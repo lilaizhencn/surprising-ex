@@ -6,6 +6,13 @@ import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CoreOrderType;
+import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.CoreTimeInForce;
+import com.surprising.aeron.protocol.PlaceOrderCommand;
+import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.service.state.RuntimeFundsDelta;
 import com.surprising.aeron.service.state.RuntimeProjectionPoint;
 import com.surprising.aeron.service.state.TradingCoreState;
@@ -33,11 +40,16 @@ class PendingMatchingTest {
         assertThat(updatedCancellations.beforeProjection()).isSameAs(beforeProjection);
         assertThat(updatedCancellations.fundsDelta()).isSameAs(fundsDelta);
         assertThat(updatedCancellations.preMatchingCancellationOrderIds()).containsExactly(18L, 19L);
+        assertThat(updatedCancellations.decodedCommand()).isSameAs(updatedCommand.decodedCommand());
     }
 
     private static CoreMessage command(long sourceSequence) {
         return new CoreMessage(CoreMessageHeader.command(CoreMessageType.PLACE_ORDER, UUID.randomUUID(),
                 ProductLine.LINEAR_PERPETUAL, CommandSource.GATEWAY, 7, sourceSequence,
-                101, 1_700_000_000_000L, sourceSequence), new byte[0]);
+                101, 1_700_000_000_000L, sourceSequence),
+                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
+                        1_000 + sourceSequence, "BTC-USDT", 1, CoreOrderSide.BUY, 100, 1,
+                        false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+                        CoreTimeInForce.GTC, false, "pending-" + sourceSequence)));
     }
 }

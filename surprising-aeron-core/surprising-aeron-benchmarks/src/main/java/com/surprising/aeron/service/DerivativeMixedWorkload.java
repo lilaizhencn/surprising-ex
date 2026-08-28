@@ -321,15 +321,15 @@ final class DerivativeMixedWorkload {
             ids.add(orderId);
             orders.add(orderCommand(orderId, symbol, side, price, quantity, tif));
         }
-        harness.submit(harness.command(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY, userId,
-                TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders))));
+        harness.submit(harness.batchCommand(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY, userId,
+                TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)), orders.size()));
         return List.copyOf(ids);
     }
 
     private static void cancelBatch(Harness harness, long userId, List<Long> orderIds) {
-        harness.submit(harness.command(CoreMessageType.CANCEL_ORDER_BATCH, CommandSource.GATEWAY, userId,
+        harness.submit(harness.batchCommand(CoreMessageType.CANCEL_ORDER_BATCH, CommandSource.GATEWAY, userId,
                 TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(
-                        orderIds.stream().map(CancelOrderCommand::new).toList()))));
+                        orderIds.stream().map(CancelOrderCommand::new).toList())), orderIds.size()));
     }
 
     private static long[] completedLaneOperations(CoreProbeState state) {

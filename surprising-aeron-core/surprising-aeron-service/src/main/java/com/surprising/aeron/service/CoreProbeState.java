@@ -98,6 +98,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
 public final class CoreProbeState implements AutoCloseable {
@@ -115,6 +118,8 @@ public final class CoreProbeState implements AutoCloseable {
             "surprising.aeron.benchmark.skip-matching-submit");
     private static final int MATCHING_PHASE_LOG_INTERVAL = Integer.getInteger(
             "surprising.aeron.matching-phase-log-interval", 0);
+    private static final int MATCHING_COMPLETION_SPINS = Math.max(0, Integer.getInteger(
+            "surprising.aeron.matching-completion-spins", 1_024));
     private static final boolean MATCHING_PHASE_METRICS_ENABLED = MATCHING_PHASE_LOG_INTERVAL > 0;
     private static final int STANDALONE_SNAPSHOT_TIMEOUT_SECONDS = Integer.getInteger(
             "surprising.aeron.standalone-snapshot-timeout-seconds", 300);
@@ -2264,7 +2269,7 @@ public final class CoreProbeState implements AutoCloseable {
         if (pending.operation() != PendingMatching.Operation.LIQUIDATION_BATCH) {
             return conflicts(candidate, lifecycleScope(pending));
         }
-        var batch = TradingCommandCodec.decodeExecuteLiquidationBatch(pending.command().payloadUnsafe());
+        var batch = pending.decodedCommand().liquidationBatch();
         return batch.actions().stream().map(action -> new LifecycleScope(false, action.userId(), action.symbol(),
                         action.liquidationId(), true, false)).anyMatch(scope -> conflicts(candidate, scope));
     }
@@ -2272,7 +2277,7 @@ public final class CoreProbeState implements AutoCloseable {
     private void registerPendingLifecycle(PendingMatching pending) {
         List<LifecycleScope> scopes = switch (pending.operation()) {
             case LIQUIDATION, SETTLEMENT -> List.of(lifecycleScope(pending));
-            case LIQUIDATION_BATCH -> TradingCommandCodec.decodeExecuteLiquidationBatch(pending.command().payloadUnsafe())
+            case LIQUIDATION_BATCH -> pending.decodedCommand().liquidationBatch()
                     .actions().stream()
                     .map(action -> new LifecycleScope(false, action.userId(), action.symbol(),
                             action.liquidationId(), true, false))
@@ -2336,7 +2341,7 @@ public final class CoreProbeState implements AutoCloseable {
 
     private LifecycleScope lifecycleScope(PendingMatching pending) {
         if (pending.operation() == PendingMatching.Operation.LIQUIDATION_BATCH) {
-            var action = TradingCommandCodec.decodeExecuteLiquidationBatch(pending.command().payloadUnsafe()).actions().getFirst();
+            var action = pending.decodedCommand().liquidationBatch().actions().getFirst();
             return new LifecycleScope(false, action.userId(), action.symbol(), action.liquidationId(), true, false);
         }
         return lifecycleScope(pending.command(), pending.operation());
@@ -2382,14 +2387,14 @@ public final class CoreProbeState implements AutoCloseable {
 
     private String pendingLifecycleSymbol(PendingMatching pending) {
         if (pending.operation() == PendingMatching.Operation.SETTLEMENT) {
-            return TradingCommandCodec.decodeSettleInstrument(pending.command().payloadUnsafe()).symbol();
+            return pending.decodedCommand().settlement().symbol();
         }
         if (pending.operation() == PendingMatching.Operation.LIQUIDATION_BATCH) {
-            var batch = TradingCommandCodec.decodeExecuteLiquidationBatch(pending.command().payloadUnsafe());
+            var batch = pending.decodedCommand().liquidationBatch();
             return batch.actions().isEmpty() ? "" : batch.actions().getFirst().symbol();
         }
         var liquidation = runtimePlaceOrderState.liquidation(
-                TradingCommandCodec.decodeExecuteLiquidation(pending.command().payloadUnsafe()).liquidationId());
+                pending.decodedCommand().liquidation().liquidationId());
         return liquidation == null ? "" : runtimeLiquidationSymbol(liquidation);
     }
 
@@ -2421,7 +2426,7 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private List<CoreOrderState> batchCancellationOrders(PendingMatching pending) {
-        var command = TradingCommandCodec.decodeExecuteLiquidationBatch(pending.command().payloadUnsafe());
+        var command = pending.decodedCommand().liquidationBatch();
         List<CoreOrderState> orders = new ArrayList<>();
         int remaining = command.maxCancelOrders();
         for (var action : command.actions()) {
@@ -2550,13 +2555,13 @@ public final class CoreProbeState implements AutoCloseable {
             long userId = pending.command().header().userId();
             MatchingSubmission matching = switch (pending.operation()) {
                 case PLACE -> {
-                    var command = TradingCommandCodec.decodePlaceOrder(pending.command().payloadUnsafe());
+                    var command = pending.decodedCommand().placeOrder();
                     var order = matchingOrder(command.orderId());
                     yield new MatchingSubmission(command.orderId(), command.instrumentVersion(),
                             () -> matchingAdapter.placeAsync(userId, order));
                 }
                 case CANCEL -> {
-                    var command = TradingCommandCodec.decodeCancelOrder(pending.command().payloadUnsafe());
+                    var command = pending.decodedCommand().cancelOrder();
                     var order = runtimePlaceOrderState.order(command.orderId());
                     String symbol = order == null ? "" : runtimePlaceOrderIdentities.symbol(order.symbolId());
                     long instrumentVersion = order == null ? 0 : order.instrumentVersion();
@@ -2565,18 +2570,17 @@ public final class CoreProbeState implements AutoCloseable {
                 }
                 case REPLACE, AMEND -> {
                     var originalId = pending.operation() == PendingMatching.Operation.REPLACE
-                            ? TradingCommandCodec.decodeReplaceOrder(pending.command().payloadUnsafe()).originalOrderId()
-                            : TradingCommandCodec.decodeAmendOrder(pending.command().payloadUnsafe()).originalOrderId();
+                            ? pending.decodedCommand().replaceOrder().originalOrderId()
+                            : pending.decodedCommand().amendOrder().originalOrderId();
                     var order = runtimeOrder(originalId);
-                    var replacement = replacementFor(pending.command(), order);
+                    var replacement = replacementFor(pending, order);
                     var matchingReplacement = matchingOrder(userId, replacement);
                     yield new MatchingSubmission(replacement.orderId(), replacement.instrumentVersion(),
                             () -> matchingAdapter.replaceOrderAsync(userId, originalId,
                                     runtimeOrderSymbol(order), matchingReplacement));
                 }
                 case TRIGGER -> {
-                    long[] execute = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeExecute(
-                            pending.command().payloadUnsafe());
+                    long[] execute = pending.decodedCommand().trigger();
                     var trigger = runtimePlaceOrderState.triggerOrder(execute[0]);
                     if (trigger == null) {
                         yield new MatchingSubmission(0, 0, () -> CompletableFuture.completedFuture(
@@ -2589,7 +2593,7 @@ public final class CoreProbeState implements AutoCloseable {
                             () -> matchingAdapter.placeAsync(trigger.userId(), order));
                 }
                 case LIQUIDATION -> {
-                    var command = TradingCommandCodec.decodeExecuteLiquidation(pending.command().payloadUnsafe());
+                    var command = pending.decodedCommand().liquidation();
                     var liquidation = runtimePlaceOrderState.liquidation(command.liquidationId());
                     if (liquidation == null || !com.surprising.aeron.service.state.RuntimeLiquidationQueryService
                             .isExecutable(runtimePlaceOrderState, runtimePlaceOrderIdentities, command)) {
@@ -2610,7 +2614,7 @@ public final class CoreProbeState implements AutoCloseable {
                     yield new MatchingSubmission(0, 0, () -> matchingAdapter.cancelBatchAsync(orders));
                 }
                 case SETTLEMENT -> {
-                    var command = TradingCommandCodec.decodeSettleInstrument(pending.command().payloadUnsafe());
+                    var command = pending.decodedCommand().settlement();
                     var progress = runtimeLifecycleProgress(command.symbol());
                     if (progress != null && progress.ordersComplete()) {
                         yield new MatchingSubmission(0, command.instrumentVersion(),
@@ -2664,27 +2668,26 @@ public final class CoreProbeState implements AutoCloseable {
         long instrumentVersion = 0;
         switch (pending.operation()) {
             case PLACE -> {
-                PlaceOrderCommand command = TradingCommandCodec.decodePlaceOrder(pending.command().payloadUnsafe());
+                PlaceOrderCommand command = pending.decodedCommand().placeOrder();
                 orderId = command.orderId();
                 instrumentVersion = command.instrumentVersion();
             }
             case CANCEL -> {
-                CancelOrderCommand command = TradingCommandCodec.decodeCancelOrder(pending.command().payloadUnsafe());
+                CancelOrderCommand command = pending.decodedCommand().cancelOrder();
                 var order = runtimePlaceOrderState.order(command.orderId());
                 orderId = command.orderId();
                 instrumentVersion = order == null ? 0 : order.instrumentVersion();
             }
             case REPLACE, AMEND -> {
                 long originalId = pending.operation() == PendingMatching.Operation.REPLACE
-                        ? TradingCommandCodec.decodeReplaceOrder(pending.command().payloadUnsafe()).originalOrderId()
-                        : TradingCommandCodec.decodeAmendOrder(pending.command().payloadUnsafe()).originalOrderId();
-                PlaceOrderCommand replacement = replacementFor(pending.command(), runtimeOrder(originalId));
+                        ? pending.decodedCommand().replaceOrder().originalOrderId()
+                        : pending.decodedCommand().amendOrder().originalOrderId();
+                PlaceOrderCommand replacement = replacementFor(pending, runtimeOrder(originalId));
                 orderId = replacement.orderId();
                 instrumentVersion = replacement.instrumentVersion();
             }
             case TRIGGER -> {
-                long[] execute = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeExecute(
-                        pending.command().payloadUnsafe());
+                long[] execute = pending.decodedCommand().trigger();
                 var trigger = runtimePlaceOrderState.triggerOrder(execute[0]);
                 if (trigger != null) {
                     PlaceOrderCommand placement = triggerPlacement(trigger, execute[2]);
@@ -2693,7 +2696,7 @@ public final class CoreProbeState implements AutoCloseable {
                 }
             }
             case LIQUIDATION -> {
-                var command = TradingCommandCodec.decodeExecuteLiquidation(pending.command().payloadUnsafe());
+                var command = pending.decodedCommand().liquidation();
                 var liquidation = runtimePlaceOrderState.liquidation(command.liquidationId());
                 orderId = command.liquidationId();
                 instrumentVersion = liquidation == null ? 0 : liquidation.instrumentVersion();
@@ -2736,6 +2739,17 @@ public final class CoreProbeState implements AutoCloseable {
                 order.instrumentVersion(), order.side(), priceTicks, quantitySteps,
                 order.reduceOnly(), order.marginMode(), order.positionSide(),
                 order.orderType(), timeInForce, postOnly, clientOrderId);
+    }
+
+    private PlaceOrderCommand replacementFor(PendingMatching pending, OrderRuntime order) {
+        if (pending.operation() == PendingMatching.Operation.REPLACE) {
+            if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
+            if (runtimePlaceOrderState.instrument(runtimeOrderSymbol(order)) == null) {
+                throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument is missing");
+            }
+            return pending.decodedCommand().replaceOrder().replacement();
+        }
+        return replacementForAmend(pending.decodedCommand().amendOrder(), order);
     }
 
     private PlaceOrderCommand replacementForAmend(AmendOrderCommand command, OrderRuntime order) {
@@ -2795,6 +2809,38 @@ public final class CoreProbeState implements AutoCloseable {
                 laneCommandContexts.required(sequence).matchingFuture();
         if (future == null) return null;
         future.join();
+        return takeMatchingResult(sequence);
+    }
+
+    com.surprising.aeron.service.matching.CoreMatchingResult awaitMatchingResult(
+            long sequence, long timeoutNanos) {
+        if (timeoutNanos <= 0) return null;
+        long deadline = System.nanoTime() + timeoutNanos;
+        com.surprising.aeron.service.matching.CoreMatchingResult result = takeMatchingResult(sequence);
+        if (result != null) return result;
+        if (pendingMatching.isEmpty() || pendingMatching.firstSequence() != sequence) return null;
+        CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> future =
+                laneCommandContexts.required(sequence).matchingFuture();
+        if (future == null) return null;
+        for (int spin = 0; spin < MATCHING_COMPLETION_SPINS; spin++) {
+            result = takeMatchingResult(sequence);
+            if (result != null) return result;
+            if (future.isDone()) break;
+            Thread.onSpinWait();
+        }
+        if (future.isDone()) return takeMatchingResult(sequence);
+        long remainingNanos = deadline - System.nanoTime();
+        if (remainingNanos <= 0) return null;
+        try {
+            future.get(remainingNanos, TimeUnit.NANOSECONDS);
+        } catch (TimeoutException timeout) {
+            return null;
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("matching wait was interrupted", interrupted);
+        } catch (ExecutionException failed) {
+            throw new IllegalStateException("matching execution failed", failed.getCause());
+        }
         return takeMatchingResult(sequence);
     }
 
@@ -2886,7 +2932,7 @@ public final class CoreProbeState implements AutoCloseable {
         try {
             switch (pending.operation()) {
                 case PLACE -> {
-                    var command = TradingCommandCodec.decodePlaceOrder(pending.command().payloadUnsafe());
+                    var command = pending.decodedCommand().placeOrder();
                     commandChangedUserIds = matchingUserIds(pending.command().header().userId(),
                             matchingResult.matcherEvents());
                     commandChangedOrderIds = matchingOrderIds(List.of(command.orderId()),
@@ -2902,7 +2948,7 @@ public final class CoreProbeState implements AutoCloseable {
                             matchingResult.matcherEvents());
                 }
                 case CANCEL -> {
-                    var command = TradingCommandCodec.decodeCancelOrder(pending.command().payloadUnsafe());
+                    var command = pending.decodedCommand().cancelOrder();
                     commandChangedUserIds = List.of(pending.command().header().userId());
                     commandChangedOrderIds = List.of(command.orderId());
                     if (matchingResult.accepted()) {
@@ -2910,13 +2956,13 @@ public final class CoreProbeState implements AutoCloseable {
                     }
                 }
                 case REPLACE, AMEND -> {
-                    var command = replacementFor(pending.command(), runtimeOrder(
+                    var command = replacementFor(pending, runtimeOrder(
                             pending.operation() == PendingMatching.Operation.REPLACE
-                                    ? TradingCommandCodec.decodeReplaceOrder(pending.command().payloadUnsafe()).originalOrderId()
-                                    : TradingCommandCodec.decodeAmendOrder(pending.command().payloadUnsafe()).originalOrderId()));
+                                    ? pending.decodedCommand().replaceOrder().originalOrderId()
+                                    : pending.decodedCommand().amendOrder().originalOrderId()));
                     long originalOrderId = pending.operation() == PendingMatching.Operation.REPLACE
-                            ? TradingCommandCodec.decodeReplaceOrder(pending.command().payloadUnsafe()).originalOrderId()
-                            : TradingCommandCodec.decodeAmendOrder(pending.command().payloadUnsafe()).originalOrderId();
+                            ? pending.decodedCommand().replaceOrder().originalOrderId()
+                            : pending.decodedCommand().amendOrder().originalOrderId();
                     commandChangedUserIds = matchingUserIds(pending.command().header().userId(),
                             matchingResult.matcherEvents());
                     commandChangedOrderIds = matchingOrderIds(List.of(originalOrderId, command.orderId()),
@@ -2934,8 +2980,7 @@ public final class CoreProbeState implements AutoCloseable {
                     }
                 }
                 case TRIGGER -> {
-                    long[] execute = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeExecute(
-                            pending.command().payloadUnsafe());
+                    long[] execute = pending.decodedCommand().trigger();
                     var trigger = runtimePlaceOrderState.triggerOrder(execute[0]);
                     if (trigger == null) throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND",
                             "trigger order not found");
@@ -2959,7 +3004,7 @@ public final class CoreProbeState implements AutoCloseable {
                             .filter(java.util.Objects::nonNull).map(this::orderView).toList();
                 }
                 case LIQUIDATION -> {
-                    var command = TradingCommandCodec.decodeExecuteLiquidation(pending.command().payloadUnsafe());
+                    var command = pending.decodedCommand().liquidation();
                     var liquidation = runtimePlaceOrderState.liquidation(command.liquidationId());
                     commandChangedLiquidationIds = List.of(command.liquidationId());
                     LifecycleOrderChunk chunk = liquidation == null ? new LifecycleOrderChunk(List.of(), 0)
@@ -2987,11 +3032,11 @@ public final class CoreProbeState implements AutoCloseable {
                     }
                 }
                 case LIQUIDATION_BATCH -> {
-                    var command = TradingCommandCodec.decodeExecuteLiquidationBatch(pending.command().payloadUnsafe());
+                    var command = pending.decodedCommand().liquidationBatch();
                     applyLiquidationBatch(command, matchingResult);
                 }
                 case SETTLEMENT -> {
-                    var command = TradingCommandCodec.decodeSettleInstrument(pending.command().payloadUnsafe());
+                    var command = pending.decodedCommand().settlement();
                     if (matchingResult.accepted()) {
                         applySettlementChangedIds(command);
                         settleInstrumentRuntime(command, pending.command().header().commandId());
@@ -3140,11 +3185,11 @@ public final class CoreProbeState implements AutoCloseable {
                 mask |= matchingAdapter.topology().accountLaneMask(action.userId());
             }
         } else if (pending.operation() == PendingMatching.Operation.LIQUIDATION) {
-            var command = TradingCommandCodec.decodeExecuteLiquidation(pending.command().payloadUnsafe());
+            var command = pending.decodedCommand().liquidation();
             var liquidation = runtimePlaceOrderState.liquidation(command.liquidationId());
             if (liquidation != null) mask |= matchingAdapter.topology().accountLaneMask(liquidation.userId());
         } else if (pending.operation() == PendingMatching.Operation.SETTLEMENT) {
-            String symbol = TradingCommandCodec.decodeSettleInstrument(pending.command().payloadUnsafe()).symbol();
+            String symbol = pending.decodedCommand().settlement().symbol();
             for (Long userId : positionUserIndex.users(symbol)) {
                 mask |= matchingAdapter.topology().accountLaneMask(userId);
             }
@@ -3278,7 +3323,7 @@ public final class CoreProbeState implements AutoCloseable {
     private PendingMatching applyBatchSuccessfulPrefix(PendingMatching pending,
                                                         com.surprising.aeron.service.matching.CoreMatchingResult result,
                                                         long clusterTimestamp, long clusterPosition) {
-        var batch = TradingCommandCodec.decodeExecuteLiquidationBatch(pending.command().payloadUnsafe());
+        var batch = pending.decodedCommand().liquidationBatch();
         int successful = result.successfulPrefixCount();
         int remaining = batch.maxCancelOrders();
         int successLeft = successful;
@@ -3344,7 +3389,7 @@ public final class CoreProbeState implements AutoCloseable {
 
     private PendingMatching applyLiquidationSuccessfulPrefix(PendingMatching pending,
                                                               com.surprising.aeron.service.matching.CoreMatchingResult result) {
-        var command = TradingCommandCodec.decodeExecuteLiquidation(pending.command().payloadUnsafe());
+        var command = pending.decodedCommand().liquidation();
         var liquidation = runtimePlaceOrderState.liquidation(command.liquidationId());
         if (liquidation == null || !com.surprising.aeron.service.state.RuntimeLiquidationQueryService
                 .isExecutable(runtimePlaceOrderState, runtimePlaceOrderIdentities, command)) return pending;
@@ -3369,7 +3414,7 @@ public final class CoreProbeState implements AutoCloseable {
 
     private PendingMatching applySettlementSuccessfulPrefix(PendingMatching pending,
                                                               com.surprising.aeron.service.matching.CoreMatchingResult result) {
-        var command = TradingCommandCodec.decodeSettleInstrument(pending.command().payloadUnsafe());
+        var command = pending.decodedCommand().settlement();
         var progress = runtimeLifecycleProgress(command.symbol());
         if (progress != null && progress.ordersComplete()) {
             return pending;
@@ -5909,15 +5954,40 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
 
-    record StoredResult(
-            CommandFingerprint fingerprint,
-            ResponseStatus status,
-            CoreResultCode resultCode,
-            long appliedCommandCount,
-            long requiredExportSequence,
-            long stateHash,
-            byte[] responseData,
-            long retentionSequence) {
+    static final class StoredResult {
+        private final CommandFingerprint fingerprint;
+        private final ResponseStatus status;
+        private final CoreResultCode resultCode;
+        private final long appliedCommandCount;
+        private final long requiredExportSequence;
+        private final long stateHash;
+        private final byte[] responseData;
+        private final long retentionSequence;
+
+        StoredResult(CommandFingerprint fingerprint, ResponseStatus status, CoreResultCode resultCode,
+                     long appliedCommandCount, long requiredExportSequence, long stateHash,
+                     byte[] responseData, long retentionSequence) {
+            this(fingerprint, status, resultCode, appliedCommandCount, requiredExportSequence, stateHash,
+                    responseData, retentionSequence, false);
+        }
+
+        private StoredResult(CommandFingerprint fingerprint, ResponseStatus status, CoreResultCode resultCode,
+                             long appliedCommandCount, long requiredExportSequence, long stateHash,
+                             byte[] responseData, long retentionSequence, boolean ownedResponseData) {
+            if (fingerprint == null || status == null || resultCode == null || appliedCommandCount < 0
+                    || requiredExportSequence < 0 || retentionSequence < 0) {
+                throw new IllegalArgumentException("invalid stored result");
+            }
+            this.fingerprint = fingerprint;
+            this.status = status;
+            this.resultCode = resultCode;
+            this.appliedCommandCount = appliedCommandCount;
+            this.requiredExportSequence = requiredExportSequence;
+            this.stateHash = stateHash;
+            byte[] normalized = responseData == null ? new byte[0] : responseData;
+            this.responseData = ownedResponseData ? normalized : normalized.clone();
+            this.retentionSequence = retentionSequence;
+        }
 
         StoredResult(ResponseStatus status, CoreResultCode resultCode, long appliedCommandCount, long stateHash) {
             this(CommandFingerprint.fromBytes(new byte[CommandFingerprint.LENGTH]), status,
@@ -5932,24 +6002,23 @@ public final class CoreProbeState implements AutoCloseable {
                     responseData, Math.max(1, appliedCommandCount));
         }
 
-        StoredResult {
-            if (fingerprint == null || status == null || resultCode == null || appliedCommandCount < 0
-                    || requiredExportSequence < 0 || retentionSequence < 0) {
-                throw new IllegalArgumentException("invalid stored result");
-            }
-            responseData = responseData == null ? new byte[0] : responseData.clone();
-        }
-
         StoredResult withRetentionSequence(long sequence) {
             return new StoredResult(fingerprint, status, resultCode, appliedCommandCount,
-                    requiredExportSequence, stateHash, responseData, sequence);
+                    requiredExportSequence, stateHash, responseData, sequence, true);
         }
+
+        CommandFingerprint fingerprint() { return fingerprint; }
+        ResponseStatus status() { return status; }
+        CoreResultCode resultCode() { return resultCode; }
+        long appliedCommandCount() { return appliedCommandCount; }
+        long requiredExportSequence() { return requiredExportSequence; }
+        long stateHash() { return stateHash; }
+        long retentionSequence() { return retentionSequence; }
 
         byte[] responseDataUnsafe() {
             return responseData;
         }
 
-        @Override
         public byte[] responseData() {
             return responseData.clone();
         }

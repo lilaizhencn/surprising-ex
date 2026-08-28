@@ -24,6 +24,22 @@ import org.junit.jupiter.api.Test;
 class CoreResultLedgerTest {
 
     @Test
+    void retentionMetadataReusesOwnedResponseBytesWithoutExposingThem() {
+        byte[] source = new byte[]{1, 2, 3};
+        CoreProbeState.StoredResult created = new CoreProbeState.StoredResult(
+                ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 7, source);
+        source[0] = 9;
+
+        CoreProbeState.StoredResult retained = created.withRetentionSequence(11);
+        byte[] exposed = retained.responseData();
+        exposed[1] = 9;
+
+        assertThat(created.responseDataUnsafe()).isSameAs(retained.responseDataUnsafe());
+        assertThat(retained.responseData()).containsExactly(1, 2, 3);
+        assertThat(retained.retentionSequence()).isEqualTo(11);
+    }
+
+    @Test
     void evictedCommandResultIsExplicitlyOutsideRetention() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             UUID firstCommandId = UUID.randomUUID();

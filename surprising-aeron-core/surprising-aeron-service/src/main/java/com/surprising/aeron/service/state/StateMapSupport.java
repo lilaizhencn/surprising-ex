@@ -494,7 +494,7 @@ public final class StateMapSupport {
         public V put(K key, V value) {
             if (key == null || value == null) throw new NullPointerException("state map does not allow null");
             V previous = tree.get(key);
-            tree = tree.withPut(key, value);
+            tree = tree.withPut(key, value, previous != null);
             changedKeys.add(key);
             return previous;
         }
@@ -594,28 +594,34 @@ public final class StateMapSupport {
             implements NavigableMap<K, V> {
         private final Node<K, V> root;
         private final Comparator<? super K> comparator;
+        private final int size;
 
-        private PersistentTreeMap(Node<K, V> root, Comparator<? super K> comparator) {
+        private PersistentTreeMap(Node<K, V> root, Comparator<? super K> comparator, int size) {
             this.root = root;
             this.comparator = comparator;
+            this.size = size;
         }
 
         private static <K, V> PersistentTreeMap<K, V> from(Map<K, V> source) {
             Comparator<? super K> comparator = source instanceof SortedMap<?, ?> sorted
                     ? ((SortedMap<K, V>) sorted).comparator() : null;
-            PersistentTreeMap<K, V> result = new PersistentTreeMap<>(null, comparator);
+            PersistentTreeMap<K, V> result = new PersistentTreeMap<>(null, comparator, 0);
             for (Entry<K, V> entry : source.entrySet()) {
-                result = result.withPut(entry.getKey(), entry.getValue());
+                result = result.withPut(entry.getKey(), entry.getValue(), false);
             }
             return result;
         }
 
-        private PersistentTreeMap<K, V> withPut(K key, V value) {
-            return new PersistentTreeMap<>(insert(root, key, value), comparator);
+        private PersistentTreeMap<K, V> withPut(K key, V value, boolean existed) {
+            Node<K, V> next = insert(root, key, value);
+            if (next == root) return this;
+            int nextSize = existed ? size : Math.incrementExact(size);
+            return new PersistentTreeMap<>(next, comparator, nextSize);
         }
 
         private PersistentTreeMap<K, V> without(Object key) {
-            return new PersistentTreeMap<>(delete(root, (K) key), comparator);
+            Node<K, V> next = delete(root, (K) key);
+            return next == root ? this : new PersistentTreeMap<>(next, comparator, Math.decrementExact(size));
         }
 
         private int compare(K left, K right) {
@@ -627,18 +633,33 @@ public final class StateMapSupport {
         private Node<K, V> insert(Node<K, V> node, K key, V value) {
             if (node == null) return new Node<>(key, value, null, null);
             int comparison = compare(key, node.key);
-            if (comparison == 0) return new Node<>(key, value, node.left, node.right);
-            if (comparison < 0) {
-                return balance(new Node<>(node.key, node.value, insert(node.left, key, value), node.right));
+            if (comparison == 0) {
+                return java.util.Objects.equals(value, node.value)
+                        ? node : new Node<>(key, value, node.left, node.right);
             }
-            return balance(new Node<>(node.key, node.value, node.left, insert(node.right, key, value)));
+            if (comparison < 0) {
+                Node<K, V> left = insert(node.left, key, value);
+                return left == node.left ? node
+                        : balance(new Node<>(node.key, node.value, left, node.right));
+            }
+            Node<K, V> right = insert(node.right, key, value);
+            return right == node.right ? node
+                    : balance(new Node<>(node.key, node.value, node.left, right));
         }
 
         private Node<K, V> delete(Node<K, V> node, K key) {
             if (node == null) return null;
             int comparison = compare(key, node.key);
-            if (comparison < 0) return balance(new Node<>(node.key, node.value, delete(node.left, key), node.right));
-            if (comparison > 0) return balance(new Node<>(node.key, node.value, node.left, delete(node.right, key)));
+            if (comparison < 0) {
+                Node<K, V> left = delete(node.left, key);
+                return left == node.left ? node
+                        : balance(new Node<>(node.key, node.value, left, node.right));
+            }
+            if (comparison > 0) {
+                Node<K, V> right = delete(node.right, key);
+                return right == node.right ? node
+                        : balance(new Node<>(node.key, node.value, node.left, right));
+            }
             if (node.left == null) return node.right;
             if (node.right == null) return node.left;
             Node<K, V> successor = minimum(node.right);
@@ -691,8 +712,6 @@ public final class StateMapSupport {
 
         private static int height(Node<?, ?> node) { return node == null ? 0 : node.height; }
 
-        private static int size(Node<?, ?> node) { return node == null ? 0 : node.size; }
-
         private NavigableMap<K, V> materialized() {
             TreeMap<K, V> values = new TreeMap<>(comparator);
             values.putAll(this);
@@ -722,7 +741,7 @@ public final class StateMapSupport {
         }
 
         @Override
-        public int size() { return size(root); }
+        public int size() { return size; }
 
         @Override
         public boolean isEmpty() { return root == null; }
@@ -893,7 +912,6 @@ public final class StateMapSupport {
             private final Node<K, V> left;
             private final Node<K, V> right;
             private final int height;
-            private final int size;
 
             private Node(K key, V value, Node<K, V> left, Node<K, V> right) {
                 this.key = key;
@@ -901,7 +919,6 @@ public final class StateMapSupport {
                 this.left = left;
                 this.right = right;
                 this.height = 1 + Math.max(height(left), height(right));
-                this.size = 1 + size(left) + size(right);
             }
 
         }

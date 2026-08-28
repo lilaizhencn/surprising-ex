@@ -425,17 +425,17 @@ final class LinearPerpetualMixedWorkload {
                         102, 2, CoreTimeInForce.GTC));
             }
             quoteOrderIds.add(List.copyOf(symbolOrderIds));
-            harness.submit(harness.command(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY,
+            harness.submit(harness.batchCommand(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY,
                     template.hftMakers().get(index),
-                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders))));
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)), orders.size()));
         }
         harness.drainSubmitted();
         for (int index = 0; index < template.symbols().size(); index++) {
             List<CancelOrderCommand> orders = quoteOrderIds.get(index).stream()
                     .map(CancelOrderCommand::new).toList();
-            harness.submit(harness.command(CoreMessageType.CANCEL_ORDER_BATCH, CommandSource.GATEWAY,
+            harness.submit(harness.batchCommand(CoreMessageType.CANCEL_ORDER_BATCH, CommandSource.GATEWAY,
                     template.hftMakers().get(index),
-                    TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(orders))));
+                    TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(orders)), orders.size()));
         }
         harness.drainSubmitted();
         long[] sellLiquidityOrderIds = new long[template.symbols().size()];
@@ -453,9 +453,9 @@ final class LinearPerpetualMixedWorkload {
                 orders.add(orderCommand(harness.nextOrderId(), template.symbols().get(index), CoreOrderSide.BUY,
                         101, 1, CoreTimeInForce.IOC));
             }
-            harness.submit(harness.command(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY,
+            harness.submit(harness.batchCommand(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY,
                     template.hftTakers().get(index),
-                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders))));
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)), orders.size()));
         }
         harness.drainSubmitted();
         for (int index = 0; index < template.symbols().size(); index++) {
@@ -485,9 +485,9 @@ final class LinearPerpetualMixedWorkload {
                 orders.add(orderCommand(harness.nextOrderId(), template.symbols().get(index), CoreOrderSide.SELL,
                         99, 1, CoreTimeInForce.IOC));
             }
-            harness.submit(harness.command(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY,
+            harness.submit(harness.batchCommand(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY,
                     template.hftTakers().get(index),
-                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders))));
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)), orders.size()));
         }
         harness.drainSubmitted();
     }

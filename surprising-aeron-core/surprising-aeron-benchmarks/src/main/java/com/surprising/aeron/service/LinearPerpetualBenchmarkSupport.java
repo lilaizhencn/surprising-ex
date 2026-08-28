@@ -32,6 +32,7 @@ import com.surprising.aeron.service.state.LaneTopology;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.UUID;
 
@@ -436,6 +437,7 @@ final class LinearPerpetualBenchmarkSupport {
         private long terminalCoreMessages;
         private int maxMatchingBacklog;
         private final List<PendingCommand> submittedMatching = new ArrayList<>();
+        private final IdentityHashMap<CoreMessage, Integer> batchOperationWeights = new IdentityHashMap<>();
         private boolean deferBatchResponseValidation;
         private CoreResponse deferredBatchResponse;
         private int deferredBatchOperationWeight;
@@ -493,6 +495,18 @@ final class LinearPerpetualBenchmarkSupport {
                     correlationId), payload);
         }
 
+        CoreMessage batchCommand(CoreMessageType type, CommandSource source, long userId,
+                                 byte[] payload, int operationWeight) {
+            if ((type != CoreMessageType.PLACE_ORDER_BATCH
+                    && type != CoreMessageType.CANCEL_ORDER_BATCH
+                    && type != CoreMessageType.AMEND_ORDER_BATCH) || operationWeight <= 0) {
+                throw new IllegalArgumentException("invalid benchmark batch operation weight");
+            }
+            CoreMessage command = command(type, source, userId, payload);
+            batchOperationWeights.put(command, operationWeight);
+            return command;
+        }
+
         CoreResponse execute(CoreMessage command) {
             PendingCommand submitted = submitCommand(command);
             drainSubmitted();
@@ -504,7 +518,8 @@ final class LinearPerpetualBenchmarkSupport {
         }
 
         private PendingCommand submitCommand(CoreMessage command) {
-            int operationWeight = operationWeight(command);
+            Integer batchWeight = batchOperationWeights.remove(command);
+            int operationWeight = batchWeight == null ? 1 : batchWeight;
             executedMessages = Math.addExact(executedMessages, operationWeight);
             acceptedMessages = Math.addExact(acceptedMessages, operationWeight);
             acceptedCoreMessages = Math.incrementExact(acceptedCoreMessages);
@@ -532,11 +547,9 @@ final class LinearPerpetualBenchmarkSupport {
                 long deadline = System.nanoTime() + MATCH_TIMEOUT_NANOS;
                 boolean matchingCompleted = false;
                 do {
-                    CoreMatchingResult matching = null;
-                    while (matching == null && System.nanoTime() < deadline) {
-                        matching = state.takeMatchingResult(pending.sequence);
-                        if (matching == null) Thread.onSpinWait();
-                    }
+                    long remainingNanos = deadline - System.nanoTime();
+                    CoreMatchingResult matching = state.awaitMatchingResult(
+                            pending.sequence, Math.max(0, remainingNanos));
                     if (matching == null) {
                         throw new IllegalStateException("matching timed out for "
                                 + pending.command.header().messageType());
@@ -589,18 +602,6 @@ final class LinearPerpetualBenchmarkSupport {
                     || result.items().stream().anyMatch(item -> item.status() != ResponseStatus.APPLIED)) {
                 throw new IllegalStateException("benchmark order batch did not complete every item: " + result);
             }
-        }
-
-        private static int operationWeight(CoreMessage command) {
-            return switch (command.header().messageType()) {
-                case PLACE_ORDER_BATCH -> TradingOrderBatchCodec.decodePlaceOrderBatch(
-                        command.payloadUnsafe()).orders().size();
-                case CANCEL_ORDER_BATCH -> TradingOrderBatchCodec.decodeCancelOrderBatch(
-                        command.payloadUnsafe()).orders().size();
-                case AMEND_ORDER_BATCH -> TradingOrderBatchCodec.decodeAmendOrderBatch(
-                        command.payloadUnsafe()).orders().size();
-                default -> 1;
-            };
         }
 
         private void recordExport(CoreResponse response) {

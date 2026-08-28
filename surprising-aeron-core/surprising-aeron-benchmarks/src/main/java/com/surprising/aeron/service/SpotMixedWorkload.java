@@ -324,15 +324,15 @@ final class SpotMixedWorkload {
             orderIds.add(orderId);
             orders.add(orderCommand(orderId, symbol, side, price, quantity, timeInForce));
         }
-        harness.submit(harness.command(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY, userId,
-                TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders))));
+        harness.submit(harness.batchCommand(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY, userId,
+                TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)), orders.size()));
         return List.copyOf(orderIds);
     }
 
     private static void cancelBatch(Harness harness, long userId, List<Long> orderIds) {
         List<CancelOrderCommand> cancels = orderIds.stream().map(CancelOrderCommand::new).toList();
-        harness.submit(harness.command(CoreMessageType.CANCEL_ORDER_BATCH, CommandSource.GATEWAY, userId,
-                TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(cancels))));
+        harness.submit(harness.batchCommand(CoreMessageType.CANCEL_ORDER_BATCH, CommandSource.GATEWAY, userId,
+                TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(cancels)), cancels.size()));
     }
 
     private static void cancel(Harness harness, long userId, long orderId) {

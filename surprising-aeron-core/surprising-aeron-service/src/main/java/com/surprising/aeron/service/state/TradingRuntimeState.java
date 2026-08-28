@@ -67,6 +67,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     private final LongHashSet changedTriggerOrders = new LongHashSet();
     private final LongHashSet changedFeePolicies = new LongHashSet();
     private final ThreadLocal<AccountLaneState> laneCommandScope = new ThreadLocal<>();
+    private final RuntimePerpetualMatchProcessor.BatchValidationScratch perpetualBatchValidationScratch =
+            new RuntimePerpetualMatchProcessor.BatchValidationScratch();
     private Thread owner;
 
     public TradingRuntimeState() {
@@ -523,12 +525,16 @@ public final class TradingRuntimeState implements AutoCloseable {
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             if ((expectedLaneMask & (1L << laneId)) == 0) continue;
             AccountLaneState lane = accountLanes[laneId];
-            deltas[laneId] = inLaneCommandScope(lane, ignored ->
-                    productLine.isDerivative()
-                        ? RuntimePerpetualMatchProcessor.applyLane(takerOrderId, matchingResult.matcherEvents(),
-                        this, identities, instrument, settleAssetId)
-                        : RuntimeSpotMatchProcessor.applyLane(takerOrderId, matchingResult.matcherEvents(),
-                        this, instrument, baseAssetId, quoteAssetId));
+            deltas[laneId] = inLaneCommandScope(lane, ignored -> {
+                if (!productLine.isDerivative()) {
+                    return RuntimeSpotMatchProcessor.applyLane(takerOrderId, matchingResult.matcherEvents(),
+                            this, instrument, baseAssetId, quoteAssetId);
+                }
+                RuntimeTreasuryDelta delta = new RuntimeTreasuryDelta();
+                RuntimePerpetualMatchProcessor.applyLane(takerOrderId, matchingResult.matcherEvents(),
+                        this, identities, instrument, settleAssetId, delta);
+                return delta;
+            });
         }
         recordMatcherSettlementChanges(takerOrderId, matchingResult, identities,
                 instrument, baseAssetId, quoteAssetId, settleAssetId);
@@ -577,9 +583,10 @@ public final class TradingRuntimeState implements AutoCloseable {
             for (NoTradeSettlement settlement : settlements) {
                 RuntimeTreasuryDelta delta;
                 if (productLine.isDerivative()) {
-                    delta = RuntimePerpetualMatchProcessor.applyLane(settlement.takerOrderId(),
+                    RuntimePerpetualMatchProcessor.applyLane(settlement.takerOrderId(),
                             settlement.matchingResult().matcherEvents(), this, identities,
-                            settlement.instrument(), settlement.settleAssetId());
+                            settlement.instrument(), settlement.settleAssetId(), combined);
+                    continue;
                 } else {
                     delta = RuntimeSpotMatchProcessor.applyLane(settlement.takerOrderId(),
                             settlement.matchingResult().matcherEvents(), this, settlement.instrument(),
@@ -612,8 +619,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;
         long selectedLaneMask = 0;
         List<PerpetualMatcherSettlement> settlements = new ArrayList<>(takerOrderIds.size());
-        List<List<exchange.core2.core.common.MatcherResult.MatcherEvent>> matcherEvents =
-                new ArrayList<>(takerOrderIds.size());
         for (int index = 0; index < takerOrderIds.size(); index++) {
             long takerOrderId = takerOrderIds.get(index);
             long expectedLaneMask = expectedLaneMasks.get(index);
@@ -629,11 +634,10 @@ public final class TradingRuntimeState implements AutoCloseable {
             settlements.add(new PerpetualMatcherSettlement(takerOrderId, expectedLaneMask, matchingResult,
                     instrument, identities.assetId(instrument.baseAsset()),
                     identities.assetId(instrument.quoteAsset()), identities.assetId(instrument.settleAsset())));
-            matcherEvents.add(matchingResult.matcherEvents());
             selectedLaneMask |= expectedLaneMask;
         }
         RuntimePerpetualMatchProcessor.validateAndPrepareBatch(
-                takerOrderIds, matcherEvents, this, identities);
+                takerOrderIds, matchingResults, this, identities, perpetualBatchValidationScratch);
 
         RuntimeTreasuryDelta[] deltas = new RuntimeTreasuryDelta[accountLanes.length];
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
@@ -644,9 +648,9 @@ public final class TradingRuntimeState implements AutoCloseable {
                 RuntimeTreasuryDelta combined = new RuntimeTreasuryDelta(RuntimeTreasuryDelta.ORDER_BATCH_CAPACITY);
                 for (PerpetualMatcherSettlement settlement : settlements) {
                     if ((settlement.expectedLaneMask() & (1L << currentLaneId)) == 0) continue;
-                    combined.merge(RuntimePerpetualMatchProcessor.applyLane(
+                    RuntimePerpetualMatchProcessor.applyLane(
                             settlement.takerOrderId(), settlement.matchingResult().matcherEvents(), this, identities,
-                            settlement.instrument(), settlement.settleAssetId()));
+                            settlement.instrument(), settlement.settleAssetId(), combined);
                 }
                 return combined;
             });
