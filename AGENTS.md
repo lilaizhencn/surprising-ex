@@ -22,6 +22,9 @@ Surprising-EX 是交易所后端核心项目。改动必须严谨，资金安全
 
 - 后续所有 Java 构建、Maven 测试、集成测试、JMH 基准和性能采样必须统一使用 HotSpot JDK 25；执行前检查 `java -version` 和 `mvn -version`，确认实际 JVM 为 HotSpot 兼容实现。
 - 禁止使用 OpenJ9 执行本项目的测试或性能采样，也不能把 OpenJ9 结果作为 smoke、对照或验收证据；当前环境没有 HotSpot JDK 25 时不得自动降级，必须明确记录环境阻塞。
+- 任何影响交易主链路功能或性能的改动，包括下单、撤单、撮合、成交、冻结/解冻、持仓、风险检查、强平、资金费、ADL、保险基金、结算、命令编解码、Lane、Snapshot 或 Core Fact，都必须新增或更新能覆盖真实改动路径的 JMH 场景；不能只运行与改动无关的既有基准。
+- 交易主链路改动完成后必须在 HotSpot JDK 25 上执行受影响产品线的 JMH 基准和 JFR（Java Flight Recorder）采样。JMH 至少报告参数、业务操作口径、`terminalBusinessOperations`、`terminalCoreMessages`、accepted/terminal 差值和 unfinished/backlog；JFR 至少报告交易 owner、matcher、风险、snapshot/projection 和 Core Fact 线程的热点、分配与阻塞证据。
+- JMH/JFR 采样必须使用能触发实际业务逻辑的场景，并同时验证资金守恒、余额/持仓/冻结正确、订单生命周期终态和快照恢复。基准结果、JFR artifact 路径、已测产品线、未测范围及理由必须写入交付说明；缺少 JMH、JFR 或资金不变量证据时，不得宣称交易主链路改动验收完成。
 - 测试范围按改动影响面分级，不默认执行全量测试：
   - 文档、注释、格式或不影响运行时的配置改动：执行 `git diff --check` 和必要的静态检查即可。
   - 单模块、纯函数、DTO、编解码或局部业务逻辑改动：只运行受影响模块及对应测试类，必要时包含其 Maven 依赖模块。
