@@ -37,6 +37,20 @@ final class CoreContractMath {
         return LEVERAGE_RATE_NUMERATOR % leveragePpm == 0 ? quotient : Math.addExact(quotient, 1);
     }
 
+    static long scaledFloorCapped(
+            long value, long multiplier, long divisor, long floor, long cap) {
+        if (value < 0 || multiplier < 0 || divisor <= 0 || floor < 0 || cap < 0) {
+            throw new IllegalArgumentException("invalid scaled limit input");
+        }
+        try {
+            long scaled = Math.multiplyExact(value, multiplier) / divisor;
+            return Math.min(Math.max(scaled, floor), cap);
+        } catch (ArithmeticException overflow) {
+            return big(value).multiply(big(multiplier)).divide(big(divisor))
+                    .max(big(floor)).min(big(cap)).longValueExact();
+        }
+    }
+
     static long openingMarginUnits(
             CoreInstrumentState instrument,
             CoreOrderSide side,
@@ -119,11 +133,19 @@ final class CoreContractMath {
         if (notionalUnits < 0) {
             throw new IllegalArgumentException("notional must not be negative");
         }
-        return instrument.riskLimitBrackets().stream()
-                .filter(value -> value.notionalFloorUnits() <= notionalUnits)
-                .max(java.util.Comparator.comparingLong(CoreRiskLimitBracket::notionalFloorUnits))
-                .orElseThrow(() -> new CoreStateRejectedException("RISK_BRACKET_EXCEEDED",
-                        "position notional has no risk bracket"));
+        CoreRiskLimitBracket selected = null;
+        for (CoreRiskLimitBracket candidate : instrument.riskLimitBrackets()) {
+            if (candidate.notionalFloorUnits() <= notionalUnits
+                    && (selected == null
+                    || candidate.notionalFloorUnits() > selected.notionalFloorUnits())) {
+                selected = candidate;
+            }
+        }
+        if (selected == null) {
+            throw new CoreStateRejectedException("RISK_BRACKET_EXCEEDED",
+                    "position notional has no risk bracket");
+        }
+        return selected;
     }
 
     static long pnlUnits(

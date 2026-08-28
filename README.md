@@ -240,6 +240,13 @@ view、typed event 和协议字节由单线程 `core-fact-materializer` 按 expo
 批量订单则保留整批累计 delta，直到批次原子提交。产品尚未上线，因此生产代码没有 legacy、fallback、
 双写或 feature flag 路径。
 
+Matcher continuation 与 Lane command context 共用按 Core sequence 定位的预分配 ring；pending 顺序也由 primitive
+sequence ring 保存。owner 不再为每条撮合命令维护 `ConcurrentHashMap<sequence, CompletableFuture>`、active future set
+和 completed-result map，也不在 future 完成后等待 callback 从 active set 删除；异步 callback 只向有界 completion queue
+发布结果，owner 在确定性提交边界消费。默认关闭的 matching phase 诊断不会再执行 `nanoTime` 或写计时 map。永续订单
+准入的 open-interest 比例计算和 risk bracket 选择使用精确 long fast path，只有真实 long 乘法溢出才进入
+`BigInteger` fallback；同一命令的杠杆和 matcher evidence 不再重复查询或重复解码。
+
 Trading Provider 的普通单和触发单统一使用异步 Aeron gateway，HTTP 线程不阻塞等待 Core；History Projector
 按 Kafka poll 批次提交 PostgreSQL，WebSocket fanout 也按 poll 批量解码、分组和发布。数据库、Kafka 或慢订阅者
 只会形成各自有界 backlog，不会在 Product Core 交易 owner 上执行。

@@ -5,7 +5,6 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.ReservationKind;
-import java.math.BigInteger;
 
 public final class RuntimeOrderAdmission {
 
@@ -94,8 +93,10 @@ public final class RuntimeOrderAdmission {
         }
         validatePositionIdentity(positionMode, position, order, activeOrders, userId, excluded);
         validateReduceOnly(runtime.productLine().isDerivative(), position, order, activeOrders, userId, excluded);
-        validateRiskLimits(runtime, instrument, position, order, activeOrders, userId, openInterestSteps, excluded);
-        return reservationUnits(runtime, instrument, position, order, userId);
+        long leverage = effectiveLeverage(runtime, instrument, order, userId);
+        validateRiskLimits(runtime, instrument, position, order, activeOrders, userId,
+                openInterestSteps, excluded, leverage);
+        return reservationUnits(instrument, position, order, leverage);
     }
 
     private static void validateReservation(
@@ -136,17 +137,16 @@ public final class RuntimeOrderAdmission {
         }
         boolean positionConflict = position != null && position.signedQuantitySteps() != 0
                 && position.marginMode() != order.marginMode();
-        boolean orderConflict = false;
-        for (CoreMarginMode candidate : CoreMarginMode.values()) {
-            if (candidate == order.marginMode()) continue;
-            int count = activeOrders.marginModeCount(userId, order.symbol(), order.positionSide(), candidate);
-            if (excluded != null && excluded.status() == CoreOrderStatus.OPEN
-                    && excluded.positionSide() == order.positionSide() && excluded.marginMode() == candidate) {
-                count--;
-            }
-            if (count > 0) orderConflict = true;
+        CoreMarginMode conflictingMode = order.marginMode() == CoreMarginMode.CROSS
+                ? CoreMarginMode.ISOLATED : CoreMarginMode.CROSS;
+        int conflictingOrders = activeOrders.marginModeCount(
+                userId, order.symbol(), order.positionSide(), conflictingMode);
+        if (excluded != null && excluded.status() == CoreOrderStatus.OPEN
+                && excluded.positionSide() == order.positionSide()
+                && excluded.marginMode() == conflictingMode) {
+            conflictingOrders--;
         }
-        if (positionConflict || orderConflict) {
+        if (positionConflict || conflictingOrders > 0) {
             throw rejected("POSITION_MARGIN_ADJUSTMENT_INVALID", "margin mode switch requires an empty position");
         }
         if ((order.positionSide() == CorePositionSide.LONG
@@ -181,7 +181,7 @@ public final class RuntimeOrderAdmission {
     private static void validateRiskLimits(
             TradingRuntimeState runtime, CoreInstrumentState instrument, PositionRuntime position,
             ResolvedPlaceOrder order, AdmissionOrderIndex activeOrders, long userId, long openInterestSteps,
-            OrderRuntime excluded) {
+            OrderRuntime excluded, long leverage) {
         if (!runtime.productLine().isDerivative() || order.reduceOnly()) return;
         long current = position == null ? 0 : position.signedQuantitySteps();
         long pending = activeOrders.pendingQuantity(userId, instrument.symbol(),
@@ -201,11 +201,9 @@ public final class RuntimeOrderAdmission {
         }
         long openInterestNotional = openInterestSteps == 0 ? 0
                 : CoreContractMath.notionalUnits(instrument, openInterestSteps, order.markPriceTicks());
-        long scaledLimit = BigInteger.valueOf(openInterestNotional)
-                .multiply(BigInteger.valueOf(instrument.userOpenInterestLimitRatePpm()))
-                .divide(BigInteger.valueOf(PPM))
-                .max(BigInteger.valueOf(instrument.userOpenInterestLimitFloorUnits()))
-                .min(BigInteger.valueOf(instrument.maxPositionNotionalUnits())).longValueExact();
+        long scaledLimit = CoreContractMath.scaledFloorCapped(
+                openInterestNotional, instrument.userOpenInterestLimitRatePpm(), PPM,
+                instrument.userOpenInterestLimitFloorUnits(), instrument.maxPositionNotionalUnits());
         if (projectedNotional > scaledLimit) {
             throw rejected("OPEN_INTEREST_LIMIT_EXCEEDED", "projected position exceeds open-interest limit");
         }
@@ -213,8 +211,6 @@ public final class RuntimeOrderAdmission {
         if (projectedNotional > bracket.notionalCapUnits()) {
             throw rejected("RISK_BRACKET_EXCEEDED", "projected position exceeds risk bracket");
         }
-        Long configured = runtime.leverage(new CoreLeverageKey(userId, instrument.symbol(), order.marginMode()));
-        long leverage = configured == null ? instrument.maxLeveragePpm() : configured;
         if (leverage > bracket.maxLeveragePpm()
                 || CoreContractMath.initialMarginRateFromLeverage(leverage) < bracket.initialMarginRatePpm()) {
             throw rejected("LEVERAGE_EXCEEDS_RISK_BRACKET", "configured leverage exceeds risk bracket");
@@ -222,8 +218,8 @@ public final class RuntimeOrderAdmission {
     }
 
     private static long reservationUnits(
-            TradingRuntimeState runtime, CoreInstrumentState instrument, PositionRuntime position,
-            ResolvedPlaceOrder order, long userId) {
+            CoreInstrumentState instrument, PositionRuntime position,
+            ResolvedPlaceOrder order, long leverage) {
         if (instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT) {
             if (order.side() == CoreOrderSide.SELL) return order.quantitySteps();
             long notional = Math.multiplyExact(order.reservationPriceTicks(), order.quantitySteps());
@@ -234,8 +230,6 @@ public final class RuntimeOrderAdmission {
         long signedOrder = order.side() == CoreOrderSide.BUY
                 ? order.quantitySteps() : Math.negateExact(order.quantitySteps());
         long openSteps = order.reduceOnly() ? 0 : order.quantitySteps();
-        Long configured = runtime.leverage(new CoreLeverageKey(userId, instrument.symbol(), order.marginMode()));
-        long leverage = configured == null ? instrument.maxLeveragePpm() : configured;
         long projectedRisk = Math.addExact(Math.absExact(current), order.quantitySteps());
         long projectedSigned = signedOrder > 0 ? projectedRisk : Math.negateExact(projectedRisk);
         long margin = openingMargin(instrument, projectedSigned, signedOrder, openSteps,
@@ -245,6 +239,14 @@ public final class RuntimeOrderAdmission {
                 : 0;
         long feeDebit = fragmentationSafeFeeDebit(instrument, order);
         return Math.max(1, Math.addExact(Math.addExact(margin, premium), feeDebit));
+    }
+
+    private static long effectiveLeverage(
+            TradingRuntimeState runtime, CoreInstrumentState instrument,
+            ResolvedPlaceOrder order, long userId) {
+        if (!runtime.productLine().isDerivative()) return instrument.maxLeveragePpm();
+        Long configured = runtime.leverage(new CoreLeverageKey(userId, instrument.symbol(), order.marginMode()));
+        return configured == null ? instrument.maxLeveragePpm() : configured;
     }
 
     private static long fragmentationSafeFeeDebit(CoreInstrumentState instrument, ResolvedPlaceOrder order) {

@@ -82,6 +82,11 @@ public class LinearPerpetualCoreBenchmark {
         try {
             result = state.scenario.run();
         } finally {
+            measurement.acceptedBusinessOperations = state.scenario.acceptedOperations();
+            measurement.terminalBusinessOperations = state.scenario.terminalOperations();
+            measurement.acceptedCoreMessages = state.scenario.acceptedCoreMessages();
+            measurement.terminalCoreMessages = state.scenario.terminalCoreMessages();
+            measurement.maxMatchingBacklog = state.scenario.maxBacklog();
             measurement.commit();
         }
         counters.acceptedBusinessOperations += state.scenario.acceptedOperations();

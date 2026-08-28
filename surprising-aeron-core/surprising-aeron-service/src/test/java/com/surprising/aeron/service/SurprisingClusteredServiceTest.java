@@ -479,32 +479,23 @@ class SurprisingClusteredServiceTest {
         }
     }
 
-    @SuppressWarnings("unchecked")
     private static com.surprising.aeron.service.matching.CoreMatchingResult awaitSubmittedMatching(
             CoreProbeState state,
             long sequence) throws Exception {
-        Field futuresField = CoreProbeState.class.getDeclaredField("matchingFutures");
-        futuresField.setAccessible(true);
-        Map<Long, CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult>> futures =
-                (Map<Long, CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult>>)
-                        futuresField.get(state);
-        CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> future = futures.get(sequence);
+        LaneCommandContextRing.Context context = matchingContext(state, sequence);
+        CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> future =
+                context.matchingFuture();
         assertThat(future).isNotNull();
         return future.get(5, TimeUnit.SECONDS);
     }
 
-    @SuppressWarnings("unchecked")
     private static void installIncompleteMatchingFuture(
             CoreProbeState state,
             long sequence,
             CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> replacement)
             throws Exception {
-        Field futuresField = CoreProbeState.class.getDeclaredField("matchingFutures");
-        futuresField.setAccessible(true);
-        Map<Long, CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult>> futures =
-                (Map<Long, CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult>>)
-                        futuresField.get(state);
-        CompletableFuture<?> original = futures.get(sequence);
+        LaneCommandContextRing.Context context = matchingContext(state, sequence);
+        CompletableFuture<?> original = context.matchingFuture();
         assertThat(original).isNotNull();
         original.cancel(true);
         Field completionsField = CoreProbeState.class.getDeclaredField("matchingCompletions");
@@ -513,13 +504,18 @@ class SurprisingClusteredServiceTest {
         var clear = completions.getClass().getDeclaredMethod("clear");
         clear.setAccessible(true);
         clear.invoke(completions);
-        Field completedField = CoreProbeState.class.getDeclaredField("completedMatching");
-        completedField.setAccessible(true);
-        ((Map<?, ?>) completedField.get(state)).clear();
+        context.resetMatchingContinuation();
         var track = CoreProbeState.class.getDeclaredMethod(
                 "trackMatchingFuture", long.class, CompletableFuture.class);
         track.setAccessible(true);
         track.invoke(state, sequence, replacement);
+    }
+
+    private static LaneCommandContextRing.Context matchingContext(CoreProbeState state, long sequence)
+            throws Exception {
+        Field contextsField = CoreProbeState.class.getDeclaredField("laneCommandContexts");
+        contextsField.setAccessible(true);
+        return ((LaneCommandContextRing) contextsField.get(state)).required(sequence);
     }
 
     private static ClientSession clientSession(List<byte[]> responses) {

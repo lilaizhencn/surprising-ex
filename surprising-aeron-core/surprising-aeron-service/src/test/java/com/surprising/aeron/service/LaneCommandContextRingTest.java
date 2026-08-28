@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.state.AccountLaneView;
 import com.surprising.aeron.service.state.RuntimeTreasuryDelta;
+import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
 
 class LaneCommandContextRingTest {
@@ -51,6 +52,27 @@ class LaneCommandContextRingTest {
         CoreMatchingResult copied = new CoreMatchingResult(true, "ACCEPTED").withCoreSequence(1);
         assertThatThrownBy(() -> context.acknowledge(ack(copied, 1, 1, 1)))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("invalid");
+    }
+
+    @Test
+    void storesMatchingContinuationWithoutPerCommandMapsAndKeepsTheFirstCompletion() {
+        LaneCommandContextRing ring = new LaneCommandContextRing(4, 4);
+        LaneCommandContextRing.Context context = ring.claim(3);
+        CompletableFuture<CoreMatchingResult> future = new CompletableFuture<>();
+        context.trackMatchingFuture(future);
+        CoreMatchingResult first = new CoreMatchingResult(true, "SUCCESS").withCoreSequence(3);
+        CoreMatchingResult duplicate = new CoreMatchingResult(false, "LATE").withCoreSequence(3);
+
+        context.publishMatchingCompletion(first);
+        context.publishMatchingCompletion(duplicate);
+
+        assertThat(context.matchingFuture()).isSameAs(future);
+        assertThat(ring.activeMatchingFutures()).containsExactly(future);
+        assertThat(context.takeMatchingCompletion()).isSameAs(first);
+        assertThat(context.takeMatchingCompletion()).isNull();
+        context.resetMatchingContinuation();
+        assertThat(context.matchingFuture()).isNull();
+        ring.discard(3);
     }
 
     private static AccountLaneAck ack(CoreMatchingResult result, int laneId, long fee, long insurance) {

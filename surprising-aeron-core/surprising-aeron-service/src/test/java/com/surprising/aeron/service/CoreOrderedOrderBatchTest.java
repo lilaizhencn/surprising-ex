@@ -65,11 +65,10 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.completeMatching(batchSequence, first, 2_000, 3)).isNull();
             var second = awaitMatching(state, batchSequence);
 
-            var completionsField = CoreProbeState.class.getDeclaredField("completedMatching");
-            completionsField.setAccessible(true);
-            @SuppressWarnings("unchecked")
-            Map<Long, ?> completions = (Map<Long, ?>) completionsField.get(state);
-            assertThat(completions).doesNotContainKey(laterSequence);
+            var contextsField = CoreProbeState.class.getDeclaredField("laneCommandContexts");
+            contextsField.setAccessible(true);
+            LaneCommandContextRing contexts = (LaneCommandContextRing) contextsField.get(state);
+            assertThat(contexts.required(laterSequence).hasMatchingCompletion()).isFalse();
 
             CoreResponse batchResponse = state.completeMatching(batchSequence, second, 2_001, 4);
             assertThat(batchResponse).isNotNull();

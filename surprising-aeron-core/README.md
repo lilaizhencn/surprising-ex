@@ -67,6 +67,9 @@ P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣
   Account Lane；不复制 event，也不物化
   `SettlementPlan`。wall-clock readiness/watchdog 只能由 external health
   supervisor 观察，不能进入复制状态或改变裁决顺序。
+- Pending matcher 顺序和 continuation 均使用预分配、按 Core sequence 定位的 primitive ring。热路不维护逐命令
+  `CompletableFuture` map、active set 或 completed-result map；同步边界可直接读取已完成 future 的确定性结果，不再等待
+  completion callback 清理并发集合。只有 snapshot/关闭 fence 会统一等待仍在途的 matcher future。
 - 强平和交割/行权结算的订单撤销均按确定性 cursor 分批执行，单个 Core 命令最多处理 1,024 笔订单；强平 provider
   通过一个 `EXECUTE_LIQUIDATION_BATCH` 同时提交有序 action 和可选 Risk Scan continuation，订单阶段完成后才推进用户阶段。
   每个批次共享最多 `1024` 笔撤单预算，Core 以 `nextCursorOrderId` 保存独占下一页位置。

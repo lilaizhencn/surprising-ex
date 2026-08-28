@@ -3,6 +3,8 @@ package com.surprising.aeron.service;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.state.AccountLaneView;
 import com.surprising.aeron.service.state.RuntimeTreasuryDelta;
+import java.util.ArrayList;
+import java.util.concurrent.CompletableFuture;
 
 final class LaneCommandContextRing {
     private final Context[] contexts;
@@ -57,11 +59,23 @@ final class LaneCommandContextRing {
     int highWaterMark() { return highWaterMark; }
     int capacity() { return contexts.length; }
 
+    CompletableFuture<?>[] activeMatchingFutures() {
+        ArrayList<CompletableFuture<?>> futures = new ArrayList<>(inFlight);
+        for (Context context : contexts) {
+            if (context.coreSequence != 0 && context.matchingFuture != null) {
+                futures.add(context.matchingFuture);
+            }
+        }
+        return futures.toArray(CompletableFuture[]::new);
+    }
+
     static final class Context {
         private long coreSequence;
         private long expectedLaneMask;
         private long ackLaneMask;
         private CoreMatchingResult matchingResult;
+        private CoreMatchingResult completedMatchingResult;
+        private CompletableFuture<CoreMatchingResult> matchingFuture;
         private final RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta(
                 RuntimeTreasuryDelta.ORDER_BATCH_CAPACITY);
         private final long[] laneRevisions;
@@ -79,6 +93,40 @@ final class LaneCommandContextRing {
         long ackLaneMask() { return ackLaneMask; }
         CoreMatchingResult matchingResult() { return matchingResult; }
         RuntimeTreasuryDelta treasuryDelta() { return treasuryDelta; }
+
+        void trackMatchingFuture(CompletableFuture<CoreMatchingResult> future) {
+            if (future == null || matchingFuture != null) {
+                throw new IllegalStateException("matching future is already tracked");
+            }
+            matchingFuture = future;
+        }
+
+        CompletableFuture<CoreMatchingResult> matchingFuture() {
+            return matchingFuture;
+        }
+
+        void publishMatchingCompletion(CoreMatchingResult result) {
+            if (result == null || result.nativeCommand().coreSequence() != coreSequence) {
+                throw new IllegalStateException("invalid matching completion");
+            }
+            if (completedMatchingResult == null) completedMatchingResult = result;
+        }
+
+        CoreMatchingResult takeMatchingCompletion() {
+            CoreMatchingResult result = completedMatchingResult;
+            completedMatchingResult = null;
+            if (result != null) matchingFuture = null;
+            return result;
+        }
+
+        boolean hasMatchingCompletion() {
+            return completedMatchingResult != null;
+        }
+
+        void resetMatchingContinuation() {
+            completedMatchingResult = null;
+            matchingFuture = null;
+        }
 
         void result(CoreMatchingResult result, long expectedMask, long validLaneMask) {
             if (result == null || result.nativeCommand().coreSequence() != coreSequence
@@ -128,6 +176,8 @@ final class LaneCommandContextRing {
             expectedLaneMask = 0;
             ackLaneMask = 0;
             matchingResult = null;
+            completedMatchingResult = null;
+            matchingFuture = null;
             treasuryDelta.clear();
             java.util.Arrays.fill(laneRevisions, 0);
             java.util.Arrays.fill(localStateHashes, 0);

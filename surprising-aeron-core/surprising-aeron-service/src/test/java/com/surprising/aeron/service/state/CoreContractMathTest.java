@@ -57,4 +57,16 @@ class CoreContractMathTest {
         assertThat(CoreContractMath.initialMarginRateFromLeverage(3_000_000)).isEqualTo(333_334);
         assertThat(CoreContractMath.initialMarginRateFromLeverage(Long.MAX_VALUE)).isEqualTo(1);
     }
+
+    @Test
+    void openInterestScalingUsesLongFastPathAndPreservesOverflowSemantics() {
+        assertThat(CoreContractMath.scaledFloorCapped(
+                20_000, 250_000, 1_000_000, 1_000, 10_000)).isEqualTo(5_000);
+        assertThat(CoreContractMath.scaledFloorCapped(
+                1, 1, 1_000_000, 1_000, 10_000)).isEqualTo(1_000);
+        assertThat(CoreContractMath.scaledFloorCapped(
+                Long.MAX_VALUE, 1_000_000, 1_000_000, 0, 5_000)).isEqualTo(5_000);
+        assertThat(CoreContractMath.scaledFloorCapped(
+                1, 1, 1, 10_000, 5_000)).isEqualTo(5_000);
+    }
 }
