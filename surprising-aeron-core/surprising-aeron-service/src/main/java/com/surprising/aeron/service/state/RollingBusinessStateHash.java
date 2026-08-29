@@ -2,7 +2,6 @@ package com.surprising.aeron.service.state;
 
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.HashMap;
 import java.util.function.Predicate;
 
@@ -11,9 +10,9 @@ public final class RollingBusinessStateHash {
     private static final long HASH_TAG = 0x9e3779b97f4a7c15L;
 
     private final Aggregate users = new Aggregate();
-    private final Map<Long, UserHash> userHashes = new TreeMap<>();
+    private final Map<Long, UserHash> userHashes = new HashMap<>();
     private final Aggregate orders = new Aggregate();
-    private final Map<Long, Long> orderContributions = new TreeMap<>();
+    private final Map<Long, Long> orderContributions = new HashMap<>();
     private final Aggregate instruments = new Aggregate();
     private final Aggregate leverages = new Aggregate();
     private final Aggregate algoOrders = new Aggregate();
@@ -34,12 +33,14 @@ public final class RollingBusinessStateHash {
     private final Aggregate lifecycleSettlements = new Aggregate();
     private final Aggregate fundingProgress = new Aggregate();
     private final Aggregate lifecycleProgress = new Aggregate();
-    private final Map<Integer, RuntimeMutationDelta.AssetLedger> runtimeTreasury = new TreeMap<>();
+    private final Map<Integer, RuntimeMutationDelta.AssetLedger> runtimeTreasury = new HashMap<>();
     private final Map<String, Long> contributions = new HashMap<>();
     private final int productLine;
     private long revision;
     private long nextLiquidationId;
     private long riskScanControlHash;
+    private long cachedValue;
+    private boolean valueDirty = true;
     private RuntimeIdentityRegistry identities;
 
     private RollingBusinessStateHash(TradingCoreState state, RuntimeIdentityRegistry identities) {
@@ -103,6 +104,7 @@ public final class RollingBusinessStateHash {
             updateMap(fundingProgress, beforeTreasury.fundingProgress(), afterTreasury.fundingProgress());
             updateMap(lifecycleProgress, beforeTreasury.lifecycleProgress(), afterTreasury.lifecycleProgress());
         }
+        valueDirty = true;
     }
 
     public void update(RuntimeCommitEntry entry) {
@@ -126,6 +128,7 @@ public final class RollingBusinessStateHash {
         nextLiquidationId = entry.afterNextLiquidationId();
         riskScanControlHash = stable(entry.afterRiskScanControl());
         updateTreasury(entry.mutation().treasury());
+        valueDirty = true;
     }
 
     public void restore(TradingCoreState state) {
@@ -142,6 +145,7 @@ public final class RollingBusinessStateHash {
     }
 
     public long value() {
+        if (!valueDirty) return cachedValue;
         long hash = CoreStateHash.start();
         hash = CoreStateHash.mix(hash, productLine);
         hash = CoreStateHash.mix(hash, revision);
@@ -168,7 +172,9 @@ public final class RollingBusinessStateHash {
         hash = mixAggregate(hash, "fundingSettlements", fundingSettlements);
         hash = mixAggregate(hash, "lifecycleSettlements", lifecycleSettlements);
         hash = mixAggregate(hash, "fundingProgress", fundingProgress);
-        return mixAggregate(hash, "lifecycleProgress", lifecycleProgress);
+        cachedValue = mixAggregate(hash, "lifecycleProgress", lifecycleProgress);
+        valueDirty = false;
+        return cachedValue;
     }
 
     private void rebuild(TradingCoreState state) {
@@ -200,6 +206,7 @@ public final class RollingBusinessStateHash {
         rebuildCached("lifecycleProgress", lifecycleProgress,
                 state.treasuryState().lifecycleProgress(), ignored -> true);
         rebuildRuntimeTreasury(state.treasuryState());
+        valueDirty = true;
     }
 
     private static <K, V> void rebuildMap(Aggregate target, Map<K, V> values) {
@@ -302,9 +309,11 @@ public final class RollingBusinessStateHash {
 
     private void updateUsers(RuntimeCommitEntry entry) {
         RuntimeMutationDelta mutation = entry.mutation();
-        java.util.TreeSet<Long> changed = new java.util.TreeSet<>(mutation.users().changedKeys());
-        mutation.reservations().currentValues().values().forEach(value -> changed.add(value.userId()));
-        mutation.positions().currentValues().values().forEach(value -> changed.add(value.userId()));
+        java.util.HashSet<Long> changedUsers = new java.util.HashSet<>(mutation.users().changedKeys());
+        mutation.reservations().currentValues().values().forEach(value -> changedUsers.add(value.userId()));
+        mutation.positions().currentValues().values().forEach(value -> changedUsers.add(value.userId()));
+        java.util.ArrayList<Long> changed = new java.util.ArrayList<>(changedUsers);
+        changed.sort(null);
         for (Long userId : changed) {
             UserHash hash = userHashes.get(userId);
             if (hash != null) users.remove(entryHash(userId, hash.value()));
@@ -707,9 +716,9 @@ public final class RollingBusinessStateHash {
         private final Aggregate balances = new Aggregate();
         private final Aggregate reservations = new Aggregate();
         private final Aggregate positions = new Aggregate();
-        private final Map<Integer, Long> balanceContributions = new TreeMap<>();
-        private final Map<Long, Long> reservationContributions = new TreeMap<>();
-        private final Map<Long, Long> positionContributions = new TreeMap<>();
+        private final Map<Integer, Long> balanceContributions = new HashMap<>();
+        private final Map<Long, Long> reservationContributions = new HashMap<>();
+        private final Map<Long, Long> positionContributions = new HashMap<>();
 
         private UserHash(UserRuntime user) {
             productLine = user.productLine().ordinal();

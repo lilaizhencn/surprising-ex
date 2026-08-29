@@ -2,11 +2,20 @@ package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.protocol.CoreRiskScanControlView;
 import com.surprising.product.api.ProductLine;
+import java.util.AbstractList;
+import java.util.AbstractMap;
+import java.util.AbstractSet;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.Objects;
+import java.util.RandomAccess;
 import java.util.Set;
-import java.util.TreeMap;
-import java.util.TreeSet;
 
 public final class RuntimeMutationDelta {
 
@@ -36,7 +45,7 @@ public final class RuntimeMutationDelta {
                          ValueChanges<Long, UserValue> users,
                          ValueChanges<Long, OrderRuntime> orders,
                          ValueChanges<Long, ReservationRuntime> reservations,
-                         TreeSet<Long> pendingReservations,
+                         Set<Long> pendingReservations,
                          ValueChanges<Long, PositionRuntime> positions,
                          ValueChanges<Long, LiquidationRuntime> liquidations,
                          ValueChanges<Long, RiskSnapshotRuntime> riskSnapshots,
@@ -64,7 +73,7 @@ public final class RuntimeMutationDelta {
         this.users = users;
         this.orders = orders;
         this.reservations = reservations;
-        this.pendingReservations = Collections.unmodifiableNavigableSet(pendingReservations);
+        this.pendingReservations = Collections.unmodifiableSet(new HashSet<>(pendingReservations));
         this.positions = positions;
         this.liquidations = liquidations;
         this.riskSnapshots = riskSnapshots;
@@ -121,27 +130,187 @@ public final class RuntimeMutationDelta {
         }
     }
 
-    static final class ValueChanges<K, V> {
-        private final Set<K> changedKeys;
-        private final Map<K, V> currentValues;
+    static final class ValueChanges<K extends Comparable<? super K>, V> {
+        private final CompactKeyList<K> changedKeys;
+        private final CompactValueMap<K, V> currentValues;
 
-        private ValueChanges(TreeSet<K> changedKeys, TreeMap<K, V> currentValues) {
-            if (changedKeys == null || currentValues == null || !changedKeys.containsAll(currentValues.keySet())) {
+        private ValueChanges(Collection<K> changedKeys, Map<K, V> currentValues) {
+            if (changedKeys == null || currentValues == null) {
                 throw new IllegalArgumentException("invalid runtime value changes");
+            }
+            ArrayList<K> orderedKeys = new ArrayList<>(changedKeys);
+            orderedKeys.sort(null);
+            int uniqueSize = 0;
+            for (K key : orderedKeys) {
+                if (key == null) throw new IllegalArgumentException("runtime change key cannot be null");
+                if (uniqueSize == 0 || !key.equals(orderedKeys.get(uniqueSize - 1))) {
+                    orderedKeys.set(uniqueSize++, key);
+                }
             }
             for (V value : currentValues.values()) {
                 if (value == null) throw new IllegalArgumentException("runtime values cannot contain null");
             }
-            this.changedKeys = Collections.unmodifiableNavigableSet(changedKeys);
-            this.currentValues = Collections.unmodifiableNavigableMap(currentValues);
+            Object[] keys = orderedKeys.subList(0, uniqueSize).toArray();
+            Object[] values = new Object[uniqueSize];
+            int presentValues = 0;
+            for (int index = 0; index < uniqueSize; index++) {
+                @SuppressWarnings("unchecked") K key = (K) keys[index];
+                V value = currentValues.get(key);
+                values[index] = value;
+                if (value != null) presentValues++;
+            }
+            if (presentValues != currentValues.size()) {
+                throw new IllegalArgumentException("runtime values must belong to changed keys");
+            }
+            this.changedKeys = new CompactKeyList<>(keys);
+            this.currentValues = new CompactValueMap<>(keys, values, presentValues);
         }
 
-        static <K, V> ValueChanges<K, V> of(TreeSet<K> changedKeys, TreeMap<K, V> currentValues) {
+        static <K extends Comparable<? super K>, V> ValueChanges<K, V> of(
+                Collection<K> changedKeys, Map<K, V> currentValues) {
             return new ValueChanges<>(changedKeys, currentValues);
         }
 
-        Set<K> changedKeys() { return changedKeys; }
+        java.util.List<K> changedKeys() { return changedKeys; }
         Map<K, V> currentValues() { return currentValues; }
+
+        V currentValue(K key) { return currentValues.get(key); }
+
+        boolean containsCurrent(K key) { return currentValues.containsKey(key); }
+
+        void forEachCurrentValue(java.util.function.Consumer<? super V> consumer) {
+            currentValues.forEachValue(consumer);
+        }
+    }
+
+    private static final class CompactKeyList<K> extends AbstractList<K> implements RandomAccess {
+        private final Object[] keys;
+
+        private CompactKeyList(Object[] keys) {
+            this.keys = keys;
+        }
+
+        @Override
+        public K get(int index) {
+            Objects.checkIndex(index, keys.length);
+            @SuppressWarnings("unchecked") K key = (K) keys[index];
+            return key;
+        }
+
+        @Override
+        public int size() {
+            return keys.length;
+        }
+    }
+
+    private static final class CompactValueMap<K, V> extends AbstractMap<K, V> {
+        private final Object[] keys;
+        private final Object[] values;
+        private final int[] indexTable;
+        private final int indexMask;
+        private final int size;
+
+        private CompactValueMap(Object[] keys, Object[] values, int size) {
+            this.keys = keys;
+            this.values = values;
+            int tableSize = 2;
+            while (tableSize < keys.length * 2) tableSize <<= 1;
+            indexTable = new int[tableSize];
+            indexMask = tableSize - 1;
+            for (int index = 0; index < keys.length; index++) {
+                int slot = spread(keys[index].hashCode()) & indexMask;
+                while (indexTable[slot] != 0) slot = (slot + 1) & indexMask;
+                indexTable[slot] = index + 1;
+            }
+            this.size = size;
+        }
+
+        @Override
+        public V get(Object key) {
+            if (key == null) return null;
+            int slot = spread(key.hashCode()) & indexMask;
+            int encodedIndex;
+            while ((encodedIndex = indexTable[slot]) != 0) {
+                int index = encodedIndex - 1;
+                if (keys[index].equals(key)) {
+                    @SuppressWarnings("unchecked") V value = (V) values[index];
+                    return value;
+                }
+                slot = (slot + 1) & indexMask;
+            }
+            return null;
+        }
+
+        private static int spread(int hash) {
+            return hash ^ hash >>> 16;
+        }
+
+        @Override
+        public boolean containsKey(Object key) {
+            return get(key) != null;
+        }
+
+        @Override
+        public int size() {
+            return size;
+        }
+
+        private void forEachValue(java.util.function.Consumer<? super V> consumer) {
+            Objects.requireNonNull(consumer, "consumer");
+            for (Object value : values) {
+                if (value == null) continue;
+                @SuppressWarnings("unchecked") V current = (V) value;
+                consumer.accept(current);
+            }
+        }
+
+        @Override
+        public void forEach(java.util.function.BiConsumer<? super K, ? super V> consumer) {
+            Objects.requireNonNull(consumer, "consumer");
+            for (int index = 0; index < keys.length; index++) {
+                if (values[index] == null) continue;
+                @SuppressWarnings("unchecked") K key = (K) keys[index];
+                @SuppressWarnings("unchecked") V value = (V) values[index];
+                consumer.accept(key, value);
+            }
+        }
+
+        @Override
+        public Set<Entry<K, V>> entrySet() {
+            return new AbstractSet<>() {
+                @Override
+                public Iterator<Entry<K, V>> iterator() {
+                    return new Iterator<>() {
+                        private int next = advance(0);
+
+                        @Override
+                        public boolean hasNext() {
+                            return next < keys.length;
+                        }
+
+                        @Override
+                        public Entry<K, V> next() {
+                            if (!hasNext()) throw new NoSuchElementException();
+                            int current = next;
+                            next = advance(current + 1);
+                            @SuppressWarnings("unchecked") K key = (K) keys[current];
+                            @SuppressWarnings("unchecked") V value = (V) values[current];
+                            return Map.entry(key, value);
+                        }
+
+                        private int advance(int index) {
+                            while (index < values.length && values[index] == null) index++;
+                            return index;
+                        }
+                    };
+                }
+
+                @Override
+                public int size() {
+                    return size;
+                }
+            };
+        }
     }
 
     record TreasuryValues(ValueChanges<Integer, AssetLedger> assets,
@@ -203,14 +372,15 @@ public final class RuntimeMutationDelta {
     }
 
     static LaneValues captureLane(AccountLaneState lane, CaptureRequest request) {
-        TreeMap<Long, UserValue> users = new TreeMap<>();
+        Map<Long, UserValue> users = HashMap.newHashMap(request.userIds().length);
         for (long userId : request.userIds()) {
             if (!lane.owns(userId)) continue;
             UserRuntime user = lane.users.get(userId);
             if (user == null) continue;
-            TreeSet<Integer> changedAssets = new TreeSet<>();
-            TreeMap<Integer, BalanceValue> balances = new TreeMap<>();
             int[] assetIds = request.balanceAssetIds().get(userId);
+            int assetCount = assetIds == null ? 0 : assetIds.length;
+            Set<Integer> changedAssets = HashSet.newHashSet(assetCount);
+            Map<Integer, BalanceValue> balances = HashMap.newHashMap(assetCount);
             if (assetIds != null) {
                 for (int assetId : assetIds) {
                     changedAssets.add(assetId);
@@ -226,24 +396,24 @@ public final class RuntimeMutationDelta {
                     ValueChanges.of(changedAssets, balances)));
         }
 
-        TreeMap<Long, OrderRuntime> orders = present(request.orderIds(), lane.orders);
-        TreeMap<Long, ReservationRuntime> reservations = present(request.reservationIds(), lane.reservations);
-        TreeSet<Long> pendingReservations = new TreeSet<>();
+        Map<Long, OrderRuntime> orders = present(request.orderIds(), lane.orders);
+        Map<Long, ReservationRuntime> reservations = present(request.reservationIds(), lane.reservations);
+        Set<Long> pendingReservations = HashSet.newHashSet(request.reservationIds().length);
         for (long orderId : request.reservationIds()) {
             if (lane.pendingReservationSequences.containsKey(orderId)) pendingReservations.add(orderId);
         }
-        TreeMap<Long, PositionRuntime> positions = present(request.positionKeys(), lane.positions);
-        TreeMap<Long, LiquidationRuntime> liquidations = present(request.liquidationIds(), lane.liquidations);
-        TreeMap<Long, RiskSnapshotRuntime> riskSnapshots = present(request.riskSnapshotKeys(), lane.riskSnapshots);
-        TreeMap<CoreLeverageKey, Long> leverages = new TreeMap<>();
+        Map<Long, PositionRuntime> positions = present(request.positionKeys(), lane.positions);
+        Map<Long, LiquidationRuntime> liquidations = present(request.liquidationIds(), lane.liquidations);
+        Map<Long, RiskSnapshotRuntime> riskSnapshots = present(request.riskSnapshotKeys(), lane.riskSnapshots);
+        Map<CoreLeverageKey, Long> leverages = HashMap.newHashMap(request.leverageKeys().size());
         for (CoreLeverageKey key : request.leverageKeys()) {
             if (!lane.owns(key.userId())) continue;
             Long value = lane.leverages.get(key);
             if (value != null) leverages.put(key, value);
         }
-        TreeMap<Long, CoreAlgoOrderState> algoOrders = present(request.algoOrderIds(), lane.algoOrders);
-        TreeMap<Long, CoreTriggerOrderState> triggerOrders = present(request.triggerOrderIds(), lane.triggerOrders);
-        TreeMap<RuntimeClientKey, Long> clientOrders = new TreeMap<>();
+        Map<Long, CoreAlgoOrderState> algoOrders = present(request.algoOrderIds(), lane.algoOrders);
+        Map<Long, CoreTriggerOrderState> triggerOrders = present(request.triggerOrderIds(), lane.triggerOrders);
+        Map<RuntimeClientKey, Long> clientOrders = HashMap.newHashMap(request.clientKeysByUser().size());
         request.clientKeysByUser().forEach((userId, clientKeys) -> {
             if (!lane.owns(userId)) return;
             var values = lane.clientOrderIndex.get(userId);
@@ -260,9 +430,9 @@ public final class RuntimeMutationDelta {
                 triggerOrders, clientOrders);
     }
 
-    private static <V> TreeMap<Long, V> present(
+    private static <V> Map<Long, V> present(
             long[] keys, org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<V> values) {
-        TreeMap<Long, V> result = new TreeMap<>();
+        Map<Long, V> result = HashMap.newHashMap(keys.length);
         for (long key : keys) {
             V value = values.get(key);
             if (value != null) result.put(key, value);
@@ -270,8 +440,8 @@ public final class RuntimeMutationDelta {
         return result;
     }
 
-    private static <V> TreeMap<Long, V> present(long[] keys, Map<Long, V> values) {
-        TreeMap<Long, V> result = new TreeMap<>();
+    private static <V> Map<Long, V> present(long[] keys, Map<Long, V> values) {
+        Map<Long, V> result = HashMap.newHashMap(keys.length);
         for (long key : keys) {
             V value = values.get(key);
             if (value != null) result.put(key, value);

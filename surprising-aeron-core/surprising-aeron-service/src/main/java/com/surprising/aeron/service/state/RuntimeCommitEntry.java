@@ -2,7 +2,7 @@ package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.protocol.CoreRiskScanControlView;
 import com.surprising.product.api.ProductLine;
-import java.util.Set;
+import java.util.List;
 
 public final class RuntimeCommitEntry {
     private final long sequence;
@@ -32,8 +32,8 @@ public final class RuntimeCommitEntry {
     public RuntimeIdentityRegistry identities() { return identities; }
     public RuntimeFundsDelta fundsDelta() { return fundsDelta; }
     public RuntimeProjectionPoint projectionPoint() { return projectionPoint; }
-    public Set<Long> changedUserIds() { return mutation.users().changedKeys(); }
-    public Set<Integer> changedTreasuryAssetIds() { return mutation.treasury().assets().changedKeys(); }
+    public List<Long> changedUserIds() { return mutation.users().changedKeys(); }
+    public List<Integer> changedTreasuryAssetIds() { return mutation.treasury().assets().changedKeys(); }
     public ProductLine productLine() { return mutation.productLine(); }
     public long revision() { return Math.subtractExact(mutation.revision(), mutation.pendingReservationCount()); }
 

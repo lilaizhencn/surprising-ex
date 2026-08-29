@@ -625,6 +625,36 @@ class CoreProbeStateTest {
     }
 
     @Test
+    void exportAckDoesNotWaitForAnUnrelatedPendingMatchingWindow() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            assertThat(state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))
+                    .status()).isEqualTo(ResponseStatus.APPLIED);
+            long throughSequence = state.exportState().nextSequence() - 1;
+            CoreMessage place = tradingCommand(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 2,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(713, "BTC-USDT", 1,
+                            CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                            CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "ack-window-713")));
+            assertThat(state.apply(place).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            long matchingSequence = state.matchingSequence(place.header().commandId());
+            long committedBeforeAck = state.committedCoreSequence();
+            CoreMessage ack = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ACK_EXPORT,
+                    UUID.randomUUID(), ProductLine.SPOT, CommandSource.RECOVERY_TOOL, 91, 1,
+                    0, 2_000, 91), CoreExportCodec.encodeAck(new AckExportCommand(throughSequence)));
+
+            CoreResponse ackResponse = state.apply(ack, 2_000, 91);
+
+            assertThat(ackResponse.status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(state.exportState().acknowledgedSequence()).isEqualTo(throughSequence);
+            assertThat(state.firstPendingMatchingSequence()).isEqualTo(matchingSequence);
+            assertThat(state.committedCoreSequence()).isEqualTo(committedBeforeAck);
+            completeMatching(state, matchingSequence, place);
+            assertThat(state.committedCoreSequence()).isEqualTo(state.appliedCommandCount());
+        }
+    }
+
+    @Test
     void compatibilitySnapshotWaitsForPendingMatchingCompletion() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applySpotInstrument(state);

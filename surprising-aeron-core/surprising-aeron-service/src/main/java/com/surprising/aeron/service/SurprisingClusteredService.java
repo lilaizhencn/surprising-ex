@@ -101,7 +101,10 @@ public final class SurprisingClusteredService implements ClusteredService {
                 == com.surprising.aeron.protocol.WireMessageKind.COMMAND
                 && CoreProbeState.isMatchingCommand(request.header().messageType())
                 && !state.hasPendingMatchingForUser(request.header().userId());
-        if (!matcherPipelineCommand) {
+        boolean auditControl = request.header().kind()
+                == com.surprising.aeron.protocol.WireMessageKind.COMMAND
+                && request.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.ACK_EXPORT;
+        if (!matcherPipelineCommand && !auditControl) {
             completeEarlierMatching(timestamp, header.position());
         } else {
             state.drainMatchingCompletions();
@@ -259,20 +262,13 @@ public final class SurprisingClusteredService implements ClusteredService {
         }
         if (correlationId == MATCHING_WAKEUP_CORRELATION_ID) {
             matchingWakeupScheduled = false;
-            state.drainMatchingCompletions();
-            for (int completed = 0; completed < 64; completed++) {
-                long sequence = state.firstPendingMatchingSequence();
-                if (sequence == 0) break;
-                var matchingResult = state.awaitMatchingResult(sequence);
-                if (matchingResult == null) {
-                    assertMatchingWatchdogHealthy(sequence);
-                    break;
-                }
+            int completed = state.commitReadyMatching(64, timestamp,
+                    cluster == null ? 0 : cluster.logPosition(), true, (sequence, result) -> {
                 recordMatchingProgress(sequence);
-                CoreResponse result = state.completeMatching(sequence, matchingResult, timestamp,
-                        cluster == null ? 0 : cluster.logPosition());
-                if (result == null) break;
                 deliverMatchingResponse(sequence, result);
+            });
+            if (completed == 0 && state.firstPendingMatchingSequence() != 0) {
+                assertMatchingWatchdogHealthy(state.firstPendingMatchingSequence());
             }
             scheduleMatchingWakeup();
             return;

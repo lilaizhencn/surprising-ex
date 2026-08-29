@@ -27,6 +27,14 @@ record PendingMatching(long sequence, Operation operation, CoreMessage command, 
                 DecodedMatchingCommand.decode(command));
     }
 
+    PendingMatching(long sequence, Operation operation, CoreMessage command,
+                    List<Long> preMatchingCancellationOrderIds, RuntimeProjectionPoint beforeProjection,
+                    long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta,
+                    DecodedMatchingCommand decodedCommand) {
+        this(sequence, operation, command, CommandFingerprint.of(command), preMatchingCancellationOrderIds,
+                beforeProjection, beforeBusinessStateHash, beforeFundsStateHash, fundsDelta, decodedCommand);
+    }
+
     PendingMatching {
         if (sequence <= 0 || operation == null || command == null || fingerprint == null
                 || preMatchingCancellationOrderIds == null || beforeProjection == null

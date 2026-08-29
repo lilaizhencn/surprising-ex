@@ -2,6 +2,7 @@ package com.surprising.aeron.service.state;
 
 import java.util.Map;
 import java.util.Set;
+import java.util.HashMap;
 import java.util.TreeMap;
 
 public final class RollingFundsStateHash {
@@ -9,9 +10,9 @@ public final class RollingFundsStateHash {
     private static final long HASH_TAG = 0xd6e8feb86659fd93L;
     private final int productLine;
     private final Aggregate users = new Aggregate();
-    private final Map<Long, Long> userHashes = new TreeMap<>();
-    private final Map<Long, Map<String, RuntimeMutationDelta.BalanceValue>> runtimeBalances = new TreeMap<>();
-    private final Map<Integer, RuntimeMutationDelta.AssetLedger> runtimeTreasury = new TreeMap<>();
+    private final Map<Long, Long> userHashes = new HashMap<>();
+    private final Map<Long, Map<String, RuntimeMutationDelta.BalanceValue>> runtimeBalances = new HashMap<>();
+    private final Map<Integer, RuntimeMutationDelta.AssetLedger> runtimeTreasury = new HashMap<>();
     private final Aggregate fees = new Aggregate();
     private final Aggregate insurance = new Aggregate();
     private final Aggregate deficits = new Aggregate();
@@ -21,6 +22,8 @@ public final class RollingFundsStateHash {
     private final Aggregate clearingPnl = new Aggregate();
 
     private RuntimeIdentityRegistry identities;
+    private long cachedValue;
+    private boolean valueDirty = true;
 
     private RollingFundsStateHash(TradingCoreState state, RuntimeIdentityRegistry identities) {
         if (state == null) throw new IllegalArgumentException("funds state is required");
@@ -54,6 +57,7 @@ public final class RollingFundsStateHash {
         updateMap(fundingResiduals, previous.fundingResidualBalances(), current.fundingResidualBalances());
         updateMap(roundingResiduals, previous.roundingResidualBalances(), current.roundingResidualBalances());
         updateMap(clearingPnl, previous.clearingPnlBalances(), current.clearingPnlBalances());
+        valueDirty = true;
     }
 
     public void update(RuntimeCommitEntry entry) {
@@ -94,6 +98,7 @@ public final class RollingFundsStateHash {
             update(clearingPnl, asset, clearingPnl(previous), clearingPnl(current));
             if (current == null) runtimeTreasury.remove(assetId); else runtimeTreasury.put(assetId, current);
         });
+        valueDirty = true;
     }
 
     public void restore(TradingCoreState state) {
@@ -107,6 +112,7 @@ public final class RollingFundsStateHash {
     }
 
     public long value() {
+        if (!valueDirty) return cachedValue;
         long hash = CoreStateHash.mix(CoreStateHash.start(), productLine);
         hash = mix(hash, "users", users);
         hash = mix(hash, "fee", fees);
@@ -115,7 +121,9 @@ public final class RollingFundsStateHash {
         hash = mix(hash, "liquidationFee", liquidationFees);
         hash = mix(hash, "fundingResidual", fundingResiduals);
         hash = mix(hash, "roundingResidual", roundingResiduals);
-        return mix(hash, "clearingPnl", clearingPnl);
+        cachedValue = mix(hash, "clearingPnl", clearingPnl);
+        valueDirty = false;
+        return cachedValue;
     }
 
     private void rebuild(TradingCoreState state) {
@@ -160,6 +168,7 @@ public final class RollingFundsStateHash {
                         treasury.clearingPnlBalances().getOrDefault(asset, 0L)));
             }
         }
+        valueDirty = true;
     }
 
     private void updateUsers(Map<Long, CoreUserState> before, Map<Long, CoreUserState> after) {

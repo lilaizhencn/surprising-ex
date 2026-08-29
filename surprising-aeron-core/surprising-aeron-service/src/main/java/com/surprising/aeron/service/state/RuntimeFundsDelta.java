@@ -2,9 +2,9 @@ package com.surprising.aeron.service.state;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 
 public final class RuntimeFundsDelta {
 
@@ -13,18 +13,21 @@ public final class RuntimeFundsDelta {
 
     RuntimeFundsDelta(List<Posting> postings) {
         if (postings == null) throw new IllegalArgumentException("runtime funds postings are required");
-        TreeMap<PostingKey, Long> coalesced = new TreeMap<>();
+        Map<PostingKey, Long> coalesced = new HashMap<>();
         for (Posting posting : postings) {
             if (posting == null) throw new IllegalArgumentException("runtime funds posting is required");
             coalesced.merge(posting.key(), posting.units(), Math::addExact);
         }
+        ArrayList<PostingKey> orderedKeys = new ArrayList<>(coalesced.keySet());
+        orderedKeys.sort(null);
         ArrayList<Posting> normalized = new ArrayList<>(coalesced.size());
-        TreeMap<Integer, Long> totals = new TreeMap<>();
-        coalesced.forEach((key, units) -> {
-            if (units == 0) return;
+        Map<Integer, Long> totals = new HashMap<>();
+        for (PostingKey key : orderedKeys) {
+            long units = coalesced.get(key);
+            if (units == 0) continue;
             normalized.add(new Posting(key.assetId(), key.ownerKind(), key.ownerId(), key.subledger(), units));
             totals.merge(key.assetId(), units, Math::addExact);
-        });
+        }
         this.postings = List.copyOf(normalized);
         this.unitsByAsset = Collections.unmodifiableMap(totals);
     }
@@ -62,12 +65,15 @@ public final class RuntimeFundsDelta {
                     posting.ownerId(), posting.subledger(), posting.units()));
         }
         if (externalAdjustment) {
-            unitsByAsset.forEach((assetId, units) -> {
+            ArrayList<Integer> assetIds = new ArrayList<>(unitsByAsset.keySet());
+            assetIds.sort(null);
+            for (Integer assetId : assetIds) {
+                long units = unitsByAsset.get(assetId);
                 if (units != 0) {
                     materialized.add(new FundsPosting(identities.asset(assetId), FundsPosting.OwnerKind.EXTERNAL,
                             0, FundsPosting.Subledger.EXTERNAL_ADJUSTMENT, Math.negateExact(units)));
                 }
-            });
+            }
         }
         return new FundsDelta(materialized);
     }

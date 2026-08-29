@@ -96,8 +96,10 @@ public final class RuntimeCommitLedger {
 
     private RuntimeFundsDelta fundsDelta(RuntimeMutationDelta mutation) {
         ArrayList<RuntimeFundsDelta.Posting> postings = new ArrayList<>();
-        mutation.users().currentValues().forEach((userId, user) ->
-                user.balances().changedKeys().forEach(assetId -> {
+        for (Long userId : mutation.users().changedKeys()) {
+            RuntimeMutationDelta.UserValue user = mutation.users().currentValues().get(userId);
+            if (user == null) continue;
+            for (Integer assetId : user.balances().changedKeys()) {
                     UserAssetKey key = new UserAssetKey(userId, assetId);
                     RuntimeMutationDelta.BalanceValue before = balances.get(key);
                     RuntimeMutationDelta.BalanceValue after = user.balances().currentValues().get(assetId);
@@ -108,7 +110,8 @@ public final class RuntimeCommitLedger {
                             FundsPosting.Subledger.LOCKED,
                             Math.subtractExact(units(after, false), units(before, false)));
                     if (after == null) balances.remove(key); else balances.put(key, after);
-                }));
+            }
+        }
         mutation.treasury().assets().changedKeys().forEach(assetId -> {
             RuntimeMutationDelta.AssetLedger before = treasury.get(assetId);
             RuntimeMutationDelta.AssetLedger after = mutation.treasury().assets().currentValues().get(assetId);

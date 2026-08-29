@@ -22,7 +22,6 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.function.LongFunction;
 
 final class CoreExportState implements AutoCloseable {
 
@@ -89,7 +88,7 @@ final class CoreExportState implements AutoCloseable {
         }
         CoreMessageHeader header = draft.command().header().exportEvent(sequence);
         CompletableFuture<MaterializedExport> completion = CompletableFuture.supplyAsync(() -> {
-            CoreExportEvent event = draft.factory().apply(sequence);
+            CoreExportEvent event = draft.fact().materialize(sequence);
             int actualLength = Math.addExact(CoreProtocol.HEADER_LENGTH, CoreExportCodec.encodedEventLength(event));
             if (actualLength > eventBytes) {
                 throw new IllegalStateException("Core Fact exceeded deterministic reservation");
@@ -361,15 +360,20 @@ final class CoreExportState implements AutoCloseable {
                  long beforeBusinessStateHash, long beforeFundsStateHash, long fundsStateHash,
                  long topologyHash, long laneRevisionHash, CoreMatcherTransition matcherTransition,
                  long clusterPosition, int itemCount, List<Long> terminalOrderIds,
-                 LongFunction<CoreExportEvent> factory) {
+                 FactRecord fact) {
         Draft {
             if (command == null || status == null || resultCode == null || appliedCommandCount < 0
                     || matcherTransition == null || clusterPosition < 0 || itemCount < 0
-                    || terminalOrderIds == null || factory == null) {
+                    || terminalOrderIds == null || fact == null) {
                 throw new IllegalArgumentException("invalid Core Fact draft");
             }
             terminalOrderIds = List.copyOf(terminalOrderIds);
         }
+    }
+
+    @FunctionalInterface
+    interface FactRecord {
+        CoreExportEvent materialize(long sequence);
     }
 
     private record MaterializedExport(CoreExportEvent event, CoreMessage message, int actualLength) {

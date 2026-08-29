@@ -82,6 +82,33 @@ class RuntimeStateProjectorTest {
     }
 
     @Test
+    void dirtyKeyDeltaKeepsDeterministicOrderWithoutPersistentTreeNodesOnTheOwner() {
+        TradingCoreReducer reducer = new TradingCoreReducer();
+        TradingCoreState before = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
+        before = reducer.adjustBalance(before, 9, new BalanceAdjustmentCommand("USDT", 2_000));
+        before = reducer.adjustBalance(before, 7, new BalanceAdjustmentCommand("USDT", 1_000));
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+
+        RuntimeCommandProcessor.adjustBalance(runtime, identities, 9,
+                new BalanceAdjustmentCommand("USDT", 1));
+        RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
+                new BalanceAdjustmentCommand("USDT", 1));
+        RuntimeMutationDelta mutation = runtime.captureMutationDelta();
+
+        assertThat(mutation.users().changedKeys()).containsExactly(7L, 9L);
+        assertThat(mutation.users().changedKeys()).isNotInstanceOf(java.util.SortedSet.class);
+        assertThat(mutation.users().currentValues()).isNotInstanceOf(java.util.SortedMap.class);
+        assertThat(mutation.users().changedKeys()).isInstanceOf(java.util.List.class);
+        assertThat(java.util.Arrays.stream(RuntimeMutationDelta.ValueChanges.class.getDeclaredFields())
+                .anyMatch(field -> field.getType() == java.util.Map.class
+                        || field.getType() == java.util.Set.class)).isFalse();
+        assertThat(mutation.users().currentValues().get(7L).balances().changedKeys())
+                .isNotInstanceOf(java.util.SortedSet.class);
+        runtime.close();
+    }
+
+    @Test
     void riskSnapshotMutationCapturesItsAccountLaneWhenAnotherUserChanged() {
         TradingCoreReducer reducer = new TradingCoreReducer();
         TradingCoreState instrumentState = reducer.upsertInstrument(

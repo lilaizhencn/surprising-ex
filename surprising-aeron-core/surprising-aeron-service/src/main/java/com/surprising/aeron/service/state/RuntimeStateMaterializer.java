@@ -391,7 +391,8 @@ public final class RuntimeStateMaterializer {
                 value.triggerOcoCursor());
     }
 
-    private static <K, A, B> void applyValues(RuntimeMutationDelta.ValueChanges<K, A> changes,
+    private static <K extends Comparable<? super K>, A, B> void applyValues(
+                                               RuntimeMutationDelta.ValueChanges<K, A> changes,
                                                Map<K, B> target,
                                                java.util.function.Function<A, B> mapper) {
         for (K key : changes.changedKeys()) {

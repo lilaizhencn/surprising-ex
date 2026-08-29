@@ -491,21 +491,22 @@ class SurprisingClusteredServiceTest {
             CoreProbeState state,
             long sequence) throws Exception {
         LaneCommandContextRing.Context context = matchingContext(state, sequence);
-        CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> future =
-                context.matchingFuture();
-        assertThat(future).isNotNull();
-        return future.get(5, TimeUnit.SECONDS);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (System.nanoTime() < deadline) {
+            state.drainMatchingCompletions();
+            var result = context.matchingCompletion();
+            if (result != null) return result;
+            Thread.onSpinWait();
+        }
+        throw new AssertionError("matching result was not published within five seconds");
     }
 
     private static void installIncompleteMatchingFuture(
             CoreProbeState state,
             long sequence,
-            CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> replacement)
+        CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> replacement)
             throws Exception {
         LaneCommandContextRing.Context context = matchingContext(state, sequence);
-        CompletableFuture<?> original = context.matchingFuture();
-        assertThat(original).isNotNull();
-        original.cancel(true);
         Field completionsField = CoreProbeState.class.getDeclaredField("matchingCompletions");
         completionsField.setAccessible(true);
         Object completions = completionsField.get(state);

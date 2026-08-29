@@ -6,10 +6,16 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.state.AccountLaneView;
 import com.surprising.aeron.service.state.RuntimeTreasuryDelta;
-import java.util.concurrent.CompletableFuture;
+import java.util.Arrays;
 import org.junit.jupiter.api.Test;
 
 class LaneCommandContextRingTest {
+
+    @Test
+    void commandContextDoesNotRetainAPerCommandMatchingFuture() {
+        assertThat(Arrays.stream(LaneCommandContextRing.Context.class.getDeclaredFields())
+                .anyMatch(field -> field.getType() == java.util.concurrent.CompletableFuture.class)).isFalse();
+    }
 
     @Test
     void aggregatesExactlyOneAckPerExpectedLaneAndReleasesTheResultReference() {
@@ -58,20 +64,18 @@ class LaneCommandContextRingTest {
     void storesMatchingContinuationWithoutPerCommandMapsAndKeepsTheFirstCompletion() {
         LaneCommandContextRing ring = new LaneCommandContextRing(4, 4);
         LaneCommandContextRing.Context context = ring.claim(3);
-        CompletableFuture<CoreMatchingResult> future = new CompletableFuture<>();
-        context.trackMatchingFuture(future);
+        long generation = context.beginMatchingSubmission();
         CoreMatchingResult first = new CoreMatchingResult(true, "SUCCESS").withCoreSequence(3);
         CoreMatchingResult duplicate = new CoreMatchingResult(false, "LATE").withCoreSequence(3);
 
         context.publishMatchingCompletion(first);
         context.publishMatchingCompletion(duplicate);
 
-        assertThat(context.matchingFuture()).isSameAs(future);
-        assertThat(ring.activeMatchingFutures()).containsExactly(future);
+        assertThat(context.acceptsMatchingSubmission(generation)).isTrue();
         assertThat(context.takeMatchingCompletion()).isSameAs(first);
         assertThat(context.takeMatchingCompletion()).isNull();
         context.resetMatchingContinuation();
-        assertThat(context.matchingFuture()).isNull();
+        assertThat(context.acceptsMatchingSubmission(generation)).isFalse();
         ring.discard(3);
     }
 
