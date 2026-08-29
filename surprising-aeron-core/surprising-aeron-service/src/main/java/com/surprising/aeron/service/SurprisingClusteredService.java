@@ -31,6 +31,7 @@ import org.agrona.concurrent.UnsafeBuffer;
 public final class SurprisingClusteredService implements ClusteredService {
 
     private static final int MAX_PENDING_EGRESS_PER_SESSION = 64;
+    private static final int MAX_DEFERRED_INBOUND = 4_096;
     private static final long MATCHING_TIMER_DELAY_MS = 10;
     private static final long MATCHING_WATCHDOG_TIMEOUT_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
     private static final long EGRESS_DRAIN_TIMER_DELAY_MS = 1;
@@ -40,6 +41,7 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     private final ProductLine productLine;
     private final AtomicReference<Cluster.Role> role = new AtomicReference<>();
+    private final ArrayDeque<DeferredInbound> deferredInbound = new ArrayDeque<>();
     private CoreProbeState state;
     private Cluster cluster;
     private IdleStrategy idleStrategy;
@@ -104,12 +106,23 @@ public final class SurprisingClusteredService implements ClusteredService {
         boolean auditControl = request.header().kind()
                 == com.surprising.aeron.protocol.WireMessageKind.COMMAND
                 && request.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.ACK_EXPORT;
+        if (!deferredInbound.isEmpty()) {
+            deferInbound(session, request, timestamp, header.position());
+            return;
+        }
         if (!matcherPipelineCommand && !auditControl) {
-            completeEarlierMatching(timestamp, header.position());
+            if (!completeEarlierMatching(timestamp, header.position())) {
+                deferInbound(session, request, timestamp, header.position());
+                return;
+            }
         } else {
             state.drainMatchingCompletions();
         }
-        var result = state.apply(request, timestamp, header.position());
+        processRequest(session, request, timestamp, header.position());
+    }
+
+    private void processRequest(ClientSession session, CoreMessage request, long timestamp, long clusterPosition) {
+        CoreResponse result = state.apply(request, timestamp, clusterPosition);
         long matchingSequence = state.matchingSequence(request.header().commandId());
         if (matchingSequence > 0) {
             if (session != null) {
@@ -224,6 +237,7 @@ public final class SurprisingClusteredService implements ClusteredService {
         activeEgressSessions.clear();
         egressDrainTimers.clear();
         pendingClients.clear();
+        deferredInbound.clear();
         matchingWakeupScheduled = false;
         resetMatchingWatchdog();
         this.cluster = null;
@@ -270,6 +284,7 @@ public final class SurprisingClusteredService implements ClusteredService {
             if (completed == 0 && state.firstPendingMatchingSequence() != 0) {
                 assertMatchingWatchdogHealthy(state.firstPendingMatchingSequence());
             }
+            drainDeferredInbound();
             scheduleMatchingWakeup();
             return;
         }
@@ -483,29 +498,48 @@ public final class SurprisingClusteredService implements ClusteredService {
         return result.withCommittedCoreSequence(state.committedCoreSequence());
     }
 
-    private void completeEarlierMatching(long timestamp, long clusterPosition) {
+    private boolean completeEarlierMatching(long timestamp, long clusterPosition) {
         state.drainMatchingCompletions();
         while (true) {
             long sequence = state.firstPendingMatchingSequence();
             if (sequence == 0) {
-                return;
+                return true;
             }
             if (state.hasPendingMatchingRejection(sequence)) {
                 CoreResponse rejected = state.completeRejectedMatching(sequence);
                 if (rejected != null) deliverMatchingResponse(sequence, rejected);
                 continue;
             }
-            var matchingResult = state.awaitMatchingResult(sequence);
-            if (matchingResult == null) {
-                throw new com.surprising.aeron.service.matching.FatalMatchingDivergenceException(
-                        "matching command fence", sequence, 0, "pending matcher continuation is unavailable");
-            }
+            var matchingResult = state.takeMatchingResult(sequence);
+            if (matchingResult == null) return false;
             recordMatchingProgress(sequence);
             CoreResponse result = state.completeMatching(sequence, matchingResult, timestamp, clusterPosition);
             if (result != null) {
                 deliverMatchingResponse(sequence, result);
-            }
+            } else return false;
         }
+    }
+
+    private void deferInbound(ClientSession session, CoreMessage request, long timestamp, long clusterPosition) {
+        if (deferredInbound.size() >= MAX_DEFERRED_INBOUND) {
+            throw new IllegalStateException("deferred inbound queue is full");
+        }
+        deferredInbound.addLast(new DeferredInbound(session, request, timestamp, clusterPosition));
+        scheduleMatchingWakeup();
+    }
+
+    private void drainDeferredInbound() {
+        int remaining = 64;
+        while (remaining-- > 0 && !deferredInbound.isEmpty()) {
+            DeferredInbound deferred = deferredInbound.peekFirst();
+            if (!completeEarlierMatching(deferred.timestamp(), deferred.clusterPosition())) return;
+            deferredInbound.removeFirst();
+            processRequest(deferred.session(), deferred.request(), deferred.timestamp(), deferred.clusterPosition());
+        }
+    }
+
+    private record DeferredInbound(ClientSession session, CoreMessage request,
+                                   long timestamp, long clusterPosition) {
     }
 
     private void scheduleQueryTimer(long sequence) {

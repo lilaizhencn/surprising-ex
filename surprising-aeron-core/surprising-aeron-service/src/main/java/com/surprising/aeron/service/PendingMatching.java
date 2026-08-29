@@ -10,13 +10,14 @@ import java.util.Objects;
 record PendingMatching(long sequence, Operation operation, CoreMessage command, CommandFingerprint fingerprint,
                        List<Long> preMatchingCancellationOrderIds, RuntimeProjectionPoint beforeProjection,
                        long beforeBusinessStateHash, long beforeFundsStateHash,
-                       RuntimeFundsDelta fundsDelta, DecodedMatchingCommand decodedCommand) {
+                       RuntimeFundsDelta fundsDelta, DecodedMatchingCommand decodedCommand,
+                       ResolvedMatchingAdmission admission) {
 
     PendingMatching(long sequence, Operation operation, CoreMessage command, RuntimeProjectionPoint beforeProjection,
                     long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta) {
         this(sequence, operation, command, CommandFingerprint.of(command), List.of(), beforeProjection,
                 beforeBusinessStateHash, beforeFundsStateHash, fundsDelta,
-                DecodedMatchingCommand.decode(command));
+                DecodedMatchingCommand.decode(command), null);
     }
 
     PendingMatching(long sequence, Operation operation, CoreMessage command,
@@ -24,7 +25,7 @@ record PendingMatching(long sequence, Operation operation, CoreMessage command, 
                     long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta) {
         this(sequence, operation, command, CommandFingerprint.of(command), preMatchingCancellationOrderIds,
                 beforeProjection, beforeBusinessStateHash, beforeFundsStateHash, fundsDelta,
-                DecodedMatchingCommand.decode(command));
+                DecodedMatchingCommand.decode(command), null);
     }
 
     PendingMatching(long sequence, Operation operation, CoreMessage command,
@@ -32,7 +33,16 @@ record PendingMatching(long sequence, Operation operation, CoreMessage command, 
                     long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta,
                     DecodedMatchingCommand decodedCommand) {
         this(sequence, operation, command, CommandFingerprint.of(command), preMatchingCancellationOrderIds,
-                beforeProjection, beforeBusinessStateHash, beforeFundsStateHash, fundsDelta, decodedCommand);
+                beforeProjection, beforeBusinessStateHash, beforeFundsStateHash, fundsDelta, decodedCommand, null);
+    }
+
+    PendingMatching(long sequence, Operation operation, CoreMessage command,
+                    List<Long> preMatchingCancellationOrderIds, RuntimeProjectionPoint beforeProjection,
+                    long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta,
+                    DecodedMatchingCommand decodedCommand, ResolvedMatchingAdmission admission) {
+        this(sequence, operation, command, CommandFingerprint.of(command), preMatchingCancellationOrderIds,
+                beforeProjection, beforeBusinessStateHash, beforeFundsStateHash, fundsDelta, decodedCommand,
+                admission);
     }
 
     PendingMatching {
@@ -49,12 +59,18 @@ record PendingMatching(long sequence, Operation operation, CoreMessage command, 
     PendingMatching withCommand(CoreMessage nextCommand) {
         return new PendingMatching(sequence, operation, nextCommand, fingerprint,
                 preMatchingCancellationOrderIds, beforeProjection, beforeBusinessStateHash, beforeFundsStateHash,
-                fundsDelta, DecodedMatchingCommand.decode(nextCommand));
+                fundsDelta, DecodedMatchingCommand.decode(nextCommand), admission);
     }
 
     PendingMatching withPreMatchingCancellations(List<Long> orderIds) {
         return new PendingMatching(sequence, operation, command, fingerprint, orderIds, beforeProjection,
-                beforeBusinessStateHash, beforeFundsStateHash, fundsDelta, decodedCommand);
+                beforeBusinessStateHash, beforeFundsStateHash, fundsDelta, decodedCommand, admission);
+    }
+
+    PendingMatching withAdmission(ResolvedMatchingAdmission nextAdmission) {
+        return new PendingMatching(sequence, operation, command, fingerprint, preMatchingCancellationOrderIds,
+                beforeProjection, beforeBusinessStateHash, beforeFundsStateHash, fundsDelta, decodedCommand,
+                nextAdmission);
     }
 
     enum Operation {

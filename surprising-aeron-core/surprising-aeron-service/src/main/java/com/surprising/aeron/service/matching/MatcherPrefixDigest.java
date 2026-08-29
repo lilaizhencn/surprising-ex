@@ -21,7 +21,8 @@ final class MatcherPrefixDigest {
         }
         long hash = mix(previous, DOMAIN);
         hash = mix(hash, command.coreSequence());
-        hash = mix(hash, command.commandId());
+        hash = mix(hash, command.commandIdMostSignificantBits());
+        hash = mix(hash, command.commandIdLeastSignificantBits());
         hash = mix(hash, command.orderId());
         hash = mix(hash, command.instrumentVersion());
         hash = mix(hash, command.matcherSequence());

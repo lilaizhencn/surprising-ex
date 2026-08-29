@@ -11,6 +11,7 @@ import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
@@ -104,8 +105,13 @@ public final class CoreInMemoryBenchmark {
                 if (matching == null) Thread.onSpinWait();
             }
             if (matching == null) throw new IllegalStateException("benchmark matching timed out");
-            if (state.completeMatching(sequence, matching, message.header().submittedAtEpochMillis(), sequence)
-                    == null) {
+            CoreResponse completed = null;
+            while (completed == null && System.nanoTime() < deadline) {
+                completed = state.completeMatching(
+                        sequence, matching, message.header().submittedAtEpochMillis(), sequence);
+                if (completed == null) Thread.onSpinWait();
+            }
+            if (completed == null) {
                 throw new IllegalStateException("benchmark matching completion lost");
             }
         }

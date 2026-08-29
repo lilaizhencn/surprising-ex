@@ -186,10 +186,11 @@ class DeterministicExchangeCoreAdapterTest {
                 result.matcherPrefix(), result.nativeMatcherResult(), result.matcherEvents(),
                 new MatcherResult.MarketData(
                         List.of(), List.of(new MatcherResult.Level(100, 2, 1)), 0, 0));
+        java.util.UUID commandId = java.util.UUID.fromString("00000000-0000-0000-0000-000000000007");
         var firstProcess = new CoreMatchingResult.NativeCommand(
-                7, "00000000-0000-0000-0000-000000000007", 101, 3, 41, 9, 1_000);
+                7, commandId, 101, 3, 41, 9, 1_000);
         var restoredProcess = new CoreMatchingResult.NativeCommand(
-                7, "00000000-0000-0000-0000-000000000007", 101, 3, 1, 9, 1_000);
+                7, commandId, 101, 3, 1, 9, 1_000);
 
         long firstDigest = MatcherPrefixDigest.next(MatcherPrefixDigest.initial(), firstProcess, result);
         long restoredDigest = MatcherPrefixDigest.next(

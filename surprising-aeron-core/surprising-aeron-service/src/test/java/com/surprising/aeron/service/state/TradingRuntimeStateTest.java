@@ -9,6 +9,9 @@ import org.junit.jupiter.api.Test;
 
 class TradingRuntimeStateTest {
 
+    private static final TradingRuntimeState.LaneCommitListener NOOP_LANE_COMMIT =
+            (laneId, laneRevision, localStateHash, localFundsHash) -> { };
+
     @Test
     void snapshotCaptureDoesNotRebaseLiveAccountLaneHashes() {
         TradingRuntimeState state = new TradingRuntimeState();
@@ -303,8 +306,9 @@ class TradingRuntimeStateTest {
         try {
             var result = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
                     .withCoreSequence(1);
-            var apply = state.applyAndCommitLaneSequence(1, java.util.List.of(7L), result, 3, 5, null);
-            assertThat(apply.acknowledgements()).filteredOn(java.util.Objects::nonNull).hasSize(1);
+            var apply = state.applyAndCommitLaneSequence(
+                    1, java.util.List.of(7L), result, 3, 5, NOOP_LANE_COMMIT);
+            assertThat(Long.bitCount(apply.laneMask())).isEqualTo(1);
             state.readFence(7, 1);
 
             AccountLaneView lane = state.accountLane(7);
@@ -329,7 +333,8 @@ class TradingRuntimeStateTest {
         try {
             var result = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
                     .withCoreSequence(1);
-            state.applyAndCommitLaneSequence(1, java.util.List.of(userInLastLane), result, 3, 5, null);
+            state.applyAndCommitLaneSequence(
+                    1, java.util.List.of(userInLastLane), result, 3, 5, NOOP_LANE_COMMIT);
             state.readFenceAll(1);
             assertThat(state.accountLaneById(0).committedSequence()).isEqualTo(1);
         } finally {
@@ -351,11 +356,13 @@ class TradingRuntimeStateTest {
                     .withCoreSequence(2);
             var sequenceOne = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
                     .withCoreSequence(1);
-            state.applyAndCommitLaneSequence(2, java.util.List.of(laneZeroUser), sequenceTwo, 3, 5, null);
-            state.applyAndCommitLaneSequence(1, java.util.List.of(laneOneUser), sequenceOne, 3, 5, null);
+            state.applyAndCommitLaneSequence(
+                    2, java.util.List.of(laneZeroUser), sequenceTwo, 3, 5, NOOP_LANE_COMMIT);
+            state.applyAndCommitLaneSequence(
+                    1, java.util.List.of(laneOneUser), sequenceOne, 3, 5, NOOP_LANE_COMMIT);
 
             assertThatThrownBy(() -> state.applyAndCommitLaneSequence(1,
-                    java.util.List.of(laneZeroUser, laneOneUser), sequenceOne, 7, 11, null))
+                    java.util.List.of(laneZeroUser, laneOneUser), sequenceOne, 7, 11, NOOP_LANE_COMMIT))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("out of order");
             assertThat(state.executeUserSettlement(laneOneUser, () -> "apply-reclaimed"))
@@ -376,7 +383,8 @@ class TradingRuntimeStateTest {
         state.putUser(new UserRuntime(laneZeroUser));
         var result = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
                 .withCoreSequence(2);
-        state.applyAndCommitLaneSequence(2, java.util.List.of(laneZeroUser), result, 3, 5, null);
+        state.applyAndCommitLaneSequence(
+                2, java.util.List.of(laneZeroUser), result, 3, 5, NOOP_LANE_COMMIT);
         AccountLaneView beforeRestore = state.accountLaneById(0);
 
         java.util.List<AccountLaneSnapshot> invalid = new java.util.ArrayList<>(snapshots);

@@ -2,7 +2,8 @@ package com.surprising.aeron.service;
 
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.state.AccountLaneView;
-import com.surprising.aeron.service.state.RuntimeTreasuryDelta;
+import com.surprising.aeron.service.state.MatcherSettlementPlan;
+import com.surprising.aeron.service.state.PerpetualLaneJournal;
 
 final class LaneCommandContextRing {
     private final Context[] contexts;
@@ -60,12 +61,12 @@ final class LaneCommandContextRing {
     static final class Context {
         private long coreSequence;
         private long expectedLaneMask;
-        private long ackLaneMask;
+        private long completedLaneMask;
         private CoreMatchingResult matchingResult;
+        private MatcherSettlementPlan settlementPlan;
+        private PerpetualLaneJournal[] settlementJournals;
         private CoreMatchingResult completedMatchingResult;
         private long matchingSubmissionGeneration;
-        private final RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta(
-                RuntimeTreasuryDelta.ORDER_BATCH_CAPACITY);
         private final long[] laneRevisions;
         private final long[] localStateHashes;
         private final long[] localFundsHashes;
@@ -78,9 +79,10 @@ final class LaneCommandContextRing {
 
         long coreSequence() { return coreSequence; }
         long expectedLaneMask() { return expectedLaneMask; }
-        long ackLaneMask() { return ackLaneMask; }
+        long completedLaneMask() { return completedLaneMask; }
         CoreMatchingResult matchingResult() { return matchingResult; }
-        RuntimeTreasuryDelta treasuryDelta() { return treasuryDelta; }
+        MatcherSettlementPlan settlementPlan() { return settlementPlan; }
+        PerpetualLaneJournal[] settlementJournals() { return settlementJournals; }
 
         long beginMatchingSubmission() {
             return ++matchingSubmissionGeneration;
@@ -116,30 +118,62 @@ final class LaneCommandContextRing {
             matchingSubmissionGeneration++;
         }
 
-        void result(CoreMatchingResult result, long expectedMask, long validLaneMask) {
+        void result(CoreMatchingResult result, MatcherSettlementPlan plan,
+                    long expectedMask, long validLaneMask) {
             if (result == null || result.nativeCommand().coreSequence() != coreSequence
                     || (expectedMask & ~validLaneMask) != 0
+                    || plan != null && (plan.coreSequence() != coreSequence
+                    || plan.requiredLaneMask() != expectedMask)
                     || matchingResult != null) {
                 throw new IllegalStateException("invalid immutable matching result fanout");
             }
             matchingResult = result;
+            settlementPlan = plan;
             expectedLaneMask = expectedMask;
         }
 
-        void acknowledge(AccountLaneAck ack) {
-            if (ack == null || ack.coreSequence() != coreSequence || matchingResult == null
-                    || ack.matchingResult() != matchingResult || ack.laneId() >= laneRevisions.length) {
+        void result(CoreMatchingResult result, long expectedMask, long validLaneMask) {
+            result(result, null, expectedMask, validLaneMask);
+        }
+
+        void dispatch(PerpetualLaneJournal[] journals) {
+            if (matchingResult == null || settlementPlan == null || journals == null
+                    || settlementJournals != null) {
+                throw new IllegalStateException("invalid settlement journal dispatch");
+            }
+            settlementJournals = journals;
+        }
+
+        boolean settlementDispatched() { return settlementJournals != null; }
+
+        boolean settlementReady() {
+            if (settlementJournals == null) return false;
+            for (PerpetualLaneJournal journal : settlementJournals) {
+                if (journal != null && !journal.completed()) return false;
+            }
+            return true;
+        }
+
+        Throwable settlementFailure() {
+            if (settlementJournals == null) return null;
+            for (PerpetualLaneJournal journal : settlementJournals) {
+                if (journal != null && journal.failure() != null) return journal.failure();
+            }
+            return null;
+        }
+
+        void completeLane(int laneId, long laneRevision, long localStateHash, long localFundsHash) {
+            if (matchingResult == null || laneId < 0 || laneId >= laneRevisions.length) {
                 throw new IllegalStateException("invalid account lane ACK");
             }
-            long laneBit = 1L << ack.laneId();
-            if ((expectedLaneMask & laneBit) == 0 || (ackLaneMask & laneBit) != 0) {
+            long laneBit = 1L << laneId;
+            if ((expectedLaneMask & laneBit) == 0 || (completedLaneMask & laneBit) != 0) {
                 throw new IllegalStateException("duplicate or unexpected account lane ACK");
             }
-            ackLaneMask |= laneBit;
-            laneRevisions[ack.laneId()] = ack.laneRevision();
-            localStateHashes[ack.laneId()] = ack.localStateHash();
-            localFundsHashes[ack.laneId()] = ack.localFundsHash();
-            treasuryDelta.merge(ack.treasuryDelta());
+            completedLaneMask |= laneBit;
+            laneRevisions[laneId] = laneRevision;
+            localStateHashes[laneId] = localStateHash;
+            localFundsHashes[laneId] = localFundsHash;
         }
 
         void validate(AccountLaneView view) {
@@ -147,7 +181,7 @@ final class LaneCommandContextRing {
                 throw new IllegalStateException("invalid account lane ACK view");
             }
             long laneBit = 1L << view.laneId();
-            if ((ackLaneMask & laneBit) == 0
+            if ((completedLaneMask & laneBit) == 0
                     || laneRevisions[view.laneId()] != view.revision()
                     || localStateHashes[view.laneId()] != view.localStateHash()
                     || localFundsHashes[view.laneId()] != view.localFundsHash()) {
@@ -156,17 +190,18 @@ final class LaneCommandContextRing {
         }
 
         boolean complete() {
-            return matchingResult != null && ackLaneMask == expectedLaneMask;
+            return matchingResult != null && completedLaneMask == expectedLaneMask;
         }
 
         private void clear() {
             coreSequence = 0;
             expectedLaneMask = 0;
-            ackLaneMask = 0;
+            completedLaneMask = 0;
             matchingResult = null;
+            settlementPlan = null;
+            settlementJournals = null;
             completedMatchingResult = null;
             matchingSubmissionGeneration++;
-            treasuryDelta.clear();
             java.util.Arrays.fill(laneRevisions, 0);
             java.util.Arrays.fill(localStateHashes, 0);
             java.util.Arrays.fill(localFundsHashes, 0);

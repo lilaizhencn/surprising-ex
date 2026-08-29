@@ -18,6 +18,7 @@ public final class CoreMatchingResult {
     private final List<CoreCancellationResult> cancellations;
     private final int successfulPrefixCount;
     private final boolean matcherStateChanged;
+    private final Outcome outcome;
     private final NativeCommand nativeCommand;
     private final MatcherPrefix matcherPrefix;
     private final MatcherResult nativeMatcherResult;
@@ -37,7 +38,7 @@ public final class CoreMatchingResult {
                               List<CoreCancellationResult> cancellations, int successfulPrefixCount,
                               boolean matcherStateChanged) {
         this(accepted, resultCode, cancellations, successfulPrefixCount, matcherStateChanged,
-                new NativeCommand(0, "", 0, 0, 0, 0, 0, -1), new MatcherPrefix(0, 0), null,
+                new NativeCommand(0, 0, 0, 0, 0, 0, 0, 0, -1), new MatcherPrefix(0, 0), null,
                 List.of(), EMPTY_MARKET_DATA);
     }
 
@@ -57,6 +58,7 @@ public final class CoreMatchingResult {
         this.cancellations = List.copyOf(cancellations);
         this.successfulPrefixCount = successfulPrefixCount;
         this.matcherStateChanged = matcherStateChanged;
+        this.outcome = classify(accepted, resultCode, matcherStateChanged);
         this.nativeCommand = nativeCommand;
         this.matcherPrefix = matcherPrefix;
         this.nativeMatcherResult = nativeMatcherResult;
@@ -69,7 +71,7 @@ public final class CoreMatchingResult {
         boolean accepted = result.resultCode() == CommandResultCode.SUCCESS
                 || result.resultCode() == CommandResultCode.ACCEPTED;
         return new CoreMatchingResult(accepted, result.resultCode().name(), List.of(), 0, false,
-                new NativeCommand(0, "", 0, 0, result.sequence(), 0, 0),
+                new NativeCommand(0, 0, 0, 0, 0, result.sequence(), 0, 0, -1),
                 new MatcherPrefix(0, 0), result, result.events(), result.marketData());
     }
 
@@ -82,7 +84,9 @@ public final class CoreMatchingResult {
         if (coreSequence <= 0) throw new IllegalArgumentException("coreSequence must be positive");
         if (nativeCommand.coreSequence() == coreSequence) return this;
         if (nativeCommand.coreSequence() != 0) throw new IllegalStateException("matching result sequence mismatch");
-        NativeCommand command = new NativeCommand(coreSequence, nativeCommand.commandId(), nativeCommand.orderId(),
+        NativeCommand command = new NativeCommand(coreSequence,
+                nativeCommand.commandIdMostSignificantBits(), nativeCommand.commandIdLeastSignificantBits(),
+                nativeCommand.orderId(),
                 nativeCommand.instrumentVersion(), nativeCommand.nativeSequence(), nativeCommand.matcherSequence(),
                 nativeCommand.aeronTimestamp(), nativeCommand.matcherShardId());
         return new CoreMatchingResult(accepted, resultCode, cancellations, successfulPrefixCount,
@@ -127,26 +131,53 @@ public final class CoreMatchingResult {
     public List<CoreCancellationResult> cancellations() { return cancellations; }
     public int successfulPrefixCount() { return successfulPrefixCount; }
     public boolean matcherStateChanged() { return matcherStateChanged; }
+    public Outcome outcome() { return outcome; }
     public NativeCommand nativeCommand() { return nativeCommand; }
     public MatcherPrefix matcherPrefix() { return matcherPrefix; }
     public MatcherResult nativeMatcherResult() { return nativeMatcherResult; }
     public List<MatcherResult.MatcherEvent> matcherEvents() { return matcherEvents; }
     public MatcherResult.MarketData marketData() { return marketData; }
 
-    public record NativeCommand(long coreSequence, String commandId, long orderId, long instrumentVersion,
+    private static Outcome classify(boolean accepted, String resultCode, boolean matcherStateChanged) {
+        if ("EXCHANGE_CORE_FAILURE".equals(resultCode) || "MATCHING_TIMEOUT".equals(resultCode)) {
+            return Outcome.FATAL_DIVERGENCE;
+        }
+        if (accepted) return Outcome.APPLIED;
+        return matcherStateChanged ? Outcome.KNOWN_PREFIX_APPLIED : Outcome.REJECTED_UNCHANGED;
+    }
+
+    public enum Outcome {
+        REJECTED_UNCHANGED,
+        KNOWN_PREFIX_APPLIED,
+        APPLIED,
+        FATAL_DIVERGENCE
+    }
+
+    public record NativeCommand(long coreSequence,
+                                long commandIdMostSignificantBits,
+                                long commandIdLeastSignificantBits,
+                                long orderId, long instrumentVersion,
                                 long nativeSequence, long matcherSequence, long aeronTimestamp,
                                 int matcherShardId) {
         public NativeCommand {
-            if (coreSequence < 0 || commandId == null || orderId < 0 || instrumentVersion < 0
+            if (coreSequence < 0 || orderId < 0 || instrumentVersion < 0
                     || nativeSequence < 0 || matcherSequence < 0 || aeronTimestamp < 0 || matcherShardId < -1) {
                 throw new IllegalArgumentException("invalid native command identity");
             }
         }
 
-        public NativeCommand(long coreSequence, String commandId, long orderId, long instrumentVersion,
+        public NativeCommand(long coreSequence, java.util.UUID commandId, long orderId, long instrumentVersion,
                              long nativeSequence, long matcherSequence, long aeronTimestamp) {
-            this(coreSequence, commandId, orderId, instrumentVersion, nativeSequence, matcherSequence,
+            this(coreSequence, commandId == null ? 0 : commandId.getMostSignificantBits(),
+                    commandId == null ? 0 : commandId.getLeastSignificantBits(), orderId, instrumentVersion,
+                    nativeSequence, matcherSequence,
                     aeronTimestamp, -1);
+        }
+
+        public boolean matches(java.util.UUID commandId) {
+            return commandId != null
+                    && commandIdMostSignificantBits == commandId.getMostSignificantBits()
+                    && commandIdLeastSignificantBits == commandId.getLeastSignificantBits();
         }
     }
 

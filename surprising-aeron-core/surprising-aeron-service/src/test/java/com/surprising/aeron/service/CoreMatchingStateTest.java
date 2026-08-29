@@ -305,6 +305,59 @@ class CoreMatchingStateTest {
     }
 
     @Test
+    void multiMakerPerpetualSettlementStaysInvisibleUntilParallelLanesCommit() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+            applyInstrument(state);
+            long sequence = 1;
+            for (long makerId = 11; makerId < 19; makerId++) {
+                apply(state, sequence++, makerId, CoreMessageType.ADJUST_BALANCE,
+                        TradingCommandCodec.encodeBalanceAdjustment(
+                                new BalanceAdjustmentCommand("USDT", 2_000)));
+                apply(state, sequence++, makerId, CoreMessageType.PLACE_ORDER,
+                        place(1_000 + makerId, CoreOrderSide.SELL, 100, 1,
+                                ReservationKind.DERIVATIVE_MARGIN, "USDT", 100));
+            }
+            apply(state, sequence++, 99, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(
+                            new BalanceAdjustmentCommand("USDT", 2_000)));
+            CoreMessage taker = message(state, sequence, 99, CoreMessageType.PLACE_ORDER,
+                    place(2_000, CoreOrderSide.BUY, 100, 8,
+                            ReservationKind.DERIVATIVE_MARGIN, "USDT", 800));
+            CoreResponse pending = state.apply(taker);
+            assertThat(pending.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            long matchingSequence = state.matchingSequence(taker.header().commandId());
+            var matching = state.awaitMatchingResult(matchingSequence);
+            assertThat(matching).isNotNull();
+            long committedBefore = state.committedCoreSequence();
+
+            assertThat(state.completeMatching(matchingSequence, matching,
+                    taker.header().submittedAtEpochMillis(), taker.header().sourceSequence())).isNull();
+            assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
+            assertThat(state.tradingState().user(99).positions()).isEmpty();
+            for (long makerId = 11; makerId < 19; makerId++) {
+                assertThat(state.tradingState().user(makerId).positions()).isEmpty();
+            }
+
+            CoreResponse completed = null;
+            long deadline = System.nanoTime() + 5_000_000_000L;
+            while (completed == null && System.nanoTime() < deadline) {
+                completed = state.completeMatching(matchingSequence, matching,
+                        taker.header().submittedAtEpochMillis(), taker.header().sourceSequence());
+                if (completed == null) Thread.onSpinWait();
+            }
+            assertThat(completed).isNotNull();
+            assertThat(completed.status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(state.tradingState().user(99).positions().get("BTC-USDT").signedQuantitySteps())
+                    .isEqualTo(8);
+            for (long makerId = 11; makerId < 19; makerId++) {
+                assertThat(state.tradingState().user(makerId).positions().get("BTC-USDT").signedQuantitySteps())
+                        .isEqualTo(-1);
+            }
+            assertThat(total(state, "USDT")).isEqualTo(18_000);
+        }
+    }
+
+    @Test
     void optionFillTransfersPremiumAndCreatesBuyerSellerPositions() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.OPTION)) {
             applyInstrument(state);
@@ -797,8 +850,12 @@ class CoreMatchingStateTest {
             if (result == null) Thread.onSpinWait();
         }
         assertThat(result).as("matching result for " + message.header().messageType()).isNotNull();
-        CoreResponse completed = state.completeMatching(sequence, result,
-                message.header().submittedAtEpochMillis(), message.header().sourceSequence());
+        CoreResponse completed = null;
+        while (completed == null && System.nanoTime() < deadline) {
+            completed = state.completeMatching(sequence, result,
+                    message.header().submittedAtEpochMillis(), message.header().sourceSequence());
+            if (completed == null) Thread.onSpinWait();
+        }
         assertThat(completed).isNotNull();
         assertThat(completed.status()).isIn(ResponseStatus.APPLIED, ResponseStatus.REJECTED);
         return completed;

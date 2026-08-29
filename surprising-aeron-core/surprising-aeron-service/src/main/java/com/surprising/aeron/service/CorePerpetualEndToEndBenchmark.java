@@ -143,7 +143,12 @@ public final class CorePerpetualEndToEndBenchmark {
         if (sequence == 0) throw new IllegalStateException("matching was not queued");
         CoreMatchingResult matching = state.awaitMatchingResult(sequence, 30_000_000_000L);
         if (matching == null) throw new IllegalStateException("matching timed out");
-        CoreResponse completed = state.completeMatching(sequence, matching, 1_000L, sequences.clusterPosition++);
+        CoreResponse completed = null;
+        long completionDeadline = System.nanoTime() + 30_000_000_000L;
+        while (completed == null && System.nanoTime() < completionDeadline) {
+            completed = state.completeMatching(sequence, matching, 1_000L, sequences.clusterPosition++);
+            if (completed == null) Thread.onSpinWait();
+        }
         if (completed == null || completed.status() != ResponseStatus.APPLIED) {
             throw new IllegalStateException("matching was not applied");
         }

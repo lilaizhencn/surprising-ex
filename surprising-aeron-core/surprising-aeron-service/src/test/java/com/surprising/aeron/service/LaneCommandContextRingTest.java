@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.state.AccountLaneView;
-import com.surprising.aeron.service.state.RuntimeTreasuryDelta;
 import java.util.Arrays;
 import org.junit.jupiter.api.Test;
 
@@ -24,14 +23,12 @@ class LaneCommandContextRingTest {
         CoreMatchingResult result = new CoreMatchingResult(true, "ACCEPTED").withCoreSequence(1);
         context.result(result, 0b101, 0b1111);
 
-        context.acknowledge(ack(result, 0, 3, 5));
+        context.completeLane(0, 1, 1, 1);
         assertThat(context.complete()).isFalse();
-        context.acknowledge(ack(result, 2, 7, 11));
+        context.completeLane(2, 1, 1, 1);
 
         assertThat(context.complete()).isTrue();
-        assertThat(context.ackLaneMask()).isEqualTo(0b101);
-        assertThat(context.treasuryDelta().feeUnits(0)).isEqualTo(10);
-        assertThat(context.treasuryDelta().insuranceUnits(0)).isEqualTo(16);
+        assertThat(context.completedLaneMask()).isEqualTo(0b101);
         assertThat(context.matchingResult()).isSameAs(result);
         context.validate(new AccountLaneView(0, 1, 1, 0, 1, 1,
                 1, 0, 4, 0, "account-lane-0"));
@@ -49,14 +46,13 @@ class LaneCommandContextRingTest {
         LaneCommandContextRing.Context context = new LaneCommandContextRing(4, 4).claim(1);
         CoreMatchingResult result = new CoreMatchingResult(true, "ACCEPTED").withCoreSequence(1);
         context.result(result, 0b11, 0b1111);
-        context.acknowledge(ack(result, 0, 1, 1));
+        context.completeLane(0, 1, 1, 1);
 
-        assertThatThrownBy(() -> context.acknowledge(ack(result, 0, 1, 1)))
+        assertThatThrownBy(() -> context.completeLane(0, 1, 1, 1))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("duplicate");
-        assertThatThrownBy(() -> context.acknowledge(ack(result, 2, 1, 1)))
+        assertThatThrownBy(() -> context.completeLane(2, 1, 1, 1))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("unexpected");
-        CoreMatchingResult copied = new CoreMatchingResult(true, "ACCEPTED").withCoreSequence(1);
-        assertThatThrownBy(() -> context.acknowledge(ack(copied, 1, 1, 1)))
+        assertThatThrownBy(() -> context.completeLane(4, 1, 1, 1))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("invalid");
     }
 
@@ -79,10 +75,4 @@ class LaneCommandContextRingTest {
         ring.discard(3);
     }
 
-    private static AccountLaneAck ack(CoreMatchingResult result, int laneId, long fee, long insurance) {
-        RuntimeTreasuryDelta delta = new RuntimeTreasuryDelta();
-        delta.addFee(1, fee);
-        delta.addInsurance(1, insurance);
-        return new AccountLaneAck(result.nativeCommand().coreSequence(), laneId, 1, 1, 1, result, delta);
-    }
 }

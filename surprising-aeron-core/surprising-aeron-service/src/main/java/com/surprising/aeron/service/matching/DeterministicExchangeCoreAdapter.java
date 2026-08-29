@@ -261,13 +261,16 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         CoreMatchingResult bound = matcherEvidence.bind(coreSequence, commandId, orderId,
                 instrumentVersion, aeronTimestamp, sequence,
                 controlShard ? -1 : matcherShardId(result), result);
-        if ("EXCHANGE_CORE_FAILURE".equals(bound.resultCode())
-                || "MATCHING_TIMEOUT".equals(bound.resultCode())
-                || !bound.accepted() && bound.matcherStateChanged()) {
+        if (bound.outcome() == CoreMatchingResult.Outcome.FATAL_DIVERGENCE) {
             matcherFailure.compareAndSet(null,
                     new IllegalStateException("fatal matcher result: " + bound.resultCode()));
         }
         return bound;
+    }
+
+    public void poisonFromOwner(String detail) {
+        if (detail == null || detail.isBlank()) throw new IllegalArgumentException("matcher poison detail is required");
+        matcherFailure.compareAndSet(null, new IllegalStateException(detail));
     }
 
     private CompletableFuture<CoreMatchingResult> placeUnlanedAsync(long userId, CoreMatchingOrder command) {
@@ -350,7 +353,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 Math.addExact(cancellations.successfulPrefixCount(), result.successfulPrefixCount()),
                 cancellations.matcherStateChanged() || result.matcherStateChanged()
                         || !cancellations.cancellations().isEmpty(),
-                new CoreMatchingResult.NativeCommand(0, "", 0, 0, nativeSequence, 0, 0),
+                new CoreMatchingResult.NativeCommand(0, 0, 0, 0, 0, nativeSequence, 0, 0, -1),
                 new CoreMatchingResult.MatcherPrefix(0, 0), result.nativeMatcherResult(), events,
                 result.marketData());
     }
@@ -380,7 +383,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 : failure == null ? "SUCCESS" : failure.resultCode();
         return new CoreMatchingResult(accepted, resultCode, cancellations,
                 outcome.successfulPrefix().size(), !accepted && !outcome.successfulPrefix().isEmpty(),
-                new CoreMatchingResult.NativeCommand(0, "", 0, 0, nativeSequence, 0, 0),
+                new CoreMatchingResult.NativeCommand(0, 0, 0, 0, 0, nativeSequence, 0, 0, -1),
                 new CoreMatchingResult.MatcherPrefix(0, 0), null, events,
                 new exchange.core2.core.common.MatcherResult.MarketData(List.of(), List.of(), 0, 0));
     }

@@ -50,6 +50,32 @@ public final class RuntimePerpetualFillCalculator {
             throw new IllegalStateException("runtime position owner mismatch: " + positionKey);
         }
 
+        FillResult result = calculate(instrument, order, reservation, current,
+                balance.availableUnits(), balance.lockedUnits(), fillPriceTicks, fillQuantitySteps,
+                taker, leveragePpm, settleAssetId);
+        runtime.replaceReservation(result.reservation());
+        runtime.replaceBalance(new BalanceRuntime(order.userId(), settleAssetId,
+                result.availableUnits(), result.lockedUnits()));
+        treasuryDelta.addFee(settleAssetId, result.feeTreasuryUnits());
+        treasuryDelta.addClearing(settleAssetId, result.clearingTreasuryUnits());
+        runtime.replacePosition(positionKey, result.position());
+        runtime.replaceOrder(result.order());
+        runtime.advanceUserRevision(order.userId());
+    }
+
+    static FillResult calculate(CoreInstrumentState instrument, OrderRuntime order,
+                                ReservationRuntime reservation, PositionRuntime current,
+                                long availableUnits, long lockedUnits, long fillPriceTicks,
+                                long fillQuantitySteps, boolean taker, long leveragePpm,
+                                int settleAssetId) {
+        if (instrument == null || order == null || reservation == null || availableUnits < 0 || lockedUnits < 0
+                || fillPriceTicks <= 0 || fillQuantitySteps <= 0 || leveragePpm <= 0 || settleAssetId < 0
+                || reservation.userId() != order.userId() || reservation.assetId() != settleAssetId
+                || current != null && current.userId() != order.userId()
+                || fillQuantitySteps > order.remainingQuantitySteps()) {
+            throw new IllegalArgumentException("invalid perpetual fill calculation");
+        }
+        SettlementKernel kernel = SettlementKernels.forInstrument(instrument);
         long signedFill = order.side() == CoreOrderSide.BUY ? fillQuantitySteps : Math.negateExact(fillQuantitySteps);
         long currentQuantity = current == null ? 0 : current.signedQuantitySteps();
         long currentAbs = Math.absExact(currentQuantity);
@@ -98,8 +124,8 @@ public final class RuntimePerpetualFillCalculator {
                     "runtime reservation and released position margin are insufficient");
         }
         long orderReservationDebit = Math.subtractExact(reservationDebit, releasedMarginDebit);
-        long nextAvailable = balance.availableUnits();
-        long nextLocked = balance.lockedUnits();
+        long nextAvailable = availableUnits;
+        long nextLocked = lockedUnits;
         long marginReleaseUnits = Math.subtractExact(releasedMargin, releasedMarginDebit);
         if (marginReleaseUnits > 0) {
             nextAvailable = Math.addExact(nextAvailable, marginReleaseUnits);
@@ -156,13 +182,13 @@ public final class RuntimePerpetualFillCalculator {
                 nextRemainingQuantity == 0 ? CoreOrderStatus.FILLED : order.status(),
                 Math.incrementExact(order.revision()));
 
-        runtime.replaceReservation(reservation.consume(orderReservationDebit));
-        runtime.replaceBalance(new BalanceRuntime(order.userId(), settleAssetId, nextAvailable, nextLocked));
-        treasuryDelta.addFee(settleAssetId, Math.negateExact(feeDelta));
-        treasuryDelta.addClearing(settleAssetId, Math.negateExact(appliedPnl));
-        runtime.replacePosition(positionKey, next);
-        runtime.replaceOrder(nextOrder);
-        runtime.advanceUserRevision(order.userId());
+        return new FillResult(nextOrder, reservation.consume(orderReservationDebit), next,
+                nextAvailable, nextLocked, Math.negateExact(feeDelta), Math.negateExact(appliedPnl));
+    }
+
+    record FillResult(OrderRuntime order, ReservationRuntime reservation, PositionRuntime position,
+                      long availableUnits, long lockedUnits, long feeTreasuryUnits,
+                      long clearingTreasuryUnits) {
     }
 
     private static long proportional(long units, long part, long total) {
