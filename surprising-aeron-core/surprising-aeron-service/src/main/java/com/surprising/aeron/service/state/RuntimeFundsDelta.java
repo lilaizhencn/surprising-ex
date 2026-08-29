@@ -1,36 +1,54 @@
 package com.surprising.aeron.service.state;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Arrays;
+import org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap;
 
 public final class RuntimeFundsDelta {
 
     private static final RuntimeFundsDelta EMPTY = new RuntimeFundsDelta(List.of());
     private final List<Posting> postings;
-    private final Map<Integer, Long> unitsByAsset;
+    private final IntLongHashMap unitsByAsset;
 
     RuntimeFundsDelta(List<Posting> postings) {
+        this(postings, true);
+    }
+
+    private RuntimeFundsDelta(List<Posting> postings, boolean normalize) {
         if (postings == null) throw new IllegalArgumentException("runtime funds postings are required");
-        Map<PostingKey, Long> coalesced = new HashMap<>();
-        for (Posting posting : postings) {
-            if (posting == null) throw new IllegalArgumentException("runtime funds posting is required");
-            coalesced.merge(posting.key(), posting.units(), Math::addExact);
+        ArrayList<Posting> normalizedPostings;
+        if (normalize) {
+            Map<PostingKey, Long> coalesced = new HashMap<>();
+            for (Posting posting : postings) {
+                if (posting == null) throw new IllegalArgumentException("runtime funds posting is required");
+                coalesced.merge(posting.key(), posting.units(), Math::addExact);
+            }
+            ArrayList<PostingKey> orderedKeys = new ArrayList<>(coalesced.keySet());
+            orderedKeys.sort(null);
+            normalizedPostings = new ArrayList<>(coalesced.size());
+            for (PostingKey key : orderedKeys) {
+                long units = coalesced.get(key);
+                if (units == 0) continue;
+                normalizedPostings.add(new Posting(
+                        key.assetId(), key.ownerKind(), key.ownerId(), key.subledger(), units));
+            }
+        } else {
+            normalizedPostings = new ArrayList<>(postings.size());
+            for (Posting posting : postings) {
+                if (posting == null) throw new IllegalArgumentException("runtime funds posting is required");
+                normalizedPostings.add(posting);
+            }
         }
-        ArrayList<PostingKey> orderedKeys = new ArrayList<>(coalesced.keySet());
-        orderedKeys.sort(null);
-        ArrayList<Posting> normalized = new ArrayList<>(coalesced.size());
-        Map<Integer, Long> totals = new HashMap<>();
-        for (PostingKey key : orderedKeys) {
-            long units = coalesced.get(key);
-            if (units == 0) continue;
-            normalized.add(new Posting(key.assetId(), key.ownerKind(), key.ownerId(), key.subledger(), units));
-            totals.merge(key.assetId(), units, Math::addExact);
+        IntLongHashMap totals = new IntLongHashMap();
+        for (Posting posting : normalizedPostings) {
+            long previous = totals.get(posting.assetId());
+            totals.put(posting.assetId(), Math.addExact(previous, posting.units()));
         }
-        this.postings = List.copyOf(normalized);
-        this.unitsByAsset = Collections.unmodifiableMap(totals);
+        this.postings = List.copyOf(normalizedPostings);
+        this.unitsByAsset = totals;
     }
 
     public static RuntimeFundsDelta empty() {
@@ -39,6 +57,10 @@ public final class RuntimeFundsDelta {
 
     static RuntimeFundsDelta from(List<Posting> postings) {
         return postings.isEmpty() ? EMPTY : new RuntimeFundsDelta(postings);
+    }
+
+    static RuntimeFundsDelta fromDistinct(List<Posting> postings) {
+        return postings.isEmpty() ? EMPTY : new RuntimeFundsDelta(postings, false);
     }
 
     public RuntimeFundsDelta plus(RuntimeFundsDelta other) {
@@ -56,7 +78,7 @@ public final class RuntimeFundsDelta {
 
     public void requireConserved(boolean externalAdjustment) {
         if (externalAdjustment) return;
-        unitsByAsset.forEach((assetId, units) -> {
+        unitsByAsset.forEachKeyValue((assetId, units) -> {
             if (units != 0) {
                 throw new IllegalArgumentException("runtime funds delta is not conserved for asset " + assetId);
             }
@@ -70,9 +92,9 @@ public final class RuntimeFundsDelta {
                     posting.ownerId(), posting.subledger(), posting.units()));
         }
         if (externalAdjustment) {
-            ArrayList<Integer> assetIds = new ArrayList<>(unitsByAsset.keySet());
-            assetIds.sort(null);
-            for (Integer assetId : assetIds) {
+            int[] assetIds = unitsByAsset.keySet().toArray();
+            Arrays.sort(assetIds);
+            for (int assetId : assetIds) {
                 long units = unitsByAsset.get(assetId);
                 if (units != 0) {
                     materialized.add(new FundsPosting(identities.asset(assetId), FundsPosting.OwnerKind.EXTERNAL,
@@ -95,7 +117,8 @@ public final class RuntimeFundsDelta {
                 case FUNDING_RESIDUAL -> delta.addFundingResidual(posting.assetId(), posting.units());
                 case ROUNDING_RESIDUAL -> delta.addRoundingResidual(posting.assetId(), posting.units());
                 case CLEARING_PNL -> delta.addClearing(posting.assetId(), posting.units());
-                case AVAILABLE, LOCKED, EXTERNAL_ADJUSTMENT -> throw new IllegalStateException(
+                case AVAILABLE, LOCKED, RESERVATION, POSITION_MARGIN, EXTERNAL_ADJUSTMENT ->
+                        throw new IllegalStateException(
                         "invalid Treasury funds subledger: " + posting.subledger());
             }
         }

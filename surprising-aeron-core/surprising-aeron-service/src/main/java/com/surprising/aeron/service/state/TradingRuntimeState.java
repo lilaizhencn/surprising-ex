@@ -2134,22 +2134,22 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     private RuntimeMutationDelta.CaptureRequest mutationCaptureRequest() {
         long[] userIds = changedUsers.toArray();
-        Map<Long, int[]> balanceAssetIds;
+        LongObjectHashMap<int[]> balanceAssetIds;
         if (changedBalances.isEmpty()) {
-            balanceAssetIds = Map.of();
+            balanceAssetIds = new LongObjectHashMap<>();
         } else {
-            Map<Long, int[]> captured = HashMap.newHashMap(changedBalances.size());
+            LongObjectHashMap<int[]> captured = new LongObjectHashMap<>(changedBalances.size());
             changedBalances.forEachKeyValue((userId, assetIds) -> captured.put(userId, assetIds.toArray()));
-            balanceAssetIds = Collections.unmodifiableMap(captured);
+            balanceAssetIds = captured;
         }
-        Map<Long, long[]> clientKeysByUser;
+        LongObjectHashMap<long[]> clientKeysByUser;
         if (changedClientOrdersByUser.isEmpty()) {
-            clientKeysByUser = Map.of();
+            clientKeysByUser = new LongObjectHashMap<>();
         } else {
-            Map<Long, long[]> captured = HashMap.newHashMap(changedClientOrdersByUser.size());
+            LongObjectHashMap<long[]> captured = new LongObjectHashMap<>(changedClientOrdersByUser.size());
             changedClientOrdersByUser.forEachKeyValue((userId, clientKeys) ->
                     captured.put(userId, clientKeys.toArray()));
-            clientKeysByUser = Collections.unmodifiableMap(captured);
+            clientKeysByUser = captured;
         }
         long[] orderIds = changedOrders.toArray();
         long[] reservationIds = changedReservations.toArray();
@@ -2168,8 +2168,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     private RuntimeMutationDelta captureMutationDelta(RuntimeMutationDelta.CaptureRequest request,
                                                        RuntimeMutationDelta.LaneValues[] laneValues) {
         long[] userIds = request.userIds();
-        Map<Long, int[]> balanceAssetIds = request.balanceAssetIds();
-        Map<Long, long[]> clientKeysByUser = request.clientKeysByUser();
+        LongObjectHashMap<int[]> balanceAssetIds = request.balanceAssetIds();
+        LongObjectHashMap<long[]> clientKeysByUser = request.clientKeysByUser();
         long[] orderIds = request.orderIds();
         long[] reservationIds = request.reservationIds();
         long[] positionKeys = request.positionKeys();
@@ -2178,16 +2178,16 @@ public final class TradingRuntimeState implements AutoCloseable {
         long[] algoOrderIds = request.algoOrderIds();
         long[] triggerOrderIds = request.triggerOrderIds();
         int pendingReservations = totalPendingReservations;
-        Map<Long, RuntimeMutationDelta.UserValue> users = Map.of();
-        Map<Long, OrderRuntime> orders = Map.of();
-        Map<Long, ReservationRuntime> reservations = Map.of();
-        Set<Long> pendingReservationIds = Set.of();
-        Map<Long, PositionRuntime> positions = Map.of();
-        Map<Long, LiquidationRuntime> liquidations = Map.of();
-        Map<Long, RiskSnapshotRuntime> riskSnapshots = Map.of();
+        LongObjectHashMap<RuntimeMutationDelta.UserValue> users = new LongObjectHashMap<>();
+        LongObjectHashMap<OrderRuntime> orders = new LongObjectHashMap<>();
+        LongObjectHashMap<ReservationRuntime> reservations = new LongObjectHashMap<>();
+        LongHashSet pendingReservationIds = new LongHashSet();
+        LongObjectHashMap<PositionRuntime> positions = new LongObjectHashMap<>();
+        LongObjectHashMap<LiquidationRuntime> liquidations = new LongObjectHashMap<>();
+        LongObjectHashMap<RiskSnapshotRuntime> riskSnapshots = new LongObjectHashMap<>();
         Map<CoreLeverageKey, Long> leverages = Map.of();
-        Map<Long, CoreAlgoOrderState> algoOrders = Map.of();
-        Map<Long, CoreTriggerOrderState> triggerOrders = Map.of();
+        LongObjectHashMap<CoreAlgoOrderState> algoOrders = new LongObjectHashMap<>();
+        LongObjectHashMap<CoreTriggerOrderState> triggerOrders = new LongObjectHashMap<>();
         Map<RuntimeMutationDelta.RuntimeClientKey, Long> clientOrders = Map.of();
         for (RuntimeMutationDelta.LaneValues lane : laneValues) {
             if (lane == null) continue;
@@ -2205,16 +2205,16 @@ public final class TradingRuntimeState implements AutoCloseable {
             clientOrders = mergeCaptured(clientOrders, lane.clientOrders(), clientKeysByUser.size());
         }
 
-        List<Integer> changedMarkIds = intKeys(changedMarkPrices.toArray());
-        Map<Integer, MarkPriceRuntime> currentMarks = changedMarkIds.isEmpty()
-                ? Map.of() : HashMap.newHashMap(changedMarkIds.size());
+        int[] changedMarkIds = changedMarkPrices.toArray();
+        Map<Integer, MarkPriceRuntime> currentMarks = changedMarkIds.length == 0
+                ? Map.of() : HashMap.newHashMap(changedMarkIds.length);
         for (int symbolId : changedMarkIds) {
             MarkPriceRuntime mark = markPrices.get(symbolId);
             if (mark != null) currentMarks.put(symbolId, mark);
         }
-        List<Integer> changedScanIds = intKeys(changedRiskScans.toArray());
-        Map<Integer, RiskScanRuntime> currentScans = changedScanIds.isEmpty()
-                ? Map.of() : HashMap.newHashMap(changedScanIds.size());
+        int[] changedScanIds = changedRiskScans.toArray();
+        Map<Integer, RiskScanRuntime> currentScans = changedScanIds.length == 0
+                ? Map.of() : HashMap.newHashMap(changedScanIds.length);
         for (int symbolId : changedScanIds) {
             RiskScanRuntime scan = riskScans.get(symbolId);
             if (scan != null) currentScans.put(symbolId, scan);
@@ -2233,19 +2233,19 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
 
         return new RuntimeMutationDelta(productLine, revision, pendingReservations,
-                RuntimeMutationDelta.ValueChanges.of(longKeys(userIds), users),
-                RuntimeMutationDelta.ValueChanges.of(longKeys(orderIds), orders),
-                RuntimeMutationDelta.ValueChanges.of(longKeys(reservationIds), reservations),
+                RuntimeMutationDelta.ValueChanges.ofLong(userIds, users),
+                RuntimeMutationDelta.ValueChanges.ofLong(orderIds, orders),
+                RuntimeMutationDelta.ValueChanges.ofLong(reservationIds, reservations),
                 pendingReservationIds,
-                RuntimeMutationDelta.ValueChanges.of(longKeys(positionKeys), positions),
-                RuntimeMutationDelta.ValueChanges.of(longKeys(liquidationIds), liquidations),
-                RuntimeMutationDelta.ValueChanges.of(longKeys(riskSnapshotKeys), riskSnapshots),
+                RuntimeMutationDelta.ValueChanges.ofLong(positionKeys, positions),
+                RuntimeMutationDelta.ValueChanges.ofLong(liquidationIds, liquidations),
+                RuntimeMutationDelta.ValueChanges.ofLong(riskSnapshotKeys, riskSnapshots),
                 RuntimeMutationDelta.ValueChanges.of(changedLeverages, leverages),
-                RuntimeMutationDelta.ValueChanges.of(longKeys(algoOrderIds), algoOrders),
-                RuntimeMutationDelta.ValueChanges.of(longKeys(triggerOrderIds), triggerOrders),
+                RuntimeMutationDelta.ValueChanges.ofLong(algoOrderIds, algoOrders),
+                RuntimeMutationDelta.ValueChanges.ofLong(triggerOrderIds, triggerOrders),
                 RuntimeMutationDelta.ValueChanges.of(runtimeClientKeys(clientKeysByUser), clientOrders),
-                RuntimeMutationDelta.ValueChanges.of(changedMarkIds, currentMarks),
-                RuntimeMutationDelta.ValueChanges.of(changedScanIds, currentScans),
+                RuntimeMutationDelta.ValueChanges.ofInt(changedMarkIds, currentMarks),
+                RuntimeMutationDelta.ValueChanges.ofInt(changedScanIds, currentScans),
                 RuntimeMutationDelta.ValueChanges.of(changedInstruments, currentInstruments),
                 RuntimeMutationDelta.ValueChanges.of(changedCancelAllAfterTimers, currentTimers),
                 captureTreasuryMutation(), nextLiquidationId, riskScanControl);
@@ -2276,6 +2276,28 @@ public final class TradingRuntimeState implements AutoCloseable {
         return merged;
     }
 
+    private static <V> LongObjectHashMap<V> mergeCaptured(
+            LongObjectHashMap<V> accumulated, LongObjectHashMap<V> current, int expectedSize) {
+        if (current.isEmpty()) return accumulated;
+        if (accumulated.isEmpty()) return current;
+        LongObjectHashMap<V> merged = new LongObjectHashMap<>(Math.max(expectedSize,
+                Math.addExact(accumulated.size(), current.size())));
+        merged.putAll(accumulated);
+        merged.putAll(current);
+        return merged;
+    }
+
+    private static LongHashSet mergeCaptured(
+            LongHashSet accumulated, LongHashSet current, int expectedSize) {
+        if (current.isEmpty()) return accumulated;
+        if (accumulated.isEmpty()) return current;
+        LongHashSet merged = new LongHashSet(Math.max(expectedSize,
+                Math.addExact(accumulated.size(), current.size())));
+        merged.addAll(accumulated);
+        merged.addAll(current);
+        return merged;
+    }
+
     private static <V> Set<V> mergeCaptured(Set<V> accumulated, Set<V> current, int expectedSize) {
         if (current.isEmpty()) return accumulated;
         if (accumulated.isEmpty()) return current;
@@ -2289,9 +2311,13 @@ public final class TradingRuntimeState implements AutoCloseable {
     private long mutationLaneMask(RuntimeMutationDelta.CaptureRequest request) {
         long mask = 0;
         for (long userId : request.userIds()) mask |= 1L << topology.accountLaneId(userId);
-        for (long userId : request.balanceAssetIds().keySet()) mask |= 1L << topology.accountLaneId(userId);
+        for (long userId : request.balanceAssetIds().keySet().toArray()) {
+            mask |= 1L << topology.accountLaneId(userId);
+        }
         for (CoreLeverageKey key : request.leverageKeys()) mask |= 1L << topology.accountLaneId(key.userId());
-        for (long userId : request.clientKeysByUser().keySet()) mask |= 1L << topology.accountLaneId(userId);
+        for (long userId : request.clientKeysByUser().keySet().toArray()) {
+            mask |= 1L << topology.accountLaneId(userId);
+        }
         boolean laneStateChanged = request.orderIds().length != 0 || request.reservationIds().length != 0
                 || request.positionKeys().length != 0 || request.liquidationIds().length != 0
                 || request.riskSnapshotKeys().length != 0 || request.algoOrderIds().length != 0
@@ -2303,54 +2329,40 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     private RuntimeMutationDelta.TreasuryValues captureTreasuryMutation() {
-        List<Integer> assets = intKeys(treasury.changedAssets().toArray());
-        Map<Integer, RuntimeMutationDelta.AssetLedger> assetValues = assets.isEmpty()
-                ? Map.of() : HashMap.newHashMap(assets.size());
+        int[] assets = treasury.changedAssets().toArray();
+        Map<Integer, RuntimeMutationDelta.AssetLedger> assetValues = assets.length == 0
+                ? Map.of() : HashMap.newHashMap(assets.length);
         for (int assetId : assets) {
             assetValues.put(assetId, new RuntimeMutationDelta.AssetLedger(treasury.fee(assetId),
                     treasury.insurance(assetId), treasury.insuranceDeficit(assetId),
                     treasury.liquidationFee(assetId), treasury.fundingResidual(assetId),
                     treasury.roundingResidual(assetId), treasury.clearingPnl(assetId)));
         }
-        List<Integer> fundingSymbols = intKeys(treasury.changedFundingSymbols().toArray());
-        Map<Integer, RuntimeMutationDelta.FundingLedger> funding = fundingSymbols.isEmpty()
-                ? Map.of() : HashMap.newHashMap(fundingSymbols.size());
+        int[] fundingSymbols = treasury.changedFundingSymbols().toArray();
+        Map<Integer, RuntimeMutationDelta.FundingLedger> funding = fundingSymbols.length == 0
+                ? Map.of() : HashMap.newHashMap(fundingSymbols.length);
         for (int symbolId : fundingSymbols) {
             funding.put(symbolId, new RuntimeMutationDelta.FundingLedger(
                     treasury.fundingSettlement(symbolId), treasury.fundingProgress(symbolId)));
         }
-        List<Integer> lifecycleSymbols = intKeys(treasury.changedLifecycleSymbols().toArray());
-        Map<Integer, RuntimeMutationDelta.LifecycleLedger> lifecycle = lifecycleSymbols.isEmpty()
-                ? Map.of() : HashMap.newHashMap(lifecycleSymbols.size());
+        int[] lifecycleSymbols = treasury.changedLifecycleSymbols().toArray();
+        Map<Integer, RuntimeMutationDelta.LifecycleLedger> lifecycle = lifecycleSymbols.length == 0
+                ? Map.of() : HashMap.newHashMap(lifecycleSymbols.length);
         for (int symbolId : lifecycleSymbols) {
             lifecycle.put(symbolId, new RuntimeMutationDelta.LifecycleLedger(
                     treasury.lifecycleSettlement(symbolId), treasury.lifecycleProgress(symbolId)));
         }
         return new RuntimeMutationDelta.TreasuryValues(
-                RuntimeMutationDelta.ValueChanges.of(assets, assetValues),
-                RuntimeMutationDelta.ValueChanges.of(fundingSymbols, funding),
-                RuntimeMutationDelta.ValueChanges.of(lifecycleSymbols, lifecycle));
-    }
-
-    private static List<Long> longKeys(long[] values) {
-        if (values.length == 0) return List.of();
-        ArrayList<Long> result = new ArrayList<>(values.length);
-        for (long value : values) result.add(value);
-        return result;
-    }
-
-    private static List<Integer> intKeys(int[] values) {
-        if (values.length == 0) return List.of();
-        ArrayList<Integer> result = new ArrayList<>(values.length);
-        for (int value : values) result.add(value);
-        return result;
+                RuntimeMutationDelta.ValueChanges.ofInt(assets, assetValues),
+                RuntimeMutationDelta.ValueChanges.ofInt(fundingSymbols, funding),
+                RuntimeMutationDelta.ValueChanges.ofInt(lifecycleSymbols, lifecycle));
     }
 
     private static List<RuntimeMutationDelta.RuntimeClientKey> runtimeClientKeys(
-            Map<Long, long[]> keysByUser) {
+            LongObjectHashMap<long[]> keysByUser) {
         if (keysByUser.isEmpty()) return List.of();
         ArrayList<RuntimeMutationDelta.RuntimeClientKey> result = new ArrayList<>();
-        keysByUser.forEach((userId, keys) -> {
+        keysByUser.forEachKeyValue((userId, keys) -> {
             for (long key : keys) result.add(new RuntimeMutationDelta.RuntimeClientKey(userId, key));
         });
         return result;

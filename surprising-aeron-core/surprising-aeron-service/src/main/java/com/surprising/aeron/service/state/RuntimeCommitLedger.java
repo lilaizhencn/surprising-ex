@@ -2,14 +2,15 @@ package com.surprising.aeron.service.state;
 
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.Map;
+import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
+import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 
 public final class RuntimeCommitLedger {
     private final ProductLine productLine;
-    private final Map<UserAssetKey, RuntimeMutationDelta.BalanceValue> balances = new HashMap<>();
-    private final Map<Integer, RuntimeMutationDelta.AssetLedger> treasury = new HashMap<>();
-    private final Map<Long, PositionRuntime> positions = new HashMap<>();
+    private final LongObjectHashMap<IntObjectHashMap<RuntimeMutationDelta.BalanceValue>> balances =
+            new LongObjectHashMap<>();
+    private final IntObjectHashMap<RuntimeMutationDelta.AssetLedger> treasury = new IntObjectHashMap<>();
+    private final LongObjectHashMap<PositionRuntime> positions = new LongObjectHashMap<>();
     private long sequence;
     private long revision;
 
@@ -30,9 +31,8 @@ public final class RuntimeCommitLedger {
         treasury.clear();
         positions.clear();
         initial.users().forEach((userId, user) -> user.balances().forEach((asset, balance) ->
-                balances.put(new UserAssetKey(userId, identities.assetId(asset)),
-                        new RuntimeMutationDelta.BalanceValue(
-                                balance.availableUnits(), balance.lockedUnits(), 0))));
+                putBalance(userId, identities.assetId(asset), new RuntimeMutationDelta.BalanceValue(
+                        balance.availableUnits(), balance.lockedUnits(), 0))));
         CoreTreasuryState state = initial.treasuryState();
         java.util.TreeSet<String> assets = new java.util.TreeSet<>();
         assets.addAll(state.feeBalances().keySet());
@@ -99,9 +99,10 @@ public final class RuntimeCommitLedger {
         for (Long userId : mutation.users().changedKeys()) {
             RuntimeMutationDelta.UserValue user = mutation.users().currentValues().get(userId);
             if (user == null) continue;
+            IntObjectHashMap<RuntimeMutationDelta.BalanceValue> userBalances = balances.get(userId.longValue());
             for (Integer assetId : user.balances().changedKeys()) {
-                    UserAssetKey key = new UserAssetKey(userId, assetId);
-                    RuntimeMutationDelta.BalanceValue before = balances.get(key);
+                    RuntimeMutationDelta.BalanceValue before = userBalances == null
+                            ? null : userBalances.get(assetId.intValue());
                     RuntimeMutationDelta.BalanceValue after = user.balances().currentValues().get(assetId);
                     add(postings, assetId, FundsPosting.OwnerKind.USER, userId,
                             FundsPosting.Subledger.AVAILABLE,
@@ -109,8 +110,17 @@ public final class RuntimeCommitLedger {
                     add(postings, assetId, FundsPosting.OwnerKind.USER, userId,
                             FundsPosting.Subledger.LOCKED,
                             Math.subtractExact(units(after, false), units(before, false)));
-                    if (after == null) balances.remove(key); else balances.put(key, after);
+                    if (after == null) {
+                        if (userBalances != null) userBalances.remove(assetId.intValue());
+                    } else {
+                        if (userBalances == null) {
+                            userBalances = new IntObjectHashMap<>();
+                            balances.put(userId.longValue(), userBalances);
+                        }
+                        userBalances.put(assetId.intValue(), after);
+                    }
             }
+            if (userBalances != null && userBalances.isEmpty()) balances.remove(userId.longValue());
         }
         mutation.treasury().assets().changedKeys().forEach(assetId -> {
             RuntimeMutationDelta.AssetLedger before = treasury.get(assetId);
@@ -131,7 +141,7 @@ public final class RuntimeCommitLedger {
                     Math.subtractExact(clearingPnl(after), clearingPnl(before)));
             if (after == null) treasury.remove(assetId); else treasury.put(assetId, after);
         });
-        return RuntimeFundsDelta.from(postings);
+        return RuntimeFundsDelta.fromDistinct(postings);
     }
 
     private static long units(RuntimeMutationDelta.BalanceValue value, boolean available) {
@@ -157,6 +167,12 @@ public final class RuntimeCommitLedger {
         if (units != 0) postings.add(new RuntimeFundsDelta.Posting(assetId, ownerKind, ownerId, subledger, units));
     }
 
-    private record UserAssetKey(long userId, int assetId) {
+    private void putBalance(long userId, int assetId, RuntimeMutationDelta.BalanceValue value) {
+        IntObjectHashMap<RuntimeMutationDelta.BalanceValue> userBalances = balances.get(userId);
+        if (userBalances == null) {
+            userBalances = new IntObjectHashMap<>();
+            balances.put(userId, userBalances);
+        }
+        userBalances.put(assetId, value);
     }
 }

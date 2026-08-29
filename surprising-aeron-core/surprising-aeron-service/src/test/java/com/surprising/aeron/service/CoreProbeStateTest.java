@@ -82,7 +82,7 @@ class CoreProbeStateTest {
             CoreMessage command = command(UUID.randomUUID(), 1, 1);
             var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
             exportState.append(new CoreExportState.Draft(command, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                    1, 1, 0, 0, 0, 1, 1, transition, 1, 0, List.of(), sequence -> {
+                    1, 1, 0, 0, 0, 1, 1, transition, 1, 0, new long[0], sequence -> {
                         enteredMaterializer.countDown();
                         try {
                             if (!releaseMaterializer.await(3, TimeUnit.SECONDS)) {
@@ -103,10 +103,10 @@ class CoreProbeStateTest {
             assertThat(enteredMaterializer.await(1, TimeUnit.SECONDS)).isTrue();
             assertThat(exportState.pendingCount()).isEqualTo(1);
             assertThat(exportState.batch(1)).isEmpty();
+            assertThat(exportState.acknowledge(new AckExportCommand(1))).isEmpty();
 
             releaseMaterializer.countDown();
-            assertThat(exportState.pending()).hasSize(1);
-            assertThat(exportState.batch(1)).hasSize(1);
+            assertThat(exportState.pendingCount()).isZero();
         } finally {
             releaseMaterializer.countDown();
         }
@@ -114,14 +114,14 @@ class CoreProbeStateTest {
 
     @Test
     @Timeout(5)
-    void acknowledgesPrimitiveTerminalIdsWithoutWaitingForFactMaterialization() throws Exception {
+    void acknowledgesTerminalIdsWithoutWaitingForFactMaterialization() throws Exception {
         CountDownLatch enteredMaterializer = new CountDownLatch(1);
         CountDownLatch releaseMaterializer = new CountDownLatch(1);
         try (CoreExportState exportState = new CoreExportState()) {
             CoreMessage command = command(UUID.randomUUID(), 1, 1);
             var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
             exportState.append(new CoreExportState.Draft(command, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                    1, 1, 0, 0, 0, 1, 1, transition, 1, 1, List.of(42L), sequence -> {
+                    1, 1, 0, 0, 0, 1, 1, transition, 1, 1, new long[]{42}, sequence -> {
                         enteredMaterializer.countDown();
                         try {
                             if (!releaseMaterializer.await(3, TimeUnit.SECONDS)) {
@@ -134,7 +134,10 @@ class CoreProbeStateTest {
                         return new com.surprising.aeron.protocol.CoreExportEvent(
                                 sequence, 1, 1, command.header().commandId(), command.header().messageType(),
                                 ResponseStatus.APPLIED, CoreResultCode.NONE, command.header().userId(),
-                                command.payloadUnsafe(), List.of(), List.of(), List.of(), List.of(), List.of(),
+                                command.payloadUnsafe(), List.of(), List.of(new com.surprising.aeron.protocol.CoreOrderStateView(
+                                        42, ProductLine.SPOT, 1, "BTC-USDT", 1,
+                                        com.surprising.aeron.protocol.CoreOrderSide.BUY,
+                                        100, 1, 1, 0, false, "FILLED", 1)), List.of(), List.of(), List.of(),
                                 List.of(), List.of(), 0, 0, 0, transition.routeVersion(), 1, 1, 1,
                                 transition, 1, List.of());
                     }));
@@ -142,6 +145,47 @@ class CoreProbeStateTest {
             assertThat(enteredMaterializer.await(1, TimeUnit.SECONDS)).isTrue();
             assertThat(exportState.acknowledge(new AckExportCommand(1))).containsExactly(42L);
             assertThat(exportState.pendingCount()).isZero();
+            releaseMaterializer.countDown();
+        } finally {
+            releaseMaterializer.countDown();
+        }
+    }
+
+    @Test
+    @Timeout(5)
+    void acknowledgedFactMaterializationFailureRemainsFatal() throws Exception {
+        CountDownLatch enteredMaterializer = new CountDownLatch(1);
+        CountDownLatch releaseMaterializer = new CountDownLatch(1);
+        try (CoreExportState exportState = new CoreExportState()) {
+            CoreMessage command = command(UUID.randomUUID(), 1, 1);
+            var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
+            exportState.append(new CoreExportState.Draft(command, ResponseStatus.APPLIED, CoreResultCode.NONE,
+                    1, 1, 0, 0, 0, 1, 1, transition, 1, 0, new long[0], sequence -> {
+                        enteredMaterializer.countDown();
+                        try {
+                            if (!releaseMaterializer.await(3, TimeUnit.SECONDS)) {
+                                throw new IllegalStateException("Core Fact materializer was not released");
+                            }
+                        } catch (InterruptedException exception) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException("Core Fact materializer interrupted", exception);
+                        }
+                        throw new IllegalStateException("encoded Core Fact failed");
+                    }));
+
+            assertThat(enteredMaterializer.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(exportState.acknowledge(new AckExportCommand(1))).isEmpty();
+            releaseMaterializer.countDown();
+
+            Throwable failure = null;
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            while (failure == null && System.nanoTime() < deadline) {
+                failure = catchThrowable(exportState::hasCapacityFor);
+                if (failure == null) Thread.onSpinWait();
+            }
+            assertThat(failure).isInstanceOf(java.util.concurrent.CompletionException.class)
+                    .hasMessage("Core Fact materialization failed")
+                    .hasRootCauseMessage("encoded Core Fact failed");
         } finally {
             releaseMaterializer.countDown();
         }
@@ -1492,8 +1536,8 @@ class CoreProbeStateTest {
                     0, 1_000, sequence), payload);
             var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
             exportState.append(new CoreExportState.Draft(command, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                    sequence, 0, 0, 0, 0, 1, 1, transition, sequence, 0, List.of(),
-                    exportSequence -> new com.surprising.aeron.protocol.CoreExportEvent(
+                    sequence, 0, 0, 0, 0, 1, 1, transition, sequence, 0,
+                    new long[0], exportSequence -> new com.surprising.aeron.protocol.CoreExportEvent(
                             exportSequence, factSequence, 0, command.header().commandId(),
                             command.header().messageType(), ResponseStatus.APPLIED, CoreResultCode.NONE,
                             command.header().userId(), command.payloadUnsafe(), List.of(), List.of(), List.of(),

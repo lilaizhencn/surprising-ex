@@ -12,7 +12,6 @@ import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.aeron.service.state.CoreStateRejectedException;
-import com.surprising.aeron.service.state.FundsDelta;
 import java.util.ArrayList;
 import java.util.ArrayDeque;
 import java.util.LinkedHashSet;
@@ -20,8 +19,10 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicReference;
 
 final class CoreExportState implements AutoCloseable {
 
@@ -35,6 +36,7 @@ final class CoreExportState implements AutoCloseable {
     private long pendingBytes;
     private long pendingDigest;
     private final ExecutorService materializer;
+    private final AtomicReference<Throwable> materializationFailure = new AtomicReference<>();
 
     CoreExportState() {
         this(0, 1, List.of());
@@ -61,7 +63,7 @@ final class CoreExportState implements AutoCloseable {
                     || decoded.exportSequence() != expectedSequence) {
                 throw new IllegalArgumentException("non-contiguous export state");
             }
-            PendingExport restored = pendingExport(event, decoded, terminalOrderIds(decoded));
+            PendingExport restored = pendingExport(event, decoded);
             this.pending.add(restored);
             pendingBytes = Math.addExact(pendingBytes, restored.encodedLength());
             pendingDigest ^= restored.digest();
@@ -77,6 +79,7 @@ final class CoreExportState implements AutoCloseable {
     }
 
     long append(Draft draft) {
+        assertHealthy();
         if (pending.size() >= MAX_PENDING_EVENTS) {
             throw new CoreStateRejectedException("EXPORT_BACKLOG_FULL", "export backlog reached hard limit");
         }
@@ -95,8 +98,10 @@ final class CoreExportState implements AutoCloseable {
             }
             CoreMessage message = CoreMessage.owned(header, CoreExportCodec.encodeEvent(event));
             return new MaterializedExport(event, message, actualLength);
-        }, materializer);
-        PendingExport appended = new PendingExport(header, completion, eventBytes,
+        }, materializer).whenComplete((ignored, failure) -> {
+            if (failure != null) materializationFailure.compareAndSet(null, failure);
+        });
+        PendingExport appended = new PendingExport(completion, eventBytes,
                 draftDigest(header, draft), draft.terminalOrderIds());
         pending.add(appended);
         pendingBytes = Math.addExact(pendingBytes, eventBytes);
@@ -106,6 +111,7 @@ final class CoreExportState implements AutoCloseable {
     }
 
     boolean hasCapacity() {
+        assertHealthy();
         return pending.size() < MAX_PENDING_EVENTS;
     }
 
@@ -114,6 +120,7 @@ final class CoreExportState implements AutoCloseable {
     }
 
     boolean hasCapacityFor(int additionalEvents) {
+        assertHealthy();
         if (additionalEvents < 1 || pending.size() > MAX_PENDING_EVENTS - additionalEvents) {
             return false;
         }
@@ -121,6 +128,7 @@ final class CoreExportState implements AutoCloseable {
     }
 
     List<Long> acknowledge(AckExportCommand command) {
+        assertHealthy();
         if (command.throughSequence() <= acknowledgedSequence) {
             return List.of();
         }
@@ -132,7 +140,7 @@ final class CoreExportState implements AutoCloseable {
         Set<Long> terminalOrderIds = new LinkedHashSet<>();
         for (int index = 0; index < removeCount; index++) {
             PendingExport removed = pending.removeFirst();
-            terminalOrderIds.addAll(removed.terminalOrderIds());
+            for (long orderId : removed.terminalOrderIds()) terminalOrderIds.add(orderId);
             pendingBytes = Math.subtractExact(pendingBytes, removed.encodedLength());
             pendingDigest ^= removed.digest();
         }
@@ -141,6 +149,7 @@ final class CoreExportState implements AutoCloseable {
     }
 
     List<CoreMessage> batch(int maxEvents) {
+        assertHealthy();
         int count = 0;
         long encodedLength = Integer.BYTES;
         int limit = Math.min(maxEvents, pending.size());
@@ -163,6 +172,7 @@ final class CoreExportState implements AutoCloseable {
     }
 
     CoreExportStatus status() {
+        assertHealthy();
         return new CoreExportStatus(acknowledgedSequence, nextSequence, pending.size(), pendingBytes,
                 MAX_PENDING_EVENTS, MAX_PENDING_BYTES);
     }
@@ -176,6 +186,7 @@ final class CoreExportState implements AutoCloseable {
     }
 
     List<CoreMessage> pending() {
+        assertHealthy();
         ArrayList<CoreMessage> events = new ArrayList<>(pending.size());
         for (PendingExport event : pending) events.add(event.message());
         return List.copyOf(events);
@@ -216,6 +227,7 @@ final class CoreExportState implements AutoCloseable {
     }
 
     Snapshot snapshot() {
+        assertHealthy();
         return new Snapshot(acknowledgedSequence, nextSequence, pending(), pendingDigest);
     }
 
@@ -306,38 +318,36 @@ final class CoreExportState implements AutoCloseable {
         return result;
     }
 
-    private static List<Long> terminalOrderIds(CoreExportEvent event) {
-        LinkedHashSet<Long> terminal = new LinkedHashSet<>();
+    private static long[] terminalOrderIds(CoreExportEvent event) {
+        org.eclipse.collections.impl.list.mutable.primitive.LongArrayList terminal =
+                new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList();
         for (var order : event.changedOrders()) {
             if (!"OPEN".equals(order.status())) terminal.add(order.orderId());
         }
-        return List.copyOf(terminal);
+        return terminal.toArray();
     }
 
-    private static PendingExport pendingExport(CoreMessage message, CoreExportEvent event,
-                                               List<Long> terminalOrderIds) {
+    private static PendingExport pendingExport(CoreMessage message, CoreExportEvent event) {
         MaterializedExport materialized = new MaterializedExport(event, message, encodedLength(message));
-        return new PendingExport(message.header(), CompletableFuture.completedFuture(materialized),
-                reservedEventLength(event), eventDigest(message.header(), event), terminalOrderIds);
+        return new PendingExport(CompletableFuture.completedFuture(materialized),
+                reservedEventLength(event), eventDigest(message.header(), event), terminalOrderIds(event));
     }
 
     private static final class PendingExport {
-        private final CoreMessageHeader header;
         private final CompletableFuture<MaterializedExport> completion;
         private final int encodedLength;
         private final long digest;
-        private final List<Long> terminalOrderIds;
+        private final long[] terminalOrderIds;
 
-        private PendingExport(CoreMessageHeader header, CompletableFuture<MaterializedExport> completion,
-                              int encodedLength, long digest, List<Long> terminalOrderIds) {
-            if (header == null || completion == null || terminalOrderIds == null) {
+        private PendingExport(CompletableFuture<MaterializedExport> completion,
+                              int encodedLength, long digest, long[] terminalOrderIds) {
+            if (completion == null) {
                 throw new IllegalArgumentException("invalid pending export");
             }
-            this.header = header;
             this.completion = completion;
             this.encodedLength = encodedLength;
             this.digest = digest;
-            this.terminalOrderIds = List.copyOf(terminalOrderIds);
+            this.terminalOrderIds = terminalOrderIds.clone();
             if (encodedLength < CoreProtocol.HEADER_LENGTH) {
                 throw new IllegalArgumentException("invalid pending export length");
             }
@@ -347,9 +357,9 @@ final class CoreExportState implements AutoCloseable {
             return completion.join().message();
         }
 
-        private List<Long> terminalOrderIds() { return terminalOrderIds; }
         private int encodedLength() { return encodedLength; }
         private long digest() { return digest; }
+        private long[] terminalOrderIds() { return terminalOrderIds; }
         private boolean encoded() { return completion.isDone() && !completion.isCompletedExceptionally(); }
         private boolean ready() { return completion.isDone(); }
     }
@@ -359,16 +369,20 @@ final class CoreExportState implements AutoCloseable {
                  long appliedCommandCount, long businessStateHash,
                  long beforeBusinessStateHash, long beforeFundsStateHash, long fundsStateHash,
                  long topologyHash, long laneRevisionHash, CoreMatcherTransition matcherTransition,
-                 long clusterPosition, int itemCount, List<Long> terminalOrderIds,
-                 FactRecord fact) {
+                 long clusterPosition, int itemCount, long[] terminalOrderIds, FactRecord fact) {
         Draft {
             if (command == null || status == null || resultCode == null || appliedCommandCount < 0
                     || matcherTransition == null || clusterPosition < 0 || itemCount < 0
                     || terminalOrderIds == null || fact == null) {
                 throw new IllegalArgumentException("invalid Core Fact draft");
             }
-            terminalOrderIds = List.copyOf(terminalOrderIds);
+            terminalOrderIds = terminalOrderIds.clone();
         }
+    }
+
+    private void assertHealthy() {
+        Throwable failure = materializationFailure.get();
+        if (failure != null) throw new CompletionException("Core Fact materialization failed", failure);
     }
 
     @FunctionalInterface

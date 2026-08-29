@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.state;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import java.util.List;
@@ -127,6 +128,19 @@ class RuntimeTreasuryDeltaTest {
         assertThat(treasury.insuranceUnits(0)).isEqualTo(11);
         assertThat(treasury.deficitUnits(0)).isEqualTo(13);
         assertThat(treasury.fundingResidualUnits(0)).isEqualTo(-17);
+    }
+
+    @Test
+    void rejectsUserOnlySubledgersForTreasuryOwner() {
+        for (FundsPosting.Subledger subledger : List.of(
+                FundsPosting.Subledger.RESERVATION, FundsPosting.Subledger.POSITION_MARGIN)) {
+            RuntimeFundsDelta funds = new RuntimeFundsDelta(List.of(
+                    new RuntimeFundsDelta.Posting(1, FundsPosting.OwnerKind.TREASURY, 0, subledger, 1)));
+
+            assertThatThrownBy(funds::treasuryDelta)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("invalid Treasury funds subledger: " + subledger);
+        }
     }
 
     private static TradingCoreState state(CoreTreasuryState treasury, long revision) {

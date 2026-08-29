@@ -3,7 +3,6 @@ package com.surprising.aeron.service;
 import com.surprising.aeron.protocol.CoreExportEvent;
 import com.surprising.aeron.protocol.CoreMatcherTransition;
 import com.surprising.aeron.protocol.CoreMessage;
-import com.surprising.aeron.protocol.CoreOrderStateView;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.service.state.FundsDelta;
@@ -31,7 +30,6 @@ record CoreFactJournalEntry(
         RuntimeProjectionPoint beforeProjection,
         RuntimeProjectionPoint afterProjection,
         CoreCommandDelta delta,
-        List<CoreOrderStateView> retainedOrderViews,
         List<String> treasuryAssets,
         RuntimeFundsDelta primitiveFunds,
         RuntimeIdentityRegistry identities,
@@ -42,11 +40,10 @@ record CoreFactJournalEntry(
         if (command == null || status == null || resultCode == null || appliedCommandCount < 0
                 || matcherTransition == null || clusterPosition < 0 || projections == null
                 || beforeProjection == null || afterProjection == null || delta == null
-                || retainedOrderViews == null || treasuryAssets == null || primitiveFunds == null
+                || treasuryAssets == null || primitiveFunds == null
                 || identities == null || terminalRetention == null) {
             throw new IllegalArgumentException("invalid typed Core Fact journal entry");
         }
-        retainedOrderViews = List.copyOf(retainedOrderViews);
         treasuryAssets = List.copyOf(treasuryAssets);
     }
 
@@ -62,7 +59,7 @@ record CoreFactJournalEntry(
         TradingCoreState before = projections.await(beforeProjection);
         TradingCoreState after = projections.await(afterProjection);
         CoreCommandDelta fact = CoreProbeState.materializeFactDelta(
-                before, after, delta, retainedOrderViews, treasuryAssets);
+                before, after, delta, treasuryAssets);
         FundsDelta funds = primitiveFunds.materialize(identities, externalAdjustment);
         CoreExportEvent event = new CoreExportEvent(sequence, appliedCommandCount, businessStateHash,
                 command.header().commandId(), command.header().messageType(), status, resultCode,
