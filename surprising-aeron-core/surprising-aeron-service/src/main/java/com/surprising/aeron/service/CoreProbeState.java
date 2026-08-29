@@ -141,8 +141,8 @@ public final class CoreProbeState implements AutoCloseable {
     private long commandResultsDigest;
     private long nextResultRetentionSequence;
     private long nextResultRetentionWeight;
-    private long appliedMatcherSequence;
-    private long appliedMatcherPrefixDigest;
+    private final long[] appliedMatcherSequences;
+    private final long[] appliedMatcherPrefixDigests;
     private final LinkedHashMap<SourceKey, Long> lastSourceSequences;
     private final PendingMatchingRing pendingMatching;
     private final LinkedHashMap<Long, List<LifecycleScope>> pendingLifecycleScopes;
@@ -281,15 +281,14 @@ public final class CoreProbeState implements AutoCloseable {
         this.deferredMatching = new LinkedHashMap<>();
         this.snapshotState = snapshotState;
         this.lastSourceSequenceDigest = sourceSequenceDigest(lastSourceSequences);
-        this.appliedMatcherSequence = matcherSnapshot == null ? 0 : matcherSnapshot.matcherSequence();
-        this.appliedMatcherPrefixDigest = matcherSnapshot == null
-                ? com.surprising.aeron.service.matching.CoreMatchingResult.MatcherPrefix.initialDigest()
-                : matcherSnapshot.matcherPrefixDigest();
         this.exportState = exportState;
         this.terminalRetention = terminalRetention;
         this.runtime = new TradingCoreRuntime(
                 productLine, snapshotState, appliedCommandCount, matcherSnapshot);
         this.matchingAdapter = runtime.matcherForConstruction();
+        this.appliedMatcherSequences = new long[matchingAdapter.topology().matchingEngineCount() + 1];
+        this.appliedMatcherPrefixDigests = new long[appliedMatcherSequences.length];
+        initializeMatcherProgress(matcherSnapshot);
         this.matchingCompletions = new MatchingCompletionQueue(
                 matchingAdapter.topology().matchingCompletionCapacity());
         this.laneCommandContexts = new LaneCommandContextRing(
@@ -1051,7 +1050,7 @@ public final class CoreProbeState implements AutoCloseable {
         batch.beforeState = snapshotState;
         batch.beforeProjection = currentProjectionPoint;
         batch.matcherTransition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(
-                appliedMatcherSequence, appliedMatcherPrefixDigest);
+                matcherSequence(-1), matcherPrefixDigest(-1));
         batch.admissionOrderIndex = new BatchAdmissionOrderIndex(activeOrderIndex);
         batch.started = true;
         beginSnapshotProjectionBatch();
@@ -1443,8 +1442,7 @@ public final class CoreProbeState implements AutoCloseable {
             com.surprising.aeron.service.matching.CoreMatchingResult matchingResult = matchingResults.get(index);
             if (index > 0 && !BENCHMARK_SKIP_MATCHING_SUBMIT) {
                 validateMatchingEvidence(pending, matchingResult);
-                appliedMatcherSequence = matchingResult.nativeCommand().matcherSequence();
-                appliedMatcherPrefixDigest = matchingResult.matcherPrefix().after();
+                applyMatcherProgress(matchingResult);
             }
             if (matchingResultNeedsRecovery(pending, matchingResult)) {
                 throw failMatching(pending, "matcher continuation returned " + matchingResult.resultCode(), null);
@@ -2728,9 +2726,18 @@ public final class CoreProbeState implements AutoCloseable {
             long instrumentVersion,
             java.util.function.Supplier<CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult>>
                     submission) {
-        return matchingAdapter.executeWithEvidence(pending.sequence(), pending.command().header().commandId(),
-                orderId, instrumentVersion, pending.command().header().submittedAtEpochMillis(),
-                submission);
+        boolean controlShard = pendingOrderBatches.containsKey(pending.sequence())
+                || !pending.preMatchingCancellationOrderIds().isEmpty()
+                || pending.operation() == PendingMatching.Operation.LIQUIDATION
+                || pending.operation() == PendingMatching.Operation.LIQUIDATION_BATCH
+                || pending.operation() == PendingMatching.Operation.SETTLEMENT;
+        return controlShard
+                ? matchingAdapter.executeControlWithEvidence(
+                        pending.sequence(), pending.command().header().commandId(), orderId, instrumentVersion,
+                        pending.command().header().submittedAtEpochMillis(), submission)
+                : matchingAdapter.executeWithEvidence(
+                        pending.sequence(), pending.command().header().commandId(), orderId, instrumentVersion,
+                        pending.command().header().submittedAtEpochMillis(), submission);
     }
 
     private com.surprising.aeron.protocol.PlaceOrderCommand replacementFor(CoreMessage message,
@@ -2898,12 +2905,12 @@ public final class CoreProbeState implements AutoCloseable {
                     + (failure == null || failure.getMessage() == null ? "" : ": " + failure.getMessage());
             throw failMatching(pending, detail, failure);
         }
-        long matcherSequenceBefore = appliedMatcherSequence;
-        long matcherPrefixBefore = appliedMatcherPrefixDigest;
+        int matcherShardId = matchingResult.nativeCommand().matcherShardId();
+        long matcherSequenceBefore = matcherSequence(matcherShardId);
+        long matcherPrefixBefore = matcherPrefixDigest(matcherShardId);
         if (!BENCHMARK_SKIP_MATCHING_SUBMIT) {
             validateMatchingEvidence(pending, matchingResult);
-            appliedMatcherSequence = matchingResult.nativeCommand().matcherSequence();
-            appliedMatcherPrefixDigest = matchingResult.matcherPrefix().after();
+            applyMatcherProgress(matchingResult);
         }
         if (pendingOrderBatches.containsKey(sequence)) {
             return completeOrderBatchMatching(sequence, matchingResult, clusterTimestamp, clusterPosition);
@@ -2928,7 +2935,7 @@ public final class CoreProbeState implements AutoCloseable {
         beginSnapshotProjectionBatch();
         if (!BENCHMARK_SKIP_MATCHING_SUBMIT) {
             commandMatcherTransition = new com.surprising.aeron.protocol.CoreMatcherTransition(
-                    matchingAdapter.topology().routeVersion(), matchingResult.nativeCommand().matcherShardId(),
+                    matchingAdapter.topology().routeVersion(), matcherShardId,
                     matcherSequenceBefore, matchingResult.nativeCommand().matcherSequence(),
                     matcherPrefixBefore, matchingResult.matcherPrefix().after());
         }
@@ -3489,6 +3496,9 @@ public final class CoreProbeState implements AutoCloseable {
             com.surprising.aeron.service.matching.CoreMatchingResult result) {
         var nativeCommand = result.nativeCommand();
         var prefix = result.matcherPrefix();
+        int matcherShardId = nativeCommand.matcherShardId();
+        long appliedMatcherSequence = matcherSequence(matcherShardId);
+        long appliedMatcherPrefixDigest = matcherPrefixDigest(matcherShardId);
         UUID commandId;
         try {
             commandId = UUID.fromString(nativeCommand.commandId());
@@ -3508,6 +3518,41 @@ public final class CoreProbeState implements AutoCloseable {
                     + " actualBefore=" + prefix.before()
                     + " actualAfter=" + prefix.after(), null);
         }
+    }
+
+    private void initializeMatcherProgress(MatcherSnapshot snapshot) {
+        long initialDigest = com.surprising.aeron.service.matching.CoreMatchingResult.MatcherPrefix.initialDigest();
+        java.util.Arrays.fill(appliedMatcherPrefixDigests, initialDigest);
+        if (snapshot == null) return;
+        for (com.surprising.aeron.service.matching.MatcherShardProgress progress
+                : snapshot.matcherShardProgress()) {
+            int index = matcherProgressIndex(progress.matcherShardId());
+            appliedMatcherSequences[index] = progress.matcherSequence();
+            appliedMatcherPrefixDigests[index] = progress.prefixDigest();
+        }
+    }
+
+    private void applyMatcherProgress(
+            com.surprising.aeron.service.matching.CoreMatchingResult result) {
+        int index = matcherProgressIndex(result.nativeCommand().matcherShardId());
+        appliedMatcherSequences[index] = result.nativeCommand().matcherSequence();
+        appliedMatcherPrefixDigests[index] = result.matcherPrefix().after();
+    }
+
+    private long matcherSequence(int matcherShardId) {
+        return appliedMatcherSequences[matcherProgressIndex(matcherShardId)];
+    }
+
+    private long matcherPrefixDigest(int matcherShardId) {
+        return appliedMatcherPrefixDigests[matcherProgressIndex(matcherShardId)];
+    }
+
+    private int matcherProgressIndex(int matcherShardId) {
+        int index = matcherShardId + 1;
+        if (index < 0 || index >= appliedMatcherSequences.length) {
+            throw new IllegalArgumentException("matcher shard is outside configured topology");
+        }
+        return index;
     }
 
     boolean isMatchingPending(UUID commandId) {
@@ -4909,7 +4954,7 @@ public final class CoreProbeState implements AutoCloseable {
         commandBeforeBusinessStateHash = currentBusinessStateHash();
         commandBeforeFundsStateHash = rollingFundsStateHash.value();
         commandMatcherTransition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(
-                appliedMatcherSequence, appliedMatcherPrefixDigest);
+                matcherSequence(-1), matcherPrefixDigest(-1));
         commandFundsDelta = com.surprising.aeron.service.state.RuntimeFundsDelta.empty();
         changedUserIds.clear();
         changedOrderIds.clear();
@@ -5032,7 +5077,7 @@ public final class CoreProbeState implements AutoCloseable {
         commandBeforeBusinessStateHash = currentBusinessStateHash();
         commandBeforeFundsStateHash = rollingFundsStateHash.value();
         commandMatcherTransition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(
-                appliedMatcherSequence, appliedMatcherPrefixDigest);
+                matcherSequence(-1), matcherPrefixDigest(-1));
         return appendCoreFact(command, ResponseStatus.REJECTED, resultCode, appliedCount,
                 cachedBusinessStateHash, currentProjectionPoint, currentProjectionPoint, CoreCommandDelta.empty(),
                 commandMatcherTransition);
@@ -5911,15 +5956,13 @@ public final class CoreProbeState implements AutoCloseable {
             long nextSequence = result.nativeCommand().matcherSequence();
             long nextPrefix = result.matcherPrefix().after();
             if (matcherTransition == null
-                    || nextSequence != Math.incrementExact(matcherTransition.sequenceAfter())
+                    || result.nativeCommand().matcherShardId() != matcherTransition.matcherShardId()
+                    || nextSequence <= matcherTransition.sequenceAfter()
                     || result.matcherPrefix().before() != matcherTransition.prefixAfter()) {
                 throw new IllegalArgumentException("order batch matcher transition is not contiguous");
             }
-            int previousShard = matcherTransition.matcherShardId();
-            int nextShard = previousShard == -1 || previousShard == result.nativeCommand().matcherShardId()
-                    ? result.nativeCommand().matcherShardId() : -1;
             matcherTransition = new com.surprising.aeron.protocol.CoreMatcherTransition(
-                    matcherTransition.routeVersion(), nextShard,
+                    matcherTransition.routeVersion(), matcherTransition.matcherShardId(),
                     matcherTransition.sequenceBefore(), nextSequence,
                     matcherTransition.prefixBefore(), nextPrefix);
         }

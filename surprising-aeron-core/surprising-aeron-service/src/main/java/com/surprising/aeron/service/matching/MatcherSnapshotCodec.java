@@ -25,7 +25,7 @@ import java.util.zip.CRC32C;
 public final class MatcherSnapshotCodec {
 
     private static final int MAGIC = 0x4d534e50;
-    private static final int VERSION = 4;
+    private static final int VERSION = 5;
     private static final int MAX_SNAPSHOT_BYTES = 48 * 1024 * 1024;
     private static final int MAX_REGISTRY_ENTRIES = 1_000_000;
     private static final int MAX_MODULE_BYTES = 32 * 1024 * 1024;
@@ -54,7 +54,12 @@ public final class MatcherSnapshotCodec {
                 output.writeLong(snapshot.snapshotId());
                 output.writeLong(snapshot.coreSequence());
                 output.writeLong(snapshot.matcherSequence());
-                output.writeLong(snapshot.matcherPrefixDigest());
+                output.writeInt(snapshot.matcherShardProgress().size());
+                for (MatcherShardProgress progress : snapshot.matcherShardProgress()) {
+                    output.writeInt(progress.matcherShardId());
+                    output.writeLong(progress.matcherSequence());
+                    output.writeLong(progress.prefixDigest());
+                }
                 output.writeLong(snapshot.coreBusinessStateHash());
                 output.writeInt(snapshot.engineStateHash());
                 output.writeInt(snapshot.bookStateHash());
@@ -129,7 +134,15 @@ public final class MatcherSnapshotCodec {
             long snapshotId = input.readLong();
             long coreSequence = input.readLong();
             long matcherSequence = input.readLong();
-            long matcherPrefixDigest = input.readLong();
+            int progressCount = readCount(input, "matcher shard progress");
+            if (progressCount != topology.matchingEngineCount() + 1) {
+                throw new ProtocolException("invalid matcher shard progress count");
+            }
+            List<MatcherShardProgress> matcherShardProgress = new ArrayList<>(progressCount);
+            for (int index = 0; index < progressCount; index++) {
+                matcherShardProgress.add(new MatcherShardProgress(
+                        input.readInt(), input.readLong(), input.readLong()));
+            }
             long businessHash = input.readLong();
             int engineHash = input.readInt();
             int bookHash = input.readInt();
@@ -184,7 +197,7 @@ public final class MatcherSnapshotCodec {
             }
             if (input.available() != 0) throw new ProtocolException("trailing matcher snapshot bytes");
             return new MatcherSnapshot(productLine, coreShardId, routeVersion, topology, snapshotId, coreSequence,
-                    matcherSequence, matcherPrefixDigest, businessHash, engineHash, bookHash,
+                    matcherSequence, matcherShardProgress, businessHash, engineHash, bookHash,
                     symbolHash, symbolRouteHash, userHash, instrumentHash,
                     activeOrderHash, forkGitSha, artifactSha256, configHash, symbols, users, modules);
         } catch (EOFException exception) {

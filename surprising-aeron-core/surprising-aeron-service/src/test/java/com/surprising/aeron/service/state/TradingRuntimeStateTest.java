@@ -428,6 +428,12 @@ class TradingRuntimeStateTest {
 
             for (int laneId = 0; laneId < owners.length; laneId++) {
                 assertThat(owners[laneId]).isEqualTo("core-lifecycle-lane-" + laneId);
+                AccountLaneMetricsSnapshot metrics = state.accountLaneMetricsById(laneId);
+                assertThat(metrics.queueHighWaterMark()).isEqualTo(1);
+                assertThat(metrics.completedOperations()[AccountLaneOperationType.SETTLEMENT.ordinal()])
+                        .isEqualTo(1);
+                assertThat(metrics.latencySamples()[AccountLaneOperationType.SETTLEMENT.ordinal()])
+                        .isEqualTo(1);
             }
             assertThat(state.executeUserSettlement(users.getFirst(), () -> "core-owner"))
                     .isEqualTo("core-owner");

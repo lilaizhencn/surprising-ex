@@ -29,6 +29,11 @@ public final class TradingRuntimeState implements AutoCloseable {
     private final LaneTopology topology;
     private final AccountLaneState[] accountLanes;
     private final java.util.concurrent.ExecutorService[] lifecycleLaneExecutors;
+    private final int[] accountLaneQueueHighWaterMarks;
+    private final long[][] accountLaneCompletedOperations;
+    private final long[][] accountLaneLatencySamples;
+    private final long[][] accountLaneTotalLatencyNanos;
+    private final long[][] accountLaneMaxLatencyNanos;
     private boolean accountLanesStarted;
 
     private final IntObjectHashMap<MarkPriceRuntime> markPrices = new IntObjectHashMap<>();
@@ -81,6 +86,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         this.topology = topology;
         this.accountLanes = new AccountLaneState[topology.accountLaneCount()];
         this.lifecycleLaneExecutors = new java.util.concurrent.ExecutorService[topology.accountLaneCount()];
+        this.accountLaneQueueHighWaterMarks = new int[topology.accountLaneCount()];
+        this.accountLaneCompletedOperations = laneMetricValues(topology.accountLaneCount());
+        this.accountLaneLatencySamples = laneMetricValues(topology.accountLaneCount());
+        this.accountLaneTotalLatencyNanos = laneMetricValues(topology.accountLaneCount());
+        this.accountLaneMaxLatencyNanos = laneMetricValues(topology.accountLaneCount());
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             accountLanes[laneId] = new AccountLaneState(laneId, topology.accountLaneQueueCapacity());
             int ownerLaneId = laneId;
@@ -117,7 +127,10 @@ public final class TradingRuntimeState implements AutoCloseable {
     public AccountLaneMetricsSnapshot accountLaneMetricsById(int laneId) {
         assertOwner();
         if (laneId < 0 || laneId >= accountLanes.length) throw new IllegalArgumentException("invalid laneId");
-        return AccountLaneMetricsSnapshot.empty(accountLanes[laneId].queueCapacity());
+        return new AccountLaneMetricsSnapshot(0, accountLanes[laneId].queueCapacity(),
+                accountLaneQueueHighWaterMarks[laneId], 0, 0,
+                accountLaneCompletedOperations[laneId], accountLaneLatencySamples[laneId],
+                accountLaneTotalLatencyNanos[laneId], accountLaneMaxLatencyNanos[laneId]);
     }
 
     public void startAccountLanes() {
@@ -258,12 +271,15 @@ public final class TradingRuntimeState implements AutoCloseable {
             return executeOwnerSettlements(values, ownerUserId, operation);
         }
         Object[] results = new Object[accountLanes.length];
+        long[] startedNanos = new long[accountLanes.length];
         @SuppressWarnings("unchecked")
         java.util.concurrent.Future<Object>[] futures = new java.util.concurrent.Future[accountLanes.length];
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             if (!selected[laneId]) continue;
             AccountLaneState lane = accountLanes[laneId];
             lane.releaseOwner();
+            accountLaneQueueHighWaterMarks[laneId] = Math.max(accountLaneQueueHighWaterMarks[laneId], 1);
+            startedNanos[laneId] = System.nanoTime();
             int currentLaneId = laneId;
             try {
                 futures[laneId] = lifecycleLaneExecutors[laneId].submit(() -> {
@@ -285,6 +301,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (future == null) continue;
             try {
                 results[laneId] = future.get();
+                recordLaneOperation(laneId, AccountLaneOperationType.SETTLEMENT,
+                        System.nanoTime() - startedNanos[laneId]);
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
                 failure = new IllegalStateException("lifecycle lane settlement was interrupted", interrupted);
@@ -369,6 +387,24 @@ public final class TradingRuntimeState implements AutoCloseable {
     public void close() {
         accountLanesStarted = false;
         for (java.util.concurrent.ExecutorService executor : lifecycleLaneExecutors) executor.shutdownNow();
+    }
+
+    private static long[][] laneMetricValues(int laneCount) {
+        long[][] values = new long[laneCount][];
+        for (int laneId = 0; laneId < laneCount; laneId++) {
+            values[laneId] = new long[AccountLaneOperationType.values().length];
+        }
+        return values;
+    }
+
+    private void recordLaneOperation(int laneId, AccountLaneOperationType operation, long latencyNanos) {
+        int operationIndex = operation.ordinal();
+        accountLaneCompletedOperations[laneId][operationIndex]++;
+        accountLaneLatencySamples[laneId][operationIndex]++;
+        accountLaneTotalLatencyNanos[laneId][operationIndex] = Math.addExact(
+                accountLaneTotalLatencyNanos[laneId][operationIndex], latencyNanos);
+        accountLaneMaxLatencyNanos[laneId][operationIndex] = Math.max(
+                accountLaneMaxLatencyNanos[laneId][operationIndex], latencyNanos);
     }
 
     private record PendingReservationCompletion(ReservationRuntime reservation, LongHashSet clientKeys) {

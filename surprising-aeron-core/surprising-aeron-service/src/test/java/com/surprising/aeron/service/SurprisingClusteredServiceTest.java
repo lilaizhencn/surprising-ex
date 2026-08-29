@@ -118,15 +118,23 @@ class SurprisingClusteredServiceTest {
             var facts = state.exportState().pending().stream()
                     .map(message -> CoreExportCodec.decodeEvent(message.payload()))
                     .toList();
-            for (int index = 1; index < facts.size(); index++) {
-                var previous = facts.get(index - 1);
+            long[] matcherSequenceByShard = new long[state.laneMetrics().matchingEngineCount() + 1];
+            long[] matcherPrefixByShard = new long[matcherSequenceByShard.length];
+            java.util.Arrays.fill(matcherPrefixByShard,
+                    com.surprising.aeron.service.matching.CoreMatchingResult.MatcherPrefix.initialDigest());
+            for (int index = 0; index < facts.size(); index++) {
                 var current = facts.get(index);
-                assertThat(current.beforeBusinessStateHash()).isEqualTo(previous.businessStateHash());
-                assertThat(current.beforeFundsStateHash()).isEqualTo(previous.fundsStateHash());
-                assertThat(current.matcherTransition().sequenceBefore())
-                        .isEqualTo(previous.matcherTransition().sequenceAfter());
-                assertThat(current.matcherTransition().prefixBefore())
-                        .isEqualTo(previous.matcherTransition().prefixAfter());
+                if (index > 0) {
+                    var previous = facts.get(index - 1);
+                    assertThat(current.beforeBusinessStateHash()).isEqualTo(previous.businessStateHash());
+                    assertThat(current.beforeFundsStateHash()).isEqualTo(previous.fundsStateHash());
+                }
+                var matcher = current.matcherTransition();
+                int matcherProgressIndex = matcher.matcherShardId() + 1;
+                assertThat(matcher.sequenceBefore()).isEqualTo(matcherSequenceByShard[matcherProgressIndex]);
+                assertThat(matcher.prefixBefore()).isEqualTo(matcherPrefixByShard[matcherProgressIndex]);
+                matcherSequenceByShard[matcherProgressIndex] = matcher.sequenceAfter();
+                matcherPrefixByShard[matcherProgressIndex] = matcher.prefixAfter();
             }
         } finally {
             service.onTerminate(null);

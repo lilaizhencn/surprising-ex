@@ -21,7 +21,7 @@ public record MatcherSnapshot(
         long snapshotId,
         long coreSequence,
         long matcherSequence,
-        long matcherPrefixDigest,
+        List<MatcherShardProgress> matcherShardProgress,
         long coreBusinessStateHash,
         int engineStateHash,
         int bookStateHash,
@@ -53,7 +53,7 @@ public record MatcherSnapshot(
         if (productLine == null || !CORE_SHARD_ID.equals(coreShardId)
                 || routeVersion != ROUTE_VERSION || topology == null || topology.routeVersion() != routeVersion
                 || snapshotId <= 0 || coreSequence < 0
-                || matcherSequence < 0 || matcherPrefixDigest == 0 || !FORK_GIT_SHA.equals(forkGitSha)
+                || matcherSequence < 0 || matcherShardProgress == null || !FORK_GIT_SHA.equals(forkGitSha)
                 || !ARTIFACT_SHA256.equals(artifactSha256)
                 || matcherConfigHash != matcherConfigHash(topology) || symbols == null || users == null
                 || modules == null || modules.isEmpty()) {
@@ -61,6 +61,7 @@ public record MatcherSnapshot(
         }
         symbols = Collections.unmodifiableMap(new TreeMap<>(symbols));
         users = Collections.unmodifiableSet(new TreeSet<>(users));
+        matcherShardProgress = List.copyOf(matcherShardProgress);
         modules = List.copyOf(modules);
         if (symbols.values().stream().anyMatch(symbolId -> symbolId == null || symbolId <= 0)
                 || new java.util.HashSet<>(symbols.values()).size() != symbols.size()
@@ -71,6 +72,22 @@ public record MatcherSnapshot(
                 || symbolRouteHash != topology.symbolRouteHash(symbols)
                 || userRegistryHash != userRegistryHash(users)) {
             throw new IllegalArgumentException("matcher registry hash mismatch");
+        }
+        if (matcherShardProgress.size() != topology.matchingEngineCount() + 1) {
+            throw new IllegalArgumentException("incomplete matcher shard progress");
+        }
+        boolean[] progress = new boolean[matcherShardProgress.size()];
+        for (int progressIndex = 0; progressIndex < matcherShardProgress.size(); progressIndex++) {
+            MatcherShardProgress shard = matcherShardProgress.get(progressIndex);
+            int index = shard.matcherShardId() + 1;
+            if (index < 0 || index >= progress.length || progress[index]
+                    || index != progressIndex) {
+                throw new IllegalArgumentException("invalid matcher shard progress");
+            }
+            progress[index] = true;
+        }
+        for (boolean present : progress) {
+            if (!present) throw new IllegalArgumentException("incomplete matcher shard progress");
         }
         boolean[] matching = new boolean[topology.matchingEngineCount()];
         boolean[] risk = new boolean[topology.riskEngineCount()];
@@ -112,6 +129,18 @@ public record MatcherSnapshot(
     public int accountLaneCount() { return topology.accountLaneCount(); }
     public long accountLaneSeed() { return topology.accountLaneSeed(); }
     public long topologyHash() { return topology.topologyHash(); }
+
+    public MatcherShardProgress progress(int matcherShardId) {
+        int index = matcherShardId + 1;
+        if (index < 0 || index >= matcherShardProgress.size()) {
+            throw new IllegalArgumentException("matcher shard is outside snapshot topology");
+        }
+        MatcherShardProgress progress = matcherShardProgress.get(index);
+        if (progress.matcherShardId() != matcherShardId) {
+            throw new IllegalStateException("matcher shard progress is not canonically ordered");
+        }
+        return progress;
+    }
 
     public static long matcherConfigHash(LaneTopology topology) {
         return hashText("matching=" + topology.matchingEngineCount()

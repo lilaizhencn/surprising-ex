@@ -41,7 +41,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
@@ -63,9 +62,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             new AtomicReference<>(CompletableFuture.completedFuture(null));
     private final LaneTopology topology;
     private final AtomicReference<Throwable> matcherFailure = new AtomicReference<>();
-    private final AtomicLong matcherSequence = new AtomicLong();
-    private final AtomicLong matcherPrefixDigest = new AtomicLong(MatcherPrefixDigest.initial());
-    private final AtomicLong lastNativeSequence = new AtomicLong();
+    private final MatcherEvidenceLedger matcherEvidence;
     private final AtomicInteger dispatchInFlight = new AtomicInteger();
     private final AtomicInteger dispatchHighWaterMark = new AtomicInteger();
     private final Function<Supplier<CompletableFuture<CommandResultCode>>, CompletableFuture<CommandResultCode>>
@@ -90,6 +87,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             Function<Supplier<CompletableFuture<CommandResultCode>>, CompletableFuture<CommandResultCode>>
                     snapshotPersistence) {
         this.topology = LaneTopology.configured(Boolean.getBoolean("surprising.aeron.p10-characterization"));
+        this.matcherEvidence = new MatcherEvidenceLedger(topology);
         this.snapshotPersistence = java.util.Objects.requireNonNull(snapshotPersistence, "snapshotPersistence");
         if (startImmediately) {
             start();
@@ -108,6 +106,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         try {
             snapshot.verifyCoreState(state, coreSequence);
             this.topology = snapshot.topology();
+            this.matcherEvidence = new MatcherEvidenceLedger(
+                    topology, snapshot.matcherSequence(), snapshot.matcherShardProgress());
             serializationProcessor.importSnapshot(snapshot.modules());
             snapshot.symbols().forEach((symbol, symbolId) -> {
                 String previous = symbolNames.put(symbolId, symbol);
@@ -117,8 +117,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 symbols.put(symbol, symbolId);
             });
             users.addAll(snapshot.users());
-            matcherSequence.set(snapshot.matcherSequence());
-            matcherPrefixDigest.set(snapshot.matcherPrefixDigest());
             start(snapshot);
             reconcileOpenOrdersAsync(activeOrders, coreSequence, snapshot.snapshotId(), "matcher restore").join();
             StateHashes restoredHashes = currentStateHashesAsync().join();
@@ -171,6 +169,29 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long instrumentVersion,
             long aeronTimestamp,
             Supplier<CompletableFuture<CoreMatchingResult>> command) {
+        return executeWithEvidence(coreSequence, commandId, orderId, instrumentVersion,
+                aeronTimestamp, false, command);
+    }
+
+    public CompletableFuture<CoreMatchingResult> executeControlWithEvidence(
+            long coreSequence,
+            java.util.UUID commandId,
+            long orderId,
+            long instrumentVersion,
+            long aeronTimestamp,
+            Supplier<CompletableFuture<CoreMatchingResult>> command) {
+        return executeWithEvidence(coreSequence, commandId, orderId, instrumentVersion,
+                aeronTimestamp, true, command);
+    }
+
+    private CompletableFuture<CoreMatchingResult> executeWithEvidence(
+            long coreSequence,
+            java.util.UUID commandId,
+            long orderId,
+            long instrumentVersion,
+            long aeronTimestamp,
+            boolean controlShard,
+            Supplier<CompletableFuture<CoreMatchingResult>> command) {
         if (coreSequence <= 0 || commandId == null || orderId < 0 || instrumentVersion < 0
                 || aeronTimestamp < 0 || command == null) {
             return CompletableFuture.failedFuture(new IllegalArgumentException("invalid matcher command evidence"));
@@ -189,7 +210,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         }
         dispatchHighWaterMark.accumulateAndGet(depth, Math::max);
         CompletableFuture<CoreMatchingResult> pipeline = executeWithEvidenceNow(
-                coreSequence, commandId, orderId, instrumentVersion, aeronTimestamp, command);
+                coreSequence, commandId, orderId, instrumentVersion, aeronTimestamp, controlShard, command);
         NonCancellableFuture<CoreMatchingResult> view = new NonCancellableFuture<>();
         pipeline.whenComplete((result, completionFailure) -> {
             dispatchInFlight.decrementAndGet();
@@ -208,8 +229,9 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long orderId,
             long instrumentVersion,
             long aeronTimestamp,
+            boolean controlShard,
             Supplier<CompletableFuture<CoreMatchingResult>> command) {
-        long sequence = matcherSequence.incrementAndGet();
+        long sequence = matcherEvidence.nextSequence();
         CompletableFuture<CoreMatchingResult> submitted;
         try {
             submitted = command.get();
@@ -223,7 +245,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             return CompletableFuture.failedFuture(failure);
         }
         return submitted.thenApply(result -> bindMatcherEvidence(coreSequence, commandId, orderId,
-                instrumentVersion, aeronTimestamp, sequence, result));
+                instrumentVersion, aeronTimestamp, sequence, controlShard, result));
     }
 
     private CoreMatchingResult bindMatcherEvidence(
@@ -233,26 +255,12 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long instrumentVersion,
             long aeronTimestamp,
             long sequence,
+            boolean controlShard,
             CoreMatchingResult result) {
         if (result == null) throw new IllegalStateException("matcher command returned no result");
-        long nativeSequence = result.nativeCommand().nativeSequence();
-        if (nativeSequence > 0) {
-            long previousNativeSequence = lastNativeSequence.get();
-            if (nativeSequence <= previousNativeSequence
-                    || !lastNativeSequence.compareAndSet(previousNativeSequence, nativeSequence)) {
-                throw new IllegalStateException("matcher native sequence is not strictly increasing");
-            }
-        }
-        CoreMatchingResult.NativeCommand nativeCommand = new CoreMatchingResult.NativeCommand(
-                coreSequence, commandId.toString(), orderId, instrumentVersion,
-                nativeSequence, sequence, aeronTimestamp, matcherShardId(result));
-        long before = matcherPrefixDigest.get();
-        long after = MatcherPrefixDigest.next(before, nativeCommand, result);
-        if (!matcherPrefixDigest.compareAndSet(before, after)) {
-            throw new IllegalStateException("matcher prefix advanced outside the single in-flight gate");
-        }
-        CoreMatchingResult bound = result.withEvidence(
-                nativeCommand, new CoreMatchingResult.MatcherPrefix(before, after));
+        CoreMatchingResult bound = matcherEvidence.bind(coreSequence, commandId, orderId,
+                instrumentVersion, aeronTimestamp, sequence,
+                controlShard ? -1 : matcherShardId(result), result);
         if ("EXCHANGE_CORE_FAILURE".equals(bound.resultCode())
                 || "MATCHING_TIMEOUT".equals(bound.resultCode())
                 || !bound.accepted() && bound.matcherStateChanged()) {
@@ -504,7 +512,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                                             .max().orElseThrow();
                                     return new MatcherSnapshot(state.productLine(), MatcherSnapshot.CORE_SHARD_ID,
                                             MatcherSnapshot.ROUTE_VERSION, topology, snapshotId, coreSequence, matcherSequence,
-                                            matcherPrefixDigest.get(), businessStateHash,
+                                            matcherEvidence.snapshot(), businessStateHash,
                                             hashes.engineHash(), hashes.bookHash(),
                                             MatcherSnapshot.symbolRegistryHash(symbols),
                                             topology.symbolRouteHash(symbols),

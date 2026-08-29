@@ -18,6 +18,10 @@ import com.surprising.aeron.service.state.CoreUserState;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.product.api.ProductLine;
 import exchange.core2.core.common.MatcherResult;
+import exchange.core2.core.common.OrderAction;
+import exchange.core2.core.common.OrderType;
+import exchange.core2.core.common.cmd.CommandResultCode;
+import exchange.core2.core.common.cmd.OrderCommandType;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -150,6 +154,30 @@ class DeterministicExchangeCoreAdapterTest {
     }
 
     @Test
+    void differentMatcherShardsCanCompleteOutOfSubmissionOrder() {
+        try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter(false)) {
+            CompletableFuture<CoreMatchingResult> firstNative = new CompletableFuture<>();
+            CompletableFuture<CoreMatchingResult> secondNative = new CompletableFuture<>();
+            CompletableFuture<CoreMatchingResult> first = adapter.executeWithEvidence(
+                    1, java.util.UUID.fromString("00000000-0000-0000-0000-000000000021"),
+                    201, 7, 1_000, () -> firstNative);
+            CompletableFuture<CoreMatchingResult> second = adapter.executeWithEvidence(
+                    2, java.util.UUID.fromString("00000000-0000-0000-0000-000000000022"),
+                    202, 7, 1_001, () -> secondNative);
+
+            secondNative.complete(nativeResult(2, 2));
+            CoreMatchingResult secondResult = second.join();
+            firstNative.complete(nativeResult(1, 1));
+            CoreMatchingResult firstResult = first.join();
+
+            assertThat(firstResult.nativeCommand().matcherShardId()).isNotEqualTo(
+                    secondResult.nativeCommand().matcherShardId());
+            assertThat(firstResult.matcherPrefix().before()).isEqualTo(CoreMatchingResult.MatcherPrefix.initialDigest());
+            assertThat(secondResult.matcherPrefix().before()).isEqualTo(CoreMatchingResult.MatcherPrefix.initialDigest());
+        }
+    }
+
+    @Test
     void matcherPrefixIgnoresProcessLocalSequenceAndOptionalMarketData() {
         CoreMatchingResult result = result(true, "SUCCESS");
         CoreMatchingResult resultWithMarketData = new CoreMatchingResult(
@@ -174,6 +202,7 @@ class DeterministicExchangeCoreAdapterTest {
     void poisonedMatcherRejectsCommandsSubmittedAfterTheFatalCompletion() {
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter(false)) {
             CompletableFuture<CoreMatchingResult> firstNative = new CompletableFuture<>();
+            CompletableFuture<CoreMatchingResult> secondNative = new CompletableFuture<>();
             AtomicInteger submissions = new AtomicInteger();
             CompletableFuture<CoreMatchingResult> first = adapter.executeWithEvidence(
                     1, java.util.UUID.fromString("00000000-0000-0000-0000-000000000011"),
@@ -185,7 +214,7 @@ class DeterministicExchangeCoreAdapterTest {
                     2, java.util.UUID.fromString("00000000-0000-0000-0000-000000000012"),
                     102, 7, 1_001, () -> {
                         submissions.incrementAndGet();
-                        return CompletableFuture.completedFuture(result(true, "SUCCESS"));
+                        return secondNative;
                     });
 
             firstNative.complete(result(false, "EXCHANGE_CORE_FAILURE"));
@@ -195,6 +224,7 @@ class DeterministicExchangeCoreAdapterTest {
                         submissions.incrementAndGet();
                         return CompletableFuture.completedFuture(result(true, "SUCCESS"));
                     });
+            secondNative.complete(result(true, "SUCCESS"));
 
             assertThat(first.join().resultCode()).isEqualTo("EXCHANGE_CORE_FAILURE");
             assertThat(second.join().resultCode()).isEqualTo("SUCCESS");
@@ -237,8 +267,9 @@ class DeterministicExchangeCoreAdapterTest {
 
         byte[] encoded = MatcherSnapshotCodec.encode(snapshot);
         MatcherSnapshot decoded = MatcherSnapshotCodec.decode(encoded);
-        assertThat(decoded.matcherPrefixDigest()).isEqualTo(snapshot.matcherPrefixDigest());
-        assertThat(decoded.matcherPrefixDigest()).isEqualTo(beforeSnapshot.matcherPrefix().after());
+        assertThat(decoded.matcherShardProgress()).isEqualTo(snapshot.matcherShardProgress());
+        assertThat(decoded.progress(beforeSnapshot.nativeCommand().matcherShardId()).prefixDigest())
+                .isEqualTo(beforeSnapshot.matcherPrefix().after());
         assertThat(decoded.symbols()).containsExactlyEntriesOf(snapshot.symbols());
         assertThat(decoded.users()).containsExactlyElementsOf(snapshot.users());
         assertThat(decoded.modules()).hasSize(
@@ -260,7 +291,8 @@ class DeterministicExchangeCoreAdapterTest {
             CoreMatchingResult afterRestore = restored.executeWithEvidence(
                     2, java.util.UUID.fromString("00000000-0000-0000-0000-000000000101"),
                     101, 1, 1_001, () -> restored.placeAsync(8, bid(101, 90))).join();
-            assertThat(afterRestore.matcherPrefix().before()).isEqualTo(snapshot.matcherPrefixDigest());
+            assertThat(afterRestore.matcherPrefix().before()).isEqualTo(
+                    snapshot.progress(afterRestore.nativeCommand().matcherShardId()).prefixDigest());
         }
     }
 
@@ -315,7 +347,7 @@ class DeterministicExchangeCoreAdapterTest {
         MatcherSnapshot divergentManifest = new MatcherSnapshot(
                 snapshot.productLine(), snapshot.coreShardId(), snapshot.routeVersion(), snapshot.topology(),
                 snapshot.snapshotId(),
-                snapshot.coreSequence(), snapshot.matcherSequence(), snapshot.matcherPrefixDigest(),
+                snapshot.coreSequence(), snapshot.matcherSequence(), snapshot.matcherShardProgress(),
                 divergent.businessStateHash(),
                 snapshot.engineStateHash(), snapshot.bookStateHash(), snapshot.symbolRegistryHash(),
                 snapshot.symbolRouteHash(), snapshot.userRegistryHash(),
@@ -387,5 +419,12 @@ class DeterministicExchangeCoreAdapterTest {
 
     private static CoreMatchingResult result(boolean accepted, String resultCode) {
         return new CoreMatchingResult(accepted, resultCode);
+    }
+
+    private static CoreMatchingResult nativeResult(int symbolId, long sequence) {
+        MatcherResult result = new MatcherResult(sequence, OrderCommandType.PLACE_ORDER, sequence, symbolId,
+                100, 1, 100, OrderAction.BID, OrderType.GTC, 7, 1_000, 0,
+                CommandResultCode.SUCCESS, List.of(), new MatcherResult.MarketData(List.of(), List.of(), 0, 0));
+        return CoreMatchingResult.fromNative(result);
     }
 }
