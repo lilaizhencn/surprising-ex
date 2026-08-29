@@ -23,6 +23,7 @@ RESUME="${QUALIFICATION_RESUME:-false}"
 LIFECYCLE_SYMBOL_BUDGET="${SCALE_LIFECYCLE_SYMBOL_BUDGET:-32}"
 SOAK_SECONDS="${SCALE_SOAK_SECONDS:-2400}"
 SOAK_SAMPLE_SECONDS="${SCALE_SOAK_SAMPLE_SECONDS:-10}"
+SATURATION_OPERATIONS="${SATURATION_OPERATIONS_PER_INVOCATION:-16384}"
 
 JAVA_VERSION="$(${JAVA} -version 2>&1)"
 if [[ "${JAVA_VERSION}" != *'java version "25.'* || "${JAVA_VERSION}" != *'HotSpot'* ]]; then
@@ -190,6 +191,50 @@ run_capacity() {
   run_jmh_case density-extreme-512 10000 512 512 20 100 UNIFORM 1
 }
 
+run_saturation_case() {
+  local strategy="$1" in_flight="$2"
+  local case_id
+  case "${strategy}" in
+    BUSY_SPIN) case_id="busy-spin-inflight-${in_flight}" ;;
+    YIELDING) case_id="yielding-inflight-${in_flight}" ;;
+    *) echo "Unsupported saturation wait strategy: ${strategy}" >&2; return 2 ;;
+  esac
+  local result="${ARTIFACT_DIR}/saturation-${case_id}.json"
+  local saturation_args="${JVM_ARGS_STRING} -Dsurprising.aeron.matcher-wait-strategy=${strategy} -Dsurprising.benchmark.export-ack-interval=1024"
+  "${JAVA}" -jar "${JAR}" 'LinearPerpetualCoreBenchmark.saturatedMatchingWorkload' \
+    -p accountLanes=4 -p activeUsers=10000 -p listedSymbols=512 -p activeSymbols=512 \
+    -p maxPositionsPerUser=5 -p maxOpenOrdersPerUser=10 \
+    -p maxInFlight="${in_flight}" -p operationsPerInvocation="${SATURATION_OPERATIONS}" \
+    -wi 1 -w 3s -i 3 -r 5s -f 1 -t 1 \
+    -jvmArgsAppend "${saturation_args}" -rf json -rff "${result}" \
+    2>&1 | tee "${ARTIFACT_DIR}/saturation-${case_id}.log"
+  validate_jmh "${result}"
+}
+
+run_saturation_profile() {
+  local profile_args="${JVM_ARGS_STRING} -Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN -Dsurprising.benchmark.export-ack-interval=1024 -XX:+UnlockDiagnosticVMOptions -XX:NativeMemoryTracking=summary -XX:+PrintNMTStatistics -XX:StartFlightRecording=filename=${ARTIFACT_DIR}/saturation.jfr,settings=profile,dumponexit=true -Xlog:gc*,safepoint:file=${ARTIFACT_DIR}/saturation-gc.log:time,uptime,level,tags"
+  "${JAVA}" -jar "${JAR}" 'LinearPerpetualCoreBenchmark.saturatedMatchingWorkload' \
+    -p accountLanes=4 -p activeUsers=10000 -p listedSymbols=512 -p activeSymbols=512 \
+    -p maxPositionsPerUser=5 -p maxOpenOrdersPerUser=10 \
+    -p maxInFlight=256 -p operationsPerInvocation="${SATURATION_OPERATIONS}" \
+    -wi 1 -w 3s -i 1 -r 10s -f 1 -t 1 \
+    -jvmArgsAppend "${profile_args}" -rf json -rff "${ARTIFACT_DIR}/saturation-profile.json" \
+    2>&1 | tee "${ARTIFACT_DIR}/saturation-profile.log"
+  validate_jmh "${ARTIFACT_DIR}/saturation-profile.json"
+  [[ -s "${ARTIFACT_DIR}/saturation.jfr" ]]
+  [[ -s "${ARTIFACT_DIR}/saturation-gc.log" ]]
+  grep -q 'Native Memory Tracking:' "${ARTIFACT_DIR}/saturation-profile.log"
+}
+
+run_saturation() {
+  run_saturation_case BUSY_SPIN 64
+  run_saturation_case BUSY_SPIN 256
+  run_saturation_case BUSY_SPIN 1024
+  run_saturation_case YIELDING 256
+  run_saturation_profile
+  jq -s 'add' "${ARTIFACT_DIR}"/saturation-*.json > "${ARTIFACT_DIR}/saturation-matrix.json"
+}
+
 write_environment
 case "${MODE}" in
   probe) package_benchmark; run_probe_matrix ;;
@@ -198,7 +243,8 @@ case "${MODE}" in
   profile) package_benchmark; run_profile ;;
   soak) package_benchmark; run_soak ;;
   capacity) package_benchmark; run_capacity ;;
+  saturation) package_benchmark; run_saturation ;;
   all) package_benchmark; run_probe_matrix; run_jmh_matrix; run_gc; run_profile; run_soak ;;
-  *) echo "Usage: $0 [probe|jmh|gc|profile|soak|capacity|all]" >&2; exit 2 ;;
+  *) echo "Usage: $0 [probe|jmh|gc|profile|soak|capacity|saturation|all]" >&2; exit 2 ;;
 esac
 echo "Scale qualification artifacts: ${ARTIFACT_DIR}"

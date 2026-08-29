@@ -769,7 +769,7 @@ final class LinearPerpetualMixedWorkload {
         }
     }
 
-    private static long totalFunds(TradingCoreState state) {
+    static long totalFunds(TradingCoreState state) {
         long total = 0;
         for (var user : state.users().values()) total = Math.addExact(total, user.totalUnits(SETTLE_ASSET));
         CoreTreasuryState treasury = state.treasuryState();

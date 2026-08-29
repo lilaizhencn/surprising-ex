@@ -237,7 +237,10 @@ journal 的状态伪回滚。Cluster snapshot fence 固定 journal sequence，�
 immutable image；section 编码继续在独立 snapshot encoder 线程执行，交易 owner 不执行压缩。
 Core Fact outbox 在 owner 上只登记确定性的元数据摘要、容量预留、primitive posting 和 before/after projection point；
 完整 Core view、资金 posting view、typed event、终态保留观察和协议字节由单线程 `core-fact-materializer` 按 export
-sequence 构造。Audit Exporter 查询只返回已完成的连续前缀；snapshot/outbox 持久化才建立显式 fence。
+sequence 构造。登记对象是显式 `CoreFactJournalEntry`，不捕获 owner closure；它只持有确定性命令元数据、primitive
+资金 posting、dirty-key fact view 和 projection point，materializer 才等待投影并编码完整 Core Fact。Audit Exporter
+查询只返回已完成的连续前缀；`ACK_EXPORT` 作为审计控制命令可以在无关 matcher window 未提交时确认已经物化的连续
+前缀，不再把审计 ACK 变成交易 owner 的 projection/matching fence。snapshot/outbox 持久化才建立显式 fence。
 等待 matcher 的临时冻结不会更新已提交 hash，失败仍按命令前状态回滚；
 批量订单则保留整批累计 delta，直到批次原子提交。产品尚未上线，因此生产代码没有 legacy、fallback、
 双写或 feature flag 路径。
@@ -382,6 +385,22 @@ QUALIFICATION_RUN_ID=linear-perpetual-scale \
   surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-linear-perpetual-scale.sh all
 ```
 
+撮合持续饱和能力必须与上述重生命周期矩阵分开测量。`saturation` 模式只使用一个共享 Product Core、一个
+确定性 owner 和 4 个 matcher，在 10,000 个零售用户（另有 1,537 个按 symbol 隔离的基准基础设施账户）、
+512 个活跃 symbol 上连续提交方向相反且最终净持仓归零的
+maker/taker 订单；driver 在每个方向覆盖全部 512 个 symbol，维持 64、256、1024 三档 in-flight 窗口，
+只在反向前设置因果 drain/审计 ACK fence，不在每笔命令后等待。64/256 用于持续饱和，1024 用于观察
+单阶段 burst 上限，并在 256 窗口对比
+`BUSY_SPIN` 与 `YIELDING`。结果以 terminal business operations/s 为主吞吐，以 terminal Core messages/s
+解释批量/协议开销，同时从 JFR 自定义事件记录提交到确定性结算完成的 p50、p99、p99.9、最大/平均 matcher backlog、
+满窗口采样比例，
+结束后校验未完成命令为零、活动订单不增长和资金守恒：
+
+```bash
+QUALIFICATION_RUN_ID=linear-perpetual-saturation \
+  surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-linear-perpetual-scale.sh saturation
+```
+
 2026-08-29 本机 8 核/16 线程 Intel i9-9880H、16 GiB 内存、8 GiB heap 的最终大规模门禁中，8 个 Probe、
 7 个三 fork JMH、GC、JFR/NMT 和 3 分钟诊断 soak 全部通过，所有结果均为 `fundsInvariant=true`、
 accepted=terminal、unfinished=0。Probe 的 10,000 用户均匀流量为：256 symbol `5117.737`、512 symbol
@@ -435,6 +454,52 @@ sequence 14.81%、busy-spin/`Sequence.get` 2.19%，共享 ExchangeCore/Disruptor
 热点 `CoreStateHash.mix` 仅 0.78%；主要分配仍在 `TreeMap`、persistent tree/delta lineage、mutation delta 和
 Treasury delta 合并。因此当前仍未达到每产品线 100k/s；下一阶段应围绕共享 ring/等待拓扑做物理隔离实验，
 同时保持同 symbol 串行、Core commit/资金/Treasury 全局确定性，不应再给普通成交引入同步 Lane barrier。
+
+2026-08-29 owner commit/typed fact 阶段继续一次性完成四项边界收敛：ready matcher result 按全局 Core sequence
+最多批量提交 64 条；runtime mutation 以 hash scratch 捕获并只对 dirty key 排序，不在 owner 构造 `TreeMap`/
+`TreeSet` change-set；Core Fact 使用上述 typed journal 在线程外构造完整 view/协议字节；Audit ACK 不等待无关的
+matching window 或 projection。`CoreProbeStateTest` 与 `RuntimeStateProjectorTest` 的失败优先用例分别锁定 ACK
+旁路和确定性 dirty-key 顺序，核心服务 374 项测试、基准夹具 8 项测试全部通过。
+
+同一台 8 核/16 线程本机、HotSpot JDK 25.0.1、ZGC、8 GiB heap、4 Account Lane、4 matcher、10,000 用户、
+512 个活跃 symbol、每 invocation 16,384 条 maker/taker 指令的无 profiler 饱和矩阵中，BUSY_SPIN 的
+64/256/1024 window 分别为 `4138.608`、`4238.495`、`4039.654 terminal business ops/s`，YIELDING 256 为
+`4702.306 ops/s`；相对同口径旧值，64/256/YIELDING 分别提升约 `42.0%`、`42.1%`、`44.8%`，1024 基本持平。
+全部 accepted=terminal、unfinished=0，trial teardown 逐轮核对期初/期末资金和活动订单均一致。独立 JFR/NMT
+单轮为 `4129.358 ops/s`，平均 matcher backlog `200.5/256`、最大 256；四个 invocation 的完成延迟范围为
+`p50 32.3–47.5 ms`、`p99 45.7–71.9 ms`、`p99.9 47.3–84.9 ms`。43 次 ZGC 暂停总计 `0.615 ms`、
+最大 `0.0602 ms`，allocation stall/OOM 为 0，DirectBuffer 为 0–1 byte。
+
+JFR 的 27,062 个执行样本中，exchange-core/Disruptor wait/cursor 约占 `86.8%`；这主要是 14 个等待线程在
+8 核主机上与 owner、projection、fact worker 争用 CPU，YIELDING 比 BUSY_SPIN 高约 `11%` 也印证了过度忙等。
+owner 的 2,528 个样本中首项为 matcher completion 的 `CompletableFuture.isDone`（416），之后是业务 hash
+和仍属权威 runtime map 的查询/更新；owner 分配则以 `HashMap` 扩容、`ValueChanges`、`HashSet` iterator、
+命令解码和 Treasury delta 合并为主。projection/fact materialization 已不在 owner 上，但当前约 4.0–4.7k/s
+仍远低于每产品线 100k/s，不能标记为生产容量认证；下一阶段应先减少 owner dirty-delta/hash/命令解码分配，
+并在隔离 CPU 的生产同型机上验证 matcher 等待策略和线程绑核，而不是继续放大 in-flight window。
+
+2026-08-29 completion/delta 阶段移除了 `LaneCommandContextRing` 对逐命令 `CompletableFuture` 的保留和
+`isDone` 轮询，matching callback 只向有界 completion queue 发布带 Core sequence 的结果，owner 通过单调
+publication cursor 批量 drain；关闭流程等待 queue submission 归零。matching 命令在 prepare、生命周期冲突
+检查、预撤单和 `PendingMatching` 间只解码一次 typed view。runtime mutation dirty key/value 使用排序数组和
+primitive `int[]` 开放寻址索引，不创建逐项 `HashMap` node；business/funds rolling hash 缓存根值，无序贡献
+索引不再使用 `TreeMap`。首次线性 value lookup 实现被饱和测试识别为 `643 ops/s` 回归，JFR 显示其几乎占满
+owner 有效样本，修正为开放寻址后同一控制样本恢复到 `3708 ops/s`，该失败 artifact 不作为容量结果。
+
+最终 HotSpot JDK 25.0.1、ZGC、4 Account Lane、4 matcher、10,000 用户、512 活跃 symbol 的 16,384 指令
+无 profiler 饱和矩阵中，BUSY_SPIN 64/256/1024 window 分别为 `4925.756`、`4985.047`、`4622.785 terminal
+business ops/s`，相对上一同口径结果提升约 `19.0%`、`17.6%`、`14.4%`；全部 accepted=terminal、
+unfinished=0，teardown 的资金和活动订单不变量通过。YIELDING 256 在矩阵后段为 `2328.412 ops/s`，同时随后
+BUSY_SPIN JFR 运行也降至 `2174.032 ops/s`，表明本机连续 8 GiB 多进程采样存在明显热/调度漂移；等待策略仍可
+切换，但这两个后段数值不能作为隔离服务器上的策略 A/B。
+
+最终 JFR `DataLoss=0`，`CompactValueMap.get` 从失败样本的 `3.56%` 降至 `0.40%`，owner top 已无
+`CompletableFuture.isDone`；exchange-core/Disruptor wait/cursor 仍约占 `86.2%` 全线程样本。7 次 ZGC 的最大
+暂停 `0.062 ms`，allocation stall/OOM 均为 0；带 profiler 的三个 16,384 指令 invocation 延迟为 p50
+`58.8–78.6 ms`、p99 `85.8–147 ms`、p99.9 `102–191 ms`。这些结果证明本阶段消除了 Future/线性 delta
+回归并提高当前单 Core 上限，但离每产品线 `100k/s` 仍约 20 倍，不能标记为生产容量认证。下一阶段应直接削减
+owner 上的 persistent tree/delta lineage、fact materialization 临时集合和 commit allocation，并在隔离 CPU、
+足够物理核与内存的服务器上重新做 BUSY_SPIN/YIELDING 随机顺序 A/B。
 
 其余五条衍生品线统一使用 `DerivativeCoreBenchmark.productionMixedWorkload`，通过 `productLine` 参数选择
 `LINEAR_PERPETUAL`、`INVERSE_PERPETUAL`、`LINEAR_DELIVERY`、`INVERSE_DELIVERY` 或 `OPTION`。场景固定

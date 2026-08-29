@@ -147,6 +147,28 @@ class LinearPerpetualBenchmarkSupportTest {
         }).doesNotThrowAnyException();
     }
 
+    @Test
+    void saturatedWorkloadMaintainsOneSharedCoreWindowAndPreservesFunds() {
+        var config = LinearPerpetualScaleConfig.scale(16, 16, 1, 1,
+                LinearPerpetualTrafficProfile.UNIFORM, 16);
+        var template = LinearPerpetualMixedWorkload.template(4, 32, config);
+
+        assertThatCode(() -> {
+            try (var scenario = LinearPerpetualSaturationWorkload.scenario(template, 8, 4_096)) {
+                assertThat(scenario.run()).isNotZero();
+                assertThat(scenario.operations()).isEqualTo(4_096);
+                assertThat(scenario.acceptedOperations()).isEqualTo(scenario.terminalOperations());
+                assertThat(scenario.acceptedCoreMessages()).isEqualTo(scenario.terminalCoreMessages());
+                assertThat(scenario.maxBacklog()).isEqualTo(8);
+                assertThat(scenario.averageMatchingBacklog()).isGreaterThan(7.0);
+                assertThat(scenario.fullWindowPercentage()).isGreaterThan(78.0);
+                assertThat(scenario.completedLatencySamples()).isEqualTo(4_096);
+                assertThat(scenario.p99LatencyNanos()).isPositive();
+                scenario.verify();
+            }
+        }).doesNotThrowAnyException();
+    }
+
     private record NamedScenario(
             String name,
             Supplier<LinearPerpetualBenchmarkSupport.Scenario> factory) {

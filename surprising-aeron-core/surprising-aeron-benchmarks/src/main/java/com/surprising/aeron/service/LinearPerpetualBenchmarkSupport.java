@@ -31,6 +31,7 @@ import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.state.LaneTopology;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -50,7 +51,8 @@ final class LinearPerpetualBenchmarkSupport {
     private static final long SAFE_BALANCE = 1_000_000_000L;
     private static final long LIQUIDATION_BALANCE = 230;
     private static final long MATCH_TIMEOUT_NANOS = 30_000_000_000L;
-    private static final int EXPORT_ACK_INTERVAL = 128;
+    private static final int EXPORT_ACK_INTERVAL = Math.max(1,
+            Integer.getInteger("surprising.benchmark.export-ack-interval", 128));
     private static final int COMMANDS_PER_LOGICAL_MILLISECOND = 256;
 
     private LinearPerpetualBenchmarkSupport() {
@@ -462,7 +464,7 @@ final class LinearPerpetualBenchmarkSupport {
         private long acceptedCoreMessages;
         private long terminalCoreMessages;
         private int maxMatchingBacklog;
-        private final List<PendingCommand> submittedMatching = new ArrayList<>();
+        private final ArrayDeque<PendingCommand> submittedMatching = new ArrayDeque<>();
         private final IdentityHashMap<CoreMessage, Integer> batchOperationWeights = new IdentityHashMap<>();
         private boolean deferBatchResponseValidation;
         private CoreResponse deferredBatchResponse;
@@ -548,7 +550,15 @@ final class LinearPerpetualBenchmarkSupport {
             submitCommand(command);
         }
 
+        void submitTimed(CoreMessage command) {
+            submitCommand(command, System.nanoTime());
+        }
+
         private PendingCommand submitCommand(CoreMessage command) {
+            return submitCommand(command, 0);
+        }
+
+        private PendingCommand submitCommand(CoreMessage command, long submittedAtNanos) {
             Integer batchWeight = batchOperationWeights.remove(command);
             int operationWeight = batchWeight == null ? 1 : batchWeight;
             executedMessages = Math.addExact(executedMessages, operationWeight);
@@ -563,13 +573,13 @@ final class LinearPerpetualBenchmarkSupport {
                 indirectSequence = true;
             }
             PendingCommand pending = new PendingCommand(
-                    command, sequence, operationWeight, response, indirectSequence);
+                    command, sequence, operationWeight, response, indirectSequence, submittedAtNanos);
             if (response.resultCode() == CoreResultCode.MATCHING_PENDING || sequence != 0) {
                 if (sequence == 0) throw new IllegalStateException("matching sequence was not registered");
-                submittedMatching.add(pending);
+                submittedMatching.addLast(pending);
                 maxMatchingBacklog = Math.max(maxMatchingBacklog, submittedMatching.size());
             } else {
-                validateTerminal(command, response, operationWeight);
+                validateTerminal(command, response, operationWeight, "");
                 terminalMessages = Math.addExact(terminalMessages, operationWeight);
                 terminalCoreMessages = Math.incrementExact(terminalCoreMessages);
                 recordExport(response);
@@ -578,60 +588,93 @@ final class LinearPerpetualBenchmarkSupport {
         }
 
         void drainSubmitted() {
-            for (PendingCommand pending : submittedMatching) {
-                long deadline = System.nanoTime() + MATCH_TIMEOUT_NANOS;
-                boolean matchingCompleted = false;
-                do {
-                    long registeredSequence = pending.indirectSequence ? pending.sequence
-                            : state.matchingSequence(pending.command.header().commandId());
-                    if (registeredSequence == 0) {
-                        CoreResponse refreshed = state.apply(pending.command);
-                        if (refreshed.resultCode() != CoreResultCode.MATCHING_PENDING) {
-                            pending.response = refreshed;
-                            matchingCompleted = true;
-                            continue;
-                        }
-                        throw new IllegalStateException("pending matching command lost its sequence");
-                    }
-                    if (registeredSequence != pending.sequence) {
-                        throw new IllegalStateException("matching command sequence changed from "
-                                + pending.sequence + " to " + registeredSequence);
-                    }
-                    long remainingNanos = deadline - System.nanoTime();
-                    if (remainingNanos <= 0) {
-                        throw new IllegalStateException("matching timed out for "
-                                + pending.command.header().messageType()
-                                + " sequence=" + pending.sequence
-                                + " firstPending=" + state.firstPendingMatchingSequence()
-                                + " pendingCount=" + state.pendingMatchingCount()
-                                + " submittedCount=" + submittedMatching.size());
-                    }
-                    CoreMatchingResult matching = state.awaitMatchingResult(pending.sequence);
-                    if (matching == null) {
-                        continue;
-                    }
-                    pending.response = state.completeMatching(pending.sequence, matching,
-                            pending.command.header().submittedAtEpochMillis(),
-                            pending.command.header().correlationId());
-                    matchingCompleted = pending.response != null
-                            && pending.response.resultCode() != CoreResultCode.MATCHING_PENDING;
-                } while (!matchingCompleted);
-                validateTerminal(pending.command, pending.response, pending.operationWeight);
-                terminalMessages = Math.addExact(terminalMessages, pending.operationWeight);
-                terminalCoreMessages = Math.incrementExact(terminalCoreMessages);
-                recordExport(pending.response);
-            }
-            submittedMatching.clear();
+            while (!submittedMatching.isEmpty()) drainOldestLatencyNanos();
             if (commandsSinceExportAck >= EXPORT_ACK_INTERVAL) acknowledgeExports();
         }
 
-        private void validateTerminal(CoreMessage command, CoreResponse response, int operationWeight) {
+        int pendingSubmissions() {
+            return submittedMatching.size();
+        }
+
+        long drainOldestLatencyNanos() {
+            PendingCommand pending = submittedMatching.peekFirst();
+            if (pending == null) throw new IllegalStateException("no matching submission to drain");
+            long deadline = System.nanoTime() + MATCH_TIMEOUT_NANOS;
+            boolean matchingCompleted = false;
+            String nativeMatchingResult = "";
+            do {
+                long registeredSequence = pending.indirectSequence ? pending.sequence
+                        : state.matchingSequence(pending.command.header().commandId());
+                if (registeredSequence == 0) {
+                    CoreResponse refreshed = state.apply(pending.command);
+                    if (refreshed.resultCode() != CoreResultCode.MATCHING_PENDING) {
+                        pending.response = refreshed;
+                        matchingCompleted = true;
+                        continue;
+                    }
+                    throw new IllegalStateException("pending matching command lost its sequence");
+                }
+                if (registeredSequence != pending.sequence) {
+                    throw new IllegalStateException("matching command sequence changed from "
+                            + pending.sequence + " to " + registeredSequence);
+                }
+                long remainingNanos = deadline - System.nanoTime();
+                if (remainingNanos <= 0) {
+                    throw new IllegalStateException("matching timed out for "
+                            + pending.command.header().messageType()
+                            + " sequence=" + pending.sequence
+                            + " firstPending=" + state.firstPendingMatchingSequence()
+                            + " pendingCount=" + state.pendingMatchingCount()
+                            + " submittedCount=" + submittedMatching.size());
+                }
+                CoreMatchingResult matching = state.awaitMatchingResult(pending.sequence);
+                if (matching == null) continue;
+                nativeMatchingResult = matching.resultCode();
+                pending.response = state.completeMatching(pending.sequence, matching,
+                        pending.command.header().submittedAtEpochMillis(),
+                        pending.command.header().correlationId());
+                matchingCompleted = pending.response != null
+                        && pending.response.resultCode() != CoreResultCode.MATCHING_PENDING;
+            } while (!matchingCompleted);
+            submittedMatching.removeFirst();
+            validateTerminal(pending.command, pending.response, pending.operationWeight, nativeMatchingResult);
+            terminalMessages = Math.addExact(terminalMessages, pending.operationWeight);
+            terminalCoreMessages = Math.incrementExact(terminalCoreMessages);
+            recordExport(pending.response);
+            return pending.submittedAtNanos == 0 ? 0 : System.nanoTime() - pending.submittedAtNanos;
+        }
+
+        int drainReadyMatching(int maxCompletions, java.util.function.LongConsumer latencyRecorder) {
+            if (maxCompletions <= 0 || latencyRecorder == null) {
+                throw new IllegalArgumentException("matching drain batch requires a positive limit and recorder");
+            }
+            return state.commitReadyMatching(maxCompletions, benchmarkTimestamp(sequences.clusterPosition),
+                    sequences.clusterPosition, true, (sequence, response) -> {
+                        PendingCommand pending = submittedMatching.peekFirst();
+                        if (pending == null || pending.sequence != sequence) {
+                            throw new IllegalStateException("matching batch completion crossed submission order");
+                        }
+                        pending.response = response;
+                        submittedMatching.removeFirst();
+                        validateTerminal(pending.command, response, pending.operationWeight, "");
+                        terminalMessages = Math.addExact(terminalMessages, pending.operationWeight);
+                        terminalCoreMessages = Math.incrementExact(terminalCoreMessages);
+                        recordExport(response);
+                        long latency = pending.submittedAtNanos == 0
+                                ? 0 : System.nanoTime() - pending.submittedAtNanos;
+                        latencyRecorder.accept(latency);
+                    });
+        }
+
+        private void validateTerminal(
+                CoreMessage command, CoreResponse response, int operationWeight, String nativeMatchingResult) {
             if (response.commandStatus() != ResponseStatus.APPLIED
                     && response.commandStatus() != ResponseStatus.OK) {
                 throw new IllegalStateException("benchmark command rejected type=" + command.header().messageType()
                         + " userId=" + command.header().userId()
                         + " status=" + response.status() + '/' + response.commandStatus()
                         + " result=" + response.resultCode()
+                        + (nativeMatchingResult.isEmpty() ? "" : " nativeMatching=" + nativeMatchingResult)
                         + " applied=" + state.appliedCommandCount()
                         + " users=" + state.tradingState().users().size()
                         + " orders=" + state.tradingState().orders().size()
@@ -754,15 +797,17 @@ final class LinearPerpetualBenchmarkSupport {
             private final long sequence;
             private final int operationWeight;
             private final boolean indirectSequence;
+            private final long submittedAtNanos;
             private CoreResponse response;
 
             private PendingCommand(CoreMessage command, long sequence, int operationWeight,
-                                   CoreResponse response, boolean indirectSequence) {
+                                   CoreResponse response, boolean indirectSequence, long submittedAtNanos) {
                 this.command = command;
                 this.sequence = sequence;
                 this.operationWeight = operationWeight;
                 this.response = response;
                 this.indirectSequence = indirectSequence;
+                this.submittedAtNanos = submittedAtNanos;
             }
         }
     }

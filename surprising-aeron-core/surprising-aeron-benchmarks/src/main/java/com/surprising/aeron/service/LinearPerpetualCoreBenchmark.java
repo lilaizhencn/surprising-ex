@@ -135,6 +135,39 @@ public class LinearPerpetualCoreBenchmark {
         return result;
     }
 
+    @Benchmark
+    @BenchmarkMode(Mode.Throughput)
+    @OutputTimeUnit(TimeUnit.SECONDS)
+    public long saturatedMatchingWorkload(SaturationState state, MixedWorkloadCounters counters) {
+        LinearPerpetualSaturationEvent measurement = new LinearPerpetualSaturationEvent();
+        boolean profileLatencies = measurement.isEnabled();
+        if (profileLatencies) {
+            measurement.activeUsers = state.activeUsers;
+            measurement.activeSymbols = state.activeSymbols;
+            measurement.maxInFlight = state.maxInFlight;
+            measurement.operationsPerInvocation = state.operationsPerInvocation;
+            measurement.begin();
+        }
+        long result;
+        try {
+            result = state.scenario.run();
+        } finally {
+            if (profileLatencies) {
+                measurement.terminalBusinessOperations = state.scenario.terminalOperations();
+                measurement.terminalCoreMessages = state.scenario.terminalCoreMessages();
+                measurement.maxMatchingBacklog = state.scenario.maxBacklog();
+                measurement.averageMatchingBacklog = state.scenario.averageMatchingBacklog();
+                measurement.fullWindowPercentage = state.scenario.fullWindowPercentage();
+                measurement.p50LatencyNanos = state.scenario.p50LatencyNanos();
+                measurement.p99LatencyNanos = state.scenario.p99LatencyNanos();
+                measurement.p999LatencyNanos = state.scenario.p999LatencyNanos();
+                measurement.commit();
+            }
+        }
+        recordCounters(state.scenario, counters);
+        return result;
+    }
+
     private static void recordCounters(LinearPerpetualBenchmarkSupport.Scenario scenario,
                                        MixedWorkloadCounters counters) {
         counters.acceptedBusinessOperations += scenario.acceptedOperations();
@@ -361,6 +394,52 @@ public class LinearPerpetualCoreBenchmark {
         @Override
         LinearPerpetualBenchmarkSupport.Scenario createScenario() {
             return LinearPerpetualMixedWorkload.scaleScenario(template, hftRounds, hftBatchSize);
+        }
+    }
+
+    @State(Scope.Benchmark)
+    public static class SaturationState {
+        @Param("4")
+        public int accountLanes;
+
+        @Param("10000")
+        public int activeUsers;
+
+        @Param("512")
+        public int listedSymbols;
+
+        @Param("512")
+        public int activeSymbols;
+
+        @Param("5")
+        public int maxPositionsPerUser;
+
+        @Param("10")
+        public int maxOpenOrdersPerUser;
+
+        @Param("1024")
+        public int maxInFlight;
+
+        @Param("16384")
+        public int operationsPerInvocation;
+
+        private LinearPerpetualSaturationWorkload.SaturationScenario scenario;
+
+        @Setup(Level.Trial)
+        public void setUpTrial() {
+            LinearPerpetualBenchmarkSupport.configureAccountLanes(accountLanes);
+            var config = LinearPerpetualScaleConfig.scale(listedSymbols, activeSymbols,
+                    maxPositionsPerUser, maxOpenOrdersPerUser,
+                    LinearPerpetualTrafficProfile.UNIFORM, activeSymbols);
+            var template = LinearPerpetualMixedWorkload.template(accountLanes, activeUsers, config);
+            scenario = LinearPerpetualSaturationWorkload.scenario(
+                    template, maxInFlight, operationsPerInvocation);
+        }
+
+        @TearDown(Level.Trial)
+        public void tearDownTrial() {
+            scenario.verify();
+            scenario.close();
         }
     }
 
