@@ -109,17 +109,25 @@ final class LinearPerpetualSaturationWorkload {
                 if (backlog >= window) {
                     fullWindowSamples = Math.incrementExact(fullWindowSamples);
                     int batchSize = window < 64 ? 1 : Math.min(64, Math.max(1, window / 4));
-                    int completed = target.drainReadyMatching(batchSize, this::record);
-                    if (completed == 0) throw new IllegalStateException("saturated matching batch made no progress");
+                    drainUntilCommitted(target, batchSize);
                 }
             }
 
             private void drainFence(LinearPerpetualBenchmarkSupport.Harness target) {
                 while (target.pendingSubmissions() != 0) {
-                    int completed = target.drainReadyMatching(64, this::record);
-                    if (completed == 0) throw new IllegalStateException("matching fence batch made no progress");
+                    drainUntilCommitted(target, 64);
                 }
                 target.drainSubmitted();
+            }
+
+            private void drainUntilCommitted(LinearPerpetualBenchmarkSupport.Harness target, int batchSize) {
+                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+                while (target.drainReadyMatching(batchSize, this::record) == 0) {
+                    if (System.nanoTime() >= deadline) {
+                        throw new IllegalStateException("saturated matching completion timed out");
+                    }
+                    Thread.onSpinWait();
+                }
             }
 
             private void record(long latencyNanos) {

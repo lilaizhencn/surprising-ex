@@ -41,14 +41,15 @@ sectioned snapshot v15；decoder 和 startup 对旧主版本 fail closed，不�
 
 P10 的目标不是物理 Core shard；每个三节点 Product Core 仍只运行一个共享的 Adapter/ExchangeCore，按 symbol 的
 Matcher Lane 直接复用 exchange-core 原生 MatchingEngineRouter shard，Account Lane 是默认必须实施的运行时边界，
-生产默认 `accountLaneCount=4`；Sequencer 扫描一次 userId 后把同一不可变 matcher result 引用扇出到受影响 Lane，
-以 expected/ack Lane mask 提交，不生成 `SettlementPlan` 或 event 副本；Treasury 保持 Sequencer owner。全局 Core
+生产默认 `accountLaneCount=4`；`MatcherSettlementPlan` 单次遍历 matcher events，生成按 Lane 切分的只读事件视图，
+每个 Lane 只处理自己的用户和成交，不再重复扫描完整结果。Treasury 保持 Sequencer owner。全局 Core
 sequence、Core Fact、snapshot 和恢复仍由一个确定性 Sequencer 协调。默认 topology 为 4 个 native matcher shard、
-1 个 risk engine、4 个 Account Lane、一个 Sequencer-owned Treasury；matcher pipeline、pending reservation 隐藏、ACK 位图、全局 commit
-cursor 和实际 Lane snapshot section 已落地。Account Lane 作为账户隔离、路由、局部 hash 和恢复校验边界，由 Product Core
-owner 直接按确定性 Lane 顺序执行普通交易，不创建逐命令 SPSC ring 或同步 worker barrier；独立 lifecycle worker
-仅承载跨多个 Lane 的重生命周期结算，并在 owner 统一合并前完成。当前 P10-D/E 已把订单批次合并为
-每 Lane 一次 apply/commit，并在提交前捕获 Lane 原生 per-asset Treasury delta。
+1 个 risk engine、4 个 Account Lane、一个 Sequencer-owned Treasury；matcher pipeline、pending reservation 隐藏、原生 Lane commit
+位图、全局 commit cursor 和实际 Lane snapshot section 已落地。小于并行阈值的普通成交由 owner 原地结算，避免任务切换；
+大额多成交由按需创建的 `SettlementLaneWorker` 并行计算纯 `PerpetualLaneJournal`，worker 不写 Runtime State。
+owner 不等待 Future、ACK 或逐命令 barrier，而是在后续 duty cycle 轮询完成位图；只有所需 Lane 全部成功且 Core sequence
+连续时，才按 Lane 顺序一次性应用 journal、合并 Treasury delta、提交 Runtime State/Core Fact，对外保持原子可见。
+BLOCKING worker 空闲时无限 park，由生产者唤醒；也可显式切换 BUSY_SPIN 或 YIELDING。
 P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣称生产认证完成。
 
 ## 协议约束
@@ -68,8 +69,8 @@ P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣
   异步完成直接把同一个 `CoreMatchingResult` 引用按 Core sequence release-publish 到预分配 completion mailbox，
   不存在 MPSC queue、publication cursor 或 `Completion` wrapper。owner 只消费当前确定性 sequence；depth 在槽位
   发布前预约，sticky overflow 无论是否存在 pending sequence 都会 fail closed。Sequencer 扫描一次 userId 后把该引用扇出给受影响
-  Account Lane；不复制 event，也不物化
-  `SettlementPlan`。wall-clock readiness/watchdog 只能由 external health
+  Account Lane；`MatcherSettlementPlan` 在一次遍历内完成结果分类、受影响用户收集和 Lane event slice 构造，后续 Lane
+  不再重复遍历 matcher 链。wall-clock readiness/watchdog 只能由 external health
   supervisor 观察，不能进入复制状态或改变裁决顺序。
 - Pending matcher 顺序和 continuation 均使用预分配、按 Core sequence 定位的 primitive ring。热路不维护逐命令
   `CompletableFuture` map、active set 或 completed-result map；同步边界可直接读取已完成 future 的确定性结果，不再等待
@@ -77,6 +78,12 @@ P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣
 - JFR 热点判断只统计自定义 workload measurement 事件窗口，排除 JMH trial 初始化和 snapshot template。交易窗口内
   的协议 enum 解码无 Stream，typed mutation 不再重复复制已排序 change-set，lazy delta 用有界原子槽缓存变化值；批量
   订单结果和 open-order 状态按精确长度编码，避免每个 item 的中间 frame 与 grow/copy 缓冲。
+- matcher 结果使用 typed outcome 区分成交、挂单、拒绝和撤单，并用 primitive UUID 两段值保存 command identity；已知的
+  前置撤单 prefix 可以确定性恢复，未知 prefix 或语义分歧仍 fail closed。replace/amend 在进入 matcher 前只执行一次
+  identity、reservation 和 admission 解析，完成阶段复用 `ResolvedMatchingAdmission`，不再次做同义业务校验。
+- Lane 提交使用 owner 预分配的 apply result、Lane values 和回调，不再创建逐命令 ACK/对象数组或二次 ACK 循环。
+  `surprising.aeron.parallel-settlement-min-trades` 控制并行结算阈值，默认 `8`；
+  `surprising.aeron.settlement-wait-strategy` 接受 `BLOCKING`（默认）、`YIELDING` 或 `BUSY_SPIN`。
 - 单笔交易提交只发布 typed commit 和 `RuntimeProjectionPoint`；不可变 Snapshot map root 由 projector 顺序生成，Core
   Fact materializer 按 before/after point 构造完整视图。下单、撤单和撮合完成的 owner 路径不执行 lazy transition view，
   也不等待 projector；普通及批量订单校验直接读取 `OrderRuntime`，matcher 前置撤单只携带最小身份，不构造

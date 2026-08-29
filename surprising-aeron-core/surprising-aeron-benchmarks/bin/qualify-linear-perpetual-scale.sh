@@ -47,6 +47,7 @@ JVM_ARGS=(
   "-Dsurprising.aeron.account-lanes=4"
   "-Dsurprising.aeron.matching-engines=4"
   "-Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN"
+  "-Dsurprising.aeron.settlement-wait-strategy=BLOCKING"
   "-Dsurprising.aeron.matching-completion-spins=16384"
   "-Dsurprising.aeron.projection-busy-spin=false"
   "-Dsurprising.aeron.projection-batch-size=64"
