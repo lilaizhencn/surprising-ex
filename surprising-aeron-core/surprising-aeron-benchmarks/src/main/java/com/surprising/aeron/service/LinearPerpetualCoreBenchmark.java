@@ -158,6 +158,8 @@ public class LinearPerpetualCoreBenchmark {
                 measurement.maxMatchingBacklog = state.scenario.maxBacklog();
                 measurement.averageMatchingBacklog = state.scenario.averageMatchingBacklog();
                 measurement.fullWindowPercentage = state.scenario.fullWindowPercentage();
+                measurement.completionMailboxHighWaterMark = state.scenario.completionMailboxHighWaterMark();
+                measurement.completionMailboxCapacity = state.scenario.completionMailboxCapacity();
                 measurement.p50LatencyNanos = state.scenario.p50LatencyNanos();
                 measurement.p99LatencyNanos = state.scenario.p99LatencyNanos();
                 measurement.p999LatencyNanos = state.scenario.p999LatencyNanos();

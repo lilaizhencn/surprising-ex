@@ -38,6 +38,12 @@ final class LinearPerpetualSaturationEvent extends Event {
     @Label("Full window percentage")
     double fullWindowPercentage;
 
+    @Label("Completion mailbox high-water mark")
+    int completionMailboxHighWaterMark;
+
+    @Label("Completion mailbox capacity")
+    int completionMailboxCapacity;
+
     @Label("Completion p50")
     @Timespan(Timespan.NANOSECONDS)
     long p50LatencyNanos;

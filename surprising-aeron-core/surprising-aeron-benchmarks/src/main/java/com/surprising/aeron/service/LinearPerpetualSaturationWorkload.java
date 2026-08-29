@@ -30,6 +30,10 @@ final class LinearPerpetualSaturationWorkload {
         double averageMatchingBacklog();
 
         double fullWindowPercentage();
+
+        int completionMailboxHighWaterMark();
+
+        int completionMailboxCapacity();
     }
 
     static SaturationScenario scenario(
@@ -183,6 +187,16 @@ final class LinearPerpetualSaturationWorkload {
             @Override
             public double fullWindowPercentage() {
                 return backlogSamples == 0 ? 0 : 100.0 * fullWindowSamples / backlogSamples;
+            }
+
+            @Override
+            public int completionMailboxHighWaterMark() {
+                return harness.matchingCompletionHighWaterMark();
+            }
+
+            @Override
+            public int completionMailboxCapacity() {
+                return harness.matchingCompletionCapacity();
             }
 
             private long percentile(double fraction) {

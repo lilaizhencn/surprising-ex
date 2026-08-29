@@ -779,6 +779,14 @@ final class LinearPerpetualBenchmarkSupport {
             return maxMatchingBacklog;
         }
 
+        int matchingCompletionHighWaterMark() {
+            return state.matchingCompletionHighWaterMark();
+        }
+
+        int matchingCompletionCapacity() {
+            return state.matchingCompletionCapacity();
+        }
+
         @Override
         public void close() {
             state.close();
