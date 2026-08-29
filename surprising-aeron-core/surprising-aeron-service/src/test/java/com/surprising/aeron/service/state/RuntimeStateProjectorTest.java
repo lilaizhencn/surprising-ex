@@ -56,6 +56,13 @@ class RuntimeStateProjectorTest {
 
         assertThat(after).isEqualTo(RuntimeStateMaterializer.materialize(runtime, identities));
         assertThat(after.user(9)).isSameAs(before.user(9));
+        assertThat(after.orders()).isSameAs(before.orders());
+        assertThat(after.instruments()).isSameAs(before.instruments());
+        assertThat(after.riskState().markPrices()).isSameAs(before.riskState().markPrices());
+        assertThat(after.riskState().snapshots()).isSameAs(before.riskState().snapshots());
+        assertThat(after.riskState().liquidations()).isSameAs(before.riskState().liquidations());
+        assertThat(after.riskState().scans()).isSameAs(before.riskState().scans());
+        assertThat(after.treasuryState()).isSameAs(before.treasuryState());
         assertThat(StateMapSupport.changedKeys(before.users(), after.users())).containsExactly(7L);
         assertThat(traversalProbe.reservationTraversals()).isZero();
         assertThat(traversalProbe.positionTraversals()).isZero();
@@ -105,6 +112,23 @@ class RuntimeStateProjectorTest {
                         || field.getType() == java.util.Set.class)).isFalse();
         assertThat(mutation.users().currentValues().get(7L).balances().changedKeys())
                 .isNotInstanceOf(java.util.SortedSet.class);
+        runtime.close();
+    }
+
+    @Test
+    void emptyMutationFamiliesShareOneImmutableValueChangesInstance() {
+        TradingCoreState before = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+
+        RuntimeMutationDelta first = runtime.captureMutationDelta();
+        RuntimeMutationDelta second = runtime.captureMutationDelta();
+
+        assertThat(first.orders()).isSameAs(first.positions());
+        assertThat(first.orders()).isSameAs(first.liquidations());
+        assertThat(first.orders()).isSameAs(second.orders());
+        assertThat(first.treasury().assets()).isSameAs(first.treasury().funding());
+        assertThat(first.treasury().assets()).isSameAs(second.treasury().assets());
         runtime.close();
     }
 

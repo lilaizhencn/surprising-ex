@@ -8,6 +8,7 @@ import java.util.Map;
 
 public final class RuntimeFundsDelta {
 
+    private static final RuntimeFundsDelta EMPTY = new RuntimeFundsDelta(List.of());
     private final List<Posting> postings;
     private final Map<Integer, Long> unitsByAsset;
 
@@ -33,7 +34,11 @@ public final class RuntimeFundsDelta {
     }
 
     public static RuntimeFundsDelta empty() {
-        return new RuntimeFundsDelta(List.of());
+        return EMPTY;
+    }
+
+    static RuntimeFundsDelta from(List<Posting> postings) {
+        return postings.isEmpty() ? EMPTY : new RuntimeFundsDelta(postings);
     }
 
     public RuntimeFundsDelta plus(RuntimeFundsDelta other) {
@@ -42,7 +47,7 @@ public final class RuntimeFundsDelta {
         ArrayList<Posting> merged = new ArrayList<>(postings.size() + other.postings.size());
         merged.addAll(postings);
         merged.addAll(other.postings);
-        return new RuntimeFundsDelta(merged);
+        return from(merged);
     }
 
     public int postingCount() {

@@ -501,6 +501,33 @@ BUSY_SPIN JFR 运行也降至 `2174.032 ops/s`，表明本机连续 8 GiB 多进
 owner 上的 persistent tree/delta lineage、fact materialization 临时集合和 commit allocation，并在隔离 CPU、
 足够物理核与内存的服务器上重新做 BUSY_SPIN/YIELDING 随机顺序 A/B。
 
+2026-08-29 sparse delta/fact 阶段让空 mutation family 共享不可变空值，只有实际存在 after-image 时才建立
+lane/owner map；少量 dirty value 使用紧凑查询，空资金 posting 共享 `RuntimeFundsDelta`。projection 对未变化的
+order、instrument、risk、treasury 等 map/root 直接复用上一版本，只为相关 dirty family 建立 delta；Core Fact
+的 user/liquidation/trigger/treasury view 改为确定性循环与 primitive ID 去重，不再创建 stream/`LinkedHashMap`/
+`TreeSet` 临时集合。重复饱和测试同时发现 Core Fact 尚未异步登记终态订单时 Audit ACK 可先完成，导致两个已终态
+订单错过当前裁剪；ACK 现在利用 outbox 随提交保存的 primitive 终态订单 ID 在 owner 上登记后裁剪，迟到的 fact
+观察不能越过 tombstone 重新保留同一订单。对应竞态回归连续 5 轮通过，核心服务 378 项和 benchmark 10 项测试
+全部通过。
+
+同一 HotSpot JDK 25.0.1、ZGC、8 GiB、4 Account Lane、4 matcher、10,000 用户、512 活跃 symbol、每 invocation
+16,384 条 maker/taker 指令下，首次完整矩阵的 BUSY_SPIN 64/256/1024 为 `4575.316`/`5421.945`/
+`4670.304 terminal business ops/s`，YIELDING 256 为 `5064.447 ops/s`。竞态修复后的最终同源码运行因连续
+8 分钟测试与 busy-spin 线程在 8 核本机争用，BUSY_SPIN 三点降为 `2994.058`/`2745.905`/`2143.459`，但同轮
+YIELDING 256 回升到 `5884.217 ops/s`，随后 BUSY_SPIN JFR 单轮也回升到 `4911.514 ops/s`；因此这些本机矩阵
+只能证明正确性和调度敏感性，不能把单个低值或高值当作隔离服务器容量。所有运行均 accepted=terminal、
+unfinished=0，teardown 的资金总量和活动订单不变量通过。
+
+最终 JFR 的四个 16,384 指令 invocation 延迟收敛到 p50 `24.4–44.2 ms`、p99 `30.7–82.5 ms`、p99.9
+`32.0–105.6 ms`。相对上一同配置 JFR 的 allocation sample weight，owner 从 `7.379 GiB` 降至 `7.023 GiB`
+（约 `-4.8%`），projection 从 `2.799 GiB` 降至 `2.153 GiB`（约 `-23.1%`），fact materializer 从
+`1.817 GiB` 降至 `1.253 GiB`（约 `-31.0%`）；这是采样权重而不是精确分配率。JFR `DataLoss=0`，7 次 ZGC
+最大暂停 `0.275 ms`，allocation stall/OOM 为 0。owner 的 2,218 个执行样本中，completion publication
+cursor 等待占 504（`22.7%`），其后是 runtime `TreeMap`、rolling hash 和 small `CompactValueMap` 查询；
+projection/fact 分别只有 344/263 个样本。当前最佳同轮终态吞吐仍不足 6k/s，离每产品线 `100k/s` 很远；
+下一阶段的主攻点已经从 projection/fact 临时集合转为 owner completion 协调、权威 runtime map/hash 和物理 CPU
+隔离，不能继续靠增大 in-flight window 获得目标容量。
+
 其余五条衍生品线统一使用 `DerivativeCoreBenchmark.productionMixedWorkload`，通过 `productLine` 参数选择
 `LINEAR_PERPETUAL`、`INVERSE_PERPETUAL`、`LINEAR_DELIVERY`、`INVERSE_DELIVERY` 或 `OPTION`。场景固定
 4 个 Account Lane、4 个 symbol 和 1,000/10,000 个真实持仓用户，混合批量挂单/撤单、双向 IOC、部分成交、

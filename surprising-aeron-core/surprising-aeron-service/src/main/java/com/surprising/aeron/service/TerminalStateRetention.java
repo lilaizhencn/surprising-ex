@@ -74,6 +74,14 @@ final class TerminalStateRetention {
                 observeLiquidation(after.riskState().liquidations().get(id), exportSequence));
     }
 
+    synchronized void observeAcknowledgedOrders(
+            TradingCoreState state, long acknowledgedSequence, Iterable<Long> orderIds) {
+        if (state == null || acknowledgedSequence <= 0 || orderIds == null) {
+            throw new IllegalArgumentException("invalid acknowledged terminal orders");
+        }
+        sorted(orderIds).forEach(id -> observeOrder(state.orders().get(id), acknowledgedSequence));
+    }
+
     synchronized TerminalPruneBatch eligible(TradingCoreState state, long acknowledgedSequence, int limit) {
         if (state == null || acknowledgedSequence < 0 || limit <= 0) {
             throw new IllegalArgumentException("invalid terminal prune request");
@@ -247,6 +255,7 @@ final class TerminalStateRetention {
     }
 
     private void retain(EntityKey key, long userId, String clientId, long exportSequence) {
+        if (tombstones.containsKey(key)) return;
         RetainedEntity retained = new RetainedEntity(key, userId, normalizeClientId(clientId), exportSequence);
         RetainedEntity previous = candidates.put(key, retained);
         if (previous != null) candidateDigest ^= entryDigest(previous);

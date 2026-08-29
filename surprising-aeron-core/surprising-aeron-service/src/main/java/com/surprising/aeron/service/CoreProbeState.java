@@ -4276,8 +4276,13 @@ public final class CoreProbeState implements AutoCloseable {
                 refreshSnapshotProjection();
             }
             case ACK_EXPORT -> {
-                exportState.acknowledge(CoreExportCodec.decodeAck(message.payloadUnsafe()));
+                List<Long> acknowledgedTerminalOrderIds =
+                        exportState.acknowledge(CoreExportCodec.decodeAck(message.payloadUnsafe()));
                 snapshotState = runtimeProjectionJournal.await(currentProjectionPoint);
+                if (!acknowledgedTerminalOrderIds.isEmpty()) {
+                    terminalRetention.observeAcknowledgedOrders(snapshotState,
+                            exportState.acknowledgedSequence(), acknowledgedTerminalOrderIds);
+                }
                 TerminalPruneBatch pruneBatch = terminalRetention.eligible(snapshotState,
                         exportState.acknowledgedSequence(), TerminalStateRetention.MAX_PRUNE_PER_ACK);
                 commandChangedUserIds = pruneBatch.orderIds().stream()
@@ -5285,10 +5290,19 @@ public final class CoreProbeState implements AutoCloseable {
             List<CoreOrderStateView> retainedOrderViews, List<String> treasuryAssets) {
         List<CoreOrderStateView> orders = changedOrders(before, after, delta.orderIds());
         if (!retainedOrderViews.isEmpty()) {
-            java.util.LinkedHashMap<Long, CoreOrderStateView> byId = new java.util.LinkedHashMap<>();
-            orders.forEach(order -> byId.put(order.orderId(), order));
-            retainedOrderViews.forEach(order -> byId.putIfAbsent(order.orderId(), order));
-            orders = List.copyOf(byId.values());
+            org.eclipse.collections.impl.set.mutable.primitive.LongHashSet retainedIds =
+                    new org.eclipse.collections.impl.set.mutable.primitive.LongHashSet(
+                            orders.size() + retainedOrderViews.size());
+            java.util.ArrayList<CoreOrderStateView> merged = new java.util.ArrayList<>(
+                    orders.size() + retainedOrderViews.size());
+            for (CoreOrderStateView order : orders) {
+                retainedIds.add(order.orderId());
+                merged.add(order);
+            }
+            for (CoreOrderStateView order : retainedOrderViews) {
+                if (retainedIds.add(order.orderId())) merged.add(order);
+            }
+            orders = List.copyOf(merged);
         }
         return new CoreCommandDelta(delta.userIds(), delta.orderIds(), delta.liquidationIds(),
                 delta.triggerOrderIds(), delta.executions(), delta.fundingPayments(), delta.fundingProgress(),
@@ -5333,21 +5347,21 @@ public final class CoreProbeState implements AutoCloseable {
         if (changedLiquidationIds == null) {
             throw new IllegalStateException("changed liquidation ids are required for export");
         }
-        java.util.stream.Stream<com.surprising.aeron.service.state.CoreLiquidationState> values =
-                changedLiquidationIds.stream()
-                        .map(id -> after.riskState().liquidations().get(id))
-                        .filter(java.util.Objects::nonNull);
-        return values.filter(value -> !value.equals(before.riskState().liquidations().get(value.liquidationId())))
-                .map(value -> {
-                    var instrument = after.instruments().get(value.symbol());
-                    if (instrument == null) throw new IllegalStateException("liquidation instrument is missing");
-                    return new com.surprising.aeron.protocol.CoreLiquidationView(value.liquidationId(),
-                            value.userId(), value.symbol(), instrument.settleAsset(), value.marginMode(),
-                            value.positionSide(), value.instrumentVersion(), value.triggerPriceSequence(),
-                            value.signedQuantitySteps(), value.closeQuantitySteps(), value.deficitUnits(),
-                            value.executionPriceTicks(), value.liquidationFeeRatePpm(),
-                            value.liquidationFeeUnits(), value.status().name());
-                }).toList();
+        java.util.ArrayList<com.surprising.aeron.protocol.CoreLiquidationView> result =
+                new java.util.ArrayList<>(changedLiquidationIds.size());
+        for (Long liquidationId : changedLiquidationIds) {
+            var value = after.riskState().liquidations().get(liquidationId);
+            if (value == null || value.equals(before.riskState().liquidations().get(liquidationId))) continue;
+            var instrument = after.instruments().get(value.symbol());
+            if (instrument == null) throw new IllegalStateException("liquidation instrument is missing");
+            result.add(new com.surprising.aeron.protocol.CoreLiquidationView(value.liquidationId(),
+                    value.userId(), value.symbol(), instrument.settleAsset(), value.marginMode(),
+                    value.positionSide(), value.instrumentVersion(), value.triggerPriceSequence(),
+                    value.signedQuantitySteps(), value.closeQuantitySteps(), value.deficitUnits(),
+                    value.executionPriceTicks(), value.liquidationFeeRatePpm(),
+                    value.liquidationFeeUnits(), value.status().name()));
+        }
+        return List.copyOf(result);
     }
 
     private static List<com.surprising.aeron.protocol.CoreTriggerOrderStateView> changedTriggerOrders(
@@ -5355,27 +5369,38 @@ public final class CoreProbeState implements AutoCloseable {
         if (changedTriggerOrderIds == null) {
             throw new IllegalStateException("changed trigger order ids are required for export");
         }
-        java.util.stream.Stream<com.surprising.aeron.service.state.CoreTriggerOrderState> values =
-                changedTriggerOrderIds.stream()
-                        .map(id -> after.triggerOrders().get(id))
-                        .filter(java.util.Objects::nonNull);
-        return values.filter(value -> !value.equals(before.triggerOrders().get(value.triggerOrderId())))
-                .map(com.surprising.aeron.service.state.CoreTriggerOrderState::view).toList();
+        java.util.ArrayList<com.surprising.aeron.protocol.CoreTriggerOrderStateView> result =
+                new java.util.ArrayList<>(changedTriggerOrderIds.size());
+        for (Long triggerOrderId : changedTriggerOrderIds) {
+            var value = after.triggerOrders().get(triggerOrderId);
+            if (value != null && !value.equals(before.triggerOrders().get(triggerOrderId))) {
+                result.add(value.view());
+            }
+        }
+        return List.copyOf(result);
     }
 
     private static List<com.surprising.aeron.protocol.CoreTreasuryAssetView> changedTreasuryAssets(
             TradingCoreState before, TradingCoreState after, List<String> changedAssetNames) {
-        java.util.TreeSet<String> assets = new java.util.TreeSet<>();
-        assets.addAll(changedAssetNames);
-        return assets.stream().filter(asset -> treasuryChanged(before, after, asset))
-                .map(asset -> new com.surprising.aeron.protocol.CoreTreasuryAssetView(asset,
-                        after.treasuryState().feeBalances().getOrDefault(asset, 0L),
-                        after.treasuryState().insuranceBalances().getOrDefault(asset, 0L),
-                        after.treasuryState().insuranceDeficits().getOrDefault(asset, 0L),
-                        after.treasuryState().liquidationFeeBalances().getOrDefault(asset, 0L),
-                        after.treasuryState().fundingResidualBalances().getOrDefault(asset, 0L),
-                        after.treasuryState().roundingResidualBalances().getOrDefault(asset, 0L),
-                        after.treasuryState().clearingPnlBalances().getOrDefault(asset, 0L))).toList();
+        String[] assets = changedAssetNames.toArray(String[]::new);
+        java.util.Arrays.sort(assets);
+        java.util.ArrayList<com.surprising.aeron.protocol.CoreTreasuryAssetView> result =
+                new java.util.ArrayList<>(assets.length);
+        String previousAsset = null;
+        for (String asset : assets) {
+            if (asset.equals(previousAsset)) continue;
+            previousAsset = asset;
+            if (!treasuryChanged(before, after, asset)) continue;
+            result.add(new com.surprising.aeron.protocol.CoreTreasuryAssetView(asset,
+                    after.treasuryState().feeBalances().getOrDefault(asset, 0L),
+                    after.treasuryState().insuranceBalances().getOrDefault(asset, 0L),
+                    after.treasuryState().insuranceDeficits().getOrDefault(asset, 0L),
+                    after.treasuryState().liquidationFeeBalances().getOrDefault(asset, 0L),
+                    after.treasuryState().fundingResidualBalances().getOrDefault(asset, 0L),
+                    after.treasuryState().roundingResidualBalances().getOrDefault(asset, 0L),
+                    after.treasuryState().clearingPnlBalances().getOrDefault(asset, 0L)));
+        }
+        return List.copyOf(result);
     }
 
     private static boolean treasuryChanged(TradingCoreState before, TradingCoreState after, String asset) {
@@ -5397,25 +5422,33 @@ public final class CoreProbeState implements AutoCloseable {
 
     private static CoreUserStateView userDelta(com.surprising.aeron.service.state.CoreUserState before,
                                                 com.surprising.aeron.service.state.CoreUserState after) {
+        java.util.Set<String> changedBalanceAssets = after.changedBalanceAssetsSince(before);
+        java.util.ArrayList<CoreBalanceView> balances = new java.util.ArrayList<>(changedBalanceAssets.size());
+        for (String asset : changedBalanceAssets) {
+            var value = after.balances().get(asset);
+            if (value != null) balances.add(new CoreBalanceView(
+                    value.asset(), value.availableUnits(), value.lockedUnits()));
+        }
+        java.util.Set<Long> changedReservationIds = after.changedReservationIdsSince(before);
+        java.util.ArrayList<CoreReservationView> reservations =
+                new java.util.ArrayList<>(changedReservationIds.size());
+        for (Long orderId : changedReservationIds) {
+            var value = after.reservations().get(orderId);
+            if (value != null) reservations.add(new CoreReservationView(
+                    value.orderId(), value.symbol(), value.instrumentVersion(), value.kind(), value.asset(),
+                    value.reservedUnits(), value.releasedUnits(), value.consumedUnits(), value.orderQuantitySteps()));
+        }
+        java.util.Set<String> changedPositionKeys = after.changedPositionKeysSince(before);
+        java.util.ArrayList<CorePositionView> positions = new java.util.ArrayList<>(changedPositionKeys.size());
+        for (String positionKey : changedPositionKeys) {
+            var value = after.positions().get(positionKey);
+            if (value != null) positions.add(new CorePositionView(
+                    value.symbol(), value.marginAsset(), value.marginMode(), value.positionSide(),
+                    value.instrumentVersion(), value.signedQuantitySteps(), value.entryPriceTicks(),
+                    value.entryValueTicks(), value.realizedPnlUnits(), value.positionMarginUnits()));
+        }
         return new CoreUserStateView(after.productLine(), after.userId(), after.revision(), after.positionMode(),
-                after.changedBalanceAssetsSince(before).stream()
-                        .map(after.balances()::get)
-                        .filter(java.util.Objects::nonNull)
-                        .map(value -> new CoreBalanceView(value.asset(), value.availableUnits(), value.lockedUnits()))
-                        .toList(),
-                after.changedReservationIdsSince(before).stream()
-                        .map(after.reservations()::get)
-                        .filter(java.util.Objects::nonNull)
-                        .map(value -> new CoreReservationView(value.orderId(), value.symbol(), value.instrumentVersion(),
-                                value.kind(), value.asset(), value.reservedUnits(), value.releasedUnits(),
-                                value.consumedUnits(), value.orderQuantitySteps())).toList(),
-                after.changedPositionKeysSince(before).stream()
-                        .map(after.positions()::get)
-                        .filter(java.util.Objects::nonNull)
-                        .map(value -> new CorePositionView(value.symbol(), value.marginAsset(), value.marginMode(),
-                                value.positionSide(), value.instrumentVersion(), value.signedQuantitySteps(),
-                                value.entryPriceTicks(), value.entryValueTicks(), value.realizedPnlUnits(),
-                                value.positionMarginUnits())).toList());
+                List.copyOf(balances), List.copyOf(reservations), List.copyOf(positions));
     }
 
     private static CoreOrderStateView orderView(com.surprising.aeron.service.state.CoreOrderState order) {

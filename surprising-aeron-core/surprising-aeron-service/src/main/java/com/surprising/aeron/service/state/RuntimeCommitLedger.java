@@ -131,7 +131,7 @@ public final class RuntimeCommitLedger {
                     Math.subtractExact(clearingPnl(after), clearingPnl(before)));
             if (after == null) treasury.remove(assetId); else treasury.put(assetId, after);
         });
-        return new RuntimeFundsDelta(postings);
+        return RuntimeFundsDelta.from(postings);
     }
 
     private static long units(RuntimeMutationDelta.BalanceValue value, boolean available) {

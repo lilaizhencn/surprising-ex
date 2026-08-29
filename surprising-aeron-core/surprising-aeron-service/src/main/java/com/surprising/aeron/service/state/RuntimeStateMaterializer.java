@@ -202,7 +202,7 @@ public final class RuntimeStateMaterializer {
             throw new IllegalArgumentException("runtime mutation delta is out of order");
         }
 
-        Map<Long, CoreUserState> users = StateMapSupport.delta(previous.users());
+        Map<Long, CoreUserState> users = deltaIfChanged(previous.users(), delta.users());
         for (Long userId : delta.users().changedKeys()) {
             RuntimeMutationDelta.UserValue runtimeUser = delta.users().currentValues().get(userId);
             CoreUserState beforeUser = previous.user(userId);
@@ -213,13 +213,14 @@ public final class RuntimeStateMaterializer {
             users.put(userId, materializeUser(userId, delta, identities, beforeUser));
         }
 
-        Map<Long, CoreOrderState> orders = StateMapSupport.delta(previous.orders());
+        Map<Long, CoreOrderState> orders = deltaIfChanged(previous.orders(), delta.orders());
         for (Long orderId : delta.orders().changedKeys()) {
             OrderRuntime order = delta.orders().currentValues().get(orderId);
             if (order == null || delta.pendingReservations().contains(orderId)) orders.remove(orderId);
             else orders.put(orderId, orderSnapshot(order, identities));
         }
-        Map<String, CoreMarkPriceState> marks = StateMapSupport.delta(previous.riskState().markPrices());
+        Map<String, CoreMarkPriceState> marks = deltaIfChanged(
+                previous.riskState().markPrices(), delta.markPrices());
         for (Integer symbolId : delta.markPrices().changedKeys()) {
             String symbol = identities.symbol(symbolId);
             MarkPriceRuntime mark = delta.markPrices().currentValues().get(symbolId);
@@ -227,7 +228,8 @@ public final class RuntimeStateMaterializer {
             else marks.put(symbol, new CoreMarkPriceState(symbol, mark.instrumentVersion(),
                     mark.markPriceTicks(), mark.priceSequence(), mark.generatedAtEpochMillis()));
         }
-        Map<String, CoreRiskSnapshot> snapshots = StateMapSupport.delta(previous.riskState().snapshots());
+        Map<String, CoreRiskSnapshot> snapshots = deltaIfChanged(
+                previous.riskState().snapshots(), delta.riskSnapshots());
         for (Long positionKey : delta.riskSnapshots().changedKeys()) {
             RuntimeIdentityRegistry.PositionIdentity identity = identities.positionIdentity(positionKey);
             String snapshotKey = identity.userId() + ":" + identity.positionKey();
@@ -241,30 +243,40 @@ public final class RuntimeStateMaterializer {
                 snapshots.put(snapshot.key(), snapshot);
             }
         }
-        Map<Long, CoreLiquidationState> liquidations = StateMapSupport.delta(previous.riskState().liquidations());
+        Map<Long, CoreLiquidationState> liquidations = deltaIfChanged(
+                previous.riskState().liquidations(), delta.liquidations());
         applyValues(delta.liquidations(), liquidations, value -> liquidation(value, identities));
-        Map<String, CoreRiskState.RiskScan> scans = StateMapSupport.delta(previous.riskState().scans());
+        Map<String, CoreRiskState.RiskScan> scans = deltaIfChanged(
+                previous.riskState().scans(), delta.riskScans());
         for (Integer symbolId : delta.riskScans().changedKeys()) {
             String symbol = identities.symbol(symbolId);
             RiskScanRuntime scan = delta.riskScans().currentValues().get(symbolId);
             if (scan == null) scans.remove(symbol); else scans.put(symbol, riskScan(scan, identities));
         }
-        CoreRiskState riskState = new CoreRiskState(marks, snapshots, liquidations, scans,
+        CoreRiskState riskState = marks == previous.riskState().markPrices()
+                && snapshots == previous.riskState().snapshots()
+                && liquidations == previous.riskState().liquidations()
+                && scans == previous.riskState().scans()
+                && delta.nextLiquidationId() == previous.riskState().nextLiquidationId()
+                && delta.riskScanControl().equals(previous.riskState().scanControl())
+                ? previous.riskState()
+                : new CoreRiskState(marks, snapshots, liquidations, scans,
                 delta.nextLiquidationId(), delta.riskScanControl());
 
         CoreTreasuryState treasuryState = treasuryTransition(delta.treasury(), identities, previous.treasuryState());
-        Map<String, CoreInstrumentState> instruments = StateMapSupport.delta(previous.instruments());
+        Map<String, CoreInstrumentState> instruments = deltaIfChanged(previous.instruments(), delta.instruments());
         applyValues(delta.instruments(), instruments, java.util.function.Function.identity());
-        Map<CoreLeverageKey, Long> leverages = StateMapSupport.delta(previous.leverages());
+        Map<CoreLeverageKey, Long> leverages = deltaIfChanged(previous.leverages(), delta.leverages());
         applyValues(delta.leverages(), leverages, java.util.function.Function.identity());
-        Map<Long, CoreAlgoOrderState> algoOrders = StateMapSupport.delta(previous.algoOrders());
+        Map<Long, CoreAlgoOrderState> algoOrders = deltaIfChanged(previous.algoOrders(), delta.algoOrders());
         applyValues(delta.algoOrders(), algoOrders, java.util.function.Function.identity());
-        Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> timers = StateMapSupport.delta(
-                previous.cancelAllAfterTimers());
+        Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> timers = deltaIfChanged(
+                previous.cancelAllAfterTimers(), delta.timers());
         applyValues(delta.timers(), timers, java.util.function.Function.identity());
-        Map<Long, CoreTriggerOrderState> triggers = StateMapSupport.delta(previous.triggerOrders());
+        Map<Long, CoreTriggerOrderState> triggers = deltaIfChanged(previous.triggerOrders(), delta.triggerOrders());
         applyValues(delta.triggerOrders(), triggers, java.util.function.Function.identity());
-        Map<TradingCoreState.ClientOrderKey, Long> clients = StateMapSupport.delta(previous.clientOrderIndex());
+        Map<TradingCoreState.ClientOrderKey, Long> clients = deltaIfChanged(
+                previous.clientOrderIndex(), delta.clientOrders());
         for (RuntimeMutationDelta.RuntimeClientKey runtimeKey : delta.clientOrders().changedKeys()) {
             TradingCoreState.ClientOrderKey key = new TradingCoreState.ClientOrderKey(runtimeKey.userId(),
                     identities.clientOrderId(runtimeKey.userId(), runtimeKey.clientKey()));
@@ -280,8 +292,8 @@ public final class RuntimeStateMaterializer {
                                                  RuntimeIdentityRegistry identities, CoreUserState beforeUser) {
         RuntimeMutationDelta.UserValue runtimeUser = delta.users().currentValues().get(userId);
         if (runtimeUser == null) return null;
-        Map<String, AssetBalance> balances = StateMapSupport.delta(
-                beforeUser == null ? Map.of() : beforeUser.balances());
+        Map<String, AssetBalance> balances = deltaIfChanged(
+                beforeUser == null ? Map.of() : beforeUser.balances(), runtimeUser.balances());
         for (Integer assetId : runtimeUser.balances().changedKeys()) {
             String asset = identities.asset(assetId);
             RuntimeMutationDelta.BalanceValue balance = runtimeUser.balances().currentValues().get(assetId);
@@ -290,23 +302,27 @@ public final class RuntimeStateMaterializer {
                     Math.addExact(balance.availableUnits(), balance.pendingReservedUnits()),
                     Math.subtractExact(balance.lockedUnits(), balance.pendingReservedUnits())));
         }
-        Map<Long, OrderReservation> reservations = StateMapSupport.delta(
-                beforeUser == null ? Map.of() : beforeUser.reservations());
+        Map<Long, OrderReservation> previousReservations = beforeUser == null
+                ? Map.of() : beforeUser.reservations();
+        Map<Long, OrderReservation> reservations = previousReservations;
         for (Long orderId : delta.reservations().changedKeys()) {
             ReservationRuntime value = delta.reservations().currentValues().get(orderId);
             OrderReservation prior = beforeUser == null ? null : beforeUser.reservations().get(orderId);
             if (value != null && value.userId() == userId && !delta.pendingReservations().contains(orderId)) {
+                if (reservations == previousReservations) reservations = StateMapSupport.delta(previousReservations);
                 reservations.put(orderId, reservation(value, identities));
             } else if (prior != null) {
+                if (reservations == previousReservations) reservations = StateMapSupport.delta(previousReservations);
                 reservations.remove(orderId);
             }
         }
-        Map<String, CorePositionState> positions = StateMapSupport.delta(
-                beforeUser == null ? Map.of() : beforeUser.positions());
+        Map<String, CorePositionState> previousPositions = beforeUser == null ? Map.of() : beforeUser.positions();
+        Map<String, CorePositionState> positions = previousPositions;
         for (Long positionKey : delta.positions().changedKeys()) {
             RuntimeIdentityRegistry.PositionIdentity identity = identities.positionIdentity(positionKey);
             if (identity.userId() != userId) continue;
             PositionRuntime value = delta.positions().currentValues().get(positionKey);
+            if (positions == previousPositions) positions = StateMapSupport.delta(previousPositions);
             if (value == null) positions.remove(identity.positionKey());
             else positions.put(identity.positionKey(), position(positionKey, value, identities));
         }
@@ -401,16 +417,34 @@ public final class RuntimeStateMaterializer {
         }
     }
 
+    private static <K extends Comparable<? super K>, C extends Comparable<? super C>, B> Map<K, B> deltaIfChanged(
+            Map<K, B> previous, RuntimeMutationDelta.ValueChanges<C, ?> changes) {
+        return changes.changedKeys().isEmpty() ? previous : StateMapSupport.delta(previous);
+    }
+
     static CoreTreasuryState treasuryTransition(RuntimeMutationDelta.TreasuryValues changes,
                                                 RuntimeIdentityRegistry identities,
                                                 CoreTreasuryState previous) {
-        Map<String, Long> fees = StateMapSupport.delta(previous.feeBalances());
-        Map<String, Long> insurance = StateMapSupport.delta(previous.insuranceBalances());
-        Map<String, Long> deficits = StateMapSupport.delta(previous.insuranceDeficits());
-        Map<String, Long> liquidationFees = StateMapSupport.delta(previous.liquidationFeeBalances());
-        Map<String, Long> fundingResiduals = StateMapSupport.delta(previous.fundingResidualBalances());
-        Map<String, Long> roundingResiduals = StateMapSupport.delta(previous.roundingResidualBalances());
-        Map<String, Long> clearingPnl = StateMapSupport.delta(previous.clearingPnlBalances());
+        if (changes.assets().changedKeys().isEmpty()
+                && changes.funding().changedKeys().isEmpty()
+                && changes.lifecycle().changedKeys().isEmpty()) {
+            return previous;
+        }
+        boolean assetsChanged = !changes.assets().changedKeys().isEmpty();
+        Map<String, Long> fees = assetsChanged
+                ? StateMapSupport.delta(previous.feeBalances()) : previous.feeBalances();
+        Map<String, Long> insurance = assetsChanged
+                ? StateMapSupport.delta(previous.insuranceBalances()) : previous.insuranceBalances();
+        Map<String, Long> deficits = assetsChanged
+                ? StateMapSupport.delta(previous.insuranceDeficits()) : previous.insuranceDeficits();
+        Map<String, Long> liquidationFees = assetsChanged
+                ? StateMapSupport.delta(previous.liquidationFeeBalances()) : previous.liquidationFeeBalances();
+        Map<String, Long> fundingResiduals = assetsChanged
+                ? StateMapSupport.delta(previous.fundingResidualBalances()) : previous.fundingResidualBalances();
+        Map<String, Long> roundingResiduals = assetsChanged
+                ? StateMapSupport.delta(previous.roundingResidualBalances()) : previous.roundingResidualBalances();
+        Map<String, Long> clearingPnl = assetsChanged
+                ? StateMapSupport.delta(previous.clearingPnlBalances()) : previous.clearingPnlBalances();
         for (Integer assetId : changes.assets().changedKeys()) {
             String asset = identities.asset(assetId);
             RuntimeMutationDelta.AssetLedger value = changes.assets().currentValues().get(assetId);
@@ -422,9 +456,11 @@ public final class RuntimeStateMaterializer {
             putOrRemove(roundingResiduals, asset, value.roundingResidual());
             putOrRemove(clearingPnl, asset, value.clearingPnl());
         }
-        Map<String, Long> fundingSettlements = StateMapSupport.delta(previous.fundingSettlements());
-        Map<String, CoreTreasuryState.FundingProgress> fundingProgress = StateMapSupport.delta(
-                previous.fundingProgress());
+        boolean fundingChanged = !changes.funding().changedKeys().isEmpty();
+        Map<String, Long> fundingSettlements = fundingChanged
+                ? StateMapSupport.delta(previous.fundingSettlements()) : previous.fundingSettlements();
+        Map<String, CoreTreasuryState.FundingProgress> fundingProgress = fundingChanged
+                ? StateMapSupport.delta(previous.fundingProgress()) : previous.fundingProgress();
         for (Integer symbolId : changes.funding().changedKeys()) {
             String symbol = identities.symbol(symbolId);
             RuntimeMutationDelta.FundingLedger value = changes.funding().currentValues().get(symbolId);
@@ -435,9 +471,11 @@ public final class RuntimeStateMaterializer {
                     progress.instrumentVersion(), progress.fundingRatePpm(), progress.accountLaneId(),
                     progress.nextCursorUserId(), progress.commandId()));
         }
-        Map<String, Long> lifecycleSettlements = StateMapSupport.delta(previous.lifecycleSettlements());
-        Map<String, CoreTreasuryState.LifecycleProgress> lifecycleProgress = StateMapSupport.delta(
-                previous.lifecycleProgress());
+        boolean lifecycleChanged = !changes.lifecycle().changedKeys().isEmpty();
+        Map<String, Long> lifecycleSettlements = lifecycleChanged
+                ? StateMapSupport.delta(previous.lifecycleSettlements()) : previous.lifecycleSettlements();
+        Map<String, CoreTreasuryState.LifecycleProgress> lifecycleProgress = lifecycleChanged
+                ? StateMapSupport.delta(previous.lifecycleProgress()) : previous.lifecycleProgress();
         for (Integer symbolId : changes.lifecycle().changedKeys()) {
             String symbol = identities.symbol(symbolId);
             RuntimeMutationDelta.LifecycleLedger value = changes.lifecycle().currentValues().get(symbolId);

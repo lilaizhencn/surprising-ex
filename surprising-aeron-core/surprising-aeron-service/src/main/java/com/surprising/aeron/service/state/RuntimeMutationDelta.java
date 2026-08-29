@@ -19,6 +19,10 @@ import java.util.Set;
 
 public final class RuntimeMutationDelta {
 
+    private static final LaneValues EMPTY_LANE_VALUES = new LaneValues(
+            0, Map.of(), Map.of(), Map.of(), Set.of(), Map.of(), Map.of(), Map.of(),
+            Map.of(), Map.of(), Map.of(), Map.of());
+
     private final ProductLine productLine;
     private final long revision;
     private final int pendingReservationCount;
@@ -73,7 +77,8 @@ public final class RuntimeMutationDelta {
         this.users = users;
         this.orders = orders;
         this.reservations = reservations;
-        this.pendingReservations = Collections.unmodifiableSet(new HashSet<>(pendingReservations));
+        this.pendingReservations = pendingReservations.isEmpty()
+                ? Set.of() : Collections.unmodifiableSet(new HashSet<>(pendingReservations));
         this.positions = positions;
         this.liquidations = liquidations;
         this.riskSnapshots = riskSnapshots;
@@ -131,8 +136,14 @@ public final class RuntimeMutationDelta {
     }
 
     static final class ValueChanges<K extends Comparable<? super K>, V> {
+        private static final ValueChanges<?, ?> EMPTY = new ValueChanges<>(new Object[0], new Object[0], 0);
         private final CompactKeyList<K> changedKeys;
         private final CompactValueMap<K, V> currentValues;
+
+        private ValueChanges(Object[] keys, Object[] values, int presentValues) {
+            this.changedKeys = new CompactKeyList<>(keys);
+            this.currentValues = new CompactValueMap<>(keys, values, presentValues);
+        }
 
         private ValueChanges(Collection<K> changedKeys, Map<K, V> currentValues) {
             if (changedKeys == null || currentValues == null) {
@@ -168,7 +179,21 @@ public final class RuntimeMutationDelta {
 
         static <K extends Comparable<? super K>, V> ValueChanges<K, V> of(
                 Collection<K> changedKeys, Map<K, V> currentValues) {
+            if (changedKeys == null || currentValues == null) {
+                throw new IllegalArgumentException("invalid runtime value changes");
+            }
+            if (changedKeys.isEmpty()) {
+                if (!currentValues.isEmpty()) {
+                    throw new IllegalArgumentException("runtime values must belong to changed keys");
+                }
+                return empty();
+            }
             return new ValueChanges<>(changedKeys, currentValues);
+        }
+
+        @SuppressWarnings("unchecked")
+        static <K extends Comparable<? super K>, V> ValueChanges<K, V> empty() {
+            return (ValueChanges<K, V>) EMPTY;
         }
 
         java.util.List<K> changedKeys() { return changedKeys; }
@@ -213,14 +238,19 @@ public final class RuntimeMutationDelta {
         private CompactValueMap(Object[] keys, Object[] values, int size) {
             this.keys = keys;
             this.values = values;
-            int tableSize = 2;
-            while (tableSize < keys.length * 2) tableSize <<= 1;
-            indexTable = new int[tableSize];
-            indexMask = tableSize - 1;
-            for (int index = 0; index < keys.length; index++) {
-                int slot = spread(keys[index].hashCode()) & indexMask;
-                while (indexTable[slot] != 0) slot = (slot + 1) & indexMask;
-                indexTable[slot] = index + 1;
+            if (keys.length <= 4) {
+                indexTable = null;
+                indexMask = 0;
+            } else {
+                int tableSize = 2;
+                while (tableSize < keys.length * 2) tableSize <<= 1;
+                indexTable = new int[tableSize];
+                indexMask = tableSize - 1;
+                for (int index = 0; index < keys.length; index++) {
+                    int slot = spread(keys[index].hashCode()) & indexMask;
+                    while (indexTable[slot] != 0) slot = (slot + 1) & indexMask;
+                    indexTable[slot] = index + 1;
+                }
             }
             this.size = size;
         }
@@ -228,6 +258,15 @@ public final class RuntimeMutationDelta {
         @Override
         public V get(Object key) {
             if (key == null) return null;
+            if (indexTable == null) {
+                for (int index = 0; index < keys.length; index++) {
+                    if (keys[index].equals(key)) {
+                        @SuppressWarnings("unchecked") V value = (V) values[index];
+                        return value;
+                    }
+                }
+                return null;
+            }
             int slot = spread(key.hashCode()) & indexMask;
             int encodedIndex;
             while ((encodedIndex = indexTable[slot]) != 0) {
@@ -367,20 +406,19 @@ public final class RuntimeMutationDelta {
     }
 
     static LaneValues emptyLaneValues() {
-        return new LaneValues(0, Map.of(), Map.of(), Map.of(), Set.of(), Map.of(), Map.of(), Map.of(),
-                Map.of(), Map.of(), Map.of(), Map.of());
+        return EMPTY_LANE_VALUES;
     }
 
     static LaneValues captureLane(AccountLaneState lane, CaptureRequest request) {
-        Map<Long, UserValue> users = HashMap.newHashMap(request.userIds().length);
+        Map<Long, UserValue> users = null;
         for (long userId : request.userIds()) {
             if (!lane.owns(userId)) continue;
             UserRuntime user = lane.users.get(userId);
             if (user == null) continue;
             int[] assetIds = request.balanceAssetIds().get(userId);
             int assetCount = assetIds == null ? 0 : assetIds.length;
-            Set<Integer> changedAssets = HashSet.newHashSet(assetCount);
-            Map<Integer, BalanceValue> balances = HashMap.newHashMap(assetCount);
+            Set<Integer> changedAssets = assetCount == 0 ? Set.of() : HashSet.newHashSet(assetCount);
+            Map<Integer, BalanceValue> balances = assetCount == 0 ? Map.of() : HashMap.newHashMap(assetCount);
             if (assetIds != null) {
                 for (int assetId : assetIds) {
                     changedAssets.add(assetId);
@@ -392,60 +430,88 @@ public final class RuntimeMutationDelta {
                     }
                 }
             }
+            if (users == null) users = HashMap.newHashMap(request.userIds().length);
             users.put(userId, new UserValue(user, lane.pendingReservationCount(userId),
                     ValueChanges.of(changedAssets, balances)));
         }
 
         Map<Long, OrderRuntime> orders = present(request.orderIds(), lane.orders);
         Map<Long, ReservationRuntime> reservations = present(request.reservationIds(), lane.reservations);
-        Set<Long> pendingReservations = HashSet.newHashSet(request.reservationIds().length);
+        Set<Long> pendingReservations = null;
         for (long orderId : request.reservationIds()) {
-            if (lane.pendingReservationSequences.containsKey(orderId)) pendingReservations.add(orderId);
+            if (lane.pendingReservationSequences.containsKey(orderId)) {
+                if (pendingReservations == null) {
+                    pendingReservations = HashSet.newHashSet(request.reservationIds().length);
+                }
+                pendingReservations.add(orderId);
+            }
         }
         Map<Long, PositionRuntime> positions = present(request.positionKeys(), lane.positions);
         Map<Long, LiquidationRuntime> liquidations = present(request.liquidationIds(), lane.liquidations);
         Map<Long, RiskSnapshotRuntime> riskSnapshots = present(request.riskSnapshotKeys(), lane.riskSnapshots);
-        Map<CoreLeverageKey, Long> leverages = HashMap.newHashMap(request.leverageKeys().size());
+        Map<CoreLeverageKey, Long> leverages = null;
         for (CoreLeverageKey key : request.leverageKeys()) {
             if (!lane.owns(key.userId())) continue;
             Long value = lane.leverages.get(key);
-            if (value != null) leverages.put(key, value);
+            if (value != null) {
+                if (leverages == null) leverages = HashMap.newHashMap(request.leverageKeys().size());
+                leverages.put(key, value);
+            }
         }
         Map<Long, CoreAlgoOrderState> algoOrders = present(request.algoOrderIds(), lane.algoOrders);
         Map<Long, CoreTriggerOrderState> triggerOrders = present(request.triggerOrderIds(), lane.triggerOrders);
-        Map<RuntimeClientKey, Long> clientOrders = HashMap.newHashMap(request.clientKeysByUser().size());
-        request.clientKeysByUser().forEach((userId, clientKeys) -> {
-            if (!lane.owns(userId)) return;
+        Map<RuntimeClientKey, Long> clientOrders = null;
+        for (Map.Entry<Long, long[]> entry : request.clientKeysByUser().entrySet()) {
+            long userId = entry.getKey();
+            long[] clientKeys = entry.getValue();
+            if (!lane.owns(userId)) continue;
             var values = lane.clientOrderIndex.get(userId);
-            if (values == null) return;
+            if (values == null) continue;
             for (long clientKey : clientKeys) {
                 Long orderId = values.get(clientKey);
                 if (orderId != null && !lane.pendingReservation(orderId)) {
+                    if (clientOrders == null) {
+                        clientOrders = HashMap.newHashMap(request.clientKeysByUser().size());
+                    }
                     clientOrders.put(new RuntimeClientKey(userId, clientKey), orderId);
                 }
             }
-        });
-        return new LaneValues(lane.pendingReservationSequences.size(), users, orders, reservations,
-                pendingReservations, positions, liquidations, riskSnapshots, leverages, algoOrders,
-                triggerOrders, clientOrders);
+        }
+        return new LaneValues(lane.pendingReservationSequences.size(), emptyIfNull(users), orders, reservations,
+                emptyIfNull(pendingReservations), positions, liquidations, riskSnapshots, emptyIfNull(leverages), algoOrders,
+                triggerOrders, emptyIfNull(clientOrders));
+    }
+
+    private static <K, V> Map<K, V> emptyIfNull(Map<K, V> values) {
+        return values == null ? Map.of() : values;
+    }
+
+    private static <V> Set<V> emptyIfNull(Set<V> values) {
+        return values == null ? Set.of() : values;
     }
 
     private static <V> Map<Long, V> present(
             long[] keys, org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<V> values) {
-        Map<Long, V> result = HashMap.newHashMap(keys.length);
+        Map<Long, V> result = null;
         for (long key : keys) {
             V value = values.get(key);
-            if (value != null) result.put(key, value);
+            if (value != null) {
+                if (result == null) result = HashMap.newHashMap(keys.length);
+                result.put(key, value);
+            }
         }
-        return result;
+        return emptyIfNull(result);
     }
 
     private static <V> Map<Long, V> present(long[] keys, Map<Long, V> values) {
-        Map<Long, V> result = HashMap.newHashMap(keys.length);
+        Map<Long, V> result = null;
         for (long key : keys) {
             V value = values.get(key);
-            if (value != null) result.put(key, value);
+            if (value != null) {
+                if (result == null) result = HashMap.newHashMap(keys.length);
+                result.put(key, value);
+            }
         }
-        return result;
+        return emptyIfNull(result);
     }
 }

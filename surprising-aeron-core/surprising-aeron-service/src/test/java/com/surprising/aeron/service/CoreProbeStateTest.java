@@ -1415,6 +1415,36 @@ class CoreProbeStateTest {
     }
 
     @Test
+    void acknowledgedTerminalOrderCannotBeResurrectedByLateFactMaterialization() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            assertThat(state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 2,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))
+                    .status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(applyAndDrain(state, tradingCommand(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 3,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(903, "BTC-USDT", 1,
+                            CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS,
+                            CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
+                            false, "client-903")))).status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(applyAndDrain(state, tradingCommand(CoreMessageType.CANCEL_ORDER, UUID.randomUUID(), 4,
+                    TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(903)))).status())
+                    .isEqualTo(ResponseStatus.APPLIED);
+
+            var terminalState = state.tradingState();
+            var retention = new TerminalStateRetention();
+            retention.observeAcknowledgedOrders(terminalState, 4, List.of(903L));
+            var eligible = retention.eligible(terminalState, 4, TerminalStateRetention.MAX_PRUNE_PER_ACK);
+
+            assertThat(eligible.orderIds()).containsExactly(903L);
+            retention.complete(eligible, 4);
+            retention.observe(terminalState, 3, List.of(903L), List.of(), List.of());
+            assertThat(retention.candidateCount()).isZero();
+            assertThat(retention.tombstoneCount()).isEqualTo(1);
+            assertThat(retention.containsOrder(903, 1001, "client-903")).isTrue();
+        }
+    }
+
+    @Test
     void cancelSettlementDoesNotSubmitCrossThreadLaneCommands() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applySpotInstrument(state);
