@@ -240,15 +240,19 @@ Core Fact outbox 在 owner 上只登记确定性的元数据摘要、容量预�
 sequence 构造。登记对象是显式 `CoreFactJournalEntry`，不捕获 owner closure；它只持有确定性命令元数据、primitive
 资金 posting、dirty-key fact view 和 projection point，materializer 才等待投影并编码完整 Core Fact。Audit Exporter
 查询只返回已完成的连续前缀；`ACK_EXPORT` 作为审计控制命令可以在无关 matcher window 未提交时确认已经物化的连续
-前缀，不再把审计 ACK 变成交易 owner 的 projection/matching fence。snapshot/outbox 持久化才建立显式 fence。
-等待 matcher 的临时冻结不会更新已提交 hash，失败仍按命令前状态回滚；
+前缀；ACK 裁剪只消费随 outbox entry 保存的 primitive 终态订单 ID，不等待 Core Fact view/materializer，
+也不把审计 ACK 变成交易 owner 的 projection/matching fence。异步物化失败保留为 sticky fatal failure；
+snapshot/outbox 持久化才建立显式 fence。matcher 之前的业务拒绝不会修改权威状态；matcher 已接受后若提交阶段
+再出现校验或发布错误则 fail closed，不能伪回滚已经产生的订单簿事实；
 批量订单则保留整批累计 delta，直到批次原子提交。产品尚未上线，因此生产代码没有 legacy、fallback、
 双写或 feature flag 路径。
 
 Matcher continuation 与 Lane command context 共用按 Core sequence 定位的预分配 ring；pending 顺序也由 primitive
 sequence ring 保存。owner 不再为每条撮合命令维护 `ConcurrentHashMap<sequence, CompletableFuture>`、active future set
-和 completed-result map，也不在 future 完成后等待 callback 从 active set 删除；异步 callback 只向有界 completion queue
-发布结果，owner 在确定性提交边界消费。默认关闭的 matching phase 诊断不会再执行 `nanoTime` 或写计时 map。永续订单
+和 completed-result map，也不在 future 完成后等待 callback 从 active set 删除；异步 callback 只按 Core sequence
+release-publish 到预分配 completion mailbox，owner 仅消费当前确定性 sequence。mailbox depth 在槽位发布前预约，
+sticky overflow 即使没有 pending sequence 也会 fail closed。默认关闭的 matching phase 诊断不会再执行 `nanoTime`
+或写计时 map。永续订单
 准入的 open-interest 比例计算和 risk bracket 选择使用精确 long fast path，只有真实 long 乘法溢出才进入
 `BigInteger` fallback；同一命令的杠杆和 matcher evidence 不再重复查询或重复解码。
 
@@ -527,6 +531,28 @@ cursor 等待占 504（`22.7%`），其后是 runtime `TreeMap`、rolling hash �
 projection/fact 分别只有 344/263 个样本。当前最佳同轮终态吞吐仍不足 6k/s，离每产品线 `100k/s` 很远；
 下一阶段的主攻点已经从 projection/fact 临时集合转为 owner completion 协调、权威 runtime map/hash 和物理 CPU
 隔离，不能继续靠增大 in-flight window 获得目标容量。
+
+2026-08-29 本阶段一次性收敛六项 owner 热路：matcher 之前完成触发单和 replacement 身份校验，matcher 接受后取消
+业务回滚；completion 从 MPSC queue/publication cursor 改成按 Core sequence 定位的预分配 mailbox；Core Fact 的
+order view 和协议编码继续在线程外生成，ACK 只携带 primitive 终态保留元数据；runtime mutation/commit/funds ledger
+的 long/int key 与 lane after-image 使用 primitive 容器；逐提交资金 posting 按资产守恒，完整资金总量和 immutable
+snapshot 则在 teardown/soak 核对；查询分派通过单一 `QUERY` 分支与命令热路隔离。回归过程中还修复了 mailbox
+“槽位先发布、depth 后增加”的消费竞态，以及无 pending sequence 时 overflow 未优先 fail closed 的问题。
+
+HotSpot JDK 25.0.1、ZGC、8 GiB、4 Account Lane、4 matcher、10,000 用户、512 活跃 symbol、16,384 指令、
+BUSY_SPIN/256 window 的 5×5 秒预热、5×5 秒计量、3 forks A/B 中，当前为
+`5744.730 ± 276.257 terminal business ops/s`，固定基线 `2fd9fb77` 为
+`5419.854 ± 475.267 ops/s`，均值提高 `5.99%`；99.9% 区间仍重叠，因此只判定没有可确认回退且方向正向，
+不声明统计显著提升。最后一项 fail-closed 门禁加入后的同配置 1 fork 复测为 `5858.194 ops/s`，
+accepted=terminal、unfinished=0。service 全模块 `380` 个测试及 benchmark 模块 `10` 个测试均为 0 失败；
+3 分钟 10k×512 soak 完成 `1,400,899` 个终态业务操作，摘要为
+`fundsInvariant=true`，平均 `7509.324 ops/s`，snapshot `27,947,612 bytes`、恢复 `3416.690 ms`，
+期末 heap 比期初低，direct memory 为 0。`-prof gc` 的重生命周期场景为 `400.255 MB/s`，折算约
+`139,571 B/terminal business op`；JFR `DataLoss=0`、ZGC allocation stall/OOM 为 0，暂停主要为
+`0.01–0.06 ms`，最终采样最大 ZGC pause 为 `0.163 ms`。JFR 有效分配热点仍是 reservation rolling hash、
+`CompactKeyList`、mutation capture 和 persistent tree；全线程执行样本约 `84.6%` 是
+exchange-core/Disruptor 的前四项 wait/cursor，属于本机 8 物理核上等待线程
+与 owner 的 CPU 争用。当前结果仍不是每产品线 100k/s 生产认证，且 3 分钟只属于诊断 soak，正式门禁仍要求 40 分钟。
 
 其余五条衍生品线统一使用 `DerivativeCoreBenchmark.productionMixedWorkload`，通过 `productLine` 参数选择
 `LINEAR_PERPETUAL`、`INVERSE_PERPETUAL`、`LINEAR_DELIVERY`、`INVERSE_DELIVERY` 或 `OPTION`。场景固定

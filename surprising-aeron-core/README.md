@@ -65,8 +65,9 @@ P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣
 - Adapter 按 Core sequence 向一个 ExchangeCore ring 提交最多 `matcherWindowSize` 个命令；原生 shard 可并行，
   普通 symbol 结果按 `matcherShardId` 独立推进严格单调 sequence/native sequence 和连续 prefix；control shard `-1`
   承载跨 symbol 批次、前置撤单与生命周期命令。不同 shard 允许乱序完成，任一 shard 内倒退或 prefix 断裂即 fail closed。
-  异步完成直接把同一个 `CoreMatchingResult` 引用放入
-  有界 MPSC completion queue，不存在 `Completion` wrapper。Sequencer 扫描一次 userId 后把该引用扇出给受影响
+  异步完成直接把同一个 `CoreMatchingResult` 引用按 Core sequence release-publish 到预分配 completion mailbox，
+  不存在 MPSC queue、publication cursor 或 `Completion` wrapper。owner 只消费当前确定性 sequence；depth 在槽位
+  发布前预约，sticky overflow 无论是否存在 pending sequence 都会 fail closed。Sequencer 扫描一次 userId 后把该引用扇出给受影响
   Account Lane；不复制 event，也不物化
   `SettlementPlan`。wall-clock readiness/watchdog 只能由 external health
   supervisor 观察，不能进入复制状态或改变裁决顺序。
