@@ -36,7 +36,7 @@ mvn -pl :surprising-aeron-client,:surprising-aeron-tools -am test
 
 ## 实现状态与版本切换说明
 
-当前写格式为 command/envelope schema v4、export event marker v9、trading snapshot v24、matcher snapshot v4 和
+当前写格式为 command/envelope schema v4、export event marker v9、trading snapshot v24、matcher snapshot v5 和
 sectioned snapshot v15；decoder 和 startup 对旧主版本 fail closed，不保留 legacy reader 或隐式降级。
 
 P10 的目标不是物理 Core shard；每个三节点 Product Core 仍只运行一个共享的 Adapter/ExchangeCore，按 symbol 的
@@ -46,7 +46,8 @@ Matcher Lane 直接复用 exchange-core 原生 MatchingEngineRouter shard，Acco
 sequence、Core Fact、snapshot 和恢复仍由一个确定性 Sequencer 协调。默认 topology 为 4 个 native matcher shard、
 1 个 risk engine、4 个 Account Lane、一个 Sequencer-owned Treasury；matcher pipeline、pending reservation 隐藏、ACK 位图、全局 commit
 cursor 和实际 Lane snapshot section 已落地。Account Lane 作为账户隔离、路由、局部 hash 和恢复校验边界，由 Product Core
-owner 直接按确定性 Lane 顺序执行；不再创建 Lane worker、SPSC ring 或逐命令同步等待。当前 P10-D/E 已把订单批次合并为
+owner 直接按确定性 Lane 顺序执行普通交易，不创建逐命令 SPSC ring 或同步 worker barrier；独立 lifecycle worker
+仅承载跨多个 Lane 的重生命周期结算，并在 owner 统一合并前完成。当前 P10-D/E 已把订单批次合并为
 每 Lane 一次 apply/commit，并在提交前捕获 Lane 原生 per-asset Treasury delta。
 P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣称生产认证完成。
 
@@ -62,7 +63,9 @@ P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣
   Core 的 `CoreOrderState` 只保存业务元数据和活动状态，不保存可重建 FIFO 的 priority sequence。
 - adapter 固定使用 `RiskProcessingMode.MATCHING_ONLY` 并禁用 exchange-core margin trading；内部 user/symbol/risk module 是需随 matcher snapshot 恢复的技术状态，不是业务资金、持仓或保证金权威。
 - Adapter 按 Core sequence 向一个 ExchangeCore ring 提交最多 `matcherWindowSize` 个命令；原生 shard 可并行，
-  ResultsHandler 的 native sequence/prefix 必须形成严格连续前缀。异步完成直接把同一个 `CoreMatchingResult` 引用放入
+  普通 symbol 结果按 `matcherShardId` 独立推进严格单调 sequence/native sequence 和连续 prefix；control shard `-1`
+  承载跨 symbol 批次、前置撤单与生命周期命令。不同 shard 允许乱序完成，任一 shard 内倒退或 prefix 断裂即 fail closed。
+  异步完成直接把同一个 `CoreMatchingResult` 引用放入
   有界 MPSC completion queue，不存在 `Completion` wrapper。Sequencer 扫描一次 userId 后把该引用扇出给受影响
   Account Lane；不复制 event，也不物化
   `SettlementPlan`。wall-clock readiness/watchdog 只能由 external health
@@ -182,7 +185,7 @@ reservation 和 matcher 提交。只读 preflight 只服务显式 dry-run/test A
 - 每个 command 产生不可变、按 `(asset, ownerKind, ownerId, subledger)` 排序的 `FundsDelta` 和 Core Fact；before/after state hash、
   funds hash、Core/book prefix 和 Aeron position 必须共同标识同一裁决。Audit Exporter 从 replicated outbox 发布 Kafka history，
   History Projector 再幂等写入 PostgreSQL；投影结果不是 current state。
-- 当前写格式为 command/envelope v4、export event marker v9、trading snapshot v24、matcher snapshot v4、
+- 当前写格式为 command/envelope v4、export event marker v9、trading snapshot v24、matcher snapshot v5、
   sectioned snapshot v15。
   decoder、snapshot loader 和 startup 对旧主版本 fresh fail-old：旧版本一律拒绝并 fail closed，只能从 fresh compatible
   Product Core state 启动，不保留旧 codec reader、迁移读取路径或隐式降级。
@@ -227,8 +230,9 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
   service 的 Maven `validate` 同时校验 provenance 与整包 hash。
   matcher 内部启用事件链池化，池对象只在 exchange-core 内复用；对外 `MatcherResult` 为不可变值，普通交易热路径不执行全局状态报告。
   开放订单报告和 Core 对账均为 O(活动订单数)，不做排序。
-- `Trading snapshot v24` 是唯一外层交易快照写格式；matcher snapshot v4 保存全部
-  `MATCHING_ENGINE_ROUTER/[0..N)` 和 `RISK_ENGINE/[0..R)`。`sectioned snapshot v15` 按相同 Core/book prefix 拆分载荷，
+- `Trading snapshot v24` 是唯一外层交易快照写格式；matcher snapshot v5 保存全部
+  `MATCHING_ENGINE_ROUTER/[0..N)`、`RISK_ENGINE/[0..R)`，并按 `[-1, 0..N)` 保存 control/native shard 的独立
+  evidence sequence 与 prefix。`sectioned snapshot v15` 按相同 Core/book prefix 拆分载荷，
   并保存按 laneId 升序的实际 Account Lane state section；三个 Member 必须运行完全相同的 topology、fork、配置和 schema。
 - capture 在单共享 ExchangeCore 与 Core state 的配对 snapshot fence 内等待全部 native shard module 和 callback；
   pending matching 存在时拒绝发布。当前不存在第二个 ExchangeCore 或 `SymbolMatchingLanes` 运行时。

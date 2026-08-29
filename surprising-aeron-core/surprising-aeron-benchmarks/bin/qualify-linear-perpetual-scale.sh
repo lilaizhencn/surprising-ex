@@ -86,18 +86,14 @@ run_probe_case() {
 
 run_probe_matrix() {
   : > "${ARTIFACT_DIR}/scale-matrix.jsonl"
-  for symbols in 256 512; do
-    run_probe_case "symbols-u10000-s${symbols}" \
-      10000 "${symbols}" "${symbols}" 1 3 UNIFORM 1 4 "${LIFECYCLE_SYMBOL_BUDGET}"
-  done
+  run_probe_case symbols-u10000-s512 \
+    10000 512 512 1 3 UNIFORM 1 4 "${LIFECYCLE_SYMBOL_BUDGET}"
   run_probe_case density-u10000-s512-p5-o10 \
     10000 512 512 5 10 UNIFORM 1 4 "${LIFECYCLE_SYMBOL_BUDGET}"
   run_probe_case traffic-u10000-s512-pareto \
     10000 512 512 1 3 PARETO_80_20 5 4 "${LIFECYCLE_SYMBOL_BUDGET}"
   run_probe_case traffic-u10000-s512-hot \
     10000 512 512 1 3 SINGLE_HOT 1 4 "${LIFECYCLE_SYMBOL_BUDGET}"
-  run_probe_case traffic-u10000-s512-idle \
-    10000 512 256 1 3 MOSTLY_IDLE 1 4 "${LIFECYCLE_SYMBOL_BUDGET}"
   run_probe_case traffic-u10000-s512-storm \
     10000 512 512 1 3 MARK_PRICE_STORM 1 4 "${LIFECYCLE_SYMBOL_BUDGET}"
   run_probe_case full-sweep-u10000-s512 \
@@ -134,10 +130,8 @@ run_jmh_case() {
 }
 
 run_jmh_matrix() {
-  run_jmh_case uniform-256 10000 256 256 1 3 UNIFORM 1
   run_jmh_case uniform-512 10000 512 512 1 3 UNIFORM 1
   run_jmh_case pareto-512 10000 512 512 1 3 PARETO_80_20 5
-  run_jmh_case idle-512 10000 512 256 1 3 MOSTLY_IDLE 1
   run_jmh_case storm-512 10000 512 512 1 3 MARK_PRICE_STORM 1
   run_jmh_case density-512 10000 512 512 5 10 UNIFORM 1
   run_jmh_case full-sweep-512 10000 512 512 1 3 UNIFORM 1 512

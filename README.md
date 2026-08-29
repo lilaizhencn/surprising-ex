@@ -15,7 +15,7 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 |---|---|
 | P0 | canonical 中文 P0-P5 规范注册与分支安全：先发布根 README 契约，保留既有脏改动。 |
 | P1 | reservation、`PositionCloseCapacity`、价格分离与累计手续费：衍生品普通单为全量开仓风险预留，reduce-only 才可省略开仓保证金。 |
-| P2 | deterministic `MATCHING_ONLY` 推进与成对快照：adapter 每次仅执行一个按 Core sequence 排序的 matcher 命令，先取得不可变结果并推进可恢复的 matcher prefix digest，才执行下一条。 |
+| P2 | deterministic `MATCHING_ONLY` 推进与成对快照：adapter 允许有界 matcher pipeline；普通 symbol 命令按 native matcher shard 独立推进可恢复 prefix，跨 shard 批次/生命周期命令进入 control shard，Core commit 与 Core Fact 仍按全局 Core sequence 确定提交。 |
 | P3 | TradingRuntimeState 生产写入权威：六条产品线的 Runtime owner 线程是唯一交易裁决状态，immutable `TradingCoreState` 仅是快照、事实增量、恢复、hash 与对账投影。 |
 | P4 | six isolated settlement kernels：Spot、LinearPerpetual、InversePerpetual、LinearDelivery、InverseDelivery、Option 各有穷尽且隔离的结算内核。 |
 | P5 | FundsDelta、Treasury、操作级舍入与连续性：每命令/资产资金变动不可变且确定性排序，Treasury 子账本、残差和 Core Fact 前后状态证据显式核算。 |
@@ -35,7 +35,8 @@ P10-G 使用真实 HTTP 开放环门禁，只有保存 1,000 用户、至少 200
 但不在正式下单前额外往返 Core。`DeterministicExchangeCoreAdapter` 向一个共享 ExchangeCore 的原生 matcher shard
 提交有界 pipeline，直接持有
 exchange-core 产出的不可变 `MatcherResult`、event list 和 market data，不再复制 matcher 证据，并用
-`matcherSequence + MatcherPrefix(before, after)` 绑定命令结果；prefix digest 随配对快照恢复，断裂或 malformed
+全局唯一 `matcherSequence + matcherShardId + MatcherPrefix(before, after)` 绑定命令结果；每个 native shard 和
+control shard 各自推进 prefix digest，随配对快照恢复，单 shard 断裂、倒退或 malformed
 结果立即 fail closed。普通命令不再生成逐命令全量 `BookHashes`，完整 `bookStateHash` 只保留在 snapshot、恢复和
 显式审计边界。`TradingRuntimeState` 是 P3 唯一交易裁决权威；`TradingCoreState` 仅在每个事实边界按 changed-key
 生成一次不可变投影，承担 Cluster snapshot、Core Fact、恢复、状态 hash 和对账。P4 使用六个穷尽且隔离的
@@ -364,8 +365,8 @@ NMT 只能作为后续泄漏对照基线，不能单独证明无泄漏。20,000 
 
 线性永续的规模矩阵使用独立入口
 `surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-linear-perpetual-scale.sh`。它在 4 个 Account Lane、
-4 个 matcher、HotSpot JDK 25、ZGC 下只运行能暴露规模问题的 10,000 用户、256/512 个挂牌及活跃 symbol；
-小用户数和少 symbol 不再进入规模资格矩阵。矩阵包含均匀、80/20、单热点、绝大多数休眠、标记价风暴、
+4 个 matcher、HotSpot JDK 25、ZGC 下只运行能暴露规模问题的 10,000 用户、512 个挂牌及活跃 symbol；
+小用户数、少 symbol 和半数休眠场景不再进入规模资格矩阵。矩阵包含均匀、80/20、单热点、标记价风暴、
 每用户最多 5 仓位/10 挂单以及 512 symbol 全量生命周期 sweep。20 仓位/100 挂单的极端状态密度通过
 `capacity` 模式独立执行，避免初始化容量边界污染持续吞吐结论。
 `probe` 把每次完整生命周期 sweep 的吞吐、延迟、matcher backlog、未完成风险/资金费分片、快照大小和恢复时间
@@ -405,10 +406,35 @@ Snapshot v16 移除每个 Account Lane 重复保存的全局 `TradingCoreState`�
 exchange-core/Disruptor busy-spin 等待约占执行样本 `84%`，`RuntimeStateMaterializer.materializeTransition`、
 Snapshot 编码和 Core Fact 构造均未进入主要 CPU 热点。剩余业务分配集中在 `TreeMap`、`StateMapSupport.delta`、
 lineage freeze、mutation delta 和状态 hash。历史 `25660.077 ops/s` 使用 4 symbol、96 轮 HFT、batch 20，
-主要测持续轻交易；本矩阵每轮覆盖 256/512 symbol 并混入风险、资金费、强平、保险基金、ADL 和快照恢复，不能
+主要测持续轻交易；本矩阵每轮覆盖 512 symbol 并混入风险、资金费、强平、保险基金、ADL 和快照恢复，不能
 直接比较。与口径相同的旧 10k×512 全量 sweep 是 `4248.228 ops/s`，新 Probe 为 `4659.989 ops/s`，因此不是
 从 25k 回退，而是旧文档混用了两种 workload。当前单 JVM 重生命周期场景离每产品线 100k/s 仍很远，且矩阵不含
 Aeron Cluster、HTTP、Kafka、WebSocket；不得标记为 100k/s 生产认证。
+
+2026-08-29 matcher shard 证据链改造后，普通 symbol 结果不再争用一个全局 prefix/native completion
+水位：`MatcherEvidenceLedger` 为 control shard `-1` 和 4 个 native matcher shard 分别保存 sequence、prefix 与
+process-local native sequence；不同 shard 可以乱序完成，Core 只在对应 shard 上验证单调 sequence 与连续 prefix，
+再按全局 Core sequence 提交。跨 symbol 的订单批次、前置撤单和生命周期 matcher 工作固定进入 control shard，
+避免把一个 Core Fact 压缩成不可验证的多 prefix；matcher snapshot v5 按 `[-1, 0..N)` 保存并校验完整进度。
+普通成交结算仍由 Core owner 按确定性 Account Lane 顺序原地执行，不引入逐命令 executor/Future barrier；已有多用户
+重生命周期 Lane worker 继续只用于重操作，并输出真实 queue high-water、完成数和延迟指标。
+
+同机、同一 7 GiB ZGC/JVM 参数、10,000 用户/512 活跃 symbol 的改动前后 A/B 为
+`2251.935 -> 2752.499 terminal business ops/s`，提升 `22.23%`；该主机同时运行桌面负载且只有 16 GiB，绝对值有明显换页和 CPU 争用，
+因此这个 A/B 只证明改造方向，不替代隔离服务器容量结论。最终 512-only 大矩阵、5 个三 fork JMH、GC、JFR/NMT
+和 3 分钟诊断 soak 全部 PASS，均为 `fundsInvariant=true`、accepted=terminal、unfinished=0。无 profiler JMH：
+均匀低密度 `2571.970±683.121`、高密度 `2605.934±467.229`、80/20 `2518.355±791.503`、标记价风暴
+`610.364±99.517`、512 symbol 全量 lifecycle sweep `2337.144±513.754 ops/s`。soak 完成 `601,870` 个终态
+业务操作，平均 `3199.540 ops/s`，初始/期末/峰值堆为 `3.92/3.03/4.90 GiB`，DirectBuffer 峰值 1 byte，
+快照 `27,239,765 bytes`，恢复 `3685.434 ms`，没有观察到单调增长型泄漏。
+
+GC 归因运行是 `2689.811 ops/s`、`176.481 MB/s`，折算约 `67.19 KiB/terminal business op`；JFR
+`DataLoss=0`，9 次 ZGC 的最长暂停 `0.192 ms`、allocation stall 为 0。JFR 执行样本中
+`ProcessingSequenceBarrier.checkAlert` 56.95%、`WaitSpinningHelper.tryWaitFor` 11.03%、ring cursor/minimum
+sequence 14.81%、busy-spin/`Sequence.get` 2.19%，共享 ExchangeCore/Disruptor 等待合计约 84.98%。首个应用层
+热点 `CoreStateHash.mix` 仅 0.78%；主要分配仍在 `TreeMap`、persistent tree/delta lineage、mutation delta 和
+Treasury delta 合并。因此当前仍未达到每产品线 100k/s；下一阶段应围绕共享 ring/等待拓扑做物理隔离实验，
+同时保持同 symbol 串行、Core commit/资金/Treasury 全局确定性，不应再给普通成交引入同步 Lane barrier。
 
 其余五条衍生品线统一使用 `DerivativeCoreBenchmark.productionMixedWorkload`，通过 `productLine` 参数选择
 `LINEAR_PERPETUAL`、`INVERSE_PERPETUAL`、`LINEAR_DELIVERY`、`INVERSE_DELIVERY` 或 `OPTION`。场景固定
@@ -639,7 +665,7 @@ Topic、端口、磁盘、监控阈值和故障演练的精确清单待生产 Ru
   worktree，从已认证提交的不可变 `git archive` 编译，并在 JAR 生成后重新认证仓库和内嵌 provenance；
   Aeron service 的 Maven `validate` 阶段同时校验 provenance 与整包 hash。
 - 当前唯一写格式为 command/envelope schema v4、Core Export marker v9、`TradingState v24`、sectioned snapshot v15
-  和 matcher snapshot v4；所有旧主版本立即 fail closed，没有 legacy reader。sectioned snapshot 按 laneId 升序保存
+  和 matcher snapshot v5；所有旧主版本立即 fail closed，没有 legacy reader。sectioned snapshot 按 laneId 升序保存
   4 个实际 Account Lane state section，matcher section 保存 `matchingEngineCount` 个原生 matcher module 和
   `riskEngineCount` 个 risk module。
   恢复只使用 `InitialStateConfiguration.fromSnapshotOnly`，不允许 clean-start、活动订单回放或第二本 FIFO。
