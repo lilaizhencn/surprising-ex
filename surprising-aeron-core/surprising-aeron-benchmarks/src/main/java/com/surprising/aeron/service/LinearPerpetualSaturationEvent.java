@@ -38,6 +38,21 @@ final class LinearPerpetualSaturationEvent extends Event {
     @Label("Full window percentage")
     double fullWindowPercentage;
 
+    @Label("Window samples")
+    long windowSamples;
+
+    @Label("Full window samples")
+    long fullWindowSamples;
+
+    @Label("Sliding refill operations")
+    long refillOperations;
+
+    @Label("Producer starvation samples")
+    long producerStarvationSamples;
+
+    @Label("Producer starvation percentage")
+    double producerStarvationPercentage;
+
     @Label("Completion mailbox high-water mark")
     int completionMailboxHighWaterMark;
 

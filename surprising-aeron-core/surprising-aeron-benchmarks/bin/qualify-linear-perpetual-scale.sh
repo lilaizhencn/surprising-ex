@@ -114,6 +114,16 @@ validate_jmh() {
     .secondaryMetrics.unfinishedCoreMessages.score == 0)' "${result}" > /dev/null
 }
 
+validate_saturation_jmh() {
+  local result="$1"
+  validate_jmh "${result}"
+  jq -e 'length == 1 and all(.[ ];
+    .secondaryMetrics.matchingWindowSamples.score > 0 and
+    .secondaryMetrics.matchingFullWindowSamples.score > 0 and
+    .secondaryMetrics.matchingRefillOperations.score > 0 and
+    .secondaryMetrics.matchingProducerStarvationSamples.score == 0)' "${result}" > /dev/null
+}
+
 run_jmh_case() {
   local case_id="$1" users="$2" listed="$3" active="$4" positions="$5" orders="$6" profile="$7" rounds="$8"
   local lifecycle_budget="${9:-${LIFECYCLE_SYMBOL_BUDGET}}"
@@ -209,7 +219,7 @@ run_saturation_case() {
     -wi 1 -w 3s -i 3 -r 5s -f 1 -t 1 \
     -jvmArgsAppend "${saturation_args}" -rf json -rff "${result}" \
     2>&1 | tee "${ARTIFACT_DIR}/saturation-${case_id}.log"
-  validate_jmh "${result}"
+  validate_saturation_jmh "${result}"
 }
 
 run_saturation_profile() {
@@ -221,7 +231,7 @@ run_saturation_profile() {
     -wi 1 -w 3s -i 1 -r 10s -f 1 -t 1 \
     -jvmArgsAppend "${profile_args}" -rf json -rff "${ARTIFACT_DIR}/saturation-profile.json" \
     2>&1 | tee "${ARTIFACT_DIR}/saturation-profile.log"
-  validate_jmh "${ARTIFACT_DIR}/saturation-profile.json"
+  validate_saturation_jmh "${ARTIFACT_DIR}/saturation-profile.json"
   [[ -s "${ARTIFACT_DIR}/saturation.jfr" ]]
   [[ -s "${ARTIFACT_DIR}/saturation-gc.log" ]]
   grep -q 'Native Memory Tracking:' "${ARTIFACT_DIR}/saturation-profile.log"

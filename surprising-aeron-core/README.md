@@ -75,6 +75,11 @@ P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣
 - Pending matcher 顺序和 continuation 均使用预分配、按 Core sequence 定位的 primitive ring。热路不维护逐命令
   `CompletableFuture` map、active set 或 completed-result map；同步边界可直接读取已完成 future 的确定性结果，不再等待
   completion callback 清理并发集合。只有 snapshot/关闭 fence 会统一等待仍在途的 matcher future。
+- `saturatedMatchingWorkload` 使用共享有界窗口的持续滑动 feeder：同一方向内每完成一组 maker/taker 依赖就立即补入
+  下一币对，不再整窗排空后重新提交；一个方向全部完成后才反向，防止预置深度场景产生方向穿越。
+  每个 symbol 同一时刻最多一组订单在途，保持账户依赖和 Core sequence 提交顺序；
+  每个提交批次只等待首个连续完成，随后非阻塞提交该批其余已完成结果并立即 refill，避免 owner 空转与 matcher 争抢 CPU；
+  JMH/JFR 同时记录 window/full-window、refill 和 producer-starvation，资格脚本要求测量期存在持续补料且 starvation 为零。
 - JFR 热点判断只统计自定义 workload measurement 事件窗口，排除 JMH trial 初始化和 snapshot template。交易窗口内
   的协议 enum 解码无 Stream，typed mutation 不再重复复制已排序 change-set，lazy delta 用有界原子槽缓存变化值；批量
   订单结果和 open-order 状态按精确长度编码，避免每个 item 的中间 frame 与 grow/copy 缓冲。

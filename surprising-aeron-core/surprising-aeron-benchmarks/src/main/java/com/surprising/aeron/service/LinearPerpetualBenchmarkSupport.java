@@ -648,8 +648,21 @@ final class LinearPerpetualBenchmarkSupport {
             if (maxCompletions <= 0 || latencyRecorder == null) {
                 throw new IllegalArgumentException("matching drain batch requires a positive limit and recorder");
             }
-            return state.commitReadyMatching(maxCompletions, benchmarkTimestamp(sequences.clusterPosition),
-                    sequences.clusterPosition, true, (sequence, response) -> {
+            return commitReadyMatching(maxCompletions, true,
+                    (userId, latencyNanos) -> latencyRecorder.accept(latencyNanos));
+        }
+
+        int awaitReadyMatching(int maxCompletions, MatchingCompletionConsumer completionConsumer) {
+            if (maxCompletions <= 0 || completionConsumer == null) {
+                throw new IllegalArgumentException("matching batch requires a positive limit and consumer");
+            }
+            return commitReadyMatching(maxCompletions, true, completionConsumer);
+        }
+
+        private int commitReadyMatching(int maxCompletions, boolean awaitFirst,
+                                        MatchingCompletionConsumer completionConsumer) {
+            int completed = state.commitReadyMatching(maxCompletions, benchmarkTimestamp(sequences.clusterPosition),
+                    sequences.clusterPosition, awaitFirst, (sequence, response) -> {
                         PendingCommand pending = submittedMatching.peekFirst();
                         if (pending == null || pending.sequence != sequence) {
                             throw new IllegalStateException("matching batch completion crossed submission order");
@@ -662,8 +675,15 @@ final class LinearPerpetualBenchmarkSupport {
                         recordExport(response);
                         long latency = pending.submittedAtNanos == 0
                                 ? 0 : System.nanoTime() - pending.submittedAtNanos;
-                        latencyRecorder.accept(latency);
+                        completionConsumer.accept(pending.command.header().userId(), latency);
                     });
+            if (commandsSinceExportAck >= EXPORT_ACK_INTERVAL) acknowledgeExportsWithoutDrain();
+            return completed;
+        }
+
+        @FunctionalInterface
+        interface MatchingCompletionConsumer {
+            void accept(long userId, long latencyNanos);
         }
 
         private void validateTerminal(
@@ -713,12 +733,26 @@ final class LinearPerpetualBenchmarkSupport {
         }
 
         void acknowledgeExports() {
-            if (lastRequiredExportSequence == 0) return;
+            CoreMessage acknowledgement = exportAcknowledgement();
+            if (acknowledgement != null) execute(acknowledgement);
+        }
+
+        private void acknowledgeExportsWithoutDrain() {
+            CoreMessage acknowledgement = exportAcknowledgement();
+            if (acknowledgement == null) return;
+            PendingCommand pending = submitCommand(acknowledgement);
+            if (pending.sequence != 0 || pending.response.resultCode() == CoreResultCode.MATCHING_PENDING) {
+                throw new IllegalStateException("export acknowledgement entered the matching pipeline");
+            }
+        }
+
+        private CoreMessage exportAcknowledgement() {
+            if (lastRequiredExportSequence == 0) return null;
             long acknowledged = lastRequiredExportSequence;
             lastRequiredExportSequence = 0;
             commandsSinceExportAck = 0;
-            execute(command(CoreMessageType.ACK_EXPORT, CommandSource.RECOVERY_TOOL, 0,
-                    CoreExportCodec.encodeAck(new AckExportCommand(acknowledged))));
+            return command(CoreMessageType.ACK_EXPORT, CommandSource.RECOVERY_TOOL, 0,
+                    CoreExportCodec.encodeAck(new AckExportCommand(acknowledged)));
         }
 
         CoreLiquidationWorkView executionWork() {

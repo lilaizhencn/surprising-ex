@@ -158,6 +158,11 @@ public class LinearPerpetualCoreBenchmark {
                 measurement.maxMatchingBacklog = state.scenario.maxBacklog();
                 measurement.averageMatchingBacklog = state.scenario.averageMatchingBacklog();
                 measurement.fullWindowPercentage = state.scenario.fullWindowPercentage();
+                measurement.windowSamples = state.scenario.windowSamples();
+                measurement.fullWindowSamples = state.scenario.fullWindowSamples();
+                measurement.refillOperations = state.scenario.refillOperations();
+                measurement.producerStarvationSamples = state.scenario.producerStarvationSamples();
+                measurement.producerStarvationPercentage = state.scenario.producerStarvationPercentage();
                 measurement.completionMailboxHighWaterMark = state.scenario.completionMailboxHighWaterMark();
                 measurement.completionMailboxCapacity = state.scenario.completionMailboxCapacity();
                 measurement.p50LatencyNanos = state.scenario.p50LatencyNanos();
@@ -185,6 +190,12 @@ public class LinearPerpetualCoreBenchmark {
         counters.laneSettlementOperations += scenario.laneOperations(1);
         counters.laneQueryOperations += scenario.laneOperations(2);
         counters.laneRiskOperations += scenario.laneOperations(3);
+        if (scenario instanceof LinearPerpetualSaturationWorkload.SaturationScenario saturation) {
+            counters.matchingWindowSamples += saturation.windowSamples();
+            counters.matchingFullWindowSamples += saturation.fullWindowSamples();
+            counters.matchingRefillOperations += saturation.refillOperations();
+            counters.matchingProducerStarvationSamples += saturation.producerStarvationSamples();
+        }
     }
 
     @State(Scope.Thread)
@@ -459,6 +470,10 @@ public class LinearPerpetualCoreBenchmark {
         public long laneSettlementOperations;
         public long laneQueryOperations;
         public long laneRiskOperations;
+        public long matchingWindowSamples;
+        public long matchingFullWindowSamples;
+        public long matchingRefillOperations;
+        public long matchingProducerStarvationSamples;
 
         @Setup(Level.Iteration)
         public void reset() {
@@ -473,6 +488,10 @@ public class LinearPerpetualCoreBenchmark {
             laneSettlementOperations = 0;
             laneQueryOperations = 0;
             laneRiskOperations = 0;
+            matchingWindowSamples = 0;
+            matchingFullWindowSamples = 0;
+            matchingRefillOperations = 0;
+            matchingProducerStarvationSamples = 0;
         }
     }
 }
