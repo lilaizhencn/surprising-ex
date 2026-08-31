@@ -960,8 +960,8 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
                 throw new IllegalArgumentException("invalid Core Fact metadata");
             }
             boolean nonZeroFingerprint = false;
-            for (byte value : commandFingerprint.bytes()) {
-                if (value != 0) {
+            for (int index = 0; index < CommandFingerprint.LENGTH; index++) {
+                if (commandFingerprint.byteAt(index) != 0) {
                     nonZeroFingerprint = true;
                     break;
                 }

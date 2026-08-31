@@ -237,6 +237,41 @@ class RuntimeCommitHashTest {
     }
 
     @Test
+    void ownerAppliedHashTransitionsAvoidPreviewReplayAndRemainRollbackSafe() {
+        TradingCoreReducer reducer = new TradingCoreReducer();
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        List<Long> users = oneUserPerLane();
+        TradingCoreState before = baseState(reducer, users);
+        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities, FOUR_LANES);
+        RuntimeCommandProcessor.adjustBalance(runtime, identities, users.getFirst(),
+                new BalanceAdjustmentCommand(ASSET, 43));
+        TradingCoreState after = RuntimeStateMaterializer.materialize(runtime, identities);
+        RollingBusinessStateHash business = RollingBusinessStateHash.create(before, identities);
+        RollingFundsStateHash funds = RollingFundsStateHash.create(before, identities);
+        TradingRuntimeState.PreparedCommit captured = runtime.prepareCommitPatch(
+                1, 0, 1, identities, before.revision(), unchangedMatcher(), null,
+                business.value(), business.value(), funds.value(), funds.value(), true);
+        RuntimeCommitPatch.PreparedChanges changes = captured.prepareChanges();
+
+        RollingBusinessStateHash.HashTransition businessAbort = business.prepareApplied(changes);
+        RollingFundsStateHash.HashTransition fundsAbort = funds.prepareApplied(changes);
+        assertThat(business.value()).isEqualTo(RollingBusinessStateHash.compute(after));
+        assertThat(funds.value()).isEqualTo(RollingFundsStateHash.compute(after));
+        fundsAbort.rollback();
+        businessAbort.rollback();
+        assertThat(business.value()).isEqualTo(RollingBusinessStateHash.compute(before));
+        assertThat(funds.value()).isEqualTo(RollingFundsStateHash.compute(before));
+
+        RollingBusinessStateHash.HashTransition businessCommit = business.prepareApplied(changes);
+        RollingFundsStateHash.HashTransition fundsCommit = funds.prepareApplied(changes);
+        businessCommit.commit();
+        fundsCommit.commit();
+        assertThat(business.value()).isEqualTo(RollingBusinessStateHash.compute(after));
+        assertThat(funds.value()).isEqualTo(RollingFundsStateHash.compute(after));
+        runtime.close();
+    }
+
+    @Test
     void canonicalOverlayBeforeHashDoesNotReplaceRawContributionValidation() {
         TradingCoreReducer reducer = new TradingCoreReducer();
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();

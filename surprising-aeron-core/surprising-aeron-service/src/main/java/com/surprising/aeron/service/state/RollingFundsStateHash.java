@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.state;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
@@ -12,9 +11,12 @@ public final class RollingFundsStateHash {
 
     private final int productLine;
     private final Aggregate users = new Aggregate();
-    private final Map<Long, UserFundsHash> userHashes = new HashMap<>();
+    private final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<UserFundsHash> userHashes =
+            new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
     private final OwnerDomains[] ownerDomains = ownerDomains();
-    private final Map<Integer, RuntimeCommitPatch.TreasuryAssetValue> runtimeTreasury = new HashMap<>();
+    private final org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap<
+            RuntimeCommitPatch.TreasuryAssetValue> runtimeTreasury =
+            new org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap<>();
     private final Aggregate fees = new Aggregate();
     private final Aggregate insurance = new Aggregate();
     private final Aggregate deficits = new Aggregate();
@@ -112,7 +114,35 @@ public final class RollingFundsStateHash {
             valueDirty = beforeDirty;
         }
         return new HashTransition(this, staged, beforeHash, afterHash, beforeRevision, beforeSequence,
-                beforeIdentities, changes.afterRevision(), changes.coreSequence(), ownerGeneration);
+                beforeIdentities, changes.afterRevision(), changes.coreSequence(), ownerGeneration, false);
+    }
+
+    public HashTransition prepareApplied(RuntimeCommitPatch.PreparedChanges changes) {
+        if (changes == null) throw new IllegalArgumentException("prepared changes are required");
+        FundsPatchStage staged = stagePatch(changes);
+        long beforeHash = value();
+        long beforeRevision = revision;
+        long beforeSequence = lastCoreSequence;
+        RuntimeCommitPatch.IdentityView beforeIdentities = identities;
+        boolean applied = false;
+        try {
+            staged.apply();
+            applied = true;
+            identities = staged.identities;
+            revision = changes.afterRevision();
+            lastCoreSequence = changes.coreSequence();
+            valueDirty = true;
+            long afterHash = value();
+            return new HashTransition(this, staged, beforeHash, afterHash, beforeRevision, beforeSequence,
+                    beforeIdentities, changes.afterRevision(), changes.coreSequence(), ownerGeneration, true);
+        } catch (RuntimeException failure) {
+            if (applied) staged.rollbackApplied();
+            identities = beforeIdentities;
+            revision = beforeRevision;
+            lastCoreSequence = beforeSequence;
+            valueDirty = true;
+            throw failure;
+        }
     }
 
     public final class HashTransition {
@@ -134,6 +164,16 @@ public final class RollingFundsStateHash {
                                long beforeRevision, long beforeSequence,
                                RuntimeCommitPatch.IdentityView beforeIdentities,
                                long afterRevision, long afterSequence, long preparedGeneration) {
+            this(owner, staged, beforeHash, afterHash, beforeRevision, beforeSequence, beforeIdentities,
+                    afterRevision, afterSequence, preparedGeneration, false);
+        }
+
+        private HashTransition(RollingFundsStateHash owner, FundsPatchStage staged,
+                               long beforeHash, long afterHash,
+                               long beforeRevision, long beforeSequence,
+                               RuntimeCommitPatch.IdentityView beforeIdentities,
+                               long afterRevision, long afterSequence, long preparedGeneration,
+                               boolean applied) {
             this.owner = owner;
             this.staged = staged;
             this.beforeHash = beforeHash;
@@ -144,6 +184,7 @@ public final class RollingFundsStateHash {
             this.afterRevision = afterRevision;
             this.afterSequence = afterSequence;
             this.preparedGeneration = preparedGeneration;
+            if (applied) state = TransitionState.APPLIED;
         }
 
         public long beforeHash() { return beforeHash; }
@@ -152,6 +193,17 @@ public final class RollingFundsStateHash {
             commitOn(owner);
         }
         private void commitOn(RollingFundsStateHash target) {
+            if (state == TransitionState.APPLIED) {
+                if (owner != target || ownerGeneration != preparedGeneration
+                        || revision != afterRevision || lastCoreSequence != afterSequence
+                        || value() != afterHash) {
+                    throw new IllegalStateException("stale or foreign applied funds hash transition");
+                }
+                ownerGeneration = Math.incrementExact(ownerGeneration);
+                committedGeneration = ownerGeneration;
+                state = TransitionState.COMMITTED;
+                return;
+            }
             requireState(TransitionState.PREPARED, "commit");
             if (owner != target || ownerGeneration != preparedGeneration || revision != beforeRevision
                     || lastCoreSequence != beforeSequence || value() != beforeHash) {
@@ -179,8 +231,10 @@ public final class RollingFundsStateHash {
             rollbackOn(owner);
         }
         private void rollbackOn(RollingFundsStateHash target) {
-            requireState(TransitionState.COMMITTED, "rollback");
-            if (owner != target || ownerGeneration != committedGeneration || revision != afterRevision
+            boolean applied = state == TransitionState.APPLIED;
+            if (!applied) requireState(TransitionState.COMMITTED, "rollback");
+            long expectedGeneration = applied ? preparedGeneration : committedGeneration;
+            if (owner != target || ownerGeneration != expectedGeneration || revision != afterRevision
                     || lastCoreSequence != afterSequence || value() != afterHash) {
                 throw new IllegalStateException("stale or foreign committed funds hash transition");
             }
@@ -211,13 +265,12 @@ public final class RollingFundsStateHash {
         transition.rollbackOn(this);
     }
 
-    private enum TransitionState { PREPARED, COMMITTED, ROLLED_BACK }
+    private enum TransitionState { PREPARED, APPLIED, COMMITTED, ROLLED_BACK }
 
     private FundsPatchStage stagePatch(RuntimeCommitView patch) {
         RuntimeCommitPatch.IdentityView patchIdentities = validateHeader(patch);
         FundsPatchStage staged = new FundsPatchStage(patchIdentities);
         for (RuntimeCommitPatch.AccountLaneOwnerGroup group : patch.accountLaneGroups()) {
-            java.util.ArrayList<RuntimeCommitPatch.UserChange> deletions = new java.util.ArrayList<>();
             for (RuntimeCommitPatch.UserChange change : group.users()) {
                 boolean exists = userHashes.containsKey(change.userId());
                 if (exists != (change.before() != null)) {
@@ -228,14 +281,12 @@ public final class RollingFundsStateHash {
                             change.userId(), change.after(), null);
                     staged.add(() -> applyUserChange(group.laneId(), change),
                             () -> applyUserChange(group.laneId(), reverse));
-                } else if (change.after() == null) {
-                    deletions.add(change);
                 }
             }
             for (RuntimeCommitPatch.BalanceChange change : group.balances()) {
                 String asset = patchIdentities.asset(change.key().assetId());
                 UserFundsHash user = userHashes.get(change.key().userId());
-                Long actual = user == null ? null : user.balanceContributions.get(change.key().assetId());
+                Long actual = user == null ? null : user.balanceContribution(change.key().assetId());
                 Long expected = balanceContribution(asset, change.before());
                 if (!Objects.equals(actual, expected)) {
                     throw new IllegalArgumentException("funds balance before-value mismatch");
@@ -247,7 +298,8 @@ public final class RollingFundsStateHash {
                 staged.add(() -> applyBalanceChange(group.laneId(), change, asset),
                         () -> applyBalanceChange(previousOwner, reverse, asset));
             }
-            for (RuntimeCommitPatch.UserChange change : deletions) {
+            for (RuntimeCommitPatch.UserChange change : group.users()) {
+                if (change.before() == null || change.after() != null) continue;
                 int previousOwner = userHashes.get(change.userId()).owner;
                 RuntimeCommitPatch.UserChange reverse = new RuntimeCommitPatch.UserChange(
                         change.userId(), null, change.before());
@@ -609,7 +661,8 @@ public final class RollingFundsStateHash {
         private final long userId;
         private int owner;
         private final Aggregate balances = new Aggregate();
-        private final Map<Integer, Long> balanceContributions = new HashMap<>();
+        private final org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap balanceContributions =
+                new org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap();
 
         private UserFundsHash(long userId, int owner) {
             this.userId = userId;
@@ -631,13 +684,21 @@ public final class RollingFundsStateHash {
         }
 
         private void replace(RuntimeCommitPatch.BalanceChange change, String asset) {
-            Long previous = balanceContributions.remove(change.key().assetId());
-            if (previous != null) balances.remove(previous);
-            Long current = balanceContribution(asset, change.after());
+            int assetId = change.key().assetId();
+            if (balanceContributions.containsKey(assetId)) {
+                long previous = balanceContributions.get(assetId);
+                balanceContributions.removeKey(assetId);
+                balances.remove(previous);
+            }
+            Long current = RollingFundsStateHash.balanceContribution(asset, change.after());
             if (current != null) {
-                balanceContributions.put(change.key().assetId(), current);
+                balanceContributions.put(assetId, current);
                 balances.add(current);
             }
+        }
+
+        private Long balanceContribution(int assetId) {
+            return balanceContributions.containsKey(assetId) ? balanceContributions.get(assetId) : null;
         }
 
         private long value() {

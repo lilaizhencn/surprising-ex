@@ -498,10 +498,9 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.snapshotBusinessStateHash()).isEqualTo(businessHashBeforeFatal);
             assertThat(state.snapshotFundsStateHash()).isEqualTo(fundsHashBeforeFatal);
             assertThat(state.snapshotProjectionSequence()).isEqualTo(projectionBeforeFatal);
-            assertThat(state.commandResults()).hasSize(resultsBeforeFatal + 1).containsKey(fatalId);
-            assertThat(state.commandResults().get(fatalId).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
-            assertThat(state.commandResults().get(fatalId).status()).isEqualTo(ResponseStatus.OK);
-            assertThat(state.commandResults().get(fatalId).requiredExportSequence()).isZero();
+            assertThat(state.commandResults()).hasSize(resultsBeforeFatal).doesNotContainKey(fatalId);
+            assertThat(state.pendingMatching(fatalSequence)).isNotNull();
+            assertThat(state.pendingMatching(fatalSequence).pendingStateHash()).isNotZero();
             assertThat(state.appliedCommandCount()).isEqualTo(appliedBeforeFatal + 1);
             assertThat(state.pendingMatchingCount()).isOne();
             assertThat(state.matchingSequence(fatalId)).isEqualTo(fatalSequence);
@@ -666,8 +665,8 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.tradingState().order(12_102)).isNull();
             assertThat(state.tradingState().order(12_103)).isNull();
             assertThat(state.pendingMatchingCount()).isEqualTo(1);
-            assertThat(state.commandResults().get(commandId).resultCode())
-                    .isEqualTo(CoreResultCode.MATCHING_PENDING);
+            assertThat(state.commandResults()).doesNotContainKey(commandId);
+            assertThat(state.pendingMatching(sequence)).isNotNull();
             assertThatThrownBy(() -> state.apply(probe(UUID.randomUUID(), 4)))
                     .isSameAs(divergence);
         }

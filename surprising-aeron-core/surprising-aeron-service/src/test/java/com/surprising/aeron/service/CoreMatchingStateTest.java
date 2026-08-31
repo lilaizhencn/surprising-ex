@@ -36,6 +36,37 @@ import org.junit.jupiter.params.provider.MethodSource;
 class CoreMatchingStateTest {
 
     @Test
+    void inFlightIdempotencyUsesPendingIndexWithoutPollutingTerminalResultLedger() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applyInstrument(state);
+            apply(state, 1, 7, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 500)));
+            CoreMessage command = message(state, 2, 7, CoreMessageType.PLACE_ORDER,
+                    place(101, CoreOrderSide.BUY, 100, 1,
+                            ReservationKind.SPOT_ASSET, "USDT", 100));
+
+            CoreResponse pending = state.apply(command);
+            CoreResponse duplicate = state.apply(command);
+            CoreMessage conflicting = new CoreMessage(command.header(),
+                    place(102, CoreOrderSide.BUY, 100, 1,
+                            ReservationKind.SPOT_ASSET, "USDT", 100));
+            CoreResponse conflict = state.apply(conflicting);
+
+            assertThat(state.commandResults()).doesNotContainKey(command.header().commandId());
+            assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
+            assertThat(duplicate.commandStatus()).isEqualTo(ResponseStatus.OK);
+            assertThat(duplicate.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            assertThat(duplicate.appliedCommandCount()).isEqualTo(pending.appliedCommandCount());
+            assertThat(duplicate.stateHash()).isEqualTo(pending.stateHash());
+            assertThat(conflict.resultCode()).isEqualTo(CoreResultCode.IDEMPOTENCY_CONFLICT);
+
+            CoreResponse completed = drainMatching(state, pending, command);
+            assertThat(completed.status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(state.commandResults()).containsKey(command.header().commandId());
+        }
+    }
+
+    @Test
     void crossLaneIocPartialFillCommitsBothOwnersAndReleasesUnusedFunds() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applyInstrument(state);

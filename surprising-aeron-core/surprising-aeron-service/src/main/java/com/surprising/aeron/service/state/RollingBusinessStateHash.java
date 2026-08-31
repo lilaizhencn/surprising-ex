@@ -12,10 +12,12 @@ public final class RollingBusinessStateHash {
     private static final int RESTORED_OWNER = 64;
 
     private final Aggregate users = new Aggregate();
-    private final Map<Long, UserHash> userHashes = new HashMap<>();
+    private final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<UserHash> userHashes =
+            new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
     private final OwnerDomains[] ownerDomains = ownerDomains();
     private final Aggregate orders = new Aggregate();
-    private final Map<Long, OwnedContribution> orderContributions = new HashMap<>();
+    private final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<OwnedContribution>
+            orderContributions = new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
     private final Aggregate instruments = new Aggregate();
     private final Aggregate leverages = new Aggregate();
     private final Aggregate algoOrders = new Aggregate();
@@ -36,8 +38,15 @@ public final class RollingBusinessStateHash {
     private final Aggregate lifecycleSettlements = new Aggregate();
     private final Aggregate fundingProgress = new Aggregate();
     private final Aggregate lifecycleProgress = new Aggregate();
-    private final Map<Integer, RuntimeCommitPatch.TreasuryAssetValue> runtimeTreasury = new HashMap<>();
+    private final org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap<
+            RuntimeCommitPatch.TreasuryAssetValue> runtimeTreasury =
+            new org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap<>();
     private final Map<ContributionKey, OwnedContribution> contributions = new HashMap<>();
+    private final org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap
+            pendingBeforeCountsScratch = new org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap();
+    private final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<
+            RuntimeCommitPatch.ReservationChange> reservationChangesScratch =
+            new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
     private final int productLine;
     private long revision;
     private long nextLiquidationId;
@@ -134,7 +143,32 @@ public final class RollingBusinessStateHash {
             valueDirty = beforeDirty;
         }
         return new HashTransition(this, staged, beforeHash, afterHash, beforeRevision, beforeSequence,
-                changes.afterRevision(), changes.coreSequence(), ownerGeneration);
+                changes.afterRevision(), changes.coreSequence(), ownerGeneration, false);
+    }
+
+    public HashTransition prepareApplied(RuntimeCommitPatch.PreparedChanges changes) {
+        if (changes == null) throw new IllegalArgumentException("prepared changes are required");
+        BusinessPatchStage staged = stagePatch(changes);
+        long beforeHash = value();
+        long beforeRevision = revision;
+        long beforeSequence = lastCoreSequence;
+        boolean applied = false;
+        try {
+            staged.apply();
+            applied = true;
+            revision = changes.afterRevision();
+            lastCoreSequence = changes.coreSequence();
+            valueDirty = true;
+            long afterHash = value();
+            return new HashTransition(this, staged, beforeHash, afterHash, beforeRevision, beforeSequence,
+                    changes.afterRevision(), changes.coreSequence(), ownerGeneration, true);
+        } catch (RuntimeException failure) {
+            if (applied) staged.rollbackApplied();
+            revision = beforeRevision;
+            lastCoreSequence = beforeSequence;
+            valueDirty = true;
+            throw failure;
+        }
     }
 
     public final class HashTransition {
@@ -153,7 +187,8 @@ public final class RollingBusinessStateHash {
         private HashTransition(RollingBusinessStateHash owner, BusinessPatchStage staged,
                                long beforeHash, long afterHash,
                                long beforeRevision, long beforeSequence,
-                               long afterRevision, long afterSequence, long preparedGeneration) {
+                               long afterRevision, long afterSequence, long preparedGeneration,
+                               boolean applied) {
             this.owner = owner;
             this.staged = staged;
             this.beforeHash = beforeHash;
@@ -163,6 +198,7 @@ public final class RollingBusinessStateHash {
             this.afterRevision = afterRevision;
             this.afterSequence = afterSequence;
             this.preparedGeneration = preparedGeneration;
+            if (applied) state = TransitionState.APPLIED;
         }
 
         public long beforeHash() { return beforeHash; }
@@ -171,6 +207,17 @@ public final class RollingBusinessStateHash {
             commitOn(owner);
         }
         private void commitOn(RollingBusinessStateHash target) {
+            if (state == TransitionState.APPLIED) {
+                if (owner != target || ownerGeneration != preparedGeneration
+                        || revision != afterRevision || lastCoreSequence != afterSequence
+                        || value() != afterHash) {
+                    throw new IllegalStateException("stale or foreign applied business hash transition");
+                }
+                ownerGeneration = Math.incrementExact(ownerGeneration);
+                committedGeneration = ownerGeneration;
+                state = TransitionState.COMMITTED;
+                return;
+            }
             requireState(TransitionState.PREPARED, "commit");
             if (owner != target || ownerGeneration != preparedGeneration
                     || revision != beforeRevision || lastCoreSequence != beforeSequence || value() != beforeHash) {
@@ -196,8 +243,10 @@ public final class RollingBusinessStateHash {
             rollbackOn(owner);
         }
         private void rollbackOn(RollingBusinessStateHash target) {
-            requireState(TransitionState.COMMITTED, "rollback");
-            if (owner != target || ownerGeneration != committedGeneration
+            boolean applied = state == TransitionState.APPLIED;
+            if (!applied) requireState(TransitionState.COMMITTED, "rollback");
+            long expectedGeneration = applied ? preparedGeneration : committedGeneration;
+            if (owner != target || ownerGeneration != expectedGeneration
                     || revision != afterRevision || lastCoreSequence != afterSequence || value() != afterHash) {
                 throw new IllegalStateException("stale or foreign committed business hash transition");
             }
@@ -227,7 +276,7 @@ public final class RollingBusinessStateHash {
         transition.rollbackOn(this);
     }
 
-    private enum TransitionState { PREPARED, COMMITTED, ROLLED_BACK }
+    private enum TransitionState { PREPARED, APPLIED, COMMITTED, ROLLED_BACK }
 
     private BusinessPatchStage stagePatch(RuntimeCommitView patch) {
         if (patch == null || patch.productLine().ordinal() != productLine) {
@@ -247,18 +296,22 @@ public final class RollingBusinessStateHash {
         for (RuntimeCommitPatch.AccountLaneOwnerGroup group : patch.accountLaneGroups()) {
             UserGroupUpdate userStage = new UserGroupUpdate(group.laneId());
             UserGroupUpdate userRollback = new UserGroupUpdate(group.laneId());
-            Map<Long, Integer> pendingBeforeCounts = new HashMap<>();
-            Map<Long, RuntimeCommitPatch.ReservationChange> reservationChanges = new HashMap<>();
+            pendingBeforeCountsScratch.clear();
+            reservationChangesScratch.clear();
             for (RuntimeCommitPatch.UserChange change : group.users()) {
-                pendingBeforeCounts.put(change.userId(), change.pendingReservationCountAfter());
+                pendingBeforeCountsScratch.put(change.userId(), change.pendingReservationCountAfter());
             }
             for (RuntimeCommitPatch.ReservationChange change : group.reservations()) {
-                reservationChanges.put(change.orderId(), change);
+                reservationChangesScratch.put(change.orderId(), change);
                 if (change.pendingAfter() && change.after() != null) {
-                    pendingBeforeCounts.merge(change.after().userId(), -1, Math::addExact);
+                    long userId = change.after().userId();
+                    pendingBeforeCountsScratch.put(
+                            userId, Math.addExact(pendingBeforeCountsScratch.get(userId), -1));
                 }
                 if (change.pendingBefore() && change.before() != null) {
-                    pendingBeforeCounts.merge(change.before().userId(), 1, Math::addExact);
+                    long userId = change.before().userId();
+                    pendingBeforeCountsScratch.put(
+                            userId, Math.addExact(pendingBeforeCountsScratch.get(userId), 1));
                 }
             }
             for (RuntimeCommitPatch.UserChange change : group.users()) {
@@ -270,13 +323,13 @@ public final class RollingBusinessStateHash {
                 userStage.append(() -> userStage.apply(change));
                 RuntimeCommitPatch.UserChange reverse = new RuntimeCommitPatch.UserChange(
                         change.userId(), change.after(), change.before(),
-                        pendingBeforeCounts.getOrDefault(change.userId(), 0));
+                        pendingBeforeCountsScratch.get(change.userId()));
                 userRollback.prepend(() -> userRollback.apply(reverse));
             }
             for (RuntimeCommitPatch.BalanceChange change : group.balances()) {
                 String asset = identities.asset(change.key().assetId());
                 UserHash user = userHashes.get(change.key().userId());
-                Long actual = user == null ? null : user.balanceContributions.get(change.key().assetId());
+                Long actual = user == null ? null : user.balanceContribution(change.key().assetId());
                 Long expected = change.before() == null ? null
                         : entryHashStable(asset, stableBalance(asset, change.before()));
                 requireContribution(actual, expected, "balance");
@@ -289,7 +342,7 @@ public final class RollingBusinessStateHash {
             for (RuntimeCommitPatch.ReservationChange change : group.reservations()) {
                 ReservationRuntime before = change.before();
                 UserHash user = before == null ? null : userHashes.get(before.userId());
-                Long actual = user == null ? null : user.reservationContributions.get(change.orderId());
+                Long actual = user == null ? null : user.reservationContribution(change.orderId());
                 Long expected = before == null || before.reservedUnits() == 0 || change.pendingBefore() ? null
                         : entryHashStable(change.orderId(), stableReservation(before, identities));
                 requireContribution(actual, expected, "reservation");
@@ -303,7 +356,7 @@ public final class RollingBusinessStateHash {
                 RuntimeIdentityRegistry.PositionIdentity identity = identities.positionIdentity(change.positionKey());
                 PositionRuntime before = change.before();
                 UserHash user = before == null ? null : userHashes.get(before.userId());
-                Long actual = user == null ? null : user.positionContributions.get(change.positionKey());
+                Long actual = user == null ? null : user.positionContribution(change.positionKey());
                 Long expected = before == null ? null : entryHashStable(
                         identity.positionKey(), stablePosition(before, identities));
                 requireContribution(actual, expected, "position");
@@ -314,7 +367,8 @@ public final class RollingBusinessStateHash {
                 userRollback.prepend(() -> userRollback.apply(reverse));
             }
             for (RuntimeCommitPatch.OrderChange change : group.orders()) {
-                RuntimeCommitPatch.ReservationChange reservationChange = reservationChanges.get(change.orderId());
+                RuntimeCommitPatch.ReservationChange reservationChange =
+                        reservationChangesScratch.get(change.orderId());
                 boolean pendingBefore = reservationChange != null && reservationChange.pendingBefore();
                 boolean pendingAfter = reservationChange != null && reservationChange.pendingAfter();
                 OwnedContribution owned = orderContributions.get(change.orderId());
@@ -1254,9 +1308,12 @@ public final class RollingBusinessStateHash {
         private final Aggregate balances = new Aggregate();
         private final Aggregate reservations = new Aggregate();
         private final Aggregate positions = new Aggregate();
-        private final Map<Integer, Long> balanceContributions = new HashMap<>();
-        private final Map<Long, Long> reservationContributions = new HashMap<>();
-        private final Map<Long, Long> positionContributions = new HashMap<>();
+        private final org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap balanceContributions =
+                new org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap();
+        private final org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap reservationContributions =
+                new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap();
+        private final org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap positionContributions =
+                new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap();
 
         private UserHash(UserRuntime user) {
             productLine = user.productLine().ordinal();
@@ -1319,8 +1376,11 @@ public final class RollingBusinessStateHash {
         private void updateBalance(RuntimeCommitPatch.BalanceChange change,
                                    RuntimeIdentityRegistry identities) {
             int assetId = change.key().assetId();
-            Long previous = balanceContributions.remove(assetId);
-            if (previous != null) balances.remove(previous);
+            if (balanceContributions.containsKey(assetId)) {
+                long previous = balanceContributions.get(assetId);
+                balanceContributions.removeKey(assetId);
+                balances.remove(previous);
+            }
             if (change.after() != null) {
                 String asset = identities.asset(assetId);
                 long contribution = entryHashStable(asset, stableBalance(asset, change.after()));
@@ -1331,12 +1391,13 @@ public final class RollingBusinessStateHash {
 
         private void updateReservation(long ownerId, RuntimeCommitPatch.ReservationChange change,
                                        RuntimeIdentityRegistry identities) {
-            Long previous = reservationContributions.get(change.orderId());
+            boolean hadPrevious = reservationContributions.containsKey(change.orderId());
+            long previous = hadPrevious ? reservationContributions.get(change.orderId()) : 0;
             ReservationRuntime current = change.after();
             boolean includeCurrent = current != null && current.userId() == ownerId
                     && current.reservedUnits() > 0 && !change.pendingAfter();
-            if (previous == null && !includeCurrent) return;
-            if (previous != null) {
+            if (!hadPrevious && !includeCurrent) return;
+            if (hadPrevious) {
                 reservationContributions.remove(change.orderId());
                 reservations.remove(previous);
             }
@@ -1349,10 +1410,11 @@ public final class RollingBusinessStateHash {
 
         private void updatePosition(long ownerId, RuntimeCommitPatch.PositionChange change,
                                     RuntimeIdentityRegistry identities) {
-            Long previous = positionContributions.get(change.positionKey());
+            boolean hadPrevious = positionContributions.containsKey(change.positionKey());
+            long previous = hadPrevious ? positionContributions.get(change.positionKey()) : 0;
             PositionRuntime current = change.after();
-            if (previous == null && (current == null || current.userId() != ownerId)) return;
-            if (previous != null) {
+            if (!hadPrevious && (current == null || current.userId() != ownerId)) return;
+            if (hadPrevious) {
                 positionContributions.remove(change.positionKey());
                 positions.remove(previous);
             }
@@ -1362,6 +1424,18 @@ public final class RollingBusinessStateHash {
                 positionContributions.put(change.positionKey(), contribution);
                 positions.add(contribution);
             }
+        }
+
+        private Long balanceContribution(int assetId) {
+            return balanceContributions.containsKey(assetId) ? balanceContributions.get(assetId) : null;
+        }
+
+        private Long reservationContribution(long orderId) {
+            return reservationContributions.containsKey(orderId) ? reservationContributions.get(orderId) : null;
+        }
+
+        private Long positionContribution(long positionKey) {
+            return positionContributions.containsKey(positionKey) ? positionContributions.get(positionKey) : null;
         }
 
         private long value() {

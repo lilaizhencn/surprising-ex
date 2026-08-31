@@ -791,7 +791,9 @@ class RuntimeCommitRecoveryTest {
         assertThat(identities.snapshot()).isEqualTo(identitiesBefore);
         List<PatchEvidence> patches = state.drainCapturedCommitPatchesForTest().stream()
                 .map(PatchEvidence::from).toList();
-        CoreResultCode stored = state.commandResults().get(batch.header().commandId()).resultCode();
+        CoreResultCode stored = state.pendingMatching(state.matchingSequence(batch.header().commandId())) == null
+                ? state.commandResults().get(batch.header().commandId()).resultCode()
+                : CoreResultCode.MATCHING_PENDING;
         return new FatalBatchEvidence(true, outboxBefore, encodedV10OutboxFacts(state), ackBefore,
                 state.exportState().snapshot().acknowledgedSequence(), patches, stored,
                 businessBefore, fundsBefore, projectionBefore, matcherAfterFirst,

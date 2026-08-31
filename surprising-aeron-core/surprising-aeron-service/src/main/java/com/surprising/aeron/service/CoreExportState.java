@@ -741,13 +741,8 @@ final class CoreExportState implements AutoCloseable {
         }
 
         void acceptOldestFirst(java.util.function.Consumer<RuntimeCommitPatch> consumer) {
-            RuntimeCommitPatch[] ordered = new RuntimeCommitPatch[size];
-            PatchChain cursor = this;
-            for (int index = size - 1; index >= 0; index--) {
-                ordered[index] = cursor.patch;
-                cursor = cursor.previous;
-            }
-            for (RuntimeCommitPatch value : ordered) consumer.accept(value);
+            if (previous != null) previous.acceptOldestFirst(consumer);
+            consumer.accept(patch);
         }
 
         RuntimeCommitPatch.FactIdentitySlice identities() {

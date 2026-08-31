@@ -20,18 +20,35 @@ final class PendingMatching {
     private DecodedMatchingCommand decodedCommand;
     private ResolvedMatchingAdmission admission;
     private CoreAdmissionReservation capacityReservation;
+    private long pendingStateHash;
 
     PendingMatching(long sequence, Operation operation, CoreMessage command,
                     RuntimeProjectionPoint beforeProjection,
                     long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta) {
-        this(sequence, operation, command, List.of(), beforeProjection,
+        this(sequence, operation, command, CommandFingerprint.of(command), List.of(), beforeProjection,
+                beforeBusinessStateHash, beforeFundsStateHash, fundsDelta);
+    }
+
+    PendingMatching(long sequence, Operation operation, CoreMessage command, CommandFingerprint fingerprint,
+                    RuntimeProjectionPoint beforeProjection,
+                    long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta) {
+        this(sequence, operation, command, fingerprint, List.of(), beforeProjection,
                 beforeBusinessStateHash, beforeFundsStateHash, fundsDelta);
     }
 
     PendingMatching(long sequence, Operation operation, CoreMessage command,
                     List<Long> preMatchingCancellationOrderIds, RuntimeProjectionPoint beforeProjection,
                     long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta) {
-        this(sequence, operation, command, preMatchingCancellationOrderIds, beforeProjection,
+        this(sequence, operation, command, CommandFingerprint.of(command), preMatchingCancellationOrderIds,
+                beforeProjection,
+                beforeBusinessStateHash, beforeFundsStateHash, fundsDelta,
+                DecodedMatchingCommand.decode(command));
+    }
+
+    PendingMatching(long sequence, Operation operation, CoreMessage command, CommandFingerprint fingerprint,
+                    List<Long> preMatchingCancellationOrderIds, RuntimeProjectionPoint beforeProjection,
+                    long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta) {
+        this(sequence, operation, command, fingerprint, preMatchingCancellationOrderIds, beforeProjection,
                 beforeBusinessStateHash, beforeFundsStateHash, fundsDelta,
                 DecodedMatchingCommand.decode(command));
     }
@@ -40,7 +57,16 @@ final class PendingMatching {
                     List<Long> preMatchingCancellationOrderIds, RuntimeProjectionPoint beforeProjection,
                     long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta,
                     DecodedMatchingCommand decodedCommand) {
-        this(sequence, operation, command, preMatchingCancellationOrderIds, beforeProjection,
+        this(sequence, operation, command, CommandFingerprint.of(command), preMatchingCancellationOrderIds,
+                beforeProjection,
+                beforeBusinessStateHash, beforeFundsStateHash, fundsDelta, decodedCommand, null);
+    }
+
+    PendingMatching(long sequence, Operation operation, CoreMessage command, CommandFingerprint fingerprint,
+                    List<Long> preMatchingCancellationOrderIds, RuntimeProjectionPoint beforeProjection,
+                    long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta,
+                    DecodedMatchingCommand decodedCommand) {
+        this(sequence, operation, command, fingerprint, preMatchingCancellationOrderIds, beforeProjection,
                 beforeBusinessStateHash, beforeFundsStateHash, fundsDelta, decodedCommand, null);
     }
 
@@ -48,8 +74,17 @@ final class PendingMatching {
                     List<Long> preMatchingCancellationOrderIds, RuntimeProjectionPoint beforeProjection,
                     long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta,
                     DecodedMatchingCommand decodedCommand, ResolvedMatchingAdmission admission) {
+        this(sequence, operation, command, CommandFingerprint.of(command), preMatchingCancellationOrderIds,
+                beforeProjection, beforeBusinessStateHash, beforeFundsStateHash, fundsDelta, decodedCommand,
+                admission);
+    }
+
+    PendingMatching(long sequence, Operation operation, CoreMessage command, CommandFingerprint fingerprint,
+                    List<Long> preMatchingCancellationOrderIds, RuntimeProjectionPoint beforeProjection,
+                    long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta,
+                    DecodedMatchingCommand decodedCommand, ResolvedMatchingAdmission admission) {
         if (sequence <= 0 || operation == null || command == null || preMatchingCancellationOrderIds == null
-                || beforeProjection == null || fundsDelta == null || decodedCommand == null
+                || fingerprint == null || beforeProjection == null || fundsDelta == null || decodedCommand == null
                 || command.header().kind() != com.surprising.aeron.protocol.WireMessageKind.COMMAND) {
             throw new IllegalArgumentException("invalid pending matching request");
         }
@@ -57,7 +92,7 @@ final class PendingMatching {
         this.sequence = sequence;
         this.operation = operation;
         this.command = command;
-        this.fingerprint = CommandFingerprint.of(command);
+        this.fingerprint = fingerprint;
         this.preMatchingCancellationOrderIds = List.copyOf(preMatchingCancellationOrderIds);
         this.beforeProjection = beforeProjection;
         this.beforeBusinessStateHash = beforeBusinessStateHash;
@@ -90,6 +125,7 @@ final class PendingMatching {
         decodedCommand = DecodedMatchingCommand.decode(nextCommand);
         admission = source.admission;
         capacityReservation = source.capacityReservation;
+        pendingStateHash = source.pendingStateHash;
     }
 
     PendingMatching withPreMatchingCancellations(List<Long> orderIds) {
@@ -107,6 +143,11 @@ final class PendingMatching {
         return this;
     }
 
+    PendingMatching withPendingStateHash(long stateHash) {
+        pendingStateHash = stateHash;
+        return this;
+    }
+
     long sequence() { return sequence; }
     Operation operation() { return operation; }
     CoreMessage command() { return command; }
@@ -119,6 +160,7 @@ final class PendingMatching {
     DecodedMatchingCommand decodedCommand() { return decodedCommand; }
     ResolvedMatchingAdmission admission() { return admission; }
     CoreAdmissionReservation capacityReservation() { return capacityReservation; }
+    long pendingStateHash() { return pendingStateHash; }
 
     enum Operation {
         PLACE,

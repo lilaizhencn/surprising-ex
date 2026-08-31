@@ -110,8 +110,8 @@ class W1W2InvariantFenceTest {
 
         assertThat(ownerCommit)
                 .contains("preparedCommit.builder().prepare(")
-                .contains("rollingBusinessStateHash.prepare(preparedChanges)")
-                .contains("rollingFundsStateHash.prepare(preparedChanges)")
+                .contains("rollingBusinessStateHash.prepareApplied(preparedChanges)")
+                .contains("rollingFundsStateHash.prepareApplied(preparedChanges)")
                 .contains("businessTransition.commit()")
                 .contains("fundsTransition.commit()")
                 .contains("commitFaultInjector.inject(\"funds-hash\")")

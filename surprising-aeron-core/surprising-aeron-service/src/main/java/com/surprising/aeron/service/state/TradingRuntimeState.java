@@ -33,7 +33,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     private long revision;
     private final LaneTopology topology;
     private final AccountLaneState[] accountLanes;
-    private final ArrayList<Long>[] laneUserScratch;
+    private final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] laneUserScratch;
     private final SettlementLaneWorker[] lifecycleLaneWorkers;
     private final LifecycleLaneTask[] lifecycleLaneTasks;
     private final boolean[] lifecycleSelectedScratch;
@@ -128,8 +128,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (topology == null) throw new IllegalArgumentException("lane topology is required");
         this.topology = topology;
         this.accountLanes = new AccountLaneState[topology.accountLaneCount()];
-        @SuppressWarnings("unchecked")
-        ArrayList<Long>[] routedUsers = new ArrayList[topology.accountLaneCount()];
+        org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] routedUsers =
+                new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[topology.accountLaneCount()];
         this.laneUserScratch = routedUsers;
         this.lifecycleLaneWorkers = new SettlementLaneWorker[topology.accountLaneCount()];
         this.lifecycleLaneTasks = new LifecycleLaneTask[topology.accountLaneCount()];
@@ -143,7 +143,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         this.accountLaneMaxLatencyNanos = laneMetricValues(topology.accountLaneCount());
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             accountLanes[laneId] = new AccountLaneState(laneId, topology.accountLaneQueueCapacity());
-            laneUserScratch[laneId] = new ArrayList<>(4);
+            laneUserScratch[laneId] = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList(4);
         }
     }
 
@@ -387,9 +387,14 @@ public final class TradingRuntimeState implements AutoCloseable {
         return topology.accountLaneId(userId) == scoped.laneId();
     }
 
-    private static void applyLaneUsers(AccountLaneState lane, java.util.List<Long> users, long coreSequence,
+    private static void applyLaneUsers(
+                                       AccountLaneState lane,
+                                       org.eclipse.collections.impl.list.mutable.primitive.LongArrayList users,
+                                       long coreSequence,
                                        long stateContribution, long fundsContribution) {
-        for (long userId : users) {
+        org.eclipse.collections.api.iterator.LongIterator iterator = users.longIterator();
+        while (iterator.hasNext()) {
+            long userId = iterator.next();
             if (!lane.owns(userId)) lane.registerUser(userId);
             lane.applied(coreSequence, userId, stateContribution, fundsContribution);
         }
@@ -728,18 +733,51 @@ public final class TradingRuntimeState implements AutoCloseable {
                 || matchingResult.nativeCommand().coreSequence() != coreSequence) {
             throw new IllegalArgumentException("invalid lane apply");
         }
-        for (ArrayList<Long> users : laneUserScratch) users.clear();
+        clearLaneUserScratch();
         for (Long userId : userIds) {
             if (userId == null || userId <= 0) continue;
-            int laneId = topology.accountLaneId(userId);
-            laneUserScratch[laneId].add(userId);
+            addLaneUser(userId.longValue());
         }
+        return applyAndCommitLaneSequenceFromScratch(
+                coreSequence, matchingResult, stateContribution, fundsContribution);
+    }
+
+    public List<RuntimeCommitPatch.LaneCommit> applyAndCommitLaneSequence(
+            long coreSequence, long[] userIds, CoreMatchingResult matchingResult,
+            long stateContribution, long fundsContribution) {
+        assertOwner();
+        if (coreSequence <= 0 || userIds == null || matchingResult == null
+                || matchingResult.nativeCommand().coreSequence() != coreSequence) {
+            throw new IllegalArgumentException("invalid lane apply");
+        }
+        clearLaneUserScratch();
+        for (long userId : userIds) {
+            if (userId > 0) addLaneUser(userId);
+        }
+        return applyAndCommitLaneSequenceFromScratch(
+                coreSequence, matchingResult, stateContribution, fundsContribution);
+    }
+
+    private void clearLaneUserScratch() {
+        for (org.eclipse.collections.impl.list.mutable.primitive.LongArrayList users : laneUserScratch) {
+            users.clear();
+        }
+    }
+
+    private void addLaneUser(long userId) {
+        int laneId = topology.accountLaneId(userId);
+        laneUserScratch[laneId].add(userId);
+    }
+
+    private List<RuntimeCommitPatch.LaneCommit> applyAndCommitLaneSequenceFromScratch(
+            long coreSequence, CoreMatchingResult matchingResult,
+            long stateContribution, long fundsContribution) {
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             if (!laneUserScratch[laneId].isEmpty()) accountLanes[laneId].requireApplySequence(coreSequence);
         }
         ArrayList<RuntimeCommitPatch.LaneCommit> laneCommits = new ArrayList<>();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            java.util.List<Long> users = laneUserScratch[laneId];
+            org.eclipse.collections.impl.list.mutable.primitive.LongArrayList users = laneUserScratch[laneId];
             if (users.isEmpty()) continue;
             AccountLaneState lane = accountLanes[laneId];
             if (matchingResult.nativeCommand().coreSequence() != coreSequence) {
@@ -2946,10 +2984,18 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     public void abortPreparedCommit(RuntimeCommitPatch sealedPatch) {
+        abortPreparedCommitView(sealedPatch);
+    }
+
+    public void abortPreparedCommit(RuntimeCommitPatch.PreparedChanges preparedChanges) {
+        abortPreparedCommitView(preparedChanges);
+    }
+
+    private void abortPreparedCommitView(RuntimeCommitView preparedCommit) {
         assertOwner();
-        if (sealedPatch == null) return;
+        if (preparedCommit == null) return;
         activePatchBuilder = RuntimeCommitPatch.builder(productLine);
-        for (RuntimeCommitPatch.AccountLaneOwnerGroup group : sealedPatch.accountLaneGroups()) {
+        for (RuntimeCommitPatch.AccountLaneOwnerGroup group : preparedCommit.accountLaneGroups()) {
             for (RuntimeCommitPatch.PositionChange change : group.positions()) {
                 activePatchBuilder.capturePositionBefore(group.laneId(), change.positionKey(), change.before());
             }

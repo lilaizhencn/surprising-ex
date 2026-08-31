@@ -3,6 +3,7 @@ package com.surprising.aeron.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.aeron.protocol.CommandSource;
+import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
@@ -26,10 +27,11 @@ class PendingMatchingTest {
     @Test
     void preservesCapturedPreCommandHashesAcrossDeferredMatchingUpdates() {
         CoreMessage command = command(11);
+        CommandFingerprint fingerprint = CommandFingerprint.of(command);
         TradingCoreState beforeState = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
         RuntimeProjectionPoint beforeProjection = new RuntimeProjectionPoint(0, beforeState);
         RuntimeFundsDelta fundsDelta = RuntimeFundsDelta.empty();
-        PendingMatching pending = new PendingMatching(7, PendingMatching.Operation.PLACE, command,
+        PendingMatching pending = new PendingMatching(7, PendingMatching.Operation.PLACE, command, fingerprint,
                 List.of(17L), beforeProjection, 101L, 202L, fundsDelta);
 
         PendingMatching updatedCommand = pending.withCommand(command(12));
@@ -41,6 +43,7 @@ class PendingMatchingTest {
         assertThat(updatedCancellations.fundsDelta()).isSameAs(fundsDelta);
         assertThat(updatedCancellations.preMatchingCancellationOrderIds()).containsExactly(18L, 19L);
         assertThat(updatedCancellations.decodedCommand()).isSameAs(updatedCommand.decodedCommand());
+        assertThat(updatedCancellations.fingerprint()).isSameAs(fingerprint);
     }
 
     private static CoreMessage command(long sourceSequence) {
