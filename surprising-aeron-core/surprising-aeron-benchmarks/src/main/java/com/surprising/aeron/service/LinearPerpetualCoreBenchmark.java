@@ -168,11 +168,52 @@ public class LinearPerpetualCoreBenchmark {
                 measurement.p50LatencyNanos = state.scenario.p50LatencyNanos();
                 measurement.p99LatencyNanos = state.scenario.p99LatencyNanos();
                 measurement.p999LatencyNanos = state.scenario.p999LatencyNanos();
+                recordSaturationLatency(measurement, state.scenario.latencyReport());
                 measurement.commit();
             }
         }
         recordCounters(state.scenario, counters);
         return result;
+    }
+
+    private static void recordSaturationLatency(
+            LinearPerpetualSaturationEvent event,
+            LinearPerpetualSaturationWorkload.LatencyReport report) {
+        var entryAccepted = report.entryAccepted();
+        var acceptedTerminal = report.acceptedTerminal();
+        var entryTerminal = report.entryTerminal();
+        event.businessType = report.businessType();
+        event.loadModel = report.loadModel();
+        event.targetOperationsPerSecond = report.targetOperationsPerSecond();
+        event.scheduledBusinessOperations = entryTerminal.samples();
+        event.coordinatedOmissionCorrected = entryTerminal.coordinatedOmissionCorrected();
+        event.latencySamples = entryTerminal.samples();
+        event.histogramLowestNanos = entryTerminal.rangeLowestNanos();
+        event.histogramHighestNanos = entryTerminal.rangeHighestNanos();
+        event.timeoutNanos = entryTerminal.timeoutNanos();
+        event.latencyUnit = entryTerminal.unit();
+        event.classificationSource = "EXHAUSTIVE_CORE_MESSAGE_TYPE_SWITCH";
+        event.entryAcceptedHistogramCounts = entryAccepted.histogramCounts();
+        event.acceptedTerminalHistogramCounts = acceptedTerminal.histogramCounts();
+        event.entryTerminalHistogramCounts = entryTerminal.histogramCounts();
+        event.entryAcceptedP50Nanos = entryAccepted.p50();
+        event.entryAcceptedP90Nanos = entryAccepted.p90();
+        event.entryAcceptedP95Nanos = entryAccepted.p95();
+        event.entryAcceptedP99Nanos = entryAccepted.p99();
+        event.entryAcceptedP999Nanos = entryAccepted.p999();
+        event.entryAcceptedMaxNanos = entryAccepted.max();
+        event.acceptedTerminalP50Nanos = acceptedTerminal.p50();
+        event.acceptedTerminalP90Nanos = acceptedTerminal.p90();
+        event.acceptedTerminalP95Nanos = acceptedTerminal.p95();
+        event.acceptedTerminalP99Nanos = acceptedTerminal.p99();
+        event.acceptedTerminalP999Nanos = acceptedTerminal.p999();
+        event.acceptedTerminalMaxNanos = acceptedTerminal.max();
+        event.entryTerminalP50Nanos = entryTerminal.p50();
+        event.entryTerminalP90Nanos = entryTerminal.p90();
+        event.entryTerminalP95Nanos = entryTerminal.p95();
+        event.entryTerminalP99Nanos = entryTerminal.p99();
+        event.entryTerminalP999Nanos = entryTerminal.p999();
+        event.entryTerminalMaxNanos = entryTerminal.max();
     }
 
     private static void recordCounters(LinearPerpetualBenchmarkSupport.Scenario scenario,
@@ -430,11 +471,14 @@ public class LinearPerpetualCoreBenchmark {
         @Param("10")
         public int maxOpenOrdersPerUser;
 
-        @Param("1024")
+        @Param("256")
         public int maxInFlight;
 
         @Param("16384")
         public int operationsPerInvocation;
+
+        @Param("100000")
+        public int targetOperationsPerSecond;
 
         private LinearPerpetualSaturationWorkload.SaturationScenario scenario;
 
@@ -446,7 +490,7 @@ public class LinearPerpetualCoreBenchmark {
                     LinearPerpetualTrafficProfile.UNIFORM, activeSymbols);
             var template = LinearPerpetualMixedWorkload.template(accountLanes, activeUsers, config);
             scenario = LinearPerpetualSaturationWorkload.scenario(
-                    template, maxInFlight, operationsPerInvocation);
+                    template, maxInFlight, operationsPerInvocation, targetOperationsPerSecond);
         }
 
         @TearDown(Level.Trial)

@@ -165,7 +165,7 @@ class CorePerpetualFinancialMatrixTest {
                             null, runtime, identities);
 
             RuntimeStateParityChecker.assertMatches(expected.state(), identities, runtime);
-            assertThat(RuntimeStateMaterializer.materializeTransition(runtime, identities, marked))
+            assertThat(RuntimeStateMaterializer.materialize(runtime, identities))
                     .isEqualTo(expected.state());
             assertThat(actual.payments()).isEqualTo(expected.payments());
             assertThat(runtime.accountLane(USER_ID).queueDepth()).isZero();
@@ -681,7 +681,7 @@ class CorePerpetualFinancialMatrixTest {
                 ? CoreLiquidationState.Status.COMPLETED : CoreLiquidationState.Status.ADL_REQUIRED);
         assertThat(ending.treasuryState().insuranceBalances()).containsEntry(variant.settleAsset(), 100L);
         return row(variant, full ? "INSURANCE_FULL" : "INSURANCE_PARTIAL", opening, ending, List.of(), false, false,
-                funds(100, 0, 0, 0, coverage - 100, 0, 0, 100, coverage, 0, 0, 100));
+                funds(100, 0, 0, 0, -100, 0, 0, 100, 0, 0, 0, 100));
     }
 
     private Row adlOrder(Variant variant) {
@@ -700,8 +700,8 @@ class CorePerpetualFinancialMatrixTest {
         long residual = linearOrInverse(variant, 865, 98_875);
         long makerOpening = linearOrInverse(variant, 5_480, 200_833);
         return row(variant, "ADL_ORDER", ending, ending, List.of(MAKER_ID, SECOND_MAKER_ID), true, true,
-                funds(25, makerOpening, 0, 100 - residual, 0, 0, 0, 0,
-                        25, makerOpening, 0, 100 - residual));
+                funds(0, makerOpening, 0, 100 - residual, 0, 0, 0, 0,
+                        0, makerOpening, 0, 100 - residual));
     }
 
     private Row adlCoverage(Variant variant) {
@@ -735,9 +735,9 @@ class CorePerpetualFinancialMatrixTest {
         assertThat(ending.user(MAKER_ID).totalUnits(variant.settleAsset()))
                 .isEqualTo(linearOrInverse(variant, 1_130, 1_850));
         return row(variant, "ADL_COVERAGE", beforeAdl, ending, List.of(MAKER_ID), true, true,
-                funds(insuranceCoverage, linearOrInverse(variant, 2_990, 100_500), 0, 100 - residual,
+                funds(0, linearOrInverse(variant, 2_990, 100_500), 0, 100 - residual,
                         0, Math.negateExact(residual), 0, residual,
-                        insuranceCoverage, targetEndingEconomic, 0, 100));
+                        0, targetEndingEconomic, 0, 100));
     }
 
     private Row snapshotContinuation(Variant variant) {

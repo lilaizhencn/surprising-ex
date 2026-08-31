@@ -1,14 +1,16 @@
 package com.surprising.aeron.protocol;
 
+import com.surprising.product.api.ProductLine;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 public final class CoreExportCodec {
 
-    private static final int EVENT_V9_MARKER = 0xC0E7_0009;
+    private static final int EVENT_V10_MARKER = 0xC0E7_000A;
     private static final int BATCH_V3_MARKER = 0xC0B2_0003;
     private static final int EVENT_FIXED_LENGTH = 64;
     public static final int MAX_COMMAND_PAYLOAD =
@@ -52,7 +54,7 @@ public final class CoreExportCodec {
         List<byte[]> orders = new ArrayList<>(event.changedOrders().size());
         for (CoreOrderStateView order : event.changedOrders()) orders.add(CoreStateQueryCodec.encodeOrderState(order));
         ByteBuffer output = littleEndian(encodedEventLength(event));
-        output.putInt(EVENT_V9_MARKER);
+        output.putInt(EVENT_V10_MARKER);
         output.putLong(event.exportSequence());
         output.putLong(event.appliedCommandCount());
         output.putLong(event.businessStateHash());
@@ -96,6 +98,21 @@ public final class CoreExportCodec {
             output.putInt(posting.ownerKind().wireCode()).putLong(posting.ownerId())
                     .putInt(posting.subledger().wireCode()).putLong(posting.units());
         });
+        output.put(event.commandFingerprint().bytes());
+        output.putInt(event.matcherEvidence().size());
+        event.matcherEvidence().forEach(item -> output.putLong(item.matcherSequence())
+                .putInt(item.matcherShardId()).putLong(item.makerOrderId()).putLong(item.takerOrderId())
+                .putLong(item.quantitySteps()).putLong(item.priceTicks()));
+        putLongIds(output, event.terminalIds().orderIds());
+        putLongIds(output, event.terminalIds().liquidationIds());
+        putLongIds(output, event.terminalIds().triggerOrderIds());
+        output.putLong(event.previousCoreSequence()).putLong(event.coreSequence())
+                .putLong(event.previousProjectionSequence()).putLong(event.projectionSequence());
+        putOptional(output, event.fundingProgress() == null ? null
+                : CoreFundingProgressCodec.encode(event.fundingProgress()));
+        putOptional(output, event.settlementProgress() == null ? null
+                : CoreSettlementProgressCodec.encode(event.settlementProgress()));
+        putTombstones(output, event.tombstones());
         return output.array();
     }
 
@@ -126,6 +143,17 @@ public final class CoreExportCodec {
         for (CoreFundsPostingView posting : event.fundsPostings()) {
             length = Math.addExact(length, Integer.BYTES * 3L + Long.BYTES * 2L + utf8Length(posting.asset()));
         }
+        length = Math.addExact(length, CommandFingerprint.LENGTH + Integer.BYTES
+                + Math.multiplyExact(event.matcherEvidence().size(), Long.BYTES * 5L + Integer.BYTES));
+        length = Math.addExact(length, Integer.BYTES * 3L + Long.BYTES
+                * (event.terminalIds().orderIds().size() + event.terminalIds().liquidationIds().size()
+                + event.terminalIds().triggerOrderIds().size()));
+        length = Math.addExact(length, Long.BYTES * 4L
+                + optionalLength(event.fundingProgress() == null ? null
+                : CoreFundingProgressCodec.encode(event.fundingProgress()))
+                + optionalLength(event.settlementProgress() == null ? null
+                : CoreSettlementProgressCodec.encode(event.settlementProgress()))
+                + tombstonesLength(event.tombstones()));
         if (payload.length > MAX_COMMAND_PAYLOAD || length > CoreMessageCodec.MAX_PAYLOAD_LENGTH) {
             throw new IllegalArgumentException("export event payload is too large");
         }
@@ -137,7 +165,7 @@ public final class CoreExportCodec {
             throw new ProtocolException("export event is truncated");
         }
         ByteBuffer input = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN);
-        if (input.getInt() != EVENT_V9_MARKER) {
+        if (input.getInt() != EVENT_V10_MARKER) {
             throw new ProtocolException("unsupported export event version");
         }
         long sequence = input.getLong();
@@ -213,6 +241,32 @@ public final class CoreExportCodec {
                     CoreFundsPostingView.OwnerKind.fromWireCode(input.getInt()), input.getLong(),
                     CoreFundsPostingView.Subledger.fromWireCode(input.getInt()), input.getLong()));
         }
+        if (input.remaining() < CommandFingerprint.LENGTH) {
+            throw new ProtocolException("Core Fact fingerprint is truncated");
+        }
+        byte[] fingerprint = new byte[CommandFingerprint.LENGTH];
+        input.get(fingerprint);
+        int evidenceCount = readCount(input);
+        List<CoreExportEvent.MatcherEvidence> evidence = new ArrayList<>(evidenceCount);
+        for (int index = 0; index < evidenceCount; index++) {
+            requireRemaining(input, Long.BYTES * 5 + Integer.BYTES, "matcher evidence is truncated");
+            evidence.add(new CoreExportEvent.MatcherEvidence(input.getLong(), input.getInt(), input.getLong(),
+                    input.getLong(), input.getLong(), input.getLong()));
+        }
+        CoreExportEvent.TerminalIds terminalIds = new CoreExportEvent.TerminalIds(
+                readLongIds(input), readLongIds(input), readLongIds(input));
+        requireRemaining(input, Long.BYTES * 4, "Core Fact sequences are truncated");
+        long previousCoreSequence = input.getLong();
+        long coreSequence = input.getLong();
+        long previousProjectionSequence = input.getLong();
+        long projectionSequence = input.getLong();
+        byte[] fundingProgressPayload = readOptional(input);
+        byte[] settlementProgressPayload = readOptional(input);
+        CoreFundingProgressView fundingProgress = fundingProgressPayload == null ? null
+                : CoreFundingProgressCodec.decode(fundingProgressPayload);
+        CoreSettlementProgressView settlementProgress = settlementProgressPayload == null ? null
+                : CoreSettlementProgressCodec.decode(settlementProgressPayload);
+        CoreExportEvent.Tombstones tombstones = readTombstones(input);
         if (input.hasRemaining()) throw new ProtocolException("export event has trailing bytes");
         return new CoreExportEvent(sequence, appliedCount, businessHash, commandId,
                 commandType, status, resultCode, userId, payload, users, orders, executions, fundingPayments,
@@ -220,7 +274,42 @@ public final class CoreExportCodec {
                 routeVersion, topologyHash, laneRevisionHash, committedCoreSequence,
                 new CoreMatcherTransition(routeVersion, matcherShardId, matcherSequenceBefore, matcherSequenceAfter,
                         matcherPrefixBefore, matcherPrefixAfter),
-                clusterPosition, fundsPostings);
+                clusterPosition, fundsPostings, CommandFingerprint.fromBytes(fingerprint), evidence, terminalIds,
+                previousCoreSequence, coreSequence, previousProjectionSequence, projectionSequence,
+                fundingProgress, settlementProgress, tombstones);
+    }
+
+    public static CoreExportEvent decodeEvent(CoreMessage message, ProductLine expectedProductLine) {
+        Objects.requireNonNull(message, "message");
+        Objects.requireNonNull(expectedProductLine, "expectedProductLine");
+        if (message.header().kind() != WireMessageKind.EXPORT_EVENT
+                || message.header().messageType() != CoreMessageType.CORE_EVENT
+                || message.header().productLine() != expectedProductLine) {
+            throw new ProtocolException("Core export event envelope mismatch");
+        }
+        CoreExportEvent event = decodeEvent(message.payloadUnsafe());
+        if (message.header().sourceSequence() != event.exportSequence()
+                || !message.header().commandId().equals(event.commandId())
+                || message.header().userId() != event.userId()
+                || message.header().route().version() != event.routeVersion()) {
+            throw new ProtocolException("Core export event identity mismatch");
+        }
+        for (CoreUserStateView user : event.changedUsers()) {
+            if (user.productLine() != expectedProductLine) {
+                throw new ProtocolException("Core export user product line mismatch");
+            }
+        }
+        for (CoreOrderStateView order : event.changedOrders()) {
+            if (order.productLine() != expectedProductLine) {
+                throw new ProtocolException("Core export order product line mismatch");
+            }
+        }
+        for (CoreTriggerOrderStateView trigger : event.changedTriggerOrders()) {
+            if (trigger.productLine() != expectedProductLine) {
+                throw new ProtocolException("Core export trigger order product line mismatch");
+            }
+        }
+        return event;
     }
 
     private static int liquidationLength(CoreLiquidationView liquidation) {
@@ -325,6 +414,138 @@ public final class CoreExportCodec {
         return new CoreFundingPaymentView(settlementId, userId, symbol, CoreMarginMode.values()[marginMode],
                 CorePositionSide.values()[positionSide], asset, input.getLong(), input.getLong(),
                 input.getLong(), input.getLong());
+    }
+
+    private static void putLongIds(ByteBuffer output, List<Long> ids) {
+        output.putInt(ids.size());
+        ids.forEach(output::putLong);
+    }
+
+    private static List<Long> readLongIds(ByteBuffer input) {
+        int count = readCount(input);
+        requireRemaining(input, Math.multiplyExact(count, Long.BYTES), "Core Fact ids are truncated");
+        ArrayList<Long> ids = new ArrayList<>(count);
+        for (int index = 0; index < count; index++) ids.add(input.getLong());
+        return List.copyOf(ids);
+    }
+
+    private static void putOptional(ByteBuffer output, byte[] value) {
+        if (value == null) output.putInt(-1);
+        else output.putInt(value.length).put(value);
+    }
+
+    private static byte[] readOptional(ByteBuffer input) {
+        requireRemaining(input, Integer.BYTES, "optional Core Fact value is truncated");
+        int length = input.getInt();
+        if (length == -1) return null;
+        if (length <= 0 || length > input.remaining()) {
+            throw new ProtocolException("invalid optional Core Fact value length");
+        }
+        byte[] value = new byte[length];
+        input.get(value);
+        return value;
+    }
+
+    private static long optionalLength(byte[] value) {
+        return Integer.BYTES + (value == null ? 0 : value.length);
+    }
+
+    private static void putTombstones(ByteBuffer output, CoreExportEvent.Tombstones tombstones) {
+        putLongIds(output, tombstones.userIds());
+        output.putInt(tombstones.balances().size());
+        tombstones.balances().forEach(key -> { output.putLong(key.userId()); putString(output, key.asset()); });
+        output.putInt(tombstones.reservations().size());
+        tombstones.reservations().forEach(key -> output.putLong(key.userId()).putLong(key.orderId()));
+        putLongIds(output, tombstones.orderIds());
+        output.putInt(tombstones.positions().size());
+        tombstones.positions().forEach(key -> {
+            output.putLong(key.userId()); putString(output, key.symbol()); output.putInt(key.positionSide().ordinal());
+        });
+        output.putInt(tombstones.leverages().size());
+        tombstones.leverages().forEach(key -> {
+            output.putLong(key.userId()); putString(output, key.symbol()); output.putInt(key.marginMode().ordinal());
+        });
+        putLongIds(output, tombstones.liquidationIds());
+        putLongIds(output, tombstones.algoOrderIds());
+        putLongIds(output, tombstones.triggerOrderIds());
+        output.putInt(tombstones.treasuryAssets().size());
+        tombstones.treasuryAssets().forEach(asset -> putString(output, asset));
+    }
+
+    private static CoreExportEvent.Tombstones readTombstones(ByteBuffer input) {
+        List<Long> users = readLongIds(input);
+        int balanceCount = readCount(input);
+        ArrayList<CoreExportEvent.UserAssetKey> balances = new ArrayList<>(balanceCount);
+        for (int index = 0; index < balanceCount; index++) {
+            requireRemaining(input, Long.BYTES, "balance tombstone is truncated");
+            balances.add(new CoreExportEvent.UserAssetKey(input.getLong(), readString(input)));
+        }
+        int reservationCount = readCount(input);
+        requireRemaining(input, Math.multiplyExact(reservationCount, Long.BYTES * 2),
+                "reservation tombstone is truncated");
+        ArrayList<CoreExportEvent.UserOrderKey> reservations = new ArrayList<>(reservationCount);
+        for (int index = 0; index < reservationCount; index++) {
+            reservations.add(new CoreExportEvent.UserOrderKey(input.getLong(), input.getLong()));
+        }
+        List<Long> orders = readLongIds(input);
+        int positionCount = readCount(input);
+        ArrayList<CoreExportEvent.UserPositionKey> positions = new ArrayList<>(positionCount);
+        for (int index = 0; index < positionCount; index++) {
+            requireRemaining(input, Long.BYTES, "position tombstone is truncated");
+            long userId = input.getLong();
+            String symbol = readString(input);
+            int side = readEnumOrdinal(input, CorePositionSide.values().length, "position side");
+            positions.add(new CoreExportEvent.UserPositionKey(userId, symbol, CorePositionSide.values()[side]));
+        }
+        int leverageCount = readCount(input);
+        ArrayList<CoreExportEvent.UserLeverageKey> leverages = new ArrayList<>(leverageCount);
+        for (int index = 0; index < leverageCount; index++) {
+            requireRemaining(input, Long.BYTES, "leverage tombstone is truncated");
+            long userId = input.getLong();
+            String symbol = readString(input);
+            int mode = readEnumOrdinal(input, CoreMarginMode.values().length, "margin mode");
+            leverages.add(new CoreExportEvent.UserLeverageKey(userId, symbol, CoreMarginMode.values()[mode]));
+        }
+        List<Long> liquidations = readLongIds(input);
+        List<Long> algos = readLongIds(input);
+        List<Long> triggers = readLongIds(input);
+        int treasuryCount = readCount(input);
+        ArrayList<String> treasury = new ArrayList<>(treasuryCount);
+        for (int index = 0; index < treasuryCount; index++) treasury.add(readString(input));
+        return new CoreExportEvent.Tombstones(users, balances, reservations, orders, positions, leverages,
+                liquidations, algos, triggers, treasury);
+    }
+
+    private static long tombstonesLength(CoreExportEvent.Tombstones tombstones) {
+        long length = Integer.BYTES * 10L;
+        length = Math.addExact(length, Long.BYTES * (long) (tombstones.userIds().size()
+                + tombstones.orderIds().size() + tombstones.liquidationIds().size()
+                + tombstones.algoOrderIds().size() + tombstones.triggerOrderIds().size()));
+        for (CoreExportEvent.UserAssetKey key : tombstones.balances()) {
+            length = Math.addExact(length, Long.BYTES + Integer.BYTES + utf8Length(key.asset()));
+        }
+        length = Math.addExact(length, Math.multiplyExact(tombstones.reservations().size(), Long.BYTES * 2L));
+        for (CoreExportEvent.UserPositionKey key : tombstones.positions()) {
+            length = Math.addExact(length, Long.BYTES + Integer.BYTES * 2L + utf8Length(key.symbol()));
+        }
+        for (CoreExportEvent.UserLeverageKey key : tombstones.leverages()) {
+            length = Math.addExact(length, Long.BYTES + Integer.BYTES * 2L + utf8Length(key.symbol()));
+        }
+        for (String asset : tombstones.treasuryAssets()) {
+            length = Math.addExact(length, Integer.BYTES + utf8Length(asset));
+        }
+        return length;
+    }
+
+    private static int readEnumOrdinal(ByteBuffer input, int bound, String name) {
+        requireRemaining(input, Integer.BYTES, name + " is truncated");
+        int value = input.getInt();
+        if (value < 0 || value >= bound) throw new ProtocolException("invalid " + name);
+        return value;
+    }
+
+    private static void requireRemaining(ByteBuffer input, int length, String message) {
+        if (length < 0 || input.remaining() < length) throw new ProtocolException(message);
     }
 
     private static void putString(ByteBuffer output, String value) {

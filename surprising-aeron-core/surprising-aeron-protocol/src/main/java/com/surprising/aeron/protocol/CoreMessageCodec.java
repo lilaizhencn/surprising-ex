@@ -33,26 +33,48 @@ public final class CoreMessageCodec {
             throw new IllegalArgumentException("destination is smaller than encoded message");
         }
         CoreMessageHeader header = message.header();
-        ByteBuffer buffer = ByteBuffer.wrap(destination, 0, encodedLength).order(ByteOrder.LITTLE_ENDIAN);
-        buffer.putInt(CoreProtocol.MAGIC);
-        buffer.putShort((short) header.schemaVersion());
-        buffer.put((byte) header.kind().wireCode());
-        buffer.put((byte) ProductLineWireCode.encode(header.productLine()));
-        buffer.putShort((short) header.messageType().wireCode());
-        buffer.put((byte) header.source().wireCode());
-        buffer.put((byte) header.route().shardCode());
-        buffer.putShort((short) CoreProtocol.HEADER_LENGTH);
-        buffer.putShort((short) header.route().version());
-        buffer.putLong(header.commandId().getMostSignificantBits());
-        buffer.putLong(header.commandId().getLeastSignificantBits());
-        buffer.putLong(header.sourceId());
-        buffer.putLong(header.sourceSequence());
-        buffer.putLong(header.userId());
-        buffer.putLong(header.submittedAtEpochMillis());
-        buffer.putLong(header.correlationId());
-        buffer.putInt(message.payloadLength());
+        encodeHeader(destination, header, message.payloadLength());
         message.copyPayloadTo(destination, CoreProtocol.HEADER_LENGTH);
         return encodedLength;
+    }
+
+    public static int encodedResponseLength(CoreResponse response) {
+        return Math.addExact(CoreProtocol.HEADER_LENGTH, CoreProtocol.responsePayloadLength(response));
+    }
+
+    public static int encodeResponse(CoreMessageHeader header, CoreResponse response,
+                                     long committedCoreSequence, byte[] destination) {
+        Objects.requireNonNull(header, "header");
+        int payloadLength = CoreProtocol.responsePayloadLength(response);
+        int encodedLength = Math.addExact(CoreProtocol.HEADER_LENGTH, payloadLength);
+        if (payloadLength > MAX_PAYLOAD_LENGTH || destination == null || destination.length < encodedLength) {
+            throw new IllegalArgumentException("destination is smaller than encoded response");
+        }
+        encodeHeader(destination, header, payloadLength);
+        CoreProtocol.encodeResponsePayload(
+                response, committedCoreSequence, destination, CoreProtocol.HEADER_LENGTH);
+        return encodedLength;
+    }
+
+    private static void encodeHeader(byte[] destination, CoreMessageHeader header, int payloadLength) {
+        int cursor = 0;
+        CoreProtocol.putInt(destination, cursor, CoreProtocol.MAGIC); cursor += Integer.BYTES;
+        CoreProtocol.putShort(destination, cursor, header.schemaVersion()); cursor += Short.BYTES;
+        destination[cursor++] = (byte) header.kind().wireCode();
+        destination[cursor++] = (byte) ProductLineWireCode.encode(header.productLine());
+        CoreProtocol.putShort(destination, cursor, header.messageType().wireCode()); cursor += Short.BYTES;
+        destination[cursor++] = (byte) header.source().wireCode();
+        destination[cursor++] = (byte) header.route().shardCode();
+        CoreProtocol.putShort(destination, cursor, CoreProtocol.HEADER_LENGTH); cursor += Short.BYTES;
+        CoreProtocol.putShort(destination, cursor, header.route().version()); cursor += Short.BYTES;
+        CoreProtocol.putLong(destination, cursor, header.commandId().getMostSignificantBits()); cursor += Long.BYTES;
+        CoreProtocol.putLong(destination, cursor, header.commandId().getLeastSignificantBits()); cursor += Long.BYTES;
+        CoreProtocol.putLong(destination, cursor, header.sourceId()); cursor += Long.BYTES;
+        CoreProtocol.putLong(destination, cursor, header.sourceSequence()); cursor += Long.BYTES;
+        CoreProtocol.putLong(destination, cursor, header.userId()); cursor += Long.BYTES;
+        CoreProtocol.putLong(destination, cursor, header.submittedAtEpochMillis()); cursor += Long.BYTES;
+        CoreProtocol.putLong(destination, cursor, header.correlationId()); cursor += Long.BYTES;
+        CoreProtocol.putInt(destination, cursor, payloadLength);
     }
 
     public static CoreMessage decode(byte[] encoded) {

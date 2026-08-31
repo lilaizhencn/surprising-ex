@@ -1014,7 +1014,7 @@ public final class W5FaultQaMain {
 
         private KafkaEvent event(ConsumerRecord<String, byte[]> record) {
             CoreMessage message = CoreMessageCodec.decode(record.value());
-            CoreExportEvent event = CoreExportCodec.decodeEvent(message.payload());
+            CoreExportEvent event = CoreExportCodec.decodeEvent(message, ProductLine.LINEAR_PERPETUAL);
             return new KafkaEvent(event.exportSequence(), record.offset(), record.key(), record.value(), message,
                     record.topic(), record.partition());
         }

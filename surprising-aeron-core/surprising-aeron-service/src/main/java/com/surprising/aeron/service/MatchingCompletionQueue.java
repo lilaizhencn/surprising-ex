@@ -33,13 +33,20 @@ final class MatchingCompletionQueue {
         int index = index(sequence);
         int currentDepth = depth.incrementAndGet();
         if (slots.compareAndSet(index, null, result)) {
-            highWaterMark.accumulateAndGet(currentDepth, Math::max);
+            updateHighWaterMark(currentDepth);
             if (currentDepth == 1 || waiterSequence == sequence) signalWaiter();
             return true;
         }
         depth.decrementAndGet();
         overflowed.set(true);
         return false;
+    }
+
+    private void updateHighWaterMark(int currentDepth) {
+        int observed = highWaterMark.get();
+        while (currentDepth > observed && !highWaterMark.compareAndSet(observed, currentDepth)) {
+            observed = highWaterMark.get();
+        }
     }
 
     boolean consumeOverflow() {

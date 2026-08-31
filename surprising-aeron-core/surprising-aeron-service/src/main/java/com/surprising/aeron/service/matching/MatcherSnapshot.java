@@ -155,17 +155,21 @@ public record MatcherSnapshot(
     }
 
     public void verifyCoreState(TradingCoreState state, long expectedCoreSequence) {
+        verifyCoreState(state, expectedCoreSequence, state == null ? 0 : state.businessStateHash());
+    }
+
+    public void verifyCoreState(TradingCoreState state, long expectedCoreSequence,
+                                long expectedCoreBusinessStateHash) {
         if (state == null) throw new IllegalStateException("Core snapshot state is missing");
-        long actualBusinessStateHash = state.businessStateHash();
         long actualInstrumentRegistryHash = instrumentRegistryHash(state);
         long actualActiveOrderHash = activeOrderHash(state);
-        verifyCoreManifest(state.productLine(), expectedCoreSequence, actualBusinessStateHash);
+        verifyCoreManifest(state.productLine(), expectedCoreSequence, expectedCoreBusinessStateHash);
         if (instrumentRegistryHash != actualInstrumentRegistryHash
                 || activeOrderHash != actualActiveOrderHash) {
             throw new IllegalStateException("Core and matcher snapshot manifests do not match"
                     + " (productLine=" + productLine + '/' + state.productLine()
                     + ", coreSequence=" + coreSequence + '/' + expectedCoreSequence
-                    + ", businessStateHash=" + coreBusinessStateHash + '/' + actualBusinessStateHash
+                    + ", businessStateHash=" + coreBusinessStateHash + '/' + expectedCoreBusinessStateHash
                     + ", instrumentRegistryHash=" + instrumentRegistryHash + '/'
                     + actualInstrumentRegistryHash + ", activeOrderHash=" + activeOrderHash + '/'
                     + actualActiveOrderHash + ')');

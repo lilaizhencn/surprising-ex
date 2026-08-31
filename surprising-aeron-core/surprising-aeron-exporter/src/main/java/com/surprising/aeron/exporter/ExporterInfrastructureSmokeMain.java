@@ -1,11 +1,13 @@
 package com.surprising.aeron.exporter;
 
 import com.surprising.aeron.protocol.CommandSource;
+import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.aeron.protocol.CoreExportEvent;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
+import com.surprising.aeron.protocol.CoreMatcherTransition;
 import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
@@ -29,12 +31,18 @@ public final class ExporterInfrastructureSmokeMain {
         long sequence = Long.parseLong(System.getenv().getOrDefault(
                 "EXPORT_SMOKE_SEQUENCE", Long.toString(System.currentTimeMillis())));
         UUID commandId = UUID.nameUUIDFromBytes((productLine + ":infra-smoke:" + sequence).getBytes());
+        byte[] payload = CoreProtocol.probePayload(1);
+        CoreMessage command = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
+                commandId, productLine, CommandSource.OPERATIONS, 1, sequence, 0, sequence, sequence), payload);
         CoreExportEvent event = new CoreExportEvent(sequence, sequence, sequence, commandId,
                 CoreMessageType.PROBE_INCREMENT, ResponseStatus.APPLIED, CoreResultCode.NONE, 0,
-                CoreProtocol.probePayload(1));
-        CoreMessage message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
-                commandId, productLine, CommandSource.OPERATIONS, 1, sequence, 0, sequence, sequence)
-                .exportEvent(sequence), CoreExportCodec.encodeEvent(event));
+                payload, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
+                Math.max(0, sequence - 1), Math.max(0, sequence - 1), sequence,
+                com.surprising.aeron.protocol.CoreRoute.DEFAULT.version(), 1, sequence, sequence,
+                CoreMatcherTransition.unchanged(0, 0), sequence, List.of(), CommandFingerprint.of(command),
+                List.of(), CoreExportEvent.TerminalIds.empty(), Math.max(0, sequence - 1), sequence,
+                Math.max(0, sequence - 1), sequence, null, null, CoreExportEvent.Tombstones.empty());
+        CoreMessage message = new CoreMessage(command.header().exportEvent(sequence), CoreExportCodec.encodeEvent(event));
         try (var sink = new KafkaCoreExportSink(ExporterConfiguration.kafkaProducerProperties())) {
             sink.publish(productLine, List.of(message));
         }

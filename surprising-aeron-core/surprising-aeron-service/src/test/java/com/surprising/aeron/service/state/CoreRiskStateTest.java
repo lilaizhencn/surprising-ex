@@ -307,7 +307,7 @@ class CoreRiskStateTest {
             for (int laneId = 0; laneId < runtime.topology().accountLaneCount(); laneId++) {
                 assertThat(runtime.accountLaneById(laneId).queueDepth()).isZero();
             }
-            assertThat(RuntimeStateMaterializer.materializeTransition(runtime, identities, state))
+            assertThat(RuntimeStateMaterializer.materialize(runtime, identities))
                     .isEqualTo(first);
             RuntimeStateParityChecker.assertMatches(first, identities, runtime);
 

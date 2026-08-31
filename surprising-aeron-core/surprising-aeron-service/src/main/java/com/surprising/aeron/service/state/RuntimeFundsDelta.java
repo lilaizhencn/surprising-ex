@@ -85,7 +85,7 @@ public final class RuntimeFundsDelta {
         });
     }
 
-    public FundsDelta materialize(RuntimeIdentityRegistry identities, boolean externalAdjustment) {
+    public FundsDelta materialize(RuntimeCommitPatch.IdentityView identities, boolean externalAdjustment) {
         ArrayList<FundsPosting> materialized = new ArrayList<>(postings.size() + unitsByAsset.size());
         for (Posting posting : postings) {
             materialized.add(new FundsPosting(identities.asset(posting.assetId()), posting.ownerKind(),

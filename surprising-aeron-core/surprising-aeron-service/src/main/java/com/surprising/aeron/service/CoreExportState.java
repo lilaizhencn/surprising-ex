@@ -1,6 +1,7 @@
 package com.surprising.aeron.service;
 
 import com.surprising.aeron.protocol.AckExportCommand;
+import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.aeron.protocol.CoreExportEvent;
 import com.surprising.aeron.protocol.CoreExportStatus;
@@ -12,54 +13,112 @@ import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.aeron.service.state.CoreStateRejectedException;
-import java.util.ArrayList;
+import com.surprising.aeron.service.state.RuntimeCommitPatch;
+import com.surprising.product.api.ProductLine;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicReferenceArray;
+import java.util.concurrent.locks.LockSupport;
 
 final class CoreExportState implements AutoCloseable {
 
     static final int MAX_PENDING_EVENTS = 1_000_000;
-    static final long MAX_PENDING_BYTES = 64L * 1024 * 1024;
+    static final long DEFAULT_PENDING_BYTES = 64L * 1024 * 1024;
+    static final long MAX_PENDING_BYTES = 1024L * 1024 * 1024;
     private static final long MAX_EVENT_BYTES = CoreProtocol.HEADER_LENGTH
             + (long) CoreMessageCodec.MAX_PAYLOAD_LENGTH;
+    private static final long MATERIALIZATION_TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(5);
     private long acknowledgedSequence;
     private long nextSequence;
     private final ArrayDeque<PendingExport> pending;
     private long pendingBytes;
     private long pendingDigest;
-    private final ExecutorService materializer;
+    private final SpscTaskQueue<PendingExport> materializationQueue;
+    private final Thread materializer;
+    private final EventEncoder encoder;
+    private final java.util.function.Function<com.surprising.aeron.service.state.CoreOrderState,
+            com.surprising.aeron.protocol.CoreOrderStateView> orderViewFactory;
     private final AtomicReference<Throwable> materializationFailure = new AtomicReference<>();
+    private volatile long submittedMaterializations;
+    private volatile long completedMaterializations;
+    private final AtomicInteger acknowledgedMaterializationItems = new AtomicInteger();
+    private final AtomicLong acknowledgedMaterializationBytes = new AtomicLong();
+    private final int eventCapacity;
+    private final long byteCapacity;
+    private final int materializationBatchSize;
+    private int reservedEvents;
+    private long reservedBytes;
+    private long maxBacklog;
+    private volatile long materializationBatchCount;
+    private volatile long materializationBatchItems;
+    private volatile long materializationBatchBytes;
+    private long rejectionCount;
+    private volatile long errorCount;
+    private long timeoutCount;
+    private volatile boolean closed;
+    private volatile boolean activated;
+    private long nextMaterializationSequence;
 
     CoreExportState() {
-        this(0, 1, List.of());
+        this(null, 0, 1, List.of(), CoreExportCodec::encodeEvent, RuntimeCommitPatch::exportOrderView);
+        activate();
     }
 
-    private CoreExportState(long acknowledgedSequence, long nextSequence, List<CoreMessage> pending) {
-        if (acknowledgedSequence < 0 || nextSequence <= acknowledgedSequence || pending == null
-                || pending.size() > MAX_PENDING_EVENTS || nextSequence - acknowledgedSequence - 1 != pending.size()) {
+    CoreExportState(EventEncoder encoder) {
+        this(null, 0, 1, List.of(), encoder, RuntimeCommitPatch::exportOrderView);
+        activate();
+    }
+
+    CoreExportState(EventEncoder encoder,
+                    java.util.function.Function<com.surprising.aeron.service.state.CoreOrderState,
+                            com.surprising.aeron.protocol.CoreOrderStateView> orderViewFactory) {
+        this(null, 0, 1, List.of(), encoder, orderViewFactory);
+        activate();
+    }
+
+    private CoreExportState(ProductLine expectedProductLine,
+                            long acknowledgedSequence, long nextSequence, List<CoreMessage> pending,
+                            EventEncoder encoder,
+                            java.util.function.Function<com.surprising.aeron.service.state.CoreOrderState,
+                                    com.surprising.aeron.protocol.CoreOrderStateView> orderViewFactory) {
+        if (acknowledgedSequence < 0 || pending == null || pending.size() > MAX_PENDING_EVENTS) {
             throw new IllegalArgumentException("invalid export state");
+        }
+        if (nextSequence <= acknowledgedSequence
+                || nextSequence - acknowledgedSequence - 1 != pending.size()) {
+            throw new IllegalArgumentException("outbox next sequence does not match pending events");
         }
         this.acknowledgedSequence = acknowledgedSequence;
         this.nextSequence = nextSequence;
         this.pending = new ArrayDeque<>(pending.size());
-        this.materializer = Executors.newSingleThreadExecutor(task -> {
-            Thread thread = new Thread(task, "core-fact-materializer");
-            thread.setDaemon(true);
-            return thread;
-        });
+        this.encoder = java.util.Objects.requireNonNull(encoder, "encoder");
+        this.orderViewFactory = java.util.Objects.requireNonNull(orderViewFactory, "orderViewFactory");
+        eventCapacity = configuredCapacity();
+        byteCapacity = configuredByteCapacity();
+        materializationBatchSize = configuredBatchSize(eventCapacity);
+        materializationQueue = new SpscTaskQueue<>(eventCapacity);
         long expectedSequence = Math.incrementExact(acknowledgedSequence);
         for (CoreMessage event : pending) {
-            CoreExportEvent decoded = CoreExportCodec.decodeEvent(event.payloadUnsafe());
-            if (event.header().kind() != WireMessageKind.EXPORT_EVENT
-                    || event.header().sourceSequence() != expectedSequence
+            if (expectedProductLine == null) {
+                throw new IllegalArgumentException("restored export product line is required");
+            }
+            CoreExportEvent decoded = CoreExportCodec.decodeEvent(event, expectedProductLine);
+            validateRestoredCommandIdentity(event, decoded, expectedProductLine);
+            if (event.header().sourceSequence() != expectedSequence
                     || decoded.exportSequence() != expectedSequence) {
                 throw new IllegalArgumentException("non-contiguous export state");
             }
@@ -69,50 +128,129 @@ final class CoreExportState implements AutoCloseable {
             pendingDigest ^= restored.digest();
             expectedSequence = Math.incrementExact(expectedSequence);
         }
-        if (pendingBytes > MAX_PENDING_BYTES) {
+        if (pendingBytes > byteCapacity || this.pending.size() > eventCapacity) {
             throw new IllegalArgumentException("export state exceeds byte limit");
         }
+        maxBacklog = this.pending.size();
+        nextMaterializationSequence = nextSequence;
+        materializer = Thread.ofPlatform().daemon(true).name("core-fact-materializer")
+                .unstarted(this::runMaterializer);
     }
 
-    static CoreExportState restore(long acknowledgedSequence, long nextSequence, List<CoreMessage> pending) {
-        return new CoreExportState(acknowledgedSequence, nextSequence, pending);
+    static CoreExportState passive() {
+        return new CoreExportState(null, 0, 1, List.of(), CoreExportCodec::encodeEvent,
+                RuntimeCommitPatch::exportOrderView);
+    }
+
+    static CoreExportState restore(ProductLine expectedProductLine,
+                                   long acknowledgedSequence, long nextSequence, List<CoreMessage> pending) {
+        return new CoreExportState(Objects.requireNonNull(expectedProductLine, "expectedProductLine"),
+                acknowledgedSequence, nextSequence, pending, CoreExportCodec::encodeEvent,
+                RuntimeCommitPatch::exportOrderView);
+    }
+
+    void activate() {
+        if (activated) return;
+        if (closed) throw new IllegalStateException("cannot activate closed export state");
+        activated = true;
+        materializer.start();
+    }
+
+    boolean activated() { return activated; }
+
+    private static void validateRestoredCommandIdentity(
+            CoreMessage envelope, CoreExportEvent event, ProductLine expectedProductLine) {
+        CoreMessageHeader header = envelope.header();
+        CoreMessage canonicalCommand = new CoreMessage(new CoreMessageHeader(
+                header.schemaVersion(), WireMessageKind.COMMAND, event.commandType(), event.commandId(),
+                expectedProductLine, header.route(), header.source(), header.sourceId(), 0,
+                event.userId(), header.submittedAtEpochMillis(), header.correlationId()),
+                event.commandPayloadUnsafe());
+        if (!CommandFingerprint.of(canonicalCommand).equals(event.commandFingerprint())) {
+            throw new com.surprising.aeron.protocol.ProtocolException(
+                    "Core export event command identity mismatch");
+        }
     }
 
     long append(Draft draft) {
+        if (draft == null) throw new IllegalArgumentException("core fact draft is required");
+        AdmissionReservation reservation = reserveAdmission(1, reservedEventLength(draft));
+        try {
+            return append(reservation, draft);
+        } finally {
+            if (!reservation.closed) release(reservation);
+        }
+    }
+
+    AdmissionReservation reserveAdmission(int events, long bytes) {
         assertHealthy();
-        if (pending.size() >= MAX_PENDING_EVENTS) {
+        requireActivated();
+        if (events < 1 || bytes < CoreProtocol.HEADER_LENGTH) {
+            throw new IllegalArgumentException("invalid export admission request");
+        }
+        if (events > eventCapacity - pending.size() - acknowledgedMaterializationItems.get() - reservedEvents
+                || bytes > byteCapacity - pendingBytes - acknowledgedMaterializationBytes.get() - reservedBytes) {
+            rejectionCount++;
             throw new CoreStateRejectedException("EXPORT_BACKLOG_FULL", "export backlog reached hard limit");
         }
+        reservedEvents = Math.addExact(reservedEvents, events);
+        reservedBytes = Math.addExact(reservedBytes, bytes);
+        return new AdmissionReservation(this, events, bytes);
+    }
+
+    AdmissionReservation reserveAdmission(int events) {
+        return reserveAdmission(events, Math.multiplyExact(MAX_EVENT_BYTES, events));
+    }
+
+    void release(AdmissionReservation reservation) {
+        validateReservation(reservation);
+        reservedEvents = Math.subtractExact(reservedEvents, reservation.remainingEvents);
+        reservedBytes = Math.subtractExact(reservedBytes, reservation.remainingBytes);
+        reservation.remainingEvents = 0;
+        reservation.remainingBytes = 0;
+        reservation.closed = true;
+    }
+
+    long append(AdmissionReservation reservation, Draft draft) {
+        validateReservation(reservation);
         if (draft == null) throw new IllegalArgumentException("core fact draft is required");
         long sequence = nextSequence;
         int eventBytes = reservedEventLength(draft);
-        if (pendingBytes + eventBytes > MAX_PENDING_BYTES) {
-            throw new CoreStateRejectedException("EXPORT_BACKLOG_FULL", "export backlog reached byte limit");
+        if (eventBytes > reservation.remainingBytes) {
+            throw new IllegalStateException("Core Fact exceeded aggregate admission byte reservation");
         }
         CoreMessageHeader header = draft.command().header().exportEvent(sequence);
-        CompletableFuture<MaterializedExport> completion = CompletableFuture.supplyAsync(() -> {
-            CoreExportEvent event = draft.fact().materialize(sequence);
-            int actualLength = Math.addExact(CoreProtocol.HEADER_LENGTH, CoreExportCodec.encodedEventLength(event));
-            if (actualLength > eventBytes) {
-                throw new IllegalStateException("Core Fact exceeded deterministic reservation");
-            }
-            CoreMessage message = CoreMessage.owned(header, CoreExportCodec.encodeEvent(event));
-            return new MaterializedExport(event, message, actualLength);
-        }, materializer).whenComplete((ignored, failure) -> {
-            if (failure != null) materializationFailure.compareAndSet(null, failure);
-        });
-        PendingExport appended = new PendingExport(completion, eventBytes,
+        PendingExport appended = new PendingExport(draft, header, eventBytes,
                 draftDigest(header, draft), draft.terminalOrderIds());
         pending.add(appended);
         pendingBytes = Math.addExact(pendingBytes, eventBytes);
         pendingDigest ^= appended.digest();
         nextSequence = Math.incrementExact(nextSequence);
+        reservation.remainingEvents--;
+        reservation.remainingBytes -= eventBytes;
+        reservedEvents--;
+        reservedBytes -= eventBytes;
+        if (reservation.remainingEvents == 0) {
+            reservedBytes -= reservation.remainingBytes;
+            reservation.remainingBytes = 0;
+            reservation.closed = true;
+        }
+        submittedMaterializations = Math.incrementExact(submittedMaterializations);
+        if (!materializationQueue.offer(appended)) {
+            IllegalStateException impossible = new IllegalStateException(
+                    "reserved Core Fact materialization slot was unavailable");
+            poison(impossible);
+            submittedMaterializations--;
+            appended.completeExceptionally(impossible, this);
+            throw impossible;
+        }
+        maxBacklog = Math.max(maxBacklog, pending.size() + acknowledgedMaterializationItems.get());
         return sequence;
     }
 
     boolean hasCapacity() {
         assertHealthy();
-        return pending.size() < MAX_PENDING_EVENTS;
+        return hasCapacityFor(1);
     }
 
     boolean hasCapacityFor() {
@@ -121,14 +259,17 @@ final class CoreExportState implements AutoCloseable {
 
     boolean hasCapacityFor(int additionalEvents) {
         assertHealthy();
-        if (additionalEvents < 1 || pending.size() > MAX_PENDING_EVENTS - additionalEvents) {
+        if (additionalEvents < 1 || pending.size() + acknowledgedMaterializationItems.get()
+                > eventCapacity - additionalEvents - reservedEvents) {
             return false;
         }
-        return pendingBytes <= MAX_PENDING_BYTES - Math.multiplyExact(MAX_EVENT_BYTES, additionalEvents);
+        return pendingBytes + acknowledgedMaterializationBytes.get()
+                <= byteCapacity - reservedBytes - Math.multiplyExact(MAX_EVENT_BYTES, additionalEvents);
     }
 
     List<Long> acknowledge(AckExportCommand command) {
         assertHealthy();
+        requireActivated();
         if (command.throughSequence() <= acknowledgedSequence) {
             return List.of();
         }
@@ -141,6 +282,7 @@ final class CoreExportState implements AutoCloseable {
         for (int index = 0; index < removeCount; index++) {
             PendingExport removed = pending.removeFirst();
             for (long orderId : removed.terminalOrderIds()) terminalOrderIds.add(orderId);
+            if (!removed.ready()) retainAcknowledgedMaterialization(removed);
             pendingBytes = Math.subtractExact(pendingBytes, removed.encodedLength());
             pendingDigest ^= removed.digest();
         }
@@ -150,6 +292,7 @@ final class CoreExportState implements AutoCloseable {
 
     List<CoreMessage> batch(int maxEvents) {
         assertHealthy();
+        requireActivated();
         int count = 0;
         long encodedLength = Integer.BYTES;
         int limit = Math.min(maxEvents, pending.size());
@@ -174,7 +317,7 @@ final class CoreExportState implements AutoCloseable {
     CoreExportStatus status() {
         assertHealthy();
         return new CoreExportStatus(acknowledgedSequence, nextSequence, pending.size(), pendingBytes,
-                MAX_PENDING_EVENTS, MAX_PENDING_BYTES);
+                eventCapacity, byteCapacity);
     }
 
     long acknowledgedSequence() {
@@ -223,12 +366,58 @@ final class CoreExportState implements AutoCloseable {
 
     @Override
     public void close() {
-        materializer.shutdownNow();
+        closed = true;
+        materializationQueue.signalConsumer();
+        if (!activated) return;
+        boolean interrupted = false;
+        long deadline = System.nanoTime() + MATERIALIZATION_TIMEOUT_NANOS;
+        while (materializer.isAlive() && System.nanoTime() < deadline) {
+            try {
+                materializer.join(Math.max(1, TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())));
+            } catch (InterruptedException exception) {
+                interrupted = true;
+            }
+        }
+        if (interrupted) Thread.currentThread().interrupt();
+        if (materializer.isAlive()) {
+            timeoutCount++;
+            TimeoutException timeout = new TimeoutException("Core Fact materializer close timed out");
+            poison(timeout);
+            materializer.interrupt();
+            failPendingMaterializations(timeout);
+            throw new IllegalStateException("Core Fact materializer did not terminate", timeout);
+        }
+        Throwable failure = materializationFailure.get();
+        if (failure != null) {
+            throw new CompletionException("Core Fact materializer closed after failure", failure);
+        }
+        if (materializationBacklog() != 0 || !materializationQueue.isEmpty()
+                || acknowledgedMaterializationItems.get() != 0
+                || acknowledgedMaterializationBytes.get() != 0) {
+            throw new IllegalStateException("Core Fact materializer closed before draining");
+        }
+    }
+
+    private void retainAcknowledgedMaterialization(PendingExport removed) {
+        long bytes = removed.encodedLength();
+        acknowledgedMaterializationItems.incrementAndGet();
+        acknowledgedMaterializationBytes.addAndGet(bytes);
+        if (!removed.retainAcknowledged()) releaseAcknowledgedMaterialization(bytes);
+    }
+
+    private void releaseAcknowledgedMaterialization(long bytes) {
+        acknowledgedMaterializationItems.decrementAndGet();
+        acknowledgedMaterializationBytes.addAndGet(-bytes);
     }
 
     Snapshot snapshot() {
         assertHealthy();
-        return new Snapshot(acknowledgedSequence, nextSequence, pending(), pendingDigest);
+        try {
+            return new Snapshot(acknowledgedSequence, nextSequence, pending(), pendingDigest);
+        } catch (RuntimeException failure) {
+            poison(failure);
+            throw failure;
+        }
     }
 
     record Snapshot(long acknowledgedSequence, long nextSequence, List<CoreMessage> pendingEvents,
@@ -319,32 +508,36 @@ final class CoreExportState implements AutoCloseable {
     }
 
     private static long[] terminalOrderIds(CoreExportEvent event) {
-        org.eclipse.collections.impl.list.mutable.primitive.LongArrayList terminal =
-                new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList();
-        for (var order : event.changedOrders()) {
-            if (!"OPEN".equals(order.status())) terminal.add(order.orderId());
-        }
-        return terminal.toArray();
+        return event.terminalIds().orderIds().stream().mapToLong(Long::longValue).toArray();
     }
 
     private static PendingExport pendingExport(CoreMessage message, CoreExportEvent event) {
         MaterializedExport materialized = new MaterializedExport(event, message, encodedLength(message));
-        return new PendingExport(CompletableFuture.completedFuture(materialized),
-                reservedEventLength(event), eventDigest(message.header(), event), terminalOrderIds(event));
+        return new PendingExport(materialized, reservedEventLength(event),
+                eventDigest(message.header(), event), terminalOrderIds(event));
     }
 
     private static final class PendingExport {
-        private final CompletableFuture<MaterializedExport> completion;
+        private static final int READY = 1;
+        private static final int FAILED = 1 << 1;
+        private static final int RETAINED_AFTER_ACK = 1 << 2;
+        private static final AtomicIntegerFieldUpdater<PendingExport> STATE =
+                AtomicIntegerFieldUpdater.newUpdater(PendingExport.class, "completionState");
+        private final Draft draft;
+        private final CoreMessageHeader header;
         private final int encodedLength;
         private final long digest;
         private final long[] terminalOrderIds;
+        @SuppressWarnings("unused")
+        private volatile int completionState;
+        private volatile MaterializedExport materialized;
+        private volatile Throwable failure;
+        private volatile Thread waiter;
 
-        private PendingExport(CompletableFuture<MaterializedExport> completion,
+        private PendingExport(Draft draft, CoreMessageHeader header,
                               int encodedLength, long digest, long[] terminalOrderIds) {
-            if (completion == null) {
-                throw new IllegalArgumentException("invalid pending export");
-            }
-            this.completion = completion;
+            this.draft = Objects.requireNonNull(draft, "draft");
+            this.header = Objects.requireNonNull(header, "header");
             this.encodedLength = encodedLength;
             this.digest = digest;
             this.terminalOrderIds = terminalOrderIds.clone();
@@ -353,15 +546,83 @@ final class CoreExportState implements AutoCloseable {
             }
         }
 
+        private PendingExport(MaterializedExport materialized,
+                              int encodedLength, long digest, long[] terminalOrderIds) {
+            this.draft = null;
+            this.header = materialized.message().header();
+            this.encodedLength = encodedLength;
+            this.digest = digest;
+            this.terminalOrderIds = terminalOrderIds.clone();
+            this.materialized = Objects.requireNonNull(materialized, "materialized");
+            completionState = READY;
+        }
+
         private CoreMessage message() {
-            return completion.join().message();
+            long deadline = System.nanoTime() + MATERIALIZATION_TIMEOUT_NANOS;
+            Thread current = Thread.currentThread();
+            waiter = current;
+            try {
+                while (true) {
+                    int state = completionState;
+                    if ((state & READY) != 0) return materialized.message();
+                    if ((state & FAILED) != 0) {
+                        throw new CompletionException("Core Fact materialization failed", failure);
+                    }
+                    long remaining = deadline - System.nanoTime();
+                    if (remaining <= 0) {
+                        throw new CompletionException("Core Fact materialization timed out",
+                                new TimeoutException("Core Fact materialization timed out"));
+                    }
+                    LockSupport.parkNanos(this, remaining);
+                    if (Thread.interrupted()) {
+                        Thread.currentThread().interrupt();
+                        throw new CompletionException("Core Fact materialization interrupted",
+                                new InterruptedException());
+                    }
+                }
+            } finally {
+                if (waiter == current) waiter = null;
+            }
+        }
+
+        private boolean complete(MaterializedExport result, CoreExportState owner) {
+            materialized = Objects.requireNonNull(result, "materialized export");
+            return finish(READY, owner);
+        }
+
+        private boolean completeExceptionally(Throwable cause, CoreExportState owner) {
+            failure = Objects.requireNonNull(cause, "materialization failure");
+            return finish(FAILED, owner);
+        }
+
+        private boolean finish(int terminalState, CoreExportState owner) {
+            while (true) {
+                int state = completionState;
+                if ((state & (READY | FAILED)) != 0) return false;
+                if (!STATE.compareAndSet(this, state, state | terminalState)) continue;
+                Thread blocked = waiter;
+                if (blocked != null) LockSupport.unpark(blocked);
+                if ((state & RETAINED_AFTER_ACK) != 0) {
+                    owner.releaseAcknowledgedMaterialization(encodedLength);
+                }
+                return true;
+            }
+        }
+
+        private boolean retainAcknowledged() {
+            while (true) {
+                int state = completionState;
+                if ((state & (READY | FAILED)) != 0) return false;
+                if ((state & RETAINED_AFTER_ACK) != 0) return true;
+                if (STATE.compareAndSet(this, state, state | RETAINED_AFTER_ACK)) return true;
+            }
         }
 
         private int encodedLength() { return encodedLength; }
         private long digest() { return digest; }
         private long[] terminalOrderIds() { return terminalOrderIds; }
-        private boolean encoded() { return completion.isDone() && !completion.isCompletedExceptionally(); }
-        private boolean ready() { return completion.isDone(); }
+        private boolean encoded() { return (completionState & READY) != 0; }
+        private boolean ready() { return (completionState & (READY | FAILED)) != 0; }
     }
 
     record Draft(CoreMessage command, ResponseStatus status,
@@ -369,39 +630,588 @@ final class CoreExportState implements AutoCloseable {
                  long appliedCommandCount, long businessStateHash,
                  long beforeBusinessStateHash, long beforeFundsStateHash, long fundsStateHash,
                  long topologyHash, long laneRevisionHash, CoreMatcherTransition matcherTransition,
-                 long clusterPosition, int itemCount, long[] terminalOrderIds, FactRecord fact) {
+                 long clusterPosition, long projectionSequence, int itemCount, long[] terminalOrderIds,
+                 PatchChain patches, CoreCommandDelta delta,
+                 com.surprising.aeron.service.state.RuntimeFundsDelta fundsDelta,
+                 RuntimeCommitPatch.CoreFactMetadata commandMetadata) {
         Draft {
             if (command == null || status == null || resultCode == null || appliedCommandCount < 0
-                    || matcherTransition == null || clusterPosition < 0 || itemCount < 0
-                    || terminalOrderIds == null || fact == null) {
+                    || matcherTransition == null || clusterPosition < 0 || projectionSequence < 0
+                    || itemCount < 0 || terminalOrderIds == null || delta == null || fundsDelta == null
+                    || commandMetadata == null
+                    || !command.header().commandId().equals(commandMetadata.commandId())
+                    || command.header().messageType().wireCode() != commandMetadata.messageTypeWireCode()
+                    || command.header().userId() != commandMetadata.userId()
+                    || status != commandMetadata.status() || resultCode != commandMetadata.resultCode()
+                    || appliedCommandCount != commandMetadata.appliedCommandCount()
+                    || clusterPosition != commandMetadata.clusterPosition()
+                    || topologyHash != commandMetadata.topologyHash()
+                    || laneRevisionHash != commandMetadata.laneRevisionHash()) {
                 throw new IllegalArgumentException("invalid Core Fact draft");
             }
             terminalOrderIds = terminalOrderIds.clone();
         }
+
+        private CoreExportEvent materialize(long sequence,
+                java.util.function.Function<com.surprising.aeron.service.state.CoreOrderState,
+                        com.surprising.aeron.protocol.CoreOrderStateView> orderViewFactory) {
+            FactViewMerge merged = new FactViewMerge();
+            if (patches != null) patches.acceptOldestFirst(patch -> merged.accept(patch.materializeCoreFactFragment()));
+            for (long orderId : terminalOrderIds) merged.terminalOrders.add(orderId);
+            RuntimeCommitPatch first = patches == null ? null : patches.first();
+            RuntimeCommitPatch last = patches == null ? null : patches.patch();
+            RuntimeCommitPatch.FactIdentitySlice identities = patches == null
+                    ? new RuntimeCommitPatch.FactIdentitySlice(List.of(), List.of(), List.of(), List.of())
+                    : patches.identities();
+            long previousCoreSequence = first == null ? appliedCommandCount - 1 : first.previousCoreSequence();
+            long coreSequence = last == null ? appliedCommandCount : last.coreSequence();
+            long previousProjectionSequence = first == null ? projectionSequence : first.previousProjectionSequence();
+            long committedProjectionSequence = last == null ? projectionSequence : last.projectionSequence();
+            var payload = new RuntimeCommitPatch.CoreFactPayload(
+                    List.copyOf(merged.users.values()), merged.orders.values().stream().map(orderViewFactory).toList(),
+                    delta.executions(),
+                    delta.fundingPayments(), List.copyOf(merged.liquidations.values()),
+                    List.copyOf(merged.treasury.values()), List.copyOf(merged.triggers.values()),
+                    fundsDelta.materialize(identities, commandMetadata.externalAdjustment()).views(),
+                    delta.fundingProgress(), delta.settlementProgress(), matcherTransition, merged.evidence,
+                    new RuntimeCommitPatch.TerminalIds(List.copyOf(merged.terminalOrders),
+                            List.copyOf(merged.terminalLiquidations), List.copyOf(merged.terminalTriggers)),
+                    merged.tombstones.seal(), previousCoreSequence, coreSequence,
+                    previousProjectionSequence, committedProjectionSequence,
+                    beforeBusinessStateHash, businessStateHash, beforeFundsStateHash, fundsStateHash,
+                    topologyHash, laneRevisionHash, clusterPosition, commandMetadata);
+            return new CoreExportEvent(sequence, appliedCommandCount, businessStateHash,
+                    command.header().commandId(), command.header().messageType(), status, resultCode,
+                    command.header().userId(), command.payloadUnsafe(), payload.changedUsers(),
+                    payload.changedOrders(), payload.executions(), payload.fundingPayments(),
+                    payload.changedLiquidations(), payload.changedTreasuryAssets(), payload.changedTriggerOrders(),
+                    beforeBusinessStateHash, beforeFundsStateHash, fundsStateHash,
+                    matcherTransition.routeVersion(), topologyHash, laneRevisionHash, appliedCommandCount,
+                    matcherTransition, clusterPosition, payload.fundsPostings(),
+                    commandMetadata.commandFingerprint(), payload.matcherEvidence().stream().map(item ->
+                            new CoreExportEvent.MatcherEvidence(item.matcherSequence(), item.matcherShardId(),
+                                    item.makerOrderId(), item.takerOrderId(), item.quantitySteps(), item.priceTicks()))
+                            .toList(),
+                    new CoreExportEvent.TerminalIds(payload.terminalIds().orderIds(),
+                            payload.terminalIds().liquidationIds(), payload.terminalIds().triggerOrderIds()),
+                    payload.previousCoreSequence(), payload.coreSequence(), payload.previousProjectionSequence(),
+                    payload.projectionSequence(), payload.fundingProgress(), payload.settlementProgress(),
+                    payload.tombstones());
+        }
     }
 
-    private void assertHealthy() {
+    static final class PatchChain {
+        private final RuntimeCommitPatch patch;
+        private final PatchChain previous;
+        private final int size;
+        private final int itemCount;
+        private final long estimatedBytes;
+        private final CoreAdmissionReservation.FactPermit permit;
+
+        PatchChain(RuntimeCommitPatch patch, PatchChain previous, CoreAdmissionReservation.FactPermit permit) {
+            this.patch = Objects.requireNonNull(patch, "patch");
+            this.permit = Objects.requireNonNull(permit, "permit");
+            this.previous = previous;
+            if (previous != null && (!previous.permit.sameOwner(permit)
+                    || permit.ordinal() != previous.permit.ordinal() + 1)) {
+                throw new IllegalArgumentException("foreign, missing, or reordered fact permit");
+            }
+            if (previous != null && (previous.patch.coreSequence() != patch.previousCoreSequence()
+                    || previous.patch.projectionSequence() != patch.previousProjectionSequence())) {
+                throw new IllegalArgumentException("non-contiguous fact patch chain");
+            }
+            permit.requireConsumed();
+            size = Math.addExact(previous == null ? 0 : previous.size, 1);
+            itemCount = Math.addExact(previous == null ? 0 : previous.itemCount, patch.coreFactItemCount());
+            estimatedBytes = Math.addExact(previous == null ? 4_096L : previous.estimatedBytes,
+                    Math.multiplyExact((long) patch.coreFactItemCount(), 2_048L));
+            if (estimatedBytes > maxReservedEventBytes()) {
+                throw new IllegalStateException("fact patch chain exceeds reserved union byte bound");
+            }
+        }
+
+        RuntimeCommitPatch patch() { return patch; }
+        int size() { return size; }
+        int itemCount() { return itemCount; }
+
+        RuntimeCommitPatch first() {
+            PatchChain cursor = this;
+            while (cursor.previous != null) cursor = cursor.previous;
+            return cursor.patch;
+        }
+
+        void acceptOldestFirst(java.util.function.Consumer<RuntimeCommitPatch> consumer) {
+            RuntimeCommitPatch[] ordered = new RuntimeCommitPatch[size];
+            PatchChain cursor = this;
+            for (int index = size - 1; index >= 0; index--) {
+                ordered[index] = cursor.patch;
+                cursor = cursor.previous;
+            }
+            for (RuntimeCommitPatch value : ordered) consumer.accept(value);
+        }
+
+        RuntimeCommitPatch.FactIdentitySlice identities() {
+            RuntimeCommitPatch.FactIdentitySlice[] merged = {
+                    new RuntimeCommitPatch.FactIdentitySlice(List.of(), List.of(), List.of(), List.of())};
+            acceptOldestFirst(value -> merged[0] = merged[0].merge(value.identities()));
+            return merged[0];
+        }
+    }
+
+    private static com.surprising.aeron.protocol.CoreUserStateView mergeFactUser(
+            com.surprising.aeron.protocol.CoreUserStateView previous,
+            com.surprising.aeron.protocol.CoreUserStateView current) {
+        TreeMap<String, com.surprising.aeron.protocol.CoreBalanceView> balances = new TreeMap<>();
+        previous.balances().forEach(value -> balances.put(value.asset(), value));
+        current.balances().forEach(value -> balances.put(value.asset(), value));
+        TreeMap<Long, com.surprising.aeron.protocol.CoreReservationView> reservations = new TreeMap<>();
+        previous.reservations().forEach(value -> reservations.put(value.orderId(), value));
+        current.reservations().forEach(value -> reservations.put(value.orderId(), value));
+        TreeMap<PositionKey, com.surprising.aeron.protocol.CorePositionView> positions = new TreeMap<>();
+        previous.positions().forEach(value -> positions.put(
+                new PositionKey(value.symbol(), value.positionSide()), value));
+        current.positions().forEach(value -> positions.put(
+                new PositionKey(value.symbol(), value.positionSide()), value));
+        TreeMap<LeverageKey, com.surprising.aeron.protocol.CoreLeverageView> leverages = new TreeMap<>();
+        previous.leverages().forEach(value -> leverages.put(
+                new LeverageKey(value.symbol(), value.marginMode()), value));
+        current.leverages().forEach(value -> leverages.put(
+                new LeverageKey(value.symbol(), value.marginMode()), value));
+        return new com.surprising.aeron.protocol.CoreUserStateView(current.productLine(), current.userId(),
+                current.revision(), current.positionMode(), List.copyOf(balances.values()),
+                List.copyOf(reservations.values()), List.copyOf(positions.values()),
+                List.copyOf(leverages.values()));
+    }
+
+    private static final class FactViewMerge {
+        private final TreeMap<Long, com.surprising.aeron.protocol.CoreUserStateView> users = new TreeMap<>();
+        private final TreeMap<Long, com.surprising.aeron.service.state.CoreOrderState> orders = new TreeMap<>();
+        private final TreeMap<Long, com.surprising.aeron.protocol.CoreLiquidationView> liquidations =
+                new TreeMap<>();
+        private final TreeMap<String, com.surprising.aeron.protocol.CoreTreasuryAssetView> treasury =
+                new TreeMap<>();
+        private final TreeMap<Long, com.surprising.aeron.protocol.CoreTriggerOrderStateView> triggers =
+                new TreeMap<>();
+        private final ArrayList<RuntimeCommitPatch.MatcherEvidence> evidence = new ArrayList<>();
+        private final TreeSet<Long> terminalOrders = new TreeSet<>();
+        private final TreeSet<Long> terminalLiquidations = new TreeSet<>();
+        private final TreeSet<Long> terminalTriggers = new TreeSet<>();
+        private final FactTombstoneMerge tombstones = new FactTombstoneMerge();
+
+        private void accept(RuntimeCommitPatch.CoreFactFragment value) {
+            value.changedUsers().forEach(user -> users.merge(user.userId(), user,
+                    CoreExportState::mergeFactUser));
+            value.changedOrders().forEach(order -> orders.put(order.orderId(), order));
+            value.changedLiquidations().forEach(item -> liquidations.put(item.liquidationId(), item));
+            value.changedTreasuryAssets().forEach(item -> treasury.put(item.asset(), item));
+            value.changedTriggerOrders().forEach(item -> triggers.put(item.triggerOrderId(), item));
+            tombstones.observeValues(value);
+            tombstones.apply(value.tombstones(), users, orders, liquidations, treasury, triggers);
+            evidence.addAll(value.matcherEvidence());
+            terminalOrders.addAll(value.terminalIds().orderIds());
+            terminalLiquidations.addAll(value.terminalIds().liquidationIds());
+            terminalTriggers.addAll(value.terminalIds().triggerOrderIds());
+        }
+    }
+
+    private static final class FactTombstoneMerge {
+        private final TreeSet<Long> users = new TreeSet<>();
+        private final TreeMap<AssetKey, CoreExportEvent.UserAssetKey> balances = new TreeMap<>();
+        private final TreeMap<ReservationKey, CoreExportEvent.UserOrderKey> reservations = new TreeMap<>();
+        private final TreeSet<Long> orders = new TreeSet<>();
+        private final TreeMap<UserPositionKey, CoreExportEvent.UserPositionKey> positions = new TreeMap<>();
+        private final TreeMap<UserLeverageKey, CoreExportEvent.UserLeverageKey> leverages = new TreeMap<>();
+        private final TreeSet<Long> liquidations = new TreeSet<>();
+        private final TreeSet<Long> algos = new TreeSet<>();
+        private final TreeSet<Long> triggers = new TreeSet<>();
+        private final TreeSet<String> treasury = new TreeSet<>();
+
+        private void observeValues(RuntimeCommitPatch.CoreFactFragment fragment) {
+            fragment.changedUsers().forEach(user -> {
+                users.remove(user.userId());
+                user.balances().forEach(value -> balances.remove(new AssetKey(user.userId(), value.asset())));
+                user.reservations().forEach(value -> reservations.remove(
+                        new ReservationKey(user.userId(), value.orderId())));
+                user.positions().forEach(value -> positions.remove(
+                        new UserPositionKey(user.userId(), value.symbol(), value.positionSide())));
+                user.leverages().forEach(value -> leverages.remove(
+                        new UserLeverageKey(user.userId(), value.symbol(), value.marginMode())));
+            });
+            fragment.changedOrders().forEach(value -> orders.remove(value.orderId()));
+            fragment.changedLiquidations().forEach(value -> liquidations.remove(value.liquidationId()));
+            fragment.changedTriggerOrders().forEach(value -> triggers.remove(value.triggerOrderId()));
+            fragment.changedTreasuryAssets().forEach(value -> treasury.remove(value.asset()));
+        }
+
+        private void apply(CoreExportEvent.Tombstones deleted,
+                           TreeMap<Long, com.surprising.aeron.protocol.CoreUserStateView> changedUsers,
+                           TreeMap<Long, com.surprising.aeron.service.state.CoreOrderState> changedOrders,
+                           TreeMap<Long, com.surprising.aeron.protocol.CoreLiquidationView> changedLiquidations,
+                           TreeMap<String, com.surprising.aeron.protocol.CoreTreasuryAssetView> changedTreasury,
+                           TreeMap<Long, com.surprising.aeron.protocol.CoreTriggerOrderStateView> changedTriggers) {
+            deleted.userIds().forEach(userId -> {
+                users.add(userId);
+                changedUsers.remove(userId);
+                balances.keySet().removeIf(key -> key.userId == userId);
+                reservations.keySet().removeIf(key -> key.userId == userId);
+                positions.keySet().removeIf(key -> key.userId == userId);
+                leverages.keySet().removeIf(key -> key.userId == userId);
+            });
+            deleted.balances().forEach(key -> {
+                balances.put(new AssetKey(key.userId(), key.asset()), key);
+                changedUsers.computeIfPresent(key.userId(), (ignored, user) -> withoutBalance(user, key.asset()));
+            });
+            deleted.reservations().forEach(key -> {
+                reservations.put(new ReservationKey(key.userId(), key.orderId()), key);
+                changedUsers.computeIfPresent(key.userId(),
+                        (ignored, user) -> withoutReservation(user, key.orderId()));
+            });
+            deleted.orderIds().forEach(orderId -> { orders.add(orderId); changedOrders.remove(orderId); });
+            deleted.positions().forEach(key -> {
+                positions.put(new UserPositionKey(key.userId(), key.symbol(), key.positionSide()), key);
+                changedUsers.computeIfPresent(key.userId(), (ignored, user) -> withoutPosition(user, key));
+            });
+            deleted.leverages().forEach(key -> {
+                leverages.put(new UserLeverageKey(key.userId(), key.symbol(), key.marginMode()), key);
+                changedUsers.computeIfPresent(key.userId(), (ignored, user) -> withoutLeverage(user, key));
+            });
+            deleted.liquidationIds().forEach(id -> { liquidations.add(id); changedLiquidations.remove(id); });
+            algos.addAll(deleted.algoOrderIds());
+            deleted.triggerOrderIds().forEach(id -> { triggers.add(id); changedTriggers.remove(id); });
+            deleted.treasuryAssets().forEach(asset -> { treasury.add(asset); changedTreasury.remove(asset); });
+        }
+
+        private CoreExportEvent.Tombstones seal() {
+            return new CoreExportEvent.Tombstones(List.copyOf(users), List.copyOf(balances.values()),
+                    List.copyOf(reservations.values()), List.copyOf(orders), List.copyOf(positions.values()),
+                    List.copyOf(leverages.values()), List.copyOf(liquidations), List.copyOf(algos),
+                    List.copyOf(triggers), List.copyOf(treasury));
+        }
+    }
+
+    private static com.surprising.aeron.protocol.CoreUserStateView withoutBalance(
+            com.surprising.aeron.protocol.CoreUserStateView user, String asset) {
+        return new com.surprising.aeron.protocol.CoreUserStateView(user.productLine(), user.userId(),
+                user.revision(), user.positionMode(), user.balances().stream()
+                .filter(value -> !value.asset().equals(asset)).toList(), user.reservations(),
+                user.positions(), user.leverages());
+    }
+
+    private static com.surprising.aeron.protocol.CoreUserStateView withoutReservation(
+            com.surprising.aeron.protocol.CoreUserStateView user, long orderId) {
+        return new com.surprising.aeron.protocol.CoreUserStateView(user.productLine(), user.userId(),
+                user.revision(), user.positionMode(), user.balances(), user.reservations().stream()
+                .filter(value -> value.orderId() != orderId).toList(), user.positions(), user.leverages());
+    }
+
+    private static com.surprising.aeron.protocol.CoreUserStateView withoutPosition(
+            com.surprising.aeron.protocol.CoreUserStateView user, CoreExportEvent.UserPositionKey key) {
+        return new com.surprising.aeron.protocol.CoreUserStateView(user.productLine(), user.userId(),
+                user.revision(), user.positionMode(), user.balances(), user.reservations(), user.positions().stream()
+                .filter(value -> !value.symbol().equals(key.symbol())
+                        || value.positionSide() != key.positionSide()).toList(), user.leverages());
+    }
+
+    private static com.surprising.aeron.protocol.CoreUserStateView withoutLeverage(
+            com.surprising.aeron.protocol.CoreUserStateView user, CoreExportEvent.UserLeverageKey key) {
+        return new com.surprising.aeron.protocol.CoreUserStateView(user.productLine(), user.userId(),
+                user.revision(), user.positionMode(), user.balances(), user.reservations(), user.positions(),
+                user.leverages().stream().filter(value -> !value.symbol().equals(key.symbol())
+                        || value.marginMode() != key.marginMode()).toList());
+    }
+
+    private record PositionKey(String symbol, com.surprising.aeron.protocol.CorePositionSide side)
+            implements Comparable<PositionKey> {
+        @Override public int compareTo(PositionKey other) {
+            int result = symbol.compareTo(other.symbol);
+            return result != 0 ? result : side.compareTo(other.side);
+        }
+    }
+
+    private record LeverageKey(String symbol, com.surprising.aeron.protocol.CoreMarginMode mode)
+            implements Comparable<LeverageKey> {
+        @Override public int compareTo(LeverageKey other) {
+            int result = symbol.compareTo(other.symbol);
+            return result != 0 ? result : mode.compareTo(other.mode);
+        }
+    }
+
+    private record AssetKey(long userId, String asset) implements Comparable<AssetKey> {
+        @Override public int compareTo(AssetKey other) {
+            int result = Long.compare(userId, other.userId);
+            return result != 0 ? result : asset.compareTo(other.asset);
+        }
+    }
+
+    private record ReservationKey(long userId, long orderId) implements Comparable<ReservationKey> {
+        @Override public int compareTo(ReservationKey other) {
+            int result = Long.compare(userId, other.userId);
+            return result != 0 ? result : Long.compare(orderId, other.orderId);
+        }
+    }
+
+    private record UserPositionKey(long userId, String symbol,
+                                   com.surprising.aeron.protocol.CorePositionSide side)
+            implements Comparable<UserPositionKey> {
+        @Override public int compareTo(UserPositionKey other) {
+            int result = Long.compare(userId, other.userId);
+            if (result == 0) result = symbol.compareTo(other.symbol);
+            return result != 0 ? result : side.compareTo(other.side);
+        }
+    }
+
+    private record UserLeverageKey(long userId, String symbol,
+                                   com.surprising.aeron.protocol.CoreMarginMode mode)
+            implements Comparable<UserLeverageKey> {
+        @Override public int compareTo(UserLeverageKey other) {
+            int result = Long.compare(userId, other.userId);
+            if (result == 0) result = symbol.compareTo(other.symbol);
+            return result != 0 ? result : mode.compareTo(other.mode);
+        }
+    }
+
+    void assertHealthy() {
         Throwable failure = materializationFailure.get();
         if (failure != null) throw new CompletionException("Core Fact materialization failed", failure);
+        if (closed) throw new IllegalStateException("Core Fact materializer is closed");
+    }
+
+    private long materializationBacklog() {
+        return Math.subtractExact(submittedMaterializations, completedMaterializations);
+    }
+
+    private void requireActivated() {
+        if (!activated) throw new IllegalStateException("Core Fact materializer is not activated");
+    }
+
+    private void runMaterializer() {
+        ArrayList<PendingExport> batch = new ArrayList<>(materializationBatchSize);
+        while (!closed || materializationBacklog() > 0) {
+            try {
+                PendingExport first = materializationQueue.poll(50, TimeUnit.MILLISECONDS);
+                if (first == null) continue;
+                batch.add(first);
+                materializationQueue.drainTo(batch, materializationBatchSize - 1);
+                long bytes = 0;
+                for (PendingExport task : batch) {
+                    Throwable priorFailure = materializationFailure.get();
+                    if (priorFailure != null) {
+                        completedMaterializations = Math.incrementExact(completedMaterializations);
+                        task.completeExceptionally(priorFailure, this);
+                        continue;
+                    }
+                    boolean released = false;
+                    try {
+                        if (task.header.sourceSequence() != nextMaterializationSequence) {
+                            throw new IllegalStateException("Core Fact materialization sequence gap");
+                        }
+                        CoreExportEvent event = task.draft.materialize(nextMaterializationSequence,
+                                orderViewFactory);
+                        int actualLength = Math.addExact(CoreProtocol.HEADER_LENGTH,
+                                CoreExportCodec.encodedEventLength(event));
+                        if (actualLength > task.encodedLength) {
+                            throw new IllegalStateException("Core Fact exceeded deterministic reservation");
+                        }
+                        CoreMessage message = CoreMessage.owned(task.header, encoder.encode(event));
+                        nextMaterializationSequence = Math.incrementExact(nextMaterializationSequence);
+                        bytes = Math.addExact(bytes, actualLength);
+                        completedMaterializations = Math.incrementExact(completedMaterializations);
+                        released = true;
+                        task.complete(new MaterializedExport(event, message, actualLength), this);
+                    } catch (Throwable failure) {
+                        poison(failure);
+                        if (!released) {
+                            completedMaterializations = Math.incrementExact(completedMaterializations);
+                            released = true;
+                        }
+                        task.completeExceptionally(failure, this);
+                    } finally {
+                        if (!released) completedMaterializations = Math.incrementExact(completedMaterializations);
+                    }
+                }
+                materializationBatchCount++;
+                materializationBatchItems += batch.size();
+                materializationBatchBytes = Math.addExact(materializationBatchBytes, bytes);
+                batch.clear();
+                if (materializationFailure.get() != null) {
+                    failQueuedMaterializations(materializationFailure.get());
+                    return;
+                }
+            } catch (InterruptedException interrupted) {
+                if (!closed) {
+                    poison(interrupted);
+                    failQueuedMaterializations(interrupted);
+                    return;
+                }
+            } catch (Throwable failure) {
+                poison(failure);
+                failQueuedMaterializations(failure);
+                return;
+            }
+        }
+    }
+
+    private void failQueuedMaterializations(Throwable failure) {
+        PendingExport task;
+        while ((task = materializationQueue.poll()) != null) {
+            completedMaterializations = Math.incrementExact(completedMaterializations);
+            task.completeExceptionally(failure, this);
+        }
+    }
+
+    private void failPendingMaterializations(Throwable failure) {
+        for (PendingExport export : pending) {
+            if (!export.ready()) export.completeExceptionally(failure, this);
+        }
+    }
+
+    private void poison(Throwable failure) {
+        if (materializationFailure.compareAndSet(null, failure)) errorCount++;
+    }
+
+    private void validateReservation(AdmissionReservation reservation) {
+        assertHealthy();
+        if (reservation == null || reservation.owner != this || reservation.closed
+                || reservation.remainingEvents < 1 || reservation.remainingBytes < 1) {
+            throw new IllegalStateException("invalid or consumed export admission reservation");
+        }
+    }
+
+    Metrics metrics() {
+        return new Metrics(pending.size(), maxBacklog, closed ? pending.size() : -1,
+                materializationBatchCount, materializationBatchItems, materializationBatchBytes,
+                materializationBacklog(), acknowledgedMaterializationItems.get(),
+                acknowledgedMaterializationBytes.get(), reservedEvents, reservedBytes,
+                rejectionCount, errorCount, timeoutCount);
     }
 
     @FunctionalInterface
-    interface FactRecord {
-        CoreExportEvent materialize(long sequence);
+    interface EventEncoder {
+        byte[] encode(CoreExportEvent event);
     }
 
     private record MaterializedExport(CoreExportEvent event, CoreMessage message, int actualLength) {
+    }
+
+    private static final class SpscTaskQueue<E> {
+        private final AtomicReferenceArray<E> slots;
+        private final int mask;
+        private volatile long producerSequence;
+        private volatile long consumerSequence;
+        private volatile Thread consumerWaiter;
+
+        private SpscTaskQueue(int requestedCapacity) {
+            if (requestedCapacity < 1) throw new IllegalArgumentException("queue capacity must be positive");
+            int capacity = 1;
+            while (capacity < requestedCapacity) capacity = Math.multiplyExact(capacity, 2);
+            slots = new AtomicReferenceArray<>(capacity);
+            mask = capacity - 1;
+        }
+
+        private boolean offer(E value) {
+            Objects.requireNonNull(value, "queue value");
+            long sequence = producerSequence;
+            if (sequence - consumerSequence >= slots.length()) return false;
+            int index = (int) sequence & mask;
+            if (slots.get(index) != null) throw new IllegalStateException("SPSC live slot overwrite");
+            slots.lazySet(index, value);
+            producerSequence = sequence + 1;
+            signalConsumer();
+            return true;
+        }
+
+        private E poll(long timeout, TimeUnit unit) throws InterruptedException {
+            E value = poll();
+            if (value != null || timeout <= 0) return value;
+            long timeoutNanos = unit.toNanos(timeout);
+            long deadline = System.nanoTime() + timeoutNanos;
+            Thread current = Thread.currentThread();
+            consumerWaiter = current;
+            try {
+                while ((value = poll()) == null) {
+                    long remaining = deadline - System.nanoTime();
+                    if (remaining <= 0) return null;
+                    LockSupport.parkNanos(this, remaining);
+                    if (Thread.interrupted()) throw new InterruptedException();
+                }
+                return value;
+            } finally {
+                if (consumerWaiter == current) consumerWaiter = null;
+            }
+        }
+
+        private E poll() {
+            long sequence = consumerSequence;
+            if (sequence >= producerSequence) return null;
+            int index = (int) sequence & mask;
+            E value = slots.get(index);
+            if (value == null) return null;
+            slots.lazySet(index, null);
+            consumerSequence = sequence + 1;
+            return value;
+        }
+
+        private int drainTo(List<E> destination, int maxElements) {
+            int count = 0;
+            E value;
+            while (count < maxElements && (value = poll()) != null) {
+                destination.add(value);
+                count++;
+            }
+            return count;
+        }
+
+        private boolean isEmpty() {
+            return consumerSequence >= producerSequence;
+        }
+
+        private void signalConsumer() {
+            Thread waiter = consumerWaiter;
+            if (waiter != null) LockSupport.unpark(waiter);
+        }
+    }
+
+    static final class AdmissionReservation {
+        private final CoreExportState owner;
+        private int remainingEvents;
+        private long remainingBytes;
+        private boolean closed;
+
+        private AdmissionReservation(CoreExportState owner, int remainingEvents, long remainingBytes) {
+            this.owner = owner;
+            this.remainingEvents = remainingEvents;
+            this.remainingBytes = remainingBytes;
+        }
+
+        int remainingEvents() { return remainingEvents; }
+    }
+
+    record Metrics(long currentBacklog, long maxBacklog, long endBacklog,
+                   long batchCount, long batchItems, long batchBytes,
+                   long materializationBacklog, long acknowledgedMaterializationItems,
+                   long acknowledgedMaterializationBytes,
+                   long reservedEvents, long reservedBytes,
+                   long rejectionCount, long errorCount, long timeoutCount) {
     }
 
     private static int reservedEventLength(Draft draft) {
         return reservedEventLength(draft.command().payloadLength(), draft.itemCount());
     }
 
+    static long maxReservedEventBytes() { return MAX_EVENT_BYTES; }
+
+    static long maxReservedAdmissionBytes(int events) {
+        if (events < 1) throw new IllegalArgumentException("event count must be positive");
+        return Math.min(MAX_PENDING_BYTES, Math.multiplyExact(MAX_EVENT_BYTES, events));
+    }
+
     private static int reservedEventLength(CoreExportEvent event) {
         int items = event.changedUsers().size() + event.changedOrders().size() + event.executions().size()
                 + event.fundingPayments().size() + event.changedLiquidations().size()
                 + event.changedTreasuryAssets().size() + event.changedTriggerOrders().size()
-                + event.fundsPostings().size();
+                + event.fundsPostings().size() + event.matcherEvidence().size()
+                + event.terminalIds().orderIds().size() + event.terminalIds().liquidationIds().size()
+                + event.terminalIds().triggerOrderIds().size() + event.tombstones().itemCount();
         return reservedEventLength(event.commandPayloadUnsafe().length, items);
     }
 
@@ -412,5 +1222,30 @@ final class CoreExportState implements AutoCloseable {
             throw new CoreStateRejectedException("EXPORT_BACKLOG_FULL", "export fact exceeds event limit");
         }
         return Math.toIntExact(reserved);
+    }
+
+    private static int configuredCapacity() {
+        int value = Integer.getInteger("surprising.aeron.export-materialization-capacity", MAX_PENDING_EVENTS);
+        if (value < 1 || value > MAX_PENDING_EVENTS) {
+            throw new IllegalArgumentException("export materialization capacity is outside supported bounds");
+        }
+        return value;
+    }
+
+    private static long configuredByteCapacity() {
+        long value = Long.getLong("surprising.aeron.export-pending-bytes", DEFAULT_PENDING_BYTES);
+        if (value < MAX_EVENT_BYTES || value > MAX_PENDING_BYTES) {
+            throw new IllegalArgumentException("export byte capacity is outside supported bounds");
+        }
+        return value;
+    }
+
+    private static int configuredBatchSize(int capacity) {
+        int value = Integer.getInteger("surprising.aeron.export-materialization-batch-size",
+                Math.min(64, capacity));
+        if (value < 1 || value > capacity) {
+            throw new IllegalArgumentException("export materialization batch size is outside supported bounds");
+        }
+        return value;
     }
 }

@@ -27,7 +27,7 @@ public final class ClusterExportSmokeMain {
             ReliableCoreExporter exporter = new ReliableCoreExporter(productLine, client::submit,
                     (line, events) -> {
                         events.forEach(event -> published.add(
-                                CoreExportCodec.decodeEvent(event.payload()).exportSequence()));
+                                CoreExportCodec.decodeEvent(event, productLine).exportSequence()));
                         if ("fail".equalsIgnoreCase(mode)) {
                             throw new IllegalStateException("injected exporter sink failure");
                         }

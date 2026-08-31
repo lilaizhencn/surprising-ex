@@ -116,10 +116,12 @@ public class CoreMarketDataProjection {
 
     synchronized void apply(CoreMessage message) {
         ProductLine productLine = properties.getKafka().getProductLine();
-        if (message.header().productLine() != productLine) {
-            throw new IllegalStateException("Core event product line mismatch");
+        CoreExportEvent event;
+        try {
+            event = CoreExportCodec.decodeEvent(message, productLine);
+        } catch (com.surprising.aeron.protocol.ProtocolException exception) {
+            throw new IllegalStateException("Core event product line mismatch", exception);
         }
-        CoreExportEvent event = CoreExportCodec.decodeEvent(message.payload());
         if (event.exportSequence() <= appliedExportSequence) return;
         long expectedSequence = Math.incrementExact(appliedExportSequence);
         if (event.exportSequence() != expectedSequence) {

@@ -36,6 +36,7 @@ import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.locks.LockSupport;
 
 final class LinearPerpetualBenchmarkSupport {
 
@@ -43,6 +44,14 @@ final class LinearPerpetualBenchmarkSupport {
     static final int DEFAULT_MAKER_DEPTH = 16;
     static final int DEFAULT_RISK_USERS = 32;
     static final int MAX_BENCHMARK_SCALE = 10_000;
+    static final OwnerCommitScale OWNER_COMMIT_SCALE = new OwnerCommitScale(
+            10_000, 512, 4, 5, 10, 256, 16_384);
+    static final List<String> OWNER_COMMIT_BENCHMARK_NAMES = List.of(
+            "ownerCommitSealPublishApply",
+            "multiLanePatchFanout",
+            "incrementalHashAgainstCanonical",
+            "batchedPatchProjectionCoreFact",
+            "ownerCommitSnapshotRecovery");
     private static final String SYMBOL = "JMH-BTC-USDT";
     private static final String SETTLE_ASSET = "USDT";
     private static final long ENTRY_PRICE = 100;
@@ -51,6 +60,7 @@ final class LinearPerpetualBenchmarkSupport {
     private static final long SAFE_BALANCE = 1_000_000_000L;
     private static final long LIQUIDATION_BALANCE = 230;
     private static final long MATCH_TIMEOUT_NANOS = 30_000_000_000L;
+    private static final int PROJECTION_ADMISSION_HEADROOM = 3;
     private static final int EXPORT_ACK_INTERVAL = Math.max(1,
             Integer.getInteger("surprising.benchmark.export-ack-interval", 128));
     private static final int COMMANDS_PER_LOGICAL_MILLISECOND = 256;
@@ -118,6 +128,18 @@ final class LinearPerpetualBenchmarkSupport {
 
         @Override
         void close();
+    }
+
+    record OwnerCommitScale(int activeUsers, int listedSymbols, int accountLanes,
+                            int positionsPerUser, int ordersPerUser, int maxInFlight,
+                            int operationsPerInvocation) {
+        OwnerCommitScale {
+            if (activeUsers != 10_000 || listedSymbols != 512 || accountLanes != 4
+                    || positionsPerUser != 5 || ordersPerUser != 10 || maxInFlight != 256
+                    || operationsPerInvocation != 16_384) {
+                throw new IllegalArgumentException("owner commit qualification scale must remain fixed");
+            }
+        }
     }
 
     record SnapshotTemplate(byte[] bytes, long businessStateHash, int accountLanes,
@@ -469,6 +491,8 @@ final class LinearPerpetualBenchmarkSupport {
         private boolean deferBatchResponseValidation;
         private CoreResponse deferredBatchResponse;
         private int deferredBatchOperationWeight;
+        private OpenLoopBusinessLatencyRecorder businessLatencies;
+        private Runnable admissionBackpressureDrain;
 
         private Harness(CoreProbeState state, Sequences sequences) {
             this.state = state;
@@ -519,6 +543,15 @@ final class LinearPerpetualBenchmarkSupport {
             return benchmarkTimestamp(sequences.clusterPosition);
         }
 
+        void beginBusinessLatencies(int targetOperationsPerSecond) {
+            businessLatencies = OpenLoopBusinessLatencyRecorder.createIfEnabled(targetOperationsPerSecond);
+        }
+
+        void commitBusinessLatencies() {
+            if (businessLatencies != null) businessLatencies.commit();
+            businessLatencies = null;
+        }
+
         CoreMessage command(CoreMessageType type, CommandSource source, long userId, byte[] payload) {
             long sourceSequence = sequences.next(source);
             long correlationId = sequences.clusterPosition++;
@@ -554,18 +587,29 @@ final class LinearPerpetualBenchmarkSupport {
             submitCommand(command, System.nanoTime());
         }
 
+        void submitScheduled(CoreMessage command, long scheduledEntryNanos) {
+            if (scheduledEntryNanos <= 0) throw new IllegalArgumentException("scheduled entry must be positive");
+            submitCommand(command, scheduledEntryNanos);
+        }
+
         private PendingCommand submitCommand(CoreMessage command) {
             return submitCommand(command, 0);
         }
 
         private PendingCommand submitCommand(CoreMessage command, long submittedAtNanos) {
+            while (submittedAtNanos != 0 && System.nanoTime() < submittedAtNanos) Thread.onSpinWait();
             Integer batchWeight = batchOperationWeights.remove(command);
             int operationWeight = batchWeight == null ? 1 : batchWeight;
+            OpenLoopBusinessLatencyRecorder.Token businessLatency = businessLatencies == null
+                    ? null : businessLatencies.enter(command.header().messageType(), operationWeight);
+            awaitProjectionAdmissionCapacity();
             executedMessages = Math.addExact(executedMessages, operationWeight);
             acceptedMessages = Math.addExact(acceptedMessages, operationWeight);
             acceptedCoreMessages = Math.incrementExact(acceptedCoreMessages);
             int pendingBefore = state.pendingMatchingCount();
             CoreResponse response = state.apply(command);
+            if (businessLatencies != null) businessLatencies.accepted(businessLatency);
+            long acceptedAtNanos = submittedAtNanos == 0 ? 0 : System.nanoTime();
             long sequence = state.matchingSequence(command.header().commandId());
             boolean indirectSequence = false;
             if (sequence == 0 && pendingBefore == 0 && state.pendingMatchingCount() != 0) {
@@ -573,7 +617,8 @@ final class LinearPerpetualBenchmarkSupport {
                 indirectSequence = true;
             }
             PendingCommand pending = new PendingCommand(
-                    command, sequence, operationWeight, response, indirectSequence, submittedAtNanos);
+                    command, sequence, operationWeight, response, indirectSequence,
+                    submittedAtNanos, acceptedAtNanos, businessLatency);
             if (response.resultCode() == CoreResultCode.MATCHING_PENDING || sequence != 0) {
                 if (sequence == 0) throw new IllegalStateException("matching sequence was not registered");
                 submittedMatching.addLast(pending);
@@ -583,8 +628,35 @@ final class LinearPerpetualBenchmarkSupport {
                 terminalMessages = Math.addExact(terminalMessages, operationWeight);
                 terminalCoreMessages = Math.incrementExact(terminalCoreMessages);
                 recordExport(response);
+                if (businessLatencies != null) businessLatencies.terminal(businessLatency);
             }
             return pending;
+        }
+
+        private void awaitProjectionAdmissionCapacity() {
+            long deadline = System.nanoTime() + MATCH_TIMEOUT_NANOS;
+            int idle = 0;
+            while (!state.hasProjectionAdmissionCapacity(PROJECTION_ADMISSION_HEADROOM)) {
+                if (System.nanoTime() >= deadline) {
+                    throw new IllegalStateException("commit journal admission remained saturated for 30 seconds");
+                }
+                if (!submittedMatching.isEmpty()) {
+                    int pendingBefore = submittedMatching.size();
+                    if (admissionBackpressureDrain == null) drainOldestLatencyNanos();
+                    else admissionBackpressureDrain.run();
+                    if (submittedMatching.size() >= pendingBefore) {
+                        throw new IllegalStateException("commit admission drain made no matching progress");
+                    }
+                    idle = 0;
+                    continue;
+                }
+                if (idle++ < 1_024) Thread.onSpinWait();
+                else LockSupport.parkNanos(1_000L);
+            }
+        }
+
+        void admissionBackpressureDrain(Runnable drain) {
+            admissionBackpressureDrain = drain;
         }
 
         void drainSubmitted() {
@@ -641,6 +713,7 @@ final class LinearPerpetualBenchmarkSupport {
             terminalMessages = Math.addExact(terminalMessages, pending.operationWeight);
             terminalCoreMessages = Math.incrementExact(terminalCoreMessages);
             recordExport(pending.response);
+            if (businessLatencies != null) businessLatencies.terminal(pending.businessLatency);
             return pending.submittedAtNanos == 0 ? 0 : System.nanoTime() - pending.submittedAtNanos;
         }
 
@@ -649,7 +722,8 @@ final class LinearPerpetualBenchmarkSupport {
                 throw new IllegalArgumentException("matching drain batch requires a positive limit and recorder");
             }
             return commitReadyMatching(maxCompletions, true,
-                    (userId, latencyNanos) -> latencyRecorder.accept(latencyNanos));
+                    (userId, entryNanos, acceptedNanos, terminalNanos) ->
+                            latencyRecorder.accept(entryNanos == 0 ? 0 : terminalNanos - entryNanos));
         }
 
         int awaitReadyMatching(int maxCompletions, MatchingCompletionConsumer completionConsumer) {
@@ -673,9 +747,10 @@ final class LinearPerpetualBenchmarkSupport {
                         terminalMessages = Math.addExact(terminalMessages, pending.operationWeight);
                         terminalCoreMessages = Math.incrementExact(terminalCoreMessages);
                         recordExport(response);
-                        long latency = pending.submittedAtNanos == 0
-                                ? 0 : System.nanoTime() - pending.submittedAtNanos;
-                        completionConsumer.accept(pending.command.header().userId(), latency);
+                        if (businessLatencies != null) businessLatencies.terminal(pending.businessLatency);
+                        long terminalAtNanos = System.nanoTime();
+                        completionConsumer.accept(pending.command.header().userId(),
+                                pending.submittedAtNanos, pending.acceptedAtNanos, terminalAtNanos);
                     });
             if (commandsSinceExportAck >= EXPORT_ACK_INTERVAL) acknowledgeExportsWithoutDrain();
             return completed;
@@ -683,7 +758,8 @@ final class LinearPerpetualBenchmarkSupport {
 
         @FunctionalInterface
         interface MatchingCompletionConsumer {
-            void accept(long userId, long latencyNanos);
+            void accept(long userId, long scheduledEntryNanos,
+                        long acceptedAtNanos, long terminalAtNanos);
         }
 
         private void validateTerminal(
@@ -782,7 +858,7 @@ final class LinearPerpetualBenchmarkSupport {
         }
 
         private ProductLine productLine() {
-            return state.tradingState().productLine();
+            return state.productLine();
         }
 
         CoreProbeState state() {
@@ -840,16 +916,22 @@ final class LinearPerpetualBenchmarkSupport {
             private final int operationWeight;
             private final boolean indirectSequence;
             private final long submittedAtNanos;
+            private final long acceptedAtNanos;
+            private final OpenLoopBusinessLatencyRecorder.Token businessLatency;
             private CoreResponse response;
 
             private PendingCommand(CoreMessage command, long sequence, int operationWeight,
-                                   CoreResponse response, boolean indirectSequence, long submittedAtNanos) {
+                                   CoreResponse response, boolean indirectSequence,
+                                   long submittedAtNanos, long acceptedAtNanos,
+                                   OpenLoopBusinessLatencyRecorder.Token businessLatency) {
                 this.command = command;
                 this.sequence = sequence;
                 this.operationWeight = operationWeight;
                 this.response = response;
                 this.indirectSequence = indirectSequence;
                 this.submittedAtNanos = submittedAtNanos;
+                this.acceptedAtNanos = acceptedAtNanos;
+                this.businessLatency = businessLatency;
             }
         }
     }

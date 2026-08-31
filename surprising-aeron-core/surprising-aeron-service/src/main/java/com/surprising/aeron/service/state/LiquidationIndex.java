@@ -26,31 +26,16 @@ public final class LiquidationIndex {
         return allActiveIds;
     }
 
-    public void update(TradingCoreState before, TradingCoreState after) {
-        if (before.riskState().liquidations() == after.riskState().liquidations()) return;
-        StateMapSupport.requireDeltaLineage(before.riskState().liquidations(),
-                after.riskState().liquidations(), "liquidations");
-        Set<Long> changed = StateMapSupport.changedKeys(after.riskState().liquidations());
-        for (Long id : changed) {
-            if (id == null) continue;
-            CoreLiquidationState previous = before.riskState().liquidations().get(id);
-            CoreLiquidationState current = after.riskState().liquidations().get(id);
-            if (isActive(previous)) remove(previous);
-            if (isActive(current)) add(current);
-        }
-    }
-
-    public void update(RuntimeCommitEntry entry) {
-        RuntimeMutationDelta.ValueChanges<Long, LiquidationRuntime> changes = entry.mutation().liquidations();
-        for (Long id : changes.changedKeys()) {
-            LiquidationKey previous = keysById.remove(id);
-            if (previous != null) remove(id, previous);
-            LiquidationRuntime current = changes.currentValues().get(id);
-            if (isActive(current)) {
-                LiquidationKey key = new LiquidationKey(current.userId(),
-                        entry.identities().symbol(current.symbolId()), current.positionSide());
-                keysById.put(id, key);
-                add(id, key);
+    void apply(java.util.List<RuntimeCommitPatch.LiquidationChange> changes,
+               RuntimeCommitPatch.IdentityView identities) {
+        for (RuntimeCommitPatch.LiquidationChange change : changes) {
+            LiquidationKey previous = keysById.remove(change.liquidationId());
+            if (previous != null) remove(change.liquidationId(), previous);
+            if (isActive(change.after())) {
+                LiquidationKey key = new LiquidationKey(change.after().userId(),
+                        identities.symbol(change.after().symbolId()), change.after().positionSide());
+                keysById.put(change.liquidationId(), key);
+                add(change.liquidationId(), key);
             }
         }
     }

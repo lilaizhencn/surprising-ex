@@ -1718,7 +1718,9 @@ public final class TradingCoreReducer {
         long collectedFee = cash.collectedFeeUnits();
         CoreTreasuryState treasury = canceled.treasuryState()
                 .adjustInsurance(instrument.settleAsset(),
-                        Math.addExact(Math.negateExact(cash.appliedDelta()), collectedFee));
+                        Math.addExact(Math.negateExact(cash.appliedDelta()), collectedFee))
+                .adjustDeficit(instrument.settleAsset(), uncovered)
+                .adjustClearingPnl(instrument.settleAsset(), uncovered);
         Map<String, AssetBalance> balances = StateMapSupport.delta(user.balances());
         balances.put(instrument.settleAsset(), cash.balance());
         Map<String, CorePositionState> positions = StateMapSupport.delta(user.positions());
@@ -1806,12 +1808,6 @@ public final class TradingCoreReducer {
                 liquidation.instrumentVersion());
         CoreLiquidationState.Status nextStatus;
         CoreTreasuryState treasury = state.treasuryState();
-        CoreUserState target = state.user(liquidation.userId());
-        if (target == null) {
-            throw new CoreStateRejectedException("USER_NOT_FOUND", "liquidation user does not exist");
-        }
-        AssetBalance targetBalance = requireBalance(target, instrument.settleAsset());
-        long creditedUnits = 0;
         switch (command.resolution()) {
             case INSURANCE -> {
                 if (liquidation.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) {
@@ -1828,9 +1824,8 @@ public final class TradingCoreReducer {
                             "insurance fund balance is insufficient");
                 }
                 treasury = treasury.adjustInsurance(instrument.settleAsset(),
-                        Math.negateExact(command.coveredUnits()));
-                targetBalance = targetBalance.credit(command.coveredUnits());
-                creditedUnits = command.coveredUnits();
+                        Math.negateExact(command.coveredUnits())).adjustDeficit(
+                        instrument.settleAsset(), Math.negateExact(command.coveredUnits()));
                 nextStatus = command.coveredUnits() == liquidation.deficitUnits()
                         ? CoreLiquidationState.Status.COMPLETED : CoreLiquidationState.Status.ADL_REQUIRED;
             }
@@ -1854,18 +1849,11 @@ public final class TradingCoreReducer {
         CoreLiquidationState nextLiquidation = command.resolution() == ResolveLiquidationCommand.Resolution.COMPLETED
                 ? liquidation.withStatus(nextStatus) : liquidation.covered(command.coveredUnits(), nextStatus);
         liquidations.put(liquidation.liquidationId(), nextLiquidation);
-        Map<Long, CoreUserState> users = StateMapSupport.delta(state.users());
-        if (creditedUnits > 0) {
-            Map<String, AssetBalance> balances = StateMapSupport.delta(target.balances());
-            balances.put(instrument.settleAsset(), targetBalance);
-            users.put(target.userId(), target.transition(Math.incrementExact(target.revision()), balances,
-                    target.reservations(), target.positions(), target.positionMode()));
-        }
         CoreRiskState risk = new CoreRiskState(state.riskState().markPrices(), state.riskState().snapshots(),
                 liquidations, state.riskState().scans(), state.riskState().nextLiquidationId(),
                 state.riskState().scanControl());
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
-                users, state.orders(), state.instruments(), risk, treasury,
+                state.users(), state.orders(), state.instruments(), risk, treasury,
                 state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(),
                 state.triggerOrders());
     }
@@ -1929,8 +1917,10 @@ public final class TradingCoreReducer {
         if (releasedMargin > 0) balance = balance.release(releasedMargin);
         long targetCashDelta = Math.subtractExact(coverCapacity, command.coveredUnits());
         if (targetCashDelta > 0) balance = balance.credit(targetCashDelta);
-        CoreTreasuryState treasury = state.treasuryState().adjustClearingPnl(
-                instrument.settleAsset(), Math.negateExact(targetCashDelta));
+        CoreTreasuryState treasury = state.treasuryState()
+                .adjustClearingPnl(instrument.settleAsset(), Math.negateExact(targetCashDelta))
+                .adjustDeficit(instrument.settleAsset(), Math.negateExact(command.coveredUnits()))
+                .adjustClearingPnl(instrument.settleAsset(), Math.negateExact(command.coveredUnits()));
         Map<String, AssetBalance> balances = StateMapSupport.delta(target.balances());
         balances.put(instrument.settleAsset(), balance);
         long nextEntryValue = remainingAbs == 0 ? 0

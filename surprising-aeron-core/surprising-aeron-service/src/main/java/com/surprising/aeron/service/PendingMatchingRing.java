@@ -6,10 +6,14 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
 
 final class PendingMatchingRing {
     private final PendingMatching[] entries;
     private final long[] sequences;
+    private final LongIntHashMap slotsBySequence;
+    private final Map<UUID, PendingMatching> entriesByCommandId;
+    private final LongIntHashMap pendingByUser;
     private final int mask;
     private int head;
     private int tail;
@@ -23,31 +27,39 @@ final class PendingMatchingRing {
         while (capacity < requestedCapacity) capacity <<= 1;
         entries = new PendingMatching[capacity];
         sequences = new long[capacity];
+        slotsBySequence = new LongIntHashMap(capacity);
+        entriesByCommandId = new java.util.HashMap<>(capacity);
+        pendingByUser = new LongIntHashMap(capacity);
         mask = capacity - 1;
     }
 
     void put(PendingMatching pending) {
         if (pending == null) throw new IllegalArgumentException("pending matching is required");
-        for (int offset = 0; offset < size; offset++) {
-            int index = (head + offset) & mask;
-            if (sequences[index] == pending.sequence()) {
-                entries[index] = pending;
-                return;
+        int encodedIndex = slotsBySequence.get(pending.sequence());
+        if (encodedIndex != 0) {
+            int index = encodedIndex - 1;
+            PendingMatching existing = entries[index];
+            if (existing == null || existing.sequence() != pending.sequence()) {
+                throw new IllegalStateException("pending matching index is corrupted");
             }
+            requireAvailableCommandId(pending, existing);
+            removeIndexes(existing);
+            entries[index] = pending;
+            addIndexes(pending, index);
+            return;
         }
         if (size == entries.length) throw new IllegalStateException("pending matching ring is full");
         int index = tail++ & mask;
+        requireAvailableCommandId(pending, null);
         entries[index] = pending;
         sequences[index] = pending.sequence();
+        addIndexes(pending, index);
         size++;
     }
 
     PendingMatching get(long sequence) {
-        for (int offset = 0; offset < size; offset++) {
-            int index = (head + offset) & mask;
-            if (sequences[index] == sequence) return entries[index];
-        }
-        return null;
+        int encodedIndex = slotsBySequence.get(sequence);
+        return encodedIndex == 0 ? null : entries[encodedIndex - 1];
     }
 
     boolean contains(long sequence) {
@@ -63,6 +75,7 @@ final class PendingMatchingRing {
         }
         entries[entryIndex] = null;
         sequences[head++ & mask] = 0;
+        removeIndexes(removed);
         size--;
         return removed;
     }
@@ -80,21 +93,11 @@ final class PendingMatchingRing {
     }
 
     PendingMatching findByCommandId(UUID commandId) {
-        if (commandId == null) return null;
-        for (int offset = 0; offset < size; offset++) {
-            PendingMatching pending = entries[(head + offset) & mask];
-            if (pending != null && commandId.equals(pending.command().header().commandId())) return pending;
-        }
-        return null;
+        return commandId == null ? null : entriesByCommandId.get(commandId);
     }
 
     boolean hasUser(long userId) {
-        if (userId <= 0) return false;
-        for (int offset = 0; offset < size; offset++) {
-            PendingMatching pending = entries[(head + offset) & mask];
-            if (pending != null && pending.command().header().userId() == userId) return true;
-        }
-        return false;
+        return userId > 0 && pendingByUser.get(userId) > 0;
     }
 
     void forEach(Consumer<PendingMatching> consumer) {
@@ -114,6 +117,31 @@ final class PendingMatchingRing {
         while (size != 0) remove(firstSequence());
         head = 0;
         tail = 0;
+    }
+
+    private void addIndexes(PendingMatching pending, int index) {
+        slotsBySequence.put(pending.sequence(), index + 1);
+        UUID commandId = pending.command().header().commandId();
+        entriesByCommandId.put(commandId, pending);
+        long userId = pending.command().header().userId();
+        if (userId > 0) pendingByUser.addToValue(userId, 1);
+    }
+
+    private void removeIndexes(PendingMatching pending) {
+        slotsBySequence.removeKey(pending.sequence());
+        entriesByCommandId.remove(pending.command().header().commandId(), pending);
+        long userId = pending.command().header().userId();
+        if (userId <= 0) return;
+        int remaining = pendingByUser.addToValue(userId, -1);
+        if (remaining == 0) pendingByUser.removeKey(userId);
+        else if (remaining < 0) throw new IllegalStateException("pending matching user count underflow");
+    }
+
+    private void requireAvailableCommandId(PendingMatching pending, PendingMatching replaced) {
+        PendingMatching duplicate = entriesByCommandId.get(pending.command().header().commandId());
+        if (duplicate != null && duplicate != replaced) {
+            throw new IllegalStateException("duplicate pending matching commandId");
+        }
     }
 
     int size() { return size; }

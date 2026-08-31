@@ -63,26 +63,11 @@ public final class AlgoOrderIndex {
         return List.copyOf(result);
     }
 
-    public void update(TradingCoreState before, TradingCoreState after) {
-        if (before.algoOrders() == after.algoOrders()) return;
-        StateMapSupport.requireDeltaLineage(before.algoOrders(), after.algoOrders(), "algo orders");
-        Set<Long> changed = StateMapSupport.changedKeys(after.algoOrders());
-        for (Long id : changed) {
-            if (id == null) continue;
-            CoreAlgoOrderState previous = before.algoOrders().get(id);
-            CoreAlgoOrderState current = after.algoOrders().get(id);
+    void apply(java.util.List<RuntimeCommitPatch.AlgoOrderChange> changes) {
+        for (RuntimeCommitPatch.AlgoOrderChange change : changes) {
+            CoreAlgoOrderState previous = valuesById.remove(change.algoOrderId());
             if (previous != null) remove(previous);
-            if (current != null) add(current);
-        }
-    }
-
-    public void update(RuntimeCommitEntry entry) {
-        RuntimeMutationDelta.ValueChanges<Long, CoreAlgoOrderState> changes = entry.mutation().algoOrders();
-        for (Long id : changes.changedKeys()) {
-            CoreAlgoOrderState previous = valuesById.remove(id);
-            if (previous != null) remove(previous);
-            CoreAlgoOrderState current = changes.currentValues().get(id);
-            if (current != null) add(current);
+            if (change.after() != null) add(change.after());
         }
     }
 

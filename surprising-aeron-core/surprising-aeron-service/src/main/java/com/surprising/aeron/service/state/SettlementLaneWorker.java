@@ -17,6 +17,10 @@ final class SettlementLaneWorker implements AutoCloseable {
     private volatile boolean running = true;
 
     SettlementLaneWorker(int laneId, int requestedCapacity) {
+        this("settlement", laneId, requestedCapacity);
+    }
+
+    SettlementLaneWorker(String role, int laneId, int requestedCapacity) {
         if (laneId < 0 || requestedCapacity <= 0) {
             throw new IllegalArgumentException("invalid settlement lane worker");
         }
@@ -25,7 +29,7 @@ final class SettlementLaneWorker implements AutoCloseable {
         tasks = new Runnable[capacity];
         indexMask = capacity - 1;
         waitStrategy = configuredWaitStrategy();
-        thread = new Thread(this::run, "core-settlement-lane-" + laneId);
+        thread = new Thread(this::run, "core-" + role + "-lane-" + laneId);
         thread.setDaemon(true);
         thread.start();
     }

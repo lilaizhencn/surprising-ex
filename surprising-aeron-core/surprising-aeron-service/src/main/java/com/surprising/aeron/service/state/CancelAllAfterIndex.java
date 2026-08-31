@@ -48,28 +48,11 @@ public final class CancelAllAfterIndex {
         return List.copyOf(result);
     }
 
-    public void update(TradingCoreState before, TradingCoreState after) {
-        if (before.cancelAllAfterTimers() == after.cancelAllAfterTimers()) return;
-        StateMapSupport.requireDeltaLineage(before.cancelAllAfterTimers(),
-                after.cancelAllAfterTimers(), "cancel-all-after timers");
-        Set<CoreCancelAllAfterKey> changed = StateMapSupport.changedKeys(after.cancelAllAfterTimers());
-        for (CoreCancelAllAfterKey key : changed) {
-            if (key == null) continue;
-            CoreCancelAllAfterState previous = before.cancelAllAfterTimers().get(key);
-            CoreCancelAllAfterState current = after.cancelAllAfterTimers().get(key);
+    void apply(java.util.List<RuntimeCommitPatch.TimerChange> changes) {
+        for (RuntimeCommitPatch.TimerChange change : changes) {
+            CoreCancelAllAfterState previous = valuesByKey.remove(change.key());
             if (previous != null) remove(previous);
-            if (current != null) add(current);
-        }
-    }
-
-    public void update(RuntimeCommitEntry entry) {
-        RuntimeMutationDelta.ValueChanges<CoreCancelAllAfterKey, CoreCancelAllAfterState> changes =
-                entry.mutation().timers();
-        for (CoreCancelAllAfterKey key : changes.changedKeys()) {
-            CoreCancelAllAfterState previous = valuesByKey.remove(key);
-            if (previous != null) remove(previous);
-            CoreCancelAllAfterState current = changes.currentValues().get(key);
-            if (current != null) add(current);
+            if (change.after() != null) add(change.after());
         }
     }
 

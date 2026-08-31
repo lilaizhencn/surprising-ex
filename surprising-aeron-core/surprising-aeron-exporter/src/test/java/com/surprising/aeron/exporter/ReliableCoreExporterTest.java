@@ -78,7 +78,7 @@ class ReliableCoreExporterTest {
             throw new AssertionError(exception);
         }
         assertThat(retried).hasSize(2);
-        assertThat(retried).extracting(message -> CoreExportCodec.decodeEvent(message.payload()).exportSequence())
+        assertThat(retried).extracting(message -> CoreExportCodec.decodeEvent(message, ProductLine.SPOT).exportSequence())
                 .containsExactly(1L, 2L);
         assertThat(recovered.status().pendingCount()).isZero();
     }

@@ -3,6 +3,8 @@ package com.surprising.aeron.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
+import com.surprising.aeron.protocol.CommandSource;
+import com.surprising.aeron.protocol.CoreMessageType;
 import java.util.List;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
@@ -25,6 +27,98 @@ class LinearPerpetualBenchmarkSupportTest {
                 1_000_000L);
 
         assertThat(lastTimestamp - firstTimestamp).isLessThanOrEqualTo(5_000);
+    }
+
+    @Test
+    void commandConstructionDoesNotRequestImmutableProjection() {
+        try (var harness = LinearPerpetualBenchmarkSupport.Harness.create(4)) {
+            harness.adjust(100_001L, 100);
+            long freezesBefore = harness.state().snapshotProjectionFreezeCount();
+
+            harness.command(CoreMessageType.ADJUST_BALANCE, CommandSource.GATEWAY,
+                    100_001L, new byte[0]);
+
+            assertThat(harness.state().snapshotProjectionFreezeCount()).isEqualTo(freezesBefore);
+        }
+    }
+
+    @Test
+    void ownerCommitQualificationKeepsTheRequiredScaleAndScenarioContract() {
+        var scale = LinearPerpetualBenchmarkSupport.OWNER_COMMIT_SCALE;
+
+        assertThat(scale.activeUsers()).isEqualTo(10_000);
+        assertThat(scale.listedSymbols()).isEqualTo(512);
+        assertThat(scale.accountLanes()).isEqualTo(4);
+        assertThat(scale.positionsPerUser()).isEqualTo(5);
+        assertThat(scale.ordersPerUser()).isEqualTo(10);
+        assertThat(scale.maxInFlight()).isEqualTo(256);
+        assertThat(scale.operationsPerInvocation()).isEqualTo(16_384);
+        assertThat(LinearPerpetualBenchmarkSupport.OWNER_COMMIT_BENCHMARK_NAMES).containsExactly(
+                "ownerCommitSealPublishApply",
+                "multiLanePatchFanout",
+                "incrementalHashAgainstCanonical",
+                "batchedPatchProjectionCoreFact",
+                "ownerCommitSnapshotRecovery");
+    }
+
+    @Test
+    void ownerCommitScenariosConsumeTheirRealScaleAndPreserveState() {
+        var result = OwnerCommitPatchBenchmark.exerciseSmallScale(16, 4);
+
+        assertThat(result.requestedOperations()).isEqualTo(16);
+        assertThat(result.requestedMaxInFlight()).isEqualTo(4);
+        assertThat(result.terminalOperations()).isEqualTo(result.requestedOperations());
+        assertThat(result.fanoutOperations()).isEqualTo(result.requestedOperations());
+        assertThat(result.projectedOperations()).isEqualTo(result.requestedOperations());
+        assertThat(result.encodedEvents()).isEqualTo(result.requestedOperations());
+        assertThat(result.maximumBacklog()).isBetween(1L, 4L);
+        assertThat(result.encodedBytes()).isPositive();
+        assertThat(result.snapshotBytes()).isPositive();
+        assertThat(result.initialFunds()).isEqualTo(result.recoveredFunds());
+        assertThat(result.recoveredPositions()).isGreaterThan(result.initialPositions());
+        assertThat(result.recoveredOrders()).isGreaterThan(result.initialOrders());
+        assertThat(result.recoveredBusinessHash()).isEqualTo(result.businessHash());
+        assertThat(result.recoveredFundsHash()).isEqualTo(result.fundsHash());
+        assertThat(result.topologyHash()).isNotZero();
+        assertThat(result.recoveryTopologyExact()).isTrue();
+        assertThat(result.fingerprintsExact()).isTrue();
+        assertThat(result.encodedFingerprintsExact()).isTrue();
+        assertThat(result.encodedFactsExact()).isTrue();
+        assertThat(result.nonZeroFingerprints()).isTrue();
+        assertThat(result.firstActualFingerprint()).isEqualTo(result.firstExpectedFingerprint())
+                .doesNotMatch("0{64}");
+    }
+
+    @Test
+    void denseOwnerCommitBatchAllocatesOrderIdsAboveTheInitialBook() {
+        assertThat(OwnerCommitPatchBenchmark.exerciseDenseBatchSetup(4)).isEqualTo(4);
+    }
+
+    @Test
+    void incrementalAndCanonicalHashQualificationExecutesEveryTransitionAndFullRecompute() {
+        var result = OwnerCommitPatchBenchmark.exerciseHashComparisonSmallScale(8);
+
+        assertThat(result.operations()).isEqualTo(8);
+        assertThat(result.businessPrepares()).isEqualTo(result.operations());
+        assertThat(result.fundsPrepares()).isEqualTo(result.operations());
+        assertThat(result.transitionCommits()).isEqualTo(result.operations() * 2);
+        assertThat(result.canonicalComputes()).isEqualTo(result.operations() * 2);
+        assertThat(result.projectedSequence()).isEqualTo(result.operations());
+        assertThat(result.incrementalBusinessHash()).isEqualTo(result.canonicalBusinessHash());
+        assertThat(result.incrementalFundsHash()).isEqualTo(result.canonicalFundsHash());
+        assertThat(result.everyOperationEquivalent()).isTrue();
+    }
+
+    @Test
+    void soakLeakQualificationUsesAllRealPointsAndResistsOneTransientOutlier() {
+        var result = LinearPerpetualScaleSoakMain.exerciseLeakSlopeSmallScale();
+
+        assertThat(result.samples()).isEqualTo(4);
+        assertThat(result.liveSetSlope()).isEqualTo(100.0);
+        assertThat(result.oldGenerationSlope()).isEqualTo(100.0);
+        assertThat(result.directSlope()).isEqualTo(100.0);
+        assertThat(result.mappedSlope()).isEqualTo(100.0);
+        assertThat(result.pass()).isTrue();
     }
 
     @Test

@@ -21,7 +21,14 @@ public final class TreasuryRuntime {
     private final IntHashSet changedAssets = new IntHashSet();
     private final IntHashSet changedFundingSymbols = new IntHashSet();
     private final IntHashSet changedLifecycleSymbols = new IntHashSet();
+    private final IntObjectHashMap<RuntimeCommitPatch.TreasuryAssetValue> patchAssetBefore =
+            new IntObjectHashMap<>();
+    private final IntObjectHashMap<RuntimeCommitPatch.TreasuryFundingValue> patchFundingBefore =
+            new IntObjectHashMap<>();
+    private final IntObjectHashMap<RuntimeCommitPatch.TreasuryLifecycleValue> patchLifecycleBefore =
+            new IntObjectHashMap<>();
     private Thread owner;
+    private boolean orderBatchMutationScope;
 
     void assertOwner() {
         Thread current = Thread.currentThread();
@@ -46,6 +53,21 @@ public final class TreasuryRuntime {
     public long lifecycleSettlement(int symbolId) { assertOwner(); return lifecycleSettlements.get(symbolId); }
     public LifecycleProgressRuntime lifecycleProgress(int symbolId) { assertOwner(); return lifecycleProgress.get(symbolId); }
 
+    void beginOrderBatchMutationScope() {
+        assertOwner();
+        if (orderBatchMutationScope) throw new IllegalStateException("Treasury order batch scope is already active");
+        orderBatchMutationScope = true;
+    }
+
+    void endOrderBatchMutationScope() {
+        assertOwner();
+        orderBatchMutationScope = false;
+    }
+
+    private void rejectNonAssetOrderBatchMutation(String domain) {
+        if (orderBatchMutationScope) throw new IllegalStateException("order batch cannot mutate " + domain);
+    }
+
     public int assetLedgerEntryCount() {
         assertOwner();
         return Math.addExact(Math.addExact(Math.addExact(feeBalances.size(), insuranceBalances.size()),
@@ -56,12 +78,14 @@ public final class TreasuryRuntime {
 
     public void setFee(int assetId, long units) {
         assertOwner();
+        captureAssetBefore(assetId);
         setSigned(feeBalances, assetId, units);
         changedAssets.add(assetId);
     }
 
     public void setInsurance(int assetId, long units, long deficit) {
         assertOwner();
+        captureAssetBefore(assetId);
         setSigned(insuranceBalances, assetId, units);
         setSigned(insuranceDeficits, assetId, deficit);
         changedAssets.add(assetId);
@@ -69,45 +93,53 @@ public final class TreasuryRuntime {
 
     public void adjustInsurance(int assetId, long deltaUnits) {
         assertOwner();
+        captureAssetBefore(assetId);
         setSigned(insuranceBalances, assetId, Math.addExact(insurance(assetId), deltaUnits));
         changedAssets.add(assetId);
     }
 
     public void setLiquidationFee(int assetId, long units) {
         assertOwner();
+        captureAssetBefore(assetId);
         setSigned(liquidationFeeBalances, assetId, units);
         changedAssets.add(assetId);
     }
 
     public void setFundingResidual(int assetId, long units) {
         assertOwner();
+        captureAssetBefore(assetId);
         setSigned(fundingResidualBalances, assetId, units);
         changedAssets.add(assetId);
     }
 
     public void setRoundingResidual(int assetId, long units) {
         assertOwner();
+        captureAssetBefore(assetId);
         setSigned(roundingResidualBalances, assetId, units);
         changedAssets.add(assetId);
     }
 
     public void setClearingPnl(int assetId, long units) {
         assertOwner();
+        captureAssetBefore(assetId);
         setSigned(clearingPnlBalances, assetId, units);
         changedAssets.add(assetId);
     }
 
     public void setDeficit(int assetId, long units) {
         assertOwner();
+        captureAssetBefore(assetId);
         setSigned(insuranceDeficits, assetId, units);
         changedAssets.add(assetId);
     }
 
     public void setFundingSettlement(int symbolId, long settlementId) {
         assertOwner();
+        rejectNonAssetOrderBatchMutation("Treasury funding state");
         if (symbolId < 0 || settlementId <= 0) {
             throw new IllegalArgumentException("invalid runtime funding settlement");
         }
+        captureFundingBefore(symbolId);
         fundingSettlements.put(symbolId, settlementId);
         fundingProgress.remove(symbolId);
         changedFundingSymbols.add(symbolId);
@@ -115,16 +147,20 @@ public final class TreasuryRuntime {
 
     public void setFundingProgress(int symbolId, FundingProgressRuntime progress) {
         assertOwner();
+        rejectNonAssetOrderBatchMutation("Treasury funding state");
         if (symbolId < 0 || progress == null) {
             throw new IllegalArgumentException("invalid runtime funding progress");
         }
+        captureFundingBefore(symbolId);
         fundingProgress.put(symbolId, progress);
         changedFundingSymbols.add(symbolId);
     }
 
     public void setLifecycleSettlement(int symbolId, long settlementId) {
         assertOwner();
+        rejectNonAssetOrderBatchMutation("Treasury lifecycle state");
         if (symbolId < 0 || settlementId <= 0) throw new IllegalArgumentException("invalid lifecycle settlement");
+        captureLifecycleBefore(symbolId);
         lifecycleSettlements.put(symbolId, settlementId);
         lifecycleProgress.remove(symbolId);
         changedLifecycleSymbols.add(symbolId);
@@ -132,7 +168,9 @@ public final class TreasuryRuntime {
 
     public void setLifecycleProgress(int symbolId, LifecycleProgressRuntime progress) {
         assertOwner();
+        rejectNonAssetOrderBatchMutation("Treasury lifecycle state");
         if (symbolId < 0 || progress == null) throw new IllegalArgumentException("invalid lifecycle progress");
+        captureLifecycleBefore(symbolId);
         lifecycleProgress.put(symbolId, progress);
         changedLifecycleSymbols.add(symbolId);
     }
@@ -157,6 +195,24 @@ public final class TreasuryRuntime {
         changedAssets.clear();
         changedFundingSymbols.clear();
         changedLifecycleSymbols.clear();
+        patchAssetBefore.clear();
+        patchFundingBefore.clear();
+        patchLifecycleBefore.clear();
+    }
+
+    RuntimeCommitPatch.TreasuryAssetValue patchAssetBefore(int assetId) {
+        assertOwner();
+        return patchAssetBefore.get(assetId);
+    }
+
+    RuntimeCommitPatch.TreasuryFundingValue patchFundingBefore(int symbolId) {
+        assertOwner();
+        return patchFundingBefore.get(symbolId);
+    }
+
+    RuntimeCommitPatch.TreasuryLifecycleValue patchLifecycleBefore(int symbolId) {
+        assertOwner();
+        return patchLifecycleBefore.get(symbolId);
     }
 
     public void clear() {
@@ -196,6 +252,47 @@ public final class TreasuryRuntime {
     private static void setSigned(IntLongHashMap balances, int assetId, long units) {
         if (assetId < 0) throw new IllegalArgumentException("invalid treasury asset");
         if (units == 0) balances.remove(assetId); else balances.put(assetId, units);
+    }
+
+    private void captureAssetBefore(int assetId) {
+        if (changedAssets.contains(assetId)) return;
+        RuntimeCommitPatch.TreasuryAssetValue value = currentAsset(assetId);
+        if (value != null) patchAssetBefore.put(assetId, value);
+    }
+
+    private RuntimeCommitPatch.TreasuryAssetValue currentAsset(int assetId) {
+        long fee = feeBalances.get(assetId);
+        long insurance = insuranceBalances.get(assetId);
+        long deficit = insuranceDeficits.get(assetId);
+        long liquidationFee = liquidationFeeBalances.get(assetId);
+        long fundingResidual = fundingResidualBalances.get(assetId);
+        long roundingResidual = roundingResidualBalances.get(assetId);
+        long clearingPnl = clearingPnlBalances.get(assetId);
+        if ((fee | insurance | deficit | liquidationFee | fundingResidual | roundingResidual | clearingPnl) == 0) {
+            return null;
+        }
+        return new RuntimeCommitPatch.TreasuryAssetValue(fee, insurance, deficit, liquidationFee,
+                fundingResidual, roundingResidual, clearingPnl);
+    }
+
+    private void captureFundingBefore(int symbolId) {
+        if (changedFundingSymbols.contains(symbolId)) return;
+        long settlementId = fundingSettlements.get(symbolId);
+        FundingProgressRuntime progress = fundingProgress.get(symbolId);
+        if (settlementId != 0 || progress != null) {
+            patchFundingBefore.put(symbolId,
+                    new RuntimeCommitPatch.TreasuryFundingValue(settlementId, progress));
+        }
+    }
+
+    private void captureLifecycleBefore(int symbolId) {
+        if (changedLifecycleSymbols.contains(symbolId)) return;
+        long settlementId = lifecycleSettlements.get(symbolId);
+        LifecycleProgressRuntime progress = lifecycleProgress.get(symbolId);
+        if (settlementId != 0 || progress != null) {
+            patchLifecycleBefore.put(symbolId,
+                    new RuntimeCommitPatch.TreasuryLifecycleValue(settlementId, progress));
+        }
     }
 
     public record FundingProgressRuntime(long settlementId, long instrumentVersion, long fundingRatePpm,

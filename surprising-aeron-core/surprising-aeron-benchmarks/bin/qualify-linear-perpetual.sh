@@ -34,6 +34,7 @@ fi
 
 HEAP="${QUALIFICATION_HEAP:-4g}"
 MATCHER_WAIT_STRATEGY="${MATCHER_WAIT_STRATEGY:-BUSY_SPIN}"
+MATCHING_ENGINES="${MATCHING_ENGINES:-1}"
 PROJECTION_BUSY_SPIN="${PROJECTION_BUSY_SPIN:-false}"
 SETTLEMENT_WAIT_STRATEGY="${SETTLEMENT_WAIT_STRATEGY:-BLOCKING}"
 MATCHING_COMPLETION_SPINS="${MATCHING_COMPLETION_SPINS:-16384}"
@@ -51,6 +52,10 @@ PROFILE_WARMUP_SECONDS="${PROFILE_WARMUP_SECONDS:-5}"
 PROFILE_MEASUREMENT_SECONDS="${PROFILE_MEASUREMENT_SECONDS:-15}"
 E2E_CYCLES="${E2E_CYCLES:-10000}"
 E2E_MAKER_DEPTH="${E2E_MAKER_DEPTH:-1}"
+if (( MATCHING_ENGINES < 1 || (MATCHING_ENGINES & (MATCHING_ENGINES - 1)) != 0 )); then
+  echo "MATCHING_ENGINES must be a positive power of two; found ${MATCHING_ENGINES}." >&2
+  exit 2
+fi
 MAIN_JVM_ARGS=(
   "-Xms${HEAP}"
   "-Xmx${HEAP}"
@@ -65,7 +70,7 @@ MAIN_JVM_ARGS=(
   "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
   "--add-opens=java.base/jdk.internal.ref=ALL-UNNAMED"
   "--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED"
-  "-Dsurprising.aeron.matching-engines=4"
+  "-Dsurprising.aeron.matching-engines=${MATCHING_ENGINES}"
   "-Dsurprising.aeron.matcher-wait-strategy=${MATCHER_WAIT_STRATEGY}"
   "-Dsurprising.aeron.settlement-wait-strategy=${SETTLEMENT_WAIT_STRATEGY}"
   "-Dsurprising.aeron.matching-completion-spins=${MATCHING_COMPLETION_SPINS}"

@@ -26,7 +26,7 @@ class PositionUserIndexTest {
         afterUsers.put(1L, CoreUserState.empty(ProductLine.LINEAR_PERPETUAL, 1));
         TradingCoreState after = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 2, afterUsers,
                 Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
-        index.update(before, after);
+        index.rebuild(after);
 
         assertThat(index.users("BTC-USDT")).isEmpty();
     }
@@ -48,7 +48,7 @@ class PositionUserIndexTest {
         afterUsers.put(1L, CoreUserState.empty(ProductLine.LINEAR_PERPETUAL, 1));
         TradingCoreState after = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 2, afterUsers,
                 Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
-        index.update(before, after);
+        index.rebuild(after);
 
         assertThat(index.totals()).isEmpty();
     }

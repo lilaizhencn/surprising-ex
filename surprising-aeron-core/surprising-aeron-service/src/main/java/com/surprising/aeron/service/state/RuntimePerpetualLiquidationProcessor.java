@@ -123,6 +123,8 @@ public final class RuntimePerpetualLiquidationProcessor {
         runtime.recordUserSettlementChanges(liquidation.userId(), settleAssetId, positionKey);
         RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
         treasuryDelta.addInsurance(settleAssetId, insuranceDelta);
+        treasuryDelta.addDeficit(settleAssetId, uncovered);
+        treasuryDelta.addClearing(settleAssetId, uncovered);
         treasuryDelta.apply(runtime.treasury());
         runtime.setMetadata(runtime.productLine(), revisionAfterCancellation(runtime.revision(), canceledOrders));
         return runtime;
@@ -243,14 +245,9 @@ public final class RuntimePerpetualLiquidationProcessor {
                     throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
                             "insurance fund balance is insufficient");
                 }
-                BalanceRuntime balance = runtime.balance(liquidation.userId(), assetId);
-                if (balance == null) {
-                    throw new CoreStateRejectedException("BALANCE_NOT_FOUND", "required balance is missing");
-                }
-                nextBalance = new BalanceRuntime(balance.userId(), balance.assetId(),
-                        Math.addExact(balance.availableUnits(), command.coveredUnits()), balance.lockedUnits());
                 changedAssetId = assetId;
                 treasuryDelta.addInsurance(assetId, Math.negateExact(command.coveredUnits()));
+                treasuryDelta.addDeficit(assetId, Math.negateExact(command.coveredUnits()));
                 nextDeficit = Math.subtractExact(nextDeficit, command.coveredUnits());
                 nextStatus = nextDeficit == 0 ? CoreLiquidationState.Status.COMPLETED
                         : CoreLiquidationState.Status.ADL_REQUIRED;
@@ -365,6 +362,8 @@ public final class RuntimePerpetualLiquidationProcessor {
         long targetCashDelta = Math.subtractExact(coverCapacity, command.coveredUnits());
         RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
         treasuryDelta.addClearing(settleAssetId, Math.negateExact(targetCashDelta));
+        treasuryDelta.addDeficit(settleAssetId, Math.negateExact(command.coveredUnits()));
+        treasuryDelta.addClearing(settleAssetId, Math.negateExact(command.coveredUnits()));
         BalanceRuntime nextBalance = new BalanceRuntime(balance.userId(), balance.assetId(),
                 Math.addExact(balance.availableUnits(), Math.addExact(releasedMargin, targetCashDelta)),
                 Math.subtractExact(balance.lockedUnits(), releasedMargin));

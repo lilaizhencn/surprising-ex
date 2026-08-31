@@ -2,8 +2,8 @@ package com.surprising.aeron.service;
 
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageCodec;
+import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
-import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.product.api.ProductLine;
@@ -61,12 +61,12 @@ public final class SurprisingClusteredService implements ClusteredService {
             throw new IllegalArgumentException("product line is required");
         }
         this.productLine = productLine;
-        this.state = new CoreProbeState(productLine);
     }
 
     @Override
     public void onStart(Cluster cluster, Image snapshotImage) {
         this.cluster = cluster;
+        if (state == null) state = new CoreProbeState(productLine);
         pendingEgress.clear();
         activeEgressSessions.clear();
         egressDrainTimers.clear();
@@ -99,13 +99,8 @@ public final class SurprisingClusteredService implements ClusteredService {
         } catch (IllegalArgumentException exception) {
             return;
         }
-        boolean matcherPipelineCommand = request.header().kind()
-                == com.surprising.aeron.protocol.WireMessageKind.COMMAND
-                && CoreProbeState.isMatchingCommand(request.header().messageType())
-                && !state.hasPendingMatchingForUser(request.header().userId());
-        boolean auditControl = request.header().kind()
-                == com.surprising.aeron.protocol.WireMessageKind.COMMAND
-                && request.header().messageType() == com.surprising.aeron.protocol.CoreMessageType.ACK_EXPORT;
+        boolean matcherPipelineCommand = isMatcherPipelineCommand(request);
+        boolean auditControl = isAuditControl(request);
         if (!deferredInbound.isEmpty()) {
             deferInbound(session, request, timestamp, header.position());
             return;
@@ -142,9 +137,7 @@ public final class SurprisingClusteredService implements ClusteredService {
             return;
         }
         if (session != null) {
-            CoreMessage response = new CoreMessage(request.header().response(responseType(request.header())),
-                    CoreProtocol.responsePayload(visible(result)));
-            offer(session, response);
+            offerResponse(session, request.header().response(responseType(request.header())), result);
         }
     }
 
@@ -241,7 +234,10 @@ public final class SurprisingClusteredService implements ClusteredService {
         matchingWakeupScheduled = false;
         resetMatchingWatchdog();
         this.cluster = null;
-        state.close();
+        if (state != null) {
+            state.close();
+            state = null;
+        }
     }
 
     @Override
@@ -298,10 +294,8 @@ public final class SurprisingClusteredService implements ClusteredService {
             if (clients != null) {
                 for (PendingClient pendingClient : clients) {
                     if (pendingClient.session().isClosing()) continue;
-                    CoreMessage response = new CoreMessage(pendingClient.requestHeader().response(
-                            responseType(pendingClient.requestHeader())), CoreProtocol.responsePayload(
-                            visible(queryResult)));
-                    offer(pendingClient.session(), response);
+                    offerResponse(pendingClient.session(), pendingClient.requestHeader().response(
+                            responseType(pendingClient.requestHeader())), queryResult);
                 }
             }
             return;
@@ -324,6 +318,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     }
 
     CoreProbeState state() {
+        if (state == null) throw new IllegalStateException("clustered service is not started");
         return state;
     }
 
@@ -364,16 +359,47 @@ public final class SurprisingClusteredService implements ClusteredService {
     }
 
     private void offer(ClientSession session, CoreMessage message) {
-        PendingEgress egress = pendingEgress.computeIfAbsent(session.id(), id -> new PendingEgress(session));
+        PendingEgress egress = pendingEgress(session);
         int length = CoreMessageCodec.encodedLength(message);
         egress.ensureScratch(length);
         CoreMessageCodec.encode(message, egress.scratch);
+        offerEncoded(egress, length);
+    }
+
+    private void offerResponse(ClientSession session, CoreMessageHeader header,
+                               CoreResponse response) {
+        PendingEgress egress = pendingEgress(session);
+        int length = CoreMessageCodec.encodedResponseLength(response);
+        egress.ensureScratch(length);
+        CoreMessageCodec.encodeResponse(header, response, state.committedCoreSequence(), egress.scratch);
+        offerEncoded(egress, length);
+    }
+
+    private PendingEgress pendingEgress(ClientSession session) {
+        PendingEgress egress = pendingEgress.get(session.id());
+        if (egress == null) {
+            egress = new PendingEgress(session);
+            pendingEgress.put(session.id(), egress);
+            return egress;
+        }
+        if (egress.session != session) {
+            // Aeron can reuse a numeric session id after reconnect. Never retain queued
+            // responses or a proxy belonging to the previous session incarnation.
+            egress.queue.clear();
+            egress.session = session;
+            egress.drainTimerScheduled = false;
+            activeEgressSessions.remove(session.id());
+        }
+        return egress;
+    }
+
+    private void offerEncoded(PendingEgress egress, int length) {
         if (!egress.queue.isEmpty()) {
             enqueue(egress, egress.scratch, length);
             scheduleEgressDrain(egress);
             return;
         }
-        if (session.offer(egress.scratchBuffer, 0, length) < 0) {
+        if (egress.session.offer(egress.scratchBuffer, 0, length) < 0) {
             enqueue(egress, egress.scratch, length);
             scheduleEgressDrain(egress);
         }
@@ -422,7 +448,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     }
 
     private static final class PendingEgress {
-        private final ClientSession session;
+        private ClientSession session;
         private final ArrayDeque<UnsafeBuffer> queue = new ArrayDeque<>();
         private byte[] scratch = new byte[0];
         private UnsafeBuffer scratchBuffer = new UnsafeBuffer(scratch);
@@ -488,14 +514,9 @@ public final class SurprisingClusteredService implements ClusteredService {
         if (clients == null) return;
         for (PendingClient pendingClient : clients) {
             if (pendingClient.session().isClosing()) continue;
-            CoreMessage response = new CoreMessage(pendingClient.requestHeader().response(
-                    responseType(pendingClient.requestHeader())), CoreProtocol.responsePayload(visible(result)));
-            offer(pendingClient.session(), response);
+            offerResponse(pendingClient.session(), pendingClient.requestHeader().response(
+                    responseType(pendingClient.requestHeader())), result);
         }
-    }
-
-    private CoreResponse visible(CoreResponse result) {
-        return result.withCommittedCoreSequence(state.committedCoreSequence());
     }
 
     private boolean completeEarlierMatching(long timestamp, long clusterPosition) {
@@ -529,13 +550,29 @@ public final class SurprisingClusteredService implements ClusteredService {
     }
 
     private void drainDeferredInbound() {
-        int remaining = 64;
+        int remaining = 256;
         while (remaining-- > 0 && !deferredInbound.isEmpty()) {
             DeferredInbound deferred = deferredInbound.peekFirst();
-            if (!completeEarlierMatching(deferred.timestamp(), deferred.clusterPosition())) return;
+            CoreMessage request = deferred.request();
+            boolean matcherPipelineCommand = isMatcherPipelineCommand(request);
+            boolean auditControl = isAuditControl(request);
+            if (!matcherPipelineCommand && !auditControl
+                    && !completeEarlierMatching(deferred.timestamp(), deferred.clusterPosition())) return;
+            if (matcherPipelineCommand || auditControl) state.drainMatchingCompletions();
             deferredInbound.removeFirst();
-            processRequest(deferred.session(), deferred.request(), deferred.timestamp(), deferred.clusterPosition());
+            processRequest(deferred.session(), request, deferred.timestamp(), deferred.clusterPosition());
         }
+    }
+
+    private boolean isMatcherPipelineCommand(CoreMessage request) {
+        return request.header().kind() == WireMessageKind.COMMAND
+                && CoreProbeState.isMatchingCommand(request.header().messageType())
+                && !state.hasPendingMatchingForUser(request.header().userId());
+    }
+
+    private static boolean isAuditControl(CoreMessage request) {
+        return request.header().kind() == WireMessageKind.COMMAND
+                && request.header().messageType() == CoreMessageType.ACK_EXPORT;
     }
 
     private record DeferredInbound(ClientSession session, CoreMessage request,

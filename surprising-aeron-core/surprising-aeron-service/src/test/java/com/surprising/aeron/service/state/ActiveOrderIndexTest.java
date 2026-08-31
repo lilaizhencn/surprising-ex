@@ -36,7 +36,7 @@ class ActiveOrderIndexTest {
         TradingCoreState after = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 2, before.users(), orders,
                 before.instruments(), before.riskState(), before.treasuryState(), before.leverages(),
                 before.algoOrders(), before.cancelAllAfterTimers(), before.clientOrderIndex(), before.triggerOrders());
-        index.update(before, after);
+        index.rebuild(after);
 
         assertThat(index.pendingQuantity(11, "BTC-USDT", CorePositionSide.NET, CoreOrderSide.BUY)).isEqualTo(2);
         assertThat(index.reduceOnlyQuantity(11, "BTC-USDT", CoreOrderSide.SELL)).isZero();

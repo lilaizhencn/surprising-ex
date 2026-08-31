@@ -142,12 +142,20 @@ class JdbcCoreEventProjectorPostgresTest {
     }
 
     private static CoreMessage event(long sequence, UUID commandId, List<CoreUserStateView> users) {
+        byte[] payload = new byte[] {(byte) sequence};
+        CoreMessage command = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT, commandId,
+                ProductLine.SPOT, CommandSource.OPERATIONS, 1, sequence, users.getFirst().userId(),
+                1_700_000_000_000L + sequence, 1), payload);
         var event = new CoreExportEvent(sequence, sequence, sequence * 17, commandId,
                 CoreMessageType.PROBE_INCREMENT, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                users.getFirst().userId(), new byte[] {(byte) sequence}, users, List.of(), List.of());
-        return new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT, commandId,
-                ProductLine.SPOT, CommandSource.OPERATIONS, 1, sequence, users.getFirst().userId(),
-                1_700_000_000_000L + sequence, 1).exportEvent(sequence), CoreExportCodec.encodeEvent(event));
+                users.getFirst().userId(), payload, users, List.of(), List.of(), List.of(), List.of(), List.of(),
+                List.of(), Math.max(0, (sequence - 1) * 17), 0, 0,
+                com.surprising.aeron.protocol.CoreRoute.DEFAULT.version(), 1, sequence * 17, sequence,
+                com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0), sequence, List.of(),
+                com.surprising.aeron.protocol.CommandFingerprint.of(command), List.of(),
+                CoreExportEvent.TerminalIds.empty(), Math.max(0, sequence - 1), sequence,
+                Math.max(0, sequence - 1), sequence, null, null, CoreExportEvent.Tombstones.empty());
+        return new CoreMessage(command.header().exportEvent(sequence), CoreExportCodec.encodeEvent(event));
     }
 
     private static CoreUserStateView user(long userId, long revision) {

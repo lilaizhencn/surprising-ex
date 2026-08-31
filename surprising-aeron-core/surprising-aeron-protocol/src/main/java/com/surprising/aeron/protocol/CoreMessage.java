@@ -5,6 +5,8 @@ import java.util.Objects;
 
 public final class CoreMessage {
 
+    private static final byte[] EMPTY_PAYLOAD = new byte[0];
+
     private final CoreMessageHeader header;
     private final byte[] payload;
 
@@ -20,7 +22,7 @@ public final class CoreMessage {
         this.header = Objects.requireNonNull(header, "header");
         this.payload = owned
                 ? Objects.requireNonNull(payload, "payload")
-                : payload == null ? new byte[0] : Arrays.copyOf(payload, payload.length);
+                : payload == null || payload.length == 0 ? EMPTY_PAYLOAD : Arrays.copyOf(payload, payload.length);
     }
 
     public CoreMessageHeader header() {
@@ -28,7 +30,7 @@ public final class CoreMessage {
     }
 
     public byte[] payload() {
-        return Arrays.copyOf(payload, payload.length);
+        return payload.length == 0 ? EMPTY_PAYLOAD : Arrays.copyOf(payload, payload.length);
     }
 
     public byte[] payloadUnsafe() {

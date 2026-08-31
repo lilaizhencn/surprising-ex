@@ -25,28 +25,13 @@ public final class RiskSnapshotIndex {
         return keys == null ? Set.of() : Collections.unmodifiableNavigableSet(keys);
     }
 
-    public void update(TradingCoreState before, TradingCoreState after) {
-        if (before.riskState().snapshots() == after.riskState().snapshots()) return;
-        StateMapSupport.requireDeltaLineage(before.riskState().snapshots(),
-                after.riskState().snapshots(), "risk snapshots");
-        Set<String> changed = StateMapSupport.changedKeys(after.riskState().snapshots());
-        for (String key : changed) {
-            if (key == null) continue;
-            CoreRiskSnapshot previous = before.riskState().snapshots().get(key);
-            CoreRiskSnapshot current = after.riskState().snapshots().get(key);
-            if (previous != null) remove(previous.userId(), key);
-            if (current != null) add(current.userId(), key);
-        }
-    }
-
-    public void update(RuntimeCommitEntry entry) {
-        RuntimeMutationDelta.ValueChanges<Long, RiskSnapshotRuntime> changes =
-                entry.mutation().riskSnapshots();
-        for (Long positionKey : changes.changedKeys()) {
-            RuntimeIdentityRegistry.PositionIdentity identity = entry.identities().positionIdentity(positionKey);
+    void apply(java.util.List<RuntimeCommitPatch.RiskSnapshotChange> changes,
+               RuntimeCommitPatch.IdentityView identities) {
+        for (RuntimeCommitPatch.RiskSnapshotChange change : changes) {
+            RuntimeIdentityRegistry.PositionIdentity identity = identities.positionIdentity(change.riskKey());
             String key = identity.userId() + ":" + identity.positionKey();
             remove(identity.userId(), key);
-            if (changes.currentValues().containsKey(positionKey)) add(identity.userId(), key);
+            if (change.after() != null) add(identity.userId(), key);
         }
     }
 

@@ -42,6 +42,28 @@ class CoreMessageCodecTest {
         assertThat(Arrays.copyOf(destination, length)).isEqualTo(CoreMessageCodec.encode(message));
         assertThat(destination[length]).isEqualTo((byte) 0x5a);
     }
+
+    @Test
+    void encodesCommittedResponseDirectlyIntoReusableDestination() {
+        CoreMessageHeader header = command(UUID.randomUUID(), 42, 99, 7).header()
+                .response(CoreMessageType.COMMAND_RESULT);
+        CoreResponse response = new CoreResponse(ResponseStatus.OK, ResponseStatus.APPLIED,
+                CoreResultCode.NONE, CoreRoute.DEFAULT.version(), 11, 12, 13, 14,
+                new byte[]{3, 5, 8, 13});
+        byte[] destination = new byte[CoreMessageCodec.encodedResponseLength(response) + 1];
+        destination[destination.length - 1] = 0x5a;
+
+        int length = CoreMessageCodec.encodeResponse(header, response, 77, destination);
+
+        CoreMessage decoded = CoreMessageCodec.decode(Arrays.copyOf(destination, length));
+        CoreResponse decodedResponse = CoreProtocol.decodeResponse(decoded.payloadUnsafe());
+        assertThat(decoded.header()).isEqualTo(header);
+        assertThat(decodedResponse.committedCoreSequence()).isEqualTo(77);
+        assertThat(decodedResponse.appliedCommandCount()).isEqualTo(12);
+        assertThat(decodedResponse.data()).containsExactly(3, 5, 8, 13);
+        assertThat(destination[length]).isEqualTo((byte) 0x5a);
+    }
+
     @Test
     void roundTripsExplicitDefaultRoute() {
         CoreMessage command = command(UUID.randomUUID(), 42, 99, 7);

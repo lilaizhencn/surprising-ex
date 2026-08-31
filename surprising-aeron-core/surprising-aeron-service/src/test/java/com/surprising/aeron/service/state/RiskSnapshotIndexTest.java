@@ -26,7 +26,7 @@ class RiskSnapshotIndexTest {
         TradingCoreState after = new TradingCoreState(ProductLine.SPOT, 2, before.users(), before.orders(),
                 before.instruments(), risk, before.treasuryState());
 
-        index.update(before, after);
+        index.rebuild(after);
 
         assertThat(index.keys(11)).isEmpty();
         assertThat(index.keys(12)).containsExactly("12:ETH-USDT");

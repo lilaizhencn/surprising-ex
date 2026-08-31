@@ -5,8 +5,13 @@ import com.surprising.aeron.service.state.CoreAlgoOrderState;
 import com.surprising.aeron.service.state.CoreLiquidationState;
 import com.surprising.aeron.service.state.CoreOrderState;
 import com.surprising.aeron.service.state.CoreTriggerOrderState;
+import com.surprising.aeron.service.state.LiquidationRuntime;
+import com.surprising.aeron.service.state.OrderRuntime;
+import com.surprising.aeron.service.state.ReservationRuntime;
+import com.surprising.aeron.service.state.RuntimeCommitPatch;
 import com.surprising.aeron.service.state.TerminalPruneBatch;
 import com.surprising.aeron.service.state.TradingCoreState;
+import com.surprising.aeron.service.state.TradingRuntimeState;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
@@ -23,6 +28,8 @@ import java.util.UUID;
 
 final class TerminalStateRetention {
 
+    // The live instance is product-owner confined. Snapshot encoding receives a detached copy.
+
     static final int MAX_TOMBSTONES = 65_536;
     static final int MAX_PRUNE_PER_ACK = 4_096;
     static final int MAX_FUNDS_COMMANDS = 131_072;
@@ -32,6 +39,7 @@ final class TerminalStateRetention {
     private final LinkedHashMap<EntityKey, RetainedEntity> tombstones;
     private final Map<ClientIdentity, EntityKey> tombstonesByClient;
     private final LinkedHashMap<UUID, CommandFingerprint> fundsCommands;
+    private final ArrayList<Long> sortedScratch = new ArrayList<>();
     private long candidateDigest;
     private long tombstoneDigest;
     private long fundsCommandDigest;
@@ -61,28 +69,54 @@ final class TerminalStateRetention {
         tombstones.values().forEach(this::indexTombstone);
     }
 
-    synchronized void observe(TradingCoreState after, long exportSequence,
+    void observe(TradingCoreState after, long exportSequence,
                  Iterable<Long> orderIds, Iterable<Long> liquidationIds, Iterable<Long> triggerOrderIds) {
         if (after == null || exportSequence <= 0) {
             throw new IllegalArgumentException("invalid terminal retention observation");
         }
-        sorted(orderIds).forEach(id -> observeOrder(after.orders().get(id), exportSequence));
-        sorted(after.changedAlgoOrderIds()).forEach(id -> observeAlgo(after.algoOrders().get(id), exportSequence));
-        sorted(triggerOrderIds).forEach(id ->
+        forEachSorted(orderIds, id -> observeOrder(after.orders().get(id), exportSequence));
+        forEachSorted(after.changedAlgoOrderIds(), id -> observeAlgo(after.algoOrders().get(id), exportSequence));
+        forEachSorted(triggerOrderIds, id ->
                 observeTrigger(after.triggerOrders().get(id), exportSequence));
-        sorted(liquidationIds).forEach(id ->
+        forEachSorted(liquidationIds, id ->
                 observeLiquidation(after.riskState().liquidations().get(id), exportSequence));
     }
 
-    synchronized void observeAcknowledgedOrders(
+    void observe(List<RuntimeCommitPatch> patches, long exportSequence) {
+        if (patches == null || patches.isEmpty() || exportSequence <= 0) {
+            throw new IllegalArgumentException("invalid terminal retention patch observation");
+        }
+        for (RuntimeCommitPatch patch : patches) {
+            for (RuntimeCommitPatch.AccountLaneOwnerGroup group : patch.accountLaneGroups()) {
+                group.orders().forEach(change -> observeOrder(change.businessAfter(), exportSequence));
+                group.algoOrders().forEach(change -> observeAlgo(change.after(), exportSequence));
+                group.triggerOrders().forEach(change -> observeTrigger(change.after(), exportSequence));
+                group.liquidations().forEach(change -> observeLiquidation(change.after(), exportSequence));
+            }
+        }
+    }
+
+    void observe(RuntimeCommitPatch patch, long exportSequence) {
+        if (patch == null || exportSequence <= 0) {
+            throw new IllegalArgumentException("invalid terminal retention patch observation");
+        }
+        for (RuntimeCommitPatch.AccountLaneOwnerGroup group : patch.accountLaneGroups()) {
+            group.orders().forEach(change -> observeOrder(change.businessAfter(), exportSequence));
+            group.algoOrders().forEach(change -> observeAlgo(change.after(), exportSequence));
+            group.triggerOrders().forEach(change -> observeTrigger(change.after(), exportSequence));
+            group.liquidations().forEach(change -> observeLiquidation(change.after(), exportSequence));
+        }
+    }
+
+    void observeAcknowledgedOrders(
             TradingCoreState state, long acknowledgedSequence, Iterable<Long> orderIds) {
         if (state == null || acknowledgedSequence <= 0 || orderIds == null) {
             throw new IllegalArgumentException("invalid acknowledged terminal orders");
         }
-        sorted(orderIds).forEach(id -> observeOrder(state.orders().get(id), acknowledgedSequence));
+        forEachSorted(orderIds, id -> observeOrder(state.orders().get(id), acknowledgedSequence));
     }
 
-    synchronized TerminalPruneBatch eligible(TradingCoreState state, long acknowledgedSequence, int limit) {
+    TerminalPruneBatch eligible(TradingCoreState state, long acknowledgedSequence, int limit) {
         if (state == null || acknowledgedSequence < 0 || limit <= 0) {
             throw new IllegalArgumentException("invalid terminal prune request");
         }
@@ -105,7 +139,31 @@ final class TerminalStateRetention {
         return new TerminalPruneBatch(orders, algos, triggers, liquidations);
     }
 
-    synchronized void complete(TerminalPruneBatch batch, long acknowledgedSequence) {
+    TerminalPruneBatch eligible(
+            TradingRuntimeState state, long acknowledgedSequence, int limit) {
+        if (state == null || acknowledgedSequence < 0 || limit <= 0) {
+            throw new IllegalArgumentException("invalid terminal prune request");
+        }
+        ArrayList<Long> orders = new ArrayList<>();
+        ArrayList<Long> algos = new ArrayList<>();
+        ArrayList<Long> triggers = new ArrayList<>();
+        ArrayList<Long> liquidations = new ArrayList<>();
+        int remaining = Math.min(limit, MAX_PRUNE_PER_ACK);
+        for (RetainedEntity candidate : candidates.values()) {
+            if (remaining == 0) break;
+            if (candidate.exportSequence() > acknowledgedSequence || !isStillPrunable(state, candidate)) continue;
+            switch (candidate.key().type()) {
+                case ORDER -> orders.add(candidate.key().id());
+                case ALGO -> algos.add(candidate.key().id());
+                case TRIGGER -> triggers.add(candidate.key().id());
+                case LIQUIDATION -> liquidations.add(candidate.key().id());
+            }
+            remaining--;
+        }
+        return new TerminalPruneBatch(orders, algos, triggers, liquidations);
+    }
+
+    void complete(TerminalPruneBatch batch, long acknowledgedSequence) {
         if (batch == null || acknowledgedSequence < 0) {
             throw new IllegalArgumentException("invalid completed terminal prune");
         }
@@ -124,35 +182,35 @@ final class TerminalStateRetention {
         }
     }
 
-    synchronized boolean containsOrder(long orderId, long userId, String clientOrderId) {
+    boolean containsOrder(long orderId, long userId, String clientOrderId) {
         return contains(EntityType.ORDER, orderId, userId, clientOrderId);
     }
 
-    synchronized boolean containsAlgo(long algoOrderId, long userId, String clientAlgoOrderId) {
+    boolean containsAlgo(long algoOrderId, long userId, String clientAlgoOrderId) {
         return contains(EntityType.ALGO, algoOrderId, userId, clientAlgoOrderId);
     }
 
-    synchronized boolean containsTrigger(long triggerOrderId, long userId, String clientTriggerOrderId) {
+    boolean containsTrigger(long triggerOrderId, long userId, String clientTriggerOrderId) {
         return contains(EntityType.TRIGGER, triggerOrderId, userId, clientTriggerOrderId);
     }
 
-    synchronized int candidateCount() {
+    int candidateCount() {
         return candidates.size();
     }
 
-    synchronized int tombstoneCount() {
+    int tombstoneCount() {
         return tombstones.size();
     }
 
-    synchronized CommandFingerprint fundsCommand(UUID commandId) {
+    CommandFingerprint fundsCommand(UUID commandId) {
         return fundsCommands.get(commandId);
     }
 
-    synchronized boolean hasFundsCommandCapacity(UUID commandId) {
+    boolean hasFundsCommandCapacity(UUID commandId) {
         return fundsCommands.containsKey(commandId) || fundsCommands.size() < MAX_FUNDS_COMMANDS;
     }
 
-    synchronized void retainFundsCommand(UUID commandId, CommandFingerprint fingerprint) {
+    void retainFundsCommand(UUID commandId, CommandFingerprint fingerprint) {
         if (commandId == null || fingerprint == null || !hasFundsCommandCapacity(commandId)) {
             throw new IllegalStateException("funds command retention is full");
         }
@@ -163,7 +221,7 @@ final class TerminalStateRetention {
         if (previous == null) fundsCommandDigest ^= entryDigest(commandId, fingerprint);
     }
 
-    synchronized long digest() {
+    long digest() {
         long hash = 0xcbf29ce484222325L;
         hash = mix(hash, candidates.size());
         hash = mix(hash, candidateDigest);
@@ -174,7 +232,7 @@ final class TerminalStateRetention {
         return hash;
     }
 
-    synchronized byte[] encode() {
+    byte[] encode() {
         try {
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();
             DataOutputStream output = new DataOutputStream(bytes);
@@ -194,7 +252,7 @@ final class TerminalStateRetention {
         }
     }
 
-    synchronized TerminalStateRetention copy() {
+    TerminalStateRetention copy() {
         return new TerminalStateRetention(new LinkedHashMap<>(candidates), new LinkedHashMap<>(tombstones),
                 new LinkedHashMap<>(fundsCommands), candidateDigest, tombstoneDigest, fundsCommandDigest);
     }
@@ -254,6 +312,18 @@ final class TerminalStateRetention {
         else removeCandidate(key);
     }
 
+    private void observeLiquidation(LiquidationRuntime liquidation, long exportSequence) {
+        if (liquidation == null) return;
+        EntityKey key = new EntityKey(EntityType.LIQUIDATION, liquidation.liquidationId());
+        if (liquidation.status() == CoreLiquidationState.Status.CANCELED
+                || liquidation.status() == CoreLiquidationState.Status.COMPLETED
+                && liquidation.deficitUnits() == 0) {
+            retain(key, liquidation.userId(), "", exportSequence);
+        } else {
+            removeCandidate(key);
+        }
+    }
+
     private void retain(EntityKey key, long userId, String clientId, long exportSequence) {
         if (tombstones.containsKey(key)) return;
         RetainedEntity retained = new RetainedEntity(key, userId, normalizeClientId(clientId), exportSequence);
@@ -291,6 +361,31 @@ final class TerminalStateRetention {
         };
     }
 
+    private boolean isStillPrunable(TradingRuntimeState state, RetainedEntity candidate) {
+        return switch (candidate.key().type()) {
+            case ORDER -> {
+                OrderRuntime order = state.order(candidate.key().id());
+                ReservationRuntime reservation = order == null ? null : state.reservation(order.orderId());
+                yield order != null && order.status().terminal()
+                        && (reservation == null || reservation.reservedUnits() == 0);
+            }
+            case ALGO -> {
+                CoreAlgoOrderState algo = state.algoOrder(candidate.key().id());
+                yield algo != null && algo.terminal();
+            }
+            case TRIGGER -> {
+                CoreTriggerOrderState trigger = state.triggerOrder(candidate.key().id());
+                yield trigger != null && !trigger.status().open();
+            }
+            case LIQUIDATION -> {
+                LiquidationRuntime liquidation = state.liquidation(candidate.key().id());
+                yield liquidation != null && (liquidation.status() == CoreLiquidationState.Status.CANCELED
+                        || liquidation.status() == CoreLiquidationState.Status.COMPLETED
+                        && liquidation.deficitUnits() == 0);
+            }
+        };
+    }
+
     private void complete(EntityType type, List<Long> ids, long acknowledgedSequence) {
         for (long id : ids) {
             EntityKey key = new EntityKey(type, id);
@@ -313,11 +408,12 @@ final class TerminalStateRetention {
         return tombstonesByClient.containsKey(new ClientIdentity(type, userId, normalized));
     }
 
-    private static List<Long> sorted(Iterable<Long> values) {
-        ArrayList<Long> result = new ArrayList<>();
-        values.forEach(value -> { if (value != null) result.add(value); });
-        result.sort(Comparator.naturalOrder());
-        return result;
+    private void forEachSorted(Iterable<Long> values, java.util.function.LongConsumer consumer) {
+        sortedScratch.clear();
+        values.forEach(value -> { if (value != null) sortedScratch.add(value); });
+        sortedScratch.sort(Comparator.naturalOrder());
+        for (long value : sortedScratch) consumer.accept(value);
+        sortedScratch.clear();
     }
 
     private static void write(DataOutputStream output, LinkedHashMap<EntityKey, RetainedEntity> values)

@@ -8,11 +8,14 @@ import java.util.function.Predicate;
 public final class RollingBusinessStateHash {
 
     private static final long HASH_TAG = 0x9e3779b97f4a7c15L;
+    private static final int GLOBAL_OWNER = 63;
+    private static final int RESTORED_OWNER = 64;
 
     private final Aggregate users = new Aggregate();
     private final Map<Long, UserHash> userHashes = new HashMap<>();
+    private final OwnerDomains[] ownerDomains = ownerDomains();
     private final Aggregate orders = new Aggregate();
-    private final Map<Long, Long> orderContributions = new HashMap<>();
+    private final Map<Long, OwnedContribution> orderContributions = new HashMap<>();
     private final Aggregate instruments = new Aggregate();
     private final Aggregate leverages = new Aggregate();
     private final Aggregate algoOrders = new Aggregate();
@@ -33,15 +36,41 @@ public final class RollingBusinessStateHash {
     private final Aggregate lifecycleSettlements = new Aggregate();
     private final Aggregate fundingProgress = new Aggregate();
     private final Aggregate lifecycleProgress = new Aggregate();
-    private final Map<Integer, RuntimeMutationDelta.AssetLedger> runtimeTreasury = new HashMap<>();
-    private final Map<String, Long> contributions = new HashMap<>();
+    private final Map<Integer, RuntimeCommitPatch.TreasuryAssetValue> runtimeTreasury = new HashMap<>();
+    private final Map<ContributionKey, OwnedContribution> contributions = new HashMap<>();
     private final int productLine;
     private long revision;
     private long nextLiquidationId;
     private long riskScanControlHash;
+    private long lastCoreSequence = Long.MIN_VALUE;
     private long cachedValue;
     private boolean valueDirty = true;
+    private long ownerGeneration;
     private RuntimeIdentityRegistry identities;
+    private int failAfterStagedOperation = -1;
+
+    private enum Domain {
+        USERS, ORDERS, INSTRUMENTS, LEVERAGES, ALGO, TIMERS, TRIGGERS, MARKS, SNAPSHOTS,
+        LIQUIDATIONS, SCANS, FEES, INSURANCE, DEFICITS, LIQUIDATION_FEES, FUNDING_RESIDUALS,
+        ROUNDING_RESIDUALS, CLEARING_PNL, FUNDING_SETTLEMENTS, LIFECYCLE_SETTLEMENTS,
+        FUNDING_PROGRESS, LIFECYCLE_PROGRESS
+    }
+
+    private record OwnedContribution(int owner, long value) {}
+
+    void failAfterStagedOperationForTest(int operationIndex) {
+        if (operationIndex < 0) throw new IllegalArgumentException("operation index must not be negative");
+        failAfterStagedOperation = operationIndex;
+    }
+
+    int stagedOperationCountForTest(RuntimeCommitPatch patch) { return stagePatch(patch).size(); }
+
+    static long[] aggregateForTest(long[] additions, long[] removals) {
+        Aggregate aggregate = new Aggregate();
+        for (long contribution : additions) aggregate.add(contribution);
+        for (long contribution : removals) aggregate.remove(contribution);
+        return new long[]{aggregate.count, aggregate.sum, aggregate.xor};
+    }
 
     private RollingBusinessStateHash(TradingCoreState state, RuntimeIdentityRegistry identities) {
         productLine = state.productLine().ordinal();
@@ -65,77 +94,410 @@ public final class RollingBusinessStateHash {
         return new RollingBusinessStateHash(state, null).value();
     }
 
+    public long coreSequence() { return lastCoreSequence; }
+
     public void update(TradingCoreState before, TradingCoreState after) {
         if (before == after) return;
-        revision = after.revision();
-        updateUsers(before.users(), after.users());
-        updateMap(orders, before.orders(), after.orders(), order -> !order.status().terminal());
-        updateMap(instruments, before.instruments(), after.instruments());
-        updateMap(leverages, before.leverages(), after.leverages());
-        updateMap(algoOrders, before.algoOrders(), after.algoOrders(), algo -> !algo.terminal());
-        updateMap(timers, before.cancelAllAfterTimers(), after.cancelAllAfterTimers());
-        updateMap(triggers, before.triggerOrders(), after.triggerOrders(), trigger -> trigger.status().open());
-
-        if (before.riskState() != after.riskState()) {
-            updateMap(markPrices, before.riskState().markPrices(), after.riskState().markPrices());
-            updateMap(riskSnapshots, before.riskState().snapshots(), after.riskState().snapshots());
-            updateMap(liquidations, before.riskState().liquidations(), after.riskState().liquidations(),
-                    liquidation -> !liquidation.terminal());
-            updateMap(riskScans, before.riskState().scans(), after.riskState().scans());
-            nextLiquidationId = after.riskState().nextLiquidationId();
-            riskScanControlHash = stable(after.riskState().scanControl());
-        }
-        if (before.treasuryState() != after.treasuryState()) {
-            var beforeTreasury = before.treasuryState();
-            var afterTreasury = after.treasuryState();
-            updateMap(feeBalances, beforeTreasury.feeBalances(), afterTreasury.feeBalances());
-            updateMap(insuranceBalances, beforeTreasury.insuranceBalances(), afterTreasury.insuranceBalances());
-            updateMap(insuranceDeficits, beforeTreasury.insuranceDeficits(), afterTreasury.insuranceDeficits());
-            updateMap(liquidationFeeBalances, beforeTreasury.liquidationFeeBalances(),
-                    afterTreasury.liquidationFeeBalances());
-            updateMap(fundingResidualBalances, beforeTreasury.fundingResidualBalances(),
-                    afterTreasury.fundingResidualBalances());
-            updateMap(roundingResidualBalances, beforeTreasury.roundingResidualBalances(),
-                    afterTreasury.roundingResidualBalances());
-            updateMap(clearingPnlBalances, beforeTreasury.clearingPnlBalances(),
-                    afterTreasury.clearingPnlBalances());
-            updateMap(fundingSettlements, beforeTreasury.fundingSettlements(), afterTreasury.fundingSettlements());
-            updateMap(lifecycleSettlements, beforeTreasury.lifecycleSettlements(), afterTreasury.lifecycleSettlements());
-            updateMap(fundingProgress, beforeTreasury.fundingProgress(), afterTreasury.fundingProgress());
-            updateMap(lifecycleProgress, beforeTreasury.lifecycleProgress(), afterTreasury.lifecycleProgress());
-        }
-        valueDirty = true;
+        restore(after);
     }
 
-    public void update(RuntimeCommitEntry entry) {
-        if (entry == null || entry.productLine().ordinal() != productLine) {
+    public void update(RuntimeCommitPatch entry) {
+        BusinessPatchStage staged = stagePatch(entry);
+        long nextGeneration = Math.incrementExact(ownerGeneration);
+        staged.apply();
+        revision = entry.revision();
+        lastCoreSequence = entry.coreSequence();
+        valueDirty = true;
+        ownerGeneration = nextGeneration;
+    }
+
+    public HashTransition prepare(RuntimeCommitPatch.PreparedChanges changes) {
+        if (changes == null) throw new IllegalArgumentException("prepared changes are required");
+        BusinessPatchStage staged = stagePatch(changes);
+        long beforeHash = value();
+        long beforeRevision = revision;
+        long beforeSequence = lastCoreSequence;
+        long beforeCachedValue = cachedValue;
+        boolean beforeDirty = valueDirty;
+        long afterHash;
+        try {
+            afterHash = staged.preview(() -> {
+                revision = changes.afterRevision();
+                lastCoreSequence = changes.coreSequence();
+                valueDirty = true;
+                return value();
+            });
+        } finally {
+            revision = beforeRevision;
+            lastCoreSequence = beforeSequence;
+            cachedValue = beforeCachedValue;
+            valueDirty = beforeDirty;
+        }
+        return new HashTransition(this, staged, beforeHash, afterHash, beforeRevision, beforeSequence,
+                changes.afterRevision(), changes.coreSequence(), ownerGeneration);
+    }
+
+    public final class HashTransition {
+        private final RollingBusinessStateHash owner;
+        private final BusinessPatchStage staged;
+        private final long beforeHash;
+        private final long afterHash;
+        private final long beforeRevision;
+        private final long beforeSequence;
+        private final long afterRevision;
+        private final long afterSequence;
+        private final long preparedGeneration;
+        private long committedGeneration = -1;
+        private TransitionState state = TransitionState.PREPARED;
+
+        private HashTransition(RollingBusinessStateHash owner, BusinessPatchStage staged,
+                               long beforeHash, long afterHash,
+                               long beforeRevision, long beforeSequence,
+                               long afterRevision, long afterSequence, long preparedGeneration) {
+            this.owner = owner;
+            this.staged = staged;
+            this.beforeHash = beforeHash;
+            this.afterHash = afterHash;
+            this.beforeRevision = beforeRevision;
+            this.beforeSequence = beforeSequence;
+            this.afterRevision = afterRevision;
+            this.afterSequence = afterSequence;
+            this.preparedGeneration = preparedGeneration;
+        }
+
+        public long beforeHash() { return beforeHash; }
+        public long afterHash() { return afterHash; }
+        public void commit() {
+            commitOn(owner);
+        }
+        private void commitOn(RollingBusinessStateHash target) {
+            requireState(TransitionState.PREPARED, "commit");
+            if (owner != target || ownerGeneration != preparedGeneration
+                    || revision != beforeRevision || lastCoreSequence != beforeSequence || value() != beforeHash) {
+                throw new IllegalStateException("stale or foreign business hash transition");
+            }
+            long nextGeneration = Math.incrementExact(ownerGeneration);
+            staged.apply();
+            revision = afterRevision;
+            lastCoreSequence = afterSequence;
+            valueDirty = true;
+            if (value() != afterHash) {
+                staged.rollbackApplied();
+                revision = beforeRevision;
+                lastCoreSequence = beforeSequence;
+                valueDirty = true;
+                throw new IllegalStateException("business hash transition after-value mismatch");
+            }
+            ownerGeneration = nextGeneration;
+            committedGeneration = ownerGeneration;
+            state = TransitionState.COMMITTED;
+        }
+        public void rollback() {
+            rollbackOn(owner);
+        }
+        private void rollbackOn(RollingBusinessStateHash target) {
+            requireState(TransitionState.COMMITTED, "rollback");
+            if (owner != target || ownerGeneration != committedGeneration
+                    || revision != afterRevision || lastCoreSequence != afterSequence || value() != afterHash) {
+                throw new IllegalStateException("stale or foreign committed business hash transition");
+            }
+            long nextGeneration = Math.incrementExact(ownerGeneration);
+            staged.rollbackApplied();
+            revision = beforeRevision;
+            lastCoreSequence = beforeSequence;
+            valueDirty = true;
+            if (value() != beforeHash) throw new IllegalStateException("business hash rollback mismatch");
+            ownerGeneration = nextGeneration;
+            state = TransitionState.ROLLED_BACK;
+        }
+        private void requireState(TransitionState expected, String operation) {
+            if (state != expected) {
+                throw new IllegalStateException("business hash transition cannot " + operation + " from " + state);
+            }
+        }
+    }
+
+    void commitForTest(HashTransition transition) {
+        if (transition == null) throw new IllegalArgumentException("business hash transition is required");
+        transition.commitOn(this);
+    }
+
+    void rollbackForTest(HashTransition transition) {
+        if (transition == null) throw new IllegalArgumentException("business hash transition is required");
+        transition.rollbackOn(this);
+    }
+
+    private enum TransitionState { PREPARED, COMMITTED, ROLLED_BACK }
+
+    private BusinessPatchStage stagePatch(RuntimeCommitView patch) {
+        if (patch == null || patch.productLine().ordinal() != productLine) {
             throw new IllegalArgumentException("invalid business hash commit");
         }
-        revision = entry.revision();
-        updateUsers(entry);
-        updateOrders(entry.mutation().orders());
-        RuntimeMutationDelta mutation = entry.mutation();
-        updateCached("instruments", instruments, mutation.instruments(), value -> stable(value), ignored -> true);
-        updateCached("leverages", leverages, mutation.leverages(), value -> stable(value), ignored -> true);
-        updateCached("algo", algoOrders, mutation.algoOrders(), value -> stable(value), value -> !value.terminal());
-        updateCached("timers", timers, mutation.timers(), value -> stable(value), ignored -> true);
-        updateCached("triggers", triggers, mutation.triggerOrders(), value -> stable(value),
-                value -> value.status().open());
-        updateRuntimeMarks(mutation.markPrices());
-        updateRuntimeRiskSnapshots(mutation.riskSnapshots());
-        updateRuntimeLiquidations(mutation.liquidations());
-        updateRuntimeRiskScans(mutation.riskScans());
-        nextLiquidationId = entry.afterNextLiquidationId();
-        riskScanControlHash = stable(entry.afterRiskScanControl());
-        updateTreasury(entry.mutation().treasury());
-        valueDirty = true;
+        if (lastCoreSequence != Long.MIN_VALUE
+                && (patch.previousCoreSequence() < lastCoreSequence
+                || patch.coreSequence() <= lastCoreSequence)) {
+            throw new IllegalArgumentException("non-monotonic business hash commit sequence: last "
+                    + lastCoreSequence + ", previous " + patch.previousCoreSequence()
+                    + ", current " + patch.coreSequence());
+        }
+        if (patch.beforeRevision() != revision) {
+            throw new IllegalArgumentException("business hash commit before-value mismatch");
+        }
+        BusinessPatchStage staged = new BusinessPatchStage();
+        for (RuntimeCommitPatch.AccountLaneOwnerGroup group : patch.accountLaneGroups()) {
+            UserGroupUpdate userStage = new UserGroupUpdate(group.laneId());
+            UserGroupUpdate userRollback = new UserGroupUpdate(group.laneId());
+            Map<Long, Integer> pendingBeforeCounts = new HashMap<>();
+            Map<Long, RuntimeCommitPatch.ReservationChange> reservationChanges = new HashMap<>();
+            for (RuntimeCommitPatch.UserChange change : group.users()) {
+                pendingBeforeCounts.put(change.userId(), change.pendingReservationCountAfter());
+            }
+            for (RuntimeCommitPatch.ReservationChange change : group.reservations()) {
+                reservationChanges.put(change.orderId(), change);
+                if (change.pendingAfter() && change.after() != null) {
+                    pendingBeforeCounts.merge(change.after().userId(), -1, Math::addExact);
+                }
+                if (change.pendingBefore() && change.before() != null) {
+                    pendingBeforeCounts.merge(change.before().userId(), 1, Math::addExact);
+                }
+            }
+            for (RuntimeCommitPatch.UserChange change : group.users()) {
+                UserHash current = userHashes.get(change.userId());
+                if ((current != null) != (change.before() != null)) {
+                    throw new IllegalArgumentException("business user before-value mismatch");
+                }
+                userRollback.owner(change.userId(), current == null ? group.laneId() : current.owner);
+                userStage.append(() -> userStage.apply(change));
+                RuntimeCommitPatch.UserChange reverse = new RuntimeCommitPatch.UserChange(
+                        change.userId(), change.after(), change.before(),
+                        pendingBeforeCounts.getOrDefault(change.userId(), 0));
+                userRollback.prepend(() -> userRollback.apply(reverse));
+            }
+            for (RuntimeCommitPatch.BalanceChange change : group.balances()) {
+                String asset = identities.asset(change.key().assetId());
+                UserHash user = userHashes.get(change.key().userId());
+                Long actual = user == null ? null : user.balanceContributions.get(change.key().assetId());
+                Long expected = change.before() == null ? null
+                        : entryHashStable(asset, stableBalance(asset, change.before()));
+                requireContribution(actual, expected, "balance");
+                if (change.after() != null) stableBalance(asset, change.after());
+                userStage.append(() -> userStage.apply(change));
+                RuntimeCommitPatch.BalanceChange reverse = new RuntimeCommitPatch.BalanceChange(
+                        change.key(), change.after(), change.before());
+                userRollback.prepend(() -> userRollback.apply(reverse));
+            }
+            for (RuntimeCommitPatch.ReservationChange change : group.reservations()) {
+                ReservationRuntime before = change.before();
+                UserHash user = before == null ? null : userHashes.get(before.userId());
+                Long actual = user == null ? null : user.reservationContributions.get(change.orderId());
+                Long expected = before == null || before.reservedUnits() == 0 || change.pendingBefore() ? null
+                        : entryHashStable(change.orderId(), stableReservation(before, identities));
+                requireContribution(actual, expected, "reservation");
+                if (change.after() != null) stableReservation(change.after(), identities);
+                userStage.append(() -> userStage.apply(change));
+                RuntimeCommitPatch.ReservationChange reverse = new RuntimeCommitPatch.ReservationChange(
+                        change.orderId(), change.after(), change.before(), change.pendingAfter(), change.pendingBefore());
+                userRollback.prepend(() -> userRollback.apply(reverse));
+            }
+            for (RuntimeCommitPatch.PositionChange change : group.positions()) {
+                RuntimeIdentityRegistry.PositionIdentity identity = identities.positionIdentity(change.positionKey());
+                PositionRuntime before = change.before();
+                UserHash user = before == null ? null : userHashes.get(before.userId());
+                Long actual = user == null ? null : user.positionContributions.get(change.positionKey());
+                Long expected = before == null ? null : entryHashStable(
+                        identity.positionKey(), stablePosition(before, identities));
+                requireContribution(actual, expected, "position");
+                if (change.after() != null) stablePosition(change.after(), identities);
+                userStage.append(() -> userStage.apply(change));
+                RuntimeCommitPatch.PositionChange reverse = new RuntimeCommitPatch.PositionChange(
+                        change.positionKey(), change.after(), change.before());
+                userRollback.prepend(() -> userRollback.apply(reverse));
+            }
+            for (RuntimeCommitPatch.OrderChange change : group.orders()) {
+                RuntimeCommitPatch.ReservationChange reservationChange = reservationChanges.get(change.orderId());
+                boolean pendingBefore = reservationChange != null && reservationChange.pendingBefore();
+                boolean pendingAfter = reservationChange != null && reservationChange.pendingAfter();
+                OwnedContribution owned = orderContributions.get(change.orderId());
+                Long actual = owned == null ? null : owned.value();
+                Long expected = change.before() == null || change.before().status().terminal() || pendingBefore ? null
+                        : entryHashStable(change.orderId(), stableOrder(change.before(), identities));
+                requireContribution(actual, expected, "order");
+                if (change.after() != null) stableOrder(change.after(), identities);
+                int previousOwner = owned == null ? group.laneId() : owned.owner();
+                RuntimeCommitPatch.OrderChange reverse = new RuntimeCommitPatch.OrderChange(
+                        change.orderId(), change.after(), change.before());
+                staged.add(() -> updateOrder(group.laneId(), change, !pendingAfter),
+                        () -> updateOrder(previousOwner, reverse, !pendingBefore));
+            }
+            for (RuntimeCommitPatch.LeverageChange change : group.leverages()) {
+                validateCachedBefore("leverages", change.key(), change.before(), value -> stable(value),
+                        ignored -> true);
+                int previousOwner = contributionOwner("leverages", change.key(), group.laneId());
+                staged.add(() -> updateCachedValue(group.laneId(), "leverages", leverages,
+                                change.key(), change.after(), value -> stable(value), ignored -> true),
+                        () -> updateCachedValue(previousOwner, "leverages", leverages,
+                                change.key(), change.before(), value -> stable(value), ignored -> true));
+            }
+            for (RuntimeCommitPatch.AlgoOrderChange change : group.algoOrders()) {
+                validateCachedBefore("algo", change.algoOrderId(), change.before(), value -> stable(value),
+                        value -> !value.terminal());
+                int previousOwner = contributionOwner("algo", change.algoOrderId(), group.laneId());
+                staged.add(() -> updateCachedValue(group.laneId(), "algo", algoOrders,
+                                change.algoOrderId(), change.after(), value -> stable(value), value -> !value.terminal()),
+                        () -> updateCachedValue(previousOwner, "algo", algoOrders,
+                                change.algoOrderId(), change.before(), value -> stable(value), value -> !value.terminal()));
+            }
+            for (RuntimeCommitPatch.TimerChange change : group.timers()) {
+                validateCachedBefore("timers", change.key(), change.before(), value -> stable(value),
+                        ignored -> true);
+                int previousOwner = contributionOwner("timers", change.key(), group.laneId());
+                staged.add(() -> updateCachedValue(group.laneId(), "timers", timers,
+                                change.key(), change.after(), value -> stable(value), ignored -> true),
+                        () -> updateCachedValue(previousOwner, "timers", timers,
+                                change.key(), change.before(), value -> stable(value), ignored -> true));
+            }
+            for (RuntimeCommitPatch.TriggerOrderChange change : group.triggerOrders()) {
+                validateCachedBefore("triggers", change.triggerOrderId(), change.before(), value -> stable(value),
+                        value -> value.status().open());
+                int previousOwner = contributionOwner("triggers", change.triggerOrderId(), group.laneId());
+                staged.add(() -> updateCachedValue(group.laneId(), "triggers", triggers,
+                        change.triggerOrderId(), change.after(), value -> stable(value),
+                                value -> value.status().open()),
+                        () -> updateCachedValue(previousOwner, "triggers", triggers,
+                                change.triggerOrderId(), change.before(), value -> stable(value),
+                                value -> value.status().open()));
+            }
+            for (RuntimeCommitPatch.RiskSnapshotChange change : group.riskSnapshots()) {
+                RuntimeIdentityRegistry.PositionIdentity identity = identities.positionIdentity(change.riskKey());
+                validateCachedBefore("snapshots",
+                        new PositionContributionKey(identity.userId(), identity.positionKey()),
+                        change.before(), this::stableRiskSnapshot, ignored -> true);
+                PositionContributionKey key = new PositionContributionKey(identity.userId(), identity.positionKey());
+                int previousOwner = contributionOwner("snapshots", key, group.laneId());
+                staged.add(() -> updateRuntimeContribution(group.laneId(), "snapshots", riskSnapshots,
+                                key, change.after(), this::stableRiskSnapshot, ignored -> true),
+                        () -> updateRuntimeContribution(previousOwner, "snapshots", riskSnapshots,
+                                key, change.before(), this::stableRiskSnapshot, ignored -> true));
+            }
+            for (RuntimeCommitPatch.LiquidationChange change : group.liquidations()) {
+                validateCachedBefore("liquidations", change.liquidationId(), change.before(),
+                        this::stableLiquidation, value -> !runtimeTerminal(value));
+                int previousOwner = contributionOwner("liquidations", change.liquidationId(), group.laneId());
+                staged.add(() -> updateRuntimeContribution(group.laneId(), "liquidations", liquidations,
+                        change.liquidationId(), change.after(), this::stableLiquidation,
+                                value -> !runtimeTerminal(value)),
+                        () -> updateRuntimeContribution(previousOwner, "liquidations", liquidations,
+                                change.liquidationId(), change.before(), this::stableLiquidation,
+                                value -> !runtimeTerminal(value)));
+            }
+            staged.add(userStage::apply, userRollback::apply);
+        }
+        RuntimeCommitPatch.GlobalOwnerGroup global = patch.globalOwnerGroup();
+        for (RuntimeCommitPatch.InstrumentChange change : global.instruments()) {
+            validateCachedBefore("instruments", change.symbol(), change.before(), value -> stable(value),
+                    ignored -> true);
+            staged.add(() -> updateCachedValue(Integer.MAX_VALUE, "instruments", instruments,
+                            change.symbol(), change.after(), value -> stable(value), ignored -> true),
+                    () -> updateCachedValue(Integer.MAX_VALUE, "instruments", instruments,
+                            change.symbol(), change.before(), value -> stable(value), ignored -> true));
+        }
+        for (RuntimeCommitPatch.MarkPriceChange change : patch.globalOwnerGroup().markPrices()) {
+            String symbol = identities.symbol(change.symbolId());
+            validateCachedBefore("marks", symbol, change.before(), this::stableMark, ignored -> true);
+            staged.add(() -> updateRuntimeContribution(Integer.MAX_VALUE, "marks", markPrices,
+                            symbol, change.after(), this::stableMark, ignored -> true),
+                    () -> updateRuntimeContribution(Integer.MAX_VALUE, "marks", markPrices,
+                            symbol, change.before(), this::stableMark, ignored -> true));
+        }
+        for (RuntimeCommitPatch.RiskScanChange change : patch.globalOwnerGroup().riskScans()) {
+            String symbol = identities.symbol(change.symbolId());
+            validateCachedBefore("scans", symbol, change.before(), this::stableRiskScan, ignored -> true);
+            staged.add(() -> updateRuntimeContribution(Integer.MAX_VALUE, "scans", riskScans,
+                            symbol, change.after(), this::stableRiskScan, ignored -> true),
+                    () -> updateRuntimeContribution(Integer.MAX_VALUE, "scans", riskScans,
+                            symbol, change.before(), this::stableRiskScan, ignored -> true));
+        }
+        for (RuntimeCommitPatch.TreasuryAssetChange change : patch.globalOwnerGroup().treasuryAssets()) {
+            identities.asset(change.assetId());
+            if (!java.util.Objects.equals(runtimeTreasury.get(change.assetId()), change.before())) {
+                throw new IllegalArgumentException("business treasury before-value mismatch");
+            }
+            RuntimeCommitPatch.TreasuryAssetChange reverse = new RuntimeCommitPatch.TreasuryAssetChange(
+                    change.assetId(), change.after(), change.before());
+            staged.add(() -> updateTreasuryAsset(change), () -> updateTreasuryAsset(reverse));
+        }
+        for (RuntimeCommitPatch.TreasuryFundingChange change : global.treasuryFunding()) {
+            String symbol = identities.symbol(change.symbolId());
+            RuntimeCommitPatch.TreasuryFundingValue before = change.before();
+            validateCachedBefore("fundingSettlements", symbol,
+                    before == null || before.settlementId() == 0 ? null : before.settlementId(),
+                    value -> stable(value), ignored -> true);
+            validateCachedBefore("fundingProgress", symbol, before == null ? null : before.progress(),
+                    this::stableFundingProgress, ignored -> true);
+            RuntimeCommitPatch.TreasuryFundingChange reverse = new RuntimeCommitPatch.TreasuryFundingChange(
+                    change.symbolId(), change.after(), change.before());
+            staged.add(() -> updateTreasuryFunding(change), () -> updateTreasuryFunding(reverse));
+        }
+        for (RuntimeCommitPatch.TreasuryLifecycleChange change : global.treasuryLifecycle()) {
+            String symbol = identities.symbol(change.symbolId());
+            RuntimeCommitPatch.TreasuryLifecycleValue before = change.before();
+            validateCachedBefore("lifecycleSettlements", symbol,
+                    before == null || before.settlementId() == 0 ? null : before.settlementId(),
+                    value -> stable(value), ignored -> true);
+            validateCachedBefore("lifecycleProgress", symbol, before == null ? null : before.progress(),
+                    this::stableLifecycleProgress, ignored -> true);
+            RuntimeCommitPatch.TreasuryLifecycleChange reverse = new RuntimeCommitPatch.TreasuryLifecycleChange(
+                    change.symbolId(), change.after(), change.before());
+            staged.add(() -> updateTreasuryLifecycle(change), () -> updateTreasuryLifecycle(reverse));
+        }
+        if (global.nextLiquidationId() != null
+                && global.nextLiquidationId().before() != nextLiquidationId) {
+            throw new IllegalArgumentException("business next-liquidation-id before-value mismatch");
+        }
+        if (global.riskScanControl() != null
+                && stable(global.riskScanControl().before()) != riskScanControlHash) {
+            throw new IllegalArgumentException("business risk-scan-control before-value mismatch");
+        }
+        if (global.nextLiquidationId() != null) {
+            staged.add(() -> nextLiquidationId = global.nextLiquidationId().after(),
+                    () -> nextLiquidationId = global.nextLiquidationId().before());
+        }
+        if (global.riskScanControl() != null) {
+            long after = stable(global.riskScanControl().after());
+            long before = riskScanControlHash;
+            staged.add(() -> riskScanControlHash = after, () -> riskScanControlHash = before);
+        }
+        return staged;
+    }
+
+    private <K, V> void validateCachedBefore(String domain, K key, V before,
+                                             java.util.function.ToLongFunction<V> stableValue,
+                                             Predicate<V> included) {
+        OwnedContribution owned = contributions.get(contributionKey(domain, key));
+        Long actual = owned == null ? null : owned.value();
+        Long expected = before == null || !included.test(before) ? null
+                : entryHashStable(key, stableValue.applyAsLong(before));
+        requireContribution(actual, expected, domain);
+    }
+
+    private int contributionOwner(String domain, Object key, int fallback) {
+        OwnedContribution owned = contributions.get(contributionKey(domain, key));
+        return owned == null ? fallback : owned.owner();
+    }
+
+    private static void requireContribution(Long actual, Long expected, String domain) {
+        if (!java.util.Objects.equals(actual, expected)) {
+            throw new IllegalArgumentException("business " + domain + " before-value mismatch");
+        }
     }
 
     public void restore(TradingCoreState state) {
+        long nextGeneration = Math.incrementExact(ownerGeneration);
         revision = state.revision();
         nextLiquidationId = state.riskState().nextLiquidationId();
         riskScanControlHash = stable(state.riskState().scanControl());
         rebuild(state);
+        ownerGeneration = nextGeneration;
     }
 
     public void restore(TradingCoreState state, RuntimeIdentityRegistry identities) {
@@ -149,36 +511,37 @@ public final class RollingBusinessStateHash {
         long hash = CoreStateHash.start();
         hash = CoreStateHash.mix(hash, productLine);
         hash = CoreStateHash.mix(hash, revision);
-        hash = mixAggregate(hash, "users", users);
-        hash = mixAggregate(hash, "orders", orders);
-        hash = mixAggregate(hash, "instruments", instruments);
-        hash = mixAggregate(hash, "leverages", leverages);
-        hash = mixAggregate(hash, "algo", algoOrders);
-        hash = mixAggregate(hash, "timers", timers);
-        hash = mixAggregate(hash, "triggers", triggers);
-        hash = mixAggregate(hash, "markPrices", markPrices);
-        hash = mixAggregate(hash, "riskSnapshots", riskSnapshots);
-        hash = mixAggregate(hash, "liquidations", liquidations);
-        hash = mixAggregate(hash, "riskScans", riskScans);
+        hash = mixOwnerDomain(hash, "users", Domain.USERS);
+        hash = mixOwnerDomain(hash, "orders", Domain.ORDERS);
+        hash = mixOwnerDomain(hash, "instruments", Domain.INSTRUMENTS);
+        hash = mixOwnerDomain(hash, "leverages", Domain.LEVERAGES);
+        hash = mixOwnerDomain(hash, "algo", Domain.ALGO);
+        hash = mixOwnerDomain(hash, "timers", Domain.TIMERS);
+        hash = mixOwnerDomain(hash, "triggers", Domain.TRIGGERS);
+        hash = mixOwnerDomain(hash, "markPrices", Domain.MARKS);
+        hash = mixOwnerDomain(hash, "riskSnapshots", Domain.SNAPSHOTS);
+        hash = mixOwnerDomain(hash, "liquidations", Domain.LIQUIDATIONS);
+        hash = mixOwnerDomain(hash, "riskScans", Domain.SCANS);
         hash = CoreStateHash.mix(hash, nextLiquidationId);
         hash = CoreStateHash.mix(hash, riskScanControlHash);
-        hash = mixAggregate(hash, "feeBalances", feeBalances);
-        hash = mixAggregate(hash, "insuranceBalances", insuranceBalances);
-        hash = mixAggregate(hash, "insuranceDeficits", insuranceDeficits);
-        hash = mixAggregate(hash, "liquidationFeeBalances", liquidationFeeBalances);
-        hash = mixAggregate(hash, "fundingResidualBalances", fundingResidualBalances);
-        hash = mixAggregate(hash, "roundingResidualBalances", roundingResidualBalances);
-        hash = mixAggregate(hash, "clearingPnlBalances", clearingPnlBalances);
-        hash = mixAggregate(hash, "fundingSettlements", fundingSettlements);
-        hash = mixAggregate(hash, "lifecycleSettlements", lifecycleSettlements);
-        hash = mixAggregate(hash, "fundingProgress", fundingProgress);
-        cachedValue = mixAggregate(hash, "lifecycleProgress", lifecycleProgress);
+        hash = mixOwnerDomain(hash, "feeBalances", Domain.FEES);
+        hash = mixOwnerDomain(hash, "insuranceBalances", Domain.INSURANCE);
+        hash = mixOwnerDomain(hash, "insuranceDeficits", Domain.DEFICITS);
+        hash = mixOwnerDomain(hash, "liquidationFeeBalances", Domain.LIQUIDATION_FEES);
+        hash = mixOwnerDomain(hash, "fundingResidualBalances", Domain.FUNDING_RESIDUALS);
+        hash = mixOwnerDomain(hash, "roundingResidualBalances", Domain.ROUNDING_RESIDUALS);
+        hash = mixOwnerDomain(hash, "clearingPnlBalances", Domain.CLEARING_PNL);
+        hash = mixOwnerDomain(hash, "fundingSettlements", Domain.FUNDING_SETTLEMENTS);
+        hash = mixOwnerDomain(hash, "lifecycleSettlements", Domain.LIFECYCLE_SETTLEMENTS);
+        hash = mixOwnerDomain(hash, "fundingProgress", Domain.FUNDING_PROGRESS);
+        cachedValue = mixOwnerDomain(hash, "lifecycleProgress", Domain.LIFECYCLE_PROGRESS);
         valueDirty = false;
         return cachedValue;
     }
 
     private void rebuild(TradingCoreState state) {
         contributions.clear();
+        clearOwnerDomains();
         rebuildUsers(state.users());
         rebuildOrders(state.orders());
         rebuildCached("instruments", instruments, state.instruments(), ignored -> true);
@@ -197,6 +560,13 @@ public final class RollingBusinessStateHash {
         rebuildMap(fundingResidualBalances, state.treasuryState().fundingResidualBalances());
         rebuildMap(roundingResidualBalances, state.treasuryState().roundingResidualBalances());
         rebuildMap(clearingPnlBalances, state.treasuryState().clearingPnlBalances());
+        setOwnerAggregate(Integer.MAX_VALUE, Domain.FEES, feeBalances);
+        setOwnerAggregate(Integer.MAX_VALUE, Domain.INSURANCE, insuranceBalances);
+        setOwnerAggregate(Integer.MAX_VALUE, Domain.DEFICITS, insuranceDeficits);
+        setOwnerAggregate(Integer.MAX_VALUE, Domain.LIQUIDATION_FEES, liquidationFeeBalances);
+        setOwnerAggregate(Integer.MAX_VALUE, Domain.FUNDING_RESIDUALS, fundingResidualBalances);
+        setOwnerAggregate(Integer.MAX_VALUE, Domain.ROUNDING_RESIDUALS, roundingResidualBalances);
+        setOwnerAggregate(Integer.MAX_VALUE, Domain.CLEARING_PNL, clearingPnlBalances);
         rebuildCached("fundingSettlements", fundingSettlements,
                 state.treasuryState().fundingSettlements(), ignored -> true);
         rebuildCached("lifecycleSettlements", lifecycleSettlements,
@@ -206,6 +576,7 @@ public final class RollingBusinessStateHash {
         rebuildCached("lifecycleProgress", lifecycleProgress,
                 state.treasuryState().lifecycleProgress(), ignored -> true);
         rebuildRuntimeTreasury(state.treasuryState());
+        lastCoreSequence = Long.MIN_VALUE;
         valueDirty = true;
     }
 
@@ -220,75 +591,50 @@ public final class RollingBusinessStateHash {
         values.forEach((key, value) -> {
             if (!included.test(value)) return;
             long contribution = entryHash(key, value);
-            contributions.put(contributionKey(domain, key), contribution);
+            int owner = restoredOwner(domain(domain));
+            contributions.put(contributionKey(domain, key), new OwnedContribution(owner, contribution));
             target.add(contribution);
+            addOwner(owner, domain(domain), contribution);
         });
     }
 
-    private <K extends Comparable<? super K>, V> void updateCached(
-            String domain, Aggregate target, RuntimeMutationDelta.ValueChanges<K, V> changes,
-            java.util.function.ToLongFunction<V> stableValue, Predicate<V> included) {
-        for (K key : changes.changedKeys()) {
-            Long previous = contributions.remove(contributionKey(domain, key));
-            if (previous != null) target.remove(previous);
-            V current = changes.currentValues().get(key);
-            if (current != null && included.test(current)) {
-                long contribution = entryHashStable(key, stableValue.applyAsLong(current));
-                contributions.put(contributionKey(domain, key), contribution);
-                target.add(contribution);
-            }
+    private <K, V> void updateCachedValue(int owner, String domain, Aggregate target, K key, V current,
+                                          java.util.function.ToLongFunction<V> stableValue,
+                                          Predicate<V> included) {
+        OwnedContribution previous = contributions.remove(contributionKey(domain, key));
+        Domain typedDomain = domain(domain);
+        if (previous != null) {
+            target.remove(previous.value());
+            removeOwner(previous.owner(), typedDomain, previous.value());
         }
-    }
-
-    private void updateRuntimeMarks(RuntimeMutationDelta.ValueChanges<Integer, MarkPriceRuntime> changes) {
-        for (Integer symbolId : changes.changedKeys()) {
-            String symbol = identities.symbol(symbolId);
-            updateRuntimeContribution("marks", markPrices, symbol,
-                    changes.currentValues().get(symbolId), this::stableMark, ignored -> true);
-        }
-    }
-
-    private void updateRuntimeRiskSnapshots(
-            RuntimeMutationDelta.ValueChanges<Long, RiskSnapshotRuntime> changes) {
-        for (Long positionKey : changes.changedKeys()) {
-            RuntimeIdentityRegistry.PositionIdentity identity = identities.positionIdentity(positionKey);
-            String key = identity.userId() + ":" + identity.positionKey();
-            updateRuntimeContribution("snapshots", riskSnapshots, key,
-                    changes.currentValues().get(positionKey), this::stableRiskSnapshot, ignored -> true);
-        }
-    }
-
-    private void updateRuntimeLiquidations(
-            RuntimeMutationDelta.ValueChanges<Long, LiquidationRuntime> changes) {
-        for (Long id : changes.changedKeys()) {
-            updateRuntimeContribution("liquidations", liquidations, id, changes.currentValues().get(id),
-                    this::stableLiquidation, value -> !runtimeTerminal(value));
-        }
-    }
-
-    private void updateRuntimeRiskScans(RuntimeMutationDelta.ValueChanges<Integer, RiskScanRuntime> changes) {
-        for (Integer symbolId : changes.changedKeys()) {
-            String symbol = identities.symbol(symbolId);
-            updateRuntimeContribution("scans", riskScans, symbol, changes.currentValues().get(symbolId),
-                    this::stableRiskScan, ignored -> true);
-        }
-    }
-
-    private <K, V> void updateRuntimeContribution(String domain, Aggregate target, K key, V current,
-                                                   java.util.function.ToLongFunction<V> stableValue,
-                                                   Predicate<V> included) {
-        Long previous = contributions.remove(contributionKey(domain, key));
-        if (previous != null) target.remove(previous);
         if (current != null && included.test(current)) {
             long contribution = entryHashStable(key, stableValue.applyAsLong(current));
-            contributions.put(contributionKey(domain, key), contribution);
+            contributions.put(contributionKey(domain, key), new OwnedContribution(owner, contribution));
             target.add(contribution);
+            addOwner(owner, typedDomain, contribution);
         }
     }
 
-    private static String contributionKey(String domain, Object key) {
-        return domain + '\u0000' + key;
+    private <K, V> void updateRuntimeContribution(int owner, String domain, Aggregate target, K key, V current,
+                                                   java.util.function.ToLongFunction<V> stableValue,
+                                                   Predicate<V> included) {
+        updateCachedValue(owner, domain, target, key, current, stableValue, included);
     }
+
+    private static ContributionKey contributionKey(String domain, Object key) {
+        Object typedKey = key;
+        if ("snapshots".equals(domain) && key instanceof String text) {
+            int separator = text.indexOf(':');
+            if (separator > 0) {
+                typedKey = new PositionContributionKey(Long.parseLong(text.substring(0, separator)),
+                        text.substring(separator + 1));
+            }
+        }
+        return new ContributionKey(domain, typedKey);
+    }
+
+    private record ContributionKey(String domain, Object key) {}
+    private record PositionContributionKey(long userId, String positionKey) {}
 
     private static <K, V> void rebuildMap(Aggregate target, Map<K, V> values, Predicate<V> included) {
         target.clear();
@@ -303,33 +649,23 @@ public final class RollingBusinessStateHash {
         values.forEach((userId, user) -> {
             UserHash hash = UserHash.create(user, identities);
             userHashes.put(userId, hash);
-            users.add(entryHash(userId, hash.value()));
+            long contribution = entryHash(userId, hash.value());
+            users.add(contribution);
+            addOwner(-1, Domain.USERS, contribution);
         });
     }
 
-    private void updateUsers(RuntimeCommitEntry entry) {
-        RuntimeMutationDelta mutation = entry.mutation();
-        java.util.HashSet<Long> changedUsers = new java.util.HashSet<>(mutation.users().changedKeys());
-        mutation.reservations().currentValues().values().forEach(value -> changedUsers.add(value.userId()));
-        mutation.positions().currentValues().values().forEach(value -> changedUsers.add(value.userId()));
-        java.util.ArrayList<Long> changed = new java.util.ArrayList<>(changedUsers);
-        changed.sort(null);
-        for (Long userId : changed) {
-            UserHash hash = userHashes.get(userId);
-            if (hash != null) users.remove(entryHash(userId, hash.value()));
-            RuntimeMutationDelta.UserValue user = mutation.users().currentValues().get(userId);
-            if (hash == null) {
-                if (user == null) continue;
-                hash = UserHash.create(user.user());
-            } else if (user != null) {
-                hash.updateUser(user.user());
-            }
-            hash.updateBalances(user == null ? null : user.balances(), identities);
-            hash.updateReservations(userId, mutation.reservations(), identities);
-            hash.updatePositions(userId, mutation.positions(), identities);
-            userHashes.put(userId, hash);
-            users.add(entryHash(userId, hash.value()));
+    private UserHash beginUserChange(Map<Long, UserHash> changed, long userId) {
+        if (changed.containsKey(userId)) return changed.get(userId);
+        UserHash hash = userHashes.get(userId);
+        if (hash != null) {
+            long contribution = entryHash(userId, hash.value());
+            users.remove(contribution);
+            removeOwner(hash.owner, Domain.USERS, contribution);
+            hash = hash.copy();
         }
+        changed.put(userId, hash);
+        return hash;
     }
 
     private void rebuildOrders(Map<Long, CoreOrderState> values) {
@@ -338,21 +674,24 @@ public final class RollingBusinessStateHash {
         values.forEach((orderId, order) -> {
             if (order.status().terminal()) return;
             long contribution = entryHash(orderId, order);
-            orderContributions.put(orderId, contribution);
+            orderContributions.put(orderId, new OwnedContribution(-1, contribution));
             orders.add(contribution);
+            addOwner(-1, Domain.ORDERS, contribution);
         });
     }
 
-    private void updateOrders(RuntimeMutationDelta.ValueChanges<Long, OrderRuntime> changes) {
-        for (Long orderId : changes.changedKeys()) {
-            Long previous = orderContributions.remove(orderId);
-            if (previous != null) orders.remove(previous);
-            OrderRuntime current = changes.currentValues().get(orderId);
-            if (current != null && !current.status().terminal()) {
-                long contribution = entryHashStable(orderId, stableOrder(current, identities));
-                orderContributions.put(orderId, contribution);
-                orders.add(contribution);
-            }
+    private void updateOrder(int owner, RuntimeCommitPatch.OrderChange change, boolean visible) {
+        OwnedContribution previous = orderContributions.remove(change.orderId());
+        if (previous != null) {
+            orders.remove(previous.value());
+            removeOwner(previous.owner(), Domain.ORDERS, previous.value());
+        }
+        OrderRuntime current = change.after();
+        if (current != null && !current.status().terminal() && visible) {
+            long contribution = entryHashStable(change.orderId(), stableOrder(current, identities));
+            orderContributions.put(change.orderId(), new OwnedContribution(owner, contribution));
+            orders.add(contribution);
+            addOwner(owner, Domain.ORDERS, contribution);
         }
     }
 
@@ -367,7 +706,7 @@ public final class RollingBusinessStateHash {
         assets.addAll(treasury.roundingResidualBalances().keySet());
         assets.addAll(treasury.clearingPnlBalances().keySet());
         for (String asset : assets) {
-            runtimeTreasury.put(identities.assetId(asset), new RuntimeMutationDelta.AssetLedger(
+            runtimeTreasury.put(identities.assetId(asset), new RuntimeCommitPatch.TreasuryAssetValue(
                     treasury.feeBalances().getOrDefault(asset, 0L),
                     treasury.insuranceBalances().getOrDefault(asset, 0L),
                     treasury.insuranceDeficits().getOrDefault(asset, 0L),
@@ -378,99 +717,65 @@ public final class RollingBusinessStateHash {
         }
     }
 
-    private void updateTreasury(RuntimeMutationDelta.TreasuryValues treasury) {
-        treasury.assets().changedKeys().forEach(assetId -> {
-            String asset = identities.asset(assetId);
-            RuntimeMutationDelta.AssetLedger previous = runtimeTreasury.get(assetId);
-            RuntimeMutationDelta.AssetLedger current = treasury.assets().currentValues().get(assetId);
-            update(feeBalances, asset, fee(previous), fee(current));
-            update(insuranceBalances, asset, insurance(previous), insurance(current));
-            update(insuranceDeficits, asset, deficit(previous), deficit(current));
-            update(liquidationFeeBalances, asset, liquidationFee(previous), liquidationFee(current));
-            update(fundingResidualBalances, asset, fundingResidual(previous), fundingResidual(current));
-            update(roundingResidualBalances, asset, roundingResidual(previous), roundingResidual(current));
-            update(clearingPnlBalances, asset, clearingPnl(previous), clearingPnl(current));
-            if (current == null) runtimeTreasury.remove(assetId); else runtimeTreasury.put(assetId, current);
-        });
-        for (Integer symbolId : treasury.funding().changedKeys()) {
-            String symbol = identities.symbol(symbolId);
-            RuntimeMutationDelta.FundingLedger value = treasury.funding().currentValues().get(symbolId);
-            updateRuntimeContribution("fundingSettlements", fundingSettlements, symbol,
-                    value == null || value.settlementId() == 0 ? null : value.settlementId(),
-                    number -> stable(number), ignored -> true);
-            updateRuntimeContribution("fundingProgress", fundingProgress, symbol,
-                    value == null ? null : value.progress(), this::stableFundingProgress, ignored -> true);
+    private void updateTreasuryAsset(RuntimeCommitPatch.TreasuryAssetChange change) {
+        String asset = identities.asset(change.assetId());
+        RuntimeCommitPatch.TreasuryAssetValue previous = change.before();
+        RuntimeCommitPatch.TreasuryAssetValue current = change.after();
+        update(feeBalances, Domain.FEES, asset, patchFee(previous), patchFee(current));
+        update(insuranceBalances, Domain.INSURANCE, asset, patchInsurance(previous), patchInsurance(current));
+        update(insuranceDeficits, Domain.DEFICITS, asset, patchDeficit(previous), patchDeficit(current));
+        update(liquidationFeeBalances, Domain.LIQUIDATION_FEES, asset,
+                patchLiquidationFee(previous), patchLiquidationFee(current));
+        update(fundingResidualBalances, Domain.FUNDING_RESIDUALS, asset,
+                patchFundingResidual(previous), patchFundingResidual(current));
+        update(roundingResidualBalances, Domain.ROUNDING_RESIDUALS, asset,
+                patchRoundingResidual(previous), patchRoundingResidual(current));
+        update(clearingPnlBalances, Domain.CLEARING_PNL, asset,
+                patchClearingPnl(previous), patchClearingPnl(current));
+        if (current == null) runtimeTreasury.remove(change.assetId());
+        else runtimeTreasury.put(change.assetId(), current);
+    }
+
+    private void updateTreasuryFunding(RuntimeCommitPatch.TreasuryFundingChange change) {
+        String symbol = identities.symbol(change.symbolId());
+        RuntimeCommitPatch.TreasuryFundingValue current = change.after();
+        updateRuntimeContribution(Integer.MAX_VALUE, "fundingSettlements", fundingSettlements, symbol,
+                current == null || current.settlementId() == 0 ? null : current.settlementId(),
+                number -> stable(number), ignored -> true);
+        updateRuntimeContribution(Integer.MAX_VALUE, "fundingProgress", fundingProgress, symbol,
+                current == null ? null : current.progress(), this::stableFundingProgress, ignored -> true);
+    }
+
+    private void updateTreasuryLifecycle(RuntimeCommitPatch.TreasuryLifecycleChange change) {
+        String symbol = identities.symbol(change.symbolId());
+        RuntimeCommitPatch.TreasuryLifecycleValue current = change.after();
+        updateRuntimeContribution(Integer.MAX_VALUE, "lifecycleSettlements", lifecycleSettlements, symbol,
+                current == null || current.settlementId() == 0 ? null : current.settlementId(),
+                number -> stable(number), ignored -> true);
+        updateRuntimeContribution(Integer.MAX_VALUE, "lifecycleProgress", lifecycleProgress, symbol,
+                current == null ? null : current.progress(), this::stableLifecycleProgress, ignored -> true);
+    }
+
+    private void update(Aggregate aggregate, Domain domain, String asset, long previous, long current) {
+        if (previous != 0) {
+            long contribution = entryHash(asset, previous);
+            aggregate.remove(contribution);
+            removeOwner(Integer.MAX_VALUE, domain, contribution);
         }
-        for (Integer symbolId : treasury.lifecycle().changedKeys()) {
-            String symbol = identities.symbol(symbolId);
-            RuntimeMutationDelta.LifecycleLedger value = treasury.lifecycle().currentValues().get(symbolId);
-            updateRuntimeContribution("lifecycleSettlements", lifecycleSettlements, symbol,
-                    value == null || value.settlementId() == 0 ? null : value.settlementId(),
-                    number -> stable(number), ignored -> true);
-            updateRuntimeContribution("lifecycleProgress", lifecycleProgress, symbol,
-                    value == null ? null : value.progress(), this::stableLifecycleProgress, ignored -> true);
+        if (current != 0) {
+            long contribution = entryHash(asset, current);
+            aggregate.add(contribution);
+            addOwner(Integer.MAX_VALUE, domain, contribution);
         }
     }
 
-    private static void update(Aggregate aggregate, String asset, long previous, long current) {
-        if (previous != 0) aggregate.remove(entryHash(asset, previous));
-        if (current != 0) aggregate.add(entryHash(asset, current));
-    }
-
-    private static long fee(RuntimeMutationDelta.AssetLedger value) { return value == null ? 0 : value.fee(); }
-    private static long insurance(RuntimeMutationDelta.AssetLedger value) { return value == null ? 0 : value.insurance(); }
-    private static long deficit(RuntimeMutationDelta.AssetLedger value) { return value == null ? 0 : value.deficit(); }
-    private static long liquidationFee(RuntimeMutationDelta.AssetLedger value) { return value == null ? 0 : value.liquidationFee(); }
-    private static long fundingResidual(RuntimeMutationDelta.AssetLedger value) { return value == null ? 0 : value.fundingResidual(); }
-    private static long roundingResidual(RuntimeMutationDelta.AssetLedger value) { return value == null ? 0 : value.roundingResidual(); }
-    private static long clearingPnl(RuntimeMutationDelta.AssetLedger value) { return value == null ? 0 : value.clearingPnl(); }
-
-    private void updateUsers(Map<Long, CoreUserState> before, Map<Long, CoreUserState> after) {
-        if (before == after) return;
-        for (Long userId : StateMapSupport.changedKeys(before, after)) {
-            UserHash previousHash = userHashes.remove(userId);
-            CoreUserState previous = before.get(userId);
-            if (previous != null) {
-                if (previousHash == null) previousHash = UserHash.create(previous, identities);
-                users.remove(entryHash(userId, previousHash.value()));
-            }
-            CoreUserState next = after.get(userId);
-            if (next != null) {
-                UserHash nextHash = UserHash.create(next, identities);
-                userHashes.put(userId, nextHash);
-                users.add(entryHash(userId, nextHash.value()));
-            }
-        }
-    }
-
-    private static <K, V> void updateMap(Aggregate target, Map<K, V> before, Map<K, V> after) {
-        if (before == after) return;
-        if (!StateMapSupport.isDelta(after)) {
-            rebuildMap(target, after);
-            return;
-        }
-        Set<K> changed = StateMapSupport.changedKeys(after);
-        for (K key : changed) {
-            if (before.containsKey(key)) target.remove(entryHash(key, before.get(key)));
-            if (after.containsKey(key)) target.add(entryHash(key, after.get(key)));
-        }
-    }
-
-    private static <K, V> void updateMap(Aggregate target, Map<K, V> before, Map<K, V> after,
-                                         Predicate<V> included) {
-        if (before == after) return;
-        if (!StateMapSupport.isDelta(after)) {
-            rebuildMap(target, after, included);
-            return;
-        }
-        Set<K> changed = StateMapSupport.changedKeys(after);
-        for (K key : changed) {
-            V previous = before.get(key);
-            if (previous != null && included.test(previous)) target.remove(entryHash(key, previous));
-            V next = after.get(key);
-            if (next != null && included.test(next)) target.add(entryHash(key, next));
-        }
-    }
+    private static long patchFee(RuntimeCommitPatch.TreasuryAssetValue value) { return value == null ? 0 : value.fee(); }
+    private static long patchInsurance(RuntimeCommitPatch.TreasuryAssetValue value) { return value == null ? 0 : value.insurance(); }
+    private static long patchDeficit(RuntimeCommitPatch.TreasuryAssetValue value) { return value == null ? 0 : value.deficit(); }
+    private static long patchLiquidationFee(RuntimeCommitPatch.TreasuryAssetValue value) { return value == null ? 0 : value.liquidationFee(); }
+    private static long patchFundingResidual(RuntimeCommitPatch.TreasuryAssetValue value) { return value == null ? 0 : value.fundingResidual(); }
+    private static long patchRoundingResidual(RuntimeCommitPatch.TreasuryAssetValue value) { return value == null ? 0 : value.roundingResidual(); }
+    private static long patchClearingPnl(RuntimeCommitPatch.TreasuryAssetValue value) { return value == null ? 0 : value.clearingPnl(); }
 
     private static long entryHash(Object key, Object value) {
         long hash = CoreStateHash.mix(CoreStateHash.start(), HASH_TAG);
@@ -517,6 +822,7 @@ public final class RollingBusinessStateHash {
 
     private static long stable(Object value) {
         if (value == null) return 0;
+        if (value instanceof PositionContributionKey key) return stablePositionContributionKey(key);
         if (value instanceof CoreUserState user) {
             return TradingCoreState.hashUser(CoreStateHash.start(), user);
         }
@@ -563,6 +869,32 @@ public final class RollingBusinessStateHash {
             return CoreStateHash.mix(hash, position.positionMarginUnits());
         }
         return CoreStateHash.mix(hash, value.toString());
+    }
+
+    private static long stablePositionContributionKey(PositionContributionKey key) {
+        long base = CoreStateHash.mix(CoreStateHash.start(), String.class.getName());
+        String user = Long.toString(key.userId());
+        String position = key.positionKey();
+        int characterCount = user.length() + 1 + position.length();
+        boolean ascii = true;
+        for (int index = 0; index < position.length(); index++) {
+            if (position.charAt(index) > 0x7f) { ascii = false; break; }
+        }
+        long hash = CoreStateHash.mix(base, characterCount);
+        for (int index = 0; index < user.length(); index++) hash = mixAscii(hash, user.charAt(index));
+        hash = mixAscii(hash, ':');
+        if (ascii) {
+            for (int index = 0; index < position.length(); index++) hash = mixAscii(hash, position.charAt(index));
+            return hash;
+        }
+        for (byte item : position.getBytes(java.nio.charset.StandardCharsets.UTF_8)) {
+            hash = (hash ^ Byte.toUnsignedInt(item)) * 0x100000001b3L;
+        }
+        return hash;
+    }
+
+    private static long mixAscii(long hash, char value) {
+        return (hash ^ value) * 0x100000001b3L;
     }
 
     private static long stableMark(CoreMarkPriceState value) {
@@ -676,6 +1008,212 @@ public final class RollingBusinessStateHash {
         return CoreStateHash.mix(hash, aggregate.xor);
     }
 
+    private long mixOwnerDomain(long hash, String name, Domain domain) {
+        long count = 0;
+        long sum = 0;
+        long xor = 0;
+        for (OwnerDomains owner : ownerDomains) {
+            Aggregate aggregate = owner.aggregate(domain);
+            count += aggregate.count;
+            sum += aggregate.sum;
+            xor ^= aggregate.xor;
+        }
+        hash = CoreStateHash.mix(hash, name);
+        hash = CoreStateHash.mix(hash, count);
+        hash = CoreStateHash.mix(hash, sum);
+        return CoreStateHash.mix(hash, xor);
+    }
+
+    private void addOwner(int owner, Domain domain, long contribution) {
+        ownerDomains[ownerIndex(owner)].aggregate(domain).add(contribution);
+    }
+
+    private void setOwnerAggregate(int owner, Domain domain, Aggregate source) {
+        Aggregate target = ownerDomains[ownerIndex(owner)].aggregate(domain);
+        target.count = source.count;
+        target.sum = source.sum;
+        target.xor = source.xor;
+    }
+
+    private void removeOwner(int owner, Domain domain, long contribution) {
+        ownerDomains[ownerIndex(owner)].aggregate(domain).remove(contribution);
+    }
+
+    private static int ownerIndex(int owner) {
+        if (owner == -1) return RESTORED_OWNER;
+        if (owner == Integer.MAX_VALUE) return GLOBAL_OWNER;
+        if (owner < 0 || owner >= GLOBAL_OWNER) throw new IllegalArgumentException("invalid hash owner");
+        return owner;
+    }
+
+    private static OwnerDomains[] ownerDomains() {
+        OwnerDomains[] result = new OwnerDomains[RESTORED_OWNER + 1];
+        for (int index = 0; index < result.length; index++) result[index] = new OwnerDomains();
+        return result;
+    }
+
+    private void clearOwnerDomains() {
+        for (OwnerDomains owner : ownerDomains) owner.clear();
+    }
+
+    private static Domain domain(String name) {
+        return switch (name) {
+            case "instruments" -> Domain.INSTRUMENTS;
+            case "leverages" -> Domain.LEVERAGES;
+            case "algo" -> Domain.ALGO;
+            case "timers" -> Domain.TIMERS;
+            case "triggers" -> Domain.TRIGGERS;
+            case "marks" -> Domain.MARKS;
+            case "snapshots" -> Domain.SNAPSHOTS;
+            case "liquidations" -> Domain.LIQUIDATIONS;
+            case "scans" -> Domain.SCANS;
+            case "fundingSettlements" -> Domain.FUNDING_SETTLEMENTS;
+            case "lifecycleSettlements" -> Domain.LIFECYCLE_SETTLEMENTS;
+            case "fundingProgress" -> Domain.FUNDING_PROGRESS;
+            case "lifecycleProgress" -> Domain.LIFECYCLE_PROGRESS;
+            default -> throw new IllegalArgumentException("unknown hash domain: " + name);
+        };
+    }
+
+    private static int restoredOwner(Domain domain) {
+        return switch (domain) {
+            case INSTRUMENTS, MARKS, SCANS, FEES, INSURANCE, DEFICITS, LIQUIDATION_FEES,
+                    FUNDING_RESIDUALS, ROUNDING_RESIDUALS, CLEARING_PNL, FUNDING_SETTLEMENTS,
+                    LIFECYCLE_SETTLEMENTS, FUNDING_PROGRESS, LIFECYCLE_PROGRESS -> Integer.MAX_VALUE;
+            default -> -1;
+        };
+    }
+
+    private static final class OwnerDomains {
+        private final Aggregate[] domains = new Aggregate[Domain.values().length];
+
+        private OwnerDomains() {
+            for (int index = 0; index < domains.length; index++) domains[index] = new Aggregate();
+        }
+
+        private Aggregate aggregate(Domain domain) { return domains[domain.ordinal()]; }
+        private void clear() { for (Aggregate aggregate : domains) aggregate.clear(); }
+    }
+
+    private final class BusinessPatchStage {
+        private final java.util.ArrayList<StagedOperation> operations = new java.util.ArrayList<>();
+        private java.util.ArrayDeque<Runnable> appliedRollbacks;
+
+        private void add(Runnable operation, Runnable rollback) {
+            operations.add(new StagedOperation(operation, rollback));
+        }
+        private int size() { return operations.size(); }
+
+        private long preview(java.util.function.LongSupplier value) {
+            java.util.ArrayDeque<Runnable> rollbacks = new java.util.ArrayDeque<>();
+            try {
+                for (StagedOperation operation : operations) {
+                    operation.apply().run();
+                    rollbacks.push(operation.rollback());
+                }
+                return value.getAsLong();
+            } finally {
+                while (!rollbacks.isEmpty()) rollbacks.pop().run();
+                valueDirty = true;
+            }
+        }
+
+        private void apply() {
+            java.util.ArrayDeque<Runnable> rollbacks = new java.util.ArrayDeque<>();
+            try {
+                for (int index = 0; index < operations.size(); index++) {
+                    StagedOperation operation = operations.get(index);
+                    operation.apply().run();
+                    rollbacks.push(operation.rollback());
+                    if (index == failAfterStagedOperation) {
+                        failAfterStagedOperation = -1;
+                        throw new IllegalStateException("injected mid-stage business hash apply failure");
+                    }
+                }
+                appliedRollbacks = rollbacks;
+            } catch (RuntimeException failure) {
+                while (!rollbacks.isEmpty()) rollbacks.pop().run();
+                valueDirty = true;
+                throw failure;
+            }
+        }
+
+        private void rollbackApplied() {
+            if (appliedRollbacks == null) return;
+            while (!appliedRollbacks.isEmpty()) appliedRollbacks.pop().run();
+            appliedRollbacks = null;
+            valueDirty = true;
+        }
+    }
+
+    private record StagedOperation(Runnable apply, Runnable rollback) {}
+
+    private final class UserGroupUpdate {
+        private final int laneId;
+        private final java.util.LinkedHashMap<Long, UserHash> changed = new java.util.LinkedHashMap<>();
+        private final java.util.HashMap<Long, Integer> targetOwners = new java.util.HashMap<>();
+        private final java.util.ArrayList<Runnable> operations = new java.util.ArrayList<>();
+
+        private UserGroupUpdate(int laneId) { this.laneId = laneId; }
+        private void append(Runnable operation) { operations.add(operation); }
+        private void prepend(Runnable operation) { operations.add(0, operation); }
+        private void owner(long userId, int owner) { targetOwners.put(userId, owner); }
+
+        private void apply(RuntimeCommitPatch.UserChange change) {
+            UserHash hash = beginUserChange(changed, change.userId());
+            if (change.after() == null) changed.put(change.userId(), null);
+            else if (hash == null) changed.put(change.userId(), UserHash.create(change.after()));
+            else hash.updateUser(change);
+        }
+
+        private void apply(RuntimeCommitPatch.BalanceChange change) {
+            UserHash hash = beginUserChange(changed, change.key().userId());
+            if (hash != null) hash.updateBalance(change, identities);
+        }
+
+        private void apply(RuntimeCommitPatch.ReservationChange change) {
+            long beforeOwner = change.before() == null ? 0 : change.before().userId();
+            long afterOwner = change.after() == null ? 0 : change.after().userId();
+            if (beforeOwner != 0) {
+                UserHash hash = beginUserChange(changed, beforeOwner);
+                if (hash != null) hash.updateReservation(beforeOwner, change, identities);
+            }
+            if (afterOwner != 0 && afterOwner != beforeOwner) {
+                UserHash hash = beginUserChange(changed, afterOwner);
+                if (hash != null) hash.updateReservation(afterOwner, change, identities);
+            }
+        }
+
+        private void apply(RuntimeCommitPatch.PositionChange change) {
+            long beforeOwner = change.before() == null ? 0 : change.before().userId();
+            long afterOwner = change.after() == null ? 0 : change.after().userId();
+            if (beforeOwner != 0) {
+                UserHash hash = beginUserChange(changed, beforeOwner);
+                if (hash != null) hash.updatePosition(beforeOwner, change, identities);
+            }
+            if (afterOwner != 0 && afterOwner != beforeOwner) {
+                UserHash hash = beginUserChange(changed, afterOwner);
+                if (hash != null) hash.updatePosition(afterOwner, change, identities);
+            }
+        }
+
+        private void apply() {
+            for (Runnable operation : operations) operation.run();
+            for (Map.Entry<Long, UserHash> changedUser : changed.entrySet()) {
+                if (changedUser.getValue() == null) userHashes.remove(changedUser.getKey());
+                else {
+                    int owner = targetOwners.getOrDefault(changedUser.getKey(), laneId);
+                    changedUser.getValue().owner = owner;
+                    userHashes.put(changedUser.getKey(), changedUser.getValue());
+                    long contribution = entryHash(changedUser.getKey(), changedUser.getValue().value());
+                    users.add(contribution);
+                    addOwner(owner, Domain.USERS, contribution);
+                }
+            }
+            changed.clear();
+        }
+    }
+
     private static final class Aggregate {
         private long count;
         private long sum;
@@ -685,6 +1223,12 @@ public final class RollingBusinessStateHash {
             count = 0;
             sum = 0;
             xor = 0;
+        }
+
+        private void copyFrom(Aggregate source) {
+            count = source.count;
+            sum = source.sum;
+            xor = source.xor;
         }
 
         private void add(long value) {
@@ -699,16 +1243,10 @@ public final class RollingBusinessStateHash {
             xor ^= value;
         }
 
-        private Aggregate copy() {
-            Aggregate result = new Aggregate();
-            result.count = count;
-            result.sum = sum;
-            result.xor = xor;
-            return result;
-        }
     }
 
     private static final class UserHash {
+        private int owner = -1;
         private int productLine;
         private final long userId;
         private long revision;
@@ -726,6 +1264,22 @@ public final class RollingBusinessStateHash {
             revision = user.revision();
             positionMode = user.positionMode().wireCode();
         }
+
+        private UserHash(UserHash source) {
+            owner = source.owner;
+            productLine = source.productLine;
+            userId = source.userId;
+            revision = source.revision;
+            positionMode = source.positionMode;
+            balances.copyFrom(source.balances);
+            reservations.copyFrom(source.reservations);
+            positions.copyFrom(source.positions);
+            balanceContributions.putAll(source.balanceContributions);
+            reservationContributions.putAll(source.reservationContributions);
+            positionContributions.putAll(source.positionContributions);
+        }
+
+        private UserHash copy() { return new UserHash(this); }
 
         private static UserHash create(UserRuntime user) {
             return new UserHash(user);
@@ -755,64 +1309,58 @@ public final class RollingBusinessStateHash {
             return hash;
         }
 
-        private void updateUser(UserRuntime user) {
+        private void updateUser(RuntimeCommitPatch.UserChange change) {
+            UserRuntime user = change.after();
             productLine = user.productLine().ordinal();
-            revision = user.revision();
+            revision = Math.subtractExact(user.revision(), change.pendingReservationCountAfter());
             positionMode = user.positionMode().wireCode();
         }
 
-        private void updateBalances(RuntimeMutationDelta.ValueChanges<Integer,
-                RuntimeMutationDelta.BalanceValue> changes, RuntimeIdentityRegistry identities) {
-            if (changes == null) return;
-            for (Integer assetId : changes.changedKeys()) {
-                Long previous = balanceContributions.remove(assetId);
-                if (previous != null) balances.remove(previous);
-                RuntimeMutationDelta.BalanceValue current = changes.currentValues().get(assetId);
-                if (current != null) {
-                    String asset = identities.asset(assetId);
-                    long contribution = entryHashStable(asset, stableBalance(asset, current));
-                    balanceContributions.put(assetId, contribution);
-                    balances.add(contribution);
-                }
+        private void updateBalance(RuntimeCommitPatch.BalanceChange change,
+                                   RuntimeIdentityRegistry identities) {
+            int assetId = change.key().assetId();
+            Long previous = balanceContributions.remove(assetId);
+            if (previous != null) balances.remove(previous);
+            if (change.after() != null) {
+                String asset = identities.asset(assetId);
+                long contribution = entryHashStable(asset, stableBalance(asset, change.after()));
+                balanceContributions.put(assetId, contribution);
+                balances.add(contribution);
             }
         }
 
-        private void updateReservations(long ownerId,
-                RuntimeMutationDelta.ValueChanges<Long, ReservationRuntime> changes,
-                RuntimeIdentityRegistry identities) {
-            for (Long orderId : changes.changedKeys()) {
-                ReservationRuntime current = changes.currentValues().get(orderId);
-                Long previous = reservationContributions.get(orderId);
-                if (previous == null && (current == null || current.userId() != ownerId)) continue;
-                if (previous != null) {
-                    reservationContributions.remove(orderId);
-                    reservations.remove(previous);
-                }
-                if (current != null && current.userId() == ownerId && current.reservedUnits() > 0) {
-                    long contribution = entryHashStable(orderId, stableReservation(current, identities));
-                    reservationContributions.put(orderId, contribution);
-                    reservations.add(contribution);
-                }
+        private void updateReservation(long ownerId, RuntimeCommitPatch.ReservationChange change,
+                                       RuntimeIdentityRegistry identities) {
+            Long previous = reservationContributions.get(change.orderId());
+            ReservationRuntime current = change.after();
+            boolean includeCurrent = current != null && current.userId() == ownerId
+                    && current.reservedUnits() > 0 && !change.pendingAfter();
+            if (previous == null && !includeCurrent) return;
+            if (previous != null) {
+                reservationContributions.remove(change.orderId());
+                reservations.remove(previous);
+            }
+            if (includeCurrent) {
+                long contribution = entryHashStable(change.orderId(), stableReservation(current, identities));
+                reservationContributions.put(change.orderId(), contribution);
+                reservations.add(contribution);
             }
         }
 
-        private void updatePositions(long ownerId,
-                RuntimeMutationDelta.ValueChanges<Long, PositionRuntime> changes,
-                RuntimeIdentityRegistry identities) {
-            for (Long positionKey : changes.changedKeys()) {
-                PositionRuntime current = changes.currentValues().get(positionKey);
-                Long previous = positionContributions.get(positionKey);
-                if (previous == null && (current == null || current.userId() != ownerId)) continue;
-                if (previous != null) {
-                    positionContributions.remove(positionKey);
-                    positions.remove(previous);
-                }
-                if (current != null && current.userId() == ownerId) {
-                    String identity = identities.positionIdentity(positionKey).positionKey();
-                    long contribution = entryHashStable(identity, stablePosition(current, identities));
-                    positionContributions.put(positionKey, contribution);
-                    positions.add(contribution);
-                }
+        private void updatePosition(long ownerId, RuntimeCommitPatch.PositionChange change,
+                                    RuntimeIdentityRegistry identities) {
+            Long previous = positionContributions.get(change.positionKey());
+            PositionRuntime current = change.after();
+            if (previous == null && (current == null || current.userId() != ownerId)) return;
+            if (previous != null) {
+                positionContributions.remove(change.positionKey());
+                positions.remove(previous);
+            }
+            if (current != null && current.userId() == ownerId) {
+                String identity = identities.positionIdentity(change.positionKey()).positionKey();
+                long contribution = entryHashStable(identity, stablePosition(current, identities));
+                positionContributions.put(change.positionKey(), contribution);
+                positions.add(contribution);
             }
         }
 
@@ -828,11 +1376,11 @@ public final class RollingBusinessStateHash {
         }
     }
 
-    private static long stableBalance(String asset, RuntimeMutationDelta.BalanceValue balance) {
+    private static long stableBalance(String asset, RuntimeCommitPatch.UserBalance balance) {
         long hash = CoreStateHash.mix(CoreStateHash.start(), AssetBalance.class.getName());
         hash = CoreStateHash.mix(hash, asset);
-        hash = CoreStateHash.mix(hash, balance.availableUnits());
-        return CoreStateHash.mix(hash, balance.lockedUnits());
+        hash = CoreStateHash.mix(hash, Math.addExact(balance.availableUnits(), balance.pendingReservedUnits()));
+        return CoreStateHash.mix(hash, Math.subtractExact(balance.lockedUnits(), balance.pendingReservedUnits()));
     }
 
     private static long stableReservation(ReservationRuntime reservation, RuntimeIdentityRegistry identities) {

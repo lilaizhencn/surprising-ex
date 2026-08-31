@@ -144,6 +144,9 @@ public final class RuntimeCommandProcessor {
             throw new CoreStateRejectedException("STALE_INSTRUMENT_VERSION", "instrument version must increase");
         }
         int symbolId = identities.symbolId(instrument.symbol());
+        identities.assetId(instrument.baseAsset());
+        identities.assetId(instrument.quoteAsset());
+        identities.assetId(instrument.settleAsset());
         boolean[] openState = {false};
         runtime.ordersForSnapshot().forEachValue(order -> {
             if (order.symbolId() == symbolId && order.status() == CoreOrderStatus.OPEN) openState[0] = true;
@@ -377,8 +380,9 @@ public final class RuntimeCommandProcessor {
         return true;
     }
 
-    public static void rejectPlaceOrder(TradingRuntimeState runtime, long userId, long orderId) {
-        if (runtime == null || userId <= 0 || orderId <= 0) {
+    public static void rejectPlaceOrder(TradingRuntimeState runtime, long userId, long orderId,
+                                        long coreSequence) {
+        if (runtime == null || userId <= 0 || orderId <= 0 || coreSequence <= 0) {
             throw new IllegalArgumentException("invalid runtime rejected order");
         }
         runtime.assertOwner();
@@ -388,6 +392,9 @@ public final class RuntimeCommandProcessor {
         }
         ReservationRuntime reservation = runtime.reservation(orderId);
         if (reservation == null) throw new IllegalStateException("rejected order reservation is missing");
+        if (runtime.pendingReservation(orderId, userId)) {
+            runtime.completePendingReservation(userId, orderId, coreSequence);
+        }
         BalanceRuntime balance = runtime.balance(userId, reservation.assetId());
         if (balance == null) throw new IllegalStateException("rejected order balance is missing");
         long releaseUnits = reservation.reservedUnits();

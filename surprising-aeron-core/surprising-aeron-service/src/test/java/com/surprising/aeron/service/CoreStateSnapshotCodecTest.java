@@ -6,7 +6,9 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CommandSource;
+import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CoreMessage;
+import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreOrderSide;
@@ -17,10 +19,10 @@ import com.surprising.aeron.protocol.ProductLineWireCode;
 import com.surprising.aeron.protocol.ProtocolException;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
+import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter;
 import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import com.surprising.aeron.service.matching.MatcherSnapshot;
-import com.surprising.aeron.service.matching.MatcherSnapshotCodec;
 import com.surprising.aeron.service.state.ActiveOrderIndex;
 import com.surprising.aeron.service.state.CoreOrderState;
 import com.surprising.aeron.service.state.CoreOrderStatus;
@@ -28,7 +30,6 @@ import com.surprising.aeron.service.state.CoreRiskState;
 import com.surprising.aeron.service.state.CoreTreasuryState;
 import com.surprising.aeron.service.state.CoreUserState;
 import com.surprising.aeron.service.state.TradingCoreState;
-import com.surprising.aeron.service.state.TradingStateSnapshotCodec;
 import com.surprising.product.api.ProductLine;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -37,6 +38,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.CRC32C;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.junit.jupiter.api.Test;
@@ -57,7 +59,7 @@ class CoreStateSnapshotCodecTest {
         });
         CoreProbeState.StoredResult stored = new CoreProbeState.StoredResult(
                 fingerprint, ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 17, 77, response, 4);
-        CoreProbeState original = CoreProbeState.restore(ProductLine.SPOT, 1, 0,
+        CoreProbeState original = CoreProbeStateRestoreTestSupport.restore(ProductLine.SPOT, 1, 0,
                 Map.of(commandId, stored), Map.of(),
                 com.surprising.aeron.service.state.TradingCoreState.empty(ProductLine.SPOT),
                 new CoreExportState());
@@ -79,7 +81,7 @@ class CoreStateSnapshotCodecTest {
             byte[] snapshot = state.snapshot(41);
             ByteBuffer buffer = ByteBuffer.wrap(snapshot).order(ByteOrder.LITTLE_ENDIAN);
 
-            assertThat(Short.toUnsignedInt(buffer.getShort(Integer.BYTES))).isEqualTo(16);
+            assertThat(Short.toUnsignedInt(buffer.getShort(Integer.BYTES))).isEqualTo(17);
             assertThat(buffer.getInt(8)).isEqualTo(14);
             buffer.position(ENVELOPE_LENGTH);
             int[] sectionIds = new int[14];
@@ -164,18 +166,24 @@ class CoreStateSnapshotCodecTest {
     }
 
     @Test
-    void rejectsLegacyVersionEightSnapshot() {
-        TradingCoreState tradingState = TradingCoreState.empty(ProductLine.SPOT);
-        MatcherSnapshot matcherSnapshot;
-        try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
-            matcherSnapshot = adapter.snapshotAsync(
-                    47, 0, tradingState.businessStateHash(), tradingState, List.of()).join();
+    void onlyVersionSeventeenSectionedDecoderAcceptsRecoveryInput() {
+        byte[] unsupported;
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            unsupported = state.snapshot(47);
         }
-        byte[] legacy = legacySnapshot(tradingState, matcherSnapshot);
+        ByteBuffer.wrap(unsupported).order(ByteOrder.LITTLE_ENDIAN).putShort(Integer.BYTES, (short) 16);
+        UnsafeBuffer encoded = new UnsafeBuffer(unsupported);
 
-        assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(legacy, ProductLine.SPOT))
+        assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(unsupported, ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class)
-                .hasMessageContaining("legacy core snapshot is disabled");
+                .hasMessageContaining("unsupported snapshot version: 16");
+        assertThatThrownBy(() -> CoreStateSnapshotCodec.manifest(unsupported, ProductLine.SPOT))
+                .isInstanceOf(ProtocolException.class)
+                .hasMessageContaining("unsupported snapshot version: 16");
+        SectionedCoreSnapshotCodec.RecoveryBuffer recovery = new SectionedCoreSnapshotCodec.RecoveryBuffer();
+        assertThatThrownBy(() -> recovery.accept(encoded, 0, unsupported.length))
+                .isInstanceOf(ProtocolException.class)
+                .hasMessageContaining("unsupported snapshot version: 16");
     }
 
     @Test
@@ -200,22 +208,6 @@ class CoreStateSnapshotCodecTest {
     }
 
     @Test
-    void fragmentedVersionEightRecoveryFailsClosed() {
-        TradingCoreState tradingState = TradingCoreState.empty(ProductLine.SPOT);
-        MatcherSnapshot matcherSnapshot;
-        try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
-            matcherSnapshot = adapter.snapshotAsync(
-                    47, 0, tradingState.businessStateHash(), tradingState, List.of()).join();
-        }
-        byte[] legacy = legacySnapshot(tradingState, matcherSnapshot);
-        UnsafeBuffer encoded = new UnsafeBuffer(legacy);
-        SectionedCoreSnapshotCodec.RecoveryBuffer recovery = new SectionedCoreSnapshotCodec.RecoveryBuffer();
-        assertThatThrownBy(() -> recovery.accept(encoded, 0, legacy.length))
-                .isInstanceOf(ProtocolException.class)
-                .hasMessageContaining("unsupported snapshot version: 8");
-    }
-
-    @Test
     void byteExactRoundTripPreservesStateHashOpenOrdersAndOutbox() {
         TradingCoreState tradingState = stateWithOpenBid();
         MatcherSnapshot matcherSnapshot;
@@ -230,7 +222,7 @@ class CoreStateSnapshotCodecTest {
                 UUID.fromString("00000000-0000-0000-0000-000000000043"), ProductLine.SPOT,
                 CommandSource.GATEWAY, 43, 1, 7, 1_000, 43), CoreProtocol.probePayload(3));
         assertThat(outboxSource.apply(increment).status()).isEqualTo(ResponseStatus.APPLIED);
-        CoreProbeState original = CoreProbeState.restore(ProductLine.SPOT, 1, 3,
+        CoreProbeState original = CoreProbeStateRestoreTestSupport.restore(ProductLine.SPOT, 1, 3,
                 outboxSource.commandResults(), outboxSource.lastSourceSequences(), tradingState,
                 outboxSource.exportState(), matcherSnapshot);
         CoreProbeState restored = null;
@@ -265,6 +257,109 @@ class CoreStateSnapshotCodecTest {
     }
 
     @Test
+    void sectionedRecoveryRejectsEveryOutboxIdentityMismatchBeforeCandidateOrThreadPublication() {
+        CoreMessage adjustment = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE,
+                UUID.fromString("00000000-0000-0000-0000-000000000087"), ProductLine.SPOT,
+                CommandSource.GATEWAY, 87, 1, 7, 1_000, 87),
+                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 25)));
+        try (CoreProbeState live = new CoreProbeState(ProductLine.SPOT)) {
+            assertThat(live.apply(adjustment).status()).isEqualTo(ResponseStatus.APPLIED);
+            byte[] control = live.snapshot(87);
+            try (CoreProbeState restored = CoreStateSnapshotCodec.decode(control, ProductLine.SPOT)) {
+                assertThat(restored.exportState().status()).isEqualTo(live.exportState().status());
+                assertThat(restored.exportState().pending()).hasSameSizeAs(live.exportState().pending());
+            }
+
+            var liveOutboxBefore = live.exportState().status();
+            long liveOutboxDigestBefore = live.exportState().pendingDigest();
+            List<byte[]> livePendingBefore = live.exportState().pending().stream()
+                    .map(CoreMessageCodec::encode).toList();
+            long liveAppliedBefore = live.appliedCommandCount();
+            long liveStateHashBefore = live.stateHash();
+            TradingCoreState liveTradingBefore = live.tradingState();
+            long materializerThreadsBefore = coreFactMaterializerThreadCount();
+            Map<String, byte[]> corruptions = new LinkedHashMap<>();
+            corruptions.put("envelope product line",
+                    mutateOutboxEvent(control, OutboxMutation.ENVELOPE_PRODUCT_LINE));
+            corruptions.put("nested product line",
+                    mutateOutboxEvent(control, OutboxMutation.NESTED_PRODUCT_LINE));
+            corruptions.put("command id", mutateOutboxEvent(control, OutboxMutation.COMMAND_ID));
+            corruptions.put("source sequence", mutateOutboxEvent(control, OutboxMutation.SOURCE_SEQUENCE));
+            corruptions.put("command type", mutateOutboxEvent(control, OutboxMutation.COMMAND_TYPE));
+
+            corruptions.forEach((label, corrupted) -> {
+                Throwable failure = catchThrowable(() ->
+                        CoreStateSnapshotCodec.decode(corrupted, ProductLine.SPOT));
+                assertThat(failure).as(label).isInstanceOf(ProtocolException.class);
+                assertThat(live.appliedCommandCount()).as(label).isEqualTo(liveAppliedBefore);
+                assertThat(live.stateHash()).as(label).isEqualTo(liveStateHashBefore);
+                assertThat(live.tradingState()).as(label).isEqualTo(liveTradingBefore);
+                assertThat(live.exportState().status()).as(label).isEqualTo(liveOutboxBefore);
+                assertThat(live.exportState().pendingDigest()).as(label).isEqualTo(liveOutboxDigestBefore);
+                List<byte[]> livePendingAfter = live.exportState().pending().stream()
+                        .map(CoreMessageCodec::encode).toList();
+                assertThat(livePendingAfter).as(label).hasSameSizeAs(livePendingBefore);
+                for (int index = 0; index < livePendingBefore.size(); index++) {
+                    assertThat(livePendingAfter.get(index)).as(label + " pending event " + index)
+                            .containsExactly(livePendingBefore.get(index));
+                }
+                assertThat(coreFactMaterializerThreadCount()).as(label)
+                        .isEqualTo(materializerThreadsBefore);
+            });
+        }
+    }
+
+    @Test
+    void validPendingOutboxFollowedByCorruptMatcherSectionStartsNoRecoveryConsumer() {
+        byte[] control = pendingOutboxSnapshot(88);
+        long threadsBefore = recoveryConsumerThreadCount();
+        byte[] corrupted = mutateSectionPayloadInt(control, 5, 0, Integer.MAX_VALUE);
+
+        assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(corrupted, ProductLine.SPOT))
+                .isInstanceOf(ProtocolException.class);
+        assertThat(recoveryConsumerThreadCount()).isEqualTo(threadsBefore);
+    }
+
+    @Test
+    void accountLanesRestoreWhileEveryConsumerIsPassiveThenOneActivationStartsAll() {
+        byte[] control = pendingOutboxSnapshot(89);
+        AtomicReference<CoreProbeState.RestoreActivationState> beforeActivation = new AtomicReference<>();
+        SectionedCoreSnapshotParser.setBeforeActivationObserverForTest(state ->
+                beforeActivation.set(state.restoreActivationState()));
+        try (CoreProbeState restored = CoreStateSnapshotCodec.decode(control, ProductLine.SPOT)) {
+            assertThat(beforeActivation.get()).isNotNull();
+            assertThat(beforeActivation.get().allPassive()).isTrue();
+            assertThat(restored.restoreActivationState().allActivated()).isTrue();
+        } finally {
+            SectionedCoreSnapshotParser.setBeforeActivationObserverForTest(null);
+        }
+    }
+
+    @Test
+    void passiveCandidateConstructionFailureClosesEveryResourceWithoutStartingConsumers() {
+        byte[] control = pendingOutboxSnapshot(90);
+        AtomicReference<CoreProbeState> candidate = new AtomicReference<>();
+        long threadsBefore = recoveryConsumerThreadCount();
+        SectionedCoreSnapshotParser.setBeforeActivationObserverForTest(state -> {
+            candidate.set(state);
+            throw new IllegalStateException("injected passive candidate failure");
+        });
+        try {
+            assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(control, ProductLine.SPOT))
+                    .isInstanceOf(ProtocolException.class)
+                    .hasMessageContaining("injected passive candidate failure");
+            assertThat(candidate.get()).isNotNull();
+            assertThat(candidate.get().restoreActivationState().allPassive()).isTrue();
+            assertThatThrownBy(candidate.get().exportState()::assertHealthy)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("closed");
+            assertThat(recoveryConsumerThreadCount()).isEqualTo(threadsBefore);
+        } finally {
+            SectionedCoreSnapshotParser.setBeforeActivationObserverForTest(null);
+        }
+    }
+
+    @Test
     void pairedManifestExposesFencePositionSequencesHashesAndOutboxMetadata() {
         MatcherSnapshot matcherSnapshot;
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
@@ -290,7 +385,7 @@ class CoreStateSnapshotCodecTest {
 
             CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.SPOT, snapshot);
 
-            assertThat(manifest.schemaVersion()).isEqualTo(16);
+            assertThat(manifest.schemaVersion()).isEqualTo(17);
             assertThat(manifest.snapshotId()).isEqualTo(73);
             assertThat(manifest.coreSequence()).isEqualTo(state.appliedCommandCount());
             assertThat(manifest.clusterTimestamp()).isEqualTo(1_234);
@@ -327,23 +422,24 @@ class CoreStateSnapshotCodecTest {
         mismatches.put("applied sequence", mutateHeaderLong(snapshot, 58));
         mismatches.put("snapshot id", mutateHeaderLong(snapshot, 74));
         mismatches.put("core sequence", mutateHeaderLong(snapshot, 82));
-        mismatches.put("matcher sequence", mutateHeaderLong(snapshot, 106));
-        mismatches.put("business state hash", mutateHeaderLong(snapshot, 114));
-        mismatches.put("funds hash", mutateHeaderLong(snapshot, 122));
-        mismatches.put("engine state hash", mutateHeaderInt(snapshot, 130));
-        mismatches.put("book state hash", mutateHeaderInt(snapshot, 134));
-        mismatches.put("symbol registry hash", mutateHeaderLong(snapshot, 138));
-        mismatches.put("user registry hash", mutateHeaderLong(snapshot, 146));
-        mismatches.put("instrument registry hash", mutateHeaderLong(snapshot, 154));
-        mismatches.put("active order hash", mutateHeaderLong(snapshot, 162));
-        mismatches.put("source sequence digest", mutateHeaderLong(snapshot, 170));
-        mismatches.put("outbox acknowledged sequence", mutateHeaderLong(snapshot, 178));
-        mismatches.put("outbox next sequence", mutateHeaderLong(snapshot, 186));
-        mismatches.put("outbox pending count", mutateHeaderInt(snapshot, 194));
-        mismatches.put("outbox pending digest", mutateHeaderLong(snapshot, 198));
-        mismatches.put("matcher config", mutateHeaderLong(snapshot, 206));
-        mismatches.put("fork identity", mutateHeaderByte(snapshot, 214));
-        mismatches.put("artifact identity", mutateHeaderByte(snapshot, 254));
+        mismatches.put("projection sequence", mutateHeaderLong(snapshot, 90));
+        mismatches.put("matcher sequence", mutateHeaderLong(snapshot, 130));
+        mismatches.put("business state hash", mutateHeaderLong(snapshot, 138));
+        mismatches.put("funds hash", mutateHeaderLong(snapshot, 146));
+        mismatches.put("engine state hash", mutateHeaderInt(snapshot, 154));
+        mismatches.put("book state hash", mutateHeaderInt(snapshot, 158));
+        mismatches.put("symbol registry hash", mutateHeaderLong(snapshot, 162));
+        mismatches.put("user registry hash", mutateHeaderLong(snapshot, 170));
+        mismatches.put("instrument registry hash", mutateHeaderLong(snapshot, 178));
+        mismatches.put("active order hash", mutateHeaderLong(snapshot, 186));
+        mismatches.put("source sequence digest", mutateHeaderLong(snapshot, 194));
+        mismatches.put("outbox acknowledged sequence", mutateHeaderLong(snapshot, 202));
+        mismatches.put("outbox next sequence", mutateHeaderLong(snapshot, 210));
+        mismatches.put("outbox pending count", mutateHeaderInt(snapshot, 218));
+        mismatches.put("outbox pending digest", mutateHeaderLong(snapshot, 222));
+        mismatches.put("matcher config", mutateHeaderLong(snapshot, 230));
+        mismatches.put("fork identity", mutateHeaderByte(snapshot, 238));
+        mismatches.put("artifact identity", mutateHeaderByte(snapshot, 278));
 
         mismatches.forEach((field, mutated) -> {
             Throwable failure = catchThrowable(() -> CoreStateSnapshotCodec.decode(mutated, ProductLine.SPOT));
@@ -393,27 +489,23 @@ class CoreStateSnapshotCodecTest {
                 .isInstanceOf(ProtocolException.class).hasMessageContaining("checksum");
     }
 
-    @Test
-    void legacyManifestFailsClosed() {
-        TradingCoreState tradingState = TradingCoreState.empty(ProductLine.SPOT);
-        MatcherSnapshot matcherSnapshot;
-        try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
-            matcherSnapshot = adapter.snapshotAsync(
-                    47, 0, tradingState.businessStateHash(), tradingState, List.of()).join();
-        }
-
-        byte[] legacy = legacySnapshot(tradingState, matcherSnapshot);
-        assertThatThrownBy(() -> CoreStateSnapshotCodec.manifest(legacy, ProductLine.SPOT))
-                .isInstanceOf(ProtocolException.class)
-                .hasMessageContaining("legacy core snapshot is disabled");
-    }
-
     private static TradingCoreState stateWithOpenBid() {
         CoreOrderState order = new CoreOrderState(1, ProductLine.SPOT, 7, "BTC-USDT", 1,
                 CoreOrderSide.BUY, 100, 2, 0, 2, false, CoreOrderStatus.OPEN, 1);
         return new TradingCoreState(ProductLine.SPOT, 1,
                 Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(1L, order), Map.of(),
                 CoreRiskState.empty(), CoreTreasuryState.empty());
+    }
+
+    private static byte[] pendingOutboxSnapshot(long sequence) {
+        CoreMessage adjustment = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE,
+                new UUID(0, sequence), ProductLine.SPOT, CommandSource.GATEWAY, sequence, 1, 7,
+                1_000, sequence),
+                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 25)));
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            assertThat(state.apply(adjustment).status()).isEqualTo(ResponseStatus.APPLIED);
+            return state.snapshot(sequence);
+        }
     }
 
     private static CoreMatchingOrder bid() {
@@ -496,6 +588,82 @@ class CoreStateSnapshotCodecTest {
         throw new AssertionError("section not found: " + targetSectionId);
     }
 
+    private static byte[] mutateOutboxEvent(byte[] snapshot, OutboxMutation mutation) {
+        byte[] mutated = snapshot.clone();
+        ByteBuffer buffer = ByteBuffer.wrap(mutated).order(ByteOrder.LITTLE_ENDIAN);
+        buffer.position(ENVELOPE_LENGTH);
+        while (buffer.hasRemaining()) {
+            int sectionId = buffer.getInt();
+            int sectionLength = buffer.getInt();
+            int sectionOffset = buffer.position();
+            if (sectionId == 4) {
+                int eventCount = buffer.getInt(sectionOffset + Long.BYTES * 2);
+                if (eventCount < 1) throw new AssertionError("snapshot outbox is empty");
+                int eventLengthOffset = sectionOffset + Long.BYTES * 2 + Integer.BYTES;
+                int eventLength = buffer.getInt(eventLengthOffset);
+                int eventOffset = eventLengthOffset + Integer.BYTES;
+                if (eventLength < CoreProtocol.HEADER_LENGTH
+                        || eventOffset + eventLength > sectionOffset + sectionLength) {
+                    throw new AssertionError("invalid encoded snapshot outbox event");
+                }
+                int eventPayloadOffset = eventOffset + CoreProtocol.HEADER_LENGTH;
+                switch (mutation) {
+                    case ENVELOPE_PRODUCT_LINE -> mutated[eventOffset + 7] =
+                            (byte) ProductLineWireCode.encode(ProductLine.OPTION);
+                    case NESTED_PRODUCT_LINE -> {
+                        int commandPayloadLength = buffer.getInt(eventPayloadOffset + 64);
+                        int usersCountOffset = eventPayloadOffset + 68 + commandPayloadLength;
+                        int userCount = buffer.getInt(usersCountOffset);
+                        if (userCount < 1) throw new AssertionError("Core Fact has no changed user");
+                        int userLength = buffer.getInt(usersCountOffset + Integer.BYTES);
+                        int userOffset = usersCountOffset + Integer.BYTES * 2;
+                        if (userLength < Integer.BYTES * 2
+                                || userOffset + userLength > eventOffset + eventLength) {
+                            throw new AssertionError("invalid changed user encoding");
+                        }
+                        buffer.putInt(userOffset + Integer.BYTES,
+                                ProductLineWireCode.encode(ProductLine.OPTION));
+                    }
+                    case COMMAND_ID -> buffer.putLong(eventOffset + 16,
+                            Math.addExact(buffer.getLong(eventOffset + 16), 1));
+                    case SOURCE_SEQUENCE -> buffer.putLong(eventOffset + 40,
+                            Math.addExact(buffer.getLong(eventOffset + 40), 1));
+                    case COMMAND_TYPE -> buffer.putInt(eventPayloadOffset + 44,
+                            CoreMessageType.PROBE_INCREMENT.wireCode());
+                }
+                return rewriteOuterChecksum(mutated);
+            }
+            buffer.position(Math.addExact(sectionOffset, sectionLength));
+        }
+        throw new AssertionError("snapshot outbox section not found");
+    }
+
+    private static long coreFactMaterializerThreadCount() {
+        return Thread.getAllStackTraces().keySet().stream()
+                .filter(Thread::isAlive)
+                .filter(thread -> thread.getName().equals("core-fact-materializer"))
+                .count();
+    }
+
+    private static long recoveryConsumerThreadCount() {
+        return Thread.getAllStackTraces().keySet().stream()
+                .filter(Thread::isAlive)
+                .map(Thread::getName)
+                .filter(name -> name.equals("core-fact-materializer")
+                        || name.startsWith("core-commit-projector-")
+                        || name.contains("matching-engine") || name.contains("risk-engine")
+                        || name.contains("ExchangeCore"))
+                .count();
+    }
+
+    private enum OutboxMutation {
+        ENVELOPE_PRODUCT_LINE,
+        NESTED_PRODUCT_LINE,
+        COMMAND_ID,
+        SOURCE_SEQUENCE,
+        COMMAND_TYPE
+    }
+
     private static byte[] rewriteOuterChecksum(byte[] snapshot) {
         CRC32C checksum = new CRC32C();
         checksum.update(snapshot, 0, snapshot.length - SECTION_HEADER_LENGTH - Long.BYTES);
@@ -504,20 +672,4 @@ class CoreStateSnapshotCodecTest {
         return snapshot;
     }
 
-    private static byte[] legacySnapshot(TradingCoreState tradingState, MatcherSnapshot matcherSnapshot) {
-        byte[] matcher = MatcherSnapshotCodec.encode(matcherSnapshot);
-        byte[] trading = TradingStateSnapshotCodec.encode(tradingState);
-        byte[] retention = new TerminalStateRetention().encode();
-        int length = 48 + 20 + matcher.length + trading.length + retention.length + Long.BYTES;
-        ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
-        buffer.putInt(0x5358534E).putShort((short) 8).put((byte) 1).put((byte) 0)
-                .putInt(MatcherSnapshot.ROUTE_VERSION).putLong(0).putLong(0)
-                .putInt(0).putInt(0).putInt(trading.length).putInt(matcher.length).putInt(retention.length)
-                .putLong(0).putLong(1).putInt(0)
-                .put(matcher).put(trading).put(retention);
-        CRC32C checksum = new CRC32C();
-        checksum.update(buffer.array(), 0, buffer.position());
-        buffer.putLong(checksum.getValue());
-        return buffer.array();
-    }
 }

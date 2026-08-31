@@ -31,32 +31,13 @@ public final class PositionUserIndex {
         return users == null ? null : users.higher(cursorUserId);
     }
 
-    public void update(TradingCoreState before, TradingCoreState after) {
-        if (before.users() == after.users()) return;
-        StateMapSupport.requireDeltaLineage(before.users(), after.users(), "position user index users");
-        Set<Long> changedUsers = StateMapSupport.changedKeys(after.users());
-        for (Long userId : changedUsers) {
-            if (userId == null) continue;
-            CoreUserState previous = before.user(userId);
-            CoreUserState current = after.user(userId);
-            if (previous != null) {
-                previous.positions().values().forEach(position -> remove(position.symbol(), userId));
-            }
-            if (current != null) {
-                current.positions().values().forEach(position -> add(position.symbol(), userId));
-            }
-        }
-    }
-
-    public void update(RuntimeCommitEntry entry) {
-        RuntimeMutationDelta.ValueChanges<Long, PositionRuntime> changes = entry.mutation().positions();
-        for (Long positionKey : changes.changedKeys()) {
-            RuntimePositionIndexValue previous = positions.remove(positionKey);
+    void apply(java.util.List<RuntimeCommitPatch.PositionChange> changes, RuntimeCommitPatch.IdentityView identities) {
+        for (RuntimeCommitPatch.PositionChange change : changes) {
+            RuntimePositionIndexValue previous = positions.remove(change.positionKey());
             if (previous != null) removePosition(previous);
-            PositionRuntime current = changes.currentValues().get(positionKey);
-            if (current != null) {
-                RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(current, entry.identities());
-                positions.put(positionKey, indexed);
+            if (change.after() != null) {
+                RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(change.after(), identities);
+                positions.put(change.positionKey(), indexed);
                 addPosition(indexed);
             }
         }

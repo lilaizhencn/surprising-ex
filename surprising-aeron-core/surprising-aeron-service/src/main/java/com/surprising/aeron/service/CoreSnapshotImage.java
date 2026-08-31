@@ -19,6 +19,7 @@ record CoreSnapshotImage(
         long sourceSequenceDigest,
         long snapshotId,
         long coreSequence,
+        long projectionSequence,
         long businessStateHash,
         long fundsStateHash,
         long clusterTimestamp,
@@ -39,7 +40,7 @@ record CoreSnapshotImage(
         feePolicies = Collections.unmodifiableMap(new LinkedHashMap<>(feePolicies));
         pendingTransfers = Collections.unmodifiableMap(new LinkedHashMap<>(pendingTransfers));
         accountLanes = List.copyOf(accountLanes);
-        if (productLine == null || appliedCommandCount < 0 || snapshotId <= 0
+        if (productLine == null || appliedCommandCount < 0 || snapshotId <= 0 || projectionSequence < 0
                 || coreSequence != appliedCommandCount || clusterTimestamp < 0 || clusterPosition < 0
                 || businessStateHash == 0 || fundsStateHash == 0
                 || matcherSnapshot == null || tradingState == null || exportState == null
@@ -49,11 +50,17 @@ record CoreSnapshotImage(
     }
 
     void verifyFullState() {
-        matcherSnapshot.verifyCoreState(tradingState, appliedCommandCount);
-        if (tradingState.businessStateHash() != businessStateHash
+        verifyMatcherState(matcherSnapshot, tradingState, appliedCommandCount, businessStateHash);
+        if (CoreProbeState.canonicalBusinessStateHash(
+                tradingState.businessStateHash(), feePolicies, pendingTransfers) != businessStateHash
                 || com.surprising.aeron.service.state.RollingFundsStateHash.compute(tradingState)
                 != fundsStateHash) {
             throw new IllegalStateException("snapshot rolling hash differs from immutable state audit");
         }
+    }
+
+    static void verifyMatcherState(MatcherSnapshot matcherSnapshot, TradingCoreState tradingState,
+                                   long appliedCommandCount, long businessStateHash) {
+        matcherSnapshot.verifyCoreState(tradingState, appliedCommandCount, businessStateHash);
     }
 }

@@ -83,7 +83,7 @@ public final class ReliableCoreExporter {
             }
             validateContiguous(events, queryStatus.acknowledgedSequence() + 1);
             sink.publish(productLine, events);
-            long throughSequence = CoreExportCodec.decodeEvent(events.getLast().payload()).exportSequence();
+            long throughSequence = CoreExportCodec.decodeEvent(events.getLast(), productLine).exportSequence();
             metrics.recordPublished(events.size(), throughSequence);
             pendingAcknowledgementSequence = throughSequence;
             return acknowledgePublishedBatch(throughSequence, events.size(), queryStatus, events);
@@ -186,21 +186,21 @@ public final class ReliableCoreExporter {
         return new ExportCycleResult(publishedEvents, after);
     }
 
-    private static CoreExportStatus statusAfterAck(CoreExportStatus before, List<CoreMessage> events) {
+    private CoreExportStatus statusAfterAck(CoreExportStatus before, List<CoreMessage> events) {
         long encodedBytes = events.stream()
                 .mapToLong(message -> CoreProtocol.HEADER_LENGTH + message.payloadLength()).sum();
         return new CoreExportStatus(
-                CoreExportCodec.decodeEvent(events.getLast().payload()).exportSequence(),
+                CoreExportCodec.decodeEvent(events.getLast(), productLine).exportSequence(),
                 before.nextSequence(),
                 Math.max(0, before.pendingCount() - events.size()),
                 Math.max(0, before.pendingBytes() - encodedBytes),
                 before.maxPendingCount(), before.maxPendingBytes());
     }
 
-    private static void validateContiguous(List<CoreMessage> events, long expectedFirst) {
+    private void validateContiguous(List<CoreMessage> events, long expectedFirst) {
         long expected = expectedFirst;
         for (CoreMessage message : events) {
-            long actual = CoreExportCodec.decodeEvent(message.payload()).exportSequence();
+            long actual = CoreExportCodec.decodeEvent(message, productLine).exportSequence();
             if (actual != expected) {
                 throw new IllegalStateException("non-contiguous export batch: expected=" + expected
                         + ", actual=" + actual);

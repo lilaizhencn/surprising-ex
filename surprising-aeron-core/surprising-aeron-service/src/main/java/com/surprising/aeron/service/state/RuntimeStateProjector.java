@@ -18,7 +18,12 @@ public final class RuntimeStateProjector {
         if (source == null || identities == null) throw new IllegalArgumentException("source and identities are required");
         TradingRuntimeState runtime = new TradingRuntimeState(topology);
         runtime.replaceAuxiliaryState(source);
-        source.instruments().keySet().forEach(identities::symbolId);
+        source.instruments().values().forEach(instrument -> {
+            identities.symbolId(instrument.symbol());
+            identities.assetId(instrument.baseAsset());
+            identities.assetId(instrument.quoteAsset());
+            identities.assetId(instrument.settleAsset());
+        });
         source.users().forEach((userId, user) -> {
             runtime.putUser(new UserRuntime(user.productLine(), userId, user.revision(), user.positionMode()));
             user.balances().forEach((asset, balance) -> runtime.putBalance(new BalanceRuntime(
@@ -95,11 +100,15 @@ public final class RuntimeStateProjector {
         runtime.setNextLiquidationId(source.riskState().nextLiquidationId());
         source.orders().forEach((orderId, order) -> {
             runtime.putOrder(toRuntimeOrder(order, identities));
+            if (source.productLine().supportsUserPositionMarginFlow()) {
+                identities.positionKey(order.userId(), positionKey(order.symbol(), order.positionSide()));
+            }
             if (!order.clientOrderId().isEmpty()) {
                 runtime.putClientOrder(order.userId(), identities.clientKey(order.userId(), order.clientOrderId()), orderId);
             }
         });
         validateClientIndex(source, runtime, identities);
+        runtime.rebuildAccountLaneHashes();
         runtime.clearChangedKeys();
         runtime.releaseOwnerForHandoff();
         identities.releaseOwnerForHandoff();

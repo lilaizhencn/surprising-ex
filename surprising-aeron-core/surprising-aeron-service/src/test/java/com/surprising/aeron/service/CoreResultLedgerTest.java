@@ -26,8 +26,8 @@ class CoreResultLedgerTest {
     @Test
     void retentionMetadataReusesOwnedResponseBytesWithoutExposingThem() {
         byte[] source = new byte[]{1, 2, 3};
-        CoreProbeState.StoredResult created = new CoreProbeState.StoredResult(
-                ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 7, source);
+        CoreProbeState.StoredResult created = stored(
+                ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 7, source, 0);
         source[0] = 9;
 
         CoreProbeState.StoredResult retained = created.withRetentionSequence(11);
@@ -63,11 +63,11 @@ class CoreResultLedgerTest {
         byte[] response = new byte[512_000];
         Arrays.fill(response, (byte) 7);
         for (int index = 0; index < 70; index++) {
-            results.put(UUID.randomUUID(), new CoreProbeState.StoredResult(
-                    ResponseStatus.APPLIED, CoreResultCode.NONE, index + 1L, index + 10L, response));
+            results.put(UUID.randomUUID(), stored(ResponseStatus.APPLIED, CoreResultCode.NONE,
+                    index + 1L, index + 10L, response, index + 1L));
         }
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> CoreProbeState.restore(
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> CoreProbeStateRestoreTestSupport.restore(
                         ProductLine.SPOT, 70, 0, results, Map.of(),
                         com.surprising.aeron.service.state.TradingCoreState.empty(ProductLine.SPOT),
                         new CoreExportState()))
@@ -87,15 +87,16 @@ class CoreResultLedgerTest {
             UUID third = UUID.randomUUID();
 
             storeResult.invoke(state, first,
-                    new CoreProbeState.StoredResult(ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 1, response));
+                    stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 1, response, 0));
             storeResult.invoke(state, second,
-                    new CoreProbeState.StoredResult(ResponseStatus.APPLIED, CoreResultCode.NONE, 2, 2, response));
+                    stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 2, 2, response, 0));
             storeResult.invoke(state, third,
-                    new CoreProbeState.StoredResult(ResponseStatus.APPLIED, CoreResultCode.NONE, 3, 3, response));
+                    stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 3, 3, response, 0));
 
             assertThat(state.commandResults()).doesNotContainKey(first);
             assertThat(state.commandResults()).containsKeys(second, third);
-            try (CoreProbeState restored = CoreProbeState.restore(ProductLine.SPOT, state.appliedCommandCount(),
+            try (CoreProbeState restored = CoreProbeStateRestoreTestSupport.restore(
+                    ProductLine.SPOT, state.appliedCommandCount(),
                     state.probeValue(), state.commandResults(), state.lastSourceSequences(), state.tradingState(),
                     state.exportState())) {
                 assertThat(restored.stateHash()).isEqualTo(state.stateHash());
@@ -117,23 +118,23 @@ class CoreResultLedgerTest {
             byte[] fourMiB = new byte[4 * 1024 * 1024];
 
             storeResult.invoke(state, oldest,
-                    new CoreProbeState.StoredResult(ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 1, fourteenMiB));
+                    stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 1, fourteenMiB, 0));
             storeResult.invoke(state, pending,
-                    new CoreProbeState.StoredResult(ResponseStatus.OK, CoreResultCode.MATCHING_PENDING, 2, 2,
-                            oneMiB));
+                    stored(ResponseStatus.OK, CoreResultCode.MATCHING_PENDING, 2, 2, oneMiB, 0));
             long pendingRetention = state.commandResults().get(pending).retentionSequence();
             storeResult.invoke(state, newest,
-                    new CoreProbeState.StoredResult(ResponseStatus.APPLIED, CoreResultCode.NONE, 3, 3, fourteenMiB));
+                    stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 3, 3, fourteenMiB, 0));
 
             storeResult.invoke(state, pending,
-                    new CoreProbeState.StoredResult(ResponseStatus.APPLIED, CoreResultCode.NONE, 4, 4, fourMiB));
+                    stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 4, 4, fourMiB, 0));
 
             assertThat(state.commandResults()).doesNotContainKey(oldest);
             assertThat(state.commandResults()).containsKeys(pending, newest);
             assertThat(state.commandResults().get(pending).status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(state.commandResults().get(pending).responseData()).hasSize(fourMiB.length);
             assertThat(state.commandResults().get(pending).retentionSequence()).isEqualTo(pendingRetention);
-            try (CoreProbeState restored = CoreProbeState.restore(ProductLine.SPOT, state.appliedCommandCount(),
+            try (CoreProbeState restored = CoreProbeStateRestoreTestSupport.restore(
+                    ProductLine.SPOT, state.appliedCommandCount(),
                     state.probeValue(), state.commandResults(), state.lastSourceSequences(), state.tradingState(),
                     state.exportState())) {
                 assertThat(restored.stateHash()).isEqualTo(state.stateHash());
@@ -161,6 +162,20 @@ class CoreResultLedgerTest {
         return new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT, commandId,
                 ProductLine.SPOT, CommandSource.GATEWAY, 7, sourceSequence, 1001,
                 1_000 + sourceSequence, sourceSequence), CoreProtocol.probePayload(delta));
+    }
+
+    private static CoreProbeState.StoredResult stored(
+            ResponseStatus status,
+            CoreResultCode resultCode,
+            long appliedCommandCount,
+            long requiredExportSequence,
+            byte[] response,
+            long retentionSequence) {
+        long sourceSequence = Math.max(1, appliedCommandCount);
+        CoreMessage command = probe(new UUID(appliedCommandCount, requiredExportSequence), sourceSequence, 1);
+        return new CoreProbeState.StoredResult(
+                com.surprising.aeron.protocol.CommandFingerprint.of(command), status, resultCode,
+                appliedCommandCount, requiredExportSequence, 0, response, retentionSequence);
     }
 
     private static CoreMessage commandResultQuery(UUID commandId) {

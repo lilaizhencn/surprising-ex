@@ -4,10 +4,12 @@ import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.state.AccountLaneView;
 import com.surprising.aeron.service.state.MatcherSettlementPlan;
 import com.surprising.aeron.service.state.PerpetualLaneJournal;
+import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 final class LaneCommandContextRing {
     private final Context[] contexts;
     private final int mask;
+    private long nextMatchingSubmissionId;
     private int inFlight;
     private int highWaterMark;
 
@@ -48,6 +50,13 @@ final class LaneCommandContextRing {
         return contexts[(int) coreSequence & mask].coreSequence == coreSequence;
     }
 
+    SubmissionToken beginMatchingSubmission(long coreSequence) {
+        if (nextMatchingSubmissionId == Long.MAX_VALUE) {
+            throw new IllegalStateException("matching submission token id is exhausted");
+        }
+        return required(coreSequence).beginMatchingSubmission(++nextMatchingSubmissionId);
+    }
+
     void discard(long coreSequence) {
         Context context = required(coreSequence);
         context.clear();
@@ -58,7 +67,17 @@ final class LaneCommandContextRing {
     int highWaterMark() { return highWaterMark; }
     int capacity() { return contexts.length; }
 
+    record SubmissionToken(long coreSequence, long tokenId, boolean active) {
+        SubmissionToken {
+            if (coreSequence <= 0 || tokenId <= 0) {
+                throw new IllegalArgumentException("invalid matching submission token");
+            }
+        }
+    }
+
     static final class Context {
+        private static final AtomicIntegerFieldUpdater<Context> SUBMISSION_WRITERS =
+                AtomicIntegerFieldUpdater.newUpdater(Context.class, "submissionWriters");
         private long coreSequence;
         private long expectedLaneMask;
         private long completedLaneMask;
@@ -66,7 +85,9 @@ final class LaneCommandContextRing {
         private MatcherSettlementPlan settlementPlan;
         private PerpetualLaneJournal[] settlementJournals;
         private CoreMatchingResult completedMatchingResult;
-        private long matchingSubmissionGeneration;
+        private volatile SubmissionToken matchingSubmission;
+        @SuppressWarnings("unused")
+        private volatile int submissionWriters;
         private final long[] laneRevisions;
         private final long[] localStateHashes;
         private final long[] localFundsHashes;
@@ -84,12 +105,32 @@ final class LaneCommandContextRing {
         MatcherSettlementPlan settlementPlan() { return settlementPlan; }
         PerpetualLaneJournal[] settlementJournals() { return settlementJournals; }
 
-        long beginMatchingSubmission() {
-            return ++matchingSubmissionGeneration;
+        private SubmissionToken beginMatchingSubmission(long tokenId) {
+            invalidateMatchingSubmission();
+            SubmissionToken token = new SubmissionToken(coreSequence, tokenId, true);
+            matchingSubmission = token;
+            return token;
         }
 
-        boolean acceptsMatchingSubmission(long generation) {
-            return coreSequence != 0 && generation == matchingSubmissionGeneration;
+        boolean acceptsMatchingSubmission(SubmissionToken token) {
+            return token != null && token.active() && matchingSubmission == token;
+        }
+
+        SubmissionToken matchingSubmissionToken() {
+            return matchingSubmission;
+        }
+
+        boolean enqueueMatchingCompletion(
+                SubmissionToken token,
+                MatchingCompletionQueue completions,
+                CoreMatchingResult result) {
+            SUBMISSION_WRITERS.incrementAndGet(this);
+            try {
+                if (!acceptsMatchingSubmission(token)) return false;
+                return completions.offer(result);
+            } finally {
+                SUBMISSION_WRITERS.decrementAndGet(this);
+            }
         }
 
         void publishMatchingCompletion(CoreMatchingResult result) {
@@ -114,8 +155,8 @@ final class LaneCommandContextRing {
         }
 
         void resetMatchingContinuation() {
+            invalidateMatchingSubmission();
             completedMatchingResult = null;
-            matchingSubmissionGeneration++;
         }
 
         void result(CoreMatchingResult result, MatcherSettlementPlan plan,
@@ -194,6 +235,7 @@ final class LaneCommandContextRing {
         }
 
         private void clear() {
+            invalidateMatchingSubmission();
             coreSequence = 0;
             expectedLaneMask = 0;
             completedLaneMask = 0;
@@ -201,10 +243,18 @@ final class LaneCommandContextRing {
             settlementPlan = null;
             settlementJournals = null;
             completedMatchingResult = null;
-            matchingSubmissionGeneration++;
             java.util.Arrays.fill(laneRevisions, 0);
             java.util.Arrays.fill(localStateHashes, 0);
             java.util.Arrays.fill(localFundsHashes, 0);
+        }
+
+        private void invalidateMatchingSubmission() {
+            SubmissionToken current = matchingSubmission;
+            if (current != null && current.active()) {
+                matchingSubmission = new SubmissionToken(
+                        current.coreSequence(), current.tokenId(), false);
+            }
+            while (submissionWriters != 0) Thread.onSpinWait();
         }
     }
 }

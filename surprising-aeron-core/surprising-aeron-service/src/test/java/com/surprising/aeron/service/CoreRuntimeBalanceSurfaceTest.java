@@ -46,6 +46,8 @@ class CoreRuntimeBalanceSurfaceTest {
                     balance.set(state.tradingState().user(1001).totalUnits("USDT"));
                 } catch (Throwable throwable) {
                     failure.set(throwable);
+                } finally {
+                    state.close();
                 }
             });
 

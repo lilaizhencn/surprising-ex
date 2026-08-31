@@ -28,6 +28,7 @@ import org.apache.kafka.clients.consumer.MockConsumer;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.h2.jdbcx.JdbcDataSource;
+import org.h2.api.Trigger;
 import org.junit.jupiter.api.Test;
 
 class KafkaProjectionWorkerTest {
@@ -39,14 +40,15 @@ class KafkaProjectionWorkerTest {
     void projectorFailureCommitsNoOffset() throws Exception {
         JdbcDataSource dataSource = dataSource("worker_failure");
         TrackingConsumer consumer = consumer(dataSource);
-        CoreUserStateView duplicate = user(17);
-        consumer.addRecord(record(41, event(1, List.of(duplicate, duplicate))));
+        installFailingProjectionTrigger(dataSource);
+        consumer.addRecord(record(41, event(1, List.of(user(17)))));
         var worker = new KafkaProjectionWorker(ProductLine.SPOT, consumer,
                 new JdbcCoreEventProjector(dataSource));
 
         assertThatThrownBy(() -> worker.pollOnce(Duration.ZERO)).isInstanceOf(SQLException.class);
         assertThat(consumer.commitCalls).isZero();
         assertThat(consumer.committed(java.util.Set.of(PARTITION)).get(PARTITION)).isNull();
+        removeFailingProjectionTrigger(dataSource);
         assertProjectionState(dataSource, 0, 0, 0);
     }
 
@@ -99,16 +101,20 @@ class KafkaProjectionWorkerTest {
 
     private static CoreMessage event(long sequence, List<CoreUserStateView> users) {
         UUID commandId = UUID.randomUUID();
+        byte[] payload = new byte[] {(byte) sequence};
+        CoreMessage command = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT, commandId,
+                ProductLine.SPOT, CommandSource.OPERATIONS, 1, sequence, users.getFirst().userId(),
+                1_700_000_000_000L + sequence, 1), payload);
         var event = new CoreExportEvent(sequence, sequence, sequence * 17, commandId,
                 CoreMessageType.PROBE_INCREMENT, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                users.getFirst().userId(), new byte[] {(byte) sequence}, users, List.of(), List.of(), List.of(),
+                users.getFirst().userId(), payload, users, List.of(), List.of(), List.of(),
                 List.of(), List.of(), List.of(), (sequence - 1) * 17, 0, 0,
                 com.surprising.aeron.protocol.CoreRoute.DEFAULT.version(), 1, sequence * 17, sequence,
                 com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0),
-                sequence, List.of());
-        return new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT, commandId,
-                ProductLine.SPOT, CommandSource.OPERATIONS, 1, sequence, users.getFirst().userId(),
-                1_700_000_000_000L + sequence, 1).exportEvent(sequence), CoreExportCodec.encodeEvent(event));
+                sequence, List.of(), com.surprising.aeron.protocol.CommandFingerprint.of(command), List.of(),
+                CoreExportEvent.TerminalIds.empty(), Math.max(0, sequence - 1), sequence,
+                Math.max(0, sequence - 1), sequence, null, null, CoreExportEvent.Tombstones.empty());
+        return new CoreMessage(command.header().exportEvent(sequence), CoreExportCodec.encodeEvent(event));
     }
 
     private static CoreUserStateView user(long userId) {
@@ -137,6 +143,26 @@ class KafkaProjectionWorkerTest {
             }
         }
         return dataSource;
+    }
+
+    private static void installFailingProjectionTrigger(JdbcDataSource dataSource) throws SQLException {
+        try (Connection connection = dataSource.getConnection(); var statement = connection.createStatement()) {
+            statement.execute("CREATE TRIGGER fail_projection BEFORE INSERT ON core_user_fact_projection "
+                    + "FOR EACH ROW CALL '" + FailingProjectionTrigger.class.getName() + "'");
+        }
+    }
+
+    private static void removeFailingProjectionTrigger(JdbcDataSource dataSource) throws SQLException {
+        try (Connection connection = dataSource.getConnection(); var statement = connection.createStatement()) {
+            statement.execute("DROP TRIGGER fail_projection");
+        }
+    }
+
+    public static final class FailingProjectionTrigger implements Trigger {
+        @Override
+        public void fire(Connection connection, Object[] oldRow, Object[] newRow) throws SQLException {
+            throw new SQLException("injected projection failure");
+        }
     }
 
     private static void assertProjectionState(JdbcDataSource dataSource, int events, int facts,

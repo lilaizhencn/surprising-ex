@@ -269,28 +269,9 @@ public final class TriggerOrderIndex {
                 && idsByClient.containsKey(new ClientTriggerKey(userId, clientTriggerOrderId));
     }
 
-    public void update(TradingCoreState before, TradingCoreState after) {
-        if (before.triggerOrders() == after.triggerOrders()) return;
-        StateMapSupport.requireDeltaLineage(before.triggerOrders(), after.triggerOrders(), "trigger orders");
-        Set<Long> changed = StateMapSupport.changedKeys(after.triggerOrders());
-        for (Long id : changed) {
-            if (id == null) continue;
-            CoreTriggerOrderState previous = before.triggerOrders().get(id);
-            CoreTriggerOrderState current = after.triggerOrders().get(id);
-            if (previous != null) remove(previous, id);
-            if (previous != null && !previous.clientTriggerOrderId().isEmpty()) {
-                idsByClient.remove(new ClientTriggerKey(previous.userId(), previous.clientTriggerOrderId()));
-            }
-            if (current != null) add(current);
-            if (current != null && !current.clientTriggerOrderId().isEmpty()) {
-                idsByClient.put(new ClientTriggerKey(current.userId(), current.clientTriggerOrderId()), id);
-            }
-        }
-    }
-
-    public void update(RuntimeCommitEntry entry) {
-        RuntimeMutationDelta.ValueChanges<Long, CoreTriggerOrderState> changes = entry.mutation().triggerOrders();
-        for (Long id : changes.changedKeys()) {
+    void apply(java.util.List<RuntimeCommitPatch.TriggerOrderChange> changes) {
+        for (RuntimeCommitPatch.TriggerOrderChange change : changes) {
+            long id = change.triggerOrderId();
             CoreTriggerOrderState previous = valuesById.remove(id);
             if (previous != null) {
                 remove(previous, id);
@@ -298,7 +279,7 @@ public final class TriggerOrderIndex {
                     idsByClient.remove(new ClientTriggerKey(previous.userId(), previous.clientTriggerOrderId()));
                 }
             }
-            CoreTriggerOrderState current = changes.currentValues().get(id);
+            CoreTriggerOrderState current = change.after();
             if (current != null) {
                 add(current);
                 if (!current.clientTriggerOrderId().isEmpty()) {

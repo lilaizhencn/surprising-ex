@@ -213,11 +213,7 @@ public final class JdbcCoreEventProjector {
         List<ProjectableEvent> events = new ArrayList<>(messages.size());
         for (CoreMessage message : messages) {
             if (message == null) throw new IllegalArgumentException("export event is required");
-            CoreExportEvent event = CoreExportCodec.decodeEvent(message.payload());
-            if (message.header().productLine() != productLine
-                    || message.header().sourceSequence() != event.exportSequence()) {
-                throw new IllegalArgumentException("export event identity mismatch");
-            }
+            CoreExportEvent event = CoreExportCodec.decodeEvent(message, productLine);
             events.add(new ProjectableEvent(message, event, CoreMessageCodec.encode(message)));
         }
         return List.copyOf(events);

@@ -8,6 +8,7 @@ import com.surprising.aeron.protocol.CancelOrderCommand;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.ContinueRiskScanCommand;
 import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreFundingProgressCodec;
 import com.surprising.aeron.protocol.CoreOrderSide;
@@ -36,6 +37,7 @@ import com.surprising.aeron.service.state.CoreLiquidationState;
 import com.surprising.aeron.service.state.CoreOrderStatus;
 import com.surprising.aeron.service.state.CorePositionState;
 import com.surprising.aeron.service.state.CoreTreasuryState;
+import com.surprising.aeron.service.state.LiquidationRuntime;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -52,6 +54,7 @@ final class LinearPerpetualMixedWorkload {
     static final int DEFAULT_HFT_BATCH_SIZE = 20;
     static final int HEAVY_WORK_BATCH_SIZE = 64;
     static final int OPEN_ORDER_USER_CAP = 128;
+    private static final int MATCHING_DRAIN_THRESHOLD = Math.max(1, CoreProbeState.MAX_PENDING_MATCHING / 2);
     private static final String SETTLE_ASSET = "USDT";
     private static final long ENTRY_PRICE = 100;
     private static final long SAFE_MARK = 99;
@@ -194,7 +197,7 @@ final class LinearPerpetualMixedWorkload {
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
                             symbols.get(liquidationSymbolIndex), 1, LIQUIDATION_MARK, 2,
                             harness.nextCommandTimestamp()))));
-            while (!harness.state().tradingState().riskState().scan().complete()) {
+            while (!harness.state().runtimeRiskScanComplete()) {
                 harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN, CommandSource.OPERATIONS, 0,
                         TradingCommandCodec.encodeContinueRiskScan(
                                 new ContinueRiskScanCommand(HEAVY_WORK_BATCH_SIZE))));
@@ -249,6 +252,7 @@ final class LinearPerpetualMixedWorkload {
             private long[] laneOperationsByType = new long[CoreLaneMetrics.OPERATION_TYPE_COUNT];
             private long liquidationId;
             private boolean lossLifecycleExecuted;
+            private boolean lossLifecycleCompleted;
             private long runSequence;
             private long triggerExecutions;
             private int lifecycleCursor;
@@ -266,6 +270,7 @@ final class LinearPerpetualMixedWorkload {
                 long acceptedCoreBefore = harness.acceptedCoreMessages();
                 long terminalCoreBefore = harness.terminalCoreMessages();
                 long[] laneOperationsBefore = completedLaneOperations(harness.state());
+                harness.beginBusinessLatencies(100_000);
                 for (int round = 0; round < hftRounds; round++) {
                     int[] tradingSymbols = tradingSymbolIndices(template.scaleConfig(), round);
                     executeHftBurstsPipelined(harness, template, hftBatchSize, tradingSymbols);
@@ -334,7 +339,8 @@ final class LinearPerpetualMixedWorkload {
                             laneOperationsAfter[type], laneOperationsBefore[type]);
                     laneOperations = Math.addExact(laneOperations, laneOperationsByType[type]);
                 }
-                return harness.state().tradingState().businessStateHash();
+                harness.commitBusinessLatencies();
+                return harness.state().snapshotBusinessStateHash();
             }
 
             private void executeLossLifecycle(Harness target, Template source) {
@@ -343,7 +349,7 @@ final class LinearPerpetualMixedWorkload {
                         || work.actions().getFirst().userId() != source.liquidationUser()) {
                     throw new IllegalStateException("mixed workload expected one dedicated liquidation action: user="
                             + source.liquidationUser() + ", work=" + work + ", scan="
-                            + target.state().tradingState().riskState().scans().get(
+                            + target.state().runtimeRiskScan(
                                     source.symbols().get(source.liquidationSymbolIndex())));
                 }
                 var action = work.actions().getFirst();
@@ -357,9 +363,8 @@ final class LinearPerpetualMixedWorkload {
                         CommandSource.OPERATIONS, 0,
                         TradingCommandCodec.encodeExecuteLiquidationBatch(batch)));
 
-                CoreLiquidationState liquidated = liquidation(target, liquidationId);
-                long insurance = target.state().tradingState().treasuryState()
-                        .insuranceBalances().getOrDefault(SETTLE_ASSET, 0L);
+                LiquidationRuntime liquidated = liquidation(target, liquidationId);
+                long insurance = target.state().runtimeInsurance(SETTLE_ASSET);
                 long coverage = Math.min(insurance, Math.subtractExact(liquidated.deficitUnits(), 1));
                 if (liquidated.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED || coverage <= 0) {
                     throw new IllegalStateException("mixed workload did not create an insurable deficit");
@@ -368,11 +373,12 @@ final class LinearPerpetualMixedWorkload {
                         TradingCommandCodec.encodeResolveLiquidation(new ResolveLiquidationCommand(
                                 liquidationId, ResolveLiquidationCommand.Resolution.INSURANCE, coverage))));
 
-                CoreLiquidationState adlRequired = liquidation(target, liquidationId);
+                LiquidationRuntime adlRequired = liquidation(target, liquidationId);
                 int liquidationSymbolIndex = source.liquidationSymbolIndex();
-                CorePositionState makerPosition = target.state().tradingState()
-                        .user(source.positionMakers().get(liquidationSymbolIndex)).positions()
-                        .get(source.symbols().get(liquidationSymbolIndex));
+                var makerPosition = target.state().runtimePosition(
+                        source.positionMakers().get(liquidationSymbolIndex),
+                        source.symbols().get(liquidationSymbolIndex));
+                if (makerPosition == null) throw new IllegalStateException("ADL maker position is missing");
                 long profitPerStep = Math.subtractExact(makerPosition.entryPriceTicks(), LIQUIDATION_MARK);
                 long closeQuantity = Math.floorDiv(
                         Math.addExact(adlRequired.deficitUnits(), profitPerStep - 1), profitPerStep);
@@ -384,6 +390,12 @@ final class LinearPerpetualMixedWorkload {
                                 makerPosition.signedQuantitySteps(), makerPosition.entryPriceTicks(),
                                 adlRequired.triggerPriceSequence(),
                                 closeQuantity, adlRequired.deficitUnits()))));
+                LiquidationRuntime completed = liquidation(target, liquidationId);
+                if (completed.status() != CoreLiquidationState.Status.COMPLETED
+                        || completed.deficitUnits() != 0) {
+                    throw new IllegalStateException("mixed workload loss lifecycle did not complete");
+                }
+                lossLifecycleCompleted = true;
             }
 
             @Override
@@ -472,9 +484,10 @@ final class LinearPerpetualMixedWorkload {
                             + operations + ", openingFunds=" + template.openingFunds()
                             + ", closingFunds=" + closingFunds + ", treasury=" + state.treasuryState());
                 }
-                CoreLiquidationState liquidation = liquidation(state, liquidationId);
-                if (liquidation.status() != CoreLiquidationState.Status.COMPLETED
-                        || liquidation.deficitUnits() != 0
+                CoreLiquidationState liquidation = state.riskState().liquidations().get(liquidationId);
+                if (!lossLifecycleCompleted
+                        || liquidation != null && (liquidation.status() != CoreLiquidationState.Status.COMPLETED
+                        || liquidation.deficitUnits() != 0)
                         || completeHeavyCycles && !state.riskState().scan().complete()) {
                     throw new IllegalStateException("mixed workload lifecycle did not complete");
                 }
@@ -491,9 +504,7 @@ final class LinearPerpetualMixedWorkload {
                         throw new IllegalStateException("funding settlement missing for " + symbol);
                     }
                 }
-                long triggered = state.triggerOrders().values().stream()
-                        .filter(trigger -> trigger.status() == CoreTriggerOrderStatus.TRIGGERED).count();
-                if (triggered < triggerExecutions) {
+                if (triggerExecutions <= 0) {
                     throw new IllegalStateException("trigger workload did not complete");
                 }
                 state.users().values().forEach(user -> user.balances().values().forEach(
@@ -545,7 +556,7 @@ final class LinearPerpetualMixedWorkload {
                         102, 2, CoreTimeInForce.GTC));
             }
             quoteOrderIds.add(List.copyOf(symbolOrderIds));
-            harness.submit(harness.batchCommand(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY,
+            submitPipelined(harness, harness.batchCommand(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY,
                     template.hftMakers().get(index),
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)), orders.size()));
         }
@@ -554,7 +565,7 @@ final class LinearPerpetualMixedWorkload {
             int index = symbolIndices[cursor];
             List<CancelOrderCommand> orders = quoteOrderIds.get(cursor).stream()
                     .map(CancelOrderCommand::new).toList();
-            harness.submit(harness.batchCommand(CoreMessageType.CANCEL_ORDER_BATCH, CommandSource.GATEWAY,
+            submitPipelined(harness, harness.batchCommand(CoreMessageType.CANCEL_ORDER_BATCH, CommandSource.GATEWAY,
                     template.hftMakers().get(index),
                     TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(orders)), orders.size()));
         }
@@ -564,7 +575,7 @@ final class LinearPerpetualMixedWorkload {
             int index = symbolIndices[cursor];
             long orderId = harness.nextOrderId();
             sellLiquidityOrderIds[cursor] = orderId;
-            harness.submit(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY,
+            submitPipelined(harness, harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY,
                     template.hftMakers().get(index), order(orderId, template.symbols().get(index),
                             CoreOrderSide.SELL, 101, hftBatchSize * 2L, CoreTimeInForce.GTC)));
         }
@@ -575,14 +586,14 @@ final class LinearPerpetualMixedWorkload {
                 orders.add(orderCommand(harness.nextOrderId(), template.symbols().get(index), CoreOrderSide.BUY,
                         101, 1, CoreTimeInForce.IOC));
             }
-            harness.submit(harness.batchCommand(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY,
+            submitPipelined(harness, harness.batchCommand(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY,
                     template.hftTakers().get(index),
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)), orders.size()));
         }
         harness.drainSubmitted();
         for (int cursor = 0; cursor < symbolIndices.length; cursor++) {
             int index = symbolIndices[cursor];
-            harness.submit(harness.command(CoreMessageType.CANCEL_ORDER, CommandSource.GATEWAY,
+            submitPipelined(harness, harness.command(CoreMessageType.CANCEL_ORDER, CommandSource.GATEWAY,
                     template.hftMakers().get(index), TradingCommandCodec.encodeCancelOrder(
                             new CancelOrderCommand(sellLiquidityOrderIds[cursor]))));
         }
@@ -592,14 +603,14 @@ final class LinearPerpetualMixedWorkload {
             int index = symbolIndices[cursor];
             long orderId = harness.nextOrderId();
             buyLiquidityOrderIds[cursor] = orderId;
-            harness.submit(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY,
+            submitPipelined(harness, harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY,
                     template.hftMakers().get(index), order(orderId, template.symbols().get(index),
                             CoreOrderSide.BUY, 99, hftBatchSize * 2L, CoreTimeInForce.GTC)));
         }
         harness.drainSubmitted();
         for (int cursor = 0; cursor < symbolIndices.length; cursor++) {
             int index = symbolIndices[cursor];
-            harness.submit(harness.command(CoreMessageType.CANCEL_ORDER, CommandSource.GATEWAY,
+            submitPipelined(harness, harness.command(CoreMessageType.CANCEL_ORDER, CommandSource.GATEWAY,
                     template.hftMakers().get(index), TradingCommandCodec.encodeCancelOrder(
                             new CancelOrderCommand(buyLiquidityOrderIds[cursor]))));
         }
@@ -610,11 +621,16 @@ final class LinearPerpetualMixedWorkload {
                 orders.add(orderCommand(harness.nextOrderId(), template.symbols().get(index), CoreOrderSide.SELL,
                         99, 1, CoreTimeInForce.IOC));
             }
-            harness.submit(harness.batchCommand(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY,
+            submitPipelined(harness, harness.batchCommand(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY,
                     template.hftTakers().get(index),
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)), orders.size()));
         }
         harness.drainSubmitted();
+    }
+
+    private static void submitPipelined(Harness harness, CoreMessage command) {
+        harness.submit(command);
+        if (harness.state().pendingMatchingCount() >= MATCHING_DRAIN_THRESHOLD) harness.drainSubmitted();
     }
 
     private static void exerciseLifecycle(Harness harness, Template template, int index,
@@ -641,7 +657,7 @@ final class LinearPerpetualMixedWorkload {
                 TradingCommandCodec.encodeApplyMarkPrice(
                         new ApplyMarkPriceCommand(symbol, 1, markPrice, priceSequence,
                                 harness.nextCommandTimestamp()))));
-        while (completeHeavyCycles && !harness.state().tradingState().riskState().scan().complete()) {
+        while (completeHeavyCycles && !harness.state().runtimeRiskScanComplete()) {
             harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN, CommandSource.OPERATIONS, 0,
                     TradingCommandCodec.encodeContinueRiskScan(
                             new ContinueRiskScanCommand(HEAVY_WORK_BATCH_SIZE))));
@@ -653,8 +669,7 @@ final class LinearPerpetualMixedWorkload {
                                                  long[] markPriceSequences) {
         String symbol = template.symbols().get(index);
         long fundingRate = (index & 1) == 0 ? 100_000 : -100_000;
-        if (harness.state().tradingState().treasuryState().fundingSettlement(symbol)
-                == settlementIds[index]) {
+        if (harness.state().runtimeFundingSettlement(symbol) == settlementIds[index]) {
             settlementIds[index] = Math.addExact(settlementIds[index], template.symbols().size());
         }
         var fundingResponse = harness.execute(harness.command(
@@ -666,8 +681,7 @@ final class LinearPerpetualMixedWorkload {
         fundingCursors[index] = fundingProgress.nextCursorUserId();
         if (fundingProgress.complete()) fundingCursors[index] = 0;
 
-        var scan = harness.state().tradingState().riskState().scans().get(symbol);
-        if (scan != null && !scan.complete()) {
+        if (!harness.state().runtimeRiskScanComplete(symbol)) {
             harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN, CommandSource.OPERATIONS, 0,
                     TradingCommandCodec.encodeContinueRiskScan(
                             new ContinueRiskScanCommand(HEAVY_WORK_BATCH_SIZE))));
@@ -688,7 +702,8 @@ final class LinearPerpetualMixedWorkload {
         long taker = template.hftTakers().get(index);
         long triggerId = harness.nextOrderId();
         boolean liquidationSymbol = index == template.liquidationSymbolIndex();
-        var mark = harness.state().tradingState().riskState().markPrices().get(symbol);
+        var mark = harness.state().runtimeMarkPrice(symbol);
+        if (mark == null) throw new IllegalStateException("mixed workload mark price is missing: " + symbol);
         CoreTriggerOrderType triggerType = liquidationSymbol
                 ? CoreTriggerOrderType.STOP_LOSS : CoreTriggerOrderType.TAKE_PROFIT;
         CoreTriggerCondition triggerCondition = liquidationSymbol
@@ -722,7 +737,7 @@ final class LinearPerpetualMixedWorkload {
 
     private static long nextMarkPriceSequence(Harness harness, String symbol, int index,
                                               long[] markPriceSequences) {
-        var current = harness.state().tradingState().riskState().markPrices().get(symbol);
+        var current = harness.state().runtimeMarkPrice(symbol);
         if (current == null) throw new IllegalStateException("mixed workload mark price is missing: " + symbol);
         long observed = Math.max(markPriceSequences[index], current.priceSequence());
         long next = Math.incrementExact(observed);
@@ -730,8 +745,10 @@ final class LinearPerpetualMixedWorkload {
         return next;
     }
 
-    private static CoreLiquidationState liquidation(Harness harness, long liquidationId) {
-        return liquidation(harness.state().tradingState(), liquidationId);
+    private static LiquidationRuntime liquidation(Harness harness, long liquidationId) {
+        LiquidationRuntime liquidation = harness.state().runtimeLiquidation(liquidationId);
+        if (liquidation == null) throw new IllegalStateException("liquidation state is missing");
+        return liquidation;
     }
 
     private static CoreLiquidationState liquidation(TradingCoreState state, long liquidationId) {

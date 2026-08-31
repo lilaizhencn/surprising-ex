@@ -171,190 +171,27 @@ public final class RuntimeStateMaterializer {
                 new TreeMap<>(runtime.triggerOrdersForRuntime()));
     }
 
-    public static TradingCoreState materializeTransition(TradingRuntimeState runtime,
-                                                         RuntimeIdentityRegistry identities,
-                                                         TradingCoreState previous) {
-        return materializeTransition(runtime, identities, previous, null);
-    }
-
-    static TradingCoreState materializeTransition(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                                                   TradingCoreState previous,
-                                                   SnapshotTraversalProbe traversalProbe) {
-        if (runtime == null || identities == null || previous == null) {
-            throw new IllegalArgumentException("runtime, identities and previous state required");
-        }
-        runtime.assertOwner();
-        return materializeTransition(runtime.captureMutationDelta(), identities, previous, traversalProbe);
-    }
-
-    public static TradingCoreState materializeTransition(RuntimeMutationDelta delta,
-                                                         RuntimeIdentityRegistry identities,
-                                                         TradingCoreState previous) {
-        return materializeTransition(delta, identities, previous, null);
-    }
-
-    private static TradingCoreState materializeTransition(RuntimeMutationDelta delta,
-                                                          RuntimeIdentityRegistry identities,
-                                                          TradingCoreState previous,
-                                                          SnapshotTraversalProbe traversalProbe) {
-        if (delta == null || identities == null || previous == null
-                || delta.productLine() != previous.productLine() || delta.revision() < previous.revision()) {
-            throw new IllegalArgumentException("runtime mutation delta is out of order");
-        }
-
-        Map<Long, CoreUserState> users = deltaIfChanged(previous.users(), delta.users());
-        for (Long userId : delta.users().changedKeys()) {
-            RuntimeMutationDelta.UserValue runtimeUser = delta.users().currentValues().get(userId);
-            CoreUserState beforeUser = previous.user(userId);
-            if (runtimeUser == null) {
-                users.remove(userId);
-                continue;
-            }
-            users.put(userId, materializeUser(userId, delta, identities, beforeUser));
-        }
-
-        Map<Long, CoreOrderState> orders = deltaIfChanged(previous.orders(), delta.orders());
-        for (Long orderId : delta.orders().changedKeys()) {
-            OrderRuntime order = delta.orders().currentValues().get(orderId);
-            if (order == null || delta.pendingReservations().contains(orderId)) orders.remove(orderId);
-            else orders.put(orderId, orderSnapshot(order, identities));
-        }
-        Map<String, CoreMarkPriceState> marks = deltaIfChanged(
-                previous.riskState().markPrices(), delta.markPrices());
-        for (Integer symbolId : delta.markPrices().changedKeys()) {
-            String symbol = identities.symbol(symbolId);
-            MarkPriceRuntime mark = delta.markPrices().currentValues().get(symbolId);
-            if (mark == null) marks.remove(symbol);
-            else marks.put(symbol, new CoreMarkPriceState(symbol, mark.instrumentVersion(),
-                    mark.markPriceTicks(), mark.priceSequence(), mark.generatedAtEpochMillis()));
-        }
-        Map<String, CoreRiskSnapshot> snapshots = deltaIfChanged(
-                previous.riskState().snapshots(), delta.riskSnapshots());
-        for (Long positionKey : delta.riskSnapshots().changedKeys()) {
-            RuntimeIdentityRegistry.PositionIdentity identity = identities.positionIdentity(positionKey);
-            String snapshotKey = identity.userId() + ":" + identity.positionKey();
-            RiskSnapshotRuntime risk = delta.riskSnapshots().currentValues().get(positionKey);
-            if (risk == null) snapshots.remove(snapshotKey);
-            else {
-                CoreRiskSnapshot snapshot = riskSnapshot(risk, identities);
-                if (!snapshot.key().equals(snapshotKey)) {
-                    throw new IllegalStateException("runtime risk snapshot identity mismatch: " + positionKey);
-                }
-                snapshots.put(snapshot.key(), snapshot);
-            }
-        }
-        Map<Long, CoreLiquidationState> liquidations = deltaIfChanged(
-                previous.riskState().liquidations(), delta.liquidations());
-        applyValues(delta.liquidations(), liquidations, value -> liquidation(value, identities));
-        Map<String, CoreRiskState.RiskScan> scans = deltaIfChanged(
-                previous.riskState().scans(), delta.riskScans());
-        for (Integer symbolId : delta.riskScans().changedKeys()) {
-            String symbol = identities.symbol(symbolId);
-            RiskScanRuntime scan = delta.riskScans().currentValues().get(symbolId);
-            if (scan == null) scans.remove(symbol); else scans.put(symbol, riskScan(scan, identities));
-        }
-        CoreRiskState riskState = marks == previous.riskState().markPrices()
-                && snapshots == previous.riskState().snapshots()
-                && liquidations == previous.riskState().liquidations()
-                && scans == previous.riskState().scans()
-                && delta.nextLiquidationId() == previous.riskState().nextLiquidationId()
-                && delta.riskScanControl().equals(previous.riskState().scanControl())
-                ? previous.riskState()
-                : new CoreRiskState(marks, snapshots, liquidations, scans,
-                delta.nextLiquidationId(), delta.riskScanControl());
-
-        CoreTreasuryState treasuryState = treasuryTransition(delta.treasury(), identities, previous.treasuryState());
-        Map<String, CoreInstrumentState> instruments = deltaIfChanged(previous.instruments(), delta.instruments());
-        applyValues(delta.instruments(), instruments, java.util.function.Function.identity());
-        Map<CoreLeverageKey, Long> leverages = deltaIfChanged(previous.leverages(), delta.leverages());
-        applyValues(delta.leverages(), leverages, java.util.function.Function.identity());
-        Map<Long, CoreAlgoOrderState> algoOrders = deltaIfChanged(previous.algoOrders(), delta.algoOrders());
-        applyValues(delta.algoOrders(), algoOrders, java.util.function.Function.identity());
-        Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> timers = deltaIfChanged(
-                previous.cancelAllAfterTimers(), delta.timers());
-        applyValues(delta.timers(), timers, java.util.function.Function.identity());
-        Map<Long, CoreTriggerOrderState> triggers = deltaIfChanged(previous.triggerOrders(), delta.triggerOrders());
-        applyValues(delta.triggerOrders(), triggers, java.util.function.Function.identity());
-        Map<TradingCoreState.ClientOrderKey, Long> clients = deltaIfChanged(
-                previous.clientOrderIndex(), delta.clientOrders());
-        for (RuntimeMutationDelta.RuntimeClientKey runtimeKey : delta.clientOrders().changedKeys()) {
-            TradingCoreState.ClientOrderKey key = new TradingCoreState.ClientOrderKey(runtimeKey.userId(),
-                    identities.clientOrderId(runtimeKey.userId(), runtimeKey.clientKey()));
-            Long orderId = delta.clientOrders().currentValues().get(runtimeKey);
-            if (orderId == null) clients.remove(key); else clients.put(key, orderId);
-        }
-        return new TradingCoreState(delta.productLine(),
-                Math.subtractExact(delta.revision(), delta.pendingReservationCount()), users, orders, instruments,
-                riskState, treasuryState, leverages, algoOrders, timers, clients, triggers);
-    }
-
-    private static CoreUserState materializeUser(long userId, RuntimeMutationDelta delta,
-                                                 RuntimeIdentityRegistry identities, CoreUserState beforeUser) {
-        RuntimeMutationDelta.UserValue runtimeUser = delta.users().currentValues().get(userId);
-        if (runtimeUser == null) return null;
-        Map<String, AssetBalance> balances = deltaIfChanged(
-                beforeUser == null ? Map.of() : beforeUser.balances(), runtimeUser.balances());
-        for (Integer assetId : runtimeUser.balances().changedKeys()) {
-            String asset = identities.asset(assetId);
-            RuntimeMutationDelta.BalanceValue balance = runtimeUser.balances().currentValues().get(assetId);
-            if (balance == null) balances.remove(asset);
-            else balances.put(asset, new AssetBalance(asset,
-                    Math.addExact(balance.availableUnits(), balance.pendingReservedUnits()),
-                    Math.subtractExact(balance.lockedUnits(), balance.pendingReservedUnits())));
-        }
-        Map<Long, OrderReservation> previousReservations = beforeUser == null
-                ? Map.of() : beforeUser.reservations();
-        Map<Long, OrderReservation> reservations = previousReservations;
-        for (Long orderId : delta.reservations().changedKeys()) {
-            ReservationRuntime value = delta.reservations().currentValues().get(orderId);
-            OrderReservation prior = beforeUser == null ? null : beforeUser.reservations().get(orderId);
-            if (value != null && value.userId() == userId && !delta.pendingReservations().contains(orderId)) {
-                if (reservations == previousReservations) reservations = StateMapSupport.delta(previousReservations);
-                reservations.put(orderId, reservation(value, identities));
-            } else if (prior != null) {
-                if (reservations == previousReservations) reservations = StateMapSupport.delta(previousReservations);
-                reservations.remove(orderId);
-            }
-        }
-        Map<String, CorePositionState> previousPositions = beforeUser == null ? Map.of() : beforeUser.positions();
-        Map<String, CorePositionState> positions = previousPositions;
-        for (Long positionKey : delta.positions().changedKeys()) {
-            RuntimeIdentityRegistry.PositionIdentity identity = identities.positionIdentity(positionKey);
-            if (identity.userId() != userId) continue;
-            PositionRuntime value = delta.positions().currentValues().get(positionKey);
-            if (positions == previousPositions) positions = StateMapSupport.delta(previousPositions);
-            if (value == null) positions.remove(identity.positionKey());
-            else positions.put(identity.positionKey(), position(positionKey, value, identities));
-        }
-        UserRuntime current = runtimeUser.user();
-        long revision = Math.subtractExact(current.revision(), runtimeUser.pendingReservationCount());
-        return beforeUser == null
-                ? new CoreUserState(current.productLine(), userId, revision, balances,
-                reservations, positions, current.positionMode())
-                : beforeUser.transition(revision, balances, reservations, positions, current.positionMode());
-    }
-
-    private static CoreTreasuryState.FundingProgress fundingProgress(
+    static CoreTreasuryState.FundingProgress fundingProgress(
             TreasuryRuntime.FundingProgressRuntime value) {
         return new CoreTreasuryState.FundingProgress(value.settlementId(), value.instrumentVersion(),
                 value.fundingRatePpm(), value.accountLaneId(), value.nextCursorUserId(), value.commandId());
     }
 
-    private static CoreTreasuryState.LifecycleProgress lifecycleProgress(
+    static CoreTreasuryState.LifecycleProgress lifecycleProgress(
             TreasuryRuntime.LifecycleProgressRuntime value) {
         return new CoreTreasuryState.LifecycleProgress(value.settlementId(), value.instrumentVersion(),
                 value.settlementPriceTicks(), value.optionCashUnitsPerContract(), value.ordersComplete(),
                 value.accountLaneId(), value.nextCursorOrderId(), value.nextCursorUserId(), value.commandId());
     }
 
-    static OrderReservation reservation(ReservationRuntime value, RuntimeIdentityRegistry identities) {
+    static OrderReservation reservation(ReservationRuntime value, RuntimeCommitPatch.IdentityView identities) {
         return new OrderReservation(value.orderId(), identities.symbol(value.symbolId()), value.instrumentVersion(),
                 value.kind(), identities.asset(value.assetId()), value.totalReservedUnits(), value.releasedUnits(),
                 value.consumedUnits(), value.orderQuantitySteps());
     }
 
     static CorePositionState position(long positionKey, PositionRuntime value,
-                                      RuntimeIdentityRegistry identities) {
+                                      RuntimeCommitPatch.IdentityView identities) {
         String identity = identities.positionKey(value.userId(), positionKey);
         CorePositionState result = new CorePositionState(identities.symbol(value.symbolId()),
                 identities.asset(value.assetId()), value.marginMode(), value.positionSide(),
@@ -366,7 +203,7 @@ public final class RuntimeStateMaterializer {
         return result;
     }
 
-    public static CoreOrderState orderSnapshot(OrderRuntime value, RuntimeIdentityRegistry identities) {
+    public static CoreOrderState orderSnapshot(OrderRuntime value, RuntimeCommitPatch.IdentityView identities) {
         if (value == null || identities == null) throw new IllegalArgumentException("runtime order is required");
         return new CoreOrderState(value.orderId(), value.productLine(), value.userId(),
                 identities.symbol(value.symbolId()), value.instrumentVersion(), value.side(), value.priceTicks(),
@@ -378,14 +215,14 @@ public final class RuntimeStateMaterializer {
     }
 
     static CoreRiskSnapshot riskSnapshot(RiskSnapshotRuntime value,
-                                         RuntimeIdentityRegistry identities) {
+                                         RuntimeCommitPatch.IdentityView identities) {
         return new CoreRiskSnapshot(value.userId(), identities.symbol(value.symbolId()), value.positionSide(),
                 value.priceSequence(), value.equityUnits(), value.unrealizedPnlUnits(),
                 value.maintenanceMarginUnits(), value.marginRatioPpm(), value.status());
     }
 
     static CoreLiquidationState liquidation(LiquidationRuntime value,
-                                            RuntimeIdentityRegistry identities) {
+                                            RuntimeCommitPatch.IdentityView identities) {
         return new CoreLiquidationState(value.liquidationId(), value.userId(),
                 identities.symbol(value.symbolId()), value.marginMode(), value.positionSide(),
                 value.instrumentVersion(), value.triggerPriceSequence(), value.signedQuantitySteps(),
@@ -395,7 +232,7 @@ public final class RuntimeStateMaterializer {
     }
 
     static CoreRiskState.RiskScan riskScan(RiskScanRuntime value,
-                                           RuntimeIdentityRegistry identities) {
+                                           RuntimeCommitPatch.IdentityView identities) {
         return new CoreRiskState.RiskScan(identities.symbol(value.symbolId()), value.accountLaneId(),
                 value.priceSequence(),
                 value.scanStartPriceSequence(), value.lastUserId(), value.riskComplete(), value.riskUserId(),
@@ -405,95 +242,6 @@ public final class RuntimeStateMaterializer {
                 value.triggerPhase(), value.triggerPriceCursor(), value.triggerOrderCursor(), value.triggerUpperId(),
                 value.triggerMarkPriceTicks(), value.triggerGeneratedAtEpochMillis(), value.triggerOcoOrderId(),
                 value.triggerOcoCursor());
-    }
-
-    private static <K extends Comparable<? super K>, A, B> void applyValues(
-                                               RuntimeMutationDelta.ValueChanges<K, A> changes,
-                                               Map<K, B> target,
-                                               java.util.function.Function<A, B> mapper) {
-        for (K key : changes.changedKeys()) {
-            A value = changes.currentValues().get(key);
-            if (value == null) target.remove(key); else target.put(key, mapper.apply(value));
-        }
-    }
-
-    private static <K extends Comparable<? super K>, C extends Comparable<? super C>, B> Map<K, B> deltaIfChanged(
-            Map<K, B> previous, RuntimeMutationDelta.ValueChanges<C, ?> changes) {
-        return changes.changedKeys().isEmpty() ? previous : StateMapSupport.delta(previous);
-    }
-
-    static CoreTreasuryState treasuryTransition(RuntimeMutationDelta.TreasuryValues changes,
-                                                RuntimeIdentityRegistry identities,
-                                                CoreTreasuryState previous) {
-        if (changes.assets().changedKeys().isEmpty()
-                && changes.funding().changedKeys().isEmpty()
-                && changes.lifecycle().changedKeys().isEmpty()) {
-            return previous;
-        }
-        boolean assetsChanged = !changes.assets().changedKeys().isEmpty();
-        Map<String, Long> fees = assetsChanged
-                ? StateMapSupport.delta(previous.feeBalances()) : previous.feeBalances();
-        Map<String, Long> insurance = assetsChanged
-                ? StateMapSupport.delta(previous.insuranceBalances()) : previous.insuranceBalances();
-        Map<String, Long> deficits = assetsChanged
-                ? StateMapSupport.delta(previous.insuranceDeficits()) : previous.insuranceDeficits();
-        Map<String, Long> liquidationFees = assetsChanged
-                ? StateMapSupport.delta(previous.liquidationFeeBalances()) : previous.liquidationFeeBalances();
-        Map<String, Long> fundingResiduals = assetsChanged
-                ? StateMapSupport.delta(previous.fundingResidualBalances()) : previous.fundingResidualBalances();
-        Map<String, Long> roundingResiduals = assetsChanged
-                ? StateMapSupport.delta(previous.roundingResidualBalances()) : previous.roundingResidualBalances();
-        Map<String, Long> clearingPnl = assetsChanged
-                ? StateMapSupport.delta(previous.clearingPnlBalances()) : previous.clearingPnlBalances();
-        for (Integer assetId : changes.assets().changedKeys()) {
-            String asset = identities.asset(assetId);
-            RuntimeMutationDelta.AssetLedger value = changes.assets().currentValues().get(assetId);
-            putOrRemove(fees, asset, value.fee());
-            putOrRemove(insurance, asset, value.insurance());
-            putOrRemove(deficits, asset, value.deficit());
-            putOrRemove(liquidationFees, asset, value.liquidationFee());
-            putOrRemove(fundingResiduals, asset, value.fundingResidual());
-            putOrRemove(roundingResiduals, asset, value.roundingResidual());
-            putOrRemove(clearingPnl, asset, value.clearingPnl());
-        }
-        boolean fundingChanged = !changes.funding().changedKeys().isEmpty();
-        Map<String, Long> fundingSettlements = fundingChanged
-                ? StateMapSupport.delta(previous.fundingSettlements()) : previous.fundingSettlements();
-        Map<String, CoreTreasuryState.FundingProgress> fundingProgress = fundingChanged
-                ? StateMapSupport.delta(previous.fundingProgress()) : previous.fundingProgress();
-        for (Integer symbolId : changes.funding().changedKeys()) {
-            String symbol = identities.symbol(symbolId);
-            RuntimeMutationDelta.FundingLedger value = changes.funding().currentValues().get(symbolId);
-            putOrRemove(fundingSettlements, symbol, value.settlementId());
-            TreasuryRuntime.FundingProgressRuntime progress = value.progress();
-            if (progress == null) fundingProgress.remove(symbol);
-            else fundingProgress.put(symbol, new CoreTreasuryState.FundingProgress(progress.settlementId(),
-                    progress.instrumentVersion(), progress.fundingRatePpm(), progress.accountLaneId(),
-                    progress.nextCursorUserId(), progress.commandId()));
-        }
-        boolean lifecycleChanged = !changes.lifecycle().changedKeys().isEmpty();
-        Map<String, Long> lifecycleSettlements = lifecycleChanged
-                ? StateMapSupport.delta(previous.lifecycleSettlements()) : previous.lifecycleSettlements();
-        Map<String, CoreTreasuryState.LifecycleProgress> lifecycleProgress = lifecycleChanged
-                ? StateMapSupport.delta(previous.lifecycleProgress()) : previous.lifecycleProgress();
-        for (Integer symbolId : changes.lifecycle().changedKeys()) {
-            String symbol = identities.symbol(symbolId);
-            RuntimeMutationDelta.LifecycleLedger value = changes.lifecycle().currentValues().get(symbolId);
-            putOrRemove(lifecycleSettlements, symbol, value.settlementId());
-            TreasuryRuntime.LifecycleProgressRuntime progress = value.progress();
-            if (progress == null) lifecycleProgress.remove(symbol);
-            else lifecycleProgress.put(symbol, new CoreTreasuryState.LifecycleProgress(progress.settlementId(),
-                    progress.instrumentVersion(), progress.settlementPriceTicks(),
-                    progress.optionCashUnitsPerContract(), progress.ordersComplete(), progress.accountLaneId(),
-                    progress.nextCursorOrderId(), progress.nextCursorUserId(), progress.commandId()));
-        }
-        return new CoreTreasuryState(fees, insurance, deficits, liquidationFees, fundingResiduals,
-                roundingResiduals, clearingPnl, fundingSettlements, lifecycleSettlements,
-                fundingProgress, lifecycleProgress);
-    }
-
-    private static void putOrRemove(Map<String, Long> values, String key, long value) {
-        if (value == 0) values.remove(key); else values.put(key, value);
     }
 
     static final class SnapshotTraversalProbe {

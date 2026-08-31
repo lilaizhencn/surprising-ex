@@ -49,7 +49,7 @@ public final class KafkaCoreExportSink implements CoreExportSink, AutoCloseable 
     }
 
     static ProducerRecord<String, byte[]> record(String topic, ProductLine productLine, CoreMessage message) {
-        long sequence = CoreExportCodec.decodeEvent(message.payload()).exportSequence();
+        long sequence = CoreExportCodec.decodeEvent(message, productLine).exportSequence();
         return new ProducerRecord<>(topic, 0, productLine.name() + ":" + sequence,
                 CoreMessageCodec.encode(message));
     }

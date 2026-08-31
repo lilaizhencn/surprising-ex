@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration version="2.0" label="Surprising owner commit qualification"
+               description="One explicit JDK 25 qualification recording contract"
+               provider="Surprising-EX">
+  <event name="jdk.CPULoad"><setting name="enabled">true</setting><setting name="period">1 s</setting></event>
+  <event name="jdk.ThreadCPULoad"><setting name="enabled">true</setting><setting name="period">1 s</setting></event>
+  <event name="jdk.ExecutionSample"><setting name="enabled">true</setting><setting name="period">20 ms</setting></event>
+  <event name="jdk.NativeMethodSample"><setting name="enabled">true</setting><setting name="period">20 ms</setting></event>
+  <event name="jdk.ObjectAllocationSample"><setting name="enabled">true</setting></event>
+  <event name="jdk.ObjectAllocationInNewTLAB"><setting name="enabled">true</setting><setting name="stackTrace">true</setting></event>
+  <event name="jdk.ObjectAllocationOutsideTLAB"><setting name="enabled">true</setting><setting name="stackTrace">true</setting></event>
+  <event name="jdk.ThreadAllocationStatistics"><setting name="enabled">true</setting><setting name="period">1 s</setting></event>
+  <event name="jdk.GCHeapSummary"><setting name="enabled">true</setting></event>
+  <event name="jdk.GarbageCollection"><setting name="enabled">true</setting></event>
+  <event name="jdk.GCPhasePause"><setting name="enabled">true</setting></event>
+  <event name="jdk.GCPhasePauseLevel1"><setting name="enabled">true</setting></event>
+  <event name="jdk.GCPhasePauseLevel2"><setting name="enabled">true</setting></event>
+  <event name="jdk.GCPhasePauseLevel3"><setting name="enabled">true</setting></event>
+  <event name="jdk.GCPhaseConcurrent"><setting name="enabled">true</setting></event>
+  <event name="jdk.GCConfiguration"><setting name="enabled">true</setting></event>
+  <event name="jdk.YoungGenerationConfiguration"><setting name="enabled">true</setting></event>
+  <event name="jdk.ZAllocationStall"><setting name="enabled">true</setting></event>
+  <event name="jdk.G1EvacuationFailure"><setting name="enabled">true</setting></event>
+  <event name="jdk.PromotionFailed"><setting name="enabled">true</setting></event>
+  <event name="jdk.EvacuationFailed"><setting name="enabled">true</setting></event>
+  <event name="jdk.ShenandoahHeapRegionStateChange"><setting name="enabled">true</setting></event>
+  <event name="jdk.NativeMemoryUsage"><setting name="enabled">true</setting><setting name="period">1 s</setting></event>
+  <event name="jdk.DirectBufferStatistics"><setting name="enabled">true</setting><setting name="period">1 s</setting></event>
+  <event name="jdk.JavaMonitorEnter"><setting name="enabled">true</setting><setting name="threshold">0 ns</setting><setting name="stackTrace">true</setting></event>
+  <event name="jdk.JavaMonitorWait"><setting name="enabled">true</setting><setting name="threshold">0 ns</setting><setting name="stackTrace">true</setting></event>
+  <event name="jdk.ThreadPark"><setting name="enabled">true</setting><setting name="threshold">0 ns</setting><setting name="stackTrace">true</setting></event>
+  <event name="jdk.ThreadSleep"><setting name="enabled">true</setting><setting name="threshold">0 ns</setting><setting name="stackTrace">true</setting></event>
+  <event name="jdk.ThreadStart"><setting name="enabled">true</setting></event>
+  <event name="jdk.ThreadEnd"><setting name="enabled">true</setting></event>
+  <event name="jdk.JavaThreadStatistics"><setting name="enabled">true</setting><setting name="period">1 s</setting></event>
+  <event name="jdk.SafepointBegin"><setting name="enabled">true</setting></event>
+  <event name="jdk.SafepointStateSynchronization"><setting name="enabled">true</setting></event>
+  <event name="jdk.SafepointCleanup"><setting name="enabled">true</setting></event>
+  <event name="jdk.SafepointCleanupTask"><setting name="enabled">true</setting></event>
+  <event name="jdk.SafepointEnd"><setting name="enabled">true</setting></event>
+  <event name="jdk.ExecuteVMOperation"><setting name="enabled">true</setting></event>
+  <event name="jdk.Compilation"><setting name="enabled">true</setting></event>
+  <event name="jdk.CompilationFailure"><setting name="enabled">true</setting></event>
+  <event name="jdk.Deoptimization"><setting name="enabled">true</setting><setting name="stackTrace">true</setting></event>
+  <event name="jdk.CodeCacheStatistics"><setting name="enabled">true</setting><setting name="period">1 s</setting></event>
+  <event name="jdk.ClassLoad"><setting name="enabled">true</setting></event>
+  <event name="jdk.ClassUnload"><setting name="enabled">true</setting></event>
+  <event name="jdk.MetaspaceSummary"><setting name="enabled">true</setting></event>
+  <event name="jdk.MetaspaceGCThreshold"><setting name="enabled">true</setting></event>
+  <event name="jdk.FileRead"><setting name="enabled">true</setting><setting name="threshold">0 ns</setting><setting name="stackTrace">true</setting></event>
+  <event name="jdk.FileWrite"><setting name="enabled">true</setting><setting name="threshold">0 ns</setting><setting name="stackTrace">true</setting></event>
+  <event name="jdk.SocketRead"><setting name="enabled">true</setting><setting name="threshold">0 ns</setting><setting name="stackTrace">true</setting></event>
+  <event name="jdk.SocketWrite"><setting name="enabled">true</setting><setting name="threshold">0 ns</setting><setting name="stackTrace">true</setting></event>
+  <event name="jdk.JavaExceptionThrow"><setting name="enabled">true</setting><setting name="stackTrace">true</setting></event>
+  <event name="jdk.JavaErrorThrow"><setting name="enabled">true</setting><setting name="stackTrace">true</setting></event>
+  <event name="jdk.OSInformation"><setting name="enabled">true</setting></event>
+  <event name="jdk.PhysicalMemory"><setting name="enabled">true</setting><setting name="period">1 s</setting></event>
+  <event name="jdk.SwapSpace"><setting name="enabled">true</setting><setting name="period">1 s</setting></event>
+  <event name="jdk.ContainerConfiguration"><setting name="enabled">true</setting></event>
+  <event name="jdk.ContainerCPUUsage"><setting name="enabled">true</setting><setting name="period">1 s</setting></event>
+  <event name="jdk.ContainerCPUThrottling"><setting name="enabled">true</setting><setting name="period">1 s</setting></event>
+  <event name="jdk.ContainerMemoryUsage"><setting name="enabled">true</setting><setting name="period">1 s</setting></event>
+  <event name="jdk.SystemProcess"><setting name="enabled">true</setting><setting name="period">1 s</setting></event>
+  <event name="jdk.DataLoss"><setting name="enabled">true</setting></event>
+  <event name="com.surprising.OwnerCommitMeasurement"><setting name="enabled">true</setting></event>
+  <event name="com.surprising.LinearPerpetualWorkload"><setting name="enabled">true</setting></event>
+  <event name="com.surprising.LinearPerpetualSaturation"><setting name="enabled">true</setting></event>
+  <event name="com.surprising.LinearPerpetualBusinessLatency"><setting name="enabled">true</setting></event>
+</configuration>

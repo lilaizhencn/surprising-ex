@@ -369,7 +369,8 @@ class CoreLifecycleStateTest {
         TradingCoreState resolved = reducer.resolveLiquidation(funded,
                 new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, deficit));
         assertThat(resolved.treasuryState().insuranceBalances()).containsEntry("USDT", 100L);
-        assertThat(resolved.user(1).totalUnits("USDT")).isEqualTo(deficit);
+        assertThat(resolved.treasuryState().insuranceDeficits().getOrDefault("USDT", 0L)).isZero();
+        assertThat(resolved.user(1).totalUnits("USDT")).isZero();
         assertThat(resolved.riskState().liquidations().get(1L).status())
                 .isEqualTo(CoreLiquidationState.Status.COMPLETED);
     }
@@ -628,9 +629,6 @@ class CoreLifecycleStateTest {
                 }
             }
         }
-        long unresolved = state.riskState().liquidations().values().stream()
-                .filter(liquidation -> state.instruments().get(liquidation.symbol()).settleAsset().equals(asset))
-                .mapToLong(CoreLiquidationState::deficitUnits).sum();
-        return Math.subtractExact(Math.addExact(total(state, asset), unrealized), unresolved);
+        return Math.addExact(total(state, asset), unrealized);
     }
 }

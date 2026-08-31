@@ -67,6 +67,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private final AtomicInteger dispatchHighWaterMark = new AtomicInteger();
     private final Function<Supplier<CompletableFuture<CommandResultCode>>, CompletableFuture<CommandResultCode>>
             snapshotPersistence;
+    private Runnable deferredActivation;
+    private boolean activationComplete;
 
     public DeterministicExchangeCoreAdapter() {
         this(true);
@@ -91,6 +93,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         this.snapshotPersistence = java.util.Objects.requireNonNull(snapshotPersistence, "snapshotPersistence");
         if (startImmediately) {
             start();
+            activationComplete = true;
         }
     }
 
@@ -99,15 +102,35 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             Iterable<CoreOrderState> activeOrders,
             long coreSequence,
             MatcherSnapshot snapshot) {
+        this(state, activeOrders, coreSequence, snapshot, true);
+    }
+
+    public DeterministicExchangeCoreAdapter(
+            TradingCoreState state,
+            Iterable<CoreOrderState> activeOrders,
+            long coreSequence,
+            MatcherSnapshot snapshot,
+            boolean startImmediately) {
+        this(state, activeOrders, coreSequence, snapshot, startImmediately,
+                state == null ? 0 : state.businessStateHash());
+    }
+
+    public DeterministicExchangeCoreAdapter(
+            TradingCoreState state,
+            Iterable<CoreOrderState> activeOrders,
+            long coreSequence,
+            MatcherSnapshot snapshot,
+            boolean startImmediately,
+            long expectedCoreBusinessStateHash) {
         this.snapshotPersistence = submission -> submission.get();
         if (snapshot == null || activeOrders == null) {
             throw new IllegalArgumentException("matcher snapshot is required");
         }
         try {
-            snapshot.verifyCoreState(state, coreSequence);
+            snapshot.verifyCoreState(state, coreSequence, expectedCoreBusinessStateHash);
             this.topology = snapshot.topology();
             this.matcherEvidence = new MatcherEvidenceLedger(
-                    topology, snapshot.matcherSequence(), snapshot.matcherShardProgress());
+                    topology, 0, snapshot.matcherShardProgress());
             serializationProcessor.importSnapshot(snapshot.modules());
             snapshot.symbols().forEach((symbol, symbolId) -> {
                 String previous = symbolNames.put(symbolId, symbol);
@@ -117,24 +140,50 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 symbols.put(symbol, symbolId);
             });
             users.addAll(snapshot.users());
-            start(snapshot);
-            reconcileOpenOrdersAsync(activeOrders, coreSequence, snapshot.snapshotId(), "matcher restore").join();
-            StateHashes restoredHashes = currentStateHashesAsync().join();
-            if (restoredHashes.engineHash() != snapshot.engineStateHash()
-                    || restoredHashes.bookHash() != snapshot.bookStateHash()) {
-                throw new FatalMatchingDivergenceException("matcher restore", coreSequence,
-                        snapshot.snapshotId(), "restored exchange-core state hash mismatch"
-                                + " (expectedEngine=" + snapshot.engineStateHash()
-                                + ", actualEngine=" + restoredHashes.engineHash()
-                                + ", expectedBook=" + snapshot.bookStateHash()
-                                + ", actualBook=" + restoredHashes.bookHash() + ')');
-            }
+            List<CoreOrderState> restoredOrders = new ArrayList<>();
+            activeOrders.forEach(restoredOrders::add);
+            deferredActivation = () -> activateRestoredMatcher(
+                    state, restoredOrders, coreSequence, snapshot);
+            if (startImmediately) activate();
         } catch (RuntimeException exception) {
             stop();
             Throwable cause = unwrap(exception);
             if (cause instanceof FatalMatchingDivergenceException divergence) throw divergence;
             throw new FatalMatchingDivergenceException("matcher restore", coreSequence,
                     snapshot.snapshotId(), "native snapshot validation failed", cause);
+        }
+    }
+
+    public synchronized void activate() {
+        if (activationComplete) return;
+        try {
+            Runnable activation = deferredActivation;
+            if (activation == null) start(); else activation.run();
+            deferredActivation = null;
+            activationComplete = true;
+        } catch (RuntimeException exception) {
+            stop();
+            Throwable cause = unwrap(exception);
+            if (cause instanceof FatalMatchingDivergenceException divergence) throw divergence;
+            throw exception;
+        }
+    }
+
+    public synchronized boolean activated() { return activationComplete; }
+
+    private void activateRestoredMatcher(TradingCoreState state, Iterable<CoreOrderState> activeOrders,
+                                         long coreSequence, MatcherSnapshot snapshot) {
+        start(snapshot);
+        reconcileOpenOrdersAsync(activeOrders, coreSequence, snapshot.snapshotId(), "matcher restore").join();
+        StateHashes restoredHashes = currentStateHashesAsync().join();
+        if (restoredHashes.engineHash() != snapshot.engineStateHash()
+                || restoredHashes.bookHash() != snapshot.bookStateHash()) {
+            throw new FatalMatchingDivergenceException("matcher restore", coreSequence,
+                    snapshot.snapshotId(), "restored exchange-core state hash mismatch"
+                            + " (expectedEngine=" + snapshot.engineStateHash()
+                            + ", actualEngine=" + restoredHashes.engineHash()
+                            + ", expectedBook=" + snapshot.bookStateHash()
+                            + ", actualBook=" + restoredHashes.bookHash() + ')');
         }
     }
 
@@ -258,6 +307,10 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             boolean controlShard,
             CoreMatchingResult result) {
         if (result == null) throw new IllegalStateException("matcher command returned no result");
+        Throwable matcherPoison = matcherFailure.get();
+        if (matcherPoison != null) {
+            throw new IllegalStateException("matcher completion discarded after fatal divergence", matcherPoison);
+        }
         CoreMatchingResult bound = matcherEvidence.bind(coreSequence, commandId, orderId,
                 instrumentVersion, aeronTimestamp, sequence,
                 controlShard ? -1 : matcherShardId(result), result);
@@ -814,7 +867,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private void stop() {
         if (core != null) {
             awaitSnapshotOperations();
-            if (api != null) {
+            if (api != null && matcherFailure.get() == null) {
                 submitOrdered(() -> api.processReport(
                         new exchange.core2.core.common.api.reports.StateHashReportQuery(), 0)).join();
             }
@@ -846,6 +899,10 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         return previous.thenCompose(ignored -> {
             CompletableFuture<T> result;
             try {
+                Throwable matcherPoison = matcherFailure.get();
+                if (matcherPoison != null) {
+                    throw new IllegalStateException("matcher is poisoned by an earlier command", matcherPoison);
+                }
                 result = submission.get();
                 result.whenComplete((value, failure) -> gate.complete(null));
             } catch (RuntimeException exception) {

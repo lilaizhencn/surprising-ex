@@ -60,6 +60,7 @@ class SurprisingClusteredServiceTest {
         AtomicReference<CoreResponse> response = new AtomicReference<>();
         Thread serviceThread = new Thread(() -> {
             try {
+                service.onStart(cluster(), null);
                 response.set(service.state().apply(command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
                         CoreProtocol.probePayload(1))));
             } catch (Throwable throwable) {
@@ -146,6 +147,7 @@ class SurprisingClusteredServiceTest {
         SurprisingClusteredService source = service();
         SurprisingClusteredService target = service();
         try {
+            source.onStart(cluster(), null);
             assertThat(source.state().apply(command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
                     CoreProtocol.probePayload(9))).status()).isEqualTo(ResponseStatus.APPLIED);
             byte[] snapshot = source.state().snapshot(45);
@@ -173,8 +175,8 @@ class SurprisingClusteredServiceTest {
     void emptyAndIncompleteFragmentSourcesFailBeforeStateReplacement() {
         SurprisingClusteredService service = service();
         try {
-            CoreProbeState before = service.state();
             service.onStart(cluster(), null);
+            CoreProbeState before = service.state();
             assertThatThrownBy(() -> service.loadSnapshot((handler, limit) -> 0, () -> true))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("incomplete");
             assertThat(service.state()).isSameAs(before);
@@ -208,6 +210,7 @@ class SurprisingClusteredServiceTest {
     void doesNotReplaceStateAfterCorruptSnapshot() {
         SurprisingClusteredService service = service();
         try {
+            service.onStart(cluster(), null);
             CoreProbeState before = service.state();
             byte[] snapshot = before.snapshot();
             snapshot[snapshot.length / 2] ^= 1;
@@ -225,6 +228,7 @@ class SurprisingClusteredServiceTest {
     void pairedManifestMismatchFailsBeforeLiveStateReplacement() {
         SurprisingClusteredService service = service();
         try {
+            service.onStart(cluster(), null);
             CoreProbeState before = service.state();
             assertThat(before.apply(command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
                     CoreProtocol.probePayload(9))).status()).isEqualTo(ResponseStatus.APPLIED);
@@ -274,10 +278,11 @@ class SurprisingClusteredServiceTest {
         SurprisingClusteredService service = service();
         AtomicInteger attempts = new AtomicInteger();
         AtomicLong correlationId = new AtomicLong();
+        List<byte[]> responses = new CopyOnWriteArrayList<>();
         try {
-            preparePendingPlace(service.state(), 902);
-
             service.onStart(clusterWithTimerBackpressure(attempts, correlationId), null);
+            preparePendingPlace(service.state(), 902);
+            service.onSessionOpen(clientSession(responses), 1_000);
 
             assertThat(attempts).hasValue(3);
             assertThat(correlationId).hasValue(Long.MAX_VALUE - 1);
@@ -364,6 +369,7 @@ class SurprisingClusteredServiceTest {
         // Given
         SurprisingClusteredService service = service();
         try {
+            service.onStart(cluster(), null);
             CoreProbeState before = service.state();
             assertThat(before.apply(command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
                     CoreProtocol.probePayload(7))).status()).isEqualTo(ResponseStatus.APPLIED);
@@ -430,6 +436,7 @@ class SurprisingClusteredServiceTest {
         SurprisingClusteredService service = service();
         List<byte[]> responses = new CopyOnWriteArrayList<>();
         try {
+            service.onStart(cluster(), null);
             CoreProbeState state = service.state();
             assertThat(state.apply(timerInstrument()).status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(state.apply(command(CoreMessageType.ADJUST_BALANCE, 1, 1001,

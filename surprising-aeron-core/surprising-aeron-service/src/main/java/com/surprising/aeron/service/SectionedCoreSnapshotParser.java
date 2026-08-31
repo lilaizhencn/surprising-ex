@@ -28,14 +28,20 @@ import java.util.UUID;
 
 final class SectionedCoreSnapshotParser {
 
+    private static volatile java.util.function.Consumer<CoreProbeState> beforeActivationObserverForTest;
+
     private SectionedCoreSnapshotParser() {
+    }
+
+    static void setBeforeActivationObserverForTest(java.util.function.Consumer<CoreProbeState> observer) {
+        beforeActivationObserverForTest = observer;
     }
 
     static Components parse(byte[][] payloads, ProductLine expectedProductLine) {
         HeaderManifest manifest = SectionedCoreSnapshotValidation.parseHeader(payloads[0], expectedProductLine);
         Map<CoreProbeState.SourceKey, Long> sourceSequences = parseSources(payloads[1]);
         Map<UUID, CoreProbeState.StoredResult> commandResults = parseResults(payloads[2]);
-        CoreExportState exportState = parseOutbox(payloads[3]);
+        OutboxSnapshot outbox = parseOutbox(payloads[3]);
         MatcherSnapshot matcherSnapshot = MatcherSnapshotCodec.decode(payloads[4]);
         TradingCoreState tradingState = TradingStateSnapshotCodec.decode(payloads[5], manifest.productLine());
         Map<Long, CoreFeePolicyState> feePolicies = CoreFeePolicySnapshotCodec.decode(payloads[6]);
@@ -49,14 +55,25 @@ final class SectionedCoreSnapshotParser {
         for (int index = 0; index < laneSectionCount; index++) {
             accountLanes.add(parseAccountLane(payloads[9 + index], manifest));
         }
-        SectionedCoreSnapshotValidation.validatePairing(
-                manifest, sourceSequences, exportState, matcherSnapshot, tradingState);
-        matcherSnapshot.verifyCoreState(tradingState, manifest.appliedCommandCount());
-        long checksum = ByteBuffer.wrap(payloads[payloads.length - 1]).order(ByteOrder.LITTLE_ENDIAN).getLong();
-        return new Components(manifest.productLine(), manifest.appliedCommandCount(), manifest.probeValue(),
-                commandResults, sourceSequences, exportState, matcherSnapshot, tradingState, feePolicies,
-                pendingTransfers, retention, accountLanes,
-                manifest, checksum);
+        SectionedCoreSnapshotValidation.validateAccountLanes(manifest, accountLanes);
+        CoreExportState exportState = null;
+        try {
+            exportState = CoreExportState.restore(expectedProductLine,
+                    outbox.acknowledgedSequence(), outbox.nextSequence(), outbox.events());
+            SectionedCoreSnapshotValidation.validatePairing(
+                    manifest, sourceSequences, exportState, matcherSnapshot, tradingState,
+                    feePolicies, pendingTransfers);
+            CoreSnapshotImage.verifyMatcherState(matcherSnapshot, tradingState,
+                    manifest.appliedCommandCount(), manifest.businessStateHash());
+            long checksum = ByteBuffer.wrap(payloads[payloads.length - 1])
+                    .order(ByteOrder.LITTLE_ENDIAN).getLong();
+            return new Components(manifest.productLine(), manifest.appliedCommandCount(), manifest.probeValue(),
+                    commandResults, sourceSequences, exportState, matcherSnapshot, tradingState, feePolicies,
+                    pendingTransfers, retention, accountLanes, manifest, checksum);
+        } catch (RuntimeException failure) {
+            if (exportState != null) exportState.close();
+            throw failure;
+        }
     }
 
     private static AccountLaneSnapshot parseAccountLane(byte[] payload, HeaderManifest manifest) {
@@ -124,7 +141,7 @@ final class SectionedCoreSnapshotParser {
         return commandResults;
     }
 
-    private static CoreExportState parseOutbox(byte[] payload) {
+    private static OutboxSnapshot parseOutbox(byte[] payload) {
         ByteBuffer outbox = wrap(payload);
         if (outbox.remaining() < SectionedCoreSnapshotCodec.OUTBOX_FIXED_LENGTH) {
             throw new ProtocolException("truncated snapshot outbox");
@@ -144,11 +161,7 @@ final class SectionedCoreSnapshotParser {
             events.add(CoreMessageCodec.decode(event));
         }
         requireConsumed(outbox, "outbox");
-        try {
-            return CoreExportState.restore(acknowledgedSequence, nextSequence, events);
-        } catch (IllegalArgumentException exception) {
-            throw new ProtocolException("invalid snapshot outbox metadata");
-        }
+        return new OutboxSnapshot(acknowledgedSequence, nextSequence, List.copyOf(events));
     }
 
     private static SnapshotResult readResult(ByteBuffer source) {
@@ -205,6 +218,9 @@ final class SectionedCoreSnapshotParser {
     private record SnapshotResult(UUID commandId, CoreProbeState.StoredResult value) {
     }
 
+    private record OutboxSnapshot(long acknowledgedSequence, long nextSequence, List<CoreMessage> events) {
+    }
+
     record Components(
             ProductLine productLine,
             long appliedCommandCount,
@@ -223,16 +239,34 @@ final class SectionedCoreSnapshotParser {
 
         CoreProbeState restore(ProductLine expectedProductLine) {
             requireProductLine(expectedProductLine);
+            CoreProbeState candidate = null;
             try {
-                CoreProbeState state = CoreProbeState.restore(productLine, appliedCommandCount, probeValue,
-                        commandResults, sourceSequences, tradingState, exportState, retention, matcherSnapshot);
-                state.restoreFeePolicies(feePolicies);
-                state.restorePendingTransfers(pendingTransfers);
-                state.restoreAccountLaneSnapshots(accountLanes, manifest.coreSequence());
-                return state;
-            } catch (IllegalArgumentException exception) {
+                com.surprising.aeron.service.state.TradingRuntimeState.validateAccountLaneSnapshotManifest(
+                        accountLanes, manifest.coreSequence(), tradingState, manifest.topology());
+                candidate = CoreProbeState.prepareRestore(productLine, appliedCommandCount, probeValue,
+                        commandResults, sourceSequences, tradingState, exportState, retention, matcherSnapshot,
+                        manifest.projectionSequence(), feePolicies, pendingTransfers);
+                candidate.restoreAccountLaneSnapshots(accountLanes, manifest.coreSequence());
+                java.util.function.Consumer<CoreProbeState> observer = beforeActivationObserverForTest;
+                if (observer != null) observer.accept(candidate);
+                candidate.activate();
+                return candidate;
+            } catch (RuntimeException exception) {
+                if (candidate != null) {
+                    try {
+                        candidate.close();
+                    } catch (RuntimeException closeFailure) {
+                        exception.addSuppressed(closeFailure);
+                    }
+                } else {
+                    try {
+                        exportState.close();
+                    } catch (RuntimeException closeFailure) {
+                        exception.addSuppressed(closeFailure);
+                    }
+                }
                 throw new com.surprising.aeron.protocol.ProtocolException(
-                        "invalid account lane snapshot: " + exception.getMessage());
+                        "invalid restored snapshot state: " + exception.getMessage(), exception);
             }
         }
 

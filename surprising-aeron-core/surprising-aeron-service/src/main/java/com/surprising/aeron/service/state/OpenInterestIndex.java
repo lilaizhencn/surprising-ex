@@ -29,28 +29,13 @@ public final class OpenInterestIndex {
         return value == null ? 0 : Math.max(value.longQuantity(), value.shortQuantity());
     }
 
-    public void update(TradingCoreState before, TradingCoreState after) {
-        if (before.users() == after.users()) return;
-        StateMapSupport.requireDeltaLineage(before.users(), after.users(), "open interest users");
-        Set<Long> changedUsers = StateMapSupport.changedKeys(after.users());
-        for (Long userId : changedUsers) {
-            if (userId == null) continue;
-            CoreUserState previous = before.user(userId);
-            CoreUserState current = after.user(userId);
-            if (previous != null) previous.positions().values().forEach(this::remove);
-            if (current != null) current.positions().values().forEach(this::add);
-        }
-    }
-
-    public void update(RuntimeCommitEntry entry) {
-        RuntimeMutationDelta.ValueChanges<Long, PositionRuntime> changes = entry.mutation().positions();
-        for (Long positionKey : changes.changedKeys()) {
-            RuntimePositionIndexValue previous = positions.remove(positionKey);
+    void apply(java.util.List<RuntimeCommitPatch.PositionChange> changes, RuntimeCommitPatch.IdentityView identities) {
+        for (RuntimeCommitPatch.PositionChange change : changes) {
+            RuntimePositionIndexValue previous = positions.remove(change.positionKey());
             if (previous != null) remove(previous);
-            PositionRuntime current = changes.currentValues().get(positionKey);
-            if (current != null) {
-                RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(current, entry.identities());
-                positions.put(positionKey, indexed);
+            if (change.after() != null) {
+                RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(change.after(), identities);
+                positions.put(change.positionKey(), indexed);
                 add(indexed);
             }
         }

@@ -11,14 +11,15 @@ public record CoreResponse(
         long stateHash,
         byte[] data) {
 
+    private static final byte[] EMPTY_DATA = new byte[0];
+
     public CoreResponse {
         if (status == null || commandStatus == null || resultCode == null
                 || routeVersion != CoreRoute.DEFAULT.version() || committedCoreSequence < 0
-                || committedCoreSequence > appliedCommandCount || appliedCommandCount < 0
-                || requiredExportSequence < 0) {
+                || appliedCommandCount < 0 || requiredExportSequence < 0) {
             throw new IllegalArgumentException("invalid core response");
         }
-        data = data == null ? new byte[0] : data.clone();
+        data = data == null || data.length == 0 ? EMPTY_DATA : data.clone();
     }
 
     public CoreResponse(ResponseStatus status, ResponseStatus commandStatus, CoreResultCode resultCode,
@@ -69,6 +70,14 @@ public record CoreResponse(
 
     @Override
     public byte[] data() {
-        return data.clone();
+        return data.length == 0 ? EMPTY_DATA : data.clone();
+    }
+
+    int dataLength() {
+        return data.length;
+    }
+
+    byte[] dataUnsafe() {
+        return data;
     }
 }

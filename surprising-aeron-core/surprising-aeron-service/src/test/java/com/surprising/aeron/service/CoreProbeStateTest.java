@@ -20,7 +20,6 @@ import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
-import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
@@ -37,13 +36,486 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.parallel.ResourceLock;
+import org.junit.jupiter.api.parallel.Resources;
 
+@ResourceLock(Resources.SYSTEM_PROPERTIES)
 class CoreProbeStateTest {
+
+    @Test
+    void directCoreProbeAdmissionReleasesUnusedJournalSliceAfterFactPublication() throws Exception {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            var journal = commitJournal(state);
+            long publishedBefore = journal.publishedSequence();
+            long exportBefore = state.exportState().nextSequence();
+
+            CoreResponse response = state.apply(command(UUID.randomUUID(), 1, 7));
+
+            assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(journal.publishedSequence()).isEqualTo(publishedBefore);
+            assertThat(state.exportState().nextSequence()).isEqualTo(exportBefore + 1);
+            assertThat(journal.metrics().reservedEntries()).isZero();
+            assertThat(journal.metrics().reservedBytes()).isZero();
+            assertThat(state.exportState().metrics().reservedEvents()).isZero();
+            assertThat(state.exportState().metrics().reservedBytes()).isZero();
+        }
+    }
+
+    @Test
+    void matchingCoreProbeAdmissionConsumesPrepareSliceAndReleasesTerminalRemainder() throws Exception {
+        try (CoreProbeState state = fundedSpotState()) {
+            var journal = commitJournal(state);
+            CoreMessage place = placeOrder(UUID.randomUUID(), 3, 9_001, "matching-demand-9001");
+
+            CoreResponse pending = state.apply(place);
+
+            assertThat(pending.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            PendingMatching pendingMatching = state.pendingMatching(state.matchingSequence(place.header().commandId()));
+            assertThat(pendingMatching).isNotNull();
+            assertThat(journal.metrics().reservedEntries()).isEqualTo(1);
+            assertThat(state.exportState().metrics().reservedEvents()).isEqualTo(1);
+            assertThat(pendingMatching.capacityReservation().remainingPatches()).isEqualTo(1);
+            assertThat(pendingMatching.capacityReservation().remainingFacts()).isEqualTo(1);
+
+            assertThat(completeMatching(state, state.matchingSequence(place.header().commandId()), place).status())
+                    .isEqualTo(ResponseStatus.APPLIED);
+            assertThat(journal.metrics().reservedEntries()).isZero();
+            assertThat(journal.metrics().reservedBytes()).isZero();
+            assertThat(state.exportState().metrics().reservedEvents()).isZero();
+            assertThat(state.exportState().metrics().reservedBytes()).isZero();
+        }
+    }
+
+    @Test
+    void deferredCoreProbeAdmissionStaysReservedUntilDeferredMatchingCompletes() throws Exception {
+        try (CoreProbeState state = fundedSpotState()) {
+            CoreMessage batch = tradingCommand(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 3,
+                    com.surprising.aeron.protocol.TradingOrderBatchCodec.encodePlaceOrderBatch(
+                            new com.surprising.aeron.protocol.PlaceOrderBatchCommand(List.of(
+                                    new PlaceOrderCommand(9_101, "BTC-USDT", 1, CoreOrderSide.BUY, 600, 1,
+                                            false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                                            CoreOrderType.LIMIT, CoreTimeInForce.GTC, false,
+                                            "batch-demand-9101")))));
+            CoreMessage deferred = placeOrder(UUID.randomUUID(), 4, 9_102, "deferred-demand-9102");
+
+            assertThat(state.apply(batch).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            CoreResponse deferredResponse = state.apply(deferred);
+
+            assertThat(deferredResponse.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            PendingMatching deferredPending = state.pendingMatching(
+                    state.matchingSequence(deferred.header().commandId()));
+            assertThat(deferredPending).isNotNull();
+            assertThat(deferredPending.capacityReservation().remainingPatches()).isEqualTo(1);
+            assertThat(deferredPending.capacityReservation().remainingFacts()).isEqualTo(1);
+            assertThat(commitJournal(state).metrics().reservedEntries()).isPositive();
+            assertThat(state.exportState().metrics().reservedEvents()).isPositive();
+
+            while (!state.pendingMatching().isEmpty()) {
+                long sequence = state.pendingMatching().keySet().iterator().next();
+                completeMatching(state, sequence, state.pendingMatching(sequence).command());
+            }
+            assertThat(commitJournal(state).metrics().reservedEntries()).isZero();
+            assertThat(state.exportState().metrics().reservedEvents()).isZero();
+        }
+    }
+
+    @Test
+    void queuedCoreProbeAdmissionRetainsSharedSlicesUntilTriggeredMatchingCompletes() throws Exception {
+        try (CoreProbeState state = fundedSpotState()) {
+            var trigger = new com.surprising.aeron.protocol.CoreTriggerOrderStateView(9_201,
+                    ProductLine.SPOT, 1001, "queued-demand-9201", "", "BTC-USDT", CoreOrderSide.SELL,
+                    com.surprising.aeron.protocol.CoreTriggerOrderType.TAKE_PROFIT,
+                    com.surprising.aeron.protocol.CoreTriggerCondition.GREATER_OR_EQUAL, 70_000,
+                    0, 0, 0, 0, 0, CoreOrderType.MARKET, CoreTimeInForce.IOC, 0, 1,
+                    CoreMarginMode.CROSS, CorePositionSide.NET,
+                    com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING, 0, 0, 0,
+                    "", "queued-demand", 0, 0, 1_000, 1_000, 1);
+            assertThat(state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 3,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 1))))
+                    .status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(state.apply(tradingCommand(CoreMessageType.PLACE_TRIGGER_ORDER, UUID.randomUUID(), 4,
+                    com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeState(trigger))).status())
+                    .isEqualTo(ResponseStatus.APPLIED);
+            CoreMessage mark = tradingCommand(CoreMessageType.APPLY_MARK_PRICE, UUID.randomUUID(), 5,
+                    TradingCommandCodec.encodeApplyMarkPrice(
+                            new ApplyMarkPriceCommand("BTC-USDT", 1, 70_000, 7, 1_000)));
+
+            assertThat(state.apply(mark).status()).isEqualTo(ResponseStatus.APPLIED);
+            CoreMessage continuation = tradingCommand(CoreMessageType.CONTINUE_RISK_SCAN, UUID.randomUUID(), 6,
+                    TradingCommandCodec.encodeContinueRiskScan(
+                            new com.surprising.aeron.protocol.ContinueRiskScanCommand(64)));
+
+            assertThat(state.apply(continuation).status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(state.pendingMatching()).isNotEmpty();
+            PendingMatching queuedPending = state.pendingMatching().values().iterator().next();
+            assertThat(queuedPending.capacityReservation().remainingPatches()).isEqualTo(2);
+            assertThat(queuedPending.capacityReservation().remainingFacts()).isEqualTo(2);
+            assertThat(commitJournal(state).metrics().reservedEntries()).isPositive();
+            assertThat(state.exportState().metrics().reservedEvents()).isPositive();
+
+            while (!state.pendingMatching().isEmpty()) {
+                long sequence = state.pendingMatching().keySet().iterator().next();
+                completeMatching(state, sequence, state.pendingMatching(sequence).command());
+            }
+            assertThat(commitJournal(state).metrics().reservedEntries()).isZero();
+            assertThat(commitJournal(state).metrics().reservedBytes()).isZero();
+            assertThat(state.exportState().metrics().reservedEvents()).isZero();
+            assertThat(state.exportState().metrics().reservedBytes()).isZero();
+        }
+    }
+
+    @Test
+    void unusedCombinedAdmissionReleasesJournalAndExportBytes() {
+        var initial = com.surprising.aeron.service.state.TradingCoreState.empty(ProductLine.SPOT);
+        try (var journal = new com.surprising.aeron.service.state.RuntimeCommitJournal(
+                ProductLine.SPOT, initial, initial.businessStateHash(),
+                com.surprising.aeron.service.state.RollingFundsStateHash.compute(initial));
+             var exportState = new CoreExportState()) {
+            var reservation = CoreAdmissionReservation.reserve(journal, exportState,
+                    CoreAdmissionReservation.AdmissionDemand.matching(tradingCommand(
+                            CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 1,
+                            TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(91, "BTC-USDT", 1,
+                                    CoreOrderSide.BUY, 70_000, 1, false, CoreMarginMode.CROSS,
+                                    CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
+                                    false, "budget")))));
+            assertThat(journal.metrics().reservedEntries()).isEqualTo(1);
+            assertThat(journal.metrics().reservedBytes()).isPositive();
+            assertThat(exportState.metrics().reservedEvents()).isEqualTo(1);
+            assertThat(exportState.metrics().reservedBytes()).isPositive();
+
+            reservation.retainHolders(1);
+            assertThat(reservation.holders()).isEqualTo(2);
+            reservation.releaseUnused();
+            assertThat(journal.metrics().reservedEntries()).isEqualTo(1);
+            assertThat(exportState.metrics().reservedEvents()).isEqualTo(1);
+            reservation.releaseUnused();
+
+            assertThat(reservation.holders()).isZero();
+            assertThat(reservation.remainingFactNodes()).isZero();
+            assertThat(reservation.remainingFactItems()).isZero();
+            assertThat(reservation.remainingFactBytes()).isZero();
+            assertThat(journal.metrics().reservedEntries()).isZero();
+            assertThat(journal.metrics().reservedBytes()).isZero();
+            assertThat(exportState.metrics().reservedEvents()).isZero();
+            assertThat(exportState.metrics().reservedBytes()).isZero();
+        }
+    }
+
+    @Test
+    void factBudgetRejectsOneMoreNodeItemAndByteWithoutDrift() {
+        var nodes = new CoreAdmissionReservation.FactBudget(1, 4, 64);
+        nodes.reservePatch();
+        assertThatThrownBy(nodes::reservePatch).isInstanceOf(IllegalStateException.class);
+        assertThat(nodes.remainingNodes()).isZero();
+        assertThat(nodes.remainingItems()).isEqualTo(4);
+        assertThat(nodes.remainingBytes()).isEqualTo(64);
+
+        CoreMessage command = command(UUID.randomUUID(), 1, 1);
+        var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
+        var patch = conservedFundsPatch(identities, command);
+        var items = new CoreAdmissionReservation.FactBudget(1, patch.coreFactItemCount() - 1,
+                patch.estimatedCoreFactBytes());
+        var itemPermit = items.reservePatch();
+        assertThatThrownBy(() -> itemPermit.consume(patch)).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("pre-mutation fact bound");
+        assertThat(items.remainingItems()).isEqualTo(patch.coreFactItemCount() - 1);
+        assertThat(items.remainingBytes()).isEqualTo(patch.estimatedCoreFactBytes());
+
+        var bytes = new CoreAdmissionReservation.FactBudget(1, patch.coreFactItemCount(),
+                patch.estimatedCoreFactBytes() - 1);
+        var bytePermit = bytes.reservePatch();
+        assertThatThrownBy(() -> bytePermit.consume(patch)).isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("pre-mutation fact bound");
+        assertThat(bytes.remainingItems()).isEqualTo(patch.coreFactItemCount());
+        assertThat(bytes.remainingBytes()).isEqualTo(patch.estimatedCoreFactBytes() - 1);
+    }
+
+    @Test
+    void factPermitRejectsReuseReorderForeignOwnerAndOrdinalGap() {
+        var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
+        int symbolId = identities.symbolId("BTC-USDT");
+        var open = new com.surprising.aeron.service.state.OrderRuntime(81, 17, symbolId, 2);
+        var closed = new com.surprising.aeron.service.state.OrderRuntime(81, 17, symbolId, 2, true);
+        var first = orderPatch(identities, null, open, 0, 1);
+        var second = orderPatch(identities, open, closed, 1, 2);
+
+        var orderedBudget = new CoreAdmissionReservation.FactBudget(2, 16, 32_768);
+        var firstPermit = orderedBudget.reservePatch();
+        var secondPermit = orderedBudget.reservePatch();
+        assertThatThrownBy(() -> secondPermit.consume(second))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("gap or reorder");
+        firstPermit.consume(first);
+        assertThatThrownBy(() -> firstPermit.consume(first))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("already resolved");
+        secondPermit.consume(second);
+
+        var foreign = factPermit(second);
+        var firstChain = new CoreExportState.PatchChain(first, null, firstPermit);
+        assertThatThrownBy(() -> new CoreExportState.PatchChain(second, firstChain, foreign))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("foreign");
+
+        var gapBudget = new CoreAdmissionReservation.FactBudget(2, 16, 32_768);
+        var returned = gapBudget.reservePatch();
+        var gap = gapBudget.reservePatch();
+        returned.returnUnused();
+        assertThatThrownBy(() -> gap.consume(second))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("gap");
+
+        var staleBudget = new CoreAdmissionReservation.FactBudget(1, 8, 16_384);
+        var stale = staleBudget.reservePatch();
+        staleBudget.release();
+        assertThatThrownBy(() -> stale.consume(first))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("released");
+    }
+
+    @Test
+    void ordinaryMatchingReservesItsBoundedDemandInsteadOfTheGlobalPatchMaximum() {
+        CoreMessage command = tradingCommand(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 1,
+                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(91, "BTC-USDT", 1,
+                        CoreOrderSide.BUY, 70_000, 1, false, CoreMarginMode.CROSS,
+                        CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
+                        false, "bounded-patch")));
+
+        var demand = CoreAdmissionReservation.AdmissionDemand.matching(command);
+
+        assertThat(demand.patchBytes()).isEqualTo(demand.factByteUpperBound());
+        assertThat(demand.patchBytes())
+                .isLessThan(com.surprising.aeron.service.state.RuntimeCommitJournal.maxReservedPatchBytes());
+    }
+
+    @Test
+    void linearPerpetualFundingRiskLiquidationAndAdlReceiveExactThreePatchBudget() {
+        List<CoreMessage> commands = List.of(
+                tradingCommand(ProductLine.LINEAR_PERPETUAL, CoreMessageType.APPLY_FUNDING,
+                        UUID.randomUUID(), 1, TradingCommandCodec.encodeApplyFunding(
+                                new com.surprising.aeron.protocol.ApplyFundingCommand(
+                                        1, "BTC-USDT", 1, 10, 0, 64))),
+                tradingCommand(ProductLine.LINEAR_PERPETUAL, CoreMessageType.CONTINUE_RISK_SCAN,
+                        UUID.randomUUID(), 2, TradingCommandCodec.encodeContinueRiskScan(
+                                new com.surprising.aeron.protocol.ContinueRiskScanCommand(64))),
+                tradingCommand(ProductLine.LINEAR_PERPETUAL, CoreMessageType.RESOLVE_LIQUIDATION,
+                        UUID.randomUUID(), 3, TradingCommandCodec.encodeResolveLiquidation(
+                                new com.surprising.aeron.protocol.ResolveLiquidationCommand(1,
+                                        com.surprising.aeron.protocol.ResolveLiquidationCommand.Resolution.ADL, 0))),
+                tradingCommand(ProductLine.LINEAR_PERPETUAL, CoreMessageType.EXECUTE_ADL,
+                        UUID.randomUUID(), 4, TradingCommandCodec.encodeExecuteAdl(
+                                new com.surprising.aeron.protocol.ExecuteAdlCommand(1, 1001, "BTC-USDT",
+                                        CoreMarginMode.CROSS, CorePositionSide.NET, 10, 70_000,
+                                        1, 1, 1))));
+        for (CoreMessage command : commands) {
+            var demand = CoreAdmissionReservation.AdmissionDemand.direct(command, 256);
+            assertThat(demand.factChainNodes()).isEqualTo(3);
+            var budget = new CoreAdmissionReservation.FactBudget(
+                    demand.factChainNodes(), demand.factItems(), demand.factByteUpperBound());
+            for (int node = 0; node < 3; node++) budget.reservePatch();
+            assertThat(budget.remainingNodes()).isZero();
+            budget.release();
+            assertThat(budget.remainingItems()).isZero();
+            assertThat(budget.remainingBytes()).isZero();
+        }
+    }
+
+    @Test
+    @Timeout(5)
+    void exportAdmissionReservationIsConsumedExactlyOnceAndBatched() {
+        try (CoreExportState exportState = new CoreExportState()) {
+            var reservation = exportState.reserveAdmission(2);
+            var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
+            CoreMessage first = command(UUID.randomUUID(), 1, 1);
+            CoreMessage second = command(UUID.randomUUID(), 2, 1);
+            exportState.append(reservation, draft(first, 1, 1, 0, transition, List.of()));
+            exportState.append(reservation, draft(second, 2, 2, 1, transition, List.of()));
+
+            assertThat(reservation.remainingEvents()).isZero();
+            assertThatThrownBy(() -> exportState.append(reservation,
+                    draft(command(UUID.randomUUID(), 3, 1), 3, 3, 2, transition, List.of())))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("consumed export admission");
+            assertThat(exportState.pending()).hasSize(2);
+            assertThat(exportState.metrics().reservedEvents()).isZero();
+            assertThat(exportState.metrics().materializationBacklog()).isZero();
+            assertThat(exportState.metrics().batchItems()).isEqualTo(2);
+            assertThat(exportState.acknowledge(new AckExportCommand(2))).isEmpty();
+            assertThat(exportState.metrics().currentBacklog()).isZero();
+            assertThat(exportState.metrics().acknowledgedMaterializationItems()).isZero();
+            assertThat(exportState.metrics().acknowledgedMaterializationBytes()).isZero();
+        }
+    }
+
+    @Test
+    void exportAdmissionReservationSharesAggregateBytesAcrossFactSlices() {
+        try (CoreExportState exportState = new CoreExportState()) {
+            var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
+            CoreMessage heavyCommand = tradingCommand(CoreMessageType.PROBE_INCREMENT, UUID.randomUUID(), 1,
+                    new byte[] {1});
+            int lightFactBytes = CoreProtocol.HEADER_LENGTH + 4_097;
+            int heavyFactBytes = lightFactBytes + 2_048;
+            var reservation = exportState.reserveAdmission(2, lightFactBytes + heavyFactBytes);
+            var heavyFact = draft(heavyCommand, 1, 1, 0, transition, List.of(1L));
+
+            assertThat(exportState.append(reservation, heavyFact)).isEqualTo(1);
+            assertThat(reservation.remainingEvents()).isEqualTo(1);
+            assertThat(exportState.metrics().reservedEvents()).isEqualTo(1);
+            assertThat(exportState.metrics().reservedBytes()).isEqualTo(lightFactBytes);
+
+            exportState.release(reservation);
+            assertThat(exportState.metrics().reservedEvents()).isZero();
+            assertThat(exportState.metrics().reservedBytes()).isZero();
+        }
+    }
+
+    @Test
+    void exportByteRingRejectsBeforeSequenceOrPendingStateDrifts() {
+        String property = "surprising.aeron.export-pending-bytes";
+        String previous = System.getProperty(property);
+        System.setProperty(property, Long.toString(CoreExportState.maxReservedEventBytes()));
+        CoreExportState.AdmissionReservation reservation = null;
+        CoreExportState exportState = null;
+        try {
+            exportState = new CoreExportState();
+            CoreExportState activeExportState = exportState;
+            reservation = exportState.reserveAdmission(1, CoreExportState.maxReservedEventBytes());
+            CoreExportState.Metrics before = exportState.metrics();
+
+            assertThatThrownBy(() -> activeExportState.reserveAdmission(1, CoreProtocol.HEADER_LENGTH))
+                    .isInstanceOf(com.surprising.aeron.service.state.CoreStateRejectedException.class)
+                    .hasMessageContaining("hard limit");
+
+            assertThat(exportState.pendingCount()).isZero();
+            assertThat(exportState.nextSequence()).isOne();
+            assertThat(exportState.metrics().reservedBytes()).isEqualTo(before.reservedBytes());
+            assertThat(exportState.metrics().reservedEvents()).isEqualTo(before.reservedEvents());
+            assertThat(exportState.metrics().rejectionCount()).isEqualTo(before.rejectionCount() + 1);
+            exportState.release(reservation);
+            reservation = null;
+        } finally {
+            if (reservation != null && exportState != null) exportState.release(reservation);
+            if (exportState != null) exportState.close();
+            restoreProperty(property, previous);
+        }
+    }
+
+    @Test
+    void missingOrZeroFactMetadataIsRejectedBeforeExportStateDrifts() {
+        try (CoreExportState exportState = new CoreExportState()) {
+            CoreMessage command = command(UUID.randomUUID(), 1, 1);
+            var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
+            CoreExportState.Metrics before = exportState.metrics();
+
+            assertThatThrownBy(() -> new CoreExportState.Draft(command, ResponseStatus.APPLIED,
+                    CoreResultCode.NONE, 1, 1, 0, 0, 0, 1, 1, transition, 1, 1, 0, new long[0],
+                    null, CoreCommandDelta.empty(),
+                    com.surprising.aeron.service.state.RuntimeFundsDelta.empty(), null))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("invalid Core Fact draft");
+            assertThatThrownBy(() -> new com.surprising.aeron.service.state.RuntimeCommitPatch.CoreFactMetadata(
+                    command.header().commandId(), com.surprising.aeron.protocol.CommandFingerprint.fromBytes(
+                    new byte[com.surprising.aeron.protocol.CommandFingerprint.LENGTH]),
+                    command.header().messageType().wireCode(), command.header().userId(), ResponseStatus.APPLIED,
+                    CoreResultCode.NONE, 1, 1, 1, 1, false))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("Core Fact fingerprint must not be zero");
+
+            assertThat(exportState.pendingCount()).isZero();
+            assertThat(exportState.nextSequence()).isOne();
+            assertThat(exportState.metrics()).isEqualTo(before);
+        }
+    }
+
+    @Test
+    void injectedOwnerCommitFailuresLeaveAllCommittedSurfacesBehindTheFence() throws Exception {
+        for (String phase : List.of("preflight", "indexes", "business-hash", "funds-hash")) {
+            try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+                long businessHash = ((com.surprising.aeron.service.state.RollingBusinessStateHash)
+                        field(state, "rollingBusinessStateHash")).value();
+                long fundsHash = ((com.surprising.aeron.service.state.RollingFundsStateHash)
+                        field(state, "rollingFundsStateHash")).value();
+                var journal = (com.surprising.aeron.service.state.RuntimeCommitJournal)
+                        field(state, "runtimeProjectionJournal");
+                var runtimeState = (com.surprising.aeron.service.state.TradingRuntimeState)
+                        field(state, "runtimePlaceOrderState");
+                var activeOrders = (com.surprising.aeron.service.state.ActiveOrderIndex)
+                        field(state, "activeOrderIndex");
+                var activeOrderPage = activeOrders.page(0, "BTC-USDT", Long.MAX_VALUE, 10);
+                long committedLaneSequence = runtimeState.accountLane(7).committedSequence();
+                CoreProbeState.setCommitFaultInjectorForTest(current -> {
+                    if (phase.equals(current)) throw new IllegalStateException("injected " + phase + " failure");
+                });
+
+                CoreMessage adjustment = tradingCommand(CoreMessageType.ADJUST_BALANCE,
+                        UUID.randomUUID(), 1,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 25)));
+                assertThatThrownBy(() -> state.apply(adjustment))
+                        .isInstanceOf(IllegalStateException.class)
+                        .hasMessage("injected " + phase + " failure");
+
+                assertThat(((com.surprising.aeron.service.state.RuntimeFundsDelta)
+                        field(state, "commandFundsDelta")).postingCount()).isZero();
+                assertThat(((com.surprising.aeron.service.state.RollingBusinessStateHash)
+                        field(state, "rollingBusinessStateHash")).value()).isEqualTo(businessHash);
+                assertThat(((com.surprising.aeron.service.state.RollingFundsStateHash)
+                        field(state, "rollingFundsStateHash")).value()).isEqualTo(fundsHash);
+                assertThat(journal.publishedSequence()).isZero();
+                assertThat((long) field(state, "appliedCommandCount")).isZero();
+                assertThat(activeOrders.page(0, "BTC-USDT", Long.MAX_VALUE, 10)).isEqualTo(activeOrderPage);
+                assertThat(runtimeState.accountLane(7).committedSequence()).isEqualTo(committedLaneSequence);
+                assertThat(runtimeState.hasChangedBalance(1001, 0)).isTrue();
+                assertThat((boolean) field(field(runtimeState, "activePatchBuilder"), "sealed")).isFalse();
+                assertThatThrownBy(() -> state.apply(query(CoreMessageType.BUSINESS_STATE_HASH_QUERY,
+                        0, new byte[0]))).hasMessageContaining("owner commit publication failed");
+            } finally {
+                CoreProbeState.setCommitFaultInjectorForTest(null);
+            }
+        }
+    }
+
+    @Test
+    void hashCommitFailuresPreserveOriginalAndRollbackCommittedSurfaces() throws Exception {
+        for (boolean failBusiness : List.of(true, false)) {
+            try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+                var business = (com.surprising.aeron.service.state.RollingBusinessStateHash)
+                        field(state, "rollingBusinessStateHash");
+                var funds = (com.surprising.aeron.service.state.RollingFundsStateHash)
+                        field(state, "rollingFundsStateHash");
+                long businessHash = business.value();
+                long fundsHash = funds.value();
+                var journal = (com.surprising.aeron.service.state.RuntimeCommitJournal)
+                        field(state, "runtimeProjectionJournal");
+                var runtimeState = (com.surprising.aeron.service.state.TradingRuntimeState)
+                        field(state, "runtimePlaceOrderState");
+                var activeOrders = (com.surprising.aeron.service.state.ActiveOrderIndex)
+                        field(state, "activeOrderIndex");
+                var activeOrderPage = activeOrders.page(0, "BTC-USDT", Long.MAX_VALUE, 10);
+                long committedLaneSequence = runtimeState.accountLane(7).committedSequence();
+                failHashCommit(failBusiness ? business : funds);
+
+                CoreMessage adjustment = tradingCommand(CoreMessageType.ADJUST_BALANCE,
+                        UUID.randomUUID(), 1,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 25)));
+                Throwable failure = catchThrowable(() -> state.apply(adjustment));
+
+                assertThat(failure).isInstanceOf(IllegalStateException.class)
+                        .hasMessage("injected mid-stage " + (failBusiness ? "business" : "funds")
+                                + " hash apply failure");
+                assertThat(((com.surprising.aeron.service.state.RuntimeFundsDelta)
+                        field(state, "commandFundsDelta")).postingCount()).isZero();
+                assertThat(business.value()).isEqualTo(businessHash);
+                assertThat(funds.value()).isEqualTo(fundsHash);
+                assertThat(journal.publishedSequence()).isZero();
+                assertThat((long) field(state, "appliedCommandCount")).isZero();
+                assertThat(activeOrders.page(0, "BTC-USDT", Long.MAX_VALUE, 10)).isEqualTo(activeOrderPage);
+                assertThat(runtimeState.accountLane(7).committedSequence()).isEqualTo(committedLaneSequence);
+                assertThat(runtimeState.hasChangedBalance(1001, 0)).isTrue();
+                assertThat((boolean) field(field(runtimeState, "activePatchBuilder"), "sealed")).isFalse();
+            }
+        }
+    }
 
     @Test
     void nonMatchingTreasuryCommandExportsItsChangedAssetAndConservedPostings() {
@@ -78,27 +550,14 @@ class CoreProbeStateTest {
     void appendsCoreFactWithoutWaitingForMaterializationAndPublishesOnlyReadyPrefix() throws Exception {
         CountDownLatch enteredMaterializer = new CountDownLatch(1);
         CountDownLatch releaseMaterializer = new CountDownLatch(1);
-        try (CoreExportState exportState = new CoreExportState()) {
+        try (CoreExportState exportState = new CoreExportState(event -> {
+            enteredMaterializer.countDown();
+            awaitMaterializer(releaseMaterializer);
+            return CoreExportCodec.encodeEvent(event);
+        })) {
             CoreMessage command = command(UUID.randomUUID(), 1, 1);
             var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
-            exportState.append(new CoreExportState.Draft(command, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                    1, 1, 0, 0, 0, 1, 1, transition, 1, 0, new long[0], sequence -> {
-                        enteredMaterializer.countDown();
-                        try {
-                            if (!releaseMaterializer.await(3, TimeUnit.SECONDS)) {
-                                throw new IllegalStateException("Core Fact materializer was not released");
-                            }
-                        } catch (InterruptedException exception) {
-                            Thread.currentThread().interrupt();
-                            throw new IllegalStateException("Core Fact materializer interrupted", exception);
-                        }
-                        return new com.surprising.aeron.protocol.CoreExportEvent(
-                                sequence, 1, 1, command.header().commandId(), command.header().messageType(),
-                                ResponseStatus.APPLIED, CoreResultCode.NONE, command.header().userId(),
-                                command.payloadUnsafe(), List.of(), List.of(), List.of(), List.of(), List.of(),
-                                List.of(), List.of(), 0, 0, 0, transition.routeVersion(), 1, 1, 1,
-                                transition, 1, List.of());
-                    }));
+            exportState.append(draft(command, 1, 1, 0, transition, List.of()));
 
             assertThat(enteredMaterializer.await(1, TimeUnit.SECONDS)).isTrue();
             assertThat(exportState.pendingCount()).isEqualTo(1);
@@ -114,40 +573,133 @@ class CoreProbeStateTest {
 
     @Test
     @Timeout(5)
+    void closeDrainsAnInFlightFactWithoutInterruptingItsAssembler() throws Exception {
+        CountDownLatch enteredMaterializer = new CountDownLatch(1);
+        CountDownLatch releaseMaterializer = new CountDownLatch(1);
+        CountDownLatch closeStarted = new CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicReference<Throwable> closeFailure =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        CoreExportState exportState = new CoreExportState(event -> {
+            enteredMaterializer.countDown();
+            awaitMaterializer(releaseMaterializer);
+            return CoreExportCodec.encodeEvent(event);
+        });
+        Thread closer = null;
+        try {
+            var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
+            exportState.append(draft(command(UUID.randomUUID(), 1, 1), 1, 1, 0,
+                    transition, List.of()));
+            assertThat(enteredMaterializer.await(1, TimeUnit.SECONDS)).isTrue();
+
+            closer = Thread.ofPlatform().start(() -> {
+                closeStarted.countDown();
+                try {
+                    exportState.close();
+                } catch (Throwable failure) {
+                    closeFailure.set(failure);
+                }
+            });
+            assertThat(closeStarted.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(closer.isAlive()).isTrue();
+            releaseMaterializer.countDown();
+            closer.join(TimeUnit.SECONDS.toMillis(2));
+
+            assertThat(closer.isAlive()).isFalse();
+            assertThat(closeFailure.get()).isNull();
+            assertThat(exportState.metrics().materializationBacklog()).isZero();
+            assertThat(exportState.metrics().acknowledgedMaterializationItems()).isZero();
+            assertThat(exportState.metrics().acknowledgedMaterializationBytes()).isZero();
+        } finally {
+            releaseMaterializer.countDown();
+            if (closer != null && closer.isAlive()) closer.join(TimeUnit.SECONDS.toMillis(2));
+        }
+    }
+
+    @Test
+    @Timeout(5)
+    void unexpectedMaterializerInterruptPoisonsAdmissionAndClose() throws Exception {
+        CoreExportState exportState = new CoreExportState();
+        ((Thread) field(exportState, "materializer")).interrupt();
+        Throwable admissionFailure = null;
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+        while (admissionFailure == null && System.nanoTime() < deadline) {
+            admissionFailure = catchThrowable(exportState::hasCapacityFor);
+            if (admissionFailure == null) Thread.onSpinWait();
+        }
+
+        assertThat(admissionFailure).isInstanceOf(java.util.concurrent.CompletionException.class)
+                .hasRootCauseInstanceOf(InterruptedException.class);
+        assertThat(exportState.pendingCount()).isZero();
+        assertThat(exportState.nextSequence()).isOne();
+        assertThat(exportState.metrics().errorCount()).isOne();
+        assertThatThrownBy(exportState::close)
+                .isInstanceOf(java.util.concurrent.CompletionException.class)
+                .hasRootCauseInstanceOf(InterruptedException.class);
+    }
+
+    @Test
+    @Timeout(5)
     void acknowledgesTerminalIdsWithoutWaitingForFactMaterialization() throws Exception {
         CountDownLatch enteredMaterializer = new CountDownLatch(1);
         CountDownLatch releaseMaterializer = new CountDownLatch(1);
-        try (CoreExportState exportState = new CoreExportState()) {
+        var encodedEvent = new java.util.concurrent.atomic.AtomicReference<com.surprising.aeron.protocol.CoreExportEvent>();
+        try (CoreExportState exportState = new CoreExportState(event -> {
+            enteredMaterializer.countDown();
+            awaitMaterializer(releaseMaterializer);
+            encodedEvent.set(event);
+            return CoreExportCodec.encodeEvent(event);
+        })) {
             CoreMessage command = command(UUID.randomUUID(), 1, 1);
             var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
+            var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
+            var patch = conservedFundsPatch(identities, command);
+            var chain = new CoreExportState.PatchChain(patch, null, factPermit(patch));
+            var metadata = new com.surprising.aeron.service.state.RuntimeCommitPatch.CoreFactMetadata(
+                    command.header().commandId(), com.surprising.aeron.protocol.CommandFingerprint.of(command),
+                    command.header().messageType().wireCode(), command.header().userId(), ResponseStatus.APPLIED,
+                    CoreResultCode.NONE, 1, 1, 1, 1, false);
             exportState.append(new CoreExportState.Draft(command, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                    1, 1, 0, 0, 0, 1, 1, transition, 1, 1, new long[]{42}, sequence -> {
-                        enteredMaterializer.countDown();
-                        try {
-                            if (!releaseMaterializer.await(3, TimeUnit.SECONDS)) {
-                                throw new IllegalStateException("Core Fact materializer was not released");
-                            }
-                        } catch (InterruptedException exception) {
-                            Thread.currentThread().interrupt();
-                            throw new IllegalStateException("Core Fact materializer interrupted", exception);
-                        }
-                        return new com.surprising.aeron.protocol.CoreExportEvent(
-                                sequence, 1, 1, command.header().commandId(), command.header().messageType(),
-                                ResponseStatus.APPLIED, CoreResultCode.NONE, command.header().userId(),
-                                command.payloadUnsafe(), List.of(), List.of(new com.surprising.aeron.protocol.CoreOrderStateView(
-                                        42, ProductLine.SPOT, 1, "BTC-USDT", 1,
-                                        com.surprising.aeron.protocol.CoreOrderSide.BUY,
-                                        100, 1, 1, 0, false, "FILLED", 1)), List.of(), List.of(), List.of(),
-                                List.of(), List.of(), 0, 0, 0, transition.routeVersion(), 1, 1, 1,
-                                transition, 1, List.of());
-                    }));
+                    1, 1, 0, 0, 1, 1, 1, transition, 1, 1,
+                    Math.addExact(1, chain.itemCount()), new long[]{42}, chain, CoreCommandDelta.empty(),
+                    patch.fundsDelta(), metadata));
 
             assertThat(enteredMaterializer.await(1, TimeUnit.SECONDS)).isTrue();
             assertThat(exportState.acknowledge(new AckExportCommand(1))).containsExactly(42L);
             assertThat(exportState.pendingCount()).isZero();
+            assertThat(exportState.metrics().acknowledgedMaterializationItems()).isOne();
+            assertThat(exportState.metrics().acknowledgedMaterializationBytes()).isPositive();
             releaseMaterializer.countDown();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            while (exportState.metrics().acknowledgedMaterializationBytes() != 0
+                    && System.nanoTime() < deadline) Thread.onSpinWait();
+            assertThat(exportState.metrics().acknowledgedMaterializationItems()).isZero();
+            assertThat(exportState.metrics().acknowledgedMaterializationBytes()).isZero();
+            assertThat(encodedEvent.get().fundsPostings()).hasSize(2);
+            assertThat(encodedEvent.get().fundsPostings()).extracting(item -> item.units())
+                    .containsExactlyInAnyOrder(-10L, 10L);
+            assertThat(exportState.metrics().reservedEvents()).isZero();
+            assertThat(exportState.metrics().reservedBytes()).isZero();
         } finally {
             releaseMaterializer.countDown();
+        }
+    }
+
+    @Test
+    @Timeout(5)
+    void restoredExportUsesEncodedTerminalIdsInsteadOfChangedOrders() {
+        try (CoreExportState exportState = new CoreExportState()) {
+            CoreMessage command = command(UUID.randomUUID(), 1, 1);
+            var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
+            exportState.append(draft(command, 1, 1, 0, transition, List.of(42L)));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            while (exportState.encodedPendingCount() != 1 && System.nanoTime() < deadline) Thread.onSpinWait();
+            List<CoreMessage> encoded = exportState.pending();
+
+            try (CoreExportState restored = CoreExportState.restore(ProductLine.SPOT, 0, 2, encoded)) {
+                restored.activate();
+                assertThat(restored.pendingDigest()).isEqualTo(exportState.pendingDigest());
+                assertThat(restored.acknowledge(new AckExportCommand(1))).containsExactly(42L);
+            }
         }
     }
 
@@ -156,22 +708,15 @@ class CoreProbeStateTest {
     void acknowledgedFactMaterializationFailureRemainsFatal() throws Exception {
         CountDownLatch enteredMaterializer = new CountDownLatch(1);
         CountDownLatch releaseMaterializer = new CountDownLatch(1);
-        try (CoreExportState exportState = new CoreExportState()) {
+        CoreExportState exportState = new CoreExportState(event -> {
+            enteredMaterializer.countDown();
+            awaitMaterializer(releaseMaterializer);
+            throw new IllegalStateException("encoded Core Fact failed");
+        });
+        try {
             CoreMessage command = command(UUID.randomUUID(), 1, 1);
             var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
-            exportState.append(new CoreExportState.Draft(command, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                    1, 1, 0, 0, 0, 1, 1, transition, 1, 0, new long[0], sequence -> {
-                        enteredMaterializer.countDown();
-                        try {
-                            if (!releaseMaterializer.await(3, TimeUnit.SECONDS)) {
-                                throw new IllegalStateException("Core Fact materializer was not released");
-                            }
-                        } catch (InterruptedException exception) {
-                            Thread.currentThread().interrupt();
-                            throw new IllegalStateException("Core Fact materializer interrupted", exception);
-                        }
-                        throw new IllegalStateException("encoded Core Fact failed");
-                    }));
+            exportState.append(draft(command, 1, 1, 0, transition, List.of()));
 
             assertThat(enteredMaterializer.await(1, TimeUnit.SECONDS)).isTrue();
             assertThat(exportState.acknowledge(new AckExportCommand(1))).isEmpty();
@@ -188,6 +733,138 @@ class CoreProbeStateTest {
                     .hasRootCauseMessage("encoded Core Fact failed");
         } finally {
             releaseMaterializer.countDown();
+            assertThatThrownBy(exportState::close)
+                    .isInstanceOf(java.util.concurrent.CompletionException.class)
+                    .hasRootCauseMessage("encoded Core Fact failed");
+        }
+    }
+
+    @Test
+    @Timeout(5)
+    void multiPatchDeleteAfterCreateIsMergedByTheOffOwnerAssembler() {
+        var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
+        var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
+        int symbolId = identities.symbolId("BTC-USDT");
+        var order = new com.surprising.aeron.service.state.OrderRuntime(71, 17, symbolId, 2);
+        var created = orderPatch(identities, null, order, 0, 1);
+        var deleted = orderPatch(identities, order, null, 1, 2);
+        var permits = factPermits(List.of(created, deleted));
+        var chain = new CoreExportState.PatchChain(deleted,
+                new CoreExportState.PatchChain(created, null, permits.get(0)), permits.get(1));
+        CoreMessage command = command(UUID.randomUUID(), 2, 1);
+        try (CoreExportState exportState = new CoreExportState()) {
+            exportState.append(draft(command, 2, 2, 0, transition, List.of(71L), chain, identities));
+            var event = CoreExportCodec.decodeEvent(exportState.pending().getFirst().payloadUnsafe());
+            assertThat(event.changedOrders()).isEmpty();
+            assertThat(event.tombstones().orderIds()).containsExactly(71L);
+        }
+    }
+
+    @Test
+    void longFactPatchChainTraversesOldestFirstWithoutRecursion() {
+        var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
+        int symbolId = identities.symbolId("BTC-USDT");
+        var open = new com.surprising.aeron.service.state.OrderRuntime(72, 17, symbolId, 2);
+        var canceled = new com.surprising.aeron.service.state.OrderRuntime(72, 17, symbolId, 2, true);
+        CoreExportState.PatchChain chain = null;
+        int nodes = 1_024;
+        var patches = new java.util.ArrayList<com.surprising.aeron.service.state.RuntimeCommitPatch>(nodes);
+        for (int sequence = 1; sequence <= nodes; sequence++) {
+            var before = sequence == 1 ? null : sequence % 2 == 0 ? open : canceled;
+            var after = sequence % 2 == 0 ? canceled : open;
+            var patch = orderPatch(identities, before, after, sequence - 1L, sequence);
+            patches.add(patch);
+        }
+        var permits = factPermits(patches);
+        for (int index = 0; index < nodes; index++) {
+            chain = new CoreExportState.PatchChain(patches.get(index), chain, permits.get(index));
+        }
+        java.util.ArrayList<Long> sequences = new java.util.ArrayList<>(nodes);
+        chain.acceptOldestFirst(patch -> sequences.add(patch.coreSequence()));
+        assertThat(sequences).hasSize(nodes);
+        assertThat(sequences.getFirst()).isOne();
+        assertThat(sequences.getLast()).isEqualTo(nodes);
+    }
+
+    @Test
+    @Timeout(5)
+    void exportAssemblerBuildsTheOrderViewOnItsOwnThread() {
+        var captured = new java.util.concurrent.atomic.AtomicReference<com.surprising.aeron.protocol.CoreExportEvent>();
+        var assemblerThread = new java.util.concurrent.atomic.AtomicReference<String>();
+        var conversions = new java.util.concurrent.atomic.AtomicInteger();
+        try (CoreExportState exportState = new CoreExportState(event -> {
+            assemblerThread.set(Thread.currentThread().getName());
+            captured.set(event);
+            return CoreExportCodec.encodeEvent(event);
+        }, order -> {
+            conversions.incrementAndGet();
+            return com.surprising.aeron.service.state.RuntimeCommitPatch.exportOrderView(order);
+        })) {
+            var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
+            var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
+            int symbolId = identities.symbolId("BTC-USDT");
+            var order = new com.surprising.aeron.service.state.OrderRuntime(73, 17, symbolId, 2);
+            var terminal = new com.surprising.aeron.service.state.OrderRuntime(73, 17, symbolId, 2, true);
+            var created = orderPatch(identities, null, order, 0, 1);
+            var canceled = orderPatch(identities, order, terminal, 1, 2);
+            var permits = factPermits(List.of(created, canceled));
+            var chain = new CoreExportState.PatchChain(canceled,
+                    new CoreExportState.PatchChain(created, null, permits.get(0)), permits.get(1));
+            CoreMessage command = command(UUID.randomUUID(), 2, 1);
+            exportState.append(draft(command, 2, 2, 0, transition, List.of(), chain, identities));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            while (captured.get() == null && System.nanoTime() < deadline) Thread.onSpinWait();
+
+            assertThat(captured.get().changedOrders().getFirst().orderId()).isEqualTo(73);
+            assertThat(assemblerThread.get()).isEqualTo("core-fact-materializer");
+            assertThat(conversions).hasValue(1);
+        }
+    }
+
+    @Test
+    void sealedFactIdentitySliceKeepsV10BytesStableAfterRegistryMutationAndRollback() {
+        var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
+        int symbolId = identities.symbolId("BTC-USDT");
+        var order = new com.surprising.aeron.service.state.OrderRuntime(74, 17, symbolId, 2);
+        var patch = orderPatch(identities, null, order, 0, 1);
+        CoreMessage command = command(UUID.randomUUID(), 1, 1);
+        var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
+        byte[] before;
+        try (CoreExportState exportState = new CoreExportState()) {
+            exportState.append(draft(command, 1, 1, 0, transition, List.of(),
+                    new CoreExportState.PatchChain(patch, null, factPermit(patch)), identities));
+            before = exportState.pending().getFirst().payloadUnsafe().clone();
+        }
+
+        identities.symbolId("ETH-USDT");
+        var prepared = identities.prepareClientKey(17, "rolled-back-client");
+        identities.rollbackPreparedClientKey(17, "rolled-back-client", prepared);
+
+        try (CoreExportState exportState = new CoreExportState()) {
+            exportState.append(draft(command, 1, 1, 0, transition, List.of(),
+                    new CoreExportState.PatchChain(patch, null, factPermit(patch)), identities));
+            assertThat(exportState.pending().getFirst().payloadUnsafe()).isEqualTo(before);
+        }
+    }
+
+    @Test
+    void terminalOrderIsConvertedOnceAcrossProjectionIndexRetentionAndExport() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            assertThat(state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 2,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))
+                    .status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(applyAndDrain(state, tradingCommand(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 3,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(975, "BTC-USDT", 1,
+                            CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS,
+                            CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
+                            false, "client-975")))).status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(applyAndDrain(state, tradingCommand(CoreMessageType.CANCEL_ORDER, UUID.randomUUID(), 4,
+                    TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(975)))).status())
+                    .isEqualTo(ResponseStatus.APPLIED);
+            var event = CoreExportCodec.decodeEvent(state.exportState().pending().getLast()
+                    .payloadUnsafe());
+            assertThat(event.terminalIds().orderIds()).contains(975L);
         }
     }
 
@@ -267,18 +944,40 @@ class CoreProbeStateTest {
 
     @Test
     void bindsRuntimeStateToTheFirstCoreCommandThread() throws InterruptedException {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
-            AtomicReference<CoreResponse> response = new AtomicReference<>();
-            Thread coreAgent = new Thread(() -> response.set(state.apply(tradingCommand(
-                    CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
-                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))));
+        AtomicReference<CoreProbeState> stateRef = new AtomicReference<>();
+        AtomicReference<CoreResponse> response = new AtomicReference<>();
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        CountDownLatch commandComplete = new CountDownLatch(1);
+        CountDownLatch releaseClose = new CountDownLatch(1);
+        Thread coreAgent = new Thread(() -> {
+            CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+            stateRef.set(state);
+            try {
+                response.set(state.apply(tradingCommand(
+                        CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
+                        TradingCommandCodec.encodeBalanceAdjustment(
+                                new BalanceAdjustmentCommand("USDT", 10_000)))));
+            } catch (Throwable thrown) {
+                failure.set(thrown);
+            } finally {
+                commandComplete.countDown();
+                awaitMaterializer(releaseClose);
+                state.close();
+            }
+        });
 
-            coreAgent.start();
-            coreAgent.join();
-
+        coreAgent.start();
+        assertThat(commandComplete.await(10, TimeUnit.SECONDS)).isTrue();
+        try {
+            assertThat(failure.get()).isNull();
+            CoreProbeState state = stateRef.get();
             assertThat(response.get().status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(state.tradingState().user(1001).totalUnits("USDT")).isEqualTo(10_000);
+        } finally {
+            releaseClose.countDown();
+            coreAgent.join();
         }
+        assertThat(failure.get()).isNull();
     }
 
     @Test
@@ -442,7 +1141,8 @@ class CoreProbeStateTest {
             sourceSequences.put(new CoreProbeState.SourceKey(CommandSource.GATEWAY, sourceId), 1L);
         }
 
-        assertThatThrownBy(() -> CoreProbeState.restore(ProductLine.SPOT, 0, 0, Map.of(), sourceSequences,
+        assertThatThrownBy(() -> CoreProbeStateRestoreTestSupport.restore(
+                ProductLine.SPOT, 0, 0, Map.of(), sourceSequences,
                 com.surprising.aeron.service.state.TradingCoreState.empty(ProductLine.SPOT),
                 new CoreExportState()))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -456,11 +1156,16 @@ class CoreProbeStateTest {
         original.apply(first);
         original.apply(second);
 
+        long freezeCount = original.snapshotProjectionFreezeCount();
         CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.INVERSE_DELIVERY, original.snapshot());
 
         assertThat(restored.appliedCommandCount()).isEqualTo(original.appliedCommandCount());
         assertThat(restored.probeValue()).isEqualTo(8);
         assertThat(restored.stateHash()).isEqualTo(original.stateHash());
+        assertThat(restored.snapshotProjectionSequence()).isEqualTo(original.snapshotProjectionSequence());
+        assertThat(original.snapshotProjectionFreezeCount()).isEqualTo(freezeCount);
+        assertThat(original.snapshotHasOutstandingReservation()).isFalse();
+        assertThat(restored.snapshotHasOutstandingReservation()).isFalse();
         assertThat(restored.apply(first).status()).isEqualTo(ResponseStatus.DUPLICATE);
     }
 
@@ -707,9 +1412,68 @@ class CoreProbeStateTest {
             CoreMessage place = tradingCommand(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 2,
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(713, "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "snapshot-attempt-713")));
 
-            state.apply(place);
+            assertThat(state.apply(place).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             assertThat(state.snapshot()).isNotEmpty();
             assertThat(state.pendingMatching()).isEmpty();
+        }
+    }
+
+    @Test
+    void noTradePlaceCompletionPublishesOrderWithClientIndexBeforeSnapshotFreeze() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))));
+            CoreMessage place = tradingCommand(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 2,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(713, "BTC-USDT", 1,
+                            CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS,
+                            CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false,
+                            "snapshot-attempt-713")));
+
+            state.captureCommittedPatchesForTest();
+            assertThat(state.apply(place).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            assertThat(state.commitReadyMatching(1, 0, 0, true, (sequence, response) -> { })).isEqualTo(1);
+            var placePatch = state.capturedCommitPatchesForTest().getLast();
+            var clientOrderChanges = placePatch.accountLaneGroups().stream()
+                    .flatMap(group -> group.clientOrders().stream())
+                    .toList();
+            assertThat(clientOrderChanges).isNotEmpty();
+            assertThat(clientOrderChanges.stream().anyMatch(change -> change.key().userId() == 1001
+                            && change.beforeOrderId() == null
+                            && Long.valueOf(713).equals(change.afterOrderId())))
+                    .isTrue();
+            assertThat(placePatch.accountLaneGroups().stream()
+                    .flatMap(group -> group.orders().stream())
+                    .anyMatch(change -> change.orderId() == 713
+                            && change.businessAfter() != null
+                            && change.businessAfter().userId() == 1001
+                            && change.businessAfter().clientOrderId().equals("snapshot-attempt-713")))
+                    .isTrue();
+            assertThat(state.snapshot()).isNotEmpty();
+            assertThat(state.pendingMatching()).isEmpty();
+        }
+    }
+
+    @Test
+    void snapshotPropagatesProjectionFailureInsteadOfWaitingForever() throws Exception {
+        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        var journal = commitJournal(state);
+        var failReplica = journal.getClass().getDeclaredMethod(
+                "failReplicaAfterMutationsForTest", long.class, int.class);
+        failReplica.setAccessible(true);
+        failReplica.invoke(journal, journal.publishedSequence() + 1, 1);
+        try {
+            assertThat(state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))
+                    .status()).isEqualTo(ResponseStatus.APPLIED);
+
+            assertThatThrownBy(state::snapshot)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("runtime commit journal failed");
+        } finally {
+            assertThatThrownBy(state::close)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("runtime commit journal did not drain on close");
         }
     }
 
@@ -974,6 +1738,74 @@ class CoreProbeStateTest {
     }
 
     @Test
+    void closeReleasesRealQueuedTriggerSharedAdmissionAcrossEveryHolder() throws Exception {
+        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        applySpotInstrument(state);
+        state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
+                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 2))));
+        for (long triggerId : List.of(713L, 714L)) {
+            var trigger = new com.surprising.aeron.protocol.CoreTriggerOrderStateView(triggerId,
+                    ProductLine.SPOT, 1001, "tp-" + triggerId, "", "BTC-USDT", CoreOrderSide.SELL,
+                    com.surprising.aeron.protocol.CoreTriggerOrderType.TAKE_PROFIT,
+                    com.surprising.aeron.protocol.CoreTriggerCondition.GREATER_OR_EQUAL, 70_000,
+                    0, 0, 0, 0, 0, CoreOrderType.MARKET, CoreTimeInForce.IOC, 0, 1,
+                    CoreMarginMode.CROSS, CorePositionSide.NET,
+                    com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING, 0, 0, 0,
+                    "", "trace-close-" + triggerId, 0, 0, 1_000, 1_000, 1);
+            CoreResponse placed = state.apply(tradingCommand(CoreMessageType.PLACE_TRIGGER_ORDER,
+                    UUID.randomUUID(), triggerId - 710,
+                    com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeState(trigger)));
+            assertThat(placed.status()).withFailMessage("trigger %s result=%s", triggerId, placed.resultCode())
+                    .isEqualTo(ResponseStatus.APPLIED);
+        }
+        CoreResponse markResponse = state.apply(tradingCommand(CoreMessageType.APPLY_MARK_PRICE, UUID.randomUUID(), 5,
+                TradingCommandCodec.encodeApplyMarkPrice(new com.surprising.aeron.protocol.ApplyMarkPriceCommand(
+                        "BTC-USDT", 1, 70_000, 8, 1_000))));
+        assertThat(markResponse.status()).withFailMessage("mark result=%s", markResponse.resultCode())
+                .isEqualTo(ResponseStatus.APPLIED);
+        long continuationSequence = 6;
+        while (state.pendingMatching().isEmpty()
+                && !state.tradingState().riskState().scan().complete()) {
+            assertThat(state.apply(tradingCommand(CoreMessageType.CONTINUE_RISK_SCAN, UUID.randomUUID(),
+                    continuationSequence++, TradingCommandCodec.encodeContinueRiskScan(
+                            new com.surprising.aeron.protocol.ContinueRiskScanCommand(64)))).status())
+                    .isEqualTo(ResponseStatus.APPLIED);
+        }
+        assertThat(state.pendingMatching())
+                .withFailMessage("risk=%s triggers=%s", state.tradingState().riskState(),
+                        state.tradingState().triggerOrders())
+                .hasSize(2);
+        CoreAdmissionReservation reservation = state.pendingMatching().values().iterator().next()
+                .capacityReservation();
+        assertThat(state.pendingMatching().values())
+                .allMatch(pending -> pending.capacityReservation() == reservation);
+        assertThat(reservation.holders()).isEqualTo(2);
+        var journal = commitJournal(state);
+        var fundsBeforeClose = state.tradingState().user(1001).balances();
+        int idempotencyEntriesBeforeClose = state.commandResults().size();
+
+        state.close();
+
+        assertThat(reservation.holders()).isZero();
+        assertThat(reservation.remainingPatches()).isZero();
+        assertThat(reservation.remainingFacts()).isZero();
+        assertThat(reservation.remainingFactNodes()).isZero();
+        assertThat(reservation.remainingFactItems()).isZero();
+        assertThat(reservation.remainingFactBytes()).isZero();
+        assertThat(state.pendingMatching()).isEmpty();
+        assertThat((Map<?, ?>) field(state, "factPatchChains")).isEmpty();
+        assertThat(field(state, "currentAdmission")).isNull();
+        assertThat(field(state, "activeFactCommand")).isNull();
+        assertThat(field(state, "activeFactFingerprint")).isNull();
+        assertThat(journal.metrics().reservedEntries()).isZero();
+        assertThat(journal.metrics().reservedBytes()).isZero();
+        assertThat(state.exportState().metrics().reservedEvents()).isZero();
+        assertThat(state.exportState().metrics().reservedBytes()).isZero();
+        assertThat(state.commandResults()).hasSize(idempotencyEntriesBeforeClose);
+        assertThat(state.tradingState().user(1001).balances()).isEqualTo(fundsBeforeClose);
+    }
+
+    @Test
     void orderPreflightUsesAuthoritativeRulesWithoutMutatingState() {
         CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
         applySpotInstrument(state);
@@ -1212,7 +2044,7 @@ class CoreProbeStateTest {
         var trading = new com.surprising.aeron.service.state.TradingCoreState(ProductLine.SPOT, 1,
                 Map.of(), Map.of(), Map.of(), risk,
                 com.surprising.aeron.service.state.CoreTreasuryState.empty());
-        CoreProbeState state = CoreProbeState.restore(ProductLine.SPOT, 0, 0,
+        CoreProbeState state = CoreProbeStateRestoreTestSupport.restore(ProductLine.SPOT, 0, 0,
                 Map.of(), Map.of(), trading, new CoreExportState());
 
         var response = state.apply(query(CoreMessageType.LIQUIDATION_WORK_QUERY, 0,
@@ -1296,9 +2128,11 @@ class CoreProbeStateTest {
     }
 
     @Test
-    void rejectsFactProducingOrderBeforeFinancialMutationWhenReplicatedOutboxCapacityIsReserved() {
+    void exportBacklogCapacityIsReservedBeforeMutation() throws Exception {
         // Given
         CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        CoreExportState.AdmissionReservation blocker = null;
+        try {
         applySpotInstrument(state);
         assertThat(state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))
@@ -1315,9 +2149,20 @@ class CoreProbeStateTest {
         var beforeSourceCursors = state.lastSourceSequences();
         long beforeSourceCursorDigest = state.sourceSequenceDigest();
         var beforeExportStatus = state.exportState().status();
+        var journal = (com.surprising.aeron.service.state.RuntimeCommitJournal)
+                field(state, "runtimeProjectionJournal");
+        long beforePublishedSequence = journal.publishedSequence();
         UUID rejectedCommandId = UUID.randomUUID();
         CoreMessage command = tradingCommand(CoreMessageType.PLACE_ORDER, rejectedCommandId, 2,
                 TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(9_001, "BTC-USDT", 1, CoreOrderSide.BUY, 600, 1, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "")));
+        var demand = CoreAdmissionReservation.AdmissionDemand.matching(command);
+        var exportStatus = state.exportState().status();
+        long remainingBytes = exportStatus.maxPendingBytes() - exportStatus.pendingBytes();
+        blocker = state.exportState().reserveAdmission(1,
+                Math.subtractExact(Math.addExact(remainingBytes, 1), demand.factBytes()));
+        assertThatThrownBy(() -> state.exportState().reserveAdmission(demand.factCount(), demand.factBytes()))
+                .isInstanceOf(com.surprising.aeron.service.state.CoreStateRejectedException.class)
+                .hasMessageContaining("export backlog reached hard limit");
 
         // When
         CoreResponse rejected = state.apply(command);
@@ -1336,7 +2181,363 @@ class CoreProbeStateTest {
         assertThat(state.lastSourceSequences()).isEqualTo(beforeSourceCursors);
         assertThat(state.sourceSequenceDigest()).isEqualTo(beforeSourceCursorDigest);
         assertThat(state.exportState().status()).isEqualTo(beforeExportStatus);
+        assertThat(journal.publishedSequence()).isEqualTo(beforePublishedSequence);
+        assertThat(journal.metrics().reservedEntries()).isZero();
+        assertThat(state.pendingMatching()).isEmpty();
         assertThat(state.commandResults()).doesNotContainKey(rejectedCommandId);
+        } finally {
+            if (blocker != null) state.exportState().release(blocker);
+            state.close();
+        }
+    }
+
+    @Test
+    void commandDerivedRiskLiquidationAndAdlBoundsRejectBeforeEveryOwnerSurfaceMutation() throws Exception {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+            assertThat(state.apply(tradingCommand(ProductLine.LINEAR_PERPETUAL,
+                    CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1_000))))
+                    .status()).isEqualTo(ResponseStatus.APPLIED);
+
+            var actions = new java.util.ArrayList<com.surprising.aeron.protocol.ExecuteLiquidationBatchAction>(
+                    com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand.MAX_ACTIONS);
+            for (int index = 1; index <= com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand.MAX_ACTIONS;
+                 index++) {
+                actions.add(new com.surprising.aeron.protocol.ExecuteLiquidationBatchAction(
+                        index, index, "BTC-USDT", 1, 1, 70_000, 0));
+            }
+            var oversizedLiquidation = new com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand(
+                    actions, com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand.MAX_CANCEL_ORDERS,
+                    0, new com.surprising.aeron.protocol.CoreRiskScanContinuation("BTC-USDT", 1, 0),
+                    com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand.MAX_RISK_SCAN_USERS);
+            UUID liquidationId = UUID.randomUUID();
+            OwnerSurface beforeLiquidation = ownerSurface(state);
+            CoreResponse liquidation = state.apply(tradingCommand(ProductLine.LINEAR_PERPETUAL,
+                    CoreMessageType.EXECUTE_LIQUIDATION_BATCH,
+                    liquidationId, 2, TradingCommandCodec.encodeExecuteLiquidationBatch(oversizedLiquidation)));
+            assertThat(liquidation.status()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(liquidation.resultCode()).isEqualTo(CoreResultCode.EXPORT_BACKLOG_FULL);
+            assertOwnerSurfaceUnchanged(state, beforeLiquidation, liquidationId);
+
+            byte[] invalidRisk = TradingCommandCodec.encodeContinueRiskScan(
+                    new com.surprising.aeron.protocol.ContinueRiskScanCommand(4_096));
+            java.nio.ByteBuffer.wrap(invalidRisk).order(java.nio.ByteOrder.LITTLE_ENDIAN).putInt(4_097);
+            UUID riskId = UUID.randomUUID();
+            OwnerSurface beforeRisk = ownerSurface(state);
+            CoreResponse risk = state.apply(tradingCommand(ProductLine.LINEAR_PERPETUAL,
+                    CoreMessageType.CONTINUE_RISK_SCAN,
+                    riskId, 3, invalidRisk));
+            assertThat(risk.status()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(risk.resultCode()).isEqualTo(CoreResultCode.INVALID_COMMAND);
+            assertOwnerSurfaceUnchanged(state, beforeRisk, riskId);
+
+            UUID adlId = UUID.randomUUID();
+            OwnerSurface beforeAdl = ownerSurface(state);
+            CoreResponse adl = state.apply(tradingCommand(ProductLine.LINEAR_PERPETUAL,
+                    CoreMessageType.EXECUTE_ADL,
+                    adlId, 4, new byte[] {1, 2, 3}));
+            assertThat(adl.status()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(adl.resultCode()).isEqualTo(CoreResultCode.INVALID_COMMAND);
+            assertOwnerSurfaceUnchanged(state, beforeAdl, adlId);
+
+            assertThat(commitJournal(state).metrics().reservedEntries()).isZero();
+            assertThat(commitJournal(state).metrics().reservedBytes()).isZero();
+            assertThat(state.exportState().metrics().reservedEvents()).isZero();
+            assertThat(state.exportState().metrics().reservedBytes()).isZero();
+        }
+    }
+
+    @Test
+    void realLinearPerpetualFundingRiskLiquidationAndAdlUnderestimateRollBackExactOwnerSnapshot()
+            throws Exception {
+        var reducer = new com.surprising.aeron.service.state.TradingCoreReducer();
+        var fundingState = linearStateWithPosition(reducer, 1001, 10, 100, 1_000, 100);
+        fundingState = linearStateWithPosition(reducer, fundingState, 2002, -10, 100, 1_000, 100);
+        fundingState = reducer.applyMarkPrice(fundingState,
+                new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 1, 1_700_000_000_000L));
+
+        var riskState = linearStateWithPosition(reducer, 1001, 10, 100, 100, 100);
+
+        var liquidated = reducer.applyMarkPrice(riskState,
+                new ApplyMarkPriceCommand("BTC-USDT", 1, 1, 1, 1_700_000_000_000L));
+        liquidated = reducer.executeLiquidation(liquidated,
+                new com.surprising.aeron.protocol.ExecuteLiquidationCommand(1, 1, 1, 0));
+        long deficit = liquidated.riskState().liquidations().get(1L).deficitUnits();
+        var resolutionState = reducer.adjustInsuranceFund(liquidated,
+                new com.surprising.aeron.protocol.AdjustInsuranceFundCommand("USDT", deficit));
+
+        var adlBase = linearStateWithPosition(reducer, riskState, 2002, -10, 200, 1_000, 100);
+        adlBase = reducer.applyMarkPrice(adlBase,
+                new ApplyMarkPriceCommand("BTC-USDT", 1, 1, 1, 1_700_000_000_000L));
+        adlBase = reducer.executeLiquidation(adlBase,
+                new com.surprising.aeron.protocol.ExecuteLiquidationCommand(1, 1, 1, 0));
+        long initialAdlDeficit = adlBase.riskState().liquidations().get(1L).deficitUnits();
+        long insuranceCovered = Math.max(1, initialAdlDeficit / 2);
+        if (insuranceCovered >= initialAdlDeficit) insuranceCovered = initialAdlDeficit - 1;
+        adlBase = reducer.adjustInsuranceFund(adlBase,
+                new com.surprising.aeron.protocol.AdjustInsuranceFundCommand("USDT", initialAdlDeficit));
+        adlBase = reducer.resolveLiquidation(adlBase,
+                new com.surprising.aeron.protocol.ResolveLiquidationCommand(1,
+                        com.surprising.aeron.protocol.ResolveLiquidationCommand.Resolution.INSURANCE,
+                        insuranceCovered));
+        long adlDeficit = Math.subtractExact(initialAdlDeficit, insuranceCovered);
+
+        List<UnderestimateScenario> scenarios = List.of(
+                new UnderestimateScenario(fundingState, tradingCommand(ProductLine.LINEAR_PERPETUAL,
+                        CoreMessageType.APPLY_FUNDING, UUID.randomUUID(), 1,
+                        TradingCommandCodec.encodeApplyFunding(new com.surprising.aeron.protocol.ApplyFundingCommand(
+                                91, "BTC-USDT", 1, 10_000, 0, 64)))),
+                new UnderestimateScenario(riskState, tradingCommand(ProductLine.LINEAR_PERPETUAL,
+                        CoreMessageType.APPLY_MARK_PRICE, UUID.randomUUID(), 1,
+                        TradingCommandCodec.encodeApplyMarkPrice(
+                                new ApplyMarkPriceCommand("BTC-USDT", 1, 1, 1, 1_700_000_000_000L)))),
+                new UnderestimateScenario(resolutionState, tradingCommand(ProductLine.LINEAR_PERPETUAL,
+                        CoreMessageType.RESOLVE_LIQUIDATION, UUID.randomUUID(), 1,
+                        TradingCommandCodec.encodeResolveLiquidation(
+                                new com.surprising.aeron.protocol.ResolveLiquidationCommand(1,
+                                        com.surprising.aeron.protocol.ResolveLiquidationCommand.Resolution.INSURANCE,
+                                        deficit)))),
+                new UnderestimateScenario(adlBase, tradingCommand(ProductLine.LINEAR_PERPETUAL,
+                        CoreMessageType.EXECUTE_ADL, UUID.randomUUID(), 1,
+                        TradingCommandCodec.encodeExecuteAdl(new com.surprising.aeron.protocol.ExecuteAdlCommand(
+                                1, 2002, "BTC-USDT", CoreMarginMode.CROSS, CorePositionSide.NET,
+                                -10, 200, 1, 5, adlDeficit)))));
+
+        CoreAdmissionReservation.setFactEstimateFaultInjectorForTest((message, estimate) ->
+                new CoreAdmissionReservation.FactCostEstimate(
+                        estimate.nodes(), estimate.nodes(), CoreProtocol.HEADER_LENGTH));
+        try {
+            for (UnderestimateScenario scenario : scenarios) {
+                try (CoreProbeState state = restoredLinearState(scenario.state())) {
+                    OwnerSurface beforeOwner = ownerSurface(state);
+                    byte[] beforeSnapshot = state.snapshot();
+
+                    CoreResponse rejected = state.apply(scenario.command());
+
+                    assertThat(rejected.status()).isEqualTo(ResponseStatus.REJECTED);
+                    assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.INVALID_COMMAND);
+                    assertOwnerSurfaceUnchanged(state, beforeOwner, scenario.command().header().commandId());
+                    assertSnapshotStateEquivalent(ProductLine.LINEAR_PERPETUAL,
+                            beforeSnapshot, state.snapshot());
+                    assertThat(commitJournal(state).metrics().reservedEntries()).isZero();
+                    assertThat(commitJournal(state).metrics().reservedBytes()).isZero();
+                    assertThat(state.exportState().metrics().reservedEvents()).isZero();
+                    assertThat(state.exportState().metrics().reservedBytes()).isZero();
+                }
+            }
+        } finally {
+            CoreAdmissionReservation.setFactEstimateFaultInjectorForTest(null);
+        }
+    }
+
+    @Test
+    void realFundingEstimateOneByteOverAdmissionCapacityRejectsBeforeMutation() throws Exception {
+        var reducer = new com.surprising.aeron.service.state.TradingCoreReducer();
+        var seeded = linearStateWithPosition(reducer, 1001, 10, 100, 1_000, 100);
+        CoreMessage funding = tradingCommand(ProductLine.LINEAR_PERPETUAL, CoreMessageType.APPLY_FUNDING,
+                UUID.randomUUID(), 1, TradingCommandCodec.encodeApplyFunding(
+                        new com.surprising.aeron.protocol.ApplyFundingCommand(
+                                92, "BTC-USDT", 1, 10_000, 0, 64)));
+        var estimate = CoreAdmissionReservation.FactCostEstimate.from(funding, 3, 256);
+        CoreAdmissionReservation.setFactAdmissionByteLimitForTest(estimate.bytes() - 1);
+        try (CoreProbeState state = restoredLinearState(seeded)) {
+            OwnerSurface before = ownerSurface(state);
+            long snapshotStarted = System.nanoTime();
+            byte[] beforeSnapshot = state.snapshot();
+            assertThat(System.nanoTime() - snapshotStarted)
+                    .as("snapshot owner fence must not perform repeated canonical full-state hashing")
+                    .isLessThan(TimeUnit.SECONDS.toNanos(5));
+
+            CoreResponse rejected = state.apply(funding);
+
+            assertThat(rejected.status()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.EXPORT_BACKLOG_FULL);
+            assertOwnerSurfaceUnchanged(state, before, funding.header().commandId());
+            assertSnapshotStateEquivalent(ProductLine.LINEAR_PERPETUAL,
+                    beforeSnapshot, state.snapshot());
+        } finally {
+            CoreAdmissionReservation.setFactAdmissionByteLimitForTest(0);
+        }
+    }
+
+    @Test
+    void observedLiquidationFactKeepsMatcherEvidenceAndPoisonsAfterEstimatorUnderflow() throws Exception {
+        var reducer = new com.surprising.aeron.service.state.TradingCoreReducer();
+        var seeded = linearStateWithPosition(reducer, 1001, 10, 100, 100, 100);
+        seeded = reducer.updateRiskScanControl(seeded,
+                new com.surprising.aeron.protocol.UpdateRiskScanControlCommand(
+                        seeded.riskState().scanControl().version(), "test-liquidation", true,
+                        0, 64, "test", "exercise observed matcher fact rollback"),
+                1_700_000_000_000L);
+        seeded = reducer.applyMarkPrice(seeded,
+                new ApplyMarkPriceCommand("BTC-USDT", 1, 1, 1, 1_700_000_000_000L));
+        assertThat(seeded.riskState().liquidations()).containsKey(1L);
+        CoreMessage liquidation = tradingCommand(ProductLine.LINEAR_PERPETUAL,
+                CoreMessageType.EXECUTE_LIQUIDATION, UUID.randomUUID(), 1,
+                TradingCommandCodec.encodeExecuteLiquidation(
+                        new com.surprising.aeron.protocol.ExecuteLiquidationCommand(1, 1, 1, 0)));
+        CoreAdmissionReservation.setFactEstimateFaultInjectorForTest((message, estimate) ->
+                new CoreAdmissionReservation.FactCostEstimate(
+                        estimate.nodes(), estimate.nodes(), CoreProtocol.HEADER_LENGTH));
+        try (CoreProbeState state = restoredLinearState(seeded)) {
+            assertThat(state.apply(liquidation).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            long sequence = state.pendingMatching().keySet().iterator().next();
+            var matching = awaitMatching(state, sequence);
+            int shardIndex = matching.nativeCommand().matcherShardId() + 1;
+            var laneContexts = (LaneCommandContextRing) field(state, "laneCommandContexts");
+            var submissionToken = laneContexts.required(sequence).matchingSubmissionToken();
+            assertThat(submissionToken.active()).isTrue();
+            OwnerSurface beforeOwner = ownerSurface(state);
+            var beforeRuntimeState = state.tradingState();
+
+            Throwable failure = catchThrowable(() -> state.completeMatching(
+                    sequence, matching, liquidation.header().submittedAtEpochMillis(),
+                    liquidation.header().sourceSequence()));
+
+            assertThat(failure).isInstanceOf(
+                    com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class);
+            assertThat(state.tradingState()).isEqualTo(beforeRuntimeState);
+            assertThat(ownerSurface(state)).isEqualTo(beforeOwner);
+            assertThat(((long[]) field(state, "appliedMatcherSequences"))[shardIndex])
+                    .isEqualTo(matching.nativeCommand().matcherSequence());
+            assertThat(((long[]) field(state, "appliedMatcherPrefixDigests"))[shardIndex])
+                    .isEqualTo(matching.matcherPrefix().after());
+            assertThat(laneContexts.required(sequence).matchingSubmissionToken().tokenId())
+                    .isEqualTo(submissionToken.tokenId());
+            assertThat(laneContexts.required(sequence).matchingSubmissionToken().active()).isFalse();
+            assertThat(commitJournal(state).metrics().reservedEntries()).isPositive();
+            assertThat(state.exportState().metrics().currentBacklog()).isZero();
+            assertThatThrownBy(() -> state.apply(query(CoreMessageType.STATE_HASH_QUERY, 0, new byte[0])))
+                    .isSameAs(failure);
+            assertThatThrownBy(state::snapshot).isSameAs(failure);
+        } finally {
+            CoreAdmissionReservation.setFactEstimateFaultInjectorForTest(null);
+        }
+    }
+
+    @Test
+    @Timeout(10)
+    void fullCommitJournalRejectsMatchingBeforeMatcherSubmissionOrOwnerMutation() throws Exception {
+        String capacityProperty = "surprising.aeron.commit-journal-capacity";
+        String exportProperty = "surprising.aeron.export-materialization-capacity";
+        String previousCapacity = System.getProperty(capacityProperty);
+        String previousExportCapacity = System.getProperty(exportProperty);
+        System.setProperty(capacityProperty, "1024");
+        System.setProperty(exportProperty, "2048");
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CoreProbeState state = null;
+        try {
+            state = fundedSpotState();
+            var journal = commitJournal(state);
+            var stableProjection = state.tradingState();
+            journal.blockProjectorForTest(entered, release);
+            assertThat(entered.await(1, TimeUnit.SECONDS)).isTrue();
+            fillCommitJournal(journal, stableProjection);
+            OwnerSurface before = ownerSurface(state, stableProjection);
+            CoreMessage rejectedCommand = placeOrder(UUID.randomUUID(), 3, 9_301, "journal-full-9301");
+
+            CoreResponse rejected = state.apply(rejectedCommand, 9_301, 9_301);
+
+            assertThat(rejected.status()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.MATCHING_BACKPRESSURE);
+            assertOwnerSurfaceUnchanged(state, stableProjection, before,
+                    rejectedCommand.header().commandId());
+            assertThat(journal.metrics().currentBacklog()).isEqualTo(1_024);
+            assertThat(journal.metrics().reservedEntries()).isZero();
+        } finally {
+            release.countDown();
+            if (state != null) {
+                var journal = commitJournal(state);
+                journal.await(journal.publishedSequence(), System.nanoTime() + TimeUnit.SECONDS.toNanos(5), true);
+                state.close();
+            }
+            restoreProperty(capacityProperty, previousCapacity);
+            restoreProperty(exportProperty, previousExportCapacity);
+        }
+    }
+
+    @Test
+    void fullExportReservationRejectsMatchingAndRollsBackTheJournalReservationAtomically() throws Exception {
+        String exportProperty = "surprising.aeron.export-materialization-capacity";
+        String previousExportCapacity = System.getProperty(exportProperty);
+        System.setProperty(exportProperty, "4");
+        CoreExportState.AdmissionReservation reservation = null;
+        CoreProbeState state = null;
+        try {
+            state = fundedSpotState();
+            var journal = commitJournal(state);
+            reservation = state.exportState().reserveAdmission(2);
+            assertThat(state.exportState().metrics().currentBacklog()
+                    + state.exportState().metrics().reservedEvents()).isEqualTo(4);
+            OwnerSurface before = ownerSurface(state);
+            CoreMessage rejectedCommand = placeOrder(UUID.randomUUID(), 3, 9_302, "export-full-9302");
+
+            CoreResponse rejected = state.apply(rejectedCommand, 9_302, 9_302);
+
+            assertThat(rejected.status()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.EXPORT_BACKLOG_FULL);
+            assertOwnerSurfaceUnchanged(state, before, rejectedCommand.header().commandId());
+            assertThat(journal.metrics().reservedEntries()).isZero();
+            assertThat(journal.metrics().reservedBytes()).isZero();
+            assertThat(state.exportState().metrics().reservedEvents()).isEqualTo(2);
+            assertThat(state.exportState().metrics().rejectionCount()).isPositive();
+        } finally {
+            if (state != null) {
+                if (reservation != null) state.exportState().release(reservation);
+                state.close();
+            }
+            restoreProperty(exportProperty, previousExportCapacity);
+        }
+    }
+
+    @Test
+    @Timeout(10)
+    void bothFullAdmissionQueuesRejectWithoutCursorHashLaneOrIndexDrift() throws Exception {
+        String capacityProperty = "surprising.aeron.commit-journal-capacity";
+        String exportProperty = "surprising.aeron.export-materialization-capacity";
+        String previousCapacity = System.getProperty(capacityProperty);
+        String previousExportCapacity = System.getProperty(exportProperty);
+        System.setProperty(capacityProperty, "1024");
+        System.setProperty(exportProperty, "4");
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CoreExportState.AdmissionReservation reservation = null;
+        CoreProbeState state = null;
+        try {
+            state = fundedSpotState();
+            var journal = commitJournal(state);
+            var stableProjection = state.tradingState();
+            reservation = state.exportState().reserveAdmission(2);
+            journal.blockProjectorForTest(entered, release);
+            assertThat(entered.await(1, TimeUnit.SECONDS)).isTrue();
+            fillCommitJournal(journal, stableProjection);
+            assertThat(journal.metrics().currentBacklog()).isEqualTo(1_024);
+            assertThat(state.exportState().metrics().currentBacklog()
+                    + state.exportState().metrics().reservedEvents()).isEqualTo(4);
+            OwnerSurface before = ownerSurface(state, stableProjection);
+            CoreMessage rejectedCommand = placeOrder(UUID.randomUUID(), 3, 9_303, "both-full-9303");
+
+            CoreResponse rejected = state.apply(rejectedCommand, 9_303, 9_303);
+
+            assertThat(rejected.status()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.MATCHING_BACKPRESSURE);
+            assertOwnerSurfaceUnchanged(state, stableProjection, before,
+                    rejectedCommand.header().commandId());
+            assertThat(journal.metrics().currentBacklog()).isEqualTo(1_024);
+            assertThat(journal.metrics().reservedEntries()).isZero();
+            assertThat(state.exportState().metrics().reservedEvents()).isEqualTo(2);
+        } finally {
+            release.countDown();
+            if (state != null) {
+                if (reservation != null) state.exportState().release(reservation);
+                var journal = commitJournal(state);
+                journal.await(journal.publishedSequence(), System.nanoTime() + TimeUnit.SECONDS.toNanos(5), true);
+                state.close();
+            }
+            restoreProperty(capacityProperty, previousCapacity);
+            restoreProperty(exportProperty, previousExportCapacity);
+        }
     }
 
     @Test
@@ -1361,7 +2562,7 @@ class CoreProbeStateTest {
 
         assertThatThrownBy(() -> CoreProbeState.fromSnapshot(ProductLine.SPOT, snapshot))
                 .isInstanceOf(com.surprising.aeron.protocol.ProtocolException.class)
-                .hasMessageContaining("legacy core snapshot is disabled");
+                .hasMessageContaining("unsupported snapshot version: 2");
     }
 
     @Test
@@ -1372,7 +2573,7 @@ class CoreProbeStateTest {
         CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.OPTION, state.snapshot());
 
         assertThat(manifest.productLine()).isEqualTo(ProductLine.OPTION);
-        assertThat(manifest.schemaVersion()).isEqualTo(16);
+        assertThat(manifest.schemaVersion()).isEqualTo(17);
         assertThat(manifest.appliedCommandCount()).isEqualTo(1);
         assertThat(manifest.businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
         assertThat(manifest.engineStateHash()).isNotZero();
@@ -1435,13 +2636,21 @@ class CoreProbeStateTest {
         assertThat(state.tradingState().user(1001).reservations()).containsKey(901L);
 
         long throughSequence = state.exportState().nextSequence() - 1;
+        long outboxSequenceBeforeAck = state.exportState().nextSequence();
         long businessHashBeforeAck = state.tradingState().businessStateHash();
         long revisionBeforeAck = state.tradingState().revision();
+        long businessHashCoreSequenceBeforeAck = state.committedBusinessHashCoreSequence();
+        long fundsHashCoreSequenceBeforeAck = state.committedFundsHashCoreSequence();
+        long projectionSequenceBeforeAck = state.committedProjectionSequence();
         CoreMessage ack = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ACK_EXPORT,
                 UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 9, 2, 0, 1_000, 5),
                 CoreExportCodec.encodeAck(new AckExportCommand(throughSequence)));
 
         assertThat(state.apply(ack).status()).isEqualTo(ResponseStatus.APPLIED);
+        assertThat(state.exportState().nextSequence()).isEqualTo(outboxSequenceBeforeAck);
+        assertThat(state.committedBusinessHashCoreSequence()).isEqualTo(businessHashCoreSequenceBeforeAck);
+        assertThat(state.committedFundsHashCoreSequence()).isEqualTo(fundsHashCoreSequenceBeforeAck);
+        assertThat(state.committedProjectionSequence()).isEqualTo(projectionSequenceBeforeAck + 1);
         assertThat(state.tradingState().businessStateHash()).isEqualTo(businessHashBeforeAck);
         assertThat(state.tradingState().revision()).isEqualTo(revisionBeforeAck);
         assertThat(state.tradingState().user(1001).reservations()).doesNotContainKey(901L);
@@ -1453,9 +2662,13 @@ class CoreProbeStateTest {
         CoreMessage reusedOrderId = tradingCommand(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 5,
                 TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(901, "BTC-USDT", 1, CoreOrderSide.BUY, 900, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "client-902")));
         assertThat(state.apply(reusedOrderId).resultCode()).isEqualTo(CoreResultCode.DUPLICATE_ORDER_ID);
+        long outboxSequenceBeforeSnapshot = state.exportState().nextSequence();
+        long projectionSequenceBeforeSnapshot = state.committedProjectionSequence();
         CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot());
         assertThat(restored.tradingState().user(1001).reservations()).doesNotContainKey(901L);
         assertThat(restored.terminalRetentionTombstoneCount()).isEqualTo(1);
+        assertThat(restored.exportState().nextSequence()).isEqualTo(outboxSequenceBeforeSnapshot);
+        assertThat(restored.committedProjectionSequence()).isEqualTo(projectionSequenceBeforeSnapshot);
     }
 
     @Test
@@ -1523,26 +2736,293 @@ class CoreProbeStateTest {
         return total;
     }
 
+    private static CoreProbeState fundedSpotState() {
+        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        applySpotInstrument(state);
+        assertThat(state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 2,
+                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))
+                .status()).isEqualTo(ResponseStatus.APPLIED);
+        return state;
+    }
+
+    private static CoreMessage placeOrder(UUID commandId, long sourceSequence, long orderId,
+                                          String clientOrderId) {
+        return tradingCommand(CoreMessageType.PLACE_ORDER, commandId, sourceSequence,
+                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1,
+                        CoreOrderSide.BUY, 600, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                        CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, clientOrderId)));
+    }
+
+    private static com.surprising.aeron.service.state.RuntimeCommitJournal commitJournal(
+            CoreProbeState state) throws Exception {
+        return (com.surprising.aeron.service.state.RuntimeCommitJournal) field(state,
+                "runtimeProjectionJournal");
+    }
+
+    private static void fillCommitJournal(com.surprising.aeron.service.state.RuntimeCommitJournal journal,
+                                          com.surprising.aeron.service.state.TradingCoreState state) throws Exception {
+        long fundsHash = com.surprising.aeron.service.state.RollingFundsStateHash.compute(state);
+        long sequence = journal.publishedSequence();
+        for (int entry = 0; entry < 1_024; entry++) {
+            sequence++;
+            var builder = com.surprising.aeron.service.state.RuntimeCommitPatch.builder(
+                    state.productLine(), sequence - 1, sequence, sequence - 1, sequence)
+                    .matcherTransition(com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0));
+            var patch = builder.seal(
+                    new com.surprising.aeron.service.state.RuntimeCommitPatch.SealMetadata(
+                            state.revision(), state.revision(), state.businessStateHash(), state.businessStateHash(),
+                            fundsHash, fundsHash, 0, null));
+            journal.publish(patch, patch.businessStateHash(), patch.fundsStateHash());
+        }
+    }
+
+    private static OwnerSurface ownerSurface(CoreProbeState state) throws Exception {
+        return ownerSurface(state, state.tradingState());
+    }
+
+    private static OwnerSurface ownerSurface(
+            CoreProbeState state,
+            com.surprising.aeron.service.state.TradingCoreState snapshot) throws Exception {
+        var user = snapshot.user(1001);
+        var runtime = (com.surprising.aeron.service.state.TradingRuntimeState) field(state,
+                "runtimePlaceOrderState");
+        var activeOrders = (com.surprising.aeron.service.state.ActiveOrderIndex) field(state, "activeOrderIndex");
+        return new OwnerSurface(state.appliedCommandCount(), state.committedCoreSequence(), state.stateHash(),
+                state.sourceSequenceDigest(), state.lastSourceSequences(), state.commandResults(),
+                (long) field(state, "currentClusterTimestamp"), (long) field(state, "currentClusterPosition"),
+                snapshot.businessStateHash(), user.balances(), user.reservations(), user.positions(),
+                snapshot.orders(), activeOrders.page(0, "BTC-USDT", Long.MAX_VALUE, 10),
+                runtime.accountLane(1001).committedSequence(), state.pendingMatching(),
+                commitJournal(state).publishedSequence(), state.exportState().status());
+    }
+
+    private static com.surprising.aeron.service.state.TradingCoreState linearStateWithPosition(
+            com.surprising.aeron.service.state.TradingCoreReducer reducer,
+            long userId, long quantity, long entryPrice, long wallet, long margin) {
+        var state = reducer.upsertInstrument(
+                com.surprising.aeron.service.state.TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
+                new UpsertInstrumentCommand("BTC-USDT", 1, ContractType.LINEAR_PERPETUAL.ordinal(),
+                        "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 100_000,
+                        0, 0, 0, -1, 0));
+        return linearStateWithPosition(reducer, state, userId, quantity, entryPrice, wallet, margin);
+    }
+
+    private static com.surprising.aeron.service.state.TradingCoreState linearStateWithPosition(
+            com.surprising.aeron.service.state.TradingCoreReducer reducer,
+            com.surprising.aeron.service.state.TradingCoreState state,
+            long userId, long quantity, long entryPrice, long wallet, long margin) {
+        var funded = reducer.adjustBalance(state, userId, new BalanceAdjustmentCommand("USDT", wallet));
+        var current = funded.user(userId);
+        var balances = new TreeMap<>(current.balances());
+        balances.put("USDT", new com.surprising.aeron.service.state.AssetBalance(
+                "USDT", wallet - margin, margin));
+        var positions = new TreeMap<>(current.positions());
+        positions.put("BTC-USDT", new com.surprising.aeron.service.state.CorePositionState(
+                "BTC-USDT", "USDT", 1, quantity, entryPrice,
+                Math.multiplyExact(Math.absExact(quantity), entryPrice), 0, margin));
+        var user = new com.surprising.aeron.service.state.CoreUserState(
+                funded.productLine(), userId, current.revision() + 1,
+                balances, current.reservations(), positions);
+        var users = new TreeMap<>(funded.users());
+        users.put(userId, user);
+        return new com.surprising.aeron.service.state.TradingCoreState(
+                funded.productLine(), funded.revision() + 1, users, funded.orders(),
+                funded.instruments(), funded.riskState(), funded.treasuryState());
+    }
+
+    private static CoreProbeState restoredLinearState(
+            com.surprising.aeron.service.state.TradingCoreState state) {
+        return CoreProbeStateRestoreTestSupport.restore(ProductLine.LINEAR_PERPETUAL, 0, 0,
+                Map.of(), Map.of(), state, new CoreExportState());
+    }
+
+    private static void assertOwnerSurfaceUnchanged(CoreProbeState state, OwnerSurface before,
+                                                    UUID rejectedCommandId) throws Exception {
+        assertOwnerSurfaceUnchanged(state, state.tradingState(), before, rejectedCommandId);
+    }
+
+    private static void assertOwnerSurfaceUnchanged(
+            CoreProbeState state,
+            com.surprising.aeron.service.state.TradingCoreState snapshot,
+            OwnerSurface before,
+            UUID rejectedCommandId) throws Exception {
+        var after = ownerSurface(state, snapshot);
+        assertThat(after).isEqualTo(before);
+        assertThat(state.matchingSequence(rejectedCommandId)).isZero();
+        assertThat(state.commandResults()).doesNotContainKey(rejectedCommandId);
+    }
+
+    private static void assertSnapshotStateEquivalent(
+            ProductLine productLine,
+            byte[] beforeSnapshot,
+            byte[] afterSnapshot) throws Exception {
+        CoreSnapshotManifest beforeManifest = CoreProbeState.inspectSnapshot(productLine, beforeSnapshot);
+        CoreSnapshotManifest afterManifest = CoreProbeState.inspectSnapshot(productLine, afterSnapshot);
+        assertThat(afterManifest)
+                .usingRecursiveComparison()
+                .ignoringFields("snapshotId", "clusterTimestamp", "clusterPosition",
+                        "matcherSequence", "checksum")
+                .isEqualTo(beforeManifest);
+        assertThat(afterManifest.matcherSequence()).isGreaterThan(beforeManifest.matcherSequence());
+        try (CoreProbeState before = CoreProbeState.fromSnapshot(productLine, beforeSnapshot);
+             CoreProbeState after = CoreProbeState.fromSnapshot(productLine, afterSnapshot)) {
+            assertThat(ownerSurface(after)).isEqualTo(ownerSurface(before));
+            assertThat(after.tradingState()).isEqualTo(before.tradingState());
+            assertThat(after.committedBusinessHashCoreSequence())
+                    .isEqualTo(before.committedBusinessHashCoreSequence());
+            assertThat(after.committedFundsHashCoreSequence())
+                    .isEqualTo(before.committedFundsHashCoreSequence());
+            assertThat(after.committedProjectionSequence())
+                    .isEqualTo(before.committedProjectionSequence());
+        }
+    }
+
+    private static void restoreProperty(String property, String value) {
+        if (value == null) System.clearProperty(property); else System.setProperty(property, value);
+    }
+
+    private record OwnerSurface(long appliedCommandCount, long committedCoreSequence, long stateHash,
+                                long sourceSequenceDigest, Map<CoreProbeState.SourceKey, Long> sourceCursors,
+                                Map<UUID, CoreProbeState.StoredResult> commandResults,
+                                long clusterTimestamp, long clusterPosition, long businessStateHash,
+                                Map<String, com.surprising.aeron.service.state.AssetBalance> balances,
+                                Map<Long, com.surprising.aeron.service.state.OrderReservation> reservations,
+                                Map<String, com.surprising.aeron.service.state.CorePositionState> positions,
+                                Map<Long, com.surprising.aeron.service.state.CoreOrderState> orders,
+                                com.surprising.aeron.service.state.ActiveOrderIndex.Page activeOrders,
+                                long laneSequence, Map<Long, PendingMatching> pendingMatching,
+                                long journalSequence,
+                                com.surprising.aeron.protocol.CoreExportStatus exportStatus) {
+    }
+
+    private record UnderestimateScenario(
+            com.surprising.aeron.service.state.TradingCoreState state, CoreMessage command) {
+    }
+
     private static CoreMessage command(UUID commandId, long sourceSequence, long delta) {
         return command(ProductLine.SPOT, commandId, sourceSequence, delta);
+    }
+
+    private static void awaitMaterializer(CountDownLatch releaseMaterializer) {
+        try {
+            if (!releaseMaterializer.await(3, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Core Fact materializer was not released");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Core Fact materializer interrupted", exception);
+        }
+    }
+
+    private static CoreExportState.Draft draft(
+            CoreMessage command, long appliedCount, long businessStateHash, long beforeBusinessStateHash,
+            com.surprising.aeron.protocol.CoreMatcherTransition transition, List<Long> terminalOrderIds) {
+        var metadata = new com.surprising.aeron.service.state.RuntimeCommitPatch.CoreFactMetadata(
+                command.header().commandId(), com.surprising.aeron.protocol.CommandFingerprint.of(command),
+                command.header().messageType().wireCode(), command.header().userId(), ResponseStatus.APPLIED,
+                CoreResultCode.NONE, appliedCount, appliedCount, 1, 1, false);
+        return new CoreExportState.Draft(command, ResponseStatus.APPLIED, CoreResultCode.NONE,
+                appliedCount, businessStateHash, beforeBusinessStateHash, 0, 0, 1, 1, transition,
+                appliedCount, appliedCount, terminalOrderIds.size(), terminalOrderIds.stream()
+                .mapToLong(Long::longValue).toArray(), null, CoreCommandDelta.empty(),
+                com.surprising.aeron.service.state.RuntimeFundsDelta.empty(), metadata);
+    }
+
+    private static CoreAdmissionReservation.FactPermit factPermit(
+            com.surprising.aeron.service.state.RuntimeCommitPatch patch) {
+        return factPermits(List.of(patch)).getFirst();
+    }
+
+    private static List<CoreAdmissionReservation.FactPermit> factPermits(
+            List<com.surprising.aeron.service.state.RuntimeCommitPatch> patches) {
+        int items = patches.stream().mapToInt(
+                com.surprising.aeron.service.state.RuntimeCommitPatch::coreFactItemCount).sum();
+        long bytes = patches.stream().mapToLong(
+                com.surprising.aeron.service.state.RuntimeCommitPatch::estimatedCoreFactBytes).sum();
+        var budget = new CoreAdmissionReservation.FactBudget(patches.size(),
+                Math.max(items, patches.size()), Math.max(bytes, patches.size()));
+        var permits = new java.util.ArrayList<CoreAdmissionReservation.FactPermit>(patches.size());
+        for (var patch : patches) {
+            var permit = budget.reservePatch();
+            permit.consume(patch);
+            permits.add(permit);
+        }
+        return List.copyOf(permits);
+    }
+
+    private static com.surprising.aeron.service.state.RuntimeCommitPatch conservedFundsPatch(
+            com.surprising.aeron.service.state.RuntimeIdentityRegistry identities, CoreMessage command) {
+        int assetId = identities.assetId("USDT");
+        var builder = com.surprising.aeron.service.state.RuntimeCommitPatch.builder(
+                        ProductLine.LINEAR_PERPETUAL, 0, 1, 0, 1)
+                .matcherTransition(com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0))
+                .addFundsPosting(new com.surprising.aeron.service.state.RuntimeCommitPatch.FundsPosting(assetId,
+                        com.surprising.aeron.service.state.FundsPosting.OwnerKind.USER, 1,
+                        com.surprising.aeron.service.state.FundsPosting.Subledger.AVAILABLE, -10))
+                .addFundsPosting(new com.surprising.aeron.service.state.RuntimeCommitPatch.FundsPosting(assetId,
+                        com.surprising.aeron.service.state.FundsPosting.OwnerKind.TREASURY, 0,
+                        com.surprising.aeron.service.state.FundsPosting.Subledger.FEE, 10));
+        var metadata = new com.surprising.aeron.service.state.RuntimeCommitPatch.CoreFactMetadata(
+                command.header().commandId(), com.surprising.aeron.protocol.CommandFingerprint.of(command),
+                command.header().messageType().wireCode(), command.header().userId(), ResponseStatus.APPLIED,
+                CoreResultCode.NONE, 1, 1, 1, 1, false);
+        var prepared = builder.prepare(new com.surprising.aeron.service.state.RuntimeCommitPatch.PrepareMetadata(
+                0, 1, 0, 0, 0, metadata, false), identities);
+        return builder.seal(prepared, 1, 1);
+    }
+
+    private static CoreExportState.Draft draft(
+            CoreMessage command, long appliedCount, long businessStateHash, long beforeBusinessStateHash,
+            com.surprising.aeron.protocol.CoreMatcherTransition transition, List<Long> terminalOrderIds,
+            CoreExportState.PatchChain patches,
+            com.surprising.aeron.service.state.RuntimeIdentityRegistry identities) {
+        var metadata = new com.surprising.aeron.service.state.RuntimeCommitPatch.CoreFactMetadata(
+                command.header().commandId(), com.surprising.aeron.protocol.CommandFingerprint.of(command),
+                command.header().messageType().wireCode(), command.header().userId(), ResponseStatus.APPLIED,
+                CoreResultCode.NONE, appliedCount, appliedCount, 1, 1, false);
+        int itemCount = terminalOrderIds.size() + (patches == null ? 0 : patches.itemCount());
+        return new CoreExportState.Draft(command, ResponseStatus.APPLIED, CoreResultCode.NONE,
+                appliedCount, businessStateHash, beforeBusinessStateHash, 0, 0, 1, 1, transition,
+                appliedCount, appliedCount, itemCount, terminalOrderIds.stream().mapToLong(Long::longValue).toArray(),
+                patches, CoreCommandDelta.empty(),
+                com.surprising.aeron.service.state.RuntimeFundsDelta.empty(), metadata);
+    }
+
+    private static com.surprising.aeron.service.state.RuntimeCommitPatch orderPatch(
+            com.surprising.aeron.service.state.RuntimeIdentityRegistry identities,
+            com.surprising.aeron.service.state.OrderRuntime before,
+            com.surprising.aeron.service.state.OrderRuntime after,
+            long previousSequence, long sequence) {
+        var builder = com.surprising.aeron.service.state.RuntimeCommitPatch.builder(
+                        ProductLine.LINEAR_PERPETUAL, previousSequence, sequence, previousSequence, sequence)
+                .matcherTransition(com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0));
+        var businessBefore = before == null ? null
+                : com.surprising.aeron.service.state.RuntimeStateMaterializer.orderSnapshot(before, identities);
+        var businessAfter = after == null ? null
+                : com.surprising.aeron.service.state.RuntimeStateMaterializer.orderSnapshot(after, identities);
+        builder.recordOrder(1, before, after, businessBefore, businessAfter);
+        builder.addLaneCommit(new com.surprising.aeron.service.state.RuntimeCommitPatch.LaneCommit(
+                1, sequence, sequence, 0, 1, previousSequence, sequence,
+                previousSequence, sequence, previousSequence, sequence));
+        CoreMessage cause = command(ProductLine.LINEAR_PERPETUAL, UUID.randomUUID(), sequence, 1);
+        var metadata = new com.surprising.aeron.service.state.RuntimeCommitPatch.CoreFactMetadata(
+                cause.header().commandId(), com.surprising.aeron.protocol.CommandFingerprint.of(cause),
+                cause.header().messageType().wireCode(), cause.header().userId(), ResponseStatus.APPLIED,
+                CoreResultCode.NONE, sequence, sequence, 1, 1, false);
+        var prepared = builder.prepare(new com.surprising.aeron.service.state.RuntimeCommitPatch.PrepareMetadata(
+                previousSequence, sequence, previousSequence, previousSequence, 1L << 1, metadata, false),
+                identities);
+        return builder.seal(prepared, sequence, sequence);
     }
 
     private static void fillExportBacklogCapacity(CoreExportState exportState) {
         byte[] payload = new byte[CoreExportCodec.MAX_COMMAND_PAYLOAD / 2];
         for (long sequence = 1; sequence <= 6; sequence++) {
-            long factSequence = sequence;
             CoreMessage command = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
                     UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 91, sequence,
                     0, 1_000, sequence), payload);
             var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
-            exportState.append(new CoreExportState.Draft(command, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                    sequence, 0, 0, 0, 0, 1, 1, transition, sequence, 0,
-                    new long[0], exportSequence -> new com.surprising.aeron.protocol.CoreExportEvent(
-                            exportSequence, factSequence, 0, command.header().commandId(),
-                            command.header().messageType(), ResponseStatus.APPLIED, CoreResultCode.NONE,
-                            command.header().userId(), command.payloadUnsafe(), List.of(), List.of(), List.of(),
-                            List.of(), List.of(), List.of(), List.of(), 0, 0, 0, transition.routeVersion(),
-                            1, 1, factSequence, transition, factSequence, List.of())));
+            exportState.append(draft(command, sequence, 0, 0, transition, List.of()));
         }
         assertThat(exportState.hasCapacityFor()).isFalse();
     }
@@ -1560,18 +3040,36 @@ class CoreProbeStateTest {
         return response;
     }
 
+    private static Object field(Object target, String name) throws Exception {
+        var field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(target);
+    }
+
+    private static void failHashCommit(Object hash) throws Exception {
+        var method = hash.getClass().getDeclaredMethod("failAfterStagedOperationForTest", int.class);
+        method.setAccessible(true);
+        method.invoke(hash, 0);
+    }
+
     private static CoreResponse completeMatching(CoreProbeState state, long sequence, CoreMessage message) {
+        com.surprising.aeron.service.matching.CoreMatchingResult result = awaitMatching(state, sequence);
+        CoreResponse completed = state.completeMatching(sequence, result, message.header().submittedAtEpochMillis(),
+                message.header().sourceSequence());
+        assertThat(completed).isNotNull();
+        return completed;
+    }
+
+    private static com.surprising.aeron.service.matching.CoreMatchingResult awaitMatching(
+            CoreProbeState state, long sequence) {
         com.surprising.aeron.service.matching.CoreMatchingResult result = null;
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (result == null && System.nanoTime() < deadline) {
             result = state.takeMatchingResult(sequence);
             if (result == null) Thread.onSpinWait();
         }
-        assertThat(result).as("matching result for " + message.header().messageType()).isNotNull();
-        CoreResponse completed = state.completeMatching(sequence, result, message.header().submittedAtEpochMillis(),
-                message.header().sourceSequence());
-        assertThat(completed).isNotNull();
-        return completed;
+        assertThat(result).as("matching result for sequence " + sequence).isNotNull();
+        return result;
     }
 
     private static CoreResponse applyBookQuery(CoreProbeState state, CoreMessage message) {
@@ -1602,8 +3100,17 @@ class CoreProbeStateTest {
             UUID commandId,
             long sourceSequence,
             byte[] payload) {
+        return tradingCommand(ProductLine.SPOT, messageType, commandId, sourceSequence, payload);
+    }
+
+    private static CoreMessage tradingCommand(
+            ProductLine productLine,
+            CoreMessageType messageType,
+            UUID commandId,
+            long sourceSequence,
+            byte[] payload) {
         return new CoreMessage(CoreMessageHeader.command(messageType, commandId,
-                ProductLine.SPOT, CommandSource.GATEWAY, 7, sourceSequence, 1001,
+                productLine, CommandSource.GATEWAY, 7, sourceSequence, 1001,
                 1_000, sourceSequence), payload);
     }
 

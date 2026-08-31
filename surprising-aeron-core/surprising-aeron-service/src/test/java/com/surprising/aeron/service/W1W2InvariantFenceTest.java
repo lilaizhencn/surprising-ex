@@ -1,18 +1,76 @@
 package com.surprising.aeron.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class W1W2InvariantFenceTest {
 
     @Test
+    void failedOwnerCommitKeepsJournalIndexesMetadataAndEveryLaneBehindVisibilityFence() throws Exception {
+        try (CoreProbeState state = new CoreProbeState(
+                com.surprising.product.api.ProductLine.SPOT)) {
+            var journal = (com.surprising.aeron.service.state.RuntimeCommitJournal)
+                    field(state, "runtimeProjectionJournal");
+            var runtimeState = (com.surprising.aeron.service.state.TradingRuntimeState)
+                    field(state, "runtimePlaceOrderState");
+            TradingCoreRuntime runtime = (TradingCoreRuntime) field(state, "runtime");
+            var activeOrders = (com.surprising.aeron.service.state.ActiveOrderIndex)
+                    field(state, "activeOrderIndex");
+            var laneViews = runtimeState.accountLanes();
+            var activeOrderSnapshot = activeOrders.orders();
+            long businessHash = (long) field(runtime, "committedBusinessStateHash");
+            long revision = (long) field(runtime, "committedRevision");
+            long coreSequence = runtime.committedCoreSequence();
+            CoreProbeState.setCommitFaultInjectorForTest(phase -> {
+                if (phase.equals("indexes")) throw new IllegalStateException("injected indexes failure");
+            });
+            var adjustment = new com.surprising.aeron.protocol.CoreMessage(
+                    com.surprising.aeron.protocol.CoreMessageHeader.command(
+                            com.surprising.aeron.protocol.CoreMessageType.ADJUST_BALANCE,
+                            UUID.randomUUID(), com.surprising.product.api.ProductLine.SPOT,
+                            com.surprising.aeron.protocol.CommandSource.GATEWAY, 7, 1, 1001, 1_000, 1),
+                    com.surprising.aeron.protocol.TradingCommandCodec.encodeBalanceAdjustment(
+                            new com.surprising.aeron.protocol.BalanceAdjustmentCommand("USDT", 25)));
+
+            assertThatThrownBy(() -> state.apply(adjustment))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("injected indexes failure");
+
+            assertThat(journal.publishedSequence()).isZero();
+            assertThat(activeOrders.orders()).containsExactlyElementsOf(activeOrderSnapshot);
+            assertThat((long) field(runtime, "committedBusinessStateHash")).isEqualTo(businessHash);
+            assertThat((long) field(runtime, "committedRevision")).isEqualTo(revision);
+            assertThat(runtime.committedCoreSequence()).isEqualTo(coreSequence);
+            assertThat(runtime.readFence(coreSequence)).isEqualTo(coreSequence);
+            var afterFailure = runtimeState.accountLanes();
+            assertThat(afterFailure).hasSameSizeAs(laneViews);
+            for (int laneId = 0; laneId < afterFailure.length; laneId++) {
+                assertThat(afterFailure[laneId].revision()).isEqualTo(laneViews[laneId].revision());
+                assertThat(afterFailure[laneId].appliedSequence())
+                        .isEqualTo(laneViews[laneId].appliedSequence());
+                assertThat(afterFailure[laneId].committedSequence())
+                        .isEqualTo(laneViews[laneId].committedSequence());
+                assertThat(afterFailure[laneId].localStateHash())
+                        .isEqualTo(laneViews[laneId].localStateHash());
+                assertThat(afterFailure[laneId].localFundsHash())
+                        .isEqualTo(laneViews[laneId].localFundsHash());
+            }
+        } finally {
+            CoreProbeState.setCommitFaultInjectorForTest(null);
+        }
+    }
+
+    @Test
     void keepsSingleBookSnapshotOnlyRestore() throws Exception {
         String adapter = source("matching/DeterministicExchangeCoreAdapter.java");
         String runtime = source("TradingCoreRuntime.java");
+        String indexes = source("state/RuntimeCommitIndexes.java");
         String probe = source("CoreProbeState.java");
 
         assertThat(adapter)
@@ -21,21 +79,54 @@ class W1W2InvariantFenceTest {
                 .contains("reconcileOpenOrdersAsync(activeOrders")
                 .doesNotContain("fromOrders", "rebuildMatcher", "resubmitMatcher", "CoreBookState");
         assertThat(runtime).contains("private void restoreIndexes(TradingCoreState restored)");
-        assertThat(linesContaining(runtime, ".rebuild(restored"))
+        assertThat(runtime).contains("commitIndexes.rebuild(restored, identities);");
+        assertThat(linesContaining(indexes, ".rebuild(state"))
                 .containsExactly(
-                        "positionUsers.rebuild(restored, identities);",
-                        "openInterest.rebuild(restored, identities);",
-                        "triggers.rebuild(restored);",
-                        "algos.rebuild(restored);",
-                        "liquidations.rebuild(restored);",
-                        "timers.rebuild(restored);",
-                        "activeOrders.rebuild(restored, identities);",
-                        "adlPositions.rebuild(restored, identities);",
-                        "riskSnapshots.rebuild(restored);");
+                        "positionUsers.rebuild(state, identities);",
+                        "openInterest.rebuild(state, identities);",
+                        "triggers.rebuild(state);",
+                        "algos.rebuild(state);",
+                        "liquidations.rebuild(state);",
+                        "timers.rebuild(state);",
+                        "activeOrders.rebuild(state, identities);",
+                        "adlPositions.rebuild(state, identities);",
+                        "riskSnapshots.rebuild(state);");
         assertThat(probe)
                 .contains("fatalFailure = cause == null")
                 .contains("if (fatalFailure != null) throw fatalFailure;")
-                .doesNotContain("CoreBookState");
+                .doesNotContain("CoreBookState", "LaneCommitListener", "recordLaneCommit", "cachedLane");
+        assertThat(source("state/TradingRuntimeState.java"))
+                .doesNotContain("LaneCommitListener", "AccountLaneApplyResult");
+    }
+
+    @Test
+    void ownerCommitStagesTypedHashesWithoutMaterializingOrAwaitingProjection() throws Exception {
+        String probe = source("CoreProbeState.java");
+        int start = probe.indexOf("    private void projectSnapshotNow(\n            List<");
+        int end = probe.indexOf("    private void reservePlaceOrderRuntime", start);
+        assertThat(start).isGreaterThanOrEqualTo(0);
+        assertThat(end).isGreaterThan(start);
+        String ownerCommit = probe.substring(start, end);
+
+        assertThat(ownerCommit)
+                .contains("preparedCommit.builder().prepare(")
+                .contains("rollingBusinessStateHash.prepare(preparedChanges)")
+                .contains("rollingFundsStateHash.prepare(preparedChanges)")
+                .contains("businessTransition.commit()")
+                .contains("fundsTransition.commit()")
+                .contains("commitFaultInjector.inject(\"funds-hash\")")
+                .contains("fundsTransition.rollback()")
+                .contains("businessTransition.rollback()")
+                .contains("publishSealedCommit(commit,")
+                .doesNotContain("runtimeProjectionJournal.await")
+                .doesNotContain("RuntimeStateMaterializer.materialize")
+                .doesNotContain("RollingBusinessStateHash.compute")
+                .doesNotContain("RollingFundsStateHash.compute")
+                .doesNotContain("rollingBusinessStateHash.restore")
+                .doesNotContain("rollingFundsStateHash.restore");
+        assertThat(occurrences(ownerCommit, "preparedCommit.builder().prepare(")).isEqualTo(1);
+        assertThat(occurrences(ownerCommit, "publishSealedCommit(commit,")).isEqualTo(1);
+        assertThat(probe).contains("currentAdmission.publish(commit, businessStateHash, fundsStateHash)");
     }
 
     private static String source(String relativePath) throws Exception {
@@ -48,5 +139,15 @@ class W1W2InvariantFenceTest {
 
     private static List<String> linesContaining(String source, String needle) {
         return source.lines().map(String::trim).filter(line -> line.contains(needle)).toList();
+    }
+
+    private static int occurrences(String source, String token) {
+        return source.split(java.util.regex.Pattern.quote(token), -1).length - 1;
+    }
+
+    private static Object field(Object target, String name) throws Exception {
+        java.lang.reflect.Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(target);
     }
 }

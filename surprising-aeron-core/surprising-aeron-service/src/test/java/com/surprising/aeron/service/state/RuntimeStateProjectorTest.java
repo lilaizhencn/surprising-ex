@@ -39,33 +39,22 @@ class RuntimeStateProjectorTest {
     }
 
     @Test
-    void materializesOneRuntimeCommandAsADeltaWithoutTraversingGlobalState() {
+    void appliesOneRuntimePatchWithoutFreezingUntilRequested() {
         TradingCoreReducer reducer = new TradingCoreReducer();
         TradingCoreState before = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
         before = reducer.adjustBalance(before, 7, new BalanceAdjustmentCommand("USDT", 1_000));
         before = reducer.adjustBalance(before, 9, new BalanceAdjustmentCommand("USDT", 2_000));
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-        RuntimeStateMaterializer.SnapshotTraversalProbe traversalProbe =
-                new RuntimeStateMaterializer.SnapshotTraversalProbe();
-
         RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
                 new BalanceAdjustmentCommand("USDT", 250));
-        TradingCoreState after = RuntimeStateMaterializer.materializeTransition(
-                runtime, identities, before, traversalProbe);
+        RuntimeCommitPatch patch = capture(runtime, identities, before, 1, before.revision());
+        RuntimeProjectionState projection = projection(before);
+        projection.apply(patch);
+        TradingCoreState after = projection.freeze(1);
 
         assertThat(after).isEqualTo(RuntimeStateMaterializer.materialize(runtime, identities));
-        assertThat(after.user(9)).isSameAs(before.user(9));
-        assertThat(after.orders()).isSameAs(before.orders());
-        assertThat(after.instruments()).isSameAs(before.instruments());
-        assertThat(after.riskState().markPrices()).isSameAs(before.riskState().markPrices());
-        assertThat(after.riskState().snapshots()).isSameAs(before.riskState().snapshots());
-        assertThat(after.riskState().liquidations()).isSameAs(before.riskState().liquidations());
-        assertThat(after.riskState().scans()).isSameAs(before.riskState().scans());
-        assertThat(after.treasuryState()).isSameAs(before.treasuryState());
-        assertThat(StateMapSupport.changedKeys(before.users(), after.users())).containsExactly(7L);
-        assertThat(traversalProbe.reservationTraversals()).isZero();
-        assertThat(traversalProbe.positionTraversals()).isZero();
+        assertThat(projection.freeze(1)).isSameAs(after);
     }
 
     @Test
@@ -78,11 +67,11 @@ class RuntimeStateProjectorTest {
 
         RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
                 new BalanceAdjustmentCommand("USDT", 250));
-        RuntimeMutationDelta captured = runtime.captureMutationDelta();
+        RuntimeCommitPatch captured = capture(runtime, identities, before, 1, before.revision());
         RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
                 new BalanceAdjustmentCommand("USDT", 100));
 
-        TradingCoreState projected = RuntimeStateMaterializer.materializeTransition(captured, identities, before);
+        TradingCoreState projected = project(before, captured);
 
         assertThat(projected.user(7).balances().get("USDT").availableUnits()).isEqualTo(1_250);
         assertThat(runtime.balance(7, identities.assetId("USDT")).availableUnits()).isEqualTo(1_350);
@@ -101,34 +90,28 @@ class RuntimeStateProjectorTest {
                 new BalanceAdjustmentCommand("USDT", 1));
         RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
                 new BalanceAdjustmentCommand("USDT", 1));
-        RuntimeMutationDelta mutation = runtime.captureMutationDelta();
+        RuntimeCommitPatch patch = capture(runtime, identities, before, 1, before.revision());
 
-        assertThat(mutation.users().changedKeys()).containsExactly(7L, 9L);
-        assertThat(mutation.users().changedKeys()).isNotInstanceOf(java.util.SortedSet.class);
-        assertThat(mutation.users().currentValues()).isNotInstanceOf(java.util.SortedMap.class);
-        assertThat(mutation.users().changedKeys()).isInstanceOf(java.util.List.class);
-        assertThat(java.util.Arrays.stream(RuntimeMutationDelta.ValueChanges.class.getDeclaredFields())
-                .anyMatch(field -> field.getType() == java.util.Map.class
-                        || field.getType() == java.util.Set.class)).isFalse();
-        assertThat(mutation.users().currentValues().get(7L).balances().changedKeys())
-                .isNotInstanceOf(java.util.SortedSet.class);
+        assertThat(patch.changedUserIds()).containsExactly(7L, 9L);
+        assertThat(patch.accountLaneGroups()).isSortedAccordingTo(
+                java.util.Comparator.comparingInt(RuntimeCommitPatch.AccountLaneOwnerGroup::laneId));
+        assertThat(patch.accountLaneGroups().stream().flatMap(group -> group.balances().stream())
+                .map(change -> change.key().userId())).containsExactlyInAnyOrder(7L, 9L);
         runtime.close();
     }
 
     @Test
-    void emptyMutationFamiliesShareOneImmutableValueChangesInstance() {
+    void emptyTypedPatchUsesImmutableOwnerGroups() {
         TradingCoreState before = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
 
-        RuntimeMutationDelta first = runtime.captureMutationDelta();
-        RuntimeMutationDelta second = runtime.captureMutationDelta();
+        RuntimeCommitPatch patch = capture(runtime, identities, before, 1, before.revision());
 
-        assertThat(first.orders()).isSameAs(first.positions());
-        assertThat(first.orders()).isSameAs(first.liquidations());
-        assertThat(first.orders()).isSameAs(second.orders());
-        assertThat(first.treasury().assets()).isSameAs(first.treasury().funding());
-        assertThat(first.treasury().assets()).isSameAs(second.treasury().assets());
+        assertThat(patch.accountLaneGroups()).isEmpty();
+        assertThat(patch.globalOwnerGroup().treasuryAssets()).isEmpty();
+        assertThatThrownBy(() -> patch.accountLaneGroups().add(null))
+                .isInstanceOf(UnsupportedOperationException.class);
         runtime.close();
     }
 
@@ -165,8 +148,8 @@ class RuntimeStateProjectorTest {
                 identities.symbolId("BTC-USDT"), CorePositionSide.NET, 1,
                 1_000, 0, 10, 10_000, CoreRiskStatus.NORMAL));
 
-        TradingCoreState projected = RuntimeStateMaterializer.materializeTransition(
-                runtime.captureMutationDelta(), identities, before);
+        RuntimeCommitPatch patch = capture(runtime, identities, before, 1, before.revision());
+        TradingCoreState projected = project(before, patch);
 
         assertThat(projected.riskState().snapshots()).containsKey(secondUser + ":BTC-USDT");
         runtime.close();
@@ -179,24 +162,22 @@ class RuntimeStateProjectorTest {
                 7, new BalanceAdjustmentCommand("USDT", 1_000));
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-        RuntimeCommitLedger ledger = new RuntimeCommitLedger(before, identities);
+        long patchRevision = before.revision();
         RollingBusinessStateHash businessHash = RollingBusinessStateHash.create(before, identities);
         RollingFundsStateHash fundsHash = RollingFundsStateHash.create(before, identities);
 
         RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
                 new BalanceAdjustmentCommand("USDT", 250));
-        RuntimeMutationDelta mutation = runtime.captureMutationDelta();
-        RuntimeCommitEntry commit = ledger.capture(1, mutation, identities);
-        ledger.commit(commit);
-        TradingCoreState expected = RuntimeStateMaterializer.materializeTransition(mutation, identities, before);
+        RuntimeCommitPatch commit = capture(runtime, identities, before, 1, patchRevision);
+        TradingCoreState expected = project(before, commit);
         businessHash.update(commit);
         fundsHash.update(commit);
 
-        try (RuntimeProjectionJournal journal = new RuntimeProjectionJournal(
+        try (RuntimeCommitJournal journal = new RuntimeCommitJournal(
                 ProductLine.LINEAR_PERPETUAL, before, before.businessStateHash(),
                 RollingFundsStateHash.compute(before))) {
             journal.publish(commit, businessHash.value(), fundsHash.value());
-            RuntimeProjectionJournal.ProjectionVersion projected = journal.await(
+            RuntimeCommitJournal.ProjectionVersion projected = journal.await(
                     1, System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5), true);
 
             assertThat(journal.await(commit.projectionPoint())).isEqualTo(expected);
@@ -213,38 +194,36 @@ class RuntimeStateProjectorTest {
                 7, new BalanceAdjustmentCommand("USDT", 1_000));
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-        RuntimeCommitLedger ledger = new RuntimeCommitLedger(before, identities);
+        long patchRevision = before.revision();
         RollingBusinessStateHash businessHash = RollingBusinessStateHash.create(before, identities);
         RollingFundsStateHash fundsHash = RollingFundsStateHash.create(before, identities);
 
         RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
                 new BalanceAdjustmentCommand("USDT", 250));
-        RuntimeMutationDelta firstMutation = runtime.captureMutationDelta();
-        RuntimeCommitEntry first = ledger.capture(1, firstMutation, identities);
-        ledger.commit(first);
+        RuntimeCommitPatch first = capture(runtime, identities, before, 1, patchRevision);
+        patchRevision = first.revision();
         runtime.clearChangedKeys();
-        TradingCoreState firstState = RuntimeStateMaterializer.materializeTransition(
-                firstMutation, identities, before);
+        RuntimeProjectionState replica = projection(before);
+        replica.apply(first);
+        TradingCoreState firstState = replica.freeze(1);
         businessHash.update(first);
         fundsHash.update(first);
 
         RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
                 new BalanceAdjustmentCommand("USDT", -100));
-        RuntimeMutationDelta secondMutation = runtime.captureMutationDelta();
-        RuntimeCommitEntry second = ledger.capture(2, secondMutation, identities);
-        ledger.commit(second);
-        TradingCoreState expected = RuntimeStateMaterializer.materializeTransition(
-                secondMutation, identities, firstState);
+        RuntimeCommitPatch second = capture(runtime, identities, firstState, 2, patchRevision);
+        replica.apply(second);
+        TradingCoreState expected = replica.freeze(2);
         businessHash.update(second);
         fundsHash.update(second);
 
-        try (RuntimeProjectionJournal journal = new RuntimeProjectionJournal(
+        try (RuntimeCommitJournal journal = new RuntimeCommitJournal(
                 ProductLine.LINEAR_PERPETUAL, before, before.businessStateHash(),
                 RollingFundsStateHash.compute(before))) {
-            journal.publish(first, RollingBusinessStateHash.create(firstState, identities).value(),
-                    RollingFundsStateHash.compute(firstState));
-            journal.publish(second, businessHash.value(), fundsHash.value());
-            RuntimeProjectionJournal.ProjectionVersion projected = journal.await(
+            journal.publish(first, first.businessStateHash(),
+                    first.fundsStateHash());
+            journal.publish(second, second.businessStateHash(), second.fundsStateHash());
+            RuntimeCommitJournal.ProjectionVersion projected = journal.await(
                     2, System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5), true);
             assertThat(projected.state()).isEqualTo(expected);
         }
@@ -267,11 +246,11 @@ class RuntimeStateProjectorTest {
             PlaceOrderCommand command = new PlaceOrderCommand(orderId, "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.IOC, false, "incremental-" + orderId);
             ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(runtime, identities, 7, command, 1);
             RuntimeCommandProcessor.placeOrder(runtime, identities, 7, resolved, new UUID(0, orderId), 100);
-            TradingCoreState placed = RuntimeStateMaterializer.materializeTransition(runtime, identities, state);
+            TradingCoreState placed = RuntimeStateMaterializer.materialize(runtime, identities);
             runtime.clearChangedKeys();
             RuntimeCommandProcessor.stampOrderChanges(runtime, identities, state,
                     1_000 + index, 2_000 + index, java.util.List.of(orderId));
-            TradingCoreState stamped = RuntimeStateMaterializer.materializeTransition(runtime, identities, placed);
+            TradingCoreState stamped = RuntimeStateMaterializer.materialize(runtime, identities);
             runtime.clearChangedKeys();
             state = stamped;
         }
@@ -282,6 +261,35 @@ class RuntimeStateProjectorTest {
         assertThat(runtime.balance(7, identities.assetId("USDT")).availableUnits()).isEqualTo(995_000);
         assertThat(runtime.balance(7, identities.assetId("USDT")).lockedUnits()).isEqualTo(5_000);
         assertThat(runtime.order(10_049).clusterPosition()).isEqualTo(2_049);
+    }
+
+    @Test
+    void pendingPlaceCompletionPublishesClientIndexWhenRuntimeIdentityIsUnchanged() {
+        TradingCoreReducer reducer = new TradingCoreReducer();
+        TradingCoreState before = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
+        before = reducer.upsertInstrument(before, new UpsertInstrumentCommand("BTC-USDT", 1,
+                ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
+                1, 1, 1, 100_000, 100_000, 0, 0, 0, -1, 0));
+        before = reducer.adjustBalance(before, 7, new BalanceAdjustmentCommand("USDT", 1_000_000));
+        before = reducer.applyMarkPrice(before, new ApplyMarkPriceCommand("BTC-USDT", 1, 1_000, 1, 1));
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
+        PlaceOrderCommand command = new PlaceOrderCommand(11, "BTC-USDT", 1, CoreOrderSide.BUY,
+                1_000, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "pending-client-11");
+        ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(runtime, identities, 7, command, 1);
+        RuntimeCommandProcessor.placeOrder(runtime, identities, 7, resolved, new UUID(0, 11), 100);
+        runtime.markPendingReservation(7, 11, 1);
+        runtime.clearChangedKeys();
+
+        runtime.completePendingReservation(7, 11, 1);
+        RuntimeCommandProcessor.stampOrderChanges(runtime, identities, before, 1_000, 2_000, List.of(11L));
+        RuntimeCommitPatch patch = capture(runtime, identities, before, 1, before.revision());
+
+        TradingCoreState projected = project(before, patch);
+        assertThat(projected.order(11)).isNotNull();
+        assertThat(projected.order(7, "pending-client-11").orderId()).isEqualTo(11);
+        runtime.close();
     }
 
     @Test
@@ -549,6 +557,35 @@ class RuntimeStateProjectorTest {
         assertThat(restored.positionKey(7, positionKey)).isEqualTo("BTC-USDT:LONG");
         assertThat(restored.assetId("USDT")).isEqualTo(assetId);
         assertThat(restored.symbolId("BTC-USDT")).isEqualTo(symbolId);
+    }
+
+    private static com.surprising.aeron.protocol.CoreMatcherTransition unchangedMatcher() {
+        return com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
+    }
+
+    private static RuntimeProjectionState projection(TradingCoreState state) {
+        return new RuntimeProjectionState(state, state.businessStateHash(), RollingFundsStateHash.compute(state));
+    }
+
+    private static TradingCoreState project(TradingCoreState state, RuntimeCommitPatch patch) {
+        RuntimeProjectionState projection = projection(state);
+        projection.apply(patch);
+        return projection.freeze(patch.sequence());
+    }
+
+    private static RuntimeCommitPatch capture(TradingRuntimeState runtime,
+                                              RuntimeIdentityRegistry identities,
+                                              TradingCoreState previous,
+                                              long projectionSequence,
+                                              long previousRevision) {
+        TradingCoreState current = RuntimeStateMaterializer.materialize(runtime, identities);
+        TradingRuntimeState.PreparedCommit prepared = runtime.prepareCommitPatch(
+                projectionSequence, projectionSequence - 1, projectionSequence, identities,
+                previousRevision, unchangedMatcher(), null,
+                previous.businessStateHash(), current.businessStateHash(),
+                RollingFundsStateHash.compute(previous), RollingFundsStateHash.compute(current), true);
+        RuntimeCommitPatch.PreparedChanges changes = prepared.prepareChanges();
+        return prepared.seal(changes, current.businessStateHash(), RollingFundsStateHash.compute(current));
     }
 
 }

@@ -31,6 +31,8 @@ final class LinearPerpetualSaturationWorkload {
 
         long p999LatencyNanos();
 
+        LatencyReport latencyReport();
+
         double averageMatchingBacklog();
 
         double fullWindowPercentage();
@@ -50,10 +52,29 @@ final class LinearPerpetualSaturationWorkload {
         double producerStarvationPercentage();
     }
 
+    record StageLatency(int samples, long rangeLowestNanos, long rangeHighestNanos,
+                        long timeoutNanos, String unit, boolean coordinatedOmissionCorrected,
+                        String histogramCounts, long p50, long p90, long p95, long p99,
+                        long p999, long max) {
+    }
+
+    record LatencyReport(String businessType, String loadModel, int targetOperationsPerSecond,
+                         StageLatency entryAccepted, StageLatency acceptedTerminal,
+                         StageLatency entryTerminal) {
+    }
+
     static SaturationScenario scenario(
             LinearPerpetualMixedWorkload.Template template,
             int maxInFlight,
             int operationsPerRun) {
+        return scenario(template, maxInFlight, operationsPerRun, 100_000);
+    }
+
+    static SaturationScenario scenario(
+            LinearPerpetualMixedWorkload.Template template,
+            int maxInFlight,
+            int operationsPerRun,
+            int targetOperationsPerSecond) {
         if (template == null) throw new IllegalArgumentException("saturation template is required");
         if (maxInFlight < 4 || maxInFlight > 4_096) {
             throw new IllegalArgumentException("maxInFlight must be in [4,4096]");
@@ -64,13 +85,18 @@ final class LinearPerpetualSaturationWorkload {
             throw new IllegalArgumentException(
                     "operationsPerRun must cover the window and contain complete direction round trips");
         }
+        if (targetOperationsPerSecond <= 0) {
+            throw new IllegalArgumentException("targetOperationsPerSecond must be positive");
+        }
         var harness = LinearPerpetualBenchmarkSupport.Harness.restore(template.snapshot());
         int openingActiveOrders = harness.state().tradingState().orders().size();
         int symbolCount = template.symbols().size();
         int directionCount = operationsPerRun / operationsPerDirection;
         int completionBatchSize = maxInFlight < 64 ? 2 : Math.min(64, maxInFlight / 4);
         return new SaturationScenario() {
-            private final long[] completionLatencies = new long[operationsPerRun];
+            private final long[] entryAcceptedLatencies = new long[operationsPerRun];
+            private final long[] acceptedTerminalLatencies = new long[operationsPerRun];
+            private final long[] entryTerminalLatencies = new long[operationsPerRun];
             private final LongHashSet usersInFlight = new LongHashSet();
             private final LongLongHashMap userSymbols = userSymbols();
             private final boolean[] pairInFlight = new boolean[symbolCount];
@@ -91,6 +117,8 @@ final class LinearPerpetualSaturationWorkload {
             private int scheduledOperations;
             private int currentDirection;
             private int completedPairsInDirection;
+            private long firstScheduledEntryNanos;
+            private int scheduledEntrySequence;
 
             @Override
             public long run() {
@@ -102,32 +130,40 @@ final class LinearPerpetualSaturationWorkload {
                 fullWindowSamples = 0;
                 producerStarvationSamples = 0;
                 refillOperations = 0;
+                firstScheduledEntryNanos = System.nanoTime();
+                scheduledEntrySequence = 0;
                 prepareRun();
                 long lastProgressNanos = System.nanoTime();
-                while (latencySamples < operationsPerRun) {
-                    int filled = fillWindow(harness);
-                    sampleWindow(harness);
-                    int completed = harness.awaitReadyMatching(completionBatchSize, this::record);
-                    if (filled != 0 || completed != 0) {
-                        lastProgressNanos = System.nanoTime();
-                    } else {
-                        if (harness.pendingSubmissions() == 0) {
-                            throw new IllegalStateException("continuous feeder has no runnable or in-flight work");
+                harness.admissionBackpressureDrain(
+                        () -> harness.awaitReadyMatching(completionBatchSize, this::record));
+                try {
+                    while (latencySamples < operationsPerRun) {
+                        int filled = fillWindow(harness);
+                        sampleWindow(harness);
+                        int completed = harness.awaitReadyMatching(completionBatchSize, this::record);
+                        if (filled != 0 || completed != 0) {
+                            lastProgressNanos = System.nanoTime();
+                        } else {
+                            if (harness.pendingSubmissions() == 0) {
+                                throw new IllegalStateException("continuous feeder has no runnable or in-flight work");
+                            }
+                            if (System.nanoTime() - lastProgressNanos >= PROGRESS_TIMEOUT_NANOS) {
+                                throw new IllegalStateException("continuous feeder made no progress within 30 seconds");
+                            }
+                            Thread.onSpinWait();
                         }
-                        if (System.nanoTime() - lastProgressNanos >= PROGRESS_TIMEOUT_NANOS) {
-                            throw new IllegalStateException("continuous feeder made no progress within 30 seconds");
-                        }
-                        Thread.onSpinWait();
                     }
+                    harness.drainSubmitted();
+                } finally {
+                    harness.admissionBackpressureDrain(null);
                 }
-                harness.drainSubmitted();
                 runSequence = Math.addExact(runSequence, directionCount);
                 acceptedCoreMessages = Math.subtractExact(harness.acceptedCoreMessages(), acceptedCoreBefore);
                 terminalCoreMessages = Math.subtractExact(harness.terminalCoreMessages(), terminalCoreBefore);
                 if (latencySamples != operationsPerRun) {
                     throw new IllegalStateException("saturation workload lost completion latency samples");
                 }
-                return harness.state().tradingState().businessStateHash();
+                return harness.state().snapshotBusinessStateHash();
             }
 
             private void prepareRun() {
@@ -176,8 +212,11 @@ final class LinearPerpetualSaturationWorkload {
                 var order = new PlaceOrderCommand(orderId, symbol, 1, side, PRICE_TICKS, 1,
                         false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                         timeInForce, false, "saturation-" + orderId);
-                target.submitTimed(target.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY,
-                        userId, TradingCommandCodec.encodePlaceOrder(order)));
+                long scheduledEntryNanos = Math.addExact(firstScheduledEntryNanos,
+                        Math.multiplyExact(scheduledEntrySequence++,
+                                TimeUnit.SECONDS.toNanos(1) / targetOperationsPerSecond));
+                target.submitScheduled(target.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY,
+                        userId, TradingCommandCodec.encodePlaceOrder(order)), scheduledEntryNanos);
             }
 
             private void sampleWindow(LinearPerpetualBenchmarkSupport.Harness target) {
@@ -192,14 +231,18 @@ final class LinearPerpetualSaturationWorkload {
                 }
             }
 
-            private void record(long userId, long latencyNanos) {
+            private void record(long userId, long entryNanos, long acceptedNanos, long terminalNanos) {
                 if (!usersInFlight.remove(userId)) {
                     throw new IllegalStateException("matching completion user is not in flight");
                 }
-                if (latencyNanos <= 0 || latencySamples >= completionLatencies.length) {
+                if (entryNanos <= 0 || acceptedNanos < entryNanos || terminalNanos < acceptedNanos
+                        || latencySamples >= entryTerminalLatencies.length) {
                     throw new IllegalStateException("invalid saturation completion latency");
                 }
-                completionLatencies[latencySamples++] = latencyNanos;
+                entryAcceptedLatencies[latencySamples] = acceptedNanos - entryNanos;
+                acceptedTerminalLatencies[latencySamples] = terminalNanos - acceptedNanos;
+                entryTerminalLatencies[latencySamples] = terminalNanos - entryNanos;
+                latencySamples++;
                 long mapped = userSymbols.get(userId);
                 if (mapped == 0) throw new IllegalStateException("matching completion user is unknown");
                 int symbolIndex = Math.toIntExact(mapped - 1);
@@ -290,17 +333,24 @@ final class LinearPerpetualSaturationWorkload {
 
             @Override
             public long p50LatencyNanos() {
-                return percentile(0.50);
+                return percentile(entryTerminalLatencies, 0.50);
             }
 
             @Override
             public long p99LatencyNanos() {
-                return percentile(0.99);
+                return percentile(entryTerminalLatencies, 0.99);
             }
 
             @Override
             public long p999LatencyNanos() {
-                return percentile(0.999);
+                return percentile(entryTerminalLatencies, 0.999);
+            }
+
+            @Override
+            public LatencyReport latencyReport() {
+                return new LatencyReport("PLACE_ORDER", "OPEN_LOOP_CONSTANT_ARRIVAL",
+                        targetOperationsPerSecond, stage(entryAcceptedLatencies),
+                        stage(acceptedTerminalLatencies), stage(entryTerminalLatencies));
             }
 
             @Override
@@ -348,9 +398,32 @@ final class LinearPerpetualSaturationWorkload {
                 return harness.matchingCompletionCapacity();
             }
 
-            private long percentile(double fraction) {
+            private StageLatency stage(long[] values) {
+                return new StageLatency(latencySamples, 1, PROGRESS_TIMEOUT_NANOS,
+                        PROGRESS_TIMEOUT_NANOS, "NANOSECONDS", true, histogram(values),
+                        percentile(values, 0.50), percentile(values, 0.90),
+                        percentile(values, 0.95), percentile(values, 0.99),
+                        percentile(values, 0.999), percentile(values, 1.0));
+            }
+
+            private String histogram(long[] values) {
+                long[] buckets = new long[64];
+                for (int index = 0; index < latencySamples; index++) {
+                    long value = Math.max(1, values[index]);
+                    int bucket = 64 - Long.numberOfLeadingZeros(value - 1);
+                    buckets[Math.min(bucket, buckets.length - 1)]++;
+                }
+                StringBuilder encoded = new StringBuilder(128);
+                for (int index = 0; index < buckets.length; index++) {
+                    if (index != 0) encoded.append(',');
+                    encoded.append(buckets[index]);
+                }
+                return encoded.toString();
+            }
+
+            private long percentile(long[] values, double fraction) {
                 if (latencySamples == 0) return 0;
-                long[] sorted = Arrays.copyOf(completionLatencies, latencySamples);
+                long[] sorted = Arrays.copyOf(values, latencySamples);
                 Arrays.sort(sorted);
                 int index = (int) Math.ceil(sorted.length * fraction) - 1;
                 return sorted[Math.max(0, Math.min(index, sorted.length - 1))];
@@ -364,6 +437,7 @@ final class LinearPerpetualSaturationWorkload {
                 for (boolean inFlight : pairInFlight) incompletePair |= inFlight;
                 if (latencySamples != operationsPerRun
                         || scheduledOperations != operationsPerRun
+                        || scheduledEntrySequence != operationsPerRun
                         || acceptedCoreMessages != terminalCoreMessages
                         || backlogSamples == 0
                         || !usersInFlight.isEmpty()
@@ -377,6 +451,7 @@ final class LinearPerpetualSaturationWorkload {
                     throw new IllegalStateException("saturation workload invariant failed: samples="
                             + latencySamples + '/' + operationsPerRun
                             + ", scheduled=" + scheduledOperations + '/' + operationsPerRun
+                            + ", scheduledEntries=" + scheduledEntrySequence + '/' + operationsPerRun
                             + ", coreMessages=" + acceptedCoreMessages + '/' + terminalCoreMessages
                             + ", backlogSamples=" + backlogSamples
                             + ", usersInFlight=" + usersInFlight.size()

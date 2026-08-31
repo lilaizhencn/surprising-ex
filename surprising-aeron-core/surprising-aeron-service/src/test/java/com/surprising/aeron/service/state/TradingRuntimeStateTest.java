@@ -3,14 +3,24 @@ package com.surprising.aeron.service.state;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.lang.reflect.Field;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 
 class TradingRuntimeStateTest {
 
-    private static final TradingRuntimeState.LaneCommitListener NOOP_LANE_COMMIT =
-            (laneId, laneRevision, localStateHash, localFundsHash) -> { };
+    @Test
+    void accountLaneApplyUsesBoundedTransitionHashes() throws Exception {
+        String source = accountLaneSource();
+
+        assertThat(methodSource(source, "void applied", "void requireApply"))
+                .contains("stateContribution", "fundsContribution", "transitionHash")
+                .doesNotContain("computeStateHash", "computeFundsHash");
+    }
 
     @Test
     void snapshotCaptureDoesNotRebaseLiveAccountLaneHashes() {
@@ -68,6 +78,21 @@ class TradingRuntimeStateTest {
         assertThat(state.changedOrders().contains(11L)).isTrue();
         assertThat(state.changedReservations().contains(11L)).isTrue();
         assertThat(state.changedClientOrders().contains(91L)).isTrue();
+    }
+
+    @Test
+    void discardsExpandedCaptureMapsAfterLargeCommands() {
+        ConcurrentHashMap<Long, Long> expanded = new ConcurrentHashMap<>();
+        for (long key = 0; key < 512; key++) expanded.put(key, key);
+
+        ConcurrentHashMap<Long, Long> compacted = TradingRuntimeState.clearCapturedChanges(expanded);
+        assertThat(compacted).isEmpty();
+        assertThat(compacted).isNotSameAs(expanded);
+
+        compacted.put(1L, 1L);
+        ConcurrentHashMap<Long, Long> reused = TradingRuntimeState.clearCapturedChanges(compacted);
+        assertThat(reused).isEmpty();
+        assertThat(reused).isSameAs(compacted);
     }
 
     @Test
@@ -194,6 +219,251 @@ class TradingRuntimeStateTest {
     }
 
     @Test
+    void pendingReservationCountersTrackUsersAndAssetsInConstantTime() throws Exception {
+        // Given: 10,000 pending reservations spread across 100 users and 10 assets.
+        TradingRuntimeState state = new TradingRuntimeState();
+        long orderId = 1;
+        for (long userId = 1; userId <= 100; userId++) {
+            state.putUser(new UserRuntime(userId));
+            for (int assetId = 1; assetId <= 10; assetId++) {
+                for (int reservation = 0; reservation < 10; reservation++) {
+                    state.putReservation(new ReservationRuntime(orderId, userId, assetId, assetId));
+                    state.markPendingReservation(userId, orderId, 1);
+                    orderId++;
+                }
+            }
+        }
+
+        // When: each user and user/asset counter is read directly.
+        for (long userId = 1; userId <= 100; userId++) {
+            assertThat(state.pendingReservationCount(userId)).isEqualTo(100);
+            for (int assetId = 1; assetId <= 10; assetId++) {
+                assertThat(state.pendingReservedUnits(userId, assetId)).isEqualTo(10L * assetId);
+            }
+        }
+
+        // Then: completion removes every lane and global pending total without changing reservations.
+        state.completePendingReservations(1);
+        assertThat(state.pendingReservationCount()).isZero();
+        assertThat(state.hasPendingReservations()).isFalse();
+        for (long userId = 1; userId <= 100; userId++) {
+            assertThat(state.pendingReservationCount(userId)).isZero();
+            for (int assetId = 1; assetId <= 10; assetId++) {
+                assertThat(state.pendingReservedUnits(userId, assetId)).isZero();
+            }
+        }
+
+        String source = accountLaneSource();
+        assertThat(methodSource(source, "long pendingReservedUnits", "int pendingReservationCount"))
+                .doesNotContain("forEach", "->", "pendingReservationSequences");
+        assertThat(methodSource(source, "int pendingReservationCount", "boolean hasPendingReservations"))
+                .doesNotContain("forEach", "->", "pendingReservationSequences");
+    }
+
+    @Test
+    void duplicateReservationCompletionFailsWithoutCounterDrift() {
+        // Given: one marked reservation with locked funds.
+        TradingRuntimeState state = new TradingRuntimeState();
+        state.putUser(new UserRuntime(7));
+        state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
+        state.reserveOrder(11, 7, 91, 5, 2, 3, 200);
+        state.markPendingReservation(7, 11, 4);
+
+        // When: the reservation is completed once and completion is retried.
+        state.completePendingReservation(7, 11, 4);
+        long revisionAfterFirstCompletion = state.revision();
+        AccountLaneView laneAfterFirstCompletion = state.accountLane(7);
+        BalanceRuntime balanceAfterFirstCompletion = state.balance(7, 3);
+        assertThatThrownBy(() -> state.completePendingReservation(7, 11, 4))
+                .isInstanceOf(IllegalStateException.class);
+
+        // Then: the failed retry leaves counters, funds, revision, and lane hashes unchanged.
+        assertThat(state.pendingReservationCount()).isZero();
+        assertThat(state.pendingReservationCount(7)).isZero();
+        assertThat(state.pendingReservedUnits(7, 3)).isZero();
+        assertThat(state.balance(7, 3).availableUnits())
+                .isEqualTo(balanceAfterFirstCompletion.availableUnits());
+        assertThat(state.balance(7, 3).lockedUnits()).isEqualTo(balanceAfterFirstCompletion.lockedUnits());
+        assertThat(state.revision()).isEqualTo(revisionAfterFirstCompletion);
+        assertThat(state.accountLane(7).localStateHash()).isEqualTo(laneAfterFirstCompletion.localStateHash());
+        assertThat(state.accountLane(7).localFundsHash()).isEqualTo(laneAfterFirstCompletion.localFundsHash());
+    }
+
+    @Test
+    void duplicateMarkAndMissingCompletionFailWithoutCounterDrift() {
+        // Given: one reservation that is marked pending exactly once.
+        TradingRuntimeState state = new TradingRuntimeState();
+        state.putUser(new UserRuntime(7));
+        state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
+        state.reserveOrder(11, 7, 91, 5, 2, 3, 200);
+        state.markPendingReservation(7, 11, 4);
+
+        // When: the mark is duplicated and completion uses a sequence that was never marked.
+        assertThatThrownBy(() -> state.markPendingReservation(7, 11, 4))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> state.completePendingReservation(7, 11, 5))
+                .isInstanceOf(IllegalStateException.class);
+
+        // Then: neither failed command changes pending counters or locked funds.
+        assertThat(state.pendingReservationCount()).isEqualTo(1);
+        assertThat(state.pendingReservationCount(7)).isEqualTo(1);
+        assertThat(state.pendingReservedUnits(7, 3)).isEqualTo(200);
+        assertThat(state.balance(7, 3).availableUnits()).isEqualTo(800);
+        assertThat(state.balance(7, 3).lockedUnits()).isEqualTo(200);
+    }
+
+    @Test
+    void pendingReservationReplacementAndRestoreKeepTransientCountersExact() {
+        // Given: a snapshot fence without in-flight reservations.
+        TradingRuntimeState state = new TradingRuntimeState();
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        int assetId = identities.assetId("USDT");
+        state.putUser(new UserRuntime(7));
+        state.putBalance(new BalanceRuntime(7, assetId, 1_000, 0));
+        TradingCoreState global = RuntimeStateMaterializer.materialize(state, identities);
+        var snapshots = state.accountLaneSnapshots(1, global);
+        state.reserveOrder(11, 7, 91, 5, 2, assetId, 200);
+        state.markPendingReservation(7, 11, 2);
+
+        // When: a pending reservation is partially released, then the pre-pending snapshot is restored.
+        state.replaceReservation(state.reservation(11).release(50));
+        assertThat(state.pendingReservationCount(7)).isEqualTo(1);
+        assertThat(state.pendingReservedUnits(7, assetId)).isEqualTo(150);
+        assertThatThrownBy(() -> state.accountLaneSnapshots(2, global))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("pending reservation");
+        state.restoreAccountLaneSnapshots(snapshots, 1, global);
+
+        // Then: no transient pending reservation or counter crosses the restored snapshot fence.
+        assertThat(state.pendingReservationCount()).isZero();
+        assertThat(state.pendingReservationCount(7)).isZero();
+        assertThat(state.pendingReservedUnits(7, assetId)).isZero();
+        assertThat(state.hasPendingReservations()).isFalse();
+        assertThat(state.balance(7, assetId).availableUnits()).isEqualTo(800);
+        assertThat(state.balance(7, assetId).lockedUnits()).isEqualTo(200);
+    }
+
+    @Test
+    void pendingReservationConsumptionAndCancellationKeepCountersAndFundsExact() {
+        // Given: a pending reservation with locked funds.
+        TradingRuntimeState state = new TradingRuntimeState();
+        state.putUser(new UserRuntime(7));
+        state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
+        state.reserveOrder(11, 7, 91, 5, 2, 3, 200);
+        state.markPendingReservation(7, 11, 4);
+
+        // When: the reservation is partially consumed and then canceled.
+        state.replaceReservation(state.reservation(11).consume(50));
+        state.replaceBalance(new BalanceRuntime(7, 3, 800, 150));
+        assertThat(state.pendingReservedUnits(7, 3)).isEqualTo(150);
+        state.cancelOrder(11, 7, 150);
+
+        // Then: the counter reaches zero while the balance release remains exact.
+        assertThat(state.pendingReservationCount(7)).isEqualTo(1);
+        assertThat(state.pendingReservedUnits(7, 3)).isZero();
+        assertThat(state.balance(7, 3).availableUnits()).isEqualTo(950);
+        assertThat(state.balance(7, 3).lockedUnits()).isZero();
+    }
+
+    @Test
+    void rejectsPendingReservationRemovalWithoutCounterOrFundsDrift() {
+        // Given: a marked reservation with funds locked in its owner lane.
+        TradingRuntimeState state = new TradingRuntimeState();
+        state.putUser(new UserRuntime(7));
+        state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
+        state.reserveOrder(11, 7, 91, 5, 2, 3, 200);
+        state.markPendingReservation(7, 11, 4);
+
+        // When: a caller attempts to remove it before lifecycle completion.
+        assertThatThrownBy(() -> state.removeReservation(11, 7)).isInstanceOf(IllegalStateException.class);
+
+        // Then: the reservation, pending counters, and locked funds remain unchanged.
+        assertThat(state.reservation(11)).isNotNull();
+        assertThat(state.pendingReservationCount()).isEqualTo(1);
+        assertThat(state.pendingReservationCount(7)).isEqualTo(1);
+        assertThat(state.pendingReservedUnits(7, 3)).isEqualTo(200);
+        assertThat(state.balance(7, 3).availableUnits()).isEqualTo(800);
+        assertThat(state.balance(7, 3).lockedUnits()).isEqualTo(200);
+    }
+
+    @Test
+    void laneCounterOverflowFailsBeforePendingStateChanges() {
+        // Given: an account lane with one maximum-unit pending reservation.
+        AccountLaneState lane = new AccountLaneState(0, 8);
+        lane.reservations.put(1, new ReservationRuntime(1, 7, 3, Long.MAX_VALUE));
+        lane.markPendingReservation(1, 1);
+        lane.reservations.put(2, new ReservationRuntime(2, 7, 3, 1));
+
+        // When: the next mark would overflow reserved units.
+        assertThatThrownBy(() -> lane.markPendingReservation(2, 1)).isInstanceOf(ArithmeticException.class);
+
+        // Then: the failed mark leaves the original pending reservation and counters intact.
+        assertThat(lane.pendingReservation(1)).isTrue();
+        assertThat(lane.pendingReservation(2)).isFalse();
+        assertThat(lane.pendingReservationCount(7)).isEqualTo(1);
+        assertThat(lane.pendingReservedUnits(7, 3)).isEqualTo(Long.MAX_VALUE);
+    }
+
+    @Test
+    void globalPendingCounterUnderflowFailsBeforeLaneStateChanges() {
+        // Given: a runtime with no pending reservations.
+        TradingRuntimeState state = new TradingRuntimeState();
+
+        // When: a completion is attempted without a global pending reservation.
+        assertThatThrownBy(() -> state.completePendingReservation(7, 11, 4))
+                .isInstanceOf(IllegalStateException.class);
+
+        // Then: global and per-user counters remain at zero.
+        assertThat(state.pendingReservationCount()).isZero();
+        assertThat(state.pendingReservationCount(7)).isZero();
+        assertThat(state.pendingReservedUnits(7, 3)).isZero();
+    }
+
+    @Test
+    void pendingReservationBatchRejectsLaterLaneBeforeEarlierLaneDrifts() throws Exception {
+        // Given: pending reservations owned by two distinct account lanes.
+        LaneTopology topology = LaneTopology.productionDefault();
+        long firstUser = userForLane(topology, 0);
+        long laterUser = userForLane(topology, 1);
+        TradingRuntimeState state = new TradingRuntimeState(topology);
+        state.putUser(new UserRuntime(firstUser));
+        state.putUser(new UserRuntime(laterUser));
+        state.putBalance(new BalanceRuntime(firstUser, 3, 1_000, 0));
+        state.putBalance(new BalanceRuntime(laterUser, 3, 1_000, 0));
+        state.reserveOrder(11, firstUser, 91, 5, 2, 3, 200);
+        state.reserveOrder(12, laterUser, 92, 5, 2, 3, 200);
+        state.markPendingReservation(firstUser, 11, 4);
+        state.markPendingReservation(laterUser, 12, 4);
+        ReservationRuntime firstReservation = state.reservation(11);
+        BalanceRuntime firstBalance = state.balance(firstUser, 3);
+        AccountLaneView firstLane = state.accountLane(firstUser);
+        long[] pendingOrderIds = pendingReservationOrderIds(state, 4);
+        long firstPendingOwner = pendingReservationOwner(state, 11);
+        long laterPendingOwner = pendingReservationOwner(state, 12);
+        accountLaneState(state, topology.accountLaneId(laterUser)).reservations.remove(12);
+
+        // When: preflight reaches the missing reservation in the later lane.
+        assertThatThrownBy(() -> state.completePendingReservations(4)).isInstanceOf(IllegalStateException.class);
+
+        // Then: neither the earlier lane nor either global pending index has drifted.
+        assertThat(state.reservation(11)).isEqualTo(firstReservation);
+        assertThat(state.pendingReservationCount()).isEqualTo(2);
+        assertThat(state.pendingReservationCount(firstUser)).isEqualTo(1);
+        assertThat(state.pendingReservationCount(laterUser)).isEqualTo(1);
+        assertThat(state.pendingReservedUnits(firstUser, 3)).isEqualTo(200);
+        assertThat(state.pendingReservation(11, firstUser)).isTrue();
+        assertThat(state.pendingReservation(12, laterUser)).isTrue();
+        assertThat(pendingReservationOrderIds(state, 4)).containsExactlyInAnyOrder(pendingOrderIds);
+        assertThat(pendingReservationOwner(state, 11)).isEqualTo(firstPendingOwner);
+        assertThat(pendingReservationOwner(state, 12)).isEqualTo(laterPendingOwner);
+        assertThat(state.balance(firstUser, 3).availableUnits()).isEqualTo(firstBalance.availableUnits());
+        assertThat(state.balance(firstUser, 3).lockedUnits()).isEqualTo(firstBalance.lockedUnits());
+        assertThat(state.accountLane(firstUser).revision()).isEqualTo(firstLane.revision());
+        assertThat(state.accountLane(firstUser).localStateHash()).isEqualTo(firstLane.localStateHash());
+        assertThat(state.accountLane(firstUser).localFundsHash()).isEqualTo(firstLane.localFundsHash());
+    }
+
+    @Test
     void rejectsDuplicateOrderAndClientWithoutChangingFunds() {
         TradingRuntimeState state = new TradingRuntimeState();
         state.putUser(new UserRuntime(7));
@@ -307,8 +577,9 @@ class TradingRuntimeStateTest {
             var result = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
                     .withCoreSequence(1);
             var apply = state.applyAndCommitLaneSequence(
-                    1, java.util.List.of(7L), result, 3, 5, NOOP_LANE_COMMIT);
-            assertThat(Long.bitCount(apply.laneMask())).isEqualTo(1);
+                    1, java.util.List.of(7L), result, 3, 5);
+            assertThat(apply).hasSize(1);
+            state.commitLaneSequence(apply);
             state.readFence(7, 1);
 
             AccountLaneView lane = state.accountLane(7);
@@ -333,13 +604,133 @@ class TradingRuntimeStateTest {
         try {
             var result = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
                     .withCoreSequence(1);
-            state.applyAndCommitLaneSequence(
-                    1, java.util.List.of(userInLastLane), result, 3, 5, NOOP_LANE_COMMIT);
+            var apply = state.applyAndCommitLaneSequence(
+                    1, java.util.List.of(userInLastLane), result, 3, 5);
+            state.commitLaneSequence(apply);
             state.readFenceAll(1);
             assertThat(state.accountLaneById(0).committedSequence()).isEqualTo(1);
         } finally {
             state.close();
         }
+    }
+
+    @Test
+    void appliedLanesRemainBehindFenceUntilExplicitVisibilityCommit() {
+        LaneTopology topology = LaneTopology.productionDefault();
+        TradingRuntimeState state = new TradingRuntimeState(topology);
+        long laneZeroUser = userForLane(topology, 0);
+        long laneOneUser = userForLane(topology, 1);
+        state.putUser(new UserRuntime(laneZeroUser));
+        state.putUser(new UserRuntime(laneOneUser));
+        state.startAccountLanes();
+        try {
+            var result = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
+                    .withCoreSequence(1);
+            var apply = state.applyAndCommitLaneSequence(1, java.util.List.of(laneZeroUser, laneOneUser),
+                    result, 3, 5);
+
+            assertThat(state.accountLaneById(0).appliedSequence()).isEqualTo(1);
+            assertThat(state.accountLaneById(1).appliedSequence()).isEqualTo(1);
+            assertThat(state.accountLaneById(0).committedSequence()).isZero();
+            assertThat(state.accountLaneById(1).committedSequence()).isZero();
+            assertThatThrownBy(() -> state.readFence(laneZeroUser, 1))
+                    .isInstanceOf(IllegalStateException.class);
+
+            state.commitLaneSequence(apply);
+            assertThat(state.accountLaneById(0).committedSequence()).isEqualTo(1);
+            assertThat(state.accountLaneById(1).committedSequence()).isEqualTo(1);
+        } finally {
+            state.close();
+        }
+    }
+
+    @Test
+    void laneCommitMetadataCoversAllFourLanesAndTheEmptyApply() {
+        LaneTopology topology = LaneTopology.productionDefault();
+        TradingRuntimeState state = new TradingRuntimeState(topology);
+        java.util.List<Long> users = new java.util.ArrayList<>();
+        for (int laneId = 0; laneId < topology.accountLaneCount(); laneId++) {
+            long userId = userForLane(topology, laneId);
+            users.add(userId);
+            state.putUser(new UserRuntime(userId));
+        }
+        state.clearChangedKeys();
+        var result = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
+                .withCoreSequence(1);
+
+        java.util.List<RuntimeCommitPatch.LaneCommit> commits = state.applyAndCommitLaneSequence(
+                1, users, result, 3, 5);
+
+        assertThat(commits).extracting(RuntimeCommitPatch.LaneCommit::laneId)
+                .containsExactly(0, 1, 2, 3);
+        assertThat(commits).allSatisfy(commit -> {
+            assertThat(commit.appliedSequence()).isEqualTo(1);
+            assertThat(commit.committedSequence()).isEqualTo(1);
+            assertThat(commit.ownerGroupStartInclusive()).isEqualTo(commit.laneId());
+            assertThat(commit.ownerGroupEndExclusive()).isEqualTo(commit.laneId() + 1);
+        });
+        state.commitLaneSequence(commits);
+        for (int laneId = 0; laneId < topology.accountLaneCount(); laneId++) {
+            assertThat(state.accountLaneById(laneId).appliedSequence()).isEqualTo(1);
+            assertThat(state.accountLaneById(laneId).committedSequence()).isEqualTo(1);
+        }
+        state.clearChangedKeys();
+        var emptyResult = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
+                .withCoreSequence(2);
+        assertThat(state.applyAndCommitLaneSequence(2, java.util.List.of(), emptyResult, 7, 11)).isEmpty();
+    }
+
+    @Test
+    void missingRequiredLaneCannotSealOrPublishPatch() {
+        LaneTopology topology = LaneTopology.productionDefault();
+        TradingRuntimeState state = new TradingRuntimeState(topology);
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        long changedUser = userForLane(topology, 0);
+        state.putUser(new UserRuntime(changedUser));
+        RuntimeCommitPatch.LaneCommit unrelated = new RuntimeCommitPatch.LaneCommit(
+                1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0);
+
+        TradingRuntimeState.PreparedCommit prepared = state.prepareCommitPatch(
+                1, 0, 1, identities, 0,
+                com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0),
+                java.util.List.of(unrelated), 0, 0, 0, 0, true);
+
+        assertThatThrownBy(prepared::prepareChanges)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("every changed lane");
+        assertThat(state.accountLaneById(0).appliedSequence()).isZero();
+        assertThat(state.accountLaneById(0).committedSequence()).isZero();
+    }
+
+    @Test
+    void sameCommandPositionRemovalRetainsTypedOpenBeforeAndMarginMode() {
+        TradingRuntimeState state = new TradingRuntimeState();
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        int symbolId = identities.symbolId("BTC-USDT");
+        int assetId = identities.assetId("USDT");
+        long positionKey = identities.positionKey(7, "BTC-USDT:NET");
+        PositionRuntime open = new PositionRuntime(7, symbolId, assetId,
+                com.surprising.aeron.protocol.CoreMarginMode.ISOLATED,
+                com.surprising.aeron.protocol.CorePositionSide.NET,
+                1, 2, 100, 200, 0, 40);
+        state.putPosition(positionKey, open);
+        state.clearChangedKeys();
+
+        state.removePosition(positionKey, 7);
+
+        assertThat(state.currentPatchPositionBefore(positionKey)).isSameAs(open);
+        var prepared = state.prepareCommitPatch(1, 0, 1, identities, 0,
+                com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0), null,
+                0, 0, 0, 0, true);
+        RuntimeCommitPatch.PreparedChanges changes = prepared.prepareChanges();
+        RuntimeCommitPatch patch = prepared.seal(changes, 0, 0);
+        RuntimeCommitPatch.PositionChange removal = patch.accountLaneGroups().stream()
+                .flatMap(group -> group.positions().stream()).findFirst().orElseThrow();
+        assertThat(removal.before()).isEqualTo(open);
+        assertThat(removal.before().signedQuantitySteps()).isEqualTo(2);
+        assertThat(removal.before().marginMode())
+                .isEqualTo(com.surprising.aeron.protocol.CoreMarginMode.ISOLATED);
+        assertThat(removal.after()).isNull();
     }
 
     @Test
@@ -356,15 +747,35 @@ class TradingRuntimeStateTest {
                     .withCoreSequence(2);
             var sequenceOne = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
                     .withCoreSequence(1);
-            state.applyAndCommitLaneSequence(
-                    2, java.util.List.of(laneZeroUser), sequenceTwo, 3, 5, NOOP_LANE_COMMIT);
-            state.applyAndCommitLaneSequence(
-                    1, java.util.List.of(laneOneUser), sequenceOne, 3, 5, NOOP_LANE_COMMIT);
+            var laneZeroApply = state.applyAndCommitLaneSequence(
+                    2, java.util.List.of(laneZeroUser), sequenceTwo, 3, 5);
+            state.commitLaneSequence(laneZeroApply);
+            state.clearChangedKeys();
+            var laneOneApply = state.applyAndCommitLaneSequence(
+                    1, java.util.List.of(laneOneUser), sequenceOne, 3, 5);
+            state.commitLaneSequence(laneOneApply);
+            state.clearChangedKeys();
+            AccountLaneView[] beforeFailure = state.accountLanes();
+            long revisionBeforeFailure = state.revision();
 
             assertThatThrownBy(() -> state.applyAndCommitLaneSequence(1,
-                    java.util.List.of(laneZeroUser, laneOneUser), sequenceOne, 7, 11, NOOP_LANE_COMMIT))
+                    java.util.List.of(laneZeroUser, laneOneUser), sequenceOne, 7, 11))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("out of order");
+            AccountLaneView[] afterFailure = state.accountLanes();
+            for (int laneId = 0; laneId < topology.accountLaneCount(); laneId++) {
+                assertThat(afterFailure[laneId].revision()).isEqualTo(beforeFailure[laneId].revision());
+                assertThat(afterFailure[laneId].appliedSequence())
+                        .isEqualTo(beforeFailure[laneId].appliedSequence());
+                assertThat(afterFailure[laneId].committedSequence())
+                        .isEqualTo(beforeFailure[laneId].committedSequence());
+                assertThat(afterFailure[laneId].localStateHash())
+                        .isEqualTo(beforeFailure[laneId].localStateHash());
+                assertThat(afterFailure[laneId].localFundsHash())
+                        .isEqualTo(beforeFailure[laneId].localFundsHash());
+            }
+            assertThat(state.revision()).isEqualTo(revisionBeforeFailure);
+            assertThat(state.changedUsers().isEmpty()).isTrue();
             assertThat(state.executeUserSettlement(laneOneUser, () -> "apply-reclaimed"))
                     .isEqualTo("apply-reclaimed");
         } finally {
@@ -383,8 +794,9 @@ class TradingRuntimeStateTest {
         state.putUser(new UserRuntime(laneZeroUser));
         var result = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
                 .withCoreSequence(2);
-        state.applyAndCommitLaneSequence(
-                2, java.util.List.of(laneZeroUser), result, 3, 5, NOOP_LANE_COMMIT);
+        var apply = state.applyAndCommitLaneSequence(
+                2, java.util.List.of(laneZeroUser), result, 3, 5);
+        state.commitLaneSequence(apply);
         AccountLaneView beforeRestore = state.accountLaneById(0);
 
         java.util.List<AccountLaneSnapshot> invalid = new java.util.ArrayList<>(snapshots);
@@ -455,6 +867,41 @@ class TradingRuntimeStateTest {
             if (topology.accountLaneId(userId) == laneId) return userId;
         }
         throw new IllegalStateException("unable to find user for Account Lane");
+    }
+
+    private static String accountLaneSource() throws Exception {
+        Path testClasses = Path.of(TradingRuntimeStateTest.class.getProtectionDomain()
+                .getCodeSource().getLocation().toURI());
+        Path module = testClasses.getParent().getParent();
+        return Files.readString(module.resolve("src/main/java/com/surprising/aeron/service/state/AccountLaneState.java"));
+    }
+
+    private static AccountLaneState accountLaneState(TradingRuntimeState state, int laneId) throws Exception {
+        Field field = TradingRuntimeState.class.getDeclaredField("accountLanes");
+        field.setAccessible(true);
+        return ((AccountLaneState[]) field.get(state))[laneId];
+    }
+
+    private static long[] pendingReservationOrderIds(TradingRuntimeState state, long coreSequence) throws Exception {
+        Field field = TradingRuntimeState.class.getDeclaredField("pendingReservationsBySequence");
+        field.setAccessible(true);
+        var pending = (org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<
+                org.eclipse.collections.impl.set.mutable.primitive.LongHashSet>) field.get(state);
+        return pending.get(coreSequence).toArray();
+    }
+
+    private static long pendingReservationOwner(TradingRuntimeState state, long orderId) throws Exception {
+        Field field = TradingRuntimeState.class.getDeclaredField("pendingReservationUsers");
+        field.setAccessible(true);
+        var owners = (org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap) field.get(state);
+        return owners.getIfAbsent(orderId, 0);
+    }
+
+    private static String methodSource(String source, String startMarker, String endMarker) {
+        int start = source.indexOf(startMarker);
+        int end = source.indexOf(endMarker, start);
+        if (start < 0 || end < 0) throw new IllegalArgumentException("account lane lookup method is missing");
+        return source.substring(start, end);
     }
 
     private static RiskScanRuntime incompleteRiskScan(int symbolId, long lastUserId) {

@@ -12,7 +12,8 @@ import com.surprising.aeron.service.state.PositionUserIndex;
 import com.surprising.aeron.service.state.RiskSnapshotIndex;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.RuntimeStateMaterializer;
-import com.surprising.aeron.service.state.RuntimeCommitEntry;
+import com.surprising.aeron.service.state.RuntimeCommitPatch;
+import com.surprising.aeron.service.state.RuntimeCommitIndexes;
 import com.surprising.aeron.service.state.RuntimeStateProjector;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.TradingRuntimeState;
@@ -35,6 +36,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     private final ActiveOrderIndex activeOrders;
     private final AdlPositionIndex adlPositions;
     private final RiskSnapshotIndex riskSnapshots;
+    private final RuntimeCommitIndexes commitIndexes;
     private RuntimeIdentityRegistry identities;
     private TradingRuntimeState runtimeState;
     private long committedRevision;
@@ -42,6 +44,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     private long committedCoreSequence;
     private final CompletableFuture<Void> matcherReady;
     private Thread owner;
+    private boolean activated;
 
     public TradingCoreRuntime(ProductLine productLine, TradingCoreState initialState) {
         this(productLine, initialState, 0, null);
@@ -52,6 +55,26 @@ public final class TradingCoreRuntime implements AutoCloseable {
             TradingCoreState initialState,
             long coreSequence,
             MatcherSnapshot matcherSnapshot) {
+        this(productLine, initialState, coreSequence, matcherSnapshot, true);
+    }
+
+    private TradingCoreRuntime(
+            ProductLine productLine,
+            TradingCoreState initialState,
+            long coreSequence,
+            MatcherSnapshot matcherSnapshot,
+            boolean activateImmediately) {
+        this(productLine, initialState, coreSequence, matcherSnapshot, activateImmediately,
+                initialState == null ? 0 : initialState.businessStateHash());
+    }
+
+    private TradingCoreRuntime(
+            ProductLine productLine,
+            TradingCoreState initialState,
+            long coreSequence,
+            MatcherSnapshot matcherSnapshot,
+            boolean activateImmediately,
+            long expectedCoreBusinessStateHash) {
         if (productLine == null || initialState == null || initialState.productLine() != productLine) {
             throw new IllegalArgumentException("invalid trading runtime state");
         }
@@ -66,9 +89,10 @@ public final class TradingCoreRuntime implements AutoCloseable {
         this.committedCoreSequence = coreSequence;
         this.activeOrders = new ActiveOrderIndex(initialState, identities);
         this.matcher = matcherSnapshot == null
-                ? new DeterministicExchangeCoreAdapter()
+                ? new DeterministicExchangeCoreAdapter(activateImmediately)
                 : new DeterministicExchangeCoreAdapter(
-                        initialState, activeOrders.orders(), coreSequence, matcherSnapshot);
+                        initialState, activeOrders.orders(), coreSequence, matcherSnapshot, activateImmediately,
+                        expectedCoreBusinessStateHash);
         this.positionUsers = new PositionUserIndex(initialState, identities);
         this.openInterest = new OpenInterestIndex(initialState, identities);
         this.triggers = new TriggerOrderIndex(initialState);
@@ -77,16 +101,51 @@ public final class TradingCoreRuntime implements AutoCloseable {
         this.timers = new CancelAllAfterIndex(initialState);
         this.adlPositions = new AdlPositionIndex(initialState, identities);
         this.riskSnapshots = new RiskSnapshotIndex(initialState);
+        this.commitIndexes = new RuntimeCommitIndexes(positionUsers, openInterest, triggers, algos, liquidations,
+                timers, activeOrders, adlPositions, riskSnapshots);
         this.matcherReady = CompletableFuture.completedFuture(null);
+        if (activateImmediately) activate();
     }
+
+    static TradingCoreRuntime passive(ProductLine productLine, TradingCoreState initialState,
+                                      long coreSequence, MatcherSnapshot matcherSnapshot) {
+        return new TradingCoreRuntime(productLine, initialState, coreSequence, matcherSnapshot, false);
+    }
+
+    static TradingCoreRuntime passive(ProductLine productLine, TradingCoreState initialState,
+                                      long coreSequence, MatcherSnapshot matcherSnapshot,
+                                      long expectedCoreBusinessStateHash) {
+        return new TradingCoreRuntime(productLine, initialState, coreSequence, matcherSnapshot, false,
+                expectedCoreBusinessStateHash);
+    }
+
+    void activate() {
+        if (activated) return;
+        Thread current = Thread.currentThread();
+        if (owner != null && owner != current) {
+            throw new IllegalStateException("trading runtime is bound to another thread");
+        }
+        owner = current;
+        runtimeState.bindOwner();
+        identities.assertOwner();
+        runtimeState.startAccountLanes();
+        matcher.activate();
+        activated = true;
+    }
+
+    void releaseOwnerForHandoff() {
+        if (activated) throw new IllegalStateException("active trading runtime cannot change owner");
+        runtimeState.releaseOwnerForHandoff();
+        identities.releaseOwnerForHandoff();
+        owner = null;
+    }
+
+    boolean activated() { return activated; }
 
     public void bindOwner() {
         Thread current = Thread.currentThread();
         if (owner == null) {
-            owner = current;
-            runtimeState.bindOwner();
-            identities.assertOwner();
-            runtimeState.startAccountLanes();
+            activate();
         } else if (owner != current) {
             throw new IllegalStateException("trading runtime is bound to another thread");
         }
@@ -241,25 +300,43 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return riskSnapshots;
     }
 
-    void commitRuntimeTransition(RuntimeCommitEntry entry,
+    void commitRuntimeTransition(RuntimeCommitPatch entry,
                                  long beforeBusinessStateHash, long afterBusinessStateHash) {
         assertOwner();
         if (entry == null || entry.productLine() != productLine || entry.revision() < committedRevision
                 || beforeBusinessStateHash != committedBusinessStateHash) {
             throw new IllegalStateException("typed runtime transition is out of order");
         }
-        positionUsers.update(entry);
-        openInterest.update(entry);
-        triggers.update(entry);
-        algos.update(entry);
-        liquidations.update(entry);
-        timers.update(entry);
-        activeOrders.update(entry);
-        adlPositions.update(entry);
-        riskSnapshots.update(entry);
+        commitIndexes.apply(entry);
         committedRevision = entry.revision();
         committedBusinessStateHash = afterBusinessStateHash;
-        runtimeState.clearChangedKeys();
+    }
+
+    void rollbackRuntimeTransition(RuntimeCommitPatch entry,
+                                   long beforeRevision, long beforeBusinessStateHash) {
+        assertOwner();
+        if (entry == null || committedRevision != entry.revision()
+                || committedBusinessStateHash != entry.businessStateHash()) {
+            return;
+        }
+        commitIndexes.rollback(entry);
+        committedRevision = beforeRevision;
+        committedBusinessStateHash = beforeBusinessStateHash;
+    }
+
+    void restoreCommittedConsumers(TradingCoreState state, long revision, long businessStateHash) {
+        if (owner != null) assertOwner();
+        commitIndexes.rebuild(state, identities);
+        committedRevision = revision;
+        committedBusinessStateHash = businessStateHash;
+    }
+
+    void rebaseInitialBusinessStateHash(long expectedBefore, long after) {
+        if (owner != null) assertOwner();
+        if (committedCoreSequence != 0 || committedBusinessStateHash != expectedBefore) {
+            throw new IllegalStateException("runtime business hash rebase is outside initial state");
+        }
+        committedBusinessStateHash = after;
     }
 
     public void restoreStateOnly(TradingCoreState restored) {
@@ -285,15 +362,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         runtimeState.clearChangedKeys();
         committedRevision = restored.revision();
         committedBusinessStateHash = restored.businessStateHash();
-        positionUsers.rebuild(restored, identities);
-        openInterest.rebuild(restored, identities);
-        triggers.rebuild(restored);
-        algos.rebuild(restored);
-        liquidations.rebuild(restored);
-        timers.rebuild(restored);
-        activeOrders.rebuild(restored, identities);
-        adlPositions.rebuild(restored, identities);
-        riskSnapshots.rebuild(restored);
+        commitIndexes.rebuild(restored, identities);
     }
 
     @Override

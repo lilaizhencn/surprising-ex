@@ -10,6 +10,8 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.List;
+import com.surprising.aeron.service.state.AccountLaneSnapshot;
 
 final class SectionedCoreSnapshotValidation {
 
@@ -37,6 +39,9 @@ final class SectionedCoreSnapshotValidation {
         long probeValue = header.getLong();
         long snapshotId = header.getLong();
         long coreSequence = header.getLong();
+        long projectionSequence = header.getLong();
+        long projectionSequenceComplement = header.getLong();
+        long accountLaneDigest = header.getLong();
         long clusterTimestamp = header.getLong();
         long clusterPosition = header.getLong();
         long matcherSequence = header.getLong();
@@ -65,7 +70,10 @@ final class SectionedCoreSnapshotValidation {
             throw new ProtocolException("snapshot topology mismatch");
         }
         if (snapshotId <= 0) throw new ProtocolException("snapshot id mismatch");
-        if (appliedCommandCount < 0 || coreSequence < 0 || matcherSequence < 0
+        if (projectionSequenceComplement != ~projectionSequence) {
+            throw new ProtocolException("snapshot projection sequence mismatch");
+        }
+        if (appliedCommandCount < 0 || coreSequence < 0 || projectionSequence < 0 || matcherSequence < 0
                 || clusterTimestamp < 0 || clusterPosition < 0) {
             throw new ProtocolException("invalid snapshot sequence or position");
         }
@@ -74,7 +82,7 @@ final class SectionedCoreSnapshotValidation {
             throw new ProtocolException("invalid snapshot outbox metadata");
         }
         return new HeaderManifest(productLine, routeVersion, topology, topologyHash, symbolRouteHash,
-                snapshotId, coreSequence,
+                snapshotId, coreSequence, projectionSequence, accountLaneDigest,
                 clusterTimestamp, clusterPosition, appliedCommandCount, probeValue, matcherSequence,
                 businessStateHash, globalFundsHash, engineStateHash, bookStateHash,
                 symbolRegistryHash, userRegistryHash,
@@ -88,7 +96,9 @@ final class SectionedCoreSnapshotValidation {
             Map<CoreProbeState.SourceKey, Long> sourceSequences,
             CoreExportState exportState,
             MatcherSnapshot matcherSnapshot,
-            TradingCoreState tradingState) {
+            TradingCoreState tradingState,
+            Map<Long, com.surprising.aeron.service.state.CoreFeePolicyState> feePolicies,
+            Map<Long, com.surprising.aeron.service.state.TransferRuntime> pendingTransfers) {
         requireMatch(manifest.productLine() == matcherSnapshot.productLine()
                 && manifest.productLine() == tradingState.productLine(), "product line");
         requireMatch(manifest.routeVersion() == matcherSnapshot.routeVersion(), "route");
@@ -99,7 +109,8 @@ final class SectionedCoreSnapshotValidation {
         requireMatch(manifest.coreSequence() == matcherSnapshot.coreSequence(), "core sequence");
         requireMatch(manifest.appliedCommandCount() == manifest.coreSequence(), "applied sequence");
         requireMatch(manifest.matcherSequence() == matcherSnapshot.matcherSequence(), "matcher sequence");
-        requireMatch(manifest.businessStateHash() == tradingState.businessStateHash()
+        requireMatch(manifest.businessStateHash() == CoreProbeState.canonicalBusinessStateHash(
+                        tradingState.businessStateHash(), feePolicies, pendingTransfers)
                 && manifest.businessStateHash() == matcherSnapshot.coreBusinessStateHash(), "business state hash");
         requireMatch(manifest.globalFundsHash()
                 == com.surprising.aeron.service.state.RollingFundsStateHash.compute(tradingState), "funds hash");
@@ -124,6 +135,29 @@ final class SectionedCoreSnapshotValidation {
         requireMatch(manifest.artifactSha256().equals(matcherSnapshot.artifactSha256()), "artifact identity");
     }
 
+    static void validateAccountLanes(HeaderManifest manifest, List<AccountLaneSnapshot> lanes) {
+        requireMatch(manifest.accountLaneDigest() == accountLaneDigest(lanes), "account lane hash");
+    }
+
+    static long accountLaneDigest(List<AccountLaneSnapshot> lanes) {
+        if (lanes == null) throw new IllegalArgumentException("account lanes are required");
+        long hash = 0xcbf29ce484222325L;
+        for (AccountLaneSnapshot lane : lanes) {
+            hash = mix(hash, lane.laneId());
+            hash = mix(hash, lane.revision());
+            hash = mix(hash, lane.appliedSequence());
+            hash = mix(hash, lane.committedSequence());
+            hash = mix(hash, lane.localStateHash());
+            hash = mix(hash, lane.localFundsHash());
+            for (Long userId : lane.userIds()) hash = mix(hash, userId);
+        }
+        return hash;
+    }
+
+    private static long mix(long hash, long value) {
+        return (hash ^ value) * 0x100000001b3L;
+    }
+
     private static String readFixedAscii(ByteBuffer buffer, int length) {
         byte[] encoded = new byte[length];
         buffer.get(encoded);
@@ -137,6 +171,7 @@ final class SectionedCoreSnapshotValidation {
     record HeaderManifest(
             ProductLine productLine, int routeVersion, LaneTopology topology, long topologyHash,
             long symbolRouteHash, long snapshotId, long coreSequence,
+            long projectionSequence, long accountLaneDigest,
             long clusterTimestamp, long clusterPosition, long appliedCommandCount, long probeValue,
             long matcherSequence, long businessStateHash, long globalFundsHash,
             int engineStateHash, int bookStateHash,

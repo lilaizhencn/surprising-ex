@@ -1,6 +1,8 @@
 package com.surprising.aeron.service.state;
 
 import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
+import org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap;
+import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
@@ -32,11 +34,16 @@ public final class AccountLaneState {
     final Map<Long, CoreAlgoOrderState> algoOrders = new TreeMap<>();
     final Map<Long, CoreTriggerOrderState> triggerOrders = new TreeMap<>();
     final LongLongHashMap pendingReservationSequences = new LongLongHashMap();
+    private final LongIntHashMap pendingReservationCountsByUser = new LongIntHashMap();
+    private final LongObjectHashMap<IntLongHashMap> pendingReservedUnitsByUser = new LongObjectHashMap<>();
+    private int totalPendingReservations;
     private long revision;
     private long appliedSequence;
     private long committedSequence;
     private long localStateHash = 0xcbf29ce484222325L;
     private long localFundsHash = 0xcbf29ce484222325L;
+    private long pendingApplySequence;
+    private Checkpoint pendingApplyCheckpoint;
     private Thread owner;
 
     AccountLaneState(int laneId, int queueCapacity) {
@@ -45,6 +52,8 @@ public final class AccountLaneState {
         }
         this.laneId = laneId;
         this.queueCapacity = queueCapacity;
+        this.localStateHash = computeStateHash();
+        this.localFundsHash = computeFundsHash();
     }
 
     void bindOwner() {
@@ -100,16 +109,108 @@ public final class AccountLaneState {
         if (pendingReservationSequences.containsKey(orderId)) {
             throw new IllegalStateException("reservation is already pending");
         }
+        ReservationRuntime reservation = reservations.get(orderId);
+        if (reservation == null) throw new IllegalStateException("pending reservation is missing");
+        int nextUserCount = Math.addExact(pendingReservationCountsByUser.get(reservation.userId()), 1);
+        int nextTotal = Math.addExact(totalPendingReservations, 1);
+        IntLongHashMap unitsByAsset = pendingReservedUnitsByUser.get(reservation.userId());
+        long previousUnits = unitsByAsset == null ? 0 : unitsByAsset.get(reservation.assetId());
+        long nextUnits = Math.addExact(previousUnits, reservation.reservedUnits());
         pendingReservationSequences.put(orderId, coreSequence);
+        if (unitsByAsset == null && nextUnits != 0) {
+            unitsByAsset = new IntLongHashMap();
+            pendingReservedUnitsByUser.put(reservation.userId(), unitsByAsset);
+        }
+        pendingReservationCountsByUser.put(reservation.userId(), nextUserCount);
+        if (nextUnits != 0) unitsByAsset.put(reservation.assetId(), nextUnits);
+        totalPendingReservations = nextTotal;
     }
 
     void completePendingReservation(long orderId, long coreSequence) {
         assertOwner();
+        PendingReservationCompletion completion = pendingReservationCompletion(orderId, coreSequence);
+        ReservationRuntime reservation = completion.reservation();
+        pendingReservationSequences.removeKey(orderId);
+        if (completion.nextUserCount() == 0) pendingReservationCountsByUser.removeKey(reservation.userId());
+        else pendingReservationCountsByUser.put(reservation.userId(), completion.nextUserCount());
+        if (completion.nextUnits() == 0) {
+            if (completion.unitsByAsset() != null) {
+                completion.unitsByAsset().removeKey(reservation.assetId());
+                if (completion.unitsByAsset().isEmpty()) pendingReservedUnitsByUser.removeKey(reservation.userId());
+            }
+        } else {
+            completion.unitsByAsset().put(reservation.assetId(), completion.nextUnits());
+        }
+        totalPendingReservations = completion.nextTotal();
+    }
+
+    void requirePendingReservationCompletion(long orderId, long coreSequence) {
+        assertOwner();
+        pendingReservationCompletion(orderId, coreSequence);
+    }
+
+    private PendingReservationCompletion pendingReservationCompletion(long orderId, long coreSequence) {
         long pendingSequence = pendingReservationSequences.getIfAbsent(orderId, 0);
         if (pendingSequence != coreSequence) {
             throw new IllegalStateException("pending reservation sequence mismatch");
         }
-        pendingReservationSequences.removeKey(orderId);
+        ReservationRuntime reservation = reservations.get(orderId);
+        if (reservation == null) throw new IllegalStateException("pending reservation is missing");
+        int userCount = pendingReservationCountsByUser.get(reservation.userId());
+        int nextUserCount = Math.subtractExact(userCount, 1);
+        int nextTotal = Math.subtractExact(totalPendingReservations, 1);
+        IntLongHashMap unitsByAsset = pendingReservedUnitsByUser.get(reservation.userId());
+        long previousUnits = unitsByAsset == null ? 0 : unitsByAsset.get(reservation.assetId());
+        long nextUnits = Math.subtractExact(previousUnits, reservation.reservedUnits());
+        if (nextUserCount < 0 || nextTotal < 0 || nextUnits < 0) {
+            throw new IllegalStateException("pending reservation counters are inconsistent");
+        }
+        if (nextUnits != 0 && unitsByAsset == null) {
+            throw new IllegalStateException("pending reservation counters are inconsistent");
+        }
+        return new PendingReservationCompletion(reservation, nextUserCount, nextTotal, unitsByAsset, nextUnits);
+    }
+
+    void replacePendingReservation(ReservationRuntime previous, ReservationRuntime replacement) {
+        assertOwner();
+        if (!pendingReservationSequences.containsKey(previous.orderId())) return;
+        if (previous.orderId() != replacement.orderId() || previous.userId() != replacement.userId()) {
+            throw new IllegalStateException("pending reservation owner cannot change");
+        }
+        IntLongHashMap unitsByAsset = pendingReservedUnitsByUser.get(previous.userId());
+        long currentUnits = unitsByAsset == null ? 0 : unitsByAsset.get(previous.assetId());
+        long remainingUnits = Math.subtractExact(currentUnits, previous.reservedUnits());
+        if (remainingUnits < 0) throw new IllegalStateException("pending reservation counters are inconsistent");
+        if (previous.assetId() == replacement.assetId()) {
+            long nextUnits = Math.addExact(remainingUnits, replacement.reservedUnits());
+            if (nextUnits == 0) {
+                if (unitsByAsset != null) {
+                    unitsByAsset.removeKey(previous.assetId());
+                    if (unitsByAsset.isEmpty()) pendingReservedUnitsByUser.removeKey(previous.userId());
+                }
+                return;
+            }
+            if (unitsByAsset == null) {
+                unitsByAsset = new IntLongHashMap();
+                pendingReservedUnitsByUser.put(previous.userId(), unitsByAsset);
+            }
+            unitsByAsset.put(previous.assetId(), nextUnits);
+        } else {
+            long existingReplacementUnits = unitsByAsset == null ? 0 : unitsByAsset.get(replacement.assetId());
+            long replacementUnits = Math.addExact(existingReplacementUnits,
+                    replacement.reservedUnits());
+            if (unitsByAsset == null && replacementUnits != 0) {
+                unitsByAsset = new IntLongHashMap();
+                pendingReservedUnitsByUser.put(previous.userId(), unitsByAsset);
+            }
+            if (unitsByAsset != null) {
+                if (remainingUnits == 0) unitsByAsset.removeKey(previous.assetId());
+                else unitsByAsset.put(previous.assetId(), remainingUnits);
+                if (replacementUnits == 0) unitsByAsset.removeKey(replacement.assetId());
+                else unitsByAsset.put(replacement.assetId(), replacementUnits);
+            }
+        }
+        if (unitsByAsset != null && unitsByAsset.isEmpty()) pendingReservedUnitsByUser.removeKey(previous.userId());
     }
 
     boolean pendingReservation(long orderId) {
@@ -119,48 +220,100 @@ public final class AccountLaneState {
 
     long pendingReservedUnits(long userId, int assetId) {
         assertOwner();
-        long[] total = {0};
-        pendingReservationSequences.forEachKeyValue((orderId, ignored) -> {
-            ReservationRuntime reservation = reservations.get(orderId);
-            if (reservation != null && reservation.userId() == userId && reservation.assetId() == assetId) {
-                total[0] = Math.addExact(total[0], reservation.reservedUnits());
-            }
-        });
-        return total[0];
+        IntLongHashMap unitsByAsset = pendingReservedUnitsByUser.get(userId);
+        return unitsByAsset == null ? 0 : unitsByAsset.get(assetId);
     }
 
     int pendingReservationCount(long userId) {
         assertOwner();
-        int[] count = {0};
-        pendingReservationSequences.forEachKeyValue((orderId, ignored) -> {
-            ReservationRuntime reservation = reservations.get(orderId);
-            if (reservation != null && reservation.userId() == userId) count[0]++;
-        });
-        return count[0];
+        return pendingReservationCountsByUser.get(userId);
+    }
+
+    int pendingReservationCount() {
+        assertOwner();
+        return totalPendingReservations;
     }
 
     boolean hasPendingReservations() {
         assertOwner();
-        return !pendingReservationSequences.isEmpty();
+        return totalPendingReservations != 0;
     }
 
     void applied(long coreSequence, long userId, long stateContribution, long fundsContribution) {
         assertOwner();
-        if (coreSequence < appliedSequence || userId <= 0 || !userIds.contains(userId)) {
-            throw new IllegalStateException("account lane apply is out of order");
+        requireApply(coreSequence, userId);
+        if (pendingApplyCheckpoint == null) {
+            pendingApplyCheckpoint = checkpoint();
+            pendingApplySequence = coreSequence;
+        } else if (pendingApplySequence != coreSequence) {
+            throw new IllegalStateException("account lane has an unfinished apply");
         }
         appliedSequence = coreSequence;
         revision = Math.incrementExact(revision);
-        localStateHash = mix(mix(localStateHash, userId), stateContribution);
-        localFundsHash = mix(mix(localFundsHash, userId), fundsContribution);
+        localStateHash = transitionHash(localStateHash, coreSequence, userId, stateContribution);
+        localFundsHash = transitionHash(localFundsHash, coreSequence, userId, fundsContribution);
+    }
+
+    void requireApply(long coreSequence, long userId) {
+        assertOwner();
+        requireApplySequence(coreSequence);
+        if (userId <= 0 || !userIds.contains(userId)) {
+            throw new IllegalStateException("account lane apply is out of order");
+        }
+    }
+
+    void requireApplySequence(long coreSequence) {
+        assertOwner();
+        if (coreSequence < appliedSequence) {
+            throw new IllegalStateException("account lane apply is out of order");
+        }
     }
 
     void committed(long coreSequence) {
         assertOwner();
+        requireCommit(coreSequence);
+        if (pendingApplyCheckpoint == null || pendingApplySequence != coreSequence) {
+            throw new IllegalStateException("account lane commit has no pending apply");
+        }
+        committedSequence = coreSequence;
+        pendingApplySequence = 0;
+        pendingApplyCheckpoint = null;
+    }
+
+    void rollbackApplied(long coreSequence) {
+        assertOwner();
+        if (pendingApplyCheckpoint == null || pendingApplySequence != coreSequence) {
+            throw new IllegalStateException("account lane rollback has no pending apply");
+        }
+        Checkpoint checkpoint = pendingApplyCheckpoint;
+        rollback(checkpoint);
+    }
+
+    Checkpoint checkpoint() {
+        assertOwner();
+        return new Checkpoint(revision, appliedSequence, committedSequence, localStateHash, localFundsHash);
+    }
+
+    void rollback(Checkpoint checkpoint) {
+        assertOwner();
+        if (checkpoint == null) throw new IllegalArgumentException("account lane checkpoint is required");
+        pendingApplySequence = 0;
+        pendingApplyCheckpoint = null;
+        revision = checkpoint.revision();
+        appliedSequence = checkpoint.appliedSequence();
+        committedSequence = checkpoint.committedSequence();
+        localStateHash = checkpoint.localStateHash();
+        localFundsHash = checkpoint.localFundsHash();
+    }
+
+    record Checkpoint(long revision, long appliedSequence, long committedSequence,
+                      long localStateHash, long localFundsHash) {}
+
+    void requireCommit(long coreSequence) {
+        assertOwner();
         if (coreSequence < committedSequence || coreSequence > appliedSequence) {
             throw new IllegalStateException("account lane commit is out of order");
         }
-        committedSequence = coreSequence;
     }
 
     void readFence(long coreSequence) {
@@ -197,6 +350,11 @@ public final class AccountLaneState {
         userIds.clear();
         userIds.addAll(restoredUsers);
         pendingReservationSequences.clear();
+        pendingReservationCountsByUser.clear();
+        pendingReservedUnitsByUser.clear();
+        totalPendingReservations = 0;
+        pendingApplySequence = 0;
+        pendingApplyCheckpoint = null;
     }
 
     LongHashSet userIdsSnapshot() {
@@ -237,6 +395,11 @@ public final class AccountLaneState {
                 snapshot.localStateHash(), snapshot.localFundsHash(), restoredUsers);
     }
 
+    private record PendingReservationCompletion(
+            ReservationRuntime reservation, int nextUserCount, int nextTotal,
+            IntLongHashMap unitsByAsset, long nextUnits) {
+    }
+
     private static long mix(long hash, long value) {
         long mixed = hash;
         for (int shift = 0; shift < Long.SIZE; shift += Byte.SIZE) {
@@ -244,6 +407,13 @@ public final class AccountLaneState {
             mixed *= 0x100000001b3L;
         }
         return mixed;
+    }
+
+    private static long transitionHash(long current, long coreSequence, long userId, long contribution) {
+        long hash = mix(current, coreSequence);
+        hash = mix(hash, userId);
+        hash = mix(hash, contribution);
+        return hash == 0 ? 1 : hash;
     }
 
     private long computeStateHash() {
@@ -291,6 +461,12 @@ public final class AccountLaneState {
             }
         }
         return hash == 0 ? 1 : hash;
+    }
+
+    void rebuildLocalHashes() {
+        assertOwner();
+        localStateHash = computeStateHash();
+        localFundsHash = computeFundsHash();
     }
 
     private static <T> long mixMap(long hash, LongObjectHashMap<T> values) {

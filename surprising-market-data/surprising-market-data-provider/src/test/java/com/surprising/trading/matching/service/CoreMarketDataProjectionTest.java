@@ -103,12 +103,8 @@ class CoreMarketDataProjectionTest {
         CoreOrderStateView maker = order(2, 202, CoreOrderSide.SELL, 6, 4, "OPEN", -50, 100);
         CoreOrderStateView taker = order(1, 101, CoreOrderSide.BUY, 6, 0, "FILLED", 0, 200);
         UUID commandId = UUID.fromString("00000000-0000-0000-0000-000000000002");
-        CoreExportEvent event = new CoreExportEvent(2, 2, 99, commandId, CoreMessageType.PLACE_ORDER,
-                ResponseStatus.APPLIED, CoreResultCode.NONE, 101, new byte[0], List.of(),
-                List.of(taker, maker), List.of(new CoreExecutionView(1, 2, 101, 202, 10, 6)));
-        CoreMessage message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PLACE_ORDER, commandId,
-                ProductLine.SPOT, CommandSource.GATEWAY, 7, 2, 101, 1_000, 2).exportEvent(2),
-                CoreExportCodec.encodeEvent(event));
+        CoreMessage message = message(2, commandId, List.of(taker, maker),
+                List.of(new CoreExecutionView(1, 2, 101, 202, 10, 6)));
 
         projection.apply(message);
 
@@ -243,12 +239,20 @@ class CoreMarketDataProjectionTest {
     private static CoreMessage message(long exportSequence, UUID commandId, CoreResultCode resultCode,
                                        List<CoreOrderStateView> orders, List<CoreExecutionView> executions) {
         long userId = orders.isEmpty() ? 1 : orders.getFirst().userId();
+        byte[] payload = new byte[0];
+        CoreMessage command = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PLACE_ORDER, commandId,
+                ProductLine.SPOT, CommandSource.GATEWAY, 7, exportSequence, userId, 1_000, exportSequence), payload);
         CoreExportEvent event = new CoreExportEvent(exportSequence, exportSequence, 99, commandId,
                 CoreMessageType.PLACE_ORDER, ResponseStatus.APPLIED, resultCode, userId,
-                new byte[0], List.of(), orders, executions);
-        return new CoreMessage(CoreMessageHeader.command(CoreMessageType.PLACE_ORDER, commandId,
-                ProductLine.SPOT, CommandSource.GATEWAY, 7, exportSequence, userId, 1_000, exportSequence)
-                .exportEvent(exportSequence), CoreExportCodec.encodeEvent(event));
+                payload, List.of(), orders, executions, List.of(), List.of(), List.of(), List.of(),
+                Math.max(0, exportSequence - 1), 98, 99,
+                com.surprising.aeron.protocol.CoreRoute.DEFAULT.version(), 1, 99, exportSequence,
+                com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0), exportSequence, List.of(),
+                com.surprising.aeron.protocol.CommandFingerprint.of(command), List.of(),
+                CoreExportEvent.TerminalIds.empty(), Math.max(0, exportSequence - 1), exportSequence,
+                Math.max(0, exportSequence - 1), exportSequence, null, null,
+                CoreExportEvent.Tombstones.empty());
+        return new CoreMessage(command.header().exportEvent(exportSequence), CoreExportCodec.encodeEvent(event));
     }
 
     private static CoreOrderStateView order(long orderId, long userId, CoreOrderSide side,

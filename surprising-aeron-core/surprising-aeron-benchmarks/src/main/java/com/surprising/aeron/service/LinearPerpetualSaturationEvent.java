@@ -23,6 +23,22 @@ final class LinearPerpetualSaturationEvent extends Event {
     @Label("Operations per invocation")
     int operationsPerInvocation;
 
+    @Label("Scheduled business operations") long scheduledBusinessOperations;
+
+    @Label("Business type") String businessType;
+    @Label("Load model") String loadModel;
+    @Label("Target operations per second") int targetOperationsPerSecond;
+    @Label("Coordinated omission corrected") boolean coordinatedOmissionCorrected;
+    @Label("Latency samples") int latencySamples;
+    @Label("Histogram lowest") @Timespan(Timespan.NANOSECONDS) long histogramLowestNanos;
+    @Label("Histogram highest") @Timespan(Timespan.NANOSECONDS) long histogramHighestNanos;
+    @Label("Timeout") @Timespan(Timespan.NANOSECONDS) long timeoutNanos;
+    @Label("Latency unit") String latencyUnit;
+    @Label("Classification source") String classificationSource;
+    @Label("Entry-accepted histogram counts") String entryAcceptedHistogramCounts;
+    @Label("Accepted-terminal histogram counts") String acceptedTerminalHistogramCounts;
+    @Label("Entry-terminal histogram counts") String entryTerminalHistogramCounts;
+
     @Label("Terminal business operations")
     long terminalBusinessOperations;
 
@@ -70,4 +86,23 @@ final class LinearPerpetualSaturationEvent extends Event {
     @Label("Completion p99.9")
     @Timespan(Timespan.NANOSECONDS)
     long p999LatencyNanos;
+
+    @Label("Entry to accepted p50") @Timespan(Timespan.NANOSECONDS) long entryAcceptedP50Nanos;
+    @Label("Entry to accepted p90") @Timespan(Timespan.NANOSECONDS) long entryAcceptedP90Nanos;
+    @Label("Entry to accepted p95") @Timespan(Timespan.NANOSECONDS) long entryAcceptedP95Nanos;
+    @Label("Entry to accepted p99") @Timespan(Timespan.NANOSECONDS) long entryAcceptedP99Nanos;
+    @Label("Entry to accepted p99.9") @Timespan(Timespan.NANOSECONDS) long entryAcceptedP999Nanos;
+    @Label("Entry to accepted max") @Timespan(Timespan.NANOSECONDS) long entryAcceptedMaxNanos;
+    @Label("Accepted to terminal p50") @Timespan(Timespan.NANOSECONDS) long acceptedTerminalP50Nanos;
+    @Label("Accepted to terminal p90") @Timespan(Timespan.NANOSECONDS) long acceptedTerminalP90Nanos;
+    @Label("Accepted to terminal p95") @Timespan(Timespan.NANOSECONDS) long acceptedTerminalP95Nanos;
+    @Label("Accepted to terminal p99") @Timespan(Timespan.NANOSECONDS) long acceptedTerminalP99Nanos;
+    @Label("Accepted to terminal p99.9") @Timespan(Timespan.NANOSECONDS) long acceptedTerminalP999Nanos;
+    @Label("Accepted to terminal max") @Timespan(Timespan.NANOSECONDS) long acceptedTerminalMaxNanos;
+    @Label("Entry to terminal p50") @Timespan(Timespan.NANOSECONDS) long entryTerminalP50Nanos;
+    @Label("Entry to terminal p90") @Timespan(Timespan.NANOSECONDS) long entryTerminalP90Nanos;
+    @Label("Entry to terminal p95") @Timespan(Timespan.NANOSECONDS) long entryTerminalP95Nanos;
+    @Label("Entry to terminal p99") @Timespan(Timespan.NANOSECONDS) long entryTerminalP99Nanos;
+    @Label("Entry to terminal p99.9") @Timespan(Timespan.NANOSECONDS) long entryTerminalP999Nanos;
+    @Label("Entry to terminal max") @Timespan(Timespan.NANOSECONDS) long entryTerminalMaxNanos;
 }

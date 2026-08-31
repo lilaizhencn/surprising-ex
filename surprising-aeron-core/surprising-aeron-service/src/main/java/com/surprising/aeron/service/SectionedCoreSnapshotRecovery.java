@@ -155,7 +155,13 @@ final class SectionedCoreSnapshotRecovery {
 
     private SectionedCoreSnapshotParser.Components components(ProductLine expectedProductLine) {
         ensureComplete();
-        return SectionedCoreSnapshotParser.parse(payloads, expectedProductLine);
+        try {
+            return SectionedCoreSnapshotParser.parse(payloads, expectedProductLine);
+        } catch (ProtocolException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            throw new ProtocolException("invalid snapshot component: " + exception.getMessage(), exception);
+        }
     }
 
     private void ensureComplete() {

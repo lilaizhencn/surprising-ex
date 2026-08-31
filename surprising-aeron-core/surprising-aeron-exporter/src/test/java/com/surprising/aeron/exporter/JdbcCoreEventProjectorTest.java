@@ -55,13 +55,13 @@ class JdbcCoreEventProjectorTest {
                 }
             }
         }
-        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
-        state.apply(new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
-                UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 1, 1, 0, 1, 1),
-                CoreProtocol.probePayload(1)));
-        CoreMessage event = CoreExportCodec.decodeBatchResponse(state.apply(new CoreMessage(CoreMessageHeader.query(
-                CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(), ProductLine.SPOT,
-                CommandSource.OPERATIONS, 1, 0, 0, 1, 2), CoreExportCodec.encodeBatchQuery(1))).data()).events().getFirst();
+        CoreMessage event;
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            state.apply(new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
+                    UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 1, 1, 0, 1, 1),
+                    CoreProtocol.probePayload(1)));
+            event = awaitFirstExport(state);
+        }
         JdbcCoreEventProjector projector = projector(dataSource);
 
         assertThat(projector.project(ProductLine.SPOT, event)).isTrue();
@@ -81,10 +81,11 @@ class JdbcCoreEventProjectorTest {
         UUID commandId = UUID.randomUUID();
         var transfer = new TransferFundsCommand(7001L, ProductLine.SPOT, ProductLine.LINEAR_PERPETUAL,
                 "FUNDING", "USDT_PERPETUAL", "USDT", 1_250L, "transfer-007", "history test");
-        var event = withContinuity(new CoreExportEvent(1, 1, 9, commandId, CoreMessageType.TRANSFER_IN,
+        var event = event(ProductLine.LINEAR_PERPETUAL, 1, 1, 9, commandId, CoreMessageType.TRANSFER_IN,
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 42,
                 TradingCommandCodec.encodeTransferFunds(transfer), java.util.List.of(),
-                java.util.List.of(), java.util.List.of()), 0);
+                java.util.List.of(), java.util.List.of(), java.util.List.of(), java.util.List.of(),
+                java.util.List.of(), 0, CoreExportEvent.Tombstones.empty());
         var message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.TRANSFER_IN, commandId,
                 ProductLine.LINEAR_PERPETUAL, CommandSource.GATEWAY, 1, 1, 42,
                 1_700_000_000_000L, 1).exportEvent(1), CoreExportCodec.encodeEvent(event));
@@ -121,9 +122,11 @@ class JdbcCoreEventProjectorTest {
         var maker = new CoreOrderStateView(72, ProductLine.SPOT, 18, "BTC-USDT", 3,
                 CoreOrderSide.SELL, 60_000, 2, 1, 1, false, "OPEN", 2);
         var execution = new CoreExecutionView(71, 72, 17, 18, 60_000, 1);
-        var event = withContinuity(new CoreExportEvent(1, 1, 9, commandId, CoreMessageType.PLACE_ORDER,
+        var event = event(ProductLine.SPOT, 1, 1, 9, commandId, CoreMessageType.PLACE_ORDER,
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 17, new byte[] {1},
-                java.util.List.of(user), java.util.List.of(order, maker), java.util.List.of(execution)), 0);
+                java.util.List.of(user), java.util.List.of(order, maker), java.util.List.of(execution),
+                java.util.List.of(), java.util.List.of(), java.util.List.of(), 0,
+                CoreExportEvent.Tombstones.empty());
         var message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PLACE_ORDER, commandId,
                 ProductLine.SPOT, CommandSource.GATEWAY, 1, 1, 17, 1, 1).exportEvent(1),
                 CoreExportCodec.encodeEvent(event));
@@ -176,10 +179,11 @@ class JdbcCoreEventProjectorTest {
                 CorePositionSide.NET, "USDT", 2, 120_000, 100, -12);
         var shortPayment = new CoreFundingPaymentView(81, 18, "BTC-USDT", CoreMarginMode.CROSS,
                 CorePositionSide.NET, "USDT", -2, 120_000, 100, 12);
-        var event = withContinuity(new CoreExportEvent(1, 3, 9, commandId, CoreMessageType.APPLY_FUNDING,
+        var event = event(ProductLine.LINEAR_PERPETUAL, 1, 3, 9, commandId, CoreMessageType.APPLY_FUNDING,
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 0, TradingCommandCodec.encodeApplyFunding(command),
                 java.util.List.of(), java.util.List.of(), java.util.List.of(),
-                java.util.List.of(longPayment, shortPayment)), 0);
+                java.util.List.of(longPayment, shortPayment), java.util.List.of(), java.util.List.of(), 0,
+                CoreExportEvent.Tombstones.empty());
         var message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.APPLY_FUNDING, commandId,
                 ProductLine.LINEAR_PERPETUAL, CommandSource.SCHEDULER, 1, 1, 0, 1234, 1).exportEvent(1),
                 CoreExportCodec.encodeEvent(event));
@@ -188,10 +192,11 @@ class JdbcCoreEventProjectorTest {
         var continuationCommand = new ApplyFundingCommand(81, "BTC-USDT", 7, 100, 18, 128);
         var continuationPayment = new CoreFundingPaymentView(81, 19, "BTC-USDT", CoreMarginMode.CROSS,
                 CorePositionSide.NET, "USDT", 1, 60_000, 100, -6);
-        var continuation = withContinuity(new CoreExportEvent(2, 4, 10, UUID.randomUUID(), CoreMessageType.APPLY_FUNDING,
+        var continuation = event(ProductLine.LINEAR_PERPETUAL, 2, 4, 10, UUID.randomUUID(), CoreMessageType.APPLY_FUNDING,
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 0,
                 TradingCommandCodec.encodeApplyFunding(continuationCommand), java.util.List.of(),
-                java.util.List.of(), java.util.List.of(), java.util.List.of(continuationPayment)), 9);
+                java.util.List.of(), java.util.List.of(), java.util.List.of(continuationPayment),
+                java.util.List.of(), java.util.List.of(), 9, CoreExportEvent.Tombstones.empty());
         var continuationMessage = new CoreMessage(CoreMessageHeader.command(CoreMessageType.APPLY_FUNDING,
                 continuation.commandId(), ProductLine.LINEAR_PERPETUAL, CommandSource.SCHEDULER, 1, 4, 0,
                 1234, 1).exportEvent(2), CoreExportCodec.encodeEvent(continuation));
@@ -219,12 +224,13 @@ class JdbcCoreEventProjectorTest {
                 com.surprising.aeron.protocol.CoreMarginMode.ISOLATED, CorePositionSide.NET,
                 3, 8, 2, 2, 12, 60_000, 25_000, 3, "INSURANCE_REQUIRED");
         var treasury = new com.surprising.aeron.protocol.CoreTreasuryAssetView("USDT", 4, 9, 12);
-        var event = withContinuity(new CoreExportEvent(1, 4, 10, commandId, CoreMessageType.EXECUTE_LIQUIDATION,
+        var event = event(ProductLine.LINEAR_PERPETUAL, 1, 4, 10, commandId, CoreMessageType.EXECUTE_LIQUIDATION,
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 17,
                 TradingCommandCodec.encodeExecuteLiquidation(
                         new com.surprising.aeron.protocol.ExecuteLiquidationCommand(9, 1, 60_000, 25_000)),
                 java.util.List.of(), java.util.List.of(), java.util.List.of(), java.util.List.of(),
-                java.util.List.of(liquidation), java.util.List.of(treasury)), 0);
+                java.util.List.of(liquidation), java.util.List.of(treasury), 0,
+                CoreExportEvent.Tombstones.empty());
         var message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.EXECUTE_LIQUIDATION, commandId,
                 ProductLine.LINEAR_PERPETUAL, CommandSource.SCHEDULER, 1, 1, 17, 1234, 1).exportEvent(1),
                 CoreExportCodec.encodeEvent(event));
@@ -270,10 +276,11 @@ class JdbcCoreEventProjectorTest {
     private static CoreMessage orderEvent(long exportSequence, CoreMessageType type,
                                           CoreOrderStateView order) {
         UUID commandId = UUID.randomUUID();
-        var event = withContinuity(new CoreExportEvent(exportSequence, exportSequence, exportSequence * 17,
+        var event = event(ProductLine.SPOT, exportSequence, exportSequence, exportSequence * 17,
                 commandId, type, ResponseStatus.APPLIED, CoreResultCode.NONE, order.userId(),
                 new byte[] {(byte) exportSequence}, java.util.List.of(), java.util.List.of(order),
-                java.util.List.of()), (exportSequence - 1) * 17);
+                java.util.List.of(), java.util.List.of(), java.util.List.of(), java.util.List.of(),
+                (exportSequence - 1) * 17, CoreExportEvent.Tombstones.empty());
         return new CoreMessage(CoreMessageHeader.command(type, commandId, ProductLine.SPOT,
                 CommandSource.GATEWAY, 1, exportSequence, order.userId(), exportSequence, exportSequence)
                 .exportEvent(exportSequence), CoreExportCodec.encodeEvent(event));
@@ -283,16 +290,82 @@ class JdbcCoreEventProjectorTest {
         return new JdbcCoreEventProjector(dataSource);
     }
 
-    private static CoreExportEvent withContinuity(CoreExportEvent event, long beforeBusinessStateHash) {
-        return new CoreExportEvent(event.exportSequence(), event.appliedCommandCount(),
-                event.businessStateHash(), event.commandId(), event.commandType(), event.commandStatus(),
-                event.resultCode(), event.userId(), event.commandPayload(), event.changedUsers(),
-                event.changedOrders(), event.executions(), event.fundingPayments(), event.changedLiquidations(),
-                event.changedTreasuryAssets(), event.changedTriggerOrders(), beforeBusinessStateHash, 0, 0,
+    private static CoreMessage awaitFirstExport(CoreProbeState state) {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+        while (System.nanoTime() < deadline) {
+            CoreMessage query = new CoreMessage(CoreMessageHeader.query(
+                    CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(), ProductLine.SPOT,
+                    CommandSource.OPERATIONS, 1, 0, 0, 1, 2), CoreExportCodec.encodeBatchQuery(1));
+            java.util.List<CoreMessage> events = CoreExportCodec.decodeBatchResponse(
+                    state.apply(query).data()).events();
+            if (!events.isEmpty()) return events.getFirst();
+            Thread.onSpinWait();
+        }
+        throw new IllegalStateException("Core Fact materialization did not complete");
+    }
+
+    @Test
+    void appliesDeleteThenRecreateAsTheCanonicalChangedOrderFact() throws Exception {
+        JdbcDataSource dataSource = new JdbcDataSource();
+        dataSource.setURL("jdbc:h2:mem:delete_recreate_order;MODE=PostgreSQL;DB_CLOSE_DELAY=-1");
+        migrate(dataSource);
+        UUID commandId = UUID.randomUUID();
+        var recreated = new CoreOrderStateView(71, ProductLine.SPOT, 17, "BTC-USDT", 3,
+                CoreOrderSide.BUY, 60_000, 2, 0, 2, false, "OPEN", 2);
+        var tombstones = new CoreExportEvent.Tombstones(java.util.List.of(), java.util.List.of(),
+                java.util.List.of(), java.util.List.of(71L), java.util.List.of(), java.util.List.of(),
+                java.util.List.of(), java.util.List.of(), java.util.List.of(), java.util.List.of());
+        CoreExportEvent deleted = event(ProductLine.SPOT, 1, 1, 17, commandId, CoreMessageType.CANCEL_ORDER,
+                ResponseStatus.APPLIED, CoreResultCode.NONE, 17, new byte[] {1}, java.util.List.of(),
+                java.util.List.of(), java.util.List.of(), java.util.List.of(), java.util.List.of(),
+                java.util.List.of(), 0, tombstones);
+        CoreMessage deletedMessage = new CoreMessage(CoreMessageHeader.command(CoreMessageType.CANCEL_ORDER, commandId,
+                ProductLine.SPOT, CommandSource.GATEWAY, 1, 1, 17, 1, 1).exportEvent(1),
+                CoreExportCodec.encodeEvent(deleted));
+        UUID recreateCommandId = UUID.randomUUID();
+        CoreExportEvent recreatedEvent = event(ProductLine.SPOT, 2, 2, 34, recreateCommandId,
+                CoreMessageType.PLACE_ORDER, ResponseStatus.APPLIED, CoreResultCode.NONE, 17, new byte[] {2},
+                java.util.List.of(), java.util.List.of(recreated), java.util.List.of(), java.util.List.of(),
+                java.util.List.of(), java.util.List.of(), 17, CoreExportEvent.Tombstones.empty());
+        CoreMessage recreatedMessage = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PLACE_ORDER,
+                recreateCommandId, ProductLine.SPOT, CommandSource.GATEWAY, 1, 2, 17, 2, 2).exportEvent(2),
+                CoreExportCodec.encodeEvent(recreatedEvent));
+
+        JdbcCoreEventProjector projector = projector(dataSource);
+        assertThat(projector.project(ProductLine.SPOT, deletedMessage)).isTrue();
+        assertThat(projector.project(ProductLine.SPOT, recreatedMessage)).isTrue();
+
+        try (Connection connection = dataSource.getConnection(); var statement = connection.createStatement();
+             var result = statement.executeQuery("SELECT status, order_revision FROM core_order_projection "
+                     + "WHERE product_line = 'SPOT' AND order_id = 71")) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getString(1)).isEqualTo("OPEN");
+            assertThat(result.getLong(2)).isEqualTo(2);
+            assertThat(result.next()).isFalse();
+        }
+    }
+
+    private static CoreExportEvent event(ProductLine productLine, long exportSequence, long appliedCommandCount,
+                                         long businessStateHash, UUID commandId, CoreMessageType commandType,
+                                         ResponseStatus status, CoreResultCode resultCode, long userId, byte[] payload,
+                                         java.util.List<CoreUserStateView> users,
+                                         java.util.List<CoreOrderStateView> orders,
+                                         java.util.List<CoreExecutionView> executions,
+                                         java.util.List<CoreFundingPaymentView> fundingPayments,
+                                         java.util.List<com.surprising.aeron.protocol.CoreLiquidationView> liquidations,
+                                         java.util.List<com.surprising.aeron.protocol.CoreTreasuryAssetView> treasury,
+                                         long beforeBusinessStateHash, CoreExportEvent.Tombstones tombstones) {
+        CoreMessage command = new CoreMessage(CoreMessageHeader.command(commandType, commandId, productLine,
+                CommandSource.GATEWAY, 1, appliedCommandCount, userId, exportSequence, exportSequence), payload);
+        return new CoreExportEvent(exportSequence, appliedCommandCount, businessStateHash, commandId, commandType,
+                status, resultCode, userId, payload, users, orders, executions, fundingPayments, liquidations,
+                treasury, java.util.List.of(), beforeBusinessStateHash, 0, 0,
                 com.surprising.aeron.protocol.CoreRoute.DEFAULT.version(), 1,
-                event.businessStateHash() == 0 ? 1 : event.businessStateHash(), event.appliedCommandCount(),
-                com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0),
-                event.exportSequence(), java.util.List.of());
+                17, appliedCommandCount,
+                com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0), exportSequence,
+                java.util.List.of(), com.surprising.aeron.protocol.CommandFingerprint.of(command), java.util.List.of(),
+                CoreExportEvent.TerminalIds.empty(), Math.max(0, appliedCommandCount - 1), appliedCommandCount,
+                Math.max(0, exportSequence - 1), exportSequence, null, null, tombstones);
     }
 
     private static void assertCount(java.sql.Statement statement, String table, int expected) throws Exception {

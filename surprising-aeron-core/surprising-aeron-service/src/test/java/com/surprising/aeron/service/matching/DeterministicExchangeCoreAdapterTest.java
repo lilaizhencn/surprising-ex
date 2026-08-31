@@ -200,7 +200,7 @@ class DeterministicExchangeCoreAdapterTest {
     }
 
     @Test
-    void poisonedMatcherRejectsCommandsSubmittedAfterTheFatalCompletion() {
+    void poisonedMatcherDiscardsAlreadySubmittedCompletionAndRejectsFutureSupplier() throws Exception {
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter(false)) {
             CompletableFuture<CoreMatchingResult> firstNative = new CompletableFuture<>();
             CompletableFuture<CoreMatchingResult> secondNative = new CompletableFuture<>();
@@ -225,12 +225,14 @@ class DeterministicExchangeCoreAdapterTest {
                         submissions.incrementAndGet();
                         return CompletableFuture.completedFuture(result(true, "SUCCESS"));
                     });
-            secondNative.complete(result(true, "SUCCESS"));
-
             assertThat(first.join().resultCode()).isEqualTo("EXCHANGE_CORE_FAILURE");
-            assertThat(second.join().resultCode()).isEqualTo("SUCCESS");
+            var progressAfterFatal = matcherProgress(adapter);
+            secondNative.complete(result(true, "SUCCESS"));
+            assertThatThrownBy(second::join).hasCauseInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("completion discarded after fatal divergence");
             assertThatThrownBy(third::join).hasCauseInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("matcher is poisoned");
+            assertThat(matcherProgress(adapter)).isEqualTo(progressAfterFatal);
             assertThat(submissions).hasValue(2);
         }
     }
@@ -427,5 +429,12 @@ class DeterministicExchangeCoreAdapterTest {
                 100, 1, 100, OrderAction.BID, OrderType.GTC, 7, 1_000, 0,
                 CommandResultCode.SUCCESS, List.of(), new MatcherResult.MarketData(List.of(), List.of(), 0, 0));
         return CoreMatchingResult.fromNative(result);
+    }
+
+    private static List<MatcherShardProgress> matcherProgress(
+            DeterministicExchangeCoreAdapter adapter) throws Exception {
+        var field = DeterministicExchangeCoreAdapter.class.getDeclaredField("matcherEvidence");
+        field.setAccessible(true);
+        return ((MatcherEvidenceLedger) field.get(adapter)).snapshot();
     }
 }

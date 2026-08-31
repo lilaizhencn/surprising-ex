@@ -9,7 +9,6 @@ import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreOrderStateView;
 import com.surprising.aeron.protocol.CorePositionView;
 import com.surprising.aeron.protocol.CoreUserStateView;
-import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.product.api.ProductLine;
 import com.surprising.websocket.api.model.ExecutionReportEvent;
 import com.surprising.websocket.api.model.SubscriptionTopic;
@@ -89,12 +88,12 @@ public class CoreEventFanoutConsumer {
         }
         CoreMessage message = CoreMessageCodec.decode(record.value());
         ProductLine productLine = properties.getKafka().getProductLine();
-        if (message.header().productLine() != productLine
-                || message.header().kind() != WireMessageKind.EXPORT_EVENT
-                || message.header().messageType() != CoreMessageType.CORE_EVENT) {
-            throw new IllegalStateException("invalid Core event envelope for WebSocket fanout");
+        CoreExportEvent event;
+        try {
+            event = CoreExportCodec.decodeEvent(message, productLine);
+        } catch (com.surprising.aeron.protocol.ProtocolException exception) {
+            throw new IllegalStateException("invalid Core event envelope for WebSocket fanout", exception);
         }
-        CoreExportEvent event = CoreExportCodec.decodeEvent(message.payload());
         String expectedKey = productLine.name() + ":" + event.exportSequence();
         if (!expectedKey.equals(record.key())) {
             throw new IllegalStateException("Core event key mismatch: expected=" + expectedKey
@@ -141,6 +140,7 @@ public class CoreEventFanoutConsumer {
         publishExecutions(event, orders, eventTime, batch);
         for (int index = 0; index < event.changedTriggerOrders().size(); index++) {
             var trigger = event.changedTriggerOrders().get(index);
+            requireProductLine(trigger.productLine(), productLine);
             TriggerOrderResponse response = triggerResponse(trigger);
             batch.add(topic(WsChannel.TRIGGER_ORDERS, trigger.symbol(), trigger.userId()),
                     new CoreTriggerOrderWebSocketEvent(eventId(productLine, event.exportSequence(),

@@ -8,6 +8,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreBalanceView;
@@ -21,10 +22,16 @@ import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderStateView;
+import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CorePositionView;
 import com.surprising.aeron.protocol.CoreResultCode;
+import com.surprising.aeron.protocol.CoreTimeInForce;
+import com.surprising.aeron.protocol.CoreTriggerCondition;
+import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
+import com.surprising.aeron.protocol.CoreTriggerOrderStatus;
+import com.surprising.aeron.protocol.CoreTriggerOrderType;
 import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.product.api.ProductLine;
@@ -154,6 +161,18 @@ class CoreEventFanoutConsumerTest {
         assertThat(CoreWebSocketEventId.uuid(order)).isEqualTo(CoreWebSocketEventId.uuid(order));
     }
 
+    @Test
+    void rejectsMixedProductLineTriggerBeforeAnyFanout() {
+        SubscriptionRegistry registry = mock(SubscriptionRegistry.class);
+        CoreEventFanoutConsumer consumer = new CoreEventFanoutConsumer(registry, properties(ProductLine.SPOT));
+
+        assertThatThrownBy(() -> consumer.onCoreEvents(List.of(mixedTriggerRecord())))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("invalid Core event envelope for WebSocket fanout")
+                .hasRootCauseMessage("Core export trigger order product line mismatch");
+        verifyNoInteractions(registry);
+    }
+
     private static WebSocketProperties properties(ProductLine productLine) {
         WebSocketProperties properties = new WebSocketProperties();
         properties.getKafka().setProductLine(productLine);
@@ -180,15 +199,45 @@ class CoreEventFanoutConsumerTest {
                 includePositions ? List.of(position) : List.of());
         CoreUserStateView makerUser = new CoreUserStateView(productLine, 202, 2, CorePositionMode.ONE_WAY,
                 List.of(new CoreBalanceView("USDT", 11_000, 0)), List.of(), List.of());
+        byte[] payload = new byte[] {1};
+        CoreMessage command = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PLACE_ORDER, commandId,
+                productLine, CommandSource.GATEWAY, 1, sequence, 101, 1_700_000_000_000L, 1), payload);
         CoreExportEvent event = new CoreExportEvent(sequence, sequence, 9, commandId,
-                CoreMessageType.PLACE_ORDER, ResponseStatus.APPLIED, CoreResultCode.NONE, 101, new byte[] {1},
+                CoreMessageType.PLACE_ORDER, ResponseStatus.APPLIED, CoreResultCode.NONE, 101, payload,
                 List.of(takerUser, makerUser), List.of(taker, maker),
-                List.of(new CoreExecutionView(11, 22, 101, 202, 100, 10)));
-        CoreMessage message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PLACE_ORDER, commandId,
-                productLine, CommandSource.GATEWAY, 1, sequence, 101, 1_700_000_000_000L, 1)
-                .exportEvent(sequence), CoreExportCodec.encodeEvent(event));
+                List.of(new CoreExecutionView(11, 22, 101, 202, 100, 10)), List.of(), List.of(), List.of(), List.of(),
+                Math.max(0, sequence - 1), 8, 9, com.surprising.aeron.protocol.CoreRoute.DEFAULT.version(),
+                1, 9, sequence, com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0), sequence,
+                List.of(), com.surprising.aeron.protocol.CommandFingerprint.of(command), List.of(),
+                CoreExportEvent.TerminalIds.empty(), Math.max(0, sequence - 1), sequence,
+                Math.max(0, sequence - 1), sequence, null, null, CoreExportEvent.Tombstones.empty());
+        CoreMessage message = new CoreMessage(command.header().exportEvent(sequence), CoreExportCodec.encodeEvent(event));
         String topic = "surprising." + productLine.topicSegment() + ".core.events.v1";
         return new ConsumerRecord<>(topic, 0, kafkaOffset, productLine.name() + ":" + sequence,
                 CoreMessageCodec.encode(message));
+    }
+
+    private static ConsumerRecord<String, byte[]> mixedTriggerRecord() {
+        UUID commandId = UUID.randomUUID();
+        byte[] payload = new byte[] {1};
+        CoreMessage command = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT, commandId,
+                ProductLine.SPOT, CommandSource.OPERATIONS, 1, 1, 0, 1_700_000_000_000L, 1), payload);
+        CoreTriggerOrderStateView trigger = new CoreTriggerOrderStateView(501,
+                ProductLine.LINEAR_PERPETUAL, 1001, "tp-501", "", "BTC-USDT", CoreOrderSide.SELL,
+                CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL, 70_000, 0, 0, 0, 0, 0,
+                CoreOrderType.MARKET, CoreTimeInForce.IOC, 0, 10, CoreMarginMode.CROSS, CorePositionSide.NET,
+                CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "trigger-trace", 0, 0, 1_000, 1_000, 1,
+                7, -25, 40);
+        CoreExportEvent event = new CoreExportEvent(1, 1, 9, commandId, CoreMessageType.PROBE_INCREMENT,
+                ResponseStatus.APPLIED, CoreResultCode.NONE, 0, payload, List.of(), List.of(), List.of(), List.of(),
+                List.of(), List.of(), List.of(trigger), 8, 8, 9,
+                com.surprising.aeron.protocol.CoreRoute.DEFAULT.version(), 1, 9, 1,
+                com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0), 1, List.of(),
+                com.surprising.aeron.protocol.CommandFingerprint.of(command), List.of(),
+                CoreExportEvent.TerminalIds.empty(), 0, 1, 0, 1, null, null,
+                CoreExportEvent.Tombstones.empty());
+        CoreMessage envelope = new CoreMessage(command.header().exportEvent(1), CoreExportCodec.encodeEvent(event));
+        return new ConsumerRecord<>("surprising.spot.core.events.v1", 0, 0, "SPOT:1",
+                CoreMessageCodec.encode(envelope));
     }
 }
