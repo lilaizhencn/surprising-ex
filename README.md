@@ -239,6 +239,9 @@ Core Fact outbox 在 owner 上只登记确定性的元数据摘要、容量预�
 完整 Core view、资金 posting view、typed event、终态保留观察和协议字节由单线程 `core-fact-materializer` 按 export
 sequence 构造。登记对象是显式 `CoreFactJournalEntry`，不捕获 owner closure；它只持有确定性命令元数据、primitive
 资金 posting、dirty-key fact view 和 projection point，materializer 才等待投影并编码完整 Core Fact。Audit Exporter
+异步物化期间，command-level `RuntimeFundsDelta` 可能比对应 `PatchChain` 存活更久；draft 因此保留稳定的
+`RuntimeIdentityRegistry` 作为资金 posting 的资产解析兜底，正常路径仍优先使用 patch-local identity，避免延长整条
+patch chain 生命周期或重新引入 owner 物化。缺失资产必须 fail-fast，不能静默忽略资金 posting。
 查询只返回已完成的连续前缀；`ACK_EXPORT` 作为审计控制命令可以在无关 matcher window 未提交时确认已经物化的连续
 前缀；ACK 裁剪只消费随 outbox entry 保存的 primitive 终态订单 ID，不等待 Core Fact view/materializer，
 也不把审计 ACK 变成交易 owner 的 projection/matching fence。异步物化失败保留为 sticky fatal failure；
