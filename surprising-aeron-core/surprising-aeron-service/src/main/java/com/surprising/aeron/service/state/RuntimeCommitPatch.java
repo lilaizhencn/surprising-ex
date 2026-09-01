@@ -1488,15 +1488,24 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             ArrayList<Long> liquidations = new ArrayList<>();
             ArrayList<Long> triggers = new ArrayList<>();
             for (AccountLaneOwnerGroup group : groups) {
-                group.orders.stream().filter(change -> change.after != null && change.after.status().terminal())
-                        .map(OrderChange::orderId).forEach(orders::add);
-                group.liquidations.stream().filter(change -> change.after != null
-                                && (change.after.status() == CoreLiquidationState.Status.CANCELED
-                                || change.after.status() == CoreLiquidationState.Status.COMPLETED
-                                && change.after.deficitUnits() == 0))
-                        .map(LiquidationChange::liquidationId).forEach(liquidations::add);
-                group.triggerOrders.stream().filter(change -> change.after != null && !change.after.status().open())
-                        .map(TriggerOrderChange::triggerOrderId).forEach(triggers::add);
+                for (OrderChange change : group.orders) {
+                    if (change.after != null && change.after.status().terminal()) {
+                        orders.add(change.orderId);
+                    }
+                }
+                for (LiquidationChange change : group.liquidations) {
+                    if (change.after != null
+                            && (change.after.status() == CoreLiquidationState.Status.CANCELED
+                            || change.after.status() == CoreLiquidationState.Status.COMPLETED
+                            && change.after.deficitUnits() == 0)) {
+                        liquidations.add(change.liquidationId);
+                    }
+                }
+                for (TriggerOrderChange change : group.triggerOrders) {
+                    if (change.after != null && !change.after.status().open()) {
+                        triggers.add(change.triggerOrderId);
+                    }
+                }
             }
             return new TerminalIds(orders, liquidations, triggers);
         }

@@ -5924,12 +5924,11 @@ public final class CoreProbeState implements AutoCloseable {
     private long laneRevisionHash() {
         long hash = 0xcbf29ce484222325L ^ matchingAdapter.topology().topologyHash();
         for (int laneId = 0; laneId < matchingAdapter.topology().accountLaneCount(); laneId++) {
-            var lane = runtimePlaceOrderState.accountLaneById(laneId);
             hash ^= laneId;
             hash *= 0x100000001b3L;
-            hash ^= lane.localStateHash();
+            hash ^= runtimePlaceOrderState.accountLaneLocalStateHashById(laneId);
             hash *= 0x100000001b3L;
-            hash ^= lane.localFundsHash();
+            hash ^= runtimePlaceOrderState.accountLaneLocalFundsHashById(laneId);
             hash *= 0x100000001b3L;
         }
         return hash == 0 ? 1 : hash;

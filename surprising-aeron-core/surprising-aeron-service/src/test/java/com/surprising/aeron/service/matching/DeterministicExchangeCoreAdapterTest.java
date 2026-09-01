@@ -156,7 +156,7 @@ class DeterministicExchangeCoreAdapterTest {
     }
 
     @Test
-    void differentMatcherShardsCanCompleteOutOfSubmissionOrder() {
+    void fixedMatcherShardRejectsOutOfNativeSequenceCompletion() {
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter(false)) {
             CompletableFuture<CoreMatchingResult> firstNative = new CompletableFuture<>();
             CompletableFuture<CoreMatchingResult> secondNative = new CompletableFuture<>();
@@ -170,12 +170,12 @@ class DeterministicExchangeCoreAdapterTest {
             secondNative.complete(nativeResult(2, 2));
             CoreMatchingResult secondResult = second.join();
             firstNative.complete(nativeResult(1, 1));
-            CoreMatchingResult firstResult = first.join();
 
-            assertThat(firstResult.nativeCommand().matcherShardId()).isNotEqualTo(
-                    secondResult.nativeCommand().matcherShardId());
-            assertThat(firstResult.matcherPrefix().before()).isEqualTo(CoreMatchingResult.MatcherPrefix.initialDigest());
+            assertThat(secondResult.nativeCommand().matcherShardId()).isZero();
             assertThat(secondResult.matcherPrefix().before()).isEqualTo(CoreMatchingResult.MatcherPrefix.initialDigest());
+            assertThatThrownBy(first::join)
+                    .hasRootCauseInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("native sequence is not strictly increasing");
         }
     }
 
@@ -282,7 +282,7 @@ class DeterministicExchangeCoreAdapterTest {
         assertThat(decoded.modules().stream()
                 .filter(module -> module.type().name().equals("MATCHING_ENGINE_ROUTER"))
                 .map(module -> module.instanceId()).sorted().toList())
-                .containsExactly(0, 1, 2, 3);
+                .containsExactly(0);
         assertThat(decoded.modules()).zipSatisfy(snapshot.modules(), (actual, expected) -> {
             assertThat(actual.type()).isEqualTo(expected.type());
             assertThat(actual.sequence()).isEqualTo(expected.sequence());

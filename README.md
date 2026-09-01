@@ -687,13 +687,17 @@ mvn -pl surprising-aeron-core/surprising-aeron-service -am test
 API 变化需要重新界定直接受影响消费者。`package` 是默认构建目标；需要发布到本地仓库时显式使用 `install`。跨账户、
 撮合、风控或协议变更必须执行受影响模块测试。
 
-matching 使用 `exchange.core2:exchange-core:0.5.16-emporia` 及其 Chronicle/OpenHFT 传递依赖，必须使用
+matching 使用 `exchange.core2:exchange-core:0.5.17-emporia` 及其 Chronicle/OpenHFT 传递依赖，必须使用
 以下 JVM 参数：
 
 ```text
 --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED
 --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED
 ```
+
+Product Core 固定使用 Aeron `1.53.0`。外部风控已经由 Product Core 完成的订单进入 exchange-core 的
+`MATCHING_ONLY` 直达管线 `Grouping → Matching → Results`，不创建 R1/R2 风险处理器；热路径通过有界关联环提交，
+不创建 exchange-core promise/Future，也不执行 matcher 用户注册。通用 exchange-core 配置仍保持原 R1/R2 与多生产者语义。
 
 ### 单产品线做市与 JFR 压测
 
@@ -785,15 +789,15 @@ Topic、端口、磁盘、监控阈值和故障演练的精确清单待生产 Ru
 
 ### P10 快照与发布契约
 
-- fork 固定为 `exchange-core 0.5.16-emporia`，源码提交
-  `4c4d163b6ba736a43360b325cdd7b9fb8c20648d`，可复现 JAR SHA-256
-  `d4ab72853924edc32069ab7158e7bcc5d374ecc1bcd594df04128ab459732b86`；fork 构建拒绝 dirty
+- fork 固定为 `exchange-core 0.5.17-emporia`，源码提交
+  `a85db2d210c478ec9ba97940db6b48de820f4dd4`，可复现 JAR SHA-256
+  `0f55185e990b9c60e1a48da4171e22210f1def32956549c04ab17535dc3c19be`；fork 构建拒绝 dirty
   worktree，从已认证提交的不可变 `git archive` 编译，并在 JAR 生成后重新认证仓库和内嵌 provenance；
   Aeron service 的 Maven `validate` 阶段同时校验 provenance 与整包 hash。
 - 当前唯一写格式为 command/envelope schema v4、Core Export marker v9、`TradingState v24`、sectioned snapshot v15
   和 matcher snapshot v5；所有旧主版本立即 fail closed，没有 legacy reader。sectioned snapshot 按 laneId 升序保存
   4 个实际 Account Lane state section，matcher section 保存 `matchingEngineCount` 个原生 matcher module 和
-  `riskEngineCount` 个 risk module。
+  `MATCHING_ONLY` 直达模式不生成 risk module。
   恢复只使用 `InitialStateConfiguration.fromSnapshotOnly`，不允许 clean-start、活动订单回放或第二本 FIFO。
 - capture 在单共享 ExchangeCore 与 Core state 的配对 snapshot fence 内完成；存在 pending matching 时精确拒绝快照。恢复在开放流量前执行
   CRC32C、产品线/路由、snapshot ID、Core/matcher sequence、Cluster position、source/outbox digest、

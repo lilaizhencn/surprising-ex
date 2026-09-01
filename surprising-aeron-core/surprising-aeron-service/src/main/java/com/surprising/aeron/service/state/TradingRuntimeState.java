@@ -176,6 +176,26 @@ public final class TradingRuntimeState implements AutoCloseable {
         return onLane(laneId, lane -> laneView(laneId, lane));
     }
 
+    public long accountLaneLocalStateHashById(int laneId) {
+        assertOwner();
+        if (laneId < 0 || laneId >= accountLanes.length) {
+            throw new IllegalArgumentException("invalid laneId");
+        }
+        AccountLaneState lane = accountLanes[laneId];
+        lane.assertOwner();
+        return lane.localStateHash();
+    }
+
+    public long accountLaneLocalFundsHashById(int laneId) {
+        assertOwner();
+        if (laneId < 0 || laneId >= accountLanes.length) {
+            throw new IllegalArgumentException("invalid laneId");
+        }
+        AccountLaneState lane = accountLanes[laneId];
+        lane.assertOwner();
+        return lane.localFundsHash();
+    }
+
     public AccountLaneMetricsSnapshot accountLaneMetricsById(int laneId) {
         assertOwner();
         if (laneId < 0 || laneId >= accountLanes.length) throw new IllegalArgumentException("invalid laneId");

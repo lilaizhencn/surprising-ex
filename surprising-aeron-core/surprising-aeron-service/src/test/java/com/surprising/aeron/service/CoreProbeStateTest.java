@@ -906,7 +906,7 @@ class CoreProbeStateTest {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             CoreLaneMetrics metrics = state.laneMetrics();
 
-            assertThat(metrics.matchingEngineCount()).isEqualTo(4);
+            assertThat(metrics.matchingEngineCount()).isEqualTo(1);
             assertThat(metrics.accountLaneCount()).isEqualTo(4);
             assertThat(metrics.matcherDispatchCapacity()).isEqualTo(4_096);
             assertThat(metrics.matchingCompletionCapacity()).isEqualTo(4_096);

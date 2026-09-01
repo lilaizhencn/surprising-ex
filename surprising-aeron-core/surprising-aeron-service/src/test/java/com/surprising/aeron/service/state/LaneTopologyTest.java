@@ -13,9 +13,9 @@ class LaneTopologyTest {
         LaneTopology topology = LaneTopology.productionDefault();
 
         assertThat(topology.routeVersion()).isEqualTo(3);
-        assertThat(topology.matchingEngineCount()).isEqualTo(4);
-        assertThat(topology.riskEngineCount()).isEqualTo(1);
-        assertThat(topology.matcherShardMask()).isEqualTo(3);
+        assertThat(topology.matchingEngineCount()).isEqualTo(1);
+        assertThat(topology.riskEngineCount()).isZero();
+        assertThat(topology.matcherShardMask()).isZero();
         assertThat(topology.accountLaneCount()).isEqualTo(4);
         assertThat(topology.topologyHash()).isNotZero();
     }
@@ -25,8 +25,8 @@ class LaneTopologyTest {
         LaneTopology topology = LaneTopology.productionDefault();
         Map<String, Integer> symbols = Map.of("BTC-USDT", 101, "ETH-USDT", 202);
 
-        assertThat(topology.matcherShardId(101)).isEqualTo(1);
-        assertThat(topology.matcherShardId(202)).isEqualTo(2);
+        assertThat(topology.matcherShardId(101)).isZero();
+        assertThat(topology.matcherShardId(202)).isZero();
         assertThat(topology.accountLaneId(9_001)).isEqualTo(topology.accountLaneId(9_001));
         assertThat(Long.bitCount(topology.accountLaneMask(9_001))).isEqualTo(1);
         assertThat(topology.symbolRouteHash(symbols)).isNotZero();

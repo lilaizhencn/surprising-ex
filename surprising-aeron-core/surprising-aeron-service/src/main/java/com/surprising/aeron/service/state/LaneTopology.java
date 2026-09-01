@@ -15,8 +15,8 @@ public record LaneTopology(
         int accountLaneQueueCapacity) {
 
     public static final int ROUTE_VERSION = 3;
-    public static final int DEFAULT_MATCHING_ENGINE_COUNT = 4;
-    public static final int DEFAULT_RISK_ENGINE_COUNT = 1;
+    public static final int DEFAULT_MATCHING_ENGINE_COUNT = 1;
+    public static final int DEFAULT_RISK_ENGINE_COUNT = 0;
     public static final int DEFAULT_ACCOUNT_LANE_COUNT = 4;
     public static final long DEFAULT_ACCOUNT_LANE_SEED = 0x6a09e667f3bcc909L;
     public static final int DEFAULT_MATCHER_WINDOW_SIZE = 4_096;
@@ -24,7 +24,7 @@ public record LaneTopology(
 
     public LaneTopology {
         requirePowerOfTwo(matchingEngineCount, 1, 64, "matchingEngineCount");
-        requirePowerOfTwo(riskEngineCount, 1, 64, "riskEngineCount");
+        requirePowerOfTwo(riskEngineCount, 0, 64, "riskEngineCount");
         requirePowerOfTwo(accountLaneCount, 1, Long.SIZE, "accountLaneCount");
         requirePowerOfTwo(matcherWindowSize, 1, 1 << 20, "matcherWindowSize");
         requirePowerOfTwo(matchingCompletionCapacity, 1, 1 << 20, "matchingCompletionCapacity");
@@ -39,7 +39,7 @@ public record LaneTopology(
     }
 
     public static LaneTopology characterization() {
-        return new LaneTopology(ROUTE_VERSION, 1, 1, 0, 1, DEFAULT_ACCOUNT_LANE_SEED,
+        return new LaneTopology(ROUTE_VERSION, 1, 0, 0, 1, DEFAULT_ACCOUNT_LANE_SEED,
                 DEFAULT_MATCHER_WINDOW_SIZE, DEFAULT_QUEUE_CAPACITY, DEFAULT_QUEUE_CAPACITY);
     }
 

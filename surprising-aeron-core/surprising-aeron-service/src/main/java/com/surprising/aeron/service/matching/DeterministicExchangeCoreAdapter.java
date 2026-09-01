@@ -15,10 +15,6 @@ import exchange.core2.core.common.L2MarketData;
 import exchange.core2.core.common.OrderAction;
 import exchange.core2.core.common.OrderType;
 import exchange.core2.core.common.SymbolType;
-import exchange.core2.core.common.api.ApiAddUser;
-import exchange.core2.core.common.api.ApiCancelOrder;
-import exchange.core2.core.common.api.ApiPlaceOrder;
-import exchange.core2.core.common.api.ApiMoveOrder;
 import exchange.core2.core.common.api.ApiPersistState;
 import exchange.core2.core.common.api.binary.BatchAddSymbolsCommand;
 import exchange.core2.core.common.api.reports.OpenOrdersReportQuery;
@@ -56,13 +52,13 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private final Map<Integer, String> symbolNames = new ConcurrentHashMap<>();
     private final Set<Long> users = ConcurrentHashMap.newKeySet();
     private final Map<String, CompletableFuture<Integer>> symbolRegistrations = new ConcurrentHashMap<>();
-    private final Map<Long, CompletableFuture<Void>> userRegistrations = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<Long, SnapshotOperation> snapshotOperations = new ConcurrentHashMap<>();
     private final AtomicReference<CompletableFuture<Void>> submissionTail =
             new AtomicReference<>(CompletableFuture.completedFuture(null));
     private final LaneTopology topology;
     private final AtomicReference<Throwable> matcherFailure = new AtomicReference<>();
     private final MatcherEvidenceLedger matcherEvidence;
+    private final DirectMatcherCompletionRing directCompletions;
     private final AtomicInteger dispatchInFlight = new AtomicInteger();
     private final AtomicInteger dispatchHighWaterMark = new AtomicInteger();
     private final Function<Supplier<CompletableFuture<CommandResultCode>>, CompletableFuture<CommandResultCode>>
@@ -90,6 +86,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                     snapshotPersistence) {
         this.topology = LaneTopology.configured(Boolean.getBoolean("surprising.aeron.p10-characterization"));
         this.matcherEvidence = new MatcherEvidenceLedger(topology);
+        this.directCompletions = new DirectMatcherCompletionRing(topology.matcherWindowSize());
         this.snapshotPersistence = java.util.Objects.requireNonNull(snapshotPersistence, "snapshotPersistence");
         if (startImmediately) {
             start();
@@ -131,6 +128,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             this.topology = snapshot.topology();
             this.matcherEvidence = new MatcherEvidenceLedger(
                     topology, 0, snapshot.matcherShardProgress());
+            this.directCompletions = new DirectMatcherCompletionRing(topology.matcherWindowSize());
             serializationProcessor.importSnapshot(snapshot.modules());
             snapshot.symbols().forEach((symbol, symbolId) -> {
                 String previous = symbolNames.put(symbolId, symbol);
@@ -203,10 +201,10 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             }
             symbolFutures.add(ensureSymbolAsync(symbol));
         }
-        CompletableFuture<?>[] futures = new CompletableFuture<?>[symbolFutures.size() + 1];
-        futures[0] = ensureUserAsync(userId);
+        users.add(userId);
+        CompletableFuture<?>[] futures = new CompletableFuture<?>[symbolFutures.size()];
         for (int index = 0; index < symbolFutures.size(); index++) {
-            futures[index + 1] = symbolFutures.get(index);
+            futures[index] = symbolFutures.get(index);
         }
         return CompletableFuture.allOf(futures);
     }
@@ -327,24 +325,20 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     private CompletableFuture<CoreMatchingResult> placeUnlanedAsync(long userId, CoreMatchingOrder command) {
+        Integer symbolId = symbols.get(command.symbol());
+        users.add(userId);
+        if (symbolId != null) return submitDirectPlace(userId, symbolId, command);
         return ensureSymbolAsync(command.symbol())
-                .thenCombine(ensureUserAsync(userId), (symbolId, ignored) -> symbolId)
-                .thenCompose(symbolId -> {
-                    return api.submitCommandAsyncMatcherResult(ApiPlaceOrder.builder()
-                        .orderId(command.orderId())
-                        .uid(userId)
-                        .symbol(symbolId)
-                        .action(command.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK)
-                        .orderType(orderType(command))
-                        .price(command.matchingPriceTicks())
-                        .reservePrice(command.matchingPriceTicks())
-                        .size(command.quantitySteps()).build());
-                })
-                .thenApply(DeterministicExchangeCoreAdapter::matchingResult);
+                .thenCompose(registered -> submitDirectPlace(userId, registered, command));
     }
 
-    private static CoreMatchingResult matchingResult(exchange.core2.core.common.MatcherResult response) {
-        return CoreMatchingResult.fromNative(response);
+    private CompletableFuture<CoreMatchingResult> submitDirectPlace(
+            long userId, int symbolId, CoreMatchingOrder command) {
+        return submitDirect(correlationId -> api.submitMatcherPlace(
+                correlationId, System.nanoTime(), command.orderId(), 0,
+                command.matchingPriceTicks(), command.matchingPriceTicks(), command.quantitySteps(),
+                command.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
+                orderType(command), symbolId, userId));
     }
 
     private static OrderType orderType(CoreMatchingOrder command) {
@@ -451,12 +445,17 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     private CompletableFuture<CoreMatchingResult> cancelAsync(long userId, long orderId, String symbol) {
-        return ensureSymbolAsync(symbol).thenCompose(symbolId -> ensureUserAsync(userId)
-                .thenCompose(ignored -> {
-                    return api.submitCommandAsyncMatcherResult(ApiCancelOrder.builder()
-                            .orderId(orderId).uid(userId).symbol(symbolId).build());
-                }))
-                .thenApply(DeterministicExchangeCoreAdapter::matchingResult);
+        Integer symbolId = symbols.get(symbol);
+        users.add(userId);
+        if (symbolId != null) return submitDirectCancel(userId, orderId, symbolId);
+        return ensureSymbolAsync(symbol)
+                .thenCompose(registered -> submitDirectCancel(userId, orderId, registered));
+    }
+
+    private CompletableFuture<CoreMatchingResult> submitDirectCancel(
+            long userId, long orderId, int symbolId) {
+        return submitDirect(correlationId -> api.submitMatcherCancel(
+                correlationId, System.nanoTime(), orderId, symbolId, userId));
     }
 
     public CompletableFuture<CoreMatchingResult> cancelAsyncForContinuation(long userId, long orderId,
@@ -466,26 +465,15 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     public CompletableFuture<CoreMatchingResult> replaceOrderAsync(long userId, long orderId, String symbol,
                                                                     CoreMatchingOrder replacement) {
-        return ensureSymbolAsync(symbol).thenCompose(symbolId -> ensureUserAsync(userId)
-                .thenCompose(ignored -> {
-                    CompletableFuture<exchange.core2.core.common.MatcherResult> cancel =
-                            api.submitCommandAsyncMatcherResult(ApiCancelOrder.builder()
-                            .orderId(orderId).uid(userId).symbol(symbolId).build());
-                    return cancel.thenCompose(cancelResponse -> {
-                        CoreMatchingResult cancelResult = matchingResult(cancelResponse);
+        users.add(userId);
+        return ensureSymbolAsync(symbol).thenCompose(symbolId ->
+                    submitDirectCancel(userId, orderId, symbolId).thenCompose(cancelResult -> {
                         if (!cancelResult.accepted()) {
                             return CompletableFuture.completedFuture(cancelResult);
                         }
                         return ensureSymbolAsync(replacement.symbol()).thenCompose(replacementSymbolId -> {
-                            CompletableFuture<exchange.core2.core.common.MatcherResult> place =
-                                    api.submitCommandAsyncMatcherResult(ApiPlaceOrder.builder()
-                                            .orderId(replacement.orderId()).uid(userId).symbol(replacementSymbolId)
-                                            .action(replacement.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK)
-                                            .orderType(orderType(replacement)).price(replacement.matchingPriceTicks())
-                                            .reservePrice(replacement.matchingPriceTicks())
-                                            .size(replacement.quantitySteps()).build());
-                            return place.thenApply(response -> {
-                                CoreMatchingResult result = matchingResult(response);
+                            return submitDirectPlace(userId, replacementSymbolId, replacement)
+                                    .thenApply(result -> {
                                 List<CoreCancellationResult> cancellations = List.of(
                                         new CoreCancellationResult(orderId, true, cancelResult.resultCode()));
                                 List<exchange.core2.core.common.MatcherResult.MatcherEvent> events =
@@ -497,19 +485,22 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                                         result.nativeMatcherResult(), events, result.marketData());
                             });
                         });
-                    });
-                }));
+                    }));
     }
 
     public CompletableFuture<CoreMatchingResult> replaceAsync(long userId, long orderId, String symbol,
                                                                long newPriceTicks) {
-        return ensureSymbolAsync(symbol).thenCompose(symbolId -> ensureUserAsync(userId)
-                .thenCompose(ignored -> {
-                    CompletableFuture<exchange.core2.core.common.MatcherResult> submitted = api.submitCommandAsyncMatcherResult(ApiMoveOrder.builder()
-                            .orderId(orderId).uid(userId).symbol(symbolId).newPrice(newPriceTicks).build());
-                    return submitted;
-                }))
-                .thenApply(DeterministicExchangeCoreAdapter::matchingResult);
+        Integer symbolId = symbols.get(symbol);
+        users.add(userId);
+        if (symbolId != null) return submitDirectMove(userId, orderId, symbolId, newPriceTicks);
+        return ensureSymbolAsync(symbol)
+                .thenCompose(registered -> submitDirectMove(userId, orderId, registered, newPriceTicks));
+    }
+
+    private CompletableFuture<CoreMatchingResult> submitDirectMove(
+            long userId, long orderId, int symbolId, long newPriceTicks) {
+        return submitDirect(correlationId -> api.submitMatcherMove(
+                correlationId, System.nanoTime(), newPriceTicks, orderId, symbolId, userId));
     }
 
     public CompletableFuture<Integer> orderBooksStateHashAsync() {
@@ -742,6 +733,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 .performanceCfg(PerformanceConfiguration.latencyPerformanceBuilder()
                         .matchingEnginesNum(topology.matchingEngineCount())
                         .riskEnginesNum(topology.riskEngineCount())
+                        .directMatchingOnlyPipeline(true)
                         .msgsInGroupLimit(Math.max(1,
                                 Integer.getInteger("surprising.aeron.matcher-group-size", 256)))
                         .maxGroupDurationNs(Math.max(1,
@@ -754,6 +746,9 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                         .build())
                 .build();
         core = ExchangeCore.builder().exchangeConfiguration(configuration).resultsConsumer((command, sequence) -> {
+            if (command.correlationId != 0) {
+                directCompletions.complete(command.correlationId, sequence, command);
+            }
         }).build();
         core.startup();
         api = core.getApi();
@@ -790,17 +785,15 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         });
     }
 
-    private CompletableFuture<Void> ensureUserAsync(long userId) {
-        if (users.contains(userId)) return CompletableFuture.completedFuture(null);
-        return userRegistrations.computeIfAbsent(userId, key ->
-                submitOrdered(() -> api.submitCommandAsync(ApiAddUser.builder().uid(key).build())).thenApply(result -> {
-                    if (result != CommandResultCode.SUCCESS
-                            && result != CommandResultCode.USER_MGMT_USER_ALREADY_EXISTS) {
-                        throw new IllegalStateException("failed to add exchange-core user " + key + ": " + result);
-                    }
-                    users.add(key);
-                    return null;
-                }));
+    private CompletableFuture<CoreMatchingResult> submitDirect(
+            java.util.function.LongConsumer submission) {
+        DirectMatcherCompletionRing.Pending pending = directCompletions.reserve();
+        try {
+            submission.accept(pending.correlationId());
+        } catch (Throwable failure) {
+            directCompletions.fail(pending, failure);
+        }
+        return pending.future();
     }
 
     private int stableSymbolId(String symbol) {
@@ -875,7 +868,6 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             core = null;
             api = null;
             symbolRegistrations.clear();
-            userRegistrations.clear();
             submissionTail.set(CompletableFuture.completedFuture(null));
         }
     }

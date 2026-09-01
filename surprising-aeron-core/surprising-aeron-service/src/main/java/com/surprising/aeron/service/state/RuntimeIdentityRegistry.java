@@ -2,24 +2,27 @@ package com.surprising.aeron.service.state;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class RuntimeIdentityRegistry implements RuntimeCommitPatch.IdentityView {
 
-    private final Map<String, Integer> assetIds = new ConcurrentHashMap<>();
+    // Forward and allocation indexes are owner-only. Inverse indexes remain
+    // concurrent because asynchronous Core Fact materializers resolve them.
+    private final Map<String, Integer> assetIds = new HashMap<>();
     private final Map<Integer, String> assets = new ConcurrentHashMap<>();
-    private final Map<String, Integer> symbolIds = new ConcurrentHashMap<>();
+    private final Map<String, Integer> symbolIds = new HashMap<>();
     private final Map<Integer, String> symbols = new ConcurrentHashMap<>();
-    private final Map<ClientIdentity, Long> clientKeys = new ConcurrentHashMap<>();
+    private final Map<ClientIdentity, Long> clientKeys = new HashMap<>();
     private final Map<Long, ClientIdentity> clients = new ConcurrentHashMap<>();
-    private final Map<Long, Long> clientAllocationKeys = new ConcurrentHashMap<>();
-    private final Map<Long, Long> clientKeyAllocations = new ConcurrentHashMap<>();
-    private final Map<PositionIdentity, Long> positionKeys = new ConcurrentHashMap<>();
+    private final Map<Long, Long> clientAllocationKeys = new HashMap<>();
+    private final Map<Long, Long> clientKeyAllocations = new HashMap<>();
+    private final Map<PositionIdentity, Long> positionKeys = new HashMap<>();
     private final Map<Long, PositionIdentity> positions = new ConcurrentHashMap<>();
-    private final Map<Long, Long> positionAllocationKeys = new ConcurrentHashMap<>();
-    private final Map<Long, Long> positionKeyAllocations = new ConcurrentHashMap<>();
+    private final Map<Long, Long> positionAllocationKeys = new HashMap<>();
+    private final Map<Long, Long> positionKeyAllocations = new HashMap<>();
     private int nextAssetId;
     private int nextSymbolId;
     private long nextClientKey = 1;

@@ -4,7 +4,7 @@
 端口空间、Archive 和数据卷；一个逻辑 Core 固定由三个 Member 组成，并管理该变体全部 symbol。
 
 W1/W2 已完成单一可执行盘口改造：`TradingCoreRuntime` 是 Core 单写边界，撮合命令只进入 fork 的
-exchange-core 0.5.16-emporia；`TradingCoreState` 不再保存 `CoreBookState` 或任何 FIFO priority map。
+exchange-core 0.5.17-emporia；`TradingCoreState` 不再保存 `CoreBookState` 或任何 FIFO priority map。
 matcher 恢复导入 Aeron 配对 snapshot 中全部原生 `ME[0..N)/RE0`，通过 `fromSnapshotOnly` 启动，不逐单回放。
 
 部署基线不按 margin mode 或热点 symbol 分 Core：CROSS 和 ISOLATED 都由同一个 ProductLine Core 裁决；
@@ -125,7 +125,7 @@ P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣
   外部提交时间、`correlationId` 和 route v3；旧 envelope/route 不再接受。
 - Instrument Provider 通过版本化 `UpsertInstrumentCommand` 下发保证金率、risk brackets、最大杠杆和
   最大持仓名义价值；CoreInstrumentState 是运行时唯一参数副本，Risk Provider 只能查询 Core 快照。
-- exchange-core 0.5.16-emporia 是唯一可执行订单簿（sole executable order book），独占价格树/FIFO；`GTX` 使用原生
+- exchange-core 0.5.17-emporia 是唯一可执行订单簿（sole executable order book），独占价格树/FIFO；`GTX` 使用原生
   post-only 语义，外层不得查 book 后模拟，也不得建立并行可执行 book。
   Core 的 `CoreOrderState` 只保存业务元数据和活动状态，不保存可重建 FIFO 的 priority sequence。
 - adapter 固定使用 `RiskProcessingMode.MATCHING_ONLY` 并禁用 exchange-core margin trading；内部 user/symbol/risk module 是需随 matcher snapshot 恢复的技术状态，不是业务资金、持仓或保证金权威。
@@ -313,15 +313,17 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
 
 ## W1/W2 原生快照契约
 
-- fork 坐标为 `exchange.core2:exchange-core:0.5.16-emporia`，Git SHA
-  `4c4d163b6ba736a43360b325cdd7b9fb8c20648d`，可复现 JAR SHA-256
-  `d4ab72853924edc32069ab7158e7bcc5d374ecc1bcd594df04128ab459732b86`；fork 只允许 clean
+- fork 坐标为 `exchange.core2:exchange-core:0.5.17-emporia`，Git SHA
+  `a85db2d210c478ec9ba97940db6b48de820f4dd4`，可复现 JAR SHA-256
+  `0f55185e990b9c60e1a48da4171e22210f1def32956549c04ab17535dc3c19be`；fork 只允许 clean
   worktree 构建，从该提交的不可变 `git archive` 编译，并在 JAR 生成后重新认证仓库和内嵌 SHA；
   service 的 Maven `validate` 同时校验 provenance 与整包 hash。
-  matcher 内部启用事件链池化，池对象只在 exchange-core 内复用；对外 `MatcherResult` 为不可变值，普通交易热路径不执行全局状态报告。
+  Aeron 依赖固定为 `1.53.0`。matcher 内部使用 `Grouping → Matching → Results` 的 `MATCHING_ONLY`
+  直达管线，不创建 R1/R2 风险处理器；热路径用有界 correlation ring 接收不可变 `MatcherResult`，不进入
+  exchange-core promises Map、不创建其 Future，也不提交 matcher 用户注册命令。事件链池对象只在 exchange-core 内复用；普通交易热路径不执行全局状态报告。
   开放订单报告和 Core 对账均为 O(活动订单数)，不做排序。
-- `Trading snapshot v24` 是唯一外层交易快照写格式；matcher snapshot v5 保存全部
-  `MATCHING_ENGINE_ROUTER/[0..N)`、`RISK_ENGINE/[0..R)`，并按 `[-1, 0..N)` 保存 control/native shard 的独立
+- `Trading snapshot v24` 是唯一外层交易快照写格式；matcher snapshot v5 在直达模式只保存
+  `MATCHING_ENGINE_ROUTER/[0..N)`，不生成 `RISK_ENGINE` module，并按 `[-1, 0..N)` 保存 control/native shard 的独立
   evidence sequence 与 prefix。`sectioned snapshot v17` 按相同 Core/book prefix 拆分载荷，
   并保存按 laneId 升序的实际 Account Lane state section；三个 Member 必须运行完全相同的 topology、fork、配置和 schema。
 - capture 在单共享 ExchangeCore 与 Core state 的配对 snapshot fence 内等待全部 native shard module 和 callback；
