@@ -21,8 +21,8 @@ class RuntimeCommitPatchTest {
         RuntimeCommitPatch reversed = populatedBuilder(true).seal(metadata());
 
         assertThat(first).isEqualTo(reversed);
-        assertThat(first.ownerGroups()).extracting(RuntimeCommitPatch.OwnerGroup::ownerOrder)
-                .containsExactly(1, 3, Integer.MAX_VALUE);
+        assertThat(first.previousCoreSequence()).isEqualTo(first.previousProjectionSequence());
+        assertThat(first.coreSequence()).isEqualTo(first.projectionSequence());
         assertThat(first.laneMask()).isEqualTo((1L << 1) | (1L << 3));
         assertThat(first.accountLaneGroups()).extracting(RuntimeCommitPatch.AccountLaneOwnerGroup::laneId)
                 .containsExactly(1, 3);
@@ -56,10 +56,10 @@ class RuntimeCommitPatchTest {
 
     @Test
     void rejectsInconsistentLaneMaskAndSequence() {
-        assertThatThrownBy(() -> RuntimeCommitPatch.builder(ProductLine.LINEAR_PERPETUAL, 10, 12, 3, 4))
+        assertThatThrownBy(() -> RuntimeCommitPatch.builder(ProductLine.LINEAR_PERPETUAL, 10, 12))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("contiguous");
-        assertThatThrownBy(() -> RuntimeCommitPatch.builder(ProductLine.LINEAR_PERPETUAL, 0, 0, 0, 1))
+        assertThatThrownBy(() -> RuntimeCommitPatch.builder(ProductLine.LINEAR_PERPETUAL, 0, 0))
                 .isInstanceOf(IllegalArgumentException.class);
 
         RuntimeCommitPatch.Builder builder = baseBuilder();
@@ -100,7 +100,7 @@ class RuntimeCommitPatchTest {
         builder.laneMask(1L << 1);
         RuntimeCommitPatch first = builder.seal(metadata(1L << 1));
 
-        builder.reset().sequences(40, 41, 8, 9)
+        builder.reset().sequences(40, 41)
                 .matcherTransition(new CoreMatcherTransition(1, 0, 6, 8, 90, 101));
         builder.recordUser(1, null, user(8, 1));
         builder.laneMask(1L << 1);
@@ -135,7 +135,7 @@ class RuntimeCommitPatchTest {
                 .extracting(RuntimeCommitPatch.UserChange::userId)
                 .containsExactlyElementsOf(java.util.stream.LongStream.rangeClosed(1, 64).boxed().toList());
 
-        ascending.reset().sequences(40, 41, 8, 9)
+        ascending.reset().sequences(40, 41)
                 .matcherTransition(new CoreMatcherTransition(1, 0, 6, 8, 90, 101));
         ascending.recordUser(1, null, user(100, 1));
         ascending.laneMask(1L << 1);
@@ -257,7 +257,7 @@ class RuntimeCommitPatchTest {
         int symbolId = identities.symbolId("BTC-USDT");
         OrderRuntime order = new OrderRuntime(71, 7, symbolId, 2);
         RuntimeCommitPatch.Builder builder = RuntimeCommitPatch.builder(
-                ProductLine.LINEAR_PERPETUAL, 0, 1, 0, 1)
+                ProductLine.LINEAR_PERPETUAL, 0, 1)
                 .matcherTransition(CoreMatcherTransition.unchanged(0, 0));
         builder.recordUser(1, null, user(7, 1));
         CoreOrderState businessOrder = RuntimeStateMaterializer.orderSnapshot(order, identities);
@@ -295,7 +295,7 @@ class RuntimeCommitPatchTest {
         long firstPositionKey = identities.positionKey(7, "BTC-USDT:LONG");
         long secondPositionKey = identities.positionKey(9, "BTC-USDT:SHORT");
         RuntimeCommitPatch.Builder builder = RuntimeCommitPatch.builder(
-                ProductLine.LINEAR_PERPETUAL, 0, 1, 0, 1)
+                ProductLine.LINEAR_PERPETUAL, 0, 1)
                 .matcherTransition(CoreMatcherTransition.unchanged(0, 0));
         builder.recordUser(1, null, user(9, 1));
         builder.recordUser(1, null, user(7, 1));
@@ -383,8 +383,8 @@ class RuntimeCommitPatchTest {
         assertThat(patch.terminalIds().triggerOrderIds()).containsExactly(8L);
         assertThat(patch.previousCoreSequence()).isEqualTo(40);
         assertThat(patch.coreSequence()).isEqualTo(41);
-        assertThat(patch.previousProjectionSequence()).isEqualTo(8);
-        assertThat(patch.projectionSequence()).isEqualTo(9);
+        assertThat(patch.previousProjectionSequence()).isEqualTo(40);
+        assertThat(patch.projectionSequence()).isEqualTo(41);
     }
 
     private static RuntimeCommitPatch.Builder populatedBuilder(boolean reverse) {
@@ -414,7 +414,7 @@ class RuntimeCommitPatchTest {
     }
 
     private static RuntimeCommitPatch.Builder baseBuilder() {
-        return RuntimeCommitPatch.builder(ProductLine.LINEAR_PERPETUAL, 40, 41, 8, 9)
+        return RuntimeCommitPatch.builder(ProductLine.LINEAR_PERPETUAL, 40, 41)
                 .matcherTransition(new CoreMatcherTransition(1, 0, 6, 8, 90, 101));
     }
 

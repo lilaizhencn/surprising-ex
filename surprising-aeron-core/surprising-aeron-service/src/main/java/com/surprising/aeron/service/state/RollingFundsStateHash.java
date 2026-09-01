@@ -303,10 +303,8 @@ public final class RollingFundsStateHash {
         if (patch == null || patch.productLine().ordinal() != productLine) {
             throw new IllegalArgumentException("invalid funds hash commit");
         }
-        if (lastCoreSequence != Long.MIN_VALUE
-                && (patch.previousCoreSequence() < lastCoreSequence
-                || patch.coreSequence() <= lastCoreSequence)) {
-            throw new IllegalArgumentException("non-monotonic funds hash commit sequence: last "
+        if (lastCoreSequence != Long.MIN_VALUE && patch.previousCoreSequence() != lastCoreSequence) {
+            throw new IllegalArgumentException("non-contiguous funds hash commit sequence: last "
                     + lastCoreSequence + ", previous " + patch.previousCoreSequence()
                     + ", current " + patch.coreSequence());
         }

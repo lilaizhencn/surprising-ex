@@ -113,6 +113,22 @@ class TradingRuntimeStateTest {
     }
 
     @Test
+    void returnedBalanceIsDetachedFromTheLaneOwnedAuthoritativeBalance() throws InterruptedException {
+        LaneTopology topology = LaneTopology.productionDefault();
+        TradingRuntimeState state = new TradingRuntimeState(topology);
+        long userId = userForLane(topology, 0);
+        state.putUser(new UserRuntime(userId));
+        state.putBalance(new BalanceRuntime(userId, 3, 1_000, 0));
+        BalanceRuntime retained = state.balance(userId, 3);
+        Thread other = new Thread(() -> retained.credit(1));
+        other.start();
+        other.join();
+
+        assertThat(retained.availableUnits()).isEqualTo(1_001);
+        assertThat(state.balance(userId, 3).availableUnits()).isEqualTo(1_000);
+    }
+
+    @Test
     void retainedTreasuryReferenceStillEnforcesRuntimeOwner() throws InterruptedException {
         TradingRuntimeState state = new TradingRuntimeState();
         TreasuryRuntime treasury = state.treasury();
@@ -667,7 +683,7 @@ class TradingRuntimeStateTest {
         long changedUser = userForLane(topology, 0);
         state.putUser(new UserRuntime(changedUser));
         TradingRuntimeState.PreparedCommit prepared = state.prepareCommitPatch(
-                1, 0, 1, identities, 0,
+                1, identities, 0,
                 com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0),
                 1L << 1, 0, 0, 0, 0, true);
 
@@ -695,7 +711,7 @@ class TradingRuntimeStateTest {
         state.removePosition(positionKey, 7);
 
         assertThat(state.currentPatchPositionBefore(positionKey)).isSameAs(open);
-        var prepared = state.prepareCommitPatch(1, 0, 1, identities, 0,
+        var prepared = state.prepareCommitPatch(1, identities, 0,
                 com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0), 0,
                 0, 0, 0, 0, true);
         RuntimeCommitPatch.PreparedChanges changes = prepared.prepareChanges();
@@ -812,12 +828,15 @@ class TradingRuntimeStateTest {
             UserRuntime user = new UserRuntime(userId);
             revisions.add(user.revision());
             state.putUser(user);
+            state.putBalance(new BalanceRuntime(userId, 3, 1_000 + laneId, 0));
         }
         state.startAccountLanes();
         try {
             Object[] owners = state.executeLifecycleSettlements(users, Long::longValue,
                     laneId -> {
                         state.advanceUserRevision(users.get(laneId));
+                        assertThat(state.balance(users.get(laneId), 3).availableUnits())
+                                .isEqualTo(1_000 + laneId);
                         return Thread.currentThread().getName();
                     });
 

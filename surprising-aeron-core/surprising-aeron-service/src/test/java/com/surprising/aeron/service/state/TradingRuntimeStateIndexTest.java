@@ -120,7 +120,7 @@ class TradingRuntimeStateIndexTest {
     private static RuntimeCommitPatch capture(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                               TradingCoreState before, TradingCoreState after, long sequence) {
         TradingRuntimeState.PreparedCommit prepared = runtime.prepareCommitPatch(
-                sequence, sequence - 1, sequence, identities,
+                sequence, identities,
                 before.revision(), com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0), 0,
                 before.businessStateHash(), after.businessStateHash(),
                 RollingFundsStateHash.compute(before), RollingFundsStateHash.compute(after), true);

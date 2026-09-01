@@ -354,8 +354,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new IllegalArgumentException("invalid account lane mutation");
         }
         Object[] results = laneMutationResultsScratch;
+        java.util.Arrays.fill(results, null);
         if (selectedLaneMask == 0) {
-            for (int laneId = 0; laneId < results.length; laneId++) results[laneId] = null;
             return results;
         }
         if (workItems == 0) throw new IllegalArgumentException("account lane mutation has no work");
@@ -363,10 +363,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (!allowParallel || selectedCount < 2 || workItems < PARALLEL_LIFECYCLE_MIN_ITEMS
                 || !accountLanesStarted) {
             for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-                if ((selectedLaneMask & 1L << laneId) == 0) {
-                    results[laneId] = null;
-                    continue;
-                }
+                if ((selectedLaneMask & 1L << laneId) == 0) continue;
                 int currentLaneId = laneId;
                 results[laneId] = inLaneCommandScope(accountLanes[laneId],
                         ignored -> operation.apply(currentLaneId));
@@ -376,10 +373,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         long[] startedNanos = laneMutationStartedNanosScratch;
         long submittedLaneMask = 0;
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            if ((selectedLaneMask & 1L << laneId) == 0) {
-                results[laneId] = null;
-                continue;
-            }
+            if ((selectedLaneMask & 1L << laneId) == 0) continue;
             AccountLaneState lane = accountLanes[laneId];
             lane.releaseOwner();
             accountLaneQueueHighWaterMarks[laneId] = Math.max(accountLaneQueueHighWaterMarks[laneId], 1);
@@ -401,33 +395,29 @@ public final class TradingRuntimeState implements AutoCloseable {
             } catch (RuntimeException failure) {
                 task.failSubmission(failure);
                 lane.bindOwner();
-                awaitAndRebindLaneMutations(submittedLaneMask);
+                try {
+                    completeLaneMutations(submittedLaneMask, results, startedNanos);
+                } catch (RuntimeException submittedFailure) {
+                    failure.addSuppressed(submittedFailure);
+                }
                 throw failure;
             }
         }
+        completeLaneMutations(submittedLaneMask, results, startedNanos);
+        return results;
+    }
+
+    private void completeLaneMutations(long laneMask, Object[] results, long[] startedNanos) {
         RuntimeException failure = null;
-        for (int laneId = 0; laneId < laneMutationTasks.length; laneId++) {
-            if ((selectedLaneMask & 1L << laneId) == 0) continue;
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            if ((laneMask & 1L << laneId) == 0) continue;
             try {
                 results[laneId] = laneMutationTasks[laneId].await();
                 recordLaneOperation(laneId, AccountLaneOperationType.SETTLEMENT,
                         System.nanoTime() - startedNanos[laneId]);
             } catch (RuntimeException laneFailure) {
-                failure = laneFailure;
-                break;
-            }
-        }
-        awaitAndRebindLaneMutations(selectedLaneMask);
-        if (failure != null) throw failure;
-        return results;
-    }
-
-    private void awaitAndRebindLaneMutations(long laneMask) {
-        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            if ((laneMask & 1L << laneId) == 0) continue;
-            try {
-                laneMutationTasks[laneId].await();
-            } catch (RuntimeException ignored) {
+                if (failure == null) failure = laneFailure;
+                else failure.addSuppressed(laneFailure);
             }
         }
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
@@ -436,6 +426,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 flushPublishedChanges(laneId);
             }
         }
+        if (failure != null) throw failure;
     }
 
     @FunctionalInterface
@@ -622,7 +613,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
 
         private void prepare(AccountLaneState lane, java.util.function.IntFunction<Object> operation) {
-            if (!completed) throw new IllegalStateException("lifecycle lane task is still active");
+            if (!completed) throw new IllegalStateException("account lane task is still active");
             this.lane = lane;
             this.operation = operation;
             result = null;
@@ -658,10 +649,10 @@ public final class TradingRuntimeState implements AutoCloseable {
                 if (interrupted) Thread.currentThread().interrupt();
             }
             if (interrupted) {
-                throw new IllegalStateException("lifecycle lane settlement was interrupted");
+                throw new IllegalStateException("account lane mutation was interrupted");
             }
             if (failure instanceof RuntimeException runtimeFailure) throw runtimeFailure;
-            if (failure != null) throw new IllegalStateException("lifecycle lane settlement failed", failure);
+            if (failure != null) throw new IllegalStateException("account lane mutation failed", failure);
             return result;
         }
 
@@ -2772,8 +2763,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         return new LongHashSet(changedFeePolicies);
     }
 
-    public PreparedCommit prepareCommitPatch(long projectionSequence,
-                                                  long previousCoreSequence, long coreSequence,
+    public PreparedCommit prepareCommitPatch(long sequence,
                                                   RuntimeIdentityRegistry identities,
                                                   long previousRevision,
                                                   CoreMatcherTransition matcherTransition,
@@ -2784,8 +2774,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                                                   long fundsStateHash,
                                                   boolean externalAdjustment) {
         assertOwner();
-        if (projectionSequence <= 0 || previousCoreSequence < 0 || coreSequence <= 0
-                || identities == null || previousRevision < 0
+        if (sequence <= 0 || identities == null || previousRevision < 0
                 || matcherTransition == null) {
             throw new IllegalArgumentException("invalid runtime commit patch capture");
         }
@@ -2794,8 +2783,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new IllegalArgumentException("invalid runtime commit lane mask");
         }
         RuntimeCommitPatch.Builder builder = activePatchBuilder
-                .sequences(previousCoreSequence, coreSequence,
-                        projectionSequence - 1, projectionSequence)
+                .sequences(Math.subtractExact(sequence, 1), sequence)
                 .matcherTransition(matcherTransition);
         for (long userId : changedUsers.toArray()) {
             LongObjectHashMap<UserRuntime> capturedUsers =

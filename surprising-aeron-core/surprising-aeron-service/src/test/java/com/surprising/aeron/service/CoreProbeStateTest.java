@@ -2799,7 +2799,7 @@ class CoreProbeStateTest {
         for (int entry = 0; entry < 1_024; entry++) {
             sequence++;
             var builder = com.surprising.aeron.service.state.RuntimeCommitPatch.builder(
-                    state.productLine(), sequence - 1, sequence, sequence - 1, sequence)
+                    state.productLine(), sequence - 1, sequence)
                     .matcherTransition(com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0));
             var patch = builder.seal(
                     new com.surprising.aeron.service.state.RuntimeCommitPatch.SealMetadata(
@@ -2987,7 +2987,7 @@ class CoreProbeStateTest {
             com.surprising.aeron.service.state.RuntimeIdentityRegistry identities, CoreMessage command) {
         int assetId = identities.assetId("USDT");
         var builder = com.surprising.aeron.service.state.RuntimeCommitPatch.builder(
-                        ProductLine.LINEAR_PERPETUAL, 0, 1, 0, 1)
+                        ProductLine.LINEAR_PERPETUAL, 0, 1)
                 .matcherTransition(com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0))
                 .addFundsPosting(new com.surprising.aeron.service.state.RuntimeCommitPatch.FundsPosting(assetId,
                         com.surprising.aeron.service.state.FundsPosting.OwnerKind.USER, 1,
@@ -3027,7 +3027,7 @@ class CoreProbeStateTest {
             com.surprising.aeron.service.state.OrderRuntime after,
             long previousSequence, long sequence) {
         var builder = com.surprising.aeron.service.state.RuntimeCommitPatch.builder(
-                        ProductLine.LINEAR_PERPETUAL, previousSequence, sequence, previousSequence, sequence)
+                        ProductLine.LINEAR_PERPETUAL, previousSequence, sequence)
                 .matcherTransition(com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0));
         var businessBefore = before == null ? null
                 : com.surprising.aeron.service.state.RuntimeStateMaterializer.orderSnapshot(before, identities);

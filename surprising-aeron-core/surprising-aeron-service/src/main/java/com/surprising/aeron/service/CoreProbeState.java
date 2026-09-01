@@ -5284,38 +5284,58 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private void projectSnapshotNow(long committedLaneMask) {
-        long projectionSequence = Math.incrementExact(runtimeProjectionJournal.publishedSequence());
-        long previousBusinessStateHash = cachedBusinessStateHash;
-        long previousFundsStateHash = rollingFundsStateHash.value();
-        com.surprising.aeron.service.state.TradingRuntimeState.PreparedCommit preparedCommit;
-        com.surprising.aeron.service.state.RuntimeCommitPatch.PreparedChanges preparedChanges = null;
-        com.surprising.aeron.service.state.RollingBusinessStateHash.HashTransition businessTransition = null;
-        com.surprising.aeron.service.state.RollingFundsStateHash.HashTransition fundsTransition = null;
-        com.surprising.aeron.service.state.RuntimeCommitPatch commit = null;
-        CoreAdmissionReservation.FactPermit factPermit = null;
-        CoreExportState.PatchChain nextFactPatchChain = null;
-        UUID factCommandId = null;
-        boolean indexesApplied = false;
-        boolean retentionOnly = currentAdmission == null;
-        long previousCoreSequence = Math.subtractExact(projectionSequence, 1);
-        long businessCommitSequence = rollingBusinessStateHash.coreSequence();
-        if (rollingFundsStateHash.coreSequence() != businessCommitSequence) {
-            throw new IllegalStateException("business and funds commit sequence differ");
+        new OwnerCommitTransaction(committedLaneMask).execute();
+    }
+
+    private final class OwnerCommitTransaction {
+        private final long committedLaneMask;
+        private final long sequence = Math.incrementExact(runtimeProjectionJournal.publishedSequence());
+        private final long previousSequence = Math.subtractExact(sequence, 1);
+        private final long previousBusinessStateHash = cachedBusinessStateHash;
+        private final long previousFundsStateHash = rollingFundsStateHash.value();
+        private com.surprising.aeron.service.state.RuntimeCommitPatch.PreparedChanges preparedChanges;
+        private com.surprising.aeron.service.state.RollingBusinessStateHash.HashTransition businessTransition;
+        private com.surprising.aeron.service.state.RollingFundsStateHash.HashTransition fundsTransition;
+        private com.surprising.aeron.service.state.RuntimeCommitPatch commit;
+        private CoreAdmissionReservation.FactPermit factPermit;
+        private CoreExportState.PatchChain nextFactPatchChain;
+        private UUID factCommandId;
+        private boolean indexesApplied;
+
+        private OwnerCommitTransaction(long committedLaneMask) {
+            this.committedLaneMask = committedLaneMask;
         }
-        if (businessCommitSequence != Long.MIN_VALUE && businessCommitSequence != previousCoreSequence) {
-            throw new IllegalStateException("rolling hash and projection commit sequence differ");
+
+        private void execute() {
+            requireCanonicalSequence();
+            try {
+                prepareAndPublish();
+            } catch (RuntimeException failure) {
+                rollback(failure);
+                throw failure;
+            }
+            finish();
         }
-        long coreSequence = projectionSequence;
-        try {
+
+        private void requireCanonicalSequence() {
+            long businessSequence = rollingBusinessStateHash.coreSequence();
+            if (rollingFundsStateHash.coreSequence() != businessSequence) {
+                throw new IllegalStateException("business and funds commit sequence differ");
+            }
+            if (businessSequence != Long.MIN_VALUE && businessSequence != previousSequence) {
+                throw new IllegalStateException("rolling hash and projection commit sequence differ");
+            }
+        }
+
+        private void prepareAndPublish() {
             commitFaultInjector.inject("preflight");
             if (currentAdmission == null && currentRetentionAdmission == null
                     || activeFactCommand == null || activeFactFingerprint == null) {
                 throw new IllegalStateException("Core Fact metadata must be admitted before runtime mutation");
             }
             if (currentAdmission != null) factPermit = currentAdmission.reserveFactPatch();
-            preparedCommit = runtimePlaceOrderState.prepareCommitPatch(
-                    projectionSequence, previousCoreSequence, coreSequence,
-                    runtimePlaceOrderIdentities,
+            var preparedCommit = runtimePlaceOrderState.prepareCommitPatch(
+                    sequence, runtimePlaceOrderIdentities,
                     runtimePatchRevision, commandMatcherTransition, committedLaneMask,
                     previousBusinessStateHash, previousBusinessStateHash,
                     previousFundsStateHash, previousFundsStateHash, commandExternalAdjustment);
@@ -5328,22 +5348,20 @@ public final class CoreProbeState implements AutoCloseable {
             var factMetadata = new com.surprising.aeron.service.state.RuntimeCommitPatch.CoreFactMetadata(
                     activeFactCommand.header().commandId(), activeFactFingerprint,
                     activeFactCommand.header().messageType().wireCode(), activeFactCommand.header().userId(),
-                    ResponseStatus.APPLIED, CoreResultCode.NONE, activeFactAppliedCommandCount(retentionOnly),
-                    currentClusterPosition,
+                    ResponseStatus.APPLIED, CoreResultCode.NONE,
+                    activeFactAppliedCommandCount(currentAdmission == null), currentClusterPosition,
                     activeFactTopologyHash, activeFactLaneRevisionHash, commandExternalAdjustment);
             var baseMetadata = preparedCommit.metadata();
             preparedChanges = preparedCommit.builder().prepare(
-                            new com.surprising.aeron.service.state.RuntimeCommitPatch.PrepareMetadata(
-                                    baseMetadata.beforeRevision(), baseMetadata.afterRevision(),
-                                    baseMetadata.beforeBusinessStateHash(), baseMetadata.beforeFundsStateHash(),
-                                    baseMetadata.laneMask(), factMetadata, baseMetadata.externalAdjustment()),
-                            preparedCommit.identities());
-            long nextBusinessStateHash;
-            long nextFundsStateHash;
+                    new com.surprising.aeron.service.state.RuntimeCommitPatch.PrepareMetadata(
+                            baseMetadata.beforeRevision(), baseMetadata.afterRevision(),
+                            baseMetadata.beforeBusinessStateHash(), baseMetadata.beforeFundsStateHash(),
+                            baseMetadata.laneMask(), factMetadata, baseMetadata.externalAdjustment()),
+                    preparedCommit.identities());
             businessTransition = rollingBusinessStateHash.prepareApplied(preparedChanges);
             fundsTransition = rollingFundsStateHash.prepareApplied(preparedChanges);
-            nextBusinessStateHash = canonicalBusinessStateHash(businessTransition.afterHash());
-            nextFundsStateHash = fundsTransition.afterHash();
+            long nextBusinessStateHash = canonicalBusinessStateHash(businessTransition.afterHash());
+            long nextFundsStateHash = fundsTransition.afterHash();
             commit = preparedCommit.seal(preparedChanges, nextBusinessStateHash, nextFundsStateHash);
             if (factPermit != null) {
                 factPermit.consume(commit);
@@ -5364,65 +5382,52 @@ public final class CoreProbeState implements AutoCloseable {
                 runtimeProjectionJournal.publish(currentRetentionAdmission, commit,
                         nextBusinessStateHash, nextFundsStateHash);
             }
-        } catch (RuntimeException failure) {
+        }
+
+        private void rollback(RuntimeException failure) {
             if (committedLaneMask != 0) {
-                try {
-                    runtimePlaceOrderState.rollbackLaneSequence(coreSequence, committedLaneMask);
-                } catch (RuntimeException cleanupFailure) {
-                    failure.addSuppressed(cleanupFailure);
-                }
+                cleanup(failure, () -> runtimePlaceOrderState.rollbackLaneSequence(sequence, committedLaneMask));
             }
             if (factPermit != null) {
-                try {
-                    currentAdmission.abortFactPatch(factPermit);
-                } catch (RuntimeException cleanupFailure) {
-                    failure.addSuppressed(cleanupFailure);
-                }
+                cleanup(failure, () -> currentAdmission.abortFactPatch(factPermit));
             }
-            if (fundsTransition != null) {
-                try {
-                    fundsTransition.rollback();
-                } catch (RuntimeException cleanupFailure) {
-                    failure.addSuppressed(cleanupFailure);
-                }
-            }
-            if (businessTransition != null) {
-                try {
-                    businessTransition.rollback();
-                } catch (RuntimeException cleanupFailure) {
-                    failure.addSuppressed(cleanupFailure);
-                }
-            }
+            if (fundsTransition != null) cleanup(failure, fundsTransition::rollback);
+            if (businessTransition != null) cleanup(failure, businessTransition::rollback);
             if (indexesApplied) {
-                try {
-                    runtime.rollbackRuntimeTransition(commit, runtimePatchRevision, previousBusinessStateHash);
-                } catch (RuntimeException cleanupFailure) {
-                    failure.addSuppressed(cleanupFailure);
-                }
+                cleanup(failure, () -> runtime.rollbackRuntimeTransition(
+                        commit, runtimePatchRevision, previousBusinessStateHash));
             }
-            try {
+            cleanup(failure, () -> {
                 if (commit != null) runtimePlaceOrderState.abortPreparedCommit(commit);
                 else runtimePlaceOrderState.abortPreparedCommit(preparedChanges);
-            } catch (RuntimeException cleanupFailure) {
-                failure.addSuppressed(cleanupFailure);
-            }
+            });
             if (!(failure instanceof CoreAdmissionReservation.FactEstimateInvariantException)) {
                 commitPublicationFailure = new IllegalStateException("owner commit publication failed", failure);
             }
-            throw failure;
         }
-        seedChangeAccumulators();
-        commit.acceptChangedUserIds(changedUserIds::add);
-        if (committedLaneMask != 0) {
-            runtimePlaceOrderState.commitLaneSequence(commit.coreSequence(), committedLaneMask);
+
+        private void finish() {
+            seedChangeAccumulators();
+            commit.acceptChangedUserIds(changedUserIds::add);
+            if (committedLaneMask != 0) {
+                runtimePlaceOrderState.commitLaneSequence(sequence, committedLaneMask);
+            }
+            commandFundsDelta = commandFundsDelta.plus(commit.fundsDelta());
+            currentProjectionPoint = commit.projectionPoint();
+            if (factCommandId != null) factPatchChains.put(factCommandId, nextFactPatchChain);
+            if (capturedCommitPatches != null) capturedCommitPatches.add(commit);
+            runtimePatchRevision = commit.revision();
+            releaseRetiredIdentities(commit);
+            runtimePlaceOrderState.clearChangedKeys();
         }
-        commandFundsDelta = commandFundsDelta.plus(commit.fundsDelta());
-        currentProjectionPoint = commit.projectionPoint();
-        if (factCommandId != null) factPatchChains.put(factCommandId, nextFactPatchChain);
-        if (capturedCommitPatches != null) capturedCommitPatches.add(commit);
-        runtimePatchRevision = commit.revision();
-        releaseRetiredIdentities(commit);
-        runtimePlaceOrderState.clearChangedKeys();
+
+        private void cleanup(RuntimeException failure, Runnable action) {
+            try {
+                action.run();
+            } catch (RuntimeException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+        }
     }
 
     private void releaseRetiredIdentities(

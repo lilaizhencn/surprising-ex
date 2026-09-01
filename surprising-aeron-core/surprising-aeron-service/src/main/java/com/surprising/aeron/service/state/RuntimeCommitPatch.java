@@ -45,10 +45,8 @@ interface RuntimeCommitView {
 public final class RuntimeCommitPatch implements RuntimeCommitView {
 
     private final ProductLine productLine;
-    private final long previousCoreSequence;
-    private final long coreSequence;
-    private final long previousProjectionSequence;
-    private final long projectionSequence;
+    private final long previousSequence;
+    private final long sequence;
     private final long beforeRevision;
     private final long afterRevision;
     private final long beforeBusinessStateHash;
@@ -58,7 +56,6 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
     private final long laneMask;
     private final List<AccountLaneOwnerGroup> accountLaneGroups;
     private final GlobalOwnerGroup globalOwnerGroup;
-    private final List<OwnerGroup> ownerGroups;
     private final List<FundsPosting> fundsPostings;
     private final RuntimeFundsDelta fundsDelta;
     private final CoreMatcherTransition matcherTransition;
@@ -78,10 +75,8 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
                                List<MatcherEvidence> matcherEvidence,
                                TerminalIds terminalIds) {
         productLine = builder.productLine;
-        previousCoreSequence = builder.previousCoreSequence;
-        coreSequence = builder.coreSequence;
-        previousProjectionSequence = builder.previousProjectionSequence;
-        projectionSequence = builder.projectionSequence;
+        previousSequence = builder.previousSequence;
+        sequence = builder.sequence;
         beforeRevision = metadata.beforeRevision();
         afterRevision = metadata.afterRevision();
         beforeBusinessStateHash = metadata.beforeBusinessStateHash();
@@ -91,10 +86,6 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         laneMask = metadata.laneMask();
         this.accountLaneGroups = accountLaneGroups;
         this.globalOwnerGroup = globalOwnerGroup;
-        ArrayList<OwnerGroup> groups = new ArrayList<>(this.accountLaneGroups.size() + 1);
-        groups.addAll(this.accountLaneGroups);
-        groups.add(globalOwnerGroup);
-        ownerGroups = List.copyOf(groups);
         this.fundsPostings = fundsPostings;
         this.fundsDelta = fundsDelta;
         matcherTransition = builder.matcherTransition;
@@ -103,14 +94,12 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         coreFactValues = builder.coreFactValues;
         coreFactMetadata = metadata.coreFactMetadata();
         this.identities = identities;
-        projectionPoint = new RuntimeProjectionPoint(projectionSequence, null);
+        projectionPoint = new RuntimeProjectionPoint(sequence, null);
     }
 
     public static Builder builder(ProductLine productLine,
-                                  long previousCoreSequence, long coreSequence,
-                                  long previousProjectionSequence, long projectionSequence) {
-        return new Builder(productLine, previousCoreSequence, coreSequence,
-                previousProjectionSequence, projectionSequence);
+                                  long previousSequence, long sequence) {
+        return new Builder(productLine, previousSequence, sequence);
     }
 
     static Builder builder(ProductLine productLine) {
@@ -118,10 +107,10 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
     }
 
     public ProductLine productLine() { return productLine; }
-    public long previousCoreSequence() { return previousCoreSequence; }
-    public long coreSequence() { return coreSequence; }
-    public long previousProjectionSequence() { return previousProjectionSequence; }
-    public long projectionSequence() { return projectionSequence; }
+    public long previousCoreSequence() { return previousSequence; }
+    public long coreSequence() { return sequence; }
+    public long previousProjectionSequence() { return previousSequence; }
+    public long projectionSequence() { return sequence; }
     public long beforeRevision() { return beforeRevision; }
     public long afterRevision() { return afterRevision; }
     public long beforeBusinessStateHash() { return beforeBusinessStateHash; }
@@ -131,7 +120,6 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
     public long laneMask() { return laneMask; }
     public List<AccountLaneOwnerGroup> accountLaneGroups() { return accountLaneGroups; }
     public GlobalOwnerGroup globalOwnerGroup() { return globalOwnerGroup; }
-    public List<OwnerGroup> ownerGroups() { return ownerGroups; }
     public List<FundsPosting> fundsPostings() { return fundsPostings; }
     public RuntimeFundsDelta fundsDelta() { return fundsDelta; }
     public CoreMatcherTransition matcherTransition() { return matcherTransition; }
@@ -143,7 +131,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         if (identities == null) throw new IllegalStateException("patch identities are unavailable");
         return identities;
     }
-    public long sequence() { return projectionSequence; }
+    public long sequence() { return sequence; }
     public long revision() { return afterRevision; }
     public RuntimeProjectionPoint projectionPoint() { return projectionPoint; }
     public List<Long> changedUserIds() {
@@ -419,9 +407,8 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
     public boolean equals(Object other) {
         if (this == other) return true;
         if (!(other instanceof RuntimeCommitPatch patch)) return false;
-        return previousCoreSequence == patch.previousCoreSequence && coreSequence == patch.coreSequence
-                && previousProjectionSequence == patch.previousProjectionSequence
-                && projectionSequence == patch.projectionSequence && beforeRevision == patch.beforeRevision
+        return previousSequence == patch.previousSequence && sequence == patch.sequence
+                && beforeRevision == patch.beforeRevision
                 && afterRevision == patch.afterRevision && beforeBusinessStateHash == patch.beforeBusinessStateHash
                 && businessStateHash == patch.businessStateHash && beforeFundsStateHash == patch.beforeFundsStateHash
                 && fundsStateHash == patch.fundsStateHash && laneMask == patch.laneMask
@@ -436,8 +423,8 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
 
     @Override
     public int hashCode() {
-        return Objects.hash(productLine, previousCoreSequence, coreSequence, previousProjectionSequence,
-                projectionSequence, beforeRevision, afterRevision, beforeBusinessStateHash, businessStateHash,
+        return Objects.hash(productLine, previousSequence, sequence,
+                beforeRevision, afterRevision, beforeBusinessStateHash, businessStateHash,
                 beforeFundsStateHash, fundsStateHash, laneMask, accountLaneGroups, globalOwnerGroup,
                 fundsPostings, matcherTransition, matcherEvidence, terminalIds, coreFactValues, coreFactMetadata,
                 identities);
@@ -667,10 +654,6 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         }
     }
 
-    public sealed interface OwnerGroup permits AccountLaneOwnerGroup, GlobalOwnerGroup {
-        int ownerOrder();
-    }
-
     public record AccountLaneOwnerGroup(
             int laneId,
             List<UserChange> users,
@@ -684,7 +667,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             List<AlgoOrderChange> algoOrders,
             List<TriggerOrderChange> triggerOrders,
             List<ClientOrderChange> clientOrders,
-            List<TimerChange> timers) implements OwnerGroup {
+            List<TimerChange> timers) {
         public AccountLaneOwnerGroup {
             if (laneId < 0 || laneId >= Long.SIZE - 1) throw new IllegalArgumentException("invalid lane id");
             users = List.copyOf(users);
@@ -700,8 +683,6 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             clientOrders = List.copyOf(clientOrders);
             timers = List.copyOf(timers);
         }
-
-        @Override public int ownerOrder() { return laneId; }
     }
 
     public record GlobalOwnerGroup(
@@ -712,7 +693,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             List<TreasuryFundingChange> treasuryFunding,
             List<TreasuryLifecycleChange> treasuryLifecycle,
             NextLiquidationIdChange nextLiquidationId,
-            RiskScanControlChange riskScanControl) implements OwnerGroup {
+            RiskScanControlChange riskScanControl) {
         public GlobalOwnerGroup {
             markPrices = List.copyOf(markPrices);
             riskScans = List.copyOf(riskScans);
@@ -721,8 +702,6 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             treasuryFunding = List.copyOf(treasuryFunding);
             treasuryLifecycle = List.copyOf(treasuryLifecycle);
         }
-
-        @Override public int ownerOrder() { return Integer.MAX_VALUE; }
     }
 
     public record UserBalance(long availableUnits, long lockedUnits, long pendingReservedUnits) {
@@ -1033,8 +1012,8 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         }
 
         public ProductLine productLine() { return builder.productLine; }
-        public long previousCoreSequence() { return builder.previousCoreSequence; }
-        public long coreSequence() { return builder.coreSequence; }
+        public long previousCoreSequence() { return builder.previousSequence; }
+        public long coreSequence() { return builder.sequence; }
         public long beforeRevision() { return metadata.beforeRevision(); }
         public long afterRevision() { return metadata.afterRevision(); }
         public long beforeBusinessStateHash() { return metadata.beforeBusinessStateHash(); }
@@ -1048,10 +1027,8 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
 
     public static final class Builder {
         private ProductLine productLine;
-        private long previousCoreSequence;
-        private long coreSequence;
-        private long previousProjectionSequence;
-        private long projectionSequence;
+        private long previousSequence;
+        private long sequence;
         private boolean sequencesSet;
         private final LaneChanges[] lanes = new LaneChanges[Long.SIZE - 1];
         private long laneMask;
@@ -1070,10 +1047,9 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         private boolean finalSealed;
         private PreparedChanges activePrepared;
 
-        private Builder(ProductLine productLine, long previousCoreSequence, long coreSequence,
-                        long previousProjectionSequence, long projectionSequence) {
+        private Builder(ProductLine productLine, long previousSequence, long sequence) {
             this(productLine);
-            sequences(previousCoreSequence, coreSequence, previousProjectionSequence, projectionSequence);
+            sequences(previousSequence, sequence);
         }
 
         private Builder(ProductLine productLine) {
@@ -1090,10 +1066,8 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             fundsPostings.clear();
             matcherEvidence.clear();
             liquidationAssets.clear();
-            previousCoreSequence = 0;
-            coreSequence = 0;
-            previousProjectionSequence = 0;
-            projectionSequence = 0;
+            previousSequence = 0;
+            sequence = 0;
             laneMask = 0;
             terminalOrderIds = List.of();
             terminalLiquidationIds = List.of();
@@ -1110,22 +1084,17 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             return this;
         }
 
-        Builder sequences(long previousCoreSequence, long coreSequence,
-                          long previousProjectionSequence, long projectionSequence) {
+        Builder sequences(long previousSequence, long sequence) {
             requireOpen();
             if (sequencesSet) throw new IllegalStateException("patch sequences are already set");
-            if (productLine == null || previousCoreSequence < 0 || coreSequence <= 0
-                    || previousProjectionSequence < 0 || projectionSequence <= 0) {
+            if (productLine == null || previousSequence < 0 || sequence <= 0) {
                 throw new IllegalArgumentException("invalid patch sequence metadata");
             }
-            if (coreSequence != Math.incrementExact(previousCoreSequence)
-                    || projectionSequence != Math.incrementExact(previousProjectionSequence)) {
-                throw new IllegalArgumentException("commit and projection sequences must be contiguous");
+            if (sequence != Math.incrementExact(previousSequence)) {
+                throw new IllegalArgumentException("commit sequence must be contiguous");
             }
-            this.previousCoreSequence = previousCoreSequence;
-            this.coreSequence = coreSequence;
-            this.previousProjectionSequence = previousProjectionSequence;
-            this.projectionSequence = projectionSequence;
+            this.previousSequence = previousSequence;
+            this.sequence = sequence;
             sequencesSet = true;
             return this;
         }

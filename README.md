@@ -30,7 +30,9 @@ Account Lane mutation 入口执行；单 Lane 内联、多 Lane 并行只是调�
 同一用户的资金、订单与持仓始终在所属 Lane 内串行修改；Product Core 只在所有目标 Lane 完成后执行一次全局
 sequence 可见性屏障、合并 per-asset Treasury delta、验证资金守恒并发布 Core Fact。提交协议只保存
 `coreSequence + completedLaneMask`，不再生成每 Lane 的 revision/hash/owner-group-offset 提交对象，也不再由 worker
-计算克隆状态后交给 owner 重放。query/read fence、snapshot capture/restore 仍以同一全局 sequence 为一致性边界。
+计算克隆状态后交给 owner 重放。权威余额只允许在 Account Lane scope 内访问，对外查询返回副本；余额对象不再各自保存线程 owner，
+因此 owner/worker 交接为 O(1) 且不会遍历余额，worker completion 只等待一次并统一恢复 Lane owner。
+query/read fence、snapshot capture/restore 仍以同一全局 sequence 为一致性边界。
 P10-G 使用真实 HTTP 开放环门禁，只有保存 1,000 用户、至少 200 symbol、100k/s offered rate、
 计量窗口内至少 100k/s 实际终态吞吐、40 分钟、JFR 和资金/盘口核对 artifact 后才可标记生产认证完成。普通下单只提交一次正式 `PLACE_ORDER`，
 由 Product Core 在同一权威转换内完成 P1 的预占、平仓容量和费用校验；显式 dry-run 接口仍可调用只读 preflight，
@@ -234,6 +236,9 @@ Product Core 的热状态与不可变状态投影通过 `RuntimeCommitPatch` 分
 `TradingCoreState`；滚动资金/业务 hash、资金守恒、Treasury 合并、投影和 Core Fact 共同消费同一份
 primitive `RuntimeFundsDelta`/typed change。滚动 hash 直接使用各 domain 的增量 aggregate，不维护第二套 owner-domain
 aggregate；typed change 容器使用 generation reset，避免每条命令 `HashMap.clear` 和 entry 重建。持久化 immutable map root 由有界
+`RuntimeCommitPatch` 内部只保存一套连续 canonical sequence，Core 与 projection 访问器映射到同一值；Account Lane groups
+与 global owner group 分开保存，不再额外物化派生 owner group 列表。owner 的 prepare/seal/hash/index/publish 与失败清理
+由单一提交事务封装，保留资金、幂等和回滚边界。
 `RuntimeProjectionJournal` 在线程外顺序生成；每个 entry 自带只写一次的 `RuntimeProjectionPoint`，owner 不再构造
 lazy transition view，也不在单笔下单、撤单或撮合完成路径等待 Snapshot projector。只有显式 Snapshot、批量订单基线、
 Export ACK 清理、非热状态读取和拒绝回滚允许建立 projection fence。提交后的校验失败则 fail-fast，不能把已经进入 typed

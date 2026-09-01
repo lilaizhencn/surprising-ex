@@ -367,7 +367,7 @@ class RuntimeCommitJournalTest {
             assertThatThrownBy(() -> journal.reservePublish(2))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("sequence gap");
             RuntimeCommitPatch.Builder builder = RuntimeCommitPatch.builder(
-                    ProductLine.LINEAR_PERPETUAL, 0, 1, 0, 1)
+                    ProductLine.LINEAR_PERPETUAL, 0, 1)
                     .matcherTransition(CoreMatcherTransition.unchanged(0, 0));
             RuntimeCommitPatch patch = seal(builder, new RuntimeCommitPatch.SealMetadata(0, 0,
                     initial.businessStateHash(), initial.businessStateHash(),
@@ -389,7 +389,7 @@ class RuntimeCommitJournalTest {
     private static RuntimeCommitPatch emptyPatch(TradingCoreState state, long sequence) {
         long fundsHash = RollingFundsStateHash.compute(state);
         RuntimeCommitPatch.Builder builder = RuntimeCommitPatch.builder(
-                state.productLine(), sequence - 1, sequence, sequence - 1, sequence)
+                state.productLine(), sequence - 1, sequence)
                 .matcherTransition(CoreMatcherTransition.unchanged(0, 0));
         return seal(builder, new RuntimeCommitPatch.SealMetadata(state.revision(), state.revision(),
                 state.businessStateHash(), state.businessStateHash(), fundsHash, fundsHash, 0, null));
@@ -398,7 +398,7 @@ class RuntimeCommitJournalTest {
     private static RuntimeCommitPatch patchWithTerminalOrder(TradingCoreState state, long sequence) {
         long fundsHash = RollingFundsStateHash.compute(state);
         RuntimeCommitPatch.Builder builder = RuntimeCommitPatch.builder(
-                state.productLine(), sequence - 1, sequence, sequence - 1, sequence)
+                state.productLine(), sequence - 1, sequence)
                 .matcherTransition(CoreMatcherTransition.unchanged(0, 0))
                 .terminalIds(List.of(1L), List.of(), List.of());
         return seal(builder, new RuntimeCommitPatch.SealMetadata(state.revision(), state.revision(),
@@ -433,7 +433,7 @@ class RuntimeCommitJournalTest {
             runtime.treasury().setFee(identities.assetId("USDT"), -3 + delta);
             TradingCoreState current = RuntimeStateMaterializer.materialize(runtime, identities);
             TradingRuntimeState.PreparedCommit prepared = runtime.prepareCommitPatch(
-                    index + 1L, index, index + 1L, identities,
+                    index + 1L, identities,
                     previous.revision(), CoreMatcherTransition.unchanged(0, 0), 0,
                     previous.businessStateHash(), current.businessStateHash(),
                     RollingFundsStateHash.compute(previous), RollingFundsStateHash.compute(current), true);

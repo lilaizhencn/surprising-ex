@@ -84,12 +84,19 @@ class TradingCoreRuntimeAuthorityTest {
         assertThat(occurrences(production,
                 "currentAdmission.publish(commit, businessStateHash, fundsStateHash)")).isEqualTo(1);
         assertThat(occurrences(production, "publishSealedCommit(")).isEqualTo(2);
-        assertThat(source("state/RuntimeCommitPatch.java"))
-                .doesNotContain("orderSnapshot", "captureCommitPatch", "RuntimePatchValues");
+        String patchSource = source("state/RuntimeCommitPatch.java");
+        assertThat(patchSource)
+                .doesNotContain("orderSnapshot", "captureCommitPatch", "RuntimePatchValues",
+                        "private final long previousCoreSequence", "private final long coreSequence",
+                        "private final long previousProjectionSequence", "private final long projectionSequence",
+                        "interface OwnerGroup", "List<OwnerGroup>");
         String runtimeState = source("state/TradingRuntimeState.java");
         String prepareCommit = method(runtimeState, "    public PreparedCommit prepareCommitPatch(");
         assertThat(runtimeState)
-                .doesNotContain("captureCommitPatch", "public RuntimeCommitPatch seal()", ".seal();");
+                .doesNotContain("captureCommitPatch", "public RuntimeCommitPatch seal()", ".seal();",
+                        "BalanceRuntime::releaseOwnerForHandoff", "awaitAndRebindLaneMutations");
+        assertThat(occurrences(runtimeState, "laneMutationTasks[laneId].await()"))
+                .isEqualTo(1);
         assertThat(occurrences(production, ".recordOrder(")).isEqualTo(1);
         assertThat(occurrences(prepareCommit, "RuntimeStateMaterializer.orderSnapshot(")).isEqualTo(2);
         assertThat(occurrences(prepareCommit, "RuntimeCommitPatch.exportOrderView(")).isZero();

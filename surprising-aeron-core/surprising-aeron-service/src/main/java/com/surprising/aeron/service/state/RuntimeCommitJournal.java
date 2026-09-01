@@ -547,7 +547,7 @@ public final class RuntimeCommitJournal implements AutoCloseable {
     }
 
     private static long estimatedBytes(RuntimeCommitPatch patch) {
-        return 256L + 128L * patch.ownerGroups().size() + 96L * patch.fundsPostings().size()
+        return 384L + 128L * patch.accountLaneGroups().size() + 96L * patch.fundsPostings().size()
                 + 80L * patch.matcherEvidence().size() + 32L * patch.coreFactItemCount();
     }
 

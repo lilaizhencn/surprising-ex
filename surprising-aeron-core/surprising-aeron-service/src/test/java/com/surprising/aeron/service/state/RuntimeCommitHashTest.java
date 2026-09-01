@@ -139,7 +139,7 @@ class RuntimeCommitHashTest {
         RollingBusinessStateHash business = RollingBusinessStateHash.create(before, identities);
         RollingFundsStateHash funds = RollingFundsStateHash.create(before, identities);
         TradingRuntimeState.PreparedCommit captured = runtime.prepareCommitPatch(
-                1, 0, 1, identities, before.revision(), unchangedMatcher(), 0,
+                1, identities, before.revision(), unchangedMatcher(), 0,
                 business.value(), business.value(), funds.value(), funds.value(), true);
         RuntimeCommitPatch.SealMetadata seal = captured.metadata();
         RuntimeCommitPatch.PreparedChanges changes = captured.builder().prepare(
@@ -191,7 +191,7 @@ class RuntimeCommitHashTest {
         TradingCoreState after = materialized;
         RollingBusinessStateHash business = RollingBusinessStateHash.create(before, identities);
         TradingRuntimeState.PreparedCommit captured = runtime.prepareCommitPatch(
-                1, 0, 1, identities, before.revision(), unchangedMatcher(), 0,
+                1, identities, before.revision(), unchangedMatcher(), 0,
                 business.value(), business.value(), RollingFundsStateHash.compute(before),
                 RollingFundsStateHash.compute(after), true);
         RuntimeCommitPatch.PreparedChanges changes = captured.prepareChanges();
@@ -219,7 +219,7 @@ class RuntimeCommitHashTest {
         TradingCoreState after = RuntimeStateMaterializer.materialize(runtime, identities);
         RollingBusinessStateHash business = RollingBusinessStateHash.create(before, identities);
         TradingRuntimeState.PreparedCommit captured = runtime.prepareCommitPatch(
-                1, 0, 1, identities, before.revision(), unchangedMatcher(), 0,
+                1, identities, before.revision(), unchangedMatcher(), 0,
                 business.value(), business.value(), RollingFundsStateHash.compute(before),
                 RollingFundsStateHash.compute(after), true);
         RuntimeCommitPatch.PreparedChanges changes = captured.prepareChanges();
@@ -249,7 +249,7 @@ class RuntimeCommitHashTest {
         RollingBusinessStateHash business = RollingBusinessStateHash.create(before, identities);
         RollingFundsStateHash funds = RollingFundsStateHash.create(before, identities);
         TradingRuntimeState.PreparedCommit captured = runtime.prepareCommitPatch(
-                1, 0, 1, identities, before.revision(), unchangedMatcher(), 0,
+                1, identities, before.revision(), unchangedMatcher(), 0,
                 business.value(), business.value(), funds.value(), funds.value(), true);
         RuntimeCommitPatch.PreparedChanges changes = captured.prepareChanges();
 
@@ -285,7 +285,7 @@ class RuntimeCommitHashTest {
         long canonicalOverlayBefore = business.value() ^ 0x5a5a_5a5a_5a5a_5a5aL;
         long canonicalOverlayAfter = RollingBusinessStateHash.compute(after) ^ 0x5a5a_5a5a_5a5a_5a5aL;
         TradingRuntimeState.PreparedCommit captured = runtime.prepareCommitPatch(
-                1, 0, 1, identities, before.revision(), unchangedMatcher(), 0,
+                1, identities, before.revision(), unchangedMatcher(), 0,
                 canonicalOverlayBefore, canonicalOverlayAfter, RollingFundsStateHash.compute(before),
                 RollingFundsStateHash.compute(after), true);
         RuntimeCommitPatch.PreparedChanges changes = captured.prepareChanges();
@@ -311,7 +311,7 @@ class RuntimeCommitHashTest {
         RollingBusinessStateHash business = RollingBusinessStateHash.create(before, identities);
         RollingFundsStateHash funds = RollingFundsStateHash.create(before, identities);
         TradingRuntimeState.PreparedCommit captured = runtime.prepareCommitPatch(
-                1, 0, 1, identities, before.revision(), unchangedMatcher(), 0,
+                1, identities, before.revision(), unchangedMatcher(), 0,
                 business.value(), business.value(), funds.value(), funds.value(), true);
         RuntimeCommitPatch.SealMetadata seal = captured.metadata();
         RuntimeCommitPatch.PreparedChanges changes = captured.builder().prepare(
@@ -333,7 +333,7 @@ class RuntimeCommitHashTest {
         assertThatThrownBy(() -> foreignFunds.commitForTest(fundsA)).hasMessageContaining("foreign");
         assertThat(foreignBusiness.value()).isEqualTo(businessBefore);
         assertThat(foreignFunds.value()).isEqualTo(fundsBefore);
-        RuntimeCommitPatch.Builder foreignBuilder = RuntimeCommitPatch.builder(PRODUCT_LINE, 0, 1, 0, 1)
+        RuntimeCommitPatch.Builder foreignBuilder = RuntimeCommitPatch.builder(PRODUCT_LINE, 0, 1)
                 .matcherTransition(unchangedMatcher());
         assertThatThrownBy(() -> foreignBuilder.seal(changes, businessA.afterHash(), fundsA.afterHash()))
                 .hasMessageContaining("different builder");
@@ -358,7 +358,7 @@ class RuntimeCommitHashTest {
                 new BalanceAdjustmentCommand(ASSET, 17));
         TradingCoreState afterSecond = RuntimeStateMaterializer.materialize(runtime, identities);
         TradingRuntimeState.PreparedCommit capturedSecond = runtime.prepareCommitPatch(
-                2, 1, 2, identities, afterFirst.revision(), unchangedMatcher(), 0,
+                2, identities, afterFirst.revision(), unchangedMatcher(), 0,
                 business.value(), business.value(), funds.value(), funds.value(), true);
         RuntimeCommitPatch.SealMetadata secondSeal = capturedSecond.metadata();
         RuntimeCommitPatch.PreparedChanges secondChanges = capturedSecond.builder().prepare(
@@ -452,7 +452,7 @@ class RuntimeCommitHashTest {
         CoreTreasuryState nextTreasury = before.treasuryState().recordLifecycle(SYMBOL, 81);
         TradingCoreState after = new TradingCoreState(line, 1, before.users(), before.orders(),
                 before.instruments(), before.riskState(), nextTreasury);
-        RuntimeCommitPatch.Builder builder = RuntimeCommitPatch.builder(line, 0, 1, 0, 1)
+        RuntimeCommitPatch.Builder builder = RuntimeCommitPatch.builder(line, 0, 1)
                 .matcherTransition(unchangedMatcher());
         builder.recordTreasuryLifecycle(symbolId, null,
                 new RuntimeCommitPatch.TreasuryLifecycleValue(81, null));
@@ -516,7 +516,7 @@ class RuntimeCommitHashTest {
     }
 
     @Test
-    void acceptsSkippedCoreSequencesWhenProjectionAndCanonicalStateRemainContinuous() {
+    void rejectsSkippedCanonicalSequencesWithoutHashDrift() {
         TradingCoreReducer reducer = new TradingCoreReducer();
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         long userId = oneUserPerLane().getFirst();
@@ -527,16 +527,13 @@ class RuntimeCommitHashTest {
         TradingCoreState secondState = reducer.adjustBalance(firstState, userId,
                 new BalanceAdjustmentCommand(ASSET, 200));
         RuntimeCommitPatch first = balancePatch(1, userId, initial, firstState, identities);
-        RuntimeCommitPatch gap = balancePatch(2, 4, 5, userId, firstState, secondState, identities);
+        RuntimeCommitPatch gap = balancePatch(5, userId, firstState, secondState, identities);
         RollingBusinessStateHash business = RollingBusinessStateHash.create(initial, identities);
         RollingFundsStateHash funds = RollingFundsStateHash.create(initial, identities);
 
         business.update(first);
         funds.update(first);
-        business.update(gap);
-        funds.update(gap);
-
-        assertHashAndRestoreParity(secondState, business, funds, identities);
+        assertRejectedWithoutDrift(business, funds, gap, "sequence");
     }
 
     @Test
@@ -551,7 +548,7 @@ class RuntimeCommitHashTest {
         TradingCoreState secondState = reducer.adjustBalance(firstState, userId,
                 new BalanceAdjustmentCommand(ASSET, 200));
         RuntimeCommitPatch first = balancePatch(1, userId, initial, firstState, identities);
-        RuntimeCommitPatch gap = balancePatch(2, 4, 5, userId, firstState, secondState, identities);
+        RuntimeCommitPatch gap = balancePatch(2, userId, firstState, secondState, identities);
         RuntimeCommitPatch reordered = balancePatch(2, userId, firstState, secondState, identities);
         RollingBusinessStateHash business = RollingBusinessStateHash.create(initial, identities);
         RollingFundsStateHash funds = RollingFundsStateHash.create(initial, identities);
@@ -579,7 +576,7 @@ class RuntimeCommitHashTest {
             long beforeAvailable, long beforeLocked, long afterAvailable, long afterLocked,
             long beforeInsurance, long afterInsurance, RuntimeIdentityRegistry identities) {
         RuntimeCommitPatch.Builder builder = RuntimeCommitPatch.builder(
-                PRODUCT_LINE, sequence - 1, sequence, sequence - 1, sequence)
+                PRODUCT_LINE, sequence - 1, sequence)
                 .matcherTransition(unchangedMatcher());
         builder.recordUser(laneId, runtimeUser(before.user(userId)), runtimeUser(after.user(userId)));
         builder.recordBalance(laneId, userId, assetId,
@@ -670,7 +667,7 @@ class RuntimeCommitHashTest {
     private static RuntimeCommitPatch capture(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                               TradingCoreState before, TradingCoreState after, long sequence) {
         TradingRuntimeState.PreparedCommit prepared = runtime.prepareCommitPatch(
-                sequence, sequence - 1, sequence, identities,
+                sequence, identities,
                 before.revision(), unchangedMatcher(), 0,
                 RollingBusinessStateHash.compute(before), RollingBusinessStateHash.compute(after),
                 RollingFundsStateHash.compute(before), RollingFundsStateHash.compute(after), true);
@@ -750,21 +747,12 @@ class RuntimeCommitHashTest {
     private static RuntimeCommitPatch balancePatch(long sequence, long userId,
                                                    TradingCoreState before, TradingCoreState after,
                                                    RuntimeIdentityRegistry identities) {
-        return balancePatch(sequence, sequence - 1, sequence, userId, before, after, identities);
-    }
-
-    private static RuntimeCommitPatch balancePatch(long projectionSequence,
-                                                   long previousCoreSequence, long coreSequence,
-                                                   long userId, TradingCoreState before,
-                                                   TradingCoreState after,
-                                                   RuntimeIdentityRegistry identities) {
         int laneId = FOUR_LANES.accountLaneId(userId);
         int assetId = identities.assetId(ASSET);
         CoreUserState beforeUser = before.user(userId);
         CoreUserState afterUser = after.user(userId);
         RuntimeCommitPatch.Builder builder = RuntimeCommitPatch.builder(
-                PRODUCT_LINE, previousCoreSequence, coreSequence,
-                projectionSequence - 1, projectionSequence)
+                PRODUCT_LINE, sequence - 1, sequence)
                 .matcherTransition(unchangedMatcher());
         builder.recordUser(laneId, runtimeUser(beforeUser), runtimeUser(afterUser));
         builder.recordBalance(laneId, userId, assetId, patchBalance(beforeUser), patchBalance(afterUser));
@@ -783,7 +771,7 @@ class RuntimeCommitHashTest {
         UserRuntime current = new UserRuntime(PRODUCT_LINE, userId,
                 Math.incrementExact(prior.revision()), CorePositionMode.ONE_WAY);
         RuntimeCommitPatch.Builder builder = RuntimeCommitPatch.builder(
-                PRODUCT_LINE, sequence - 1, sequence, sequence - 1, sequence)
+                PRODUCT_LINE, sequence - 1, sequence)
                 .matcherTransition(unchangedMatcher());
         builder.recordUser(laneId, prior, current);
         builder.recordBalance(laneId, userId, Integer.MAX_VALUE, null,

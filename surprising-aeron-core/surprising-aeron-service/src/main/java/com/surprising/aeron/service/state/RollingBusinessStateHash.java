@@ -271,10 +271,8 @@ public final class RollingBusinessStateHash {
         if (patch == null || patch.productLine().ordinal() != productLine) {
             throw new IllegalArgumentException("invalid business hash commit");
         }
-        if (lastCoreSequence != Long.MIN_VALUE
-                && (patch.previousCoreSequence() < lastCoreSequence
-                || patch.coreSequence() <= lastCoreSequence)) {
-            throw new IllegalArgumentException("non-monotonic business hash commit sequence: last "
+        if (lastCoreSequence != Long.MIN_VALUE && patch.previousCoreSequence() != lastCoreSequence) {
+            throw new IllegalArgumentException("non-contiguous business hash commit sequence: last "
                     + lastCoreSequence + ", previous " + patch.previousCoreSequence()
                     + ", current " + patch.coreSequence());
         }

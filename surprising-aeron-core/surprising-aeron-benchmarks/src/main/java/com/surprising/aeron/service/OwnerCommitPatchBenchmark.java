@@ -724,6 +724,8 @@ public class OwnerCommitPatchBenchmark {
                         && event.beforeBusinessStateHash() == patch.beforeBusinessStateHash()
                         && event.fundsStateHash() == patch.fundsStateHash()
                         && event.beforeFundsStateHash() == patch.beforeFundsStateHash()
+                        && patch.previousCoreSequence() == patch.previousProjectionSequence()
+                        && patch.coreSequence() == patch.projectionSequence()
                         && event.projectionSequence() == patch.projectionSequence()
                         && event.commandId().equals(patch.coreFactMetadata().commandId())
                         && !event.changedUsers().isEmpty() && !event.changedOrders().isEmpty();
@@ -849,7 +851,7 @@ public class OwnerCommitPatchBenchmark {
     }
 
     private static long estimatedPatchBytes(RuntimeCommitPatch patch) {
-        return 256L + 128L * patch.ownerGroups().size() + 96L * patch.fundsPostings().size()
+        return 384L + 128L * patch.accountLaneGroups().size() + 96L * patch.fundsPostings().size()
                 + 80L * patch.matcherEvidence().size() + 32L * patch.coreFactItemCount();
     }
 
@@ -963,7 +965,7 @@ public class OwnerCommitPatchBenchmark {
                                          RollingBusinessStateHash business, RollingFundsStateHash funds,
                                          long sequence, long userSeed, long orderIdBase) {
         RuntimeCommitPatch.Builder builder = RuntimeCommitPatch.builder(
-                PRODUCT_LINE, sequence - 1, sequence, sequence - 1, sequence)
+                PRODUCT_LINE, sequence - 1, sequence)
                 .matcherTransition(CoreMatcherTransition.unchanged(0, 0));
         int assetId = identities.assetId(ASSET);
         long laneMask = 0;

@@ -64,7 +64,6 @@ public final class AccountLaneState {
 
     void releaseOwner() {
         if (owner != Thread.currentThread()) throw new IllegalStateException("account lane owner mismatch");
-        balances.forEachValue(values -> values.forEachValue(BalanceRuntime::releaseOwnerForHandoff));
         owner = null;
     }
 
@@ -72,7 +71,6 @@ public final class AccountLaneState {
         if (owner != null && owner != Thread.currentThread()) {
             throw new IllegalStateException("account lane owner mismatch");
         }
-        balances.forEachValue(values -> values.forEachValue(BalanceRuntime::releaseOwnerForHandoff));
         owner = null;
     }
 

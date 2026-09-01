@@ -580,7 +580,7 @@ class RuntimeStateProjectorTest {
                                               long previousRevision) {
         TradingCoreState current = RuntimeStateMaterializer.materialize(runtime, identities);
         TradingRuntimeState.PreparedCommit prepared = runtime.prepareCommitPatch(
-                projectionSequence, projectionSequence - 1, projectionSequence, identities,
+                projectionSequence, identities,
                 previousRevision, unchangedMatcher(), 0,
                 previous.businessStateHash(), current.businessStateHash(),
                 RollingFundsStateHash.compute(previous), RollingFundsStateHash.compute(current), true);
