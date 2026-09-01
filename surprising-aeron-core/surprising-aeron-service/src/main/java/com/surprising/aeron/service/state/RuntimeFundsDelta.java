@@ -93,9 +93,16 @@ public final class RuntimeFundsDelta {
     }
 
     public FundsDelta materialize(RuntimeCommitPatch.IdentityView identities, boolean externalAdjustment) {
+        return materialize(identities, null, externalAdjustment);
+    }
+
+    public FundsDelta materialize(RuntimeCommitPatch.IdentityView identities,
+                                  RuntimeCommitPatch.IdentityView fallbackIdentities,
+                                  boolean externalAdjustment) {
         ArrayList<FundsPosting> materialized = new ArrayList<>(postings.size() + unitsByAsset.size());
         for (RuntimeCommitPatch.FundsPosting posting : postings) {
-            materialized.add(new FundsPosting(identities.asset(posting.assetId()), posting.ownerKind(),
+            materialized.add(new FundsPosting(asset(identities, fallbackIdentities, posting.assetId()),
+                    posting.ownerKind(),
                     posting.ownerId(), posting.subledger(), posting.units()));
         }
         if (externalAdjustment) {
@@ -104,12 +111,24 @@ public final class RuntimeFundsDelta {
             for (int assetId : assetIds) {
                 long units = unitsByAsset.get(assetId);
                 if (units != 0) {
-                    materialized.add(new FundsPosting(identities.asset(assetId), FundsPosting.OwnerKind.EXTERNAL,
+                    materialized.add(new FundsPosting(asset(identities, fallbackIdentities, assetId),
+                            FundsPosting.OwnerKind.EXTERNAL,
                             0, FundsPosting.Subledger.EXTERNAL_ADJUSTMENT, Math.negateExact(units)));
                 }
             }
         }
         return new FundsDelta(materialized);
+    }
+
+    private static String asset(RuntimeCommitPatch.IdentityView identities,
+                                RuntimeCommitPatch.IdentityView fallbackIdentities,
+                                int assetId) {
+        if (identities instanceof RuntimeCommitPatch.FactIdentitySlice slice) {
+            String asset = slice.assetOrNull(assetId);
+            if (asset != null) return asset;
+            if (fallbackIdentities != null) return fallbackIdentities.asset(assetId);
+        }
+        return identities.asset(assetId);
     }
 
     public RuntimeTreasuryDelta treasuryDelta() {

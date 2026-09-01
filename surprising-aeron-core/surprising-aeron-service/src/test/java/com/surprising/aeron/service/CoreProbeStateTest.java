@@ -686,6 +686,39 @@ class CoreProbeStateTest {
 
     @Test
     @Timeout(5)
+    void materializesFundsWhenCommandDeltaOutlivesItsFactPatchIdentitySlice() {
+        var encodedEvent = new java.util.concurrent.atomic.AtomicReference<
+                com.surprising.aeron.protocol.CoreExportEvent>();
+        try (CoreExportState exportState = new CoreExportState(event -> {
+            encodedEvent.set(event);
+            return CoreExportCodec.encodeEvent(event);
+        })) {
+            CoreMessage command = command(UUID.randomUUID(), 1, 1);
+            var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
+            var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
+            var patch = conservedFundsPatch(identities, command);
+            var metadata = new com.surprising.aeron.service.state.RuntimeCommitPatch.CoreFactMetadata(
+                    command.header().commandId(), com.surprising.aeron.protocol.CommandFingerprint.of(command),
+                    command.header().messageType().wireCode(), command.header().userId(), ResponseStatus.APPLIED,
+                    CoreResultCode.NONE, 1, 1, 1, 1, false);
+
+            exportState.append(new CoreExportState.Draft(command, ResponseStatus.APPLIED, CoreResultCode.NONE,
+                    1, 1, 0, 0, 1, 1, 1, transition, 1, 1,
+                    patch.fundsPostings().size(), new long[0], null, CoreCommandDelta.empty(),
+                    patch.fundsDelta(), identities, metadata));
+
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            while (encodedEvent.get() == null && System.nanoTime() < deadline) Thread.onSpinWait();
+            assertThat(encodedEvent.get()).isNotNull();
+            assertThat(encodedEvent.get().fundsPostings()).extracting(item -> item.asset())
+                    .containsOnly("USDT");
+            assertThat(encodedEvent.get().fundsPostings()).extracting(item -> item.units())
+                    .containsExactlyInAnyOrder(-10L, 10L);
+        }
+    }
+
+    @Test
+    @Timeout(5)
     void restoredExportUsesEncodedTerminalIdsInsteadOfChangedOrders() {
         try (CoreExportState exportState = new CoreExportState()) {
             CoreMessage command = command(UUID.randomUUID(), 1, 1);

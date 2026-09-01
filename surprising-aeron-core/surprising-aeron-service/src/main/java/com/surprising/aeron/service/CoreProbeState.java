@@ -5889,6 +5889,7 @@ public final class CoreProbeState implements AutoCloseable {
                 businessStateHash, beforeBusinessStateHash, beforeFundsStateHash, fundsStateHash,
                 topologyHash, revisionHash, matcherTransition, clusterPosition, afterProjection.sequence(),
                 itemCount, terminalOrderIds, commandFactPatches, delta, commandFundsDelta,
+                runtimePlaceOrderIdentities,
                 metadata);
         long sequence = currentAdmission == null
                 ? exportState.append(draft) : currentAdmission.append(draft);

@@ -492,6 +492,16 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         }
 
         @Override public String asset(int assetId) { return findIdentity(assets, assetId, "asset"); }
+        String assetOrNull(int assetId) {
+            int low = 0, high = assets.size() - 1;
+            while (low <= high) {
+                int middle = (low + high) >>> 1;
+                IdentityValue value = assets.get(middle);
+                if (value.id() == assetId) return value.value();
+                if (value.id() < assetId) low = middle + 1; else high = middle - 1;
+            }
+            return null;
+        }
         @Override public int assetId(String asset) {
             for (IdentityValue value : assets) if (value.value().equals(asset)) return value.id();
             throw new IllegalArgumentException("unknown patch asset: " + asset);

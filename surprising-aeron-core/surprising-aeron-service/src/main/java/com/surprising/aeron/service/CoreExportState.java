@@ -643,7 +643,23 @@ final class CoreExportState implements AutoCloseable {
                  long clusterPosition, long projectionSequence, int itemCount, long[] terminalOrderIds,
                  PatchChain patches, CoreCommandDelta delta,
                  com.surprising.aeron.service.state.RuntimeFundsDelta fundsDelta,
+                 RuntimeCommitPatch.IdentityView fallbackFundIdentities,
                  RuntimeCommitPatch.CoreFactMetadata commandMetadata) {
+        Draft(CoreMessage command, ResponseStatus status,
+              com.surprising.aeron.protocol.CoreResultCode resultCode,
+              long appliedCommandCount, long businessStateHash,
+              long beforeBusinessStateHash, long beforeFundsStateHash, long fundsStateHash,
+              long topologyHash, long laneRevisionHash, CoreMatcherTransition matcherTransition,
+              long clusterPosition, long projectionSequence, int itemCount, long[] terminalOrderIds,
+              PatchChain patches, CoreCommandDelta delta,
+              com.surprising.aeron.service.state.RuntimeFundsDelta fundsDelta,
+              RuntimeCommitPatch.CoreFactMetadata commandMetadata) {
+            this(command, status, resultCode, appliedCommandCount, businessStateHash,
+                    beforeBusinessStateHash, beforeFundsStateHash, fundsStateHash,
+                    topologyHash, laneRevisionHash, matcherTransition, clusterPosition, projectionSequence,
+                    itemCount, terminalOrderIds, patches, delta, fundsDelta, null, commandMetadata);
+        }
+
         Draft {
             if (command == null || status == null || resultCode == null || appliedCommandCount < 0
                     || matcherTransition == null || clusterPosition < 0 || projectionSequence < 0
@@ -711,7 +727,8 @@ final class CoreExportState implements AutoCloseable {
             List<com.surprising.aeron.protocol.CoreOrderStateView> orderViews =
                     materializeOrders(orders, orderViewFactory);
             List<com.surprising.aeron.protocol.CoreFundsPostingView> fundsPostings =
-                    fundsDelta.materialize(identities, commandMetadata.externalAdjustment()).views();
+                    fundsDelta.materialize(identities, fallbackFundIdentities,
+                            commandMetadata.externalAdjustment()).views();
             List<CoreExportEvent.MatcherEvidence> matcherEvidence = materializeMatcherEvidence(evidence);
             return new CoreExportEvent(sequence, appliedCommandCount, businessStateHash,
                     command.header().commandId(), command.header().messageType(), status, resultCode,
