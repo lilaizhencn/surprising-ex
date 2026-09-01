@@ -246,6 +246,67 @@ class RuntimeCommitPatchTest {
     }
 
     @Test
+    void materializesEachChangedUserFromOneGroupedTraversal() {
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        int assetId = identities.assetId("USDT");
+        int symbolId = identities.symbolId("BTC-USDT");
+        long firstPositionKey = identities.positionKey(7, "BTC-USDT:LONG");
+        long secondPositionKey = identities.positionKey(9, "BTC-USDT:SHORT");
+        RuntimeCommitPatch.Builder builder = RuntimeCommitPatch.builder(
+                ProductLine.LINEAR_PERPETUAL, 0, 1, 0, 1)
+                .matcherTransition(CoreMatcherTransition.unchanged(0, 0));
+        builder.recordUser(1, null, user(9, 1));
+        builder.recordUser(1, null, user(7, 1));
+        builder.recordBalance(1, 9, assetId, null, new RuntimeCommitPatch.UserBalance(900, 100, 0));
+        builder.recordBalance(1, 7, assetId, null, new RuntimeCommitPatch.UserBalance(700, 300, 0));
+        builder.recordReservation(1, 99, null,
+                new ReservationRuntime(99, 9, symbolId, 1,
+                        com.surprising.aeron.protocol.ReservationKind.DERIVATIVE_MARGIN,
+                        assetId, 100, 0, 0, 1), false, false);
+        builder.recordReservation(1, 77, null,
+                new ReservationRuntime(77, 7, symbolId, 1,
+                        com.surprising.aeron.protocol.ReservationKind.DERIVATIVE_MARGIN,
+                        assetId, 300, 0, 0, 1), false, false);
+        builder.recordPosition(1, secondPositionKey, null,
+                new PositionRuntime(9, symbolId, assetId,
+                        com.surprising.aeron.protocol.CoreMarginMode.CROSS,
+                        com.surprising.aeron.protocol.CorePositionSide.SHORT,
+                        1, -1, 100, 100, 0, 100));
+        builder.recordPosition(1, firstPositionKey, null,
+                new PositionRuntime(7, symbolId, assetId,
+                        com.surprising.aeron.protocol.CoreMarginMode.CROSS,
+                        com.surprising.aeron.protocol.CorePositionSide.LONG,
+                        1, 1, 100, 100, 0, 300));
+        builder.addLaneCommit(laneCommit(1, 0, 1, 0, 1, 0, 1));
+
+        UUID factCommandId = UUID.randomUUID();
+        var factMetadata = new RuntimeCommitPatch.CoreFactMetadata(factCommandId,
+                fingerprint(factCommandId, 7, 1),
+                com.surprising.aeron.protocol.CoreMessageType.PROBE_INCREMENT.wireCode(), 7,
+                ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 1, 1, 1, true);
+        RuntimeCommitPatch.PreparedChanges prepared = builder.prepare(new RuntimeCommitPatch.PrepareMetadata(
+                0, 1, 0, 0, 1L << 1, factMetadata, true), identities);
+        RuntimeCommitPatch.CoreFactFragment fragment = builder.seal(prepared, 1, 0)
+                .materializeCoreFactFragment();
+
+        assertThat(fragment.changedUsers()).extracting(user -> user.userId()).containsExactly(7L, 9L);
+        assertThat(fragment.changedUsers().get(0).balances()).singleElement()
+                .extracting(balance -> balance.availableUnits()).isEqualTo(700L);
+        assertThat(fragment.changedUsers().get(0).reservations()).singleElement()
+                .extracting(reservation -> reservation.orderId()).isEqualTo(77L);
+        assertThat(fragment.changedUsers().get(0).positions()).singleElement()
+                .extracting(position -> position.positionSide())
+                .isEqualTo(com.surprising.aeron.protocol.CorePositionSide.LONG);
+        assertThat(fragment.changedUsers().get(1).balances()).singleElement()
+                .extracting(balance -> balance.availableUnits()).isEqualTo(900L);
+        assertThat(fragment.changedUsers().get(1).reservations()).singleElement()
+                .extracting(reservation -> reservation.orderId()).isEqualTo(99L);
+        assertThat(fragment.changedUsers().get(1).positions()).singleElement()
+                .extracting(position -> position.positionSide())
+                .isEqualTo(com.surprising.aeron.protocol.CorePositionSide.SHORT);
+    }
+
+    @Test
     void assemblesCompactOrderDeletionAsTombstone() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         int symbolId = identities.symbolId("BTC-USDT");

@@ -320,11 +320,11 @@ public final class RollingBusinessStateHash {
                     throw new IllegalArgumentException("business user before-value mismatch");
                 }
                 userRollback.owner(change.userId(), current == null ? group.laneId() : current.owner);
-                userStage.append(() -> userStage.apply(change));
+                userStage.append(change);
                 RuntimeCommitPatch.UserChange reverse = new RuntimeCommitPatch.UserChange(
                         change.userId(), change.after(), change.before(),
                         pendingBeforeCountsScratch.get(change.userId()));
-                userRollback.prepend(() -> userRollback.apply(reverse));
+                userRollback.prepend(reverse);
             }
             for (RuntimeCommitPatch.BalanceChange change : group.balances()) {
                 String asset = identities.asset(change.key().assetId());
@@ -334,10 +334,10 @@ public final class RollingBusinessStateHash {
                         : entryHashStable(asset, stableBalance(asset, change.before()));
                 requireContribution(actual, expected, "balance");
                 if (change.after() != null) stableBalance(asset, change.after());
-                userStage.append(() -> userStage.apply(change));
+                userStage.append(change);
                 RuntimeCommitPatch.BalanceChange reverse = new RuntimeCommitPatch.BalanceChange(
                         change.key(), change.after(), change.before());
-                userRollback.prepend(() -> userRollback.apply(reverse));
+                userRollback.prepend(reverse);
             }
             for (RuntimeCommitPatch.ReservationChange change : group.reservations()) {
                 ReservationRuntime before = change.before();
@@ -347,10 +347,10 @@ public final class RollingBusinessStateHash {
                         : entryHashStable(change.orderId(), stableReservation(before, identities));
                 requireContribution(actual, expected, "reservation");
                 if (change.after() != null) stableReservation(change.after(), identities);
-                userStage.append(() -> userStage.apply(change));
+                userStage.append(change);
                 RuntimeCommitPatch.ReservationChange reverse = new RuntimeCommitPatch.ReservationChange(
                         change.orderId(), change.after(), change.before(), change.pendingAfter(), change.pendingBefore());
-                userRollback.prepend(() -> userRollback.apply(reverse));
+                userRollback.prepend(reverse);
             }
             for (RuntimeCommitPatch.PositionChange change : group.positions()) {
                 RuntimeIdentityRegistry.PositionIdentity identity = identities.positionIdentity(change.positionKey());
@@ -361,10 +361,10 @@ public final class RollingBusinessStateHash {
                         identity.positionKey(), stablePosition(before, identities));
                 requireContribution(actual, expected, "position");
                 if (change.after() != null) stablePosition(change.after(), identities);
-                userStage.append(() -> userStage.apply(change));
+                userStage.append(change);
                 RuntimeCommitPatch.PositionChange reverse = new RuntimeCommitPatch.PositionChange(
                         change.positionKey(), change.after(), change.before());
-                userRollback.prepend(() -> userRollback.apply(reverse));
+                userRollback.prepend(reverse);
             }
             for (RuntimeCommitPatch.OrderChange change : group.orders()) {
                 RuntimeCommitPatch.ReservationChange reservationChange =
@@ -380,8 +380,8 @@ public final class RollingBusinessStateHash {
                 int previousOwner = owned == null ? group.laneId() : owned.owner();
                 RuntimeCommitPatch.OrderChange reverse = new RuntimeCommitPatch.OrderChange(
                         change.orderId(), change.after(), change.before());
-                staged.add(() -> updateOrder(group.laneId(), change, !pendingAfter),
-                        () -> updateOrder(previousOwner, reverse, !pendingBefore));
+                staged.addOrder(group.laneId(), change, !pendingAfter,
+                        previousOwner, reverse, !pendingBefore);
             }
             for (RuntimeCommitPatch.LeverageChange change : group.leverages()) {
                 validateCachedBefore("leverages", change.key(), change.before(), value -> stable(value),
@@ -444,7 +444,7 @@ public final class RollingBusinessStateHash {
                                 change.liquidationId(), change.before(), this::stableLiquidation,
                                 value -> !runtimeTerminal(value)));
             }
-            staged.add(userStage::apply, userRollback::apply);
+            staged.addUserGroup(userStage, userRollback);
         }
         RuntimeCommitPatch.GlobalOwnerGroup global = patch.globalOwnerGroup();
         for (RuntimeCommitPatch.InstrumentChange change : global.instruments()) {
@@ -1150,68 +1150,171 @@ public final class RollingBusinessStateHash {
     }
 
     private final class BusinessPatchStage {
-        private final java.util.ArrayList<StagedOperation> operations = new java.util.ArrayList<>();
-        private java.util.ArrayDeque<Runnable> appliedRollbacks;
+        private static final byte GENERIC = 1;
+        private static final byte ORDER = 2;
+        private static final byte USER_GROUP = 3;
+
+        private final java.util.ArrayList<Runnable> operations = new java.util.ArrayList<>();
+        private final java.util.ArrayList<Runnable> rollbacks = new java.util.ArrayList<>();
+        private byte[] operationTypes = new byte[16];
+        private Object[] values = new Object[16];
+        private Object[] rollbackValues = new Object[16];
+        private int[] owners = new int[16];
+        private int[] rollbackOwners = new int[16];
+        private boolean[] included = new boolean[16];
+        private boolean[] rollbackIncluded = new boolean[16];
+        private int appliedCount;
 
         private void add(Runnable operation, Runnable rollback) {
-            operations.add(new StagedOperation(operation, rollback));
+            ensureCapacity();
+            operationTypes[operations.size()] = GENERIC;
+            operations.add(operation);
+            rollbacks.add(rollback);
         }
+
+        private void addOrder(int owner, RuntimeCommitPatch.OrderChange change, boolean include,
+                              int rollbackOwner, RuntimeCommitPatch.OrderChange reverse,
+                              boolean includeBefore) {
+            int index = operations.size();
+            ensureCapacity();
+            operationTypes[index] = ORDER;
+            values[index] = change;
+            rollbackValues[index] = reverse;
+            owners[index] = owner;
+            rollbackOwners[index] = rollbackOwner;
+            included[index] = include;
+            rollbackIncluded[index] = includeBefore;
+            operations.add(null);
+            rollbacks.add(null);
+        }
+
+        private void addUserGroup(UserGroupUpdate update, UserGroupUpdate rollback) {
+            int index = operations.size();
+            ensureCapacity();
+            operationTypes[index] = USER_GROUP;
+            values[index] = update;
+            rollbackValues[index] = rollback;
+            operations.add(null);
+            rollbacks.add(null);
+        }
+
         private int size() { return operations.size(); }
 
         private long preview(java.util.function.LongSupplier value) {
-            java.util.ArrayDeque<Runnable> rollbacks = new java.util.ArrayDeque<>();
+            int applied = 0;
             try {
-                for (StagedOperation operation : operations) {
-                    operation.apply().run();
-                    rollbacks.push(operation.rollback());
+                for (; applied < operations.size(); applied++) {
+                    apply(applied);
                 }
                 return value.getAsLong();
             } finally {
-                while (!rollbacks.isEmpty()) rollbacks.pop().run();
+                while (applied > 0) rollback(--applied);
                 valueDirty = true;
             }
         }
 
         private void apply() {
-            java.util.ArrayDeque<Runnable> rollbacks = new java.util.ArrayDeque<>();
+            int applied = 0;
             try {
                 for (int index = 0; index < operations.size(); index++) {
-                    StagedOperation operation = operations.get(index);
-                    operation.apply().run();
-                    rollbacks.push(operation.rollback());
+                    apply(index);
+                    applied++;
                     if (index == failAfterStagedOperation) {
                         failAfterStagedOperation = -1;
                         throw new IllegalStateException("injected mid-stage business hash apply failure");
                     }
                 }
-                appliedRollbacks = rollbacks;
+                appliedCount = applied;
             } catch (RuntimeException failure) {
-                while (!rollbacks.isEmpty()) rollbacks.pop().run();
+                while (applied > 0) rollback(--applied);
                 valueDirty = true;
                 throw failure;
             }
         }
 
         private void rollbackApplied() {
-            if (appliedRollbacks == null) return;
-            while (!appliedRollbacks.isEmpty()) appliedRollbacks.pop().run();
-            appliedRollbacks = null;
+            while (appliedCount > 0) rollback(--appliedCount);
             valueDirty = true;
+        }
+
+        private void apply(int index) {
+            switch (operationTypes[index]) {
+                case GENERIC -> operations.get(index).run();
+                case ORDER -> updateOrder(owners[index],
+                        (RuntimeCommitPatch.OrderChange) values[index], included[index]);
+                case USER_GROUP -> ((UserGroupUpdate) values[index]).apply();
+                default -> throw new IllegalStateException("unknown staged business hash operation");
+            }
+        }
+
+        private void rollback(int index) {
+            switch (operationTypes[index]) {
+                case GENERIC -> rollbacks.get(index).run();
+                case ORDER -> updateOrder(rollbackOwners[index],
+                        (RuntimeCommitPatch.OrderChange) rollbackValues[index], rollbackIncluded[index]);
+                case USER_GROUP -> ((UserGroupUpdate) rollbackValues[index]).apply();
+                default -> throw new IllegalStateException("unknown staged business hash rollback operation");
+            }
+        }
+
+        private void ensureCapacity() {
+            if (operations.size() < operationTypes.length) return;
+            int capacity = Math.multiplyExact(operationTypes.length, 2);
+            operationTypes = java.util.Arrays.copyOf(operationTypes, capacity);
+            values = java.util.Arrays.copyOf(values, capacity);
+            rollbackValues = java.util.Arrays.copyOf(rollbackValues, capacity);
+            owners = java.util.Arrays.copyOf(owners, capacity);
+            rollbackOwners = java.util.Arrays.copyOf(rollbackOwners, capacity);
+            included = java.util.Arrays.copyOf(included, capacity);
+            rollbackIncluded = java.util.Arrays.copyOf(rollbackIncluded, capacity);
         }
     }
 
-    private record StagedOperation(Runnable apply, Runnable rollback) {}
-
     private final class UserGroupUpdate {
+        private static final byte USER = 1;
+        private static final byte BALANCE = 2;
+        private static final byte RESERVATION = 3;
+        private static final byte POSITION = 4;
+
         private final int laneId;
         private final java.util.LinkedHashMap<Long, UserHash> changed = new java.util.LinkedHashMap<>();
         private final java.util.HashMap<Long, Integer> targetOwners = new java.util.HashMap<>();
-        private final java.util.ArrayList<Runnable> operations = new java.util.ArrayList<>();
+        private Object[] operations = new Object[8];
+        private byte[] operationTypes = new byte[8];
+        private int operationCount;
 
         private UserGroupUpdate(int laneId) { this.laneId = laneId; }
-        private void append(Runnable operation) { operations.add(operation); }
-        private void prepend(Runnable operation) { operations.add(0, operation); }
+        private void append(RuntimeCommitPatch.UserChange change) { append(USER, change); }
+        private void append(RuntimeCommitPatch.BalanceChange change) { append(BALANCE, change); }
+        private void append(RuntimeCommitPatch.ReservationChange change) { append(RESERVATION, change); }
+        private void append(RuntimeCommitPatch.PositionChange change) { append(POSITION, change); }
+        private void prepend(RuntimeCommitPatch.UserChange change) { prepend(USER, change); }
+        private void prepend(RuntimeCommitPatch.BalanceChange change) { prepend(BALANCE, change); }
+        private void prepend(RuntimeCommitPatch.ReservationChange change) { prepend(RESERVATION, change); }
+        private void prepend(RuntimeCommitPatch.PositionChange change) { prepend(POSITION, change); }
         private void owner(long userId, int owner) { targetOwners.put(userId, owner); }
+
+        private void append(byte type, Object change) {
+            ensureOperationCapacity();
+            operationTypes[operationCount] = type;
+            operations[operationCount++] = change;
+        }
+
+        private void prepend(byte type, Object change) {
+            ensureOperationCapacity();
+            System.arraycopy(operationTypes, 0, operationTypes, 1, operationCount);
+            System.arraycopy(operations, 0, operations, 1, operationCount);
+            operationTypes[0] = type;
+            operations[0] = change;
+            operationCount++;
+        }
+
+        private void ensureOperationCapacity() {
+            if (operationCount < operations.length) return;
+            int capacity = Math.multiplyExact(operations.length, 2);
+            operations = java.util.Arrays.copyOf(operations, capacity);
+            operationTypes = java.util.Arrays.copyOf(operationTypes, capacity);
+        }
 
         private void apply(RuntimeCommitPatch.UserChange change) {
             UserHash hash = beginUserChange(changed, change.userId());
@@ -1252,7 +1355,15 @@ public final class RollingBusinessStateHash {
         }
 
         private void apply() {
-            for (Runnable operation : operations) operation.run();
+            for (int index = 0; index < operationCount; index++) {
+                switch (operationTypes[index]) {
+                    case USER -> apply((RuntimeCommitPatch.UserChange) operations[index]);
+                    case BALANCE -> apply((RuntimeCommitPatch.BalanceChange) operations[index]);
+                    case RESERVATION -> apply((RuntimeCommitPatch.ReservationChange) operations[index]);
+                    case POSITION -> apply((RuntimeCommitPatch.PositionChange) operations[index]);
+                    default -> throw new IllegalStateException("unknown staged user hash operation");
+                }
+            }
             for (Map.Entry<Long, UserHash> changedUser : changed.entrySet()) {
                 if (changedUser.getValue() == null) userHashes.remove(changedUser.getKey());
                 else {

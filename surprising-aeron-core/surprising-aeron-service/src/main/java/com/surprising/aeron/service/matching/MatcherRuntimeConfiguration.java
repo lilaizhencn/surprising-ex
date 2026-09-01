@@ -6,12 +6,13 @@ import java.util.Locale;
 final class MatcherRuntimeConfiguration {
 
     static final String WAIT_STRATEGY_PROPERTY = "surprising.aeron.matcher-wait-strategy";
+    static final CoreWaitStrategy DEFAULT_WAIT_STRATEGY = CoreWaitStrategy.YIELDING;
 
     private MatcherRuntimeConfiguration() {
     }
 
     static CoreWaitStrategy waitStrategy() {
-        return waitStrategy(System.getProperty(WAIT_STRATEGY_PROPERTY, CoreWaitStrategy.BUSY_SPIN.name()));
+        return waitStrategy(System.getProperty(WAIT_STRATEGY_PROPERTY, DEFAULT_WAIT_STRATEGY.name()));
     }
 
     static CoreWaitStrategy waitStrategy(String value) {

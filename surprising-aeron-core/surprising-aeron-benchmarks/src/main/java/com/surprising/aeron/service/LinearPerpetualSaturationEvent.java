@@ -23,6 +23,9 @@ final class LinearPerpetualSaturationEvent extends Event {
     @Label("Operations per invocation")
     int operationsPerInvocation;
 
+    @Label("Matcher wait strategy")
+    String matcherWaitStrategy;
+
     @Label("Scheduled business operations") long scheduledBusinessOperations;
 
     @Label("Business type") String businessType;

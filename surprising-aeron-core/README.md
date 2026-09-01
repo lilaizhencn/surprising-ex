@@ -331,5 +331,5 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
   批次上限和审计元数据；状态随 Cluster Log/Archive 与 `Trading snapshot v24` 恢复。
 - `APPLY_MARK_PRICE` 只提交新价格和初始化 risk/trigger cursor；用户风险、强平计划和触发单扫描只能由有界
   `CONTINUE_RISK_SCAN` 推进，不能在标记价命令中隐式执行首批扫描。
-- matcher 等待策略可在启动时配置为 `BUSY_SPIN`、`YIELDING` 或 `BLOCKING`；Account Lane 可配置为
+- matcher 等待策略默认 `YIELDING`，可在隔离物理 CPU 时显式配置为 `BUSY_SPIN`，或配置为 `BLOCKING`；Account Lane 可配置为
   `BUSY_SPIN`、`BALANCED` 或 `PARK`。等待策略是运行时性能参数，不进入业务状态或 snapshot hash。

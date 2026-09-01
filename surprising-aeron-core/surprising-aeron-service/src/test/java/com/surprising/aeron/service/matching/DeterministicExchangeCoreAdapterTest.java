@@ -33,6 +33,8 @@ class DeterministicExchangeCoreAdapterTest {
 
     @Test
     void acceptsOnlyProductionWaitStrategies() {
+        assertThat(MatcherRuntimeConfiguration.DEFAULT_WAIT_STRATEGY)
+                .isEqualTo(exchange.core2.core.common.CoreWaitStrategy.YIELDING);
         assertThat(MatcherRuntimeConfiguration.waitStrategy("busy_spin"))
                 .isEqualTo(exchange.core2.core.common.CoreWaitStrategy.BUSY_SPIN);
         assertThat(MatcherRuntimeConfiguration.waitStrategy("yielding"))

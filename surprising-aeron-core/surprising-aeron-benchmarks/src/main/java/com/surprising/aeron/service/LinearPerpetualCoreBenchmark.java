@@ -146,6 +146,7 @@ public class LinearPerpetualCoreBenchmark {
             measurement.activeSymbols = state.activeSymbols;
             measurement.maxInFlight = state.maxInFlight;
             measurement.operationsPerInvocation = state.operationsPerInvocation;
+            measurement.matcherWaitStrategy = state.matcherWaitStrategy;
             measurement.begin();
         }
         long result;
@@ -480,11 +481,17 @@ public class LinearPerpetualCoreBenchmark {
         @Param("100000")
         public int targetOperationsPerSecond;
 
+        @Param("YIELDING")
+        public String matcherWaitStrategy;
+
         private LinearPerpetualSaturationWorkload.SaturationScenario scenario;
+        private String previousMatcherWaitStrategy;
 
         @Setup(Level.Trial)
         public void setUpTrial() {
             LinearPerpetualBenchmarkSupport.configureAccountLanes(accountLanes);
+            previousMatcherWaitStrategy = System.getProperty("surprising.aeron.matcher-wait-strategy");
+            System.setProperty("surprising.aeron.matcher-wait-strategy", matcherWaitStrategy);
             var config = LinearPerpetualScaleConfig.scale(listedSymbols, activeSymbols,
                     maxPositionsPerUser, maxOpenOrdersPerUser,
                     LinearPerpetualTrafficProfile.UNIFORM, activeSymbols);
@@ -495,8 +502,16 @@ public class LinearPerpetualCoreBenchmark {
 
         @TearDown(Level.Trial)
         public void tearDownTrial() {
-            scenario.verify();
-            scenario.close();
+            try {
+                scenario.verify();
+                scenario.close();
+            } finally {
+                if (previousMatcherWaitStrategy == null) {
+                    System.clearProperty("surprising.aeron.matcher-wait-strategy");
+                } else {
+                    System.setProperty("surprising.aeron.matcher-wait-strategy", previousMatcherWaitStrategy);
+                }
+            }
         }
     }
 

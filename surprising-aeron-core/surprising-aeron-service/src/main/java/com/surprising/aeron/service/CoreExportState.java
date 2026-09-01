@@ -655,28 +655,57 @@ final class CoreExportState implements AutoCloseable {
         private CoreExportEvent materialize(long sequence,
                 java.util.function.Function<com.surprising.aeron.service.state.CoreOrderState,
                         com.surprising.aeron.protocol.CoreOrderStateView> orderViewFactory) {
-            FactViewMerge merged = new FactViewMerge();
-            if (patches != null) patches.acceptOldestFirst(patch -> merged.accept(patch.materializeCoreFactFragment()));
-            for (long orderId : terminalOrderIds) merged.terminalOrders.add(orderId);
             RuntimeCommitPatch first = patches == null ? null : patches.first();
             RuntimeCommitPatch last = patches == null ? null : patches.patch();
             RuntimeCommitPatch.FactIdentitySlice identities = patches == null
                     ? new RuntimeCommitPatch.FactIdentitySlice(List.of(), List.of(), List.of(), List.of())
-                    : patches.identities();
+                    : patches.size() == 1 ? last.identities() : patches.identities();
+            List<com.surprising.aeron.protocol.CoreUserStateView> users;
+            List<com.surprising.aeron.service.state.CoreOrderState> orders;
+            List<com.surprising.aeron.protocol.CoreLiquidationView> liquidations;
+            List<com.surprising.aeron.protocol.CoreTreasuryAssetView> treasury;
+            List<com.surprising.aeron.protocol.CoreTriggerOrderStateView> triggers;
+            List<RuntimeCommitPatch.MatcherEvidence> evidence;
+            RuntimeCommitPatch.TerminalIds terminalIds;
+            CoreExportEvent.Tombstones tombstones;
+            if (patches != null && patches.size() == 1) {
+                RuntimeCommitPatch.CoreFactFragment fragment = last.materializeCoreFactFragment();
+                users = fragment.changedUsers();
+                orders = fragment.changedOrders();
+                liquidations = fragment.changedLiquidations();
+                treasury = fragment.changedTreasuryAssets();
+                triggers = fragment.changedTriggerOrders();
+                evidence = fragment.matcherEvidence();
+                terminalIds = mergeTerminalOrders(fragment.terminalIds(), terminalOrderIds);
+                tombstones = fragment.tombstones();
+            } else {
+                FactViewMerge merged = new FactViewMerge();
+                if (patches != null) {
+                    patches.acceptOldestFirst(patch -> merged.accept(patch.materializeCoreFactFragment()));
+                }
+                for (long orderId : terminalOrderIds) merged.terminalOrders.add(orderId);
+                users = List.copyOf(merged.users.values());
+                orders = List.copyOf(merged.orders.values());
+                liquidations = List.copyOf(merged.liquidations.values());
+                treasury = List.copyOf(merged.treasury.values());
+                triggers = List.copyOf(merged.triggers.values());
+                evidence = merged.evidence;
+                terminalIds = new RuntimeCommitPatch.TerminalIds(List.copyOf(merged.terminalOrders),
+                        List.copyOf(merged.terminalLiquidations), List.copyOf(merged.terminalTriggers));
+                tombstones = merged.tombstones.seal();
+            }
             long previousCoreSequence = first == null ? appliedCommandCount - 1 : first.previousCoreSequence();
             long coreSequence = last == null ? appliedCommandCount : last.coreSequence();
             long previousProjectionSequence = first == null ? projectionSequence : first.previousProjectionSequence();
             long committedProjectionSequence = last == null ? projectionSequence : last.projectionSequence();
             var payload = new RuntimeCommitPatch.CoreFactPayload(
-                    List.copyOf(merged.users.values()), merged.orders.values().stream().map(orderViewFactory).toList(),
+                    users, materializeOrders(orders, orderViewFactory),
                     delta.executions(),
-                    delta.fundingPayments(), List.copyOf(merged.liquidations.values()),
-                    List.copyOf(merged.treasury.values()), List.copyOf(merged.triggers.values()),
+                    delta.fundingPayments(), liquidations,
+                    treasury, triggers,
                     fundsDelta.materialize(identities, commandMetadata.externalAdjustment()).views(),
-                    delta.fundingProgress(), delta.settlementProgress(), matcherTransition, merged.evidence,
-                    new RuntimeCommitPatch.TerminalIds(List.copyOf(merged.terminalOrders),
-                            List.copyOf(merged.terminalLiquidations), List.copyOf(merged.terminalTriggers)),
-                    merged.tombstones.seal(), previousCoreSequence, coreSequence,
+                    delta.fundingProgress(), delta.settlementProgress(), matcherTransition, evidence,
+                    terminalIds, tombstones, previousCoreSequence, coreSequence,
                     previousProjectionSequence, committedProjectionSequence,
                     beforeBusinessStateHash, businessStateHash, beforeFundsStateHash, fundsStateHash,
                     topologyHash, laneRevisionHash, clusterPosition, commandMetadata);
@@ -688,15 +717,42 @@ final class CoreExportState implements AutoCloseable {
                     beforeBusinessStateHash, beforeFundsStateHash, fundsStateHash,
                     matcherTransition.routeVersion(), topologyHash, laneRevisionHash, appliedCommandCount,
                     matcherTransition, clusterPosition, payload.fundsPostings(),
-                    commandMetadata.commandFingerprint(), payload.matcherEvidence().stream().map(item ->
-                            new CoreExportEvent.MatcherEvidence(item.matcherSequence(), item.matcherShardId(),
-                                    item.makerOrderId(), item.takerOrderId(), item.quantitySteps(), item.priceTicks()))
-                            .toList(),
+                    commandMetadata.commandFingerprint(), materializeMatcherEvidence(payload.matcherEvidence()),
                     new CoreExportEvent.TerminalIds(payload.terminalIds().orderIds(),
                             payload.terminalIds().liquidationIds(), payload.terminalIds().triggerOrderIds()),
                     payload.previousCoreSequence(), payload.coreSequence(), payload.previousProjectionSequence(),
                     payload.projectionSequence(), payload.fundingProgress(), payload.settlementProgress(),
                     payload.tombstones());
+        }
+
+        private static RuntimeCommitPatch.TerminalIds mergeTerminalOrders(
+                RuntimeCommitPatch.TerminalIds terminalIds, long[] additionalOrderIds) {
+            if (additionalOrderIds.length == 0) return terminalIds;
+            TreeSet<Long> orders = new TreeSet<>(terminalIds.orderIds());
+            for (long orderId : additionalOrderIds) orders.add(orderId);
+            return new RuntimeCommitPatch.TerminalIds(List.copyOf(orders), terminalIds.liquidationIds(),
+                    terminalIds.triggerOrderIds());
+        }
+
+        private static List<com.surprising.aeron.protocol.CoreOrderStateView> materializeOrders(
+                List<com.surprising.aeron.service.state.CoreOrderState> orders,
+                java.util.function.Function<com.surprising.aeron.service.state.CoreOrderState,
+                        com.surprising.aeron.protocol.CoreOrderStateView> orderViewFactory) {
+            ArrayList<com.surprising.aeron.protocol.CoreOrderStateView> result = new ArrayList<>(orders.size());
+            for (com.surprising.aeron.service.state.CoreOrderState order : orders) {
+                result.add(orderViewFactory.apply(order));
+            }
+            return result;
+        }
+
+        private static List<CoreExportEvent.MatcherEvidence> materializeMatcherEvidence(
+                List<RuntimeCommitPatch.MatcherEvidence> evidence) {
+            ArrayList<CoreExportEvent.MatcherEvidence> result = new ArrayList<>(evidence.size());
+            for (RuntimeCommitPatch.MatcherEvidence item : evidence) {
+                result.add(new CoreExportEvent.MatcherEvidence(item.matcherSequence(), item.matcherShardId(),
+                        item.makerOrderId(), item.takerOrderId(), item.quantitySteps(), item.priceTicks()));
+            }
+            return result;
         }
     }
 

@@ -613,8 +613,10 @@ exchange-core/disruptor busy-spin，这是 matcher 等待策略的 CPU/尾延迟
 重建 runtime symbol identity，首笔批量订单会在冻结资金前 fail-fast。`RuntimeStateProjector` 现在从权威
 instrument map 预备全部 symbol identity，聚焦红测和完整现货场景均已覆盖。
 
-matcher 等待策略通过启动参数 `surprising.aeron.matcher-wait-strategy=BUSY_SPIN|YIELDING|BLOCKING` 切换；
-它只影响 matcher 线程等待和 CPU/尾延迟权衡，不进入资金状态或 snapshot hash，修改后重启单产品线 Core 生效。
+matcher 等待策略通过启动参数 `surprising.aeron.matcher-wait-strategy=BUSY_SPIN|YIELDING|BLOCKING` 切换，
+默认使用 `YIELDING`，避免 matcher 在未隔离 CPU 的环境持续占满核心；只有为 matcher 隔离物理 CPU 时才显式启用
+`BUSY_SPIN`。该参数只影响 matcher 线程等待和 CPU/尾延迟权衡，不进入资金状态或 snapshot hash，修改后重启
+单产品线 Core 生效。
 Account Lane 已不创建独立等待线程，因此不存在 Lane busy-spin 配置。
 
 Snapshot projector 默认使用 park/unpark；`surprising.aeron.projection-busy-spin=true` 可在隔离 CPU 的服务器上切为

@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.function.Function;
+import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
 public final class RuntimeProjectionState {
@@ -48,6 +49,7 @@ public final class RuntimeProjectionState {
     private Throwable failure;
     private volatile long failOnSequence = -1;
     private volatile int failAfterMutations = -1;
+    private final MutationJournal mutationJournal = new MutationJournal();
 
     public RuntimeProjectionState(TradingCoreState initial, long businessStateHash, long fundsStateHash) {
         this(initial, businessStateHash, fundsStateHash, 0);
@@ -105,7 +107,7 @@ public final class RuntimeProjectionState {
             failOnSequence = -1;
             failAfterMutations = -1;
         }
-        MutationJournal inverse = new MutationJournal(injectedFailureCount);
+        MutationJournal inverse = mutationJournal.reset(injectedFailureCount);
         try {
             if (patch == null || patch.productLine() != productLine
                     || patch.previousProjectionSequence() != sequence
@@ -115,27 +117,22 @@ public final class RuntimeProjectionState {
                     || patch.beforeFundsStateHash() != fundsStateHash) {
                 throw new IllegalStateException("projection patch is not contiguous with mutable replica");
             }
-            prevalidate(patch);
             applyAccountLanes(patch, inverse);
             applyGlobal(patch.globalOwnerGroup(), patch.identities(), inverse);
-            long previousRevision = revision;
-            inverse.mutate(() -> revision = previousRevision, () -> revision = patch.afterRevision());
-            long previousBusinessStateHash = businessStateHash;
-            inverse.mutate(() -> businessStateHash = previousBusinessStateHash,
-                    () -> businessStateHash = patch.businessStateHash());
-            long previousFundsStateHash = fundsStateHash;
-            inverse.mutate(() -> fundsStateHash = previousFundsStateHash,
-                    () -> fundsStateHash = patch.fundsStateHash());
-            long previousSequence = sequence;
-            inverse.mutate(() -> sequence = previousSequence, () -> sequence = patch.projectionSequence());
+            inverse.setRevision(patch.afterRevision());
+            inverse.setBusinessStateHash(patch.businessStateHash());
+            inverse.setFundsStateHash(patch.fundsStateHash());
+            inverse.setSequence(patch.projectionSequence());
             cachedFreeze = null;
             cachedFreezeSequence = -1;
+            inverse.release();
         } catch (Throwable applyFailure) {
             try {
                 inverse.rollback();
             } catch (Throwable rollbackFailure) {
                 applyFailure.addSuppressed(rollbackFailure);
             }
+            inverse.release();
             failure = applyFailure;
             throw applyFailure;
         }
@@ -192,14 +189,13 @@ public final class RuntimeProjectionState {
 
     private void applyAccountLanes(RuntimeCommitPatch patch, MutationJournal inverse) {
         RuntimeCommitPatch.IdentityView identities = patch.identities();
-        LongHashSet changedUsers = new LongHashSet();
+        UserPatchIndex userIndex = UserPatchIndex.create(patch.accountLaneGroups());
         for (RuntimeCommitPatch.AccountLaneOwnerGroup group : patch.accountLaneGroups()) {
-            group.users().forEach(change -> changedUsers.add(change.userId()));
-            group.balances().forEach(change -> changedUsers.add(change.key().userId()));
-            group.reservations().forEach(change -> changedUsers.add(userId(change.before(), change.after())));
-            group.positions().forEach(change -> changedUsers.add(userId(change.before(), change.after())));
             for (RuntimeCommitPatch.OrderChange change : group.orders()) {
-                boolean pending = reservationPendingAfter(patch.accountLaneGroups(), change.orderId());
+                if (change.after() != null && change.businessAfter() == null) {
+                    throw new IllegalStateException("order business value is missing from commit patch");
+                }
+                boolean pending = userIndex.pendingReservations.contains(change.orderId());
                 inverse.putOrRemove(orders, change.orderId(), change.after() == null || pending
                         ? null : change.businessAfter());
             }
@@ -226,14 +222,13 @@ public final class RuntimeProjectionState {
                 inverse.putOrRemove(clientOrders, key, change.afterOrderId());
             }
         }
-        changedUsers.remove(0L);
-        changedUsers.forEach(userId -> applyUser(patch.accountLaneGroups(),
-                userChange(patch.accountLaneGroups(), userId), userId, identities, inverse));
+        for (UserChanges changes : userIndex.ordered) applyUser(changes, identities, inverse);
     }
 
-    private void applyUser(List<RuntimeCommitPatch.AccountLaneOwnerGroup> groups,
-                           RuntimeCommitPatch.UserChange userChange, long userId,
+    private void applyUser(UserChanges changes,
                            RuntimeCommitPatch.IdentityView identities, MutationJournal inverse) {
+        long userId = changes.userId;
+        RuntimeCommitPatch.UserChange userChange = changes.userChange;
         if (userChange != null && userChange.after() == null) {
             inverse.putOrRemove(users, userId, null);
             return;
@@ -245,39 +240,36 @@ public final class RuntimeProjectionState {
             user = new MutableUser(runtimeUser.productLine(), runtimeUser.positionMode());
             inverse.putOrRemove(users, userId, user);
         }
-        int pendingRevisionDelta = 0;
-        for (RuntimeCommitPatch.AccountLaneOwnerGroup group : groups) {
-            for (RuntimeCommitPatch.BalanceChange change : group.balances()) {
-                if (change.key().userId() != userId) continue;
-                RuntimeCommitPatch.UserBalance value = change.after();
-                String asset = identities.asset(change.key().assetId());
-                inverse.putOrRemove(user.balances, asset, value == null ? null : new AssetBalance(asset,
-                        Math.addExact(value.availableUnits(), value.pendingReservedUnits()),
-                        Math.subtractExact(value.lockedUnits(), value.pendingReservedUnits())));
-            }
-            for (RuntimeCommitPatch.ReservationChange change : group.reservations()) {
-                if (userId(change.before(), change.after()) != userId) continue;
-                if (change.pendingBefore()) pendingRevisionDelta = Math.incrementExact(pendingRevisionDelta);
-                if (change.pendingAfter()) pendingRevisionDelta = Math.decrementExact(pendingRevisionDelta);
-                inverse.putOrRemove(user.reservations, change.orderId(), change.after() == null || change.pendingAfter()
-                        ? null : RuntimeStateMaterializer.reservation(change.after(), identities));
-            }
-            for (RuntimeCommitPatch.PositionChange change : group.positions()) {
-                if (userId(change.before(), change.after()) != userId) continue;
-                RuntimeIdentityRegistry.PositionIdentity identity = identities.positionIdentity(change.positionKey());
-                inverse.putOrRemove(user.positions, identity.positionKey(), change.after() == null
-                        ? null : RuntimeStateMaterializer.position(change.positionKey(), change.after(), identities));
-            }
+        if (runtimeUser != null && runtimeUser.productLine() != productLine) {
+            throw new IllegalStateException("projection user product line mismatch");
         }
-        long previousRevision = user.revision;
+        int pendingRevisionDelta = 0;
+        for (RuntimeCommitPatch.BalanceChange change : changes.balances) {
+            RuntimeCommitPatch.UserBalance value = change.after();
+            String asset = identities.asset(change.key().assetId());
+            inverse.putOrRemove(user.balances, asset, value == null ? null : new AssetBalance(asset,
+                    Math.addExact(value.availableUnits(), value.pendingReservedUnits()),
+                    Math.subtractExact(value.lockedUnits(), value.pendingReservedUnits())));
+        }
+        for (RuntimeCommitPatch.ReservationChange change : changes.reservations) {
+            if (change.pendingBefore()) pendingRevisionDelta = Math.incrementExact(pendingRevisionDelta);
+            if (change.pendingAfter()) pendingRevisionDelta = Math.decrementExact(pendingRevisionDelta);
+            inverse.putOrRemove(user.reservations, change.orderId(), change.after() == null || change.pendingAfter()
+                    ? null : RuntimeStateMaterializer.reservation(change.after(), identities));
+        }
+        for (RuntimeCommitPatch.PositionChange change : changes.positions) {
+            RuntimeIdentityRegistry.PositionIdentity identity = identities.positionIdentity(change.positionKey());
+            if (identity.userId() != userId) {
+                throw new IllegalStateException("projection position owner mismatch");
+            }
+            inverse.putOrRemove(user.positions, identity.positionKey(), change.after() == null
+                    ? null : RuntimeStateMaterializer.position(change.positionKey(), change.after(), identities));
+        }
         long nextRevision = runtimeUser == null ? Math.addExact(user.revision, pendingRevisionDelta)
                 : Math.subtractExact(runtimeUser.revision(), userChange.pendingReservationCountAfter());
-        MutableUser mutableUser = user;
-        inverse.mutate(() -> mutableUser.revision = previousRevision, () -> mutableUser.revision = nextRevision);
+        inverse.setUserRevision(user, nextRevision);
         if (runtimeUser != null) {
-            CorePositionMode previousMode = user.positionMode;
-            inverse.mutate(() -> mutableUser.positionMode = previousMode,
-                    () -> mutableUser.positionMode = runtimeUser.positionMode());
+            inverse.setUserPositionMode(user, runtimeUser.positionMode());
         }
     }
 
@@ -295,14 +287,10 @@ public final class RuntimeProjectionState {
         }
         global.instruments().forEach(change -> inverse.putOrRemove(instruments, change.symbol(), change.after()));
         if (global.nextLiquidationId() != null) {
-            long previous = nextLiquidationId;
-            inverse.mutate(() -> nextLiquidationId = previous,
-                    () -> nextLiquidationId = global.nextLiquidationId().after());
+            inverse.setNextLiquidationId(global.nextLiquidationId().after());
         }
         if (global.riskScanControl() != null) {
-            CoreRiskScanControlView previous = riskScanControl;
-            inverse.mutate(() -> riskScanControl = previous,
-                    () -> riskScanControl = global.riskScanControl().after());
+            inverse.setRiskScanControl(global.riskScanControl().after());
         }
         for (RuntimeCommitPatch.TreasuryAssetChange change : global.treasuryAssets()) {
             String asset = identities.asset(change.assetId());
@@ -343,142 +331,97 @@ public final class RuntimeProjectionState {
         return after != null ? after.userId() : before == null ? 0 : before.userId();
     }
 
-    private static RuntimeCommitPatch.UserChange userChange(
-            List<RuntimeCommitPatch.AccountLaneOwnerGroup> groups, long userId) {
-        for (RuntimeCommitPatch.AccountLaneOwnerGroup group : groups) {
-            for (RuntimeCommitPatch.UserChange change : group.users()) {
-                if (change.userId() == userId) return change;
-            }
-        }
-        return null;
-    }
-
-    private static boolean reservationPendingAfter(List<RuntimeCommitPatch.AccountLaneOwnerGroup> groups, long orderId) {
-        for (RuntimeCommitPatch.AccountLaneOwnerGroup group : groups) {
-            for (RuntimeCommitPatch.ReservationChange change : group.reservations()) {
-                if (change.orderId() == orderId) return change.pendingAfter();
-            }
-        }
-        return false;
-    }
-
     private static <K, V, C> void applyChanges(MutationJournal inverse, Map<K, V> values, List<C> changes,
                                                 Function<C, K> key, Function<C, V> after) {
         for (C change : changes) inverse.putOrRemove(values, key.apply(change), after.apply(change));
     }
 
-    private void prevalidate(RuntimeCommitPatch patch) {
-        RuntimeCommitPatch.IdentityView identities = patch.identities();
-        LongHashSet changedUsers = new LongHashSet();
-        for (RuntimeCommitPatch.AccountLaneOwnerGroup group : patch.accountLaneGroups()) {
-            group.users().forEach(change -> changedUsers.add(change.userId()));
-            group.balances().forEach(change -> changedUsers.add(change.key().userId()));
-            group.reservations().forEach(change -> changedUsers.add(userId(change.before(), change.after())));
-            group.positions().forEach(change -> changedUsers.add(userId(change.before(), change.after())));
-            for (RuntimeCommitPatch.OrderChange change : group.orders()) {
-                if (change.after() != null && change.businessAfter() == null) {
-                    throw new IllegalStateException("order business value is missing from commit patch");
+    private static final class UserPatchIndex {
+        private final ArrayList<UserChanges> ordered = new ArrayList<>();
+        private final LongObjectHashMap<UserChanges> byUser = new LongObjectHashMap<>();
+        private final LongHashSet pendingReservations = new LongHashSet();
+
+        private static UserPatchIndex create(List<RuntimeCommitPatch.AccountLaneOwnerGroup> groups) {
+            UserPatchIndex result = new UserPatchIndex();
+            for (RuntimeCommitPatch.AccountLaneOwnerGroup group : groups) {
+                for (RuntimeCommitPatch.UserChange change : group.users()) {
+                    result.user(change.userId()).userChange = change;
+                }
+                for (RuntimeCommitPatch.BalanceChange change : group.balances()) {
+                    result.user(change.key().userId()).balances.add(change);
+                }
+                for (RuntimeCommitPatch.ReservationChange change : group.reservations()) {
+                    long userId = userId(change.before(), change.after());
+                    if (userId != 0) result.user(userId).reservations.add(change);
+                    if (change.pendingAfter()) result.pendingReservations.add(change.orderId());
+                }
+                for (RuntimeCommitPatch.PositionChange change : group.positions()) {
+                    long userId = userId(change.before(), change.after());
+                    if (userId != 0) result.user(userId).positions.add(change);
                 }
             }
-            for (RuntimeCommitPatch.RiskSnapshotChange change : group.riskSnapshots()) {
-                identities.positionIdentity(change.riskKey());
-                if (change.after() != null) RuntimeStateMaterializer.riskSnapshot(change.after(), identities);
-            }
-            for (RuntimeCommitPatch.LiquidationChange change : group.liquidations()) {
-                if (change.after() != null) RuntimeStateMaterializer.liquidation(change.after(), identities);
-            }
-            for (RuntimeCommitPatch.ClientOrderChange change : group.clientOrders()) {
-                identities.clientOrderId(change.key().userId(), change.key().clientKey());
-            }
+            return result;
         }
-        changedUsers.remove(0L);
-        changedUsers.forEach(userId -> prevalidateUser(patch.accountLaneGroups(),
-                userChange(patch.accountLaneGroups(), userId), userId, identities));
-        RuntimeCommitPatch.GlobalOwnerGroup global = patch.globalOwnerGroup();
-        global.markPrices().forEach(change -> {
-            String symbol = identities.symbol(change.symbolId());
-            MarkPriceRuntime value = change.after();
-            if (value != null) {
-                new CoreMarkPriceState(symbol, value.instrumentVersion(), value.markPriceTicks(),
-                        value.priceSequence(), value.generatedAtEpochMillis());
-            }
-        });
-        global.riskScans().forEach(change -> {
-            identities.symbol(change.symbolId());
-            if (change.after() != null) RuntimeStateMaterializer.riskScan(change.after(), identities);
-        });
-        global.treasuryAssets().forEach(change -> identities.asset(change.assetId()));
-        global.treasuryFunding().forEach(change -> {
-            identities.symbol(change.symbolId());
-            if (change.after() != null && change.after().progress() != null) {
-                RuntimeStateMaterializer.fundingProgress(change.after().progress());
-            }
-        });
-        global.treasuryLifecycle().forEach(change -> {
-            identities.symbol(change.symbolId());
-            if (change.after() != null && change.after().progress() != null) {
-                RuntimeStateMaterializer.lifecycleProgress(change.after().progress());
-            }
-        });
+
+        private UserChanges user(long userId) {
+            UserChanges changes = byUser.get(userId);
+            if (changes != null) return changes;
+            changes = new UserChanges(userId);
+            byUser.put(userId, changes);
+            ordered.add(changes);
+            return changes;
+        }
     }
 
-    private void prevalidateUser(List<RuntimeCommitPatch.AccountLaneOwnerGroup> groups,
-                                 RuntimeCommitPatch.UserChange userChange, long userId,
-                                 RuntimeCommitPatch.IdentityView identities) {
-        if (userChange != null && userChange.after() == null) return;
-        MutableUser user = users.get(userId);
-        UserRuntime runtimeUser = userChange == null ? null : userChange.after();
-        if (user == null && runtimeUser == null) {
-            throw new IllegalStateException("typed patch lacks current user state: " + userId);
-        }
-        if (runtimeUser != null && runtimeUser.productLine() != productLine) {
-            throw new IllegalStateException("projection user product line mismatch");
-        }
-        int pendingRevisionDelta = 0;
-        for (RuntimeCommitPatch.AccountLaneOwnerGroup group : groups) {
-            for (RuntimeCommitPatch.BalanceChange change : group.balances()) {
-                if (change.key().userId() != userId) continue;
-                String asset = identities.asset(change.key().assetId());
-                RuntimeCommitPatch.UserBalance value = change.after();
-                if (value != null) {
-                    new AssetBalance(asset, Math.addExact(value.availableUnits(), value.pendingReservedUnits()),
-                            Math.subtractExact(value.lockedUnits(), value.pendingReservedUnits()));
-                }
-            }
-            for (RuntimeCommitPatch.ReservationChange change : group.reservations()) {
-                if (userId(change.before(), change.after()) != userId) continue;
-                if (change.pendingBefore()) pendingRevisionDelta = Math.incrementExact(pendingRevisionDelta);
-                if (change.pendingAfter()) pendingRevisionDelta = Math.decrementExact(pendingRevisionDelta);
-                if (change.after() != null && !change.pendingAfter()) {
-                    RuntimeStateMaterializer.reservation(change.after(), identities);
-                }
-            }
-            for (RuntimeCommitPatch.PositionChange change : group.positions()) {
-                if (userId(change.before(), change.after()) != userId) continue;
-                RuntimeIdentityRegistry.PositionIdentity identity = identities.positionIdentity(change.positionKey());
-                if (change.after() != null) {
-                    RuntimeStateMaterializer.position(change.positionKey(), change.after(), identities);
-                }
-                if (identity.userId() != userId) throw new IllegalStateException("projection position owner mismatch");
-            }
-        }
-        long baseRevision = user == null ? 0 : user.revision;
-        if (runtimeUser == null) Math.addExact(baseRevision, pendingRevisionDelta);
-        else Math.subtractExact(runtimeUser.revision(), userChange.pendingReservationCountAfter());
+    private static final class UserChanges {
+        private final long userId;
+        private RuntimeCommitPatch.UserChange userChange;
+        private final ArrayList<RuntimeCommitPatch.BalanceChange> balances = new ArrayList<>();
+        private final ArrayList<RuntimeCommitPatch.ReservationChange> reservations = new ArrayList<>();
+        private final ArrayList<RuntimeCommitPatch.PositionChange> positions = new ArrayList<>();
+
+        private UserChanges(long userId) { this.userId = userId; }
     }
 
-    private static final class MutationJournal {
-        private final ArrayList<Runnable> inverse = new ArrayList<>();
+    private final class MutationJournal {
+        private static final byte MAP = 1;
+        private static final byte ROOT_REVISION = 2;
+        private static final byte ROOT_BUSINESS_HASH = 3;
+        private static final byte ROOT_FUNDS_HASH = 4;
+        private static final byte ROOT_SEQUENCE = 5;
+        private static final byte USER_REVISION = 6;
+        private static final byte USER_POSITION_MODE = 7;
+        private static final byte NEXT_LIQUIDATION_ID = 8;
+        private static final byte RISK_SCAN_CONTROL = 9;
+
+        private byte[] types = new byte[32];
+        private Object[] targets = new Object[32];
+        private Object[] keys = new Object[32];
+        private Object[] previousValues = new Object[32];
+        private long[] previousLongs = new long[32];
+        private boolean[] previousPresence = new boolean[32];
+        private int size;
         private int remainingUntilFailure;
 
-        private MutationJournal(int remainingUntilFailure) {
+        private MutationJournal reset(int remainingUntilFailure) {
+            release();
             this.remainingUntilFailure = remainingUntilFailure;
+            return this;
+        }
+
+        private void release() {
+            java.util.Arrays.fill(targets, 0, size, null);
+            java.util.Arrays.fill(keys, 0, size, null);
+            java.util.Arrays.fill(previousValues, 0, size, null);
+            size = 0;
         }
 
         private <K, V> void putOrRemove(Map<K, V> values, K key, V value) {
-            boolean present = values.containsKey(key);
-            V previous = values.get(key);
-            inverse.add(() -> { if (present) values.put(key, previous); else values.remove(key); });
+            int index = append(MAP);
+            targets[index] = values;
+            keys[index] = key;
+            previousValues[index] = values.get(key);
+            previousPresence[index] = previousValues[index] != null || values.containsKey(key);
             if (value == null) values.remove(key); else values.put(key, value);
             afterMutation();
         }
@@ -487,10 +430,78 @@ public final class RuntimeProjectionState {
             putOrRemove(values, key, value == 0 ? null : value);
         }
 
-        private void mutate(Runnable rollback, Runnable mutation) {
-            inverse.add(rollback);
-            mutation.run();
+        private void setRevision(long value) {
+            int index = append(ROOT_REVISION);
+            previousLongs[index] = revision;
+            revision = value;
             afterMutation();
+        }
+
+        private void setBusinessStateHash(long value) {
+            int index = append(ROOT_BUSINESS_HASH);
+            previousLongs[index] = businessStateHash;
+            businessStateHash = value;
+            afterMutation();
+        }
+
+        private void setFundsStateHash(long value) {
+            int index = append(ROOT_FUNDS_HASH);
+            previousLongs[index] = fundsStateHash;
+            fundsStateHash = value;
+            afterMutation();
+        }
+
+        private void setSequence(long value) {
+            int index = append(ROOT_SEQUENCE);
+            previousLongs[index] = sequence;
+            sequence = value;
+            afterMutation();
+        }
+
+        private void setUserRevision(MutableUser user, long value) {
+            int index = append(USER_REVISION);
+            targets[index] = user;
+            previousLongs[index] = user.revision;
+            user.revision = value;
+            afterMutation();
+        }
+
+        private void setUserPositionMode(MutableUser user, CorePositionMode value) {
+            int index = append(USER_POSITION_MODE);
+            targets[index] = user;
+            previousValues[index] = user.positionMode;
+            user.positionMode = value;
+            afterMutation();
+        }
+
+        private void setNextLiquidationId(long value) {
+            int index = append(NEXT_LIQUIDATION_ID);
+            previousLongs[index] = nextLiquidationId;
+            nextLiquidationId = value;
+            afterMutation();
+        }
+
+        private void setRiskScanControl(CoreRiskScanControlView value) {
+            int index = append(RISK_SCAN_CONTROL);
+            previousValues[index] = riskScanControl;
+            riskScanControl = value;
+            afterMutation();
+        }
+
+        private int append(byte type) {
+            if (size == types.length) grow();
+            types[size] = type;
+            return size++;
+        }
+
+        private void grow() {
+            int capacity = Math.multiplyExact(types.length, 2);
+            types = java.util.Arrays.copyOf(types, capacity);
+            targets = java.util.Arrays.copyOf(targets, capacity);
+            keys = java.util.Arrays.copyOf(keys, capacity);
+            previousValues = java.util.Arrays.copyOf(previousValues, capacity);
+            previousLongs = java.util.Arrays.copyOf(previousLongs, capacity);
+            previousPresence = java.util.Arrays.copyOf(previousPresence, capacity);
         }
 
         private void afterMutation() {
@@ -500,7 +511,28 @@ public final class RuntimeProjectionState {
         }
 
         private void rollback() {
-            for (int index = inverse.size() - 1; index >= 0; index--) inverse.get(index).run();
+            for (int index = size - 1; index >= 0; index--) {
+                switch (types[index]) {
+                    case MAP -> rollbackMap(index);
+                    case ROOT_REVISION -> revision = previousLongs[index];
+                    case ROOT_BUSINESS_HASH -> businessStateHash = previousLongs[index];
+                    case ROOT_FUNDS_HASH -> fundsStateHash = previousLongs[index];
+                    case ROOT_SEQUENCE -> sequence = previousLongs[index];
+                    case USER_REVISION -> ((MutableUser) targets[index]).revision = previousLongs[index];
+                    case USER_POSITION_MODE -> ((MutableUser) targets[index]).positionMode =
+                            (CorePositionMode) previousValues[index];
+                    case NEXT_LIQUIDATION_ID -> nextLiquidationId = previousLongs[index];
+                    case RISK_SCAN_CONTROL -> riskScanControl = (CoreRiskScanControlView) previousValues[index];
+                    default -> throw new IllegalStateException("unknown projection rollback operation");
+                }
+            }
+        }
+
+        @SuppressWarnings({"rawtypes", "unchecked"})
+        private void rollbackMap(int index) {
+            Map values = (Map) targets[index];
+            if (previousPresence[index]) values.put(keys[index], previousValues[index]);
+            else values.remove(keys[index]);
         }
     }
 
