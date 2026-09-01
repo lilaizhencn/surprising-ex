@@ -732,7 +732,7 @@ class RuntimeCommitRecoveryTest {
         long[] matcherPrefixBefore = ((long[]) field(state, "appliedMatcherPrefixDigests")).clone();
 
         state.captureCommittedPatchesForTest();
-        ClusterReplay replay = replayClusterCommand(service, batch);
+        ClusterReplay replay = replayClusterCommandRaw(service, batch);
         assertThat(replay.responses()).isEmpty();
         long sequence = state.matchingSequence(batch.header().commandId());
         var first = awaitMatching(state, sequence);
@@ -742,7 +742,7 @@ class RuntimeCommitRecoveryTest {
         });
         state.publishMatchingCompletion(sequence, first);
         Throwable divergence = org.assertj.core.api.Assertions.catchThrowable(() ->
-                service.onTimerEvent(sequence, batch.header().submittedAtEpochMillis()));
+                service.doBackgroundWork(System.nanoTime()));
         assertThat(replay.responses()).isEmpty();
         long[] matcherAfterFirst = ((long[]) field(state, "appliedMatcherSequences")).clone();
         long[] matcherPrefixAfterFirst = ((long[]) field(state, "appliedMatcherPrefixDigests")).clone();
@@ -816,6 +816,17 @@ class RuntimeCommitRecoveryTest {
     }
 
     private static ClusterReplay replayClusterCommand(SurprisingClusteredService service, CoreMessage command) {
+        ClusterReplay replay = replayClusterCommandRaw(service, command);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (replay.responses().isEmpty() && System.nanoTime() < deadline) {
+            if (service.doBackgroundWork(System.nanoTime()) == 0) Thread.onSpinWait();
+        }
+        assertThat(replay.responses()).isNotEmpty();
+        return replay;
+    }
+
+    private static ClusterReplay replayClusterCommandRaw(
+            SurprisingClusteredService service, CoreMessage command) {
         List<byte[]> responses = new ArrayList<>();
         byte[] encoded = CoreMessageCodec.encode(command);
         service.onSessionMessage(clusterClient(responses), command.header().submittedAtEpochMillis(),
@@ -830,12 +841,6 @@ class RuntimeCommitRecoveryTest {
         ArrayList<ResponseView> responses = new ArrayList<>();
         for (CoreMessage command : commands) {
             ClusterReplay replay = replayClusterCommand(service, command);
-            long sequence;
-            while ((sequence = state.matchingSequence(command.header().commandId())) != 0) {
-                var matching = awaitMatching(state, sequence);
-                state.publishMatchingCompletion(sequence, matching);
-                service.onTimerEvent(sequence, command.header().submittedAtEpochMillis());
-            }
             CoreResponse completed = replay.response();
             assertThat(completed.status()).as(completed.resultCode().name())
                     .isIn(ResponseStatus.APPLIED, ResponseStatus.DUPLICATE);

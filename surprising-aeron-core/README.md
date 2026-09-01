@@ -21,13 +21,13 @@ CROSS 只共享该 Core 内权益，ISOLATED 绑定 position identity。只保�
 | `surprising-aeron-exporter` | P5 可靠 Exporter 的最小 sink 边界。 |
 | `surprising-aeron-tools` | Cluster 探针、状态 hash 查询和只读离线 replay 诊断；不得作为生产恢复或 snapshot 来源。 |
 
-## 当前同步 Owner 主链路
+## 当前单 Matcher 流水线主链路
 
-当前生产主链路固定为一个 Aeron Cluster service owner、一个 exchange-core matching engine（exchange-core risk engine 为 0）和逻辑
-Account Lane。`DeterministicExchangeCoreAdapter` 通过 fork 的 `SynchronousMatchingEngine` 在 owner 回调内
-直接撮合；同一回调随后按 userId 路由到目标 Lane，串行完成资金、订单、持仓、手续费与 Treasury delta，
-最后一次性发布 Core Fact 和响应。不存在 Disruptor matcher 线程、matcher completion queue、Account Lane
-工作线程、1 ms Cluster timer 续执行或跨线程 ACK barrier。
+当前生产主链路固定为一个 Aeron Cluster service owner、一个 matcher worker、一个 exchange-core matching engine
+（exchange-core risk engine 为 0）和逻辑 Account Lane。owner 把已准备的不可变命令写入预分配的有界 SPSC ring；
+matcher worker 独占 fork 的 `SynchronousMatchingEngine` 并按序写回结果；owner 按 Core sequence 批量收割连续结果，
+再按 userId 路由到目标 Lane，串行完成资金、订单、持仓、手续费与 Treasury delta，最后一次性发布 Core Fact 和响应。
+不存在 Disruptor、逐命令 Future、Account Lane 工作线程、1 ms Cluster timer 续执行或跨线程 ACK barrier。
 
 Account Lane 仍是资金隔离、哈希、快照与审计边界，但不是并行执行器。多成交、多用户、跨 Lane 的一笔命令
 使用同一套 `MatcherSettlementPlan` 和同一 owner transaction；任何 Lane 失败都由
@@ -139,12 +139,12 @@ P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣
   post-only 语义，外层不得查 book 后模拟，也不得建立并行可执行 book。
   Core 的 `CoreOrderState` 只保存业务元数据和活动状态，不保存可重建 FIFO 的 priority sequence。
 - adapter 固定使用 `RiskProcessingMode.MATCHING_ONLY` 并禁用 exchange-core margin trading；内部 user/symbol/risk module 是需随 matcher snapshot 恢复的技术状态，不是业务资金、持仓或保证金权威。
-- Adapter 在 owner 上调用 `SynchronousMatchingEngine`，每条命令直接取得一个确定性的 `CoreMatchingResult`。
+- Adapter 只在 matcher worker 上调用 `SynchronousMatchingEngine`，每条命令产生一个确定性的 `CoreMatchingResult`。
   matching engine 固定为 1；native sequence 与滚动 prefix 仍写入 snapshot/replay 证据，倒退或 prefix 断裂立即 fail closed。
-  结果只暂存在当前 `LaneCommandContextRing.Context`，没有 ExchangeCore ring、异步 callback、completion mailbox 或 timer。
+  命令与结果只经过固定容量 SPSC ring 和当前 `LaneCommandContextRing.Context`，没有 ExchangeCore ring、异步 callback、Future 或 timer。
   `MatcherSettlementPlan` 一次完成结果分类、用户收集和 Lane event slice 构造，后续 Lane 不重复遍历 matcher 链。
-- Pending matcher ring 只用于批量/触发单在同一 owner transaction 内的确定性 continuation 与故障证据；
-  它不表示跨线程 in-flight。热路不维护逐命令 Future、active set、completed-result map 或 completion token。
+- Pending matcher ring 同时表达最多 256 个跨线程 in-flight 命令、批量/触发单的确定性 continuation 与故障证据；
+  热路不维护逐命令 Future、active set、completed-result map 或 completion token。
 - `saturatedMatchingWorkload` 使用共享有界窗口的持续滑动 feeder：同一方向内每完成一组 maker/taker 依赖就立即补入
   下一币对，不再整窗排空后重新提交；一个方向全部完成后才反向，防止预置深度场景产生方向穿越。
   每个 symbol 同一时刻最多一组订单在途，保持账户依赖和 Core sequence 提交顺序；

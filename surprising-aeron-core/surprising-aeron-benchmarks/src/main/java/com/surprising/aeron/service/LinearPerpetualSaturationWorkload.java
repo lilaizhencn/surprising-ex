@@ -89,6 +89,7 @@ final class LinearPerpetualSaturationWorkload {
         int openingActiveOrders = harness.state().tradingState().orders().size();
         int symbolCount = template.symbols().size();
         int directionCount = operationsPerRun / operationsPerDirection;
+        int completionBatchSize = maxInFlight < 64 ? 2 : Math.min(64, maxInFlight / 4);
         return new SaturationScenario() {
             private final long[] entryAcceptedLatencies = new long[operationsPerRun];
             private final long[] acceptedTerminalLatencies = new long[operationsPerRun];
@@ -130,17 +131,29 @@ final class LinearPerpetualSaturationWorkload {
                 scheduledEntrySequence = 0;
                 prepareRun();
                 long lastProgressNanos = System.nanoTime();
-                while (latencySamples < operationsPerRun) {
-                    int completed = fillWindow(harness);
-                    sampleWindow(harness);
-                    if (completed != 0) {
-                        lastProgressNanos = System.nanoTime();
-                    } else {
-                        if (System.nanoTime() - lastProgressNanos >= PROGRESS_TIMEOUT_NANOS) {
-                            throw new IllegalStateException("synchronous owner made no progress within 30 seconds");
+                harness.admissionBackpressureDrain(() -> completeReady(harness));
+                try {
+                    while (latencySamples < operationsPerRun) {
+                        int filled = fillWindow(harness);
+                        sampleWindow(harness);
+                        int completed = completeReady(harness);
+                        if (filled != 0 || completed != 0) {
+                            lastProgressNanos = System.nanoTime();
+                        } else {
+                            if (harness.pendingSubmissions() == 0) {
+                                throw new IllegalStateException(
+                                        "continuous feeder has no runnable or in-flight work");
+                            }
+                            if (System.nanoTime() - lastProgressNanos >= PROGRESS_TIMEOUT_NANOS) {
+                                throw new IllegalStateException(
+                                        "continuous feeder made no progress within 30 seconds");
+                            }
+                            Thread.onSpinWait();
                         }
-                        Thread.onSpinWait();
                     }
+                    harness.drainSubmitted();
+                } finally {
+                    harness.admissionBackpressureDrain(null);
                 }
                 runSequence = Math.addExact(runSequence, directionCount);
                 acceptedCoreMessages = Math.subtractExact(harness.acceptedCoreMessages(), acceptedCoreBefore);
@@ -149,6 +162,10 @@ final class LinearPerpetualSaturationWorkload {
                     throw new IllegalStateException("saturation workload lost completion latency samples");
                 }
                 return harness.state().snapshotBusinessStateHash();
+            }
+
+            private int completeReady(LinearPerpetualBenchmarkSupport.Harness target) {
+                return target.awaitReadyMatching(completionBatchSize, this::record);
             }
 
             private void prepareRun() {
@@ -166,7 +183,8 @@ final class LinearPerpetualSaturationWorkload {
 
             private int fillWindow(LinearPerpetualBenchmarkSupport.Harness target) {
                 int filled = 0;
-                while (readySize != 0 && scheduledOperations < operationsPerRun) {
+                while (readySize != 0 && scheduledOperations < operationsPerRun
+                        && target.pendingSubmissions() <= maxInFlight - 2) {
                     int symbolIndex = dequeue();
                     long makerId = template.hftMakers().get(symbolIndex);
                     long takerId = template.hftTakers().get(symbolIndex);
@@ -174,6 +192,7 @@ final class LinearPerpetualSaturationWorkload {
                             || usersInFlight.contains(takerId)) {
                         throw new IllegalStateException("invalid continuous feeder dependency state");
                     }
+                    int pendingBefore = target.pendingSubmissions();
                     boolean makerSells = ((runSequence + currentDirection) & 1) == 0;
                     CoreOrderSide makerSide = makerSells ? CoreOrderSide.SELL : CoreOrderSide.BUY;
                     CoreOrderSide takerSide = makerSells ? CoreOrderSide.BUY : CoreOrderSide.SELL;
@@ -181,11 +200,11 @@ final class LinearPerpetualSaturationWorkload {
                     usersInFlight.add(takerId);
                     pairInFlight[symbolIndex] = true;
                     String symbol = template.symbols().get(symbolIndex);
-                    scheduledOperations += 2;
                     submit(target, makerId, symbol, makerSide, CoreTimeInForce.GTC);
                     submit(target, takerId, symbol, takerSide, CoreTimeInForce.IOC);
+                    scheduledOperations += 2;
                     filled += 2;
-                    if (scheduledOperations > maxInFlight) refillOperations += 2;
+                    if (pendingBefore != 0) refillOperations += 2;
                 }
                 return filled;
             }
@@ -199,18 +218,20 @@ final class LinearPerpetualSaturationWorkload {
                 long scheduledEntryNanos = Math.addExact(firstScheduledEntryNanos,
                         Math.multiplyExact(scheduledEntrySequence++,
                                 TimeUnit.SECONDS.toNanos(1) / targetOperationsPerSecond));
-                var completion = target.submitScheduled(
-                        target.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY,
-                                userId, TradingCommandCodec.encodePlaceOrder(order)),
-                        scheduledEntryNanos);
-                record(userId, completion.entryNanos(), completion.acceptedNanos(), completion.terminalNanos());
+                target.submitScheduled(target.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY,
+                        userId, TradingCommandCodec.encodePlaceOrder(order)), scheduledEntryNanos);
             }
 
             private void sampleWindow(LinearPerpetualBenchmarkSupport.Harness target) {
                 int backlog = target.pendingSubmissions();
                 backlogTotal = Math.addExact(backlogTotal, backlog);
                 backlogSamples = Math.incrementExact(backlogSamples);
-                if (backlog >= maxInFlight - 1) fullWindowSamples = Math.incrementExact(fullWindowSamples);
+                if (backlog >= maxInFlight - 1) {
+                    fullWindowSamples = Math.incrementExact(fullWindowSamples);
+                }
+                if (scheduledOperations < operationsPerRun && backlog == 0) {
+                    producerStarvationSamples = Math.incrementExact(producerStarvationSamples);
+                }
             }
 
             private void record(long userId, long entryNanos, long acceptedNanos, long terminalNanos) {

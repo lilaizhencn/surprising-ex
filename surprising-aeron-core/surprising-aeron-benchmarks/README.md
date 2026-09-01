@@ -85,7 +85,7 @@ quantile 的中位数称为全局样本 percentile；`quantileAggregation=MERGED
 是 qualification 的强制合同。
 
 `all` 模式依次运行统一 Maven 精确测试、probe、无 profiler JMH、GC、JFR/NMT、固定 256 in-flight 的
-saturation、owner commit 和 40 分钟 soak。同步 matcher 没有 completion/projection wait strategy；旧环境参数不参与
+saturation、owner commit 和 40 分钟 soak。单 matcher SPSC pipeline 没有 Disruptor/projection wait strategy；旧环境参数不参与
 生产主链路。soak 至少要求 3 个 GC 后样本，检查 live-set、direct/mapped、
 线程、文件描述符和 buffer-pool balance 的增长斜率。post-GC 点来自 HotSpot GC notification
 中的 GC id 与 `memoryUsageAfterGc`，不再从采样窗口内 collection count 变化推断；所有指标使用
@@ -98,9 +98,8 @@ OldObject sample，不支持时只允许 recording metadata 支撑且带原因�
 斜率异常后的升级诊断，不能与基础吞吐轮直接比较。
 
 10k users/512 symbols/固定 256 in-flight 的 sustained saturation 使用 100k/s constant-arrival 调度时间戳，
-在 Harness 的真实同步 `state.apply` 入口和 owner terminal 返回边界分别打点。同步路径的期末 matcher backlog、
-completion mailbox 和 completion batch 必须为零；单 transaction 的瞬时 matcher backlog 上限为 1。
-`maxInFlight=256` 是驱动端固定上限，不能解释为 Core 内部异步队列。
+在 Harness 的真实 `state.apply` 入口和 owner terminal 返回边界分别打点。期末 matcher command/completion backlog
+必须为零；Core 内部 SPSC pipeline 和驱动端共同执行真实的 256 in-flight 上限，owner 每轮最多收割 64 个连续完成结果。
 scale mixed workload
 同样只在 JFR event enabled 时启用 open-loop recorder，并通过无 `default` 的 `CoreMessageType`
 穷举 switch 分类为 PLACE_ORDER、CANCEL_ORDER、AMEND_ORDER、ORDER_BATCH、TRIGGER_ORDER、

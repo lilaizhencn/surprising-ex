@@ -79,7 +79,7 @@ class SurprisingClusteredServiceTest {
     }
 
     @Test
-    void sessionCallbackAppliesMatchingExactlyOnceWithoutATimer() {
+    void backgroundWorkAppliesMatchingExactlyOnceWithoutAReplicatedTimer() {
         SurprisingClusteredService service = service();
         List<byte[]> responses = new CopyOnWriteArrayList<>();
         service.onStart(cluster(), null);
@@ -96,6 +96,8 @@ class SurprisingClusteredServiceTest {
 
             onSessionMessage(service, responses, place);
             service.onTimerEvent(service.state().appliedCommandCount(), 1_001);
+            awaitBackgroundWork(service, () -> service.state().pendingMatchingCount() == 0
+                    && responses.size() == 1);
 
             assertThat(service.state().pendingMatchingCount()).isZero();
             assertThat(responses).hasSize(1);
@@ -107,7 +109,7 @@ class SurprisingClusteredServiceTest {
     }
 
     @Test
-    void eachSessionMessageCommitsItsOwnMatchingBeforeTheFollowingFact() throws Exception {
+    void deferredIngressCommitsMatchingBeforeTheFollowingFact() throws Exception {
         SurprisingClusteredService service = service();
         List<byte[]> responses = new CopyOnWriteArrayList<>();
         service.onStart(cluster(), null);
@@ -122,15 +124,18 @@ class SurprisingClusteredServiceTest {
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(906, "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "session-fence")),
                     UUID.fromString("00000000-0000-0000-0000-000000000013"));
             onSessionMessage(service, responses, place);
-            assertThat(state.pendingMatchingCount()).isZero();
-            assertThat(state.tradingState().order(906).status())
-                    .isEqualTo(com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
+            assertThat(state.pendingMatchingCount()).isOne();
+            assertThat(responses).isEmpty();
 
             onSessionMessage(service, responses, command(CoreMessageType.PROBE_INCREMENT, 3, 1001,
                     CoreProtocol.probePayload(1),
                     UUID.fromString("00000000-0000-0000-0000-000000000014")));
+            awaitBackgroundWork(service, () -> state.pendingMatchingCount() == 0
+                    && responses.size() == 2);
 
             assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(state.tradingState().order(906).status())
+                    .isEqualTo(com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
             assertThat(responses).hasSize(2);
             var facts = state.exportState().pending().stream()
                     .map(message -> CoreExportCodec.decodeEvent(message.payload()))
@@ -575,6 +580,15 @@ class SurprisingClusteredServiceTest {
         byte[] encoded = CoreMessageCodec.encode(request);
         service.onSessionMessage(clientSession(responses), 1_000, new UnsafeBuffer(encoded), 0,
                 encoded.length, aeronHeader());
+    }
+
+    private static void awaitBackgroundWork(
+            SurprisingClusteredService service, java.util.function.BooleanSupplier completed) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!completed.getAsBoolean() && System.nanoTime() < deadline) {
+            if (service.doBackgroundWork(System.nanoTime()) == 0) Thread.onSpinWait();
+        }
+        assertThat(completed.getAsBoolean()).isTrue();
     }
 
     private static Header aeronHeader() {

@@ -15,7 +15,7 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 |---|---|
 | P0 | canonical 中文 P0-P5 规范注册与分支安全：先发布根 README 契约，保留既有脏改动。 |
 | P1 | reservation、`PositionCloseCapacity`、价格分离与累计手续费：衍生品普通单为全量开仓风险预留，reduce-only 才可省略开仓保证金。 |
-| P2 | deterministic `MATCHING_ONLY` 推进与成对快照：adapter 在 Aeron owner 回调内调用单个同步 matcher；native sequence/prefix 与 Core 状态成对快照，Core commit 与 Core Fact 按全局 Core sequence 确定提交。 |
+| P2 | deterministic `MATCHING_ONLY` 推进与成对快照：Aeron owner 通过有界 SPSC pipeline 调用单个同步 matcher worker；native sequence/prefix 与 Core 状态成对快照，Core commit 与 Core Fact 按全局 Core sequence 确定提交。 |
 | P3 | TradingRuntimeState 生产写入权威：六条产品线的 Runtime owner 线程是唯一交易裁决状态，immutable `TradingCoreState` 仅是快照、事实增量、恢复、hash 与对账投影。 |
 | P4 | six isolated settlement kernels：Spot、LinearPerpetual、InversePerpetual、LinearDelivery、InverseDelivery、Option 各有穷尽且隔离的结算内核。 |
 | P5 | FundsDelta、Treasury、操作级舍入与连续性：每命令/资产资金变动不可变且确定性排序，Treasury 子账本、残差和 Core Fact 前后状态证据显式核算。 |
@@ -28,8 +28,8 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 当前实现状态：P0-P5 与 P10-A 至 P10-F 的主体迁移已完成。所有账户、风险、生命周期和成交变更统一由
 Aeron service owner 通过同一个 Account Lane mutation 入口执行；Lane 只做确定性路由、资金所有权、局部 hash 与
 snapshot section 隔离，不创建线程。跨 Lane 命令按 Lane id 固定顺序串行修改，最后一次性合并 Treasury delta、
-验证资金守恒并发布 Core Fact；任一环节失败由命令 checkpoint 整体回滚。主链路没有 Disruptor matcher、completion
-mailbox、Lane worker、Cluster timer continuation 或 projection replica。query/read fence、snapshot capture/restore
+验证资金守恒并发布 Core Fact；任一环节失败由命令 checkpoint 整体回滚。主链路只有一个预分配 SPSC matcher
+command/completion ring，不使用 Disruptor、Future、Lane worker、Cluster timer continuation 或 projection replica。query/read fence、snapshot capture/restore
 仍以同一全局 sequence 为一致性边界。
 P10-G 使用真实 HTTP 开放环门禁，只有保存 1,000 用户、至少 200 symbol、100k/s offered rate、
 计量窗口内至少 100k/s 实际终态吞吐、40 分钟、JFR 和资金/盘口核对 artifact 后才可标记生产认证完成。普通下单只提交一次正式 `PLACE_ORDER`，
@@ -254,8 +254,8 @@ snapshot/outbox 持久化才建立显式 fence。matcher 之前的业务拒绝�
 双写或 feature flag 路径。
 
 Matcher continuation 与 Lane command context 共用按 Core sequence 定位的预分配 ring；pending 顺序也由 primitive
-sequence ring 保存。owner 不为撮合命令维护 Future、active set、completed-result map 或 completion mailbox；同步 matcher
-结果直接写入当前 command context，并在同一 owner callback 内消费。默认关闭的 matching phase 诊断不会执行 `nanoTime`
+sequence ring 保存。owner 不为撮合命令维护 Future、active set 或 completed-result map；一个 matcher worker 从有界 SPSC
+ring 按序取命令，owner 按 Core sequence 批量收割连续 completion 并落账。默认关闭的 matching phase 诊断不会执行 `nanoTime`
 或写计时 map。永续订单
 准入的 open-interest 比例计算和 risk bracket 选择使用精确 long fast path，只有真实 long 乘法溢出才进入
 `BigInteger` fallback；同一命令的杠杆和 matcher evidence 不再重复查询或重复解码。
@@ -392,10 +392,10 @@ QUALIFICATION_RUN_ID=linear-perpetual-scale \
 撮合持续饱和能力必须与上述重生命周期矩阵分开测量。`saturation` 模式只使用一个共享 Product Core、一个
 确定性 owner 和 1 个同步 matching engine，在 10,000 个零售用户（另有按 symbol 隔离的基准基础设施账户）、
 512 个活跃 symbol 上连续提交方向相反且最终净持仓归零的
-maker/taker 订单；driver 固定 `256 in-flight` 上限，不采集其他档位。每条命令在同一 owner callback 内同步撮合、
-结算和终态返回，不存在 matcher drain 或等待策略对照。结果以 terminal business operations/s 为主吞吐，以
+maker/taker 订单；driver 固定 `256 in-flight` 上限，不采集其他档位。owner 连续准备命令，单个 matcher worker
+按序撮合；owner 同时批量提交上一段连续 completion 的账户结算和终态响应。结果以 terminal business operations/s 为主吞吐，以
 terminal Core messages/s 解释协议开销，同时从 JFR 自定义事件记录三段尾延迟；matcher 期末 backlog 必须为零，
-单个 owner transaction 注册到同步完成之间的瞬时 backlog 上限为 1，
+matcher SPSC pipeline 与 driver 的最大在途上限均为 256，owner 每次最多批量提交 64 个连续完成结果，
 结束后校验未完成命令为零、活动订单不增长和资金守恒：
 
 ```bash

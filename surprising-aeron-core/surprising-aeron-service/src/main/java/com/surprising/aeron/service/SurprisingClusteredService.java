@@ -30,6 +30,8 @@ import org.agrona.concurrent.UnsafeBuffer;
 public final class SurprisingClusteredService implements ClusteredService {
 
     private static final int MAX_PENDING_EGRESS_PER_SESSION = 64;
+    private static final int MATCHING_COMPLETION_BATCH_SIZE = 64;
+    private static final int DEFERRED_INGRESS_BATCH_SIZE = 64;
     private static final long SNAPSHOT_TIMEOUT_SECONDS = 30;
 
     private final ProductLine productLine;
@@ -39,6 +41,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     private final Map<Long, PendingEgress> pendingEgress = new HashMap<>();
     private final Set<Long> activeEgressSessions = new HashSet<>();
     private final Map<Long, ArrayDeque<PendingClient>> pendingClients = new HashMap<>();
+    private final ArrayDeque<DeferredInbound> deferredInbound = new ArrayDeque<>();
     private long snapshotFenceNotReadyCount;
     private long snapshotFenceTimeoutCount;
 
@@ -56,6 +59,7 @@ public final class SurprisingClusteredService implements ClusteredService {
         pendingEgress.clear();
         activeEgressSessions.clear();
         pendingClients.clear();
+        deferredInbound.clear();
         snapshotFenceNotReadyCount = 0;
         snapshotFenceTimeoutCount = 0;
         idleStrategy = cluster.idleStrategy();
@@ -83,12 +87,30 @@ public final class SurprisingClusteredService implements ClusteredService {
     }
 
     private void processRequest(ClientSession session, CoreMessage request, long timestamp, long clusterPosition) {
+        if (!deferredInbound.isEmpty() || shouldDeferWhileMatching(request)) {
+            deferredInbound.addLast(new DeferredInbound(session, request, timestamp, clusterPosition));
+            return;
+        }
+        processRequestNow(session, request, timestamp, clusterPosition);
+    }
+
+    private boolean shouldDeferWhileMatching(CoreMessage request) {
+        if (state.firstPendingMatchingSequence() == 0) return false;
+        return request.header().kind() != WireMessageKind.COMMAND
+                || (!CoreProbeState.isMatchingCommand(request.header().messageType())
+                && request.header().messageType() != CoreMessageType.ACK_EXPORT);
+    }
+
+    private void processRequestNow(
+            ClientSession session, CoreMessage request, long timestamp, long clusterPosition) {
         CoreResponse result = state.apply(request, timestamp, clusterPosition);
         long matchingSequence = state.matchingSequence(request.header().commandId());
-        if (state.firstPendingMatchingSequence() != 0) {
-            CoreResponse matchingResult = state.completeMatchingSynchronously(
-                    matchingSequence, timestamp, clusterPosition);
-            if (matchingSequence > 0) result = matchingResult;
+        if (matchingSequence > 0) {
+            if (session != null) {
+                pendingClients.computeIfAbsent(matchingSequence, ignored -> new ArrayDeque<>())
+                        .addLast(new PendingClient(session, request.header()));
+            }
+            return;
         }
         long querySequence = state.querySequence(request.header().commandId());
         if (querySequence != 0) {
@@ -146,6 +168,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     private SectionedCoreSnapshotCodec.SectionedSnapshot captureSnapshotSections(
             long snapshotId, long deadlineNanos) {
         try {
+            drainIngressBeforeSnapshot(deadlineNanos);
             state.beginSnapshot(snapshotId, deadlineNanos);
             idleStrategy.reset();
             while (true) {
@@ -181,6 +204,10 @@ public final class SurprisingClusteredService implements ClusteredService {
     @Override
     public int doBackgroundWork(long nowNs) {
         int work = 0;
+        long clusterTimestamp = cluster == null ? 0 : cluster.time();
+        long clusterPosition = cluster == null ? 0 : cluster.logPosition();
+        work += commitReadyMatching(clusterTimestamp, clusterPosition, false);
+        work += drainDeferredIngress();
         Iterator<Long> sessions = activeEgressSessions.iterator();
         while (sessions.hasNext()) {
             Long sessionId = sessions.next();
@@ -212,11 +239,55 @@ public final class SurprisingClusteredService implements ClusteredService {
         return work;
     }
 
+    private int commitReadyMatching(long clusterTimestamp, long clusterPosition, boolean awaitFirst) {
+        return state.commitReadyMatching(MATCHING_COMPLETION_BATCH_SIZE,
+                clusterTimestamp, clusterPosition, awaitFirst, this::completeMatchingClients);
+    }
+
+    private void completeMatchingClients(long sequence, CoreResponse response) {
+        ArrayDeque<PendingClient> clients = pendingClients.remove(sequence);
+        if (clients == null) return;
+        for (PendingClient client : clients) {
+            if (!client.session().isClosing()) {
+                offerResponse(client.session(), client.requestHeader().response(
+                        responseType(client.requestHeader())), response);
+            }
+        }
+    }
+
+    private int drainDeferredIngress() {
+        int deferred = 0;
+        while (state.firstPendingMatchingSequence() == 0
+                && !deferredInbound.isEmpty()
+                && deferred < DEFERRED_INGRESS_BATCH_SIZE) {
+            DeferredInbound inbound = deferredInbound.removeFirst();
+            processRequestNow(inbound.session(), inbound.request(),
+                    inbound.timestamp(), inbound.clusterPosition());
+            deferred++;
+        }
+        return deferred;
+    }
+
+    private void drainIngressBeforeSnapshot(long deadlineNanos) {
+        while (state.firstPendingMatchingSequence() != 0 || !deferredInbound.isEmpty()) {
+            int work = commitReadyMatching(cluster == null ? 0 : cluster.time(),
+                    cluster == null ? 0 : cluster.logPosition(), false);
+            work += drainDeferredIngress();
+            if (work == 0) {
+                if (System.nanoTime() >= deadlineNanos) {
+                    throw new CoreProbeState.SnapshotFenceTimeoutException();
+                }
+                Thread.onSpinWait();
+            }
+        }
+    }
+
     @Override
     public void onTerminate(Cluster cluster) {
         pendingEgress.clear();
         activeEgressSessions.clear();
         pendingClients.clear();
+        deferredInbound.clear();
         this.cluster = null;
         if (state != null) {
             state.close();
@@ -402,6 +473,10 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     private record PendingClient(ClientSession session,
                                  com.surprising.aeron.protocol.CoreMessageHeader requestHeader) {
+    }
+
+    private record DeferredInbound(ClientSession session, CoreMessage request,
+                                   long timestamp, long clusterPosition) {
     }
 
     private static CoreMessageType responseType(com.surprising.aeron.protocol.CoreMessageHeader requestHeader) {

@@ -370,4 +370,12 @@ public final class TradingCoreRuntime implements AutoCloseable {
         runtimeState.close();
         matcher.close();
     }
+
+    void closeOwnerState() {
+        runtimeState.close();
+    }
+
+    void closeMatcher() {
+        matcher.close();
+    }
 }

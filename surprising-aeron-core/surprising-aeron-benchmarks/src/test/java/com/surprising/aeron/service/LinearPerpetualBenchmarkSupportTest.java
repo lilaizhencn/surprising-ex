@@ -253,9 +253,9 @@ class LinearPerpetualBenchmarkSupportTest {
                 assertThat(scenario.operations()).isEqualTo(4_096);
                 assertThat(scenario.acceptedOperations()).isEqualTo(scenario.terminalOperations());
                 assertThat(scenario.acceptedCoreMessages()).isEqualTo(scenario.terminalCoreMessages());
-                assertThat(scenario.maxBacklog()).isEqualTo(1);
-                assertThat(scenario.averageMatchingBacklog()).isZero();
-                assertThat(scenario.fullWindowPercentage()).isZero();
+                assertThat(scenario.maxBacklog()).isEqualTo(8);
+                assertThat(scenario.averageMatchingBacklog()).isPositive();
+                assertThat(scenario.fullWindowPercentage()).isPositive();
                 assertThat(scenario.refillOperations()).isGreaterThan(3_800);
                 assertThat(scenario.producerStarvationPercentage()).isZero();
                 assertThat(scenario.completedLatencySamples()).isEqualTo(4_096);
