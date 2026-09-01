@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.product.api.ProductLine;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -32,6 +34,16 @@ class CoreStateQueryCodecTest {
                 .isEqualTo(CoreStateQueryCodec.encodeUserState(user).length);
         assertThat(CoreStateQueryCodec.encodedOrderStateLength(order))
                 .isEqualTo(CoreStateQueryCodec.encodeOrderState(order).length);
+        ByteBuffer directUser = ByteBuffer.allocate(CoreStateQueryCodec.encodedUserStateLength(user))
+                .order(ByteOrder.LITTLE_ENDIAN);
+        CoreStateQueryCodec.writeUserState(directUser, user);
+        ByteBuffer directOrder = ByteBuffer.allocate(CoreStateQueryCodec.encodedOrderStateLength(order))
+                .order(ByteOrder.LITTLE_ENDIAN);
+        CoreStateQueryCodec.writeOrderState(directOrder, order);
+        assertThat(directUser.position()).isEqualTo(directUser.capacity());
+        assertThat(directOrder.position()).isEqualTo(directOrder.capacity());
+        assertThat(directUser.array()).containsExactly(CoreStateQueryCodec.encodeUserState(user));
+        assertThat(directOrder.array()).containsExactly(CoreStateQueryCodec.encodeOrderState(order));
         assertThat(CoreStateQueryCodec.decodeClientOrderStateQuery(
                 CoreStateQueryCodec.encodeClientOrderStateQuery("client-71"))).isEqualTo("client-71");
     }

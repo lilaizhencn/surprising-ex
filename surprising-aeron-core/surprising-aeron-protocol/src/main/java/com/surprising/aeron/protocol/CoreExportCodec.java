@@ -49,10 +49,6 @@ public final class CoreExportCodec {
 
     public static byte[] encodeEvent(CoreExportEvent event) {
         byte[] payload = event.commandPayloadUnsafe();
-        List<byte[]> users = new ArrayList<>(event.changedUsers().size());
-        for (CoreUserStateView user : event.changedUsers()) users.add(CoreStateQueryCodec.encodeUserState(user));
-        List<byte[]> orders = new ArrayList<>(event.changedOrders().size());
-        for (CoreOrderStateView order : event.changedOrders()) orders.add(CoreStateQueryCodec.encodeOrderState(order));
         ByteBuffer output = littleEndian(encodedEventLength(event));
         output.putInt(EVENT_V10_MARKER);
         output.putLong(event.exportSequence());
@@ -66,8 +62,16 @@ public final class CoreExportCodec {
         output.putLong(event.userId());
         output.putInt(payload.length);
         output.put(payload);
-        putItems(output, users);
-        putItems(output, orders);
+        output.putInt(event.changedUsers().size());
+        for (CoreUserStateView user : event.changedUsers()) {
+            output.putInt(CoreStateQueryCodec.encodedUserStateLength(user));
+            CoreStateQueryCodec.writeUserState(output, user);
+        }
+        output.putInt(event.changedOrders().size());
+        for (CoreOrderStateView order : event.changedOrders()) {
+            output.putInt(CoreStateQueryCodec.encodedOrderStateLength(order));
+            CoreStateQueryCodec.writeOrderState(output, order);
+        }
         output.putInt(event.executions().size());
         event.executions().forEach(execution -> output.putLong(execution.takerOrderId())
                 .putLong(execution.makerOrderId()).putLong(execution.takerUserId())

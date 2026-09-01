@@ -166,6 +166,10 @@ public class LinearPerpetualCoreBenchmark {
                 measurement.producerStarvationPercentage = state.scenario.producerStarvationPercentage();
                 measurement.completionMailboxHighWaterMark = state.scenario.completionMailboxHighWaterMark();
                 measurement.completionMailboxCapacity = state.scenario.completionMailboxCapacity();
+                measurement.completionBatchCount = state.scenario.completionBatchCount();
+                measurement.completionBatchItems = state.scenario.completionBatchItems();
+                measurement.maximumCompletionBatchSize = state.scenario.maximumCompletionBatchSize();
+                measurement.averageCompletionBatchSize = state.scenario.averageCompletionBatchSize();
                 measurement.p50LatencyNanos = state.scenario.p50LatencyNanos();
                 measurement.p99LatencyNanos = state.scenario.p99LatencyNanos();
                 measurement.p999LatencyNanos = state.scenario.p999LatencyNanos();

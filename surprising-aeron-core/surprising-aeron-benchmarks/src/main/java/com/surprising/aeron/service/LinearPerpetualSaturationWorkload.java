@@ -50,6 +50,14 @@ final class LinearPerpetualSaturationWorkload {
         long producerStarvationSamples();
 
         double producerStarvationPercentage();
+
+        long completionBatchCount();
+
+        long completionBatchItems();
+
+        int maximumCompletionBatchSize();
+
+        double averageCompletionBatchSize();
     }
 
     record StageLatency(int samples, long rangeLowestNanos, long rangeHighestNanos,
@@ -111,6 +119,9 @@ final class LinearPerpetualSaturationWorkload {
             private long fullWindowSamples;
             private long producerStarvationSamples;
             private long refillOperations;
+            private long completionBatchCount;
+            private long completionBatchItems;
+            private int maximumCompletionBatchSize;
             private int readyHead;
             private int readyTail;
             private int readySize;
@@ -130,17 +141,20 @@ final class LinearPerpetualSaturationWorkload {
                 fullWindowSamples = 0;
                 producerStarvationSamples = 0;
                 refillOperations = 0;
+                completionBatchCount = 0;
+                completionBatchItems = 0;
+                maximumCompletionBatchSize = 0;
                 firstScheduledEntryNanos = System.nanoTime();
                 scheduledEntrySequence = 0;
                 prepareRun();
                 long lastProgressNanos = System.nanoTime();
                 harness.admissionBackpressureDrain(
-                        () -> harness.awaitReadyMatching(completionBatchSize, this::record));
+                        () -> completeReady(harness));
                 try {
                     while (latencySamples < operationsPerRun) {
                         int filled = fillWindow(harness);
                         sampleWindow(harness);
-                        int completed = harness.awaitReadyMatching(completionBatchSize, this::record);
+                        int completed = completeReady(harness);
                         if (filled != 0 || completed != 0) {
                             lastProgressNanos = System.nanoTime();
                         } else {
@@ -164,6 +178,16 @@ final class LinearPerpetualSaturationWorkload {
                     throw new IllegalStateException("saturation workload lost completion latency samples");
                 }
                 return harness.state().snapshotBusinessStateHash();
+            }
+
+            private int completeReady(LinearPerpetualBenchmarkSupport.Harness target) {
+                int completed = target.awaitReadyMatching(completionBatchSize, this::record);
+                if (completed > 0) {
+                    completionBatchCount = Math.incrementExact(completionBatchCount);
+                    completionBatchItems = Math.addExact(completionBatchItems, completed);
+                    maximumCompletionBatchSize = Math.max(maximumCompletionBatchSize, completed);
+                }
+                return completed;
             }
 
             private void prepareRun() {
@@ -386,6 +410,20 @@ final class LinearPerpetualSaturationWorkload {
             @Override
             public double producerStarvationPercentage() {
                 return backlogSamples == 0 ? 0 : 100.0 * producerStarvationSamples / backlogSamples;
+            }
+
+            @Override
+            public long completionBatchCount() { return completionBatchCount; }
+
+            @Override
+            public long completionBatchItems() { return completionBatchItems; }
+
+            @Override
+            public int maximumCompletionBatchSize() { return maximumCompletionBatchSize; }
+
+            @Override
+            public double averageCompletionBatchSize() {
+                return completionBatchCount == 0 ? 0 : (double) completionBatchItems / completionBatchCount;
             }
 
             @Override

@@ -102,6 +102,27 @@ class RuntimeCommitPatchTest {
     }
 
     @Test
+    void resetReusesBuilderWithoutMutatingOrLeakingThePreviousPatch() {
+        RuntimeCommitPatch.Builder builder = baseBuilder();
+        builder.recordUser(1, null, user(7, 1));
+        builder.addLaneCommit(laneCommit(1, 0, 41, 3, 4, 31, 37));
+        RuntimeCommitPatch first = builder.seal(metadata(1L << 1));
+
+        builder.reset().sequences(40, 41, 8, 9)
+                .matcherTransition(new CoreMatcherTransition(1, 0, 6, 8, 90, 101));
+        builder.recordUser(1, null, user(8, 1));
+        builder.addLaneCommit(laneCommit(1, 0, 41, 3, 4, 31, 37));
+        RuntimeCommitPatch second = builder.seal(metadata(1L << 1));
+
+        assertThat(first.accountLaneGroups().getFirst().users())
+                .extracting(RuntimeCommitPatch.UserChange::userId).containsExactly(7L);
+        assertThat(second.accountLaneGroups().getFirst().users())
+                .extracting(RuntimeCommitPatch.UserChange::userId).containsExactly(8L);
+        assertThat(first.laneCommits()).hasSize(1);
+        assertThat(second.laneCommits()).hasSize(1);
+    }
+
+    @Test
     void rejectsDuplicateCanonicalMetadataAndExactArithmeticOverflow() {
         RuntimeCommitPatch.Builder duplicateTerminal = baseBuilder();
         duplicateTerminal.terminalIds(List.of(4L, 4L), List.of(), List.of());

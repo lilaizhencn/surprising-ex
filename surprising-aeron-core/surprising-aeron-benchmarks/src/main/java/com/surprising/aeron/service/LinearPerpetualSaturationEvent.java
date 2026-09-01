@@ -78,6 +78,11 @@ final class LinearPerpetualSaturationEvent extends Event {
     @Label("Completion mailbox capacity")
     int completionMailboxCapacity;
 
+    @Label("Completion batch count") long completionBatchCount;
+    @Label("Completion batch items") long completionBatchItems;
+    @Label("Maximum completion batch size") int maximumCompletionBatchSize;
+    @Label("Average completion batch size") double averageCompletionBatchSize;
+
     @Label("Completion p50")
     @Timespan(Timespan.NANOSECONDS)
     long p50LatencyNanos;

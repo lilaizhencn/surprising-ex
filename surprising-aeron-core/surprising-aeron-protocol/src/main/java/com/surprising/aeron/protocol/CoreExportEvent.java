@@ -206,9 +206,21 @@ public record CoreExportEvent(
 
     private static <T> void requireUnique(List<T> values, java.util.function.ToLongFunction<T> key,
                                           String description) {
-        java.util.HashSet<Long> keys = new java.util.HashSet<>();
-        for (T value : values) {
-            if (value == null || !keys.add(key.applyAsLong(value))) {
+        if (values.size() < 2) {
+            if (!values.isEmpty() && values.getFirst() == null) {
+                throw new IllegalArgumentException("duplicate or null " + description);
+            }
+            return;
+        }
+        long[] keys = new long[values.size()];
+        for (int index = 0; index < keys.length; index++) {
+            T value = values.get(index);
+            if (value == null) throw new IllegalArgumentException("duplicate or null " + description);
+            keys[index] = key.applyAsLong(value);
+        }
+        java.util.Arrays.sort(keys);
+        for (int index = 1; index < keys.length; index++) {
+            if (keys[index - 1] == keys[index]) {
                 throw new IllegalArgumentException("duplicate or null " + description);
             }
         }
@@ -216,9 +228,22 @@ public record CoreExportEvent(
 
     private static <T> void requireUniqueText(List<T> values, java.util.function.Function<T, String> key,
                                               String description) {
-        java.util.HashSet<String> keys = new java.util.HashSet<>();
-        for (T value : values) {
-            if (value == null || !keys.add(key.apply(value))) {
+        if (values.size() < 2) {
+            if (!values.isEmpty() && (values.getFirst() == null || key.apply(values.getFirst()) == null)) {
+                throw new IllegalArgumentException("duplicate or null " + description);
+            }
+            return;
+        }
+        String[] keys = new String[values.size()];
+        for (int index = 0; index < keys.length; index++) {
+            T value = values.get(index);
+            if (value == null) throw new IllegalArgumentException("duplicate or null " + description);
+            keys[index] = key.apply(value);
+            if (keys[index] == null) throw new IllegalArgumentException("duplicate or null " + description);
+        }
+        java.util.Arrays.sort(keys);
+        for (int index = 1; index < keys.length; index++) {
+            if (keys[index - 1].equals(keys[index])) {
                 throw new IllegalArgumentException("duplicate or null " + description);
             }
         }

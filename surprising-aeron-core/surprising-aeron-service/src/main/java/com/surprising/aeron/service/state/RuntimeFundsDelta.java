@@ -1,49 +1,52 @@
 package com.surprising.aeron.service.state;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Arrays;
 import org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap;
 
 public final class RuntimeFundsDelta {
 
-    private static final RuntimeFundsDelta EMPTY = new RuntimeFundsDelta(List.of());
-    private final List<Posting> postings;
+    private static final RuntimeFundsDelta EMPTY = new RuntimeFundsDelta(List.of(), false, true);
+    private final List<RuntimeCommitPatch.FundsPosting> postings;
     private final IntLongHashMap unitsByAsset;
 
     RuntimeFundsDelta(List<Posting> postings) {
-        this(postings, true);
+        this(toPatchPostings(postings), true, true);
     }
 
-    private RuntimeFundsDelta(List<Posting> postings, boolean normalize) {
+    private RuntimeFundsDelta(List<RuntimeCommitPatch.FundsPosting> postings,
+                              boolean normalize, boolean trusted) {
         if (postings == null) throw new IllegalArgumentException("runtime funds postings are required");
-        ArrayList<Posting> normalizedPostings;
+        ArrayList<RuntimeCommitPatch.FundsPosting> normalizedPostings;
         if (normalize) {
-            Map<PostingKey, Long> coalesced = new HashMap<>();
-            for (Posting posting : postings) {
+            ArrayList<RuntimeCommitPatch.FundsPosting> ordered = new ArrayList<>(postings.size());
+            for (RuntimeCommitPatch.FundsPosting posting : postings) {
                 if (posting == null) throw new IllegalArgumentException("runtime funds posting is required");
-                coalesced.merge(posting.key(), posting.units(), Math::addExact);
+                ordered.add(posting);
             }
-            ArrayList<PostingKey> orderedKeys = new ArrayList<>(coalesced.keySet());
-            orderedKeys.sort(null);
-            normalizedPostings = new ArrayList<>(coalesced.size());
-            for (PostingKey key : orderedKeys) {
-                long units = coalesced.get(key);
-                if (units == 0) continue;
-                normalizedPostings.add(new Posting(
-                        key.assetId(), key.ownerKind(), key.ownerId(), key.subledger(), units));
+            ordered.sort(null);
+            normalizedPostings = new ArrayList<>(ordered.size());
+            RuntimeCommitPatch.FundsPosting key = null;
+            long units = 0;
+            for (RuntimeCommitPatch.FundsPosting posting : ordered) {
+                if (key != null && key.compareTo(posting) != 0) {
+                    appendNormalized(normalizedPostings, key, units);
+                    units = 0;
+                }
+                if (key == null || key.compareTo(posting) != 0) key = posting;
+                units = Math.addExact(units, posting.units());
             }
+            if (key != null) appendNormalized(normalizedPostings, key, units);
         } else {
             normalizedPostings = new ArrayList<>(postings.size());
-            for (Posting posting : postings) {
+            for (RuntimeCommitPatch.FundsPosting posting : postings) {
                 if (posting == null) throw new IllegalArgumentException("runtime funds posting is required");
                 normalizedPostings.add(posting);
             }
         }
         IntLongHashMap totals = new IntLongHashMap();
-        for (Posting posting : normalizedPostings) {
+        for (RuntimeCommitPatch.FundsPosting posting : normalizedPostings) {
             long previous = totals.get(posting.assetId());
             totals.put(posting.assetId(), Math.addExact(previous, posting.units()));
         }
@@ -60,16 +63,20 @@ public final class RuntimeFundsDelta {
     }
 
     static RuntimeFundsDelta fromDistinct(List<Posting> postings) {
-        return postings.isEmpty() ? EMPTY : new RuntimeFundsDelta(postings, false);
+        return postings.isEmpty() ? EMPTY : new RuntimeFundsDelta(toPatchPostings(postings), false, true);
+    }
+
+    static RuntimeFundsDelta fromPatchPostings(List<RuntimeCommitPatch.FundsPosting> postings) {
+        return postings.isEmpty() ? EMPTY : new RuntimeFundsDelta(postings, true, true);
     }
 
     public RuntimeFundsDelta plus(RuntimeFundsDelta other) {
         if (other == null || other.postings.isEmpty()) return this;
         if (postings.isEmpty()) return other;
-        ArrayList<Posting> merged = new ArrayList<>(postings.size() + other.postings.size());
+        ArrayList<RuntimeCommitPatch.FundsPosting> merged = new ArrayList<>(postings.size() + other.postings.size());
         merged.addAll(postings);
         merged.addAll(other.postings);
-        return from(merged);
+        return fromPatchPostings(merged);
     }
 
     public int postingCount() {
@@ -87,7 +94,7 @@ public final class RuntimeFundsDelta {
 
     public FundsDelta materialize(RuntimeCommitPatch.IdentityView identities, boolean externalAdjustment) {
         ArrayList<FundsPosting> materialized = new ArrayList<>(postings.size() + unitsByAsset.size());
-        for (Posting posting : postings) {
+        for (RuntimeCommitPatch.FundsPosting posting : postings) {
             materialized.add(new FundsPosting(identities.asset(posting.assetId()), posting.ownerKind(),
                     posting.ownerId(), posting.subledger(), posting.units()));
         }
@@ -108,7 +115,7 @@ public final class RuntimeFundsDelta {
     public RuntimeTreasuryDelta treasuryDelta() {
         RuntimeTreasuryDelta delta = new RuntimeTreasuryDelta(Math.max(
                 RuntimeTreasuryDelta.SINGLE_COMMAND_CAPACITY, unitsByAsset.size()));
-        for (Posting posting : postings) {
+        for (RuntimeCommitPatch.FundsPosting posting : postings) {
             if (posting.ownerKind() != FundsPosting.OwnerKind.TREASURY) continue;
             switch (posting.subledger()) {
                 case FEE -> delta.addFee(posting.assetId(), posting.units());
@@ -125,8 +132,26 @@ public final class RuntimeFundsDelta {
         return delta;
     }
 
-    List<Posting> postings() {
+    List<RuntimeCommitPatch.FundsPosting> postings() {
         return postings;
+    }
+
+    private static void appendNormalized(ArrayList<RuntimeCommitPatch.FundsPosting> target,
+                                         RuntimeCommitPatch.FundsPosting key, long units) {
+        if (units == 0) return;
+        target.add(units == key.units() ? key : new RuntimeCommitPatch.FundsPosting(
+                key.assetId(), key.ownerKind(), key.ownerId(), key.subledger(), units));
+    }
+
+    private static List<RuntimeCommitPatch.FundsPosting> toPatchPostings(List<Posting> postings) {
+        if (postings == null || postings.isEmpty()) return List.of();
+        ArrayList<RuntimeCommitPatch.FundsPosting> converted = new ArrayList<>(postings.size());
+        for (Posting posting : postings) {
+            if (posting == null) throw new IllegalArgumentException("runtime funds posting is required");
+            converted.add(new RuntimeCommitPatch.FundsPosting(posting.assetId(), posting.ownerKind(),
+                    posting.ownerId(), posting.subledger(), posting.units()));
+        }
+        return converted;
     }
 
     record Posting(int assetId, FundsPosting.OwnerKind ownerKind, long ownerId,
@@ -137,20 +162,5 @@ public final class RuntimeFundsDelta {
             }
         }
 
-        PostingKey key() {
-            return new PostingKey(assetId, ownerKind, ownerId, subledger);
-        }
-    }
-
-    private record PostingKey(int assetId, FundsPosting.OwnerKind ownerKind, long ownerId,
-                              FundsPosting.Subledger subledger) implements Comparable<PostingKey> {
-        @Override
-        public int compareTo(PostingKey other) {
-            int result = Integer.compare(assetId, other.assetId);
-            if (result == 0) result = Integer.compare(ownerKind.ordinal(), other.ownerKind.ordinal());
-            if (result == 0) result = Long.compare(ownerId, other.ownerId);
-            if (result == 0) result = Integer.compare(subledger.ordinal(), other.subledger.ordinal());
-            return result;
-        }
     }
 }

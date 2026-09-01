@@ -5,9 +5,7 @@ import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
 import java.util.ArrayList;
 import java.util.List;
-import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
-import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
 public final class MatcherSettlementPlan {
     private final long coreSequence;
@@ -46,15 +44,13 @@ public final class MatcherSettlementPlan {
         int laneCount = runtime.topology().accountLaneCount();
         @SuppressWarnings("unchecked")
         ArrayList<MatcherEvent>[] routed = new ArrayList[laneCount];
-        for (int laneId = 0; laneId < laneCount; laneId++) routed[laneId] = new ArrayList<>();
-        LongHashSet userSet = new LongHashSet();
-        LongArrayList users = new LongArrayList();
-        LongHashSet orderSet = new LongHashSet();
-        LongArrayList orders = new LongArrayList();
-        addUnique(userSet, users, activeUserId);
-        for (long orderId : initialOrderIds) if (orderId > 0) addUnique(orderSet, orders, orderId);
+        int expectedChanges = Math.max(2, result.matcherEvents().size() + initialOrderIds.length + 1);
+        LongArrayList users = new LongArrayList(expectedChanges);
+        LongArrayList orders = new LongArrayList(expectedChanges);
+        addUnique(users, activeUserId);
+        for (long orderId : initialOrderIds) if (orderId > 0) addUnique(orders, orderId);
         long laneMask = runtime.topology().accountLaneMask(activeUserId);
-        LongLongHashMap remaining = new LongLongHashMap();
+        RemainingQuantities remaining = new RemainingQuantities(expectedChanges);
         remaining.put(takerOrderId, taker.remainingQuantitySteps());
         ArrayList<MatcherEvent> trades = new ArrayList<>(result.matcherEvents().size());
         preparePositionIdentity(runtime, identities, instrument, taker);
@@ -70,8 +66,7 @@ public final class MatcherSettlementPlan {
                 throw new IllegalStateException("runtime match does not match authoritative orders");
             }
             long takerRemaining = Math.subtractExact(remaining.get(takerOrderId), event.size());
-            long makerBefore = remaining.containsKey(maker.orderId())
-                    ? remaining.get(maker.orderId()) : maker.remainingQuantitySteps();
+            long makerBefore = remaining.getOrDefault(maker.orderId(), maker.remainingQuantitySteps());
             long makerRemaining = Math.subtractExact(makerBefore, event.size());
             if (takerRemaining < 0 || makerRemaining < 0) {
                 throw new IllegalStateException("fill exceeds runtime order remaining quantity");
@@ -79,26 +74,28 @@ public final class MatcherSettlementPlan {
             remaining.put(takerOrderId, takerRemaining);
             remaining.put(maker.orderId(), makerRemaining);
             preparePositionIdentity(runtime, identities, instrument, maker);
-            addUnique(userSet, users, maker.userId());
-            addUnique(orderSet, orders, maker.orderId());
+            addUnique(users, maker.userId());
+            addUnique(orders, maker.orderId());
             trades.add(event);
             int takerLane = runtime.topology().accountLaneId(taker.userId());
             int makerLane = runtime.topology().accountLaneId(maker.userId());
-            routed[takerLane].add(event);
-            if (makerLane != takerLane) routed[makerLane].add(event);
+            addLaneEvent(routed, takerLane, event);
+            if (makerLane != takerLane) addLaneEvent(routed, makerLane, event);
             laneMask |= 1L << makerLane;
         }
         for (var cancellation : result.cancellations()) {
             OrderRuntime order = runtime.order(cancellation.orderId());
             if (order != null) {
-                addUnique(userSet, users, order.userId());
-                addUnique(orderSet, orders, order.orderId());
+                addUnique(users, order.userId());
+                addUnique(orders, order.orderId());
                 laneMask |= runtime.topology().accountLaneMask(order.userId());
             }
         }
         @SuppressWarnings("unchecked")
         List<MatcherEvent>[] frozen = new List[laneCount];
-        for (int laneId = 0; laneId < laneCount; laneId++) frozen[laneId] = List.copyOf(routed[laneId]);
+        for (int laneId = 0; laneId < laneCount; laneId++) {
+            frozen[laneId] = routed[laneId] == null ? List.of() : List.copyOf(routed[laneId]);
+        }
         return new MatcherSettlementPlan(coreSequence, takerOrderId, laneMask,
                 users.toArray(), orders.toArray(), List.copyOf(trades), frozen);
     }
@@ -116,8 +113,58 @@ public final class MatcherSettlementPlan {
                 List.of(), lanes);
     }
 
-    private static void addUnique(LongHashSet set, LongArrayList values, long value) {
-        if (set.add(value)) values.add(value);
+    private static void addUnique(LongArrayList values, long value) {
+        if (!values.contains(value)) values.add(value);
+    }
+
+    private static void addLaneEvent(ArrayList<MatcherEvent>[] lanes, int laneId, MatcherEvent event) {
+        ArrayList<MatcherEvent> events = lanes[laneId];
+        if (events == null) {
+            events = new ArrayList<>();
+            lanes[laneId] = events;
+        }
+        events.add(event);
+    }
+
+    private static final class RemainingQuantities {
+        private long[] orderIds;
+        private long[] quantities;
+        private int size;
+
+        private RemainingQuantities(int capacity) {
+            orderIds = new long[capacity];
+            quantities = new long[capacity];
+        }
+
+        private long get(long orderId) {
+            int index = indexOf(orderId);
+            return index < 0 ? 0 : quantities[index];
+        }
+
+        private long getOrDefault(long orderId, long defaultValue) {
+            int index = indexOf(orderId);
+            return index < 0 ? defaultValue : quantities[index];
+        }
+
+        private void put(long orderId, long quantity) {
+            int index = indexOf(orderId);
+            if (index >= 0) {
+                quantities[index] = quantity;
+                return;
+            }
+            if (size == orderIds.length) {
+                int capacity = Math.multiplyExact(orderIds.length, 2);
+                orderIds = java.util.Arrays.copyOf(orderIds, capacity);
+                quantities = java.util.Arrays.copyOf(quantities, capacity);
+            }
+            orderIds[size] = orderId;
+            quantities[size++] = quantity;
+        }
+
+        private int indexOf(long orderId) {
+            for (int index = 0; index < size; index++) if (orderIds[index] == orderId) return index;
+            return -1;
+        }
     }
 
     private static void preparePositionIdentity(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,

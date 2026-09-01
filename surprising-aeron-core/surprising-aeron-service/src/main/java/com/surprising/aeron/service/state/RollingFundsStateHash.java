@@ -277,9 +277,7 @@ public final class RollingFundsStateHash {
                     throw new IllegalArgumentException("funds user before-value mismatch");
                 }
                 if (change.before() == null) {
-                    RuntimeCommitPatch.UserChange reverse = new RuntimeCommitPatch.UserChange(
-                            change.userId(), change.after(), null);
-                    staged.addUser(group.laneId(), change, group.laneId(), reverse);
+                    staged.addUser(group.laneId(), change, group.laneId());
                 }
             }
             for (RuntimeCommitPatch.BalanceChange change : group.balances()) {
@@ -292,16 +290,12 @@ public final class RollingFundsStateHash {
                 }
                 balanceContribution(asset, change.after());
                 int previousOwner = user == null ? group.laneId() : user.owner;
-                RuntimeCommitPatch.BalanceChange reverse = new RuntimeCommitPatch.BalanceChange(
-                        change.key(), change.after(), change.before());
-                staged.addBalance(group.laneId(), change, previousOwner, reverse, asset);
+                staged.addBalance(group.laneId(), change, previousOwner, asset);
             }
             for (RuntimeCommitPatch.UserChange change : group.users()) {
                 if (change.before() == null || change.after() != null) continue;
                 int previousOwner = userHashes.get(change.userId()).owner;
-                RuntimeCommitPatch.UserChange reverse = new RuntimeCommitPatch.UserChange(
-                        change.userId(), null, change.before());
-                staged.addUser(group.laneId(), change, previousOwner, reverse);
+                staged.addUser(group.laneId(), change, previousOwner);
             }
         }
         for (RuntimeCommitPatch.TreasuryAssetChange change : patch.globalOwnerGroup().treasuryAssets()) {
@@ -309,9 +303,7 @@ public final class RollingFundsStateHash {
             if (!Objects.equals(runtimeTreasury.get(change.assetId()), normalize(change.before()))) {
                 throw new IllegalArgumentException("funds treasury before-value mismatch");
             }
-            RuntimeCommitPatch.TreasuryAssetChange reverse = new RuntimeCommitPatch.TreasuryAssetChange(
-                    change.assetId(), change.after(), change.before());
-            staged.addTreasury(change, reverse, asset);
+            staged.addTreasury(change, asset);
         }
         return staged;
     }
@@ -361,7 +353,8 @@ public final class RollingFundsStateHash {
         return cachedValue;
     }
 
-    private void applyBalanceChange(int owner, RuntimeCommitPatch.BalanceChange change, String asset) {
+    private void applyBalanceChange(int owner, RuntimeCommitPatch.BalanceChange change, String asset,
+                                    boolean reverse) {
         long userId = change.key().userId();
         UserFundsHash user = userHashes.get(userId);
         long previousContribution = user == null ? 0 : entryHash(userId, user.value());
@@ -370,13 +363,14 @@ public final class RollingFundsStateHash {
             user = new UserFundsHash(userId, owner);
             userHashes.put(userId, user);
         }
-        user.replace(change, asset);
+        user.replace(change, asset, reverse);
         replaceUserContribution(previousOwner, previousContribution, owner, user);
     }
 
-    private void applyUserChange(int owner, RuntimeCommitPatch.UserChange change) {
+    private void applyUserChange(int owner, RuntimeCommitPatch.UserChange change, boolean reverse) {
         UserFundsHash user = userHashes.get(change.userId());
-        if (change.after() == null) {
+        UserRuntime current = reverse ? change.before() : change.after();
+        if (current == null) {
             if (user != null) {
                 long contribution = entryHash(change.userId(), user.value());
                 users.remove(contribution);
@@ -390,9 +384,10 @@ public final class RollingFundsStateHash {
         }
     }
 
-    private void applyTreasuryChange(RuntimeCommitPatch.TreasuryAssetChange change, String asset) {
-        RuntimeCommitPatch.TreasuryAssetValue previous = change.before();
-        RuntimeCommitPatch.TreasuryAssetValue current = change.after();
+    private void applyTreasuryChange(RuntimeCommitPatch.TreasuryAssetChange change, String asset,
+                                     boolean reverse) {
+        RuntimeCommitPatch.TreasuryAssetValue previous = reverse ? change.after() : change.before();
+        RuntimeCommitPatch.TreasuryAssetValue current = reverse ? change.before() : change.after();
         update(fees, Domain.FEES, asset, fee(previous), fee(current));
         update(insurance, Domain.INSURANCE, asset, insurance(previous), insurance(current));
         update(deficits, Domain.DEFICITS, asset, deficit(previous), deficit(current));
@@ -603,7 +598,6 @@ public final class RollingFundsStateHash {
         private int[] owners = new int[8];
         private int[] rollbackOwners = new int[8];
         private Object[] changes = new Object[8];
-        private Object[] reverseChanges = new Object[8];
         private String[] assets = new String[8];
         private int operationCount;
         private int appliedCount;
@@ -611,27 +605,25 @@ public final class RollingFundsStateHash {
         private FundsPatchStage(RuntimeCommitPatch.IdentityView identities) { this.identities = identities; }
 
         private void addUser(int owner, RuntimeCommitPatch.UserChange change,
-                             int rollbackOwner, RuntimeCommitPatch.UserChange reverse) {
-            add(USER, owner, change, rollbackOwner, reverse, null);
+                             int rollbackOwner) {
+            add(USER, owner, change, rollbackOwner, null);
         }
 
         private void addBalance(int owner, RuntimeCommitPatch.BalanceChange change,
-                                int rollbackOwner, RuntimeCommitPatch.BalanceChange reverse, String asset) {
-            add(BALANCE, owner, change, rollbackOwner, reverse, asset);
+                                int rollbackOwner, String asset) {
+            add(BALANCE, owner, change, rollbackOwner, asset);
         }
 
-        private void addTreasury(RuntimeCommitPatch.TreasuryAssetChange change,
-                                 RuntimeCommitPatch.TreasuryAssetChange reverse, String asset) {
-            add(TREASURY, 0, change, 0, reverse, asset);
+        private void addTreasury(RuntimeCommitPatch.TreasuryAssetChange change, String asset) {
+            add(TREASURY, 0, change, 0, asset);
         }
 
-        private void add(byte type, int owner, Object change, int rollbackOwner, Object reverse, String asset) {
+        private void add(byte type, int owner, Object change, int rollbackOwner, String asset) {
             ensureCapacity();
             operationTypes[operationCount] = type;
             owners[operationCount] = owner;
             rollbackOwners[operationCount] = rollbackOwner;
             changes[operationCount] = change;
-            reverseChanges[operationCount] = reverse;
             assets[operationCount] = asset;
             operationCount++;
         }
@@ -678,11 +670,12 @@ public final class RollingFundsStateHash {
 
         private void apply(int index) {
             switch (operationTypes[index]) {
-                case USER -> applyUserChange(owners[index], (RuntimeCommitPatch.UserChange) changes[index]);
+                case USER -> applyUserChange(owners[index],
+                        (RuntimeCommitPatch.UserChange) changes[index], false);
                 case BALANCE -> applyBalanceChange(owners[index],
-                        (RuntimeCommitPatch.BalanceChange) changes[index], assets[index]);
+                        (RuntimeCommitPatch.BalanceChange) changes[index], assets[index], false);
                 case TREASURY -> applyTreasuryChange(
-                        (RuntimeCommitPatch.TreasuryAssetChange) changes[index], assets[index]);
+                        (RuntimeCommitPatch.TreasuryAssetChange) changes[index], assets[index], false);
                 default -> throw new IllegalStateException("unknown staged funds hash operation");
             }
         }
@@ -690,11 +683,11 @@ public final class RollingFundsStateHash {
         private void rollback(int index) {
             switch (operationTypes[index]) {
                 case USER -> applyUserChange(rollbackOwners[index],
-                        (RuntimeCommitPatch.UserChange) reverseChanges[index]);
+                        (RuntimeCommitPatch.UserChange) changes[index], true);
                 case BALANCE -> applyBalanceChange(rollbackOwners[index],
-                        (RuntimeCommitPatch.BalanceChange) reverseChanges[index], assets[index]);
+                        (RuntimeCommitPatch.BalanceChange) changes[index], assets[index], true);
                 case TREASURY -> applyTreasuryChange(
-                        (RuntimeCommitPatch.TreasuryAssetChange) reverseChanges[index], assets[index]);
+                        (RuntimeCommitPatch.TreasuryAssetChange) changes[index], assets[index], true);
                 default -> throw new IllegalStateException("unknown staged funds hash rollback operation");
             }
         }
@@ -706,7 +699,6 @@ public final class RollingFundsStateHash {
             owners = java.util.Arrays.copyOf(owners, capacity);
             rollbackOwners = java.util.Arrays.copyOf(rollbackOwners, capacity);
             changes = java.util.Arrays.copyOf(changes, capacity);
-            reverseChanges = java.util.Arrays.copyOf(reverseChanges, capacity);
             assets = java.util.Arrays.copyOf(assets, capacity);
         }
     }
@@ -746,14 +738,15 @@ public final class RollingFundsStateHash {
             return hash;
         }
 
-        private void replace(RuntimeCommitPatch.BalanceChange change, String asset) {
+        private void replace(RuntimeCommitPatch.BalanceChange change, String asset, boolean reverse) {
             int assetId = change.key().assetId();
             if (balanceContributions.containsKey(assetId)) {
                 long previous = balanceContributions.get(assetId);
                 balanceContributions.removeKey(assetId);
                 balances.remove(previous);
             }
-            Long current = RollingFundsStateHash.balanceContribution(asset, change.after());
+            Long current = RollingFundsStateHash.balanceContribution(
+                    asset, reverse ? change.before() : change.after());
             if (current != null) {
                 balanceContributions.put(assetId, current);
                 balances.add(current);

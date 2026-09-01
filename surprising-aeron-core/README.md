@@ -43,6 +43,12 @@ snapshot 从已完成 projection 冻结，replay 按连续 patch sequence 重放
 patch 的 `businessAfter` / `exportAfter` 随后由 projection、index、retention、export 与 payload consumer 直接读取，
 不得再次从 Runtime fallback 构造。
 
+owner 提交暂存采用可复用 `RuntimeCommitPatch.Builder`；reset 只清理下一轮可变槽位，sealed patch 仍持有独立不可变值。
+用户与余额 before-value 按 Account Lane 写入 primitive journal，避免共享 `ConcurrentHashMap<Long, ...>` 的装箱和节点竞争；
+资金 posting 用排序后线性合并生成唯一 canonical 列表，business/funds hash 回滚直接反向读取同一条 change 的 before/after，
+不再创建镜像 reverse patch。Core Fact materializer 直接把 user/order 嵌套结构写入最终 event buffer，不再为每个嵌套对象先生成
+临时 `byte[]`；协议 marker、字段顺序、资金守恒、tombstone 和 snapshot/replay 语义保持不变。
+
 准入先同时预留 journal patch 数/字节与 Core Fact event 数/字节，之后才允许 mutation/Cluster Log commit；reservation 只能
 消费一次，提交前拒绝或失败必须释放。journal/export 容量满返回 backpressure，不创建无界 executor 或队列。owner、每个
 Account Lane、matcher、risk、projector 与 exporter 的失败会 poison 相应路径，撤销 hash/index transition、回收 lane ticket，

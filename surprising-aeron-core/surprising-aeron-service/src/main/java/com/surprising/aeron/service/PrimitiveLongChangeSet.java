@@ -1,6 +1,7 @@
 package com.surprising.aeron.service;
 
 import java.util.AbstractCollection;
+import java.util.Collection;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 import org.eclipse.collections.api.iterator.LongIterator;
@@ -16,6 +17,17 @@ final class PrimitiveLongChangeSet extends AbstractCollection<Long> {
         if (!membership.add(value)) return false;
         insertionOrder.add(value);
         return true;
+    }
+
+    @Override
+    public boolean addAll(Collection<? extends Long> values) {
+        boolean changed = false;
+        if (values instanceof ImmutableLongArrayList primitive) {
+            for (int index = 0; index < primitive.size(); index++) changed |= add(primitive.valueAt(index));
+            return changed;
+        }
+        for (Long value : values) changed |= add(value);
+        return changed;
     }
 
     @Override

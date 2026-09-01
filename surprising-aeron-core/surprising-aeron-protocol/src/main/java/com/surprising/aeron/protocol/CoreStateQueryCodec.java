@@ -166,6 +166,42 @@ public final class CoreStateQueryCodec {
         return Math.toIntExact(length);
     }
 
+    static void writeUserState(java.nio.ByteBuffer output, CoreUserStateView state) {
+        output.putInt(VERSION);
+        output.putInt(ProductLineWireCode.encode(state.productLine()));
+        output.putLong(state.userId());
+        output.putLong(state.revision());
+        output.putInt(state.positionMode().wireCode());
+        output.putInt(state.balances().size());
+        for (CoreBalanceView balance : state.balances()) {
+            putText(output, balance.asset(), false);
+            output.putLong(balance.availableUnits()).putLong(balance.lockedUnits());
+        }
+        output.putInt(state.reservations().size());
+        for (CoreReservationView reservation : state.reservations()) {
+            output.putLong(reservation.orderId());
+            putText(output, reservation.symbol(), false);
+            output.putLong(reservation.instrumentVersion()).putInt(reservation.kind().wireCode());
+            putText(output, reservation.asset(), false);
+            output.putLong(reservation.reservedUnits()).putLong(reservation.releasedUnits())
+                    .putLong(reservation.consumedUnits()).putLong(reservation.orderQuantitySteps());
+        }
+        output.putInt(state.positions().size());
+        for (CorePositionView position : state.positions()) {
+            putText(output, position.symbol(), false);
+            putText(output, position.marginAsset(), false);
+            output.putInt(position.marginMode().wireCode()).putInt(position.positionSide().wireCode())
+                    .putLong(position.instrumentVersion()).putLong(position.signedQuantitySteps())
+                    .putLong(position.entryPriceTicks()).putLong(position.entryValueTicks())
+                    .putLong(position.realizedPnlUnits()).putLong(position.positionMarginUnits());
+        }
+        output.putInt(state.leverages().size());
+        for (CoreLeverageView leverage : state.leverages()) {
+            putText(output, leverage.symbol(), false);
+            output.putInt(leverage.marginMode().wireCode()).putLong(leverage.leveragePpm());
+        }
+    }
+
     public static CoreUserStateView decodeUserState(byte[] encoded) {
         Reader reader = new Reader(encoded);
         reader.version(VERSION);
@@ -224,6 +260,58 @@ public final class CoreStateQueryCodec {
         length = Math.addExact(length, Long.BYTES * 6L);
         length = Math.addExact(length, textLength(state.status()) + Long.BYTES);
         return Math.toIntExact(length);
+    }
+
+    static void writeOrderState(java.nio.ByteBuffer output, CoreOrderStateView state) {
+        output.putInt(VERSION).putLong(state.orderId())
+                .putInt(ProductLineWireCode.encode(state.productLine())).putLong(state.userId());
+        putText(output, state.symbol(), false);
+        output.putLong(state.instrumentVersion()).putInt(state.side().wireCode())
+                .putLong(state.priceTicks()).putLong(state.quantitySteps())
+                .putLong(state.executedQuantitySteps()).putLong(state.remainingQuantitySteps())
+                .put((byte) (state.reduceOnly() ? 1 : 0)).putInt(state.marginMode().wireCode())
+                .putInt(state.positionSide().wireCode()).putInt(state.orderType().wireCode())
+                .putInt(state.timeInForce().wireCode()).put((byte) (state.postOnly() ? 1 : 0));
+        putText(output, state.clientOrderId(), true);
+        output.putLong(state.commandId().getMostSignificantBits()).putLong(state.commandId().getLeastSignificantBits())
+                .putLong(state.makerFeeRatePpm()).putLong(state.takerFeeRatePpm())
+                .putLong(state.cumulativeFeeUnits()).putLong(state.createdAtEpochMillis())
+                .putLong(state.updatedAtEpochMillis()).putLong(state.clusterPosition());
+        putText(output, state.status(), false);
+        output.putLong(state.revision());
+    }
+
+    private static void putText(java.nio.ByteBuffer output, String value, boolean optional) {
+        if (value == null) throw new IllegalArgumentException(optional
+                ? "optional query text is required" : "query text is required");
+        int length = utf8Length(value);
+        if (length > MAX_TEXT_BYTES || !optional && length == 0) {
+            throw new IllegalArgumentException(optional
+                    ? "invalid optional query text length" : "invalid query text length");
+        }
+        output.putInt(length);
+        for (int index = 0; index < value.length(); index++) {
+            char current = value.charAt(index);
+            if (current < 0x80) {
+                output.put((byte) current);
+            } else if (current < 0x800) {
+                output.put((byte) (0xc0 | current >>> 6));
+                output.put((byte) (0x80 | current & 0x3f));
+            } else if (Character.isHighSurrogate(current) && index + 1 < value.length()
+                    && Character.isLowSurrogate(value.charAt(index + 1))) {
+                int codePoint = Character.toCodePoint(current, value.charAt(++index));
+                output.put((byte) (0xf0 | codePoint >>> 18));
+                output.put((byte) (0x80 | codePoint >>> 12 & 0x3f));
+                output.put((byte) (0x80 | codePoint >>> 6 & 0x3f));
+                output.put((byte) (0x80 | codePoint & 0x3f));
+            } else if (Character.isSurrogate(current)) {
+                output.put((byte) '?');
+            } else {
+                output.put((byte) (0xe0 | current >>> 12));
+                output.put((byte) (0x80 | current >>> 6 & 0x3f));
+                output.put((byte) (0x80 | current & 0x3f));
+            }
+        }
     }
 
     private static int textLength(String value) {

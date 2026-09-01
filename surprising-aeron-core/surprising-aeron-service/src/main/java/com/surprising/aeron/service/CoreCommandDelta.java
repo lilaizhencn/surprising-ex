@@ -27,10 +27,10 @@ public record CoreCommandDelta(
         List<CoreTriggerOrderStateView> changedTriggerOrders) {
 
     public CoreCommandDelta {
-        userIds = copyNullable(userIds);
-        orderIds = copyNullable(orderIds);
-        liquidationIds = copyNullable(liquidationIds);
-        triggerOrderIds = copyNullable(triggerOrderIds);
+        userIds = copyNullableLongs(userIds);
+        orderIds = copyNullableLongs(orderIds);
+        liquidationIds = copyNullableLongs(liquidationIds);
+        triggerOrderIds = copyNullableLongs(triggerOrderIds);
         executions = List.copyOf(executions == null ? List.of() : executions);
         fundingPayments = List.copyOf(fundingPayments == null ? List.of() : fundingPayments);
         changedUsers = List.copyOf(changedUsers == null ? List.of() : changedUsers);
@@ -47,5 +47,9 @@ public record CoreCommandDelta(
 
     private static <T> List<T> copyNullable(List<T> values) {
         return values == null ? null : List.copyOf(values);
+    }
+
+    private static List<Long> copyNullableLongs(List<Long> values) {
+        return values == null ? null : ImmutableLongArrayList.preservePrimitive(values);
     }
 }

@@ -238,6 +238,8 @@ public final class CoreProbeState implements AutoCloseable {
     private final PrimitiveLongChangeSet changedLiquidationIds = new PrimitiveLongChangeSet();
     private final PrimitiveLongChangeSet changedTriggerOrderIds = new PrimitiveLongChangeSet();
     private final LinkedHashSet<String> changedTreasuryAssets = new LinkedHashSet<>();
+    private final RuntimeTreasuryDelta mergedLaneTreasuryDelta =
+            new RuntimeTreasuryDelta(RuntimeTreasuryDelta.ORDER_BATCH_CAPACITY);
     private com.surprising.aeron.service.state.RuntimeFundsDelta commandFundsDelta =
             com.surprising.aeron.service.state.RuntimeFundsDelta.empty();
     private List<com.surprising.aeron.protocol.CoreExecutionView> commandExecutions = List.of();
@@ -3606,9 +3608,10 @@ public final class CoreProbeState implements AutoCloseable {
         };
     }
 
-    private static RuntimeTreasuryDelta mergeTreasuryDeltas(RuntimeTreasuryDelta[] laneDeltas) {
+    private RuntimeTreasuryDelta mergeTreasuryDeltas(RuntimeTreasuryDelta[] laneDeltas) {
         if (laneDeltas == null) throw new IllegalArgumentException("account lane Treasury deltas are required");
-        RuntimeTreasuryDelta aggregate = new RuntimeTreasuryDelta(RuntimeTreasuryDelta.ORDER_BATCH_CAPACITY);
+        RuntimeTreasuryDelta aggregate = mergedLaneTreasuryDelta;
+        aggregate.clear();
         for (RuntimeTreasuryDelta delta : laneDeltas) {
             if (delta != null) aggregate.merge(delta);
         }
@@ -5899,7 +5902,10 @@ public final class CoreProbeState implements AutoCloseable {
         if (commandTerminalOrderIds != null) return commandTerminalOrderIds;
         org.eclipse.collections.impl.list.mutable.primitive.LongArrayList terminal =
                 new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList();
-        for (Long orderId : delta.orderIds()) {
+        List<Long> orderIds = delta.orderIds();
+        for (int index = 0; index < orderIds.size(); index++) {
+            long orderId = orderIds instanceof ImmutableLongArrayList primitive
+                    ? primitive.valueAt(index) : orderIds.get(index);
             var order = runtimePlaceOrderState.order(orderId);
             if (order != null && order.status().terminal()) terminal.add(orderId);
         }
@@ -5988,10 +5994,10 @@ public final class CoreProbeState implements AutoCloseable {
         for (long userId : runtimePlaceOrderState.changedUsers().toArray()) {
             changedUserIds.add(userId);
         }
-        commandChangedUserIds = List.copyOf(changedUserIds);
-        commandChangedOrderIds = List.copyOf(changedOrderIds);
-        commandChangedLiquidationIds = List.copyOf(changedLiquidationIds);
-        commandChangedTriggerOrderIds = List.copyOf(changedTriggerOrderIds);
+        commandChangedUserIds = ImmutableLongArrayList.copyOf(changedUserIds.toPrimitiveArray());
+        commandChangedOrderIds = ImmutableLongArrayList.copyOf(changedOrderIds.toPrimitiveArray());
+        commandChangedLiquidationIds = ImmutableLongArrayList.copyOf(changedLiquidationIds.toPrimitiveArray());
+        commandChangedTriggerOrderIds = ImmutableLongArrayList.copyOf(changedTriggerOrderIds.toPrimitiveArray());
         commandChangedTreasuryAssets = List.copyOf(changedTreasuryAssets);
     }
 
@@ -6023,25 +6029,15 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private static List<Long> immutableLongList(PrimitiveLongChangeSet ids) {
-        if (ids.isEmpty()) return List.of();
-        long[] values = ids.toPrimitiveArray();
-        java.util.ArrayList<Long> boxed = new java.util.ArrayList<>(values.length);
-        for (long value : values) boxed.add(value);
-        return List.copyOf(boxed);
+        return ImmutableLongArrayList.copyOf(ids.toPrimitiveArray());
     }
 
     private static List<Long> boxedLongs(long[] values) {
-        if (values.length == 0) return List.of();
-        java.util.ArrayList<Long> boxed = new java.util.ArrayList<>(values.length);
-        for (long value : values) boxed.add(value);
-        return List.copyOf(boxed);
+        return ImmutableLongArrayList.copyOf(values);
     }
 
     private static List<Long> boxedLongsIncluding(long[] values, long requiredValue) {
-        java.util.TreeSet<Long> boxed = new java.util.TreeSet<>();
-        for (long value : values) boxed.add(value);
-        boxed.add(requiredValue);
-        return List.copyOf(boxed);
+        return ImmutableLongArrayList.sortedDistinct(values, requiredValue);
     }
 
     private int pendingRiskScanCount() {
@@ -6149,7 +6145,9 @@ public final class CoreProbeState implements AutoCloseable {
         for (CoreOrderStateView view : commandOrderViews) {
             if (orderIds.add(view.orderId())) views.add(view);
         }
-        for (Long orderId : commandChangedOrderIds) {
+        for (int orderIndex = 0; orderIndex < commandChangedOrderIds.size(); orderIndex++) {
+            long orderId = commandChangedOrderIds instanceof ImmutableLongArrayList primitive
+                    ? primitive.valueAt(orderIndex) : commandChangedOrderIds.get(orderIndex);
             var order = runtimeOrder(orderId);
             if (order == null) continue;
             CoreOrderStateView view = orderView(order);

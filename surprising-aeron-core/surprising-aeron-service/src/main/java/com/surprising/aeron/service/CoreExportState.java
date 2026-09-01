@@ -522,7 +522,7 @@ final class CoreExportState implements AutoCloseable {
     }
 
     private static PendingExport pendingExport(CoreMessage message, CoreExportEvent event) {
-        MaterializedExport materialized = new MaterializedExport(event, message, encodedLength(message));
+        MaterializedExport materialized = new MaterializedExport(message, encodedLength(message));
         return new PendingExport(materialized, reservedEventLength(event),
                 eventDigest(message.header(), event), terminalOrderIds(event));
     }
@@ -708,31 +708,25 @@ final class CoreExportState implements AutoCloseable {
             long coreSequence = last == null ? appliedCommandCount : last.coreSequence();
             long previousProjectionSequence = first == null ? projectionSequence : first.previousProjectionSequence();
             long committedProjectionSequence = last == null ? projectionSequence : last.projectionSequence();
-            var payload = new RuntimeCommitPatch.CoreFactPayload(
-                    users, materializeOrders(orders, orderViewFactory),
-                    delta.executions(),
-                    delta.fundingPayments(), liquidations,
-                    treasury, triggers,
-                    fundsDelta.materialize(identities, commandMetadata.externalAdjustment()).views(),
-                    delta.fundingProgress(), delta.settlementProgress(), matcherTransition, evidence,
-                    terminalIds, tombstones, previousCoreSequence, coreSequence,
-                    previousProjectionSequence, committedProjectionSequence,
-                    beforeBusinessStateHash, businessStateHash, beforeFundsStateHash, fundsStateHash,
-                    topologyHash, laneRevisionHash, clusterPosition, commandMetadata);
+            List<com.surprising.aeron.protocol.CoreOrderStateView> orderViews =
+                    materializeOrders(orders, orderViewFactory);
+            List<com.surprising.aeron.protocol.CoreFundsPostingView> fundsPostings =
+                    fundsDelta.materialize(identities, commandMetadata.externalAdjustment()).views();
+            List<CoreExportEvent.MatcherEvidence> matcherEvidence = materializeMatcherEvidence(evidence);
             return new CoreExportEvent(sequence, appliedCommandCount, businessStateHash,
                     command.header().commandId(), command.header().messageType(), status, resultCode,
-                    command.header().userId(), command.payloadUnsafe(), payload.changedUsers(),
-                    payload.changedOrders(), payload.executions(), payload.fundingPayments(),
-                    payload.changedLiquidations(), payload.changedTreasuryAssets(), payload.changedTriggerOrders(),
+                    command.header().userId(), command.payloadUnsafe(), users,
+                    orderViews, delta.executions(), delta.fundingPayments(),
+                    liquidations, treasury, triggers,
                     beforeBusinessStateHash, beforeFundsStateHash, fundsStateHash,
                     matcherTransition.routeVersion(), topologyHash, laneRevisionHash, appliedCommandCount,
-                    matcherTransition, clusterPosition, payload.fundsPostings(),
-                    commandMetadata.commandFingerprint(), materializeMatcherEvidence(payload.matcherEvidence()),
-                    new CoreExportEvent.TerminalIds(payload.terminalIds().orderIds(),
-                            payload.terminalIds().liquidationIds(), payload.terminalIds().triggerOrderIds()),
-                    payload.previousCoreSequence(), payload.coreSequence(), payload.previousProjectionSequence(),
-                    payload.projectionSequence(), payload.fundingProgress(), payload.settlementProgress(),
-                    payload.tombstones());
+                    matcherTransition, clusterPosition, fundsPostings,
+                    commandMetadata.commandFingerprint(), matcherEvidence,
+                    new CoreExportEvent.TerminalIds(terminalIds.orderIds(),
+                            terminalIds.liquidationIds(), terminalIds.triggerOrderIds()),
+                    previousCoreSequence, coreSequence, previousProjectionSequence,
+                    committedProjectionSequence, delta.fundingProgress(), delta.settlementProgress(),
+                    tombstones);
         }
 
         private static RuntimeCommitPatch.TerminalIds mergeTerminalOrders(
@@ -1068,17 +1062,17 @@ final class CoreExportState implements AutoCloseable {
                         }
                         CoreExportEvent event = task.draft.materialize(nextMaterializationSequence,
                                 orderViewFactory);
-                        int actualLength = Math.addExact(CoreProtocol.HEADER_LENGTH,
-                                CoreExportCodec.encodedEventLength(event));
+                        byte[] encoded = encoder.encode(event);
+                        int actualLength = Math.addExact(CoreProtocol.HEADER_LENGTH, encoded.length);
                         if (actualLength > task.encodedLength) {
                             throw new IllegalStateException("Core Fact exceeded deterministic reservation");
                         }
-                        CoreMessage message = CoreMessage.owned(task.header, encoder.encode(event));
+                        CoreMessage message = CoreMessage.owned(task.header, encoded);
                         nextMaterializationSequence = Math.incrementExact(nextMaterializationSequence);
                         bytes = Math.addExact(bytes, actualLength);
                         completedMaterializations = Math.incrementExact(completedMaterializations);
                         released = true;
-                        task.complete(new MaterializedExport(event, message, actualLength), this);
+                        task.complete(new MaterializedExport(message, actualLength), this);
                     } catch (Throwable failure) {
                         poison(failure);
                         if (!released) {
@@ -1151,7 +1145,7 @@ final class CoreExportState implements AutoCloseable {
         byte[] encode(CoreExportEvent event);
     }
 
-    private record MaterializedExport(CoreExportEvent event, CoreMessage message, int actualLength) {
+    private record MaterializedExport(CoreMessage message, int actualLength) {
     }
 
     private static final class SpscTaskQueue<E> {

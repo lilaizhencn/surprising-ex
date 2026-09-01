@@ -31,7 +31,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.BiFunction;
-import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 
 interface RuntimeCommitView {
     ProductLine productLine();
@@ -219,12 +218,18 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         ArrayList<CoreTriggerOrderStateView> triggers = new ArrayList<>();
         for (AccountLaneOwnerGroup group : accountLaneGroups) {
             appendUsers(users, group, registry);
-            group.orders.stream().map(OrderChange::businessAfter).filter(Objects::nonNull)
-                    .forEach(orders::add);
-            group.liquidations.stream().filter(change -> change.after != null && !change.asset.isBlank())
-                    .map(change -> liquidationView(change, registry)).forEach(liquidations::add);
-            group.triggerOrders.stream().map(TriggerOrderChange::after).filter(Objects::nonNull)
-                    .map(CoreTriggerOrderState::view).forEach(triggers::add);
+            for (OrderChange change : group.orders) {
+                CoreOrderState order = change.businessAfter();
+                if (order != null) orders.add(order);
+            }
+            for (LiquidationChange change : group.liquidations) {
+                if (change.after != null && !change.asset.isBlank()) {
+                    liquidations.add(liquidationView(change, registry));
+                }
+            }
+            for (TriggerOrderChange change : group.triggerOrders) {
+                if (change.after != null) triggers.add(change.after.view());
+            }
         }
         ArrayList<CoreTreasuryAssetView> treasury = new ArrayList<>();
         for (TreasuryAssetChange change : globalOwnerGroup.treasuryAssets) {
@@ -252,22 +257,20 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
                                     IdentityView identities) {
         if (group.users.isEmpty()) return;
         ArrayList<UserFactBuilder> ordered = new ArrayList<>(group.users.size());
-        LongObjectHashMap<UserFactBuilder> byUser = new LongObjectHashMap<>(group.users.size() * 2);
         for (UserChange userChange : group.users) {
             UserRuntime user = userChange.after;
             if (user == null) continue;
             UserFactBuilder builder = new UserFactBuilder(user);
             ordered.add(builder);
-            byUser.put(user.userId(), builder);
         }
         for (BalanceChange change : group.balances) {
-            UserFactBuilder builder = byUser.get(change.key.userId);
+            UserFactBuilder builder = userFactBuilder(ordered, change.key.userId);
             if (builder != null && change.after != null) builder.balances.add(new CoreBalanceView(
                     identities.asset(change.key.assetId), change.after.availableUnits, change.after.lockedUnits));
         }
         for (ReservationChange change : group.reservations) {
             ReservationRuntime value = change.after;
-            UserFactBuilder builder = value == null ? null : byUser.get(value.userId());
+            UserFactBuilder builder = value == null ? null : userFactBuilder(ordered, value.userId());
             if (builder != null) builder.reservations.add(new CoreReservationView(value.orderId(),
                     identities.symbol(value.symbolId()), value.instrumentVersion(), value.kind(),
                     identities.asset(value.assetId()), value.totalReservedUnits(), value.releasedUnits(),
@@ -275,18 +278,26 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         }
         for (PositionChange change : group.positions) {
             PositionRuntime value = change.after;
-            UserFactBuilder builder = value == null ? null : byUser.get(value.userId());
+            UserFactBuilder builder = value == null ? null : userFactBuilder(ordered, value.userId());
             if (builder != null) builder.positions.add(new CorePositionView(identities.symbol(value.symbolId()),
                     identities.asset(value.assetId()), value.marginMode(), value.positionSide(),
                     value.instrumentVersion(), value.signedQuantitySteps(), value.entryPriceTicks(),
                     value.entryValueTicks(), value.realizedPnlUnits(), value.positionMarginUnits()));
         }
         for (LeverageChange change : group.leverages) {
-            UserFactBuilder builder = byUser.get(change.key.userId());
+            UserFactBuilder builder = userFactBuilder(ordered, change.key.userId());
             if (builder != null && change.after != null) builder.leverages.add(
                     new CoreLeverageView(change.key.symbol(), change.key.marginMode(), change.after));
         }
         for (UserFactBuilder builder : ordered) result.add(builder.materialize());
+    }
+
+    private static UserFactBuilder userFactBuilder(ArrayList<UserFactBuilder> values, long userId) {
+        for (int index = 0; index < values.size(); index++) {
+            UserFactBuilder candidate = values.get(index);
+            if (candidate.user.userId() == userId) return candidate;
+        }
+        return null;
     }
 
     private static final class UserFactBuilder {
@@ -326,29 +337,30 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         ArrayList<Long> algos = new ArrayList<>();
         ArrayList<Long> triggers = new ArrayList<>();
         for (AccountLaneOwnerGroup group : patch.accountLaneGroups) {
-            group.users.stream().filter(change -> change.after == null)
-                    .map(UserChange::userId).forEach(users::add);
-            group.balances.stream().filter(change -> change.after == null)
-                    .map(change -> new CoreExportEvent.UserAssetKey(change.key.userId,
-                            identities.asset(change.key.assetId))).forEach(balances::add);
-            group.reservations.stream().filter(change -> change.after == null)
-                    .map(change -> new CoreExportEvent.UserOrderKey(change.before.userId(), change.orderId))
-                    .forEach(reservations::add);
-            group.orders.stream().filter(change -> change.after == null)
-                    .map(OrderChange::orderId).forEach(orders::add);
-            group.positions.stream().filter(change -> change.after == null)
-                    .map(change -> new CoreExportEvent.UserPositionKey(change.before.userId(),
-                            identities.symbol(change.before.symbolId()), change.before.positionSide()))
-                    .forEach(positions::add);
-            group.leverages.stream().filter(change -> change.after == null)
-                    .map(change -> new CoreExportEvent.UserLeverageKey(change.key.userId(),
-                            change.key.symbol(), change.key.marginMode())).forEach(leverages::add);
-            group.liquidations.stream().filter(change -> change.after == null)
-                    .map(LiquidationChange::liquidationId).forEach(liquidations::add);
-            group.algoOrders.stream().filter(change -> change.after == null)
-                    .map(AlgoOrderChange::algoOrderId).forEach(algos::add);
-            group.triggerOrders.stream().filter(change -> change.after == null)
-                    .map(TriggerOrderChange::triggerOrderId).forEach(triggers::add);
+            for (UserChange change : group.users) if (change.after == null) users.add(change.userId);
+            for (BalanceChange change : group.balances) if (change.after == null) {
+                balances.add(new CoreExportEvent.UserAssetKey(change.key.userId,
+                        identities.asset(change.key.assetId)));
+            }
+            for (ReservationChange change : group.reservations) if (change.after == null) {
+                reservations.add(new CoreExportEvent.UserOrderKey(change.before.userId(), change.orderId));
+            }
+            for (OrderChange change : group.orders) if (change.after == null) orders.add(change.orderId);
+            for (PositionChange change : group.positions) if (change.after == null) {
+                positions.add(new CoreExportEvent.UserPositionKey(change.before.userId(),
+                        identities.symbol(change.before.symbolId()), change.before.positionSide()));
+            }
+            for (LeverageChange change : group.leverages) if (change.after == null) {
+                leverages.add(new CoreExportEvent.UserLeverageKey(change.key.userId(),
+                        change.key.symbol(), change.key.marginMode()));
+            }
+            for (LiquidationChange change : group.liquidations) {
+                if (change.after == null) liquidations.add(change.liquidationId);
+            }
+            for (AlgoOrderChange change : group.algoOrders) if (change.after == null) algos.add(change.algoOrderId);
+            for (TriggerOrderChange change : group.triggerOrders) {
+                if (change.after == null) triggers.add(change.triggerOrderId);
+            }
         }
         users.sort(Long::compare);
         balances.sort(java.util.Comparator.comparingLong(CoreExportEvent.UserAssetKey::userId)
@@ -365,9 +377,10 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         liquidations.sort(Long::compare);
         algos.sort(Long::compare);
         triggers.sort(Long::compare);
-        ArrayList<String> treasury = new ArrayList<>(patch.globalOwnerGroup.treasuryAssets.stream()
-                .filter(change -> change.after == null)
-                .map(change -> identities.asset(change.assetId)).toList());
+        ArrayList<String> treasury = new ArrayList<>();
+        for (TreasuryAssetChange change : patch.globalOwnerGroup.treasuryAssets) {
+            if (change.after == null) treasury.add(identities.asset(change.assetId));
+        }
         treasury.sort(String::compareTo);
         return new CoreExportEvent.Tombstones(users, balances, reservations, orders, positions, leverages,
                 liquidations, algos, triggers, treasury);
@@ -539,10 +552,13 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         private static FactIdentitySlice capture(List<AccountLaneOwnerGroup> groups, GlobalOwnerGroup global,
                                                  List<FundsPosting> funds,
                                                  RuntimeIdentityRegistry registry) {
-            java.util.TreeSet<Integer> assetIds = new java.util.TreeSet<>();
-            java.util.TreeSet<Integer> symbolIds = new java.util.TreeSet<>();
+            org.eclipse.collections.impl.set.mutable.primitive.IntHashSet assetIds =
+                    new org.eclipse.collections.impl.set.mutable.primitive.IntHashSet();
+            org.eclipse.collections.impl.set.mutable.primitive.IntHashSet symbolIds =
+                    new org.eclipse.collections.impl.set.mutable.primitive.IntHashSet();
             java.util.TreeSet<ClientOrderKey> clientKeys = new java.util.TreeSet<>();
-            java.util.TreeSet<Long> positionKeys = new java.util.TreeSet<>();
+            org.eclipse.collections.impl.set.mutable.primitive.LongHashSet positionKeys =
+                    new org.eclipse.collections.impl.set.mutable.primitive.LongHashSet();
             for (AccountLaneOwnerGroup group : groups) {
                 group.balances().forEach(change -> assetIds.add(change.key().assetId()));
                 for (ReservationChange change : group.reservations()) {
@@ -565,7 +581,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
                     RiskSnapshotRuntime value = change.after() == null ? change.before() : change.after();
                     symbolIds.add(value.symbolId()); positionKeys.add(change.riskKey());
                 }
-                clientKeys.addAll(group.clientOrders().stream().map(ClientOrderChange::key).toList());
+                for (ClientOrderChange change : group.clientOrders()) clientKeys.add(change.key());
             }
             global.markPrices().forEach(change -> symbolIds.add(change.symbolId()));
             global.riskScans().forEach(change -> symbolIds.add(change.symbolId()));
@@ -575,20 +591,45 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             funds.forEach(posting -> assetIds.add(posting.assetId()));
             if (assetIds.isEmpty() && symbolIds.isEmpty() && clientKeys.isEmpty() && positionKeys.isEmpty()
                     || registry == null) return EMPTY;
-            List<IdentityValue> assets = assetIds.stream().map(id -> new IdentityValue(id, registry.asset(id))).toList();
-            List<IdentityValue> symbols = symbolIds.stream().map(id -> new IdentityValue(id, registry.symbol(id))).toList();
-            List<ClientIdentityValue> clients = clientKeys.stream().map(key -> new ClientIdentityValue(
-                    key.clientKey(), key.userId(), registry.clientOrderId(key.userId(), key.clientKey()))).toList();
-            List<PositionIdentityValue> positions = positionKeys.stream().map(key ->
-                    new PositionIdentityValue(key, registry.positionIdentity(key))).toList();
+            int[] orderedAssetIds = assetIds.toArray();
+            int[] orderedSymbolIds = symbolIds.toArray();
+            long[] orderedPositionKeys = positionKeys.toArray();
+            java.util.Arrays.sort(orderedAssetIds);
+            java.util.Arrays.sort(orderedSymbolIds);
+            java.util.Arrays.sort(orderedPositionKeys);
+            ArrayList<IdentityValue> assets = new ArrayList<>(orderedAssetIds.length);
+            for (int id : orderedAssetIds) assets.add(new IdentityValue(id, registry.asset(id)));
+            ArrayList<IdentityValue> symbols = new ArrayList<>(orderedSymbolIds.length);
+            for (int id : orderedSymbolIds) symbols.add(new IdentityValue(id, registry.symbol(id)));
+            ArrayList<ClientIdentityValue> clients = new ArrayList<>(clientKeys.size());
+            for (ClientOrderKey key : clientKeys) clients.add(new ClientIdentityValue(
+                    key.clientKey(), key.userId(), registry.clientOrderId(key.userId(), key.clientKey())));
+            ArrayList<PositionIdentityValue> positions = new ArrayList<>(orderedPositionKeys.length);
+            for (long key : orderedPositionKeys) {
+                positions.add(new PositionIdentityValue(key, registry.positionIdentity(key)));
+            }
             return new FactIdentitySlice(assets, symbols, clients, positions);
         }
 
         private static <T extends Comparable<? super T>> List<T> canonicalLongIdentities(List<T> values,
                                                                                           String kind) {
-            List<T> copy = values == null ? List.of() : values.stream().sorted().toList();
-            for (int index = 1; index < copy.size(); index++) if (copy.get(index - 1).compareTo(copy.get(index)) == 0) {
-                throw new IllegalArgumentException("duplicate patch " + kind + " identity");
+            if (values == null || values.isEmpty()) return List.of();
+            boolean ordered = true;
+            T previous = Objects.requireNonNull(values.getFirst(), "patch identity");
+            for (int index = 1; index < values.size(); index++) {
+                T current = Objects.requireNonNull(values.get(index), "patch identity");
+                int comparison = previous.compareTo(current);
+                if (comparison == 0) throw new IllegalArgumentException("duplicate patch " + kind + " identity");
+                if (comparison > 0) ordered = false;
+                previous = current;
+            }
+            if (ordered) return List.copyOf(values);
+            ArrayList<T> copy = new ArrayList<>(values);
+            copy.sort(null);
+            for (int index = 1; index < copy.size(); index++) {
+                if (copy.get(index - 1).compareTo(copy.get(index)) == 0) {
+                    throw new IllegalArgumentException("duplicate patch " + kind + " identity");
+                }
             }
             return List.copyOf(copy);
         }
@@ -890,60 +931,6 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         public static CoreFactValues empty() { return EMPTY; }
     }
 
-    public record CoreFactPayload(
-            List<CoreUserStateView> changedUsers,
-            List<CoreOrderStateView> changedOrders,
-            List<CoreExecutionView> executions,
-            List<CoreFundingPaymentView> fundingPayments,
-            List<CoreLiquidationView> changedLiquidations,
-            List<CoreTreasuryAssetView> changedTreasuryAssets,
-            List<CoreTriggerOrderStateView> changedTriggerOrders,
-            List<CoreFundsPostingView> fundsPostings,
-            CoreFundingProgressView fundingProgress,
-            CoreSettlementProgressView settlementProgress,
-            CoreMatcherTransition matcherTransition,
-            List<MatcherEvidence> matcherEvidence,
-            TerminalIds terminalIds,
-            CoreExportEvent.Tombstones tombstones,
-            long previousCoreSequence,
-            long coreSequence,
-            long previousProjectionSequence,
-            long projectionSequence,
-            long beforeBusinessStateHash,
-            long businessStateHash,
-            long beforeFundsStateHash,
-            long fundsStateHash,
-            long topologyHash,
-            long laneRevisionHash,
-            long clusterPosition,
-            CoreFactMetadata commandMetadata) {
-
-        public CoreFactPayload {
-            changedUsers = List.copyOf(changedUsers);
-            changedOrders = List.copyOf(changedOrders);
-            executions = List.copyOf(executions);
-            fundingPayments = List.copyOf(fundingPayments);
-            changedLiquidations = List.copyOf(changedLiquidations);
-            changedTreasuryAssets = List.copyOf(changedTreasuryAssets);
-            changedTriggerOrders = List.copyOf(changedTriggerOrders);
-            fundsPostings = List.copyOf(fundsPostings);
-            matcherEvidence = List.copyOf(matcherEvidence);
-            Objects.requireNonNull(matcherTransition, "matcherTransition");
-            Objects.requireNonNull(terminalIds, "terminalIds");
-            Objects.requireNonNull(tombstones, "tombstones");
-            Objects.requireNonNull(commandMetadata, "commandMetadata");
-        }
-
-        public int itemCount() {
-            return changedUsers.size() + changedOrders.size() + executions.size() + fundingPayments.size()
-                    + changedLiquidations.size() + changedTreasuryAssets.size() + changedTriggerOrders.size()
-                    + fundsPostings.size() + matcherEvidence.size() + terminalIds.orderIds().size()
-                    + terminalIds.liquidationIds().size() + terminalIds.triggerOrderIds().size()
-                    + tombstones.itemCount();
-        }
-
-    }
-
     public record CoreFactFragment(List<CoreUserStateView> changedUsers,
                                    List<CoreOrderState> changedOrders,
                                    List<CoreLiquidationView> changedLiquidations,
@@ -1064,14 +1051,14 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
     }
 
     public static final class Builder {
-        private final ProductLine productLine;
+        private ProductLine productLine;
         private long previousCoreSequence;
         private long coreSequence;
         private long previousProjectionSequence;
         private long projectionSequence;
         private boolean sequencesSet;
-        private final Map<Integer, LaneChanges> lanes = new HashMap<>();
-        private final Map<Integer, LaneCommit> laneCommits = new HashMap<>();
+        private final LaneChanges[] lanes = new LaneChanges[Long.SIZE - 1];
+        private final LaneCommit[] laneCommits = new LaneCommit[Long.SIZE - 1];
         private long laneMask;
         private final GlobalChanges global = new GlobalChanges();
         private final ArrayList<FundsPosting> fundsPostings = new ArrayList<>();
@@ -1098,6 +1085,37 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             this.productLine = Objects.requireNonNull(productLine, "product line");
         }
 
+        Builder reset() {
+            return reset(productLine);
+        }
+
+        Builder reset(ProductLine productLine) {
+            for (LaneChanges lane : lanes) if (lane != null) lane.reset();
+            java.util.Arrays.fill(laneCommits, null);
+            global.reset();
+            fundsPostings.clear();
+            matcherEvidence.clear();
+            liquidationAssets.clear();
+            previousCoreSequence = 0;
+            coreSequence = 0;
+            previousProjectionSequence = 0;
+            projectionSequence = 0;
+            laneMask = 0;
+            terminalOrderIds = List.of();
+            terminalLiquidationIds = List.of();
+            terminalTriggerOrderIds = List.of();
+            matcherTransition = null;
+            coreFactValues = CoreFactValues.empty();
+            sequencesSet = false;
+            coreFactValuesSet = false;
+            terminalIdsSet = false;
+            sealed = false;
+            finalSealed = false;
+            activePrepared = null;
+            this.productLine = Objects.requireNonNull(productLine, "product line");
+            return this;
+        }
+
         Builder sequences(long previousCoreSequence, long coreSequence,
                           long previousProjectionSequence, long projectionSequence) {
             requireOpen();
@@ -1116,7 +1134,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             this.previousProjectionSequence = previousProjectionSequence;
             this.projectionSequence = projectionSequence;
             sequencesSet = true;
-            for (LaneCommit commit : laneCommits.values()) requireLaneSequence(commit);
+            for (LaneCommit commit : laneCommits) if (commit != null) requireLaneSequence(commit);
             return this;
         }
 
@@ -1165,11 +1183,12 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             requireOpen();
             Objects.requireNonNull(commit, "commit");
             if (sequencesSet) requireLaneSequence(commit);
-            if (laneCommits.putIfAbsent(commit.laneId(), commit) != null) {
+            if (laneCommits[commit.laneId()] != null) {
                 throw new IllegalArgumentException("duplicate lane commit");
             }
+            laneCommits[commit.laneId()] = commit;
             laneMask |= 1L << commit.laneId();
-            lanes.computeIfAbsent(commit.laneId(), ignored -> new LaneChanges());
+            if (lanes[commit.laneId()] == null) lanes[commit.laneId()] = new LaneChanges();
             return this;
         }
 
@@ -1415,11 +1434,12 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
                     && metadata.coreFactMetadata().appliedCommandCount() != coreSequence) {
                 throw new IllegalArgumentException("Core Fact command count must equal core sequence");
             }
-            List<LaneCommit> commits = laneCommits.values().stream().sorted().toList();
-            java.util.Set<Integer> changedLaneIds = changedLaneIds();
-            if (!laneCommits.keySet().equals(changedLaneIds)) {
+            ArrayList<LaneCommit> commits = new ArrayList<>(Long.bitCount(laneMask));
+            for (LaneCommit commit : laneCommits) if (commit != null) commits.add(commit);
+            long changedLaneMask = changedLaneMask();
+            if (laneMask != changedLaneMask) {
                 throw new IllegalArgumentException("every changed lane must have exactly one lane commit"
-                        + " changed=" + changedLaneIds + " commits=" + laneCommits.keySet());
+                        + " changedMask=" + changedLaneMask + " commitMask=" + laneMask);
             }
             if (laneMask != metadata.laneMask()) throw new IllegalArgumentException("lane mask mismatch");
             ArrayList<AccountLaneOwnerGroup> groups = new ArrayList<>(commits.size());
@@ -1429,21 +1449,15 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
                         || commit.ownerGroupEndExclusive() != ownerGroupOffset + 1) {
                     throw new IllegalArgumentException("lane commit owner-group offset mismatch");
                 }
-                groups.add(lanes.get(commit.laneId()).seal(commit.laneId()));
+                groups.add(lanes[commit.laneId()].seal(commit.laneId()));
             }
 
             GlobalOwnerGroup sealedGlobal = global.seal();
             ArrayList<FundsPosting> derivedPostings = new ArrayList<>(fundsPostings);
             deriveFundsPostings(groups, sealedGlobal, derivedPostings);
-            RuntimeFundsDelta primitiveFunds = RuntimeFundsDelta.from(derivedPostings.stream()
-                    .map(posting -> new RuntimeFundsDelta.Posting(posting.assetId(), posting.ownerKind(),
-                            posting.ownerId(), posting.subledger(), posting.units()))
-                    .toList());
+            RuntimeFundsDelta primitiveFunds = RuntimeFundsDelta.fromPatchPostings(derivedPostings);
             primitiveFunds.requireConserved(metadata.externalAdjustment());
-            List<FundsPosting> canonicalFunds = primitiveFunds.postings().stream()
-                    .map(posting -> new FundsPosting(posting.assetId(), posting.ownerKind(), posting.ownerId(),
-                            posting.subledger(), posting.units()))
-                    .toList();
+            List<FundsPosting> canonicalFunds = primitiveFunds.postings();
             List<MatcherEvidence> canonicalEvidence = canonicalDistinct(
                     matcherEvidence, "duplicate matcher evidence");
             TerminalIds terminals = terminalIdsSet
@@ -1565,16 +1579,29 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
 
         java.util.Set<Integer> changedLaneIds() {
             java.util.HashSet<Integer> changed = new java.util.HashSet<>();
-            lanes.forEach((laneId, values) -> {
-                if (values.hasChanges()) changed.add(laneId);
-            });
+            for (int laneId = 0; laneId < lanes.length; laneId++) {
+                if (lanes[laneId] != null && lanes[laneId].hasChanges()) changed.add(laneId);
+            }
             return java.util.Set.copyOf(changed);
+        }
+
+        private long changedLaneMask() {
+            long mask = 0;
+            for (int laneId = 0; laneId < lanes.length; laneId++) {
+                if (lanes[laneId] != null && lanes[laneId].hasChanges()) mask |= 1L << laneId;
+            }
+            return mask;
         }
 
         private LaneChanges lane(int laneId) {
             requireOpen();
             if (laneId < 0 || laneId >= Long.SIZE - 1) throw new IllegalArgumentException("invalid lane id");
-            return lanes.computeIfAbsent(laneId, ignored -> new LaneChanges());
+            LaneChanges changes = lanes[laneId];
+            if (changes == null) {
+                changes = new LaneChanges();
+                lanes[laneId] = changes;
+            }
+            return changes;
         }
 
         private void requireProductLine(UserRuntime value) {
@@ -1631,6 +1658,21 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
                     || triggerOrders.hasChanges() || clientOrders.hasChanges() || timers.hasChanges();
         }
 
+        private void reset() {
+            users.reset();
+            balances.reset();
+            reservations.reset();
+            orders.reset();
+            positions.reset();
+            liquidations.reset();
+            riskSnapshots.reset();
+            leverages.reset();
+            algoOrders.reset();
+            triggerOrders.reset();
+            clientOrders.reset();
+            timers.reset();
+        }
+
         private AccountLaneOwnerGroup seal(int laneId) {
             return new AccountLaneOwnerGroup(laneId,
                     users.seal((key, change) -> new UserChange(key,
@@ -1667,6 +1709,17 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         private final Changes<UnitKey, Long> nextLiquidationId = new Changes<>();
         private final Changes<UnitKey, CoreRiskScanControlView> riskScanControl = new Changes<>();
 
+        private void reset() {
+            markPrices.reset();
+            riskScans.reset();
+            instruments.reset();
+            treasuryAssets.reset();
+            treasuryFunding.reset();
+            treasuryLifecycle.reset();
+            nextLiquidationId.reset();
+            riskScanControl.reset();
+        }
+
         private GlobalOwnerGroup seal() {
             return new GlobalOwnerGroup(
                     markPrices.seal((key, change) -> new MarkPriceChange(key, change.before, change.after)),
@@ -1687,7 +1740,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
 
         private void captureBefore(K key, V before) {
             if (key == null) throw new IllegalArgumentException("invalid typed patch key");
-            values.putIfAbsent(key, new BeforeAfter<>(before, before));
+            if (!values.containsKey(key)) values.put(key, new BeforeAfter<>(before, before));
         }
 
         private V before(K key) {
@@ -1704,6 +1757,10 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
                 if (!Objects.equals(change.before, change.after)) return true;
             }
             return false;
+        }
+
+        private void reset() {
+            values.clear();
         }
 
         private void record(K key, V before, V after) {
@@ -1723,13 +1780,14 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
 
         private <R> List<R> seal(BiFunction<K, BeforeAfter<V>, R> materializer) {
             ArrayList<R> result = new ArrayList<>(values.size());
-            ArrayList<Map.Entry<K, BeforeAfter<V>>> ordered = new ArrayList<>(values.entrySet());
-            ordered.sort(Map.Entry.comparingByKey());
-            ordered.forEach(entry -> {
+            @SuppressWarnings("unchecked")
+            Map.Entry<K, BeforeAfter<V>>[] ordered = values.entrySet().toArray(Map.Entry[]::new);
+            java.util.Arrays.sort(ordered, Map.Entry.comparingByKey());
+            for (Map.Entry<K, BeforeAfter<V>> entry : ordered) {
                 K key = entry.getKey();
                 BeforeAfter<V> change = entry.getValue();
                 if (!Objects.equals(change.before, change.after)) result.add(materializer.apply(key, change));
-            });
+            }
             return java.util.Collections.unmodifiableList(result);
         }
 
