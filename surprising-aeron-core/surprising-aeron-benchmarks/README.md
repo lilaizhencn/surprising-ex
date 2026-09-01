@@ -21,11 +21,11 @@ SURPRISING_JAVA_HOME=/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.j
 
 脚本同时检查并保存 `java -version` 和 `mvn -version`，拒绝 OpenJ9、非 JDK 25 或非
 HotSpot-compatible VM，默认使用 ZGC，并固定 10,000 活跃用户、512 个活跃 symbol、4 个
-Account Lane、每用户 5 个持仓和 10 个未成交单、1,024 max in-flight、16,384 operations per
+Account Lane、每用户 5 个持仓和 10 个未成交单、固定 256 max in-flight、16,384 operations per
 invocation。owner 场景使用 100,000 ops/s 的 open-loop constant-arrival 计划时间，入口延迟从
 计划到达时刻计算，因此包含排队并修正 coordinated omission。每个 benchmark/business type
 分别输出 entry→accepted、accepted→terminal、entry→terminal 的 p50/p90/p95/p99/p99.9/max。
-1,024 in-flight 验收同时固定 256 MiB Core Fact reservation 上限；服务默认仍为 64 MiB，生产部署
+256 in-flight 验收同时固定 256 MiB Core Fact reservation 上限；服务默认仍为 64 MiB，生产部署
 必须按最大并发命令的 `FactCostEstimate` 总和配置，不能依赖事件数上限代替字节门禁。
 
 AuxCounters 同时输出 terminal business ops、terminal Core messages、fills/trades、batch/items、
@@ -84,10 +84,9 @@ log2 histogram bucket count；analyzer 先按 business type 合并全部 invocat
 quantile 的中位数称为全局样本 percentile；`quantileAggregation=MERGED_LOG2_HISTOGRAM_COUNTS`
 是 qualification 的强制合同。
 
-`all` 模式依次运行统一 Maven 精确测试、probe、无 profiler JMH、GC、JFR/NMT、BUSY_SPIN 与
-YIELDING（均为 max-in-flight 1,024）的 saturation、owner commit 和 40 分钟 soak。等待策略可用
-`MATCHER_WAIT_STRATEGY`、`PROJECTION_WAIT_STRATEGY` 和逗号分隔的
-`SATURATION_WAIT_STRATEGIES` 切换。soak 至少要求 3 个 GC 后样本，检查 live-set、direct/mapped、
+`all` 模式依次运行统一 Maven 精确测试、probe、无 profiler JMH、GC、JFR/NMT、固定 256 in-flight 的
+saturation、owner commit 和 40 分钟 soak。同步 matcher 没有 completion/projection wait strategy；旧环境参数不参与
+生产主链路。soak 至少要求 3 个 GC 后样本，检查 live-set、direct/mapped、
 线程、文件描述符和 buffer-pool balance 的增长斜率。post-GC 点来自 HotSpot GC notification
 中的 GC id 与 `memoryUsageAfterGc`，不再从采样窗口内 collection count 变化推断；所有指标使用
 至少 3 个真实 GC 完成点的 Theil–Sen 稳健线性斜率。怀疑泄漏时设置
@@ -98,8 +97,11 @@ OldObject sample，不支持时只允许 recording metadata 支撑且带原因�
 不含 OldObject 事件。OldObject/path-to-roots 会显著增加采样、dump 和 root-path 分析开销，只用于
 斜率异常后的升级诊断，不能与基础吞吐轮直接比较。
 
-10k users/512 symbols/1,024 in-flight 的 sustained saturation 使用 100k/s constant-arrival 调度时间戳，
-在 Harness 的真实 `state.apply` 接受边界和 matching terminal 边界分别打点。scale mixed workload
+10k users/512 symbols/固定 256 in-flight 的 sustained saturation 使用 100k/s constant-arrival 调度时间戳，
+在 Harness 的真实同步 `state.apply` 入口和 owner terminal 返回边界分别打点。同步路径的期末 matcher backlog、
+completion mailbox 和 completion batch 必须为零；单 transaction 的瞬时 matcher backlog 上限为 1。
+`maxInFlight=256` 是驱动端固定上限，不能解释为 Core 内部异步队列。
+scale mixed workload
 同样只在 JFR event enabled 时启用 open-loop recorder，并通过无 `default` 的 `CoreMessageType`
 穷举 switch 分类为 PLACE_ORDER、CANCEL_ORDER、AMEND_ORDER、ORDER_BATCH、TRIGGER_ORDER、
 RISK_SCAN、LIQUIDATION、FUNDING、ADL、SETTLEMENT。TAKER_FILL 只允许由真实 fill terminal

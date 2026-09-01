@@ -59,7 +59,7 @@ final class MatcherEvidenceLedger {
         int index = index(matcherShardId);
         long nativeSequence = result.nativeCommand().nativeSequence();
         if (nativeSequence > 0) advanceStrictly(shardNativeSequences, index, nativeSequence,
-                "matcher shard native sequence is not strictly increasing");
+                "matcher shard native sequence is not strictly increasing shard=" + matcherShardId);
         advanceStrictly(shardSequences, index, sequence,
                 "matcher shard sequence is not strictly increasing");
         CoreMatchingResult.NativeCommand nativeCommand = new CoreMatchingResult.NativeCommand(
@@ -92,7 +92,7 @@ final class MatcherEvidenceLedger {
     private static void advanceStrictly(AtomicLongArray values, int index, long next, String message) {
         long previous = values.get(index);
         if (next <= previous || !values.compareAndSet(index, previous, next)) {
-            throw new IllegalStateException(message);
+            throw new IllegalStateException(message + " previous=" + previous + " next=" + next);
         }
     }
 

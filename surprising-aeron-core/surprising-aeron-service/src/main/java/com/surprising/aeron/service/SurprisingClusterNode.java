@@ -33,7 +33,7 @@ public final class SurprisingClusterNode {
                 .threadingMode(coreThreadingMode())
                 .clientLivenessTimeoutNs(coreClientLivenessTimeoutNs())
                 .publicationUnblockTimeoutNs(corePublicationUnblockTimeoutNs())
-                .termBufferSparseFile(true)
+                .termBufferSparseFile(false)
                 .errorHandler(errorHandler("media-driver"));
 
         AeronArchive.Context replicationArchiveContext = new AeronArchive.Context()
@@ -43,7 +43,7 @@ public final class SurprisingClusterNode {
                 .archiveDir(new File(nodeDirectory, "archive"))
                 .controlChannel(topology.archiveControlChannel())
                 .archiveClientContext(replicationArchiveContext)
-                .localControlChannel("aeron:ipc?term-length=64k")
+                .localControlChannel(localArchiveControlChannel())
                 .recordingEventsEnabled(false)
                 .threadingMode(ArchiveThreadingMode.SHARED)
                 .replicationChannel(topology.replicationChannel());
@@ -64,7 +64,7 @@ public final class SurprisingClusterNode {
                 .clusterMemberId(topology.nodeId())
                 .clusterMembers(topology.clusterMembers())
                 .clusterDir(clusterDirectory)
-                .ingressChannel("aeron:udp?term-length=64k")
+                .ingressChannel(clusterIngressChannel())
                 .replicationChannel(topology.replicationChannel())
                 .maxConcurrentSessions(maxConcurrentSessions)
                 .archiveContext(localArchiveClient.clone())
@@ -108,7 +108,10 @@ public final class SurprisingClusterNode {
     static ThreadingMode coreThreadingMode() {
         String configured = System.getProperty("surprising.aeron.core.threading-mode");
         if (configured == null || configured.isBlank()) {
-            configured = System.getenv().getOrDefault("AERON_CORE_THREADING_MODE", "DEDICATED");
+            configured = System.getenv().get("AERON_CORE_THREADING_MODE");
+        }
+        if (configured == null || configured.isBlank()) {
+            configured = Runtime.getRuntime().availableProcessors() >= 12 ? "DEDICATED" : "SHARED_NETWORK";
         }
         try {
             return ThreadingMode.valueOf(configured.trim().toUpperCase(Locale.ROOT));
@@ -125,5 +128,26 @@ public final class SurprisingClusterNode {
 
     static long corePublicationUnblockTimeoutNs() {
         return TimeUnit.SECONDS.toNanos(60);
+    }
+
+    static String clusterIngressChannel() {
+        return configuredChannel("surprising.aeron.cluster-ingress-channel",
+                "AERON_CLUSTER_INGRESS_CHANNEL", "aeron:udp?term-length=16m");
+    }
+
+    static String localArchiveControlChannel() {
+        return configuredChannel("surprising.aeron.archive-local-control-channel",
+                "AERON_ARCHIVE_LOCAL_CONTROL_CHANNEL", "aeron:ipc?term-length=1m");
+    }
+
+    private static String configuredChannel(String property, String environment, String defaultValue) {
+        String value = System.getProperty(property);
+        if (value == null || value.isBlank()) value = System.getenv(environment);
+        if (value == null || value.isBlank()) value = defaultValue;
+        value = value.trim();
+        if (!value.startsWith("aeron:")) {
+            throw new IllegalArgumentException(property + " must be an Aeron channel URI");
+        }
+        return value;
     }
 }

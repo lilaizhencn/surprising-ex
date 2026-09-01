@@ -32,11 +32,11 @@
         <postgresql.version>42.7.11</postgresql.version>
         <spring-cloud.version>2025.1.3</spring-cloud.version>
         <bouncycastle.version>1.82</bouncycastle.version>
-        <exchange-core.version>0.5.17-emporia</exchange-core.version>
+        <exchange-core.version>0.5.18-emporia</exchange-core.version>
         <exchange-core.repository>https://github.com/lilaizhencn/exchange-core.git</exchange-core.repository>
-        <exchange-core.git-sha>a85db2d210c478ec9ba97940db6b48de820f4dd4</exchange-core.git-sha>
+        <exchange-core.git-sha>4636c44b19de90be0bd6c85afdd0e4fa190da9f0</exchange-core.git-sha>
         <exchange-core.build-jdk>25</exchange-core.build-jdk>
-        <exchange-core.sha256>0f55185e990b9c60e1a48da4171e22210f1def32956549c04ab17535dc3c19be</exchange-core.sha256>
+        <exchange-core.sha256>4a6e41ae66822eddf8539fa8bb80fe77ffc3cc4adc7376d6666b45cf24ee874e</exchange-core.sha256>
         <aeron.version>1.53.0</aeron.version>
         <hdrhistogram.version>2.2.2</hdrhistogram.version>
         <chronicle.bom.version>2026.18</chronicle.bom.version>

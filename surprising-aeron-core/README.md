@@ -4,7 +4,7 @@
 端口空间、Archive 和数据卷；一个逻辑 Core 固定由三个 Member 组成，并管理该变体全部 symbol。
 
 W1/W2 已完成单一可执行盘口改造：`TradingCoreRuntime` 是 Core 单写边界，撮合命令只进入 fork 的
-exchange-core 0.5.17-emporia；`TradingCoreState` 不再保存 `CoreBookState` 或任何 FIFO priority map。
+exchange-core 0.5.18-emporia；`TradingCoreState` 不再保存 `CoreBookState` 或任何 FIFO priority map。
 matcher 恢复导入 Aeron 配对 snapshot 中全部原生 `ME[0..N)/RE0`，通过 `fromSnapshotOnly` 启动，不逐单回放。
 
 部署基线不按 margin mode 或热点 symbol 分 Core：CROSS 和 ISOLATED 都由同一个 ProductLine Core 裁决；
@@ -21,6 +21,28 @@ CROSS 只共享该 Core 内权益，ISOLATED 绑定 position identity。只保�
 | `surprising-aeron-exporter` | P5 可靠 Exporter 的最小 sink 边界。 |
 | `surprising-aeron-tools` | Cluster 探针、状态 hash 查询和只读离线 replay 诊断；不得作为生产恢复或 snapshot 来源。 |
 
+## 当前同步 Owner 主链路
+
+当前生产主链路固定为一个 Aeron Cluster service owner、一个 exchange-core matching engine（exchange-core risk engine 为 0）和逻辑
+Account Lane。`DeterministicExchangeCoreAdapter` 通过 fork 的 `SynchronousMatchingEngine` 在 owner 回调内
+直接撮合；同一回调随后按 userId 路由到目标 Lane，串行完成资金、订单、持仓、手续费与 Treasury delta，
+最后一次性发布 Core Fact 和响应。不存在 Disruptor matcher 线程、matcher completion queue、Account Lane
+工作线程、1 ms Cluster timer 续执行或跨线程 ACK barrier。
+
+Account Lane 仍是资金隔离、哈希、快照与审计边界，但不是并行执行器。多成交、多用户、跨 Lane 的一笔命令
+使用同一套 `MatcherSettlementPlan` 和同一 owner transaction；任何 Lane 失败都由
+`TradingRuntimeState.CommandCheckpoint` 回滚整条命令，不会暴露部分资金或持仓结果。
+
+`RuntimeCommitJournal` 只保留当前 owner transaction 的准入、连续 sequence 和诊断元数据，不再维护热
+projection replica、projector 线程或 per-command freeze。普通命令只更新权威 mutable runtime、rolling hash、
+索引和 typed patch；`TradingCoreState` 只在显式 query/snapshot fence 直接物化。Snapshot 编码也在确定性的
+snapshot fence 内同步完成，不创建 snapshot encoder/audit executor。
+
+Cluster 本地进度不写复制 timer。Aeron publication 遇到 `BACK_PRESSURED`/`ADMIN_ACTION` 时保留有界 egress，
+遇到 `CLOSED`/`NOT_CONNECTED`/`MAX_POSITION_EXCEEDED` 时 fail closed。默认 UDP term length 为 16 MiB，
+Archive 本地 control 为 1 MiB；term buffer 使用非 sparse 文件。线程模式可显式配置，否则 12 CPU 及以上用
+`DEDICATED`，更小机器用 `SHARED_NETWORK`，避免在桌面环境制造无意义的 busy-spin 争用。
+
 ## Owner commit 单一路径（P11）
 
 本实现改动触及共享 protocol 与通用 Product Core owner commit、投影和 Core Fact 出口；运行时与性能验证范围仅为
@@ -29,11 +51,9 @@ CROSS 只共享该 Core 内权益，ISOLATED 绑定 position identity。只保�
 
 唯一写路径为：owner thread 原地修改 `TradingRuntimeState`，在命令边界把首个 before 与最终 after 收集为
 `PreparedChanges`；business/funds rolling hash 先生成可回滚 transition，随后只 seal 一份
-`RuntimeCommitPatch`。该 patch 依次驱动 `RuntimeCommitIndexes`、有界 `RuntimeCommitJournal`，再由单 projector
-以 item/byte 上限批量更新 mutable projection，并以 Core Fact v10 异步批量编码。普通下单、撤单、成交和风险命令
-不全量 materialize、不等待 projector 或 Core Fact；显式 snapshot、query fence、关闭和恢复才请求并等待精确 fence。
-snapshot 从已完成 projection 冻结，replay 按连续 patch sequence 重放；任何 sequence、hash、产品线或 lane 拓扑不匹配均
-在替换状态前 fail closed。
+`RuntimeCommitPatch`。该 patch 驱动 `RuntimeCommitIndexes`、轻量 sequence journal 和 Core Fact v10；普通下单、
+撤单、成交和风险命令不全量 materialize，也不等待后台 projection。显式 snapshot/query fence 直接从权威 runtime
+构造不可变视图；任何 sequence、hash、产品线或 Lane 拓扑不匹配均在替换状态前 fail closed。
 
 `RuntimeCommitIndexes` 的唯一 patch apply 入口覆盖九个索引：`PositionUserIndex`、`OpenInterestIndex`、
 `TriggerOrderIndex`、`AlgoOrderIndex`、`LiquidationIndex`、`CancelAllAfterIndex`、`ActiveOrderIndex`、
@@ -49,9 +69,9 @@ owner 提交暂存采用可复用 `RuntimeCommitPatch.Builder`；reset 只清理
 不再创建镜像 reverse patch。Core Fact materializer 直接把 user/order 嵌套结构写入最终 event buffer，不再为每个嵌套对象先生成
 临时 `byte[]`；协议 marker、字段顺序、资金守恒、tombstone 和 snapshot/replay 语义保持不变。
 
-准入先同时预留 journal patch 数/字节与 Core Fact event 数/字节，之后才允许 mutation/Cluster Log commit；reservation 只能
-消费一次，提交前拒绝或失败必须释放。journal/export 容量满返回 backpressure，不创建无界 executor 或队列。owner、每个
-Account Lane、matcher、risk、projector 与 exporter 的失败会 poison 相应路径，撤销 hash/index transition、回收 lane ticket，
+准入先同时预留当前 transaction 的 patch 数/字节与 Core Fact event 数/字节，之后才允许 mutation；reservation 只能
+消费一次，提交前拒绝或失败必须释放。export 容量满返回 backpressure，不创建无界 executor 或队列。owner、
+Account Lane、matcher、risk 与 exporter 的失败会 poison 相应路径，撤销 hash/index transition、回收 lane ticket，
 且不会推进可见 patch/core sequence。资金 posting 以 `(asset, ownerKind, ownerId, subledger)` 的 before/after 精确导出，
 含 fee、insurance、funding、liquidation、rounding、clearing、deficit 后逐资产守恒；sealed patch 的 business/funds hash、
 idempotency response、订单终态与 snapshot/replay hash 必须一致。
@@ -62,16 +82,10 @@ idempotency response、订单终态与 snapshot/replay hash 必须一致。
 `failOrderBatch`：typed runtime checkpoint rollback 后按逆序回收预分配 client-order key，再撤销 position identity；不会调用
 通用 immutable-state restore。这样批量 idempotency、Lane 隔离和 admission/open-interest 语义仍在同一 owner commit 边界内。
 
-支持的背压和等待参数包括 `surprising.aeron.commit-journal-capacity`、
-`surprising.aeron.commit-journal-capacity-bytes`、`surprising.aeron.projection-batch-size`、
-`surprising.aeron.projection-batch-bytes`、`surprising.aeron.projection-batch-delay-nanos`、
-`surprising.aeron.projection-wait-strategy`（`PARKING`/`YIELDING`/`BUSY_SPIN`）、
-`surprising.aeron.projection-busy-spin`、`surprising.aeron.export-materialization-capacity`、
-`surprising.aeron.export-pending-bytes` 和 `surprising.aeron.export-materialization-batch-size`。BUSY_SPIN 会持续占用
-CPU，YIELDING 降低抢占强度，PARKING 以延迟换取空闲 CPU；它们都是运行时性能参数，不能改变业务顺序或 snapshot hash。
-连续 matcher completion 由 owner 按 core sequence 非阻塞批量提交；projection 与 Core Fact 的 SPSC 发布在批末各执行
-一次唤醒。projection batch 使用单一回滚边界并仅在请求的批末 sequence freeze，任一 patch 失败会回滚该 projection batch，
-但不会改变 owner 已提交的权威状态或资金校验边界。
+保留的背压参数是当前 transaction 的 commit admission 字节上限以及
+`surprising.aeron.export-materialization-capacity`、`surprising.aeron.export-pending-bytes`、
+`surprising.aeron.export-materialization-batch-size`。旧 projection batch/wait-strategy 和 matcher completion
+等待参数不再参与生产链路。Core Fact materializer 仍可异步编码，但 owner 不等待它；只有有界 admission 能影响新命令接收。
 
 静态/目标验证（执行前必须确认 HotSpot JDK 25，且本任务未执行这些 Java 命令）：
 
@@ -82,8 +96,8 @@ mvn -pl surprising-aeron-core/surprising-aeron-service \
 surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-linear-perpetual-scale.sh jmh
 ```
 
-最后一条资格命令固定使用 HotSpot 25、ZGC、10,000 users、512 listed/active symbols、4 Account Lanes；其 scale、GC、
-JFR、soak 与 BUSY_SPIN/YIELDING saturation 模式会写入当前脚本指定 artifact 目录。JMH/JFR 只能在前置审计、目标测试和
+最后一条资格命令固定使用 HotSpot 25、ZGC、10,000 users、512 listed/active symbols、4 个逻辑 Account Lane、
+1 个同步 matching engine 和 256 in-flight；其 scale、GC、JFR、soak 与 saturation artifact 会写入当前脚本指定目录。JMH/JFR 只能在前置审计、目标测试和
 编译通过后执行；本 README 不把它们或六产品线资金验证声明为已完成。
 
 ## 本地构建与三节点运行
@@ -105,21 +119,13 @@ mvn -pl :surprising-aeron-client,:surprising-aeron-tools -am test
 sectioned snapshot v17；decoder 和 startup 只接受这些当前版本，对任何旧版本 fail closed，不保留 legacy reader、兼容 reader
 或隐式降级。
 
-P10 的目标不是物理 Core shard；每个三节点 Product Core 仍只运行一个共享的 Adapter/ExchangeCore，按 symbol 的
-Matcher Lane 直接复用 exchange-core 原生 MatchingEngineRouter shard，Account Lane 是默认必须实施的运行时边界，
-生产默认 `accountLaneCount=4`；`MatcherSettlementPlan` 单次遍历 matcher events，生成按 Lane 切分的只读事件视图，
-每个 Lane 只处理自己的用户和成交，不再重复扫描完整结果。Treasury 保持 Sequencer owner。全局 Core
-sequence、Core Fact、snapshot 和恢复仍由一个确定性 Sequencer 协调。默认 topology 为 4 个 native matcher shard、
-1 个 risk engine、4 个 Account Lane、一个 Sequencer-owned Treasury；matcher pipeline、pending reservation 隐藏、Lane commit
-位图、全局 commit cursor 和实际 Lane snapshot section 已落地。账户、风险、生命周期和撮合成交统一调用同一个 Lane mutation
-入口：单 Lane 或短操作由 owner 内联执行，多 Lane 成交按 userId 路由后由对应 `SettlementLaneWorker` 直接修改该 Lane 的权威
-Runtime State，两者只在调度方式上不同，不再维护 journal/replay 结算分支。owner 只在一次命令的所有目标 Lane 完成后等待一次
-统一 barrier，随后合并 Treasury delta、验证资金守恒并以同一个连续 commit sequence 发布 Runtime State/Core Fact；任一 Lane
-失败则整条命令 fail closed 并按命令 checkpoint 回滚，对外不会暴露部分成交。权威余额只在 Lane scope 内访问，查询返回副本；
-余额对象不保存独立线程 owner，所以 owner/worker 交接只切换 Lane owner、不扫描余额，completion 在同一个 barrier 中只 await 一次。Runtime commit 内部只存一套 canonical
-sequence，不再复制 core/projection 序列或派生 owner group 列表；prepare、seal、hash、index、publish 和 rollback 由单一 owner
-commit transaction 管理。BLOCKING worker 空闲时无限 park，由生产者唤醒；
-也可显式切换 BUSY_SPIN 或 YIELDING。
+P10 的目标不是物理 Core shard；每个三节点 Product Core 只运行一个 Adapter 和一个 exchange-core matching engine。
+生产默认 `accountLaneCount=4`，Lane 只负责确定性路由、局部 hash、快照 section 和资金所有权校验，不创建线程。
+`MatcherSettlementPlan` 单次遍历 matcher events 并按 Lane 切分；owner 按 Lane id 的固定顺序执行全部用户变更，再合并
+Treasury delta、验证资金守恒，以一个连续 core sequence 发布 Runtime State/Core Fact。账户、风险、生命周期和撮合成交
+统一走这一条同步 mutation 路径，没有“短操作内联/大操作 worker”两套实现，也没有 BLOCKING/YIELDING/BUSY_SPIN
+settlement wait strategy。Runtime commit 只存一套 canonical sequence；prepare、seal、hash、index、publish 和 rollback
+都属于同一 owner transaction。
 P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣称生产认证完成。
 
 ## 协议约束
@@ -129,22 +135,16 @@ P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣
   外部提交时间、`correlationId` 和 route v3；旧 envelope/route 不再接受。
 - Instrument Provider 通过版本化 `UpsertInstrumentCommand` 下发保证金率、risk brackets、最大杠杆和
   最大持仓名义价值；CoreInstrumentState 是运行时唯一参数副本，Risk Provider 只能查询 Core 快照。
-- exchange-core 0.5.17-emporia 是唯一可执行订单簿（sole executable order book），独占价格树/FIFO；`GTX` 使用原生
+- exchange-core 0.5.18-emporia 是唯一可执行订单簿（sole executable order book），独占价格树/FIFO；`GTX` 使用原生
   post-only 语义，外层不得查 book 后模拟，也不得建立并行可执行 book。
   Core 的 `CoreOrderState` 只保存业务元数据和活动状态，不保存可重建 FIFO 的 priority sequence。
 - adapter 固定使用 `RiskProcessingMode.MATCHING_ONLY` 并禁用 exchange-core margin trading；内部 user/symbol/risk module 是需随 matcher snapshot 恢复的技术状态，不是业务资金、持仓或保证金权威。
-- Adapter 按 Core sequence 向一个 ExchangeCore ring 提交最多 `matcherWindowSize` 个命令；原生 shard 可并行，
-  普通 symbol 结果按 `matcherShardId` 独立推进严格单调 sequence/native sequence 和连续 prefix；control shard `-1`
-  承载跨 symbol 批次、前置撤单与生命周期命令。不同 shard 允许乱序完成，任一 shard 内倒退或 prefix 断裂即 fail closed。
-  异步完成直接把同一个 `CoreMatchingResult` 引用按 Core sequence release-publish 到预分配 completion mailbox，
-  不存在 MPSC queue、publication cursor 或 `Completion` wrapper。owner 只消费当前确定性 sequence；depth 在槽位
-  发布前预约，sticky overflow 无论是否存在 pending sequence 都会 fail closed。Sequencer 扫描一次 userId 后把该引用扇出给受影响
-  Account Lane；`MatcherSettlementPlan` 在一次遍历内完成结果分类、受影响用户收集和 Lane event slice 构造，后续 Lane
-  不再重复遍历 matcher 链。wall-clock readiness/watchdog 只能由 external health
-  supervisor 观察，不能进入复制状态或改变裁决顺序。
-- Pending matcher 顺序和 continuation 均使用预分配、按 Core sequence 定位的 primitive ring。热路不维护逐命令
-  `CompletableFuture` map、active set 或 completed-result map；同步边界可直接读取已完成 future 的确定性结果，不再等待
-  completion callback 清理并发集合。只有 snapshot/关闭 fence 会统一等待仍在途的 matcher future。
+- Adapter 在 owner 上调用 `SynchronousMatchingEngine`，每条命令直接取得一个确定性的 `CoreMatchingResult`。
+  matching engine 固定为 1；native sequence 与滚动 prefix 仍写入 snapshot/replay 证据，倒退或 prefix 断裂立即 fail closed。
+  结果只暂存在当前 `LaneCommandContextRing.Context`，没有 ExchangeCore ring、异步 callback、completion mailbox 或 timer。
+  `MatcherSettlementPlan` 一次完成结果分类、用户收集和 Lane event slice 构造，后续 Lane 不重复遍历 matcher 链。
+- Pending matcher ring 只用于批量/触发单在同一 owner transaction 内的确定性 continuation 与故障证据；
+  它不表示跨线程 in-flight。热路不维护逐命令 Future、active set、completed-result map 或 completion token。
 - `saturatedMatchingWorkload` 使用共享有界窗口的持续滑动 feeder：同一方向内每完成一组 maker/taker 依赖就立即补入
   下一币对，不再整窗排空后重新提交；一个方向全部完成后才反向，防止预置深度场景产生方向穿越。
   每个 symbol 同一时刻最多一组订单在途，保持账户依赖和 Core sequence 提交顺序；
@@ -156,17 +156,14 @@ P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣
 - matcher 结果使用 typed outcome 区分成交、挂单、拒绝和撤单，并用 primitive UUID 两段值保存 command identity；已知的
   前置撤单 prefix 可以确定性恢复，未知 prefix 或语义分歧仍 fail closed。replace/amend 在进入 matcher 前只执行一次
   identity、reservation 和 admission 解析，完成阶段复用 `ResolvedMatchingAdmission`，不再次做同义业务校验。
-- Lane 提交使用 owner 预分配的 apply result、Lane values 和回调，不再创建逐命令 ACK/对象数组或二次 ACK 循环。
-  `surprising.aeron.parallel-settlement-min-trades` 控制并行结算阈值，默认 `8`；
-  `surprising.aeron.parallel-lifecycle-min-items` 控制生命周期跨 Lane 并行阈值，默认 `2`；单 Lane 工作保持 owner 串行，多 Lane 工作保持 Account Lane 独立 owner；
-  `surprising.aeron.settlement-wait-strategy` 接受 `BLOCKING`（默认）、`YIELDING` 或 `BUSY_SPIN`。
+- Lane 提交由 owner 按固定 Lane 顺序执行；不存在 parallel-settlement、parallel-lifecycle 或 settlement-wait-strategy 参数。
 - pending matcher 以 sequence、commandId 和 user 三个有界索引做常数时间定位；Core Fact owner→materializer
   使用有界 SPSC ring，ACK 早于 materialization 时由 slot 状态机回收，不创建逐 Fact Future/Task。
 - Cluster response 直接写入 session egress scratch，并以调用时的 committed Core sequence 编码；内部不再构造
   visible response、临时 response payload 或二次 `CoreMessage` payload copy。只有 Aeron backpressure 入队时复制 scratch。
-- 单笔交易只发布 sealed typed commit 和 `RuntimeProjectionPoint`；mutable projector 顺序消费有界 patch batch，只有 snapshot/query
-  fence、关闭和恢复才冻结 `TradingCoreState`。Core Fact v10 从 patch 的 typed before/after、tombstone 和 encoded terminal ID
-  异步编码；下单、撤单、撮合及批量 owner 路径不执行 lazy transition view，也不等待 projector 或 Core Fact。普通及批量订单校验
+- 单笔交易只发布 sealed typed commit 和轻量 `RuntimeProjectionPoint` sequence；没有 mutable projector 或 projection replica。
+  Snapshot/query fence 从权威 runtime 直接构造 `TradingCoreState`。Core Fact v10 从 patch 的 typed before/after、tombstone 和 encoded terminal ID
+  异步编码；下单、撤单、撮合及批量 owner 路径不执行 full materialization，也不等待 Core Fact。普通及批量订单校验
   直接读取 `OrderRuntime` 与 typed patch before-value，matcher 前置撤单只携带最小身份，不构造 `CoreOrderState`；批量失败走
   `CommandCheckpoint` typed rollback，而不是 immutable snapshot baseline 或通用 restore。
 - 强平和交割/行权结算的订单撤销均按确定性 cursor 分批执行，单个 Core 命令最多处理 1,024 笔订单；强平 provider
@@ -175,8 +172,8 @@ P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣
   生命周期进度保存在 Core 状态中，但 pending matcher continuation 不写入 snapshot。matcher 异常、超时、
   malformed result 或 Core/matcher 分歧直接抛出 `FatalMatchingDivergenceException`，Cluster Member 失败关闭，
   不 rebuild、不 retry、不 resubmit；生命周期期间同 symbol 的普通订单被拒绝，其他 symbol 仍可提交。
-- snapshot/query/lifecycle fence 停止新派发并排空 bounded window；不同 symbol 可在原生 shard 并行，但全局可见性、
-  Core Fact 和 outbox 永远只按 Core sequence 提交。测试固定使用单个 `matchingEnginesNum(1)`，不得创建第二个 Adapter/ExchangeCore。
+- snapshot/query/lifecycle fence 停止新命令并确认当前 owner transaction 已终态；Core Fact 和 outbox 永远只按
+  Core sequence 提交。测试固定使用单个 `matchingEnginesNum(1)`，不得创建第二个 Adapter/ExchangeCore。
 
 生命周期批量协议使用 `EXECUTE_LIQUIDATION_BATCH` wire code 43。`CoreLiquidationWorkCodec` 返回 action 的
 `ORDERED` cursor 和精确 Risk Scan token；`CoreLiquidationBatchResultCodec` 返回 offered/applied/pending/obsolete/
@@ -324,9 +321,9 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
 
 ## W1/W2 原生快照契约
 
-- fork 坐标为 `exchange.core2:exchange-core:0.5.17-emporia`，Git SHA
-  `a85db2d210c478ec9ba97940db6b48de820f4dd4`，可复现 JAR SHA-256
-  `0f55185e990b9c60e1a48da4171e22210f1def32956549c04ab17535dc3c19be`；fork 只允许 clean
+- fork 坐标为 `exchange.core2:exchange-core:0.5.18-emporia`，Git SHA
+  `4636c44b19de90be0bd6c85afdd0e4fa190da9f0`，可复现 JAR SHA-256
+  `4a6e41ae66822eddf8539fa8bb80fe77ffc3cc4adc7376d6666b45cf24ee874e`；fork 只允许 clean
   worktree 构建，从该提交的不可变 `git archive` 编译，并在 JAR 生成后重新认证仓库和内嵌 SHA；
   service 的 Maven `validate` 同时校验 provenance 与整包 hash。
   Aeron 依赖固定为 `1.53.0`。matcher 内部使用 `Grouping → Matching → Results` 的 `MATCHING_ONLY`
@@ -353,5 +350,4 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
   批次上限和审计元数据；状态随 Cluster Log/Archive 与 `Trading snapshot v24` 恢复。
 - `APPLY_MARK_PRICE` 只提交新价格和初始化 risk/trigger cursor；用户风险、强平计划和触发单扫描只能由有界
   `CONTINUE_RISK_SCAN` 推进，不能在标记价命令中隐式执行首批扫描。
-- matcher 等待策略默认 `BUSY_SPIN` 并固定一个 matching engine；共享 CPU 时可显式配置为 `YIELDING` 或 `BLOCKING`，但需单独验收；Account Lane 可配置为
-  `BUSY_SPIN`、`BALANCED` 或 `PARK`。等待策略是运行时性能参数，不进入业务状态或 snapshot hash。
+- matcher 固定为一个同步 engine；Account Lane 是 owner 内逻辑边界，两者都没有等待线程或 wait strategy。

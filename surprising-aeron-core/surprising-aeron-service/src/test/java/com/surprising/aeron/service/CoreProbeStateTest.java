@@ -936,21 +936,6 @@ class CoreProbeStateTest {
     }
 
     @Test
-    void replicatedTimerBoundaryDoesNotBlockOnIncompleteLocalMatching() throws Exception {
-        CompletableFuture<com.surprising.aeron.service.matching.CoreMatchingResult> matching =
-                new CompletableFuture<>();
-        AtomicReference<com.surprising.aeron.service.matching.CoreMatchingResult> result = new AtomicReference<>();
-        Thread timer = Thread.ofVirtual().start(() -> result.set(CoreProbeState.awaitMatchingCompletion(matching)));
-
-        timer.join(200);
-
-        assertThat(timer.isAlive()).isFalse();
-        assertThat(result.get()).isNull();
-        matching.complete(new com.surprising.aeron.service.matching.CoreMatchingResult(
-                true, "SUCCESS"));
-    }
-
-    @Test
     void acceptedLiquidationBatchDoesNotFailWhenItsRiskScanWasSupersededDuringMatching() throws Exception {
         try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
             var batch = new com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand(
@@ -976,9 +961,11 @@ class CoreProbeStateTest {
     }
 
     @Test
-    void bindsRuntimeStateToTheFirstCoreCommandThread() throws InterruptedException {
+    void bindsRuntimeStateAndMaterializationToTheCoreCommandThread() throws InterruptedException {
         AtomicReference<CoreProbeState> stateRef = new AtomicReference<>();
         AtomicReference<CoreResponse> response = new AtomicReference<>();
+        AtomicReference<com.surprising.aeron.service.state.TradingCoreState> materialized =
+                new AtomicReference<>();
         AtomicReference<Throwable> failure = new AtomicReference<>();
         CountDownLatch commandComplete = new CountDownLatch(1);
         CountDownLatch releaseClose = new CountDownLatch(1);
@@ -990,6 +977,7 @@ class CoreProbeStateTest {
                         CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
                         TradingCommandCodec.encodeBalanceAdjustment(
                                 new BalanceAdjustmentCommand("USDT", 10_000)))));
+                materialized.set(state.tradingState());
             } catch (Throwable thrown) {
                 failure.set(thrown);
             } finally {
@@ -1003,9 +991,9 @@ class CoreProbeStateTest {
         assertThat(commandComplete.await(10, TimeUnit.SECONDS)).isTrue();
         try {
             assertThat(failure.get()).isNull();
-            CoreProbeState state = stateRef.get();
+            assertThat(stateRef.get()).isNotNull();
             assertThat(response.get().status()).isEqualTo(ResponseStatus.APPLIED);
-            assertThat(state.tradingState().user(1001).totalUnits("USDT")).isEqualTo(10_000);
+            assertThat(materialized.get().user(1001).totalUnits("USDT")).isEqualTo(10_000);
         } finally {
             releaseClose.countDown();
             coreAgent.join();
@@ -1346,7 +1334,7 @@ class CoreProbeStateTest {
     }
 
     @Test
-    void asyncMatchingCompletesOnOwnerContinuationWithoutBlockingApply() {
+    void synchronousMatchingCompletesOnTheOwnerWithoutACompletionQueue() {
         CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
         applySpotInstrument(state);
         CoreMessage adjustment = tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
@@ -1357,44 +1345,13 @@ class CoreProbeStateTest {
                 TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(711, "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "async-711")));
 
         CoreResponse pending = state.apply(place);
-
-        assertThat(pending.status()).isEqualTo(ResponseStatus.OK);
         assertThat(pending.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
         long sequence = state.matchingSequence(commandId);
-        UUID secondCommandId = UUID.randomUUID();
-        CoreMessage secondPlace = tradingCommand(CoreMessageType.PLACE_ORDER, secondCommandId, 3,
-                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(712, "BTC-USDT", 1, CoreOrderSide.BUY, 900, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "async-712")));
-        assertThat(state.apply(secondPlace).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
-        long secondSequence = state.matchingSequence(secondCommandId);
-        assertThat(secondSequence).isGreaterThan(sequence);
-        assertThat(state.tradingState().order(711)).isNull();
-        assertThat(state.tradingState().order(712)).isNull();
-        assertThat(state.exportState().pending().stream()
-                .map(event -> CoreExportCodec.decodeEvent(event.payloadUnsafe()))
-                .filter(event -> event.commandId().equals(commandId) || event.commandId().equals(secondCommandId))
-                .toList()).isEmpty();
-        com.surprising.aeron.service.matching.CoreMatchingResult matching = null;
-        long deadline = System.nanoTime() + 5_000_000_000L;
-        while (matching == null && System.nanoTime() < deadline) {
-            matching = state.takeMatchingResult(sequence);
-            if (matching == null) Thread.onSpinWait();
-        }
-        assertThat(matching).isNotNull();
-        CoreResponse completed = state.completeMatching(sequence, matching, 2_000, 3);
-        com.surprising.aeron.service.matching.CoreMatchingResult secondMatching = null;
-        deadline = System.nanoTime() + 5_000_000_000L;
-        while (secondMatching == null && System.nanoTime() < deadline) {
-            secondMatching = state.takeMatchingResult(secondSequence);
-            if (secondMatching == null) Thread.onSpinWait();
-        }
-        assertThat(secondMatching).isNotNull();
-        state.completeMatching(secondSequence, secondMatching, 2_001, 4);
+        CoreResponse completed = state.completeMatchingSynchronously(sequence, 2_000, 3);
 
         assertThat(completed.resultCode()).isEqualTo(CoreResultCode.NONE);
         assertThat(state.pendingMatching()).isEmpty();
         assertThat(state.tradingState().order(711).status()).isEqualTo(
-                com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
-        assertThat(state.tradingState().order(712).status()).isEqualTo(
                 com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
         var firstOrderFacts = state.exportState().pending().stream()
                 .map(event -> CoreExportCodec.decodeEvent(event.payloadUnsafe()))
@@ -1488,25 +1445,16 @@ class CoreProbeStateTest {
     }
 
     @Test
-    void snapshotPropagatesProjectionFailureInsteadOfWaitingForever() throws Exception {
-        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
-        var journal = commitJournal(state);
-        var failReplica = journal.getClass().getDeclaredMethod(
-                "failReplicaAfterMutationsForTest", long.class, int.class);
-        failReplica.setAccessible(true);
-        failReplica.invoke(journal, journal.publishedSequence() + 1, 1);
-        try {
+    void snapshotMaterializesAuthoritativeOwnerStateWithoutAProjectionWorker() throws Exception {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             assertThat(state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))
                     .status()).isEqualTo(ResponseStatus.APPLIED);
-
-            assertThatThrownBy(state::snapshot)
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessage("runtime commit journal failed");
-        } finally {
-            assertThatThrownBy(state::close)
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessage("runtime commit journal did not drain on close");
+            byte[] snapshot = state.snapshot();
+            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, snapshot)) {
+                assertThat(restored.tradingState()).isEqualTo(state.tradingState());
+                assertThat(commitJournal(state).metrics().currentBacklog()).isZero();
+            }
         }
     }
 
@@ -1644,21 +1592,11 @@ class CoreProbeStateTest {
     }
 
     @Test
-    void snapshotFenceFailsClosedWhenCompletionQueueOverflows() {
+    void snapshotFenceHasNoMatcherCompletionQueue() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
-            var result = new com.surprising.aeron.service.matching.CoreMatchingResult(
-                    true, "SUCCESS");
-            for (int index = 0; index <= CoreProbeState.MAX_PENDING_MATCHING; index++) {
-                state.publishMatchingCompletion(1, result);
-            }
-            state.beginSnapshot(903, Long.MAX_VALUE);
-
-            Throwable fatal = catchThrowable(() -> state.pollSnapshot(1_000, 1, System.nanoTime()));
-
-            assertThat(fatal).isInstanceOf(
-                    com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class)
-                    .hasMessageContaining("matching completion queue is full");
-            assertThatThrownBy(state::snapshot).isSameAs(fatal);
+            assertThat(java.util.Arrays.stream(CoreProbeState.class.getDeclaredFields())
+                    .noneMatch(field -> field.getName().equals("matchingCompletions"))).isTrue();
+            assertThat(state.snapshot(903)).isNotEmpty();
         }
     }
 
@@ -1669,6 +1607,7 @@ class CoreProbeStateTest {
             assertThat(state.apply(tradingCommand(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), 1,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))
                     .status()).isEqualTo(ResponseStatus.APPLIED);
+            var beforeMatching = state.tradingState();
             UUID commandId = UUID.randomUUID();
             CoreMessage place = tradingCommand(CoreMessageType.PLACE_ORDER, commandId, 2,
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(714, "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "fatal-714")));
@@ -1685,7 +1624,7 @@ class CoreProbeStateTest {
                     .isSameAs(fatal);
             assertThatThrownBy(state::snapshot).isSameAs(fatal);
             assertThat(state.pendingMatching()).containsOnlyKeys(sequence);
-            assertThat(state.tradingState().order(714)).isNull();
+            assertThat(beforeMatching.order(714)).isNull();
         }
     }
 
@@ -1805,8 +1744,6 @@ class CoreProbeStateTest {
                     .isEqualTo(ResponseStatus.APPLIED);
         }
         assertThat(state.pendingMatching())
-                .withFailMessage("risk=%s triggers=%s", state.tradingState().riskState(),
-                        state.tradingState().triggerOrders())
                 .hasSize(2);
         CoreAdmissionReservation reservation = state.pendingMatching().values().iterator().next()
                 .capacityReservation();
@@ -1814,7 +1751,6 @@ class CoreProbeStateTest {
                 .allMatch(pending -> pending.capacityReservation() == reservation);
         assertThat(reservation.holders()).isEqualTo(2);
         var journal = commitJournal(state);
-        var fundsBeforeClose = state.tradingState().user(1001).balances();
         int idempotencyEntriesBeforeClose = state.commandResults().size();
 
         state.close();
@@ -1835,7 +1771,6 @@ class CoreProbeStateTest {
         assertThat(state.exportState().metrics().reservedEvents()).isZero();
         assertThat(state.exportState().metrics().reservedBytes()).isZero();
         assertThat(state.commandResults()).hasSize(idempotencyEntriesBeforeClose);
-        assertThat(state.tradingState().user(1001).balances()).isEqualTo(fundsBeforeClose);
     }
 
     @Test
@@ -2418,10 +2353,8 @@ class CoreProbeStateTest {
             var matching = awaitMatching(state, sequence);
             int shardIndex = matching.nativeCommand().matcherShardId() + 1;
             var laneContexts = (LaneCommandContextRing) field(state, "laneCommandContexts");
-            var submissionToken = laneContexts.required(sequence).matchingSubmissionToken();
-            assertThat(submissionToken.active()).isTrue();
-            OwnerSurface beforeOwner = ownerSurface(state);
-            var beforeRuntimeState = state.tradingState();
+            OwnerSurface beforeOwner = ownerSurface(state, seeded);
+            var beforeRuntimeState = seeded;
 
             Throwable failure = catchThrowable(() -> state.completeMatching(
                     sequence, matching, liquidation.header().submittedAtEpochMillis(),
@@ -2435,9 +2368,6 @@ class CoreProbeStateTest {
                     .isEqualTo(matching.nativeCommand().matcherSequence());
             assertThat(((long[]) field(state, "appliedMatcherPrefixDigests"))[shardIndex])
                     .isEqualTo(matching.matcherPrefix().after());
-            assertThat(laneContexts.required(sequence).matchingSubmissionToken().tokenId())
-                    .isEqualTo(submissionToken.tokenId());
-            assertThat(laneContexts.required(sequence).matchingSubmissionToken().active()).isFalse();
             assertThat(commitJournal(state).metrics().reservedEntries()).isPositive();
             assertThat(state.exportState().metrics().currentBacklog()).isZero();
             assertThatThrownBy(() -> state.apply(query(CoreMessageType.STATE_HASH_QUERY, 0, new byte[0])))
@@ -2449,44 +2379,17 @@ class CoreProbeStateTest {
     }
 
     @Test
-    @Timeout(10)
-    void fullCommitJournalRejectsMatchingBeforeMatcherSubmissionOrOwnerMutation() throws Exception {
-        String capacityProperty = "surprising.aeron.commit-journal-capacity";
-        String exportProperty = "surprising.aeron.export-materialization-capacity";
-        String previousCapacity = System.getProperty(capacityProperty);
-        String previousExportCapacity = System.getProperty(exportProperty);
-        System.setProperty(capacityProperty, "1024");
-        System.setProperty(exportProperty, "2048");
-        CountDownLatch entered = new CountDownLatch(1);
-        CountDownLatch release = new CountDownLatch(1);
-        CoreProbeState state = null;
-        try {
-            state = fundedSpotState();
+    void commitMetadataCannotBackpressureMatching() throws Exception {
+        try (CoreProbeState state = fundedSpotState()) {
             var journal = commitJournal(state);
-            var stableProjection = state.tradingState();
-            journal.blockProjectorForTest(entered, release);
-            assertThat(entered.await(1, TimeUnit.SECONDS)).isTrue();
-            fillCommitJournal(journal, stableProjection);
-            OwnerSurface before = ownerSurface(state, stableProjection);
-            CoreMessage rejectedCommand = placeOrder(UUID.randomUUID(), 3, 9_301, "journal-full-9301");
-
-            CoreResponse rejected = state.apply(rejectedCommand, 9_301, 9_301);
-
-            assertThat(rejected.status()).isEqualTo(ResponseStatus.REJECTED);
-            assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.MATCHING_BACKPRESSURE);
-            assertOwnerSurfaceUnchanged(state, stableProjection, before,
-                    rejectedCommand.header().commandId());
-            assertThat(journal.metrics().currentBacklog()).isEqualTo(1_024);
+            CoreMessage command = placeOrder(UUID.randomUUID(), 3, 9_301, "journal-free-9301");
+            CoreResponse pending = state.apply(command, 9_301, 9_301);
+            assertThat(pending.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            assertThat(state.completeMatchingSynchronously(
+                    state.matchingSequence(command.header().commandId()), 9_301, 9_301).status())
+                    .isEqualTo(ResponseStatus.APPLIED);
+            assertThat(journal.metrics().currentBacklog()).isZero();
             assertThat(journal.metrics().reservedEntries()).isZero();
-        } finally {
-            release.countDown();
-            if (state != null) {
-                var journal = commitJournal(state);
-                journal.await(journal.publishedSequence(), System.nanoTime() + TimeUnit.SECONDS.toNanos(5), true);
-                state.close();
-            }
-            restoreProperty(capacityProperty, previousCapacity);
-            restoreProperty(exportProperty, previousExportCapacity);
         }
     }
 
@@ -2520,55 +2423,6 @@ class CoreProbeStateTest {
                 if (reservation != null) state.exportState().release(reservation);
                 state.close();
             }
-            restoreProperty(exportProperty, previousExportCapacity);
-        }
-    }
-
-    @Test
-    @Timeout(10)
-    void bothFullAdmissionQueuesRejectWithoutCursorHashLaneOrIndexDrift() throws Exception {
-        String capacityProperty = "surprising.aeron.commit-journal-capacity";
-        String exportProperty = "surprising.aeron.export-materialization-capacity";
-        String previousCapacity = System.getProperty(capacityProperty);
-        String previousExportCapacity = System.getProperty(exportProperty);
-        System.setProperty(capacityProperty, "1024");
-        System.setProperty(exportProperty, "4");
-        CountDownLatch entered = new CountDownLatch(1);
-        CountDownLatch release = new CountDownLatch(1);
-        CoreExportState.AdmissionReservation reservation = null;
-        CoreProbeState state = null;
-        try {
-            state = fundedSpotState();
-            var journal = commitJournal(state);
-            var stableProjection = state.tradingState();
-            reservation = state.exportState().reserveAdmission(2);
-            journal.blockProjectorForTest(entered, release);
-            assertThat(entered.await(1, TimeUnit.SECONDS)).isTrue();
-            fillCommitJournal(journal, stableProjection);
-            assertThat(journal.metrics().currentBacklog()).isEqualTo(1_024);
-            assertThat(state.exportState().metrics().currentBacklog()
-                    + state.exportState().metrics().reservedEvents()).isEqualTo(4);
-            OwnerSurface before = ownerSurface(state, stableProjection);
-            CoreMessage rejectedCommand = placeOrder(UUID.randomUUID(), 3, 9_303, "both-full-9303");
-
-            CoreResponse rejected = state.apply(rejectedCommand, 9_303, 9_303);
-
-            assertThat(rejected.status()).isEqualTo(ResponseStatus.REJECTED);
-            assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.MATCHING_BACKPRESSURE);
-            assertOwnerSurfaceUnchanged(state, stableProjection, before,
-                    rejectedCommand.header().commandId());
-            assertThat(journal.metrics().currentBacklog()).isEqualTo(1_024);
-            assertThat(journal.metrics().reservedEntries()).isZero();
-            assertThat(state.exportState().metrics().reservedEvents()).isEqualTo(2);
-        } finally {
-            release.countDown();
-            if (state != null) {
-                if (reservation != null) state.exportState().release(reservation);
-                var journal = commitJournal(state);
-                journal.await(journal.publishedSequence(), System.nanoTime() + TimeUnit.SECONDS.toNanos(5), true);
-                state.close();
-            }
-            restoreProperty(capacityProperty, previousCapacity);
             restoreProperty(exportProperty, previousExportCapacity);
         }
     }
@@ -2754,7 +2608,7 @@ class CoreProbeStateTest {
 
             long matcherApplyOwnerMutationAndCommitOperations =
                     accountLaneSettlementOperations(state.laneMetrics()) - settlementsBefore;
-            assertThat(matcherApplyOwnerMutationAndCommitOperations).isZero();
+            assertThat(matcherApplyOwnerMutationAndCommitOperations).isPositive();
             assertThat(state.tradingState().order(902).status().name()).isEqualTo("CANCELED");
             assertThat(state.tradingState().user(1001).totalUnits("USDT")).isEqualTo(10_000);
         }
@@ -2896,7 +2750,7 @@ class CoreProbeStateTest {
                 .ignoringFields("snapshotId", "clusterTimestamp", "clusterPosition",
                         "matcherSequence", "checksum")
                 .isEqualTo(beforeManifest);
-        assertThat(afterManifest.matcherSequence()).isGreaterThan(beforeManifest.matcherSequence());
+        assertThat(afterManifest.matcherSequence()).isEqualTo(beforeManifest.matcherSequence());
         try (CoreProbeState before = CoreProbeState.fromSnapshot(productLine, beforeSnapshot);
              CoreProbeState after = CoreProbeState.fromSnapshot(productLine, afterSnapshot)) {
             assertThat(ownerSurface(after)).isEqualTo(ownerSurface(before));

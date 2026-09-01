@@ -34,7 +34,7 @@ class RuntimeCommitHashTest {
     private static final String SYMBOL = "BTC-USDT";
     private static final String ASSET = "USDT";
     private static final LaneTopology FOUR_LANES = new LaneTopology(
-            LaneTopology.ROUTE_VERSION, 4, 1, 3, 4, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED,
+            LaneTopology.ROUTE_VERSION, 1, 0, 0, 4, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED,
             LaneTopology.DEFAULT_MATCHER_WINDOW_SIZE, LaneTopology.DEFAULT_QUEUE_CAPACITY,
             LaneTopology.DEFAULT_QUEUE_CAPACITY);
 

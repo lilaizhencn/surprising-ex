@@ -587,9 +587,32 @@ final class LinearPerpetualBenchmarkSupport {
             submitCommand(command, System.nanoTime());
         }
 
-        void submitScheduled(CoreMessage command, long scheduledEntryNanos) {
+        ScheduledCompletion submitScheduled(CoreMessage command, long scheduledEntryNanos) {
             if (scheduledEntryNanos <= 0) throw new IllegalArgumentException("scheduled entry must be positive");
-            submitCommand(command, scheduledEntryNanos);
+            PendingCommand pending = submitCommand(command, scheduledEntryNanos);
+            if (pending.sequence != 0 || pending.response.resultCode() == CoreResultCode.MATCHING_PENDING) {
+                if (submittedMatching.size() != 1 || submittedMatching.peekFirst() != pending) {
+                    throw new IllegalStateException("synchronous owner benchmark crossed command order");
+                }
+                CoreResponse response = state.completeMatchingSynchronously(
+                        pending.sequence, benchmarkTimestamp(sequences.clusterPosition),
+                        sequences.clusterPosition);
+                if (response == null || response.resultCode() == CoreResultCode.MATCHING_PENDING) {
+                    throw new IllegalStateException("synchronous owner benchmark left matching work pending");
+                }
+                pending.response = response;
+                submittedMatching.removeFirst();
+                validateTerminal(command, response, pending.operationWeight, "");
+                terminalMessages = Math.addExact(terminalMessages, pending.operationWeight);
+                terminalCoreMessages = Math.incrementExact(terminalCoreMessages);
+                recordExport(response);
+                if (businessLatencies != null) businessLatencies.terminal(pending.businessLatency);
+                if (commandsSinceExportAck >= EXPORT_ACK_INTERVAL) acknowledgeExportsWithoutDrain();
+            }
+            return new ScheduledCompletion(pending.submittedAtNanos, pending.acceptedAtNanos, System.nanoTime());
+        }
+
+        record ScheduledCompletion(long entryNanos, long acceptedNanos, long terminalNanos) {
         }
 
         private PendingCommand submitCommand(CoreMessage command) {

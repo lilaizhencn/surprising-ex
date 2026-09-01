@@ -95,8 +95,7 @@ class TradingCoreRuntimeAuthorityTest {
         assertThat(runtimeState)
                 .doesNotContain("captureCommitPatch", "public RuntimeCommitPatch seal()", ".seal();",
                         "BalanceRuntime::releaseOwnerForHandoff", "awaitAndRebindLaneMutations");
-        assertThat(occurrences(runtimeState, "laneMutationTasks[laneId].await()"))
-                .isEqualTo(1);
+        assertThat(runtimeState).doesNotContain("laneMutationTasks", "SettlementLaneWorker");
         assertThat(occurrences(production, ".recordOrder(")).isEqualTo(1);
         assertThat(occurrences(prepareCommit, "RuntimeStateMaterializer.orderSnapshot(")).isEqualTo(2);
         assertThat(occurrences(prepareCommit, "RuntimeCommitPatch.exportOrderView(")).isZero();
@@ -123,7 +122,7 @@ class TradingCoreRuntimeAuthorityTest {
                 .doesNotContain("newSingleThreadExecutor", "ArrayBlockingQueue", "LinkedBlockingQueue",
                         "LinkedTransferQueue", "CompletableFuture<MaterializedExport>",
                         "AtomicReferenceArray<E>");
-        assertThat(occurrences(production, "RuntimeStateMaterializer.materialize(")).isEqualTo(1);
+        assertThat(occurrences(production, "RuntimeStateMaterializer.materialize(")).isEqualTo(4);
         assertThat(method(source("TradingCoreRuntime.java"), "    public TradingCoreState snapshotState()"))
                 .contains("RuntimeStateMaterializer.materialize(runtimeState, identities)");
     }
@@ -175,7 +174,7 @@ class TradingCoreRuntimeAuthorityTest {
     }
 
     @Test
-    void permitsSnapshotAndJournalAwaitOnlyAtExplicitFences() throws Exception {
+    void materializesAuthoritativeStateOnlyAtExplicitReadAndSnapshotFences() throws Exception {
         String production = productionSources();
         assertThat(linesContaining(production, ".snapshotState()")).isEmpty();
         assertThat(linesContaining(production, ".awaitState(")).isEmpty();
@@ -183,13 +182,11 @@ class TradingCoreRuntimeAuthorityTest {
         String probe = source("CoreProbeState.java");
         String snapshotFence = method(probe, "    SectionedCoreSnapshotCodec.SectionedSnapshot pollSnapshotSections(");
         String queryFence = method(probe, "    public TradingCoreState tradingState()");
-        String restoreFence = method(probe, "    private void restoreCommandState(RuntimeProjectionPoint projectionPoint)");
         String orderBatch = section(probe, "    private CoreResponse activateOrderBatch(",
                 "    private void recordSourceSequence(");
-        assertThat(occurrences(probe, "runtimeProjectionJournal.await(")).isEqualTo(3);
-        assertThat(occurrences(snapshotFence, "runtimeProjectionJournal.await(")).isEqualTo(1);
-        assertThat(occurrences(queryFence, "runtimeProjectionJournal.await(")).isEqualTo(1);
-        assertThat(occurrences(restoreFence, "runtimeProjectionJournal.await(")).isEqualTo(1);
+        assertThat(occurrences(probe, "runtimeProjectionJournal.await(")).isZero();
+        assertThat(snapshotFence).contains("RuntimeStateMaterializer.materialize(");
+        assertThat(queryFence).contains("RuntimeStateMaterializer.materialize(");
         assertThat(journalAwaitOutsideFence(probe)).isEmpty();
         assertThat(orderBatch).doesNotContain("runtimeProjectionJournal.await(", "snapshotState",
                         "TradingCoreState", "RuntimeStateMaterializer.materialize", "restoreCommandState(")

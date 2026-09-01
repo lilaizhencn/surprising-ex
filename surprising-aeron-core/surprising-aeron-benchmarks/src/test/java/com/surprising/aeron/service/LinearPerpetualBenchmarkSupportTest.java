@@ -71,7 +71,7 @@ class LinearPerpetualBenchmarkSupportTest {
         assertThat(result.fanoutOperations()).isEqualTo(result.requestedOperations());
         assertThat(result.projectedOperations()).isEqualTo(result.requestedOperations());
         assertThat(result.encodedEvents()).isEqualTo(result.requestedOperations());
-        assertThat(result.maximumBacklog()).isBetween(1L, 4L);
+        assertThat(result.maximumBacklog()).isZero();
         assertThat(result.encodedBytes()).isPositive();
         assertThat(result.snapshotBytes()).isPositive();
         assertThat(result.initialFunds()).isEqualTo(result.recoveredFunds());
@@ -253,9 +253,9 @@ class LinearPerpetualBenchmarkSupportTest {
                 assertThat(scenario.operations()).isEqualTo(4_096);
                 assertThat(scenario.acceptedOperations()).isEqualTo(scenario.terminalOperations());
                 assertThat(scenario.acceptedCoreMessages()).isEqualTo(scenario.terminalCoreMessages());
-                assertThat(scenario.maxBacklog()).isEqualTo(8);
-                assertThat(scenario.averageMatchingBacklog()).isGreaterThan(7.0);
-                assertThat(scenario.fullWindowPercentage()).isGreaterThan(78.0);
+                assertThat(scenario.maxBacklog()).isEqualTo(1);
+                assertThat(scenario.averageMatchingBacklog()).isZero();
+                assertThat(scenario.fullWindowPercentage()).isZero();
                 assertThat(scenario.refillOperations()).isGreaterThan(3_800);
                 assertThat(scenario.producerStarvationPercentage()).isZero();
                 assertThat(scenario.completedLatencySamples()).isEqualTo(4_096);

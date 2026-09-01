@@ -6,7 +6,7 @@ public final class RuntimeProjectionPoint {
     private volatile boolean completed;
 
     public RuntimeProjectionPoint(long sequence, TradingCoreState state) {
-        if (sequence < 0 || sequence == 0 && state == null) {
+        if (sequence < 0) {
             throw new IllegalArgumentException("invalid runtime projection point");
         }
         this.sequence = sequence;

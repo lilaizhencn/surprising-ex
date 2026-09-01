@@ -1,60 +1,40 @@
 package com.surprising.aeron.service.state;
 
 import com.surprising.product.api.ProductLine;
-import java.lang.invoke.MethodHandles;
-import java.lang.invoke.VarHandle;
-import java.util.ArrayList;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.locks.LockSupport;
 
+/**
+ * Owner-thread commit admission and sequence journal.
+ *
+ * <p>The authoritative mutable state already lives on the Product Core owner. Keeping a second
+ * {@link RuntimeProjectionState} current for every command duplicated all Map/hash/materialization
+ * work and introduced a reverse projection fence. This journal therefore retains only bounded
+ * admission, sequencing and diagnostic metadata. A read-only {@link TradingCoreState} is built
+ * explicitly by {@link RuntimeStateMaterializer} at a query or snapshot boundary.</p>
+ */
 public final class RuntimeCommitJournal implements AutoCloseable {
-
-    private static final VarHandle ENTRY = MethodHandles.arrayElementVarHandle(RuntimeCommitPatch[].class);
 
     private static final int MIN_CAPACITY = 1_024;
     private static final int MAX_CAPACITY = 1 << 20;
-    private static final int MAX_PROJECTION_BATCH = 1_024;
-    private static final long DEFAULT_AWAIT_NANOS = TimeUnit.SECONDS.toNanos(5);
-    private static final long IDLE_PARK_NANOS = 50_000L;
     private static final long MAX_RESERVED_PATCH_BYTES = 16L << 20;
 
-    private final RuntimeCommitPatch[] entries;
-    private final long[] entryBytes;
-    private final int mask;
-    private final int projectionBatchSize;
-    private final long projectionBatchBytes;
-    private final long batchDelayNanos;
+    private final int capacity;
     private final long capacityBytes;
     private final WaitStrategy waitStrategy;
-    private final Thread projector;
-    private final RuntimeProjectionState replica;
     private final RuntimeProjectionPoint initialPoint;
-    private volatile ProjectionVersion projected;
-    private volatile long publishedSequence;
-    private volatile long consumedSequence;
-    private volatile long requestedSequence;
-    private volatile Throwable failure;
-    private volatile boolean closed;
-    private volatile ProjectorGate projectorGate;
-    private volatile CountDownLatch projectionWaiterEntered;
+    private long publishedSequence;
     private long reservedEntries;
     private long reservedBytes;
-    private volatile long publishedBytes;
-    private volatile long consumedBytes;
-    private long maxBacklogBytes;
-    private long maxBacklog;
-    private volatile long batchCount;
-    private volatile long batchItems;
-    private volatile long batchBytes;
-    private volatile long waitCount;
+    private long batchCount;
+    private long batchItems;
+    private long batchBytes;
     private long rejectionCount;
-    private volatile long errorCount;
+    private long errorCount;
     private long timeoutCount;
-    private RuntimeCommitPatch lastAppliedPatch;
+    private long businessStateHash;
+    private long fundsStateHash;
     private boolean activated;
+    private boolean closed;
     private int publicationBatchDepth;
-    private boolean projectionSignalPending;
 
     public RuntimeCommitJournal(ProductLine productLine, TradingCoreState initial,
                                 long businessStateHash, long fundsStateHash) {
@@ -73,27 +53,17 @@ public final class RuntimeCommitJournal implements AutoCloseable {
             throw new IllegalArgumentException("invalid commit journal state");
         }
         if (initialSequence < 0) throw new IllegalArgumentException("initial commit sequence is negative");
-        int capacity = normalizedCapacity(Integer.getInteger(
+        capacity = normalizedCapacity(Integer.getInteger(
                 "surprising.aeron.commit-journal-capacity",
                 Integer.getInteger("surprising.aeron.projection-journal-capacity", 65_536)));
-        entries = new RuntimeCommitPatch[capacity];
-        entryBytes = new long[capacity];
-        mask = capacity - 1;
-        projectionBatchSize = configuredBatchSize(capacity);
-        projectionBatchBytes = configuredPositiveLong("surprising.aeron.projection-batch-bytes", 4L << 20);
-        batchDelayNanos = configuredPositiveLong("surprising.aeron.projection-batch-delay-nanos", 100_000L);
         capacityBytes = configuredPositiveLong("surprising.aeron.commit-journal-capacity-bytes",
                 Math.multiplyExact(MAX_RESERVED_PATCH_BYTES, capacity));
-        waitStrategy = WaitStrategy.configured();
-        replica = new RuntimeProjectionState(initial, businessStateHash, fundsStateHash, initialSequence);
+        waitStrategy = WaitStrategy.PARKING;
+        initialPoint = new RuntimeProjectionPoint(initialSequence, null);
+        initialPoint.completeSequence();
         publishedSequence = initialSequence;
-        consumedSequence = initialSequence;
-        requestedSequence = initialSequence;
-        projected = new ProjectionVersion(initialSequence, initial, businessStateHash, fundsStateHash);
-        initialPoint = new RuntimeProjectionPoint(initialSequence, initial);
-        projector = Thread.ofPlatform().daemon(true)
-                .name("core-commit-projector-" + productLine.name().toLowerCase(java.util.Locale.ROOT))
-                .unstarted(this::runProjector);
+        this.businessStateHash = businessStateHash;
+        this.fundsStateHash = fundsStateHash;
         if (activateImmediately) activate();
     }
 
@@ -108,14 +78,9 @@ public final class RuntimeCommitJournal implements AutoCloseable {
         if (activated) return;
         if (closed) throw new IllegalStateException("cannot activate closed commit journal");
         activated = true;
-        projector.start();
     }
 
     public boolean activated() { return activated; }
-
-    private long backlogBytes() {
-        return Math.subtractExact(publishedBytes, consumedBytes);
-    }
 
     public AdmissionReservation reserveAdmission(int entriesRequired) {
         return reserveAdmission(entriesRequired, Math.multiplyExact(MAX_RESERVED_PATCH_BYTES, entriesRequired));
@@ -126,11 +91,10 @@ public final class RuntimeCommitJournal implements AutoCloseable {
         if (entriesRequired < 1 || bytesRequired < 1) {
             throw new IllegalArgumentException("journal reservation must be positive");
         }
-        long backlog = publishedSequence - consumedSequence;
-        if (entriesRequired > entries.length - backlog - reservedEntries
-                || bytesRequired > capacityBytes - backlogBytes() - reservedBytes) {
+        if (entriesRequired > capacity - reservedEntries
+                || bytesRequired > capacityBytes - reservedBytes) {
             rejectionCount++;
-            throw new CoreStateRejectedException("MATCHING_BACKPRESSURE", "commit journal backlog is full");
+            throw new CoreStateRejectedException("MATCHING_BACKPRESSURE", "commit admission is full");
         }
         reservedEntries = Math.addExact(reservedEntries, entriesRequired);
         reservedBytes = Math.addExact(reservedBytes, bytesRequired);
@@ -163,33 +127,27 @@ public final class RuntimeCommitJournal implements AutoCloseable {
                 || businessStateHash != patch.businessStateHash() || fundsStateHash != patch.fundsStateHash()) {
             throw new IllegalStateException("invalid commit journal publication");
         }
-        int index = (int) (next & mask);
-        if (entryAcquire(index) != null) {
-            poison(new IllegalStateException("commit journal live slot overwrite"));
-            throw new IllegalStateException("commit journal slot was not reclaimed", failure);
-        }
         long patchBytes = estimatedBytes(patch);
         if (patchBytes > reservation.nextSliceByteAllowance()) {
             throw new IllegalStateException("commit patch exceeded per-slice admission byte reservation");
         }
-        entryBytes[index] = patchBytes;
-        entryRelease(index, patch);
         reservation.remaining--;
         reservation.remainingBytes -= patchBytes;
         reservation.consumedSlices++;
         reservedEntries--;
         reservedBytes -= patchBytes;
-        publishedBytes = Math.addExact(publishedBytes, patchBytes);
-        long currentBacklogBytes = backlogBytes();
         if (reservation.remaining == 0) {
             reservedBytes -= reservation.remainingBytes;
             reservation.remainingBytes = 0;
             reservation.closed = true;
         }
-        maxBacklog = Math.max(maxBacklog, next - consumedSequence);
-        maxBacklogBytes = Math.max(maxBacklogBytes, currentBacklogBytes);
         publishedSequence = next;
-        signalProjector();
+        this.businessStateHash = businessStateHash;
+        this.fundsStateHash = fundsStateHash;
+        patch.projectionPoint().completeSequence();
+        batchCount++;
+        batchItems++;
+        batchBytes = Math.addExact(batchBytes, patchBytes);
         return next;
     }
 
@@ -203,15 +161,6 @@ public final class RuntimeCommitJournal implements AutoCloseable {
             throw new IllegalStateException("commit journal publication batch is not active");
         }
         publicationBatchDepth--;
-        if (publicationBatchDepth == 0 && projectionSignalPending) {
-            projectionSignalPending = false;
-            LockSupport.unpark(projector);
-        }
-    }
-
-    private void signalProjector() {
-        if (publicationBatchDepth == 0) LockSupport.unpark(projector);
-        else projectionSignalPending = true;
     }
 
     public PublishReservation reservePublish(long sequence) {
@@ -241,62 +190,43 @@ public final class RuntimeCommitJournal implements AutoCloseable {
 
     public boolean hasCapacityFor(int additionalEntries) {
         requireHealthy();
-        if (additionalEntries <= 0
-                || additionalEntries > entries.length
-                - (publishedSequence - consumedSequence) - reservedEntries) {
-            return false;
-        }
+        if (additionalEntries <= 0 || additionalEntries > capacity - reservedEntries) return false;
         long additionalBytes = Math.multiplyExact(MAX_RESERVED_PATCH_BYTES, additionalEntries);
-        return additionalBytes <= capacityBytes - backlogBytes() - reservedBytes;
+        return additionalBytes <= capacityBytes - reservedBytes;
     }
 
     public long publishedSequence() { return publishedSequence; }
-    public long projectedSequence() { return projected.sequence(); }
+    public long projectedSequence() { return publishedSequence; }
     public boolean hasOutstandingReservation() { return reservedEntries != 0 || reservedBytes != 0; }
-    public long lag() { return Math.subtractExact(publishedSequence, consumedSequence); }
+    public long lag() { return 0; }
     public RuntimeProjectionPoint initialPoint() { return initialPoint; }
-    public long projectionFreezeCount() { return replica.freezeCount(); }
+    public long projectionFreezeCount() { return 0; }
 
     public void rebaseInitialBusinessStateHash(long expectedBefore, long after) {
-        if (failure != null) throw new IllegalStateException("runtime commit journal failed", failure);
         if (closed) throw new IllegalStateException("runtime commit journal is closed");
-        ProjectionVersion current = projected;
-        if (publishedSequence != 0 || consumedSequence != 0 || current.sequence() != 0
-                || current.businessStateHash() != expectedBefore) {
-            throw new IllegalStateException("commit journal is past its initial projection");
+        if (publishedSequence != 0 || businessStateHash != expectedBefore) {
+            throw new IllegalStateException("commit journal is past its initial sequence");
         }
-        replica.rebaseInitialBusinessStateHash(expectedBefore, after);
-        projected = new ProjectionVersion(0, current.state(), after, current.fundsStateHash());
-    }
-    boolean projectorAlive() { return projector.isAlive(); }
-    void failReplicaAfterMutationsForTest(long sequence, int mutationCount) {
-        replica.failAfterMutationsForTest(sequence, mutationCount);
+        businessStateHash = after;
     }
 
-    public void blockProjectorForTest(CountDownLatch entered, CountDownLatch release) {
-        if (entered == null || release == null) throw new IllegalArgumentException("projector gate is required");
-        projectorGate = new ProjectorGate(entered, release);
-        LockSupport.unpark(projector);
-    }
-
-    void signalProjectionWaiterForTest(CountDownLatch entered) {
-        if (entered == null) throw new IllegalArgumentException("projection waiter latch is required");
-        projectionWaiterEntered = entered;
-    }
+    boolean projectorAlive() { return false; }
 
     public Metrics metrics() {
-        return new Metrics(lag(), maxBacklog, closed ? lag() : -1, batchCount, batchItems, batchBytes,
-                backlogBytes(), maxBacklogBytes, waitStrategy, waitCount, rejectionCount, errorCount,
-                timeoutCount, reservedEntries, reservedBytes);
+        return new Metrics(0, 0, 0, batchCount, batchItems, batchBytes,
+                0, 0, waitStrategy, 0, rejectionCount, errorCount, timeoutCount,
+                reservedEntries, reservedBytes);
     }
 
     public ProjectionVersion current() {
         requireHealthy();
-        return projected;
+        return new ProjectionVersion(publishedSequence, null, businessStateHash, fundsStateHash);
     }
 
+    public void assertHealthy() { requireHealthy(); }
+
     public TradingCoreState await(RuntimeProjectionPoint point) {
-        return await(point, System.nanoTime() + DEFAULT_AWAIT_NANOS);
+        return await(point, Long.MAX_VALUE);
     }
 
     public TradingCoreState await(RuntimeProjectionPoint point, long deadlineNanos) {
@@ -304,147 +234,25 @@ public final class RuntimeCommitJournal implements AutoCloseable {
             throw new IllegalArgumentException("invalid runtime projection point fence");
         }
         if (point.state() != null) return point.state();
-        requestProjection(point.sequence());
-        while (!point.projected()) {
-            requireHealthy();
-            if (System.nanoTime() >= deadlineNanos) {
-                timeoutCount++;
-                throw new IllegalStateException("runtime projection point timed out");
-            }
-            awaitWork();
-            if (Thread.currentThread().isInterrupted()) {
-                throw new IllegalStateException("runtime projection wait was interrupted");
-            }
-        }
-        return point.state();
+        throw new UnsupportedOperationException(
+                "per-command projection was removed; materialize authoritative runtime at a read fence");
     }
 
     public ProjectionVersion await(long sequence, long deadlineNanos, boolean verifyHashes) {
         if (sequence < 0 || sequence != publishedSequence || deadlineNanos <= 0) {
             throw new IllegalArgumentException("invalid projection fence");
         }
-        requestProjection(sequence);
-        while (projected.sequence() < sequence) {
-            requireHealthy();
-            if (System.nanoTime() >= deadlineNanos) {
-                timeoutCount++;
-                throw new IllegalStateException("projection fence timed out");
-            }
-            awaitWork();
-            if (Thread.currentThread().isInterrupted()) {
-                throw new IllegalStateException("projection fence wait was interrupted");
-            }
+        if (sequence != 0) {
+            throw new UnsupportedOperationException(
+                    "per-command projection was removed; materialize authoritative runtime at a read fence");
         }
-        ProjectionVersion result = projected;
-        if (verifyHashes) verifyHashes(result);
-        return result;
+        return current();
     }
 
     public void requestProjection(long sequence) {
         requireHealthy();
         if (sequence < 0 || sequence != publishedSequence) {
             throw new IllegalArgumentException("invalid requested projection sequence");
-        }
-        if (sequence > requestedSequence) requestedSequence = sequence;
-        LockSupport.unpark(projector);
-    }
-
-    private void runProjector() {
-        ArrayList<RuntimeCommitPatch> patches = new ArrayList<>(projectionBatchSize);
-        try {
-            long firstPendingNanos = 0;
-            while (!closed || consumedSequence < publishedSequence) {
-                awaitProjectorGate();
-                freezeRequestedState();
-                long available = publishedSequence - consumedSequence;
-                if (available == 0) {
-                    firstPendingNanos = 0;
-                    awaitWork();
-                    continue;
-                }
-                if (firstPendingNanos == 0) firstPendingNanos = System.nanoTime();
-                boolean forced = closed || requestedSequence > consumedSequence
-                        || System.nanoTime() - firstPendingNanos >= batchDelayNanos;
-                if (!forced && available < projectionBatchSize) {
-                    awaitWork();
-                    continue;
-                }
-                patches.clear();
-                long bytes = 0;
-                long scanSequence = consumedSequence;
-                while (patches.size() < projectionBatchSize && scanSequence < publishedSequence) {
-                    long sequence = Math.incrementExact(scanSequence);
-                    int index = (int) (sequence & mask);
-                    RuntimeCommitPatch patch = entryAcquire(index);
-                    if (patch == null) break;
-                    long patchBytes = entryBytes[index];
-                    if (!patches.isEmpty() && bytes + patchBytes > projectionBatchBytes) break;
-                    patches.add(patch);
-                    bytes = Math.addExact(bytes, patchBytes);
-                    scanSequence = sequence;
-                }
-                int items = patches.size();
-                if (items > 0) {
-                    replica.apply(patches);
-                    for (int offset = 0; offset < items; offset++) {
-                        long sequence = Math.incrementExact(consumedSequence);
-                        int index = (int) (sequence & mask);
-                        RuntimeCommitPatch patch = patches.get(offset);
-                        lastAppliedPatch = patch;
-                        patch.projectionPoint().completeSequence();
-                        long patchBytes = entryBytes[index];
-                        entryBytes[index] = 0;
-                        entryRelease(index, null);
-                        consumedBytes = Math.addExact(consumedBytes, patchBytes);
-                        consumedSequence = sequence;
-                    }
-                    batchCount++;
-                    batchItems += items;
-                    batchBytes = Math.addExact(batchBytes, bytes);
-                    firstPendingNanos = 0;
-                    freezeRequestedState();
-                }
-            }
-            requestedSequence = publishedSequence;
-            freezeRequestedState();
-        } catch (Throwable projectorFailure) {
-            try {
-                freezeLastCompleteAfterFailure();
-            } catch (Throwable freezeFailure) {
-                projectorFailure.addSuppressed(freezeFailure);
-            }
-            poison(projectorFailure);
-        }
-    }
-
-    private void freezeRequestedState() {
-        long requested = requestedSequence;
-        if (requested <= projected.sequence() || requested != replica.sequence()) return;
-        publishFrozenState(replica.sequence(), replica.freeze(replica.sequence()));
-    }
-
-    private void freezeLastCompleteAfterFailure() {
-        long applied = replica.sequence();
-        if (applied > projected.sequence()) {
-            publishFrozenState(applied, replica.freezeLastCompleteAfterFailure(applied));
-        }
-    }
-
-    private void publishFrozenState(long sequence, TradingCoreState state) {
-        projected = new ProjectionVersion(sequence, state, replica.businessStateHash(), replica.fundsStateHash());
-        if (lastAppliedPatch != null && lastAppliedPatch.sequence() == sequence
-                && !lastAppliedPatch.projectionPoint().projected()) {
-            lastAppliedPatch.completeProjection(state);
-        }
-    }
-
-    private void verifyHashes(ProjectionVersion version) {
-        long business = RollingBusinessStateHash.compute(version.state());
-        long funds = RollingFundsStateHash.compute(version.state());
-        if (business != version.businessStateHash() || funds != version.fundsStateHash()) {
-            IllegalStateException mismatch = new IllegalStateException("typed projection hash mismatch");
-            poison(mismatch);
-            throw mismatch;
         }
     }
 
@@ -455,72 +263,18 @@ public final class RuntimeCommitJournal implements AutoCloseable {
         }
     }
 
-    private void poison(Throwable cause) {
-        if (failure == null) {
-            failure = cause;
-            errorCount++;
-        }
-        LockSupport.unpark(projector);
-    }
-
-    private RuntimeCommitPatch entryAcquire(int index) {
-        return (RuntimeCommitPatch) ENTRY.getAcquire(entries, index);
-    }
-
-    private void entryRelease(int index, RuntimeCommitPatch patch) {
-        ENTRY.setRelease(entries, index, patch);
-    }
-
     private void requireHealthy() {
-        if (failure != null) throw new IllegalStateException("runtime commit journal failed", failure);
         if (closed) throw new IllegalStateException("runtime commit journal is closed");
         if (!activated) throw new IllegalStateException("runtime commit journal is not activated");
     }
 
-    private void awaitWork() {
-        waitCount++;
-        CountDownLatch entered = projectionWaiterEntered;
-        if (entered != null && Thread.currentThread() != projector) {
-            projectionWaiterEntered = null;
-            entered.countDown();
-        }
-        waitStrategy.idle(this);
-    }
-
-    private void awaitProjectorGate() throws InterruptedException {
-        ProjectorGate gate = projectorGate;
-        if (gate == null) return;
-        gate.entered.countDown();
-        if (!gate.release.await(DEFAULT_AWAIT_NANOS, TimeUnit.NANOSECONDS)) {
-            throw new IllegalStateException("test projector gate timed out");
-        }
-        projectorGate = null;
-    }
-
     @Override
     public void close() {
-        requestedSequence = publishedSequence;
+        if (closed) return;
+        if (publicationBatchDepth != 0 || reservedEntries != 0 || reservedBytes != 0) {
+            throw new IllegalStateException("runtime commit journal closed with outstanding admission");
+        }
         closed = true;
-        LockSupport.unpark(projector);
-        boolean interrupted = false;
-        long deadline = System.nanoTime() + DEFAULT_AWAIT_NANOS;
-        while (projector.isAlive() && System.nanoTime() < deadline) {
-            try {
-                projector.join(Math.max(1, TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())));
-            } catch (InterruptedException exception) {
-                interrupted = true;
-            }
-        }
-        if (interrupted) Thread.currentThread().interrupt();
-        if (projector.isAlive()) {
-            projector.interrupt();
-            timeoutCount++;
-            throw new IllegalStateException("runtime commit projector did not terminate");
-        }
-        if (failure != null || consumedSequence != publishedSequence || projected.sequence() != publishedSequence
-                || reservedEntries != 0 || reservedBytes != 0 || backlogBytes() != 0) {
-            throw new IllegalStateException("runtime commit journal did not drain on close", failure);
-        }
     }
 
     private static int normalizedCapacity(int requested) {
@@ -530,14 +284,6 @@ public final class RuntimeCommitJournal implements AutoCloseable {
         int value = 1;
         while (value < requested) value <<= 1;
         return value;
-    }
-
-    private static int configuredBatchSize(int capacity) {
-        int size = Integer.getInteger("surprising.aeron.projection-batch-size", 1);
-        if (size < 1 || size > MAX_PROJECTION_BATCH || size > capacity) {
-            throw new IllegalArgumentException("projection batch size is outside supported bounds");
-        }
-        return size;
     }
 
     private static long configuredPositiveLong(String name, long defaultValue) {
@@ -588,31 +334,16 @@ public final class RuntimeCommitJournal implements AutoCloseable {
     }
 
     public enum WaitStrategy {
-        BUSY_SPIN {
-            @Override void idle(Object blocker) { Thread.onSpinWait(); }
-        },
-        YIELDING {
-            @Override void idle(Object blocker) { Thread.yield(); }
-        },
-        PARKING {
-            @Override void idle(Object blocker) { LockSupport.parkNanos(blocker, IDLE_PARK_NANOS); }
-        };
+        BUSY_SPIN,
+        YIELDING,
+        PARKING;
 
-        abstract void idle(Object blocker);
-
-        static WaitStrategy configured() {
-            if (Boolean.getBoolean("surprising.aeron.projection-busy-spin")) return BUSY_SPIN;
-            String configured = System.getProperty("surprising.aeron.projection-wait-strategy", "PARKING");
-            return valueOf(configured.trim().toUpperCase(java.util.Locale.ROOT));
-        }
     }
-
-    private record ProjectorGate(CountDownLatch entered, CountDownLatch release) { }
 
     public record ProjectionVersion(long sequence, TradingCoreState state,
                                     long businessStateHash, long fundsStateHash) {
         public ProjectionVersion {
-            if (sequence < 0 || state == null) throw new IllegalArgumentException("invalid projection version");
+            if (sequence < 0) throw new IllegalArgumentException("invalid projection version");
         }
     }
 

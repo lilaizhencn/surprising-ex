@@ -39,9 +39,9 @@ public record MatcherSnapshot(
 
     public static final String CORE_SHARD_ID = "default";
     public static final int ROUTE_VERSION = LaneTopology.ROUTE_VERSION;
-    public static final String FORK_GIT_SHA = "a85db2d210c478ec9ba97940db6b48de820f4dd4";
+    public static final String FORK_GIT_SHA = "4636c44b19de90be0bd6c85afdd0e4fa190da9f0";
     public static final String ARTIFACT_SHA256 =
-            "0f55185e990b9c60e1a48da4171e22210f1def32956549c04ab17535dc3c19be";
+            "4a6e41ae66822eddf8539fa8bb80fe77ffc3cc4adc7376d6666b45cf24ee874e";
     public static final long MATCHER_CONFIG_HASH = matcherConfigHash(new LaneTopology(
             ROUTE_VERSION, LaneTopology.DEFAULT_MATCHING_ENGINE_COUNT,
             LaneTopology.DEFAULT_RISK_ENGINE_COUNT, LaneTopology.DEFAULT_MATCHING_ENGINE_COUNT - 1,

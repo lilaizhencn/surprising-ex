@@ -86,7 +86,7 @@ public class OwnerCommitPatchBenchmark {
     private static final String ASSET = "USDT";
     private static final int OPERATIONS_PER_INVOCATION = 16_384;
     private static final LaneTopology FOUR_LANES = new LaneTopology(
-            LaneTopology.ROUTE_VERSION, 4, 1, 3, 4, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED,
+            LaneTopology.ROUTE_VERSION, 1, 0, 0, 4, LaneTopology.DEFAULT_ACCOUNT_LANE_SEED,
             LaneTopology.DEFAULT_MATCHER_WINDOW_SIZE, LaneTopology.DEFAULT_QUEUE_CAPACITY,
             LaneTopology.DEFAULT_QUEUE_CAPACITY);
 
@@ -100,7 +100,6 @@ public class OwnerCommitPatchBenchmark {
             int end = Math.min(state.operationsPerInvocation, start + state.maxInFlight);
             RuntimeCommitJournal.AdmissionReservation reservation = state.journal.reserveAdmission(
                     end - start, Math.multiplyExact(end - start, 1L << 20));
-            RuntimeCommitPatch last = null;
             for (int index = start; index < end; index++) {
                 long entry = latencies.awaitEntry(index);
                 latencies.accepted(index, entry, System.nanoTime());
@@ -110,9 +109,7 @@ public class OwnerCommitPatchBenchmark {
                         prepared.afterBusinessStateHash, prepared.afterFundsStateHash);
                 state.journal.publish(reservation, patch, patch.businessStateHash(), patch.fundsStateHash());
                 checksum ^= patch.coreSequence() ^ patch.businessStateHash() ^ patch.fundsStateHash();
-                last = patch;
             }
-            state.journal.await(last.projectionPoint());
             long terminal = System.nanoTime();
             latencies.terminalRange(start, end, terminal);
         }
@@ -662,7 +659,6 @@ public class OwnerCommitPatchBenchmark {
                 int end = Math.min(operations, start + maxInFlight);
                 RuntimeCommitJournal.AdmissionReservation reservation = journal.reserveAdmission(
                         end - start, Math.multiplyExact(end - start, 1L << 20));
-                RuntimeCommitPatch last = null;
                 for (int index = start; index < end; index++) {
                     PreparedDraft prepared = drafts.drafts.get(index);
                     RuntimeCommitPatch patch = prepared.draft.builder.seal(prepared.draft.changes,
@@ -677,9 +673,7 @@ public class OwnerCommitPatchBenchmark {
                     }
                     fingerprintsExact &= expected.equals(actual);
                     nonZeroFingerprints &= hasNonZeroByte(actual.bytes());
-                    last = patch;
                 }
-                journal.await(last.projectionPoint());
                 maximumBacklog = Math.max(maximumBacklog, journal.metrics().maxBacklog());
             }
             if (journal.metrics().currentBacklog() != 0) {

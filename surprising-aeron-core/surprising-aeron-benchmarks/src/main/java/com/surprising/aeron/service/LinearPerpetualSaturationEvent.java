@@ -23,9 +23,6 @@ final class LinearPerpetualSaturationEvent extends Event {
     @Label("Operations per invocation")
     int operationsPerInvocation;
 
-    @Label("Matcher wait strategy")
-    String matcherWaitStrategy;
-
     @Label("Scheduled business operations") long scheduledBusinessOperations;
 
     @Label("Business type") String businessType;
@@ -71,17 +68,6 @@ final class LinearPerpetualSaturationEvent extends Event {
 
     @Label("Producer starvation percentage")
     double producerStarvationPercentage;
-
-    @Label("Completion mailbox high-water mark")
-    int completionMailboxHighWaterMark;
-
-    @Label("Completion mailbox capacity")
-    int completionMailboxCapacity;
-
-    @Label("Completion batch count") long completionBatchCount;
-    @Label("Completion batch items") long completionBatchItems;
-    @Label("Maximum completion batch size") int maximumCompletionBatchSize;
-    @Label("Average completion batch size") double averageCompletionBatchSize;
 
     @Label("Completion p50")
     @Timespan(Timespan.NANOSECONDS)

@@ -25,10 +25,7 @@ SOAK_SECONDS="${SCALE_SOAK_SECONDS:-2400}"
 SOAK_SAMPLE_SECONDS="${SCALE_SOAK_SAMPLE_SECONDS:-10}"
 SOAK_OLD_OBJECT_PATHS="${SCALE_SOAK_OLD_OBJECT_PATHS:-false}"
 SATURATION_OPERATIONS="${SATURATION_OPERATIONS_PER_INVOCATION:-16384}"
-SATURATION_WAIT_STRATEGIES="${SATURATION_WAIT_STRATEGIES:-BUSY_SPIN,YIELDING}"
-MATCHER_WAIT_STRATEGY="${MATCHER_WAIT_STRATEGY:-BUSY_SPIN}"
 MATCHING_ENGINES="${MATCHING_ENGINES:-1}"
-PROJECTION_WAIT_STRATEGY="${PROJECTION_WAIT_STRATEGY:-PARKING}"
 JFR_ANALYZER="${SCRIPT_DIR}/analyze-owner-commit-jfr.sh"
 SUREFIRE_VERIFIER="${SCRIPT_DIR}/verify-surefire-reports.sh"
 OLD_OBJECT_JFC_GENERATOR="${SCRIPT_DIR}/generate-oldobject-jfc.sh"
@@ -37,8 +34,8 @@ if [[ ! -s "${JFR_SETTINGS_FILE}" ]]; then
   echo "missing explicit JFR settings: ${JFR_SETTINGS_FILE}" >&2
   exit 2
 fi
-if (( MATCHING_ENGINES < 1 || (MATCHING_ENGINES & (MATCHING_ENGINES - 1)) != 0 )); then
-  echo "MATCHING_ENGINES must be a positive power of two; found ${MATCHING_ENGINES}." >&2
+if (( MATCHING_ENGINES != 1 )); then
+  echo "MATCHING_ENGINES must be exactly 1; found ${MATCHING_ENGINES}." >&2
   exit 2
 fi
 
@@ -72,13 +69,6 @@ JVM_ARGS=(
   "--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED"
   "-Dsurprising.aeron.account-lanes=4"
   "-Dsurprising.aeron.matching-engines=${MATCHING_ENGINES}"
-  "-Dsurprising.aeron.matcher-wait-strategy=${MATCHER_WAIT_STRATEGY}"
-  "-Dsurprising.aeron.settlement-wait-strategy=BLOCKING"
-  "-Dsurprising.aeron.matching-completion-spins=16384"
-  "-Dsurprising.aeron.projection-busy-spin=false"
-  "-Dsurprising.aeron.projection-wait-strategy=${PROJECTION_WAIT_STRATEGY}"
-  "-Dsurprising.aeron.projection-batch-size=64"
-  "-Dsurprising.aeron.projection-batch-bytes=4194304"
   "-Dsurprising.aeron.commit-journal-capacity=65536"
   "-Dsurprising.aeron.commit-journal-capacity-bytes=1073741824"
   "-Dsurprising.aeron.export-pending-bytes=268435456"
@@ -254,7 +244,7 @@ validate_saturation_jmh() {
     .params.maxInFlight == "256" and .params.operationsPerInvocation == "16384" and
     .params.targetOperationsPerSecond == "100000" and
     .secondaryMetrics.matchingWindowSamples.score > 0 and
-    .secondaryMetrics.matchingFullWindowSamples.score > 0 and
+    .secondaryMetrics.matchingFullWindowSamples.score == 0 and
     .secondaryMetrics.matchingRefillOperations.score > 0 and
     .secondaryMetrics.matchingProducerStarvationSamples.score == 0)' "${result}" > /dev/null
 }
@@ -395,15 +385,10 @@ run_capacity() {
 }
 
 run_saturation_case() {
-  local strategy="$1" in_flight="$2"
-  local case_id
-  case "${strategy}" in
-    BUSY_SPIN) case_id="busy-spin-inflight-${in_flight}" ;;
-    YIELDING) case_id="yielding-inflight-${in_flight}" ;;
-    *) echo "Unsupported saturation wait strategy: ${strategy}" >&2; return 2 ;;
-  esac
+  local in_flight="$1"
+  local case_id="sync-owner-inflight-${in_flight}"
   local result="${ARTIFACT_DIR}/saturation-${case_id}.json"
-  local saturation_args="${JVM_ARGS_STRING} -Dsurprising.aeron.matcher-wait-strategy=${strategy} -Dsurprising.benchmark.export-ack-interval=1024"
+  local saturation_args="${JVM_ARGS_STRING} -Dsurprising.benchmark.export-ack-interval=1024"
   "${JAVA}" -jar "${JAR}" 'LinearPerpetualCoreBenchmark.saturatedMatchingWorkload' \
     -p accountLanes=4 -p activeUsers=10000 -p listedSymbols=512 -p activeSymbols=512 \
     -p maxPositionsPerUser=5 -p maxOpenOrdersPerUser=10 \
@@ -418,7 +403,6 @@ run_saturation_case() {
 run_saturation_profile() {
   local profile_jvm_args=(
     "${JVM_ARGS[@]}"
-    "-Dsurprising.aeron.matcher-wait-strategy=${MATCHER_WAIT_STRATEGY}"
     "-Dsurprising.benchmark.export-ack-interval=1024"
     "-XX:+UnlockDiagnosticVMOptions"
     "-XX:NativeMemoryTracking=summary"
@@ -449,11 +433,7 @@ run_saturation_profile() {
 }
 
 run_saturation() {
-  local strategy
-  IFS=',' read -r -a strategies <<< "${SATURATION_WAIT_STRATEGIES}"
-  for strategy in "${strategies[@]}"; do
-    run_saturation_case "${strategy}" 256
-  done
+  run_saturation_case 256
   run_saturation_profile
   jq -s 'add' "${ARTIFACT_DIR}"/saturation-*.json > "${ARTIFACT_DIR}/saturation-matrix.json"
 }

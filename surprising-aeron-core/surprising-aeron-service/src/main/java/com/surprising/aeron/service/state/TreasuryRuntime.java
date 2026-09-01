@@ -215,6 +215,33 @@ public final class TreasuryRuntime {
         return patchLifecycleBefore.get(symbolId);
     }
 
+    void rollbackChangedValues() {
+        assertOwner();
+        for (int assetId : changedAssets.toArray()) {
+            RuntimeCommitPatch.TreasuryAssetValue before = patchAssetBefore.get(assetId);
+            restoreSigned(feeBalances, assetId, before == null ? 0 : before.fee());
+            restoreSigned(insuranceBalances, assetId, before == null ? 0 : before.insurance());
+            restoreSigned(insuranceDeficits, assetId, before == null ? 0 : before.deficit());
+            restoreSigned(liquidationFeeBalances, assetId, before == null ? 0 : before.liquidationFee());
+            restoreSigned(fundingResidualBalances, assetId, before == null ? 0 : before.fundingResidual());
+            restoreSigned(roundingResidualBalances, assetId, before == null ? 0 : before.roundingResidual());
+            restoreSigned(clearingPnlBalances, assetId, before == null ? 0 : before.clearingPnl());
+        }
+        for (int symbolId : changedFundingSymbols.toArray()) {
+            RuntimeCommitPatch.TreasuryFundingValue before = patchFundingBefore.get(symbolId);
+            restoreSigned(fundingSettlements, symbolId, before == null ? 0 : before.settlementId());
+            if (before == null || before.progress() == null) fundingProgress.remove(symbolId);
+            else fundingProgress.put(symbolId, before.progress());
+        }
+        for (int symbolId : changedLifecycleSymbols.toArray()) {
+            RuntimeCommitPatch.TreasuryLifecycleValue before = patchLifecycleBefore.get(symbolId);
+            restoreSigned(lifecycleSettlements, symbolId, before == null ? 0 : before.settlementId());
+            if (before == null || before.progress() == null) lifecycleProgress.remove(symbolId);
+            else lifecycleProgress.put(symbolId, before.progress());
+        }
+        clearChangedKeys();
+    }
+
     public void clear() {
         assertOwner();
         feeBalances.clear();
@@ -252,6 +279,10 @@ public final class TreasuryRuntime {
     private static void setSigned(IntLongHashMap balances, int assetId, long units) {
         if (assetId < 0) throw new IllegalArgumentException("invalid treasury asset");
         if (units == 0) balances.remove(assetId); else balances.put(assetId, units);
+    }
+
+    private static void restoreSigned(IntLongHashMap values, int key, long value) {
+        if (value == 0) values.remove(key); else values.put(key, value);
     }
 
     private void captureAssetBefore(int assetId) {

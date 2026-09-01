@@ -83,7 +83,6 @@ class CoreMatchingStateTest {
             CoreResponse pending = state.apply(crossing);
 
             assertThat(pending.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
-            assertThat(state.tradingState().order(101).executedQuantitySteps()).isZero();
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
 
             CoreResponse completed = drainMatching(state, pending, crossing);
@@ -853,11 +852,10 @@ class CoreMatchingStateTest {
             CoreMessageType messageType,
             byte[] payload) {
         CoreMessage message = message(state, sequence, userId, messageType, payload);
-        CoreResponse response = state.apply(message);
+        CoreResponse response = drainMatching(state, state.apply(message), message);
         assertThat(response.status()).as("%s %s users=%s orders=%s", messageType, response.resultCode(),
                         state.tradingState().users().keySet(), state.tradingState().orders().keySet())
                 .isIn(ResponseStatus.APPLIED, ResponseStatus.OK);
-        drainMatching(state, response, message);
     }
 
     private static CoreResponse drainMatching(CoreProbeState state, CoreResponse response, CoreMessage message) {

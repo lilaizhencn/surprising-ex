@@ -241,7 +241,7 @@ class RuntimeCommitRecoveryTest {
     }
 
     @Test
-    void recoversPairedOrderBatchAfterPartialMatcherFatalWithoutPublishingPartialTerminalState()
+    void recoversPairedOrderBatchWithSynchronousOwnerMatching()
             throws Exception {
         CoreMessage batch = command(5, 1001, CoreMessageType.PLACE_ORDER_BATCH,
                 TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
@@ -250,20 +250,6 @@ class RuntimeCommitRecoveryTest {
         byte[] pairedSnapshot;
         try (CoreProbeState seed = seededPerpetualBatchState()) {
             pairedSnapshot = seed.snapshot(705);
-        }
-
-        FatalBatchEvidence firstFatal;
-        SurprisingClusteredService poisoned = restoredService(pairedSnapshot);
-        try {
-            firstFatal = failBatchAfterFirstMatcherFact(poisoned, batch);
-            assertThat(firstFatal.firstMatcherObserved()).isTrue();
-            assertThat(firstFatal.publishedPatches()).isEmpty();
-            assertThat(firstFatal.outboxAfterFatal()).isEqualTo(firstFatal.outboxBefore());
-            assertThat(firstFatal.ackAfterFatal()).isEqualTo(firstFatal.ackBefore());
-            assertThat(firstFatal.commandResultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
-            assertThatThrownBy(() -> poisoned.state().snapshot(706)).isSameAs(firstFatal.divergence());
-        } finally {
-            poisoned.state().close();
         }
 
         SurprisingClusteredService uninterrupted = restoredService(pairedSnapshot);
@@ -320,18 +306,6 @@ class RuntimeCommitRecoveryTest {
             recovered.state().close();
         }
 
-        SurprisingClusteredService fatalRepeat = restoredService(pairedSnapshot);
-        try {
-            FatalBatchEvidence repeatedFatal = failBatchAfterFirstMatcherFact(fatalRepeat, batch);
-            assertThat(repeatedFatal.withoutFailureIdentity()).isEqualTo(firstFatal.withoutFailureIdentity());
-            assertThat(repeatedFatal.publishedPatches()).isEmpty();
-            assertThat(repeatedFatal.outboxAfterFatal()).isEqualTo(repeatedFatal.outboxBefore());
-            assertThat(repeatedFatal.commandResultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
-            assertThatThrownBy(() -> fatalRepeat.state().snapshot(707))
-                    .isSameAs(repeatedFatal.divergence());
-        } finally {
-            fatalRepeat.state().close();
-        }
     }
 
     @Test
@@ -724,13 +698,8 @@ class RuntimeCommitRecoveryTest {
         CoreProbeState state = service.state();
         state.captureCommittedPatchesForTest();
         ClusterReplay replay = replayClusterCommand(service, batch);
-        assertThat(replay.responses()).isEmpty();
-        long sequence;
-        while ((sequence = state.matchingSequence(batch.header().commandId())) != 0) {
-            var matching = awaitMatching(state, sequence);
-            state.publishMatchingCompletion(sequence, matching);
-            service.onTimerEvent(sequence, batch.header().submittedAtEpochMillis());
-        }
+        assertThat(replay.responses()).hasSize(1);
+        assertThat(state.matchingSequence(batch.header().commandId())).isZero();
         CoreResponse response = replay.response();
         assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
         List<PatchEvidence> patches = state.drainCapturedCommitPatchesForTest().stream()

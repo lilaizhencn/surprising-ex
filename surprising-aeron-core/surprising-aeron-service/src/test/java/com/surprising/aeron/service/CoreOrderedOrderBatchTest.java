@@ -160,8 +160,8 @@ class CoreOrderedOrderBatchTest {
             assertThat(duplicate.appliedCommandCount()).isEqualTo(deferred.appliedCommandCount());
             assertThat(duplicate.requiredExportSequence()).isEqualTo(deferred.requiredExportSequence());
             assertThat(duplicate.stateHash()).isEqualTo(deferred.stateHash());
-            assertThat(state.tradingState().order(9_102)).isNull();
-            assertThat(state.tradingState().order(9_103)).isNull();
+            assertThat(state.pendingMatching()).containsKeys(
+                    state.matchingSequence(laterId), state.matchingSequence(lastId));
             var exportsBeforeBatchCompletion = CoreExportCodec.decodeBatchResponse(state.apply(new CoreMessage(
                     CoreMessageHeader.query(CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(),
                             ProductLine.SPOT, CommandSource.GATEWAY, 77, 0, 1001, 1_999, 4),
@@ -175,8 +175,8 @@ class CoreOrderedOrderBatchTest {
             var batchMatching = awaitMatching(state, batchSequence);
             CoreResponse batchResponse = state.completeMatching(batchSequence, batchMatching, 2_000, 4);
             assertThat(batchResponse).isNotNull();
-            assertThat(state.tradingState().order(9_102)).isNull();
-            assertThat(state.tradingState().order(9_103)).isNull();
+            assertThat(state.pendingMatching()).containsKeys(
+                    state.matchingSequence(laterId), state.matchingSequence(lastId));
             assertThat(batchResponse.appliedCommandCount()).isEqualTo(batchSequence);
             state.exportState().pending();
             var eventsBeforeCompletions = CoreExportCodec.decodeBatchResponse(state.apply(new CoreMessage(
@@ -281,7 +281,7 @@ class CoreOrderedOrderBatchTest {
                             place(99_999, "changed-batch", 1_000))))));
             assertThat(conflict.status()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(conflict.resultCode()).isEqualTo(CoreResultCode.IDEMPOTENCY_CONFLICT);
-            assertThat(state.tradingState()).isSameAs(stateAfterBatch);
+            assertThat(state.tradingState()).isEqualTo(stateAfterBatch);
             state.exportState().pending();
 
             var events = CoreExportCodec.decodeBatchResponse(state.apply(new CoreMessage(
@@ -457,8 +457,6 @@ class CoreOrderedOrderBatchTest {
             assertThat(runtime.order(11_004)).isNotNull();
             LaneCommandContextRing contexts = field(state, "laneCommandContexts");
             LaneCommandContextRing.Context claimedContext = contexts.required(fatalSequence);
-            LaneCommandContextRing.SubmissionToken claimedToken = claimedContext.matchingSubmissionToken();
-            assertThat(claimedContext.acceptsMatchingSubmission(claimedToken)).isTrue();
             long[] matcherAfterFirst = ((long[]) field(state, "appliedMatcherSequences")).clone();
             long[] matcherPrefixAfterFirst = ((long[]) field(state, "appliedMatcherPrefixDigests")).clone();
             assertThat(matcherAfterFirst).isNotEqualTo(matcherBeforeFatal);
@@ -480,7 +478,7 @@ class CoreOrderedOrderBatchTest {
             assertThatThrownBy(() -> state.apply(probe(UUID.randomUUID(), 4)))
                     .isSameAs(divergence);
             assertThat(state.takeMatchingResult(fatalSequence)).isNull();
-            assertThat(claimedContext.acceptsMatchingSubmission(claimedToken)).isFalse();
+            assertThat(claimedContext.hasMatchingCompletion()).isFalse();
             assertThat(runtime.order(11_004)).isNull();
             assertThat(runtime.reservation(11_004)).isNull();
             assertThat(state.tradingState().order(11_005)).isNull();
@@ -700,7 +698,7 @@ class CoreOrderedOrderBatchTest {
 
             assertThat(response.status()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(response.resultCode()).isEqualTo(CoreResultCode.ORDER_OWNER_MISMATCH);
-            assertThat(state.tradingState()).isSameAs(before);
+            assertThat(state.tradingState()).isEqualTo(before);
             assertThat(state.appliedCommandCount()).isEqualTo(appliedBefore);
             assertThat(state.stateHash()).isEqualTo(stateHashBefore);
             assertThat(state.pendingMatchingCount()).isZero();
@@ -953,7 +951,7 @@ class CoreOrderedOrderBatchTest {
 
             assertThat(response.status()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(response.resultCode()).isEqualTo(CoreResultCode.PRODUCT_LINE_MISMATCH);
-            assertThat(state.tradingState()).isSameAs(before);
+            assertThat(state.tradingState()).isEqualTo(before);
             assertThat(state.appliedCommandCount()).isEqualTo(appliedBefore);
             assertThat(state.stateHash()).isEqualTo(stateHashBefore);
             assertThat(state.pendingMatchingCount()).isZero();

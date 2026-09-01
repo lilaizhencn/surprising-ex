@@ -146,7 +146,6 @@ public class LinearPerpetualCoreBenchmark {
             measurement.activeSymbols = state.activeSymbols;
             measurement.maxInFlight = state.maxInFlight;
             measurement.operationsPerInvocation = state.operationsPerInvocation;
-            measurement.matcherWaitStrategy = state.matcherWaitStrategy;
             measurement.begin();
         }
         long result;
@@ -164,12 +163,6 @@ public class LinearPerpetualCoreBenchmark {
                 measurement.refillOperations = state.scenario.refillOperations();
                 measurement.producerStarvationSamples = state.scenario.producerStarvationSamples();
                 measurement.producerStarvationPercentage = state.scenario.producerStarvationPercentage();
-                measurement.completionMailboxHighWaterMark = state.scenario.completionMailboxHighWaterMark();
-                measurement.completionMailboxCapacity = state.scenario.completionMailboxCapacity();
-                measurement.completionBatchCount = state.scenario.completionBatchCount();
-                measurement.completionBatchItems = state.scenario.completionBatchItems();
-                measurement.maximumCompletionBatchSize = state.scenario.maximumCompletionBatchSize();
-                measurement.averageCompletionBatchSize = state.scenario.averageCompletionBatchSize();
                 measurement.p50LatencyNanos = state.scenario.p50LatencyNanos();
                 measurement.p99LatencyNanos = state.scenario.p99LatencyNanos();
                 measurement.p999LatencyNanos = state.scenario.p999LatencyNanos();
@@ -485,17 +478,11 @@ public class LinearPerpetualCoreBenchmark {
         @Param("100000")
         public int targetOperationsPerSecond;
 
-        @Param("BUSY_SPIN")
-        public String matcherWaitStrategy;
-
         private LinearPerpetualSaturationWorkload.SaturationScenario scenario;
-        private String previousMatcherWaitStrategy;
 
         @Setup(Level.Trial)
         public void setUpTrial() {
             LinearPerpetualBenchmarkSupport.configureAccountLanes(accountLanes);
-            previousMatcherWaitStrategy = System.getProperty("surprising.aeron.matcher-wait-strategy");
-            System.setProperty("surprising.aeron.matcher-wait-strategy", matcherWaitStrategy);
             var config = LinearPerpetualScaleConfig.scale(listedSymbols, activeSymbols,
                     maxPositionsPerUser, maxOpenOrdersPerUser,
                     LinearPerpetualTrafficProfile.UNIFORM, activeSymbols);
@@ -506,16 +493,8 @@ public class LinearPerpetualCoreBenchmark {
 
         @TearDown(Level.Trial)
         public void tearDownTrial() {
-            try {
-                scenario.verify();
-                scenario.close();
-            } finally {
-                if (previousMatcherWaitStrategy == null) {
-                    System.clearProperty("surprising.aeron.matcher-wait-strategy");
-                } else {
-                    System.setProperty("surprising.aeron.matcher-wait-strategy", previousMatcherWaitStrategy);
-                }
-            }
+            scenario.verify();
+            scenario.close();
         }
     }
 

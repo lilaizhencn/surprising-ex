@@ -26,17 +26,12 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public static final int MAX_PENDING_TRANSFERS = 131_072;
     private static final int CHANGE_KEY_COMPACTION_THRESHOLD = 512;
-    private static final int PARALLEL_LIFECYCLE_MIN_ITEMS = Math.max(2,
-            Integer.getInteger("surprising.aeron.parallel-lifecycle-min-items", 2));
 
     private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
     private long revision;
     private final LaneTopology topology;
     private final AccountLaneState[] accountLanes;
     private final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] laneUserScratch;
-    private final SettlementLaneWorker[] laneWorkers;
-    private final LaneMutationTask[] laneMutationTasks;
-    private final long[] laneMutationStartedNanosScratch;
     private final Object[] laneMutationResultsScratch;
     private final int[] accountLaneQueueHighWaterMarks;
     private final long[][] accountLaneCompletedOperations;
@@ -108,6 +103,10 @@ public final class TradingRuntimeState implements AutoCloseable {
             new ConcurrentHashMap<>();
     private ConcurrentHashMap<String, PatchBefore<CoreInstrumentState>> patchInstrumentsBefore =
             new ConcurrentHashMap<>();
+    private ConcurrentHashMap<Long, PatchBefore<TransferRuntime>> patchPendingTransfersBefore =
+            new ConcurrentHashMap<>();
+    private ConcurrentHashMap<Long, PatchBefore<CoreFeePolicyState>> patchFeePoliciesBefore =
+            new ConcurrentHashMap<>();
     private long patchNextLiquidationIdBefore;
     private boolean patchNextLiquidationIdChanged;
     private CoreRiskScanControlView patchRiskScanControlBefore;
@@ -143,9 +142,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] routedUsers =
                 new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[topology.accountLaneCount()];
         this.laneUserScratch = routedUsers;
-        this.laneWorkers = new SettlementLaneWorker[topology.accountLaneCount()];
-        this.laneMutationTasks = new LaneMutationTask[topology.accountLaneCount()];
-        this.laneMutationStartedNanosScratch = new long[topology.accountLaneCount()];
         this.laneMutationResultsScratch = new Object[topology.accountLaneCount()];
         this.accountLaneQueueHighWaterMarks = new int[topology.accountLaneCount()];
         this.accountLaneCompletedOperations = laneMetricValues(topology.accountLaneCount());
@@ -359,74 +355,16 @@ public final class TradingRuntimeState implements AutoCloseable {
             return results;
         }
         if (workItems == 0) throw new IllegalArgumentException("account lane mutation has no work");
-        int selectedCount = Long.bitCount(selectedLaneMask);
-        if (!allowParallel || selectedCount < 2 || workItems < PARALLEL_LIFECYCLE_MIN_ITEMS
-                || !accountLanesStarted) {
-            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-                if ((selectedLaneMask & 1L << laneId) == 0) continue;
-                int currentLaneId = laneId;
-                results[laneId] = inLaneCommandScope(accountLanes[laneId],
-                        ignored -> operation.apply(currentLaneId));
-            }
-            return results;
-        }
-        long[] startedNanos = laneMutationStartedNanosScratch;
-        long submittedLaneMask = 0;
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             if ((selectedLaneMask & 1L << laneId) == 0) continue;
-            AccountLaneState lane = accountLanes[laneId];
-            lane.releaseOwner();
-            accountLaneQueueHighWaterMarks[laneId] = Math.max(accountLaneQueueHighWaterMarks[laneId], 1);
-            startedNanos[laneId] = System.nanoTime();
-            LaneMutationTask task = laneMutationTasks[laneId];
-            if (task == null) {
-                task = new LaneMutationTask(laneId);
-                laneMutationTasks[laneId] = task;
-            }
-            SettlementLaneWorker worker = laneWorkers[laneId];
-            if (worker == null) {
-                worker = new SettlementLaneWorker("mutation", laneId, topology.accountLaneQueueCapacity());
-                laneWorkers[laneId] = worker;
-            }
-            task.prepare(lane, operation);
-            try {
-                worker.execute(task);
-                submittedLaneMask |= 1L << laneId;
-            } catch (RuntimeException failure) {
-                task.failSubmission(failure);
-                lane.bindOwner();
-                try {
-                    completeLaneMutations(submittedLaneMask, results, startedNanos);
-                } catch (RuntimeException submittedFailure) {
-                    failure.addSuppressed(submittedFailure);
-                }
-                throw failure;
-            }
+            int currentLaneId = laneId;
+            long startedNanos = System.nanoTime();
+            results[laneId] = inLaneCommandScope(accountLanes[laneId],
+                    ignored -> operation.apply(currentLaneId));
+            recordLaneOperation(laneId, AccountLaneOperationType.SETTLEMENT,
+                    System.nanoTime() - startedNanos);
         }
-        completeLaneMutations(submittedLaneMask, results, startedNanos);
         return results;
-    }
-
-    private void completeLaneMutations(long laneMask, Object[] results, long[] startedNanos) {
-        RuntimeException failure = null;
-        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            if ((laneMask & 1L << laneId) == 0) continue;
-            try {
-                results[laneId] = laneMutationTasks[laneId].await();
-                recordLaneOperation(laneId, AccountLaneOperationType.SETTLEMENT,
-                        System.nanoTime() - startedNanos[laneId]);
-            } catch (RuntimeException laneFailure) {
-                if (failure == null) failure = laneFailure;
-                else failure.addSuppressed(laneFailure);
-            }
-        }
-        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            if ((laneMask & 1L << laneId) != 0) {
-                accountLanes[laneId].bindOwner();
-                flushPublishedChanges(laneId);
-            }
-        }
-        if (failure != null) throw failure;
     }
 
     @FunctionalInterface
@@ -592,74 +530,6 @@ public final class TradingRuntimeState implements AutoCloseable {
     @Override
     public void close() {
         accountLanesStarted = false;
-        for (SettlementLaneWorker worker : laneWorkers) {
-            if (worker != null) worker.close();
-        }
-    }
-
-    private final class LaneMutationTask implements Runnable {
-        private final int laneId;
-        private final LaneOperation<Object> scopedOperation;
-        private AccountLaneState lane;
-        private java.util.function.IntFunction<Object> operation;
-        private Object result;
-        private Throwable failure;
-        private volatile boolean completed = true;
-        private volatile Thread waiter;
-
-        private LaneMutationTask(int laneId) {
-            this.laneId = laneId;
-            scopedOperation = ignored -> operation.apply(this.laneId);
-        }
-
-        private void prepare(AccountLaneState lane, java.util.function.IntFunction<Object> operation) {
-            if (!completed) throw new IllegalStateException("account lane task is still active");
-            this.lane = lane;
-            this.operation = operation;
-            result = null;
-            failure = null;
-            completed = false;
-        }
-
-        @Override
-        public void run() {
-            try {
-                result = inLaneCommandScope(lane, scopedOperation);
-            } catch (Throwable taskFailure) {
-                failure = taskFailure;
-            } finally {
-                lane.releaseOwner();
-                completed = true;
-                Thread blocked = waiter;
-                if (blocked != null) java.util.concurrent.locks.LockSupport.unpark(blocked);
-            }
-        }
-
-        private Object await() {
-            boolean interrupted = false;
-            Thread current = Thread.currentThread();
-            waiter = current;
-            try {
-                while (!completed) {
-                    java.util.concurrent.locks.LockSupport.park(this);
-                    if (Thread.interrupted()) interrupted = true;
-                }
-            } finally {
-                if (waiter == current) waiter = null;
-                if (interrupted) Thread.currentThread().interrupt();
-            }
-            if (interrupted) {
-                throw new IllegalStateException("account lane mutation was interrupted");
-            }
-            if (failure instanceof RuntimeException runtimeFailure) throw runtimeFailure;
-            if (failure != null) throw new IllegalStateException("account lane mutation failed", failure);
-            return result;
-        }
-
-        private void failSubmission(Throwable submissionFailure) {
-            failure = submissionFailure;
-            completed = true;
-        }
     }
 
     private static long[][] laneMetricValues(int laneCount) {
@@ -1316,6 +1186,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 || !patchTriggerOrdersBefore.isEmpty() || !patchClientOrdersBefore.isEmpty()
                 || !patchTimersBefore.isEmpty() || !patchMarkPricesBefore.isEmpty()
                 || !patchRiskScansBefore.isEmpty() || !patchInstrumentsBefore.isEmpty()
+                || !patchPendingTransfersBefore.isEmpty() || !patchFeePoliciesBefore.isEmpty()
                 || patchNextLiquidationIdChanged || patchRiskScanControlChanged;
     }
 
@@ -1513,22 +1384,94 @@ public final class TradingRuntimeState implements AutoCloseable {
         for (LongObjectHashMap<UserRuntime> capturedUsers : patchUsersBeforeByLane) {
             capturedUsers.forEachKeyValue(this::rollbackUser);
         }
-        for (int assetId : treasury.changedAssets().toArray()) {
-            RuntimeCommitPatch.TreasuryAssetValue before = treasury.patchAssetBefore(assetId);
-            treasury.setFee(assetId, before == null ? 0 : before.fee());
-            treasury.setInsurance(assetId, before == null ? 0 : before.insurance(),
-                    before == null ? 0 : before.deficit());
-            treasury.setLiquidationFee(assetId, before == null ? 0 : before.liquidationFee());
-            treasury.setFundingResidual(assetId, before == null ? 0 : before.fundingResidual());
-            treasury.setRoundingResidual(assetId, before == null ? 0 : before.roundingResidual());
-            treasury.setClearingPnl(assetId, before == null ? 0 : before.clearingPnl());
-        }
+        rollbackCommandGlobals();
+        treasury.rollbackChangedValues();
         revision = checkpoint.revision();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             int id = laneId;
             onLane(id, lane -> { lane.rollback(checkpoint.lanes().get(id)); return null; });
         }
         clearChangedKeys();
+    }
+
+    private void rollbackCommandGlobals() {
+        patchLiquidationsBefore.forEach((id, before) -> {
+            LiquidationRuntime current = liquidation(id);
+            if (current != null) onLane(current.userId(), lane -> {
+                lane.liquidations.remove(id);
+                removeActiveLiquidation(lane, current);
+                return null;
+            });
+            LiquidationRuntime restored = before.value();
+            if (restored != null) onLane(restored.userId(), lane -> {
+                lane.liquidations.put(id, restored);
+                indexActiveLiquidation(lane, restored);
+                return null;
+            });
+        });
+        patchRiskSnapshotsBefore.forEach((key, before) -> {
+            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+                int id = laneId;
+                onLane(id, lane -> { lane.riskSnapshots.remove(key); return null; });
+            }
+            RiskSnapshotRuntime restored = before.value();
+            if (restored != null) onLane(restored.userId(), lane -> {
+                lane.riskSnapshots.put(key, restored);
+                return null;
+            });
+        });
+        patchLeveragesBefore.forEach((key, before) -> onLane(key.userId(), lane -> {
+            if (before.value() == null) {
+                lane.leverages.remove(key);
+                TreeSet<CoreLeverageKey> keys = lane.leverageKeysByUser.get(key.userId());
+                if (keys != null) {
+                    keys.remove(key);
+                    if (keys.isEmpty()) lane.leverageKeysByUser.remove(key.userId());
+                }
+            } else {
+                lane.leverages.put(key, before.value());
+                lane.leverageKeysByUser.getIfAbsentPut(key.userId(), TreeSet::new).add(key);
+            }
+            return null;
+        }));
+        patchAlgoOrdersBefore.forEach((id, before) -> {
+            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+                int laneIndex = laneId;
+                onLane(laneIndex, lane -> { lane.algoOrders.remove(id); return null; });
+            }
+            CoreAlgoOrderState restored = before.value();
+            if (restored != null) onLane(restored.userId(), lane -> {
+                lane.algoOrders.put(id, restored);
+                return null;
+            });
+        });
+        patchTriggerOrdersBefore.forEach((id, before) -> {
+            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+                int laneIndex = laneId;
+                onLane(laneIndex, lane -> { lane.triggerOrders.remove(id); return null; });
+            }
+            CoreTriggerOrderState restored = before.value();
+            if (restored != null) onLane(restored.userId(), lane -> {
+                lane.triggerOrders.put(id, restored);
+                return null;
+            });
+        });
+        patchTimersBefore.forEach((key, before) -> putOrRemove(cancelAllAfterTimers, key, before.value()));
+        patchMarkPricesBefore.forEach((id, before) -> putOrRemove(markPrices, id, before.value()));
+        patchRiskScansBefore.forEach((id, before) -> putOrRemove(riskScans, id, before.value()));
+        patchInstrumentsBefore.forEach((symbol, before) -> putOrRemove(instruments, symbol, before.value()));
+        patchPendingTransfersBefore.forEach((id, before) -> putOrRemove(pendingTransfers, id, before.value()));
+        patchFeePoliciesBefore.forEach((id, before) -> putOrRemove(feePolicies, id, before.value()));
+        if (patchNextLiquidationIdChanged) nextLiquidationId = patchNextLiquidationIdBefore;
+        if (patchRiskScanControlChanged) riskScanControl = patchRiskScanControlBefore;
+    }
+
+    private static <K, V> void putOrRemove(Map<K, V> values, K key, V value) {
+        if (value == null) values.remove(key); else values.put(key, value);
+    }
+
+    private static <V> void putOrRemove(IntObjectHashMap<V> values, int key, V value) {
+        if (value == null) values.remove(key); else values.put(key, value);
     }
 
     public record CommandCheckpoint(long revision, List<AccountLaneState.Checkpoint> lanes) {
@@ -1988,7 +1931,10 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new CoreStateRejectedException("PENDING_TRANSFER_CAPACITY_FULL",
                     "pending transfer runtime capacity is full");
         }
-        if (transfer == null || pendingTransfers.putIfAbsent(transfer.transferId(), transfer) != null) {
+        if (transfer == null) throw new IllegalArgumentException("pending transfer is required");
+        patchPendingTransfersBefore.computeIfAbsent(transfer.transferId(),
+                id -> new PatchBefore<>(pendingTransfers.get(id)));
+        if (pendingTransfers.putIfAbsent(transfer.transferId(), transfer) != null) {
             throw new IllegalArgumentException("pending transfer already exists");
         }
     }
@@ -2001,6 +1947,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (current.userId() != userId) {
             throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer belongs to another user");
         }
+        patchPendingTransfersBefore.computeIfAbsent(transferId, id -> new PatchBefore<>(current));
         pendingTransfers.remove(transferId);
         return true;
     }
@@ -2033,6 +1980,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
             return;
         }
+        patchFeePoliciesBefore.computeIfAbsent(next.policyId(), id -> new PatchBefore<>(current));
         feePolicies.put(next.policyId(), next);
         changedFeePolicies.add(next.policyId());
         setMetadata(productLine, Math.incrementExact(revision));
@@ -3100,6 +3048,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         patchMarkPricesBefore = clearCapturedChanges(patchMarkPricesBefore);
         patchRiskScansBefore = clearCapturedChanges(patchRiskScansBefore);
         patchInstrumentsBefore = clearCapturedChanges(patchInstrumentsBefore);
+        patchPendingTransfersBefore = clearCapturedChanges(patchPendingTransfersBefore);
+        patchFeePoliciesBefore = clearCapturedChanges(patchFeePoliciesBefore);
         patchNextLiquidationIdChanged = false;
         patchRiskScanControlChanged = false;
     }

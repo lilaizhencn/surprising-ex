@@ -79,20 +79,35 @@ class SurprisingClusteredServiceTest {
     }
 
     @Test
-    void timerReplayReturnsWithoutBlockingAndAppliesMatchingExactlyOnce() throws Exception {
-        TimerScenario live = runTimerScenario(false);
-        TimerScenario replay = runTimerScenario(true);
+    void sessionCallbackAppliesMatchingExactlyOnceWithoutATimer() {
+        SurprisingClusteredService service = service();
+        List<byte[]> responses = new CopyOnWriteArrayList<>();
+        service.onStart(cluster(), null);
+        try {
+            assertThat(service.state().apply(timerInstrument()).status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(service.state().apply(command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))
+                    .status()).isEqualTo(ResponseStatus.APPLIED);
+            CoreMessage place = command(CoreMessageType.PLACE_ORDER, 2, 1001,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(904, "BTC-USDT", 1,
+                            CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS,
+                            CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
+                            false, "same-callback")));
 
-        assertThat(replay).isEqualTo(live);
-        assertThat(replay.appliedCommandCount()).isEqualTo(3);
-        assertThat(replay.pendingMatchingCount()).isZero();
-        assertThat(replay.responseCount()).isOne();
-        assertThat(replay.orderStatus())
-                .isEqualTo(com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
+            onSessionMessage(service, responses, place);
+            service.onTimerEvent(service.state().appliedCommandCount(), 1_001);
+
+            assertThat(service.state().pendingMatchingCount()).isZero();
+            assertThat(responses).hasSize(1);
+            assertThat(service.state().tradingState().order(904).status())
+                    .isEqualTo(com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
+        } finally {
+            service.onTerminate(null);
+        }
     }
 
     @Test
-    void followingSessionMessageCompletesEarlierMatchingBeforeAppendingItsFact() throws Exception {
+    void eachSessionMessageCommitsItsOwnMatchingBeforeTheFollowingFact() throws Exception {
         SurprisingClusteredService service = service();
         List<byte[]> responses = new CopyOnWriteArrayList<>();
         service.onStart(cluster(), null);
@@ -107,8 +122,9 @@ class SurprisingClusteredServiceTest {
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(906, "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "session-fence")),
                     UUID.fromString("00000000-0000-0000-0000-000000000013"));
             onSessionMessage(service, responses, place);
-            assertThat(awaitSubmittedMatching(state, state.matchingSequence(place.header().commandId())))
-                    .isNotNull();
+            assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(state.tradingState().order(906).status())
+                    .isEqualTo(com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
 
             onSessionMessage(service, responses, command(CoreMessageType.PROBE_INCREMENT, 3, 1001,
                     CoreProtocol.probePayload(1),
@@ -274,7 +290,7 @@ class SurprisingClusteredServiceTest {
     }
 
     @Test
-    void retriesTimerSchedulingUntilAeronBackpressureClears() {
+    void localProgressDoesNotScheduleReplicatedClusterTimers() {
         SurprisingClusteredService service = service();
         AtomicInteger attempts = new AtomicInteger();
         AtomicLong correlationId = new AtomicLong();
@@ -284,8 +300,8 @@ class SurprisingClusteredServiceTest {
             preparePendingPlace(service.state(), 902);
             service.onSessionOpen(clientSession(responses), 1_000);
 
-            assertThat(attempts).hasValue(3);
-            assertThat(correlationId).hasValue(Long.MAX_VALUE - 1);
+            assertThat(attempts).hasValue(0);
+            assertThat(correlationId).hasValue(0);
         } finally {
             service.onTerminate(null);
         }

@@ -817,7 +817,7 @@ class TradingRuntimeStateTest {
     }
 
     @Test
-    void lifecycleSettlementUsesIndependentLaneOwnersAndRebindsTheCoreOwner() {
+    void lifecycleSettlementUsesLogicalLanesOnTheSingleCoreOwner() {
         LaneTopology topology = LaneTopology.productionDefault();
         TradingRuntimeState state = new TradingRuntimeState(topology);
         java.util.List<Long> users = new java.util.ArrayList<>();
@@ -841,10 +841,10 @@ class TradingRuntimeStateTest {
                     });
 
             for (int laneId = 0; laneId < owners.length; laneId++) {
-                assertThat(owners[laneId]).isEqualTo("core-mutation-lane-" + laneId);
+                assertThat(owners[laneId]).isEqualTo(Thread.currentThread().getName());
                 assertThat(state.user(users.get(laneId)).revision()).isEqualTo(revisions.get(laneId) + 1);
                 AccountLaneMetricsSnapshot metrics = state.accountLaneMetricsById(laneId);
-                assertThat(metrics.queueHighWaterMark()).isEqualTo(1);
+                assertThat(metrics.queueHighWaterMark()).isZero();
                 assertThat(metrics.completedOperations()[AccountLaneOperationType.SETTLEMENT.ordinal()])
                         .isEqualTo(1);
                 assertThat(metrics.latencySamples()[AccountLaneOperationType.SETTLEMENT.ordinal()])
