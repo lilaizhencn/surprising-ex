@@ -293,9 +293,14 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
     }
 
     private static UserFactBuilder userFactBuilder(ArrayList<UserFactBuilder> values, long userId) {
-        for (int index = 0; index < values.size(); index++) {
-            UserFactBuilder candidate = values.get(index);
-            if (candidate.user.userId() == userId) return candidate;
+        int low = 0;
+        int high = values.size() - 1;
+        while (low <= high) {
+            int middle = (low + high) >>> 1;
+            UserFactBuilder candidate = values.get(middle);
+            int comparison = Long.compare(candidate.user.userId(), userId);
+            if (comparison == 0) return candidate;
+            if (comparison < 0) low = middle + 1; else high = middle - 1;
         }
         return null;
     }
@@ -481,32 +486,56 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
 
     public record FactIdentitySlice(List<IdentityValue> assets, List<IdentityValue> symbols,
                                     List<ClientIdentityValue> clients,
-                                    List<PositionIdentityValue> positions) implements IdentityView {
-        private static final FactIdentitySlice EMPTY = new FactIdentitySlice(List.of(), List.of(), List.of(), List.of());
+                                    List<PositionIdentityValue> positions,
+                                    long dictionaryVersion,
+                                    IdentityView dictionary) implements IdentityView {
+        private static final FactIdentitySlice EMPTY = new FactIdentitySlice(
+                List.of(), List.of(), List.of(), List.of(), 0, null);
+
+        public FactIdentitySlice(List<IdentityValue> assets, List<IdentityValue> symbols,
+                                 List<ClientIdentityValue> clients,
+                                 List<PositionIdentityValue> positions) {
+            this(assets, symbols, clients, positions, 0, null);
+        }
 
         public FactIdentitySlice {
             assets = canonicalIdentities(assets, "asset");
             symbols = canonicalIdentities(symbols, "symbol");
             clients = canonicalLongIdentities(clients, "client");
             positions = canonicalLongIdentities(positions, "position");
+            if (dictionaryVersion < 0) throw new IllegalArgumentException("invalid identity dictionary version");
         }
 
-        @Override public String asset(int assetId) { return findIdentity(assets, assetId, "asset"); }
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) return true;
+            if (!(other instanceof FactIdentitySlice slice)) return false;
+            return dictionaryVersion == slice.dictionaryVersion
+                    && assets.equals(slice.assets) && symbols.equals(slice.symbols)
+                    && clients.equals(slice.clients) && positions.equals(slice.positions);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(assets, symbols, clients, positions, dictionaryVersion);
+        }
+
+        @Override public String asset(int assetId) {
+            String value = findIdentityOrNull(assets, assetId);
+            return value != null ? value : requireDictionary().asset(assetId);
+        }
         String assetOrNull(int assetId) {
-            int low = 0, high = assets.size() - 1;
-            while (low <= high) {
-                int middle = (low + high) >>> 1;
-                IdentityValue value = assets.get(middle);
-                if (value.id() == assetId) return value.value();
-                if (value.id() < assetId) low = middle + 1; else high = middle - 1;
-            }
-            return null;
+            String value = findIdentityOrNull(assets, assetId);
+            return value != null || dictionary == null ? value : dictionary.asset(assetId);
         }
         @Override public int assetId(String asset) {
             for (IdentityValue value : assets) if (value.value().equals(asset)) return value.id();
-            throw new IllegalArgumentException("unknown patch asset: " + asset);
+            return requireDictionary().assetId(asset);
         }
-        @Override public String symbol(int symbolId) { return findIdentity(symbols, symbolId, "symbol"); }
+        @Override public String symbol(int symbolId) {
+            String value = findIdentityOrNull(symbols, symbolId);
+            return value != null ? value : requireDictionary().symbol(symbolId);
+        }
         @Override public String clientOrderId(long userId, long clientKey) {
             for (ClientIdentityValue value : clients) {
                 if (value.key() == clientKey && value.userId() == userId) return value.clientOrderId();
@@ -528,89 +557,66 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         public FactIdentitySlice merge(FactIdentitySlice other) {
             if (other == null || other == EMPTY) return this;
             if (this == EMPTY) return other;
-            java.util.TreeMap<Integer, String> assetValues = mergeValues(assets, other.assets, "asset");
-            java.util.TreeMap<Integer, String> symbolValues = mergeValues(symbols, other.symbols, "symbol");
-            java.util.TreeMap<Long, ClientIdentityValue> clientValues = new java.util.TreeMap<>();
-            for (ClientIdentityValue value : clients) clientValues.put(value.key(), value);
-            for (ClientIdentityValue value : other.clients) mergeExact(clientValues, value.key(), value, "client");
-            java.util.TreeMap<Long, PositionIdentityValue> positionValues = new java.util.TreeMap<>();
-            for (PositionIdentityValue value : positions) positionValues.put(value.key(), value);
-            for (PositionIdentityValue value : other.positions) mergeExact(positionValues, value.key(), value, "position");
-            return new FactIdentitySlice(assetValues.entrySet().stream()
-                    .map(entry -> new IdentityValue(entry.getKey(), entry.getValue())).toList(),
-                    symbolValues.entrySet().stream()
-                            .map(entry -> new IdentityValue(entry.getKey(), entry.getValue())).toList(),
-                    List.copyOf(clientValues.values()), List.copyOf(positionValues.values()));
-        }
-
-        private static java.util.TreeMap<Integer, String> mergeValues(List<IdentityValue> left,
-                                                                       List<IdentityValue> right,
-                                                                       String kind) {
-            java.util.TreeMap<Integer, String> values = new java.util.TreeMap<>();
-            for (IdentityValue value : left) values.put(value.id(), value.value());
-            for (IdentityValue value : right) mergeExact(values, value.id(), value.value(), kind);
-            return values;
-        }
-
-        private static <K, V> void mergeExact(Map<K, V> values, K key, V value, String kind) {
-            V previous = values.putIfAbsent(key, value);
-            if (previous != null && !previous.equals(value)) {
-                throw new IllegalStateException("conflicting patch " + kind + " identity");
+            IdentityView mergedDictionary = dictionary != null ? dictionary : other.dictionary;
+            if (dictionary != null && other.dictionary != null && dictionary != other.dictionary) {
+                throw new IllegalStateException("conflicting patch identity dictionaries");
             }
+            return new FactIdentitySlice(mergeSorted(assets, other.assets, "asset"),
+                    mergeSorted(symbols, other.symbols, "symbol"),
+                    mergeSorted(clients, other.clients, "client"),
+                    mergeSorted(positions, other.positions, "position"),
+                    Math.max(dictionaryVersion, other.dictionaryVersion), mergedDictionary);
+        }
+
+        private static <T extends Comparable<? super T>> List<T> mergeSorted(
+                List<T> left, List<T> right, String kind) {
+            if (left.isEmpty()) return right;
+            if (right.isEmpty()) return left;
+            ArrayList<T> merged = new ArrayList<>(Math.addExact(left.size(), right.size()));
+            int leftIndex = 0;
+            int rightIndex = 0;
+            while (leftIndex < left.size() && rightIndex < right.size()) {
+                T leftValue = left.get(leftIndex);
+                T rightValue = right.get(rightIndex);
+                int comparison = leftValue.compareTo(rightValue);
+                if (comparison < 0) {
+                    merged.add(leftValue);
+                    leftIndex++;
+                } else if (comparison > 0) {
+                    merged.add(rightValue);
+                    rightIndex++;
+                } else {
+                    if (!leftValue.equals(rightValue)) {
+                        throw new IllegalStateException("conflicting patch " + kind + " identity");
+                    }
+                    merged.add(leftValue);
+                    leftIndex++;
+                    rightIndex++;
+                }
+            }
+            while (leftIndex < left.size()) merged.add(left.get(leftIndex++));
+            while (rightIndex < right.size()) merged.add(right.get(rightIndex++));
+            return List.copyOf(merged);
         }
 
         private static FactIdentitySlice capture(List<AccountLaneOwnerGroup> groups, GlobalOwnerGroup global,
                                                  List<FundsPosting> funds,
                                                  RuntimeIdentityRegistry registry) {
-            org.eclipse.collections.impl.set.mutable.primitive.IntHashSet assetIds =
-                    new org.eclipse.collections.impl.set.mutable.primitive.IntHashSet();
-            org.eclipse.collections.impl.set.mutable.primitive.IntHashSet symbolIds =
-                    new org.eclipse.collections.impl.set.mutable.primitive.IntHashSet();
             java.util.TreeSet<ClientOrderKey> clientKeys = new java.util.TreeSet<>();
             org.eclipse.collections.impl.set.mutable.primitive.LongHashSet positionKeys =
                     new org.eclipse.collections.impl.set.mutable.primitive.LongHashSet();
             for (AccountLaneOwnerGroup group : groups) {
-                group.balances().forEach(change -> assetIds.add(change.key().assetId()));
-                for (ReservationChange change : group.reservations()) {
-                    ReservationRuntime value = change.after() == null ? change.before() : change.after();
-                    assetIds.add(value.assetId()); symbolIds.add(value.symbolId());
-                }
-                for (OrderChange change : group.orders()) {
-                    OrderRuntime value = change.after() == null ? change.before() : change.after();
-                    symbolIds.add(value.symbolId());
-                }
                 for (PositionChange change : group.positions()) {
-                    PositionRuntime value = change.after() == null ? change.before() : change.after();
-                    assetIds.add(value.assetId()); symbolIds.add(value.symbolId()); positionKeys.add(change.positionKey());
-                }
-                for (LiquidationChange change : group.liquidations()) {
-                    LiquidationRuntime value = change.after() == null ? change.before() : change.after();
-                    symbolIds.add(value.symbolId());
+                    positionKeys.add(change.positionKey());
                 }
                 for (RiskSnapshotChange change : group.riskSnapshots()) {
-                    RiskSnapshotRuntime value = change.after() == null ? change.before() : change.after();
-                    symbolIds.add(value.symbolId()); positionKeys.add(change.riskKey());
+                    positionKeys.add(change.riskKey());
                 }
                 for (ClientOrderChange change : group.clientOrders()) clientKeys.add(change.key());
             }
-            global.markPrices().forEach(change -> symbolIds.add(change.symbolId()));
-            global.riskScans().forEach(change -> symbolIds.add(change.symbolId()));
-            global.treasuryAssets().forEach(change -> assetIds.add(change.assetId()));
-            global.treasuryFunding().forEach(change -> symbolIds.add(change.symbolId()));
-            global.treasuryLifecycle().forEach(change -> symbolIds.add(change.symbolId()));
-            funds.forEach(posting -> assetIds.add(posting.assetId()));
-            if (assetIds.isEmpty() && symbolIds.isEmpty() && clientKeys.isEmpty() && positionKeys.isEmpty()
-                    || registry == null) return EMPTY;
-            int[] orderedAssetIds = assetIds.toArray();
-            int[] orderedSymbolIds = symbolIds.toArray();
+            if (registry == null) return EMPTY;
             long[] orderedPositionKeys = positionKeys.toArray();
-            java.util.Arrays.sort(orderedAssetIds);
-            java.util.Arrays.sort(orderedSymbolIds);
             java.util.Arrays.sort(orderedPositionKeys);
-            ArrayList<IdentityValue> assets = new ArrayList<>(orderedAssetIds.length);
-            for (int id : orderedAssetIds) assets.add(new IdentityValue(id, registry.asset(id)));
-            ArrayList<IdentityValue> symbols = new ArrayList<>(orderedSymbolIds.length);
-            for (int id : orderedSymbolIds) symbols.add(new IdentityValue(id, registry.symbol(id)));
             ArrayList<ClientIdentityValue> clients = new ArrayList<>(clientKeys.size());
             for (ClientOrderKey key : clientKeys) clients.add(new ClientIdentityValue(
                     key.clientKey(), key.userId(), registry.clientOrderId(key.userId(), key.clientKey())));
@@ -618,7 +624,8 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             for (long key : orderedPositionKeys) {
                 positions.add(new PositionIdentityValue(key, registry.positionIdentity(key)));
             }
-            return new FactIdentitySlice(assets, symbols, clients, positions);
+            return new FactIdentitySlice(List.of(), List.of(), clients, positions,
+                    registry.dictionaryVersion(), registry);
         }
 
         private static <T extends Comparable<? super T>> List<T> canonicalLongIdentities(List<T> values,
@@ -648,7 +655,12 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             return canonicalLongIdentities(values, kind);
         }
 
-        private static String findIdentity(List<IdentityValue> values, int id, String kind) {
+        private IdentityView requireDictionary() {
+            if (dictionary == null) throw new IllegalArgumentException("identity dictionary is unavailable");
+            return dictionary;
+        }
+
+        private static String findIdentityOrNull(List<IdentityValue> values, int id) {
             int low = 0, high = values.size() - 1;
             while (low <= high) {
                 int middle = (low + high) >>> 1;
@@ -656,7 +668,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
                 if (value.id() == id) return value.value();
                 if (value.id() < id) low = middle + 1; else high = middle - 1;
             }
-            throw new IllegalArgumentException("unknown patch " + kind + " id: " + id);
+            return null;
         }
     }
 
@@ -1756,6 +1768,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
 
     private static final class Changes<K extends Comparable<? super K>, V> {
         private final HashMap<K, BeforeAfter<V>> values = new HashMap<>();
+        private int changedCount;
 
         private void captureBefore(K key, V before) {
             if (key == null) throw new IllegalArgumentException("invalid typed patch key");
@@ -1772,14 +1785,12 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         }
 
         private boolean hasChanges() {
-            for (BeforeAfter<V> change : values.values()) {
-                if (!Objects.equals(change.before, change.after)) return true;
-            }
-            return false;
+            return changedCount != 0;
         }
 
         private void reset() {
             values.clear();
+            changedCount = 0;
         }
 
         private void record(K key, V before, V after) {
@@ -1789,31 +1800,41 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             BeforeAfter<V> existing = values.get(key);
             if (existing == null) {
                 values.put(key, new BeforeAfter<>(before, after));
+                if (!Objects.equals(before, after)) changedCount++;
                 return;
             }
             if (!Objects.equals(before, existing.before) && !Objects.equals(before, existing.after)) {
                 throw new IllegalArgumentException("conflicting before-value for patch key " + key);
             }
+            boolean changedBefore = !Objects.equals(existing.before, existing.after);
             existing.after = after;
+            boolean changedAfter = !Objects.equals(existing.before, existing.after);
+            if (changedBefore != changedAfter) changedCount += changedAfter ? 1 : -1;
         }
 
         private <R> List<R> seal(BiFunction<K, BeforeAfter<V>, R> materializer) {
-            ArrayList<R> result = new ArrayList<>(values.size());
+            if (changedCount == 0) return List.of();
+            ArrayList<R> result = new ArrayList<>(changedCount);
             @SuppressWarnings("unchecked")
-            Map.Entry<K, BeforeAfter<V>>[] ordered = values.entrySet().toArray(Map.Entry[]::new);
+            Map.Entry<K, BeforeAfter<V>>[] ordered = new Map.Entry[changedCount];
+            int index = 0;
+            for (Map.Entry<K, BeforeAfter<V>> entry : values.entrySet()) {
+                BeforeAfter<V> change = entry.getValue();
+                if (!Objects.equals(change.before, change.after)) ordered[index++] = entry;
+            }
             java.util.Arrays.sort(ordered, Map.Entry.comparingByKey());
             for (Map.Entry<K, BeforeAfter<V>> entry : ordered) {
                 K key = entry.getKey();
                 BeforeAfter<V> change = entry.getValue();
-                if (!Objects.equals(change.before, change.after)) result.add(materializer.apply(key, change));
+                result.add(materializer.apply(key, change));
             }
             return java.util.Collections.unmodifiableList(result);
         }
 
         private <R> R single(java.util.function.Function<BeforeAfter<V>, R> materializer) {
-            if (values.isEmpty()) return null;
+            if (changedCount == 0) return null;
             BeforeAfter<V> change = values.values().iterator().next();
-            return Objects.equals(change.before, change.after) ? null : materializer.apply(change);
+            return materializer.apply(change);
         }
     }
 

@@ -40,6 +40,21 @@ class CoreResultLedgerTest {
     }
 
     @Test
+    void retainedResultCachesItsCommandBoundDigestWithoutChangingLedgerSemantics() {
+        UUID commandId = UUID.randomUUID();
+        CoreProbeState.StoredResult retained = stored(
+                ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 7, new byte[]{1, 2, 3}, 11);
+
+        long first = retained.entryDigest(commandId);
+        long second = retained.entryDigest(commandId);
+        long differentCommand = retained.entryDigest(UUID.randomUUID());
+
+        assertThat(second).isEqualTo(first);
+        assertThat(differentCommand).isNotEqualTo(first);
+        assertThat(retained.entryDigest(commandId)).isEqualTo(first);
+    }
+
+    @Test
     void evictedCommandResultIsExplicitlyOutsideRetention() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             UUID firstCommandId = UUID.randomUUID();

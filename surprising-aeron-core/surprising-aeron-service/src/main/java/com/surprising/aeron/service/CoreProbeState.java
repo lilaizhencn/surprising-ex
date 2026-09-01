@@ -6364,7 +6364,7 @@ public final class CoreProbeState implements AutoCloseable {
         return digest;
     }
 
-    private static long resultEntryDigest(UUID commandId, StoredResult result) {
+    private static long computeResultEntryDigest(UUID commandId, StoredResult result) {
         long digest = HASH_OFFSET_BASIS;
         digest = mix(digest, commandId.getMostSignificantBits());
         digest = mix(digest, commandId.getLeastSignificantBits());
@@ -6383,7 +6383,7 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private static long resultContribution(UUID commandId, StoredResult result) {
-        return resultEntryDigest(commandId, result) * retentionWeight(result.retentionSequence());
+        return result.entryDigest(commandId) * result.retentionWeight;
     }
 
     private static long retentionWeight(long sequence) {
@@ -6441,7 +6441,7 @@ public final class CoreProbeState implements AutoCloseable {
         } else {
             long retentionSequence = nextResultRetentionSequence;
             StoredResult retained = result.withRetentionSequence(retentionSequence);
-            long contribution = resultEntryDigest(commandId, retained) * nextResultRetentionWeight;
+            long contribution = retained.entryDigest(commandId) * nextResultRetentionWeight;
             nextResultRetentionSequence = Math.incrementExact(nextResultRetentionSequence);
             nextResultRetentionWeight *= RESULT_LEDGER_POSITION_BASE;
             commandResults.put(commandId, retained);
@@ -6857,6 +6857,9 @@ public final class CoreProbeState implements AutoCloseable {
         private final long stateHash;
         private final byte[] responseData;
         private final long retentionSequence;
+        private final long retentionWeight;
+        private UUID digestCommandId;
+        private long cachedEntryDigest;
 
         StoredResult(CommandFingerprint fingerprint, ResponseStatus status, CoreResultCode resultCode,
                      long appliedCommandCount, long requiredExportSequence, long stateHash,
@@ -6881,6 +6884,7 @@ public final class CoreProbeState implements AutoCloseable {
             byte[] normalized = responseData == null ? new byte[0] : responseData;
             this.responseData = ownedResponseData ? normalized : normalized.clone();
             this.retentionSequence = retentionSequence;
+            this.retentionWeight = CoreProbeState.retentionWeight(retentionSequence);
         }
 
         static StoredResult owned(CommandFingerprint fingerprint, ResponseStatus status, CoreResultCode resultCode,
@@ -6902,6 +6906,15 @@ public final class CoreProbeState implements AutoCloseable {
         long requiredExportSequence() { return requiredExportSequence; }
         long stateHash() { return stateHash; }
         long retentionSequence() { return retentionSequence; }
+
+        long entryDigest(UUID commandId) {
+            if (commandId == null) throw new IllegalArgumentException("command id is required");
+            if (commandId.equals(digestCommandId)) return cachedEntryDigest;
+            long digest = computeResultEntryDigest(commandId, this);
+            digestCommandId = commandId;
+            cachedEntryDigest = digest;
+            return digest;
+        }
 
         byte[] responseDataUnsafe() {
             return responseData;

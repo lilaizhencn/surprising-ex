@@ -836,18 +836,25 @@ class TradingRuntimeStateTest {
         LaneTopology topology = LaneTopology.productionDefault();
         TradingRuntimeState state = new TradingRuntimeState(topology);
         java.util.List<Long> users = new java.util.ArrayList<>();
+        java.util.List<Long> revisions = new java.util.ArrayList<>();
         for (int laneId = 0; laneId < topology.accountLaneCount(); laneId++) {
             long userId = userForLane(topology, laneId);
             users.add(userId);
-            state.putUser(new UserRuntime(userId));
+            UserRuntime user = new UserRuntime(userId);
+            revisions.add(user.revision());
+            state.putUser(user);
         }
         state.startAccountLanes();
         try {
             Object[] owners = state.executeLifecycleSettlements(users, Long::longValue,
-                    ignored -> Thread.currentThread().getName());
+                    laneId -> {
+                        state.advanceUserRevision(users.get(laneId));
+                        return Thread.currentThread().getName();
+                    });
 
             for (int laneId = 0; laneId < owners.length; laneId++) {
                 assertThat(owners[laneId]).isEqualTo("core-lifecycle-lane-" + laneId);
+                assertThat(state.user(users.get(laneId)).revision()).isEqualTo(revisions.get(laneId) + 1);
                 AccountLaneMetricsSnapshot metrics = state.accountLaneMetricsById(laneId);
                 assertThat(metrics.queueHighWaterMark()).isEqualTo(1);
                 assertThat(metrics.completedOperations()[AccountLaneOperationType.SETTLEMENT.ordinal()])

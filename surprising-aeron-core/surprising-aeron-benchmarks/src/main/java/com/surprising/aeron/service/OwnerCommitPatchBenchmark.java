@@ -210,6 +210,7 @@ public class OwnerCommitPatchBenchmark {
                                                OwnerCommitLatencies latencies) {
         latencies.begin(state.operationsPerInvocation, state.targetOperationsPerSecond);
         long encodedBytes = 0;
+        long identityDictionaryVersion = 0;
         for (int start = 0; start < state.operationsPerInvocation; start += state.maxInFlight) {
             int end = Math.min(state.operationsPerInvocation, start + state.maxInFlight);
             for (int index = start; index < end; index++) {
@@ -219,6 +220,11 @@ public class OwnerCommitPatchBenchmark {
             state.projection.apply(state.batch.patches.subList(start, end));
             for (int index = start; index < end; index++) {
                 RuntimeCommitPatch patch = state.batch.patches.get(index);
+                long patchIdentityVersion = patch.identities().dictionaryVersion();
+                if (patchIdentityVersion < identityDictionaryVersion) {
+                    throw new IllegalStateException("Core Fact identity dictionary version regressed");
+                }
+                identityDictionaryVersion = patchIdentityVersion;
                 state.exportState.append(exportDraft(patch, state.batch.commands.get(index)));
             }
         }
@@ -232,7 +238,7 @@ public class OwnerCommitPatchBenchmark {
         counters.coreFactEncodedBytes += encodedBytes;
         latencies.copyTo(counters);
         commitMeasurement("PROJECTION_CORE_FACT", latencies, state.operationsPerInvocation);
-        return encodedBytes ^ state.projection.sequence();
+        return encodedBytes ^ state.projection.sequence() ^ identityDictionaryVersion;
     }
 
     @Benchmark

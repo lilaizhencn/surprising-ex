@@ -9,12 +9,13 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public final class RuntimeIdentityRegistry implements RuntimeCommitPatch.IdentityView {
 
-    // Forward and allocation indexes are owner-only. Inverse indexes remain
-    // concurrent because asynchronous Core Fact materializers resolve them.
+    // Forward and allocation indexes are owner-only. Monotonic asset/symbol
+    // dictionaries use volatile array publication; releasable client/position
+    // identities remain concurrent for asynchronous Core Fact materializers.
     private final Map<String, Integer> assetIds = new HashMap<>();
-    private final Map<Integer, String> assets = new ConcurrentHashMap<>();
+    private volatile String[] assets = new String[16];
     private final Map<String, Integer> symbolIds = new HashMap<>();
-    private final Map<Integer, String> symbols = new ConcurrentHashMap<>();
+    private volatile String[] symbols = new String[16];
     private final Map<ClientIdentity, Long> clientKeys = new HashMap<>();
     private final Map<Long, ClientIdentity> clients = new ConcurrentHashMap<>();
     private final Map<Long, Long> clientAllocationKeys = new HashMap<>();
@@ -27,6 +28,7 @@ public final class RuntimeIdentityRegistry implements RuntimeCommitPatch.Identit
     private int nextSymbolId;
     private long nextClientKey = 1;
     private long nextPositionKey = 1;
+    private long dictionaryVersion;
     private Thread owner;
 
     public void assertOwner() {
@@ -46,7 +48,8 @@ public final class RuntimeIdentityRegistry implements RuntimeCommitPatch.Identit
         if (existing != null) return existing;
         int id = nextAssetId++;
         assetIds.put(normalized, id);
-        assets.put(id, normalized);
+        assets = storeIdentity(assets, id, normalized);
+        dictionaryVersion = Math.incrementExact(dictionaryVersion);
         return id;
     }
 
@@ -56,7 +59,8 @@ public final class RuntimeIdentityRegistry implements RuntimeCommitPatch.Identit
     }
 
     public String asset(int assetId) {
-        String asset = assets.get(assetId);
+        String[] current = assets;
+        String asset = assetId < 0 || assetId >= current.length ? null : current[assetId];
         if (asset == null) throw new IllegalArgumentException("unknown runtime asset id: " + assetId);
         return asset;
     }
@@ -68,7 +72,8 @@ public final class RuntimeIdentityRegistry implements RuntimeCommitPatch.Identit
         if (existing != null) return existing;
         int id = nextSymbolId++;
         symbolIds.put(normalized, id);
-        symbols.put(id, normalized);
+        symbols = storeIdentity(symbols, id, normalized);
+        dictionaryVersion = Math.incrementExact(dictionaryVersion);
         return id;
     }
 
@@ -82,7 +87,8 @@ public final class RuntimeIdentityRegistry implements RuntimeCommitPatch.Identit
     }
 
     String preparedSymbol(int symbolId) {
-        String symbol = symbols.get(symbolId);
+        String[] current = symbols;
+        String symbol = symbolId < 0 || symbolId >= current.length ? null : current[symbolId];
         if (symbol == null) throw new IllegalArgumentException("unknown runtime symbol id: " + symbolId);
         return symbol;
     }
@@ -101,6 +107,7 @@ public final class RuntimeIdentityRegistry implements RuntimeCommitPatch.Identit
         }
         clientKeys.put(identity, key);
         trackAllocation(clientAllocationKeys, clientKeyAllocations, nextClientKey++, key);
+        dictionaryVersion = Math.incrementExact(dictionaryVersion);
         return key;
     }
 
@@ -118,6 +125,7 @@ public final class RuntimeIdentityRegistry implements RuntimeCommitPatch.Identit
         }
         clientKeys.put(identity, key);
         trackAllocation(clientAllocationKeys, clientKeyAllocations, nextClientKey++, key);
+        dictionaryVersion = Math.incrementExact(dictionaryVersion);
         return new PreparedClientKey(key, true);
     }
 
@@ -181,6 +189,7 @@ public final class RuntimeIdentityRegistry implements RuntimeCommitPatch.Identit
         }
         positionKeys.put(identity, key);
         trackAllocation(positionAllocationKeys, positionKeyAllocations, nextPositionKey++, key);
+        dictionaryVersion = Math.incrementExact(dictionaryVersion);
         return key;
     }
 
@@ -247,6 +256,10 @@ public final class RuntimeIdentityRegistry implements RuntimeCommitPatch.Identit
         return identity;
     }
 
+    public long dictionaryVersion() {
+        return dictionaryVersion;
+    }
+
     public void releasePositionKey(long positionKey) {
         assertOwner();
         PositionIdentity identity = positions.remove(positionKey);
@@ -271,6 +284,17 @@ public final class RuntimeIdentityRegistry implements RuntimeCommitPatch.Identit
         }
         long key = hash & Long.MAX_VALUE;
         return key == 0 ? 1 : key;
+    }
+
+    private static String[] storeIdentity(String[] values, int id, String value) {
+        String[] target = values;
+        if (id >= target.length) {
+            int capacity = target.length;
+            while (capacity <= id) capacity = Math.multiplyExact(capacity, 2);
+            target = java.util.Arrays.copyOf(target, capacity);
+        }
+        target[id] = value;
+        return target;
     }
 
     private static void trackAllocation(Map<Long, Long> allocations, Map<Long, Long> allocationsByKey,
@@ -298,11 +322,11 @@ public final class RuntimeIdentityRegistry implements RuntimeCommitPatch.Identit
         RuntimeIdentityRegistry registry = new RuntimeIdentityRegistry();
         snapshot.assetIds().forEach((name, id) -> {
             registry.assetIds.put(name, id);
-            registry.assets.put(id, name);
+            registry.assets = storeIdentity(registry.assets, id, name);
         });
         snapshot.symbolIds().forEach((name, id) -> {
             registry.symbolIds.put(name, id);
-            registry.symbols.put(id, name);
+            registry.symbols = storeIdentity(registry.symbols, id, name);
         });
         snapshot.clientKeys().forEach((identity, key) -> {
             registry.clientKeys.put(identity, key);
@@ -316,6 +340,9 @@ public final class RuntimeIdentityRegistry implements RuntimeCommitPatch.Identit
         registry.nextSymbolId = snapshot.nextSymbolId();
         registry.nextClientKey = snapshot.nextClientKey();
         registry.nextPositionKey = snapshot.nextPositionKey();
+        registry.dictionaryVersion = Math.addExact(
+                Math.addExact(snapshot.nextAssetId(), snapshot.nextSymbolId()),
+                Math.addExact(snapshot.nextClientKey() - 1, snapshot.nextPositionKey() - 1));
         return registry;
     }
 

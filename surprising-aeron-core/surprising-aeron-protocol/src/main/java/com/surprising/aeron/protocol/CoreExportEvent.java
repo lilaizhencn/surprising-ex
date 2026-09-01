@@ -44,6 +44,12 @@ public record CoreExportEvent(
         CoreSettlementProgressView settlementProgress,
         Tombstones tombstones) {
 
+    private static final ThreadLocal<long[]> LONG_KEY_SCRATCH =
+            ThreadLocal.withInitial(() -> new long[16]);
+    private static final ThreadLocal<String[]> TEXT_KEY_SCRATCH =
+            ThreadLocal.withInitial(() -> new String[16]);
+    private static final int MAX_RETAINED_VALIDATION_KEYS = 4_096;
+
     public CoreExportEvent {
         if (exportSequence <= 0 || appliedCommandCount <= 0 || commandId == null || commandType == null
                 || commandType.kind() != WireMessageKind.COMMAND || commandStatus == null || resultCode == null
@@ -212,14 +218,23 @@ public record CoreExportEvent(
             }
             return;
         }
-        long[] keys = new long[values.size()];
-        for (int index = 0; index < keys.length; index++) {
+        long[] keys = LONG_KEY_SCRATCH.get();
+        if (keys.length < values.size()) {
+            int capacity = Math.min(MAX_RETAINED_VALIDATION_KEYS, Math.max(keys.length, values.size()));
+            while (capacity < values.size() && capacity < MAX_RETAINED_VALIDATION_KEYS) {
+                capacity = Math.min(MAX_RETAINED_VALIDATION_KEYS, Math.multiplyExact(capacity, 2));
+            }
+            if (values.size() > MAX_RETAINED_VALIDATION_KEYS) capacity = values.size();
+            keys = new long[capacity];
+            if (capacity <= MAX_RETAINED_VALIDATION_KEYS) LONG_KEY_SCRATCH.set(keys);
+        }
+        for (int index = 0; index < values.size(); index++) {
             T value = values.get(index);
             if (value == null) throw new IllegalArgumentException("duplicate or null " + description);
             keys[index] = key.applyAsLong(value);
         }
-        java.util.Arrays.sort(keys);
-        for (int index = 1; index < keys.length; index++) {
+        java.util.Arrays.sort(keys, 0, values.size());
+        for (int index = 1; index < values.size(); index++) {
             if (keys[index - 1] == keys[index]) {
                 throw new IllegalArgumentException("duplicate or null " + description);
             }
@@ -234,19 +249,29 @@ public record CoreExportEvent(
             }
             return;
         }
-        String[] keys = new String[values.size()];
-        for (int index = 0; index < keys.length; index++) {
+        String[] keys = TEXT_KEY_SCRATCH.get();
+        if (keys.length < values.size()) {
+            int capacity = Math.min(MAX_RETAINED_VALIDATION_KEYS, Math.max(keys.length, values.size()));
+            while (capacity < values.size() && capacity < MAX_RETAINED_VALIDATION_KEYS) {
+                capacity = Math.min(MAX_RETAINED_VALIDATION_KEYS, Math.multiplyExact(capacity, 2));
+            }
+            if (values.size() > MAX_RETAINED_VALIDATION_KEYS) capacity = values.size();
+            keys = new String[capacity];
+            if (capacity <= MAX_RETAINED_VALIDATION_KEYS) TEXT_KEY_SCRATCH.set(keys);
+        }
+        for (int index = 0; index < values.size(); index++) {
             T value = values.get(index);
             if (value == null) throw new IllegalArgumentException("duplicate or null " + description);
             keys[index] = key.apply(value);
             if (keys[index] == null) throw new IllegalArgumentException("duplicate or null " + description);
         }
-        java.util.Arrays.sort(keys);
-        for (int index = 1; index < keys.length; index++) {
+        java.util.Arrays.sort(keys, 0, values.size());
+        for (int index = 1; index < values.size(); index++) {
             if (keys[index - 1].equals(keys[index])) {
                 throw new IllegalArgumentException("duplicate or null " + description);
             }
         }
+        java.util.Arrays.fill(keys, 0, values.size(), null);
     }
 
     private static void requireSingleProductLine(List<CoreUserStateView> users, List<CoreOrderStateView> orders,
@@ -275,33 +300,100 @@ public record CoreExportEvent(
             List<CoreTreasuryAssetView> treasury,
             List<CoreTriggerOrderStateView> triggers,
             Tombstones tombstones) {
-        java.util.HashSet<Long> deletedUsers = new java.util.HashSet<>(tombstones.userIds());
-        java.util.HashSet<Long> deletedOrders = new java.util.HashSet<>(tombstones.orderIds());
-        java.util.HashSet<Long> deletedLiquidations = new java.util.HashSet<>(tombstones.liquidationIds());
-        java.util.HashSet<Long> deletedTriggers = new java.util.HashSet<>(tombstones.triggerOrderIds());
-        java.util.HashSet<String> deletedTreasury = new java.util.HashSet<>(tombstones.treasuryAssets());
-        if (users.stream().anyMatch(user -> deletedUsers.contains(user.userId()))
-                || orders.stream().anyMatch(order -> deletedOrders.contains(order.orderId()))
-                || liquidations.stream().anyMatch(value -> deletedLiquidations.contains(value.liquidationId()))
-                || triggers.stream().anyMatch(value -> deletedTriggers.contains(value.triggerOrderId()))
-                || treasury.stream().anyMatch(value -> deletedTreasury.contains(value.asset()))) {
+        for (CoreUserStateView user : users) if (containsLong(tombstones.userIds(), user.userId())) {
             throw new IllegalArgumentException("Core Fact delete/recreate keys are unresolved");
         }
-        java.util.HashSet<UserAssetKey> deletedBalances = new java.util.HashSet<>(tombstones.balances());
-        java.util.HashSet<UserOrderKey> deletedReservations = new java.util.HashSet<>(tombstones.reservations());
-        java.util.HashSet<UserPositionKey> deletedPositions = new java.util.HashSet<>(tombstones.positions());
-        java.util.HashSet<UserLeverageKey> deletedLeverages = new java.util.HashSet<>(tombstones.leverages());
-        for (CoreUserStateView user : users) {
-            if (user.balances().stream().anyMatch(value -> deletedBalances.contains(
-                    new UserAssetKey(user.userId(), value.asset())))
-                    || user.reservations().stream().anyMatch(value -> deletedReservations.contains(
-                    new UserOrderKey(user.userId(), value.orderId())))
-                    || user.positions().stream().anyMatch(value -> deletedPositions.contains(
-                    new UserPositionKey(user.userId(), value.symbol(), value.positionSide())))
-                    || user.leverages().stream().anyMatch(value -> deletedLeverages.contains(
-                    new UserLeverageKey(user.userId(), value.symbol(), value.marginMode())))) {
-                throw new IllegalArgumentException("Core Fact nested delete/recreate keys are unresolved");
+        for (CoreOrderStateView order : orders) if (containsLong(tombstones.orderIds(), order.orderId())) {
+            throw new IllegalArgumentException("Core Fact delete/recreate keys are unresolved");
+        }
+        for (CoreLiquidationView value : liquidations) {
+            if (containsLong(tombstones.liquidationIds(), value.liquidationId())) {
+                throw new IllegalArgumentException("Core Fact delete/recreate keys are unresolved");
             }
+        }
+        for (CoreTriggerOrderStateView value : triggers) {
+            if (containsLong(tombstones.triggerOrderIds(), value.triggerOrderId())) {
+                throw new IllegalArgumentException("Core Fact delete/recreate keys are unresolved");
+            }
+        }
+        for (CoreTreasuryAssetView value : treasury) {
+            if (java.util.Collections.binarySearch(tombstones.treasuryAssets(), value.asset()) >= 0) {
+                throw new IllegalArgumentException("Core Fact delete/recreate keys are unresolved");
+            }
+        }
+        for (CoreUserStateView user : users) {
+            for (CoreBalanceView value : user.balances())
+                requireNotDeletedBalance(tombstones.balances(), user.userId(), value.asset());
+            for (CoreReservationView value : user.reservations())
+                requireNotDeletedReservation(tombstones.reservations(), user.userId(), value.orderId());
+            for (CorePositionView value : user.positions())
+                requireNotDeletedPosition(tombstones.positions(), user.userId(), value.symbol(), value.positionSide());
+            for (CoreLeverageView value : user.leverages())
+                requireNotDeletedLeverage(tombstones.leverages(), user.userId(), value.symbol(), value.marginMode());
+        }
+    }
+
+    private static boolean containsLong(List<Long> values, long expected) {
+        int low = 0;
+        int high = values.size() - 1;
+        while (low <= high) {
+            int middle = (low + high) >>> 1;
+            int comparison = Long.compare(values.get(middle), expected);
+            if (comparison == 0) return true;
+            if (comparison < 0) low = middle + 1; else high = middle - 1;
+        }
+        return false;
+    }
+
+    private static void requireNotDeletedBalance(List<UserAssetKey> values, long userId, String asset) {
+        int low = 0, high = values.size() - 1;
+        while (low <= high) {
+            int middle = (low + high) >>> 1;
+            UserAssetKey value = values.get(middle);
+            int comparison = Long.compare(value.userId(), userId);
+            if (comparison == 0) comparison = value.asset().compareTo(asset);
+            if (comparison == 0) throw new IllegalArgumentException("Core Fact nested delete/recreate keys are unresolved");
+            if (comparison < 0) low = middle + 1; else high = middle - 1;
+        }
+    }
+
+    private static void requireNotDeletedReservation(List<UserOrderKey> values, long userId, long orderId) {
+        int low = 0, high = values.size() - 1;
+        while (low <= high) {
+            int middle = (low + high) >>> 1;
+            UserOrderKey value = values.get(middle);
+            int comparison = Long.compare(value.userId(), userId);
+            if (comparison == 0) comparison = Long.compare(value.orderId(), orderId);
+            if (comparison == 0) throw new IllegalArgumentException("Core Fact nested delete/recreate keys are unresolved");
+            if (comparison < 0) low = middle + 1; else high = middle - 1;
+        }
+    }
+
+    private static void requireNotDeletedPosition(List<UserPositionKey> values, long userId, String symbol,
+                                                   CorePositionSide side) {
+        int low = 0, high = values.size() - 1;
+        while (low <= high) {
+            int middle = (low + high) >>> 1;
+            UserPositionKey value = values.get(middle);
+            int comparison = Long.compare(value.userId(), userId);
+            if (comparison == 0) comparison = value.symbol().compareTo(symbol);
+            if (comparison == 0) comparison = value.positionSide().compareTo(side);
+            if (comparison == 0) throw new IllegalArgumentException("Core Fact nested delete/recreate keys are unresolved");
+            if (comparison < 0) low = middle + 1; else high = middle - 1;
+        }
+    }
+
+    private static void requireNotDeletedLeverage(List<UserLeverageKey> values, long userId, String symbol,
+                                                   CoreMarginMode mode) {
+        int low = 0, high = values.size() - 1;
+        while (low <= high) {
+            int middle = (low + high) >>> 1;
+            UserLeverageKey value = values.get(middle);
+            int comparison = Long.compare(value.userId(), userId);
+            if (comparison == 0) comparison = value.symbol().compareTo(symbol);
+            if (comparison == 0) comparison = value.marginMode().compareTo(mode);
+            if (comparison == 0) throw new IllegalArgumentException("Core Fact nested delete/recreate keys are unresolved");
+            if (comparison < 0) low = middle + 1; else high = middle - 1;
         }
     }
 

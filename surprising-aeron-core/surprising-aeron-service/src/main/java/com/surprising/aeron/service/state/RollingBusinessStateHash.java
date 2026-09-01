@@ -372,39 +372,25 @@ public final class RollingBusinessStateHash {
                 validateCachedBefore("leverages", change.key(), change.before(), value -> stable(value),
                         ignored -> true);
                 int previousOwner = contributionOwner("leverages", change.key(), group.laneId());
-                staged.add(() -> updateCachedValue(group.laneId(), "leverages", leverages,
-                                change.key(), change.after(), value -> stable(value), ignored -> true),
-                        () -> updateCachedValue(previousOwner, "leverages", leverages,
-                                change.key(), change.before(), value -> stable(value), ignored -> true));
+                staged.addTyped(BusinessPatchStage.LEVERAGE, group.laneId(), previousOwner, null, change);
             }
             for (RuntimeCommitPatch.AlgoOrderChange change : group.algoOrders()) {
                 validateCachedBefore("algo", change.algoOrderId(), change.before(), value -> stable(value),
                         value -> !value.terminal());
                 int previousOwner = contributionOwner("algo", change.algoOrderId(), group.laneId());
-                staged.add(() -> updateCachedValue(group.laneId(), "algo", algoOrders,
-                                change.algoOrderId(), change.after(), value -> stable(value), value -> !value.terminal()),
-                        () -> updateCachedValue(previousOwner, "algo", algoOrders,
-                                change.algoOrderId(), change.before(), value -> stable(value), value -> !value.terminal()));
+                staged.addTyped(BusinessPatchStage.ALGO, group.laneId(), previousOwner, null, change);
             }
             for (RuntimeCommitPatch.TimerChange change : group.timers()) {
                 validateCachedBefore("timers", change.key(), change.before(), value -> stable(value),
                         ignored -> true);
                 int previousOwner = contributionOwner("timers", change.key(), group.laneId());
-                staged.add(() -> updateCachedValue(group.laneId(), "timers", timers,
-                                change.key(), change.after(), value -> stable(value), ignored -> true),
-                        () -> updateCachedValue(previousOwner, "timers", timers,
-                                change.key(), change.before(), value -> stable(value), ignored -> true));
+                staged.addTyped(BusinessPatchStage.TIMER, group.laneId(), previousOwner, null, change);
             }
             for (RuntimeCommitPatch.TriggerOrderChange change : group.triggerOrders()) {
                 validateCachedBefore("triggers", change.triggerOrderId(), change.before(), value -> stable(value),
                         value -> value.status().open());
                 int previousOwner = contributionOwner("triggers", change.triggerOrderId(), group.laneId());
-                staged.add(() -> updateCachedValue(group.laneId(), "triggers", triggers,
-                        change.triggerOrderId(), change.after(), value -> stable(value),
-                                value -> value.status().open()),
-                        () -> updateCachedValue(previousOwner, "triggers", triggers,
-                                change.triggerOrderId(), change.before(), value -> stable(value),
-                                value -> value.status().open()));
+                staged.addTyped(BusinessPatchStage.TRIGGER, group.laneId(), previousOwner, null, change);
             }
             for (RuntimeCommitPatch.RiskSnapshotChange change : group.riskSnapshots()) {
                 RuntimeIdentityRegistry.PositionIdentity identity = identities.positionIdentity(change.riskKey());
@@ -413,21 +399,15 @@ public final class RollingBusinessStateHash {
                         change.before(), this::stableRiskSnapshot, ignored -> true);
                 PositionContributionKey key = new PositionContributionKey(identity.userId(), identity.positionKey());
                 int previousOwner = contributionOwner("snapshots", key, group.laneId());
-                staged.add(() -> updateRuntimeContribution(group.laneId(), "snapshots", riskSnapshots,
-                                key, change.after(), this::stableRiskSnapshot, ignored -> true),
-                        () -> updateRuntimeContribution(previousOwner, "snapshots", riskSnapshots,
-                                key, change.before(), this::stableRiskSnapshot, ignored -> true));
+                staged.addTyped(BusinessPatchStage.RISK_SNAPSHOT,
+                        group.laneId(), previousOwner, key, change);
             }
             for (RuntimeCommitPatch.LiquidationChange change : group.liquidations()) {
                 validateCachedBefore("liquidations", change.liquidationId(), change.before(),
                         this::stableLiquidation, value -> !runtimeTerminal(value));
                 int previousOwner = contributionOwner("liquidations", change.liquidationId(), group.laneId());
-                staged.add(() -> updateRuntimeContribution(group.laneId(), "liquidations", liquidations,
-                        change.liquidationId(), change.after(), this::stableLiquidation,
-                                value -> !runtimeTerminal(value)),
-                        () -> updateRuntimeContribution(previousOwner, "liquidations", liquidations,
-                                change.liquidationId(), change.before(), this::stableLiquidation,
-                                value -> !runtimeTerminal(value)));
+                staged.addTyped(BusinessPatchStage.LIQUIDATION,
+                        group.laneId(), previousOwner, null, change);
             }
             staged.addUserGroup(userStage);
         }
@@ -435,33 +415,28 @@ public final class RollingBusinessStateHash {
         for (RuntimeCommitPatch.InstrumentChange change : global.instruments()) {
             validateCachedBefore("instruments", change.symbol(), change.before(), value -> stable(value),
                     ignored -> true);
-            staged.add(() -> updateCachedValue(Integer.MAX_VALUE, "instruments", instruments,
-                            change.symbol(), change.after(), value -> stable(value), ignored -> true),
-                    () -> updateCachedValue(Integer.MAX_VALUE, "instruments", instruments,
-                            change.symbol(), change.before(), value -> stable(value), ignored -> true));
+            staged.addTyped(BusinessPatchStage.INSTRUMENT,
+                    Integer.MAX_VALUE, Integer.MAX_VALUE, null, change);
         }
         for (RuntimeCommitPatch.MarkPriceChange change : patch.globalOwnerGroup().markPrices()) {
             String symbol = identities.symbol(change.symbolId());
             validateCachedBefore("marks", symbol, change.before(), this::stableMark, ignored -> true);
-            staged.add(() -> updateRuntimeContribution(Integer.MAX_VALUE, "marks", markPrices,
-                            symbol, change.after(), this::stableMark, ignored -> true),
-                    () -> updateRuntimeContribution(Integer.MAX_VALUE, "marks", markPrices,
-                            symbol, change.before(), this::stableMark, ignored -> true));
+            staged.addTyped(BusinessPatchStage.MARK,
+                    Integer.MAX_VALUE, Integer.MAX_VALUE, symbol, change);
         }
         for (RuntimeCommitPatch.RiskScanChange change : patch.globalOwnerGroup().riskScans()) {
             String symbol = identities.symbol(change.symbolId());
             validateCachedBefore("scans", symbol, change.before(), this::stableRiskScan, ignored -> true);
-            staged.add(() -> updateRuntimeContribution(Integer.MAX_VALUE, "scans", riskScans,
-                            symbol, change.after(), this::stableRiskScan, ignored -> true),
-                    () -> updateRuntimeContribution(Integer.MAX_VALUE, "scans", riskScans,
-                            symbol, change.before(), this::stableRiskScan, ignored -> true));
+            staged.addTyped(BusinessPatchStage.RISK_SCAN,
+                    Integer.MAX_VALUE, Integer.MAX_VALUE, symbol, change);
         }
         for (RuntimeCommitPatch.TreasuryAssetChange change : patch.globalOwnerGroup().treasuryAssets()) {
             identities.asset(change.assetId());
             if (!java.util.Objects.equals(runtimeTreasury.get(change.assetId()), change.before())) {
                 throw new IllegalArgumentException("business treasury before-value mismatch");
             }
-            staged.add(() -> updateTreasuryAsset(change, false), () -> updateTreasuryAsset(change, true));
+            staged.addTyped(BusinessPatchStage.TREASURY_ASSET,
+                    Integer.MAX_VALUE, Integer.MAX_VALUE, null, change);
         }
         for (RuntimeCommitPatch.TreasuryFundingChange change : global.treasuryFunding()) {
             String symbol = identities.symbol(change.symbolId());
@@ -471,7 +446,8 @@ public final class RollingBusinessStateHash {
                     value -> stable(value), ignored -> true);
             validateCachedBefore("fundingProgress", symbol, before == null ? null : before.progress(),
                     this::stableFundingProgress, ignored -> true);
-            staged.add(() -> updateTreasuryFunding(change, false), () -> updateTreasuryFunding(change, true));
+            staged.addTyped(BusinessPatchStage.TREASURY_FUNDING,
+                    Integer.MAX_VALUE, Integer.MAX_VALUE, null, change);
         }
         for (RuntimeCommitPatch.TreasuryLifecycleChange change : global.treasuryLifecycle()) {
             String symbol = identities.symbol(change.symbolId());
@@ -481,7 +457,8 @@ public final class RollingBusinessStateHash {
                     value -> stable(value), ignored -> true);
             validateCachedBefore("lifecycleProgress", symbol, before == null ? null : before.progress(),
                     this::stableLifecycleProgress, ignored -> true);
-            staged.add(() -> updateTreasuryLifecycle(change, false), () -> updateTreasuryLifecycle(change, true));
+            staged.addTyped(BusinessPatchStage.TREASURY_LIFECYCLE,
+                    Integer.MAX_VALUE, Integer.MAX_VALUE, null, change);
         }
         if (global.nextLiquidationId() != null
                 && global.nextLiquidationId().before() != nextLiquidationId) {
@@ -492,13 +469,14 @@ public final class RollingBusinessStateHash {
             throw new IllegalArgumentException("business risk-scan-control before-value mismatch");
         }
         if (global.nextLiquidationId() != null) {
-            staged.add(() -> nextLiquidationId = global.nextLiquidationId().after(),
-                    () -> nextLiquidationId = global.nextLiquidationId().before());
+            staged.addTyped(BusinessPatchStage.NEXT_LIQUIDATION_ID,
+                    Integer.MAX_VALUE, Integer.MAX_VALUE, null, global.nextLiquidationId());
         }
         if (global.riskScanControl() != null) {
             long after = stable(global.riskScanControl().after());
             long before = riskScanControlHash;
-            staged.add(() -> riskScanControlHash = after, () -> riskScanControlHash = before);
+            staged.addTyped(BusinessPatchStage.RISK_SCAN_CONTROL,
+                    Integer.MAX_VALUE, Integer.MAX_VALUE, before, after);
         }
         return staged;
     }
@@ -1178,30 +1156,45 @@ public final class RollingBusinessStateHash {
     }
 
     private final class BusinessPatchStage {
-        private static final byte GENERIC = 1;
-        private static final byte ORDER = 2;
-        private static final byte USER_GROUP = 3;
+        private static final byte ORDER = 1;
+        private static final byte USER_GROUP = 2;
+        private static final byte LEVERAGE = 3;
+        private static final byte ALGO = 4;
+        private static final byte TIMER = 5;
+        private static final byte TRIGGER = 6;
+        private static final byte RISK_SNAPSHOT = 7;
+        private static final byte LIQUIDATION = 8;
+        private static final byte INSTRUMENT = 9;
+        private static final byte MARK = 10;
+        private static final byte RISK_SCAN = 11;
+        private static final byte TREASURY_ASSET = 12;
+        private static final byte TREASURY_FUNDING = 13;
+        private static final byte TREASURY_LIFECYCLE = 14;
+        private static final byte NEXT_LIQUIDATION_ID = 15;
+        private static final byte RISK_SCAN_CONTROL = 16;
 
-        private final java.util.ArrayList<Runnable> operations = new java.util.ArrayList<>();
-        private final java.util.ArrayList<Runnable> rollbacks = new java.util.ArrayList<>();
         private byte[] operationTypes = new byte[16];
         private Object[] values = new Object[16];
+        private Object[] keys = new Object[16];
         private int[] owners = new int[16];
         private int[] rollbackOwners = new int[16];
         private boolean[] included = new boolean[16];
         private boolean[] rollbackIncluded = new boolean[16];
+        private int operationCount;
         private int appliedCount;
 
-        private void add(Runnable operation, Runnable rollback) {
+        private void addTyped(byte type, int owner, int rollbackOwner, Object key, Object value) {
             ensureCapacity();
-            operationTypes[operations.size()] = GENERIC;
-            operations.add(operation);
-            rollbacks.add(rollback);
+            operationTypes[operationCount] = type;
+            owners[operationCount] = owner;
+            rollbackOwners[operationCount] = rollbackOwner;
+            keys[operationCount] = key;
+            values[operationCount++] = value;
         }
 
         private void addOrder(int owner, RuntimeCommitPatch.OrderChange change, boolean include,
                               int rollbackOwner, boolean includeBefore) {
-            int index = operations.size();
+            int index = operationCount++;
             ensureCapacity();
             operationTypes[index] = ORDER;
             values[index] = change;
@@ -1209,25 +1202,21 @@ public final class RollingBusinessStateHash {
             rollbackOwners[index] = rollbackOwner;
             included[index] = include;
             rollbackIncluded[index] = includeBefore;
-            operations.add(null);
-            rollbacks.add(null);
         }
 
         private void addUserGroup(UserGroupUpdate update) {
-            int index = operations.size();
+            int index = operationCount++;
             ensureCapacity();
             operationTypes[index] = USER_GROUP;
             values[index] = update;
-            operations.add(null);
-            rollbacks.add(null);
         }
 
-        private int size() { return operations.size(); }
+        private int size() { return operationCount; }
 
         private long preview(java.util.function.LongSupplier value) {
             int applied = 0;
             try {
-                for (; applied < operations.size(); applied++) {
+                for (; applied < operationCount; applied++) {
                     apply(applied);
                 }
                 return value.getAsLong();
@@ -1240,7 +1229,7 @@ public final class RollingBusinessStateHash {
         private void apply() {
             int applied = 0;
             try {
-                for (int index = 0; index < operations.size(); index++) {
+                for (int index = 0; index < operationCount; index++) {
                     apply(index);
                     applied++;
                     if (index == failAfterStagedOperation) {
@@ -1263,29 +1252,126 @@ public final class RollingBusinessStateHash {
 
         private void apply(int index) {
             switch (operationTypes[index]) {
-                case GENERIC -> operations.get(index).run();
                 case ORDER -> updateOrder(owners[index],
                         (RuntimeCommitPatch.OrderChange) values[index], included[index], false);
                 case USER_GROUP -> ((UserGroupUpdate) values[index]).apply(false);
+                case LEVERAGE -> applyLeverage(index, false);
+                case ALGO -> applyAlgo(index, false);
+                case TIMER -> applyTimer(index, false);
+                case TRIGGER -> applyTrigger(index, false);
+                case RISK_SNAPSHOT -> applyRiskSnapshot(index, false);
+                case LIQUIDATION -> applyLiquidation(index, false);
+                case INSTRUMENT -> applyInstrument(index, false);
+                case MARK -> applyMark(index, false);
+                case RISK_SCAN -> applyRiskScan(index, false);
+                case TREASURY_ASSET -> updateTreasuryAsset(
+                        (RuntimeCommitPatch.TreasuryAssetChange) values[index], false);
+                case TREASURY_FUNDING -> updateTreasuryFunding(
+                        (RuntimeCommitPatch.TreasuryFundingChange) values[index], false);
+                case TREASURY_LIFECYCLE -> updateTreasuryLifecycle(
+                        (RuntimeCommitPatch.TreasuryLifecycleChange) values[index], false);
+                case NEXT_LIQUIDATION_ID -> nextLiquidationId =
+                        ((RuntimeCommitPatch.NextLiquidationIdChange) values[index]).after();
+                case RISK_SCAN_CONTROL -> riskScanControlHash = (long) values[index];
                 default -> throw new IllegalStateException("unknown staged business hash operation");
             }
         }
 
         private void rollback(int index) {
             switch (operationTypes[index]) {
-                case GENERIC -> rollbacks.get(index).run();
                 case ORDER -> updateOrder(rollbackOwners[index],
                         (RuntimeCommitPatch.OrderChange) values[index], rollbackIncluded[index], true);
                 case USER_GROUP -> ((UserGroupUpdate) values[index]).apply(true);
+                case LEVERAGE -> applyLeverage(index, true);
+                case ALGO -> applyAlgo(index, true);
+                case TIMER -> applyTimer(index, true);
+                case TRIGGER -> applyTrigger(index, true);
+                case RISK_SNAPSHOT -> applyRiskSnapshot(index, true);
+                case LIQUIDATION -> applyLiquidation(index, true);
+                case INSTRUMENT -> applyInstrument(index, true);
+                case MARK -> applyMark(index, true);
+                case RISK_SCAN -> applyRiskScan(index, true);
+                case TREASURY_ASSET -> updateTreasuryAsset(
+                        (RuntimeCommitPatch.TreasuryAssetChange) values[index], true);
+                case TREASURY_FUNDING -> updateTreasuryFunding(
+                        (RuntimeCommitPatch.TreasuryFundingChange) values[index], true);
+                case TREASURY_LIFECYCLE -> updateTreasuryLifecycle(
+                        (RuntimeCommitPatch.TreasuryLifecycleChange) values[index], true);
+                case NEXT_LIQUIDATION_ID -> nextLiquidationId =
+                        ((RuntimeCommitPatch.NextLiquidationIdChange) values[index]).before();
+                case RISK_SCAN_CONTROL -> riskScanControlHash = (long) keys[index];
                 default -> throw new IllegalStateException("unknown staged business hash rollback operation");
             }
         }
 
+        private int owner(int index, boolean reverse) {
+            return reverse ? rollbackOwners[index] : owners[index];
+        }
+
+        private void applyLeverage(int index, boolean reverse) {
+            RuntimeCommitPatch.LeverageChange change = (RuntimeCommitPatch.LeverageChange) values[index];
+            updateCachedValue(owner(index, reverse), "leverages", leverages, change.key(),
+                    reverse ? change.before() : change.after(), value -> stable(value), ignored -> true);
+        }
+
+        private void applyAlgo(int index, boolean reverse) {
+            RuntimeCommitPatch.AlgoOrderChange change = (RuntimeCommitPatch.AlgoOrderChange) values[index];
+            updateCachedValue(owner(index, reverse), "algo", algoOrders, change.algoOrderId(),
+                    reverse ? change.before() : change.after(), value -> stable(value), value -> !value.terminal());
+        }
+
+        private void applyTimer(int index, boolean reverse) {
+            RuntimeCommitPatch.TimerChange change = (RuntimeCommitPatch.TimerChange) values[index];
+            updateCachedValue(owner(index, reverse), "timers", timers, change.key(),
+                    reverse ? change.before() : change.after(), value -> stable(value), ignored -> true);
+        }
+
+        private void applyTrigger(int index, boolean reverse) {
+            RuntimeCommitPatch.TriggerOrderChange change = (RuntimeCommitPatch.TriggerOrderChange) values[index];
+            updateCachedValue(owner(index, reverse), "triggers", triggers, change.triggerOrderId(),
+                    reverse ? change.before() : change.after(), value -> stable(value), value -> value.status().open());
+        }
+
+        private void applyRiskSnapshot(int index, boolean reverse) {
+            RuntimeCommitPatch.RiskSnapshotChange change = (RuntimeCommitPatch.RiskSnapshotChange) values[index];
+            updateRuntimeContribution(owner(index, reverse), "snapshots", riskSnapshots,
+                    (PositionContributionKey) keys[index], reverse ? change.before() : change.after(),
+                    RollingBusinessStateHash.this::stableRiskSnapshot, ignored -> true);
+        }
+
+        private void applyLiquidation(int index, boolean reverse) {
+            RuntimeCommitPatch.LiquidationChange change = (RuntimeCommitPatch.LiquidationChange) values[index];
+            updateRuntimeContribution(owner(index, reverse), "liquidations", liquidations,
+                    change.liquidationId(), reverse ? change.before() : change.after(),
+                    RollingBusinessStateHash.this::stableLiquidation, value -> !runtimeTerminal(value));
+        }
+
+        private void applyInstrument(int index, boolean reverse) {
+            RuntimeCommitPatch.InstrumentChange change = (RuntimeCommitPatch.InstrumentChange) values[index];
+            updateCachedValue(Integer.MAX_VALUE, "instruments", instruments, change.symbol(),
+                    reverse ? change.before() : change.after(), value -> stable(value), ignored -> true);
+        }
+
+        private void applyMark(int index, boolean reverse) {
+            RuntimeCommitPatch.MarkPriceChange change = (RuntimeCommitPatch.MarkPriceChange) values[index];
+            updateRuntimeContribution(Integer.MAX_VALUE, "marks", markPrices, (String) keys[index],
+                    reverse ? change.before() : change.after(), RollingBusinessStateHash.this::stableMark,
+                    ignored -> true);
+        }
+
+        private void applyRiskScan(int index, boolean reverse) {
+            RuntimeCommitPatch.RiskScanChange change = (RuntimeCommitPatch.RiskScanChange) values[index];
+            updateRuntimeContribution(Integer.MAX_VALUE, "scans", riskScans, (String) keys[index],
+                    reverse ? change.before() : change.after(), RollingBusinessStateHash.this::stableRiskScan,
+                    ignored -> true);
+        }
+
         private void ensureCapacity() {
-            if (operations.size() < operationTypes.length) return;
+            if (operationCount < operationTypes.length) return;
             int capacity = Math.multiplyExact(operationTypes.length, 2);
             operationTypes = java.util.Arrays.copyOf(operationTypes, capacity);
             values = java.util.Arrays.copyOf(values, capacity);
+            keys = java.util.Arrays.copyOf(keys, capacity);
             owners = java.util.Arrays.copyOf(owners, capacity);
             rollbackOwners = java.util.Arrays.copyOf(rollbackOwners, capacity);
             included = java.util.Arrays.copyOf(included, capacity);
@@ -1445,12 +1531,15 @@ public final class RollingBusinessStateHash {
         private final Aggregate balances = new Aggregate();
         private final Aggregate reservations = new Aggregate();
         private final Aggregate positions = new Aggregate();
-        private final org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap balanceContributions =
+        private org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap balanceContributions =
                 new org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap();
-        private final org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap reservationContributions =
+        private org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap reservationContributions =
                 new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap();
-        private final org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap positionContributions =
+        private org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap positionContributions =
                 new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap();
+        private boolean balancesShared;
+        private boolean reservationsShared;
+        private boolean positionsShared;
 
         private UserHash(UserRuntime user) {
             productLine = user.productLine().ordinal();
@@ -1468,9 +1557,12 @@ public final class RollingBusinessStateHash {
             balances.copyFrom(source.balances);
             reservations.copyFrom(source.reservations);
             positions.copyFrom(source.positions);
-            balanceContributions.putAll(source.balanceContributions);
-            reservationContributions.putAll(source.reservationContributions);
-            positionContributions.putAll(source.positionContributions);
+            balanceContributions = source.balanceContributions;
+            reservationContributions = source.reservationContributions;
+            positionContributions = source.positionContributions;
+            balancesShared = true;
+            reservationsShared = true;
+            positionsShared = true;
         }
 
         private UserHash copy() { return new UserHash(this); }
@@ -1512,6 +1604,7 @@ public final class RollingBusinessStateHash {
         private void updateBalance(RuntimeCommitPatch.BalanceChange change,
                                    RuntimeIdentityRegistry identities, boolean reverse) {
             int assetId = change.key().assetId();
+            ensureBalancesOwned();
             if (balanceContributions.containsKey(assetId)) {
                 long previous = balanceContributions.get(assetId);
                 balanceContributions.removeKey(assetId);
@@ -1535,6 +1628,7 @@ public final class RollingBusinessStateHash {
             boolean includeCurrent = current != null && current.userId() == ownerId
                     && current.reservedUnits() > 0 && !pendingCurrent;
             if (!hadPrevious && !includeCurrent) return;
+            ensureReservationsOwned();
             if (hadPrevious) {
                 reservationContributions.remove(change.orderId());
                 reservations.remove(previous);
@@ -1552,6 +1646,7 @@ public final class RollingBusinessStateHash {
             long previous = hadPrevious ? positionContributions.get(change.positionKey()) : 0;
             PositionRuntime current = reverse ? change.before() : change.after();
             if (!hadPrevious && (current == null || current.userId() != ownerId)) return;
+            ensurePositionsOwned();
             if (hadPrevious) {
                 positionContributions.remove(change.positionKey());
                 positions.remove(previous);
@@ -1574,6 +1669,36 @@ public final class RollingBusinessStateHash {
 
         private Long positionContribution(long positionKey) {
             return positionContributions.containsKey(positionKey) ? positionContributions.get(positionKey) : null;
+        }
+
+        private void ensureBalancesOwned() {
+            if (!balancesShared) return;
+            org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap copy =
+                    new org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap(
+                            Math.max(1, balanceContributions.size()));
+            copy.putAll(balanceContributions);
+            balanceContributions = copy;
+            balancesShared = false;
+        }
+
+        private void ensureReservationsOwned() {
+            if (!reservationsShared) return;
+            org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap copy =
+                    new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap(
+                            Math.max(1, reservationContributions.size()));
+            copy.putAll(reservationContributions);
+            reservationContributions = copy;
+            reservationsShared = false;
+        }
+
+        private void ensurePositionsOwned() {
+            if (!positionsShared) return;
+            org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap copy =
+                    new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap(
+                            Math.max(1, positionContributions.size()));
+            copy.putAll(positionContributions);
+            positionContributions = copy;
+            positionsShared = false;
         }
 
         private long value() {

@@ -248,6 +248,13 @@ reservation 和 matcher 提交。只读 preflight 只服务显式 dry-run/test A
 - Core Fact 的 typed fragment 在 owner 已 sealed 的 patch chain 上离线合并；`FactIdentitySlice` 提供精确用户/订单/持仓/资产
   identity，`FactBudget` 在 mutation 前预留 chain node、item 和 byte 上限。off-owner encoder 只消费这些 typed 值，不能回读
   Runtime、冻结 `TradingCoreState` 或创建 fallback fact。
+- owner commit 的非资金业务状态使用 typed opcode journal，不捕获逐变更 closure；用户 balance/reservation/position hash
+  分域 copy-on-write，未变分域不复制。稳定 asset/symbol identity 由版本化 append-only registry 发布，patch 只保存字典版本和
+  本次可释放 client/position identity；Core Fact 继续保存该版本对应的 registry 引用，恢复时版本与游标一并重建。
+- Account Lane 只把 order/reservation/user/position 的 primitive dirty key 写入各自 lane journal；Sequencer 在 lane 完成边界按
+  固定 lane 顺序刷新到 owner-only primitive published map，不使用跨 lane `ConcurrentHashMap`。projection 直接消费 sealed patch
+  的 canonical sorted list 并做二分定位，不再构造第二层 user/map/set materialization；Core Fact tombstone 冲突校验使用有界
+  可复用 scratch 与二分查找，幂等账本缓存 command-bound digest 和 retention weight。
 - `USER_STATE`、`ORDER_STATE`、client-order、活动订单、Treasury、风险、ADL、清算工作和生命周期进度查询都读取 Runtime 或其 ID 索引；
 - 产品线划转的扣款、入账和完成都在 owner thread 内执行纯内存命令；源 Runtime 使用有界 pending 索引支持前向恢复，
   不执行数据库、Kafka、HTTP、锁等待或 Future 等待。

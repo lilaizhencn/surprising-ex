@@ -58,10 +58,11 @@ public final class TradingRuntimeState implements AutoCloseable {
     private final LongLongHashMap orderLaneIds = new LongLongHashMap();
     private final LongLongHashMap reservationLaneIds = new LongLongHashMap();
     private final LongLongHashMap positionLaneIds = new LongLongHashMap();
-    private final ConcurrentHashMap<Long, UserRuntime> publishedUsers = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<Long, OrderRuntime> publishedOrders = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<Long, ReservationRuntime> publishedReservations = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<Long, PositionRuntime> publishedPositions = new ConcurrentHashMap<>();
+    private final LongObjectHashMap<UserRuntime> publishedUsers = new LongObjectHashMap<>();
+    private final LongObjectHashMap<OrderRuntime> publishedOrders = new LongObjectHashMap<>();
+    private final LongObjectHashMap<ReservationRuntime> publishedReservations = new LongObjectHashMap<>();
+    private final LongObjectHashMap<PositionRuntime> publishedPositions = new LongObjectHashMap<>();
+    private final PublishedLaneChanges[] publishedLaneChanges;
     private int totalPendingReservations;
     private long nextLiquidationId = 1;
     private CoreRiskScanControlView riskScanControl = CoreRiskState.defaultScanControl();
@@ -84,10 +85,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     private final LongHashSet changedFeePolicies = new LongHashSet();
     private final LongObjectHashMap<UserRuntime>[] patchUsersBeforeByLane;
     private final LaneBalancePatches[] patchBalancesBeforeByLane;
-    private ConcurrentHashMap<Long, PatchReservationBefore> patchReservationsBefore =
-            new ConcurrentHashMap<>();
-    private ConcurrentHashMap<Long, PatchOrderBefore> patchOrdersBefore =
-            new ConcurrentHashMap<>();
+    private final LongObjectHashMap<PatchReservationBefore>[] patchReservationsBeforeByLane;
+    private final LongObjectHashMap<PatchOrderBefore>[] patchOrdersBeforeByLane;
     private final RuntimeCommitPatch.Builder activePatchBuilder = RuntimeCommitPatch.builder(productLine);
     private boolean orderBatchMutationScope;
     private ConcurrentHashMap<Long, PatchBefore<LiquidationRuntime>> patchLiquidationsBefore =
@@ -133,6 +132,15 @@ public final class TradingRuntimeState implements AutoCloseable {
                         topology.accountLaneCount()];
         this.patchUsersBeforeByLane = userPatches;
         this.patchBalancesBeforeByLane = new LaneBalancePatches[topology.accountLaneCount()];
+        @SuppressWarnings("unchecked")
+        LongObjectHashMap<PatchReservationBefore>[] reservationPatches =
+                (LongObjectHashMap<PatchReservationBefore>[]) new LongObjectHashMap<?>[topology.accountLaneCount()];
+        this.patchReservationsBeforeByLane = reservationPatches;
+        @SuppressWarnings("unchecked")
+        LongObjectHashMap<PatchOrderBefore>[] orderPatches =
+                (LongObjectHashMap<PatchOrderBefore>[]) new LongObjectHashMap<?>[topology.accountLaneCount()];
+        this.patchOrdersBeforeByLane = orderPatches;
+        this.publishedLaneChanges = new PublishedLaneChanges[topology.accountLaneCount()];
         org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] routedUsers =
                 new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[topology.accountLaneCount()];
         this.laneUserScratch = routedUsers;
@@ -151,6 +159,9 @@ public final class TradingRuntimeState implements AutoCloseable {
             laneUserScratch[laneId] = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList(4);
             patchUsersBeforeByLane[laneId] = new LongObjectHashMap<>();
             patchBalancesBeforeByLane[laneId] = new LaneBalancePatches();
+            patchReservationsBeforeByLane[laneId] = new LongObjectHashMap<>();
+            patchOrdersBeforeByLane[laneId] = new LongObjectHashMap<>();
+            publishedLaneChanges[laneId] = new PublishedLaneChanges();
         }
     }
 
@@ -271,6 +282,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             return operation.apply(lane);
         } finally {
             laneCommandScope.remove();
+            if (Thread.currentThread() == owner) flushPublishedChanges(lane.laneId());
         }
     }
 
@@ -399,7 +411,10 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
         }
         for (int laneId = 0; laneId < selected.length; laneId++) {
-            if (selected[laneId]) accountLanes[laneId].bindOwner();
+            if (selected[laneId]) {
+                accountLanes[laneId].bindOwner();
+                flushPublishedChanges(laneId);
+            }
         }
     }
 
@@ -454,6 +469,94 @@ public final class TradingRuntimeState implements AutoCloseable {
         LongObjectHashMap<LongObjectHashMap<Long>> copy = new LongObjectHashMap<>(index.size());
         index.forEachKeyValue((userId, values) -> copy.put(userId, new LongObjectHashMap<>(values)));
         return copy;
+    }
+
+    private void publishUser(long userId, UserRuntime value) {
+        AccountLaneState scoped = laneCommandScope.get();
+        if (scoped == null) putOrRemove(publishedUsers, userId, value);
+        else publishedLaneChanges[scoped.laneId()].putUser(userId, value);
+    }
+
+    private void publishOrder(long orderId, OrderRuntime value) {
+        AccountLaneState scoped = laneCommandScope.get();
+        if (scoped == null) putOrRemove(publishedOrders, orderId, value);
+        else publishedLaneChanges[scoped.laneId()].putOrder(orderId, value);
+    }
+
+    private void publishReservation(long orderId, ReservationRuntime value) {
+        AccountLaneState scoped = laneCommandScope.get();
+        if (scoped == null) putOrRemove(publishedReservations, orderId, value);
+        else publishedLaneChanges[scoped.laneId()].putReservation(orderId, value);
+    }
+
+    private void publishPosition(long positionKey, PositionRuntime value) {
+        AccountLaneState scoped = laneCommandScope.get();
+        if (scoped == null) putOrRemove(publishedPositions, positionKey, value);
+        else publishedLaneChanges[scoped.laneId()].putPosition(positionKey, value);
+    }
+
+    private void flushPublishedChanges(int laneId) {
+        publishedLaneChanges[laneId].drainTo(
+                publishedUsers, publishedOrders, publishedReservations, publishedPositions);
+    }
+
+    private static <V> void putOrRemove(LongObjectHashMap<V> values, long key, V value) {
+        if (value == null) values.remove(key); else values.put(key, value);
+    }
+
+    private static final class PublishedLaneChanges {
+        private final LongObjectHashMap<UserRuntime> users = new LongObjectHashMap<>();
+        private final LongHashSet removedUsers = new LongHashSet();
+        private final LongObjectHashMap<OrderRuntime> orders = new LongObjectHashMap<>();
+        private final LongHashSet removedOrders = new LongHashSet();
+        private final LongObjectHashMap<ReservationRuntime> reservations = new LongObjectHashMap<>();
+        private final LongHashSet removedReservations = new LongHashSet();
+        private final LongObjectHashMap<PositionRuntime> positions = new LongObjectHashMap<>();
+        private final LongHashSet removedPositions = new LongHashSet();
+
+        private void putUser(long key, UserRuntime value) {
+            update(users, removedUsers, key, value);
+        }
+
+        private void putOrder(long key, OrderRuntime value) {
+            update(orders, removedOrders, key, value);
+        }
+
+        private void putReservation(long key, ReservationRuntime value) {
+            update(reservations, removedReservations, key, value);
+        }
+
+        private void putPosition(long key, PositionRuntime value) {
+            update(positions, removedPositions, key, value);
+        }
+
+        private void drainTo(LongObjectHashMap<UserRuntime> targetUsers,
+                             LongObjectHashMap<OrderRuntime> targetOrders,
+                             LongObjectHashMap<ReservationRuntime> targetReservations,
+                             LongObjectHashMap<PositionRuntime> targetPositions) {
+            drain(users, removedUsers, targetUsers);
+            drain(orders, removedOrders, targetOrders);
+            drain(reservations, removedReservations, targetReservations);
+            drain(positions, removedPositions, targetPositions);
+        }
+
+        private static <V> void update(LongObjectHashMap<V> values, LongHashSet removed, long key, V value) {
+            if (value == null) {
+                values.remove(key);
+                removed.add(key);
+            } else {
+                removed.remove(key);
+                values.put(key, value);
+            }
+        }
+
+        private static <V> void drain(LongObjectHashMap<V> values, LongHashSet removed,
+                                      LongObjectHashMap<V> target) {
+            removed.forEach(target::remove);
+            values.forEachKeyValue(target::put);
+            removed.clear();
+            values.clear();
+        }
     }
 
     @Override
@@ -1426,7 +1529,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 || !changedAlgoOrders.isEmpty() || !changedCancelAllAfterTimers.isEmpty()
                 || !changedTriggerOrders.isEmpty() || !changedFeePolicies.isEmpty()
                 || hasCapturedUsers() || hasCapturedBalances()
-                || !patchReservationsBefore.isEmpty() || !patchOrdersBefore.isEmpty()
+                || hasCaptured(patchReservationsBeforeByLane) || hasCaptured(patchOrdersBeforeByLane)
                 || !patchLiquidationsBefore.isEmpty() || !patchRiskSnapshotsBefore.isEmpty()
                 || !patchLeveragesBefore.isEmpty() || !patchAlgoOrdersBefore.isEmpty()
                 || !patchTriggerOrdersBefore.isEmpty() || !patchClientOrdersBefore.isEmpty()
@@ -1439,6 +1542,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         for (LongObjectHashMap<UserRuntime> captured : patchUsersBeforeByLane) {
             if (!captured.isEmpty()) return true;
         }
+        return false;
+    }
+
+    private static boolean hasCaptured(LongObjectHashMap<?>[] capturedByLane) {
+        for (LongObjectHashMap<?> captured : capturedByLane) if (!captured.isEmpty()) return true;
         return false;
     }
 
@@ -1603,13 +1711,16 @@ public final class TradingRuntimeState implements AutoCloseable {
                 return null;
             });
         }
-        for (long orderId : patchOrdersBefore.keySet()) rollbackOrder(orderId, patchOrdersBefore.get(orderId).value());
-        for (long orderId : patchReservationsBefore.keySet()) {
-            PatchReservationBefore captured = patchReservationsBefore.get(orderId);
-            if (captured.pending()) {
-                throw new IllegalStateException("order batch overlapped an existing pending reservation");
-            }
-            rollbackReservation(orderId, captured.value());
+        for (LongObjectHashMap<PatchOrderBefore> capturedOrders : patchOrdersBeforeByLane) {
+            capturedOrders.forEachKeyValue((orderId, captured) -> rollbackOrder(orderId, captured.value()));
+        }
+        for (LongObjectHashMap<PatchReservationBefore> capturedReservations : patchReservationsBeforeByLane) {
+            capturedReservations.forEachKeyValue((orderId, captured) -> {
+                if (captured.pending()) {
+                    throw new IllegalStateException("order batch overlapped an existing pending reservation");
+                }
+                rollbackReservation(orderId, captured.value());
+            });
         }
         for (long positionKey : changedPositions.toArray()) rollbackPosition(positionKey);
         for (LaneBalancePatches capturedBalances : patchBalancesBeforeByLane) {
@@ -2198,7 +2309,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             lane.registerUser(user.userId());
             return null;
         });
-        publishedUsers.put(user.userId(), user);
+        publishUser(user.userId(), user);
         changedUsers.add(user.userId());
     }
 
@@ -2209,7 +2320,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         UserRuntime advanced = new UserRuntime(current.productLine(), userId,
                 Math.incrementExact(current.revision()), current.positionMode());
         onLane(userId, lane -> lane.users.put(userId, advanced));
-        publishedUsers.put(userId, advanced);
+        publishUser(userId, advanced);
         if (laneCommandScope.get() == null) changedUsers.add(userId);
     }
 
@@ -2232,7 +2343,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             lane.leverageKeysByUser.remove(userId);
             return keys;
         });
-        publishedUsers.remove(userId);
+        publishUser(userId, null);
         clientKeys.forEach(clientKey -> {
             changedClientOrders.add(clientKey);
             changedClientOrder(userId, clientKey);
@@ -2268,7 +2379,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         captureUserBefore(order.userId());
         captureOrderBefore(order.orderId());
         onLane(order.userId(), lane -> lane.orders.put(order.orderId(), order));
-        publishedOrders.put(order.orderId(), order);
+        publishOrder(order.orderId(), order);
         orderLaneIds.put(order.orderId(), topology.accountLaneId(order.userId()) + 1L);
         changedOrders.add(order.orderId());
         changedUsers.add(order.userId());
@@ -2294,7 +2405,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             addUserEntity(lane.reservationIdsByUser, reservation.userId(), reservation.orderId());
             return null;
         });
-        publishedReservations.put(reservation.orderId(), reservation);
+        publishReservation(reservation.orderId(), reservation);
         if (previous == null) {
             reservationLaneIds.put(reservation.orderId(), topology.accountLaneId(reservation.userId()) + 1L);
         }
@@ -2312,7 +2423,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new IllegalArgumentException("runtime order owner cannot change");
         }
         onLane(order.userId(), lane -> lane.orders.put(order.orderId(), order));
-        publishedOrders.put(order.orderId(), order);
+        publishOrder(order.orderId(), order);
         if (previous == null) {
             orderLaneIds.put(order.orderId(), topology.accountLaneId(order.userId()) + 1L);
         }
@@ -2329,7 +2440,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (previous != null) {
             captureUserBefore(previous.userId());
             onLane(previous.userId(), lane -> lane.orders.remove(orderId));
-            publishedOrders.remove(orderId);
+            publishOrder(orderId, null);
             orderLaneIds.removeKey(orderId);
             changedOrders.add(orderId);
             changedUsers.add(previous.userId());
@@ -2357,7 +2468,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             addUserEntity(lane.reservationIdsByUser, reservation.userId(), reservation.orderId());
             return null;
         });
-        publishedReservations.put(reservation.orderId(), reservation);
+        publishReservation(reservation.orderId(), reservation);
         if (previous == null) {
             reservationLaneIds.put(reservation.orderId(), topology.accountLaneId(reservation.userId()) + 1L);
         }
@@ -2384,7 +2495,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             removeUserEntity(lane.reservationIdsByUser, userId, orderId);
             return null;
         });
-        publishedReservations.remove(orderId);
+        publishReservation(orderId, null);
         reservationLaneIds.removeKey(orderId);
         changedReservations.add(orderId);
         changedUsers.add(userId);
@@ -2440,7 +2551,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             indexPosition(lane, positionKey, position);
             return null;
         });
-        publishedPositions.put(positionKey, position);
+        publishPosition(positionKey, position);
         positionLaneIds.put(positionKey, topology.accountLaneId(position.userId()) + 1L);
         if (laneCommandScope.get() == null) {
             changedPositions.add(positionKey);
@@ -2539,7 +2650,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             unindexPosition(lane, positionKey, current);
             return null;
         });
-        publishedPositions.remove(positionKey);
+        publishPosition(positionKey, null);
         positionLaneIds.removeKey(positionKey);
         changedPositions.add(positionKey);
         changedUsers.add(userId);
@@ -2615,8 +2726,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             lane.reservations.put(orderId, released);
             return new CanceledOrder(terminalOrder, released);
         });
-        publishedOrders.put(orderId, canceled.order());
-        publishedReservations.put(orderId, canceled.reservation());
+        publishOrder(orderId, canceled.order());
+        publishReservation(orderId, canceled.reservation());
         changedOrders.add(orderId);
         changedReservations.add(orderId);
         changedUsers.add(userId);
@@ -2645,7 +2756,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             ReservationRuntime released = reservation.release(releaseUnits);
             lane.replacePendingReservation(reservation, released);
             lane.reservations.put(orderId, released);
-            publishedReservations.put(orderId, released);
+            publishReservation(orderId, released);
             return new TerminalRelease(releaseUnits, reservation.assetId());
         });
         if (release.units() == 0) return;
@@ -2748,12 +2859,12 @@ public final class TradingRuntimeState implements AutoCloseable {
             @SuppressWarnings("unchecked")
             List<TerminalOrderPruned> pruned = (List<TerminalOrderPruned>) result;
             for (TerminalOrderPruned terminal : pruned) {
-                publishedOrders.remove(terminal.orderId());
+                publishOrder(terminal.orderId(), null);
                 orderLaneIds.removeKey(terminal.orderId());
                 changedOrders.add(terminal.orderId());
                 changedUsers.add(terminal.userId());
                 if (terminal.reservationRemoved()) {
-                    publishedReservations.remove(terminal.orderId());
+                    publishReservation(terminal.orderId(), null);
                     reservationLaneIds.removeKey(terminal.orderId());
                     changedReservations.add(terminal.orderId());
                     changedBalance(terminal.userId(), terminal.reservationAssetId());
@@ -2918,33 +3029,37 @@ public final class TradingRuntimeState implements AutoCloseable {
                 }
             }
         }
-        patchReservationsBefore.forEach((orderId, before) -> {
-            ReservationRuntime after = reservation(orderId);
-            ReservationRuntime beforeValue = before.value();
-            long userId = after != null ? after.userId() : beforeValue == null ? 0 : beforeValue.userId();
-            boolean pendingAfter = after != null && pendingReservation(orderId, after.userId());
-            if (userId != 0 && (!java.util.Objects.equals(beforeValue, after) || before.pending() != pendingAfter)) {
-                builder.recordReservation(topology.accountLaneId(userId), orderId,
-                    beforeValue, after, before != null && before.pending(),
-                    pendingAfter);
-            }
-        });
-        patchOrdersBefore.forEach((orderId, before) -> {
-            OrderRuntime after = order(orderId);
-            OrderRuntime beforeValue = before.value();
-            long userId = after != null ? after.userId() : beforeValue == null ? 0 : beforeValue.userId();
-            boolean pendingAfter = after != null && pendingReservation(orderId, after.userId());
-            OrderRuntime visibleBefore = before.pending() ? null : beforeValue;
-            OrderRuntime visibleAfter = pendingAfter ? null : after;
-            if (userId != 0 && !java.util.Objects.equals(visibleBefore, visibleAfter)) {
-                CoreOrderState businessBefore = visibleBefore == null ? null
-                        : RuntimeStateMaterializer.orderSnapshot(visibleBefore, identities);
-                CoreOrderState businessAfter = visibleAfter == null ? null
-                        : RuntimeStateMaterializer.orderSnapshot(visibleAfter, identities);
-                builder.recordOrder(topology.accountLaneId(userId), visibleBefore, visibleAfter,
-                        businessBefore, businessAfter);
-            }
-        });
+        for (LongObjectHashMap<PatchReservationBefore> capturedReservations : patchReservationsBeforeByLane) {
+            capturedReservations.forEachKeyValue((orderId, before) -> {
+                ReservationRuntime after = reservation(orderId);
+                ReservationRuntime beforeValue = before.value();
+                long userId = after != null ? after.userId() : beforeValue == null ? 0 : beforeValue.userId();
+                boolean pendingAfter = after != null && pendingReservation(orderId, after.userId());
+                if (userId != 0
+                        && (!java.util.Objects.equals(beforeValue, after) || before.pending() != pendingAfter)) {
+                    builder.recordReservation(topology.accountLaneId(userId), orderId,
+                            beforeValue, after, before.pending(), pendingAfter);
+                }
+            });
+        }
+        for (LongObjectHashMap<PatchOrderBefore> capturedOrders : patchOrdersBeforeByLane) {
+            capturedOrders.forEachKeyValue((orderId, before) -> {
+                OrderRuntime after = order(orderId);
+                OrderRuntime beforeValue = before.value();
+                long userId = after != null ? after.userId() : beforeValue == null ? 0 : beforeValue.userId();
+                boolean pendingAfter = after != null && pendingReservation(orderId, after.userId());
+                OrderRuntime visibleBefore = before.pending() ? null : beforeValue;
+                OrderRuntime visibleAfter = pendingAfter ? null : after;
+                if (userId != 0 && !java.util.Objects.equals(visibleBefore, visibleAfter)) {
+                    CoreOrderState businessBefore = visibleBefore == null ? null
+                            : RuntimeStateMaterializer.orderSnapshot(visibleBefore, identities);
+                    CoreOrderState businessAfter = visibleAfter == null ? null
+                            : RuntimeStateMaterializer.orderSnapshot(visibleAfter, identities);
+                    builder.recordOrder(topology.accountLaneId(userId), visibleBefore, visibleAfter,
+                            businessBefore, businessAfter);
+                }
+            });
+        }
         for (long positionKey : changedPositions.toArray()) {
             PositionRuntime after = position(positionKey);
             PositionRuntime beforeValue = currentPatchPositionBefore(positionKey);
@@ -3159,7 +3274,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public OrderRuntime currentPatchOrderBefore(long orderId) {
         assertOwner();
-        PatchOrderBefore captured = patchOrdersBefore.get(orderId);
+        PatchOrderBefore captured = capturedOrderBefore(orderId);
         return captured == null ? order(orderId) : captured.value();
     }
 
@@ -3202,8 +3317,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             clearChanged(capturedUsers);
         }
         for (LaneBalancePatches capturedBalances : patchBalancesBeforeByLane) capturedBalances.clear();
-        patchReservationsBefore = clearCapturedChanges(patchReservationsBefore);
-        patchOrdersBefore = clearCapturedChanges(patchOrdersBefore);
+        clearCaptured(patchReservationsBeforeByLane);
+        clearCaptured(patchOrdersBeforeByLane);
         activePatchBuilder.reset(productLine);
         patchLiquidationsBefore = clearCapturedChanges(patchLiquidationsBefore);
         patchRiskSnapshotsBefore = clearCapturedChanges(patchRiskSnapshotsBefore);
@@ -3364,8 +3479,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (clientKey != 0) putClientOrderIndex(lane, userId, clientKey, orderId);
             return new ReservedOrder(order, reservation);
         });
-        publishedOrders.put(orderId, reserved.order());
-        publishedReservations.put(orderId, reserved.reservation());
+        publishOrder(orderId, reserved.order());
+        publishReservation(orderId, reserved.reservation());
         orderLaneIds.put(orderId, topology.accountLaneId(userId) + 1L);
         reservationLaneIds.put(orderId, topology.accountLaneId(userId) + 1L);
         changedOrders.add(orderId);
@@ -3391,7 +3506,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             indexPosition(lane, positionKey, position);
             return null;
         });
-        publishedPositions.put(positionKey, position);
+        publishPosition(positionKey, position);
         positionLaneIds.put(positionKey, topology.accountLaneId(position.userId()) + 1L);
         changedPositions.add(positionKey);
         changedUsers.add(position.userId());
@@ -3449,7 +3564,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
             return null;
         });
-        if (before == null) publishedUsers.remove(userId); else publishedUsers.put(userId, before);
+        publishUser(userId, before);
     }
 
     private void rollbackBalance(long userId, int assetId, RuntimeCommitPatch.UserBalance before) {
@@ -3476,11 +3591,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         OrderRuntime current = order(orderId);
         if (current != null) onLane(current.userId(), lane -> { lane.orders.remove(orderId); return null; });
         if (before == null) {
-            publishedOrders.remove(orderId);
+            publishOrder(orderId, null);
             orderLaneIds.removeKey(orderId);
         } else {
             onLane(before.userId(), lane -> { lane.orders.put(orderId, before); return null; });
-            publishedOrders.put(orderId, before);
+            publishOrder(orderId, before);
             orderLaneIds.put(orderId, topology.accountLaneId(before.userId()) + 1L);
         }
     }
@@ -3493,7 +3608,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             return null;
         });
         if (before == null) {
-            publishedReservations.remove(orderId);
+            publishReservation(orderId, null);
             reservationLaneIds.removeKey(orderId);
         } else {
             onLane(before.userId(), lane -> {
@@ -3501,7 +3616,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 addUserEntity(lane.reservationIdsByUser, before.userId(), orderId);
                 return null;
             });
-            publishedReservations.put(orderId, before);
+            publishReservation(orderId, before);
             reservationLaneIds.put(orderId, topology.accountLaneId(before.userId()) + 1L);
         }
     }
@@ -3526,7 +3641,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             return null;
         });
         if (rollbackValue == null) {
-            publishedPositions.remove(positionKey);
+            publishPosition(positionKey, null);
             positionLaneIds.removeKey(positionKey);
         } else {
             onLane(rollbackValue.userId(), lane -> {
@@ -3534,7 +3649,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 indexPosition(lane, positionKey, rollbackValue);
                 return null;
             });
-            publishedPositions.put(positionKey, rollbackValue);
+            publishPosition(positionKey, rollbackValue);
             positionLaneIds.put(positionKey, topology.accountLaneId(rollbackValue.userId()) + 1L);
         }
     }
@@ -3548,24 +3663,62 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     private void captureOrderBefore(long orderId) {
-        patchOrdersBefore.computeIfAbsent(orderId, ignored -> {
-            OrderRuntime value = order(orderId);
-            return new PatchOrderBefore(value,
-                    value != null && pendingReservation(orderId, value.userId()));
-        });
+        if (capturedOrderBefore(orderId) != null) return;
+        OrderRuntime value = order(orderId);
+        int laneId = captureLane(orderId, value == null ? 0 : value.userId(), orderLaneIds);
+        LongObjectHashMap<PatchOrderBefore> captured = patchOrdersBeforeByLane[laneId];
+        if (!captured.containsKey(orderId)) {
+            captured.put(orderId, new PatchOrderBefore(value,
+                    value != null && pendingReservation(orderId, value.userId())));
+        }
     }
 
     private void captureReservationBefore(long orderId) {
-        patchReservationsBefore.computeIfAbsent(orderId, ignored -> {
-            ReservationRuntime reservation = reservation(orderId);
-            return new PatchReservationBefore(reservation,
-                    reservation != null && pendingReservation(orderId, reservation.userId()));
-        });
+        if (capturedReservationBefore(orderId) != null) return;
+        ReservationRuntime value = reservation(orderId);
+        int laneId = captureLane(orderId, value == null ? 0 : value.userId(), reservationLaneIds);
+        LongObjectHashMap<PatchReservationBefore> captured = patchReservationsBeforeByLane[laneId];
+        if (!captured.containsKey(orderId)) {
+            captured.put(orderId, new PatchReservationBefore(value,
+                    value != null && pendingReservation(orderId, value.userId())));
+        }
     }
 
     private boolean reservationPendingBefore(long orderId) {
-        PatchReservationBefore before = patchReservationsBefore.get(orderId);
+        PatchReservationBefore before = capturedReservationBefore(orderId);
         return before != null && before.pending();
+    }
+
+    private int captureLane(long entityId, long userId, LongLongHashMap laneIds) {
+        AccountLaneState scoped = laneCommandScope.get();
+        if (scoped != null) return scoped.laneId();
+        if (userId > 0) return topology.accountLaneId(userId);
+        int indexed = indexedLane(laneIds, entityId);
+        return indexed >= 0 ? indexed : Math.floorMod(Long.hashCode(entityId), accountLanes.length);
+    }
+
+    private PatchOrderBefore capturedOrderBefore(long orderId) {
+        for (LongObjectHashMap<PatchOrderBefore> captured : patchOrdersBeforeByLane) {
+            PatchOrderBefore value = captured.get(orderId);
+            if (value != null || captured.containsKey(orderId)) return value;
+        }
+        return null;
+    }
+
+    private PatchReservationBefore capturedReservationBefore(long orderId) {
+        for (LongObjectHashMap<PatchReservationBefore> captured : patchReservationsBeforeByLane) {
+            PatchReservationBefore value = captured.get(orderId);
+            if (value != null || captured.containsKey(orderId)) return value;
+        }
+        return null;
+    }
+
+    private static void clearCaptured(LongObjectHashMap<?>[] capturedByLane) {
+        for (LongObjectHashMap<?> captured : capturedByLane) {
+            boolean compact = captured.size() >= CHANGE_KEY_COMPACTION_THRESHOLD;
+            captured.clear();
+            if (compact) captured.compact();
+        }
     }
 
     private boolean reservationPendingAfter(long orderId) {

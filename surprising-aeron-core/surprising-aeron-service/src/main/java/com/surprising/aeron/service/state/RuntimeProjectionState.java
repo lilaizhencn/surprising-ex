@@ -3,13 +3,9 @@ package com.surprising.aeron.service.state;
 import com.surprising.aeron.protocol.CoreRiskScanControlView;
 import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.product.api.ProductLine;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.function.Function;
-import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
-import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
 public final class RuntimeProjectionState {
 
@@ -214,13 +210,13 @@ public final class RuntimeProjectionState {
 
     private void applyAccountLanes(RuntimeCommitPatch patch, MutationJournal inverse) {
         RuntimeCommitPatch.IdentityView identities = patch.identities();
-        UserPatchIndex userIndex = UserPatchIndex.create(patch.accountLaneGroups());
         for (RuntimeCommitPatch.AccountLaneOwnerGroup group : patch.accountLaneGroups()) {
+            prepareChangedUsers(group.users(), inverse);
             for (RuntimeCommitPatch.OrderChange change : group.orders()) {
                 if (change.after() != null && change.businessAfter() == null) {
                     throw new IllegalStateException("order business value is missing from commit patch");
                 }
-                boolean pending = userIndex.pendingReservations.contains(change.orderId());
+                boolean pending = pendingAfter(group.reservations(), change.orderId());
                 inverse.putOrRemove(orders, change.orderId(), change.after() == null || pending
                         ? null : change.businessAfter());
             }
@@ -233,56 +229,73 @@ public final class RuntimeProjectionState {
                 inverse.putOrRemove(liquidations, change.liquidationId(), change.after() == null
                         ? null : RuntimeStateMaterializer.liquidation(change.after(), identities));
             }
-            applyChanges(inverse, leverages, group.leverages(), RuntimeCommitPatch.LeverageChange::key,
-                    RuntimeCommitPatch.LeverageChange::after);
-            applyChanges(inverse, algoOrders, group.algoOrders(), RuntimeCommitPatch.AlgoOrderChange::algoOrderId,
-                    RuntimeCommitPatch.AlgoOrderChange::after);
-            applyChanges(inverse, timers, group.timers(), RuntimeCommitPatch.TimerChange::key,
-                    RuntimeCommitPatch.TimerChange::after);
-            applyChanges(inverse, triggerOrders, group.triggerOrders(), RuntimeCommitPatch.TriggerOrderChange::triggerOrderId,
-                    RuntimeCommitPatch.TriggerOrderChange::after);
+            for (RuntimeCommitPatch.LeverageChange change : group.leverages()) {
+                inverse.putOrRemove(leverages, change.key(), change.after());
+            }
+            for (RuntimeCommitPatch.AlgoOrderChange change : group.algoOrders()) {
+                inverse.putOrRemove(algoOrders, change.algoOrderId(), change.after());
+            }
+            for (RuntimeCommitPatch.TimerChange change : group.timers()) {
+                inverse.putOrRemove(timers, change.key(), change.after());
+            }
+            for (RuntimeCommitPatch.TriggerOrderChange change : group.triggerOrders()) {
+                inverse.putOrRemove(triggerOrders, change.triggerOrderId(), change.after());
+            }
             for (RuntimeCommitPatch.ClientOrderChange change : group.clientOrders()) {
                 TradingCoreState.ClientOrderKey key = new TradingCoreState.ClientOrderKey(change.key().userId(),
                         identities.clientOrderId(change.key().userId(), change.key().clientKey()));
                 inverse.putOrRemove(clientOrders, key, change.afterOrderId());
             }
+            applyUserValues(group, identities, inverse);
+            finishChangedUsers(group.users(), inverse);
         }
-        for (UserChanges changes : userIndex.ordered) applyUser(changes, identities, inverse);
     }
 
-    private void applyUser(UserChanges changes,
-                           RuntimeCommitPatch.IdentityView identities, MutationJournal inverse) {
-        long userId = changes.userId;
-        RuntimeCommitPatch.UserChange userChange = changes.userChange;
-        if (userChange != null && userChange.after() == null) {
-            inverse.putOrRemove(users, userId, null);
-            return;
+    private void prepareChangedUsers(List<RuntimeCommitPatch.UserChange> changes, MutationJournal inverse) {
+        for (RuntimeCommitPatch.UserChange change : changes) {
+            UserRuntime runtimeUser = change.after();
+            if (runtimeUser == null) continue;
+            if (runtimeUser.productLine() != productLine) {
+                throw new IllegalStateException("projection user product line mismatch");
+            }
+            if (users.get(change.userId()) == null) {
+                inverse.putOrRemove(users, change.userId(),
+                        new MutableUser(runtimeUser.productLine(), runtimeUser.positionMode()));
+            }
         }
-        MutableUser user = users.get(userId);
-        UserRuntime runtimeUser = userChange == null ? null : userChange.after();
-        if (user == null) {
-            if (runtimeUser == null) throw new IllegalStateException("typed patch lacks current user state: " + userId);
-            user = new MutableUser(runtimeUser.productLine(), runtimeUser.positionMode());
-            inverse.putOrRemove(users, userId, user);
-        }
-        if (runtimeUser != null && runtimeUser.productLine() != productLine) {
-            throw new IllegalStateException("projection user product line mismatch");
-        }
-        int pendingRevisionDelta = 0;
-        for (RuntimeCommitPatch.BalanceChange change : changes.balances) {
+    }
+
+    private void applyUserValues(RuntimeCommitPatch.AccountLaneOwnerGroup group,
+                                 RuntimeCommitPatch.IdentityView identities, MutationJournal inverse) {
+        for (RuntimeCommitPatch.BalanceChange change : group.balances()) {
+            long userId = change.key().userId();
+            MutableUser user = mutableUser(group.users(), userId);
+            if (user == null) continue;
             RuntimeCommitPatch.UserBalance value = change.after();
             String asset = identities.asset(change.key().assetId());
             inverse.putOrRemove(user.balances, asset, value == null ? null : new AssetBalance(asset,
                     Math.addExact(value.availableUnits(), value.pendingReservedUnits()),
                     Math.subtractExact(value.lockedUnits(), value.pendingReservedUnits())));
         }
-        for (RuntimeCommitPatch.ReservationChange change : changes.reservations) {
-            if (change.pendingBefore()) pendingRevisionDelta = Math.incrementExact(pendingRevisionDelta);
-            if (change.pendingAfter()) pendingRevisionDelta = Math.decrementExact(pendingRevisionDelta);
+        for (RuntimeCommitPatch.ReservationChange change : group.reservations()) {
+            long userId = userId(change.before(), change.after());
+            if (userId == 0) continue;
+            MutableUser user = mutableUser(group.users(), userId);
+            if (user == null) continue;
             inverse.putOrRemove(user.reservations, change.orderId(), change.after() == null || change.pendingAfter()
                     ? null : RuntimeStateMaterializer.reservation(change.after(), identities));
+            if (findUserChange(group.users(), userId) == null) {
+                int revisionDelta = (change.pendingBefore() ? 1 : 0) - (change.pendingAfter() ? 1 : 0);
+                if (revisionDelta != 0) {
+                    inverse.setUserRevision(user, Math.addExact(user.revision, revisionDelta));
+                }
+            }
         }
-        for (RuntimeCommitPatch.PositionChange change : changes.positions) {
+        for (RuntimeCommitPatch.PositionChange change : group.positions()) {
+            long userId = userId(change.before(), change.after());
+            if (userId == 0) continue;
+            MutableUser user = mutableUser(group.users(), userId);
+            if (user == null) continue;
             RuntimeIdentityRegistry.PositionIdentity identity = identities.positionIdentity(change.positionKey());
             if (identity.userId() != userId) {
                 throw new IllegalStateException("projection position owner mismatch");
@@ -290,12 +303,56 @@ public final class RuntimeProjectionState {
             inverse.putOrRemove(user.positions, identity.positionKey(), change.after() == null
                     ? null : RuntimeStateMaterializer.position(change.positionKey(), change.after(), identities));
         }
-        long nextRevision = runtimeUser == null ? Math.addExact(user.revision, pendingRevisionDelta)
-                : Math.subtractExact(runtimeUser.revision(), userChange.pendingReservationCountAfter());
-        inverse.setUserRevision(user, nextRevision);
-        if (runtimeUser != null) {
+    }
+
+    private void finishChangedUsers(List<RuntimeCommitPatch.UserChange> changes, MutationJournal inverse) {
+        for (RuntimeCommitPatch.UserChange change : changes) {
+            UserRuntime runtimeUser = change.after();
+            if (runtimeUser == null) {
+                inverse.putOrRemove(users, change.userId(), null);
+                continue;
+            }
+            MutableUser user = users.get(change.userId());
+            if (user == null) throw new IllegalStateException("typed patch lacks current user state: " + change.userId());
+            inverse.setUserRevision(user,
+                    Math.subtractExact(runtimeUser.revision(), change.pendingReservationCountAfter()));
             inverse.setUserPositionMode(user, runtimeUser.positionMode());
         }
+    }
+
+    private MutableUser mutableUser(List<RuntimeCommitPatch.UserChange> changes, long userId) {
+        RuntimeCommitPatch.UserChange change = findUserChange(changes, userId);
+        if (change != null && change.after() == null) return null;
+        MutableUser user = users.get(userId);
+        if (user == null) throw new IllegalStateException("typed patch lacks current user state: " + userId);
+        return user;
+    }
+
+    private static RuntimeCommitPatch.UserChange findUserChange(
+            List<RuntimeCommitPatch.UserChange> changes, long userId) {
+        int low = 0;
+        int high = changes.size() - 1;
+        while (low <= high) {
+            int middle = (low + high) >>> 1;
+            RuntimeCommitPatch.UserChange change = changes.get(middle);
+            int comparison = Long.compare(change.userId(), userId);
+            if (comparison == 0) return change;
+            if (comparison < 0) low = middle + 1; else high = middle - 1;
+        }
+        return null;
+    }
+
+    private static boolean pendingAfter(List<RuntimeCommitPatch.ReservationChange> changes, long orderId) {
+        int low = 0;
+        int high = changes.size() - 1;
+        while (low <= high) {
+            int middle = (low + high) >>> 1;
+            RuntimeCommitPatch.ReservationChange change = changes.get(middle);
+            int comparison = Long.compare(change.orderId(), orderId);
+            if (comparison == 0) return change.pendingAfter();
+            if (comparison < 0) low = middle + 1; else high = middle - 1;
+        }
+        return false;
     }
 
     private void applyGlobal(RuntimeCommitPatch.GlobalOwnerGroup global, RuntimeCommitPatch.IdentityView identities,
@@ -354,58 +411,6 @@ public final class RuntimeProjectionState {
 
     private static long userId(PositionRuntime before, PositionRuntime after) {
         return after != null ? after.userId() : before == null ? 0 : before.userId();
-    }
-
-    private static <K, V, C> void applyChanges(MutationJournal inverse, Map<K, V> values, List<C> changes,
-                                                Function<C, K> key, Function<C, V> after) {
-        for (C change : changes) inverse.putOrRemove(values, key.apply(change), after.apply(change));
-    }
-
-    private static final class UserPatchIndex {
-        private final ArrayList<UserChanges> ordered = new ArrayList<>();
-        private final LongObjectHashMap<UserChanges> byUser = new LongObjectHashMap<>();
-        private final LongHashSet pendingReservations = new LongHashSet();
-
-        private static UserPatchIndex create(List<RuntimeCommitPatch.AccountLaneOwnerGroup> groups) {
-            UserPatchIndex result = new UserPatchIndex();
-            for (RuntimeCommitPatch.AccountLaneOwnerGroup group : groups) {
-                for (RuntimeCommitPatch.UserChange change : group.users()) {
-                    result.user(change.userId()).userChange = change;
-                }
-                for (RuntimeCommitPatch.BalanceChange change : group.balances()) {
-                    result.user(change.key().userId()).balances.add(change);
-                }
-                for (RuntimeCommitPatch.ReservationChange change : group.reservations()) {
-                    long userId = userId(change.before(), change.after());
-                    if (userId != 0) result.user(userId).reservations.add(change);
-                    if (change.pendingAfter()) result.pendingReservations.add(change.orderId());
-                }
-                for (RuntimeCommitPatch.PositionChange change : group.positions()) {
-                    long userId = userId(change.before(), change.after());
-                    if (userId != 0) result.user(userId).positions.add(change);
-                }
-            }
-            return result;
-        }
-
-        private UserChanges user(long userId) {
-            UserChanges changes = byUser.get(userId);
-            if (changes != null) return changes;
-            changes = new UserChanges(userId);
-            byUser.put(userId, changes);
-            ordered.add(changes);
-            return changes;
-        }
-    }
-
-    private static final class UserChanges {
-        private final long userId;
-        private RuntimeCommitPatch.UserChange userChange;
-        private final ArrayList<RuntimeCommitPatch.BalanceChange> balances = new ArrayList<>();
-        private final ArrayList<RuntimeCommitPatch.ReservationChange> reservations = new ArrayList<>();
-        private final ArrayList<RuntimeCommitPatch.PositionChange> positions = new ArrayList<>();
-
-        private UserChanges(long userId) { this.userId = userId; }
     }
 
     private final class MutationJournal {
