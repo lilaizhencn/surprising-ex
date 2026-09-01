@@ -79,7 +79,7 @@ class SurprisingClusteredServiceTest {
     }
 
     @Test
-    void timerReplayFencesFollowingLogEntriesUntilMatchingCompletesAndAppliesExactlyOnce() throws Exception {
+    void timerReplayReturnsWithoutBlockingAndAppliesMatchingExactlyOnce() throws Exception {
         TimerScenario live = runTimerScenario(false);
         TimerScenario replay = runTimerScenario(true);
 
@@ -419,8 +419,8 @@ class SurprisingClusteredServiceTest {
         continueAfterTimer.countDown();
         TimerScenario result = scenario.get(5, TimeUnit.SECONDS);
         assertThat(returnedWithoutCompletion)
-                .as("a matching timer must fence later cluster-log entries until the local matcher result is ready")
-                .isEqualTo(!delayedCompletion);
+                .as("the clustered-service owner must never park waiting for a matcher completion")
+                .isTrue();
         return result;
     }
 

@@ -109,9 +109,13 @@ class TradingCoreRuntimeAuthorityTest {
                 .doesNotContain("update(TradingCoreState before, TradingCoreState after)");
         assertThat(source("CoreExportState.java"))
                 .contains("new SpscTaskQueue<>(eventCapacity)",
-                        "private final AtomicReferenceArray<E> slots")
+                        "private final Object[] slots",
+                        "MethodHandles.arrayElementVarHandle(Object[].class)",
+                        "SLOT.setRelease(slots, index, value)",
+                        "SLOT.getAcquire(slots, index)")
                 .doesNotContain("newSingleThreadExecutor", "ArrayBlockingQueue", "LinkedBlockingQueue",
-                        "LinkedTransferQueue", "CompletableFuture<MaterializedExport>");
+                        "LinkedTransferQueue", "CompletableFuture<MaterializedExport>",
+                        "AtomicReferenceArray<E>");
         assertThat(occurrences(production, "RuntimeStateMaterializer.materialize(")).isEqualTo(1);
         assertThat(method(source("TradingCoreRuntime.java"), "    public TradingCoreState snapshotState()"))
                 .contains("RuntimeStateMaterializer.materialize(runtimeState, identities)");

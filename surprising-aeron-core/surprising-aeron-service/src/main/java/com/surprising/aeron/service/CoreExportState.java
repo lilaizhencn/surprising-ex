@@ -15,6 +15,8 @@ import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.aeron.service.state.CoreStateRejectedException;
 import com.surprising.aeron.service.state.RuntimeCommitPatch;
 import com.surprising.product.api.ProductLine;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -31,7 +33,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.concurrent.locks.LockSupport;
 
 final class CoreExportState implements AutoCloseable {
@@ -246,6 +247,15 @@ final class CoreExportState implements AutoCloseable {
         }
         maxBacklog = Math.max(maxBacklog, pending.size() + acknowledgedMaterializationItems.get());
         return sequence;
+    }
+
+    void beginMaterializationBatch() {
+        assertHealthy();
+        materializationQueue.beginBatch();
+    }
+
+    void endMaterializationBatch() {
+        materializationQueue.endBatch();
     }
 
     boolean hasCapacity() {
@@ -1145,30 +1155,48 @@ final class CoreExportState implements AutoCloseable {
     }
 
     private static final class SpscTaskQueue<E> {
-        private final AtomicReferenceArray<E> slots;
+        private static final VarHandle SLOT = MethodHandles.arrayElementVarHandle(Object[].class);
+
+        private final Object[] slots;
         private final int mask;
         private volatile long producerSequence;
         private volatile long consumerSequence;
         private volatile Thread consumerWaiter;
+        private int batchDepth;
+        private boolean signalPending;
 
         private SpscTaskQueue(int requestedCapacity) {
             if (requestedCapacity < 1) throw new IllegalArgumentException("queue capacity must be positive");
             int capacity = 1;
             while (capacity < requestedCapacity) capacity = Math.multiplyExact(capacity, 2);
-            slots = new AtomicReferenceArray<>(capacity);
+            slots = new Object[capacity];
             mask = capacity - 1;
         }
 
         private boolean offer(E value) {
             Objects.requireNonNull(value, "queue value");
             long sequence = producerSequence;
-            if (sequence - consumerSequence >= slots.length()) return false;
+            if (sequence - consumerSequence >= slots.length) return false;
             int index = (int) sequence & mask;
-            if (slots.get(index) != null) throw new IllegalStateException("SPSC live slot overwrite");
-            slots.lazySet(index, value);
+            if (slotAcquire(index) != null) throw new IllegalStateException("SPSC live slot overwrite");
+            slotRelease(index, value);
             producerSequence = sequence + 1;
-            signalConsumer();
+            if (batchDepth == 0) signalConsumer();
+            else signalPending = true;
             return true;
+        }
+
+        private void beginBatch() {
+            batchDepth = Math.incrementExact(batchDepth);
+        }
+
+        private void endBatch() {
+            if (batchDepth <= 0) throw new IllegalStateException("SPSC producer batch is not active");
+            batchDepth--;
+            if (batchDepth == 0 && signalPending) {
+                signalPending = false;
+                signalConsumer();
+            }
         }
 
         private E poll(long timeout, TimeUnit unit) throws InterruptedException {
@@ -1195,11 +1223,20 @@ final class CoreExportState implements AutoCloseable {
             long sequence = consumerSequence;
             if (sequence >= producerSequence) return null;
             int index = (int) sequence & mask;
-            E value = slots.get(index);
+            E value = slotAcquire(index);
             if (value == null) return null;
-            slots.lazySet(index, null);
+            slotRelease(index, null);
             consumerSequence = sequence + 1;
             return value;
+        }
+
+        @SuppressWarnings("unchecked")
+        private E slotAcquire(int index) {
+            return (E) SLOT.getAcquire(slots, index);
+        }
+
+        private void slotRelease(int index, E value) {
+            SLOT.setRelease(slots, index, value);
         }
 
         private int drainTo(List<E> destination, int maxElements) {

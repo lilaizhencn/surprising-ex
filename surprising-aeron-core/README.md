@@ -63,6 +63,9 @@ idempotency response、订单终态与 snapshot/replay hash 必须一致。
 `surprising.aeron.projection-busy-spin`、`surprising.aeron.export-materialization-capacity`、
 `surprising.aeron.export-pending-bytes` 和 `surprising.aeron.export-materialization-batch-size`。BUSY_SPIN 会持续占用
 CPU，YIELDING 降低抢占强度，PARKING 以延迟换取空闲 CPU；它们都是运行时性能参数，不能改变业务顺序或 snapshot hash。
+连续 matcher completion 由 owner 按 core sequence 非阻塞批量提交；projection 与 Core Fact 的 SPSC 发布在批末各执行
+一次唤醒。projection batch 使用单一回滚边界并仅在请求的批末 sequence freeze，任一 patch 失败会回滚该 projection batch，
+但不会改变 owner 已提交的权威状态或资金校验边界。
 
 静态/目标验证（执行前必须确认 HotSpot JDK 25，且本任务未执行这些 Java 命令）：
 

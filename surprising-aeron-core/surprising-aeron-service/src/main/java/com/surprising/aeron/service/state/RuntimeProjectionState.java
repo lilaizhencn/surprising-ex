@@ -96,46 +96,71 @@ public final class RuntimeProjectionState {
 
     public void apply(List<RuntimeCommitPatch> patches) {
         if (patches == null || patches.isEmpty()) throw new IllegalArgumentException("projection batch required");
-        for (RuntimeCommitPatch patch : patches) apply(patch);
-    }
-
-    public void apply(RuntimeCommitPatch patch) {
         requireHealthy();
-        int injectedFailureCount = patch != null && patch.projectionSequence() == failOnSequence
-                ? failAfterMutations : -1;
-        if (injectedFailureCount > 0) {
-            failOnSequence = -1;
-            failAfterMutations = -1;
-        }
-        MutationJournal inverse = mutationJournal.reset(injectedFailureCount);
+        MutationJournal inverse = mutationJournal.reset(-1);
         try {
-            if (patch == null || patch.productLine() != productLine
-                    || patch.previousProjectionSequence() != sequence
-                    || patch.projectionSequence() != Math.incrementExact(sequence)
-                    || patch.beforeRevision() != revision
-                    || patch.beforeBusinessStateHash() != businessStateHash
-                    || patch.beforeFundsStateHash() != fundsStateHash) {
-                throw new IllegalStateException("projection patch is not contiguous with mutable replica");
+            for (RuntimeCommitPatch patch : patches) {
+                armInjectedFailure(patch, inverse);
+                applyPatch(patch, inverse);
             }
-            applyAccountLanes(patch, inverse);
-            applyGlobal(patch.globalOwnerGroup(), patch.identities(), inverse);
-            inverse.setRevision(patch.afterRevision());
-            inverse.setBusinessStateHash(patch.businessStateHash());
-            inverse.setFundsStateHash(patch.fundsStateHash());
-            inverse.setSequence(patch.projectionSequence());
             cachedFreeze = null;
             cachedFreezeSequence = -1;
             inverse.release();
         } catch (Throwable applyFailure) {
-            try {
-                inverse.rollback();
-            } catch (Throwable rollbackFailure) {
-                applyFailure.addSuppressed(rollbackFailure);
-            }
-            inverse.release();
-            failure = applyFailure;
+            rollbackFailedApplication(inverse, applyFailure);
             throw applyFailure;
         }
+    }
+
+    public void apply(RuntimeCommitPatch patch) {
+        requireHealthy();
+        MutationJournal inverse = mutationJournal.reset(-1);
+        try {
+            armInjectedFailure(patch, inverse);
+            applyPatch(patch, inverse);
+            cachedFreeze = null;
+            cachedFreezeSequence = -1;
+            inverse.release();
+        } catch (Throwable applyFailure) {
+            rollbackFailedApplication(inverse, applyFailure);
+            throw applyFailure;
+        }
+    }
+
+    private void applyPatch(RuntimeCommitPatch patch, MutationJournal inverse) {
+        if (patch == null || patch.productLine() != productLine
+                || patch.previousProjectionSequence() != sequence
+                || patch.projectionSequence() != Math.incrementExact(sequence)
+                || patch.beforeRevision() != revision
+                || patch.beforeBusinessStateHash() != businessStateHash
+                || patch.beforeFundsStateHash() != fundsStateHash) {
+            throw new IllegalStateException("projection patch is not contiguous with mutable replica");
+        }
+        applyAccountLanes(patch, inverse);
+        applyGlobal(patch.globalOwnerGroup(), patch.identities(), inverse);
+        inverse.setRevision(patch.afterRevision());
+        inverse.setBusinessStateHash(patch.businessStateHash());
+        inverse.setFundsStateHash(patch.fundsStateHash());
+        inverse.setSequence(patch.projectionSequence());
+    }
+
+    private void armInjectedFailure(RuntimeCommitPatch patch, MutationJournal inverse) {
+        int injectedFailureCount = patch != null && patch.projectionSequence() == failOnSequence
+                ? failAfterMutations : -1;
+        if (injectedFailureCount <= 0) return;
+        failOnSequence = -1;
+        failAfterMutations = -1;
+        inverse.armFailure(injectedFailureCount);
+    }
+
+    private void rollbackFailedApplication(MutationJournal inverse, Throwable applyFailure) {
+        try {
+            inverse.rollback();
+        } catch (Throwable rollbackFailure) {
+            applyFailure.addSuppressed(rollbackFailure);
+        }
+        inverse.release();
+        failure = applyFailure;
     }
 
     public TradingCoreState freeze(long requestedSequence) {
@@ -417,13 +442,23 @@ public final class RuntimeProjectionState {
         }
 
         private <K, V> void putOrRemove(Map<K, V> values, K key, V value) {
+            V current = values.get(key);
+            boolean present = current != null || values.containsKey(key);
+            if (value == null ? !present : value.equals(current)) return;
             int index = append(MAP);
             targets[index] = values;
             keys[index] = key;
-            previousValues[index] = values.get(key);
-            previousPresence[index] = previousValues[index] != null || values.containsKey(key);
+            previousValues[index] = current;
+            previousPresence[index] = present;
             if (value == null) values.remove(key); else values.put(key, value);
             afterMutation();
+        }
+
+        private void armFailure(int mutationCount) {
+            if (mutationCount <= 0 || remainingUntilFailure > 0) {
+                throw new IllegalStateException("projection mutation failure is already armed");
+            }
+            remainingUntilFailure = mutationCount;
         }
 
         private void putZeroOrRemove(Map<String, Long> values, String key, long value) {

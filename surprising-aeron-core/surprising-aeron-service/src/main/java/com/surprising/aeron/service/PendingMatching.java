@@ -21,6 +21,9 @@ final class PendingMatching {
     private ResolvedMatchingAdmission admission;
     private CoreAdmissionReservation capacityReservation;
     private long pendingStateHash;
+    private long commitFenceTimestamp;
+    private long commitFenceClusterPosition;
+    private boolean commitFenceEstablished;
 
     PendingMatching(long sequence, Operation operation, CoreMessage command,
                     RuntimeProjectionPoint beforeProjection,
@@ -126,6 +129,9 @@ final class PendingMatching {
         admission = source.admission;
         capacityReservation = source.capacityReservation;
         pendingStateHash = source.pendingStateHash;
+        commitFenceTimestamp = source.commitFenceTimestamp;
+        commitFenceClusterPosition = source.commitFenceClusterPosition;
+        commitFenceEstablished = source.commitFenceEstablished;
     }
 
     PendingMatching withPreMatchingCancellations(List<Long> orderIds) {
@@ -148,6 +154,16 @@ final class PendingMatching {
         return this;
     }
 
+    void establishCommitFence(long clusterTimestamp, long clusterPosition) {
+        if (clusterTimestamp < 0 || clusterPosition < 0) {
+            throw new IllegalArgumentException("matching commit fence cannot be negative");
+        }
+        if (commitFenceEstablished) return;
+        commitFenceTimestamp = clusterTimestamp;
+        commitFenceClusterPosition = clusterPosition;
+        commitFenceEstablished = true;
+    }
+
     long sequence() { return sequence; }
     Operation operation() { return operation; }
     CoreMessage command() { return command; }
@@ -161,6 +177,14 @@ final class PendingMatching {
     ResolvedMatchingAdmission admission() { return admission; }
     CoreAdmissionReservation capacityReservation() { return capacityReservation; }
     long pendingStateHash() { return pendingStateHash; }
+    long commitFenceTimestamp() {
+        if (!commitFenceEstablished) throw new IllegalStateException("matching commit fence is not established");
+        return commitFenceTimestamp;
+    }
+    long commitFenceClusterPosition() {
+        if (!commitFenceEstablished) throw new IllegalStateException("matching commit fence is not established");
+        return commitFenceClusterPosition;
+    }
 
     enum Operation {
         PLACE,

@@ -1,12 +1,16 @@
 package com.surprising.aeron.service.state;
 
 import com.surprising.product.api.ProductLine;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
+import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.concurrent.locks.LockSupport;
 
 public final class RuntimeCommitJournal implements AutoCloseable {
+
+    private static final VarHandle ENTRY = MethodHandles.arrayElementVarHandle(RuntimeCommitPatch[].class);
 
     private static final int MIN_CAPACITY = 1_024;
     private static final int MAX_CAPACITY = 1 << 20;
@@ -15,7 +19,7 @@ public final class RuntimeCommitJournal implements AutoCloseable {
     private static final long IDLE_PARK_NANOS = 50_000L;
     private static final long MAX_RESERVED_PATCH_BYTES = 16L << 20;
 
-    private final AtomicReferenceArray<RuntimeCommitPatch> entries;
+    private final RuntimeCommitPatch[] entries;
     private final long[] entryBytes;
     private final int mask;
     private final int projectionBatchSize;
@@ -49,6 +53,8 @@ public final class RuntimeCommitJournal implements AutoCloseable {
     private long timeoutCount;
     private RuntimeCommitPatch lastAppliedPatch;
     private boolean activated;
+    private int publicationBatchDepth;
+    private boolean projectionSignalPending;
 
     public RuntimeCommitJournal(ProductLine productLine, TradingCoreState initial,
                                 long businessStateHash, long fundsStateHash) {
@@ -70,7 +76,7 @@ public final class RuntimeCommitJournal implements AutoCloseable {
         int capacity = normalizedCapacity(Integer.getInteger(
                 "surprising.aeron.commit-journal-capacity",
                 Integer.getInteger("surprising.aeron.projection-journal-capacity", 65_536)));
-        entries = new AtomicReferenceArray<>(capacity);
+        entries = new RuntimeCommitPatch[capacity];
         entryBytes = new long[capacity];
         mask = capacity - 1;
         projectionBatchSize = configuredBatchSize(capacity);
@@ -121,7 +127,7 @@ public final class RuntimeCommitJournal implements AutoCloseable {
             throw new IllegalArgumentException("journal reservation must be positive");
         }
         long backlog = publishedSequence - consumedSequence;
-        if (entriesRequired > entries.length() - backlog - reservedEntries
+        if (entriesRequired > entries.length - backlog - reservedEntries
                 || bytesRequired > capacityBytes - backlogBytes() - reservedBytes) {
             rejectionCount++;
             throw new CoreStateRejectedException("MATCHING_BACKPRESSURE", "commit journal backlog is full");
@@ -158,7 +164,7 @@ public final class RuntimeCommitJournal implements AutoCloseable {
             throw new IllegalStateException("invalid commit journal publication");
         }
         int index = (int) (next & mask);
-        if (entries.get(index) != null) {
+        if (entryAcquire(index) != null) {
             poison(new IllegalStateException("commit journal live slot overwrite"));
             throw new IllegalStateException("commit journal slot was not reclaimed", failure);
         }
@@ -167,7 +173,7 @@ public final class RuntimeCommitJournal implements AutoCloseable {
             throw new IllegalStateException("commit patch exceeded per-slice admission byte reservation");
         }
         entryBytes[index] = patchBytes;
-        entries.set(index, patch);
+        entryRelease(index, patch);
         reservation.remaining--;
         reservation.remainingBytes -= patchBytes;
         reservation.consumedSlices++;
@@ -183,8 +189,29 @@ public final class RuntimeCommitJournal implements AutoCloseable {
         maxBacklog = Math.max(maxBacklog, next - consumedSequence);
         maxBacklogBytes = Math.max(maxBacklogBytes, currentBacklogBytes);
         publishedSequence = next;
-        LockSupport.unpark(projector);
+        signalProjector();
         return next;
+    }
+
+    public void beginPublicationBatch() {
+        requireHealthy();
+        publicationBatchDepth = Math.incrementExact(publicationBatchDepth);
+    }
+
+    public void endPublicationBatch() {
+        if (publicationBatchDepth <= 0) {
+            throw new IllegalStateException("commit journal publication batch is not active");
+        }
+        publicationBatchDepth--;
+        if (publicationBatchDepth == 0 && projectionSignalPending) {
+            projectionSignalPending = false;
+            LockSupport.unpark(projector);
+        }
+    }
+
+    private void signalProjector() {
+        if (publicationBatchDepth == 0) LockSupport.unpark(projector);
+        else projectionSignalPending = true;
     }
 
     public PublishReservation reservePublish(long sequence) {
@@ -215,7 +242,7 @@ public final class RuntimeCommitJournal implements AutoCloseable {
     public boolean hasCapacityFor(int additionalEntries) {
         requireHealthy();
         if (additionalEntries <= 0
-                || additionalEntries > entries.length()
+                || additionalEntries > entries.length
                 - (publishedSequence - consumedSequence) - reservedEntries) {
             return false;
         }
@@ -323,6 +350,7 @@ public final class RuntimeCommitJournal implements AutoCloseable {
     }
 
     private void runProjector() {
+        ArrayList<RuntimeCommitPatch> patches = new ArrayList<>(projectionBatchSize);
         try {
             long firstPendingNanos = 0;
             while (!closed || consumedSequence < publishedSequence) {
@@ -341,31 +369,40 @@ public final class RuntimeCommitJournal implements AutoCloseable {
                     awaitWork();
                     continue;
                 }
-                int items = 0;
+                patches.clear();
                 long bytes = 0;
-                while (items < projectionBatchSize && consumedSequence < publishedSequence) {
-                    long sequence = Math.incrementExact(consumedSequence);
+                long scanSequence = consumedSequence;
+                while (patches.size() < projectionBatchSize && scanSequence < publishedSequence) {
+                    long sequence = Math.incrementExact(scanSequence);
                     int index = (int) (sequence & mask);
-                    RuntimeCommitPatch patch = entries.get(index);
+                    RuntimeCommitPatch patch = entryAcquire(index);
                     if (patch == null) break;
                     long patchBytes = entryBytes[index];
-                    if (items > 0 && bytes + patchBytes > projectionBatchBytes) break;
-                    replica.apply(patch);
-                    lastAppliedPatch = patch;
-                    lastAppliedPatch.projectionPoint().completeSequence();
-                    entryBytes[index] = 0;
-                    entries.set(index, null);
-                    consumedBytes = Math.addExact(consumedBytes, patchBytes);
-                    consumedSequence = sequence;
-                    items++;
+                    if (!patches.isEmpty() && bytes + patchBytes > projectionBatchBytes) break;
+                    patches.add(patch);
                     bytes = Math.addExact(bytes, patchBytes);
-                    freezeRequestedState();
+                    scanSequence = sequence;
                 }
+                int items = patches.size();
                 if (items > 0) {
+                    replica.apply(patches);
+                    for (int offset = 0; offset < items; offset++) {
+                        long sequence = Math.incrementExact(consumedSequence);
+                        int index = (int) (sequence & mask);
+                        RuntimeCommitPatch patch = patches.get(offset);
+                        lastAppliedPatch = patch;
+                        patch.projectionPoint().completeSequence();
+                        long patchBytes = entryBytes[index];
+                        entryBytes[index] = 0;
+                        entryRelease(index, null);
+                        consumedBytes = Math.addExact(consumedBytes, patchBytes);
+                        consumedSequence = sequence;
+                    }
                     batchCount++;
                     batchItems += items;
                     batchBytes = Math.addExact(batchBytes, bytes);
                     firstPendingNanos = 0;
+                    freezeRequestedState();
                 }
             }
             requestedSequence = publishedSequence;
@@ -424,6 +461,14 @@ public final class RuntimeCommitJournal implements AutoCloseable {
             errorCount++;
         }
         LockSupport.unpark(projector);
+    }
+
+    private RuntimeCommitPatch entryAcquire(int index) {
+        return (RuntimeCommitPatch) ENTRY.getAcquire(entries, index);
+    }
+
+    private void entryRelease(int index, RuntimeCommitPatch patch) {
+        ENTRY.setRelease(entries, index, patch);
     }
 
     private void requireHealthy() {

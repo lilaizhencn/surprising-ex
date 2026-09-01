@@ -295,7 +295,7 @@ class RuntimeCommitJournalTest {
     }
 
     @Test
-    void midApplyFailureRollsBackToExactLastCompleteMixedDomainPatch() {
+    void midBatchFailureRollsBackTheWholeProjectionBatch() throws Exception {
         String property = "surprising.aeron.projection-batch-size";
         String previousProperty = System.getProperty(property);
         System.setProperty(property, "2");
@@ -303,34 +303,33 @@ class RuntimeCommitJournalTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(initial, identities);
         RuntimeCommitJournal journal = journal(initial);
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
         try {
             List<RuntimeCommitPatch> patches = captureMixedPatches(runtime, identities, initial, 250, -100);
             RuntimeCommitPatch first = patches.get(0);
             RuntimeCommitPatch second = patches.get(1);
-            RuntimeProjectionState oracleReplica = new RuntimeProjectionState(initial, initial.businessStateHash(),
-                    RollingFundsStateHash.compute(initial));
-            oracleReplica.apply(first);
-            TradingCoreState lastComplete = oracleReplica.freeze(1);
 
+            journal.blockProjectorForTest(entered, release);
+            assertThat(entered.await(1, TimeUnit.SECONDS)).isTrue();
             journal.failReplicaAfterMutationsForTest(2, 8);
             journal.publish(first, first.businessStateHash(), first.fundsStateHash());
             journal.publish(second, second.businessStateHash(), second.fundsStateHash());
             journal.requestProjection(2);
+            release.countDown();
             awaitFailure(journal);
 
             assertThat(journal.publishedSequence()).isEqualTo(2);
-            assertThat(journal.projectedSequence()).isEqualTo(1);
-            assertThat(journal.lag()).isEqualTo(1);
-            assertThat(journal.projectionFreezeCount()).isEqualTo(1);
-            assertThat(first.projectionPoint().projected()).isTrue();
-            assertThat(first.projectionPoint().state()).isEqualTo(lastComplete);
-            assertThat(first.projectionPoint().state().businessStateHash()).isEqualTo(first.businessStateHash());
-            assertThat(RollingFundsStateHash.compute(first.projectionPoint().state()))
-                    .isEqualTo(first.fundsStateHash());
+            assertThat(journal.projectedSequence()).isZero();
+            assertThat(journal.lag()).isEqualTo(2);
+            assertThat(journal.projectionFreezeCount()).isZero();
+            assertThat(first.projectionPoint().completed()).isFalse();
+            assertThat(first.projectionPoint().projected()).isFalse();
             assertThatThrownBy(() -> journal.await(2, System.nanoTime() + TimeUnit.SECONDS.toNanos(1), false))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("runtime commit journal failed");
         } finally {
+            release.countDown();
             assertThatThrownBy(journal::close)
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("did not drain");

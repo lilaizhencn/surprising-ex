@@ -3107,6 +3107,14 @@ public final class CoreProbeState implements AutoCloseable {
                 ? context.matchingResult() : context.takeMatchingCompletion();
     }
 
+    boolean establishMatchingCommitFence(long sequence, long clusterTimestamp, long clusterPosition) {
+        PendingMatching pending = pendingMatching.get(sequence);
+        if (pending == null) return false;
+        if (firstPendingMatchingSequence() != sequence) return false;
+        pending.establishCommitFence(clusterTimestamp, clusterPosition);
+        return true;
+    }
+
     com.surprising.aeron.service.matching.CoreMatchingResult awaitMatchingResult(long sequence) {
         return awaitMatchingResult(sequence, MATCHING_AWAIT_TIMEOUT_NANOS);
     }
@@ -3175,11 +3183,14 @@ public final class CoreProbeState implements AutoCloseable {
                                   com.surprising.aeron.service.matching.CoreMatchingResult matchingResult,
                                   long clusterTimestamp, long clusterPosition) {
         runtime.assertOwner();
-        currentClusterPosition = clusterPosition;
         ensureRuntimePlaceOrderState();
         assertHealthy();
         PendingMatching pending = pendingMatching.get(sequence);
         if (pending == null || matchingResult == null) return null;
+        pending.establishCommitFence(clusterTimestamp, clusterPosition);
+        clusterTimestamp = pending.commitFenceTimestamp();
+        clusterPosition = pending.commitFenceClusterPosition();
+        currentClusterPosition = clusterPosition;
         LaneCommandContextRing.Context laneContext = laneCommandContexts.required(sequence);
         boolean resumingSettlement = laneContext.settlementDispatched();
         if (resumingSettlement) {
@@ -3948,27 +3959,53 @@ public final class CoreProbeState implements AutoCloseable {
         if (maxCompletions <= 0 || handler == null) {
             throw new IllegalArgumentException("matching commit batch requires a positive limit and handler");
         }
-        drainMatchingCompletions();
-        int completed = 0;
-        int attempts = 0;
-        while (attempts < maxCompletions) {
-            long sequence = firstPendingMatchingSequence();
-            if (sequence == 0) break;
-            CoreResponse response;
-            if (hasPendingMatchingRejection(sequence)) {
-                response = completeRejectedMatching(sequence);
-            } else {
-                com.surprising.aeron.service.matching.CoreMatchingResult matching = attempts == 0 && awaitFirst
-                        ? awaitMatchingResult(sequence) : takeMatchingResult(sequence);
-                if (matching == null) break;
-                response = completeMatching(sequence, matching, clusterTimestamp, clusterPosition);
+        beginDownstreamPublicationBatch();
+        try {
+            drainMatchingCompletions();
+            int completed = 0;
+            int attempts = 0;
+            while (attempts < maxCompletions) {
+                long sequence = firstPendingMatchingSequence();
+                if (sequence == 0) break;
+                PendingMatching pending = pendingMatching.get(sequence);
+                if (pending == null) throw new IllegalStateException("matching commit cursor is missing");
+                pending.establishCommitFence(clusterTimestamp, clusterPosition);
+                CoreResponse response;
+                if (hasPendingMatchingRejection(sequence)) {
+                    response = completeRejectedMatching(sequence);
+                } else {
+                    com.surprising.aeron.service.matching.CoreMatchingResult matching = attempts == 0 && awaitFirst
+                            ? awaitMatchingResult(sequence) : takeMatchingResult(sequence);
+                    if (matching == null) break;
+                    response = completeMatching(sequence, matching, clusterTimestamp, clusterPosition);
+                }
+                attempts++;
+                if (response == null) break;
+                handler.onCommitted(sequence, response);
+                completed++;
             }
-            attempts++;
-            if (response == null) break;
-            handler.onCommitted(sequence, response);
-            completed++;
+            return completed;
+        } finally {
+            endDownstreamPublicationBatch();
         }
-        return completed;
+    }
+
+    private void beginDownstreamPublicationBatch() {
+        runtimeProjectionJournal.beginPublicationBatch();
+        try {
+            exportState.beginMaterializationBatch();
+        } catch (RuntimeException failure) {
+            runtimeProjectionJournal.endPublicationBatch();
+            throw failure;
+        }
+    }
+
+    private void endDownstreamPublicationBatch() {
+        try {
+            exportState.endMaterializationBatch();
+        } finally {
+            runtimeProjectionJournal.endPublicationBatch();
+        }
     }
 
     int matchingCompletionHighWaterMark() {

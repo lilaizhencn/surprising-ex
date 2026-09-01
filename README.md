@@ -622,7 +622,10 @@ Account Lane 已不创建独立等待线程，因此不存在 Lane busy-spin 配
 Snapshot projector 默认使用 park/unpark；`surprising.aeron.projection-busy-spin=true` 可在隔离 CPU 的服务器上切为
 busy-spin。journal 默认容量 65,536，可通过 `surprising.aeron.projection-journal-capacity` 配置为 1,024 到
 1,048,576 之间的 2 次幂；`surprising.aeron.projection-batch-size` 控制触发连续 typed commit 合并的 backlog
-阈值，默认 1，单批最多 1,024 条。Snapshot fence 和关闭流程会显式请求立即 flush。容量耗尽、sequence 缺口、
+阈值，默认 1，单批最多 1,024 条。projector 会以一个回滚 journal 原子应用同批 patch、只在批末发布请求的
+freeze；owner 到 projector 以及 owner 到 Core Fact materializer 使用 release/acquire SPSC ring，并在一批连续
+matching completion 完成后各唤醒一次消费者。Aeron owner 只非阻塞消费 ready sequence 前缀，1 ms timer 只作
+无入站流量时的兜底，单次最多提交固定 256 条。Snapshot fence 和关闭流程会显式请求立即 flush。容量耗尽、sequence 缺口、
 projector 异常或 fence hash 不一致都
 会 fail-fast，不降级为同步投影，也没有 legacy 双写路径。
 

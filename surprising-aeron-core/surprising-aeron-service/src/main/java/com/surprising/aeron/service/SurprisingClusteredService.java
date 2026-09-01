@@ -32,7 +32,8 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     private static final int MAX_PENDING_EGRESS_PER_SESSION = 64;
     private static final int MAX_DEFERRED_INBOUND = 4_096;
-    private static final long MATCHING_TIMER_DELAY_MS = 10;
+    private static final long MATCHING_TIMER_DELAY_MS = 1;
+    private static final int MATCHING_COMMIT_BATCH_SIZE = 256;
     private static final long MATCHING_WATCHDOG_TIMEOUT_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
     private static final long EGRESS_DRAIN_TIMER_DELAY_MS = 1;
     private static final long SNAPSHOT_TIMEOUT_SECONDS = 30;
@@ -110,6 +111,8 @@ public final class SurprisingClusteredService implements ClusteredService {
                 deferInbound(session, request, timestamp, header.position());
                 return;
             }
+        } else if (matcherPipelineCommand) {
+            commitReadyMatching(timestamp, header.position(), false);
         } else {
             state.drainMatchingCompletions();
         }
@@ -272,11 +275,8 @@ public final class SurprisingClusteredService implements ClusteredService {
         }
         if (correlationId == MATCHING_WAKEUP_CORRELATION_ID) {
             matchingWakeupScheduled = false;
-            int completed = state.commitReadyMatching(64, timestamp,
-                    cluster == null ? 0 : cluster.logPosition(), true, (sequence, result) -> {
-                recordMatchingProgress(sequence);
-                deliverMatchingResponse(sequence, result);
-            });
+            int completed = commitReadyMatching(timestamp,
+                    cluster == null ? 0 : cluster.logPosition(), false);
             if (completed == 0 && state.firstPendingMatchingSequence() != 0) {
                 assertMatchingWatchdogHealthy(state.firstPendingMatchingSequence());
             }
@@ -300,15 +300,16 @@ public final class SurprisingClusteredService implements ClusteredService {
             }
             return;
         }
-        var matchingResult = state.awaitMatchingResult(correlationId);
+        long clusterPosition = cluster == null ? 0 : cluster.logPosition();
+        if (!state.establishMatchingCommitFence(correlationId, timestamp, clusterPosition)) return;
+        var matchingResult = state.takeMatchingResult(correlationId);
         if (matchingResult == null) {
             assertMatchingWatchdogHealthy(correlationId);
             scheduleMatchingWakeup();
             return;
         }
         recordMatchingProgress(correlationId);
-        CoreResponse result = state.completeMatching(correlationId, matchingResult, timestamp,
-                cluster == null ? 0 : cluster.logPosition());
+        CoreResponse result = state.completeMatching(correlationId, matchingResult, timestamp, clusterPosition);
         if (result == null) {
             scheduleMatchingWakeup();
             return;
@@ -502,6 +503,14 @@ public final class SurprisingClusteredService implements ClusteredService {
     private void recordMatchingProgress(long sequence) {
         matchingWatchSequence = sequence;
         matchingWatchStartedNanos = System.nanoTime();
+    }
+
+    private int commitReadyMatching(long timestamp, long clusterPosition, boolean awaitFirst) {
+        return state.commitReadyMatching(MATCHING_COMMIT_BATCH_SIZE, timestamp, clusterPosition, awaitFirst,
+                (sequence, result) -> {
+                    recordMatchingProgress(sequence);
+                    deliverMatchingResponse(sequence, result);
+                });
     }
 
     private void resetMatchingWatchdog() {
