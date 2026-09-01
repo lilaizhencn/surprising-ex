@@ -481,7 +481,7 @@ public class LinearPerpetualCoreBenchmark {
         @Param("100000")
         public int targetOperationsPerSecond;
 
-        @Param("YIELDING")
+        @Param("BUSY_SPIN")
         public String matcherWaitStrategy;
 
         private LinearPerpetualSaturationWorkload.SaturationScenario scenario;
