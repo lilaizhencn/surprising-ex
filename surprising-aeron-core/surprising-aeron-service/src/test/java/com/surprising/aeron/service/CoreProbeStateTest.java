@@ -2681,8 +2681,8 @@ class CoreProbeStateTest {
 
         assertThat(state.apply(ack).status()).isEqualTo(ResponseStatus.APPLIED);
         assertThat(state.exportState().nextSequence()).isEqualTo(outboxSequenceBeforeAck);
-        assertThat(state.committedBusinessHashCoreSequence()).isEqualTo(businessHashCoreSequenceBeforeAck);
-        assertThat(state.committedFundsHashCoreSequence()).isEqualTo(fundsHashCoreSequenceBeforeAck);
+        assertThat(state.committedBusinessHashCoreSequence()).isEqualTo(businessHashCoreSequenceBeforeAck + 1);
+        assertThat(state.committedFundsHashCoreSequence()).isEqualTo(fundsHashCoreSequenceBeforeAck + 1);
         assertThat(state.committedProjectionSequence()).isEqualTo(projectionSequenceBeforeAck + 1);
         assertThat(state.tradingState().businessStateHash()).isEqualTo(businessHashBeforeAck);
         assertThat(state.tradingState().revision()).isEqualTo(revisionBeforeAck);
@@ -3034,9 +3034,7 @@ class CoreProbeStateTest {
         var businessAfter = after == null ? null
                 : com.surprising.aeron.service.state.RuntimeStateMaterializer.orderSnapshot(after, identities);
         builder.recordOrder(1, before, after, businessBefore, businessAfter);
-        builder.addLaneCommit(new com.surprising.aeron.service.state.RuntimeCommitPatch.LaneCommit(
-                1, sequence, sequence, 0, 1, previousSequence, sequence,
-                previousSequence, sequence, previousSequence, sequence));
+        builder.laneMask(1L << 1);
         CoreMessage cause = command(ProductLine.LINEAR_PERPETUAL, UUID.randomUUID(), sequence, 1);
         var metadata = new com.surprising.aeron.service.state.RuntimeCommitPatch.CoreFactMetadata(
                 cause.header().commandId(), com.surprising.aeron.protocol.CommandFingerprint.of(cause),

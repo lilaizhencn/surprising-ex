@@ -44,10 +44,11 @@ final class CoreProbeStateRestoreTestSupport {
             MatcherSnapshot matcherSnapshot) {
         CoreProbeState candidate = CoreProbeState.prepareRestore(productLine, appliedCommandCount, probeValue,
                 commandResults, lastSourceSequences, snapshotState, exportState, new TerminalStateRetention(),
-                matcherSnapshot, 0, Map.of(), Map.of());
+                matcherSnapshot, appliedCommandCount, Map.of(), Map.of());
         try {
-            var accountLanes = candidate.accountLaneSnapshots(appliedCommandCount, snapshotState);
-            candidate.restoreAccountLaneSnapshots(accountLanes, appliedCommandCount);
+            long projectionSequence = candidate.snapshotProjectionSequence();
+            var accountLanes = candidate.accountLaneSnapshots(projectionSequence, snapshotState);
+            candidate.restoreAccountLaneSnapshots(accountLanes, projectionSequence);
             candidate.activate();
             return candidate;
         } catch (RuntimeException failure) {

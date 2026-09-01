@@ -34,11 +34,10 @@ public final class TradingRuntimeState implements AutoCloseable {
     private final LaneTopology topology;
     private final AccountLaneState[] accountLanes;
     private final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] laneUserScratch;
-    private final SettlementLaneWorker[] lifecycleLaneWorkers;
-    private final LifecycleLaneTask[] lifecycleLaneTasks;
-    private final boolean[] lifecycleSelectedScratch;
-    private final long[] lifecycleStartedNanosScratch;
-    private final SettlementLaneWorker[] settlementLaneWorkers;
+    private final SettlementLaneWorker[] laneWorkers;
+    private final LaneMutationTask[] laneMutationTasks;
+    private final long[] laneMutationStartedNanosScratch;
+    private final Object[] laneMutationResultsScratch;
     private final int[] accountLaneQueueHighWaterMarks;
     private final long[][] accountLaneCompletedOperations;
     private final long[][] accountLaneLatencySamples;
@@ -144,11 +143,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] routedUsers =
                 new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[topology.accountLaneCount()];
         this.laneUserScratch = routedUsers;
-        this.lifecycleLaneWorkers = new SettlementLaneWorker[topology.accountLaneCount()];
-        this.lifecycleLaneTasks = new LifecycleLaneTask[topology.accountLaneCount()];
-        this.lifecycleSelectedScratch = new boolean[topology.accountLaneCount()];
-        this.lifecycleStartedNanosScratch = new long[topology.accountLaneCount()];
-        this.settlementLaneWorkers = new SettlementLaneWorker[topology.accountLaneCount()];
+        this.laneWorkers = new SettlementLaneWorker[topology.accountLaneCount()];
+        this.laneMutationTasks = new LaneMutationTask[topology.accountLaneCount()];
+        this.laneMutationStartedNanosScratch = new long[topology.accountLaneCount()];
+        this.laneMutationResultsScratch = new Object[topology.accountLaneCount()];
         this.accountLaneQueueHighWaterMarks = new int[topology.accountLaneCount()];
         this.accountLaneCompletedOperations = laneMetricValues(topology.accountLaneCount());
         this.accountLaneLatencySamples = laneMetricValues(topology.accountLaneCount());
@@ -291,8 +289,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (userId <= 0 || operation == null) {
             throw new IllegalArgumentException("invalid user settlement command");
         }
-        return onLane(topology.accountLaneId(userId),
-                lane -> inLaneCommandScope(lane, ignored -> operation.get()));
+        int laneId = topology.accountLaneId(userId);
+        executeLaneMutations(1L << laneId, 1, false, ignored -> operation.get());
+        @SuppressWarnings("unchecked") T result = (T) laneMutationResultsScratch[laneId];
+        return result;
     }
 
     public <T> T executeUserRisk(long userId, java.util.function.Supplier<T> operation) {
@@ -300,8 +300,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (userId <= 0 || operation == null) {
             throw new IllegalArgumentException("invalid user risk command");
         }
-        return onLane(topology.accountLaneId(userId),
-                lane -> inLaneCommandScope(lane, ignored -> operation.get()));
+        int laneId = topology.accountLaneId(userId);
+        executeLaneMutations(1L << laneId, 1, false, ignored -> operation.get());
+        @SuppressWarnings("unchecked") T result = (T) laneMutationResultsScratch[laneId];
+        return result;
     }
 
     public Object[] executeOwnerSettlements(Iterable<Long> userIds,
@@ -316,20 +318,13 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (values == null || ownerUserId == null || operation == null) {
             throw new IllegalArgumentException("invalid owner settlement command");
         }
-        boolean[] selected = new boolean[accountLanes.length];
+        long selectedLaneMask = 0;
         for (E value : values) {
             if (value == null) continue;
             long userId = ownerUserId.applyAsLong(value);
-            if (userId > 0) selected[topology.accountLaneId(userId)] = true;
+            if (userId > 0) selectedLaneMask |= topology.accountLaneMask(userId);
         }
-        Object[] results = new Object[accountLanes.length];
-        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            if (!selected[laneId]) continue;
-            int currentLaneId = laneId;
-            results[laneId] = inLaneCommandScope(accountLanes[laneId],
-                    ignored -> operation.apply(currentLaneId));
-        }
-        return results;
+        return executeLaneMutations(selectedLaneMask, Long.bitCount(selectedLaneMask), false, operation);
     }
 
     public <E> Object[] executeLifecycleSettlements(Iterable<E> values,
@@ -339,57 +334,82 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (values == null || ownerUserId == null || operation == null) {
             throw new IllegalArgumentException("invalid lifecycle settlement command");
         }
-        boolean[] selected = lifecycleSelectedScratch;
-        java.util.Arrays.fill(selected, false);
-        int selectedCount = 0;
+        long selectedLaneMask = 0;
         int workItems = 0;
         for (E value : values) {
             if (value == null) continue;
             long userId = ownerUserId.applyAsLong(value);
             if (userId <= 0) continue;
             workItems++;
-            int laneId = topology.accountLaneId(userId);
-            if (!selected[laneId]) {
-                selected[laneId] = true;
-                selectedCount++;
+            selectedLaneMask |= topology.accountLaneMask(userId);
+        }
+        return executeLaneMutations(selectedLaneMask, workItems, true, operation);
+    }
+
+    private Object[] executeLaneMutations(long selectedLaneMask, int workItems, boolean allowParallel,
+                                          java.util.function.IntFunction<Object> operation) {
+        assertOwner();
+        long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;
+        if ((selectedLaneMask & ~validMask) != 0 || workItems < 0 || operation == null) {
+            throw new IllegalArgumentException("invalid account lane mutation");
+        }
+        Object[] results = laneMutationResultsScratch;
+        if (selectedLaneMask == 0) {
+            for (int laneId = 0; laneId < results.length; laneId++) results[laneId] = null;
+            return results;
+        }
+        if (workItems == 0) throw new IllegalArgumentException("account lane mutation has no work");
+        int selectedCount = Long.bitCount(selectedLaneMask);
+        if (!allowParallel || selectedCount < 2 || workItems < PARALLEL_LIFECYCLE_MIN_ITEMS
+                || !accountLanesStarted) {
+            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+                if ((selectedLaneMask & 1L << laneId) == 0) {
+                    results[laneId] = null;
+                    continue;
+                }
+                int currentLaneId = laneId;
+                results[laneId] = inLaneCommandScope(accountLanes[laneId],
+                        ignored -> operation.apply(currentLaneId));
             }
+            return results;
         }
-        if (selectedCount < 2 || workItems < PARALLEL_LIFECYCLE_MIN_ITEMS || !accountLanesStarted) {
-            return executeOwnerSettlements(values, ownerUserId, operation);
-        }
-        Object[] results = new Object[accountLanes.length];
-        long[] startedNanos = lifecycleStartedNanosScratch;
+        long[] startedNanos = laneMutationStartedNanosScratch;
+        long submittedLaneMask = 0;
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            if (!selected[laneId]) continue;
+            if ((selectedLaneMask & 1L << laneId) == 0) {
+                results[laneId] = null;
+                continue;
+            }
             AccountLaneState lane = accountLanes[laneId];
             lane.releaseOwner();
             accountLaneQueueHighWaterMarks[laneId] = Math.max(accountLaneQueueHighWaterMarks[laneId], 1);
             startedNanos[laneId] = System.nanoTime();
-            LifecycleLaneTask task = lifecycleLaneTasks[laneId];
+            LaneMutationTask task = laneMutationTasks[laneId];
             if (task == null) {
-                task = new LifecycleLaneTask(laneId);
-                lifecycleLaneTasks[laneId] = task;
+                task = new LaneMutationTask(laneId);
+                laneMutationTasks[laneId] = task;
             }
-            SettlementLaneWorker worker = lifecycleLaneWorkers[laneId];
+            SettlementLaneWorker worker = laneWorkers[laneId];
             if (worker == null) {
-                worker = new SettlementLaneWorker("lifecycle", laneId, topology.accountLaneQueueCapacity());
-                lifecycleLaneWorkers[laneId] = worker;
+                worker = new SettlementLaneWorker("mutation", laneId, topology.accountLaneQueueCapacity());
+                laneWorkers[laneId] = worker;
             }
             task.prepare(lane, operation);
             try {
                 worker.execute(task);
+                submittedLaneMask |= 1L << laneId;
             } catch (RuntimeException failure) {
                 task.failSubmission(failure);
                 lane.bindOwner();
-                awaitAndRebindLifecycleLanes(selected);
+                awaitAndRebindLaneMutations(submittedLaneMask);
                 throw failure;
             }
         }
         RuntimeException failure = null;
-        for (int laneId = 0; laneId < lifecycleLaneTasks.length; laneId++) {
-            if (!selected[laneId]) continue;
+        for (int laneId = 0; laneId < laneMutationTasks.length; laneId++) {
+            if ((selectedLaneMask & 1L << laneId) == 0) continue;
             try {
-                results[laneId] = lifecycleLaneTasks[laneId].await();
+                results[laneId] = laneMutationTasks[laneId].await();
                 recordLaneOperation(laneId, AccountLaneOperationType.SETTLEMENT,
                         System.nanoTime() - startedNanos[laneId]);
             } catch (RuntimeException laneFailure) {
@@ -397,21 +417,21 @@ public final class TradingRuntimeState implements AutoCloseable {
                 break;
             }
         }
-        awaitAndRebindLifecycleLanes(selected);
+        awaitAndRebindLaneMutations(selectedLaneMask);
         if (failure != null) throw failure;
         return results;
     }
 
-    private void awaitAndRebindLifecycleLanes(boolean[] selected) {
-        for (int laneId = 0; laneId < selected.length; laneId++) {
-            if (!selected[laneId]) continue;
+    private void awaitAndRebindLaneMutations(long laneMask) {
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            if ((laneMask & 1L << laneId) == 0) continue;
             try {
-                lifecycleLaneTasks[laneId].await();
+                laneMutationTasks[laneId].await();
             } catch (RuntimeException ignored) {
             }
         }
-        for (int laneId = 0; laneId < selected.length; laneId++) {
-            if (selected[laneId]) {
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            if ((laneMask & 1L << laneId) != 0) {
                 accountLanes[laneId].bindOwner();
                 flushPublishedChanges(laneId);
             }
@@ -429,8 +449,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         return topology.accountLaneId(userId) == scoped.laneId();
     }
 
-    private static void applyLaneUsers(
-                                       AccountLaneState lane,
+    private static void applyLaneUsers(AccountLaneState lane,
                                        org.eclipse.collections.impl.list.mutable.primitive.LongArrayList users,
                                        long coreSequence,
                                        long stateContribution, long fundsContribution) {
@@ -438,8 +457,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         while (iterator.hasNext()) {
             long userId = iterator.next();
             if (!lane.owns(userId)) lane.registerUser(userId);
-            lane.applied(coreSequence, userId, stateContribution, fundsContribution);
         }
+        lane.applied(coreSequence, stateContribution, fundsContribution);
     }
 
     private static BalanceRuntime copyBalance(IntObjectHashMap<BalanceRuntime> balances, int assetId) {
@@ -497,7 +516,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     private void flushPublishedChanges(int laneId) {
         publishedLaneChanges[laneId].drainTo(
-                publishedUsers, publishedOrders, publishedReservations, publishedPositions);
+                laneId, publishedUsers, publishedOrders, publishedReservations, publishedPositions,
+                orderLaneIds, reservationLaneIds, positionLaneIds);
     }
 
     private static <V> void putOrRemove(LongObjectHashMap<V> values, long key, V value) {
@@ -530,14 +550,18 @@ public final class TradingRuntimeState implements AutoCloseable {
             update(positions, removedPositions, key, value);
         }
 
-        private void drainTo(LongObjectHashMap<UserRuntime> targetUsers,
+        private void drainTo(int laneId,
+                             LongObjectHashMap<UserRuntime> targetUsers,
                              LongObjectHashMap<OrderRuntime> targetOrders,
                              LongObjectHashMap<ReservationRuntime> targetReservations,
-                             LongObjectHashMap<PositionRuntime> targetPositions) {
+                             LongObjectHashMap<PositionRuntime> targetPositions,
+                             LongLongHashMap targetOrderLanes,
+                             LongLongHashMap targetReservationLanes,
+                             LongLongHashMap targetPositionLanes) {
             drain(users, removedUsers, targetUsers);
-            drain(orders, removedOrders, targetOrders);
-            drain(reservations, removedReservations, targetReservations);
-            drain(positions, removedPositions, targetPositions);
+            drainIndexed(orders, removedOrders, targetOrders, targetOrderLanes, laneId);
+            drainIndexed(reservations, removedReservations, targetReservations, targetReservationLanes, laneId);
+            drainIndexed(positions, removedPositions, targetPositions, targetPositionLanes, laneId);
         }
 
         private static <V> void update(LongObjectHashMap<V> values, LongHashSet removed, long key, V value) {
@@ -557,20 +581,32 @@ public final class TradingRuntimeState implements AutoCloseable {
             removed.clear();
             values.clear();
         }
+
+        private static <V> void drainIndexed(LongObjectHashMap<V> values, LongHashSet removed,
+                                             LongObjectHashMap<V> target, LongLongHashMap targetLanes,
+                                             int laneId) {
+            removed.forEach(key -> {
+                target.remove(key);
+                targetLanes.removeKey(key);
+            });
+            values.forEachKeyValue((key, value) -> {
+                target.put(key, value);
+                targetLanes.put(key, laneId + 1L);
+            });
+            removed.clear();
+            values.clear();
+        }
     }
 
     @Override
     public void close() {
         accountLanesStarted = false;
-        for (SettlementLaneWorker worker : lifecycleLaneWorkers) {
-            if (worker != null) worker.close();
-        }
-        for (SettlementLaneWorker worker : settlementLaneWorkers) {
+        for (SettlementLaneWorker worker : laneWorkers) {
             if (worker != null) worker.close();
         }
     }
 
-    private final class LifecycleLaneTask implements Runnable {
+    private final class LaneMutationTask implements Runnable {
         private final int laneId;
         private final LaneOperation<Object> scopedOperation;
         private AccountLaneState lane;
@@ -580,7 +616,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         private volatile boolean completed = true;
         private volatile Thread waiter;
 
-        private LifecycleLaneTask(int laneId) {
+        private LaneMutationTask(int laneId) {
             this.laneId = laneId;
             scopedOperation = ignored -> operation.apply(this.laneId);
         }
@@ -855,12 +891,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    public List<RuntimeCommitPatch.LaneCommit> applyAndCommitLaneSequence(
-            long coreSequence, Iterable<Long> userIds, CoreMatchingResult matchingResult,
+    public long stageLaneMutation(
+            long coreSequence, Iterable<Long> userIds,
             long stateContribution, long fundsContribution) {
         assertOwner();
-        if (coreSequence <= 0 || userIds == null || matchingResult == null
-                || matchingResult.nativeCommand().coreSequence() != coreSequence) {
+        if (coreSequence <= 0 || userIds == null) {
             throw new IllegalArgumentException("invalid lane apply");
         }
         clearLaneUserScratch();
@@ -868,24 +903,21 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (userId == null || userId <= 0) continue;
             addLaneUser(userId.longValue());
         }
-        return applyAndCommitLaneSequenceFromScratch(
-                coreSequence, matchingResult, stateContribution, fundsContribution);
+        return stageLaneMutationFromScratch(coreSequence, stateContribution, fundsContribution);
     }
 
-    public List<RuntimeCommitPatch.LaneCommit> applyAndCommitLaneSequence(
-            long coreSequence, long[] userIds, CoreMatchingResult matchingResult,
+    public long stageLaneMutation(
+            long coreSequence, long[] userIds,
             long stateContribution, long fundsContribution) {
         assertOwner();
-        if (coreSequence <= 0 || userIds == null || matchingResult == null
-                || matchingResult.nativeCommand().coreSequence() != coreSequence) {
+        if (coreSequence <= 0 || userIds == null) {
             throw new IllegalArgumentException("invalid lane apply");
         }
         clearLaneUserScratch();
         for (long userId : userIds) {
             if (userId > 0) addLaneUser(userId);
         }
-        return applyAndCommitLaneSequenceFromScratch(
-                coreSequence, matchingResult, stateContribution, fundsContribution);
+        return stageLaneMutationFromScratch(coreSequence, stateContribution, fundsContribution);
     }
 
     private void clearLaneUserScratch() {
@@ -899,65 +931,51 @@ public final class TradingRuntimeState implements AutoCloseable {
         laneUserScratch[laneId].add(userId);
     }
 
-    private List<RuntimeCommitPatch.LaneCommit> applyAndCommitLaneSequenceFromScratch(
-            long coreSequence, CoreMatchingResult matchingResult,
-            long stateContribution, long fundsContribution) {
+    private long stageLaneMutationFromScratch(
+            long coreSequence, long stateContribution, long fundsContribution) {
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             if (!laneUserScratch[laneId].isEmpty()) accountLanes[laneId].requireApplySequence(coreSequence);
         }
-        ArrayList<RuntimeCommitPatch.LaneCommit> laneCommits = new ArrayList<>();
+        long laneMask = 0;
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             org.eclipse.collections.impl.list.mutable.primitive.LongArrayList users = laneUserScratch[laneId];
             if (users.isEmpty()) continue;
             AccountLaneState lane = accountLanes[laneId];
-            if (matchingResult.nativeCommand().coreSequence() != coreSequence) {
-                throw new IllegalStateException("immutable matcher result sequence changed during fanout");
-            }
-            long beforeRevision = lane.revision();
-            long beforeStateHash = lane.localStateHash();
-            long beforeFundsHash = lane.localFundsHash();
             applyLaneUsers(lane, users, coreSequence, stateContribution, fundsContribution);
-            RuntimeCommitPatch.LaneCommit laneCommit = new RuntimeCommitPatch.LaneCommit(
-                    laneId, coreSequence, coreSequence, laneCommits.size(), laneCommits.size() + 1,
-                    beforeRevision, lane.revision(), beforeStateHash, lane.localStateHash(),
-                    beforeFundsHash, lane.localFundsHash());
-            activePatchBuilder.addLaneCommit(laneCommit);
-            laneCommits.add(laneCommit);
+            laneMask |= 1L << laneId;
         }
-        requireLaneCommitSequence(laneCommits);
-        return List.copyOf(laneCommits);
+        activePatchBuilder.laneMask(laneMask);
+        if (laneMask != 0) requireLaneSequence(coreSequence, laneMask);
+        return laneMask;
     }
 
-    public void commitLaneSequence(List<RuntimeCommitPatch.LaneCommit> laneCommits) {
+    public void commitLaneSequence(long coreSequence, long laneMask) {
         assertOwner();
-        requireLaneCommitSequence(laneCommits);
-        for (RuntimeCommitPatch.LaneCommit laneCommit : laneCommits) {
-            AccountLaneState lane = accountLanes[laneCommit.laneId()];
-            lane.committed(laneCommit.committedSequence());
-            if (lane.appliedSequence() != laneCommit.appliedSequence()
-                    || lane.committedSequence() != laneCommit.committedSequence()) {
+        requireLaneSequence(coreSequence, laneMask);
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            if ((laneMask & 1L << laneId) == 0) continue;
+            AccountLaneState lane = accountLanes[laneId];
+            lane.committed(coreSequence);
+            if (lane.appliedSequence() != coreSequence || lane.committedSequence() != coreSequence) {
                 throw new IllegalStateException("account lane read fence differs from lane commit");
             }
         }
     }
 
-    public void rollbackLaneSequence(List<RuntimeCommitPatch.LaneCommit> laneCommits) {
+    public void rollbackLaneSequence(long coreSequence, long laneMask) {
         assertOwner();
-        if (laneCommits == null) return;
-        for (RuntimeCommitPatch.LaneCommit laneCommit : laneCommits) {
-            accountLanes[laneCommit.laneId()].rollbackApplied(laneCommit.appliedSequence());
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            if ((laneMask & 1L << laneId) != 0) accountLanes[laneId].rollbackApplied(coreSequence);
         }
     }
 
-    private void requireLaneCommitSequence(List<RuntimeCommitPatch.LaneCommit> laneCommits) {
-        if (laneCommits == null) throw new IllegalArgumentException("lane commits are required");
-        int previousLaneId = -1;
-        for (RuntimeCommitPatch.LaneCommit laneCommit : laneCommits) {
-            if (laneCommit.laneId() <= previousLaneId || laneCommit.laneId() >= accountLanes.length) {
-                throw new IllegalArgumentException("lane commits must be unique and sorted");
-            }
-            accountLanes[laneCommit.laneId()].requireCommit(laneCommit.appliedSequence());
-            previousLaneId = laneCommit.laneId();
+    private void requireLaneSequence(long coreSequence, long laneMask) {
+        long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;
+        if (coreSequence <= 0 || laneMask == 0 || (laneMask & ~validMask) != 0) {
+            throw new IllegalArgumentException("invalid lane commit barrier");
+        }
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            if ((laneMask & 1L << laneId) != 0) accountLanes[laneId].requireCommit(coreSequence);
         }
     }
 
@@ -985,12 +1003,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             captureMatchedOrderBefore(orderId, identities, instrument,
                     baseAssetId, quoteAssetId, settleAssetId);
         }
-        RuntimeTreasuryDelta[] deltas = new RuntimeTreasuryDelta[accountLanes.length];
-        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            if ((expectedLaneMask & (1L << laneId)) == 0) continue;
-            int currentLaneId = laneId;
-            AccountLaneState lane = accountLanes[laneId];
-            deltas[laneId] = inLaneCommandScope(lane, ignored -> {
+        Object[] laneResults = executeLaneMutations(
+                expectedLaneMask, Math.max(1, plan.tradeEvents().size()), true, currentLaneId -> {
                 if (!productLine.isDerivative()) {
                     return RuntimeSpotMatchProcessor.applyLane(takerOrderId, plan.laneEvents(currentLaneId),
                             this, instrument, baseAssetId, quoteAssetId);
@@ -1000,6 +1014,11 @@ public final class TradingRuntimeState implements AutoCloseable {
                         this, identities, instrument, settleAssetId, delta);
                 return delta;
             });
+        RuntimeTreasuryDelta[] deltas = new RuntimeTreasuryDelta[accountLanes.length];
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            if ((expectedLaneMask & (1L << laneId)) != 0) {
+                deltas[laneId] = (RuntimeTreasuryDelta) laneResults[laneId];
+            }
         }
         recordMatcherSettlementChanges(plan, identities, instrument,
                 baseAssetId, quoteAssetId, settleAssetId);
@@ -1017,236 +1036,6 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new IllegalStateException("matcher settlement lane mask mismatch");
         }
         return applyMatcherSettlement(coreSequence, expectedLaneMask, plan, matchingResult, identities);
-    }
-
-    public PerpetualLaneJournal[] dispatchPerpetualSettlement(
-            MatcherSettlementPlan plan, RuntimeIdentityRegistry identities) {
-        assertOwner();
-        if (!productLine.isDerivative() || plan == null || identities == null) {
-            throw new IllegalArgumentException("invalid perpetual settlement dispatch");
-        }
-        OrderRuntime taker = order(plan.takerOrderId());
-        if (taker == null) throw new IllegalStateException("taker order is missing");
-        CoreInstrumentState instrument = instrument(identities.symbol(taker.symbolId()));
-        if (instrument == null) throw new IllegalStateException("match instrument is missing");
-        int settleAssetId = identities.assetId(instrument.settleAsset());
-        PerpetualLaneJournal[] journals = new PerpetualLaneJournal[accountLanes.length];
-        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            if ((plan.requiredLaneMask() & 1L << laneId) == 0 || plan.laneEvents(laneId).isEmpty()) continue;
-            PerpetualJournalBuilder builder = new PerpetualJournalBuilder(
-                    plan, identities, instrument, settleAssetId, laneId);
-            journals[laneId] = builder.build();
-        }
-        for (int laneId = 0; laneId < journals.length; laneId++) {
-            PerpetualLaneJournal journal = journals[laneId];
-            if (journal == null) continue;
-            try {
-                SettlementLaneWorker worker = settlementLaneWorkers[laneId];
-                if (worker == null) {
-                    worker = new SettlementLaneWorker(laneId, topology.accountLaneQueueCapacity());
-                    settlementLaneWorkers[laneId] = worker;
-                }
-                worker.execute(journal);
-            } catch (RuntimeException failure) {
-                for (PerpetualLaneJournal submitted : journals) {
-                    if (submitted != null && !submitted.completed()) submitted.failure = failure;
-                }
-                throw failure;
-            }
-        }
-        return journals;
-    }
-
-    public RuntimeTreasuryDelta[] applyPreparedPerpetualSettlement(
-            MatcherSettlementPlan plan, PerpetualLaneJournal[] journals,
-            RuntimeIdentityRegistry identities) {
-        assertOwner();
-        if (plan == null || journals == null || journals.length != accountLanes.length || identities == null) {
-            throw new IllegalArgumentException("invalid prepared perpetual settlement");
-        }
-        for (int laneId = 0; laneId < journals.length; laneId++) {
-            PerpetualLaneJournal journal = journals[laneId];
-            if (journal == null) continue;
-            if (!journal.completed || journal.failure != null || journal.coreSequence != plan.coreSequence()
-                    || journal.laneId != laneId) {
-                throw new IllegalStateException("perpetual lane journal is incomplete", journal.failure);
-            }
-            AccountLaneView lane = accountLaneById(laneId);
-            if (lane.revision() != journal.beforeRevision || lane.localStateHash() != journal.beforeStateHash
-                    || lane.localFundsHash() != journal.beforeFundsHash) {
-                throw new IllegalStateException("perpetual lane journal input is stale");
-            }
-            for (int index = 0; index < journal.beforeOrders.length; index++) {
-                OrderRuntime current = order(journal.beforeOrders[index].orderId());
-                ReservationRuntime reservation = reservation(journal.beforeReservations[index].orderId());
-                if (current == null || current.revision() != journal.beforeOrders[index].revision()
-                        || !journal.beforeReservations[index].equals(reservation)) {
-                    throw new IllegalStateException("perpetual order journal input is stale");
-                }
-            }
-            for (int index = 0; index < journal.accountUserIds.length; index++) {
-                BalanceRuntime balance = balance(journal.accountUserIds[index], journal.settleAssetId);
-                if (balance == null || balance.availableUnits() != journal.beforeAvailable[index]
-                        || balance.lockedUnits() != journal.beforeLocked[index]) {
-                    throw new IllegalStateException("perpetual balance journal input is stale");
-                }
-            }
-            for (int index = 0; index < journal.positionKeys.length; index++) {
-                if (!java.util.Objects.equals(position(journal.positionKeys[index]), journal.beforePositions[index])) {
-                    throw new IllegalStateException("perpetual position journal input is stale");
-                }
-            }
-        }
-        RuntimeTreasuryDelta[] deltas = new RuntimeTreasuryDelta[accountLanes.length];
-        for (int laneId = 0; laneId < journals.length; laneId++) {
-            PerpetualLaneJournal journal = journals[laneId];
-            if (journal == null) continue;
-            AccountLaneState lane = accountLanes[laneId];
-            inLaneCommandScope(lane, ignored -> {
-                for (int index = 0; index < journal.accountUserIds.length; index++) {
-                    replaceBalance(new BalanceRuntime(journal.accountUserIds[index], journal.settleAssetId,
-                            journal.available[index], journal.locked[index]));
-                }
-                for (ReservationRuntime reservation : journal.reservations) replaceReservation(reservation);
-                for (int index = 0; index < journal.positions.length; index++) {
-                    replacePosition(journal.positionKeys[index], journal.positions[index]);
-                }
-                for (OrderRuntime order : journal.orders) replaceOrder(order);
-                for (int index = 0; index < journal.accountUserIds.length; index++) {
-                    for (long revision = 0; revision < journal.userRevisionIncrements[index]; revision++) {
-                        advanceUserRevision(journal.accountUserIds[index]);
-                    }
-                }
-                return null;
-            });
-            deltas[laneId] = journal.treasuryDelta;
-        }
-        OrderRuntime taker = order(plan.takerOrderId());
-        CoreInstrumentState instrument = instrument(identities.symbol(taker.symbolId()));
-        recordMatcherSettlementChanges(plan, identities, instrument,
-                identities.assetId(instrument.baseAsset()), identities.assetId(instrument.quoteAsset()),
-                identities.assetId(instrument.settleAsset()));
-        return deltas;
-    }
-
-    private final class PerpetualJournalBuilder {
-        private final MatcherSettlementPlan plan;
-        private final RuntimeIdentityRegistry identities;
-        private final CoreInstrumentState instrument;
-        private final int settleAssetId;
-        private final int laneId;
-        private final java.util.ArrayList<OrderRuntime> orders = new java.util.ArrayList<>();
-        private final java.util.ArrayList<ReservationRuntime> reservations = new java.util.ArrayList<>();
-        private final java.util.ArrayList<PositionRuntime> positions = new java.util.ArrayList<>();
-        private final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList positionKeys =
-                new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList();
-        private final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList accountUserIds =
-                new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList();
-        private final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList available =
-                new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList();
-        private final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList locked =
-                new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList();
-        private final org.eclipse.collections.impl.list.mutable.primitive.IntArrayList orderAccounts =
-                new org.eclipse.collections.impl.list.mutable.primitive.IntArrayList();
-        private final org.eclipse.collections.impl.list.mutable.primitive.IntArrayList orderPositions =
-                new org.eclipse.collections.impl.list.mutable.primitive.IntArrayList();
-        private final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList leverages =
-                new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList();
-        private final org.eclipse.collections.impl.list.mutable.primitive.IntArrayList operationOrders =
-                new org.eclipse.collections.impl.list.mutable.primitive.IntArrayList();
-        private final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList operationPrices =
-                new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList();
-        private final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList operationQuantities =
-                new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList();
-        private final org.eclipse.collections.impl.list.mutable.primitive.BooleanArrayList operationTakers =
-                new org.eclipse.collections.impl.list.mutable.primitive.BooleanArrayList();
-        private final org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap orderIndexes =
-                new org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap();
-        private final org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap positionIndexes =
-                new org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap();
-        private final org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap accountIndexes =
-                new org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap();
-
-        private PerpetualJournalBuilder(MatcherSettlementPlan plan, RuntimeIdentityRegistry identities,
-                                        CoreInstrumentState instrument, int settleAssetId, int laneId) {
-            this.plan = plan;
-            this.identities = identities;
-            this.instrument = instrument;
-            this.settleAssetId = settleAssetId;
-            this.laneId = laneId;
-        }
-
-        private PerpetualLaneJournal build() {
-            OrderRuntime taker = order(plan.takerOrderId());
-            for (var event : plan.laneEvents(laneId)) {
-                if (topology.accountLaneId(taker.userId()) == laneId) add(taker.orderId(), event.price(), event.size(), true);
-                add(event.matchedOrderId(), event.price(), event.size(), false);
-            }
-            int takerIndex = orderIndexes.get(taker.orderId()) - 1;
-            boolean[] takers = operationTakers.toArray();
-            return new PerpetualLaneJournal(plan.coreSequence(), laneId, accountLaneById(laneId),
-                    orders.toArray(OrderRuntime[]::new), reservations.toArray(ReservationRuntime[]::new),
-                    positions.toArray(PositionRuntime[]::new), positionKeys.toArray(), accountUserIds.toArray(),
-                    available.toArray(), locked.toArray(), orderAccounts.toArray(), orderPositions.toArray(),
-                    leverages.toArray(), operationOrders.toArray(), operationPrices.toArray(),
-                    operationQuantities.toArray(), takers, instrument, settleAssetId, takerIndex);
-        }
-
-        private void add(long orderId, long price, long quantity, boolean taker) {
-            OrderRuntime order = TradingRuntimeState.this.order(orderId);
-            if (order == null || topology.accountLaneId(order.userId()) != laneId) return;
-            int encodedOrderIndex = orderIndexes.get(orderId);
-            int orderIndex;
-            if (encodedOrderIndex == 0) {
-                orderIndex = captureOrder(order);
-                orderIndexes.put(orderId, orderIndex + 1);
-            } else {
-                orderIndex = encodedOrderIndex - 1;
-            }
-            operationOrders.add(orderIndex);
-            operationPrices.add(price);
-            operationQuantities.add(quantity);
-            operationTakers.add(taker);
-        }
-
-        private int captureOrder(OrderRuntime order) {
-            ReservationRuntime reservation = TradingRuntimeState.this.reservation(order.orderId());
-            BalanceRuntime balance = TradingRuntimeState.this.balance(order.userId(), settleAssetId);
-            if (reservation == null || balance == null) throw new IllegalStateException("fill entities are missing");
-            int encodedAccountIndex = accountIndexes.get(order.userId());
-            int accountIndex;
-            if (encodedAccountIndex == 0) {
-                accountIndex = accountUserIds.size();
-                accountUserIds.add(order.userId());
-                available.add(balance.availableUnits());
-                locked.add(balance.lockedUnits());
-                accountIndexes.put(order.userId(), accountIndex + 1);
-            } else {
-                accountIndex = encodedAccountIndex - 1;
-            }
-            String identity = order.positionSide() == CorePositionSide.NET
-                    ? instrument.symbol() : instrument.symbol() + ':' + order.positionSide().name();
-            long positionKey = identities.preparedPositionKey(order.userId(), identity);
-            int encodedPositionIndex = positionIndexes.get(positionKey);
-            int positionIndex;
-            if (encodedPositionIndex == 0) {
-                positionIndex = positionKeys.size();
-                positionKeys.add(positionKey);
-                positions.add(position(positionKey));
-                positionIndexes.put(positionKey, positionIndex + 1);
-            } else {
-                positionIndex = encodedPositionIndex - 1;
-            }
-            Long leverage = TradingRuntimeState.this.leverage(
-                    new CoreLeverageKey(order.userId(), instrument.symbol(), order.marginMode()));
-            int index = orders.size();
-            orders.add(order);
-            reservations.add(reservation);
-            orderAccounts.add(accountIndex);
-            orderPositions.add(positionIndex);
-            leverages.add(leverage == null ? instrument.maxLeveragePpm() : leverage);
-            return index;
-        }
     }
 
     public RuntimeTreasuryDelta[] applyNoTradeMatcherSettlements(
@@ -1347,12 +1136,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         RuntimePerpetualMatchProcessor.validateAndPrepareBatch(
                 takerOrderIds, matchingResults, this, identities, perpetualBatchValidationScratch);
 
-        RuntimeTreasuryDelta[] deltas = new RuntimeTreasuryDelta[accountLanes.length];
-        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            if ((selectedLaneMask & (1L << laneId)) == 0) continue;
-            int currentLaneId = laneId;
-            AccountLaneState lane = accountLanes[laneId];
-            deltas[laneId] = inLaneCommandScope(lane, ignored -> {
+        Object[] laneResults = executeLaneMutations(
+                selectedLaneMask, Math.max(1, settlements.size()), true, currentLaneId -> {
                 RuntimeTreasuryDelta combined = new RuntimeTreasuryDelta(RuntimeTreasuryDelta.ORDER_BATCH_CAPACITY);
                 for (PerpetualMatcherSettlement settlement : settlements) {
                     if ((settlement.expectedLaneMask() & (1L << currentLaneId)) == 0) continue;
@@ -1362,6 +1147,11 @@ public final class TradingRuntimeState implements AutoCloseable {
                 }
                 return combined;
             });
+        RuntimeTreasuryDelta[] deltas = new RuntimeTreasuryDelta[accountLanes.length];
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            if ((selectedLaneMask & (1L << laneId)) != 0) {
+                deltas[laneId] = (RuntimeTreasuryDelta) laneResults[laneId];
+            }
         }
         for (PerpetualMatcherSettlement settlement : settlements) {
             recordMatcherSettlementChanges(settlement.takerOrderId(), settlement.matchingResult(), identities,
@@ -2552,8 +2342,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             return null;
         });
         publishPosition(positionKey, position);
-        positionLaneIds.put(positionKey, topology.accountLaneId(position.userId()) + 1L);
         if (laneCommandScope.get() == null) {
+            positionLaneIds.put(positionKey, topology.accountLaneId(position.userId()) + 1L);
             changedPositions.add(positionKey);
             changedUsers.add(position.userId());
             if (previous != null) changedUsers.add(previous.userId());
@@ -2987,7 +2777,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                                                   RuntimeIdentityRegistry identities,
                                                   long previousRevision,
                                                   CoreMatcherTransition matcherTransition,
-                                                  List<RuntimeCommitPatch.LaneCommit> laneCommits,
+                                                  long committedLaneMask,
                                                   long beforeBusinessStateHash,
                                                   long businessStateHash,
                                                   long beforeFundsStateHash,
@@ -2999,9 +2789,9 @@ public final class TradingRuntimeState implements AutoCloseable {
                 || matcherTransition == null) {
             throw new IllegalArgumentException("invalid runtime commit patch capture");
         }
-        if (laneCommits != null && !laneCommits.isEmpty()
-                && laneCommits.getFirst().coreSequence() != coreSequence) {
-            throw new IllegalArgumentException("runtime commit core sequence does not match lane commit");
+        long validLaneMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;
+        if (committedLaneMask < 0 || (committedLaneMask & ~validLaneMask) != 0) {
+            throw new IllegalArgumentException("invalid runtime commit lane mask");
         }
         RuntimeCommitPatch.Builder builder = activePatchBuilder
                 .sequences(previousCoreSequence, coreSequence,
@@ -3138,16 +2928,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (patchRiskScanControlChanged) {
             builder.recordRiskScanControl(patchRiskScanControlBefore, riskScanControl);
         }
-        if (laneCommits == null || laneCommits.isEmpty()) {
-            java.util.List<Integer> changedLaneIds = builder.changedLaneIds().stream().sorted().toList();
-            for (int ownerGroupOffset = 0; ownerGroupOffset < changedLaneIds.size(); ownerGroupOffset++) {
-                int laneId = changedLaneIds.get(ownerGroupOffset);
-                AccountLaneView lane = accountLaneById(laneId);
-                builder.addLaneCommit(new RuntimeCommitPatch.LaneCommit(laneId, coreSequence, coreSequence,
-                        ownerGroupOffset, ownerGroupOffset + 1, lane.revision(), lane.revision(),
-                        lane.localStateHash(), lane.localStateHash(), lane.localFundsHash(), lane.localFundsHash()));
-            }
-        }
+        long changedLaneMask = builder.changedLaneMask();
+        builder.laneMask(committedLaneMask == 0 ? changedLaneMask : committedLaneMask);
         return new PreparedCommit(builder, identities, new RuntimeCommitPatch.SealMetadata(previousRevision,
                 Math.subtractExact(revision, totalPendingReservations), beforeBusinessStateHash,
                 businessStateHash, beforeFundsStateHash, fundsStateHash, builder.laneMask(), null,

@@ -66,7 +66,7 @@ class TradingCoreRuntimeAuthorityTest {
         assertThat(deletedTokens(production)).isEmpty();
 
         String probe = source("CoreProbeState.java");
-        int start = probe.indexOf("    private void projectSnapshotNow(\n            List<");
+        int start = probe.indexOf("    private void projectSnapshotNow(long committedLaneMask)");
         int end = probe.indexOf("    private void publishSealedCommit(", start);
         assertThat(start).isGreaterThanOrEqualTo(0);
         assertThat(end).isGreaterThan(start);

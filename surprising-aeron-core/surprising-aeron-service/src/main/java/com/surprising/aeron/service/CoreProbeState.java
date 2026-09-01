@@ -132,8 +132,6 @@ public final class CoreProbeState implements AutoCloseable {
             "surprising.aeron.matching-phase-log-interval", 0);
     private static final int MATCHING_COMPLETION_SPINS = Math.max(0, Integer.getInteger(
             "surprising.aeron.matching-completion-spins", 1_024));
-    private static final int PARALLEL_SETTLEMENT_MIN_TRADES = Math.max(2, Integer.getInteger(
-            "surprising.aeron.parallel-settlement-min-trades", 8));
     private static final long MATCHING_AWAIT_TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(30);
     private static final boolean MATCHING_PHASE_METRICS_ENABLED = MATCHING_PHASE_LOG_INTERVAL > 0;
     private static final int STANDALONE_SNAPSHOT_TIMEOUT_SECONDS = Integer.getInteger(
@@ -440,9 +438,10 @@ public final class CoreProbeState implements AutoCloseable {
         if (message.header().kind() == WireMessageKind.QUERY
                 && accountLaneReadQuery(message.header().messageType())) {
             if (singleUserLaneQuery(message.header().messageType()) && message.header().userId() > 0) {
-                runtimePlaceOrderState.readFence(message.header().userId(), committedCoreSequence);
+                runtimePlaceOrderState.readFence(
+                        message.header().userId(), runtimeProjectionJournal.publishedSequence());
             } else {
-                runtimePlaceOrderState.readFenceAll(committedCoreSequence);
+                runtimePlaceOrderState.readFenceAll(runtimeProjectionJournal.publishedSequence());
             }
         }
         if (message.header().kind() == WireMessageKind.QUERY
@@ -930,7 +929,7 @@ public final class CoreProbeState implements AutoCloseable {
         }
         long nextAppliedCommandCount = Math.incrementExact(appliedCommandCount);
         LaneCommandContextRing.Context commandLaneContext = null;
-        List<com.surprising.aeron.service.state.RuntimeCommitPatch.LaneCommit> laneApply = List.of();
+        long committedLaneMask = 0;
         try {
             materializeChangeAccumulators();
             try {
@@ -950,15 +949,15 @@ public final class CoreProbeState implements AutoCloseable {
                 commandLaneContext.result(new com.surprising.aeron.service.matching.CoreMatchingResult(
                                 true, "NO_NATIVE_COMMAND").withCoreSequence(nextAppliedCommandCount),
                         expectedLaneMask, validAccountLaneMask());
-                laneApply = applyAndCommitLaneSequence(nextAppliedCommandCount,
-                        commandDelta.userIds(), commandLaneContext.matchingResult(),
+                committedLaneMask = stageLaneMutation(nextCommitSequence(),
+                        commandDelta.userIds(),
                         rollingBusinessStateHash.value(), rollingFundsStateHash.value(), commandLaneContext);
                 if (commandLaneContext.completedLaneMask() != expectedLaneMask) {
                     throw new IllegalStateException("single command account lane mask mismatch");
                 }
                 requireCompleteAccountLanes(commandLaneContext);
             }
-            completeSnapshotProjectionBatch(laneApply);
+            completeSnapshotProjectionBatch(committedLaneMask);
             if (status == ResponseStatus.APPLIED) {
                 validateFundsConservation(message);
             }
@@ -1735,14 +1734,14 @@ public final class CoreProbeState implements AutoCloseable {
         RuntimeTreasuryDelta[] laneTreasuryDeltas = batch.laneTreasuryDeltas == null
                 ? new RuntimeTreasuryDelta[matchingAdapter.topology().accountLaneCount()]
                 : batch.laneTreasuryDeltas;
-        List<com.surprising.aeron.service.state.RuntimeCommitPatch.LaneCommit> laneApply;
+        long committedLaneMask;
         try {
             RuntimeTreasuryDelta expectedTreasuryDelta = mergeTreasuryDeltas(laneTreasuryDeltas);
             expectedTreasuryDelta.apply(runtimePlaceOrderState.treasury());
             runtimePlaceOrderState.setMetadata(productLine,
                     Math.incrementExact(runtimePlaceOrderState.revision()));
-            laneApply = applyAndCommitLaneSequence(batch.sequence, commandChangedUserIds,
-                    laneContext.matchingResult(), rollingBusinessStateHash.value(), rollingFundsStateHash.value(),
+            committedLaneMask = stageLaneMutation(nextCommitSequence(), commandChangedUserIds,
+                    rollingBusinessStateHash.value(), rollingFundsStateHash.value(),
                     laneContext);
             if (laneContext.completedLaneMask() != laneContext.expectedLaneMask()) {
                 throw new IllegalStateException("order batch account lane mask mismatch");
@@ -1751,7 +1750,7 @@ public final class CoreProbeState implements AutoCloseable {
         } catch (RuntimeException validationFailure) {
             throw failOrderBatch(batch, pending, "order batch final validation failed", validationFailure);
         }
-        completeSnapshotProjectionBatch(laneApply);
+        completeSnapshotProjectionBatch(committedLaneMask);
         materializeChangeAccumulators();
         java.util.ArrayList<CoreOrderBatchResult.Item> resultItems = new java.util.ArrayList<>(batch.results.size());
         java.util.ArrayList<CoreExecutionView> executions = new java.util.ArrayList<>();
@@ -3105,8 +3104,7 @@ public final class CoreProbeState implements AutoCloseable {
         transferMatchingCompletion(sequence);
         if (pendingMatching.isEmpty() || pendingMatching.firstSequence() != sequence) return null;
         LaneCommandContextRing.Context context = laneCommandContexts.required(sequence);
-        return context.settlementDispatched()
-                ? context.matchingResult() : context.takeMatchingCompletion();
+        return context.takeMatchingCompletion();
     }
 
     boolean establishMatchingCommitFence(long sequence, long clusterTimestamp, long clusterPosition) {
@@ -3194,22 +3192,12 @@ public final class CoreProbeState implements AutoCloseable {
         clusterPosition = pending.commitFenceClusterPosition();
         currentClusterPosition = clusterPosition;
         LaneCommandContextRing.Context laneContext = laneCommandContexts.required(sequence);
-        boolean resumingSettlement = laneContext.settlementDispatched();
-        if (resumingSettlement) {
-            matchingResult = laneContext.matchingResult();
-            if (!laneContext.settlementReady()) return null;
-            Throwable failure = laneContext.settlementFailure();
-            if (failure != null) {
-                matchingAdapter.poisonFromOwner("account lane calculation failed sequence=" + sequence);
-                throw failMatching(pending, "account lane calculation failed", failure);
-            }
-        }
-        if (!resumingSettlement && MATCHING_PHASE_METRICS_ENABLED) {
+        if (MATCHING_PHASE_METRICS_ENABLED) {
             Long submitNanos = matchingSubmitNanos.remove(sequence);
             if (submitNanos != null) matchingPhaseMetrics.recordExchange(System.nanoTime() - submitNanos);
         }
         long applyStartNanos = System.nanoTime();
-        if (!resumingSettlement && matchingResultNeedsRecovery(pending, matchingResult)) {
+        if (matchingResultNeedsRecovery(pending, matchingResult)) {
             OrderBatchPending failedBatch = pendingOrderBatches.get(sequence);
             Throwable failure = failedBatch == null ? null : failedBatch.pipelinedMatchingFailure;
             String detail = "matcher continuation returned " + matchingResult.resultCode()
@@ -3220,13 +3208,11 @@ public final class CoreProbeState implements AutoCloseable {
             throw failMatching(pending, detail, failure);
         }
         int matcherShardId = matchingResult.nativeCommand().matcherShardId();
-        long matcherSequenceBefore = resumingSettlement
-                ? matchingResult.nativeCommand().matcherSequence() - 1 : matcherSequence(matcherShardId);
-        long matcherPrefixBefore = resumingSettlement
-                ? matchingResult.matcherPrefix().before() : matcherPrefixDigest(matcherShardId);
+        long matcherSequenceBefore = matcherSequence(matcherShardId);
+        long matcherPrefixBefore = matcherPrefixDigest(matcherShardId);
         var matchingRuntimeCheckpoint = runtimePlaceOrderState.commandCheckpoint();
         long matchingPositionIdentityCheckpoint = runtimePlaceOrderIdentities.positionCheckpoint();
-        if (!resumingSettlement && !BENCHMARK_SKIP_MATCHING_SUBMIT) {
+        if (!BENCHMARK_SKIP_MATCHING_SUBMIT) {
             validateMatchingEvidence(pending, matchingResult);
             applyMatcherProgress(matchingResult);
         }
@@ -3234,25 +3220,14 @@ public final class CoreProbeState implements AutoCloseable {
             return completeOrderBatchMatching(sequence, matchingResult, clusterTimestamp, clusterPosition);
         }
         com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan =
-                resumingSettlement ? laneContext.settlementPlan()
-                        : initialMatcherSettlementPlan(pending, matchingResult);
-        if (!resumingSettlement && settlementPlan != null) {
-            laneContext.result(matchingResult, settlementPlan, settlementPlan.requiredLaneMask(),
+                initialMatcherSettlementPlan(pending, matchingResult);
+        if (settlementPlan != null) {
+            laneContext.result(matchingResult, settlementPlan.requiredLaneMask(),
                     validAccountLaneMask());
-        } else if (!resumingSettlement && !(matchingResult.accepted()
+        } else if (!(matchingResult.accepted()
                 && (pending.operation() == PendingMatching.Operation.REPLACE
                 || pending.operation() == PendingMatching.Operation.AMEND))) {
             laneContext.result(matchingResult, expectedLaneMask(pending, matchingResult), validAccountLaneMask());
-        }
-        if (!resumingSettlement && matchingResult.accepted() && productLine.isDerivative()
-                && settlementPlan != null
-                && settlementPlan.tradeEvents().size() >= PARALLEL_SETTLEMENT_MIN_TRADES
-                && Long.bitCount(settlementPlan.requiredLaneMask()) > 1
-                && (pending.operation() == PendingMatching.Operation.PLACE
-                || pending.operation() == PendingMatching.Operation.TRIGGER)) {
-            laneContext.dispatch(runtimePlaceOrderState.dispatchPerpetualSettlement(
-                    settlementPlan, runtimePlaceOrderIdentities));
-            return null;
         }
         RuntimeProjectionPoint beforeProjection = pending.beforeProjection();
         commandOrderViews = List.of();
@@ -3322,7 +3297,7 @@ public final class CoreProbeState implements AutoCloseable {
                                 sequence, command.orderId(), admission.userId(),
                                 new long[]{originalOrderId, command.orderId()}, matchingResult,
                                 runtimePlaceOrderState, runtimePlaceOrderIdentities);
-                        laneContext.result(matchingResult, settlementPlan, settlementPlan.requiredLaneMask(),
+                        laneContext.result(matchingResult, settlementPlan.requiredLaneMask(),
                                 validAccountLaneMask());
                         commandChangedUserIds = boxedLongs(settlementPlan.userIds());
                         commandChangedOrderIds = boxedLongs(settlementPlan.orderIds());
@@ -3431,14 +3406,15 @@ public final class CoreProbeState implements AutoCloseable {
         }
         try {
             materializeChangeAccumulators();
-            var laneApply = applyAndCommitLaneSequence(pending.sequence(), changedUserIds.toPrimitiveArray(),
-                    laneContext.matchingResult(), rollingBusinessStateHash.value(), rollingFundsStateHash.value(),
+            long committedLaneMask = stageLaneMutation(
+                    nextCommitSequence(), changedUserIds.toPrimitiveArray(),
+                    rollingBusinessStateHash.value(), rollingFundsStateHash.value(),
                     laneContext);
             if (laneContext.completedLaneMask() != laneContext.expectedLaneMask()) {
                 throw failMatching(pending, "account lane mask differs from immutable matcher result", null);
             }
             requireCompleteAccountLanes(laneContext);
-            completeSnapshotProjectionBatch(laneApply);
+            completeSnapshotProjectionBatch(committedLaneMask);
             if (!commandChangedOrderIds.isEmpty()) {
                 materializeCommandOrderViews();
             }
@@ -5284,18 +5260,17 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private void completeSnapshotProjectionBatch() {
-        completeSnapshotProjectionBatch(null);
+        completeSnapshotProjectionBatch(0);
     }
 
-    private void completeSnapshotProjectionBatch(
-            List<com.surprising.aeron.service.state.RuntimeCommitPatch.LaneCommit> laneCommits) {
+    private void completeSnapshotProjectionBatch(long committedLaneMask) {
         boolean dirty = snapshotProjectionDirty;
         boolean provisionalOnly = snapshotProjectionProvisionalOnly;
         snapshotProjectionDeferred = false;
         snapshotProjectionDirty = false;
         snapshotProjectionProvisionalOnly = false;
         if (dirty && provisionalOnly) runtimePlaceOrderState.clearChangedKeys();
-        else if (dirty) projectSnapshotNow(laneCommits);
+        else if (dirty) projectSnapshotNow(committedLaneMask);
     }
 
     private void abortSnapshotProjectionBatch() {
@@ -5305,11 +5280,10 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private void projectSnapshotNow() {
-        projectSnapshotNow(null);
+        projectSnapshotNow(0);
     }
 
-    private void projectSnapshotNow(
-            List<com.surprising.aeron.service.state.RuntimeCommitPatch.LaneCommit> laneCommits) {
+    private void projectSnapshotNow(long committedLaneMask) {
         long projectionSequence = Math.incrementExact(runtimeProjectionJournal.publishedSequence());
         long previousBusinessStateHash = cachedBusinessStateHash;
         long previousFundsStateHash = rollingFundsStateHash.value();
@@ -5322,6 +5296,16 @@ public final class CoreProbeState implements AutoCloseable {
         CoreExportState.PatchChain nextFactPatchChain = null;
         UUID factCommandId = null;
         boolean indexesApplied = false;
+        boolean retentionOnly = currentAdmission == null;
+        long previousCoreSequence = Math.subtractExact(projectionSequence, 1);
+        long businessCommitSequence = rollingBusinessStateHash.coreSequence();
+        if (rollingFundsStateHash.coreSequence() != businessCommitSequence) {
+            throw new IllegalStateException("business and funds commit sequence differ");
+        }
+        if (businessCommitSequence != Long.MIN_VALUE && businessCommitSequence != previousCoreSequence) {
+            throw new IllegalStateException("rolling hash and projection commit sequence differ");
+        }
+        long coreSequence = projectionSequence;
         try {
             commitFaultInjector.inject("preflight");
             if (currentAdmission == null && currentRetentionAdmission == null
@@ -5329,16 +5313,10 @@ public final class CoreProbeState implements AutoCloseable {
                 throw new IllegalStateException("Core Fact metadata must be admitted before runtime mutation");
             }
             if (currentAdmission != null) factPermit = currentAdmission.reserveFactPatch();
-            boolean retentionOnly = currentAdmission == null;
-            long coreSequence = retentionOnly ? committedCoreSequence
-                    : laneCommits == null || laneCommits.isEmpty()
-                    ? Math.incrementExact(appliedCommandCount) : laneCommits.getFirst().coreSequence();
-            long previousCoreSequence = retentionOnly
-                    ? coreSequence : Math.subtractExact(coreSequence, 1);
             preparedCommit = runtimePlaceOrderState.prepareCommitPatch(
                     projectionSequence, previousCoreSequence, coreSequence,
                     runtimePlaceOrderIdentities,
-                    runtimePatchRevision, commandMatcherTransition, laneCommits,
+                    runtimePatchRevision, commandMatcherTransition, committedLaneMask,
                     previousBusinessStateHash, previousBusinessStateHash,
                     previousFundsStateHash, previousFundsStateHash, commandExternalAdjustment);
             preparedCommit.builder().coreFactValues(
@@ -5350,7 +5328,8 @@ public final class CoreProbeState implements AutoCloseable {
             var factMetadata = new com.surprising.aeron.service.state.RuntimeCommitPatch.CoreFactMetadata(
                     activeFactCommand.header().commandId(), activeFactFingerprint,
                     activeFactCommand.header().messageType().wireCode(), activeFactCommand.header().userId(),
-                    ResponseStatus.APPLIED, CoreResultCode.NONE, coreSequence, currentClusterPosition,
+                    ResponseStatus.APPLIED, CoreResultCode.NONE, activeFactAppliedCommandCount(retentionOnly),
+                    currentClusterPosition,
                     activeFactTopologyHash, activeFactLaneRevisionHash, commandExternalAdjustment);
             var baseMetadata = preparedCommit.metadata();
             preparedChanges = preparedCommit.builder().prepare(
@@ -5361,15 +5340,10 @@ public final class CoreProbeState implements AutoCloseable {
                             preparedCommit.identities());
             long nextBusinessStateHash;
             long nextFundsStateHash;
-            if (retentionOnly) {
-                nextBusinessStateHash = previousBusinessStateHash;
-                nextFundsStateHash = previousFundsStateHash;
-            } else {
-                businessTransition = rollingBusinessStateHash.prepareApplied(preparedChanges);
-                fundsTransition = rollingFundsStateHash.prepareApplied(preparedChanges);
-                nextBusinessStateHash = canonicalBusinessStateHash(businessTransition.afterHash());
-                nextFundsStateHash = fundsTransition.afterHash();
-            }
+            businessTransition = rollingBusinessStateHash.prepareApplied(preparedChanges);
+            fundsTransition = rollingFundsStateHash.prepareApplied(preparedChanges);
+            nextBusinessStateHash = canonicalBusinessStateHash(businessTransition.afterHash());
+            nextFundsStateHash = fundsTransition.afterHash();
             commit = preparedCommit.seal(preparedChanges, nextBusinessStateHash, nextFundsStateHash);
             if (factPermit != null) {
                 factPermit.consume(commit);
@@ -5380,12 +5354,10 @@ public final class CoreProbeState implements AutoCloseable {
             runtime.commitRuntimeTransition(commit, previousBusinessStateHash, nextBusinessStateHash);
             indexesApplied = true;
             commitFaultInjector.inject("indexes");
-            if (!retentionOnly) {
-                businessTransition.commit();
-                commitFaultInjector.inject("business-hash");
-                fundsTransition.commit();
-                commitFaultInjector.inject("funds-hash");
-            }
+            businessTransition.commit();
+            commitFaultInjector.inject("business-hash");
+            fundsTransition.commit();
+            commitFaultInjector.inject("funds-hash");
             if (currentAdmission != null) {
                 publishSealedCommit(commit, nextBusinessStateHash, nextFundsStateHash);
             } else {
@@ -5393,9 +5365,9 @@ public final class CoreProbeState implements AutoCloseable {
                         nextBusinessStateHash, nextFundsStateHash);
             }
         } catch (RuntimeException failure) {
-            if (laneCommits != null && !laneCommits.isEmpty()) {
+            if (committedLaneMask != 0) {
                 try {
-                    runtimePlaceOrderState.rollbackLaneSequence(laneCommits);
+                    runtimePlaceOrderState.rollbackLaneSequence(coreSequence, committedLaneMask);
                 } catch (RuntimeException cleanupFailure) {
                     failure.addSuppressed(cleanupFailure);
                 }
@@ -5441,7 +5413,9 @@ public final class CoreProbeState implements AutoCloseable {
         }
         seedChangeAccumulators();
         commit.acceptChangedUserIds(changedUserIds::add);
-        if (laneCommits != null) runtimePlaceOrderState.commitLaneSequence(laneCommits);
+        if (committedLaneMask != 0) {
+            runtimePlaceOrderState.commitLaneSequence(commit.coreSequence(), committedLaneMask);
+        }
         commandFundsDelta = commandFundsDelta.plus(commit.fundsDelta());
         currentProjectionPoint = commit.projectionPoint();
         if (factCommandId != null) factPatchChains.put(factCommandId, nextFactPatchChain);
@@ -5760,10 +5734,6 @@ public final class CoreProbeState implements AutoCloseable {
             long coreSequence,
             com.surprising.aeron.service.matching.CoreMatchingResult matchingResult,
             LaneCommandContextRing.Context laneContext) {
-        if (laneContext.settlementDispatched()) {
-            return runtimePlaceOrderState.applyPreparedPerpetualSettlement(
-                    settlementPlan, laneContext.settlementJournals(), runtimePlaceOrderIdentities);
-        }
         return runtimePlaceOrderState.applyMatcherSettlement(
                 coreSequence, laneContext.expectedLaneMask(), settlementPlan,
                 matchingResult, runtimePlaceOrderIdentities);
@@ -5934,40 +5904,38 @@ public final class CoreProbeState implements AutoCloseable {
         return hash == 0 ? 1 : hash;
     }
 
-    private List<com.surprising.aeron.service.state.RuntimeCommitPatch.LaneCommit>
-    applyAndCommitLaneSequence(
+    private long stageLaneMutation(
             long sequence, Iterable<Long> userIds,
-            com.surprising.aeron.service.matching.CoreMatchingResult matchingResult,
             long stateContribution, long fundsContribution, LaneCommandContextRing.Context context) {
         if (context == null || sequence <= 0) {
             throw new IllegalStateException("account lane commit context is missing");
         }
-        List<com.surprising.aeron.service.state.RuntimeCommitPatch.LaneCommit> laneCommits =
-                runtimePlaceOrderState.applyAndCommitLaneSequence(sequence, userIds, matchingResult,
-                        stateContribution, fundsContribution);
-        for (com.surprising.aeron.service.state.RuntimeCommitPatch.LaneCommit laneCommit : laneCommits) {
-            context.completeLane(laneCommit.laneId(), laneCommit.afterRevision(),
-                    laneCommit.afterHash(), laneCommit.afterFundsHash());
-        }
-        return laneCommits;
+        long laneMask = runtimePlaceOrderState.stageLaneMutation(
+                sequence, userIds, stateContribution, fundsContribution);
+        context.completeLanes(laneMask);
+        return laneMask;
     }
 
-    private List<com.surprising.aeron.service.state.RuntimeCommitPatch.LaneCommit>
-    applyAndCommitLaneSequence(
+    private long nextCommitSequence() {
+        return Math.incrementExact(runtimeProjectionJournal.publishedSequence());
+    }
+
+    private long activeFactAppliedCommandCount(boolean retentionOnly) {
+        if (retentionOnly) return appliedCommandCount;
+        PendingMatching pending = pendingMatching.findByCommandId(activeFactCommand.header().commandId());
+        return pending == null ? Math.incrementExact(appliedCommandCount) : pending.sequence();
+    }
+
+    private long stageLaneMutation(
             long sequence, long[] userIds,
-            com.surprising.aeron.service.matching.CoreMatchingResult matchingResult,
             long stateContribution, long fundsContribution, LaneCommandContextRing.Context context) {
         if (context == null || sequence <= 0) {
             throw new IllegalStateException("account lane commit context is missing");
         }
-        List<com.surprising.aeron.service.state.RuntimeCommitPatch.LaneCommit> laneCommits =
-                runtimePlaceOrderState.applyAndCommitLaneSequence(sequence, userIds, matchingResult,
-                        stateContribution, fundsContribution);
-        for (com.surprising.aeron.service.state.RuntimeCommitPatch.LaneCommit laneCommit : laneCommits) {
-            context.completeLane(laneCommit.laneId(), laneCommit.afterRevision(),
-                    laneCommit.afterHash(), laneCommit.afterFundsHash());
-        }
-        return laneCommits;
+        long laneMask = runtimePlaceOrderState.stageLaneMutation(
+                sequence, userIds, stateContribution, fundsContribution);
+        context.completeLanes(laneMask);
+        return laneMask;
     }
 
     private long appendRejectedCoreFact(CoreMessage command, CommandFingerprint fingerprint,

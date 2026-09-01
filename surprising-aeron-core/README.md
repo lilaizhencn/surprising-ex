@@ -110,12 +110,13 @@ Matcher Lane 直接复用 exchange-core 原生 MatchingEngineRouter shard，Acco
 生产默认 `accountLaneCount=4`；`MatcherSettlementPlan` 单次遍历 matcher events，生成按 Lane 切分的只读事件视图，
 每个 Lane 只处理自己的用户和成交，不再重复扫描完整结果。Treasury 保持 Sequencer owner。全局 Core
 sequence、Core Fact、snapshot 和恢复仍由一个确定性 Sequencer 协调。默认 topology 为 4 个 native matcher shard、
-1 个 risk engine、4 个 Account Lane、一个 Sequencer-owned Treasury；matcher pipeline、pending reservation 隐藏、原生 Lane commit
-位图、全局 commit cursor 和实际 Lane snapshot section 已落地。小于并行阈值的普通成交由 owner 原地结算，避免任务切换；
-大额多成交由按需创建的 `SettlementLaneWorker` 并行计算纯 `PerpetualLaneJournal`，worker 不写 Runtime State。
-owner 不等待 Future、ACK 或逐命令 barrier，而是在后续 duty cycle 轮询完成位图；只有所需 Lane 全部成功且 Core sequence
-连续时，才按 Lane 顺序一次性应用 journal、合并 Treasury delta、提交 Runtime State/Core Fact，对外保持原子可见。
-BLOCKING worker 空闲时无限 park，由生产者唤醒；也可显式切换 BUSY_SPIN 或 YIELDING。
+1 个 risk engine、4 个 Account Lane、一个 Sequencer-owned Treasury；matcher pipeline、pending reservation 隐藏、Lane commit
+位图、全局 commit cursor 和实际 Lane snapshot section 已落地。账户、风险、生命周期和撮合成交统一调用同一个 Lane mutation
+入口：单 Lane 或短操作由 owner 内联执行，多 Lane 成交按 userId 路由后由对应 `SettlementLaneWorker` 直接修改该 Lane 的权威
+Runtime State，两者只在调度方式上不同，不再维护 journal/replay 结算分支。owner 只在一次命令的所有目标 Lane 完成后等待一次
+统一 barrier，随后合并 Treasury delta、验证资金守恒并以同一个连续 commit sequence 发布 Runtime State/Core Fact；任一 Lane
+失败则整条命令 fail closed 并按命令 checkpoint 回滚，对外不会暴露部分成交。BLOCKING worker 空闲时无限 park，由生产者唤醒；
+也可显式切换 BUSY_SPIN 或 YIELDING。
 P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣称生产认证完成。
 
 ## 协议约束

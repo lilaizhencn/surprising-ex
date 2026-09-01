@@ -574,12 +574,9 @@ class TradingRuntimeStateTest {
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
         state.startAccountLanes();
         try {
-            var result = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
-                    .withCoreSequence(1);
-            var apply = state.applyAndCommitLaneSequence(
-                    1, java.util.List.of(7L), result, 3, 5);
-            assertThat(apply).hasSize(1);
-            state.commitLaneSequence(apply);
+            var apply = state.stageLaneMutation(1, java.util.List.of(7L), 3, 5);
+            assertThat(apply).isEqualTo(1L << LaneTopology.characterization().accountLaneId(7));
+            state.commitLaneSequence(1, apply);
             state.readFence(7, 1);
 
             AccountLaneView lane = state.accountLane(7);
@@ -602,11 +599,8 @@ class TradingRuntimeStateTest {
         state.putUser(new UserRuntime(userInLastLane));
         state.startAccountLanes();
         try {
-            var result = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
-                    .withCoreSequence(1);
-            var apply = state.applyAndCommitLaneSequence(
-                    1, java.util.List.of(userInLastLane), result, 3, 5);
-            state.commitLaneSequence(apply);
+            var apply = state.stageLaneMutation(1, java.util.List.of(userInLastLane), 3, 5);
+            state.commitLaneSequence(1, apply);
             state.readFenceAll(1);
             assertThat(state.accountLaneById(0).committedSequence()).isEqualTo(1);
         } finally {
@@ -624,10 +618,8 @@ class TradingRuntimeStateTest {
         state.putUser(new UserRuntime(laneOneUser));
         state.startAccountLanes();
         try {
-            var result = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
-                    .withCoreSequence(1);
-            var apply = state.applyAndCommitLaneSequence(1, java.util.List.of(laneZeroUser, laneOneUser),
-                    result, 3, 5);
+            var apply = state.stageLaneMutation(
+                    1, java.util.List.of(laneZeroUser, laneOneUser), 3, 5);
 
             assertThat(state.accountLaneById(0).appliedSequence()).isEqualTo(1);
             assertThat(state.accountLaneById(1).appliedSequence()).isEqualTo(1);
@@ -636,7 +628,7 @@ class TradingRuntimeStateTest {
             assertThatThrownBy(() -> state.readFence(laneZeroUser, 1))
                     .isInstanceOf(IllegalStateException.class);
 
-            state.commitLaneSequence(apply);
+            state.commitLaneSequence(1, apply);
             assertThat(state.accountLaneById(0).committedSequence()).isEqualTo(1);
             assertThat(state.accountLaneById(1).committedSequence()).isEqualTo(1);
         } finally {
@@ -645,7 +637,7 @@ class TradingRuntimeStateTest {
     }
 
     @Test
-    void laneCommitMetadataCoversAllFourLanesAndTheEmptyApply() {
+    void laneCompletionMaskCoversAllFourLanesAndTheEmptyApply() {
         LaneTopology topology = LaneTopology.productionDefault();
         TradingRuntimeState state = new TradingRuntimeState(topology);
         java.util.List<Long> users = new java.util.ArrayList<>();
@@ -655,29 +647,16 @@ class TradingRuntimeStateTest {
             state.putUser(new UserRuntime(userId));
         }
         state.clearChangedKeys();
-        var result = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
-                .withCoreSequence(1);
+        long committedLaneMask = state.stageLaneMutation(1, users, 3, 5);
 
-        java.util.List<RuntimeCommitPatch.LaneCommit> commits = state.applyAndCommitLaneSequence(
-                1, users, result, 3, 5);
-
-        assertThat(commits).extracting(RuntimeCommitPatch.LaneCommit::laneId)
-                .containsExactly(0, 1, 2, 3);
-        assertThat(commits).allSatisfy(commit -> {
-            assertThat(commit.appliedSequence()).isEqualTo(1);
-            assertThat(commit.committedSequence()).isEqualTo(1);
-            assertThat(commit.ownerGroupStartInclusive()).isEqualTo(commit.laneId());
-            assertThat(commit.ownerGroupEndExclusive()).isEqualTo(commit.laneId() + 1);
-        });
-        state.commitLaneSequence(commits);
+        assertThat(committedLaneMask).isEqualTo(0b1111);
+        state.commitLaneSequence(1, committedLaneMask);
         for (int laneId = 0; laneId < topology.accountLaneCount(); laneId++) {
             assertThat(state.accountLaneById(laneId).appliedSequence()).isEqualTo(1);
             assertThat(state.accountLaneById(laneId).committedSequence()).isEqualTo(1);
         }
         state.clearChangedKeys();
-        var emptyResult = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
-                .withCoreSequence(2);
-        assertThat(state.applyAndCommitLaneSequence(2, java.util.List.of(), emptyResult, 7, 11)).isEmpty();
+        assertThat(state.stageLaneMutation(2, java.util.List.of(), 7, 11)).isZero();
     }
 
     @Test
@@ -687,17 +666,14 @@ class TradingRuntimeStateTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         long changedUser = userForLane(topology, 0);
         state.putUser(new UserRuntime(changedUser));
-        RuntimeCommitPatch.LaneCommit unrelated = new RuntimeCommitPatch.LaneCommit(
-                1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0);
-
         TradingRuntimeState.PreparedCommit prepared = state.prepareCommitPatch(
                 1, 0, 1, identities, 0,
                 com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0),
-                java.util.List.of(unrelated), 0, 0, 0, 0, true);
+                1L << 1, 0, 0, 0, 0, true);
 
         assertThatThrownBy(prepared::prepareChanges)
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("every changed lane");
+                .hasMessageContaining("lane mask must equal changed lane mask");
         assertThat(state.accountLaneById(0).appliedSequence()).isZero();
         assertThat(state.accountLaneById(0).committedSequence()).isZero();
     }
@@ -720,7 +696,7 @@ class TradingRuntimeStateTest {
 
         assertThat(state.currentPatchPositionBefore(positionKey)).isSameAs(open);
         var prepared = state.prepareCommitPatch(1, 0, 1, identities, 0,
-                com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0), null,
+                com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0), 0,
                 0, 0, 0, 0, true);
         RuntimeCommitPatch.PreparedChanges changes = prepared.prepareChanges();
         RuntimeCommitPatch patch = prepared.seal(changes, 0, 0);
@@ -734,7 +710,7 @@ class TradingRuntimeStateTest {
     }
 
     @Test
-    void applyAndCommitFailuresReclaimEverySubmittedLaneTicket() {
+    void stagedMutationRejectsAnOlderGlobalSequenceWithoutChangingAnyLane() {
         LaneTopology topology = LaneTopology.productionDefault();
         TradingRuntimeState state = new TradingRuntimeState(topology);
         long laneZeroUser = userForLane(topology, 0);
@@ -743,23 +719,19 @@ class TradingRuntimeStateTest {
         state.putUser(new UserRuntime(laneOneUser));
         state.startAccountLanes();
         try {
-            var sequenceTwo = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
-                    .withCoreSequence(2);
-            var sequenceOne = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
-                    .withCoreSequence(1);
-            var laneZeroApply = state.applyAndCommitLaneSequence(
-                    2, java.util.List.of(laneZeroUser), sequenceTwo, 3, 5);
-            state.commitLaneSequence(laneZeroApply);
+            var laneZeroApply = state.stageLaneMutation(
+                    2, java.util.List.of(laneZeroUser), 3, 5);
+            state.commitLaneSequence(2, laneZeroApply);
             state.clearChangedKeys();
-            var laneOneApply = state.applyAndCommitLaneSequence(
-                    1, java.util.List.of(laneOneUser), sequenceOne, 3, 5);
-            state.commitLaneSequence(laneOneApply);
+            var laneOneApply = state.stageLaneMutation(
+                    1, java.util.List.of(laneOneUser), 3, 5);
+            state.commitLaneSequence(1, laneOneApply);
             state.clearChangedKeys();
             AccountLaneView[] beforeFailure = state.accountLanes();
             long revisionBeforeFailure = state.revision();
 
-            assertThatThrownBy(() -> state.applyAndCommitLaneSequence(1,
-                    java.util.List.of(laneZeroUser, laneOneUser), sequenceOne, 7, 11))
+            assertThatThrownBy(() -> state.stageLaneMutation(1,
+                    java.util.List.of(laneZeroUser, laneOneUser), 7, 11))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("out of order");
             AccountLaneView[] afterFailure = state.accountLanes();
@@ -792,11 +764,8 @@ class TradingRuntimeStateTest {
         java.util.List<AccountLaneSnapshot> snapshots = state.accountLaneSnapshots(1, global);
         long laneZeroUser = userForLane(topology, 0);
         state.putUser(new UserRuntime(laneZeroUser));
-        var result = new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ACCEPTED")
-                .withCoreSequence(2);
-        var apply = state.applyAndCommitLaneSequence(
-                2, java.util.List.of(laneZeroUser), result, 3, 5);
-        state.commitLaneSequence(apply);
+        var apply = state.stageLaneMutation(2, java.util.List.of(laneZeroUser), 3, 5);
+        state.commitLaneSequence(2, apply);
         AccountLaneView beforeRestore = state.accountLaneById(0);
 
         java.util.List<AccountLaneSnapshot> invalid = new java.util.ArrayList<>(snapshots);
@@ -853,7 +822,7 @@ class TradingRuntimeStateTest {
                     });
 
             for (int laneId = 0; laneId < owners.length; laneId++) {
-                assertThat(owners[laneId]).isEqualTo("core-lifecycle-lane-" + laneId);
+                assertThat(owners[laneId]).isEqualTo("core-mutation-lane-" + laneId);
                 assertThat(state.user(users.get(laneId)).revision()).isEqualTo(revisions.get(laneId) + 1);
                 AccountLaneMetricsSnapshot metrics = state.accountLaneMetricsById(laneId);
                 assertThat(metrics.queueHighWaterMark()).isEqualTo(1);

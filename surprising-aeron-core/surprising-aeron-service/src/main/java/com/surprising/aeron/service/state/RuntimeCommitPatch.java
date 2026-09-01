@@ -10,7 +10,6 @@ import com.surprising.aeron.protocol.CoreFundingProgressView;
 import com.surprising.aeron.protocol.CoreLeverageView;
 import com.surprising.aeron.protocol.CoreLiquidationView;
 import com.surprising.aeron.protocol.CoreMatcherTransition;
-import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreOrderStateView;
 import com.surprising.aeron.protocol.CorePositionView;
 import com.surprising.aeron.protocol.CoreReservationView;
@@ -57,7 +56,6 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
     private final long beforeFundsStateHash;
     private final long fundsStateHash;
     private final long laneMask;
-    private final List<LaneCommit> laneCommits;
     private final List<AccountLaneOwnerGroup> accountLaneGroups;
     private final GlobalOwnerGroup globalOwnerGroup;
     private final List<OwnerGroup> ownerGroups;
@@ -73,7 +71,6 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
 
     private RuntimeCommitPatch(Builder builder, SealMetadata metadata,
                                FactIdentitySlice identities,
-                               List<LaneCommit> laneCommits,
                                List<AccountLaneOwnerGroup> accountLaneGroups,
                                GlobalOwnerGroup globalOwnerGroup,
                                List<FundsPosting> fundsPostings,
@@ -92,7 +89,6 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         beforeFundsStateHash = metadata.beforeFundsStateHash();
         fundsStateHash = metadata.fundsStateHash();
         laneMask = metadata.laneMask();
-        this.laneCommits = laneCommits;
         this.accountLaneGroups = accountLaneGroups;
         this.globalOwnerGroup = globalOwnerGroup;
         ArrayList<OwnerGroup> groups = new ArrayList<>(this.accountLaneGroups.size() + 1);
@@ -133,7 +129,6 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
     public long beforeFundsStateHash() { return beforeFundsStateHash; }
     public long fundsStateHash() { return fundsStateHash; }
     public long laneMask() { return laneMask; }
-    public List<LaneCommit> laneCommits() { return laneCommits; }
     public List<AccountLaneOwnerGroup> accountLaneGroups() { return accountLaneGroups; }
     public GlobalOwnerGroup globalOwnerGroup() { return globalOwnerGroup; }
     public List<OwnerGroup> ownerGroups() { return ownerGroups; }
@@ -430,7 +425,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
                 && afterRevision == patch.afterRevision && beforeBusinessStateHash == patch.beforeBusinessStateHash
                 && businessStateHash == patch.businessStateHash && beforeFundsStateHash == patch.beforeFundsStateHash
                 && fundsStateHash == patch.fundsStateHash && laneMask == patch.laneMask
-                && productLine == patch.productLine && laneCommits.equals(patch.laneCommits)
+                && productLine == patch.productLine
                 && accountLaneGroups.equals(patch.accountLaneGroups)
                 && globalOwnerGroup.equals(patch.globalOwnerGroup) && fundsPostings.equals(patch.fundsPostings)
                 && matcherTransition.equals(patch.matcherTransition) && matcherEvidence.equals(patch.matcherEvidence)
@@ -443,7 +438,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
     public int hashCode() {
         return Objects.hash(productLine, previousCoreSequence, coreSequence, previousProjectionSequence,
                 projectionSequence, beforeRevision, afterRevision, beforeBusinessStateHash, businessStateHash,
-                beforeFundsStateHash, fundsStateHash, laneMask, laneCommits, accountLaneGroups, globalOwnerGroup,
+                beforeFundsStateHash, fundsStateHash, laneMask, accountLaneGroups, globalOwnerGroup,
                 fundsPostings, matcherTransition, matcherEvidence, terminalIds, coreFactValues, coreFactMetadata,
                 identities);
     }
@@ -877,24 +872,6 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         public RiskScanControlChange { requireChange(true, before, after, "risk scan control"); }
     }
 
-    public record LaneCommit(int laneId, long appliedSequence, long committedSequence,
-                             int ownerGroupStartInclusive, int ownerGroupEndExclusive,
-                             long beforeRevision, long afterRevision,
-                             long beforeHash, long afterHash,
-                             long beforeFundsHash, long afterFundsHash) implements Comparable<LaneCommit> {
-        public LaneCommit {
-            if (laneId < 0 || laneId >= Long.SIZE - 1 || appliedSequence <= 0
-                    || committedSequence != appliedSequence
-                    || ownerGroupStartInclusive < 0
-                    || ownerGroupEndExclusive != Math.incrementExact(ownerGroupStartInclusive)
-                    || beforeRevision < 0 || afterRevision < beforeRevision) {
-                throw new IllegalArgumentException("invalid lane commit");
-            }
-        }
-        public long coreSequence() { return committedSequence; }
-        @Override public int compareTo(LaneCommit other) { return Integer.compare(laneId, other.laneId); }
-    }
-
     public record FundsPosting(int assetId,
                                com.surprising.aeron.service.state.FundsPosting.OwnerKind ownerKind,
                                long ownerId,
@@ -1032,7 +1009,6 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         private final Builder builder;
         private final PrepareMetadata metadata;
         private final FactIdentitySlice identities;
-        private final List<LaneCommit> laneCommits;
         private final List<AccountLaneOwnerGroup> accountLaneGroups;
         private final GlobalOwnerGroup globalOwnerGroup;
         private final List<FundsPosting> fundsPostings;
@@ -1041,7 +1017,6 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         private final TerminalIds terminalIds;
 
         private PreparedChanges(Builder builder, PrepareMetadata metadata, FactIdentitySlice identities,
-                                List<LaneCommit> laneCommits,
                                 List<AccountLaneOwnerGroup> accountLaneGroups,
                                 GlobalOwnerGroup globalOwnerGroup,
                                 List<FundsPosting> fundsPostings, RuntimeFundsDelta fundsDelta,
@@ -1049,7 +1024,6 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             this.builder = builder;
             this.metadata = metadata;
             this.identities = identities;
-            this.laneCommits = laneCommits;
             this.accountLaneGroups = accountLaneGroups;
             this.globalOwnerGroup = globalOwnerGroup;
             this.fundsPostings = fundsPostings;
@@ -1080,7 +1054,6 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         private long projectionSequence;
         private boolean sequencesSet;
         private final LaneChanges[] lanes = new LaneChanges[Long.SIZE - 1];
-        private final LaneCommit[] laneCommits = new LaneCommit[Long.SIZE - 1];
         private long laneMask;
         private final GlobalChanges global = new GlobalChanges();
         private final ArrayList<FundsPosting> fundsPostings = new ArrayList<>();
@@ -1113,7 +1086,6 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
 
         Builder reset(ProductLine productLine) {
             for (LaneChanges lane : lanes) if (lane != null) lane.reset();
-            java.util.Arrays.fill(laneCommits, null);
             global.reset();
             fundsPostings.clear();
             matcherEvidence.clear();
@@ -1146,17 +1118,15 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
                     || previousProjectionSequence < 0 || projectionSequence <= 0) {
                 throw new IllegalArgumentException("invalid patch sequence metadata");
             }
-            if (coreSequence != previousCoreSequence
-                    && coreSequence != Math.incrementExact(previousCoreSequence)
+            if (coreSequence != Math.incrementExact(previousCoreSequence)
                     || projectionSequence != Math.incrementExact(previousProjectionSequence)) {
-                throw new IllegalArgumentException("patch sequences must be contiguous");
+                throw new IllegalArgumentException("commit and projection sequences must be contiguous");
             }
             this.previousCoreSequence = previousCoreSequence;
             this.coreSequence = coreSequence;
             this.previousProjectionSequence = previousProjectionSequence;
             this.projectionSequence = projectionSequence;
             sequencesSet = true;
-            for (LaneCommit commit : laneCommits) if (commit != null) requireLaneSequence(commit);
             return this;
         }
 
@@ -1201,28 +1171,18 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             return this;
         }
 
-        public Builder addLaneCommit(LaneCommit commit) {
+        public Builder laneMask(long laneMask) {
             requireOpen();
-            Objects.requireNonNull(commit, "commit");
-            if (sequencesSet) requireLaneSequence(commit);
-            if (laneCommits[commit.laneId()] != null) {
-                throw new IllegalArgumentException("duplicate lane commit");
+            if (laneMask < 0 || this.laneMask != 0 && this.laneMask != laneMask) {
+                throw new IllegalArgumentException("invalid or conflicting lane mask");
             }
-            laneCommits[commit.laneId()] = commit;
-            laneMask |= 1L << commit.laneId();
-            if (lanes[commit.laneId()] == null) lanes[commit.laneId()] = new LaneChanges();
+            this.laneMask = laneMask;
             return this;
         }
 
         long laneMask() {
             requireOpen();
             return laneMask;
-        }
-
-        private void requireLaneSequence(LaneCommit commit) {
-            if (commit.appliedSequence() != coreSequence || commit.committedSequence() != coreSequence) {
-                throw new IllegalArgumentException("lane commit sequence mismatch");
-            }
         }
 
         public Builder recordUser(int laneId, UserRuntime before, UserRuntime after) {
@@ -1434,7 +1394,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
                     metadata.beforeFundsStateHash(), fundsStateHash, metadata.laneMask(),
                     metadata.coreFactMetadata(), metadata.externalAdjustment());
             RuntimeCommitPatch patch = new RuntimeCommitPatch(this, sealedMetadata, prepared.identities,
-                    prepared.laneCommits, prepared.accountLaneGroups, prepared.globalOwnerGroup,
+                    prepared.accountLaneGroups, prepared.globalOwnerGroup,
                     prepared.fundsPostings, prepared.fundsDelta, prepared.matcherEvidence, prepared.terminalIds);
             finalSealed = true;
             return patch;
@@ -1446,32 +1406,15 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             Objects.requireNonNull(metadata, "metadata");
             if (!sequencesSet) throw new IllegalStateException("patch sequences are required");
             if (matcherTransition == null) throw new IllegalArgumentException("matcher transition is required");
-            if (coreSequence == previousCoreSequence
-                    && (metadata.coreFactMetadata() == null
-                    || metadata.coreFactMetadata().messageTypeWireCode()
-                    != CoreMessageType.ACK_EXPORT.wireCode())) {
-                throw new IllegalArgumentException("projection-only patch requires ACK_EXPORT metadata");
-            }
-            if (metadata.coreFactMetadata() != null
-                    && metadata.coreFactMetadata().appliedCommandCount() != coreSequence) {
-                throw new IllegalArgumentException("Core Fact command count must equal core sequence");
-            }
-            ArrayList<LaneCommit> commits = new ArrayList<>(Long.bitCount(laneMask));
-            for (LaneCommit commit : laneCommits) if (commit != null) commits.add(commit);
             long changedLaneMask = changedLaneMask();
             if (laneMask != changedLaneMask) {
-                throw new IllegalArgumentException("every changed lane must have exactly one lane commit"
+                throw new IllegalArgumentException("commit lane mask must equal changed lane mask"
                         + " changedMask=" + changedLaneMask + " commitMask=" + laneMask);
             }
             if (laneMask != metadata.laneMask()) throw new IllegalArgumentException("lane mask mismatch");
-            ArrayList<AccountLaneOwnerGroup> groups = new ArrayList<>(commits.size());
-            for (int ownerGroupOffset = 0; ownerGroupOffset < commits.size(); ownerGroupOffset++) {
-                LaneCommit commit = commits.get(ownerGroupOffset);
-                if (commit.ownerGroupStartInclusive() != ownerGroupOffset
-                        || commit.ownerGroupEndExclusive() != ownerGroupOffset + 1) {
-                    throw new IllegalArgumentException("lane commit owner-group offset mismatch");
-                }
-                groups.add(lanes[commit.laneId()].seal(commit.laneId()));
+            ArrayList<AccountLaneOwnerGroup> groups = new ArrayList<>(Long.bitCount(laneMask));
+            for (int laneId = 0; laneId < lanes.length; laneId++) {
+                if ((laneMask & 1L << laneId) != 0) groups.add(lanes[laneId].seal(laneId));
             }
 
             GlobalOwnerGroup sealedGlobal = global.seal();
@@ -1488,7 +1431,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             FactIdentitySlice identitySlice = FactIdentitySlice.capture(groups, sealedGlobal,
                     canonicalFunds, identities);
             PreparedChanges prepared = new PreparedChanges(this, prepareMetadata, identitySlice,
-                    List.copyOf(commits), List.copyOf(groups), sealedGlobal, canonicalFunds,
+                    List.copyOf(groups), sealedGlobal, canonicalFunds,
                     primitiveFunds, canonicalEvidence, terminals);
             activePrepared = prepared;
             sealed = true;
@@ -1616,7 +1559,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             return java.util.Set.copyOf(changed);
         }
 
-        private long changedLaneMask() {
+        long changedLaneMask() {
             long mask = 0;
             for (int laneId = 0; laneId < lanes.length; laneId++) {
                 if (lanes[laneId] != null && lanes[laneId].hasChanges()) mask |= 1L << laneId;
@@ -1767,21 +1710,28 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
     }
 
     private static final class Changes<K extends Comparable<? super K>, V> {
-        private final HashMap<K, BeforeAfter<V>> values = new HashMap<>();
+        private Object[] keys = new Object[8];
+        private Object[] values = new Object[8];
+        private int[] stamps = new int[8];
+        private int[] touchedSlots = new int[8];
+        private int generation = 1;
+        private int size;
         private int changedCount;
 
         private void captureBefore(K key, V before) {
             if (key == null) throw new IllegalArgumentException("invalid typed patch key");
-            if (!values.containsKey(key)) values.put(key, new BeforeAfter<>(before, before));
+            ensureCapacity();
+            int slot = findSlot(key);
+            if (stamps[slot] != generation) insert(slot, key, new BeforeAfter<>(before, before));
         }
 
         private V before(K key) {
-            BeforeAfter<V> captured = values.get(key);
+            BeforeAfter<V> captured = change(key);
             return captured == null ? null : captured.before;
         }
 
         private boolean contains(K key) {
-            return values.containsKey(key);
+            return change(key) != null;
         }
 
         private boolean hasChanges() {
@@ -1789,17 +1739,25 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         }
 
         private void reset() {
-            values.clear();
+            size = 0;
             changedCount = 0;
+            if (generation == Integer.MAX_VALUE) {
+                java.util.Arrays.fill(stamps, 0);
+                generation = 1;
+            } else {
+                generation++;
+            }
         }
 
         private void record(K key, V before, V after) {
             if (key == null || before == null && after == null) {
                 throw new IllegalArgumentException("invalid typed patch change");
             }
-            BeforeAfter<V> existing = values.get(key);
+            ensureCapacity();
+            int slot = findSlot(key);
+            BeforeAfter<V> existing = stamps[slot] == generation ? value(slot) : null;
             if (existing == null) {
-                values.put(key, new BeforeAfter<>(before, after));
+                insert(slot, key, new BeforeAfter<>(before, after));
                 if (!Objects.equals(before, after)) changedCount++;
                 return;
             }
@@ -1815,26 +1773,96 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         private <R> List<R> seal(BiFunction<K, BeforeAfter<V>, R> materializer) {
             if (changedCount == 0) return List.of();
             ArrayList<R> result = new ArrayList<>(changedCount);
-            @SuppressWarnings("unchecked")
-            Map.Entry<K, BeforeAfter<V>>[] ordered = new Map.Entry[changedCount];
+            int[] ordered = new int[changedCount];
             int index = 0;
-            for (Map.Entry<K, BeforeAfter<V>> entry : values.entrySet()) {
-                BeforeAfter<V> change = entry.getValue();
-                if (!Objects.equals(change.before, change.after)) ordered[index++] = entry;
+            for (int touchedIndex = 0; touchedIndex < size; touchedIndex++) {
+                int slot = touchedSlots[touchedIndex];
+                BeforeAfter<V> change = value(slot);
+                if (!Objects.equals(change.before, change.after)) ordered[index++] = slot;
             }
-            java.util.Arrays.sort(ordered, Map.Entry.comparingByKey());
-            for (Map.Entry<K, BeforeAfter<V>> entry : ordered) {
-                K key = entry.getKey();
-                BeforeAfter<V> change = entry.getValue();
-                result.add(materializer.apply(key, change));
+            sort(ordered, 0, ordered.length - 1);
+            for (int slot : ordered) {
+                result.add(materializer.apply(key(slot), value(slot)));
             }
             return java.util.Collections.unmodifiableList(result);
         }
 
         private <R> R single(java.util.function.Function<BeforeAfter<V>, R> materializer) {
             if (changedCount == 0) return null;
-            BeforeAfter<V> change = values.values().iterator().next();
-            return materializer.apply(change);
+            for (int index = 0; index < size; index++) {
+                BeforeAfter<V> change = value(touchedSlots[index]);
+                if (!Objects.equals(change.before, change.after)) return materializer.apply(change);
+            }
+            throw new IllegalStateException("changed patch entry is missing");
+        }
+
+        private BeforeAfter<V> change(K key) {
+            if (key == null) return null;
+            int slot = findSlot(key);
+            return stamps[slot] == generation ? value(slot) : null;
+        }
+
+        private void ensureCapacity() {
+            if ((size + 1) * 2 <= keys.length) return;
+            Object[] previousKeys = keys;
+            Object[] previousValues = values;
+            int[] previousTouched = touchedSlots;
+            int previousSize = size;
+            int capacity = Math.multiplyExact(keys.length, 2);
+            keys = new Object[capacity];
+            values = new Object[capacity];
+            stamps = new int[capacity];
+            touchedSlots = new int[capacity];
+            size = 0;
+            for (int index = 0; index < previousSize; index++) {
+                int previousSlot = previousTouched[index];
+                @SuppressWarnings("unchecked") K key = (K) previousKeys[previousSlot];
+                insert(findSlot(key), key, previousValues[previousSlot]);
+            }
+        }
+
+        private int findSlot(Object key) {
+            int hash = key.hashCode();
+            hash ^= hash >>> 16;
+            int slot = hash & (keys.length - 1);
+            while (stamps[slot] == generation && !keys[slot].equals(key)) {
+                slot = slot + 1 & (keys.length - 1);
+            }
+            return slot;
+        }
+
+        private void insert(int slot, K key, Object value) {
+            stamps[slot] = generation;
+            keys[slot] = key;
+            values[slot] = value;
+            touchedSlots[size++] = slot;
+        }
+
+        private void sort(int[] slots, int low, int high) {
+            int left = low;
+            int right = high;
+            K pivot = key(slots[(low + high) >>> 1]);
+            while (left <= right) {
+                while (key(slots[left]).compareTo(pivot) < 0) left++;
+                while (key(slots[right]).compareTo(pivot) > 0) right--;
+                if (left <= right) {
+                    int swap = slots[left];
+                    slots[left++] = slots[right];
+                    slots[right--] = swap;
+                }
+            }
+            if (low < right) sort(slots, low, right);
+            if (left < high) sort(slots, left, high);
+        }
+
+        @SuppressWarnings("unchecked")
+        private K key(int slot) {
+            return (K) keys[slot];
+        }
+
+        @SuppressWarnings("unchecked")
+        private BeforeAfter<V> value(int slot) {
+            return (BeforeAfter<V>) values[slot];
         }
     }
 

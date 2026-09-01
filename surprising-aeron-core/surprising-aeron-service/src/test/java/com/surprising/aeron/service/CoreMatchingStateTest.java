@@ -95,10 +95,10 @@ class CoreMatchingStateTest {
             assertThat(state.tradingState().user(8).balances().get("USDT").lockedUnits()).isZero();
             assertThat(state.tradingState().user(8).totalUnits("BTC")).isEqualTo(2);
             CoreLaneMetrics metrics = state.laneMetrics();
-            assertThat(metrics.accountLaneAppliedSequences()[0]).isEqualTo(state.committedCoreSequence());
-            assertThat(metrics.accountLaneCommittedSequences()[0]).isEqualTo(state.committedCoreSequence());
-            assertThat(metrics.accountLaneAppliedSequences()[2]).isEqualTo(state.committedCoreSequence());
-            assertThat(metrics.accountLaneCommittedSequences()[2]).isEqualTo(state.committedCoreSequence());
+            assertThat(metrics.accountLaneAppliedSequences()[0]).isEqualTo(state.snapshotProjectionSequence());
+            assertThat(metrics.accountLaneCommittedSequences()[0]).isEqualTo(state.snapshotProjectionSequence());
+            assertThat(metrics.accountLaneAppliedSequences()[2]).isEqualTo(state.snapshotProjectionSequence());
+            assertThat(metrics.accountLaneCommittedSequences()[2]).isEqualTo(state.snapshotProjectionSequence());
             assertThat(state.tradingState().orders().values())
                     .noneMatch(order -> order.status() == CoreOrderStatus.OPEN);
         }
@@ -336,7 +336,7 @@ class CoreMatchingStateTest {
     }
 
     @Test
-    void multiMakerPerpetualSettlementStaysInvisibleUntilParallelLanesCommit() {
+    void multiMakerPerpetualSettlementPublishesOnlyAfterTheUnifiedLaneBarrier() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
             long sequence = 1;
@@ -359,25 +359,14 @@ class CoreMatchingStateTest {
             long matchingSequence = state.matchingSequence(taker.header().commandId());
             var matching = state.awaitMatchingResult(matchingSequence);
             assertThat(matching).isNotNull();
-            long committedBefore = state.committedCoreSequence();
-
-            assertThat(state.completeMatching(matchingSequence, matching,
-                    taker.header().submittedAtEpochMillis(), taker.header().sourceSequence())).isNull();
-            assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
-            assertThat(state.tradingState().user(99).positions()).isEmpty();
-            for (long makerId = 11; makerId < 19; makerId++) {
-                assertThat(state.tradingState().user(makerId).positions()).isEmpty();
-            }
-
-            CoreResponse completed = null;
-            long deadline = System.nanoTime() + 5_000_000_000L;
-            while (completed == null && System.nanoTime() < deadline) {
-                completed = state.completeMatching(matchingSequence, matching,
-                        taker.header().submittedAtEpochMillis(), taker.header().sourceSequence());
-                if (completed == null) Thread.onSpinWait();
-            }
+            CoreResponse completed = state.completeMatching(matchingSequence, matching,
+                    taker.header().submittedAtEpochMillis(), taker.header().sourceSequence());
             assertThat(completed).isNotNull();
             assertThat(completed.status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(state.tradingState().user(99).positions()).isNotEmpty();
+            for (long makerId = 11; makerId < 19; makerId++) {
+                assertThat(state.tradingState().user(makerId).positions()).isNotEmpty();
+            }
             assertThat(state.tradingState().user(99).positions().get("BTC-USDT").signedQuantitySteps())
                     .isEqualTo(8);
             for (long makerId = 11; makerId < 19; makerId++) {

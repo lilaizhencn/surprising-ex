@@ -434,7 +434,7 @@ class RuntimeCommitJournalTest {
             TradingCoreState current = RuntimeStateMaterializer.materialize(runtime, identities);
             TradingRuntimeState.PreparedCommit prepared = runtime.prepareCommitPatch(
                     index + 1L, index, index + 1L, identities,
-                    previous.revision(), CoreMatcherTransition.unchanged(0, 0), null,
+                    previous.revision(), CoreMatcherTransition.unchanged(0, 0), 0,
                     previous.businessStateHash(), current.businessStateHash(),
                     RollingFundsStateHash.compute(previous), RollingFundsStateHash.compute(current), true);
             RuntimeCommitPatch.PreparedChanges changes = prepared.prepareChanges();

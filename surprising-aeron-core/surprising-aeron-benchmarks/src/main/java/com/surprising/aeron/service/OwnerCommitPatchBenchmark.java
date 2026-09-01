@@ -998,12 +998,10 @@ public class OwnerCommitPatchBenchmark {
                     .recordBalance(laneId, userId, assetId, null,
                             new RuntimeCommitPatch.UserBalance(0, position.positionMarginUnits(), 0))
                     .recordPosition(laneId, positionKey, null, position)
-                    .recordOrder(laneId, null, order, null, businessOrder)
-                    .addLaneCommit(new RuntimeCommitPatch.LaneCommit(laneId, sequence, sequence,
-                            laneId, laneId + 1, revision - 1, revision,
-                            sequence - 1, sequence, sequence - 1, sequence));
+                    .recordOrder(laneId, null, order, null, businessOrder);
             laneMask |= 1L << laneId;
         }
+        builder.laneMask(laneMask);
         long clearingBefore = Math.negateExact(Math.multiplyExact(sequence - 1, 100L));
         long clearingAfter = Math.negateExact(Math.multiplyExact(sequence, 100L));
         builder.recordTreasuryAsset(assetId,

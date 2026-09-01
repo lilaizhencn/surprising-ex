@@ -102,7 +102,7 @@ class W1W2InvariantFenceTest {
     @Test
     void ownerCommitStagesTypedHashesWithoutMaterializingOrAwaitingProjection() throws Exception {
         String probe = source("CoreProbeState.java");
-        int start = probe.indexOf("    private void projectSnapshotNow(\n            List<");
+        int start = probe.indexOf("    private void projectSnapshotNow(long committedLaneMask)");
         int end = probe.indexOf("    private void reservePlaceOrderRuntime", start);
         assertThat(start).isGreaterThanOrEqualTo(0);
         assertThat(end).isGreaterThan(start);

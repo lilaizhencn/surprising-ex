@@ -239,9 +239,9 @@ public final class AccountLaneState {
         return totalPendingReservations != 0;
     }
 
-    void applied(long coreSequence, long userId, long stateContribution, long fundsContribution) {
+    void applied(long coreSequence, long stateContribution, long fundsContribution) {
         assertOwner();
-        requireApply(coreSequence, userId);
+        requireApplySequence(coreSequence);
         if (pendingApplyCheckpoint == null) {
             pendingApplyCheckpoint = checkpoint();
             pendingApplySequence = coreSequence;
@@ -250,16 +250,8 @@ public final class AccountLaneState {
         }
         appliedSequence = coreSequence;
         revision = Math.incrementExact(revision);
-        localStateHash = transitionHash(localStateHash, coreSequence, userId, stateContribution);
-        localFundsHash = transitionHash(localFundsHash, coreSequence, userId, fundsContribution);
-    }
-
-    void requireApply(long coreSequence, long userId) {
-        assertOwner();
-        requireApplySequence(coreSequence);
-        if (userId <= 0 || !userIds.contains(userId)) {
-            throw new IllegalStateException("account lane apply is out of order");
-        }
+        localStateHash = transitionHash(localStateHash, coreSequence, stateContribution);
+        localFundsHash = transitionHash(localFundsHash, coreSequence, fundsContribution);
     }
 
     void requireApplySequence(long coreSequence) {
@@ -409,9 +401,8 @@ public final class AccountLaneState {
         return mixed;
     }
 
-    private static long transitionHash(long current, long coreSequence, long userId, long contribution) {
+    private static long transitionHash(long current, long coreSequence, long contribution) {
         long hash = mix(current, coreSequence);
-        hash = mix(hash, userId);
         hash = mix(hash, contribution);
         return hash == 0 ? 1 : hash;
     }

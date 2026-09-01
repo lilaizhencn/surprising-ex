@@ -25,10 +25,12 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 | P9 | 1,000-user / 40-minute certification：千用户、四十分钟验证，不是 P0-P5 行为改动。 |
 | P10 | single-Core deterministic lanes / capacity：每个 Product Core 只运行一个共享 ExchangeCore，以原生 symbol matcher shard 和默认启用的 user Account Lane 扩展；同一不可变 matcher result 引用按 userId 扇出，以 expected/ack Lane mask 提交，Treasury 保持 Sequencer owner，不包含物理 Core shard。实施边界以本 README 和 Aeron 模块 README 为准。 |
 
-当前实现状态：P0-P5 与 P10-A 至 P10-F 的主体迁移已完成；每个 Account Lane 使用固定 platform owner thread，
-账户状态 mutation、query/read fence 和 snapshot capture/restore 都经过有界双向 SPSC ring。订单批次先完成确定性风险准入，
-再以每 Lane 一次 apply/commit 捕获账户 mutation 与原生 per-asset Treasury delta；Sequencer 只合并 ACK、Treasury delta
-和全局 sequence，不再为同批每笔订单逐次往返 Lane。
+当前实现状态：P0-P5 与 P10-A 至 P10-F 的主体迁移已完成。所有账户、风险、生命周期和成交变更统一通过同一个
+Account Lane mutation 入口执行；单 Lane 内联、多 Lane 并行只是调度策略差异，不再维护两套结算业务路径。
+同一用户的资金、订单与持仓始终在所属 Lane 内串行修改；Product Core 只在所有目标 Lane 完成后执行一次全局
+sequence 可见性屏障、合并 per-asset Treasury delta、验证资金守恒并发布 Core Fact。提交协议只保存
+`coreSequence + completedLaneMask`，不再生成每 Lane 的 revision/hash/owner-group-offset 提交对象，也不再由 worker
+计算克隆状态后交给 owner 重放。query/read fence、snapshot capture/restore 仍以同一全局 sequence 为一致性边界。
 P10-G 使用真实 HTTP 开放环门禁，只有保存 1,000 用户、至少 200 symbol、100k/s offered rate、
 计量窗口内至少 100k/s 实际终态吞吐、40 分钟、JFR 和资金/盘口核对 artifact 后才可标记生产认证完成。普通下单只提交一次正式 `PLACE_ORDER`，
 由 Product Core 在同一权威转换内完成 P1 的预占、平仓容量和费用校验；显式 dry-run 接口仍可调用只读 preflight，
@@ -226,10 +228,12 @@ Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，
 中直接修改在线余额。接口返回已处理数量和失败/未完成数量，便于记录 `ProductLine`、Core sequence
 和资金对账证据。
 
-Product Core 的热状态与不可变状态投影通过 `RuntimeMutationDelta` 分界。命令在 Account Lane 内完成原地
-裁决后，owner 只捕获本命令涉及的用户、余额、订单、冻结、仓位和风险 after-image，生成有序
-`RuntimeCommitEntry`。entry 不持有命令前后的 `TradingCoreState`；滚动资金/业务 hash、资金守恒、Lane Treasury ACK
-和热索引共同消费同一份 primitive `RuntimeFundsDelta`/typed after-image。持久化 immutable map root 由有界
+Product Core 的热状态与不可变状态投影通过 `RuntimeCommitPatch` 分界。命令在 Account Lane 内完成原地
+裁决后，owner 只封存本命令涉及的用户、余额、订单、冻结、仓位和风险 typed before/after image，生成一次不可变事实增量；
+`CoreProbeState` 不再额外保存 LaneCommit、lane revision 或局部 hash。entry 不持有命令前后的完整
+`TradingCoreState`；滚动资金/业务 hash、资金守恒、Treasury 合并、投影和 Core Fact 共同消费同一份
+primitive `RuntimeFundsDelta`/typed change。滚动 hash 直接使用各 domain 的增量 aggregate，不维护第二套 owner-domain
+aggregate；typed change 容器使用 generation reset，避免每条命令 `HashMap.clear` 和 entry 重建。持久化 immutable map root 由有界
 `RuntimeProjectionJournal` 在线程外顺序生成；每个 entry 自带只写一次的 `RuntimeProjectionPoint`，owner 不再构造
 lazy transition view，也不在单笔下单、撤单或撮合完成路径等待 Snapshot projector。只有显式 Snapshot、批量订单基线、
 Export ACK 清理、非热状态读取和拒绝回滚允许建立 projection fence。提交后的校验失败则 fail-fast，不能把已经进入 typed
@@ -273,9 +277,9 @@ Trading Provider 的普通单和触发单统一使用异步 Aeron gateway，HTTP
 要求 JDK 25。Topic 创建和三节点部署入口仍在整理；PostgreSQL 首发初始化统一使用根目录 `init.sql`：
 
 六条 Product Core 产品线的局部热路径使用独立 JMH 模块验证。它直接驱动内存状态机和内嵌 exchange-core，
-不启动 wallet、PostgreSQL、Kafka、Valkey 或 Aeron Cluster；JMH worker 固定为一个 owner thread，Account Lane
-作为确定性账户分区由同一个 Product Core owner 直接执行，不再为短操作跨线程排队和同步等待。默认覆盖限价挂单、
-吃单成交、撤单、部分成交、多 Lane 撮合、风险扫描、强平执行和配对快照恢复。
+不启动 wallet、PostgreSQL、Kafka、Valkey 或 Aeron Cluster；JMH 主裁决固定为一个 Product Core owner，短操作不跨线程；
+达到并行结算阈值的多 Lane 衍生成交则覆盖真实的 Lane direct-apply 与 owner completion barrier。默认覆盖限价挂单、
+吃单成交、撤单、部分成交、至少 8 笔成交的多 Lane 撮合、风险扫描、强平执行和配对快照恢复。
 `productionMixedWorkload` 额外把多币对做市、触发单、资金费、风险扫描、强平、保险基金和 ADL 放入同一条
 确定性 owner command stream，模拟生产中同时到达、由 Product Core 串行裁决的混合负载：
 

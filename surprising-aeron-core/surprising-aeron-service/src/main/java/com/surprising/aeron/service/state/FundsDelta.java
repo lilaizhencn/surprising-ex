@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
@@ -31,26 +32,27 @@ public final class FundsDelta {
         if (source == null) {
             throw new IllegalArgumentException("funds postings are required");
         }
-        TreeMap<FundsPosting, Long> coalesced = new TreeMap<>(POSTING_ORDER);
-        TreeSet<String> assets = new TreeSet<>();
-        for (FundsPosting posting : source) {
+        FundsPosting[] ordered = source.toArray(FundsPosting[]::new);
+        for (FundsPosting posting : ordered) {
             if (posting == null) {
                 throw new IllegalArgumentException("funds posting is required");
             }
-            assets.add(posting.asset());
-            coalesced.merge(posting, posting.units(), Math::addExact);
         }
-        coalesced.entrySet().removeIf(entry -> entry.getValue() == 0);
-
-        ArrayList<FundsPosting> normalized = new ArrayList<>(coalesced.size());
-        TreeMap<String, Long> totals = new TreeMap<>();
-        assets.forEach(asset -> totals.put(asset, 0L));
-        coalesced.forEach((posting, units) -> {
-            FundsPosting normalizedPosting = new FundsPosting(posting.asset(), posting.ownerKind(),
-                    posting.ownerId(), posting.subledger(), units);
-            normalized.add(normalizedPosting);
-            totals.put(posting.asset(), Math.addExact(totals.get(posting.asset()), units));
-        });
+        java.util.Arrays.sort(ordered, POSTING_ORDER);
+        ArrayList<FundsPosting> normalized = new ArrayList<>(ordered.length);
+        LinkedHashMap<String, Long> totals = new LinkedHashMap<>();
+        for (int index = 0; index < ordered.length;) {
+            FundsPosting first = ordered[index++];
+            long units = first.units();
+            while (index < ordered.length && POSTING_ORDER.compare(first, ordered[index]) == 0) {
+                units = Math.addExact(units, ordered[index++].units());
+            }
+            totals.putIfAbsent(first.asset(), 0L);
+            if (units == 0) continue;
+            normalized.add(new FundsPosting(first.asset(), first.ownerKind(),
+                    first.ownerId(), first.subledger(), units));
+            totals.put(first.asset(), Math.addExact(totals.get(first.asset()), units));
+        }
         totals.forEach((asset, units) -> {
             if (units != 0) {
                 throw new IllegalArgumentException("Funds delta is not conserved for asset " + asset);

@@ -397,7 +397,8 @@ class RuntimeCommitRecoveryTest {
                     CommandSource.RECOVERY_TOOL, 90, 1, 0, CoreMessageType.ACK_EXPORT,
                     CoreExportCodec.encodeAck(new AckExportCommand(acknowledged)))));
             assertThat(ack.patches()).allSatisfy(patch -> {
-                assertThat(patch.previousCoreSequence()).isEqualTo(patch.coreSequence());
+                assertThat(patch.coreSequence())
+                        .isEqualTo(Math.incrementExact(patch.previousCoreSequence()));
                 assertThat(patch.beforeRevision()).isEqualTo(patch.afterRevision());
                 assertThat(patch.fundsPostings()).isEmpty();
             });
@@ -1222,7 +1223,7 @@ class RuntimeCommitRecoveryTest {
             ProductLine productLine, long previousCoreSequence, long coreSequence,
             long previousProjectionSequence, long projectionSequence, long beforeRevision, long afterRevision,
             long beforeBusinessStateHash, long businessStateHash, long beforeFundsStateHash, long fundsStateHash,
-            long laneMask, List<RuntimeCommitPatch.LaneCommit> laneCommits,
+            long laneMask,
             List<RuntimeCommitPatch.AccountLaneOwnerGroup> accountLaneGroups,
             RuntimeCommitPatch.GlobalOwnerGroup globalOwnerGroup,
             List<RuntimeCommitPatch.FundsPosting> fundsPostings,
@@ -1236,7 +1237,7 @@ class RuntimeCommitRecoveryTest {
             return new PatchEvidence(patch.productLine(), patch.previousCoreSequence(), patch.coreSequence(),
                     patch.previousProjectionSequence(), patch.projectionSequence(), patch.beforeRevision(),
                     patch.afterRevision(), patch.beforeBusinessStateHash(), patch.businessStateHash(),
-                    patch.beforeFundsStateHash(), patch.fundsStateHash(), patch.laneMask(), patch.laneCommits(),
+                    patch.beforeFundsStateHash(), patch.fundsStateHash(), patch.laneMask(),
                     patch.accountLaneGroups(), patch.globalOwnerGroup(), patch.fundsPostings(),
                     patch.matcherTransition(), patch.matcherEvidence(), patch.terminalIds(), patch.coreFactValues(),
                     patch.coreFactMetadata(), patch.materializeCoreFactFragment());

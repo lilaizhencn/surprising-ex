@@ -57,7 +57,8 @@ final class SectionedCoreSnapshotWriter {
                 clusterTimestamp, clusterPosition, matcherSnapshot, snapshotState,
                 state.lastSourceSequences(), state.commandResults(),
                 state.exportState().snapshot(), state.feePolicies(), state.pendingTransfers(),
-                state.terminalRetention().copy(), state.accountLaneSnapshots(coreSequence, snapshotState));
+                state.terminalRetention().copy(),
+                state.accountLaneSnapshots(state.snapshotProjectionSequence(), snapshotState));
     }
 
     static SectionedCoreSnapshotCodec.SectionedSnapshot encode(CoreSnapshotImage image) {

@@ -121,7 +121,7 @@ class TradingRuntimeStateIndexTest {
                                               TradingCoreState before, TradingCoreState after, long sequence) {
         TradingRuntimeState.PreparedCommit prepared = runtime.prepareCommitPatch(
                 sequence, sequence - 1, sequence, identities,
-                before.revision(), com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0), null,
+                before.revision(), com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0), 0,
                 before.businessStateHash(), after.businessStateHash(),
                 RollingFundsStateHash.compute(before), RollingFundsStateHash.compute(after), true);
         RuntimeCommitPatch.PreparedChanges changes = prepared.prepareChanges();
