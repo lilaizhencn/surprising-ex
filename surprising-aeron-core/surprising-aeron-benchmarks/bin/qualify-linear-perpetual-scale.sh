@@ -244,7 +244,7 @@ validate_saturation_jmh() {
     .params.maxInFlight == "256" and .params.operationsPerInvocation == "16384" and
     .params.targetOperationsPerSecond == "100000" and
     .secondaryMetrics.matchingWindowSamples.score > 0 and
-    .secondaryMetrics.matchingFullWindowSamples.score == 0 and
+    .secondaryMetrics.matchingFullWindowSamples.score > 0 and
     .secondaryMetrics.matchingRefillOperations.score > 0 and
     .secondaryMetrics.matchingProducerStarvationSamples.score == 0)' "${result}" > /dev/null
 }
@@ -386,7 +386,7 @@ run_capacity() {
 
 run_saturation_case() {
   local in_flight="$1"
-  local case_id="sync-owner-inflight-${in_flight}"
+  local case_id="spsc-matcher-inflight-${in_flight}"
   local result="${ARTIFACT_DIR}/saturation-${case_id}.json"
   local saturation_args="${JVM_ARGS_STRING} -Dsurprising.benchmark.export-ack-interval=1024"
   "${JAVA}" -jar "${JAR}" 'LinearPerpetualCoreBenchmark.saturatedMatchingWorkload' \
@@ -394,7 +394,9 @@ run_saturation_case() {
     -p maxPositionsPerUser=5 -p maxOpenOrdersPerUser=10 \
     -p maxInFlight="${in_flight}" -p operationsPerInvocation="${SATURATION_OPERATIONS}" \
     -p targetOperationsPerSecond=100000 \
-    -wi 1 -w 3s -i 3 -r 5s -f 1 -t 1 \
+    -wi "${JMH_WARMUP_ITERATIONS}" -w "${JMH_WARMUP_SECONDS}s" \
+    -i "${JMH_MEASUREMENT_ITERATIONS}" -r "${JMH_MEASUREMENT_SECONDS}s" \
+    -f "${JMH_FORKS}" -t 1 \
     -jvmArgsAppend "${saturation_args}" -rf json -rff "${result}" \
     2>&1 | tee "${ARTIFACT_DIR}/saturation-${case_id}.log"
   validate_saturation_jmh "${result}"
