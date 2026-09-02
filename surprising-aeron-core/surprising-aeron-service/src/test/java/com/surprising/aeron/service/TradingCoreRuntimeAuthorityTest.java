@@ -92,13 +92,23 @@ class TradingCoreRuntimeAuthorityTest {
                         "interface OwnerGroup", "List<OwnerGroup>");
         String runtimeState = source("state/TradingRuntimeState.java");
         String prepareCommit = method(runtimeState, "    public PreparedCommit prepareCommitPatch(");
+        String matcherDispatch = method(runtimeState,
+                "    public MatcherSettlementEvent dispatchMatcherSettlement(");
         assertThat(runtimeState)
                 .doesNotContain("captureCommitPatch", "public RuntimeCommitPatch seal()", ".seal();",
                         "BalanceRuntime::releaseOwnerForHandoff", "awaitAndRebindLaneMutations",
                         "pendingApplyCheckpoint", "pendingApplySequence", "rollbackLaneSequence",
                         "lane.releaseOwner()", "lane.bindOwner()")
                 .contains("MatcherSettlementEvent dispatchMatcherSettlement(",
-                        "laneWorkers[laneId].submit(event)", "LaneCommitCommand");
+                        "laneWorkers[laneId].submit(event)", "LaneCommitCommand",
+                        "unindexMatcherPendingReservations(event.plan())",
+                        "publishedLaneStateHashes", "publishedLaneFundsHashes")
+                .doesNotContain("captureMatchedOrderBefore");
+        assertThat(matcherDispatch)
+                .doesNotContain("captureBalanceBefore(", "LaneMutationTask", ".await(", "onLane(");
+        assertThat(prepareCommit)
+                .doesNotContain("BalanceRuntime balance = balance(",
+                        "pendingReservedUnits(userId, assetId)", "onLane(", ".await(");
         assertThat(runtimeState)
                 .contains("SettlementLaneWorker[] laneWorkers", "LaneMutationTask[] laneMutationTasks",
                         "flushPublishedChanges(laneId)");
@@ -108,8 +118,12 @@ class TradingCoreRuntimeAuthorityTest {
                 .doesNotContain("Runnable[]", "ExecutorService", "CompletableFuture", "BlockingQueue");
         assertThat(source("state/MatcherSettlementEvent.java"))
                 .contains("implements SettlementLaneWorker.Command", "lane.applied(commitSequence",
-                        "COMPLETED_LANE_MASK.getAndBitwiseOr")
+                        "completeMatcherPendingReservations(lane, plan)",
+                        "publishLaneHashes(lane)", "COMPLETED_LANE_MASK.getAndBitwiseOr")
                 .doesNotContain("await(", "LockSupport.park");
+        assertThat(method(probe, "    private long laneRevisionHash()"))
+                .contains("accountLaneLocalStateHashById", "accountLaneLocalFundsHashById")
+                .doesNotContain("accountLaneById", ".await(");
         assertThat(occurrences(production, ".recordOrder(")).isEqualTo(1);
         assertThat(occurrences(prepareCommit, "RuntimeStateMaterializer.orderSnapshot(")).isEqualTo(2);
         assertThat(occurrences(prepareCommit, "RuntimeCommitPatch.exportOrderView(")).isZero();

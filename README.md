@@ -29,6 +29,8 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 `MatcherSettlementEvent`，按确定性的 Lane mask 直接写入各 Account Lane 的有界 SPSC ring；每个 Lane 线程永久拥有并
 串行修改本 Lane 的账户、余额、订单、冻结和持仓。Coordinator 只读取 completion bitmap、按 Core sequence 发布
 Core Fact 并推进 committed watermark，不做逐 Lane `release/bind/await`。Lane 允许连续消费多个 applied sequence；
+同一事件在 Lane 内直接完成本命令的 pending reservation，并把余额 primitive before/after 与最新局部 hash 一并发布；
+owner 的 prepare/seal 和 lane revision hash 只消费这些已完成结果，不再逐余额、逐 reservation 或逐 Lane 发同步查询。
 查询和 snapshot 只越过 committed watermark。观察到撮合事实后的任何 Lane、资金、hash、index 或发布不变量错误均
 fail-stop，实例必须从 snapshot 和 Cluster Log 恢复，热路径不再尝试分布式 rollback。
 P10-G 使用真实 HTTP 开放环门禁，只有保存 1,000 用户、至少 200 symbol、100k/s offered rate、
@@ -230,7 +232,8 @@ Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，
 
 Product Core 的热状态与不可变状态投影通过 `RuntimeCommitPatch` 分界。命令在 Account Lane 内完成原地
 裁决后，owner 只封存本命令涉及的用户、余额、订单、冻结、仓位和风险 typed before/after image，生成一次不可变事实增量；
-`CoreProbeState` 不再额外保存 LaneCommit、lane revision 或局部 hash。entry 不持有命令前后的完整
+`CoreProbeState` 不再保存 LaneCommit 对象图；`TradingRuntimeState` 只保留每 Lane 最新发布的 primitive state/funds hash，
+owner 不跨线程读取 Lane hash。entry 不持有命令前后的完整
 `TradingCoreState`；滚动资金/业务 hash、资金守恒、Treasury 合并、投影和 Core Fact 共同消费同一份
 primitive `RuntimeFundsDelta`/typed change。滚动 hash 直接使用各 domain 的增量 aggregate，不维护第二套 owner-domain
 aggregate；typed change 容器使用 generation reset，避免每条命令 `HashMap.clear` 和 entry 重建。持久化 immutable map root 由有界

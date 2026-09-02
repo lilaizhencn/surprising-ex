@@ -8,6 +8,7 @@ import java.lang.invoke.VarHandle;
  * Mutable completion state is isolated from the fact payload and is only used by the owner coordinator.
  */
 public final class MatcherSettlementEvent implements SettlementLaneWorker.Command {
+    private static final RuntimeTreasuryDelta EMPTY_TREASURY_DELTA = new RuntimeTreasuryDelta(1);
     private static final VarHandle COMPLETED_LANE_MASK;
     private static final VarHandle FAILURE;
 
@@ -58,11 +59,14 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         this.baseAssetId = baseAssetId;
         this.quoteAssetId = quoteAssetId;
         this.settleAssetId = settleAssetId;
-        laneTreasuryDeltas = new RuntimeTreasuryDelta[laneCount];
-        for (int laneId = 0; laneId < laneCount; laneId++) {
-            if ((requiredLaneMask & 1L << laneId) != 0) {
-                laneTreasuryDeltas[laneId] =
-                        new RuntimeTreasuryDelta(RuntimeTreasuryDelta.ORDER_BATCH_CAPACITY);
+        if (plan.tradeEventCount() == 0) {
+            laneTreasuryDeltas = null;
+        } else {
+            laneTreasuryDeltas = new RuntimeTreasuryDelta[laneCount];
+            for (int laneId = 0; laneId < laneCount; laneId++) {
+                if ((requiredLaneMask & 1L << laneId) != 0) {
+                    laneTreasuryDeltas[laneId] = new RuntimeTreasuryDelta();
+                }
             }
         }
     }
@@ -77,7 +81,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         }
         try {
             runtime.inLaneCommandScope(lane, ignored -> {
-                RuntimeTreasuryDelta delta = laneTreasuryDeltas[laneId];
+                RuntimeTreasuryDelta delta = laneTreasuryDeltas == null
+                        ? EMPTY_TREASURY_DELTA : laneTreasuryDeltas[laneId];
                 if (runtime.productLine().isDerivative()) {
                     RuntimePerpetualMatchProcessor.applyLane(plan.takerOrderId(), plan, laneId,
                             runtime, identities, instrument, settleAssetId, delta);
@@ -85,15 +90,17 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
                     RuntimeSpotMatchProcessor.applyLane(plan.takerOrderId(), plan, laneId,
                             runtime, instrument, baseAssetId, quoteAssetId, delta);
                 }
+                runtime.completeMatcherPendingReservations(lane, plan);
                 if (commitSequence != 0) {
                     lane.applied(commitSequence, stateContribution, fundsContribution);
+                    runtime.publishLaneHashes(lane);
                 }
                 return null;
             });
         } catch (Throwable laneFailure) {
             FAILURE.compareAndSet(this, null, laneFailure);
         } finally {
-            runtime.recordMatcherLaneOperation(laneId, System.nanoTime() - startedNanos);
+            runtime.recordMatcherLaneOperation(lane, System.nanoTime() - startedNanos);
             long previous = (long) COMPLETED_LANE_MASK.getAndBitwiseOr(this, laneMask);
             if ((previous & laneMask) != 0) {
                 FAILURE.compareAndSet(this, null,
@@ -121,6 +128,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         if (laneFailure instanceof RuntimeException runtimeFailure) throw runtimeFailure;
         if (laneFailure instanceof Error error) throw error;
         if (laneFailure != null) throw new IllegalStateException("account lane settlement failed", laneFailure);
+        if (laneTreasuryDeltas == null) return EMPTY_TREASURY_DELTA;
         RuntimeTreasuryDelta aggregate = null;
         for (int laneId = 0; laneId < laneTreasuryDeltas.length; laneId++) {
             RuntimeTreasuryDelta delta = laneTreasuryDeltas[laneId];

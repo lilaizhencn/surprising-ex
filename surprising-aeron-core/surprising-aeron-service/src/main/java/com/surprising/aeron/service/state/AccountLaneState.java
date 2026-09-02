@@ -42,6 +42,9 @@ public final class AccountLaneState {
     private long committedSequence;
     private long localStateHash = 0xcbf29ce484222325L;
     private long localFundsHash = 0xcbf29ce484222325L;
+    private long matcherSettlementOperations;
+    private long matcherSettlementLatencyNanos;
+    private long matcherSettlementMaxLatencyNanos;
     private Thread owner;
 
     AccountLaneState(int laneId, int queueCapacity) {
@@ -225,6 +228,20 @@ public final class AccountLaneState {
         return totalPendingReservations;
     }
 
+    void recordMatcherSettlement(long latencyNanos) {
+        assertOwner();
+        if (latencyNanos < 0) throw new IllegalArgumentException("invalid matcher settlement latency");
+        matcherSettlementOperations++;
+        matcherSettlementLatencyNanos = Math.addExact(matcherSettlementLatencyNanos, latencyNanos);
+        matcherSettlementMaxLatencyNanos = Math.max(matcherSettlementMaxLatencyNanos, latencyNanos);
+    }
+
+    MatcherSettlementMetrics matcherSettlementMetrics() {
+        assertOwner();
+        return new MatcherSettlementMetrics(matcherSettlementOperations,
+                matcherSettlementLatencyNanos, matcherSettlementMaxLatencyNanos);
+    }
+
     boolean hasPendingReservations() {
         assertOwner();
         return totalPendingReservations != 0;
@@ -339,6 +356,9 @@ public final class AccountLaneState {
     private record PendingReservationCompletion(
             ReservationRuntime reservation, int nextUserCount, int nextTotal,
             IntLongHashMap unitsByAsset, long nextUnits) {
+    }
+
+    record MatcherSettlementMetrics(long operations, long totalLatencyNanos, long maxLatencyNanos) {
     }
 
     private static long mix(long hash, long value) {

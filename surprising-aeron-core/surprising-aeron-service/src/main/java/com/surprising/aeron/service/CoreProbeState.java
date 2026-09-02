@@ -3153,7 +3153,7 @@ public final class CoreProbeState implements AutoCloseable {
                         rejectPlaceOrderRuntime(pending.command().header().userId(), command.orderId(), sequence);
                     }
                     commandExecutions = executionViews(command.orderId(), pending.command().header().userId(),
-                            settlementPlan.tradeEvents());
+                            settlementPlan);
                 }
                 case CANCEL -> {
                     var command = pending.decodedCommand().cancelOrder();
@@ -3185,7 +3185,7 @@ public final class CoreProbeState implements AutoCloseable {
                                 pending, settlementPlan, sequence, matchingResult, laneContext, applyStartNanos);
                         if (settlementTreasuryDelta == null) return null;
                         commandExecutions = executionViews(command.orderId(), pending.command().header().userId(),
-                                settlementPlan.tradeEvents());
+                                settlementPlan);
                     } else {
                         commandChangedUserIds = boxedLongs(settlementPlan.userIds());
                         commandChangedOrderIds = boxedLongs(settlementPlan.orderIds());
@@ -3211,7 +3211,7 @@ public final class CoreProbeState implements AutoCloseable {
                             matchingResult.accepted() ? command.orderId() : 0,
                             matchingResult.accepted() ? "" : matchingResult.resultCode(), execute[3]);
                     commandExecutions = executionViews(command.orderId(), trigger.userId(),
-                            settlementPlan.tradeEvents());
+                            settlementPlan);
                     commandOrderViews = commandChangedOrderIds.stream().map(this::runtimeOrder)
                             .filter(java.util.Objects::nonNull).map(this::orderView).toList();
                 }
@@ -3348,12 +3348,12 @@ public final class CoreProbeState implements AutoCloseable {
                 case PLACE -> {
                     var command = pending.decodedCommand().placeOrder();
                     commandExecutions = executionViews(command.orderId(), pending.command().header().userId(),
-                            pending.settlementPlan().tradeEvents());
+                            pending.settlementPlan());
                 }
                 case REPLACE, AMEND -> {
                     ResolvedMatchingAdmission admission = requireMatchingAdmission(pending);
                     commandExecutions = executionViews(admission.command().orderId(), admission.userId(),
-                            pending.settlementPlan().tradeEvents());
+                            pending.settlementPlan());
                 }
                 case TRIGGER -> {
                     long[] execute = pending.decodedCommand().trigger();
@@ -3364,7 +3364,7 @@ public final class CoreProbeState implements AutoCloseable {
                     var command = triggerPlacement(trigger, execute[2]);
                     completeTriggerOrderRuntime(trigger.triggerOrderId(), true, command.orderId(), "", execute[3]);
                     commandExecutions = executionViews(command.orderId(), trigger.userId(),
-                            pending.settlementPlan().tradeEvents());
+                            pending.settlementPlan());
                     commandOrderViews = commandChangedOrderIds.stream().map(this::runtimeOrder)
                             .filter(java.util.Objects::nonNull).map(this::orderView).toList();
                 }
@@ -6076,6 +6076,20 @@ public final class CoreProbeState implements AutoCloseable {
         java.util.ArrayList<com.surprising.aeron.protocol.CoreExecutionView> executions = null;
         for (MatcherEvent match : matches) {
             if (match.eventType() != MatcherEventType.TRADE) continue;
+            if (executions == null) executions = new java.util.ArrayList<>();
+            executions.add(new com.surprising.aeron.protocol.CoreExecutionView(
+                    takerOrderId, match.matchedOrderId(), takerUserId, match.matchedOrderUid(),
+                    match.price(), match.size()));
+        }
+        return executions == null ? List.of() : List.copyOf(executions);
+    }
+
+    private static List<com.surprising.aeron.protocol.CoreExecutionView> executionViews(
+            long takerOrderId, long takerUserId,
+            com.surprising.aeron.service.state.MatcherSettlementPlan plan) {
+        java.util.ArrayList<com.surprising.aeron.protocol.CoreExecutionView> executions = null;
+        for (int index = 0; index < plan.tradeEventCount(); index++) {
+            MatcherEvent match = plan.tradeEvent(index);
             if (executions == null) executions = new java.util.ArrayList<>();
             executions.add(new com.surprising.aeron.protocol.CoreExecutionView(
                     takerOrderId, match.matchedOrderId(), takerUserId, match.matchedOrderUid(),
