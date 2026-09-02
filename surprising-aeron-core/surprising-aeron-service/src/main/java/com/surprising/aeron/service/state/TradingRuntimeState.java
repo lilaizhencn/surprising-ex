@@ -2814,6 +2814,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         return new LongHashSet(changedUsers);
     }
 
+    public void acceptChangedUserIds(java.util.function.LongConsumer consumer) {
+        assertOwner();
+        if (consumer == null) throw new IllegalArgumentException("changed user consumer is required");
+        changedUsers.forEach(consumer::accept);
+    }
+
     public IntHashSet changedBalances(long userId) {
         assertOwner();
         IntHashSet assets = changedBalances.get(userId);
@@ -3795,6 +3801,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         private long[] pendingAfter = new long[8];
         private boolean[] presentAfter = new boolean[8];
         private boolean[] capturedAfter = new boolean[8];
+        private long[] indexUserIds = new long[16];
+        private int[] indexAssetIds = new int[16];
+        private int[] indexSlots = new int[16];
+        private int[] indexGenerations = new int[16];
+        private int indexGeneration = 1;
         private int size;
 
         private int size() { return size; }
@@ -3814,13 +3825,14 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
 
         private boolean contains(long userId, int assetId) {
-            for (int index = 0; index < size; index++) {
-                if (userIds[index] == userId && assetIds[index] == assetId) return true;
-            }
-            return false;
+            return indexOf(userId, assetId) >= 0;
         }
 
         private void add(long userId, int assetId, BalanceRuntime value, long pendingReservedUnits) {
+            if (indexOf(userId, assetId) >= 0) {
+                throw new IllegalStateException("balance capture key already exists");
+            }
+            ensureIndexCapacity(size + 1);
             if (size == userIds.length) {
                 int capacity = Math.multiplyExact(size, 2);
                 userIds = java.util.Arrays.copyOf(userIds, capacity);
@@ -3835,6 +3847,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 presentAfter = java.util.Arrays.copyOf(presentAfter, capacity);
                 capturedAfter = java.util.Arrays.copyOf(capturedAfter, capacity);
             }
+            int indexPosition = emptyIndexPosition(userId, assetId);
             userIds[size] = userId;
             assetIds[size] = assetId;
             capturedAfter[size] = false;
@@ -3845,26 +3858,77 @@ public final class TradingRuntimeState implements AutoCloseable {
                 lockedBefore[size] = value.lockedUnits();
                 pendingBefore[size] = pendingReservedUnits;
             }
+            indexUserIds[indexPosition] = userId;
+            indexAssetIds[indexPosition] = assetId;
+            indexSlots[indexPosition] = size;
+            indexGenerations[indexPosition] = indexGeneration;
             size++;
         }
 
         private void after(long userId, int assetId, BalanceRuntime value, long pendingReservedUnits) {
-            for (int index = 0; index < size; index++) {
-                if (userIds[index] != userId || assetIds[index] != assetId) continue;
-                capturedAfter[index] = true;
-                presentAfter[index] = value != null;
-                if (value != null) {
-                    availableAfter[index] = value.availableUnits();
-                    lockedAfter[index] = value.lockedUnits();
-                    pendingAfter[index] = pendingReservedUnits;
-                }
-                return;
+            int index = indexOf(userId, assetId);
+            if (index < 0) {
+                throw new IllegalStateException("balance after-state is missing its before-state");
             }
-            throw new IllegalStateException("balance after-state is missing its before-state");
+            capturedAfter[index] = true;
+            presentAfter[index] = value != null;
+            if (value != null) {
+                availableAfter[index] = value.availableUnits();
+                lockedAfter[index] = value.lockedUnits();
+                pendingAfter[index] = pendingReservedUnits;
+            }
         }
 
         private void clear() {
             size = 0;
+            if (++indexGeneration == 0) {
+                java.util.Arrays.fill(indexGenerations, 0);
+                indexGeneration = 1;
+            }
+        }
+
+        private int indexOf(long userId, int assetId) {
+            int mask = indexSlots.length - 1;
+            int position = pairHash(userId, assetId) & mask;
+            while (indexGenerations[position] == indexGeneration) {
+                if (indexUserIds[position] == userId && indexAssetIds[position] == assetId) {
+                    return indexSlots[position];
+                }
+                position = (position + 1) & mask;
+            }
+            return -1;
+        }
+
+        private int emptyIndexPosition(long userId, int assetId) {
+            int mask = indexSlots.length - 1;
+            int position = pairHash(userId, assetId) & mask;
+            while (indexGenerations[position] == indexGeneration) position = (position + 1) & mask;
+            return position;
+        }
+
+        private void ensureIndexCapacity(int requiredSize) {
+            if (requiredSize <= indexSlots.length / 2) return;
+            int capacity = Math.multiplyExact(indexSlots.length, 2);
+            indexUserIds = new long[capacity];
+            indexAssetIds = new int[capacity];
+            indexSlots = new int[capacity];
+            indexGenerations = new int[capacity];
+            indexGeneration = 1;
+            for (int index = 0; index < size; index++) {
+                int position = emptyIndexPosition(userIds[index], assetIds[index]);
+                indexUserIds[position] = userIds[index];
+                indexAssetIds[position] = assetIds[index];
+                indexSlots[position] = index;
+                indexGenerations[position] = indexGeneration;
+            }
+        }
+
+        private static int pairHash(long userId, int assetId) {
+            long value = userId ^ Integer.toUnsignedLong(assetId) * 0x9e3779b97f4a7c15L;
+            value ^= value >>> 33;
+            value *= 0xff51afd7ed558ccdL;
+            value ^= value >>> 33;
+            return (int) value;
         }
     }
 
@@ -3876,6 +3940,10 @@ public final class TradingRuntimeState implements AutoCloseable {
     private static final class LaneLongCaptures<V> {
         private long[] keys = new long[8];
         private Object[] values = new Object[8];
+        private long[] indexKeys = new long[16];
+        private int[] indexSlots = new int[16];
+        private int[] indexGenerations = new int[16];
+        private int indexGeneration = 1;
         private int size;
 
         private int size() { return size; }
@@ -3890,13 +3958,18 @@ public final class TradingRuntimeState implements AutoCloseable {
 
         private void put(long key, V value) {
             if (indexOf(key) >= 0) throw new IllegalStateException("capture key already exists");
+            ensureIndexCapacity(size + 1);
             if (size == keys.length) {
                 int capacity = Math.multiplyExact(size, 2);
                 keys = java.util.Arrays.copyOf(keys, capacity);
                 values = java.util.Arrays.copyOf(values, capacity);
             }
+            int indexPosition = emptyIndexPosition(key);
             keys[size] = key;
             values[size] = value;
+            indexKeys[indexPosition] = key;
+            indexSlots[indexPosition] = size;
+            indexGenerations[indexPosition] = indexGeneration;
             size++;
         }
 
@@ -3912,15 +3985,51 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
 
         private int indexOf(long key) {
-            for (int index = 0; index < size; index++) {
-                if (keys[index] == key) return index;
+            int mask = indexSlots.length - 1;
+            int position = longHash(key) & mask;
+            while (indexGenerations[position] == indexGeneration) {
+                if (indexKeys[position] == key) return indexSlots[position];
+                position = (position + 1) & mask;
             }
             return -1;
+        }
+
+        private int emptyIndexPosition(long key) {
+            int mask = indexSlots.length - 1;
+            int position = longHash(key) & mask;
+            while (indexGenerations[position] == indexGeneration) position = (position + 1) & mask;
+            return position;
+        }
+
+        private void ensureIndexCapacity(int requiredSize) {
+            if (requiredSize <= indexSlots.length / 2) return;
+            int capacity = Math.multiplyExact(indexSlots.length, 2);
+            indexKeys = new long[capacity];
+            indexSlots = new int[capacity];
+            indexGenerations = new int[capacity];
+            indexGeneration = 1;
+            for (int index = 0; index < size; index++) {
+                int position = emptyIndexPosition(keys[index]);
+                indexKeys[position] = keys[index];
+                indexSlots[position] = index;
+                indexGenerations[position] = indexGeneration;
+            }
+        }
+
+        private static int longHash(long key) {
+            key ^= key >>> 33;
+            key *= 0xff51afd7ed558ccdL;
+            key ^= key >>> 33;
+            return (int) key;
         }
 
         private void clear() {
             for (int index = 0; index < size; index++) values[index] = null;
             size = 0;
+            if (++indexGeneration == 0) {
+                java.util.Arrays.fill(indexGenerations, 0);
+                indexGeneration = 1;
+            }
         }
     }
 

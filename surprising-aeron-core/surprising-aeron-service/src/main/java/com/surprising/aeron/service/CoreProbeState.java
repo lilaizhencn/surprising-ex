@@ -5968,9 +5968,7 @@ public final class CoreProbeState implements AutoCloseable {
 
     private void materializeChangeAccumulators() {
         seedChangeAccumulators();
-        for (long userId : runtimePlaceOrderState.changedUsers().toArray()) {
-            changedUserIds.add(userId);
-        }
+        runtimePlaceOrderState.acceptChangedUserIds(changedUserIds::add);
         commandChangedUserIds = ImmutableLongArrayList.copyOf(changedUserIds.toPrimitiveArray());
         commandChangedOrderIds = ImmutableLongArrayList.copyOf(changedOrderIds.toPrimitiveArray());
         commandChangedLiquidationIds = ImmutableLongArrayList.copyOf(changedLiquidationIds.toPrimitiveArray());
