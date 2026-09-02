@@ -3231,6 +3231,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
         public long sequence() { return builder.sequence(); }
         public long revision() { return metadata.afterRevision(); }
+        public int coreFactItemCount() { return builder.coreFactItemCount(); }
         public RuntimeFactFrame.CoreFactMetadata coreFactMetadata() { return metadata.coreFactMetadata(); }
         public void visitTerminalValues(RuntimeFactFrame.RetentionConsumer consumer) {
             builder.visitTerminalValues(consumer);

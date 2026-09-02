@@ -56,6 +56,20 @@ class MatcherCommandPipelineTest {
     }
 
     @Test
+    void probingANonHeadCompletionDoesNotViolateShardOrder() {
+        try (MatcherCommandPipeline pipeline = new MatcherCommandPipeline(4)) {
+            pipeline.submit(20, () -> new CoreMatchingResult(true, "FIRST-SUBMITTED"));
+            pipeline.submit(10, () -> new CoreMatchingResult(true, "SECOND-SUBMITTED"));
+
+            assertThat(pipeline.await(10, TimeUnit.MILLISECONDS.toNanos(1))).isNull();
+            assertThat(pipeline.await(20, TimeUnit.SECONDS.toNanos(5)).resultCode())
+                    .isEqualTo("FIRST-SUBMITTED");
+            assertThat(pipeline.await(10, TimeUnit.SECONDS.toNanos(5)).resultCode())
+                    .isEqualTo("SECOND-SUBMITTED");
+        }
+    }
+
+    @Test
     void wakesAfterRepeatedIdleAndBurstCyclesWithoutLosingACompletion() {
         try (MatcherCommandPipeline pipeline = new MatcherCommandPipeline(8)) {
             for (long cycle = 1; cycle <= 100; cycle++) {

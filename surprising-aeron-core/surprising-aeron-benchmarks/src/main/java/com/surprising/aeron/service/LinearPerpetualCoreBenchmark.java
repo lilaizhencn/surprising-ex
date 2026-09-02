@@ -453,6 +453,9 @@ public class LinearPerpetualCoreBenchmark {
 
     @State(Scope.Benchmark)
     public static class SaturationState {
+        @Param("1")
+        public int matchingEngines;
+
         @Param("4")
         public int accountLanes;
 
@@ -484,6 +487,11 @@ public class LinearPerpetualCoreBenchmark {
 
         @Setup(Level.Trial)
         public void setUpTrial() {
+            if (matchingEngines != 1 || maxInFlight != 256) {
+                throw new IllegalArgumentException(
+                        "qualification requires one matcher shard and exactly 256 in-flight");
+            }
+            System.setProperty("surprising.aeron.matching-engines", Integer.toString(matchingEngines));
             LinearPerpetualBenchmarkSupport.configureAccountLanes(accountLanes);
             var config = LinearPerpetualScaleConfig.scale(listedSymbols, activeSymbols,
                     maxPositionsPerUser, maxOpenOrdersPerUser,

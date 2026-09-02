@@ -15,7 +15,7 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 |---|---|
 | P0 | canonical 中文 P0-P5 规范注册与分支安全：先发布根 README 契约，保留既有脏改动。 |
 | P1 | reservation、`PositionCloseCapacity`、价格分离与累计手续费：衍生品普通单为全量开仓风险预留，reduce-only 才可省略开仓保证金。 |
-| P2 | deterministic `MATCHING_ONLY` 推进与成对快照：Aeron owner 通过有界 SPSC pipeline 调用单个同步 matcher worker；native sequence/prefix 与 Core 状态成对快照，Core commit 与 Core Fact 按全局 Core sequence 确定提交。 |
+| P2 | deterministic `MATCHING_ONLY` 推进与成对快照：symbol 稳定路由到独立同步 matcher shard；每 shard 使用有界 SPSC pipeline 和本地 native sequence/prefix，Core 状态与全部 shard 成对快照。 |
 | P3 | TradingRuntimeState 生产写入权威：六条产品线的 Runtime owner 线程是唯一交易裁决状态，immutable `TradingCoreState` 仅是快照、事实增量、恢复、hash 与对账投影。 |
 | P4 | six isolated settlement kernels：Spot、LinearPerpetual、InversePerpetual、LinearDelivery、InverseDelivery、Option 各有穷尽且隔离的结算内核。 |
 | P5 | FundsDelta、Treasury、操作级舍入与连续性：每命令/资产资金变动不可变且确定性排序，Treasury 子账本、残差和 Core Fact 前后状态证据显式核算。 |
@@ -23,12 +23,13 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 | P7 | fatal / readiness campaign：致命故障和就绪性验证，不是 P0-P5 行为改动。 |
 | P8 | three-node recovery certification：三节点恢复认证，不是 P0-P5 行为改动。 |
 | P9 | 1,000-user / 40-minute certification：千用户、四十分钟验证，不是 P0-P5 行为改动。 |
-| P10 | single-Core deterministic lanes / capacity：每个 Product Core 只运行一个同步 matching engine；Account Lane 是有固定线程所有权的确定性资金隔离与执行边界，不创建物理 Core shard。实施边界以本 README 和 Aeron 模块 README 为准。 |
+| P10 | single-Core deterministic lanes / capacity：每个 Product Core 保持一个业务 owner，可配置多个按 symbol 分片的独立同步 matcher；Account Lane 是固定线程所有权的资金隔离与执行边界，不创建物理 Product Core shard。实施边界以本 README 和 Aeron 模块 README 为准。 |
 
 当前实现状态：P0-P5 与 P10-A 至 P10-F 的主体迁移已完成。撮合输出构造成一条不可变
 `MatcherSettlementEvent`，按确定性的 Lane mask 直接写入各 Account Lane 的有界 SPSC ring；每个 Lane 线程永久拥有并
-串行修改本 Lane 的账户、余额、订单、冻结和持仓。Coordinator 只读取 completion bitmap、按 Core sequence 发布
-Core Fact，不做逐 Lane `release/bind/await`。Lane 在同一个 owner task 内依次推进 applied/committed watermark，允许连续消费多个 sequence；
+串行修改本 Lane 的账户、余额、订单、冻结和持仓。Coordinator 只读取 completion bitmap，并按 matcher 实际完成顺序发布
+Core Fact，不做逐 Lane `release/bind/await`。Lane 使用本地连续 commit sequence 推进 applied/committed watermark；入口 Core sequence
+仅保留复制身份和连续完成水位，不再强制不同 symbol 逐条等待；
 同一事件在 Lane 内直接完成本命令的 pending reservation，并把余额 primitive before/after 与最新局部 hash 一并发布；
 订单 `updatedAt/clusterPosition` 也在该事件的所属 Lane 内一次写入，成交完成后不再二次 fan-out 做 metadata stamping；
 owner 的 prepare/seal 和 lane revision hash 只消费这些已完成结果，不再逐余额、逐 reservation 或逐 Lane 发同步查询。
@@ -37,17 +38,18 @@ fail-stop，实例必须从 snapshot 和 Cluster Log 恢复，热路径不再尝
 P10-G 使用真实 HTTP 开放环门禁，只有保存 1,000 用户、至少 200 symbol、100k/s offered rate、
 计量窗口内至少 100k/s 实际终态吞吐、40 分钟、JFR 和资金/盘口核对 artifact 后才可标记生产认证完成。普通下单只提交一次正式 `PLACE_ORDER`，
 由 Product Core 在同一权威转换内完成 P1 的预占、平仓容量和费用校验；显式 dry-run 接口仍可调用只读 preflight，
-但不在正式下单前额外往返 Core。`DeterministicExchangeCoreAdapter` 向一个共享 ExchangeCore 的原生 matcher shard
-提交有界 pipeline，直接持有
+但不在正式下单前额外往返 Core。`DeterministicExchangeCoreAdapter` 按 symbol 把命令提交到对应 shard 的有界 SPSC pipeline；
+每个 worker 独占一个 `SynchronousMatchingEngine(matchingEnginesNum=1)`，直接持有
 exchange-core 产出的不可变 `MatcherResult`、event list 和 market data，不再复制 matcher 证据，并用
 全局唯一 `matcherSequence + matcherShardId + MatcherPrefix(before, after)` 绑定命令结果；每个 native shard 和
 control shard 各自推进 prefix digest，随配对快照恢复，单 shard 断裂、倒退或 malformed
-结果立即 fail closed。普通命令不再生成逐命令全量 `BookHashes`，完整 `bookStateHash` 只保留在 snapshot、恢复和
-显式审计边界。`TradingRuntimeState` 是 P3 唯一交易裁决权威；`TradingCoreState` 仅在每个事实边界按 changed-key
-生成一次不可变投影，承担 Cluster snapshot、Core Fact、恢复、状态 hash 和对账。P4 使用六个穷尽且隔离的
+结果立即 fail closed。普通命令不再生成逐命令全量 `BookHashes` 或完整业务/资金 rolling hash，完整 hash 只保留在 snapshot、恢复和
+显式审计边界。`TradingRuntimeState` 是 P3 唯一交易裁决权威；热路径只记录 raw typed fact changes，
+`TradingCoreState` 仅在 snapshot/query fence 物化；Core Fact 的不可变嵌套结构由有界后台 materializer 批量生成。P4 使用六个穷尽且隔离的
 `SettlementKernel`。P5 以确定性 `FundsDelta`、Treasury 子账本、状态/资金 hash 和 replicated outbox 形成连续事实链。
-P10 使用 `routeVersion=3`、1 个 matching engine、0 个 exchange-core risk engine 和默认 4 个逻辑 Account Lane；业务风控仍由 owner 执行。pending reservation
-在 commit 前不进入 query、Snapshot State 或 Core Fact，Core Fact 仍严格按全局 sequence 发布。
+P10 使用 `routeVersion=3`、1–64 个（2 的幂）matcher shard、每 shard 一个同步 engine、0 个 exchange-core risk engine
+和默认 4 个逻辑 Account Lane；业务风控仍由 owner 执行。pending reservation 在 commit 前不进入 query、Snapshot State 或 Core Fact。
+正式性能验收为了保持可比性仍固定 matcher=1、256 in-flight；多 matcher 只使用单独的功能与隔离验证，不能混入基线结论。
 
 ### 分支安全与验证契约
 
@@ -258,8 +260,9 @@ snapshot/outbox 持久化才建立显式 fence。matcher 之前的业务拒绝�
 双写或 feature flag 路径。
 
 Matcher continuation 与 Lane command context 共用按 Core sequence 定位的预分配 ring；pending 顺序也由 primitive
-sequence ring 保存。owner 不为撮合命令维护 Future、active set 或 completed-result map；一个 matcher worker 从有界 SPSC
-ring 按序取命令，owner 按 Core sequence 批量收割连续 completion 并落账。默认关闭的 matching phase 诊断不会执行 `nanoTime`
+sequence ring 保存。owner 不为撮合命令维护 Future、active set 或 completed-result map；每个 matcher shard worker 从自己的
+有界 SPSC ring 按 symbol 顺序取命令，owner 收割所有 shard 中已完成的结果并按完成顺序落账。全局 Core sequence 只在结果完成后
+推进连续水位，不阻塞其他 shard。默认关闭的 matching phase 诊断不会执行 `nanoTime`
 或写计时 map。永续订单
 准入的 open-interest 比例计算和 risk bracket 选择使用精确 long fast path，只有真实 long 乘法溢出才进入
 `BigInteger` fallback；同一命令的杠杆和 matcher evidence 不再重复查询或重复解码。
@@ -436,8 +439,8 @@ lineage freeze、mutation delta 和状态 hash。历史 `25660.077 ops/s` 使用
 从 25k 回退，而是旧文档混用了两种 workload。当前单 JVM 重生命周期场景离每产品线 100k/s 仍很远，且矩阵不含
 Aeron Cluster、HTTP、Kafka、WebSocket；不得标记为 100k/s 生产认证。
 
-当前 `MatcherEvidenceLedger` 保存单 matching engine 的严格单调 native sequence 与连续 prefix，并随 matcher snapshot
-校验完整进度。跨 symbol 批次、前置撤单和生命周期 matcher 工作仍使用同一同步引擎，不存在 shard 乱序完成。
+当前 `MatcherEvidenceLedger` 按 matcher shard 保存严格单调 native sequence 与连续 prefix，并随 matcher snapshot
+校验完整进度。同 symbol 命令保持单 shard FIFO；跨 symbol shard 可以乱序完成，snapshot/control fence 才等待全部 shard。
 普通成交由不可变 matcher fact 直接 fan-out 到固定 Account Lane worker；每个 Lane 只串行执行本 Lane 的资产和持仓变化，
 Coordinator 依据 completion bitmap 和 sequence watermark 发布终态。多用户重生命周期工作沿用相同 Lane 所有权边界。
 

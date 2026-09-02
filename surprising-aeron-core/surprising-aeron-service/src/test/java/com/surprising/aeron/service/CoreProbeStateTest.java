@@ -432,17 +432,10 @@ class CoreProbeStateTest {
     void injectedOwnerCommitFailuresPoisonTheInstanceForSnapshotLogRecovery() throws Exception {
         for (String phase : List.of("preflight", "indexes", "hashes")) {
             try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
-                long businessHash = ((com.surprising.aeron.service.state.RollingBusinessStateHash)
-                        field(state, "rollingBusinessStateHash")).value();
-                long fundsHash = ((com.surprising.aeron.service.state.RollingFundsStateHash)
-                        field(state, "rollingFundsStateHash")).value();
                 var journal = (com.surprising.aeron.service.state.RuntimeCommitJournal)
                         field(state, "runtimeProjectionJournal");
                 var runtimeState = (com.surprising.aeron.service.state.TradingRuntimeState)
                         field(state, "runtimePlaceOrderState");
-                var activeOrders = (com.surprising.aeron.service.state.ActiveOrderIndex)
-                        field(state, "activeOrderIndex");
-                var activeOrderPage = activeOrders.page(0, "BTC-USDT", Long.MAX_VALUE, 10);
                 long committedLaneSequence = runtimeState.accountLane(7).committedSequence();
                 CoreProbeState.setCommitFaultInjectorForTest(current -> {
                     if (phase.equals(current)) throw new IllegalStateException("injected " + phase + " failure");
@@ -856,10 +849,12 @@ class CoreProbeStateTest {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             CoreLaneMetrics metrics = state.laneMetrics();
 
-            assertThat(metrics.matchingEngineCount()).isEqualTo(1);
+            assertThat(metrics.matchingEngineCount()).isEqualTo(state.laneTopology().matchingEngineCount());
             assertThat(metrics.accountLaneCount()).isEqualTo(4);
-            assertThat(metrics.matcherDispatchCapacity()).isEqualTo(4_096);
-            assertThat(metrics.matchingCompletionCapacity()).isEqualTo(4_096);
+            int totalMatcherCapacity = Math.multiplyExact(
+                    state.laneTopology().matchingEngineCount(), state.laneTopology().matcherWindowSize());
+            assertThat(metrics.matcherDispatchCapacity()).isEqualTo(totalMatcherCapacity);
+            assertThat(metrics.matchingCompletionCapacity()).isEqualTo(totalMatcherCapacity);
             assertThat(metrics.commandContextCapacity()).isEqualTo(4_096);
             assertThat(metrics.matcherDispatchDepth()).isZero();
             assertThat(metrics.commandContextDepth()).isZero();

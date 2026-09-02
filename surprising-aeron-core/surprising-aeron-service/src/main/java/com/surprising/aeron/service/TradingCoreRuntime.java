@@ -317,7 +317,11 @@ public final class TradingCoreRuntime implements AutoCloseable {
         assertOwner();
         if (entry == null || entry.metadata().afterRevision() < committedRevision
                 || beforeBusinessStateHash != committedBusinessStateHash) {
-            throw new IllegalStateException("runtime fact transition is out of order");
+            throw new IllegalStateException("runtime fact transition is out of order: afterRevision="
+                    + (entry == null ? "null" : entry.metadata().afterRevision())
+                    + ", committedRevision=" + committedRevision
+                    + ", beforeBusinessStateHash=" + beforeBusinessStateHash
+                    + ", committedBusinessStateHash=" + committedBusinessStateHash);
         }
         factIndexes.apply(entry.builder(), entry.identities());
         committedRevision = entry.metadata().afterRevision();
@@ -327,15 +331,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     void restoreCommittedConsumers(TradingCoreState state, long revision, long businessStateHash) {
         if (owner != null) assertOwner();
         factIndexes.rebuild(state, identities);
-        committedRevision = revision;
-        committedBusinessStateHash = businessStateHash;
-    }
-
-    void refreshCommittedAuditHashes(long revision, long businessStateHash) {
-        assertOwner();
-        if (revision < committedRevision || businessStateHash == 0) {
-            throw new IllegalArgumentException("invalid committed audit fence");
-        }
         committedRevision = revision;
         committedBusinessStateHash = businessStateHash;
     }

@@ -23,9 +23,7 @@ public record LaneTopology(
     public static final int DEFAULT_QUEUE_CAPACITY = 4_096;
 
     public LaneTopology {
-        if (matchingEngineCount != 1) {
-            throw new IllegalArgumentException("matchingEngineCount must be exactly 1");
-        }
+        requirePowerOfTwo(matchingEngineCount, 1, 64, "matchingEngineCount");
         requirePowerOfTwo(riskEngineCount, 0, 64, "riskEngineCount");
         requirePowerOfTwo(accountLaneCount, 1, Long.SIZE, "accountLaneCount");
         requirePowerOfTwo(matcherWindowSize, 1, 1 << 20, "matcherWindowSize");
@@ -47,9 +45,6 @@ public record LaneTopology(
 
     public static LaneTopology configured(boolean allowCharacterization) {
         int matching = Integer.getInteger("surprising.aeron.matching-engines", DEFAULT_MATCHING_ENGINE_COUNT);
-        if (matching != DEFAULT_MATCHING_ENGINE_COUNT) {
-            throw new IllegalArgumentException("surprising.aeron.matching-engines must be exactly 1");
-        }
         int risk = Integer.getInteger("surprising.aeron.risk-engines", DEFAULT_RISK_ENGINE_COUNT);
         int accounts = Integer.getInteger("surprising.aeron.account-lanes", DEFAULT_ACCOUNT_LANE_COUNT);
         long seed = Long.getLong("surprising.aeron.account-lane-seed", DEFAULT_ACCOUNT_LANE_SEED);

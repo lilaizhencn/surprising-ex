@@ -81,7 +81,8 @@ class CoreStateSnapshotCodecTest {
             byte[] snapshot = state.snapshot(41);
             ByteBuffer buffer = ByteBuffer.wrap(snapshot).order(ByteOrder.LITTLE_ENDIAN);
 
-            assertThat(Short.toUnsignedInt(buffer.getShort(Integer.BYTES))).isEqualTo(17);
+            assertThat(Short.toUnsignedInt(buffer.getShort(Integer.BYTES)))
+                    .isEqualTo(SectionedCoreSnapshotCodec.VERSION);
             assertThat(buffer.getInt(8)).isEqualTo(14);
             buffer.position(ENVELOPE_LENGTH);
             int[] sectionIds = new int[14];
@@ -286,6 +287,7 @@ class CoreStateSnapshotCodecTest {
             corruptions.put("command id", mutateOutboxEvent(control, OutboxMutation.COMMAND_ID));
             corruptions.put("source sequence", mutateOutboxEvent(control, OutboxMutation.SOURCE_SEQUENCE));
             corruptions.put("command type", mutateOutboxEvent(control, OutboxMutation.COMMAND_TYPE));
+            corruptions.put("reservation length", mutateOutboxEvent(control, OutboxMutation.RESERVATION_LENGTH));
 
             corruptions.forEach((label, corrupted) -> {
                 Throwable failure = catchThrowable(() ->
@@ -385,7 +387,7 @@ class CoreStateSnapshotCodecTest {
 
             CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.SPOT, snapshot);
 
-            assertThat(manifest.schemaVersion()).isEqualTo(17);
+            assertThat(manifest.schemaVersion()).isEqualTo(SectionedCoreSnapshotCodec.VERSION);
             assertThat(manifest.snapshotId()).isEqualTo(73);
             assertThat(manifest.coreSequence()).isEqualTo(state.appliedCommandCount());
             assertThat(manifest.clusterTimestamp()).isEqualTo(1_234);
@@ -399,7 +401,8 @@ class CoreStateSnapshotCodecTest {
             assertThat(manifest.businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
             assertThat(manifest.forkGitSha()).isEqualTo(MatcherSnapshot.FORK_GIT_SHA);
             assertThat(manifest.artifactSha256()).isEqualTo(MatcherSnapshot.ARTIFACT_SHA256);
-            assertThat(manifest.matcherConfigHash()).isEqualTo(MatcherSnapshot.MATCHER_CONFIG_HASH);
+            assertThat(manifest.matcherConfigHash())
+                    .isEqualTo(MatcherSnapshot.matcherConfigHash(state.laneTopology()));
         }
     }
 
@@ -426,20 +429,20 @@ class CoreStateSnapshotCodecTest {
         mismatches.put("matcher sequence", mutateHeaderLong(snapshot, 130));
         mismatches.put("business state hash", mutateHeaderLong(snapshot, 138));
         mismatches.put("funds hash", mutateHeaderLong(snapshot, 146));
-        mismatches.put("engine state hash", mutateHeaderInt(snapshot, 154));
-        mismatches.put("book state hash", mutateHeaderInt(snapshot, 158));
-        mismatches.put("symbol registry hash", mutateHeaderLong(snapshot, 162));
-        mismatches.put("user registry hash", mutateHeaderLong(snapshot, 170));
-        mismatches.put("instrument registry hash", mutateHeaderLong(snapshot, 178));
-        mismatches.put("active order hash", mutateHeaderLong(snapshot, 186));
-        mismatches.put("source sequence digest", mutateHeaderLong(snapshot, 194));
-        mismatches.put("outbox acknowledged sequence", mutateHeaderLong(snapshot, 202));
-        mismatches.put("outbox next sequence", mutateHeaderLong(snapshot, 210));
-        mismatches.put("outbox pending count", mutateHeaderInt(snapshot, 218));
-        mismatches.put("outbox pending digest", mutateHeaderLong(snapshot, 222));
-        mismatches.put("matcher config", mutateHeaderLong(snapshot, 230));
-        mismatches.put("fork identity", mutateHeaderByte(snapshot, 238));
-        mismatches.put("artifact identity", mutateHeaderByte(snapshot, 278));
+        mismatches.put("engine state hash", mutateHeaderInt(snapshot, 170));
+        mismatches.put("book state hash", mutateHeaderInt(snapshot, 174));
+        mismatches.put("symbol registry hash", mutateHeaderLong(snapshot, 178));
+        mismatches.put("user registry hash", mutateHeaderLong(snapshot, 186));
+        mismatches.put("instrument registry hash", mutateHeaderLong(snapshot, 194));
+        mismatches.put("active order hash", mutateHeaderLong(snapshot, 202));
+        mismatches.put("source sequence digest", mutateHeaderLong(snapshot, 210));
+        mismatches.put("outbox acknowledged sequence", mutateHeaderLong(snapshot, 218));
+        mismatches.put("outbox next sequence", mutateHeaderLong(snapshot, 226));
+        mismatches.put("outbox pending count", mutateHeaderInt(snapshot, 234));
+        mismatches.put("outbox pending digest", mutateHeaderLong(snapshot, 238));
+        mismatches.put("matcher config", mutateHeaderLong(snapshot, 246));
+        mismatches.put("fork identity", mutateHeaderByte(snapshot, 254));
+        mismatches.put("artifact identity", mutateHeaderByte(snapshot, 294));
 
         mismatches.forEach((field, mutated) -> {
             Throwable failure = catchThrowable(() -> CoreStateSnapshotCodec.decode(mutated, ProductLine.SPOT));
@@ -599,7 +602,7 @@ class CoreStateSnapshotCodecTest {
             if (sectionId == 4) {
                 int eventCount = buffer.getInt(sectionOffset + Long.BYTES * 2);
                 if (eventCount < 1) throw new AssertionError("snapshot outbox is empty");
-                int eventLengthOffset = sectionOffset + Long.BYTES * 2 + Integer.BYTES;
+                int eventLengthOffset = sectionOffset + Long.BYTES * 2 + Integer.BYTES * 2;
                 int eventLength = buffer.getInt(eventLengthOffset);
                 int eventOffset = eventLengthOffset + Integer.BYTES;
                 if (eventLength < CoreProtocol.HEADER_LENGTH
@@ -630,6 +633,8 @@ class CoreStateSnapshotCodecTest {
                             Math.addExact(buffer.getLong(eventOffset + 40), 1));
                     case COMMAND_TYPE -> buffer.putInt(eventPayloadOffset + 44,
                             CoreMessageType.PROBE_INCREMENT.wireCode());
+                    case RESERVATION_LENGTH -> buffer.putInt(
+                            eventLengthOffset - Integer.BYTES, eventLength - 1);
                 }
                 return rewriteOuterChecksum(mutated);
             }
@@ -661,7 +666,8 @@ class CoreStateSnapshotCodecTest {
         NESTED_PRODUCT_LINE,
         COMMAND_ID,
         SOURCE_SEQUENCE,
-        COMMAND_TYPE
+        COMMAND_TYPE,
+        RESERVATION_LENGTH
     }
 
     private static byte[] rewriteOuterChecksum(byte[] snapshot) {

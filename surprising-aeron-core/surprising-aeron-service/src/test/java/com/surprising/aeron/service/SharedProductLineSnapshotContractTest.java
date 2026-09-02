@@ -39,7 +39,7 @@ class SharedProductLineSnapshotContractTest {
 
     @ParameterizedTest
     @EnumSource(ProductLine.class)
-    void v17SnapshotRestoresEveryProductLineWithoutCrossLineOrFinancialDrift(ProductLine productLine) {
+    void currentSnapshotRestoresEveryProductLineWithoutCrossLineOrFinancialDrift(ProductLine productLine) {
         CoreMessage funding = gateway(productLine, 1, USER_ID, CoreMessageType.ADJUST_BALANCE,
                 TradingCommandCodec.encodeBalanceAdjustment(
                         new BalanceAdjustmentCommand(settleAsset(productLine), BALANCE_UNITS)));
@@ -77,7 +77,7 @@ class SharedProductLineSnapshotContractTest {
             long economicUnits = economicAssetUnits(original, settleAsset(productLine));
 
             assertThat(manifest.productLine()).isEqualTo(productLine);
-            assertThat(manifest.schemaVersion()).isEqualTo(17);
+            assertThat(manifest.schemaVersion()).isEqualTo(SectionedCoreSnapshotCodec.VERSION);
             assertThatThrownBy(() -> CoreProbeState.fromSnapshot(other(productLine), snapshot))
                     .isInstanceOf(ProtocolException.class)
                     .hasMessageContaining("product line");

@@ -155,9 +155,10 @@ class DeterministicExchangeCoreAdapterTest {
 
             secondNative.complete(nativeResult(2, 2));
             CoreMatchingResult secondResult = second.join();
-            firstNative.complete(nativeResult(1, 1));
+            firstNative.complete(nativeResult(2, 1));
 
-            assertThat(secondResult.nativeCommand().matcherShardId()).isZero();
+            assertThat(secondResult.nativeCommand().matcherShardId())
+                    .isEqualTo(adapter.topology().matcherShardId(2));
             assertThat(secondResult.matcherPrefix().before()).isEqualTo(CoreMatchingResult.MatcherPrefix.initialDigest());
             assertThatThrownBy(first::join)
                     .hasRootCauseInstanceOf(IllegalStateException.class)
@@ -268,7 +269,8 @@ class DeterministicExchangeCoreAdapterTest {
         assertThat(decoded.modules().stream()
                 .filter(module -> module.type().name().equals("MATCHING_ENGINE_ROUTER"))
                 .map(module -> module.instanceId()).sorted().toList())
-                .containsExactly(0);
+                .containsExactlyElementsOf(java.util.stream.IntStream.range(
+                        0, decoded.matchingEngineCount()).boxed().toList());
         assertThat(decoded.modules()).zipSatisfy(snapshot.modules(), (actual, expected) -> {
             assertThat(actual.type()).isEqualTo(expected.type());
             assertThat(actual.sequence()).isEqualTo(expected.sequence());

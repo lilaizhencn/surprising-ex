@@ -41,12 +41,13 @@ import java.util.function.Function;
 
 public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
-    private SynchronousMatchingEngine engine;
+    private SynchronousMatchingEngine[] engines;
     private final InMemorySerializationProcessor serializationProcessor =
             new InMemorySerializationProcessor();
-    private final Map<String, Integer> symbols = new HashMap<>();
-    private final Map<Integer, String> symbolNames = new HashMap<>();
-    private final Set<Long> users = new HashSet<>();
+    private final Map<String, Integer> symbols = new ConcurrentHashMap<>();
+    private final Map<Integer, String> symbolNames = new ConcurrentHashMap<>();
+    private final Set<Long> users = ConcurrentHashMap.newKeySet();
+    private final Set<Integer> registeredSymbols = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<Long, SnapshotOperation> snapshotOperations = new ConcurrentHashMap<>();
     private final LaneTopology topology;
     private final AtomicReference<Throwable> matcherFailure = new AtomicReference<>();
@@ -57,9 +58,14 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             snapshotPersistence;
     private Runnable deferredActivation;
     private boolean activationComplete;
+    private final AtomicInteger activatedShardCount = new AtomicInteger();
+    private MatcherSnapshot restoredSnapshot;
+    private List<CoreOrderState> restoredActiveOrders = List.of();
+    private long restoredCoreSequence;
+    private MatcherShardSnapshot[] restoredShardHashes;
     private boolean synchronousDispatchObserved;
-    private long activeAeronTimestamp;
-    private boolean matchingCommandActive;
+    private final ThreadLocal<Long> activeAeronTimestamp = ThreadLocal.withInitial(() -> 0L);
+    private final ThreadLocal<Boolean> matchingCommandActive = ThreadLocal.withInitial(() -> false);
 
     public DeterministicExchangeCoreAdapter() {
         this(true);
@@ -130,9 +136,13 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 }
                 symbols.put(symbol, symbolId);
             });
+            registeredSymbols.addAll(snapshot.symbols().values());
             users.addAll(snapshot.users());
             List<CoreOrderState> restoredOrders = new ArrayList<>();
             activeOrders.forEach(restoredOrders::add);
+            restoredSnapshot = snapshot;
+            restoredActiveOrders = List.copyOf(restoredOrders);
+            restoredCoreSequence = coreSequence;
             deferredActivation = () -> activateRestoredMatcher(
                     state, restoredOrders, coreSequence, snapshot);
             if (startImmediately) activate();
@@ -162,6 +172,51 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     public synchronized boolean activated() { return activationComplete; }
 
+    /** Starts one independent synchronous engine on the thread that will own that shard. */
+    public void activateShard(int shardId) {
+        if (shardId < 0 || shardId >= topology.matchingEngineCount()) {
+            throw new IllegalArgumentException("matcher shard is outside configured topology");
+        }
+        if (topology.matchingEngineCount() == 1) {
+            synchronized (this) {
+                if (activationComplete) return;
+                Runnable activation = deferredActivation;
+                if (activation == null) start(); else activation.run();
+                deferredActivation = null;
+                activationComplete = true;
+                return;
+            }
+        }
+        synchronized (this) {
+            if (activationComplete) return;
+            if (engines == null) engines = new SynchronousMatchingEngine[topology.matchingEngineCount()];
+            if (restoredShardHashes == null) restoredShardHashes = new MatcherShardSnapshot[engines.length];
+            if (engines[shardId] != null) return;
+        }
+        startShard(shardId, restoredSnapshot);
+        if (restoredSnapshot != null) {
+            reconcileOpenOrdersShard(restoredActiveOrders, shardId, restoredCoreSequence,
+                    restoredSnapshot.snapshotId(), "matcher restore");
+            StateHashes hashes = stateHashes(shardId);
+            restoredShardHashes[shardId] = new MatcherShardSnapshot(
+                    shardId, hashes.engineHash(), hashes.bookHash());
+        }
+        if (activatedShardCount.incrementAndGet() == topology.matchingEngineCount()) {
+            if (restoredSnapshot != null) {
+                StateHashes hashes = aggregateStateHashes(List.of(restoredShardHashes));
+                if (hashes.engineHash() != restoredSnapshot.engineStateHash()
+                        || hashes.bookHash() != restoredSnapshot.bookStateHash()) {
+                    throw new FatalMatchingDivergenceException("matcher restore", restoredCoreSequence,
+                            restoredSnapshot.snapshotId(), "restored exchange-core state hash mismatch");
+                }
+            }
+            synchronized (this) {
+                deferredActivation = null;
+                activationComplete = true;
+            }
+        }
+    }
+
     private void activateRestoredMatcher(TradingCoreState state, Iterable<CoreOrderState> activeOrders,
                                          long coreSequence, MatcherSnapshot snapshot) {
         start(snapshot);
@@ -185,8 +240,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     public CoreMatchingResult place(long userId, CoreMatchingOrder command) {
         int symbolId = ensureSymbol(command.symbol());
         users.add(userId);
-        return directMatcher(() -> engine.place(
-                activeAeronTimestamp, command.orderId(), 0,
+        return directMatcher(() -> engine(symbolId).place(
+                activeAeronTimestamp.get(), command.orderId(), 0,
                 command.matchingPriceTicks(), command.matchingPriceTicks(), command.quantitySteps(),
                 command.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
                 orderType(command), symbolId, userId));
@@ -283,24 +338,25 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         }
         Throwable failure = matcherFailure.get();
         if (failure != null) throw new IllegalStateException("matcher is poisoned by an earlier command", failure);
-        if (matchingCommandActive) throw new IllegalStateException("nested synchronous matcher command");
-        long sequence = matcherEvidence.nextSequence();
+        if (matchingCommandActive.get()) throw new IllegalStateException("nested synchronous matcher command");
         if (!synchronousDispatchObserved) {
             synchronousDispatchObserved = true;
             dispatchHighWaterMark.accumulateAndGet(1, Math::max);
         }
         try {
-            matchingCommandActive = true;
-            activeAeronTimestamp = aeronTimestamp;
+            matchingCommandActive.set(true);
+            activeAeronTimestamp.set(aeronTimestamp);
             CoreMatchingResult result = command.get();
+            int matcherShardId = controlShard ? -1 : matcherShardId(result);
+            long sequence = matcherEvidence.nextSequence(matcherShardId);
             return bindMatcherEvidence(coreSequence, commandId, orderId, instrumentVersion,
-                    aeronTimestamp, sequence, controlShard, result);
+                    aeronTimestamp, sequence, matcherShardId, result);
         } catch (RuntimeException exception) {
             matcherFailure.compareAndSet(null, exception);
             throw exception;
         } finally {
-            activeAeronTimestamp = 0;
-            matchingCommandActive = false;
+            activeAeronTimestamp.remove();
+            matchingCommandActive.remove();
         }
     }
 
@@ -351,29 +407,32 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long aeronTimestamp,
             boolean controlShard,
             Supplier<CompletableFuture<CoreMatchingResult>> command) {
-        long sequence = matcherEvidence.nextSequence();
         CompletableFuture<CoreMatchingResult> submitted;
         try {
-            if (matchingCommandActive) {
+            if (matchingCommandActive.get()) {
                 throw new IllegalStateException("nested synchronous matcher command");
             }
-            matchingCommandActive = true;
-            activeAeronTimestamp = aeronTimestamp;
+            matchingCommandActive.set(true);
+            activeAeronTimestamp.set(aeronTimestamp);
             submitted = command.get();
         } catch (RuntimeException exception) {
             matcherFailure.compareAndSet(null, exception);
             return CompletableFuture.failedFuture(exception);
         } finally {
-            activeAeronTimestamp = 0;
-            matchingCommandActive = false;
+            activeAeronTimestamp.remove();
+            matchingCommandActive.remove();
         }
         if (submitted == null) {
             IllegalStateException failure = new IllegalStateException("matcher command returned no future");
             matcherFailure.compareAndSet(null, failure);
             return CompletableFuture.failedFuture(failure);
         }
-        return submitted.thenApply(result -> bindMatcherEvidence(coreSequence, commandId, orderId,
-                instrumentVersion, aeronTimestamp, sequence, controlShard, result));
+        return submitted.thenApply(result -> {
+            int matcherShardId = controlShard ? -1 : matcherShardId(result);
+            long sequence = matcherEvidence.nextSequence(matcherShardId);
+            return bindMatcherEvidence(coreSequence, commandId, orderId,
+                    instrumentVersion, aeronTimestamp, sequence, matcherShardId, result);
+        });
     }
 
     private CoreMatchingResult bindMatcherEvidence(
@@ -383,7 +442,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long instrumentVersion,
             long aeronTimestamp,
             long sequence,
-            boolean controlShard,
+            int matcherShardId,
             CoreMatchingResult result) {
         if (result == null) throw new IllegalStateException("matcher command returned no result");
         Throwable matcherPoison = matcherFailure.get();
@@ -392,7 +451,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         }
         CoreMatchingResult bound = matcherEvidence.bind(coreSequence, commandId, orderId,
                 instrumentVersion, aeronTimestamp, sequence,
-                controlShard ? -1 : matcherShardId(result), result);
+                matcherShardId, result);
         if (bound.outcome() == CoreMatchingResult.Outcome.FATAL_DIVERGENCE) {
             matcherFailure.compareAndSet(null,
                     new IllegalStateException("fatal matcher result: " + bound.resultCode()));
@@ -415,8 +474,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     private CompletableFuture<CoreMatchingResult> submitDirectPlace(
             long userId, int symbolId, CoreMatchingOrder command) {
-        return completedMatcher(() -> engine.place(
-                activeAeronTimestamp, command.orderId(), 0,
+        return completedMatcher(() -> engine(symbolId).place(
+                activeAeronTimestamp.get(), command.orderId(), 0,
                 command.matchingPriceTicks(), command.matchingPriceTicks(), command.quantitySteps(),
                 command.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
                 orderType(command), symbolId, userId));
@@ -521,6 +580,24 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         return aggregateCancellationOutcomes(cancellations, outcome);
     }
 
+    public CoreMatchingResult aggregateCancellationResults(
+            List<CoreOrderState> requested, List<CoreMatchingResult> results) {
+        if (requested == null || results == null || requested.size() != results.size()) {
+            throw new IllegalArgumentException("cancellation aggregation size mismatch");
+        }
+        ArrayList<CoreMatchingResult> completed = new ArrayList<>(results.size());
+        ArrayList<CoreMatchingResult> successfulPrefix = new ArrayList<>(results.size());
+        CoreMatchingResult failed = null;
+        for (CoreMatchingResult result : results) {
+            if (result == null) throw new IllegalArgumentException("cancellation result is missing");
+            completed.add(result);
+            if (failed == null && result.accepted()) successfulPrefix.add(result);
+            else if (failed == null) failed = result;
+        }
+        return aggregateCancellationResult(requested,
+                new CancelBatchOutcome(completed, successfulPrefix, failed, null));
+    }
+
     private static CoreMatchingResult aggregateCancellationOutcomes(
             List<CoreCancellationResult> cancellations,
             CancelBatchOutcome outcome) {
@@ -558,7 +635,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     private CompletableFuture<CoreMatchingResult> submitDirectCancel(
             long userId, long orderId, int symbolId) {
-        return completedMatcher(() -> engine.cancel(activeAeronTimestamp, orderId, symbolId, userId));
+        return completedMatcher(() -> engine(symbolId).cancel(
+                activeAeronTimestamp.get(), orderId, symbolId, userId));
     }
 
     public CompletableFuture<CoreMatchingResult> cancelAsyncForContinuation(long userId, long orderId,
@@ -573,7 +651,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private CoreMatchingResult cancel(long userId, long orderId, String symbol) {
         int symbolId = ensureSymbol(symbol);
         users.add(userId);
-        return directMatcher(() -> engine.cancel(activeAeronTimestamp, orderId, symbolId, userId));
+        return directMatcher(() -> engine(symbolId).cancel(
+                activeAeronTimestamp.get(), orderId, symbolId, userId));
     }
 
     public CompletableFuture<CoreMatchingResult> replaceOrderAsync(long userId, long orderId, String symbol,
@@ -627,11 +706,68 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     private CompletableFuture<CoreMatchingResult> submitDirectMove(
             long userId, long orderId, int symbolId, long newPriceTicks) {
-        return completedMatcher(() -> engine.move(activeAeronTimestamp, newPriceTicks, orderId, symbolId, userId));
+        return completedMatcher(() -> engine(symbolId).move(
+                activeAeronTimestamp.get(), newPriceTicks, orderId, symbolId, userId));
     }
 
     public CompletableFuture<Integer> orderBooksStateHashAsync() {
         return currentStateHashesAsync().thenApply(StateHashes::bookHash);
+    }
+
+    public MatcherShardSnapshot captureShardSnapshot(
+            int shardId, long snapshotId, long coreSequence, Iterable<CoreOrderState> activeOrders) {
+        if (shardId < 0 || shardId >= topology.matchingEngineCount() || snapshotId <= 0
+                || coreSequence < 0 || activeOrders == null) {
+            throw new IllegalArgumentException("invalid matcher shard snapshot request");
+        }
+        reconcileOpenOrdersShard(activeOrders, shardId, coreSequence, snapshotId, "matcher snapshot");
+        StateHashes hashes = stateHashes(shardId);
+        CommandResultCode result = snapshotPersistence.apply(() -> CompletableFuture.completedFuture(
+                engines[shardId].storeSnapshot(snapshotId, coreSequence, coreSequence)
+                        ? CommandResultCode.SUCCESS
+                        : CommandResultCode.STATE_PERSIST_MATCHING_ENGINE_FAILED)).join();
+        if (result != CommandResultCode.SUCCESS) {
+            throw new FatalMatchingDivergenceException("matcher snapshot", coreSequence, snapshotId,
+                    "exchange-core persist failed for shard " + shardId + ": " + result);
+        }
+        return new MatcherShardSnapshot(shardId, hashes.engineHash(), hashes.bookHash());
+    }
+
+    public MatcherShardSnapshot stateHashShard(int shardId) {
+        if (shardId < 0 || shardId >= topology.matchingEngineCount()) {
+            throw new IllegalArgumentException("matcher shard is outside configured topology");
+        }
+        StateHashes hashes = stateHashes(shardId);
+        return new MatcherShardSnapshot(shardId, hashes.engineHash(), hashes.bookHash());
+    }
+
+    public int aggregateBookHash(List<MatcherShardSnapshot> shards) {
+        return aggregateStateHashes(shards).bookHash();
+    }
+
+    public MatcherSnapshot finishShardedSnapshot(
+            long snapshotId, long coreSequence, long businessStateHash, TradingCoreState state,
+            List<MatcherShardSnapshot> shardSnapshots) {
+        if (state == null || shardSnapshots == null || shardSnapshots.size() != topology.matchingEngineCount()) {
+            throw new IllegalArgumentException("incomplete matcher shard snapshot set");
+        }
+        StateHashes hashes = aggregateStateHashes(shardSnapshots);
+        try {
+            List<InMemorySerializationProcessor.SerializedModule> modules =
+                    serializationProcessor.exportSnapshot(snapshotId);
+            long matcherSequence = modules.stream()
+                    .mapToLong(InMemorySerializationProcessor.SerializedModule::sequence).max().orElseThrow();
+            return new MatcherSnapshot(state.productLine(), MatcherSnapshot.CORE_SHARD_ID,
+                    MatcherSnapshot.ROUTE_VERSION, topology, snapshotId, coreSequence, matcherSequence,
+                    matcherEvidence.snapshot(), businessStateHash, hashes.engineHash(), hashes.bookHash(),
+                    MatcherSnapshot.symbolRegistryHash(symbols), topology.symbolRouteHash(symbols),
+                    MatcherSnapshot.userRegistryHash(users), MatcherSnapshot.instrumentRegistryHash(state),
+                    MatcherSnapshot.activeOrderHash(state), MatcherSnapshot.FORK_GIT_SHA,
+                    MatcherSnapshot.ARTIFACT_SHA256, MatcherSnapshot.matcherConfigHash(topology),
+                    symbols, users, modules);
+        } finally {
+            serializationProcessor.removeSnapshot(snapshotId);
+        }
     }
 
     public CompletableFuture<MatcherSnapshot> snapshotAsync(
@@ -672,7 +808,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             pipeline = reconcileOpenOrdersAsync(activeOrders, coreSequence, snapshotId,
                     "matcher snapshot").thenCompose(ignored -> currentStateHashesAsync()).thenCompose(hashes ->
                     snapshotPersistence.apply(() -> CompletableFuture.completedFuture(
-                                    engine.storeSnapshot(snapshotId, coreSequence, coreSequence)
+                                    storeMatcherShards(snapshotId, coreSequence)
                                             ? CommandResultCode.SUCCESS
                                             : CommandResultCode.STATE_PERSIST_MATCHING_ENGINE_FAILED))
                             .thenApply(result -> {
@@ -742,12 +878,14 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 }
             }
             Map<Long, ReconciledOrder> actual = new HashMap<>();
-            for (SynchronousMatchingEngine.OpenOrder order : engine.openOrders()) {
-                ReconciledOrder reconciled = new ReconciledOrder(order.symbolId(), order.orderId(), order.uid(),
-                        order.action(), order.price(), order.size(), order.filled(), order.reserveBidPrice());
-                if (actual.put(order.orderId(), reconciled) != null) {
-                    throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
-                            "exchange-core returned duplicate open order ID " + order.orderId());
+            for (SynchronousMatchingEngine matcher : engines) {
+                for (SynchronousMatchingEngine.OpenOrder order : matcher.openOrders()) {
+                    ReconciledOrder reconciled = new ReconciledOrder(order.symbolId(), order.orderId(), order.uid(),
+                            order.action(), order.price(), order.size(), order.filled(), order.reserveBidPrice());
+                    if (actual.put(order.orderId(), reconciled) != null) {
+                        throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
+                                "exchange-core returned duplicate open order ID " + order.orderId());
+                    }
                 }
             }
             if (!expected.equals(actual)) {
@@ -761,24 +899,81 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         }
     }
 
+    private void reconcileOpenOrdersShard(Iterable<CoreOrderState> activeOrders, int shardId,
+                                          long coreSequence, long snapshotId, String operation) {
+        Map<Long, ReconciledOrder> expected = new HashMap<>();
+        for (CoreOrderState order : activeOrders) {
+            Integer symbolId = symbols.get(order.symbol());
+            if (symbolId == null || topology.matcherShardId(symbolId) != shardId) continue;
+            if (order.status() != com.surprising.aeron.service.state.CoreOrderStatus.OPEN) {
+                throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
+                        "active-order index contains a terminal order");
+            }
+            ReconciledOrder value = new ReconciledOrder(symbolId, order.orderId(), order.userId(),
+                    order.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
+                    order.matchingPriceTicks(), order.quantitySteps(), order.executedQuantitySteps(),
+                    order.matchingPriceTicks());
+            if (expected.put(order.orderId(), value) != null) {
+                throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
+                        "active-order index contains duplicate order ID " + order.orderId());
+            }
+        }
+        Map<Long, ReconciledOrder> actual = new HashMap<>();
+        for (SynchronousMatchingEngine.OpenOrder order : engines[shardId].openOrders()) {
+            ReconciledOrder value = new ReconciledOrder(order.symbolId(), order.orderId(), order.uid(),
+                    order.action(), order.price(), order.size(), order.filled(), order.reserveBidPrice());
+            if (actual.put(order.orderId(), value) != null) {
+                throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
+                        "exchange-core returned duplicate open order ID " + order.orderId());
+            }
+        }
+        if (!expected.equals(actual)) {
+            throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
+                    "Core OPEN orders do not exactly match exchange-core shard " + shardId
+                            + " (expected=" + expected.size() + ", actual=" + actual.size() + ')');
+        }
+    }
+
     private CompletableFuture<StateHashes> currentStateHashesAsync() {
-        return CompletableFuture.completedFuture(engine.stateHashReport())
-                .thenApply(report -> {
-                    int engineHash = 1;
-                    int bookHash = 0;
-                    for (Map.Entry<exchange.core2.core.common.api.reports.StateHashReportResult.SubmoduleKey,
-                            Integer> entry : report.getHashCodes().entrySet()) {
-                        engineHash = engineHash * 31 + entry.getKey().submodule.code;
-                        engineHash = engineHash * 31 + entry.getKey().moduleId;
-                        engineHash = engineHash * 31 + entry.getValue();
-                        if (entry.getKey().submodule
-                                == exchange.core2.core.common.api.reports.StateHashReportResult.SubmoduleType
-                                .MATCHING_ORDER_BOOKS) {
-                            bookHash = bookHash * 31 + entry.getValue();
-                        }
-                    }
-                    return new StateHashes(engineHash, bookHash);
-                });
+        try {
+            ArrayList<MatcherShardSnapshot> snapshots = new ArrayList<>(engines.length);
+            for (int shardId = 0; shardId < engines.length; shardId++) {
+                StateHashes hashes = stateHashes(shardId);
+                snapshots.add(new MatcherShardSnapshot(shardId, hashes.engineHash(), hashes.bookHash()));
+            }
+            return CompletableFuture.completedFuture(aggregateStateHashes(snapshots));
+        } catch (RuntimeException failure) {
+            return CompletableFuture.failedFuture(failure);
+        }
+    }
+
+    private StateHashes stateHashes(int shardId) {
+        var report = engines[shardId].stateHashReport();
+        int engineHash = 1;
+        int bookHash = 0;
+        for (Map.Entry<exchange.core2.core.common.api.reports.StateHashReportResult.SubmoduleKey,
+                Integer> entry : report.getHashCodes().entrySet()) {
+            engineHash = engineHash * 31 + entry.getKey().submodule.code;
+            engineHash = engineHash * 31 + entry.getKey().moduleId;
+            engineHash = engineHash * 31 + entry.getValue();
+            if (entry.getKey().submodule
+                    == exchange.core2.core.common.api.reports.StateHashReportResult.SubmoduleType
+                    .MATCHING_ORDER_BOOKS) bookHash = bookHash * 31 + entry.getValue();
+        }
+        return new StateHashes(engineHash, bookHash);
+    }
+
+    private static StateHashes aggregateStateHashes(List<MatcherShardSnapshot> shards) {
+        if (shards.size() == 1) return new StateHashes(shards.getFirst().engineHash(), shards.getFirst().bookHash());
+        int engineHash = 1;
+        int bookHash = 0;
+        for (int shardId = 0; shardId < shards.size(); shardId++) {
+            MatcherShardSnapshot shard = shards.get(shardId);
+            if (shard.shardId() != shardId) throw new IllegalArgumentException("matcher shards are not ordered");
+            engineHash = (engineHash * 31 + shardId) * 31 + shard.engineHash();
+            bookHash = (bookHash * 31 + shardId) * 31 + shard.bookHash();
+        }
+        return new StateHashes(engineHash, bookHash);
     }
 
     public CompletableFuture<List<CoreBookLevelView>> orderBookLevelsAsync(String requestedSymbol, int depth) {
@@ -788,7 +983,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         String symbol = requestedSymbol.trim().toUpperCase(java.util.Locale.ROOT);
         Integer symbolId = symbols.get(symbol);
         if (symbolId == null) return CompletableFuture.completedFuture(List.of());
-        return CompletableFuture.completedFuture(bookLevels(symbol, engine.orderBook(symbolId, depth)));
+        return CompletableFuture.completedFuture(bookLevels(symbol, engine(symbolId).orderBook(symbolId, depth)));
     }
 
     public CompletableFuture<BookBootstrapSnapshot> orderBookBootstrapAsync(int depth) {
@@ -801,7 +996,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             List<CompletableFuture<BookResult>> requests = new ArrayList<>(entries.size());
             for (Map.Entry<String, Integer> entry : entries) {
                 requests.add(CompletableFuture.completedFuture(
-                        new BookResult(entry.getKey(), engine.orderBook(entry.getValue(), depth))));
+                        new BookResult(entry.getKey(), engine(entry.getValue()).orderBook(entry.getValue(), depth))));
             }
             return CompletableFuture.allOf(requests.toArray(CompletableFuture[]::new)).thenApply(ignored -> {
                 int expectedLevels = 0;
@@ -821,6 +1016,37 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 return new BookBootstrapSnapshot(entries.stream().map(Map.Entry::getKey).toList(), levels);
             });
         });
+    }
+
+    public BookBootstrapSnapshot orderBookBootstrapShard(int shardId, int depth) {
+        if (shardId < 0 || shardId >= topology.matchingEngineCount() || depth < 1 || depth > 100) {
+            throw new IllegalArgumentException("invalid matcher shard bootstrap query");
+        }
+        List<Map.Entry<String, Integer>> entries = symbols.entrySet().stream()
+                .filter(entry -> topology.matcherShardId(entry.getValue()) == shardId)
+                .sorted(Map.Entry.comparingByKey()).toList();
+        ArrayList<CoreBookLevelView> levels = new ArrayList<>();
+        for (Map.Entry<String, Integer> entry : entries) {
+            levels.addAll(bookLevels(entry.getKey(), engines[shardId].orderBook(entry.getValue(), depth)));
+        }
+        return new BookBootstrapSnapshot(entries.stream().map(Map.Entry::getKey).toList(), levels);
+    }
+
+    public BookBootstrapSnapshot mergeBookBootstrapShards(List<BookBootstrapSnapshot> shards) {
+        if (shards == null || shards.size() != topology.matchingEngineCount()) {
+            throw new IllegalArgumentException("incomplete matcher bootstrap shards");
+        }
+        ArrayList<String> mergedSymbols = new ArrayList<>();
+        ArrayList<CoreBookLevelView> mergedLevels = new ArrayList<>();
+        for (BookBootstrapSnapshot shard : shards) {
+            mergedSymbols.addAll(shard.symbols());
+            mergedLevels.addAll(shard.levels());
+        }
+        mergedSymbols.sort(String::compareTo);
+        mergedLevels.sort(Comparator.comparing(CoreBookLevelView::symbol)
+                .thenComparing(CoreBookLevelView::side)
+                .thenComparingLong(CoreBookLevelView::priceTicks));
+        return new BookBootstrapSnapshot(mergedSymbols, mergedLevels);
     }
 
     private static List<CoreBookLevelView> bookLevels(String symbol, L2MarketData book) {
@@ -853,6 +1079,12 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     private void start(MatcherSnapshot snapshot) {
+        engines = new SynchronousMatchingEngine[topology.matchingEngineCount()];
+        for (int shardId = 0; shardId < engines.length; shardId++) startShard(shardId, snapshot);
+        activatedShardCount.set(engines.length);
+    }
+
+    private void startShard(int shardId, MatcherSnapshot snapshot) {
         InitialStateConfiguration initialState = snapshot == null
                 ? InitialStateConfiguration.cleanStart("aeron-authoritative-book")
                 : InitialStateConfiguration.fromSnapshotOnly(
@@ -863,7 +1095,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                         .marginTradingMode(OrdersProcessingConfiguration.MarginTradingMode.MARGIN_TRADING_DISABLED)
                         .build())
                 .performanceCfg(PerformanceConfiguration.latencyPerformanceBuilder()
-                        .matchingEnginesNum(topology.matchingEngineCount())
+                        .matchingEnginesNum(1)
                         .riskEnginesNum(topology.riskEngineCount())
                         .directMatchingOnlyPipeline(true)
                         .msgsInGroupLimit(Math.max(1,
@@ -874,13 +1106,18 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 .initStateCfg(initialState)
                 .serializationCfg(SerializationConfiguration.builder()
                         .enableJournaling(false)
-                        .serializationProcessorFactory(ignored -> serializationProcessor)
+                        .serializationProcessorFactory(ignored ->
+                                new ShardSerializationProcessor(serializationProcessor, shardId))
                         .build())
                 .build();
-        engine = new SynchronousMatchingEngine(configuration);
+        engines[shardId] = new SynchronousMatchingEngine(configuration);
     }
 
     public LaneTopology topology() { return topology; }
+    public int matcherShardId(String symbol) {
+        if (symbol == null || symbol.isBlank()) throw new IllegalArgumentException("matcher symbol is required");
+        return topology.matcherShardId(reserveSymbolId(symbol));
+    }
     public int dispatchDepth() { return dispatchInFlight.get(); }
     public int dispatchCapacity() { return topology.matcherWindowSize(); }
     public int dispatchHighWaterMark() { return dispatchHighWaterMark.get(); }
@@ -899,20 +1136,18 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     private int ensureSymbol(String symbol) {
-        Integer existing = symbols.get(symbol);
-        if (existing != null) return existing;
-        int symbolId = stableSymbolId(symbol);
+        int symbolId = reserveSymbolId(symbol);
+        if (registeredSymbols.contains(symbolId)) return symbolId;
         CoreSymbolSpecification specification = CoreSymbolSpecification.builder()
                 .symbolId(symbolId).type(SymbolType.CURRENCY_EXCHANGE_PAIR)
                 .baseCurrency(stableId("BASE:" + symbol)).quoteCurrency(stableId("QUOTE:" + symbol))
                 .baseScaleK(1).quoteScaleK(1).makerFee(0).takerFee(0).marginBuy(0).marginSell(0).build();
-        CommandResultCode result = engine.registerSymbol(specification);
+        CommandResultCode result = engine(symbolId).registerSymbol(specification);
         if (result != CommandResultCode.SUCCESS
                 && result != CommandResultCode.SYMBOL_MGMT_SYMBOL_ALREADY_EXISTS) {
             throw new IllegalStateException("failed to add exchange-core symbol " + symbol + ": " + result);
         }
-        symbols.put(symbol, symbolId);
-        symbolNames.put(symbolId, symbol);
+        registeredSymbols.add(symbolId);
         return symbolId;
     }
 
@@ -956,10 +1191,31 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
 
     private int stableSymbolId(String symbol) {
         int symbolId = stableId("SYMBOL:" + symbol);
-        while (symbolId == 0 || (symbolNames.containsKey(symbolId) && !symbol.equals(symbolNames.get(symbolId)))) {
-            symbolId = symbolId == Integer.MAX_VALUE ? 1 : symbolId + 1;
+        return symbolId == 0 ? 1 : symbolId;
+    }
+
+    private synchronized int reserveSymbolId(String symbol) {
+        Integer existing = symbols.get(symbol);
+        if (existing != null) return existing;
+        int symbolId = stableSymbolId(symbol);
+        String collision = symbolNames.putIfAbsent(symbolId, symbol);
+        if (collision != null && !collision.equals(symbol)) {
+            throw new IllegalStateException("stable matcher symbol id collision: " + symbol + '/' + collision);
         }
+        symbols.put(symbol, symbolId);
         return symbolId;
+    }
+
+    private SynchronousMatchingEngine engine(int symbolId) {
+        if (engines == null) throw new IllegalStateException("matcher engines are not active");
+        return engines[topology.matcherShardId(symbolId)];
+    }
+
+    private boolean storeMatcherShards(long snapshotId, long coreSequence) {
+        for (SynchronousMatchingEngine matcher : engines) {
+            if (!matcher.storeSnapshot(snapshotId, coreSequence, coreSequence)) return false;
+        }
+        return true;
     }
 
     private static int stableId(String value) {
@@ -983,6 +1239,12 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     private record StateHashes(int engineHash, int bookHash) {
+    }
+
+    public record MatcherShardSnapshot(int shardId, int engineHash, int bookHash) {
+        public MatcherShardSnapshot {
+            if (shardId < 0) throw new IllegalArgumentException("matcher shard id must be non-negative");
+        }
     }
 
     private static final class SnapshotOperation {
@@ -1016,12 +1278,34 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     private void stop() {
-        if (engine != null) {
+        if (engines != null) {
             awaitSnapshotOperations();
-            if (matcherFailure.get() == null) engine.stateHashReport();
-            engine.close();
-            engine = null;
+            RuntimeException failure = null;
+            for (SynchronousMatchingEngine matcher : engines) {
+                try {
+                    if (matcherFailure.get() == null) matcher.stateHashReport();
+                    matcher.close();
+                } catch (RuntimeException closeFailure) {
+                    if (failure == null) failure = closeFailure;
+                    else failure.addSuppressed(closeFailure);
+                }
+            }
+            engines = null;
+            if (failure != null) throw failure;
         }
+    }
+
+    public void closeShard(int shardId) {
+        SynchronousMatchingEngine[] active = engines;
+        if (active == null) return;
+        if (shardId < 0 || shardId >= active.length) {
+            throw new IllegalArgumentException("matcher shard is outside configured topology");
+        }
+        SynchronousMatchingEngine matcher = active[shardId];
+        if (matcher == null) return;
+        if (matcherFailure.get() == null) matcher.stateHashReport();
+        matcher.close();
+        active[shardId] = null;
     }
 
     private void awaitSnapshotOperations() {

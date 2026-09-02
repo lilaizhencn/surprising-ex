@@ -1151,6 +1151,17 @@ public final class RuntimeFactFrame implements RuntimeFactView {
         long previousSequence() { return previousSequence; }
         long sequence() { return sequence; }
 
+        int coreFactItemCount() {
+            int count = Math.addExact(fundsPostings.size(), matcherEvidence.size());
+            count = Math.addExact(count, terminalOrderIds.size());
+            count = Math.addExact(count, terminalLiquidationIds.size());
+            count = Math.addExact(count, terminalTriggerOrderIds.size());
+            for (LaneChanges lane : lanes) {
+                if (lane != null) count = Math.addExact(count, lane.coreFactItemCount());
+            }
+            return Math.addExact(count, global.treasuryAssets.changedCount());
+        }
+
         RuntimeFundsDelta materializeFundsDelta(boolean externalAdjustment) {
             ArrayList<FundsPosting> derived = new ArrayList<>(fundsPostings);
             for (LaneChanges lane : lanes) {
@@ -1679,6 +1690,18 @@ public final class RuntimeFactFrame implements RuntimeFactView {
                     || triggerOrders.hasChanges() || clientOrders.hasChanges() || timers.hasChanges();
         }
 
+        private int coreFactItemCount() {
+            int count = users.changedCount();
+            count = Math.addExact(count, balances.changedCount());
+            count = Math.addExact(count, reservations.changedCount());
+            count = Math.addExact(count, orders.changedCount());
+            count = Math.addExact(count, positions.changedCount());
+            count = Math.addExact(count, liquidations.changedCount());
+            count = Math.addExact(count, leverages.changedCount());
+            count = Math.addExact(count, algoOrders.changedCount());
+            return Math.addExact(count, triggerOrders.changedCount());
+        }
+
         private void reset() {
             users.reset();
             balances.reset();
@@ -1802,6 +1825,7 @@ public final class RuntimeFactFrame implements RuntimeFactView {
         private int changedCount;
 
         private boolean hasChanges() { return changedCount != 0; }
+        private int changedCount() { return changedCount; }
 
         private void reset() {
             for (int index = 0; index < size; index++) {
@@ -1886,6 +1910,7 @@ public final class RuntimeFactFrame implements RuntimeFactView {
         private int changedCount;
 
         private boolean hasChanges() { return changedCount != 0; }
+        private int changedCount() { return changedCount; }
 
         private void reset() {
             for (int index = 0; index < size; index++) {
@@ -1980,6 +2005,7 @@ public final class RuntimeFactFrame implements RuntimeFactView {
 
         private boolean contains(long key) { return indexOf(key) >= 0; }
         private boolean hasChanges() { return changedCount != 0; }
+        private int changedCount() { return changedCount; }
 
         private void reset() {
             for (int index = 0; index < size; index++) {
@@ -2086,6 +2112,8 @@ public final class RuntimeFactFrame implements RuntimeFactView {
         private boolean hasChanges() {
             return changedCount != 0;
         }
+
+        private int changedCount() { return changedCount; }
 
         private void reset() {
             for (int index = 0; index < size; index++) {

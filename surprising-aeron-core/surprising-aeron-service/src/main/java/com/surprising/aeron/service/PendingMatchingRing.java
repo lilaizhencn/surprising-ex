@@ -11,12 +11,15 @@ import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
 final class PendingMatchingRing {
     private final PendingMatching[] entries;
     private final long[] sequences;
+    private final int[] nextSlots;
+    private final int[] previousSlots;
+    private final int[] freeSlots;
     private final LongIntHashMap slotsBySequence;
     private final Map<UUID, PendingMatching> entriesByCommandId;
     private final LongIntHashMap pendingByUser;
-    private final int mask;
-    private int head;
-    private int tail;
+    private int head = -1;
+    private int tail = -1;
+    private int freeHead;
     private int size;
 
     PendingMatchingRing(int requestedCapacity) {
@@ -27,10 +30,16 @@ final class PendingMatchingRing {
         while (capacity < requestedCapacity) capacity <<= 1;
         entries = new PendingMatching[capacity];
         sequences = new long[capacity];
+        nextSlots = new int[capacity];
+        previousSlots = new int[capacity];
+        freeSlots = new int[capacity];
+        java.util.Arrays.fill(nextSlots, -1);
+        java.util.Arrays.fill(previousSlots, -1);
+        for (int index = 0; index < capacity - 1; index++) freeSlots[index] = index + 1;
+        freeSlots[capacity - 1] = -1;
         slotsBySequence = new LongIntHashMap(capacity);
         entriesByCommandId = new java.util.HashMap<>(capacity);
         pendingByUser = new LongIntHashMap(capacity);
-        mask = capacity - 1;
     }
 
     void put(PendingMatching pending) {
@@ -48,11 +57,20 @@ final class PendingMatchingRing {
             addIndexes(pending, index);
             return;
         }
-        if (size == entries.length) throw new IllegalStateException("pending matching ring is full");
-        int index = tail++ & mask;
+        if (size == entries.length || freeHead < 0) {
+            throw new IllegalStateException("pending matching ring is full");
+        }
+        int index = freeHead;
+        freeHead = freeSlots[index];
+        freeSlots[index] = -1;
         requireAvailableCommandId(pending, null);
         entries[index] = pending;
         sequences[index] = pending.sequence();
+        previousSlots[index] = tail;
+        nextSlots[index] = -1;
+        if (tail == -1) head = index;
+        else nextSlots[tail] = index;
+        tail = index;
         addIndexes(pending, index);
         size++;
     }
@@ -67,52 +85,51 @@ final class PendingMatchingRing {
     }
 
     PendingMatching remove(long sequence) {
-        if (size == 0 || sequences[head & mask] != sequence) return null;
-        int entryIndex = head & mask;
+        int encodedIndex = slotsBySequence.get(sequence);
+        if (encodedIndex == 0) return null;
+        int entryIndex = encodedIndex - 1;
         PendingMatching removed = entries[entryIndex];
         if (removed == null || removed.sequence() != sequence) {
             throw new IllegalStateException("pending matching order is corrupted");
         }
         entries[entryIndex] = null;
-        sequences[head++ & mask] = 0;
+        sequences[entryIndex] = 0;
+        int previous = previousSlots[entryIndex];
+        int next = nextSlots[entryIndex];
+        if (previous == -1) head = next;
+        else nextSlots[previous] = next;
+        if (next == -1) tail = previous;
+        else previousSlots[next] = previous;
+        previousSlots[entryIndex] = -1;
+        nextSlots[entryIndex] = -1;
+        freeSlots[entryIndex] = freeHead;
+        freeHead = entryIndex;
         removeIndexes(removed);
         size--;
         return removed;
     }
 
     long firstSequence() {
-        return size == 0 ? 0 : sequences[head & mask];
+        return head == -1 ? 0 : sequences[head];
     }
 
     PendingMatching findFirst(Predicate<PendingMatching> predicate) {
-        for (int offset = 0; offset < size; offset++) {
-            PendingMatching pending = entries[(head + offset) & mask];
+        for (int slot = head; slot != -1; slot = nextSlots[slot]) {
+            PendingMatching pending = entries[slot];
             if (pending != null && predicate.test(pending)) return pending;
         }
         return null;
     }
 
-    PendingMatching firstUnsubmittedPlaceAdmission(LongIntHashMap rejections) {
-        for (int offset = 0; offset < size; offset++) {
-            PendingMatching pending = entries[(head + offset) & mask];
+    PendingMatching firstCompletedUnsubmittedPlaceAdmission(LongIntHashMap rejections) {
+        for (int slot = head; slot != -1; slot = nextSlots[slot]) {
+            PendingMatching pending = entries[slot];
             if (pending != null && pending.placeAdmission() != null && !pending.isMatchingSubmitted()
-                    && !rejections.containsKey(pending.sequence())) {
+                    && pending.placeAdmission().complete() && !rejections.containsKey(pending.sequence())) {
                 return pending;
             }
         }
         return null;
-    }
-
-    boolean hasUnsubmittedPlaceAdmissionBefore(long sequence, LongIntHashMap rejections) {
-        for (int offset = 0; offset < size; offset++) {
-            PendingMatching pending = entries[(head + offset) & mask];
-            if (pending == null || pending.sequence() >= sequence) continue;
-            if (pending.placeAdmission() != null && !pending.isMatchingSubmitted()
-                    && !rejections.containsKey(pending.sequence())) {
-                return true;
-            }
-        }
-        return false;
     }
 
     PendingMatching findByCommandId(UUID commandId) {
@@ -124,8 +141,8 @@ final class PendingMatchingRing {
     }
 
     void forEach(Consumer<PendingMatching> consumer) {
-        for (int offset = 0; offset < size; offset++) {
-            PendingMatching pending = entries[(head + offset) & mask];
+        for (int slot = head; slot != -1; slot = nextSlots[slot]) {
+            PendingMatching pending = entries[slot];
             if (pending != null) consumer.accept(pending);
         }
     }
@@ -138,8 +155,6 @@ final class PendingMatchingRing {
 
     void clear() {
         while (size != 0) remove(firstSequence());
-        head = 0;
-        tail = 0;
     }
 
     private void addIndexes(PendingMatching pending, int index) {

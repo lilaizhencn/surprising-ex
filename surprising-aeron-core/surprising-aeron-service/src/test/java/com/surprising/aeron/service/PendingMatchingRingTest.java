@@ -16,25 +16,37 @@ import org.junit.jupiter.api.Test;
 class PendingMatchingRingTest {
 
     @Test
-    void keepsPrimitiveSequenceOrderAndReplacesAnExistingSlotWithoutGrowing() {
+    void keepsTheLowWatermarkWhileAllowingIndependentPartitionCompletion() {
         PendingMatchingRing ring = new PendingMatchingRing(3);
         PendingMatching first = pending(7, UUID.randomUUID(), 1001);
         PendingMatching replacement = first.withCommand(command(first.command().header().commandId(), 1002));
         PendingMatching second = pending(11, UUID.randomUUID(), 1003);
+        PendingMatching third = pending(12, UUID.randomUUID(), 1004);
+        PendingMatching fourth = pending(13, UUID.randomUUID(), 1005);
 
         ring.put(first);
         ring.put(replacement);
         ring.put(second);
+        ring.put(third);
+        ring.put(fourth);
 
         assertThat(ring.capacity()).isEqualTo(4);
-        assertThat(ring.size()).isEqualTo(2);
+        assertThat(ring.size()).isEqualTo(4);
         assertThat(ring.firstSequence()).isEqualTo(7);
         assertThat(ring.get(7)).isSameAs(replacement);
         assertThat(ring.findByCommandId(second.command().header().commandId())).isSameAs(second);
-        assertThat(ring.remove(11)).isNull();
+        assertThat(ring.remove(11)).isSameAs(second);
+        assertThat(ring.remove(12)).isSameAs(third);
+        assertThat(ring.remove(13)).isSameAs(fourth);
+        assertThat(ring.firstSequence()).isEqualTo(7);
+        ring.put(pending(14, UUID.randomUUID(), 1006));
+        ring.put(pending(15, UUID.randomUUID(), 1007));
+        ring.put(pending(16, UUID.randomUUID(), 1008));
+        assertThat(ring.snapshot().keySet()).containsExactly(7L, 14L, 15L, 16L);
         assertThat(ring.remove(7)).isSameAs(replacement);
-        assertThat(ring.firstSequence()).isEqualTo(11);
-        assertThat(ring.snapshot()).containsOnlyKeys(11L);
+        assertThat(ring.firstSequence()).isEqualTo(14);
+        ring.clear();
+        assertThat(ring.snapshot()).isEmpty();
     }
 
     private static PendingMatching pending(long sequence, UUID commandId, long userId) {

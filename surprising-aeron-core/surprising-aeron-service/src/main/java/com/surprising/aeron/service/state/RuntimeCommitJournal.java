@@ -235,6 +235,8 @@ public final class RuntimeCommitJournal implements AutoCloseable {
 
     public long publishedSequence() { return publishedSequence; }
     public long projectedSequence() { return publishedSequence; }
+    public long auditBusinessStateHash() { return businessStateHash; }
+    public long auditFundsStateHash() { return fundsStateHash; }
     public boolean hasOutstandingReservation() { return reservedEntries != 0 || reservedBytes != 0; }
     public long lag() { return 0; }
     public RuntimeProjectionPoint initialPoint() { return initialPoint; }
@@ -246,15 +248,6 @@ public final class RuntimeCommitJournal implements AutoCloseable {
             throw new IllegalStateException("commit journal is past its initial sequence");
         }
         businessStateHash = after;
-    }
-
-    public void refreshAuditHashes(long businessStateHash, long fundsStateHash) {
-        requireHealthy();
-        if (businessStateHash == 0 || fundsStateHash == 0 || hasOutstandingReservation()) {
-            throw new IllegalStateException("invalid audit hash fence");
-        }
-        this.businessStateHash = businessStateHash;
-        this.fundsStateHash = fundsStateHash;
     }
 
     boolean projectorAlive() { return false; }

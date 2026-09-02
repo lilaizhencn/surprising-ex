@@ -32,15 +32,22 @@ final class MatcherCommandPipeline implements AutoCloseable {
     private long controlSequence;
     private Runnable shutdownAction;
     private volatile Throwable shutdownFailure;
+    private final int workerId;
 
     MatcherCommandPipeline(int requestedCapacity) {
-        this(requestedCapacity, true);
+        this(0, requestedCapacity, true);
     }
 
     MatcherCommandPipeline(int requestedCapacity, boolean startImmediately) {
+        this(0, requestedCapacity, startImmediately);
+    }
+
+    MatcherCommandPipeline(int workerId, int requestedCapacity, boolean startImmediately) {
+        if (workerId < 0) throw new IllegalArgumentException("matcher worker id must be non-negative");
         if (requestedCapacity <= 0 || (requestedCapacity & (requestedCapacity - 1)) != 0) {
             throw new IllegalArgumentException("matcher pipeline capacity must be a power of two");
         }
+        this.workerId = workerId;
         slots = new Slot[requestedCapacity];
         for (int index = 0; index < requestedCapacity; index++) slots[index] = new Slot();
         mask = requestedCapacity - 1;
@@ -54,7 +61,7 @@ final class MatcherCommandPipeline implements AutoCloseable {
         }
         startupAction = action;
         accepting = true;
-        worker = Thread.ofPlatform().daemon(true).name("core-matcher-0").start(this::run);
+        worker = Thread.ofPlatform().daemon(true).name("core-matcher-" + workerId).start(this::run);
         awaitStartup();
     }
 
@@ -110,9 +117,11 @@ final class MatcherCommandPipeline implements AutoCloseable {
         long position = consumedPosition;
         if (position >= completedPosition) return null;
         Slot slot = slots[(int) position & mask];
-        if (slot.token != expectedToken || slot.command == null) {
-            throw new IllegalStateException("matcher completion crossed command order");
-        }
+        // A shard still publishes completions in its own submission order. The owner can probe
+        // pending commands in a different (Core sequence) order, so a non-head token is simply
+        // not consumable yet; the pass that probes the shard head will release it first.
+        if (slot.token != expectedToken) return null;
+        if (slot.command == null) throw new IllegalStateException("matcher completion publication gap");
         Object result = slot.result;
         Throwable failure = slot.failure;
         slot.clear();

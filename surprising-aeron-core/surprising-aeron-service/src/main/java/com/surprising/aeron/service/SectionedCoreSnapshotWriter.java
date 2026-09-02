@@ -217,15 +217,18 @@ final class SectionedCoreSnapshotWriter {
     private static byte[] outbox(CoreExportState.Snapshot exportState) {
         long length = SectionedCoreSnapshotCodec.OUTBOX_FIXED_LENGTH;
         for (CoreMessage event : exportState.pendingEvents()) {
-            length = Math.addExact(length, Math.addExact(Integer.BYTES, CoreMessageCodec.encodedLength(event)));
+            length = Math.addExact(length,
+                    Math.addExact(Integer.BYTES * 2, CoreMessageCodec.encodedLength(event)));
         }
         requireSectionLength(Math.toIntExact(length));
         ByteBuffer buffer = ByteBuffer.allocate(Math.toIntExact(length)).order(ByteOrder.LITTLE_ENDIAN)
                 .putLong(exportState.acknowledgedSequence())
                 .putLong(exportState.nextSequence())
                 .putInt(exportState.pendingCount());
-        for (CoreMessage event : exportState.pendingEvents()) {
+        for (int index = 0; index < exportState.pendingCount(); index++) {
+            CoreMessage event = exportState.pendingEvents().get(index);
             byte[] encoded = CoreMessageCodec.encode(event);
+            buffer.putInt(exportState.pendingReservedLengths().get(index));
             buffer.putInt(encoded.length).put(encoded);
         }
         return buffer.array();

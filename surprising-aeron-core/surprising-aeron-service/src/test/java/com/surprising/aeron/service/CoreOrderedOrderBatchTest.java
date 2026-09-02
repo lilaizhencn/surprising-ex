@@ -217,7 +217,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(laterEvents).hasSize(1);
             assertThat(lastEvents).hasSize(1);
             assertThat(batchEvent.exportSequence()).isLessThan(laterEvents.getFirst().exportSequence());
-            assertThat(batchEvent.businessStateHash()).isNotEqualTo(laterEvents.getFirst().businessStateHash());
+            assertThat(batchEvent.changedOrders()).isNotEqualTo(laterEvents.getFirst().changedOrders());
             assertThat(laterEvents.getFirst().changedOrders()).extracting(order -> order.orderId())
                     .containsExactly(9_102L);
             assertThat(lastEvents.getFirst().changedOrders()).extracting(order -> order.orderId())

@@ -3,13 +3,12 @@ package com.surprising.aeron.service.matching;
 import com.surprising.aeron.service.state.LaneTopology;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongArray;
 
 final class MatcherEvidenceLedger {
 
     private final LaneTopology topology;
-    private final AtomicLong matcherSequence;
+    private final AtomicLongArray issuedSequences;
     private final AtomicLongArray shardSequences;
     private final AtomicLongArray shardPrefixes;
     private final AtomicLongArray shardNativeSequences;
@@ -27,24 +26,23 @@ final class MatcherEvidenceLedger {
         this.shardSequences = new AtomicLongArray(progress.size());
         this.shardPrefixes = new AtomicLongArray(progress.size());
         this.shardNativeSequences = new AtomicLongArray(progress.size());
-        long maximumSequence = sequenceFloor;
+        this.issuedSequences = new AtomicLongArray(progress.size());
         boolean[] restored = new boolean[progress.size()];
         for (MatcherShardProgress shard : progress) {
             int index = index(shard.matcherShardId());
             if (restored[index]) throw new IllegalArgumentException("duplicate matcher shard progress");
             restored[index] = true;
             shardSequences.set(index, shard.matcherSequence());
+            issuedSequences.set(index, Math.max(sequenceFloor, shard.matcherSequence()));
             shardPrefixes.set(index, shard.prefixDigest());
-            maximumSequence = Math.max(maximumSequence, shard.matcherSequence());
         }
         for (boolean present : restored) {
             if (!present) throw new IllegalArgumentException("incomplete matcher shard progress");
         }
-        this.matcherSequence = new AtomicLong(maximumSequence);
     }
 
-    long nextSequence() {
-        return matcherSequence.incrementAndGet();
+    long nextSequence(int matcherShardId) {
+        return issuedSequences.incrementAndGet(index(matcherShardId));
     }
 
     CoreMatchingResult bind(

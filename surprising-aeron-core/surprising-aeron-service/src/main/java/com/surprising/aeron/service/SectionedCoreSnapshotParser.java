@@ -59,7 +59,8 @@ final class SectionedCoreSnapshotParser {
         CoreExportState exportState = null;
         try {
             exportState = CoreExportState.restore(expectedProductLine,
-                    outbox.acknowledgedSequence(), outbox.nextSequence(), outbox.events());
+                    outbox.acknowledgedSequence(), outbox.nextSequence(), outbox.events(),
+                    outbox.reservedLengths());
             SectionedCoreSnapshotValidation.validatePairing(
                     manifest, sourceSequences, exportState, matcherSnapshot, tradingState,
                     feePolicies, pendingTransfers);
@@ -150,18 +151,25 @@ final class SectionedCoreSnapshotParser {
         long nextSequence = outbox.getLong();
         int eventCount = readCount(outbox, CoreExportState.MAX_PENDING_EVENTS, "outbox event");
         ArrayList<CoreMessage> events = new ArrayList<>(eventCount);
+        ArrayList<Integer> reservedLengths = new ArrayList<>(eventCount);
         for (int index = 0; index < eventCount; index++) {
-            if (outbox.remaining() < Integer.BYTES) throw new ProtocolException("truncated snapshot outbox event");
+            if (outbox.remaining() < Integer.BYTES * 2) {
+                throw new ProtocolException("truncated snapshot outbox event");
+            }
+            int reservedLength = outbox.getInt();
             int eventLength = outbox.getInt();
-            if (eventLength <= 0 || eventLength > outbox.remaining()) {
+            if (eventLength <= 0 || eventLength > outbox.remaining()
+                    || reservedLength < eventLength || reservedLength > CoreExportState.maxReservedEventBytes()) {
                 throw new ProtocolException("invalid snapshot outbox event length");
             }
             byte[] event = new byte[eventLength];
             outbox.get(event);
             events.add(CoreMessageCodec.decode(event));
+            reservedLengths.add(reservedLength);
         }
         requireConsumed(outbox, "outbox");
-        return new OutboxSnapshot(acknowledgedSequence, nextSequence, List.copyOf(events));
+        return new OutboxSnapshot(acknowledgedSequence, nextSequence,
+                List.copyOf(events), List.copyOf(reservedLengths));
     }
 
     private static SnapshotResult readResult(ByteBuffer source) {
@@ -218,7 +226,8 @@ final class SectionedCoreSnapshotParser {
     private record SnapshotResult(UUID commandId, CoreProbeState.StoredResult value) {
     }
 
-    private record OutboxSnapshot(long acknowledgedSequence, long nextSequence, List<CoreMessage> events) {
+    private record OutboxSnapshot(long acknowledgedSequence, long nextSequence, List<CoreMessage> events,
+                                  List<Integer> reservedLengths) {
     }
 
     record Components(

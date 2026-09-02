@@ -75,28 +75,30 @@ final class CoreExportState implements AutoCloseable {
     private long nextMaterializationSequence;
 
     CoreExportState() {
-        this(null, 0, 1, List.of(), CoreExportCodec::encodeEvent, RuntimeFactFrame::exportOrderView);
+        this(null, 0, 1, List.of(), null, CoreExportCodec::encodeEvent, RuntimeFactFrame::exportOrderView);
         activate();
     }
 
     CoreExportState(EventEncoder encoder) {
-        this(null, 0, 1, List.of(), encoder, RuntimeFactFrame::exportOrderView);
+        this(null, 0, 1, List.of(), null, encoder, RuntimeFactFrame::exportOrderView);
         activate();
     }
 
     CoreExportState(EventEncoder encoder,
                     java.util.function.Function<com.surprising.aeron.service.state.CoreOrderState,
                             com.surprising.aeron.protocol.CoreOrderStateView> orderViewFactory) {
-        this(null, 0, 1, List.of(), encoder, orderViewFactory);
+        this(null, 0, 1, List.of(), null, encoder, orderViewFactory);
         activate();
     }
 
     private CoreExportState(ProductLine expectedProductLine,
                             long acknowledgedSequence, long nextSequence, List<CoreMessage> pending,
+                            List<Integer> restoredReservedLengths,
                             EventEncoder encoder,
                             java.util.function.Function<com.surprising.aeron.service.state.CoreOrderState,
                                     com.surprising.aeron.protocol.CoreOrderStateView> orderViewFactory) {
-        if (acknowledgedSequence < 0 || pending == null || pending.size() > MAX_PENDING_EVENTS) {
+        if (acknowledgedSequence < 0 || pending == null || pending.size() > MAX_PENDING_EVENTS
+                || restoredReservedLengths != null && restoredReservedLengths.size() != pending.size()) {
             throw new IllegalArgumentException("invalid export state");
         }
         if (nextSequence <= acknowledgedSequence
@@ -113,6 +115,7 @@ final class CoreExportState implements AutoCloseable {
         materializationBatchSize = configuredBatchSize(eventCapacity);
         materializationQueue = new SpscTaskQueue<>(eventCapacity);
         long expectedSequence = Math.incrementExact(acknowledgedSequence);
+        int pendingIndex = 0;
         for (CoreMessage event : pending) {
             if (expectedProductLine == null) {
                 throw new IllegalArgumentException("restored export product line is required");
@@ -123,7 +126,9 @@ final class CoreExportState implements AutoCloseable {
                     || decoded.exportSequence() != expectedSequence) {
                 throw new IllegalArgumentException("non-contiguous export state");
             }
-            PendingExport restored = pendingExport(event, decoded);
+            int reservedLength = restoredReservedLengths == null
+                    ? reservedEventLength(decoded) : restoredReservedLengths.get(pendingIndex++);
+            PendingExport restored = pendingExport(event, decoded, reservedLength);
             this.pending.add(restored);
             pendingBytes = Math.addExact(pendingBytes, restored.encodedLength());
             pendingDigest ^= restored.digest();
@@ -139,15 +144,23 @@ final class CoreExportState implements AutoCloseable {
     }
 
     static CoreExportState passive() {
-        return new CoreExportState(null, 0, 1, List.of(), CoreExportCodec::encodeEvent,
+        return new CoreExportState(null, 0, 1, List.of(), null, CoreExportCodec::encodeEvent,
                 RuntimeFactFrame::exportOrderView);
     }
 
     static CoreExportState restore(ProductLine expectedProductLine,
                                    long acknowledgedSequence, long nextSequence, List<CoreMessage> pending) {
         return new CoreExportState(Objects.requireNonNull(expectedProductLine, "expectedProductLine"),
-                acknowledgedSequence, nextSequence, pending, CoreExportCodec::encodeEvent,
+                acknowledgedSequence, nextSequence, pending, null, CoreExportCodec::encodeEvent,
                 RuntimeFactFrame::exportOrderView);
+    }
+
+    static CoreExportState restore(ProductLine expectedProductLine,
+                                   long acknowledgedSequence, long nextSequence, List<CoreMessage> pending,
+                                   List<Integer> reservedLengths) {
+        return new CoreExportState(Objects.requireNonNull(expectedProductLine, "expectedProductLine"),
+                acknowledgedSequence, nextSequence, pending, List.copyOf(reservedLengths),
+                CoreExportCodec::encodeEvent, RuntimeFactFrame::exportOrderView);
     }
 
     void activate() {
@@ -423,7 +436,9 @@ final class CoreExportState implements AutoCloseable {
     Snapshot snapshot() {
         assertHealthy();
         try {
-            return new Snapshot(acknowledgedSequence, nextSequence, pending(), pendingDigest);
+            ArrayList<Integer> reservedLengths = new ArrayList<>(pending.size());
+            for (PendingExport value : pending) reservedLengths.add(value.encodedLength());
+            return new Snapshot(acknowledgedSequence, nextSequence, pending(), reservedLengths, pendingDigest);
         } catch (RuntimeException failure) {
             poison(failure);
             throw failure;
@@ -431,11 +446,14 @@ final class CoreExportState implements AutoCloseable {
     }
 
     record Snapshot(long acknowledgedSequence, long nextSequence, List<CoreMessage> pendingEvents,
+                    List<Integer> pendingReservedLengths,
                     long pendingDigest) {
         Snapshot {
             pendingEvents = List.copyOf(pendingEvents);
+            pendingReservedLengths = List.copyOf(pendingReservedLengths);
             if (acknowledgedSequence < 0 || nextSequence <= acknowledgedSequence
-                    || nextSequence - acknowledgedSequence - 1 != pendingEvents.size()) {
+                    || nextSequence - acknowledgedSequence - 1 != pendingEvents.size()
+                    || pendingReservedLengths.size() != pendingEvents.size()) {
                 throw new IllegalArgumentException("invalid export snapshot");
             }
         }
@@ -521,9 +539,12 @@ final class CoreExportState implements AutoCloseable {
         return event.terminalIds().orderIds().stream().mapToLong(Long::longValue).toArray();
     }
 
-    private static PendingExport pendingExport(CoreMessage message, CoreExportEvent event) {
+    private static PendingExport pendingExport(CoreMessage message, CoreExportEvent event, int reservedLength) {
+        if (reservedLength < encodedLength(message) || reservedLength > MAX_EVENT_BYTES) {
+            throw new IllegalArgumentException("invalid restored export reservation length");
+        }
         MaterializedExport materialized = new MaterializedExport(message, encodedLength(message));
-        return new PendingExport(materialized, reservedEventLength(event),
+        return new PendingExport(materialized, reservedLength,
                 eventDigest(message.header(), event), terminalOrderIds(event));
     }
 
@@ -837,7 +858,10 @@ final class CoreExportState implements AutoCloseable {
             return frame == null ? materialized.coreFactMetadata() : frame.coreFactMetadata();
         }
         int size() { return size; }
-        int itemCount() { return 0; }
+        int itemCount() {
+            int current = frame == null ? materialized.coreFactItemCount() : frame.coreFactItemCount();
+            return previous == null ? current : Math.addExact(previous.itemCount(), current);
+        }
 
         RuntimeFactFrame first() {
             FactChain cursor = this;
