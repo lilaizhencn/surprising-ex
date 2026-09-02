@@ -16,11 +16,10 @@ import org.junit.jupiter.api.Test;
 class RuntimeCommitPatchTest {
 
     @Test
-    void canonicalizesOwnerGroupsAndTypedChanges() {
+    void preservesDeterministicFirstTouchOrderWithoutSorting() {
         RuntimeCommitPatch first = populatedBuilder(false).seal(metadata());
         RuntimeCommitPatch reversed = populatedBuilder(true).seal(metadata());
 
-        assertThat(first).isEqualTo(reversed);
         assertThat(first.previousCoreSequence()).isEqualTo(first.previousProjectionSequence());
         assertThat(first.coreSequence()).isEqualTo(first.projectionSequence());
         assertThat(first.laneMask()).isEqualTo((1L << 1) | (1L << 3));
@@ -31,8 +30,13 @@ class RuntimeCommitPatchTest {
         assertThat(first.fundsPostings()).extracting(RuntimeCommitPatch.FundsPosting::assetId)
                 .containsExactly(2, 2);
         assertThat(first.matcherEvidence()).extracting(RuntimeCommitPatch.MatcherEvidence::matcherSequence)
-                .containsExactly(7L, 8L);
+                .containsExactly(8L, 7L);
         assertThat(first.terminalIds().orderIds()).containsExactly(4L, 12L);
+        assertThat(reversed.accountLaneGroups().getFirst().users())
+                .extracting(RuntimeCommitPatch.UserChange::userId).containsExactly(9L, 2L);
+        assertThat(reversed.matcherEvidence()).extracting(RuntimeCommitPatch.MatcherEvidence::matcherSequence)
+                .containsExactly(7L, 8L);
+        assertThat(reversed.terminalIds().orderIds()).containsExactly(12L, 4L);
     }
 
     @Test
@@ -115,7 +119,7 @@ class RuntimeCommitPatchTest {
     }
 
     @Test
-    void generationStampedChangesGrowAndResetWithoutLeakingPreviousKeys() {
+    void primitiveChangesGrowAndResetWithoutLeakingPreviousKeys() {
         RuntimeCommitPatch.Builder ascending = baseBuilder();
         RuntimeCommitPatch.Builder descending = baseBuilder();
         for (long userId = 1; userId <= 64; userId++) {
@@ -130,10 +134,13 @@ class RuntimeCommitPatchTest {
         RuntimeCommitPatch first = ascending.seal(metadata(1L << 1));
         RuntimeCommitPatch reversed = descending.seal(metadata(1L << 1));
 
-        assertThat(first).isEqualTo(reversed);
         assertThat(first.accountLaneGroups().getFirst().users())
                 .extracting(RuntimeCommitPatch.UserChange::userId)
                 .containsExactlyElementsOf(java.util.stream.LongStream.rangeClosed(1, 64).boxed().toList());
+        assertThat(reversed.accountLaneGroups().getFirst().users())
+                .extracting(RuntimeCommitPatch.UserChange::userId)
+                .containsExactlyElementsOf(java.util.stream.LongStream.iterate(64, value -> value - 1)
+                        .limit(64).boxed().toList());
 
         ascending.reset().sequences(40, 41)
                 .matcherTransition(new CoreMatcherTransition(1, 0, 6, 8, 90, 101));
@@ -331,21 +338,21 @@ class RuntimeCommitPatchTest {
         RuntimeCommitPatch.CoreFactFragment fragment = builder.seal(prepared, 1, 0)
                 .materializeCoreFactFragment();
 
-        assertThat(fragment.changedUsers()).extracting(user -> user.userId()).containsExactly(7L, 9L);
+        assertThat(fragment.changedUsers()).extracting(user -> user.userId()).containsExactly(9L, 7L);
         assertThat(fragment.changedUsers().get(0).balances()).singleElement()
-                .extracting(balance -> balance.availableUnits()).isEqualTo(700L);
+                .extracting(balance -> balance.availableUnits()).isEqualTo(900L);
         assertThat(fragment.changedUsers().get(0).reservations()).singleElement()
-                .extracting(reservation -> reservation.orderId()).isEqualTo(77L);
+                .extracting(reservation -> reservation.orderId()).isEqualTo(99L);
         assertThat(fragment.changedUsers().get(0).positions()).singleElement()
                 .extracting(position -> position.positionSide())
-                .isEqualTo(com.surprising.aeron.protocol.CorePositionSide.LONG);
+                .isEqualTo(com.surprising.aeron.protocol.CorePositionSide.SHORT);
         assertThat(fragment.changedUsers().get(1).balances()).singleElement()
-                .extracting(balance -> balance.availableUnits()).isEqualTo(900L);
+                .extracting(balance -> balance.availableUnits()).isEqualTo(700L);
         assertThat(fragment.changedUsers().get(1).reservations()).singleElement()
-                .extracting(reservation -> reservation.orderId()).isEqualTo(99L);
+                .extracting(reservation -> reservation.orderId()).isEqualTo(77L);
         assertThat(fragment.changedUsers().get(1).positions()).singleElement()
                 .extracting(position -> position.positionSide())
-                .isEqualTo(com.surprising.aeron.protocol.CorePositionSide.SHORT);
+                .isEqualTo(com.surprising.aeron.protocol.CorePositionSide.LONG);
     }
 
     @Test

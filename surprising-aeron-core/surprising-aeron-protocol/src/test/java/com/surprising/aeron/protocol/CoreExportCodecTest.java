@@ -254,9 +254,9 @@ class CoreExportCodecTest {
     }
 
     @Test
-    void rejectsNonCanonicalOrDuplicateTerminalAndTombstoneKeys() {
-        assertThatThrownBy(() -> new CoreExportEvent.TerminalIds(List.of(2L, 1L), List.of(), List.of()))
-                .isInstanceOf(IllegalArgumentException.class);
+    void preservesDeterministicFirstTouchOrderAndRejectsDuplicateTerminalAndTombstoneKeys() {
+        assertThat(new CoreExportEvent.TerminalIds(List.of(2L, 1L), List.of(), List.of()).orderIds())
+                .containsExactly(2L, 1L);
         assertThatThrownBy(() -> new CoreExportEvent.TerminalIds(List.of(1L, 1L), List.of(), List.of()))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new CoreExportEvent.TerminalIds(List.of(0L), List.of(), List.of()))

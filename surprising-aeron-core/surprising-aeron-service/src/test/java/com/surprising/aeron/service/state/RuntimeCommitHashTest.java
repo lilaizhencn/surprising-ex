@@ -129,7 +129,7 @@ class RuntimeCommitHashTest {
     }
 
     @Test
-    void preparedChangesDeriveAfterHashesWithoutMaterializationAndCommitAtomically() {
+    void preparedChangesApplyOnceAndSealWithoutReversibleTransitions() {
         TradingCoreReducer reducer = new TradingCoreReducer();
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         List<Long> users = oneUserPerLane();
@@ -147,28 +147,13 @@ class RuntimeCommitHashTest {
                         seal.beforeBusinessStateHash(), seal.beforeFundsStateHash(), seal.laneMask(),
                         seal.coreFactMetadata(), seal.externalAdjustment()), identities);
 
-        RollingBusinessStateHash.HashTransition businessTransition = business.prepare(changes);
-        RollingFundsStateHash.HashTransition fundsTransition = funds.prepare(changes);
-        assertThat(business.value()).isEqualTo(businessTransition.beforeHash());
-        assertThat(funds.value()).isEqualTo(fundsTransition.beforeHash());
-        RuntimeCommitPatch patch = captured.builder().seal(
-                changes, businessTransition.afterHash(), fundsTransition.afterHash());
-
-        businessTransition.commit();
-        funds.failAfterStagedOperationForTest(0);
-        assertThatThrownBy(fundsTransition::commit).hasMessageContaining("injected mid-stage");
-        businessTransition.rollback();
-        assertThat(business.value()).isEqualTo(businessTransition.beforeHash());
-        assertThat(funds.value()).isEqualTo(fundsTransition.beforeHash());
-
-        assertThatThrownBy(businessTransition::commit).hasMessageContaining("ROLLED_BACK");
-        assertThatThrownBy(fundsTransition::rollback).hasMessageContaining("PREPARED");
-        RollingBusinessStateHash.HashTransition retryBusiness = business.prepare(changes);
-        RollingFundsStateHash.HashTransition retryFunds = funds.prepare(changes);
-        retryBusiness.commit();
-        retryFunds.commit();
+        long businessAfter = business.applyFailStop(changes);
+        long fundsAfter = funds.applyFailStop(changes);
+        RuntimeCommitPatch patch = captured.builder().seal(changes, businessAfter, fundsAfter);
         assertThat(business.value()).isEqualTo(patch.businessStateHash());
         assertThat(funds.value()).isEqualTo(patch.fundsStateHash());
+        assertThatThrownBy(() -> business.applyFailStop(changes)).hasMessageContaining("sequence");
+        assertThatThrownBy(() -> funds.applyFailStop(changes)).hasMessageContaining("sequence");
         runtime.close();
     }
 
@@ -196,19 +181,15 @@ class RuntimeCommitHashTest {
                 RollingFundsStateHash.compute(after), true);
         RuntimeCommitPatch.PreparedChanges changes = captured.prepareChanges();
 
-        RollingBusinessStateHash.HashTransition transition = business.prepare(changes);
-        RuntimeCommitPatch patch = captured.seal(
-                changes, transition.afterHash(), RollingFundsStateHash.compute(after));
-        transition.commit();
+        long businessAfter = business.applyFailStop(changes);
+        RuntimeCommitPatch patch = captured.seal(changes, businessAfter, RollingFundsStateHash.compute(after));
         assertThat(business.value()).isEqualTo(RollingBusinessStateHash.compute(after));
         assertThat(business.value()).isEqualTo(patch.businessStateHash());
-        transition.rollback();
-        assertThat(business.value()).isEqualTo(RollingBusinessStateHash.compute(before));
         runtime.close();
     }
 
     @Test
-    void preparedBusinessStageReusesOneStageAcrossPreviewCommitRollbackAndRetry() {
+    void preparedBusinessStageAppliesDirectlyWithoutPreviewOrRollback() {
         TradingCoreReducer reducer = new TradingCoreReducer();
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         List<Long> users = oneUserPerLane();
@@ -224,20 +205,13 @@ class RuntimeCommitHashTest {
                 RollingFundsStateHash.compute(after), true);
         RuntimeCommitPatch.PreparedChanges changes = captured.prepareChanges();
 
-        RollingBusinessStateHash.HashTransition first = business.prepare(changes);
-        first.commit();
-        assertThat(business.value()).isEqualTo(RollingBusinessStateHash.compute(after));
-        first.rollback();
-        assertThat(business.value()).isEqualTo(RollingBusinessStateHash.compute(before));
-
-        RollingBusinessStateHash.HashTransition retry = business.prepare(changes);
-        retry.commit();
+        assertThat(business.applyFailStop(changes)).isEqualTo(RollingBusinessStateHash.compute(after));
         assertThat(business.value()).isEqualTo(RollingBusinessStateHash.compute(after));
         runtime.close();
     }
 
     @Test
-    void ownerAppliedHashTransitionsAvoidPreviewReplayAndRemainRollbackSafe() {
+    void ownerAppliesBusinessAndFundsHashesOnce() {
         TradingCoreReducer reducer = new TradingCoreReducer();
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         List<Long> users = oneUserPerLane();
@@ -253,19 +227,8 @@ class RuntimeCommitHashTest {
                 business.value(), business.value(), funds.value(), funds.value(), true);
         RuntimeCommitPatch.PreparedChanges changes = captured.prepareChanges();
 
-        RollingBusinessStateHash.HashTransition businessAbort = business.prepareApplied(changes);
-        RollingFundsStateHash.HashTransition fundsAbort = funds.prepareApplied(changes);
-        assertThat(business.value()).isEqualTo(RollingBusinessStateHash.compute(after));
-        assertThat(funds.value()).isEqualTo(RollingFundsStateHash.compute(after));
-        fundsAbort.rollback();
-        businessAbort.rollback();
-        assertThat(business.value()).isEqualTo(RollingBusinessStateHash.compute(before));
-        assertThat(funds.value()).isEqualTo(RollingFundsStateHash.compute(before));
-
-        RollingBusinessStateHash.HashTransition businessCommit = business.prepareApplied(changes);
-        RollingFundsStateHash.HashTransition fundsCommit = funds.prepareApplied(changes);
-        businessCommit.commit();
-        fundsCommit.commit();
+        business.applyFailStop(changes);
+        funds.applyFailStop(changes);
         assertThat(business.value()).isEqualTo(RollingBusinessStateHash.compute(after));
         assertThat(funds.value()).isEqualTo(RollingFundsStateHash.compute(after));
         runtime.close();
@@ -290,10 +253,9 @@ class RuntimeCommitHashTest {
                 RollingFundsStateHash.compute(after), true);
         RuntimeCommitPatch.PreparedChanges changes = captured.prepareChanges();
 
-        RollingBusinessStateHash.HashTransition transition = business.prepare(changes);
+        business.applyFailStop(changes);
         RuntimeCommitPatch patch = captured.seal(
                 changes, canonicalOverlayAfter, RollingFundsStateHash.compute(after));
-        transition.commit();
         assertThat(patch.beforeBusinessStateHash()).isEqualTo(canonicalOverlayBefore);
         assertThat(patch.businessStateHash()).isEqualTo(canonicalOverlayAfter);
         assertThat(business.value()).isEqualTo(RollingBusinessStateHash.compute(after));
@@ -301,7 +263,7 @@ class RuntimeCommitHashTest {
     }
 
     @Test
-    void preparedHashTransitionsRejectStaleRepeatedAndForeignUseWithoutDrift() {
+    void failStopHashesRejectRepeatedSequenceAfterDirectApply() {
         TradingCoreReducer reducer = new TradingCoreReducer();
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         List<Long> users = oneUserPerLane();
@@ -318,37 +280,13 @@ class RuntimeCommitHashTest {
                 new RuntimeCommitPatch.PrepareMetadata(seal.beforeRevision(), seal.afterRevision(),
                         seal.beforeBusinessStateHash(), seal.beforeFundsStateHash(), seal.laneMask(),
                         seal.coreFactMetadata(), seal.externalAdjustment()), identities);
-        RollingBusinessStateHash.HashTransition businessA = business.prepare(changes);
-        RollingBusinessStateHash.HashTransition businessB = business.prepare(changes);
-        RollingFundsStateHash.HashTransition fundsA = funds.prepare(changes);
-        RollingFundsStateHash.HashTransition fundsB = funds.prepare(changes);
-        RollingBusinessStateHash foreignBusiness = RollingBusinessStateHash.create(before, identities);
-        RollingFundsStateHash foreignFunds = RollingFundsStateHash.create(before, identities);
-        long businessBefore = business.value();
-        long fundsBefore = funds.value();
-
-        assertThatThrownBy(businessA::rollback).hasMessageContaining("PREPARED");
-        assertThatThrownBy(fundsA::rollback).hasMessageContaining("PREPARED");
-        assertThatThrownBy(() -> foreignBusiness.commitForTest(businessA)).hasMessageContaining("foreign");
-        assertThatThrownBy(() -> foreignFunds.commitForTest(fundsA)).hasMessageContaining("foreign");
-        assertThat(foreignBusiness.value()).isEqualTo(businessBefore);
-        assertThat(foreignFunds.value()).isEqualTo(fundsBefore);
-        RuntimeCommitPatch.Builder foreignBuilder = RuntimeCommitPatch.builder(PRODUCT_LINE, 0, 1)
-                .matcherTransition(unchangedMatcher());
-        assertThatThrownBy(() -> foreignBuilder.seal(changes, businessA.afterHash(), fundsA.afterHash()))
-                .hasMessageContaining("different builder");
-
-        RuntimeCommitPatch firstPatch = captured.builder().seal(changes, businessA.afterHash(), fundsA.afterHash());
-        assertThatThrownBy(() -> captured.builder().seal(changes, businessA.afterHash(), fundsA.afterHash()))
+        long firstBusinessHash = business.applyFailStop(changes);
+        long firstFundsHash = funds.applyFailStop(changes);
+        RuntimeCommitPatch firstPatch = captured.builder().seal(changes, firstBusinessHash, firstFundsHash);
+        assertThatThrownBy(() -> captured.builder().seal(changes, firstBusinessHash, firstFundsHash))
                 .hasMessageContaining("already sealed");
-        businessA.commit();
-        fundsA.commit();
-        assertThatThrownBy(businessA::commit).hasMessageContaining("COMMITTED");
-        assertThatThrownBy(fundsA::commit).hasMessageContaining("COMMITTED");
-        assertThatThrownBy(businessB::commit).hasMessageContaining("stale");
-        assertThatThrownBy(fundsB::commit).hasMessageContaining("stale");
-        assertThatThrownBy(() -> foreignBusiness.rollbackForTest(businessA)).hasMessageContaining("foreign");
-        assertThatThrownBy(() -> foreignFunds.rollbackForTest(fundsA)).hasMessageContaining("foreign");
+        assertThatThrownBy(() -> business.applyFailStop(changes)).hasMessageContaining("sequence");
+        assertThatThrownBy(() -> funds.applyFailStop(changes)).hasMessageContaining("sequence");
         assertThat(business.value()).isEqualTo(firstPatch.businessStateHash());
         assertThat(funds.value()).isEqualTo(firstPatch.fundsStateHash());
 
@@ -366,66 +304,13 @@ class RuntimeCommitHashTest {
                         secondSeal.beforeBusinessStateHash(), secondSeal.beforeFundsStateHash(),
                         secondSeal.laneMask(), secondSeal.coreFactMetadata(), secondSeal.externalAdjustment()),
                 identities);
-        RollingBusinessStateHash.HashTransition businessC = business.prepare(secondChanges);
-        RollingFundsStateHash.HashTransition fundsC = funds.prepare(secondChanges);
+        long secondBusinessHash = business.applyFailStop(secondChanges);
+        long secondFundsHash = funds.applyFailStop(secondChanges);
         RuntimeCommitPatch secondPatch = capturedSecond.builder().seal(
-                secondChanges, businessC.afterHash(), fundsC.afterHash());
-        businessC.commit();
-        fundsC.commit();
+                secondChanges, secondBusinessHash, secondFundsHash);
         assertThat(business.value()).isEqualTo(secondPatch.businessStateHash());
         assertThat(funds.value()).isEqualTo(secondPatch.fundsStateHash());
         assertHashAndRestoreParity(afterSecond, business, funds, identities);
-
-        long businessAfterSecond = business.value();
-        long fundsAfterSecond = funds.value();
-        assertThatThrownBy(businessA::rollback).hasMessageContaining("stale");
-        assertThatThrownBy(fundsA::rollback).hasMessageContaining("stale");
-        assertThat(business.value()).isEqualTo(businessAfterSecond);
-        assertThat(funds.value()).isEqualTo(fundsAfterSecond);
-
-        businessC.rollback();
-        fundsC.rollback();
-        assertThat(business.value()).isEqualTo(firstPatch.businessStateHash());
-        assertThat(funds.value()).isEqualTo(firstPatch.fundsStateHash());
-        assertThatThrownBy(businessC::rollback).hasMessageContaining("ROLLED_BACK");
-        assertThatThrownBy(fundsC::rollback).hasMessageContaining("ROLLED_BACK");
-        assertThatThrownBy(businessC::commit).hasMessageContaining("ROLLED_BACK");
-        assertThatThrownBy(fundsC::commit).hasMessageContaining("ROLLED_BACK");
-        runtime.close();
-    }
-
-    @Test
-    void midStageMixedDomainFailureRollsBackBothHashesAndRemainsRetryable() {
-        TradingCoreReducer reducer = new TradingCoreReducer();
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        List<Long> users = oneUserPerLane();
-        TradingCoreState before = baseState(reducer, users);
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities, FOUR_LANES);
-        place(runtime, identities, users.getFirst(), 20_001, CoreOrderSide.BUY, 2);
-        TradingCoreState after = RuntimeStateMaterializer.materialize(runtime, identities);
-        RuntimeCommitPatch patch = capture(runtime, identities, before, after, 1);
-        RuntimeCommitPatch.AccountLaneOwnerGroup group = patch.accountLaneGroups().getFirst();
-        assertThat(group.users()).isNotEmpty();
-        assertThat(group.balances()).isNotEmpty();
-        assertThat(group.reservations()).isNotEmpty();
-        assertThat(group.orders()).isNotEmpty();
-
-        RollingBusinessStateHash business = RollingBusinessStateHash.create(before, identities);
-        RollingFundsStateHash funds = RollingFundsStateHash.create(before, identities);
-        long businessBefore = business.value();
-        long fundsBefore = funds.value();
-        assertEveryStagedOperationRollsBack(patch, before, identities);
-        business.failAfterStagedOperationForTest(0);
-        funds.failAfterStagedOperationForTest(0);
-        assertThatThrownBy(() -> business.update(patch)).hasMessageContaining("injected mid-stage");
-        assertThatThrownBy(() -> funds.update(patch)).hasMessageContaining("injected mid-stage");
-        assertThat(business.value()).isEqualTo(businessBefore);
-        assertThat(funds.value()).isEqualTo(fundsBefore);
-
-        business.update(patch);
-        funds.update(patch);
-        assertThat(business.value()).isEqualTo(RollingBusinessStateHash.compute(after));
-        assertThat(funds.value()).isEqualTo(RollingFundsStateHash.compute(after));
         runtime.close();
     }
 
@@ -460,7 +345,6 @@ class RuntimeCommitHashTest {
                 0, 1, RollingBusinessStateHash.compute(before), RollingBusinessStateHash.compute(after),
                 RollingFundsStateHash.compute(before), RollingFundsStateHash.compute(after),
                 0, null, true), identities);
-        assertEveryStagedOperationRollsBack(patch, before, identities);
         RollingBusinessStateHash business = RollingBusinessStateHash.create(before, identities);
         RollingFundsStateHash funds = RollingFundsStateHash.create(before, identities);
 
@@ -502,8 +386,6 @@ class RuntimeCommitHashTest {
                 populated, deleted, runtimePosition, null, 900, 100, 1_000, 0, 50, 0, identities);
         RuntimeCommitPatch recreation = positionTreasuryPatch(2, laneId, userId, assetId, positionKey,
                 deleted, recreated, null, runtimePosition, 1_000, 0, 900, 100, 0, 50, identities);
-        assertEveryStagedOperationRollsBack(deletion, populated, identities);
-        assertEveryStagedOperationRollsBack(recreation, deleted, identities);
         RollingBusinessStateHash business = RollingBusinessStateHash.create(populated, identities);
         RollingFundsStateHash funds = RollingFundsStateHash.create(populated, identities);
 
@@ -623,7 +505,6 @@ class RuntimeCommitHashTest {
                                                      RollingFundsStateHash funds) {
         TradingCoreState after = RuntimeStateMaterializer.materialize(runtime, identities);
         RuntimeCommitPatch patch = capture(runtime, identities, before, after, sequence);
-        assertEveryStagedOperationRollsBack(patch, before, identities);
         business.update(patch);
         funds.update(patch);
         assertThat(business.value()).isEqualTo(RollingBusinessStateHash.compute(after));
@@ -634,34 +515,6 @@ class RuntimeCommitHashTest {
         assertThat(RollingFundsStateHash.create(restoredState, identities).value()).isEqualTo(funds.value());
         runtime.clearChangedKeys();
         return after;
-    }
-
-    private static void assertEveryStagedOperationRollsBack(
-            RuntimeCommitPatch patch, TradingCoreState before, RuntimeIdentityRegistry identities) {
-        RollingBusinessStateHash businessProbe = RollingBusinessStateHash.create(before, identities);
-        int businessOperations = businessProbe.stagedOperationCountForTest(patch);
-        for (int index = 0; index < businessOperations; index++) {
-            businessProbe = RollingBusinessStateHash.create(before, identities);
-            long value = businessProbe.value();
-            businessProbe.failAfterStagedOperationForTest(index);
-            RollingBusinessStateHash current = businessProbe;
-            assertThatThrownBy(() -> current.update(patch)).hasMessageContaining("injected mid-stage");
-            assertThat(current.value()).isEqualTo(value);
-            current.update(patch);
-            assertThat(current.value()).isEqualTo(patch.businessStateHash());
-        }
-        RollingFundsStateHash fundsProbe = RollingFundsStateHash.create(before, identities);
-        int fundsOperations = fundsProbe.stagedOperationCountForTest(patch);
-        for (int index = 0; index < fundsOperations; index++) {
-            fundsProbe = RollingFundsStateHash.create(before, identities);
-            long value = fundsProbe.value();
-            fundsProbe.failAfterStagedOperationForTest(index);
-            RollingFundsStateHash current = fundsProbe;
-            assertThatThrownBy(() -> current.update(patch)).hasMessageContaining("injected mid-stage");
-            assertThat(current.value()).isEqualTo(value);
-            current.update(patch);
-            assertThat(current.value()).isEqualTo(patch.fundsStateHash());
-        }
     }
 
     private static RuntimeCommitPatch capture(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,

@@ -2,7 +2,6 @@ package com.surprising.aeron.service.state;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Arrays;
 import org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap;
 
 public final class RuntimeFundsDelta {
@@ -10,6 +9,7 @@ public final class RuntimeFundsDelta {
     private static final RuntimeFundsDelta EMPTY = new RuntimeFundsDelta(List.of(), false, true);
     private final List<RuntimeCommitPatch.FundsPosting> postings;
     private final IntLongHashMap unitsByAsset;
+    private final int[] assetIds;
 
     RuntimeFundsDelta(List<Posting> postings) {
         this(toPatchPostings(postings), true, true);
@@ -20,24 +20,26 @@ public final class RuntimeFundsDelta {
         if (postings == null) throw new IllegalArgumentException("runtime funds postings are required");
         ArrayList<RuntimeCommitPatch.FundsPosting> normalizedPostings;
         if (normalize) {
-            ArrayList<RuntimeCommitPatch.FundsPosting> ordered = new ArrayList<>(postings.size());
+            normalizedPostings = new ArrayList<>(postings.size());
             for (RuntimeCommitPatch.FundsPosting posting : postings) {
                 if (posting == null) throw new IllegalArgumentException("runtime funds posting is required");
-                ordered.add(posting);
-            }
-            ordered.sort(null);
-            normalizedPostings = new ArrayList<>(ordered.size());
-            RuntimeCommitPatch.FundsPosting key = null;
-            long units = 0;
-            for (RuntimeCommitPatch.FundsPosting posting : ordered) {
-                if (key != null && key.compareTo(posting) != 0) {
-                    appendNormalized(normalizedPostings, key, units);
-                    units = 0;
+                int existingIndex = -1;
+                for (int index = 0; index < normalizedPostings.size(); index++) {
+                    if (samePostingKey(normalizedPostings.get(index), posting)) {
+                        existingIndex = index;
+                        break;
+                    }
                 }
-                if (key == null || key.compareTo(posting) != 0) key = posting;
-                units = Math.addExact(units, posting.units());
+                if (existingIndex < 0) {
+                    normalizedPostings.add(posting);
+                    continue;
+                }
+                RuntimeCommitPatch.FundsPosting existing = normalizedPostings.get(existingIndex);
+                long units = Math.addExact(existing.units(), posting.units());
+                if (units == 0) normalizedPostings.remove(existingIndex);
+                else normalizedPostings.set(existingIndex, new RuntimeCommitPatch.FundsPosting(
+                        existing.assetId(), existing.ownerKind(), existing.ownerId(), existing.subledger(), units));
             }
-            if (key != null) appendNormalized(normalizedPostings, key, units);
         } else {
             normalizedPostings = new ArrayList<>(postings.size());
             for (RuntimeCommitPatch.FundsPosting posting : postings) {
@@ -46,12 +48,24 @@ public final class RuntimeFundsDelta {
             }
         }
         IntLongHashMap totals = new IntLongHashMap();
+        int[] touchedAssets = new int[Math.max(1, normalizedPostings.size())];
+        int touchedAssetCount = 0;
         for (RuntimeCommitPatch.FundsPosting posting : normalizedPostings) {
+            if (!totals.containsKey(posting.assetId())) touchedAssets[touchedAssetCount++] = posting.assetId();
             long previous = totals.get(posting.assetId());
             totals.put(posting.assetId(), Math.addExact(previous, posting.units()));
         }
         this.postings = List.copyOf(normalizedPostings);
         this.unitsByAsset = totals;
+        this.assetIds = java.util.Arrays.copyOf(touchedAssets, touchedAssetCount);
+    }
+
+    private static boolean samePostingKey(RuntimeCommitPatch.FundsPosting left,
+                                          RuntimeCommitPatch.FundsPosting right) {
+        return left.assetId() == right.assetId()
+                && left.ownerKind() == right.ownerKind()
+                && left.ownerId() == right.ownerId()
+                && left.subledger() == right.subledger();
     }
 
     public static RuntimeFundsDelta empty() {
@@ -85,11 +99,12 @@ public final class RuntimeFundsDelta {
 
     public void requireConserved(boolean externalAdjustment) {
         if (externalAdjustment) return;
-        unitsByAsset.forEachKeyValue((assetId, units) -> {
+        for (int assetId : assetIds) {
+            long units = unitsByAsset.get(assetId);
             if (units != 0) {
                 throw new IllegalArgumentException("runtime funds delta is not conserved for asset " + assetId);
             }
-        });
+        }
     }
 
     public FundsDelta materialize(RuntimeCommitPatch.IdentityView identities, boolean externalAdjustment) {
@@ -106,8 +121,6 @@ public final class RuntimeFundsDelta {
                     posting.ownerId(), posting.subledger(), posting.units()));
         }
         if (externalAdjustment) {
-            int[] assetIds = unitsByAsset.keySet().toArray();
-            Arrays.sort(assetIds);
             for (int assetId : assetIds) {
                 long units = unitsByAsset.get(assetId);
                 if (units != 0) {
@@ -153,13 +166,6 @@ public final class RuntimeFundsDelta {
 
     List<RuntimeCommitPatch.FundsPosting> postings() {
         return postings;
-    }
-
-    private static void appendNormalized(ArrayList<RuntimeCommitPatch.FundsPosting> target,
-                                         RuntimeCommitPatch.FundsPosting key, long units) {
-        if (units == 0) return;
-        target.add(units == key.units() ? key : new RuntimeCommitPatch.FundsPosting(
-                key.assetId(), key.ownerKind(), key.ownerId(), key.subledger(), units));
     }
 
     private static List<RuntimeCommitPatch.FundsPosting> toPatchPostings(List<Posting> postings) {

@@ -10,14 +10,12 @@ import java.lang.invoke.VarHandle;
 public final class MatcherSettlementEvent implements SettlementLaneWorker.Command {
     private static final RuntimeTreasuryDelta EMPTY_TREASURY_DELTA = new RuntimeTreasuryDelta(1);
     private static final VarHandle COMPLETED_LANE_MASK;
-    private static final VarHandle FAILURE;
 
     static {
         try {
             MethodHandles.Lookup lookup = MethodHandles.lookup();
             COMPLETED_LANE_MASK = lookup.findVarHandle(MatcherSettlementEvent.class,
                     "completedLaneMask", long.class);
-            FAILURE = lookup.findVarHandle(MatcherSettlementEvent.class, "failure", Throwable.class);
         } catch (ReflectiveOperationException exception) {
             throw new ExceptionInInitializerError(exception);
         }
@@ -36,7 +34,6 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     private final int settleAssetId;
     private final RuntimeTreasuryDelta[] laneTreasuryDeltas;
     private volatile long completedLaneMask;
-    private volatile Throwable failure;
     private boolean collected;
 
     MatcherSettlementEvent(long commitSequence, long requiredLaneMask,
@@ -79,33 +76,28 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         if ((requiredLaneMask & laneMask) == 0) {
             throw new IllegalStateException("matcher fact was routed to an unrelated account lane");
         }
-        try {
-            runtime.inLaneCommandScope(lane, ignored -> {
-                RuntimeTreasuryDelta delta = laneTreasuryDeltas == null
-                        ? EMPTY_TREASURY_DELTA : laneTreasuryDeltas[laneId];
-                if (runtime.productLine().isDerivative()) {
-                    RuntimePerpetualMatchProcessor.applyLane(plan.takerOrderId(), plan, laneId,
-                            runtime, identities, instrument, settleAssetId, delta);
-                } else {
-                    RuntimeSpotMatchProcessor.applyLane(plan.takerOrderId(), plan, laneId,
-                            runtime, instrument, baseAssetId, quoteAssetId, delta);
-                }
-                runtime.completeMatcherPendingReservations(lane, plan);
-                if (commitSequence != 0) {
-                    lane.applied(commitSequence, stateContribution, fundsContribution);
-                    runtime.publishLaneHashes(lane);
-                }
-                return null;
-            });
-        } catch (Throwable laneFailure) {
-            FAILURE.compareAndSet(this, null, laneFailure);
-        } finally {
-            runtime.recordMatcherLaneOperation(lane, System.nanoTime() - startedNanos);
-            long previous = (long) COMPLETED_LANE_MASK.getAndBitwiseOr(this, laneMask);
-            if ((previous & laneMask) != 0) {
-                FAILURE.compareAndSet(this, null,
-                        new IllegalStateException("account lane completed the same matcher fact twice"));
+        runtime.inLaneCommandScope(lane, ignored -> {
+            RuntimeTreasuryDelta delta = laneTreasuryDeltas == null
+                    ? EMPTY_TREASURY_DELTA : laneTreasuryDeltas[laneId];
+            if (runtime.productLine().isDerivative()) {
+                RuntimePerpetualMatchProcessor.applyLane(plan.takerOrderId(), plan, laneId,
+                        runtime, identities, instrument, settleAssetId, delta);
+            } else {
+                RuntimeSpotMatchProcessor.applyLane(plan.takerOrderId(), plan, laneId,
+                        runtime, instrument, baseAssetId, quoteAssetId, delta);
             }
+            runtime.completeMatcherPendingReservations(lane, plan);
+            if (commitSequence != 0) {
+                lane.applied(commitSequence, stateContribution, fundsContribution);
+                lane.committed(commitSequence);
+                runtime.publishLaneHashes(lane);
+            }
+            return null;
+        });
+        runtime.recordMatcherLaneOperation(lane, System.nanoTime() - startedNanos);
+        long previous = (long) COMPLETED_LANE_MASK.getAndBitwiseOr(this, laneMask);
+        if ((previous & laneMask) != 0) {
+            throw new IllegalStateException("account lane completed the same matcher fact twice");
         }
     }
 
@@ -124,10 +116,6 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         if (!complete()) return null;
         if (collected) throw new IllegalStateException("matcher settlement event was already collected");
         collected = true;
-        Throwable laneFailure = failure;
-        if (laneFailure instanceof RuntimeException runtimeFailure) throw runtimeFailure;
-        if (laneFailure instanceof Error error) throw error;
-        if (laneFailure != null) throw new IllegalStateException("account lane settlement failed", laneFailure);
         if (laneTreasuryDeltas == null) return EMPTY_TREASURY_DELTA;
         RuntimeTreasuryDelta aggregate = null;
         for (int laneId = 0; laneId < laneTreasuryDeltas.length; laneId++) {

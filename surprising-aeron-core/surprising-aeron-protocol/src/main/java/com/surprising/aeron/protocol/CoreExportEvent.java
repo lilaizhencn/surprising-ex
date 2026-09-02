@@ -334,77 +334,56 @@ public record CoreExportEvent(
     }
 
     private static boolean containsLong(List<Long> values, long expected) {
-        int low = 0;
-        int high = values.size() - 1;
-        while (low <= high) {
-            int middle = (low + high) >>> 1;
-            int comparison = Long.compare(values.get(middle), expected);
-            if (comparison == 0) return true;
-            if (comparison < 0) low = middle + 1; else high = middle - 1;
-        }
+        for (long value : values) if (value == expected) return true;
         return false;
     }
 
     private static void requireNotDeletedBalance(List<UserAssetKey> values, long userId, String asset) {
-        int low = 0, high = values.size() - 1;
-        while (low <= high) {
-            int middle = (low + high) >>> 1;
-            UserAssetKey value = values.get(middle);
-            int comparison = Long.compare(value.userId(), userId);
-            if (comparison == 0) comparison = value.asset().compareTo(asset);
-            if (comparison == 0) throw new IllegalArgumentException("Core Fact nested delete/recreate keys are unresolved");
-            if (comparison < 0) low = middle + 1; else high = middle - 1;
+        for (UserAssetKey value : values) {
+            if (value.userId() == userId && value.asset().equals(asset)) {
+                throw new IllegalArgumentException("Core Fact nested delete/recreate keys are unresolved");
+            }
         }
     }
 
     private static void requireNotDeletedReservation(List<UserOrderKey> values, long userId, long orderId) {
-        int low = 0, high = values.size() - 1;
-        while (low <= high) {
-            int middle = (low + high) >>> 1;
-            UserOrderKey value = values.get(middle);
-            int comparison = Long.compare(value.userId(), userId);
-            if (comparison == 0) comparison = Long.compare(value.orderId(), orderId);
-            if (comparison == 0) throw new IllegalArgumentException("Core Fact nested delete/recreate keys are unresolved");
-            if (comparison < 0) low = middle + 1; else high = middle - 1;
+        for (UserOrderKey value : values) {
+            if (value.userId() == userId && value.orderId() == orderId) {
+                throw new IllegalArgumentException("Core Fact nested delete/recreate keys are unresolved");
+            }
         }
     }
 
     private static void requireNotDeletedPosition(List<UserPositionKey> values, long userId, String symbol,
                                                    CorePositionSide side) {
-        int low = 0, high = values.size() - 1;
-        while (low <= high) {
-            int middle = (low + high) >>> 1;
-            UserPositionKey value = values.get(middle);
-            int comparison = Long.compare(value.userId(), userId);
-            if (comparison == 0) comparison = value.symbol().compareTo(symbol);
-            if (comparison == 0) comparison = value.positionSide().compareTo(side);
-            if (comparison == 0) throw new IllegalArgumentException("Core Fact nested delete/recreate keys are unresolved");
-            if (comparison < 0) low = middle + 1; else high = middle - 1;
+        for (UserPositionKey value : values) {
+            if (value.userId() == userId && value.symbol().equals(symbol) && value.positionSide() == side) {
+                throw new IllegalArgumentException("Core Fact nested delete/recreate keys are unresolved");
+            }
         }
     }
 
     private static void requireNotDeletedLeverage(List<UserLeverageKey> values, long userId, String symbol,
                                                    CoreMarginMode mode) {
-        int low = 0, high = values.size() - 1;
-        while (low <= high) {
-            int middle = (low + high) >>> 1;
-            UserLeverageKey value = values.get(middle);
-            int comparison = Long.compare(value.userId(), userId);
-            if (comparison == 0) comparison = value.symbol().compareTo(symbol);
-            if (comparison == 0) comparison = value.marginMode().compareTo(mode);
-            if (comparison == 0) throw new IllegalArgumentException("Core Fact nested delete/recreate keys are unresolved");
-            if (comparison < 0) low = middle + 1; else high = middle - 1;
+        for (UserLeverageKey value : values) {
+            if (value.userId() == userId && value.symbol().equals(symbol) && value.marginMode() == mode) {
+                throw new IllegalArgumentException("Core Fact nested delete/recreate keys are unresolved");
+            }
         }
     }
 
     private static <T> void requireCanonical(List<T> values, Comparator<? super T> comparator,
                                              Predicate<T> valid, String description) {
-        T previous = null;
-        for (T value : values) {
-            if (!valid.test(value) || previous != null && comparator.compare(previous, value) >= 0) {
+        for (int index = 0; index < values.size(); index++) {
+            T value = values.get(index);
+            if (!valid.test(value)) {
                 throw new IllegalArgumentException(description + " list is invalid or non-canonical");
             }
-            previous = value;
+            for (int prior = 0; prior < index; prior++) {
+                if (comparator.compare(values.get(prior), value) == 0) {
+                    throw new IllegalArgumentException(description + " list is invalid or non-canonical");
+                }
+            }
         }
     }
 }

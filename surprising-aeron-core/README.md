@@ -31,8 +31,9 @@ matcher worker 独占 fork 的 `SynchronousMatchingEngine` 并按序写回结果
 不存在 Disruptor、逐命令 Future、临时 Runnable fan-out、Owner/Lane 所有权切换或阻塞式逐 Lane ACK barrier。
 
 Account Lane 同时是资金隔离、执行、哈希、快照与审计边界。多成交、多用户、跨 Lane 的一笔命令共享同一条
-`MatcherSettlementEvent`，不是为每笔 fill 创建 maker/taker 两个任务。Lane 可以连续应用多个 sequence；只有
-Coordinator 发布成功后 committed watermark 才前移。任何 Lane 或提交不变量失败都会 fail-stop，并从 snapshot/Cluster Log
+`MatcherSettlementEvent`，不是为每笔 fill 创建 maker/taker 两个任务。Lane 可以连续应用多个 sequence；
+一个 Lane task 同时完成账户变更、applied/committed watermark 和局部 hash 发布，不存在第二个 commit task。Coordinator 只按 completion bitmap
+推进 Core Fact。任何 Lane 或提交不变量失败都会 fail-stop，并从 snapshot/Cluster Log
 恢复，不在交易热路径对已应用 Lane 做反向回滚。
 
 `RuntimeCommitJournal` 只保留当前 owner transaction 的准入、连续 sequence 和诊断元数据，不再维护热
@@ -67,7 +68,8 @@ patch 的 `businessAfter` / `exportAfter` 随后由 projection、index、retenti
 
 owner 提交暂存采用可复用 `RuntimeCommitPatch.Builder`；reset 只清理本轮触碰的槽位，sealed patch 仍持有独立不可变值。
 用户与余额 before-value 按 Account Lane 写入 primitive journal，避免共享 `ConcurrentHashMap<Long, ...>` 的装箱和节点竞争；
-资金 posting 用排序后线性合并生成唯一 canonical 列表；hash staging 复用 typed before/after，不创建镜像 reverse patch。
+资金 posting 按本命令 first-touch 顺序直接线性合并，不排序；rolling hash 直接前向消费 typed before/after，
+不创建 staging operation 数组、镜像 reverse patch 或每用户临时更新对象。
 Core Fact materializer 直接把 user/order 嵌套结构写入最终 event buffer，不再为每个嵌套对象先生成
 临时 `byte[]`；协议 marker、字段顺序、资金守恒、tombstone 和 snapshot/replay 语义保持不变。
 
@@ -160,7 +162,8 @@ P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣
   identity、reservation 和 admission 解析，完成阶段复用 `ResolvedMatchingAdmission`，不再次做同义业务校验。
 - 单用户非撮合命令也通过目标 Lane 的固定 SPSC worker 执行；成交或生命周期命令涉及两个及以上 Lane 时，同一条不可变
   事件直接投递给所有相关 Lane，各 worker 只修改自己拥有的账户状态。Coordinator 非阻塞检查 completion bitmap，按
-  sequence 发布 typed patch/Core Fact 后异步投递 committed watermark；不重绑定 Lane，也不执行热路径 rollback。
+  sequence 发布 typed patch/Core Fact；applied/committed watermark 已在原 Lane task 内连续推进，不再异步投递第二个 commit task；
+  不重绑定 Lane，也不执行热路径 rollback。
   `surprising.aeron.settlement-wait-strategy` 可选 `BLOCKING`（默认）、`YIELDING` 或
   `BUSY_SPIN`，正式对照必须保持同一策略并单独报告 busy-spin CPU。
 - pending matcher 以 sequence、commandId 和 user 三个有界索引做常数时间定位；Core Fact owner→materializer

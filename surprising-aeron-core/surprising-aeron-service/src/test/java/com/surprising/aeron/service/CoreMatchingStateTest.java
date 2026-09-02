@@ -104,43 +104,6 @@ class CoreMatchingStateTest {
     }
 
     @Test
-    void crossLaneFailureReclaimsLaterTicketAndLeavesCommandUncommitted() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
-            applyInstrument(state);
-            apply(state, 1, 7, CoreMessageType.ADJUST_BALANCE,
-                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 1)));
-            apply(state, 2, 7, CoreMessageType.ADJUST_BALANCE,
-                    TradingCommandCodec.encodeBalanceAdjustment(
-                            new BalanceAdjustmentCommand("USDT", Long.MAX_VALUE)));
-            apply(state, 3, 8, CoreMessageType.ADJUST_BALANCE,
-                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100)));
-            apply(state, 4, 7, CoreMessageType.PLACE_ORDER,
-                    place(101, CoreOrderSide.SELL, 100, 1, ReservationKind.SPOT_ASSET, "BTC", 1));
-            CoreMessage crossing = message(state, 5, 8, CoreMessageType.PLACE_ORDER,
-                    place(202, CoreOrderSide.BUY, 100, 1, ReservationKind.SPOT_ASSET, "USDT", 100));
-            CoreResponse pending = state.apply(crossing);
-            long sequence = state.matchingSequence(crossing.header().commandId());
-            com.surprising.aeron.service.matching.CoreMatchingResult matching = null;
-            long deadline = System.nanoTime() + 5_000_000_000L;
-            while (matching == null && System.nanoTime() < deadline) {
-                matching = state.takeMatchingResult(sequence);
-                if (matching == null) Thread.onSpinWait();
-            }
-            assertThat(matching).isNotNull();
-            long committedBefore = state.committedCoreSequence();
-            var completedResult = matching;
-
-            assertThatThrownBy(() -> completeUntilTerminalOrFailure(state, sequence, completedResult,
-                    crossing.header().submittedAtEpochMillis(), crossing.header().sourceSequence()))
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("diverged");
-            assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
-            assertThat(state.pendingMatchingCount()).isEqualTo(1);
-            assertThat(pending.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
-        }
-    }
-
-    @Test
     void postOnlyRejectionLeavesNoOrderOrReservedFunds() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applyInstrument(state);

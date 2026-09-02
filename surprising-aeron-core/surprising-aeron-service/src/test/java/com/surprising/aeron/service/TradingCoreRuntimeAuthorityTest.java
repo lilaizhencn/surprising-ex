@@ -98,9 +98,10 @@ class TradingCoreRuntimeAuthorityTest {
                 .doesNotContain("captureCommitPatch", "public RuntimeCommitPatch seal()", ".seal();",
                         "BalanceRuntime::releaseOwnerForHandoff", "awaitAndRebindLaneMutations",
                         "pendingApplyCheckpoint", "pendingApplySequence", "rollbackLaneSequence",
-                        "lane.releaseOwner()", "lane.bindOwner()")
+                        "lane.releaseOwner()", "lane.bindOwner()", "LaneCommitCommand",
+                        "commitLaneSequence(")
                 .contains("MatcherSettlementEvent dispatchMatcherSettlement(",
-                        "laneWorkers[laneId].submit(event)", "LaneCommitCommand",
+                        "laneWorkers[laneId].submit(event)", "lane.committed(coreSequence)",
                         "unindexMatcherPendingReservations(event.plan())",
                         "publishedLaneStateHashes", "publishedLaneFundsHashes")
                 .doesNotContain("captureMatchedOrderBefore");

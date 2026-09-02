@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 class W1W2InvariantFenceTest {
 
     @Test
-    void failedOwnerCommitDoesNotPublishAndPoisonsTheInstance() throws Exception {
+    void failedOwnerCommitLeavesLaneForwardOnlyDoesNotPublishAndPoisonsTheInstance() throws Exception {
         try (CoreProbeState state = new CoreProbeState(
                 com.surprising.product.api.ProductLine.SPOT)) {
             var journal = (com.surprising.aeron.service.state.RuntimeCommitJournal)
@@ -46,10 +46,14 @@ class W1W2InvariantFenceTest {
             assertThat(runtime.committedCoreSequence()).isEqualTo(coreSequence);
             var afterFailure = runtimeState.accountLanes();
             assertThat(afterFailure).hasSameSizeAs(laneViews);
+            boolean laneAdvanced = false;
             for (int laneId = 0; laneId < afterFailure.length; laneId++) {
                 assertThat(afterFailure[laneId].committedSequence())
-                        .isEqualTo(laneViews[laneId].committedSequence());
+                        .isGreaterThanOrEqualTo(laneViews[laneId].committedSequence());
+                laneAdvanced |= afterFailure[laneId].committedSequence()
+                        > laneViews[laneId].committedSequence();
             }
+            assertThat(laneAdvanced).isTrue();
             assertThatThrownBy(() -> state.apply(adjustment))
                     .hasMessageContaining("snapshot and log is required");
         } finally {
@@ -91,7 +95,7 @@ class W1W2InvariantFenceTest {
     }
 
     @Test
-    void ownerCommitStagesTypedHashesWithoutMaterializingOrAwaitingProjection() throws Exception {
+    void ownerCommitAppliesHashesOnceAndFailsStopWithoutRollback() throws Exception {
         String probe = source("CoreProbeState.java");
         int start = probe.indexOf("    private void projectSnapshotNow(long committedLaneMask)");
         int end = probe.indexOf("    private void reservePlaceOrderRuntime", start);
@@ -101,15 +105,13 @@ class W1W2InvariantFenceTest {
 
         assertThat(ownerCommit)
                 .contains("preparedCommit.builder().prepare(")
-                .contains("rollingBusinessStateHash.prepareApplied(preparedChanges)")
-                .contains("rollingFundsStateHash.prepareApplied(preparedChanges)")
-                .contains("businessTransition.commit()")
-                .contains("fundsTransition.commit()")
-                .contains("commitFaultInjector.inject(\"funds-hash\")")
+                .contains("rollingBusinessStateHash.applyFailStop(preparedChanges)")
+                .contains("rollingFundsStateHash.applyFailStop(preparedChanges)")
+                .contains("commitFaultInjector.inject(\"hashes\")")
                 .contains("restart from snapshot and log is required")
                 .contains("publishSealedCommit(commit,")
-                .doesNotContain("fundsTransition::rollback", "businessTransition::rollback",
-                        "rollbackLaneSequence")
+                .doesNotContain("prepareApplied", "businessTransition", "fundsTransition",
+                        "rollbackLaneSequence", "commitLaneSequence(")
                 .doesNotContain("runtimeProjectionJournal.await")
                 .doesNotContain("RuntimeStateMaterializer.materialize")
                 .doesNotContain("RollingBusinessStateHash.compute")
@@ -119,6 +121,20 @@ class W1W2InvariantFenceTest {
         assertThat(occurrences(ownerCommit, "preparedCommit.builder().prepare(")).isEqualTo(1);
         assertThat(occurrences(ownerCommit, "publishSealedCommit(commit,")).isEqualTo(1);
         assertThat(probe).contains("currentAdmission.publish(commit, businessStateHash, fundsStateHash)");
+        assertThat(source("state/TradingRuntimeState.java"))
+                .doesNotContain("LaneCommitCommand", "commitLaneSequence(")
+                .contains("lane.applied(coreSequence", "lane.committed(coreSequence)");
+        assertThat(source("state/RuntimeCommitPatch.java"))
+                .doesNotContain("Changes<Long", "Changes<Integer", "BeforeAfter", ".sort(",
+                        "Arrays.sort", "TreeMap", "TreeSet", "forEachKeyValue", ".toArray(");
+        assertThat(source("state/RollingBusinessStateHash.java"))
+                .doesNotContain("HashTransition", "prepareApplied", "BusinessPatchStage",
+                        "UserGroupUpdate", "afterAppliedOperation", "failAfterStagedOperation",
+                        ".sort(", "Arrays.sort", ".toArray(", "forEachKeyValue");
+        assertThat(source("state/RollingFundsStateHash.java"))
+                .doesNotContain("HashTransition", "prepareApplied", "FundsPatchStage",
+                        "afterAppliedOperation", "failAfterStagedOperation", ".sort(",
+                        "Arrays.sort", ".toArray(", "forEachKeyValue");
     }
 
     private static String source(String relativePath) throws Exception {

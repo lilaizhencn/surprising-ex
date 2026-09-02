@@ -23,7 +23,6 @@ import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -135,9 +134,11 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
     public long revision() { return afterRevision; }
     public RuntimeProjectionPoint projectionPoint() { return projectionPoint; }
     public List<Long> changedUserIds() {
-        java.util.TreeSet<Long> ids = new java.util.TreeSet<>();
-        acceptChangedUserIds(ids::add);
-        ids.remove(0L);
+        ArrayList<Long> ids = new ArrayList<>();
+        acceptChangedUserIds(userId -> {
+            for (long existing : ids) if (existing == userId) return;
+            ids.add(userId);
+        });
         return List.copyOf(ids);
     }
 
@@ -276,15 +277,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
     }
 
     private static UserFactBuilder userFactBuilder(ArrayList<UserFactBuilder> values, long userId) {
-        int low = 0;
-        int high = values.size() - 1;
-        while (low <= high) {
-            int middle = (low + high) >>> 1;
-            UserFactBuilder candidate = values.get(middle);
-            int comparison = Long.compare(candidate.user.userId(), userId);
-            if (comparison == 0) return candidate;
-            if (comparison < 0) low = middle + 1; else high = middle - 1;
-        }
+        for (UserFactBuilder candidate : values) if (candidate.user.userId() == userId) return candidate;
         return null;
     }
 
@@ -350,26 +343,10 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
                 if (change.after == null) triggers.add(change.triggerOrderId);
             }
         }
-        users.sort(Long::compare);
-        balances.sort(java.util.Comparator.comparingLong(CoreExportEvent.UserAssetKey::userId)
-                .thenComparing(CoreExportEvent.UserAssetKey::asset));
-        reservations.sort(java.util.Comparator.comparingLong(CoreExportEvent.UserOrderKey::userId)
-                .thenComparingLong(CoreExportEvent.UserOrderKey::orderId));
-        orders.sort(Long::compare);
-        positions.sort(java.util.Comparator.comparingLong(CoreExportEvent.UserPositionKey::userId)
-                .thenComparing(CoreExportEvent.UserPositionKey::symbol)
-                .thenComparing(CoreExportEvent.UserPositionKey::positionSide));
-        leverages.sort(java.util.Comparator.comparingLong(CoreExportEvent.UserLeverageKey::userId)
-                .thenComparing(CoreExportEvent.UserLeverageKey::symbol)
-                .thenComparing(CoreExportEvent.UserLeverageKey::marginMode));
-        liquidations.sort(Long::compare);
-        algos.sort(Long::compare);
-        triggers.sort(Long::compare);
         ArrayList<String> treasury = new ArrayList<>();
         for (TreasuryAssetChange change : patch.globalOwnerGroup.treasuryAssets) {
             if (change.after == null) treasury.add(identities.asset(change.assetId));
         }
-        treasury.sort(String::compareTo);
         return new CoreExportEvent.Tombstones(users, balances, reservations, orders, positions, leverages,
                 liquidations, algos, triggers, treasury);
     }
@@ -522,11 +499,11 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             for (ClientIdentityValue value : clients) {
                 if (value.key() == clientKey && value.userId() == userId) return value.clientOrderId();
             }
-            throw new IllegalArgumentException("unknown patch client key: " + userId + '/' + clientKey);
+            return requireDictionary().clientOrderId(userId, clientKey);
         }
         @Override public RuntimeIdentityRegistry.PositionIdentity positionIdentity(long positionKey) {
             for (PositionIdentityValue value : positions) if (value.key() == positionKey) return value.identity();
-            throw new IllegalArgumentException("unknown patch position key: " + positionKey);
+            return requireDictionary().positionIdentity(positionKey);
         }
         @Override public String positionKey(long userId, long positionKey) {
             RuntimeIdentityRegistry.PositionIdentity identity = positionIdentity(positionKey);
@@ -543,94 +520,78 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             if (dictionary != null && other.dictionary != null && dictionary != other.dictionary) {
                 throw new IllegalStateException("conflicting patch identity dictionaries");
             }
-            return new FactIdentitySlice(mergeSorted(assets, other.assets, "asset"),
-                    mergeSorted(symbols, other.symbols, "symbol"),
-                    mergeSorted(clients, other.clients, "client"),
-                    mergeSorted(positions, other.positions, "position"),
+            return new FactIdentitySlice(mergeFirstTouch(assets, other.assets, "asset"),
+                    mergeFirstTouch(symbols, other.symbols, "symbol"),
+                    mergeFirstTouch(clients, other.clients, "client"),
+                    mergeFirstTouch(positions, other.positions, "position"),
                     Math.max(dictionaryVersion, other.dictionaryVersion), mergedDictionary);
         }
 
-        private static <T extends Comparable<? super T>> List<T> mergeSorted(
+        private static <T extends Comparable<? super T>> List<T> mergeFirstTouch(
                 List<T> left, List<T> right, String kind) {
             if (left.isEmpty()) return right;
             if (right.isEmpty()) return left;
             ArrayList<T> merged = new ArrayList<>(Math.addExact(left.size(), right.size()));
-            int leftIndex = 0;
-            int rightIndex = 0;
-            while (leftIndex < left.size() && rightIndex < right.size()) {
-                T leftValue = left.get(leftIndex);
-                T rightValue = right.get(rightIndex);
-                int comparison = leftValue.compareTo(rightValue);
-                if (comparison < 0) {
-                    merged.add(leftValue);
-                    leftIndex++;
-                } else if (comparison > 0) {
-                    merged.add(rightValue);
-                    rightIndex++;
-                } else {
-                    if (!leftValue.equals(rightValue)) {
+            merged.addAll(left);
+            for (T candidate : right) {
+                boolean duplicate = false;
+                for (T existing : merged) {
+                    if (existing.compareTo(candidate) != 0) continue;
+                    if (!existing.equals(candidate)) {
                         throw new IllegalStateException("conflicting patch " + kind + " identity");
                     }
-                    merged.add(leftValue);
-                    leftIndex++;
-                    rightIndex++;
+                    duplicate = true;
+                    break;
                 }
+                if (!duplicate) merged.add(candidate);
             }
-            while (leftIndex < left.size()) merged.add(left.get(leftIndex++));
-            while (rightIndex < right.size()) merged.add(right.get(rightIndex++));
             return List.copyOf(merged);
         }
 
-        private static FactIdentitySlice capture(List<AccountLaneOwnerGroup> groups, GlobalOwnerGroup global,
-                                                 List<FundsPosting> funds,
+        private static FactIdentitySlice capture(List<AccountLaneOwnerGroup> groups,
                                                  RuntimeIdentityRegistry registry) {
-            java.util.TreeSet<ClientOrderKey> clientKeys = new java.util.TreeSet<>();
-            org.eclipse.collections.impl.set.mutable.primitive.LongHashSet positionKeys =
-                    new org.eclipse.collections.impl.set.mutable.primitive.LongHashSet();
+            if (registry == null) return EMPTY;
+            ArrayList<ClientIdentityValue> clients = null;
+            ArrayList<PositionIdentityValue> positions = null;
             for (AccountLaneOwnerGroup group : groups) {
                 for (PositionChange change : group.positions()) {
-                    positionKeys.add(change.positionKey());
+                    if (change.after() == null) {
+                        if (positions == null) positions = new ArrayList<>();
+                        positions.add(new PositionIdentityValue(
+                                change.positionKey(), registry.positionIdentity(change.positionKey())));
+                    }
                 }
-                for (RiskSnapshotChange change : group.riskSnapshots()) {
-                    positionKeys.add(change.riskKey());
+                for (ClientOrderChange change : group.clientOrders()) {
+                    if (change.afterOrderId() == null) {
+                        if (clients == null) clients = new ArrayList<>();
+                        ClientOrderKey key = change.key();
+                        clients.add(new ClientIdentityValue(key.clientKey(), key.userId(),
+                                registry.clientOrderId(key.userId(), key.clientKey())));
+                    }
                 }
-                for (ClientOrderChange change : group.clientOrders()) clientKeys.add(change.key());
             }
-            if (registry == null) return EMPTY;
-            long[] orderedPositionKeys = positionKeys.toArray();
-            java.util.Arrays.sort(orderedPositionKeys);
-            ArrayList<ClientIdentityValue> clients = new ArrayList<>(clientKeys.size());
-            for (ClientOrderKey key : clientKeys) clients.add(new ClientIdentityValue(
-                    key.clientKey(), key.userId(), registry.clientOrderId(key.userId(), key.clientKey())));
-            ArrayList<PositionIdentityValue> positions = new ArrayList<>(orderedPositionKeys.length);
-            for (long key : orderedPositionKeys) {
-                positions.add(new PositionIdentityValue(key, registry.positionIdentity(key)));
+            if (clients == null && positions == null) {
+                return new FactIdentitySlice(List.of(), List.of(), List.of(), List.of(),
+                        registry.dictionaryVersion(), registry);
             }
-            return new FactIdentitySlice(List.of(), List.of(), clients, positions,
+            return new FactIdentitySlice(List.of(), List.of(),
+                    clients == null ? List.of() : clients,
+                    positions == null ? List.of() : positions,
                     registry.dictionaryVersion(), registry);
         }
 
         private static <T extends Comparable<? super T>> List<T> canonicalLongIdentities(List<T> values,
                                                                                           String kind) {
             if (values == null || values.isEmpty()) return List.of();
-            boolean ordered = true;
-            T previous = Objects.requireNonNull(values.getFirst(), "patch identity");
-            for (int index = 1; index < values.size(); index++) {
+            for (int index = 0; index < values.size(); index++) {
                 T current = Objects.requireNonNull(values.get(index), "patch identity");
-                int comparison = previous.compareTo(current);
-                if (comparison == 0) throw new IllegalArgumentException("duplicate patch " + kind + " identity");
-                if (comparison > 0) ordered = false;
-                previous = current;
-            }
-            if (ordered) return List.copyOf(values);
-            ArrayList<T> copy = new ArrayList<>(values);
-            copy.sort(null);
-            for (int index = 1; index < copy.size(); index++) {
-                if (copy.get(index - 1).compareTo(copy.get(index)) == 0) {
-                    throw new IllegalArgumentException("duplicate patch " + kind + " identity");
+                for (int previous = 0; previous < index; previous++) {
+                    if (values.get(previous).compareTo(current) == 0) {
+                        throw new IllegalArgumentException("duplicate patch " + kind + " identity");
+                    }
                 }
             }
-            return List.copyOf(copy);
+            return List.copyOf(values);
         }
 
         private static List<IdentityValue> canonicalIdentities(List<IdentityValue> values, String kind) {
@@ -643,13 +604,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         }
 
         private static String findIdentityOrNull(List<IdentityValue> values, int id) {
-            int low = 0, high = values.size() - 1;
-            while (low <= high) {
-                int middle = (low + high) >>> 1;
-                IdentityValue value = values.get(middle);
-                if (value.id() == id) return value.value();
-                if (value.id() < id) low = middle + 1; else high = middle - 1;
-            }
+            for (IdentityValue value : values) if (value.id() == id) return value.value();
             return null;
         }
     }
@@ -851,35 +806,21 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
                                com.surprising.aeron.service.state.FundsPosting.OwnerKind ownerKind,
                                long ownerId,
                                com.surprising.aeron.service.state.FundsPosting.Subledger subledger,
-                               long units) implements Comparable<FundsPosting> {
+                               long units) {
         public FundsPosting {
             if (assetId < 0 || ownerKind == null || subledger == null || units == 0) {
                 throw new IllegalArgumentException("invalid patch funds posting");
             }
         }
-        @Override public int compareTo(FundsPosting other) {
-            int result = Integer.compare(assetId, other.assetId);
-            if (result == 0) result = Integer.compare(ownerKind.ordinal(), other.ownerKind.ordinal());
-            if (result == 0) result = Long.compare(ownerId, other.ownerId);
-            if (result == 0) result = Integer.compare(subledger.ordinal(), other.subledger.ordinal());
-            return result;
-        }
     }
 
     public record MatcherEvidence(long matcherSequence, int matcherShardId, long makerOrderId,
-                                  long takerOrderId, long quantitySteps, long priceTicks)
-            implements Comparable<MatcherEvidence> {
+                                  long takerOrderId, long quantitySteps, long priceTicks) {
         public MatcherEvidence {
             if (matcherSequence <= 0 || matcherShardId < 0 || makerOrderId <= 0 || takerOrderId <= 0
                     || quantitySteps <= 0 || priceTicks <= 0) {
                 throw new IllegalArgumentException("invalid matcher evidence");
             }
-        }
-        @Override public int compareTo(MatcherEvidence other) {
-            int result = Long.compare(matcherSequence, other.matcherSequence);
-            if (result == 0) result = Integer.compare(matcherShardId, other.matcherShardId);
-            if (result == 0) result = Long.compare(makerOrderId, other.makerOrderId);
-            return result != 0 ? result : Long.compare(takerOrderId, other.takerOrderId);
         }
     }
 
@@ -1182,7 +1123,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
 
         public Builder recordBalance(int laneId, long userId, int assetId,
                                      UserBalance before, UserBalance after) {
-            lane(laneId).balances.record(new BalanceKey(userId, assetId), before, after);
+            lane(laneId).balances.record(userId, assetId, before, after);
             return this;
         }
 
@@ -1235,6 +1176,14 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
 
         boolean hasPositionCheckpoint(int laneId, long positionKey) {
             return lane(laneId).positions.contains(positionKey);
+        }
+
+        void forEachCapturedPosition(PositionBeforeConsumer consumer) {
+            Objects.requireNonNull(consumer, "consumer");
+            for (int laneId = 0; laneId < lanes.length; laneId++) {
+                LaneChanges lane = lanes[laneId];
+                if (lane != null) lane.positions.forEachBefore(laneId, consumer);
+            }
         }
 
         public Builder recordLiquidation(int laneId, long id, LiquidationRuntime before, LiquidationRuntime after) {
@@ -1393,8 +1342,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             TerminalIds terminals = terminalIdsSet
                     ? new TerminalIds(terminalOrderIds, terminalLiquidationIds, terminalTriggerOrderIds)
                     : terminalIds(groups);
-            FactIdentitySlice identitySlice = FactIdentitySlice.capture(groups, sealedGlobal,
-                    canonicalFunds, identities);
+            FactIdentitySlice identitySlice = FactIdentitySlice.capture(groups, identities);
             PreparedChanges prepared = new PreparedChanges(this, prepareMetadata, identitySlice,
                     List.copyOf(groups), sealedGlobal, canonicalFunds,
                     primitiveFunds, canonicalEvidence, terminals);
@@ -1577,16 +1525,16 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
     }
 
     private static final class LaneChanges {
-        private final Changes<Long, UserValue> users = new Changes<>();
-        private final Changes<BalanceKey, UserBalance> balances = new Changes<>();
-        private final Changes<Long, ReservationValue> reservations = new Changes<>();
-        private final Changes<Long, OrderValue> orders = new Changes<>();
-        private final Changes<Long, PositionRuntime> positions = new Changes<>();
-        private final Changes<Long, LiquidationRuntime> liquidations = new Changes<>();
-        private final Changes<Long, RiskSnapshotRuntime> riskSnapshots = new Changes<>();
+        private final LongChanges<UserValue> users = new LongChanges<>();
+        private final BalanceChanges balances = new BalanceChanges();
+        private final LongChanges<ReservationValue> reservations = new LongChanges<>();
+        private final LongChanges<OrderValue> orders = new LongChanges<>();
+        private final LongChanges<PositionRuntime> positions = new LongChanges<>();
+        private final LongChanges<LiquidationRuntime> liquidations = new LongChanges<>();
+        private final LongChanges<RiskSnapshotRuntime> riskSnapshots = new LongChanges<>();
         private final Changes<CoreLeverageKey, Long> leverages = new Changes<>();
-        private final Changes<Long, CoreAlgoOrderState> algoOrders = new Changes<>();
-        private final Changes<Long, CoreTriggerOrderState> triggerOrders = new Changes<>();
+        private final LongChanges<CoreAlgoOrderState> algoOrders = new LongChanges<>();
+        private final LongChanges<CoreTriggerOrderState> triggerOrders = new LongChanges<>();
         private final Changes<ClientOrderKey, Long> clientOrders = new Changes<>();
         private final Changes<CoreCancelAllAfterKey, CoreCancelAllAfterState> timers = new Changes<>();
 
@@ -1614,37 +1562,36 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
 
         private AccountLaneOwnerGroup seal(int laneId) {
             return new AccountLaneOwnerGroup(laneId,
-                    users.seal((key, change) -> new UserChange(key,
-                            change.before == null ? null : change.before.value(),
-                            change.after == null ? null : change.after.value(),
-                            change.after == null ? 0 : change.after.pendingReservationCount())),
-                    balances.seal((key, change) -> new BalanceChange(key, change.before, change.after)),
-                    reservations.seal((key, change) -> new ReservationChange(key,
-                            change.before == null ? null : change.before.value(),
-                            change.after == null ? null : change.after.value(),
-                            change.before != null && change.before.pending(),
-                            change.after != null && change.after.pending())),
-                    orders.seal((key, change) -> new OrderChange(key,
-                            change.before.runtime(), change.after.runtime(),
-                            change.before.business(), change.after.business())),
-                    positions.seal((key, change) -> new PositionChange(key, change.before, change.after)),
-                    liquidations.seal((key, change) -> new LiquidationChange(key, change.before, change.after)),
-                    riskSnapshots.seal((key, change) -> new RiskSnapshotChange(key, change.before, change.after)),
-                    leverages.seal((key, change) -> new LeverageChange(key, change.before, change.after)),
-                    algoOrders.seal((key, change) -> new AlgoOrderChange(key, change.before, change.after)),
-                    triggerOrders.seal((key, change) -> new TriggerOrderChange(key, change.before, change.after)),
-                    clientOrders.seal((key, change) -> new ClientOrderChange(key, change.before, change.after)),
-                    timers.seal((key, change) -> new TimerChange(key, change.before, change.after)));
+                    users.seal((key, before, after) -> new UserChange(key,
+                            before == null ? null : before.value(),
+                            after == null ? null : after.value(),
+                            after == null ? 0 : after.pendingReservationCount())),
+                    balances.seal(),
+                    reservations.seal((key, before, after) -> new ReservationChange(key,
+                            before == null ? null : before.value(),
+                            after == null ? null : after.value(),
+                            before != null && before.pending(),
+                            after != null && after.pending())),
+                    orders.seal((key, before, after) -> new OrderChange(key,
+                            before.runtime(), after.runtime(), before.business(), after.business())),
+                    positions.seal((key, before, after) -> new PositionChange(key, before, after)),
+                    liquidations.seal((key, before, after) -> new LiquidationChange(key, before, after)),
+                    riskSnapshots.seal((key, before, after) -> new RiskSnapshotChange(key, before, after)),
+                    leverages.seal((key, before, after) -> new LeverageChange(key, before, after)),
+                    algoOrders.seal((key, before, after) -> new AlgoOrderChange(key, before, after)),
+                    triggerOrders.seal((key, before, after) -> new TriggerOrderChange(key, before, after)),
+                    clientOrders.seal((key, before, after) -> new ClientOrderChange(key, before, after)),
+                    timers.seal((key, before, after) -> new TimerChange(key, before, after)));
         }
     }
 
     private static final class GlobalChanges {
-        private final Changes<Integer, MarkPriceRuntime> markPrices = new Changes<>();
-        private final Changes<Integer, RiskScanRuntime> riskScans = new Changes<>();
+        private final IntChanges<MarkPriceRuntime> markPrices = new IntChanges<>();
+        private final IntChanges<RiskScanRuntime> riskScans = new IntChanges<>();
         private final Changes<String, CoreInstrumentState> instruments = new Changes<>();
-        private final Changes<Integer, TreasuryAssetValue> treasuryAssets = new Changes<>();
-        private final Changes<Integer, TreasuryFundingValue> treasuryFunding = new Changes<>();
-        private final Changes<Integer, TreasuryLifecycleValue> treasuryLifecycle = new Changes<>();
+        private final IntChanges<TreasuryAssetValue> treasuryAssets = new IntChanges<>();
+        private final IntChanges<TreasuryFundingValue> treasuryFunding = new IntChanges<>();
+        private final IntChanges<TreasuryLifecycleValue> treasuryLifecycle = new IntChanges<>();
         private final Changes<UnitKey, Long> nextLiquidationId = new Changes<>();
         private final Changes<UnitKey, CoreRiskScanControlView> riskScanControl = new Changes<>();
 
@@ -1661,42 +1608,300 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
 
         private GlobalOwnerGroup seal() {
             return new GlobalOwnerGroup(
-                    markPrices.seal((key, change) -> new MarkPriceChange(key, change.before, change.after)),
-                    riskScans.seal((key, change) -> new RiskScanChange(key, change.before, change.after)),
-                    instruments.seal((key, change) -> new InstrumentChange(key, change.before, change.after)),
-                    treasuryAssets.seal((key, change) -> new TreasuryAssetChange(key, change.before, change.after)),
-                    treasuryFunding.seal((key, change) -> new TreasuryFundingChange(key,
-                            change.before, change.after)),
-                    treasuryLifecycle.seal((key, change) -> new TreasuryLifecycleChange(key,
-                            change.before, change.after)),
-                    nextLiquidationId.single(change -> new NextLiquidationIdChange(change.before, change.after)),
-                    riskScanControl.single(change -> new RiskScanControlChange(change.before, change.after)));
+                    markPrices.seal(MarkPriceChange::new),
+                    riskScans.seal(RiskScanChange::new),
+                    instruments.seal((key, before, after) -> new InstrumentChange(key, before, after)),
+                    treasuryAssets.seal(TreasuryAssetChange::new),
+                    treasuryFunding.seal(TreasuryFundingChange::new),
+                    treasuryLifecycle.seal(TreasuryLifecycleChange::new),
+                    nextLiquidationId.single(NextLiquidationIdChange::new),
+                    riskScanControl.single(RiskScanControlChange::new));
         }
     }
 
-    private static final class Changes<K extends Comparable<? super K>, V> {
+    @FunctionalInterface
+    private interface LongChangeFunction<V, R> {
+        R apply(long key, V before, V after);
+    }
+
+    @FunctionalInterface
+    interface PositionBeforeConsumer {
+        void accept(int laneId, long positionKey, PositionRuntime before);
+    }
+
+    @FunctionalInterface
+    private interface IntChangeFunction<V, R> {
+        R apply(int key, V before, V after);
+    }
+
+    @FunctionalInterface
+    private interface ChangeFunction<K, V, R> {
+        R apply(K key, V before, V after);
+    }
+
+    /** Primitive user/asset keys avoid allocating a BalanceKey while a command is still mutable. */
+    private static final class BalanceChanges {
+        private long[] userIds = new long[8];
+        private int[] assetIds = new int[8];
+        private UserBalance[] beforeValues = new UserBalance[8];
+        private UserBalance[] afterValues = new UserBalance[8];
+        private int size;
+        private int changedCount;
+
+        private boolean hasChanges() { return changedCount != 0; }
+
+        private void reset() {
+            for (int index = 0; index < size; index++) {
+                beforeValues[index] = null;
+                afterValues[index] = null;
+            }
+            size = 0;
+            changedCount = 0;
+        }
+
+        private void record(long userId, int assetId, UserBalance before, UserBalance after) {
+            if (userId <= 0 || assetId < 0 || before == null && after == null) {
+                throw new IllegalArgumentException("invalid balance patch change");
+            }
+            int index = indexOf(userId, assetId);
+            if (index < 0) {
+                ensureCapacity();
+                userIds[size] = userId;
+                assetIds[size] = assetId;
+                beforeValues[size] = before;
+                afterValues[size] = after;
+                size++;
+                if (!Objects.equals(before, after)) changedCount++;
+                return;
+            }
+            UserBalance existingBefore = beforeValues[index];
+            UserBalance existingAfter = afterValues[index];
+            if (!Objects.equals(before, existingBefore) && !Objects.equals(before, existingAfter)) {
+                throw new IllegalArgumentException("conflicting before-value for balance patch key");
+            }
+            boolean changedBefore = !Objects.equals(existingBefore, existingAfter);
+            afterValues[index] = after;
+            boolean changedAfter = !Objects.equals(existingBefore, after);
+            if (changedBefore != changedAfter) changedCount += changedAfter ? 1 : -1;
+        }
+
+        private List<BalanceChange> seal() {
+            if (changedCount == 0) return List.of();
+            ArrayList<BalanceChange> result = new ArrayList<>(changedCount);
+            for (int index = 0; index < size; index++) {
+                if (!Objects.equals(beforeValues[index], afterValues[index])) {
+                    result.add(new BalanceChange(new BalanceKey(userIds[index], assetIds[index]),
+                            beforeValues[index], afterValues[index]));
+                }
+            }
+            return java.util.Collections.unmodifiableList(result);
+        }
+
+        private int indexOf(long userId, int assetId) {
+            for (int index = 0; index < size; index++) {
+                if (userIds[index] == userId && assetIds[index] == assetId) return index;
+            }
+            return -1;
+        }
+
+        private void ensureCapacity() {
+            if (size < userIds.length) return;
+            int capacity = Math.multiplyExact(userIds.length, 2);
+            userIds = java.util.Arrays.copyOf(userIds, capacity);
+            assetIds = java.util.Arrays.copyOf(assetIds, capacity);
+            beforeValues = java.util.Arrays.copyOf(beforeValues, capacity);
+            afterValues = java.util.Arrays.copyOf(afterValues, capacity);
+        }
+    }
+
+    /** Primitive-key, first-touch ordered changes for global int-keyed entities. */
+    private static final class IntChanges<V> {
+        private int[] keys = new int[8];
+        private Object[] beforeValues = new Object[8];
+        private Object[] afterValues = new Object[8];
+        private int size;
+        private int changedCount;
+
+        private boolean hasChanges() { return changedCount != 0; }
+
+        private void reset() {
+            for (int index = 0; index < size; index++) {
+                beforeValues[index] = null;
+                afterValues[index] = null;
+            }
+            size = 0;
+            changedCount = 0;
+        }
+
+        private void record(int key, V before, V after) {
+            if (key < 0 || before == null && after == null) {
+                throw new IllegalArgumentException("invalid int-keyed patch change");
+            }
+            int index = indexOf(key);
+            if (index < 0) {
+                ensureCapacity();
+                keys[size] = key;
+                beforeValues[size] = before;
+                afterValues[size] = after;
+                size++;
+                if (!Objects.equals(before, after)) changedCount++;
+                return;
+            }
+            V existingBefore = before(index);
+            V existingAfter = after(index);
+            if (!Objects.equals(before, existingBefore) && !Objects.equals(before, existingAfter)) {
+                throw new IllegalArgumentException("conflicting before-value for int patch key " + key);
+            }
+            boolean changedBefore = !Objects.equals(existingBefore, existingAfter);
+            afterValues[index] = after;
+            boolean changedAfter = !Objects.equals(existingBefore, after);
+            if (changedBefore != changedAfter) changedCount += changedAfter ? 1 : -1;
+        }
+
+        private <R> List<R> seal(IntChangeFunction<V, R> materializer) {
+            if (changedCount == 0) return List.of();
+            ArrayList<R> result = new ArrayList<>(changedCount);
+            for (int index = 0; index < size; index++) {
+                V before = before(index);
+                V after = after(index);
+                if (!Objects.equals(before, after)) result.add(materializer.apply(keys[index], before, after));
+            }
+            return java.util.Collections.unmodifiableList(result);
+        }
+
+        private int indexOf(int key) {
+            for (int index = 0; index < size; index++) if (keys[index] == key) return index;
+            return -1;
+        }
+
+        private void ensureCapacity() {
+            if (size < keys.length) return;
+            int capacity = Math.multiplyExact(keys.length, 2);
+            keys = java.util.Arrays.copyOf(keys, capacity);
+            beforeValues = java.util.Arrays.copyOf(beforeValues, capacity);
+            afterValues = java.util.Arrays.copyOf(afterValues, capacity);
+        }
+
+        @SuppressWarnings("unchecked")
+        private V before(int index) { return (V) beforeValues[index]; }
+
+        @SuppressWarnings("unchecked")
+        private V after(int index) { return (V) afterValues[index]; }
+    }
+
+    /** Primitive-key, first-touch ordered changes for lane-owned entities. */
+    private static final class LongChanges<V> {
+        private long[] keys = new long[8];
+        private Object[] beforeValues = new Object[8];
+        private Object[] afterValues = new Object[8];
+        private int size;
+        private int changedCount;
+
+        private void captureBefore(long key, V before) {
+            if (contains(key)) return;
+            append(key, before, before);
+        }
+
+        private V before(long key) {
+            int index = indexOf(key);
+            return index < 0 ? null : before(index);
+        }
+
+        private boolean contains(long key) { return indexOf(key) >= 0; }
+        private boolean hasChanges() { return changedCount != 0; }
+
+        private void reset() {
+            for (int index = 0; index < size; index++) {
+                beforeValues[index] = null;
+                afterValues[index] = null;
+            }
+            size = 0;
+            changedCount = 0;
+        }
+
+        private void record(long key, V before, V after) {
+            if (before == null && after == null) {
+                throw new IllegalArgumentException("invalid primitive patch change");
+            }
+            int index = indexOf(key);
+            if (index < 0) {
+                append(key, before, after);
+                if (!Objects.equals(before, after)) changedCount++;
+                return;
+            }
+            V existingBefore = before(index);
+            V existingAfter = after(index);
+            if (!Objects.equals(before, existingBefore) && !Objects.equals(before, existingAfter)) {
+                throw new IllegalArgumentException("conflicting before-value for patch key " + key);
+            }
+            boolean changedBefore = !Objects.equals(existingBefore, existingAfter);
+            afterValues[index] = after;
+            boolean changedAfter = !Objects.equals(existingBefore, after);
+            if (changedBefore != changedAfter) changedCount += changedAfter ? 1 : -1;
+        }
+
+        private <R> List<R> seal(LongChangeFunction<V, R> materializer) {
+            if (changedCount == 0) return List.of();
+            ArrayList<R> result = new ArrayList<>(changedCount);
+            for (int index = 0; index < size; index++) {
+                V before = before(index);
+                V after = after(index);
+                if (!Objects.equals(before, after)) result.add(materializer.apply(keys[index], before, after));
+            }
+            return java.util.Collections.unmodifiableList(result);
+        }
+
+        private void forEachBefore(int laneId, PositionBeforeConsumer consumer) {
+            for (int index = 0; index < size; index++) {
+                consumer.accept(laneId, keys[index], (PositionRuntime) beforeValues[index]);
+            }
+        }
+
+        private void append(long key, V before, V after) {
+            if (size == keys.length) {
+                int capacity = Math.multiplyExact(size, 2);
+                keys = java.util.Arrays.copyOf(keys, capacity);
+                beforeValues = java.util.Arrays.copyOf(beforeValues, capacity);
+                afterValues = java.util.Arrays.copyOf(afterValues, capacity);
+            }
+            keys[size] = key;
+            beforeValues[size] = before;
+            afterValues[size] = after;
+            size++;
+        }
+
+        private int indexOf(long key) {
+            for (int index = 0; index < size; index++) if (keys[index] == key) return index;
+            return -1;
+        }
+
+        @SuppressWarnings("unchecked")
+        private V before(int index) { return (V) beforeValues[index]; }
+
+        @SuppressWarnings("unchecked")
+        private V after(int index) { return (V) afterValues[index]; }
+    }
+
+    private static final class Changes<K, V> {
         private Object[] keys = new Object[8];
-        private Object[] values = new Object[8];
-        private int[] stamps = new int[8];
-        private int[] touchedSlots = new int[8];
-        private int generation = 1;
+        private Object[] beforeValues = new Object[8];
+        private Object[] afterValues = new Object[8];
         private int size;
         private int changedCount;
 
         private void captureBefore(K key, V before) {
             if (key == null) throw new IllegalArgumentException("invalid typed patch key");
-            ensureCapacity();
-            int slot = findSlot(key);
-            if (stamps[slot] != generation) insert(slot, key, new BeforeAfter<>(before, before));
+            if (indexOf(key) >= 0) return;
+            append(key, before, before);
         }
 
         private V before(K key) {
-            BeforeAfter<V> captured = change(key);
-            return captured == null ? null : captured.before;
+            int index = indexOf(key);
+            return index < 0 ? null : before(index);
         }
 
         private boolean contains(K key) {
-            return change(key) != null;
+            return indexOf(key) >= 0;
         }
 
         private boolean hasChanges() {
@@ -1704,141 +1909,91 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         }
 
         private void reset() {
+            for (int index = 0; index < size; index++) {
+                keys[index] = null;
+                beforeValues[index] = null;
+                afterValues[index] = null;
+            }
             size = 0;
             changedCount = 0;
-            if (generation == Integer.MAX_VALUE) {
-                java.util.Arrays.fill(stamps, 0);
-                generation = 1;
-            } else {
-                generation++;
-            }
         }
 
         private void record(K key, V before, V after) {
             if (key == null || before == null && after == null) {
                 throw new IllegalArgumentException("invalid typed patch change");
             }
-            ensureCapacity();
-            int slot = findSlot(key);
-            BeforeAfter<V> existing = stamps[slot] == generation ? value(slot) : null;
-            if (existing == null) {
-                insert(slot, key, new BeforeAfter<>(before, after));
+            int index = indexOf(key);
+            if (index < 0) {
+                append(key, before, after);
                 if (!Objects.equals(before, after)) changedCount++;
                 return;
             }
-            if (!Objects.equals(before, existing.before) && !Objects.equals(before, existing.after)) {
+            V existingBefore = before(index);
+            V existingAfter = after(index);
+            if (!Objects.equals(before, existingBefore) && !Objects.equals(before, existingAfter)) {
                 throw new IllegalArgumentException("conflicting before-value for patch key " + key);
             }
-            boolean changedBefore = !Objects.equals(existing.before, existing.after);
-            existing.after = after;
-            boolean changedAfter = !Objects.equals(existing.before, existing.after);
+            boolean changedBefore = !Objects.equals(existingBefore, existingAfter);
+            afterValues[index] = after;
+            boolean changedAfter = !Objects.equals(existingBefore, after);
             if (changedBefore != changedAfter) changedCount += changedAfter ? 1 : -1;
         }
 
-        private <R> List<R> seal(BiFunction<K, BeforeAfter<V>, R> materializer) {
+        private <R> List<R> seal(ChangeFunction<K, V, R> materializer) {
             if (changedCount == 0) return List.of();
             ArrayList<R> result = new ArrayList<>(changedCount);
-            int[] ordered = new int[changedCount];
-            int index = 0;
-            for (int touchedIndex = 0; touchedIndex < size; touchedIndex++) {
-                int slot = touchedSlots[touchedIndex];
-                BeforeAfter<V> change = value(slot);
-                if (!Objects.equals(change.before, change.after)) ordered[index++] = slot;
-            }
-            sort(ordered, 0, ordered.length - 1);
-            for (int slot : ordered) {
-                result.add(materializer.apply(key(slot), value(slot)));
+            for (int index = 0; index < size; index++) {
+                V before = before(index);
+                V after = after(index);
+                if (!Objects.equals(before, after)) {
+                    result.add(materializer.apply(key(index), before, after));
+                }
             }
             return java.util.Collections.unmodifiableList(result);
         }
 
-        private <R> R single(java.util.function.Function<BeforeAfter<V>, R> materializer) {
+        private <R> R single(BiFunction<V, V, R> materializer) {
             if (changedCount == 0) return null;
             for (int index = 0; index < size; index++) {
-                BeforeAfter<V> change = value(touchedSlots[index]);
-                if (!Objects.equals(change.before, change.after)) return materializer.apply(change);
+                V before = before(index);
+                V after = after(index);
+                if (!Objects.equals(before, after)) return materializer.apply(before, after);
             }
             throw new IllegalStateException("changed patch entry is missing");
         }
 
-        private BeforeAfter<V> change(K key) {
-            if (key == null) return null;
-            int slot = findSlot(key);
-            return stamps[slot] == generation ? value(slot) : null;
+        private void append(K key, V before, V after) {
+            ensureCapacity();
+            keys[size] = key;
+            beforeValues[size] = before;
+            afterValues[size] = after;
+            size++;
+        }
+
+        private int indexOf(Object key) {
+            if (key == null) return -1;
+            for (int index = 0; index < size; index++) {
+                if (keys[index].equals(key)) return index;
+            }
+            return -1;
         }
 
         private void ensureCapacity() {
-            if ((size + 1) * 2 <= keys.length) return;
-            Object[] previousKeys = keys;
-            Object[] previousValues = values;
-            int[] previousTouched = touchedSlots;
-            int previousSize = size;
+            if (size < keys.length) return;
             int capacity = Math.multiplyExact(keys.length, 2);
-            keys = new Object[capacity];
-            values = new Object[capacity];
-            stamps = new int[capacity];
-            touchedSlots = new int[capacity];
-            size = 0;
-            for (int index = 0; index < previousSize; index++) {
-                int previousSlot = previousTouched[index];
-                @SuppressWarnings("unchecked") K key = (K) previousKeys[previousSlot];
-                insert(findSlot(key), key, previousValues[previousSlot]);
-            }
-        }
-
-        private int findSlot(Object key) {
-            int hash = key.hashCode();
-            hash ^= hash >>> 16;
-            int slot = hash & (keys.length - 1);
-            while (stamps[slot] == generation && !keys[slot].equals(key)) {
-                slot = slot + 1 & (keys.length - 1);
-            }
-            return slot;
-        }
-
-        private void insert(int slot, K key, Object value) {
-            stamps[slot] = generation;
-            keys[slot] = key;
-            values[slot] = value;
-            touchedSlots[size++] = slot;
-        }
-
-        private void sort(int[] slots, int low, int high) {
-            int left = low;
-            int right = high;
-            K pivot = key(slots[(low + high) >>> 1]);
-            while (left <= right) {
-                while (key(slots[left]).compareTo(pivot) < 0) left++;
-                while (key(slots[right]).compareTo(pivot) > 0) right--;
-                if (left <= right) {
-                    int swap = slots[left];
-                    slots[left++] = slots[right];
-                    slots[right--] = swap;
-                }
-            }
-            if (low < right) sort(slots, low, right);
-            if (left < high) sort(slots, left, high);
+            keys = java.util.Arrays.copyOf(keys, capacity);
+            beforeValues = java.util.Arrays.copyOf(beforeValues, capacity);
+            afterValues = java.util.Arrays.copyOf(afterValues, capacity);
         }
 
         @SuppressWarnings("unchecked")
-        private K key(int slot) {
-            return (K) keys[slot];
-        }
+        private K key(int index) { return (K) keys[index]; }
 
         @SuppressWarnings("unchecked")
-        private BeforeAfter<V> value(int slot) {
-            return (BeforeAfter<V>) values[slot];
-        }
-    }
+        private V before(int index) { return (V) beforeValues[index]; }
 
-    private static final class BeforeAfter<V> {
-        private final V before;
-        private V after;
-
-        private BeforeAfter(V before, V after) {
-            this.before = before;
-            this.after = after;
-        }
+        @SuppressWarnings("unchecked")
+        private V after(int index) { return (V) afterValues[index]; }
     }
     private record ReservationValue(ReservationRuntime value, boolean pending) {
         private ReservationValue {
@@ -1873,25 +2028,25 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
 
     private static List<Long> canonicalIds(List<Long> ids, String domain) {
         if (ids == null) throw new IllegalArgumentException("terminal ids are required");
-        ArrayList<Long> ordered = new ArrayList<>(ids);
-        ordered.sort(null);
-        Long previous = null;
-        for (Long id : ordered) {
+        for (int index = 0; index < ids.size(); index++) {
+            Long id = ids.get(index);
             if (id == null || id <= 0) throw new IllegalArgumentException("invalid terminal " + domain + " id");
-            if (id.equals(previous)) throw new IllegalArgumentException("duplicate terminal " + domain + " id");
-            previous = id;
-        }
-        return List.copyOf(ordered);
-    }
-
-    private static <T extends Comparable<? super T>> List<T> canonicalDistinct(List<T> values, String message) {
-        ArrayList<T> ordered = new ArrayList<>(values);
-        ordered.sort(Comparator.naturalOrder());
-        for (int index = 1; index < ordered.size(); index++) {
-            if (ordered.get(index - 1).compareTo(ordered.get(index)) == 0) {
-                throw new IllegalArgumentException(message);
+            for (int previous = 0; previous < index; previous++) {
+                if (id.equals(ids.get(previous))) {
+                    throw new IllegalArgumentException("duplicate terminal " + domain + " id");
+                }
             }
         }
-        return List.copyOf(ordered);
+        return List.copyOf(ids);
+    }
+
+    private static <T> List<T> canonicalDistinct(List<T> values, String message) {
+        for (int index = 0; index < values.size(); index++) {
+            T value = Objects.requireNonNull(values.get(index), message);
+            for (int previous = 0; previous < index; previous++) {
+                if (value.equals(values.get(previous))) throw new IllegalArgumentException(message);
+            }
+        }
+        return List.copyOf(values);
     }
 }

@@ -188,6 +188,7 @@ public final class CoreProbeState implements AutoCloseable {
     private final com.surprising.aeron.service.state.RuntimeCommitJournal runtimeProjectionJournal;
     private final Map<UUID, CoreExportState.PatchChain> factPatchChains = new HashMap<>();
     private RuntimeProjectionPoint currentProjectionPoint;
+    private final OwnerCommitPublisher ownerCommitPublisher = new OwnerCommitPublisher();
     private List<com.surprising.aeron.service.state.RuntimeCommitPatch> capturedCommitPatches;
     private CoreAdmissionReservation currentAdmission;
     private com.surprising.aeron.service.state.RuntimeCommitJournal.AdmissionReservation currentRetentionAdmission;
@@ -5295,36 +5296,47 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private void projectSnapshotNow(long committedLaneMask) {
-        new OwnerCommitTransaction(committedLaneMask).execute();
+        ownerCommitPublisher.execute(committedLaneMask);
     }
 
-    private final class OwnerCommitTransaction {
-        private final long committedLaneMask;
-        private final long sequence = Math.incrementExact(runtimeProjectionJournal.publishedSequence());
-        private final long previousSequence = Math.subtractExact(sequence, 1);
-        private final long previousBusinessStateHash = cachedBusinessStateHash;
-        private final long previousFundsStateHash = rollingFundsStateHash.value();
+    private final class OwnerCommitPublisher {
+        private long committedLaneMask;
+        private long sequence;
+        private long previousSequence;
+        private long previousBusinessStateHash;
+        private long previousFundsStateHash;
         private com.surprising.aeron.service.state.RuntimeCommitPatch.PreparedChanges preparedChanges;
-        private com.surprising.aeron.service.state.RollingBusinessStateHash.HashTransition businessTransition;
-        private com.surprising.aeron.service.state.RollingFundsStateHash.HashTransition fundsTransition;
         private com.surprising.aeron.service.state.RuntimeCommitPatch commit;
         private CoreAdmissionReservation.FactPermit factPermit;
         private CoreExportState.PatchChain nextFactPatchChain;
         private UUID factCommandId;
+        private boolean active;
 
-        private OwnerCommitTransaction(long committedLaneMask) {
+        private void execute(long committedLaneMask) {
+            if (active) throw new IllegalStateException("owner commit publisher is already active");
+            active = true;
             this.committedLaneMask = committedLaneMask;
-        }
-
-        private void execute() {
-            requireCanonicalSequence();
             try {
-                prepareAndPublish();
-            } catch (RuntimeException failure) {
-                failStop(failure);
-                throw failure;
+                sequence = Math.incrementExact(runtimeProjectionJournal.publishedSequence());
+                previousSequence = Math.subtractExact(sequence, 1);
+                previousBusinessStateHash = cachedBusinessStateHash;
+                previousFundsStateHash = rollingFundsStateHash.value();
+                requireCanonicalSequence();
+                try {
+                    prepareAndPublish();
+                } catch (RuntimeException failure) {
+                    failStop(failure);
+                    throw failure;
+                }
+                finish();
+            } finally {
+                preparedChanges = null;
+                commit = null;
+                factPermit = null;
+                nextFactPatchChain = null;
+                factCommandId = null;
+                active = false;
             }
-            finish();
         }
 
         private void requireCanonicalSequence() {
@@ -5368,10 +5380,9 @@ public final class CoreProbeState implements AutoCloseable {
                             baseMetadata.beforeBusinessStateHash(), baseMetadata.beforeFundsStateHash(),
                             baseMetadata.laneMask(), factMetadata, baseMetadata.externalAdjustment()),
                     preparedCommit.identities());
-            businessTransition = rollingBusinessStateHash.prepareApplied(preparedChanges);
-            fundsTransition = rollingFundsStateHash.prepareApplied(preparedChanges);
-            long nextBusinessStateHash = canonicalBusinessStateHash(businessTransition.afterHash());
-            long nextFundsStateHash = fundsTransition.afterHash();
+            long nextBusinessStateHash = canonicalBusinessStateHash(
+                    rollingBusinessStateHash.applyFailStop(preparedChanges));
+            long nextFundsStateHash = rollingFundsStateHash.applyFailStop(preparedChanges);
             commit = preparedCommit.seal(preparedChanges, nextBusinessStateHash, nextFundsStateHash);
             if (factPermit != null) {
                 factPermit.consume(commit);
@@ -5381,10 +5392,7 @@ public final class CoreProbeState implements AutoCloseable {
             }
             runtime.commitRuntimeTransition(commit, previousBusinessStateHash, nextBusinessStateHash);
             commitFaultInjector.inject("indexes");
-            businessTransition.commit();
-            commitFaultInjector.inject("business-hash");
-            fundsTransition.commit();
-            commitFaultInjector.inject("funds-hash");
+            commitFaultInjector.inject("hashes");
             if (currentAdmission != null) {
                 publishSealedCommit(commit, nextBusinessStateHash, nextFundsStateHash);
             } else {
@@ -5405,9 +5413,6 @@ public final class CoreProbeState implements AutoCloseable {
         private void finish() {
             seedChangeAccumulators();
             commit.acceptChangedUserIds(changedUserIds::add);
-            if (committedLaneMask != 0) {
-                runtimePlaceOrderState.commitLaneSequence(sequence, committedLaneMask);
-            }
             commandFundsDelta = commandFundsDelta.plus(commit.fundsDelta());
             currentProjectionPoint = commit.projectionPoint();
             if (factCommandId != null) factPatchChains.put(factCommandId, nextFactPatchChain);

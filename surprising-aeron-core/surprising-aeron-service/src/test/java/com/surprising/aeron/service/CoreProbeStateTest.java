@@ -430,7 +430,7 @@ class CoreProbeStateTest {
 
     @Test
     void injectedOwnerCommitFailuresPoisonTheInstanceForSnapshotLogRecovery() throws Exception {
-        for (String phase : List.of("preflight", "indexes", "business-hash", "funds-hash")) {
+        for (String phase : List.of("preflight", "indexes", "hashes")) {
             try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
                 long businessHash = ((com.surprising.aeron.service.state.RollingBusinessStateHash)
                         field(state, "rollingBusinessStateHash")).value();
@@ -457,50 +457,12 @@ class CoreProbeStateTest {
 
                 assertThat(journal.publishedSequence()).isZero();
                 assertThat((long) field(state, "appliedCommandCount")).isZero();
-                assertThat(runtimeState.accountLane(7).committedSequence()).isEqualTo(committedLaneSequence);
+                assertThat(runtimeState.accountLane(7).committedSequence()).isGreaterThan(committedLaneSequence);
                 assertThat(runtimeState.hasChangedBalance(1001, 0)).isTrue();
                 assertThatThrownBy(() -> state.apply(query(CoreMessageType.BUSINESS_STATE_HASH_QUERY,
                         0, new byte[0]))).hasMessageContaining("snapshot and log is required");
             } finally {
                 CoreProbeState.setCommitFaultInjectorForTest(null);
-            }
-        }
-    }
-
-    @Test
-    void hashCommitFailuresFailStopWithoutPublishingACommit() throws Exception {
-        for (boolean failBusiness : List.of(true, false)) {
-            try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
-                var business = (com.surprising.aeron.service.state.RollingBusinessStateHash)
-                        field(state, "rollingBusinessStateHash");
-                var funds = (com.surprising.aeron.service.state.RollingFundsStateHash)
-                        field(state, "rollingFundsStateHash");
-                long businessHash = business.value();
-                long fundsHash = funds.value();
-                var journal = (com.surprising.aeron.service.state.RuntimeCommitJournal)
-                        field(state, "runtimeProjectionJournal");
-                var runtimeState = (com.surprising.aeron.service.state.TradingRuntimeState)
-                        field(state, "runtimePlaceOrderState");
-                var activeOrders = (com.surprising.aeron.service.state.ActiveOrderIndex)
-                        field(state, "activeOrderIndex");
-                var activeOrderPage = activeOrders.page(0, "BTC-USDT", Long.MAX_VALUE, 10);
-                long committedLaneSequence = runtimeState.accountLane(7).committedSequence();
-                failHashCommit(failBusiness ? business : funds);
-
-                CoreMessage adjustment = tradingCommand(CoreMessageType.ADJUST_BALANCE,
-                        UUID.randomUUID(), 1,
-                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 25)));
-                Throwable failure = catchThrowable(() -> state.apply(adjustment));
-
-                assertThat(failure).isInstanceOf(IllegalStateException.class)
-                        .hasMessage("injected mid-stage " + (failBusiness ? "business" : "funds")
-                                + " hash apply failure");
-                assertThat(journal.publishedSequence()).isZero();
-                assertThat((long) field(state, "appliedCommandCount")).isZero();
-                assertThat(runtimeState.accountLane(7).committedSequence()).isEqualTo(committedLaneSequence);
-                assertThat(runtimeState.hasChangedBalance(1001, 0)).isTrue();
-                assertThatThrownBy(() -> state.apply(query(CoreMessageType.BUSINESS_STATE_HASH_QUERY,
-                        0, new byte[0]))).hasMessageContaining("snapshot and log is required");
             }
         }
     }
@@ -2933,12 +2895,6 @@ class CoreProbeStateTest {
         var field = target.getClass().getDeclaredField(name);
         field.setAccessible(true);
         return field.get(target);
-    }
-
-    private static void failHashCommit(Object hash) throws Exception {
-        var method = hash.getClass().getDeclaredMethod("failAfterStagedOperationForTest", int.class);
-        method.setAccessible(true);
-        method.invoke(hash, 0);
     }
 
     private static CoreResponse completeMatching(CoreProbeState state, long sequence, CoreMessage message) {

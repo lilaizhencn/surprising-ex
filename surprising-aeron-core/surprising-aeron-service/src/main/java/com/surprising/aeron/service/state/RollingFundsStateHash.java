@@ -27,14 +27,6 @@ public final class RollingFundsStateHash {
     private long cachedValue;
     private boolean valueDirty = true;
     private long ownerGeneration;
-    private int failAfterStagedOperation = -1;
-
-    void failAfterStagedOperationForTest(int operationIndex) {
-        if (operationIndex < 0) throw new IllegalArgumentException("operation index must not be negative");
-        failAfterStagedOperation = operationIndex;
-    }
-
-    int stagedOperationCountForTest(RuntimeCommitPatch patch) { return stagePatch(patch).size(); }
 
     static long[] aggregateForTest(long[] additions, long[] removals) {
         Aggregate aggregate = new Aggregate();
@@ -71,198 +63,27 @@ public final class RollingFundsStateHash {
     }
 
     public void update(RuntimeCommitPatch patch) {
-        FundsPatchStage staged = stagePatch(patch);
         long nextGeneration = Math.incrementExact(ownerGeneration);
-        staged.apply();
-        identities = staged.identities;
+        identities = applyPatch(patch);
         revision = patch.revision();
         lastCoreSequence = patch.coreSequence();
         valueDirty = true;
         ownerGeneration = nextGeneration;
     }
 
-    public HashTransition prepare(RuntimeCommitPatch.PreparedChanges changes) {
+    /** Applies the authoritative delta once; failures are handled by process fail-stop and replay. */
+    public long applyFailStop(RuntimeCommitPatch.PreparedChanges changes) {
         if (changes == null) throw new IllegalArgumentException("prepared changes are required");
-        FundsPatchStage staged = stagePatch(changes);
-        long beforeHash = value();
-        long beforeRevision = revision;
-        long beforeSequence = lastCoreSequence;
-        RuntimeCommitPatch.IdentityView beforeIdentities = identities;
-        long beforeCachedValue = cachedValue;
-        boolean beforeDirty = valueDirty;
-        long afterHash;
-        try {
-            afterHash = staged.preview(() -> {
-                identities = staged.identities;
-                revision = changes.afterRevision();
-                lastCoreSequence = changes.coreSequence();
-                valueDirty = true;
-                return value();
-            });
-        } finally {
-            identities = beforeIdentities;
-            revision = beforeRevision;
-            lastCoreSequence = beforeSequence;
-            cachedValue = beforeCachedValue;
-            valueDirty = beforeDirty;
-        }
-        return new HashTransition(this, staged, beforeHash, afterHash, beforeRevision, beforeSequence,
-                beforeIdentities, changes.afterRevision(), changes.coreSequence(), ownerGeneration, false);
+        identities = applyPatch(changes);
+        revision = changes.afterRevision();
+        lastCoreSequence = changes.coreSequence();
+        valueDirty = true;
+        ownerGeneration = Math.incrementExact(ownerGeneration);
+        return value();
     }
 
-    public HashTransition prepareApplied(RuntimeCommitPatch.PreparedChanges changes) {
-        if (changes == null) throw new IllegalArgumentException("prepared changes are required");
-        FundsPatchStage staged = stagePatch(changes);
-        long beforeHash = value();
-        long beforeRevision = revision;
-        long beforeSequence = lastCoreSequence;
-        RuntimeCommitPatch.IdentityView beforeIdentities = identities;
-        boolean applied = false;
-        try {
-            staged.apply();
-            applied = true;
-            identities = staged.identities;
-            revision = changes.afterRevision();
-            lastCoreSequence = changes.coreSequence();
-            valueDirty = true;
-            long afterHash = value();
-            return new HashTransition(this, staged, beforeHash, afterHash, beforeRevision, beforeSequence,
-                    beforeIdentities, changes.afterRevision(), changes.coreSequence(), ownerGeneration, true);
-        } catch (RuntimeException failure) {
-            if (applied) staged.rollbackApplied();
-            identities = beforeIdentities;
-            revision = beforeRevision;
-            lastCoreSequence = beforeSequence;
-            valueDirty = true;
-            throw failure;
-        }
-    }
-
-    public final class HashTransition {
-        private final RollingFundsStateHash owner;
-        private final FundsPatchStage staged;
-        private final long beforeHash;
-        private final long afterHash;
-        private final long beforeRevision;
-        private final long beforeSequence;
-        private final RuntimeCommitPatch.IdentityView beforeIdentities;
-        private final long afterRevision;
-        private final long afterSequence;
-        private final long preparedGeneration;
-        private long committedGeneration = -1;
-        private TransitionState state = TransitionState.PREPARED;
-
-        private HashTransition(RollingFundsStateHash owner, FundsPatchStage staged,
-                               long beforeHash, long afterHash,
-                               long beforeRevision, long beforeSequence,
-                               RuntimeCommitPatch.IdentityView beforeIdentities,
-                               long afterRevision, long afterSequence, long preparedGeneration) {
-            this(owner, staged, beforeHash, afterHash, beforeRevision, beforeSequence, beforeIdentities,
-                    afterRevision, afterSequence, preparedGeneration, false);
-        }
-
-        private HashTransition(RollingFundsStateHash owner, FundsPatchStage staged,
-                               long beforeHash, long afterHash,
-                               long beforeRevision, long beforeSequence,
-                               RuntimeCommitPatch.IdentityView beforeIdentities,
-                               long afterRevision, long afterSequence, long preparedGeneration,
-                               boolean applied) {
-            this.owner = owner;
-            this.staged = staged;
-            this.beforeHash = beforeHash;
-            this.afterHash = afterHash;
-            this.beforeRevision = beforeRevision;
-            this.beforeSequence = beforeSequence;
-            this.beforeIdentities = beforeIdentities;
-            this.afterRevision = afterRevision;
-            this.afterSequence = afterSequence;
-            this.preparedGeneration = preparedGeneration;
-            if (applied) state = TransitionState.APPLIED;
-        }
-
-        public long beforeHash() { return beforeHash; }
-        public long afterHash() { return afterHash; }
-        public void commit() {
-            commitOn(owner);
-        }
-        private void commitOn(RollingFundsStateHash target) {
-            if (state == TransitionState.APPLIED) {
-                if (owner != target || ownerGeneration != preparedGeneration
-                        || revision != afterRevision || lastCoreSequence != afterSequence
-                        || value() != afterHash) {
-                    throw new IllegalStateException("stale or foreign applied funds hash transition");
-                }
-                ownerGeneration = Math.incrementExact(ownerGeneration);
-                committedGeneration = ownerGeneration;
-                state = TransitionState.COMMITTED;
-                return;
-            }
-            requireState(TransitionState.PREPARED, "commit");
-            if (owner != target || ownerGeneration != preparedGeneration || revision != beforeRevision
-                    || lastCoreSequence != beforeSequence || value() != beforeHash) {
-                throw new IllegalStateException("stale or foreign funds hash transition");
-            }
-            long nextGeneration = Math.incrementExact(ownerGeneration);
-            staged.apply();
-            identities = staged.identities;
-            revision = afterRevision;
-            lastCoreSequence = afterSequence;
-            valueDirty = true;
-            if (value() != afterHash) {
-                staged.rollbackApplied();
-                identities = beforeIdentities;
-                revision = beforeRevision;
-                lastCoreSequence = beforeSequence;
-                valueDirty = true;
-                throw new IllegalStateException("funds hash transition after-value mismatch");
-            }
-            ownerGeneration = nextGeneration;
-            committedGeneration = ownerGeneration;
-            state = TransitionState.COMMITTED;
-        }
-        public void rollback() {
-            rollbackOn(owner);
-        }
-        private void rollbackOn(RollingFundsStateHash target) {
-            boolean applied = state == TransitionState.APPLIED;
-            if (!applied) requireState(TransitionState.COMMITTED, "rollback");
-            long expectedGeneration = applied ? preparedGeneration : committedGeneration;
-            if (owner != target || ownerGeneration != expectedGeneration || revision != afterRevision
-                    || lastCoreSequence != afterSequence || value() != afterHash) {
-                throw new IllegalStateException("stale or foreign committed funds hash transition");
-            }
-            long nextGeneration = Math.incrementExact(ownerGeneration);
-            staged.rollbackApplied();
-            identities = beforeIdentities;
-            revision = beforeRevision;
-            lastCoreSequence = beforeSequence;
-            valueDirty = true;
-            if (value() != beforeHash) throw new IllegalStateException("funds hash rollback mismatch");
-            ownerGeneration = nextGeneration;
-            state = TransitionState.ROLLED_BACK;
-        }
-        private void requireState(TransitionState expected, String operation) {
-            if (state != expected) {
-                throw new IllegalStateException("funds hash transition cannot " + operation + " from " + state);
-            }
-        }
-    }
-
-    void commitForTest(HashTransition transition) {
-        if (transition == null) throw new IllegalArgumentException("funds hash transition is required");
-        transition.commitOn(this);
-    }
-
-    void rollbackForTest(HashTransition transition) {
-        if (transition == null) throw new IllegalArgumentException("funds hash transition is required");
-        transition.rollbackOn(this);
-    }
-
-    private enum TransitionState { PREPARED, APPLIED, COMMITTED, ROLLED_BACK }
-
-    private FundsPatchStage stagePatch(RuntimeCommitView patch) {
+    private RuntimeCommitPatch.IdentityView applyPatch(RuntimeCommitView patch) {
         RuntimeCommitPatch.IdentityView patchIdentities = validateHeader(patch);
-        FundsPatchStage staged = new FundsPatchStage(patchIdentities);
         for (RuntimeCommitPatch.AccountLaneOwnerGroup group : patch.accountLaneGroups()) {
             for (RuntimeCommitPatch.UserChange change : group.users()) {
                 boolean exists = userHashes.containsKey(change.userId());
@@ -270,7 +91,7 @@ public final class RollingFundsStateHash {
                     throw new IllegalArgumentException("funds user before-value mismatch");
                 }
                 if (change.before() == null) {
-                    staged.addUser(change);
+                    applyUserChange(change);
                 }
             }
             for (RuntimeCommitPatch.BalanceChange change : group.balances()) {
@@ -282,11 +103,11 @@ public final class RollingFundsStateHash {
                     throw new IllegalArgumentException("funds balance before-value mismatch");
                 }
                 balanceContribution(asset, change.after());
-                staged.addBalance(change, asset);
+                applyBalanceChange(change, asset);
             }
             for (RuntimeCommitPatch.UserChange change : group.users()) {
                 if (change.before() == null || change.after() != null) continue;
-                staged.addUser(change);
+                applyUserChange(change);
             }
         }
         for (RuntimeCommitPatch.TreasuryAssetChange change : patch.globalOwnerGroup().treasuryAssets()) {
@@ -294,9 +115,9 @@ public final class RollingFundsStateHash {
             if (!Objects.equals(runtimeTreasury.get(change.assetId()), normalize(change.before()))) {
                 throw new IllegalArgumentException("funds treasury before-value mismatch");
             }
-            staged.addTreasury(change, asset);
+            applyTreasuryChange(change, asset);
         }
-        return staged;
+        return patchIdentities;
     }
 
     private RuntimeCommitPatch.IdentityView validateHeader(RuntimeCommitView patch) {
@@ -342,7 +163,7 @@ public final class RollingFundsStateHash {
         return cachedValue;
     }
 
-    private void applyBalanceChange(RuntimeCommitPatch.BalanceChange change, String asset, boolean reverse) {
+    private void applyBalanceChange(RuntimeCommitPatch.BalanceChange change, String asset) {
         long userId = change.key().userId();
         UserFundsHash user = userHashes.get(userId);
         long previousContribution = user == null ? 0 : entryHash(userId, user.value());
@@ -350,13 +171,13 @@ public final class RollingFundsStateHash {
             user = new UserFundsHash(userId);
             userHashes.put(userId, user);
         }
-        user.replace(change, asset, reverse);
+        user.replace(change, asset);
         replaceUserContribution(previousContribution, user);
     }
 
-    private void applyUserChange(RuntimeCommitPatch.UserChange change, boolean reverse) {
+    private void applyUserChange(RuntimeCommitPatch.UserChange change) {
         UserFundsHash user = userHashes.get(change.userId());
-        UserRuntime current = reverse ? change.before() : change.after();
+        UserRuntime current = change.after();
         if (current == null) {
             if (user != null) {
                 long contribution = entryHash(change.userId(), user.value());
@@ -370,10 +191,9 @@ public final class RollingFundsStateHash {
         }
     }
 
-    private void applyTreasuryChange(RuntimeCommitPatch.TreasuryAssetChange change, String asset,
-                                     boolean reverse) {
-        RuntimeCommitPatch.TreasuryAssetValue previous = reverse ? change.after() : change.before();
-        RuntimeCommitPatch.TreasuryAssetValue current = reverse ? change.before() : change.after();
+    private void applyTreasuryChange(RuntimeCommitPatch.TreasuryAssetChange change, String asset) {
+        RuntimeCommitPatch.TreasuryAssetValue previous = change.before();
+        RuntimeCommitPatch.TreasuryAssetValue current = change.after();
         update(fees, asset, fee(previous), fee(current));
         update(insurance, asset, insurance(previous), insurance(current));
         update(deficits, asset, deficit(previous), deficit(current));
@@ -501,111 +321,6 @@ public final class RollingFundsStateHash {
         return CoreStateHash.mix(hash, aggregate.xor);
     }
 
-    private final class FundsPatchStage {
-        private static final byte USER = 1;
-        private static final byte BALANCE = 2;
-        private static final byte TREASURY = 3;
-
-        private final RuntimeCommitPatch.IdentityView identities;
-        private byte[] operationTypes = new byte[8];
-        private Object[] changes = new Object[8];
-        private String[] assets = new String[8];
-        private int operationCount;
-        private int appliedCount;
-
-        private FundsPatchStage(RuntimeCommitPatch.IdentityView identities) { this.identities = identities; }
-
-        private void addUser(RuntimeCommitPatch.UserChange change) {
-            add(USER, change, null);
-        }
-
-        private void addBalance(RuntimeCommitPatch.BalanceChange change, String asset) {
-            add(BALANCE, change, asset);
-        }
-
-        private void addTreasury(RuntimeCommitPatch.TreasuryAssetChange change, String asset) {
-            add(TREASURY, change, asset);
-        }
-
-        private void add(byte type, Object change, String asset) {
-            ensureCapacity();
-            operationTypes[operationCount] = type;
-            changes[operationCount] = change;
-            assets[operationCount] = asset;
-            operationCount++;
-        }
-
-        private int size() { return operationCount; }
-
-        private long preview(java.util.function.LongSupplier value) {
-            int applied = 0;
-            try {
-                while (applied < operationCount) {
-                    apply(applied);
-                    applied++;
-                }
-                return value.getAsLong();
-            } finally {
-                while (applied > 0) rollback(--applied);
-                valueDirty = true;
-            }
-        }
-
-        private void apply() {
-            int applied = 0;
-            try {
-                for (int index = 0; index < operationCount; index++) {
-                    apply(index);
-                    applied++;
-                    if (index == failAfterStagedOperation) {
-                        failAfterStagedOperation = -1;
-                        throw new IllegalStateException("injected mid-stage funds hash apply failure");
-                    }
-                }
-                appliedCount = applied;
-            } catch (RuntimeException failure) {
-                while (applied > 0) rollback(--applied);
-                valueDirty = true;
-                throw failure;
-            }
-        }
-
-        private void rollbackApplied() {
-            while (appliedCount > 0) rollback(--appliedCount);
-            valueDirty = true;
-        }
-
-        private void apply(int index) {
-            switch (operationTypes[index]) {
-                case USER -> applyUserChange((RuntimeCommitPatch.UserChange) changes[index], false);
-                case BALANCE -> applyBalanceChange(
-                        (RuntimeCommitPatch.BalanceChange) changes[index], assets[index], false);
-                case TREASURY -> applyTreasuryChange(
-                        (RuntimeCommitPatch.TreasuryAssetChange) changes[index], assets[index], false);
-                default -> throw new IllegalStateException("unknown staged funds hash operation");
-            }
-        }
-
-        private void rollback(int index) {
-            switch (operationTypes[index]) {
-                case USER -> applyUserChange((RuntimeCommitPatch.UserChange) changes[index], true);
-                case BALANCE -> applyBalanceChange(
-                        (RuntimeCommitPatch.BalanceChange) changes[index], assets[index], true);
-                case TREASURY -> applyTreasuryChange(
-                        (RuntimeCommitPatch.TreasuryAssetChange) changes[index], assets[index], true);
-                default -> throw new IllegalStateException("unknown staged funds hash rollback operation");
-            }
-        }
-
-        private void ensureCapacity() {
-            if (operationCount < operationTypes.length) return;
-            int capacity = Math.multiplyExact(operationTypes.length, 2);
-            operationTypes = java.util.Arrays.copyOf(operationTypes, capacity);
-            changes = java.util.Arrays.copyOf(changes, capacity);
-            assets = java.util.Arrays.copyOf(assets, capacity);
-        }
-    }
-
     private static final class Aggregate {
         private long count;
         private long sum;
@@ -639,15 +354,14 @@ public final class RollingFundsStateHash {
             return hash;
         }
 
-        private void replace(RuntimeCommitPatch.BalanceChange change, String asset, boolean reverse) {
+        private void replace(RuntimeCommitPatch.BalanceChange change, String asset) {
             int assetId = change.key().assetId();
             if (balanceContributions.containsKey(assetId)) {
                 long previous = balanceContributions.get(assetId);
                 balanceContributions.removeKey(assetId);
                 balances.remove(previous);
             }
-            Long current = RollingFundsStateHash.balanceContribution(
-                    asset, reverse ? change.before() : change.after());
+            Long current = RollingFundsStateHash.balanceContribution(asset, change.after());
             if (current != null) {
                 balanceContributions.put(assetId, current);
                 balances.add(current);

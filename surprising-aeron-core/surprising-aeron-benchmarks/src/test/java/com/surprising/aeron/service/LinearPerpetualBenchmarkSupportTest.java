@@ -99,9 +99,8 @@ class LinearPerpetualBenchmarkSupportTest {
         var result = OwnerCommitPatchBenchmark.exerciseHashComparisonSmallScale(8);
 
         assertThat(result.operations()).isEqualTo(8);
-        assertThat(result.businessPrepares()).isEqualTo(result.operations());
-        assertThat(result.fundsPrepares()).isEqualTo(result.operations());
-        assertThat(result.transitionCommits()).isEqualTo(result.operations() * 2);
+        assertThat(result.businessApplies()).isEqualTo(result.operations());
+        assertThat(result.fundsApplies()).isEqualTo(result.operations());
         assertThat(result.canonicalComputes()).isEqualTo(result.operations() * 2);
         assertThat(result.projectedSequence()).isEqualTo(result.operations());
         assertThat(result.incrementalBusinessHash()).isEqualTo(result.canonicalBusinessHash());

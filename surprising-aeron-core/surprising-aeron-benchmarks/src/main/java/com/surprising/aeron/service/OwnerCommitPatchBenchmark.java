@@ -157,16 +157,12 @@ public class OwnerCommitPatchBenchmark {
                     long entry = latencies.awaitEntry(index);
                     latencies.accepted(index, entry, System.nanoTime());
                     PreparedDraft prepared = state.drafts.drafts.get(index);
-                    RollingBusinessStateHash.HashTransition business =
-                            state.incrementalBusinessHash.prepare(prepared.draft.changes);
-                    RollingFundsStateHash.HashTransition funds =
-                            state.incrementalFundsHash.prepare(prepared.draft.changes);
-                    if (business.afterHash() != prepared.afterBusinessStateHash
-                            || funds.afterHash() != prepared.afterFundsStateHash) {
-                        throw new IllegalStateException("incremental hash transition diverged from sealed patch");
+                    long business = state.incrementalBusinessHash.applyFailStop(prepared.draft.changes);
+                    long funds = state.incrementalFundsHash.applyFailStop(prepared.draft.changes);
+                    if (business != prepared.afterBusinessStateHash
+                            || funds != prepared.afterFundsStateHash) {
+                        throw new IllegalStateException("incremental hash apply diverged from sealed patch");
                     }
-                    business.commit();
-                    funds.commit();
                     checksum ^= state.incrementalBusinessHash.value() ^ state.incrementalFundsHash.value();
                     long terminal = System.nanoTime();
                     latencies.terminal(index, terminal);
@@ -752,20 +748,16 @@ public class OwnerCommitPatchBenchmark {
         RollingFundsStateHash funds = RollingFundsStateHash.create(initial, identities);
         RuntimeProjectionState projection = new RuntimeProjectionState(
                 initial, drafts.initialBusinessStateHash, drafts.initialFundsStateHash);
-        int businessPrepares = 0;
-        int fundsPrepares = 0;
-        int transitionCommits = 0;
+        int businessApplies = 0;
+        int fundsApplies = 0;
         int canonicalComputes = 0;
         boolean everyOperationEquivalent = true;
         for (int index = 0; index < operations; index++) {
             PreparedDraft prepared = drafts.drafts.get(index);
-            RollingBusinessStateHash.HashTransition businessTransition = business.prepare(prepared.draft.changes);
-            businessPrepares++;
-            RollingFundsStateHash.HashTransition fundsTransition = funds.prepare(prepared.draft.changes);
-            fundsPrepares++;
-            businessTransition.commit();
-            fundsTransition.commit();
-            transitionCommits += 2;
+            business.applyFailStop(prepared.draft.changes);
+            businessApplies++;
+            funds.applyFailStop(prepared.draft.changes);
+            fundsApplies++;
             RuntimeCommitPatch patch = batch.patches.get(index);
             projection.apply(patch);
             TradingCoreState projected = projection.freeze(patch.projectionSequence());
@@ -777,8 +769,8 @@ public class OwnerCommitPatchBenchmark {
                     && business.value() == patch.businessStateHash()
                     && funds.value() == patch.fundsStateHash();
         }
-        return new HashQualificationResult(operations, businessPrepares, fundsPrepares,
-                transitionCommits, canonicalComputes, projection.sequence(), business.value(), funds.value(),
+        return new HashQualificationResult(operations, businessApplies, fundsApplies,
+                canonicalComputes, projection.sequence(), business.value(), funds.value(),
                 batch.finalBusinessStateHash, batch.finalFundsStateHash, everyOperationEquivalent);
     }
 
@@ -795,8 +787,8 @@ public class OwnerCommitPatchBenchmark {
                                       boolean nonZeroFingerprints,
                                       String firstExpectedFingerprint, String firstActualFingerprint) { }
 
-    static record HashQualificationResult(int operations, int businessPrepares, int fundsPrepares,
-                                          int transitionCommits, int canonicalComputes,
+    static record HashQualificationResult(int operations, int businessApplies, int fundsApplies,
+                                          int canonicalComputes,
                                           long projectedSequence, long incrementalBusinessHash,
                                           long incrementalFundsHash, long canonicalBusinessHash,
                                           long canonicalFundsHash, boolean everyOperationEquivalent) { }
@@ -871,11 +863,9 @@ public class OwnerCommitPatchBenchmark {
         for (long sequence = 1; sequence <= size; sequence++) {
             Draft draft = draftWithHashes(
                     initial, identities, business, funds, sequence, userSeed, orderIdBase);
-            RollingBusinessStateHash.HashTransition businessTransition = business.prepare(draft.changes);
-            RollingFundsStateHash.HashTransition fundsTransition = funds.prepare(draft.changes);
-            drafts.add(new PreparedDraft(draft, businessTransition.afterHash(), fundsTransition.afterHash()));
-            businessTransition.commit();
-            fundsTransition.commit();
+            long businessAfter = business.applyFailStop(draft.changes);
+            long fundsAfter = funds.applyFailStop(draft.changes);
+            drafts.add(new PreparedDraft(draft, businessAfter, fundsAfter));
             userSeed += 64;
         }
         return new DraftBatch(List.copyOf(drafts), initialBusiness, initialFunds,
@@ -883,12 +873,9 @@ public class OwnerCommitPatchBenchmark {
     }
 
     private static RuntimeCommitPatch seal(Draft draft) {
-        RollingBusinessStateHash.HashTransition business = draft.businessHash.prepare(draft.changes);
-        RollingFundsStateHash.HashTransition funds = draft.fundsHash.prepare(draft.changes);
-        RuntimeCommitPatch patch = draft.builder.seal(draft.changes, business.afterHash(), funds.afterHash());
-        business.commit();
-        funds.commit();
-        return patch;
+        long business = draft.businessHash.applyFailStop(draft.changes);
+        long funds = draft.fundsHash.applyFailStop(draft.changes);
+        return draft.builder.seal(draft.changes, business, funds);
     }
 
     private static Batch batch(int size) {

@@ -599,7 +599,6 @@ class TradingRuntimeStateTest {
         try {
             var apply = state.stageLaneMutation(1, java.util.List.of(7L), 3, 5);
             assertThat(apply).isEqualTo(1L << LaneTopology.characterization().accountLaneId(7));
-            state.commitLaneSequence(1, apply);
             state.readFence(7, 1);
 
             AccountLaneView lane = state.accountLane(7);
@@ -622,8 +621,7 @@ class TradingRuntimeStateTest {
         state.putUser(new UserRuntime(userInLastLane));
         state.startAccountLanes();
         try {
-            var apply = state.stageLaneMutation(1, java.util.List.of(userInLastLane), 3, 5);
-            state.commitLaneSequence(1, apply);
+            state.stageLaneMutation(1, java.util.List.of(userInLastLane), 3, 5);
             state.readFenceAll(1);
             assertThat(state.accountLaneById(0).committedSequence()).isEqualTo(1);
         } finally {
@@ -632,7 +630,7 @@ class TradingRuntimeStateTest {
     }
 
     @Test
-    void appliedLanesRemainBehindFenceUntilExplicitVisibilityCommit() {
+    void laneApplyPublishesCommittedWatermarkInTheSameOwnerTask() {
         LaneTopology topology = LaneTopology.productionDefault();
         TradingRuntimeState state = new TradingRuntimeState(topology);
         long laneZeroUser = userForLane(topology, 0);
@@ -641,19 +639,13 @@ class TradingRuntimeStateTest {
         state.putUser(new UserRuntime(laneOneUser));
         state.startAccountLanes();
         try {
-            var apply = state.stageLaneMutation(
-                    1, java.util.List.of(laneZeroUser, laneOneUser), 3, 5);
+            state.stageLaneMutation(1, java.util.List.of(laneZeroUser, laneOneUser), 3, 5);
 
             assertThat(state.accountLaneById(0).appliedSequence()).isEqualTo(1);
             assertThat(state.accountLaneById(1).appliedSequence()).isEqualTo(1);
-            assertThat(state.accountLaneById(0).committedSequence()).isZero();
-            assertThat(state.accountLaneById(1).committedSequence()).isZero();
-            assertThatThrownBy(() -> state.readFence(laneZeroUser, 1))
-                    .isInstanceOf(IllegalStateException.class);
-
-            state.commitLaneSequence(1, apply);
             assertThat(state.accountLaneById(0).committedSequence()).isEqualTo(1);
             assertThat(state.accountLaneById(1).committedSequence()).isEqualTo(1);
+            state.readFence(laneZeroUser, 1);
         } finally {
             state.close();
         }
@@ -673,7 +665,6 @@ class TradingRuntimeStateTest {
         long committedLaneMask = state.stageLaneMutation(1, users, 3, 5);
 
         assertThat(committedLaneMask).isEqualTo(0b1111);
-        state.commitLaneSequence(1, committedLaneMask);
         for (int laneId = 0; laneId < topology.accountLaneCount(); laneId++) {
             assertThat(state.accountLaneById(laneId).appliedSequence()).isEqualTo(1);
             assertThat(state.accountLaneById(laneId).committedSequence()).isEqualTo(1);
@@ -742,13 +733,9 @@ class TradingRuntimeStateTest {
         state.putUser(new UserRuntime(laneOneUser));
         state.startAccountLanes();
         try {
-            var laneZeroApply = state.stageLaneMutation(
-                    2, java.util.List.of(laneZeroUser), 3, 5);
-            state.commitLaneSequence(2, laneZeroApply);
+            state.stageLaneMutation(2, java.util.List.of(laneZeroUser), 3, 5);
             state.clearChangedKeys();
-            var laneOneApply = state.stageLaneMutation(
-                    1, java.util.List.of(laneOneUser), 3, 5);
-            state.commitLaneSequence(1, laneOneApply);
+            state.stageLaneMutation(1, java.util.List.of(laneOneUser), 3, 5);
             state.clearChangedKeys();
             AccountLaneView[] beforeFailure = state.accountLanes();
             long revisionBeforeFailure = state.revision();
@@ -779,25 +766,19 @@ class TradingRuntimeStateTest {
     }
 
     @Test
-    void accountLaneConsumesConsecutiveSequencesBeforeCommitWatermarkAdvances() {
+    void accountLanePublishesEachConsecutiveSequenceWithoutASecondCommitTask() {
         LaneTopology topology = LaneTopology.productionDefault();
         TradingRuntimeState state = new TradingRuntimeState(topology);
         long userId = userForLane(topology, 0);
         state.putUser(new UserRuntime(userId));
         state.startAccountLanes();
         try {
-            long firstMask = state.stageLaneMutation(1, java.util.List.of(userId), 3, 5);
-            long secondMask = state.stageLaneMutation(2, java.util.List.of(userId), 7, 11);
+            state.stageLaneMutation(1, java.util.List.of(userId), 3, 5);
+            state.stageLaneMutation(2, java.util.List.of(userId), 7, 11);
 
             AccountLaneView applied = state.accountLaneById(0);
             assertThat(applied.appliedSequence()).isEqualTo(2);
-            assertThat(applied.committedSequence()).isZero();
-
-            state.commitLaneSequence(1, firstMask);
-            state.commitLaneSequence(2, secondMask);
-            AccountLaneView committed = state.accountLaneById(0);
-            assertThat(committed.appliedSequence()).isEqualTo(2);
-            assertThat(committed.committedSequence()).isEqualTo(2);
+            assertThat(applied.committedSequence()).isEqualTo(2);
         } finally {
             state.close();
         }
@@ -812,8 +793,7 @@ class TradingRuntimeStateTest {
         java.util.List<AccountLaneSnapshot> snapshots = state.accountLaneSnapshots(1, global);
         long laneZeroUser = userForLane(topology, 0);
         state.putUser(new UserRuntime(laneZeroUser));
-        var apply = state.stageLaneMutation(2, java.util.List.of(laneZeroUser), 3, 5);
-        state.commitLaneSequence(2, apply);
+        state.stageLaneMutation(2, java.util.List.of(laneZeroUser), 3, 5);
         AccountLaneView beforeRestore = state.accountLaneById(0);
 
         java.util.List<AccountLaneSnapshot> invalid = new java.util.ArrayList<>(snapshots);

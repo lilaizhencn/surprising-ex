@@ -28,7 +28,7 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 当前实现状态：P0-P5 与 P10-A 至 P10-F 的主体迁移已完成。撮合输出构造成一条不可变
 `MatcherSettlementEvent`，按确定性的 Lane mask 直接写入各 Account Lane 的有界 SPSC ring；每个 Lane 线程永久拥有并
 串行修改本 Lane 的账户、余额、订单、冻结和持仓。Coordinator 只读取 completion bitmap、按 Core sequence 发布
-Core Fact 并推进 committed watermark，不做逐 Lane `release/bind/await`。Lane 允许连续消费多个 applied sequence；
+Core Fact，不做逐 Lane `release/bind/await`。Lane 在同一个 owner task 内依次推进 applied/committed watermark，允许连续消费多个 sequence；
 同一事件在 Lane 内直接完成本命令的 pending reservation，并把余额 primitive before/after 与最新局部 hash 一并发布；
 owner 的 prepare/seal 和 lane revision hash 只消费这些已完成结果，不再逐余额、逐 reservation 或逐 Lane 发同步查询。
 查询和 snapshot 只越过 committed watermark。观察到撮合事实后的任何 Lane、资金、hash、index 或发布不变量错误均
