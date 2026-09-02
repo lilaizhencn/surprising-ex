@@ -73,6 +73,10 @@ final class SettlementLaneWorker implements AutoCloseable {
         return failure;
     }
 
+    void assertHealthy() {
+        rethrowFailure();
+    }
+
     private void run() {
         long next = consumerSequence;
         try {

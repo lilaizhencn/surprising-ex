@@ -5489,11 +5489,8 @@ public final class CoreProbeState implements AutoCloseable {
         var admissionIdentity =
                 com.surprising.aeron.service.state.RuntimeOrderAdmission.admissionIdentity(
                         runtimePlaceOrderState, runtimePlaceOrderIdentities, userId, resolved);
-        long requiredReservation =
-                com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservationPrepared(
-                        runtimePlaceOrderState, userId, resolved, openInterestSteps,
-                        admissionOrderIndex, admissionIdentity);
-        reservePlaceOrderRuntime(userId, resolved, commandId, pendingCoreSequence, requiredReservation, batch);
+        reservePlaceOrderRuntime(userId, resolved, commandId, pendingCoreSequence,
+                openInterestSteps, admissionOrderIndex, admissionIdentity, batch);
     }
 
     private void reservePlaceOrderRuntime(ResolvedMatchingAdmission admission, UUID commandId,
@@ -5510,6 +5507,26 @@ public final class CoreProbeState implements AutoCloseable {
     private void reservePlaceOrderRuntime(long userId, ResolvedPlaceOrder resolved, UUID commandId,
                                           long pendingCoreSequence, long requiredReservation,
                                           OrderBatchPending batch) {
+        reservePlaceOrderRuntime(userId, resolved, commandId, pendingCoreSequence,
+                0, null, null, requiredReservation, batch);
+    }
+
+    private void reservePlaceOrderRuntime(
+            long userId, ResolvedPlaceOrder resolved, UUID commandId, long pendingCoreSequence,
+            long openInterestSteps,
+            com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionOrderIndex admissionOrderIndex,
+            com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionIdentity admissionIdentity,
+            OrderBatchPending batch) {
+        reservePlaceOrderRuntime(userId, resolved, commandId, pendingCoreSequence,
+                openInterestSteps, admissionOrderIndex, admissionIdentity, 0, batch);
+    }
+
+    private void reservePlaceOrderRuntime(
+            long userId, ResolvedPlaceOrder resolved, UUID commandId, long pendingCoreSequence,
+            long openInterestSteps,
+            com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionOrderIndex admissionOrderIndex,
+            com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionIdentity admissionIdentity,
+            long preparedRequiredReservation, OrderBatchPending batch) {
         var preparedClientKey = runtimePlaceOrderIdentities.prepareClientKey(
                 userId, resolved.clientOrderId());
         Integer symbolId = runtimePlaceOrderIdentities.findSymbolId(resolved.symbol());
@@ -5523,6 +5540,11 @@ public final class CoreProbeState implements AutoCloseable {
         int assetId = runtimePlaceOrderIdentities.assetId(resolved.reservationAsset());
         try {
             runtimePlaceOrderState.executeUserSettlement(userId, () -> {
+                long requiredReservation = admissionIdentity == null
+                        ? preparedRequiredReservation
+                        : com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservationPrepared(
+                                runtimePlaceOrderState, userId, resolved, openInterestSteps,
+                                admissionOrderIndex, admissionIdentity);
                 RuntimeCommandProcessor.placeOrderPrepared(runtimePlaceOrderState, userId, resolved,
                         commandId, requiredReservation, preparedClientKey.key(), symbolId, assetId);
                 runtimePlaceOrderState.markPendingReservation(userId, resolved.orderId(), pendingCoreSequence);

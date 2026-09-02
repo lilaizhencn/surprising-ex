@@ -312,7 +312,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             task = new LaneMutationTask(laneId);
             laneMutationTasks[laneId] = task;
         }
-        task.prepare(ignored -> operation.apply(accountLanes[laneId]));
+        task.prepare(operation);
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
                 accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
         long ticket = laneWorkers[laneId].submit(task);
@@ -447,19 +447,9 @@ public final class TradingRuntimeState implements AutoCloseable {
                 laneMutationTasks[laneId] = task;
             }
             SettlementLaneWorker worker = laneWorkers[laneId];
-            task.prepare(operation);
-            try {
-                worker.submit(task);
-                submittedLaneMask |= 1L << laneId;
-            } catch (RuntimeException failure) {
-                task.failSubmission(failure);
-                try {
-                    completeLaneMutations(submittedLaneMask, results, startedNanos);
-                } catch (RuntimeException submittedFailure) {
-                    failure.addSuppressed(submittedFailure);
-                }
-                throw failure;
-            }
+            task.prepareIndexed(operation);
+            worker.submit(task);
+            submittedLaneMask |= 1L << laneId;
         }
         completeLaneMutations(submittedLaneMask, results, startedNanos);
         return results;
@@ -471,6 +461,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             if ((laneMask & 1L << laneId) == 0) continue;
             try {
                 results[laneId] = laneMutationTasks[laneId].await();
+                laneWorkers[laneId].assertHealthy();
                 recordLaneOperation(laneId, AccountLaneOperationType.SETTLEMENT,
                         System.nanoTime() - startedNanos[laneId]);
             } catch (RuntimeException laneFailure) {
@@ -615,43 +606,86 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
 
         private static final class ChangeBuffer<V> {
-            private final LongObjectHashMap<V> values = new LongObjectHashMap<>();
-            private final LongHashSet removed = new LongHashSet();
             private long[] keys = new long[8];
+            private Object[] values = new Object[8];
+            private long[] indexKeys = new long[16];
+            private int[] indexSlots = new int[16];
+            private int[] indexGenerations = new int[16];
+            private int indexGeneration = 1;
             private int size;
 
             private void put(long key, V value) {
-                if (!values.containsKey(key) && !removed.contains(key)) {
-                    if (size == keys.length) {
-                        keys = java.util.Arrays.copyOf(keys, Math.multiplyExact(size, 2));
-                    }
-                    keys[size++] = key;
+                int slot = indexOf(key);
+                if (slot >= 0) {
+                    values[slot] = value;
+                    return;
                 }
-                if (value == null) {
-                    values.removeKey(key);
-                    removed.add(key);
-                } else {
-                    removed.remove(key);
-                    values.put(key, value);
+                ensureIndexCapacity(size + 1);
+                if (size == keys.length) {
+                    int capacity = Math.multiplyExact(size, 2);
+                    keys = java.util.Arrays.copyOf(keys, capacity);
+                    values = java.util.Arrays.copyOf(values, capacity);
                 }
+                int indexPosition = emptyIndexPosition(key);
+                keys[size] = key;
+                values[size] = value;
+                indexKeys[indexPosition] = key;
+                indexSlots[indexPosition] = size;
+                indexGenerations[indexPosition] = indexGeneration;
+                size++;
             }
 
             private void drain(LongObjectHashMap<V> target, LongLongHashMap targetLanes, int laneId) {
                 for (int index = 0; index < size; index++) {
                     long key = keys[index];
-                    if (removed.remove(key)) {
+                    @SuppressWarnings("unchecked") V value = (V) values[index];
+                    values[index] = null;
+                    if (value == null) {
                         target.removeKey(key);
                         if (targetLanes != null) targetLanes.removeKey(key);
                     } else {
-                        V value = values.removeKey(key);
-                        if (value == null) throw new IllegalStateException("published lane change is missing");
                         target.put(key, value);
                         if (targetLanes != null) targetLanes.put(key, laneId + 1L);
                     }
                 }
                 size = 0;
-                if (!values.isEmpty() || !removed.isEmpty()) {
-                    throw new IllegalStateException("published lane changes contain an untracked key");
+                if (++indexGeneration == 0) {
+                    java.util.Arrays.fill(indexGenerations, 0);
+                    indexGeneration = 1;
+                }
+            }
+
+            private int indexOf(long key) {
+                int mask = indexSlots.length - 1;
+                int position = LaneLongCaptures.longHash(key) & mask;
+                while (indexGenerations[position] == indexGeneration) {
+                    if (indexKeys[position] == key) return indexSlots[position];
+                    position = (position + 1) & mask;
+                }
+                return -1;
+            }
+
+            private int emptyIndexPosition(long key) {
+                int mask = indexSlots.length - 1;
+                int position = LaneLongCaptures.longHash(key) & mask;
+                while (indexGenerations[position] == indexGeneration) {
+                    position = (position + 1) & mask;
+                }
+                return position;
+            }
+
+            private void ensureIndexCapacity(int requiredSize) {
+                if (requiredSize <= indexSlots.length / 2) return;
+                int capacity = Math.multiplyExact(indexSlots.length, 2);
+                indexKeys = new long[capacity];
+                indexSlots = new int[capacity];
+                indexGenerations = new int[capacity];
+                indexGeneration = 1;
+                for (int index = 0; index < size; index++) {
+                    int position = emptyIndexPosition(keys[index]);
+                    indexKeys[position] = keys[index];
+                    indexSlots[position] = index;
+                    indexGenerations[position] = indexGeneration;
                 }
             }
         }
@@ -667,8 +701,9 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     private final class LaneMutationTask implements SettlementLaneWorker.Command {
         private final int laneId;
-        private final LaneOperation<Object> scopedOperation;
-        private java.util.function.IntFunction<Object> operation;
+        private final LaneOperation<Object> indexedScopedOperation;
+        private LaneOperation<Object> operation;
+        private java.util.function.IntFunction<Object> indexedOperation;
         private Object result;
         private Throwable failure;
         private volatile boolean completed = true;
@@ -676,12 +711,23 @@ public final class TradingRuntimeState implements AutoCloseable {
 
         private LaneMutationTask(int laneId) {
             this.laneId = laneId;
-            scopedOperation = ignored -> operation.apply(this.laneId);
+            indexedScopedOperation = ignored -> indexedOperation.apply(this.laneId);
         }
 
-        private void prepare(java.util.function.IntFunction<Object> operation) {
+        @SuppressWarnings("unchecked")
+        private void prepare(LaneOperation<?> operation) {
             if (!completed) throw new IllegalStateException("account lane task is still active");
-            this.operation = operation;
+            this.operation = (LaneOperation<Object>) operation;
+            indexedOperation = null;
+            result = null;
+            failure = null;
+            completed = false;
+        }
+
+        private void prepareIndexed(java.util.function.IntFunction<Object> operation) {
+            if (!completed) throw new IllegalStateException("account lane task is still active");
+            this.operation = null;
+            indexedOperation = operation;
             result = null;
             failure = null;
             completed = false;
@@ -690,7 +736,9 @@ public final class TradingRuntimeState implements AutoCloseable {
         @Override
         public void execute(AccountLaneState lane) {
             try {
-                result = inLaneCommandScope(lane, scopedOperation);
+                result = operation == null
+                        ? inLaneCommandScope(lane, indexedScopedOperation)
+                        : inLaneCommandScope(lane, operation);
             } catch (Throwable taskFailure) {
                 failure = taskFailure;
             } finally {
@@ -718,11 +766,6 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (failure instanceof Error error) throw error;
             if (failure != null) throw new IllegalStateException("account lane mutation failed", failure);
             return result;
-        }
-
-        private void failSubmission(Throwable submissionFailure) {
-            failure = submissionFailure;
-            completed = true;
         }
     }
 
