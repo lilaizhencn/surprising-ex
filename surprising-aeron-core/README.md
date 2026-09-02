@@ -148,6 +148,7 @@ P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣
 - `saturatedMatchingWorkload` 使用共享有界窗口的持续滑动 feeder：同一方向内每完成一组 maker/taker 依赖就立即补入
   下一币对，不再整窗排空后重新提交；一个方向全部完成后才反向，防止预置深度场景产生方向穿越。
   每个 symbol 同一时刻最多一组订单在途，保持账户依赖和 Core sequence 提交顺序；
+  每组 maker/taker 固定路由到不同 Account Lane，确保基准真实覆盖并行 settlement/barrier，而不是同 Lane 快路径；
   每个提交批次只等待首个连续完成，随后非阻塞提交该批其余已完成结果并立即 refill，避免 owner 空转与 matcher 争抢 CPU；
   JMH/JFR 同时记录 window/full-window、refill 和 producer-starvation，资格脚本要求测量期存在持续补料且 starvation 为零。
 - JFR 热点判断只统计自定义 workload measurement 事件窗口，排除 JMH trial 初始化和 snapshot template。交易窗口内
@@ -156,7 +157,11 @@ P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣
 - matcher 结果使用 typed outcome 区分成交、挂单、拒绝和撤单，并用 primitive UUID 两段值保存 command identity；已知的
   前置撤单 prefix 可以确定性恢复，未知 prefix 或语义分歧仍 fail closed。replace/amend 在进入 matcher 前只执行一次
   identity、reservation 和 admission 解析，完成阶段复用 `ResolvedMatchingAdmission`，不再次做同义业务校验。
-- Lane 提交由 owner 按固定 Lane 顺序执行；不存在 parallel-settlement、parallel-lifecycle 或 settlement-wait-strategy 参数。
+- 单用户命令仍由 owner 在目标 Account Lane 内联执行；一次成交或生命周期命令涉及两个及以上 Lane 时，owner 将每个
+  Lane 的 mutation 发布到固定容量 SPSC worker，各 worker 只修改自己拥有的账户状态。统一 barrier 收齐全部结果后，
+  owner 按 Lane 顺序重绑定、合并 Treasury delta、发布 typed patch 并提交 Core Fact；任一 Lane 失败则整条命令按 checkpoint
+  回滚，不存在部分成交提交。`surprising.aeron.settlement-wait-strategy` 可选 `BLOCKING`（默认）、`YIELDING` 或
+  `BUSY_SPIN`，正式对照必须保持同一策略并单独报告 busy-spin CPU。
 - pending matcher 以 sequence、commandId 和 user 三个有界索引做常数时间定位；Core Fact owner→materializer
   使用有界 SPSC ring，ACK 早于 materialization 时由 slot 状态机回收，不创建逐 Fact Future/Task。
 - Cluster response 直接写入 session egress scratch，并以调用时的 committed Core sequence 编码；内部不再构造

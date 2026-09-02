@@ -55,6 +55,25 @@ class MatcherCommandPipelineTest {
         }
     }
 
+    @Test
+    void wakesAfterRepeatedIdleAndBurstCyclesWithoutLosingACompletion() {
+        try (MatcherCommandPipeline pipeline = new MatcherCommandPipeline(8)) {
+            for (long cycle = 1; cycle <= 100; cycle++) {
+                long first = cycle * 2 - 1;
+                long second = cycle * 2;
+                pipeline.submit(first, () -> new CoreMatchingResult(true, "FIRST"));
+                pipeline.submit(second, () -> new CoreMatchingResult(true, "SECOND"));
+
+                assertThat(pipeline.await(first, TimeUnit.SECONDS.toNanos(5)).resultCode())
+                        .isEqualTo("FIRST");
+                assertThat(pipeline.await(second, TimeUnit.SECONDS.toNanos(5)).resultCode())
+                        .isEqualTo("SECOND");
+                assertThat(pipeline.inFlight()).isZero();
+                java.util.concurrent.locks.LockSupport.parkNanos(TimeUnit.MICROSECONDS.toNanos(200));
+            }
+        }
+    }
+
     private static void await(CountDownLatch latch) {
         try {
             if (!latch.await(5, TimeUnit.SECONDS)) {

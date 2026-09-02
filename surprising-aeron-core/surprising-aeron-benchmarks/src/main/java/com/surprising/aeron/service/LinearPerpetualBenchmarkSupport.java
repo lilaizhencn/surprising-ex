@@ -95,6 +95,10 @@ final class LinearPerpetualBenchmarkSupport {
             return 0;
         }
 
+        default long terminalTrades() {
+            return 0;
+        }
+
         default int incompleteRiskScans() {
             return 0;
         }
@@ -370,7 +374,35 @@ final class LinearPerpetualBenchmarkSupport {
                         CoreTimeInForce.GTC)));
         CoreMessage command = harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, taker,
                 order(harness.nextOrderId(), CoreOrderSide.BUY, ENTRY_PRICE, takerQuantity, CoreTimeInForce.IOC));
-        return commandScenario(harness, command);
+        return new Scenario() {
+            @Override
+            public long run() {
+                return harness.execute(command).stateHash();
+            }
+
+            @Override
+            public void verify() {
+                CoreLaneMetrics metrics = harness.state().laneMetrics();
+                int parallelLanes = 0;
+                for (int highWaterMark : metrics.accountLaneQueueHighWaterMarks()) {
+                    if (highWaterMark > 0) parallelLanes++;
+                }
+                if (parallelLanes < 2) {
+                    throw new IllegalStateException("cross-lane fill did not exercise parallel settlement");
+                }
+                for (int depth : metrics.accountLaneQueueDepths()) {
+                    if (depth != 0) throw new IllegalStateException("Account Lane queue did not drain");
+                }
+                for (long rejected : metrics.accountLaneRejectedSubmissions()) {
+                    if (rejected != 0) throw new IllegalStateException("Account Lane rejected settlement work");
+                }
+            }
+
+            @Override
+            public void close() {
+                harness.close();
+            }
+        };
     }
 
     private static Scenario commandScenario(Harness harness, CoreMessage command) {
@@ -895,6 +927,10 @@ final class LinearPerpetualBenchmarkSupport {
 
         int matchingCompletionCapacity() {
             return state.matchingCompletionCapacity();
+        }
+
+        long terminalTradeCount() {
+            return state.terminalTradeCount();
         }
 
         @Override

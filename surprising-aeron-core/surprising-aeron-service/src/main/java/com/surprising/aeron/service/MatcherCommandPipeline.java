@@ -94,7 +94,7 @@ final class MatcherCommandPipeline implements AutoCloseable {
         submittedPosition = position + 1;
         int depth = Math.toIntExact(submittedPosition - consumedPosition);
         submissionHighWaterMark = Math.max(submissionHighWaterMark, depth);
-        LockSupport.unpark(worker);
+        if (position == workerPosition) LockSupport.unpark(worker);
     }
 
     CoreMatchingResult poll(long expectedCoreSequence) {

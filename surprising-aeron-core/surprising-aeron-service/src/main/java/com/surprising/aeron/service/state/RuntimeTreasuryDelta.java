@@ -128,12 +128,12 @@ public final class RuntimeTreasuryDelta {
     }
 
     public void clear() {
-        java.util.Arrays.fill(feeUnits, 0);
-        java.util.Arrays.fill(insuranceUnits, 0);
-        java.util.Arrays.fill(deficitUnits, 0);
-        java.util.Arrays.fill(fundingResidualUnits, 0);
-        java.util.Arrays.fill(roundingResidualUnits, 0);
-        java.util.Arrays.fill(clearingUnits, 0);
+        java.util.Arrays.fill(feeUnits, 0, size, 0);
+        java.util.Arrays.fill(insuranceUnits, 0, size, 0);
+        java.util.Arrays.fill(deficitUnits, 0, size, 0);
+        java.util.Arrays.fill(fundingResidualUnits, 0, size, 0);
+        java.util.Arrays.fill(roundingResidualUnits, 0, size, 0);
+        java.util.Arrays.fill(clearingUnits, 0, size, 0);
         size = 0;
     }
 

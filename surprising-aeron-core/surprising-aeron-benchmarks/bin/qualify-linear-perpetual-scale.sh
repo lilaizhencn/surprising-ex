@@ -69,6 +69,7 @@ JVM_ARGS=(
   "--add-exports=java.base/jdk.internal.ref=ALL-UNNAMED"
   "-Dsurprising.aeron.account-lanes=4"
   "-Dsurprising.aeron.matching-engines=${MATCHING_ENGINES}"
+  "-Dsurprising.aeron.settlement-wait-strategy=BLOCKING"
   "-Dsurprising.aeron.commit-journal-capacity=65536"
   "-Dsurprising.aeron.commit-journal-capacity-bytes=1073741824"
   "-Dsurprising.aeron.export-pending-bytes=268435456"
@@ -233,7 +234,10 @@ validate_jmh() {
       .secondaryMetrics.terminalBusinessOperations.score and
     .secondaryMetrics.acceptedCoreMessages.score == .secondaryMetrics.terminalCoreMessages.score and
     .secondaryMetrics.unfinishedBusinessOperations.score == 0 and
-    .secondaryMetrics.unfinishedCoreMessages.score == 0)' "${result}" > /dev/null
+    .secondaryMetrics.unfinishedCoreMessages.score == 0 and
+    .secondaryMetrics.rejectedBusinessOperations.score == 0 and
+    .secondaryMetrics.errorBusinessOperations.score == 0 and
+    .secondaryMetrics.timedOutBusinessOperations.score == 0)' "${result}" > /dev/null
 }
 
 validate_saturation_jmh() {
@@ -246,7 +250,8 @@ validate_saturation_jmh() {
     .secondaryMetrics.matchingWindowSamples.score > 0 and
     .secondaryMetrics.matchingFullWindowSamples.score > 0 and
     .secondaryMetrics.matchingRefillOperations.score > 0 and
-    .secondaryMetrics.matchingProducerStarvationSamples.score == 0)' "${result}" > /dev/null
+    .secondaryMetrics.matchingProducerStarvationSamples.score == 0 and
+    .secondaryMetrics.terminalTrades.score > 0)' "${result}" > /dev/null
 }
 
 run_jmh_case() {

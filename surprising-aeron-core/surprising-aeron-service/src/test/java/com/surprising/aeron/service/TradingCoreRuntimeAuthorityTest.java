@@ -95,7 +95,14 @@ class TradingCoreRuntimeAuthorityTest {
         assertThat(runtimeState)
                 .doesNotContain("captureCommitPatch", "public RuntimeCommitPatch seal()", ".seal();",
                         "BalanceRuntime::releaseOwnerForHandoff", "awaitAndRebindLaneMutations");
-        assertThat(runtimeState).doesNotContain("laneMutationTasks", "SettlementLaneWorker");
+        assertThat(runtimeState)
+                .contains("SettlementLaneWorker[] laneWorkers", "LaneMutationTask[] laneMutationTasks",
+                        "completeLaneMutations(submittedLaneMask", "lane.releaseOwner()",
+                        "flushPublishedChanges(laneId)");
+        assertThat(source("state/SettlementLaneWorker.java"))
+                .contains("private final Runnable[] tasks", "volatile long producerSequence",
+                        "volatile long consumerSequence", "LockSupport.unpark(thread)")
+                .doesNotContain("ExecutorService", "CompletableFuture", "BlockingQueue");
         assertThat(occurrences(production, ".recordOrder(")).isEqualTo(1);
         assertThat(occurrences(prepareCommit, "RuntimeStateMaterializer.orderSnapshot(")).isEqualTo(2);
         assertThat(occurrences(prepareCommit, "RuntimeCommitPatch.exportOrderView(")).isZero();

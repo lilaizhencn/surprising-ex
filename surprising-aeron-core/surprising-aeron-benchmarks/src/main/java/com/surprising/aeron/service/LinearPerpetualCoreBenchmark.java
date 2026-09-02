@@ -95,6 +95,7 @@ public class LinearPerpetualCoreBenchmark {
                 state.scenario.acceptedOperations(), state.scenario.terminalOperations());
         counters.acceptedCoreMessages += state.scenario.acceptedCoreMessages();
         counters.terminalCoreMessages += state.scenario.terminalCoreMessages();
+        counters.terminalTrades += state.scenario.terminalTrades();
         counters.unfinishedCoreMessages += Math.subtractExact(
                 state.scenario.acceptedCoreMessages(), state.scenario.terminalCoreMessages());
         counters.laneOperations += state.scenario.laneOperations();
@@ -222,6 +223,7 @@ public class LinearPerpetualCoreBenchmark {
                 scenario.acceptedOperations(), scenario.terminalOperations());
         counters.acceptedCoreMessages += scenario.acceptedCoreMessages();
         counters.terminalCoreMessages += scenario.terminalCoreMessages();
+        counters.terminalTrades += scenario.terminalTrades();
         counters.unfinishedCoreMessages += Math.subtractExact(
                 scenario.acceptedCoreMessages(), scenario.terminalCoreMessages());
         counters.laneOperations += scenario.laneOperations();
@@ -504,8 +506,12 @@ public class LinearPerpetualCoreBenchmark {
         public long acceptedBusinessOperations;
         public long terminalBusinessOperations;
         public long unfinishedBusinessOperations;
+        public long rejectedBusinessOperations;
+        public long errorBusinessOperations;
+        public long timedOutBusinessOperations;
         public long acceptedCoreMessages;
         public long terminalCoreMessages;
+        public long terminalTrades;
         public long unfinishedCoreMessages;
         public long laneOperations;
         public long laneCommandOperations;
@@ -522,8 +528,12 @@ public class LinearPerpetualCoreBenchmark {
             acceptedBusinessOperations = 0;
             terminalBusinessOperations = 0;
             unfinishedBusinessOperations = 0;
+            rejectedBusinessOperations = 0;
+            errorBusinessOperations = 0;
+            timedOutBusinessOperations = 0;
             acceptedCoreMessages = 0;
             terminalCoreMessages = 0;
+            terminalTrades = 0;
             unfinishedCoreMessages = 0;
             laneOperations = 0;
             laneCommandOperations = 0;

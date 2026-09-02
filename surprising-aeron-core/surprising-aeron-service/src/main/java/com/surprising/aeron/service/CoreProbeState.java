@@ -180,6 +180,7 @@ public final class CoreProbeState implements AutoCloseable {
     private final Map<Long, Long> matchingSubmitNanos = MATCHING_PHASE_METRICS_ENABLED
             ? new HashMap<>() : null;
     private long completedMatchingCount;
+    private long terminalTradeCount;
     private final TerminalStateRetention terminalRetention;
     private final com.surprising.aeron.service.state.RollingBusinessStateHash rollingBusinessStateHash;
     private final com.surprising.aeron.service.state.RollingFundsStateHash rollingFundsStateHash;
@@ -1585,7 +1586,7 @@ public final class CoreProbeState implements AutoCloseable {
                         batch.deferredNoTradeOrderIds.add(command.orderId());
                         batch.deferredNoTradeMatchingResults.add(matchingResult);
                     } else {
-                        batch.mergeTreasuryDeltas(runtimePlaceOrderState.applyMatcherSettlement(
+                        batch.mergeTreasuryDelta(runtimePlaceOrderState.applyMatcherSettlement(
                                 pending.sequence(), expectedLaneMask(pending, matchingResult), command.orderId(),
                                 matchingResult, runtimePlaceOrderIdentities));
                     }
@@ -1613,7 +1614,7 @@ public final class CoreProbeState implements AutoCloseable {
                     reservePlaceOrderRuntime(pending.command().header().userId(), replacement,
                             pending.command().header().commandId(), pending.sequence(),
                             batchOpenInterestSteps(batch, replacement.symbol()), batch.admissionOrderIndex, batch);
-                    batch.mergeTreasuryDeltas(runtimePlaceOrderState.applyMatcherSettlement(
+                    batch.mergeTreasuryDelta(runtimePlaceOrderState.applyMatcherSettlement(
                             pending.sequence(), expectedLaneMask(pending, matchingResult), replacement.orderId(),
                             matchingResult, runtimePlaceOrderIdentities));
                 }
@@ -1641,13 +1642,13 @@ public final class CoreProbeState implements AutoCloseable {
         activateFactContext(capacityReservation, pending.command(), pending.fingerprint());
         commandFundsDelta = pending.fundsDelta();
         if (!batch.deferredPerpetualOrderIds.isEmpty()) {
-            batch.mergeTreasuryDeltas(runtimePlaceOrderState.applyPerpetualMatcherSettlements(
+            batch.mergeTreasuryDelta(runtimePlaceOrderState.applyPerpetualMatcherSettlements(
                     batch.sequence, batch.deferredPerpetualOrderIds,
                     batch.deferredPerpetualExpectedLaneMasks, batch.deferredPerpetualMatchingResults,
                     runtimePlaceOrderIdentities));
         }
         if (!batch.deferredNoTradeOrderIds.isEmpty()) {
-            batch.mergeTreasuryDeltas(runtimePlaceOrderState.applyNoTradeMatcherSettlements(
+            batch.mergeTreasuryDelta(runtimePlaceOrderState.applyNoTradeMatcherSettlements(
                     batch.sequence, pending.command().header().userId(), batch.deferredNoTradeOrderIds,
                     batch.deferredNoTradeMatchingResults, runtimePlaceOrderIdentities));
         }
@@ -1686,12 +1687,11 @@ public final class CoreProbeState implements AutoCloseable {
         if (laneContext.expectedLaneMask() != actualLaneMask) {
             throw failOrderBatch(batch, pending, "order batch account lane mask mismatch", null);
         }
-        RuntimeTreasuryDelta[] laneTreasuryDeltas = batch.laneTreasuryDeltas == null
-                ? new RuntimeTreasuryDelta[matchingAdapter.topology().accountLaneCount()]
-                : batch.laneTreasuryDeltas;
         long committedLaneMask;
         try {
-            RuntimeTreasuryDelta expectedTreasuryDelta = mergeTreasuryDeltas(laneTreasuryDeltas);
+            RuntimeTreasuryDelta expectedTreasuryDelta = mergedLaneTreasuryDelta;
+            expectedTreasuryDelta.clear();
+            if (batch.treasuryDelta != null) expectedTreasuryDelta.merge(batch.treasuryDelta);
             expectedTreasuryDelta.apply(runtimePlaceOrderState.treasury());
             runtimePlaceOrderState.setMetadata(productLine,
                     Math.incrementExact(runtimePlaceOrderState.revision()));
@@ -1720,6 +1720,7 @@ public final class CoreProbeState implements AutoCloseable {
         CoreOrderBatchResult result = new CoreOrderBatchResult(resultItems);
         byte[] responseData = TradingOrderBatchCodec.encodeResult(result);
         commandExecutions = List.copyOf(executions);
+        terminalTradeCount = Math.addExact(terminalTradeCount, commandExecutions.size());
         CoreCommandDelta delta = commandDelta();
         validateFundsConservation(pending.command());
         commitMatchingSequence(batch.sequence);
@@ -3127,7 +3128,7 @@ public final class CoreProbeState implements AutoCloseable {
         }
         ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
         CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
-        com.surprising.aeron.service.state.RuntimeTreasuryDelta[] laneTreasuryDeltas = null;
+        com.surprising.aeron.service.state.RuntimeTreasuryDelta settlementTreasuryDelta = null;
         try {
             switch (pending.operation()) {
                 case PLACE -> {
@@ -3136,7 +3137,7 @@ public final class CoreProbeState implements AutoCloseable {
                     commandChangedOrderIds = boxedLongsIncluding(settlementPlan.orderIds(), command.orderId());
                     applyPreMatchingCancellations(pending, matchingResult);
                     if (matchingResult.accepted()) {
-                        laneTreasuryDeltas = applyMatchesOnAccountLanes(
+                        settlementTreasuryDelta = applyMatchesOnAccountLanes(
                                 settlementPlan, sequence, matchingResult, laneContext);
                     } else {
                         rejectPlaceOrderRuntime(pending.command().header().userId(), command.orderId(), sequence);
@@ -3170,7 +3171,7 @@ public final class CoreProbeState implements AutoCloseable {
                                 validAccountLaneMask());
                         commandChangedUserIds = boxedLongs(settlementPlan.userIds());
                         commandChangedOrderIds = boxedLongs(settlementPlan.orderIds());
-                        laneTreasuryDeltas = applyMatchesOnAccountLanes(
+                        settlementTreasuryDelta = applyMatchesOnAccountLanes(
                                 settlementPlan, sequence, matchingResult, laneContext);
                         commandExecutions = executionViews(command.orderId(), pending.command().header().userId(),
                                 settlementPlan.tradeEvents());
@@ -3189,7 +3190,7 @@ public final class CoreProbeState implements AutoCloseable {
                     commandChangedOrderIds = boxedLongs(settlementPlan.orderIds());
                     applyPreMatchingCancellations(pending, matchingResult);
                     if (matchingResult.accepted()) {
-                        laneTreasuryDeltas = applyMatchesOnAccountLanes(
+                        settlementTreasuryDelta = applyMatchesOnAccountLanes(
                                 settlementPlan, sequence, matchingResult, laneContext);
                     } else {
                         rejectPlaceOrderRuntime(trigger.userId(), command.orderId(), sequence);
@@ -3258,8 +3259,7 @@ public final class CoreProbeState implements AutoCloseable {
             throw failMatching(pending, "Core and matcher state diverged", exception);
         }
         try {
-            RuntimeTreasuryDelta settledTreasuryDelta = laneTreasuryDeltas == null
-                    ? null : mergeTreasuryDeltas(laneTreasuryDeltas);
+            RuntimeTreasuryDelta settledTreasuryDelta = settlementTreasuryDelta;
             if (settledTreasuryDelta != null) {
                 settledTreasuryDelta.apply(runtimePlaceOrderState.treasury());
                 runtimePlaceOrderState.setMetadata(productLine,
@@ -3312,6 +3312,7 @@ public final class CoreProbeState implements AutoCloseable {
         cachedBusinessStateHash = businessStateHash;
         long stateHash = stateHash(businessStateHash, pending.command().header().commandId(), status, resultCode, applied);
         byte[] responseData = commandResultData(pending, matchingResult);
+        terminalTradeCount = Math.addExact(terminalTradeCount, commandExecutions.size());
         storeResult(pending.command().header().commandId(), StoredResult.owned(pending.fingerprint(),
                 status, resultCode, applied, requiredExportSequence, stateHash, responseData));
         laneCommandContexts.release(sequence);
@@ -3451,16 +3452,6 @@ public final class CoreProbeState implements AutoCloseable {
             }
             default -> null;
         };
-    }
-
-    private RuntimeTreasuryDelta mergeTreasuryDeltas(RuntimeTreasuryDelta[] laneDeltas) {
-        if (laneDeltas == null) throw new IllegalArgumentException("account lane Treasury deltas are required");
-        RuntimeTreasuryDelta aggregate = mergedLaneTreasuryDelta;
-        aggregate.clear();
-        for (RuntimeTreasuryDelta delta : laneDeltas) {
-            if (delta != null) aggregate.merge(delta);
-        }
-        return aggregate;
     }
 
     private void requireCompleteAccountLanes(LaneCommandContextRing.Context context) {
@@ -3949,6 +3940,11 @@ public final class CoreProbeState implements AutoCloseable {
 
     public int pendingMatchingCount() {
         return pendingMatching.size();
+    }
+
+    public long terminalTradeCount() {
+        runtime.assertOwner();
+        return terminalTradeCount;
     }
 
     public CoreLaneMetrics laneMetrics() {
@@ -5622,7 +5618,7 @@ public final class CoreProbeState implements AutoCloseable {
                 runtimePlaceOrderIdentities, productLine, userId, trigger);
     }
 
-    private com.surprising.aeron.service.state.RuntimeTreasuryDelta[] applyMatchesOnAccountLanes(
+    private com.surprising.aeron.service.state.RuntimeTreasuryDelta applyMatchesOnAccountLanes(
             com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan,
             long coreSequence,
             com.surprising.aeron.service.matching.CoreMatchingResult matchingResult,
@@ -6568,7 +6564,7 @@ public final class CoreProbeState implements AutoCloseable {
         private final List<com.surprising.aeron.service.matching.CoreMatchingResult>
                 deferredPerpetualMatchingResults = new ArrayList<>();
         private final List<PreparedClientAllocation> preparedClientKeys = new ArrayList<>();
-        private com.surprising.aeron.service.state.RuntimeTreasuryDelta[] laneTreasuryDeltas;
+        private com.surprising.aeron.service.state.RuntimeTreasuryDelta treasuryDelta;
         private int nextIndex;
         private long sequence;
         private List<Long> currentPreMatchingCancellationOrderIds = List.of();
@@ -6614,21 +6610,14 @@ public final class CoreProbeState implements AutoCloseable {
             matchingResults.add(result);
         }
 
-        private void mergeTreasuryDeltas(
-                com.surprising.aeron.service.state.RuntimeTreasuryDelta[] deltas) {
-            if (deltas == null) throw new IllegalArgumentException("order batch Treasury deltas are required");
-            if (laneTreasuryDeltas == null) {
-                laneTreasuryDeltas = new com.surprising.aeron.service.state.RuntimeTreasuryDelta[deltas.length];
-                for (int laneId = 0; laneId < deltas.length; laneId++) {
-                    laneTreasuryDeltas[laneId] = new com.surprising.aeron.service.state.RuntimeTreasuryDelta(
-                            com.surprising.aeron.service.state.RuntimeTreasuryDelta.ORDER_BATCH_CAPACITY);
-                }
-            } else if (laneTreasuryDeltas.length != deltas.length) {
-                throw new IllegalStateException("order batch Account Lane topology changed");
+        private void mergeTreasuryDelta(
+                com.surprising.aeron.service.state.RuntimeTreasuryDelta delta) {
+            if (delta == null) throw new IllegalArgumentException("order batch Treasury delta is required");
+            if (treasuryDelta == null) {
+                treasuryDelta = new com.surprising.aeron.service.state.RuntimeTreasuryDelta(
+                        com.surprising.aeron.service.state.RuntimeTreasuryDelta.ORDER_BATCH_CAPACITY);
             }
-            for (int laneId = 0; laneId < deltas.length; laneId++) {
-                if (deltas[laneId] != null) laneTreasuryDeltas[laneId].merge(deltas[laneId]);
-            }
+            treasuryDelta.merge(delta);
         }
 
         private void retainPreparedClientKey(

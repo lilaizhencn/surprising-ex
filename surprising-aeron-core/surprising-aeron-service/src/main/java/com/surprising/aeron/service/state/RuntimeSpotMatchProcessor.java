@@ -98,6 +98,40 @@ public final class RuntimeSpotMatchProcessor {
         return treasuryDelta;
     }
 
+    static void applyLane(long takerOrderId, MatcherSettlementPlan plan, int laneId,
+                          TradingRuntimeState runtime, CoreInstrumentState instrument,
+                          int baseAssetId, int quoteAssetId, RuntimeTreasuryDelta treasuryDelta) {
+        if (plan == null || treasuryDelta == null || laneId < 0
+                || laneId >= runtime.topology().accountLaneCount()) {
+            throw new IllegalArgumentException("invalid spot matcher settlement plan");
+        }
+        OrderRuntime localTaker = runtime.order(takerOrderId);
+        for (int index = 0; index < plan.tradeEventCount(); index++) {
+            if (!plan.tradeTouchesLane(index, laneId)) continue;
+            MatcherEvent match = plan.tradeEvent(index);
+            if (localTaker != null) {
+                localTaker = requireOpen(runtime, takerOrderId);
+                applyFill(runtime, instrument, localTaker, match.price(), match.size(), true,
+                        baseAssetId, quoteAssetId, treasuryDelta);
+            }
+            OrderRuntime maker = runtime.order(match.matchedOrderId());
+            if (maker != null) {
+                applyFill(runtime, instrument, requireOpen(runtime, maker.orderId()), match.price(), match.size(),
+                        false, baseAssetId, quoteAssetId, treasuryDelta);
+                releaseTerminalReservation(runtime, maker.orderId());
+            }
+        }
+        localTaker = runtime.order(takerOrderId);
+        if (localTaker != null) {
+            if (!localTaker.canceled() && (localTaker.timeInForce().immediate()
+                    || localTaker.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET)) {
+                runtime.replaceOrder(localTaker.withStatus(CoreOrderStatus.CANCELED,
+                        Math.incrementExact(localTaker.revision())));
+            }
+            releaseTerminalReservation(runtime, takerOrderId);
+        }
+    }
+
     static void validate(long takerOrderId, List<MatcherEvent> matches, TradingRuntimeState runtime) {
         validateMatches(runtime, requireOpen(runtime, takerOrderId), matches);
     }

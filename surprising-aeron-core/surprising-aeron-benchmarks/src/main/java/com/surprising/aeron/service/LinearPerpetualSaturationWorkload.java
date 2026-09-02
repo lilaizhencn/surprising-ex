@@ -103,6 +103,7 @@ final class LinearPerpetualSaturationWorkload {
             private int latencySamples;
             private long acceptedCoreMessages;
             private long terminalCoreMessages;
+            private long terminalTrades;
             private long backlogTotal;
             private long backlogSamples;
             private long fullWindowSamples;
@@ -121,6 +122,7 @@ final class LinearPerpetualSaturationWorkload {
             public long run() {
                 long acceptedCoreBefore = harness.acceptedCoreMessages();
                 long terminalCoreBefore = harness.terminalCoreMessages();
+                long terminalTradesBefore = harness.terminalTradeCount();
                 latencySamples = 0;
                 backlogTotal = 0;
                 backlogSamples = 0;
@@ -158,6 +160,7 @@ final class LinearPerpetualSaturationWorkload {
                 runSequence = Math.addExact(runSequence, directionCount);
                 acceptedCoreMessages = Math.subtractExact(harness.acceptedCoreMessages(), acceptedCoreBefore);
                 terminalCoreMessages = Math.subtractExact(harness.terminalCoreMessages(), terminalCoreBefore);
+                terminalTrades = Math.subtractExact(harness.terminalTradeCount(), terminalTradesBefore);
                 if (latencySamples != operationsPerRun) {
                     throw new IllegalStateException("saturation workload lost completion latency samples");
                 }
@@ -330,6 +333,11 @@ final class LinearPerpetualSaturationWorkload {
             }
 
             @Override
+            public long terminalTrades() {
+                return terminalTrades;
+            }
+
+            @Override
             public int completedLatencySamples() {
                 return latencySamples;
             }
@@ -426,12 +434,18 @@ final class LinearPerpetualSaturationWorkload {
             public void verify() {
                 long closingFunds = LinearPerpetualMixedWorkload.totalFunds(harness.state().tradingState());
                 int closingActiveOrders = harness.state().tradingState().orders().size();
+                int parallelSettlementLanes = 0;
+                for (int highWaterMark : harness.state().laneMetrics().accountLaneQueueHighWaterMarks()) {
+                    if (highWaterMark > 0) parallelSettlementLanes++;
+                }
                 boolean incompletePair = false;
                 for (boolean inFlight : pairInFlight) incompletePair |= inFlight;
                 if (latencySamples != operationsPerRun
                         || scheduledOperations != operationsPerRun
                         || scheduledEntrySequence != operationsPerRun
                         || acceptedCoreMessages != terminalCoreMessages
+                        || terminalTrades != operationsPerRun / 2L
+                        || parallelSettlementLanes < 2
                         || backlogSamples == 0
                         || !usersInFlight.isEmpty()
                         || incompletePair
@@ -446,6 +460,8 @@ final class LinearPerpetualSaturationWorkload {
                             + ", scheduled=" + scheduledOperations + '/' + operationsPerRun
                             + ", scheduledEntries=" + scheduledEntrySequence + '/' + operationsPerRun
                             + ", coreMessages=" + acceptedCoreMessages + '/' + terminalCoreMessages
+                            + ", terminalTrades=" + terminalTrades + '/' + (operationsPerRun / 2L)
+                            + ", parallelSettlementLanes=" + parallelSettlementLanes
                             + ", backlogSamples=" + backlogSamples
                             + ", usersInFlight=" + usersInFlight.size()
                             + ", incompletePair=" + incompletePair

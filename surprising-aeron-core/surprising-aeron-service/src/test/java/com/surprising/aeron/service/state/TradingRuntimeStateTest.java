@@ -804,7 +804,8 @@ class TradingRuntimeStateTest {
         TradingRuntimeState state = new TradingRuntimeState();
         state.startAccountLanes();
         try {
-            assertThatThrownBy(() -> state.executeOwnerSettlements(java.util.List.of(203L, 8L), laneId -> {
+            assertThatThrownBy(() -> state.executeLifecycleSettlements(
+                    java.util.List.of(203L, 8L), Long::longValue, laneId -> {
                 if (laneId == 0) throw new IllegalStateException("injected lifecycle lane failure");
                 return laneId;
             })).isInstanceOf(IllegalStateException.class)
@@ -817,7 +818,7 @@ class TradingRuntimeStateTest {
     }
 
     @Test
-    void lifecycleSettlementUsesLogicalLanesOnTheSingleCoreOwner() {
+    void lifecycleSettlementUsesIndependentLaneOwnersAndRebindsTheCoreOwner() {
         LaneTopology topology = LaneTopology.productionDefault();
         TradingRuntimeState state = new TradingRuntimeState(topology);
         java.util.List<Long> users = new java.util.ArrayList<>();
@@ -841,10 +842,10 @@ class TradingRuntimeStateTest {
                     });
 
             for (int laneId = 0; laneId < owners.length; laneId++) {
-                assertThat(owners[laneId]).isEqualTo(Thread.currentThread().getName());
+                assertThat(owners[laneId]).isEqualTo("core-mutation-lane-" + laneId);
                 assertThat(state.user(users.get(laneId)).revision()).isEqualTo(revisions.get(laneId) + 1);
                 AccountLaneMetricsSnapshot metrics = state.accountLaneMetricsById(laneId);
-                assertThat(metrics.queueHighWaterMark()).isZero();
+                assertThat(metrics.queueHighWaterMark()).isEqualTo(1);
                 assertThat(metrics.completedOperations()[AccountLaneOperationType.SETTLEMENT.ordinal()])
                         .isEqualTo(1);
                 assertThat(metrics.latencySamples()[AccountLaneOperationType.SETTLEMENT.ordinal()])

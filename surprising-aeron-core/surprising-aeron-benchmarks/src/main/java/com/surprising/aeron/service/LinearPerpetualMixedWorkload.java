@@ -38,6 +38,7 @@ import com.surprising.aeron.service.state.CoreOrderStatus;
 import com.surprising.aeron.service.state.CorePositionState;
 import com.surprising.aeron.service.state.CoreTreasuryState;
 import com.surprising.aeron.service.state.LiquidationRuntime;
+import com.surprising.aeron.service.state.LaneTopology;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -134,7 +135,20 @@ final class LinearPerpetualMixedWorkload {
             int cursor = activeUsers + 1;
             List<Long> positionMakers = List.copyOf(users.subList(cursor, cursor += symbolCount));
             List<Long> hftMakers = List.copyOf(users.subList(cursor, cursor += symbolCount));
-            List<Long> hftTakers = List.copyOf(users.subList(cursor, cursor += symbolCount));
+            List<Long> rawHftTakers = List.copyOf(users.subList(cursor, cursor += symbolCount));
+            int takerShift = symbolCount > 1 && symbolCount % accountLanes == 0 ? 1 : 0;
+            java.util.ArrayList<Long> routedHftTakers = new java.util.ArrayList<>(symbolCount);
+            for (int index = 0; index < symbolCount; index++) {
+                routedHftTakers.add(rawHftTakers.get((index + takerShift) % symbolCount));
+            }
+            List<Long> hftTakers = List.copyOf(routedHftTakers);
+            LaneTopology laneTopology = LaneTopology.configured(false);
+            for (int index = 0; index < symbolCount; index++) {
+                if (laneTopology.accountLaneId(hftMakers.get(index))
+                        == laneTopology.accountLaneId(hftTakers.get(index))) {
+                    throw new IllegalStateException("HFT maker/taker pair must cross Account Lanes");
+                }
+            }
 
             long[] aggregateQuantities = new long[symbolCount];
             for (int index = 0; index < activeUsers; index++) {

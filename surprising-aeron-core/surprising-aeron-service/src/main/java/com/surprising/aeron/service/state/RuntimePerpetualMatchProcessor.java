@@ -198,6 +198,49 @@ public final class RuntimePerpetualMatchProcessor {
         }
     }
 
+    static void applyLane(long takerOrderId, MatcherSettlementPlan plan, int laneId,
+                          TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                          CoreInstrumentState instrument, int settleAssetId,
+                          RuntimeTreasuryDelta treasuryDelta) {
+        if (plan == null || treasuryDelta == null || laneId < 0
+                || laneId >= runtime.topology().accountLaneCount()) {
+            throw new IllegalArgumentException("invalid perpetual matcher settlement plan");
+        }
+        OrderRuntime localTaker = runtime.order(takerOrderId);
+        for (int index = 0; index < plan.tradeEventCount(); index++) {
+            if (!plan.tradeTouchesLane(index, laneId)) continue;
+            MatcherEvent match = plan.tradeEvent(index);
+            if (localTaker != null) {
+                localTaker = requireOpen(runtime, takerOrderId);
+                applyFill(runtime, identities, instrument, localTaker, match.price(), match.size(), true,
+                        settleAssetId, treasuryDelta);
+            }
+            OrderRuntime maker = runtime.order(match.matchedOrderId());
+            if (maker != null) {
+                maker = requireOpen(runtime, maker.orderId());
+                applyFill(runtime, identities, instrument, maker, match.price(), match.size(), false,
+                        settleAssetId, treasuryDelta);
+                if (runtime.order(maker.orderId()).canceled()) {
+                    long releaseUnits = runtime.reservation(maker.orderId()).reservedUnits();
+                    runtime.releaseTerminalReservation(maker.orderId());
+                    if (releaseUnits > 0) runtime.advanceUserRevision(maker.userId());
+                }
+            }
+        }
+        localTaker = runtime.order(takerOrderId);
+        if (localTaker != null) {
+            if (!localTaker.canceled() && (localTaker.timeInForce().immediate()
+                    || localTaker.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET)) {
+                runtime.replaceOrder(terminal(localTaker));
+            }
+            if (runtime.order(takerOrderId).canceled()) {
+                long releaseUnits = runtime.reservation(takerOrderId).reservedUnits();
+                runtime.releaseTerminalReservation(takerOrderId);
+                if (releaseUnits > 0) runtime.advanceUserRevision(localTaker.userId());
+            }
+        }
+    }
+
     static final class BatchValidationScratch {
         private final LongLongHashMap remainingByOrderId = new LongLongHashMap();
         private final LongHashSet terminalOrderIds = new LongHashSet();
