@@ -94,15 +94,22 @@ class TradingCoreRuntimeAuthorityTest {
         String prepareCommit = method(runtimeState, "    public PreparedCommit prepareCommitPatch(");
         assertThat(runtimeState)
                 .doesNotContain("captureCommitPatch", "public RuntimeCommitPatch seal()", ".seal();",
-                        "BalanceRuntime::releaseOwnerForHandoff", "awaitAndRebindLaneMutations");
+                        "BalanceRuntime::releaseOwnerForHandoff", "awaitAndRebindLaneMutations",
+                        "pendingApplyCheckpoint", "pendingApplySequence", "rollbackLaneSequence",
+                        "lane.releaseOwner()", "lane.bindOwner()")
+                .contains("MatcherSettlementEvent dispatchMatcherSettlement(",
+                        "laneWorkers[laneId].submit(event)", "LaneCommitCommand");
         assertThat(runtimeState)
                 .contains("SettlementLaneWorker[] laneWorkers", "LaneMutationTask[] laneMutationTasks",
-                        "completeLaneMutations(submittedLaneMask", "lane.releaseOwner()",
                         "flushPublishedChanges(laneId)");
         assertThat(source("state/SettlementLaneWorker.java"))
-                .contains("private final Runnable[] tasks", "volatile long producerSequence",
+                .contains("private final Command[] commands", "volatile long producerSequence",
                         "volatile long consumerSequence", "LockSupport.unpark(thread)")
-                .doesNotContain("ExecutorService", "CompletableFuture", "BlockingQueue");
+                .doesNotContain("Runnable[]", "ExecutorService", "CompletableFuture", "BlockingQueue");
+        assertThat(source("state/MatcherSettlementEvent.java"))
+                .contains("implements SettlementLaneWorker.Command", "lane.applied(commitSequence",
+                        "COMPLETED_LANE_MASK.getAndBitwiseOr")
+                .doesNotContain("await(", "LockSupport.park");
         assertThat(occurrences(production, ".recordOrder(")).isEqualTo(1);
         assertThat(occurrences(prepareCommit, "RuntimeStateMaterializer.orderSnapshot(")).isEqualTo(2);
         assertThat(occurrences(prepareCommit, "RuntimeCommitPatch.exportOrderView(")).isZero();
@@ -197,13 +204,14 @@ class TradingCoreRuntimeAuthorityTest {
         assertThat(journalAwaitOutsideFence(probe)).isEmpty();
         assertThat(orderBatch).doesNotContain("runtimeProjectionJournal.await(", "snapshotState",
                         "TradingCoreState", "RuntimeStateMaterializer.materialize", "restoreCommandState(")
-                .contains("runtimePlaceOrderState.commandCheckpoint()", "currentPatchOrderBefore(",
+                .contains("runtimePlaceOrderState.commandRevisionCheckpoint()", "currentPatchOrderBefore(",
                         "currentPatchPositionBefore(", "failOrderBatch(", "rollbackOrderBatchMutations(");
         assertThat(method(probe, "    private void rollbackOrderBatchMutations("))
                 .contains("rollbackActiveCommand(batch.runtimeCheckpoint", "batch.rollbackPreparedClientKeys(")
                 .doesNotContain("restoreCommandState(");
         assertThat(method(probe, "    private com.surprising.aeron.service.matching.FatalMatchingDivergenceException failOrderBatch("))
-                .contains("rollbackOrderBatchMutations(batch, true)");
+                .contains("endOrderBatchMutationScope()", "return failMatching(pending, detail, cause)")
+                .doesNotContain("rollbackOrderBatchMutations", "rollbackActiveCommand");
         assertThat(section(probe, "    private static final class OrderBatchPending {",
                 "    private static final class PipelinedBatchNotApplicable"))
                 .doesNotContain("snapshotState", "TradingCoreState", "runtimeProjectionJournal.await",

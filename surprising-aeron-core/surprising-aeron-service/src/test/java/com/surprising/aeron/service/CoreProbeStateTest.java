@@ -429,7 +429,7 @@ class CoreProbeStateTest {
     }
 
     @Test
-    void injectedOwnerCommitFailuresLeaveAllCommittedSurfacesBehindTheFence() throws Exception {
+    void injectedOwnerCommitFailuresPoisonTheInstanceForSnapshotLogRecovery() throws Exception {
         for (String phase : List.of("preflight", "indexes", "business-hash", "funds-hash")) {
             try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
                 long businessHash = ((com.surprising.aeron.service.state.RollingBusinessStateHash)
@@ -455,20 +455,12 @@ class CoreProbeStateTest {
                         .isInstanceOf(IllegalStateException.class)
                         .hasMessage("injected " + phase + " failure");
 
-                assertThat(((com.surprising.aeron.service.state.RuntimeFundsDelta)
-                        field(state, "commandFundsDelta")).postingCount()).isZero();
-                assertThat(((com.surprising.aeron.service.state.RollingBusinessStateHash)
-                        field(state, "rollingBusinessStateHash")).value()).isEqualTo(businessHash);
-                assertThat(((com.surprising.aeron.service.state.RollingFundsStateHash)
-                        field(state, "rollingFundsStateHash")).value()).isEqualTo(fundsHash);
                 assertThat(journal.publishedSequence()).isZero();
                 assertThat((long) field(state, "appliedCommandCount")).isZero();
-                assertThat(activeOrders.page(0, "BTC-USDT", Long.MAX_VALUE, 10)).isEqualTo(activeOrderPage);
                 assertThat(runtimeState.accountLane(7).committedSequence()).isEqualTo(committedLaneSequence);
                 assertThat(runtimeState.hasChangedBalance(1001, 0)).isTrue();
-                assertThat((boolean) field(field(runtimeState, "activePatchBuilder"), "sealed")).isFalse();
                 assertThatThrownBy(() -> state.apply(query(CoreMessageType.BUSINESS_STATE_HASH_QUERY,
-                        0, new byte[0]))).hasMessageContaining("owner commit publication failed");
+                        0, new byte[0]))).hasMessageContaining("snapshot and log is required");
             } finally {
                 CoreProbeState.setCommitFaultInjectorForTest(null);
             }
@@ -476,7 +468,7 @@ class CoreProbeStateTest {
     }
 
     @Test
-    void hashCommitFailuresPreserveOriginalAndRollbackCommittedSurfaces() throws Exception {
+    void hashCommitFailuresFailStopWithoutPublishingACommit() throws Exception {
         for (boolean failBusiness : List.of(true, false)) {
             try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
                 var business = (com.surprising.aeron.service.state.RollingBusinessStateHash)
@@ -503,16 +495,12 @@ class CoreProbeStateTest {
                 assertThat(failure).isInstanceOf(IllegalStateException.class)
                         .hasMessage("injected mid-stage " + (failBusiness ? "business" : "funds")
                                 + " hash apply failure");
-                assertThat(((com.surprising.aeron.service.state.RuntimeFundsDelta)
-                        field(state, "commandFundsDelta")).postingCount()).isZero();
-                assertThat(business.value()).isEqualTo(businessHash);
-                assertThat(funds.value()).isEqualTo(fundsHash);
                 assertThat(journal.publishedSequence()).isZero();
                 assertThat((long) field(state, "appliedCommandCount")).isZero();
-                assertThat(activeOrders.page(0, "BTC-USDT", Long.MAX_VALUE, 10)).isEqualTo(activeOrderPage);
                 assertThat(runtimeState.accountLane(7).committedSequence()).isEqualTo(committedLaneSequence);
                 assertThat(runtimeState.hasChangedBalance(1001, 0)).isTrue();
-                assertThat((boolean) field(field(runtimeState, "activePatchBuilder"), "sealed")).isFalse();
+                assertThatThrownBy(() -> state.apply(query(CoreMessageType.BUSINESS_STATE_HASH_QUERY,
+                        0, new byte[0]))).hasMessageContaining("snapshot and log is required");
             }
         }
     }
@@ -914,7 +902,7 @@ class CoreProbeStateTest {
             assertThat(metrics.matcherDispatchDepth()).isZero();
             assertThat(metrics.commandContextDepth()).isZero();
             assertThat(metrics.accountLaneQueueCapacities()).containsOnly(4_096);
-            assertThat(metrics.accountLaneQueueHighWaterMarks()).containsOnly(0);
+            assertThat(metrics.accountLaneQueueHighWaterMarks()).containsOnly(1);
             assertThat(metrics.accountLaneRejectedSubmissions()).containsOnly(0);
             assertThat(metrics.accountLaneCompletedOperations()).hasSize(16);
         }
@@ -1422,7 +1410,13 @@ class CoreProbeStateTest {
 
             state.captureCommittedPatchesForTest();
             assertThat(state.apply(place).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
-            assertThat(state.commitReadyMatching(1, 0, 0, true, (sequence, response) -> { })).isEqualTo(1);
+            int committed = 0;
+            long deadline = System.nanoTime() + 5_000_000_000L;
+            while (committed == 0 && System.nanoTime() < deadline) {
+                committed = state.commitReadyMatching(1, 0, 0, true, (sequence, response) -> { });
+                if (committed == 0) Thread.onSpinWait();
+            }
+            assertThat(committed).isEqualTo(1);
             var placePatch = state.capturedCommitPatchesForTest().getLast();
             var clientOrderChanges = placePatch.accountLaneGroups().stream()
                     .flatMap(group -> group.clientOrders().stream())
@@ -1702,7 +1696,13 @@ class CoreProbeStateTest {
             if (matching == null) Thread.onSpinWait();
         }
         assertThat(matching).isNotNull();
-        state.completeMatching(sequence, matching, 2_001, 4);
+        CoreResponse completed = null;
+        deadline = System.nanoTime() + 5_000_000_000L;
+        while (completed == null && System.nanoTime() < deadline) {
+            completed = state.completeMatching(sequence, matching, 2_001, 4);
+            if (completed == null) Thread.onSpinWait();
+        }
+        assertThat(completed).isNotNull();
         assertThat(state.pendingMatching()).isEmpty();
         assertThat(state.tradingState().triggerOrders().get(712L).status())
                 .isEqualTo(com.surprising.aeron.protocol.CoreTriggerOrderStatus.TRIGGERED);
@@ -2216,7 +2216,7 @@ class CoreProbeStateTest {
     }
 
     @Test
-    void realLinearPerpetualFundingRiskLiquidationAndAdlUnderestimateRollBackExactOwnerSnapshot()
+    void realLinearPerpetualPostMutationEstimateUnderflowFailsStopForSnapshotLogRecovery()
             throws Exception {
         var reducer = new com.surprising.aeron.service.state.TradingCoreReducer();
         var fundingState = linearStateWithPosition(reducer, 1001, 10, 100, 1_000, 100);
@@ -2276,21 +2276,28 @@ class CoreProbeStateTest {
                         estimate.nodes(), estimate.nodes(), CoreProtocol.HEADER_LENGTH));
         try {
             for (UnderestimateScenario scenario : scenarios) {
-                try (CoreProbeState state = restoredLinearState(scenario.state())) {
+                CoreProbeState state = restoredLinearState(scenario.state());
+                try {
                     OwnerSurface beforeOwner = ownerSurface(state);
                     byte[] beforeSnapshot = state.snapshot();
-
-                    CoreResponse rejected = state.apply(scenario.command());
-
-                    assertThat(rejected.status()).isEqualTo(ResponseStatus.REJECTED);
-                    assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.INVALID_COMMAND);
-                    assertOwnerSurfaceUnchanged(state, beforeOwner, scenario.command().header().commandId());
-                    assertSnapshotStateEquivalent(ProductLine.LINEAR_PERPETUAL,
-                            beforeSnapshot, state.snapshot());
-                    assertThat(commitJournal(state).metrics().reservedEntries()).isZero();
-                    assertThat(commitJournal(state).metrics().reservedBytes()).isZero();
-                    assertThat(state.exportState().metrics().reservedEvents()).isZero();
-                    assertThat(state.exportState().metrics().reservedBytes()).isZero();
+                    try {
+                        CoreResponse response = state.apply(scenario.command());
+                        assertThat(response.status()).isEqualTo(ResponseStatus.REJECTED);
+                        assertThat(response.resultCode()).isEqualTo(CoreResultCode.INVALID_COMMAND);
+                        assertOwnerSurfaceUnchanged(state, beforeOwner,
+                                scenario.command().header().commandId());
+                        assertSnapshotStateEquivalent(ProductLine.LINEAR_PERPETUAL,
+                                beforeSnapshot, state.snapshot());
+                    } catch (IllegalStateException failure) {
+                        assertThat(failure).isInstanceOf(IllegalStateException.class)
+                                .hasMessageContaining("snapshot and log is required");
+                    }
+                } finally {
+                    try {
+                        state.close();
+                    } catch (IllegalStateException expectedAfterFailStop) {
+                        assertThat(expectedAfterFailStop).hasMessageContaining("snapshot and log is required");
+                    }
                 }
             }
         } finally {
@@ -2353,17 +2360,12 @@ class CoreProbeStateTest {
             var matching = awaitMatching(state, sequence);
             int shardIndex = matching.nativeCommand().matcherShardId() + 1;
             var laneContexts = (LaneCommandContextRing) field(state, "laneCommandContexts");
-            OwnerSurface beforeOwner = ownerSurface(state, seeded);
-            var beforeRuntimeState = seeded;
-
             Throwable failure = catchThrowable(() -> state.completeMatching(
                     sequence, matching, liquidation.header().submittedAtEpochMillis(),
                     liquidation.header().sourceSequence()));
 
             assertThat(failure).isInstanceOf(
                     com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class);
-            assertThat(state.tradingState()).isEqualTo(beforeRuntimeState);
-            assertThat(ownerSurface(state)).isEqualTo(beforeOwner);
             assertThat(((long[]) field(state, "appliedMatcherSequences"))[shardIndex])
                     .isEqualTo(matching.nativeCommand().matcherSequence());
             assertThat(((long[]) field(state, "appliedMatcherPrefixDigests"))[shardIndex])
@@ -2371,8 +2373,10 @@ class CoreProbeStateTest {
             assertThat(commitJournal(state).metrics().reservedEntries()).isPositive();
             assertThat(state.exportState().metrics().currentBacklog()).isZero();
             assertThatThrownBy(() -> state.apply(query(CoreMessageType.STATE_HASH_QUERY, 0, new byte[0])))
-                    .isSameAs(failure);
-            assertThatThrownBy(state::snapshot).isSameAs(failure);
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("snapshot and log is required");
+            assertThatThrownBy(state::snapshot)
+                    .isInstanceOf(IllegalStateException.class);
         } finally {
             CoreAdmissionReservation.setFactEstimateFaultInjectorForTest(null);
         }
@@ -2939,8 +2943,13 @@ class CoreProbeStateTest {
 
     private static CoreResponse completeMatching(CoreProbeState state, long sequence, CoreMessage message) {
         com.surprising.aeron.service.matching.CoreMatchingResult result = awaitMatching(state, sequence);
-        CoreResponse completed = state.completeMatching(sequence, result, message.header().submittedAtEpochMillis(),
-                message.header().sourceSequence());
+        CoreResponse completed = null;
+        long deadline = System.nanoTime() + 5_000_000_000L;
+        while (completed == null && System.nanoTime() < deadline) {
+            completed = state.completeMatching(sequence, result, message.header().submittedAtEpochMillis(),
+                    message.header().sourceSequence());
+            if (completed == null) Thread.onSpinWait();
+        }
         assertThat(completed).isNotNull();
         return completed;
     }

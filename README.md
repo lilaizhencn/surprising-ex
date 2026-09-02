@@ -23,14 +23,14 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 | P7 | fatal / readiness campaign：致命故障和就绪性验证，不是 P0-P5 行为改动。 |
 | P8 | three-node recovery certification：三节点恢复认证，不是 P0-P5 行为改动。 |
 | P9 | 1,000-user / 40-minute certification：千用户、四十分钟验证，不是 P0-P5 行为改动。 |
-| P10 | single-Core deterministic lanes / capacity：每个 Product Core 只运行一个同步 matching engine；Account Lane 是 owner 内的确定性资金隔离与路由边界，不创建 Lane worker、ACK barrier 或物理 Core shard。实施边界以本 README 和 Aeron 模块 README 为准。 |
+| P10 | single-Core deterministic lanes / capacity：每个 Product Core 只运行一个同步 matching engine；Account Lane 是有固定线程所有权的确定性资金隔离与执行边界，不创建物理 Core shard。实施边界以本 README 和 Aeron 模块 README 为准。 |
 
-当前实现状态：P0-P5 与 P10-A 至 P10-F 的主体迁移已完成。所有账户、风险、生命周期和成交变更统一由
-Aeron service owner 通过同一个 Account Lane mutation 入口执行；Lane 只做确定性路由、资金所有权、局部 hash 与
-snapshot section 隔离，不创建线程。跨 Lane 命令按 Lane id 固定顺序串行修改，最后一次性合并 Treasury delta、
-验证资金守恒并发布 Core Fact；任一环节失败由命令 checkpoint 整体回滚。主链路只有一个预分配 SPSC matcher
-command/completion ring，不使用 Disruptor、Future、Lane worker、Cluster timer continuation 或 projection replica。query/read fence、snapshot capture/restore
-仍以同一全局 sequence 为一致性边界。
+当前实现状态：P0-P5 与 P10-A 至 P10-F 的主体迁移已完成。撮合输出构造成一条不可变
+`MatcherSettlementEvent`，按确定性的 Lane mask 直接写入各 Account Lane 的有界 SPSC ring；每个 Lane 线程永久拥有并
+串行修改本 Lane 的账户、余额、订单、冻结和持仓。Coordinator 只读取 completion bitmap、按 Core sequence 发布
+Core Fact 并推进 committed watermark，不做逐 Lane `release/bind/await`。Lane 允许连续消费多个 applied sequence；
+查询和 snapshot 只越过 committed watermark。观察到撮合事实后的任何 Lane、资金、hash、index 或发布不变量错误均
+fail-stop，实例必须从 snapshot 和 Cluster Log 恢复，热路径不再尝试分布式 rollback。
 P10-G 使用真实 HTTP 开放环门禁，只有保存 1,000 用户、至少 200 symbol、100k/s offered rate、
 计量窗口内至少 100k/s 实际终态吞吐、40 分钟、JFR 和资金/盘口核对 artifact 后才可标记生产认证完成。普通下单只提交一次正式 `PLACE_ORDER`，
 由 Product Core 在同一权威转换内完成 P1 的预占、平仓容量和费用校验；显式 dry-run 接口仍可调用只读 preflight，
@@ -235,8 +235,8 @@ Product Core 的热状态与不可变状态投影通过 `RuntimeCommitPatch` 分
 primitive `RuntimeFundsDelta`/typed change。滚动 hash 直接使用各 domain 的增量 aggregate，不维护第二套 owner-domain
 aggregate；typed change 容器使用 generation reset，避免每条命令 `HashMap.clear` 和 entry 重建。持久化 immutable map root 由有界
 `RuntimeCommitPatch` 内部只保存一套连续 canonical sequence，Core 与 projection 访问器映射到同一值；Account Lane groups
-与 global owner group 分开保存，不再额外物化派生 owner group 列表。owner 的 prepare/seal/hash/index/publish 与失败清理
-由单一提交事务封装，保留资金、幂等和回滚边界。
+与 global owner group 分开保存，不再额外物化派生 owner group 列表。owner 的 prepare/seal/hash/index/publish
+由单一提交事务封装；提交失败后毒化实例并恢复，不在已应用的 Lane 之间执行反向补偿。
 `RuntimeCommitJournal` 在 owner 内只保存准入、连续 sequence、rolling hash 和诊断计数；每个 entry 自带轻量
 `RuntimeProjectionPoint`，不再维护 Snapshot projector 或热 projection replica。显式 Snapshot/query fence 直接从权威
 runtime 物化 immutable image 并复算业务/资金 hash；section 编码在同一确定性 snapshot fence 内完成，不创建 encoder 线程。
@@ -275,7 +275,7 @@ Trading Provider 的普通单和触发单统一使用异步 Aeron gateway，HTTP
 
 六条 Product Core 产品线的局部热路径使用独立 JMH 模块验证。它直接驱动内存状态机和内嵌 exchange-core，
 不启动 wallet、PostgreSQL、Kafka、Valkey 或 Aeron Cluster；JMH 主裁决固定为一个 Product Core owner，短操作不跨线程；
-达到并行结算阈值的多 Lane 衍生成交则覆盖真实的 Lane direct-apply 与 owner completion barrier。默认覆盖限价挂单、
+达到并行结算阈值的多 Lane 衍生成交则覆盖真实的 Lane direct-apply 与 owner completion bitmap。默认覆盖限价挂单、
 吃单成交、撤单、部分成交、至少 8 笔成交的多 Lane 撮合、风险扫描、强平执行和配对快照恢复。
 `productionMixedWorkload` 额外把多币对做市、触发单、资金费、风险扫描、强平、保险基金和 ADL 放入同一条
 确定性 owner command stream，模拟生产中同时到达、由 Product Core 串行裁决的混合负载：
@@ -434,8 +434,8 @@ Aeron Cluster、HTTP、Kafka、WebSocket；不得标记为 100k/s 生产认证�
 
 当前 `MatcherEvidenceLedger` 保存单 matching engine 的严格单调 native sequence 与连续 prefix，并随 matcher snapshot
 校验完整进度。跨 symbol 批次、前置撤单和生命周期 matcher 工作仍使用同一同步引擎，不存在 shard 乱序完成。
-普通成交和多用户重生命周期工作都由 Core owner 按确定性 Account Lane 顺序原地执行，不引入 executor、Future barrier
-或 Lane worker。
+普通成交由不可变 matcher fact 直接 fan-out 到固定 Account Lane worker；每个 Lane 只串行执行本 Lane 的资产和持仓变化，
+Coordinator 依据 completion bitmap 和 sequence watermark 发布终态。多用户重生命周期工作沿用相同 Lane 所有权边界。
 
 同机、同一 7 GiB ZGC/JVM 参数、10,000 用户/512 活跃 symbol 的改动前后 A/B 为
 `2251.935 -> 2752.499 terminal business ops/s`，提升 `22.23%`；该主机同时运行桌面负载且只有 16 GiB，绝对值有明显换页和 CPU 争用，
@@ -608,7 +608,8 @@ exchange-core/disruptor busy-spin，这是 matcher 等待策略的 CPU/尾延迟
 重建 runtime symbol identity，首笔批量订单会在冻结资金前 fail-fast。`RuntimeStateProjector` 现在从权威
 instrument map 预备全部 symbol identity，聚焦红测和完整现货场景均已覆盖。
 
-同步 matcher 固定为一个 engine，不再读取 matcher wait strategy。Account Lane 不创建等待线程。
+同步 matcher 固定为一个 engine。Account Lane 使用固定 SPSC worker，settlement wait strategy 只影响 Lane 空闲等待，
+不改变事件顺序、完成位图或 committed watermark 语义。
 `RuntimeCommitJournal` 只做当前 owner transaction 的有界准入和连续 sequence 记录，没有 Snapshot projector、
 projection wait strategy 或批量 flush。Snapshot/query fence 直接物化权威 runtime；Core Fact materializer 保留有界
 异步编码，但 owner 不等待它。容量耗尽、sequence 缺口或 fence hash 不一致都会 fail-fast，不存在 legacy 双写路径。

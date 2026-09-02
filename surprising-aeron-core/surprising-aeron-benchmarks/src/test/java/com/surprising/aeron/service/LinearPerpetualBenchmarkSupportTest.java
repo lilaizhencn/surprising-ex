@@ -181,8 +181,9 @@ class LinearPerpetualBenchmarkSupportTest {
                 assertThat(scenario.acceptedOperations()).isEqualTo(scenario.terminalOperations());
                 assertThat(scenario.maxBacklog()).isGreaterThan(1);
                 assertThat(scenario.laneOperations(1))
-                        .as("one perpetual place batch must not cross the account lane once per item")
-                        .isLessThan(scenario.acceptedOperations() / 2);
+                        .as("each immutable matcher fact must visit each of its at most two account lanes once")
+                        .isPositive()
+                        .isLessThanOrEqualTo(Math.multiplyExact(scenario.acceptedOperations(), 2));
                 scenario.verify();
             }
         }).doesNotThrowAnyException();

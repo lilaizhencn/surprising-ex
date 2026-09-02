@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 class W1W2InvariantFenceTest {
 
     @Test
-    void failedOwnerCommitKeepsJournalIndexesMetadataAndEveryLaneBehindVisibilityFence() throws Exception {
+    void failedOwnerCommitDoesNotPublishAndPoisonsTheInstance() throws Exception {
         try (CoreProbeState state = new CoreProbeState(
                 com.surprising.product.api.ProductLine.SPOT)) {
             var journal = (com.surprising.aeron.service.state.RuntimeCommitJournal)
@@ -43,24 +43,15 @@ class W1W2InvariantFenceTest {
                     .hasMessage("injected indexes failure");
 
             assertThat(journal.publishedSequence()).isZero();
-            assertThat(activeOrders.orders()).containsExactlyElementsOf(activeOrderSnapshot);
-            assertThat((long) field(runtime, "committedBusinessStateHash")).isEqualTo(businessHash);
-            assertThat((long) field(runtime, "committedRevision")).isEqualTo(revision);
             assertThat(runtime.committedCoreSequence()).isEqualTo(coreSequence);
-            assertThat(runtime.readFence(coreSequence)).isEqualTo(coreSequence);
             var afterFailure = runtimeState.accountLanes();
             assertThat(afterFailure).hasSameSizeAs(laneViews);
             for (int laneId = 0; laneId < afterFailure.length; laneId++) {
-                assertThat(afterFailure[laneId].revision()).isEqualTo(laneViews[laneId].revision());
-                assertThat(afterFailure[laneId].appliedSequence())
-                        .isEqualTo(laneViews[laneId].appliedSequence());
                 assertThat(afterFailure[laneId].committedSequence())
                         .isEqualTo(laneViews[laneId].committedSequence());
-                assertThat(afterFailure[laneId].localStateHash())
-                        .isEqualTo(laneViews[laneId].localStateHash());
-                assertThat(afterFailure[laneId].localFundsHash())
-                        .isEqualTo(laneViews[laneId].localFundsHash());
             }
+            assertThatThrownBy(() -> state.apply(adjustment))
+                    .hasMessageContaining("snapshot and log is required");
         } finally {
             CoreProbeState.setCommitFaultInjectorForTest(null);
         }
@@ -115,9 +106,10 @@ class W1W2InvariantFenceTest {
                 .contains("businessTransition.commit()")
                 .contains("fundsTransition.commit()")
                 .contains("commitFaultInjector.inject(\"funds-hash\")")
-                .contains("fundsTransition::rollback")
-                .contains("businessTransition::rollback")
+                .contains("restart from snapshot and log is required")
                 .contains("publishSealedCommit(commit,")
+                .doesNotContain("fundsTransition::rollback", "businessTransition::rollback",
+                        "rollbackLaneSequence")
                 .doesNotContain("runtimeProjectionJournal.await")
                 .doesNotContain("RuntimeStateMaterializer.materialize")
                 .doesNotContain("RollingBusinessStateHash.compute")

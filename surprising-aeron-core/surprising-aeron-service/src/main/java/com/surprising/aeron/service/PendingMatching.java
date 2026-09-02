@@ -24,6 +24,9 @@ final class PendingMatching {
     private long commitFenceTimestamp;
     private long commitFenceClusterPosition;
     private boolean commitFenceEstablished;
+    private com.surprising.aeron.service.state.MatcherSettlementEvent settlementEvent;
+    private com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan;
+    private long settlementApplyStartNanos;
 
     PendingMatching(long sequence, Operation operation, CoreMessage command,
                     RuntimeProjectionPoint beforeProjection,
@@ -132,6 +135,9 @@ final class PendingMatching {
         commitFenceTimestamp = source.commitFenceTimestamp;
         commitFenceClusterPosition = source.commitFenceClusterPosition;
         commitFenceEstablished = source.commitFenceEstablished;
+        settlementEvent = source.settlementEvent;
+        settlementPlan = source.settlementPlan;
+        settlementApplyStartNanos = source.settlementApplyStartNanos;
     }
 
     PendingMatching withPreMatchingCancellations(List<Long> orderIds) {
@@ -177,6 +183,19 @@ final class PendingMatching {
     ResolvedMatchingAdmission admission() { return admission; }
     CoreAdmissionReservation capacityReservation() { return capacityReservation; }
     long pendingStateHash() { return pendingStateHash; }
+    com.surprising.aeron.service.state.MatcherSettlementEvent settlementEvent() { return settlementEvent; }
+    com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan() { return settlementPlan; }
+    long settlementApplyStartNanos() { return settlementApplyStartNanos; }
+    void settlement(com.surprising.aeron.service.state.MatcherSettlementEvent event,
+                    com.surprising.aeron.service.state.MatcherSettlementPlan plan,
+                    long applyStartNanos) {
+        if (event == null || plan == null || settlementEvent != null) {
+            throw new IllegalStateException("invalid matcher settlement continuation");
+        }
+        settlementEvent = event;
+        settlementPlan = plan;
+        settlementApplyStartNanos = applyStartNanos;
+    }
     long commitFenceTimestamp() {
         if (!commitFenceEstablished) throw new IllegalStateException("matching commit fence is not established");
         return commitFenceTimestamp;

@@ -319,13 +319,6 @@ public class OwnerCommitPatchBenchmark {
                     new AlgoOrderIndex(initial), new LiquidationIndex(initial), new CancelAllAfterIndex(initial),
                     activeOrders, new AdlPositionIndex(initial, identities), new RiskSnapshotIndex(initial));
         }
-
-        @TearDown(Level.Invocation)
-        public void tearDown() {
-            for (int index = batch.patches.size() - 1; index >= 0; index--) {
-                indexes.rollback(batch.patches.get(index));
-            }
-        }
     }
 
     @State(Scope.Thread)

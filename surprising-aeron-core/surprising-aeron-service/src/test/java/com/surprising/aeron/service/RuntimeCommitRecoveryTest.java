@@ -620,8 +620,13 @@ class RuntimeCommitRecoveryTest {
             if (matching == null) Thread.onSpinWait();
         }
         assertThat(matching).as("matching completion for " + command.header().messageType()).isNotNull();
-        CoreResponse completed = state.completeMatching(sequence, matching,
-                command.header().submittedAtEpochMillis(), command.header().sourceSequence());
+        CoreResponse completed = null;
+        deadline = System.nanoTime() + 5_000_000_000L;
+        while (completed == null && System.nanoTime() < deadline) {
+            completed = state.completeMatching(sequence, matching,
+                    command.header().submittedAtEpochMillis(), command.header().sourceSequence());
+            if (completed == null) Thread.onSpinWait();
+        }
         assertThat(completed).isNotNull();
         assertThat(completed.status()).isEqualTo(ResponseStatus.APPLIED);
         return completed;
@@ -706,68 +711,6 @@ class RuntimeCommitRecoveryTest {
                 .map(PatchEvidence::from).toList();
         return new BatchReplay(response(response), patches, encodedV10OutboxFacts(state),
                 state.exportState().snapshot().acknowledgedSequence());
-    }
-
-    private static FatalBatchEvidence failBatchAfterFirstMatcherFact(
-            SurprisingClusteredService service, CoreMessage batch)
-            throws Exception {
-        CoreProbeState state = service.state();
-        var stateBefore = state.tradingState();
-        long businessBefore = state.snapshotBusinessStateHash();
-        long fundsBefore = state.snapshotFundsStateHash();
-        long projectionBefore = state.snapshotProjectionSequence();
-        List<String> outboxBefore = encodedV10OutboxFacts(state);
-        long ackBefore = state.exportState().snapshot().acknowledgedSequence();
-        var runtime = (com.surprising.aeron.service.state.TradingRuntimeState)
-                field(state, "runtimePlaceOrderState");
-        long laneFenceBefore = state.appliedCommandCount();
-        var lanesBefore = state.accountLaneSnapshots(laneFenceBefore, stateBefore);
-        Map<String, Map<String, Object>> indexesBefore = allIndexSnapshots(state);
-        var identities = (com.surprising.aeron.service.state.RuntimeIdentityRegistry)
-                field(state, "runtimePlaceOrderIdentities");
-        var identitiesBefore = identities.snapshot();
-        int usdtAssetId = identities.findAssetId("USDT");
-        RuntimeFinancialView financialBefore = runtimeFinancialView(runtime, usdtAssetId);
-        long[] matcherBefore = ((long[]) field(state, "appliedMatcherSequences")).clone();
-        long[] matcherPrefixBefore = ((long[]) field(state, "appliedMatcherPrefixDigests")).clone();
-
-        state.captureCommittedPatchesForTest();
-        ClusterReplay replay = replayClusterCommandRaw(service, batch);
-        assertThat(replay.responses()).isEmpty();
-        long sequence = state.matchingSequence(batch.header().commandId());
-        var first = awaitMatching(state, sequence);
-        assertThat(first.nativeCommand()).isNotNull();
-        state.failOrderBatchAfterItemForTest(() -> {
-            throw new IllegalArgumentException("injected paired batch failure before commit");
-        });
-        state.publishMatchingCompletion(sequence, first);
-        Throwable divergence = org.assertj.core.api.Assertions.catchThrowable(() ->
-                service.doBackgroundWork(System.nanoTime()));
-        assertThat(replay.responses()).isEmpty();
-        long[] matcherAfterFirst = ((long[]) field(state, "appliedMatcherSequences")).clone();
-        long[] matcherPrefixAfterFirst = ((long[]) field(state, "appliedMatcherPrefixDigests")).clone();
-        assertThat(matcherAfterFirst).isNotEqualTo(matcherBefore);
-        assertThat(matcherPrefixAfterFirst).isNotEqualTo(matcherPrefixBefore);
-        assertThat(divergence).isInstanceOf(
-                com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class);
-        assertThat(state.tradingState()).isEqualTo(stateBefore);
-        assertThat(state.snapshotBusinessStateHash()).isEqualTo(businessBefore);
-        assertThat(state.snapshotFundsStateHash()).isEqualTo(fundsBefore);
-        assertThat(state.snapshotProjectionSequence()).isEqualTo(projectionBefore);
-        assertThat(state.accountLaneSnapshots(laneFenceBefore, state.tradingState())).isEqualTo(lanesBefore);
-        assertThat(allIndexSnapshots(state)).isEqualTo(indexesBefore);
-        assertThat(runtimeFinancialView(runtime, usdtAssetId)).isEqualTo(financialBefore);
-        assertThat(identities.findPositionKey(1001, "BTC-USDT")).isNull();
-        assertThat(identities.snapshot()).isEqualTo(identitiesBefore);
-        List<PatchEvidence> patches = state.drainCapturedCommitPatchesForTest().stream()
-                .map(PatchEvidence::from).toList();
-        CoreResultCode stored = state.pendingMatching(state.matchingSequence(batch.header().commandId())) == null
-                ? state.commandResults().get(batch.header().commandId()).resultCode()
-                : CoreResultCode.MATCHING_PENDING;
-        return new FatalBatchEvidence(true, outboxBefore, encodedV10OutboxFacts(state), ackBefore,
-                state.exportState().snapshot().acknowledgedSequence(), patches, stored,
-                businessBefore, fundsBefore, projectionBefore, matcherAfterFirst,
-                matcherPrefixAfterFirst, divergence);
     }
 
     private static com.surprising.aeron.service.matching.CoreMatchingResult awaitMatching(
@@ -1154,43 +1097,6 @@ class RuntimeCommitRecoveryTest {
         long makerTotal() {
             return makerBalance.available() + makerBalance.locked();
         }
-    }
-
-    private record FatalBatchEvidence(
-            boolean firstMatcherObserved,
-            List<String> outboxBefore,
-            List<String> outboxAfterFatal,
-            long ackBefore,
-            long ackAfterFatal,
-            List<PatchEvidence> publishedPatches,
-            CoreResultCode commandResultCode,
-            long businessStateHash,
-            long fundsStateHash,
-            long projectionSequence,
-            long[] matcherSequences,
-            long[] matcherPrefixDigests,
-            Throwable divergence) {
-
-        FatalDeterminism withoutFailureIdentity() {
-            return new FatalDeterminism(outboxBefore, outboxAfterFatal, ackBefore, ackAfterFatal,
-                    publishedPatches, commandResultCode, businessStateHash, fundsStateHash, projectionSequence,
-                    java.util.Arrays.stream(matcherSequences).boxed().toList(),
-                    java.util.Arrays.stream(matcherPrefixDigests).boxed().toList());
-        }
-    }
-
-    private record FatalDeterminism(
-            List<String> outboxBefore,
-            List<String> outboxAfterFatal,
-            long ackBefore,
-            long ackAfterFatal,
-            List<PatchEvidence> publishedPatches,
-            CoreResultCode commandResultCode,
-            long businessStateHash,
-            long fundsStateHash,
-            long projectionSequence,
-            List<Long> matcherSequences,
-            List<Long> matcherPrefixDigests) {
     }
 
     private record PatchEvidence(

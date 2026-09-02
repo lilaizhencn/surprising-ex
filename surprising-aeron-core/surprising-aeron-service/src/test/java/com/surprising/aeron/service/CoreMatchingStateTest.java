@@ -130,7 +130,7 @@ class CoreMatchingStateTest {
             long committedBefore = state.committedCoreSequence();
             var completedResult = matching;
 
-            assertThatThrownBy(() -> state.completeMatching(sequence, completedResult,
+            assertThatThrownBy(() -> completeUntilTerminalOrFailure(state, sequence, completedResult,
                     crossing.header().submittedAtEpochMillis(), crossing.header().sourceSequence()))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("diverged");
@@ -358,7 +358,7 @@ class CoreMatchingStateTest {
             long matchingSequence = state.matchingSequence(taker.header().commandId());
             var matching = state.awaitMatchingResult(matchingSequence);
             assertThat(matching).isNotNull();
-            CoreResponse completed = state.completeMatching(matchingSequence, matching,
+            CoreResponse completed = completeUntilTerminalOrFailure(state, matchingSequence, matching,
                     taker.header().submittedAtEpochMillis(), taker.header().sourceSequence());
             assertThat(completed).isNotNull();
             assertThat(completed.status()).isEqualTo(ResponseStatus.APPLIED);
@@ -868,14 +868,24 @@ class CoreMatchingStateTest {
             if (result == null) Thread.onSpinWait();
         }
         assertThat(result).as("matching result for " + message.header().messageType()).isNotNull();
-        CoreResponse completed = null;
-        while (completed == null && System.nanoTime() < deadline) {
-            completed = state.completeMatching(sequence, result,
-                    message.header().submittedAtEpochMillis(), message.header().sourceSequence());
-            if (completed == null) Thread.onSpinWait();
-        }
+        CoreResponse completed = completeUntilTerminalOrFailure(state, sequence, result,
+                message.header().submittedAtEpochMillis(), message.header().sourceSequence());
         assertThat(completed).isNotNull();
         assertThat(completed.status()).isIn(ResponseStatus.APPLIED, ResponseStatus.REJECTED);
+        return completed;
+    }
+
+    private static CoreResponse completeUntilTerminalOrFailure(
+            CoreProbeState state, long sequence,
+            com.surprising.aeron.service.matching.CoreMatchingResult result,
+            long clusterTimestamp, long clusterPosition) {
+        CoreResponse completed = null;
+        long deadline = System.nanoTime() + 5_000_000_000L;
+        while (completed == null && System.nanoTime() < deadline) {
+            completed = state.completeMatching(sequence, result, clusterTimestamp, clusterPosition);
+            if (completed == null) Thread.onSpinWait();
+        }
+        if (completed == null) throw new AssertionError("account lane settlement did not complete");
         return completed;
     }
 

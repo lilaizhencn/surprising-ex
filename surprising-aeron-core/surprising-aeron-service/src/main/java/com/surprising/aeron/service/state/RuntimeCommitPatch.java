@@ -758,10 +758,6 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
                 throw new IllegalArgumentException("order business identity mismatch");
             }
         }
-
-        public OrderChange reversed() {
-            return new OrderChange(orderId, after, before, businessAfter, businessBefore);
-        }
     }
     public record PositionChange(long positionKey, PositionRuntime before, PositionRuntime after) {
         public PositionChange { requireChange(positionKey > 0, before, after, "position"); }

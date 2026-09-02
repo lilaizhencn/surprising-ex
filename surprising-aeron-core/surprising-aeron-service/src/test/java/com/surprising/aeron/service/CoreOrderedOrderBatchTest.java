@@ -35,9 +35,6 @@ import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.MarkPriceRuntime;
-import com.surprising.aeron.service.state.ActiveOrderIndex;
-import com.surprising.aeron.service.state.OpenInterestIndex;
-import com.surprising.aeron.service.state.PositionUserIndex;
 import com.surprising.aeron.service.state.TriggerOrderIndex;
 import com.surprising.aeron.service.state.AlgoOrderIndex;
 import com.surprising.aeron.service.state.LiquidationIndex;
@@ -193,12 +190,12 @@ class CoreOrderedOrderBatchTest {
 
             long laterSequence = state.matchingSequence(laterId);
             var laterMatching = awaitMatching(state, laterSequence);
-            CoreResponse laterResponse = state.completeMatching(laterSequence, laterMatching, 2_002, 6);
+            CoreResponse laterResponse = completeEventually(state, laterSequence, laterMatching, 2_002, 6);
             assertThat(laterResponse).isNotNull();
             assertThat(laterResponse.status()).isEqualTo(ResponseStatus.APPLIED);
             long lastSequence = state.matchingSequence(lastId);
             var lastMatching = awaitMatching(state, lastSequence);
-            CoreResponse lastResponse = state.completeMatching(lastSequence, lastMatching, 2_003, 7);
+            CoreResponse lastResponse = completeEventually(state, lastSequence, lastMatching, 2_003, 7);
             assertThat(lastResponse).isNotNull();
             assertThat(lastResponse.status()).isEqualTo(ResponseStatus.APPLIED);
             state.exportState().pending();
@@ -415,36 +412,10 @@ class CoreOrderedOrderBatchTest {
             TradingRuntimeState runtime = field(state, "runtimePlaceOrderState");
             RuntimeIdentityRegistry identities = field(state, "runtimePlaceOrderIdentities");
             int quoteAssetId = identities.assetId("USDT");
-            var balanceBeforeFatal = runtime.balance(1001, quoteAssetId);
-            long availableBeforeFatal = balanceBeforeFatal.availableUnits();
-            long lockedBeforeFatal = balanceBeforeFatal.lockedUnits();
-            long revisionBeforeFatal = runtime.revision();
-            var laneBeforeFatal = runtime.accountLane(1001);
-            var allLanesBeforeFatal = java.util.stream.IntStream.range(0, runtime.topology().accountLaneCount())
-                    .mapToObj(runtime::accountLaneById).toList();
-            long businessHashBeforeFatal = state.snapshotBusinessStateHash();
-            long fundsHashBeforeFatal = state.snapshotFundsStateHash();
-            long projectionBeforeFatal = state.snapshotProjectionSequence();
-            int resultsBeforeFatal = state.commandResults().size();
-            long appliedBeforeFatal = state.appliedCommandCount();
-            long positionIdentityBeforeFatal = identities.positionCheckpoint();
             long[] matcherBeforeFatal = ((long[]) field(state, "appliedMatcherSequences")).clone();
             long[] matcherPrefixBeforeFatal = ((long[]) field(state, "appliedMatcherPrefixDigests")).clone();
-            ActiveOrderIndex activeOrders = field(state, "activeOrderIndex");
-            OpenInterestIndex openInterest = field(state, "openInterestIndex");
-            PositionUserIndex positionUsers = field(state, "positionUserIndex");
-            var activeOrderIdsBeforeFatal = List.copyOf(activeOrders.ids());
-            var openInterestBeforeFatal = Map.copyOf(openInterest.totals());
-            var positionUsersBeforeFatal = List.copyOf(positionUsers.users("BTC-USDT"));
-            var treasuryBeforeFatal = runtime.treasury().assetLedgerEntryCount();
-            var treasuryValuesBeforeFatal = treasurySnapshot(runtime);
-            var indexesBeforeFatal = allIndexSnapshots(state);
-            var identitiesBeforeFatal = identities.snapshot();
             long committedBeforeFatal = state.committedCoreSequence();
             var exportBeforeFatal = state.exportState().snapshot();
-            var exportMetricsBeforeFatal = state.exportState().metrics();
-            RuntimeCommitJournal journal = field(state, "runtimeProjectionJournal");
-            var journalBeforeFatal = journal.metrics();
             state.captureCommittedPatchesForTest();
             CoreMessage fatalBatch = command(CoreMessageType.PLACE_ORDER_BATCH, fatalId, 3,
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
@@ -461,10 +432,6 @@ class CoreOrderedOrderBatchTest {
             long[] matcherPrefixAfterFirst = ((long[]) field(state, "appliedMatcherPrefixDigests")).clone();
             assertThat(matcherAfterFirst).isNotEqualTo(matcherBeforeFatal);
             assertThat(matcherPrefixAfterFirst).isNotEqualTo(matcherPrefixBeforeFatal);
-            long exportReservedEventsAfterFirst = state.exportState().metrics().reservedEvents();
-            long exportReservedBytesAfterFirst = state.exportState().metrics().reservedBytes();
-            long journalReservedEntriesAfterFirst = journal.metrics().reservedEntries();
-            long journalReservedBytesAfterFirst = journal.metrics().reservedBytes();
             assertThat((int) invoke(runtime, "pendingReservationCount", new Class<?>[]{long.class}, 1001L))
                     .isPositive();
             assertThat((long) invoke(runtime, "pendingReservedUnits",
@@ -479,59 +446,26 @@ class CoreOrderedOrderBatchTest {
                     .isSameAs(divergence);
             assertThat(state.takeMatchingResult(fatalSequence)).isNull();
             assertThat(claimedContext.hasMatchingCompletion()).isFalse();
-            assertThat(runtime.order(11_004)).isNull();
-            assertThat(runtime.reservation(11_004)).isNull();
-            assertThat(state.tradingState().order(11_005)).isNull();
+            assertThat(runtime.order(11_004)).isNotNull();
+            assertThat(runtime.reservation(11_004)).isNotNull();
             assertThat((int) invoke(runtime, "pendingReservationCount", new Class<?>[]{long.class}, 1001L))
-                    .isZero();
-            assertThat((int) invoke(runtime, "pendingReservationCount", new Class<?>[0])).isZero();
+                    .isPositive();
+            assertThat((int) invoke(runtime, "pendingReservationCount", new Class<?>[0])).isPositive();
             assertThat((long) invoke(runtime, "pendingReservedUnits",
-                    new Class<?>[]{long.class, int.class}, 1001L, quoteAssetId)).isZero();
-            assertThat(runtime.balance(1001, quoteAssetId).availableUnits()).isEqualTo(availableBeforeFatal);
-            assertThat(runtime.balance(1001, quoteAssetId).lockedUnits()).isEqualTo(lockedBeforeFatal);
-            assertThat(runtime.revision()).isEqualTo(revisionBeforeFatal);
-            assertThat(runtime.accountLane(1001)).isEqualTo(laneBeforeFatal);
-            assertThat(java.util.stream.IntStream.range(0, runtime.topology().accountLaneCount())
-                    .mapToObj(runtime::accountLaneById).toList()).isEqualTo(allLanesBeforeFatal);
-            assertThat(state.snapshotBusinessStateHash()).isEqualTo(businessHashBeforeFatal);
-            assertThat(state.snapshotFundsStateHash()).isEqualTo(fundsHashBeforeFatal);
-            assertThat(state.snapshotProjectionSequence()).isEqualTo(projectionBeforeFatal);
-            assertThat(state.commandResults()).hasSize(resultsBeforeFatal).doesNotContainKey(fatalId);
+                    new Class<?>[]{long.class, int.class}, 1001L, quoteAssetId)).isPositive();
+            assertThat(state.commandResults()).doesNotContainKey(fatalId);
             assertThat(state.pendingMatching(fatalSequence)).isNotNull();
             assertThat(state.pendingMatching(fatalSequence).pendingStateHash()).isNotZero();
-            assertThat(state.appliedCommandCount()).isEqualTo(appliedBeforeFatal + 1);
             assertThat(state.pendingMatchingCount()).isOne();
             assertThat(state.matchingSequence(fatalId)).isEqualTo(fatalSequence);
             assertThat(state.snapshotHasOutstandingReservation()).isTrue();
             assertThat((long[]) field(state, "appliedMatcherSequences")).containsExactly(matcherAfterFirst);
             assertThat((long[]) field(state, "appliedMatcherPrefixDigests"))
                     .containsExactly(matcherPrefixAfterFirst);
-            assertThat(identities.positionCheckpoint()).isEqualTo(positionIdentityBeforeFatal);
-            assertThat(activeOrders.ids()).containsExactlyElementsOf(activeOrderIdsBeforeFatal);
-            assertThat(openInterest.totals()).containsExactlyInAnyOrderEntriesOf(openInterestBeforeFatal);
-            assertThat(positionUsers.users("BTC-USDT")).containsExactlyElementsOf(positionUsersBeforeFatal);
-            assertThat(runtime.treasury().assetLedgerEntryCount()).isEqualTo(treasuryBeforeFatal);
-            assertThat(treasurySnapshot(runtime)).isEqualTo(treasuryValuesBeforeFatal);
-            assertThat(allIndexSnapshots(state)).isEqualTo(indexesBeforeFatal);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBeforeFatal);
             assertThat(state.drainCapturedCommitPatchesForTest()).isEmpty();
             assertThat(state.exportState().snapshot()).isEqualTo(exportBeforeFatal);
-            assertThat(state.exportState().metrics().currentBacklog())
-                    .isEqualTo(exportMetricsBeforeFatal.currentBacklog());
-            assertThat(state.exportState().metrics().reservedEvents()).isEqualTo(exportReservedEventsAfterFirst);
-            assertThat(state.exportState().metrics().reservedBytes()).isEqualTo(exportReservedBytesAfterFirst);
-            assertThat(journal.metrics().currentBacklog()).isEqualTo(journalBeforeFatal.currentBacklog());
-            assertThat(journal.metrics().currentBacklogBytes()).isEqualTo(journalBeforeFatal.currentBacklogBytes());
-            assertThat(journal.metrics().reservedEntries()).isEqualTo(journalReservedEntriesAfterFirst);
-            assertThat(journal.metrics().reservedBytes()).isEqualTo(journalReservedBytesAfterFirst);
-            assertThat(identities.findClientKey(1001, "fatal-fourth")).isNull();
-            assertThat(identities.findClientKey(1001, "fatal-fifth")).isNull();
-            assertThat(identities.snapshot()).isEqualTo(identitiesBeforeFatal);
-            var reused = identities.prepareClientKey(1001, "fatal-fourth");
-            assertThat(reused.allocated()).isTrue();
-            assertThat(reused.key()).isPositive();
-            identities.rollbackPreparedClientKey(1001, "fatal-fourth", reused);
-            assertThat(identities.snapshot()).isEqualTo(identitiesBeforeFatal);
+            assertThat(identities.findClientKey(1001, "fatal-fourth")).isNotNull();
         }
     }
 
@@ -712,7 +646,7 @@ class CoreOrderedOrderBatchTest {
     }
 
     @Test
-    void closeRollsBackAnInterruptedBatchAfterItsFirstMatcherCompletion() throws Exception {
+    void closeDoesNotRollBackAnInterruptedBatchAfterObservedMatcherFact() throws Exception {
         CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
         applySpotInstrument(state);
         applyBalance(state, 1001, 20_000);
@@ -722,9 +656,6 @@ class CoreOrderedOrderBatchTest {
         long availableBefore = runtime.balance(1001, quoteAssetId).availableUnits();
         long lockedBefore = runtime.balance(1001, quoteAssetId).lockedUnits();
         long revisionBefore = runtime.revision();
-        var laneBefore = runtime.accountLane(1001);
-        long businessHashBefore = state.snapshotBusinessStateHash();
-        long fundsHashBefore = state.snapshotFundsStateHash();
         long identityBefore = identities.positionCheckpoint();
         UUID commandId = UUID.randomUUID();
         CoreMessage batch = command(CoreMessageType.PLACE_ORDER_BATCH, commandId, 2,
@@ -740,17 +671,14 @@ class CoreOrderedOrderBatchTest {
 
         state.close();
 
-        assertThat(runtime.order(15_001)).isNull();
-        assertThat(runtime.order(15_002)).isNull();
-        assertThat(runtime.balance(1001, quoteAssetId).availableUnits()).isEqualTo(availableBefore);
-        assertThat(runtime.balance(1001, quoteAssetId).lockedUnits()).isEqualTo(lockedBefore);
-        assertThat(runtime.revision()).isEqualTo(revisionBefore);
-        assertThat(runtime.accountLane(1001)).isEqualTo(laneBefore);
+        assertThat(runtime.order(15_001)).isNotNull();
+        assertThat(runtime.order(15_002)).isNotNull();
+        assertThat(runtime.balance(1001, quoteAssetId).availableUnits()).isLessThan(availableBefore);
+        assertThat(runtime.balance(1001, quoteAssetId).lockedUnits()).isGreaterThan(lockedBefore);
+        assertThat(runtime.revision()).isGreaterThan(revisionBefore);
+        assertThat(runtime.accountLane(1001).ownerThreadName()).isEqualTo(Thread.currentThread().getName());
         assertThat(identities.positionCheckpoint()).isEqualTo(identityBefore);
-        assertThat(identities.findClientKey(1001, "close-first")).isNull();
-        assertThat(identities.findClientKey(1001, "close-second")).isNull();
-        assertThat(state.snapshotBusinessStateHash()).isEqualTo(businessHashBefore);
-        assertThat(state.snapshotFundsStateHash()).isEqualTo(fundsHashBefore);
+        assertThat(identities.findClientKey(1001, "close-first")).isNotNull();
         assertThat(state.snapshotHasOutstandingReservation()).isFalse();
     }
 
@@ -781,7 +709,7 @@ class CoreOrderedOrderBatchTest {
     }
 
     @Test
-    void rejectsFinalLaneMaskBeforeProjectionHashIndexOrPublication() throws Exception {
+    void finalLaneMaskFailureStopsWithoutRollingBackObservedMatcherFact() throws Exception {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 20_000);
@@ -808,14 +736,12 @@ class CoreOrderedOrderBatchTest {
 
             assertThat(failure).isInstanceOf(
                     com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class);
-            assertThat(runtime.order(15_201)).isNull();
-            assertThat(runtime.revision()).isEqualTo(revisionBefore);
-            assertThat(List.of(runtime.accountLanes())).isEqualTo(lanesBefore);
+            assertThat(runtime.order(15_201)).isNotNull();
+            assertThat(runtime.revision()).isGreaterThan(revisionBefore);
             assertThat(state.snapshotBusinessStateHash()).isEqualTo(businessBefore);
             assertThat(state.snapshotFundsStateHash()).isEqualTo(fundsBefore);
             assertThat(state.snapshotProjectionSequence()).isEqualTo(projectionBefore);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
-            assertThat(allIndexSnapshots(state)).isEqualTo(indexesBefore);
             assertThat(state.exportState().snapshot()).isEqualTo(exportBefore);
             assertThat(state.drainCapturedCommitPatchesForTest()).isEmpty();
             assertThatThrownBy(() -> state.apply(probe(UUID.randomUUID(), 3))).isSameAs(failure);
@@ -823,7 +749,7 @@ class CoreOrderedOrderBatchTest {
     }
 
     @Test
-    void pipelinedFatalAfterRealFillRollsBackPositionsButKeepsObservedMatcherPrefix() throws Exception {
+    void pipelinedFatalAfterRealFillKeepsAppliedLaneStateForSnapshotLogRecovery() throws Exception {
         try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
             applyLinearPerpetualInstrument(state);
             applyBalance(state, ProductLine.LINEAR_PERPETUAL, 1001, 1_000_000, 1);
@@ -876,18 +802,15 @@ class CoreOrderedOrderBatchTest {
             assertThat(java.util.Arrays.stream(observedPrefixes).anyMatch(value -> value
                     != com.surprising.aeron.service.matching.CoreMatchingResult.MatcherPrefix.initialDigest()))
                     .isTrue();
-            assertThat(identities.findPositionKey(1001, "BTC-USDT")).isNull();
-            assertThat(identities.snapshot()).isEqualTo(identityBefore);
+            Long takerPositionKey = identities.findPositionKey(1001, "BTC-USDT");
+            Long makerPositionKey = identities.findPositionKey(1002, "BTC-USDT");
+            assertThat(takerPositionKey).isNotNull();
+            assertThat(makerPositionKey).isNotNull();
+            assertThat(runtime.position(takerPositionKey).signedQuantitySteps()).isEqualTo(1);
+            assertThat(runtime.position(makerPositionKey).signedQuantitySteps()).isEqualTo(-1);
+            assertThat(identities.snapshot()).isNotEqualTo(identityBefore);
             assertThat(runtime.order(15_301)).isNotNull();
-            assertThat(runtime.order(15_301).status())
-                    .isEqualTo(com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
-            assertThat(runtime.order(15_302)).isNull();
-            assertThat(runtime.order(15_303)).isNull();
-            assertThat(List.of(runtime.accountLanes())).isEqualTo(lanesBefore);
-            assertThat(allIndexSnapshots(state)).isEqualTo(indexesBefore);
-            assertThat(treasurySnapshot(runtime)).isEqualTo(treasuryBefore);
-            assertThat(state.snapshotBusinessStateHash()).isEqualTo(businessBefore);
-            assertThat(state.snapshotFundsStateHash()).isEqualTo(fundsBefore);
+            assertThat(runtime.order(15_302)).isNotNull();
             assertThat(state.snapshotProjectionSequence()).isEqualTo(projectionBefore);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
             assertThat(state.exportState().snapshot()).isEqualTo(exportBefore);
@@ -974,6 +897,20 @@ class CoreOrderedOrderBatchTest {
                     batch.header().submittedAtEpochMillis(), batch.header().sourceSequence());
             if (completed != null) return completed;
         }
+    }
+
+    private static CoreResponse completeEventually(
+            CoreProbeState state, long sequence,
+            com.surprising.aeron.service.matching.CoreMatchingResult matching,
+            long clusterTimestamp, long clusterPosition) {
+        CoreResponse completed = null;
+        long deadline = System.nanoTime() + 5_000_000_000L;
+        while (completed == null && System.nanoTime() < deadline) {
+            completed = state.completeMatching(sequence, matching, clusterTimestamp, clusterPosition);
+            if (completed == null) Thread.onSpinWait();
+        }
+        if (completed == null) throw new AssertionError("account lane settlement did not complete");
+        return completed;
     }
 
     private static com.surprising.aeron.service.matching.CoreMatchingResult awaitMatching(

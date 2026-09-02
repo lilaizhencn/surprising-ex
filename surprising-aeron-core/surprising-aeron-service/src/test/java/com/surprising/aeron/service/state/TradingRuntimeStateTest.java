@@ -20,6 +20,13 @@ class TradingRuntimeStateTest {
         assertThat(methodSource(source, "void applied", "void requireApply"))
                 .contains("stateContribution", "fundsContribution", "transitionHash")
                 .doesNotContain("computeStateHash", "computeFundsHash");
+        assertThat(source).doesNotContain("record Checkpoint", "void rollback(Checkpoint",
+                "pendingApplyCheckpoint", "pendingApplySequence");
+        String runtimeSource = Files.readString(Path.of(
+                "src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java"));
+        assertThat(methodSource(runtimeSource, "public long commandRevisionCheckpoint", "public void beginOrderBatch"))
+                .contains("return revision")
+                .doesNotContain("onLane(", "new CommandCheckpoint", "AccountLaneState.Checkpoint");
     }
 
     @Test
@@ -584,7 +591,7 @@ class TradingRuntimeStateTest {
     }
 
     @Test
-    void routesStateAndReadFencesWithoutCrossThreadLaneWaits() {
+    void routesStateAndReadFencesThroughThePermanentLaneOwner() {
         TradingRuntimeState state = new TradingRuntimeState(LaneTopology.characterization());
         state.putUser(new UserRuntime(7));
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
@@ -596,7 +603,7 @@ class TradingRuntimeStateTest {
             state.readFence(7, 1);
 
             AccountLaneView lane = state.accountLane(7);
-            assertThat(lane.ownerThreadName()).isEqualTo(Thread.currentThread().getName());
+            assertThat(lane.ownerThreadName()).isEqualTo("core-account-lane-0");
             assertThat(lane.appliedSequence()).isEqualTo(1);
             assertThat(lane.committedSequence()).isEqualTo(1);
             assertThat(lane.queueDepth()).isZero();
@@ -772,6 +779,31 @@ class TradingRuntimeStateTest {
     }
 
     @Test
+    void accountLaneConsumesConsecutiveSequencesBeforeCommitWatermarkAdvances() {
+        LaneTopology topology = LaneTopology.productionDefault();
+        TradingRuntimeState state = new TradingRuntimeState(topology);
+        long userId = userForLane(topology, 0);
+        state.putUser(new UserRuntime(userId));
+        state.startAccountLanes();
+        try {
+            long firstMask = state.stageLaneMutation(1, java.util.List.of(userId), 3, 5);
+            long secondMask = state.stageLaneMutation(2, java.util.List.of(userId), 7, 11);
+
+            AccountLaneView applied = state.accountLaneById(0);
+            assertThat(applied.appliedSequence()).isEqualTo(2);
+            assertThat(applied.committedSequence()).isZero();
+
+            state.commitLaneSequence(1, firstMask);
+            state.commitLaneSequence(2, secondMask);
+            AccountLaneView committed = state.accountLaneById(0);
+            assertThat(committed.appliedSequence()).isEqualTo(2);
+            assertThat(committed.committedSequence()).isEqualTo(2);
+        } finally {
+            state.close();
+        }
+    }
+
+    @Test
     void invalidSnapshotSetDoesNotPartiallyRestoreEarlierLanes() {
         LaneTopology topology = LaneTopology.productionDefault();
         TradingRuntimeState state = new TradingRuntimeState(topology);
@@ -818,7 +850,7 @@ class TradingRuntimeStateTest {
     }
 
     @Test
-    void lifecycleSettlementUsesIndependentLaneOwnersAndRebindsTheCoreOwner() {
+    void lifecycleSettlementUsesPermanentIndependentLaneOwners() {
         LaneTopology topology = LaneTopology.productionDefault();
         TradingRuntimeState state = new TradingRuntimeState(topology);
         java.util.List<Long> users = new java.util.ArrayList<>();
@@ -842,7 +874,7 @@ class TradingRuntimeStateTest {
                     });
 
             for (int laneId = 0; laneId < owners.length; laneId++) {
-                assertThat(owners[laneId]).isEqualTo("core-mutation-lane-" + laneId);
+                assertThat(owners[laneId]).isEqualTo("core-account-lane-" + laneId);
                 assertThat(state.user(users.get(laneId)).revision()).isEqualTo(revisions.get(laneId) + 1);
                 AccountLaneMetricsSnapshot metrics = state.accountLaneMetricsById(laneId);
                 assertThat(metrics.queueHighWaterMark()).isEqualTo(1);

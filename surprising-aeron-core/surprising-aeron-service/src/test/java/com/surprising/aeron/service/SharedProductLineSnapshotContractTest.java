@@ -182,8 +182,14 @@ class SharedProductLineSnapshotContractTest {
             if (matching == null) Thread.onSpinWait();
         }
         assertThat(matching).as("matching completion for %s", command.header().messageType()).isNotNull();
-        return state.completeMatching(matchingSequence, matching, command.header().submittedAtEpochMillis(),
-                command.header().sourceSequence());
+        CoreResponse completed = null;
+        deadline = System.nanoTime() + 5_000_000_000L;
+        while (completed == null && System.nanoTime() < deadline) {
+            completed = state.completeMatching(matchingSequence, matching,
+                    command.header().submittedAtEpochMillis(), command.header().sourceSequence());
+            if (completed == null) Thread.onSpinWait();
+        }
+        return completed;
     }
 
     private static void assertApplied(CoreResponse response) {

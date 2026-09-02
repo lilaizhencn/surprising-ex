@@ -1,17 +1,17 @@
 package com.surprising.aeron.service.state;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.NavigableSet;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.TreeSet;
 
 public final class AdlPositionIndex {
 
-    private final Map<String, NavigableSet<PositionKey>> keysByAsset = new TreeMap<>();
-    private final Map<Long, RuntimePositionIndexValue> positions = new TreeMap<>();
-    private final Map<AssetPositionKey, Integer> positionCounts = new TreeMap<>();
+    private final Map<String, NavigableSet<PositionKey>> keysByAsset = new HashMap<>();
+    private final Map<Long, RuntimePositionIndexValue> positions = new HashMap<>();
+    private final Map<AssetPositionKey, Integer> positionCounts = new HashMap<>();
 
     public AdlPositionIndex(TradingCoreState state) {
         rebuild(state);
@@ -81,13 +81,7 @@ public final class AdlPositionIndex {
         if (values.isEmpty()) keysByAsset.remove(position.asset());
     }
 
-    private record AssetPositionKey(String asset, PositionKey position) implements Comparable<AssetPositionKey> {
-        @Override
-        public int compareTo(AssetPositionKey other) {
-            int comparison = asset.compareTo(other.asset);
-            return comparison != 0 ? comparison : position.compareTo(other.position);
-        }
-    }
+    private record AssetPositionKey(String asset, PositionKey position) {}
 
     private void add(long userId, CorePositionState position) {
         if (position.signedQuantitySteps() == 0) return;

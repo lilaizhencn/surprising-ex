@@ -312,18 +312,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         committedBusinessStateHash = afterBusinessStateHash;
     }
 
-    void rollbackRuntimeTransition(RuntimeCommitPatch entry,
-                                   long beforeRevision, long beforeBusinessStateHash) {
-        assertOwner();
-        if (entry == null || committedRevision != entry.revision()
-                || committedBusinessStateHash != entry.businessStateHash()) {
-            return;
-        }
-        commitIndexes.rollback(entry);
-        committedRevision = beforeRevision;
-        committedBusinessStateHash = beforeBusinessStateHash;
-    }
-
     void restoreCommittedConsumers(TradingCoreState state, long revision, long businessStateHash) {
         if (owner != null) assertOwner();
         commitIndexes.rebuild(state, identities);

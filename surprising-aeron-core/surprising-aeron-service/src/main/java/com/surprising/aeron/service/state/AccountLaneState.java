@@ -7,7 +7,7 @@ import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 import java.util.Map;
-import java.util.TreeMap;
+import java.util.HashMap;
 import java.util.TreeSet;
 
 public final class AccountLaneState {
@@ -29,10 +29,10 @@ public final class AccountLaneState {
     final LongObjectHashMap<RiskSnapshotRuntime> riskSnapshots = new LongObjectHashMap<>();
     final LongObjectHashMap<LongObjectHashMap<Long>> clientOrderIndex = new LongObjectHashMap<>();
     final LongObjectHashMap<LongHashSet> clientKeysByOrderId = new LongObjectHashMap<>();
-    final Map<CoreLeverageKey, Long> leverages = new TreeMap<>();
+    final Map<CoreLeverageKey, Long> leverages = new HashMap<>();
     final LongObjectHashMap<TreeSet<CoreLeverageKey>> leverageKeysByUser = new LongObjectHashMap<>();
-    final Map<Long, CoreAlgoOrderState> algoOrders = new TreeMap<>();
-    final Map<Long, CoreTriggerOrderState> triggerOrders = new TreeMap<>();
+    final Map<Long, CoreAlgoOrderState> algoOrders = new HashMap<>();
+    final Map<Long, CoreTriggerOrderState> triggerOrders = new HashMap<>();
     final LongLongHashMap pendingReservationSequences = new LongLongHashMap();
     private final LongIntHashMap pendingReservationCountsByUser = new LongIntHashMap();
     private final LongObjectHashMap<IntLongHashMap> pendingReservedUnitsByUser = new LongObjectHashMap<>();
@@ -42,8 +42,6 @@ public final class AccountLaneState {
     private long committedSequence;
     private long localStateHash = 0xcbf29ce484222325L;
     private long localFundsHash = 0xcbf29ce484222325L;
-    private long pendingApplySequence;
-    private Checkpoint pendingApplyCheckpoint;
     private Thread owner;
 
     AccountLaneState(int laneId, int queueCapacity) {
@@ -60,11 +58,6 @@ public final class AccountLaneState {
         Thread current = Thread.currentThread();
         if (owner == null) owner = current;
         else if (owner != current) throw new IllegalStateException("account lane is bound to another thread");
-    }
-
-    void releaseOwner() {
-        if (owner != Thread.currentThread()) throw new IllegalStateException("account lane owner mismatch");
-        owner = null;
     }
 
     void releaseOwnerForHandoff() {
@@ -240,12 +233,6 @@ public final class AccountLaneState {
     void applied(long coreSequence, long stateContribution, long fundsContribution) {
         assertOwner();
         requireApplySequence(coreSequence);
-        if (pendingApplyCheckpoint == null) {
-            pendingApplyCheckpoint = checkpoint();
-            pendingApplySequence = coreSequence;
-        } else if (pendingApplySequence != coreSequence) {
-            throw new IllegalStateException("account lane has an unfinished apply");
-        }
         appliedSequence = coreSequence;
         revision = Math.incrementExact(revision);
         localStateHash = transitionHash(localStateHash, coreSequence, stateContribution);
@@ -254,7 +241,7 @@ public final class AccountLaneState {
 
     void requireApplySequence(long coreSequence) {
         assertOwner();
-        if (coreSequence < appliedSequence) {
+        if (coreSequence <= appliedSequence) {
             throw new IllegalStateException("account lane apply is out of order");
         }
     }
@@ -262,42 +249,8 @@ public final class AccountLaneState {
     void committed(long coreSequence) {
         assertOwner();
         requireCommit(coreSequence);
-        if (pendingApplyCheckpoint == null || pendingApplySequence != coreSequence) {
-            throw new IllegalStateException("account lane commit has no pending apply");
-        }
         committedSequence = coreSequence;
-        pendingApplySequence = 0;
-        pendingApplyCheckpoint = null;
     }
-
-    void rollbackApplied(long coreSequence) {
-        assertOwner();
-        if (pendingApplyCheckpoint == null || pendingApplySequence != coreSequence) {
-            throw new IllegalStateException("account lane rollback has no pending apply");
-        }
-        Checkpoint checkpoint = pendingApplyCheckpoint;
-        rollback(checkpoint);
-    }
-
-    Checkpoint checkpoint() {
-        assertOwner();
-        return new Checkpoint(revision, appliedSequence, committedSequence, localStateHash, localFundsHash);
-    }
-
-    void rollback(Checkpoint checkpoint) {
-        assertOwner();
-        if (checkpoint == null) throw new IllegalArgumentException("account lane checkpoint is required");
-        pendingApplySequence = 0;
-        pendingApplyCheckpoint = null;
-        revision = checkpoint.revision();
-        appliedSequence = checkpoint.appliedSequence();
-        committedSequence = checkpoint.committedSequence();
-        localStateHash = checkpoint.localStateHash();
-        localFundsHash = checkpoint.localFundsHash();
-    }
-
-    record Checkpoint(long revision, long appliedSequence, long committedSequence,
-                      long localStateHash, long localFundsHash) {}
 
     void requireCommit(long coreSequence) {
         assertOwner();
@@ -343,8 +296,6 @@ public final class AccountLaneState {
         pendingReservationCountsByUser.clear();
         pendingReservedUnitsByUser.clear();
         totalPendingReservations = 0;
-        pendingApplySequence = 0;
-        pendingApplyCheckpoint = null;
     }
 
     LongHashSet userIdsSnapshot() {

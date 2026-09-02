@@ -143,7 +143,7 @@ fi
 emit_group workload-measurements \
   'com.surprising.LinearPerpetualWorkload,com.surprising.LinearPerpetualSaturation,com.surprising.LinearPerpetualBusinessLatency' optional
 emit_group allocations \
-  'jdk.ObjectAllocationSample,jdk.ObjectAllocationInNewTLAB,jdk.ObjectAllocationOutsideTLAB,jdk.ThreadAllocationStatistics' required
+  'jdk.ObjectAllocationSample,jdk.ThreadAllocationStatistics' required
 emit_group heap-gc \
   'jdk.GCHeapSummary,jdk.GarbageCollection,jdk.GCPhasePause,jdk.GCPhasePauseLevel1,jdk.GCPhasePauseLevel2,jdk.GCPhasePauseLevel3,jdk.GCPhaseConcurrent,jdk.GCConfiguration,jdk.YoungGenerationConfiguration' required
 emit_group gc-failure-signals \
@@ -151,7 +151,7 @@ emit_group gc-failure-signals \
 emit_group native-direct-memory \
   'jdk.NativeMemoryUsage,jdk.DirectBufferStatistics' required
 emit_group locks-parks \
-  'jdk.JavaMonitorEnter,jdk.JavaMonitorWait,jdk.ThreadPark,jdk.ThreadSleep' optional
+  'jdk.JavaMonitorEnter,jdk.JavaMonitorWait,jdk.ThreadSleep' optional
 emit_group thread-lifecycle \
   'jdk.ThreadStart,jdk.ThreadEnd,jdk.JavaThreadStatistics' required
 emit_group safepoints \
@@ -163,6 +163,14 @@ emit_group exceptions 'jdk.JavaExceptionThrow,jdk.JavaErrorThrow' optional
 emit_group old-objects 'jdk.OldObjectSample' optional
 emit_group system-container \
   'jdk.OSInformation,jdk.PhysicalMemory,jdk.SwapSpace,jdk.ContainerConfiguration,jdk.ContainerCPUUsage,jdk.ContainerCPUThrottling,jdk.ContainerMemoryUsage,jdk.SystemProcess' required
+
+# High-frequency park and TLAB events expand to multi-gigabyte JSON because every row repeats its stack.
+# Preserve bounded, inspectable JDK aggregations instead of materializing those raw event streams.
+"${JFR_BIN}" view --width 200 contention-by-site "${RECORDING}" > "${OUTPUT_DIR}/contention-by-site.txt"
+"${JFR_BIN}" view --width 200 contention-by-thread "${RECORDING}" > "${OUTPUT_DIR}/contention-by-thread.txt"
+"${JFR_BIN}" view --width 200 allocation-by-class "${RECORDING}" > "${OUTPUT_DIR}/allocation-by-class.txt"
+"${JFR_BIN}" view --width 200 allocation-by-site "${RECORDING}" > "${OUTPUT_DIR}/allocation-by-site.txt"
+"${JFR_BIN}" view --width 200 allocation-by-thread "${RECORDING}" > "${OUTPUT_DIR}/allocation-by-thread.txt"
 
 if ! jq -e '[.recording.events[]? | select(.type == "jdk.NativeMemoryUsage")] | length > 0' \
     "${OUTPUT_DIR}/native-direct-memory.json" > /dev/null; then
@@ -594,7 +602,8 @@ jq -n \
         count: (.values.count // 0), totalCapacity: (.values.totalCapacity // 0),
         memoryUsed: (.values.memoryUsed // 0)}]
     },
-    locksAndParks: {events: ($lockEvents | length),
+    locksAndParks: {events: ($lockEvents | length), rawThreadParkJsonMaterialized: false,
+      aggregateArtifacts: ["contention-by-site.txt", "contention-by-thread.txt"],
       totalDurationNanos: ([$lockEvents[] | (.values.duration // 0 | durationNanos)] | add // 0),
       topMethods: top($lockEvents; frame(.)), topThreads: top($lockEvents; thread(.))},
     threads: {
@@ -641,7 +650,7 @@ jq -n \
           .type == "jdk.NativeMethodSample")] | length),
         blocked: ([$lockEvents[] | select(.type == "jdk.JavaMonitorEnter")] | length),
         waiting: ([$lockEvents[] | select(.type == "jdk.JavaMonitorWait")] | length),
-        parked: ([$lockEvents[] | select(.type == "jdk.ThreadPark")] | length),
+        parked: "see bounded contention aggregate artifacts",
         sleeping: ([$lockEvents[] | select(.type == "jdk.ThreadSleep")] | length)
       }
     },

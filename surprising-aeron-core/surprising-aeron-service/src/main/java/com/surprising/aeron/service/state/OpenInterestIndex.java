@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.state;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Set;
@@ -9,7 +10,7 @@ import java.util.TreeMap;
 public final class OpenInterestIndex {
 
     private final NavigableMap<String, Totals> totals = new TreeMap<>();
-    private final Map<Long, RuntimePositionIndexValue> positions = new TreeMap<>();
+    private final Map<Long, RuntimePositionIndexValue> positions = new HashMap<>();
     private RuntimeIdentityRegistry identities;
 
     public OpenInterestIndex(TradingCoreState state) {

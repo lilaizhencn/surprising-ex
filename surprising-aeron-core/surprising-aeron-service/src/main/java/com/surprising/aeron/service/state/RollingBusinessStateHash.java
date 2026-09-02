@@ -43,6 +43,10 @@ public final class RollingBusinessStateHash {
     private final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<
             RuntimeCommitPatch.ReservationChange> reservationChangesScratch =
             new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
+    private long[] pendingBeforeCountKeys = new long[8];
+    private int pendingBeforeCountKeyCount;
+    private long[] reservationChangeKeys = new long[8];
+    private int reservationChangeKeyCount;
     private final int productLine;
     private long revision;
     private long nextLiquidationId;
@@ -282,22 +286,21 @@ public final class RollingBusinessStateHash {
         BusinessPatchStage staged = new BusinessPatchStage();
         for (RuntimeCommitPatch.AccountLaneOwnerGroup group : patch.accountLaneGroups()) {
             UserGroupUpdate userStage = new UserGroupUpdate();
-            pendingBeforeCountsScratch.clear();
-            reservationChangesScratch.clear();
+            resetStageScratch();
             for (RuntimeCommitPatch.UserChange change : group.users()) {
-                pendingBeforeCountsScratch.put(change.userId(), change.pendingReservationCountAfter());
+                putPendingBeforeCount(change.userId(), change.pendingReservationCountAfter());
             }
             for (RuntimeCommitPatch.ReservationChange change : group.reservations()) {
-                reservationChangesScratch.put(change.orderId(), change);
+                putReservationChange(change.orderId(), change);
                 if (change.pendingAfter() && change.after() != null) {
                     long userId = change.after().userId();
-                    pendingBeforeCountsScratch.put(
-                            userId, Math.addExact(pendingBeforeCountsScratch.get(userId), -1));
+                    putPendingBeforeCount(userId,
+                            Math.addExact(pendingBeforeCountsScratch.get(userId), -1));
                 }
                 if (change.pendingBefore() && change.before() != null) {
                     long userId = change.before().userId();
-                    pendingBeforeCountsScratch.put(
-                            userId, Math.addExact(pendingBeforeCountsScratch.get(userId), 1));
+                    putPendingBeforeCount(userId,
+                            Math.addExact(pendingBeforeCountsScratch.get(userId), 1));
                 }
             }
             for (RuntimeCommitPatch.UserChange change : group.users()) {
@@ -448,6 +451,39 @@ public final class RollingBusinessStateHash {
             staged.addTyped(BusinessPatchStage.RISK_SCAN_CONTROL, before, after);
         }
         return staged;
+    }
+
+    private void resetStageScratch() {
+        for (int index = 0; index < pendingBeforeCountKeyCount; index++) {
+            pendingBeforeCountsScratch.removeKey(pendingBeforeCountKeys[index]);
+        }
+        pendingBeforeCountKeyCount = 0;
+        for (int index = 0; index < reservationChangeKeyCount; index++) {
+            reservationChangesScratch.removeKey(reservationChangeKeys[index]);
+        }
+        reservationChangeKeyCount = 0;
+    }
+
+    private void putPendingBeforeCount(long userId, int value) {
+        if (!pendingBeforeCountsScratch.containsKey(userId)) {
+            if (pendingBeforeCountKeyCount == pendingBeforeCountKeys.length) {
+                pendingBeforeCountKeys = java.util.Arrays.copyOf(
+                        pendingBeforeCountKeys, Math.multiplyExact(pendingBeforeCountKeyCount, 2));
+            }
+            pendingBeforeCountKeys[pendingBeforeCountKeyCount++] = userId;
+        }
+        pendingBeforeCountsScratch.put(userId, value);
+    }
+
+    private void putReservationChange(long orderId, RuntimeCommitPatch.ReservationChange change) {
+        if (!reservationChangesScratch.containsKey(orderId)) {
+            if (reservationChangeKeyCount == reservationChangeKeys.length) {
+                reservationChangeKeys = java.util.Arrays.copyOf(
+                        reservationChangeKeys, Math.multiplyExact(reservationChangeKeyCount, 2));
+            }
+            reservationChangeKeys[reservationChangeKeyCount++] = orderId;
+        }
+        reservationChangesScratch.put(orderId, change);
     }
 
     private <K, V> void validateCachedBefore(String domain, K key, V before,

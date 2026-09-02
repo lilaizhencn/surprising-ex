@@ -7,7 +7,6 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.NavigableMap;
 import java.util.NavigableSet;
 import java.util.Set;
 import java.util.TreeMap;
@@ -17,9 +16,9 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
 
     public static final int MAX_PAGE_SIZE = 1_024;
 
-    private final Map<Long, NavigableSet<Long>> idsByUser = new TreeMap<>();
-    private final Map<String, NavigableSet<Long>> idsBySymbol = new TreeMap<>();
-    private final NavigableMap<Long, IndexedOrder> ordersById = new TreeMap<>();
+    private final Map<Long, NavigableSet<Long>> idsByUser = new HashMap<>();
+    private final Map<String, NavigableSet<Long>> idsBySymbol = new HashMap<>();
+    private final Map<Long, IndexedOrder> ordersById = new HashMap<>();
     private RuntimeCommitPatch.IdentityView identities;
     private final Map<PendingKey, Long> pendingQuantity = new HashMap<>();
     private final Map<ReduceKey, Long> reduceOnlyQuantity = new HashMap<>();
@@ -35,12 +34,14 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     }
 
     public NavigableSet<Long> ids() {
-        return ordersById.descendingKeySet();
+        return new TreeSet<>(ordersById.keySet()).descendingSet();
     }
 
     public Collection<CoreOrderState> orders() {
         ArrayList<CoreOrderState> result = new ArrayList<>(ordersById.size());
-        ordersById.values().forEach(order -> result.add(order.materialize(identities)));
+        for (Long orderId : new TreeSet<>(ordersById.keySet())) {
+            result.add(ordersById.get(orderId).materialize(identities));
+        }
         return Collections.unmodifiableCollection(result);
     }
 
@@ -110,7 +111,7 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
         NavigableSet<Long> source;
         NavigableSet<Long> filter = null;
         if (userId == 0 && (normalizedSymbol == null || normalizedSymbol.isBlank())) {
-            source = ordersById.navigableKeySet();
+            source = new TreeSet<>(ordersById.keySet());
         } else if (userId == 0) {
             source = idsBySymbol.get(normalizedSymbol);
         } else if (normalizedSymbol == null || normalizedSymbol.isBlank()) {
