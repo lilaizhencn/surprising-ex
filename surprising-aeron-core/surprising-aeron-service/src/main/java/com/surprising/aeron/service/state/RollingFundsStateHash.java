@@ -97,12 +97,13 @@ public final class RollingFundsStateHash {
             for (RuntimeCommitPatch.BalanceChange change : group.balances()) {
                 String asset = patchIdentities.asset(change.key().assetId());
                 UserFundsHash user = userHashes.get(change.key().userId());
-                Long actual = user == null ? null : user.balanceContribution(change.key().assetId());
-                Long expected = balanceContribution(asset, change.before());
-                if (!Objects.equals(actual, expected)) {
+                boolean actualPresent = user != null && user.hasBalanceContribution(change.key().assetId());
+                boolean expectedPresent = change.before() != null;
+                long actual = actualPresent ? user.balanceContribution(change.key().assetId()) : 0;
+                long expected = expectedPresent ? balanceContribution(asset, change.before()) : 0;
+                if (actualPresent != expectedPresent || actualPresent && actual != expected) {
                     throw new IllegalArgumentException("funds balance before-value mismatch");
                 }
-                balanceContribution(asset, change.after());
                 applyBalanceChange(change, asset);
             }
             for (RuntimeCommitPatch.UserChange change : group.users()) {
@@ -213,7 +214,7 @@ public final class RollingFundsStateHash {
         state.users().forEach((userId, user) -> {
             UserFundsHash userHash = UserFundsHash.create(user, identities);
             userHashes.put(userId, userHash);
-            long contribution = entryHash(userId, userHash.value());
+            long contribution = entryHash(userId.longValue(), userHash.value());
             users.add(contribution);
         });
         CoreTreasuryState treasury = state.treasuryState();
@@ -267,8 +268,7 @@ public final class RollingFundsStateHash {
                 && roundingResidual(value) == 0 && clearingPnl(value) == 0 ? null : value;
     }
 
-    private static Long balanceContribution(String asset, RuntimeCommitPatch.UserBalance balance) {
-        if (balance == null) return null;
+    private static long balanceContribution(String asset, RuntimeCommitPatch.UserBalance balance) {
         long available = Math.addExact(balance.availableUnits(), balance.pendingReservedUnits());
         long locked = Math.subtractExact(balance.lockedUnits(), balance.pendingReservedUnits());
         long valueHash = CoreStateHash.mix(CoreStateHash.start(), asset);
@@ -305,6 +305,12 @@ public final class RollingFundsStateHash {
         long hash = CoreStateHash.mix(CoreStateHash.start(), HASH_TAG);
         hash = stable(hash, key);
         return stable(hash, value);
+    }
+
+    private static long entryHash(long key, long value) {
+        long hash = CoreStateHash.mix(CoreStateHash.start(), HASH_TAG);
+        hash = CoreStateHash.mix(hash, key);
+        return CoreStateHash.mix(hash, value);
     }
 
     private static long stable(long hash, Object value) {
@@ -361,16 +367,16 @@ public final class RollingFundsStateHash {
                 balanceContributions.removeKey(assetId);
                 balances.remove(previous);
             }
-            Long current = RollingFundsStateHash.balanceContribution(asset, change.after());
-            if (current != null) {
+            RuntimeCommitPatch.UserBalance after = change.after();
+            if (after != null) {
+                long current = RollingFundsStateHash.balanceContribution(asset, after);
                 balanceContributions.put(assetId, current);
                 balances.add(current);
             }
         }
 
-        private Long balanceContribution(int assetId) {
-            return balanceContributions.containsKey(assetId) ? balanceContributions.get(assetId) : null;
-        }
+        private boolean hasBalanceContribution(int assetId) { return balanceContributions.containsKey(assetId); }
+        private long balanceContribution(int assetId) { return balanceContributions.get(assetId); }
 
         private long value() {
             long hash = CoreStateHash.mix(CoreStateHash.start(), userId);

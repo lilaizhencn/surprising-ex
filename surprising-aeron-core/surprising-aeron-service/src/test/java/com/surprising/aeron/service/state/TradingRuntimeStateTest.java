@@ -84,7 +84,6 @@ class TradingRuntimeStateTest {
         assertThat(state.hasChangedBalance(7, 3)).isTrue();
         assertThat(state.changedOrders().contains(11L)).isTrue();
         assertThat(state.changedReservations().contains(11L)).isTrue();
-        assertThat(state.changedClientOrders().contains(91L)).isTrue();
     }
 
     @Test
@@ -221,8 +220,7 @@ class TradingRuntimeStateTest {
 
         state.completePendingReservation(7, 11, 4);
 
-        assertThat(state.changedClientOrders().contains(91)).isTrue();
-        assertThat(state.changedClientOrdersByUser().get(7).contains(91)).isTrue();
+        assertThat(state.orderIdByClient(7, 91)).isEqualTo(11);
     }
 
     @Test
@@ -237,8 +235,7 @@ class TradingRuntimeStateTest {
 
         state.completePendingReservation(7, 11, 4);
 
-        assertThat(state.changedClientOrders().isEmpty()).isTrue();
-        assertThat(state.changedClientOrdersByUser().isEmpty()).isTrue();
+        assertThat(state.orderIdByClient(7, 91)).isNull();
     }
 
     @Test

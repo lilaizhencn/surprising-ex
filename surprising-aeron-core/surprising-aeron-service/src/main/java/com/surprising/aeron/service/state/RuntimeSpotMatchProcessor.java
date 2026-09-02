@@ -3,9 +3,8 @@ package com.surprising.aeron.service.state;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 
 public final class RuntimeSpotMatchProcessor {
 
@@ -106,9 +105,10 @@ public final class RuntimeSpotMatchProcessor {
             throw new IllegalArgumentException("invalid spot matcher settlement plan");
         }
         OrderRuntime localTaker = runtime.order(takerOrderId);
-        for (int index = 0; index < plan.tradeEventCount(); index++) {
-            if (!plan.tradeTouchesLane(index, laneId)) continue;
-            MatcherEvent match = plan.tradeEvent(index);
+        for (int index = 0; index < plan.matcherEventCount(); index++) {
+            MatcherEvent match = plan.matcherEvent(index);
+            if (match.eventType() != MatcherEventType.TRADE
+                    || !plan.matcherEventTouchesLane(index, laneId, runtime)) continue;
             if (localTaker != null) {
                 localTaker = requireOpen(runtime, takerOrderId);
                 applyFill(runtime, instrument, localTaker, match.price(), match.size(), true,
@@ -206,28 +206,32 @@ public final class RuntimeSpotMatchProcessor {
     private static void validateMatches(TradingRuntimeState runtime, OrderRuntime taker,
                                         List<MatcherEvent> matches) {
         long takerRemaining = taker.remainingQuantitySteps();
-        Map<Long, Long> makerRemaining = new HashMap<>();
-        for (MatcherEvent match : matches) {
-            if (match == null) {
-                throw new IllegalArgumentException("invalid runtime match");
+        LongLongHashMap makerRemaining = runtime.matcherSettlementRemainingScratch();
+        makerRemaining.clear();
+        try {
+            for (MatcherEvent match : matches) {
+                if (match == null) {
+                    throw new IllegalArgumentException("invalid runtime match");
+                }
+                if (match.eventType() != MatcherEventType.TRADE) continue;
+                if (match.price() <= 0 || match.size() <= 0) {
+                    throw new IllegalArgumentException("invalid runtime match");
+                }
+                OrderRuntime maker = requireOpen(runtime, match.matchedOrderId());
+                if (maker.userId() != match.matchedOrderUid() || maker.symbolId() != taker.symbolId()
+                        || maker.side() == taker.side() || maker.userId() == taker.userId()) {
+                    throw new IllegalStateException("runtime match does not match authoritative orders");
+                }
+                takerRemaining = Math.subtractExact(takerRemaining, match.size());
+                long remaining = Math.subtractExact(makerRemaining.containsKey(maker.orderId())
+                        ? makerRemaining.get(maker.orderId()) : maker.remainingQuantitySteps(), match.size());
+                if (takerRemaining < 0 || remaining < 0) {
+                    throw new IllegalStateException("fill exceeds runtime order remaining quantity");
+                }
+                makerRemaining.put(maker.orderId(), remaining);
             }
-            if (match.eventType() != MatcherEventType.TRADE) continue;
-            if (match.price() <= 0 || match.size() <= 0) {
-                throw new IllegalArgumentException("invalid runtime match");
-            }
-            OrderRuntime maker = requireOpen(runtime, match.matchedOrderId());
-            if (maker.userId() != match.matchedOrderUid() || maker.symbolId() != taker.symbolId()
-                    || maker.side() == taker.side() || maker.userId() == taker.userId()) {
-                throw new IllegalStateException("runtime match does not match authoritative orders");
-            }
-            takerRemaining = Math.subtractExact(takerRemaining, match.size());
-            long remaining = Math.subtractExact(
-                    makerRemaining.getOrDefault(maker.orderId(), maker.remainingQuantitySteps()),
-                    match.size());
-            if (takerRemaining < 0 || remaining < 0) {
-                throw new IllegalStateException("fill exceeds runtime order remaining quantity");
-            }
-            makerRemaining.put(maker.orderId(), remaining);
+        } finally {
+            makerRemaining.clear();
         }
     }
 

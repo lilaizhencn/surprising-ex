@@ -254,11 +254,17 @@ class LinearPerpetualBenchmarkSupportTest {
                 assertThat(scenario.acceptedOperations()).isEqualTo(scenario.terminalOperations());
                 assertThat(scenario.acceptedCoreMessages()).isEqualTo(scenario.terminalCoreMessages());
                 assertThat(scenario.terminalTrades()).isEqualTo(2_048);
+                assertThat(scenario.laneOperations(0))
+                        .as("one Lane-owned admission command per accepted PLACE")
+                        .isEqualTo(4_096);
                 assertThat(scenario.laneOperations(1))
-                        .as("admission plus one immutable matcher fact per touched lane")
+                        .as("one immutable matcher fact per touched account Lane")
+                        .isGreaterThan(4_096)
+                        .isLessThanOrEqualTo(8_192);
+                assertThat(scenario.laneOperations())
+                        .isEqualTo(Math.addExact(scenario.laneOperations(0), scenario.laneOperations(1)))
                         .isGreaterThan(8_192)
                         .isLessThanOrEqualTo(12_288);
-                assertThat(scenario.laneOperations()).isEqualTo(scenario.laneOperations(1));
                 assertThat(scenario.maxBacklog()).isEqualTo(8);
                 assertThat(scenario.averageMatchingBacklog()).isPositive();
                 assertThat(scenario.fullWindowPercentage()).isPositive();

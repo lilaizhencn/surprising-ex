@@ -167,61 +167,86 @@ public final class TradingCommandCodec {
     public static byte[] encodePlaceOrder(PlaceOrderCommand command) {
         byte[] symbol = text(command.symbol());
         byte[] clientOrderId = optionalText(command.clientOrderId());
-        return ByteBuffer.allocate(Integer.BYTES + Long.BYTES * 4 + Short.BYTES * 2
-                        + symbol.length + clientOrderId.length + Integer.BYTES * 5 + Byte.BYTES * 2)
-                .order(ByteOrder.LITTLE_ENDIAN)
-                .putInt(PLACE_ORDER_VERSION)
-                .putLong(command.orderId())
-                .putLong(command.instrumentVersion())
-                .putShort((short) symbol.length)
-                .put(symbol)
-                .putInt(command.side().wireCode())
-                .putLong(command.limitPriceTicks())
-                .putLong(command.quantitySteps())
-                .put((byte) (command.reduceOnly() ? 1 : 0))
-                .putInt(command.marginMode().wireCode())
-                .putInt(command.positionSide().wireCode())
-                .putInt(command.orderType().wireCode())
-                .putInt(command.timeInForce().wireCode())
-                .put((byte) (command.postOnly() ? 1 : 0))
-                .putShort((short) clientOrderId.length)
-                .put(clientOrderId)
-                .array();
+        byte[] payload = new byte[Integer.BYTES + Long.BYTES * 4 + Short.BYTES * 2
+                + symbol.length + clientOrderId.length + Integer.BYTES * 5 + Byte.BYTES * 2];
+        int offset = 0;
+        offset = putInt(payload, offset, PLACE_ORDER_VERSION);
+        offset = putLong(payload, offset, command.orderId());
+        offset = putLong(payload, offset, command.instrumentVersion());
+        offset = putShort(payload, offset, symbol.length);
+        System.arraycopy(symbol, 0, payload, offset, symbol.length);
+        offset += symbol.length;
+        offset = putInt(payload, offset, command.side().wireCode());
+        offset = putLong(payload, offset, command.limitPriceTicks());
+        offset = putLong(payload, offset, command.quantitySteps());
+        payload[offset++] = (byte) (command.reduceOnly() ? 1 : 0);
+        offset = putInt(payload, offset, command.marginMode().wireCode());
+        offset = putInt(payload, offset, command.positionSide().wireCode());
+        offset = putInt(payload, offset, command.orderType().wireCode());
+        offset = putInt(payload, offset, command.timeInForce().wireCode());
+        payload[offset++] = (byte) (command.postOnly() ? 1 : 0);
+        offset = putShort(payload, offset, clientOrderId.length);
+        System.arraycopy(clientOrderId, 0, payload, offset, clientOrderId.length);
+        return payload;
     }
 
     public static PlaceOrderCommand decodePlaceOrder(byte[] payload) {
-        ByteBuffer buffer = readable(payload);
-        requireRemaining(buffer, Integer.BYTES + Long.BYTES * 2);
-        int version = buffer.getInt();
+        requireRange(payload, 0, Integer.BYTES + Long.BYTES * 2);
+        int offset = 0;
+        int version = getInt(payload, offset);
+        offset += Integer.BYTES;
         if (version != PLACE_ORDER_VERSION) {
             throw new ProtocolException("unsupported Core protocol version: " + version);
         }
-        long orderId = buffer.getLong();
-        long instrumentVersion = buffer.getLong();
-        String symbol = readText(buffer);
-        requireRemaining(buffer, Integer.BYTES + Long.BYTES * 2 + Byte.BYTES + Integer.BYTES * 3);
-        CoreOrderSide side = CoreOrderSide.fromWireCode(buffer.getInt());
-        long limitPriceTicks = buffer.getLong();
-        long quantitySteps = buffer.getLong();
-        byte reduceOnlyCode = buffer.get();
+        long orderId = getLong(payload, offset);
+        offset += Long.BYTES;
+        long instrumentVersion = getLong(payload, offset);
+        offset += Long.BYTES;
+        requireRange(payload, offset, Short.BYTES);
+        int symbolLength = getUnsignedShort(payload, offset);
+        offset += Short.BYTES;
+        if (symbolLength == 0 || symbolLength > MAX_TEXT_BYTES) {
+            throw new ProtocolException("invalid text length: " + symbolLength);
+        }
+        requireRange(payload, offset, symbolLength);
+        String symbol = new String(payload, offset, symbolLength, StandardCharsets.UTF_8);
+        offset += symbolLength;
+        requireRange(payload, offset, Integer.BYTES + Long.BYTES * 2 + Byte.BYTES + Integer.BYTES * 4
+                + Byte.BYTES + Short.BYTES);
+        CoreOrderSide side = CoreOrderSide.fromWireCode(getInt(payload, offset));
+        offset += Integer.BYTES;
+        long limitPriceTicks = getLong(payload, offset);
+        offset += Long.BYTES;
+        long quantitySteps = getLong(payload, offset);
+        offset += Long.BYTES;
+        byte reduceOnlyCode = payload[offset++];
         if (reduceOnlyCode != 0 && reduceOnlyCode != 1) {
             throw new ProtocolException("invalid reduceOnly flag: " + reduceOnlyCode);
         }
-        CoreMarginMode marginMode = CoreMarginMode.fromWireCode(buffer.getInt());
-        CorePositionSide positionSide = CorePositionSide.fromWireCode(buffer.getInt());
-        requireRemaining(buffer, Integer.BYTES * 2 + Byte.BYTES);
-        CoreOrderType orderType = CoreOrderType.fromWireCode(buffer.getInt());
-        CoreTimeInForce timeInForce = CoreTimeInForce.fromWireCode(buffer.getInt());
-        byte postOnlyCode = buffer.get();
+        CoreMarginMode marginMode = CoreMarginMode.fromWireCode(getInt(payload, offset));
+        offset += Integer.BYTES;
+        CorePositionSide positionSide = CorePositionSide.fromWireCode(getInt(payload, offset));
+        offset += Integer.BYTES;
+        CoreOrderType orderType = CoreOrderType.fromWireCode(getInt(payload, offset));
+        offset += Integer.BYTES;
+        CoreTimeInForce timeInForce = CoreTimeInForce.fromWireCode(getInt(payload, offset));
+        offset += Integer.BYTES;
+        byte postOnlyCode = payload[offset++];
         if (postOnlyCode != 0 && postOnlyCode != 1) {
             throw new ProtocolException("invalid postOnly flag: " + postOnlyCode);
         }
-        boolean postOnly = postOnlyCode == 1;
-        String clientOrderId = readOptionalText(buffer);
-        requireConsumed(buffer);
+        int clientLength = getUnsignedShort(payload, offset);
+        offset += Short.BYTES;
+        if (clientLength > MAX_TEXT_BYTES) {
+            throw new ProtocolException("invalid optional text length: " + clientLength);
+        }
+        requireRange(payload, offset, clientLength);
+        String clientOrderId = new String(payload, offset, clientLength, StandardCharsets.UTF_8);
+        offset += clientLength;
+        if (offset != payload.length) throw new ProtocolException("trailing bytes in trading command payload");
         return new PlaceOrderCommand(orderId, symbol, instrumentVersion, side, limitPriceTicks,
                 quantitySteps, reduceOnlyCode == 1, marginMode, positionSide,
-                orderType, timeInForce, postOnly, clientOrderId);
+                orderType, timeInForce, postOnlyCode == 1, clientOrderId);
     }
 
     public static byte[] encodeUpsertFeePolicy(UpsertFeePolicyCommand command) {
@@ -772,5 +797,48 @@ public final class TradingCommandCodec {
         if (buffer.hasRemaining()) {
             throw new ProtocolException("trailing bytes in trading command payload");
         }
+    }
+
+    private static void requireRange(byte[] payload, int offset, int length) {
+        if (payload == null) throw new ProtocolException("payload is required");
+        if (offset < 0 || length < 0 || offset > payload.length - length) {
+            throw new ProtocolException("truncated trading command payload");
+        }
+    }
+
+    private static int putShort(byte[] target, int offset, int value) {
+        target[offset] = (byte) value;
+        target[offset + 1] = (byte) (value >>> 8);
+        return offset + Short.BYTES;
+    }
+
+    private static int putInt(byte[] target, int offset, int value) {
+        for (int index = 0; index < Integer.BYTES; index++) target[offset + index] = (byte) (value >>> (index * 8));
+        return offset + Integer.BYTES;
+    }
+
+    private static int putLong(byte[] target, int offset, long value) {
+        for (int index = 0; index < Long.BYTES; index++) target[offset + index] = (byte) (value >>> (index * 8));
+        return offset + Long.BYTES;
+    }
+
+    private static int getUnsignedShort(byte[] source, int offset) {
+        return Byte.toUnsignedInt(source[offset]) | Byte.toUnsignedInt(source[offset + 1]) << 8;
+    }
+
+    private static int getInt(byte[] source, int offset) {
+        int value = 0;
+        for (int index = 0; index < Integer.BYTES; index++) {
+            value |= Byte.toUnsignedInt(source[offset + index]) << (index * 8);
+        }
+        return value;
+    }
+
+    private static long getLong(byte[] source, int offset) {
+        long value = 0;
+        for (int index = 0; index < Long.BYTES; index++) {
+            value |= (long) Byte.toUnsignedInt(source[offset + index]) << (index * 8);
+        }
+        return value;
     }
 }

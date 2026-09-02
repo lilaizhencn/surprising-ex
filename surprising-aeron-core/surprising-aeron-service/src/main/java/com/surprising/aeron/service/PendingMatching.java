@@ -4,6 +4,8 @@ import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.service.state.RuntimeFundsDelta;
 import com.surprising.aeron.service.state.RuntimeProjectionPoint;
+import com.surprising.aeron.service.state.PlaceAdmissionEvent;
+import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import java.util.List;
 import java.util.Objects;
 
@@ -27,6 +29,9 @@ final class PendingMatching {
     private com.surprising.aeron.service.state.MatcherSettlementEvent settlementEvent;
     private com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan;
     private long settlementApplyStartNanos;
+    private PlaceAdmissionEvent placeAdmission;
+    private CoreMatchingOrder admittedMatchingOrder;
+    private boolean matchingSubmitted;
 
     PendingMatching(long sequence, Operation operation, CoreMessage command,
                     RuntimeProjectionPoint beforeProjection,
@@ -138,6 +143,9 @@ final class PendingMatching {
         settlementEvent = source.settlementEvent;
         settlementPlan = source.settlementPlan;
         settlementApplyStartNanos = source.settlementApplyStartNanos;
+        placeAdmission = source.placeAdmission;
+        admittedMatchingOrder = source.admittedMatchingOrder;
+        matchingSubmitted = source.matchingSubmitted;
     }
 
     PendingMatching withPreMatchingCancellations(List<Long> orderIds) {
@@ -186,6 +194,25 @@ final class PendingMatching {
     com.surprising.aeron.service.state.MatcherSettlementEvent settlementEvent() { return settlementEvent; }
     com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan() { return settlementPlan; }
     long settlementApplyStartNanos() { return settlementApplyStartNanos; }
+    PlaceAdmissionEvent placeAdmission() { return placeAdmission; }
+    void placeAdmission(PlaceAdmissionEvent event) {
+        if (event == null || placeAdmission != null || operation != Operation.PLACE) {
+            throw new IllegalStateException("invalid place admission continuation");
+        }
+        placeAdmission = event;
+    }
+    void admissionCompleted(CoreMatchingOrder matchingOrder) {
+        if (matchingOrder == null || placeAdmission == null || admittedMatchingOrder != null) {
+            throw new IllegalStateException("invalid completed place admission");
+        }
+        admittedMatchingOrder = matchingOrder;
+    }
+    CoreMatchingOrder admittedMatchingOrder() { return admittedMatchingOrder; }
+    boolean isMatchingSubmitted() { return matchingSubmitted; }
+    void matchingSubmitted() {
+        if (matchingSubmitted) throw new IllegalStateException("matching command was submitted twice");
+        matchingSubmitted = true;
+    }
     void settlement(com.surprising.aeron.service.state.MatcherSettlementEvent event,
                     com.surprising.aeron.service.state.MatcherSettlementPlan plan,
                     long applyStartNanos) {

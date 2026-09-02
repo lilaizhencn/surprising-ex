@@ -1,14 +1,16 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.protocol.CorePositionSide;
 import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
+import org.eclipse.collections.api.iterator.LongIterator;
 import java.util.Map;
 import java.util.HashMap;
-import java.util.TreeSet;
+import java.util.HashSet;
 
 public final class AccountLaneState {
     private final int laneId;
@@ -21,16 +23,16 @@ public final class AccountLaneState {
     final LongObjectHashMap<LongHashSet> reservationIdsByUser = new LongObjectHashMap<>();
     final LongObjectHashMap<PositionRuntime> positions = new LongObjectHashMap<>();
     final LongObjectHashMap<LongHashSet> positionKeysByUser = new LongObjectHashMap<>();
-    final IntObjectHashMap<LongObjectHashMap<TreeSet<Long>>> positionKeysBySymbolAndUser
+    final IntObjectHashMap<LongObjectHashMap<LongHashSet>> positionKeysBySymbolAndUser
             = new IntObjectHashMap<>();
     final LongObjectHashMap<LiquidationRuntime> liquidations = new LongObjectHashMap<>();
     final LongObjectHashMap<IntObjectHashMap<LongObjectHashMap<Long>>> activeLiquidationIndex
             = new LongObjectHashMap<>();
     final LongObjectHashMap<RiskSnapshotRuntime> riskSnapshots = new LongObjectHashMap<>();
-    final LongObjectHashMap<LongObjectHashMap<Long>> clientOrderIndex = new LongObjectHashMap<>();
+    final LongObjectHashMap<LongLongHashMap> clientOrderIndex = new LongObjectHashMap<>();
     final LongObjectHashMap<LongHashSet> clientKeysByOrderId = new LongObjectHashMap<>();
     final Map<CoreLeverageKey, Long> leverages = new HashMap<>();
-    final LongObjectHashMap<TreeSet<CoreLeverageKey>> leverageKeysByUser = new LongObjectHashMap<>();
+    final LongObjectHashMap<HashSet<CoreLeverageKey>> leverageKeysByUser = new LongObjectHashMap<>();
     final Map<Long, CoreAlgoOrderState> algoOrders = new HashMap<>();
     final Map<Long, CoreTriggerOrderState> triggerOrders = new HashMap<>();
     final LongLongHashMap pendingReservationSequences = new LongLongHashMap();
@@ -46,6 +48,7 @@ public final class AccountLaneState {
     private long matcherSettlementLatencyNanos;
     private long matcherSettlementMaxLatencyNanos;
     private Thread owner;
+    private final LaneAdmissionOrderIndex admissionOrderIndex = new LaneAdmissionOrderIndex();
 
     AccountLaneState(int laneId, int queueCapacity) {
         if (laneId < 0 || laneId >= Long.SIZE || queueCapacity <= 0) {
@@ -245,6 +248,72 @@ public final class AccountLaneState {
     boolean hasPendingReservations() {
         assertOwner();
         return totalPendingReservations != 0;
+    }
+
+    RuntimeOrderAdmission.AdmissionOrderIndex admissionOrderIndex(int symbolId) {
+        assertOwner();
+        if (symbolId < 0) throw new IllegalArgumentException("invalid admission symbol");
+        admissionOrderIndex.symbolId = symbolId;
+        return admissionOrderIndex;
+    }
+
+    private final class LaneAdmissionOrderIndex implements RuntimeOrderAdmission.AdmissionOrderIndex {
+        private int symbolId;
+
+        @Override
+        public long pendingQuantity(long userId, String symbol, CorePositionSide positionSide,
+                                    com.surprising.aeron.protocol.CoreOrderSide side) {
+            long quantity = 0;
+            LongHashSet ids = reservationIdsByUser.get(userId);
+            if (ids == null) return 0;
+            LongIterator iterator = ids.longIterator();
+            while (iterator.hasNext()) {
+                OrderRuntime order = orders.get(iterator.next());
+                if (active(order) && order.symbolId() == symbolId && !order.reduceOnly()
+                        && order.positionSide() == positionSide && order.side() == side) {
+                    quantity = Math.addExact(quantity, order.remainingQuantitySteps());
+                }
+            }
+            return quantity;
+        }
+
+        @Override
+        public long reduceOnlyQuantity(long userId, String symbol,
+                                       com.surprising.aeron.protocol.CoreOrderSide side) {
+            long quantity = 0;
+            LongHashSet ids = reservationIdsByUser.get(userId);
+            if (ids == null) return 0;
+            LongIterator iterator = ids.longIterator();
+            while (iterator.hasNext()) {
+                OrderRuntime order = orders.get(iterator.next());
+                if (active(order) && order.symbolId() == symbolId && order.reduceOnly()
+                        && order.side() == side) {
+                    quantity = Math.addExact(quantity, order.remainingQuantitySteps());
+                }
+            }
+            return quantity;
+        }
+
+        @Override
+        public int marginModeCount(long userId, String symbol, CorePositionSide positionSide,
+                                   com.surprising.aeron.protocol.CoreMarginMode marginMode) {
+            int count = 0;
+            LongHashSet ids = reservationIdsByUser.get(userId);
+            if (ids == null) return 0;
+            LongIterator iterator = ids.longIterator();
+            while (iterator.hasNext()) {
+                OrderRuntime order = orders.get(iterator.next());
+                if (active(order) && order.symbolId() == symbolId && order.positionSide() == positionSide
+                        && order.marginMode() == marginMode) {
+                    count = Math.incrementExact(count);
+                }
+            }
+            return count;
+        }
+
+        private static boolean active(OrderRuntime order) {
+            return order != null && !order.status().terminal();
+        }
     }
 
     void applied(long coreSequence, long stateContribution, long fundsContribution) {

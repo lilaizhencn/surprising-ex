@@ -27,41 +27,40 @@ final class CoreAdmissionReservation {
 
     private final RuntimeCommitJournal journal;
     private final CoreExportState exportState;
-    private final RuntimeCommitJournal.AdmissionReservation journalReservation;
     private final CoreExportState.AdmissionReservation exportReservation;
     private final FactBudget factBudget;
+    private int remainingPatches;
     private int holders = 1;
     private boolean released;
 
     private CoreAdmissionReservation(RuntimeCommitJournal journal, CoreExportState exportState,
-                                     RuntimeCommitJournal.AdmissionReservation journalReservation,
                                      CoreExportState.AdmissionReservation exportReservation,
-                                     FactBudget factBudget) {
+                                     FactBudget factBudget, int patchCount) {
         this.journal = journal;
         this.exportState = exportState;
-        this.journalReservation = journalReservation;
         this.exportReservation = exportReservation;
         this.factBudget = factBudget;
+        this.remainingPatches = patchCount;
     }
 
     static CoreAdmissionReservation reserve(RuntimeCommitJournal journal, CoreExportState exportState,
                                             AdmissionDemand demand) {
-        RuntimeCommitJournal.AdmissionReservation patches =
-                journal.reserveAdmission(demand.patchCount(), demand.patchBytes());
-        try {
-            CoreExportState.AdmissionReservation facts =
-                    exportState.reserveAdmission(demand.factCount(), demand.factBytes());
-            return new CoreAdmissionReservation(journal, exportState, patches, facts,
-                    new FactBudget(demand.factChainNodes(), demand.factItems(), demand.factByteUpperBound()));
-        } catch (RuntimeException failure) {
-            journal.release(patches);
-            throw failure;
-        }
+        journal.assertHealthy();
+        CoreExportState.AdmissionReservation facts =
+                exportState.reserveAdmission(demand.factCount(), demand.factBytes());
+        return new CoreAdmissionReservation(journal, exportState, facts,
+                new FactBudget(demand.factChainNodes(), demand.factItems(), demand.factByteUpperBound()),
+                demand.patchCount());
     }
 
     long publish(RuntimeCommitPatch patch, long businessStateHash, long fundsStateHash) {
         requireOpen();
-        return journal.publish(journalReservation, patch, businessStateHash, fundsStateHash);
+        if (remainingPatches == 0) {
+            throw new IllegalStateException("commit watermark budget exhausted");
+        }
+        long sequence = journal.publish(patch, businessStateHash, fundsStateHash);
+        remainingPatches--;
+        return sequence;
     }
 
     long append(CoreExportState.Draft draft) {
@@ -82,13 +81,13 @@ final class CoreAdmissionReservation {
     void releaseUnused() {
         if (released) return;
         if (--holders > 0) return;
-        if (journalReservation.remaining() > 0) journal.release(journalReservation);
         if (exportReservation.remainingEvents() > 0) exportState.release(exportReservation);
         factBudget.release();
+        remainingPatches = 0;
         released = true;
     }
 
-    int remainingPatches() { return journalReservation.remaining(); }
+    int remainingPatches() { return remainingPatches; }
     int remainingFacts() { return exportReservation.remainingEvents(); }
     int holders() { return holders; }
     int remainingFactNodes() { return factBudget.remainingNodes(); }

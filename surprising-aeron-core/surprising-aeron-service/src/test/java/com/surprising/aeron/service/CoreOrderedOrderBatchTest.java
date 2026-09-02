@@ -458,7 +458,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.pendingMatching(fatalSequence).pendingStateHash()).isNotZero();
             assertThat(state.pendingMatchingCount()).isOne();
             assertThat(state.matchingSequence(fatalId)).isEqualTo(fatalSequence);
-            assertThat(state.snapshotHasOutstandingReservation()).isTrue();
+            assertThat(state.snapshotHasOutstandingReservation()).isFalse();
             assertThat((long[]) field(state, "appliedMatcherSequences")).containsExactly(matcherAfterFirst);
             assertThat((long[]) field(state, "appliedMatcherPrefixDigests"))
                     .containsExactly(matcherPrefixAfterFirst);
@@ -667,7 +667,7 @@ class CoreOrderedOrderBatchTest {
         long sequence = state.matchingSequence(commandId);
         assertThat(state.completeMatching(sequence, awaitMatching(state, sequence), 2_000, 3)).isNull();
         assertThat(runtime.order(15_001)).isNotNull();
-        assertThat(state.snapshotHasOutstandingReservation()).isTrue();
+        assertThat(state.snapshotHasOutstandingReservation()).isFalse();
 
         state.close();
 

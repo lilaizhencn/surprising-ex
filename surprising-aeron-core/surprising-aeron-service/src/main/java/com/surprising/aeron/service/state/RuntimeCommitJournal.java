@@ -111,26 +111,18 @@ public final class RuntimeCommitJournal implements AutoCloseable {
     }
 
     public long publish(RuntimeCommitPatch patch, long businessStateHash, long fundsStateHash) {
-        AdmissionReservation reservation = reserveAdmission(1);
-        try {
-            return publish(reservation, patch, businessStateHash, fundsStateHash);
-        } finally {
-            if (!reservation.closed) release(reservation);
-        }
+        requireHealthy();
+        return publishCommittedPatch(patch, businessStateHash, fundsStateHash);
     }
 
     public long publish(AdmissionReservation reservation, RuntimeCommitPatch patch,
                         long businessStateHash, long fundsStateHash) {
         validateReservation(reservation);
-        long next = Math.incrementExact(publishedSequence);
-        if (patch == null || patch.sequence() != next
-                || businessStateHash != patch.businessStateHash() || fundsStateHash != patch.fundsStateHash()) {
-            throw new IllegalStateException("invalid commit journal publication");
-        }
         long patchBytes = estimatedBytes(patch);
         if (patchBytes > reservation.nextSliceByteAllowance()) {
             throw new IllegalStateException("commit patch exceeded per-slice admission byte reservation");
         }
+        long published = publishCommittedPatch(patch, businessStateHash, fundsStateHash);
         reservation.remaining--;
         reservation.remainingBytes -= patchBytes;
         reservation.consumedSlices++;
@@ -141,6 +133,18 @@ public final class RuntimeCommitJournal implements AutoCloseable {
             reservation.remainingBytes = 0;
             reservation.closed = true;
         }
+        return published;
+    }
+
+    private long publishCommittedPatch(RuntimeCommitPatch patch,
+                                       long businessStateHash,
+                                       long fundsStateHash) {
+        long next = Math.incrementExact(publishedSequence);
+        if (patch == null || patch.sequence() != next
+                || businessStateHash != patch.businessStateHash() || fundsStateHash != patch.fundsStateHash()) {
+            throw new IllegalStateException("invalid commit journal publication");
+        }
+        long patchBytes = estimatedBytes(patch);
         publishedSequence = next;
         this.businessStateHash = businessStateHash;
         this.fundsStateHash = fundsStateHash;

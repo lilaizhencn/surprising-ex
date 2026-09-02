@@ -4,92 +4,119 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableSet;
-import java.util.Set;
-import java.util.TreeMap;
 import java.util.TreeSet;
+import org.eclipse.collections.api.iterator.LongIterator;
+import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
+import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
 public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOrderIndex {
 
     public static final int MAX_PAGE_SIZE = 1_024;
 
-    private final Map<Long, NavigableSet<Long>> idsByUser = new HashMap<>();
-    private final Map<String, NavigableSet<Long>> idsBySymbol = new HashMap<>();
-    private final Map<Long, IndexedOrder> ordersById = new HashMap<>();
-    private RuntimeCommitPatch.IdentityView identities;
-    private final Map<PendingKey, Long> pendingQuantity = new HashMap<>();
-    private final Map<ReduceKey, Long> reduceOnlyQuantity = new HashMap<>();
-    private final Map<MarginKey, Integer> marginModeCounts = new HashMap<>();
+    private final LongObjectHashMap<LongHashSet> idsByUser = new LongObjectHashMap<>();
+    private final Map<String, LongHashSet> idsBySymbol = new HashMap<>();
+    private final LongObjectHashMap<CoreOrderState> ordersById = new LongObjectHashMap<>();
 
     public ActiveOrderIndex(TradingCoreState state) {
         rebuild(state);
     }
 
     public ActiveOrderIndex(TradingCoreState state, RuntimeIdentityRegistry identities) {
-        this.identities = identities;
         rebuild(state);
     }
 
     public NavigableSet<Long> ids() {
-        return new TreeSet<>(ordersById.keySet()).descendingSet();
+        return descending(ordersById.keySet().toArray());
     }
 
     public Collection<CoreOrderState> orders() {
         ArrayList<CoreOrderState> result = new ArrayList<>(ordersById.size());
-        for (Long orderId : new TreeSet<>(ordersById.keySet())) {
-            result.add(ordersById.get(orderId).materialize(identities));
+        long[] orderIds = ordersById.keySet().toArray();
+        java.util.Arrays.sort(orderIds);
+        for (long orderId : orderIds) {
+            result.add(ordersById.get(orderId));
         }
         return Collections.unmodifiableCollection(result);
     }
 
     public NavigableSet<Long> ids(long userId) {
-        NavigableSet<Long> ids = idsByUser.get(userId);
-        return ids == null ? new TreeSet<>() : ids.descendingSet();
+        LongHashSet ids = idsByUser.get(userId);
+        return ids == null ? new TreeSet<>() : descending(ids.toArray());
     }
 
     public NavigableSet<Long> ids(String symbol) {
-        NavigableSet<Long> ids = idsBySymbol.get(OrderReservation.normalizeSymbol(symbol));
-        return ids == null ? new TreeSet<>() : ids.descendingSet();
+        LongHashSet ids = idsBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+        return ids == null ? new TreeSet<>() : descending(ids.toArray());
     }
 
     public int count(String symbol) {
-        NavigableSet<Long> ids = idsBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+        LongHashSet ids = idsBySymbol.get(OrderReservation.normalizeSymbol(symbol));
         return ids == null ? 0 : ids.size();
     }
 
     public NavigableSet<Long> ids(long userId, String symbol) {
-        NavigableSet<Long> userIds = idsByUser.get(userId);
-        NavigableSet<Long> symbolIds = idsBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+        LongHashSet userIds = idsByUser.get(userId);
+        LongHashSet symbolIds = idsBySymbol.get(OrderReservation.normalizeSymbol(symbol));
         if (userIds == null || symbolIds == null) return new TreeSet<>();
-        TreeSet<Long> result = new TreeSet<>(userIds);
-        result.retainAll(symbolIds);
+        LongHashSet source = userIds.size() <= symbolIds.size() ? userIds : symbolIds;
+        LongHashSet filter = source == userIds ? symbolIds : userIds;
+        TreeSet<Long> result = new TreeSet<>();
+        source.forEach(orderId -> { if (filter.contains(orderId)) result.add(orderId); });
         return result.descendingSet();
     }
 
     public long pendingQuantity(long userId, String symbol,
                                 com.surprising.aeron.protocol.CorePositionSide positionSide,
                                 com.surprising.aeron.protocol.CoreOrderSide side) {
-        return pendingQuantity.getOrDefault(new PendingKey(userId, OrderReservation.normalizeSymbol(symbol),
-                positionSide, side), 0L);
+        String normalized = OrderReservation.normalizeSymbol(symbol);
+        LongHashSet ids = idsByUser.get(userId);
+        if (ids == null) return 0;
+        long total = 0;
+        LongIterator iterator = ids.longIterator();
+        while (iterator.hasNext()) {
+            long orderId = iterator.next();
+            CoreOrderState order = ordersById.get(orderId);
+            if (order != null && !order.reduceOnly() && order.symbol().equals(normalized)
+                    && order.positionSide() == positionSide && order.side() == side) {
+                total = Math.addExact(total, order.remainingQuantitySteps());
+            }
+        }
+        return total;
     }
 
     public long reduceOnlyQuantity(long userId, String symbol,
                                    com.surprising.aeron.protocol.CoreOrderSide side) {
-        return reduceOnlyQuantity.getOrDefault(
-                new ReduceKey(userId, OrderReservation.normalizeSymbol(symbol), side), 0L);
+        String normalized = OrderReservation.normalizeSymbol(symbol);
+        LongHashSet ids = idsByUser.get(userId);
+        if (ids == null) return 0;
+        long total = 0;
+        LongIterator iterator = ids.longIterator();
+        while (iterator.hasNext()) {
+            long orderId = iterator.next();
+            CoreOrderState order = ordersById.get(orderId);
+            if (order != null && order.reduceOnly() && order.symbol().equals(normalized)
+                    && order.side() == side) {
+                total = Math.addExact(total, order.remainingQuantitySteps());
+            }
+        }
+        return total;
     }
 
     public boolean hasDifferentMarginMode(long userId, String symbol,
                                           com.surprising.aeron.protocol.CorePositionSide positionSide,
                                           com.surprising.aeron.protocol.CoreMarginMode marginMode) {
         String normalized = OrderReservation.normalizeSymbol(symbol);
-        for (com.surprising.aeron.protocol.CoreMarginMode candidate
-                : com.surprising.aeron.protocol.CoreMarginMode.values()) {
-            if (candidate != marginMode && marginModeCounts.getOrDefault(
-                    new MarginKey(userId, normalized, positionSide, candidate), 0) > 0) {
+        LongHashSet ids = idsByUser.get(userId);
+        if (ids == null) return false;
+        LongIterator iterator = ids.longIterator();
+        while (iterator.hasNext()) {
+            long orderId = iterator.next();
+            CoreOrderState order = ordersById.get(orderId);
+            if (order != null && order.symbol().equals(normalized)
+                    && order.positionSide() == positionSide && order.marginMode() != marginMode) {
                 return true;
             }
         }
@@ -99,8 +126,20 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     public int marginModeCount(long userId, String symbol,
                                com.surprising.aeron.protocol.CorePositionSide positionSide,
                                com.surprising.aeron.protocol.CoreMarginMode marginMode) {
-        return marginModeCounts.getOrDefault(new MarginKey(userId, OrderReservation.normalizeSymbol(symbol),
-                positionSide, marginMode), 0);
+        String normalized = OrderReservation.normalizeSymbol(symbol);
+        LongHashSet ids = idsByUser.get(userId);
+        if (ids == null) return 0;
+        int count = 0;
+        LongIterator iterator = ids.longIterator();
+        while (iterator.hasNext()) {
+            long orderId = iterator.next();
+            CoreOrderState order = ordersById.get(orderId);
+            if (order != null && order.symbol().equals(normalized)
+                    && order.positionSide() == positionSide && order.marginMode() == marginMode) {
+                count = Math.incrementExact(count);
+            }
+        }
+        return count;
     }
 
     public Page page(long userId, String symbol, long beforeOrderId, int limit) {
@@ -108,17 +147,17 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
             throw new IllegalArgumentException("invalid active-order page");
         }
         String normalizedSymbol = OrderReservation.normalizeSymbol(symbol);
-        NavigableSet<Long> source;
-        NavigableSet<Long> filter = null;
+        LongHashSet source;
+        LongHashSet filter = null;
         if (userId == 0 && (normalizedSymbol == null || normalizedSymbol.isBlank())) {
-            source = new TreeSet<>(ordersById.keySet());
+            source = new LongHashSet(ordersById.keySet().toArray());
         } else if (userId == 0) {
             source = idsBySymbol.get(normalizedSymbol);
         } else if (normalizedSymbol == null || normalizedSymbol.isBlank()) {
             source = idsByUser.get(userId);
         } else {
-            NavigableSet<Long> userIds = idsByUser.get(userId);
-            NavigableSet<Long> symbolIds = idsBySymbol.get(normalizedSymbol);
+            LongHashSet userIds = idsByUser.get(userId);
+            LongHashSet symbolIds = idsBySymbol.get(normalizedSymbol);
             if (userIds == null || symbolIds == null) return new Page(List.of(), 0);
             if (userIds.size() <= symbolIds.size()) {
                 source = userIds;
@@ -129,22 +168,16 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
             }
         }
         if (source == null || source.isEmpty()) return new Page(List.of(), 0);
-        NavigableSet<Long> descending = beforeOrderId == 0
-                ? source.descendingSet()
-                : source.headSet(beforeOrderId, false).descendingSet();
-        Iterator<Long> iterator = descending.iterator();
+        long[] descending = source.toArray();
+        java.util.Arrays.sort(descending);
         List<Long> result = new ArrayList<>(limit);
-        while (iterator.hasNext() && result.size() < limit) {
-            long orderId = iterator.next();
-            if (filter == null || filter.contains(orderId)) result.add(orderId);
-        }
         long nextCursor = 0;
-        while (iterator.hasNext()) {
-            long orderId = iterator.next();
-            if (filter == null || filter.contains(orderId)) {
-                nextCursor = result.getLast();
-                break;
-            }
+        for (int index = descending.length - 1; index >= 0; index--) {
+            long orderId = descending[index];
+            if (beforeOrderId != 0 && orderId >= beforeOrderId
+                    || filter != null && !filter.contains(orderId)) continue;
+            if (result.size() < limit) result.add(orderId);
+            else { nextCursor = result.getLast(); break; }
         }
         return new Page(List.copyOf(result), nextCursor);
     }
@@ -157,9 +190,8 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     }
 
     void apply(java.util.List<RuntimeCommitPatch.OrderChange> changes, RuntimeCommitPatch.IdentityView identities) {
-        if (this.identities == null) this.identities = identities;
         for (RuntimeCommitPatch.OrderChange change : changes) {
-            IndexedOrder previous = ordersById.get(change.orderId());
+            CoreOrderState previous = ordersById.get(change.orderId());
             if (previous != null) remove(previous);
             if (change.businessAfter() != null && change.businessAfter().status() == CoreOrderStatus.OPEN) {
                 add(change.businessAfter());
@@ -171,16 +203,12 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
         idsByUser.clear();
         idsBySymbol.clear();
         ordersById.clear();
-        pendingQuantity.clear();
-        reduceOnlyQuantity.clear();
-        marginModeCounts.clear();
         state.orders().values().stream()
                 .filter(ActiveOrderIndex::isActive)
                 .forEach(this::add);
     }
 
     public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {
-        this.identities = identities;
         rebuild(state);
     }
 
@@ -189,90 +217,40 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     }
 
     private void add(CoreOrderState order) {
-        add(IndexedOrder.of(order));
-    }
-
-    private void add(IndexedOrder order) {
         ordersById.put(order.orderId(), order);
-        idsByUser.computeIfAbsent(order.userId(), ignored -> new TreeSet<>()).add(order.orderId());
-        idsBySymbol.computeIfAbsent(order.symbol(), ignored -> new TreeSet<>()).add(order.orderId());
-        if (order.reduceOnly()) {
-            add(reduceOnlyQuantity, new ReduceKey(order.userId(), order.symbol(), order.side()),
-                    order.remainingQuantitySteps());
-        } else {
-            add(pendingQuantity, new PendingKey(order.userId(), order.symbol(), order.positionSide(), order.side()),
-                    order.remainingQuantitySteps());
+        LongHashSet userIds = idsByUser.get(order.userId());
+        if (userIds == null) {
+            userIds = new LongHashSet();
+            idsByUser.put(order.userId(), userIds);
         }
-        marginModeCounts.merge(new MarginKey(order.userId(), order.symbol(), order.positionSide(), order.marginMode()),
-                1, Math::addExact);
+        userIds.add(order.orderId());
+        idsBySymbol.computeIfAbsent(order.symbol(), ignored -> new LongHashSet()).add(order.orderId());
     }
 
     private void remove(CoreOrderState order) {
-        remove(IndexedOrder.of(order));
-    }
-
-    private void remove(IndexedOrder order) {
         ordersById.remove(order.orderId());
         remove(idsByUser, order.userId(), order.orderId());
         remove(idsBySymbol, order.symbol(), order.orderId());
-        if (order.reduceOnly()) {
-            subtract(reduceOnlyQuantity, new ReduceKey(order.userId(), order.symbol(), order.side()),
-                    order.remainingQuantitySteps());
-        } else {
-            subtract(pendingQuantity,
-                    new PendingKey(order.userId(), order.symbol(), order.positionSide(), order.side()),
-                    order.remainingQuantitySteps());
-        }
-        MarginKey marginKey = new MarginKey(order.userId(), order.symbol(), order.positionSide(), order.marginMode());
-        int nextCount = Math.subtractExact(marginModeCounts.getOrDefault(marginKey, 0), 1);
-        if (nextCount == 0) marginModeCounts.remove(marginKey); else marginModeCounts.put(marginKey, nextCount);
     }
 
-    private static <K> void add(Map<K, Long> values, K key, long quantity) {
-        values.put(key, Math.addExact(values.getOrDefault(key, 0L), quantity));
+    private static void remove(LongObjectHashMap<LongHashSet> values, long key, long id) {
+        LongHashSet ids = values.get(key);
+        if (ids == null) return;
+        ids.remove(id);
+        if (ids.isEmpty()) values.removeKey(key);
     }
 
-    private static <K> void subtract(Map<K, Long> values, K key, long quantity) {
-        long next = Math.subtractExact(values.getOrDefault(key, 0L), quantity);
-        if (next < 0) throw new IllegalStateException("negative active order aggregate");
-        if (next == 0) values.remove(key); else values.put(key, next);
-    }
-
-    private static <K> void remove(Map<K, NavigableSet<Long>> values, K key, long id) {
-        NavigableSet<Long> ids = values.get(key);
+    private static <K> void remove(Map<K, LongHashSet> values, K key, long id) {
+        LongHashSet ids = values.get(key);
         if (ids == null) return;
         ids.remove(id);
         if (ids.isEmpty()) values.remove(key);
     }
 
-    private record PendingKey(long userId, String symbol,
-                              com.surprising.aeron.protocol.CorePositionSide positionSide,
-                              com.surprising.aeron.protocol.CoreOrderSide side) {
+    private static NavigableSet<Long> descending(long[] values) {
+        TreeSet<Long> sorted = new TreeSet<>();
+        for (long value : values) sorted.add(value);
+        return sorted.descendingSet();
     }
 
-    private record ReduceKey(long userId, String symbol,
-                             com.surprising.aeron.protocol.CoreOrderSide side) {
-    }
-
-    private record MarginKey(long userId, String symbol,
-                             com.surprising.aeron.protocol.CorePositionSide positionSide,
-                             com.surprising.aeron.protocol.CoreMarginMode marginMode) {
-    }
-
-    private record IndexedOrder(long orderId, long userId, String symbol,
-                                com.surprising.aeron.protocol.CoreOrderSide side,
-                                com.surprising.aeron.protocol.CorePositionSide positionSide,
-                                com.surprising.aeron.protocol.CoreMarginMode marginMode,
-                                boolean reduceOnly, long remainingQuantitySteps,
-                                CoreOrderState core) {
-        private static IndexedOrder of(CoreOrderState order) {
-            return new IndexedOrder(order.orderId(), order.userId(), order.symbol(), order.side(),
-                    order.positionSide(), order.marginMode(), order.reduceOnly(), order.remainingQuantitySteps(),
-                    order);
-        }
-
-        private CoreOrderState materialize(RuntimeCommitPatch.IdentityView identities) {
-            return core;
-        }
-    }
 }

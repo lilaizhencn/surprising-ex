@@ -9,8 +9,16 @@ import java.lang.invoke.VarHandle;
  */
 public final class MatcherSettlementEvent implements SettlementLaneWorker.Command {
     private static final RuntimeTreasuryDelta EMPTY_TREASURY_DELTA = new RuntimeTreasuryDelta(1);
-    private static final int COMPLETION_STRIDE = 8;
-    private static final VarHandle LANE_COMPLETION = MethodHandles.arrayElementVarHandle(long[].class);
+    private static final VarHandle COMPLETED_LANE_MASK;
+
+    static {
+        try {
+            COMPLETED_LANE_MASK = MethodHandles.lookup().findVarHandle(
+                    MatcherSettlementEvent.class, "completedLaneMask", long.class);
+        } catch (ReflectiveOperationException failure) {
+            throw new ExceptionInInitializerError(failure);
+        }
+    }
 
 
     private final long commitSequence;
@@ -26,8 +34,9 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     private final int baseAssetId;
     private final int quoteAssetId;
     private final int settleAssetId;
-    private final RuntimeTreasuryDelta[] laneTreasuryDeltas;
-    private final long[] laneCompletions;
+    private final RuntimeTreasuryDelta[] touchedLaneTreasuryDeltas;
+    @SuppressWarnings("FieldMayBeFinal")
+    private long completedLaneMask;
     private boolean collected;
 
     MatcherSettlementEvent(long commitSequence, long requiredLaneMask,
@@ -56,15 +65,12 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         this.baseAssetId = baseAssetId;
         this.quoteAssetId = quoteAssetId;
         this.settleAssetId = settleAssetId;
-        laneCompletions = new long[Math.multiplyExact(laneCount, COMPLETION_STRIDE)];
-        if (plan.tradeEventCount() == 0) {
-            laneTreasuryDeltas = null;
+        if (plan.tradeCount() == 0) {
+            touchedLaneTreasuryDeltas = null;
         } else {
-            laneTreasuryDeltas = new RuntimeTreasuryDelta[laneCount];
-            for (int laneId = 0; laneId < laneCount; laneId++) {
-                if ((requiredLaneMask & 1L << laneId) != 0) {
-                    laneTreasuryDeltas[laneId] = new RuntimeTreasuryDelta();
-                }
+            touchedLaneTreasuryDeltas = new RuntimeTreasuryDelta[Long.bitCount(requiredLaneMask)];
+            for (int index = 0; index < touchedLaneTreasuryDeltas.length; index++) {
+                touchedLaneTreasuryDeltas[index] = new RuntimeTreasuryDelta();
             }
         }
     }
@@ -77,9 +83,10 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         if ((requiredLaneMask & laneMask) == 0) {
             throw new IllegalStateException("matcher fact was routed to an unrelated account lane");
         }
-        runtime.inLaneCommandScope(lane, ignored -> {
-            RuntimeTreasuryDelta delta = laneTreasuryDeltas == null
-                    ? EMPTY_TREASURY_DELTA : laneTreasuryDeltas[laneId];
+        runtime.enterLaneCommandScope(lane);
+        try {
+            RuntimeTreasuryDelta delta = touchedLaneTreasuryDeltas == null
+                    ? EMPTY_TREASURY_DELTA : touchedLaneTreasuryDeltas[laneSlot(laneId)];
             if (runtime.productLine().isDerivative()) {
                 RuntimePerpetualMatchProcessor.applyLane(plan.takerOrderId(), plan, laneId,
                         runtime, identities, instrument, settleAssetId, delta);
@@ -96,30 +103,20 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
                 lane.committed(commitSequence);
                 runtime.publishLaneHashes(lane);
             }
-            return null;
-        });
+        } finally {
+            runtime.exitLaneCommandScope(lane);
+        }
         runtime.recordMatcherLaneOperation(lane, System.nanoTime() - startedNanos);
-        int completionIndex = Math.multiplyExact(laneId, COMPLETION_STRIDE);
-        if ((long) LANE_COMPLETION.getAcquire(laneCompletions, completionIndex) != 0) {
+        long previous = (long) COMPLETED_LANE_MASK.getAndBitwiseOrRelease(this, laneMask);
+        if ((previous & laneMask) != 0) {
             throw new IllegalStateException("account lane completed the same matcher fact twice");
         }
-        LANE_COMPLETION.setRelease(laneCompletions, completionIndex, 1L);
     }
 
     public long commitSequence() { return commitSequence; }
     public long requiredLaneMask() { return requiredLaneMask; }
     public long completedLaneMask() {
-        long completed = 0;
-        long pending = requiredLaneMask;
-        while (pending != 0) {
-            int laneId = Long.numberOfTrailingZeros(pending);
-            if ((long) LANE_COMPLETION.getAcquire(
-                    laneCompletions, laneId * COMPLETION_STRIDE) != 0) {
-                completed |= 1L << laneId;
-            }
-            pending &= pending - 1;
-        }
-        return completed;
+        return (long) COMPLETED_LANE_MASK.getAcquire(this);
     }
     public boolean complete() { return completedLaneMask() == requiredLaneMask; }
     MatcherSettlementPlan plan() { return plan; }
@@ -133,15 +130,21 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         if (!complete()) return null;
         if (collected) throw new IllegalStateException("matcher settlement event was already collected");
         collected = true;
-        if (laneTreasuryDeltas == null) return EMPTY_TREASURY_DELTA;
+        if (touchedLaneTreasuryDeltas == null) return EMPTY_TREASURY_DELTA;
         RuntimeTreasuryDelta aggregate = null;
-        for (int laneId = 0; laneId < laneTreasuryDeltas.length; laneId++) {
-            RuntimeTreasuryDelta delta = laneTreasuryDeltas[laneId];
-            if (delta == null) continue;
+        for (RuntimeTreasuryDelta delta : touchedLaneTreasuryDeltas) {
             if (aggregate == null) aggregate = delta;
             else aggregate.merge(delta);
         }
         if (aggregate == null) throw new IllegalStateException("matcher settlement event has no lane delta");
         return aggregate;
+    }
+
+    private int laneSlot(int laneId) {
+        long laneBit = 1L << laneId;
+        if ((requiredLaneMask & laneBit) == 0) {
+            throw new IllegalStateException("matcher fact has no treasury slot for lane " + laneId);
+        }
+        return Long.bitCount(requiredLaneMask & (laneBit - 1));
     }
 }

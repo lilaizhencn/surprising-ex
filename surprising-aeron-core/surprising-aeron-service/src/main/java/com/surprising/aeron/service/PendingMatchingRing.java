@@ -92,6 +92,29 @@ final class PendingMatchingRing {
         return null;
     }
 
+    PendingMatching firstUnsubmittedPlaceAdmission(LongIntHashMap rejections) {
+        for (int offset = 0; offset < size; offset++) {
+            PendingMatching pending = entries[(head + offset) & mask];
+            if (pending != null && pending.placeAdmission() != null && !pending.isMatchingSubmitted()
+                    && !rejections.containsKey(pending.sequence())) {
+                return pending;
+            }
+        }
+        return null;
+    }
+
+    boolean hasUnsubmittedPlaceAdmissionBefore(long sequence, LongIntHashMap rejections) {
+        for (int offset = 0; offset < size; offset++) {
+            PendingMatching pending = entries[(head + offset) & mask];
+            if (pending == null || pending.sequence() >= sequence) continue;
+            if (pending.placeAdmission() != null && !pending.isMatchingSubmitted()
+                    && !rejections.containsKey(pending.sequence())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     PendingMatching findByCommandId(UUID commandId) {
         return commandId == null ? null : entriesByCommandId.get(commandId);
     }

@@ -64,6 +64,8 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
     private final CoreFactMetadata coreFactMetadata;
     private final FactIdentitySlice identities;
     private final RuntimeProjectionPoint projectionPoint;
+    private final int coreFactItemCount;
+    private final long estimatedCoreFactBytes;
 
     private RuntimeCommitPatch(Builder builder, SealMetadata metadata,
                                FactIdentitySlice identities,
@@ -94,6 +96,10 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         coreFactMetadata = metadata.coreFactMetadata();
         this.identities = identities;
         projectionPoint = new RuntimeProjectionPoint(sequence, null);
+        coreFactItemCount = countCoreFactItems(accountLaneGroups, globalOwnerGroup, fundsPostings,
+                matcherEvidence, terminalIds);
+        estimatedCoreFactBytes = Math.addExact(4_096L,
+                Math.multiplyExact((long) coreFactItemCount, 2_048L));
     }
 
     public static Builder builder(ProductLine productLine,
@@ -170,6 +176,14 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
     public boolean changesBusinessState() { return beforeRevision != afterRevision; }
 
     public int coreFactItemCount() {
+        return coreFactItemCount;
+    }
+
+    private static int countCoreFactItems(List<AccountLaneOwnerGroup> accountLaneGroups,
+                                          GlobalOwnerGroup globalOwnerGroup,
+                                          List<FundsPosting> fundsPostings,
+                                          List<MatcherEvidence> matcherEvidence,
+                                          TerminalIds terminalIds) {
         int count = 0;
         count = Math.addExact(count, fundsPostings.size());
         count = Math.addExact(count, matcherEvidence.size());
@@ -191,7 +205,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
     }
 
     public long estimatedCoreFactBytes() {
-        return Math.addExact(4_096L, Math.multiplyExact((long) coreFactItemCount(), 2_048L));
+        return estimatedCoreFactBytes;
     }
 
     public CoreFactFragment materializeCoreFactFragment() {
@@ -246,59 +260,45 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
     private static void appendUsers(ArrayList<CoreUserStateView> result, AccountLaneOwnerGroup group,
                                     IdentityView identities) {
         if (group.users.isEmpty()) return;
-        ArrayList<UserFactBuilder> ordered = new ArrayList<>(group.users.size());
         for (UserChange userChange : group.users) {
             UserRuntime user = userChange.after;
             if (user == null) continue;
-            UserFactBuilder builder = new UserFactBuilder(user);
-            ordered.add(builder);
-        }
-        for (BalanceChange change : group.balances) {
-            UserFactBuilder builder = userFactBuilder(ordered, change.key.userId);
-            if (builder != null && change.after != null) builder.balances.add(new CoreBalanceView(
-                    identities.asset(change.key.assetId), change.after.availableUnits, change.after.lockedUnits));
-        }
-        for (ReservationChange change : group.reservations) {
-            ReservationRuntime value = change.after;
-            UserFactBuilder builder = value == null ? null : userFactBuilder(ordered, value.userId());
-            if (builder != null) builder.reservations.add(new CoreReservationView(value.orderId(),
-                    identities.symbol(value.symbolId()), value.instrumentVersion(), value.kind(),
-                    identities.asset(value.assetId()), value.totalReservedUnits(), value.releasedUnits(),
-                    value.consumedUnits(), value.orderQuantitySteps()));
-        }
-        for (PositionChange change : group.positions) {
-            PositionRuntime value = change.after;
-            UserFactBuilder builder = value == null ? null : userFactBuilder(ordered, value.userId());
-            if (builder != null) builder.positions.add(new CorePositionView(identities.symbol(value.symbolId()),
-                    identities.asset(value.assetId()), value.marginMode(), value.positionSide(),
-                    value.instrumentVersion(), value.signedQuantitySteps(), value.entryPriceTicks(),
-                    value.entryValueTicks(), value.realizedPnlUnits(), value.positionMarginUnits()));
-        }
-        for (LeverageChange change : group.leverages) {
-            UserFactBuilder builder = userFactBuilder(ordered, change.key.userId());
-            if (builder != null && change.after != null) builder.leverages.add(
-                    new CoreLeverageView(change.key.symbol(), change.key.marginMode(), change.after));
-        }
-        for (UserFactBuilder builder : ordered) result.add(builder.materialize());
-    }
-
-    private static UserFactBuilder userFactBuilder(ArrayList<UserFactBuilder> values, long userId) {
-        for (UserFactBuilder candidate : values) if (candidate.user.userId() == userId) return candidate;
-        return null;
-    }
-
-    private static final class UserFactBuilder {
-        private final UserRuntime user;
-        private final ArrayList<CoreBalanceView> balances = new ArrayList<>();
-        private final ArrayList<CoreReservationView> reservations = new ArrayList<>();
-        private final ArrayList<CorePositionView> positions = new ArrayList<>();
-        private final ArrayList<CoreLeverageView> leverages = new ArrayList<>();
-
-        private UserFactBuilder(UserRuntime user) { this.user = user; }
-
-        private CoreUserStateView materialize() {
-            return new CoreUserStateView(user.productLine(), user.userId(), user.revision(), user.positionMode(),
-                    balances, reservations, positions, leverages);
+            ArrayList<CoreBalanceView> balances = null;
+            for (BalanceChange change : group.balances) {
+                if (change.key.userId != user.userId() || change.after == null) continue;
+                if (balances == null) balances = new ArrayList<>();
+                balances.add(new CoreBalanceView(identities.asset(change.key.assetId),
+                        change.after.availableUnits, change.after.lockedUnits));
+            }
+            ArrayList<CoreReservationView> reservations = null;
+            for (ReservationChange change : group.reservations) {
+                ReservationRuntime value = change.after;
+                if (value == null || value.userId() != user.userId()) continue;
+                if (reservations == null) reservations = new ArrayList<>();
+                reservations.add(new CoreReservationView(value.orderId(), identities.symbol(value.symbolId()),
+                        value.instrumentVersion(), value.kind(), identities.asset(value.assetId()),
+                        value.totalReservedUnits(), value.releasedUnits(), value.consumedUnits(),
+                        value.orderQuantitySteps()));
+            }
+            ArrayList<CorePositionView> positions = null;
+            for (PositionChange change : group.positions) {
+                PositionRuntime value = change.after;
+                if (value == null || value.userId() != user.userId()) continue;
+                if (positions == null) positions = new ArrayList<>();
+                positions.add(new CorePositionView(identities.symbol(value.symbolId()),
+                        identities.asset(value.assetId()), value.marginMode(), value.positionSide(),
+                        value.instrumentVersion(), value.signedQuantitySteps(), value.entryPriceTicks(),
+                        value.entryValueTicks(), value.realizedPnlUnits(), value.positionMarginUnits()));
+            }
+            ArrayList<CoreLeverageView> leverages = null;
+            for (LeverageChange change : group.leverages) {
+                if (change.key.userId() != user.userId() || change.after == null) continue;
+                if (leverages == null) leverages = new ArrayList<>();
+                leverages.add(new CoreLeverageView(change.key.symbol(), change.key.marginMode(), change.after));
+            }
+            result.add(new CoreUserStateView(user.productLine(), user.userId(), user.revision(),
+                    user.positionMode(), listOrEmpty(balances), listOrEmpty(reservations),
+                    listOrEmpty(positions), listOrEmpty(leverages)));
         }
     }
 

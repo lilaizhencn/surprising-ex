@@ -12,8 +12,8 @@ public final class RollingBusinessStateHash {
     private final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<UserHash> userHashes =
             new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
     private final Aggregate orders = new Aggregate();
-    private final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<OwnedContribution>
-            orderContributions = new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
+    private final org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap orderContributions =
+            new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap();
     private final Aggregate instruments = new Aggregate();
     private final Aggregate leverages = new Aggregate();
     private final Aggregate algoOrders = new Aggregate();
@@ -143,20 +143,24 @@ public final class RollingBusinessStateHash {
             for (RuntimeCommitPatch.BalanceChange change : group.balances()) {
                 String asset = identities.asset(change.key().assetId());
                 UserHash user = userHashes.get(change.key().userId());
-                Long actual = user == null ? null : user.balanceContribution(change.key().assetId());
-                Long expected = change.before() == null ? null
-                        : entryHashStable(asset, stableBalance(asset, change.before()));
-                requireContribution(actual, expected, "balance");
+                boolean actualPresent = user != null && user.hasBalanceContribution(change.key().assetId());
+                boolean expectedPresent = change.before() != null;
+                long actual = actualPresent ? user.balanceContribution(change.key().assetId()) : 0;
+                long expected = expectedPresent
+                        ? entryHashStable(asset, stableBalance(asset, change.before())) : 0;
+                requireContribution(actualPresent, actual, expectedPresent, expected, "balance");
                 if (change.after() != null) stableBalance(asset, change.after());
                 userUpdater.apply(change);
             }
             for (RuntimeCommitPatch.ReservationChange change : group.reservations()) {
                 ReservationRuntime before = change.before();
                 UserHash user = before == null ? null : userHashes.get(before.userId());
-                Long actual = user == null ? null : user.reservationContribution(change.orderId());
-                Long expected = before == null || before.reservedUnits() == 0 || change.pendingBefore() ? null
-                        : entryHashStable(change.orderId(), stableReservation(before, identities));
-                requireContribution(actual, expected, "reservation");
+                boolean actualPresent = user != null && user.hasReservationContribution(change.orderId());
+                boolean expectedPresent = before != null && before.reservedUnits() != 0 && !change.pendingBefore();
+                long actual = actualPresent ? user.reservationContribution(change.orderId()) : 0;
+                long expected = expectedPresent
+                        ? entryHashStable(change.orderId(), stableReservation(before, identities)) : 0;
+                requireContribution(actualPresent, actual, expectedPresent, expected, "reservation");
                 if (change.after() != null) stableReservation(change.after(), identities);
                 userUpdater.apply(change);
             }
@@ -164,10 +168,12 @@ public final class RollingBusinessStateHash {
                 RuntimeIdentityRegistry.PositionIdentity identity = identities.positionIdentity(change.positionKey());
                 PositionRuntime before = change.before();
                 UserHash user = before == null ? null : userHashes.get(before.userId());
-                Long actual = user == null ? null : user.positionContribution(change.positionKey());
-                Long expected = before == null ? null : entryHashStable(
-                        identity.positionKey(), stablePosition(before, identities));
-                requireContribution(actual, expected, "position");
+                boolean actualPresent = user != null && user.hasPositionContribution(change.positionKey());
+                boolean expectedPresent = before != null;
+                long actual = actualPresent ? user.positionContribution(change.positionKey()) : 0;
+                long expected = expectedPresent ? entryHashStable(
+                        identity.positionKey(), stablePosition(before, identities)) : 0;
+                requireContribution(actualPresent, actual, expectedPresent, expected, "position");
                 if (change.after() != null) stablePosition(change.after(), identities);
                 userUpdater.apply(change);
             }
@@ -176,11 +182,15 @@ public final class RollingBusinessStateHash {
                         reservationChangesScratch.get(change.orderId());
                 boolean pendingBefore = reservationChange != null && reservationChange.pendingBefore();
                 boolean pendingAfter = reservationChange != null && reservationChange.pendingAfter();
-                OwnedContribution owned = orderContributions.get(change.orderId());
-                Long actual = owned == null ? null : owned.value();
-                Long expected = change.before() == null || change.before().status().terminal() || pendingBefore ? null
-                        : entryHashStable(change.orderId(), stableOrder(change.before(), identities));
-                requireContribution(actual, expected, "order");
+                boolean actualPresent = orderContributions.containsKey(change.orderId());
+                boolean expectedPresent = change.before() != null
+                        && !change.before().status().terminal() && !pendingBefore;
+                long actual = actualPresent ? orderContributions.get(change.orderId()) : 0;
+                long expected = expectedPresent
+                        ? entryHashStable(change.orderId(), stableOrder(change.before(), identities)) : 0;
+                if (actualPresent != expectedPresent || actualPresent && actual != expected) {
+                    throw new IllegalArgumentException("business order before-value mismatch");
+                }
                 if (change.after() != null) stableOrder(change.after(), identities);
                 updateOrder(change, !pendingAfter);
             }
@@ -317,6 +327,14 @@ public final class RollingBusinessStateHash {
 
     private static void requireContribution(Long actual, Long expected, String domain) {
         if (!java.util.Objects.equals(actual, expected)) {
+            throw new IllegalArgumentException("business " + domain + " before-value mismatch");
+        }
+    }
+
+    private static void requireContribution(boolean actualPresent, long actual,
+                                            boolean expectedPresent, long expected,
+                                            String domain) {
+        if (actualPresent != expectedPresent || actualPresent && actual != expected) {
             throw new IllegalArgumentException("business " + domain + " before-value mismatch");
         }
     }
@@ -466,7 +484,7 @@ public final class RollingBusinessStateHash {
         values.forEach((userId, user) -> {
             UserHash hash = UserHash.create(user, identities);
             userHashes.put(userId, hash);
-            long contribution = entryHash(userId, hash.value());
+            long contribution = entryHash(userId.longValue(), hash.value());
             users.add(contribution);
         });
     }
@@ -477,20 +495,21 @@ public final class RollingBusinessStateHash {
         values.forEach((orderId, order) -> {
             if (order.status().terminal()) return;
             long contribution = entryHash(orderId, order);
-            orderContributions.put(orderId, new OwnedContribution(contribution));
+            orderContributions.put(orderId, contribution);
             orders.add(contribution);
         });
     }
 
     private void updateOrder(RuntimeCommitPatch.OrderChange change, boolean visible) {
-        OwnedContribution previous = orderContributions.remove(change.orderId());
-        if (previous != null) {
-            orders.remove(previous.value());
+        if (orderContributions.containsKey(change.orderId())) {
+            long previous = orderContributions.get(change.orderId());
+            orderContributions.remove(change.orderId());
+            orders.remove(previous);
         }
         OrderRuntime current = change.after();
         if (current != null && !current.status().terminal() && visible) {
             long contribution = entryHashStable(change.orderId(), stableOrder(current, identities));
-            orderContributions.put(change.orderId(), new OwnedContribution(contribution));
+            orderContributions.put(change.orderId(), contribution);
             orders.add(contribution);
         }
     }
@@ -575,6 +594,18 @@ public final class RollingBusinessStateHash {
         long hash = CoreStateHash.mix(CoreStateHash.start(), HASH_TAG);
         hash = CoreStateHash.mix(hash, stable(key));
         return CoreStateHash.mix(hash, stable(value));
+    }
+
+    private static long entryHash(long key, Object value) {
+        long hash = CoreStateHash.mix(CoreStateHash.start(), HASH_TAG);
+        hash = CoreStateHash.mix(hash, key);
+        return CoreStateHash.mix(hash, stable(value));
+    }
+
+    private static long entryHash(long key, long stableValue) {
+        long hash = CoreStateHash.mix(CoreStateHash.start(), HASH_TAG);
+        hash = CoreStateHash.mix(hash, key);
+        return CoreStateHash.mix(hash, stableValue);
     }
 
     private static long entryHashStable(Object key, long stableValue) {
@@ -1083,17 +1114,16 @@ public final class RollingBusinessStateHash {
             }
         }
 
-        private Long balanceContribution(int assetId) {
-            return balanceContributions.containsKey(assetId) ? balanceContributions.get(assetId) : null;
+        private boolean hasBalanceContribution(int assetId) { return balanceContributions.containsKey(assetId); }
+        private long balanceContribution(int assetId) { return balanceContributions.get(assetId); }
+        private boolean hasReservationContribution(long orderId) {
+            return reservationContributions.containsKey(orderId);
         }
-
-        private Long reservationContribution(long orderId) {
-            return reservationContributions.containsKey(orderId) ? reservationContributions.get(orderId) : null;
+        private long reservationContribution(long orderId) { return reservationContributions.get(orderId); }
+        private boolean hasPositionContribution(long positionKey) {
+            return positionContributions.containsKey(positionKey);
         }
-
-        private Long positionContribution(long positionKey) {
-            return positionContributions.containsKey(positionKey) ? positionContributions.get(positionKey) : null;
-        }
+        private long positionContribution(long positionKey) { return positionContributions.get(positionKey); }
 
         private long value() {
             long hash = CoreStateHash.start();

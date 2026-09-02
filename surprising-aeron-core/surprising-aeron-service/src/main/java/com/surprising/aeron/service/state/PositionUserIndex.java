@@ -4,14 +4,17 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.NavigableSet;
-import java.util.Set;
 import java.util.TreeSet;
+import org.eclipse.collections.api.iterator.LongIterator;
+import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
+import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
+import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
 public final class PositionUserIndex {
 
-    private final Map<String, NavigableSet<Long>> usersBySymbol = new HashMap<>();
-    private final Map<Long, RuntimePositionIndexValue> positions = new HashMap<>();
-    private final Map<UserSymbol, Integer> positionCounts = new HashMap<>();
+    private final Map<String, LongHashSet> usersBySymbol = new HashMap<>();
+    private final LongObjectHashMap<RuntimePositionIndexValue> positions = new LongObjectHashMap<>();
+    private final Map<String, LongIntHashMap> positionCountsBySymbol = new HashMap<>();
 
     public PositionUserIndex(TradingCoreState state) {
         rebuild(state);
@@ -22,18 +25,28 @@ public final class PositionUserIndex {
     }
 
     public NavigableSet<Long> users(String symbol) {
-        NavigableSet<Long> users = usersBySymbol.get(OrderReservation.normalizeSymbol(symbol));
-        return users == null ? Collections.emptyNavigableSet() : Collections.unmodifiableNavigableSet(users);
+        LongHashSet users = usersBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+        if (users == null) return Collections.emptyNavigableSet();
+        TreeSet<Long> sorted = new TreeSet<>();
+        users.forEach(sorted::add);
+        return Collections.unmodifiableNavigableSet(sorted);
     }
 
     public Long higherUser(String symbol, long cursorUserId) {
-        NavigableSet<Long> users = usersBySymbol.get(OrderReservation.normalizeSymbol(symbol));
-        return users == null ? null : users.higher(cursorUserId);
+        LongHashSet users = usersBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+        if (users == null) return null;
+        long higher = Long.MAX_VALUE;
+        LongIterator iterator = users.longIterator();
+        while (iterator.hasNext()) {
+            long userId = iterator.next();
+            if (userId > cursorUserId && userId < higher) higher = userId;
+        }
+        return higher == Long.MAX_VALUE ? null : higher;
     }
 
     void apply(java.util.List<RuntimeCommitPatch.PositionChange> changes, RuntimeCommitPatch.IdentityView identities) {
         for (RuntimeCommitPatch.PositionChange change : changes) {
-            RuntimePositionIndexValue previous = positions.remove(change.positionKey());
+            RuntimePositionIndexValue previous = positions.removeKey(change.positionKey());
             if (previous != null) removePosition(previous);
             if (change.after() != null) {
                 RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(change.after(), identities);
@@ -52,7 +65,7 @@ public final class PositionUserIndex {
     public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {
         usersBySymbol.clear();
         positions.clear();
-        positionCounts.clear();
+        positionCountsBySymbol.clear();
         state.users().values().forEach(user -> user.positions().forEach((key, position) -> {
             long positionKey = identities.positionKey(user.userId(), key);
             RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(user.userId(), position);
@@ -62,30 +75,29 @@ public final class PositionUserIndex {
     }
 
     private void addPosition(RuntimePositionIndexValue position) {
-        UserSymbol key = new UserSymbol(position.userId(), position.symbol());
-        int count = positionCounts.merge(key, 1, Math::addExact);
+        LongIntHashMap counts = positionCountsBySymbol.computeIfAbsent(
+                position.symbol(), ignored -> new LongIntHashMap());
+        int count = counts.addToValue(position.userId(), 1);
         if (count == 1) add(position.symbol(), position.userId());
     }
 
     private void removePosition(RuntimePositionIndexValue position) {
-        UserSymbol key = new UserSymbol(position.userId(), position.symbol());
-        int count = Math.subtractExact(positionCounts.getOrDefault(key, 0), 1);
+        LongIntHashMap counts = positionCountsBySymbol.get(position.symbol());
+        if (counts == null) throw new IllegalStateException("position user count is missing");
+        int count = counts.addToValue(position.userId(), -1);
         if (count == 0) {
-            positionCounts.remove(key);
+            counts.removeKey(position.userId());
+            if (counts.isEmpty()) positionCountsBySymbol.remove(position.symbol());
             remove(position.symbol(), position.userId());
-        } else {
-            positionCounts.put(key, count);
-        }
+        } else if (count < 0) throw new IllegalStateException("negative position user count");
     }
 
-    private record UserSymbol(long userId, String symbol) {}
-
     private void add(String symbol, long userId) {
-        usersBySymbol.computeIfAbsent(symbol, ignored -> new TreeSet<>()).add(userId);
+        usersBySymbol.computeIfAbsent(symbol, ignored -> new LongHashSet()).add(userId);
     }
 
     private void remove(String symbol, long userId) {
-        NavigableSet<Long> users = usersBySymbol.get(symbol);
+        LongHashSet users = usersBySymbol.get(symbol);
         if (users == null) return;
         users.remove(userId);
         if (users.isEmpty()) usersBySymbol.remove(symbol);

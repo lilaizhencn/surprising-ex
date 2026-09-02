@@ -3,29 +3,30 @@ package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
-import java.util.Arrays;
+import java.util.List;
+import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 
 public final class MatcherSettlementPlan {
-    private static final MatcherEvent[] NO_TRADES = new MatcherEvent[0];
-    private static final long[] NO_TRADE_LANES = new long[0];
     private final long coreSequence;
     private final long takerOrderId;
+    private final long activeUserId;
     private final long requiredLaneMask;
-    private final long[] userIds;
     private final long[] orderIds;
-    private final MatcherEvent[] tradeEvents;
-    private final long[] tradeLaneMasks;
+    private final int orderCount;
+    private final List<MatcherEvent> matcherEvents;
+    private final int tradeCount;
 
-    private MatcherSettlementPlan(long coreSequence, long takerOrderId, long requiredLaneMask,
-                                  long[] userIds, long[] orderIds, MatcherEvent[] tradeEvents,
-                                  long[] tradeLaneMasks) {
+    private MatcherSettlementPlan(long coreSequence, long takerOrderId, long activeUserId,
+                                  long requiredLaneMask, long[] orderIds, int orderCount,
+                                  List<MatcherEvent> matcherEvents, int tradeCount) {
         this.coreSequence = coreSequence;
         this.takerOrderId = takerOrderId;
+        this.activeUserId = activeUserId;
         this.requiredLaneMask = requiredLaneMask;
-        this.userIds = userIds;
         this.orderIds = orderIds;
-        this.tradeEvents = tradeEvents;
-        this.tradeLaneMasks = tradeLaneMasks;
+        this.orderCount = orderCount;
+        this.matcherEvents = matcherEvents;
+        this.tradeCount = tradeCount;
     }
 
     public static MatcherSettlementPlan build(long coreSequence, long takerOrderId, long activeUserId,
@@ -43,8 +44,6 @@ public final class MatcherSettlementPlan {
         }
         int expectedChanges = Math.max(2, result.matcherEvents().size() + result.cancellations().size()
                 + initialOrderIds.length + 1);
-        long[] users = new long[expectedChanges];
-        int userCount = addUnique(users, 0, activeUserId);
         long[] orders = new long[expectedChanges];
         int orderCount = 0;
         for (long orderId : initialOrderIds) {
@@ -56,69 +55,56 @@ public final class MatcherSettlementPlan {
             for (var cancellation : result.cancellations()) {
                 OrderRuntime order = runtime.order(cancellation.orderId());
                 if (order != null) {
-                    userCount = addUnique(users, userCount, order.userId());
                     orderCount = addUnique(orders, orderCount, order.orderId());
                     laneMask |= runtime.topology().accountLaneMask(order.userId());
                 }
             }
-            return new MatcherSettlementPlan(coreSequence, takerOrderId, laneMask, trim(users, userCount),
-                    trim(orders, orderCount), NO_TRADES, NO_TRADE_LANES);
+            return new MatcherSettlementPlan(coreSequence, takerOrderId, activeUserId, laneMask,
+                    orders, orderCount, result.matcherEvents(), 0);
         }
-        long[] remainingOrderIds = new long[Math.max(2, result.matcherEvents().size() + 1)];
-        long[] remainingQuantities = new long[remainingOrderIds.length];
-        int remainingCount = 1;
-        remainingOrderIds[0] = takerOrderId;
-        remainingQuantities[0] = taker.remainingQuantitySteps();
-        MatcherEvent[] trades = new MatcherEvent[result.matcherEvents().size()];
-        long[] tradeLaneMasks = new long[trades.length];
+        LongLongHashMap remainingByOrderId = runtime.matcherSettlementRemainingScratch();
+        remainingByOrderId.clear();
+        remainingByOrderId.put(takerOrderId, taker.remainingQuantitySteps());
         int tradeCount = 0;
-        for (MatcherEvent event : result.matcherEvents()) {
-            if (event == null) throw new IllegalArgumentException("runtime match is required");
-            if (event.eventType() != MatcherEventType.TRADE) continue;
-            if (event.price() <= 0 || event.size() <= 0) {
-                throw new IllegalArgumentException("invalid runtime match price or quantity");
+        try {
+            for (MatcherEvent event : result.matcherEvents()) {
+                if (event == null) throw new IllegalArgumentException("runtime match is required");
+                if (event.eventType() != MatcherEventType.TRADE) continue;
+                if (event.price() <= 0 || event.size() <= 0) {
+                    throw new IllegalArgumentException("invalid runtime match price or quantity");
+                }
+                OrderRuntime maker = requireOpen(runtime, event.matchedOrderId());
+                if (maker.userId() != event.matchedOrderUid() || maker.symbolId() != taker.symbolId()
+                        || maker.side() == taker.side() || maker.userId() == taker.userId()) {
+                    throw new IllegalStateException("runtime match does not match authoritative orders");
+                }
+                long takerRemaining = Math.subtractExact(remainingByOrderId.get(takerOrderId), event.size());
+                long makerBefore = remainingByOrderId.containsKey(maker.orderId())
+                        ? remainingByOrderId.get(maker.orderId()) : maker.remainingQuantitySteps();
+                long makerRemaining = Math.subtractExact(makerBefore, event.size());
+                if (takerRemaining < 0 || makerRemaining < 0) {
+                    throw new IllegalStateException("fill exceeds runtime order remaining quantity");
+                }
+                remainingByOrderId.put(takerOrderId, takerRemaining);
+                remainingByOrderId.put(maker.orderId(), makerRemaining);
+                preparePositionIdentity(runtime, identities, instrument, maker);
+                orderCount = addUnique(orders, orderCount, maker.orderId());
+                int makerLane = runtime.topology().accountLaneId(maker.userId());
+                tradeCount++;
+                laneMask |= 1L << makerLane;
             }
-            OrderRuntime maker = requireOpen(runtime, event.matchedOrderId());
-            if (maker.userId() != event.matchedOrderUid() || maker.symbolId() != taker.symbolId()
-                    || maker.side() == taker.side() || maker.userId() == taker.userId()) {
-                throw new IllegalStateException("runtime match does not match authoritative orders");
-            }
-            int takerIndex = indexOf(remainingOrderIds, remainingCount, takerOrderId);
-            int makerIndex = indexOf(remainingOrderIds, remainingCount, maker.orderId());
-            long takerRemaining = Math.subtractExact(remainingQuantities[takerIndex], event.size());
-            long makerBefore = makerIndex < 0
-                    ? maker.remainingQuantitySteps() : remainingQuantities[makerIndex];
-            long makerRemaining = Math.subtractExact(makerBefore, event.size());
-            if (takerRemaining < 0 || makerRemaining < 0) {
-                throw new IllegalStateException("fill exceeds runtime order remaining quantity");
-            }
-            remainingQuantities[takerIndex] = takerRemaining;
-            if (makerIndex < 0) {
-                makerIndex = remainingCount++;
-                remainingOrderIds[makerIndex] = maker.orderId();
-            }
-            remainingQuantities[makerIndex] = makerRemaining;
-            preparePositionIdentity(runtime, identities, instrument, maker);
-            userCount = addUnique(users, userCount, maker.userId());
-            orderCount = addUnique(orders, orderCount, maker.orderId());
-            int takerLane = runtime.topology().accountLaneId(taker.userId());
-            int makerLane = runtime.topology().accountLaneId(maker.userId());
-            trades[tradeCount] = event;
-            tradeLaneMasks[tradeCount] = 1L << takerLane | 1L << makerLane;
-            tradeCount++;
-            laneMask |= 1L << makerLane;
+        } finally {
+            remainingByOrderId.clear();
         }
         for (var cancellation : result.cancellations()) {
             OrderRuntime order = runtime.order(cancellation.orderId());
             if (order != null) {
-                userCount = addUnique(users, userCount, order.userId());
                 orderCount = addUnique(orders, orderCount, order.orderId());
                 laneMask |= runtime.topology().accountLaneMask(order.userId());
             }
         }
-        return new MatcherSettlementPlan(coreSequence, takerOrderId, laneMask, trim(users, userCount),
-                trim(orders, orderCount), trim(trades, tradeCount),
-                trim(tradeLaneMasks, tradeCount));
+        return new MatcherSettlementPlan(coreSequence, takerOrderId, activeUserId, laneMask,
+                orders, orderCount, result.matcherEvents(), tradeCount);
     }
 
     public static MatcherSettlementPlan empty(long coreSequence, long activeUserId, long[] orderIds,
@@ -126,9 +112,10 @@ public final class MatcherSettlementPlan {
         if (coreSequence <= 0 || activeUserId <= 0 || orderIds == null || runtime == null) {
             throw new IllegalArgumentException("invalid empty matcher settlement plan input");
         }
-        return new MatcherSettlementPlan(coreSequence, orderIds.length == 0 ? 0 : orderIds[orderIds.length - 1],
-                runtime.topology().accountLaneMask(activeUserId), new long[]{activeUserId}, orderIds.clone(),
-                NO_TRADES, NO_TRADE_LANES);
+        return new MatcherSettlementPlan(coreSequence,
+                orderIds.length == 0 ? 0 : orderIds[orderIds.length - 1], activeUserId,
+                runtime.topology().accountLaneMask(activeUserId), orderIds.clone(), orderIds.length,
+                List.of(), 0);
     }
 
     private static int addUnique(long[] values, int size, long value) {
@@ -137,19 +124,6 @@ public final class MatcherSettlementPlan {
         }
         values[size] = value;
         return size + 1;
-    }
-
-    private static int indexOf(long[] values, int size, long value) {
-        for (int index = 0; index < size; index++) if (values[index] == value) return index;
-        return -1;
-    }
-
-    private static MatcherEvent[] trim(MatcherEvent[] values, int size) {
-        return values.length == size ? values : Arrays.copyOf(values, size);
-    }
-
-    private static long[] trim(long[] values, int size) {
-        return values.length == size ? values : Arrays.copyOf(values, size);
     }
 
     private static void preparePositionIdentity(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
@@ -163,21 +137,27 @@ public final class MatcherSettlementPlan {
     private static OrderRuntime requireOpen(TradingRuntimeState runtime, long orderId) {
         OrderRuntime order = runtime.order(orderId);
         if (order == null || order.status() != CoreOrderStatus.OPEN) {
-            throw new IllegalStateException("runtime matched order is not open: " + orderId);
+            throw new IllegalStateException("runtime matched order is not open: " + orderId
+                    + (order == null ? " missing" : " status=" + order.status()
+                    + " executed=" + order.executedQuantitySteps()
+                    + " remaining=" + order.remainingQuantitySteps()
+                    + " revision=" + order.revision()));
         }
         return order;
     }
 
     public long coreSequence() { return coreSequence; }
     public long takerOrderId() { return takerOrderId; }
+    public long activeUserId() { return activeUserId; }
     public long requiredLaneMask() { return requiredLaneMask; }
-    public long[] userIds() { return userIds; }
-    public long[] orderIds() { return orderIds; }
-    public int orderCount() { return orderIds.length; }
+    public int orderCount() { return orderCount; }
     public long orderId(int index) { return orderIds[index]; }
-    public int tradeEventCount() { return tradeEvents.length; }
-    public MatcherEvent tradeEvent(int index) { return tradeEvents[index]; }
-    public boolean tradeTouchesLane(int index, int laneId) {
-        return (tradeLaneMasks[index] & 1L << laneId) != 0;
+    public int matcherEventCount() { return matcherEvents.size(); }
+    public MatcherEvent matcherEvent(int index) { return matcherEvents.get(index); }
+    public int tradeCount() { return tradeCount; }
+    public boolean matcherEventTouchesLane(int index, int laneId, TradingRuntimeState runtime) {
+        MatcherEvent event = matcherEvents.get(index);
+        return runtime.topology().accountLaneId(activeUserId) == laneId
+                || runtime.topology().accountLaneId(event.matchedOrderUid()) == laneId;
     }
 }

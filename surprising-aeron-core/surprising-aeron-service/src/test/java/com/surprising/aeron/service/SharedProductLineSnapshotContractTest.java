@@ -128,7 +128,7 @@ class SharedProductLineSnapshotContractTest {
                         settlementId, SYMBOL, 1, 100, productLine.isOptionProduct() ? 10 : 0))));
         assertApplied(settlement);
         assertThat(state.tradingState().treasuryState().lifecycleSettlements()).containsEntry(SYMBOL, settlementId);
-        CoreResponse rejectedAfterSettlement = state.apply(gateway(productLine, 4, USER_ID,
+        CoreResponse rejectedAfterSettlement = applyTerminal(state, gateway(productLine, 4, USER_ID,
                 CoreMessageType.PLACE_ORDER, TradingCommandCodec.encodePlaceOrder(place(
                         20_000L + productLine.ordinal()))));
         assertThat(rejectedAfterSettlement.status()).isEqualTo(ResponseStatus.REJECTED);
@@ -175,21 +175,8 @@ class SharedProductLineSnapshotContractTest {
         CoreResponse response = state.apply(command);
         if (response.resultCode() != CoreResultCode.MATCHING_PENDING) return response;
         long matchingSequence = state.matchingSequence(command.header().commandId());
-        com.surprising.aeron.service.matching.CoreMatchingResult matching = null;
-        long deadline = System.nanoTime() + 5_000_000_000L;
-        while (matching == null && System.nanoTime() < deadline) {
-            matching = state.takeMatchingResult(matchingSequence);
-            if (matching == null) Thread.onSpinWait();
-        }
-        assertThat(matching).as("matching completion for %s", command.header().messageType()).isNotNull();
-        CoreResponse completed = null;
-        deadline = System.nanoTime() + 5_000_000_000L;
-        while (completed == null && System.nanoTime() < deadline) {
-            completed = state.completeMatching(matchingSequence, matching,
-                    command.header().submittedAtEpochMillis(), command.header().sourceSequence());
-            if (completed == null) Thread.onSpinWait();
-        }
-        return completed;
+        return state.completeMatchingSynchronously(matchingSequence,
+                command.header().submittedAtEpochMillis(), command.header().sourceSequence());
     }
 
     private static void assertApplied(CoreResponse response) {

@@ -377,7 +377,8 @@ class CoreMatchingStateTest {
             CoreMessage tooLarge = message(state, 5, 22, CoreMessageType.PLACE_ORDER,
                     place(203, CoreOrderSide.SELL, 110, 3, true,
                             ReservationKind.DERIVATIVE_MARGIN, "USDT", 1));
-            assertThat(state.apply(tooLarge).resultCode().name()).isEqualTo("REDUCE_ONLY_CAPACITY_EXCEEDED");
+            assertThat(drainMatching(state, state.apply(tooLarge), tooLarge).resultCode().name())
+                    .isEqualTo("REDUCE_ONLY_CAPACITY_EXCEEDED");
 
             apply(state, 6, 11, CoreMessageType.PLACE_ORDER,
                     place(301, CoreOrderSide.BUY, 110, 3,
@@ -824,14 +825,7 @@ class CoreMatchingStateTest {
     private static CoreResponse drainMatching(CoreProbeState state, CoreResponse response, CoreMessage message) {
         if (response.resultCode() != CoreResultCode.MATCHING_PENDING) return response;
         long sequence = state.matchingSequence(message.header().commandId());
-        com.surprising.aeron.service.matching.CoreMatchingResult result = null;
-        long deadline = System.nanoTime() + 5_000_000_000L;
-        while (result == null && System.nanoTime() < deadline) {
-            result = state.takeMatchingResult(sequence);
-            if (result == null) Thread.onSpinWait();
-        }
-        assertThat(result).as("matching result for " + message.header().messageType()).isNotNull();
-        CoreResponse completed = completeUntilTerminalOrFailure(state, sequence, result,
+        CoreResponse completed = state.completeMatchingSynchronously(sequence,
                 message.header().submittedAtEpochMillis(), message.header().sourceSequence());
         assertThat(completed).isNotNull();
         assertThat(completed.status()).isIn(ResponseStatus.APPLIED, ResponseStatus.REJECTED);

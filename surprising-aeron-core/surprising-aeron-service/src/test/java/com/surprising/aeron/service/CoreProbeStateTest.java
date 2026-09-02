@@ -78,7 +78,7 @@ class CoreProbeStateTest {
             assertThat(pending.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             PendingMatching pendingMatching = state.pendingMatching(state.matchingSequence(place.header().commandId()));
             assertThat(pendingMatching).isNotNull();
-            assertThat(journal.metrics().reservedEntries()).isEqualTo(1);
+            assertThat(journal.metrics().reservedEntries()).isZero();
             assertThat(state.exportState().metrics().reservedEvents()).isEqualTo(1);
             assertThat(pendingMatching.capacityReservation().remainingPatches()).isEqualTo(1);
             assertThat(pendingMatching.capacityReservation().remainingFacts()).isEqualTo(1);
@@ -113,7 +113,7 @@ class CoreProbeStateTest {
             assertThat(deferredPending).isNotNull();
             assertThat(deferredPending.capacityReservation().remainingPatches()).isEqualTo(1);
             assertThat(deferredPending.capacityReservation().remainingFacts()).isEqualTo(1);
-            assertThat(commitJournal(state).metrics().reservedEntries()).isPositive();
+            assertThat(commitJournal(state).metrics().reservedEntries()).isZero();
             assertThat(state.exportState().metrics().reservedEvents()).isPositive();
 
             while (!state.pendingMatching().isEmpty()) {
@@ -156,7 +156,7 @@ class CoreProbeStateTest {
             PendingMatching queuedPending = state.pendingMatching().values().iterator().next();
             assertThat(queuedPending.capacityReservation().remainingPatches()).isEqualTo(2);
             assertThat(queuedPending.capacityReservation().remainingFacts()).isEqualTo(2);
-            assertThat(commitJournal(state).metrics().reservedEntries()).isPositive();
+            assertThat(commitJournal(state).metrics().reservedEntries()).isZero();
             assertThat(state.exportState().metrics().reservedEvents()).isPositive();
 
             while (!state.pendingMatching().isEmpty()) {
@@ -184,15 +184,15 @@ class CoreProbeStateTest {
                                     CoreOrderSide.BUY, 70_000, 1, false, CoreMarginMode.CROSS,
                                     CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                                     false, "budget")))));
-            assertThat(journal.metrics().reservedEntries()).isEqualTo(1);
-            assertThat(journal.metrics().reservedBytes()).isPositive();
+            assertThat(journal.metrics().reservedEntries()).isZero();
+            assertThat(journal.metrics().reservedBytes()).isZero();
             assertThat(exportState.metrics().reservedEvents()).isEqualTo(1);
             assertThat(exportState.metrics().reservedBytes()).isPositive();
 
             reservation.retainHolders(1);
             assertThat(reservation.holders()).isEqualTo(2);
             reservation.releaseUnused();
-            assertThat(journal.metrics().reservedEntries()).isEqualTo(1);
+            assertThat(journal.metrics().reservedEntries()).isZero();
             assertThat(exportState.metrics().reservedEvents()).isEqualTo(1);
             reservation.releaseUnused();
 
@@ -1258,7 +1258,8 @@ class CoreProbeStateTest {
         CoreMessage duplicateClientOrder = tradingCommand(CoreMessageType.PLACE_ORDER, duplicateId, 4,
                 TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(92, "BTC-USDT", 1, CoreOrderSide.BUY, 900, 1, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "client-91")));
         long availableBeforeDuplicate = original.tradingState().user(1001).balances().get("USDT").availableUnits();
-        assertThat(original.apply(duplicateClientOrder).resultCode()).isEqualTo(CoreResultCode.DUPLICATE_CLIENT_ORDER_ID);
+        assertThat(applyAndDrain(original, duplicateClientOrder).resultCode())
+                .isEqualTo(CoreResultCode.DUPLICATE_CLIENT_ORDER_ID);
         assertThat(original.tradingState().order(92)).isNull();
         assertThat(original.tradingState().user(1001).balances().get("USDT").availableUnits())
                 .isEqualTo(availableBeforeDuplicate);
@@ -1724,7 +1725,7 @@ class CoreProbeStateTest {
         assertThat(reservation.remainingFactItems()).isZero();
         assertThat(reservation.remainingFactBytes()).isZero();
         assertThat(state.pendingMatching()).isEmpty();
-        assertThat((Map<?, ?>) field(state, "factPatchChains")).isEmpty();
+        assertThat(field(state, "activeFactPatchChain")).isNull();
         assertThat(field(state, "currentAdmission")).isNull();
         assertThat(field(state, "activeFactCommand")).isNull();
         assertThat(field(state, "activeFactFingerprint")).isNull();
@@ -2000,7 +2001,7 @@ class CoreProbeStateTest {
         CoreMessage command = tradingCommand(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 1,
                 TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(1, "BTC-USDT", 1, CoreOrderSide.BUY, 600, 1, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, "")));
 
-        var rejected = state.apply(command);
+        var rejected = applyAndDrain(state, command);
         var duplicate = state.apply(command);
 
         assertThat(rejected.status()).isEqualTo(ResponseStatus.REJECTED);
@@ -2332,7 +2333,7 @@ class CoreProbeStateTest {
                     .isEqualTo(matching.nativeCommand().matcherSequence());
             assertThat(((long[]) field(state, "appliedMatcherPrefixDigests"))[shardIndex])
                     .isEqualTo(matching.matcherPrefix().after());
-            assertThat(commitJournal(state).metrics().reservedEntries()).isPositive();
+            assertThat(commitJournal(state).metrics().reservedEntries()).isZero();
             assertThat(state.exportState().metrics().currentBacklog()).isZero();
             assertThatThrownBy(() -> state.apply(query(CoreMessageType.STATE_HASH_QUERY, 0, new byte[0])))
                     .isInstanceOf(IllegalStateException.class)
@@ -2882,7 +2883,8 @@ class CoreProbeStateTest {
         int pendingBefore = state.pendingMatching().size();
         CoreResponse response = state.apply(message);
         if (response.resultCode() == CoreResultCode.MATCHING_PENDING) {
-            return completeMatching(state, state.matchingSequence(message.header().commandId()), message);
+            return state.completeMatchingSynchronously(state.matchingSequence(message.header().commandId()),
+                    message.header().submittedAtEpochMillis(), message.header().sourceSequence());
         }
         while (state.pendingMatching().size() > pendingBefore) {
             long sequence = state.pendingMatching().keySet().stream().skip(pendingBefore).findFirst().orElseThrow();

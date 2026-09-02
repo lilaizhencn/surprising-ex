@@ -475,9 +475,12 @@ final class LinearPerpetualSaturationWorkload {
                         || scheduledEntrySequence != operationsPerRun
                         || acceptedCoreMessages != terminalCoreMessages
                         || terminalTrades != operationsPerRun / 2L
+                        || laneOperationsByType[0] != operationsPerRun
                         || laneOperationsByType[1] <= operationsPerRun
-                        || laneOperationsByType[1] > Math.multiplyExact(operationsPerRun, 3L)
-                        || laneOperations != laneOperationsByType[1]
+                        || laneOperationsByType[1] > Math.multiplyExact(operationsPerRun, 2L)
+                        || laneOperations != Math.addExact(laneOperationsByType[0], laneOperationsByType[1])
+                        || laneOperations <= Math.multiplyExact(operationsPerRun, 2L)
+                        || laneOperations > Math.multiplyExact(operationsPerRun, 3L)
                         || parallelSettlementLanes < 2
                         || rejectedLaneSubmissions != 0
                         || queuedLaneOperations != 0
@@ -497,6 +500,7 @@ final class LinearPerpetualSaturationWorkload {
                             + ", coreMessages=" + acceptedCoreMessages + '/' + terminalCoreMessages
                             + ", terminalTrades=" + terminalTrades + '/' + (operationsPerRun / 2L)
                             + ", laneOperations=" + laneOperations
+                            + ", laneAdmissions=" + laneOperationsByType[0]
                             + ", laneSettlements=" + laneOperationsByType[1]
                             + ", rejectedLaneSubmissions=" + rejectedLaneSubmissions
                             + ", queuedLaneOperations=" + queuedLaneOperations

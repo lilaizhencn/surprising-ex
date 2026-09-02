@@ -26,7 +26,9 @@ CROSS 只共享该 Core 内权益，ISOLATED 绑定 position identity。只保�
 当前生产主链路固定为一个 Aeron Cluster service owner、一个 matcher worker、一个 exchange-core matching engine
 （exchange-core risk engine 为 0）和逻辑 Account Lane。owner 把已准备的不可变命令写入预分配的有界 SPSC ring；
 matcher worker 独占 fork 的 `SynchronousMatchingEngine` 并按序写回结果；owner 按 Core sequence 批量收割连续结果，
-再把同一条不可变 matcher fact 按 userId 路由到目标 Lane。固定 Account Lane worker 永久拥有本 Lane 状态并串行完成
+PLACE 在进入 matcher 前先以单向事件投递给用户所属 Lane，由该 Lane 串行完成余额冻结、order/reservation 和 client-order
+索引写入；owner 只收集已完成的准入结果并提交 matcher。matcher 返回后，owner 再把同一条不可变 matcher fact 按 userId
+路由到目标 Lane。固定 Account Lane worker 永久拥有本 Lane 状态并串行完成
 资金、订单、持仓和手续费变化；Coordinator 根据 completion bitmap 按 sequence 合并 Treasury delta、发布 Core Fact 和响应。
 不存在 Disruptor、逐命令 Future、临时 Runnable fan-out、Owner/Lane 所有权切换或阻塞式逐 Lane ACK barrier。
 
@@ -69,6 +71,8 @@ patch 的 `businessAfter` / `exportAfter` 随后由 projection、index、retenti
 
 owner 提交暂存采用可复用 `RuntimeCommitPatch.Builder`；reset 只清理本轮触碰的槽位，sealed patch 仍持有独立不可变值。
 用户与余额 before-value 按 Account Lane 写入 primitive journal，避免共享 `ConcurrentHashMap<Long, ...>` 的装箱和节点竞争；
+Lane 内 order、reservation、position、client-order 和 pending reservation 索引均使用 primitive key/value 容器；
+`TreeMap`/排序只允许出现在 query、snapshot 或确有多个 patch 的 Core Fact 合并边界，不进入普通 PLACE/成交 mutation；
 命令级 changed-ID 使用 first-touch primitive 数组和 generation 哈希索引，clear 不扫描历史容量；无删除项的 Core Fact 复用空 tombstone，
 有删除项时也只创建实际使用的类别列表；
 资金 posting 按本命令 first-touch 顺序直接线性合并，不排序；rolling hash 直接前向消费 typed before/after，
@@ -129,7 +133,8 @@ sectioned snapshot v17；decoder 和 startup 只接受这些当前版本，对�
 
 P10 的目标不是物理 Core shard；每个三节点 Product Core 只运行一个 Adapter 和一个 exchange-core matching engine。
 生产默认 `accountLaneCount=4`，每个 Lane 由一个固定 SPSC worker 永久拥有，负责资金状态、局部 hash 和快照 section。
-`MatcherSettlementPlan` 单次遍历 matcher events 并形成不可变事件；相关 Lane 并行消费，Coordinator 合并 Treasury delta、
+`MatcherSettlementPlan` 单次校验 matcher events，只保留需要终结的 primitive order ID，并直接引用 matcher 已有的确定性事件序列，
+不再复制 user、trade、remaining quantity 和 per-trade Lane-mask 数组；相关 Lane 按 userId 过滤并行消费，Coordinator 合并 Treasury delta、
 验证资金守恒，以一个连续 core sequence 发布 Runtime State/Core Fact。BLOCKING/YIELDING/BUSY_SPIN 只控制空闲等待。
 Runtime commit 只存一套 canonical sequence；prepare、seal、hash、index、publish 属于同一 owner transaction，失败后 fail-stop 恢复。
 P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣称生产认证完成。
@@ -148,7 +153,8 @@ P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣
 - Adapter 只在 matcher worker 上调用 `SynchronousMatchingEngine`，每条命令产生一个确定性的 `CoreMatchingResult`。
   matching engine 固定为 1；native sequence 与滚动 prefix 仍写入 snapshot/replay 证据，倒退或 prefix 断裂立即 fail closed。
   命令与结果只经过固定容量 SPSC ring 和当前 `LaneCommandContextRing.Context`，没有 ExchangeCore ring、异步 callback、Future 或 timer。
-  `MatcherSettlementPlan` 一次完成结果分类、用户收集和 Lane event slice 构造，后续 Lane 不重复遍历 matcher 链。
+  `MatcherSettlementPlan` 一次完成结果校验与目标 Lane 计算；后续 Lane 直接读取同一份 matcher event 序列并按 userId 过滤，
+  不构造 Lane event slice、maker/taker task、boxed change map 或逐成交 completion 对象。
 - Pending matcher ring 同时表达最多 256 个跨线程 in-flight 命令、批量/触发单的确定性 continuation 与故障证据；
   热路不维护逐命令 Future、active set、completed-result map 或 completion token。
 - `saturatedMatchingWorkload` 使用共享有界窗口的持续滑动 feeder：同一方向内每完成一组 maker/taker 依赖就立即补入
