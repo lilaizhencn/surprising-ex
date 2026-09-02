@@ -68,6 +68,25 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
         return result.descendingSet();
     }
 
+    /** Primitive deterministic intersection used by the matcher command path. */
+    public long[] sortedIds(long userId, String symbol) {
+        LongHashSet userIds = idsByUser.get(userId);
+        LongHashSet symbolIds = idsBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+        if (userIds == null || symbolIds == null) return new long[0];
+        LongHashSet source = userIds.size() <= symbolIds.size() ? userIds : symbolIds;
+        LongHashSet filter = source == userIds ? symbolIds : userIds;
+        long[] values = new long[source.size()];
+        int size = 0;
+        LongIterator iterator = source.longIterator();
+        while (iterator.hasNext()) {
+            long orderId = iterator.next();
+            if (filter.contains(orderId)) values[size++] = orderId;
+        }
+        if (size != values.length) values = java.util.Arrays.copyOf(values, size);
+        java.util.Arrays.sort(values);
+        return values;
+    }
+
     public long pendingQuantity(long userId, String symbol,
                                 com.surprising.aeron.protocol.CorePositionSide positionSide,
                                 com.surprising.aeron.protocol.CoreOrderSide side) {
@@ -189,13 +208,17 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
         }
     }
 
-    void apply(java.util.List<RuntimeCommitPatch.OrderChange> changes, RuntimeCommitPatch.IdentityView identities) {
-        for (RuntimeCommitPatch.OrderChange change : changes) {
-            CoreOrderState previous = ordersById.get(change.orderId());
-            if (previous != null) remove(previous);
-            if (change.businessAfter() != null && change.businessAfter().status() == CoreOrderStatus.OPEN) {
-                add(change.businessAfter());
-            }
+    void apply(java.util.List<RuntimeFactFrame.OrderChange> changes, RuntimeFactFrame.IdentityView identities) {
+        for (RuntimeFactFrame.OrderChange change : changes) {
+            apply(change.orderId(), change.after(), identities);
+        }
+    }
+
+    void apply(long orderId, OrderRuntime after, RuntimeFactFrame.IdentityView identities) {
+        CoreOrderState previous = ordersById.get(orderId);
+        if (previous != null) remove(previous);
+        if (after != null && after.status() == CoreOrderStatus.OPEN) {
+            add(RuntimeStateMaterializer.orderSnapshot(after, identities));
         }
     }
 

@@ -48,12 +48,16 @@ public final class CancelAllAfterIndex {
         return List.copyOf(result);
     }
 
-    void apply(java.util.List<RuntimeCommitPatch.TimerChange> changes) {
-        for (RuntimeCommitPatch.TimerChange change : changes) {
-            CoreCancelAllAfterState previous = valuesByKey.remove(change.key());
-            if (previous != null) remove(previous);
-            if (change.after() != null) add(change.after());
+    void apply(java.util.List<RuntimeFactFrame.TimerChange> changes) {
+        for (RuntimeFactFrame.TimerChange change : changes) {
+            apply(change.key(), change.after());
         }
+    }
+
+    void apply(CoreCancelAllAfterKey key, CoreCancelAllAfterState after) {
+        CoreCancelAllAfterState previous = valuesByKey.remove(key);
+        if (previous != null) remove(previous);
+        if (after != null) add(after);
     }
 
     public void rebuild(TradingCoreState state) {

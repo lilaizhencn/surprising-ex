@@ -10,7 +10,7 @@ record RuntimePositionIndexValue(long userId, String symbol, String asset,
                 position.positionSide(), position.signedQuantitySteps());
     }
 
-    static RuntimePositionIndexValue from(PositionRuntime position, RuntimeCommitPatch.IdentityView identities) {
+    static RuntimePositionIndexValue from(PositionRuntime position, RuntimeFactFrame.IdentityView identities) {
         return new RuntimePositionIndexValue(position.userId(), identities.symbol(position.symbolId()),
                 identities.asset(position.assetId()), position.positionSide(), position.signedQuantitySteps());
     }

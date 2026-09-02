@@ -31,9 +31,9 @@ import com.surprising.aeron.service.state.PositionUserIndex;
 import com.surprising.aeron.service.state.RiskSnapshotIndex;
 import com.surprising.aeron.service.state.RollingBusinessStateHash;
 import com.surprising.aeron.service.state.RollingFundsStateHash;
-import com.surprising.aeron.service.state.RuntimeCommitIndexes;
+import com.surprising.aeron.service.state.RuntimeFactIndexes;
 import com.surprising.aeron.service.state.RuntimeCommitJournal;
-import com.surprising.aeron.service.state.RuntimeCommitPatch;
+import com.surprising.aeron.service.state.RuntimeFactFrame;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.RuntimeProjectionState;
 import com.surprising.aeron.service.state.RuntimeStateMaterializer;
@@ -80,7 +80,7 @@ import org.openjdk.jmh.annotations.Warmup;
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
 })
 @Threads(1)
-public class OwnerCommitPatchBenchmark {
+public class OwnerFactFrameBenchmark {
 
     private static final ProductLine PRODUCT_LINE = ProductLine.LINEAR_PERPETUAL;
     private static final String ASSET = "USDT";
@@ -105,7 +105,7 @@ public class OwnerCommitPatchBenchmark {
                 latencies.accepted(index, entry, System.nanoTime());
                 PreparedDraft prepared = state.drafts.drafts.get(index);
                 Draft draft = prepared.draft;
-                RuntimeCommitPatch patch = draft.builder.seal(draft.changes,
+                RuntimeFactFrame patch = draft.builder.seal(draft.changes,
                         prepared.afterBusinessStateHash, prepared.afterFundsStateHash);
                 state.journal.publish(reservation, patch, patch.businessStateHash(), patch.fundsStateHash());
                 checksum ^= patch.coreSequence() ^ patch.businessStateHash() ^ patch.fundsStateHash();
@@ -130,7 +130,7 @@ public class OwnerCommitPatchBenchmark {
             for (int index = start; index < end; index++) {
                 long entry = latencies.awaitEntry(index);
                 latencies.accepted(index, entry, System.nanoTime());
-                RuntimeCommitPatch patch = state.batch.patches.get(index);
+                RuntimeFactFrame patch = state.batch.patches.get(index);
                 state.indexes.apply(patch);
                 long terminal = System.nanoTime();
                 latencies.terminal(index, terminal);
@@ -174,7 +174,7 @@ public class OwnerCommitPatchBenchmark {
                 for (int index = start; index < end; index++) {
                     long entry = latencies.awaitEntry(index);
                     latencies.accepted(index, entry, System.nanoTime());
-                    RuntimeCommitPatch patch = state.batch.patches.get(index);
+                    RuntimeFactFrame patch = state.batch.patches.get(index);
                     state.projection.apply(patch);
                     TradingCoreState projected = state.projection.freeze(patch.projectionSequence());
                     long business = RollingBusinessStateHash.compute(projected);
@@ -212,7 +212,7 @@ public class OwnerCommitPatchBenchmark {
             }
             state.projection.apply(state.batch.patches.subList(start, end));
             for (int index = start; index < end; index++) {
-                RuntimeCommitPatch patch = state.batch.patches.get(index);
+                RuntimeFactFrame patch = state.batch.patches.get(index);
                 long patchIdentityVersion = patch.identities().dictionaryVersion();
                 if (patchIdentityVersion < identityDictionaryVersion) {
                     throw new IllegalStateException("Core Fact identity dictionary version regressed");
@@ -296,7 +296,7 @@ public class OwnerCommitPatchBenchmark {
     @State(Scope.Thread)
     public static class MultiLaneFanoutState extends ScaleContractState {
         private Batch batch;
-        private RuntimeCommitIndexes indexes;
+        private RuntimeFactIndexes indexes;
         private OpenInterestIndex openInterest;
         private ActiveOrderIndex activeOrders;
         private String touchedSymbol;
@@ -310,7 +310,7 @@ public class OwnerCommitPatchBenchmark {
             touchedSymbol = symbol(initial, 0);
             openInterest = new OpenInterestIndex(initial, identities);
             activeOrders = new ActiveOrderIndex(initial, identities);
-            indexes = new RuntimeCommitIndexes(
+            indexes = new RuntimeFactIndexes(
                     new PositionUserIndex(initial, identities), openInterest, new TriggerOrderIndex(initial),
                     new AlgoOrderIndex(initial), new LiquidationIndex(initial), new CancelAllAfterIndex(initial),
                     activeOrders, new AdlPositionIndex(initial, identities), new RiskSnapshotIndex(initial));
@@ -636,7 +636,7 @@ public class OwnerCommitPatchBenchmark {
         }
         TradingCoreState initial = initialState(16, 8, 2, 2);
         DraftBatch drafts = draftBatch(initial, operations);
-        ArrayList<RuntimeCommitPatch> sealed = new ArrayList<>(operations);
+        ArrayList<RuntimeFactFrame> sealed = new ArrayList<>(operations);
         long maximumBacklog = 0;
         boolean fingerprintsExact = true;
         boolean nonZeroFingerprints = true;
@@ -650,7 +650,7 @@ public class OwnerCommitPatchBenchmark {
                         end - start, Math.multiplyExact(end - start, 1L << 20));
                 for (int index = start; index < end; index++) {
                     PreparedDraft prepared = drafts.drafts.get(index);
-                    RuntimeCommitPatch patch = prepared.draft.builder.seal(prepared.draft.changes,
+                    RuntimeFactFrame patch = prepared.draft.builder.seal(prepared.draft.changes,
                             prepared.afterBusinessStateHash, prepared.afterFundsStateHash);
                     journal.publish(reservation, patch, patch.businessStateHash(), patch.fundsStateHash());
                     sealed.add(patch);
@@ -671,9 +671,9 @@ public class OwnerCommitPatchBenchmark {
         }
 
         RuntimeIdentityRegistry identities = identities(initial);
-        RuntimeCommitIndexes indexes = indexes(initial, identities);
+        RuntimeFactIndexes indexes = indexes(initial, identities);
         int fanoutOperations = 0;
-        for (RuntimeCommitPatch patch : sealed) {
+        for (RuntimeFactFrame patch : sealed) {
             indexes.apply(patch);
             fanoutOperations++;
         }
@@ -687,7 +687,7 @@ public class OwnerCommitPatchBenchmark {
         boolean encodedFactsExact = true;
         try (CoreExportState exportState = new CoreExportState()) {
             for (int index = 0; index < sealed.size(); index++) {
-                RuntimeCommitPatch patch = sealed.get(index);
+                RuntimeFactFrame patch = sealed.get(index);
                 projection.apply(patch);
                 projectedOperations++;
                 exportState.append(exportDraft(patch, drafts.drafts.get(index).draft.command));
@@ -702,7 +702,7 @@ public class OwnerCommitPatchBenchmark {
                 encodedBytes = Math.addExact(encodedBytes, encodedMessage.payloadLength());
                 encodedFingerprintsExact &= event.commandFingerprint().equals(
                         CommandFingerprint.of(drafts.drafts.get(index).draft.command));
-                RuntimeCommitPatch patch = sealed.get(index);
+                RuntimeFactFrame patch = sealed.get(index);
                 encodedFactsExact &= event.businessStateHash() == patch.businessStateHash()
                         && event.beforeBusinessStateHash() == patch.beforeBusinessStateHash()
                         && event.fundsStateHash() == patch.fundsStateHash()
@@ -758,7 +758,7 @@ public class OwnerCommitPatchBenchmark {
             businessApplies++;
             funds.applyFailStop(prepared.draft.changes);
             fundsApplies++;
-            RuntimeCommitPatch patch = batch.patches.get(index);
+            RuntimeFactFrame patch = batch.patches.get(index);
             projection.apply(patch);
             TradingCoreState projected = projection.freeze(patch.projectionSequence());
             long canonicalBusiness = RollingBusinessStateHash.compute(projected);
@@ -823,19 +823,19 @@ public class OwnerCommitPatchBenchmark {
         counters.batchItems += operations;
         counters.totalBatchSize += operations;
         counters.maximumBatchSize += Math.min(operations, maxInFlight);
-        for (RuntimeCommitPatch patch : batch.patches) {
+        for (RuntimeFactFrame patch : batch.patches) {
             counters.patchItems += patch.coreFactItemCount();
             counters.patchBytes += estimatedPatchBytes(patch);
         }
     }
 
-    private static long estimatedPatchBytes(RuntimeCommitPatch patch) {
+    private static long estimatedPatchBytes(RuntimeFactFrame patch) {
         return 384L + 128L * patch.accountLaneGroups().size() + 96L * patch.fundsPostings().size()
                 + 80L * patch.matcherEvidence().size() + 32L * patch.coreFactItemCount();
     }
 
-    private static RuntimeCommitIndexes indexes(TradingCoreState initial, RuntimeIdentityRegistry identities) {
-        return new RuntimeCommitIndexes(
+    private static RuntimeFactIndexes indexes(TradingCoreState initial, RuntimeIdentityRegistry identities) {
+        return new RuntimeFactIndexes(
                 new PositionUserIndex(initial, identities), new OpenInterestIndex(initial, identities),
                 new TriggerOrderIndex(initial), new AlgoOrderIndex(initial), new LiquidationIndex(initial),
                 new CancelAllAfterIndex(initial), new ActiveOrderIndex(initial, identities),
@@ -872,7 +872,7 @@ public class OwnerCommitPatchBenchmark {
                 business.value(), funds.value());
     }
 
-    private static RuntimeCommitPatch seal(Draft draft) {
+    private static RuntimeFactFrame seal(Draft draft) {
         long business = draft.businessHash.applyFailStop(draft.changes);
         long funds = draft.fundsHash.applyFailStop(draft.changes);
         return draft.builder.seal(draft.changes, business, funds);
@@ -888,13 +888,13 @@ public class OwnerCommitPatchBenchmark {
         RollingFundsStateHash funds = RollingFundsStateHash.create(initial, identities);
         long orderIdBase = maximumOrderId(initial);
         RuntimeProjectionState buildProjection = new RuntimeProjectionState(initial, business.value(), funds.value());
-        ArrayList<RuntimeCommitPatch> patches = new ArrayList<>(size);
+        ArrayList<RuntimeFactFrame> patches = new ArrayList<>(size);
         ArrayList<CoreMessage> commands = new ArrayList<>(size);
         long userSeed = 10_000_000;
         for (long sequence = 1; sequence <= size; sequence++) {
             Draft draft = draftWithHashes(
                     initial, identities, business, funds, sequence, userSeed, orderIdBase);
-            RuntimeCommitPatch patch = seal(draft);
+            RuntimeFactFrame patch = seal(draft);
             patches.add(patch);
             commands.add(draft.command);
             buildProjection.apply(patch);
@@ -916,10 +916,10 @@ public class OwnerCommitPatchBenchmark {
         TradingCoreState initial = drafts.drafts.get(0).draft.initial;
         RuntimeProjectionState projection = new RuntimeProjectionState(
                 initial, drafts.initialBusinessStateHash, drafts.initialFundsStateHash);
-        ArrayList<RuntimeCommitPatch> patches = new ArrayList<>(drafts.drafts.size());
+        ArrayList<RuntimeFactFrame> patches = new ArrayList<>(drafts.drafts.size());
         ArrayList<CoreMessage> commands = new ArrayList<>(drafts.drafts.size());
         for (PreparedDraft prepared : drafts.drafts) {
-            RuntimeCommitPatch patch = prepared.draft.builder.seal(prepared.draft.changes,
+            RuntimeFactFrame patch = prepared.draft.builder.seal(prepared.draft.changes,
                     prepared.afterBusinessStateHash, prepared.afterFundsStateHash);
             patches.add(patch);
             commands.add(prepared.draft.command);
@@ -938,7 +938,7 @@ public class OwnerCommitPatchBenchmark {
     private static Draft draftWithHashes(TradingCoreState initial, RuntimeIdentityRegistry identities,
                                          RollingBusinessStateHash business, RollingFundsStateHash funds,
                                          long sequence, long userSeed, long orderIdBase) {
-        RuntimeCommitPatch.Builder builder = RuntimeCommitPatch.builder(
+        RuntimeFactFrame.Builder builder = RuntimeFactFrame.builder(
                 PRODUCT_LINE, sequence - 1, sequence)
                 .matcherTransition(CoreMatcherTransition.unchanged(0, 0));
         int assetId = identities.assetId(ASSET);
@@ -972,7 +972,7 @@ public class OwnerCommitPatchBenchmark {
                     .orderSnapshot(order, identities);
             builder.recordUser(laneId, null, user)
                     .recordBalance(laneId, userId, assetId, null,
-                            new RuntimeCommitPatch.UserBalance(0, position.positionMarginUnits(), 0))
+                            new RuntimeFactFrame.UserBalance(0, position.positionMarginUnits(), 0))
                     .recordPosition(laneId, positionKey, null, position)
                     .recordOrder(laneId, null, order, null, businessOrder);
             laneMask |= 1L << laneId;
@@ -983,12 +983,12 @@ public class OwnerCommitPatchBenchmark {
         builder.recordTreasuryAsset(assetId,
                 treasuryAsset(initial, clearingBefore), treasuryAsset(initial, clearingAfter));
         CoreMessage command = benchmarkCommand(sequence, commandUserId, commandSymbol, commandOrderId);
-        RuntimeCommitPatch.CoreFactMetadata factMetadata = new RuntimeCommitPatch.CoreFactMetadata(
+        RuntimeFactFrame.CoreFactMetadata factMetadata = new RuntimeFactFrame.CoreFactMetadata(
                 command.header().commandId(), CommandFingerprint.of(command),
                 command.header().messageType().wireCode(), command.header().userId(),
                 ResponseStatus.APPLIED, CoreResultCode.NONE,
                 sequence, sequence, FOUR_LANES.topologyHash(), sequence, false);
-        RuntimeCommitPatch.PreparedChanges changes = builder.prepare(new RuntimeCommitPatch.PrepareMetadata(
+        RuntimeFactFrame.PreparedChanges changes = builder.prepare(new RuntimeFactFrame.PrepareMetadata(
                 Math.addExact(initial.revision(), sequence - 1),
                 Math.addExact(initial.revision(), sequence), business.value(), funds.value(), laneMask,
                 factMetadata, false), identities);
@@ -1005,10 +1005,10 @@ public class OwnerCommitPatchBenchmark {
         return batch(operations).patches().size();
     }
 
-    private static RuntimeCommitPatch.TreasuryAssetValue treasuryAsset(
+    private static RuntimeFactFrame.TreasuryAssetValue treasuryAsset(
             TradingCoreState initial, long clearingAdjustment) {
         var treasury = initial.treasuryState();
-        return new RuntimeCommitPatch.TreasuryAssetValue(
+        return new RuntimeFactFrame.TreasuryAssetValue(
                 treasury.feeBalances().getOrDefault(ASSET, 0L),
                 treasury.insuranceBalances().getOrDefault(ASSET, 0L),
                 treasury.insuranceDeficits().getOrDefault(ASSET, 0L),
@@ -1062,28 +1062,28 @@ public class OwnerCommitPatchBenchmark {
         return new ArrayList<>(initial.instruments().keySet()).get(target);
     }
 
-    private static CoreExportState.Draft exportDraft(RuntimeCommitPatch patch, CoreMessage command) {
-        RuntimeCommitPatch.CoreFactMetadata metadata = patch.coreFactMetadata();
+    private static CoreExportState.Draft exportDraft(RuntimeFactFrame patch, CoreMessage command) {
+        RuntimeFactFrame.CoreFactMetadata metadata = patch.coreFactMetadata();
         long[] terminalOrderIds = patch.terminalIds().orderIds().stream().mapToLong(Long::longValue).toArray();
         return new CoreExportState.Draft(command, metadata.status(), metadata.resultCode(),
                 metadata.appliedCommandCount(), patch.businessStateHash(), patch.beforeBusinessStateHash(),
                 patch.beforeFundsStateHash(), patch.fundsStateHash(), metadata.topologyHash(),
                 metadata.laneRevisionHash(), patch.matcherTransition(), metadata.clusterPosition(),
                 patch.projectionSequence(), patch.coreFactItemCount(), terminalOrderIds,
-                new CoreExportState.PatchChain(patch, null, factPermit(patch)),
+                new CoreExportState.FactChain(patch, null, factPermit(patch)),
                 CoreCommandDelta.empty(), patch.fundsDelta(), metadata);
     }
 
-    private static CoreAdmissionReservation.FactPermit factPermit(RuntimeCommitPatch patch) {
+    private static CoreAdmissionReservation.FactPermit factPermit(RuntimeFactFrame patch) {
         var budget = new CoreAdmissionReservation.FactBudget(
                 1, Math.max(1, patch.coreFactItemCount()), Math.max(1, patch.estimatedCoreFactBytes()));
-        var permit = budget.reservePatch();
+        var permit = budget.reserveFrame();
         permit.consume(patch);
         return permit;
     }
 
     private record Draft(TradingCoreState initial, RuntimeIdentityRegistry identities,
-                         RuntimeCommitPatch.Builder builder, RuntimeCommitPatch.PreparedChanges changes,
+                         RuntimeFactFrame.Builder builder, RuntimeFactFrame.PreparedChanges changes,
                          RollingBusinessStateHash businessHash, RollingFundsStateHash fundsHash,
                          CoreMessage command) {}
 
@@ -1093,7 +1093,7 @@ public class OwnerCommitPatchBenchmark {
                               long initialFundsStateHash, long finalBusinessStateHash,
                               long finalFundsStateHash) {}
 
-    private record Batch(TradingCoreState initial, List<RuntimeCommitPatch> patches, List<CoreMessage> commands,
+    private record Batch(TradingCoreState initial, List<RuntimeFactFrame> patches, List<CoreMessage> commands,
                          TradingCoreState finalState, long initialBusinessStateHash,
                          long initialFundsStateHash, long finalBusinessStateHash,
                          long finalFundsStateHash) {}

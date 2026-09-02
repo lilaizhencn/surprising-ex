@@ -7,7 +7,7 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 
-public final class RuntimeIdentityRegistry implements RuntimeCommitPatch.IdentityView {
+public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityView {
 
     // Forward and allocation indexes are owner-only. Monotonic asset/symbol
     // dictionaries use volatile array publication; releasable client/position

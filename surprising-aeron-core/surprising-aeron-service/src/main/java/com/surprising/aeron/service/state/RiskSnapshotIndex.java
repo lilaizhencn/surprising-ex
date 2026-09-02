@@ -25,14 +25,18 @@ public final class RiskSnapshotIndex {
         return keys == null ? Set.of() : Collections.unmodifiableNavigableSet(keys);
     }
 
-    void apply(java.util.List<RuntimeCommitPatch.RiskSnapshotChange> changes,
-               RuntimeCommitPatch.IdentityView identities) {
-        for (RuntimeCommitPatch.RiskSnapshotChange change : changes) {
-            RuntimeIdentityRegistry.PositionIdentity identity = identities.positionIdentity(change.riskKey());
-            String key = identity.userId() + ":" + identity.positionKey();
-            remove(identity.userId(), key);
-            if (change.after() != null) add(identity.userId(), key);
+    void apply(java.util.List<RuntimeFactFrame.RiskSnapshotChange> changes,
+               RuntimeFactFrame.IdentityView identities) {
+        for (RuntimeFactFrame.RiskSnapshotChange change : changes) {
+            apply(change.riskKey(), change.after(), identities);
         }
+    }
+
+    void apply(long riskKey, RiskSnapshotRuntime after, RuntimeFactFrame.IdentityView identities) {
+        RuntimeIdentityRegistry.PositionIdentity identity = identities.positionIdentity(riskKey);
+        String key = identity.userId() + ":" + identity.positionKey();
+        remove(identity.userId(), key);
+        if (after != null) add(identity.userId(), key);
     }
 
     public void rebuild(TradingCoreState state) {

@@ -12,12 +12,12 @@ import org.agrona.concurrent.UnsafeBuffer;
 final class SectionedCoreSnapshotCodec {
 
     static final int MAGIC = 0x5358534E;
-    static final int VERSION = 17;
+    static final int VERSION = 18;
     static final int ENVELOPE_LENGTH = 12;
     static final int SECTION_HEADER_LENGTH = 8;
     static final int FORK_GIT_SHA_LENGTH = 40;
     static final int ARTIFACT_SHA256_LENGTH = 64;
-    static final int HEADER_LENGTH = 342;
+    static final int HEADER_LENGTH = 358;
     static final int SOURCE_SEQUENCE_LENGTH = 24;
     static final int OUTBOX_FIXED_LENGTH = 20;
     static final int FOOTER_LENGTH = Long.BYTES;

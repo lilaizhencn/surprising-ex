@@ -63,12 +63,16 @@ public final class AlgoOrderIndex {
         return List.copyOf(result);
     }
 
-    void apply(java.util.List<RuntimeCommitPatch.AlgoOrderChange> changes) {
-        for (RuntimeCommitPatch.AlgoOrderChange change : changes) {
-            CoreAlgoOrderState previous = valuesById.remove(change.algoOrderId());
-            if (previous != null) remove(previous);
-            if (change.after() != null) add(change.after());
+    void apply(java.util.List<RuntimeFactFrame.AlgoOrderChange> changes) {
+        for (RuntimeFactFrame.AlgoOrderChange change : changes) {
+            apply(change.algoOrderId(), change.after());
         }
+    }
+
+    void apply(long algoOrderId, CoreAlgoOrderState after) {
+        CoreAlgoOrderState previous = valuesById.remove(algoOrderId);
+        if (previous != null) remove(previous);
+        if (after != null) add(after);
     }
 
     public void rebuild(TradingCoreState state) {

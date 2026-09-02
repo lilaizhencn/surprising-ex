@@ -44,7 +44,7 @@ final class CoreProbeStateRestoreTestSupport {
             MatcherSnapshot matcherSnapshot) {
         CoreProbeState candidate = CoreProbeState.prepareRestore(productLine, appliedCommandCount, probeValue,
                 commandResults, lastSourceSequences, snapshotState, exportState, new TerminalStateRetention(),
-                matcherSnapshot, appliedCommandCount, Map.of(), Map.of());
+                matcherSnapshot, appliedCommandCount, Map.of(), Map.of(), 0, 0);
         try {
             long projectionSequence = candidate.snapshotProjectionSequence();
             var accountLanes = candidate.accountLaneSnapshots(projectionSequence, snapshotState);

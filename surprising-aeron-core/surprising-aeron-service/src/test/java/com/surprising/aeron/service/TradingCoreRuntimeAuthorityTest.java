@@ -67,35 +67,33 @@ class TradingCoreRuntimeAuthorityTest {
 
         String probe = source("CoreProbeState.java");
         int start = probe.indexOf("    private void projectSnapshotNow(long committedLaneMask)");
-        int end = probe.indexOf("    private void publishSealedCommit(", start);
+        int end = probe.indexOf("    private void publishFactFrame(", start);
         assertThat(start).isGreaterThanOrEqualTo(0);
         assertThat(end).isGreaterThan(start);
         String ownerCommit = probe.substring(start, end);
-        assertThat(ownerCommit).contains("preparedCommit.builder().prepare(", "preparedCommit.seal(preparedChanges",
-                        "runtime.commitRuntimeTransition(commit", "publishSealedCommit(commit,")
+        assertThat(ownerCommit).contains("runtime.commitRuntimeTransition(frame", "publishFactFrame(frame,")
                 .doesNotContain("RuntimeStateMaterializer.materialize", "RollingBusinessStateHash.compute",
-                        "RollingFundsStateHash.compute", "StateMapSupport", ".await(");
-        assertThat(occurrences(ownerCommit, "preparedCommit.builder().prepare(")).isEqualTo(1);
-        assertThat(occurrences(ownerCommit, "preparedCommit.seal(preparedChanges")).isEqualTo(1);
-        assertThat(occurrences(ownerCommit, "runtime.commitRuntimeTransition(commit")).isEqualTo(1);
-        assertThat(occurrences(ownerCommit, "publishSealedCommit(commit,")).isEqualTo(1);
-        assertThat(probe).contains("currentAdmission.publish(commit, businessStateHash, fundsStateHash)");
-        assertThat(occurrences(production, "commitIndexes.apply(entry)")).isEqualTo(1);
+                        "RollingFundsStateHash.compute", "StateMapSupport", ".await(",
+                        ".prepareChanges()", ".materializeCoreFactFragment()");
+        assertThat(occurrences(ownerCommit, "runtime.commitRuntimeTransition(frame")).isEqualTo(1);
+        assertThat(occurrences(ownerCommit, "publishFactFrame(frame,")).isEqualTo(1);
+        assertThat(probe).contains("currentAdmission.publish(frame, businessStateHash, fundsStateHash)");
+        assertThat(occurrences(production, "factIndexes.apply(entry)")).isEqualTo(1);
         assertThat(occurrences(production,
-                "currentAdmission.publish(commit, businessStateHash, fundsStateHash)")).isEqualTo(1);
-        assertThat(occurrences(production, "publishSealedCommit(")).isEqualTo(2);
-        String patchSource = source("state/RuntimeCommitPatch.java");
+                "currentAdmission.publish(frame, businessStateHash, fundsStateHash)")).isEqualTo(1);
+        assertThat(occurrences(production, "publishFactFrame(")).isEqualTo(2);
+        String patchSource = source("state/RuntimeFactFrame.java");
         assertThat(patchSource)
-                .doesNotContain("orderSnapshot", "captureCommitPatch", "RuntimePatchValues",
+                .doesNotContain("captureCommitPatch", "RuntimePatchValues",
                         "private final long previousCoreSequence", "private final long coreSequence",
                         "private final long previousProjectionSequence", "private final long projectionSequence",
                         "interface OwnerGroup", "List<OwnerGroup>");
         String runtimeState = source("state/TradingRuntimeState.java");
-        String prepareCommit = method(runtimeState, "    public PreparedCommit prepareCommitPatch(");
+        String prepareCommit = method(runtimeState, "    public PreparedFactFrame prepareFactFrame(");
         String matcherDispatch = method(runtimeState,
                 "    public MatcherSettlementEvent dispatchMatcherSettlement(");
         assertThat(runtimeState)
-                .doesNotContain("captureCommitPatch", "public RuntimeCommitPatch seal()", ".seal();",
+                .doesNotContain("captureCommitPatch", "public RuntimeFactFrame seal()", ".seal();",
                         "BalanceRuntime::releaseOwnerForHandoff", "awaitAndRebindLaneMutations",
                         "pendingApplyCheckpoint", "pendingApplySequence", "rollbackLaneSequence",
                         "lane.releaseOwner()", "lane.bindOwner()", "LaneCommitCommand",
@@ -127,21 +125,23 @@ class TradingCoreRuntimeAuthorityTest {
                 .contains("accountLaneLocalStateHashById", "accountLaneLocalFundsHashById")
                 .doesNotContain("accountLaneById", ".await(");
         assertThat(occurrences(production, ".recordOrder(")).isEqualTo(1);
-        assertThat(occurrences(prepareCommit, "RuntimeStateMaterializer.orderSnapshot(")).isEqualTo(2);
-        assertThat(occurrences(prepareCommit, "RuntimeCommitPatch.exportOrderView(")).isZero();
+        assertThat(occurrences(prepareCommit, "RuntimeStateMaterializer.orderSnapshot(")).isZero();
+        assertThat(occurrences(prepareCommit, "RuntimeFactFrame.exportOrderView(")).isZero();
         assertThat(occurrences(production, "exportOrderView(")).isEqualTo(1);
-        assertThat(source("state/RuntimeCommitPatch.java"))
-                .contains("CoreOrderState businessBefore, CoreOrderState businessAfter)",
-                        "typed order patch values are required");
+        assertThat(source("state/RuntimeFactFrame.java"))
+                .contains("OrderRuntime before, OrderRuntime after")
+                .doesNotContain("typed order patch values are required");
         assertNoOrderSnapshotFallback(
                 source("state/RuntimeCommitJournal.java"),
-                source("state/RuntimeCommitIndexes.java"),
-                source("state/RuntimeProjectionState.java"),
+                source("state/RuntimeFactIndexes.java"),
                 source("CoreExportState.java"),
                 source("TerminalStateRetention.java"),
                 protocolSource("CoreExportCodec.java"));
+        assertThat(source("state/RuntimeProjectionState.java"))
+                .as("off-owner export projection may materialize typed order views")
+                .doesNotContain("exportOrderView(");
         assertThat(placeholderZeroHashSeals(production)).isEmpty();
-        assertThat(source("state/RuntimeCommitIndexes.java"))
+        assertThat(source("state/RuntimeFactIndexes.java"))
                 .doesNotContain("update(TradingCoreState before, TradingCoreState after)");
         assertThat(source("CoreExportState.java"))
                 .contains("new SpscTaskQueue<>(eventCapacity)",

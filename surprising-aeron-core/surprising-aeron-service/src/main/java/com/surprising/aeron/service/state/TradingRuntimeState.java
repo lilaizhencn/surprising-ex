@@ -94,7 +94,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     private final LaneLongCaptures<PatchReservationBefore>[] patchReservationsBeforeByLane;
     private final LaneLongCaptures<PatchOrderBefore>[] patchOrdersBeforeByLane;
     private final LaneClientOrderCaptures[] patchClientOrdersBeforeByLane;
-    private final RuntimeCommitPatch.Builder activePatchBuilder = RuntimeCommitPatch.builder(productLine);
+    private RuntimeFactFrame.Builder activePatchBuilder = RuntimeFactFrame.builder(productLine);
     private boolean orderBatchMutationScope;
     private ConcurrentHashMap<Long, PatchBefore<LiquidationRuntime>> patchLiquidationsBefore =
             new ConcurrentHashMap<>();
@@ -3016,7 +3016,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         return new LongHashSet(changedFeePolicies);
     }
 
-    public PreparedCommit prepareCommitPatch(long sequence,
+    public PreparedFactFrame prepareFactFrame(long sequence,
                                                   RuntimeIdentityRegistry identities,
                                                   long previousRevision,
                                                   CoreMatcherTransition matcherTransition,
@@ -3035,7 +3035,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (committedLaneMask < 0 || (committedLaneMask & ~validLaneMask) != 0) {
             throw new IllegalArgumentException("invalid runtime commit lane mask");
         }
-        RuntimeCommitPatch.Builder builder = activePatchBuilder
+        RuntimeFactFrame.Builder builder = activePatchBuilder
                 .sequences(Math.subtractExact(sequence, 1), sequence)
                 .matcherTransition(matcherTransition);
         for (LaneLongCaptures<UserRuntime> capturedUsers : patchUsersBeforeByLane) {
@@ -3049,8 +3049,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             for (int index = 0; index < capturedBalances.size(); index++) {
                 long userId = capturedBalances.userId(index);
                 int assetId = capturedBalances.assetId(index);
-                RuntimeCommitPatch.UserBalance before = capturedBalances.before(index);
-                RuntimeCommitPatch.UserBalance after = capturedBalances.after(index);
+                RuntimeFactFrame.UserBalance before = capturedBalances.before(index);
+                RuntimeFactFrame.UserBalance after = capturedBalances.after(index);
                 if (!java.util.Objects.equals(before, after)) {
                     builder.recordBalance(laneId, userId, assetId, before, after);
                 }
@@ -3082,12 +3082,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 OrderRuntime visibleBefore = before.pending() ? null : beforeValue;
                 OrderRuntime visibleAfter = pendingAfter ? null : after;
                 if (userId != 0 && !java.util.Objects.equals(visibleBefore, visibleAfter)) {
-                    CoreOrderState businessBefore = visibleBefore == null ? null
-                            : RuntimeStateMaterializer.orderSnapshot(visibleBefore, identities);
-                    CoreOrderState businessAfter = visibleAfter == null ? null
-                            : RuntimeStateMaterializer.orderSnapshot(visibleAfter, identities);
-                    builder.recordOrder(topology.accountLaneId(userId), visibleBefore, visibleAfter,
-                            businessBefore, businessAfter);
+                    builder.recordOrder(topology.accountLaneId(userId), visibleBefore, visibleAfter);
                 }
             }
         }
@@ -3149,7 +3144,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 Long visibleAfter = visibleClientOrder(orderIdByClient(userId, clientKey), false);
                 if (!java.util.Objects.equals(visibleBefore, visibleAfter)) {
                     builder.recordClientOrder(laneId,
-                            new RuntimeCommitPatch.ClientOrderKey(userId, clientKey),
+                            new RuntimeFactFrame.ClientOrderKey(userId, clientKey),
                             visibleBefore, visibleAfter);
                 }
             }
@@ -3176,92 +3171,134 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         long changedLaneMask = builder.changedLaneMask();
         builder.laneMask(committedLaneMask == 0 ? changedLaneMask : committedLaneMask);
-        return new PreparedCommit(builder, identities, new RuntimeCommitPatch.SealMetadata(previousRevision,
+        RuntimeFactFrame.Builder completedBuilder = builder;
+        activePatchBuilder = RuntimeFactFrame.builder(productLine);
+        return new PreparedFactFrame(completedBuilder, identities, new RuntimeFactFrame.SealMetadata(previousRevision,
                 Math.subtractExact(revision, totalPendingReservations), beforeBusinessStateHash,
                 businessStateHash, beforeFundsStateHash, fundsStateHash, builder.laneMask(), null,
                 externalAdjustment));
     }
 
-    public record PreparedCommit(RuntimeCommitPatch.Builder builder, RuntimeIdentityRegistry identities,
-                                 RuntimeCommitPatch.SealMetadata metadata) {
-        public PreparedCommit {
+    public static final class PreparedFactFrame {
+        private final RuntimeFactFrame.Builder builder;
+        private final RuntimeIdentityRegistry identities;
+        private final RuntimeFactFrame.SealMetadata metadata;
+        private RuntimeFactFrame materialized;
+
+        public PreparedFactFrame(RuntimeFactFrame.Builder builder, RuntimeIdentityRegistry identities,
+                                 RuntimeFactFrame.SealMetadata metadata) {
             if (builder == null || identities == null || metadata == null) {
                 throw new IllegalArgumentException("invalid prepared commit");
             }
+            this.builder = builder;
+            this.identities = identities;
+            this.metadata = metadata;
         }
 
-        public RuntimeCommitPatch.PreparedChanges prepareChanges() {
-            return builder.prepare(new RuntimeCommitPatch.PrepareMetadata(
+        public RuntimeFactFrame.Builder builder() { return builder; }
+        public RuntimeIdentityRegistry identities() { return identities; }
+        public RuntimeFactFrame.SealMetadata metadata() { return metadata; }
+
+        public RuntimeFactFrame.PreparedChanges prepareChanges() {
+            return builder.prepare(new RuntimeFactFrame.PrepareMetadata(
                     metadata.beforeRevision(), metadata.afterRevision(), metadata.beforeBusinessStateHash(),
                     metadata.beforeFundsStateHash(), metadata.laneMask(), metadata.coreFactMetadata(),
                     metadata.externalAdjustment()), identities);
         }
 
-        public RuntimeCommitPatch seal(RuntimeCommitPatch.PreparedChanges changes,
+        public RuntimeFactFrame seal(RuntimeFactFrame.PreparedChanges changes,
                                        long businessStateHash, long fundsStateHash) {
             return builder.seal(changes, businessStateHash, fundsStateHash);
         }
 
+        public PreparedFactFrame withFactMetadata(RuntimeFactFrame.CoreFactMetadata factMetadata) {
+            return new PreparedFactFrame(builder, identities, new RuntimeFactFrame.SealMetadata(
+                    metadata.beforeRevision(), metadata.afterRevision(), metadata.beforeBusinessStateHash(),
+                    metadata.businessStateHash(), metadata.beforeFundsStateHash(), metadata.fundsStateHash(),
+                    metadata.laneMask(), factMetadata, metadata.externalAdjustment()));
+        }
+
+        public RuntimeFundsDelta fundsDelta() {
+            return builder.materializeFundsDelta(metadata.externalAdjustment());
+        }
+
+        public synchronized RuntimeFactFrame materialize() {
+            if (materialized != null) return materialized;
+            RuntimeFactFrame.PreparedChanges changes = prepareChanges();
+            materialized = seal(changes, metadata.businessStateHash(), metadata.fundsStateHash());
+            return materialized;
+        }
+
+        public long sequence() { return builder.sequence(); }
+        public long revision() { return metadata.afterRevision(); }
+        public RuntimeFactFrame.CoreFactMetadata coreFactMetadata() { return metadata.coreFactMetadata(); }
+        public void visitTerminalValues(RuntimeFactFrame.RetentionConsumer consumer) {
+            builder.visitTerminalValues(consumer);
+        }
+        public void visitIdentityReleases(RuntimeFactFrame.IdentityReleaseConsumer consumer) {
+            builder.visitIdentityReleases(consumer);
+        }
+
     }
 
-    private void recordUserChange(RuntimeCommitPatch.Builder builder, long userId,
+    private void recordUserChange(RuntimeFactFrame.Builder builder, long userId,
                                   UserRuntime before, UserRuntime after) {
         if (before == null && after == null) return;
         builder.recordCurrentUser(topology.accountLaneId(userId), before, after,
                 after == null ? 0 : pendingReservationCount(userId));
     }
 
-    private void recordTimerChange(RuntimeCommitPatch.Builder builder, CoreCancelAllAfterKey key,
+    private void recordTimerChange(RuntimeFactFrame.Builder builder, CoreCancelAllAfterKey key,
                                    CoreCancelAllAfterState before, CoreCancelAllAfterState after) {
         if (!java.util.Objects.equals(before, after)) {
             builder.recordTimer(topology.accountLaneId(key.userId()), key, before, after);
         }
     }
 
-    private static void recordMarkPriceChange(RuntimeCommitPatch.Builder builder, int symbolId,
+    private static void recordMarkPriceChange(RuntimeFactFrame.Builder builder, int symbolId,
                                               MarkPriceRuntime before, MarkPriceRuntime after) {
         if (!java.util.Objects.equals(before, after)) builder.recordMarkPrice(symbolId, before, after);
     }
 
-    private static void recordRiskScanChange(RuntimeCommitPatch.Builder builder, int symbolId,
+    private static void recordRiskScanChange(RuntimeFactFrame.Builder builder, int symbolId,
                                              RiskScanRuntime before, RiskScanRuntime after) {
         if (!java.util.Objects.equals(before, after)) builder.recordRiskScan(symbolId, before, after);
     }
 
-    private static void recordInstrumentChange(RuntimeCommitPatch.Builder builder, String symbol,
+    private static void recordInstrumentChange(RuntimeFactFrame.Builder builder, String symbol,
                                                CoreInstrumentState before, CoreInstrumentState after) {
         if (!java.util.Objects.equals(before, after)) builder.recordInstrument(symbol, before, after);
     }
 
-    private static void recordTreasuryAssetChange(RuntimeCommitPatch.Builder builder, int assetId,
-                                                   RuntimeCommitPatch.TreasuryAssetValue before,
-                                                   RuntimeCommitPatch.TreasuryAssetValue after) {
+    private static void recordTreasuryAssetChange(RuntimeFactFrame.Builder builder, int assetId,
+                                                   RuntimeFactFrame.TreasuryAssetValue before,
+                                                   RuntimeFactFrame.TreasuryAssetValue after) {
         if (!java.util.Objects.equals(before, after)) builder.recordTreasuryAsset(assetId, before, after);
     }
 
-    private RuntimeCommitPatch.TreasuryFundingValue treasuryFundingValue(int symbolId) {
+    private RuntimeFactFrame.TreasuryFundingValue treasuryFundingValue(int symbolId) {
         long settlementId = treasury.fundingSettlement(symbolId);
         TreasuryRuntime.FundingProgressRuntime progress = treasury.fundingProgress(symbolId);
         return settlementId == 0 && progress == null ? null
-                : new RuntimeCommitPatch.TreasuryFundingValue(settlementId, progress);
+                : new RuntimeFactFrame.TreasuryFundingValue(settlementId, progress);
     }
 
-    private static void recordTreasuryFundingChange(RuntimeCommitPatch.Builder builder, int symbolId,
-                                                     RuntimeCommitPatch.TreasuryFundingValue before,
-                                                     RuntimeCommitPatch.TreasuryFundingValue after) {
+    private static void recordTreasuryFundingChange(RuntimeFactFrame.Builder builder, int symbolId,
+                                                     RuntimeFactFrame.TreasuryFundingValue before,
+                                                     RuntimeFactFrame.TreasuryFundingValue after) {
         if (!java.util.Objects.equals(before, after)) builder.recordTreasuryFunding(symbolId, before, after);
     }
 
-    private RuntimeCommitPatch.TreasuryLifecycleValue treasuryLifecycleValue(int symbolId) {
+    private RuntimeFactFrame.TreasuryLifecycleValue treasuryLifecycleValue(int symbolId) {
         long settlementId = treasury.lifecycleSettlement(symbolId);
         TreasuryRuntime.LifecycleProgressRuntime progress = treasury.lifecycleProgress(symbolId);
         return settlementId == 0 && progress == null ? null
-                : new RuntimeCommitPatch.TreasuryLifecycleValue(settlementId, progress);
+                : new RuntimeFactFrame.TreasuryLifecycleValue(settlementId, progress);
     }
 
-    private static void recordTreasuryLifecycleChange(RuntimeCommitPatch.Builder builder, int symbolId,
-                                                       RuntimeCommitPatch.TreasuryLifecycleValue before,
-                                                       RuntimeCommitPatch.TreasuryLifecycleValue after) {
+    private static void recordTreasuryLifecycleChange(RuntimeFactFrame.Builder builder, int symbolId,
+                                                       RuntimeFactFrame.TreasuryLifecycleValue before,
+                                                       RuntimeFactFrame.TreasuryLifecycleValue after) {
         if (!java.util.Objects.equals(before, after)) builder.recordTreasuryLifecycle(symbolId, before, after);
     }
 
@@ -3287,7 +3324,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         return captured == null ? order(orderId) : captured.value();
     }
 
-    private RuntimeCommitPatch.TreasuryAssetValue treasuryAssetValue(int assetId) {
+    private RuntimeFactFrame.TreasuryAssetValue treasuryAssetValue(int assetId) {
         long fee = treasury.fee(assetId);
         long insurance = treasury.insurance(assetId);
         long deficit = treasury.insuranceDeficit(assetId);
@@ -3298,7 +3335,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if ((fee | insurance | deficit | liquidationFee | fundingResidual | roundingResidual | clearingPnl) == 0) {
             return null;
         }
-        return new RuntimeCommitPatch.TreasuryAssetValue(fee, insurance, deficit, liquidationFee,
+        return new RuntimeFactFrame.TreasuryAssetValue(fee, insurance, deficit, liquidationFee,
                 fundingResidual, roundingResidual, clearingPnl);
     }
 
@@ -3626,7 +3663,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         publishUser(userId, before);
     }
 
-    private void rollbackBalance(long userId, int assetId, RuntimeCommitPatch.UserBalance before) {
+    private void rollbackBalance(long userId, int assetId, RuntimeFactFrame.UserBalance before) {
         onLane(userId, lane -> {
             IntObjectHashMap<BalanceRuntime> balances = lane.balances.get(userId);
             if (before == null) {
@@ -3996,16 +4033,16 @@ public final class TradingRuntimeState implements AutoCloseable {
         private int size() { return size; }
         private long userId(int index) { return userIds[index]; }
         private int assetId(int index) { return assetIds[index]; }
-        private RuntimeCommitPatch.UserBalance before(int index) {
-            return !presentBefore[index] ? null : new RuntimeCommitPatch.UserBalance(
+        private RuntimeFactFrame.UserBalance before(int index) {
+            return !presentBefore[index] ? null : new RuntimeFactFrame.UserBalance(
                     availableBefore[index], lockedBefore[index], pendingBefore[index]);
         }
 
-        private RuntimeCommitPatch.UserBalance after(int index) {
+        private RuntimeFactFrame.UserBalance after(int index) {
             if (!capturedAfter[index]) {
                 throw new IllegalStateException("balance mutation did not publish its lane after-state");
             }
-            return !presentAfter[index] ? null : new RuntimeCommitPatch.UserBalance(
+            return !presentAfter[index] ? null : new RuntimeFactFrame.UserBalance(
                     availableAfter[index], lockedAfter[index], pendingAfter[index]);
         }
 

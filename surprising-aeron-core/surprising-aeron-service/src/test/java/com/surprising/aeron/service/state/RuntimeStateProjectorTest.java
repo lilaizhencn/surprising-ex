@@ -48,7 +48,7 @@ class RuntimeStateProjectorTest {
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
         RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
                 new BalanceAdjustmentCommand("USDT", 250));
-        RuntimeCommitPatch patch = capture(runtime, identities, before, 1, before.revision());
+        RuntimeFactFrame patch = capture(runtime, identities, before, 1, before.revision());
         RuntimeProjectionState projection = projection(before);
         projection.apply(patch);
         TradingCoreState after = projection.freeze(1);
@@ -67,7 +67,7 @@ class RuntimeStateProjectorTest {
 
         RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
                 new BalanceAdjustmentCommand("USDT", 250));
-        RuntimeCommitPatch captured = capture(runtime, identities, before, 1, before.revision());
+        RuntimeFactFrame captured = capture(runtime, identities, before, 1, before.revision());
         RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
                 new BalanceAdjustmentCommand("USDT", 100));
 
@@ -90,11 +90,11 @@ class RuntimeStateProjectorTest {
                 new BalanceAdjustmentCommand("USDT", 1));
         RuntimeCommandProcessor.adjustBalance(runtime, identities, 7,
                 new BalanceAdjustmentCommand("USDT", 1));
-        RuntimeCommitPatch patch = capture(runtime, identities, before, 1, before.revision());
+        RuntimeFactFrame patch = capture(runtime, identities, before, 1, before.revision());
 
         assertThat(patch.changedUserIds()).containsExactly(7L, 9L);
         assertThat(patch.accountLaneGroups()).isSortedAccordingTo(
-                java.util.Comparator.comparingInt(RuntimeCommitPatch.AccountLaneOwnerGroup::laneId));
+                java.util.Comparator.comparingInt(RuntimeFactFrame.AccountLaneOwnerGroup::laneId));
         assertThat(patch.accountLaneGroups().stream().flatMap(group -> group.balances().stream())
                 .map(change -> change.key().userId())).containsExactlyInAnyOrder(7L, 9L);
         runtime.close();
@@ -106,7 +106,7 @@ class RuntimeStateProjectorTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
 
-        RuntimeCommitPatch patch = capture(runtime, identities, before, 1, before.revision());
+        RuntimeFactFrame patch = capture(runtime, identities, before, 1, before.revision());
 
         assertThat(patch.accountLaneGroups()).isEmpty();
         assertThat(patch.globalOwnerGroup().treasuryAssets()).isEmpty();
@@ -148,7 +148,7 @@ class RuntimeStateProjectorTest {
                 identities.symbolId("BTC-USDT"), CorePositionSide.NET, 1,
                 1_000, 0, 10, 10_000, CoreRiskStatus.NORMAL));
 
-        RuntimeCommitPatch patch = capture(runtime, identities, before, 1, before.revision());
+        RuntimeFactFrame patch = capture(runtime, identities, before, 1, before.revision());
         TradingCoreState projected = project(before, patch);
 
         assertThat(projected.riskState().snapshots()).containsKey(secondUser + ":BTC-USDT");
@@ -210,7 +210,7 @@ class RuntimeStateProjectorTest {
 
         runtime.completePendingReservation(7, 11, 1);
         RuntimeCommandProcessor.stampOrderChanges(runtime, identities, before, 1_000, 2_000, List.of(11L));
-        RuntimeCommitPatch patch = capture(runtime, identities, before, 1, before.revision());
+        RuntimeFactFrame patch = capture(runtime, identities, before, 1, before.revision());
 
         TradingCoreState projected = project(before, patch);
         assertThat(projected.order(11)).isNotNull();
@@ -493,24 +493,24 @@ class RuntimeStateProjectorTest {
         return new RuntimeProjectionState(state, state.businessStateHash(), RollingFundsStateHash.compute(state));
     }
 
-    private static TradingCoreState project(TradingCoreState state, RuntimeCommitPatch patch) {
+    private static TradingCoreState project(TradingCoreState state, RuntimeFactFrame patch) {
         RuntimeProjectionState projection = projection(state);
         projection.apply(patch);
         return projection.freeze(patch.sequence());
     }
 
-    private static RuntimeCommitPatch capture(TradingRuntimeState runtime,
+    private static RuntimeFactFrame capture(TradingRuntimeState runtime,
                                               RuntimeIdentityRegistry identities,
                                               TradingCoreState previous,
                                               long projectionSequence,
                                               long previousRevision) {
         TradingCoreState current = RuntimeStateMaterializer.materialize(runtime, identities);
-        TradingRuntimeState.PreparedCommit prepared = runtime.prepareCommitPatch(
+        TradingRuntimeState.PreparedFactFrame prepared = runtime.prepareFactFrame(
                 projectionSequence, identities,
                 previousRevision, unchangedMatcher(), 0,
                 previous.businessStateHash(), current.businessStateHash(),
                 RollingFundsStateHash.compute(previous), RollingFundsStateHash.compute(current), true);
-        RuntimeCommitPatch.PreparedChanges changes = prepared.prepareChanges();
+        RuntimeFactFrame.PreparedChanges changes = prepared.prepareChanges();
         return prepared.seal(changes, current.businessStateHash(), RollingFundsStateHash.compute(current));
     }
 

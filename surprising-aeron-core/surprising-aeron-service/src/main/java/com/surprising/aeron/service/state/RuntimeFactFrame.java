@@ -30,18 +30,43 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.function.BiFunction;
 
-interface RuntimeCommitView {
+interface RuntimeFactView {
     ProductLine productLine();
     long previousCoreSequence();
     long coreSequence();
     long beforeRevision();
     long beforeFundsStateHash();
-    List<RuntimeCommitPatch.AccountLaneOwnerGroup> accountLaneGroups();
-    RuntimeCommitPatch.GlobalOwnerGroup globalOwnerGroup();
-    RuntimeCommitPatch.FactIdentitySlice identities();
+    List<RuntimeFactFrame.AccountLaneOwnerGroup> accountLaneGroups();
+    RuntimeFactFrame.GlobalOwnerGroup globalOwnerGroup();
+    RuntimeFactFrame.FactIdentitySlice identities();
 }
 
-public final class RuntimeCommitPatch implements RuntimeCommitView {
+public final class RuntimeFactFrame implements RuntimeFactView {
+
+    interface ChangeConsumer {
+        default void order(long orderId, OrderRuntime before, OrderRuntime after) {}
+        default void position(long positionKey, PositionRuntime before, PositionRuntime after) {}
+        default void liquidation(long liquidationId, LiquidationRuntime before, LiquidationRuntime after) {}
+        default void riskSnapshot(long riskKey, RiskSnapshotRuntime before, RiskSnapshotRuntime after) {}
+        default void algoOrder(long algoOrderId, CoreAlgoOrderState before, CoreAlgoOrderState after) {}
+        default void triggerOrder(long triggerOrderId, CoreTriggerOrderState before,
+                                  CoreTriggerOrderState after) {}
+        default void timer(CoreCancelAllAfterKey key, CoreCancelAllAfterState before,
+                           CoreCancelAllAfterState after) {}
+    }
+
+    public interface RetentionConsumer {
+        void order(OrderRuntime value);
+        void liquidation(LiquidationRuntime value);
+        void algoOrder(CoreAlgoOrderState value);
+        void triggerOrder(CoreTriggerOrderState value);
+    }
+
+    public interface IdentityReleaseConsumer {
+        void clientOrder(long userId, long clientKey, Long afterOrderId);
+        void position(long positionKey, PositionRuntime after);
+        void riskSnapshot(long riskKey, RiskSnapshotRuntime after);
+    }
 
     private final ProductLine productLine;
     private final long previousSequence;
@@ -67,7 +92,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
     private final int coreFactItemCount;
     private final long estimatedCoreFactBytes;
 
-    private RuntimeCommitPatch(Builder builder, SealMetadata metadata,
+    private RuntimeFactFrame(Builder builder, SealMetadata metadata,
                                FactIdentitySlice identities,
                                List<AccountLaneOwnerGroup> accountLaneGroups,
                                GlobalOwnerGroup globalOwnerGroup,
@@ -217,7 +242,8 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         for (AccountLaneOwnerGroup group : accountLaneGroups) {
             appendUsers(users, group, registry);
             for (OrderChange change : group.orders) {
-                CoreOrderState order = change.businessAfter();
+                CoreOrderState order = change.after() == null ? null
+                        : RuntimeStateMaterializer.orderSnapshot(change.after(), registry);
                 if (order != null) orders.add(order);
             }
             for (LiquidationChange change : group.liquidations) {
@@ -312,7 +338,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
                 order.clusterPosition(), order.status().name(), order.revision());
     }
 
-    private static CoreExportEvent.Tombstones tombstones(RuntimeCommitPatch patch,
+    private static CoreExportEvent.Tombstones tombstones(RuntimeFactFrame patch,
                                                           IdentityView identities) {
         ArrayList<Long> users = null;
         ArrayList<CoreExportEvent.UserAssetKey> balances = null;
@@ -422,7 +448,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
     @Override
     public boolean equals(Object other) {
         if (this == other) return true;
-        if (!(other instanceof RuntimeCommitPatch patch)) return false;
+        if (!(other instanceof RuntimeFactFrame patch)) return false;
         return previousSequence == patch.previousSequence && sequence == patch.sequence
                 && beforeRevision == patch.beforeRevision
                 && afterRevision == patch.afterRevision && beforeBusinessStateHash == patch.beforeBusinessStateHash
@@ -740,17 +766,9 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             }
         }
     }
-    public record OrderChange(long orderId, OrderRuntime before, OrderRuntime after,
-                              CoreOrderState businessBefore, CoreOrderState businessAfter) {
-        public OrderChange(long orderId, OrderRuntime before, OrderRuntime after) {
-            this(orderId, before, after, null, null);
-        }
+    public record OrderChange(long orderId, OrderRuntime before, OrderRuntime after) {
         public OrderChange {
             requireChange(orderId > 0, before, after, "order");
-            if (businessBefore != null && businessBefore.orderId() != orderId
-                    || businessAfter != null && businessAfter.orderId() != orderId) {
-                throw new IllegalArgumentException("order business identity mismatch");
-            }
         }
     }
     public record PositionChange(long positionKey, PositionRuntime before, PositionRuntime after) {
@@ -960,7 +978,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         }
     }
 
-    public static final class PreparedChanges implements RuntimeCommitView {
+    public static final class PreparedChanges implements RuntimeFactView {
         private final Builder builder;
         private final PrepareMetadata metadata;
         private final FactIdentitySlice identities;
@@ -1130,6 +1148,50 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             return laneMask;
         }
 
+        long previousSequence() { return previousSequence; }
+        long sequence() { return sequence; }
+
+        RuntimeFundsDelta materializeFundsDelta(boolean externalAdjustment) {
+            ArrayList<FundsPosting> derived = new ArrayList<>(fundsPostings);
+            for (LaneChanges lane : lanes) {
+                if (lane == null) continue;
+                lane.balances.forEachChanged((userId, assetId, before, after) -> {
+                    addPosting(derived, assetId, com.surprising.aeron.service.state.FundsPosting.OwnerKind.USER,
+                            userId, com.surprising.aeron.service.state.FundsPosting.Subledger.AVAILABLE,
+                            Math.subtractExact(available(after), available(before)));
+                    addPosting(derived, assetId, com.surprising.aeron.service.state.FundsPosting.OwnerKind.USER,
+                            userId, com.surprising.aeron.service.state.FundsPosting.Subledger.LOCKED,
+                            Math.subtractExact(locked(after), locked(before)));
+                });
+            }
+            global.treasuryAssets.forEachChanged((assetId, before, after) -> {
+                addPosting(derived, assetId, com.surprising.aeron.service.state.FundsPosting.OwnerKind.TREASURY, 0,
+                        com.surprising.aeron.service.state.FundsPosting.Subledger.FEE,
+                        Math.subtractExact(treasuryFee(after), treasuryFee(before)));
+                addPosting(derived, assetId, com.surprising.aeron.service.state.FundsPosting.OwnerKind.TREASURY, 0,
+                        com.surprising.aeron.service.state.FundsPosting.Subledger.INSURANCE,
+                        Math.subtractExact(treasuryInsurance(after), treasuryInsurance(before)));
+                addPosting(derived, assetId, com.surprising.aeron.service.state.FundsPosting.OwnerKind.TREASURY, 0,
+                        com.surprising.aeron.service.state.FundsPosting.Subledger.DEFICIT,
+                        Math.negateExact(Math.subtractExact(treasuryDeficit(after), treasuryDeficit(before))));
+                addPosting(derived, assetId, com.surprising.aeron.service.state.FundsPosting.OwnerKind.TREASURY, 0,
+                        com.surprising.aeron.service.state.FundsPosting.Subledger.LIQUIDATION_FEE,
+                        Math.subtractExact(treasuryLiquidationFee(after), treasuryLiquidationFee(before)));
+                addPosting(derived, assetId, com.surprising.aeron.service.state.FundsPosting.OwnerKind.TREASURY, 0,
+                        com.surprising.aeron.service.state.FundsPosting.Subledger.FUNDING_RESIDUAL,
+                        Math.subtractExact(treasuryFundingResidual(after), treasuryFundingResidual(before)));
+                addPosting(derived, assetId, com.surprising.aeron.service.state.FundsPosting.OwnerKind.TREASURY, 0,
+                        com.surprising.aeron.service.state.FundsPosting.Subledger.ROUNDING_RESIDUAL,
+                        Math.subtractExact(treasuryRoundingResidual(after), treasuryRoundingResidual(before)));
+                addPosting(derived, assetId, com.surprising.aeron.service.state.FundsPosting.OwnerKind.TREASURY, 0,
+                        com.surprising.aeron.service.state.FundsPosting.Subledger.CLEARING_PNL,
+                        Math.subtractExact(treasuryClearingPnl(after), treasuryClearingPnl(before)));
+            });
+            RuntimeFundsDelta delta = RuntimeFundsDelta.fromPatchPostings(derived);
+            delta.requireConserved(externalAdjustment);
+            return delta;
+        }
+
         public Builder recordUser(int laneId, UserRuntime before, UserRuntime after) {
             return recordUser(laneId, before, after, 0);
         }
@@ -1175,23 +1237,20 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             return this;
         }
 
-        public Builder recordOrder(int laneId, OrderRuntime before, OrderRuntime after,
-                                   CoreOrderState businessBefore, CoreOrderState businessAfter) {
+        public Builder recordOrder(int laneId, OrderRuntime before, OrderRuntime after) {
             requireProductLine(before);
             requireProductLine(after);
             long key = before != null ? before.orderId() : requireNonNull(after, "order").orderId();
             requireEntityId(key, before == null ? key : before.orderId(), after == null ? key : after.orderId(),
                     "order");
-            if (businessBefore == null != (before == null) || businessAfter == null != (after == null)) {
-                throw new IllegalArgumentException("typed order patch values are required");
-            }
-            if (businessBefore != null && businessBefore.orderId() != key
-                    || businessAfter != null && businessAfter.orderId() != key) {
-                throw new IllegalArgumentException("typed order patch identity mismatch");
-            }
-            lane(laneId).orders.record(key, new OrderValue(before, businessBefore),
-                    new OrderValue(after, businessAfter));
+            lane(laneId).orders.record(key, before, after);
             return this;
+        }
+
+        /** Typed order snapshots are deliberately ignored and never retained on the hot path. */
+        public Builder recordOrder(int laneId, OrderRuntime before, OrderRuntime after,
+                                   CoreOrderState ignoredBefore, CoreOrderState ignoredAfter) {
+            return recordOrder(laneId, before, after);
         }
 
         public Builder recordPosition(int laneId, long positionKey, PositionRuntime before, PositionRuntime after) {
@@ -1319,7 +1378,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             requireOpen(); global.riskScanControl.record(UnitKey.VALUE, before, after); return this;
         }
 
-        public RuntimeCommitPatch seal(SealMetadata metadata) {
+        public RuntimeFactFrame seal(SealMetadata metadata) {
             PreparedChanges prepared = prepare(new PrepareMetadata(
                     metadata.beforeRevision(), metadata.afterRevision(), metadata.beforeBusinessStateHash(),
                     metadata.beforeFundsStateHash(), metadata.laneMask(), metadata.coreFactMetadata(),
@@ -1336,7 +1395,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             return prepareInternal(provisional, identities, metadata);
         }
 
-        public RuntimeCommitPatch seal(PreparedChanges prepared, long businessStateHash, long fundsStateHash) {
+        public RuntimeFactFrame seal(PreparedChanges prepared, long businessStateHash, long fundsStateHash) {
             if (prepared == null || prepared.builder != this || prepared != activePrepared) {
                 throw new IllegalArgumentException("prepared changes belong to a different builder");
             }
@@ -1346,7 +1405,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
                     metadata.beforeBusinessStateHash(), businessStateHash,
                     metadata.beforeFundsStateHash(), fundsStateHash, metadata.laneMask(),
                     metadata.coreFactMetadata(), metadata.externalAdjustment());
-            RuntimeCommitPatch patch = new RuntimeCommitPatch(this, sealedMetadata, prepared.identities,
+            RuntimeFactFrame patch = new RuntimeFactFrame(this, sealedMetadata, prepared.identities,
                     prepared.accountLaneGroups, prepared.globalOwnerGroup,
                     prepared.fundsPostings, prepared.fundsDelta, prepared.matcherEvidence, prepared.terminalIds);
             finalSealed = true;
@@ -1519,6 +1578,42 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             return mask;
         }
 
+        void visitChangedIndexes(ChangeConsumer consumer) {
+            Objects.requireNonNull(consumer, "change consumer");
+            for (LaneChanges lane : lanes) {
+                if (lane == null || !lane.hasChanges()) continue;
+                lane.orders.forEachChanged(consumer::order);
+                lane.positions.forEachChanged(consumer::position);
+                lane.liquidations.forEachChanged(consumer::liquidation);
+                lane.riskSnapshots.forEachChanged(consumer::riskSnapshot);
+                lane.algoOrders.forEachChanged(consumer::algoOrder);
+                lane.triggerOrders.forEachChanged(consumer::triggerOrder);
+                lane.timers.forEachChanged(consumer::timer);
+            }
+        }
+
+        void visitTerminalValues(RetentionConsumer consumer) {
+            Objects.requireNonNull(consumer, "retention consumer");
+            for (LaneChanges lane : lanes) {
+                if (lane == null || !lane.hasChanges()) continue;
+                lane.orders.forEachChanged((key, before, after) -> consumer.order(after));
+                lane.liquidations.forEachChanged((key, before, after) -> consumer.liquidation(after));
+                lane.algoOrders.forEachChanged((key, before, after) -> consumer.algoOrder(after));
+                lane.triggerOrders.forEachChanged((key, before, after) -> consumer.triggerOrder(after));
+            }
+        }
+
+        void visitIdentityReleases(IdentityReleaseConsumer consumer) {
+            Objects.requireNonNull(consumer, "identity release consumer");
+            for (LaneChanges lane : lanes) {
+                if (lane == null || !lane.hasChanges()) continue;
+                lane.clientOrders.forEachChanged((key, before, after) ->
+                        consumer.clientOrder(key.userId(), key.clientKey(), after));
+                lane.positions.forEachChanged((key, before, after) -> consumer.position(key, after));
+                lane.riskSnapshots.forEachChanged((key, before, after) -> consumer.riskSnapshot(key, after));
+            }
+        }
+
         private LaneChanges lane(int laneId) {
             requireOpen();
             if (laneId < 0 || laneId >= Long.SIZE - 1) throw new IllegalArgumentException("invalid lane id");
@@ -1567,7 +1662,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         private final LongChanges<UserValue> users = new LongChanges<>();
         private final BalanceChanges balances = new BalanceChanges();
         private final LongChanges<ReservationValue> reservations = new LongChanges<>();
-        private final LongChanges<OrderValue> orders = new LongChanges<>();
+        private final LongChanges<OrderRuntime> orders = new LongChanges<>();
         private final LongChanges<PositionRuntime> positions = new LongChanges<>();
         private final LongChanges<LiquidationRuntime> liquidations = new LongChanges<>();
         private final LongChanges<RiskSnapshotRuntime> riskSnapshots = new LongChanges<>();
@@ -1611,8 +1706,7 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
                             after == null ? null : after.value(),
                             before != null && before.pending(),
                             after != null && after.pending())),
-                    orders.seal((key, before, after) -> new OrderChange(key,
-                            before.runtime(), after.runtime(), before.business(), after.business())),
+                    orders.seal(OrderChange::new),
                     positions.seal((key, before, after) -> new PositionChange(key, before, after)),
                     liquidations.seal((key, before, after) -> new LiquidationChange(key, before, after)),
                     riskSnapshots.seal((key, before, after) -> new RiskSnapshotChange(key, before, after)),
@@ -1664,6 +1758,11 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
     }
 
     @FunctionalInterface
+    private interface LongChangeConsumer<V> {
+        void accept(long key, V before, V after);
+    }
+
+    @FunctionalInterface
     interface PositionBeforeConsumer {
         void accept(int laneId, long positionKey, PositionRuntime before);
     }
@@ -1674,8 +1773,23 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
     }
 
     @FunctionalInterface
+    private interface IntChangeConsumer<V> {
+        void accept(int key, V before, V after);
+    }
+
+    @FunctionalInterface
+    private interface BalanceChangeConsumer {
+        void accept(long userId, int assetId, UserBalance before, UserBalance after);
+    }
+
+    @FunctionalInterface
     private interface ChangeFunction<K, V, R> {
         R apply(K key, V before, V after);
+    }
+
+    @FunctionalInterface
+    private interface ChangeConsumer3<K, V> {
+        void accept(K key, V before, V after);
     }
 
     /** Primitive user/asset keys avoid allocating a BalanceKey while a command is still mutable. */
@@ -1734,6 +1848,16 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
                 }
             }
             return java.util.Collections.unmodifiableList(result);
+        }
+
+        private void forEachChanged(BalanceChangeConsumer consumer) {
+            for (int index = 0; index < size; index++) {
+                UserBalance before = beforeValues[index];
+                UserBalance after = afterValues[index];
+                if (!Objects.equals(before, after)) {
+                    consumer.accept(userIds[index], assetIds[index], before, after);
+                }
+            }
         }
 
         private int indexOf(long userId, int assetId) {
@@ -1806,6 +1930,14 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
                 if (!Objects.equals(before, after)) result.add(materializer.apply(keys[index], before, after));
             }
             return java.util.Collections.unmodifiableList(result);
+        }
+
+        private void forEachChanged(IntChangeConsumer<V> consumer) {
+            for (int index = 0; index < size; index++) {
+                V before = before(index);
+                V after = after(index);
+                if (!Objects.equals(before, after)) consumer.accept(keys[index], before, after);
+            }
         }
 
         private int indexOf(int key) {
@@ -1888,6 +2020,14 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
                 if (!Objects.equals(before, after)) result.add(materializer.apply(keys[index], before, after));
             }
             return java.util.Collections.unmodifiableList(result);
+        }
+
+        private void forEachChanged(LongChangeConsumer<V> consumer) {
+            for (int index = 0; index < size; index++) {
+                V before = before(index);
+                V after = after(index);
+                if (!Objects.equals(before, after)) consumer.accept(keys[index], before, after);
+            }
         }
 
         private void forEachBefore(int laneId, PositionBeforeConsumer consumer) {
@@ -1991,6 +2131,14 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             return java.util.Collections.unmodifiableList(result);
         }
 
+        private void forEachChanged(ChangeConsumer3<K, V> consumer) {
+            for (int index = 0; index < size; index++) {
+                V before = before(index);
+                V after = after(index);
+                if (!Objects.equals(before, after)) consumer.accept(key(index), before, after);
+            }
+        }
+
         private <R> R single(BiFunction<V, V, R> materializer) {
             if (changedCount == 0) return null;
             for (int index = 0; index < size; index++) {
@@ -2039,7 +2187,6 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             if (value == null && pending) throw new IllegalArgumentException("absent reservation cannot be pending");
         }
     }
-    private record OrderValue(OrderRuntime runtime, CoreOrderState business) {}
     private record UserValue(UserRuntime value, int pendingReservationCount, boolean forceCurrent) {}
     private enum UnitKey { VALUE }
 

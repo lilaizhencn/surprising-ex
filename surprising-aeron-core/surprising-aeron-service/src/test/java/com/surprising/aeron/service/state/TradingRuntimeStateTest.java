@@ -677,7 +677,7 @@ class TradingRuntimeStateTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         long changedUser = userForLane(topology, 0);
         state.putUser(new UserRuntime(changedUser));
-        TradingRuntimeState.PreparedCommit prepared = state.prepareCommitPatch(
+        TradingRuntimeState.PreparedFactFrame prepared = state.prepareFactFrame(
                 1, identities, 0,
                 com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0),
                 1L << 1, 0, 0, 0, 0, true);
@@ -706,12 +706,12 @@ class TradingRuntimeStateTest {
         state.removePosition(positionKey, 7);
 
         assertThat(state.currentPatchPositionBefore(positionKey)).isSameAs(open);
-        var prepared = state.prepareCommitPatch(1, identities, 0,
+        var prepared = state.prepareFactFrame(1, identities, 0,
                 com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0), 0,
                 0, 0, 0, 0, true);
-        RuntimeCommitPatch.PreparedChanges changes = prepared.prepareChanges();
-        RuntimeCommitPatch patch = prepared.seal(changes, 0, 0);
-        RuntimeCommitPatch.PositionChange removal = patch.accountLaneGroups().stream()
+        RuntimeFactFrame.PreparedChanges changes = prepared.prepareChanges();
+        RuntimeFactFrame patch = prepared.seal(changes, 0, 0);
+        RuntimeFactFrame.PositionChange removal = patch.accountLaneGroups().stream()
                 .flatMap(group -> group.positions().stream()).findFirst().orElseThrow();
         assertThat(removal.before()).isEqualTo(open);
         assertThat(removal.before().signedQuantitySteps()).isEqualTo(2);

@@ -40,7 +40,7 @@ import com.surprising.aeron.service.state.CoreFeePolicyState;
 import com.surprising.aeron.service.state.CoreLiquidationState;
 import com.surprising.aeron.service.state.CoreOrderStatus;
 import com.surprising.aeron.service.state.LaneTopology;
-import com.surprising.aeron.service.state.RuntimeCommitPatch;
+import com.surprising.aeron.service.state.RuntimeFactFrame;
 import com.surprising.aeron.service.state.TransferRuntime;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -182,7 +182,7 @@ class RuntimeCommitRecoveryTest {
                 assertThat(duplicate.stateHash()).isEqualTo(restoredPartial.responses().getFirst().stateHash());
                 assertThat(HexFormat.of().formatHex(duplicate.data()))
                         .isEqualTo(restoredPartial.responses().getFirst().data());
-                assertThat(firstRestore.drainCapturedCommitPatchesForTest()).isEmpty();
+                assertThat(firstRestore.drainCapturedFactFramesForTest()).isEmpty();
                 assertThat(firstRestore.snapshotProjectionSequence()).isEqualTo(projectionBeforeDuplicate);
                 assertThat(firstRestore.exportState().nextSequence()).isEqualTo(exportBeforeDuplicate);
                 CoreMessage changedRetry = new CoreMessage(duplicateCommand.header(),
@@ -190,7 +190,7 @@ class RuntimeCommitRecoveryTest {
                 firstRestore.captureCommittedPatchesForTest();
                 assertThat(firstRestore.apply(changedRetry).resultCode())
                         .isEqualTo(CoreResultCode.IDEMPOTENCY_CONFLICT);
-                assertThat(firstRestore.drainCapturedCommitPatchesForTest()).isEmpty();
+                assertThat(firstRestore.drainCapturedFactFramesForTest()).isEmpty();
                 assertThat(firstRestore.snapshotProjectionSequence()).isEqualTo(projectionBeforeDuplicate);
                 assertThat(firstRestore.exportState().nextSequence()).isEqualTo(exportBeforeDuplicate);
             }
@@ -288,8 +288,8 @@ class RuntimeCommitRecoveryTest {
             assertThat(economicUsdt(recovered.state().tradingState())).isEqualTo(4_000);
             assertThat(replayed.patches().stream().flatMap(patch -> patch.fundsPostings().stream())
                     .collect(java.util.stream.Collectors.groupingBy(
-                            RuntimeCommitPatch.FundsPosting::assetId,
-                            java.util.stream.Collectors.summingLong(RuntimeCommitPatch.FundsPosting::units))))
+                            RuntimeFactFrame.FundsPosting::assetId,
+                            java.util.stream.Collectors.summingLong(RuntimeFactFrame.FundsPosting::units))))
                     .allSatisfy((assetId, units) -> assertThat(units).as("assetId=" + assetId).isZero());
 
             long projectionBeforeDuplicate = recovered.state().snapshotProjectionSequence();
@@ -658,7 +658,7 @@ class RuntimeCommitRecoveryTest {
                 TradingCommandCodec.encodeExecuteLiquidation(new ExecuteLiquidationCommand(
                         action.liquidationId(), action.triggerPriceSequence(), action.markPriceTicks(), 100_000)));
         responses.add(response(apply(state, execution)));
-        List<PatchEvidence> patches = state.drainCapturedCommitPatchesForTest().stream()
+        List<PatchEvidence> patches = state.drainCapturedFactFramesForTest().stream()
                 .map(PatchEvidence::from).toList();
         return new ReplayResult(List.copyOf(responses), patches);
     }
@@ -707,7 +707,7 @@ class RuntimeCommitRecoveryTest {
         assertThat(state.matchingSequence(batch.header().commandId())).isZero();
         CoreResponse response = replay.response();
         assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
-        List<PatchEvidence> patches = state.drainCapturedCommitPatchesForTest().stream()
+        List<PatchEvidence> patches = state.drainCapturedFactFramesForTest().stream()
                 .map(PatchEvidence::from).toList();
         return new BatchReplay(response(response), patches, encodedV10OutboxFacts(state),
                 state.exportState().snapshot().acknowledgedSequence());
@@ -789,7 +789,7 @@ class RuntimeCommitRecoveryTest {
                     .isIn(ResponseStatus.APPLIED, ResponseStatus.DUPLICATE);
             responses.add(response(completed));
         }
-        List<PatchEvidence> patches = state.drainCapturedCommitPatchesForTest().stream()
+        List<PatchEvidence> patches = state.drainCapturedFactFramesForTest().stream()
                 .map(PatchEvidence::from).toList();
         return new ReplayResult(List.copyOf(responses), patches);
     }
@@ -808,7 +808,7 @@ class RuntimeCommitRecoveryTest {
                                       long expectedUnits) {
         long units = replay.patches().stream().flatMap(patch -> patch.fundsPostings().stream())
                 .filter(posting -> posting.subledger() == subledger)
-                .mapToLong(RuntimeCommitPatch.FundsPosting::units).sum();
+                .mapToLong(RuntimeFactFrame.FundsPosting::units).sum();
         assertThat(units).as(subledger.name()).isEqualTo(expectedUnits);
     }
 
@@ -817,8 +817,8 @@ class RuntimeCommitRecoveryTest {
                 .filter(patch -> !patch.coreFactMetadata().externalAdjustment())
                 .flatMap(patch -> patch.fundsPostings().stream())
                 .collect(java.util.stream.Collectors.groupingBy(
-                        RuntimeCommitPatch.FundsPosting::assetId,
-                        java.util.stream.Collectors.summingLong(RuntimeCommitPatch.FundsPosting::units))))
+                        RuntimeFactFrame.FundsPosting::assetId,
+                        java.util.stream.Collectors.summingLong(RuntimeFactFrame.FundsPosting::units))))
                 .allSatisfy((assetId, units) -> assertThat(units).as("assetId=" + assetId).isZero());
     }
 
@@ -1045,7 +1045,7 @@ class RuntimeCommitRecoveryTest {
     private static ReplayResult replay(CoreProbeState state, List<CoreMessage> commands) {
         state.captureCommittedPatchesForTest();
         List<ResponseView> responses = commands.stream().map(command -> response(apply(state, command))).toList();
-        List<PatchEvidence> patches = state.drainCapturedCommitPatchesForTest().stream()
+        List<PatchEvidence> patches = state.drainCapturedFactFramesForTest().stream()
                 .map(PatchEvidence::from).toList();
         return new ReplayResult(responses, patches);
     }
@@ -1104,16 +1104,16 @@ class RuntimeCommitRecoveryTest {
             long previousProjectionSequence, long projectionSequence, long beforeRevision, long afterRevision,
             long beforeBusinessStateHash, long businessStateHash, long beforeFundsStateHash, long fundsStateHash,
             long laneMask,
-            List<RuntimeCommitPatch.AccountLaneOwnerGroup> accountLaneGroups,
-            RuntimeCommitPatch.GlobalOwnerGroup globalOwnerGroup,
-            List<RuntimeCommitPatch.FundsPosting> fundsPostings,
+            List<RuntimeFactFrame.AccountLaneOwnerGroup> accountLaneGroups,
+            RuntimeFactFrame.GlobalOwnerGroup globalOwnerGroup,
+            List<RuntimeFactFrame.FundsPosting> fundsPostings,
             com.surprising.aeron.protocol.CoreMatcherTransition matcherTransition,
-            List<RuntimeCommitPatch.MatcherEvidence> matcherEvidence, RuntimeCommitPatch.TerminalIds terminalIds,
-            RuntimeCommitPatch.CoreFactValues coreFactValues,
-            RuntimeCommitPatch.CoreFactMetadata coreFactMetadata,
-            RuntimeCommitPatch.CoreFactFragment coreFactFragment) {
+            List<RuntimeFactFrame.MatcherEvidence> matcherEvidence, RuntimeFactFrame.TerminalIds terminalIds,
+            RuntimeFactFrame.CoreFactValues coreFactValues,
+            RuntimeFactFrame.CoreFactMetadata coreFactMetadata,
+            RuntimeFactFrame.CoreFactFragment coreFactFragment) {
 
-        static PatchEvidence from(RuntimeCommitPatch patch) {
+        static PatchEvidence from(RuntimeFactFrame patch) {
             return new PatchEvidence(patch.productLine(), patch.previousCoreSequence(), patch.coreSequence(),
                     patch.previousProjectionSequence(), patch.projectionSequence(), patch.beforeRevision(),
                     patch.afterRevision(), patch.beforeBusinessStateHash(), patch.businessStateHash(),

@@ -41,7 +41,7 @@ Account Lane 同时是资金隔离、执行、哈希、快照与审计边界。�
 
 `RuntimeCommitJournal` 只保留当前 owner transaction 的准入、连续 sequence 和诊断元数据，不再维护热
 projection replica、projector 线程或 per-command freeze。普通命令只更新权威 mutable runtime、rolling hash、
-索引和 typed patch；`TradingCoreState` 只在显式 query/snapshot fence 直接物化。Snapshot 编码也在确定性的
+索引和 typed fact frame；`TradingCoreState` 只在显式 query/snapshot fence 直接物化。Snapshot 编码也在确定性的
 snapshot fence 内同步完成，不创建 snapshot encoder/audit executor。
 
 Cluster 本地进度不写复制 timer。Aeron publication 遇到 `BACK_PRESSURED`/`ADMIN_ACTION` 时保留有界 egress，
@@ -57,34 +57,34 @@ Archive 本地 control 为 1 MiB；term buffer 使用非 sparse 文件。线程�
 
 唯一写路径为：Account Lane worker 原地修改各自拥有的 `TradingRuntimeState` 分区，owner 在命令边界把首个 before 与最终 after 收集为
 `PreparedChanges`；business/funds rolling hash 完成校验后只 seal 一份
-`RuntimeCommitPatch`。该 patch 驱动 `RuntimeCommitIndexes`、轻量 sequence journal 和 Core Fact v10；普通下单、
+`RuntimeFactFrame`。该 fact frame 驱动 `RuntimeFactIndexes`、轻量 sequence journal 和 Core Fact v10；普通下单、
 撤单、成交和风险命令不全量 materialize，也不等待后台 projection。显式 snapshot/query fence 直接从权威 runtime
 构造不可变视图；任何 sequence、hash、产品线或 Lane 拓扑不匹配均在替换状态前 fail closed。
 
-`RuntimeCommitIndexes` 的唯一 patch apply 入口覆盖九个索引：`PositionUserIndex`、`OpenInterestIndex`、
+`RuntimeFactIndexes` 的唯一 fact frame apply 入口覆盖九个索引：`PositionUserIndex`、`OpenInterestIndex`、
 `TriggerOrderIndex`、`AlgoOrderIndex`、`LiquidationIndex`、`CancelAllAfterIndex`、`ActiveOrderIndex`、
 `AdlPositionIndex` 与 `RiskSnapshotIndex`。Core Fact v10 明确编码 tombstone：删除后重建同一用户/资产、订单、持仓、
 杠杆或其他实体不会复活旧值；terminal order/liquidation/trigger ID 也以独立、已编码的列表保留。
 订单的 canonical business/export view 只在 owner 的 `prepareCommitPatch` 中由一处 `recordOrder` producer 预封装；
-patch 的 `businessAfter` / `exportAfter` 随后由 projection、index、retention、export 与 payload consumer 直接读取，
+fact frame 的 `businessAfter` / `exportAfter` 随后由 projection、index、retention、export 与 payload consumer 直接读取，
 不得再次从 Runtime fallback 构造。
 
-owner 提交暂存采用可复用 `RuntimeCommitPatch.Builder`；reset 只清理本轮触碰的槽位，sealed patch 仍持有独立不可变值。
+owner 提交暂存采用可复用 `RuntimeFactFrame.Builder`；reset 只清理本轮触碰的槽位，materialized fact frame 仍持有独立不可变值。
 用户与余额 before-value 按 Account Lane 写入 primitive journal，避免共享 `ConcurrentHashMap<Long, ...>` 的装箱和节点竞争；
 Lane 内 order、reservation、position、client-order 和 pending reservation 索引均使用 primitive key/value 容器；
-`TreeMap`/排序只允许出现在 query、snapshot 或确有多个 patch 的 Core Fact 合并边界，不进入普通 PLACE/成交 mutation；
+`TreeMap`/排序只允许出现在 query、snapshot 或确有多个 fact frame 的 Core Fact 合并边界，不进入普通 PLACE/成交 mutation；
 命令级 changed-ID 使用 first-touch primitive 数组和 generation 哈希索引，clear 不扫描历史容量；无删除项的 Core Fact 复用空 tombstone，
 有删除项时也只创建实际使用的类别列表；
 资金 posting 按本命令 first-touch 顺序直接线性合并，不排序；rolling hash 直接前向消费 typed before/after，
-不创建 staging operation 数组、镜像 reverse patch 或每用户临时更新对象。
+不创建 staging operation 数组、镜像 reverse fact frame 或每用户临时更新对象。
 Core Fact materializer 直接把 user/order 嵌套结构写入最终 event buffer，不再为每个嵌套对象先生成
 临时 `byte[]`；协议 marker、字段顺序、资金守恒、tombstone 和 snapshot/replay 语义保持不变。
 
-准入先同时预留当前 transaction 的 patch 数/字节与 Core Fact event 数/字节，之后才允许 mutation；reservation 只能
+准入先同时预留当前 transaction 的 fact frame 数/字节与 Core Fact event 数/字节，之后才允许 mutation；reservation 只能
 消费一次，提交前拒绝或失败必须释放。export 容量满返回 backpressure，不创建无界 executor 或队列。owner、
 Account Lane、matcher、risk 与 exporter 的失败会 poison 相应路径；观察并应用 matcher fact 后不撤销 Lane 或 hash/index
-transition，而是停止服务并从 snapshot/Cluster Log 恢复，且不会推进可见 patch/core sequence。资金 posting 以 `(asset, ownerKind, ownerId, subledger)` 的 before/after 精确导出，
-含 fee、insurance、funding、liquidation、rounding、clearing、deficit 后逐资产守恒；sealed patch 的 business/funds hash、
+transition，而是停止服务并从 snapshot/Cluster Log 恢复，且不会推进可见 fact frame/core sequence。资金 posting 以 `(asset, ownerKind, ownerId, subledger)` 的 before/after 精确导出，
+含 fee、insurance、funding、liquidation、rounding、clearing、deficit 后逐资产守恒；materialized fact frame 的 business/funds hash、
 idempotency response、订单终态与 snapshot/replay hash 必须一致。
 
 批量订单先在 owner 上做 mutation domain 与容量 preflight，并保存一个 primitive runtime revision；
@@ -171,7 +171,7 @@ P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣
   identity、reservation 和 admission 解析，完成阶段复用 `ResolvedMatchingAdmission`，不再次做同义业务校验。
 - 单用户非撮合命令也通过目标 Lane 的固定 SPSC worker 执行；成交或生命周期命令涉及两个及以上 Lane 时，同一条不可变
   事件直接投递给所有相关 Lane，各 worker 只修改自己拥有的账户状态。Coordinator 非阻塞检查 completion bitmap，按
-  sequence 发布 typed patch/Core Fact；applied/committed watermark 已在原 Lane task 内连续推进，不再异步投递第二个 commit task；
+  sequence 发布 typed fact frame/Core Fact；applied/committed watermark 已在原 Lane task 内连续推进，不再异步投递第二个 commit task；
   不重绑定 Lane，也不执行热路径 rollback。
   `surprising.aeron.settlement-wait-strategy` 可选 `BLOCKING`（默认）、`YIELDING` 或
   `BUSY_SPIN`，正式对照必须保持同一策略并单独报告 busy-spin CPU。
@@ -180,9 +180,9 @@ P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣
 - Cluster response 直接写入 session egress scratch，并以调用时的 committed Core sequence 编码；内部不再构造
   visible response、临时 response payload 或二次 `CoreMessage` payload copy。只有 Aeron backpressure 入队时复制 scratch。
 - 单笔交易只发布 sealed typed commit 和轻量 `RuntimeProjectionPoint` sequence；没有 mutable projector 或 projection replica。
-  Snapshot/query fence 从权威 runtime 直接构造 `TradingCoreState`。Core Fact v10 从 patch 的 typed before/after、tombstone 和 encoded terminal ID
+  Snapshot/query fence 从权威 runtime 直接构造 `TradingCoreState`。Core Fact v10 从 fact frame 的 typed before/after、tombstone 和 encoded terminal ID
   异步编码；下单、撤单、撮合及批量 owner 路径不执行 full materialization，也不等待 Core Fact。普通及批量订单校验
-  直接读取 `OrderRuntime` 与 typed patch before-value，matcher 前置撤单只携带最小身份，不构造 `CoreOrderState`；matcher fact
+  直接读取 `OrderRuntime` 与 typed fact frame before-value，matcher 前置撤单只携带最小身份，不构造 `CoreOrderState`；matcher fact
   之前的 batch preflight 拒绝只按 primitive revision 与 typed before-value 撤销，fact 之后的任何失败统一 fail-stop。
 - 强平和交割/行权结算的订单撤销均按确定性 cursor 分批执行，单个 Core 命令最多处理 1,024 笔订单；强平 provider
   通过一个 `EXECUTE_LIQUIDATION_BATCH` 同时提交有序 action 和可选 Risk Scan continuation，订单阶段完成后才推进用户阶段。
@@ -256,22 +256,22 @@ reservation 和 matcher 提交。只读 preflight 只服务显式 dry-run/test A
 - `TradingRuntimeState` 是六条产品线生产热路径的唯一 mutation authority。只有 Product Core owner 与固定 Account Lane owner 可以按各自边界写入 Runtime State；
   外围服务、异步 matcher callback、PostgreSQL、Kafka 和 query projection 均不得直接写入。
 - `PreparedChanges` 收集命令内每个 typed key 的首个 before 与最终 after；business/funds hash transition 校验完成后，
-  只 seal 一个 `RuntimeCommitPatch`。该 patch 是 indexes、journal、Core Fact 和恢复的唯一提交载体，不存在 persistent delta tree、
+  只 seal 一个 `RuntimeFactFrame`。该 fact frame 是 indexes、journal、Core Fact 和恢复的唯一提交载体，不存在 persistent delta tree、
   shadow baseline 或 immutable outcome 回写 Runtime。
-- `RuntimeCommitIndexes` 先按 patch owner group 增量更新九个索引，随后有界 `RuntimeCommitJournal` 由单 projector 以连续 sequence、
+- `RuntimeFactIndexes` 先按 fact frame owner group 增量更新九个索引，随后有界 `RuntimeCommitJournal` 由单 projector 以连续 sequence、
   item/byte batch 更新 mutable projection。只有 snapshot/query fence、关闭或恢复把该 mutable state 冻结为 `TradingCoreState`；
   普通命令不创建 per-command immutable state。
-- Core Fact v10 从 sealed patch 的 typed before/after、funds posting、tombstone 与 terminal ID 异步批量编码至 bounded exporter；
+- Core Fact v10 从 materialized fact frame 的 typed before/after、funds posting、tombstone 与 terminal ID 异步批量编码至 bounded exporter；
   owner 不等待 projection 或 Core Fact materializer。任何 admission、hash、index、publish 或 projector 失败均 fail closed，
   不推进可见 sequence，且按已完成阶段回滚/回收。
-- Core Fact 的 typed fragment 在 owner 已 sealed 的 patch chain 上离线合并；`FactIdentitySlice` 提供精确用户/订单/持仓/资产
+- Core Fact 的 typed fragment 在 owner 已 sealed 的 fact frame chain 上离线合并；`FactIdentitySlice` 提供精确用户/订单/持仓/资产
   identity，`FactBudget` 在 mutation 前预留 chain node、item 和 byte 上限。off-owner encoder 只消费这些 typed 值，不能回读
   Runtime、冻结 `TradingCoreState` 或创建 fallback fact。
 - owner commit 的非资金业务状态使用 typed opcode journal，不捕获逐变更 closure；用户 balance/reservation/position hash
-  分域 copy-on-write，未变分域不复制。稳定 asset/symbol identity 由版本化 append-only registry 发布，patch 只保存字典版本和
+  分域 copy-on-write，未变分域不复制。稳定 asset/symbol identity 由版本化 append-only registry 发布，fact frame 只保存字典版本和
   本次可释放 client/position identity；Core Fact 继续保存该版本对应的 registry 引用，恢复时版本与游标一并重建。
 - Account Lane 只把 order/reservation/user/position 的 primitive dirty key 写入各自 lane journal；Sequencer 在 lane 完成边界按
-  固定 lane 顺序刷新到 owner-only primitive published map，不使用跨 lane `ConcurrentHashMap`。projection 直接消费 sealed patch
+  固定 lane 顺序刷新到 owner-only primitive published map，不使用跨 lane `ConcurrentHashMap`。projection 直接消费 materialized fact frame
   的 canonical sorted list 并做二分定位，不再构造第二层 user/map/set materialization；Core Fact tombstone 冲突校验使用有界
   可复用 scratch 与二分查找，幂等账本缓存 command-bound digest 和 retention weight。
 - `USER_STATE`、`ORDER_STATE`、client-order、活动订单、Treasury、风险、ADL、清算工作和生命周期进度查询都读取 Runtime 或其 ID 索引；
@@ -280,7 +280,7 @@ reservation 和 matcher 提交。只读 preflight 只服务显式 dry-run/test A
   无分页协议设定固定实体/扫描上限，超限返回 `QUERY_RESPONSE_TOO_LARGE`。除异步 book capture 外，查询只占用一次
   有界 owner-thread CPU 片段，不做全局 materialization，也不会等待数据库、Kafka、Valkey 或 matcher callback；因此慢查询或超大结果
   不能把交易下单拖入外部 I/O 等待。
-- 主源码不再提供 immutable outcome 反向覆盖 Runtime 的 delta applier。状态索引和 business-state hash 都从 sealed patch
+- 主源码不再提供 immutable outcome 反向覆盖 Runtime 的 delta applier。状态索引和 business-state hash 都从 materialized fact frame
   增量推进；exchange-core 仍是唯一可执行订单簿，未被 Runtime 或 frozen snapshot 复制。
 - Runtime/materialization 等价检查只保留在测试源码，用于快照恢复回归，不进入生产命令或在线查询路径。
 

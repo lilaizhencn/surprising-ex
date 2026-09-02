@@ -3,13 +3,13 @@ package com.surprising.aeron.service.state;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.NavigableSet;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.Set;
-import java.util.TreeSet;
 
 public final class AdlPositionIndex {
 
-    private final Map<String, NavigableSet<PositionKey>> keysByAsset = new HashMap<>();
+    private final Map<String, HashSet<PositionKey>> keysByAsset = new HashMap<>();
     private final Map<Long, RuntimePositionIndexValue> positions = new HashMap<>();
     private final Map<AssetPositionKey, Integer> positionCounts = new HashMap<>();
 
@@ -22,19 +22,28 @@ public final class AdlPositionIndex {
     }
 
     public Set<PositionKey> positions(String asset) {
-        NavigableSet<PositionKey> values = keysByAsset.get(AssetBalance.normalizeAsset(asset));
-        return values == null ? Set.of() : Collections.unmodifiableNavigableSet(values);
+        Set<PositionKey> values = keysByAsset.get(AssetBalance.normalizeAsset(asset));
+        if (values == null || values.isEmpty()) return Set.of();
+        PositionKey[] ordered = values.toArray(PositionKey[]::new);
+        java.util.Arrays.sort(ordered);
+        LinkedHashSet<PositionKey> result = new LinkedHashSet<>(ordered.length);
+        Collections.addAll(result, ordered);
+        return Collections.unmodifiableSet(result);
     }
 
-    void apply(java.util.List<RuntimeCommitPatch.PositionChange> changes, RuntimeCommitPatch.IdentityView identities) {
-        for (RuntimeCommitPatch.PositionChange change : changes) {
-            RuntimePositionIndexValue previous = positions.remove(change.positionKey());
-            if (previous != null) remove(previous);
-            if (change.after() != null) {
-                RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(change.after(), identities);
-                positions.put(change.positionKey(), indexed);
-                add(indexed);
-            }
+    void apply(java.util.List<RuntimeFactFrame.PositionChange> changes, RuntimeFactFrame.IdentityView identities) {
+        for (RuntimeFactFrame.PositionChange change : changes) {
+            apply(change.positionKey(), change.after(), identities);
+        }
+    }
+
+    void apply(long positionKey, PositionRuntime after, RuntimeFactFrame.IdentityView identities) {
+        RuntimePositionIndexValue previous = positions.remove(positionKey);
+        if (previous != null) remove(previous);
+        if (after != null) {
+            RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(after, identities);
+            positions.put(positionKey, indexed);
+            add(indexed);
         }
     }
 
@@ -61,7 +70,7 @@ public final class AdlPositionIndex {
         PositionKey key = new PositionKey(position.userId(), position.symbol(), position.positionSide());
         AssetPositionKey counted = new AssetPositionKey(position.asset(), key);
         if (positionCounts.merge(counted, 1, Math::addExact) == 1) {
-            keysByAsset.computeIfAbsent(position.asset(), ignored -> new TreeSet<>()).add(key);
+            keysByAsset.computeIfAbsent(position.asset(), ignored -> new HashSet<>()).add(key);
         }
     }
 
@@ -75,7 +84,7 @@ public final class AdlPositionIndex {
             return;
         }
         positionCounts.remove(counted);
-        NavigableSet<PositionKey> values = keysByAsset.get(position.asset());
+        Set<PositionKey> values = keysByAsset.get(position.asset());
         if (values == null) return;
         values.remove(key);
         if (values.isEmpty()) keysByAsset.remove(position.asset());
@@ -85,12 +94,12 @@ public final class AdlPositionIndex {
 
     private void add(long userId, CorePositionState position) {
         if (position.signedQuantitySteps() == 0) return;
-        keysByAsset.computeIfAbsent(position.marginAsset(), ignored -> new TreeSet<>())
+        keysByAsset.computeIfAbsent(position.marginAsset(), ignored -> new HashSet<>())
                 .add(new PositionKey(userId, position.symbol(), position.positionSide()));
     }
 
     private void remove(long userId, CorePositionState position) {
-        NavigableSet<PositionKey> values = keysByAsset.get(position.marginAsset());
+        Set<PositionKey> values = keysByAsset.get(position.marginAsset());
         if (values == null) return;
         values.remove(new PositionKey(userId, position.symbol(), position.positionSide()));
         if (values.isEmpty()) keysByAsset.remove(position.marginAsset());

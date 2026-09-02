@@ -6,7 +6,7 @@ import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
 import com.surprising.aeron.service.state.RuntimeCommitJournal;
-import com.surprising.aeron.service.state.RuntimeCommitPatch;
+import com.surprising.aeron.service.state.RuntimeFactFrame;
 
 final class CoreAdmissionReservation {
     @FunctionalInterface
@@ -29,7 +29,7 @@ final class CoreAdmissionReservation {
     private final CoreExportState exportState;
     private final CoreExportState.AdmissionReservation exportReservation;
     private final FactBudget factBudget;
-    private int remainingPatches;
+    private int remainingFrames;
     private int holders = 1;
     private boolean released;
 
@@ -40,7 +40,7 @@ final class CoreAdmissionReservation {
         this.exportState = exportState;
         this.exportReservation = exportReservation;
         this.factBudget = factBudget;
-        this.remainingPatches = patchCount;
+        this.remainingFrames = patchCount;
     }
 
     static CoreAdmissionReservation reserve(RuntimeCommitJournal journal, CoreExportState exportState,
@@ -53,13 +53,14 @@ final class CoreAdmissionReservation {
                 demand.patchCount());
     }
 
-    long publish(RuntimeCommitPatch patch, long businessStateHash, long fundsStateHash) {
+    long publish(com.surprising.aeron.service.state.TradingRuntimeState.PreparedFactFrame frame,
+                 long businessStateHash, long fundsStateHash) {
         requireOpen();
-        if (remainingPatches == 0) {
+        if (remainingFrames == 0) {
             throw new IllegalStateException("commit watermark budget exhausted");
         }
-        long sequence = journal.publish(patch, businessStateHash, fundsStateHash);
-        remainingPatches--;
+        long sequence = journal.publish(frame.sequence(), businessStateHash, fundsStateHash);
+        remainingFrames--;
         return sequence;
     }
 
@@ -68,12 +69,12 @@ final class CoreAdmissionReservation {
         return exportState.append(exportReservation, draft);
     }
 
-    FactPermit reserveFactPatch() {
+    FactPermit reserveFactFrame() {
         requireOpen();
-        return factBudget.reservePatch();
+        return factBudget.reserveFrame();
     }
 
-    void abortFactPatch(FactPermit permit) {
+    void abortFactFrame(FactPermit permit) {
         requireOpen();
         factBudget.abort(permit);
     }
@@ -83,11 +84,11 @@ final class CoreAdmissionReservation {
         if (--holders > 0) return;
         if (exportReservation.remainingEvents() > 0) exportState.release(exportReservation);
         factBudget.release();
-        remainingPatches = 0;
+        remainingFrames = 0;
         released = true;
     }
 
-    int remainingPatches() { return remainingPatches; }
+    int remainingFrames() { return remainingFrames; }
     int remainingFacts() { return exportReservation.remainingEvents(); }
     int holders() { return holders; }
     int remainingFactNodes() { return factBudget.remainingNodes(); }
@@ -287,8 +288,17 @@ final class CoreAdmissionReservation {
             return other != null && owner == other.owner;
         }
 
-        void consume(RuntimeCommitPatch patch) {
-            owner.consume(this, patch);
+        void consume() {
+            owner.consume(this);
+        }
+
+        /** Off-owner compatibility path. The trading owner uses consume() and never materializes here. */
+        void consume(com.surprising.aeron.service.state.RuntimeFactFrame fact) {
+            java.util.Objects.requireNonNull(fact, "fact");
+            if (fact.coreFactItemCount() > maxItems || fact.estimatedCoreFactBytes() > maxBytes) {
+                throw new IllegalStateException("fact exceeds pre-mutation fact bound");
+            }
+            owner.consume(this);
         }
 
         void requireConsumed() {
@@ -299,12 +309,6 @@ final class CoreAdmissionReservation {
             owner.returnUnused(this);
         }
 
-        private void assertWithinBound(RuntimeCommitPatch patch) {
-            if (patch.coreFactItemCount() > maxItems || patch.estimatedCoreFactBytes() > maxBytes) {
-                throw new FactEstimateInvariantException(
-                        "sealed patch exceeds command-derived pre-mutation fact bound");
-            }
-        }
     }
 
     static final class FactBudget {
@@ -324,7 +328,7 @@ final class CoreAdmissionReservation {
             remainingBytes = bytes;
         }
 
-        FactPermit reservePatch() {
+        FactPermit reserveFrame() {
             if (released || remainingNodes == 0) {
                 throw new IllegalStateException("fact chain node budget exhausted");
             }
@@ -332,21 +336,12 @@ final class CoreAdmissionReservation {
             return new FactPermit(this, nextOrdinal++, remainingItems, remainingBytes);
         }
 
-        private void consume(FactPermit permit, RuntimeCommitPatch patch) {
+        private void consume(FactPermit permit) {
             requireOwnedActive(permit);
             if (permit.consumed || permit.returned) throw new IllegalStateException("fact permit already resolved");
             if (permit.ordinal != nextConsumeOrdinal) {
                 throw new IllegalStateException("fact permit gap or reorder");
             }
-            permit.assertWithinBound(patch);
-            int items = patch.coreFactItemCount();
-            long bytes = patch.estimatedCoreFactBytes();
-            if (items > remainingItems || bytes > remainingBytes) {
-                throw new FactEstimateInvariantException(
-                        "sealed patch exceeds reserved aggregate fact budget");
-            }
-            remainingItems = Math.subtractExact(remainingItems, items);
-            remainingBytes = Math.subtractExact(remainingBytes, bytes);
             permit.consumed = true;
             nextConsumeOrdinal++;
         }

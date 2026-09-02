@@ -269,22 +269,24 @@ public final class TriggerOrderIndex {
                 && idsByClient.containsKey(new ClientTriggerKey(userId, clientTriggerOrderId));
     }
 
-    void apply(java.util.List<RuntimeCommitPatch.TriggerOrderChange> changes) {
-        for (RuntimeCommitPatch.TriggerOrderChange change : changes) {
-            long id = change.triggerOrderId();
-            CoreTriggerOrderState previous = valuesById.remove(id);
-            if (previous != null) {
-                remove(previous, id);
-                if (!previous.clientTriggerOrderId().isEmpty()) {
-                    idsByClient.remove(new ClientTriggerKey(previous.userId(), previous.clientTriggerOrderId()));
-                }
+    void apply(java.util.List<RuntimeFactFrame.TriggerOrderChange> changes) {
+        for (RuntimeFactFrame.TriggerOrderChange change : changes) {
+            apply(change.triggerOrderId(), change.after());
+        }
+    }
+
+    void apply(long id, CoreTriggerOrderState current) {
+        CoreTriggerOrderState previous = valuesById.remove(id);
+        if (previous != null) {
+            remove(previous, id);
+            if (!previous.clientTriggerOrderId().isEmpty()) {
+                idsByClient.remove(new ClientTriggerKey(previous.userId(), previous.clientTriggerOrderId()));
             }
-            CoreTriggerOrderState current = change.after();
-            if (current != null) {
-                add(current);
-                if (!current.clientTriggerOrderId().isEmpty()) {
-                    idsByClient.put(new ClientTriggerKey(current.userId(), current.clientTriggerOrderId()), id);
-                }
+        }
+        if (current != null) {
+            add(current);
+            if (!current.clientTriggerOrderId().isEmpty()) {
+                idsByClient.put(new ClientTriggerKey(current.userId(), current.clientTriggerOrderId()), id);
             }
         }
     }

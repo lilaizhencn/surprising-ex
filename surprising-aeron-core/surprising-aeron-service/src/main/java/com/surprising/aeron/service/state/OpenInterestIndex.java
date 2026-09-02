@@ -30,15 +30,19 @@ public final class OpenInterestIndex {
         return value == null ? 0 : Math.max(value.longQuantity(), value.shortQuantity());
     }
 
-    void apply(java.util.List<RuntimeCommitPatch.PositionChange> changes, RuntimeCommitPatch.IdentityView identities) {
-        for (RuntimeCommitPatch.PositionChange change : changes) {
-            RuntimePositionIndexValue previous = positions.remove(change.positionKey());
-            if (previous != null) remove(previous);
-            if (change.after() != null) {
-                RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(change.after(), identities);
-                positions.put(change.positionKey(), indexed);
-                add(indexed);
-            }
+    void apply(java.util.List<RuntimeFactFrame.PositionChange> changes, RuntimeFactFrame.IdentityView identities) {
+        for (RuntimeFactFrame.PositionChange change : changes) {
+            apply(change.positionKey(), change.after(), identities);
+        }
+    }
+
+    void apply(long positionKey, PositionRuntime after, RuntimeFactFrame.IdentityView identities) {
+        RuntimePositionIndexValue previous = positions.remove(positionKey);
+        if (previous != null) remove(previous);
+        if (after != null) {
+            RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(after, identities);
+            positions.put(positionKey, indexed);
+            add(indexed);
         }
     }
 

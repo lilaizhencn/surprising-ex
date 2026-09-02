@@ -90,12 +90,12 @@ public final class RuntimeProjectionState {
         cachedFreezeSequence = initialSequence;
     }
 
-    public void apply(List<RuntimeCommitPatch> patches) {
+    public void apply(List<RuntimeFactFrame> patches) {
         if (patches == null || patches.isEmpty()) throw new IllegalArgumentException("projection batch required");
         requireHealthy();
         MutationJournal inverse = mutationJournal.reset(-1);
         try {
-            for (RuntimeCommitPatch patch : patches) {
+            for (RuntimeFactFrame patch : patches) {
                 armInjectedFailure(patch, inverse);
                 applyPatch(patch, inverse);
             }
@@ -108,7 +108,7 @@ public final class RuntimeProjectionState {
         }
     }
 
-    public void apply(RuntimeCommitPatch patch) {
+    public void apply(RuntimeFactFrame patch) {
         requireHealthy();
         MutationJournal inverse = mutationJournal.reset(-1);
         try {
@@ -123,7 +123,7 @@ public final class RuntimeProjectionState {
         }
     }
 
-    private void applyPatch(RuntimeCommitPatch patch, MutationJournal inverse) {
+    private void applyPatch(RuntimeFactFrame patch, MutationJournal inverse) {
         if (patch == null || patch.productLine() != productLine
                 || patch.previousProjectionSequence() != sequence
                 || patch.projectionSequence() != Math.incrementExact(sequence)
@@ -140,7 +140,7 @@ public final class RuntimeProjectionState {
         inverse.setSequence(patch.projectionSequence());
     }
 
-    private void armInjectedFailure(RuntimeCommitPatch patch, MutationJournal inverse) {
+    private void armInjectedFailure(RuntimeFactFrame patch, MutationJournal inverse) {
         int injectedFailureCount = patch != null && patch.projectionSequence() == failOnSequence
                 ? failAfterMutations : -1;
         if (injectedFailureCount <= 0) return;
@@ -208,40 +208,37 @@ public final class RuntimeProjectionState {
         businessStateHash = after;
     }
 
-    private void applyAccountLanes(RuntimeCommitPatch patch, MutationJournal inverse) {
-        RuntimeCommitPatch.IdentityView identities = patch.identities();
-        for (RuntimeCommitPatch.AccountLaneOwnerGroup group : patch.accountLaneGroups()) {
+    private void applyAccountLanes(RuntimeFactFrame patch, MutationJournal inverse) {
+        RuntimeFactFrame.IdentityView identities = patch.identities();
+        for (RuntimeFactFrame.AccountLaneOwnerGroup group : patch.accountLaneGroups()) {
             prepareChangedUsers(group.users(), inverse);
-            for (RuntimeCommitPatch.OrderChange change : group.orders()) {
-                if (change.after() != null && change.businessAfter() == null) {
-                    throw new IllegalStateException("order business value is missing from commit patch");
-                }
+            for (RuntimeFactFrame.OrderChange change : group.orders()) {
                 boolean pending = pendingAfter(group.reservations(), change.orderId());
                 inverse.putOrRemove(orders, change.orderId(), change.after() == null || pending
-                        ? null : change.businessAfter());
+                        ? null : RuntimeStateMaterializer.orderSnapshot(change.after(), identities));
             }
-            for (RuntimeCommitPatch.RiskSnapshotChange change : group.riskSnapshots()) {
+            for (RuntimeFactFrame.RiskSnapshotChange change : group.riskSnapshots()) {
                 RuntimeIdentityRegistry.PositionIdentity identity = identities.positionIdentity(change.riskKey());
                 inverse.putOrRemove(riskSnapshots, identity.userId() + ":" + identity.positionKey(),
                         change.after() == null ? null : RuntimeStateMaterializer.riskSnapshot(change.after(), identities));
             }
-            for (RuntimeCommitPatch.LiquidationChange change : group.liquidations()) {
+            for (RuntimeFactFrame.LiquidationChange change : group.liquidations()) {
                 inverse.putOrRemove(liquidations, change.liquidationId(), change.after() == null
                         ? null : RuntimeStateMaterializer.liquidation(change.after(), identities));
             }
-            for (RuntimeCommitPatch.LeverageChange change : group.leverages()) {
+            for (RuntimeFactFrame.LeverageChange change : group.leverages()) {
                 inverse.putOrRemove(leverages, change.key(), change.after());
             }
-            for (RuntimeCommitPatch.AlgoOrderChange change : group.algoOrders()) {
+            for (RuntimeFactFrame.AlgoOrderChange change : group.algoOrders()) {
                 inverse.putOrRemove(algoOrders, change.algoOrderId(), change.after());
             }
-            for (RuntimeCommitPatch.TimerChange change : group.timers()) {
+            for (RuntimeFactFrame.TimerChange change : group.timers()) {
                 inverse.putOrRemove(timers, change.key(), change.after());
             }
-            for (RuntimeCommitPatch.TriggerOrderChange change : group.triggerOrders()) {
+            for (RuntimeFactFrame.TriggerOrderChange change : group.triggerOrders()) {
                 inverse.putOrRemove(triggerOrders, change.triggerOrderId(), change.after());
             }
-            for (RuntimeCommitPatch.ClientOrderChange change : group.clientOrders()) {
+            for (RuntimeFactFrame.ClientOrderChange change : group.clientOrders()) {
                 TradingCoreState.ClientOrderKey key = new TradingCoreState.ClientOrderKey(change.key().userId(),
                         identities.clientOrderId(change.key().userId(), change.key().clientKey()));
                 inverse.putOrRemove(clientOrders, key, change.afterOrderId());
@@ -251,8 +248,8 @@ public final class RuntimeProjectionState {
         }
     }
 
-    private void prepareChangedUsers(List<RuntimeCommitPatch.UserChange> changes, MutationJournal inverse) {
-        for (RuntimeCommitPatch.UserChange change : changes) {
+    private void prepareChangedUsers(List<RuntimeFactFrame.UserChange> changes, MutationJournal inverse) {
+        for (RuntimeFactFrame.UserChange change : changes) {
             UserRuntime runtimeUser = change.after();
             if (runtimeUser == null) continue;
             if (runtimeUser.productLine() != productLine) {
@@ -265,19 +262,19 @@ public final class RuntimeProjectionState {
         }
     }
 
-    private void applyUserValues(RuntimeCommitPatch.AccountLaneOwnerGroup group,
-                                 RuntimeCommitPatch.IdentityView identities, MutationJournal inverse) {
-        for (RuntimeCommitPatch.BalanceChange change : group.balances()) {
+    private void applyUserValues(RuntimeFactFrame.AccountLaneOwnerGroup group,
+                                 RuntimeFactFrame.IdentityView identities, MutationJournal inverse) {
+        for (RuntimeFactFrame.BalanceChange change : group.balances()) {
             long userId = change.key().userId();
             MutableUser user = mutableUser(group.users(), userId);
             if (user == null) continue;
-            RuntimeCommitPatch.UserBalance value = change.after();
+            RuntimeFactFrame.UserBalance value = change.after();
             String asset = identities.asset(change.key().assetId());
             inverse.putOrRemove(user.balances, asset, value == null ? null : new AssetBalance(asset,
                     Math.addExact(value.availableUnits(), value.pendingReservedUnits()),
                     Math.subtractExact(value.lockedUnits(), value.pendingReservedUnits())));
         }
-        for (RuntimeCommitPatch.ReservationChange change : group.reservations()) {
+        for (RuntimeFactFrame.ReservationChange change : group.reservations()) {
             long userId = userId(change.before(), change.after());
             if (userId == 0) continue;
             MutableUser user = mutableUser(group.users(), userId);
@@ -291,7 +288,7 @@ public final class RuntimeProjectionState {
                 }
             }
         }
-        for (RuntimeCommitPatch.PositionChange change : group.positions()) {
+        for (RuntimeFactFrame.PositionChange change : group.positions()) {
             long userId = userId(change.before(), change.after());
             if (userId == 0) continue;
             MutableUser user = mutableUser(group.users(), userId);
@@ -305,8 +302,8 @@ public final class RuntimeProjectionState {
         }
     }
 
-    private void finishChangedUsers(List<RuntimeCommitPatch.UserChange> changes, MutationJournal inverse) {
-        for (RuntimeCommitPatch.UserChange change : changes) {
+    private void finishChangedUsers(List<RuntimeFactFrame.UserChange> changes, MutationJournal inverse) {
+        for (RuntimeFactFrame.UserChange change : changes) {
             UserRuntime runtimeUser = change.after();
             if (runtimeUser == null) {
                 inverse.putOrRemove(users, change.userId(), null);
@@ -320,21 +317,21 @@ public final class RuntimeProjectionState {
         }
     }
 
-    private MutableUser mutableUser(List<RuntimeCommitPatch.UserChange> changes, long userId) {
-        RuntimeCommitPatch.UserChange change = findUserChange(changes, userId);
+    private MutableUser mutableUser(List<RuntimeFactFrame.UserChange> changes, long userId) {
+        RuntimeFactFrame.UserChange change = findUserChange(changes, userId);
         if (change != null && change.after() == null) return null;
         MutableUser user = users.get(userId);
         if (user == null) throw new IllegalStateException("typed patch lacks current user state: " + userId);
         return user;
     }
 
-    private static RuntimeCommitPatch.UserChange findUserChange(
-            List<RuntimeCommitPatch.UserChange> changes, long userId) {
+    private static RuntimeFactFrame.UserChange findUserChange(
+            List<RuntimeFactFrame.UserChange> changes, long userId) {
         int low = 0;
         int high = changes.size() - 1;
         while (low <= high) {
             int middle = (low + high) >>> 1;
-            RuntimeCommitPatch.UserChange change = changes.get(middle);
+            RuntimeFactFrame.UserChange change = changes.get(middle);
             int comparison = Long.compare(change.userId(), userId);
             if (comparison == 0) return change;
             if (comparison < 0) low = middle + 1; else high = middle - 1;
@@ -342,12 +339,12 @@ public final class RuntimeProjectionState {
         return null;
     }
 
-    private static boolean pendingAfter(List<RuntimeCommitPatch.ReservationChange> changes, long orderId) {
+    private static boolean pendingAfter(List<RuntimeFactFrame.ReservationChange> changes, long orderId) {
         int low = 0;
         int high = changes.size() - 1;
         while (low <= high) {
             int middle = (low + high) >>> 1;
-            RuntimeCommitPatch.ReservationChange change = changes.get(middle);
+            RuntimeFactFrame.ReservationChange change = changes.get(middle);
             int comparison = Long.compare(change.orderId(), orderId);
             if (comparison == 0) return change.pendingAfter();
             if (comparison < 0) low = middle + 1; else high = middle - 1;
@@ -355,15 +352,15 @@ public final class RuntimeProjectionState {
         return false;
     }
 
-    private void applyGlobal(RuntimeCommitPatch.GlobalOwnerGroup global, RuntimeCommitPatch.IdentityView identities,
+    private void applyGlobal(RuntimeFactFrame.GlobalOwnerGroup global, RuntimeFactFrame.IdentityView identities,
                              MutationJournal inverse) {
-        for (RuntimeCommitPatch.MarkPriceChange change : global.markPrices()) {
+        for (RuntimeFactFrame.MarkPriceChange change : global.markPrices()) {
             String symbol = identities.symbol(change.symbolId());
             MarkPriceRuntime value = change.after();
             inverse.putOrRemove(marks, symbol, value == null ? null : new CoreMarkPriceState(symbol,
                     value.instrumentVersion(), value.markPriceTicks(), value.priceSequence(), value.generatedAtEpochMillis()));
         }
-        for (RuntimeCommitPatch.RiskScanChange change : global.riskScans()) {
+        for (RuntimeFactFrame.RiskScanChange change : global.riskScans()) {
             inverse.putOrRemove(riskScans, identities.symbol(change.symbolId()), change.after() == null
                     ? null : RuntimeStateMaterializer.riskScan(change.after(), identities));
         }
@@ -374,9 +371,9 @@ public final class RuntimeProjectionState {
         if (global.riskScanControl() != null) {
             inverse.setRiskScanControl(global.riskScanControl().after());
         }
-        for (RuntimeCommitPatch.TreasuryAssetChange change : global.treasuryAssets()) {
+        for (RuntimeFactFrame.TreasuryAssetChange change : global.treasuryAssets()) {
             String asset = identities.asset(change.assetId());
-            RuntimeCommitPatch.TreasuryAssetValue value = change.after();
+            RuntimeFactFrame.TreasuryAssetValue value = change.after();
             inverse.putZeroOrRemove(fees, asset, value == null ? 0 : value.fee());
             inverse.putZeroOrRemove(insurance, asset, value == null ? 0 : value.insurance());
             inverse.putZeroOrRemove(deficits, asset, value == null ? 0 : value.deficit());
@@ -385,16 +382,16 @@ public final class RuntimeProjectionState {
             inverse.putZeroOrRemove(roundingResiduals, asset, value == null ? 0 : value.roundingResidual());
             inverse.putZeroOrRemove(clearingPnl, asset, value == null ? 0 : value.clearingPnl());
         }
-        for (RuntimeCommitPatch.TreasuryFundingChange change : global.treasuryFunding()) {
+        for (RuntimeFactFrame.TreasuryFundingChange change : global.treasuryFunding()) {
             String symbol = identities.symbol(change.symbolId());
-            RuntimeCommitPatch.TreasuryFundingValue value = change.after();
+            RuntimeFactFrame.TreasuryFundingValue value = change.after();
             inverse.putZeroOrRemove(fundingSettlements, symbol, value == null ? 0 : value.settlementId());
             inverse.putOrRemove(fundingProgress, symbol, value == null || value.progress() == null ? null
                     : RuntimeStateMaterializer.fundingProgress(value.progress()));
         }
-        for (RuntimeCommitPatch.TreasuryLifecycleChange change : global.treasuryLifecycle()) {
+        for (RuntimeFactFrame.TreasuryLifecycleChange change : global.treasuryLifecycle()) {
             String symbol = identities.symbol(change.symbolId());
-            RuntimeCommitPatch.TreasuryLifecycleValue value = change.after();
+            RuntimeFactFrame.TreasuryLifecycleValue value = change.after();
             inverse.putZeroOrRemove(lifecycleSettlements, symbol, value == null ? 0 : value.settlementId());
             inverse.putOrRemove(lifecycleProgress, symbol, value == null || value.progress() == null ? null
                     : RuntimeStateMaterializer.lifecycleProgress(value.progress()));

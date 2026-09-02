@@ -22,6 +22,8 @@ record CoreSnapshotImage(
         long projectionSequence,
         long businessStateHash,
         long fundsStateHash,
+        long auditBusinessStateHash,
+        long auditFundsStateHash,
         long clusterTimestamp,
         long clusterPosition,
         MatcherSnapshot matcherSnapshot,
@@ -43,6 +45,7 @@ record CoreSnapshotImage(
         if (productLine == null || appliedCommandCount < 0 || snapshotId <= 0 || projectionSequence < 0
                 || coreSequence != appliedCommandCount || clusterTimestamp < 0 || clusterPosition < 0
                 || businessStateHash == 0 || fundsStateHash == 0
+                || auditBusinessStateHash == 0 || auditFundsStateHash == 0
                 || matcherSnapshot == null || tradingState == null || exportState == null
                 || terminalRetention == null || tradingState.productLine() != productLine) {
             throw new IllegalArgumentException("invalid core snapshot image");

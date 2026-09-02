@@ -256,7 +256,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.tradingState().orders().keySet())
                     .containsExactlyInAnyOrderElementsOf(orders.stream()
                             .map(PlaceOrderCommand::orderId).toList());
-            var patches = state.drainCapturedCommitPatchesForTest();
+            var patches = state.drainCapturedFactFramesForTest();
             assertThat(patches).hasSize(1);
             var patch = patches.getFirst();
             assertThat(patch.coreSequence()).isEqualTo(response.appliedCommandCount());
@@ -463,7 +463,7 @@ class CoreOrderedOrderBatchTest {
             assertThat((long[]) field(state, "appliedMatcherPrefixDigests"))
                     .containsExactly(matcherPrefixAfterFirst);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBeforeFatal);
-            assertThat(state.drainCapturedCommitPatchesForTest()).isEmpty();
+            assertThat(state.drainCapturedFactFramesForTest()).isEmpty();
             assertThat(state.exportState().snapshot()).isEqualTo(exportBeforeFatal);
             assertThat(identities.findClientKey(1001, "fatal-fourth")).isNotNull();
         }
@@ -743,7 +743,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.snapshotProjectionSequence()).isEqualTo(projectionBefore);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
             assertThat(state.exportState().snapshot()).isEqualTo(exportBefore);
-            assertThat(state.drainCapturedCommitPatchesForTest()).isEmpty();
+            assertThat(state.drainCapturedFactFramesForTest()).isEmpty();
             assertThatThrownBy(() -> state.apply(probe(UUID.randomUUID(), 3))).isSameAs(failure);
         }
     }
@@ -814,7 +814,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.snapshotProjectionSequence()).isEqualTo(projectionBefore);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
             assertThat(state.exportState().snapshot()).isEqualTo(exportBefore);
-            assertThat(state.drainCapturedCommitPatchesForTest()).isEmpty();
+            assertThat(state.drainCapturedFactFramesForTest()).isEmpty();
             assertThat(state.takeMatchingResult(sequence)).isNull();
             assertThatThrownBy(() -> state.apply(command(ProductLine.LINEAR_PERPETUAL,
                     CoreMessageType.PROBE_INCREMENT, UUID.randomUUID(), 5,

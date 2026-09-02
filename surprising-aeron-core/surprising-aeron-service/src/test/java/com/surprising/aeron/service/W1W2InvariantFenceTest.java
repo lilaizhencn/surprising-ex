@@ -65,7 +65,7 @@ class W1W2InvariantFenceTest {
     void keepsSingleBookSnapshotOnlyRestore() throws Exception {
         String adapter = source("matching/DeterministicExchangeCoreAdapter.java");
         String runtime = source("TradingCoreRuntime.java");
-        String indexes = source("state/RuntimeCommitIndexes.java");
+        String indexes = source("state/RuntimeFactIndexes.java");
         String probe = source("CoreProbeState.java");
 
         assertThat(adapter)
@@ -74,7 +74,7 @@ class W1W2InvariantFenceTest {
                 .contains("reconcileOpenOrdersAsync(activeOrders")
                 .doesNotContain("fromOrders", "rebuildMatcher", "resubmitMatcher", "CoreBookState");
         assertThat(runtime).contains("private void restoreIndexes(TradingCoreState restored)");
-        assertThat(runtime).contains("commitIndexes.rebuild(restored, identities);");
+        assertThat(runtime).contains("factIndexes.rebuild(restored, identities);");
         assertThat(linesContaining(indexes, ".rebuild(state"))
                 .containsExactly(
                         "positionUsers.rebuild(state, identities);",
@@ -104,12 +104,12 @@ class W1W2InvariantFenceTest {
         String ownerCommit = probe.substring(start, end);
 
         assertThat(ownerCommit)
-                .contains("preparedCommit.builder().prepare(")
-                .contains("rollingBusinessStateHash.applyFailStop(preparedChanges)")
-                .contains("rollingFundsStateHash.applyFailStop(preparedChanges)")
+                .contains("prepareFactFrame(")
+                .doesNotContain("rollingBusinessStateHash.applyFailStop")
+                .doesNotContain("rollingFundsStateHash.applyFailStop")
                 .contains("commitFaultInjector.inject(\"hashes\")")
                 .contains("restart from snapshot and log is required")
-                .contains("publishSealedCommit(commit,")
+                .contains("publishFactFrame(frame,")
                 .doesNotContain("prepareApplied", "businessTransition", "fundsTransition",
                         "rollbackLaneSequence", "commitLaneSequence(")
                 .doesNotContain("runtimeProjectionJournal.await")
@@ -118,13 +118,13 @@ class W1W2InvariantFenceTest {
                 .doesNotContain("RollingFundsStateHash.compute")
                 .doesNotContain("rollingBusinessStateHash.restore")
                 .doesNotContain("rollingFundsStateHash.restore");
-        assertThat(occurrences(ownerCommit, "preparedCommit.builder().prepare(")).isEqualTo(1);
-        assertThat(occurrences(ownerCommit, "publishSealedCommit(commit,")).isEqualTo(1);
-        assertThat(probe).contains("currentAdmission.publish(commit, businessStateHash, fundsStateHash)");
+        assertThat(occurrences(ownerCommit, "prepareFactFrame(")).isEqualTo(1);
+        assertThat(occurrences(ownerCommit, "publishFactFrame(frame,")).isEqualTo(1);
+        assertThat(probe).contains("currentAdmission.publish(frame, businessStateHash, fundsStateHash)");
         assertThat(source("state/TradingRuntimeState.java"))
                 .doesNotContain("LaneCommitCommand", "commitLaneSequence(")
                 .contains("lane.applied(coreSequence", "lane.committed(coreSequence)");
-        assertThat(source("state/RuntimeCommitPatch.java"))
+        assertThat(source("state/RuntimeFactFrame.java"))
                 .doesNotContain("Changes<Long", "Changes<Integer", "BeforeAfter", ".sort(",
                         "Arrays.sort", "TreeMap", "TreeSet", "forEachKeyValue", ".toArray(");
         assertThat(source("state/RollingBusinessStateHash.java"))

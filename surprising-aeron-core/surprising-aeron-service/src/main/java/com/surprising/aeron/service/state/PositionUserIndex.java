@@ -44,15 +44,19 @@ public final class PositionUserIndex {
         return higher == Long.MAX_VALUE ? null : higher;
     }
 
-    void apply(java.util.List<RuntimeCommitPatch.PositionChange> changes, RuntimeCommitPatch.IdentityView identities) {
-        for (RuntimeCommitPatch.PositionChange change : changes) {
-            RuntimePositionIndexValue previous = positions.removeKey(change.positionKey());
-            if (previous != null) removePosition(previous);
-            if (change.after() != null) {
-                RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(change.after(), identities);
-                positions.put(change.positionKey(), indexed);
-                addPosition(indexed);
-            }
+    void apply(java.util.List<RuntimeFactFrame.PositionChange> changes, RuntimeFactFrame.IdentityView identities) {
+        for (RuntimeFactFrame.PositionChange change : changes) {
+            apply(change.positionKey(), change.after(), identities);
+        }
+    }
+
+    void apply(long positionKey, PositionRuntime after, RuntimeFactFrame.IdentityView identities) {
+        RuntimePositionIndexValue previous = positions.removeKey(positionKey);
+        if (previous != null) removePosition(previous);
+        if (after != null) {
+            RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(after, identities);
+            positions.put(positionKey, indexed);
+            addPosition(indexed);
         }
     }
 

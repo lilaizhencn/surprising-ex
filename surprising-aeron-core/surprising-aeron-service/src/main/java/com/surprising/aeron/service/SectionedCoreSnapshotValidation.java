@@ -47,6 +47,8 @@ final class SectionedCoreSnapshotValidation {
         long matcherSequence = header.getLong();
         long businessStateHash = header.getLong();
         long globalFundsHash = header.getLong();
+        long auditBusinessStateHash = header.getLong();
+        long auditFundsStateHash = header.getLong();
         int engineStateHash = header.getInt();
         int bookStateHash = header.getInt();
         long symbolRegistryHash = header.getLong();
@@ -84,7 +86,8 @@ final class SectionedCoreSnapshotValidation {
         return new HeaderManifest(productLine, routeVersion, topology, topologyHash, symbolRouteHash,
                 snapshotId, coreSequence, projectionSequence, accountLaneDigest,
                 clusterTimestamp, clusterPosition, appliedCommandCount, probeValue, matcherSequence,
-                businessStateHash, globalFundsHash, engineStateHash, bookStateHash,
+                businessStateHash, globalFundsHash, auditBusinessStateHash, auditFundsStateHash,
+                engineStateHash, bookStateHash,
                 symbolRegistryHash, userRegistryHash,
                 instrumentRegistryHash, activeOrderHash, sourceSequenceDigest, outboxAcknowledgedSequence,
                 outboxNextSequence, outboxPendingCount, outboxPendingDigest, forkGitSha, artifactSha256,
@@ -174,6 +177,7 @@ final class SectionedCoreSnapshotValidation {
             long projectionSequence, long accountLaneDigest,
             long clusterTimestamp, long clusterPosition, long appliedCommandCount, long probeValue,
             long matcherSequence, long businessStateHash, long globalFundsHash,
+            long auditBusinessStateHash, long auditFundsStateHash,
             int engineStateHash, int bookStateHash,
             long symbolRegistryHash, long userRegistryHash, long instrumentRegistryHash, long activeOrderHash,
             long sourceSequenceDigest, long outboxAcknowledgedSequence, long outboxNextSequence,

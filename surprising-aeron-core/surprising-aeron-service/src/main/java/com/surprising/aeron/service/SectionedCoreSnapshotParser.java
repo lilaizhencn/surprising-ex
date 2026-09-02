@@ -245,7 +245,8 @@ final class SectionedCoreSnapshotParser {
                         accountLanes, manifest.projectionSequence(), tradingState, manifest.topology());
                 candidate = CoreProbeState.prepareRestore(productLine, appliedCommandCount, probeValue,
                         commandResults, sourceSequences, tradingState, exportState, retention, matcherSnapshot,
-                        manifest.projectionSequence(), feePolicies, pendingTransfers);
+                        manifest.projectionSequence(), feePolicies, pendingTransfers,
+                        manifest.auditBusinessStateHash(), manifest.auditFundsStateHash());
                 candidate.restoreAccountLaneSnapshots(accountLanes, manifest.projectionSequence());
                 java.util.function.Consumer<CoreProbeState> observer = beforeActivationObserverForTest;
                 if (observer != null) observer.accept(candidate);

@@ -8,7 +8,7 @@ import com.surprising.aeron.service.state.CoreTriggerOrderState;
 import com.surprising.aeron.service.state.LiquidationRuntime;
 import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.state.ReservationRuntime;
-import com.surprising.aeron.service.state.RuntimeCommitPatch;
+import com.surprising.aeron.service.state.RuntimeFactFrame;
 import com.surprising.aeron.service.state.TerminalPruneBatch;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.TradingRuntimeState;
@@ -26,7 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-final class TerminalStateRetention {
+final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer {
 
     // The live instance is product-owner confined. Snapshot encoding receives a detached copy.
 
@@ -39,6 +39,7 @@ final class TerminalStateRetention {
     private final LinkedHashMap<EntityKey, RetainedEntity> tombstones;
     private final Map<ClientIdentity, EntityKey> tombstonesByClient;
     private final LinkedHashMap<UUID, CommandFingerprint> fundsCommands;
+    private long visitingExportSequence;
     private final ArrayList<Long> sortedScratch = new ArrayList<>();
     private long candidateDigest;
     private long tombstoneDigest;
@@ -82,13 +83,13 @@ final class TerminalStateRetention {
                 observeLiquidation(after.riskState().liquidations().get(id), exportSequence));
     }
 
-    void observe(List<RuntimeCommitPatch> patches, long exportSequence) {
+    void observe(List<RuntimeFactFrame> patches, long exportSequence) {
         if (patches == null || patches.isEmpty() || exportSequence <= 0) {
             throw new IllegalArgumentException("invalid terminal retention patch observation");
         }
-        for (RuntimeCommitPatch patch : patches) {
-            for (RuntimeCommitPatch.AccountLaneOwnerGroup group : patch.accountLaneGroups()) {
-                group.orders().forEach(change -> observeOrder(change.businessAfter(), exportSequence));
+        for (RuntimeFactFrame patch : patches) {
+            for (RuntimeFactFrame.AccountLaneOwnerGroup group : patch.accountLaneGroups()) {
+                group.orders().forEach(change -> observeOrder(change.after(), exportSequence));
                 group.algoOrders().forEach(change -> observeAlgo(change.after(), exportSequence));
                 group.triggerOrders().forEach(change -> observeTrigger(change.after(), exportSequence));
                 group.liquidations().forEach(change -> observeLiquidation(change.after(), exportSequence));
@@ -96,17 +97,42 @@ final class TerminalStateRetention {
         }
     }
 
-    void observe(RuntimeCommitPatch patch, long exportSequence) {
+    void observe(RuntimeFactFrame patch, long exportSequence) {
         if (patch == null || exportSequence <= 0) {
             throw new IllegalArgumentException("invalid terminal retention patch observation");
         }
-        for (RuntimeCommitPatch.AccountLaneOwnerGroup group : patch.accountLaneGroups()) {
-            group.orders().forEach(change -> observeOrder(change.businessAfter(), exportSequence));
+        for (RuntimeFactFrame.AccountLaneOwnerGroup group : patch.accountLaneGroups()) {
+            group.orders().forEach(change -> observeOrder(change.after(), exportSequence));
             group.algoOrders().forEach(change -> observeAlgo(change.after(), exportSequence));
             group.triggerOrders().forEach(change -> observeTrigger(change.after(), exportSequence));
             group.liquidations().forEach(change -> observeLiquidation(change.after(), exportSequence));
         }
     }
+
+    void observe(com.surprising.aeron.service.state.TradingRuntimeState.PreparedFactFrame frame,
+                 long exportSequence) {
+        if (frame == null || exportSequence <= 0 || visitingExportSequence != 0) {
+            throw new IllegalArgumentException("invalid deferred fact retention visit");
+        }
+        visitingExportSequence = exportSequence;
+        try {
+            frame.visitTerminalValues(this);
+        } finally {
+            visitingExportSequence = 0;
+        }
+    }
+
+    @Override
+    public void order(OrderRuntime value) { observeOrder(value, visitingExportSequence); }
+
+    @Override
+    public void liquidation(LiquidationRuntime value) { observeLiquidation(value, visitingExportSequence); }
+
+    @Override
+    public void algoOrder(CoreAlgoOrderState value) { observeAlgo(value, visitingExportSequence); }
+
+    @Override
+    public void triggerOrder(CoreTriggerOrderState value) { observeTrigger(value, visitingExportSequence); }
 
     void observeAcknowledgedOrders(
             TradingCoreState state, long acknowledgedSequence, Iterable<Long> orderIds) {
@@ -285,6 +311,13 @@ final class TerminalStateRetention {
     }
 
     private void observeOrder(CoreOrderState order, long exportSequence) {
+        if (order == null) return;
+        EntityKey key = new EntityKey(EntityType.ORDER, order.orderId());
+        if (order.status().terminal()) retain(key, order.userId(), order.clientOrderId(), exportSequence);
+        else removeCandidate(key);
+    }
+
+    private void observeOrder(OrderRuntime order, long exportSequence) {
         if (order == null) return;
         EntityKey key = new EntityKey(EntityType.ORDER, order.orderId());
         if (order.status().terminal()) retain(key, order.userId(), order.clientOrderId(), exportSequence);

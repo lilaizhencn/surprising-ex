@@ -110,12 +110,25 @@ public final class RuntimeCommitJournal implements AutoCloseable {
         reservation.closed = true;
     }
 
-    public long publish(RuntimeCommitPatch patch, long businessStateHash, long fundsStateHash) {
+    public long publish(RuntimeFactFrame patch, long businessStateHash, long fundsStateHash) {
         requireHealthy();
         return publishCommittedPatch(patch, businessStateHash, fundsStateHash);
     }
 
-    public long publish(AdmissionReservation reservation, RuntimeCommitPatch patch,
+    public long publish(long sequence, long businessStateHash, long fundsStateHash) {
+        requireHealthy();
+        long next = Math.incrementExact(publishedSequence);
+        if (sequence != next) throw new IllegalStateException("invalid fact frame publication");
+        publishedSequence = next;
+        this.businessStateHash = businessStateHash;
+        this.fundsStateHash = fundsStateHash;
+        batchCount++;
+        batchItems++;
+        batchBytes = Math.addExact(batchBytes, 64);
+        return next;
+    }
+
+    public long publish(AdmissionReservation reservation, RuntimeFactFrame patch,
                         long businessStateHash, long fundsStateHash) {
         validateReservation(reservation);
         long patchBytes = estimatedBytes(patch);
@@ -136,7 +149,28 @@ public final class RuntimeCommitJournal implements AutoCloseable {
         return published;
     }
 
-    private long publishCommittedPatch(RuntimeCommitPatch patch,
+    public long publish(AdmissionReservation reservation, long sequence,
+                        long businessStateHash, long fundsStateHash) {
+        validateReservation(reservation);
+        final long bytes = 64;
+        if (bytes > reservation.nextSliceByteAllowance()) {
+            throw new IllegalStateException("fact frame exceeded commit admission byte reservation");
+        }
+        long published = publish(sequence, businessStateHash, fundsStateHash);
+        reservation.remaining--;
+        reservation.remainingBytes -= bytes;
+        reservation.consumedSlices++;
+        reservedEntries--;
+        reservedBytes -= bytes;
+        if (reservation.remaining == 0) {
+            reservedBytes -= reservation.remainingBytes;
+            reservation.remainingBytes = 0;
+            reservation.closed = true;
+        }
+        return published;
+    }
+
+    private long publishCommittedPatch(RuntimeFactFrame patch,
                                        long businessStateHash,
                                        long fundsStateHash) {
         long next = Math.incrementExact(publishedSequence);
@@ -174,7 +208,7 @@ public final class RuntimeCommitJournal implements AutoCloseable {
         return new PublishReservation(reserveAdmission(1), sequence);
     }
 
-    public long publish(PublishReservation reservation, RuntimeCommitPatch patch,
+    public long publish(PublishReservation reservation, RuntimeFactFrame patch,
                         long businessStateHash, long fundsStateHash) {
         if (reservation == null || reservation.sequence != Math.incrementExact(publishedSequence)) {
             throw new IllegalStateException("invalid commit journal reservation");
@@ -187,7 +221,7 @@ public final class RuntimeCommitJournal implements AutoCloseable {
         release(reservation.admission);
     }
 
-    public void preflightPublish(RuntimeCommitPatch patch) {
+    public void preflightPublish(RuntimeFactFrame patch) {
         PublishReservation reservation = reservePublish(patch == null ? -1 : patch.sequence());
         release(reservation);
     }
@@ -212,6 +246,15 @@ public final class RuntimeCommitJournal implements AutoCloseable {
             throw new IllegalStateException("commit journal is past its initial sequence");
         }
         businessStateHash = after;
+    }
+
+    public void refreshAuditHashes(long businessStateHash, long fundsStateHash) {
+        requireHealthy();
+        if (businessStateHash == 0 || fundsStateHash == 0 || hasOutstandingReservation()) {
+            throw new IllegalStateException("invalid audit hash fence");
+        }
+        this.businessStateHash = businessStateHash;
+        this.fundsStateHash = fundsStateHash;
     }
 
     boolean projectorAlive() { return false; }
@@ -296,7 +339,7 @@ public final class RuntimeCommitJournal implements AutoCloseable {
         return value;
     }
 
-    private static long estimatedBytes(RuntimeCommitPatch patch) {
+    private static long estimatedBytes(RuntimeFactFrame patch) {
         return 384L + 128L * patch.accountLaneGroups().size() + 96L * patch.fundsPostings().size()
                 + 80L * patch.matcherEvidence().size() + 32L * patch.coreFactItemCount();
     }

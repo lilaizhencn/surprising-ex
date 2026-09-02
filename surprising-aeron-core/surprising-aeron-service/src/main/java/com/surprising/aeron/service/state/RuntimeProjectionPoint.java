@@ -38,7 +38,7 @@ public final class RuntimeProjectionPoint {
         completed = true;
     }
 
-    void completeSequence() {
+    public void completeSequence() {
         completed = true;
     }
 }

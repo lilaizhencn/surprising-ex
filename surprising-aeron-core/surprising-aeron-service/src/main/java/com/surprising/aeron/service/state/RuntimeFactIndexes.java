@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.state;
 
-public final class RuntimeCommitIndexes {
+public final class RuntimeFactIndexes implements RuntimeFactFrame.ChangeConsumer {
     private final PositionUserIndex positionUsers;
     private final OpenInterestIndex openInterest;
     private final TriggerOrderIndex triggers;
@@ -11,8 +11,16 @@ public final class RuntimeCommitIndexes {
     private final AdlPositionIndex adlPositions;
     private final RiskSnapshotIndex riskSnapshots;
     private ApplyStats lastApplyStats = ApplyStats.EMPTY;
+    private RuntimeFactFrame.IdentityView activeIdentities;
+    private int positionVisits;
+    private int triggerVisits;
+    private int algoVisits;
+    private int liquidationVisits;
+    private int timerVisits;
+    private int orderVisits;
+    private int riskVisits;
 
-    public RuntimeCommitIndexes(PositionUserIndex positionUsers, OpenInterestIndex openInterest,
+    public RuntimeFactIndexes(PositionUserIndex positionUsers, OpenInterestIndex openInterest,
                                 TriggerOrderIndex triggers, AlgoOrderIndex algos,
                                 LiquidationIndex liquidations, CancelAllAfterIndex timers,
                                 ActiveOrderIndex activeOrders, AdlPositionIndex adlPositions,
@@ -28,9 +36,9 @@ public final class RuntimeCommitIndexes {
         this.riskSnapshots = require(riskSnapshots, "risk-snapshot");
     }
 
-    public void apply(RuntimeCommitPatch patch) {
+    public void apply(RuntimeFactFrame patch) {
         if (patch == null) throw new IllegalArgumentException("runtime commit patch is required");
-        RuntimeCommitPatch.IdentityView identities = patch.identities();
+        RuntimeFactFrame.IdentityView identities = patch.identities();
         int positionUserVisits = 0;
         int openInterestVisits = 0;
         int triggerVisits = 0;
@@ -40,7 +48,7 @@ public final class RuntimeCommitIndexes {
         int activeOrderVisits = 0;
         int adlPositionVisits = 0;
         int riskSnapshotVisits = 0;
-        for (RuntimeCommitPatch.AccountLaneOwnerGroup group : patch.accountLaneGroups()) {
+        for (RuntimeFactFrame.AccountLaneOwnerGroup group : patch.accountLaneGroups()) {
             if (!group.positions().isEmpty()) {
                 positionUsers.apply(group.positions(), identities);
                 positionUserVisits++;
@@ -78,6 +86,67 @@ public final class RuntimeCommitIndexes {
         }
         lastApplyStats = new ApplyStats(positionUserVisits, openInterestVisits, triggerVisits, algoVisits,
                 liquidationVisits, timerVisits, activeOrderVisits, adlPositionVisits, riskSnapshotVisits);
+    }
+
+    public void apply(RuntimeFactFrame.Builder builder, RuntimeFactFrame.IdentityView identities) {
+        if (builder == null || identities == null || activeIdentities != null) {
+            throw new IllegalArgumentException("runtime change frame is invalid");
+        }
+        activeIdentities = identities;
+        positionVisits = triggerVisits = algoVisits = liquidationVisits = timerVisits = orderVisits = riskVisits = 0;
+        try {
+            builder.visitChangedIndexes(this);
+            lastApplyStats = new ApplyStats(positionVisits, positionVisits, triggerVisits, algoVisits,
+                    liquidationVisits, timerVisits, orderVisits, positionVisits, riskVisits);
+        } finally {
+            activeIdentities = null;
+        }
+    }
+
+    @Override
+    public void order(long orderId, OrderRuntime before, OrderRuntime after) {
+        activeOrders.apply(orderId, after, activeIdentities);
+        orderVisits++;
+    }
+
+    @Override
+    public void position(long positionKey, PositionRuntime before, PositionRuntime after) {
+        positionUsers.apply(positionKey, after, activeIdentities);
+        openInterest.apply(positionKey, after, activeIdentities);
+        adlPositions.apply(positionKey, after, activeIdentities);
+        positionVisits++;
+    }
+
+    @Override
+    public void liquidation(long liquidationId, LiquidationRuntime before, LiquidationRuntime after) {
+        liquidations.apply(liquidationId, after, activeIdentities);
+        liquidationVisits++;
+    }
+
+    @Override
+    public void riskSnapshot(long riskKey, RiskSnapshotRuntime before, RiskSnapshotRuntime after) {
+        riskSnapshots.apply(riskKey, after, activeIdentities);
+        riskVisits++;
+    }
+
+    @Override
+    public void algoOrder(long algoOrderId, CoreAlgoOrderState before, CoreAlgoOrderState after) {
+        algos.apply(algoOrderId, after);
+        algoVisits++;
+    }
+
+    @Override
+    public void triggerOrder(long triggerOrderId, CoreTriggerOrderState before,
+                             CoreTriggerOrderState after) {
+        triggers.apply(triggerOrderId, after);
+        triggerVisits++;
+    }
+
+    @Override
+    public void timer(CoreCancelAllAfterKey key, CoreCancelAllAfterState before,
+                      CoreCancelAllAfterState after) {
+        timers.apply(key, after);
+        timerVisits++;
     }
 
     public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {

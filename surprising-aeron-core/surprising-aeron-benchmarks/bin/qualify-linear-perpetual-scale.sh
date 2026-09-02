@@ -86,7 +86,7 @@ write_environment() {
 
 run_targeted_tests() {
   local protocol_tests='CoreExportCodecTest'
-  local service_tests='RuntimeCommitPatchTest,RuntimeCommitHashTest,RuntimeCommitJournalTest,RuntimeCommitRecoveryTest,RuntimeStateProjectorTest,TradingRuntimeStateTest,TradingRuntimeStateIndexTest,RuntimeTreasuryDeltaTest,RuntimeCommandProcessorTest,CoreProbeStateTest,CoreOrderedOrderBatchTest,CoreLifecycleStateTest,CoreMatchingStateTest,CorePerpetualFinancialMatrixTest,CoreDeliveryOptionFinancialMatrixTest,CoreTreasuryStateTest,FundsDeltaTest,RuntimePerpetualMatchProcessorTest,RuntimePerpetualFundingProcessorTest,RuntimePerpetualFillCalculatorTest,CoreRiskStateTest,CoreProductLineArchitectureContractTest,CoreFundsIdempotencyTest,CoreStateSnapshotCodecTest,TradingStateSnapshotCodecTest,CoreFeePolicySnapshotCodecTest,CoreNativeSnapshotProductLineTest,SharedProductLineSnapshotContractTest,TradingCoreRuntimeAuthorityTest,W1W2InvariantFenceTest,DeterministicExchangeCoreAdapterTest,SurprisingClusteredServiceTest,ActiveOrderIndexTest,PositionUserIndexTest,RiskSnapshotIndexTest'
+  local service_tests='RuntimeFactFrameTest,RuntimeCommitHashTest,RuntimeCommitJournalTest,RuntimeCommitRecoveryTest,RuntimeStateProjectorTest,TradingRuntimeStateTest,TradingRuntimeStateIndexTest,RuntimeTreasuryDeltaTest,RuntimeCommandProcessorTest,CoreProbeStateTest,CoreOrderedOrderBatchTest,CoreLifecycleStateTest,CoreMatchingStateTest,CorePerpetualFinancialMatrixTest,CoreDeliveryOptionFinancialMatrixTest,CoreTreasuryStateTest,FundsDeltaTest,RuntimePerpetualMatchProcessorTest,RuntimePerpetualFundingProcessorTest,RuntimePerpetualFillCalculatorTest,CoreRiskStateTest,CoreProductLineArchitectureContractTest,CoreFundsIdempotencyTest,CoreStateSnapshotCodecTest,TradingStateSnapshotCodecTest,CoreFeePolicySnapshotCodecTest,CoreNativeSnapshotProductLineTest,SharedProductLineSnapshotContractTest,TradingCoreRuntimeAuthorityTest,W1W2InvariantFenceTest,DeterministicExchangeCoreAdapterTest,SurprisingClusteredServiceTest,ActiveOrderIndexTest,PositionUserIndexTest,RiskSnapshotIndexTest'
   local exporter_tests='ReliableCoreExporterTest,KafkaProjectionWorkerTest,KafkaCoreExportSinkTest,JdbcCoreEventProjectorTest,JdbcCoreEventProjectorPostgresTest,AdaptiveExportLoopTest,W5PublishBarrierTest'
   local gateway_tests='CoreEventFanoutConsumerTest,KafkaFanoutConsumerTest,KafkaFanoutConsumerTopicTest'
   local market_data_tests='CoreMarketDataProjectionTest'
@@ -468,8 +468,8 @@ validate_owner_commit_jmh() {
     .secondaryMetrics.rejectedOperations.score == 0 and
     .secondaryMetrics.errorOperations.score == 0 and
     .secondaryMetrics.timeoutOperations.score == 0 and
-    .secondaryMetrics.patchItems.score > 0 and
-    .secondaryMetrics.patchBytes.score > 0 and
+    .secondaryMetrics.fact frameItems.score > 0 and
+    .secondaryMetrics.fact frameBytes.score > 0 and
     .secondaryMetrics.batchItems.score > 0 and
     .secondaryMetrics.maximumBatchSize.score > 0 and
     (if (.benchmark | endswith("ownerCommitSnapshotRecovery")) then
@@ -480,7 +480,7 @@ validate_owner_commit_jmh() {
 }
 
 run_owner_commit() {
-  local benchmark='OwnerCommitPatchBenchmark.*'
+  local benchmark='OwnerFactFrameBenchmark.*'
   local params=(
     -p activeUsers=10000 -p listedSymbols=512 -p accountLanes=4
     -p positionsPerUser=5 -p ordersPerUser=10 -p maxInFlight=256

@@ -80,7 +80,7 @@ class CoreProbeStateTest {
             assertThat(pendingMatching).isNotNull();
             assertThat(journal.metrics().reservedEntries()).isZero();
             assertThat(state.exportState().metrics().reservedEvents()).isEqualTo(1);
-            assertThat(pendingMatching.capacityReservation().remainingPatches()).isEqualTo(1);
+            assertThat(pendingMatching.capacityReservation().remainingFrames()).isEqualTo(1);
             assertThat(pendingMatching.capacityReservation().remainingFacts()).isEqualTo(1);
 
             assertThat(completeMatching(state, state.matchingSequence(place.header().commandId()), place).status())
@@ -111,7 +111,7 @@ class CoreProbeStateTest {
             PendingMatching deferredPending = state.pendingMatching(
                     state.matchingSequence(deferred.header().commandId()));
             assertThat(deferredPending).isNotNull();
-            assertThat(deferredPending.capacityReservation().remainingPatches()).isEqualTo(1);
+            assertThat(deferredPending.capacityReservation().remainingFrames()).isEqualTo(1);
             assertThat(deferredPending.capacityReservation().remainingFacts()).isEqualTo(1);
             assertThat(commitJournal(state).metrics().reservedEntries()).isZero();
             assertThat(state.exportState().metrics().reservedEvents()).isPositive();
@@ -154,7 +154,7 @@ class CoreProbeStateTest {
             assertThat(state.apply(continuation).status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(state.pendingMatching()).isNotEmpty();
             PendingMatching queuedPending = state.pendingMatching().values().iterator().next();
-            assertThat(queuedPending.capacityReservation().remainingPatches()).isEqualTo(2);
+            assertThat(queuedPending.capacityReservation().remainingFrames()).isEqualTo(2);
             assertThat(queuedPending.capacityReservation().remainingFacts()).isEqualTo(2);
             assertThat(commitJournal(state).metrics().reservedEntries()).isZero();
             assertThat(state.exportState().metrics().reservedEvents()).isPositive();
@@ -210,8 +210,8 @@ class CoreProbeStateTest {
     @Test
     void factBudgetRejectsOneMoreNodeItemAndByteWithoutDrift() {
         var nodes = new CoreAdmissionReservation.FactBudget(1, 4, 64);
-        nodes.reservePatch();
-        assertThatThrownBy(nodes::reservePatch).isInstanceOf(IllegalStateException.class);
+        nodes.reserveFrame();
+        assertThatThrownBy(nodes::reserveFrame).isInstanceOf(IllegalStateException.class);
         assertThat(nodes.remainingNodes()).isZero();
         assertThat(nodes.remainingItems()).isEqualTo(4);
         assertThat(nodes.remainingBytes()).isEqualTo(64);
@@ -221,7 +221,7 @@ class CoreProbeStateTest {
         var patch = conservedFundsPatch(identities, command);
         var items = new CoreAdmissionReservation.FactBudget(1, patch.coreFactItemCount() - 1,
                 patch.estimatedCoreFactBytes());
-        var itemPermit = items.reservePatch();
+        var itemPermit = items.reserveFrame();
         assertThatThrownBy(() -> itemPermit.consume(patch)).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("pre-mutation fact bound");
         assertThat(items.remainingItems()).isEqualTo(patch.coreFactItemCount() - 1);
@@ -229,7 +229,7 @@ class CoreProbeStateTest {
 
         var bytes = new CoreAdmissionReservation.FactBudget(1, patch.coreFactItemCount(),
                 patch.estimatedCoreFactBytes() - 1);
-        var bytePermit = bytes.reservePatch();
+        var bytePermit = bytes.reserveFrame();
         assertThatThrownBy(() -> bytePermit.consume(patch)).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("pre-mutation fact bound");
         assertThat(bytes.remainingItems()).isEqualTo(patch.coreFactItemCount());
@@ -246,8 +246,8 @@ class CoreProbeStateTest {
         var second = orderPatch(identities, open, closed, 1, 2);
 
         var orderedBudget = new CoreAdmissionReservation.FactBudget(2, 16, 32_768);
-        var firstPermit = orderedBudget.reservePatch();
-        var secondPermit = orderedBudget.reservePatch();
+        var firstPermit = orderedBudget.reserveFrame();
+        var secondPermit = orderedBudget.reserveFrame();
         assertThatThrownBy(() -> secondPermit.consume(second))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("gap or reorder");
         firstPermit.consume(first);
@@ -256,19 +256,19 @@ class CoreProbeStateTest {
         secondPermit.consume(second);
 
         var foreign = factPermit(second);
-        var firstChain = new CoreExportState.PatchChain(first, null, firstPermit);
-        assertThatThrownBy(() -> new CoreExportState.PatchChain(second, firstChain, foreign))
+        var firstChain = new CoreExportState.FactChain(first, null, firstPermit);
+        assertThatThrownBy(() -> new CoreExportState.FactChain(second, firstChain, foreign))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("foreign");
 
         var gapBudget = new CoreAdmissionReservation.FactBudget(2, 16, 32_768);
-        var returned = gapBudget.reservePatch();
-        var gap = gapBudget.reservePatch();
+        var returned = gapBudget.reserveFrame();
+        var gap = gapBudget.reserveFrame();
         returned.returnUnused();
         assertThatThrownBy(() -> gap.consume(second))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("gap");
 
         var staleBudget = new CoreAdmissionReservation.FactBudget(1, 8, 16_384);
-        var stale = staleBudget.reservePatch();
+        var stale = staleBudget.reserveFrame();
         staleBudget.release();
         assertThatThrownBy(() -> stale.consume(first))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("released");
@@ -313,7 +313,7 @@ class CoreProbeStateTest {
             assertThat(demand.factChainNodes()).isEqualTo(3);
             var budget = new CoreAdmissionReservation.FactBudget(
                     demand.factChainNodes(), demand.factItems(), demand.factByteUpperBound());
-            for (int node = 0; node < 3; node++) budget.reservePatch();
+            for (int node = 0; node < 3; node++) budget.reserveFrame();
             assertThat(budget.remainingNodes()).isZero();
             budget.release();
             assertThat(budget.remainingItems()).isZero();
@@ -414,7 +414,7 @@ class CoreProbeStateTest {
                     com.surprising.aeron.service.state.RuntimeFundsDelta.empty(), null))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessage("invalid Core Fact draft");
-            assertThatThrownBy(() -> new com.surprising.aeron.service.state.RuntimeCommitPatch.CoreFactMetadata(
+            assertThatThrownBy(() -> new com.surprising.aeron.service.state.RuntimeFactFrame.CoreFactMetadata(
                     command.header().commandId(), com.surprising.aeron.protocol.CommandFingerprint.fromBytes(
                     new byte[com.surprising.aeron.protocol.CommandFingerprint.LENGTH]),
                     command.header().messageType().wireCode(), command.header().userId(), ResponseStatus.APPLIED,
@@ -603,8 +603,8 @@ class CoreProbeStateTest {
             var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
             var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
             var patch = conservedFundsPatch(identities, command);
-            var chain = new CoreExportState.PatchChain(patch, null, factPermit(patch));
-            var metadata = new com.surprising.aeron.service.state.RuntimeCommitPatch.CoreFactMetadata(
+            var chain = new CoreExportState.FactChain(patch, null, factPermit(patch));
+            var metadata = new com.surprising.aeron.service.state.RuntimeFactFrame.CoreFactMetadata(
                     command.header().commandId(), com.surprising.aeron.protocol.CommandFingerprint.of(command),
                     command.header().messageType().wireCode(), command.header().userId(), ResponseStatus.APPLIED,
                     CoreResultCode.NONE, 1, 1, 1, 1, false);
@@ -647,7 +647,7 @@ class CoreProbeStateTest {
             var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
             var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
             var patch = conservedFundsPatch(identities, command);
-            var metadata = new com.surprising.aeron.service.state.RuntimeCommitPatch.CoreFactMetadata(
+            var metadata = new com.surprising.aeron.service.state.RuntimeFactFrame.CoreFactMetadata(
                     command.header().commandId(), com.surprising.aeron.protocol.CommandFingerprint.of(command),
                     command.header().messageType().wireCode(), command.header().userId(), ResponseStatus.APPLIED,
                     CoreResultCode.NONE, 1, 1, 1, 1, false);
@@ -732,8 +732,8 @@ class CoreProbeStateTest {
         var created = orderPatch(identities, null, order, 0, 1);
         var deleted = orderPatch(identities, order, null, 1, 2);
         var permits = factPermits(List.of(created, deleted));
-        var chain = new CoreExportState.PatchChain(deleted,
-                new CoreExportState.PatchChain(created, null, permits.get(0)), permits.get(1));
+        var chain = new CoreExportState.FactChain(deleted,
+                new CoreExportState.FactChain(created, null, permits.get(0)), permits.get(1));
         CoreMessage command = command(UUID.randomUUID(), 2, 1);
         try (CoreExportState exportState = new CoreExportState()) {
             exportState.append(draft(command, 2, 2, 0, transition, List.of(71L), chain, identities));
@@ -744,14 +744,14 @@ class CoreProbeStateTest {
     }
 
     @Test
-    void longFactPatchChainTraversesOldestFirstWithoutRecursion() {
+    void longFactChainTraversesOldestFirstWithoutRecursion() {
         var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
         int symbolId = identities.symbolId("BTC-USDT");
         var open = new com.surprising.aeron.service.state.OrderRuntime(72, 17, symbolId, 2);
         var canceled = new com.surprising.aeron.service.state.OrderRuntime(72, 17, symbolId, 2, true);
-        CoreExportState.PatchChain chain = null;
+        CoreExportState.FactChain chain = null;
         int nodes = 1_024;
-        var patches = new java.util.ArrayList<com.surprising.aeron.service.state.RuntimeCommitPatch>(nodes);
+        var patches = new java.util.ArrayList<com.surprising.aeron.service.state.RuntimeFactFrame>(nodes);
         for (int sequence = 1; sequence <= nodes; sequence++) {
             var before = sequence == 1 ? null : sequence % 2 == 0 ? open : canceled;
             var after = sequence % 2 == 0 ? canceled : open;
@@ -760,7 +760,7 @@ class CoreProbeStateTest {
         }
         var permits = factPermits(patches);
         for (int index = 0; index < nodes; index++) {
-            chain = new CoreExportState.PatchChain(patches.get(index), chain, permits.get(index));
+            chain = new CoreExportState.FactChain(patches.get(index), chain, permits.get(index));
         }
         java.util.ArrayList<Long> sequences = new java.util.ArrayList<>(nodes);
         chain.acceptOldestFirst(patch -> sequences.add(patch.coreSequence()));
@@ -781,7 +781,7 @@ class CoreProbeStateTest {
             return CoreExportCodec.encodeEvent(event);
         }, order -> {
             conversions.incrementAndGet();
-            return com.surprising.aeron.service.state.RuntimeCommitPatch.exportOrderView(order);
+            return com.surprising.aeron.service.state.RuntimeFactFrame.exportOrderView(order);
         })) {
             var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
             var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
@@ -791,8 +791,8 @@ class CoreProbeStateTest {
             var created = orderPatch(identities, null, order, 0, 1);
             var canceled = orderPatch(identities, order, terminal, 1, 2);
             var permits = factPermits(List.of(created, canceled));
-            var chain = new CoreExportState.PatchChain(canceled,
-                    new CoreExportState.PatchChain(created, null, permits.get(0)), permits.get(1));
+            var chain = new CoreExportState.FactChain(canceled,
+                    new CoreExportState.FactChain(created, null, permits.get(0)), permits.get(1));
             CoreMessage command = command(UUID.randomUUID(), 2, 1);
             exportState.append(draft(command, 2, 2, 0, transition, List.of(), chain, identities));
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
@@ -815,7 +815,7 @@ class CoreProbeStateTest {
         byte[] before;
         try (CoreExportState exportState = new CoreExportState()) {
             exportState.append(draft(command, 1, 1, 0, transition, List.of(),
-                    new CoreExportState.PatchChain(patch, null, factPermit(patch)), identities));
+                    new CoreExportState.FactChain(patch, null, factPermit(patch)), identities));
             before = exportState.pending().getFirst().payloadUnsafe().clone();
         }
 
@@ -825,7 +825,7 @@ class CoreProbeStateTest {
 
         try (CoreExportState exportState = new CoreExportState()) {
             exportState.append(draft(command, 1, 1, 0, transition, List.of(),
-                    new CoreExportState.PatchChain(patch, null, factPermit(patch)), identities));
+                    new CoreExportState.FactChain(patch, null, factPermit(patch)), identities));
             assertThat(exportState.pending().getFirst().payloadUnsafe()).isEqualTo(before);
         }
     }
@@ -1380,7 +1380,7 @@ class CoreProbeStateTest {
                 if (committed == 0) Thread.onSpinWait();
             }
             assertThat(committed).isEqualTo(1);
-            var placePatch = state.capturedCommitPatchesForTest().getLast();
+            var placePatch = state.capturedFactFramesForTest().getLast();
             var clientOrderChanges = placePatch.accountLaneGroups().stream()
                     .flatMap(group -> group.clientOrders().stream())
                     .toList();
@@ -1392,9 +1392,8 @@ class CoreProbeStateTest {
             assertThat(placePatch.accountLaneGroups().stream()
                     .flatMap(group -> group.orders().stream())
                     .anyMatch(change -> change.orderId() == 713
-                            && change.businessAfter() != null
-                            && change.businessAfter().userId() == 1001
-                            && change.businessAfter().clientOrderId().equals("snapshot-attempt-713")))
+                            && change.after() != null
+                            && change.after().userId() == 1001))
                     .isTrue();
             assertThat(state.snapshot()).isNotEmpty();
             assertThat(state.pendingMatching()).isEmpty();
@@ -1719,13 +1718,13 @@ class CoreProbeStateTest {
         state.close();
 
         assertThat(reservation.holders()).isZero();
-        assertThat(reservation.remainingPatches()).isZero();
+        assertThat(reservation.remainingFrames()).isZero();
         assertThat(reservation.remainingFacts()).isZero();
         assertThat(reservation.remainingFactNodes()).isZero();
         assertThat(reservation.remainingFactItems()).isZero();
         assertThat(reservation.remainingFactBytes()).isZero();
         assertThat(state.pendingMatching()).isEmpty();
-        assertThat(field(state, "activeFactPatchChain")).isNull();
+        assertThat(field(state, "activeFactChain")).isNull();
         assertThat(field(state, "currentAdmission")).isNull();
         assertThat(field(state, "activeFactCommand")).isNull();
         assertThat(field(state, "activeFactFingerprint")).isNull();
@@ -2427,7 +2426,7 @@ class CoreProbeStateTest {
         CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.OPTION, state.snapshot());
 
         assertThat(manifest.productLine()).isEqualTo(ProductLine.OPTION);
-        assertThat(manifest.schemaVersion()).isEqualTo(17);
+        assertThat(manifest.schemaVersion()).isEqualTo(18);
         assertThat(manifest.appliedCommandCount()).isEqualTo(1);
         assertThat(manifest.businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
         assertThat(manifest.engineStateHash()).isNotZero();
@@ -2502,8 +2501,8 @@ class CoreProbeStateTest {
 
         assertThat(state.apply(ack).status()).isEqualTo(ResponseStatus.APPLIED);
         assertThat(state.exportState().nextSequence()).isEqualTo(outboxSequenceBeforeAck);
-        assertThat(state.committedBusinessHashCoreSequence()).isEqualTo(businessHashCoreSequenceBeforeAck + 1);
-        assertThat(state.committedFundsHashCoreSequence()).isEqualTo(fundsHashCoreSequenceBeforeAck + 1);
+        assertThat(state.committedBusinessHashCoreSequence()).isEqualTo(businessHashCoreSequenceBeforeAck);
+        assertThat(state.committedFundsHashCoreSequence()).isEqualTo(fundsHashCoreSequenceBeforeAck);
         assertThat(state.committedProjectionSequence()).isEqualTo(projectionSequenceBeforeAck + 1);
         assertThat(state.tradingState().businessStateHash()).isEqualTo(businessHashBeforeAck);
         assertThat(state.tradingState().revision()).isEqualTo(revisionBeforeAck);
@@ -2619,11 +2618,11 @@ class CoreProbeStateTest {
         long sequence = journal.publishedSequence();
         for (int entry = 0; entry < 1_024; entry++) {
             sequence++;
-            var builder = com.surprising.aeron.service.state.RuntimeCommitPatch.builder(
+            var builder = com.surprising.aeron.service.state.RuntimeFactFrame.builder(
                     state.productLine(), sequence - 1, sequence)
                     .matcherTransition(com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0));
             var patch = builder.seal(
-                    new com.surprising.aeron.service.state.RuntimeCommitPatch.SealMetadata(
+                    new com.surprising.aeron.service.state.RuntimeFactFrame.SealMetadata(
                             state.revision(), state.revision(), state.businessStateHash(), state.businessStateHash(),
                             fundsHash, fundsHash, 0, null));
             journal.publish(patch, patch.businessStateHash(), patch.fundsStateHash());
@@ -2771,7 +2770,7 @@ class CoreProbeStateTest {
     private static CoreExportState.Draft draft(
             CoreMessage command, long appliedCount, long businessStateHash, long beforeBusinessStateHash,
             com.surprising.aeron.protocol.CoreMatcherTransition transition, List<Long> terminalOrderIds) {
-        var metadata = new com.surprising.aeron.service.state.RuntimeCommitPatch.CoreFactMetadata(
+        var metadata = new com.surprising.aeron.service.state.RuntimeFactFrame.CoreFactMetadata(
                 command.header().commandId(), com.surprising.aeron.protocol.CommandFingerprint.of(command),
                 command.header().messageType().wireCode(), command.header().userId(), ResponseStatus.APPLIED,
                 CoreResultCode.NONE, appliedCount, appliedCount, 1, 1, false);
@@ -2783,44 +2782,44 @@ class CoreProbeStateTest {
     }
 
     private static CoreAdmissionReservation.FactPermit factPermit(
-            com.surprising.aeron.service.state.RuntimeCommitPatch patch) {
+            com.surprising.aeron.service.state.RuntimeFactFrame patch) {
         return factPermits(List.of(patch)).getFirst();
     }
 
     private static List<CoreAdmissionReservation.FactPermit> factPermits(
-            List<com.surprising.aeron.service.state.RuntimeCommitPatch> patches) {
+            List<com.surprising.aeron.service.state.RuntimeFactFrame> patches) {
         int items = patches.stream().mapToInt(
-                com.surprising.aeron.service.state.RuntimeCommitPatch::coreFactItemCount).sum();
+                com.surprising.aeron.service.state.RuntimeFactFrame::coreFactItemCount).sum();
         long bytes = patches.stream().mapToLong(
-                com.surprising.aeron.service.state.RuntimeCommitPatch::estimatedCoreFactBytes).sum();
+                com.surprising.aeron.service.state.RuntimeFactFrame::estimatedCoreFactBytes).sum();
         var budget = new CoreAdmissionReservation.FactBudget(patches.size(),
                 Math.max(items, patches.size()), Math.max(bytes, patches.size()));
         var permits = new java.util.ArrayList<CoreAdmissionReservation.FactPermit>(patches.size());
         for (var patch : patches) {
-            var permit = budget.reservePatch();
+            var permit = budget.reserveFrame();
             permit.consume(patch);
             permits.add(permit);
         }
         return List.copyOf(permits);
     }
 
-    private static com.surprising.aeron.service.state.RuntimeCommitPatch conservedFundsPatch(
+    private static com.surprising.aeron.service.state.RuntimeFactFrame conservedFundsPatch(
             com.surprising.aeron.service.state.RuntimeIdentityRegistry identities, CoreMessage command) {
         int assetId = identities.assetId("USDT");
-        var builder = com.surprising.aeron.service.state.RuntimeCommitPatch.builder(
+        var builder = com.surprising.aeron.service.state.RuntimeFactFrame.builder(
                         ProductLine.LINEAR_PERPETUAL, 0, 1)
                 .matcherTransition(com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0))
-                .addFundsPosting(new com.surprising.aeron.service.state.RuntimeCommitPatch.FundsPosting(assetId,
+                .addFundsPosting(new com.surprising.aeron.service.state.RuntimeFactFrame.FundsPosting(assetId,
                         com.surprising.aeron.service.state.FundsPosting.OwnerKind.USER, 1,
                         com.surprising.aeron.service.state.FundsPosting.Subledger.AVAILABLE, -10))
-                .addFundsPosting(new com.surprising.aeron.service.state.RuntimeCommitPatch.FundsPosting(assetId,
+                .addFundsPosting(new com.surprising.aeron.service.state.RuntimeFactFrame.FundsPosting(assetId,
                         com.surprising.aeron.service.state.FundsPosting.OwnerKind.TREASURY, 0,
                         com.surprising.aeron.service.state.FundsPosting.Subledger.FEE, 10));
-        var metadata = new com.surprising.aeron.service.state.RuntimeCommitPatch.CoreFactMetadata(
+        var metadata = new com.surprising.aeron.service.state.RuntimeFactFrame.CoreFactMetadata(
                 command.header().commandId(), com.surprising.aeron.protocol.CommandFingerprint.of(command),
                 command.header().messageType().wireCode(), command.header().userId(), ResponseStatus.APPLIED,
                 CoreResultCode.NONE, 1, 1, 1, 1, false);
-        var prepared = builder.prepare(new com.surprising.aeron.service.state.RuntimeCommitPatch.PrepareMetadata(
+        var prepared = builder.prepare(new com.surprising.aeron.service.state.RuntimeFactFrame.PrepareMetadata(
                 0, 1, 0, 0, 0, metadata, false), identities);
         return builder.seal(prepared, 1, 1);
     }
@@ -2828,9 +2827,9 @@ class CoreProbeStateTest {
     private static CoreExportState.Draft draft(
             CoreMessage command, long appliedCount, long businessStateHash, long beforeBusinessStateHash,
             com.surprising.aeron.protocol.CoreMatcherTransition transition, List<Long> terminalOrderIds,
-            CoreExportState.PatchChain patches,
+            CoreExportState.FactChain patches,
             com.surprising.aeron.service.state.RuntimeIdentityRegistry identities) {
-        var metadata = new com.surprising.aeron.service.state.RuntimeCommitPatch.CoreFactMetadata(
+        var metadata = new com.surprising.aeron.service.state.RuntimeFactFrame.CoreFactMetadata(
                 command.header().commandId(), com.surprising.aeron.protocol.CommandFingerprint.of(command),
                 command.header().messageType().wireCode(), command.header().userId(), ResponseStatus.APPLIED,
                 CoreResultCode.NONE, appliedCount, appliedCount, 1, 1, false);
@@ -2842,12 +2841,12 @@ class CoreProbeStateTest {
                 com.surprising.aeron.service.state.RuntimeFundsDelta.empty(), metadata);
     }
 
-    private static com.surprising.aeron.service.state.RuntimeCommitPatch orderPatch(
+    private static com.surprising.aeron.service.state.RuntimeFactFrame orderPatch(
             com.surprising.aeron.service.state.RuntimeIdentityRegistry identities,
             com.surprising.aeron.service.state.OrderRuntime before,
             com.surprising.aeron.service.state.OrderRuntime after,
             long previousSequence, long sequence) {
-        var builder = com.surprising.aeron.service.state.RuntimeCommitPatch.builder(
+        var builder = com.surprising.aeron.service.state.RuntimeFactFrame.builder(
                         ProductLine.LINEAR_PERPETUAL, previousSequence, sequence)
                 .matcherTransition(com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0));
         var businessBefore = before == null ? null
@@ -2857,11 +2856,11 @@ class CoreProbeStateTest {
         builder.recordOrder(1, before, after, businessBefore, businessAfter);
         builder.laneMask(1L << 1);
         CoreMessage cause = command(ProductLine.LINEAR_PERPETUAL, UUID.randomUUID(), sequence, 1);
-        var metadata = new com.surprising.aeron.service.state.RuntimeCommitPatch.CoreFactMetadata(
+        var metadata = new com.surprising.aeron.service.state.RuntimeFactFrame.CoreFactMetadata(
                 cause.header().commandId(), com.surprising.aeron.protocol.CommandFingerprint.of(cause),
                 cause.header().messageType().wireCode(), cause.header().userId(), ResponseStatus.APPLIED,
                 CoreResultCode.NONE, sequence, sequence, 1, 1, false);
-        var prepared = builder.prepare(new com.surprising.aeron.service.state.RuntimeCommitPatch.PrepareMetadata(
+        var prepared = builder.prepare(new com.surprising.aeron.service.state.RuntimeFactFrame.PrepareMetadata(
                 previousSequence, sequence, previousSequence, previousSequence, 1L << 1, metadata, false),
                 identities);
         return builder.seal(prepared, sequence, sequence);

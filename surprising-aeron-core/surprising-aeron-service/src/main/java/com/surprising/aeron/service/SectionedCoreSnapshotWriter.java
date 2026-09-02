@@ -44,8 +44,9 @@ final class SectionedCoreSnapshotWriter {
             throw new IllegalStateException("pending matcher continuations cannot be snapshotted");
         }
         var snapshotState = state.snapshotTradingState();
-        long businessStateHash = state.snapshotBusinessStateHash();
-        long fundsStateHash = state.snapshotFundsStateHash();
+        long businessStateHash = CoreProbeState.canonicalBusinessStateHash(
+                snapshotState.businessStateHash(), state.feePolicies(), state.pendingTransfers());
+        long fundsStateHash = com.surprising.aeron.service.state.RollingFundsStateHash.compute(snapshotState);
         matcherSnapshot.verifyCoreManifest(state.productLine(), state.appliedCommandCount(), businessStateHash);
         if (snapshotId != matcherSnapshot.snapshotId() || coreSequence != matcherSnapshot.coreSequence()
                 || coreSequence != state.appliedCommandCount() || clusterTimestamp < 0 || clusterPosition < 0) {
@@ -54,6 +55,7 @@ final class SectionedCoreSnapshotWriter {
         return new CoreSnapshotImage(state.productLine(), state.appliedCommandCount(), state.probeValue(),
                 state.sourceSequenceDigest(), snapshotId, coreSequence, state.snapshotProjectionSequence(),
                 businessStateHash, fundsStateHash,
+                state.snapshotBusinessAuditBaseHash(), state.snapshotFundsStateHash(),
                 clusterTimestamp, clusterPosition, matcherSnapshot, snapshotState,
                 state.lastSourceSequences(), state.commandResults(),
                 state.exportState().snapshot(), state.feePolicies(), state.pendingTransfers(),
@@ -150,6 +152,8 @@ final class SectionedCoreSnapshotWriter {
                 .putLong(matcherSnapshot.matcherSequence())
                 .putLong(image.businessStateHash())
                 .putLong(image.fundsStateHash())
+                .putLong(image.auditBusinessStateHash())
+                .putLong(image.auditFundsStateHash())
                 .putInt(matcherSnapshot.engineStateHash())
                 .putInt(matcherSnapshot.bookStateHash())
                 .putLong(matcherSnapshot.symbolRegistryHash())

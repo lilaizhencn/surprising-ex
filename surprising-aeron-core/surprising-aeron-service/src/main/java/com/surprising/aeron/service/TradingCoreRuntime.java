@@ -12,8 +12,8 @@ import com.surprising.aeron.service.state.PositionUserIndex;
 import com.surprising.aeron.service.state.RiskSnapshotIndex;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.RuntimeStateMaterializer;
-import com.surprising.aeron.service.state.RuntimeCommitPatch;
-import com.surprising.aeron.service.state.RuntimeCommitIndexes;
+import com.surprising.aeron.service.state.RuntimeFactFrame;
+import com.surprising.aeron.service.state.RuntimeFactIndexes;
 import com.surprising.aeron.service.state.RuntimeStateProjector;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.TradingRuntimeState;
@@ -36,7 +36,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     private final ActiveOrderIndex activeOrders;
     private final AdlPositionIndex adlPositions;
     private final RiskSnapshotIndex riskSnapshots;
-    private final RuntimeCommitIndexes commitIndexes;
+    private final RuntimeFactIndexes factIndexes;
     private RuntimeIdentityRegistry identities;
     private TradingRuntimeState runtimeState;
     private long committedRevision;
@@ -101,7 +101,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         this.timers = new CancelAllAfterIndex(initialState);
         this.adlPositions = new AdlPositionIndex(initialState, identities);
         this.riskSnapshots = new RiskSnapshotIndex(initialState);
-        this.commitIndexes = new RuntimeCommitIndexes(positionUsers, openInterest, triggers, algos, liquidations,
+        this.factIndexes = new RuntimeFactIndexes(positionUsers, openInterest, triggers, algos, liquidations,
                 timers, activeOrders, adlPositions, riskSnapshots);
         this.matcherReady = CompletableFuture.completedFuture(null);
         if (activateImmediately) activate();
@@ -300,21 +300,42 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return riskSnapshots;
     }
 
-    void commitRuntimeTransition(RuntimeCommitPatch entry,
+    void commitRuntimeTransition(RuntimeFactFrame entry,
                                  long beforeBusinessStateHash, long afterBusinessStateHash) {
         assertOwner();
         if (entry == null || entry.productLine() != productLine || entry.revision() < committedRevision
                 || beforeBusinessStateHash != committedBusinessStateHash) {
             throw new IllegalStateException("typed runtime transition is out of order");
         }
-        commitIndexes.apply(entry);
+        factIndexes.apply(entry);
         committedRevision = entry.revision();
+        committedBusinessStateHash = afterBusinessStateHash;
+    }
+
+    void commitRuntimeTransition(TradingRuntimeState.PreparedFactFrame entry,
+                                 long beforeBusinessStateHash, long afterBusinessStateHash) {
+        assertOwner();
+        if (entry == null || entry.metadata().afterRevision() < committedRevision
+                || beforeBusinessStateHash != committedBusinessStateHash) {
+            throw new IllegalStateException("runtime fact transition is out of order");
+        }
+        factIndexes.apply(entry.builder(), entry.identities());
+        committedRevision = entry.metadata().afterRevision();
         committedBusinessStateHash = afterBusinessStateHash;
     }
 
     void restoreCommittedConsumers(TradingCoreState state, long revision, long businessStateHash) {
         if (owner != null) assertOwner();
-        commitIndexes.rebuild(state, identities);
+        factIndexes.rebuild(state, identities);
+        committedRevision = revision;
+        committedBusinessStateHash = businessStateHash;
+    }
+
+    void refreshCommittedAuditHashes(long revision, long businessStateHash) {
+        assertOwner();
+        if (revision < committedRevision || businessStateHash == 0) {
+            throw new IllegalArgumentException("invalid committed audit fence");
+        }
         committedRevision = revision;
         committedBusinessStateHash = businessStateHash;
     }
@@ -350,7 +371,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         runtimeState.clearChangedKeys();
         committedRevision = restored.revision();
         committedBusinessStateHash = restored.businessStateHash();
-        commitIndexes.rebuild(restored, identities);
+        factIndexes.rebuild(restored, identities);
     }
 
     @Override

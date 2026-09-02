@@ -35,11 +35,11 @@ public final class RollingBusinessStateHash {
     private final Aggregate fundingProgress = new Aggregate();
     private final Aggregate lifecycleProgress = new Aggregate();
     private final org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap<
-            RuntimeCommitPatch.TreasuryAssetValue> runtimeTreasury =
+            RuntimeFactFrame.TreasuryAssetValue> runtimeTreasury =
             new org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap<>();
     private final Map<ContributionKey, OwnedContribution> contributions = new HashMap<>();
     private final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<
-            RuntimeCommitPatch.ReservationChange> reservationChangesScratch =
+            RuntimeFactFrame.ReservationChange> reservationChangesScratch =
             new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
     private long[] reservationChangeKeys = new long[8];
     private int reservationChangeKeyCount;
@@ -92,7 +92,7 @@ public final class RollingBusinessStateHash {
         restore(after);
     }
 
-    public void update(RuntimeCommitPatch entry) {
+    public void update(RuntimeFactFrame entry) {
         long nextGeneration = Math.incrementExact(ownerGeneration);
         applyPatch(entry);
         revision = entry.revision();
@@ -105,7 +105,7 @@ public final class RollingBusinessStateHash {
      * Applies an already-mutated authoritative command without constructing a reversible hash
      * transaction. Any exception is fail-stop; recovery starts from snapshot plus command log.
      */
-    public long applyFailStop(RuntimeCommitPatch.PreparedChanges changes) {
+    public long applyFailStop(RuntimeFactFrame.PreparedChanges changes) {
         if (changes == null) throw new IllegalArgumentException("prepared changes are required");
         applyPatch(changes);
         revision = changes.afterRevision();
@@ -115,7 +115,7 @@ public final class RollingBusinessStateHash {
         return value();
     }
 
-    private void applyPatch(RuntimeCommitView patch) {
+    private void applyPatch(RuntimeFactView patch) {
         if (patch == null || patch.productLine().ordinal() != productLine) {
             throw new IllegalArgumentException("invalid business hash commit");
         }
@@ -127,20 +127,20 @@ public final class RollingBusinessStateHash {
         if (patch.beforeRevision() != revision) {
             throw new IllegalArgumentException("business hash commit before-value mismatch");
         }
-        for (RuntimeCommitPatch.AccountLaneOwnerGroup group : patch.accountLaneGroups()) {
+        for (RuntimeFactFrame.AccountLaneOwnerGroup group : patch.accountLaneGroups()) {
             UserHashUpdater userUpdater = userHashUpdater.reset();
             resetStageScratch();
-            for (RuntimeCommitPatch.ReservationChange change : group.reservations()) {
+            for (RuntimeFactFrame.ReservationChange change : group.reservations()) {
                 putReservationChange(change.orderId(), change);
             }
-            for (RuntimeCommitPatch.UserChange change : group.users()) {
+            for (RuntimeFactFrame.UserChange change : group.users()) {
                 UserHash current = userHashes.get(change.userId());
                 if ((current != null) != (change.before() != null)) {
                     throw new IllegalArgumentException("business user before-value mismatch");
                 }
                 userUpdater.apply(change);
             }
-            for (RuntimeCommitPatch.BalanceChange change : group.balances()) {
+            for (RuntimeFactFrame.BalanceChange change : group.balances()) {
                 String asset = identities.asset(change.key().assetId());
                 UserHash user = userHashes.get(change.key().userId());
                 boolean actualPresent = user != null && user.hasBalanceContribution(change.key().assetId());
@@ -152,7 +152,7 @@ public final class RollingBusinessStateHash {
                 if (change.after() != null) stableBalance(asset, change.after());
                 userUpdater.apply(change);
             }
-            for (RuntimeCommitPatch.ReservationChange change : group.reservations()) {
+            for (RuntimeFactFrame.ReservationChange change : group.reservations()) {
                 ReservationRuntime before = change.before();
                 UserHash user = before == null ? null : userHashes.get(before.userId());
                 boolean actualPresent = user != null && user.hasReservationContribution(change.orderId());
@@ -164,7 +164,7 @@ public final class RollingBusinessStateHash {
                 if (change.after() != null) stableReservation(change.after(), identities);
                 userUpdater.apply(change);
             }
-            for (RuntimeCommitPatch.PositionChange change : group.positions()) {
+            for (RuntimeFactFrame.PositionChange change : group.positions()) {
                 RuntimeIdentityRegistry.PositionIdentity identity = identities.positionIdentity(change.positionKey());
                 PositionRuntime before = change.before();
                 UserHash user = before == null ? null : userHashes.get(before.userId());
@@ -177,8 +177,8 @@ public final class RollingBusinessStateHash {
                 if (change.after() != null) stablePosition(change.after(), identities);
                 userUpdater.apply(change);
             }
-            for (RuntimeCommitPatch.OrderChange change : group.orders()) {
-                RuntimeCommitPatch.ReservationChange reservationChange =
+            for (RuntimeFactFrame.OrderChange change : group.orders()) {
+                RuntimeFactFrame.ReservationChange reservationChange =
                         reservationChangesScratch.get(change.orderId());
                 boolean pendingBefore = reservationChange != null && reservationChange.pendingBefore();
                 boolean pendingAfter = reservationChange != null && reservationChange.pendingAfter();
@@ -194,31 +194,31 @@ public final class RollingBusinessStateHash {
                 if (change.after() != null) stableOrder(change.after(), identities);
                 updateOrder(change, !pendingAfter);
             }
-            for (RuntimeCommitPatch.LeverageChange change : group.leverages()) {
+            for (RuntimeFactFrame.LeverageChange change : group.leverages()) {
                 validateCachedBefore("leverages", change.key(), change.before(), value -> stable(value),
                         ignored -> true);
                 updateCachedValue("leverages", leverages, change.key(), change.after(),
                         value -> stable(value), ignored -> true);
             }
-            for (RuntimeCommitPatch.AlgoOrderChange change : group.algoOrders()) {
+            for (RuntimeFactFrame.AlgoOrderChange change : group.algoOrders()) {
                 validateCachedBefore("algo", change.algoOrderId(), change.before(), value -> stable(value),
                         value -> !value.terminal());
                 updateCachedValue("algo", algoOrders, change.algoOrderId(), change.after(),
                         value -> stable(value), value -> !value.terminal());
             }
-            for (RuntimeCommitPatch.TimerChange change : group.timers()) {
+            for (RuntimeFactFrame.TimerChange change : group.timers()) {
                 validateCachedBefore("timers", change.key(), change.before(), value -> stable(value),
                         ignored -> true);
                 updateCachedValue("timers", timers, change.key(), change.after(),
                         value -> stable(value), ignored -> true);
             }
-            for (RuntimeCommitPatch.TriggerOrderChange change : group.triggerOrders()) {
+            for (RuntimeFactFrame.TriggerOrderChange change : group.triggerOrders()) {
                 validateCachedBefore("triggers", change.triggerOrderId(), change.before(), value -> stable(value),
                         value -> value.status().open());
                 updateCachedValue("triggers", triggers, change.triggerOrderId(), change.after(),
                         value -> stable(value), value -> value.status().open());
             }
-            for (RuntimeCommitPatch.RiskSnapshotChange change : group.riskSnapshots()) {
+            for (RuntimeFactFrame.RiskSnapshotChange change : group.riskSnapshots()) {
                 RuntimeIdentityRegistry.PositionIdentity identity = identities.positionIdentity(change.riskKey());
                 validateCachedBefore("snapshots",
                         new PositionContributionKey(identity.userId(), identity.positionKey()),
@@ -227,7 +227,7 @@ public final class RollingBusinessStateHash {
                 updateRuntimeContribution("snapshots", riskSnapshots, key, change.after(),
                         this::stableRiskSnapshot, ignored -> true);
             }
-            for (RuntimeCommitPatch.LiquidationChange change : group.liquidations()) {
+            for (RuntimeFactFrame.LiquidationChange change : group.liquidations()) {
                 validateCachedBefore("liquidations", change.liquidationId(), change.before(),
                         this::stableLiquidation, value -> !runtimeTerminal(value));
                 updateRuntimeContribution("liquidations", liquidations, change.liquidationId(), change.after(),
@@ -235,35 +235,35 @@ public final class RollingBusinessStateHash {
             }
             userUpdater.publish();
         }
-        RuntimeCommitPatch.GlobalOwnerGroup global = patch.globalOwnerGroup();
-        for (RuntimeCommitPatch.InstrumentChange change : global.instruments()) {
+        RuntimeFactFrame.GlobalOwnerGroup global = patch.globalOwnerGroup();
+        for (RuntimeFactFrame.InstrumentChange change : global.instruments()) {
             validateCachedBefore("instruments", change.symbol(), change.before(), value -> stable(value),
                     ignored -> true);
             updateCachedValue("instruments", instruments, change.symbol(), change.after(),
                     value -> stable(value), ignored -> true);
         }
-        for (RuntimeCommitPatch.MarkPriceChange change : patch.globalOwnerGroup().markPrices()) {
+        for (RuntimeFactFrame.MarkPriceChange change : patch.globalOwnerGroup().markPrices()) {
             String symbol = identities.symbol(change.symbolId());
             validateCachedBefore("marks", symbol, change.before(), this::stableMark, ignored -> true);
             updateRuntimeContribution("marks", markPrices, symbol, change.after(), this::stableMark,
                     ignored -> true);
         }
-        for (RuntimeCommitPatch.RiskScanChange change : patch.globalOwnerGroup().riskScans()) {
+        for (RuntimeFactFrame.RiskScanChange change : patch.globalOwnerGroup().riskScans()) {
             String symbol = identities.symbol(change.symbolId());
             validateCachedBefore("scans", symbol, change.before(), this::stableRiskScan, ignored -> true);
             updateRuntimeContribution("scans", riskScans, symbol, change.after(), this::stableRiskScan,
                     ignored -> true);
         }
-        for (RuntimeCommitPatch.TreasuryAssetChange change : patch.globalOwnerGroup().treasuryAssets()) {
+        for (RuntimeFactFrame.TreasuryAssetChange change : patch.globalOwnerGroup().treasuryAssets()) {
             identities.asset(change.assetId());
             if (!java.util.Objects.equals(runtimeTreasury.get(change.assetId()), change.before())) {
                 throw new IllegalArgumentException("business treasury before-value mismatch");
             }
             updateTreasuryAsset(change);
         }
-        for (RuntimeCommitPatch.TreasuryFundingChange change : global.treasuryFunding()) {
+        for (RuntimeFactFrame.TreasuryFundingChange change : global.treasuryFunding()) {
             String symbol = identities.symbol(change.symbolId());
-            RuntimeCommitPatch.TreasuryFundingValue before = change.before();
+            RuntimeFactFrame.TreasuryFundingValue before = change.before();
             validateCachedBefore("fundingSettlements", symbol,
                     before == null || before.settlementId() == 0 ? null : before.settlementId(),
                     value -> stable(value), ignored -> true);
@@ -271,9 +271,9 @@ public final class RollingBusinessStateHash {
                     this::stableFundingProgress, ignored -> true);
             updateTreasuryFunding(change);
         }
-        for (RuntimeCommitPatch.TreasuryLifecycleChange change : global.treasuryLifecycle()) {
+        for (RuntimeFactFrame.TreasuryLifecycleChange change : global.treasuryLifecycle()) {
             String symbol = identities.symbol(change.symbolId());
-            RuntimeCommitPatch.TreasuryLifecycleValue before = change.before();
+            RuntimeFactFrame.TreasuryLifecycleValue before = change.before();
             validateCachedBefore("lifecycleSettlements", symbol,
                     before == null || before.settlementId() == 0 ? null : before.settlementId(),
                     value -> stable(value), ignored -> true);
@@ -304,7 +304,7 @@ public final class RollingBusinessStateHash {
         reservationChangeKeyCount = 0;
     }
 
-    private void putReservationChange(long orderId, RuntimeCommitPatch.ReservationChange change) {
+    private void putReservationChange(long orderId, RuntimeFactFrame.ReservationChange change) {
         if (!reservationChangesScratch.containsKey(orderId)) {
             if (reservationChangeKeyCount == reservationChangeKeys.length) {
                 reservationChangeKeys = java.util.Arrays.copyOf(
@@ -385,6 +385,12 @@ public final class RollingBusinessStateHash {
         cachedValue = mixAggregate(hash, "lifecycleProgress", lifecycleProgress);
         valueDirty = false;
         return cachedValue;
+    }
+
+    public void restoreAuditWatermark(long watermark) {
+        if (watermark == 0) throw new IllegalArgumentException("business audit watermark is required");
+        cachedValue = watermark;
+        valueDirty = false;
     }
 
     private void rebuild(TradingCoreState state) {
@@ -500,7 +506,7 @@ public final class RollingBusinessStateHash {
         });
     }
 
-    private void updateOrder(RuntimeCommitPatch.OrderChange change, boolean visible) {
+    private void updateOrder(RuntimeFactFrame.OrderChange change, boolean visible) {
         if (orderContributions.containsKey(change.orderId())) {
             long previous = orderContributions.get(change.orderId());
             orderContributions.remove(change.orderId());
@@ -525,7 +531,7 @@ public final class RollingBusinessStateHash {
         assets.addAll(treasury.roundingResidualBalances().keySet());
         assets.addAll(treasury.clearingPnlBalances().keySet());
         for (String asset : assets) {
-            runtimeTreasury.put(identities.assetId(asset), new RuntimeCommitPatch.TreasuryAssetValue(
+            runtimeTreasury.put(identities.assetId(asset), new RuntimeFactFrame.TreasuryAssetValue(
                     treasury.feeBalances().getOrDefault(asset, 0L),
                     treasury.insuranceBalances().getOrDefault(asset, 0L),
                     treasury.insuranceDeficits().getOrDefault(asset, 0L),
@@ -536,10 +542,10 @@ public final class RollingBusinessStateHash {
         }
     }
 
-    private void updateTreasuryAsset(RuntimeCommitPatch.TreasuryAssetChange change) {
+    private void updateTreasuryAsset(RuntimeFactFrame.TreasuryAssetChange change) {
         String asset = identities.asset(change.assetId());
-        RuntimeCommitPatch.TreasuryAssetValue previous = change.before();
-        RuntimeCommitPatch.TreasuryAssetValue current = change.after();
+        RuntimeFactFrame.TreasuryAssetValue previous = change.before();
+        RuntimeFactFrame.TreasuryAssetValue current = change.after();
         update(feeBalances, asset, patchFee(previous), patchFee(current));
         update(insuranceBalances, asset, patchInsurance(previous), patchInsurance(current));
         update(insuranceDeficits, asset, patchDeficit(previous), patchDeficit(current));
@@ -551,9 +557,9 @@ public final class RollingBusinessStateHash {
         else runtimeTreasury.put(change.assetId(), current);
     }
 
-    private void updateTreasuryFunding(RuntimeCommitPatch.TreasuryFundingChange change) {
+    private void updateTreasuryFunding(RuntimeFactFrame.TreasuryFundingChange change) {
         String symbol = identities.symbol(change.symbolId());
-        RuntimeCommitPatch.TreasuryFundingValue current = change.after();
+        RuntimeFactFrame.TreasuryFundingValue current = change.after();
         updateRuntimeContribution("fundingSettlements", fundingSettlements, symbol,
                 current == null || current.settlementId() == 0 ? null : current.settlementId(),
                 number -> stable(number), ignored -> true);
@@ -561,9 +567,9 @@ public final class RollingBusinessStateHash {
                 current == null ? null : current.progress(), this::stableFundingProgress, ignored -> true);
     }
 
-    private void updateTreasuryLifecycle(RuntimeCommitPatch.TreasuryLifecycleChange change) {
+    private void updateTreasuryLifecycle(RuntimeFactFrame.TreasuryLifecycleChange change) {
         String symbol = identities.symbol(change.symbolId());
-        RuntimeCommitPatch.TreasuryLifecycleValue current = change.after();
+        RuntimeFactFrame.TreasuryLifecycleValue current = change.after();
         updateRuntimeContribution("lifecycleSettlements", lifecycleSettlements, symbol,
                 current == null || current.settlementId() == 0 ? null : current.settlementId(),
                 number -> stable(number), ignored -> true);
@@ -582,13 +588,13 @@ public final class RollingBusinessStateHash {
         }
     }
 
-    private static long patchFee(RuntimeCommitPatch.TreasuryAssetValue value) { return value == null ? 0 : value.fee(); }
-    private static long patchInsurance(RuntimeCommitPatch.TreasuryAssetValue value) { return value == null ? 0 : value.insurance(); }
-    private static long patchDeficit(RuntimeCommitPatch.TreasuryAssetValue value) { return value == null ? 0 : value.deficit(); }
-    private static long patchLiquidationFee(RuntimeCommitPatch.TreasuryAssetValue value) { return value == null ? 0 : value.liquidationFee(); }
-    private static long patchFundingResidual(RuntimeCommitPatch.TreasuryAssetValue value) { return value == null ? 0 : value.fundingResidual(); }
-    private static long patchRoundingResidual(RuntimeCommitPatch.TreasuryAssetValue value) { return value == null ? 0 : value.roundingResidual(); }
-    private static long patchClearingPnl(RuntimeCommitPatch.TreasuryAssetValue value) { return value == null ? 0 : value.clearingPnl(); }
+    private static long patchFee(RuntimeFactFrame.TreasuryAssetValue value) { return value == null ? 0 : value.fee(); }
+    private static long patchInsurance(RuntimeFactFrame.TreasuryAssetValue value) { return value == null ? 0 : value.insurance(); }
+    private static long patchDeficit(RuntimeFactFrame.TreasuryAssetValue value) { return value == null ? 0 : value.deficit(); }
+    private static long patchLiquidationFee(RuntimeFactFrame.TreasuryAssetValue value) { return value == null ? 0 : value.liquidationFee(); }
+    private static long patchFundingResidual(RuntimeFactFrame.TreasuryAssetValue value) { return value == null ? 0 : value.fundingResidual(); }
+    private static long patchRoundingResidual(RuntimeFactFrame.TreasuryAssetValue value) { return value == null ? 0 : value.roundingResidual(); }
+    private static long patchClearingPnl(RuntimeFactFrame.TreasuryAssetValue value) { return value == null ? 0 : value.clearingPnl(); }
 
     private static long entryHash(Object key, Object value) {
         long hash = CoreStateHash.mix(CoreStateHash.start(), HASH_TAG);
@@ -890,7 +896,7 @@ public final class RollingBusinessStateHash {
             return this;
         }
 
-        private void apply(RuntimeCommitPatch.UserChange change) {
+        private void apply(RuntimeFactFrame.UserChange change) {
             UserHash hash = begin(change.userId());
             UserRuntime current = change.after();
             if (current == null) set(change.userId(), null);
@@ -898,12 +904,12 @@ public final class RollingBusinessStateHash {
             else hash.updateUser(current, change.pendingReservationCountAfter());
         }
 
-        private void apply(RuntimeCommitPatch.BalanceChange change) {
+        private void apply(RuntimeFactFrame.BalanceChange change) {
             UserHash hash = begin(change.key().userId());
             if (hash != null) hash.updateBalance(change, identities);
         }
 
-        private void apply(RuntimeCommitPatch.ReservationChange change) {
+        private void apply(RuntimeFactFrame.ReservationChange change) {
             ReservationRuntime previous = change.before();
             ReservationRuntime current = change.after();
             long previousOwner = previous == null ? 0 : previous.userId();
@@ -918,7 +924,7 @@ public final class RollingBusinessStateHash {
             }
         }
 
-        private void apply(RuntimeCommitPatch.PositionChange change) {
+        private void apply(RuntimeFactFrame.PositionChange change) {
             PositionRuntime previous = change.before();
             PositionRuntime current = change.after();
             long previousOwner = previous == null ? 0 : previous.userId();
@@ -1059,7 +1065,7 @@ public final class RollingBusinessStateHash {
             positionMode = user.positionMode().wireCode();
         }
 
-        private void updateBalance(RuntimeCommitPatch.BalanceChange change,
+        private void updateBalance(RuntimeFactFrame.BalanceChange change,
                                    RuntimeIdentityRegistry identities) {
             int assetId = change.key().assetId();
             if (balanceContributions.containsKey(assetId)) {
@@ -1067,7 +1073,7 @@ public final class RollingBusinessStateHash {
                 balanceContributions.removeKey(assetId);
                 balances.remove(previous);
             }
-            RuntimeCommitPatch.UserBalance current = change.after();
+            RuntimeFactFrame.UserBalance current = change.after();
             if (current != null) {
                 String asset = identities.asset(assetId);
                 long contribution = entryHashStable(asset, stableBalance(asset, current));
@@ -1076,7 +1082,7 @@ public final class RollingBusinessStateHash {
             }
         }
 
-        private void updateReservation(long ownerId, RuntimeCommitPatch.ReservationChange change,
+        private void updateReservation(long ownerId, RuntimeFactFrame.ReservationChange change,
                                        RuntimeIdentityRegistry identities) {
             boolean hadPrevious = reservationContributions.containsKey(change.orderId());
             long previous = hadPrevious ? reservationContributions.get(change.orderId()) : 0;
@@ -1096,7 +1102,7 @@ public final class RollingBusinessStateHash {
             }
         }
 
-        private void updatePosition(long ownerId, RuntimeCommitPatch.PositionChange change,
+        private void updatePosition(long ownerId, RuntimeFactFrame.PositionChange change,
                                     RuntimeIdentityRegistry identities) {
             boolean hadPrevious = positionContributions.containsKey(change.positionKey());
             long previous = hadPrevious ? positionContributions.get(change.positionKey()) : 0;
@@ -1137,7 +1143,7 @@ public final class RollingBusinessStateHash {
         }
     }
 
-    private static long stableBalance(String asset, RuntimeCommitPatch.UserBalance balance) {
+    private static long stableBalance(String asset, RuntimeFactFrame.UserBalance balance) {
         long hash = CoreStateHash.mix(CoreStateHash.start(), AssetBalance.class.getName());
         hash = CoreStateHash.mix(hash, asset);
         hash = CoreStateHash.mix(hash, Math.addExact(balance.availableUnits(), balance.pendingReservedUnits()));

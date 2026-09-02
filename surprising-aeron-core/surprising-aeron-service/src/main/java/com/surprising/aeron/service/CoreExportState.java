@@ -13,7 +13,7 @@ import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.aeron.service.state.CoreStateRejectedException;
-import com.surprising.aeron.service.state.RuntimeCommitPatch;
+import com.surprising.aeron.service.state.RuntimeFactFrame;
 import com.surprising.product.api.ProductLine;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
@@ -75,12 +75,12 @@ final class CoreExportState implements AutoCloseable {
     private long nextMaterializationSequence;
 
     CoreExportState() {
-        this(null, 0, 1, List.of(), CoreExportCodec::encodeEvent, RuntimeCommitPatch::exportOrderView);
+        this(null, 0, 1, List.of(), CoreExportCodec::encodeEvent, RuntimeFactFrame::exportOrderView);
         activate();
     }
 
     CoreExportState(EventEncoder encoder) {
-        this(null, 0, 1, List.of(), encoder, RuntimeCommitPatch::exportOrderView);
+        this(null, 0, 1, List.of(), encoder, RuntimeFactFrame::exportOrderView);
         activate();
     }
 
@@ -140,14 +140,14 @@ final class CoreExportState implements AutoCloseable {
 
     static CoreExportState passive() {
         return new CoreExportState(null, 0, 1, List.of(), CoreExportCodec::encodeEvent,
-                RuntimeCommitPatch::exportOrderView);
+                RuntimeFactFrame::exportOrderView);
     }
 
     static CoreExportState restore(ProductLine expectedProductLine,
                                    long acknowledgedSequence, long nextSequence, List<CoreMessage> pending) {
         return new CoreExportState(Objects.requireNonNull(expectedProductLine, "expectedProductLine"),
                 acknowledgedSequence, nextSequence, pending, CoreExportCodec::encodeEvent,
-                RuntimeCommitPatch::exportOrderView);
+                RuntimeFactFrame::exportOrderView);
     }
 
     void activate() {
@@ -641,19 +641,19 @@ final class CoreExportState implements AutoCloseable {
                  long beforeBusinessStateHash, long beforeFundsStateHash, long fundsStateHash,
                  long topologyHash, long laneRevisionHash, CoreMatcherTransition matcherTransition,
                  long clusterPosition, long projectionSequence, int itemCount, long[] terminalOrderIds,
-                 PatchChain patches, CoreCommandDelta delta,
+                 FactChain patches, CoreCommandDelta delta,
                  com.surprising.aeron.service.state.RuntimeFundsDelta fundsDelta,
-                 RuntimeCommitPatch.IdentityView fallbackFundIdentities,
-                 RuntimeCommitPatch.CoreFactMetadata commandMetadata) {
+                 RuntimeFactFrame.IdentityView fallbackFundIdentities,
+                 RuntimeFactFrame.CoreFactMetadata commandMetadata) {
         Draft(CoreMessage command, ResponseStatus status,
               com.surprising.aeron.protocol.CoreResultCode resultCode,
               long appliedCommandCount, long businessStateHash,
               long beforeBusinessStateHash, long beforeFundsStateHash, long fundsStateHash,
               long topologyHash, long laneRevisionHash, CoreMatcherTransition matcherTransition,
               long clusterPosition, long projectionSequence, int itemCount, long[] terminalOrderIds,
-              PatchChain patches, CoreCommandDelta delta,
+              FactChain patches, CoreCommandDelta delta,
               com.surprising.aeron.service.state.RuntimeFundsDelta fundsDelta,
-              RuntimeCommitPatch.CoreFactMetadata commandMetadata) {
+              RuntimeFactFrame.CoreFactMetadata commandMetadata) {
             this(command, status, resultCode, appliedCommandCount, businessStateHash,
                     beforeBusinessStateHash, beforeFundsStateHash, fundsStateHash,
                     topologyHash, laneRevisionHash, matcherTransition, clusterPosition, projectionSequence,
@@ -681,21 +681,21 @@ final class CoreExportState implements AutoCloseable {
         private CoreExportEvent materialize(long sequence,
                 java.util.function.Function<com.surprising.aeron.service.state.CoreOrderState,
                         com.surprising.aeron.protocol.CoreOrderStateView> orderViewFactory) {
-            RuntimeCommitPatch first = patches == null ? null : patches.first();
-            RuntimeCommitPatch last = patches == null ? null : patches.patch();
-            RuntimeCommitPatch.FactIdentitySlice identities = patches == null
-                    ? new RuntimeCommitPatch.FactIdentitySlice(List.of(), List.of(), List.of(), List.of())
+            RuntimeFactFrame first = patches == null ? null : patches.first();
+            RuntimeFactFrame last = patches == null ? null : patches.patch();
+            RuntimeFactFrame.FactIdentitySlice identities = patches == null
+                    ? new RuntimeFactFrame.FactIdentitySlice(List.of(), List.of(), List.of(), List.of())
                     : patches.size() == 1 ? last.identities() : patches.identities();
             List<com.surprising.aeron.protocol.CoreUserStateView> users;
             List<com.surprising.aeron.service.state.CoreOrderState> orders;
             List<com.surprising.aeron.protocol.CoreLiquidationView> liquidations;
             List<com.surprising.aeron.protocol.CoreTreasuryAssetView> treasury;
             List<com.surprising.aeron.protocol.CoreTriggerOrderStateView> triggers;
-            List<RuntimeCommitPatch.MatcherEvidence> evidence;
-            RuntimeCommitPatch.TerminalIds terminalIds;
+            List<RuntimeFactFrame.MatcherEvidence> evidence;
+            RuntimeFactFrame.TerminalIds terminalIds;
             CoreExportEvent.Tombstones tombstones;
             if (patches != null && patches.size() == 1) {
-                RuntimeCommitPatch.CoreFactFragment fragment = last.materializeCoreFactFragment();
+                RuntimeFactFrame.CoreFactFragment fragment = last.materializeCoreFactFragment();
                 users = fragment.changedUsers();
                 orders = fragment.changedOrders();
                 liquidations = fragment.changedLiquidations();
@@ -716,7 +716,7 @@ final class CoreExportState implements AutoCloseable {
                 treasury = List.copyOf(merged.treasury.values());
                 triggers = List.copyOf(merged.triggers.values());
                 evidence = merged.evidence;
-                terminalIds = new RuntimeCommitPatch.TerminalIds(List.copyOf(merged.terminalOrders),
+                terminalIds = new RuntimeFactFrame.TerminalIds(List.copyOf(merged.terminalOrders),
                         List.copyOf(merged.terminalLiquidations), List.copyOf(merged.terminalTriggers));
                 tombstones = merged.tombstones.seal();
             }
@@ -746,8 +746,8 @@ final class CoreExportState implements AutoCloseable {
                     tombstones);
         }
 
-        private static RuntimeCommitPatch.TerminalIds mergeTerminalOrders(
-                RuntimeCommitPatch.TerminalIds terminalIds, long[] additionalOrderIds) {
+        private static RuntimeFactFrame.TerminalIds mergeTerminalOrders(
+                RuntimeFactFrame.TerminalIds terminalIds, long[] additionalOrderIds) {
             if (additionalOrderIds.length == 0) return terminalIds;
             ArrayList<Long> orders = new ArrayList<>(terminalIds.orderIds());
             for (long orderId : additionalOrderIds) {
@@ -761,7 +761,7 @@ final class CoreExportState implements AutoCloseable {
                 if (!present) orders.add(orderId);
             }
             orders.sort(Long::compare);
-            return new RuntimeCommitPatch.TerminalIds(List.copyOf(orders), terminalIds.liquidationIds(),
+            return new RuntimeFactFrame.TerminalIds(List.copyOf(orders), terminalIds.liquidationIds(),
                     terminalIds.triggerOrderIds());
         }
 
@@ -777,9 +777,9 @@ final class CoreExportState implements AutoCloseable {
         }
 
         private static List<CoreExportEvent.MatcherEvidence> materializeMatcherEvidence(
-                List<RuntimeCommitPatch.MatcherEvidence> evidence) {
+                List<RuntimeFactFrame.MatcherEvidence> evidence) {
             ArrayList<CoreExportEvent.MatcherEvidence> result = new ArrayList<>(evidence.size());
-            for (RuntimeCommitPatch.MatcherEvidence item : evidence) {
+            for (RuntimeFactFrame.MatcherEvidence item : evidence) {
                 result.add(new CoreExportEvent.MatcherEvidence(item.matcherSequence(), item.matcherShardId(),
                         item.makerOrderId(), item.takerOrderId(), item.quantitySteps(), item.priceTicks()));
             }
@@ -787,54 +787,85 @@ final class CoreExportState implements AutoCloseable {
         }
     }
 
-    static final class PatchChain {
-        private final RuntimeCommitPatch patch;
-        private final PatchChain previous;
+    static final class FactChain {
+        private final com.surprising.aeron.service.state.TradingRuntimeState.PreparedFactFrame frame;
+        private final FactChain previous;
         private final int size;
-        private final int itemCount;
-        private final long estimatedBytes;
         private final CoreAdmissionReservation.FactPermit permit;
+        private RuntimeFactFrame materialized;
 
-        PatchChain(RuntimeCommitPatch patch, PatchChain previous, CoreAdmissionReservation.FactPermit permit) {
-            this.patch = Objects.requireNonNull(patch, "patch");
+        FactChain(com.surprising.aeron.service.state.TradingRuntimeState.PreparedFactFrame frame,
+                   FactChain previous, CoreAdmissionReservation.FactPermit permit) {
+            this.frame = Objects.requireNonNull(frame, "fact frame");
             this.permit = Objects.requireNonNull(permit, "permit");
             this.previous = previous;
             if (previous != null && (!previous.permit.sameOwner(permit)
                     || permit.ordinal() != previous.permit.ordinal() + 1)) {
                 throw new IllegalArgumentException("foreign, missing, or reordered fact permit");
             }
-            if (previous != null && (previous.patch.coreSequence() != patch.previousCoreSequence()
-                    || previous.patch.projectionSequence() != patch.previousProjectionSequence())) {
-                throw new IllegalArgumentException("non-contiguous fact patch chain");
+            if (previous != null && previous.frame.sequence() + 1 != frame.sequence()) {
+                throw new IllegalArgumentException("non-contiguous fact frame chain");
             }
             permit.requireConsumed();
             size = Math.addExact(previous == null ? 0 : previous.size, 1);
-            itemCount = Math.addExact(previous == null ? 0 : previous.itemCount, patch.coreFactItemCount());
-            estimatedBytes = Math.addExact(previous == null ? 4_096L : previous.estimatedBytes,
-                    Math.multiplyExact((long) patch.coreFactItemCount(), 2_048L));
-            if (estimatedBytes > maxReservedEventBytes()) {
-                throw new IllegalStateException("fact patch chain exceeds reserved union byte bound");
+        }
+
+        FactChain(RuntimeFactFrame materialized, FactChain previous,
+                   CoreAdmissionReservation.FactPermit permit) {
+            this.frame = null;
+            this.materialized = Objects.requireNonNull(materialized, "fact frame");
+            this.permit = Objects.requireNonNull(permit, "permit");
+            this.previous = previous;
+            if (previous != null && (!previous.permit.sameOwner(permit)
+                    || permit.ordinal() != previous.permit.ordinal() + 1)) {
+                throw new IllegalArgumentException("foreign, missing, or reordered fact permit");
             }
+            if (previous != null && previous.sequence() + 1 != materialized.sequence()) {
+                throw new IllegalArgumentException("non-contiguous fact frame chain");
+            }
+            permit.requireConsumed();
+            size = Math.addExact(previous == null ? 0 : previous.size, 1);
         }
 
-        RuntimeCommitPatch patch() { return patch; }
+        private long sequence() { return frame == null ? materialized.sequence() : frame.sequence(); }
+
+        RuntimeFactFrame patch() {
+            if (materialized == null) materialized = frame.materialize();
+            return materialized;
+        }
+        RuntimeFactFrame.CoreFactMetadata coreFactMetadata() {
+            return frame == null ? materialized.coreFactMetadata() : frame.coreFactMetadata();
+        }
         int size() { return size; }
-        int itemCount() { return itemCount; }
+        int itemCount() { return 0; }
 
-        RuntimeCommitPatch first() {
-            PatchChain cursor = this;
+        RuntimeFactFrame first() {
+            FactChain cursor = this;
             while (cursor.previous != null) cursor = cursor.previous;
-            return cursor.patch;
+            return cursor.patch();
         }
 
-        void acceptOldestFirst(java.util.function.Consumer<RuntimeCommitPatch> consumer) {
+        void acceptOldestFirst(java.util.function.Consumer<RuntimeFactFrame> consumer) {
             if (previous != null) previous.acceptOldestFirst(consumer);
-            consumer.accept(patch);
+            consumer.accept(patch());
         }
 
-        RuntimeCommitPatch.FactIdentitySlice identities() {
-            RuntimeCommitPatch.FactIdentitySlice[] merged = {
-                    new RuntimeCommitPatch.FactIdentitySlice(List.of(), List.of(), List.of(), List.of())};
+        void acceptPreparedOldestFirst(
+                java.util.function.Consumer<com.surprising.aeron.service.state.TradingRuntimeState.PreparedFactFrame>
+                        consumer) {
+            if (previous != null) previous.acceptPreparedOldestFirst(consumer);
+            if (frame != null) consumer.accept(frame);
+        }
+
+        void retainOldestFirst(TerminalStateRetention retention, long exportSequence) {
+            if (previous != null) previous.retainOldestFirst(retention, exportSequence);
+            if (frame != null) retention.observe(frame, exportSequence);
+            else retention.observe(materialized, exportSequence);
+        }
+
+        RuntimeFactFrame.FactIdentitySlice identities() {
+            RuntimeFactFrame.FactIdentitySlice[] merged = {
+                    new RuntimeFactFrame.FactIdentitySlice(List.of(), List.of(), List.of(), List.of())};
             acceptOldestFirst(value -> merged[0] = merged[0].merge(value.identities()));
             return merged[0];
         }
@@ -874,13 +905,13 @@ final class CoreExportState implements AutoCloseable {
                 new TreeMap<>();
         private final TreeMap<Long, com.surprising.aeron.protocol.CoreTriggerOrderStateView> triggers =
                 new TreeMap<>();
-        private final ArrayList<RuntimeCommitPatch.MatcherEvidence> evidence = new ArrayList<>();
+        private final ArrayList<RuntimeFactFrame.MatcherEvidence> evidence = new ArrayList<>();
         private final TreeSet<Long> terminalOrders = new TreeSet<>();
         private final TreeSet<Long> terminalLiquidations = new TreeSet<>();
         private final TreeSet<Long> terminalTriggers = new TreeSet<>();
         private final FactTombstoneMerge tombstones = new FactTombstoneMerge();
 
-        private void accept(RuntimeCommitPatch.CoreFactFragment value) {
+        private void accept(RuntimeFactFrame.CoreFactFragment value) {
             value.changedUsers().forEach(user -> users.merge(user.userId(), user,
                     CoreExportState::mergeFactUser));
             value.changedOrders().forEach(order -> orders.put(order.orderId(), order));
@@ -908,7 +939,7 @@ final class CoreExportState implements AutoCloseable {
         private final TreeSet<Long> triggers = new TreeSet<>();
         private final TreeSet<String> treasury = new TreeSet<>();
 
-        private void observeValues(RuntimeCommitPatch.CoreFactFragment fragment) {
+        private void observeValues(RuntimeFactFrame.CoreFactFragment fragment) {
             fragment.changedUsers().forEach(user -> {
                 users.remove(user.userId());
                 user.balances().forEach(value -> balances.remove(new AssetKey(user.userId(), value.asset())));

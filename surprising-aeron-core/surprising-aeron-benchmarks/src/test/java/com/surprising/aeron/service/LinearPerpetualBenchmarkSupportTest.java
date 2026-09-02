@@ -63,7 +63,7 @@ class LinearPerpetualBenchmarkSupportTest {
 
     @Test
     void ownerCommitScenariosConsumeTheirRealScaleAndPreserveState() {
-        var result = OwnerCommitPatchBenchmark.exerciseSmallScale(16, 4);
+        var result = OwnerFactFrameBenchmark.exerciseSmallScale(16, 4);
 
         assertThat(result.requestedOperations()).isEqualTo(16);
         assertThat(result.requestedMaxInFlight()).isEqualTo(4);
@@ -91,12 +91,12 @@ class LinearPerpetualBenchmarkSupportTest {
 
     @Test
     void denseOwnerCommitBatchAllocatesOrderIdsAboveTheInitialBook() {
-        assertThat(OwnerCommitPatchBenchmark.exerciseDenseBatchSetup(4)).isEqualTo(4);
+        assertThat(OwnerFactFrameBenchmark.exerciseDenseBatchSetup(4)).isEqualTo(4);
     }
 
     @Test
     void incrementalAndCanonicalHashQualificationExecutesEveryTransitionAndFullRecompute() {
-        var result = OwnerCommitPatchBenchmark.exerciseHashComparisonSmallScale(8);
+        var result = OwnerFactFrameBenchmark.exerciseHashComparisonSmallScale(8);
 
         assertThat(result.operations()).isEqualTo(8);
         assertThat(result.businessApplies()).isEqualTo(result.operations());

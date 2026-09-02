@@ -26,17 +26,21 @@ public final class LiquidationIndex {
         return allActiveIds;
     }
 
-    void apply(java.util.List<RuntimeCommitPatch.LiquidationChange> changes,
-               RuntimeCommitPatch.IdentityView identities) {
-        for (RuntimeCommitPatch.LiquidationChange change : changes) {
-            LiquidationKey previous = keysById.remove(change.liquidationId());
-            if (previous != null) remove(change.liquidationId(), previous);
-            if (isActive(change.after())) {
-                LiquidationKey key = new LiquidationKey(change.after().userId(),
-                        identities.symbol(change.after().symbolId()), change.after().positionSide());
-                keysById.put(change.liquidationId(), key);
-                add(change.liquidationId(), key);
-            }
+    void apply(java.util.List<RuntimeFactFrame.LiquidationChange> changes,
+               RuntimeFactFrame.IdentityView identities) {
+        for (RuntimeFactFrame.LiquidationChange change : changes) {
+            apply(change.liquidationId(), change.after(), identities);
+        }
+    }
+
+    void apply(long liquidationId, LiquidationRuntime after, RuntimeFactFrame.IdentityView identities) {
+        LiquidationKey previous = keysById.remove(liquidationId);
+        if (previous != null) remove(liquidationId, previous);
+        if (isActive(after)) {
+            LiquidationKey key = new LiquidationKey(after.userId(), identities.symbol(after.symbolId()),
+                    after.positionSide());
+            keysById.put(liquidationId, key);
+            add(liquidationId, key);
         }
     }
 

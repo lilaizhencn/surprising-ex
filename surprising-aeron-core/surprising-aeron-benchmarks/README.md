@@ -1,14 +1,14 @@
 # Product Core 性能验证
 
-本模块的 `OwnerCommitPatchBenchmark` 独立测量撮合完成后的 typed owner commit 路径：patch
+本模块的 `OwnerFactFrameBenchmark` 独立测量撮合完成后的 raw fact-frame owner commit 路径：fact frame
 seal/publish/apply、四 Account Lane 的九索引 fanout、增量 hash 与 canonical recompute、批量
 projection/Core Fact V10 编码，以及 snapshot/recovery。五个测量体都真实处理 16,384 个连续
-`RuntimeCommitPatch`，并以 1,024 个 patch 为 admission/fanout/projection 窗口；JMH 使用
+`RuntimeFactFrame`，并以 1,024 个 fact frame 为 admission/fanout/projection 窗口；JMH 使用
 `@OperationsPerInvocation(16384)` 按逻辑 owner commit 归一，不再使用固定 64 条装饰性 batch。
-Core Fact 场景将 typed patch 交给 `CoreExportState` 的异步 materializer，并从其完成后的 encoded
+Core Fact 场景将 typed fact frame 交给 `CoreExportState` 的异步 materializer，并从其完成后的 encoded
 `CoreMessage` 统计 V10 bytes；owner benchmark 不直接构造或读取 Core Fact payload。
 增量 hash 分支在测量区逐 operation 执行 `RollingBusinessStateHash` 与 `RollingFundsStateHash`
-的 prepare/transition/commit，canonical 分支则逐 patch 冻结当前 projection 并执行两类 full
+的 prepare/transition/commit，canonical 分支则逐 fact frame 冻结当前 projection 并执行两类 full
 compute，避免复用 setup 阶段的最终 hash。snapshot 场景只有在 decode、runtime restore、重新
 materialize 以及完整 state/hash 等价检查全部完成后才记录 terminal。
 
@@ -29,10 +29,10 @@ invocation。owner 场景使用 100,000 ops/s 的 open-loop constant-arrival 计
 必须按最大并发命令的 `FactCostEstimate` 总和配置，不能依赖事件数上限代替字节门禁。
 
 AuxCounters 同时输出 terminal business ops、terminal Core messages、fills/trades、batch/items、
-accepted-terminal gap、unfinished、最大/期末 backlog、reject/error/timeout、patch items/bytes、
-snapshot bytes、Core Fact encoded bytes、总/最大 batch size。`patchBytes` 是与 commit journal
-一致的 typed patch admission byte 估算，snapshot 编码大小只进入独立的 `snapshotBytes`。这里一个
-patch 表示一个已被 Product Core 接受并完成 owner commit 的业务
+accepted-terminal gap、unfinished、最大/期末 backlog、reject/error/timeout、fact frame items/bytes、
+snapshot bytes、Core Fact encoded bytes、总/最大 batch size。`fact frameBytes` 是与 commit journal
+一致的 typed fact frame admission byte 估算，snapshot 编码大小只进入独立的 `snapshotBytes`。这里一个
+fact frame 表示一个已被 Product Core 接受并完成 owner commit 的业务
 操作；它不是 HTTP request，也不能和 fills/trades 混为一个 TPS 数字。
 
 输出包含无 profiler 的主 JMH 结果、`-prof gc` 结果、原始 JFR、GC/safepoint 日志、NMT
@@ -119,7 +119,7 @@ business ops、Core messages 或 fills 重复相加。
 Core messages、fills/trades、backlog、尾延迟及资金不变量；内部 owner commit 分数只用于定位
 seal/journal/index/hash/projection/encode/snapshot 的阶段容量，不能替代 API TPS。
 
-`tests` 模式覆盖 typed patch/service 财务矩阵、六产品线 V17
+`tests` 模式覆盖 typed fact frame/service 财务矩阵、六产品线 V17
 `SharedProductLineSnapshotContractTest`、protocol V10、exporter（包含 JDBC/Postgres projector）、
 gateway fanout consumers、market-data `CoreMarketDataProjectionTest` 和 benchmark 小规模真实场景。
 service 清单还显式覆盖 delivery option 财务矩阵、treasury、perpetual funding/fill、产品线架构、

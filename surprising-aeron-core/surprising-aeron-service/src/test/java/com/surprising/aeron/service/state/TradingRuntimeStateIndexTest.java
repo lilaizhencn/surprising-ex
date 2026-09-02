@@ -44,13 +44,13 @@ class TradingRuntimeStateIndexTest {
         addIndexedOwnerGroup(runtime, identities, 7, symbolId, assetId, 10);
         addIndexedOwnerGroup(runtime, identities, secondUser, symbolId, assetId, 20);
         TradingCoreState current = RuntimeStateMaterializer.materialize(runtime, identities);
-        RuntimeCommitPatch patch = capture(runtime, identities, before, current, 1);
+        RuntimeFactFrame patch = capture(runtime, identities, before, current, 1);
         RuntimeProjectionState projection = new RuntimeProjectionState(before,
                 before.businessStateHash(), RollingFundsStateHash.compute(before));
         projection.apply(patch);
         TradingCoreState after = projection.freeze(patch.sequence());
         IndexSet incremental = indexes(before, identities);
-        RuntimeCommitIndexes commitIndexes = incremental.coordinator();
+        RuntimeFactIndexes commitIndexes = incremental.coordinator();
 
         commitIndexes.apply(patch);
 
@@ -71,24 +71,24 @@ class TradingRuntimeStateIndexTest {
         assertThat(incremental.riskSnapshots().keys()).isEqualTo(rebuilt.riskSnapshots().keys());
         assertParity(incremental, rebuilt, current, secondUser);
         assertThat(commitIndexes.lastApplyStats()).isEqualTo(
-                new RuntimeCommitIndexes.ApplyStats(2, 2, 2, 2, 2, 2, 2, 2, 2));
+                new RuntimeFactIndexes.ApplyStats(2, 2, 2, 2, 2, 2, 2, 2, 2));
 
         runtime.clearChangedKeys();
         removeIndexedOwnerGroup(runtime, identities, 7, 10);
         removeIndexedOwnerGroup(runtime, identities, secondUser, 20);
         TradingCoreState removed = RuntimeStateMaterializer.materialize(runtime, identities);
-        RuntimeCommitPatch removal = capture(runtime, identities, current, removed, 2);
+        RuntimeFactFrame removal = capture(runtime, identities, current, removed, 2);
         commitIndexes.apply(removal);
         IndexSet rebuiltRemoved = indexes(removed, identities);
         assertParity(incremental, rebuiltRemoved, removed, secondUser);
         assertThat(commitIndexes.lastApplyStats()).isEqualTo(
-                new RuntimeCommitIndexes.ApplyStats(2, 2, 2, 2, 2, 2, 2, 2, 2));
+                new RuntimeFactIndexes.ApplyStats(2, 2, 2, 2, 2, 2, 2, 2, 2));
 
         commitIndexes.rebuild(current, identities);
         IndexSet rebuiltRollback = indexes(current, identities);
         assertParity(incremental, rebuiltRollback, current, secondUser);
         assertThat(commitIndexes.lastApplyStats()).isEqualTo(
-                new RuntimeCommitIndexes.ApplyStats(0, 0, 0, 0, 0, 0, 0, 0, 0));
+                new RuntimeFactIndexes.ApplyStats(0, 0, 0, 0, 0, 0, 0, 0, 0));
     }
 
     private static void addIndexedOwnerGroup(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
@@ -117,14 +117,14 @@ class TradingRuntimeStateIndexTest {
                         10_000_000, 100_000, 50_000)));
     }
 
-    private static RuntimeCommitPatch capture(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+    private static RuntimeFactFrame capture(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                               TradingCoreState before, TradingCoreState after, long sequence) {
-        TradingRuntimeState.PreparedCommit prepared = runtime.prepareCommitPatch(
+        TradingRuntimeState.PreparedFactFrame prepared = runtime.prepareFactFrame(
                 sequence, identities,
                 before.revision(), com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0), 0,
                 before.businessStateHash(), after.businessStateHash(),
                 RollingFundsStateHash.compute(before), RollingFundsStateHash.compute(after), true);
-        RuntimeCommitPatch.PreparedChanges changes = prepared.prepareChanges();
+        RuntimeFactFrame.PreparedChanges changes = prepared.prepareChanges();
         return prepared.seal(changes, after.businessStateHash(), RollingFundsStateHash.compute(after));
     }
 
@@ -206,7 +206,7 @@ class TradingRuntimeStateIndexTest {
         RiskSnapshotIndex riskSnapshots = new RiskSnapshotIndex(state);
         return new IndexSet(positionUsers, openInterest, triggers, algos, liquidations, timers,
                 activeOrders, adlPositions, riskSnapshots,
-                new RuntimeCommitIndexes(positionUsers, openInterest, triggers, algos, liquidations,
+                new RuntimeFactIndexes(positionUsers, openInterest, triggers, algos, liquidations,
                         timers, activeOrders, adlPositions, riskSnapshots));
     }
 
@@ -214,5 +214,5 @@ class TradingRuntimeStateIndexTest {
                             TriggerOrderIndex triggers, AlgoOrderIndex algos,
                             LiquidationIndex liquidations, CancelAllAfterIndex timers,
                             ActiveOrderIndex activeOrders, AdlPositionIndex adlPositions,
-                            RiskSnapshotIndex riskSnapshots, RuntimeCommitIndexes coordinator) { }
+                            RiskSnapshotIndex riskSnapshots, RuntimeFactIndexes coordinator) { }
 }

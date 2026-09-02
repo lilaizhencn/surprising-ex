@@ -100,7 +100,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
-public final class CoreProbeState implements AutoCloseable {
+public final class CoreProbeState implements AutoCloseable,
+        com.surprising.aeron.service.state.RuntimeFactFrame.IdentityReleaseConsumer {
     @FunctionalInterface
     interface CommitFaultInjector {
         void inject(String phase);
@@ -187,10 +188,10 @@ public final class CoreProbeState implements AutoCloseable {
     private final com.surprising.aeron.service.state.RollingFundsStateHash rollingFundsStateHash;
     private long runtimePatchRevision;
     private final com.surprising.aeron.service.state.RuntimeCommitJournal runtimeProjectionJournal;
-    private CoreExportState.PatchChain activeFactPatchChain;
+    private CoreExportState.FactChain activeFactChain;
     private RuntimeProjectionPoint currentProjectionPoint;
     private final OwnerCommitPublisher ownerCommitPublisher = new OwnerCommitPublisher();
-    private List<com.surprising.aeron.service.state.RuntimeCommitPatch> capturedCommitPatches;
+    private List<com.surprising.aeron.service.state.RuntimeFactFrame> capturedFactFrames;
     private CoreAdmissionReservation currentAdmission;
     private com.surprising.aeron.service.state.RuntimeCommitJournal.AdmissionReservation currentRetentionAdmission;
     private CoreMessage activeFactCommand;
@@ -255,20 +256,20 @@ public final class CoreProbeState implements AutoCloseable {
     public CoreProbeState(ProductLine productLine) {
         this(productLine, 0, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
                 TradingCoreState.empty(productLine), CoreExportState.passive(), new TerminalStateRetention(), null,
-                0, Map.of(), Map.of(), null, null);
+                0, Map.of(), Map.of(), 0, 0, null, null);
     }
 
     CoreProbeState(ProductLine productLine, MatcherSnapshotCapture matcherSnapshotCapture) {
         this(productLine, 0, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
                 TradingCoreState.empty(productLine), CoreExportState.passive(), new TerminalStateRetention(), null,
-                0, Map.of(), Map.of(), matcherSnapshotCapture, null);
+                0, Map.of(), Map.of(), 0, 0, matcherSnapshotCapture, null);
     }
 
     CoreProbeState(ProductLine productLine, MatcherSnapshotCapture matcherSnapshotCapture,
                    SnapshotEncoder snapshotEncoder) {
         this(productLine, 0, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
                 TradingCoreState.empty(productLine), CoreExportState.passive(), new TerminalStateRetention(), null,
-                0, Map.of(), Map.of(), matcherSnapshotCapture, snapshotEncoder);
+                0, Map.of(), Map.of(), 0, 0, matcherSnapshotCapture, snapshotEncoder);
     }
 
     private CoreProbeState(
@@ -284,6 +285,8 @@ public final class CoreProbeState implements AutoCloseable {
             long projectionSequence,
             Map<Long, com.surprising.aeron.service.state.CoreFeePolicyState> restoredFeePolicies,
             Map<Long, com.surprising.aeron.service.state.TransferRuntime> restoredPendingTransfers,
+            long restoredAuditBusinessStateHash,
+            long restoredAuditFundsStateHash,
             MatcherSnapshotCapture matcherSnapshotCapture,
             SnapshotEncoder snapshotEncoder) {
         this.productLine = productLine;
@@ -351,10 +354,13 @@ public final class CoreProbeState implements AutoCloseable {
                 snapshotState, runtimePlaceOrderIdentities);
         this.cachedFeePolicyHash = computeFeePolicyHash(restoredFeePolicies);
         this.cachedTransferHash = computeTransferHash(restoredPendingTransfers);
-        this.cachedBusinessStateHash = currentBusinessStateHash();
-        if (cachedBusinessStateHash != restoredBusinessStateHash) {
-            throw new IllegalStateException("restored canonical business hash mismatch");
+        if (restoredAuditBusinessStateHash != 0) {
+            rollingBusinessStateHash.restoreAuditWatermark(restoredAuditBusinessStateHash);
         }
+        if (restoredAuditFundsStateHash != 0) {
+            rollingFundsStateHash.restoreAuditWatermark(restoredAuditFundsStateHash);
+        }
+        this.cachedBusinessStateHash = currentBusinessStateHash();
         this.runtimePatchRevision = snapshotState.revision();
         this.runtime.restoreCommittedConsumers(
                 snapshotState, runtimePatchRevision, cachedBusinessStateHash);
@@ -377,7 +383,9 @@ public final class CoreProbeState implements AutoCloseable {
             MatcherSnapshot matcherSnapshot,
             long projectionSequence,
             Map<Long, com.surprising.aeron.service.state.CoreFeePolicyState> feePolicies,
-            Map<Long, com.surprising.aeron.service.state.TransferRuntime> pendingTransfers) {
+            Map<Long, com.surprising.aeron.service.state.TransferRuntime> pendingTransfers,
+            long auditBusinessStateHash,
+            long auditFundsStateHash) {
         if (projectionSequence < 0 || appliedCommandCount < 0 || commandResults == null
                 || commandResults.size() > MAX_IDEMPOTENCY_RESULTS || lastSourceSequences == null
                 || lastSourceSequences.size() > MAX_SOURCE_SEQUENCES
@@ -390,7 +398,7 @@ public final class CoreProbeState implements AutoCloseable {
         return new CoreProbeState(productLine, appliedCommandCount, probeValue,
                 new LinkedHashMap<>(commandResults), new LinkedHashMap<>(lastSourceSequences),
                 snapshotState, exportState, terminalRetention, matcherSnapshot, projectionSequence,
-                feePolicies, pendingTransfers, null, null);
+                feePolicies, pendingTransfers, auditBusinessStateHash, auditFundsStateHash, null, null);
     }
 
     public CoreResponse apply(CoreMessage message) {
@@ -2294,31 +2302,40 @@ public final class CoreProbeState implements AutoCloseable {
                 return List.of();
             }
         }
-        LinkedHashSet<Long> cancellations = new LinkedHashSet<>();
-        cancellations.addAll(preMatchingCloseCapacityCancellations(
-                message.header().userId(), placement, excludedOrderId));
-        cancellations.addAll(preMatchingSelfTradeCancellations(
-                message.header().userId(), placement, excludedOrderId));
-        return List.copyOf(cancellations);
+        org.eclipse.collections.impl.set.mutable.primitive.LongHashSet cancellations =
+                new org.eclipse.collections.impl.set.mutable.primitive.LongHashSet();
+        List<Long> closeCapacity = preMatchingCloseCapacityCancellations(
+                message.header().userId(), placement, excludedOrderId);
+        for (int index = 0; index < closeCapacity.size(); index++) {
+            cancellations.add(closeCapacity instanceof ImmutableLongArrayList primitive
+                    ? primitive.valueAt(index) : closeCapacity.get(index));
+        }
+        long[] selfTrade = preMatchingSelfTradeCancellations(
+                message.header().userId(), placement, excludedOrderId);
+        for (long orderId : selfTrade) cancellations.add(orderId);
+        long[] ordered = cancellations.toArray();
+        java.util.Arrays.sort(ordered);
+        return ImmutableLongArrayList.takeOwnership(ordered);
     }
 
-    private List<Long> preMatchingSelfTradeCancellations(
+    private long[] preMatchingSelfTradeCancellations(
             long userId,
             PlaceOrderCommand placement,
             long excludedOrderId) {
         long matchingPrice = CoreOrderDecisionResolver.resolve(runtimePlaceOrderState,
                 runtimePlaceOrderIdentities, userId, placement, currentClusterTimestamp).matchingPriceTicks();
-        return activeOrderIndex.ids(userId, placement.symbol()).stream()
-                .filter(orderId -> orderId != excludedOrderId && orderId != placement.orderId())
-                .map(this::runtimeOrder)
-                .filter(java.util.Objects::nonNull)
-                .filter(order -> order.status() == com.surprising.aeron.service.state.CoreOrderStatus.OPEN)
-                .filter(order -> order.side() != placement.side())
-                .filter(order -> placement.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY
-                        ? matchingPrice >= order.priceTicks()
-                        : matchingPrice <= order.priceTicks())
-                .map(OrderRuntime::orderId)
-                .toList();
+        long[] candidates = activeOrderIndex.sortedIds(userId, placement.symbol());
+        int size = 0;
+        for (long orderId : candidates) {
+            if (orderId == excludedOrderId || orderId == placement.orderId()) continue;
+            OrderRuntime order = runtimeOrder(orderId);
+            if (order == null || order.status() != com.surprising.aeron.service.state.CoreOrderStatus.OPEN
+                    || order.side() == placement.side()) continue;
+            boolean crosses = placement.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY
+                    ? matchingPrice >= order.priceTicks() : matchingPrice <= order.priceTicks();
+            if (crosses) candidates[size++] = orderId;
+        }
+        return size == candidates.length ? candidates : java.util.Arrays.copyOf(candidates, size);
     }
 
     private List<Long> preMatchingCloseCapacityCancellations(
@@ -4376,7 +4393,7 @@ public final class CoreProbeState implements AutoCloseable {
             if (laneCommandContexts.inFlight() != 0) {
                 throw new IllegalStateException("snapshot fence contains unfinished lane or matcher work");
             }
-            if (currentAdmission != null || activeFactPatchChain != null
+            if (currentAdmission != null || activeFactChain != null
                     || runtimeProjectionJournal.hasOutstandingReservation()
                     || snapshotProjectionDeferred || snapshotProjectionDirty) {
                 throw new IllegalStateException("snapshot fence contains outstanding admission or patch work");
@@ -4386,11 +4403,9 @@ public final class CoreProbeState implements AutoCloseable {
                 fence.projectionSequence = runtimeProjectionJournal.publishedSequence();
                 fence.snapshotState = com.surprising.aeron.service.state.RuntimeStateMaterializer.materialize(
                         runtimePlaceOrderState, runtimePlaceOrderIdentities);
-                long businessStateHash = currentBusinessStateHash();
-                long fundsStateHash = rollingFundsStateHash.value();
-                if (canonicalBusinessStateHash(fence.snapshotState.businessStateHash()) != businessStateHash) {
-                    throw new IllegalStateException("snapshot projection fence hash mismatch");
-                }
+                long businessStateHash = canonicalBusinessStateHash(fence.snapshotState.businessStateHash());
+                long fundsStateHash = com.surprising.aeron.service.state.RollingFundsStateHash.compute(
+                        fence.snapshotState);
                 fence.projection = new com.surprising.aeron.service.state.RuntimeCommitJournal.ProjectionVersion(
                         fence.projectionSequence, fence.snapshotState, businessStateHash, fundsStateHash);
             }
@@ -4575,7 +4590,10 @@ public final class CoreProbeState implements AutoCloseable {
         } catch (RuntimeException poisonFailure) {
             failure.addSuppressed(poisonFailure);
         }
-        return failMatching(pending, "Core Fact estimate invariant failed after matcher fact", failure);
+        return failMatching(pending,
+                "Core Fact estimate invariant failed after matcher fact; "
+                        + "restart from snapshot and log is required",
+                failure);
     }
 
     private void assertHealthy() {
@@ -4642,6 +4660,10 @@ public final class CoreProbeState implements AutoCloseable {
         return currentBusinessStateHash();
     }
 
+    long snapshotBusinessAuditBaseHash() {
+        return rollingBusinessStateHash.value();
+    }
+
     long snapshotFundsStateHash() {
         return rollingFundsStateHash.value();
     }
@@ -4699,13 +4721,13 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     boolean snapshotHasOutstandingReservation() {
-        return currentAdmission != null || activeFactPatchChain != null
+        return currentAdmission != null || activeFactChain != null
                 || runtimeProjectionJournal.hasOutstandingReservation();
     }
 
     void captureCommittedPatchesForTest() {
-        if (capturedCommitPatches == null) capturedCommitPatches = new ArrayList<>();
-        else capturedCommitPatches.clear();
+        if (capturedFactFrames == null) capturedFactFrames = new ArrayList<>();
+        else capturedFactFrames.clear();
     }
 
     void failOrderBatchLaneMaskPreflightForTest(long expectedLaneMask) {
@@ -4726,13 +4748,13 @@ public final class CoreProbeState implements AutoCloseable {
         fault.run();
     }
 
-    List<com.surprising.aeron.service.state.RuntimeCommitPatch> capturedCommitPatchesForTest() {
-        return capturedCommitPatches == null ? List.of() : List.copyOf(capturedCommitPatches);
+    List<com.surprising.aeron.service.state.RuntimeFactFrame> capturedFactFramesForTest() {
+        return capturedFactFrames == null ? List.of() : List.copyOf(capturedFactFrames);
     }
 
-    List<com.surprising.aeron.service.state.RuntimeCommitPatch> drainCapturedCommitPatchesForTest() {
-        List<com.surprising.aeron.service.state.RuntimeCommitPatch> captured = capturedCommitPatchesForTest();
-        if (capturedCommitPatches != null) capturedCommitPatches.clear();
+    List<com.surprising.aeron.service.state.RuntimeFactFrame> drainCapturedFactFramesForTest() {
+        List<com.surprising.aeron.service.state.RuntimeFactFrame> captured = capturedFactFramesForTest();
+        if (capturedFactFrames != null) capturedFactFrames.clear();
         return captured;
     }
 
@@ -5355,10 +5377,10 @@ public final class CoreProbeState implements AutoCloseable {
         private long previousSequence;
         private long previousBusinessStateHash;
         private long previousFundsStateHash;
-        private com.surprising.aeron.service.state.RuntimeCommitPatch.PreparedChanges preparedChanges;
-        private com.surprising.aeron.service.state.RuntimeCommitPatch commit;
+        private com.surprising.aeron.service.state.TradingRuntimeState.PreparedFactFrame frame;
+        private com.surprising.aeron.service.state.RuntimeFundsDelta frameFundsDelta;
         private CoreAdmissionReservation.FactPermit factPermit;
-        private CoreExportState.PatchChain nextFactPatchChain;
+        private CoreExportState.FactChain nextFactChain;
         private UUID factCommandId;
         private boolean active;
 
@@ -5371,7 +5393,6 @@ public final class CoreProbeState implements AutoCloseable {
                 previousSequence = Math.subtractExact(sequence, 1);
                 previousBusinessStateHash = cachedBusinessStateHash;
                 previousFundsStateHash = rollingFundsStateHash.value();
-                requireCanonicalSequence();
                 try {
                     prepareAndPublish();
                 } catch (RuntimeException failure) {
@@ -5380,22 +5401,12 @@ public final class CoreProbeState implements AutoCloseable {
                 }
                 finish();
             } finally {
-                preparedChanges = null;
-                commit = null;
+                frame = null;
+                frameFundsDelta = null;
                 factPermit = null;
-                nextFactPatchChain = null;
+                nextFactChain = null;
                 factCommandId = null;
                 active = false;
-            }
-        }
-
-        private void requireCanonicalSequence() {
-            long businessSequence = rollingBusinessStateHash.coreSequence();
-            if (rollingFundsStateHash.coreSequence() != businessSequence) {
-                throw new IllegalStateException("business and funds commit sequence differ");
-            }
-            if (businessSequence != Long.MIN_VALUE && businessSequence != previousSequence) {
-                throw new IllegalStateException("rolling hash and projection commit sequence differ");
             }
         }
 
@@ -5405,55 +5416,49 @@ public final class CoreProbeState implements AutoCloseable {
                     || activeFactCommand == null || activeFactFingerprint == null) {
                 throw new IllegalStateException("Core Fact metadata must be admitted before runtime mutation");
             }
-            if (currentAdmission != null) factPermit = currentAdmission.reserveFactPatch();
-            var preparedCommit = runtimePlaceOrderState.prepareCommitPatch(
+            if (currentAdmission != null) factPermit = currentAdmission.reserveFactFrame();
+            frame = runtimePlaceOrderState.prepareFactFrame(
                     sequence, runtimePlaceOrderIdentities,
                     runtimePatchRevision, commandMatcherTransition, committedLaneMask,
                     previousBusinessStateHash, previousBusinessStateHash,
                     previousFundsStateHash, previousFundsStateHash, commandExternalAdjustment);
-            preparedCommit.builder().coreFactValues(
-                    new com.surprising.aeron.service.state.RuntimeCommitPatch.CoreFactValues(
+            frame.builder().coreFactValues(
+                    new com.surprising.aeron.service.state.RuntimeFactFrame.CoreFactValues(
                             commandExecutions, commandFundingPayments,
                             commandFundingProgress, commandSettlementProgress));
             activeFactTopologyHash = matchingAdapter.topology().topologyHash();
             activeFactLaneRevisionHash = laneRevisionHash();
-            var factMetadata = new com.surprising.aeron.service.state.RuntimeCommitPatch.CoreFactMetadata(
+            var factMetadata = new com.surprising.aeron.service.state.RuntimeFactFrame.CoreFactMetadata(
                     activeFactCommand.header().commandId(), activeFactFingerprint,
                     activeFactCommand.header().messageType().wireCode(), activeFactCommand.header().userId(),
                     ResponseStatus.APPLIED, CoreResultCode.NONE,
                     activeFactAppliedCommandCount(currentAdmission == null), currentClusterPosition,
                     activeFactTopologyHash, activeFactLaneRevisionHash, commandExternalAdjustment);
-            var baseMetadata = preparedCommit.metadata();
-            preparedChanges = preparedCommit.builder().prepare(
-                    new com.surprising.aeron.service.state.RuntimeCommitPatch.PrepareMetadata(
-                            baseMetadata.beforeRevision(), baseMetadata.afterRevision(),
-                            baseMetadata.beforeBusinessStateHash(), baseMetadata.beforeFundsStateHash(),
-                            baseMetadata.laneMask(), factMetadata, baseMetadata.externalAdjustment()),
-                    preparedCommit.identities());
-            long nextBusinessStateHash = canonicalBusinessStateHash(
-                    rollingBusinessStateHash.applyFailStop(preparedChanges));
-            long nextFundsStateHash = rollingFundsStateHash.applyFailStop(preparedChanges);
-            commit = preparedCommit.seal(preparedChanges, nextBusinessStateHash, nextFundsStateHash);
+            frame = frame.withFactMetadata(factMetadata);
+            frameFundsDelta = frame.fundsDelta();
+            // Hashes are audit artifacts and are refreshed at a snapshot/audit fence.
+            long nextBusinessStateHash = previousBusinessStateHash;
+            long nextFundsStateHash = previousFundsStateHash;
             if (factPermit != null) {
-                factPermit.consume(commit);
+                factPermit.consume();
                 factCommandId = activeFactCommand.header().commandId();
-                nextFactPatchChain = new CoreExportState.PatchChain(
-                        commit, activeFactPatchChain, factPermit);
+                nextFactChain = new CoreExportState.FactChain(
+                        frame, activeFactChain, factPermit);
             }
-            runtime.commitRuntimeTransition(commit, previousBusinessStateHash, nextBusinessStateHash);
+            runtime.commitRuntimeTransition(frame, previousBusinessStateHash, nextBusinessStateHash);
             commitFaultInjector.inject("indexes");
             commitFaultInjector.inject("hashes");
             if (currentAdmission != null) {
-                publishSealedCommit(commit, nextBusinessStateHash, nextFundsStateHash);
+                publishFactFrame(frame, nextBusinessStateHash, nextFundsStateHash);
             } else {
-                runtimeProjectionJournal.publish(currentRetentionAdmission, commit,
+                runtimeProjectionJournal.publish(currentRetentionAdmission, frame.sequence(),
                         nextBusinessStateHash, nextFundsStateHash);
             }
         }
 
         private void failStop(RuntimeException failure) {
             if (factPermit != null) {
-                cleanup(failure, () -> currentAdmission.abortFactPatch(factPermit));
+                cleanup(failure, () -> currentAdmission.abortFactFrame(factPermit));
             }
             commitPublicationFailure = new IllegalStateException(
                     "owner commit failed after deterministic mutation; restart from snapshot and log is required",
@@ -5461,12 +5466,13 @@ public final class CoreProbeState implements AutoCloseable {
         }
 
         private void finish() {
-            commandFundsDelta = commandFundsDelta.plus(commit.fundsDelta());
-            currentProjectionPoint = commit.projectionPoint();
-            if (factCommandId != null) activeFactPatchChain = nextFactPatchChain;
-            if (capturedCommitPatches != null) capturedCommitPatches.add(commit);
-            runtimePatchRevision = commit.revision();
-            releaseRetiredIdentities(commit);
+            commandFundsDelta = commandFundsDelta.plus(frameFundsDelta);
+            currentProjectionPoint = new com.surprising.aeron.service.state.RuntimeProjectionPoint(sequence, null);
+            currentProjectionPoint.completeSequence();
+            if (factCommandId != null) activeFactChain = nextFactChain;
+            if (capturedFactFrames != null) capturedFactFrames.add(frame.materialize());
+            runtimePatchRevision = frame.revision();
+            frame.visitIdentityReleases(CoreProbeState.this);
             runtimePlaceOrderState.clearChangedKeys();
         }
 
@@ -5479,24 +5485,21 @@ public final class CoreProbeState implements AutoCloseable {
         }
     }
 
-    private void releaseRetiredIdentities(
-            com.surprising.aeron.service.state.RuntimeCommitPatch commit) {
-        for (var group : commit.accountLaneGroups()) {
-            for (var change : group.clientOrders()) {
-                if (change.afterOrderId() == null
-                        && runtimePlaceOrderState.orderIdByClient(
-                        change.key().userId(), change.key().clientKey()) == null) {
-                    runtimePlaceOrderIdentities.releaseClientKey(
-                            change.key().userId(), change.key().clientKey());
-                }
-            }
-            for (var change : group.positions()) {
-                releaseRetiredPositionIdentity(change.positionKey(), change.after());
-            }
-            for (var change : group.riskSnapshots()) {
-                releaseRetiredPositionIdentity(change.riskKey(), change.after());
-            }
+    @Override
+    public void clientOrder(long userId, long clientKey, Long afterOrderId) {
+        if (afterOrderId == null && runtimePlaceOrderState.orderIdByClient(userId, clientKey) == null) {
+            runtimePlaceOrderIdentities.releaseClientKey(userId, clientKey);
         }
+    }
+
+    @Override
+    public void position(long positionKey, com.surprising.aeron.service.state.PositionRuntime after) {
+        releaseRetiredPositionIdentity(positionKey, after);
+    }
+
+    @Override
+    public void riskSnapshot(long riskKey, com.surprising.aeron.service.state.RiskSnapshotRuntime after) {
+        releaseRetiredPositionIdentity(riskKey, after);
     }
 
     private void releaseRetiredPositionIdentity(long positionKey, Object after) {
@@ -5506,11 +5509,12 @@ public final class CoreProbeState implements AutoCloseable {
         }
     }
 
-    private void publishSealedCommit(com.surprising.aeron.service.state.RuntimeCommitPatch commit,
+    private void publishFactFrame(
+            com.surprising.aeron.service.state.TradingRuntimeState.PreparedFactFrame frame,
             long businessStateHash,
             long fundsStateHash) {
         if (currentAdmission == null) throw new IllegalStateException("commit admission reservation is missing");
-        currentAdmission.publish(commit, businessStateHash, fundsStateHash);
+        currentAdmission.publish(frame, businessStateHash, fundsStateHash);
     }
 
     private com.surprising.aeron.service.state.PlaceAdmissionEvent dispatchPlaceAdmission(
@@ -5939,19 +5943,19 @@ public final class CoreProbeState implements AutoCloseable {
         long clusterPosition = currentClusterPosition;
         long beforeBusinessStateHash = commandBeforeBusinessStateHash;
         long beforeFundsStateHash = commandBeforeFundsStateHash;
-        CoreExportState.PatchChain commandFactPatches = activeFactPatchChain;
-        if (commandFactPatches != null
-                && !commandFactPatches.patch().coreFactMetadata().commandId()
+        CoreExportState.FactChain commandFactFrames = activeFactChain;
+        if (commandFactFrames != null
+                && !commandFactFrames.coreFactMetadata().commandId()
                 .equals(command.header().commandId())) {
-            throw new IllegalStateException("Core Fact patch belongs to a different active command");
+            throw new IllegalStateException("Core Fact frame belongs to a different active command");
         }
-        activeFactPatchChain = null;
+        activeFactChain = null;
         long[] terminalOrderIds = terminalOrderIds(delta);
         int itemCount = Math.addExact(delta.executions().size(), delta.fundingPayments().size());
         itemCount = Math.addExact(itemCount, terminalOrderIds.length);
-        if (commandFactPatches != null) itemCount = Math.addExact(itemCount, commandFactPatches.itemCount());
-        com.surprising.aeron.service.state.RuntimeCommitPatch.CoreFactMetadata metadata =
-                commandFactPatches == null ? null : commandFactPatches.patch().coreFactMetadata();
+        if (commandFactFrames != null) itemCount = Math.addExact(itemCount, commandFactFrames.itemCount());
+        com.surprising.aeron.service.state.RuntimeFactFrame.CoreFactMetadata metadata =
+                commandFactFrames == null ? null : commandFactFrames.coreFactMetadata();
         if (metadata == null
                 || !metadata.commandId().equals(command.header().commandId())
                 || !metadata.commandFingerprint().equals(fingerprint)
@@ -5963,7 +5967,7 @@ public final class CoreProbeState implements AutoCloseable {
                 || metadata.topologyHash() != topologyHash
                 || metadata.laneRevisionHash() != revisionHash
                 || metadata.externalAdjustment() != externalAdjustment) {
-            metadata = new com.surprising.aeron.service.state.RuntimeCommitPatch.CoreFactMetadata(
+            metadata = new com.surprising.aeron.service.state.RuntimeFactFrame.CoreFactMetadata(
                     command.header().commandId(), fingerprint,
                     command.header().messageType().wireCode(), command.header().userId(), status, resultCode,
                     appliedCount, clusterPosition, topologyHash, revisionHash, externalAdjustment);
@@ -5971,13 +5975,27 @@ public final class CoreProbeState implements AutoCloseable {
         CoreExportState.Draft draft = new CoreExportState.Draft(command, status, resultCode, appliedCount,
                 businessStateHash, beforeBusinessStateHash, beforeFundsStateHash, fundsStateHash,
                 topologyHash, revisionHash, matcherTransition, clusterPosition, afterProjection.sequence(),
-                itemCount, terminalOrderIds, commandFactPatches, delta, commandFundsDelta,
+                itemCount, terminalOrderIds, commandFactFrames, delta, commandFundsDelta,
                 runtimePlaceOrderIdentities,
                 metadata);
-        long sequence = currentAdmission == null
-                ? exportState.append(draft) : currentAdmission.append(draft);
-        if (commandFactPatches != null) {
-            commandFactPatches.acceptOldestFirst(patch -> terminalRetention.observe(patch, sequence));
+        long sequence;
+        try {
+            sequence = currentAdmission == null
+                    ? exportState.append(draft) : currentAdmission.append(draft);
+        } catch (IllegalStateException failure) {
+            if (commandFactFrames == null) throw failure;
+            var invariant = new CoreAdmissionReservation.FactEstimateInvariantException(failure.getMessage());
+            invariant.initCause(failure);
+            PendingMatching pending = pendingMatching.findByCommandId(command.header().commandId());
+            if (pending != null) throw failObservedMatchingEstimateInvariant(pending, invariant);
+            commitPublicationFailure = new IllegalStateException(
+                    "Core Fact publication failed after deterministic mutation: " + failure.getMessage()
+                            + "; restart from snapshot and log is required",
+                    invariant);
+            throw commitPublicationFailure;
+        }
+        if (commandFactFrames != null) {
+            commandFactFrames.retainOldestFirst(terminalRetention, sequence);
         }
         return sequence;
     }
@@ -6152,7 +6170,7 @@ public final class CoreProbeState implements AutoCloseable {
             if (pending.capacityReservation() != null) pending.capacityReservation().releaseUnused();
         });
         pendingMatching.clear();
-        activeFactPatchChain = null;
+        activeFactChain = null;
         pendingMatchingRejections.clear();
         pendingLifecycleScopes.clear();
         pendingOrderBatches.clear();

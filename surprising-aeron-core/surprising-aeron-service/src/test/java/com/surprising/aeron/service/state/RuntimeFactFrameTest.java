@@ -13,28 +13,28 @@ import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
-class RuntimeCommitPatchTest {
+class RuntimeFactFrameTest {
 
     @Test
     void preservesDeterministicFirstTouchOrderWithoutSorting() {
-        RuntimeCommitPatch first = populatedBuilder(false).seal(metadata());
-        RuntimeCommitPatch reversed = populatedBuilder(true).seal(metadata());
+        RuntimeFactFrame first = populatedBuilder(false).seal(metadata());
+        RuntimeFactFrame reversed = populatedBuilder(true).seal(metadata());
 
         assertThat(first.previousCoreSequence()).isEqualTo(first.previousProjectionSequence());
         assertThat(first.coreSequence()).isEqualTo(first.projectionSequence());
         assertThat(first.laneMask()).isEqualTo((1L << 1) | (1L << 3));
-        assertThat(first.accountLaneGroups()).extracting(RuntimeCommitPatch.AccountLaneOwnerGroup::laneId)
+        assertThat(first.accountLaneGroups()).extracting(RuntimeFactFrame.AccountLaneOwnerGroup::laneId)
                 .containsExactly(1, 3);
         assertThat(first.accountLaneGroups().getFirst().users())
-                .extracting(RuntimeCommitPatch.UserChange::userId).containsExactly(2L, 9L);
-        assertThat(first.fundsPostings()).extracting(RuntimeCommitPatch.FundsPosting::assetId)
+                .extracting(RuntimeFactFrame.UserChange::userId).containsExactly(2L, 9L);
+        assertThat(first.fundsPostings()).extracting(RuntimeFactFrame.FundsPosting::assetId)
                 .containsExactly(2, 2);
-        assertThat(first.matcherEvidence()).extracting(RuntimeCommitPatch.MatcherEvidence::matcherSequence)
+        assertThat(first.matcherEvidence()).extracting(RuntimeFactFrame.MatcherEvidence::matcherSequence)
                 .containsExactly(8L, 7L);
         assertThat(first.terminalIds().orderIds()).containsExactly(4L, 12L);
         assertThat(reversed.accountLaneGroups().getFirst().users())
-                .extracting(RuntimeCommitPatch.UserChange::userId).containsExactly(9L, 2L);
-        assertThat(reversed.matcherEvidence()).extracting(RuntimeCommitPatch.MatcherEvidence::matcherSequence)
+                .extracting(RuntimeFactFrame.UserChange::userId).containsExactly(9L, 2L);
+        assertThat(reversed.matcherEvidence()).extracting(RuntimeFactFrame.MatcherEvidence::matcherSequence)
                 .containsExactly(7L, 8L);
         assertThat(reversed.terminalIds().orderIds()).containsExactly(12L, 4L);
     }
@@ -43,15 +43,15 @@ class RuntimeCommitPatchTest {
     void retainsFirstBeforeAndFinalAfterAndRepresentsDeletion() {
         UserRuntime before = user(7, 1);
         UserRuntime middle = user(7, 2);
-        RuntimeCommitPatch.Builder builder = baseBuilder();
+        RuntimeFactFrame.Builder builder = baseBuilder();
         builder.recordUser(1, before, middle);
         builder.recordUser(1, middle, null);
         builder.laneMask(1L << 1);
 
-        RuntimeCommitPatch patch = builder.seal(metadata(1L << 1));
+        RuntimeFactFrame patch = builder.seal(metadata(1L << 1));
 
         assertThat(patch.accountLaneGroups().getFirst().users())
-                .containsExactly(new RuntimeCommitPatch.UserChange(7, before, null));
+                .containsExactly(new RuntimeFactFrame.UserChange(7, before, null));
         assertThatThrownBy(() -> patch.accountLaneGroups().add(patch.accountLaneGroups().getFirst()))
                 .isInstanceOf(UnsupportedOperationException.class);
         assertThatThrownBy(() -> patch.accountLaneGroups().getFirst().users().clear())
@@ -60,13 +60,13 @@ class RuntimeCommitPatchTest {
 
     @Test
     void rejectsInconsistentLaneMaskAndSequence() {
-        assertThatThrownBy(() -> RuntimeCommitPatch.builder(ProductLine.LINEAR_PERPETUAL, 10, 12))
+        assertThatThrownBy(() -> RuntimeFactFrame.builder(ProductLine.LINEAR_PERPETUAL, 10, 12))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("contiguous");
-        assertThatThrownBy(() -> RuntimeCommitPatch.builder(ProductLine.LINEAR_PERPETUAL, 0, 0))
+        assertThatThrownBy(() -> RuntimeFactFrame.builder(ProductLine.LINEAR_PERPETUAL, 0, 0))
                 .isInstanceOf(IllegalArgumentException.class);
 
-        RuntimeCommitPatch.Builder builder = baseBuilder();
+        RuntimeFactFrame.Builder builder = baseBuilder();
         builder.recordUser(1, null, user(7, 1));
         builder.laneMask(1L << 1);
         assertThatThrownBy(() -> builder.seal(metadata(1L << 2)))
@@ -76,19 +76,19 @@ class RuntimeCommitPatchTest {
 
     @Test
     void rejectsProductLineConflictingLaneMaskAndSecondSeal() {
-        RuntimeCommitPatch.Builder mismatch = baseBuilder();
+        RuntimeFactFrame.Builder mismatch = baseBuilder();
         assertThatThrownBy(() -> mismatch.recordUser(1,
                 new UserRuntime(ProductLine.SPOT, 7, 1, CorePositionMode.ONE_WAY), null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("product line");
 
-        RuntimeCommitPatch.Builder conflictingLaneMask = baseBuilder();
+        RuntimeFactFrame.Builder conflictingLaneMask = baseBuilder();
         conflictingLaneMask.laneMask(1L << 1);
         assertThatThrownBy(() -> conflictingLaneMask.laneMask(1L << 2))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("lane mask");
 
-        RuntimeCommitPatch.Builder sealed = baseBuilder();
+        RuntimeFactFrame.Builder sealed = baseBuilder();
         sealed.recordUser(1, null, user(7, 1));
         sealed.laneMask(1L << 1);
         sealed.seal(metadata(1L << 1));
@@ -99,29 +99,29 @@ class RuntimeCommitPatchTest {
 
     @Test
     void resetReusesBuilderWithoutMutatingOrLeakingThePreviousPatch() {
-        RuntimeCommitPatch.Builder builder = baseBuilder();
+        RuntimeFactFrame.Builder builder = baseBuilder();
         builder.recordUser(1, null, user(7, 1));
         builder.laneMask(1L << 1);
-        RuntimeCommitPatch first = builder.seal(metadata(1L << 1));
+        RuntimeFactFrame first = builder.seal(metadata(1L << 1));
 
         builder.reset().sequences(40, 41)
                 .matcherTransition(new CoreMatcherTransition(1, 0, 6, 8, 90, 101));
         builder.recordUser(1, null, user(8, 1));
         builder.laneMask(1L << 1);
-        RuntimeCommitPatch second = builder.seal(metadata(1L << 1));
+        RuntimeFactFrame second = builder.seal(metadata(1L << 1));
 
         assertThat(first.accountLaneGroups().getFirst().users())
-                .extracting(RuntimeCommitPatch.UserChange::userId).containsExactly(7L);
+                .extracting(RuntimeFactFrame.UserChange::userId).containsExactly(7L);
         assertThat(second.accountLaneGroups().getFirst().users())
-                .extracting(RuntimeCommitPatch.UserChange::userId).containsExactly(8L);
+                .extracting(RuntimeFactFrame.UserChange::userId).containsExactly(8L);
         assertThat(first.laneMask()).isEqualTo(1L << 1);
         assertThat(second.laneMask()).isEqualTo(1L << 1);
     }
 
     @Test
     void primitiveChangesGrowAndResetWithoutLeakingPreviousKeys() {
-        RuntimeCommitPatch.Builder ascending = baseBuilder();
-        RuntimeCommitPatch.Builder descending = baseBuilder();
+        RuntimeFactFrame.Builder ascending = baseBuilder();
+        RuntimeFactFrame.Builder descending = baseBuilder();
         for (long userId = 1; userId <= 64; userId++) {
             ascending.recordUser(1, null, user(userId, 1));
         }
@@ -131,14 +131,14 @@ class RuntimeCommitPatchTest {
         ascending.laneMask(1L << 1);
         descending.laneMask(1L << 1);
 
-        RuntimeCommitPatch first = ascending.seal(metadata(1L << 1));
-        RuntimeCommitPatch reversed = descending.seal(metadata(1L << 1));
+        RuntimeFactFrame first = ascending.seal(metadata(1L << 1));
+        RuntimeFactFrame reversed = descending.seal(metadata(1L << 1));
 
         assertThat(first.accountLaneGroups().getFirst().users())
-                .extracting(RuntimeCommitPatch.UserChange::userId)
+                .extracting(RuntimeFactFrame.UserChange::userId)
                 .containsExactlyElementsOf(java.util.stream.LongStream.rangeClosed(1, 64).boxed().toList());
         assertThat(reversed.accountLaneGroups().getFirst().users())
-                .extracting(RuntimeCommitPatch.UserChange::userId)
+                .extracting(RuntimeFactFrame.UserChange::userId)
                 .containsExactlyElementsOf(java.util.stream.LongStream.iterate(64, value -> value - 1)
                         .limit(64).boxed().toList());
 
@@ -146,16 +146,16 @@ class RuntimeCommitPatchTest {
                 .matcherTransition(new CoreMatcherTransition(1, 0, 6, 8, 90, 101));
         ascending.recordUser(1, null, user(100, 1));
         ascending.laneMask(1L << 1);
-        RuntimeCommitPatch afterReset = ascending.seal(metadata(1L << 1));
+        RuntimeFactFrame afterReset = ascending.seal(metadata(1L << 1));
 
         assertThat(afterReset.accountLaneGroups().getFirst().users())
-                .extracting(RuntimeCommitPatch.UserChange::userId)
+                .extracting(RuntimeFactFrame.UserChange::userId)
                 .containsExactly(100L);
     }
 
     @Test
     void rejectsDuplicateCanonicalMetadataAndExactArithmeticOverflow() {
-        RuntimeCommitPatch.Builder duplicateTerminal = baseBuilder();
+        RuntimeFactFrame.Builder duplicateTerminal = baseBuilder();
         duplicateTerminal.terminalIds(List.of(4L, 4L), List.of(), List.of());
         duplicateTerminal.recordUser(1, null, user(7, 1));
         duplicateTerminal.laneMask(1L << 1);
@@ -163,11 +163,11 @@ class RuntimeCommitPatchTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("duplicate terminal");
 
-        RuntimeCommitPatch.Builder overflow = baseBuilder();
+        RuntimeFactFrame.Builder overflow = baseBuilder();
         overflow.recordUser(1, null, user(7, 1));
-        overflow.addFundsPosting(new RuntimeCommitPatch.FundsPosting(
+        overflow.addFundsPosting(new RuntimeFactFrame.FundsPosting(
                 1, FundsPosting.OwnerKind.USER, 7, FundsPosting.Subledger.AVAILABLE, Long.MAX_VALUE));
-        overflow.addFundsPosting(new RuntimeCommitPatch.FundsPosting(
+        overflow.addFundsPosting(new RuntimeFactFrame.FundsPosting(
                 1, FundsPosting.OwnerKind.USER, 7, FundsPosting.Subledger.AVAILABLE, 1));
         overflow.laneMask(1L << 1);
         assertThatThrownBy(() -> overflow.seal(metadata(1L << 1))).isInstanceOf(ArithmeticException.class);
@@ -175,9 +175,9 @@ class RuntimeCommitPatchTest {
 
     @Test
     void rejectsUnconservedFundsUnlessTheCommandIsAnExternalAdjustment() {
-        RuntimeCommitPatch.FundsPosting unbalanced = new RuntimeCommitPatch.FundsPosting(
+        RuntimeFactFrame.FundsPosting unbalanced = new RuntimeFactFrame.FundsPosting(
                 1, FundsPosting.OwnerKind.USER, 7, FundsPosting.Subledger.AVAILABLE, 10);
-        RuntimeCommitPatch.Builder rejected = baseBuilder();
+        RuntimeFactFrame.Builder rejected = baseBuilder();
         rejected.recordUser(1, null, user(7, 1));
         rejected.addFundsPosting(unbalanced);
         rejected.laneMask(1L << 1);
@@ -185,7 +185,7 @@ class RuntimeCommitPatchTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("not conserved");
 
-        RuntimeCommitPatch.Builder external = baseBuilder();
+        RuntimeFactFrame.Builder external = baseBuilder();
         external.recordUser(1, null, user(7, 1));
         external.addFundsPosting(unbalanced);
         external.laneMask(1L << 1);
@@ -194,12 +194,12 @@ class RuntimeCommitPatchTest {
 
     @Test
     void rejectsEmbeddedIdentityAndTriggerProductLineMismatch() {
-        RuntimeCommitPatch.Builder userIdentity = baseBuilder();
+        RuntimeFactFrame.Builder userIdentity = baseBuilder();
         assertThatThrownBy(() -> userIdentity.recordUser(1, user(7, 1), user(8, 2)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("identity");
 
-        RuntimeCommitPatch.Builder triggerLine = baseBuilder();
+        RuntimeFactFrame.Builder triggerLine = baseBuilder();
         assertThatThrownBy(() -> triggerLine.recordTriggerOrder(1, 17, null,
                 trigger(17, ProductLine.SPOT)))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -208,23 +208,23 @@ class RuntimeCommitPatchTest {
 
     @Test
     void rejectsConflictingBeforeValueAndNegativeSealRevision() {
-        RuntimeCommitPatch.Builder conflicting = baseBuilder();
+        RuntimeFactFrame.Builder conflicting = baseBuilder();
         conflicting.recordUser(1, user(7, 1), user(7, 2));
         assertThatThrownBy(() -> conflicting.recordUser(1, user(7, 4), user(7, 5)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("conflicting before-value");
-        assertThatThrownBy(() -> new RuntimeCommitPatch.SealMetadata(
+        assertThatThrownBy(() -> new RuntimeFactFrame.SealMetadata(
                 -1, 0, 0, 0, 0, 0, 0, metadata().coreFactMetadata()))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void elidesNoOpChangesWithoutClaimingBusinessMutation() {
-        RuntimeCommitPatch.Builder builder = baseBuilder();
+        RuntimeFactFrame.Builder builder = baseBuilder();
         UserRuntime unchanged = user(7, 1);
         builder.recordUser(1, unchanged, unchanged);
 
-        RuntimeCommitPatch patch = builder.seal(metadata(0, 8, 8));
+        RuntimeFactFrame patch = builder.seal(metadata(0, 8, 8));
 
         assertThat(patch.changesBusinessState()).isFalse();
         assertThat(patch.accountLaneGroups()).isEmpty();
@@ -232,27 +232,27 @@ class RuntimeCommitPatchTest {
 
     @Test
     void sealedLaneMaskExactlyRepresentsSingleAllSparseAndNoOpOwnerGroups() {
-        RuntimeCommitPatch.Builder single = baseBuilder();
+        RuntimeFactFrame.Builder single = baseBuilder();
         single.recordUser(2, null, user(2, 1));
         single.laneMask(1L << 2);
         assertThat(single.seal(metadata(1L << 2)).laneMask()).isEqualTo(1L << 2);
 
-        RuntimeCommitPatch.Builder allFour = baseBuilder();
+        RuntimeFactFrame.Builder allFour = baseBuilder();
         for (int laneId = 0; laneId < 4; laneId++) {
             allFour.recordUser(laneId, null, user(laneId + 1L, 1));
         }
         allFour.laneMask(0b1111);
         assertThat(allFour.seal(metadata(0b1111)).laneMask()).isEqualTo(0b1111);
 
-        RuntimeCommitPatch.Builder sparse = baseBuilder();
+        RuntimeFactFrame.Builder sparse = baseBuilder();
         sparse.recordUser(0, null, user(4, 1));
         sparse.recordUser(3, null, user(7, 1));
         sparse.laneMask((1L << 0) | (1L << 3));
         assertThat(sparse.seal(metadata((1L << 0) | (1L << 3))).laneMask())
                 .isEqualTo((1L << 0) | (1L << 3));
 
-        RuntimeCommitPatch.Builder noOp = baseBuilder();
-        RuntimeCommitPatch empty = noOp.seal(metadata(0, 8, 8));
+        RuntimeFactFrame.Builder noOp = baseBuilder();
+        RuntimeFactFrame empty = noOp.seal(metadata(0, 8, 8));
         assertThat(empty.laneMask()).isZero();
         assertThat(empty.accountLaneGroups()).isEmpty();
         assertThat(empty.changesBusinessState()).isFalse();
@@ -263,7 +263,7 @@ class RuntimeCommitPatchTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         int symbolId = identities.symbolId("BTC-USDT");
         OrderRuntime order = new OrderRuntime(71, 7, symbolId, 2);
-        RuntimeCommitPatch.Builder builder = RuntimeCommitPatch.builder(
+        RuntimeFactFrame.Builder builder = RuntimeFactFrame.builder(
                 ProductLine.LINEAR_PERPETUAL, 0, 1)
                 .matcherTransition(CoreMatcherTransition.unchanged(0, 0));
         builder.recordUser(1, null, user(7, 1));
@@ -272,23 +272,23 @@ class RuntimeCommitPatchTest {
         builder.laneMask(1L << 1);
 
         UUID factCommandId = UUID.randomUUID();
-        var factMetadata = new RuntimeCommitPatch.CoreFactMetadata(factCommandId,
+        var factMetadata = new RuntimeFactFrame.CoreFactMetadata(factCommandId,
                 fingerprint(factCommandId, 7, 1),
                 com.surprising.aeron.protocol.CoreMessageType.PROBE_INCREMENT.wireCode(), 7,
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 1, 1, 1, false);
-        RuntimeCommitPatch.PrepareMetadata prepareMetadata = new RuntimeCommitPatch.PrepareMetadata(
+        RuntimeFactFrame.PrepareMetadata prepareMetadata = new RuntimeFactFrame.PrepareMetadata(
                 0, 1, 0, 0, 1L << 1, factMetadata, false);
-        RuntimeCommitPatch.PreparedChanges prepared = builder.prepare(prepareMetadata, identities);
-        RuntimeCommitPatch patch = builder.seal(prepared, 1, 0);
-        RuntimeCommitPatch.OrderChange change = patch.accountLaneGroups().getFirst().orders().getFirst();
+        RuntimeFactFrame.PreparedChanges prepared = builder.prepare(prepareMetadata, identities);
+        RuntimeFactFrame patch = builder.seal(prepared, 1, 0);
+        RuntimeFactFrame.OrderChange change = patch.accountLaneGroups().getFirst().orders().getFirst();
         TradingCoreState initial = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
         ActiveOrderIndex index = new ActiveOrderIndex(initial, identities);
         index.apply(List.of(change), identities);
         RuntimeProjectionState projection = new RuntimeProjectionState(initial, 0, 0);
         projection.apply(patch);
 
-        assertThat(index.orders().iterator().next()).isSameAs(change.businessAfter());
-        assertThat(projection.freeze(1).orders().get(71L)).isSameAs(change.businessAfter());
+        assertThat(index.orders().iterator().next().orderId()).isEqualTo(change.orderId());
+        assertThat(projection.freeze(1).orders().get(71L).orderId()).isEqualTo(change.orderId());
         assertThat(patch.materializeCoreFactFragment().changedOrders())
                 .singleElement().extracting(CoreOrderState::orderId)
                 .isEqualTo(order.orderId());
@@ -301,13 +301,13 @@ class RuntimeCommitPatchTest {
         int symbolId = identities.symbolId("BTC-USDT");
         long firstPositionKey = identities.positionKey(7, "BTC-USDT:LONG");
         long secondPositionKey = identities.positionKey(9, "BTC-USDT:SHORT");
-        RuntimeCommitPatch.Builder builder = RuntimeCommitPatch.builder(
+        RuntimeFactFrame.Builder builder = RuntimeFactFrame.builder(
                 ProductLine.LINEAR_PERPETUAL, 0, 1)
                 .matcherTransition(CoreMatcherTransition.unchanged(0, 0));
         builder.recordUser(1, null, user(9, 1));
         builder.recordUser(1, null, user(7, 1));
-        builder.recordBalance(1, 9, assetId, null, new RuntimeCommitPatch.UserBalance(900, 100, 0));
-        builder.recordBalance(1, 7, assetId, null, new RuntimeCommitPatch.UserBalance(700, 300, 0));
+        builder.recordBalance(1, 9, assetId, null, new RuntimeFactFrame.UserBalance(900, 100, 0));
+        builder.recordBalance(1, 7, assetId, null, new RuntimeFactFrame.UserBalance(700, 300, 0));
         builder.recordReservation(1, 99, null,
                 new ReservationRuntime(99, 9, symbolId, 1,
                         com.surprising.aeron.protocol.ReservationKind.DERIVATIVE_MARGIN,
@@ -329,13 +329,13 @@ class RuntimeCommitPatchTest {
         builder.laneMask(1L << 1);
 
         UUID factCommandId = UUID.randomUUID();
-        var factMetadata = new RuntimeCommitPatch.CoreFactMetadata(factCommandId,
+        var factMetadata = new RuntimeFactFrame.CoreFactMetadata(factCommandId,
                 fingerprint(factCommandId, 7, 1),
                 com.surprising.aeron.protocol.CoreMessageType.PROBE_INCREMENT.wireCode(), 7,
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 1, 1, 1, true);
-        RuntimeCommitPatch.PreparedChanges prepared = builder.prepare(new RuntimeCommitPatch.PrepareMetadata(
+        RuntimeFactFrame.PreparedChanges prepared = builder.prepare(new RuntimeFactFrame.PrepareMetadata(
                 0, 1, 0, 0, 1L << 1, factMetadata, true), identities);
-        RuntimeCommitPatch.CoreFactFragment fragment = builder.seal(prepared, 1, 0)
+        RuntimeFactFrame.CoreFactFragment fragment = builder.seal(prepared, 1, 0)
                 .materializeCoreFactFragment();
 
         assertThat(fragment.changedUsers()).extracting(user -> user.userId()).containsExactly(9L, 7L);
@@ -360,20 +360,20 @@ class RuntimeCommitPatchTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         int symbolId = identities.symbolId("BTC-USDT");
         OrderRuntime order = new OrderRuntime(72, 7, symbolId, 2);
-        RuntimeCommitPatch.Builder builder = baseBuilder();
+        RuntimeFactFrame.Builder builder = baseBuilder();
         CoreOrderState businessOrder = RuntimeStateMaterializer.orderSnapshot(order, identities);
         builder.recordOrder(1, order, null, businessOrder, null);
         builder.laneMask(1L << 1);
 
         UUID factCommandId = UUID.randomUUID();
-        var factMetadata = new RuntimeCommitPatch.CoreFactMetadata(factCommandId,
+        var factMetadata = new RuntimeFactFrame.CoreFactMetadata(factCommandId,
                 fingerprint(factCommandId, 7, 41),
                 com.surprising.aeron.protocol.CoreMessageType.PROBE_INCREMENT.wireCode(), 7,
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 41, 401, 501, 601, false);
-        RuntimeCommitPatch.PrepareMetadata prepareMetadata = new RuntimeCommitPatch.PrepareMetadata(
+        RuntimeFactFrame.PrepareMetadata prepareMetadata = new RuntimeFactFrame.PrepareMetadata(
                 3, 4, 5, 7, 1L << 1, factMetadata, false);
-        RuntimeCommitPatch.PreparedChanges prepared = builder.prepare(prepareMetadata, identities);
-        RuntimeCommitPatch patch = builder.seal(prepared, 9, 11);
+        RuntimeFactFrame.PreparedChanges prepared = builder.prepare(prepareMetadata, identities);
+        RuntimeFactFrame patch = builder.seal(prepared, 9, 11);
 
         assertThat(patch.materializeCoreFactFragment().changedOrders()).isEmpty();
         assertThat(patch.materializeCoreFactFragment().tombstones().orderIds()).containsExactly(72L);
@@ -381,7 +381,7 @@ class RuntimeCommitPatchTest {
 
     @Test
     void compactPatchRetainsCanonicalCommitMetadataAndTerminalIdsWithoutMaterializingPayload() {
-        RuntimeCommitPatch patch = populatedBuilder(false).seal(metadata());
+        RuntimeFactFrame patch = populatedBuilder(false).seal(metadata());
 
         assertThat(patch.coreFactMetadata()).isEqualTo(metadata().coreFactMetadata());
         assertThat(patch.matcherEvidence()).isNotEmpty();
@@ -394,12 +394,12 @@ class RuntimeCommitPatchTest {
         assertThat(patch.projectionSequence()).isEqualTo(41);
     }
 
-    private static RuntimeCommitPatch.Builder populatedBuilder(boolean reverse) {
-        RuntimeCommitPatch.Builder builder = baseBuilder();
+    private static RuntimeFactFrame.Builder populatedBuilder(boolean reverse) {
+        RuntimeFactFrame.Builder builder = baseBuilder();
         UserRuntime user2 = user(2, 1);
         UserRuntime user9 = user(9, 1);
-        RuntimeCommitPatch.UserBalance before = new RuntimeCommitPatch.UserBalance(100, 20, 5);
-        RuntimeCommitPatch.UserBalance after = new RuntimeCommitPatch.UserBalance(90, 30, 7);
+        RuntimeFactFrame.UserBalance before = new RuntimeFactFrame.UserBalance(100, 20, 5);
+        RuntimeFactFrame.UserBalance after = new RuntimeFactFrame.UserBalance(90, 30, 7);
         if (reverse) {
             builder.recordUser(1, null, user9);
             builder.recordBalance(1, 9, 2, before, after);
@@ -411,40 +411,40 @@ class RuntimeCommitPatchTest {
             builder.recordBalance(1, 9, 2, before, after);
             builder.recordUser(1, null, user9);
         }
-        List<RuntimeCommitPatch.MatcherEvidence> evidence = List.of(
-                new RuntimeCommitPatch.MatcherEvidence(8, 2, 19, 29, 3, 101),
-                new RuntimeCommitPatch.MatcherEvidence(7, 1, 17, 27, 2, 99));
+        List<RuntimeFactFrame.MatcherEvidence> evidence = List.of(
+                new RuntimeFactFrame.MatcherEvidence(8, 2, 19, 29, 3, 101),
+                new RuntimeFactFrame.MatcherEvidence(7, 1, 17, 27, 2, 99));
         (reverse ? evidence.reversed() : evidence).forEach(builder::addMatcherEvidence);
         builder.terminalIds(reverse ? List.of(12L, 4L) : List.of(4L, 12L), List.of(6L), List.of(8L));
         builder.laneMask((1L << 1) | (1L << 3));
         return builder;
     }
 
-    private static RuntimeCommitPatch.Builder baseBuilder() {
-        return RuntimeCommitPatch.builder(ProductLine.LINEAR_PERPETUAL, 40, 41)
+    private static RuntimeFactFrame.Builder baseBuilder() {
+        return RuntimeFactFrame.builder(ProductLine.LINEAR_PERPETUAL, 40, 41)
                 .matcherTransition(new CoreMatcherTransition(1, 0, 6, 8, 90, 101));
     }
 
-    private static RuntimeCommitPatch.SealMetadata metadata() {
+    private static RuntimeFactFrame.SealMetadata metadata() {
         return metadata((1L << 1) | (1L << 3));
     }
 
-    private static RuntimeCommitPatch.SealMetadata metadata(boolean externalAdjustment) {
+    private static RuntimeFactFrame.SealMetadata metadata(boolean externalAdjustment) {
         return metadata((1L << 1), 8, 9, externalAdjustment);
     }
 
-    private static RuntimeCommitPatch.SealMetadata metadata(long laneMask) {
+    private static RuntimeFactFrame.SealMetadata metadata(long laneMask) {
         return metadata(laneMask, 8, 9);
     }
 
-    private static RuntimeCommitPatch.SealMetadata metadata(long laneMask, long beforeRevision, long afterRevision) {
+    private static RuntimeFactFrame.SealMetadata metadata(long laneMask, long beforeRevision, long afterRevision) {
         return metadata(laneMask, beforeRevision, afterRevision, false);
     }
 
-    private static RuntimeCommitPatch.SealMetadata metadata(
+    private static RuntimeFactFrame.SealMetadata metadata(
             long laneMask, long beforeRevision, long afterRevision, boolean externalAdjustment) {
-        return new RuntimeCommitPatch.SealMetadata(beforeRevision, afterRevision, 111, 113, 211, 223,
-                laneMask, new RuntimeCommitPatch.CoreFactMetadata(
+        return new RuntimeFactFrame.SealMetadata(beforeRevision, afterRevision, 111, 113, 211, 223,
+                laneMask, new RuntimeFactFrame.CoreFactMetadata(
                 UUID.fromString("00000000-0000-0000-0000-000000000041"),
                 fingerprint(UUID.fromString("00000000-0000-0000-0000-000000000041"), 9, 41),
                 com.surprising.aeron.protocol.CoreMessageType.PROBE_INCREMENT.wireCode(), 9,
