@@ -104,6 +104,9 @@ final class LinearPerpetualSaturationWorkload {
             private long acceptedCoreMessages;
             private long terminalCoreMessages;
             private long terminalTrades;
+            private long laneOperations;
+            private final long[] laneOperationsByType =
+                    new long[CoreLaneMetrics.OPERATION_TYPE_COUNT];
             private long backlogTotal;
             private long backlogSamples;
             private long fullWindowSamples;
@@ -123,6 +126,7 @@ final class LinearPerpetualSaturationWorkload {
                 long acceptedCoreBefore = harness.acceptedCoreMessages();
                 long terminalCoreBefore = harness.terminalCoreMessages();
                 long terminalTradesBefore = harness.terminalTradeCount();
+                long[] laneOperationsBefore = completedLaneOperations(harness.state());
                 latencySamples = 0;
                 backlogTotal = 0;
                 backlogSamples = 0;
@@ -161,6 +165,13 @@ final class LinearPerpetualSaturationWorkload {
                 acceptedCoreMessages = Math.subtractExact(harness.acceptedCoreMessages(), acceptedCoreBefore);
                 terminalCoreMessages = Math.subtractExact(harness.terminalCoreMessages(), terminalCoreBefore);
                 terminalTrades = Math.subtractExact(harness.terminalTradeCount(), terminalTradesBefore);
+                long[] laneOperationsAfter = completedLaneOperations(harness.state());
+                laneOperations = 0;
+                for (int type = 0; type < laneOperationsByType.length; type++) {
+                    laneOperationsByType[type] = Math.subtractExact(
+                            laneOperationsAfter[type], laneOperationsBefore[type]);
+                    laneOperations = Math.addExact(laneOperations, laneOperationsByType[type]);
+                }
                 if (latencySamples != operationsPerRun) {
                     throw new IllegalStateException("saturation workload lost completion latency samples");
                 }
@@ -338,6 +349,16 @@ final class LinearPerpetualSaturationWorkload {
             }
 
             @Override
+            public long laneOperations() {
+                return laneOperations;
+            }
+
+            @Override
+            public long laneOperations(int operationType) {
+                return laneOperationsByType[operationType];
+            }
+
+            @Override
             public int completedLatencySamples() {
                 return latencySamples;
             }
@@ -435,8 +456,17 @@ final class LinearPerpetualSaturationWorkload {
                 long closingFunds = LinearPerpetualMixedWorkload.totalFunds(harness.state().tradingState());
                 int closingActiveOrders = harness.state().tradingState().orders().size();
                 int parallelSettlementLanes = 0;
-                for (int highWaterMark : harness.state().laneMetrics().accountLaneQueueHighWaterMarks()) {
+                CoreLaneMetrics laneMetrics = harness.state().laneMetrics();
+                for (int highWaterMark : laneMetrics.accountLaneQueueHighWaterMarks()) {
                     if (highWaterMark > 0) parallelSettlementLanes++;
+                }
+                long rejectedLaneSubmissions = 0;
+                for (long rejected : laneMetrics.accountLaneRejectedSubmissions()) {
+                    rejectedLaneSubmissions = Math.addExact(rejectedLaneSubmissions, rejected);
+                }
+                int queuedLaneOperations = 0;
+                for (int depth : laneMetrics.accountLaneQueueDepths()) {
+                    queuedLaneOperations = Math.addExact(queuedLaneOperations, depth);
                 }
                 boolean incompletePair = false;
                 for (boolean inFlight : pairInFlight) incompletePair |= inFlight;
@@ -445,7 +475,12 @@ final class LinearPerpetualSaturationWorkload {
                         || scheduledEntrySequence != operationsPerRun
                         || acceptedCoreMessages != terminalCoreMessages
                         || terminalTrades != operationsPerRun / 2L
+                        || laneOperationsByType[1] <= operationsPerRun
+                        || laneOperationsByType[1] > Math.multiplyExact(operationsPerRun, 3L)
+                        || laneOperations != laneOperationsByType[1]
                         || parallelSettlementLanes < 2
+                        || rejectedLaneSubmissions != 0
+                        || queuedLaneOperations != 0
                         || backlogSamples == 0
                         || !usersInFlight.isEmpty()
                         || incompletePair
@@ -461,6 +496,10 @@ final class LinearPerpetualSaturationWorkload {
                             + ", scheduledEntries=" + scheduledEntrySequence + '/' + operationsPerRun
                             + ", coreMessages=" + acceptedCoreMessages + '/' + terminalCoreMessages
                             + ", terminalTrades=" + terminalTrades + '/' + (operationsPerRun / 2L)
+                            + ", laneOperations=" + laneOperations
+                            + ", laneSettlements=" + laneOperationsByType[1]
+                            + ", rejectedLaneSubmissions=" + rejectedLaneSubmissions
+                            + ", queuedLaneOperations=" + queuedLaneOperations
                             + ", parallelSettlementLanes=" + parallelSettlementLanes
                             + ", backlogSamples=" + backlogSamples
                             + ", usersInFlight=" + usersInFlight.size()
@@ -479,5 +518,15 @@ final class LinearPerpetualSaturationWorkload {
                 harness.close();
             }
         };
+    }
+
+    private static long[] completedLaneOperations(CoreProbeState state) {
+        long[] total = new long[CoreLaneMetrics.OPERATION_TYPE_COUNT];
+        long[] completed = state.laneMetrics().accountLaneCompletedOperations();
+        for (int index = 0; index < completed.length; index++) {
+            int type = index % CoreLaneMetrics.OPERATION_TYPE_COUNT;
+            total[type] = Math.addExact(total[type], completed[index]);
+        }
+        return total;
     }
 }

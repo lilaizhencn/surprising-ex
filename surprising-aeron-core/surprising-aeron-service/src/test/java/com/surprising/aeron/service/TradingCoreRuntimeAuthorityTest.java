@@ -120,8 +120,9 @@ class TradingCoreRuntimeAuthorityTest {
         assertThat(source("state/MatcherSettlementEvent.java"))
                 .contains("implements SettlementLaneWorker.Command", "lane.applied(commitSequence",
                         "completeMatcherPendingReservations(lane, plan)",
-                        "publishLaneHashes(lane)", "COMPLETED_LANE_MASK.getAndBitwiseOr")
-                .doesNotContain("await(", "LockSupport.park");
+                        "publishLaneHashes(lane)", "COMPLETION_STRIDE = 8",
+                        "LANE_COMPLETION.setRelease", "LANE_COMPLETION.getAcquire")
+                .doesNotContain("getAndBitwiseOr", "await(", "LockSupport.park");
         assertThat(method(probe, "    private long laneRevisionHash()"))
                 .contains("accountLaneLocalStateHashById", "accountLaneLocalFundsHashById")
                 .doesNotContain("accountLaneById", ".await(");

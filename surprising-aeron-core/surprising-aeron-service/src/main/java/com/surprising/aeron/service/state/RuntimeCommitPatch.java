@@ -198,8 +198,8 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
         FactIdentitySlice registry = identities();
         ArrayList<CoreUserStateView> users = new ArrayList<>();
         ArrayList<CoreOrderState> orders = new ArrayList<>();
-        ArrayList<CoreLiquidationView> liquidations = new ArrayList<>();
-        ArrayList<CoreTriggerOrderStateView> triggers = new ArrayList<>();
+        ArrayList<CoreLiquidationView> liquidations = null;
+        ArrayList<CoreTriggerOrderStateView> triggers = null;
         for (AccountLaneOwnerGroup group : accountLaneGroups) {
             appendUsers(users, group, registry);
             for (OrderChange change : group.orders) {
@@ -208,22 +208,28 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
             }
             for (LiquidationChange change : group.liquidations) {
                 if (change.after != null && !change.asset.isBlank()) {
+                    if (liquidations == null) liquidations = new ArrayList<>();
                     liquidations.add(liquidationView(change, registry));
                 }
             }
             for (TriggerOrderChange change : group.triggerOrders) {
-                if (change.after != null) triggers.add(change.after.view());
+                if (change.after != null) {
+                    if (triggers == null) triggers = new ArrayList<>();
+                    triggers.add(change.after.view());
+                }
             }
         }
-        ArrayList<CoreTreasuryAssetView> treasury = new ArrayList<>();
+        ArrayList<CoreTreasuryAssetView> treasury = null;
         for (TreasuryAssetChange change : globalOwnerGroup.treasuryAssets) {
             TreasuryAssetValue value = change.after;
             if (value == null) continue;
+            if (treasury == null) treasury = new ArrayList<>();
             treasury.add(new CoreTreasuryAssetView(registry.asset(change.assetId), treasuryFee(value),
                     treasuryInsurance(value), treasuryDeficit(value), treasuryLiquidationFee(value),
                     treasuryFundingResidual(value), treasuryRoundingResidual(value), treasuryClearingPnl(value)));
         }
-        return new CoreFactFragment(users, orders, liquidations, treasury, triggers, matcherEvidence,
+        return new CoreFactFragment(users, orders, listOrEmpty(liquidations), listOrEmpty(treasury),
+                listOrEmpty(triggers), matcherEvidence,
                 terminalIds, tombstones(this, registry));
     }
 
@@ -308,47 +314,80 @@ public final class RuntimeCommitPatch implements RuntimeCommitView {
 
     private static CoreExportEvent.Tombstones tombstones(RuntimeCommitPatch patch,
                                                           IdentityView identities) {
-        ArrayList<Long> users = new ArrayList<>();
-        ArrayList<CoreExportEvent.UserAssetKey> balances = new ArrayList<>();
-        ArrayList<CoreExportEvent.UserOrderKey> reservations = new ArrayList<>();
-        ArrayList<Long> orders = new ArrayList<>();
-        ArrayList<CoreExportEvent.UserPositionKey> positions = new ArrayList<>();
-        ArrayList<CoreExportEvent.UserLeverageKey> leverages = new ArrayList<>();
-        ArrayList<Long> liquidations = new ArrayList<>();
-        ArrayList<Long> algos = new ArrayList<>();
-        ArrayList<Long> triggers = new ArrayList<>();
+        ArrayList<Long> users = null;
+        ArrayList<CoreExportEvent.UserAssetKey> balances = null;
+        ArrayList<CoreExportEvent.UserOrderKey> reservations = null;
+        ArrayList<Long> orders = null;
+        ArrayList<CoreExportEvent.UserPositionKey> positions = null;
+        ArrayList<CoreExportEvent.UserLeverageKey> leverages = null;
+        ArrayList<Long> liquidations = null;
+        ArrayList<Long> algos = null;
+        ArrayList<Long> triggers = null;
         for (AccountLaneOwnerGroup group : patch.accountLaneGroups) {
-            for (UserChange change : group.users) if (change.after == null) users.add(change.userId);
+            for (UserChange change : group.users) if (change.after == null) {
+                if (users == null) users = new ArrayList<>();
+                users.add(change.userId);
+            }
             for (BalanceChange change : group.balances) if (change.after == null) {
+                if (balances == null) balances = new ArrayList<>();
                 balances.add(new CoreExportEvent.UserAssetKey(change.key.userId,
                         identities.asset(change.key.assetId)));
             }
             for (ReservationChange change : group.reservations) if (change.after == null) {
+                if (reservations == null) reservations = new ArrayList<>();
                 reservations.add(new CoreExportEvent.UserOrderKey(change.before.userId(), change.orderId));
             }
-            for (OrderChange change : group.orders) if (change.after == null) orders.add(change.orderId);
+            for (OrderChange change : group.orders) if (change.after == null) {
+                if (orders == null) orders = new ArrayList<>();
+                orders.add(change.orderId);
+            }
             for (PositionChange change : group.positions) if (change.after == null) {
+                if (positions == null) positions = new ArrayList<>();
                 positions.add(new CoreExportEvent.UserPositionKey(change.before.userId(),
                         identities.symbol(change.before.symbolId()), change.before.positionSide()));
             }
             for (LeverageChange change : group.leverages) if (change.after == null) {
+                if (leverages == null) leverages = new ArrayList<>();
                 leverages.add(new CoreExportEvent.UserLeverageKey(change.key.userId(),
                         change.key.symbol(), change.key.marginMode()));
             }
             for (LiquidationChange change : group.liquidations) {
-                if (change.after == null) liquidations.add(change.liquidationId);
+                if (change.after == null) {
+                    if (liquidations == null) liquidations = new ArrayList<>();
+                    liquidations.add(change.liquidationId);
+                }
             }
-            for (AlgoOrderChange change : group.algoOrders) if (change.after == null) algos.add(change.algoOrderId);
+            for (AlgoOrderChange change : group.algoOrders) if (change.after == null) {
+                if (algos == null) algos = new ArrayList<>();
+                algos.add(change.algoOrderId);
+            }
             for (TriggerOrderChange change : group.triggerOrders) {
-                if (change.after == null) triggers.add(change.triggerOrderId);
+                if (change.after == null) {
+                    if (triggers == null) triggers = new ArrayList<>();
+                    triggers.add(change.triggerOrderId);
+                }
             }
         }
-        ArrayList<String> treasury = new ArrayList<>();
+        ArrayList<String> treasury = null;
         for (TreasuryAssetChange change : patch.globalOwnerGroup.treasuryAssets) {
-            if (change.after == null) treasury.add(identities.asset(change.assetId));
+            if (change.after == null) {
+                if (treasury == null) treasury = new ArrayList<>();
+                treasury.add(identities.asset(change.assetId));
+            }
         }
-        return new CoreExportEvent.Tombstones(users, balances, reservations, orders, positions, leverages,
-                liquidations, algos, triggers, treasury);
+        if (users == null && balances == null && reservations == null && orders == null
+                && positions == null && leverages == null && liquidations == null && algos == null
+                && triggers == null && treasury == null) {
+            return CoreExportEvent.Tombstones.empty();
+        }
+        return new CoreExportEvent.Tombstones(listOrEmpty(users), listOrEmpty(balances),
+                listOrEmpty(reservations), listOrEmpty(orders), listOrEmpty(positions),
+                listOrEmpty(leverages), listOrEmpty(liquidations), listOrEmpty(algos),
+                listOrEmpty(triggers), listOrEmpty(treasury));
+    }
+
+    private static <T> List<T> listOrEmpty(ArrayList<T> values) {
+        return values == null ? List.of() : values;
     }
 
     private static CoreLiquidationView liquidationView(LiquidationChange change,

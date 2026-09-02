@@ -32,7 +32,8 @@ matcher worker 独占 fork 的 `SynchronousMatchingEngine` 并按序写回结果
 
 Account Lane 同时是资金隔离、执行、哈希、快照与审计边界。多成交、多用户、跨 Lane 的一笔命令共享同一条
 `MatcherSettlementEvent`，不是为每笔 fill 创建 maker/taker 两个任务。Lane 可以连续应用多个 sequence；
-一个 Lane task 同时完成账户变更、applied/committed watermark 和局部 hash 发布，不存在第二个 commit task。Coordinator 只按 completion bitmap
+一个 Lane task 同时完成账户变更、pending reservation 终结、订单 commit metadata、applied/committed watermark 和局部 hash 发布，
+不存在成交后的第二次订单 stamping Lane 往返或第二个 commit task。Coordinator 只按 completion bitmap
 推进 Core Fact。任何 Lane 或提交不变量失败都会 fail-stop，并从 snapshot/Cluster Log
 恢复，不在交易热路径对已应用 Lane 做反向回滚。
 
@@ -68,6 +69,8 @@ patch 的 `businessAfter` / `exportAfter` 随后由 projection、index、retenti
 
 owner 提交暂存采用可复用 `RuntimeCommitPatch.Builder`；reset 只清理本轮触碰的槽位，sealed patch 仍持有独立不可变值。
 用户与余额 before-value 按 Account Lane 写入 primitive journal，避免共享 `ConcurrentHashMap<Long, ...>` 的装箱和节点竞争；
+命令级 changed-ID 使用 first-touch primitive 数组和 generation 哈希索引，clear 不扫描历史容量；无删除项的 Core Fact 复用空 tombstone，
+有删除项时也只创建实际使用的类别列表；
 资金 posting 按本命令 first-touch 顺序直接线性合并，不排序；rolling hash 直接前向消费 typed before/after，
 不创建 staging operation 数组、镜像 reverse patch 或每用户临时更新对象。
 Core Fact materializer 直接把 user/order 嵌套结构写入最终 event buffer，不再为每个嵌套对象先生成

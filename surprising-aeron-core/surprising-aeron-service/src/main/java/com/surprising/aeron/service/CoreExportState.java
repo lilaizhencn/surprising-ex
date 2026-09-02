@@ -749,8 +749,18 @@ final class CoreExportState implements AutoCloseable {
         private static RuntimeCommitPatch.TerminalIds mergeTerminalOrders(
                 RuntimeCommitPatch.TerminalIds terminalIds, long[] additionalOrderIds) {
             if (additionalOrderIds.length == 0) return terminalIds;
-            TreeSet<Long> orders = new TreeSet<>(terminalIds.orderIds());
-            for (long orderId : additionalOrderIds) orders.add(orderId);
+            ArrayList<Long> orders = new ArrayList<>(terminalIds.orderIds());
+            for (long orderId : additionalOrderIds) {
+                boolean present = false;
+                for (long existing : orders) {
+                    if (existing == orderId) {
+                        present = true;
+                        break;
+                    }
+                }
+                if (!present) orders.add(orderId);
+            }
+            orders.sort(Long::compare);
             return new RuntimeCommitPatch.TerminalIds(List.copyOf(orders), terminalIds.liquidationIds(),
                     terminalIds.triggerOrderIds());
         }

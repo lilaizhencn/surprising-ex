@@ -147,6 +147,10 @@ public record CoreExportEvent(
                              List<UserPositionKey> positions, List<UserLeverageKey> leverages,
                              List<Long> liquidationIds, List<Long> algoOrderIds,
                              List<Long> triggerOrderIds, List<String> treasuryAssets) {
+        private static final Tombstones EMPTY = new Tombstones(
+                List.of(), List.of(), List.of(), List.of(), List.of(),
+                List.of(), List.of(), List.of(), List.of(), List.of());
+
         public Tombstones {
             userIds = List.copyOf(userIds);
             balances = List.copyOf(balances);
@@ -183,8 +187,7 @@ public record CoreExportEvent(
         }
 
         public static Tombstones empty() {
-            return new Tombstones(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
-                    List.of(), List.of(), List.of(), List.of());
+            return EMPTY;
         }
 
         public int itemCount() {

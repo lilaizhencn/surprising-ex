@@ -30,6 +30,7 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 串行修改本 Lane 的账户、余额、订单、冻结和持仓。Coordinator 只读取 completion bitmap、按 Core sequence 发布
 Core Fact，不做逐 Lane `release/bind/await`。Lane 在同一个 owner task 内依次推进 applied/committed watermark，允许连续消费多个 sequence；
 同一事件在 Lane 内直接完成本命令的 pending reservation，并把余额 primitive before/after 与最新局部 hash 一并发布；
+订单 `updatedAt/clusterPosition` 也在该事件的所属 Lane 内一次写入，成交完成后不再二次 fan-out 做 metadata stamping；
 owner 的 prepare/seal 和 lane revision hash 只消费这些已完成结果，不再逐余额、逐 reservation 或逐 Lane 发同步查询。
 查询和 snapshot 只越过 committed watermark。观察到撮合事实后的任何 Lane、资金、hash、index 或发布不变量错误均
 fail-stop，实例必须从 snapshot 和 Cluster Log 恢复，热路径不再尝试分布式 rollback。

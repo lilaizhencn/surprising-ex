@@ -21,6 +21,11 @@ final class ImmutableLongArrayList extends AbstractList<Long> implements RandomA
         return new ImmutableLongArrayList(values, false);
     }
 
+    static ImmutableLongArrayList takeOwnership(long[] values) {
+        if (values == null || values.length == 0) return EMPTY;
+        return new ImmutableLongArrayList(values, true);
+    }
+
     static ImmutableLongArrayList sortedDistinct(long[] values, long additional) {
         long[] copy = Arrays.copyOf(values, values.length + 1);
         copy[values.length] = additional;

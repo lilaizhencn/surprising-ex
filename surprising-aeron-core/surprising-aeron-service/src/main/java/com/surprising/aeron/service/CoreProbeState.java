@@ -3372,7 +3372,6 @@ public final class CoreProbeState implements AutoCloseable {
                 default -> throw new IllegalStateException(
                         "operation cannot own an asynchronous matcher settlement: " + pending.operation());
             }
-            runtimePlaceOrderState.completePendingReservations(pending.sequence());
             if (pending.operation() == PendingMatching.Operation.PLACE
                     || pending.operation() == PendingMatching.Operation.REPLACE
                     || pending.operation() == PendingMatching.Operation.AMEND
@@ -3383,10 +3382,6 @@ public final class CoreProbeState implements AutoCloseable {
             runtimePlaceOrderState.setMetadata(productLine,
                     Math.incrementExact(runtimePlaceOrderState.revision()));
             refreshSnapshotProjection();
-            if (snapshotProjectionDirty) {
-                stampOrderChangesRuntime(pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                        commandChangedOrderIds);
-            }
             materializeChangeAccumulators();
             long committedLaneMask = event.requiredLaneMask();
             if (laneContext.completedLaneMask() != laneContext.expectedLaneMask()) {
@@ -5768,7 +5763,8 @@ public final class CoreProbeState implements AutoCloseable {
         if (event == null) {
             event = runtimePlaceOrderState.dispatchMatcherSettlement(
                     coreSequence, laneContext.expectedLaneMask(), nextCommitSequence(),
-                    rollingBusinessStateHash.value(), rollingFundsStateHash.value(), settlementPlan,
+                    rollingBusinessStateHash.value(), rollingFundsStateHash.value(),
+                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), settlementPlan,
                     matchingResult, runtimePlaceOrderIdentities);
             pending.settlement(event, settlementPlan, applyStartNanos);
         }
@@ -5991,10 +5987,10 @@ public final class CoreProbeState implements AutoCloseable {
     private void materializeChangeAccumulators() {
         seedChangeAccumulators();
         runtimePlaceOrderState.acceptChangedUserIds(changedUserIds::add);
-        commandChangedUserIds = ImmutableLongArrayList.copyOf(changedUserIds.toPrimitiveArray());
-        commandChangedOrderIds = ImmutableLongArrayList.copyOf(changedOrderIds.toPrimitiveArray());
-        commandChangedLiquidationIds = ImmutableLongArrayList.copyOf(changedLiquidationIds.toPrimitiveArray());
-        commandChangedTriggerOrderIds = ImmutableLongArrayList.copyOf(changedTriggerOrderIds.toPrimitiveArray());
+        commandChangedUserIds = changedUserIds.toImmutableList();
+        commandChangedOrderIds = changedOrderIds.toImmutableList();
+        commandChangedLiquidationIds = changedLiquidationIds.toImmutableList();
+        commandChangedTriggerOrderIds = changedTriggerOrderIds.toImmutableList();
         commandChangedTreasuryAssets = List.copyOf(changedTreasuryAssets);
     }
 
@@ -6026,7 +6022,7 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private static List<Long> immutableLongList(PrimitiveLongChangeSet ids) {
-        return ImmutableLongArrayList.copyOf(ids.toPrimitiveArray());
+        return ids.toImmutableList();
     }
 
     private static List<Long> boxedLongs(long[] values) {

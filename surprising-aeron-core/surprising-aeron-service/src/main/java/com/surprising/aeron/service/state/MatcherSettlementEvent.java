@@ -17,6 +17,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     private final long requiredLaneMask;
     private final long stateContribution;
     private final long fundsContribution;
+    private final long commitTimestamp;
+    private final long commitClusterPosition;
     private final MatcherSettlementPlan plan;
     private final TradingRuntimeState runtime;
     private final RuntimeIdentityRegistry identities;
@@ -30,10 +32,14 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
 
     MatcherSettlementEvent(long commitSequence, long requiredLaneMask,
                            long stateContribution, long fundsContribution,
+                           long commitTimestamp, long commitClusterPosition,
                            MatcherSettlementPlan plan, TradingRuntimeState runtime,
                            RuntimeIdentityRegistry identities, CoreInstrumentState instrument,
                            int baseAssetId, int quoteAssetId, int settleAssetId, int laneCount) {
-        if (commitSequence < 0 || requiredLaneMask == 0 || plan == null || runtime == null
+        if (commitSequence < 0 || requiredLaneMask == 0
+                || (commitSequence == 0 && (commitTimestamp != -1 || commitClusterPosition != -1))
+                || (commitSequence != 0 && (commitTimestamp < 0 || commitClusterPosition < 0))
+                || plan == null || runtime == null
                 || identities == null || instrument == null || laneCount <= 0) {
             throw new IllegalArgumentException("invalid immutable matcher settlement event");
         }
@@ -41,6 +47,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         this.requiredLaneMask = requiredLaneMask;
         this.stateContribution = stateContribution;
         this.fundsContribution = fundsContribution;
+        this.commitTimestamp = commitTimestamp;
+        this.commitClusterPosition = commitClusterPosition;
         this.plan = plan;
         this.runtime = runtime;
         this.identities = identities;
@@ -80,6 +88,9 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
                         runtime, instrument, baseAssetId, quoteAssetId, delta);
             }
             runtime.completeMatcherPendingReservations(lane, plan);
+            if (commitSequence != 0) {
+                runtime.stampMatcherOrders(lane, plan, commitTimestamp, commitClusterPosition);
+            }
             if (commitSequence != 0) {
                 lane.applied(commitSequence, stateContribution, fundsContribution);
                 lane.committed(commitSequence);

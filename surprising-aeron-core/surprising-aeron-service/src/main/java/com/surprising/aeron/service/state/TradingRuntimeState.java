@@ -1079,7 +1079,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new IllegalStateException("blocking matcher settlement is restricted to one order batch");
         }
         MatcherSettlementEvent event = dispatchMatcherSettlement(coreSequence, expectedLaneMask,
-                0, 0, 0, plan, matchingResult, identities);
+                0, 0, 0, -1, -1, plan, matchingResult, identities);
         while (!event.complete()) Thread.onSpinWait();
         return collectMatcherSettlement(event);
     }
@@ -1087,6 +1087,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     public MatcherSettlementEvent dispatchMatcherSettlement(
             long coreSequence, long expectedLaneMask, long commitSequence,
             long stateContribution, long fundsContribution,
+            long commitTimestamp, long commitClusterPosition,
             MatcherSettlementPlan plan, CoreMatchingResult matchingResult,
             RuntimeIdentityRegistry identities) {
         assertOwner();
@@ -1107,7 +1108,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         int quoteAssetId = identities.assetId(instrument.quoteAsset());
         int settleAssetId = identities.assetId(instrument.settleAsset());
         MatcherSettlementEvent event = new MatcherSettlementEvent(commitSequence, expectedLaneMask,
-                stateContribution, fundsContribution, plan, this, identities, instrument,
+                stateContribution, fundsContribution, commitTimestamp, commitClusterPosition,
+                plan, this, identities, instrument,
                 baseAssetId, quoteAssetId, settleAssetId, accountLanes.length);
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             if ((expectedLaneMask & 1L << laneId) == 0) continue;
@@ -1156,6 +1158,18 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
             lane.completePendingReservation(orderId, plan.coreSequence());
             captureBalanceAfter(lane, reservation.userId(), reservation.assetId());
+        }
+    }
+
+    void stampMatcherOrders(AccountLaneState lane, MatcherSettlementPlan plan,
+                            long timestamp, long clusterPosition) {
+        for (int index = 0; index < plan.orderCount(); index++) {
+            OrderRuntime order = lane.orders.get(plan.orderId(index));
+            if (order == null || order.updatedAtEpochMillis() == timestamp
+                    && order.clusterPosition() == clusterPosition) {
+                continue;
+            }
+            replaceOrder(order.withCommitMetadata(timestamp, clusterPosition));
         }
     }
 
@@ -1227,7 +1241,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         MatcherSettlementEvent[] events = new MatcherSettlementEvent[plans.length];
         for (int index = 0; index < plans.length; index++) {
             events[index] = dispatchMatcherSettlement(coreSequence, expectedLaneMask, 0, 0, 0,
-                    plans[index], matchingResults.get(index), identities);
+                    -1, -1, plans[index], matchingResults.get(index), identities);
         }
         awaitMatcherSettlementBatch(events);
         aggregateTreasuryDeltaScratch.clear();
@@ -1275,7 +1289,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         for (int index = 0; index < settlements.size(); index++) {
             PerpetualMatcherSettlement settlement = settlements.get(index);
             events[index] = dispatchMatcherSettlement(coreSequence, settlement.expectedLaneMask(), 0, 0, 0,
-                    settlement.plan(), settlement.matchingResult(), identities);
+                    -1, -1, settlement.plan(), settlement.matchingResult(), identities);
         }
         awaitMatcherSettlementBatch(events);
         aggregateTreasuryDeltaScratch.clear();
