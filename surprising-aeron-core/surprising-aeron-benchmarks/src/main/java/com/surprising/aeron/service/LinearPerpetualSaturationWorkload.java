@@ -9,6 +9,7 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
+import com.surprising.aeron.service.state.CoreOrderStatus;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
@@ -88,7 +89,7 @@ final class LinearPerpetualSaturationWorkload {
             throw new IllegalArgumentException("targetOperationsPerSecond must be positive");
         }
         var harness = LinearPerpetualBenchmarkSupport.Harness.restore(template.snapshot());
-        int openingActiveOrders = harness.state().tradingState().orders().size();
+        int openingActiveOrders = activeOrderCount(harness.state());
         int symbolCount = template.symbols().size();
         int directionCount = operationsPerRun / operationsPerDirection;
         int completionBatchSize = maxInFlight < 64 ? 2 : Math.min(64, maxInFlight / 4);
@@ -456,7 +457,7 @@ final class LinearPerpetualSaturationWorkload {
             @Override
             public void verify() {
                 long closingFunds = LinearPerpetualMixedWorkload.totalFunds(harness.state().tradingState());
-                int closingActiveOrders = harness.state().tradingState().orders().size();
+                int closingActiveOrders = activeOrderCount(harness.state());
                 int parallelSettlementLanes = 0;
                 CoreLaneMetrics laneMetrics = harness.state().laneMetrics();
                 for (int highWaterMark : laneMetrics.accountLaneQueueHighWaterMarks()) {
@@ -534,5 +535,11 @@ final class LinearPerpetualSaturationWorkload {
             total[type] = Math.addExact(total[type], completed[index]);
         }
         return total;
+    }
+
+    private static int activeOrderCount(CoreProbeState state) {
+        return (int) state.tradingState().orders().values().stream()
+                .filter(order -> order.status() == CoreOrderStatus.OPEN)
+                .count();
     }
 }
