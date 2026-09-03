@@ -635,7 +635,7 @@ class TradingRuntimeStateTest {
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
         state.startAccountLanes();
         try {
-            var apply = state.stageLaneMutation(1, java.util.List.of(7L), 3, 5);
+            var apply = state.stageLaneMutation(1, java.util.List.of(7L));
             assertThat(apply).isEqualTo(1L << LaneTopology.characterization().accountLaneId(7));
             state.readFence(7, 1);
 
@@ -659,7 +659,7 @@ class TradingRuntimeStateTest {
         state.putUser(new UserRuntime(userInLastLane));
         state.startAccountLanes();
         try {
-            state.stageLaneMutation(1, java.util.List.of(userInLastLane), 3, 5);
+            state.stageLaneMutation(1, java.util.List.of(userInLastLane));
             state.readFenceAll(1);
             assertThat(state.accountLaneById(0).committedSequence()).isEqualTo(1);
         } finally {
@@ -677,7 +677,7 @@ class TradingRuntimeStateTest {
         state.putUser(new UserRuntime(laneOneUser));
         state.startAccountLanes();
         try {
-            state.stageLaneMutation(1, java.util.List.of(laneZeroUser, laneOneUser), 3, 5);
+            state.stageLaneMutation(1, java.util.List.of(laneZeroUser, laneOneUser));
 
             assertThat(state.accountLaneById(0).appliedSequence()).isEqualTo(1);
             assertThat(state.accountLaneById(1).appliedSequence()).isEqualTo(1);
@@ -700,7 +700,7 @@ class TradingRuntimeStateTest {
             state.putUser(new UserRuntime(userId));
         }
         state.clearChangedKeys();
-        long committedLaneMask = state.stageLaneMutation(1, users, 3, 5);
+        long committedLaneMask = state.stageLaneMutation(1, users);
 
         assertThat(committedLaneMask).isEqualTo(0b1111);
         for (int laneId = 0; laneId < topology.accountLaneCount(); laneId++) {
@@ -708,7 +708,7 @@ class TradingRuntimeStateTest {
             assertThat(state.accountLaneById(laneId).committedSequence()).isEqualTo(1);
         }
         state.clearChangedKeys();
-        assertThat(state.stageLaneMutation(2, java.util.List.of(), 7, 11)).isZero();
+        assertThat(state.stageLaneMutation(2, java.util.List.of())).isZero();
     }
 
     @Test
@@ -741,15 +741,15 @@ class TradingRuntimeStateTest {
         state.putUser(new UserRuntime(laneOneUser));
         state.startAccountLanes();
         try {
-            state.stageLaneMutation(2, java.util.List.of(laneZeroUser), 3, 5);
+            state.stageLaneMutation(2, java.util.List.of(laneZeroUser));
             state.clearChangedKeys();
-            state.stageLaneMutation(1, java.util.List.of(laneOneUser), 3, 5);
+            state.stageLaneMutation(1, java.util.List.of(laneOneUser));
             state.clearChangedKeys();
             AccountLaneView[] beforeFailure = state.accountLanes();
             long revisionBeforeFailure = state.revision();
 
-            assertThatThrownBy(() -> state.stageLaneMutation(1,
-                    java.util.List.of(laneZeroUser, laneOneUser), 7, 11))
+            assertThatThrownBy(() -> state.stageLaneMutation(
+                    1, java.util.List.of(laneZeroUser, laneOneUser)))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("out of order");
             AccountLaneView[] afterFailure = state.accountLanes();
@@ -781,8 +781,8 @@ class TradingRuntimeStateTest {
         state.putUser(new UserRuntime(userId));
         state.startAccountLanes();
         try {
-            state.stageLaneMutation(1, java.util.List.of(userId), 3, 5);
-            state.stageLaneMutation(2, java.util.List.of(userId), 7, 11);
+            state.stageLaneMutation(1, java.util.List.of(userId));
+            state.stageLaneMutation(2, java.util.List.of(userId));
 
             AccountLaneView applied = state.accountLaneById(0);
             assertThat(applied.appliedSequence()).isEqualTo(2);
@@ -801,7 +801,7 @@ class TradingRuntimeStateTest {
         java.util.List<AccountLaneSnapshot> snapshots = state.accountLaneSnapshots(1, global);
         long laneZeroUser = userForLane(topology, 0);
         state.putUser(new UserRuntime(laneZeroUser));
-        state.stageLaneMutation(2, java.util.List.of(laneZeroUser), 3, 5);
+        state.stageLaneMutation(2, java.util.List.of(laneZeroUser));
         AccountLaneView beforeRestore = state.accountLaneById(0);
 
         java.util.List<AccountLaneSnapshot> invalid = new java.util.ArrayList<>(snapshots);

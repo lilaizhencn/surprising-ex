@@ -264,9 +264,13 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     }
 
     void apply(long orderId, OrderRuntime after, RuntimeFactFrame.IdentityView identities) {
-        CoreOrderState previous = ordersById.get(orderId);
         CoreOrderState current = after != null && after.status() == CoreOrderStatus.OPEN
                 ? RuntimeStateMaterializer.orderSnapshot(after, identities) : null;
+        applySnapshot(orderId, current);
+    }
+
+    void applySnapshot(long orderId, CoreOrderState current) {
+        CoreOrderState previous = ordersById.get(orderId);
         if (previous == null) {
             if (current != null) add(current);
             return;

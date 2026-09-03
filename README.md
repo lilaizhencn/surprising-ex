@@ -30,9 +30,9 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 串行修改本 Lane 的账户、余额、订单、冻结和持仓。Coordinator 只读取 completion bitmap，并按 matcher 实际完成顺序完成
 提交，不做逐 Lane `release/bind/await`。Lane 使用本地连续 commit sequence 推进 applied/committed watermark；入口 Core sequence
 仅保留复制身份和连续完成水位，不再强制不同 symbol 逐条等待；
-同一事件在 Lane 内直接完成本命令的 pending reservation，并把余额 primitive before/after 与最新局部 hash 一并发布；
+同一事件在 Lane 内直接完成本命令的 pending reservation，并生成该 sequence 的最终订单/持仓索引值和资金增量；
 订单 `updatedAt/clusterPosition` 也在该事件的所属 Lane 内一次写入，成交完成后不再二次 fan-out 做 metadata stamping；
-owner 的 prepare/seal 和 lane revision hash 只消费这些已完成结果，不再逐余额、逐 reservation 或逐 Lane 发同步查询。
+owner 只按 sequence 消费 completion、安装 Lane 已生成的终态、推进连续水位并发布 Aeron 边界，不再逐余额、逐 reservation、逐订单或逐持仓重算业务结果。
 查询和 snapshot 只越过 committed watermark。观察到撮合事实后的任何 Lane、资金、hash、index 或发布不变量错误均
 fail-stop，实例必须从 snapshot 和 Cluster Log 恢复，热路径不再尝试分布式 rollback。
 P10-G 使用真实 HTTP 开放环门禁，只有保存 1,000 用户、至少 200 symbol、100k/s offered rate、
@@ -219,20 +219,13 @@ Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，
 中直接修改在线余额。接口返回已处理数量和失败/未完成数量，便于记录 `ProductLine`、Core sequence
 和资金对账证据。
 
-Product Core 的热状态与不可变状态投影通过 `RuntimeCommitPatch` 分界。命令在 Account Lane 内完成原地
-裁决后，owner 只封存本命令涉及的用户、余额、订单、冻结、仓位和风险 typed before/after image，生成一次不可变事实增量；
-`CoreProbeState` 不再保存 LaneCommit 对象图；`TradingRuntimeState` 只保留每 Lane 最新发布的 primitive state/funds hash，
-owner 不跨线程读取 Lane hash。entry 不持有命令前后的完整
-`TradingCoreState`；滚动资金/业务 hash、资金守恒、Treasury 合并、投影和 Core Fact 共同消费同一份
-primitive `RuntimeFundsDelta`/typed change。滚动 hash 直接使用各 domain 的增量 aggregate，不维护第二套 owner-domain
-aggregate；typed change 容器使用 generation reset，避免每条命令 `HashMap.clear` 和 entry 重建。持久化 immutable map root 由有界
-`RuntimeCommitPatch` 内部只保存一套连续 canonical sequence，Core 与 projection 访问器映射到同一值；Account Lane groups
-与 global owner group 分开保存，不再额外物化派生 owner group 列表。owner 的 prepare/seal/hash/index/publish
-由单一提交事务封装；提交失败后毒化实例并恢复，不在已应用的 Lane 之间执行反向补偿。
-`RuntimeCommitJournal` 在 owner 内只保存准入、连续 sequence、rolling hash 和诊断计数；每个 entry 自带轻量
-`RuntimeProjectionPoint`，不再维护 Snapshot projector 或热 projection replica。显式 Snapshot/query fence 直接从权威
-runtime 物化 immutable image 并复算业务/资金 hash；section 编码在同一确定性 snapshot fence 内完成，不创建 encoder 线程。
-交易 owner 只登记当前命令所需的 typed change、资金 posting 和连续提交序号；生产默认不启动 Core Fact
+Product Core 的热状态由 Account Lane 原地裁决。每个 sequence 的 `LaneCommandContextRing.Context` 独立持有 admission、
+挂起的 snapshot batch 状态和 matcher completion；Lane 直接生成最终订单/持仓索引值与 `RuntimeFundsDelta`，owner 不再从
+matcher plan 回查并重建业务变化。owner 仅按 sequence 安装已完成终态、合并 Treasury、生成响应、推进连续 Core sequence
+并发布 Aeron 边界；提交失败后毒化实例并恢复，不在已应用的 Lane 之间执行反向补偿。
+`RuntimeCommitJournal` 只保留 entry 容量准入和连续 sequence，不维护按字节容量、热 projection replica、逐命令审计 hash
+或 projector 线程。显式 Snapshot/query fence 直接从权威 runtime 物化 immutable image 并复算边界所需 hash；section 编码
+在同一确定性 snapshot fence 内完成。生产默认不启动 Core Fact
 materializer、export queue 或历史投影。Aeron Cluster 的 log、snapshot 和 runtime 才是当前状态及恢复来源。
 `CoreExportEvent`/codec 仅保留为未来历史事件出口的协议边界，当前不参与交易热路径，也不产生 Kafka/PG 写入。
 matcher 之前的业务拒绝不会修改权威状态；matcher 已接受后若提交阶段再出现校验或发布错误则 fail closed，不能伪回滚

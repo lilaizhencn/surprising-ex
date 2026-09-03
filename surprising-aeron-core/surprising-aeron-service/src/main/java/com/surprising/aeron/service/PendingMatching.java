@@ -33,7 +33,6 @@ final class PendingMatching {
     private CoreMatchingOrder admittedMatchingOrder;
     private boolean matchingSubmitted;
     private boolean settlementReady;
-    private CommitContext commitContext;
     private boolean dispatchOnly;
     private boolean pipelinedSettlementCounted;
 
@@ -151,7 +150,6 @@ final class PendingMatching {
         admittedMatchingOrder = source.admittedMatchingOrder;
         matchingSubmitted = source.matchingSubmitted;
         settlementReady = source.settlementReady;
-        commitContext = source.commitContext;
         dispatchOnly = source.dispatchOnly;
         pipelinedSettlementCounted = source.pipelinedSettlementCounted;
     }
@@ -197,7 +195,11 @@ final class PendingMatching {
     RuntimeFundsDelta fundsDelta() { return fundsDelta; }
     DecodedMatchingCommand decodedCommand() { return decodedCommand; }
     ResolvedMatchingAdmission admission() { return admission; }
-    CoreAdmissionReservation capacityReservation() { return capacityReservation; }
+    CoreAdmissionReservation takeCapacityReservation() {
+        CoreAdmissionReservation value = capacityReservation;
+        capacityReservation = null;
+        return value;
+    }
     long pendingStateHash() { return pendingStateHash; }
     com.surprising.aeron.service.state.MatcherSettlementEvent settlementEvent() { return settlementEvent; }
     com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan() { return settlementPlan; }
@@ -238,25 +240,6 @@ final class PendingMatching {
         settlementPlan = plan;
         settlementApplyStartNanos = applyStartNanos;
     }
-    void suspendCommitContext(List<Long> changedUserIds, List<Long> changedOrderIds,
-                              long[] accumulatedUserIds, long[] accumulatedOrderIds,
-                              RuntimeFundsDelta fundsDelta, boolean snapshotDirty,
-                              boolean snapshotProvisionalOnly) {
-        if (commitContext != null || settlementEvent == null || changedUserIds == null
-                || changedOrderIds == null || accumulatedUserIds == null || accumulatedOrderIds == null
-                || fundsDelta == null) {
-            throw new IllegalStateException("invalid suspended matching commit context");
-        }
-        commitContext = new CommitContext(List.copyOf(changedUserIds), List.copyOf(changedOrderIds),
-                accumulatedUserIds, accumulatedOrderIds, fundsDelta, snapshotDirty, snapshotProvisionalOnly);
-    }
-    CommitContext takeCommitContext() {
-        CommitContext context = commitContext;
-        if (context == null) throw new IllegalStateException("matching commit context is missing");
-        commitContext = null;
-        return context;
-    }
-    boolean hasCommitContext() { return commitContext != null; }
     void dispatchOnly() { dispatchOnly = true; }
     boolean isDispatchOnly() { return dispatchOnly; }
     boolean takeDispatchOnly() {

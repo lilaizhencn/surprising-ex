@@ -24,13 +24,13 @@ final class CoreAdmissionReservation {
                                             AdmissionDemand demand) {
         journal.assertHealthy();
         return new CoreAdmissionReservation(journal,
-                journal.reserveAdmission(demand.patchCount(), demand.patchBytes()), demand.patchCount());
+                journal.reserveAdmission(demand.patchCount()), demand.patchCount());
     }
 
-    long publish(long sequence, long businessStateHash, long fundsStateHash) {
+    long publish(long sequence) {
         requireOpen();
         if (remainingFrames == 0) throw new IllegalStateException("commit watermark budget exhausted");
-        long published = journal.publish(journalReservation, sequence, businessStateHash, fundsStateHash);
+        long published = journal.publish(journalReservation, sequence);
         remainingFrames--;
         return published;
     }
@@ -56,9 +56,9 @@ final class CoreAdmissionReservation {
         if (released) throw new IllegalStateException("core admission reservation is released");
     }
 
-    record AdmissionDemand(int patchCount, long patchBytes) {
+    record AdmissionDemand(int patchCount) {
         AdmissionDemand {
-            if (patchCount < 1 || patchBytes < 1) {
+            if (patchCount < 1) {
                 throw new IllegalArgumentException("admission demand must be positive");
             }
         }
@@ -81,7 +81,7 @@ final class CoreAdmissionReservation {
         }
 
         private static AdmissionDemand forOperations(int operations) {
-            return new AdmissionDemand(operations, Math.multiplyExact(64L, operations));
+            return new AdmissionDemand(operations);
         }
 
         private static int operationCount(CoreMessageType type) {

@@ -27,9 +27,9 @@ class RuntimeCommitJournalTest {
         TradingCoreState initial = TradingCoreState.empty(ProductLine.SPOT);
         try (RuntimeCommitJournal journal = new RuntimeCommitJournal(
                 ProductLine.SPOT, initial, initial.businessStateHash(), 0)) {
-            RuntimeCommitJournal.AdmissionReservation reservation = journal.reserveAdmission(2, 800);
+            RuntimeCommitJournal.AdmissionReservation reservation = journal.reserveAdmission(2);
             assertThat(journal.metrics().reservedEntries()).isEqualTo(2);
-            assertThat(journal.metrics().reservedBytes()).isEqualTo(800);
+            assertThat(journal.metrics().reservedBytes()).isZero();
 
             journal.release(reservation);
 

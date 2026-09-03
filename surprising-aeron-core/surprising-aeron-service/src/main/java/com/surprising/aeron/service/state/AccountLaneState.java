@@ -302,7 +302,7 @@ public final class AccountLaneState {
         }
     }
 
-    void applied(long coreSequence, long stateContribution, long fundsContribution) {
+    void applied(long coreSequence) {
         assertOwner();
         requireApplySequence(coreSequence);
         appliedSequence = coreSequence;

@@ -4,7 +4,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.aeron.service.matching.CoreMatchingResult;
+import com.surprising.aeron.service.state.RuntimeCommitJournal;
+import com.surprising.aeron.service.state.RuntimeFundsDelta;
+import com.surprising.aeron.service.state.TradingCoreState;
+import com.surprising.product.api.ProductLine;
 import java.util.Arrays;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class LaneCommandContextRingTest {
@@ -63,6 +68,31 @@ class LaneCommandContextRingTest {
         assertThat(context.takeMatchingCompletion()).isNull();
         context.resetMatchingContinuation();
         ring.discard(3);
+    }
+
+    @Test
+    void ownsAdmissionAndSuspendedCommitStateBySequence() {
+        TradingCoreState initial = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
+        try (RuntimeCommitJournal journal = new RuntimeCommitJournal(
+                ProductLine.LINEAR_PERPETUAL, initial, initial.businessStateHash(), 0)) {
+            CoreAdmissionReservation admission = CoreAdmissionReservation.reserve(journal, null,
+                    new CoreAdmissionReservation.AdmissionDemand(1));
+            LaneCommandContextRing ring = new LaneCommandContextRing(4, 4);
+            LaneCommandContextRing.Context context = ring.claim(2);
+            context.admission(admission);
+            PendingMatching.CommitContext suspended = new PendingMatching.CommitContext(
+                    List.of(7L), List.of(11L), new long[]{7}, new long[]{11},
+                    RuntimeFundsDelta.empty(), true, false);
+            context.suspendCommitContext(suspended);
+
+            assertThat(context.admission()).isSameAs(admission);
+            assertThat(context.hasCommitContext()).isTrue();
+            assertThat(context.takeCommitContext()).isSameAs(suspended);
+            assertThat(context.hasCommitContext()).isFalse();
+
+            admission.releaseUnused();
+            ring.discard(2);
+        }
     }
 
 }

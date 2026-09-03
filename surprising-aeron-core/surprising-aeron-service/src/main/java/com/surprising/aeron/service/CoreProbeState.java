@@ -134,7 +134,6 @@ public final class CoreProbeState implements AutoCloseable,
     private static final long HASH_OFFSET_BASIS = 0xcbf29ce484222325L;
     private static final long HASH_PRIME = 0x100000001b3L;
     private static final byte[] EMPTY_RESPONSE_DATA = new byte[0];
-    private static final long RESULT_LEDGER_POSITION_BASE = 0x9e3779b97f4a7c15L;
     private static final int MATCHING_PENDING_WIRE_CODE = 66;
     static final int MAX_PENDING_MATCHING = Integer.getInteger(
             "surprising.aeron.max-pending-matching", 4_096);
@@ -142,9 +141,7 @@ public final class CoreProbeState implements AutoCloseable,
     private final TradingCoreRuntime runtime;
     private final LinkedHashMap<UUID, StoredResult> commandResults;
     private long commandResultBytes;
-    private long commandResultsDigest;
     private long nextResultRetentionSequence;
-    private long nextResultRetentionWeight;
     private final long[] appliedMatcherSequences;
     private final long[] appliedMatcherPrefixDigests;
     private final LinkedHashMap<SourceKey, Long> lastSourceSequences;
@@ -203,7 +200,6 @@ public final class CoreProbeState implements AutoCloseable,
     private long cachedBusinessStateHash;
     private long cachedFeePolicyHash;
     private long cachedTransferHash;
-    private long lastSourceSequenceDigest;
     private long nextAsyncQueryId = Long.MIN_VALUE;
     private RuntimeIdentityRegistry runtimePlaceOrderIdentities;
     private TradingRuntimeState runtimePlaceOrderState;
@@ -280,15 +276,12 @@ public final class CoreProbeState implements AutoCloseable,
         this.probeValue = probeValue;
         this.commandResults = commandResults;
         this.commandResultBytes = resultLedgerBytes(commandResults);
-        this.commandResultsDigest = resultLedgerDigest(commandResults);
         this.nextResultRetentionSequence = nextRetentionSequence(commandResults);
-        this.nextResultRetentionWeight = retentionWeight(nextResultRetentionSequence);
         this.lastSourceSequences = lastSourceSequences;
         this.pendingLifecycleScopes = new LinkedHashMap<>();
         this.pendingOrderBatches = new LinkedHashMap<>();
         this.deferredMatching = new LinkedHashMap<>();
         this.lastSnapshotId = matcherSnapshot == null ? 0 : matcherSnapshot.snapshotId();
-        this.lastSourceSequenceDigest = sourceSequenceDigest(lastSourceSequences);
         this.exportState = exportState;
         this.terminalRetention = terminalRetention;
         long restoredBusinessStateHash = canonicalBusinessStateHash(
@@ -879,9 +872,8 @@ public final class CoreProbeState implements AutoCloseable,
                 commandLaneContext.result(new com.surprising.aeron.service.matching.CoreMatchingResult(
                                 true, "NO_NATIVE_COMMAND").withCoreSequence(nextAppliedCommandCount),
                         expectedLaneMask, validAccountLaneMask());
-                committedLaneMask = stageLaneMutation(nextCommitSequence(),
-                        commandChangedUserIds,
-                        auditBusinessStateHash, auditFundsStateHash, commandLaneContext);
+                committedLaneMask = stageLaneMutation(
+                        nextCommitSequence(), commandChangedUserIds, commandLaneContext);
                 if (commandLaneContext.completedLaneMask() != expectedLaneMask) {
                     throw new IllegalStateException("single command account lane mask mismatch");
                 }
@@ -902,11 +894,7 @@ public final class CoreProbeState implements AutoCloseable,
         long requiredExportSequence = 0;
         cachedBusinessStateHash = businessStateHash;
         appendQueuedMatching();
-        Long previousSourceSequence = lastSourceSequences.put(sourceKey, message.header().sourceSequence());
-        if (previousSourceSequence != null) {
-            lastSourceSequenceDigest ^= sourceSequenceDigest(sourceKey, previousSourceSequence);
-        }
-        lastSourceSequenceDigest ^= sourceSequenceDigest(sourceKey, message.header().sourceSequence());
+        lastSourceSequences.put(sourceKey, message.header().sourceSequence());
         if (isFundsIdempotencyCommand(message.header().messageType())
                 && status == ResponseStatus.APPLIED) {
             terminalRetention.retainFundsCommand(message.header().commandId(), fingerprint);
@@ -986,7 +974,7 @@ public final class CoreProbeState implements AutoCloseable,
     }
 
     private CoreResponse activateOrderBatch(OrderBatchPending batch, PendingMatching pending) {
-        CoreAdmissionReservation reservation = pending.capacityReservation();
+        CoreAdmissionReservation reservation = sequenceAdmission(pending.sequence());
         if (reservation == null) throw new IllegalStateException("order batch admission reservation is missing");
         activateFactContext(reservation, pending.command(), pending.fingerprint());
         commandOrderViews = List.of();
@@ -1559,7 +1547,7 @@ public final class CoreProbeState implements AutoCloseable,
 
     private CoreResponse finishOrderBatch(OrderBatchPending batch, PendingMatching pending,
                                           long clusterTimestamp, long clusterPosition) {
-        CoreAdmissionReservation capacityReservation = pending.capacityReservation();
+        CoreAdmissionReservation capacityReservation = sequenceAdmission(pending.sequence());
         if (capacityReservation == null) {
             throw new IllegalStateException("order batch admission reservation is missing");
         }
@@ -1619,9 +1607,8 @@ public final class CoreProbeState implements AutoCloseable,
             expectedTreasuryDelta.apply(runtimePlaceOrderState.treasury());
             runtimePlaceOrderState.setMetadata(productLine,
                     Math.incrementExact(runtimePlaceOrderState.revision()));
-            committedLaneMask = stageLaneMutation(nextCommitSequence(), commandChangedUserIds,
-                    auditBusinessStateHash, auditFundsStateHash,
-                    laneContext);
+            committedLaneMask = stageLaneMutation(
+                    nextCommitSequence(), commandChangedUserIds, laneContext);
             if (laneContext.completedLaneMask() != laneContext.expectedLaneMask()) {
                 throw new IllegalStateException("order batch account lane mask mismatch");
             }
@@ -1666,11 +1653,7 @@ public final class CoreProbeState implements AutoCloseable,
     }
 
     private void recordSourceSequence(SourceKey sourceKey, long sourceSequence) {
-        Long previousSourceSequence = lastSourceSequences.put(sourceKey, sourceSequence);
-        if (previousSourceSequence != null) {
-            lastSourceSequenceDigest ^= sourceSequenceDigest(sourceKey, previousSourceSequence);
-        }
-        lastSourceSequenceDigest ^= sourceSequenceDigest(sourceKey, sourceSequence);
+        lastSourceSequences.put(sourceKey, sourceSequence);
     }
 
     static boolean isMatchingCommand(CoreMessageType type) {
@@ -1859,7 +1842,7 @@ public final class CoreProbeState implements AutoCloseable,
                     ? CoreAdmissionReservation.reserve(runtimeProjectionJournal, exportState,
                             CoreAdmissionReservation.AdmissionDemand.matching(
                                     message, matchingOrderBound(message, decodedCommand), decodedCommand))
-                    : deferredPending.capacityReservation();
+                    : sequenceAdmission(deferredPending.sequence());
             if (capacityReservation == null) {
                 throw new IllegalStateException("deferred matching admission reservation is missing");
             }
@@ -1972,9 +1955,9 @@ public final class CoreProbeState implements AutoCloseable,
                 ? newPendingMatching(sequence, operation, message, effectiveFingerprint,
                         preMatchingCancellations, beforeProjection,
                         beforeBusinessStateHash, beforeFundsStateHash, decodedCommand, admission)
+                        .withCapacityReservation(capacityReservation)
                 : deferredPending.withPreMatchingCancellations(preMatchingCancellations)
                         .withAdmission(admission);
-        pending = pending.withCapacityReservation(capacityReservation);
         pending.establishCommitFence(clusterTimestamp, clusterPosition);
         if (deferredPending == null) {
             putPendingMatching(pending);
@@ -2102,11 +2085,7 @@ public final class CoreProbeState implements AutoCloseable,
         long requiredExportSequence = 0;
         appliedCommandCount = sequence;
         refreshCommittedCoreSequence();
-        Long previousSourceSequence = lastSourceSequences.put(sourceKey, message.header().sourceSequence());
-        if (previousSourceSequence != null) {
-            lastSourceSequenceDigest ^= sourceSequenceDigest(sourceKey, previousSourceSequence);
-        }
-        lastSourceSequenceDigest ^= sourceSequenceDigest(sourceKey, message.header().sourceSequence());
+        lastSourceSequences.put(sourceKey, message.header().sourceSequence());
         long stateHash = stateHash(cachedBusinessStateHash, message.header().commandId(),
                 ResponseStatus.REJECTED, resultCode, appliedCommandCount);
         storeResult(message.header().commandId(), new StoredResult(fingerprint,
@@ -2470,13 +2449,19 @@ public final class CoreProbeState implements AutoCloseable,
             throw new IllegalStateException("matching pending capacity is exhausted");
         }
         pendingMatching.put(pending);
-        laneCommandContexts.claim(pending.sequence());
+        laneCommandContexts.claim(pending.sequence()).admission(pending.takeCapacityReservation());
         CoreMessageType type = pending.command().header().messageType();
         if (type != CoreMessageType.PLACE_ORDER_BATCH
                 && type != CoreMessageType.CANCEL_ORDER_BATCH
                 && type != CoreMessageType.AMEND_ORDER_BATCH) {
             pendingMatching.registerSubmission(pending.sequence(), matcherShard(pending));
         }
+    }
+
+    private CoreAdmissionReservation sequenceAdmission(long sequence) {
+        CoreAdmissionReservation admission = laneCommandContexts.required(sequence).admission();
+        if (admission == null) throw new IllegalStateException("sequence admission is missing");
+        return admission;
     }
 
     private LifecycleScope lifecycleScope(CoreMessage message, PendingMatching.Operation operation,
@@ -3115,7 +3100,7 @@ public final class CoreProbeState implements AutoCloseable,
         int encodedResultCode = pendingMatchingRejections.get(sequence);
         if (pending == null || encodedResultCode == 0) return null;
         CoreResultCode resultCode = CoreResultCode.values()[encodedResultCode - 1];
-        CoreAdmissionReservation capacityReservation = pending.capacityReservation();
+        CoreAdmissionReservation capacityReservation = sequenceAdmission(pending.sequence());
         if (capacityReservation == null) {
             throw new IllegalStateException("rejected matching admission reservation is missing");
         }
@@ -3161,7 +3146,7 @@ public final class CoreProbeState implements AutoCloseable,
         currentClusterPosition = clusterPosition;
         LaneCommandContextRing.Context laneContext = laneCommandContexts.required(sequence);
         if (pending.settlementEvent() != null) {
-            if (pending.hasCommitContext()) restoreMatchingCommitContext(pending);
+            if (laneContext.hasCommitContext()) restoreMatchingCommitContext(pending);
             return completeDispatchedMatcherSettlement(pending, matchingResult, laneContext);
         }
         if (MATCHING_PHASE_METRICS_ENABLED) {
@@ -3206,7 +3191,7 @@ public final class CoreProbeState implements AutoCloseable,
         commandRiskScanControl = null;
         resetChangeAccumulators();
         commandFundsDelta = pending.fundsDelta();
-        CoreAdmissionReservation capacityReservation = pending.capacityReservation();
+        CoreAdmissionReservation capacityReservation = sequenceAdmission(pending.sequence());
         if (capacityReservation == null) {
             throw new IllegalStateException("matching admission reservation is missing");
         }
@@ -3357,17 +3342,16 @@ public final class CoreProbeState implements AutoCloseable,
         }
         materializeChangeAccumulators();
             long committedLaneMask = pending.settlementEvent() == null
-                    ? stageLaneMutation(nextCommitSequence(), changedUserIds.toPrimitiveArray(),
-                    auditBusinessStateHash, auditFundsStateHash, laneContext)
+                    ? stageLaneMutation(nextCommitSequence(), changedUserIds.toPrimitiveArray(), laneContext)
                     : pending.settlementEvent().requiredLaneMask();
             if (laneContext.completedLaneMask() != laneContext.expectedLaneMask()) {
                 throw failMatching(pending, "account lane mask differs from immutable matcher result", null);
             }
             requireCompleteAccountLanes(laneContext);
-            completeSnapshotProjectionBatch(committedLaneMask);
             if (!commandChangedOrderIds.isEmpty()) {
                 materializeCommandOrderViews(pending);
             }
+            completeSnapshotProjectionBatch(committedLaneMask);
         validateFundsConservation(pending.command());
         if (MATCHING_PHASE_METRICS_ENABLED) {
             matchingPhaseMetrics.recordApply(System.nanoTime() - applyStartNanos);
@@ -3449,8 +3433,8 @@ public final class CoreProbeState implements AutoCloseable,
                 throw failMatching(pending, "account lane completion differs from immutable matcher fact", null);
             }
             requireCompleteAccountLanes(laneContext);
-            completeSnapshotProjectionBatch(committedLaneMask);
             if (!commandChangedOrderIds.isEmpty()) materializeCommandOrderViews(pending);
+            completeSnapshotProjectionBatch(committedLaneMask);
             validateFundsConservation(pending.command());
         } catch (CoreStateRejectedException exception) {
             throw failMatching(pending, "Core rejected an accepted matcher result", exception);
@@ -3482,7 +3466,7 @@ public final class CoreProbeState implements AutoCloseable,
         storeResult(pending.command().header().commandId(), StoredResult.owned(pending.fingerprint(),
                 ResponseStatus.APPLIED, CoreResultCode.NONE, applied, requiredExportSequence,
                 stateHash, responseData));
-        CoreAdmissionReservation capacityReservation = pending.capacityReservation();
+        CoreAdmissionReservation capacityReservation = sequenceAdmission(pending.sequence());
         laneCommandContexts.release(applied);
         if (pending.takePipelinedSettlementCounted()) {
             dispatchedSettlementInFlight--;
@@ -4033,7 +4017,8 @@ public final class CoreProbeState implements AutoCloseable,
             pending.dispatchOnly();
             CoreResponse response = completeMatching(
                     pending.sequence(), matching, clusterTimestamp, clusterPosition);
-            if (response != null || pending.settlementEvent() == null || !pending.hasCommitContext()) {
+            if (response != null || pending.settlementEvent() == null
+                    || !laneCommandContexts.required(pending.sequence()).hasCommitContext()) {
                 throw new IllegalStateException("pipelined matcher settlement committed during dispatch");
             }
             pendingMatching.completeDispatch(pending.sequence());
@@ -4742,7 +4727,7 @@ public final class CoreProbeState implements AutoCloseable,
     }
 
     long sourceSequenceDigest() {
-        return lastSourceSequenceDigest;
+        return sourceSequenceDigest(lastSourceSequences);
     }
 
     Map<UUID, StoredResult> commandResults() {
@@ -5303,8 +5288,6 @@ public final class CoreProbeState implements AutoCloseable,
             active = true;
             try {
                 long sequence = Math.incrementExact(runtimeProjectionJournal.publishedSequence());
-                long previousBusinessStateHash = runtimeProjectionJournal.auditBusinessStateHash();
-                long previousFundsStateHash = runtimeProjectionJournal.auditFundsStateHash();
                 try {
                     commitFaultInjector.inject("preflight");
                     if (currentAdmission == null) {
@@ -5312,10 +5295,9 @@ public final class CoreProbeState implements AutoCloseable,
                     }
                     com.surprising.aeron.service.state.RuntimeFundsDelta fundsDelta =
                             runtimePlaceOrderState.prepareFundsDelta();
-                    runtime.commitRuntimeChanges(runtimePlaceOrderState, runtimePlaceOrderIdentities,
-                            previousBusinessStateHash, previousBusinessStateHash);
+                    runtime.commitRuntimeChanges(runtimePlaceOrderState, runtimePlaceOrderIdentities);
                     commitFaultInjector.inject("indexes");
-                    currentAdmission.publish(sequence, previousBusinessStateHash, previousFundsStateHash);
+                    currentAdmission.publish(sequence);
                     commandFundsDelta = commandFundsDelta.plus(fundsDelta);
                     currentProjectionPoint = new RuntimeProjectionPoint(sequence, null);
                     currentProjectionPoint.completeSequence();
@@ -5679,7 +5661,6 @@ public final class CoreProbeState implements AutoCloseable,
         if (event == null) {
             event = runtimePlaceOrderState.dispatchMatcherSettlement(
                     coreSequence, laneContext.expectedLaneMask(), coreSequence,
-                    auditBusinessStateHash, auditFundsStateHash,
                     pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), settlementPlan,
                     matchingResult, runtimePlaceOrderIdentities);
             pending.settlement(event, settlementPlan, applyStartNanos);
@@ -5697,9 +5678,10 @@ public final class CoreProbeState implements AutoCloseable,
         if (!snapshotProjectionDeferred || pending == null || pending.settlementEvent() == null) {
             throw new IllegalStateException("matching commit context cannot be suspended");
         }
-        pending.suspendCommitContext(commandChangedUserIds, commandChangedOrderIds,
+        laneCommandContexts.required(pending.sequence()).suspendCommitContext(new PendingMatching.CommitContext(
+                List.copyOf(commandChangedUserIds), List.copyOf(commandChangedOrderIds),
                 changedUserIds.toPrimitiveArray(), changedOrderIds.toPrimitiveArray(), commandFundsDelta,
-                snapshotProjectionDirty, snapshotProjectionProvisionalOnly);
+                snapshotProjectionDirty, snapshotProjectionProvisionalOnly));
         snapshotProjectionDeferred = false;
         snapshotProjectionDirty = false;
         snapshotProjectionProvisionalOnly = false;
@@ -5713,8 +5695,8 @@ public final class CoreProbeState implements AutoCloseable,
         if (snapshotProjectionDeferred || currentAdmission != null) {
             throw new IllegalStateException("another owner commit context is active");
         }
-        PendingMatching.CommitContext context = pending.takeCommitContext();
-        activateFactContext(pending.capacityReservation(), pending.command(), pending.fingerprint());
+        PendingMatching.CommitContext context = laneCommandContexts.required(pending.sequence()).takeCommitContext();
+        activateFactContext(sequenceAdmission(pending.sequence()), pending.command(), pending.fingerprint());
         snapshotProjectionDeferred = true;
         snapshotProjectionDirty = context.snapshotDirty();
         snapshotProjectionProvisionalOnly = context.snapshotProvisionalOnly();
@@ -5802,13 +5784,11 @@ public final class CoreProbeState implements AutoCloseable,
     }
 
     private long stageLaneMutation(
-            long sequence, Iterable<Long> userIds,
-            long stateContribution, long fundsContribution, LaneCommandContextRing.Context context) {
+            long sequence, Iterable<Long> userIds, LaneCommandContextRing.Context context) {
         if (context == null || sequence <= 0) {
             throw new IllegalStateException("account lane commit context is missing");
         }
-        long laneMask = runtimePlaceOrderState.stageLaneMutation(
-                sequence, userIds, stateContribution, fundsContribution);
+        long laneMask = runtimePlaceOrderState.stageLaneMutation(sequence, userIds);
         context.completeLanes(laneMask);
         return laneMask;
     }
@@ -5818,13 +5798,11 @@ public final class CoreProbeState implements AutoCloseable,
     }
 
     private long stageLaneMutation(
-            long sequence, long[] userIds,
-            long stateContribution, long fundsContribution, LaneCommandContextRing.Context context) {
+            long sequence, long[] userIds, LaneCommandContextRing.Context context) {
         if (context == null || sequence <= 0) {
             throw new IllegalStateException("account lane commit context is missing");
         }
-        long laneMask = runtimePlaceOrderState.stageLaneMutation(
-                sequence, userIds, stateContribution, fundsContribution);
+        long laneMask = runtimePlaceOrderState.stageLaneMutation(sequence, userIds);
         context.completeLanes(laneMask);
         return laneMask;
     }
@@ -5910,7 +5888,7 @@ public final class CoreProbeState implements AutoCloseable,
             clearFactContext();
         }
         pendingMatching.forEach(pending -> {
-            if (pending.capacityReservation() != null) pending.capacityReservation().releaseUnused();
+            sequenceAdmission(pending.sequence()).releaseUnused();
         });
         pendingMatching.clear();
         pendingMatchingRejections.clear();
@@ -5991,7 +5969,7 @@ public final class CoreProbeState implements AutoCloseable,
         for (int orderIndex = 0; orderIndex < commandChangedOrderIds.size(); orderIndex++) {
             long orderId = commandChangedOrderIds instanceof ImmutableLongArrayList primitive
                     ? primitive.valueAt(orderIndex) : commandChangedOrderIds.get(orderIndex);
-            var order = runtimeOrder(orderId);
+            var order = responseOrder(orderId);
             if (order == null) continue;
             CoreOrderStateView view = orderView(order);
             if (orderIds.add(orderId)) {
@@ -6011,15 +5989,20 @@ public final class CoreProbeState implements AutoCloseable,
     private void materializeResponseOrders(long... orderIds) {
         java.util.ArrayList<CoreOrderStateView> views = new java.util.ArrayList<>(orderIds.length);
         for (long orderId : orderIds) {
-            OrderRuntime order = runtimeOrder(orderId);
+            OrderRuntime order = responseOrder(orderId);
             if (order != null) views.add(orderView(order));
         }
         commandOrderViews = List.copyOf(views);
     }
 
     private void materializeResponseOrder(long orderId) {
-        OrderRuntime order = runtimeOrder(orderId);
+        OrderRuntime order = responseOrder(orderId);
         commandOrderViews = order == null ? List.of() : List.of(orderView(order));
+    }
+
+    private OrderRuntime responseOrder(long orderId) {
+        OrderRuntime changed = runtimePlaceOrderState.changedOrderValue(orderId);
+        return changed == null ? runtimeOrder(orderId) : changed;
     }
 
     private CoreOrderStateView orderView(OrderRuntime order) {
@@ -6205,14 +6188,6 @@ public final class CoreProbeState implements AutoCloseable,
         return Math.addExact(CoreStateSnapshotCodec.RESULT_FIXED_LENGTH, result.responseDataUnsafe().length);
     }
 
-    private static long resultLedgerDigest(Map<UUID, StoredResult> results) {
-        long digest = 0;
-        for (Map.Entry<UUID, StoredResult> entry : results.entrySet()) {
-            digest += resultContribution(entry.getKey(), entry.getValue());
-        }
-        return digest;
-    }
-
     private static long computeResultEntryDigest(UUID commandId, StoredResult result) {
         long digest = HASH_OFFSET_BASIS;
         digest = mix(digest, commandId.getMostSignificantBits());
@@ -6229,22 +6204,6 @@ public final class CoreProbeState implements AutoCloseable,
             digest = mix(digest, Byte.toUnsignedInt(value));
         }
         return digest;
-    }
-
-    private static long resultContribution(UUID commandId, StoredResult result) {
-        return result.entryDigest(commandId) * result.retentionWeight;
-    }
-
-    private static long retentionWeight(long sequence) {
-        long weight = 1;
-        long factor = RESULT_LEDGER_POSITION_BASE;
-        long exponent = sequence;
-        while (exponent > 0) {
-            if ((exponent & 1) != 0) weight *= factor;
-            factor *= factor;
-            exponent >>>= 1;
-        }
-        return weight;
     }
 
     private static long nextRetentionSequence(Map<UUID, StoredResult> results) {
@@ -6284,18 +6243,12 @@ public final class CoreProbeState implements AutoCloseable,
             commandResults.put(commandId, retained);
             commandResultBytes = Math.addExact(Math.subtractExact(commandResultBytes, resultEntryBytes(previous)),
                     resultBytes);
-            long replacementContribution = resultContribution(commandId, retained);
-            commandResultsDigest -= resultContribution(commandId, previous);
-            commandResultsDigest += replacementContribution;
         } else {
             long retentionSequence = nextResultRetentionSequence;
             StoredResult retained = result.withRetentionSequence(retentionSequence);
-            long contribution = retained.entryDigest(commandId) * nextResultRetentionWeight;
             nextResultRetentionSequence = Math.incrementExact(nextResultRetentionSequence);
-            nextResultRetentionWeight *= RESULT_LEDGER_POSITION_BASE;
             commandResults.put(commandId, retained);
             commandResultBytes = Math.addExact(commandResultBytes, resultBytes);
-            commandResultsDigest += contribution;
         }
         while (commandResults.size() > MAX_IDEMPOTENCY_RESULTS
                 || commandResultBytes > MAX_RESULT_LEDGER_BYTES) {
@@ -6313,7 +6266,6 @@ public final class CoreProbeState implements AutoCloseable,
                 throw new IllegalStateException("result ledger protected entry exceeds bound");
             }
             commandResultBytes = Math.subtractExact(commandResultBytes, resultEntryBytes(oldest.getValue()));
-            commandResultsDigest -= resultContribution(oldest.getKey(), oldest.getValue());
         }
     }
 
@@ -6693,7 +6645,6 @@ public final class CoreProbeState implements AutoCloseable,
         private final long stateHash;
         private final byte[] responseData;
         private final long retentionSequence;
-        private final long retentionWeight;
         private UUID digestCommandId;
         private long cachedEntryDigest;
 
@@ -6720,7 +6671,6 @@ public final class CoreProbeState implements AutoCloseable,
             byte[] normalized = responseData == null ? new byte[0] : responseData;
             this.responseData = ownedResponseData ? normalized : normalized.clone();
             this.retentionSequence = retentionSequence;
-            this.retentionWeight = CoreProbeState.retentionWeight(retentionSequence);
         }
 
         static StoredResult owned(CommandFingerprint fingerprint, ResponseStatus status, CoreResultCode resultCode,

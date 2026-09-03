@@ -23,8 +23,6 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
 
     private final long commitSequence;
     private final long requiredLaneMask;
-    private final long stateContribution;
-    private final long fundsContribution;
     private final long commitTimestamp;
     private final long commitClusterPosition;
     private final MatcherSettlementPlan plan;
@@ -42,7 +40,6 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     private boolean collected;
 
     MatcherSettlementEvent(long commitSequence, long requiredLaneMask,
-                           long stateContribution, long fundsContribution,
                            long commitTimestamp, long commitClusterPosition,
                            MatcherSettlementPlan plan, TradingRuntimeState runtime,
                            RuntimeIdentityRegistry identities, CoreInstrumentState instrument,
@@ -56,8 +53,6 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         }
         this.commitSequence = commitSequence;
         this.requiredLaneMask = requiredLaneMask;
-        this.stateContribution = stateContribution;
-        this.fundsContribution = fundsContribution;
         this.commitTimestamp = commitTimestamp;
         this.commitClusterPosition = commitClusterPosition;
         this.plan = plan;
@@ -103,9 +98,10 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
                 runtime.stampMatcherOrders(lane, plan, commitTimestamp, commitClusterPosition);
             }
             if (commitSequence != 0) {
-                lane.applied(commitSequence, stateContribution, fundsContribution);
+                lane.applied(commitSequence);
                 lane.committed(commitSequence);
                 runtime.publishLaneHashes(lane);
+                changes.prepareLaneTerminal(laneId, identities);
             }
         } finally {
             if (commitSequence == 0) runtime.exitLaneCommandScope(lane);

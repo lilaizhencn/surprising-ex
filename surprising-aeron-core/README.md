@@ -32,19 +32,20 @@ exchange-core risk engine 固定为 0。不同 shard 的完成队列互不等待
 PLACE 在进入 matcher 前先以单向事件投递给用户所属 Lane，由该 Lane 串行完成余额冻结、order/reservation 和 client-order
 索引写入；owner 只收集已完成的准入结果并提交 matcher。matcher 返回后，owner 再把同一条不可变 matcher fact 按 userId
 路由到目标 Lane。固定 Account Lane worker 永久拥有本 Lane 状态并串行完成
-资金、订单、持仓和手续费变化；Coordinator 根据 completion bitmap 合并 Treasury delta，并按实际完成顺序发布 Core Fact 和响应。
+资金、订单、持仓和手续费变化，并生成该 sequence 的最终索引值和资金增量；Coordinator 根据 completion bitmap 按 sequence
+安装这些终态、合并 Treasury delta 并发布响应和 Aeron 边界。
 Account Lane 使用 owner 分配的本地连续 commit sequence，不使用可能乱序完成的入口 Core sequence，因此跨 symbol 的同账户事件
 仍由 Lane 严格串行，且不会发生 sequence 回退。
 不存在 Disruptor、逐命令 Future、临时 Runnable fan-out、Owner/Lane 所有权切换或阻塞式逐 Lane ACK barrier。
 
-Account Lane 同时是资金隔离、执行、哈希和快照边界。多成交、多用户、跨 Lane 的一笔命令共享同一条
+Account Lane 同时是资金隔离和业务执行边界。多成交、多用户、跨 Lane 的一笔命令共享同一条
 `MatcherSettlementEvent`，不是为每笔 fill 创建 maker/taker 两个任务。Lane 可以连续应用多个 sequence；
-一个 Lane task 同时完成账户变更、pending reservation 终结、订单 commit metadata、applied/committed watermark 和局部 hash 发布，
+一个 Lane task 同时完成账户变更、pending reservation 终结、订单 commit metadata、applied/committed watermark 和终态增量生成，
 不存在成交后的第二次订单 stamping Lane 往返或第二个 commit task。Coordinator 只按 completion bitmap
-推进 Core Fact。任何 Lane 或提交不变量失败都会 fail-stop，并从 snapshot/Cluster Log
+推进连续 sequence 和 Aeron 发布边界。任何 Lane 或提交不变量失败都会 fail-stop，并从 snapshot/Cluster Log
 恢复，不在交易热路径对已应用 Lane 做反向回滚。
 
-`RuntimeCommitJournal` 只保留当前 owner transaction 的准入、连续 sequence 和诊断元数据，不维护热 projection
+`RuntimeCommitJournal` 只保留 entry 容量准入和连续 sequence，不维护按字节容量、逐命令审计 hash 或热 projection
 replica、projector 线程或 per-command freeze。普通命令只更新权威 mutable runtime、增量索引和可复用
 `RuntimeFactFrame.Builder`；不构造逐命令完整状态副本。`TradingCoreState` 与完整业务/资金 hash 只在显式
 query/snapshot fence 直接物化。生产不启动 Core Fact materializer；`CoreExportEvent`/codec 仅作为未来历史出口的
@@ -254,19 +255,16 @@ reservation 和 matcher 提交。只读 preflight 只服务显式 dry-run/test A
 
 - `TradingRuntimeState` 是六条产品线生产热路径的唯一 mutation authority。只有 Product Core owner 与固定 Account Lane owner 可以按各自边界写入 Runtime State；
   外围服务、异步 matcher callback、PostgreSQL、Kafka 和 query projection 均不得直接写入。
-- `PreparedChanges` 收集命令内每个 typed key 的首个 before 与最终 after；business/funds hash transition 校验完成后，
-  只 seal 一个 `RuntimeFactFrame`。该 fact frame 是 indexes、journal、Core Fact 和恢复的唯一提交载体，不存在 persistent delta tree、
-  shadow baseline 或 immutable outcome 回写 Runtime。
-- `RuntimeFactIndexes` 先按 fact frame owner group 增量更新九个索引，`RuntimeCommitJournal` 只记录连续 sequence 和当前
-  transaction 的诊断数据。只有 snapshot/query fence、关闭或恢复才把权威 runtime 冻结为 `TradingCoreState`；普通命令
-  不创建 per-command immutable state。
+- matcher settlement 的每个 Account Lane 直接生成最终 order/position index value 和本 Lane `RuntimeFundsDelta`；owner 按 sequence
+  安装这些值，不扫描 matcher plan，也不再次查询或物化 Lane 业务状态。
+- `RuntimeFactIndexes` 消费 Lane 已准备的终态值与其他必要 changed key；`RuntimeCommitJournal` 只记录连续 sequence 和 entry
+  容量。只有 snapshot/query fence、关闭或恢复才把权威 runtime 冻结为 `TradingCoreState`；普通命令不创建 per-command immutable state。
 - 生产默认不编码或发布 Core Fact，不启动 exporter、projector 或 materializer。`CoreExportEvent`/codec 仅作为未来历史
   事件出口的协议边界保留；交易 owner 不等待外部历史处理。
-- owner commit 的非资金业务状态使用 typed opcode journal，不捕获逐变更 closure；用户 balance/reservation/position hash
-  分域 copy-on-write，未变分域不复制。稳定 asset/symbol identity 由版本化 append-only registry 发布，fact frame 只保存字典版本和
-  本次可释放 client/position identity；Core Fact 继续保存该版本对应的 registry 引用，恢复时版本与游标一并重建。
-- Account Lane 只把 order/reservation/user/position 的 primitive dirty key 写入各自 lane journal；Sequencer 在 lane 完成边界按
-  固定 lane 顺序刷新到 owner-only primitive published map，不使用跨 lane `ConcurrentHashMap`，不构造第二层历史投影集合。
+- admission、snapshot batch、changed-key、funds delta 和 matcher completion 都绑定到独立 sequence context；完成或拒绝后统一释放，
+  不由 `PendingMatching` 与 owner 全局字段重复持有。稳定 asset/symbol identity 由版本化 append-only registry 发布并随 snapshot 恢复。
+- Account Lane 写入各自拥有的 runtime 分区并发布固定终态增量；Sequencer 按 sequence 刷新到 owner-only published map，
+  不使用跨 Lane `ConcurrentHashMap`，也不构造第二层历史投影集合。
 - `USER_STATE`、`ORDER_STATE`、client-order、活动订单、Treasury、风险、ADL、清算工作和生命周期进度查询都读取 Runtime 或其 ID 索引；
 - 产品线划转的扣款、入账和完成都在 owner thread 内执行纯内存命令；源 Runtime 使用有界 pending 索引支持前向恢复，
   不执行数据库、Kafka、HTTP、锁等待或 Future 等待。

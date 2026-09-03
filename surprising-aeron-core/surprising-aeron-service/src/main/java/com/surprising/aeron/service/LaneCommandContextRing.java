@@ -61,6 +61,8 @@ final class LaneCommandContextRing {
         private long completedLaneMask;
         private CoreMatchingResult matchingResult;
         private CoreMatchingResult completedMatchingResult;
+        private CoreAdmissionReservation admission;
+        private PendingMatching.CommitContext commitContext;
         private Context(int laneCount) {
             if (laneCount <= 0 || laneCount > Long.SIZE) {
                 throw new IllegalArgumentException("invalid account lane count");
@@ -71,6 +73,30 @@ final class LaneCommandContextRing {
         long expectedLaneMask() { return expectedLaneMask; }
         long completedLaneMask() { return completedLaneMask; }
         CoreMatchingResult matchingResult() { return matchingResult; }
+        CoreAdmissionReservation admission() { return admission; }
+
+        void admission(CoreAdmissionReservation value) {
+            if (value == null || admission != null) {
+                throw new IllegalStateException("invalid sequence admission");
+            }
+            admission = value;
+        }
+
+        void suspendCommitContext(PendingMatching.CommitContext value) {
+            if (value == null || commitContext != null) {
+                throw new IllegalStateException("invalid suspended sequence commit context");
+            }
+            commitContext = value;
+        }
+
+        PendingMatching.CommitContext takeCommitContext() {
+            PendingMatching.CommitContext value = commitContext;
+            if (value == null) throw new IllegalStateException("sequence commit context is missing");
+            commitContext = null;
+            return value;
+        }
+
+        boolean hasCommitContext() { return commitContext != null; }
 
         void publishMatchingCompletion(CoreMatchingResult result) {
             if (result == null || result.nativeCommand().coreSequence() != coreSequence) {
@@ -128,6 +154,8 @@ final class LaneCommandContextRing {
             completedLaneMask = 0;
             matchingResult = null;
             completedMatchingResult = null;
+            admission = null;
+            commitContext = null;
         }
     }
 }

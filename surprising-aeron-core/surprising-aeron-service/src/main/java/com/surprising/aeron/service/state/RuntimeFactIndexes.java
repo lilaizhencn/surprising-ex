@@ -43,12 +43,26 @@ public final class RuntimeFactIndexes implements RuntimeFactFrame.ChangeConsumer
         activeIdentities = identities;
         positionVisits = triggerVisits = algoVisits = liquidationVisits = timerVisits = orderVisits = riskVisits = 0;
         try {
+            runtime.visitPreparedMatcherIndexes(this);
             runtime.visitChangedIndexes(this);
             lastApplyStats = new ApplyStats(positionVisits, positionVisits, triggerVisits, algoVisits,
                     liquidationVisits, timerVisits, orderVisits, positionVisits, riskVisits);
         } finally {
             activeIdentities = null;
         }
+    }
+
+    void preparedOrder(long orderId, CoreOrderState current) {
+        activeOrders.applySnapshot(orderId, current);
+        orderVisits++;
+    }
+
+    void preparedPosition(long positionKey, RuntimePositionIndexValue current) {
+        RuntimePositionIndexValue previous = adlPositions.value(positionKey);
+        positionUsers.apply(previous, current);
+        openInterest.apply(previous, current);
+        adlPositions.apply(positionKey, previous, current);
+        positionVisits++;
     }
 
     @Override

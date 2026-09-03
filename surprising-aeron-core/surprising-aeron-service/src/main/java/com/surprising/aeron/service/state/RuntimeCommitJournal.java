@@ -18,12 +18,10 @@ public final class RuntimeCommitJournal implements AutoCloseable {
     private static final long MAX_RESERVED_PATCH_BYTES = 16L << 20;
 
     private final int capacity;
-    private final long capacityBytes;
     private final WaitStrategy waitStrategy;
     private final RuntimeProjectionPoint initialPoint;
     private long publishedSequence;
     private long reservedEntries;
-    private long reservedBytes;
     private long batchCount;
     private long batchItems;
     private long batchBytes;
@@ -56,8 +54,6 @@ public final class RuntimeCommitJournal implements AutoCloseable {
         capacity = normalizedCapacity(Integer.getInteger(
                 "surprising.aeron.commit-journal-capacity",
                 Integer.getInteger("surprising.aeron.projection-journal-capacity", 65_536)));
-        capacityBytes = configuredPositiveLong("surprising.aeron.commit-journal-capacity-bytes",
-                Math.multiplyExact(MAX_RESERVED_PATCH_BYTES, capacity));
         waitStrategy = WaitStrategy.PARKING;
         initialPoint = new RuntimeProjectionPoint(initialSequence, null);
         initialPoint.completeSequence();
@@ -83,30 +79,25 @@ public final class RuntimeCommitJournal implements AutoCloseable {
     public boolean activated() { return activated; }
 
     public AdmissionReservation reserveAdmission(int entriesRequired) {
-        return reserveAdmission(entriesRequired, Math.multiplyExact(MAX_RESERVED_PATCH_BYTES, entriesRequired));
-    }
-
-    public AdmissionReservation reserveAdmission(int entriesRequired, long bytesRequired) {
         requireHealthy();
-        if (entriesRequired < 1 || bytesRequired < 1) {
-            throw new IllegalArgumentException("journal reservation must be positive");
-        }
-        if (entriesRequired > capacity - reservedEntries
-                || bytesRequired > capacityBytes - reservedBytes) {
+        if (entriesRequired < 1) throw new IllegalArgumentException("journal reservation must be positive");
+        if (entriesRequired > capacity - reservedEntries) {
             rejectionCount++;
             throw new CoreStateRejectedException("MATCHING_BACKPRESSURE", "commit admission is full");
         }
         reservedEntries = Math.addExact(reservedEntries, entriesRequired);
-        reservedBytes = Math.addExact(reservedBytes, bytesRequired);
-        return new AdmissionReservation(this, entriesRequired, bytesRequired);
+        return new AdmissionReservation(this, entriesRequired);
+    }
+
+    public AdmissionReservation reserveAdmission(int entriesRequired, long bytesRequired) {
+        if (bytesRequired < 1) throw new IllegalArgumentException("journal reservation must be positive");
+        return reserveAdmission(entriesRequired);
     }
 
     public void release(AdmissionReservation reservation) {
         validateReservation(reservation);
         reservedEntries = Math.subtractExact(reservedEntries, reservation.remaining);
-        reservedBytes = Math.subtractExact(reservedBytes, reservation.remainingBytes);
         reservation.remaining = 0;
-        reservation.remainingBytes = 0;
         reservation.closed = true;
     }
 
@@ -131,19 +122,10 @@ public final class RuntimeCommitJournal implements AutoCloseable {
     public long publish(AdmissionReservation reservation, RuntimeFactFrame patch,
                         long businessStateHash, long fundsStateHash) {
         validateReservation(reservation);
-        long patchBytes = estimatedBytes(patch);
-        if (patchBytes > reservation.nextSliceByteAllowance()) {
-            throw new IllegalStateException("commit patch exceeded per-slice admission byte reservation");
-        }
         long published = publishCommittedPatch(patch, businessStateHash, fundsStateHash);
         reservation.remaining--;
-        reservation.remainingBytes -= patchBytes;
-        reservation.consumedSlices++;
         reservedEntries--;
-        reservedBytes -= patchBytes;
         if (reservation.remaining == 0) {
-            reservedBytes -= reservation.remainingBytes;
-            reservation.remainingBytes = 0;
             reservation.closed = true;
         }
         return published;
@@ -151,20 +133,18 @@ public final class RuntimeCommitJournal implements AutoCloseable {
 
     public long publish(AdmissionReservation reservation, long sequence,
                         long businessStateHash, long fundsStateHash) {
+        long published = publish(reservation, sequence);
+        this.businessStateHash = businessStateHash;
+        this.fundsStateHash = fundsStateHash;
+        return published;
+    }
+
+    public long publish(AdmissionReservation reservation, long sequence) {
         validateReservation(reservation);
-        final long bytes = 64;
-        if (bytes > reservation.nextSliceByteAllowance()) {
-            throw new IllegalStateException("fact frame exceeded commit admission byte reservation");
-        }
         long published = publish(sequence, businessStateHash, fundsStateHash);
         reservation.remaining--;
-        reservation.remainingBytes -= bytes;
-        reservation.consumedSlices++;
         reservedEntries--;
-        reservedBytes -= bytes;
         if (reservation.remaining == 0) {
-            reservedBytes -= reservation.remainingBytes;
-            reservation.remainingBytes = 0;
             reservation.closed = true;
         }
         return published;
@@ -228,16 +208,14 @@ public final class RuntimeCommitJournal implements AutoCloseable {
 
     public boolean hasCapacityFor(int additionalEntries) {
         requireHealthy();
-        if (additionalEntries <= 0 || additionalEntries > capacity - reservedEntries) return false;
-        long additionalBytes = Math.multiplyExact(MAX_RESERVED_PATCH_BYTES, additionalEntries);
-        return additionalBytes <= capacityBytes - reservedBytes;
+        return additionalEntries > 0 && additionalEntries <= capacity - reservedEntries;
     }
 
     public long publishedSequence() { return publishedSequence; }
     public long projectedSequence() { return publishedSequence; }
     public long auditBusinessStateHash() { return businessStateHash; }
     public long auditFundsStateHash() { return fundsStateHash; }
-    public boolean hasOutstandingReservation() { return reservedEntries != 0 || reservedBytes != 0; }
+    public boolean hasOutstandingReservation() { return reservedEntries != 0; }
     public long lag() { return 0; }
     public RuntimeProjectionPoint initialPoint() { return initialPoint; }
     public long projectionFreezeCount() { return 0; }
@@ -255,7 +233,7 @@ public final class RuntimeCommitJournal implements AutoCloseable {
     public Metrics metrics() {
         return new Metrics(0, 0, 0, batchCount, batchItems, batchBytes,
                 0, 0, waitStrategy, 0, rejectionCount, errorCount, timeoutCount,
-                reservedEntries, reservedBytes);
+                reservedEntries, 0);
     }
 
     public ProjectionVersion current() {
@@ -311,7 +289,7 @@ public final class RuntimeCommitJournal implements AutoCloseable {
     @Override
     public void close() {
         if (closed) return;
-        if (publicationBatchDepth != 0 || reservedEntries != 0 || reservedBytes != 0) {
+        if (publicationBatchDepth != 0 || reservedEntries != 0) {
             throw new IllegalStateException("runtime commit journal closed with outstanding admission");
         }
         closed = true;
@@ -326,12 +304,6 @@ public final class RuntimeCommitJournal implements AutoCloseable {
         return value;
     }
 
-    private static long configuredPositiveLong(String name, long defaultValue) {
-        long value = Long.getLong(name, defaultValue);
-        if (value < 1) throw new IllegalArgumentException(name + " must be positive");
-        return value;
-    }
-
     private static long estimatedBytes(RuntimeFactFrame patch) {
         return 384L + 128L * patch.accountLaneGroups().size() + 96L * patch.fundsPostings().size()
                 + 80L * patch.matcherEvidence().size() + 32L * patch.coreFactItemCount();
@@ -342,25 +314,14 @@ public final class RuntimeCommitJournal implements AutoCloseable {
     public static final class AdmissionReservation {
         private final RuntimeCommitJournal owner;
         private int remaining;
-        private long remainingBytes;
-        private final long bytesPerSlice;
-        private final int extraByteSlices;
-        private int consumedSlices;
         private boolean closed;
 
-        private AdmissionReservation(RuntimeCommitJournal owner, int remaining, long remainingBytes) {
+        private AdmissionReservation(RuntimeCommitJournal owner, int remaining) {
             this.owner = owner;
             this.remaining = remaining;
-            this.remainingBytes = remainingBytes;
-            bytesPerSlice = remainingBytes / remaining;
-            extraByteSlices = Math.toIntExact(remainingBytes % remaining);
         }
 
         public int remaining() { return remaining; }
-
-        private long nextSliceByteAllowance() {
-            return bytesPerSlice + (consumedSlices < extraByteSlices ? 1 : 0);
-        }
     }
 
     public static final class PublishReservation {

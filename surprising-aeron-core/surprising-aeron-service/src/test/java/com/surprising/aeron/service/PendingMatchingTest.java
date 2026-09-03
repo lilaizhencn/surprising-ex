@@ -14,6 +14,7 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.TradingCommandCodec;
+import com.surprising.aeron.service.state.RuntimeCommitJournal;
 import com.surprising.aeron.service.state.RuntimeFundsDelta;
 import com.surprising.aeron.service.state.RuntimeProjectionPoint;
 import com.surprising.aeron.service.state.TradingCoreState;
@@ -23,6 +24,27 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
 class PendingMatchingTest {
+
+    @Test
+    void transfersAdmissionReservationOutOfPendingExactlyOnce() {
+        CoreMessage command = command(10);
+        TradingCoreState beforeState = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
+        try (RuntimeCommitJournal journal = new RuntimeCommitJournal(
+                ProductLine.LINEAR_PERPETUAL, beforeState, beforeState.businessStateHash(), 0)) {
+            CoreAdmissionReservation reservation = CoreAdmissionReservation.reserve(journal, null,
+                    new CoreAdmissionReservation.AdmissionDemand(1));
+            PendingMatching pending = new PendingMatching(7, PendingMatching.Operation.PLACE, command,
+                    CommandFingerprint.of(command), List.of(), new RuntimeProjectionPoint(0, beforeState),
+                    101L, 202L, RuntimeFundsDelta.empty()).withCapacityReservation(reservation);
+
+            assertThat(pending.takeCapacityReservation()).isSameAs(reservation);
+            assertThat(pending.takeCapacityReservation()).isNull();
+            assertThat(pending.withPreMatchingCancellations(List.of(18L)).takeCapacityReservation()).isNull();
+
+            reservation.releaseUnused();
+            assertThat(journal.metrics().reservedEntries()).isZero();
+        }
+    }
 
     @Test
     void preservesCapturedPreCommandHashesAcrossDeferredMatchingUpdates() {
