@@ -16,7 +16,9 @@ import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
 final class LinearPerpetualSaturationWorkload {
 
-    private static final long PRICE_TICKS = 100;
+    // Keep saturation pairs on a level that the restored density fixture never uses. Otherwise an IOC can
+    // consume a fixture order and leave its paired GTC behind, making the benchmark measure fixture cleanup.
+    private static final long PRICE_TICKS = 1_000;
     private static final long PROGRESS_TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(30);
 
     private LinearPerpetualSaturationWorkload() {
