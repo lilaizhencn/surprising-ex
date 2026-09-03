@@ -2715,7 +2715,10 @@ public final class CoreProbeState implements AutoCloseable,
     }
 
     private void progressPlaceAdmissions() {
-        for (int laneId = 0; laneId < matchingAdapter.topology().accountLaneCount(); laneId++) {
+        long readyLaneMask = runtimePlaceOrderState.takePlaceAdmissionReadyLaneMask();
+        while (readyLaneMask != 0) {
+            int laneId = Long.numberOfTrailingZeros(readyLaneMask);
+            readyLaneMask &= readyLaneMask - 1;
             long sequence;
             while ((sequence = runtimePlaceOrderState.pollPlaceAdmissionReady(laneId)) != 0) {
                 PendingMatching pending = pendingMatching.get(sequence);
@@ -2747,6 +2750,7 @@ public final class CoreProbeState implements AutoCloseable,
                             ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND;
                     pendingMatchingRejections.put(pending.sequence(), resultCode.ordinal() + 1);
                     pendingMatching.completeSubmission(pending.sequence());
+                    signalPendingMatchingReady(pending.sequence());
                     continue;
                 }
                 if (pending.admittedMatchingOrder() == null) {
@@ -2811,6 +2815,7 @@ public final class CoreProbeState implements AutoCloseable,
             com.surprising.aeron.service.matching.CoreMatchingResult result) {
         if (result == null) throw new IllegalStateException("synchronous matcher returned no result");
         laneCommandContexts.required(sequence).publishMatchingCompletion(result.withCoreSequence(sequence));
+        signalPendingMatchingReady(sequence);
     }
 
     private java.util.function.Supplier<com.surprising.aeron.service.matching.CoreMatchingResult>
@@ -3146,7 +3151,6 @@ public final class CoreProbeState implements AutoCloseable,
                                   long clusterTimestamp, long clusterPosition) {
         runtime.assertOwner();
         ensureRuntimePlaceOrderState();
-        assertHealthy();
         PendingMatching pending = pendingMatching.get(sequence);
         if (pending == null || matchingResult == null) return null;
         pending.establishCommitFence(clusterTimestamp, clusterPosition);
@@ -3890,13 +3894,39 @@ public final class CoreProbeState implements AutoCloseable,
     void drainMatchingCompletions() {
         progressPlaceAdmissions();
         matcherPipeline.drainMatchingCompletions(this::publishMatchingCompletion);
+        drainMatcherSettlementCompletions();
     }
 
     private boolean matchingCommitReady(PendingMatching pending) {
         if (pending == null) return false;
         if (hasPendingMatchingRejection(pending.sequence())) return true;
+        if (pending.settlementEvent() != null) return pending.settlementReady();
         LaneCommandContextRing.Context context = laneCommandContexts.required(pending.sequence());
         return context.hasMatchingCompletion() || context.matchingResult() != null;
+    }
+
+    private void signalPendingMatchingReady(long sequence) {
+        pendingMatching.markReady(sequence);
+    }
+
+    private void drainMatcherSettlementCompletions() {
+        long readyLaneMask = runtimePlaceOrderState.takeMatcherSettlementReadyLaneMask();
+        while (readyLaneMask != 0) {
+            int laneId = Long.numberOfTrailingZeros(readyLaneMask);
+            readyLaneMask &= readyLaneMask - 1;
+            long sequence;
+            while ((sequence = runtimePlaceOrderState.pollMatcherSettlementReady(laneId)) != 0) {
+                PendingMatching pending = pendingMatching.get(sequence);
+                if (pending == null) continue;
+                pending.markSettlementReady();
+                signalPendingMatchingReady(sequence);
+            }
+        }
+    }
+
+    private PendingMatching pollReadyPending() {
+        PendingMatching pending = pendingMatching.pollReadyHead();
+        return matchingCommitReady(pending) ? pending : null;
     }
 
     private PendingMatching awaitAnyMatchingCommitReady(long timeoutNanos) {
@@ -3904,7 +3934,7 @@ public final class CoreProbeState implements AutoCloseable,
         int idle = 0;
         while (!pendingMatching.isEmpty()) {
             drainMatchingCompletions();
-            PendingMatching ready = pendingMatching.findFirst(this::matchingCommitReady);
+            PendingMatching ready = pollReadyPending();
             if (ready != null) return ready;
             long remaining = deadline - System.nanoTime();
             if (remaining <= 0) return null;
@@ -3931,7 +3961,7 @@ public final class CoreProbeState implements AutoCloseable,
             int completed = 0;
             int attempts = 0;
             while (attempts < maxCompletions) {
-                PendingMatching pending = pendingMatching.findFirst(this::matchingCommitReady);
+                PendingMatching pending = pollReadyPending();
                 if (pending == null && attempts == 0 && awaitFirst) {
                     pending = awaitAnyMatchingCommitReady(MATCHING_AWAIT_TIMEOUT_NANOS);
                 }
@@ -3957,7 +3987,7 @@ public final class CoreProbeState implements AutoCloseable,
                     }
                 }
                 attempts++;
-                if (response == null) break;
+                if (response == null) continue;
                 handler.onCommitted(sequence, response);
                 completed++;
             }

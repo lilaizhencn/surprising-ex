@@ -72,6 +72,26 @@ class PendingMatchingRingTest {
         assertThat(ring.submissionHead(1)).isNull();
     }
 
+    @Test
+    void onlyPublishesReadyCommandsAtTheDeterministicSubmissionHead() {
+        PendingMatchingRing ring = new PendingMatchingRing(2, 1);
+        PendingMatching first = pending(1, UUID.randomUUID(), 1001);
+        PendingMatching second = pending(2, UUID.randomUUID(), 1002);
+        ring.put(first);
+        ring.put(second);
+
+        ring.markReady(2);
+        assertThat(ring.pollReadyHead()).isNull();
+        ring.markReady(1);
+        ring.markReady(1);
+        assertThat(ring.pollReadyHead()).isSameAs(first);
+
+        ring.markReady(1);
+        assertThat(ring.remove(1)).isSameAs(first);
+        assertThat(ring.pollReadyHead()).isSameAs(second);
+        assertThat(ring.pollReadyHead()).isNull();
+    }
+
     private static PendingMatching pending(long sequence, UUID commandId, long userId) {
         return new PendingMatching(sequence, PendingMatching.Operation.PLACE,
                 command(commandId, userId), new RuntimeProjectionPoint(

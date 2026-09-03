@@ -37,7 +37,12 @@ public final class TradingRuntimeState implements AutoCloseable {
     private final AccountLaneState[] accountLanes;
     private final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] laneUserScratch;
     private final SettlementLaneWorker[] laneWorkers;
-    private final PlaceAdmissionReadyQueue[] placeAdmissionReadyQueues;
+    private final LaneSequenceQueue[] placeAdmissionReadyQueues;
+    private final LaneSequenceQueue[] matcherSettlementReadyQueues;
+    private final java.util.concurrent.atomic.AtomicLong placeAdmissionReadyLaneMask =
+            new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong matcherSettlementReadyLaneMask =
+            new java.util.concurrent.atomic.AtomicLong();
     private final LaneMutationTask[] laneMutationTasks;
     private final long[] laneMutationStartedNanosScratch;
     private final Object[] laneMutationResultsScratch;
@@ -160,7 +165,8 @@ public final class TradingRuntimeState implements AutoCloseable {
                 new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[topology.accountLaneCount()];
         this.laneUserScratch = routedUsers;
         this.laneWorkers = new SettlementLaneWorker[topology.accountLaneCount()];
-        this.placeAdmissionReadyQueues = new PlaceAdmissionReadyQueue[topology.accountLaneCount()];
+        this.placeAdmissionReadyQueues = new LaneSequenceQueue[topology.accountLaneCount()];
+        this.matcherSettlementReadyQueues = new LaneSequenceQueue[topology.accountLaneCount()];
         this.laneMutationTasks = new LaneMutationTask[topology.accountLaneCount()];
         this.laneMutationStartedNanosScratch = new long[topology.accountLaneCount()];
         this.laneMutationResultsScratch = new Object[topology.accountLaneCount()];
@@ -173,7 +179,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         this.publishedLaneFundsHashes = new long[topology.accountLaneCount()];
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             accountLanes[laneId] = new AccountLaneState(laneId, topology.accountLaneQueueCapacity());
-            placeAdmissionReadyQueues[laneId] = new PlaceAdmissionReadyQueue(topology.accountLaneQueueCapacity());
+            placeAdmissionReadyQueues[laneId] = new LaneSequenceQueue(topology.accountLaneQueueCapacity());
+            matcherSettlementReadyQueues[laneId] = new LaneSequenceQueue(topology.accountLaneQueueCapacity());
             publishLaneHashes(accountLanes[laneId]);
             laneUserScratch[laneId] = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList(4);
             patchUsersBeforeByLane[laneId] = new LaneLongCaptures<>();
@@ -1162,6 +1169,12 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     void publishPlaceAdmissionReady(int laneId, long coreSequence) {
         placeAdmissionReadyQueues[laneId].publish(coreSequence);
+        markLaneReady(placeAdmissionReadyLaneMask, laneId);
+    }
+
+    public long takePlaceAdmissionReadyLaneMask() {
+        assertOwner();
+        return placeAdmissionReadyLaneMask.getAndSet(0);
     }
 
     public long pollPlaceAdmissionReady(int laneId) {
@@ -1170,6 +1183,32 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new IllegalArgumentException("invalid Account Lane id");
         }
         return placeAdmissionReadyQueues[laneId].poll();
+    }
+
+    void publishMatcherSettlementReady(int laneId, long coreSequence) {
+        matcherSettlementReadyQueues[laneId].publish(coreSequence);
+        markLaneReady(matcherSettlementReadyLaneMask, laneId);
+    }
+
+    public long takeMatcherSettlementReadyLaneMask() {
+        assertOwner();
+        return matcherSettlementReadyLaneMask.getAndSet(0);
+    }
+
+    public long pollMatcherSettlementReady(int laneId) {
+        assertOwner();
+        if (laneId < 0 || laneId >= matcherSettlementReadyQueues.length) {
+            throw new IllegalArgumentException("invalid Account Lane id");
+        }
+        return matcherSettlementReadyQueues[laneId].poll();
+    }
+
+    private static void markLaneReady(java.util.concurrent.atomic.AtomicLong readyMask, int laneId) {
+        long laneBit = 1L << laneId;
+        long current;
+        do {
+            current = readyMask.getPlain();
+        } while (!readyMask.weakCompareAndSetRelease(current, current | laneBit));
     }
 
     public CoreMatchingOrder collectPlaceAdmission(PlaceAdmissionEvent event) {

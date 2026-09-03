@@ -5,10 +5,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.Test;
 
-class PlaceAdmissionReadyQueueTest {
+class LaneSequenceQueueTest {
     @Test
     void publishesPrimitiveSequencesInLaneCompletionOrderAndReusesSlots() {
-        PlaceAdmissionReadyQueue queue = new PlaceAdmissionReadyQueue(2);
+        LaneSequenceQueue queue = new LaneSequenceQueue(2);
         queue.publish(11);
         queue.publish(13);
         assertThatThrownBy(() -> queue.publish(17)).isInstanceOf(IllegalStateException.class);

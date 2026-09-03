@@ -17,6 +17,7 @@ final class PendingMatchingRing {
     private final int[] submissionShards;
     private final int[] nextSubmissionSlots;
     private final int[] previousSubmissionSlots;
+    private final boolean[] readySlots;
     private final int[] submissionHeads;
     private final int[] submissionTails;
     private final LongIntHashMap slotsBySequence;
@@ -42,6 +43,7 @@ final class PendingMatchingRing {
         submissionShards = new int[capacity];
         nextSubmissionSlots = new int[capacity];
         previousSubmissionSlots = new int[capacity];
+        readySlots = new boolean[capacity];
         submissionHeads = new int[matcherShardCount];
         submissionTails = new int[matcherShardCount];
         java.util.Arrays.fill(nextSlots, -1);
@@ -119,6 +121,7 @@ final class PendingMatchingRing {
         previousSlots[entryIndex] = -1;
         nextSlots[entryIndex] = -1;
         removeFromSubmissionOrder(entryIndex);
+        readySlots[entryIndex] = false;
         freeSlots[entryIndex] = freeHead;
         freeHead = entryIndex;
         removeIndexes(removed);
@@ -136,6 +139,21 @@ final class PendingMatchingRing {
             if (pending != null && predicate.test(pending)) return pending;
         }
         return null;
+    }
+
+    void markReady(long sequence) {
+        int encodedIndex = slotsBySequence.get(sequence);
+        if (encodedIndex == 0) return;
+        int index = encodedIndex - 1;
+        readySlots[index] = true;
+    }
+
+    PendingMatching pollReadyHead() {
+        if (head < 0 || !readySlots[head]) return null;
+        int index = head;
+        PendingMatching pending = entries[index];
+        readySlots[index] = false;
+        return pending;
     }
 
     void registerSubmission(long sequence, int matcherShard) {

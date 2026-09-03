@@ -32,6 +32,7 @@ final class PendingMatching {
     private PlaceAdmissionEvent placeAdmission;
     private CoreMatchingOrder admittedMatchingOrder;
     private boolean matchingSubmitted;
+    private boolean settlementReady;
 
     PendingMatching(long sequence, Operation operation, CoreMessage command,
                     RuntimeProjectionPoint beforeProjection,
@@ -146,6 +147,7 @@ final class PendingMatching {
         placeAdmission = source.placeAdmission;
         admittedMatchingOrder = source.admittedMatchingOrder;
         matchingSubmitted = source.matchingSubmitted;
+        settlementReady = source.settlementReady;
     }
 
     PendingMatching withPreMatchingCancellations(List<Long> orderIds) {
@@ -212,6 +214,13 @@ final class PendingMatching {
     void matchingSubmitted() {
         if (matchingSubmitted) throw new IllegalStateException("matching command was submitted twice");
         matchingSubmitted = true;
+    }
+    boolean settlementReady() { return settlementReady; }
+    void markSettlementReady() {
+        if (settlementEvent == null) {
+            throw new IllegalStateException("matcher settlement completion has no event");
+        }
+        settlementReady = true;
     }
     void settlement(com.surprising.aeron.service.state.MatcherSettlementEvent event,
                     com.surprising.aeron.service.state.MatcherSettlementPlan plan,

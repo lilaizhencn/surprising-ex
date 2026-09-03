@@ -111,6 +111,9 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         if ((previous & laneMask) != 0) {
             throw new IllegalStateException("account lane completed the same matcher fact twice");
         }
+        if ((previous | laneMask) == requiredLaneMask && commitSequence != 0) {
+            runtime.publishMatcherSettlementReady(laneId, plan.coreSequence());
+        }
     }
 
     public long commitSequence() { return commitSequence; }
