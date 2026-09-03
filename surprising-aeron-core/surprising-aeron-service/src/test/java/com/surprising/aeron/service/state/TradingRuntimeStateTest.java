@@ -14,6 +14,47 @@ import org.junit.jupiter.api.Test;
 class TradingRuntimeStateTest {
 
     @Test
+    void pendingReservationSequenceIndexKeepsSingleOrderOnPrimitivePath() {
+        TradingRuntimeState.PendingReservationSequenceIndex index =
+                new TradingRuntimeState.PendingReservationSequenceIndex(4);
+
+        index.add(101, 1_001);
+
+        assertThat(index.containsKey(101)).isTrue();
+        assertThat(index.contains(101, 1_001)).isTrue();
+        assertThat(index.orderIds(101)).containsExactly(1_001);
+
+        index.remove(101, 1_001);
+
+        assertThat(index.isEmpty()).isTrue();
+        assertThat(index.orderIds(101)).isEmpty();
+    }
+
+    @Test
+    void pendingReservationSequenceIndexPromotesBatchOrdersWhenFirstCompletes() {
+        TradingRuntimeState.PendingReservationSequenceIndex index =
+                new TradingRuntimeState.PendingReservationSequenceIndex(4);
+        index.add(101, 1_001);
+        index.add(101, 1_002);
+        index.add(101, 1_003);
+        index.add(102, 2_001);
+
+        assertThat(index.orderIds(101)).containsExactlyInAnyOrder(1_001, 1_002, 1_003);
+        assertThatThrownBy(() -> index.add(101, 1_002))
+                .isInstanceOf(IllegalStateException.class);
+
+        index.remove(101, 1_001);
+        assertThat(index.orderIds(101)).containsExactlyInAnyOrder(1_002, 1_003);
+        index.remove(101, 1_002);
+        index.remove(101, 1_003);
+
+        assertThat(index.containsKey(101)).isFalse();
+        assertThat(index.orderIds(102)).containsExactly(2_001);
+        index.clear();
+        assertThat(index.isEmpty()).isTrue();
+    }
+
+    @Test
     void accountLaneApplyOnlyAdvancesSequenceAndRevision() throws Exception {
         String source = accountLaneSource();
 
@@ -860,9 +901,8 @@ class TradingRuntimeStateTest {
     private static long[] pendingReservationOrderIds(TradingRuntimeState state, long coreSequence) throws Exception {
         Field field = TradingRuntimeState.class.getDeclaredField("pendingReservationsBySequence");
         field.setAccessible(true);
-        var pending = (org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<
-                org.eclipse.collections.impl.set.mutable.primitive.LongHashSet>) field.get(state);
-        return pending.get(coreSequence).toArray();
+        var pending = (TradingRuntimeState.PendingReservationSequenceIndex) field.get(state);
+        return pending.orderIds(coreSequence);
     }
 
     private static long pendingReservationOwner(TradingRuntimeState state, long orderId) throws Exception {

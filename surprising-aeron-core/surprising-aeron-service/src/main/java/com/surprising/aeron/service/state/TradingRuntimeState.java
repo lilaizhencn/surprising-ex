@@ -65,7 +65,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     private final Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers = new HashMap<>();
     private final Map<Long, CoreFeePolicyState> feePolicies = new HashMap<>();
     private final Map<Long, TransferRuntime> pendingTransfers = new HashMap<>();
-    private final LongObjectHashMap<LongHashSet> pendingReservationsBySequence = new LongObjectHashMap<>(4_096);
+    private final PendingReservationSequenceIndex pendingReservationsBySequence =
+            new PendingReservationSequenceIndex(4_096);
     private final LongLongHashMap pendingReservationUsers = new LongLongHashMap(4_096);
     private final LongIntHashMap pendingReservationCountsByUser = new LongIntHashMap(4_096);
     private final LongLongHashMap orderLaneIds = new LongLongHashMap();
@@ -943,7 +944,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     private void indexPendingReservation(long userId, long orderId, long coreSequence,
                                          int nextTotalPendingReservations) {
-        pendingReservationsBySequence.getIfAbsentPut(coreSequence, LongHashSet::new).add(orderId);
+        pendingReservationsBySequence.add(coreSequence, orderId);
         pendingReservationUsers.put(orderId, userId);
         pendingReservationCountsByUser.addToValue(userId, 1);
         totalPendingReservations = nextTotalPendingReservations;
@@ -978,10 +979,10 @@ public final class TradingRuntimeState implements AutoCloseable {
     public void completePendingReservations(long coreSequence) {
         assertOwner();
         if (coreSequence <= 0) throw new IllegalArgumentException("coreSequence must be positive");
-        LongHashSet pending = pendingReservationsBySequence.get(coreSequence);
-        if (pending == null) return;
-        List<PendingReservationRef> refs = new ArrayList<>(pending.size());
-        for (long orderId : pending.toArray()) {
+        long[] pending = pendingReservationsBySequence.orderIds(coreSequence);
+        if (pending.length == 0) return;
+        List<PendingReservationRef> refs = new ArrayList<>(pending.length);
+        for (long orderId : pending) {
             long userId = pendingReservationUsers.getIfAbsent(orderId, 0);
             if (userId == 0) throw new IllegalStateException("pending reservation owner is missing");
             refs.add(new PendingReservationRef(orderId, userId));
@@ -1038,8 +1039,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     private void requirePendingReservationIndex(long orderId, long coreSequence, long userId) {
         long indexedUserId = pendingReservationUsers.getIfAbsent(orderId, 0);
-        LongHashSet orderIds = pendingReservationsBySequence.get(coreSequence);
-        if (indexedUserId != userId || orderIds == null || !orderIds.contains(orderId)) {
+        if (indexedUserId != userId || !pendingReservationsBySequence.contains(coreSequence, orderId)) {
             throw new IllegalStateException("pending reservation index differs from account lane state");
         }
     }
@@ -1047,13 +1047,11 @@ public final class TradingRuntimeState implements AutoCloseable {
     private void unindexPendingReservation(long orderId, long coreSequence, long userId,
                                            int nextTotalPendingReservations) {
         requirePendingReservationIndex(orderId, coreSequence, userId);
-        LongHashSet orderIds = pendingReservationsBySequence.get(coreSequence);
-        orderIds.remove(orderId);
+        pendingReservationsBySequence.remove(coreSequence, orderId);
         pendingReservationUsers.removeKey(orderId);
         int nextUserCount = Math.subtractExact(pendingReservationCountsByUser.get(userId), 1);
         if (nextUserCount == 0) pendingReservationCountsByUser.removeKey(userId);
         else pendingReservationCountsByUser.put(userId, nextUserCount);
-        if (orderIds.isEmpty()) pendingReservationsBySequence.removeKey(coreSequence);
         totalPendingReservations = nextTotalPendingReservations;
     }
 
@@ -1366,11 +1364,10 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     private void unindexMatcherPendingReservations(MatcherSettlementPlan plan) {
-        LongHashSet pending = pendingReservationsBySequence.get(plan.coreSequence());
-        if (pending == null) return;
+        if (!pendingReservationsBySequence.containsKey(plan.coreSequence())) return;
         for (int index = 0; index < plan.orderCount(); index++) {
             long orderId = plan.orderId(index);
-            if (!pending.contains(orderId)) continue;
+            if (!pendingReservationsBySequence.contains(plan.coreSequence(), orderId)) continue;
             long userId = pendingReservationUsers.getIfAbsent(orderId, 0);
             if (userId == 0) throw new IllegalStateException("matcher pending reservation owner is missing");
             unindexPendingReservation(orderId, plan.coreSequence(), userId,
@@ -4215,6 +4212,94 @@ public final class TradingRuntimeState implements AutoCloseable {
                 java.util.Arrays.fill(indexGenerations, 0);
                 indexGeneration = 1;
             }
+        }
+    }
+
+    static final class PendingReservationSequenceIndex {
+        private static final long[] EMPTY_ORDER_IDS = new long[0];
+
+        private final LongLongHashMap firstOrderBySequence;
+        private final LongObjectHashMap<LongHashSet> additionalOrdersBySequence;
+
+        PendingReservationSequenceIndex(int initialCapacity) {
+            firstOrderBySequence = new LongLongHashMap(initialCapacity);
+            additionalOrdersBySequence = new LongObjectHashMap<>();
+        }
+
+        void add(long coreSequence, long orderId) {
+            long firstOrderId = firstOrderBySequence.getIfAbsent(coreSequence, 0);
+            if (firstOrderId == 0) {
+                firstOrderBySequence.put(coreSequence, orderId);
+                return;
+            }
+            if (firstOrderId == orderId) {
+                throw new IllegalStateException("reservation is already indexed for sequence");
+            }
+            LongHashSet additionalOrderIds = additionalOrdersBySequence.get(coreSequence);
+            if (additionalOrderIds == null) {
+                additionalOrderIds = new LongHashSet();
+                additionalOrdersBySequence.put(coreSequence, additionalOrderIds);
+            }
+            if (!additionalOrderIds.add(orderId)) {
+                throw new IllegalStateException("reservation is already indexed for sequence");
+            }
+        }
+
+        boolean containsKey(long coreSequence) {
+            return firstOrderBySequence.containsKey(coreSequence);
+        }
+
+        boolean contains(long coreSequence, long orderId) {
+            long firstOrderId = firstOrderBySequence.getIfAbsent(coreSequence, 0);
+            if (firstOrderId == orderId) return orderId != 0;
+            LongHashSet additionalOrderIds = additionalOrdersBySequence.get(coreSequence);
+            return additionalOrderIds != null && additionalOrderIds.contains(orderId);
+        }
+
+        long[] orderIds(long coreSequence) {
+            long firstOrderId = firstOrderBySequence.getIfAbsent(coreSequence, 0);
+            if (firstOrderId == 0) return EMPTY_ORDER_IDS;
+            LongHashSet additionalOrderIds = additionalOrdersBySequence.get(coreSequence);
+            if (additionalOrderIds == null || additionalOrderIds.isEmpty()) {
+                return new long[]{firstOrderId};
+            }
+            long[] additional = additionalOrderIds.toArray();
+            long[] orderIds = new long[additional.length + 1];
+            orderIds[0] = firstOrderId;
+            System.arraycopy(additional, 0, orderIds, 1, additional.length);
+            return orderIds;
+        }
+
+        void remove(long coreSequence, long orderId) {
+            long firstOrderId = firstOrderBySequence.getIfAbsent(coreSequence, 0);
+            if (firstOrderId == 0) {
+                throw new IllegalStateException("pending reservation sequence is missing");
+            }
+            LongHashSet additionalOrderIds = additionalOrdersBySequence.get(coreSequence);
+            if (firstOrderId != orderId) {
+                if (additionalOrderIds == null || !additionalOrderIds.remove(orderId)) {
+                    throw new IllegalStateException("pending reservation is missing from sequence");
+                }
+                if (additionalOrderIds.isEmpty()) additionalOrdersBySequence.removeKey(coreSequence);
+                return;
+            }
+            if (additionalOrderIds == null || additionalOrderIds.isEmpty()) {
+                firstOrderBySequence.removeKey(coreSequence);
+                return;
+            }
+            long promotedOrderId = additionalOrderIds.toArray()[0];
+            additionalOrderIds.remove(promotedOrderId);
+            firstOrderBySequence.put(coreSequence, promotedOrderId);
+            if (additionalOrderIds.isEmpty()) additionalOrdersBySequence.removeKey(coreSequence);
+        }
+
+        boolean isEmpty() {
+            return firstOrderBySequence.isEmpty();
+        }
+
+        void clear() {
+            firstOrderBySequence.clear();
+            additionalOrdersBySequence.clear();
         }
     }
 

@@ -1711,3 +1711,37 @@
 - BigInteger、fee-policy stream、`encodeOpenOrders`中间编码和`List.copyOf`不再进入主要热点。当前CPU首项为pending reservation相关primitive `LongObjectHashMap.getIfAbsent=21.09%`，之后为`TreeMap.put=4.43%`、`TreeMap.getEntry=3.16%`和`progressPlaceAdmissions=2.82%`；下一优化边界明确为单订单sequence的pending-reservation索引。
 - allocation热点为`TreeMap.put=10.69%`、primitive map插入/扩容约19.66%、matcher evidence绑定1.98%、订单终态对象1.77%和最终command result byte[] 1.58%；已删除的open-orders中间byte[]不再出现。GC pause 28次合计`0.450ms`，p50/p95/p99/max=`0.0106/0.0496/0.0500/0.0500ms`，DataLoss=0。
 - Pageouts由61,658增至64,796，因此为短时部分验证。profile/JFR SHA-256分别为`aef4e8133589597d98c8f3820b10612cb435b82ad17e29b27e2a8a34e11649dd`、`d4e654e794f745b6a831c438b94aed3795982cf3b871dc4a0fa3f8fa7dba885c`；JFR约84MiB，summary/views位于同一artifact目录。
+
+### 2026-09-03 22:04:18 +08:00 — `PV-20260903-256-58` — `采集前锁定（pending reservation单值索引，matcher=1）`
+
+#### 采集前锁定
+
+- 被测修改：`pendingReservationsBySequence`从每sequence必建`LongHashSet`改为primitive `sequence -> firstOrderId`单值路径；仅当同一sequence出现第二个订单时懒加载additional set。普通单不再执行`getIfAbsentPut(..., LongHashSet::new)`或分配集合，批量单保留完整索引、提升和回滚语义。
+- 对照PV-56 matcher=1 `36,492.565 terminal business ops/s`和约`16,221 B/terminal business op`，同时检查PV-57中占CPU `21.09%`的`LongObjectHashMap.getIfAbsent(long, Function0)`退出热点。主轮不得回归超过10%，GC轮要求每业务操作分配不回归；业务、资金、订单终态、snapshot recovery和多settlement在途门禁不变。
+- 场景固定为`LINEAR_PERPETUAL`、matcher=1、4 Account Lane、10,000用户、512 listed/active symbols、每用户最多5持仓/10活动订单、每invocation 16,384 PLACE_ORDER、50% maker GTC + 50% taker IOC、100,000 offered terminal business ops/s、做市持续运行、严格且仅`256 in-flight`。无profiler主轮`fork=1,warmup=3x3s,measurement=3x5s,thread=1`；GC轮`fork=1,warmup=1x3s,measurement=1x5s`；JFR轮`fork=0,warmup=1x3s,measurement=1x10s`。
+- 正确性要求：accepted business/Core分别等于terminal，unfinished/rejected/error/timeout/starvation为0，期末matcher/Lane/in-flight backlog为0，trades为business的50%；teardown检查资金守恒、余额/冻结/持仓、订单生命周期、盘口和snapshot recovery。HotSpot JDK25定向service测试`54/54`、benchmark-support测试`10/10`已通过。
+- 环境：Oracle GraalVM Java HotSpot 25.0.1、Maven 3.9.16、MacBookPro16,1 / Intel Core i9-9880H / 16 logical CPU / 16GiB / macOS 26.7 x86_64；8GiB ZGC、AlwaysPreTouch、DisableExplicitGC、NMT summary、BLOCKING settlement、journal 65536/1GiB及既有Agrona opens/exports。JFC SHA-256 `dff0b88ea10e024e116295260c4906d1654f2fcd0c4371139daebf825a9813b4`。
+- 被测HEAD `aec792c85efca5be2f515acdd13abc9922c910d6`，除本文件外diff SHA-256 `97e564d67c56af6f4206d0c7bc7808e3eb09a042ab82391878ee053db3c16006`，shaded JAR SHA-256 `0321fea3308f6fc6182deb6a261dce698f891b81d8617944791666db46a50279`。artifact固定为`target/qualification/20260903T140418Z-pending-reservation-single-index-matcher1-256/`；采集前swap=`189.25MiB`、Pages throttled=0、Pageouts=64,796。Pageouts增长、JFR DataLoss非0或业务门禁不闭合时仅作部分验证；短轮不证明无泄漏。
+- 不启动或测试PostgreSQL、exporter、wallet、Kafka、API、WebSocket、market-data及其他五产品线。锁定后不修改场景、参数或门禁，失败和异常只追加结果。
+
+#### 采集结果
+
+- 无profiler主轮：`36,259.695 terminal business/Core messages/s`、`18,129.848 trades/s`，三个business样本为`32,798.174/40,003.307/35,977.605 ops/s`；accepted与terminal闭合，unfinished/rejected/error/timeout/starvation为0，资金、账户/持仓、订单终态、盘口、snapshot recovery和多settlement在途门禁通过。相对PV-56为`-0.64%`，通过10%回归门禁。
+- `-prof gc`轮为`45,044.709 terminal business ops/s`、`400.831 MB/s`、`262,062,951.429 B/invocation`，折合约`15,995 B/terminal business op`，较PV-56约`16,221 B/op`下降`1.39%`；measurement内GC次数为0。
+- JFR轮为`43,760.238 terminal business/Core messages/s`、`21,880.119 trades/s`，业务门禁闭合。原PV-57 pending reservation的`getIfAbsentPut(..., LongHashSet::new)`调用栈已消失；剩余`LongObjectHashMap.getIfAbsent`样本来自Account Lane admission/risk、ActiveOrderIndex和RuntimeFactIndexes。新的`PendingReservationSequenceIndex`普通路径未进入主要CPU或allocation site，batch fallback不在本场景中触发。
+- JFR记录39秒、1,459个execution samples、43,305个allocation samples、8次ZGC、DataLoss=0；34次GC pause合计`0.555ms`，p50/p90/p95/p99/max=`0.0110/0.0350/0.0505/0.0582/0.0582ms`。主要allocation site仍为`TreeMap.put=10.61%`、primitive map插入/扩容和业务终态对象；heap固定8GiB，native committed峰值主要为GC `144.2MiB`、Tracing `43.6MiB`、Metaspace `31.0MiB`、Code `28.2MiB`，socket I/O和DataLoss均为0。
+- Pageouts由64,796增至66,092，且未执行长稳，故本轮为正确性通过、性能门禁通过的短时部分验证，不声明生产容量或无泄漏。main/gc/JFR-json/JFR SHA-256分别为`482b0b5978275463282cf4d199273202fccb7550fb10f96394df388c9803e527`、`a8431342865112d51a36ac9f591f70f6d473e22a80f5aea6e9be5ce9770ff925`、`02666ed8dd44cd051044c2bb9223a2a7206f2c3b7424855fc746f146672428ab`、`83b485ba5a2753eb20c5ac481cc9cfe3a0f0f48c44ff39db82ab6ec73afb4357`；原始JFR约85MiB，summary/views在同一artifact目录。
+
+### 2026-09-03 22:08:30 +08:00 — `PV-20260903-256-59` — `采集前锁定（pending reservation单值索引，matcher=2诊断）`
+
+#### 采集前锁定
+
+- 使用PV-58完全相同代码、JAR、机器和业务场景，仅将matching engines从1改为2，验证多个settlement在途时sequence单值索引不会提前移除、错误升级或跨sequence污染；对照PV-58 matcher=1 `36,259.695/s`和PV-54 matcher=2 `37,241.486/s`。本轮仅作扩展性诊断，不替代正式matcher=1口径。
+- 固定严格`256 in-flight`、4 Account Lane、10,000用户、512 symbols、16,384 PLACE_ORDER/invocation、50% maker GTC + 50% taker IOC、100,000 offered；无profiler`fork=1,warmup=3x3s,measurement=3x5s,thread=1`。accepted/terminal、unfinished/backlog、错误、资金、账户/持仓、订单终态、盘口、snapshot recovery和多settlement门禁与PV-58一致。
+- HEAD `aec792c85efca5be2f515acdd13abc9922c910d6`，源码diff和JAR SHA-256沿用PV-58；HotSpot 25.0.1、8GiB ZGC及其他JVM参数不变。artifact固定为`target/qualification/20260903T140830Z-pending-reservation-single-index-matcher2-256/`；采集前swap=`189.25MiB`、Pages throttled=0、Pageouts=66,092。不执行JFR/GC/长稳及外围服务测试；锁定后不修改参数或门禁。
+
+#### 采集结果
+
+- 无profiler主轮：`36,263.922 terminal business/Core messages/s`、`18,131.961 trades/s`，三个business样本为`33,253.837/39,816.419/35,721.510 ops/s`。accepted与terminal闭合，unfinished/rejected/error/timeout/starvation为0，资金、账户/持仓、订单终态、盘口、snapshot recovery和多settlement在途门禁通过。
+- 相对PV-58 matcher=1为`+0.01%`，相对PV-54 matcher=2为`-2.63%`，均在本机样本波动范围内；两个matcher没有吞吐扩展收益，但也没有sequence索引回归、提前复用或状态污染。
+- Pageouts由66,092增至66,345，因此本轮仅作matcher扩展性诊断。JSON SHA-256 `b604411e4738b2d699eb39a0e8732fa33a908f21da89f6e569d116596a93e70f`。
