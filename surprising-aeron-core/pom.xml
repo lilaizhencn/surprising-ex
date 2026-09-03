@@ -20,7 +20,6 @@
         <module>surprising-aeron-protocol</module>
         <module>surprising-aeron-service</module>
         <module>surprising-aeron-client</module>
-        <module>surprising-aeron-exporter</module>
         <module>surprising-aeron-tools</module>
         <module>surprising-aeron-benchmarks</module>
     </modules>

@@ -12,9 +12,7 @@ import com.surprising.price.api.model.PriceStatus;
 import com.surprising.risk.api.model.RiskAccountUpdatedEvent;
 import com.surprising.risk.api.model.RiskPositionUpdatedEvent;
 import com.surprising.trading.api.KafkaSymbolKeyValidator;
-import com.surprising.trading.api.model.OrderBookDepthEvent;
 import com.surprising.trading.api.model.OrderEvent;
-import com.surprising.trading.api.model.PublicTradeEvent;
 import com.surprising.trading.api.model.TriggerOrderUpdatedEvent;
 import com.surprising.websocket.api.model.ExecutionReportEvent;
 import com.surprising.websocket.api.model.SubscriptionTopic;
@@ -93,38 +91,6 @@ public class KafkaFanoutConsumer {
     public void onCandleBatch(List<ConsumerRecord<String, String>> records) {
         for (ConsumerRecord<String, String> record : records) {
             onCandle(record);
-        }
-    }
-
-    public void onOrderBookDepth(ConsumerRecord<String, String> record) {
-        try {
-            requireCurrentProductTopic(record.topic(), orderBookDepthTopic(), "order book depth");
-            OrderBookDepthEvent event = objectMapper.readValue(record.value(), OrderBookDepthEvent.class);
-            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "order book depth");
-            registry.publish(topic(WsChannel.ORDER_BOOK_DEPTH, event.symbol(), null), event, event.eventTime());
-        } catch (Exception ex) {
-            log.error("Failed to fanout order book depth: {}", ex.getMessage(), ex);
-            throw new IllegalStateException("failed to fanout order book depth", ex);
-        }
-    }
-
-    @KafkaListener(
-            topics = "#{__listener.orderBookDepthTopic()}",
-            groupId = "#{__listener.groupId()}",
-            containerFactory = "webSocketKafkaBatchListenerContainerFactory")
-    public void onOrderBookDepthBatch(List<ConsumerRecord<String, String>> records) {
-        try {
-            Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped = new LinkedHashMap<>();
-            for (ConsumerRecord<String, String> record : records) {
-                requireCurrentProductTopic(record.topic(), orderBookDepthTopic(), "order book depth");
-                OrderBookDepthEvent event = objectMapper.readValue(record.value(), OrderBookDepthEvent.class);
-                KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "order book depth");
-                addBatch(grouped, topic(WsChannel.ORDER_BOOK_DEPTH, event.symbol(), null), event, event.eventTime());
-            }
-            publishBatches(grouped);
-        } catch (Exception ex) {
-            log.error("Failed to batch fanout order book depth: {}", ex.getMessage(), ex);
-            throw new IllegalStateException("failed to batch fanout order book depth", ex);
         }
     }
 
@@ -273,38 +239,6 @@ public class KafkaFanoutConsumer {
         }
     }
 
-    public void onPublicTrade(ConsumerRecord<String, String> record) {
-        try {
-            requireCurrentProductTopic(record.topic(), matchTradesTopic(), "public trade");
-            PublicTradeEvent event = objectMapper.readValue(record.value(), PublicTradeEvent.class);
-            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "public trade");
-            registry.publish(topic(WsChannel.TRADES, event.symbol(), null), event, event.eventTime());
-        } catch (Exception ex) {
-            log.error("Failed to fanout public trade: {}", ex.getMessage(), ex);
-            throw new IllegalStateException("failed to fanout public trade", ex);
-        }
-    }
-
-    @KafkaListener(
-            topics = "#{__listener.matchTradesTopic()}",
-            groupId = "#{__listener.groupId()}",
-            containerFactory = "webSocketKafkaBatchListenerContainerFactory")
-    public void onPublicTradeBatch(List<ConsumerRecord<String, String>> records) {
-        try {
-            Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped = new LinkedHashMap<>();
-            for (ConsumerRecord<String, String> record : records) {
-                requireCurrentProductTopic(record.topic(), matchTradesTopic(), "public trade");
-                PublicTradeEvent event = objectMapper.readValue(record.value(), PublicTradeEvent.class);
-                KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "public trade");
-                addBatch(grouped, topic(WsChannel.TRADES, event.symbol(), null), event, event.eventTime());
-            }
-            publishBatches(grouped);
-        } catch (Exception ex) {
-            log.error("Failed to batch fanout public trade: {}", ex.getMessage(), ex);
-            throw new IllegalStateException("failed to batch fanout public trade", ex);
-        }
-    }
-
     @KafkaListener(
             topics = "#{__listener.positionEventsTopic()}",
             groupId = "#{__listener.groupId()}",
@@ -362,10 +296,6 @@ public class KafkaFanoutConsumer {
         return properties.getKafka().getCandleTopic();
     }
 
-    public String orderBookDepthTopic() {
-        return properties.getKafka().getOrderBookDepthTopic();
-    }
-
     public String priceEventsTopic() {
         return properties.getKafka().getPriceEventsTopic();
     }
@@ -384,10 +314,6 @@ public class KafkaFanoutConsumer {
 
     public String triggerOrderEventsTopic() {
         return properties.getKafka().getTriggerOrderEventsTopic();
-    }
-
-    public String matchTradesTopic() {
-        return properties.getKafka().getMatchTradesTopic();
     }
 
     public String positionEventsTopic() {

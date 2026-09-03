@@ -614,8 +614,8 @@ class CoreStateSnapshotCodecTest {
                     case ENVELOPE_PRODUCT_LINE -> mutated[eventOffset + 7] =
                             (byte) ProductLineWireCode.encode(ProductLine.OPTION);
                     case NESTED_PRODUCT_LINE -> {
-                        int commandPayloadLength = buffer.getInt(eventPayloadOffset + 64);
-                        int usersCountOffset = eventPayloadOffset + 68 + commandPayloadLength;
+                        int commandPayloadLength = buffer.getInt(eventPayloadOffset + 56);
+                        int usersCountOffset = eventPayloadOffset + 60 + commandPayloadLength;
                         int userCount = buffer.getInt(usersCountOffset);
                         if (userCount < 1) throw new AssertionError("Core Fact has no changed user");
                         int userLength = buffer.getInt(usersCountOffset + Integer.BYTES);

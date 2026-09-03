@@ -4,8 +4,6 @@ import java.util.Locale;
 
 public enum WsChannel {
     CANDLES("candles", true),
-    TRADES("trades", true),
-    ORDER_BOOK_DEPTH("depth", true),
     INDEX_PRICE("index", true),
     MARK_PRICE("mark", true),
     FUNDING_RATE("funding", true),

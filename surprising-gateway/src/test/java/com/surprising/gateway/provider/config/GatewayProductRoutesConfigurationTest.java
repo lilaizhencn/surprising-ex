@@ -22,7 +22,6 @@ class GatewayProductRoutesConfigurationTest {
         assertProductRouteMatrix(properties.getRoutes().get("trading"));
         assertProductRouteMatrix(properties.getRoutes().get("trading-leverage"));
         assertProductRouteMatrix(properties.getRoutes().get("trading-market"));
-        assertProductRouteMatrix(properties.getRoutes().get("trading-trades"));
         assertProductRouteMatrix(properties.getRoutes().get("trading-trigger"));
         assertProductRouteMatrix(properties.getRoutes().get("account"));
         assertProductRouteMatrix(properties.getRoutes().get("risk"));

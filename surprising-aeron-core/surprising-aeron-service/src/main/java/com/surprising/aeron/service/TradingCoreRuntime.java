@@ -328,6 +328,19 @@ public final class TradingCoreRuntime implements AutoCloseable {
         committedBusinessStateHash = afterBusinessStateHash;
     }
 
+    void commitRuntimeChanges(TradingRuntimeState state, RuntimeIdentityRegistry identityView,
+                              long beforeBusinessStateHash, long afterBusinessStateHash) {
+        assertOwner();
+        long revision = state == null ? -1 : state.committedRevision();
+        if (state == null || identityView == null || revision < committedRevision
+                || beforeBusinessStateHash != committedBusinessStateHash) {
+            throw new IllegalStateException("runtime changed-index commit is out of order");
+        }
+        factIndexes.applyCurrent(state, identityView);
+        committedRevision = revision;
+        committedBusinessStateHash = afterBusinessStateHash;
+    }
+
     void restoreCommittedConsumers(TradingCoreState state, long revision, long businessStateHash) {
         if (owner != null) assertOwner();
         factIndexes.rebuild(state, identities);

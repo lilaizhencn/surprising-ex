@@ -61,7 +61,6 @@ import com.surprising.trading.api.model.CancelOpenAlgoOrdersRequest;
 import com.surprising.trading.api.model.CancelOpenOrdersRequest;
 import com.surprising.trading.api.model.ClosePositionRequest;
 import com.surprising.trading.api.model.MarginMode;
-import com.surprising.trading.api.model.MarketTickerSummary;
 import com.surprising.trading.api.model.OrderBookLevel;
 import com.surprising.trading.api.model.OrderBookSnapshotResponse;
 import com.surprising.trading.api.model.OrderBatchResponse;
@@ -77,7 +76,6 @@ import com.surprising.trading.api.model.PlaceAlgoOrderRequest;
 import com.surprising.trading.api.model.PlaceOrderRequest;
 import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
-import com.surprising.trading.api.model.PublicTradeEvent;
 import com.surprising.trading.api.model.TestOrderResponse;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.api.client.MarketDataRpcApi;
@@ -911,18 +909,6 @@ class MarketMakerServiceTest {
                     List.of(new OrderBookLevel(bestAskTicks, 100L, 1L)), now);
         }
 
-        @Override
-        public PublicTradeEvent latestTrade(String symbol) {
-            return null;
-        }
-
-        @Override
-        public MarketTickerSummary ticker24hr(String symbol) {
-            Instant now = Instant.parse("2026-01-01T00:00:00Z");
-            return new MarketTickerSummary(symbol, 1L, 1L, 1L,
-                    50_000L, 50_010L, 49_990L, 50_000L,
-                    BigDecimal.ONE, BigDecimal.valueOf(50_000L), BigDecimal.ONE, now, now);
-        }
     }
 
     private static final class FakeInstrumentRpc implements InstrumentRpcApi {

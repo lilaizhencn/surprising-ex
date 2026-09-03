@@ -20,14 +20,12 @@ class KafkaFanoutConsumerTopicTest {
 
         assertThat(consumer.groupId()).isEqualTo("surprising-inverse-delivery-websocket-v1-node-b");
         assertThat(consumer.candleTopic()).isEqualTo("surprising.inverse-delivery.candle.events.v1");
-        assertThat(consumer.orderBookDepthTopic()).isEqualTo("surprising.inverse-delivery.orderbook.depth.v1");
         assertThat(consumer.priceEventsTopic()).isEqualTo("surprising.inverse-delivery.price.events.v1");
         assertThat(consumer.fundingRateListenerEnabled()).isFalse();
         assertThat(consumer.fundingRateTopic()).isEqualTo("surprising.inverse-delivery.funding.rate.v1");
         assertThat(consumer.orderEventsTopic()).isEqualTo("surprising.inverse-delivery.order.events.v1");
         assertThat(consumer.triggerOrderEventsTopic())
                 .isEqualTo("surprising.inverse-delivery.trigger-order.events.v1");
-        assertThat(consumer.matchTradesTopic()).isEqualTo("surprising.inverse-delivery.match.trades.v1");
         assertThat(consumer.positionEventsTopic())
                 .isEqualTo("surprising.inverse-delivery.account.position.events.v1");
         assertThat(consumer.accountRiskEventsTopic())

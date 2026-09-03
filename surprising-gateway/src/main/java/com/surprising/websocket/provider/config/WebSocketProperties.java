@@ -98,16 +98,8 @@ public class WebSocketProperties {
             this.maxPollRecords = maxPollRecords;
         }
 
-        public String getCoreEventsTopic() {
-            return productTopics().coreEventsTopic();
-        }
-
         public String getCandleTopic() {
             return productTopics().candleEventsTopic();
-        }
-
-        public String getOrderBookDepthTopic() {
-            return productTopics().orderBookDepthTopic();
         }
 
         public String getPriceEventsTopic() {
@@ -128,10 +120,6 @@ public class WebSocketProperties {
 
         public String getTriggerOrderEventsTopic() {
             return productTopics().triggerOrderEventsTopic();
-        }
-
-        public String getMatchTradesTopic() {
-            return productTopics().matchTradesTopic();
         }
 
         public String getPositionEventsTopic() {

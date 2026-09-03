@@ -24,33 +24,9 @@ class SubscriptionTopicTest {
     }
 
     @Test
-    void publicDepthSubscriptionNormalizesSymbol() {
-        SubscriptionTopic topic = SubscriptionTopic.fromCommand(
-                new WsClientCommand("subscribe", "req-depth", "depth", "btc-usdt", null, null),
-                null);
-
-        assertThat(topic.channel()).isEqualTo(WsChannel.ORDER_BOOK_DEPTH);
-        assertThat(topic.symbol()).isEqualTo("BTC-USDT");
-        assertThat(topic.period()).isNull();
-        assertThat(topic.userId()).isNull();
-    }
-
-    @Test
-    void publicDepthSubscriptionAllowsSpotSymbolSuffix() {
-        SubscriptionTopic topic = SubscriptionTopic.fromCommand(
-                new WsClientCommand("subscribe", "req-spot-depth", "depth", "btc-usdt-spot", null, null),
-                null);
-
-        assertThat(topic.channel()).isEqualTo(WsChannel.ORDER_BOOK_DEPTH);
-        assertThat(topic.symbol()).isEqualTo("BTC-USDT-SPOT");
-        assertThat(topic.period()).isNull();
-        assertThat(topic.userId()).isNull();
-    }
-
-    @Test
     void subscriptionCarriesProductLineFromCommand() {
         SubscriptionTopic topic = SubscriptionTopic.fromCommand(
-                new WsClientCommand("subscribe", "req-product", "depth", "btc-usdt", null, null,
+                new WsClientCommand("subscribe", "req-product", "index", "btc-usdt", null, null,
                         "linear-delivery"),
                 null);
 

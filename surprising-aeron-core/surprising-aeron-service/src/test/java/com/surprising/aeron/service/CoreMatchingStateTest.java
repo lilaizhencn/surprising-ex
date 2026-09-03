@@ -154,11 +154,8 @@ class CoreMatchingStateTest {
 
             assertThat(events).singleElement()
                     .satisfies(event -> assertThat(event.resultCode()).isEqualTo(CoreResultCode.NONE));
-            assertThat(events.getFirst().changedOrders()).singleElement()
-                    .satisfies(view -> {
-                        assertThat(view.orderId()).isEqualTo(202);
-                        assertThat(view.status()).isEqualTo("OPEN");
-                    });
+            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.OPEN);
+            assertThat(events.getFirst().terminalIds().orderIds()).isEmpty();
         }
     }
 
@@ -598,9 +595,11 @@ class CoreMatchingStateTest {
                             com.surprising.aeron.protocol.CoreExportEvent::exportSequence))
                     .orElseThrow();
 
-            assertThat(event.changedTreasuryAssets()).singleElement().satisfies(treasury -> {
-                assertThat(treasury.asset()).isEqualTo("USDT");
-                assertThat(treasury.feeBalanceUnits()).isEqualTo(60);
+            assertThat(event.fundsPostings()).anySatisfy(posting -> {
+                assertThat(posting.asset()).isEqualTo("USDT");
+                assertThat(posting.subledger())
+                        .isEqualTo(com.surprising.aeron.protocol.CoreFundsPostingView.Subledger.FEE);
+                assertThat(posting.units()).isEqualTo(60);
             });
         }
     }

@@ -79,9 +79,9 @@ class SubscriptionRegistryTest {
         ClientConnection productSubscriber = connection("s-product");
         registry.add(productSubscriber);
         registry.subscribe(productSubscriber,
-                new SubscriptionTopic(WsChannel.TRADES, "BTC-USDT", null, null, ProductLine.LINEAR_DELIVERY));
+                new SubscriptionTopic(WsChannel.INDEX_PRICE, "BTC-USDT", null, null, ProductLine.LINEAR_DELIVERY));
 
-        registry.publish(new SubscriptionTopic(WsChannel.TRADES, "BTC-USDT", null, null),
+        registry.publish(new SubscriptionTopic(WsChannel.INDEX_PRICE, "BTC-USDT", null, null),
                 "payload", Instant.parse("2026-07-01T00:00:00Z"));
 
         verify(productSubscriber, never()).send(anyString());
@@ -98,7 +98,7 @@ class SubscriptionRegistryTest {
         when(user.queuedMessages()).thenReturn(3);
         when(anonymous.queueCapacity()).thenReturn(4);
         when(user.queueCapacity()).thenReturn(6);
-        SubscriptionTopic publicTopic = new SubscriptionTopic(WsChannel.TRADES, "BTC-USDT", null, null);
+        SubscriptionTopic publicTopic = new SubscriptionTopic(WsChannel.INDEX_PRICE, "BTC-USDT", null, null);
         SubscriptionTopic privateTopic = new SubscriptionTopic(WsChannel.ORDERS, "BTC-USDT", null, 7001L);
         registry.subscribe(anonymous, publicTopic);
         registry.subscribe(user, publicTopic);
@@ -113,7 +113,7 @@ class SubscriptionRegistryTest {
         assertThat(registry.queuedMessageCount()).isEqualTo(5);
         assertThat(registry.queueCapacity()).isEqualTo(10);
         assertThat(registry.channelMetrics()).extracting(SubscriptionRegistry.ChannelMetric::channel)
-                .containsExactly("ORDERS", "TRADES");
+                .containsExactly("INDEX_PRICE", "ORDERS");
     }
 
     private ClientConnection connection(String id) {

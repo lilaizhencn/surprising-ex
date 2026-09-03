@@ -703,15 +703,12 @@ public class OwnerFactFrameBenchmark {
                 encodedFingerprintsExact &= event.commandFingerprint().equals(
                         CommandFingerprint.of(drafts.drafts.get(index).draft.command));
                 RuntimeFactFrame patch = sealed.get(index);
-                encodedFactsExact &= event.businessStateHash() == patch.businessStateHash()
-                        && event.beforeBusinessStateHash() == patch.beforeBusinessStateHash()
-                        && event.fundsStateHash() == patch.fundsStateHash()
-                        && event.beforeFundsStateHash() == patch.beforeFundsStateHash()
-                        && patch.previousCoreSequence() == patch.previousProjectionSequence()
+                encodedFactsExact &= patch.previousCoreSequence() == patch.previousProjectionSequence()
                         && patch.coreSequence() == patch.projectionSequence()
+                        && event.appliedCommandCount() == patch.coreFactMetadata().appliedCommandCount()
+                        && event.committedCoreSequence() == patch.coreSequence()
                         && event.projectionSequence() == patch.projectionSequence()
-                        && event.commandId().equals(patch.coreFactMetadata().commandId())
-                        && !event.changedUsers().isEmpty() && !event.changedOrders().isEmpty();
+                        && event.commandId().equals(patch.coreFactMetadata().commandId());
                 encodedEvents++;
             }
         }
@@ -987,7 +984,7 @@ public class OwnerFactFrameBenchmark {
                 command.header().commandId(), CommandFingerprint.of(command),
                 command.header().messageType().wireCode(), command.header().userId(),
                 ResponseStatus.APPLIED, CoreResultCode.NONE,
-                sequence, sequence, FOUR_LANES.topologyHash(), sequence, false);
+                sequence, sequence, false);
         RuntimeFactFrame.PreparedChanges changes = builder.prepare(new RuntimeFactFrame.PrepareMetadata(
                 Math.addExact(initial.revision(), sequence - 1),
                 Math.addExact(initial.revision(), sequence), business.value(), funds.value(), laneMask,
@@ -1066,10 +1063,8 @@ public class OwnerFactFrameBenchmark {
         RuntimeFactFrame.CoreFactMetadata metadata = patch.coreFactMetadata();
         long[] terminalOrderIds = patch.terminalIds().orderIds().stream().mapToLong(Long::longValue).toArray();
         return new CoreExportState.Draft(command, metadata.status(), metadata.resultCode(),
-                metadata.appliedCommandCount(), patch.businessStateHash(), patch.beforeBusinessStateHash(),
-                patch.beforeFundsStateHash(), patch.fundsStateHash(), metadata.topologyHash(),
-                metadata.laneRevisionHash(), patch.matcherTransition(), metadata.clusterPosition(),
-                patch.projectionSequence(), patch.coreFactItemCount(), terminalOrderIds,
+                metadata.appliedCommandCount(), metadata.clusterPosition(), patch.projectionSequence(),
+                patch.coreFactItemCount(), terminalOrderIds,
                 new CoreExportState.FactChain(patch, null, factPermit(patch)),
                 CoreCommandDelta.empty(), patch.fundsDelta(), metadata);
     }

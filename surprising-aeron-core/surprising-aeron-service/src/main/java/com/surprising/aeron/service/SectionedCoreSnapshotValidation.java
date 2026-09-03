@@ -128,11 +128,13 @@ final class SectionedCoreSnapshotValidation {
                 && manifest.activeOrderHash() == MatcherSnapshot.activeOrderHash(tradingState), "active order hash");
         requireMatch(manifest.sourceSequenceDigest() == CoreProbeState.sourceSequenceDigest(sourceSequences),
                 "source sequence digest");
-        requireMatch(manifest.outboxAcknowledgedSequence() == exportState.acknowledgedSequence(),
-                "outbox acknowledged sequence");
-        requireMatch(manifest.outboxNextSequence() == exportState.nextSequence(), "outbox next sequence");
-        requireMatch(manifest.outboxPendingCount() == exportState.pendingCount(), "outbox pending count");
-        requireMatch(manifest.outboxPendingDigest() == exportState.pendingDigest(), "outbox pending digest");
+        if (exportState.enabled()) {
+            requireMatch(manifest.outboxAcknowledgedSequence() == exportState.acknowledgedSequence(),
+                    "outbox acknowledged sequence");
+            requireMatch(manifest.outboxNextSequence() == exportState.nextSequence(), "outbox next sequence");
+            requireMatch(manifest.outboxPendingCount() == exportState.pendingCount(), "outbox pending count");
+            requireMatch(manifest.outboxPendingDigest() == exportState.pendingDigest(), "outbox pending digest");
+        }
         requireMatch(manifest.matcherConfigHash() == matcherSnapshot.matcherConfigHash(), "matcher config");
         requireMatch(manifest.forkGitSha().equals(matcherSnapshot.forkGitSha()), "fork identity");
         requireMatch(manifest.artifactSha256().equals(matcherSnapshot.artifactSha256()), "artifact identity");

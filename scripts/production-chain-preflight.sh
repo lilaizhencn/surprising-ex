@@ -142,7 +142,7 @@ collect_resource_budget() {
   local gib=$((1024 * 1024 * 1024)) mib=$((1024 * 1024))
   PROCESS_CAPS_FILE="$TEMP_DIR/process-caps.tsv"
   for node in 0 1 2; do printf 'core-node-%s\t768\t256\n' "$node"; done >"$PROCESS_CAPS_FILE"
-  for service in instrument exporter projector price account trading market-data derivatives-lifecycle funding gateway maker; do
+  for service in instrument price account trading market-data derivatives-lifecycle funding gateway maker; do
     printf '%s\t384\t128\n' "$service" >>"$PROCESS_CAPS_FILE"
   done
   PROCESS_CAP_BYTES="$(awk -F '\t' '{sum += ($2 + $3) * 1024 * 1024} END {print sum}' "$PROCESS_CAPS_FILE")"

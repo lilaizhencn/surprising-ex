@@ -275,7 +275,7 @@ class RuntimeFactFrameTest {
         var factMetadata = new RuntimeFactFrame.CoreFactMetadata(factCommandId,
                 fingerprint(factCommandId, 7, 1),
                 com.surprising.aeron.protocol.CoreMessageType.PROBE_INCREMENT.wireCode(), 7,
-                ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 1, 1, 1, false);
+                ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 1, false);
         RuntimeFactFrame.PrepareMetadata prepareMetadata = new RuntimeFactFrame.PrepareMetadata(
                 0, 1, 0, 0, 1L << 1, factMetadata, false);
         RuntimeFactFrame.PreparedChanges prepared = builder.prepare(prepareMetadata, identities);
@@ -289,9 +289,7 @@ class RuntimeFactFrameTest {
 
         assertThat(index.orders().iterator().next().orderId()).isEqualTo(change.orderId());
         assertThat(projection.freeze(1).orders().get(71L).orderId()).isEqualTo(change.orderId());
-        assertThat(patch.materializeCoreFactFragment().changedOrders())
-                .singleElement().extracting(com.surprising.aeron.protocol.CoreOrderStateView::orderId)
-                .isEqualTo(order.orderId());
+        assertThat(change.after().orderId()).isEqualTo(order.orderId());
     }
 
     @Test
@@ -332,26 +330,26 @@ class RuntimeFactFrameTest {
         var factMetadata = new RuntimeFactFrame.CoreFactMetadata(factCommandId,
                 fingerprint(factCommandId, 7, 1),
                 com.surprising.aeron.protocol.CoreMessageType.PROBE_INCREMENT.wireCode(), 7,
-                ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 1, 1, 1, true);
+                ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 1, true);
         RuntimeFactFrame.PreparedChanges prepared = builder.prepare(new RuntimeFactFrame.PrepareMetadata(
                 0, 1, 0, 0, 1L << 1, factMetadata, true), identities);
-        RuntimeFactFrame.CoreFactFragment fragment = builder.seal(prepared, 1, 0)
-                .materializeCoreFactFragment();
+        RuntimeFactFrame patch = builder.seal(prepared, 1, 0);
+        RuntimeFactFrame.AccountLaneOwnerGroup group = patch.accountLaneGroups().getFirst();
 
-        assertThat(fragment.changedUsers()).extracting(user -> user.userId()).containsExactly(9L, 7L);
-        assertThat(fragment.changedUsers().get(0).balances()).singleElement()
-                .extracting(balance -> balance.availableUnits()).isEqualTo(900L);
-        assertThat(fragment.changedUsers().get(0).reservations()).singleElement()
-                .extracting(reservation -> reservation.orderId()).isEqualTo(99L);
-        assertThat(fragment.changedUsers().get(0).positions()).singleElement()
-                .extracting(position -> position.positionSide())
+        assertThat(patch.changedUserIds()).containsExactly(9L, 7L);
+        assertThat(group.balances()).filteredOn(change -> change.key().userId() == 9).singleElement()
+                .extracting(change -> change.after().availableUnits()).isEqualTo(900L);
+        assertThat(group.reservations()).filteredOn(change -> change.after().userId() == 9).singleElement()
+                .extracting(change -> change.after().orderId()).isEqualTo(99L);
+        assertThat(group.positions()).filteredOn(change -> change.after().userId() == 9).singleElement()
+                .extracting(change -> change.after().positionSide())
                 .isEqualTo(com.surprising.aeron.protocol.CorePositionSide.SHORT);
-        assertThat(fragment.changedUsers().get(1).balances()).singleElement()
-                .extracting(balance -> balance.availableUnits()).isEqualTo(700L);
-        assertThat(fragment.changedUsers().get(1).reservations()).singleElement()
-                .extracting(reservation -> reservation.orderId()).isEqualTo(77L);
-        assertThat(fragment.changedUsers().get(1).positions()).singleElement()
-                .extracting(position -> position.positionSide())
+        assertThat(group.balances()).filteredOn(change -> change.key().userId() == 7).singleElement()
+                .extracting(change -> change.after().availableUnits()).isEqualTo(700L);
+        assertThat(group.reservations()).filteredOn(change -> change.after().userId() == 7).singleElement()
+                .extracting(change -> change.after().orderId()).isEqualTo(77L);
+        assertThat(group.positions()).filteredOn(change -> change.after().userId() == 7).singleElement()
+                .extracting(change -> change.after().positionSide())
                 .isEqualTo(com.surprising.aeron.protocol.CorePositionSide.LONG);
     }
 
@@ -369,14 +367,15 @@ class RuntimeFactFrameTest {
         var factMetadata = new RuntimeFactFrame.CoreFactMetadata(factCommandId,
                 fingerprint(factCommandId, 7, 41),
                 com.surprising.aeron.protocol.CoreMessageType.PROBE_INCREMENT.wireCode(), 7,
-                ResponseStatus.APPLIED, CoreResultCode.NONE, 41, 401, 501, 601, false);
+                ResponseStatus.APPLIED, CoreResultCode.NONE, 41, 401, false);
         RuntimeFactFrame.PrepareMetadata prepareMetadata = new RuntimeFactFrame.PrepareMetadata(
                 3, 4, 5, 7, 1L << 1, factMetadata, false);
         RuntimeFactFrame.PreparedChanges prepared = builder.prepare(prepareMetadata, identities);
         RuntimeFactFrame patch = builder.seal(prepared, 9, 11);
 
-        assertThat(patch.materializeCoreFactFragment().changedOrders()).isEmpty();
-        assertThat(patch.materializeCoreFactFragment().tombstones().orderIds()).containsExactly(72L);
+        RuntimeFactFrame.OrderChange change = patch.accountLaneGroups().getFirst().orders().getFirst();
+        assertThat(change.before().orderId()).isEqualTo(72L);
+        assertThat(change.after()).isNull();
     }
 
     @Test
@@ -448,7 +447,7 @@ class RuntimeFactFrameTest {
                 UUID.fromString("00000000-0000-0000-0000-000000000041"),
                 fingerprint(UUID.fromString("00000000-0000-0000-0000-000000000041"), 9, 41),
                 com.surprising.aeron.protocol.CoreMessageType.PROBE_INCREMENT.wireCode(), 9,
-                ResponseStatus.APPLIED, CoreResultCode.NONE, 41, 401, 501, 601, externalAdjustment));
+                ResponseStatus.APPLIED, CoreResultCode.NONE, 41, 401, externalAdjustment));
     }
 
     private static UserRuntime user(long userId, long revision) {

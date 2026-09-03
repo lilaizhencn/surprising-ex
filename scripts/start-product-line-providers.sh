@@ -41,14 +41,12 @@ VALKEY_HOST="${VALKEY_HOST:-127.0.0.1}"
 VALKEY_PORT="${VALKEY_PORT:-6379}"
 AERON_CLUSTER_HOSTNAMES="${AERON_CLUSTER_HOSTNAMES:-127.0.0.1,127.0.0.1,127.0.0.1}"
 AERON_EGRESS_HOSTNAME="${AERON_EGRESS_HOSTNAME:-127.0.0.1}"
-EXPORTER_METRICS_HOST="${EXPORTER_METRICS_HOST:-}"
-EXPORTER_METRICS_PORT="${EXPORTER_METRICS_PORT:-}"
 BUILD_CHANGED="${BUILD_CHANGED:-false}"
 JVM_IMPLEMENTATION=""
 JVM_FEATURE_VERSION=""
 JVM_TELEMETRY_MODE=""
 
-readonly SERVICES=(instrument exporter projector price account trading market-data derivatives-lifecycle funding gateway maker)
+readonly SERVICES=(instrument price account trading market-data derivatives-lifecycle funding gateway maker)
 readonly HTTP_SERVICES=(instrument price account trading market-data derivatives-lifecycle funding gateway maker)
 readonly HTTP_PORTS=(9080 9082 9086 9084 9081 9087 9089 9094 9096)
 
@@ -71,13 +69,6 @@ case "$JFR_ENABLED" in true|false) ;; *) fail 'JFR_ENABLED must be true or false
 case "$JFR_SETTINGS" in profile|default) ;; *) fail 'JFR_SETTINGS must be profile or default' ;; esac
 case "$POSTGRES_MODE" in auto|docker|native) ;; *) fail 'POSTGRES_MODE must be auto, docker or native' ;; esac
 [[ "$RUN_ID" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$ ]] || fail "invalid RUN_ID=$RUN_ID"
-
-validate_exporter_metrics() {
-  [[ "$EXPORTER_METRICS_HOST" =~ [^[:space:]] ]] || fail 'EXPORTER_METRICS_HOST must be non-empty'
-  [[ "$EXPORTER_METRICS_PORT" =~ ^[0-9]{1,5}$ ]] || fail 'EXPORTER_METRICS_PORT must be numeric'
-  (( 10#$EXPORTER_METRICS_PORT >= 1 && 10#$EXPORTER_METRICS_PORT <= 65535 )) || \
-    fail 'EXPORTER_METRICS_PORT must be between 1 and 65535'
-}
 
 detect_jvm_campaign_support() {
   local version_output
@@ -120,7 +111,6 @@ jar_path() {
   case "$1" in
     core) printf '%s/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar' "$ROOT_DIR" ;;
     tools) printf '%s/surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar' "$ROOT_DIR" ;;
-    exporter|projector) printf '%s/surprising-aeron-core/surprising-aeron-exporter/target/surprising-aeron-exporter.jar' "$ROOT_DIR" ;;
     instrument) printf '%s/surprising-instrument/surprising-instrument-provider/target/surprising-instrument-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
     market-data) printf '%s/surprising-market-data/surprising-market-data-provider/target/surprising-market-data-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
     price) printf '%s/surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
@@ -204,10 +194,6 @@ initialize_database() {
   if [[ "$initialized" != t ]]; then
     postgres_exec < "$ROOT_DIR/init.sql" >/dev/null
   fi
-  local migration
-  for migration in "$ROOT_DIR"/surprising-aeron-core/surprising-aeron-exporter/src/main/resources/db/migration/*.sql; do
-    postgres_exec < "$migration" >/dev/null
-  done
   printf 'DATABASE=READY database=%s\n' "$POSTGRES_DB"
 }
 
@@ -324,7 +310,6 @@ COMMON_ENV=(
     PRODUCT_LINE="$PRODUCT_LINE" WALLET_ENABLED=false \
     AERON_CLUSTER_HOSTNAMES="$AERON_CLUSTER_HOSTNAMES" AERON_HOSTNAMES="$AERON_CLUSTER_HOSTNAMES" \
     AERON_EGRESS_HOSTNAME="$AERON_EGRESS_HOSTNAME" AERON_CLIENT_EGRESS_HOSTNAME="$AERON_EGRESS_HOSTNAME" \
-    EXPORTER_METRICS_HOST="$EXPORTER_METRICS_HOST" EXPORTER_METRICS_PORT="$EXPORTER_METRICS_PORT" \
     KAFKA_BOOTSTRAP_SERVERS="$KAFKA_BOOTSTRAP_SERVERS" SPRING_KAFKA_BOOTSTRAP_SERVERS="$KAFKA_BOOTSTRAP_SERVERS" \
     SURPRISING_KAFKA_BOOTSTRAP_SERVERS="$KAFKA_BOOTSTRAP_SERVERS" \
     SURPRISING_INSTRUMENT_KAFKA_BOOTSTRAP_SERVERS="$KAFKA_BOOTSTRAP_SERVERS" \
@@ -409,8 +394,6 @@ start_stack() {
   initialize_database
   start_http_service instrument
   start_core "$core_action"
-  start_background_service exporter com.surprising.aeron.exporter.ExporterMain
-  start_background_service projector com.surprising.aeron.exporter.ProjectionMain
   start_http_service price
   start_http_service account
   start_http_service trading
@@ -539,7 +522,7 @@ print_dry_run() {
   printf 'JVM_COMPATIBILITY=PASS implementation=%s featureVersion=%s collector=%s telemetry=%s jfr=%s\n' \
     "$JVM_IMPLEMENTATION" "$JVM_FEATURE_VERSION" "$JVM_GC" "$JVM_TELEMETRY_MODE" "$JFR_ENABLED"
   local service
-  printf 'START_ORDER=instrument,host-core-node0,host-core-node1,host-core-node2,exporter,projector,price,account,trading,market-data'
+  printf 'START_ORDER=instrument,host-core-node0,host-core-node1,host-core-node2,price,account,trading,market-data'
   service_enabled derivatives-lifecycle && printf ',derivatives-lifecycle'
   service_enabled funding && printf ',funding'
   printf ',gateway,maker\nWALLET=ABSENT\nPOSTGRES=%s:%s/%s\nKAFKA=%s\nVALKEY=%s:%s\n' \
@@ -551,9 +534,6 @@ export POSTGRES_HOST POSTGRES_PORT POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD K
 export VALKEY_HOST VALKEY_PORT
 case "$ACTION" in
   up|fresh|test|dry-run) detect_jvm_campaign_support ;;
-esac
-case "$ACTION" in
-  up|fresh|dry-run) validate_exporter_metrics ;;
 esac
 case "$ACTION" in
   up) start_stack up ;;

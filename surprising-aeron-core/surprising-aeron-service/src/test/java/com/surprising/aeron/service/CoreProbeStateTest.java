@@ -405,12 +405,10 @@ class CoreProbeStateTest {
     void missingOrZeroFactMetadataIsRejectedBeforeExportStateDrifts() {
         try (CoreExportState exportState = new CoreExportState()) {
             CoreMessage command = command(UUID.randomUUID(), 1, 1);
-            var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
             CoreExportState.Metrics before = exportState.metrics();
 
             assertThatThrownBy(() -> new CoreExportState.Draft(command, ResponseStatus.APPLIED,
-                    CoreResultCode.NONE, 1, 1, 0, 0, 0, 1, 1, transition, 1, 1, 0, new long[0],
-                    null, CoreCommandDelta.empty(),
+                    CoreResultCode.NONE, 1, 1, 1, 0, new long[0], null, CoreCommandDelta.empty(),
                     com.surprising.aeron.service.state.RuntimeFundsDelta.empty(), null))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessage("invalid Core Fact draft");
@@ -418,7 +416,7 @@ class CoreProbeStateTest {
                     command.header().commandId(), com.surprising.aeron.protocol.CommandFingerprint.fromBytes(
                     new byte[com.surprising.aeron.protocol.CommandFingerprint.LENGTH]),
                     command.header().messageType().wireCode(), command.header().userId(), ResponseStatus.APPLIED,
-                    CoreResultCode.NONE, 1, 1, 1, 1, false))
+                    CoreResultCode.NONE, 1, 1, false))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessage("Core Fact fingerprint must not be zero");
 
@@ -479,9 +477,6 @@ class CoreProbeStateTest {
                     .map(message -> CoreExportCodec.decodeEvent(message.payloadUnsafe()))
                     .filter(value -> value.commandId().equals(commandId))
                     .findFirst().orElseThrow();
-            assertThat(event.changedTreasuryAssets())
-                    .extracting(com.surprising.aeron.protocol.CoreTreasuryAssetView::asset)
-                    .containsExactly("USDT");
             assertThat(event.fundsPostings()).hasSize(2);
             assertThat(event.fundsPostings().stream()
                     .mapToLong(com.surprising.aeron.protocol.CoreFundsPostingView::units).sum()).isZero();
@@ -593,16 +588,15 @@ class CoreProbeStateTest {
             return CoreExportCodec.encodeEvent(event);
         })) {
             CoreMessage command = command(UUID.randomUUID(), 1, 1);
-            var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
             var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
             var patch = conservedFundsPatch(identities, command);
             var chain = new CoreExportState.FactChain(patch, null, factPermit(patch));
             var metadata = new com.surprising.aeron.service.state.RuntimeFactFrame.CoreFactMetadata(
                     command.header().commandId(), com.surprising.aeron.protocol.CommandFingerprint.of(command),
                     command.header().messageType().wireCode(), command.header().userId(), ResponseStatus.APPLIED,
-                    CoreResultCode.NONE, 1, 1, 1, 1, false);
+                    CoreResultCode.NONE, 1, 1, false);
             exportState.append(new CoreExportState.Draft(command, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                    1, 1, 0, 0, 1, 1, 1, transition, 1, 1,
+                    1, 1, 1,
                     Math.addExact(1, chain.itemCount()), new long[]{42}, chain, CoreCommandDelta.empty(),
                     patch.fundsDelta(), metadata));
 
@@ -637,16 +631,15 @@ class CoreProbeStateTest {
             return CoreExportCodec.encodeEvent(event);
         })) {
             CoreMessage command = command(UUID.randomUUID(), 1, 1);
-            var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
             var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
             var patch = conservedFundsPatch(identities, command);
             var metadata = new com.surprising.aeron.service.state.RuntimeFactFrame.CoreFactMetadata(
                     command.header().commandId(), com.surprising.aeron.protocol.CommandFingerprint.of(command),
                     command.header().messageType().wireCode(), command.header().userId(), ResponseStatus.APPLIED,
-                    CoreResultCode.NONE, 1, 1, 1, 1, false);
+                    CoreResultCode.NONE, 1, 1, false);
 
             exportState.append(new CoreExportState.Draft(command, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                    1, 1, 0, 0, 1, 1, 1, transition, 1, 1,
+                    1, 1, 1,
                     patch.fundsPostings().size(), new long[0], null, CoreCommandDelta.empty(),
                     patch.fundsDelta(), identities, metadata));
 
@@ -731,8 +724,7 @@ class CoreProbeStateTest {
         try (CoreExportState exportState = new CoreExportState()) {
             exportState.append(draft(command, 2, 2, 0, transition, List.of(71L), chain, identities));
             var event = CoreExportCodec.decodeEvent(exportState.pending().getFirst().payloadUnsafe());
-            assertThat(event.changedOrders()).isEmpty();
-            assertThat(event.tombstones().orderIds()).containsExactly(71L);
+            assertThat(event.terminalIds().orderIds()).isEmpty();
         }
     }
 
@@ -787,7 +779,7 @@ class CoreProbeStateTest {
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
             while (captured.get() == null && System.nanoTime() < deadline) Thread.onSpinWait();
 
-            assertThat(captured.get().changedOrders().getFirst().orderId()).isEqualTo(73);
+            assertThat(captured.get().commandId()).isEqualTo(command.header().commandId());
             assertThat(assemblerThread.get()).isEqualTo("core-fact-materializer");
         }
     }
@@ -1165,8 +1157,9 @@ class CoreProbeStateTest {
                 .map(message -> CoreExportCodec.decodeEvent(message.payload()))
                 .filter(event -> event.commandId().equals(placeId))
                 .findFirst().orElseThrow();
-        assertThat(placeEvent.changedUsers()).extracting(value -> value.userId()).containsExactly(1001L);
-        assertThat(placeEvent.changedOrders()).extracting(value -> value.orderId()).containsExactly(91L);
+        assertThat(placeEvent.terminalIds().orderIds()).isEmpty();
+        assertThat(original.tradingState().order(91).status()).isEqualTo(
+                com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
         var duplicatePlace = original.apply(place);
         assertThat(duplicatePlace.status()).isEqualTo(ResponseStatus.DUPLICATE);
         assertThat(com.surprising.aeron.protocol.CoreCommandResultCodec.decode(duplicatePlace.data())
@@ -1190,8 +1183,7 @@ class CoreProbeStateTest {
                 .map(message -> CoreExportCodec.decodeEvent(message.payload()))
                 .filter(event -> event.commandId().equals(triggerPlace.header().commandId()))
                 .findFirst().orElseThrow();
-        assertThat(triggerEvent.changedTriggerOrders()).extracting(value -> value.triggerOrderId())
-                .containsExactly(501L);
+        assertThat(triggerEvent.terminalIds().triggerOrderIds()).isEmpty();
         CoreMessage triggerQuery = query(CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY, 1001,
                 com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeQuery(
                         new com.surprising.aeron.protocol.CoreTriggerOrderQuery(0, "BTC-USDT", 0, 10)));
@@ -1361,7 +1353,6 @@ class CoreProbeStateTest {
                             CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false,
                             "snapshot-attempt-713")));
 
-            state.captureCommittedPatchesForTest();
             assertThat(state.apply(place).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             int committed = 0;
             long deadline = System.nanoTime() + 5_000_000_000L;
@@ -1370,21 +1361,10 @@ class CoreProbeStateTest {
                 if (committed == 0) Thread.onSpinWait();
             }
             assertThat(committed).isEqualTo(1);
-            var placePatch = state.capturedFactFramesForTest().getLast();
-            var clientOrderChanges = placePatch.accountLaneGroups().stream()
-                    .flatMap(group -> group.clientOrders().stream())
-                    .toList();
-            assertThat(clientOrderChanges).isNotEmpty();
-            assertThat(clientOrderChanges.stream().anyMatch(change -> change.key().userId() == 1001
-                            && change.beforeOrderId() == null
-                            && Long.valueOf(713).equals(change.afterOrderId())))
-                    .isTrue();
-            assertThat(placePatch.accountLaneGroups().stream()
-                    .flatMap(group -> group.orders().stream())
-                    .anyMatch(change -> change.orderId() == 713
-                            && change.after() != null
-                            && change.after().userId() == 1001))
-                    .isTrue();
+            assertThat(state.tradingState().clientOrderIndex()).containsEntry(
+                    new com.surprising.aeron.service.state.TradingCoreState.ClientOrderKey(
+                            1001, "snapshot-attempt-713"), 713L);
+            assertThat(state.tradingState().order(713).userId()).isEqualTo(1001L);
             assertThat(state.snapshot()).isNotEmpty();
             assertThat(state.pendingMatching()).isEmpty();
         }
@@ -2763,10 +2743,9 @@ class CoreProbeStateTest {
         var metadata = new com.surprising.aeron.service.state.RuntimeFactFrame.CoreFactMetadata(
                 command.header().commandId(), com.surprising.aeron.protocol.CommandFingerprint.of(command),
                 command.header().messageType().wireCode(), command.header().userId(), ResponseStatus.APPLIED,
-                CoreResultCode.NONE, appliedCount, appliedCount, 1, 1, false);
+                CoreResultCode.NONE, appliedCount, appliedCount, false);
         return new CoreExportState.Draft(command, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                appliedCount, businessStateHash, beforeBusinessStateHash, 0, 0, 1, 1, transition,
-                appliedCount, appliedCount, terminalOrderIds.size(), terminalOrderIds.stream()
+                appliedCount, appliedCount, appliedCount, terminalOrderIds.size(), terminalOrderIds.stream()
                 .mapToLong(Long::longValue).toArray(), null, CoreCommandDelta.empty(),
                 com.surprising.aeron.service.state.RuntimeFundsDelta.empty(), metadata);
     }
@@ -2808,7 +2787,7 @@ class CoreProbeStateTest {
         var metadata = new com.surprising.aeron.service.state.RuntimeFactFrame.CoreFactMetadata(
                 command.header().commandId(), com.surprising.aeron.protocol.CommandFingerprint.of(command),
                 command.header().messageType().wireCode(), command.header().userId(), ResponseStatus.APPLIED,
-                CoreResultCode.NONE, 1, 1, 1, 1, false);
+                CoreResultCode.NONE, 1, 1, false);
         var prepared = builder.prepare(new com.surprising.aeron.service.state.RuntimeFactFrame.PrepareMetadata(
                 0, 1, 0, 0, 0, metadata, false), identities);
         return builder.seal(prepared, 1, 1);
@@ -2822,11 +2801,11 @@ class CoreProbeStateTest {
         var metadata = new com.surprising.aeron.service.state.RuntimeFactFrame.CoreFactMetadata(
                 command.header().commandId(), com.surprising.aeron.protocol.CommandFingerprint.of(command),
                 command.header().messageType().wireCode(), command.header().userId(), ResponseStatus.APPLIED,
-                CoreResultCode.NONE, appliedCount, appliedCount, 1, 1, false);
+                CoreResultCode.NONE, appliedCount, appliedCount, false);
         int itemCount = terminalOrderIds.size() + (patches == null ? 0 : patches.itemCount());
         return new CoreExportState.Draft(command, ResponseStatus.APPLIED, CoreResultCode.NONE,
-                appliedCount, businessStateHash, beforeBusinessStateHash, 0, 0, 1, 1, transition,
-                appliedCount, appliedCount, itemCount, terminalOrderIds.stream().mapToLong(Long::longValue).toArray(),
+                appliedCount, appliedCount, appliedCount, itemCount,
+                terminalOrderIds.stream().mapToLong(Long::longValue).toArray(),
                 patches, CoreCommandDelta.empty(),
                 com.surprising.aeron.service.state.RuntimeFundsDelta.empty(), metadata);
     }
@@ -2849,7 +2828,7 @@ class CoreProbeStateTest {
         var metadata = new com.surprising.aeron.service.state.RuntimeFactFrame.CoreFactMetadata(
                 cause.header().commandId(), com.surprising.aeron.protocol.CommandFingerprint.of(cause),
                 cause.header().messageType().wireCode(), cause.header().userId(), ResponseStatus.APPLIED,
-                CoreResultCode.NONE, sequence, sequence, 1, 1, false);
+                CoreResultCode.NONE, sequence, sequence, false);
         var prepared = builder.prepare(new com.surprising.aeron.service.state.RuntimeFactFrame.PrepareMetadata(
                 previousSequence, sequence, previousSequence, previousSequence, 1L << 1, metadata, false),
                 identities);

@@ -75,11 +75,10 @@ client / internal gateway
   -> Aeron Product Core
   -> Runtime 原子裁决订单、预占、成交、手续费和持仓
   -> exchange-core 唯一订单簿
-  -> replicated Core Fact outbox
-  -> Audit Exporter 发布 surprising.<product-segment>.core.events.v1
-  -> History Projector 异步投影 trading_orders 和审计表
-  -> 公共行情链路：match.trades.v1 + orderbook.depth.v1
+  -> Core response / domain events
 ```
+
+历史 Core Export、PostgreSQL 投影以及公共成交/盘口历史数据暂不接入交易链路，后续作为独立外围能力添加。
 
 止盈止损走独立链路：
 
@@ -252,16 +251,14 @@ curl 'http://localhost:9094/api/v1/gateway/trading-trigger/open?userId=1001&symb
 - `POST /api/v1/trading/trigger-orders/cancel-open`：撤销用户所有 `PENDING` 条件单，可按 `symbol` 过滤，单次最多 1000 条；已经进入 `TRIGGERING` 的条件单不在这里撤销，避免和触发执行抢状态。
 - `GET /api/v1/trading/trigger-orders/open?userId=...&symbol=...&limit=...&cursor=...`：按 Core 游标查询用户待触发条件单，响应包含 `nextCursor` 和 `hasMore`。
 
-触发单事实状态只存在 Aeron Core 的 `CoreTriggerOrderState` 和增量索引中。Provider 不加载数据库、Redis 或 Kafka 触发单仓储，数据库只通过 Core Export 接收异步查询投影。
+触发单事实状态只存在 Aeron Core 的 `CoreTriggerOrderState` 和增量索引中。Provider 不加载数据库、Redis 或 Kafka 触发单仓储。
 
 ## TraceId 链路追踪
 
 - 前端或 BFF 可以传 `X-Trace-Id`；未传时 gateway/order 入口会自动生成。
-- `surprising-trading-provider` 只在当前 HTTP 请求内用 ThreadLocal 保存 traceId，请求结束会清理；提交 Aeron 前把它写入稳定 Core command/export 元数据。
-- Core command、Core Export 和 WebSocket 事件会携带同一个 traceId，查询投影不参与在线裁决。
-- matching projection 必须沿用 Core Export 的 traceId，不能重新生成或把投影 trace 当裁决身份。
-- Core Fact 中的订单、成交和用户状态变更沿用命令 traceId，私有 WebSocket 和历史投影都从同一事实恢复关联。
-- PostgreSQL 的 `trading_order_events`、`trading_match_results`、`trading_match_trades` 都保存 `trace_id`。生产日志建议同时输出 `traceId`、`orderId`、`commandId`、`tradeId`、symbol 和 Kafka topic/partition/offset。
+- `surprising-trading-provider` 只在当前 HTTP 请求内用 ThreadLocal 保存 traceId，请求结束会清理；提交 Aeron 前把它写入稳定 Core command 元数据。
+- Core command、领域事件和私有 WebSocket 事件沿用同一个 traceId，查询不参与在线裁决。
+- 生产日志建议同时输出 `traceId`、`orderId`、`commandId`、`tradeId`、symbol 和 Kafka topic/partition/offset。
 
 ## 保证金冻结
 
@@ -357,18 +354,16 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 
 - `surprising.<product-segment>.order.commands.v1`：订单撮合命令，key = `symbol`。
 - `surprising.<product-segment>.order.events.v1`：订单入口事件，key = `symbol`。
-- `surprising.<product-segment>.core.events.v1`：Product Core 导出的可靠审计事实；私有订单、成交、持仓推送和 PostgreSQL 历史投影消费这条链路。
+- `surprising.<product-segment>.core.events.v1`：预留的未来历史事件出口，当前部署不启用。
 - `surprising.<product-segment>.order.user.commands.v1`：订单用户分区单写入命令，key = `<PRODUCT_LINE>:<userId>`；
   HTTP 下单/撤单、账户结果、撮合结果和算法状态更新都必须经过此 Topic。
 - `surprising.<product-segment>.order.user.command.results.v1`：订单用户命令终态，key = `<PRODUCT_LINE>:<userId>`；
 - `surprising.<product-segment>.order.state.events.v1`：订单用户完整状态压缩广播，key = `<PRODUCT_LINE>:<userId>`；
   每个 HTTP 节点使用独立结果消费组，不能把结果 Topic 当成事实源。
-- `surprising.<product-segment>.match.trades.v1`：供 WebSocket 公共逐笔与 K 线计算使用的可丢失 `PublicTradeEvent`，key = `symbol`。matching 按 symbol 使用独立队列，每 50ms 由专用非阻塞 Kafka producer 批量刷新；逐笔保持 FIFO、不合并，同一 symbol 排队超过 10,000 条时只丢弃该 symbol 最旧的消息。
-- `surprising.<product-segment>.orderbook.depth.v1`：可丢失的 L2 盘口快照，key = `symbol`；每个 symbol 只保留最新一份待发送快照。
+- `surprising.<product-segment>.match.trades.v1`、`orderbook.depth.v1`：预留的未来公共行情事件出口，当前不由交易 Core 发布。
 - `surprising.<product-segment>.price.events.v1`：指数价和标记价统一流，`eventType` 区分分支，key = `symbol`。
 
-公共逐笔/盘口链路不读写可裁决数据库，也不能阻塞或回滚 Core 资金处理。真实经济成交事实由 Core Export
-至少一次发布，下游按稳定事件键幂等写入审计和查询投影；任何内部做市账号也执行相同的成交、手续费和资金规则。
+公共逐笔/盘口历史链路不读写可裁决数据库，也不能阻塞或回滚 Core 资金处理；重新接入时必须作为独立外围消费者。
 
 生产行情/成交投影 Topic 固定为 `32` 个分区并按 symbol 取 key，以保持每个 symbol 的 fanout 顺序；
 这些 partition 不拥有可执行盘口。不能直接增加已运行 Topic 的分区，容量超过时使用版本化 Topic 协同迁移消费者。
@@ -410,17 +405,8 @@ adapter 直接持有 fork 返回的不可变 `MatcherResult`、event list 和 ma
 
 ### 盘口深度
 
-matching projection 启动时通过内部 `ORDER_BOOK_BOOTSTRAP_QUERY` 以固定 snapshotId、exportSequence 和
-`symbolCursor + limit` 分页恢复全市场盘口；运行期间消费连续 Core Event 增量维护各 symbol，并把完整
-`SNAPSHOT` 交给独立公共行情 publisher。普通 `BOOK_STATE_QUERY` 必须指定单个 symbol，只占用对应 matching
-lane，默认深度 30、最大 100，不允许空 symbol 扫描全市场：
-
-- 每个 symbol 有独立的 latest-only 槽位，热点 symbol 不会覆盖其他 symbol 的快照；
-- 某个 symbol 有一条快照正在发送时，后续新快照只覆盖该 symbol 唯一的待发送槽位，过时的中间状态直接丢弃，不形成积压；
-- 不同 symbol 可并行发送，全局并发上限由 `surprising.trading.matching.market-data.max-in-flight` 控制；
-- publisher 使用独立的非事务 Kafka producer，继续写现有 `orderbook.depth` topic，key = `symbol`；
-- Kafka 背压或发送失败不会阻塞撮合，也不会产生 outbox 行。失败快照允许丢弃，并由下一次盘口变化发布的新快照修复；
-- 每条事件都是可独立使用的全量快照，消费者按 symbol 整体替换本地盘口，不再套用增量。
+当前只保留单 symbol 的 `BOOK_STATE_QUERY`/REST 快照，直接读取 live exchange-core 盘口；不再通过 Core Event、投影线程
+或 Kafka publisher 复制盘口。公共 WebSocket depth 和历史盘口事件以后再单独接入。
 
 公共 REST 快照接口：
 

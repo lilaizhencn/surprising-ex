@@ -3,33 +3,10 @@
 
 面向前端的 WebSocket 推送服务。
 
-这个服务不是计算服务。它消费 Kafka 领域事件，在本节点内存里维护订阅关系，只把实时消息推给连接到当前节点的客户端。
+这个服务不是计算服务。它消费仍在使用的 Kafka 领域事件，在本节点内存里维护订阅关系，只把实时消息推给连接到当前节点的客户端。
 
-Core 私有事件由 `CoreEventFanoutConsumer` 直接消费产品线的 `core.events.v1` Kafka topic，校验 Core 事件格式、产品线、key 和 Kafka offset 后立即 fanout 到 WebSocket。该路径不查询 PostgreSQL，也不要求历史投影已经完成。PostgreSQL 只由独立 projector 用于历史审计、查询和对账，不是实时 WebSocket 的前置依赖。
-
-## Core v8 事实与 fanout 契约
-
-`CoreExportCodec` 的 Core export fact 升级为 **v8**。v8 不包含签名 envelope，也不兼容 v7 或更早格式；gateway 只接受完整、严格的 v8 schema。缺字段、未知字段语义、错误长度或错误产品线/key 的 fact 必须拒绝并告警，绝不 fanout，也不得由历史投影补全字段。
-
-每条 v8 fact 都是 Product Core 在一个确定性命令边界产生的不可变事实，至少携带以下可校验身份与状态：
-
-- `productLine`、`Core sequence`、`commandId`、`orderId`、`instrumentVersion`；其中 Core sequence 是同一产品线内的裁决顺序，不能由 Kafka offset、数据库主键或 WebSocket 序号替代。
-- `matcherSequence` 与 matcher 的 `matcherPrefixBefore` / `matcherPrefixAfter`，把 Core 命令和 exchange-core 的同一已接受撮合前缀绑定；gateway 不执行撮合，也不从其他订单簿重建该结果。逐命令事实不携带全量订单簿 hash；完整 `bookStateHash` 只属于 snapshot、恢复和显式审计边界。
-- 按 `(asset, ownerKind, ownerId, subledger)` 稳定排序的逐资产 `FundsDelta`；它记录该命令的资金 postings，不可只传聚合余额，也不可由 gateway 或 PostgreSQL 二次计算。
-- `beforeStateHash` / `afterStateHash` 与 `beforeFundsHash` / `afterFundsHash`，分别覆盖命令前后 Product Core 状态和资金状态；每个 hash 都属于事实 payload，不能用本地缓存替换。
-
-Gateway 的消费顺序固定为：先验证 v8 schema，再验证产品线与 Kafka key，随后按事实内容生成与订阅匹配的 order、match、execution、position 或 trigger 更新。History Projector 独立验证 export sequence、state/funds hash、matcher prefix 和 cluster position 连续性；验证失败不得降级为“尽力投影”，也不得以旧版本、数据库记录或 HTTP 查询修复事实。
-
-```text
-Product Core 产生 v8 fact
-  -> reliable direct Core export
-  -> 产品线 core.events.v1 Kafka topic
-  -> CoreEventFanoutConsumer 验证 v8 identity 后本地 WebSocket fanout
-  -> 独立 History Projector 幂等写入 PostgreSQL（仅历史/审计/查询）
-```
-
-交易当前态仍只能由 Product Core 的 Aeron Cluster 状态、Cluster Log、Archive 与 snapshot 裁决；客户端断线后通过受支持的在线查询获得新快照，再接受后续 WebSocket 事实。
-Kafka 与 PostgreSQL 在这条链路中仅承载 history（历史）、审计和查询投影；gateway 不读 PostgreSQL 做 live fanout，也不重新引入已删除的 audit repository。
+Product Core 的当前状态和恢复只由 Aeron Cluster 的 log、snapshot 与 runtime 负责。Core Export、历史投影、审计和公共
+成交/盘口历史数据暂不接入 WebSocket；gateway 不查询 PostgreSQL，也不在交易 owner 热路径增加 fanout。
 
 ## 模块
 
@@ -44,12 +21,6 @@ WebSocket 能力已经合并进 `surprising-gateway`，与 REST gateway 共用�
 
 ```json
 {"op":"subscribe","id":"c1","channel":"candles","symbol":"BTC-USDT","period":"1m"}
-```
-
-公共盘口深度订阅示例：
-
-```json
-{"op":"subscribe","id":"d1","channel":"depth","symbol":"BTC-USDT"}
 ```
 
 私有持仓订阅示例：
@@ -79,45 +50,19 @@ WebSocket 能力已经合并进 `surprising-gateway`，与 REST gateway 共用�
 | 频道 | 公共频道 | 必填字段 | 来源 topic |
 | --- | --- | --- | --- |
 | `candles` | 是 | `symbol`, `period` | `surprising.linear-perp.candle.events.v1` |
-| `trades` | 是 | `symbol` | `surprising.linear-perp.match.trades.v1` |
-| `depth` | 是 | `symbol` | `surprising.linear-perp.orderbook.depth.v1` |
 | `index` | 是 | `symbol` | `surprising.linear-perp.price.events.v1` (`eventType=INDEX_PRICE`) |
 | `mark` | 是 | `symbol` | `surprising.linear-perp.price.events.v1` (`eventType=MARK_PRICE`) |
 | `funding` | 是 | `symbol` | `surprising.linear-perp.funding.rate.v1` |
-| `orders` | 否 | 可选 `symbol` | `surprising.linear-perp.core.events.v1` |
-| `triggerOrders` | 否 | 可选 `symbol` | `surprising.linear-perp.core.events.v1` |
-| `executionReports` | 否 | 可选 `symbol` | `surprising.linear-perp.core.events.v1` |
-| `positions` | 否 | 可选 `symbol` | `surprising.linear-perp.core.events.v1` |
+| `orders` | 否 | 可选 `symbol` | `surprising.linear-perp.order.events.v1` |
+| `triggerOrders` | 否 | 可选 `symbol` | `surprising.linear-perp.trigger-order.events.v1` |
+| `executionReports` | 否 | 可选 `symbol` | `surprising.linear-perp.order.events.v1` |
+| `positions` | 否 | 可选 `symbol` | `surprising.linear-perp.account.position.events.v1` |
 | `positionRisk` | 否 | 可选 `symbol` | `surprising.linear-perp.risk.position.events.v1` |
 | `accountRisk` | 否 | 可选 `symbol` 会按通配符处理 | `surprising.linear-perp.risk.account.events.v1` |
 
 私有订阅不传 `symbol` 时使用通配符 `*`，表示接收该认证用户的所有相关事件。
 
 `triggerOrders` 推送完整的 `TriggerOrderUpdatedEvent` 包装，包含 `eventId`、`productLine`、`order`、`eventTime` 和 `traceId`。客户端把 `PENDING`/`TRIGGERING` 快照保留在开放条件单列表，收到终态立即移除；重复或乱序 `eventId` 必须忽略，重连后要重新拉 REST 开放条件单快照。
-
-撮合逐笔以轻量、允许丢失的 `PublicTradeEvent` 进入公共 `trades` 频道。私有订单、成交回报和持仓直接从可靠的 Core export event 重建；公共 Kafka 背压或行情消息丢失不会影响用户通知与资金结算。Core event 的历史 PG 投影失败不会阻塞这条实时推送路径。
-
-## 盘口深度推送链路
-
-盘口深度由 matching 基于 live exchange-core L2 book 生成：
-
-```text
-order command
-  -> exchange-core 修改订单簿
-  -> matching 把最新全量 L2 快照交给按 symbol 隔离的行情 publisher
-  -> 独立 Kafka producer 发布 surprising.linear-perp.orderbook.depth.v1
-  -> websocket 节点消费事件，并推送 channel=depth
-```
-
-每条 depth 都是全量 `SNAPSHOT`。每个 symbol 有独立的 latest-only 待发送槽位，热点 symbol 的中间快照可以被合并，但不会影响其他 symbol。客户端收到快照后整体替换该 symbol 的本地盘口。
-
-稳妥的客户端流程：
-
-1. 订阅 `depth`，并先缓存该 symbol 的事件。
-2. 拉取 `GET /api/v1/gateway/trading-market/orderbook?symbol=BTC-USDT&depth=50`。
-3. 用 REST 快照初始化本地盘口。
-4. 收到该 symbol 更新的 WebSocket 快照后整体替换。
-5. 重连时丢弃本地盘口，重新拉 REST 快照并重新订阅。
 
 ## 持仓推送链路
 
@@ -189,7 +134,6 @@ surprising:
       group-id: surprising-websocket-${HOSTNAME:${random.uuid}}
       concurrency: 2
       max-poll-records: 1000
-      order-book-depth-topic: surprising.linear-perp.orderbook.depth.v1
       position-events-topic: surprising.linear-perp.account.position.events.v1
       account-risk-events-topic: surprising.linear-perp.risk.account.events.v1
       position-risk-events-topic: surprising.linear-perp.risk.position.events.v1
@@ -208,7 +152,7 @@ surprising:
 
 默认 `allowed-origins: ["*"]` 方便本地开发。生产环境应配置精确 HTTPS Origin。
 
-如果未来公共行情推送规模非常大，可以再加 NATS 或独立 market-data fanout 层。当前设计先保持简单和正确：Kafka 保存权威事件流，每个 WebSocket 节点做本地 fanout。
+公共成交、盘口和历史行情需要重新定义事件生产者后再接入；这部分暂不作为交易链路依赖。
 
 ## 运维注意事项
 

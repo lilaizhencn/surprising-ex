@@ -96,37 +96,14 @@ class CoreOrderedOrderBatchTest {
                     .filter(event -> event.commandId().equals(batchId) || event.commandId().equals(laterId))
                     .toList();
             assertThat(events).hasSize(2);
-            assertThat(events).extracting(event -> event.matcherTransition().sequenceAfter())
-                    .containsExactly(2L, 3L);
-            assertThat(events.getFirst().matcherTransition().sequenceBefore()).isZero();
-            assertThat(events.getFirst().matcherTransition().prefixAfter())
-                    .isNotEqualTo(events.getFirst().matcherTransition().prefixBefore());
-            assertThat(events.get(1).matcherTransition().sequenceBefore())
-                    .isEqualTo(events.getFirst().matcherTransition().sequenceAfter());
-            assertThat(events.get(1).matcherTransition().prefixBefore())
-                    .isEqualTo(events.getFirst().matcherTransition().prefixAfter());
-            assertThat(events.get(1).matcherTransition().prefixAfter())
-                    .isNotEqualTo(events.get(1).matcherTransition().prefixBefore());
-            assertThat(events.get(0).changedOrders()).extracting(order -> order.orderId())
-                    .containsExactly(9_001L, 9_002L);
-            assertThat(events.get(1).changedOrders()).extracting(order -> order.orderId())
-                    .containsExactly(9_003L);
-            assertThat(events.get(0).changedUsers().getFirst().reservations()).extracting(value -> value.orderId())
-                    .containsExactly(9_001L, 9_002L);
-            assertThat(events.get(1).changedUsers().getFirst().reservations()).extracting(value -> value.orderId())
-                    .containsExactly(9_003L);
-            assertThat(events).allSatisfy(event -> assertThat(event.changedOrders()).allSatisfy(order -> {
-                assertThat(order.commandId()).isEqualTo(event.commandId());
-                assertThat(order.createdAtEpochMillis()).isPositive();
-                assertThat(order.updatedAtEpochMillis()).isPositive();
-                assertThat(order.clusterPosition()).isPositive();
-            }));
+            assertThat(events.get(0).exportSequence()).isLessThan(events.get(1).exportSequence());
+            assertThat(events).allSatisfy(event -> assertThat(event.terminalIds().orderIds()).isEmpty());
             assertThat(TradingOrderBatchCodec.decodeResult(batchResponse.data()).items())
-                    .extracting(CoreOrderBatchResult.Item::order)
-                    .containsExactlyElementsOf(events.get(0).changedOrders());
+                    .extracting(item -> item.order().orderId())
+                    .containsExactly(9_001L, 9_002L);
             assertThat(TradingOrderBatchCodec.decodeResult(laterResponse.data()).items())
-                    .extracting(CoreOrderBatchResult.Item::order)
-                    .containsExactlyElementsOf(events.get(1).changedOrders());
+                    .extracting(item -> item.order().orderId())
+                    .containsExactly(9_003L);
         }
     }
 
@@ -211,17 +188,14 @@ class CoreOrderedOrderBatchTest {
             var batchEvent = events.stream().filter(event -> event.commandId().equals(batchId)).findFirst().orElseThrow();
             var laterEvents = events.stream().filter(event -> event.commandId().equals(laterId)).toList();
             var lastEvents = events.stream().filter(event -> event.commandId().equals(lastId)).toList();
-            assertThat(batchEvent.changedOrders()).extracting(order -> order.orderId()).containsExactly(9_101L);
-            assertThat(batchEvent.changedUsers().getFirst().reservations()).extracting(value -> value.orderId())
-                    .containsExactly(9_101L);
+            assertThat(batchEvent.terminalIds().orderIds()).isEmpty();
             assertThat(laterEvents).hasSize(1);
             assertThat(lastEvents).hasSize(1);
             assertThat(batchEvent.exportSequence()).isLessThan(laterEvents.getFirst().exportSequence());
-            assertThat(batchEvent.changedOrders()).isNotEqualTo(laterEvents.getFirst().changedOrders());
-            assertThat(laterEvents.getFirst().changedOrders()).extracting(order -> order.orderId())
-                    .containsExactly(9_102L);
-            assertThat(lastEvents.getFirst().changedOrders()).extracting(order -> order.orderId())
-                    .containsExactly(9_103L);
+            assertThat(laterEvents.getFirst().terminalIds().orderIds()).isEmpty();
+            assertThat(lastEvents.getFirst().terminalIds().orderIds()).isEmpty();
+            assertThat(state.tradingState().orders().keySet())
+                    .containsExactlyInAnyOrder(9_101L, 9_102L, 9_103L);
             var appliedCounts = events.stream().map(event -> event.appliedCommandCount()).toList();
             assertThat(java.util.stream.IntStream.range(1, appliedCounts.size())
                     .allMatch(index -> appliedCounts.get(index - 1) < appliedCounts.get(index))).isTrue();
@@ -243,7 +217,6 @@ class CoreOrderedOrderBatchTest {
             CoreMessage batch = command(CoreMessageType.PLACE_ORDER_BATCH, commandId, 2,
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)));
 
-            state.captureCommittedPatchesForTest();
             CoreResponse response = drainBatch(state, batch);
 
             assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
@@ -256,17 +229,10 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.tradingState().orders().keySet())
                     .containsExactlyInAnyOrderElementsOf(orders.stream()
                             .map(PlaceOrderCommand::orderId).toList());
-            var patches = state.drainCapturedFactFramesForTest();
-            assertThat(patches).hasSize(1);
-            var patch = patches.getFirst();
-            assertThat(patch.coreSequence()).isEqualTo(response.appliedCommandCount());
-            assertThat(patch.accountLaneGroups().stream().flatMap(group -> group.orders().stream())
-                    .map(change -> change.after() == null
-                            ? change.before().orderId() : change.after().orderId()).toList())
-                    .containsExactlyElementsOf(orders.stream().map(PlaceOrderCommand::orderId).toList());
-            assertThat(patch.businessStateHash()).isEqualTo(state.snapshotBusinessStateHash());
-            assertThat(patch.fundsStateHash()).isEqualTo(state.snapshotFundsStateHash());
-            assertThat(patch.projectionSequence()).isEqualTo(state.snapshotProjectionSequence());
+            var exportedBatch = state.exportState().snapshot().pendingEvents().stream()
+                    .map(message -> CoreExportCodec.decodeEvent(message.payloadUnsafe()))
+                    .filter(event -> event.commandId().equals(commandId)).findFirst().orElseThrow();
+            assertThat(exportedBatch.coreSequence()).isEqualTo(response.appliedCommandCount());
 
             CoreResponse replay = state.apply(batch);
             assertThat(replay.status()).isEqualTo(ResponseStatus.DUPLICATE);
@@ -289,10 +255,10 @@ class CoreOrderedOrderBatchTest {
                     .filter(event -> event.commandId().equals(commandId)).toList();
             assertThat(events).hasSize(1);
             assertThat(response.requiredExportSequence()).isEqualTo(events.getFirst().exportSequence());
-            assertThat(events.getFirst().changedUsers()).extracting(value -> value.userId())
-                    .containsExactly(1001L);
-            assertThat(events.getFirst().changedOrders()).extracting(value -> value.orderId())
-                    .containsExactlyElementsOf(orders.stream().map(PlaceOrderCommand::orderId).toList());
+            assertThat(events.getFirst().terminalIds().orderIds()).isEmpty();
+            assertThat(state.tradingState().orders().keySet())
+                    .containsExactlyInAnyOrderElementsOf(orders.stream()
+                            .map(PlaceOrderCommand::orderId).toList());
         }
     }
 
@@ -416,7 +382,6 @@ class CoreOrderedOrderBatchTest {
             long[] matcherPrefixBeforeFatal = ((long[]) field(state, "appliedMatcherPrefixDigests")).clone();
             long committedBeforeFatal = state.committedCoreSequence();
             var exportBeforeFatal = state.exportState().snapshot();
-            state.captureCommittedPatchesForTest();
             CoreMessage fatalBatch = command(CoreMessageType.PLACE_ORDER_BATCH, fatalId, 3,
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
                             place(11_004, "fatal-fourth", 1_000),
@@ -463,7 +428,6 @@ class CoreOrderedOrderBatchTest {
             assertThat((long[]) field(state, "appliedMatcherPrefixDigests"))
                     .containsExactly(matcherPrefixAfterFirst);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBeforeFatal);
-            assertThat(state.drainCapturedFactFramesForTest()).isEmpty();
             assertThat(state.exportState().snapshot()).isEqualTo(exportBeforeFatal);
             assertThat(identities.findClientKey(1001, "fatal-fourth")).isNotNull();
         }
@@ -722,7 +686,6 @@ class CoreOrderedOrderBatchTest {
             long projectionBefore = state.snapshotProjectionSequence();
             long committedBefore = state.committedCoreSequence();
             var exportBefore = state.exportState().snapshot();
-            state.captureCommittedPatchesForTest();
             UUID commandId = UUID.randomUUID();
             CoreMessage batch = command(CoreMessageType.PLACE_ORDER_BATCH, commandId, 2,
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
@@ -743,7 +706,6 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.snapshotProjectionSequence()).isEqualTo(projectionBefore);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
             assertThat(state.exportState().snapshot()).isEqualTo(exportBefore);
-            assertThat(state.drainCapturedFactFramesForTest()).isEmpty();
             assertThatThrownBy(() -> state.apply(probe(UUID.randomUUID(), 3))).isSameAs(failure);
         }
     }
@@ -771,7 +733,6 @@ class CoreOrderedOrderBatchTest {
             long projectionBefore = state.snapshotProjectionSequence();
             long committedBefore = state.committedCoreSequence();
             var exportBefore = state.exportState().snapshot();
-            state.captureCommittedPatchesForTest();
             UUID fatalId = UUID.randomUUID();
             CoreMessage fatalBatch = command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.PLACE_ORDER_BATCH,
                     fatalId, 4, TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
@@ -814,7 +775,6 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.snapshotProjectionSequence()).isEqualTo(projectionBefore);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
             assertThat(state.exportState().snapshot()).isEqualTo(exportBefore);
-            assertThat(state.drainCapturedFactFramesForTest()).isEmpty();
             assertThat(state.takeMatchingResult(sequence)).isNull();
             assertThatThrownBy(() -> state.apply(command(ProductLine.LINEAR_PERPETUAL,
                     CoreMessageType.PROBE_INCREMENT, UUID.randomUUID(), 5,

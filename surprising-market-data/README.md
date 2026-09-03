@@ -4,18 +4,16 @@
 
 - `surprising-market-data-api`：K 线查询 RPC contract 与共享 DTO。为了兼容调用方，Java 包名继续使用
   `com.surprising.candlestick.api`，artifact 已统一为 `surprising-market-data-api`。
-- `surprising-market-data-provider`：合并 Matching 的 Aeron Core 行情投影与 Candlestick 的 Kafka Streams
-  聚合，只保留一个 Spring Boot 应用、健康检查、数据源和部署进程。
+- `surprising-market-data-provider`：保留直接读取 Matching Aeron Core 盘口的查询服务；历史成交和 K 线暂不接入交易
+  Core，相关 Kafka Streams 代码作为后续外围能力保留。
 
 ## 状态边界
 
 - Aeron Core 是可执行订单簿、订单、资金和持仓的唯一事实源。
-- Matching 投影通过 `MatchingAeronGateway` 查询 Core，并把 L2 快照和公共逐笔发布到产品线隔离的 Kafka
-  Topic；该投影可重建，不参与交易裁决。
-- Candlestick 消费产品线 `match.trades` 公共逐笔 Topic，逐笔链路只聚合 1 分钟 K 线。关闭的 1 分钟 K 线
-  成功写入 PostgreSQL 后，才发布到产品线 `candle.events` Topic；独立的 Kafka Streams 回读分支只消费
-  `CLOSED + 1m`，在 RocksDB 中异步生成配置的高周期快照并回写同一 Topic。高周期事件不会再次进入聚合，
-  PostgreSQL 永远只保存关闭的 1 分钟行。
+- Matching 查询通过 `MatchingAeronGateway` 直接读取 live exchange-core 盘口，不复制订单簿，也不发布 Kafka
+  深度/成交事件。
+- Candlestick 的 Kafka Streams 聚合暂不接收交易 Core 输出；历史成交、K 线和 PostgreSQL 落库以后作为独立外围链路
+  重新接入，不参与资金和撮合裁决。
 - PostgreSQL 写入成功后的 `CLOSED + 1m` 不可修订，迟到逐笔不再修改已关闭分钟。高周期以每个
   symbol/period 的活动桶水位线推进，看到下一桶或墙钟到达桶结束时间后关闭前一桶；落后于水位线的迟到分钟
   直接丢弃，已经发布的高周期 `CLOSED` 同样不可修订。实时行情允许舍弃迟到数据，不承担历史纠错职责。
@@ -30,8 +28,8 @@
 
 统一端口为 `9081`：
 
-- `GET /api/v1/trading/market/**`：盘口和公共成交查询。
-- `GET /api/v1/candlestick/**`：K 线查询。
+- `GET /api/v1/trading/market/orderbook`：直接查询 live exchange-core 盘口。
+- `GET /api/v1/candlestick/**`：历史 K 线接口暂缓。
 - `GET /actuator/health`：统一健康检查。
 
 Gateway 对外路径不变，只把原 Matching 的 `9085` 路由改到 Market Data 的 `9081`。

@@ -27,8 +27,8 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 
 当前实现状态：P0-P5 与 P10-A 至 P10-F 的主体迁移已完成。撮合输出构造成一条不可变
 `MatcherSettlementEvent`，按确定性的 Lane mask 直接写入各 Account Lane 的有界 SPSC ring；每个 Lane 线程永久拥有并
-串行修改本 Lane 的账户、余额、订单、冻结和持仓。Coordinator 只读取 completion bitmap，并按 matcher 实际完成顺序发布
-Core Fact，不做逐 Lane `release/bind/await`。Lane 使用本地连续 commit sequence 推进 applied/committed watermark；入口 Core sequence
+串行修改本 Lane 的账户、余额、订单、冻结和持仓。Coordinator 只读取 completion bitmap，并按 matcher 实际完成顺序完成
+提交，不做逐 Lane `release/bind/await`。Lane 使用本地连续 commit sequence 推进 applied/committed watermark；入口 Core sequence
 仅保留复制身份和连续完成水位，不再强制不同 symbol 逐条等待；
 同一事件在 Lane 内直接完成本命令的 pending reservation，并把余额 primitive before/after 与最新局部 hash 一并发布；
 订单 `updatedAt/clusterPosition` 也在该事件的所属 Lane 内一次写入，成交完成后不再二次 fan-out 做 metadata stamping；
@@ -44,17 +44,17 @@ exchange-core 产出的不可变 `MatcherResult`、event list 和 market data，
 全局唯一 `matcherSequence + matcherShardId + MatcherPrefix(before, after)` 绑定命令结果；每个 native shard 和
 control shard 各自推进 prefix digest，随配对快照恢复，单 shard 断裂、倒退或 malformed
 结果立即 fail closed。普通命令不再生成逐命令全量 `BookHashes` 或完整业务/资金 rolling hash，完整 hash 只保留在 snapshot、恢复和
-显式审计边界。`TradingRuntimeState` 是 P3 唯一交易裁决权威；热路径只记录 raw typed fact changes，
-`TradingCoreState` 仅在 snapshot/query fence 物化；Core Fact 的不可变嵌套结构由有界后台 materializer 批量生成。P4 使用六个穷尽且隔离的
-`SettlementKernel`。P5 以确定性 `FundsDelta`、Treasury 子账本、状态/资金 hash 和 replicated outbox 形成连续事实链。
+显式查询或 snapshot 边界。`TradingRuntimeState` 是 P3 唯一交易裁决权威；热路径只记录 raw typed fact changes，
+`TradingCoreState` 仅在 snapshot/query fence 物化；生产不启动 Core Fact materializer。P4 使用六个穷尽且隔离的
+`SettlementKernel`。P5 以确定性 `FundsDelta`、Treasury 子账本和状态/资金不变量完成当前裁决；历史事件出口暂缓。
 P10 使用 `routeVersion=3`、1–64 个（2 的幂）matcher shard、每 shard 一个同步 engine、0 个 exchange-core risk engine
-和默认 4 个逻辑 Account Lane；业务风控仍由 owner 执行。pending reservation 在 commit 前不进入 query、Snapshot State 或 Core Fact。
+和默认 4 个逻辑 Account Lane；业务风控仍由 owner 执行。pending reservation 在 commit 前不进入 query 或 Snapshot State。
 正式性能验收为了保持可比性仍固定 matcher=1、256 in-flight；多 matcher 只使用单独的功能与隔离验证，不能混入基线结论。
 
 ### 分支安全与验证契约
 
 - 当前工作树中的脏改动是必需输入；不得新建 fresh worktree，也不得 stash、reset 或 checkout 以清理它们。
-- `CoreProbeState`、`SurprisingClusteredService`、运行时/快照/hash codec、export/projector、gateway fanout 和
+- `CoreProbeState`、`SurprisingClusteredService`、运行时/快照/hash codec、gateway fanout 和
   `init.sql` 等共享 hot files 同一时刻只能有一名 serial owner 修改；其他任务必须避开这些文件。
 - 文档和实现验证均直接记录精确的 Maven 或 Java 命令及输出 artifact，不以 `scripts/` 作为验证入口，亦不以
   `docs/` 链接作为权威规范。验证前先保存既有 dirty patch，提交时只显式选择本任务文件。
@@ -82,16 +82,12 @@ P10 使用 `routeVersion=3`、1–64 个（2 的幂）matcher shard、每 shard 
   原子完成资金预占、撮合、成交结算、风险更新和必要的强平状态推进。
 - exchange-core 固定为 `MATCHING_ONLY` 且禁用其 margin trading；引擎内部 user/symbol/risk module 只是
   matcher 技术状态，不能成为业务余额、持仓、保证金、强平或对账来源。
-- PostgreSQL 只保存 Core Export 查询投影、审计、报表和对账数据；投影延迟或不可用不能改变交易裁决。
+- PostgreSQL 不参与当前交易裁决；Core Export 历史投影、审计、报表和对账数据暂不接入。
 - 产品线资金划转由 Gateway 使用稳定 `transferId` 同步提交 `TRANSFER_OUT -> TRANSFER_IN -> COMPLETE_TRANSFER`；
   源 Core Runtime 在扣款后只保留有界 pending 记录，目标 Core 幂等入账，失败只做前向重试。Gateway 和
-  PostgreSQL 不保存在线 Saga 状态；`TRANSFER_IN` Core Fact 经 History Projector 异步写入
-  `account_product_transfers`，该表只用于历史查询。
-- Kafka 保留外部输入缓冲与 WebSocket、K 线、通知、数据仓库等外围事件分发，不恢复核心资金状态。
-- 公共逐笔统一使用产品线 `match.trades` / `PublicTradeEvent`：Gateway、标记价与 K 线不再消费
-  `trade.events`。K 线逐笔链路只生成并落库关闭的 1 分钟数据，高周期由 `candle.events` 上的
-  `CLOSED + 1m` 事件异步聚合；已关闭 K 线不可修订，水位线之前的迟到实时数据允许丢弃，历史高周期查询
-  从 PostgreSQL 的 1 分钟行计算。
+  PostgreSQL 不保存在线 Saga 状态；跨产品划转状态只保留在 Core 的有界 pending runtime 中。
+- Kafka 仅保留仍在使用的外围输入和领域事件分发，不恢复核心资金状态；Core Export/历史投影暂不启动。
+- 公共成交、盘口和 K 线历史链路暂不作为交易链路依赖，后续单独接入。
 - Valkey 只承担限流和非权威缓存，不保存 Risk 状态、强平候选、资金或订单恢复进度。
 - Risk 按 symbol 保存确定性有界扫描游标；强平 Work、触发价格序列、仓位身份、执行、强平费和
   Insurance Treasury 全部由 Aeron 校验并原子提交。
@@ -101,11 +97,9 @@ P10 使用 `routeVersion=3`、1–64 个（2 的幂）matcher shard、每 shard 
   continuation 合并为一次 `EXECUTE_LIQUIDATION_BATCH`，按 `productLine + canonical payload` 生成稳定 `commandId`。
   Core 共享最多 1,024 笔撤单预算并持久化 cursor；provider 正常周期不逐 action 往返、不单独续跑 Risk Scan，也不维护
   Redis 队列或 PostgreSQL 强平事务。
-- Core Exporter 以连续 Export Sequence 向 Kafka at-least-once 发布；只有完整 Kafka 批次成功后才向 Aeron 提交 ACK。
-  独立 History Projector 批量消费 Kafka，在一个 PostgreSQL 事务内写业务投影和 offset；任何一条失败都会回滚整批，
-  不新增数据库 outbox 或应用 WAL。
-- Matching Provider 只做 Market Data Projection：启动从 Aeron 强查询恢复 L2 和 watermark，随后消费
-  单分区连续 Core Event 发布公共深度与成交；历史成交和 24h 查询读取 PG 投影。
+- Core Export event/codec 仅保留为未来历史出口的协议边界；当前不启动 exporter、History Projector 或 PostgreSQL
+  历史写入。
+- Matching Provider 当前只提供直接读取 live exchange-core 盘口的 REST 查询；公共深度、成交、24h 与历史查询暂缓。
 - 四条业务线必须隔离部署和验证；压测前当前变体必须达到 `functional-gate=PASS`、`funds-diff=0`。
 
 ## 永续架构图
@@ -123,9 +117,7 @@ flowchart LR
     Risk --> Core
     Funding --> Core
     Core --> Matcher[exchange-core<br/>唯一可执行盘口与 FIFO]
-    Core --> Exporter[Core Exporter<br/>序列化 Export ACK]
-    Exporter --> Kafka[Kafka<br/>公共事件 / WebSocket / 行情]
-    Kafka --> Projection[History Projector<br/>PostgreSQL 异步投影 / 对账]
+    Core --> Kafka[Kafka<br/>仍在使用的外围领域事件]
     Market[Price / Market Data Provider] --> Core
     Maker[Maker Provider<br/>被动 GTX 报价] --> Trading
     Gateway --> Kafka
@@ -143,8 +135,6 @@ sequenceDiagram
     participant T as Trading Provider
     participant C as Aeron Core
     participant M as exchange-core
-    participant E as Exporter
-    participant K as Kafka / WebSocket
 
     U->>G: 下单
     G->>T: 校验产品线、账户与订单参数
@@ -157,10 +147,6 @@ sequenceDiagram
     C->>C: 释放已终结订单预留
     C-->>T: APPLIED + command result
     T-->>G: 订单与成交响应
-    C->>E: 发布 Core Event / Export Sequence
-    E->>K: 公共成交、盘口和私有推送
-    E->>E: ACK 仅在投影与事件成功后提交
-
     Note over C,T: 已接受但响应超时不会自动重发
     C-->>T: ResultUnknown(commandId)
     T->>C: COMMAND_RESULT_QUERY(commandId)
@@ -205,7 +191,7 @@ Runtime/materialization 等价检查仅留在测试源码。
 | `surprising-derivatives-lifecycle/surprising-derivatives-lifecycle-provider` | Risk、强平、保险、ADL 统一 Provider/JVM |
 | `surprising-funding` | 资金费 API 和独立资金费服务 |
 | `surprising-market-data/surprising-market-data-api` | K 线查询 contract 与共享 DTO |
-| `surprising-market-data/surprising-market-data-provider` | Matching Aeron 行情投影与 Kafka Streams + RocksDB K 线统一 Provider/JVM |
+| `surprising-market-data/surprising-market-data-provider` | 当前保留直接盘口查询；K 线/历史投影暂缓 |
 | `surprising-gateway` | REST gateway、WebSocket fanout 和统一对外入口 |
 | `surprising-maker` | 内部做市和交易链路压测 |
 
@@ -246,16 +232,11 @@ aggregate；typed change 容器使用 generation reset，避免每条命令 `Has
 `RuntimeCommitJournal` 在 owner 内只保存准入、连续 sequence、rolling hash 和诊断计数；每个 entry 自带轻量
 `RuntimeProjectionPoint`，不再维护 Snapshot projector 或热 projection replica。显式 Snapshot/query fence 直接从权威
 runtime 物化 immutable image 并复算业务/资金 hash；section 编码在同一确定性 snapshot fence 内完成，不创建 encoder 线程。
-Core Fact outbox 在 owner 上登记确定性的 typed change、资金 posting 和容量预留，完整协议字节由有界
-`core-fact-materializer` 按 export sequence 构造；materializer 不等待 projection，owner 也不等待 materializer。Audit Exporter
-异步物化期间，command-level `RuntimeFundsDelta` 可能比对应 `PatchChain` 存活更久；draft 因此保留稳定的
-`RuntimeIdentityRegistry` 作为资金 posting 的资产解析兜底，正常路径仍优先使用 patch-local identity，避免延长整条
-patch chain 生命周期或重新引入 owner 物化。缺失资产必须 fail-fast，不能静默忽略资金 posting。
-查询只返回已完成的连续前缀；`ACK_EXPORT` 作为审计控制命令可以在无关 matcher window 未提交时确认已经物化的连续
-前缀；ACK 裁剪只消费随 outbox entry 保存的 primitive 终态订单 ID，不等待 Core Fact view/materializer，
-也不把审计 ACK 变成交易 owner 的 projection/matching fence。异步物化失败保留为 sticky fatal failure；
-snapshot/outbox 持久化才建立显式 fence。matcher 之前的业务拒绝不会修改权威状态；matcher 已接受后若提交阶段
-再出现校验或发布错误则 fail closed，不能伪回滚已经产生的订单簿事实；
+交易 owner 只登记当前命令所需的 typed change、资金 posting 和连续提交序号；生产默认不启动 Core Fact
+materializer、export queue 或历史投影。Aeron Cluster 的 log、snapshot 和 runtime 才是当前状态及恢复来源。
+`CoreExportEvent`/codec 仅保留为未来历史事件出口的协议边界，当前不参与交易热路径，也不产生 Kafka/PG 写入。
+matcher 之前的业务拒绝不会修改权威状态；matcher 已接受后若提交阶段再出现校验或发布错误则 fail closed，不能伪回滚
+已经产生的订单簿事实；
 批量订单则保留整批累计 delta，直到批次原子提交。产品尚未上线，因此生产代码没有 legacy、fallback、
 双写或 feature flag 路径。
 
@@ -272,9 +253,8 @@ sequence ring 保存。owner 不为撮合命令维护 Future、active set 或 co
 有序 change-set，避免重复复制 `TreeMap`/`TreeSet`；lazy state delta 使用按变更键索引的原子值槽，不为每张 delta map
 创建 `ConcurrentHashMap`。批量订单结果在最终响应缓冲区中直接写 frame，状态查询 writer 按精确编码长度预分配。
 
-Trading Provider 的普通单和触发单统一使用异步 Aeron gateway，HTTP 线程不阻塞等待 Core；History Projector
-按 Kafka poll 批次提交 PostgreSQL，WebSocket fanout 也按 poll 批量解码、分组和发布。数据库、Kafka 或慢订阅者
-只会形成各自有界 backlog，不会在 Product Core 交易 owner 上执行。
+Trading Provider 的普通单和触发单统一使用异步 Aeron gateway，HTTP 线程不阻塞等待 Core；WebSocket 只 fanout
+仍在使用的领域事件。数据库、Kafka 或慢订阅者不会在 Product Core 交易 owner 上执行。
 
 ## 构建与本地验证
 
@@ -618,8 +598,8 @@ instrument map 预备全部 symbol identity，聚焦红测和完整现货场景�
 同步 matcher 固定为一个 engine。Account Lane 使用固定 SPSC worker，settlement wait strategy 只影响 Lane 空闲等待，
 不改变事件顺序、完成位图或 committed watermark 语义。
 `RuntimeCommitJournal` 只做当前 owner transaction 的有界准入和连续 sequence 记录，没有 Snapshot projector、
-projection wait strategy 或批量 flush。Snapshot/query fence 直接物化权威 runtime；Core Fact materializer 保留有界
-异步编码，但 owner 不等待它。容量耗尽、sequence 缺口或 fence hash 不一致都会 fail-fast，不存在 legacy 双写路径。
+projection wait strategy、export queue 或批量 flush。Snapshot/query fence 直接读取权威 runtime；历史事件出口暂不
+启动。容量耗尽、sequence 缺口或 fence hash 不一致都会 fail-fast，不存在 legacy 双写路径。
 
 快速确认 JMH 打包与场景可执行时可缩短迭代；该命令只用于 smoke，不作为容量结论：
 
@@ -761,14 +741,13 @@ Kafka 集群或长时间容量验证的场景必须在交付记录中明确标�
   manifest、完整 engine/book hash、registry hash 和恢复水位，任一不一致直接失败关闭，不进入 `READY`。
 - Gateway 通过固定 Aeron agents 和有界 mailbox 向 Core 提交命令；Kafka、Order Provider、PostgreSQL 和
   Redis/Valkey 不参与资金预留、撮合或成交结算的同步裁决，也不承担核心恢复。
-- 关闭 Kafka 自动建 Topic，使用经过审查的配置创建外围输入和 Core Export Topic；不在已有 symbol-keyed
-  Topic 上直接增加分区，扩容使用版本化 Topic 和受控投影重建。
-- PostgreSQL、Kafka 或 WebSocket 故障只能造成投影/推送延迟；Exporter 必须按 Core export sequence
-  at-least-once 发布，消费者按稳定事件键幂等，积压达到上限时 Core 在 mutation 前显式背压。
+- 关闭 Kafka 自动建 Topic，使用经过审查的配置创建仍在使用的外围输入 Topic；历史 Core Export Topic 暂不启用。
+- PostgreSQL、Kafka 或 WebSocket 不参与资金预留、撮合或成交结算的同步裁决；历史投影与公共行情历史数据待后续
+  单独接入，不进入交易 owner 热路径。
 - 上线前按单个 ProductLine 变体运行做市、全链路资金守恒、Leader/follower/cold recovery、24 小时 soak
   和容量门禁；生产峰值不超过满足 SLO 的实测容量 70%。
 - 监控 Aeron election/commit position、Archive/snapshot、matcher queue/latency、Core p99/p99.9、GC、
-  export event age、Kafka/PG/WebSocket lag、资金差额和 book hash；不以平均 TPS 代替容量结论。
+  Kafka/WebSocket lag、资金差额和 book hash；不以平均 TPS 代替容量结论。
 - `ClusterProbeMain` 使用 `-Dsurprising.aeron.probe-mode=metrics` 从 Product Core 的 committed query surface
   获取 Lane 指标并输出 Prometheus text format；指标覆盖 matcher/completion/context queue、每 Lane applied/committed gap、
   queue depth/capacity/high-water、拒绝数、oldest pending 以及 command/settlement/query/risk 延迟，标签只含

@@ -38,7 +38,7 @@ class ClientConnectionIsolationTest {
         ControlledSession healthySession = new ControlledSession("healthy", false, 4);
         ClientConnection slow = new ClientConnection(slowSession, 1001L, 2, Duration.ofSeconds(30));
         ClientConnection healthy = new ClientConnection(healthySession, 1002L, 2, Duration.ofSeconds(30));
-        SubscriptionTopic topic = new SubscriptionTopic(WsChannel.TRADES, "BTC-USDT", null, null);
+        SubscriptionTopic topic = new SubscriptionTopic(WsChannel.INDEX_PRICE, "BTC-USDT", null, null);
 
         registry.add(slow);
         registry.add(healthy);

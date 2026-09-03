@@ -77,9 +77,6 @@ printf '%s\n' "$after_cold" >"$OUTPUT_DIR/after-cold-restart.txt"
 capture_roles "$OUTPUT_DIR/roles-after-cold-restart.txt"
 cold_hash="$(printf '%s\n' "$after_cold" | sed -n 's/.*stateHash=\([^ ]*\).*/\1/p')"
 
-PRODUCT_LINE="$PRODUCT_LINE" "$ROOT_DIR/scripts/aeron-core-local.sh" smoke >"$OUTPUT_DIR/exporter-setup.log" 2>&1
-PRODUCT_LINE="$PRODUCT_LINE" "$ROOT_DIR/scripts/aeron-core-tool.sh" export-fail >"$OUTPUT_DIR/exporter-failure.log" 2>&1
-
 if [[ "$before_hash" != "$leader_hash" || "$before_hash" != "$cold_hash" ]]; then
   printf 'recovery hash mismatch before=%s leader=%s cold=%s\n' "$before_hash" "$leader_hash" "$cold_hash" >&2
   exit 1

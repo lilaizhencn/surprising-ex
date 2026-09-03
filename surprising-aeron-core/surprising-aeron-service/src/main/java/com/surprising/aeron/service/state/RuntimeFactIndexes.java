@@ -103,6 +103,21 @@ public final class RuntimeFactIndexes implements RuntimeFactFrame.ChangeConsumer
         }
     }
 
+    public void applyCurrent(TradingRuntimeState runtime, RuntimeFactFrame.IdentityView identities) {
+        if (runtime == null || identities == null || activeIdentities != null) {
+            throw new IllegalArgumentException("runtime changed indexes are invalid");
+        }
+        activeIdentities = identities;
+        positionVisits = triggerVisits = algoVisits = liquidationVisits = timerVisits = orderVisits = riskVisits = 0;
+        try {
+            runtime.visitChangedIndexes(this);
+            lastApplyStats = new ApplyStats(positionVisits, positionVisits, triggerVisits, algoVisits,
+                    liquidationVisits, timerVisits, orderVisits, positionVisits, riskVisits);
+        } finally {
+            activeIdentities = null;
+        }
+    }
+
     @Override
     public void order(long orderId, OrderRuntime before, OrderRuntime after) {
         activeOrders.apply(orderId, after, activeIdentities);

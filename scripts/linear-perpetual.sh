@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly PRODUCT_LINE=LINEAR_PERPETUAL
 readonly RUN_ID=linear-perpetual-fixed
 readonly TEST_RUN_ID=linear-perpetual-fixed-test
-readonly START_ORDER='instrument,core-node0,core-node1,core-node2,exporter,projector,price,account,trading,market-data,derivatives-lifecycle,funding,gateway,maker'
+readonly START_ORDER='instrument,core-node0,core-node1,core-node2,price,account,trading,market-data,derivatives-lifecycle,funding,gateway,maker'
 export JAVA_HOME=/opt/homebrew/opt/openjdk@25/libexec/openjdk.jdk/Contents/Home
 
 runtime() {

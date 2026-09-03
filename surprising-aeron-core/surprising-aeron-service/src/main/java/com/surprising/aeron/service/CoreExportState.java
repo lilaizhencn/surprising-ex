@@ -8,8 +8,8 @@ import com.surprising.aeron.protocol.CoreExportStatus;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreMessageHeader;
-import com.surprising.aeron.protocol.CoreMatcherTransition;
 import com.surprising.aeron.protocol.CoreProtocol;
+import com.surprising.aeron.protocol.CoreRoute;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.aeron.service.state.CoreStateRejectedException;
@@ -70,21 +70,22 @@ final class CoreExportState implements AutoCloseable {
     private volatile boolean closed;
     private volatile boolean activated;
     private long nextMaterializationSequence;
+    private final boolean enabled;
 
     CoreExportState() {
-        this(null, 0, 1, List.of(), null, CoreExportCodec::encodeEvent);
+        this(null, 0, 1, List.of(), null, CoreExportCodec::encodeEvent, true);
         activate();
     }
 
     CoreExportState(EventEncoder encoder) {
-        this(null, 0, 1, List.of(), null, encoder);
+        this(null, 0, 1, List.of(), null, encoder, true);
         activate();
     }
 
     private CoreExportState(ProductLine expectedProductLine,
                             long acknowledgedSequence, long nextSequence, List<CoreMessage> pending,
                             List<Integer> restoredReservedLengths,
-                            EventEncoder encoder) {
+                            EventEncoder encoder, boolean enabled) {
         if (acknowledgedSequence < 0 || pending == null || pending.size() > MAX_PENDING_EVENTS
                 || restoredReservedLengths != null && restoredReservedLengths.size() != pending.size()) {
             throw new IllegalArgumentException("invalid export state");
@@ -97,10 +98,11 @@ final class CoreExportState implements AutoCloseable {
         this.nextSequence = nextSequence;
         this.pending = new ArrayDeque<>(pending.size());
         this.encoder = java.util.Objects.requireNonNull(encoder, "encoder");
+        this.enabled = enabled;
         eventCapacity = configuredCapacity();
         byteCapacity = configuredByteCapacity();
         materializationBatchSize = configuredBatchSize(eventCapacity);
-        materializationQueue = new SpscTaskQueue<>(eventCapacity);
+        materializationQueue = enabled ? new SpscTaskQueue<>(eventCapacity) : null;
         long expectedSequence = Math.incrementExact(acknowledgedSequence);
         int pendingIndex = 0;
         for (CoreMessage event : pending) {
@@ -126,18 +128,25 @@ final class CoreExportState implements AutoCloseable {
         }
         maxBacklog = this.pending.size();
         nextMaterializationSequence = nextSequence;
-        materializer = Thread.ofPlatform().daemon(true).name("core-fact-materializer")
-                .unstarted(this::runMaterializer);
+        materializer = enabled
+                ? Thread.ofPlatform().daemon(true).name("core-fact-materializer").unstarted(this::runMaterializer)
+                : null;
     }
 
     static CoreExportState passive() {
-        return new CoreExportState(null, 0, 1, List.of(), null, CoreExportCodec::encodeEvent);
+        return passive(0);
+    }
+
+    static CoreExportState passive(long initialSequence) {
+        if (initialSequence < 0) throw new IllegalArgumentException("initial export sequence is negative");
+        return new CoreExportState(null, initialSequence, Math.incrementExact(initialSequence), List.of(), null,
+                CoreExportCodec::encodeEvent, false);
     }
 
     static CoreExportState restore(ProductLine expectedProductLine,
                                    long acknowledgedSequence, long nextSequence, List<CoreMessage> pending) {
         return new CoreExportState(Objects.requireNonNull(expectedProductLine, "expectedProductLine"),
-                acknowledgedSequence, nextSequence, pending, null, CoreExportCodec::encodeEvent);
+                acknowledgedSequence, nextSequence, pending, null, CoreExportCodec::encodeEvent, true);
     }
 
     static CoreExportState restore(ProductLine expectedProductLine,
@@ -145,17 +154,19 @@ final class CoreExportState implements AutoCloseable {
                                    List<Integer> reservedLengths) {
         return new CoreExportState(Objects.requireNonNull(expectedProductLine, "expectedProductLine"),
                 acknowledgedSequence, nextSequence, pending, List.copyOf(reservedLengths),
-                CoreExportCodec::encodeEvent);
+                CoreExportCodec::encodeEvent, true);
     }
 
     void activate() {
         if (activated) return;
         if (closed) throw new IllegalStateException("cannot activate closed export state");
         activated = true;
+        if (!enabled) return;
         materializer.start();
     }
 
     boolean activated() { return activated; }
+    boolean enabled() { return enabled; }
 
     private static void validateRestoredCommandIdentity(
             CoreMessage envelope, CoreExportEvent event, ProductLine expectedProductLine) {
@@ -192,6 +203,7 @@ final class CoreExportState implements AutoCloseable {
             rejectionCount++;
             throw new CoreStateRejectedException("EXPORT_BACKLOG_FULL", "export backlog reached hard limit");
         }
+        if (!enabled) return new AdmissionReservation(this, events, bytes);
         reservedEvents = Math.addExact(reservedEvents, events);
         reservedBytes = Math.addExact(reservedBytes, bytes);
         return new AdmissionReservation(this, events, bytes);
@@ -203,6 +215,12 @@ final class CoreExportState implements AutoCloseable {
 
     void release(AdmissionReservation reservation) {
         validateReservation(reservation);
+        if (!enabled) {
+            reservation.remainingEvents = 0;
+            reservation.remainingBytes = 0;
+            reservation.closed = true;
+            return;
+        }
         reservedEvents = Math.subtractExact(reservedEvents, reservation.remainingEvents);
         reservedBytes = Math.subtractExact(reservedBytes, reservation.remainingBytes);
         reservation.remainingEvents = 0;
@@ -213,6 +231,7 @@ final class CoreExportState implements AutoCloseable {
     long append(AdmissionReservation reservation, Draft draft) {
         validateReservation(reservation);
         if (draft == null) throw new IllegalArgumentException("core fact draft is required");
+        if (!enabled) return skip(reservation);
         long sequence = nextSequence;
         int eventBytes = reservedEventLength(draft);
         if (eventBytes > reservation.remainingBytes) {
@@ -247,12 +266,37 @@ final class CoreExportState implements AutoCloseable {
         return sequence;
     }
 
+    long skip() {
+        assertHealthy();
+        requireActivated();
+        if (enabled) throw new IllegalStateException("export skip is only valid for passive state");
+        long sequence = nextSequence;
+        nextSequence = Math.incrementExact(nextSequence);
+        acknowledgedSequence = sequence;
+        return sequence;
+    }
+
+    long skip(AdmissionReservation reservation) {
+        validateReservation(reservation);
+        if (enabled) throw new IllegalStateException("export skip is only valid for passive state");
+        long sequence = skip();
+        reservation.remainingEvents--;
+        reservation.remainingBytes--;
+        if (reservation.remainingEvents == 0) {
+            reservation.remainingBytes = 0;
+            reservation.closed = true;
+        }
+        return sequence;
+    }
+
     void beginMaterializationBatch() {
         assertHealthy();
+        if (!enabled) return;
         materializationQueue.beginBatch();
     }
 
     void endMaterializationBatch() {
+        if (!enabled) return;
         materializationQueue.endBatch();
     }
 
@@ -364,6 +408,7 @@ final class CoreExportState implements AutoCloseable {
     }
 
     long materializedThroughSequence() {
+        if (!enabled) return Math.subtractExact(nextSequence, 1);
         long sequence = acknowledgedSequence;
         for (PendingExport event : pending) {
             if (!event.ready()) break;
@@ -375,6 +420,7 @@ final class CoreExportState implements AutoCloseable {
     @Override
     public void close() {
         closed = true;
+        if (!enabled) return;
         materializationQueue.signalConsumer();
         if (!activated) return;
         boolean interrupted = false;
@@ -453,27 +499,22 @@ final class CoreExportState implements AutoCloseable {
     }
 
     private static long eventDigest(CoreMessageHeader header, CoreExportEvent event) {
-        return metadataDigest(header, event.appliedCommandCount(), event.businessStateHash(),
+        return metadataDigest(header, event.appliedCommandCount(),
                 event.commandType().wireCode(), event.commandStatus().wireCode(), event.resultCode().wireCode(),
-                event.beforeBusinessStateHash(), event.beforeFundsStateHash(), event.fundsStateHash(),
-                event.topologyHash(), event.laneRevisionHash(), event.committedCoreSequence(),
-                event.matcherTransition(), event.clusterPosition(), event.commandPayloadUnsafe());
+                event.committedCoreSequence(), event.clusterPosition(), event.commandPayloadUnsafe());
     }
 
     private static long draftDigest(CoreMessageHeader header, Draft draft) {
-        return metadataDigest(header, draft.appliedCommandCount(), draft.businessStateHash(),
+        return metadataDigest(header, draft.appliedCommandCount(),
                 draft.command().header().messageType().wireCode(), draft.status().wireCode(),
-                draft.resultCode().wireCode(), draft.beforeBusinessStateHash(), draft.beforeFundsStateHash(),
-                draft.fundsStateHash(), draft.topologyHash(), draft.laneRevisionHash(), draft.appliedCommandCount(),
-                draft.matcherTransition(), draft.clusterPosition(), draft.command().payloadUnsafe());
+                draft.resultCode().wireCode(), draft.appliedCommandCount(), draft.clusterPosition(),
+                draft.command().payloadUnsafe());
     }
 
     private static long metadataDigest(CoreMessageHeader header, long appliedCommandCount,
-                                       long businessStateHash, int commandType, int commandStatus,
-                                       int resultCode, long beforeBusinessStateHash, long beforeFundsStateHash,
-                                       long fundsStateHash, long topologyHash, long laneRevisionHash,
-                                       long committedCoreSequence, CoreMatcherTransition matcherTransition,
-                                       long clusterPosition, byte[] commandPayload) {
+                                       int commandType, int commandStatus,
+                                       int resultCode, long committedCoreSequence, long clusterPosition,
+                                       byte[] commandPayload) {
         long hash = 0xcbf29ce484222325L;
         hash = digestLong(hash, header.schemaVersion());
         hash = digestLong(hash, header.kind().wireCode());
@@ -488,21 +529,10 @@ final class CoreExportState implements AutoCloseable {
         hash = digestLong(hash, header.submittedAtEpochMillis());
         hash = digestLong(hash, header.correlationId());
         hash = digestLong(hash, appliedCommandCount);
-        hash = digestLong(hash, businessStateHash);
         hash = digestLong(hash, commandType);
         hash = digestLong(hash, commandStatus);
         hash = digestLong(hash, resultCode);
-        hash = digestLong(hash, beforeBusinessStateHash);
-        hash = digestLong(hash, beforeFundsStateHash);
-        hash = digestLong(hash, fundsStateHash);
-        hash = digestLong(hash, topologyHash);
-        hash = digestLong(hash, laneRevisionHash);
         hash = digestLong(hash, committedCoreSequence);
-        hash = digestLong(hash, matcherTransition.matcherShardId());
-        hash = digestLong(hash, matcherTransition.sequenceBefore());
-        hash = digestLong(hash, matcherTransition.sequenceAfter());
-        hash = digestLong(hash, matcherTransition.prefixBefore());
-        hash = digestLong(hash, matcherTransition.prefixAfter());
         hash = digestLong(hash, clusterPosition);
         for (byte value : commandPayload) {
             hash ^= Byte.toUnsignedInt(value);
@@ -648,32 +678,26 @@ final class CoreExportState implements AutoCloseable {
 
     record Draft(CoreMessage command, ResponseStatus status,
                  com.surprising.aeron.protocol.CoreResultCode resultCode,
-                 long appliedCommandCount, long businessStateHash,
-                 long beforeBusinessStateHash, long beforeFundsStateHash, long fundsStateHash,
-                 long topologyHash, long laneRevisionHash, CoreMatcherTransition matcherTransition,
-                 long clusterPosition, long projectionSequence, int itemCount, long[] terminalOrderIds,
+                 long appliedCommandCount, long clusterPosition, long projectionSequence,
+                 int itemCount, long[] terminalOrderIds,
                  FactChain patches, CoreCommandDelta delta,
                  com.surprising.aeron.service.state.RuntimeFundsDelta fundsDelta,
                  RuntimeFactFrame.IdentityView fallbackFundIdentities,
                  RuntimeFactFrame.CoreFactMetadata commandMetadata) {
         Draft(CoreMessage command, ResponseStatus status,
               com.surprising.aeron.protocol.CoreResultCode resultCode,
-              long appliedCommandCount, long businessStateHash,
-              long beforeBusinessStateHash, long beforeFundsStateHash, long fundsStateHash,
-              long topologyHash, long laneRevisionHash, CoreMatcherTransition matcherTransition,
-              long clusterPosition, long projectionSequence, int itemCount, long[] terminalOrderIds,
+              long appliedCommandCount, long clusterPosition, long projectionSequence,
+              int itemCount, long[] terminalOrderIds,
               FactChain patches, CoreCommandDelta delta,
               com.surprising.aeron.service.state.RuntimeFundsDelta fundsDelta,
               RuntimeFactFrame.CoreFactMetadata commandMetadata) {
-            this(command, status, resultCode, appliedCommandCount, businessStateHash,
-                    beforeBusinessStateHash, beforeFundsStateHash, fundsStateHash,
-                    topologyHash, laneRevisionHash, matcherTransition, clusterPosition, projectionSequence,
+            this(command, status, resultCode, appliedCommandCount, clusterPosition, projectionSequence,
                     itemCount, terminalOrderIds, patches, delta, fundsDelta, null, commandMetadata);
         }
 
         Draft {
             if (command == null || status == null || resultCode == null || appliedCommandCount < 0
-                    || matcherTransition == null || clusterPosition < 0 || projectionSequence < 0
+                    || clusterPosition < 0 || projectionSequence < 0
                     || itemCount < 0 || terminalOrderIds == null || delta == null || fundsDelta == null
                     || commandMetadata == null
                     || !command.header().commandId().equals(commandMetadata.commandId())
@@ -681,9 +705,7 @@ final class CoreExportState implements AutoCloseable {
                     || command.header().userId() != commandMetadata.userId()
                     || status != commandMetadata.status() || resultCode != commandMetadata.resultCode()
                     || appliedCommandCount != commandMetadata.appliedCommandCount()
-                    || clusterPosition != commandMetadata.clusterPosition()
-                    || topologyHash != commandMetadata.topologyHash()
-                    || laneRevisionHash != commandMetadata.laneRevisionHash()) {
+                    || clusterPosition != commandMetadata.clusterPosition()) {
                 throw new IllegalArgumentException("invalid Core Fact draft");
             }
             terminalOrderIds = terminalOrderIds.clone();
@@ -695,40 +717,6 @@ final class CoreExportState implements AutoCloseable {
             RuntimeFactFrame.FactIdentitySlice identities = patches == null
                     ? new RuntimeFactFrame.FactIdentitySlice(List.of(), List.of(), List.of(), List.of())
                     : patches.size() == 1 ? last.identities() : patches.identities();
-            List<com.surprising.aeron.protocol.CoreUserStateView> users;
-            List<com.surprising.aeron.protocol.CoreOrderStateView> orders;
-            List<com.surprising.aeron.protocol.CoreLiquidationView> liquidations;
-            List<com.surprising.aeron.protocol.CoreTreasuryAssetView> treasury;
-            List<com.surprising.aeron.protocol.CoreTriggerOrderStateView> triggers;
-            List<RuntimeFactFrame.MatcherEvidence> evidence;
-            RuntimeFactFrame.TerminalIds terminalIds;
-            CoreExportEvent.Tombstones tombstones;
-            if (patches != null && patches.size() == 1) {
-                RuntimeFactFrame.CoreFactFragment fragment = last.materializeCoreFactFragment();
-                users = fragment.changedUsers();
-                orders = fragment.changedOrders();
-                liquidations = fragment.changedLiquidations();
-                treasury = fragment.changedTreasuryAssets();
-                triggers = fragment.changedTriggerOrders();
-                evidence = fragment.matcherEvidence();
-                terminalIds = mergeTerminalOrders(fragment.terminalIds(), terminalOrderIds);
-                tombstones = fragment.tombstones();
-            } else {
-                FactViewMerge merged = new FactViewMerge();
-                if (patches != null) {
-                    patches.acceptOldestFirst(patch -> merged.accept(patch.materializeCoreFactFragment()));
-                }
-                for (long orderId : terminalOrderIds) merged.terminalOrders.add(orderId);
-                users = List.copyOf(merged.users.values());
-                orders = List.copyOf(merged.orders.values());
-                liquidations = List.copyOf(merged.liquidations.values());
-                treasury = List.copyOf(merged.treasury.values());
-                triggers = List.copyOf(merged.triggers.values());
-                evidence = merged.evidence;
-                terminalIds = new RuntimeFactFrame.TerminalIds(List.copyOf(merged.terminalOrders),
-                        List.copyOf(merged.terminalLiquidations), List.copyOf(merged.terminalTriggers));
-                tombstones = merged.tombstones.seal();
-            }
             long previousCoreSequence = first == null ? appliedCommandCount - 1 : first.previousCoreSequence();
             long coreSequence = last == null ? appliedCommandCount : last.coreSequence();
             long previousProjectionSequence = first == null ? projectionSequence : first.previousProjectionSequence();
@@ -736,51 +724,16 @@ final class CoreExportState implements AutoCloseable {
             List<com.surprising.aeron.protocol.CoreFundsPostingView> fundsPostings =
                     fundsDelta.materialize(identities, fallbackFundIdentities,
                             commandMetadata.externalAdjustment()).views();
-            List<CoreExportEvent.MatcherEvidence> matcherEvidence = materializeMatcherEvidence(evidence);
-            return new CoreExportEvent(sequence, appliedCommandCount, businessStateHash,
+            return new CoreExportEvent(sequence, appliedCommandCount,
                     command.header().commandId(), command.header().messageType(), status, resultCode,
-                    command.header().userId(), command.payloadUnsafe(), users,
-                    orders, delta.executions(), delta.fundingPayments(),
-                    liquidations, treasury, triggers,
-                    beforeBusinessStateHash, beforeFundsStateHash, fundsStateHash,
-                    matcherTransition.routeVersion(), topologyHash, laneRevisionHash, appliedCommandCount,
-                    matcherTransition, clusterPosition, fundsPostings,
-                    commandMetadata.commandFingerprint(), matcherEvidence,
-                    new CoreExportEvent.TerminalIds(terminalIds.orderIds(),
-                            terminalIds.liquidationIds(), terminalIds.triggerOrderIds()),
+                    command.header().userId(), command.payloadUnsafe(), delta.executions(), delta.fundingPayments(),
+                    CoreRoute.DEFAULT.version(), appliedCommandCount, clusterPosition, fundsPostings,
+                    commandMetadata.commandFingerprint(),
+                    new CoreExportEvent.TerminalIds(List.of(), List.of(), List.of()),
                     previousCoreSequence, coreSequence, previousProjectionSequence,
-                    committedProjectionSequence, delta.fundingProgress(), delta.settlementProgress(),
-                    tombstones);
+                    committedProjectionSequence, delta.fundingProgress(), delta.settlementProgress());
         }
 
-        private static RuntimeFactFrame.TerminalIds mergeTerminalOrders(
-                RuntimeFactFrame.TerminalIds terminalIds, long[] additionalOrderIds) {
-            if (additionalOrderIds.length == 0) return terminalIds;
-            ArrayList<Long> orders = new ArrayList<>(terminalIds.orderIds());
-            for (long orderId : additionalOrderIds) {
-                boolean present = false;
-                for (long existing : orders) {
-                    if (existing == orderId) {
-                        present = true;
-                        break;
-                    }
-                }
-                if (!present) orders.add(orderId);
-            }
-            orders.sort(Long::compare);
-            return new RuntimeFactFrame.TerminalIds(List.copyOf(orders), terminalIds.liquidationIds(),
-                    terminalIds.triggerOrderIds());
-        }
-
-        private static List<CoreExportEvent.MatcherEvidence> materializeMatcherEvidence(
-                List<RuntimeFactFrame.MatcherEvidence> evidence) {
-            ArrayList<CoreExportEvent.MatcherEvidence> result = new ArrayList<>(evidence.size());
-            for (RuntimeFactFrame.MatcherEvidence item : evidence) {
-                result.add(new CoreExportEvent.MatcherEvidence(item.matcherSequence(), item.matcherShardId(),
-                        item.makerOrderId(), item.takerOrderId(), item.quantitySteps(), item.priceTicks()));
-            }
-            return result;
-        }
     }
 
     static final class FactChain {
@@ -870,222 +823,6 @@ final class CoreExportState implements AutoCloseable {
         }
     }
 
-    private static com.surprising.aeron.protocol.CoreUserStateView mergeFactUser(
-            com.surprising.aeron.protocol.CoreUserStateView previous,
-            com.surprising.aeron.protocol.CoreUserStateView current) {
-        LinkedHashMap<String, com.surprising.aeron.protocol.CoreBalanceView> balances = new LinkedHashMap<>();
-        previous.balances().forEach(value -> balances.put(value.asset(), value));
-        current.balances().forEach(value -> balances.put(value.asset(), value));
-        LinkedHashMap<Long, com.surprising.aeron.protocol.CoreReservationView> reservations = new LinkedHashMap<>();
-        previous.reservations().forEach(value -> reservations.put(value.orderId(), value));
-        current.reservations().forEach(value -> reservations.put(value.orderId(), value));
-        LinkedHashMap<PositionKey, com.surprising.aeron.protocol.CorePositionView> positions = new LinkedHashMap<>();
-        previous.positions().forEach(value -> positions.put(
-                new PositionKey(value.symbol(), value.positionSide()), value));
-        current.positions().forEach(value -> positions.put(
-                new PositionKey(value.symbol(), value.positionSide()), value));
-        LinkedHashMap<LeverageKey, com.surprising.aeron.protocol.CoreLeverageView> leverages = new LinkedHashMap<>();
-        previous.leverages().forEach(value -> leverages.put(
-                new LeverageKey(value.symbol(), value.marginMode()), value));
-        current.leverages().forEach(value -> leverages.put(
-                new LeverageKey(value.symbol(), value.marginMode()), value));
-        return new com.surprising.aeron.protocol.CoreUserStateView(current.productLine(), current.userId(),
-                current.revision(), current.positionMode(), List.copyOf(balances.values()),
-                List.copyOf(reservations.values()), List.copyOf(positions.values()),
-                List.copyOf(leverages.values()));
-    }
-
-    private static final class FactViewMerge {
-        private final LinkedHashMap<Long, com.surprising.aeron.protocol.CoreUserStateView> users =
-                new LinkedHashMap<>();
-        private final LinkedHashMap<Long, com.surprising.aeron.protocol.CoreOrderStateView> orders =
-                new LinkedHashMap<>();
-        private final LinkedHashMap<Long, com.surprising.aeron.protocol.CoreLiquidationView> liquidations =
-                new LinkedHashMap<>();
-        private final LinkedHashMap<String, com.surprising.aeron.protocol.CoreTreasuryAssetView> treasury =
-                new LinkedHashMap<>();
-        private final LinkedHashMap<Long, com.surprising.aeron.protocol.CoreTriggerOrderStateView> triggers =
-                new LinkedHashMap<>();
-        private final ArrayList<RuntimeFactFrame.MatcherEvidence> evidence = new ArrayList<>();
-        private final LinkedHashSet<Long> terminalOrders = new LinkedHashSet<>();
-        private final LinkedHashSet<Long> terminalLiquidations = new LinkedHashSet<>();
-        private final LinkedHashSet<Long> terminalTriggers = new LinkedHashSet<>();
-        private final FactTombstoneMerge tombstones = new FactTombstoneMerge();
-
-        private void accept(RuntimeFactFrame.CoreFactFragment value) {
-            value.changedUsers().forEach(user -> users.merge(user.userId(), user,
-                    CoreExportState::mergeFactUser));
-            value.changedOrders().forEach(order -> orders.put(order.orderId(), order));
-            value.changedLiquidations().forEach(item -> liquidations.put(item.liquidationId(), item));
-            value.changedTreasuryAssets().forEach(item -> treasury.put(item.asset(), item));
-            value.changedTriggerOrders().forEach(item -> triggers.put(item.triggerOrderId(), item));
-            tombstones.observeValues(value);
-            tombstones.apply(value.tombstones(), users, orders, liquidations, treasury, triggers);
-            evidence.addAll(value.matcherEvidence());
-            terminalOrders.addAll(value.terminalIds().orderIds());
-            terminalLiquidations.addAll(value.terminalIds().liquidationIds());
-            terminalTriggers.addAll(value.terminalIds().triggerOrderIds());
-        }
-    }
-
-    private static final class FactTombstoneMerge {
-        private final LinkedHashSet<Long> users = new LinkedHashSet<>();
-        private final LinkedHashMap<AssetKey, CoreExportEvent.UserAssetKey> balances = new LinkedHashMap<>();
-        private final LinkedHashMap<ReservationKey, CoreExportEvent.UserOrderKey> reservations =
-                new LinkedHashMap<>();
-        private final LinkedHashSet<Long> orders = new LinkedHashSet<>();
-        private final LinkedHashMap<UserPositionKey, CoreExportEvent.UserPositionKey> positions =
-                new LinkedHashMap<>();
-        private final LinkedHashMap<UserLeverageKey, CoreExportEvent.UserLeverageKey> leverages =
-                new LinkedHashMap<>();
-        private final LinkedHashSet<Long> liquidations = new LinkedHashSet<>();
-        private final LinkedHashSet<Long> algos = new LinkedHashSet<>();
-        private final LinkedHashSet<Long> triggers = new LinkedHashSet<>();
-        private final LinkedHashSet<String> treasury = new LinkedHashSet<>();
-
-        private void observeValues(RuntimeFactFrame.CoreFactFragment fragment) {
-            fragment.changedUsers().forEach(user -> {
-                users.remove(user.userId());
-                user.balances().forEach(value -> balances.remove(new AssetKey(user.userId(), value.asset())));
-                user.reservations().forEach(value -> reservations.remove(
-                        new ReservationKey(user.userId(), value.orderId())));
-                user.positions().forEach(value -> positions.remove(
-                        new UserPositionKey(user.userId(), value.symbol(), value.positionSide())));
-                user.leverages().forEach(value -> leverages.remove(
-                        new UserLeverageKey(user.userId(), value.symbol(), value.marginMode())));
-            });
-            fragment.changedOrders().forEach(value -> orders.remove(value.orderId()));
-            fragment.changedLiquidations().forEach(value -> liquidations.remove(value.liquidationId()));
-            fragment.changedTriggerOrders().forEach(value -> triggers.remove(value.triggerOrderId()));
-            fragment.changedTreasuryAssets().forEach(value -> treasury.remove(value.asset()));
-        }
-
-        private void apply(CoreExportEvent.Tombstones deleted,
-                           LinkedHashMap<Long, com.surprising.aeron.protocol.CoreUserStateView> changedUsers,
-                           LinkedHashMap<Long, com.surprising.aeron.protocol.CoreOrderStateView> changedOrders,
-                           LinkedHashMap<Long, com.surprising.aeron.protocol.CoreLiquidationView> changedLiquidations,
-                           LinkedHashMap<String, com.surprising.aeron.protocol.CoreTreasuryAssetView> changedTreasury,
-                           LinkedHashMap<Long, com.surprising.aeron.protocol.CoreTriggerOrderStateView> changedTriggers) {
-            deleted.userIds().forEach(userId -> {
-                users.add(userId);
-                changedUsers.remove(userId);
-                balances.keySet().removeIf(key -> key.userId == userId);
-                reservations.keySet().removeIf(key -> key.userId == userId);
-                positions.keySet().removeIf(key -> key.userId == userId);
-                leverages.keySet().removeIf(key -> key.userId == userId);
-            });
-            deleted.balances().forEach(key -> {
-                balances.put(new AssetKey(key.userId(), key.asset()), key);
-                changedUsers.computeIfPresent(key.userId(), (ignored, user) -> withoutBalance(user, key.asset()));
-            });
-            deleted.reservations().forEach(key -> {
-                reservations.put(new ReservationKey(key.userId(), key.orderId()), key);
-                changedUsers.computeIfPresent(key.userId(),
-                        (ignored, user) -> withoutReservation(user, key.orderId()));
-            });
-            deleted.orderIds().forEach(orderId -> { orders.add(orderId); changedOrders.remove(orderId); });
-            deleted.positions().forEach(key -> {
-                positions.put(new UserPositionKey(key.userId(), key.symbol(), key.positionSide()), key);
-                changedUsers.computeIfPresent(key.userId(), (ignored, user) -> withoutPosition(user, key));
-            });
-            deleted.leverages().forEach(key -> {
-                leverages.put(new UserLeverageKey(key.userId(), key.symbol(), key.marginMode()), key);
-                changedUsers.computeIfPresent(key.userId(), (ignored, user) -> withoutLeverage(user, key));
-            });
-            deleted.liquidationIds().forEach(id -> { liquidations.add(id); changedLiquidations.remove(id); });
-            algos.addAll(deleted.algoOrderIds());
-            deleted.triggerOrderIds().forEach(id -> { triggers.add(id); changedTriggers.remove(id); });
-            deleted.treasuryAssets().forEach(asset -> { treasury.add(asset); changedTreasury.remove(asset); });
-        }
-
-        private CoreExportEvent.Tombstones seal() {
-            return new CoreExportEvent.Tombstones(List.copyOf(users), List.copyOf(balances.values()),
-                    List.copyOf(reservations.values()), List.copyOf(orders), List.copyOf(positions.values()),
-                    List.copyOf(leverages.values()), List.copyOf(liquidations), List.copyOf(algos),
-                    List.copyOf(triggers), List.copyOf(treasury));
-        }
-    }
-
-    private static com.surprising.aeron.protocol.CoreUserStateView withoutBalance(
-            com.surprising.aeron.protocol.CoreUserStateView user, String asset) {
-        return new com.surprising.aeron.protocol.CoreUserStateView(user.productLine(), user.userId(),
-                user.revision(), user.positionMode(), user.balances().stream()
-                .filter(value -> !value.asset().equals(asset)).toList(), user.reservations(),
-                user.positions(), user.leverages());
-    }
-
-    private static com.surprising.aeron.protocol.CoreUserStateView withoutReservation(
-            com.surprising.aeron.protocol.CoreUserStateView user, long orderId) {
-        return new com.surprising.aeron.protocol.CoreUserStateView(user.productLine(), user.userId(),
-                user.revision(), user.positionMode(), user.balances(), user.reservations().stream()
-                .filter(value -> value.orderId() != orderId).toList(), user.positions(), user.leverages());
-    }
-
-    private static com.surprising.aeron.protocol.CoreUserStateView withoutPosition(
-            com.surprising.aeron.protocol.CoreUserStateView user, CoreExportEvent.UserPositionKey key) {
-        return new com.surprising.aeron.protocol.CoreUserStateView(user.productLine(), user.userId(),
-                user.revision(), user.positionMode(), user.balances(), user.reservations(), user.positions().stream()
-                .filter(value -> !value.symbol().equals(key.symbol())
-                        || value.positionSide() != key.positionSide()).toList(), user.leverages());
-    }
-
-    private static com.surprising.aeron.protocol.CoreUserStateView withoutLeverage(
-            com.surprising.aeron.protocol.CoreUserStateView user, CoreExportEvent.UserLeverageKey key) {
-        return new com.surprising.aeron.protocol.CoreUserStateView(user.productLine(), user.userId(),
-                user.revision(), user.positionMode(), user.balances(), user.reservations(), user.positions(),
-                user.leverages().stream().filter(value -> !value.symbol().equals(key.symbol())
-                        || value.marginMode() != key.marginMode()).toList());
-    }
-
-    private record PositionKey(String symbol, com.surprising.aeron.protocol.CorePositionSide side)
-            implements Comparable<PositionKey> {
-        @Override public int compareTo(PositionKey other) {
-            int result = symbol.compareTo(other.symbol);
-            return result != 0 ? result : side.compareTo(other.side);
-        }
-    }
-
-    private record LeverageKey(String symbol, com.surprising.aeron.protocol.CoreMarginMode mode)
-            implements Comparable<LeverageKey> {
-        @Override public int compareTo(LeverageKey other) {
-            int result = symbol.compareTo(other.symbol);
-            return result != 0 ? result : mode.compareTo(other.mode);
-        }
-    }
-
-    private record AssetKey(long userId, String asset) implements Comparable<AssetKey> {
-        @Override public int compareTo(AssetKey other) {
-            int result = Long.compare(userId, other.userId);
-            return result != 0 ? result : asset.compareTo(other.asset);
-        }
-    }
-
-    private record ReservationKey(long userId, long orderId) implements Comparable<ReservationKey> {
-        @Override public int compareTo(ReservationKey other) {
-            int result = Long.compare(userId, other.userId);
-            return result != 0 ? result : Long.compare(orderId, other.orderId);
-        }
-    }
-
-    private record UserPositionKey(long userId, String symbol,
-                                   com.surprising.aeron.protocol.CorePositionSide side)
-            implements Comparable<UserPositionKey> {
-        @Override public int compareTo(UserPositionKey other) {
-            int result = Long.compare(userId, other.userId);
-            if (result == 0) result = symbol.compareTo(other.symbol);
-            return result != 0 ? result : side.compareTo(other.side);
-        }
-    }
-
-    private record UserLeverageKey(long userId, String symbol,
-                                   com.surprising.aeron.protocol.CoreMarginMode mode)
-            implements Comparable<UserLeverageKey> {
-        @Override public int compareTo(UserLeverageKey other) {
-            int result = Long.compare(userId, other.userId);
-            if (result == 0) result = symbol.compareTo(other.symbol);
-            return result != 0 ? result : mode.compareTo(other.mode);
-        }
-    }
 
     void assertHealthy() {
         Throwable failure = materializationFailure.get();
@@ -1130,10 +867,9 @@ final class CoreExportState implements AutoCloseable {
                                     + actualLength + ", reserved=" + task.encodedLength
                                     + ", sequence=" + task.header.sourceSequence()
                                     + ", estimatedItems=" + task.draft.itemCount()
-                                    + ", users=" + event.changedUsers().size()
-                                    + ", orders=" + event.changedOrders().size()
                                     + ", executions=" + event.executions().size()
-                                    + ", tombstones=" + event.tombstones().itemCount());
+                                    + ", fundingPayments=" + event.fundingPayments().size()
+                                    + ", fundsPostings=" + event.fundsPostings().size());
                         }
                         CoreMessage message = CoreMessage.owned(task.header, encoded);
                         nextMaterializationSequence = Math.incrementExact(nextMaterializationSequence);
@@ -1356,12 +1092,10 @@ final class CoreExportState implements AutoCloseable {
     }
 
     private static int reservedEventLength(CoreExportEvent event) {
-        int items = event.changedUsers().size() + event.changedOrders().size() + event.executions().size()
-                + event.fundingPayments().size() + event.changedLiquidations().size()
-                + event.changedTreasuryAssets().size() + event.changedTriggerOrders().size()
-                + event.fundsPostings().size() + event.matcherEvidence().size()
+        int items = event.executions().size() + event.fundingPayments().size()
+                + event.fundsPostings().size()
                 + event.terminalIds().orderIds().size() + event.terminalIds().liquidationIds().size()
-                + event.terminalIds().triggerOrderIds().size() + event.tombstones().itemCount();
+                + event.terminalIds().triggerOrderIds().size();
         return reservedEventLength(event.commandPayloadUnsafe().length, items);
     }
 

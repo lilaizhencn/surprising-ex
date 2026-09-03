@@ -121,9 +121,8 @@ class TradingCoreRuntimeAuthorityTest {
                         "publishLaneHashes(lane)", "COMPLETED_LANE_MASK.getAndBitwiseOrRelease",
                         "COMPLETED_LANE_MASK.getAcquire")
                 .doesNotContain("COMPLETION_STRIDE", "long[] laneCompletions", "await(", "LockSupport.park");
-        assertThat(method(probe, "    private long laneRevisionHash()"))
-                .contains("accountLaneLocalStateHashById", "accountLaneLocalFundsHashById")
-                .doesNotContain("accountLaneById", ".await(");
+        assertThat(probe).doesNotContain("laneRevisionHash()", "accountLaneLocalStateHashById",
+                "accountLaneLocalFundsHashById");
         assertThat(occurrences(production, ".recordOrder(")).isEqualTo(1);
         assertThat(occurrences(prepareCommit, "RuntimeStateMaterializer.orderSnapshot(")).isZero();
         assertThat(occurrences(prepareCommit, "RuntimeFactFrame.exportOrderView(")).isZero();

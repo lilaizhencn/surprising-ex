@@ -14,6 +14,7 @@ import com.surprising.aeron.protocol.ContinueRiskScanCommand;
 import com.surprising.aeron.protocol.CoreLiquidationWorkCodec;
 import com.surprising.aeron.protocol.CoreLiquidationWorkView;
 import com.surprising.aeron.protocol.CoreExportCodec;
+import com.surprising.aeron.protocol.CoreExportEvent;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreMessageHeader;
@@ -40,7 +41,6 @@ import com.surprising.aeron.service.state.CoreFeePolicyState;
 import com.surprising.aeron.service.state.CoreLiquidationState;
 import com.surprising.aeron.service.state.CoreOrderStatus;
 import com.surprising.aeron.service.state.LaneTopology;
-import com.surprising.aeron.service.state.RuntimeFactFrame;
 import com.surprising.aeron.service.state.TransferRuntime;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -88,18 +88,16 @@ class RuntimeCommitRecoveryTest {
                 ReplayResult originalReplay = replay(original, postSnapshot);
                 ReplayResult restoredReplay = replay(restored, postSnapshot);
                 assertParity(restored, original, restoredReplay, originalReplay);
-                PatchEvidence firstRestoredPatch = restoredReplay.patches().getFirst();
-                assertThat(firstRestoredPatch.beforeBusinessStateHash()).isEqualTo(originalBusinessHash);
-                assertThat(firstRestoredPatch.businessStateHash())
-                        .isEqualTo(restored.snapshotBusinessStateHash());
-                assertThat(restored.snapshotProjectionSequence()).isEqualTo(firstRestoredPatch.projectionSequence());
+                CoreExportEvent firstRestoredEvent = restoredReplay.patches().getFirst();
+                assertThat(firstRestoredEvent.coreSequence()).isEqualTo(restored.appliedCommandCount());
+                assertThat(restored.snapshotProjectionSequence()).isEqualTo(firstRestoredEvent.projectionSequence());
                 assertThat(restored.feePolicies()).containsEntry(feePolicy.policyId(), feePolicy);
                 assertThat(restored.pendingTransfers()).containsEntry(transfer.transferId(), transfer);
                 try (CoreProbeState recoveredAgain = CoreProbeState.fromSnapshot(
                         ProductLine.LINEAR_PERPETUAL, restored.snapshot(704))) {
                     assertThat(recoveredAgain.stateHash()).isEqualTo(restored.stateHash());
                     assertThat(recoveredAgain.snapshotBusinessStateHash())
-                            .isEqualTo(firstRestoredPatch.businessStateHash());
+                            .isEqualTo(restored.snapshotBusinessStateHash());
                 }
             }
         }
@@ -141,7 +139,7 @@ class RuntimeCommitRecoveryTest {
                 assertThat(uninterrupted.tradingState().order(202).executedQuantitySteps()).isEqualTo(4);
                 assertThat(uninterrupted.tradingState().order(102).status()).isEqualTo(CoreOrderStatus.CANCELED);
                 assertThat(uninterruptedMiddle.patches()).anyMatch(patchEvidence ->
-                        !patchEvidence.coreFactValues().fundingPayments().isEmpty());
+                        !patchEvidence.fundingPayments().isEmpty());
 
                 byte[] secondSnapshot = uninterrupted.snapshot(702);
                 try (CoreProbeState secondRestore = CoreProbeState.fromSnapshot(
@@ -175,22 +173,18 @@ class RuntimeCommitRecoveryTest {
                 CoreMessage duplicateCommand = partialFill.getFirst();
                 long projectionBeforeDuplicate = firstRestore.snapshotProjectionSequence();
                 long exportBeforeDuplicate = firstRestore.exportState().nextSequence();
-                firstRestore.captureCommittedPatchesForTest();
                 CoreResponse duplicate = firstRestore.apply(duplicateCommand);
                 assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
                 assertThat(duplicate.resultCode()).isEqualTo(restoredPartial.responses().getFirst().resultCode());
                 assertThat(duplicate.stateHash()).isEqualTo(restoredPartial.responses().getFirst().stateHash());
                 assertThat(HexFormat.of().formatHex(duplicate.data()))
                         .isEqualTo(restoredPartial.responses().getFirst().data());
-                assertThat(firstRestore.drainCapturedFactFramesForTest()).isEmpty();
                 assertThat(firstRestore.snapshotProjectionSequence()).isEqualTo(projectionBeforeDuplicate);
                 assertThat(firstRestore.exportState().nextSequence()).isEqualTo(exportBeforeDuplicate);
                 CoreMessage changedRetry = new CoreMessage(duplicateCommand.header(),
                         place(202, CoreOrderSide.BUY, 100, 5, false));
-                firstRestore.captureCommittedPatchesForTest();
                 assertThat(firstRestore.apply(changedRetry).resultCode())
                         .isEqualTo(CoreResultCode.IDEMPOTENCY_CONFLICT);
-                assertThat(firstRestore.drainCapturedFactFramesForTest()).isEmpty();
                 assertThat(firstRestore.snapshotProjectionSequence()).isEqualTo(projectionBeforeDuplicate);
                 assertThat(firstRestore.exportState().nextSequence()).isEqualTo(exportBeforeDuplicate);
             }
@@ -258,7 +252,10 @@ class RuntimeCommitRecoveryTest {
             BatchReplay reference = completeBatch(uninterrupted, batch);
             BatchReplay replayed = completeBatch(recovered, batch);
 
-            assertThat(replayed).isEqualTo(reference);
+            assertThat(replayed.response()).isEqualTo(reference.response());
+            assertThat(replayed.patches()).hasSameSizeAs(reference.patches());
+            assertThat(replayed.encodedV10Facts()).isEqualTo(reference.encodedV10Facts());
+            assertThat(replayed.acknowledgedSequence()).isEqualTo(reference.acknowledgedSequence());
             assertBatchRecoveryParity(recovered.state(), uninterrupted.state());
             assertThat(replayed.patches()).anyMatch(patch -> !patch.terminalIds().orderIds().isEmpty());
             assertThat(replayed.patches()).anyMatch(patch -> !patch.fundsPostings().isEmpty());
@@ -288,9 +285,10 @@ class RuntimeCommitRecoveryTest {
             assertThat(economicUsdt(recovered.state().tradingState())).isEqualTo(4_000);
             assertThat(replayed.patches().stream().flatMap(patch -> patch.fundsPostings().stream())
                     .collect(java.util.stream.Collectors.groupingBy(
-                            RuntimeFactFrame.FundsPosting::assetId,
-                            java.util.stream.Collectors.summingLong(RuntimeFactFrame.FundsPosting::units))))
-                    .allSatisfy((assetId, units) -> assertThat(units).as("assetId=" + assetId).isZero());
+                            com.surprising.aeron.protocol.CoreFundsPostingView::asset,
+                            java.util.stream.Collectors.summingLong(
+                                    com.surprising.aeron.protocol.CoreFundsPostingView::units))))
+                    .allSatisfy((asset, units) -> assertThat(units).as("asset=" + asset).isZero());
 
             long projectionBeforeDuplicate = recovered.state().snapshotProjectionSequence();
             List<String> factsBeforeDuplicate = encodedV10OutboxFacts(recovered.state());
@@ -338,7 +336,7 @@ class RuntimeCommitRecoveryTest {
                             TradingCommandCodec.encodeApplyMarkPrice(
                                     new ApplyMarkPriceCommand("BTC-USDT", 1, 1, 2, 2_000)))));
             assertThat(setup.patches()).isNotEmpty();
-            assertThat(setup.patches()).anyMatch(patch -> !patch.coreFactValues().fundingPayments().isEmpty());
+            assertThat(setup.patches()).anyMatch(patch -> !patch.fundingPayments().isEmpty());
             long operationsSequence = 3;
             CoreLiquidationWorkView work = liquidationWork(uninterrupted.state());
             while (work.riskScanPending()) {
@@ -373,11 +371,8 @@ class RuntimeCommitRecoveryTest {
             assertThat(ack.patches()).allSatisfy(patch -> {
                 assertThat(patch.coreSequence())
                         .isEqualTo(Math.incrementExact(patch.previousCoreSequence()));
-                assertThat(patch.beforeRevision()).isEqualTo(patch.afterRevision());
                 assertThat(patch.fundsPostings()).isEmpty();
             });
-            assertThat(ack.patches()).anyMatch(patch ->
-                    !patch.coreFactFragment().tombstones().orderIds().isEmpty());
             assertThat(uninterrupted.state().exportState().snapshot().acknowledgedSequence())
                     .isEqualTo(acknowledged);
 
@@ -633,8 +628,9 @@ class RuntimeCommitRecoveryTest {
     }
 
     private static ReplayResult liquidate(CoreProbeState state) {
-        state.captureCommittedPatchesForTest();
+        List<UUID> existingExportCommands = pendingExportCommandIds(state);
         ArrayList<ResponseView> responses = new ArrayList<>();
+        ArrayList<CoreMessage> appliedCommands = new ArrayList<>();
         List<CoreMessage> setup = List.of(
                 command(12, 44, CoreMessageType.ADJUST_BALANCE, balance(180)),
                 command(13, 55, CoreMessageType.ADJUST_BALANCE, balance(180)),
@@ -643,13 +639,17 @@ class RuntimeCommitRecoveryTest {
                 kafkaCommand(2, CoreMessageType.APPLY_MARK_PRICE,
                         TradingCommandCodec.encodeApplyMarkPrice(
                                 new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 2, 2_000))));
-        setup.stream().map(command -> response(apply(state, command))).forEach(responses::add);
+        setup.forEach(command -> {
+            appliedCommands.add(command);
+            responses.add(response(apply(state, command)));
+        });
 
         long operationsSequence = 3;
         CoreLiquidationWorkView work = liquidationWork(state);
         while (work.riskScanPending()) {
             CoreMessage continuation = operationsCommand(operationsSequence++, CoreMessageType.CONTINUE_RISK_SCAN,
                     TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(1)));
+            appliedCommands.add(continuation);
             responses.add(response(apply(state, continuation)));
             work = liquidationWork(state);
         }
@@ -657,10 +657,10 @@ class RuntimeCommitRecoveryTest {
         CoreMessage execution = operationsCommand(operationsSequence, CoreMessageType.EXECUTE_LIQUIDATION,
                 TradingCommandCodec.encodeExecuteLiquidation(new ExecuteLiquidationCommand(
                         action.liquidationId(), action.triggerPriceSequence(), action.markPriceTicks(), 100_000)));
+        appliedCommands.add(execution);
         responses.add(response(apply(state, execution)));
-        List<PatchEvidence> patches = state.drainCapturedFactFramesForTest().stream()
-                .map(PatchEvidence::from).toList();
-        return new ReplayResult(List.copyOf(responses), patches);
+        return new ReplayResult(List.copyOf(responses), newExportEvents(state, appliedCommands,
+                existingExportCommands));
     }
 
     private static CoreLiquidationWorkView liquidationWork(CoreProbeState state) {
@@ -676,10 +676,10 @@ class RuntimeCommitRecoveryTest {
 
     private static void assertParity(CoreProbeState actualState, CoreProbeState expectedState,
                                      ReplayResult actual, ReplayResult expected) {
-        assertThat(actual).isEqualTo(expected);
+        assertThat(actual.responses()).isEqualTo(expected.responses());
+        assertThat(encodedEvents(actual.patches())).isEqualTo(encodedEvents(expected.patches()));
         assertThat(actual.patches()).isNotEmpty();
         assertThat(actual.patches()).anyMatch(patch -> !patch.fundsPostings().isEmpty());
-        assertThat(actual.patches()).allMatch(patch -> patch.coreFactFragment() != null);
         assertThat(actualState.tradingState()).isEqualTo(expectedState.tradingState());
         assertThat(actualState.tradingState().users()).isEqualTo(expectedState.tradingState().users());
         assertThat(actualState.tradingState().orders()).isEqualTo(expectedState.tradingState().orders());
@@ -701,15 +701,14 @@ class RuntimeCommitRecoveryTest {
 
     private static BatchReplay completeBatch(SurprisingClusteredService service, CoreMessage batch) {
         CoreProbeState state = service.state();
-        state.captureCommittedPatchesForTest();
+        List<UUID> existingExportCommands = pendingExportCommandIds(state);
         ClusterReplay replay = replayClusterCommand(service, batch);
         assertThat(replay.responses()).hasSize(1);
         assertThat(state.matchingSequence(batch.header().commandId())).isZero();
         CoreResponse response = replay.response();
         assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
-        List<PatchEvidence> patches = state.drainCapturedFactFramesForTest().stream()
-                .map(PatchEvidence::from).toList();
-        return new BatchReplay(response(response), patches, encodedV10OutboxFacts(state),
+        List<CoreExportEvent> events = newExportEvents(state, List.of(batch), existingExportCommands);
+        return new BatchReplay(response(response), events, encodedV10OutboxFacts(state),
                 state.exportState().snapshot().acknowledgedSequence());
     }
 
@@ -780,7 +779,7 @@ class RuntimeCommitRecoveryTest {
     private static ReplayResult replayClustered(
             SurprisingClusteredService service, List<CoreMessage> commands) {
         CoreProbeState state = service.state();
-        state.captureCommittedPatchesForTest();
+        List<UUID> existingExportCommands = pendingExportCommandIds(state);
         ArrayList<ResponseView> responses = new ArrayList<>();
         for (CoreMessage command : commands) {
             ClusterReplay replay = replayClusterCommand(service, command);
@@ -789,9 +788,8 @@ class RuntimeCommitRecoveryTest {
                     .isIn(ResponseStatus.APPLIED, ResponseStatus.DUPLICATE);
             responses.add(response(completed));
         }
-        List<PatchEvidence> patches = state.drainCapturedFactFramesForTest().stream()
-                .map(PatchEvidence::from).toList();
-        return new ReplayResult(List.copyOf(responses), patches);
+        return new ReplayResult(List.copyOf(responses), newExportEvents(state, commands,
+                existingExportCommands));
     }
 
     private static CoreLiquidationState liquidation(CoreProbeState state, long liquidationId) {
@@ -807,19 +805,21 @@ class RuntimeCommitRecoveryTest {
                                       com.surprising.aeron.service.state.FundsPosting.Subledger subledger,
                                       long expectedUnits) {
         long units = replay.patches().stream().flatMap(patch -> patch.fundsPostings().stream())
-                .filter(posting -> posting.subledger() == subledger)
-                .mapToLong(RuntimeFactFrame.FundsPosting::units).sum();
+                .filter(posting -> posting.subledger().name().equals(subledger.name()))
+                .mapToLong(com.surprising.aeron.protocol.CoreFundsPostingView::units).sum();
         assertThat(units).as(subledger.name()).isEqualTo(expectedUnits);
     }
 
     private static void assertFundsPostingConservation(ReplayResult replay) {
         assertThat(replay.patches().stream()
-                .filter(patch -> !patch.coreFactMetadata().externalAdjustment())
+                .filter(patch -> patch.commandType() != CoreMessageType.ADJUST_BALANCE
+                        && patch.commandType() != CoreMessageType.ADJUST_INSURANCE_FUND)
                 .flatMap(patch -> patch.fundsPostings().stream())
                 .collect(java.util.stream.Collectors.groupingBy(
-                        RuntimeFactFrame.FundsPosting::assetId,
-                        java.util.stream.Collectors.summingLong(RuntimeFactFrame.FundsPosting::units))))
-                .allSatisfy((assetId, units) -> assertThat(units).as("assetId=" + assetId).isZero());
+                        com.surprising.aeron.protocol.CoreFundsPostingView::asset,
+                        java.util.stream.Collectors.summingLong(
+                                com.surprising.aeron.protocol.CoreFundsPostingView::units))))
+                .allSatisfy((asset, units) -> assertThat(units).as("asset=" + asset).isZero());
     }
 
     private static long economicEquityUsdt(CoreProbeState state) {
@@ -1043,18 +1043,16 @@ class RuntimeCommitRecoveryTest {
     }
 
     private static ReplayResult replay(CoreProbeState state, List<CoreMessage> commands) {
-        state.captureCommittedPatchesForTest();
+        List<UUID> existingExportCommands = pendingExportCommandIds(state);
         List<ResponseView> responses = commands.stream().map(command -> response(apply(state, command))).toList();
-        List<PatchEvidence> patches = state.drainCapturedFactFramesForTest().stream()
-                .map(PatchEvidence::from).toList();
-        return new ReplayResult(responses, patches);
+        return new ReplayResult(responses, newExportEvents(state, commands, existingExportCommands));
     }
 
     private record ReplayResult(List<ResponseView> responses,
-                                List<PatchEvidence> patches) {
+                                List<CoreExportEvent> patches) {
     }
 
-    private record BatchReplay(ResponseView response, List<PatchEvidence> patches,
+    private record BatchReplay(ResponseView response, List<CoreExportEvent> patches,
                                List<String> encodedV10Facts, long acknowledgedSequence) {
     }
 
@@ -1099,29 +1097,24 @@ class RuntimeCommitRecoveryTest {
         }
     }
 
-    private record PatchEvidence(
-            ProductLine productLine, long previousCoreSequence, long coreSequence,
-            long previousProjectionSequence, long projectionSequence, long beforeRevision, long afterRevision,
-            long beforeBusinessStateHash, long businessStateHash, long beforeFundsStateHash, long fundsStateHash,
-            long laneMask,
-            List<RuntimeFactFrame.AccountLaneOwnerGroup> accountLaneGroups,
-            RuntimeFactFrame.GlobalOwnerGroup globalOwnerGroup,
-            List<RuntimeFactFrame.FundsPosting> fundsPostings,
-            com.surprising.aeron.protocol.CoreMatcherTransition matcherTransition,
-            List<RuntimeFactFrame.MatcherEvidence> matcherEvidence, RuntimeFactFrame.TerminalIds terminalIds,
-            RuntimeFactFrame.CoreFactValues coreFactValues,
-            RuntimeFactFrame.CoreFactMetadata coreFactMetadata,
-            RuntimeFactFrame.CoreFactFragment coreFactFragment) {
+    private static List<UUID> pendingExportCommandIds(CoreProbeState state) {
+        return state.exportState().snapshot().pendingEvents().stream()
+                .map(message -> message.header().commandId()).toList();
+    }
 
-        static PatchEvidence from(RuntimeFactFrame patch) {
-            return new PatchEvidence(patch.productLine(), patch.previousCoreSequence(), patch.coreSequence(),
-                    patch.previousProjectionSequence(), patch.projectionSequence(), patch.beforeRevision(),
-                    patch.afterRevision(), patch.beforeBusinessStateHash(), patch.businessStateHash(),
-                    patch.beforeFundsStateHash(), patch.fundsStateHash(), patch.laneMask(),
-                    patch.accountLaneGroups(), patch.globalOwnerGroup(), patch.fundsPostings(),
-                    patch.matcherTransition(), patch.matcherEvidence(), patch.terminalIds(), patch.coreFactValues(),
-                    patch.coreFactMetadata(), patch.materializeCoreFactFragment());
-        }
+    private static List<CoreExportEvent> newExportEvents(CoreProbeState state,
+                                                         List<CoreMessage> commands,
+                                                         List<UUID> existingCommandIds) {
+        List<UUID> commandIds = commands.stream().map(command -> command.header().commandId()).toList();
+        return state.exportState().snapshot().pendingEvents().stream()
+                .filter(message -> commandIds.contains(message.header().commandId()))
+                .filter(message -> !existingCommandIds.contains(message.header().commandId()))
+                .map(message -> CoreExportCodec.decodeEvent(message.payloadUnsafe()))
+                .toList();
+    }
+
+    private static List<String> encodedEvents(List<CoreExportEvent> events) {
+        return events.stream().map(CoreExportCodec::encodeEvent).map(HexFormat.of()::formatHex).toList();
     }
 
     private record ResponseView(ResponseStatus status, ResponseStatus commandStatus, CoreResultCode resultCode,

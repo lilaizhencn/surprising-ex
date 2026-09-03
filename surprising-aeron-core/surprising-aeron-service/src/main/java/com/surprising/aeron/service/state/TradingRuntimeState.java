@@ -3003,6 +3003,127 @@ public final class TradingRuntimeState implements AutoCloseable {
         return !changedPositions.isEmpty();
     }
 
+    void visitChangedIndexes(RuntimeFactFrame.ChangeConsumer consumer) {
+        assertOwner();
+        if (consumer == null) throw new IllegalArgumentException("changed-index consumer is required");
+        changedOrders.forEach(orderId -> consumer.order(orderId, null, order(orderId)));
+        changedPositions.forEach(positionKey -> consumer.position(positionKey, null, position(positionKey)));
+        changedLiquidations.forEach(liquidationId ->
+                consumer.liquidation(liquidationId, null, liquidation(liquidationId)));
+        changedRiskSnapshots.forEach(riskKey -> consumer.riskSnapshot(riskKey, null, riskSnapshot(riskKey)));
+        changedAlgoOrders.forEach(algoOrderId -> consumer.algoOrder(algoOrderId, null, algoOrder(algoOrderId)));
+        changedTriggerOrders.forEach(triggerOrderId ->
+                consumer.triggerOrder(triggerOrderId, null, triggerOrder(triggerOrderId)));
+        changedCancelAllAfterTimers.forEach(key -> consumer.timer(key, null, cancelAllAfterTimer(key)));
+    }
+
+    public void releaseRetiredPositionIdentities(RuntimeIdentityRegistry identities) {
+        assertOwner();
+        if (identities == null) throw new IllegalArgumentException("runtime identities are required");
+        changedPositions.forEach(positionKey -> releaseRetiredPositionIdentity(identities, positionKey));
+        changedRiskSnapshots.forEach(positionKey -> releaseRetiredPositionIdentity(identities, positionKey));
+    }
+
+    private void releaseRetiredPositionIdentity(RuntimeIdentityRegistry identities, long positionKey) {
+        if (position(positionKey) == null && riskSnapshot(positionKey) == null) {
+            identities.releasePositionKey(positionKey);
+        }
+    }
+
+    public long committedRevision() {
+        assertOwner();
+        return Math.subtractExact(revision, totalPendingReservations);
+    }
+
+    public RuntimeFundsDelta prepareFundsDelta(boolean externalAdjustment) {
+        assertOwner();
+        ArrayList<RuntimeFundsDelta.Posting> postings = new ArrayList<>();
+        for (LaneBalancePatches balances : patchBalancesBeforeByLane) {
+            for (int index = 0; index < balances.size(); index++) {
+                long userId = balances.userId(index);
+                int assetId = balances.assetId(index);
+                RuntimeFactFrame.UserBalance before = balances.before(index);
+                RuntimeFactFrame.UserBalance after = balances.after(index);
+                addFundsPosting(postings, assetId, FundsPosting.OwnerKind.USER, userId,
+                        FundsPosting.Subledger.AVAILABLE,
+                        Math.subtractExact(available(after), available(before)));
+                addFundsPosting(postings, assetId, FundsPosting.OwnerKind.USER, userId,
+                        FundsPosting.Subledger.LOCKED,
+                        Math.subtractExact(locked(after), locked(before)));
+            }
+        }
+        treasury.changedAssets().forEach(assetId -> {
+            RuntimeFactFrame.TreasuryAssetValue before = treasury.patchAssetBefore(assetId);
+            RuntimeFactFrame.TreasuryAssetValue after = treasuryAssetValue(assetId);
+            addFundsPosting(postings, assetId, FundsPosting.OwnerKind.TREASURY, 0,
+                    FundsPosting.Subledger.FEE, Math.subtractExact(fee(after), fee(before)));
+            addFundsPosting(postings, assetId, FundsPosting.OwnerKind.TREASURY, 0,
+                    FundsPosting.Subledger.INSURANCE,
+                    Math.subtractExact(insurance(after), insurance(before)));
+            addFundsPosting(postings, assetId, FundsPosting.OwnerKind.TREASURY, 0,
+                    FundsPosting.Subledger.DEFICIT,
+                    Math.negateExact(Math.subtractExact(deficit(after), deficit(before))));
+            addFundsPosting(postings, assetId, FundsPosting.OwnerKind.TREASURY, 0,
+                    FundsPosting.Subledger.LIQUIDATION_FEE,
+                    Math.subtractExact(liquidationFee(after), liquidationFee(before)));
+            addFundsPosting(postings, assetId, FundsPosting.OwnerKind.TREASURY, 0,
+                    FundsPosting.Subledger.FUNDING_RESIDUAL,
+                    Math.subtractExact(fundingResidual(after), fundingResidual(before)));
+            addFundsPosting(postings, assetId, FundsPosting.OwnerKind.TREASURY, 0,
+                    FundsPosting.Subledger.ROUNDING_RESIDUAL,
+                    Math.subtractExact(roundingResidual(after), roundingResidual(before)));
+            addFundsPosting(postings, assetId, FundsPosting.OwnerKind.TREASURY, 0,
+                    FundsPosting.Subledger.CLEARING_PNL,
+                    Math.subtractExact(clearingPnl(after), clearingPnl(before)));
+        });
+        RuntimeFundsDelta delta = RuntimeFundsDelta.fromDistinct(postings);
+        delta.requireConserved(externalAdjustment);
+        return delta;
+    }
+
+    private static void addFundsPosting(ArrayList<RuntimeFundsDelta.Posting> postings, int assetId,
+                                        FundsPosting.OwnerKind ownerKind, long ownerId,
+                                        FundsPosting.Subledger subledger, long units) {
+        if (units != 0) postings.add(new RuntimeFundsDelta.Posting(
+                assetId, ownerKind, ownerId, subledger, units));
+    }
+
+    private static long available(RuntimeFactFrame.UserBalance value) {
+        return value == null ? 0 : value.availableUnits();
+    }
+
+    private static long locked(RuntimeFactFrame.UserBalance value) {
+        return value == null ? 0 : value.lockedUnits();
+    }
+
+    private static long fee(RuntimeFactFrame.TreasuryAssetValue value) {
+        return value == null ? 0 : value.fee();
+    }
+
+    private static long insurance(RuntimeFactFrame.TreasuryAssetValue value) {
+        return value == null ? 0 : value.insurance();
+    }
+
+    private static long deficit(RuntimeFactFrame.TreasuryAssetValue value) {
+        return value == null ? 0 : value.deficit();
+    }
+
+    private static long liquidationFee(RuntimeFactFrame.TreasuryAssetValue value) {
+        return value == null ? 0 : value.liquidationFee();
+    }
+
+    private static long fundingResidual(RuntimeFactFrame.TreasuryAssetValue value) {
+        return value == null ? 0 : value.fundingResidual();
+    }
+
+    private static long roundingResidual(RuntimeFactFrame.TreasuryAssetValue value) {
+        return value == null ? 0 : value.roundingResidual();
+    }
+
+    private static long clearingPnl(RuntimeFactFrame.TreasuryAssetValue value) {
+        return value == null ? 0 : value.clearingPnl();
+    }
+
     public PreparedFactFrame prepareFactFrame(long sequence,
                                                   RuntimeIdentityRegistry identities,
                                                   long previousRevision,

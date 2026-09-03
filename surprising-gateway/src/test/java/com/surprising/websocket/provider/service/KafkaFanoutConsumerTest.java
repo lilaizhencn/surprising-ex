@@ -11,9 +11,6 @@ import com.surprising.product.api.ProductLine;
 import com.surprising.trading.api.model.OrderEvent;
 import com.surprising.trading.api.model.OrderEventType;
 import com.surprising.trading.api.model.OrderStatus;
-import com.surprising.trading.api.model.OrderBookDepthEvent;
-import com.surprising.trading.api.model.OrderBookDepthUpdateType;
-import com.surprising.trading.api.model.OrderBookLevel;
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.MarkPricePublishedEvent;
 import com.surprising.price.api.model.IndexPriceEvent;
@@ -27,7 +24,6 @@ import com.surprising.trading.api.model.MarginMode;
 import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PositionSide;
-import com.surprising.trading.api.model.PublicTradeEvent;
 import com.surprising.trading.api.model.TimeInForce;
 import com.surprising.trading.api.model.TriggerCondition;
 import com.surprising.trading.api.model.TriggerOrderResponse;
@@ -57,73 +53,6 @@ class KafkaFanoutConsumerTest {
 
     @Mock
     private CandleUpdateCoalescer candleUpdateCoalescer;
-
-    @Test
-    void fansOutOrderBookDepthBySymbol() throws Exception {
-        ObjectMapper objectMapper = new ObjectMapper();
-        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
-        Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
-        OrderBookDepthEvent event = new OrderBookDepthEvent("BTC-USDT-SPOT", 7L, 6L,
-                OrderBookDepthUpdateType.DELTA, 50,
-                List.of(new OrderBookLevel(99L, 5L, 1L)),
-                List.of(new OrderBookLevel(101L, 8L, 2L)), eventTime);
-
-        consumer.onOrderBookDepth(new ConsumerRecord<>("surprising.linear-perp.orderbook.depth.v1", 0, 0L,
-                "BTC-USDT-SPOT", objectMapper.writeValueAsString(event)));
-
-        ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
-        ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
-        verify(registry).publish(topic.capture(), payload.capture(), eq(eventTime));
-        assertThat(topic.getValue().channel()).isEqualTo(WsChannel.ORDER_BOOK_DEPTH);
-        assertThat(topic.getValue().symbol()).isEqualTo("BTC-USDT-SPOT");
-        assertThat(payload.getValue()).isEqualTo(event);
-    }
-
-    @Test
-    void productTopicFanoutPublishesCurrentProductLine() throws Exception {
-        ObjectMapper objectMapper = new ObjectMapper();
-        WebSocketProperties properties = new WebSocketProperties();
-        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
-        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer,
-                properties);
-        Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
-        OrderBookDepthEvent event = new OrderBookDepthEvent("BTC-USDT-260925", 7L, 6L,
-                OrderBookDepthUpdateType.DELTA, 50,
-                List.of(new OrderBookLevel(99L, 5L, 1L)),
-                List.of(new OrderBookLevel(101L, 8L, 2L)), eventTime);
-
-        consumer.onOrderBookDepth(new ConsumerRecord<>("surprising.linear-delivery.orderbook.depth.v1", 0, 0L,
-                "BTC-USDT-260925", objectMapper.writeValueAsString(event)));
-
-        ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
-        verify(registry).publish(topic.capture(), org.mockito.ArgumentMatchers.eq(event), eq(eventTime));
-        assertThat(topic.getValue().productLine()).isEqualTo(ProductLine.LINEAR_DELIVERY);
-    }
-
-    @Test
-    void productTopicFanoutRejectsOtherProductMarketDataTopicBeforePublishing() throws Exception {
-        ObjectMapper objectMapper = new ObjectMapper();
-        WebSocketProperties properties = new WebSocketProperties();
-        properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
-        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer,
-                properties);
-        Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
-        OrderBookDepthEvent event = new OrderBookDepthEvent("BTC-USDT-260925", 7L, 6L,
-                OrderBookDepthUpdateType.DELTA, 50,
-                List.of(new OrderBookLevel(99L, 5L, 1L)),
-                List.of(new OrderBookLevel(101L, 8L, 2L)), eventTime);
-
-        assertThatThrownBy(() -> consumer.onOrderBookDepth(new ConsumerRecord<>(
-                "surprising.inverse-delivery.orderbook.depth.v1", 0, 0L,
-                "BTC-USDT-260925", objectMapper.writeValueAsString(event))))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("failed to fanout order book depth")
-                .hasRootCauseMessage("order book depth topic must match current product line: expected="
-                        + "surprising.linear-delivery.orderbook.depth.v1 actual="
-                        + "surprising.inverse-delivery.orderbook.depth.v1");
-
-        verifyNoInteractions(registry);
-    }
 
     @Test
     void productTopicFanoutRejectsOtherProductPrivateOrderTopicBeforePublishing() throws Exception {
@@ -208,69 +137,6 @@ class KafkaFanoutConsumerTest {
 
         consumer.onPriceEvent(new ConsumerRecord<>("surprising.linear-perp.price.events.v1", 0, 0L,
                 "BTC-USDT", objectMapper.writeValueAsString(PricePublishedEvent.mark(markPricePublication(event)))));
-
-        verifyNoInteractions(registry);
-    }
-
-    @Test
-    void fansOutPublicTradeWithoutPrivateFinancialData() throws Exception {
-        ObjectMapper objectMapper = new ObjectMapper();
-        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
-        Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
-        PublicTradeEvent event = new PublicTradeEvent("11:1", 11_000_001L, "BTC-USDT", 7L,
-                OrderSide.BUY, 600_000L, 3L, eventTime, "trace-trade-1");
-
-        consumer.onPublicTrade(new ConsumerRecord<>("surprising.linear-perp.match.trades.v1", 0, 0L,
-                "BTC-USDT", objectMapper.writeValueAsString(event)));
-
-        ArgumentCaptor<SubscriptionTopic> topic = ArgumentCaptor.forClass(SubscriptionTopic.class);
-        ArgumentCaptor<Object> payload = ArgumentCaptor.forClass(Object.class);
-        verify(registry).publish(topic.capture(), payload.capture(), eq(eventTime));
-        assertThat(topic.getValue().channel()).isEqualTo(WsChannel.TRADES);
-        assertThat(topic.getValue().userId()).isNull();
-        assertThat(payload.getValue()).isEqualTo(event);
-    }
-
-    @Test
-    void fansOutPublicTradeBatchFromMatchTradesTopic() throws Exception {
-        ObjectMapper objectMapper = new ObjectMapper();
-        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
-        Instant firstEventTime = Instant.parse("2026-07-01T00:00:00Z");
-        Instant secondEventTime = firstEventTime.plusMillis(1);
-        PublicTradeEvent firstEvent = new PublicTradeEvent("11:1", 11_000_001L, "BTC-USDT", 7L,
-                OrderSide.BUY, 600_000L, 3L, firstEventTime, "trace-trade-1");
-        PublicTradeEvent secondEvent = new PublicTradeEvent("11:2", 11_000_002L, "BTC-USDT", 7L,
-                OrderSide.SELL, 600_100L, 2L, secondEventTime, "trace-trade-2");
-
-        consumer.onPublicTradeBatch(List.of(
-                new ConsumerRecord<>("surprising.linear-perp.match.trades.v1", 0, 0L,
-                        "BTC-USDT", objectMapper.writeValueAsString(firstEvent)),
-                new ConsumerRecord<>("surprising.linear-perp.match.trades.v1", 0, 1L,
-                        "BTC-USDT", objectMapper.writeValueAsString(secondEvent))));
-
-        ArgumentCaptor<List<SubscriptionRegistry.TimedPayload>> events = ArgumentCaptor.forClass(List.class);
-        verify(registry).publishTimedBatch(eq(new SubscriptionTopic(WsChannel.TRADES, "BTC-USDT", null, null,
-                ProductLine.LINEAR_PERPETUAL)), events.capture());
-        assertThat(events.getValue()).containsExactly(
-                new SubscriptionRegistry.TimedPayload(firstEvent, firstEventTime),
-                new SubscriptionRegistry.TimedPayload(secondEvent, secondEventTime));
-    }
-
-    @Test
-    void rejectsPublicTradeBatchFromLegacyTradeTopic() throws Exception {
-        ObjectMapper objectMapper = new ObjectMapper();
-        KafkaFanoutConsumer consumer = new KafkaFanoutConsumer(objectMapper, registry, candleUpdateCoalescer);
-        Instant eventTime = Instant.parse("2026-07-01T00:00:00Z");
-        PublicTradeEvent event = new PublicTradeEvent("11:1", 11_000_001L, "BTC-USDT", 7L,
-                OrderSide.BUY, 600_000L, 3L, eventTime, "trace-trade-1");
-
-        assertThatThrownBy(() -> consumer.onPublicTradeBatch(List.of(new ConsumerRecord<>(
-                "surprising.linear-perp.trade.events.v1", 0, 0L,
-                "BTC-USDT", objectMapper.writeValueAsString(event)))))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("failed to batch fanout public trade")
-                .hasRootCauseMessage("public trade topic must match current product line: expected="
-                        + "surprising.linear-perp.match.trades.v1 actual=surprising.linear-perp.trade.events.v1");
 
         verifyNoInteractions(registry);
     }

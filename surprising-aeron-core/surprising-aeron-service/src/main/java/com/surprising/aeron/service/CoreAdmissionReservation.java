@@ -64,9 +64,24 @@ final class CoreAdmissionReservation {
         return sequence;
     }
 
+    long publish(long sequence, long businessStateHash, long fundsStateHash) {
+        requireOpen();
+        if (remainingFrames == 0) {
+            throw new IllegalStateException("commit watermark budget exhausted");
+        }
+        long published = journal.publish(sequence, businessStateHash, fundsStateHash);
+        remainingFrames--;
+        return published;
+    }
+
     long append(CoreExportState.Draft draft) {
         requireOpen();
         return exportState.append(exportReservation, draft);
+    }
+
+    long skipExport() {
+        requireOpen();
+        return exportState.skip(exportReservation);
     }
 
     FactPermit reserveFactFrame() {

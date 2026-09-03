@@ -212,76 +212,6 @@ class BinanceApiControllerTest {
     }
 
     @Test
-    void ticker24hrConvertsFactSummaryToBinanceFields() throws Exception {
-        GatewayProperties properties = new GatewayProperties();
-        GatewayProperties.SymbolScale scale = new GatewayProperties.SymbolScale();
-        scale.setPriceScale(2);
-        scale.setQuantityScale(3);
-        properties.getBinanceApi().setSymbolScales(Map.of("BTCUSDT", scale));
-        GatewayProxyService proxy = mock(GatewayProxyService.class);
-        AuthService authService = mock(AuthService.class);
-        when(authService.authenticateBearer("Bearer token"))
-                .thenReturn(new JwtPrincipal(1001L, "alice", "ACTIVE", List.of(), Instant.now().plusSeconds(60)));
-        String payload = "{\"symbol\":\"BTCUSDT\",\"firstTradeId\":10,\"lastTradeId\":11,"
-                + "\"tradeCount\":2,\"openPriceTicks\":10000,\"highPriceTicks\":11000,"
-                + "\"lowPriceTicks\":9900,\"lastPriceTicks\":10500,\"volumeSteps\":\"3000\","
-                + "\"quoteVolumeTicksSteps\":\"31000000\",\"lastQuantitySteps\":\"2000\","
-                + "\"openTime\":\"2026-08-01T00:00:00Z\",\"closeTime\":\"2026-08-01T00:01:00Z\"}";
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v3/ticker/24hr");
-        request.addHeader("Authorization", "Bearer token");
-        request.setParameter("symbol", "BTCUSDT");
-        when(proxy.proxyCompat(anyString(), eq("/ticker-24hr"), anyString(), eq(HttpMethod.GET),
-                any(), isNull(), isNull()))
-                .thenReturn(ResponseEntity.ok(payload.getBytes(StandardCharsets.UTF_8)));
-        BinanceApiController controller = new BinanceApiController(properties, proxy,
-                mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), authService,
-                mock(ComplianceService.class),
-                mock(CustodyWalletClient.class), mock(CustodyWithdrawalService.class), new ObjectMapper());
-
-        var response = controller.handle(request, null);
-        Map<String, Object> ticker = new ObjectMapper().readValue(response.getBody(), Map.class);
-
-        assertThat(response.getStatusCode().value()).isEqualTo(200);
-        assertThat(ticker).containsEntry("symbol", "BTCUSDT")
-                .containsEntry("priceChange", "5")
-                .containsEntry("priceChangePercent", "5")
-                .containsEntry("lastPrice", "105")
-                .containsEntry("volume", "3")
-                .containsEntry("quoteVolume", "310");
-        verify(proxy).proxyCompat(anyString(), eq("/ticker-24hr"), anyString(), eq(HttpMethod.GET),
-                any(), isNull(), isNull());
-    }
-
-    @Test
-    void tickerPriceReadsLatestTradeFromPublicMarketRoute() throws Exception {
-        GatewayProperties properties = new GatewayProperties();
-        GatewayProperties.SymbolScale scale = new GatewayProperties.SymbolScale();
-        scale.setPriceScale(2);
-        scale.setQuantityScale(3);
-        properties.getBinanceApi().setSymbolScales(Map.of("BTCUSDT", scale));
-        GatewayProxyService proxy = mock(GatewayProxyService.class);
-        AuthService authService = mock(AuthService.class);
-        when(authService.authenticateBearer("Bearer token"))
-                .thenReturn(new JwtPrincipal(1001L, "alice", "ACTIVE", List.of(), Instant.now().plusSeconds(60)));
-        when(proxy.proxyCompat(anyString(), eq("/latest-trade"), anyString(), eq(HttpMethod.GET),
-                any(), isNull(), isNull()))
-                .thenReturn(ResponseEntity.ok("{\"priceTicks\":12345}".getBytes(StandardCharsets.UTF_8)));
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v3/ticker/price");
-        request.addHeader("Authorization", "Bearer token");
-        request.setParameter("symbol", "BTCUSDT");
-        BinanceApiController controller = new BinanceApiController(properties, proxy,
-                mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class), authService,
-                mock(ComplianceService.class),
-                mock(CustodyWalletClient.class), mock(CustodyWithdrawalService.class), new ObjectMapper());
-
-        var response = controller.handle(request, null);
-        Map<String, Object> ticker = new ObjectMapper().readValue(response.getBody(), Map.class);
-
-        assertThat(response.getStatusCode().value()).isEqualTo(200);
-        assertThat(ticker).containsEntry("symbol", "BTCUSDT").containsEntry("price", "123.45");
-    }
-
-    @Test
     void accountReportsWithdrawalCapabilityOnlyWhenWalletAndKycAreReady() throws Exception {
         GatewayProperties properties = new GatewayProperties();
         properties.getCustodyWallet().setEnabled(true);
@@ -351,7 +281,7 @@ class BinanceApiControllerTest {
     }
 
     @Test
-    void exposesBookTickerAndKlinesWithBinanceShapes() throws Exception {
+    void exposesBookTickerWithBinanceShape() throws Exception {
         GatewayProperties properties = new GatewayProperties();
         GatewayProperties.SymbolScale scale = new GatewayProperties.SymbolScale();
         scale.setPriceScale(2);
@@ -362,13 +292,6 @@ class BinanceApiControllerTest {
                 any(), isNull(), isNull())).thenReturn(ResponseEntity.ok((
                         "{\"bids\":[{\"priceTicks\":12345,\"quantitySteps\":2000}],"
                                 + "\"asks\":[{\"priceTicks\":12355,\"quantitySteps\":3000}]}"
-                ).getBytes(StandardCharsets.UTF_8)));
-        when(proxy.proxyCompat(anyString(), eq("/candles"), anyString(), eq(HttpMethod.GET),
-                any(), isNull(), isNull())).thenReturn(ResponseEntity.ok((
-                        "{\"candles\":[{\"openTime\":\"2026-08-01T00:00:00Z\","
-                                + "\"closeTime\":\"2026-08-01T00:01:00Z\",\"openPrice\":\"100\","
-                                + "\"highPrice\":\"110\",\"lowPrice\":\"90\",\"closePrice\":\"105\","
-                                + "\"baseVolume\":\"3\",\"quoteVolume\":\"310\",\"tradeCount\":2}]}"
                 ).getBytes(StandardCharsets.UTF_8)));
         BinanceApiController controller = new BinanceApiController(properties, proxy,
                 mock(GatewayApiKeyService.class), mock(SensitiveActionVerificationService.class),
@@ -385,17 +308,6 @@ class BinanceApiControllerTest {
                 .containsEntry("askPrice", "123.55")
                 .containsEntry("askQty", "3");
 
-        MockHttpServletRequest klineRequest = new MockHttpServletRequest("GET", "/api/v3/klines");
-        klineRequest.addHeader("Authorization", "Bearer token");
-        klineRequest.setParameter("symbol", "BTCUSDT");
-        klineRequest.setParameter("interval", "1m");
-        klineRequest.setParameter("startTime", "1754006400000");
-        klineRequest.setParameter("endTime", "1754006460000");
-        List<List<Object>> klines = new ObjectMapper().readValue(
-                controller.handle(klineRequest, null).getBody(), List.class);
-        assertThat(klines).hasSize(1);
-        assertThat(klines.getFirst()).containsExactly(1785542400000L, "100", "110", "90", "105", "3",
-                1785542460000L, "310", 2, "0", "0", "0");
     }
 
     private BinanceApiController controller(GatewayProperties properties, AuthService authService,

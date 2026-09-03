@@ -1,43 +1,40 @@
 package com.surprising.trading.matching.service;
 
-import com.surprising.trading.api.model.MarketTickerSummary;
+import com.surprising.aeron.protocol.CoreBookLevelView;
+import com.surprising.aeron.protocol.CoreOrderBookQuery;
+import com.surprising.aeron.protocol.CoreOrderBookView;
+import com.surprising.trading.api.model.OrderBookLevel;
 import com.surprising.trading.api.model.OrderBookSnapshotResponse;
-import com.surprising.trading.api.model.PublicTradeEvent;
-import com.surprising.trading.api.model.UserMatchTradeQueryResponse;
-import com.surprising.trading.matching.repository.CoreMarketDataRepository;
 import java.time.Instant;
-import java.util.Optional;
+import java.util.List;
+import java.util.Locale;
 import org.springframework.stereotype.Service;
 
 @Service
 public class MatchingMarketDataService {
 
-    private final CoreMarketDataProjection projection;
-    private final CoreMarketDataRepository repository;
-    private final LatestPublicTradeCache latestTradeCache;
+    private final MatchingAeronGateway aeronGateway;
 
-    public MatchingMarketDataService(CoreMarketDataProjection projection,
-                                     CoreMarketDataRepository repository,
-                                     LatestPublicTradeCache latestTradeCache) {
-        this.projection = projection;
-        this.repository = repository;
-        this.latestTradeCache = latestTradeCache;
+    public MatchingMarketDataService(MatchingAeronGateway aeronGateway) {
+        this.aeronGateway = aeronGateway;
     }
 
     public OrderBookSnapshotResponse orderBookSnapshot(String symbol, int depth) {
-        return projection.snapshot(symbol, depth);
+        CoreOrderBookView book = aeronGateway.orderBookProjection(new CoreOrderBookQuery(symbol, depth));
+        String normalized = symbol.trim().toUpperCase(Locale.ROOT);
+        List<OrderBookLevel> bids = book.levels().stream()
+                .filter(level -> level.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY)
+                .map(MatchingMarketDataService::toLevel)
+                .toList();
+        List<OrderBookLevel> asks = book.levels().stream()
+                .filter(level -> level.side() == com.surprising.aeron.protocol.CoreOrderSide.SELL)
+                .map(MatchingMarketDataService::toLevel)
+                .toList();
+        return new OrderBookSnapshotResponse(normalized, book.exportSequence(), depth,
+                bids, asks, Instant.now());
     }
 
-    public Optional<PublicTradeEvent> latestPublicTrade(String symbol) {
-        return latestTradeCache.latest(symbol);
-    }
-
-    public MarketTickerSummary ticker24hr(String symbol) {
-        Instant to = Instant.now();
-        return repository.summary(symbol, to.minusSeconds(86_400), to);
-    }
-
-    public UserMatchTradeQueryResponse userTrades(long userId, String symbol, int limit, String cursor) {
-        return repository.userTrades(userId, symbol, limit, cursor);
+    private static OrderBookLevel toLevel(CoreBookLevelView level) {
+        return new OrderBookLevel(level.priceTicks(), level.quantitySteps(), level.orderCount());
     }
 }

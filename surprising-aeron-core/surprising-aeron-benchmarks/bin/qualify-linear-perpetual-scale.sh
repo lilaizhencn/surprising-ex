@@ -34,8 +34,9 @@ if [[ ! -s "${JFR_SETTINGS_FILE}" ]]; then
   echo "missing explicit JFR settings: ${JFR_SETTINGS_FILE}" >&2
   exit 2
 fi
-if (( MATCHING_ENGINES != 1 )); then
-  echo "MATCHING_ENGINES must be exactly 1; found ${MATCHING_ENGINES}." >&2
+if (( MATCHING_ENGINES < 1 || MATCHING_ENGINES > 64
+    || (MATCHING_ENGINES & (MATCHING_ENGINES - 1)) != 0 )); then
+  echo "MATCHING_ENGINES must be a positive power of two in [1,64]; found ${MATCHING_ENGINES}." >&2
   exit 2
 fi
 
@@ -87,15 +88,11 @@ write_environment() {
 run_targeted_tests() {
   local protocol_tests='CoreExportCodecTest'
   local service_tests='RuntimeFactFrameTest,RuntimeCommitHashTest,RuntimeCommitJournalTest,RuntimeCommitRecoveryTest,RuntimeStateProjectorTest,TradingRuntimeStateTest,TradingRuntimeStateIndexTest,RuntimeTreasuryDeltaTest,RuntimeCommandProcessorTest,CoreProbeStateTest,CoreOrderedOrderBatchTest,CoreLifecycleStateTest,CoreMatchingStateTest,CorePerpetualFinancialMatrixTest,CoreDeliveryOptionFinancialMatrixTest,CoreTreasuryStateTest,FundsDeltaTest,RuntimePerpetualMatchProcessorTest,RuntimePerpetualFundingProcessorTest,RuntimePerpetualFillCalculatorTest,CoreRiskStateTest,CoreProductLineArchitectureContractTest,CoreFundsIdempotencyTest,CoreStateSnapshotCodecTest,TradingStateSnapshotCodecTest,CoreFeePolicySnapshotCodecTest,CoreNativeSnapshotProductLineTest,SharedProductLineSnapshotContractTest,TradingCoreRuntimeAuthorityTest,W1W2InvariantFenceTest,DeterministicExchangeCoreAdapterTest,SurprisingClusteredServiceTest,ActiveOrderIndexTest,PositionUserIndexTest,RiskSnapshotIndexTest'
-  local exporter_tests='ReliableCoreExporterTest,KafkaProjectionWorkerTest,KafkaCoreExportSinkTest,JdbcCoreEventProjectorTest,JdbcCoreEventProjectorPostgresTest,AdaptiveExportLoopTest,W5PublishBarrierTest'
-  local gateway_tests='CoreEventFanoutConsumerTest,KafkaFanoutConsumerTest,KafkaFanoutConsumerTopicTest'
-  local market_data_tests='CoreMarketDataProjectionTest'
+  local gateway_tests='KafkaFanoutConsumerTest,KafkaFanoutConsumerTopicTest'
   local benchmark_tests='LinearPerpetualBenchmarkSupportTest'
   local protocol_marker="${ARTIFACT_DIR}/maven-protocol-tests.start"
   local service_marker="${ARTIFACT_DIR}/maven-service-tests.start"
-  local exporter_marker="${ARTIFACT_DIR}/maven-exporter-tests.start"
   local gateway_marker="${ARTIFACT_DIR}/maven-gateway-tests.start"
-  local market_data_marker="${ARTIFACT_DIR}/maven-market-data-tests.start"
   local benchmark_marker="${ARTIFACT_DIR}/maven-benchmark-tests.start"
 
   : > "${protocol_marker}"
@@ -116,16 +113,6 @@ run_targeted_tests() {
     "${REPO_ROOT}/surprising-aeron-core/surprising-aeron-service/target/surefire-reports" \
     "${service_tests}" "${service_marker}" "${ARTIFACT_DIR}/surefire-service.tsv"
 
-  : > "${exporter_marker}"
-  JAVA_HOME="${JAVA_HOME_25}" "${MAVEN}" -f "${REPO_ROOT}/pom.xml" \
-    -pl surprising-aeron-core/surprising-aeron-exporter -am \
-    -Dtest="${exporter_tests}" \
-    -Dsurefire.failIfNoSpecifiedTests=false test \
-    | tee "${ARTIFACT_DIR}/maven-exporter-consumer-tests.log"
-  bash "${SUREFIRE_VERIFIER}" \
-    "${REPO_ROOT}/surprising-aeron-core/surprising-aeron-exporter/target/surefire-reports" \
-    "${exporter_tests}" "${exporter_marker}" "${ARTIFACT_DIR}/surefire-exporter.tsv"
-
   : > "${gateway_marker}"
   JAVA_HOME="${JAVA_HOME_25}" "${MAVEN}" -f "${REPO_ROOT}/pom.xml" \
     -pl surprising-gateway -am \
@@ -136,14 +123,6 @@ run_targeted_tests() {
     "${REPO_ROOT}/surprising-gateway/target/surefire-reports" \
     "${gateway_tests}" "${gateway_marker}" "${ARTIFACT_DIR}/surefire-gateway.tsv"
 
-  : > "${market_data_marker}"
-  JAVA_HOME="${JAVA_HOME_25}" "${MAVEN}" -f "${REPO_ROOT}/pom.xml" \
-    -pl surprising-market-data/surprising-market-data-provider -am \
-    -Dtest="${market_data_tests}" -Dsurefire.failIfNoSpecifiedTests=false test \
-    | tee "${ARTIFACT_DIR}/maven-market-data-consumer-tests.log"
-  bash "${SUREFIRE_VERIFIER}" \
-    "${REPO_ROOT}/surprising-market-data/surprising-market-data-provider/target/surefire-reports" \
-    "${market_data_tests}" "${market_data_marker}" "${ARTIFACT_DIR}/surefire-market-data.tsv"
   : > "${benchmark_marker}"
   JAVA_HOME="${JAVA_HOME_25}" "${MAVEN}" -f "${REPO_ROOT}/pom.xml" \
     -pl "${MODULE}" -am -Dtest="${benchmark_tests}" \
@@ -396,6 +375,7 @@ run_saturation_case() {
   local saturation_args="${JVM_ARGS_STRING} -Dsurprising.benchmark.export-ack-interval=1024"
   "${JAVA}" -jar "${JAR}" 'LinearPerpetualCoreBenchmark.saturatedMatchingWorkload' \
     -p accountLanes=4 -p activeUsers=10000 -p listedSymbols=512 -p activeSymbols=512 \
+    -p matchingEngines="${MATCHING_ENGINES}" \
     -p maxPositionsPerUser=5 -p maxOpenOrdersPerUser=10 \
     -p maxInFlight="${in_flight}" -p operationsPerInvocation="${SATURATION_OPERATIONS}" \
     -p targetOperationsPerSecond=100000 \
@@ -419,6 +399,7 @@ run_saturation_profile() {
   )
   "${JAVA}" "${profile_jvm_args[@]}" -jar "${JAR}" 'LinearPerpetualCoreBenchmark.saturatedMatchingWorkload' \
     -p accountLanes=4 -p activeUsers=10000 -p listedSymbols=512 -p activeSymbols=512 \
+    -p matchingEngines="${MATCHING_ENGINES}" \
     -p maxPositionsPerUser=5 -p maxOpenOrdersPerUser=10 \
     -p maxInFlight=256 -p operationsPerInvocation="${SATURATION_OPERATIONS}" \
     -p targetOperationsPerSecond=100000 \

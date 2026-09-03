@@ -15,7 +15,6 @@ class WebSocketPropertiesTest {
 
         assertThat(properties.getKafka().getGroupId()).isEqualTo("surprising-linear-perp-websocket-v1-node-a");
         assertThat(properties.getKafka().getCandleTopic()).isEqualTo("surprising.linear-perp.candle.events.v1");
-        assertThat(properties.getKafka().getMatchTradesTopic()).isEqualTo("surprising.linear-perp.match.trades.v1");
         assertThat(properties.getKafka().getTriggerOrderEventsTopic())
                 .isEqualTo("surprising.linear-perp.trigger-order.events.v1");
         assertThat(properties.getKafka().getAccountRiskEventsTopic())
@@ -32,8 +31,6 @@ class WebSocketPropertiesTest {
                 .isEqualTo("surprising-linear-delivery-websocket-v1-node-a");
         assertThat(properties.getKafka().getCandleTopic())
                 .isEqualTo("surprising.linear-delivery.candle.events.v1");
-        assertThat(properties.getKafka().getOrderBookDepthTopic())
-                .isEqualTo("surprising.linear-delivery.orderbook.depth.v1");
         assertThat(properties.getKafka().getPriceEventsTopic())
                 .isEqualTo("surprising.linear-delivery.price.events.v1");
         assertThat(properties.getKafka().isFundingRateTopicEnabled()).isFalse();
@@ -43,8 +40,6 @@ class WebSocketPropertiesTest {
                 .isEqualTo("surprising.linear-delivery.order.events.v1");
         assertThat(properties.getKafka().getTriggerOrderEventsTopic())
                 .isEqualTo("surprising.linear-delivery.trigger-order.events.v1");
-        assertThat(properties.getKafka().getMatchTradesTopic())
-                .isEqualTo("surprising.linear-delivery.match.trades.v1");
         assertThat(properties.getKafka().getPositionEventsTopic())
                 .isEqualTo("surprising.linear-delivery.account.position.events.v1");
         assertThat(properties.getKafka().getAccountRiskEventsTopic())
@@ -63,14 +58,4 @@ class WebSocketPropertiesTest {
                 .isEqualTo("surprising.inverse-perp.funding.rate.v1");
     }
 
-    @Test
-    void resolvesSixAuthoritativeCoreEventTopics() {
-        WebSocketProperties properties = new WebSocketProperties();
-
-        for (ProductLine productLine : ProductLine.values()) {
-            properties.getKafka().setProductLine(productLine);
-            assertThat(properties.getKafka().getCoreEventsTopic())
-                    .isEqualTo("surprising." + productLine.topicSegment() + ".core.events.v1");
-        }
-    }
 }

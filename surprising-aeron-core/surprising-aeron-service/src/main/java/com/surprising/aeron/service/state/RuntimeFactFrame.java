@@ -1,24 +1,15 @@
 package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.protocol.CommandFingerprint;
-import com.surprising.aeron.protocol.CoreBalanceView;
 import com.surprising.aeron.protocol.CoreExecutionView;
-import com.surprising.aeron.protocol.CoreExportEvent;
 import com.surprising.aeron.protocol.CoreFundsPostingView;
 import com.surprising.aeron.protocol.CoreFundingPaymentView;
 import com.surprising.aeron.protocol.CoreFundingProgressView;
-import com.surprising.aeron.protocol.CoreLeverageView;
-import com.surprising.aeron.protocol.CoreLiquidationView;
 import com.surprising.aeron.protocol.CoreMatcherTransition;
 import com.surprising.aeron.protocol.CoreOrderStateView;
-import com.surprising.aeron.protocol.CorePositionView;
-import com.surprising.aeron.protocol.CoreReservationView;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreRiskScanControlView;
 import com.surprising.aeron.protocol.CoreSettlementProgressView;
-import com.surprising.aeron.protocol.CoreTreasuryAssetView;
-import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
-import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.product.api.ProductLine;
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
@@ -184,6 +175,16 @@ public final class RuntimeFactFrame implements RuntimeFactView {
         }
     }
 
+    private static long reservationUserId(ReservationChange change) {
+        ReservationRuntime value = change.after() != null ? change.after() : change.before();
+        return value == null ? 0 : value.userId();
+    }
+
+    private static long positionUserId(PositionChange change) {
+        PositionRuntime value = change.after() != null ? change.after() : change.before();
+        return value == null ? 0 : value.userId();
+    }
+
     void visitTerminalValues(RetentionConsumer consumer) {
         Objects.requireNonNull(consumer, "retention consumer");
         for (AccountLaneOwnerGroup group : accountLaneGroups) {
@@ -254,107 +255,6 @@ public final class RuntimeFactFrame implements RuntimeFactView {
         return estimatedCoreFactBytes;
     }
 
-    public CoreFactFragment materializeCoreFactFragment() {
-        FactIdentitySlice registry = identities();
-        int userCapacity = 0;
-        int orderCapacity = 0;
-        for (AccountLaneOwnerGroup group : accountLaneGroups) {
-            userCapacity = Math.addExact(userCapacity, group.users.size());
-            orderCapacity = Math.addExact(orderCapacity, group.orders.size());
-        }
-        ArrayList<CoreUserStateView> users = new ArrayList<>(userCapacity);
-        ArrayList<CoreOrderStateView> orders = new ArrayList<>(orderCapacity);
-        ArrayList<CoreLiquidationView> liquidations = null;
-        ArrayList<CoreTriggerOrderStateView> triggers = null;
-        for (AccountLaneOwnerGroup group : accountLaneGroups) {
-            appendUsers(users, group, registry);
-            for (OrderChange change : group.orders) {
-                CoreOrderStateView order = change.after() == null ? null
-                        : exportRuntimeOrderView(change.after(), registry);
-                if (order != null) orders.add(order);
-            }
-            for (LiquidationChange change : group.liquidations) {
-                if (change.after != null && !change.asset.isBlank()) {
-                    if (liquidations == null) liquidations = new ArrayList<>();
-                    liquidations.add(liquidationView(change, registry));
-                }
-            }
-            for (TriggerOrderChange change : group.triggerOrders) {
-                if (change.after != null) {
-                    if (triggers == null) triggers = new ArrayList<>();
-                    triggers.add(change.after.view());
-                }
-            }
-        }
-        ArrayList<CoreTreasuryAssetView> treasury = null;
-        for (TreasuryAssetChange change : globalOwnerGroup.treasuryAssets) {
-            TreasuryAssetValue value = change.after;
-            if (value == null) continue;
-            if (treasury == null) treasury = new ArrayList<>();
-            treasury.add(new CoreTreasuryAssetView(registry.asset(change.assetId), treasuryFee(value),
-                    treasuryInsurance(value), treasuryDeficit(value), treasuryLiquidationFee(value),
-                    treasuryFundingResidual(value), treasuryRoundingResidual(value), treasuryClearingPnl(value)));
-        }
-        return new CoreFactFragment(users, orders, listOrEmpty(liquidations), listOrEmpty(treasury),
-                listOrEmpty(triggers), matcherEvidence,
-                terminalIds, tombstones(this, registry));
-    }
-
-    private static long reservationUserId(ReservationChange change) {
-        ReservationRuntime value = change.after() != null ? change.after() : change.before();
-        return value == null ? 0 : value.userId();
-    }
-
-    private static long positionUserId(PositionChange change) {
-        PositionRuntime value = change.after() != null ? change.after() : change.before();
-        return value == null ? 0 : value.userId();
-    }
-
-    private static void appendUsers(ArrayList<CoreUserStateView> result, AccountLaneOwnerGroup group,
-                                    IdentityView identities) {
-        if (group.users.isEmpty()) return;
-        for (UserChange userChange : group.users) {
-            UserRuntime user = userChange.after;
-            if (user == null) continue;
-            ArrayList<CoreBalanceView> balances = null;
-            for (BalanceChange change : group.balances) {
-                if (change.key.userId != user.userId() || change.after == null) continue;
-                if (balances == null) balances = new ArrayList<>(Math.min(16, group.balances.size()));
-                balances.add(new CoreBalanceView(identities.asset(change.key.assetId),
-                        change.after.availableUnits, change.after.lockedUnits));
-            }
-            ArrayList<CoreReservationView> reservations = null;
-            for (ReservationChange change : group.reservations) {
-                ReservationRuntime value = change.after;
-                if (value == null || value.userId() != user.userId()) continue;
-                if (reservations == null) reservations = new ArrayList<>(Math.min(16, group.reservations.size()));
-                reservations.add(new CoreReservationView(value.orderId(), identities.symbol(value.symbolId()),
-                        value.instrumentVersion(), value.kind(), identities.asset(value.assetId()),
-                        value.totalReservedUnits(), value.releasedUnits(), value.consumedUnits(),
-                        value.orderQuantitySteps()));
-            }
-            ArrayList<CorePositionView> positions = null;
-            for (PositionChange change : group.positions) {
-                PositionRuntime value = change.after;
-                if (value == null || value.userId() != user.userId()) continue;
-                if (positions == null) positions = new ArrayList<>(Math.min(16, group.positions.size()));
-                positions.add(new CorePositionView(identities.symbol(value.symbolId()),
-                        identities.asset(value.assetId()), value.marginMode(), value.positionSide(),
-                        value.instrumentVersion(), value.signedQuantitySteps(), value.entryPriceTicks(),
-                        value.entryValueTicks(), value.realizedPnlUnits(), value.positionMarginUnits()));
-            }
-            ArrayList<CoreLeverageView> leverages = null;
-            for (LeverageChange change : group.leverages) {
-                if (change.key.userId() != user.userId() || change.after == null) continue;
-                if (leverages == null) leverages = new ArrayList<>(Math.min(16, group.leverages.size()));
-                leverages.add(new CoreLeverageView(change.key.symbol(), change.key.marginMode(), change.after));
-            }
-            result.add(new CoreUserStateView(user.productLine(), user.userId(), user.revision(),
-                    user.positionMode(), listOrEmpty(balances), listOrEmpty(reservations),
-                    listOrEmpty(positions), listOrEmpty(leverages)));
-        }
-    }
-
     public static CoreOrderStateView exportOrderView(CoreOrderState order) {
         return new CoreOrderStateView(order.orderId(), order.productLine(), order.userId(), order.symbol(),
                 order.instrumentVersion(), order.side(), order.priceTicks(), order.quantitySteps(),
@@ -363,125 +263,6 @@ public final class RuntimeFactFrame implements RuntimeFactView {
                 order.clientOrderId(), order.commandId(), order.makerFeeRatePpm(), order.takerFeeRatePpm(),
                 order.cumulativeFeeUnits(), order.createdAtEpochMillis(), order.updatedAtEpochMillis(),
                 order.clusterPosition(), order.status().name(), order.revision());
-    }
-
-    public static CoreOrderStateView exportRuntimeOrderView(OrderRuntime order, IdentityView identities) {
-        if (order == null || identities == null) throw new IllegalArgumentException("runtime order is required");
-        return new CoreOrderStateView(order.orderId(), order.productLine(), order.userId(),
-                identities.symbol(order.symbolId()), order.instrumentVersion(), order.side(), order.priceTicks(),
-                order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(),
-                order.reduceOnly(), order.marginMode(), order.positionSide(), order.orderType(),
-                order.timeInForce(), order.postOnly(), order.clientOrderId(), order.commandId(),
-                order.makerFeeRatePpm(), order.takerFeeRatePpm(), order.cumulativeFeeUnits(),
-                order.createdAtEpochMillis(), order.updatedAtEpochMillis(), order.clusterPosition(),
-                order.status().name(), order.revision());
-    }
-
-    private static CoreExportEvent.Tombstones tombstones(RuntimeFactFrame patch,
-                                                          IdentityView identities) {
-        ArrayList<Long> users = null;
-        ArrayList<CoreExportEvent.UserAssetKey> balances = null;
-        ArrayList<CoreExportEvent.UserOrderKey> reservations = null;
-        ArrayList<Long> orders = null;
-        ArrayList<CoreExportEvent.UserPositionKey> positions = null;
-        ArrayList<CoreExportEvent.UserLeverageKey> leverages = null;
-        ArrayList<Long> liquidations = null;
-        ArrayList<Long> algos = null;
-        ArrayList<Long> triggers = null;
-        for (AccountLaneOwnerGroup group : patch.accountLaneGroups) {
-            for (UserChange change : group.users) if (change.after == null) {
-                if (users == null) users = new ArrayList<>();
-                users.add(change.userId);
-            }
-            for (BalanceChange change : group.balances) if (change.after == null) {
-                if (balances == null) balances = new ArrayList<>();
-                balances.add(new CoreExportEvent.UserAssetKey(change.key.userId,
-                        identities.asset(change.key.assetId)));
-            }
-            for (ReservationChange change : group.reservations) if (change.after == null) {
-                if (reservations == null) reservations = new ArrayList<>();
-                reservations.add(new CoreExportEvent.UserOrderKey(change.before.userId(), change.orderId));
-            }
-            for (OrderChange change : group.orders) if (change.after == null) {
-                if (orders == null) orders = new ArrayList<>();
-                orders.add(change.orderId);
-            }
-            for (PositionChange change : group.positions) if (change.after == null) {
-                if (positions == null) positions = new ArrayList<>();
-                positions.add(new CoreExportEvent.UserPositionKey(change.before.userId(),
-                        identities.symbol(change.before.symbolId()), change.before.positionSide()));
-            }
-            for (LeverageChange change : group.leverages) if (change.after == null) {
-                if (leverages == null) leverages = new ArrayList<>();
-                leverages.add(new CoreExportEvent.UserLeverageKey(change.key.userId(),
-                        change.key.symbol(), change.key.marginMode()));
-            }
-            for (LiquidationChange change : group.liquidations) {
-                if (change.after == null) {
-                    if (liquidations == null) liquidations = new ArrayList<>();
-                    liquidations.add(change.liquidationId);
-                }
-            }
-            for (AlgoOrderChange change : group.algoOrders) if (change.after == null) {
-                if (algos == null) algos = new ArrayList<>();
-                algos.add(change.algoOrderId);
-            }
-            for (TriggerOrderChange change : group.triggerOrders) {
-                if (change.after == null) {
-                    if (triggers == null) triggers = new ArrayList<>();
-                    triggers.add(change.triggerOrderId);
-                }
-            }
-        }
-        ArrayList<String> treasury = null;
-        for (TreasuryAssetChange change : patch.globalOwnerGroup.treasuryAssets) {
-            if (change.after == null) {
-                if (treasury == null) treasury = new ArrayList<>();
-                treasury.add(identities.asset(change.assetId));
-            }
-        }
-        if (users == null && balances == null && reservations == null && orders == null
-                && positions == null && leverages == null && liquidations == null && algos == null
-                && triggers == null && treasury == null) {
-            return CoreExportEvent.Tombstones.empty();
-        }
-        return new CoreExportEvent.Tombstones(listOrEmpty(users), listOrEmpty(balances),
-                listOrEmpty(reservations), listOrEmpty(orders), listOrEmpty(positions),
-                listOrEmpty(leverages), listOrEmpty(liquidations), listOrEmpty(algos),
-                listOrEmpty(triggers), listOrEmpty(treasury));
-    }
-
-    private static <T> List<T> listOrEmpty(ArrayList<T> values) {
-        return values == null ? List.of() : values;
-    }
-
-    private static CoreLiquidationView liquidationView(LiquidationChange change,
-                                                       IdentityView identities) {
-        LiquidationRuntime value = change.after;
-        return new CoreLiquidationView(value.liquidationId(), value.userId(),
-                identities.symbol(value.symbolId()), change.asset, value.marginMode(),
-                value.positionSide(), value.instrumentVersion(), value.triggerPriceSequence(),
-                value.signedQuantitySteps(), value.closeQuantitySteps(), value.deficitUnits(),
-                value.executionPriceTicks(), value.liquidationFeeRatePpm(), value.liquidationFeeUnits(),
-                value.status().name());
-    }
-
-    private static long treasuryFee(TreasuryAssetValue value) { return value == null ? 0 : value.fee; }
-    private static long treasuryInsurance(TreasuryAssetValue value) {
-        return value == null ? 0 : value.insurance;
-    }
-    private static long treasuryDeficit(TreasuryAssetValue value) { return value == null ? 0 : value.deficit; }
-    private static long treasuryLiquidationFee(TreasuryAssetValue value) {
-        return value == null ? 0 : value.liquidationFee;
-    }
-    private static long treasuryFundingResidual(TreasuryAssetValue value) {
-        return value == null ? 0 : value.fundingResidual;
-    }
-    private static long treasuryRoundingResidual(TreasuryAssetValue value) {
-        return value == null ? 0 : value.roundingResidual;
-    }
-    private static long treasuryClearingPnl(TreasuryAssetValue value) {
-        return value == null ? 0 : value.clearingPnl;
     }
 
     @Override
@@ -941,36 +722,10 @@ public final class RuntimeFactFrame implements RuntimeFactView {
         public static CoreFactValues empty() { return EMPTY; }
     }
 
-    public record CoreFactFragment(List<CoreUserStateView> changedUsers,
-                                   List<CoreOrderStateView> changedOrders,
-                                   List<CoreLiquidationView> changedLiquidations,
-                                   List<CoreTreasuryAssetView> changedTreasuryAssets,
-                                   List<CoreTriggerOrderStateView> changedTriggerOrders,
-                                   List<MatcherEvidence> matcherEvidence,
-                                   TerminalIds terminalIds,
-                                   CoreExportEvent.Tombstones tombstones) {
-        public CoreFactFragment {
-            changedUsers = immutableView(changedUsers);
-            changedOrders = immutableView(changedOrders);
-            changedLiquidations = immutableView(changedLiquidations);
-            changedTreasuryAssets = immutableView(changedTreasuryAssets);
-            changedTriggerOrders = immutableView(changedTriggerOrders);
-            matcherEvidence = immutableView(matcherEvidence);
-            Objects.requireNonNull(terminalIds, "terminalIds");
-            Objects.requireNonNull(tombstones, "tombstones");
-        }
-
-        private static <T> List<T> immutableView(List<T> values) {
-            Objects.requireNonNull(values, "values");
-            return values.isEmpty() ? List.of() : Collections.unmodifiableList(values);
-        }
-    }
-
     public record CoreFactMetadata(UUID commandId, CommandFingerprint commandFingerprint,
                                    int messageTypeWireCode, long userId,
                                    ResponseStatus status, CoreResultCode resultCode,
                                    long appliedCommandCount, long clusterPosition,
-                                   long topologyHash, long laneRevisionHash,
                                    boolean externalAdjustment) {
         public CoreFactMetadata {
             if (commandId == null || commandFingerprint == null || messageTypeWireCode <= 0 || userId < 0
