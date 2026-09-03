@@ -521,7 +521,12 @@ final class CoreExportState implements AutoCloseable {
     }
 
     private static long[] terminalOrderIds(CoreExportEvent event) {
-        return event.terminalIds().orderIds().stream().mapToLong(Long::longValue).toArray();
+        List<Long> source = event.terminalIds().orderIds();
+        long[] ids = new long[source.size()];
+        for (int index = 0; index < ids.length; index++) {
+            ids[index] = source.get(index);
+        }
+        return ids;
     }
 
     private static PendingExport pendingExport(CoreMessage message, CoreExportEvent event, int reservedLength) {

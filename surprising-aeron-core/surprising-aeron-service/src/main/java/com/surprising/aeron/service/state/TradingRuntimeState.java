@@ -2201,7 +2201,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         TreeMap<Long, CoreAlgoOrderState> values = new TreeMap<>();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            values.putAll(onLane(laneId, lane -> new TreeMap<>(lane.algoOrders)));
+            onLane(laneId, lane -> {
+                lane.algoOrders.forEachKeyValue(values::put);
+                return null;
+            });
         }
         return values;
     }
@@ -2214,10 +2217,17 @@ public final class TradingRuntimeState implements AutoCloseable {
     Map<Long, CoreTriggerOrderState> triggerOrdersForRuntime() {
         assertOwner();
         AccountLaneState scoped = laneCommandScope.get();
-        if (scoped != null) return new TreeMap<>(scoped.triggerOrders);
+        if (scoped != null) {
+            TreeMap<Long, CoreTriggerOrderState> values = new TreeMap<>();
+            scoped.triggerOrders.forEachKeyValue(values::put);
+            return values;
+        }
         TreeMap<Long, CoreTriggerOrderState> values = new TreeMap<>();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            values.putAll(onLane(laneId, lane -> new TreeMap<>(lane.triggerOrders)));
+            onLane(laneId, lane -> {
+                lane.triggerOrders.forEachKeyValue(values::put);
+                return null;
+            });
         }
         return values;
     }

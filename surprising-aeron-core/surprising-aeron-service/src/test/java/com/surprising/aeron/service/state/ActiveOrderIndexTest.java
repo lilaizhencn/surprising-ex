@@ -80,4 +80,24 @@ class ActiveOrderIndexTest {
         assertThat(third.orderIds()).containsExactly(1L);
         assertThat(third.nextCursorOrderId()).isZero();
     }
+
+    @Test
+    void primitiveSortedCursorAvoidsBoxedCompatibilityView() {
+        CoreOrderState first = new CoreOrderState(7, ProductLine.SPOT, 11, "BTC-USDT", 1,
+                CoreOrderSide.BUY, 100, 1, 0, 1, false, CoreOrderStatus.OPEN, 1);
+        CoreOrderState second = new CoreOrderState(9, ProductLine.SPOT, 11, "BTC-USDT", 1,
+                CoreOrderSide.BUY, 101, 1, 0, 1, false, CoreOrderStatus.OPEN, 1);
+        CoreOrderState third = new CoreOrderState(8, ProductLine.SPOT, 12, "BTC-USDT", 1,
+                CoreOrderSide.BUY, 102, 1, 0, 1, false, CoreOrderStatus.OPEN, 1);
+        TradingCoreState state = new TradingCoreState(ProductLine.SPOT, 1,
+                Map.of(11L, CoreUserState.empty(ProductLine.SPOT, 11),
+                        12L, CoreUserState.empty(ProductLine.SPOT, 12)),
+                Map.of(7L, first, 8L, third, 9L, second), Map.of(), CoreRiskState.empty(),
+                CoreTreasuryState.empty());
+        ActiveOrderIndex index = new ActiveOrderIndex(state);
+
+        assertThat(index.sortedIdsDescending("BTC-USDT")).containsExactly(9L, 8L, 7L);
+        assertThat(index.sortedIdsDescending(11L)).containsExactly(9L, 7L);
+        assertThat(index.sortedIdsDescending(999L)).isEmpty();
+    }
 }

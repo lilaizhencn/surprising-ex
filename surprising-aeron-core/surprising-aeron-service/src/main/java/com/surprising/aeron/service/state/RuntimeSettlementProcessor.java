@@ -253,7 +253,7 @@ public final class RuntimeSettlementProcessor {
         long cursorOrderId = startCursorOrderId;
         int lastSelectedLaneId = startLaneId;
         while (laneId < laneCount) {
-            for (long orderId : index.ids(symbol)) {
+            for (long orderId : index.sortedIdsDescending(symbol)) {
                 CoreOrderState order = runtime.order(orderId) == null ? null
                         : RuntimeStateMaterializer.orderSnapshot(runtime.order(orderId), identities);
                 if (order == null || order.status() != CoreOrderStatus.OPEN
@@ -274,9 +274,15 @@ public final class RuntimeSettlementProcessor {
     private static List<CoreOrderState> openOrders(TradingRuntimeState runtime,
                                                    RuntimeIdentityRegistry identities,
                                                    ActiveOrderIndex index, String symbol) {
-        return index.ids(symbol).stream().map(runtime::order)
-                .filter(order -> order != null && !order.canceled())
-                .map(order -> RuntimeStateMaterializer.orderSnapshot(order, identities)).toList();
+        long[] orderIds = index.sortedIdsDescending(symbol);
+        ArrayList<CoreOrderState> result = new ArrayList<>(orderIds.length);
+        for (long orderId : orderIds) {
+            OrderRuntime order = runtime.order(orderId);
+            if (order != null && !order.canceled()) {
+                result.add(RuntimeStateMaterializer.orderSnapshot(order, identities));
+            }
+        }
+        return result.isEmpty() ? List.of() : List.copyOf(result);
     }
 
     private static void cancelOrders(TradingRuntimeState runtime, Collection<CoreOrderState> orders) {

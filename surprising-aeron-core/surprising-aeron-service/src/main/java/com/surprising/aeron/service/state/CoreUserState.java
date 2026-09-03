@@ -6,7 +6,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.TreeSet;
 
 public final class CoreUserState {
 
@@ -178,19 +177,25 @@ public final class CoreUserState {
     private static void validateLocks(Map<String, AssetBalance> balances,
                                       Map<String, Long> explainedLocks,
                                       boolean incremental) {
-        Set<String> assets = new TreeSet<>();
-        if (incremental) {
-            assets.addAll(StateMapSupport.changedKeys(balances));
-            assets.addAll(StateMapSupport.changedKeys(explainedLocks));
-        } else {
-            assets.addAll(explainedLocks.keySet());
+        if (!incremental) {
+            for (String asset : explainedLocks.keySet()) validateLock(balances, explainedLocks, asset);
+            return;
         }
-        for (String asset : assets) {
-            long units = explainedLocks.getOrDefault(asset, 0L);
-            AssetBalance balance = balances.get(asset);
-            if (units < 0 || (units > 0 && (balance == null || units > balance.lockedUnits()))) {
-                throw new IllegalStateException("reservation locks exceed balance asset=" + asset);
-            }
+        Set<String> changedBalances = StateMapSupport.changedKeys(balances);
+        Set<String> changedLocks = StateMapSupport.changedKeys(explainedLocks);
+        for (String asset : changedBalances) validateLock(balances, explainedLocks, asset);
+        for (String asset : changedLocks) {
+            if (!changedBalances.contains(asset)) validateLock(balances, explainedLocks, asset);
+        }
+    }
+
+    private static void validateLock(Map<String, AssetBalance> balances,
+                                     Map<String, Long> explainedLocks,
+                                     String asset) {
+        long units = explainedLocks.getOrDefault(asset, 0L);
+        AssetBalance balance = balances.get(asset);
+        if (units < 0 || (units > 0 && (balance == null || units > balance.lockedUnits()))) {
+            throw new IllegalStateException("reservation locks exceed balance asset=" + asset);
         }
     }
 

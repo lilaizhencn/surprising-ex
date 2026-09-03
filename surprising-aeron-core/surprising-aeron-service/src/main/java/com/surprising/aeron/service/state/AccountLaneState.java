@@ -33,8 +33,14 @@ public final class AccountLaneState {
     final LongObjectHashMap<LongHashSet> clientKeysByOrderId = new LongObjectHashMap<>();
     final Map<CoreLeverageKey, Long> leverages = new HashMap<>();
     final LongObjectHashMap<HashSet<CoreLeverageKey>> leverageKeysByUser = new LongObjectHashMap<>();
-    final Map<Long, CoreAlgoOrderState> algoOrders = new HashMap<>();
-    final Map<Long, CoreTriggerOrderState> triggerOrders = new HashMap<>();
+    /**
+     * Lane-owned numeric indexes stay primitive all the way through the settlement path.  These
+     * used to be boxed {@code HashMap<Long, ...>} instances even though their keys are already
+     * monotonic primitive ids; that created a Long object for every insert/update and made the
+     * lane state inconsistent with the other primitive indexes.
+     */
+    final LongObjectHashMap<CoreAlgoOrderState> algoOrders = new LongObjectHashMap<>();
+    final LongObjectHashMap<CoreTriggerOrderState> triggerOrders = new LongObjectHashMap<>();
     final LongLongHashMap pendingReservationSequences = new LongLongHashMap();
     private final LongIntHashMap pendingReservationCountsByUser = new LongIntHashMap();
     private final LongObjectHashMap<IntLongHashMap> pendingReservedUnitsByUser = new LongObjectHashMap<>();
@@ -462,15 +468,21 @@ public final class AccountLaneState {
             hash = mixText(hash, entry.getKey());
             hash = mix(hash, entry.getValue());
         }
-        for (Map.Entry<Long, CoreAlgoOrderState> entry : algoOrders.entrySet()) {
-            hash = mix(hash, entry.getKey());
-            hash = mixText(hash, entry.getValue());
-        }
-        for (Map.Entry<Long, CoreTriggerOrderState> entry : triggerOrders.entrySet()) {
-            hash = mix(hash, entry.getKey());
-            hash = mixText(hash, entry.getValue());
-        }
+        hash = mixPrimitiveMap(hash, algoOrders);
+        hash = mixPrimitiveMap(hash, triggerOrders);
         return hash == 0 ? 1 : hash;
+    }
+
+    private static long mixPrimitiveMap(long hash, LongObjectHashMap<?> values) {
+        long[] keys = values.keySet().toArray();
+        java.util.Arrays.sort(keys);
+        long mixed = hash;
+        for (long key : keys) {
+            mixed = mix(mixed, key);
+            Object value = values.get(key);
+            mixed = mixText(mixed, value);
+        }
+        return mixed;
     }
 
     private long computeFundsHash() {

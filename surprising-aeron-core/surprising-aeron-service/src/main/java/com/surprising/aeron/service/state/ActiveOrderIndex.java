@@ -15,6 +15,7 @@ import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOrderIndex {
 
     public static final int MAX_PAGE_SIZE = 1_024;
+    private static final NavigableSet<Long> EMPTY_IDS = Collections.emptyNavigableSet();
 
     private final LongObjectHashMap<LongHashSet> idsByUser = new LongObjectHashMap<>();
     private final Map<String, LongHashSet> idsBySymbol = new HashMap<>();
@@ -44,12 +45,12 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
 
     public NavigableSet<Long> ids(long userId) {
         LongHashSet ids = idsByUser.get(userId);
-        return ids == null ? new TreeSet<>() : descending(ids.toArray());
+        return ids == null ? EMPTY_IDS : descending(ids.toArray());
     }
 
     public NavigableSet<Long> ids(String symbol) {
         LongHashSet ids = idsBySymbol.get(OrderReservation.normalizeSymbol(symbol));
-        return ids == null ? new TreeSet<>() : descending(ids.toArray());
+        return ids == null ? EMPTY_IDS : descending(ids.toArray());
     }
 
     public int count(String symbol) {
@@ -60,7 +61,7 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     public NavigableSet<Long> ids(long userId, String symbol) {
         LongHashSet userIds = idsByUser.get(userId);
         LongHashSet symbolIds = idsBySymbol.get(OrderReservation.normalizeSymbol(symbol));
-        if (userIds == null || symbolIds == null) return new TreeSet<>();
+        if (userIds == null || symbolIds == null) return EMPTY_IDS;
         LongHashSet source = userIds.size() <= symbolIds.size() ? userIds : symbolIds;
         LongHashSet filter = source == userIds ? symbolIds : userIds;
         TreeSet<Long> result = new TreeSet<>();
@@ -85,6 +86,21 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
         if (size != values.length) values = java.util.Arrays.copyOf(values, size);
         java.util.Arrays.sort(values);
         return values;
+    }
+
+    /**
+     * Primitive descending symbol index for settlement/query cursors.  The public {@link #ids(String)}
+     * method is retained for compatibility, but callers on a runtime path should not create a
+     * boxed {@code TreeSet<Long>} just to iterate the same index.
+     */
+    public long[] sortedIdsDescending(String symbol) {
+        LongHashSet ids = idsBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+        return sortedDescending(ids);
+    }
+
+    /** Primitive descending user index for settlement/query cursors. */
+    public long[] sortedIdsDescending(long userId) {
+        return sortedDescending(idsByUser.get(userId));
     }
 
     public long pendingQuantity(long userId, String symbol,
@@ -274,6 +290,18 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
         TreeSet<Long> sorted = new TreeSet<>();
         for (long value : values) sorted.add(value);
         return sorted.descendingSet();
+    }
+
+    private static long[] sortedDescending(LongHashSet values) {
+        if (values == null || values.isEmpty()) return new long[0];
+        long[] sorted = values.toArray();
+        java.util.Arrays.sort(sorted);
+        for (int left = 0, right = sorted.length - 1; left < right; left++, right--) {
+            long value = sorted[left];
+            sorted[left] = sorted[right];
+            sorted[right] = value;
+        }
+        return sorted;
     }
 
 }

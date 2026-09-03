@@ -7,12 +7,11 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
-import java.util.TreeMap;
-import java.util.TreeSet;
 import java.util.Set;
 
 public final class FundsDelta {
@@ -40,7 +39,7 @@ public final class FundsDelta {
         }
         java.util.Arrays.sort(ordered, POSTING_ORDER);
         ArrayList<FundsPosting> normalized = new ArrayList<>(ordered.length);
-        LinkedHashMap<String, Long> totals = new LinkedHashMap<>();
+        HashMap<String, Long> totals = new HashMap<>();
         for (int index = 0; index < ordered.length;) {
             FundsPosting first = ordered[index++];
             long units = first.units();
@@ -58,7 +57,7 @@ public final class FundsDelta {
                 throw new IllegalArgumentException("Funds delta is not conserved for asset " + asset);
             }
         });
-        postings = List.copyOf(normalized);
+        postings = normalized.isEmpty() ? List.of() : Collections.unmodifiableList(normalized);
         unitsByAsset = Collections.unmodifiableMap(totals);
         canonicalBytes = encodeCanonical(postings);
     }
@@ -82,12 +81,12 @@ public final class FundsDelta {
                     posting.asset(), ownerKind(posting.ownerKind()), posting.ownerId(),
                     subledger(posting.subledger()), posting.units()));
         }
-        return List.copyOf(result);
+        return result.isEmpty() ? List.of() : Collections.unmodifiableList(result);
     }
 
     public static FundsDelta between(TradingCoreState before, TradingCoreState after,
                                      Set<Long> changedUserIds, boolean externalAdjustment) {
-        TreeSet<String> changedTreasuryAssets = new TreeSet<>();
+        HashSet<String> changedTreasuryAssets = new HashSet<>();
         addTreasuryAssets(changedTreasuryAssets, before.treasuryState());
         addTreasuryAssets(changedTreasuryAssets, after.treasuryState());
         return between(before, after, changedUserIds, changedTreasuryAssets, externalAdjustment);
@@ -100,23 +99,25 @@ public final class FundsDelta {
                 || changedUserIds == null || changedTreasuryAssets == null) {
             throw new IllegalArgumentException("invalid funds delta transition");
         }
-        ArrayList<FundsPosting> result = new ArrayList<>();
-        for (Long userId : new TreeSet<>(changedUserIds)) {
+        int estimatedPostings = Math.addExact(
+                Math.multiplyExact(changedUserIds.size(), 2),
+                Math.multiplyExact(changedTreasuryAssets.size(), 7));
+        ArrayList<FundsPosting> result = new ArrayList<>(estimatedPostings);
+        for (Long userId : changedUserIds) {
             if (userId == null) continue;
             CoreUserState previous = before.user(userId);
             CoreUserState current = after.user(userId);
-            TreeSet<String> assets = new TreeSet<>();
-            if (previous != null) assets.addAll(previous.balances().keySet());
-            if (current != null) assets.addAll(current.balances().keySet());
-            for (String asset : assets) {
-                AssetBalance previousBalance = previous == null ? null : previous.balances().get(asset);
-                AssetBalance currentBalance = current == null ? null : current.balances().get(asset);
-                add(result, asset, FundsPosting.OwnerKind.USER, userId, FundsPosting.Subledger.AVAILABLE,
-                        Math.subtractExact(currentBalance == null ? 0 : currentBalance.availableUnits(),
-                                previousBalance == null ? 0 : previousBalance.availableUnits()));
-                add(result, asset, FundsPosting.OwnerKind.USER, userId, FundsPosting.Subledger.LOCKED,
-                        Math.subtractExact(currentBalance == null ? 0 : currentBalance.lockedUnits(),
-                                previousBalance == null ? 0 : previousBalance.lockedUnits()));
+            if (previous != null) {
+                for (String asset : previous.balances().keySet()) {
+                    addUserBalanceDelta(result, previous, current, userId, asset);
+                }
+            }
+            if (current != null) {
+                for (String asset : current.balances().keySet()) {
+                    if (previous == null || !previous.balances().containsKey(asset)) {
+                        addUserBalanceDelta(result, previous, current, userId, asset);
+                    }
+                }
             }
         }
         treasury(result, before.treasuryState().feeBalances(), after.treasuryState().feeBalances(),
@@ -138,11 +139,26 @@ public final class FundsDelta {
                 after.treasuryState().clearingPnlBalances(), changedTreasuryAssets,
                 FundsPosting.Subledger.CLEARING_PNL, false);
         if (externalAdjustment) {
-            TreeMap<String, Long> totals = totals(result);
+            HashMap<String, Long> totals = totals(result);
             totals.forEach((asset, units) -> add(result, asset, FundsPosting.OwnerKind.EXTERNAL, 0,
                     FundsPosting.Subledger.EXTERNAL_ADJUSTMENT, Math.negateExact(units)));
         }
         return new FundsDelta(result);
+    }
+
+    private static void addUserBalanceDelta(List<FundsPosting> result,
+                                             CoreUserState previous,
+                                             CoreUserState current,
+                                             long userId,
+                                             String asset) {
+                AssetBalance previousBalance = previous == null ? null : previous.balances().get(asset);
+                AssetBalance currentBalance = current == null ? null : current.balances().get(asset);
+                add(result, asset, FundsPosting.OwnerKind.USER, userId, FundsPosting.Subledger.AVAILABLE,
+                        Math.subtractExact(currentBalance == null ? 0 : currentBalance.availableUnits(),
+                                previousBalance == null ? 0 : previousBalance.availableUnits()));
+                add(result, asset, FundsPosting.OwnerKind.USER, userId, FundsPosting.Subledger.LOCKED,
+                        Math.subtractExact(currentBalance == null ? 0 : currentBalance.lockedUnits(),
+                                previousBalance == null ? 0 : previousBalance.lockedUnits()));
     }
 
     @Override
@@ -185,7 +201,7 @@ public final class FundsDelta {
     private static void treasury(List<FundsPosting> target, Map<String, Long> before, Map<String, Long> after,
                                  Set<String> changedAssets,
                                  FundsPosting.Subledger subledger, boolean negate) {
-        for (String asset : new TreeSet<>(changedAssets)) {
+        for (String asset : changedAssets) {
             long delta = Math.subtractExact(after.getOrDefault(asset, 0L), before.getOrDefault(asset, 0L));
             add(target, asset, FundsPosting.OwnerKind.TREASURY, 0, subledger,
                     negate ? Math.negateExact(delta) : delta);
@@ -202,8 +218,8 @@ public final class FundsDelta {
         target.addAll(treasury.clearingPnlBalances().keySet());
     }
 
-    private static TreeMap<String, Long> totals(List<FundsPosting> postings) {
-        TreeMap<String, Long> totals = new TreeMap<>();
+    private static HashMap<String, Long> totals(List<FundsPosting> postings) {
+        HashMap<String, Long> totals = new HashMap<>();
         for (FundsPosting posting : postings) {
             totals.merge(posting.asset(), posting.units(), Math::addExact);
         }
