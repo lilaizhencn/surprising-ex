@@ -11,6 +11,11 @@ import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
  * completion lookup uses that route and never waits for another shard's queue head.
  */
 final class MatcherPipelineGroup implements AutoCloseable {
+    @FunctionalInterface
+    interface MatchingCompletionConsumer {
+        void accept(long coreSequence, CoreMatchingResult result);
+    }
+
     private final MatcherCommandPipeline[] shards;
     private final LongIntHashMap shardByToken;
 
@@ -49,6 +54,29 @@ final class MatcherPipelineGroup implements AutoCloseable {
         CoreMatchingResult result = shards[encodedShard - 1].poll(coreSequence);
         if (result != null) shardByToken.removeKey(coreSequence);
         return result;
+    }
+
+    /**
+     * Drains only completed matching heads. Control tokens remain at the shard head for their
+     * synchronous caller, so this operation is safe to run from the Core owner loop.
+     */
+    void drainMatchingCompletions(MatchingCompletionConsumer consumer) {
+        if (consumer == null) throw new IllegalArgumentException("matching completion consumer is required");
+        for (int shardId = 0; shardId < shards.length; shardId++) {
+            MatcherCommandPipeline shard = shards[shardId];
+            while (true) {
+                long coreSequence = shard.completedMatchingSequence();
+                if (coreSequence == 0) break;
+                int encodedShard = shardByToken.get(coreSequence);
+                if (encodedShard != shardId + 1) {
+                    throw new IllegalStateException("completed matcher token is not routed to its shard");
+                }
+                CoreMatchingResult result = shard.poll(coreSequence);
+                if (result == null) break;
+                shardByToken.removeKey(coreSequence);
+                consumer.accept(coreSequence, result);
+            }
+        }
     }
 
     CoreMatchingResult await(long coreSequence, long timeoutNanos) {

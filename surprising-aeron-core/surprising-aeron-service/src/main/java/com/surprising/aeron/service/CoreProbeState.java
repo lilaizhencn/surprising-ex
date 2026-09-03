@@ -4107,11 +4107,7 @@ public final class CoreProbeState implements AutoCloseable,
 
     void drainMatchingCompletions() {
         progressPlaceAdmissions();
-        pendingMatching.forEach(pending -> {
-            if (!hasPendingMatchingRejection(pending.sequence())) {
-                transferMatchingCompletion(pending.sequence());
-            }
-        });
+        matcherPipeline.drainMatchingCompletions(this::publishMatchingCompletion);
     }
 
     private boolean matchingCommitReady(PendingMatching pending) {

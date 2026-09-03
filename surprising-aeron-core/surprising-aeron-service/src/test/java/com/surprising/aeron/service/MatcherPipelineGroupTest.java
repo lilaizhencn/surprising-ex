@@ -8,6 +8,7 @@ import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter;
 import java.util.UUID;
+import java.util.ArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
@@ -15,6 +16,25 @@ import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.api.parallel.Resources;
 
 class MatcherPipelineGroupTest {
+
+    @Test
+    void drainsCompletedShardHeadsWithoutProbingPendingSequences() {
+        MatcherPipelineGroup pipelines = new MatcherPipelineGroup(2, 4, true);
+        try {
+            pipelines.submit(0, 11, () -> new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ONE"));
+            pipelines.submit(1, 12, () -> new com.surprising.aeron.service.matching.CoreMatchingResult(true, "TWO"));
+            ArrayList<Long> completed = new ArrayList<>();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (completed.size() < 2 && System.nanoTime() < deadline) {
+                pipelines.drainMatchingCompletions((sequence, result) -> completed.add(sequence));
+                Thread.onSpinWait();
+            }
+            assertThat(completed).containsExactlyInAnyOrder(11L, 12L);
+            assertThat(pipelines.completionDepth()).isZero();
+        } finally {
+            pipelines.close();
+        }
+    }
 
     @Test
     @ResourceLock(Resources.SYSTEM_PROPERTIES)

@@ -112,6 +112,18 @@ final class MatcherCommandPipeline implements AutoCloseable {
         throw new IllegalStateException("matcher pipeline returned an invalid matching result");
     }
 
+    /**
+     * Returns the positive matching token at the completion head, or zero when the head is
+     * either not complete or belongs to a synchronous control call. The owner uses this probe
+     * to drain completed matching work without probing every pending Core sequence.
+     */
+    long completedMatchingSequence() {
+        long position = consumedPosition;
+        if (position >= completedPosition) return 0;
+        long token = slots[(int) position & mask].token;
+        return token > 0 ? token : 0;
+    }
+
     private Object pollResult(long expectedToken) {
         if (expectedToken == 0) throw new IllegalArgumentException("matcher token must be non-zero");
         long position = consumedPosition;
