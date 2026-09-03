@@ -4,13 +4,12 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
-import java.math.BigInteger;
 
 public final class CoreOrderDecisionResolver {
 
     static final long MARKET_MAX_SLIPPAGE_PPM = 10_000L;
     static final long MARKET_MAX_MARK_AGE_MILLIS = 5_000L;
-    private static final BigInteger PPM = BigInteger.valueOf(1_000_000L);
+    private static final long PPM = 1_000_000L;
 
     private CoreOrderDecisionResolver() {
     }
@@ -94,16 +93,10 @@ public final class CoreOrderDecisionResolver {
     }
 
     private static long protectedPrice(CoreOrderSide side, long markPriceTicks) {
-        BigInteger factor = BigInteger.valueOf(side == CoreOrderSide.BUY
+        long factor = side == CoreOrderSide.BUY
                 ? 1_000_000L + MARKET_MAX_SLIPPAGE_PPM
-                : 1_000_000L - MARKET_MAX_SLIPPAGE_PPM);
-        BigInteger numerator = BigInteger.valueOf(markPriceTicks).multiply(factor);
-        if (side == CoreOrderSide.SELL) {
-            return Math.max(1, numerator.divide(PPM).longValueExact());
-        }
-        BigInteger[] quotientAndRemainder = numerator.divideAndRemainder(PPM);
-        return (quotientAndRemainder[1].signum() == 0
-                ? quotientAndRemainder[0] : quotientAndRemainder[0].add(BigInteger.ONE)).longValueExact();
+                : 1_000_000L - MARKET_MAX_SLIPPAGE_PPM;
+        return Math.max(1, scalePpm(markPriceTicks, factor, side == CoreOrderSide.BUY));
     }
 
     private static long reservationPrice(PlaceOrderCommand intent, CoreInstrumentState instrument,
@@ -126,10 +119,13 @@ public final class CoreOrderDecisionResolver {
     }
 
     private static long boundedMark(long markPriceTicks, long factor, boolean ceiling) {
-        BigInteger numerator = BigInteger.valueOf(markPriceTicks).multiply(BigInteger.valueOf(factor));
-        BigInteger[] quotientAndRemainder = numerator.divideAndRemainder(PPM);
-        BigInteger value = ceiling && quotientAndRemainder[1].signum() != 0
-                ? quotientAndRemainder[0].add(BigInteger.ONE) : quotientAndRemainder[0];
-        return Math.max(1, value.longValueExact());
+        return Math.max(1, scalePpm(markPriceTicks, factor, ceiling));
+    }
+
+    static long scalePpm(long value, long factor, boolean ceiling) {
+        long whole = Math.multiplyExact(value / PPM, factor);
+        long remainderProduct = Math.multiplyExact(value % PPM, factor);
+        long scaled = Math.addExact(whole, remainderProduct / PPM);
+        return ceiling && remainderProduct % PPM != 0 ? Math.incrementExact(scaled) : scaled;
     }
 }

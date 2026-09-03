@@ -19,11 +19,14 @@ public final class CoreCommandResultCodec {
         if (result == null) {
             throw new IllegalArgumentException("command result is required");
         }
-        byte[] orders = CoreStateQueryCodec.encodeOpenOrders(new CoreOpenOrdersView(result.orders()));
         if (result.orders().size() > MAX_ITEMS || result.executions().size() > MAX_ITEMS) {
             throw new IllegalArgumentException("command result is too large");
         }
-        int length = Math.addExact(Math.addExact(Integer.BYTES + IDENTITY_LENGTH, Integer.BYTES), orders.length);
+        int ordersLength = Integer.BYTES * 2;
+        for (CoreOrderStateView order : result.orders()) {
+            ordersLength = Math.addExact(ordersLength, CoreStateQueryCodec.encodedOrderStateLength(order));
+        }
+        int length = Math.addExact(Math.addExact(Integer.BYTES + IDENTITY_LENGTH, Integer.BYTES), ordersLength);
         length = Math.addExact(length, Integer.BYTES);
         length = Math.addExact(length, Math.multiplyExact(result.executions().size(), EXECUTION_LENGTH));
         ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
@@ -36,8 +39,10 @@ public final class CoreCommandResultCodec {
         buffer.putLong(result.matcherSequence());
         buffer.putLong(result.matcherPrefixBefore());
         buffer.putLong(result.matcherPrefixAfter());
-        buffer.putInt(orders.length);
-        buffer.put(orders);
+        buffer.putInt(ordersLength);
+        buffer.putInt(1);
+        buffer.putInt(result.orders().size());
+        result.orders().forEach(order -> CoreStateQueryCodec.writeOrderState(buffer, order));
         buffer.putInt(result.executions().size());
         result.executions().forEach(execution -> buffer
                 .putLong(execution.takerOrderId())

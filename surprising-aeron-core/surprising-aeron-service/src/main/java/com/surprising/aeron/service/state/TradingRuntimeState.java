@@ -2443,10 +2443,13 @@ public final class TradingRuntimeState implements AutoCloseable {
                                   CoreInstrumentState instrument) {
         assertOwner();
         String normalizedSymbol = OrderReservation.normalizeSymbol(symbol);
-        CoreFeePolicyState selected = feePolicies.values().stream()
-                .filter(policy -> policy.effective(userId, normalizedSymbol, clusterTimestamp))
-                .min(CoreFeePolicyState::compareTo)
-                .orElse(null);
+        CoreFeePolicyState selected = null;
+        for (CoreFeePolicyState policy : feePolicies.values()) {
+            if (policy.effective(userId, normalizedSymbol, clusterTimestamp)
+                    && (selected == null || policy.compareTo(selected) < 0)) {
+                selected = policy;
+            }
+        }
         return selected == null
                 ? new CoreFeeRate(instrument.makerFeeRatePpm(), instrument.takerFeeRatePpm(), 0)
                 : new CoreFeeRate(selected.makerFeeRatePpm(), selected.takerFeeRatePpm(),

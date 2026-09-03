@@ -82,6 +82,18 @@ class CoreOrderDecisionResolverTest {
         assertThat(resolved.takerFeeRatePpm()).isEqualTo(25);
     }
 
+    @Test
+    void scalesPricesWithoutOverflowingTheIntermediateProduct() {
+        long value = 9_000_000_000_000_001L;
+
+        assertThat(CoreOrderDecisionResolver.scalePpm(value, 990_000, false))
+                .isEqualTo(8_910_000_000_000_000L);
+        assertThat(CoreOrderDecisionResolver.scalePpm(value, 1_010_000, true))
+                .isEqualTo(9_090_000_000_000_002L);
+        assertThatThrownBy(() -> CoreOrderDecisionResolver.scalePpm(Long.MAX_VALUE, 1_010_000, true))
+                .isInstanceOf(ArithmeticException.class);
+    }
+
     private static TradingRuntimeState runtime(CoreInstrumentState instrument) {
         TradingRuntimeState runtime = new TradingRuntimeState();
         runtime.setMetadata(instrument.contractType().productLine(), 0);

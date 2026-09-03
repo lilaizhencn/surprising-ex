@@ -5962,11 +5962,11 @@ public final class CoreProbeState implements AutoCloseable,
     private void materializeCommandOrderViews(PendingMatching pending) {
         switch (pending.operation()) {
             case PLACE -> {
-                materializeResponseOrders(pending.decodedCommand().placeOrder().orderId());
+                materializeResponseOrder(pending.decodedCommand().placeOrder().orderId());
                 return;
             }
             case CANCEL -> {
-                materializeResponseOrders(pending.decodedCommand().cancelOrder().orderId());
+                materializeResponseOrder(pending.decodedCommand().cancelOrder().orderId());
                 return;
             }
             case REPLACE, AMEND -> {
@@ -5977,7 +5977,7 @@ public final class CoreProbeState implements AutoCloseable,
             case TRIGGER -> {
                 long[] execute = pending.decodedCommand().trigger();
                 var trigger = runtimePlaceOrderState.triggerOrder(execute[0]);
-                if (trigger != null) materializeResponseOrders(triggerPlacement(trigger, execute[2]).orderId());
+                if (trigger != null) materializeResponseOrder(triggerPlacement(trigger, execute[2]).orderId());
                 return;
             }
             default -> { }
@@ -6015,6 +6015,11 @@ public final class CoreProbeState implements AutoCloseable,
             if (order != null) views.add(orderView(order));
         }
         commandOrderViews = List.copyOf(views);
+    }
+
+    private void materializeResponseOrder(long orderId) {
+        OrderRuntime order = runtimeOrder(orderId);
+        commandOrderViews = order == null ? List.of() : List.of(orderView(order));
     }
 
     private CoreOrderStateView orderView(OrderRuntime order) {
