@@ -1383,3 +1383,21 @@
 - 线程/I/O/VM：owner正式路径同步file/socket/database I/O为0；JFR `DataLoss=0`。最大GC pause远低于业务尾延迟；最大safepoint结束暂停`0.834 ms`，最大到达safepoint`2.094 ms`。NMT退出汇总为native committed约`8.15 GiB`（主要是8GiB Java heap），32线程；没有长期NMT差分，不能给出native泄漏结论。
 - 严格有效性：JFR仍记录1,003个JVM启动/反射探测异常（594 NoSuchFieldException、312 NoSuchMethodError等），analyzer严格零异常门禁`rc=1`；swap保持`393.75MiB`，Pages throttled=0，但Pageouts从50,832增至51,799。因此本轮结论为“交易正确性和短时性能通过、完整性能验收部分通过”，不宣称正式生产容量或无泄漏。
 - artifact SHA-256：main JSON `6d26b27543025bb5f181d95418ac628731b4be1b3de51c93ef765ac83740d602`，JFR JSON `57285969ea101623bf436c6e6166329d8fb8cea86ee9d06b83ddfe96c36db542`，原始JFR `b1bf47468fe59048550ad8b461219798eb46bf4b86158e301b95a8f14aa4a9cc`，aggregate `5338eac15228897d191df1127042fe9e0c7305d0f756c8f26a64814d12922169`；目录 `target/qualification/20260903T092915Z-final-direct-commit-matcher1-256/`。
+
+### 2026-09-03 17:38:35 +08:00 — `PV-20260903-256-38` — `采集前锁定（最终代码 matcher=2 扩展性诊断）`
+
+#### 采集前锁定
+
+- 目的与对照：在最终提交 `1613a7a806557f1657b06fdd9e3ee09360ad4ca6` 上，仅将 matching engines 从1改为2，诊断删除 Core Fact/export 热路径后的 matcher 扩展性；对照为PV-37最终代码 matcher=1的`20,714.105 terminal business ops/s`。本轮不作为默认单matcher正式验收结论。
+- 固定场景：仅`LINEAR_PERPETUAL`进程内交易链路；10,000活跃用户、512 listed/active symbols、每用户最多5持仓/10活动订单、4 Account Lane、2 matching engines、0 exchange-core risk engine、1 Product Core risk engine、1 JMH worker；每invocation 16,384 PLACE_ORDER，50% maker GTC + 50% taker IOC，同symbol/价格/数量配对，做市持续运行；open-loop offered `100,000 business ops/s`并修正coordinated omission；严格且仅`256 in-flight`。
+- 正确性门禁：accepted business/Core分别等于terminal；unfinished/rejected/error/timeout/producer-starvation均为0，期末matcher/Lane/in-flight backlog为0，trades为business的50%；资金守恒、余额/冻结/持仓、订单终态、盘口和snapshot recovery必须通过。
+- 采集参数：Oracle GraalVM Java HotSpot 25.0.1、Maven 3.9.16、8GiB ZGC、AlwaysPreTouch、BLOCKING settlement、journal 65536/1GiB；无profiler主轮`fork=1、warmup=3x3s、measurement=3x5s、thread=1`。本轮只采matcher=2主吞吐，不重复JFR、GC或长稳；matcher=1最终JFR已记录于PV-37。
+- 环境与范围：采集前swap=`393.75MiB`、Pages throttled=0、Pageouts=51,799；如Pageouts增长则仅作为诊断数据。不启动或测试PostgreSQL、exporter、wallet、Kafka、API、WebSocket、market-data或其他产品线。
+- artifact与命令：使用SHA-256为`165d01806847426c0dad7c4a01fcfd0c33c3ab88335a13b3685f946b62bfbfd7`的最终shaded JAR，运行`LinearPerpetualCoreBenchmark.saturatedMatchingWorkload`，固定PV-37全部参数，仅改`-p matchingEngines=2`和`-Dsurprising.aeron.matching-engines=2`；artifact固定为`target/qualification/20260903T093835Z-final-direct-commit-matcher2-256/`。锁定后不修改场景、参数或门禁。
+
+#### 采集结果
+
+- 无profiler主轮：`21,478.824 terminal business ops/s`、`21,478.824 terminal Core messages/s`、`10,739.412 trades/s`；三个business样本为`22,511.651/21,053.899/20,870.920 ops/s`。accepted与terminal business/Core分别相等，unfinished/rejected/error/timeout/producer-starvation均为0；benchmark正常完成teardown，资金、余额/冻结/持仓、订单终态、盘口及snapshot recovery门禁通过。
+- matcher扩展性：相对PV-37同一最终JAR、同场景matcher=1的`20,714.105 terminal business ops/s`，matcher=2增加`764.719 ops/s`，仅提升`3.69%`。两个三样本区间重叠，不能认定为稳定扩展收益；当前约`21k terminal business ops/s`的平台主要受共享owner、账户Lane和状态提交路径限制，而不是单matcher撮合算力。
+- 有效性与范围：swap保持`393.75MiB`、Pages throttled保持0，但Pageouts从`51,799`增至`52,997`，因此本轮仅作为matcher扩展性诊断，不作为正式生产容量验收。按锁定范围未重复JFR、GC或长稳；matcher=1最终JFR归因见PV-37。
+- artifact：`target/qualification/20260903T093835Z-final-direct-commit-matcher2-256/saturation-main.json`，SHA-256 `415cc1fcbe0bc5ea8ddb5f56d11e14ef03dd7cdb1cea1dd4e5e7358b51ab205c`。
