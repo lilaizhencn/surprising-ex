@@ -1,12 +1,10 @@
 package com.surprising.aeron.service;
 
-import com.surprising.aeron.protocol.AckExportCommand;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CancelOrderCommand;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.ContinueRiskScanCommand;
-import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.aeron.protocol.CoreLiquidationActionView;
 import com.surprising.aeron.protocol.CoreLiquidationWorkCodec;
 import com.surprising.aeron.protocol.CoreLiquidationWorkView;
@@ -44,14 +42,6 @@ final class LinearPerpetualBenchmarkSupport {
     static final int DEFAULT_MAKER_DEPTH = 16;
     static final int DEFAULT_RISK_USERS = 32;
     static final int MAX_BENCHMARK_SCALE = 10_000;
-    static final OwnerCommitScale OWNER_COMMIT_SCALE = new OwnerCommitScale(
-            10_000, 512, 4, 5, 10, 256, 16_384);
-    static final List<String> OWNER_COMMIT_BENCHMARK_NAMES = List.of(
-            "ownerCommitSealPublishApply",
-            "multiLanePatchFanout",
-            "incrementalHashAgainstCanonical",
-            "batchedPatchProjectionCoreFact",
-            "ownerCommitSnapshotRecovery");
     private static final String SYMBOL = "JMH-BTC-USDT";
     private static final String SETTLE_ASSET = "USDT";
     private static final long ENTRY_PRICE = 100;
@@ -61,8 +51,6 @@ final class LinearPerpetualBenchmarkSupport {
     private static final long LIQUIDATION_BALANCE = 230;
     private static final long MATCH_TIMEOUT_NANOS = 30_000_000_000L;
     private static final int PROJECTION_ADMISSION_HEADROOM = 3;
-    private static final int EXPORT_ACK_INTERVAL = Math.max(1,
-            Integer.getInteger("surprising.benchmark.export-ack-interval", 128));
     private static final int COMMANDS_PER_LOGICAL_MILLISECOND = 256;
 
     private LinearPerpetualBenchmarkSupport() {
@@ -132,18 +120,6 @@ final class LinearPerpetualBenchmarkSupport {
 
         @Override
         void close();
-    }
-
-    record OwnerCommitScale(int activeUsers, int listedSymbols, int accountLanes,
-                            int positionsPerUser, int ordersPerUser, int maxInFlight,
-                            int operationsPerInvocation) {
-        OwnerCommitScale {
-            if (activeUsers != 10_000 || listedSymbols != 512 || accountLanes != 4
-                    || positionsPerUser != 5 || ordersPerUser != 10 || maxInFlight != 256
-                    || operationsPerInvocation != 16_384) {
-                throw new IllegalArgumentException("owner commit qualification scale must remain fixed");
-            }
-        }
     }
 
     record SnapshotTemplate(byte[] bytes, long businessStateHash, int accountLanes,
@@ -510,8 +486,6 @@ final class LinearPerpetualBenchmarkSupport {
     static final class Harness implements AutoCloseable {
         private final CoreProbeState state;
         private final Sequences sequences;
-        private int commandsSinceExportAck;
-        private long lastRequiredExportSequence;
         private long executedMessages;
         private long acceptedMessages;
         private long terminalMessages;
@@ -659,7 +633,6 @@ final class LinearPerpetualBenchmarkSupport {
                 validateTerminal(command, response, operationWeight, "");
                 terminalMessages = Math.addExact(terminalMessages, operationWeight);
                 terminalCoreMessages = Math.incrementExact(terminalCoreMessages);
-                recordExport(response);
                 if (businessLatencies != null) businessLatencies.terminal(businessLatency);
             }
             return pending;
@@ -693,7 +666,6 @@ final class LinearPerpetualBenchmarkSupport {
 
         void drainSubmitted() {
             while (!submittedMatching.isEmpty()) drainOldestLatencyNanos();
-            if (commandsSinceExportAck >= EXPORT_ACK_INTERVAL) acknowledgeExports();
         }
 
         int pendingSubmissions() {
@@ -744,7 +716,6 @@ final class LinearPerpetualBenchmarkSupport {
             validateTerminal(pending.command, pending.response, pending.operationWeight, nativeMatchingResult);
             terminalMessages = Math.addExact(terminalMessages, pending.operationWeight);
             terminalCoreMessages = Math.incrementExact(terminalCoreMessages);
-            recordExport(pending.response);
             if (businessLatencies != null) businessLatencies.terminal(pending.businessLatency);
             return pending.submittedAtNanos == 0 ? 0 : System.nanoTime() - pending.submittedAtNanos;
         }
@@ -778,13 +749,11 @@ final class LinearPerpetualBenchmarkSupport {
                         validateTerminal(pending.command, response, pending.operationWeight, "");
                         terminalMessages = Math.addExact(terminalMessages, pending.operationWeight);
                         terminalCoreMessages = Math.incrementExact(terminalCoreMessages);
-                        recordExport(response);
                         if (businessLatencies != null) businessLatencies.terminal(pending.businessLatency);
                         long terminalAtNanos = System.nanoTime();
                         completionConsumer.accept(pending.command.header().userId(),
                                 pending.submittedAtNanos, pending.acceptedAtNanos, terminalAtNanos);
                     });
-            if (commandsSinceExportAck >= EXPORT_ACK_INTERVAL) acknowledgeExportsWithoutDrain();
             return completed;
         }
 
@@ -805,8 +774,7 @@ final class LinearPerpetualBenchmarkSupport {
                         + (nativeMatchingResult.isEmpty() ? "" : " nativeMatching=" + nativeMatchingResult)
                         + " applied=" + state.appliedCommandCount()
                         + " users=" + state.tradingState().users().size()
-                        + " orders=" + state.tradingState().orders().size()
-                        + " export=" + state.exportState().status());
+                        + " orders=" + state.tradingState().orders().size());
             }
             if (command.header().messageType() == CoreMessageType.PLACE_ORDER_BATCH
                     || command.header().messageType() == CoreMessageType.CANCEL_ORDER_BATCH
@@ -833,36 +801,6 @@ final class LinearPerpetualBenchmarkSupport {
             }
         }
 
-        private void recordExport(CoreResponse response) {
-            if (response.requiredExportSequence() > 0) {
-                lastRequiredExportSequence = response.requiredExportSequence();
-                commandsSinceExportAck++;
-            }
-        }
-
-        void acknowledgeExports() {
-            CoreMessage acknowledgement = exportAcknowledgement();
-            if (acknowledgement != null) execute(acknowledgement);
-        }
-
-        private void acknowledgeExportsWithoutDrain() {
-            CoreMessage acknowledgement = exportAcknowledgement();
-            if (acknowledgement == null) return;
-            PendingCommand pending = submitCommand(acknowledgement);
-            if (pending.sequence != 0 || pending.response.resultCode() == CoreResultCode.MATCHING_PENDING) {
-                throw new IllegalStateException("export acknowledgement entered the matching pipeline");
-            }
-        }
-
-        private CoreMessage exportAcknowledgement() {
-            if (lastRequiredExportSequence == 0) return null;
-            long acknowledged = lastRequiredExportSequence;
-            lastRequiredExportSequence = 0;
-            commandsSinceExportAck = 0;
-            return command(CoreMessageType.ACK_EXPORT, CommandSource.RECOVERY_TOOL, 0,
-                    CoreExportCodec.encodeAck(new AckExportCommand(acknowledged)));
-        }
-
         CoreLiquidationWorkView executionWork() {
             CoreMessage query = new CoreMessage(CoreMessageHeader.query(CoreMessageType.LIQUIDATION_WORK_QUERY,
                     new UUID(99, sequences.clusterPosition++), productLine(),
@@ -883,7 +821,6 @@ final class LinearPerpetualBenchmarkSupport {
         }
 
         SnapshotTemplate snapshotTemplate(int accountLanes) {
-            acknowledgeExports();
             byte[] snapshot = state.snapshot();
             return new SnapshotTemplate(snapshot, state.tradingState().businessStateHash(), accountLanes,
                     productLine(), sequences.clusterPosition);

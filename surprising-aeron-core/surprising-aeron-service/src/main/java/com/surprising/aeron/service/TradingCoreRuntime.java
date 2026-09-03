@@ -300,34 +300,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return riskSnapshots;
     }
 
-    void commitRuntimeTransition(RuntimeFactFrame entry,
-                                 long beforeBusinessStateHash, long afterBusinessStateHash) {
-        assertOwner();
-        if (entry == null || entry.productLine() != productLine || entry.revision() < committedRevision
-                || beforeBusinessStateHash != committedBusinessStateHash) {
-            throw new IllegalStateException("typed runtime transition is out of order");
-        }
-        factIndexes.apply(entry);
-        committedRevision = entry.revision();
-        committedBusinessStateHash = afterBusinessStateHash;
-    }
-
-    void commitRuntimeTransition(TradingRuntimeState.PreparedFactFrame entry,
-                                 long beforeBusinessStateHash, long afterBusinessStateHash) {
-        assertOwner();
-        if (entry == null || entry.metadata().afterRevision() < committedRevision
-                || beforeBusinessStateHash != committedBusinessStateHash) {
-            throw new IllegalStateException("runtime fact transition is out of order: afterRevision="
-                    + (entry == null ? "null" : entry.metadata().afterRevision())
-                    + ", committedRevision=" + committedRevision
-                    + ", beforeBusinessStateHash=" + beforeBusinessStateHash
-                    + ", committedBusinessStateHash=" + committedBusinessStateHash);
-        }
-        factIndexes.apply(entry.builder(), entry.identities());
-        committedRevision = entry.metadata().afterRevision();
-        committedBusinessStateHash = afterBusinessStateHash;
-    }
-
     void commitRuntimeChanges(TradingRuntimeState state, RuntimeIdentityRegistry identityView,
                               long beforeBusinessStateHash, long afterBusinessStateHash) {
         assertOwner();

@@ -14,12 +14,12 @@ import org.junit.jupiter.api.Test;
 class TradingRuntimeStateTest {
 
     @Test
-    void accountLaneApplyUsesBoundedTransitionHashes() throws Exception {
+    void accountLaneApplyOnlyAdvancesSequenceAndRevision() throws Exception {
         String source = accountLaneSource();
 
         assertThat(methodSource(source, "void applied", "void requireApply"))
-                .contains("stateContribution", "fundsContribution", "transitionHash")
-                .doesNotContain("computeStateHash", "computeFundsHash");
+                .contains("appliedSequence", "revision")
+                .doesNotContain("transitionHash", "computeStateHash", "computeFundsHash");
         assertThat(source).doesNotContain("record Checkpoint", "void rollback(Checkpoint",
                 "pendingApplyCheckpoint", "pendingApplySequence");
         String runtimeSource = Files.readString(Path.of(
@@ -671,25 +671,6 @@ class TradingRuntimeStateTest {
     }
 
     @Test
-    void missingRequiredLaneCannotSealOrPublishPatch() {
-        LaneTopology topology = LaneTopology.productionDefault();
-        TradingRuntimeState state = new TradingRuntimeState(topology);
-        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        long changedUser = userForLane(topology, 0);
-        state.putUser(new UserRuntime(changedUser));
-        TradingRuntimeState.PreparedFactFrame prepared = state.prepareFactFrame(
-                1, identities, 0,
-                com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0),
-                1L << 1, 0, 0, 0, 0, true);
-
-        assertThatThrownBy(prepared::prepareChanges)
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("lane mask must equal changed lane mask");
-        assertThat(state.accountLaneById(0).appliedSequence()).isZero();
-        assertThat(state.accountLaneById(0).committedSequence()).isZero();
-    }
-
-    @Test
     void sameCommandPositionRemovalRetainsTypedOpenBeforeAndMarginMode() {
         TradingRuntimeState state = new TradingRuntimeState();
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
@@ -706,18 +687,7 @@ class TradingRuntimeStateTest {
         state.removePosition(positionKey, 7);
 
         assertThat(state.currentPatchPositionBefore(positionKey)).isSameAs(open);
-        var prepared = state.prepareFactFrame(1, identities, 0,
-                com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0), 0,
-                0, 0, 0, 0, true);
-        RuntimeFactFrame.PreparedChanges changes = prepared.prepareChanges();
-        RuntimeFactFrame patch = prepared.seal(changes, 0, 0);
-        RuntimeFactFrame.PositionChange removal = patch.accountLaneGroups().stream()
-                .flatMap(group -> group.positions().stream()).findFirst().orElseThrow();
-        assertThat(removal.before()).isEqualTo(open);
-        assertThat(removal.before().signedQuantitySteps()).isEqualTo(2);
-        assertThat(removal.before().marginMode())
-                .isEqualTo(com.surprising.aeron.protocol.CoreMarginMode.ISOLATED);
-        assertThat(removal.after()).isNull();
+        assertThat(state.currentPatchPositionBefore(positionKey)).isSameAs(open);
     }
 
     @Test

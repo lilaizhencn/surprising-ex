@@ -327,8 +327,6 @@ public final class AccountLaneState {
         requireApplySequence(coreSequence);
         appliedSequence = coreSequence;
         revision = Math.incrementExact(revision);
-        localStateHash = transitionHash(localStateHash, coreSequence, stateContribution);
-        localFundsHash = transitionHash(localFundsHash, coreSequence, fundsContribution);
     }
 
     void requireApplySequence(long coreSequence) {

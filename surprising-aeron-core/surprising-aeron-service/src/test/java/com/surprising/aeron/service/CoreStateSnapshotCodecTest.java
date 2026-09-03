@@ -8,7 +8,6 @@ import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CoreMessage;
-import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreOrderSide;
@@ -258,62 +257,8 @@ class CoreStateSnapshotCodecTest {
     }
 
     @Test
-    void sectionedRecoveryRejectsEveryOutboxIdentityMismatchBeforeCandidateOrThreadPublication() {
-        CoreMessage adjustment = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE,
-                UUID.fromString("00000000-0000-0000-0000-000000000087"), ProductLine.SPOT,
-                CommandSource.GATEWAY, 87, 1, 7, 1_000, 87),
-                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 25)));
-        try (CoreProbeState live = new CoreProbeState(ProductLine.SPOT)) {
-            assertThat(live.apply(adjustment).status()).isEqualTo(ResponseStatus.APPLIED);
-            byte[] control = live.snapshot(87);
-            try (CoreProbeState restored = CoreStateSnapshotCodec.decode(control, ProductLine.SPOT)) {
-                assertThat(restored.exportState().status()).isEqualTo(live.exportState().status());
-                assertThat(restored.exportState().pending()).hasSameSizeAs(live.exportState().pending());
-            }
-
-            var liveOutboxBefore = live.exportState().status();
-            long liveOutboxDigestBefore = live.exportState().pendingDigest();
-            List<byte[]> livePendingBefore = live.exportState().pending().stream()
-                    .map(CoreMessageCodec::encode).toList();
-            long liveAppliedBefore = live.appliedCommandCount();
-            long liveStateHashBefore = live.stateHash();
-            TradingCoreState liveTradingBefore = live.tradingState();
-            long materializerThreadsBefore = coreFactMaterializerThreadCount();
-            Map<String, byte[]> corruptions = new LinkedHashMap<>();
-            corruptions.put("envelope product line",
-                    mutateOutboxEvent(control, OutboxMutation.ENVELOPE_PRODUCT_LINE));
-            corruptions.put("nested product line",
-                    mutateOutboxEvent(control, OutboxMutation.NESTED_PRODUCT_LINE));
-            corruptions.put("command id", mutateOutboxEvent(control, OutboxMutation.COMMAND_ID));
-            corruptions.put("source sequence", mutateOutboxEvent(control, OutboxMutation.SOURCE_SEQUENCE));
-            corruptions.put("command type", mutateOutboxEvent(control, OutboxMutation.COMMAND_TYPE));
-            corruptions.put("reservation length", mutateOutboxEvent(control, OutboxMutation.RESERVATION_LENGTH));
-
-            corruptions.forEach((label, corrupted) -> {
-                Throwable failure = catchThrowable(() ->
-                        CoreStateSnapshotCodec.decode(corrupted, ProductLine.SPOT));
-                assertThat(failure).as(label).isInstanceOf(ProtocolException.class);
-                assertThat(live.appliedCommandCount()).as(label).isEqualTo(liveAppliedBefore);
-                assertThat(live.stateHash()).as(label).isEqualTo(liveStateHashBefore);
-                assertThat(live.tradingState()).as(label).isEqualTo(liveTradingBefore);
-                assertThat(live.exportState().status()).as(label).isEqualTo(liveOutboxBefore);
-                assertThat(live.exportState().pendingDigest()).as(label).isEqualTo(liveOutboxDigestBefore);
-                List<byte[]> livePendingAfter = live.exportState().pending().stream()
-                        .map(CoreMessageCodec::encode).toList();
-                assertThat(livePendingAfter).as(label).hasSameSizeAs(livePendingBefore);
-                for (int index = 0; index < livePendingBefore.size(); index++) {
-                    assertThat(livePendingAfter.get(index)).as(label + " pending event " + index)
-                            .containsExactly(livePendingBefore.get(index));
-                }
-                assertThat(coreFactMaterializerThreadCount()).as(label)
-                        .isEqualTo(materializerThreadsBefore);
-            });
-        }
-    }
-
-    @Test
-    void validPendingOutboxFollowedByCorruptMatcherSectionStartsNoRecoveryConsumer() {
-        byte[] control = pendingOutboxSnapshot(88);
+    void corruptMatcherSectionStartsNoRecoveryConsumer() {
+        byte[] control = populatedSnapshot(88);
         long threadsBefore = recoveryConsumerThreadCount();
         byte[] corrupted = mutateSectionPayloadInt(control, 5, 0, Integer.MAX_VALUE);
 
@@ -324,7 +269,7 @@ class CoreStateSnapshotCodecTest {
 
     @Test
     void accountLanesRestoreWhileEveryConsumerIsPassiveThenOneActivationStartsAll() {
-        byte[] control = pendingOutboxSnapshot(89);
+        byte[] control = populatedSnapshot(89);
         AtomicReference<CoreProbeState.RestoreActivationState> beforeActivation = new AtomicReference<>();
         SectionedCoreSnapshotParser.setBeforeActivationObserverForTest(state ->
                 beforeActivation.set(state.restoreActivationState()));
@@ -339,7 +284,7 @@ class CoreStateSnapshotCodecTest {
 
     @Test
     void passiveCandidateConstructionFailureClosesEveryResourceWithoutStartingConsumers() {
-        byte[] control = pendingOutboxSnapshot(90);
+        byte[] control = populatedSnapshot(90);
         AtomicReference<CoreProbeState> candidate = new AtomicReference<>();
         long threadsBefore = recoveryConsumerThreadCount();
         SectionedCoreSnapshotParser.setBeforeActivationObserverForTest(state -> {
@@ -352,9 +297,6 @@ class CoreStateSnapshotCodecTest {
                     .hasMessageContaining("injected passive candidate failure");
             assertThat(candidate.get()).isNotNull();
             assertThat(candidate.get().restoreActivationState().allPassive()).isTrue();
-            assertThatThrownBy(candidate.get().exportState()::assertHealthy)
-                    .isInstanceOf(IllegalStateException.class)
-                    .hasMessageContaining("closed");
             assertThat(recoveryConsumerThreadCount()).isEqualTo(threadsBefore);
         } finally {
             SectionedCoreSnapshotParser.setBeforeActivationObserverForTest(null);
@@ -394,9 +336,9 @@ class CoreStateSnapshotCodecTest {
             assertThat(manifest.clusterPosition()).isEqualTo(5_678);
             assertThat(manifest.sourceSequenceDigest()).isNotZero();
             assertThat(manifest.outboxAcknowledgedSequence()).isZero();
-            assertThat(manifest.outboxNextSequence()).isEqualTo(2);
-            assertThat(manifest.outboxPendingCount()).isEqualTo(1);
-            assertThat(manifest.outboxPendingDigest()).isNotZero();
+            assertThat(manifest.outboxNextSequence()).isEqualTo(1);
+            assertThat(manifest.outboxPendingCount()).isZero();
+            assertThat(manifest.outboxPendingDigest()).isZero();
             assertThat(manifest.matcherSequence()).isNotNegative();
             assertThat(manifest.businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
             assertThat(manifest.forkGitSha()).isEqualTo(MatcherSnapshot.FORK_GIT_SHA);
@@ -436,10 +378,6 @@ class CoreStateSnapshotCodecTest {
         mismatches.put("instrument registry hash", mutateHeaderLong(snapshot, 194));
         mismatches.put("active order hash", mutateHeaderLong(snapshot, 202));
         mismatches.put("source sequence digest", mutateHeaderLong(snapshot, 210));
-        mismatches.put("outbox acknowledged sequence", mutateHeaderLong(snapshot, 218));
-        mismatches.put("outbox next sequence", mutateHeaderLong(snapshot, 226));
-        mismatches.put("outbox pending count", mutateHeaderInt(snapshot, 234));
-        mismatches.put("outbox pending digest", mutateHeaderLong(snapshot, 238));
         mismatches.put("matcher config", mutateHeaderLong(snapshot, 246));
         mismatches.put("fork identity", mutateHeaderByte(snapshot, 254));
         mismatches.put("artifact identity", mutateHeaderByte(snapshot, 294));
@@ -500,7 +438,7 @@ class CoreStateSnapshotCodecTest {
                 CoreRiskState.empty(), CoreTreasuryState.empty());
     }
 
-    private static byte[] pendingOutboxSnapshot(long sequence) {
+    private static byte[] populatedSnapshot(long sequence) {
         CoreMessage adjustment = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ADJUST_BALANCE,
                 new UUID(0, sequence), ProductLine.SPOT, CommandSource.GATEWAY, sequence, 1, 7,
                 1_000, sequence),
@@ -591,83 +529,14 @@ class CoreStateSnapshotCodecTest {
         throw new AssertionError("section not found: " + targetSectionId);
     }
 
-    private static byte[] mutateOutboxEvent(byte[] snapshot, OutboxMutation mutation) {
-        byte[] mutated = snapshot.clone();
-        ByteBuffer buffer = ByteBuffer.wrap(mutated).order(ByteOrder.LITTLE_ENDIAN);
-        buffer.position(ENVELOPE_LENGTH);
-        while (buffer.hasRemaining()) {
-            int sectionId = buffer.getInt();
-            int sectionLength = buffer.getInt();
-            int sectionOffset = buffer.position();
-            if (sectionId == 4) {
-                int eventCount = buffer.getInt(sectionOffset + Long.BYTES * 2);
-                if (eventCount < 1) throw new AssertionError("snapshot outbox is empty");
-                int eventLengthOffset = sectionOffset + Long.BYTES * 2 + Integer.BYTES * 2;
-                int eventLength = buffer.getInt(eventLengthOffset);
-                int eventOffset = eventLengthOffset + Integer.BYTES;
-                if (eventLength < CoreProtocol.HEADER_LENGTH
-                        || eventOffset + eventLength > sectionOffset + sectionLength) {
-                    throw new AssertionError("invalid encoded snapshot outbox event");
-                }
-                int eventPayloadOffset = eventOffset + CoreProtocol.HEADER_LENGTH;
-                switch (mutation) {
-                    case ENVELOPE_PRODUCT_LINE -> mutated[eventOffset + 7] =
-                            (byte) ProductLineWireCode.encode(ProductLine.OPTION);
-                    case NESTED_PRODUCT_LINE -> {
-                        int commandPayloadLength = buffer.getInt(eventPayloadOffset + 56);
-                        int usersCountOffset = eventPayloadOffset + 60 + commandPayloadLength;
-                        int userCount = buffer.getInt(usersCountOffset);
-                        if (userCount < 1) throw new AssertionError("Core Fact has no changed user");
-                        int userLength = buffer.getInt(usersCountOffset + Integer.BYTES);
-                        int userOffset = usersCountOffset + Integer.BYTES * 2;
-                        if (userLength < Integer.BYTES * 2
-                                || userOffset + userLength > eventOffset + eventLength) {
-                            throw new AssertionError("invalid changed user encoding");
-                        }
-                        buffer.putInt(userOffset + Integer.BYTES,
-                                ProductLineWireCode.encode(ProductLine.OPTION));
-                    }
-                    case COMMAND_ID -> buffer.putLong(eventOffset + 16,
-                            Math.addExact(buffer.getLong(eventOffset + 16), 1));
-                    case SOURCE_SEQUENCE -> buffer.putLong(eventOffset + 40,
-                            Math.addExact(buffer.getLong(eventOffset + 40), 1));
-                    case COMMAND_TYPE -> buffer.putInt(eventPayloadOffset + 44,
-                            CoreMessageType.PROBE_INCREMENT.wireCode());
-                    case RESERVATION_LENGTH -> buffer.putInt(
-                            eventLengthOffset - Integer.BYTES, eventLength - 1);
-                }
-                return rewriteOuterChecksum(mutated);
-            }
-            buffer.position(Math.addExact(sectionOffset, sectionLength));
-        }
-        throw new AssertionError("snapshot outbox section not found");
-    }
-
-    private static long coreFactMaterializerThreadCount() {
-        return Thread.getAllStackTraces().keySet().stream()
-                .filter(Thread::isAlive)
-                .filter(thread -> thread.getName().equals("core-fact-materializer"))
-                .count();
-    }
-
     private static long recoveryConsumerThreadCount() {
         return Thread.getAllStackTraces().keySet().stream()
                 .filter(Thread::isAlive)
                 .map(Thread::getName)
-                .filter(name -> name.equals("core-fact-materializer")
-                        || name.startsWith("core-commit-projector-")
+                .filter(name -> name.startsWith("core-commit-projector-")
                         || name.contains("matching-engine") || name.contains("risk-engine")
                         || name.contains("ExchangeCore"))
                 .count();
-    }
-
-    private enum OutboxMutation {
-        ENVELOPE_PRODUCT_LINE,
-        NESTED_PRODUCT_LINE,
-        COMMAND_ID,
-        SOURCE_SEQUENCE,
-        COMMAND_TYPE,
-        RESERVATION_LENGTH
     }
 
     private static byte[] rewriteOuterChecksum(byte[] snapshot) {

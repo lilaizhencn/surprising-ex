@@ -38,6 +38,12 @@ public class LinearPerpetualCoreBenchmark {
         return state.scenario.run();
     }
 
+    /** Trading-owner commit path after Core-Fact/export materialization was removed. */
+    @Benchmark
+    public long tradingCommitFullFill(TradingCommitState state) {
+        return state.scenario.run();
+    }
+
     @Benchmark
     public long cancelRestingOrder(CancelState state) {
         return state.scenario.run();
@@ -277,6 +283,14 @@ public class LinearPerpetualCoreBenchmark {
     }
 
     @State(Scope.Thread)
+    public static class TradingCommitState extends InvocationState {
+        @Override
+        LinearPerpetualBenchmarkSupport.Scenario createScenario() {
+            return LinearPerpetualBenchmarkSupport.fullTakerFill(accountLanes);
+        }
+    }
+
+    @State(Scope.Thread)
     public static class CancelState extends InvocationState {
         @Override
         LinearPerpetualBenchmarkSupport.Scenario createScenario() {
@@ -477,10 +491,6 @@ public class LinearPerpetualCoreBenchmark {
         @Param("256")
         public int maxInFlight;
 
-        /** Explicitly exercises bounded Fact Frame reuse under the fixed admission window. */
-        @Param("4096")
-        public int factFramePoolCapacity;
-
         @Param("16384")
         public int operationsPerInvocation;
 
@@ -497,12 +507,7 @@ public class LinearPerpetualCoreBenchmark {
                 throw new IllegalArgumentException(
                         "matching engine count must be a power of two in [1,64] and in-flight must be 256");
             }
-            if (factFramePoolCapacity < maxInFlight) {
-                throw new IllegalArgumentException("Fact Frame pool must cover fixed in-flight capacity");
-            }
             System.setProperty("surprising.aeron.matching-engines", Integer.toString(matchingEngines));
-            System.setProperty("surprising.aeron.fact-frame-pool-capacity",
-                    Integer.toString(factFramePoolCapacity));
             LinearPerpetualBenchmarkSupport.configureAccountLanes(accountLanes);
             var config = LinearPerpetualScaleConfig.scale(listedSymbols, activeSymbols,
                     maxPositionsPerUser, maxOpenOrdersPerUser,

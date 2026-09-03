@@ -109,19 +109,6 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
         }
     }
 
-    void observe(com.surprising.aeron.service.state.TradingRuntimeState.PreparedFactFrame frame,
-                 long exportSequence) {
-        if (frame == null || exportSequence <= 0 || visitingExportSequence != 0) {
-            throw new IllegalArgumentException("invalid deferred fact retention visit");
-        }
-        visitingExportSequence = exportSequence;
-        try {
-            frame.visitTerminalValues(this);
-        } finally {
-            visitingExportSequence = 0;
-        }
-    }
-
     @Override
     public void order(OrderRuntime value) { observeOrder(value, visitingExportSequence); }
 
