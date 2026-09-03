@@ -7,7 +7,6 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.cloud.openfeign.EnableFeignClients;
-import org.springframework.context.annotation.ImportRuntimeHints;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication(scanBasePackages = "com.surprising")
@@ -15,7 +14,6 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableScheduling
 @EnableFeignClients(clients = InstrumentRpcApi.class)
 @EnableConfigurationProperties(FundingProperties.class)
-@ImportRuntimeHints(FundingRuntimeHints.class)
 public class SurprisingFundingApplication {
 
     public static void main(String[] args) {

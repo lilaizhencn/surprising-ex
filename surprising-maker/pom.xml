@@ -86,13 +86,6 @@
                     <mainClass>com.surprising.marketmaker.provider.SurprisingMarketMakerApplication</mainClass>
                 </configuration>
             </plugin>
-            <plugin>
-                <groupId>org.graalvm.buildtools</groupId>
-                <artifactId>native-maven-plugin</artifactId>
-                <configuration>
-                    <mainClass>com.surprising.marketmaker.provider.SurprisingMarketMakerApplication</mainClass>
-                </configuration>
-            </plugin>
         </plugins>
     </build>
 </project>

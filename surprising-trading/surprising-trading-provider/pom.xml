@@ -92,14 +92,6 @@
                     <mainClass>com.surprising.trading.SurprisingTradingApplication</mainClass>
                 </configuration>
             </plugin>
-            <plugin>
-                <groupId>org.graalvm.buildtools</groupId>
-                <artifactId>native-maven-plugin</artifactId>
-                <configuration>
-                    <mainClass>com.surprising.trading.SurprisingTradingApplication</mainClass>
-                    <buildArgs><buildArg>-H:DeadlockWatchdogInterval=60</buildArg></buildArgs>
-                </configuration>
-            </plugin>
         </plugins>
     </build>
 </project>

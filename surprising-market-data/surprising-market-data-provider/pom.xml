@@ -114,13 +114,6 @@
                     <mainClass>com.surprising.marketdata.SurprisingMarketDataApplication</mainClass>
                 </configuration>
             </plugin>
-            <plugin>
-                <groupId>org.graalvm.buildtools</groupId>
-                <artifactId>native-maven-plugin</artifactId>
-                <configuration>
-                    <mainClass>com.surprising.marketdata.SurprisingMarketDataApplication</mainClass>
-                </configuration>
-            </plugin>
         </plugins>
     </build>
 </project>

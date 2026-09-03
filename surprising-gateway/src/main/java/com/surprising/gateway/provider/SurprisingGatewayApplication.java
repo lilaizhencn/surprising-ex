@@ -5,7 +5,6 @@ import com.surprising.websocket.provider.config.WebSocketProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.context.annotation.ImportRuntimeHints;
 import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
@@ -16,7 +15,6 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableConfigurationProperties({GatewayProperties.class, WebSocketProperties.class})
 @EnableKafka
 @EnableScheduling
-@ImportRuntimeHints(GatewayRuntimeHints.class)
 public class SurprisingGatewayApplication {
 
     public static void main(String[] args) {

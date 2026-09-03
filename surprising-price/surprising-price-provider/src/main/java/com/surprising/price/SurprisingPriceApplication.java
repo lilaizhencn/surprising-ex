@@ -1,8 +1,6 @@
 package com.surprising.price;
 
-import com.surprising.price.index.IndexPriceRuntimeHints;
 import com.surprising.price.index.config.IndexPriceProperties;
-import com.surprising.price.mark.MarkPriceRuntimeHints;
 import com.surprising.price.mark.config.MarkPriceProperties;
 import com.surprising.price.consumer.MarkPriceConsumerConfiguration;
 import com.surprising.price.consumer.MarkPriceKafkaConsumer;
@@ -14,7 +12,6 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.cloud.openfeign.EnableFeignClients;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.FilterType;
-import org.springframework.context.annotation.ImportRuntimeHints;
 import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import jakarta.annotation.PostConstruct;
@@ -30,7 +27,6 @@ import org.slf4j.LoggerFactory;
 @EnableKafka
 @EnableScheduling
 @EnableConfigurationProperties({IndexPriceProperties.class, MarkPriceProperties.class})
-@ImportRuntimeHints({IndexPriceRuntimeHints.class, MarkPriceRuntimeHints.class})
 public class SurprisingPriceApplication {
 
     private static final Logger log = LoggerFactory.getLogger(SurprisingPriceApplication.class);

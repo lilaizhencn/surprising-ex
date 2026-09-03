@@ -126,13 +126,6 @@
                     <mainClass>com.surprising.gateway.provider.SurprisingGatewayApplication</mainClass>
                 </configuration>
             </plugin>
-            <plugin>
-                <groupId>org.graalvm.buildtools</groupId>
-                <artifactId>native-maven-plugin</artifactId>
-                <configuration>
-                    <mainClass>com.surprising.gateway.provider.SurprisingGatewayApplication</mainClass>
-                </configuration>
-            </plugin>
         </plugins>
     </build>
 </project>
