@@ -491,9 +491,11 @@ public class LinearPerpetualCoreBenchmark {
 
         @Setup(Level.Trial)
         public void setUpTrial() {
-            if (matchingEngines != 1 || maxInFlight != 256) {
+            if (matchingEngines < 1 || matchingEngines > 64
+                    || (matchingEngines & (matchingEngines - 1)) != 0
+                    || maxInFlight != 256) {
                 throw new IllegalArgumentException(
-                        "qualification requires one matcher shard and exactly 256 in-flight");
+                        "matching engine count must be a power of two in [1,64] and in-flight must be 256");
             }
             if (factFramePoolCapacity < maxInFlight) {
                 throw new IllegalArgumentException("Fact Frame pool must cover fixed in-flight capacity");
