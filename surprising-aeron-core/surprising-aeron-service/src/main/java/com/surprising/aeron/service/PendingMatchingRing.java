@@ -14,6 +14,11 @@ final class PendingMatchingRing {
     private final int[] nextSlots;
     private final int[] previousSlots;
     private final int[] freeSlots;
+    private final int[] submissionShards;
+    private final int[] nextSubmissionSlots;
+    private final int[] previousSubmissionSlots;
+    private final int[] submissionHeads;
+    private final int[] submissionTails;
     private final LongIntHashMap slotsBySequence;
     private final Map<UUID, PendingMatching> entriesByCommandId;
     private final LongIntHashMap pendingByUser;
@@ -22,10 +27,11 @@ final class PendingMatchingRing {
     private int freeHead;
     private int size;
 
-    PendingMatchingRing(int requestedCapacity) {
+    PendingMatchingRing(int requestedCapacity, int matcherShardCount) {
         if (requestedCapacity <= 0 || requestedCapacity > 1 << 30) {
             throw new IllegalArgumentException("pending matching capacity must be positive");
         }
+        if (matcherShardCount <= 0) throw new IllegalArgumentException("matcher shard count must be positive");
         int capacity = 1;
         while (capacity < requestedCapacity) capacity <<= 1;
         entries = new PendingMatching[capacity];
@@ -33,8 +39,18 @@ final class PendingMatchingRing {
         nextSlots = new int[capacity];
         previousSlots = new int[capacity];
         freeSlots = new int[capacity];
+        submissionShards = new int[capacity];
+        nextSubmissionSlots = new int[capacity];
+        previousSubmissionSlots = new int[capacity];
+        submissionHeads = new int[matcherShardCount];
+        submissionTails = new int[matcherShardCount];
         java.util.Arrays.fill(nextSlots, -1);
         java.util.Arrays.fill(previousSlots, -1);
+        java.util.Arrays.fill(submissionShards, -1);
+        java.util.Arrays.fill(nextSubmissionSlots, -1);
+        java.util.Arrays.fill(previousSubmissionSlots, -1);
+        java.util.Arrays.fill(submissionHeads, -1);
+        java.util.Arrays.fill(submissionTails, -1);
         for (int index = 0; index < capacity - 1; index++) freeSlots[index] = index + 1;
         freeSlots[capacity - 1] = -1;
         slotsBySequence = new LongIntHashMap(capacity);
@@ -102,6 +118,7 @@ final class PendingMatchingRing {
         else previousSlots[next] = previous;
         previousSlots[entryIndex] = -1;
         nextSlots[entryIndex] = -1;
+        removeFromSubmissionOrder(entryIndex);
         freeSlots[entryIndex] = freeHead;
         freeHead = entryIndex;
         removeIndexes(removed);
@@ -121,15 +138,38 @@ final class PendingMatchingRing {
         return null;
     }
 
-    PendingMatching firstCompletedUnsubmittedPlaceAdmission(LongIntHashMap rejections) {
-        for (int slot = head; slot != -1; slot = nextSlots[slot]) {
-            PendingMatching pending = entries[slot];
-            if (pending != null && pending.placeAdmission() != null && !pending.isMatchingSubmitted()
-                    && pending.placeAdmission().complete() && !rejections.containsKey(pending.sequence())) {
-                return pending;
-            }
+    void registerSubmission(long sequence, int matcherShard) {
+        if (matcherShard < 0 || matcherShard >= submissionHeads.length) {
+            throw new IllegalArgumentException("invalid matcher shard");
         }
-        return null;
+        int encodedIndex = slotsBySequence.get(sequence);
+        if (encodedIndex == 0) throw new IllegalStateException("pending matching sequence is missing");
+        int index = encodedIndex - 1;
+        int registeredShard = submissionShards[index];
+        if (registeredShard == matcherShard) return;
+        if (registeredShard >= 0) throw new IllegalStateException("matching submission shard changed");
+        int tailSlot = submissionTails[matcherShard];
+        submissionShards[index] = matcherShard;
+        previousSubmissionSlots[index] = tailSlot;
+        nextSubmissionSlots[index] = -1;
+        if (tailSlot < 0) submissionHeads[matcherShard] = index;
+        else nextSubmissionSlots[tailSlot] = index;
+        submissionTails[matcherShard] = index;
+    }
+
+    boolean isSubmissionHead(long sequence, int matcherShard) {
+        int encodedIndex = slotsBySequence.get(sequence);
+        return encodedIndex != 0 && submissionHeads[matcherShard] == encodedIndex - 1;
+    }
+
+    PendingMatching submissionHead(int matcherShard) {
+        int index = submissionHeads[matcherShard];
+        return index < 0 ? null : entries[index];
+    }
+
+    void completeSubmission(long sequence) {
+        int encodedIndex = slotsBySequence.get(sequence);
+        if (encodedIndex != 0) removeFromSubmissionOrder(encodedIndex - 1);
     }
 
     PendingMatching findByCommandId(UUID commandId) {
@@ -173,6 +213,20 @@ final class PendingMatchingRing {
         int remaining = pendingByUser.addToValue(userId, -1);
         if (remaining == 0) pendingByUser.removeKey(userId);
         else if (remaining < 0) throw new IllegalStateException("pending matching user count underflow");
+    }
+
+    private void removeFromSubmissionOrder(int index) {
+        int shard = submissionShards[index];
+        if (shard < 0) return;
+        int previous = previousSubmissionSlots[index];
+        int next = nextSubmissionSlots[index];
+        if (previous < 0) submissionHeads[shard] = next;
+        else nextSubmissionSlots[previous] = next;
+        if (next < 0) submissionTails[shard] = previous;
+        else previousSubmissionSlots[next] = previous;
+        submissionShards[index] = -1;
+        previousSubmissionSlots[index] = -1;
+        nextSubmissionSlots[index] = -1;
     }
 
     private void requireAvailableCommandId(PendingMatching pending, PendingMatching replaced) {

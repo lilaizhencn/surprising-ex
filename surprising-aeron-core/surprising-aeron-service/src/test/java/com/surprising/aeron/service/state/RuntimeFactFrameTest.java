@@ -290,7 +290,7 @@ class RuntimeFactFrameTest {
         assertThat(index.orders().iterator().next().orderId()).isEqualTo(change.orderId());
         assertThat(projection.freeze(1).orders().get(71L).orderId()).isEqualTo(change.orderId());
         assertThat(patch.materializeCoreFactFragment().changedOrders())
-                .singleElement().extracting(CoreOrderState::orderId)
+                .singleElement().extracting(com.surprising.aeron.protocol.CoreOrderStateView::orderId)
                 .isEqualTo(order.orderId());
     }
 

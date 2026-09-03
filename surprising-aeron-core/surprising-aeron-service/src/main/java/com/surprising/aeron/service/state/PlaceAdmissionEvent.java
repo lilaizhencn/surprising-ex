@@ -26,6 +26,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     private final RuntimeIdentityRegistry.PreparedClientKey preparedClientKey;
     private final int symbolId;
     private final int assetId;
+    private final int laneId;
     private final TradingRuntimeState runtime;
     private CoreMatchingOrder matchingOrder;
     private UserRuntime admittedUser;
@@ -38,9 +39,10 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     PlaceAdmissionEvent(long coreSequence, long userId, ResolvedPlaceOrder order, UUID commandId,
                         long openInterestSteps, RuntimeOrderAdmission.AdmissionIdentity identity,
                         RuntimeIdentityRegistry.PreparedClientKey preparedClientKey,
-                        int symbolId, int assetId, TradingRuntimeState runtime) {
+                        int symbolId, int assetId, int laneId, TradingRuntimeState runtime) {
         if (coreSequence <= 0 || userId <= 0 || order == null || commandId == null || openInterestSteps < 0
-                || identity == null || preparedClientKey == null || symbolId < 0 || assetId < 0 || runtime == null) {
+                || identity == null || preparedClientKey == null || symbolId < 0 || assetId < 0
+                || laneId < 0 || runtime == null) {
             throw new IllegalArgumentException("invalid place admission event");
         }
         this.coreSequence = coreSequence;
@@ -52,6 +54,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         this.preparedClientKey = preparedClientKey;
         this.symbolId = symbolId;
         this.assetId = assetId;
+        this.laneId = laneId;
         this.runtime = runtime;
     }
 
@@ -82,6 +85,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         }
         runtime.recordAdmissionLaneOperation(lane, System.nanoTime() - startedNanos);
         COMPLETED.setRelease(this, true);
+        runtime.publishPlaceAdmissionReady(laneId, coreSequence);
     }
 
     public boolean complete() {

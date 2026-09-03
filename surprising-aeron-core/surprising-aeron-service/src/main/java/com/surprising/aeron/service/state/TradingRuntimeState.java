@@ -37,6 +37,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     private final AccountLaneState[] accountLanes;
     private final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] laneUserScratch;
     private final SettlementLaneWorker[] laneWorkers;
+    private final PlaceAdmissionReadyQueue[] placeAdmissionReadyQueues;
     private final LaneMutationTask[] laneMutationTasks;
     private final long[] laneMutationStartedNanosScratch;
     private final Object[] laneMutationResultsScratch;
@@ -93,8 +94,10 @@ public final class TradingRuntimeState implements AutoCloseable {
     private final LaneBalancePatches[] patchBalancesBeforeByLane;
     private final LaneLongCaptures<PatchReservationBefore>[] patchReservationsBeforeByLane;
     private final LaneLongCaptures<PatchOrderBefore>[] patchOrdersBeforeByLane;
+    private final LaneLongCaptures<PositionRuntime>[] patchPositionsBeforeByLane;
     private final LaneClientOrderCaptures[] patchClientOrdersBeforeByLane;
-    private RuntimeFactFrame.Builder activePatchBuilder = RuntimeFactFrame.builder(productLine);
+    private final RuntimeFactFrameBuilderPool factFrameBuilders;
+    private RuntimeFactFrame.Builder activePatchBuilder;
     private boolean orderBatchMutationScope;
     private ConcurrentHashMap<Long, PatchBefore<LiquidationRuntime>> patchLiquidationsBefore =
             new ConcurrentHashMap<>();
@@ -134,6 +137,9 @@ public final class TradingRuntimeState implements AutoCloseable {
     public TradingRuntimeState(LaneTopology topology) {
         if (topology == null) throw new IllegalArgumentException("lane topology is required");
         this.topology = topology;
+        this.factFrameBuilders = new RuntimeFactFrameBuilderPool(productLine,
+                Integer.getInteger("surprising.aeron.fact-frame-pool-capacity", topology.matcherWindowSize()));
+        this.activePatchBuilder = factFrameBuilders.acquire();
         this.accountLanes = new AccountLaneState[topology.accountLaneCount()];
         @SuppressWarnings("unchecked")
         LaneLongCaptures<UserRuntime>[] userPatches =
@@ -149,12 +155,17 @@ public final class TradingRuntimeState implements AutoCloseable {
         LaneLongCaptures<PatchOrderBefore>[] orderPatches =
                 (LaneLongCaptures<PatchOrderBefore>[]) new LaneLongCaptures<?>[topology.accountLaneCount()];
         this.patchOrdersBeforeByLane = orderPatches;
+        @SuppressWarnings("unchecked")
+        LaneLongCaptures<PositionRuntime>[] positionPatches =
+                (LaneLongCaptures<PositionRuntime>[]) new LaneLongCaptures<?>[topology.accountLaneCount()];
+        this.patchPositionsBeforeByLane = positionPatches;
         this.patchClientOrdersBeforeByLane = new LaneClientOrderCaptures[topology.accountLaneCount()];
         this.publishedLaneChanges = new PublishedLaneChanges[topology.accountLaneCount()];
         org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] routedUsers =
                 new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[topology.accountLaneCount()];
         this.laneUserScratch = routedUsers;
         this.laneWorkers = new SettlementLaneWorker[topology.accountLaneCount()];
+        this.placeAdmissionReadyQueues = new PlaceAdmissionReadyQueue[topology.accountLaneCount()];
         this.laneMutationTasks = new LaneMutationTask[topology.accountLaneCount()];
         this.laneMutationStartedNanosScratch = new long[topology.accountLaneCount()];
         this.laneMutationResultsScratch = new Object[topology.accountLaneCount()];
@@ -167,12 +178,14 @@ public final class TradingRuntimeState implements AutoCloseable {
         this.publishedLaneFundsHashes = new long[topology.accountLaneCount()];
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             accountLanes[laneId] = new AccountLaneState(laneId, topology.accountLaneQueueCapacity());
+            placeAdmissionReadyQueues[laneId] = new PlaceAdmissionReadyQueue(topology.accountLaneQueueCapacity());
             publishLaneHashes(accountLanes[laneId]);
             laneUserScratch[laneId] = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList(4);
             patchUsersBeforeByLane[laneId] = new LaneLongCaptures<>();
             patchBalancesBeforeByLane[laneId] = new LaneBalancePatches();
             patchReservationsBeforeByLane[laneId] = new LaneLongCaptures<>();
             patchOrdersBeforeByLane[laneId] = new LaneLongCaptures<>();
+            patchPositionsBeforeByLane[laneId] = new LaneLongCaptures<>();
             patchClientOrdersBeforeByLane[laneId] = new LaneClientOrderCaptures();
             publishedLaneChanges[laneId] = new PublishedLaneChanges();
         }
@@ -1146,11 +1159,23 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         int laneId = topology.accountLaneId(userId);
         PlaceAdmissionEvent event = new PlaceAdmissionEvent(coreSequence, userId, order, commandId,
-                openInterestSteps, identity, preparedClientKey, symbolId, assetId, this);
+                openInterestSteps, identity, preparedClientKey, symbolId, assetId, laneId, this);
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
                 accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
         laneWorkers[laneId].submit(event);
         return event;
+    }
+
+    void publishPlaceAdmissionReady(int laneId, long coreSequence) {
+        placeAdmissionReadyQueues[laneId].publish(coreSequence);
+    }
+
+    public long pollPlaceAdmissionReady(int laneId) {
+        assertOwner();
+        if (laneId < 0 || laneId >= placeAdmissionReadyQueues.length) {
+            throw new IllegalArgumentException("invalid Account Lane id");
+        }
+        return placeAdmissionReadyQueues[laneId].poll();
     }
 
     public CoreMatchingOrder collectPlaceAdmission(PlaceAdmissionEvent event) {
@@ -1787,6 +1812,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         if (productLine == null || revision < 0) throw new IllegalArgumentException("invalid runtime metadata");
         this.productLine = productLine;
+        factFrameBuilders.productLine(productLine);
+        activePatchBuilder.reset(productLine);
         this.revision = revision;
     }
 
@@ -2966,56 +2993,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         return !changedPositions.isEmpty();
     }
 
-    LongHashSet changedLiquidations() {
-        assertOwner();
-        return new LongHashSet(changedLiquidations);
-    }
-
-    IntHashSet changedMarkPrices() {
-        assertOwner();
-        return new IntHashSet(changedMarkPrices);
-    }
-
-    LongHashSet changedRiskSnapshots() {
-        assertOwner();
-        return new LongHashSet(changedRiskSnapshots);
-    }
-
-    IntHashSet changedRiskScans() {
-        assertOwner();
-        return new IntHashSet(changedRiskScans);
-    }
-
-    TreeSet<String> changedInstruments() {
-        assertOwner();
-        return new TreeSet<>(changedInstruments);
-    }
-
-    TreeSet<CoreLeverageKey> changedLeverages() {
-        assertOwner();
-        return new TreeSet<>(changedLeverages);
-    }
-
-    LongHashSet changedAlgoOrders() {
-        assertOwner();
-        return new LongHashSet(changedAlgoOrders);
-    }
-
-    TreeSet<CoreCancelAllAfterKey> changedCancelAllAfterTimers() {
-        assertOwner();
-        return new TreeSet<>(changedCancelAllAfterTimers);
-    }
-
-    LongHashSet changedTriggerOrders() {
-        assertOwner();
-        return new LongHashSet(changedTriggerOrders);
-    }
-
-    LongHashSet changedFeePolicies() {
-        assertOwner();
-        return new LongHashSet(changedFeePolicies);
-    }
-
     public PreparedFactFrame prepareFactFrame(long sequence,
                                                   RuntimeIdentityRegistry identities,
                                                   long previousRevision,
@@ -3086,13 +3063,17 @@ public final class TradingRuntimeState implements AutoCloseable {
                 }
             }
         }
-        builder.forEachCapturedPosition((laneId, positionKey, beforeValue) -> {
-            PositionRuntime after = position(positionKey);
-            long userId = after != null ? after.userId() : beforeValue == null ? 0 : beforeValue.userId();
-            if (userId != 0 && !java.util.Objects.equals(beforeValue, after)) {
-                builder.recordPosition(topology.accountLaneId(userId), positionKey, beforeValue, after);
+        for (LaneLongCaptures<PositionRuntime> capturedPositions : patchPositionsBeforeByLane) {
+            for (int index = 0; index < capturedPositions.size(); index++) {
+                long positionKey = capturedPositions.key(index);
+                PositionRuntime beforeValue = capturedPositions.value(index);
+                PositionRuntime after = position(positionKey);
+                long userId = after != null ? after.userId() : beforeValue == null ? 0 : beforeValue.userId();
+                if (userId != 0 && !java.util.Objects.equals(beforeValue, after)) {
+                    builder.recordPosition(topology.accountLaneId(userId), positionKey, beforeValue, after);
+                }
             }
-        });
+        }
         patchLiquidationsBefore.forEach((liquidationId, before) -> {
             LiquidationRuntime after = liquidation(liquidationId);
             LiquidationRuntime beforeValue = before.value();
@@ -3172,27 +3153,38 @@ public final class TradingRuntimeState implements AutoCloseable {
         long changedLaneMask = builder.changedLaneMask();
         builder.laneMask(committedLaneMask == 0 ? changedLaneMask : committedLaneMask);
         RuntimeFactFrame.Builder completedBuilder = builder;
-        activePatchBuilder = RuntimeFactFrame.builder(productLine);
+        activePatchBuilder = factFrameBuilders.acquire();
         return new PreparedFactFrame(completedBuilder, identities, new RuntimeFactFrame.SealMetadata(previousRevision,
                 Math.subtractExact(revision, totalPendingReservations), beforeBusinessStateHash,
                 businessStateHash, beforeFundsStateHash, fundsStateHash, builder.laneMask(), null,
-                externalAdjustment));
+                externalAdjustment), factFrameBuilders);
     }
 
     public static final class PreparedFactFrame {
         private final RuntimeFactFrame.Builder builder;
         private final RuntimeIdentityRegistry identities;
-        private final RuntimeFactFrame.SealMetadata metadata;
+        private RuntimeFactFrame.SealMetadata metadata;
+        private final RuntimeFactFrameBuilderPool pool;
         private RuntimeFactFrame materialized;
+        private int references = 1;
+        private boolean materializationReference;
+        private boolean materializationReleased;
+        private boolean recycled;
 
         public PreparedFactFrame(RuntimeFactFrame.Builder builder, RuntimeIdentityRegistry identities,
                                  RuntimeFactFrame.SealMetadata metadata) {
+            this(builder, identities, metadata, null);
+        }
+
+        PreparedFactFrame(RuntimeFactFrame.Builder builder, RuntimeIdentityRegistry identities,
+                          RuntimeFactFrame.SealMetadata metadata, RuntimeFactFrameBuilderPool pool) {
             if (builder == null || identities == null || metadata == null) {
                 throw new IllegalArgumentException("invalid prepared commit");
             }
             this.builder = builder;
             this.identities = identities;
             this.metadata = metadata;
+            this.pool = pool;
         }
 
         public RuntimeFactFrame.Builder builder() { return builder; }
@@ -3211,11 +3203,13 @@ public final class TradingRuntimeState implements AutoCloseable {
             return builder.seal(changes, businessStateHash, fundsStateHash);
         }
 
-        public PreparedFactFrame withFactMetadata(RuntimeFactFrame.CoreFactMetadata factMetadata) {
-            return new PreparedFactFrame(builder, identities, new RuntimeFactFrame.SealMetadata(
+        public synchronized PreparedFactFrame withFactMetadata(RuntimeFactFrame.CoreFactMetadata factMetadata) {
+            if (materialized != null) throw new IllegalStateException("Fact Frame is already materialized");
+            metadata = new RuntimeFactFrame.SealMetadata(
                     metadata.beforeRevision(), metadata.afterRevision(), metadata.beforeBusinessStateHash(),
                     metadata.businessStateHash(), metadata.beforeFundsStateHash(), metadata.fundsStateHash(),
-                    metadata.laneMask(), factMetadata, metadata.externalAdjustment()));
+                    metadata.laneMask(), factMetadata, metadata.externalAdjustment());
+            return this;
         }
 
         public RuntimeFundsDelta fundsDelta() {
@@ -3226,18 +3220,52 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (materialized != null) return materialized;
             RuntimeFactFrame.PreparedChanges changes = prepareChanges();
             materialized = seal(changes, metadata.businessStateHash(), metadata.fundsStateHash());
+            if (materializationReference && !materializationReleased) {
+                materializationReleased = true;
+                releaseReference();
+            }
             return materialized;
         }
 
-        public long sequence() { return builder.sequence(); }
-        public long revision() { return metadata.afterRevision(); }
-        public int coreFactItemCount() { return builder.coreFactItemCount(); }
-        public RuntimeFactFrame.CoreFactMetadata coreFactMetadata() { return metadata.coreFactMetadata(); }
-        public void visitTerminalValues(RuntimeFactFrame.RetentionConsumer consumer) {
-            builder.visitTerminalValues(consumer);
+        public synchronized void retainForMaterialization() {
+            if (pool == null || materializationReference || recycled) {
+                throw new IllegalStateException("invalid Fact Frame materializer retain");
+            }
+            materializationReference = true;
+            references++;
         }
-        public void visitIdentityReleases(RuntimeFactFrame.IdentityReleaseConsumer consumer) {
-            builder.visitIdentityReleases(consumer);
+
+        public synchronized void releaseOwner() {
+            releaseReference();
+        }
+
+        private void releaseReference() {
+            if (pool == null) return;
+            if (references <= 0 || recycled) throw new IllegalStateException("Fact Frame released twice");
+            references--;
+            if (references == 0) {
+                recycled = true;
+                pool.release(builder);
+            }
+        }
+
+        public synchronized long sequence() {
+            return materialized == null ? builder.sequence() : materialized.sequence();
+        }
+        public long revision() { return metadata.afterRevision(); }
+        public synchronized int coreFactItemCount() {
+            return materialized == null ? builder.coreFactItemCount() : materialized.coreFactItemCount();
+        }
+        public synchronized RuntimeFactFrame.CoreFactMetadata coreFactMetadata() {
+            return materialized == null ? metadata.coreFactMetadata() : materialized.coreFactMetadata();
+        }
+        public synchronized void visitTerminalValues(RuntimeFactFrame.RetentionConsumer consumer) {
+            if (materialized == null) builder.visitTerminalValues(consumer);
+            else materialized.visitTerminalValues(consumer);
+        }
+        public synchronized void visitIdentityReleases(RuntimeFactFrame.IdentityReleaseConsumer consumer) {
+            if (materialized == null) builder.visitIdentityReleases(consumer);
+            else materialized.visitIdentityReleases(consumer);
         }
 
     }
@@ -3308,12 +3336,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         PositionRuntime current = position(positionKey);
         if (current != null) {
             int laneId = topology.accountLaneId(current.userId());
-            return activePatchBuilder.hasPositionCheckpoint(laneId, positionKey)
-                    ? activePatchBuilder.positionBefore(laneId, positionKey) : current;
+            LaneLongCaptures<PositionRuntime> captured = patchPositionsBeforeByLane[laneId];
+            return captured.containsKey(positionKey) ? captured.get(positionKey) : current;
         }
-        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            if (activePatchBuilder.hasPositionCheckpoint(laneId, positionKey)) {
-                return activePatchBuilder.positionBefore(laneId, positionKey);
+        for (LaneLongCaptures<PositionRuntime> captured : patchPositionsBeforeByLane) {
+            if (captured.containsKey(positionKey)) {
+                return captured.get(positionKey);
             }
         }
         return null;
@@ -3346,6 +3374,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         for (LaneLongCaptures<?> captured : patchUsersBeforeByLane) captured.clear();
         for (LaneLongCaptures<?> captured : patchReservationsBeforeByLane) captured.clear();
         for (LaneLongCaptures<?> captured : patchOrdersBeforeByLane) captured.clear();
+        for (LaneLongCaptures<?> captured : patchPositionsBeforeByLane) captured.clear();
         for (LaneClientOrderCaptures captured : patchClientOrdersBeforeByLane) captured.clear();
         clearChanged(changedUsers);
         clearChanged(changedOrders);
@@ -3721,12 +3750,12 @@ public final class TradingRuntimeState implements AutoCloseable {
     private void rollbackPosition(long positionKey) {
         PositionRuntime current = position(positionKey);
         int laneId = current == null ? -1 : topology.accountLaneId(current.userId());
-        PositionRuntime before = laneId >= 0 && activePatchBuilder.hasPositionCheckpoint(laneId, positionKey)
-                ? activePatchBuilder.positionBefore(laneId, positionKey) : null;
+        PositionRuntime before = laneId >= 0 && patchPositionsBeforeByLane[laneId].containsKey(positionKey)
+                ? patchPositionsBeforeByLane[laneId].get(positionKey) : null;
         if (current == null) {
             for (int candidateLaneId = 0; candidateLaneId < accountLanes.length; candidateLaneId++) {
-                if (activePatchBuilder.hasPositionCheckpoint(candidateLaneId, positionKey)) {
-                    before = activePatchBuilder.positionBefore(candidateLaneId, positionKey);
+                if (patchPositionsBeforeByLane[candidateLaneId].containsKey(positionKey)) {
+                    before = patchPositionsBeforeByLane[candidateLaneId].get(positionKey);
                     break;
                 }
             }
@@ -3849,7 +3878,9 @@ public final class TradingRuntimeState implements AutoCloseable {
         PositionRuntime before = position(positionKey);
         long userId = before == null ? fallbackUserId : before.userId();
         if (userId > 0) {
-            activePatchBuilder.capturePositionBefore(topology.accountLaneId(userId), positionKey, before);
+            LaneLongCaptures<PositionRuntime> captured =
+                    patchPositionsBeforeByLane[topology.accountLaneId(userId)];
+            if (!captured.containsKey(positionKey)) captured.put(positionKey, before);
         }
     }
 

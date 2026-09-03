@@ -19,13 +19,12 @@ import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
-import java.util.TreeMap;
-import java.util.TreeSet;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -51,8 +50,6 @@ final class CoreExportState implements AutoCloseable {
     private final SpscTaskQueue<PendingExport> materializationQueue;
     private final Thread materializer;
     private final EventEncoder encoder;
-    private final java.util.function.Function<com.surprising.aeron.service.state.CoreOrderState,
-            com.surprising.aeron.protocol.CoreOrderStateView> orderViewFactory;
     private final AtomicReference<Throwable> materializationFailure = new AtomicReference<>();
     private volatile long submittedMaterializations;
     private volatile long completedMaterializations;
@@ -75,28 +72,19 @@ final class CoreExportState implements AutoCloseable {
     private long nextMaterializationSequence;
 
     CoreExportState() {
-        this(null, 0, 1, List.of(), null, CoreExportCodec::encodeEvent, RuntimeFactFrame::exportOrderView);
+        this(null, 0, 1, List.of(), null, CoreExportCodec::encodeEvent);
         activate();
     }
 
     CoreExportState(EventEncoder encoder) {
-        this(null, 0, 1, List.of(), null, encoder, RuntimeFactFrame::exportOrderView);
-        activate();
-    }
-
-    CoreExportState(EventEncoder encoder,
-                    java.util.function.Function<com.surprising.aeron.service.state.CoreOrderState,
-                            com.surprising.aeron.protocol.CoreOrderStateView> orderViewFactory) {
-        this(null, 0, 1, List.of(), null, encoder, orderViewFactory);
+        this(null, 0, 1, List.of(), null, encoder);
         activate();
     }
 
     private CoreExportState(ProductLine expectedProductLine,
                             long acknowledgedSequence, long nextSequence, List<CoreMessage> pending,
                             List<Integer> restoredReservedLengths,
-                            EventEncoder encoder,
-                            java.util.function.Function<com.surprising.aeron.service.state.CoreOrderState,
-                                    com.surprising.aeron.protocol.CoreOrderStateView> orderViewFactory) {
+                            EventEncoder encoder) {
         if (acknowledgedSequence < 0 || pending == null || pending.size() > MAX_PENDING_EVENTS
                 || restoredReservedLengths != null && restoredReservedLengths.size() != pending.size()) {
             throw new IllegalArgumentException("invalid export state");
@@ -109,7 +97,6 @@ final class CoreExportState implements AutoCloseable {
         this.nextSequence = nextSequence;
         this.pending = new ArrayDeque<>(pending.size());
         this.encoder = java.util.Objects.requireNonNull(encoder, "encoder");
-        this.orderViewFactory = java.util.Objects.requireNonNull(orderViewFactory, "orderViewFactory");
         eventCapacity = configuredCapacity();
         byteCapacity = configuredByteCapacity();
         materializationBatchSize = configuredBatchSize(eventCapacity);
@@ -144,15 +131,13 @@ final class CoreExportState implements AutoCloseable {
     }
 
     static CoreExportState passive() {
-        return new CoreExportState(null, 0, 1, List.of(), null, CoreExportCodec::encodeEvent,
-                RuntimeFactFrame::exportOrderView);
+        return new CoreExportState(null, 0, 1, List.of(), null, CoreExportCodec::encodeEvent);
     }
 
     static CoreExportState restore(ProductLine expectedProductLine,
                                    long acknowledgedSequence, long nextSequence, List<CoreMessage> pending) {
         return new CoreExportState(Objects.requireNonNull(expectedProductLine, "expectedProductLine"),
-                acknowledgedSequence, nextSequence, pending, null, CoreExportCodec::encodeEvent,
-                RuntimeFactFrame::exportOrderView);
+                acknowledgedSequence, nextSequence, pending, null, CoreExportCodec::encodeEvent);
     }
 
     static CoreExportState restore(ProductLine expectedProductLine,
@@ -160,7 +145,7 @@ final class CoreExportState implements AutoCloseable {
                                    List<Integer> reservedLengths) {
         return new CoreExportState(Objects.requireNonNull(expectedProductLine, "expectedProductLine"),
                 acknowledgedSequence, nextSequence, pending, List.copyOf(reservedLengths),
-                CoreExportCodec::encodeEvent, RuntimeFactFrame::exportOrderView);
+                CoreExportCodec::encodeEvent);
     }
 
     void activate() {
@@ -699,16 +684,14 @@ final class CoreExportState implements AutoCloseable {
             terminalOrderIds = terminalOrderIds.clone();
         }
 
-        private CoreExportEvent materialize(long sequence,
-                java.util.function.Function<com.surprising.aeron.service.state.CoreOrderState,
-                        com.surprising.aeron.protocol.CoreOrderStateView> orderViewFactory) {
+        private CoreExportEvent materialize(long sequence) {
             RuntimeFactFrame first = patches == null ? null : patches.first();
             RuntimeFactFrame last = patches == null ? null : patches.patch();
             RuntimeFactFrame.FactIdentitySlice identities = patches == null
                     ? new RuntimeFactFrame.FactIdentitySlice(List.of(), List.of(), List.of(), List.of())
                     : patches.size() == 1 ? last.identities() : patches.identities();
             List<com.surprising.aeron.protocol.CoreUserStateView> users;
-            List<com.surprising.aeron.service.state.CoreOrderState> orders;
+            List<com.surprising.aeron.protocol.CoreOrderStateView> orders;
             List<com.surprising.aeron.protocol.CoreLiquidationView> liquidations;
             List<com.surprising.aeron.protocol.CoreTreasuryAssetView> treasury;
             List<com.surprising.aeron.protocol.CoreTriggerOrderStateView> triggers;
@@ -745,8 +728,6 @@ final class CoreExportState implements AutoCloseable {
             long coreSequence = last == null ? appliedCommandCount : last.coreSequence();
             long previousProjectionSequence = first == null ? projectionSequence : first.previousProjectionSequence();
             long committedProjectionSequence = last == null ? projectionSequence : last.projectionSequence();
-            List<com.surprising.aeron.protocol.CoreOrderStateView> orderViews =
-                    materializeOrders(orders, orderViewFactory);
             List<com.surprising.aeron.protocol.CoreFundsPostingView> fundsPostings =
                     fundsDelta.materialize(identities, fallbackFundIdentities,
                             commandMetadata.externalAdjustment()).views();
@@ -754,7 +735,7 @@ final class CoreExportState implements AutoCloseable {
             return new CoreExportEvent(sequence, appliedCommandCount, businessStateHash,
                     command.header().commandId(), command.header().messageType(), status, resultCode,
                     command.header().userId(), command.payloadUnsafe(), users,
-                    orderViews, delta.executions(), delta.fundingPayments(),
+                    orders, delta.executions(), delta.fundingPayments(),
                     liquidations, treasury, triggers,
                     beforeBusinessStateHash, beforeFundsStateHash, fundsStateHash,
                     matcherTransition.routeVersion(), topologyHash, laneRevisionHash, appliedCommandCount,
@@ -784,17 +765,6 @@ final class CoreExportState implements AutoCloseable {
             orders.sort(Long::compare);
             return new RuntimeFactFrame.TerminalIds(List.copyOf(orders), terminalIds.liquidationIds(),
                     terminalIds.triggerOrderIds());
-        }
-
-        private static List<com.surprising.aeron.protocol.CoreOrderStateView> materializeOrders(
-                List<com.surprising.aeron.service.state.CoreOrderState> orders,
-                java.util.function.Function<com.surprising.aeron.service.state.CoreOrderState,
-                        com.surprising.aeron.protocol.CoreOrderStateView> orderViewFactory) {
-            ArrayList<com.surprising.aeron.protocol.CoreOrderStateView> result = new ArrayList<>(orders.size());
-            for (com.surprising.aeron.service.state.CoreOrderState order : orders) {
-                result.add(orderViewFactory.apply(order));
-            }
-            return result;
         }
 
         private static List<CoreExportEvent.MatcherEvidence> materializeMatcherEvidence(
@@ -898,18 +868,18 @@ final class CoreExportState implements AutoCloseable {
     private static com.surprising.aeron.protocol.CoreUserStateView mergeFactUser(
             com.surprising.aeron.protocol.CoreUserStateView previous,
             com.surprising.aeron.protocol.CoreUserStateView current) {
-        TreeMap<String, com.surprising.aeron.protocol.CoreBalanceView> balances = new TreeMap<>();
+        LinkedHashMap<String, com.surprising.aeron.protocol.CoreBalanceView> balances = new LinkedHashMap<>();
         previous.balances().forEach(value -> balances.put(value.asset(), value));
         current.balances().forEach(value -> balances.put(value.asset(), value));
-        TreeMap<Long, com.surprising.aeron.protocol.CoreReservationView> reservations = new TreeMap<>();
+        LinkedHashMap<Long, com.surprising.aeron.protocol.CoreReservationView> reservations = new LinkedHashMap<>();
         previous.reservations().forEach(value -> reservations.put(value.orderId(), value));
         current.reservations().forEach(value -> reservations.put(value.orderId(), value));
-        TreeMap<PositionKey, com.surprising.aeron.protocol.CorePositionView> positions = new TreeMap<>();
+        LinkedHashMap<PositionKey, com.surprising.aeron.protocol.CorePositionView> positions = new LinkedHashMap<>();
         previous.positions().forEach(value -> positions.put(
                 new PositionKey(value.symbol(), value.positionSide()), value));
         current.positions().forEach(value -> positions.put(
                 new PositionKey(value.symbol(), value.positionSide()), value));
-        TreeMap<LeverageKey, com.surprising.aeron.protocol.CoreLeverageView> leverages = new TreeMap<>();
+        LinkedHashMap<LeverageKey, com.surprising.aeron.protocol.CoreLeverageView> leverages = new LinkedHashMap<>();
         previous.leverages().forEach(value -> leverages.put(
                 new LeverageKey(value.symbol(), value.marginMode()), value));
         current.leverages().forEach(value -> leverages.put(
@@ -921,18 +891,20 @@ final class CoreExportState implements AutoCloseable {
     }
 
     private static final class FactViewMerge {
-        private final TreeMap<Long, com.surprising.aeron.protocol.CoreUserStateView> users = new TreeMap<>();
-        private final TreeMap<Long, com.surprising.aeron.service.state.CoreOrderState> orders = new TreeMap<>();
-        private final TreeMap<Long, com.surprising.aeron.protocol.CoreLiquidationView> liquidations =
-                new TreeMap<>();
-        private final TreeMap<String, com.surprising.aeron.protocol.CoreTreasuryAssetView> treasury =
-                new TreeMap<>();
-        private final TreeMap<Long, com.surprising.aeron.protocol.CoreTriggerOrderStateView> triggers =
-                new TreeMap<>();
+        private final LinkedHashMap<Long, com.surprising.aeron.protocol.CoreUserStateView> users =
+                new LinkedHashMap<>();
+        private final LinkedHashMap<Long, com.surprising.aeron.protocol.CoreOrderStateView> orders =
+                new LinkedHashMap<>();
+        private final LinkedHashMap<Long, com.surprising.aeron.protocol.CoreLiquidationView> liquidations =
+                new LinkedHashMap<>();
+        private final LinkedHashMap<String, com.surprising.aeron.protocol.CoreTreasuryAssetView> treasury =
+                new LinkedHashMap<>();
+        private final LinkedHashMap<Long, com.surprising.aeron.protocol.CoreTriggerOrderStateView> triggers =
+                new LinkedHashMap<>();
         private final ArrayList<RuntimeFactFrame.MatcherEvidence> evidence = new ArrayList<>();
-        private final TreeSet<Long> terminalOrders = new TreeSet<>();
-        private final TreeSet<Long> terminalLiquidations = new TreeSet<>();
-        private final TreeSet<Long> terminalTriggers = new TreeSet<>();
+        private final LinkedHashSet<Long> terminalOrders = new LinkedHashSet<>();
+        private final LinkedHashSet<Long> terminalLiquidations = new LinkedHashSet<>();
+        private final LinkedHashSet<Long> terminalTriggers = new LinkedHashSet<>();
         private final FactTombstoneMerge tombstones = new FactTombstoneMerge();
 
         private void accept(RuntimeFactFrame.CoreFactFragment value) {
@@ -952,16 +924,19 @@ final class CoreExportState implements AutoCloseable {
     }
 
     private static final class FactTombstoneMerge {
-        private final TreeSet<Long> users = new TreeSet<>();
-        private final TreeMap<AssetKey, CoreExportEvent.UserAssetKey> balances = new TreeMap<>();
-        private final TreeMap<ReservationKey, CoreExportEvent.UserOrderKey> reservations = new TreeMap<>();
-        private final TreeSet<Long> orders = new TreeSet<>();
-        private final TreeMap<UserPositionKey, CoreExportEvent.UserPositionKey> positions = new TreeMap<>();
-        private final TreeMap<UserLeverageKey, CoreExportEvent.UserLeverageKey> leverages = new TreeMap<>();
-        private final TreeSet<Long> liquidations = new TreeSet<>();
-        private final TreeSet<Long> algos = new TreeSet<>();
-        private final TreeSet<Long> triggers = new TreeSet<>();
-        private final TreeSet<String> treasury = new TreeSet<>();
+        private final LinkedHashSet<Long> users = new LinkedHashSet<>();
+        private final LinkedHashMap<AssetKey, CoreExportEvent.UserAssetKey> balances = new LinkedHashMap<>();
+        private final LinkedHashMap<ReservationKey, CoreExportEvent.UserOrderKey> reservations =
+                new LinkedHashMap<>();
+        private final LinkedHashSet<Long> orders = new LinkedHashSet<>();
+        private final LinkedHashMap<UserPositionKey, CoreExportEvent.UserPositionKey> positions =
+                new LinkedHashMap<>();
+        private final LinkedHashMap<UserLeverageKey, CoreExportEvent.UserLeverageKey> leverages =
+                new LinkedHashMap<>();
+        private final LinkedHashSet<Long> liquidations = new LinkedHashSet<>();
+        private final LinkedHashSet<Long> algos = new LinkedHashSet<>();
+        private final LinkedHashSet<Long> triggers = new LinkedHashSet<>();
+        private final LinkedHashSet<String> treasury = new LinkedHashSet<>();
 
         private void observeValues(RuntimeFactFrame.CoreFactFragment fragment) {
             fragment.changedUsers().forEach(user -> {
@@ -981,11 +956,11 @@ final class CoreExportState implements AutoCloseable {
         }
 
         private void apply(CoreExportEvent.Tombstones deleted,
-                           TreeMap<Long, com.surprising.aeron.protocol.CoreUserStateView> changedUsers,
-                           TreeMap<Long, com.surprising.aeron.service.state.CoreOrderState> changedOrders,
-                           TreeMap<Long, com.surprising.aeron.protocol.CoreLiquidationView> changedLiquidations,
-                           TreeMap<String, com.surprising.aeron.protocol.CoreTreasuryAssetView> changedTreasury,
-                           TreeMap<Long, com.surprising.aeron.protocol.CoreTriggerOrderStateView> changedTriggers) {
+                           LinkedHashMap<Long, com.surprising.aeron.protocol.CoreUserStateView> changedUsers,
+                           LinkedHashMap<Long, com.surprising.aeron.protocol.CoreOrderStateView> changedOrders,
+                           LinkedHashMap<Long, com.surprising.aeron.protocol.CoreLiquidationView> changedLiquidations,
+                           LinkedHashMap<String, com.surprising.aeron.protocol.CoreTreasuryAssetView> changedTreasury,
+                           LinkedHashMap<Long, com.surprising.aeron.protocol.CoreTriggerOrderStateView> changedTriggers) {
             deleted.userIds().forEach(userId -> {
                 users.add(userId);
                 changedUsers.remove(userId);
@@ -1142,12 +1117,18 @@ final class CoreExportState implements AutoCloseable {
                         if (task.header.sourceSequence() != nextMaterializationSequence) {
                             throw new IllegalStateException("Core Fact materialization sequence gap");
                         }
-                        CoreExportEvent event = task.draft.materialize(nextMaterializationSequence,
-                                orderViewFactory);
+                        CoreExportEvent event = task.draft.materialize(nextMaterializationSequence);
                         byte[] encoded = encoder.encode(event);
                         int actualLength = Math.addExact(CoreProtocol.HEADER_LENGTH, encoded.length);
                         if (actualLength > task.encodedLength) {
-                            throw new IllegalStateException("Core Fact exceeded deterministic reservation");
+                            throw new IllegalStateException("Core Fact exceeded deterministic reservation: actual="
+                                    + actualLength + ", reserved=" + task.encodedLength
+                                    + ", sequence=" + task.header.sourceSequence()
+                                    + ", estimatedItems=" + task.draft.itemCount()
+                                    + ", users=" + event.changedUsers().size()
+                                    + ", orders=" + event.changedOrders().size()
+                                    + ", executions=" + event.executions().size()
+                                    + ", tombstones=" + event.tombstones().itemCount());
                         }
                         CoreMessage message = CoreMessage.owned(task.header, encoded);
                         nextMaterializationSequence = Math.incrementExact(nextMaterializationSequence);

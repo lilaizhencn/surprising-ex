@@ -764,17 +764,13 @@ class CoreProbeStateTest {
 
     @Test
     @Timeout(5)
-    void exportAssemblerBuildsTheOrderViewOnItsOwnThread() {
+    void exportAssemblerReceivesTheDirectRuntimeOrderViewOnItsOwnThread() {
         var captured = new java.util.concurrent.atomic.AtomicReference<com.surprising.aeron.protocol.CoreExportEvent>();
         var assemblerThread = new java.util.concurrent.atomic.AtomicReference<String>();
-        var conversions = new java.util.concurrent.atomic.AtomicInteger();
         try (CoreExportState exportState = new CoreExportState(event -> {
             assemblerThread.set(Thread.currentThread().getName());
             captured.set(event);
             return CoreExportCodec.encodeEvent(event);
-        }, order -> {
-            conversions.incrementAndGet();
-            return com.surprising.aeron.service.state.RuntimeFactFrame.exportOrderView(order);
         })) {
             var transition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(0, 0);
             var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
@@ -793,7 +789,6 @@ class CoreProbeStateTest {
 
             assertThat(captured.get().changedOrders().getFirst().orderId()).isEqualTo(73);
             assertThat(assemblerThread.get()).isEqualTo("core-fact-materializer");
-            assertThat(conversions).hasValue(1);
         }
     }
 

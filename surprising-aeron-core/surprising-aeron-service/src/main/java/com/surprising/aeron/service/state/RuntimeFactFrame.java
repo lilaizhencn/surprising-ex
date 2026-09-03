@@ -183,6 +183,26 @@ public final class RuntimeFactFrame implements RuntimeFactView {
         }
     }
 
+    void visitTerminalValues(RetentionConsumer consumer) {
+        Objects.requireNonNull(consumer, "retention consumer");
+        for (AccountLaneOwnerGroup group : accountLaneGroups) {
+            group.orders.forEach(change -> consumer.order(change.after));
+            group.liquidations.forEach(change -> consumer.liquidation(change.after));
+            group.algoOrders.forEach(change -> consumer.algoOrder(change.after));
+            group.triggerOrders.forEach(change -> consumer.triggerOrder(change.after));
+        }
+    }
+
+    void visitIdentityReleases(IdentityReleaseConsumer consumer) {
+        Objects.requireNonNull(consumer, "identity release consumer");
+        for (AccountLaneOwnerGroup group : accountLaneGroups) {
+            group.clientOrders.forEach(change ->
+                    consumer.clientOrder(change.key.userId(), change.key.clientKey(), change.afterOrderId));
+            group.positions.forEach(change -> consumer.position(change.positionKey, change.after));
+            group.riskSnapshots.forEach(change -> consumer.riskSnapshot(change.riskKey, change.after));
+        }
+    }
+
     private static void acceptPositive(java.util.function.LongConsumer consumer, long value) {
         if (value > 0) consumer.accept(value);
     }
@@ -236,14 +256,14 @@ public final class RuntimeFactFrame implements RuntimeFactView {
     public CoreFactFragment materializeCoreFactFragment() {
         FactIdentitySlice registry = identities();
         ArrayList<CoreUserStateView> users = new ArrayList<>();
-        ArrayList<CoreOrderState> orders = new ArrayList<>();
+        ArrayList<CoreOrderStateView> orders = new ArrayList<>();
         ArrayList<CoreLiquidationView> liquidations = null;
         ArrayList<CoreTriggerOrderStateView> triggers = null;
         for (AccountLaneOwnerGroup group : accountLaneGroups) {
             appendUsers(users, group, registry);
             for (OrderChange change : group.orders) {
-                CoreOrderState order = change.after() == null ? null
-                        : RuntimeStateMaterializer.orderSnapshot(change.after(), registry);
+                CoreOrderStateView order = change.after() == null ? null
+                        : exportRuntimeOrderView(change.after(), registry);
                 if (order != null) orders.add(order);
             }
             for (LiquidationChange change : group.liquidations) {
@@ -336,6 +356,18 @@ public final class RuntimeFactFrame implements RuntimeFactView {
                 order.clientOrderId(), order.commandId(), order.makerFeeRatePpm(), order.takerFeeRatePpm(),
                 order.cumulativeFeeUnits(), order.createdAtEpochMillis(), order.updatedAtEpochMillis(),
                 order.clusterPosition(), order.status().name(), order.revision());
+    }
+
+    public static CoreOrderStateView exportRuntimeOrderView(OrderRuntime order, IdentityView identities) {
+        if (order == null || identities == null) throw new IllegalArgumentException("runtime order is required");
+        return new CoreOrderStateView(order.orderId(), order.productLine(), order.userId(),
+                identities.symbol(order.symbolId()), order.instrumentVersion(), order.side(), order.priceTicks(),
+                order.quantitySteps(), order.executedQuantitySteps(), order.remainingQuantitySteps(),
+                order.reduceOnly(), order.marginMode(), order.positionSide(), order.orderType(),
+                order.timeInForce(), order.postOnly(), order.clientOrderId(), order.commandId(),
+                order.makerFeeRatePpm(), order.takerFeeRatePpm(), order.cumulativeFeeUnits(),
+                order.createdAtEpochMillis(), order.updatedAtEpochMillis(), order.clusterPosition(),
+                order.status().name(), order.revision());
     }
 
     private static CoreExportEvent.Tombstones tombstones(RuntimeFactFrame patch,
@@ -636,8 +668,7 @@ public final class RuntimeFactFrame implements RuntimeFactView {
                 }
             }
             if (clients == null && positions == null) {
-                return new FactIdentitySlice(List.of(), List.of(), List.of(), List.of(),
-                        registry.dictionaryVersion(), registry);
+                return registry.liveFactIdentitySlice();
             }
             return new FactIdentitySlice(List.of(), List.of(),
                     clients == null ? List.of() : clients,
@@ -904,7 +935,7 @@ public final class RuntimeFactFrame implements RuntimeFactView {
     }
 
     public record CoreFactFragment(List<CoreUserStateView> changedUsers,
-                                   List<CoreOrderState> changedOrders,
+                                   List<CoreOrderStateView> changedOrders,
                                    List<CoreLiquidationView> changedLiquidations,
                                    List<CoreTreasuryAssetView> changedTreasuryAssets,
                                    List<CoreTriggerOrderStateView> changedTriggerOrders,
@@ -1020,6 +1051,7 @@ public final class RuntimeFactFrame implements RuntimeFactView {
     }
 
     public static final class Builder {
+        private Builder nextFree;
         private ProductLine productLine;
         private long previousSequence;
         private long sequence;
@@ -1049,6 +1081,9 @@ public final class RuntimeFactFrame implements RuntimeFactView {
         private Builder(ProductLine productLine) {
             this.productLine = Objects.requireNonNull(productLine, "product line");
         }
+
+        Builder nextFree() { return nextFree; }
+        void nextFree(Builder nextFree) { this.nextFree = nextFree; }
 
         Builder reset() {
             return reset(productLine);
@@ -1272,27 +1307,6 @@ public final class RuntimeFactFrame implements RuntimeFactView {
             }
             lane(laneId).positions.record(positionKey, before, after);
             return this;
-        }
-
-        Builder capturePositionBefore(int laneId, long positionKey, PositionRuntime before) {
-            lane(laneId).positions.captureBefore(positionKey, before);
-            return this;
-        }
-
-        PositionRuntime positionBefore(int laneId, long positionKey) {
-            return lane(laneId).positions.before(positionKey);
-        }
-
-        boolean hasPositionCheckpoint(int laneId, long positionKey) {
-            return lane(laneId).positions.contains(positionKey);
-        }
-
-        void forEachCapturedPosition(PositionBeforeConsumer consumer) {
-            Objects.requireNonNull(consumer, "consumer");
-            for (int laneId = 0; laneId < lanes.length; laneId++) {
-                LaneChanges lane = lanes[laneId];
-                if (lane != null) lane.positions.forEachBefore(laneId, consumer);
-            }
         }
 
         public Builder recordLiquidation(int laneId, long id, LiquidationRuntime before, LiquidationRuntime after) {
@@ -1786,11 +1800,6 @@ public final class RuntimeFactFrame implements RuntimeFactView {
     }
 
     @FunctionalInterface
-    interface PositionBeforeConsumer {
-        void accept(int laneId, long positionKey, PositionRuntime before);
-    }
-
-    @FunctionalInterface
     private interface IntChangeFunction<V, R> {
         R apply(int key, V before, V after);
     }
@@ -2053,12 +2062,6 @@ public final class RuntimeFactFrame implements RuntimeFactView {
                 V before = before(index);
                 V after = after(index);
                 if (!Objects.equals(before, after)) consumer.accept(keys[index], before, after);
-            }
-        }
-
-        private void forEachBefore(int laneId, PositionBeforeConsumer consumer) {
-            for (int index = 0; index < size; index++) {
-                consumer.accept(laneId, keys[index], (PositionRuntime) beforeValues[index]);
             }
         }
 

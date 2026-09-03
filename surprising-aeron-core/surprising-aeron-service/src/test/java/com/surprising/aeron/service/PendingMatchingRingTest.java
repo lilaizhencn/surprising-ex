@@ -17,7 +17,7 @@ class PendingMatchingRingTest {
 
     @Test
     void keepsTheLowWatermarkWhileAllowingIndependentPartitionCompletion() {
-        PendingMatchingRing ring = new PendingMatchingRing(3);
+        PendingMatchingRing ring = new PendingMatchingRing(3, 1);
         PendingMatching first = pending(7, UUID.randomUUID(), 1001);
         PendingMatching replacement = first.withCommand(command(first.command().header().commandId(), 1002));
         PendingMatching second = pending(11, UUID.randomUUID(), 1003);
@@ -47,6 +47,29 @@ class PendingMatchingRingTest {
         assertThat(ring.firstSequence()).isEqualTo(14);
         ring.clear();
         assertThat(ring.snapshot()).isEmpty();
+    }
+
+    @Test
+    void advancesEachMatcherSubmissionShardWithoutScanningThePendingRing() {
+        PendingMatchingRing ring = new PendingMatchingRing(4, 2);
+        PendingMatching shardZeroFirst = pending(1, UUID.randomUUID(), 1001);
+        PendingMatching shardOne = pending(2, UUID.randomUUID(), 1002);
+        PendingMatching shardZeroSecond = pending(3, UUID.randomUUID(), 1003);
+        ring.put(shardZeroFirst);
+        ring.put(shardOne);
+        ring.put(shardZeroSecond);
+        ring.registerSubmission(1, 0);
+        ring.registerSubmission(2, 1);
+        ring.registerSubmission(3, 0);
+
+        assertThat(ring.submissionHead(0)).isSameAs(shardZeroFirst);
+        assertThat(ring.submissionHead(1)).isSameAs(shardOne);
+        assertThat(ring.isSubmissionHead(3, 0)).isFalse();
+        ring.completeSubmission(1);
+        assertThat(ring.submissionHead(0)).isSameAs(shardZeroSecond);
+        assertThat(ring.isSubmissionHead(3, 0)).isTrue();
+        ring.remove(2);
+        assertThat(ring.submissionHead(1)).isNull();
     }
 
     private static PendingMatching pending(long sequence, UUID commandId, long userId) {

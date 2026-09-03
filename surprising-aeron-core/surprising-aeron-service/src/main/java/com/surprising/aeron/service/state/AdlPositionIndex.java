@@ -3,28 +3,32 @@ package com.surprising.aeron.service.state;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
+import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
 public final class AdlPositionIndex {
 
-    private final Map<String, HashSet<PositionKey>> keysByAsset = new HashMap<>();
-    private final Map<Long, RuntimePositionIndexValue> positions = new HashMap<>();
-    private final Map<AssetPositionKey, Integer> positionCounts = new HashMap<>();
-
-    public AdlPositionIndex(TradingCoreState state) {
-        rebuild(state);
-    }
+    private final Map<String, LongHashSet> keysByAsset = new HashMap<>();
+    private final LongObjectHashMap<RuntimePositionIndexValue> positions = new LongObjectHashMap<>();
 
     public AdlPositionIndex(TradingCoreState state, RuntimeIdentityRegistry identities) {
         rebuild(state, identities);
     }
 
     public Set<PositionKey> positions(String asset) {
-        Set<PositionKey> values = keysByAsset.get(AssetBalance.normalizeAsset(asset));
+        LongHashSet values = keysByAsset.get(AssetBalance.normalizeAsset(asset));
         if (values == null || values.isEmpty()) return Set.of();
-        PositionKey[] ordered = values.toArray(PositionKey[]::new);
+        PositionKey[] captured = new PositionKey[values.size()];
+        int[] cursor = {0};
+        values.forEach(positionKey -> {
+            RuntimePositionIndexValue value = positions.get(positionKey);
+            if (value != null) captured[cursor[0]++] = new PositionKey(
+                    value.userId(), value.symbol(), value.positionSide());
+        });
+        PositionKey[] ordered = cursor[0] == captured.length
+                ? captured : java.util.Arrays.copyOf(captured, cursor[0]);
         java.util.Arrays.sort(ordered);
         LinkedHashSet<PositionKey> result = new LinkedHashSet<>(ordered.length);
         Collections.addAll(result, ordered);
@@ -39,70 +43,36 @@ public final class AdlPositionIndex {
 
     void apply(long positionKey, PositionRuntime after, RuntimeFactFrame.IdentityView identities) {
         RuntimePositionIndexValue previous = positions.remove(positionKey);
-        if (previous != null) remove(previous);
+        if (previous != null) remove(previous, positionKey);
         if (after != null) {
             RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(after, identities);
             positions.put(positionKey, indexed);
-            add(indexed);
+            add(indexed, positionKey);
         }
-    }
-
-    public void rebuild(TradingCoreState state) {
-        keysByAsset.clear();
-        state.users().values().forEach(user -> user.positions().values()
-                .forEach(position -> add(user.userId(), position)));
     }
 
     public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {
         keysByAsset.clear();
         positions.clear();
-        positionCounts.clear();
         state.users().values().forEach(user -> user.positions().forEach((key, position) -> {
             long positionKey = identities.positionKey(user.userId(), key);
             RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(user.userId(), position);
             positions.put(positionKey, indexed);
-            add(indexed);
+            add(indexed, positionKey);
         }));
     }
 
-    private void add(RuntimePositionIndexValue position) {
+    private void add(RuntimePositionIndexValue position, long positionKey) {
         if (position.signedQuantitySteps() == 0) return;
-        PositionKey key = new PositionKey(position.userId(), position.symbol(), position.positionSide());
-        AssetPositionKey counted = new AssetPositionKey(position.asset(), key);
-        if (positionCounts.merge(counted, 1, Math::addExact) == 1) {
-            keysByAsset.computeIfAbsent(position.asset(), ignored -> new HashSet<>()).add(key);
-        }
+        keysByAsset.computeIfAbsent(position.asset(), ignored -> new LongHashSet()).add(positionKey);
     }
 
-    private void remove(RuntimePositionIndexValue position) {
+    private void remove(RuntimePositionIndexValue position, long positionKey) {
         if (position.signedQuantitySteps() == 0) return;
-        PositionKey key = new PositionKey(position.userId(), position.symbol(), position.positionSide());
-        AssetPositionKey counted = new AssetPositionKey(position.asset(), key);
-        int count = Math.subtractExact(positionCounts.getOrDefault(counted, 0), 1);
-        if (count != 0) {
-            positionCounts.put(counted, count);
-            return;
-        }
-        positionCounts.remove(counted);
-        Set<PositionKey> values = keysByAsset.get(position.asset());
+        LongHashSet values = keysByAsset.get(position.asset());
         if (values == null) return;
-        values.remove(key);
+        values.remove(positionKey);
         if (values.isEmpty()) keysByAsset.remove(position.asset());
-    }
-
-    private record AssetPositionKey(String asset, PositionKey position) {}
-
-    private void add(long userId, CorePositionState position) {
-        if (position.signedQuantitySteps() == 0) return;
-        keysByAsset.computeIfAbsent(position.marginAsset(), ignored -> new HashSet<>())
-                .add(new PositionKey(userId, position.symbol(), position.positionSide()));
-    }
-
-    private void remove(long userId, CorePositionState position) {
-        Set<PositionKey> values = keysByAsset.get(position.marginAsset());
-        if (values == null) return;
-        values.remove(new PositionKey(userId, position.symbol(), position.positionSide()));
-        if (values.isEmpty()) keysByAsset.remove(position.marginAsset());
     }
 
     public record PositionKey(long userId, String symbol, com.surprising.aeron.protocol.CorePositionSide positionSide)

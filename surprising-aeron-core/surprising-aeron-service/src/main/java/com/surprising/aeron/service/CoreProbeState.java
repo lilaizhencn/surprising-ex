@@ -149,6 +149,7 @@ public final class CoreProbeState implements AutoCloseable,
     private final long[] appliedMatcherPrefixDigests;
     private final LinkedHashMap<SourceKey, Long> lastSourceSequences;
     private final PendingMatchingRing pendingMatching;
+    private final boolean[] placeAdmissionShardReady;
     private final LinkedHashMap<Long, List<LifecycleScope>> pendingLifecycleScopes;
     private final LinkedHashMap<Long, OrderBatchPending> pendingOrderBatches;
     private final LinkedHashMap<Long, DeferredMatching> deferredMatching;
@@ -163,6 +164,7 @@ public final class CoreProbeState implements AutoCloseable,
     private final Map<UUID, Long> queryIds = new ConcurrentHashMap<>();
     private final LinkedHashMap<String, BookBootstrapSession> bookBootstrapSessions = new LinkedHashMap<>();
     private final DeterministicExchangeCoreAdapter matchingAdapter;
+    private final long cachedTopologyHash;
     private final MatcherSnapshotCapture matcherSnapshotCapture;
     private final SnapshotEncoder snapshotEncoder;
     private final AtomicReference<RuntimeException> snapshotAuditFailure = new AtomicReference<>();
@@ -300,7 +302,6 @@ public final class CoreProbeState implements AutoCloseable,
         this.nextResultRetentionSequence = nextRetentionSequence(commandResults);
         this.nextResultRetentionWeight = retentionWeight(nextResultRetentionSequence);
         this.lastSourceSequences = lastSourceSequences;
-        this.pendingMatching = new PendingMatchingRing(MAX_PENDING_MATCHING);
         this.pendingLifecycleScopes = new LinkedHashMap<>();
         this.pendingOrderBatches = new LinkedHashMap<>();
         this.deferredMatching = new LinkedHashMap<>();
@@ -313,6 +314,10 @@ public final class CoreProbeState implements AutoCloseable,
         this.runtime = TradingCoreRuntime.passive(
                 productLine, snapshotState, appliedCommandCount, matcherSnapshot, restoredBusinessStateHash);
         this.matchingAdapter = runtime.matcherForConstruction();
+        this.cachedTopologyHash = matchingAdapter.topology().topologyHash();
+        this.pendingMatching = new PendingMatchingRing(
+                MAX_PENDING_MATCHING, matchingAdapter.topology().matchingEngineCount());
+        this.placeAdmissionShardReady = new boolean[matchingAdapter.topology().matchingEngineCount()];
         this.appliedMatcherSequences = new long[matchingAdapter.topology().matchingEngineCount() + 1];
         this.appliedMatcherPrefixDigests = new long[appliedMatcherSequences.length];
         initializeMatcherProgress(matcherSnapshot);
@@ -1056,6 +1061,7 @@ public final class CoreProbeState implements AutoCloseable,
         putPendingMatching(pending);
         registerPendingLifecycle(pending);
         pendingOrderBatches.put(sequence, batch);
+        pendingMatching.registerSubmission(sequence, orderBatchMatcherShard(batch));
         appliedCommandCount = sequence;
         refreshCommittedCoreSequence();
         recordSourceSequence(sourceKey, message.header().sourceSequence());
@@ -2134,7 +2140,7 @@ public final class CoreProbeState implements AutoCloseable,
         currentAdmission = reservation;
         activeFactCommand = command;
         activeFactFingerprint = fingerprint;
-        activeFactTopologyHash = matchingAdapter.topology().topologyHash();
+        activeFactTopologyHash = cachedTopologyHash;
         activeFactLaneRevisionHash = 0;
     }
 
@@ -2144,7 +2150,7 @@ public final class CoreProbeState implements AutoCloseable,
         }
         activeFactCommand = command;
         activeFactFingerprint = fingerprint;
-        activeFactTopologyHash = matchingAdapter.topology().topologyHash();
+        activeFactTopologyHash = cachedTopologyHash;
         activeFactLaneRevisionHash = 0;
     }
 
@@ -2202,6 +2208,7 @@ public final class CoreProbeState implements AutoCloseable,
                     .withCapacityReservation(currentAdmission);
             putPendingMatching(pending);
             pendingMatchingRejections.put(sequence, resultCode.ordinal() + 1);
+            pendingMatching.completeSubmission(sequence);
             appliedCommandCount = sequence;
             recordSourceSequence(sourceKey, message.header().sourceSequence());
             long stateHash = stateHash(cachedBusinessStateHash, message.header().commandId(),
@@ -2589,6 +2596,12 @@ public final class CoreProbeState implements AutoCloseable,
         }
         pendingMatching.put(pending);
         laneCommandContexts.claim(pending.sequence());
+        CoreMessageType type = pending.command().header().messageType();
+        if (type != CoreMessageType.PLACE_ORDER_BATCH
+                && type != CoreMessageType.CANCEL_ORDER_BATCH
+                && type != CoreMessageType.AMEND_ORDER_BATCH) {
+            pendingMatching.registerSubmission(pending.sequence(), matcherShard(pending));
+        }
     }
 
     private LifecycleScope lifecycleScope(CoreMessage message, PendingMatching.Operation operation,
@@ -2763,10 +2776,12 @@ public final class CoreProbeState implements AutoCloseable,
                     new com.surprising.aeron.service.matching.CoreMatchingResult(
                             true, "BENCHMARK_SKIPPED").withCoreSequence(pending.sequence()));
             pending.matchingSubmitted();
+            matchingSubmissionCompleted(pending);
             return;
         }
         if (pendingOrderBatches.containsKey(pending.sequence())) {
             submitOrderBatchMatching(pending);
+            if (pending.isMatchingSubmitted()) matchingSubmissionCompleted(pending);
             return;
         }
         runtime.matcherReady().join();
@@ -2781,10 +2796,12 @@ public final class CoreProbeState implements AutoCloseable,
             matcherPipeline.submit(shardId < 0 ? matcherShard(pending) : shardId,
                     pending.sequence(), prepareMatchingCommand(pending));
             pending.matchingSubmitted();
+            matchingSubmissionCompleted(pending);
             return;
         }
         matcherPipeline.submit(matcherShard(pending), pending.sequence(), prepareMatchingCommand(pending));
         pending.matchingSubmitted();
+        matchingSubmissionCompleted(pending);
     }
 
     private int singleMatcherShard(List<CoreOrderState> orders) {
@@ -2821,33 +2838,50 @@ public final class CoreProbeState implements AutoCloseable,
                 pending.command().header().submittedAtEpochMillis(), () -> aggregate);
         publishMatchingCompletion(pending.sequence(), evidenced);
         pending.matchingSubmitted();
+        matchingSubmissionCompleted(pending);
     }
 
     private void progressPlaceAdmissions() {
-        while (true) {
-            PendingMatching pending = pendingMatching.firstCompletedUnsubmittedPlaceAdmission(
-                    pendingMatchingRejections);
-            if (pending == null) return;
-            var admission = pending.placeAdmission();
-            RuntimeException rejection = admission.rejection();
-            if (rejection != null) {
-                if (admission.allocatedClientKey()) {
-                    runtimePlaceOrderIdentities.rollbackPreparedClientKey(
-                            admission.userId(), admission.clientOrderId(),
-                            new RuntimeIdentityRegistry.PreparedClientKey(admission.clientKey(), true));
+        for (int laneId = 0; laneId < matchingAdapter.topology().accountLaneCount(); laneId++) {
+            long sequence;
+            while ((sequence = runtimePlaceOrderState.pollPlaceAdmissionReady(laneId)) != 0) {
+                PendingMatching pending = pendingMatching.get(sequence);
+                if (pending == null || pending.placeAdmission() == null) {
+                    throw new IllegalStateException("completed place admission is not pending");
                 }
-                CoreResultCode resultCode = rejection instanceof CoreStateRejectedException rejected
-                        ? CoreResultCode.fromRejectionCode(rejected.code())
-                        : rejection instanceof ArithmeticException
-                        ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND;
-                pendingMatchingRejections.put(pending.sequence(), resultCode.ordinal() + 1);
-                continue;
+                placeAdmissionShardReady[matcherShard(pending)] = true;
             }
-            if (pending.admittedMatchingOrder() == null) {
-                pending.admissionCompleted(runtimePlaceOrderState.collectPlaceAdmission(admission));
+        }
+        for (int shard = 0; shard < placeAdmissionShardReady.length; shard++) {
+            while (placeAdmissionShardReady[shard]) {
+                PendingMatching pending = pendingMatching.submissionHead(shard);
+                if (pending == null) {
+                    placeAdmissionShardReady[shard] = false;
+                    break;
+                }
+                var admission = pending.placeAdmission();
+                if (admission == null || !admission.complete()) break;
+                RuntimeException rejection = admission.rejection();
+                if (rejection != null) {
+                    if (admission.allocatedClientKey()) {
+                        runtimePlaceOrderIdentities.rollbackPreparedClientKey(
+                                admission.userId(), admission.clientOrderId(),
+                                new RuntimeIdentityRegistry.PreparedClientKey(admission.clientKey(), true));
+                    }
+                    CoreResultCode resultCode = rejection instanceof CoreStateRejectedException rejected
+                            ? CoreResultCode.fromRejectionCode(rejected.code())
+                            : rejection instanceof ArithmeticException
+                            ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND;
+                    pendingMatchingRejections.put(pending.sequence(), resultCode.ordinal() + 1);
+                    pendingMatching.completeSubmission(pending.sequence());
+                    continue;
+                }
+                if (pending.admittedMatchingOrder() == null) {
+                    pending.admissionCompleted(runtimePlaceOrderState.collectPlaceAdmission(admission));
+                }
+                submitMatching(pending);
+                if (!pending.isMatchingSubmitted()) break;
             }
-            submitMatching(pending);
-            if (!pending.isMatchingSubmitted()) return;
         }
     }
 
@@ -2855,15 +2889,16 @@ public final class CoreProbeState implements AutoCloseable,
         PendingMatching pending = pendingMatching.get(sequence);
         if (pending != null) {
             int shardId = pendingSubmissionShard(pending);
-            PendingMatching earlierOnShard = pendingMatching.findFirst(candidate ->
-                    candidate.sequence() < sequence
-                            && !candidate.isMatchingSubmitted()
-                            && !pendingMatchingRejections.containsKey(candidate.sequence())
-                            && pendingSubmissionShard(candidate) == shardId);
-            if (earlierOnShard != null) return true;
+            if (!pendingMatching.isSubmissionHead(sequence, shardId)) return true;
         }
         if (pendingOrderBatches.isEmpty()) return false;
         return sequence > pendingOrderBatches.keySet().iterator().next();
+    }
+
+    private void matchingSubmissionCompleted(PendingMatching pending) {
+        int shard = pendingSubmissionShard(pending);
+        pendingMatching.completeSubmission(pending.sequence());
+        placeAdmissionShardReady[shard] = true;
     }
 
     private int pendingSubmissionShard(PendingMatching pending) {
@@ -5569,7 +5604,7 @@ public final class CoreProbeState implements AutoCloseable,
                     new com.surprising.aeron.service.state.RuntimeFactFrame.CoreFactValues(
                             commandExecutions, commandFundingPayments,
                             commandFundingProgress, commandSettlementProgress));
-            activeFactTopologyHash = matchingAdapter.topology().topologyHash();
+            activeFactTopologyHash = cachedTopologyHash;
             activeFactLaneRevisionHash = laneRevisionHash();
             var factMetadata = new com.surprising.aeron.service.state.RuntimeFactFrame.CoreFactMetadata(
                     activeFactCommand.header().commandId(), activeFactFingerprint,
@@ -5585,6 +5620,7 @@ public final class CoreProbeState implements AutoCloseable,
             if (factPermit != null) {
                 factPermit.consume();
                 factCommandId = activeFactCommand.header().commandId();
+                frame.retainForMaterialization();
                 nextFactChain = new CoreExportState.FactChain(
                         frame, activeFactChain, factPermit);
             }
@@ -5616,6 +5652,7 @@ public final class CoreProbeState implements AutoCloseable,
             if (capturedFactFrames != null) capturedFactFrames.add(frame.materialize());
             runtimePatchRevision = frame.revision();
             frame.visitIdentityReleases(CoreProbeState.this);
+            frame.releaseOwner();
             runtimePlaceOrderState.clearChangedKeys();
         }
 
@@ -6080,7 +6117,7 @@ public final class CoreProbeState implements AutoCloseable,
         boolean activeCommand = activeFactCommand != null
                 && activeFactCommand.header().commandId().equals(command.header().commandId());
         long topologyHash = activeCommand && activeFactTopologyHash != 0
-                ? activeFactTopologyHash : matchingAdapter.topology().topologyHash();
+                ? activeFactTopologyHash : cachedTopologyHash;
         long revisionHash = activeCommand && activeFactLaneRevisionHash != 0
                 ? activeFactLaneRevisionHash : laneRevisionHash();
         long clusterPosition = currentClusterPosition;
@@ -6166,7 +6203,7 @@ public final class CoreProbeState implements AutoCloseable,
     }
 
     private long laneRevisionHash() {
-        long hash = 0xcbf29ce484222325L ^ matchingAdapter.topology().topologyHash();
+        long hash = 0xcbf29ce484222325L ^ cachedTopologyHash;
         for (int laneId = 0; laneId < matchingAdapter.topology().accountLaneCount(); laneId++) {
             hash ^= laneId;
             hash *= 0x100000001b3L;

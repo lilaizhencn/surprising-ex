@@ -29,6 +29,9 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
     private long nextClientKey = 1;
     private long nextPositionKey = 1;
     private long dictionaryVersion;
+    private final RuntimeFactFrame.FactIdentitySlice liveFactIdentitySlice =
+            new RuntimeFactFrame.FactIdentitySlice(
+                    java.util.List.of(), java.util.List.of(), java.util.List.of(), java.util.List.of(), 0, this);
     private Thread owner;
 
     public void assertOwner() {
@@ -258,6 +261,10 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
 
     public long dictionaryVersion() {
         return dictionaryVersion;
+    }
+
+    RuntimeFactFrame.FactIdentitySlice liveFactIdentitySlice() {
+        return liveFactIdentitySlice;
     }
 
     public void releasePositionKey(long positionKey) {

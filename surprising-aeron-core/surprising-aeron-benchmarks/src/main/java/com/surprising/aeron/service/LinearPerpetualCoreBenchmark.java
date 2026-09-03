@@ -477,6 +477,10 @@ public class LinearPerpetualCoreBenchmark {
         @Param("256")
         public int maxInFlight;
 
+        /** Explicitly exercises bounded Fact Frame reuse under the fixed admission window. */
+        @Param("4096")
+        public int factFramePoolCapacity;
+
         @Param("16384")
         public int operationsPerInvocation;
 
@@ -491,7 +495,12 @@ public class LinearPerpetualCoreBenchmark {
                 throw new IllegalArgumentException(
                         "qualification requires one matcher shard and exactly 256 in-flight");
             }
+            if (factFramePoolCapacity < maxInFlight) {
+                throw new IllegalArgumentException("Fact Frame pool must cover fixed in-flight capacity");
+            }
             System.setProperty("surprising.aeron.matching-engines", Integer.toString(matchingEngines));
+            System.setProperty("surprising.aeron.fact-frame-pool-capacity",
+                    Integer.toString(factFramePoolCapacity));
             LinearPerpetualBenchmarkSupport.configureAccountLanes(accountLanes);
             var config = LinearPerpetualScaleConfig.scale(listedSymbols, activeSymbols,
                     maxPositionsPerUser, maxOpenOrdersPerUser,
@@ -503,8 +512,12 @@ public class LinearPerpetualCoreBenchmark {
 
         @TearDown(Level.Trial)
         public void tearDownTrial() {
-            scenario.verify();
-            scenario.close();
+            try {
+                scenario.verify();
+                scenario.close();
+            } finally {
+                System.clearProperty("surprising.aeron.fact-frame-pool-capacity");
+            }
         }
     }
 
