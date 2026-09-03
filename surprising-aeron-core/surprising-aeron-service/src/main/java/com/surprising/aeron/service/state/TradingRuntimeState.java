@@ -130,6 +130,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     private boolean patchRiskScanControlChanged;
     private final ThreadLocal<AccountLaneState> laneCommandScope = new ThreadLocal<>();
     private final ThreadLocal<MatcherSettlementChanges> matcherSettlementChangesScope = new ThreadLocal<>();
+    private final java.util.ArrayDeque<MatcherSettlementChanges> matcherSettlementChangesPool =
+            new java.util.ArrayDeque<>();
     private final RuntimePerpetualMatchProcessor.BatchValidationScratch perpetualBatchValidationScratch =
             new RuntimePerpetualMatchProcessor.BatchValidationScratch();
     private Thread owner;
@@ -617,8 +619,15 @@ public final class TradingRuntimeState implements AutoCloseable {
                 orderLaneIds, reservationLaneIds, positionLaneIds);
     }
 
-    MatcherSettlementChanges newMatcherSettlementChanges() {
-        return new MatcherSettlementChanges(accountLanes.length);
+    MatcherSettlementChanges acquireMatcherSettlementChanges() {
+        assertOwner();
+        MatcherSettlementChanges changes = matcherSettlementChangesPool.pollFirst();
+        return changes == null ? new MatcherSettlementChanges(accountLanes.length) : changes;
+    }
+
+    private void releaseMatcherSettlementChanges(MatcherSettlementChanges changes) {
+        changes.clear();
+        matcherSettlementChangesPool.addFirst(changes);
     }
 
     static final class MatcherSettlementChanges {
@@ -632,6 +641,11 @@ public final class TradingRuntimeState implements AutoCloseable {
                 publishedLaneChanges[laneId] = new PublishedLaneChanges();
                 balancePatches[laneId] = new LaneBalancePatches();
             }
+        }
+
+        private void clear() {
+            for (PublishedLaneChanges changes : publishedLaneChanges) changes.clear();
+            for (LaneBalancePatches patches : balancePatches) patches.clear();
         }
     }
 
@@ -673,6 +687,13 @@ public final class TradingRuntimeState implements AutoCloseable {
             orders.drain(targetOrders, targetOrderLanes, laneId);
             reservations.drain(targetReservations, targetReservationLanes, laneId);
             positions.drain(targetPositions, targetPositionLanes, laneId);
+        }
+
+        private void clear() {
+            users.clear();
+            orders.clear();
+            reservations.clear();
+            positions.clear();
         }
 
         private static final class ChangeBuffer<V> {
@@ -718,6 +739,11 @@ public final class TradingRuntimeState implements AutoCloseable {
                         if (targetLanes != null) targetLanes.put(key, laneId + 1L);
                     }
                 }
+                clear();
+            }
+
+            private void clear() {
+                for (int index = 0; index < size; index++) values[index] = null;
                 size = 0;
                 if (++indexGeneration == 0) {
                     java.util.Arrays.fill(indexGenerations, 0);
@@ -1278,23 +1304,27 @@ public final class TradingRuntimeState implements AutoCloseable {
         RuntimeTreasuryDelta aggregate = event.collectTreasuryDelta();
         unindexMatcherPendingReservations(event.plan());
         long laneMask = event.requiredLaneMask();
-        MatcherSettlementChanges changes = event.changes();
-        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            if ((laneMask & 1L << laneId) != 0) {
-                if (event.commitSequence() == 0) flushPublishedChanges(laneId);
-                else changes.publishedLaneChanges[laneId].drainTo(
-                            laneId, publishedUsers, publishedOrders, publishedReservations, publishedPositions,
-                            orderLaneIds, reservationLaneIds, positionLaneIds);
+        MatcherSettlementChanges changes = event.commitSequence() == 0 ? null : event.takeChanges();
+        try {
+            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+                if ((laneMask & 1L << laneId) != 0) {
+                    if (event.commitSequence() == 0) flushPublishedChanges(laneId);
+                    else changes.publishedLaneChanges[laneId].drainTo(
+                                laneId, publishedUsers, publishedOrders, publishedReservations, publishedPositions,
+                                orderLaneIds, reservationLaneIds, positionLaneIds);
+                }
             }
+            if (event.commitSequence() != 0) {
+                event.collectedFundsDelta(prepareBalanceFundsDelta(changes.balancePatches));
+            }
+            MatcherSettlementPlan plan = event.plan();
+            RuntimeIdentityRegistry identities = event.identities();
+            recordMatcherSettlementChanges(plan, identities, event.instrument(),
+                    event.baseAssetId(), event.quoteAssetId(), event.settleAssetId());
+            return aggregate;
+        } finally {
+            if (changes != null) releaseMatcherSettlementChanges(changes);
         }
-        if (event.commitSequence() != 0) {
-            event.collectedFundsDelta(prepareBalanceFundsDelta(changes.balancePatches));
-        }
-        MatcherSettlementPlan plan = event.plan();
-        RuntimeIdentityRegistry identities = event.identities();
-        recordMatcherSettlementChanges(plan, identities, event.instrument(),
-                event.baseAssetId(), event.quoteAssetId(), event.settleAssetId());
-        return aggregate;
     }
 
     LongLongHashMap matcherSettlementRemainingScratch() {

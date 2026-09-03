@@ -35,7 +35,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     private final int quoteAssetId;
     private final int settleAssetId;
     private final RuntimeTreasuryDelta[] touchedLaneTreasuryDeltas;
-    private final TradingRuntimeState.MatcherSettlementChanges changes;
+    private TradingRuntimeState.MatcherSettlementChanges changes;
     private RuntimeFundsDelta collectedFundsDelta = RuntimeFundsDelta.empty();
     @SuppressWarnings("FieldMayBeFinal")
     private long completedLaneMask;
@@ -67,7 +67,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         this.baseAssetId = baseAssetId;
         this.quoteAssetId = quoteAssetId;
         this.settleAssetId = settleAssetId;
-        this.changes = runtime.newMatcherSettlementChanges();
+        this.changes = commitSequence == 0 ? null : runtime.acquireMatcherSettlementChanges();
         if (plan.tradeCount() == 0) {
             touchedLaneTreasuryDeltas = null;
         } else {
@@ -133,7 +133,15 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     int baseAssetId() { return baseAssetId; }
     int quoteAssetId() { return quoteAssetId; }
     int settleAssetId() { return settleAssetId; }
-    TradingRuntimeState.MatcherSettlementChanges changes() { return changes; }
+    TradingRuntimeState.MatcherSettlementChanges changes() {
+        if (changes == null) throw new IllegalStateException("matcher settlement changes are unavailable");
+        return changes;
+    }
+    TradingRuntimeState.MatcherSettlementChanges takeChanges() {
+        TradingRuntimeState.MatcherSettlementChanges value = changes();
+        changes = null;
+        return value;
+    }
     public RuntimeFundsDelta collectedFundsDelta() { return collectedFundsDelta; }
     void collectedFundsDelta(RuntimeFundsDelta value) {
         collectedFundsDelta = value == null ? RuntimeFundsDelta.empty() : value;

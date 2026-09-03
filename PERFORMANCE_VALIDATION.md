@@ -1633,3 +1633,35 @@
 - JFR内存与运行时：总线程分配约`19.0GiB`，其中owner/JMH worker占`84.23%`；TLAB内`17.2GiB`、TLAB外`1.8GiB`。主要分配为`long[] 28.70%`、`int[] 12.11%`、`byte[] 7.51%`、`Object[] 6.01%`和per-sequence change buffer `4.71%`。8次ZGC，34次pause合计`0.484ms`，pause p50/p90/p95/p99/max=`0.0102/0.0308/0.0504/0.0606/0.0606ms`；heap committed 8GiB，JVM native committed除heap外峰值主要为GC `185MiB`、Tracing `38MiB`、Metaspace `31MiB`、Code `30.3MiB`，Direct Buffer count/used始终为0。
 - JFR线程/锁/I/O/JIT：owner/JMH worker CPU load最高，matcher及4 Lane次之；monitor contention仅6次且最大`0.114ms`，VM operation最长`0.583ms`，最大观测safepoint约`2.43ms`。交易owner无同步socket I/O，文件写仅JFR/JMH artifact；DataLoss=0。最长编译为snapshot codec `736ms`，主要编译发生在预热/采样窗口内，因此本轮只作部分性能验证；876个异常均来自启动期反射能力探测，业务错误为0。
 - 有效性与artifact：Pageouts由57,811增至60,293，且未执行长稳，不能声明生产容量或无泄漏。main/profile/JFR SHA-256分别为`fc37badbbad8f60266c7637eb848d0f8679a16d4363333029ef09e130919fd42`、`96dc54e8fccd0fe720ada54201f33af3d905f25e9808fb59b749ddfe87a6f60d`、`6ce56182a9415787dca250ef08b1271612d44b65b72a064a006d4d560099caa5`；原始JFR约94MiB，summary/views位于同目录`jfr-analysis/`。
+
+### 2026-09-03 21:36:43 +08:00 — `PV-20260903-256-53` — `采集前锁定（sequence change-buffer复用，matcher=1）`
+
+#### 采集前锁定
+
+- 被测修改：每sequence语义保持不变，但`MatcherSettlementChanges`及其Lane change/balance primitive buffers在settlement完全收集并清空后回收到owner独占池；最多保留实际并行高水位数量，后续sequence复用已扩容容量。同步batch不再创建未使用的sequence changes。
+- 对照与门禁：对照PV-50 matcher=1 `38,031.789 terminal business ops/s`及PV-51约`34,897 B/terminal business op`；主轮不得回归超过10%，GC归因轮要求分配下降。accepted/terminal、unfinished/backlog、错误、资金、余额/冻结/持仓、订单终态、盘口、snapshot recovery及多settlement在途门禁不变。
+- 场景固定为`LINEAR_PERPETUAL`、matcher=1、4 Account Lane、10,000用户、512 symbols、16,384 PLACE_ORDER/invocation、50% maker+50% taker、100,000 offered、严格且仅`256 in-flight`。无profiler主轮`fork=1,warmup=3x3s,measurement=3x5s`；`-prof gc`轮`fork=1,warmup=1x3s,measurement=1x5s`；JFR轮`fork=0,warmup=1x3s,measurement=1x10s`。
+- 环境：HotSpot 25.0.1、Maven 3.9.16、8GiB ZGC、AlwaysPreTouch、DisableExplicitGC、NMT summary、BLOCKING settlement。HEAD `21374a60b76d146a1468731a41dc71b6e97ae505`，除本文件外diff SHA-256 `16051e8272e9b09e239bcedb1dcac7b2c0759d4837b4369a7df81eaf64fd45c4`，JAR SHA-256 `50f6422205752945d8f7e637c8dbd3c1d5367cc900f6da1cbaca84600570861d`。
+- artifact固定为`target/qualification/20260903T133643Z-sequence-buffer-reuse-matcher1-256/`；采集前swap=`221.25MiB`、Pages throttled=0、Pageouts=60,293。短轮不证明无泄漏；不启动或测试PostgreSQL、exporter、wallet、Kafka、API、WebSocket、market-data及其他产品线。
+
+#### 采集结果
+
+- 无profiler主轮：`37,112.106 terminal business/Core messages/s`、`18,556.053 trades/s`，三个business样本为`33,977.758/38,330.546/39,028.013 ops/s`，Lane settlement `55,668.158/s`。accepted与terminal闭合，unfinished/rejected/error/timeout/starvation为0；资金、账户/持仓、订单终态、盘口、snapshot recovery和多settlement在途门禁通过。相对PV-50波动`-2.42%`，通过10%回归门禁。
+- `-prof gc`轮为`38,723.942 terminal business ops/s`、`410.690 MiB/s`、`309,987,236.667 B/invocation`，折合约`18,920 B/terminal business op`，较PV-51约`34,897 B/op`下降`45.78%`；5秒measurement内GC次数为0。
+- JFR轮为`40,547.327 terminal business/Core messages/s`、`20,273.664 trades/s`。owner/JMH worker总分配由PV-50的`15.9GiB`降至`9.1GiB`，占比由84.23%降至74.47%；`MatcherSettlementChanges`构造和`ChangeBuffer`不再进入主要分配类型，`ChangeBuffer.drain`仅占CPU sample `0.67%`。剩余主要分配为`long[] 16.14%`、`byte[] 11.87%`、`Object[] 5.41%`、`TreeMap.Entry 4.73%`和订单终态对象。
+- JFR GC pause 23次、合计`0.433ms`，p50/p90/p95/p99/max=`0.0100/0.0328/0.143/0.170/0.170ms`；DataLoss=0。Pageouts由60,293增至60,900，因此只作短时部分验证，不作无泄漏结论。
+- main/gc/profile/JFR SHA-256分别为`158b253c02d6636992916eba03554e097ac14207ba3ea8514120a4a96196750f`、`d50e274cef3685a26430be5761b0f4a285499a32bd22f5a0929eb16bac5049c0`、`9ad35602e951e3c0d085c7b3c6e8ba0c4b44bf1c7a6646c867b36b2ed120da14`、`c1a1a2e561bf8ba0847a64c76b093fe4920290ce628497ab0b4bd7b39daa92b5`；JFR约85MiB，summary和热点views位于同一artifact目录。
+
+### 2026-09-03 21:41:01 +08:00 — `PV-20260903-256-54` — `采集前锁定（sequence change-buffer复用，matcher=2诊断）`
+
+#### 采集前锁定
+
+- 使用PV-53同一代码、JAR和业务场景，仅将matcher从1改为2，验证owner池不会在并行matcher settlement间提前复用；对照PV-53 matcher=1 `37,112.106/s`和PV-52 matcher=2 `38,380.220/s`。本轮仅作扩展性诊断。
+- 固定严格`256 in-flight`、4 Account Lane、10,000用户、512 symbols、16,384 PLACE_ORDER/invocation、50% maker+50% taker、100,000 offered；无profiler`fork=1,warmup=3x3s,measurement=3x5s,thread=1`。业务、资金、snapshot及多settlement门禁与PV-53一致。
+- HEAD、源码diff、JAR和JVM参数沿用PV-53；artifact固定为`target/qualification/20260903T134101Z-sequence-buffer-reuse-matcher2-256/`。采集前swap=`221.25MiB`、Pages throttled=0、Pageouts=60,900；不执行JFR/GC/长稳及外围服务测试。
+
+#### 采集结果
+
+- 无profiler主轮：`37,241.486 terminal business/Core messages/s`、`18,620.743 trades/s`；三个business样本为`34,468.527/36,708.534/40,547.397 ops/s`。accepted与terminal闭合，unfinished/rejected/error/timeout/starvation为0，资金、账户/持仓、订单终态、盘口、snapshot recovery和多settlement在途门禁通过。
+- 相对PV-53 matcher=1为`+0.35%`，仍无明显双matcher扩展收益，但确认并行matcher之间没有提前复用或sequence污染。相对PV-52 matcher=2波动`-2.97%`，在相同样本波动范围内。
+- Pageouts由60,900增至61,046；本轮仅作扩展性诊断。JSON SHA-256 `57d2cf7971746ddafc14d9bfec340164f3c33548a418dbb296e63980ebd7dec3`。
