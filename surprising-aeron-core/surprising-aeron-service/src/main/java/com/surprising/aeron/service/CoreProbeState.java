@@ -183,6 +183,8 @@ public final class CoreProbeState implements AutoCloseable,
     private final Map<Long, Long> matchingSubmitNanos = MATCHING_PHASE_METRICS_ENABLED
             ? new HashMap<>() : null;
     private long completedMatchingCount;
+    private int dispatchedSettlementInFlight;
+    private int dispatchedSettlementHighWaterMark;
     private long terminalTradeCount;
     private final TerminalStateRetention terminalRetention;
     private long auditBusinessStateHash;
@@ -3159,6 +3161,7 @@ public final class CoreProbeState implements AutoCloseable,
         currentClusterPosition = clusterPosition;
         LaneCommandContextRing.Context laneContext = laneCommandContexts.required(sequence);
         if (pending.settlementEvent() != null) {
+            if (pending.hasCommitContext()) restoreMatchingCommitContext(pending);
             return completeDispatchedMatcherSettlement(pending, matchingResult, laneContext);
         }
         if (MATCHING_PHASE_METRICS_ENABLED) {
@@ -3220,9 +3223,14 @@ public final class CoreProbeState implements AutoCloseable,
                     commandChangedOrderIds = boxedOrderIds(settlementPlan);
                     applyPreMatchingCancellations(pending, matchingResult);
                     if (matchingResult.accepted()) {
+                        boolean dispatchOnly = pending.isDispatchOnly();
                         settlementTreasuryDelta = applyMatchesOnAccountLanes(
                         pending, settlementPlan, sequence, matchingResult, laneContext, applyStartNanos);
-                        if (settlementTreasuryDelta == null) return null;
+                        pending.takeDispatchOnly();
+                        if (settlementTreasuryDelta == null || dispatchOnly) {
+                            suspendMatchingCommitContext(pending);
+                            return null;
+                        }
                     } else {
                         rejectPlaceOrderRuntime(pending.command().header().userId(), command.orderId(), sequence);
                     }
@@ -3399,6 +3407,7 @@ public final class CoreProbeState implements AutoCloseable,
         com.surprising.aeron.service.state.RuntimeTreasuryDelta settlementTreasuryDelta;
         try {
             settlementTreasuryDelta = runtimePlaceOrderState.collectMatcherSettlement(event);
+            commandFundsDelta = commandFundsDelta.plus(event.collectedFundsDelta());
             laneContext.completeLanes(event.requiredLaneMask());
             switch (pending.operation()) {
                 case PLACE -> {
@@ -3475,6 +3484,12 @@ public final class CoreProbeState implements AutoCloseable,
                 stateHash, responseData));
         CoreAdmissionReservation capacityReservation = pending.capacityReservation();
         laneCommandContexts.release(applied);
+        if (pending.takePipelinedSettlementCounted()) {
+            dispatchedSettlementInFlight--;
+            if (dispatchedSettlementInFlight < 0) {
+                throw new IllegalStateException("matcher settlement in-flight count underflow");
+            }
+        }
         removePendingMatching(applied);
         if (!deferredMatching.isEmpty() || !pendingOrderBatches.isEmpty()) submitDeferredMatchingAfterBatch();
         CoreResponse response = new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED,
@@ -3958,6 +3973,7 @@ public final class CoreProbeState implements AutoCloseable,
         beginDownstreamPublicationBatch();
         try {
             drainMatchingCompletions();
+            dispatchReadyPlaceSettlements(clusterTimestamp, clusterPosition);
             int completed = 0;
             int attempts = 0;
             while (attempts < maxCompletions) {
@@ -3987,13 +4003,44 @@ public final class CoreProbeState implements AutoCloseable,
                     }
                 }
                 attempts++;
-                if (response == null) continue;
+                if (response == null) {
+                    drainMatchingCompletions();
+                    dispatchReadyPlaceSettlements(clusterTimestamp, clusterPosition);
+                    continue;
+                }
                 handler.onCommitted(sequence, response);
                 completed++;
             }
             return completed;
         } finally {
             endDownstreamPublicationBatch();
+        }
+    }
+
+    private void dispatchReadyPlaceSettlements(long clusterTimestamp, long clusterPosition) {
+        while (true) {
+            PendingMatching pending = pendingMatching.dispatchHead();
+            if (pending == null || pending.operation() != PendingMatching.Operation.PLACE
+                    || pendingOrderBatches.containsKey(pending.sequence())
+                    || pending.settlementEvent() != null || hasPendingMatchingRejection(pending.sequence())) {
+                return;
+            }
+            LaneCommandContextRing.Context laneContext = laneCommandContexts.required(pending.sequence());
+            com.surprising.aeron.service.matching.CoreMatchingResult matching = laneContext.matchingCompletion();
+            if (matching == null || !matching.accepted()) return;
+            matching = laneContext.takeMatchingCompletion();
+            pending.establishCommitFence(clusterTimestamp, clusterPosition);
+            pending.dispatchOnly();
+            CoreResponse response = completeMatching(
+                    pending.sequence(), matching, clusterTimestamp, clusterPosition);
+            if (response != null || pending.settlementEvent() == null || !pending.hasCommitContext()) {
+                throw new IllegalStateException("pipelined matcher settlement committed during dispatch");
+            }
+            pendingMatching.completeDispatch(pending.sequence());
+            pending.countPipelinedSettlement();
+            dispatchedSettlementInFlight++;
+            dispatchedSettlementHighWaterMark = Math.max(
+                    dispatchedSettlementHighWaterMark, dispatchedSettlementInFlight);
         }
     }
 
@@ -4057,6 +4104,10 @@ public final class CoreProbeState implements AutoCloseable,
 
     int matchingCompletionHighWaterMark() {
         return matcherPipeline.completionHighWaterMark();
+    }
+
+    int dispatchedSettlementHighWaterMark() {
+        return dispatchedSettlementHighWaterMark;
     }
 
     int matchingCompletionCapacity() {
@@ -5260,7 +5311,7 @@ public final class CoreProbeState implements AutoCloseable,
                         throw new IllegalStateException("runtime commit must be admitted before mutation");
                     }
                     com.surprising.aeron.service.state.RuntimeFundsDelta fundsDelta =
-                            runtimePlaceOrderState.prepareFundsDelta(commandExternalAdjustment);
+                            runtimePlaceOrderState.prepareFundsDelta();
                     runtime.commitRuntimeChanges(runtimePlaceOrderState, runtimePlaceOrderIdentities,
                             previousBusinessStateHash, previousBusinessStateHash);
                     commitFaultInjector.inject("indexes");
@@ -5627,17 +5678,58 @@ public final class CoreProbeState implements AutoCloseable,
         com.surprising.aeron.service.state.MatcherSettlementEvent event = pending.settlementEvent();
         if (event == null) {
             event = runtimePlaceOrderState.dispatchMatcherSettlement(
-                    coreSequence, laneContext.expectedLaneMask(), nextCommitSequence(),
+                    coreSequence, laneContext.expectedLaneMask(), coreSequence,
                     auditBusinessStateHash, auditFundsStateHash,
                     pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), settlementPlan,
                     matchingResult, runtimePlaceOrderIdentities);
             pending.settlement(event, settlementPlan, applyStartNanos);
         }
+        if (pending.isDispatchOnly()) return null;
         if (!event.complete()) return null;
         com.surprising.aeron.service.state.RuntimeTreasuryDelta delta =
                 runtimePlaceOrderState.collectMatcherSettlement(event);
+        commandFundsDelta = commandFundsDelta.plus(event.collectedFundsDelta());
         laneContext.completeLanes(event.requiredLaneMask());
         return delta;
+    }
+
+    private void suspendMatchingCommitContext(PendingMatching pending) {
+        if (!snapshotProjectionDeferred || pending == null || pending.settlementEvent() == null) {
+            throw new IllegalStateException("matching commit context cannot be suspended");
+        }
+        pending.suspendCommitContext(commandChangedUserIds, commandChangedOrderIds,
+                changedUserIds.toPrimitiveArray(), changedOrderIds.toPrimitiveArray(), commandFundsDelta,
+                snapshotProjectionDirty, snapshotProjectionProvisionalOnly);
+        snapshotProjectionDeferred = false;
+        snapshotProjectionDirty = false;
+        snapshotProjectionProvisionalOnly = false;
+        commandChangedUserIds = List.of();
+        commandChangedOrderIds = List.of();
+        resetChangeAccumulators();
+        clearFactContext();
+    }
+
+    private void restoreMatchingCommitContext(PendingMatching pending) {
+        if (snapshotProjectionDeferred || currentAdmission != null) {
+            throw new IllegalStateException("another owner commit context is active");
+        }
+        PendingMatching.CommitContext context = pending.takeCommitContext();
+        activateFactContext(pending.capacityReservation(), pending.command(), pending.fingerprint());
+        snapshotProjectionDeferred = true;
+        snapshotProjectionDirty = context.snapshotDirty();
+        snapshotProjectionProvisionalOnly = context.snapshotProvisionalOnly();
+        commandChangedUserIds = context.changedUserIds();
+        commandChangedOrderIds = context.changedOrderIds();
+        changedUserIds.clear();
+        for (long userId : context.accumulatedUserIds()) changedUserIds.add(userId);
+        changedOrderIds.clear();
+        for (long orderId : context.accumulatedOrderIds()) changedOrderIds.add(orderId);
+        commandFundsDelta = context.fundsDelta();
+        commandExternalAdjustment = false;
+        commandTradeCount = 0;
+        commandLiquidationProgress = null;
+        commandLiquidationBatchResult = null;
+        commandRiskScanControl = null;
     }
 
     private void requireOrderIdentityAvailable(long userId, PlaceOrderCommand command) {

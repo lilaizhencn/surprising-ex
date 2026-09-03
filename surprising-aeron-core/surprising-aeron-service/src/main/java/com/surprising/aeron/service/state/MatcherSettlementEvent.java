@@ -35,6 +35,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     private final int quoteAssetId;
     private final int settleAssetId;
     private final RuntimeTreasuryDelta[] touchedLaneTreasuryDeltas;
+    private final TradingRuntimeState.MatcherSettlementChanges changes;
+    private RuntimeFundsDelta collectedFundsDelta = RuntimeFundsDelta.empty();
     @SuppressWarnings("FieldMayBeFinal")
     private long completedLaneMask;
     private boolean collected;
@@ -65,6 +67,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         this.baseAssetId = baseAssetId;
         this.quoteAssetId = quoteAssetId;
         this.settleAssetId = settleAssetId;
+        this.changes = runtime.newMatcherSettlementChanges();
         if (plan.tradeCount() == 0) {
             touchedLaneTreasuryDeltas = null;
         } else {
@@ -83,7 +86,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         if ((requiredLaneMask & laneMask) == 0) {
             throw new IllegalStateException("matcher fact was routed to an unrelated account lane");
         }
-        runtime.enterLaneCommandScope(lane);
+        if (commitSequence == 0) runtime.enterLaneCommandScope(lane);
+        else runtime.enterMatcherSettlementScope(lane, changes);
         try {
             RuntimeTreasuryDelta delta = touchedLaneTreasuryDeltas == null
                     ? EMPTY_TREASURY_DELTA : touchedLaneTreasuryDeltas[laneSlot(laneId)];
@@ -104,7 +108,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
                 runtime.publishLaneHashes(lane);
             }
         } finally {
-            runtime.exitLaneCommandScope(lane);
+            if (commitSequence == 0) runtime.exitLaneCommandScope(lane);
+            else runtime.exitMatcherSettlementScope(lane, changes);
         }
         runtime.recordMatcherLaneOperation(lane, System.nanoTime() - startedNanos);
         long previous = (long) COMPLETED_LANE_MASK.getAndBitwiseOrRelease(this, laneMask);
@@ -128,6 +133,11 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     int baseAssetId() { return baseAssetId; }
     int quoteAssetId() { return quoteAssetId; }
     int settleAssetId() { return settleAssetId; }
+    TradingRuntimeState.MatcherSettlementChanges changes() { return changes; }
+    public RuntimeFundsDelta collectedFundsDelta() { return collectedFundsDelta; }
+    void collectedFundsDelta(RuntimeFundsDelta value) {
+        collectedFundsDelta = value == null ? RuntimeFundsDelta.empty() : value;
+    }
 
     RuntimeTreasuryDelta collectTreasuryDelta() {
         if (!complete()) return null;

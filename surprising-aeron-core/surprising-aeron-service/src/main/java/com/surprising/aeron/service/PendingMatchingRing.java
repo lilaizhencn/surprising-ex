@@ -25,6 +25,7 @@ final class PendingMatchingRing {
     private final LongIntHashMap pendingByUser;
     private int head = -1;
     private int tail = -1;
+    private int dispatchHead = -1;
     private int freeHead;
     private int size;
 
@@ -89,6 +90,7 @@ final class PendingMatchingRing {
         if (tail == -1) head = index;
         else nextSlots[tail] = index;
         tail = index;
+        if (dispatchHead == -1) dispatchHead = index;
         addIndexes(pending, index);
         size++;
     }
@@ -114,6 +116,7 @@ final class PendingMatchingRing {
         sequences[entryIndex] = 0;
         int previous = previousSlots[entryIndex];
         int next = nextSlots[entryIndex];
+        if (dispatchHead == entryIndex) dispatchHead = next;
         if (previous == -1) head = next;
         else nextSlots[previous] = next;
         if (next == -1) tail = previous;
@@ -154,6 +157,18 @@ final class PendingMatchingRing {
         PendingMatching pending = entries[index];
         readySlots[index] = false;
         return pending;
+    }
+
+    PendingMatching dispatchHead() {
+        return dispatchHead < 0 ? null : entries[dispatchHead];
+    }
+
+    void completeDispatch(long sequence) {
+        int encodedIndex = slotsBySequence.get(sequence);
+        if (encodedIndex == 0 || dispatchHead != encodedIndex - 1) {
+            throw new IllegalStateException("matcher settlement dispatch is out of order");
+        }
+        dispatchHead = nextSlots[dispatchHead];
     }
 
     void registerSubmission(long sequence, int matcherShard) {

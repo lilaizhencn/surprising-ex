@@ -92,6 +92,28 @@ class PendingMatchingRingTest {
         assertThat(ring.pollReadyHead()).isNull();
     }
 
+    @Test
+    void advancesSettlementDispatchIndependentlyFromTheGlobalCommitHead() {
+        PendingMatchingRing ring = new PendingMatchingRing(4, 1);
+        PendingMatching first = pending(1, UUID.randomUUID(), 1001);
+        PendingMatching second = pending(2, UUID.randomUUID(), 1002);
+        PendingMatching third = pending(3, UUID.randomUUID(), 1003);
+        ring.put(first);
+        ring.put(second);
+        ring.put(third);
+
+        assertThat(ring.dispatchHead()).isSameAs(first);
+        ring.completeDispatch(1);
+        assertThat(ring.dispatchHead()).isSameAs(second);
+        assertThat(ring.firstSequence()).isEqualTo(1);
+        ring.remove(2);
+        assertThat(ring.dispatchHead()).isSameAs(third);
+        ring.remove(1);
+        assertThat(ring.firstSequence()).isEqualTo(3);
+        ring.completeDispatch(3);
+        assertThat(ring.dispatchHead()).isNull();
+    }
+
     private static PendingMatching pending(long sequence, UUID commandId, long userId) {
         return new PendingMatching(sequence, PendingMatching.Operation.PLACE,
                 command(commandId, userId), new RuntimeProjectionPoint(

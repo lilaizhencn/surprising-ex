@@ -473,6 +473,7 @@ final class LinearPerpetualSaturationWorkload {
                 }
                 boolean incompletePair = false;
                 for (boolean inFlight : pairInFlight) incompletePair |= inFlight;
+                int settlementInFlightHighWaterMark = harness.dispatchedSettlementHighWaterMark();
                 if (latencySamples != operationsPerRun
                         || scheduledOperations != operationsPerRun
                         || scheduledEntrySequence != operationsPerRun
@@ -485,6 +486,7 @@ final class LinearPerpetualSaturationWorkload {
                         || laneOperations <= Math.multiplyExact(operationsPerRun, 2L)
                         || laneOperations > Math.multiplyExact(operationsPerRun, 3L)
                         || parallelSettlementLanes < 2
+                        || maxInFlight > 1 && settlementInFlightHighWaterMark < 2
                         || rejectedLaneSubmissions != 0
                         || queuedLaneOperations != 0
                         || backlogSamples == 0
@@ -508,6 +510,7 @@ final class LinearPerpetualSaturationWorkload {
                             + ", rejectedLaneSubmissions=" + rejectedLaneSubmissions
                             + ", queuedLaneOperations=" + queuedLaneOperations
                             + ", parallelSettlementLanes=" + parallelSettlementLanes
+                            + ", settlementInFlightHighWaterMark=" + settlementInFlightHighWaterMark
                             + ", backlogSamples=" + backlogSamples
                             + ", usersInFlight=" + usersInFlight.size()
                             + ", incompletePair=" + incompletePair

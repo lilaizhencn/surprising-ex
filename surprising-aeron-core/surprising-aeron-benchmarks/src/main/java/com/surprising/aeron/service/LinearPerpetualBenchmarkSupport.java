@@ -866,6 +866,10 @@ final class LinearPerpetualBenchmarkSupport {
             return state.matchingCompletionCapacity();
         }
 
+        int dispatchedSettlementHighWaterMark() {
+            return state.dispatchedSettlementHighWaterMark();
+        }
+
         long terminalTradeCount() {
             return state.terminalTradeCount();
         }

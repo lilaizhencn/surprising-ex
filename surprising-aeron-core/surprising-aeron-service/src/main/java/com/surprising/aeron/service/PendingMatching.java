@@ -33,6 +33,9 @@ final class PendingMatching {
     private CoreMatchingOrder admittedMatchingOrder;
     private boolean matchingSubmitted;
     private boolean settlementReady;
+    private CommitContext commitContext;
+    private boolean dispatchOnly;
+    private boolean pipelinedSettlementCounted;
 
     PendingMatching(long sequence, Operation operation, CoreMessage command,
                     RuntimeProjectionPoint beforeProjection,
@@ -148,6 +151,9 @@ final class PendingMatching {
         admittedMatchingOrder = source.admittedMatchingOrder;
         matchingSubmitted = source.matchingSubmitted;
         settlementReady = source.settlementReady;
+        commitContext = source.commitContext;
+        dispatchOnly = source.dispatchOnly;
+        pipelinedSettlementCounted = source.pipelinedSettlementCounted;
     }
 
     PendingMatching withPreMatchingCancellations(List<Long> orderIds) {
@@ -232,6 +238,38 @@ final class PendingMatching {
         settlementPlan = plan;
         settlementApplyStartNanos = applyStartNanos;
     }
+    void suspendCommitContext(List<Long> changedUserIds, List<Long> changedOrderIds,
+                              long[] accumulatedUserIds, long[] accumulatedOrderIds,
+                              RuntimeFundsDelta fundsDelta, boolean snapshotDirty,
+                              boolean snapshotProvisionalOnly) {
+        if (commitContext != null || settlementEvent == null || changedUserIds == null
+                || changedOrderIds == null || accumulatedUserIds == null || accumulatedOrderIds == null
+                || fundsDelta == null) {
+            throw new IllegalStateException("invalid suspended matching commit context");
+        }
+        commitContext = new CommitContext(List.copyOf(changedUserIds), List.copyOf(changedOrderIds),
+                accumulatedUserIds, accumulatedOrderIds, fundsDelta, snapshotDirty, snapshotProvisionalOnly);
+    }
+    CommitContext takeCommitContext() {
+        CommitContext context = commitContext;
+        if (context == null) throw new IllegalStateException("matching commit context is missing");
+        commitContext = null;
+        return context;
+    }
+    boolean hasCommitContext() { return commitContext != null; }
+    void dispatchOnly() { dispatchOnly = true; }
+    boolean isDispatchOnly() { return dispatchOnly; }
+    boolean takeDispatchOnly() {
+        boolean value = dispatchOnly;
+        dispatchOnly = false;
+        return value;
+    }
+    void countPipelinedSettlement() { pipelinedSettlementCounted = true; }
+    boolean takePipelinedSettlementCounted() {
+        boolean value = pipelinedSettlementCounted;
+        pipelinedSettlementCounted = false;
+        return value;
+    }
     long commitFenceTimestamp() {
         if (!commitFenceEstablished) throw new IllegalStateException("matching commit fence is not established");
         return commitFenceTimestamp;
@@ -250,5 +288,11 @@ final class PendingMatching {
         LIQUIDATION,
         LIQUIDATION_BATCH,
         SETTLEMENT
+    }
+
+    record CommitContext(List<Long> changedUserIds, List<Long> changedOrderIds,
+                         long[] accumulatedUserIds, long[] accumulatedOrderIds,
+                         RuntimeFundsDelta fundsDelta, boolean snapshotDirty,
+                         boolean snapshotProvisionalOnly) {
     }
 }
