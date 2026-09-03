@@ -1036,8 +1036,10 @@ public final class CoreProbeState implements AutoCloseable,
                                                   long clusterPosition, SourceKey sourceKey,
                                                   CommandFingerprint fingerprint) {
         OrderBatchPending batch;
+        DecodedMatchingCommand decodedCommand;
         try {
-            batch = decodeOrderBatch(message, clusterTimestamp, clusterPosition);
+            decodedCommand = DecodedMatchingCommand.decode(message);
+            batch = decodeOrderBatch(message, decodedCommand, clusterTimestamp, clusterPosition);
             validateOrderBatchIdentity(batch, message.header().userId());
         } catch (CoreStateRejectedException exception) {
             return rejected(CoreResultCode.fromRejectionCode(exception.code()));
@@ -1049,13 +1051,14 @@ public final class CoreProbeState implements AutoCloseable,
         CoreAdmissionReservation capacityReservation;
         try {
             capacityReservation = CoreAdmissionReservation.reserve(runtimeProjectionJournal, exportState,
-                    CoreAdmissionReservation.AdmissionDemand.matching(message, matchingOrderBound(message)));
+                    CoreAdmissionReservation.AdmissionDemand.matching(message, matchingOrderBound(message, decodedCommand),
+                            decodedCommand));
         } catch (CoreStateRejectedException rejection) {
             return admissionRejected(CoreResultCode.fromRejectionCode(rejection.code()));
         }
         boolean activateNow = pendingOrderBatches.isEmpty();
         long sequence = Math.incrementExact(appliedCommandCount);
-        PendingMatching pending = newPendingMatching(sequence, batch.operation, message, fingerprint)
+        PendingMatching pending = newPendingMatching(sequence, batch.operation, message, fingerprint, decodedCommand)
                 .withCapacityReservation(capacityReservation);
         batch.sequence = sequence;
         putPendingMatching(pending);
@@ -1228,22 +1231,23 @@ public final class CoreProbeState implements AutoCloseable,
         }
     }
 
-    private OrderBatchPending decodeOrderBatch(CoreMessage message, long clusterTimestamp, long clusterPosition) {
+    private OrderBatchPending decodeOrderBatch(CoreMessage message, DecodedMatchingCommand decodedCommand,
+                                               long clusterTimestamp, long clusterPosition) {
         CoreMessageType type = message.header().messageType();
         if (type == CoreMessageType.PLACE_ORDER_BATCH) {
-            PlaceOrderBatchCommand command = TradingOrderBatchCodec.decodePlaceOrderBatch(message.payloadUnsafe());
+            PlaceOrderBatchCommand command = decodedCommand.placeOrderBatch();
             return new OrderBatchPending(OrderBatchKind.PLACE, command.orders().stream()
                     .map(value -> new OrderBatchItem(value.orderId(), 0, 0, value)).toList(),
                     clusterTimestamp, clusterPosition, PendingMatching.Operation.PLACE);
         }
         if (type == CoreMessageType.CANCEL_ORDER_BATCH) {
-            CancelOrderBatchCommand command = TradingOrderBatchCodec.decodeCancelOrderBatch(message.payloadUnsafe());
+            CancelOrderBatchCommand command = decodedCommand.cancelOrderBatch();
             return new OrderBatchPending(OrderBatchKind.CANCEL, command.orders().stream()
                     .map(value -> new OrderBatchItem(value.orderId(), 0, 0, value)).toList(),
                     clusterTimestamp, clusterPosition, PendingMatching.Operation.CANCEL);
         }
         if (type == CoreMessageType.AMEND_ORDER_BATCH) {
-            AmendOrderBatchCommand command = TradingOrderBatchCodec.decodeAmendOrderBatch(message.payloadUnsafe());
+            AmendOrderBatchCommand command = decodedCommand.amendOrderBatch();
             return new OrderBatchPending(OrderBatchKind.AMEND, command.orders().stream()
                     .map(value -> new OrderBatchItem(value.replacementOrderId(), value.originalOrderId(),
                             value.replacementOrderId(), value)).toList(),
@@ -1798,6 +1802,14 @@ public final class CoreProbeState implements AutoCloseable,
     }
 
     private PendingMatching newPendingMatching(long sequence, PendingMatching.Operation operation,
+                                               CoreMessage command, CommandFingerprint fingerprint,
+                                               DecodedMatchingCommand decodedCommand) {
+        return new PendingMatching(sequence, operation, command, fingerprint, List.of(), currentProjectionPoint,
+                currentBusinessStateHash(), auditFundsStateHash,
+                com.surprising.aeron.service.state.RuntimeFundsDelta.empty(), decodedCommand);
+    }
+
+    private PendingMatching newPendingMatching(long sequence, PendingMatching.Operation operation,
                                                CoreMessage command, List<Long> preMatchingCancellations) {
         return new PendingMatching(sequence, operation, command, preMatchingCancellations, currentProjectionPoint,
                 currentBusinessStateHash(), auditFundsStateHash,
@@ -1900,19 +1912,19 @@ public final class CoreProbeState implements AutoCloseable,
         return prepareMatching(message, clusterTimestamp, clusterPosition, sourceKey, operation, fingerprint, null);
     }
 
-    private int matchingOrderBound(CoreMessage message) {
+    private int matchingOrderBound(CoreMessage message, DecodedMatchingCommand decodedCommand) {
+        if (decodedCommand == null) throw new IllegalArgumentException("decoded matching command is required");
         int inFlightOrders = pendingMatching.size();
         if (!pendingOrderBatches.isEmpty()) {
             inFlightOrders = Math.addExact(inFlightOrders, PlaceOrderBatchCommand.MAX_ORDERS);
         }
         return switch (message.header().messageType()) {
             case PLACE_ORDER -> {
-                PlaceOrderCommand command = TradingCommandCodec.decodePlaceOrder(message.payloadUnsafe());
+                PlaceOrderCommand command = decodedCommand.placeOrder();
                 yield Math.addExact(activeOrderIndex.count(command.symbol()), inFlightOrders);
             }
             case PLACE_ORDER_BATCH -> {
-                PlaceOrderBatchCommand command =
-                        TradingOrderBatchCodec.decodePlaceOrderBatch(message.payloadUnsafe());
+                PlaceOrderBatchCommand command = decodedCommand.placeOrderBatch();
                 int activeOrders = 0;
                 for (PlaceOrderCommand order : command.orders()) {
                     activeOrders = Math.max(activeOrders, activeOrderIndex.count(order.symbol()));
@@ -1940,12 +1952,15 @@ public final class CoreProbeState implements AutoCloseable,
                                          SourceKey sourceKey, PendingMatching.Operation operation,
                                          CommandFingerprint fingerprint, PendingMatching deferredPending) {
         long matchingStartNanos = System.nanoTime();
+        DecodedMatchingCommand decodedCommand;
         CoreAdmissionReservation capacityReservation;
         try {
+            decodedCommand = deferredPending == null
+                    ? DecodedMatchingCommand.decode(message) : deferredPending.decodedCommand();
             capacityReservation = deferredPending == null
                     ? CoreAdmissionReservation.reserve(runtimeProjectionJournal, exportState,
                             CoreAdmissionReservation.AdmissionDemand.matching(
-                                    message, matchingOrderBound(message)))
+                                    message, matchingOrderBound(message, decodedCommand), decodedCommand))
                     : deferredPending.capacityReservation();
             if (capacityReservation == null) {
                 throw new IllegalStateException("deferred matching admission reservation is missing");
@@ -1961,8 +1976,6 @@ public final class CoreProbeState implements AutoCloseable,
         CommandFingerprint effectiveFingerprint = deferredPending == null
                 ? fingerprint : deferredPending.fingerprint();
         activateFactContext(capacityReservation, message, effectiveFingerprint);
-        DecodedMatchingCommand decodedCommand = deferredPending == null
-                ? DecodedMatchingCommand.decode(message) : deferredPending.decodedCommand();
         try {
             rejectLifecycleOverlap(message, operation, decodedCommand);
         } catch (CoreStateRejectedException exception) {
@@ -2101,10 +2114,13 @@ public final class CoreProbeState implements AutoCloseable,
     private CoreResponse deferMatching(CoreMessage message, long clusterTimestamp, long clusterPosition,
                                        SourceKey sourceKey, PendingMatching.Operation operation,
                                        CommandFingerprint fingerprint) {
+        DecodedMatchingCommand decodedCommand;
         CoreAdmissionReservation reservation;
         try {
+            decodedCommand = DecodedMatchingCommand.decode(message);
             reservation = CoreAdmissionReservation.reserve(runtimeProjectionJournal, exportState,
-                    CoreAdmissionReservation.AdmissionDemand.matching(message, matchingOrderBound(message)));
+                    CoreAdmissionReservation.AdmissionDemand.matching(message, matchingOrderBound(message, decodedCommand),
+                            decodedCommand));
         } catch (CoreStateRejectedException rejection) {
             return admissionRejected(CoreResultCode.fromRejectionCode(rejection.code()));
         } catch (ArithmeticException | IllegalArgumentException rejection) {
@@ -2112,7 +2128,7 @@ public final class CoreProbeState implements AutoCloseable,
                     ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND);
         }
         long sequence = Math.incrementExact(appliedCommandCount);
-        PendingMatching pending = newPendingMatching(sequence, operation, message, fingerprint)
+        PendingMatching pending = newPendingMatching(sequence, operation, message, fingerprint, decodedCommand)
                 .withCapacityReservation(reservation);
         putPendingMatching(pending);
         deferredMatching.put(sequence, new DeferredMatching(clusterTimestamp, clusterPosition, sourceKey));

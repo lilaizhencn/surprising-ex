@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
+import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 
 public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityView {
 
@@ -18,12 +19,12 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
     private volatile String[] symbols = new String[16];
     private final Map<ClientIdentity, Long> clientKeys = new HashMap<>();
     private final Map<Long, ClientIdentity> clients = new ConcurrentHashMap<>();
-    private final Map<Long, Long> clientAllocationKeys = new HashMap<>();
-    private final Map<Long, Long> clientKeyAllocations = new HashMap<>();
+    private final LongLongHashMap clientAllocationKeys = new LongLongHashMap();
+    private final LongLongHashMap clientKeyAllocations = new LongLongHashMap();
     private final Map<PositionIdentity, Long> positionKeys = new HashMap<>();
     private final Map<Long, PositionIdentity> positions = new ConcurrentHashMap<>();
-    private final Map<Long, Long> positionAllocationKeys = new HashMap<>();
-    private final Map<Long, Long> positionKeyAllocations = new HashMap<>();
+    private final LongLongHashMap positionAllocationKeys = new LongLongHashMap();
+    private final LongLongHashMap positionKeyAllocations = new LongLongHashMap();
     private int nextAssetId;
     private int nextSymbolId;
     private long nextClientKey = 1;
@@ -140,15 +141,17 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
         }
         ClientIdentity identity = new ClientIdentity(userId, clientOrderId);
         long allocation = nextClientKey - 1;
-        if (prepared.key() == 0 || !Long.valueOf(prepared.key()).equals(clientAllocationKeys.get(allocation))
+        if (prepared.key() == 0 || clientAllocationKeys.get(allocation) != prepared.key()
                 || !Long.valueOf(prepared.key()).equals(clientKeys.get(identity))
                 || !identity.equals(clients.get(prepared.key()))) {
             throw new IllegalStateException("prepared client key is no longer rollback-safe");
         }
         clientKeys.remove(identity);
         clients.remove(prepared.key());
-        clientAllocationKeys.remove(allocation);
-        clientKeyAllocations.remove(prepared.key(), allocation);
+        clientAllocationKeys.removeKey(allocation);
+        if (clientKeyAllocations.removeKeyIfAbsent(prepared.key(), allocation) != allocation) {
+            throw new IllegalStateException("client identity allocation index is inconsistent");
+        }
         nextClientKey = allocation;
     }
 
@@ -214,9 +217,11 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
         }
         while (nextPositionKey > checkpoint) {
             long allocation = --nextPositionKey;
-            Long key = positionAllocationKeys.remove(allocation);
-            if (key == null) continue;
-            positionKeyAllocations.remove(key, allocation);
+            long key = positionAllocationKeys.removeKeyIfAbsent(allocation, 0);
+            if (key == 0) continue;
+            if (positionKeyAllocations.removeKeyIfAbsent(key, allocation) != allocation) {
+                throw new IllegalStateException("position identity allocation index is inconsistent");
+            }
             PositionIdentity identity = positions.remove(key);
             if (identity == null || !Long.valueOf(key).equals(positionKeys.remove(identity))) {
                 throw new IllegalStateException("position identity checkpoint is inconsistent");
@@ -304,22 +309,20 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
         return target;
     }
 
-    private static void trackAllocation(Map<Long, Long> allocations, Map<Long, Long> allocationsByKey,
+    private static void trackAllocation(LongLongHashMap allocations, LongLongHashMap allocationsByKey,
                                         long allocation, long key) {
-        Long previousKey = allocations.putIfAbsent(allocation, key);
-        Long previousAllocation = allocationsByKey.putIfAbsent(key, allocation);
-        if (previousKey != null || previousAllocation != null) {
-            if (previousKey == null) allocations.remove(allocation, key);
-            if (previousAllocation == null) allocationsByKey.remove(key, allocation);
+        if (allocations.containsKey(allocation) || allocationsByKey.containsKey(key)) {
             throw new IllegalStateException("runtime identity allocation collision");
         }
+        allocations.put(allocation, key);
+        allocationsByKey.put(key, allocation);
     }
 
-    private static void removeAllocation(Map<Long, Long> allocations, Map<Long, Long> allocationsByKey,
+    private static void removeAllocation(LongLongHashMap allocations, LongLongHashMap allocationsByKey,
                                          long key) {
-        Long allocation = allocationsByKey.remove(key);
-        if (allocation == null) return;
-        if (!allocations.remove(allocation, key)) {
+        long allocation = allocationsByKey.removeKeyIfAbsent(key, 0);
+        if (allocation == 0) return;
+        if (allocations.removeKeyIfAbsent(allocation, key) != key) {
             throw new IllegalStateException("runtime identity allocation index is inconsistent");
         }
     }

@@ -138,13 +138,20 @@ final class CoreAdmissionReservation {
 
         static AdmissionDemand matching(CoreMessage message, int matchingOrderBound) {
             if (matchingOrderBound < 0) throw new IllegalArgumentException("matching order bound cannot be negative");
+            return matching(message, matchingOrderBound, DecodedMatchingCommand.decode(message));
+        }
+
+        static AdmissionDemand matching(CoreMessage message, int matchingOrderBound,
+                                        DecodedMatchingCommand decodedCommand) {
+            if (matchingOrderBound < 0) throw new IllegalArgumentException("matching order bound cannot be negative");
+            if (decodedCommand == null) throw new IllegalArgumentException("decoded matching command is required");
             CoreMessageType type = message.header().messageType();
             int operations = switch (type) {
                 case EXECUTE_LIQUIDATION, EXECUTE_LIQUIDATION_BATCH, SETTLE_INSTRUMENT -> 3;
                 default -> 1;
             };
             return of(operations, operations,
-                    FactCostEstimate.from(message, operations, 0, matchingOrderBound));
+                    FactCostEstimate.from(message, operations, 0, matchingOrderBound, decodedCommand));
         }
 
         private static AdmissionDemand of(int patchCount, int factCount, FactCostEstimate estimate) {
@@ -174,9 +181,16 @@ final class CoreAdmissionReservation {
 
         static FactCostEstimate from(CoreMessage message, int nodes, int riskScanUserBound,
                                      int matchingOrderBound) {
+            return from(message, nodes, riskScanUserBound, matchingOrderBound,
+                    DecodedMatchingCommand.decode(message));
+        }
+
+        static FactCostEstimate from(CoreMessage message, int nodes, int riskScanUserBound,
+                                     int matchingOrderBound, DecodedMatchingCommand decodedCommand) {
+            if (decodedCommand == null) throw new IllegalArgumentException("decoded matching command is required");
             int boundedWorkItems = switch (message.header().messageType()) {
                 case PLACE_ORDER -> quantityBoundedItems(
-                        TradingCommandCodec.decodePlaceOrder(message.payloadUnsafe()).quantitySteps(),
+                        decodedCommand.placeOrder().quantitySteps(),
                         matchingOrderBound);
                 case APPLY_FUNDING -> Math.multiplyExact(
                         TradingCommandCodec.decodeApplyFunding(message.payloadUnsafe()).maxUsers(), 10);
@@ -188,23 +202,23 @@ final class CoreAdmissionReservation {
                     yield BASE_ITEMS_PER_NODE;
                 }
                 case EXECUTE_LIQUIDATION -> Math.multiplyExact(
-                        TradingCommandCodec.decodeExecuteLiquidation(message.payloadUnsafe()).maxOrders(), 16);
+                        decodedCommand.liquidation().maxOrders(), 16);
                 case EXECUTE_LIQUIDATION_BATCH -> {
-                    var command = TradingCommandCodec.decodeExecuteLiquidationBatch(message.payloadUnsafe());
+                    var command = decodedCommand.liquidationBatch();
                     yield Math.addExact(Math.addExact(Math.multiplyExact(command.actions().size(), 24),
                                     Math.multiplyExact(command.maxCancelOrders(), 12)),
                             Math.multiplyExact(command.maxRiskScanUsers(), 12));
                 }
                 case SETTLE_INSTRUMENT -> {
-                    var command = TradingCommandCodec.decodeSettleInstrument(message.payloadUnsafe());
+                    var command = decodedCommand.settlement();
                     yield Math.addExact(Math.multiplyExact(command.maxUsers(), 12),
                             Math.multiplyExact(command.maxOrders(), 16));
                 }
-                case PLACE_ORDER_BATCH -> placeOrderBatchBoundedItems(message, matchingOrderBound);
+                case PLACE_ORDER_BATCH -> placeOrderBatchBoundedItems(decodedCommand.placeOrderBatch(), matchingOrderBound);
                 case CANCEL_ORDER_BATCH -> Math.multiplyExact(
-                        TradingOrderBatchCodec.decodeCancelOrderBatch(message.payloadUnsafe()).orders().size(), 16);
+                        decodedCommand.cancelOrderBatch().orders().size(), 16);
                 case AMEND_ORDER_BATCH -> Math.multiplyExact(
-                        TradingOrderBatchCodec.decodeAmendOrderBatch(message.payloadUnsafe()).orders().size(), 16);
+                        decodedCommand.amendOrderBatch().orders().size(), 16);
                 case EXECUTE_ADL -> {
                     TradingCommandCodec.decodeExecuteAdl(message.payloadUnsafe());
                     yield 128;
@@ -229,9 +243,10 @@ final class CoreAdmissionReservation {
                     factEstimateFaultInjector.inject(message, estimate), "fact estimate fault injector");
         }
 
-        private static int placeOrderBatchBoundedItems(CoreMessage message, int matchingOrderBound) {
+        private static int placeOrderBatchBoundedItems(com.surprising.aeron.protocol.PlaceOrderBatchCommand command,
+                                                       int matchingOrderBound) {
             int items = 0;
-            for (var order : TradingOrderBatchCodec.decodePlaceOrderBatch(message.payloadUnsafe()).orders()) {
+            for (var order : command.orders()) {
                 items = addBoundedItems(items, quantityBoundedItems(order.quantitySteps(), matchingOrderBound));
             }
             return items;

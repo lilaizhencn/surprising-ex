@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.state;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap;
 
@@ -40,6 +41,11 @@ public final class RuntimeFundsDelta {
                 else normalizedPostings.set(existingIndex, new RuntimeFactFrame.FundsPosting(
                         existing.assetId(), existing.ownerKind(), existing.ownerId(), existing.subledger(), units));
             }
+        } else if (trusted) {
+            for (RuntimeFactFrame.FundsPosting posting : postings) {
+                if (posting == null) throw new IllegalArgumentException("runtime funds posting is required");
+            }
+            normalizedPostings = null;
         } else {
             normalizedPostings = new ArrayList<>(postings.size());
             for (RuntimeFactFrame.FundsPosting posting : postings) {
@@ -48,14 +54,15 @@ public final class RuntimeFundsDelta {
             }
         }
         IntLongHashMap totals = new IntLongHashMap();
-        int[] touchedAssets = new int[Math.max(1, normalizedPostings.size())];
+        int[] touchedAssets = new int[Math.max(1, trusted ? postings.size() : normalizedPostings.size())];
         int touchedAssetCount = 0;
-        for (RuntimeFactFrame.FundsPosting posting : normalizedPostings) {
+        List<RuntimeFactFrame.FundsPosting> source = trusted ? postings : normalizedPostings;
+        for (RuntimeFactFrame.FundsPosting posting : source) {
             if (!totals.containsKey(posting.assetId())) touchedAssets[touchedAssetCount++] = posting.assetId();
             long previous = totals.get(posting.assetId());
             totals.put(posting.assetId(), Math.addExact(previous, posting.units()));
         }
-        this.postings = List.copyOf(normalizedPostings);
+        this.postings = trusted ? Collections.unmodifiableList(postings) : List.copyOf(normalizedPostings);
         this.unitsByAsset = totals;
         this.assetIds = java.util.Arrays.copyOf(touchedAssets, touchedAssetCount);
     }
@@ -82,6 +89,10 @@ public final class RuntimeFundsDelta {
 
     static RuntimeFundsDelta fromPatchPostings(List<RuntimeFactFrame.FundsPosting> postings) {
         return postings.isEmpty() ? EMPTY : new RuntimeFundsDelta(postings, true, true);
+    }
+
+    static RuntimeFundsDelta fromDistinctPatchPostings(List<RuntimeFactFrame.FundsPosting> postings) {
+        return postings.isEmpty() ? EMPTY : new RuntimeFundsDelta(postings, false, true);
     }
 
     public RuntimeFundsDelta plus(RuntimeFundsDelta other) {

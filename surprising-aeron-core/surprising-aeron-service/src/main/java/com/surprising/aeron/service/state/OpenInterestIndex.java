@@ -1,16 +1,14 @@
 package com.surprising.aeron.service.state;
 
 import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.NavigableMap;
-import java.util.Set;
 import java.util.TreeMap;
+import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 
 public final class OpenInterestIndex {
 
     private final NavigableMap<String, Totals> totals = new TreeMap<>();
-    private final Map<Long, RuntimePositionIndexValue> positions = new HashMap<>();
+    private final LongObjectHashMap<RuntimePositionIndexValue> positions = new LongObjectHashMap<>();
     private RuntimeIdentityRegistry identities;
 
     public OpenInterestIndex(TradingCoreState state) {
@@ -37,7 +35,7 @@ public final class OpenInterestIndex {
     }
 
     void apply(long positionKey, PositionRuntime after, RuntimeFactFrame.IdentityView identities) {
-        RuntimePositionIndexValue previous = positions.remove(positionKey);
+        RuntimePositionIndexValue previous = positions.removeKey(positionKey);
         if (previous != null) remove(previous);
         if (after != null) {
             RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(after, identities);

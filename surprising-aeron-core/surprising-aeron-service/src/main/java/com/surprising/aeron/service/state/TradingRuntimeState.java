@@ -60,9 +60,9 @@ public final class TradingRuntimeState implements AutoCloseable {
     private final Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers = new HashMap<>();
     private final Map<Long, CoreFeePolicyState> feePolicies = new HashMap<>();
     private final Map<Long, TransferRuntime> pendingTransfers = new HashMap<>();
-    private final LongObjectHashMap<LongHashSet> pendingReservationsBySequence = new LongObjectHashMap<>();
-    private final LongLongHashMap pendingReservationUsers = new LongLongHashMap();
-    private final LongIntHashMap pendingReservationCountsByUser = new LongIntHashMap();
+    private final LongObjectHashMap<LongHashSet> pendingReservationsBySequence = new LongObjectHashMap<>(4_096);
+    private final LongLongHashMap pendingReservationUsers = new LongLongHashMap(4_096);
+    private final LongIntHashMap pendingReservationCountsByUser = new LongIntHashMap(4_096);
     private final LongLongHashMap orderLaneIds = new LongLongHashMap();
     private final LongLongHashMap reservationLaneIds = new LongLongHashMap();
     private final LongLongHashMap positionLaneIds = new LongLongHashMap();

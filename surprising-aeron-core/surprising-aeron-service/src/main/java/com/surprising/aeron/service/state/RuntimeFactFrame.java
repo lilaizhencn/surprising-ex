@@ -21,11 +21,11 @@ import com.surprising.aeron.protocol.CoreTriggerOrderStateView;
 import com.surprising.aeron.protocol.CoreUserStateView;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.product.api.ProductLine;
+import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
+import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.BiFunction;
@@ -256,8 +256,14 @@ public final class RuntimeFactFrame implements RuntimeFactView {
 
     public CoreFactFragment materializeCoreFactFragment() {
         FactIdentitySlice registry = identities();
-        ArrayList<CoreUserStateView> users = new ArrayList<>();
-        ArrayList<CoreOrderStateView> orders = new ArrayList<>();
+        int userCapacity = 0;
+        int orderCapacity = 0;
+        for (AccountLaneOwnerGroup group : accountLaneGroups) {
+            userCapacity = Math.addExact(userCapacity, group.users.size());
+            orderCapacity = Math.addExact(orderCapacity, group.orders.size());
+        }
+        ArrayList<CoreUserStateView> users = new ArrayList<>(userCapacity);
+        ArrayList<CoreOrderStateView> orders = new ArrayList<>(orderCapacity);
         ArrayList<CoreLiquidationView> liquidations = null;
         ArrayList<CoreTriggerOrderStateView> triggers = null;
         for (AccountLaneOwnerGroup group : accountLaneGroups) {
@@ -313,7 +319,7 @@ public final class RuntimeFactFrame implements RuntimeFactView {
             ArrayList<CoreBalanceView> balances = null;
             for (BalanceChange change : group.balances) {
                 if (change.key.userId != user.userId() || change.after == null) continue;
-                if (balances == null) balances = new ArrayList<>();
+                if (balances == null) balances = new ArrayList<>(Math.min(16, group.balances.size()));
                 balances.add(new CoreBalanceView(identities.asset(change.key.assetId),
                         change.after.availableUnits, change.after.lockedUnits));
             }
@@ -321,7 +327,7 @@ public final class RuntimeFactFrame implements RuntimeFactView {
             for (ReservationChange change : group.reservations) {
                 ReservationRuntime value = change.after;
                 if (value == null || value.userId() != user.userId()) continue;
-                if (reservations == null) reservations = new ArrayList<>();
+                if (reservations == null) reservations = new ArrayList<>(Math.min(16, group.reservations.size()));
                 reservations.add(new CoreReservationView(value.orderId(), identities.symbol(value.symbolId()),
                         value.instrumentVersion(), value.kind(), identities.asset(value.assetId()),
                         value.totalReservedUnits(), value.releasedUnits(), value.consumedUnits(),
@@ -331,7 +337,7 @@ public final class RuntimeFactFrame implements RuntimeFactView {
             for (PositionChange change : group.positions) {
                 PositionRuntime value = change.after;
                 if (value == null || value.userId() != user.userId()) continue;
-                if (positions == null) positions = new ArrayList<>();
+                if (positions == null) positions = new ArrayList<>(Math.min(16, group.positions.size()));
                 positions.add(new CorePositionView(identities.symbol(value.symbolId()),
                         identities.asset(value.assetId()), value.marginMode(), value.positionSide(),
                         value.instrumentVersion(), value.signedQuantitySteps(), value.entryPriceTicks(),
@@ -340,7 +346,7 @@ public final class RuntimeFactFrame implements RuntimeFactView {
             ArrayList<CoreLeverageView> leverages = null;
             for (LeverageChange change : group.leverages) {
                 if (change.key.userId() != user.userId() || change.after == null) continue;
-                if (leverages == null) leverages = new ArrayList<>();
+                if (leverages == null) leverages = new ArrayList<>(Math.min(16, group.leverages.size()));
                 leverages.add(new CoreLeverageView(change.key.symbol(), change.key.marginMode(), change.after));
             }
             result.add(new CoreUserStateView(user.productLine(), user.userId(), user.revision(),
@@ -944,14 +950,19 @@ public final class RuntimeFactFrame implements RuntimeFactView {
                                    TerminalIds terminalIds,
                                    CoreExportEvent.Tombstones tombstones) {
         public CoreFactFragment {
-            changedUsers = List.copyOf(changedUsers);
-            changedOrders = List.copyOf(changedOrders);
-            changedLiquidations = List.copyOf(changedLiquidations);
-            changedTreasuryAssets = List.copyOf(changedTreasuryAssets);
-            changedTriggerOrders = List.copyOf(changedTriggerOrders);
-            matcherEvidence = List.copyOf(matcherEvidence);
+            changedUsers = immutableView(changedUsers);
+            changedOrders = immutableView(changedOrders);
+            changedLiquidations = immutableView(changedLiquidations);
+            changedTreasuryAssets = immutableView(changedTreasuryAssets);
+            changedTriggerOrders = immutableView(changedTriggerOrders);
+            matcherEvidence = immutableView(matcherEvidence);
             Objects.requireNonNull(terminalIds, "terminalIds");
             Objects.requireNonNull(tombstones, "tombstones");
+        }
+
+        private static <T> List<T> immutableView(List<T> values) {
+            Objects.requireNonNull(values, "values");
+            return values.isEmpty() ? List.of() : Collections.unmodifiableList(values);
         }
     }
 
@@ -1063,7 +1074,7 @@ public final class RuntimeFactFrame implements RuntimeFactView {
         private final GlobalChanges global = new GlobalChanges();
         private final ArrayList<FundsPosting> fundsPostings = new ArrayList<>();
         private final ArrayList<MatcherEvidence> matcherEvidence = new ArrayList<>();
-        private final Map<Long, String> liquidationAssets = new HashMap<>();
+        private final LongObjectHashMap<String> liquidationAssets = new LongObjectHashMap<>();
         private List<Long> terminalOrderIds = List.of();
         private List<Long> terminalLiquidationIds = List.of();
         private List<Long> terminalTriggerOrderIds = List.of();
@@ -1074,6 +1085,8 @@ public final class RuntimeFactFrame implements RuntimeFactView {
         private boolean sealed;
         private boolean finalSealed;
         private PreparedChanges activePrepared;
+        /** Built once by the owner before the frame is published; materializer reuses it. */
+        private RuntimeFundsDelta cachedFundsDelta;
 
         private Builder(ProductLine productLine, long previousSequence, long sequence) {
             this(productLine);
@@ -1116,6 +1129,7 @@ public final class RuntimeFactFrame implements RuntimeFactView {
             sealed = false;
             finalSealed = false;
             activePrepared = null;
+            cachedFundsDelta = null;
             this.productLine = Objects.requireNonNull(productLine, "product line");
             return this;
         }
@@ -1205,7 +1219,22 @@ public final class RuntimeFactFrame implements RuntimeFactView {
         }
 
         RuntimeFundsDelta materializeFundsDelta(boolean externalAdjustment) {
-            ArrayList<FundsPosting> derived = new ArrayList<>(fundsPostings);
+            RuntimeFundsDelta cached = cachedFundsDelta;
+            if (cached != null) {
+                cached.requireConserved(externalAdjustment);
+                return cached;
+            }
+            int postingCapacity = fundsPostings.size();
+            for (LaneChanges lane : lanes) {
+                if (lane != null) {
+                    postingCapacity = Math.addExact(postingCapacity,
+                            Math.multiplyExact(lane.balances.size, 2));
+                }
+            }
+            postingCapacity = Math.addExact(postingCapacity,
+                    Math.multiplyExact(global.treasuryAssets.changedCount(), 7));
+            ArrayList<FundsPosting> derived = new ArrayList<>(postingCapacity);
+            derived.addAll(fundsPostings);
             for (LaneChanges lane : lanes) {
                 if (lane == null) continue;
                 lane.balances.forEachChanged((userId, assetId, before, after) -> {
@@ -1240,8 +1269,11 @@ public final class RuntimeFactFrame implements RuntimeFactView {
                         com.surprising.aeron.service.state.FundsPosting.Subledger.CLEARING_PNL,
                         Math.subtractExact(treasuryClearingPnl(after), treasuryClearingPnl(before)));
             });
-            RuntimeFundsDelta delta = RuntimeFundsDelta.fromPatchPostings(derived);
+            RuntimeFundsDelta delta = fundsPostings.isEmpty()
+                    ? RuntimeFundsDelta.fromDistinctPatchPostings(derived)
+                    : RuntimeFundsDelta.fromPatchPostings(derived);
             delta.requireConserved(externalAdjustment);
+            cachedFundsDelta = delta;
             return delta;
         }
 
@@ -1326,8 +1358,9 @@ public final class RuntimeFactFrame implements RuntimeFactView {
                                          LiquidationRuntime after, String asset) {
             if (asset == null || asset.isBlank()) throw new IllegalArgumentException("liquidation asset is required");
             recordLiquidation(laneId, id, before, after);
-            String previous = liquidationAssets.putIfAbsent(id, asset);
-            if (previous != null && !previous.equals(asset)) {
+            String previous = liquidationAssets.put(id, asset);
+            if (previous == null) return this;
+            if (!previous.equals(asset)) {
                 throw new IllegalArgumentException("conflicting liquidation asset");
             }
             return this;
@@ -1462,10 +1495,7 @@ public final class RuntimeFactFrame implements RuntimeFactView {
             }
 
             GlobalOwnerGroup sealedGlobal = global.seal();
-            ArrayList<FundsPosting> derivedPostings = new ArrayList<>(fundsPostings);
-            deriveFundsPostings(groups, sealedGlobal, derivedPostings);
-            RuntimeFundsDelta primitiveFunds = RuntimeFundsDelta.fromPatchPostings(derivedPostings);
-            primitiveFunds.requireConserved(metadata.externalAdjustment());
+            RuntimeFundsDelta primitiveFunds = materializeFundsDelta(metadata.externalAdjustment());
             List<FundsPosting> canonicalFunds = primitiveFunds.postings();
             List<MatcherEvidence> canonicalEvidence = canonicalDistinct(
                     matcherEvidence, "duplicate matcher evidence");
@@ -1474,7 +1504,7 @@ public final class RuntimeFactFrame implements RuntimeFactView {
                     : terminalIds(groups);
             FactIdentitySlice identitySlice = FactIdentitySlice.capture(groups, identities);
             PreparedChanges prepared = new PreparedChanges(this, prepareMetadata, identitySlice,
-                    List.copyOf(groups), sealedGlobal, canonicalFunds,
+                    Collections.unmodifiableList(groups), sealedGlobal, canonicalFunds,
                     primitiveFunds, canonicalEvidence, terminals);
             activePrepared = prepared;
             sealed = true;
@@ -1506,56 +1536,6 @@ public final class RuntimeFactFrame implements RuntimeFactView {
                 }
             }
             return new TerminalIds(orders, liquidations, triggers);
-        }
-
-        private static void deriveFundsPostings(List<AccountLaneOwnerGroup> groups, GlobalOwnerGroup global,
-                                                List<FundsPosting> postings) {
-            for (AccountLaneOwnerGroup group : groups) {
-                for (BalanceChange change : group.balances()) {
-                    addPosting(postings, change.key().assetId(),
-                            com.surprising.aeron.service.state.FundsPosting.OwnerKind.USER,
-                            change.key().userId(),
-                            com.surprising.aeron.service.state.FundsPosting.Subledger.AVAILABLE,
-                            Math.subtractExact(available(change.after()), available(change.before())));
-                    addPosting(postings, change.key().assetId(),
-                            com.surprising.aeron.service.state.FundsPosting.OwnerKind.USER,
-                            change.key().userId(),
-                            com.surprising.aeron.service.state.FundsPosting.Subledger.LOCKED,
-                            Math.subtractExact(locked(change.after()), locked(change.before())));
-                }
-            }
-            for (TreasuryAssetChange change : global.treasuryAssets()) {
-                TreasuryAssetValue before = change.before();
-                TreasuryAssetValue after = change.after();
-                addPosting(postings, change.assetId(),
-                        com.surprising.aeron.service.state.FundsPosting.OwnerKind.TREASURY, 0,
-                        com.surprising.aeron.service.state.FundsPosting.Subledger.FEE,
-                        Math.subtractExact(treasuryFee(after), treasuryFee(before)));
-                addPosting(postings, change.assetId(),
-                        com.surprising.aeron.service.state.FundsPosting.OwnerKind.TREASURY, 0,
-                        com.surprising.aeron.service.state.FundsPosting.Subledger.INSURANCE,
-                        Math.subtractExact(treasuryInsurance(after), treasuryInsurance(before)));
-                addPosting(postings, change.assetId(),
-                        com.surprising.aeron.service.state.FundsPosting.OwnerKind.TREASURY, 0,
-                        com.surprising.aeron.service.state.FundsPosting.Subledger.DEFICIT,
-                        Math.negateExact(Math.subtractExact(treasuryDeficit(after), treasuryDeficit(before))));
-                addPosting(postings, change.assetId(),
-                        com.surprising.aeron.service.state.FundsPosting.OwnerKind.TREASURY, 0,
-                        com.surprising.aeron.service.state.FundsPosting.Subledger.LIQUIDATION_FEE,
-                        Math.subtractExact(treasuryLiquidationFee(after), treasuryLiquidationFee(before)));
-                addPosting(postings, change.assetId(),
-                        com.surprising.aeron.service.state.FundsPosting.OwnerKind.TREASURY, 0,
-                        com.surprising.aeron.service.state.FundsPosting.Subledger.FUNDING_RESIDUAL,
-                        Math.subtractExact(treasuryFundingResidual(after), treasuryFundingResidual(before)));
-                addPosting(postings, change.assetId(),
-                        com.surprising.aeron.service.state.FundsPosting.OwnerKind.TREASURY, 0,
-                        com.surprising.aeron.service.state.FundsPosting.Subledger.ROUNDING_RESIDUAL,
-                        Math.subtractExact(treasuryRoundingResidual(after), treasuryRoundingResidual(before)));
-                addPosting(postings, change.assetId(),
-                        com.surprising.aeron.service.state.FundsPosting.OwnerKind.TREASURY, 0,
-                        com.surprising.aeron.service.state.FundsPosting.Subledger.CLEARING_PNL,
-                        Math.subtractExact(treasuryClearingPnl(after), treasuryClearingPnl(before)));
-            }
         }
 
         private static void addPosting(List<FundsPosting> postings, int assetId,
@@ -1592,14 +1572,6 @@ public final class RuntimeFactFrame implements RuntimeFactView {
         }
         private static long treasuryClearingPnl(TreasuryAssetValue value) {
             return value == null ? 0 : value.clearingPnl();
-        }
-
-        java.util.Set<Integer> changedLaneIds() {
-            java.util.HashSet<Integer> changed = new java.util.HashSet<>();
-            for (int laneId = 0; laneId < lanes.length; laneId++) {
-                if (lanes[laneId] != null && lanes[laneId].hasChanges()) changed.add(laneId);
-            }
-            return java.util.Set.copyOf(changed);
         }
 
         long changedLaneMask() {
