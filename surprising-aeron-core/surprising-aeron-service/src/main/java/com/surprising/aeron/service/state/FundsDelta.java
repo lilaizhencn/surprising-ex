@@ -151,14 +151,14 @@ public final class FundsDelta {
                                              CoreUserState current,
                                              long userId,
                                              String asset) {
-                AssetBalance previousBalance = previous == null ? null : previous.balances().get(asset);
-                AssetBalance currentBalance = current == null ? null : current.balances().get(asset);
-                add(result, asset, FundsPosting.OwnerKind.USER, userId, FundsPosting.Subledger.AVAILABLE,
-                        Math.subtractExact(currentBalance == null ? 0 : currentBalance.availableUnits(),
-                                previousBalance == null ? 0 : previousBalance.availableUnits()));
-                add(result, asset, FundsPosting.OwnerKind.USER, userId, FundsPosting.Subledger.LOCKED,
-                        Math.subtractExact(currentBalance == null ? 0 : currentBalance.lockedUnits(),
-                                previousBalance == null ? 0 : previousBalance.lockedUnits()));
+        AssetBalance previousBalance = previous == null ? null : previous.balances().get(asset);
+        AssetBalance currentBalance = current == null ? null : current.balances().get(asset);
+        add(result, asset, FundsPosting.OwnerKind.USER, userId, FundsPosting.Subledger.AVAILABLE,
+                Math.subtractExact(currentBalance == null ? 0 : currentBalance.availableUnits(),
+                        previousBalance == null ? 0 : previousBalance.availableUnits()));
+        add(result, asset, FundsPosting.OwnerKind.USER, userId, FundsPosting.Subledger.LOCKED,
+                Math.subtractExact(currentBalance == null ? 0 : currentBalance.lockedUnits(),
+                        previousBalance == null ? 0 : previousBalance.lockedUnits()));
     }
 
     @Override
