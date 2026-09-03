@@ -3161,15 +3161,21 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     public static final class PreparedFactFrame {
+        private static final int MATERIALIZING = 1;
+        private static final int MATERIALIZED = 1 << 1;
+        private static final int OWNER_DONE = 1 << 2;
+        private static final int MATERIALIZER_DONE = 1 << 3;
+        private static final int MATERIALIZATION_FAILED = 1 << 4;
+
         private final RuntimeFactFrame.Builder builder;
         private final RuntimeIdentityRegistry identities;
         private RuntimeFactFrame.SealMetadata metadata;
         private final RuntimeFactFrameBuilderPool pool;
-        private RuntimeFactFrame materialized;
-        private int references = 1;
+        private final long sequence;
+        private final int coreFactItemCount;
+        private volatile RuntimeFactFrame materialized;
+        private volatile RuntimeException materializationFailure;
         private boolean materializationReference;
-        private boolean materializationReleased;
-        private boolean recycled;
 
         public PreparedFactFrame(RuntimeFactFrame.Builder builder, RuntimeIdentityRegistry identities,
                                  RuntimeFactFrame.SealMetadata metadata) {
@@ -3185,6 +3191,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             this.identities = identities;
             this.metadata = metadata;
             this.pool = pool;
+            this.sequence = builder.sequence();
+            this.coreFactItemCount = builder.coreFactItemCount();
         }
 
         public RuntimeFactFrame.Builder builder() { return builder; }
@@ -3203,8 +3211,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             return builder.seal(changes, businessStateHash, fundsStateHash);
         }
 
-        public synchronized PreparedFactFrame withFactMetadata(RuntimeFactFrame.CoreFactMetadata factMetadata) {
-            if (materialized != null) throw new IllegalStateException("Fact Frame is already materialized");
+        public PreparedFactFrame withFactMetadata(RuntimeFactFrame.CoreFactMetadata factMetadata) {
+            if (builder.lifecycleState() != 0) throw new IllegalStateException("Fact Frame is already materialized");
             metadata = new RuntimeFactFrame.SealMetadata(
                     metadata.beforeRevision(), metadata.afterRevision(), metadata.beforeBusinessStateHash(),
                     metadata.businessStateHash(), metadata.beforeFundsStateHash(), metadata.fundsStateHash(),
@@ -3216,56 +3224,86 @@ public final class TradingRuntimeState implements AutoCloseable {
             return builder.materializeFundsDelta(metadata.externalAdjustment());
         }
 
-        public synchronized RuntimeFactFrame materialize() {
-            if (materialized != null) return materialized;
-            RuntimeFactFrame.PreparedChanges changes = prepareChanges();
-            materialized = seal(changes, metadata.businessStateHash(), metadata.fundsStateHash());
-            if (materializationReference && !materializationReleased) {
-                materializationReleased = true;
-                releaseReference();
+        public RuntimeFactFrame materialize() {
+            RuntimeFactFrame completed = materialized;
+            if (completed != null) return completed;
+            if (beginMaterialization()) {
+                try {
+                    RuntimeFactFrame.PreparedChanges changes = prepareChanges();
+                    completed = seal(changes, metadata.businessStateHash(), metadata.fundsStateHash());
+                    materialized = completed;
+                    finishMaterialization(MATERIALIZED);
+                } catch (RuntimeException failure) {
+                    materializationFailure = failure;
+                    finishMaterialization(MATERIALIZATION_FAILED);
+                    throw failure;
+                }
+                return completed;
             }
-            return materialized;
+            while ((completed = materialized) == null && materializationFailure == null) Thread.onSpinWait();
+            if (completed != null) return completed;
+            throw materializationFailure;
         }
 
-        public synchronized void retainForMaterialization() {
-            if (pool == null || materializationReference || recycled) {
+        private boolean beginMaterialization() {
+            while (true) {
+                int state = builder.lifecycleState();
+                if ((state & (MATERIALIZING | MATERIALIZED | MATERIALIZATION_FAILED)) != 0) return false;
+                if (builder.compareAndSetLifecycleState(state, state | MATERIALIZING)) return true;
+            }
+        }
+
+        private void finishMaterialization(int outcome) {
+            while (true) {
+                int state = builder.lifecycleState();
+                int next = (state & ~MATERIALIZING) | outcome | MATERIALIZER_DONE;
+                if (builder.compareAndSetLifecycleState(state, next)) {
+                    recycleIfComplete(next);
+                    return;
+                }
+            }
+        }
+
+        public void retainForMaterialization() {
+            if (pool == null || materializationReference || builder.lifecycleState() != 0) {
                 throw new IllegalStateException("invalid Fact Frame materializer retain");
             }
             materializationReference = true;
-            references++;
         }
 
-        public synchronized void releaseOwner() {
-            releaseReference();
-        }
-
-        private void releaseReference() {
+        public void releaseOwner() {
             if (pool == null) return;
-            if (references <= 0 || recycled) throw new IllegalStateException("Fact Frame released twice");
-            references--;
-            if (references == 0) {
-                recycled = true;
+            while (true) {
+                int state = builder.lifecycleState();
+                if ((state & OWNER_DONE) != 0) throw new IllegalStateException("Fact Frame released twice");
+                int next = state | OWNER_DONE;
+                if (!materializationReference) next |= MATERIALIZER_DONE;
+                if (builder.compareAndSetLifecycleState(state, next)) {
+                    recycleIfComplete(next);
+                    return;
+                }
+            }
+        }
+
+        private void recycleIfComplete(int state) {
+            if ((state & (OWNER_DONE | MATERIALIZER_DONE)) == (OWNER_DONE | MATERIALIZER_DONE)) {
                 pool.release(builder);
             }
         }
 
-        public synchronized long sequence() {
-            return materialized == null ? builder.sequence() : materialized.sequence();
-        }
+        public long sequence() { return sequence; }
         public long revision() { return metadata.afterRevision(); }
-        public synchronized int coreFactItemCount() {
-            return materialized == null ? builder.coreFactItemCount() : materialized.coreFactItemCount();
+        public int coreFactItemCount() { return coreFactItemCount; }
+        public RuntimeFactFrame.CoreFactMetadata coreFactMetadata() { return metadata.coreFactMetadata(); }
+        public void visitTerminalValues(RuntimeFactFrame.RetentionConsumer consumer) {
+            RuntimeFactFrame completed = materialized;
+            if (completed == null) builder.visitTerminalValues(consumer);
+            else completed.visitTerminalValues(consumer);
         }
-        public synchronized RuntimeFactFrame.CoreFactMetadata coreFactMetadata() {
-            return materialized == null ? metadata.coreFactMetadata() : materialized.coreFactMetadata();
-        }
-        public synchronized void visitTerminalValues(RuntimeFactFrame.RetentionConsumer consumer) {
-            if (materialized == null) builder.visitTerminalValues(consumer);
-            else materialized.visitTerminalValues(consumer);
-        }
-        public synchronized void visitIdentityReleases(RuntimeFactFrame.IdentityReleaseConsumer consumer) {
-            if (materialized == null) builder.visitIdentityReleases(consumer);
-            else materialized.visitIdentityReleases(consumer);
+        public void visitIdentityReleases(RuntimeFactFrame.IdentityReleaseConsumer consumer) {
+            RuntimeFactFrame completed = materialized;
+            if (completed == null) builder.visitIdentityReleases(consumer);
+            else completed.visitIdentityReleases(consumer);
         }
 
     }

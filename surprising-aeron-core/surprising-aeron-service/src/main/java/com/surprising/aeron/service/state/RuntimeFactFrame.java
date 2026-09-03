@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.BiFunction;
+import java.util.concurrent.atomic.AtomicInteger;
 
 interface RuntimeFactView {
     ProductLine productLine();
@@ -1052,6 +1053,7 @@ public final class RuntimeFactFrame implements RuntimeFactView {
 
     public static final class Builder {
         private Builder nextFree;
+        private final AtomicInteger lifecycleState = new AtomicInteger();
         private ProductLine productLine;
         private long previousSequence;
         private long sequence;
@@ -1084,12 +1086,17 @@ public final class RuntimeFactFrame implements RuntimeFactView {
 
         Builder nextFree() { return nextFree; }
         void nextFree(Builder nextFree) { this.nextFree = nextFree; }
+        int lifecycleState() { return lifecycleState.get(); }
+        boolean compareAndSetLifecycleState(int expected, int update) {
+            return lifecycleState.compareAndSet(expected, update);
+        }
 
         Builder reset() {
             return reset(productLine);
         }
 
         Builder reset(ProductLine productLine) {
+            lifecycleState.set(0);
             for (LaneChanges lane : lanes) if (lane != null) lane.reset();
             global.reset();
             fundsPostings.clear();
