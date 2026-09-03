@@ -1229,10 +1229,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         indexPendingReservation(userId, orderId, event.coreSequence(),
                 Math.incrementExact(totalPendingReservations));
         revision = Math.incrementExact(revision);
-        changedUsers.add(userId);
-        changedOrders.add(orderId);
-        changedReservations.add(orderId);
-        changedBalance(userId, event.assetId());
         return event.matchingOrder();
     }
 
