@@ -29,6 +29,11 @@ class ActiveOrderIndexTest {
         assertThat(index.reduceOnlyQuantity(11, "BTC-USDT", CoreOrderSide.SELL)).isEqualTo(3);
         assertThat(index.hasDifferentMarginMode(11, "BTC-USDT", CorePositionSide.NET,
                 CoreMarginMode.CROSS)).isTrue();
+        RuntimeOrderAdmission.AdmissionSummary summary = index.inspect(
+                11, "BTC-USDT", CorePositionSide.NET, CoreOrderSide.BUY, CoreMarginMode.ISOLATED);
+        assertThat(summary.pendingQuantity()).isEqualTo(5);
+        assertThat(summary.reduceOnlyQuantity()).isZero();
+        assertThat(summary.marginModeCount()).isEqualTo(1);
 
         Map<Long, CoreOrderState> orders = StateMapSupport.delta(before.orders());
         orders.put(7L, opening.fill(3));

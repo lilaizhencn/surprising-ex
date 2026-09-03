@@ -264,57 +264,37 @@ public final class AccountLaneState {
     }
 
     private final class LaneAdmissionOrderIndex implements RuntimeOrderAdmission.AdmissionOrderIndex {
+        private final RuntimeOrderAdmission.AdmissionSummary summary =
+                new RuntimeOrderAdmission.AdmissionSummary();
         private int symbolId;
 
         @Override
-        public long pendingQuantity(long userId, String symbol, CorePositionSide positionSide,
-                                    com.surprising.aeron.protocol.CoreOrderSide side) {
-            long quantity = 0;
+        public RuntimeOrderAdmission.AdmissionSummary inspect(
+                long userId, String symbol, CorePositionSide positionSide,
+                com.surprising.aeron.protocol.CoreOrderSide side,
+                com.surprising.aeron.protocol.CoreMarginMode conflictingMarginMode) {
+            long pendingQuantity = 0;
+            long reduceOnlyQuantity = 0;
+            int marginModeCount = 0;
             LongHashSet ids = reservationIdsByUser.get(userId);
-            if (ids == null) return 0;
+            if (ids == null) return summary.set(0, 0, 0);
             LongIterator iterator = ids.longIterator();
             while (iterator.hasNext()) {
                 OrderRuntime order = orders.get(iterator.next());
-                if (active(order) && order.symbolId() == symbolId && !order.reduceOnly()
-                        && order.positionSide() == positionSide && order.side() == side) {
-                    quantity = Math.addExact(quantity, order.remainingQuantitySteps());
-                }
-            }
-            return quantity;
-        }
-
-        @Override
-        public long reduceOnlyQuantity(long userId, String symbol,
-                                       com.surprising.aeron.protocol.CoreOrderSide side) {
-            long quantity = 0;
-            LongHashSet ids = reservationIdsByUser.get(userId);
-            if (ids == null) return 0;
-            LongIterator iterator = ids.longIterator();
-            while (iterator.hasNext()) {
-                OrderRuntime order = orders.get(iterator.next());
-                if (active(order) && order.symbolId() == symbolId && order.reduceOnly()
+                if (!active(order) || order.symbolId() != symbolId) continue;
+                if (order.reduceOnly() && order.side() == side) {
+                    reduceOnlyQuantity = Math.addExact(
+                            reduceOnlyQuantity, order.remainingQuantitySteps());
+                } else if (!order.reduceOnly() && order.positionSide() == positionSide
                         && order.side() == side) {
-                    quantity = Math.addExact(quantity, order.remainingQuantitySteps());
+                    pendingQuantity = Math.addExact(pendingQuantity, order.remainingQuantitySteps());
+                }
+                if (order.positionSide() == positionSide
+                        && order.marginMode() == conflictingMarginMode) {
+                    marginModeCount = Math.incrementExact(marginModeCount);
                 }
             }
-            return quantity;
-        }
-
-        @Override
-        public int marginModeCount(long userId, String symbol, CorePositionSide positionSide,
-                                   com.surprising.aeron.protocol.CoreMarginMode marginMode) {
-            int count = 0;
-            LongHashSet ids = reservationIdsByUser.get(userId);
-            if (ids == null) return 0;
-            LongIterator iterator = ids.longIterator();
-            while (iterator.hasNext()) {
-                OrderRuntime order = orders.get(iterator.next());
-                if (active(order) && order.symbolId() == symbolId && order.positionSide() == positionSide
-                        && order.marginMode() == marginMode) {
-                    count = Math.incrementExact(count);
-                }
-            }
-            return count;
+            return summary.set(pendingQuantity, reduceOnlyQuantity, marginModeCount);
         }
 
         private static boolean active(OrderRuntime order) {

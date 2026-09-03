@@ -91,10 +91,16 @@ public final class RuntimeOrderAdmission {
                 || !order.symbol().equals(excludedSymbol))) {
             throw rejected("ORDER_NOT_FOUND", "excluded replacement order is invalid");
         }
-        validatePositionIdentity(positionMode, position, order, activeOrders, userId, excluded);
-        validateReduceOnly(runtime.productLine().isDerivative(), position, order, activeOrders, userId, excluded);
+        CoreMarginMode conflictingMode = order.marginMode() == CoreMarginMode.CROSS
+                ? CoreMarginMode.ISOLATED : CoreMarginMode.CROSS;
+        AdmissionSummary admissionSummary = activeOrders.inspect(
+                userId, order.symbol(), order.positionSide(), order.side(), conflictingMode);
+        validatePositionIdentity(
+                positionMode, position, order, admissionSummary, conflictingMode, excluded);
+        validateReduceOnly(runtime.productLine().isDerivative(), position, order,
+                admissionSummary, userId, excluded);
         long leverage = effectiveLeverage(runtime, instrument, order, userId);
-        validateRiskLimits(runtime, instrument, position, order, activeOrders, userId,
+        validateRiskLimits(runtime, instrument, position, order, admissionSummary, userId,
                 openInterestSteps, excluded, leverage);
         return reservationUnits(instrument, position, order, leverage);
     }
@@ -126,7 +132,7 @@ public final class RuntimeOrderAdmission {
 
     private static void validatePositionIdentity(
             CorePositionMode mode, PositionRuntime position, ResolvedPlaceOrder order,
-            AdmissionOrderIndex activeOrders, long userId, OrderRuntime excluded) {
+            AdmissionSummary admissionSummary, CoreMarginMode conflictingMode, OrderRuntime excluded) {
         if ((mode == CorePositionMode.ONE_WAY && order.positionSide().hedgeSide())
                 || (mode == CorePositionMode.HEDGE && !order.positionSide().hedgeSide())) {
             throw rejected("POSITION_MODE_MISMATCH", "position side differs from user position mode");
@@ -137,10 +143,7 @@ public final class RuntimeOrderAdmission {
         }
         boolean positionConflict = position != null && position.signedQuantitySteps() != 0
                 && position.marginMode() != order.marginMode();
-        CoreMarginMode conflictingMode = order.marginMode() == CoreMarginMode.CROSS
-                ? CoreMarginMode.ISOLATED : CoreMarginMode.CROSS;
-        int conflictingOrders = activeOrders.marginModeCount(
-                userId, order.symbol(), order.positionSide(), conflictingMode);
+        int conflictingOrders = admissionSummary.marginModeCount();
         if (excluded != null && excluded.status() == CoreOrderStatus.OPEN
                 && excluded.positionSide() == order.positionSide()
                 && excluded.marginMode() == conflictingMode) {
@@ -159,7 +162,7 @@ public final class RuntimeOrderAdmission {
 
     private static void validateReduceOnly(
             boolean derivative, PositionRuntime position, ResolvedPlaceOrder order,
-            AdmissionOrderIndex activeOrders, long userId, OrderRuntime excluded) {
+            AdmissionSummary admissionSummary, long userId, OrderRuntime excluded) {
         if (!order.reduceOnly()) return;
         if (!derivative) throw rejected("REDUCE_ONLY_UNSUPPORTED", "spot order cannot be reduce-only");
         if (position == null || position.signedQuantitySteps() == 0
@@ -167,7 +170,7 @@ public final class RuntimeOrderAdmission {
             throw rejected("REDUCE_ONLY_REQUIRES_POSITION_STATE", "reduce-only order must close a position");
         }
         long positionSteps = Math.absExact(position.signedQuantitySteps());
-        long committedOrders = activeOrders.reduceOnlyQuantity(userId, order.symbol(), order.side());
+        long committedOrders = admissionSummary.reduceOnlyQuantity();
         if (excluded != null && excluded.status() == CoreOrderStatus.OPEN && excluded.reduceOnly()
                 && excluded.userId() == userId && excluded.side() == order.side()) {
             committedOrders = Math.subtractExact(committedOrders, excluded.remainingQuantitySteps());
@@ -180,12 +183,11 @@ public final class RuntimeOrderAdmission {
 
     private static void validateRiskLimits(
             TradingRuntimeState runtime, CoreInstrumentState instrument, PositionRuntime position,
-            ResolvedPlaceOrder order, AdmissionOrderIndex activeOrders, long userId, long openInterestSteps,
+            ResolvedPlaceOrder order, AdmissionSummary admissionSummary, long userId, long openInterestSteps,
             OrderRuntime excluded, long leverage) {
         if (!runtime.productLine().isDerivative() || order.reduceOnly()) return;
         long current = position == null ? 0 : position.signedQuantitySteps();
-        long pending = activeOrders.pendingQuantity(userId, instrument.symbol(),
-                order.positionSide(), order.side());
+        long pending = admissionSummary.pendingQuantity();
         if (excluded != null && excluded.status() == CoreOrderStatus.OPEN && !excluded.reduceOnly()
                 && excluded.userId() == userId && excluded.positionSide() == order.positionSide()
                 && excluded.side() == order.side()) {
@@ -274,12 +276,33 @@ public final class RuntimeOrderAdmission {
     }
 
     public interface AdmissionOrderIndex {
-        long pendingQuantity(long userId, String symbol, CorePositionSide positionSide, CoreOrderSide side);
+        AdmissionSummary inspect(long userId, String symbol, CorePositionSide positionSide,
+                                 CoreOrderSide side, CoreMarginMode conflictingMarginMode);
+    }
 
-        long reduceOnlyQuantity(long userId, String symbol, CoreOrderSide side);
+    public static final class AdmissionSummary {
+        private long pendingQuantity;
+        private long reduceOnlyQuantity;
+        private int marginModeCount;
 
-        int marginModeCount(long userId, String symbol, CorePositionSide positionSide,
-                            CoreMarginMode marginMode);
+        public long pendingQuantity() {
+            return pendingQuantity;
+        }
+
+        public long reduceOnlyQuantity() {
+            return reduceOnlyQuantity;
+        }
+
+        public int marginModeCount() {
+            return marginModeCount;
+        }
+
+        public AdmissionSummary set(long pendingQuantity, long reduceOnlyQuantity, int marginModeCount) {
+            this.pendingQuantity = pendingQuantity;
+            this.reduceOnlyQuantity = reduceOnlyQuantity;
+            this.marginModeCount = marginModeCount;
+            return this;
+        }
     }
 
     public record AdmissionIdentity(

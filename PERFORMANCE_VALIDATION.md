@@ -1745,3 +1745,37 @@
 - 无profiler主轮：`36,263.922 terminal business/Core messages/s`、`18,131.961 trades/s`，三个business样本为`33,253.837/39,816.419/35,721.510 ops/s`。accepted与terminal闭合，unfinished/rejected/error/timeout/starvation为0，资金、账户/持仓、订单终态、盘口、snapshot recovery和多settlement在途门禁通过。
 - 相对PV-58 matcher=1为`+0.01%`，相对PV-54 matcher=2为`-2.63%`，均在本机样本波动范围内；两个matcher没有吞吐扩展收益，但也没有sequence索引回归、提前复用或状态污染。
 - Pageouts由66,092增至66,345，因此本轮仅作matcher扩展性诊断。JSON SHA-256 `b604411e4738b2d699eb39a0e8732fa33a908f21da89f6e569d116596a93e70f`。
+
+### 2026-09-03 22:28:22 +08:00 — `PV-20260903-256-60` — `采集前锁定（热索引合并更新，matcher=1）`
+
+#### 采集前锁定
+
+- 被测修改：Account Lane、活动订单及batch admission将pending/reduce-only/margin-mode三次订单扫描合并为一次；活动订单索引只对变化的user/symbol集合做差量更新；持仓终态只物化一个`RuntimePositionIndexValue`并由PositionUser/OpenInterest/ADL共享，删除前两者重复position map；OpenInterest热路径使用可变HashMap聚合并按同symbol净差量更新，排序及不可变Totals只在查询边界生成；changed order/position缓冲直接携带最终runtime值供索引提交，已知终态路径不再回查Lane。
+- 对照与门禁：对照PV-58 matcher=1 `36,259.695 terminal business ops/s`及约`15,995 B/terminal business op`；无profiler主轮不得回归超过10%，GC轮每操作分配不得回归。accepted business/Core分别等于terminal，unfinished/rejected/error/timeout/starvation为0，期末matcher/Lane/in-flight backlog为0，trades为business的50%；teardown必须通过资金守恒、余额/冻结/持仓、订单生命周期、盘口、snapshot recovery和多settlement在途检查。
+- 固定场景：仅`LINEAR_PERPETUAL`进程内交易链路；1 matching engine、4 Account Lane、10,000活跃用户、512 listed/active symbols、每用户最多5持仓/10活动订单、每invocation 16,384 PLACE_ORDER、50% maker GTC + 50% taker IOC、100,000 offered terminal business ops/s、做市持续运行、严格且仅`256 in-flight`；open-loop并修正coordinated omission。主轮`fork=1,warmup=3x3s,measurement=3x5s,thread=1`，GC轮`fork=1,warmup=1x3s,measurement=1x5s`，JFR轮`fork=0,warmup=1x3s,measurement=1x10s`。
+- 环境：Oracle GraalVM Java HotSpot 25.0.1、Maven 3.9.16、MacBookPro16,1 / Intel Core i9-9880H / 16 logical CPU / 16GiB / macOS 26.7 x86_64；8GiB ZGC、AlwaysPreTouch、DisableExplicitGC、NMT summary、BLOCKING settlement、journal 65536/1GiB及既有Agrona opens/exports。定向service测试`62/62`和benchmark-support测试`10/10`通过。
+- 被测HEAD `f2baecbedab100ff40d238b5fbf5ec3f32de6b3c`，除本文件外diff SHA-256 `a3c8b04cfc2917a02a95c9ec4cd3968274d3a80ea5144c72e00a0cf186c842c3`，shaded JAR SHA-256 `5b1cab53bf7edb38dbef09d7b12e3731c7d883688f6ac3c4b69effa338f6e764`。artifact固定为`target/qualification/20260903T142822Z-hot-index-consolidation-matcher1-256/`；采集前swap=`157.25MiB`、Pages throttled=0、Pageouts=66,345。Pageouts增长、JFR DataLoss非0或业务门禁不闭合时仅作部分验证；短轮不证明无泄漏。
+- 不启动或测试PostgreSQL、exporter、wallet、Kafka、API、WebSocket、market-data及其他五产品线。锁定后不修改场景、参数或门禁，失败和异常只追加结果。
+
+#### 采集结果
+
+- 无profiler主轮：`37,237.544 terminal business/Core messages/s`、`18,618.772 trades/s`，三个business样本为`33,186.134/37,793.593/40,732.904 ops/s`；accepted与terminal闭合，unfinished/rejected/error/timeout/producer-starvation为0，资金、余额/冻结/持仓、订单终态、盘口、snapshot recovery和多settlement在途门禁通过。相对PV-58提升`2.70%`，通过10%回归门禁。
+- `-prof gc`轮为`43,744.744 terminal business ops/s`、`384.120 MB/s`、`257,413,218.286 B/invocation`，折合约`15,711 B/terminal business op`，较PV-58约`15,995 B/op`下降`1.78%`；measurement内GC次数为0。
+- JFR轮为`42,758.530 terminal business/Core messages/s`、`21,379.265 trades/s`，557,056个PLACE_ORDER样本；entry→accepted p50/p90/p95/p99/p99.9/max=`134.218/268.435/268.435/536.871/536.871/422.394 ms`，accepted→terminal=`8.389/8.389/8.389/16.777/67.109/110.816 ms`，entry→terminal max=`425.764 ms`。业务门禁闭合。
+- JFR热点确认：OpenInterest热更新不再通过TreeMap或逐次构造Totals，PositionUser/OpenInterest不再维护重复position-value map；三个索引共享一次`RuntimePositionIndexValue`终态物化。Account Lane admission调用栈只剩一次`reservationIdsByUser.get`和一次`inspect`遍历。`LongObjectHashMap.getIfAbsent`仍占336/1,389 execution samples，来源主要为ActiveOrder旧值读取、Account Lane用户订单集合定位、changed-balance及少数仅携带key的结算定位，不再是三遍admission扫描。
+- JFR运行时：sampled allocation约`12.000GB`、聚合器估算`21,542 sampled B/business op`（采样口径，仅作归因，分配验收采用GC轮）；热点仍为其他有序状态/快照边界的`TreeMap.put=10.56%`、primitive map插入扩容及订单终态对象。6次ZGC、28次pause合计`0.366ms`，pause p50/p90/p95/p99/max=`0.0096/0.0216/0.0483/0.0579/0.0579 ms`，allocation stall/failure=0。heap committed 8GiB；NMT committed峰值主要为GC `181.1MiB`、Tracing `32.9MiB`、Metaspace `31.1MiB`、Code `28.2MiB`，Direct Buffer为0。owner同步I/O和socket I/O为0，DataLoss=0；最大到达safepoint约`2.062ms`，最大VM operation为`13.124ms` HandshakeAllThreads。最长JIT编译为snapshot codec `790ms`，采样窗口仍包含较多编译。
+- 严格分析器因既有启动期反射/native能力探测的1,003个异常及线程角色完整性门禁返回非零；Pageouts由66,345增至69,485，且未执行长稳，所以本轮是正确性及短时性能门禁通过的部分验证，不声明生产容量或无泄漏。main/gc/JFR-json/JFR/aggregate SHA-256分别为`d9e79cea8b161b2ace04863d5a7dc9c53891b6d4444daadbd3a841481239b010`、`7ae4d33c6a686cccf40e11357519aa3b58717273dc5ba40f11b70d25890c6b70`、`0628ec8b430fdb6107edf1c6c0963cf7f99b57470f2d504c2d45c46a4c4f6caf`、`fcb8fd81baf53f62e5df1ed75ffd793fe3350840d058467f2409c94a487af2a3`、`aaed772fb203d511fb32c519e158dc776aba442d412597d59b44761168671f11`；原始JFR约84MiB，summary/views/聚合位于同一artifact的`jfr-analysis/`。
+
+### 2026-09-03 22:36:02 +08:00 — `PV-20260903-256-61` — `采集前锁定（热索引合并更新，matcher=2诊断）`
+
+#### 采集前锁定
+
+- 使用PV-60完全相同代码、JAR、机器和业务场景，仅将matching engines从1改为2，检查共享终态值、差量索引和复用admission summary在多个settlement并行在途时不会串sequence或提前覆盖；对照PV-60 matcher=1 `37,237.544/s`及PV-59 matcher=2 `36,263.922/s`。本轮仅作matcher扩展性诊断，不替代正式matcher=1口径。
+- 固定严格`256 in-flight`、4 Account Lane、10,000用户、512 symbols、16,384 PLACE_ORDER/invocation、50% maker GTC + 50% taker IOC、100,000 offered；无profiler`fork=1,warmup=3x3s,measurement=3x5s,thread=1`。accepted/terminal、unfinished/backlog、错误、资金、账户/持仓、订单终态、盘口、snapshot recovery和多settlement门禁与PV-60一致。
+- HEAD `f2baecbedab100ff40d238b5fbf5ec3f32de6b3c`，源码diff与JAR SHA-256沿用PV-60；HotSpot 25.0.1、8GiB ZGC及其他JVM参数不变。artifact固定为`target/qualification/20260903T143602Z-hot-index-consolidation-matcher2-256/`；采集前swap=`157.25MiB`、Pages throttled=0、Pageouts=69,485。不执行JFR/GC/长稳及外围服务测试；锁定后不修改参数或门禁。
+
+#### 采集结果
+
+- 无profiler主轮：`36,851.660 terminal business/Core messages/s`、`18,425.830 trades/s`，三个business样本为`32,910.047/40,226.170/37,418.762 ops/s`。accepted与terminal闭合，unfinished/rejected/error/timeout/producer-starvation为0，资金、账户/持仓、订单终态、盘口、snapshot recovery和多settlement在途门禁通过。
+- 相对PV-60 matcher=1为`-1.04%`，相对PV-59 matcher=2提升`1.62%`，均处于本机样本波动范围；两个matcher仍没有可确认的吞吐扩展收益，但共享终态值和复用summary未出现跨sequence覆盖、提前复用或资金/索引污染。
+- Pageouts由69,485增至69,573，本轮只作matcher扩展性诊断。JSON SHA-256 `559169abb657218b146eba4ee6d4b901d295d471af30877b6a57070a905b77e8`。

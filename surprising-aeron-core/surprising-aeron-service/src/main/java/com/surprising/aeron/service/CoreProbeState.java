@@ -6402,6 +6402,8 @@ public final class CoreProbeState implements AutoCloseable,
         private final java.util.Map<PendingQuantityKey, Long> pendingQuantities = new java.util.HashMap<>();
         private final java.util.Map<ReduceQuantityKey, Long> reduceOnlyQuantities = new java.util.HashMap<>();
         private final java.util.Map<MarginCountKey, Integer> marginModeCounts = new java.util.HashMap<>();
+        private final com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionSummary summary =
+                new com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionSummary();
 
         private BatchAdmissionOrderIndex(ActiveOrderIndex baseline) {
             this.baseline = java.util.Objects.requireNonNull(baseline, "baseline");
@@ -6428,47 +6430,39 @@ public final class CoreProbeState implements AutoCloseable,
         }
 
         @Override
-        public long pendingQuantity(long userId, String symbol,
-                                    com.surprising.aeron.protocol.CorePositionSide positionSide,
-                                    com.surprising.aeron.protocol.CoreOrderSide side) {
-            long quantity = baseline.pendingQuantity(userId, symbol, positionSide, side);
+        public com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionSummary inspect(
+                long userId, String symbol,
+                com.surprising.aeron.protocol.CorePositionSide positionSide,
+                com.surprising.aeron.protocol.CoreOrderSide side,
+                com.surprising.aeron.protocol.CoreMarginMode conflictingMarginMode) {
+            var baselineSummary = baseline.inspect(
+                    userId, symbol, positionSide, side, conflictingMarginMode);
+            long pendingQuantity = baselineSummary.pendingQuantity();
+            long reduceOnlyQuantity = baselineSummary.reduceOnlyQuantity();
+            int marginModeCount = baselineSummary.marginModeCount();
             for (OrderChange change : changes.values()) {
-                quantity = Math.subtractExact(quantity,
+                pendingQuantity = Math.subtractExact(pendingQuantity,
                         previousPendingContribution(change.previous(), userId, symbol, positionSide, side));
-                quantity = Math.addExact(quantity,
+                pendingQuantity = Math.addExact(pendingQuantity,
                         currentPendingContribution(change.current(), userId, symbol, positionSide, side));
-            }
-            return Math.addExact(quantity, pendingQuantities.getOrDefault(
-                    new PendingQuantityKey(userId, symbol, positionSide, side), 0L));
-        }
-
-        @Override
-        public long reduceOnlyQuantity(long userId, String symbol,
-                                       com.surprising.aeron.protocol.CoreOrderSide side) {
-            long quantity = baseline.reduceOnlyQuantity(userId, symbol, side);
-            for (OrderChange change : changes.values()) {
-                quantity = Math.subtractExact(quantity,
+                reduceOnlyQuantity = Math.subtractExact(reduceOnlyQuantity,
                         previousReduceOnlyContribution(change.previous(), userId, symbol, side));
-                quantity = Math.addExact(quantity,
+                reduceOnlyQuantity = Math.addExact(reduceOnlyQuantity,
                         currentReduceOnlyContribution(change.current(), userId, symbol, side));
+                marginModeCount = Math.subtractExact(marginModeCount,
+                        previousMarginContribution(
+                                change.previous(), userId, symbol, positionSide, conflictingMarginMode));
+                marginModeCount = Math.addExact(marginModeCount,
+                        currentMarginContribution(
+                                change.current(), userId, symbol, positionSide, conflictingMarginMode));
             }
-            return Math.addExact(quantity, reduceOnlyQuantities.getOrDefault(
+            pendingQuantity = Math.addExact(pendingQuantity, pendingQuantities.getOrDefault(
+                    new PendingQuantityKey(userId, symbol, positionSide, side), 0L));
+            reduceOnlyQuantity = Math.addExact(reduceOnlyQuantity, reduceOnlyQuantities.getOrDefault(
                     new ReduceQuantityKey(userId, symbol, side), 0L));
-        }
-
-        @Override
-        public int marginModeCount(long userId, String symbol,
-                                   com.surprising.aeron.protocol.CorePositionSide positionSide,
-                                   com.surprising.aeron.protocol.CoreMarginMode marginMode) {
-            int count = baseline.marginModeCount(userId, symbol, positionSide, marginMode);
-            for (OrderChange change : changes.values()) {
-                count = Math.subtractExact(count,
-                        previousMarginContribution(change.previous(), userId, symbol, positionSide, marginMode));
-                count = Math.addExact(count,
-                        currentMarginContribution(change.current(), userId, symbol, positionSide, marginMode));
-            }
-            return Math.addExact(count, marginModeCounts.getOrDefault(
-                    new MarginCountKey(userId, symbol, positionSide, marginMode), 0));
+            marginModeCount = Math.addExact(marginModeCount, marginModeCounts.getOrDefault(
+                    new MarginCountKey(userId, symbol, positionSide, conflictingMarginMode), 0));
+            return summary.set(pendingQuantity, reduceOnlyQuantity, marginModeCount);
         }
 
         private long previousPendingContribution(

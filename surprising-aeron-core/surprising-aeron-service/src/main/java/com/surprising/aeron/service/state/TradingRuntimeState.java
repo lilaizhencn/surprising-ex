@@ -83,9 +83,11 @@ public final class TradingRuntimeState implements AutoCloseable {
     private CoreRiskScanControlView riskScanControl = CoreRiskState.defaultScanControl();
     private final LongHashSet changedUsers = new LongHashSet();
     private final LongObjectHashMap<IntHashSet> changedBalances = new LongObjectHashMap<>();
-    private final LongHashSet changedOrders = new LongHashSet();
+    private final PublishedLaneChanges.ChangeBuffer<OrderRuntime> changedOrders =
+            new PublishedLaneChanges.ChangeBuffer<>();
     private final LongHashSet changedReservations = new LongHashSet();
-    private final LongHashSet changedPositions = new LongHashSet();
+    private final PublishedLaneChanges.ChangeBuffer<PositionRuntime> changedPositions =
+            new PublishedLaneChanges.ChangeBuffer<>();
     private final LongHashSet changedLiquidations = new LongHashSet();
     private final IntHashSet changedMarkPrices = new IntHashSet();
     private final LongHashSet changedRiskSnapshots = new LongHashSet();
@@ -743,6 +745,38 @@ public final class TradingRuntimeState implements AutoCloseable {
                 clear();
             }
 
+            private boolean isEmpty() {
+                return size == 0;
+            }
+
+            private void forEach(org.eclipse.collections.api.block.procedure.primitive.LongObjectProcedure<V> consumer) {
+                for (int index = 0; index < size; index++) {
+                    @SuppressWarnings("unchecked") V value = (V) values[index];
+                    consumer.value(keys[index], value);
+                }
+            }
+
+            private org.eclipse.collections.api.iterator.LongIterator longIterator() {
+                return new org.eclipse.collections.api.iterator.LongIterator() {
+                    private int cursor;
+
+                    @Override
+                    public long next() {
+                        if (!hasNext()) throw new java.util.NoSuchElementException();
+                        return keys[cursor++];
+                    }
+
+                    @Override
+                    public boolean hasNext() {
+                        return cursor < size;
+                    }
+                };
+            }
+
+            private long[] toArray() {
+                return java.util.Arrays.copyOf(keys, size);
+            }
+
             private void clear() {
                 for (int index = 0; index < size; index++) values[index] = null;
                 size = 0;
@@ -969,7 +1003,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (reservation != null) captureBalanceAfter(accountLane, userId, reservation.assetId());
             return new PendingReservationCompletion(reservation);
         });
-        changedOrders.add(orderId);
+        changedOrder(orderId);
         changedReservations.add(orderId);
         changedUsers.add(userId);
         if (completion.reservation() != null) changedBalance(userId, completion.reservation().assetId());
@@ -999,7 +1033,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             return null;
         });
         for (PendingReservationBatchCompletion completion : completions) {
-            changedOrders.add(completion.orderId());
+            changedOrder(completion.orderId());
             changedReservations.add(completion.orderId());
             changedUsers.add(completion.userId());
             changedBalance(completion.userId(), completion.reservation().assetId());
@@ -1516,7 +1550,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         OrderRuntime order = order(orderId);
         if (order == null) return;
         changedUsers.add(order.userId());
-        changedOrders.add(orderId);
+        changedOrder(orderId, order);
         changedReservations.add(orderId);
         changedBalance(order.userId(), baseAssetId);
         changedBalance(order.userId(), quoteAssetId);
@@ -1525,7 +1559,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             Long positionKey = identities.findPositionKey(order.userId(),
                     order.positionSide() == CorePositionSide.NET
                             ? instrument.symbol() : instrument.symbol() + ':' + order.positionSide().name());
-            if (positionKey != null) changedPositions.add(positionKey);
+            if (positionKey != null) changedPosition(positionKey);
         }
     }
 
@@ -1536,7 +1570,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         changedUsers.add(userId);
         changedBalance(userId, assetId);
-        changedPositions.add(positionKey);
+        changedPosition(positionKey);
     }
 
     public java.util.List<AccountLaneView> accountLaneViews(long laneMask) {
@@ -2559,7 +2593,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         onLane(order.userId(), lane -> lane.orders.put(order.orderId(), order));
         publishOrder(order.orderId(), order);
         orderLaneIds.put(order.orderId(), topology.accountLaneId(order.userId()) + 1L);
-        changedOrders.add(order.orderId());
+        changedOrder(order.orderId(), order);
         changedUsers.add(order.userId());
     }
 
@@ -2608,7 +2642,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
         }
         if (matcherSettlementChangesScope.get() == null) {
-            changedOrders.add(order.orderId());
+            changedOrder(order.orderId(), order);
             changedUsers.add(order.userId());
         }
     }
@@ -2622,7 +2656,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             onLane(previous.userId(), lane -> lane.orders.remove(orderId));
             publishOrder(orderId, null);
             orderLaneIds.removeKey(orderId);
-            changedOrders.add(orderId);
+            changedOrder(orderId, null);
             changedUsers.add(previous.userId());
         }
     }
@@ -2747,7 +2781,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         publishPosition(positionKey, position);
         if (laneCommandScope.get() == null) {
             positionLaneIds.put(positionKey, topology.accountLaneId(position.userId()) + 1L);
-            changedPositions.add(positionKey);
+            changedPosition(positionKey, position);
             changedUsers.add(position.userId());
             if (previous != null) changedUsers.add(previous.userId());
         }
@@ -2845,7 +2879,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         });
         publishPosition(positionKey, null);
         positionLaneIds.removeKey(positionKey);
-        changedPositions.add(positionKey);
+        changedPosition(positionKey, null);
         changedUsers.add(userId);
     }
 
@@ -2922,7 +2956,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         });
         publishOrder(orderId, canceled.order());
         publishReservation(orderId, canceled.reservation());
-        changedOrders.add(orderId);
+        changedOrder(orderId, canceled.order());
         changedReservations.add(orderId);
         changedUsers.add(userId);
         changedBalance(userId, canceled.reservation().assetId());
@@ -3051,7 +3085,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             for (TerminalOrderPruned terminal : pruned) {
                 publishOrder(terminal.orderId(), null);
                 orderLaneIds.removeKey(terminal.orderId());
-                changedOrders.add(terminal.orderId());
+                changedOrder(terminal.orderId(), null);
                 changedUsers.add(terminal.userId());
                 if (terminal.reservationRemoved()) {
                     publishReservation(terminal.orderId(), null);
@@ -3092,9 +3126,27 @@ public final class TradingRuntimeState implements AutoCloseable {
         changedUsers.add(userId);
     }
 
+    private void changedOrder(long orderId) {
+        changedOrders.put(orderId, order(orderId));
+    }
+
+    private void changedOrder(long orderId, OrderRuntime order) {
+        changedOrders.put(orderId, order);
+    }
+
+    private void changedPosition(long positionKey) {
+        changedPositions.put(positionKey, position(positionKey));
+    }
+
+    private void changedPosition(long positionKey, PositionRuntime position) {
+        changedPositions.put(positionKey, position);
+    }
+
     public LongHashSet changedOrders() {
         assertOwner();
-        return new LongHashSet(changedOrders);
+        LongHashSet keys = new LongHashSet();
+        changedOrders.forEach((orderId, ignored) -> keys.add(orderId));
+        return keys;
     }
 
     public LongHashSet changedReservations() {
@@ -3104,7 +3156,9 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public LongHashSet changedPositions() {
         assertOwner();
-        return new LongHashSet(changedPositions);
+        LongHashSet keys = new LongHashSet();
+        changedPositions.forEach((positionKey, ignored) -> keys.add(positionKey));
+        return keys;
     }
 
     public org.eclipse.collections.api.iterator.LongIterator changedPositionIterator() {
@@ -3120,8 +3174,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     void visitChangedIndexes(RuntimeFactFrame.ChangeConsumer consumer) {
         assertOwner();
         if (consumer == null) throw new IllegalArgumentException("changed-index consumer is required");
-        changedOrders.forEach(orderId -> consumer.order(orderId, null, order(orderId)));
-        changedPositions.forEach(positionKey -> consumer.position(positionKey, null, position(positionKey)));
+        changedOrders.forEach((orderId, value) -> consumer.order(orderId, null, value));
+        changedPositions.forEach((positionKey, value) -> consumer.position(positionKey, null, value));
         changedLiquidations.forEach(liquidationId ->
                 consumer.liquidation(liquidationId, null, liquidation(liquidationId)));
         changedRiskSnapshots.forEach(riskKey -> consumer.riskSnapshot(riskKey, null, riskSnapshot(riskKey)));
@@ -3134,7 +3188,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     public void releaseRetiredPositionIdentities(RuntimeIdentityRegistry identities) {
         assertOwner();
         if (identities == null) throw new IllegalArgumentException("runtime identities are required");
-        changedPositions.forEach(positionKey -> releaseRetiredPositionIdentity(identities, positionKey));
+        changedPositions.forEach((positionKey, ignored) ->
+                releaseRetiredPositionIdentity(identities, positionKey));
         changedRiskSnapshots.forEach(positionKey -> releaseRetiredPositionIdentity(identities, positionKey));
     }
 
@@ -3293,9 +3348,9 @@ public final class TradingRuntimeState implements AutoCloseable {
         for (LaneLongCaptures<?> captured : patchPositionsBeforeByLane) captured.clear();
         for (LaneClientOrderCaptures captured : patchClientOrdersBeforeByLane) captured.clear();
         clearChanged(changedUsers);
-        clearChanged(changedOrders);
+        changedOrders.clear();
         clearChanged(changedReservations);
-        clearChanged(changedPositions);
+        changedPositions.clear();
         clearChanged(changedLiquidations);
         clearChanged(changedMarkPrices);
         clearChanged(changedRiskSnapshots);
@@ -3474,7 +3529,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         publishReservation(orderId, reserved.reservation());
         orderLaneIds.put(orderId, topology.accountLaneId(userId) + 1L);
         reservationLaneIds.put(orderId, topology.accountLaneId(userId) + 1L);
-        changedOrders.add(orderId);
+        changedOrder(orderId, reserved.order());
         changedReservations.add(orderId);
         changedUsers.add(userId);
         changedBalance(userId, assetId);
@@ -3544,7 +3599,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         publishPosition(positionKey, position);
         if (matcherSettlementChangesScope.get() == null) {
             positionLaneIds.put(positionKey, topology.accountLaneId(position.userId()) + 1L);
-            changedPositions.add(positionKey);
+            changedPosition(positionKey, position);
             changedUsers.add(position.userId());
             if (previous != null) changedUsers.add(previous.userId());
         }

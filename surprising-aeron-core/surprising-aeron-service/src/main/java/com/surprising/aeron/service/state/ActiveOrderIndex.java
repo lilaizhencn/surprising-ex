@@ -20,6 +20,8 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     private final LongObjectHashMap<LongHashSet> idsByUser = new LongObjectHashMap<>();
     private final Map<String, LongHashSet> idsBySymbol = new HashMap<>();
     private final LongObjectHashMap<CoreOrderState> ordersById = new LongObjectHashMap<>();
+    private final RuntimeOrderAdmission.AdmissionSummary admissionSummary =
+            new RuntimeOrderAdmission.AdmissionSummary();
 
     public ActiveOrderIndex(TradingCoreState state) {
         rebuild(state);
@@ -120,6 +122,37 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
             }
         }
         return total;
+    }
+
+    @Override
+    public RuntimeOrderAdmission.AdmissionSummary inspect(
+            long userId, String symbol,
+            com.surprising.aeron.protocol.CorePositionSide positionSide,
+            com.surprising.aeron.protocol.CoreOrderSide side,
+            com.surprising.aeron.protocol.CoreMarginMode conflictingMarginMode) {
+        String normalized = OrderReservation.normalizeSymbol(symbol);
+        LongHashSet ids = idsByUser.get(userId);
+        if (ids == null) return admissionSummary.set(0, 0, 0);
+        long pendingQuantity = 0;
+        long reduceOnlyQuantity = 0;
+        int marginModeCount = 0;
+        LongIterator iterator = ids.longIterator();
+        while (iterator.hasNext()) {
+            CoreOrderState order = ordersById.get(iterator.next());
+            if (order == null || !order.symbol().equals(normalized)) continue;
+            if (order.reduceOnly() && order.side() == side) {
+                reduceOnlyQuantity = Math.addExact(
+                        reduceOnlyQuantity, order.remainingQuantitySteps());
+            } else if (!order.reduceOnly() && order.positionSide() == positionSide
+                    && order.side() == side) {
+                pendingQuantity = Math.addExact(pendingQuantity, order.remainingQuantitySteps());
+            }
+            if (order.positionSide() == positionSide
+                    && order.marginMode() == conflictingMarginMode) {
+                marginModeCount = Math.incrementExact(marginModeCount);
+            }
+        }
+        return admissionSummary.set(pendingQuantity, reduceOnlyQuantity, marginModeCount);
     }
 
     public long reduceOnlyQuantity(long userId, String symbol,
@@ -232,9 +265,24 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
 
     void apply(long orderId, OrderRuntime after, RuntimeFactFrame.IdentityView identities) {
         CoreOrderState previous = ordersById.get(orderId);
-        if (previous != null) remove(previous);
-        if (after != null && after.status() == CoreOrderStatus.OPEN) {
-            add(RuntimeStateMaterializer.orderSnapshot(after, identities));
+        CoreOrderState current = after != null && after.status() == CoreOrderStatus.OPEN
+                ? RuntimeStateMaterializer.orderSnapshot(after, identities) : null;
+        if (previous == null) {
+            if (current != null) add(current);
+            return;
+        }
+        if (current == null) {
+            remove(previous);
+            return;
+        }
+        ordersById.put(orderId, current);
+        if (previous.userId() != current.userId()) {
+            remove(idsByUser, previous.userId(), orderId);
+            add(idsByUser, current.userId(), orderId);
+        }
+        if (!previous.symbol().equals(current.symbol())) {
+            remove(idsBySymbol, previous.symbol(), orderId);
+            add(idsBySymbol, current.symbol(), orderId);
         }
     }
 
@@ -279,11 +327,29 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
         if (ids.isEmpty()) values.removeKey(key);
     }
 
+    private static void add(LongObjectHashMap<LongHashSet> values, long key, long id) {
+        LongHashSet ids = values.get(key);
+        if (ids == null) {
+            ids = new LongHashSet();
+            values.put(key, ids);
+        }
+        ids.add(id);
+    }
+
     private static <K> void remove(Map<K, LongHashSet> values, K key, long id) {
         LongHashSet ids = values.get(key);
         if (ids == null) return;
         ids.remove(id);
         if (ids.isEmpty()) values.remove(key);
+    }
+
+    private static <K> void add(Map<K, LongHashSet> values, K key, long id) {
+        LongHashSet ids = values.get(key);
+        if (ids == null) {
+            ids = new LongHashSet();
+            values.put(key, ids);
+        }
+        ids.add(id);
     }
 
     private static NavigableSet<Long> descending(long[] values) {

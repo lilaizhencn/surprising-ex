@@ -35,19 +35,19 @@ public final class AdlPositionIndex {
         return Collections.unmodifiableSet(result);
     }
 
-    void apply(java.util.List<RuntimeFactFrame.PositionChange> changes, RuntimeFactFrame.IdentityView identities) {
-        for (RuntimeFactFrame.PositionChange change : changes) {
-            apply(change.positionKey(), change.after(), identities);
-        }
+    RuntimePositionIndexValue value(long positionKey) {
+        return positions.get(positionKey);
     }
 
-    void apply(long positionKey, PositionRuntime after, RuntimeFactFrame.IdentityView identities) {
-        RuntimePositionIndexValue previous = positions.remove(positionKey);
+    void apply(long positionKey, RuntimePositionIndexValue previous, RuntimePositionIndexValue current) {
+        RuntimePositionIndexValue indexedPrevious = positions.remove(positionKey);
+        if (indexedPrevious != previous) {
+            throw new IllegalStateException("ADL position index differs from shared position index");
+        }
         if (previous != null) remove(previous, positionKey);
-        if (after != null) {
-            RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(after, identities);
-            positions.put(positionKey, indexed);
-            add(indexed, positionKey);
+        if (current != null) {
+            positions.put(positionKey, current);
+            add(current, positionKey);
         }
     }
 

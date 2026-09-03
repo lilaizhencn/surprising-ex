@@ -29,6 +29,17 @@ class RuntimeChangedIndexCommitTest {
         assertThat(indexes.openInterest.openInterestSteps("BTC-USDT")).isEqualTo(2);
 
         runtime.clearChangedKeys();
+        runtime.putPosition(positionKey, new PositionRuntime(7, symbolId, assetId,
+                CoreMarginMode.CROSS, CorePositionSide.NET, 1, 3, 100, 300, 0, 60));
+        runtime.putOrder(new OrderRuntime(11, 7, symbolId, 5));
+        indexes.coordinator.applyCurrent(runtime, identities);
+
+        assertThat(indexes.activeOrders.pendingQuantity(
+                7, "BTC-USDT", CorePositionSide.NET,
+                com.surprising.aeron.protocol.CoreOrderSide.BUY)).isEqualTo(5);
+        assertThat(indexes.openInterest.openInterestSteps("BTC-USDT")).isEqualTo(3);
+
+        runtime.clearChangedKeys();
         runtime.removeOrder(11);
         runtime.removePosition(positionKey, 7);
         indexes.coordinator.applyCurrent(runtime, identities);

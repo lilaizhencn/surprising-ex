@@ -59,9 +59,12 @@ public final class RuntimeFactIndexes implements RuntimeFactFrame.ChangeConsumer
 
     @Override
     public void position(long positionKey, PositionRuntime before, PositionRuntime after) {
-        positionUsers.apply(positionKey, after, activeIdentities);
-        openInterest.apply(positionKey, after, activeIdentities);
-        adlPositions.apply(positionKey, after, activeIdentities);
+        RuntimePositionIndexValue previous = adlPositions.value(positionKey);
+        RuntimePositionIndexValue current = after == null
+                ? null : RuntimePositionIndexValue.from(after, activeIdentities);
+        positionUsers.apply(previous, current);
+        openInterest.apply(previous, current);
+        adlPositions.apply(positionKey, previous, current);
         positionVisits++;
     }
 

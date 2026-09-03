@@ -6,14 +6,12 @@ import java.util.Map;
 import java.util.NavigableSet;
 import java.util.TreeSet;
 import org.eclipse.collections.api.iterator.LongIterator;
-import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 
 public final class PositionUserIndex {
 
     private final Map<String, LongHashSet> usersBySymbol = new HashMap<>();
-    private final LongObjectHashMap<RuntimePositionIndexValue> positions = new LongObjectHashMap<>();
     private final Map<String, LongIntHashMap> positionCountsBySymbol = new HashMap<>();
 
     public PositionUserIndex(TradingCoreState state) {
@@ -44,20 +42,9 @@ public final class PositionUserIndex {
         return higher == Long.MAX_VALUE ? null : higher;
     }
 
-    void apply(java.util.List<RuntimeFactFrame.PositionChange> changes, RuntimeFactFrame.IdentityView identities) {
-        for (RuntimeFactFrame.PositionChange change : changes) {
-            apply(change.positionKey(), change.after(), identities);
-        }
-    }
-
-    void apply(long positionKey, PositionRuntime after, RuntimeFactFrame.IdentityView identities) {
-        RuntimePositionIndexValue previous = positions.removeKey(positionKey);
+    void apply(RuntimePositionIndexValue previous, RuntimePositionIndexValue current) {
         if (previous != null) removePosition(previous);
-        if (after != null) {
-            RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(after, identities);
-            positions.put(positionKey, indexed);
-            addPosition(indexed);
-        }
+        if (current != null) addPosition(current);
     }
 
     public void rebuild(TradingCoreState state) {
@@ -68,12 +55,9 @@ public final class PositionUserIndex {
 
     public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {
         usersBySymbol.clear();
-        positions.clear();
         positionCountsBySymbol.clear();
         state.users().values().forEach(user -> user.positions().forEach((key, position) -> {
-            long positionKey = identities.positionKey(user.userId(), key);
             RuntimePositionIndexValue indexed = RuntimePositionIndexValue.from(user.userId(), position);
-            positions.put(positionKey, indexed);
             addPosition(indexed);
         }));
     }
