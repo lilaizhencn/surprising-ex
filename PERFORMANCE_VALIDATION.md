@@ -1067,3 +1067,9 @@
 - JFR归因轮为`8,245.926 terminal business ops/s`，accepted=terminal、unfinished/reject/error/timeout均为0。`PreparedFactFrame`/`RuntimeFactFrame` monitor事件为0；21个JavaMonitorEnter全部来自JAR/JFR初始化及一次symbol注册，证明PV-21的Frame串行锁已消除。实现不包含`MethodHandles`、`VarHandle`、reflection、FieldUpdater或业务`Unsafe`调用；JMH/Chronicle自身启动日志中的Unsafe警告不来自本次代码。
 - JFR `DataLoss=0`、owner正式窗口同步I/O=0、4次ZGC、allocation stall/failure=0，pause p99/max=`0.029939ms`；sample-weight估算约`70,466 B/business op`，仍远高于10,240门禁，top allocation仍为primitive map扩容、`TreeMap.put`、`HashMap.putVal`、`RuntimeFundsDelta`、`ArrayList`、`ByteBuffer.allocate`和PLACE decode。独立`-prof gc`因正确性/吞吐前置门禁失败未执行，sample-weight不能替代精确分配结论。
 - 锁定时swap used 4,461.75MiB，结束后5,181.00MiB，继续增加719.25MiB；环境门禁失败。未跑10分钟长稳，不能声明无泄漏。原始JFR 145MiB，SHA-256 `ac74512c287381134942d86674e32dd1b003c216501a255429654e45d5bcb7ae`；主JSON SHA-256 `a8b3d8286dd54a2e403122ffb485a8f8837289ae8dab563f8ce71a05777c1709`；artifact为`target/qualification/20260903T013511Z-lockfree-frame-256-scale/`。
+
+### 2026-09-03 09:46:38 +08:00 — `PV-20260903-256-23` — `采集前锁定（独立成交价的无锁无反射Frame）`
+
+- 被测commit固定为`b0147d969764623141131f355c6e0746c5407279`，对照为PV-22的`e8155067312402de5543a1c0b1bff200583e42f8`；生产实现不变，唯一变化是把saturation maker/taker成交价从fixture使用的100移到fixture从不使用的1,000，避免IOC消耗恢复快照中的订单。本轮继续验证无monitor、无反射、预分配Builder生命周期。
+- 继承PV-22的全部标准、机器/JVM、正确性、吞吐、延迟、分配、GC/JFR/NMT和有效性门禁；严格且仅为256 in-flight、1 matcher、4 Account Lane、4,096 Frame pool、10,000用户、512 listed/active symbol、每invocation 16,384个PLACE（50% maker GTC、50% taker IOC）、100,000 offered ops/s。主轮5x5s+5x5s、3 forks；JFR轮1x3s+1x10s；独立GC轮5x5s+3x5s、1 fork；阶段间至少30秒。
+- 锁定时swap used `5,181.00MiB`，环境容量结论预判无效，但仍执行同口径诊断确认订单隔离与Frame生命周期；不得宣称生产容量。命令沿用PV-22，仅`QUALIFICATION_RUN_ID=20260903T014638Z-isolated-price-256`，artifact固定为`target/qualification/20260903T014638Z-isolated-price-256-scale/`。任何失败照实追加；前置门禁失败则不跑10分钟长稳。
