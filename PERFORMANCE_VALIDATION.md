@@ -1696,3 +1696,18 @@
 - 无profiler主轮：`36,492.565 terminal business/Core messages/s`、`18,246.282 trades/s`；三个business样本`32,670.387/40,254.153/36,553.153 ops/s`。accepted与terminal闭合，unfinished/error为0，全部业务、资金、snapshot和多settlement门禁通过；相对PV-55为`+0.23%`。
 - `-prof gc`轮为`44,363.186 terminal business ops/s`、`403.710 MiB/s`、`265,777,682.286 B/invocation`，折合约`16,221 B/terminal business op`，较PV-55约17,000 B/op下降`4.58%`，较PV-51最初34,897 B/op累计下降`53.52%`；measurement内GC次数为0。
 - Pageouts由61,423增至61,658，短时验证通过。main/gc SHA-256分别为`2ad7322a7c0269deac1638ad2e53c1712dd44c7f3b0a679c4fb44bd2f3059f90`、`9dbaee6f58cf0fe808fec3198bf60e094e83853e19a3716e8014f8b01186c0ad`。
+
+### 2026-09-03 21:56:20 +08:00 — `PV-20260903-256-57` — `采集前锁定（最终订单提交路径JFR）`
+
+#### 采集前锁定
+
+- 使用PV-56最终提交`d02d0f18e5b367e1bffd2430224ad8a5d8055fe2`和同一JAR（SHA-256 `81d8c6b6f912cde235eb0aeaa6a45bc97d73fe44a47a4e0a34708489033aed05`）补齐JFR证据；场景仍为matcher=1、4 Lane、100k offered、严格`256 in-flight`。
+- 固定`fork=0,warmup=1x3s,measurement=1x10s`，8GiB ZGC、NMT summary及自定义owner profile JFC与PV-53一致。业务、资金、snapshot、多settlement、DataLoss和owner I/O门禁不变；JFR吞吐不与无profiler主轮直接比较。
+- artifact固定为`target/qualification/20260903T135620Z-final-order-commit-jfr-matcher1-256/`；采集前swap=`189.25MiB`、Pages throttled=0、Pageouts=61,658。短轮不证明无泄漏，不测试外围服务和其他产品线。
+
+#### 采集结果
+
+- JFR轮为`42,824.734 terminal business/Core messages/s`、`21,412.367 trades/s`，accepted与terminal闭合，unfinished/error为0，业务、资金、snapshot和多settlement门禁通过。
+- BigInteger、fee-policy stream、`encodeOpenOrders`中间编码和`List.copyOf`不再进入主要热点。当前CPU首项为pending reservation相关primitive `LongObjectHashMap.getIfAbsent=21.09%`，之后为`TreeMap.put=4.43%`、`TreeMap.getEntry=3.16%`和`progressPlaceAdmissions=2.82%`；下一优化边界明确为单订单sequence的pending-reservation索引。
+- allocation热点为`TreeMap.put=10.69%`、primitive map插入/扩容约19.66%、matcher evidence绑定1.98%、订单终态对象1.77%和最终command result byte[] 1.58%；已删除的open-orders中间byte[]不再出现。GC pause 28次合计`0.450ms`，p50/p95/p99/max=`0.0106/0.0496/0.0500/0.0500ms`，DataLoss=0。
+- Pageouts由61,658增至64,796，因此为短时部分验证。profile/JFR SHA-256分别为`aef4e8133589597d98c8f3820b10612cb435b82ad17e29b27e2a8a34e11649dd`、`d4e654e794f745b6a831c438b94aed3795982cf3b871dc4a0fa3f8fa7dba885c`；JFR约84MiB，summary/views位于同一artifact目录。
