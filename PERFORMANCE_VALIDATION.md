@@ -1197,3 +1197,54 @@
 - 异常与分析器：JFR记录 `1,018` 个 Java 异常，主要为 `NoSuchFieldException=594`、`NoSuchMethodError=306`、`UnsatisfiedLinkError=33`、`IncompatibleClassChangeError=30`，主要线程为 main、JMH worker 和 matcher-0；因此严格零异常门禁失败，不能作为正式验收证据。分析器保留了严格运行和放宽 target/exception 后的诊断聚合；严格 analyzer 返回 `rc=1`（本轮 target=15,000 不符合其固定100,000 workload contract，且存在未分类生命周期线程），不影响原始 JFR、summary、metadata、views 和 aggregate 的留存。
 - 确认结论：在 matcher=2、512 symbols、4 Lane、256 in-flight 的这轮实测中，两个 matcher worker 已被创建且执行，但只增加 matcher 并未把主要 CPU/分配压力移出单 Product Core owner；`progressPlaceAdmissions → commitReadyMatching → completeMatching`、Core Fact materialization、状态哈希/容器操作是当前更可信的共享瓶颈证据。因此“全局 per-command barrier 已删除”与“仍有单一逻辑 Core owner 形成共享提交边界”可以同时成立；当前不建议直接上 matcher=4，下一步应优先针对这些 owner/Core Fact 热点做改动或更细的 measurement-window JFR。
 - artifact：目录 `target/qualification/20260903T123905Z-matcher2-256-jfr/`；原始 `saturation.jfr` `163,260,003 B`，SHA-256 `3b46f64ba87eb99f5b2aa0da77daf8b8b1025ea36208b00fd6069f6c1367ffea`；JMH JSON `21,057 B`，SHA-256 `9bc093dfe6029e4c420e9ee51bfb2d0dc20f4c4a7cab4f98931b5847055fa6c3`；GC log `76,058 B`，SHA-256 `73975fbb61b3effc0efe46050dde3e11d727c8b51c453c4c2469741c05c17556`；NMT baseline SHA-256 `cfb22a1eb3b35239ca9f8f5eebe2b313e0861589af5e23edf8ba73507c61e2c2`，NMT diff SHA-256 `257bf82bb9b0b80cbd3f4e1ece0f7ef7a18f8fc69f033e25f5033c2d13f9b888`；JFR summary SHA-256 `ef932773519353d14d905816be5bf7bb288108d45bd679697b59bf845d5d29ba`；诊断 aggregate `saturation-jfr-analysis-diagnostic/aggregate.json` `6,784,902 B`，SHA-256 `9957b2ea612ffa9cac0f3dfff530001a156c824a56066dda095c13cd5238cfb5`。严格分析输出位于 `saturation-jfr-analysis/`，诊断聚合及 bounded views 位于 `saturation-jfr-analysis-diagnostic/`。
+
+### 2026-09-03 13:23:00 +08:00 — `PV-20260903-256-30` — `采集前锁定（matcher completion drain 优化正式对照）`
+
+#### 采集前锁定
+
+- 记录创建时间：`2026-09-03 13:23:00 +08:00`
+- 被测 git commit：`de09b039`（待采集时解析完整 SHA）
+- 对照 git commit：`d5805e12db662caf88766a493704762228b191d1`
+- 修改点：`MatcherCommandPipeline` 暴露已完成 shard head，`MatcherPipelineGroup` 从各 shard 直接排空完成项，`CoreProbeState.drainMatchingCompletions` 不再遍历全部 pending matching；新增跨 shard drain 单元测试。未改变 Core sequence、Account Lane、资金、Fact、snapshot 或 matcher 数量。
+- 验证目标：确认局部 completion drain 优化不会改变 matcher 控制 token、shard 内提交顺序、资金守恒、订单终态、Core Fact 和 snapshot recovery，并观察单 matcher 正式场景的 terminal business ops/s、Core messages/s、trades/s、尾延迟、owner CPU 与分配变化。
+- in-flight：`256（固定，不得修改）`
+- 通过标准：
+  - 吞吐：`terminal business ops/s、terminal Core messages/s、trades/s 均大于0；与同机同场景对照相比不接受超过10%的 terminal business 回归`
+  - 正确性：`accepted == terminal；accepted/terminal Core messages 相等；unfinished、rejected、error、timeout、producer starvation 均为0；期末 matching/Lane/in-flight backlog为0；资金、余额、冻结、持仓、OPEN订单和快照恢复正确`
+  - 延迟：`记录 workload entry→accepted、accepted→terminal、entry→terminal 的 p50/p90/p95/p99/p99.9/max；本轮作为诊断对照，不设未采集的业务类型阈值`
+  - 稳定性：`JFR DataLoss=0、无 swap/page-out、Pages throttled=0、无明显 CPU throttling；owner正式窗口同步文件/网络/数据库I/O为0`
+  - 资源：`保存 JFR CPU/热点、allocation、GC、heap/native/NMT、线程/锁/park、safepoint/VM/JIT、I/O/异常证据；带 profiler 数值只用于归因`
+  - 长稳/泄漏：`本轮不执行长稳，不据此下无泄漏结论`
+- 测试场景：
+  - 产品线与 symbol：`仅 LINEAR_PERPETUAL；10,000 活跃用户；512 listed/active symbols`
+  - 业务动作与比例：`每 invocation 16,384 PLACE_ORDER；50% maker GTC + 50% taker IOC；同 symbol/价格/数量配对；预期 trades 为 terminal business 的50%`
+  - 负载模型：`saturation benchmark 的 open-loop constant-arrival，target offered rate=100,000 business ops/s；记录计划到达延迟并修正 coordinated omission`
+  - 并发：`活跃用户10,000；JMH线程1；in-flight=256；Account Lane=4；matching engine=1；risk engine=0`
+  - 批量参数：`N/A（单 PLACE_ORDER；operationsPerInvocation=16,384）`
+  - 阶段时长：`JMH 3x3s warmup + 3x5s measurement + 1 fork；随后1x3s warmup + 1x10s JFR measurement；不执行长稳`
+  - 做市状态：`基准内做市状态持续运行`
+  - 初始状态：`按现有 saturatedMatchingWorkload 初始化；用户资金、持仓、活动订单和盘口由 benchmark 固定生成`
+  - 终态检查：`资金守恒、余额/冻结/持仓、订单生命周期、盘口、Core Fact、snapshot restore`
+- 固定环境与参数：
+  - 机器/CPU/内存/容器：`MacBookPro16,1；Intel Core i9-9880H；16 logical CPU；16GiB；无容器绑核；确认无明显同机干扰`
+  - OS：`macOS 26.7 / Darwin 25.6 x86_64`
+  - JDK/JVM：`Oracle GraalVM Java HotSpot 25.0.1；Maven 3.9.16；执行前记录 java -version 与 mvn -version`
+  - JVM/GC/NMT 参数：`-Xms8g -Xmx8g -XX:SoftMaxHeapSize=8g -XX:+UseZGC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC --enable-native-access=ALL-UNNAMED；account-lanes=4；matcher=1；settlement=BLOCKING；journal=65536/1GiB；export pending=256MiB；export ACK interval=1024；JFR profile 与 NMT summary`
+  - JMH：`LinearPerpetualCoreBenchmark.saturatedMatchingWorkload；fork=1；warmup=3x3s；measurement=3x5s；JMH线程=1；operationsPerInvocation=16,384；target=100,000；maxInFlight=256`
+  - JFR：`owner-commit-profile.jfc；JFR saturation profile 约10s业务测量；保存原始 saturation.jfr、summary、metadata、views、GC/safepoint、NMT；profile 开销不与无 profiler 吞吐绝对比较`
+  - 代码与配置：`分支 codex/aeron-unified-core；被测 commit de09b039；artifact 使用本轮构建 shaded JAR；JFC SHA 在结果中记录`
+- 执行命令：
+  - `java -version && mvn -version`
+  - `QUALIFICATION_RUN_ID=20260903T132300Z-completion-drain-256 SURPRISING_JAVA_HOME=/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home SCALE_JMH_WARMUP_ITERATIONS=3 SCALE_JMH_WARMUP_SECONDS=3 SCALE_JMH_MEASUREMENT_ITERATIONS=3 SCALE_JMH_MEASUREMENT_SECONDS=5 SCALE_JMH_FORKS=1 SATURATION_OPERATIONS_PER_INVOCATION=16384 MATCHING_ENGINES=1 surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-linear-perpetual-scale.sh saturation`
+
+#### 采集结果
+
+- 采集时间：`2026-09-03 13:23–13:26 +08:00`；被测 commit `de09b039079fe5d1436356811d42776295cad2e9`；对照 commit `d5805e12db662caf88766a493704762228b191d1`；HotSpot JDK `25.0.1`、Maven `3.9.16`。JMH 主结果使用 `1 fork`、`3` 个 measurement 样本；JFR profile 按脚本使用 `-f 0`，因此只作诊断，不能与无 profiler 的主结果直接比较。
+- JMH 主结果：terminal business `9,078.890 ops/s`（样本 `8,777.623–9,324.044`，JMH 99.9% error `±5,062.604`）；terminal Core messages `9,087.756/s`；trades `4,539.445/s`。accepted business/Core 与 terminal business/Core 相等；unfinished business/Core、rejected、error、timeout、producer starvation 均为 `0`。Lane command=`9,078.890/s`、Lane total=`22,768.153/s`、Lane settlement=`13,689.263/s`；matching refill=`9,061.158/s`、window=`141.858/s`、full-window=`115.259/s`。
+- JFR profile 结果：terminal business `8,823.412 ops/s`；terminal Core messages `8,832.029/s`；trades `4,411.706/s`；accepted/terminal 计数相等，unfinished/rejected/error/timeout/starvation 均为 `0`。JFR workload 共 `131,072` 个 PLACE_ORDER 样本，scheduled 与 terminal business 均为 `131,072`；matching 最大 backlog=`256`、平均 backlog=`232`、full window=`81.25%`。延迟聚合记录为 entry→accepted `p50/p90/p95/p99/p99.9/max=1.0737/2.1475/2.1475/2.1475/2.1475/1.9803s`，accepted→terminal `16.777/33.554/33.554/33.554/33.554/32.310ms`，entry→terminal `1.0737/2.1475/2.1475/2.1475/2.1475/1.9955s`；其中 quantile 是 Log2 histogram 桶值，不能当作精确分位数。
+- JFR CPU/热点：execution samples 中 benchmark worker=`633`、core-fact-materializer=`79`、core-matcher-0=`78`、4 个 Account Lane 合计=`169`；主要业务热点为 `CoreProbeState.progressPlaceAdmissions`=`63`、`awaitMatchingResult`=`22`、`completeMatching`=`14`、`TreeMap.put`=`12`、`CoreStateHash.mix`=`11`。本轮仍显示共享 owner admission/完成路径比 matcher worker 更重。
+- JFR 分配/GC/内存：采样分配约 `8.760GB`，约 `66,834.9 B/terminal business op`（采样权重，不是精确 `-prof gc`）；主要分配站点为 `LongObjectHashMap.addKeyValueAtIndex`、`TreeMap.put`、`ByteBuffer.allocate`、`ImmutableCollections.listCopy`、`ArrayList.add`、`TradingRuntimeState.prepareFactFrame`。ZGC `4` 次，allocation stall/failure=`0`；总 GC 时间占记录时间约 `49.85%`，暂停 p50/p95/p99/max=`0.010/0.013/0.144/0.144ms`，最长阶段为 Concurrent Mark `132.260ms`。heap committed=`8GiB`，最大 used=`2.398GiB`，末次 GC 后 live set=`614MiB`；NMT summary/diff、DirectBufferStatistics=`0` 已保存。短记录不能证明无泄漏。
+- JFR 完整性与门禁：`DataLoss=0`、swap=`0`、Pages throttled=`0`、owner 同步文件/网络/数据库 I/O=`0 events/0 B`；JIT compilation=`8,613`、deoptimization=`524`。但记录了 `1,036` 个 Java exception/error throw（主要为 `NoSuchFieldException=594`、`NoSuchMethodError=324`、`UnsatisfiedLinkError=33`、`IncompatibleClassChangeError=30`），超过分析器配置的 `maxExceptions=0`，故分析脚本返回 `rc=1`，本轮不能作为正式性能验收。
+- 结论：局部 completion drain 改动通过受影响单测和核心回归测试，业务计数、订单终态及压测 teardown 校验通过；本轮没有证据表明吞吐有稳定提升，也没有引入可接受的完整 JFR 验收证据。按“不要增加复杂度”的约束，未加入 ready 链表、跨层视图复用或额外状态副本；当前主要瓶颈仍在共享 owner 的 admission/commit/完成和状态容器路径，后续若继续优化应先针对单一热点做小改动。
+- 未测范围：其他五条产品线、API/Kafka/数据库/WebSocket、长稳泄漏、独立 `-prof gc`、其他 in-flight、matcher=2/4；本轮不据此推导生产容量。
+- artifact：目录 `target/qualification/20260903T132300Z-completion-drain-256-scale/`；主 JMH JSON SHA-256 `4d28c593916235a37122cebea37f7f709188b97920025be2c9d0aacdb19116d`（`22,164 B`）；JFR profile JSON SHA-256 `e1ce5fb4188418ffcfdd8eb7bcbb80584287568bc0d8504d025ea7cb3335892e`（`21,078 B`）；原始 `saturation.jfr` SHA-256 `5602b8474c38a934645917147a51bff28fa8dadbade0546317ae4304f47713ed`（`150,994,739 B`）；`jfr-summary.txt` SHA-256 `bd454b5aae3a156f3a6bd8e679e423fc054c6078b71eb8f886dca7b00f86bcf2`；`aggregate.json` SHA-256 `1adcdabf708b2a62caa3448bcc8aeb8d82bb5274e9cfae9f2646bf6948155779`；JFC SHA-256 `dff0b88ea10e024e116295260c4906d1654f2fcd0c4371139daebf825a9813b4`。
