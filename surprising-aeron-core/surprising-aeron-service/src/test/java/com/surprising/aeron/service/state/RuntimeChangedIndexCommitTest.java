@@ -91,6 +91,40 @@ class RuntimeChangedIndexCommitTest {
         runtime.close();
     }
 
+    @Test
+    void commitsLanePublishedLiquidationValuesAndDeletion() {
+        TradingCoreState initial = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(initial, identities);
+        int symbolId = identities.symbolId("BTC-USDT");
+        long userId = 7;
+        LiquidationRuntime planned = new LiquidationRuntime(1, userId, symbolId,
+                CoreMarginMode.CROSS, CorePositionSide.NET, 1, 9, 2, 2,
+                0, 0, 0, 0, CoreLiquidationState.Status.PLANNED, 0);
+        runtime.startAccountLanes();
+        IndexSet indexes = indexes(initial, identities);
+
+        runtime.executeUserRisk(userId, () -> {
+            runtime.putLiquidation(planned);
+            return null;
+        });
+        indexes.coordinator.applyCurrent(runtime, identities);
+
+        assertThat(runtime.liquidation(1)).isEqualTo(planned);
+        assertThat(indexes.liquidations.activeIds()).containsExactly(1L);
+
+        runtime.clearChangedKeys();
+        runtime.executeUserRisk(userId, () -> {
+            runtime.removeLiquidation(1);
+            return null;
+        });
+        indexes.coordinator.applyCurrent(runtime, identities);
+
+        assertThat(runtime.liquidation(1)).isNull();
+        assertThat(indexes.liquidations.activeIds()).isEmpty();
+        runtime.close();
+    }
+
     private static IndexSet indexes(TradingCoreState state, RuntimeIdentityRegistry identities) {
         PositionUserIndex positionUsers = new PositionUserIndex(state, identities);
         OpenInterestIndex openInterest = new OpenInterestIndex(state, identities);
@@ -101,12 +135,13 @@ class RuntimeChangedIndexCommitTest {
         ActiveOrderIndex activeOrders = new ActiveOrderIndex(state, identities);
         AdlPositionIndex adlPositions = new AdlPositionIndex(state, identities);
         RiskSnapshotIndex riskSnapshots = new RiskSnapshotIndex(state);
-        return new IndexSet(positionUsers, openInterest, activeOrders, riskSnapshots,
+        return new IndexSet(positionUsers, openInterest, activeOrders, liquidations, riskSnapshots,
                 new RuntimeFactIndexes(positionUsers, openInterest, triggers, algos, liquidations,
                         timers, activeOrders, adlPositions, riskSnapshots));
     }
 
     private record IndexSet(PositionUserIndex positionUsers, OpenInterestIndex openInterest,
-                            ActiveOrderIndex activeOrders, RiskSnapshotIndex riskSnapshots,
+                            ActiveOrderIndex activeOrders, LiquidationIndex liquidations,
+                            RiskSnapshotIndex riskSnapshots,
                             RuntimeFactIndexes coordinator) { }
 }

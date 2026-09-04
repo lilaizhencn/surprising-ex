@@ -27,6 +27,7 @@ import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
+import com.surprising.aeron.service.state.CoreRiskState;
 import com.surprising.aeron.service.state.LaneTopology;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -337,8 +338,8 @@ final class LinearPerpetualBenchmarkSupport {
             @Override
             public long run() {
                 CoreResponse response = harness.execute(mark);
-                while (!harness.state.tradingState().riskState().scan().complete()) {
-                    int maxUsers = harness.state.tradingState().riskState().scanControl().scanBatchSize();
+                while (!harness.state.runtimeRiskScanComplete(SYMBOL)) {
+                    int maxUsers = CoreRiskState.defaultScanControl().scanBatchSize();
                     response = harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN,
                             CommandSource.OPERATIONS, 0,
                             TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(maxUsers))));
