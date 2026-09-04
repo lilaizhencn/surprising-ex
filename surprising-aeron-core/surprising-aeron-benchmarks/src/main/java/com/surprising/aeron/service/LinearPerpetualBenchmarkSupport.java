@@ -93,6 +93,14 @@ final class LinearPerpetualBenchmarkSupport {
             return 0;
         }
 
+        default long terminalTradingOperations() {
+            return terminalOperations();
+        }
+
+        default long terminalLifecycleOperations() {
+            return 0;
+        }
+
         default int incompleteRiskScans() {
             return 0;
         }

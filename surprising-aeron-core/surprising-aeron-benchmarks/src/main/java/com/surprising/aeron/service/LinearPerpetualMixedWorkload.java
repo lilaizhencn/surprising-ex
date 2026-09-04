@@ -274,6 +274,8 @@ final class LinearPerpetualMixedWorkload {
             private long acceptedCoreMessages;
             private long terminalCoreMessages;
             private long terminalTrades;
+            private long terminalTradingOperations;
+            private long terminalLifecycleOperations;
             private long maxBacklog;
             private long laneOperations;
             private long[] laneOperationsByType = new long[CoreLaneMetrics.OPERATION_TYPE_COUNT];
@@ -298,10 +300,14 @@ final class LinearPerpetualMixedWorkload {
                 long terminalCoreBefore = harness.terminalCoreMessages();
                 long terminalTradesBefore = harness.terminalTradeCount();
                 long[] laneOperationsBefore = completedLaneOperations(harness.state());
+                terminalTradingOperations = 0;
                 harness.beginBusinessLatencies(100_000);
                 for (int round = 0; round < hftRounds; round++) {
                     int[] tradingSymbols = tradingSymbolIndices(template.scaleConfig(), round);
+                    long tradingBefore = harness.terminalMessages();
                     executeHftBurstsPipelined(harness, template, hftBatchSize, tradingSymbols, maxInFlight);
+                    terminalTradingOperations = Math.addExact(terminalTradingOperations,
+                            Math.subtractExact(harness.terminalMessages(), tradingBefore));
                     int[] lifecycleSymbols = template.scaleConfig().trafficProfile()
                             == LinearPerpetualTrafficProfile.MARK_PRICE_STORM
                             ? allIndices(template.symbols().size()) : tradingSymbols;
@@ -360,6 +366,7 @@ final class LinearPerpetualMixedWorkload {
                 terminalCoreMessages = Math.subtractExact(
                         harness.terminalCoreMessages(), terminalCoreBefore);
                 terminalTrades = Math.subtractExact(harness.terminalTradeCount(), terminalTradesBefore);
+                terminalLifecycleOperations = Math.subtractExact(terminalOperations, terminalTradingOperations);
                 maxBacklog = harness.maxMatchingBacklog();
                 long[] laneOperationsAfter = completedLaneOperations(harness.state());
                 laneOperations = 0;
@@ -455,6 +462,16 @@ final class LinearPerpetualMixedWorkload {
             @Override
             public long terminalTrades() {
                 return terminalTrades;
+            }
+
+            @Override
+            public long terminalTradingOperations() {
+                return terminalTradingOperations;
+            }
+
+            @Override
+            public long terminalLifecycleOperations() {
+                return terminalLifecycleOperations;
             }
 
             @Override

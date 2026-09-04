@@ -291,6 +291,8 @@ public class LinearPerpetualCoreBenchmark {
         counters.acceptedCoreMessages += scenario.acceptedCoreMessages();
         counters.terminalCoreMessages += scenario.terminalCoreMessages();
         counters.terminalTrades += scenario.terminalTrades();
+        counters.terminalTradingOperations += scenario.terminalTradingOperations();
+        counters.terminalLifecycleOperations += scenario.terminalLifecycleOperations();
         counters.unfinishedCoreMessages += Math.subtractExact(
                 scenario.acceptedCoreMessages(), scenario.terminalCoreMessages());
         counters.laneOperations += scenario.laneOperations();
@@ -506,12 +508,17 @@ public class LinearPerpetualCoreBenchmark {
         @Param("256")
         public int maxInFlight;
 
+        @Param("32")
+        public int lifecycleSymbolsPerRun;
+
         private LinearPerpetualMixedWorkload.Template template;
 
         @Setup(Level.Trial)
         public void setUpTrial() {
             LinearPerpetualBenchmarkSupport.configureAccountLanes(accountLanes);
-            template = LinearPerpetualMixedWorkload.template(accountLanes, activeUsers, symbols);
+            var config = LinearPerpetualScaleConfig.scale(symbols, symbols, 5, 10,
+                    LinearPerpetualTrafficProfile.UNIFORM, lifecycleSymbolsPerRun);
+            template = LinearPerpetualMixedWorkload.template(accountLanes, activeUsers, config);
         }
 
         @Override
@@ -703,6 +710,8 @@ public class LinearPerpetualCoreBenchmark {
         public long acceptedCoreMessages;
         public long terminalCoreMessages;
         public long terminalTrades;
+        public long terminalTradingOperations;
+        public long terminalLifecycleOperations;
         public long unfinishedCoreMessages;
         public long laneOperations;
         public long laneCommandOperations;
@@ -726,6 +735,8 @@ public class LinearPerpetualCoreBenchmark {
             acceptedCoreMessages = 0;
             terminalCoreMessages = 0;
             terminalTrades = 0;
+            terminalTradingOperations = 0;
+            terminalLifecycleOperations = 0;
             unfinishedCoreMessages = 0;
             laneOperations = 0;
             laneCommandOperations = 0;

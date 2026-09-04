@@ -143,6 +143,10 @@ class LinearPerpetualBenchmarkSupportTest {
                 assertThat(scenario.acceptedCoreMessages()).isEqualTo(scenario.terminalCoreMessages());
                 assertThat(scenario.acceptedOperations()).isGreaterThan(scenario.acceptedCoreMessages());
                 assertThat(scenario.maxBacklog()).isGreaterThan(1);
+                assertThat(scenario.terminalTradingOperations()).isPositive();
+                assertThat(scenario.terminalLifecycleOperations()).isPositive();
+                assertThat(scenario.terminalTradingOperations() + scenario.terminalLifecycleOperations())
+                        .isEqualTo(scenario.terminalOperations());
                 scenario.verify();
             }
         }).doesNotThrowAnyException();
@@ -158,6 +162,8 @@ class LinearPerpetualBenchmarkSupportTest {
                 assertThat(scenario.run()).isNotZero();
                 assertThat(scenario.acceptedOperations()).isEqualTo(scenario.terminalOperations());
                 assertThat(scenario.maxBacklog()).isGreaterThan(1);
+                assertThat(scenario.terminalTradingOperations()).isPositive();
+                assertThat(scenario.terminalLifecycleOperations()).isPositive();
                 assertThat(scenario.laneOperations(1))
                         .as("each immutable matcher fact must visit each of its at most two account lanes once")
                         .isPositive()

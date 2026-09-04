@@ -2462,3 +2462,35 @@
 - 混合负载JFR业务延迟按类型记录三段直方图并启用coordinated-omission correction。代表值：PLACE_ORDER accepted→terminal p50=`5.831 ms`、p99=`7.750 ms`；CANCEL_ORDER p50=`5.294 ms`、p99=`7.821 ms`；ORDER_BATCH p50=`111.4 ms`、p99=`286.8 ms`；LIQUIDATION仅2个样本，accepted→terminal p50=`0.637 us`、p99=`0.244 ms`。入口→accepted的PLACE_ORDER p50约`320 ms`、CANCEL_ORDER p50约`580 ms`，是100k/s目标到达率超过该场景约17.9k terminal business ops/s容量后形成的客户端/入口排队，不代表可持续容量下的SLA；原始事件同时保留p90/p95/p99.9/max。该轮不是独立尾延迟验收。
 - 原始artifact目录：`target/qualification/20260904T092507Z-liquidation-fairness-256/`。关键SHA-256：`main-valid.json`=`328abf41ada7a3fbf9c5c22a8655075fc89ae57a7c1e8210f6700d4ed168a48d`、`main-valid.log`=`7a4a5f3fe47911e4ad751f4c50d786dd67f121459d37fcdc254bbe1e67ac872e`、`gc.json`=`0165a18236cc5d3a2ed0a82d006cad760f55e06ae94c1643d19c814da848d9f8`、`gc.log`=`d2757035d95780a0c22f1f422e4298f9be21f0f092a9ac54e732812c51506f9e`、`jfr.json`=`5d5ebd3917264d21d85d1044da7678f2ef64c648b4a571e07f1fc02ea6533b7c`、`jfr.log`=`800a537375428553c2c277db89bcf0df7cad8d3b92c8d1ae0162cf7ee8e2d72b`、`liquidation.jfr`=`607014736698a42832d124f8a2872f61fe91cbb4b00dc3e41c09cb9c736ed3c1`、`jfr-business-latency.tsv`=`f02e61f456530f931ba2d9f7de6c0e94c1c50ccd5d4a0c911f627185bebb841f`。
 - 结论：六个新增强平场景均通过预先锁定的吞吐/耗时与正确性门禁；保险不足时按结算资产内确定性优先级和比例份额执行，余额耗尽可真实进入ADL，越序或篡改coverage会被拒绝。当前仅完成线性永续本地短时部分性能验证；未覆盖长稳泄漏、API/Kafka/WebSocket/market-data、外部Aeron Cluster部署、PostgreSQL/exporter/wallet及其他五产品线，不能作为生产容量或完整性能验收结论。
+
+### 2026-09-04 17:58:49 +08:00 — `PV-20260904-256-102` — `采集前锁定（强平混合负载口径修正）`
+
+#### 采集前锁定
+
+- 目的：修正PV-101把每轮256个symbol全量重业务与八阶段全量drain混为容量结论的问题。`liquidationWithTrading`固定1,000用户、256 active/listed symbols、20 items/batch、1 HFT round、32 lifecycle symbols/run、matcher=1、4 Account Lane；每个撮合依赖阶段内部最多且应达到256 matching Core messages在途，阶段间仅保留订单依赖和全局sequence要求的提交fence。每轮必须真实完成挂单、撤单、成交、trigger、funding/mark/risk以及一个`liquidation→insurance→ADL`闭环。
+- Core当前只允许matching command越过未完成matching sequence；尝试取消依赖fence会分别触发`snapshot projection batch is already active`及matcher prefix divergence，均由测试在采集前发现并撤销，不进入候选。不得放宽sequence、matcher evidence或资金安全校验换取吞吐。本轮分别报告`terminalTradingOperations`和`terminalLifecycleOperations`，两者之和必须等于terminal business operations；accepted/terminal business和Core必须闭合，unfinished/rejected/error/timeout为0，期末backlog为0，最大matching窗口=256，资金、订单、持仓、强平终态和snapshot恢复通过。
+- 无profiler主轮固定`fork=1,warmup=3x3s,measurement=3x5s,thread=1`、HotSpot JDK 25、8GiB ZGC、严格256 in-flight；混合负载门禁为至少`30,000 terminal business ops/s`且lifecycle operations必须为正。并用完全相同JVM/JMH参数复跑`saturatedMatchingWorkload`（10,000用户、512 symbols、16,384 PLACE_ORDER/invocation、50% maker/50% taker、100,000 offered），对照PV-100 `60,655.149/s`，不得低于其90%即`54,589.634/s`。
+- GC轮固定`fork=1,warmup=1x3s,measurement=1x5s,-prof gc`；JFR轮固定混合场景`fork=0,warmup=1x3s,measurement=1x10s`，8GiB ZGC、AlwaysPreTouch、DisableExplicitGC、NMT summary和JDK25 profile，检查CPU、线程、分配、GC/heap/native、park/锁、safepoint/VM operation、JIT、I/O、异常与DataLoss。profiler结果只归因，不替代无profiler主轮；短轮不证明无泄漏。
+- 环境：Oracle GraalVM Java HotSpot 25.0.1、Maven 3.9.16、MacBookPro16,1 / Intel i9-9880H / 8物理16逻辑CPU / 16GiB / macOS 26.7 x86_64；采集前Pages throttled=0。候选diff SHA-256=`ec53b18b2a315bf3dc8aee7432c3629d440105a00542fc7721f6e610a32f7f31`，shaded JAR SHA-256=`9c923a4cd84124ddada07adb8eded34708c35fbf22dff1e0a0d529bc0227dadd`，artifact固定为`target/qualification/20260904T095849Z-liquidation-mixed-256/`。
+- 采集前HotSpot 25 benchmark真实路径测试`12/12`通过；不启动或测试PostgreSQL、exporter、wallet、Kafka、API、WebSocket、market-data及其他五产品线。锁定后不修改代码、场景、参数或门禁；失败和无效轮如实追加。
+
+#### PV-102采集结果（失败候选）
+
+- 无profiler混合主轮为`14,655.415 terminal business ops/s`，其中trading=`14,566.003/s`、lifecycle=`89.412/s`、Core messages=`1,476.650/s`、trades=`3,468.096/s`；三个business样本为`15,355.176/13,898.628/14,712.442/s`。accepted/terminal闭合且unfinished/error为0，但低于30,000/s门禁。纯撮合同轮为`50,332.993/s`，三个样本`53,021.637/56,401.118/41,576.224/s`，仍是5万级但平均低于54,589.634/s门禁且第三样本异常偏低。
+- GC轮混合负载为`20,209.052 business ops/s`、`543.577 MB/s`、`757,340,726 B/invocation`、12次GC/198ms；JFR轮为`17,436.078 business ops/s`，DataLoss=0。JFR CPU top为`TreeMap.put 19.27%`，allocation pressure为43.89%，但逐栈确认主要来自Trial/Invocation的template物化、snapshot restore和索引重建，不能归因于测量区保险逻辑；生产侧可见热点包括`awaitMatcherSettlementBatch 3.23%`、`progressPlaceAdmissions 2.34%`、`awaitMatchingResult 1.45%`。保险分配未进入top热点。
+- 尝试用通用`HftSymbolFlow`取消八阶段fence没有性能收益，且此前两个候选分别被`snapshot projection batch is already active`和matcher prefix divergence安全校验拒绝；未放宽任何生产校验。该调度器在本轮后撤销，因此PV-102结果只作为失败诊断，不作为最终候选验收。artifact=`target/qualification/20260904T095849Z-liquidation-mixed-256/`；main/gc/JFR-json/JFR SHA-256分别为`f94ea51f780420934202e2c8627ca7da90b740b8d27730aa4cffcc2287458f13/5eb6de43f2c03c206ae22670afd47c2c8b14657b8c66fbfd2c8d94186fcb30cb/745fd54bb4ddd1bfea5a223b5308eb8ec465d3e643aedffcbf4311ebcca5656a/e41a39bd487a131cb3b2c206e0e6db8b5162d83b73615295511ab359147aac63`。
+
+### 2026-09-04 18:05:08 +08:00 — `PV-20260904-256-103` — `采集前锁定（固定比例强平混合负载最终复测）`
+
+#### 采集前锁定
+
+- 场景、JDK/JVM、机器、正确性门禁和不测试范围沿用PV-102。最终候选撤销无收益的通用flow调度器，恢复既有低分配阶段局部循环；仅保留32/256 lifecycle symbols固定比例、严格256 matching in-flight和trading/lifecycle分项计数。生产Core代码相对`bca853d5`不变。
+- 无profiler混合主轮仍固定`fork=1,warmup=3x3s,measurement=3x5s,thread=1`、8GiB ZGC；由于PV-102证明当前生产sequence协议要求阶段fence，最终门禁改为不得低于PV-101原始混合场景`17,930.674/s`的90%，即`16,137.607 terminal business ops/s`，且trading/lifecycle均为正、最大窗口256及全部正确性门禁闭合。纯撮合紧邻复测仍使用相同参数，以PV-100 `60,655.149/s`为参考并如实报告，不用PV-102高方差轮修改门禁。
+- GC与JFR参数沿用PV-102，仅在最终无profiler候选通过后采集。最终候选diff SHA-256=`5640d58a40e1eeb9fcb976a6fc3052f569947914ec3d067463c3624af93f2361`，shaded JAR SHA-256=`12020a0e41503869cb4c1274980ad5a048b4969423b3de1d1557805ed61fe0e6`，artifact固定为`target/qualification/20260904T100508Z-liquidation-mixed-final-256/`。HotSpot 25 benchmark真实路径测试`12/12`通过；锁定后不再修改代码、参数、场景或门禁。
+
+#### PV-103采集结果
+
+- 无profiler最终混合主轮为`15,253.307 terminal business ops/s`，其中trading=`15,160.248/s`、lifecycle=`93.060/s`、Core messages=`1,536.893/s`、trades=`3,609.583/s`；三个business样本为`18,265.216/14,165.032/13,329.674/s`。accepted/terminal business及Core分别相等，unfinished/rejected/error/timeout为0，资金、订单、持仓、强平终态和snapshot恢复通过，但低于`16,137.607/s`门禁，因此性能门禁失败。
+- 紧邻纯撮合为`51,678.973 terminal business/Core ops/s`、`25,839.487 trades/s`，三个样本`50,093.769/56,733.688/48,209.464/s`。它相对PV-100 `60,655.149/s`低`14.80%`，未通过严格-10%门禁，但稳定处于5万级；本轮没有证据显示保险公平代码把普通PLACE_ORDER路径降到1万级。
+- lifecycle占混合terminal business operations约`0.61%`；从PV-101每轮256个重业务symbol降到固定32个后，混合吞吐没有提高。结合PV-102 JFR，当前约1.5万/s主要由batch挂单、batch撤单、成交及不同操作类型之间必须等待matcher prefix与全局sequence闭合的阶段fence决定，而不是risk、保险或ADL计算本身。取消fence的两个候选均被一致性校验拒绝，说明若要真正让不同matching类型和非matching控制流同时在途，需要修改生产sequence admission/每sequence matcher evidence与snapshot projection上下文；不能只改JMH驱动器。
+- 因最终无profiler主轮失败，按预锁条件未执行PV-103 GC/JFR；PV-102失败候选的GC/JFR只作上述归因。artifact=`target/qualification/20260904T100508Z-liquidation-mixed-final-256/`，main JSON/log SHA-256分别为`99c1a0330ceb16e83f907d453f2d3b9fa230e2c0184510a903bd054b558d830c/8b0c022eac709afd277b8b9f7e00dcc1ef6d01df7f0ff795d67b32b1cf52dabf`。结论为功能与口径修正通过、混合性能门禁失败；不声明生产容量或完整性能验收。

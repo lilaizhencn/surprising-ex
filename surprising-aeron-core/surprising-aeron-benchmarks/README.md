@@ -126,8 +126,9 @@ seal/journal/index/hash/projection/encode/snapshot 的阶段容量，不能替�
 - `liquidationBurst256`：每个 invocation 提交一个原生 `EXECUTE_LIQUIDATION_BATCH`，持续处理 256 个强平 business item；
 - `insuranceShortfallAllocation`：256 个未决 deficit 共享不足的保险基金，查询确定性建议份额；
 - `insuranceToAdl`：按建议消耗保险份额后执行真实 `EXECUTE_ADL`，要求 deficit 清零；
-- `liquidationWithTrading`：1,000 活跃用户、256 活跃 symbol 的普通挂撤/成交流与完整强平、保险、ADL 生命周期混合运行，
-  驱动端严格限制 256 个 matching Core message 在途。
+- `liquidationWithTrading`：1,000 活跃用户、256 活跃 symbol；每个撮合阶段内部严格保持最多 256 个 matching Core message
+  在途，按订单依赖和全局 sequence 在阶段边界提交；每轮固定选择 32 个 symbol 执行触发单、资金费/mark/risk，且真实完成一次
+  强平、保险和 ADL。结果分别报告 trading 与 lifecycle terminal business operations，不能把控制流同步边界隐藏在总吞吐中。
 
 这些 JMH teardown 均验证资金/订单/强平终态和完成态 snapshot 恢复。`liquidationBurst256` 的主分数是 batch/s，
 必须使用 AuxCounters 的 `terminalBusinessOperations` 作为展开后的强平 items/s；不得把 batch/s 当成业务吞吐。
