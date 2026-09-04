@@ -50,6 +50,47 @@ class RuntimeChangedIndexCommitTest {
         runtime.close();
     }
 
+    @Test
+    void commitsLanePublishedRiskValuesAndReleasesRetiredPositionIdentity() {
+        TradingCoreState initial = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(initial, identities);
+        int symbolId = identities.symbolId("BTC-USDT");
+        int assetId = identities.assetId("USDT");
+        long userId = 7;
+        long positionKey = identities.positionKey(userId, "BTC-USDT:NET");
+        runtime.putPosition(positionKey, new PositionRuntime(userId, symbolId, assetId,
+                CoreMarginMode.CROSS, CorePositionSide.NET, 1, 2, 100, 200, 0, 40));
+        runtime.clearChangedKeys();
+        runtime.startAccountLanes();
+
+        IndexSet indexes = indexes(initial, identities);
+        RiskSnapshotRuntime risk = new RiskSnapshotRuntime(userId, symbolId, CorePositionSide.NET,
+                1, 1_000, 20, 100, 100_000, CoreRiskStatus.NORMAL);
+        runtime.executeUserRisk(userId, () -> {
+            runtime.putRiskSnapshot(positionKey, risk);
+            return null;
+        });
+        indexes.coordinator.applyCurrent(runtime, identities);
+
+        assertThat(runtime.riskSnapshot(positionKey)).isEqualTo(risk);
+        assertThat(indexes.riskSnapshots.keys(userId)).containsExactly("7:BTC-USDT:NET");
+
+        runtime.clearChangedKeys();
+        runtime.executeUserRisk(userId, () -> {
+            runtime.removeRiskSnapshot(positionKey);
+            return null;
+        });
+        runtime.removePosition(positionKey, userId);
+        indexes.coordinator.applyCurrent(runtime, identities);
+        runtime.releaseRetiredPositionIdentities(identities);
+
+        assertThat(runtime.riskSnapshot(positionKey)).isNull();
+        assertThat(indexes.riskSnapshots.keys(userId)).isEmpty();
+        assertThat(identities.findPositionKey(userId, "BTC-USDT:NET")).isNull();
+        runtime.close();
+    }
+
     private static IndexSet indexes(TradingCoreState state, RuntimeIdentityRegistry identities) {
         PositionUserIndex positionUsers = new PositionUserIndex(state, identities);
         OpenInterestIndex openInterest = new OpenInterestIndex(state, identities);
@@ -60,11 +101,12 @@ class RuntimeChangedIndexCommitTest {
         ActiveOrderIndex activeOrders = new ActiveOrderIndex(state, identities);
         AdlPositionIndex adlPositions = new AdlPositionIndex(state, identities);
         RiskSnapshotIndex riskSnapshots = new RiskSnapshotIndex(state);
-        return new IndexSet(positionUsers, openInterest, activeOrders,
+        return new IndexSet(positionUsers, openInterest, activeOrders, riskSnapshots,
                 new RuntimeFactIndexes(positionUsers, openInterest, triggers, algos, liquidations,
                         timers, activeOrders, adlPositions, riskSnapshots));
     }
 
     private record IndexSet(PositionUserIndex positionUsers, OpenInterestIndex openInterest,
-                            ActiveOrderIndex activeOrders, RuntimeFactIndexes coordinator) { }
+                            ActiveOrderIndex activeOrders, RiskSnapshotIndex riskSnapshots,
+                            RuntimeFactIndexes coordinator) { }
 }

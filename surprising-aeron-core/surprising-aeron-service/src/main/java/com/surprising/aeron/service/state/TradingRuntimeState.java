@@ -80,6 +80,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     private final LongObjectHashMap<OrderRuntime> publishedOrders = new LongObjectHashMap<>(4_096);
     private final LongObjectHashMap<ReservationRuntime> publishedReservations = new LongObjectHashMap<>(4_096);
     private final LongObjectHashMap<PositionRuntime> publishedPositions = new LongObjectHashMap<>(4_096);
+    private final LongObjectHashMap<RiskSnapshotRuntime> publishedRiskSnapshots = new LongObjectHashMap<>(4_096);
     private final PublishedLaneChanges[] publishedLaneChanges;
     private int totalPendingReservations;
     private long nextLiquidationId = 1;
@@ -97,7 +98,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             new PublishedLaneChanges.ChangeBuffer<>();
     private final LongHashSet changedLiquidations = new LongHashSet();
     private final IntHashSet changedMarkPrices = new IntHashSet();
-    private final LongHashSet changedRiskSnapshots = new LongHashSet();
+    private final PublishedLaneChanges.ChangeBuffer<RiskSnapshotRuntime> changedRiskSnapshots =
+            new PublishedLaneChanges.ChangeBuffer<>();
     private final IntHashSet changedRiskScans = new IntHashSet();
     private final HashSet<String> changedInstruments = new HashSet<>();
     private final HashSet<CoreLeverageKey> changedLeverages = new HashSet<>();
@@ -621,14 +623,23 @@ public final class TradingRuntimeState implements AutoCloseable {
         else lanePublishedChanges(scoped.laneId()).putPosition(positionKey, value);
     }
 
+    private void publishRiskSnapshot(long positionKey, RiskSnapshotRuntime value) {
+        AccountLaneState scoped = laneCommandScope.get();
+        if (scoped == null) putOrRemove(publishedRiskSnapshots, positionKey, value);
+        else lanePublishedChanges(scoped.laneId()).putRiskSnapshot(positionKey, value);
+    }
+
     private PublishedLaneChanges lanePublishedChanges(int laneId) {
         MatcherSettlementChanges changes = matcherSettlementChangesScope.get();
         return changes == null ? publishedLaneChanges[laneId] : changes.publishedLaneChanges[laneId];
     }
 
     private void flushPublishedChanges(int laneId) {
-        publishedLaneChanges[laneId].drainTo(
+        PublishedLaneChanges changes = publishedLaneChanges[laneId];
+        changes.recordRiskSnapshotChanges(this);
+        changes.drainTo(
                 laneId, publishedUsers, publishedOrders, publishedReservations, publishedPositions,
+                publishedRiskSnapshots,
                 orderLaneIds, reservationLaneIds, positionLaneIds);
     }
 
@@ -719,6 +730,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         private final ChangeBuffer<OrderRuntime> orders = new ChangeBuffer<>();
         private final ChangeBuffer<ReservationRuntime> reservations = new ChangeBuffer<>();
         private final ChangeBuffer<PositionRuntime> positions = new ChangeBuffer<>();
+        private final ChangeBuffer<RiskSnapshotRuntime> riskSnapshots = new ChangeBuffer<>();
         private final ChangeBuffer<CoreOrderState> activeOrderValues = new ChangeBuffer<>();
         private final ChangeBuffer<RuntimePositionIndexValue> positionIndexValues = new ChangeBuffer<>();
         private final LongHashSet removedOrderRoutes = new LongHashSet();
@@ -741,6 +753,10 @@ public final class TradingRuntimeState implements AutoCloseable {
             positions.put(key, value);
         }
 
+        private void putRiskSnapshot(long key, RiskSnapshotRuntime value) {
+            riskSnapshots.put(key, value);
+        }
+
         private void removeOrderRoute(long orderId) { removedOrderRoutes.add(orderId); }
         private void removeReservationRoute(long orderId) { removedReservationRoutes.add(orderId); }
         private void retireClientIdentity(long userId, long clientKey) {
@@ -756,6 +772,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                              LongObjectHashMap<OrderRuntime> targetOrders,
                              LongObjectHashMap<ReservationRuntime> targetReservations,
                              LongObjectHashMap<PositionRuntime> targetPositions,
+                             LongObjectHashMap<RiskSnapshotRuntime> targetRiskSnapshots,
                              LongLongHashMap targetOrderLanes,
                              LongLongHashMap targetReservationLanes,
                              LongLongHashMap targetPositionLanes) {
@@ -763,6 +780,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             orders.drain(targetOrders, targetOrderLanes, laneId);
             reservations.drain(targetReservations, targetReservationLanes, laneId);
             positions.drain(targetPositions, targetPositionLanes, laneId);
+            riskSnapshots.drain(targetRiskSnapshots, null, laneId);
             removedOrderRoutes.forEach(orderId -> {
                 targetOrders.remove(orderId);
                 targetOrderLanes.removeKey(orderId);
@@ -789,6 +807,11 @@ public final class TradingRuntimeState implements AutoCloseable {
             positions.forEach(state.changedPositions::put);
             activeOrderValues.forEach(state.changedActiveOrderValues::put);
             positionIndexValues.forEach(state.changedPositionIndexValues::put);
+            recordRiskSnapshotChanges(state);
+        }
+
+        private void recordRiskSnapshotChanges(TradingRuntimeState state) {
+            riskSnapshots.forEach(state.changedRiskSnapshots::put);
         }
 
         private void clear() {
@@ -796,6 +819,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             orders.clear();
             reservations.clear();
             positions.clear();
+            riskSnapshots.clear();
             activeOrderValues.clear();
             positionIndexValues.clear();
             removedOrderRoutes.clear();
@@ -1583,6 +1607,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                                 this, terminalOrderSink, event.plan().coreSequence());
                         changes.publishedLaneChanges[laneId].drainTo(
                                 laneId, publishedUsers, publishedOrders, publishedReservations, publishedPositions,
+                                publishedRiskSnapshots,
                                 orderLaneIds, reservationLaneIds, positionLaneIds);
                         changes.publishedLaneChanges[laneId].releaseRetiredClientIdentities(event.identities());
                         LaneBalancePatches balances = changes.balancePatches[laneId];
@@ -1644,6 +1669,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                     this, terminalOrderSink, event.coreSequence());
             changes.publishedLaneChanges[laneId].drainTo(
                     laneId, publishedUsers, publishedOrders, publishedReservations, publishedPositions,
+                    publishedRiskSnapshots,
                     orderLaneIds, reservationLaneIds, positionLaneIds);
             changes.publishedLaneChanges[laneId].releaseRetiredClientIdentities(event.identities());
             LaneBalancePatches balances = changes.balancePatches[laneId];
@@ -1696,6 +1722,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                     this, terminalOrderSink, event.coreSequence());
             changes.publishedLaneChanges[laneId].drainTo(
                     laneId, publishedUsers, publishedOrders, publishedReservations, publishedPositions,
+                    publishedRiskSnapshots,
                     orderLaneIds, reservationLaneIds, positionLaneIds);
             changes.publishedLaneChanges[laneId].releaseRetiredClientIdentities(event.identities());
             LaneBalancePatches balances = changes.balancePatches[laneId];
@@ -2248,6 +2275,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 lane.riskSnapshots.put(key, restored);
                 return null;
             });
+            putOrRemove(publishedRiskSnapshots, key, restored);
         });
         patchLeveragesBefore.forEach((key, before) -> onLane(key.userId(), lane -> {
             if (before.value() == null) {
@@ -2487,11 +2515,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         AccountLaneState scoped = laneCommandScope.get();
         if (scoped != null) return scoped.riskSnapshots.get(positionKey);
-        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            RiskSnapshotRuntime snapshot = onLane(laneId, lane -> lane.riskSnapshots.get(positionKey));
-            if (snapshot != null) return snapshot;
-        }
-        return null;
+        return publishedRiskSnapshots.get(positionKey);
     }
 
     public RiskScanRuntime riskScan(int symbolId) {
@@ -3170,8 +3194,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         captureUserBefore(snapshot.userId());
         captureRiskSnapshotBefore(positionKey);
-        onLane(snapshot.userId(), lane -> lane.riskSnapshots.put(positionKey, snapshot));
-        changedRiskSnapshots.add(positionKey);
+        onLane(snapshot.userId(), lane -> {
+            lane.riskSnapshots.put(positionKey, snapshot);
+            publishRiskSnapshot(positionKey, snapshot);
+            return null;
+        });
+        if (laneCommandScope.get() == null) changedRiskSnapshots.put(positionKey, snapshot);
         changedUsers.add(snapshot.userId());
     }
 
@@ -3266,10 +3294,16 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         captureRiskSnapshotBefore(positionKey);
         RiskSnapshotRuntime previous = riskSnapshot(positionKey);
-        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            onLane(laneId, lane -> lane.riskSnapshots.remove(positionKey));
+        if (previous != null) {
+            onLane(previous.userId(), lane -> {
+                lane.riskSnapshots.remove(positionKey);
+                publishRiskSnapshot(positionKey, null);
+                return null;
+            });
+        } else {
+            publishedRiskSnapshots.removeKey(positionKey);
         }
-        changedRiskSnapshots.add(positionKey);
+        if (laneCommandScope.get() == null) changedRiskSnapshots.put(positionKey, null);
         if (previous != null) changedUsers.add(previous.userId());
     }
 
@@ -3572,7 +3606,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         });
         changedLiquidations.forEach(liquidationId ->
                 consumer.liquidation(liquidationId, null, liquidation(liquidationId)));
-        changedRiskSnapshots.forEach(riskKey -> consumer.riskSnapshot(riskKey, null, riskSnapshot(riskKey)));
+        changedRiskSnapshots.forEach((riskKey, value) -> consumer.riskSnapshot(riskKey, null, value));
         changedAlgoOrders.forEach(algoOrderId -> consumer.algoOrder(algoOrderId, null, algoOrder(algoOrderId)));
         changedTriggerOrders.forEach(triggerOrderId ->
                 consumer.triggerOrder(triggerOrderId, null, triggerOrder(triggerOrderId)));
@@ -3590,11 +3624,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (identities == null) throw new IllegalArgumentException("runtime identities are required");
         changedPositions.forEach((positionKey, ignored) ->
                 releaseRetiredPositionIdentity(identities, positionKey));
-        changedRiskSnapshots.forEach(positionKey -> releaseRetiredPositionIdentity(identities, positionKey));
+        changedRiskSnapshots.forEach((positionKey, ignored) ->
+                releaseRetiredPositionIdentity(identities, positionKey));
     }
 
     private void releaseRetiredPositionIdentity(RuntimeIdentityRegistry identities, long positionKey) {
-        if (position(positionKey) == null && riskSnapshot(positionKey) == null) {
+        if (publishedPositions.get(positionKey) == null && publishedRiskSnapshots.get(positionKey) == null) {
             identities.releasePositionKey(positionKey);
         }
     }
@@ -3771,7 +3806,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         changedPositionIndexValues.clear();
         clearChanged(changedLiquidations);
         clearChanged(changedMarkPrices);
-        clearChanged(changedRiskSnapshots);
+        changedRiskSnapshots.clear();
         clearChanged(changedRiskScans);
         changedInstruments.clear();
         changedLeverages.clear();

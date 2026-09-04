@@ -83,7 +83,7 @@ public class LinearPerpetualCoreBenchmark {
     }
 
     @Benchmark
-    public long riskScan(RiskScanState state) {
+    public long riskScanLanePublishedCommit(RiskScanState state) {
         return state.scenario.run();
     }
 
