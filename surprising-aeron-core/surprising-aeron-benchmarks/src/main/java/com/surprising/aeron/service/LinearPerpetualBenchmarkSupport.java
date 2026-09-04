@@ -935,7 +935,13 @@ final class LinearPerpetualBenchmarkSupport {
         }
 
         void drainSubmitted() {
-            while (!submittedMatching.isEmpty()) drainOldestLatencyNanos();
+            while (!submittedMatching.isEmpty()) {
+                drainOldestLatencyNanos();
+                if (submittedMatching.isEmpty()) continue;
+                commitReadyMatching(
+                        Math.min(255, submittedMatching.size()), false,
+                        (userId, entryNanos, acceptedNanos, terminalNanos) -> { });
+            }
         }
 
         int pendingSubmissions() {

@@ -279,6 +279,9 @@ public final class RuntimeOrderAdmission {
     public interface AdmissionOrderIndex {
         AdmissionSummary inspect(long userId, String symbol, CorePositionSide positionSide,
                                  CoreOrderSide side, CoreMarginMode conflictingMarginMode);
+
+        default void admitted(long userId, ResolvedPlaceOrder order) {
+        }
     }
 
     public static final class AdmissionSummary {

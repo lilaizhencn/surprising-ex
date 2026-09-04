@@ -2606,3 +2606,40 @@
 - 短JFR确认重复matching result轮询、batch boxed key和逐Lane任务ThreadLocal重建已退出热路径；`DataLoss=0`，最长ZGC pause=`0.0118ms`。主要热点仍是`awaitMatchingResult`、Lane ready通知和matching completion。
 - 10分钟长稳完整结束：`54,198.389 terminal business ops/s`、Core=`5,451.915/s`、trades=`12,828.019/s`；业务计数、资金和snapshot恢复闭合。65次ZGC后半段live set约`394–652MiB`，未发现线性增长，最长pause=`0.0689ms`。
 - artifact：`target/qualification/20260904T224848Z-completion-batch-race-fixed-256/`。关键SHA-256：`main-mixed.json`=`d45894c037698974286f794566ae37e144ccf4db4ad66554aaa8b288742b5163`、`gc.json`=`62547652609c3e863666bc884233b5e8d393ca6ec87205c67d56360cebbc0ee3`、`mixed.jfr`=`2179981a1c8d11bccea338c887430e0f9bf5ddd2332f4c818eb8d27dc298a150`、`long-stable.json`=`b40ed99bbaee3f60ec2f5d2dc2d83ae9a76d4540e5752b8341b8c3b9cd676d51`、`long-stable.jfr`=`3ee479ab26820dce441090b955a887bdb3ccc22c270ad9bb10983d2316e14ac3`。未测试PostgreSQL、exporter、wallet、Kafka、API、WebSocket、market-data、外部Aeron Cluster和其他五产品线。
+
+### 2026-09-04 23:56:30 +08:00 — `PV-20260904-256-110` — `采集前锁定（异步batch admission与单次completion提交）`
+
+#### 采集前锁定
+
+- 本候选按顺序实现六项交易热路径优化：mixed JMH按生产后台方式批量泵取完成态；PLACE batch预校验后以单个Account Lane事件异步admission，owner不再同步等待Lane mutation；matching/admission/settlement由单一owner completion pump推进；Lane terminal completion在owner一次遍历中同时提交最终值、changed-key/index及identity删除；batch admission的symbol/position/side/margin与资产累计预占均改为O(1)增量索引，移除前序订单回扫；`OrderBatchPending`及其数组、列表、primitive map/set和admission index按容量池化复用。sequence、matcher prefix、资金、风险、强平、ADL、保险基金和Aeron snapshot fence语义不变。
+- 对照commit=`697b1e75c9abd83fa0f2f4e0ff8991904b3656d7`，同口径PV-109为`79,629.981 terminal business ops/s`和`7,356.164 B/business op`。正式mixed通过阈值固定为`>=75,000 terminal business ops/s`，优化目标为`>=90,000/s`并观察是否达到`100,000/s`；分配门禁为`<=7,500 B/business op`且无Full GC。低于目标不修改本轮口径，按失败或未达目标记录。
+- 场景固定为`LinearPerpetualCoreBenchmark.liquidationWithTrading`：仅LINEAR_PERPETUAL、matcher=1、4 Account Lane、1,000活跃用户、256 active symbols、20 items/batch、每轮1个HFT batch、32 lifecycle symbols/run、做市与mark/risk/强平/保险基金/ADL流程在场；严格且仅`256 in-flight`，100,000 offered、open-loop并修正coordinated omission。主轮固定`fork=1,warmup=3x3s,measurement=3x5s,threads=1`；GC轮固定`fork=1,warmup=1x3s,measurement=1x5s,-prof gc`。
+- 所有轮次要求accepted/terminal business operations及Core messages分别相等，unfinished/rejected/error/timeout/producer-starvation和期末matcher/Lane/context backlog为0；分别报告terminal business/Core messages、trades、批量items和业务类型，资金守恒、余额/冻结/持仓、订单生命周期终态、强平/保险/ADL及完成态snapshot恢复必须通过。benchmark未提供的API层requests/s和外部连接指标不作推断。
+- JFR固定同一mixed场景`fork=0,warmup=2x5s,measurement=1x15s`，宿主`-Xms8g -Xmx8g -XX:+UseZGC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:NativeMemoryTracking=summary`，使用`owner-commit-profile.jfc`。检查owner/matcher/Lane/risk/snapshot分组CPU，allocation/GC/heap/native，线程/锁/park，safepoint/VM operation，JIT，I/O/异常和DataLoss；重点确认owner不再同步batch admission、completion无重复轮询、batch admission无O(batch²)回扫、终态changed/index只遍历一次，且owner无同步数据库/网络/业务文件I/O。
+- 短轮通过后执行相同mixed场景10分钟长稳：`fork=0,warmup=1x10s,measurement=1x600s,timeout=15m`、严格256 in-flight、8GiB ZGC、NMT summary、JFR default/maxsize 1GiB。要求业务与资金闭合，多轮GC后live set无持续线性增长，线程、FD、Direct/Mapped和native committed稳定；本候选新增事件/context池，缺少长稳不能声明完整验收。
+- 环境：Oracle GraalVM Java HotSpot 25.0.1、Maven3.9.16、MacBookPro16,1 / Intel i9-9880H / 8物理16逻辑CPU / 16GiB / macOS26.7 x86_64；采集前swap=`952.75MiB`。排除本记录的代码diff SHA-256=`92537789e72db850a867da47089230fa97172ebeb6bb3deb16362da0ebdf3bea`，shaded JAR SHA-256=`1a3c80bff5a4feee522d4d66cf829a141597f06d8e7b31d36cc759a705a8998d`，JFC SHA-256=`dff0b88ea10e024e116295260c4906d1654f2fcd0c4371139daebf825a9813b4`；artifact固定为`target/qualification/20260904T235630Z-async-batch-completion-256/`。
+- 采集前HotSpot 25定向测试：核心状态/Lane/index/batch资金守恒`60/60`、真实mixed benchmark支撑`12/12`通过，shaded JAR构建和`git diff --check`通过。不启动或测试PostgreSQL、exporter、wallet、Kafka、API、WebSocket、market-data、外部Aeron Cluster及其他五产品线。采集开始后不修改代码、参数、场景或门禁；失败和无效轮照实追加。
+
+#### PV-110采集结果（主轮失败）
+
+- 无profiler mixed主轮为`41,385.054 terminal business ops/s`，三个样本`40,376.486/41,744.889/42,033.788/s`；Core messages=`4,163.682/s`、trades=`9,795.098/s`。accepted/terminal business与Core闭合，unfinished/rejected/error/timeout为0，但较PV-109下降`48.03%`，低于75,000/s门禁，因此本轮失败并按锁定规则停止GC、JFR和10分钟长稳。
+- 初步负对照显示业务Lane仍在持续处理且没有backlog或正确性错误；新增production-style benchmark drain使用`awaitFirst=false`，完成队列暂空后在宿主macOS调用`parkNanos(1,000)`，其实际调度代价被每轮completion空窗放大。该等待混入测量边界，不代表异步batch admission的纯业务成本。下一候选只修正completion pump的busy-spin/等待策略后重新锁定采集，PV-110不作为性能结论。
+- artifact=`target/qualification/20260904T235630Z-async-batch-completion-256/`；`main-mixed.json`与`main-mixed.log`保留为失败证据。未执行PostgreSQL或exporter测试。
+
+### 2026-09-05 00:50:46 +08:00 — `PV-20260905-256-111` — `采集前锁定（异步batch admission最终修正轮）`
+
+#### 采集前锁定
+
+- 对照commit=`697b1e75c9abd83fa0f2f4e0ff8991904b3656d7` / PV-109。本候选完成六项：mixed驱动等待首个终态后批量收割ready completion；PLACE batch由单个Lane事件异步admission，owner不等待Lane；统一owner completion pump；Lane completion携带最终changed/index/funds delta并由owner一次遍历提交；batch admission使用O(1) symbol/资金累计索引；池化完整`OrderBatchPending`、数组、集合与event。修复诊断发现的submission ready-mask生命周期、异步admission竞态及余额镜像重复遍历；sequence、matcher prefix、资金与snapshot fence不变。
+- 场景固定`LinearPerpetualCoreBenchmark.liquidationWithTrading`：仅LINEAR_PERPETUAL，matcher=1、4 Account Lane、1,000 users、256 symbols、20 items/batch、1 HFT round、32 lifecycle symbols/run、做市/risk/强平/保险/ADL在场，严格且仅`256 in-flight`，100,000 offered、open-loop并修正coordinated omission。主轮固定`fork=1,warmup=3x3s,measurement=3x5s,threads=1`，8GiB ZGC；门禁仍为`>=75,000 terminal business ops/s`，目标100,000/s。
+- 有效性要求：accepted/terminal business及Core分别相等，unfinished/rejected/error/timeout为0，期末backlog为0；资金守恒、余额/冻结、持仓、订单/强平终态与snapshot恢复通过。主轮通过后才运行同场景`-prof gc`、15秒JFR和10分钟长稳；主轮失败则停止后续采集，不能以profiler或诊断轮替代。
+- 环境：Oracle GraalVM Java HotSpot 25.0.1、Maven3.9.16、MacBookPro16,1 / Intel i9-9880H / 8物理16逻辑CPU / 16GiB / macOS26.7 x86_64；Pages throttled=0。代码diff SHA-256=`a9ec5be48ce13e7173e4fe048c47b6b9b5068580c402949aaf5eee7d328a7871`，shaded JAR SHA-256=`af529964ebf589c72e77c62316bff043d5e35245f05128e4a559b6b274c0ff01`，JFC SHA-256=`dff0b88ea10e024e116295260c4906d1654f2fcd0c4371139daebf825a9813b4`；artifact固定`target/qualification/20260905T005046Z-async-batch-final-256/`。
+- 采集前HotSpot25定向回归：核心状态/Lane/index `59/59`、真实mixed benchmark支撑`12/12`通过，shaded JAR构建及`git diff --check`通过。不启动或测试PostgreSQL、exporter、wallet、Kafka、API、WebSocket、market-data、外部Aeron Cluster及其他五产品线。锁定后不修改代码、参数、场景或门禁。
+
+#### PV-111采集结果（主轮失败）
+
+- 无profiler mixed主轮为`37,071.913 terminal business ops/s`，三个样本为`34,479.183/38,339.439/38,397.117/s`；其中trading=`36,851.792/s`、lifecycle=`220.121/s`、terminal Core messages=`3,729.815/s`、trades=`8,774.236/s`。accepted/terminal business与Core分别相等，unfinished/rejected/error/timeout均为0，资金、余额/冻结、持仓、订单/强平终态与snapshot恢复检查通过，但低于锁定的`75,000/s`门禁，因此本候选性能验收失败。
+- 同机短时诊断显示对照HEAD/PV-109代码约为`47,738.954 terminal business ops/s`，当前候选约低`22%`；历史PV-109的`79,629.981/s`受机器当时状态影响，不能直接当作本轮同机差值。两者每invocation的Lane业务操作量基本一致，未发现额外Lane任务膨胀。
+- 归因结论：异步admission新增了一个Lane完成边界，但当前全局snapshot mutation仍只允许一个order batch活跃；matcher提交必须等该batch admission成功后才能开始，因此没有形成跨batch并行收益，反而增加owner/Lane协调成本。六项结构调整已完成且正确性闭合，但要获得吞吐收益，下一步必须把batch snapshot/admission状态改为真正的per-sequence context，允许多个batch sequence同时在途，同时保持matcher prefix和资金提交顺序。
+- 按预锁规则，主轮失败后停止GC、正式JFR和10分钟长稳，不能声明分配、内存、尾延迟或长期稳定性验收通过。另以HotSpot 25补跑永续batch累计预占与资金守恒精确测试`1/1`通过；PostgreSQL、exporter、wallet、Kafka、API、WebSocket、market-data、外部Aeron Cluster及其他五产品线未测试。
+- artifact=`target/qualification/20260905T005046Z-async-batch-final-256/`。SHA-256：`main-mixed.json`=`59e9e59b30545c98b945fa2074b0bd688077348612dca313174ef8147917b48d`，`main-mixed.log`=`63e20a804de3f872ec9460f5e5bd370e17226eb7f638b7e5111ff3cf697d24bb`。
