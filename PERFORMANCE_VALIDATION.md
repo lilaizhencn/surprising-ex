@@ -2092,3 +2092,56 @@
 - 紧邻matcher=1配对轮为`49,506.463 terminal business/Core messages/s`、`24,753.232 trades/s`，三个business样本为`41,632.770/52,729.501/54,157.119 ops/s`；accepted/terminal、unfinished/error/timeout、资金、订单、盘口、snapshot、多settlement和tombstone门禁全部闭合。
 - 结果相对PV-79早先matcher=1为`+3.82%`，说明机器仍能复现约49.5k/s的单matcher水平；与PV-80两个matcher重复轮`31,903.890/s`相比，matcher=2低`35.56%`。因此PV-80回退不是机器热状态导致，而是当前共享owner/Lane终态物化饱和后，第二matcher的CPU/cache竞争大于撮合并行收益。
 - 本轮结束swap=`606.25MiB`、Pageouts=86,959、Pages throttled=0；JSON SHA-256 `4330c8fa891b28e54c2c06e95358771425f8c6e6804a573336a01e2506c5aaa3`。P0/P1内存改动按正式matcher=1口径通过；matcher=2正确性通过但扩展性失败，不能宣称双matcher容量提升。
+
+### 2026-09-04 11:04:00 +08:00 — `PV-20260904-256-83` — `采集前锁定（matcher evidence缓存行隔离，matcher=2）`
+
+#### 采集前锁定
+
+- 被测修改：`MatcherEvidenceLedger`由四个跨matcher共享的`AtomicLongArray`改为每matcher独立、缓存行隔离的`ShardState`，使用`VarHandle`维持原有atomic get-and-add、CAS绑定、acquire读取及snapshot restore语义；不改变sequence、matcher prefix或native sequence协议。
+- 对照PV-80同代码基础matcher=2重复轮`31,903.890 terminal business ops/s`和PV-82紧邻matcher=1 `49,506.463/s`。本轮matcher=2主轮要求全部正确性门禁闭合；若吞吐无可重复改善则撤销该改动，不保留无证据padding。随后以同参数matcher=1紧邻配对，唯一变量为matching engines数量。
+- 固定场景：仅`LINEAR_PERPETUAL`进程内交易链路；4 Account Lane、10,000活跃用户、512 listed/active symbols、每用户最多5持仓/10活动订单、每invocation 16,384 PLACE_ORDER、50% maker GTC + 50% taker IOC、100,000 offered、做市持续运行、open-loop并修正coordinated omission、严格且仅`256 in-flight`。主轮`fork=1,warmup=3x3s,measurement=3x5s,thread=1`。
+- accepted business/Core必须分别等于terminal，unfinished/rejected/error/timeout/producer-starvation及期末matcher/Lane/in-flight/context backlog为0；资金守恒、余额/冻结/持仓、订单终态、盘口、snapshot recovery、多settlement在途及terminal tombstone门禁必须通过。
+- 环境：Oracle GraalVM Java HotSpot 25.0.1、Maven 3.9.16、MacBookPro16,1 / Intel Core i9-9880H / 16 logical CPU / 16GiB / macOS 26.7 x86_64；8GiB ZGC、AlwaysPreTouch、DisableExplicitGC、NMT summary、BLOCKING settlement、journal 65,536。matcher定向测试`19/19`通过。
+- 被测HEAD `3709fa8b9e3c3828821893ac2d098434f3ebcbc8`，代码diff SHA-256 `e59853230b99ddabbcc6cf2d8581daf3ec25de5dc69ebe86e98a9b50c460aa8b`，shaded JAR SHA-256 `aef7645b1486e9f947debc96c82e34a4349a5ed092b2c136482d257d50d032de`。artifact固定为`target/qualification/20260904T110400Z-matcher-evidence-padding-256/`。
+- 不启动或测试PostgreSQL、exporter、wallet、Kafka、API、WebSocket、market-data及其他五产品线；本轮先执行matcher扩展性诊断，不执行GC、长稳或外围服务测试。锁定后不修改场景、参数或门禁。
+
+#### PV-83采集结果
+
+- matcher=2无profiler主轮为`33,314.780 terminal business/Core messages/s`、`16,657.390 trades/s`，三个business样本为`37,255.721/31,876.371/30,812.248 ops/s`。accepted与terminal闭合，unfinished/rejected/error/timeout/producer-starvation为0，资金、余额/冻结/持仓、订单终态、盘口、snapshot recovery、多settlement和tombstone门禁通过。
+- 相对PV-80重复轮仅提升`4.42%`，样本离散且连续下降，仍比PV-82 matcher=1低`32.71%`，不能证明缓存行隔离产生可复用收益。按照采集前门禁撤销`MatcherEvidenceLedger`改动，不保留padding/VarHandle复杂度；本轮不继续matcher=1配对或JFR。
+- 原始JSON位于锁定artifact目录。该轮为失败诊断，不作最终性能结论；后续归因转向owner终态扫描和changed-index提交链路。
+
+### 2026-09-04 11:12:00 +08:00 — `PV-20260904-256-84` — `采集前锁定（sequence-local funds与终态单遍提交）`
+
+#### 采集前锁定
+
+- 被测修改：owner活动命令及每个`LaneCommandContextRing.Context`改用可复用primitive funds accumulator，matcher settlement直接把各Lane标量posting合并到当前sequence，删除逐settlement `RuntimeFundsDelta.plus`的中间accumulator/List/posting物化；终态订单在`PublishedLaneChanges`提交同一遍直接进入有界retention，删除随后扫描owner全局`changedOrders`的第二遍处理。订单响应引用、publication index、资金守恒、sequence及Aeron提交边界不变。
+- 对照PV-82 matcher=1 `49,506.463 terminal business ops/s`、PV-80 matcher=2重复轮`31,903.890/s`及PV-79分配`12,754.898 B/op`。matcher=1不得回归超过10%（不低于`44,555.817/s`），GC分配不得高于PV-79；matcher=2仅作扩展性诊断。全部业务和资金正确性门禁必须闭合。
+- 固定场景：仅`LINEAR_PERPETUAL`进程内交易链路；matcher=1主轮及matcher=2诊断轮、4 Account Lane、10,000用户、512 listed/active symbols、每用户最多5持仓/10活动订单、每invocation 16,384 PLACE_ORDER、50% maker GTC + 50% taker IOC、100,000 offered、open-loop并修正coordinated omission、严格且仅`256 in-flight`。主轮均为`fork=1,warmup=3x3s,measurement=3x5s,thread=1`；GC轮`fork=1,warmup=1x3s,measurement=1x5s`；JFR轮仅在代码保留且主轮通过后执行。
+- accepted business/Core必须分别等于terminal，unfinished/rejected/error/timeout/producer-starvation及期末matcher/Lane/in-flight/context backlog为0；资金守恒、余额/冻结/持仓、订单终态、盘口、snapshot recovery、多settlement在途及terminal tombstone门禁必须通过。
+- 环境沿用PV-83：Oracle GraalVM Java HotSpot 25.0.1、8GiB ZGC、NMT summary、MacBookPro16,1 / Intel Core i9-9880H / 16GiB / macOS 26.7 x86_64。定向测试`25/25`通过。HEAD `3709fa8b9e3c3828821893ac2d098434f3ebcbc8`，排除性能记录的代码diff SHA-256 `5bb262a554f0da9a4bc45a0f54cda75ef97136c7e678477cf9ba042dd38d9681`，shaded JAR SHA-256 `63054c07d3a8b3b92eab92e31a59745c96f3e06d3ff37565a739545f90dd86e3`。artifact固定为`target/qualification/20260904T111200Z-sequence-funds-terminal-256/`。
+- 不启动或测试PostgreSQL、exporter、wallet、Kafka、API、WebSocket、market-data及其他五产品线。锁定后不修改场景、参数或门禁。
+
+#### PV-84采集结果
+
+- matcher=1无profiler主轮为`46,075.705 terminal business/Core messages/s`、`23,037.853 trades/s`，三个business样本为`37,712.669/50,512.416/50,002.031 ops/s`；通过`44,555.817/s`吞吐门禁。matcher=2紧邻诊断为`45,834.698 terminal business/Core messages/s`、`22,917.349 trades/s`，三个样本为`38,907.811/48,889.118/49,707.166 ops/s`；相对PV-80重复轮提升`43.66%`，与本轮matcher=1仅差`0.52%`，双matcher反向回退消失。两轮accepted/terminal、unfinished、错误、资金、订单、盘口、snapshot、多settlement及tombstone门禁均闭合。
+- 两次matcher=1 `-prof gc`分别为`45,068.363/45,965.811 ops/s`，`211,077,169.714/210,685,833.067 B/invocation`，按16,384 operations折合`12,883.128/12,859.731 B/op`；较PV-79的`12,754.898 B/op`高`1.01%/0.82%`，未通过锁定的严格分配门禁。归因是最终守恒校验仍调用`toDelta()`物化列表；采集后改为primitive accumulator原地逐资产校验，PV-84代码不作为最终版本。
+- matcher=1 JFR轮为`42,855.956 terminal business/Core messages/s`、`21,427.978 trades/s`，DataLoss/socket I/O为0。热点为`progressPlaceAdmissions` 62 samples、`HashMap.getNode` 34、`ThreadLocal.get` 16、`TreeMap.put` 13及`ChangeBuffer.forEach` 12；旧的全局`retainPrunedOrders/acceptChangedTerminalOrders`扫描栈为0。5次ZGC，最长pause `0.0409ms`；heap峰值约5.5GiB、GC后1.4GiB；NMT committed峰值GC约138.4MiB、Tracing 37.6MiB、Metaspace 31.2MiB、Code 28.7MiB。JFR约97MiB。
+- 受影响定向service测试`102/102`及benchmark支撑测试`12/12`通过。全service旧套件另有42个失败，集中在已删除exporter/终态历史状态旧契约，未作为本轮交易链路验收；benchmark模块一次未带`-am`运行因本地旧service artifact产生`NoSuchMethodError`，带`-am`复跑12/12通过。main matcher1/matcher2、两次GC、JFR-json及JFR SHA-256分别为`c7140be71c793f3d7bd0d05e04f8a2d468e8bffd74d41cb2c6bd922ed6f1f932`、`cd1aac34106b784d8a42887119e6c4be0b32070a84e2ad543be9d39309b1a33d`、`96115184e48d35119e55e447920746ce25ef81b5f396944dd0751cddd2f4394b`、`07c1914863d10e4cd6c2b5b4084eecf12738d3e9c2a501bdbba02df2671fb437`、`68840e018af82984530d5b050a1c80c5edba352bbe3c77f4584d1022e8873576`、`549993fa7498387a680de51e4613cba85b113b90516c0f9fcd980d5c9b176d0d`。
+
+### 2026-09-04 11:22:00 +08:00 — `PV-20260904-256-85` — `采集前锁定（primitive资金守恒最终复测）`
+
+#### 采集前锁定
+
+- 延续PV-84的sequence-local funds和终态单遍提交，唯一生产代码增量是资金守恒直接在primitive accumulator内按资产求和，不再为校验调用`RuntimeFundsDelta.toDelta()`；新增独立多资产守恒/失衡测试。协议、资金语义、snapshot和Aeron边界不变。
+- 对照PV-84 matcher=1 `46,075.705/s`、matcher=2 `45,834.698/s`和GC最低`12,859.731 B/op`，并以PV-79 `12,754.898 B/op`为最终分配门禁。固定场景、严格`256 in-flight`、4 Lane、10,000用户、512 symbols、50% maker/50% taker、100,000 offered、JVM/JMH参数及所有正确性门禁沿用PV-84；执行matcher=1主轮、matcher=2诊断、matcher=1 GC和JFR。
+- 最终代码受影响资金/service测试`57/57`，此前扩展交易测试`102/102`和benchmark支撑测试`12/12`通过。HEAD `3709fa8b9e3c3828821893ac2d098434f3ebcbc8`，排除性能记录的代码diff SHA-256 `e14317924463294cb92f22d8556e4a9f630c2c76fe1570e9b674d20252fc0ce4`，shaded JAR SHA-256 `e5f02dcc023ee646c74269808630b4adba401b04b4828c586606f178316a843b`。artifact固定为`target/qualification/20260904T112200Z-primitive-funds-final-256/`。
+- 不测试PostgreSQL、exporter、wallet、Kafka、API、WebSocket、market-data、其他五产品线或长稳。环境异常、DataLoss、业务门禁或分配门禁不通过时只作部分验证；锁定后不修改场景、参数或门禁。
+
+#### PV-85采集结果
+
+- matcher=1无profiler主轮为`50,292.270 terminal business/Core messages/s`、`25,146.135 trades/s`，三个business样本为`44,406.178/53,630.807/52,839.825 ops/s`；相对PV-82为`+1.59%`，通过吞吐门禁。matcher=2紧邻诊断为`47,959.146 terminal business/Core messages/s`、`23,979.573 trades/s`，三个样本为`42,224.670/51,353.330/50,299.437 ops/s`；相对PV-80重复轮提升`50.33%`，仅比本轮matcher=1低`4.64%`。两个matcher的反向扩展回退已消除，但共享owner/Lane提交仍限制其获得正向倍增。
+- matcher=1 GC轮为`47,420.893 terminal business ops/s`、`498.661 MB/s`、`207,445,501.333 B/invocation`，按16,384 operations折合`12,661.469 B/op`；较PV-79 `12,754.898 B/op`降低`0.73%`、较PV-84最终诊断降低`1.54%`，通过分配门禁。measurement内GC次数和GC时间为0。
+- matcher=1 JFR轮为`50,087.599 terminal business/Core messages/s`、`25,043.800 trades/s`，业务门禁闭合。主要热点为`progressPlaceAdmissions` 40 samples、`HashMap.getNode` 37、`awaitMatchingResult` 22、`ThreadLocal.get` 21、`ConcurrentHashMap.putVal` 16、`ChangeBuffer.clear` 15；旧全局终态二次扫描栈为0，资金`toDelta`不再出现在守恒校验路径。主要分配仍为primitive map扩容、`TreeMap.put`、HashMap节点、Order/Position runtime与结果编码。
+- JFR约103MiB，5次ZGC、23个pause，最长pause `0.0451ms`；heap峰值约5.2GiB、GC后约1.5GiB。NMT committed峰值GC约132.6MiB、Tracing 37.4MiB、Metaspace 31.2MiB、Code 28.2MiB；DataLoss、socket I/O和allocation stall为0。878个异常来自既有启动期反射/native能力探测，未发现交易业务异常。短轮未做长稳，不声明无泄漏或生产容量。
+- 最终受影响资金/service测试`57/57`，扩展交易测试`102/102`，benchmark真实负载测试`12/12`通过；资金守恒、余额/冻结/持仓、订单终态、盘口、snapshot recovery、多settlement及in-flight门禁全部闭合。main matcher1/matcher2、GC、JFR-json和JFR SHA-256分别为`7b4273a1fb6d2152c921ba74c4ac25a83d18c765225071063c74a426f6f59e80`、`4614f821c01907cbf7f2cb61eb89a65676b0944f86d8d20220dea5d4f52f5323`、`f68a5eff344fee5abd8957ac69e2bb1ebebeb8d20ecc4ddfd7c8f796bf667160`、`c48ed4c2ecbaee5a5c1eebc59efd629b2bb608209a28a5435851576e57746d70`、`d0f0c0333a7467eea77c2d7c05ba16134b7dc5bfc4aec6cc963cc17494ff3522`；summary/views位于同一artifact的`jfr-analysis/`。

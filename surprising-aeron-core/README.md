@@ -256,8 +256,8 @@ reservation 和 matcher 提交。只读 preflight 只服务显式 dry-run/test A
 
 - `TradingRuntimeState` 是六条产品线生产热路径的唯一 mutation authority。只有 Product Core owner 与固定 Account Lane owner 可以按各自边界写入 Runtime State；
   外围服务、异步 matcher callback、PostgreSQL、Kafka 和 query projection 均不得直接写入。
-- matcher settlement 的每个 Account Lane 直接生成最终 order/position index value 和本 Lane `RuntimeFundsDelta`；owner 按 sequence
-  安装这些值，不扫描 matcher plan，也不再次查询或物化 Lane 业务状态。
+- matcher settlement 的每个 Account Lane 直接生成最终 order/position index value 和本 Lane primitive funds accumulator；owner 按 sequence
+  单遍安装这些值并把标量 posting 合并到对应 sequence context，不扫描 matcher plan，不二次扫描终态订单，也不再次查询或物化 Lane 业务状态。`RuntimeFundsDelta`只在校验、事实或异步交接边界物化。
 - `RuntimeFactIndexes` 消费 Lane 已准备的终态值与其他必要 changed key；`RuntimeCommitJournal` 只记录连续 sequence 和 entry
   容量。只有 snapshot/query fence、关闭或恢复才把权威 runtime 冻结为 `TradingCoreState`；普通命令不创建 per-command immutable state。
 - 生产默认不编码或发布 Core Fact，不启动 exporter、projector 或 materializer。`CoreExportEvent`/codec 仅作为未来历史

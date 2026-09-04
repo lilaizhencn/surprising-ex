@@ -684,6 +684,13 @@ public final class TradingRuntimeState implements AutoCloseable {
             return aggregateFundsDelta.toDelta();
         }
 
+        void appendFundsDelta(long laneMask, RuntimeFundsAccumulator target) {
+            if (target == null) throw new IllegalArgumentException("funds accumulator is required");
+            for (int laneId = 0; laneId < laneFundsDeltas.length; laneId++) {
+                if ((laneMask & 1L << laneId) != 0) target.add(laneFundsDeltas[laneId]);
+            }
+        }
+
         private void clear() {
             for (PublishedLaneChanges changes : publishedLaneChanges) changes.clear();
             for (LaneBalancePatches patches : balancePatches) patches.clear();
@@ -749,9 +756,16 @@ public final class TradingRuntimeState implements AutoCloseable {
             removedReservationRoutes.clear();
         }
 
-        private void recordTerminalChanges(TradingRuntimeState state) {
+        private void recordTerminalChanges(TradingRuntimeState state,
+                                           TerminalOrderSink terminalOrderSink,
+                                           long coreSequence) {
             users.forEach((userId, ignored) -> state.changedUsers.add(userId));
-            orders.forEach(state.changedOrders::put);
+            orders.forEach((orderId, order) -> {
+                state.changedOrders.put(orderId, order);
+                if (terminalOrderSink != null && order != null && order.status().terminal()) {
+                    terminalOrderSink.accept(order, coreSequence);
+                }
+            });
             reservations.forEach((orderId, ignored) -> state.changedReservations.add(orderId));
             positions.forEach(state.changedPositions::put);
             activeOrderValues.forEach(state.changedActiveOrderValues::put);
@@ -1416,6 +1430,13 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     public RuntimeTreasuryDelta collectMatcherSettlement(MatcherSettlementEvent event) {
+        return collectMatcherSettlement(event, null, null);
+    }
+
+    public RuntimeTreasuryDelta collectMatcherSettlement(
+            MatcherSettlementEvent event,
+            RuntimeFundsAccumulator fundsAccumulator,
+            TerminalOrderSink terminalOrderSink) {
         assertOwner();
         if (event == null || !event.complete()) return null;
         RuntimeTreasuryDelta aggregate = event.collectTreasuryDelta();
@@ -1427,7 +1448,8 @@ public final class TradingRuntimeState implements AutoCloseable {
                 if ((laneMask & 1L << laneId) != 0) {
                     if (event.commitSequence() == 0) flushPublishedChanges(laneId);
                     else {
-                        changes.publishedLaneChanges[laneId].recordTerminalChanges(this);
+                        changes.publishedLaneChanges[laneId].recordTerminalChanges(
+                                this, terminalOrderSink, event.plan().coreSequence());
                         changes.publishedLaneChanges[laneId].drainTo(
                                 laneId, publishedUsers, publishedOrders, publishedReservations, publishedPositions,
                                 orderLaneIds, reservationLaneIds, positionLaneIds);
@@ -1439,8 +1461,10 @@ public final class TradingRuntimeState implements AutoCloseable {
                     }
                 }
             }
+            if (terminalOrderSink != null) terminalOrderSink.completeSequence();
             if (event.commitSequence() != 0) {
-                event.collectedFundsDelta(changes.collectFundsDelta(laneMask));
+                if (fundsAccumulator == null) event.collectedFundsDelta(changes.collectFundsDelta(laneMask));
+                else changes.appendFundsDelta(laneMask, fundsAccumulator);
             }
             return aggregate;
         } finally {
@@ -1453,12 +1477,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         return changedOrders.get(orderId);
     }
 
-    public void acceptChangedTerminalOrders(java.util.function.Consumer<OrderRuntime> consumer) {
-        assertOwner();
-        if (consumer == null) throw new IllegalArgumentException("terminal order consumer is required");
-        changedOrders.forEach((ignored, order) -> {
-            if (order != null && order.status().terminal()) consumer.accept(order);
-        });
+    @FunctionalInterface
+    public interface TerminalOrderSink {
+        void accept(OrderRuntime order, long coreSequence);
+
+        default void completeSequence() {
+        }
     }
 
     LongLongHashMap matcherSettlementRemainingScratch() {

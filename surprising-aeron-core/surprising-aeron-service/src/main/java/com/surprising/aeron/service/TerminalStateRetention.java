@@ -26,7 +26,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer {
+final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer,
+        TradingRuntimeState.TerminalOrderSink {
 
     // The live instance is product-owner confined. Snapshot encoding receives a detached copy.
 
@@ -129,24 +130,21 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
         forEachSorted(orderIds, id -> observeOrder(state.orders().get(id), acknowledgedSequence));
     }
 
-    void retainPrunedOrders(TradingRuntimeState state, long coreSequence) {
-        if (state == null || coreSequence <= 0) {
-            throw new IllegalArgumentException("invalid pruned terminal order retention");
-        }
-        visitingExportSequence = coreSequence;
-        try {
-            state.acceptChangedTerminalOrders(this::retainPrunedOrder);
-        } finally {
-            visitingExportSequence = 0;
-        }
+    @Override
+    public void accept(OrderRuntime order, long coreSequence) {
+        retainPrunedOrder(order, coreSequence);
+    }
+
+    @Override
+    public void completeSequence() {
         trimTombstones();
     }
 
-    private void retainPrunedOrder(OrderRuntime order) {
+    private void retainPrunedOrder(OrderRuntime order, long coreSequence) {
         EntityKey key = new EntityKey(EntityType.ORDER, order.orderId());
         if (tombstones.containsKey(key)) return;
         RetainedEntity retained = new RetainedEntity(key, order.userId(),
-                normalizeClientId(order.clientOrderId()), visitingExportSequence);
+                normalizeClientId(order.clientOrderId()), coreSequence);
         RetainedEntity previous = tombstones.put(key, retained);
         if (previous != null) tombstoneDigest ^= entryDigest(previous);
         tombstoneDigest ^= entryDigest(retained);

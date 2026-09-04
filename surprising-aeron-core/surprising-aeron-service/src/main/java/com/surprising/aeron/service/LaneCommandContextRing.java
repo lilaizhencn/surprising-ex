@@ -67,7 +67,8 @@ final class LaneCommandContextRing {
         private CoreAdmissionReservation admission;
         private java.util.List<Long> commitChangedUserIds;
         private java.util.List<Long> commitChangedOrderIds;
-        private com.surprising.aeron.service.state.RuntimeFundsDelta commitFundsDelta;
+        private final com.surprising.aeron.service.state.RuntimeFundsAccumulator commitFundsAccumulator =
+                new com.surprising.aeron.service.state.RuntimeFundsAccumulator(32);
         private boolean commitSnapshotDirty;
         private boolean commitSnapshotProvisionalOnly;
         private CoreResultCode matchingRejection;
@@ -104,23 +105,26 @@ final class LaneCommandContextRing {
 
         void suspendCommitContext(java.util.List<Long> changedUserIds,
                                   java.util.List<Long> changedOrderIds,
-                                  com.surprising.aeron.service.state.RuntimeFundsDelta fundsDelta,
+                                  com.surprising.aeron.service.state.RuntimeFundsAccumulator fundsAccumulator,
                                   boolean snapshotDirty, boolean snapshotProvisionalOnly) {
-            if (changedUserIds == null || changedOrderIds == null || fundsDelta == null
+            if (changedUserIds == null || changedOrderIds == null || fundsAccumulator == null
                     || commitChangedUserIds != null) {
                 throw new IllegalStateException("invalid suspended sequence commit context");
             }
             commitChangedUserIds = changedUserIds;
             commitChangedOrderIds = changedOrderIds;
-            commitFundsDelta = fundsDelta;
+            commitFundsAccumulator.clear();
+            commitFundsAccumulator.add(fundsAccumulator);
             commitSnapshotDirty = snapshotDirty;
             commitSnapshotProvisionalOnly = snapshotProvisionalOnly;
         }
 
         java.util.List<Long> commitChangedUserIds() { return requiredCommit(commitChangedUserIds); }
         java.util.List<Long> commitChangedOrderIds() { return requiredCommit(commitChangedOrderIds); }
-        com.surprising.aeron.service.state.RuntimeFundsDelta commitFundsDelta() {
-            return requiredCommit(commitFundsDelta);
+        void copyCommitFundsTo(com.surprising.aeron.service.state.RuntimeFundsAccumulator target) {
+            requireCommit();
+            target.clear();
+            target.add(commitFundsAccumulator);
         }
         boolean commitSnapshotDirty() { requireCommit(); return commitSnapshotDirty; }
         boolean commitSnapshotProvisionalOnly() { requireCommit(); return commitSnapshotProvisionalOnly; }
@@ -129,7 +133,7 @@ final class LaneCommandContextRing {
             requireCommit();
             commitChangedUserIds = null;
             commitChangedOrderIds = null;
-            commitFundsDelta = null;
+            commitFundsAccumulator.clear();
             commitSnapshotDirty = false;
             commitSnapshotProvisionalOnly = false;
         }
@@ -228,7 +232,7 @@ final class LaneCommandContextRing {
             admission = null;
             commitChangedUserIds = null;
             commitChangedOrderIds = null;
-            commitFundsDelta = null;
+            commitFundsAccumulator.clear();
             commitSnapshotDirty = false;
             commitSnapshotProvisionalOnly = false;
             matchingRejection = null;

@@ -215,8 +215,8 @@ public final class CoreProbeState implements AutoCloseable,
     private final PrimitiveLongChangeSet changedOrderIds = new PrimitiveLongChangeSet();
     private final RuntimeTreasuryDelta mergedLaneTreasuryDelta =
             new RuntimeTreasuryDelta(RuntimeTreasuryDelta.ORDER_BATCH_CAPACITY);
-    private com.surprising.aeron.service.state.RuntimeFundsDelta commandFundsDelta =
-            com.surprising.aeron.service.state.RuntimeFundsDelta.empty();
+    private final com.surprising.aeron.service.state.RuntimeFundsAccumulator commandFundsAccumulator =
+            new com.surprising.aeron.service.state.RuntimeFundsAccumulator(64);
     private long commandTradeCount;
     private CoreFundingProgressView commandFundingProgress;
     private CoreLiquidationProgressView commandLiquidationProgress;
@@ -1549,7 +1549,7 @@ public final class CoreProbeState implements AutoCloseable,
             throw new IllegalStateException("order batch admission reservation is missing");
         }
         activateFactContext(capacityReservation, pending.command(), pending.fingerprint());
-        commandFundsDelta = pending.fundsDelta();
+        setCommandFundsDelta(pending.fundsDelta());
         if (!batch.deferredPerpetualOrderIds.isEmpty()) {
             batch.mergeTreasuryDelta(runtimePlaceOrderState.applyPerpetualMatcherSettlements(
                     batch.sequence, batch.deferredPerpetualOrderIds,
@@ -1703,7 +1703,7 @@ public final class CoreProbeState implements AutoCloseable,
                                                ResolvedMatchingAdmission admission) {
         return pendingMatching.acquire(sequence, operation, command, CommandFingerprint.of(command),
                 preMatchingCancellations, beforeProjection, beforeBusinessStateHash, beforeFundsStateHash,
-                commandFundsDelta, decodedCommand, admission);
+                commandFundsAccumulator.toDelta(), decodedCommand, admission);
     }
 
     private PendingMatching newPendingMatching(long sequence, PendingMatching.Operation operation,
@@ -1713,7 +1713,7 @@ public final class CoreProbeState implements AutoCloseable,
                                                long beforeFundsStateHash, DecodedMatchingCommand decodedCommand,
                                                ResolvedMatchingAdmission admission) {
         return pendingMatching.acquire(sequence, operation, command, fingerprint, preMatchingCancellations,
-                beforeProjection, beforeBusinessStateHash, beforeFundsStateHash, commandFundsDelta,
+                beforeProjection, beforeBusinessStateHash, beforeFundsStateHash, commandFundsAccumulator.toDelta(),
                 decodedCommand, admission);
     }
 
@@ -3205,7 +3205,7 @@ public final class CoreProbeState implements AutoCloseable,
         commandLiquidationBatchResult = null;
         commandRiskScanControl = null;
         resetChangeAccumulators();
-        commandFundsDelta = pending.fundsDelta();
+        setCommandFundsDelta(pending.fundsDelta());
         CoreAdmissionReservation capacityReservation = sequenceAdmission(pending.sequence());
         if (capacityReservation == null) {
             throw new IllegalStateException("matching admission reservation is missing");
@@ -3406,9 +3406,8 @@ public final class CoreProbeState implements AutoCloseable,
         if (event == null || !event.complete()) return null;
         com.surprising.aeron.service.state.RuntimeTreasuryDelta settlementTreasuryDelta;
         try {
-            settlementTreasuryDelta = runtimePlaceOrderState.collectMatcherSettlement(event);
-            commandFundsDelta = commandFundsDelta.plus(event.collectedFundsDelta());
-            terminalRetention.retainPrunedOrders(runtimePlaceOrderState, pending.sequence());
+            settlementTreasuryDelta = runtimePlaceOrderState.collectMatcherSettlement(
+                    event, commandFundsAccumulator, terminalRetention);
             laneContext.completeLanes(event.requiredLaneMask());
             switch (pending.operation()) {
                 case PLACE -> {
@@ -5316,7 +5315,7 @@ public final class CoreProbeState implements AutoCloseable,
                     runtime.commitRuntimeChanges(runtimePlaceOrderState, runtimePlaceOrderIdentities);
                     commitFaultInjector.inject("indexes");
                     currentAdmission.publish(sequence);
-                    commandFundsDelta = commandFundsDelta.plus(fundsDelta);
+                    commandFundsAccumulator.add(fundsDelta);
                     currentProjectionPoint = new RuntimeProjectionPoint(sequence, null);
                     currentProjectionPoint.completeSequence();
                     runtimePatchRevision = runtimePlaceOrderState.committedRevision();
@@ -5686,9 +5685,8 @@ public final class CoreProbeState implements AutoCloseable,
         if (pending.isDispatchOnly()) return null;
         if (!event.complete()) return null;
         com.surprising.aeron.service.state.RuntimeTreasuryDelta delta =
-                runtimePlaceOrderState.collectMatcherSettlement(event);
-        commandFundsDelta = commandFundsDelta.plus(event.collectedFundsDelta());
-        terminalRetention.retainPrunedOrders(runtimePlaceOrderState, pending.sequence());
+                runtimePlaceOrderState.collectMatcherSettlement(
+                        event, commandFundsAccumulator, terminalRetention);
         laneContext.completeLanes(event.requiredLaneMask());
         return delta;
     }
@@ -5699,7 +5697,7 @@ public final class CoreProbeState implements AutoCloseable,
         }
         materializeChangeAccumulators();
         laneCommandContexts.required(pending.sequence()).suspendCommitContext(
-                commandChangedUserIds, commandChangedOrderIds, commandFundsDelta,
+                commandChangedUserIds, commandChangedOrderIds, commandFundsAccumulator,
                 snapshotProjectionDirty, snapshotProjectionProvisionalOnly);
         snapshotProjectionDeferred = false;
         snapshotProjectionDirty = false;
@@ -5725,7 +5723,7 @@ public final class CoreProbeState implements AutoCloseable,
         changedUserIds.addAll(commandChangedUserIds);
         changedOrderIds.clear();
         changedOrderIds.addAll(commandChangedOrderIds);
-        commandFundsDelta = context.commitFundsDelta();
+        context.copyCommitFundsTo(commandFundsAccumulator);
         context.clearCommitContext();
         commandExternalAdjustment = false;
         commandTradeCount = 0;
@@ -5789,10 +5787,16 @@ public final class CoreProbeState implements AutoCloseable,
     }
 
     private void resetChangeAccumulators() {
-        commandFundsDelta = com.surprising.aeron.service.state.RuntimeFundsDelta.empty();
+        commandFundsAccumulator.clear();
         commandExternalAdjustment = false;
         changedUserIds.clear();
         changedOrderIds.clear();
+    }
+
+    private void setCommandFundsDelta(
+            com.surprising.aeron.service.state.RuntimeFundsDelta fundsDelta) {
+        commandFundsAccumulator.clear();
+        commandFundsAccumulator.add(fundsDelta);
     }
 
     private void validateFundsConservation(CoreMessage command) {
@@ -5800,7 +5804,7 @@ public final class CoreProbeState implements AutoCloseable,
                 || command.header().messageType() == CoreMessageType.TRANSFER_OUT
                 || command.header().messageType() == CoreMessageType.TRANSFER_IN
                 || command.header().messageType() == CoreMessageType.ADJUST_INSURANCE_FUND;
-        commandFundsDelta.requireConserved(externalAdjustment);
+        commandFundsAccumulator.requireConserved(externalAdjustment);
     }
 
     private long stageLaneMutation(

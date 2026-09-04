@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.state.RuntimeCommitJournal;
+import com.surprising.aeron.service.state.RuntimeFundsAccumulator;
 import com.surprising.aeron.service.state.RuntimeFundsDelta;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.product.api.ProductLine;
@@ -94,15 +95,18 @@ class LaneCommandContextRingTest {
                     new CoreAdmissionReservation.AdmissionDemand(1));
             LaneCommandContextRing ring = new LaneCommandContextRing(4, 4);
             LaneCommandContextRing.Context context = ring.claim(2);
+            RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
+            RuntimeFundsAccumulator restoredFunds = new RuntimeFundsAccumulator();
             context.admission(admission);
             context.suspendCommitContext(
-                    List.of(7L), List.of(11L), RuntimeFundsDelta.empty(), true, false);
+                    List.of(7L), List.of(11L), funds, true, false);
 
             assertThat(context.admission()).isSameAs(admission);
             assertThat(context.hasCommitContext()).isTrue();
             assertThat(context.commitChangedUserIds()).containsExactly(7L);
             assertThat(context.commitChangedOrderIds()).containsExactly(11L);
-            assertThat(context.commitFundsDelta()).isSameAs(RuntimeFundsDelta.empty());
+            context.copyCommitFundsTo(restoredFunds);
+            assertThat(restoredFunds.toDelta()).isSameAs(RuntimeFundsDelta.empty());
             assertThat(context.commitSnapshotDirty()).isTrue();
             assertThat(context.commitSnapshotProvisionalOnly()).isFalse();
             context.clearCommitContext();

@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 
 /** Reusable sequence-local primitive accumulator for funds postings. */
-final class RuntimeFundsAccumulator {
+public final class RuntimeFundsAccumulator {
     private static final FundsPosting.OwnerKind[] OWNER_KINDS = FundsPosting.OwnerKind.values();
     private static final FundsPosting.Subledger[] SUBLEDGERS = FundsPosting.Subledger.values();
     private int[] assetIds;
@@ -14,11 +14,11 @@ final class RuntimeFundsAccumulator {
     private long[] units;
     private int size;
 
-    RuntimeFundsAccumulator() {
+    public RuntimeFundsAccumulator() {
         this(16);
     }
 
-    RuntimeFundsAccumulator(int capacity) {
+    public RuntimeFundsAccumulator(int capacity) {
         int initialCapacity = Math.max(1, capacity);
         assetIds = new int[initialCapacity];
         ownerKinds = new byte[initialCapacity];
@@ -27,7 +27,7 @@ final class RuntimeFundsAccumulator {
         units = new long[initialCapacity];
     }
 
-    void add(int assetId, FundsPosting.OwnerKind ownerKind, long ownerId,
+    public void add(int assetId, FundsPosting.OwnerKind ownerKind, long ownerId,
              FundsPosting.Subledger subledger, long deltaUnits) {
         if (deltaUnits == 0) return;
         if (assetId < 0 || ownerKind == null || subledger == null) {
@@ -52,14 +52,14 @@ final class RuntimeFundsAccumulator {
         size++;
     }
 
-    void add(RuntimeFundsDelta delta) {
+    public void add(RuntimeFundsDelta delta) {
         if (delta == null) return;
         for (RuntimeFactFrame.FundsPosting posting : delta.postings()) {
             add(posting.assetId(), posting.ownerKind(), posting.ownerId(), posting.subledger(), posting.units());
         }
     }
 
-    void add(RuntimeFundsAccumulator other) {
+    public void add(RuntimeFundsAccumulator other) {
         if (other == null) return;
         for (int index = 0; index < other.size; index++) {
             add(other.assetIds[index], OWNER_KINDS[other.ownerKinds[index]], other.ownerIds[index],
@@ -67,7 +67,7 @@ final class RuntimeFundsAccumulator {
         }
     }
 
-    RuntimeFundsDelta toDelta() {
+    public RuntimeFundsDelta toDelta() {
         if (size == 0) return RuntimeFundsDelta.empty();
         ArrayList<RuntimeFactFrame.FundsPosting> postings = new ArrayList<>(size);
         for (int index = 0; index < size; index++) {
@@ -77,7 +77,30 @@ final class RuntimeFundsAccumulator {
         return RuntimeFundsDelta.fromDistinctPatchPostings(postings);
     }
 
-    void clear() {
+    public void requireConserved(boolean externalAdjustment) {
+        if (externalAdjustment) return;
+        for (int index = 0; index < size; index++) {
+            int assetId = assetIds[index];
+            boolean first = true;
+            for (int previous = 0; previous < index; previous++) {
+                if (assetIds[previous] == assetId) {
+                    first = false;
+                    break;
+                }
+            }
+            if (!first) continue;
+            long total = 0;
+            for (int posting = index; posting < size; posting++) {
+                if (assetIds[posting] == assetId) total = Math.addExact(total, units[posting]);
+            }
+            if (total != 0) {
+                throw new IllegalArgumentException(
+                        "runtime funds delta is not conserved for asset " + assetId);
+            }
+        }
+    }
+
+    public void clear() {
         size = 0;
     }
 
