@@ -3,6 +3,7 @@ package com.surprising.aeron.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.state.RuntimeCommitJournal;
 import com.surprising.aeron.service.state.RuntimeFundsDelta;
@@ -68,6 +69,20 @@ class LaneCommandContextRingTest {
         assertThat(context.takeMatchingCompletion()).isNull();
         context.resetMatchingContinuation();
         ring.discard(3);
+    }
+
+    @Test
+    void storesMatchingRejectionInTheSequenceSlot() {
+        LaneCommandContextRing ring = new LaneCommandContextRing(4, 4);
+        LaneCommandContextRing.Context context = ring.claim(1);
+
+        context.rejectMatching(CoreResultCode.MATCHING_REJECTED);
+
+        assertThat(context.hasMatchingRejection()).isTrue();
+        assertThat(context.matchingRejection()).isEqualTo(CoreResultCode.MATCHING_REJECTED);
+        assertThatThrownBy(() -> context.rejectMatching(CoreResultCode.INVALID_COMMAND))
+                .isInstanceOf(IllegalStateException.class);
+        ring.discard(1);
     }
 
     @Test

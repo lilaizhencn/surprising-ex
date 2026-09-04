@@ -51,7 +51,7 @@ final class LinearPerpetualBenchmarkSupport {
     private static final long LIQUIDATION_BALANCE = 230;
     private static final long MATCH_TIMEOUT_NANOS = 30_000_000_000L;
     private static final int PROJECTION_ADMISSION_HEADROOM = 3;
-    private static final int COMMANDS_PER_LOGICAL_MILLISECOND = 256;
+    private static final int COMMANDS_PER_LOGICAL_MILLISECOND = 1_024;
 
     private LinearPerpetualBenchmarkSupport() {
     }

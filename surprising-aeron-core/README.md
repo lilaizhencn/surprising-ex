@@ -25,17 +25,18 @@ CROSS 只共享该 Core 内权益，ISOLATED 绑定 position identity。只保�
 每个 Product Core 仍只有一个 Aeron Cluster service owner，但可以在 fresh compatible state 启动前配置 1–64 个、
 数量为 2 的幂的 matcher shard。每个 shard 固定拥有一个 worker、一条预分配有界 SPSC ring 和一个独立的
 `SynchronousMatchingEngine(matchingEnginesNum=1)`；symbol 通过 `routeVersion=3` 稳定路由，运行中不 rebalance。
-exchange-core risk engine 固定为 0。不同 shard 的完成队列互不等待，owner 可以先提交任意已经完成的 shard 结果；
-同一 symbol 始终在同一 matcher worker 内保持 FIFO。全局 Core sequence 只保留为复制日志身份和已完成连续水位，
-不再作为跨 shard 的逐命令 barrier。snapshot、全盘口 bootstrap、全局状态 hash 和 userId=0 控制命令仍建立显式全分片 fence。
+exchange-core risk engine 固定为 0。不同 shard 的完成队列互不等待，同一 symbol 始终在同一 matcher worker 内保持 FIFO。
+各 shard 可以乱序完成并写回各自的 sequence context，但 owner 只从全局连续完成头按序安装 Account Lane 终态并发布 Aeron
+边界；因此撮合可以并行在途，同账户资金和订单仍保持确定性顺序。
+snapshot、全盘口 bootstrap、全局状态 hash 和 userId=0 控制命令仍建立显式全分片 fence。
 
 PLACE 在进入 matcher 前先以单向事件投递给用户所属 Lane，由该 Lane 串行完成余额冻结、order/reservation 和 client-order
 索引写入；owner 只收集已完成的准入结果并提交 matcher。matcher 返回后，owner 再把同一条不可变 matcher fact 按 userId
 路由到目标 Lane。固定 Account Lane worker 永久拥有本 Lane 状态并串行完成
-资金、订单、持仓和手续费变化，并生成该 sequence 的最终索引值和资金增量；Coordinator 根据 completion bitmap 按 sequence
+资金、订单、持仓和手续费变化，并生成该 sequence 的最终索引值和资金增量；活动订单准入统计由 Lane 按 user/symbol 随订单变更
+增量维护，准入不再扫描用户订单。Coordinator 根据 completion bitmap 按 sequence
 安装这些终态、合并 Treasury delta 并发布响应和 Aeron 边界。
-Account Lane 使用 owner 分配的本地连续 commit sequence，不使用可能乱序完成的入口 Core sequence，因此跨 symbol 的同账户事件
-仍由 Lane 严格串行，且不会发生 sequence 回退。
+Account Lane 按 owner 发布的全局连续 Core sequence 串行应用，因此跨 symbol 的同账户事件不会因 matcher 乱序完成而重排。
 不存在 Disruptor、逐命令 Future、临时 Runnable fan-out、Owner/Lane 所有权切换或阻塞式逐 Lane ACK barrier。
 
 Account Lane 同时是资金隔离和业务执行边界。多成交、多用户、跨 Lane 的一笔命令共享同一条

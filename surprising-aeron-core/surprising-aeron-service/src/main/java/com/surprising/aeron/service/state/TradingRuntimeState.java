@@ -2610,7 +2610,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         captureUserBefore(order.userId());
         captureOrderBefore(order.orderId());
-        onLane(order.userId(), lane -> lane.orders.put(order.orderId(), order));
+        onLane(order.userId(), lane -> { lane.putOrder(order); return null; });
         publishOrder(order.orderId(), order);
         orderLaneIds.put(order.orderId(), topology.accountLaneId(order.userId()) + 1L);
         changedOrder(order.orderId(), order);
@@ -2654,7 +2654,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (previous != null && previous.userId() != order.userId()) {
             throw new IllegalArgumentException("runtime order owner cannot change");
         }
-        onLane(order.userId(), lane -> lane.orders.put(order.orderId(), order));
+        onLane(order.userId(), lane -> { lane.putOrder(order); return null; });
         publishOrder(order.orderId(), order);
         if (previous == null) {
             if (matcherSettlementChangesScope.get() == null) {
@@ -2673,7 +2673,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         OrderRuntime previous = order(orderId);
         if (previous != null) {
             captureUserBefore(previous.userId());
-            onLane(previous.userId(), lane -> lane.orders.remove(orderId));
+            onLane(previous.userId(), lane -> { lane.removeOrder(orderId); return null; });
             publishOrder(orderId, null);
             orderLaneIds.removeKey(orderId);
             changedOrder(orderId, null);
@@ -2969,7 +2969,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                     Math.incrementExact(order.revision()));
             ReservationRuntime released = reservation.release(releaseUnits);
             lane.replacePendingReservation(reservation, released);
-            lane.orders.put(orderId, terminalOrder);
+            lane.putOrder(terminalOrder);
             lane.reservations.put(orderId, released);
             captureBalanceAfter(lane, userId, reservation.assetId());
             return new CanceledOrder(terminalOrder, released);
@@ -3085,7 +3085,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                     lane.reservations.remove(prune.orderId());
                     removeUserEntity(lane.reservationIdsByUser, prune.userId(), prune.orderId());
                 }
-                lane.orders.remove(prune.orderId());
+                lane.removeOrder(prune.orderId());
                 if (prune.clientKey() != 0) {
                     LongLongHashMap clients = lane.clientOrderIndex.get(prune.userId());
                     if (clients != null && clients.containsKey(prune.clientKey())
@@ -3555,7 +3555,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             OrderRuntime order = new OrderRuntime(orderId, userId, symbolId, quantitySteps);
             ReservationRuntime reservation = new ReservationRuntime(orderId, userId, assetId, reservedUnits);
             balance.reserve(reservedUnits);
-            lane.orders.put(orderId, order);
+            lane.putOrder(order);
             lane.reservations.put(orderId, reservation);
             addUserEntity(lane.reservationIdsByUser, userId, orderId);
             if (clientKey != 0) putClientOrderIndex(lane, userId, clientKey, orderId);
@@ -3610,7 +3610,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 command.instrumentVersion(), command.reservationKind(), assetId, requiredReservation,
                 0, 0, command.quantitySteps());
         balance.reserve(requiredReservation);
-        lane.orders.put(order.orderId(), order);
+        lane.putOrder(order);
         lane.reservations.put(reservation.orderId(), reservation);
         addUserEntity(lane.reservationIdsByUser, userId, order.orderId());
         if (clientKey != 0) putClientOrderIndex(lane, userId, clientKey, order.orderId());
@@ -3725,12 +3725,12 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     private void rollbackOrder(long orderId, OrderRuntime before) {
         OrderRuntime current = order(orderId);
-        if (current != null) onLane(current.userId(), lane -> { lane.orders.remove(orderId); return null; });
+        if (current != null) onLane(current.userId(), lane -> { lane.removeOrder(orderId); return null; });
         if (before == null) {
             publishOrder(orderId, null);
             orderLaneIds.removeKey(orderId);
         } else {
-            onLane(before.userId(), lane -> { lane.orders.put(orderId, before); return null; });
+            onLane(before.userId(), lane -> { lane.putOrder(before); return null; });
             publishOrder(orderId, before);
             orderLaneIds.put(orderId, topology.accountLaneId(before.userId()) + 1L);
         }

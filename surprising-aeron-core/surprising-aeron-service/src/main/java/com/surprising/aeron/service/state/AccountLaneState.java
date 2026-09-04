@@ -1,13 +1,15 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.protocol.CoreMarginMode;
+import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
+import org.agrona.collections.Long2ObjectHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
-import org.eclipse.collections.api.iterator.LongIterator;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -263,7 +265,22 @@ public final class AccountLaneState {
         return admissionOrderIndex;
     }
 
+    void putOrder(OrderRuntime order) {
+        assertOwner();
+        if (order == null) throw new IllegalArgumentException("order is required");
+        OrderRuntime previous = orders.put(order.orderId(), order);
+        admissionOrderIndex.replace(previous, order);
+    }
+
+    void removeOrder(long orderId) {
+        assertOwner();
+        OrderRuntime previous = orders.remove(orderId);
+        admissionOrderIndex.replace(previous, null);
+    }
+
     private final class LaneAdmissionOrderIndex implements RuntimeOrderAdmission.AdmissionOrderIndex {
+        private final Long2ObjectHashMap<IntObjectHashMap<AdmissionAggregate>> summariesByUser =
+                new Long2ObjectHashMap<>();
         private final RuntimeOrderAdmission.AdmissionSummary summary =
                 new RuntimeOrderAdmission.AdmissionSummary();
         private int symbolId;
@@ -271,34 +288,120 @@ public final class AccountLaneState {
         @Override
         public RuntimeOrderAdmission.AdmissionSummary inspect(
                 long userId, String symbol, CorePositionSide positionSide,
-                com.surprising.aeron.protocol.CoreOrderSide side,
-                com.surprising.aeron.protocol.CoreMarginMode conflictingMarginMode) {
-            long pendingQuantity = 0;
-            long reduceOnlyQuantity = 0;
-            int marginModeCount = 0;
-            LongHashSet ids = reservationIdsByUser.get(userId);
-            if (ids == null) return summary.set(0, 0, 0);
-            LongIterator iterator = ids.longIterator();
-            while (iterator.hasNext()) {
-                OrderRuntime order = orders.get(iterator.next());
-                if (!active(order) || order.symbolId() != symbolId) continue;
-                if (order.reduceOnly() && order.side() == side) {
-                    reduceOnlyQuantity = Math.addExact(
-                            reduceOnlyQuantity, order.remainingQuantitySteps());
-                } else if (!order.reduceOnly() && order.positionSide() == positionSide
-                        && order.side() == side) {
-                    pendingQuantity = Math.addExact(pendingQuantity, order.remainingQuantitySteps());
-                }
-                if (order.positionSide() == positionSide
-                        && order.marginMode() == conflictingMarginMode) {
-                    marginModeCount = Math.incrementExact(marginModeCount);
-                }
+                CoreOrderSide side, CoreMarginMode conflictingMarginMode) {
+            IntObjectHashMap<AdmissionAggregate> bySymbol = summariesByUser.get(userId);
+            AdmissionAggregate aggregate = bySymbol == null ? null : bySymbol.get(symbolId);
+            return aggregate == null ? summary.set(0, 0, 0)
+                    : summary.set(aggregate.pending(positionSide, side), aggregate.reduceOnly(side),
+                    aggregate.marginMode(positionSide, conflictingMarginMode));
+        }
+
+        private void replace(OrderRuntime previous, OrderRuntime replacement) {
+            if (active(previous)) update(previous, -1);
+            if (active(replacement)) update(replacement, 1);
+        }
+
+        private void update(OrderRuntime order, int direction) {
+            IntObjectHashMap<AdmissionAggregate> bySymbol = summariesByUser.get(order.userId());
+            AdmissionAggregate aggregate = bySymbol == null ? null : bySymbol.get(order.symbolId());
+            if (aggregate == null) {
+                if (direction < 0) throw new IllegalStateException("admission order index is missing");
+                bySymbol = bySymbol == null ? new IntObjectHashMap<>() : bySymbol;
+                aggregate = new AdmissionAggregate();
+                aggregate.update(order, direction);
+                bySymbol.put(order.symbolId(), aggregate);
+                summariesByUser.put(order.userId(), bySymbol);
+                return;
             }
-            return summary.set(pendingQuantity, reduceOnlyQuantity, marginModeCount);
+            aggregate.update(order, direction);
+            if (aggregate.empty()) {
+                bySymbol.remove(order.symbolId());
+                if (bySymbol.isEmpty()) summariesByUser.remove(order.userId());
+            }
         }
 
         private static boolean active(OrderRuntime order) {
             return order != null && !order.status().terminal();
+        }
+    }
+
+    private static final class AdmissionAggregate {
+        private long netBuy;
+        private long netSell;
+        private long longBuy;
+        private long longSell;
+        private long shortBuy;
+        private long shortSell;
+        private long reduceBuy;
+        private long reduceSell;
+        private int netCross;
+        private int netIsolated;
+        private int longCross;
+        private int longIsolated;
+        private int shortCross;
+        private int shortIsolated;
+        private int orders;
+
+        void update(OrderRuntime order, int direction) {
+            long quantityDelta = direction > 0 ? order.remainingQuantitySteps()
+                    : Math.negateExact(order.remainingQuantitySteps());
+            long currentQuantity = order.reduceOnly()
+                    ? reduceOnly(order.side())
+                    : pending(order.positionSide(), order.side());
+            long nextQuantity = Math.addExact(currentQuantity, quantityDelta);
+            int nextMargin = Math.addExact(
+                    marginMode(order.positionSide(), order.marginMode()), direction);
+            int nextOrders = Math.addExact(orders, direction);
+            if (nextQuantity < 0 || nextMargin < 0 || nextOrders < 0) {
+                throw new IllegalStateException("admission order index underflow");
+            }
+            if (order.reduceOnly()) assignReduceOnly(order.side(), nextQuantity);
+            else assignPending(order.positionSide(), order.side(), nextQuantity);
+            assignMarginMode(order.positionSide(), order.marginMode(), nextMargin);
+            orders = nextOrders;
+        }
+
+        long pending(CorePositionSide positionSide, CoreOrderSide side) {
+            return switch (positionSide) {
+                case NET -> side == CoreOrderSide.BUY ? netBuy : netSell;
+                case LONG -> side == CoreOrderSide.BUY ? longBuy : longSell;
+                case SHORT -> side == CoreOrderSide.BUY ? shortBuy : shortSell;
+            };
+        }
+
+        long reduceOnly(CoreOrderSide side) {
+            return side == CoreOrderSide.BUY ? reduceBuy : reduceSell;
+        }
+
+        int marginMode(CorePositionSide positionSide, CoreMarginMode marginMode) {
+            return switch (positionSide) {
+                case NET -> marginMode == CoreMarginMode.CROSS ? netCross : netIsolated;
+                case LONG -> marginMode == CoreMarginMode.CROSS ? longCross : longIsolated;
+                case SHORT -> marginMode == CoreMarginMode.CROSS ? shortCross : shortIsolated;
+            };
+        }
+
+        boolean empty() { return orders == 0; }
+
+        private void assignPending(CorePositionSide positionSide, CoreOrderSide side, long quantity) {
+            switch (positionSide) {
+                case NET -> { if (side == CoreOrderSide.BUY) netBuy = quantity; else netSell = quantity; }
+                case LONG -> { if (side == CoreOrderSide.BUY) longBuy = quantity; else longSell = quantity; }
+                case SHORT -> { if (side == CoreOrderSide.BUY) shortBuy = quantity; else shortSell = quantity; }
+            }
+        }
+
+        private void assignReduceOnly(CoreOrderSide side, long quantity) {
+            if (side == CoreOrderSide.BUY) reduceBuy = quantity;
+            else reduceSell = quantity;
+        }
+
+        private void assignMarginMode(CorePositionSide positionSide, CoreMarginMode marginMode, int count) {
+            switch (positionSide) {
+                case NET -> { if (marginMode == CoreMarginMode.CROSS) netCross = count; else netIsolated = count; }
+                case LONG -> { if (marginMode == CoreMarginMode.CROSS) longCross = count; else longIsolated = count; }
+                case SHORT -> { if (marginMode == CoreMarginMode.CROSS) shortCross = count; else shortIsolated = count; }
+            }
         }
     }
 

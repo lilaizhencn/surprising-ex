@@ -220,7 +220,7 @@ Controller 只负责 HTTP 参数校验、请求上下文提取和响应映射，
 和资金对账证据。
 
 Product Core 的热状态由 Account Lane 原地裁决。每个 sequence 的 `LaneCommandContextRing.Context` 独立持有 admission、
-挂起的 snapshot batch 状态和 matcher completion；Lane 直接生成最终订单/持仓索引值与 `RuntimeFundsDelta`，owner 不再从
+pending command、matcher completion/rejection、ready 状态、挂起的 snapshot batch 状态和 Lane completion bitmap；Lane 直接生成最终订单/持仓索引值与 `RuntimeFundsDelta`，owner 不再从
 matcher plan 回查并重建业务变化。owner 仅按 sequence 安装已完成终态、合并 Treasury、生成响应、推进连续 Core sequence
 并发布 Aeron 边界；提交失败后毒化实例并恢复，不在已应用的 Lane 之间执行反向补偿。
 `RuntimeCommitJournal` 只保留 entry 容量准入和连续 sequence，不维护按字节容量、热 projection replica、逐命令审计 hash
@@ -233,12 +233,12 @@ matcher 之前的业务拒绝不会修改权威状态；matcher 已接受后若�
 批量订单则保留整批累计 delta，直到批次原子提交。产品尚未上线，因此生产代码没有 legacy、fallback、
 双写或 feature flag 路径。
 
-Matcher continuation 与 Lane command context 共用按 Core sequence 定位的预分配 ring；pending 顺序也由 primitive
-sequence ring 保存。owner 不为撮合命令维护 Future、active set 或 completed-result map；每个 matcher shard worker 从自己的
-有界 SPSC ring 按 symbol 顺序取命令，owner 收割所有 shard 中已完成的结果并按完成顺序落账。全局 Core sequence 只在结果完成后
-推进连续水位，不阻塞其他 shard。默认关闭的 matching phase 诊断不会执行 `nanoTime`
+Matcher continuation 与 Lane command context 共用按 Core sequence 直接定位的预分配 ring。owner 不为撮合命令维护 Future、
+active set、sequence hash map 或 completed-result map；每个 matcher shard worker 从自己的有界 SPSC ring 按 symbol 顺序取命令，
+各 shard 可独立完成并把结果写回对应 sequence context，owner 只从连续完成的全局 sequence 头提交 Lane 终态和发布 Aeron 边界。
+这允许撮合并行在途，同时保持同账户资金与订单状态的确定性顺序。默认关闭的 matching phase 诊断不会执行 `nanoTime`
 或写计时 map。永续订单
-准入的 open-interest 比例计算和 risk bracket 选择使用精确 long fast path，只有真实 long 乘法溢出才进入
+准入所需的活动订单数量由所属 Lane 按 user/symbol 增量维护，检查不再遍历用户订单；open-interest 比例计算和 risk bracket 选择使用精确 long fast path，只有真实 long 乘法溢出才进入
 `BigInteger` fallback；同一命令的杠杆和 matcher evidence 不再重复查询或重复解码。
 
 性能采样必须按 `LinearPerpetualWorkload` JFR 事件的正式 measurement 窗口归因，trial 初始化和快照模板分配不能

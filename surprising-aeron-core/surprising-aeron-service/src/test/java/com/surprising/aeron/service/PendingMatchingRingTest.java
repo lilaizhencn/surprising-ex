@@ -1,6 +1,7 @@
 package com.surprising.aeron.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMessage;
@@ -17,14 +18,15 @@ class PendingMatchingRingTest {
 
     @Test
     void keepsTheLowWatermarkWhileAllowingIndependentPartitionCompletion() {
-        PendingMatchingRing ring = new PendingMatchingRing(3, 1);
+        PendingMatchingRing ring = new PendingMatchingRing(3, 1, 4);
         PendingMatching first = pending(7, UUID.randomUUID(), 1001);
         PendingMatching replacement = first.withCommand(command(first.command().header().commandId(), 1002));
-        PendingMatching second = pending(11, UUID.randomUUID(), 1003);
-        PendingMatching third = pending(12, UUID.randomUUID(), 1004);
-        PendingMatching fourth = pending(13, UUID.randomUUID(), 1005);
+        PendingMatching second = pending(8, UUID.randomUUID(), 1003);
+        PendingMatching third = pending(9, UUID.randomUUID(), 1004);
+        PendingMatching fourth = pending(10, UUID.randomUUID(), 1005);
 
         ring.put(first);
+        assertThat(ring.contexts().required(7).pending()).isSameAs(first);
         ring.put(replacement);
         ring.put(second);
         ring.put(third);
@@ -35,23 +37,28 @@ class PendingMatchingRingTest {
         assertThat(ring.firstSequence()).isEqualTo(7);
         assertThat(ring.get(7)).isSameAs(replacement);
         assertThat(ring.findByCommandId(second.command().header().commandId())).isSameAs(second);
-        assertThat(ring.remove(11)).isSameAs(second);
-        assertThat(ring.remove(12)).isSameAs(third);
-        assertThat(ring.remove(13)).isSameAs(fourth);
+        assertThat(ring.remove(8)).isSameAs(second);
+        assertThat(ring.remove(9)).isSameAs(third);
+        assertThat(ring.remove(10)).isSameAs(fourth);
         assertThat(ring.firstSequence()).isEqualTo(7);
-        ring.put(pending(14, UUID.randomUUID(), 1006));
-        ring.put(pending(15, UUID.randomUUID(), 1007));
-        ring.put(pending(16, UUID.randomUUID(), 1008));
-        assertThat(ring.snapshot().keySet()).containsExactly(7L, 14L, 15L, 16L);
+        assertThatThrownBy(() -> ring.put(pending(11, UUID.randomUUID(), 1006)))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("sequence window");
         assertThat(ring.remove(7)).isSameAs(replacement);
-        assertThat(ring.firstSequence()).isEqualTo(14);
+        assertThat(ring.contexts().claimed(7)).isFalse();
+        ring.put(pending(11, UUID.randomUUID(), 1006));
+        ring.put(pending(12, UUID.randomUUID(), 1007));
+        ring.put(pending(13, UUID.randomUUID(), 1008));
+        ring.put(pending(14, UUID.randomUUID(), 1009));
+        assertThat(ring.snapshot().keySet()).containsExactly(11L, 12L, 13L, 14L);
+        assertThat(ring.firstSequence()).isEqualTo(11);
         ring.clear();
         assertThat(ring.snapshot()).isEmpty();
     }
 
     @Test
     void advancesEachMatcherSubmissionShardWithoutScanningThePendingRing() {
-        PendingMatchingRing ring = new PendingMatchingRing(4, 2);
+        PendingMatchingRing ring = new PendingMatchingRing(4, 2, 4);
         PendingMatching shardZeroFirst = pending(1, UUID.randomUUID(), 1001);
         PendingMatching shardOne = pending(2, UUID.randomUUID(), 1002);
         PendingMatching shardZeroSecond = pending(3, UUID.randomUUID(), 1003);
@@ -74,7 +81,7 @@ class PendingMatchingRingTest {
 
     @Test
     void onlyPublishesReadyCommandsAtTheDeterministicSubmissionHead() {
-        PendingMatchingRing ring = new PendingMatchingRing(2, 1);
+        PendingMatchingRing ring = new PendingMatchingRing(2, 1, 4);
         PendingMatching first = pending(1, UUID.randomUUID(), 1001);
         PendingMatching second = pending(2, UUID.randomUUID(), 1002);
         ring.put(first);
@@ -94,7 +101,7 @@ class PendingMatchingRingTest {
 
     @Test
     void advancesSettlementDispatchIndependentlyFromTheGlobalCommitHead() {
-        PendingMatchingRing ring = new PendingMatchingRing(4, 1);
+        PendingMatchingRing ring = new PendingMatchingRing(4, 1, 4);
         PendingMatching first = pending(1, UUID.randomUUID(), 1001);
         PendingMatching second = pending(2, UUID.randomUUID(), 1002);
         PendingMatching third = pending(3, UUID.randomUUID(), 1003);

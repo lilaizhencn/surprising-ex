@@ -150,8 +150,6 @@ public final class CoreProbeState implements AutoCloseable,
     private final LinkedHashMap<Long, List<LifecycleScope>> pendingLifecycleScopes;
     private final LinkedHashMap<Long, OrderBatchPending> pendingOrderBatches;
     private final LinkedHashMap<Long, DeferredMatching> deferredMatching;
-    private final org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap pendingMatchingRejections =
-            new org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap();
     private final List<CoreMessage> queuedMatching = new ArrayList<>();
     private final LaneCommandContextRing laneCommandContexts;
     private final MatcherPipelineGroup matcherPipeline;
@@ -290,14 +288,14 @@ public final class CoreProbeState implements AutoCloseable,
                 productLine, snapshotState, appliedCommandCount, matcherSnapshot, restoredBusinessStateHash);
         this.matchingAdapter = runtime.matcherForConstruction();
         this.pendingMatching = new PendingMatchingRing(
-                MAX_PENDING_MATCHING, matchingAdapter.topology().matchingEngineCount());
+                Math.min(MAX_PENDING_MATCHING, matchingAdapter.topology().matcherWindowSize()),
+                matchingAdapter.topology().matchingEngineCount(),
+                matchingAdapter.topology().accountLaneCount());
         this.placeAdmissionShardReady = new boolean[matchingAdapter.topology().matchingEngineCount()];
         this.appliedMatcherSequences = new long[matchingAdapter.topology().matchingEngineCount() + 1];
         this.appliedMatcherPrefixDigests = new long[appliedMatcherSequences.length];
         initializeMatcherProgress(matcherSnapshot);
-        this.laneCommandContexts = new LaneCommandContextRing(
-                matchingAdapter.topology().matcherWindowSize(),
-                matchingAdapter.topology().accountLaneCount());
+        this.laneCommandContexts = pendingMatching.contexts();
         this.matcherPipeline = new MatcherPipelineGroup(
                 matchingAdapter.topology().matchingEngineCount(),
                 Math.min(matchingAdapter.topology().matcherWindowSize(),
@@ -773,7 +771,7 @@ public final class CoreProbeState implements AutoCloseable,
         CoreResultCode resultCode = CoreResultCode.NONE;
         commandTriggerOrderView = null;
         if (isMatchingCommand(message.header().messageType())) {
-            if (pendingMatching.size() >= MAX_PENDING_MATCHING) {
+            if (pendingMatching.size() >= pendingMatching.capacity()) {
                 throw new IllegalStateException("matcher dispatch window is exhausted after Cluster Log append");
             }
             if (isOrderBatchCommand(message.header().messageType())) {
@@ -840,7 +838,7 @@ public final class CoreProbeState implements AutoCloseable,
             cancelTriggersForClosedPositions();
             int reservedChildPatches = commandDemand == null ? 0 : commandDemand.patchCount() - 1;
             if (queuedMatching.size() > reservedChildPatches
-                    || pendingMatching.size() + queuedMatching.size() > MAX_PENDING_MATCHING) {
+                    || pendingMatching.size() + queuedMatching.size() > pendingMatching.capacity()) {
                 rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
                         Math.incrementExact(appliedCommandCount));
                 queuedMatching.clear();
@@ -1642,7 +1640,6 @@ public final class CoreProbeState implements AutoCloseable,
         storeResult(pending.command().header().commandId(), StoredResult.owned(
                 pending.fingerprint(), ResponseStatus.APPLIED, CoreResultCode.NONE,
                 batch.sequence, requiredExportSequence, stateHash, responseData));
-        laneCommandContexts.release(batch.sequence);
         runtimePlaceOrderState.endOrderBatchMutationScope();
         removePendingMatching(batch.sequence);
         pendingOrderBatches.remove(batch.sequence);
@@ -2071,7 +2068,7 @@ public final class CoreProbeState implements AutoCloseable,
                     matchingOperation(message.header().messageType()), message, fingerprint)
                     .withCapacityReservation(currentAdmission);
             putPendingMatching(pending);
-            pendingMatchingRejections.put(sequence, resultCode.ordinal() + 1);
+            laneCommandContexts.required(sequence).rejectMatching(resultCode);
             pendingMatching.completeSubmission(sequence);
             appliedCommandCount = sequence;
             recordSourceSequence(sourceKey, message.header().sourceSequence());
@@ -2421,9 +2418,7 @@ public final class CoreProbeState implements AutoCloseable,
 
     private PendingMatching removePendingMatching(long sequence) {
         pendingLifecycleScopes.remove(sequence);
-        pendingMatchingRejections.removeKey(sequence);
         PendingMatching removed = pendingMatching.remove(sequence);
-        if (laneCommandContexts.claimed(sequence)) laneCommandContexts.discard(sequence);
         refreshCommittedCoreSequence();
         return removed;
     }
@@ -2445,16 +2440,24 @@ public final class CoreProbeState implements AutoCloseable,
     }
 
     private void putPendingMatching(PendingMatching pending) {
-        if (pendingMatching.size() >= MAX_PENDING_MATCHING) {
+        if (pendingMatching.size() >= pendingMatching.capacity()) {
             throw new IllegalStateException("matching pending capacity is exhausted");
         }
-        pendingMatching.put(pending);
-        laneCommandContexts.claim(pending.sequence()).admission(pending.takeCapacityReservation());
-        CoreMessageType type = pending.command().header().messageType();
-        if (type != CoreMessageType.PLACE_ORDER_BATCH
-                && type != CoreMessageType.CANCEL_ORDER_BATCH
-                && type != CoreMessageType.AMEND_ORDER_BATCH) {
-            pendingMatching.registerSubmission(pending.sequence(), matcherShard(pending));
+        CoreAdmissionReservation admission = pending.takeCapacityReservation();
+        if (admission == null) throw new IllegalStateException("matching sequence admission is missing");
+        try {
+            pendingMatching.put(pending);
+            laneCommandContexts.required(pending.sequence()).admission(admission);
+            CoreMessageType type = pending.command().header().messageType();
+            if (type != CoreMessageType.PLACE_ORDER_BATCH
+                    && type != CoreMessageType.CANCEL_ORDER_BATCH
+                    && type != CoreMessageType.AMEND_ORDER_BATCH) {
+                pendingMatching.registerSubmission(pending.sequence(), matcherShard(pending));
+            }
+        } catch (RuntimeException failure) {
+            pendingMatching.remove(pending.sequence());
+            admission.releaseUnused();
+            throw failure;
         }
     }
 
@@ -2735,7 +2738,7 @@ public final class CoreProbeState implements AutoCloseable,
                             ? CoreResultCode.fromRejectionCode(rejected.code())
                             : rejection instanceof ArithmeticException
                             ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND;
-                    pendingMatchingRejections.put(pending.sequence(), resultCode.ordinal() + 1);
+                    laneCommandContexts.required(pending.sequence()).rejectMatching(resultCode);
                     pendingMatching.completeSubmission(pending.sequence());
                     signalPendingMatchingReady(pending.sequence());
                     continue;
@@ -3091,15 +3094,15 @@ public final class CoreProbeState implements AutoCloseable,
     }
 
     boolean hasPendingMatchingRejection(long sequence) {
-        return pendingMatchingRejections.containsKey(sequence);
+        return laneCommandContexts.claimed(sequence)
+                && laneCommandContexts.required(sequence).hasMatchingRejection();
     }
 
     CoreResponse completeRejectedMatching(long sequence) {
         runtime.assertOwner();
         PendingMatching pending = pendingMatching.get(sequence);
-        int encodedResultCode = pendingMatchingRejections.get(sequence);
-        if (pending == null || encodedResultCode == 0) return null;
-        CoreResultCode resultCode = CoreResultCode.values()[encodedResultCode - 1];
+        if (pending == null || !hasPendingMatchingRejection(sequence)) return null;
+        CoreResultCode resultCode = laneCommandContexts.required(sequence).matchingRejection();
         CoreAdmissionReservation capacityReservation = sequenceAdmission(pending.sequence());
         if (capacityReservation == null) {
             throw new IllegalStateException("rejected matching admission reservation is missing");
@@ -3112,7 +3115,6 @@ public final class CoreProbeState implements AutoCloseable,
         storeResult(pending.command().header().commandId(), new StoredResult(pending.fingerprint(),
                 ResponseStatus.REJECTED, resultCode, sequence, requiredExportSequence, stateHash,
                 new byte[0], 0));
-        laneCommandContexts.discard(sequence);
         removePendingMatching(sequence);
         CoreResponse response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, resultCode,
                 sequence, requiredExportSequence, stateHash, new byte[0]);
@@ -3372,7 +3374,6 @@ public final class CoreProbeState implements AutoCloseable,
         terminalTradeCount = Math.addExact(terminalTradeCount, commandTradeCount);
         storeResult(pending.command().header().commandId(), StoredResult.owned(pending.fingerprint(),
                 status, resultCode, applied, requiredExportSequence, stateHash, responseData));
-        laneCommandContexts.release(sequence);
         removePendingMatching(sequence);
         if (!deferredMatching.isEmpty() || !pendingOrderBatches.isEmpty()) {
             submitDeferredMatchingAfterBatch();
@@ -3467,7 +3468,6 @@ public final class CoreProbeState implements AutoCloseable,
                 ResponseStatus.APPLIED, CoreResultCode.NONE, applied, requiredExportSequence,
                 stateHash, responseData));
         CoreAdmissionReservation capacityReservation = sequenceAdmission(pending.sequence());
-        laneCommandContexts.release(applied);
         if (pending.takePipelinedSettlementCounted()) {
             dispatchedSettlementInFlight--;
             if (dispatchedSettlementInFlight < 0) {
@@ -5891,7 +5891,6 @@ public final class CoreProbeState implements AutoCloseable,
             sequenceAdmission(pending.sequence()).releaseUnused();
         });
         pendingMatching.clear();
-        pendingMatchingRejections.clear();
         pendingLifecycleScopes.clear();
         pendingOrderBatches.clear();
         deferredMatching.clear();

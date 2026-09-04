@@ -1,5 +1,6 @@
 package com.surprising.aeron.service;
 
+import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 
 final class LaneCommandContextRing {
@@ -45,6 +46,8 @@ final class LaneCommandContextRing {
         return contexts[(int) coreSequence & mask].coreSequence == coreSequence;
     }
 
+    Context contextAt(int slot) { return contexts[slot]; }
+
     void discard(long coreSequence) {
         Context context = required(coreSequence);
         context.clear();
@@ -63,6 +66,9 @@ final class LaneCommandContextRing {
         private CoreMatchingResult completedMatchingResult;
         private CoreAdmissionReservation admission;
         private PendingMatching.CommitContext commitContext;
+        private CoreResultCode matchingRejection;
+        private boolean pendingReady;
+        private PendingMatching pending;
         private Context(int laneCount) {
             if (laneCount <= 0 || laneCount > Long.SIZE) {
                 throw new IllegalArgumentException("invalid account lane count");
@@ -74,6 +80,14 @@ final class LaneCommandContextRing {
         long completedLaneMask() { return completedLaneMask; }
         CoreMatchingResult matchingResult() { return matchingResult; }
         CoreAdmissionReservation admission() { return admission; }
+        PendingMatching pending() { return pending; }
+
+        void pending(PendingMatching value) {
+            if (value == null || value.sequence() != coreSequence) {
+                throw new IllegalStateException("invalid pending matching sequence");
+            }
+            pending = value;
+        }
 
         void admission(CoreAdmissionReservation value) {
             if (value == null || admission != null) {
@@ -119,6 +133,30 @@ final class LaneCommandContextRing {
             return completedMatchingResult != null;
         }
 
+        void rejectMatching(CoreResultCode resultCode) {
+            if (resultCode == null || matchingRejection != null) {
+                throw new IllegalStateException("invalid matching rejection");
+            }
+            matchingRejection = resultCode;
+        }
+
+        boolean hasMatchingRejection() { return matchingRejection != null; }
+
+        CoreResultCode matchingRejection() {
+            if (matchingRejection == null) throw new IllegalStateException("matching rejection is missing");
+            return matchingRejection;
+        }
+
+        void markPendingReady() { pendingReady = true; }
+
+        boolean takePendingReady() {
+            boolean value = pendingReady;
+            pendingReady = false;
+            return value;
+        }
+
+        boolean pendingReady() { return pendingReady; }
+
         void resetMatchingContinuation() {
             completedMatchingResult = null;
         }
@@ -156,6 +194,9 @@ final class LaneCommandContextRing {
             completedMatchingResult = null;
             admission = null;
             commitContext = null;
+            matchingRejection = null;
+            pendingReady = false;
+            pending = null;
         }
     }
 }
