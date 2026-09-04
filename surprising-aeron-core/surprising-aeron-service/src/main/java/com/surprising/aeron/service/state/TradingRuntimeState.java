@@ -56,6 +56,9 @@ public final class TradingRuntimeState implements AutoCloseable {
     private final long[][] accountLaneMaxLatencyNanos;
     private final long[] publishedLaneStateHashes;
     private final long[] publishedLaneFundsHashes;
+    private final long[] publishedLaneCommittedSequences;
+    private final long[] dispatchedLaneCommitSequences;
+    private final java.util.ArrayDeque<LaneCommitEvent> laneCommitEventPool = new java.util.ArrayDeque<>();
     private boolean accountLanesStarted;
 
     private final IntObjectHashMap<MarkPriceRuntime> markPrices = new IntObjectHashMap<>();
@@ -187,6 +190,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         this.accountLaneMaxLatencyNanos = laneMetricValues(topology.accountLaneCount());
         this.publishedLaneStateHashes = new long[topology.accountLaneCount()];
         this.publishedLaneFundsHashes = new long[topology.accountLaneCount()];
+        this.publishedLaneCommittedSequences = new long[topology.accountLaneCount()];
+        this.dispatchedLaneCommitSequences = new long[topology.accountLaneCount()];
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             accountLanes[laneId] = new AccountLaneState(laneId, topology.accountLaneQueueCapacity());
             placeAdmissionReadyQueues[laneId] = new LaneSequenceQueue(topology.accountLaneQueueCapacity());
@@ -341,9 +346,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         task.prepare(operation);
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
                 accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
-        long ticket = laneWorkers[laneId].submit(task);
+        laneWorkers[laneId].submit(task);
         @SuppressWarnings("unchecked") T result = (T) task.await();
-        laneWorkers[laneId].awaitConsumed(ticket);
         flushPublishedChanges(laneId);
         return result;
     }
@@ -542,9 +546,9 @@ public final class TradingRuntimeState implements AutoCloseable {
         return topology.accountLaneId(userId) == scoped.laneId();
     }
 
-    private void applyLaneUsers(AccountLaneState lane,
-                                       org.eclipse.collections.impl.list.mutable.primitive.LongArrayList users,
-                                       long coreSequence) {
+    void applyLaneUsers(AccountLaneState lane,
+                        org.eclipse.collections.impl.list.mutable.primitive.LongArrayList users,
+                        long coreSequence) {
         org.eclipse.collections.api.iterator.LongIterator iterator = users.longIterator();
         while (iterator.hasNext()) {
             long userId = iterator.next();
@@ -559,6 +563,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         int laneId = lane.laneId();
         publishedLaneStateHashes[laneId] = lane.localStateHash();
         publishedLaneFundsHashes[laneId] = lane.localFundsHash();
+        publishedLaneCommittedSequences[laneId] = lane.committedSequence();
     }
 
     private static BalanceRuntime copyBalance(IntObjectHashMap<BalanceRuntime> balances, int assetId) {
@@ -1020,6 +1025,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         recordLaneOperation(lane.laneId(), AccountLaneOperationType.COMMAND, latencyNanos);
     }
 
+    void recordSequenceCommitLaneOperation(int laneId, long latencyNanos) {
+        recordLaneOperation(laneId, AccountLaneOperationType.SETTLEMENT, latencyNanos);
+    }
+
     private record PendingReservationCompletion(ReservationRuntime reservation) {}
 
     private record PendingReservationRef(long orderId, long userId) {
@@ -1259,6 +1268,18 @@ public final class TradingRuntimeState implements AutoCloseable {
         return stageLaneMutationFromScratch(coreSequence);
     }
 
+    public LaneCommitEvent dispatchLaneMutation(long coreSequence, long[] userIds) {
+        assertOwner();
+        if (coreSequence <= 0 || userIds == null) {
+            throw new IllegalArgumentException("invalid lane apply");
+        }
+        clearLaneUserScratch();
+        for (long userId : userIds) {
+            if (userId > 0) addLaneUser(userId);
+        }
+        return dispatchLaneMutationFromScratch(coreSequence);
+    }
+
     private void clearLaneUserScratch() {
         for (org.eclipse.collections.impl.list.mutable.primitive.LongArrayList users : laneUserScratch) {
             users.clear();
@@ -1271,18 +1292,81 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     private long stageLaneMutationFromScratch(long coreSequence) {
+        LaneCommitEvent event = dispatchLaneMutationFromScratch(coreSequence);
+        if (event == null) return 0;
+        while (!event.complete()) {
+            assertAccountLanesHealthy();
+            Thread.onSpinWait();
+        }
+        long laneMask = event.requiredLaneMask();
+        releaseLaneCommit(event);
+        return laneMask;
+    }
+
+    private LaneCommitEvent dispatchLaneMutationFromScratch(long coreSequence) {
         long laneMask = 0;
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             org.eclipse.collections.impl.list.mutable.primitive.LongArrayList users = laneUserScratch[laneId];
             if (users.isEmpty()) continue;
-            int currentLaneId = laneId;
-            onLane(currentLaneId, lane -> {
-                applyLaneUsers(lane, users, coreSequence);
-                return null;
-            });
+            if (coreSequence <= Math.max(
+                    publishedLaneCommittedSequences[laneId], dispatchedLaneCommitSequences[laneId])) {
+                throw new IllegalStateException("account lane apply is out of order");
+            }
             laneMask |= 1L << laneId;
         }
-        return laneMask;
+        if (laneMask == 0) return null;
+        LaneCommitEvent event = laneCommitEventPool.pollFirst();
+        if (event == null) event = new LaneCommitEvent(accountLanes.length);
+        event.prepare(coreSequence, laneMask, laneUserScratch, this);
+        if (!accountLanesStarted) {
+            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+                if ((laneMask & 1L << laneId) == 0) continue;
+                event.execute(accountLanes[laneId]);
+                dispatchedLaneCommitSequences[laneId] = coreSequence;
+            }
+            return event;
+        }
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            if ((laneMask & 1L << laneId) != 0 && !laneWorkers[laneId].hasCapacity()) {
+                event.discard();
+                laneCommitEventPool.addFirst(event);
+                throw new java.util.concurrent.RejectedExecutionException("Account Lane commit queue is full");
+            }
+        }
+        long submittedMask = 0;
+        try {
+            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+                long laneBit = 1L << laneId;
+                if ((laneMask & laneBit) == 0) continue;
+                accountLaneQueueHighWaterMarks[laneId] = Math.max(
+                        accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
+                laneWorkers[laneId].submit(event);
+                dispatchedLaneCommitSequences[laneId] = coreSequence;
+                submittedMask |= laneBit;
+            }
+        } catch (RuntimeException failure) {
+            if (submittedMask != 0) {
+                throw new IllegalStateException("partial Account Lane commit dispatch", failure);
+            }
+            event.discard();
+            laneCommitEventPool.addFirst(event);
+            throw failure;
+        }
+        return event;
+    }
+
+    public boolean laneCommitComplete(LaneCommitEvent event) {
+        assertOwner();
+        if (event == null) throw new IllegalArgumentException("Account Lane commit event is required");
+        assertAccountLanesHealthy();
+        return event.complete();
+    }
+
+    public void releaseLaneCommit(LaneCommitEvent event) {
+        assertOwner();
+        if (event == null) throw new IllegalArgumentException("Account Lane commit event is required");
+        event.clear();
+        laneCommitEventPool.addFirst(event);
     }
 
     private RuntimeTreasuryDelta applyOrderBatchMatcherSettlement(

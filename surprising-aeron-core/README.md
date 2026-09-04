@@ -37,7 +37,10 @@ PLACE 在进入 matcher 前先以单向事件投递给用户所属 Lane，由该
 增量维护，准入不再扫描用户订单。Coordinator 根据 completion bitmap 按 sequence
 安装这些终态、合并 Treasury delta 并发布响应和 Aeron 边界。
 Account Lane 按 owner 发布的全局连续 Core sequence 串行应用，因此跨 symbol 的同账户事件不会因 matcher 乱序完成而重排。
-不存在 Disruptor、逐命令 Future、临时 Runnable fan-out、Owner/Lane 所有权切换或阻塞式逐 Lane ACK barrier。
+普通命令需要推进多个 Lane watermark 时使用可复用的 sequence-local `LaneCommitEvent` 一次投递到全部目标 SPSC ring，owner
+只观察 completion bitmap；允许固定 256 个 commit sequence 同时在途，不再逐 Lane `await/awaitConsumed`。同步命令响应边界仍等待
+该 sequence 的完整 bitmap，查询和 snapshot fence 仍保留必要的一致性等待。不存在 Disruptor、逐命令 Future、临时 Runnable
+fan-out 或 Owner/Lane 所有权切换。
 
 Account Lane 同时是资金隔离和业务执行边界。多成交、多用户、跨 Lane 的一笔命令共享同一条
 `MatcherSettlementEvent`，不是为每笔 fill 创建 maker/taker 两个任务。Lane 可以连续应用多个 sequence；

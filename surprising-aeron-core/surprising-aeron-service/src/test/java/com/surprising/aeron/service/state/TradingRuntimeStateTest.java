@@ -793,6 +793,34 @@ class TradingRuntimeStateTest {
     }
 
     @Test
+    void keepsTwoHundredFiftySixSequenceLocalLaneCommitsInFlight() {
+        LaneTopology topology = LaneTopology.productionDefault();
+        TradingRuntimeState state = new TradingRuntimeState(topology);
+        long[] users = new long[topology.accountLaneCount()];
+        for (int laneId = 0; laneId < users.length; laneId++) {
+            users[laneId] = userForLane(topology, laneId);
+            state.putUser(new UserRuntime(users[laneId]));
+        }
+        state.startAccountLanes();
+        try {
+            LaneCommitEvent[] commits = new LaneCommitEvent[256];
+            for (int index = 0; index < commits.length; index++) {
+                commits[index] = state.dispatchLaneMutation(index + 1L, users);
+            }
+            for (LaneCommitEvent commit : commits) {
+                while (!state.laneCommitComplete(commit)) Thread.onSpinWait();
+                assertThat(commit.completedLaneMask()).isEqualTo(commit.requiredLaneMask());
+                state.releaseLaneCommit(commit);
+            }
+            for (int laneId = 0; laneId < users.length; laneId++) {
+                assertThat(state.accountLaneById(laneId).committedSequence()).isEqualTo(256);
+            }
+        } finally {
+            state.close();
+        }
+    }
+
+    @Test
     void invalidSnapshotSetDoesNotPartiallyRestoreEarlierLanes() {
         LaneTopology topology = LaneTopology.productionDefault();
         TradingRuntimeState state = new TradingRuntimeState(topology);

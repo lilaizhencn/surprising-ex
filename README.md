@@ -33,6 +33,8 @@ Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 
 同一事件在 Lane 内直接完成本命令的 pending reservation，并生成该 sequence 的最终订单/持仓索引值和 primitive 资金增量；
 订单 `updatedAt/clusterPosition` 也在该事件的所属 Lane 内一次写入，成交完成后不再二次 fan-out 做 metadata stamping；
 owner 只按 sequence 消费 completion、单遍安装 Lane 已生成的终态、合并 sequence-local 资金 accumulator、推进连续水位并发布 Aeron 边界，不再二次扫描终态订单或逐余额、逐 reservation、逐订单、逐持仓重算业务结果。
+普通命令的跨 Lane watermark 提交使用可复用 `LaneCommitEvent` 一次 fan-out，并通过 completion bitmap 收敛；不再由 owner
+逐 Lane 等待 queue slot。同步响应和 snapshot/query fence 仍在完整 committed watermark 后发布。
 查询和 snapshot 只越过 committed watermark。观察到撮合事实后的任何 Lane、资金、hash、index 或发布不变量错误均
 fail-stop，实例必须从 snapshot 和 Cluster Log 恢复，热路径不再尝试分布式 rollback。
 P10-G 使用真实 HTTP 开放环门禁，只有保存 1,000 用户、至少 200 symbol、100k/s offered rate、

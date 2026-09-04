@@ -55,18 +55,12 @@ final class SettlementLaneWorker implements AutoCloseable {
         return next + 1;
     }
 
-    void awaitConsumed(long ticket) {
-        if (ticket <= 0 || ticket > producerSequence) {
-            throw new IllegalArgumentException("invalid account lane consumer ticket");
-        }
-        while (consumerSequence < ticket) {
-            rethrowFailure();
-            Thread.onSpinWait();
-        }
-    }
-
     int depth() {
         return Math.toIntExact(producerSequence - consumerSequence);
+    }
+
+    boolean hasCapacity() {
+        return producerSequence - consumerSequence < commands.length;
     }
 
     Throwable failure() {
