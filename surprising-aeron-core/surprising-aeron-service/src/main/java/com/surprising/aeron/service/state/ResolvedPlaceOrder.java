@@ -6,6 +6,7 @@ import com.surprising.aeron.protocol.ReservationKind;
 public record ResolvedPlaceOrder(
         PlaceOrderCommand intent,
         CoreInstrumentState instrument,
+        int symbolId,
         long matchingPriceTicks,
         long reservationPriceTicks,
         long markPriceTicks,
@@ -17,7 +18,8 @@ public record ResolvedPlaceOrder(
         long feePolicyVersion) {
 
     public ResolvedPlaceOrder {
-        if (intent == null || instrument == null || matchingPriceTicks <= 0 || reservationPriceTicks <= 0
+        if (intent == null || instrument == null || symbolId < -1
+                || matchingPriceTicks <= 0 || reservationPriceTicks <= 0
                 || markPriceTicks <= 0 || markPriceSequence < 0 || reservationKind == null
                 || reservationAsset == null || reservationAsset.isBlank()
                 || makerFeeRatePpm < -1_000_000 || makerFeeRatePpm > 1_000_000

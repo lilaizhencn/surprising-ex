@@ -70,6 +70,9 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         this.isolatedChanges = captureIsolatedChanges;
         this.changes = commitSequence != 0 || captureIsolatedChanges
                 ? runtime.acquireMatcherSettlementChanges() : null;
+        if (changes != null) {
+            changes.ensureOrderCapacity(Math.addExact(plan.orderCount(), plan.preCancellationCount()));
+        }
         if (plan.tradeCount() == 0) {
             if (touchedLaneTreasuryDeltas != null) {
                 for (RuntimeTreasuryDelta delta : touchedLaneTreasuryDeltas) delta.clear();
@@ -147,13 +150,17 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             if (changes == null) runtime.exitLaneCommandScope(lane);
             else runtime.exitMatcherSettlementScope(lane, changes);
         }
-        runtime.recordMatcherLaneOperation(lane, System.nanoTime() - startedNanos);
+        // The owner may recycle the event as soon as the final completed bit is visible. Keep
+        // notification dependencies in Lane-local variables before publishing that bit.
+        TradingRuntimeState completionRuntime = runtime;
+        long completionSequence = plan.coreSequence();
+        completionRuntime.recordMatcherLaneOperation(lane, System.nanoTime() - startedNanos);
         long previous = (long) COMPLETED_LANE_MASK.getAndBitwiseOrRelease(this, laneMask);
         if ((previous & laneMask) != 0) {
             throw new IllegalStateException("account lane completed the same matcher fact twice");
         }
         if ((previous | laneMask) == requiredLaneMask) {
-            runtime.publishMatcherSettlementReady(laneId, plan.coreSequence());
+            completionRuntime.publishMatcherSettlementReady(laneId, completionSequence);
         }
     }
 

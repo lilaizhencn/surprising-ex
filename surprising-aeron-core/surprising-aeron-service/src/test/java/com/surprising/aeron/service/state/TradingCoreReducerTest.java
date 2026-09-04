@@ -523,7 +523,7 @@ class TradingCoreReducerTest {
             TradingCoreState state, PlaceOrderCommand intent, ReservationKind kind, String asset,
             long makerFeeRatePpm, long takerFeeRatePpm) {
         CoreInstrumentState instrument = state.instruments().get(intent.symbol());
-        return new ResolvedPlaceOrder(intent, instrument, intent.limitPriceTicks(), intent.limitPriceTicks(),
+        return new ResolvedPlaceOrder(intent, instrument, -1, intent.limitPriceTicks(), intent.limitPriceTicks(),
                 intent.limitPriceTicks(), 0, kind, asset, makerFeeRatePpm, takerFeeRatePpm, 0);
     }
 

@@ -67,14 +67,13 @@ public final class TradingOrderBatchCodec {
         if (length > MAX_BATCH_RESPONSE_BYTES) {
             throw new IllegalArgumentException("order batch result is too large");
         }
-        ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN)
-                .putInt(PlaceOrderBatchCommand.WIRE_VERSION)
-                .putInt(result.items().size());
+        LittleEndianWriter buffer = new LittleEndianWriter(new byte[length]);
+        buffer.putInt(PlaceOrderBatchCommand.WIRE_VERSION).putInt(result.items().size());
         for (CoreOrderBatchResult.Item item : result.items()) {
             buffer.putInt(encodedResultFrameLength(item));
             writeResultFrame(buffer, item);
         }
-        return buffer.array();
+        return buffer.bytes;
     }
 
     public static byte[] encodeBatchResult(CoreOrderBatchResult result) {
@@ -117,12 +116,13 @@ public final class TradingOrderBatchCodec {
         if (commands == null || commands.isEmpty()) {
             throw new IllegalArgumentException("order batch must not be empty");
         }
-        List<byte[]> items = new ArrayList<>(commands.size());
+        byte[][] items = new byte[commands.size()][];
+        int itemIndex = 0;
         for (T command : commands) {
             if (command == null) throw new IllegalArgumentException("order batch item is required");
             byte[] encoded = encoder.apply(command);
             if (encoded.length == 0) throw new IllegalArgumentException("order batch item is empty");
-            items.add(encoded);
+            items[itemIndex++] = encoded;
         }
         int length = Integer.BYTES * 2;
         for (byte[] item : items) {
@@ -131,13 +131,12 @@ public final class TradingOrderBatchCodec {
         if (length > MAX_BATCH_PAYLOAD_BYTES) {
             throw new IllegalArgumentException("order batch payload is too large");
         }
-        ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN)
-                .putInt(PlaceOrderBatchCommand.WIRE_VERSION)
-                .putInt(items.size());
-        for (int index = 0; index < items.size(); index++) {
-            buffer.putInt(index).putInt(items.get(index).length).put(items.get(index));
+        LittleEndianWriter buffer = new LittleEndianWriter(new byte[length]);
+        buffer.putInt(PlaceOrderBatchCommand.WIRE_VERSION).putInt(items.length);
+        for (int index = 0; index < items.length; index++) {
+            buffer.putInt(index).putInt(items[index].length).put(items[index]);
         }
-        return buffer.array();
+        return buffer.bytes;
     }
 
     private static <T> List<T> decodeCommand(byte[] encoded, int maxItems, Function<byte[], T> decoder) {
@@ -174,7 +173,7 @@ public final class TradingOrderBatchCodec {
                 + Math.addExact(Integer.BYTES, Math.multiplyExact(item.executions().size(), RESULT_EXECUTION_LENGTH));
     }
 
-    private static void writeResultFrame(ByteBuffer buffer, CoreOrderBatchResult.Item item) {
+    private static void writeResultFrame(LittleEndianWriter buffer, CoreOrderBatchResult.Item item) {
         byte[] order = item.order() == null ? null : CoreStateQueryCodec.encodeOrderState(item.order());
         int orderLength = order == null ? 0 : order.length;
         buffer
@@ -192,6 +191,34 @@ public final class TradingOrderBatchCodec {
             buffer.putLong(execution.takerOrderId()).putLong(execution.makerOrderId())
                     .putLong(execution.takerUserId()).putLong(execution.makerUserId())
                     .putLong(execution.priceTicks()).putLong(execution.quantitySteps());
+        }
+    }
+
+    /** Allocation-free writer wrapper; the returned byte array is the protocol frame itself. */
+    private static final class LittleEndianWriter {
+        private final byte[] bytes;
+        private int position;
+
+        private LittleEndianWriter(byte[] bytes) { this.bytes = bytes; }
+
+        private LittleEndianWriter putInt(int value) {
+            bytes[position++] = (byte) value;
+            bytes[position++] = (byte) (value >>> 8);
+            bytes[position++] = (byte) (value >>> 16);
+            bytes[position++] = (byte) (value >>> 24);
+            return this;
+        }
+
+        private LittleEndianWriter putLong(long value) {
+            putInt((int) value);
+            putInt((int) (value >>> 32));
+            return this;
+        }
+
+        private LittleEndianWriter put(byte[] value) {
+            System.arraycopy(value, 0, bytes, position, value.length);
+            position += value.length;
+            return this;
         }
     }
 

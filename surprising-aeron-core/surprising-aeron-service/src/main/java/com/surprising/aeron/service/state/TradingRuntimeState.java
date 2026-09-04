@@ -61,6 +61,10 @@ public final class TradingRuntimeState implements AutoCloseable {
     private final long[] publishedLaneCommittedSequences;
     private final long[] dispatchedLaneCommitSequences;
     private final java.util.ArrayDeque<LaneCommitEvent> laneCommitEventPool = new java.util.ArrayDeque<>();
+    private final java.util.ArrayDeque<MatcherSettlementEvent> matcherSettlementEventPool =
+            new java.util.ArrayDeque<>();
+    private final java.util.ArrayDeque<PlaceAdmissionEvent> placeAdmissionEventPool =
+            new java.util.ArrayDeque<>();
     private boolean accountLanesStarted;
 
     private final IntObjectHashMap<MarkPriceRuntime> markPrices = new IntObjectHashMap<>();
@@ -392,7 +396,9 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (lane == null || laneCommandScope.get() != lane) {
             throw new IllegalStateException("account lane command scope is not active");
         }
-        laneCommandScope.remove();
+        // Lane workers are long lived. Retaining the empty ThreadLocalMap slot avoids allocating
+        // a new Entry on every command while still making an inactive scope read as null.
+        laneCommandScope.set(null);
         if (Thread.currentThread() == owner) flushPublishedChanges(lane.laneId());
     }
 
@@ -400,7 +406,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (changes == null || matcherSettlementChangesScope.get() != changes) {
             throw new IllegalStateException("matcher settlement scope is not active");
         }
-        matcherSettlementChangesScope.remove();
+        matcherSettlementChangesScope.set(null);
         exitLaneCommandScope(lane);
     }
 
@@ -692,6 +698,13 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
         }
 
+        void ensureOrderCapacity(int expectedOrders) {
+            if (expectedOrders <= 0) return;
+            for (PublishedLaneChanges changes : publishedLaneChanges) {
+                changes.ensureOrderCapacity(expectedOrders);
+            }
+        }
+
         void prepareLaneTerminal(int laneId, RuntimeIdentityRegistry identities, AccountLaneState lane) {
             PublishedLaneChanges changes = publishedLaneChanges[laneId];
             changes.orders.forEach((orderId, order) -> changes.activeOrderValues.put(orderId,
@@ -758,6 +771,15 @@ public final class TradingRuntimeState implements AutoCloseable {
         private final LongHashSet removedOrderRoutes = new LongHashSet();
         private final LongHashSet removedReservationRoutes = new LongHashSet();
         private final ClientIdentityReleaseBuffer retiredClientIdentities = new ClientIdentityReleaseBuffer();
+
+        private void ensureOrderCapacity(int expectedOrders) {
+            users.ensureCapacity(expectedOrders * 2);
+            orders.ensureCapacity(expectedOrders);
+            reservations.ensureCapacity(expectedOrders);
+            positions.ensureCapacity(expectedOrders * 2);
+            activeOrderValues.ensureCapacity(expectedOrders);
+            positionIndexValues.ensureCapacity(expectedOrders * 2);
+        }
 
         private void putUser(long key, UserRuntime value) {
             users.put(key, value);
@@ -898,6 +920,29 @@ public final class TradingRuntimeState implements AutoCloseable {
             private int indexGeneration = 1;
             private int size;
 
+            private void ensureCapacity(int expectedSize) {
+                if (expectedSize <= 0) return;
+                int valueCapacity = keys.length;
+                while (valueCapacity < expectedSize) valueCapacity = Math.multiplyExact(valueCapacity, 2);
+                if (valueCapacity != keys.length) {
+                    keys = java.util.Arrays.copyOf(keys, valueCapacity);
+                    values = java.util.Arrays.copyOf(values, valueCapacity);
+                }
+                int indexCapacity = indexSlots.length;
+                while (indexCapacity < expectedSize * 2) indexCapacity = Math.multiplyExact(indexCapacity, 2);
+                if (indexCapacity == indexSlots.length) return;
+                indexKeys = new long[indexCapacity];
+                indexSlots = new int[indexCapacity];
+                indexGenerations = new int[indexCapacity];
+                indexGeneration = 1;
+                for (int index = 0; index < size; index++) {
+                    int position = emptyIndexPosition(keys[index]);
+                    indexKeys[position] = keys[index];
+                    indexSlots[position] = index;
+                    indexGenerations[position] = indexGeneration;
+                }
+            }
+
             private void put(long key, V value) {
                 int slot = indexOf(key);
                 if (slot >= 0) {
@@ -937,6 +982,19 @@ public final class TradingRuntimeState implements AutoCloseable {
 
             private boolean isEmpty() {
                 return size == 0;
+            }
+
+            private int size() { return size; }
+
+            private long keyAt(int index) {
+                if (index < 0 || index >= size) throw new IndexOutOfBoundsException(index);
+                return keys[index];
+            }
+
+            @SuppressWarnings("unchecked")
+            private V valueAt(int index) {
+                if (index < 0 || index >= size) throw new IndexOutOfBoundsException(index);
+                return (V) values[index];
             }
 
             @SuppressWarnings("unchecked")
@@ -1501,7 +1559,9 @@ public final class TradingRuntimeState implements AutoCloseable {
         int baseAssetId = identities.assetId(instrument.baseAsset());
         int quoteAssetId = identities.assetId(instrument.quoteAsset());
         int settleAssetId = identities.assetId(instrument.settleAsset());
-        MatcherSettlementEvent event = new MatcherSettlementEvent().prepare(
+        MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();
+        if (event == null) event = new MatcherSettlementEvent();
+        event.prepare(
                 commitSequence, expectedLaneMask, commitTimestamp, commitClusterPosition,
                 plan, this, identities, instrument,
                 baseAssetId, quoteAssetId, settleAssetId, accountLanes.length,
@@ -1521,6 +1581,9 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void releaseMatcherSettlement(MatcherSettlementEvent event) {
         assertOwner();
+        if (event == null) return;
+        event.clear();
+        matcherSettlementEventPool.addFirst(event);
     }
 
     public PlaceAdmissionEvent dispatchPlaceAdmission(
@@ -1532,7 +1595,9 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new IllegalStateException("asynchronous place admission requires Account Lane workers");
         }
         int laneId = topology.accountLaneId(userId);
-        PlaceAdmissionEvent event = new PlaceAdmissionEvent().prepare(
+        PlaceAdmissionEvent event = placeAdmissionEventPool.pollFirst();
+        if (event == null) event = new PlaceAdmissionEvent();
+        event.prepare(
                 coreSequence, userId, order, commandId, openInterestSteps, identity,
                 preparedClientKey, symbolId, assetId, laneId, this);
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
@@ -1543,6 +1608,9 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void releasePlaceAdmission(PlaceAdmissionEvent event) {
         assertOwner();
+        if (event == null) return;
+        event.clear();
+        placeAdmissionEventPool.addFirst(event);
     }
 
     void publishPlaceAdmissionReady(int laneId, long coreSequence) {
@@ -1552,7 +1620,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public long takePlaceAdmissionReadyLaneMask() {
         assertOwner();
-        return placeAdmissionReadyLaneMask.getAndSet(0);
+        return placeAdmissionReadyLaneMask.getAcquire() == 0
+                ? 0 : placeAdmissionReadyLaneMask.getAndSet(0);
     }
 
     public long pollPlaceAdmissionReady(int laneId) {
@@ -1570,7 +1639,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public long takeMatcherSettlementReadyLaneMask() {
         assertOwner();
-        return matcherSettlementReadyLaneMask.getAndSet(0);
+        return matcherSettlementReadyLaneMask.getAcquire() == 0
+                ? 0 : matcherSettlementReadyLaneMask.getAndSet(0);
     }
 
     public long pollMatcherSettlementReady(int laneId) {

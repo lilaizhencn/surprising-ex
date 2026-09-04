@@ -990,7 +990,7 @@ public final class CoreProbeState implements AutoCloseable {
         batch.positionIdentityCheckpoint = runtimePlaceOrderIdentities.positionCheckpoint();
         batch.matcherTransition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(
                 matcherSequence(-1), matcherPrefixDigest(-1));
-        batch.admissionOrderIndex = new BatchAdmissionOrderIndex(activeOrderIndex);
+        batch.admissionOrderIndex = new BatchAdmissionOrderIndex(activeOrderIndex, batch.items.size());
         batch.started = true;
         beginSnapshotProjectionBatch();
         if (preparePipelinedPerpetualPlaceBatch(batch, pending)) {
@@ -1028,12 +1028,8 @@ public final class CoreProbeState implements AutoCloseable {
                         runtimePlaceOrderState, runtimePlaceOrderIdentities, userId, resolved);
                 var preparedClientKey = runtimePlaceOrderIdentities.prepareClientKey(
                         userId, resolved.clientOrderId());
-                Integer symbolId = runtimePlaceOrderIdentities.findSymbolId(resolved.symbol());
-                if (symbolId == null) {
-                    throw new IllegalStateException("order symbol identity was not prepared with the instrument");
-                }
                 reservations.add(new PreparedPlaceReservation(command, resolved, admissionIdentity,
-                        preparedClientKey, symbolId,
+                        preparedClientKey, resolved.symbolId(),
                         runtimePlaceOrderIdentities.assetId(resolved.reservationAsset()),
                         batchOpenInterestSteps(batch, command.symbol())));
             }
@@ -1045,7 +1041,7 @@ public final class CoreProbeState implements AutoCloseable {
                  | PipelinedBatchNotApplicable exception) {
             rollbackOrderBatchMutations(batch, false);
             beginSnapshotProjectionBatch();
-            batch.admissionOrderIndex = new BatchAdmissionOrderIndex(activeOrderIndex);
+            batch.admissionOrderIndex = new BatchAdmissionOrderIndex(activeOrderIndex, batch.items.size());
             batch.currentPreMatchingCancellationOrderIds = List.of();
             return false;
         }
@@ -1124,21 +1120,30 @@ public final class CoreProbeState implements AutoCloseable {
         CoreMessageType type = message.header().messageType();
         if (type == CoreMessageType.PLACE_ORDER_BATCH) {
             PlaceOrderBatchCommand command = decodedCommand.placeOrderBatch();
-            return new OrderBatchPending(OrderBatchKind.PLACE, command.orders().stream()
-                    .map(value -> new OrderBatchItem(value.orderId(), 0, 0, value)).toList(),
+            List<OrderBatchItem> items = new ArrayList<>(command.orders().size());
+            for (PlaceOrderCommand value : command.orders()) {
+                items.add(new OrderBatchItem(value.orderId(), 0, 0, value));
+            }
+            return new OrderBatchPending(OrderBatchKind.PLACE, items,
                     clusterTimestamp, clusterPosition, PendingMatching.Operation.PLACE);
         }
         if (type == CoreMessageType.CANCEL_ORDER_BATCH) {
             CancelOrderBatchCommand command = decodedCommand.cancelOrderBatch();
-            return new OrderBatchPending(OrderBatchKind.CANCEL, command.orders().stream()
-                    .map(value -> new OrderBatchItem(value.orderId(), 0, 0, value)).toList(),
+            List<OrderBatchItem> items = new ArrayList<>(command.orders().size());
+            for (CancelOrderCommand value : command.orders()) {
+                items.add(new OrderBatchItem(value.orderId(), 0, 0, value));
+            }
+            return new OrderBatchPending(OrderBatchKind.CANCEL, items,
                     clusterTimestamp, clusterPosition, PendingMatching.Operation.CANCEL);
         }
         if (type == CoreMessageType.AMEND_ORDER_BATCH) {
             AmendOrderBatchCommand command = decodedCommand.amendOrderBatch();
-            return new OrderBatchPending(OrderBatchKind.AMEND, command.orders().stream()
-                    .map(value -> new OrderBatchItem(value.replacementOrderId(), value.originalOrderId(),
-                            value.replacementOrderId(), value)).toList(),
+            List<OrderBatchItem> items = new ArrayList<>(command.orders().size());
+            for (AmendOrderCommand value : command.orders()) {
+                items.add(new OrderBatchItem(value.replacementOrderId(), value.originalOrderId(),
+                        value.replacementOrderId(), value));
+            }
+            return new OrderBatchPending(OrderBatchKind.AMEND, items,
                     clusterTimestamp, clusterPosition, PendingMatching.Operation.AMEND);
         }
         throw new IllegalArgumentException("unsupported order batch type");
@@ -2740,19 +2745,7 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private void progressPlaceAdmissions() {
-        long readyLaneMask = runtimePlaceOrderState.takePlaceAdmissionReadyLaneMask();
-        while (readyLaneMask != 0) {
-            int laneId = Long.numberOfTrailingZeros(readyLaneMask);
-            readyLaneMask &= readyLaneMask - 1;
-            long sequence;
-            while ((sequence = runtimePlaceOrderState.pollPlaceAdmissionReady(laneId)) != 0) {
-                PendingMatching pending = pendingMatching.get(sequence);
-                if (pending == null || pending.placeAdmission() == null) {
-                    continue;
-                }
-                placeAdmissionReadyShardMask |= 1L << matcherShard(pending);
-            }
-        }
+        drainLaneReadyNotifications();
         long readyShards = placeAdmissionReadyShardMask;
         while (readyShards != 0) {
             int shard = Long.numberOfTrailingZeros(readyShards);
@@ -2789,6 +2782,23 @@ public final class CoreProbeState implements AutoCloseable {
                 }
                 submitMatching(pending);
                 if (!pending.isMatchingSubmitted()) break;
+            }
+        }
+    }
+
+    /** Drain completed place admissions and mark their matcher shard once. */
+    private void drainLaneReadyNotifications() {
+        long readyLaneMask = runtimePlaceOrderState.takePlaceAdmissionReadyLaneMask();
+        while (readyLaneMask != 0) {
+            int laneId = Long.numberOfTrailingZeros(readyLaneMask);
+            readyLaneMask &= readyLaneMask - 1;
+            long sequence;
+            while ((sequence = runtimePlaceOrderState.pollPlaceAdmissionReady(laneId)) != 0) {
+                PendingMatching pending = pendingMatching.get(sequence);
+                if (pending == null || pending.placeAdmission() == null) {
+                    continue;
+                }
+                placeAdmissionReadyShardMask |= 1L << matcherShard(pending);
             }
         }
     }
@@ -3126,8 +3136,9 @@ public final class CoreProbeState implements AutoCloseable {
         while (pendingMatching.contains(sequence) && System.nanoTime() < deadline) {
             drainMatchingCompletions();
             if (hasPendingMatchingRejection(sequence)) return null;
-            com.surprising.aeron.service.matching.CoreMatchingResult result =
-                    takeMatchingResult(sequence);
+            LaneCommandContextRing.Context context = laneCommandContexts.required(sequence);
+            com.surprising.aeron.service.matching.CoreMatchingResult result = context.matchingResult();
+            if (result == null) result = context.takeMatchingCompletion();
             if (result != null) return result;
             long remainingNanos = deadline - System.nanoTime();
             if (remainingNanos <= 0) break;
@@ -3307,7 +3318,7 @@ public final class CoreProbeState implements AutoCloseable {
                     if (matchingResult.accepted()) {
                         var preparedClientKey = runtimePlaceOrderIdentities.prepareClientKey(
                                 admission.userId(), admission.resolved().clientOrderId());
-                        int symbolId = runtimePlaceOrderIdentities.symbolId(admission.resolved().symbol());
+                        int symbolId = admission.resolved().symbolId();
                         int assetId = runtimePlaceOrderIdentities.assetId(admission.resolved().reservationAsset());
                         var replaceEvent = runtimePlaceOrderState.dispatchReplace(
                                 sequence, admission.userId(), originalOrderId,
@@ -5534,14 +5545,10 @@ public final class CoreProbeState implements AutoCloseable {
                 runtimePlaceOrderState, runtimePlaceOrderIdentities, userId, resolved);
         var preparedClientKey = runtimePlaceOrderIdentities.prepareClientKey(
                 userId, resolved.clientOrderId());
-        Integer symbolId = runtimePlaceOrderIdentities.findSymbolId(resolved.symbol());
-        if (symbolId == null) {
-            throw new IllegalStateException("order symbol identity was not prepared with the instrument");
-        }
         int assetId = runtimePlaceOrderIdentities.assetId(resolved.reservationAsset());
         return runtimePlaceOrderState.dispatchPlaceAdmission(coreSequence, userId, resolved, commandId,
                 openInterestIndex.openInterestSteps(resolved.symbol()), identity,
-                preparedClientKey, symbolId, assetId);
+                preparedClientKey, resolved.symbolId(), assetId);
     }
 
     private void reservePlaceOrderRuntime(long userId, PlaceOrderCommand command, UUID commandId,
@@ -5608,14 +5615,7 @@ public final class CoreProbeState implements AutoCloseable {
             long preparedRequiredReservation, OrderBatchPending batch) {
         var preparedClientKey = runtimePlaceOrderIdentities.prepareClientKey(
                 userId, resolved.clientOrderId());
-        Integer symbolId = runtimePlaceOrderIdentities.findSymbolId(resolved.symbol());
-        if (symbolId == null) {
-            if (preparedClientKey.allocated()) {
-                runtimePlaceOrderIdentities.rollbackPreparedClientKey(
-                        userId, resolved.clientOrderId(), preparedClientKey);
-            }
-            throw new IllegalStateException("order symbol identity was not prepared with the instrument");
-        }
+        int symbolId = resolved.symbolId();
         int assetId = runtimePlaceOrderIdentities.assetId(resolved.reservationAsset());
         try {
             runtimePlaceOrderState.executeUserSettlement(userId, () -> {
@@ -6536,35 +6536,62 @@ public final class CoreProbeState implements AutoCloseable {
     private final class BatchAdmissionOrderIndex
             implements com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionOrderIndex {
         private final ActiveOrderIndex baseline;
-        private final java.util.Map<Long, OrderChange> changes = new java.util.HashMap<>();
-        private final java.util.Map<PendingQuantityKey, Long> pendingQuantities = new java.util.HashMap<>();
-        private final java.util.Map<ReduceQuantityKey, Long> reduceOnlyQuantities = new java.util.HashMap<>();
-        private final java.util.Map<MarginCountKey, Integer> marginModeCounts = new java.util.HashMap<>();
+        private long[] changedOrderIds;
+        private OrderRuntime[] previousOrders;
+        private OrderRuntime[] currentOrders;
+        private int changedOrderCount;
+        private long[] pendingUserIds;
+        private String[] pendingSymbols;
+        private byte[] pendingPositionSides;
+        private byte[] pendingOrderSides;
+        private byte[] pendingMarginModes;
+        private long[] pendingQuantitySteps;
+        private boolean[] pendingReduceOnly;
+        private int pendingCount;
         private final com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionSummary summary =
                 new com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionSummary();
 
-        private BatchAdmissionOrderIndex(ActiveOrderIndex baseline) {
+        private BatchAdmissionOrderIndex(ActiveOrderIndex baseline, int expectedOrders) {
             this.baseline = java.util.Objects.requireNonNull(baseline, "baseline");
+            int capacity = Math.max(1, expectedOrders);
+            changedOrderIds = new long[capacity];
+            previousOrders = new OrderRuntime[capacity];
+            currentOrders = new OrderRuntime[capacity];
+            pendingUserIds = new long[capacity];
+            pendingSymbols = new String[capacity];
+            pendingPositionSides = new byte[capacity];
+            pendingOrderSides = new byte[capacity];
+            pendingMarginModes = new byte[capacity];
+            pendingQuantitySteps = new long[capacity];
+            pendingReduceOnly = new boolean[capacity];
         }
 
         private void update(OrderRuntime previous, OrderRuntime current) {
             long orderId = current == null ? previous == null ? 0 : previous.orderId() : current.orderId();
             if (orderId == 0) return;
-            changes.compute(orderId, (ignored, existing) -> new OrderChange(
-                    existing == null ? previous : existing.previous(), current));
+            for (int index = 0; index < changedOrderCount; index++) {
+                if (changedOrderIds[index] == orderId) {
+                    currentOrders[index] = current;
+                    return;
+                }
+            }
+            ensureChangedCapacity(changedOrderCount + 1);
+            changedOrderIds[changedOrderCount] = orderId;
+            previousOrders[changedOrderCount] = previous;
+            currentOrders[changedOrderCount] = current;
+            changedOrderCount++;
         }
 
         private void addPending(long userId, ResolvedPlaceOrder order) {
-            if (order.reduceOnly()) {
-                reduceOnlyQuantities.merge(new ReduceQuantityKey(userId, order.symbol(), order.side()),
-                        order.quantitySteps(), Math::addExact);
-            } else {
-                pendingQuantities.merge(new PendingQuantityKey(
-                                userId, order.symbol(), order.positionSide(), order.side()),
-                        order.quantitySteps(), Math::addExact);
-            }
-            marginModeCounts.merge(new MarginCountKey(
-                    userId, order.symbol(), order.positionSide(), order.marginMode()), 1, Math::addExact);
+            ensurePendingCapacity(pendingCount + 1);
+            pendingUserIds[pendingCount] = userId;
+            pendingSymbols[pendingCount] = order.symbol();
+            pendingPositionSides[pendingCount] = (byte) order.positionSide().ordinal();
+            pendingOrderSides[pendingCount] = (byte) order.side().ordinal();
+            pendingMarginModes[pendingCount] = (byte) order.marginMode().ordinal();
+            pendingQuantitySteps[pendingCount] = order.quantitySteps();
+            pendingReduceOnly[pendingCount] = order.reduceOnly();
+            pendingCount++;
         }
 
         @Override
@@ -6578,29 +6605,57 @@ public final class CoreProbeState implements AutoCloseable {
             long pendingQuantity = baselineSummary.pendingQuantity();
             long reduceOnlyQuantity = baselineSummary.reduceOnlyQuantity();
             int marginModeCount = baselineSummary.marginModeCount();
-            for (OrderChange change : changes.values()) {
+            for (int index = 0; index < changedOrderCount; index++) {
                 pendingQuantity = Math.subtractExact(pendingQuantity,
-                        previousPendingContribution(change.previous(), userId, symbol, positionSide, side));
+                        previousPendingContribution(previousOrders[index], userId, symbol, positionSide, side));
                 pendingQuantity = Math.addExact(pendingQuantity,
-                        currentPendingContribution(change.current(), userId, symbol, positionSide, side));
+                        currentPendingContribution(currentOrders[index], userId, symbol, positionSide, side));
                 reduceOnlyQuantity = Math.subtractExact(reduceOnlyQuantity,
-                        previousReduceOnlyContribution(change.previous(), userId, symbol, side));
+                        previousReduceOnlyContribution(previousOrders[index], userId, symbol, side));
                 reduceOnlyQuantity = Math.addExact(reduceOnlyQuantity,
-                        currentReduceOnlyContribution(change.current(), userId, symbol, side));
+                        currentReduceOnlyContribution(currentOrders[index], userId, symbol, side));
                 marginModeCount = Math.subtractExact(marginModeCount,
                         previousMarginContribution(
-                                change.previous(), userId, symbol, positionSide, conflictingMarginMode));
+                                previousOrders[index], userId, symbol, positionSide, conflictingMarginMode));
                 marginModeCount = Math.addExact(marginModeCount,
                         currentMarginContribution(
-                                change.current(), userId, symbol, positionSide, conflictingMarginMode));
+                                currentOrders[index], userId, symbol, positionSide, conflictingMarginMode));
             }
-            pendingQuantity = Math.addExact(pendingQuantity, pendingQuantities.getOrDefault(
-                    new PendingQuantityKey(userId, symbol, positionSide, side), 0L));
-            reduceOnlyQuantity = Math.addExact(reduceOnlyQuantity, reduceOnlyQuantities.getOrDefault(
-                    new ReduceQuantityKey(userId, symbol, side), 0L));
-            marginModeCount = Math.addExact(marginModeCount, marginModeCounts.getOrDefault(
-                    new MarginCountKey(userId, symbol, positionSide, conflictingMarginMode), 0));
+            for (int index = 0; index < pendingCount; index++) {
+                if (pendingUserIds[index] != userId || !pendingSymbols[index].equals(symbol)) continue;
+                if (pendingReduceOnly[index] && pendingOrderSides[index] == side.ordinal()) {
+                    reduceOnlyQuantity = Math.addExact(reduceOnlyQuantity, pendingQuantitySteps[index]);
+                } else if (!pendingReduceOnly[index]
+                        && pendingPositionSides[index] == positionSide.ordinal()
+                        && pendingOrderSides[index] == side.ordinal()) {
+                    pendingQuantity = Math.addExact(pendingQuantity, pendingQuantitySteps[index]);
+                }
+                if (pendingPositionSides[index] == positionSide.ordinal()
+                        && pendingMarginModes[index] == conflictingMarginMode.ordinal()) {
+                    marginModeCount = Math.incrementExact(marginModeCount);
+                }
+            }
             return summary.set(pendingQuantity, reduceOnlyQuantity, marginModeCount);
+        }
+
+        private void ensureChangedCapacity(int required) {
+            if (required <= changedOrderIds.length) return;
+            int capacity = Math.multiplyExact(changedOrderIds.length, 2);
+            changedOrderIds = java.util.Arrays.copyOf(changedOrderIds, capacity);
+            previousOrders = java.util.Arrays.copyOf(previousOrders, capacity);
+            currentOrders = java.util.Arrays.copyOf(currentOrders, capacity);
+        }
+
+        private void ensurePendingCapacity(int required) {
+            if (required <= pendingUserIds.length) return;
+            int capacity = Math.multiplyExact(pendingUserIds.length, 2);
+            pendingUserIds = java.util.Arrays.copyOf(pendingUserIds, capacity);
+            pendingSymbols = java.util.Arrays.copyOf(pendingSymbols, capacity);
+            pendingPositionSides = java.util.Arrays.copyOf(pendingPositionSides, capacity);
+            pendingOrderSides = java.util.Arrays.copyOf(pendingOrderSides, capacity);
+            pendingMarginModes = java.util.Arrays.copyOf(pendingMarginModes, capacity);
+            pendingQuantitySteps = java.util.Arrays.copyOf(pendingQuantitySteps, capacity);
+            pendingReduceOnly = java.util.Arrays.copyOf(pendingReduceOnly, capacity);
         }
 
         private long previousPendingContribution(
@@ -6658,24 +6713,6 @@ public final class CoreProbeState implements AutoCloseable {
                     && order.status() == com.surprising.aeron.service.state.CoreOrderStatus.OPEN;
         }
 
-        private record OrderChange(OrderRuntime previous, OrderRuntime current) {
-        }
-
-        private record PendingQuantityKey(
-                long userId, String symbol,
-                com.surprising.aeron.protocol.CorePositionSide positionSide,
-                com.surprising.aeron.protocol.CoreOrderSide side) {
-        }
-
-        private record ReduceQuantityKey(
-                long userId, String symbol, com.surprising.aeron.protocol.CoreOrderSide side) {
-        }
-
-        private record MarginCountKey(
-                long userId, String symbol,
-                com.surprising.aeron.protocol.CorePositionSide positionSide,
-                com.surprising.aeron.protocol.CoreMarginMode marginMode) {
-        }
     }
 
     private static final class OrderBatchPending {
@@ -6687,22 +6724,21 @@ public final class CoreProbeState implements AutoCloseable {
         private final long clusterTimestamp;
         private final long clusterPosition;
         private final PendingMatching.Operation operation;
-        private final List<CoreOrderBatchResult.Item> results = new ArrayList<>();
-        private final PrimitiveLongChangeSet changedUserIds = new PrimitiveLongChangeSet();
-        private final PrimitiveLongChangeSet changedOrderIds = new PrimitiveLongChangeSet();
-        private final PrimitiveLongChangeSet runtimeChangedOrderIds = new PrimitiveLongChangeSet();
-        private final PrimitiveLongChangeSet itemChangedOrderIds = new PrimitiveLongChangeSet();
-        private final PrimitiveLongChangeSet deferredCancellationOrderIds = new PrimitiveLongChangeSet();
-        private final List<com.surprising.aeron.service.matching.CoreMatchingResult> matchingResults =
-                new ArrayList<>();
+        private final List<CoreOrderBatchResult.Item> results;
+        private final PrimitiveLongChangeSet changedUserIds;
+        private final PrimitiveLongChangeSet changedOrderIds;
+        private final PrimitiveLongChangeSet runtimeChangedOrderIds;
+        private final PrimitiveLongChangeSet itemChangedOrderIds;
+        private final PrimitiveLongChangeSet deferredCancellationOrderIds;
+        private final List<com.surprising.aeron.service.matching.CoreMatchingResult> matchingResults;
         private final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList
                 deferredPerpetualOrderIds = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList();
         private final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList
                 deferredPerpetualExpectedLaneMasks =
                 new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList();
         private final List<com.surprising.aeron.service.matching.CoreMatchingResult>
-                deferredPerpetualMatchingResults = new ArrayList<>();
-        private final List<PreparedClientAllocation> preparedClientKeys = new ArrayList<>();
+                deferredPerpetualMatchingResults;
+        private final List<PreparedClientAllocation> preparedClientKeys;
         private com.surprising.aeron.service.state.RuntimeTreasuryDelta treasuryDelta;
         private int nextIndex;
         private long sequence;
@@ -6726,10 +6762,20 @@ public final class CoreProbeState implements AutoCloseable {
                                   long clusterTimestamp,
                                   long clusterPosition, PendingMatching.Operation operation) {
             this.kind = kind;
-            this.items = List.copyOf(items);
+            this.items = items;
             this.clusterTimestamp = clusterTimestamp;
             this.clusterPosition = clusterPosition;
             this.operation = operation;
+            int capacity = items.size();
+            results = new ArrayList<>(capacity);
+            changedUserIds = new PrimitiveLongChangeSet(capacity * 2);
+            changedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
+            runtimeChangedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
+            itemChangedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
+            deferredCancellationOrderIds = new PrimitiveLongChangeSet(capacity);
+            matchingResults = new ArrayList<>(capacity);
+            deferredPerpetualMatchingResults = new ArrayList<>(capacity);
+            preparedClientKeys = new ArrayList<>(capacity);
         }
 
         private void advanceMatcher(

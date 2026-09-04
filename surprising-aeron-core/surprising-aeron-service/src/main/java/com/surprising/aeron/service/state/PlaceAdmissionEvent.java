@@ -107,9 +107,14 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {
             rejection = failure;
         }
-        runtime.recordAdmissionLaneOperation(lane, System.nanoTime() - startedNanos);
+        // Capture every publication dependency before completed becomes visible to the owner,
+        // which is then allowed to clear and recycle this event immediately.
+        TradingRuntimeState completionRuntime = runtime;
+        int completionLaneId = laneId;
+        long completionSequence = coreSequence;
+        completionRuntime.recordAdmissionLaneOperation(lane, System.nanoTime() - startedNanos);
         COMPLETED.setRelease(this, true);
-        runtime.publishPlaceAdmissionReady(laneId, coreSequence);
+        completionRuntime.publishPlaceAdmissionReady(completionLaneId, completionSequence);
     }
 
     public boolean complete() {

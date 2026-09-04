@@ -30,8 +30,11 @@ public final class CoreOrderDecisionResolver {
 
         boolean spotLimit = instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT
                 && intent.orderType() == CoreOrderType.LIMIT;
-        Integer symbolId = spotLimit ? null : identities.findSymbolId(instrument.symbol());
-        MarkPriceRuntime mark = symbolId == null ? null : runtime.markPrice(symbolId);
+        Integer preparedSymbolId = identities.findSymbolId(instrument.symbol());
+        if (preparedSymbolId == null) {
+            throw new IllegalStateException("instrument symbol identity is missing");
+        }
+        MarkPriceRuntime mark = spotLimit ? null : runtime.markPrice(preparedSymbolId);
         if (!spotLimit) requireFreshMark(mark, instrument, clusterTimestamp);
         long markPriceTicks = spotLimit ? intent.limitPriceTicks() : mark.markPriceTicks();
         long markPriceSequence = spotLimit ? 0 : mark.priceSequence();
@@ -45,7 +48,7 @@ public final class CoreOrderDecisionResolver {
                 ? instrument.settleAsset()
                 : intent.side() == CoreOrderSide.BUY ? instrument.quoteAsset() : instrument.baseAsset();
         CoreFeeRate fee = runtime.resolveFee(userId, instrument.symbol(), clusterTimestamp, instrument);
-        return new ResolvedPlaceOrder(intent, instrument, matchingPriceTicks, reservationPriceTicks,
+        return new ResolvedPlaceOrder(intent, instrument, preparedSymbolId, matchingPriceTicks, reservationPriceTicks,
                 markPriceTicks, markPriceSequence, reservationKind, reservationAsset,
                 fee.makerFeeRatePpm(), fee.takerFeeRatePpm(), fee.policyVersion());
     }
@@ -76,7 +79,7 @@ public final class CoreOrderDecisionResolver {
         String reservationAsset = reservationKind == ReservationKind.DERIVATIVE_MARGIN
                 ? instrument.settleAsset()
                 : intent.side() == CoreOrderSide.BUY ? instrument.quoteAsset() : instrument.baseAsset();
-        return new ResolvedPlaceOrder(intent, instrument, matchingPriceTicks, reservationPriceTicks,
+        return new ResolvedPlaceOrder(intent, instrument, -1, matchingPriceTicks, reservationPriceTicks,
                 markPriceTicks, markPriceSequence, reservationKind, reservationAsset,
                 instrument.makerFeeRatePpm(), instrument.takerFeeRatePpm(), 0);
     }

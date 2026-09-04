@@ -45,11 +45,12 @@ public final class RuntimeOrderAdmission {
         String positionIdentity = order.positionSide() == CorePositionSide.NET
                 ? OrderReservation.normalizeSymbol(order.symbol())
                 : OrderReservation.normalizeSymbol(order.symbol()) + ':' + order.positionSide().name();
-        Integer symbolId = identities.findSymbolId(order.symbol());
-        boolean lifecycleSettled = symbolId != null
+        int symbolId = order.symbolId();
+        boolean lifecycleSettled = symbolId >= 0
                 && runtime.treasury().lifecycleSettlement(symbolId) != 0;
         return new AdmissionIdentity(identities.findClientKey(userId, order.clientOrderId()),
-                symbolId, identities.findPositionKey(userId, positionIdentity), lifecycleSettled);
+                symbolId < 0 ? null : symbolId,
+                identities.findPositionKey(userId, positionIdentity), lifecycleSettled);
     }
 
     public static long requiredReservationPrepared(

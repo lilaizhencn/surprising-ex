@@ -8,11 +8,25 @@ import java.util.NoSuchElementException;
 
 final class PrimitiveLongChangeSet extends AbstractCollection<Long> {
 
-    private long[] values = new long[8];
-    private long[] indexKeys = new long[16];
-    private int[] indexGenerations = new int[16];
+    private long[] values;
+    private long[] indexKeys;
+    private int[] indexGenerations;
     private int generation = 1;
     private int size;
+
+    PrimitiveLongChangeSet() {
+        this(8);
+    }
+
+    PrimitiveLongChangeSet(int expectedSize) {
+        if (expectedSize < 0) throw new IllegalArgumentException("expected size must not be negative");
+        int valueCapacity = 8;
+        while (valueCapacity < expectedSize) valueCapacity = Math.multiplyExact(valueCapacity, 2);
+        int indexCapacity = valueCapacity << 1;
+        values = new long[valueCapacity];
+        indexKeys = new long[indexCapacity];
+        indexGenerations = new int[indexCapacity];
+    }
 
     boolean add(long value) {
         if (indexOf(value) >= 0) return false;
