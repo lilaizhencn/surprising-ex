@@ -615,8 +615,9 @@ final class LinearPerpetualMixedWorkload {
         harness.drainSubmitted();
         for (int cursor = 0; cursor < symbolIndices.length; cursor++) {
             int index = symbolIndices[cursor];
-            List<CancelOrderCommand> orders = quoteOrderIds.get(cursor).stream()
-                    .map(CancelOrderCommand::new).toList();
+            List<Long> orderIds = quoteOrderIds.get(cursor);
+            List<CancelOrderCommand> orders = new ArrayList<>(orderIds.size());
+            for (long orderId : orderIds) orders.add(new CancelOrderCommand(orderId));
             submitPipelined(harness, harness.batchCommand(CoreMessageType.CANCEL_ORDER_BATCH, CommandSource.GATEWAY,
                     template.hftMakers().get(index),
                     TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(orders)), orders.size()),

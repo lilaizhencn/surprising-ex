@@ -97,19 +97,19 @@ public final class RuntimePerpetualMatchProcessor {
         }
     }
 
-    static void validateAndPrepareBatch(List<Long> takerOrderIds, List<CoreMatchingResult> matchingResults,
+    static void validateAndPrepareBatch(long[] takerOrderIds, List<CoreMatchingResult> matchingResults,
                                         TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                         BatchValidationScratch scratch) {
-        if (takerOrderIds == null || matchingResults == null || takerOrderIds.isEmpty()
-                || takerOrderIds.size() != matchingResults.size() || scratch == null) {
+        if (takerOrderIds == null || matchingResults == null || takerOrderIds.length == 0
+                || takerOrderIds.length != matchingResults.size() || scratch == null) {
             throw new IllegalArgumentException("invalid perpetual matcher settlement batch");
         }
         LongLongHashMap remainingByOrderId = scratch.remainingByOrderId;
         LongHashSet terminalOrderIds = scratch.terminalOrderIds;
         scratch.clear();
         try {
-            for (int index = 0; index < takerOrderIds.size(); index++) {
-                long takerOrderId = takerOrderIds.get(index);
+            for (int index = 0; index < takerOrderIds.length; index++) {
+                long takerOrderId = takerOrderIds[index];
                 List<MatcherEvent> matches = matchingResults.get(index).matcherEvents();
                 OrderRuntime taker = requireOpen(runtime, takerOrderId);
                 if (terminalOrderIds.contains(takerOrderId)) {

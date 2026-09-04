@@ -164,10 +164,13 @@ final class MatcherCommandPipeline implements AutoCloseable {
             if (result != null) return result;
             long remaining = deadline - System.nanoTime();
             if (remaining <= 0) return null;
-            if (idle++ < IDLE_SPINS) Thread.onSpinWait();
-            else LockSupport.parkNanos(this, Math.min(remaining, IDLE_PARK_NANOS));
-            if (Thread.currentThread().isInterrupted()) {
-                throw new IllegalStateException("matcher pipeline wait was interrupted");
+            if (idle++ < IDLE_SPINS) {
+                Thread.onSpinWait();
+            } else {
+                LockSupport.parkNanos(this, Math.min(remaining, IDLE_PARK_NANOS));
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new IllegalStateException("matcher pipeline wait was interrupted");
+                }
             }
         }
     }

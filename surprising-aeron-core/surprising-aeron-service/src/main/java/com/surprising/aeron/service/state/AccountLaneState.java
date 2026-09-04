@@ -24,6 +24,8 @@ public final class AccountLaneState {
     final LongObjectHashMap<IntObjectHashMap<BalanceRuntime>> balances =
             new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
     final LongObjectHashMap<OrderRuntime> orders = new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
+    final LongObjectHashMap<LongHashSet> activeOrderIdsByUser =
+            new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
     final LongObjectHashMap<ReservationRuntime> reservations =
             new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
     final LongObjectHashMap<LongHashSet> reservationIdsByUser =
@@ -277,13 +279,60 @@ public final class AccountLaneState {
         assertOwner();
         if (order == null) throw new IllegalArgumentException("order is required");
         OrderRuntime previous = orders.put(order.orderId(), order);
+        replaceActiveOrder(previous, order);
         admissionOrderIndex.replace(previous, order);
     }
 
     void removeOrder(long orderId) {
         assertOwner();
         OrderRuntime previous = orders.remove(orderId);
+        replaceActiveOrder(previous, null);
         admissionOrderIndex.replace(previous, null);
+    }
+
+    long openReduceOnlyQuantity(long userId, int symbolId, CorePositionSide positionSide,
+                                CoreOrderSide side, CoreMarginMode marginMode) {
+        assertOwner();
+        LongHashSet orderIds = activeOrderIdsByUser.get(userId);
+        if (orderIds == null) return 0;
+        long total = 0;
+        var iterator = orderIds.longIterator();
+        while (iterator.hasNext()) {
+            long orderId = iterator.next();
+            OrderRuntime order = orders.get(orderId);
+            if (order != null && order.symbolId() == symbolId && order.reduceOnly()
+                    && order.positionSide() == positionSide && order.side() == side
+                    && order.marginMode() == marginMode) {
+                total = Math.addExact(total, order.remainingQuantitySteps());
+            }
+        }
+        return total;
+    }
+
+    private void replaceActiveOrder(OrderRuntime previous, OrderRuntime replacement) {
+        if (active(previous)) removeActiveOrder(previous.userId(), previous.orderId());
+        if (active(replacement)) addActiveOrder(replacement.userId(), replacement.orderId());
+    }
+
+    private void addActiveOrder(long userId, long orderId) {
+        LongHashSet orderIds = activeOrderIdsByUser.get(userId);
+        if (orderIds == null) {
+            orderIds = new LongHashSet();
+            activeOrderIdsByUser.put(userId, orderIds);
+        }
+        orderIds.add(orderId);
+    }
+
+    private void removeActiveOrder(long userId, long orderId) {
+        LongHashSet orderIds = activeOrderIdsByUser.get(userId);
+        if (orderIds == null || !orderIds.remove(orderId)) {
+            throw new IllegalStateException("active order index is missing");
+        }
+        if (orderIds.isEmpty()) activeOrderIdsByUser.remove(userId);
+    }
+
+    private static boolean active(OrderRuntime order) {
+        return order != null && !order.status().terminal();
     }
 
     private final class LaneAdmissionOrderIndex implements RuntimeOrderAdmission.AdmissionOrderIndex {
@@ -328,9 +377,6 @@ public final class AccountLaneState {
             }
         }
 
-        private static boolean active(OrderRuntime order) {
-            return order != null && !order.status().terminal();
-        }
     }
 
     private static final class AdmissionAggregate {

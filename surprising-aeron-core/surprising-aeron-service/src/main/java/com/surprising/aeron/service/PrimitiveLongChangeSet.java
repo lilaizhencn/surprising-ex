@@ -27,6 +27,10 @@ final class PrimitiveLongChangeSet extends AbstractCollection<Long> {
     @Override
     public boolean addAll(Collection<? extends Long> values) {
         boolean changed = false;
+        if (values instanceof PrimitiveLongChangeSet primitive) {
+            for (int index = 0; index < primitive.size; index++) changed |= add(primitive.values[index]);
+            return changed;
+        }
         if (values instanceof ImmutableLongArrayList primitive) {
             for (int index = 0; index < primitive.size(); index++) changed |= add(primitive.valueAt(index));
             return changed;
@@ -52,6 +56,11 @@ final class PrimitiveLongChangeSet extends AbstractCollection<Long> {
 
     ImmutableLongArrayList toImmutableList() {
         return ImmutableLongArrayList.takeOwnership(toPrimitiveArray());
+    }
+
+    long valueAt(int index) {
+        if (index < 0 || index >= size) throw new IndexOutOfBoundsException(index);
+        return values[index];
     }
 
     @Override

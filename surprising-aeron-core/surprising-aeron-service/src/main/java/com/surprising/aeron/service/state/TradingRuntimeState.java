@@ -7,6 +7,8 @@ import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.IntHashSet;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreMatcherTransition;
 import com.surprising.aeron.protocol.CoreRiskScanControlView;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
@@ -1468,25 +1470,20 @@ public final class TradingRuntimeState implements AutoCloseable {
         laneCommitEventPool.addFirst(event);
     }
 
-    private RuntimeTreasuryDelta applyOrderBatchMatcherSettlement(
-            long coreSequence, long expectedLaneMask, MatcherSettlementPlan plan,
-            CoreMatchingResult matchingResult, RuntimeIdentityRegistry identities) {
-        if (!orderBatchMutationScope) {
-            throw new IllegalStateException("blocking matcher settlement is restricted to one order batch");
-        }
-        MatcherSettlementEvent event = dispatchMatcherSettlement(coreSequence, expectedLaneMask,
-                0, -1, -1, plan, matchingResult, identities);
-        while (!event.complete()) Thread.onSpinWait();
-        RuntimeTreasuryDelta result = collectMatcherSettlement(event);
-        releaseMatcherSettlement(event);
-        return result;
-    }
-
     public MatcherSettlementEvent dispatchMatcherSettlement(
             long coreSequence, long expectedLaneMask, long commitSequence,
             long commitTimestamp, long commitClusterPosition,
             MatcherSettlementPlan plan, CoreMatchingResult matchingResult,
             RuntimeIdentityRegistry identities) {
+        return dispatchMatcherSettlement(coreSequence, expectedLaneMask, commitSequence,
+                commitTimestamp, commitClusterPosition, plan, matchingResult, identities, false);
+    }
+
+    private MatcherSettlementEvent dispatchMatcherSettlement(
+            long coreSequence, long expectedLaneMask, long commitSequence,
+            long commitTimestamp, long commitClusterPosition,
+            MatcherSettlementPlan plan, CoreMatchingResult matchingResult,
+            RuntimeIdentityRegistry identities, boolean captureIsolatedChanges) {
         assertOwner();
         long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;
         if (coreSequence <= 0 || commitSequence < 0 || expectedLaneMask == 0
@@ -1507,7 +1504,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         MatcherSettlementEvent event = new MatcherSettlementEvent().prepare(
                 commitSequence, expectedLaneMask, commitTimestamp, commitClusterPosition,
                 plan, this, identities, instrument,
-                baseAssetId, quoteAssetId, settleAssetId, accountLanes.length);
+                baseAssetId, quoteAssetId, settleAssetId, accountLanes.length,
+                captureIsolatedChanges);
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             if ((expectedLaneMask & 1L << laneId) == 0) continue;
             if (!accountLanesStarted) {
@@ -1625,11 +1623,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         RuntimeTreasuryDelta aggregate = event.collectTreasuryDelta();
         unindexMatcherPendingReservations(event.plan());
         long laneMask = event.requiredLaneMask();
-        MatcherSettlementChanges changes = event.commitSequence() == 0 ? null : event.takeChanges();
+        MatcherSettlementChanges changes = event.commitSequence() != 0 || event.hasIsolatedChanges()
+                ? event.takeChanges() : null;
         try {
             for (int laneId = 0; laneId < accountLanes.length; laneId++) {
                 if ((laneMask & 1L << laneId) != 0) {
-                    if (event.commitSequence() == 0) flushPublishedChanges(laneId);
+                    if (changes == null) flushPublishedChanges(laneId);
                     else {
                         changes.publishedLaneChanges[laneId].recordTerminalChanges(
                                 this, terminalOrderSink, event.plan().coreSequence());
@@ -1647,7 +1646,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 }
             }
             if (terminalOrderSink != null) terminalOrderSink.completeSequence();
-            if (event.commitSequence() != 0) {
+            if (changes != null) {
                 if (fundsAccumulator == null) event.collectedFundsDelta(changes.collectFundsDelta(laneMask));
                 else changes.appendFundsDelta(laneMask, fundsAccumulator);
             }
@@ -1673,6 +1672,33 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (event == null) event = new LaneCancelEvent();
         event.prepare(coreSequence, userId, orderId, commitTimestamp, commitClusterPosition,
                 laneId, this, identities, changes);
+        accountLaneQueueHighWaterMarks[laneId] = Math.max(
+                accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
+        try {
+            laneWorkers[laneId].submit(event);
+        } catch (RuntimeException | Error failure) {
+            event.discard();
+            releaseMatcherSettlementChanges(changes);
+            laneCancelEventPool.addFirst(event);
+            throw failure;
+        }
+        return event;
+    }
+
+    public LaneCancelEvent dispatchCancelBatch(
+            long coreSequence, long userId, long[] orderIds,
+            long commitTimestamp, long commitClusterPosition,
+            RuntimeIdentityRegistry identities) {
+        assertOwner();
+        if (!accountLanesStarted || orderIds == null || orderIds.length == 0) {
+            throw new IllegalStateException("asynchronous cancel batch requires Account Lanes and orders");
+        }
+        int laneId = topology.accountLaneId(userId);
+        MatcherSettlementChanges changes = acquireMatcherSettlementChanges();
+        LaneCancelEvent event = laneCancelEventPool.pollFirst();
+        if (event == null) event = new LaneCancelEvent();
+        event.prepare(coreSequence, userId, orderIds, orderIds.length,
+                commitTimestamp, commitClusterPosition, laneId, false, this, identities, changes);
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
                 accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
         try {
@@ -1850,6 +1876,9 @@ public final class TradingRuntimeState implements AutoCloseable {
     public RuntimeTreasuryDelta applyOrderBatchMatcherSettlement(
             long coreSequence, long expectedLaneMask, long takerOrderId,
             CoreMatchingResult matchingResult, RuntimeIdentityRegistry identities) {
+        if (!orderBatchMutationScope) {
+            throw new IllegalStateException("blocking matcher settlement is restricted to one order batch");
+        }
         OrderRuntime taker = order(takerOrderId);
         if (taker == null) throw new IllegalStateException("taker order is missing");
         MatcherSettlementPlan plan = MatcherSettlementPlan.build(coreSequence, takerOrderId, taker.userId(),
@@ -1857,8 +1886,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (plan.requiredLaneMask() != expectedLaneMask) {
             throw new IllegalStateException("matcher settlement lane mask mismatch");
         }
-        return applyOrderBatchMatcherSettlement(
-                coreSequence, expectedLaneMask, plan, matchingResult, identities);
+        MatcherSettlementEvent event = dispatchMatcherSettlement(coreSequence, expectedLaneMask,
+                0, -1, -1, plan, matchingResult, identities);
+        while (!event.complete()) Thread.onSpinWait();
+        RuntimeTreasuryDelta result = collectMatcherSettlement(event);
+        releaseMatcherSettlement(event);
+        return result;
     }
 
     public RuntimeTreasuryDelta applyNoTradeMatcherSettlements(
@@ -1913,6 +1946,51 @@ public final class TradingRuntimeState implements AutoCloseable {
         return aggregateTreasuryDeltaScratch;
     }
 
+    public MatcherSettlementEvent[] dispatchNoTradeMatcherSettlements(
+            long coreSequence, long userId, java.util.List<Long> takerOrderIds,
+            java.util.List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities) {
+        assertOwner();
+        if (coreSequence <= 0 || userId <= 0 || takerOrderIds == null || matchingResults == null
+                || takerOrderIds.isEmpty() || takerOrderIds.size() != matchingResults.size()
+                || identities == null) {
+            throw new IllegalArgumentException("invalid no-trade matcher settlement batch");
+        }
+        MatcherSettlementPlan[] plans = new MatcherSettlementPlan[takerOrderIds.size()];
+        long expectedLaneMask = topology.accountLaneMask(userId);
+        for (int index = 0; index < takerOrderIds.size(); index++) {
+            long takerOrderId = takerOrderIds.get(index);
+            CoreMatchingResult matchingResult = matchingResults.get(index);
+            if (matchingResult == null || matchingResult.nativeCommand().coreSequence() != coreSequence
+                    || hasTrade(matchingResult)) {
+                throw new IllegalArgumentException("invalid no-trade matcher settlement result");
+            }
+            OrderRuntime taker = order(takerOrderId);
+            if (taker == null || taker.userId() != userId) {
+                throw new IllegalStateException("no-trade taker order is missing");
+            }
+            CoreInstrumentState instrument = instrument(identities.symbol(taker.symbolId()));
+            if (instrument == null) throw new IllegalStateException("match instrument is missing");
+            if (productLine.isDerivative()) {
+                RuntimePerpetualMatchProcessor.validateAndPrepare(
+                        takerOrderId, matchingResult.matcherEvents(), this, identities);
+            } else {
+                RuntimeSpotMatchProcessor.validate(takerOrderId, matchingResult.matcherEvents(), this);
+            }
+            MatcherSettlementPlan plan = MatcherSettlementPlan.build(coreSequence, takerOrderId, userId,
+                    new long[]{takerOrderId}, matchingResult, this, identities);
+            if (plan.requiredLaneMask() != expectedLaneMask) {
+                throw new IllegalStateException("no-trade matcher settlement lane mask mismatch");
+            }
+            plans[index] = plan;
+        }
+        MatcherSettlementEvent[] events = new MatcherSettlementEvent[plans.length];
+        for (int index = 0; index < plans.length; index++) {
+            events[index] = dispatchMatcherSettlement(coreSequence, expectedLaneMask, 0,
+                    -1, -1, plans[index], matchingResults.get(index), identities);
+        }
+        return events;
+    }
+
     public RuntimeTreasuryDelta applyPerpetualMatcherSettlements(
             long coreSequence, List<Long> takerOrderIds, List<Long> expectedLaneMasks,
             List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities) {
@@ -1944,8 +2022,12 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
             settlements.add(new PerpetualMatcherSettlement(expectedLaneMask, matchingResult, plan));
         }
+        long[] primitiveTakerOrderIds = new long[takerOrderIds.size()];
+        for (int index = 0; index < primitiveTakerOrderIds.length; index++) {
+            primitiveTakerOrderIds[index] = takerOrderIds.get(index);
+        }
         RuntimePerpetualMatchProcessor.validateAndPrepareBatch(
-                takerOrderIds, matchingResults, this, identities, perpetualBatchValidationScratch);
+                primitiveTakerOrderIds, matchingResults, this, identities, perpetualBatchValidationScratch);
 
         MatcherSettlementEvent[] events = new MatcherSettlementEvent[settlements.size()];
         for (int index = 0; index < settlements.size(); index++) {
@@ -1960,6 +2042,111 @@ public final class TradingRuntimeState implements AutoCloseable {
             releaseMatcherSettlement(event);
         }
         return aggregateTreasuryDeltaScratch;
+    }
+
+    public MatcherSettlementEvent[] dispatchPerpetualMatcherSettlements(
+            long coreSequence, long[] takerOrderIds, long[] expectedLaneMasks,
+            List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities) {
+        assertOwner();
+        if (!productLine.isDerivative() || coreSequence <= 0 || takerOrderIds == null
+                || expectedLaneMasks == null || matchingResults == null || takerOrderIds.length == 0
+                || takerOrderIds.length != expectedLaneMasks.length
+                || takerOrderIds.length != matchingResults.size() || identities == null) {
+            throw new IllegalArgumentException("invalid perpetual matcher settlement batch");
+        }
+        long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;
+        MatcherSettlementPlan[] plans = new MatcherSettlementPlan[takerOrderIds.length];
+        for (int index = 0; index < takerOrderIds.length; index++) {
+            long takerOrderId = takerOrderIds[index];
+            long expectedLaneMask = expectedLaneMasks[index];
+            CoreMatchingResult matchingResult = matchingResults.get(index);
+            if (takerOrderId <= 0 || expectedLaneMask == 0 || (expectedLaneMask & ~validMask) != 0
+                    || matchingResult == null || matchingResult.nativeCommand().coreSequence() != coreSequence) {
+                throw new IllegalArgumentException("invalid perpetual matcher settlement item");
+            }
+            OrderRuntime taker = order(takerOrderId);
+            if (taker == null) throw new IllegalStateException("taker order is missing");
+            MatcherSettlementPlan plan = MatcherSettlementPlan.build(coreSequence, takerOrderId, taker.userId(),
+                    new long[]{takerOrderId}, matchingResult, this, identities);
+            if (plan.requiredLaneMask() != expectedLaneMask) {
+                throw new IllegalStateException("perpetual matcher settlement lane mask mismatch");
+            }
+            plans[index] = plan;
+        }
+        RuntimePerpetualMatchProcessor.validateAndPrepareBatch(
+                takerOrderIds, matchingResults, this, identities, perpetualBatchValidationScratch);
+        MatcherSettlementEvent[] events = new MatcherSettlementEvent[plans.length];
+        for (int index = 0; index < plans.length; index++) {
+            events[index] = dispatchMatcherSettlement(coreSequence, expectedLaneMasks[index], 0,
+                    -1, -1, plans[index], matchingResults.get(index), identities, true);
+        }
+        return events;
+    }
+
+    public MatcherSettlementEvent[] dispatchSpotMatcherSettlements(
+            long coreSequence, List<Long> takerOrderIds, List<Long> expectedLaneMasks,
+            List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities) {
+        assertOwner();
+        if (productLine.isDerivative() || coreSequence <= 0 || takerOrderIds == null
+                || expectedLaneMasks == null || matchingResults == null || takerOrderIds.isEmpty()
+                || takerOrderIds.size() != expectedLaneMasks.size()
+                || takerOrderIds.size() != matchingResults.size() || identities == null) {
+            throw new IllegalArgumentException("invalid spot matcher settlement batch");
+        }
+        long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;
+        MatcherSettlementPlan[] plans = new MatcherSettlementPlan[takerOrderIds.size()];
+        for (int index = 0; index < takerOrderIds.size(); index++) {
+            long takerOrderId = takerOrderIds.get(index);
+            long expectedLaneMask = expectedLaneMasks.get(index);
+            CoreMatchingResult matchingResult = matchingResults.get(index);
+            if (takerOrderId <= 0 || expectedLaneMask == 0 || (expectedLaneMask & ~validMask) != 0
+                    || matchingResult == null || matchingResult.nativeCommand().coreSequence() != coreSequence) {
+                throw new IllegalArgumentException("invalid spot matcher settlement item");
+            }
+            OrderRuntime taker = order(takerOrderId);
+            if (taker == null) throw new IllegalStateException("spot taker order is missing");
+            RuntimeSpotMatchProcessor.validate(takerOrderId, matchingResult.matcherEvents(), this);
+            MatcherSettlementPlan plan = MatcherSettlementPlan.build(coreSequence, takerOrderId, taker.userId(),
+                    new long[]{takerOrderId}, matchingResult, this, identities);
+            if (plan.requiredLaneMask() != expectedLaneMask) {
+                throw new IllegalStateException("spot matcher settlement lane mask mismatch");
+            }
+            plans[index] = plan;
+        }
+        MatcherSettlementEvent[] events = new MatcherSettlementEvent[plans.length];
+        for (int index = 0; index < plans.length; index++) {
+            events[index] = dispatchMatcherSettlement(coreSequence, expectedLaneMasks.get(index), 0,
+                    -1, -1, plans[index], matchingResults.get(index), identities);
+        }
+        return events;
+    }
+
+    public RuntimeTreasuryDelta collectMatcherSettlements(MatcherSettlementEvent[] events) {
+        return collectMatcherSettlements(events, null, null);
+    }
+
+    public RuntimeTreasuryDelta collectMatcherSettlements(
+            MatcherSettlementEvent[] events, RuntimeFundsAccumulator fundsAccumulator,
+            TerminalOrderSink terminalOrderSink) {
+        assertOwner();
+        if (events == null || events.length == 0) return null;
+        aggregateTreasuryDeltaScratch.clear();
+        for (MatcherSettlementEvent event : events) {
+            if (event == null || !event.complete()) return null;
+        }
+        for (MatcherSettlementEvent event : events) {
+            aggregateTreasuryDeltaScratch.merge(
+                    collectMatcherSettlement(event, fundsAccumulator, terminalOrderSink));
+            releaseMatcherSettlement(event);
+        }
+        return aggregateTreasuryDeltaScratch;
+    }
+
+    private static boolean hasTrade(CoreMatchingResult result) {
+        for (var event : result.matcherEvents()) {
+            if (event.eventType() == exchange.core2.core.common.MatcherEventType.TRADE) return true;
+        }
+        return false;
     }
 
     private static void awaitMatcherSettlementBatch(MatcherSettlementEvent[] events) {
@@ -2172,6 +2359,12 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     public void assertOwner() {
+        Thread current = Thread.currentThread();
+        if (owner == current) return;
+        if (owner == null) {
+            owner = current;
+            return;
+        }
         if (laneCommandScope.get() != null) return;
         bindOwner();
     }
@@ -3650,7 +3843,13 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     void visitPreparedMatcherIndexes(RuntimeFactIndexes indexes) {
         assertOwner();
-        changedActiveOrderValues.forEach(indexes::preparedOrder);
+        changedActiveOrderValues.forEach((orderId, prepared) -> {
+            OrderRuntime current = changedOrders.get(orderId);
+            indexes.preparedOrder(orderId,
+                    changedOrders.containsKey(orderId)
+                            && (current == null || current.status() != CoreOrderStatus.OPEN)
+                            ? null : prepared);
+        });
         changedPositionIndexValues.forEach(indexes::preparedPosition);
     }
 
@@ -3920,16 +4119,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         return values;
     }
 
-    List<OrderRuntime> ordersForUser(long userId) {
+    long openReduceOnlyQuantity(long userId, int symbolId, CorePositionSide positionSide,
+                                CoreOrderSide side, CoreMarginMode marginMode) {
         assertOwner();
-        ArrayList<OrderRuntime> values = new ArrayList<>();
-        ReservedOrder reserved = onLane(userId, lane -> {
-            lane.orders.forEachValue(order -> {
-                if (order.userId() == userId) values.add(order);
-            });
-            return null;
-        });
-        return List.copyOf(values);
+        return onLane(userId, lane -> lane.openReduceOnlyQuantity(
+                userId, symbolId, positionSide, side, marginMode));
     }
 
     LongObjectHashMap<ReservationRuntime> reservationsForSnapshot() {

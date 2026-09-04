@@ -35,8 +35,18 @@ public final class OpenInterestIndex {
         return value == null ? 0 : value.longQuantity;
     }
 
+    public long longQuantityNormalized(String symbol) {
+        MutableTotals value = totals.get(symbol);
+        return value == null ? 0 : value.longQuantity;
+    }
+
     public long shortQuantity(String symbol) {
         MutableTotals value = totals.get(OrderReservation.normalizeSymbol(symbol));
+        return value == null ? 0 : value.shortQuantity;
+    }
+
+    public long shortQuantityNormalized(String symbol) {
+        MutableTotals value = totals.get(symbol);
         return value == null ? 0 : value.shortQuantity;
     }
 

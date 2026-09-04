@@ -34,6 +34,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     private int settleAssetId;
     private RuntimeTreasuryDelta[] touchedLaneTreasuryDeltas;
     private TradingRuntimeState.MatcherSettlementChanges changes;
+    private boolean isolatedChanges;
     private RuntimeFundsDelta collectedFundsDelta = RuntimeFundsDelta.empty();
     @SuppressWarnings("FieldMayBeFinal")
     private long completedLaneMask;
@@ -46,7 +47,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
                                    long commitTimestamp, long commitClusterPosition,
                                    MatcherSettlementPlan plan, TradingRuntimeState runtime,
                                    RuntimeIdentityRegistry identities, CoreInstrumentState instrument,
-                                   int baseAssetId, int quoteAssetId, int settleAssetId, int laneCount) {
+                                   int baseAssetId, int quoteAssetId, int settleAssetId, int laneCount,
+                                   boolean captureIsolatedChanges) {
         if (commitSequence < 0 || requiredLaneMask == 0
                 || (commitSequence == 0 && (commitTimestamp != -1 || commitClusterPosition != -1))
                 || (commitSequence != 0 && (commitTimestamp < 0 || commitClusterPosition < 0))
@@ -65,7 +67,9 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         this.baseAssetId = baseAssetId;
         this.quoteAssetId = quoteAssetId;
         this.settleAssetId = settleAssetId;
-        this.changes = commitSequence == 0 ? null : runtime.acquireMatcherSettlementChanges();
+        this.isolatedChanges = captureIsolatedChanges;
+        this.changes = commitSequence != 0 || captureIsolatedChanges
+                ? runtime.acquireMatcherSettlementChanges() : null;
         if (plan.tradeCount() == 0) {
             if (touchedLaneTreasuryDeltas != null) {
                 for (RuntimeTreasuryDelta delta : touchedLaneTreasuryDeltas) delta.clear();
@@ -95,6 +99,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         identities = null;
         instrument = null;
         collectedFundsDelta = RuntimeFundsDelta.empty();
+        isolatedChanges = false;
         collected = false;
     }
 
@@ -107,7 +112,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         if ((requiredLaneMask & laneMask) == 0) {
             throw new IllegalStateException("matcher fact was routed to an unrelated account lane");
         }
-        if (commitSequence == 0) runtime.enterLaneCommandScope(lane);
+        if (changes == null) runtime.enterLaneCommandScope(lane);
         else runtime.enterMatcherSettlementScope(lane, changes);
         try {
             for (int index = 0; index < plan.preCancellationCount(); index++) {
@@ -130,14 +135,16 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             if (commitSequence != 0) {
                 runtime.stampMatcherOrders(lane, plan, commitTimestamp, commitClusterPosition);
             }
-            if (commitSequence != 0) {
+            if (changes != null) {
                 changes.prepareLaneTerminal(laneId, identities, lane);
+            }
+            if (commitSequence != 0) {
                 lane.applied(commitSequence);
                 lane.committed(commitSequence);
                 runtime.publishLaneHashes(lane);
             }
         } finally {
-            if (commitSequence == 0) runtime.exitLaneCommandScope(lane);
+            if (changes == null) runtime.exitLaneCommandScope(lane);
             else runtime.exitMatcherSettlementScope(lane, changes);
         }
         runtime.recordMatcherLaneOperation(lane, System.nanoTime() - startedNanos);
@@ -145,7 +152,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         if ((previous & laneMask) != 0) {
             throw new IllegalStateException("account lane completed the same matcher fact twice");
         }
-        if ((previous | laneMask) == requiredLaneMask && commitSequence != 0) {
+        if ((previous | laneMask) == requiredLaneMask) {
             runtime.publishMatcherSettlementReady(laneId, plan.coreSequence());
         }
     }
@@ -158,6 +165,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     public boolean complete() { return completedLaneMask() == requiredLaneMask; }
     MatcherSettlementPlan plan() { return plan; }
     RuntimeIdentityRegistry identities() { return identities; }
+    boolean hasIsolatedChanges() { return isolatedChanges; }
     CoreInstrumentState instrument() { return instrument; }
     int baseAssetId() { return baseAssetId; }
     int quoteAssetId() { return quoteAssetId; }
