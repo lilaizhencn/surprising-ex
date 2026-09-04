@@ -362,5 +362,8 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
   批次上限和审计元数据；状态随 Cluster Log/Archive 与 `Trading snapshot v24` 恢复。
 - `APPLY_MARK_PRICE` 只提交新价格和初始化 risk/trigger cursor；用户风险、强平计划和触发单扫描只能由有界
   `CONTINUE_RISK_SCAN` 推进，不能在标记价命令中隐式执行首批扫描。
+- Risk continuation 按确定性的 `accountLaneId` 升序、Lane 内 `userId` 升序推进；默认64 work-unit上限覆盖实际持仓和预留遍历，
+  不是用户数量。当前 Lane 在一次 Lane task 内连续处理本 Lane 的用户和单用户分页，owner 只在 Lane completion 边界更新 cursor
+  与全局 liquidationId，不再逐用户同步往返；中途 cursor 由 trading snapshot 和 Cluster Log 恢复。
 - 每个 matcher shard 固定为一个同步 engine；Account Lane 是固定线程拥有的执行边界。正式性能验收仍固定单 shard，
   wait strategy 只控制空闲等待，不改变业务语义。

@@ -35,6 +35,17 @@ import java.util.UUID;
 
 public final class TradingCoreReducer {
 
+    private final LaneTopology topology;
+
+    public TradingCoreReducer() {
+        this(LaneTopology.configured(Boolean.getBoolean("surprising.aeron.p10-characterization")));
+    }
+
+    TradingCoreReducer(LaneTopology topology) {
+        if (topology == null) throw new IllegalArgumentException("lane topology is required");
+        this.topology = topology;
+    }
+
     public TradingCoreState upsertTriggerOrder(TradingCoreState state, long userId,
                                                CoreTriggerOrderStateView view) {
         return upsertTriggerOrder(state, userId, view, null);
@@ -986,9 +997,13 @@ public final class TradingCoreReducer {
         long scanStart = currentScan != null && !currentScan.riskComplete()
                 ? currentScan.scanStartPriceSequence() : command.priceSequence();
         long lastUserId = currentScan != null && !currentScan.riskComplete() ? currentScan.lastUserId() : 0;
+        int accountLaneId = currentScan != null && !currentScan.riskComplete()
+                ? currentScan.accountLaneId() : 0;
         CoreRiskScanControlView scanControl = state.riskState().scanControl();
-        scans.put(instrument.symbol(), new CoreRiskState.RiskScan(instrument.symbol(), command.priceSequence(),
-                scanStart, lastUserId, !scanControl.enabled()));
+        scans.put(instrument.symbol(), new CoreRiskState.RiskScan(instrument.symbol(), accountLaneId,
+                command.priceSequence(), scanStart, lastUserId, !scanControl.enabled(),
+                0, 0, "-", 0, 0, 0, 0, 0,
+                true, 0, 0, 0, 0, 0, 0, 0, 0));
         CoreRiskState risk = new CoreRiskState(marks, state.riskState().snapshots(),
                 state.riskState().liquidations(), scans, state.riskState().nextLiquidationId(), scanControl);
         TradingCoreState withMark = new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
@@ -1036,9 +1051,14 @@ public final class TradingCoreReducer {
         int remainingWork = maxUsers;
         while (remainingWork > 0 && !progress.riskComplete()) {
             CoreUserState user = progress.riskUserId() == 0
-                    ? nextRiskUser(state, positionUserIndex, scan.symbol(), progress.lastUserId())
+                    ? nextRiskUser(state, positionUserIndex, scan.symbol(), progress.accountLaneId(),
+                    progress.lastUserId())
                     : state.user(progress.riskUserId());
             if (user == null) {
+                if (progress.accountLaneId() + 1 < topology.accountLaneCount()) {
+                    progress = progress.nextAccountLane(progress.accountLaneId() + 1);
+                    continue;
+                }
                 progress = progress.withRiskProgress(true, 0, 0, "-", 0,
                         0, 0, 0, 0, progress.lastUserId());
                 break;
@@ -1058,9 +1078,14 @@ public final class TradingCoreReducer {
             }
         }
         if (!progress.riskComplete() && progress.riskUserId() == 0
-                && nextRiskUser(state, positionUserIndex, scan.symbol(), progress.lastUserId()) == null) {
-            progress = progress.withRiskProgress(true, 0, 0, "-", 0,
-                    0, 0, 0, 0, progress.lastUserId());
+                && nextRiskUser(state, positionUserIndex, scan.symbol(), progress.accountLaneId(),
+                progress.lastUserId()) == null) {
+            if (progress.accountLaneId() + 1 < topology.accountLaneCount()) {
+                progress = progress.nextAccountLane(progress.accountLaneId() + 1);
+            } else {
+                progress = progress.withRiskProgress(true, 0, 0, "-", 0,
+                        0, 0, 0, 0, progress.lastUserId());
+            }
         }
         Map<String, CoreRiskState.RiskScan> scans = StateMapSupport.delta(state.riskState().scans());
         CoreRiskState.RiskScan nextScan = progress.riskComplete()
@@ -2662,24 +2687,33 @@ public final class TradingCoreReducer {
     }
 
     @SuppressWarnings("unchecked")
-    private static CoreUserState nextRiskUser(TradingCoreState state, PositionUserIndex index,
-                                              String symbol, long lastUserId) {
+    private CoreUserState nextRiskUser(TradingCoreState state, PositionUserIndex index,
+                                       String symbol, int accountLaneId, long lastUserId) {
         if (index == null) {
             Map<Long, CoreUserState> users = state.users();
             if (users instanceof NavigableMap<?, ?> navigable) {
                 Map.Entry<Long, CoreUserState> next =
                         ((NavigableMap<Long, CoreUserState>) navigable).higherEntry(lastUserId);
+                while (next != null && topology.accountLaneId(next.getKey()) != accountLaneId) {
+                    next = ((NavigableMap<Long, CoreUserState>) navigable).higherEntry(next.getKey());
+                }
                 return next == null ? null : next.getValue();
             }
             return users.values().stream().filter(user -> user.userId() > lastUserId)
+                    .filter(user -> topology.accountLaneId(user.userId()) == accountLaneId)
                     .min(java.util.Comparator.comparingLong(CoreUserState::userId)).orElse(null);
         }
         Set<Long> indexedUsers = index.users(symbol);
         Long nextUserId;
         if (indexedUsers instanceof NavigableSet<?> navigable) {
             nextUserId = ((NavigableSet<Long>) navigable).higher(lastUserId);
+            while (nextUserId != null && topology.accountLaneId(nextUserId) != accountLaneId) {
+                nextUserId = ((NavigableSet<Long>) navigable).higher(nextUserId);
+            }
         } else {
-            nextUserId = indexedUsers.stream().filter(userId -> userId > lastUserId).min(Long::compareTo).orElse(null);
+            nextUserId = indexedUsers.stream().filter(userId -> userId > lastUserId)
+                    .filter(userId -> topology.accountLaneId(userId) == accountLaneId)
+                    .min(Long::compareTo).orElse(null);
         }
         return nextUserId == null ? null : state.user(nextUserId);
     }

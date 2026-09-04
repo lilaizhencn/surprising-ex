@@ -166,6 +166,13 @@ public record CoreRiskState(
                     orderId, cursor);
         }
 
+        public RiskScan nextAccountLane(int laneId) {
+            return new RiskScan(symbol, laneId, priceSequence, scanStartPriceSequence, 0, false,
+                    0, 0, "-", 0, 0, 0, 0, 0,
+                    triggerComplete, triggerPhase, triggerPriceCursor, triggerOrderCursor, triggerUpperId,
+                    triggerMarkPriceTicks, triggerGeneratedAtEpochMillis, triggerOcoOrderId, triggerOcoCursor);
+        }
+
         static RiskScan idle() {
             return new RiskScan("-", 0, 0, 0, true);
         }

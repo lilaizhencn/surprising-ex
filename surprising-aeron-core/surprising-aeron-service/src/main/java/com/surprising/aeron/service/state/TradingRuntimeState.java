@@ -424,6 +424,17 @@ public final class TradingRuntimeState implements AutoCloseable {
         return result;
     }
 
+    public <T> T executeRiskLane(int laneId, java.util.function.Supplier<T> operation) {
+        assertOwner();
+        if (laneId < 0 || laneId >= accountLanes.length || operation == null) {
+            throw new IllegalArgumentException("invalid risk lane command");
+        }
+        long startedNanos = System.nanoTime();
+        T result = onLane(laneId, ignored -> operation.get());
+        recordLaneOperation(laneId, AccountLaneOperationType.RISK, System.nanoTime() - startedNanos);
+        return result;
+    }
+
     public Object[] executeOwnerSettlements(Iterable<Long> userIds,
                                             java.util.function.IntFunction<Object> operation) {
         return executeOwnerSettlements(userIds, Long::longValue, operation);
@@ -2560,6 +2571,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     private static int compareRiskProgress(RiskScanRuntime left, RiskScanRuntime right) {
+        int accountLane = Integer.compare(left.accountLaneId(), right.accountLaneId());
+        if (accountLane != 0) return accountLane;
         int completedUser = Long.compare(left.lastUserId(), right.lastUserId());
         if (completedUser != 0) return completedUser;
         int activeUser = Long.compare(left.riskUserId(), right.riskUserId());

@@ -110,8 +110,40 @@ class CoreRiskStateTest {
 
         TradingCoreState completed = continueRiskScans(firstBatch);
         assertThat(completed.riskState().scan().complete()).isTrue();
-        assertThat(completed.riskState().scan().lastUserId()).isEqualTo(1_300);
+        LaneTopology topology = LaneTopology.configured(false);
+        long expectedLastUserId = 0;
+        for (long userId = 1; userId <= 1_300; userId++) {
+            if (topology.accountLaneId(userId) == topology.accountLaneCount() - 1) {
+                expectedLastUserId = userId;
+            }
+        }
+        assertThat(completed.riskState().scan().accountLaneId())
+                .isEqualTo(topology.accountLaneCount() - 1);
+        assertThat(completed.riskState().scan().lastUserId()).isEqualTo(expectedLastUserId);
         assertThat(completed.riskState().snapshots()).hasSize(1_300);
+    }
+
+    @Test
+    void laneRiskCursorSurvivesMidScanSnapshot() {
+        TradingCoreState state = reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
+                instrument(ContractType.LINEAR_PERPETUAL, 1));
+        for (long userId = 1; userId <= 260; userId++) {
+            state = reducer.adjustBalance(state, userId, new BalanceAdjustmentCommand("USDT", 100));
+            state = withPosition(state, userId, new CorePositionState("BTC-USDT", "USDT", 1,
+                    1, 100, 100, 0, 10));
+        }
+        TradingCoreState partial = reducer.applyMarkPrice(state,
+                new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 1, 1_700_000_000_000L));
+        assertThat(partial.riskState().scan().riskComplete()).isFalse();
+        TradingCoreState restored = TradingStateSnapshotCodec.decode(
+                TradingStateSnapshotCodec.encode(partial), ProductLine.LINEAR_PERPETUAL);
+
+        TradingCoreState expected = continueRiskScans(partial);
+        TradingCoreState actual = continueRiskScans(restored);
+
+        assertThat(actual).isEqualTo(expected);
+        assertThat(actual.businessStateHash()).isEqualTo(expected.businessStateHash());
+        assertThat(actual.riskState().snapshots()).hasSize(260);
     }
 
     @Test
@@ -318,11 +350,50 @@ class CoreRiskStateTest {
                         before, 64, before.users().keySet(), runtime, identities);
                 RuntimeStateParityChecker.assertMatches(first, identities, runtime);
             }
+            long riskLaneOperations = 0;
+            for (int laneId = 0; laneId < runtime.topology().accountLaneCount(); laneId++) {
+                riskLaneOperations += runtime.accountLaneMetricsById(laneId).completedOperations()[
+                        AccountLaneOperationType.RISK.ordinal()];
+            }
+            assertThat(riskLaneOperations).isPositive().isLessThan(260);
         } finally {
             runtime.close();
         }
         assertThat(first.riskState().snapshots()).hasSize(260);
         assertThat(first.riskState().liquidations()).isEmpty();
+    }
+
+    @Test
+    void laneRiskAssignsDeterministicLiquidationIdsAcrossPages() {
+        TradingCoreState state = reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
+                instrument(ContractType.LINEAR_PERPETUAL, 1));
+        for (long userId = 1; userId <= 32; userId++) {
+            state = reducer.adjustBalance(state, userId, new BalanceAdjustmentCommand("USDT", 100));
+            state = withPosition(state, userId, new CorePositionState("BTC-USDT", "USDT", 1,
+                    10, 100, 1_000, 0, 100));
+        }
+        ApplyMarkPriceCommand command = new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 1,
+                1_700_000_000_000L);
+        TradingCoreState authoritative = reducer.applyMarkPrice(state, command);
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(state, identities);
+        runtime.startAccountLanes();
+        try {
+            RuntimePerpetualRiskProcessor.applyMarkPrice(
+                    state, command, state.users().keySet(), runtime, identities);
+            RuntimeStateParityChecker.assertMatches(authoritative, identities, runtime);
+            while (!authoritative.riskState().scan().riskComplete()) {
+                TradingCoreState before = authoritative;
+                authoritative = reducer.continueRiskScan(before, 7);
+                RuntimePerpetualRiskProcessor.applyContinuation(
+                        before, 7, before.users().keySet(), runtime, identities);
+                RuntimeStateParityChecker.assertMatches(authoritative, identities, runtime);
+            }
+        } finally {
+            runtime.close();
+        }
+        assertThat(authoritative.riskState().liquidations()).hasSize(32);
+        assertThat(authoritative.riskState().nextLiquidationId()).isEqualTo(33);
     }
 
     @Test
