@@ -1408,10 +1408,8 @@ public final class CoreProbeState implements AutoCloseable {
 
     private long batchOpenInterestSteps(OrderBatchPending batch, String symbol) {
         String normalizedSymbol = symbol.strip().toUpperCase(java.util.Locale.ROOT);
-        com.surprising.aeron.service.state.OpenInterestIndex.Totals totals =
-                openInterestIndex.totals().get(normalizedSymbol);
-        long longQuantity = totals == null ? 0 : totals.longQuantity();
-        long shortQuantity = totals == null ? 0 : totals.shortQuantity();
+        long longQuantity = openInterestIndex.longQuantity(normalizedSymbol);
+        long shortQuantity = openInterestIndex.shortQuantity(normalizedSymbol);
         for (Long userId : batch.changedUserIds) {
             long before = batchPositionQuantityBefore(userId, normalizedSymbol);
             long current = runtimePositionQuantity(userId, normalizedSymbol);

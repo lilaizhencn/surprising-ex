@@ -521,6 +521,27 @@ public class LinearPerpetualCoreBenchmark {
             template = LinearPerpetualMixedWorkload.template(accountLanes, activeUsers, config);
         }
 
+        @Setup(Level.Iteration)
+        public void setUpIteration() {
+            scenario = createScenario();
+        }
+
+        @Override
+        @Setup(Level.Invocation)
+        public void setUpInvocation() {
+        }
+
+        @Override
+        @TearDown(Level.Invocation)
+        public void tearDownInvocation() {
+        }
+
+        @TearDown(Level.Iteration)
+        public void tearDownIteration() {
+            scenario.verify();
+            scenario.close();
+        }
+
         @Override
         LinearPerpetualBenchmarkSupport.Scenario createScenario() {
             return LinearPerpetualMixedWorkload.productionScenario(

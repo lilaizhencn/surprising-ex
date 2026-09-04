@@ -43,6 +43,10 @@ class PositionUserIndexTest {
                 Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
         OpenInterestIndex index = new OpenInterestIndex(before);
         assertThat(index.totals().get("BTC-USDT").shortQuantity()).isEqualTo(2);
+        assertThat(index.longQuantity("btc-usdt")).isZero();
+        assertThat(index.shortQuantity("btc-usdt")).isEqualTo(2);
+        assertThat(index.longQuantity("ETH-USDT")).isZero();
+        assertThat(index.shortQuantity("ETH-USDT")).isZero();
 
         Map<Long, CoreUserState> afterUsers = StateMapSupport.delta(before.users());
         afterUsers.put(1L, CoreUserState.empty(ProductLine.LINEAR_PERPETUAL, 1));
@@ -51,6 +55,7 @@ class PositionUserIndexTest {
         index.rebuild(after);
 
         assertThat(index.totals()).isEmpty();
+        assertThat(index.shortQuantity("BTC-USDT")).isZero();
     }
 
     @Test

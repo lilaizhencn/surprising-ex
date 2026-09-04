@@ -30,6 +30,16 @@ public final class OpenInterestIndex {
         return value == null ? 0 : Math.max(value.longQuantity, value.shortQuantity);
     }
 
+    public long longQuantity(String symbol) {
+        MutableTotals value = totals.get(OrderReservation.normalizeSymbol(symbol));
+        return value == null ? 0 : value.longQuantity;
+    }
+
+    public long shortQuantity(String symbol) {
+        MutableTotals value = totals.get(OrderReservation.normalizeSymbol(symbol));
+        return value == null ? 0 : value.shortQuantity;
+    }
+
     void apply(RuntimePositionIndexValue previous, RuntimePositionIndexValue current) {
         if (previous != null && current != null && previous.symbol().equals(current.symbol())) {
             adjust(current.symbol(),
