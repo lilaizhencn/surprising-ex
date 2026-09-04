@@ -821,6 +821,38 @@ class TradingRuntimeStateTest {
     }
 
     @Test
+    void keepsTwoHundredFiftySixLaneOwnedCancellationsInFlightWithoutOwnerWaits() {
+        LaneTopology topology = LaneTopology.productionDefault();
+        TradingRuntimeState state = new TradingRuntimeState(topology);
+        LaneCancelEvent[] cancellations = new LaneCancelEvent[256];
+        for (int index = 0; index < cancellations.length; index++) {
+            long userId = index + 1L;
+            long orderId = 10_000L + index;
+            state.putUser(new UserRuntime(userId));
+            state.putBalance(new BalanceRuntime(userId, 3, 2, 0));
+            state.reserveOrder(orderId, userId, 20_000L + index, 5, 1, 3, 1);
+        }
+        state.clearChangedKeys();
+        state.startAccountLanes();
+        try {
+            for (int index = 0; index < cancellations.length; index++) {
+                cancellations[index] = state.dispatchCancel(
+                        index + 1L, index + 1L, 10_000L + index, 1_000L + index, index + 1L);
+            }
+            for (int index = 0; index < cancellations.length; index++) {
+                LaneCancelEvent event = cancellations[index];
+                while (!event.complete()) Thread.onSpinWait();
+                state.collectCancel(event, null, null);
+                state.releaseCancel(event);
+                assertThat(state.balance(index + 1L, 3).availableUnits()).isEqualTo(2);
+                assertThat(state.balance(index + 1L, 3).lockedUnits()).isZero();
+            }
+        } finally {
+            state.close();
+        }
+    }
+
+    @Test
     void invalidSnapshotSetDoesNotPartiallyRestoreEarlierLanes() {
         LaneTopology topology = LaneTopology.productionDefault();
         TradingRuntimeState state = new TradingRuntimeState(topology);

@@ -5,6 +5,8 @@ import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.service.state.RuntimeFundsDelta;
 import com.surprising.aeron.service.state.RuntimeProjectionPoint;
 import com.surprising.aeron.service.state.PlaceAdmissionEvent;
+import com.surprising.aeron.service.state.LaneCancelEvent;
+import com.surprising.aeron.service.state.LaneReplaceEvent;
 import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import java.util.List;
 import java.util.Objects;
@@ -27,6 +29,8 @@ final class PendingMatching {
     private long commitFenceClusterPosition;
     private boolean commitFenceEstablished;
     private com.surprising.aeron.service.state.MatcherSettlementEvent settlementEvent;
+    private LaneCancelEvent cancelEvent;
+    private LaneReplaceEvent replaceEvent;
     private com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan;
     private long settlementApplyStartNanos;
     private PlaceAdmissionEvent placeAdmission;
@@ -133,6 +137,8 @@ final class PendingMatching {
         commitFenceClusterPosition = 0;
         commitFenceEstablished = false;
         settlementEvent = null;
+        cancelEvent = null;
+        replaceEvent = null;
         settlementPlan = null;
         settlementApplyStartNanos = 0;
         placeAdmission = null;
@@ -172,6 +178,8 @@ final class PendingMatching {
         commitFenceClusterPosition = source.commitFenceClusterPosition;
         commitFenceEstablished = source.commitFenceEstablished;
         settlementEvent = source.settlementEvent;
+        cancelEvent = source.cancelEvent;
+        replaceEvent = source.replaceEvent;
         settlementPlan = source.settlementPlan;
         settlementApplyStartNanos = source.settlementApplyStartNanos;
         placeAdmission = source.placeAdmission;
@@ -235,6 +243,18 @@ final class PendingMatching {
         settlementEvent = null;
         return value;
     }
+    LaneCancelEvent cancelEvent() { return cancelEvent; }
+    LaneCancelEvent takeCancelEvent() {
+        LaneCancelEvent value = cancelEvent;
+        cancelEvent = null;
+        return value;
+    }
+    LaneReplaceEvent replaceEvent() { return replaceEvent; }
+    LaneReplaceEvent takeReplaceEvent() {
+        LaneReplaceEvent value = replaceEvent;
+        replaceEvent = null;
+        return value;
+    }
     com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan() { return settlementPlan; }
     long settlementApplyStartNanos() { return settlementApplyStartNanos; }
     PlaceAdmissionEvent placeAdmission() { return placeAdmission; }
@@ -263,10 +283,25 @@ final class PendingMatching {
     }
     boolean settlementReady() { return settlementReady; }
     void markSettlementReady() {
-        if (settlementEvent == null) {
-            throw new IllegalStateException("matcher settlement completion has no event");
+        if (settlementEvent == null && cancelEvent == null && replaceEvent == null) {
+            throw new IllegalStateException("lane continuation completion has no event");
         }
         settlementReady = true;
+    }
+    void replace(LaneReplaceEvent event, long applyStartNanos) {
+        if (event == null || replaceEvent != null || settlementEvent != null
+                || operation != Operation.REPLACE && operation != Operation.AMEND) {
+            throw new IllegalStateException("invalid replace continuation");
+        }
+        replaceEvent = event;
+        settlementApplyStartNanos = applyStartNanos;
+    }
+    void cancel(LaneCancelEvent event, long applyStartNanos) {
+        if (event == null || cancelEvent != null || settlementEvent != null || operation != Operation.CANCEL) {
+            throw new IllegalStateException("invalid cancel continuation");
+        }
+        cancelEvent = event;
+        settlementApplyStartNanos = applyStartNanos;
     }
     void settlement(com.surprising.aeron.service.state.MatcherSettlementEvent event,
                     com.surprising.aeron.service.state.MatcherSettlementPlan plan,
@@ -277,6 +312,7 @@ final class PendingMatching {
         settlementEvent = event;
         settlementPlan = plan;
         settlementApplyStartNanos = applyStartNanos;
+        settlementReady = false;
     }
     void dispatchOnly() { dispatchOnly = true; }
     boolean isDispatchOnly() { return dispatchOnly; }

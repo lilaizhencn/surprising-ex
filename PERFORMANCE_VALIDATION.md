@@ -2182,3 +2182,70 @@
 - 有效JFR约102MiB，DataLoss/socket I/O/allocation stall为0；6次ZGC、28个pause合计`0.381ms`，pause p50/p95/p99/max=`0.0110/0.0401/0.0508/0.0508ms`。CPU热点仍为`progressPlaceAdmissions`44 samples、`HashMap.getNode`26、digest update18、`awaitMatchingResult`17和`TreeMap.put`15；组件JFR热点为SPSC run/submit、dispatch及completion bitmap原子OR，没有`LaneMutationTask.await`或`awaitConsumed`热点。主要分配仍是primitive map扩容、HashMap/TreeMap节点、OrderRuntime、结果编码和matcher event，不包含持续LaneCommitEvent分配。
 - HotSpot 25最终受影响service测试`76/76`、benchmark真实交易测试`10/10`通过，构建和`git diff --check`通过。另行尝试的`RuntimeCommitRecoveryTest`仍有`5/5`既有失败，断言已删除的Fact/export patch必须非空；按用户范围不恢复、不测试exporter，该旧契约不计入本轮通过范围。未测试其他五产品线、PostgreSQL、exporter、Kafka、API、WebSocket、market-data、wallet或长稳泄漏；没有NMT前后差分，因此结论为交易链路和Lane commit的短时部分验证，不声明生产容量或无泄漏。
 - 最终组件main/GC/JFR JSON、交易main/JFR JSON SHA-256分别为`cfd5f33f0bbbdf06d7c3dd5800056a99f4dc4ef0facfff0a8eba8290ede7c607`、`41fc7ebdcd57131cdfad4b638853e1c5ea6a4b826639a898cf9976d31b6e32c3`、`0e79e416c857b1696e67cfb23f2312ce4d7c905ac9b6bd0bf96adaa9aee78d75`、`e8de4f2b6b1e30a55fba1c55c86dd064717de143c3c817bec67af26980f1f04c`、`cbcd936836e09e4ff2dea787e739d5c01b8ccff3b9e5d5b054ef7f2a18e1034e`；组件/交易JFR SHA-256为`4156f937975be0201ca24d8086bb1a797bbe0a375eebf57dbc45ba16476bb0e1`、`137bf8d0734fc16f3ca34365e8f66c7fd1f7e69b38848d7417c9333d3398bdd0`，summary/views位于同一artifact的`jfr-analysis/`。
+
+### 2026-09-04 12:30:18 +08:00 — `PV-20260904-256-88` — `采集前锁定（owner无等待订单continuation最终验证）`
+
+#### 采集前锁定
+
+- 被测修改：PLACE的预撤单、CANCEL及AMEND/REPLACE命令在owner完成admission后转交对应Account Lane，由Lane读取和修改订单、冻结及索引；matcher settlement在Lane执行预撤单后再提交撮合计划。每个sequence在`PendingMatching`中保存独立cancel/replace continuation，owner仅推进sequence、聚合完成位和提交Aeron边界，不同步等待单个Lane业务结果。
+- 对照commit为`9d6192d02de7e3484f1145eab8712a8963f2c697`；完整交易吞吐对照为PV-87 matcher=1 `50,293.948 terminal business ops/s`，通过阈值为不低于`45,264.553/s`（-10%）。新增直接受影响场景为`cancelBurst256`及`amendBurst256`，每次invocation先连续提交且断言恰好`256 in-flight`，再统一drain；分数按`burst/s × 256`换算terminal business/Core messages/s，要求accepted=terminal、两个unfinished为0、期末backlog=0、最大窗口=256、资金/冻结/订单终态及snapshot恢复通过。因无旧版同口径burst基线，这两项只作为本轮受影响路径诊断，不作跨commit提升结论。
+- 完整交易场景沿用PV-87：仅`LINEAR_PERPETUAL`、matcher=1、4 Account Lane、10,000活跃用户、512 listed/active symbols、每invocation 16,384 PLACE_ORDER、50% maker GTC+50% taker IOC、100,000 offered、做市持续运行、open-loop并修正coordinated omission、严格且仅`256 in-flight`。无profiler主轮`fork=1,warmup=3x3s,measurement=3x5s,thread=1`；直接场景使用相同参数，并增加`-prof gc`轮`fork=1,warmup=1x3s,measurement=1x5s`；完整交易JFR轮`fork=0,warmup=1x3s,measurement=1x10s`。
+- 正确性门禁：accepted business/Core分别等于terminal，unfinished/rejected/error/timeout为0，期末matcher/Lane/context backlog为0；资金守恒、用户和做市余额/冻结/持仓、订单生命周期终态、盘口及snapshot恢复必须通过。每次cancel/amend burst teardown都会从完成态snapshot恢复并比较business state hash。
+- 环境固定Oracle GraalVM Java HotSpot 25.0.1、Maven 3.9.16、MacBookPro16,1 / Intel Core i9-9880H / 16 logical CPU / 16GiB / macOS 26.7 x86_64；8GiB ZGC、AlwaysPreTouch、DisableExplicitGC、NMT summary、Account Lane BLOCKING wait strategy。JMH fork参数包含所需JDK模块开放；JFR使用PV-87同配置。预热后采集，测试间自然冷却；明显swap/pageout增长、CPU throttling或JFR DataLoss时结果无效。
+- 采集前定向核心/快照测试`14/14`、新增256窗口测试`1/1`、benchmark真实场景测试`11/11`通过；一次不带`-am`的benchmark模块运行因本地旧service artifact产生`NoSuchMethodError`，已判为无效并由当前源码reactor重跑替代。HEAD=`9d6192d02de7e3484f1145eab8712a8963f2c697`，排除本记录且包含两个新增Lane事件文件的代码diff SHA-256=`1fd227b591b67bf33c3c7194a7dcc5d8ba7240463fada0a89f30500ce06b41b6`，shaded JAR SHA-256=`df1da5f2dfed6c862b653fcd5240e6b57c0d7cdb9c8e9e913615421d49994dce`。artifact固定为`target/qualification/20260904T043018Z-owner-nonblocking-continuations-256/`；采集前swap=`446.25MiB`。
+- 不启动或测试PostgreSQL、exporter、wallet、Kafka、API、WebSocket、market-data及其他五产品线；不执行长稳泄漏测试，因此通过时也只形成交易链路短时部分验证，不声明生产容量或无泄漏。锁定后不修改代码、标准、场景或参数，失败和无效轮次照实追加。
+
+#### PV-88采集结果
+
+- cancel直接场景完成，三个样本折算为`47,881.696/64,261.476/64,270.959 terminal business ops/s`，平均`58,804.711/s`；accepted/terminal business及Core messages闭合，unfinished/rejected/error/timeout为0，严格256窗口和snapshot恢复门禁通过。
+- amend在warmup中失败：第一次剩余223条未终态，独立重复诊断剩余245条未终态。线程转储显示owner/JMH worker持续位于`progressPlaceAdmissions`，matcher及4个Account Lane均空闲；说明不是Lane业务耗时或锁等待，而是非PLACE submission head未被继续提交。根因是shard ready推进循环遇到`placeAdmission == null`直接退出，AMEND在前序窗口释放后可永久留在submission队列。
+- 本轮失败，不执行GC、完整交易主轮或JFR，不作性能验收。原始JSON保留于锁定artifact；代码随后增加非PLACE submission head推进并扩展为16轮cancel/amend各256窗口回归，按规则另建轮次复测。
+
+### 2026-09-04 12:40:55 +08:00 — `PV-20260904-256-89` — `采集前锁定（非PLACE submission head推进最终复测）`
+
+#### 采集前锁定
+
+- 延续PV-88的owner无等待订单continuation实现，唯一生产代码增量是shard ready推进器遇到无Place admission的submission head时直接调用`submitMatching`并继续推进，消除matcher和Lane均空闲时AMEND永久滞留。新增回归把cancel/amend各256窗口连续执行16轮，每轮校验终态、最大窗口和完成态snapshot恢复。
+- 对照和门禁沿用PV-88：完整交易对照PV-87 `50,293.948 terminal business ops/s`，阈值`45,264.553/s`；直接cancel/amend场景按`burst/s × 256`报告terminal business/Core messages/s，必须accepted=terminal、unfinished/rejected/error/timeout=0、最大窗口恰为256、期末backlog=0并通过资金/订单/snapshot门禁。cancel还对照PV-88有效结果`58,804.711/s`，不得回退超过10%；amend因PV-88超时无有效性能基线，只作绝对值和正确性诊断。
+- 场景与参数保持不变：`LINEAR_PERPETUAL`、matcher=1、4 Account Lane；直接场景每invocation 256个独立用户及256条CANCEL或AMEND，先全部accepted再drain。完整交易为10,000用户、512 symbols、16,384 PLACE_ORDER/invocation、50% maker GTC+50% taker IOC、100,000 offered、open-loop/coordinated-omission corrected、做市运行、严格256 in-flight。主轮`fork=1,warmup=3x3s,measurement=3x5s,thread=1`；直接场景GC轮`fork=1,warmup=1x3s,measurement=1x5s`；完整交易JFR轮`fork=0,warmup=1x3s,measurement=1x10s`。
+- JDK/JVM、机器、8GiB ZGC、NMT、wait strategy、正确性和数据有效性条件、不测试范围全部沿用PV-88。修复后16轮直接回归`1/1`、定向核心/快照`14/14`、benchmark全部真实场景`11/11`通过；构建和`git diff --check`通过。
+- HEAD=`9d6192d02de7e3484f1145eab8712a8963f2c697`，排除性能记录并包含新增Lane事件文件的最终代码diff SHA-256=`0ebf531d5f8a88f9fdc2d272661a866f84fc98857a6db46349d2c29195d13fe1`，shaded JAR SHA-256=`d4de040e9857c7d3be9ad52453ae51a2138e2e8b1c9c7c519ff54dbcb5f322bc`。artifact固定为`target/qualification/20260904T044055Z-owner-nonblocking-continuations-final-256/`；采集前swap=`446.25MiB`。锁定后不修改代码、场景、参数或门禁；PostgreSQL、exporter及外围服务仍不启动、不测试。
+
+#### PV-89采集结果
+
+- cancel再次完成，三个样本折算为`51,880.731/65,035.705/66,014.676 terminal business ops/s`，平均`60,977.037/s`；业务/Core accepted与terminal闭合，unfinished/rejected/error/timeout为0，较PV-88 cancel提高`3.69%`。
+- amend仍在warmup失败，剩余143条未终态。新增分支只在`placeAdmissionShardReady=true`时生效；线程状态仍显示提示位被清零后存在非PLACE submission head，而matcher/Lane空闲。由此确认ready bit只能作为edge提示，不能控制是否检查实际队列状态。
+- 本轮失败并终止后续GC、完整交易及JFR。代码随后把每个shard改为直接检查真实submission head的level-trigger推进，异步Place admission未完成时清提示并退出；按规则另建最终轮次。
+
+### 2026-09-04 12:46:48 +08:00 — `PV-20260904-256-90` — `采集前锁定（level-trigger submission最终验证）`
+
+#### 采集前锁定
+
+- 最终修复为每次推进都直接读取各matcher shard的真实submission head，不再以`placeAdmissionShardReady`提示位作为循环条件；非PLACE head立即提交，PLACE head仅在admission acquire-complete后提交。提示位保留作通知但不参与正确性判断。诊断字段已删除，最终生产代码不含临时观测逻辑。
+- 业务场景、严格256 in-flight、matcher=1、4 Lane、用户/symbol/做市状态、正确性门禁、完整交易阈值`45,264.553 terminal business ops/s`、JDK/JVM/机器、8GiB ZGC/NMT及不测试范围全部沿用PV-89。直接cancel/amend主轮仍为`fork=1,warmup=3x3s,measurement=3x5s`；本轮优先完成两者主轮及受影响AMEND JFR，完整交易主轮随后执行。
+- level-trigger最终代码的cancel/amend各256窗口连续64轮测试通过；独立短JMH诊断也完成且accepted/terminal闭合。构建与`git diff --check`通过。HEAD=`9d6192d02de7e3484f1145eab8712a8963f2c697`，排除性能记录的最终代码diff SHA-256=`c233d8fd422e007997ecffca69a19b81bc52d614c087f8fb89a27bab698430cf`，shaded JAR SHA-256=`12a0a3b340d5ed22070dd64891297862b880d8ff50fc20fba0b90caf890e5e1d`。artifact固定为`target/qualification/20260904T044648Z-owner-level-trigger-final-256/`，采集前swap=`446.25MiB`；锁定后不修改代码或参数。
+
+#### PV-90采集结果
+
+- cancel主轮再次完成，平均`56,589.209 terminal business/Core messages/s`，accepted/terminal闭合，unfinished/rejected/error/timeout为0；严格256窗口和完成态snapshot恢复通过。
+- amend第一测量样本为`13,304.406 terminal business/Core messages/s`且闭合，但第二样本再次超时，sequence 555后仍有216条未终态，因此整项无效。该结果证明前两轮对submission ready提示位的修补不是根因，相关`CoreProbeState`尝试已撤销，不保留无证据复杂度。
+- 因直接受影响AMEND场景失败，本轮立即终止，不执行GC、完整交易或JFR，也不宣称owner无等待目标验收完成。功能测试虽通过，但不足以覆盖持续JIT负载下出现的推进停滞；原始JSON保留在锁定artifact。PostgreSQL和exporter全程未启动、未测试。
+- PV-88/PV-89/PV-90原始JSON SHA-256分别为`147b62d206c8d79f171ebfb30ea0eadfbddf39ac7d331ffe548c1feeeda08360`、`c4a730049e2bd37ec2f006194ff663a2b189fe85d0b1bb11cb417ff6780fc719`、`f42fcaec9c9b67e8132517406e0f32e332532b7e7360ce1a08377f1705ac3294`；采集结束swap仍为`446.25MiB`，未发生swap增长。
+
+### 2026-09-04 13:00:51 +08:00 — `PV-20260904-256-91` — `采集前锁定（Lane continuation回收竞态最终修复）`
+
+#### 采集前锁定
+
+- 根因修复：`LaneReplaceEvent`及具有同构风险的`LaneCancelEvent`在发布completion release位之前，把runtime、laneId和coreSequence复制到Lane线程局部变量；completion发布后只使用局部值发送ready通知，不再读取可能被owner立即`clear()`的池化事件字段。该改动不增加等待、锁、容器或业务阶段。
+- 故障证据为AMEND卡住时matcher为空、目标settlement mask=`0/4`、Lane 2 worker因`LaneReplaceEvent.execute:93`对已清空runtime解引用而NPE，队列余2；因此此前表现为owner等待，实际是池化事件完成位与最后一次字段读取之间的回收竞态。临时诊断接口已全部删除。
+- 性能标准、完整交易阈值`45,264.553 terminal business ops/s`、固定且仅256 in-flight、matcher=1、4 Lane、10,000用户、512 symbols、50% maker/50% taker、100,000 offered、JMH主轮`3x3s + 3x5s`、GC轮`1x3s + 1x5s`、JFR轮`1x3s + 1x10s`、HotSpot 25/8GiB ZGC/NMT和正确性门禁沿用PV-90。直接cancel/amend各256 burst必须全部终态、无错误、最大窗口256并通过snapshot恢复。
+- 最终代码已通过cancel/amend各256窗口连续64轮测试；构建和`git diff --check`通过。HEAD=`9d6192d02de7e3484f1145eab8712a8963f2c697`，排除性能记录的代码diff SHA-256=`ea3c89ea179712bd1b7a36567d820659806100ed85dc9ffc0c631ab6f8e1d803`，shaded JAR SHA-256=`a8d1539b762395f74c8d2e9fa5928b3897fb7e6739668f579a570e5c909cfa7d`。artifact固定为`target/qualification/20260904T050051Z-lane-continuation-race-final-256/`，采集前swap=`446.25MiB`。不启动或测试PostgreSQL、exporter及外围服务；锁定后不修改代码、场景或参数。
+
+#### PV-91采集结果
+
+- 直接AMEND主轮三个样本为`18,388.223/24,527.717/25,375.965 terminal business/Core messages/s`，平均`22,763.635/s`；CANCEL三个样本为`66,064.757/66,908.160/67,756.259/s`，平均`66,909.725/s`。两者accepted/terminal均闭合，unfinished/rejected/error/timeout为0，每次最大窗口严格为256，期末backlog为0，订单终态、资金及完成态snapshot恢复通过。AMEND不再出现Lane worker failure或超时。
+- 直接场景`-prof gc`轮：AMEND `10,967.312 terminal ops/s`、`783.930 MB/s`、`59,163,144 B/burst`，折合`231,106 B/business op`；CANCEL `27,649.892/s`、`984.141 MB/s`、`52,875,495.273 B/burst`，折合`206,545 B/op`。数值包含每个JMH invocation的snapshot restore及teardown snapshot验证分配，只用于本直接场景归因，不能替代PV-85完整交易`12,661.469 B/op`基线；测量期分别发生12次/201ms和6次/94ms GC。
+- matcher=1完整交易主轮为`49,659.886 terminal business/Core messages/s`、`24,829.943 trades/s`，三个business样本`44,068.449/52,271.281/52,639.928 ops/s`；相对PV-87 `50,293.948/s`为`-1.26%`，通过`45,264.553/s`门禁。accepted/terminal闭合，unfinished/rejected/error/timeout/producer-starvation为0，资金、余额/冻结/持仓、订单终态、盘口、snapshot recovery及期末matcher/Lane/context backlog门禁通过。
+- AMEND JFR轮为`12,800.431 terminal business/Core messages/s`，业务门禁闭合。记录15秒、约38MiB，227个execution samples、31,297个allocation samples、852,303个ThreadPark；主要CPU栈为`awaitMatchingResult`15 samples、`progressPlaceAdmissions`9、state hash mix 7、owner断言5和ThreadLocal lookup 5。5次ZGC、23个pause，最长pause`0.027346ms`；JavaMonitorEnter 14次，ExceptionStatistics、SocketRead/Write及DataLoss均为0。ThreadPark主要来自BLOCKING Lane及JMH生命周期，没有再次出现Lane worker NPE。
+- 最终复测：定向核心/资金/snapshot测试`14/14`、benchmark真实场景测试`11/11`（其中continuation测试连续64轮）通过，构建和`git diff --check`通过。未执行其他五产品线、PostgreSQL、exporter、Kafka、API、WebSocket、market-data、wallet或长稳泄漏，因此结论为本次交易链路的短时部分验证，不声明生产容量或无泄漏。
+- main/GC/trading-main/JFR-json/JFR SHA-256分别为`82a92f2eaa2dae141a9380573187ffdbbc81b4fc76231c53718250639ec4c75f`、`e6effdf09f6838c86ead0f6b23303b23afed57c2961524ba2054d8fd1f4a4b37`、`1d4f82fbb541e2ab01237c162d619c5034cae2663442bea69dd800fc4ec042e8`、`2d059fd974bcda7bf035455e33ba21223cdea0611855255b3560c05bc465a885`、`5945d16c7b1dec549175c80bbd71ff04c698b751feffc373d22508c0a51333c0`；采集结束swap仍为`446.25MiB`。

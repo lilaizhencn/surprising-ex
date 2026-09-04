@@ -12,6 +12,23 @@ import org.junit.jupiter.api.Test;
 
 class LinearPerpetualBenchmarkSupportTest {
 
+    @Test
+    void orderContinuationsSustainTheRequiredTwoHundredFiftySixInFlightWindow() {
+        var template = LinearPerpetualBenchmarkSupport.orderContinuationTemplate(4);
+        for (int round = 0; round < 64; round++) {
+            for (var scenario : List.of(
+                    LinearPerpetualBenchmarkSupport.cancelBurst256(template),
+                    LinearPerpetualBenchmarkSupport.amendBurst256(template))) {
+                try (scenario) {
+                    assertThatCode(scenario::run).doesNotThrowAnyException();
+                    scenario.verify();
+                    assertThat(scenario.operations()).isEqualTo(256);
+                    assertThat(scenario.maxBacklog()).isEqualTo(256);
+                }
+            }
+        }
+    }
+
     private final String originalAccountLanes = System.getProperty("surprising.aeron.account-lanes");
 
     @AfterEach
@@ -67,6 +84,8 @@ class LinearPerpetualBenchmarkSupportTest {
                 new NamedScenario("fullTakerFill", () -> LinearPerpetualBenchmarkSupport.fullTakerFill(lanes)),
                 new NamedScenario("cancelRestingOrder",
                         () -> LinearPerpetualBenchmarkSupport.cancelRestingOrder(lanes)),
+                new NamedScenario("amendRestingOrder",
+                        () -> LinearPerpetualBenchmarkSupport.amendRestingOrder(lanes)),
                 new NamedScenario("partialFill", () -> LinearPerpetualBenchmarkSupport.partialFill(lanes)),
                 new NamedScenario("multiLaneMatching",
                         () -> LinearPerpetualBenchmarkSupport.multiLaneMatching(matchingTemplate, 8)),

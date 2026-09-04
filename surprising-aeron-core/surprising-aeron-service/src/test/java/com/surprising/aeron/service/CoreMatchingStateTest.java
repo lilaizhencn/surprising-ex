@@ -248,8 +248,8 @@ class CoreMatchingStateTest {
                     place(202, CoreOrderSide.BUY, 100, 3, reservationKind, buyerAsset,
                             productLine == ProductLine.SPOT ? 300 : 1_000));
 
-            assertThat(state.tradingState().order(101).status()).isEqualTo(CoreOrderStatus.CANCELED);
-            assertThat(state.tradingState().order(101).executedQuantitySteps()).isZero();
+            assertThat(state.tradingState().order(101)).isNull();
+            assertThat(state.terminalRetention().containsOrder(101, 11, "")).isTrue();
             assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.OPEN);
             assertThat(state.tradingState().order(202).executedQuantitySteps()).isZero();
             if (productLine == ProductLine.SPOT) {
@@ -713,7 +713,8 @@ class CoreMatchingStateTest {
 
             assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(TradingCommandCodec.decodeAmendOrder(amend.payload()).replacementOrderId()).isEqualTo(203);
-            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.CANCELED);
+            assertThat(state.tradingState().order(202)).isNull();
+            assertThat(state.terminalRetention().containsOrder(202, 22, "")).isTrue();
             assertThat(state.tradingState().order(203).status()).isEqualTo(CoreOrderStatus.OPEN);
             assertThat(state.tradingState().order(203).priceTicks()).isEqualTo(110);
             assertThat(state.tradingState().order(203).clientOrderId()).isEqualTo("amended");

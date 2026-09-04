@@ -50,6 +50,29 @@ public class LinearPerpetualCoreBenchmark {
     }
 
     @Benchmark
+    public long amendRestingOrder(AmendState state) {
+        return state.scenario.run();
+    }
+
+    @Benchmark
+    @BenchmarkMode(Mode.Throughput)
+    @OutputTimeUnit(TimeUnit.SECONDS)
+    public long cancelBurst256(CancelBurstState state, MixedWorkloadCounters counters) {
+        long result = state.scenario.run();
+        recordCounters(state.scenario, counters);
+        return result;
+    }
+
+    @Benchmark
+    @BenchmarkMode(Mode.Throughput)
+    @OutputTimeUnit(TimeUnit.SECONDS)
+    public long amendBurst256(AmendBurstState state, MixedWorkloadCounters counters) {
+        long result = state.scenario.run();
+        recordCounters(state.scenario, counters);
+        return result;
+    }
+
+    @Benchmark
     public long partialFill(PartialFillState state) {
         return state.scenario.run();
     }
@@ -296,6 +319,40 @@ public class LinearPerpetualCoreBenchmark {
         @Override
         LinearPerpetualBenchmarkSupport.Scenario createScenario() {
             return LinearPerpetualBenchmarkSupport.cancelRestingOrder(accountLanes);
+        }
+    }
+
+    @State(Scope.Thread)
+    public static class AmendState extends InvocationState {
+        @Override
+        LinearPerpetualBenchmarkSupport.Scenario createScenario() {
+            return LinearPerpetualBenchmarkSupport.amendRestingOrder(accountLanes);
+        }
+    }
+
+    public abstract static class OrderContinuationBurstState extends InvocationState {
+        LinearPerpetualBenchmarkSupport.OrderContinuationTemplate template;
+
+        @Setup(Level.Trial)
+        public void setUpTrial() {
+            LinearPerpetualBenchmarkSupport.configureAccountLanes(accountLanes);
+            template = LinearPerpetualBenchmarkSupport.orderContinuationTemplate(accountLanes);
+        }
+    }
+
+    @State(Scope.Thread)
+    public static class CancelBurstState extends OrderContinuationBurstState {
+        @Override
+        LinearPerpetualBenchmarkSupport.Scenario createScenario() {
+            return LinearPerpetualBenchmarkSupport.cancelBurst256(template);
+        }
+    }
+
+    @State(Scope.Thread)
+    public static class AmendBurstState extends OrderContinuationBurstState {
+        @Override
+        LinearPerpetualBenchmarkSupport.Scenario createScenario() {
+            return LinearPerpetualBenchmarkSupport.amendBurst256(template);
         }
     }
 

@@ -1,6 +1,7 @@
 package com.surprising.aeron.service;
 
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
+import com.surprising.aeron.protocol.AmendOrderCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CancelOrderCommand;
 import com.surprising.aeron.protocol.CommandSource;
@@ -146,6 +147,16 @@ final class LinearPerpetualBenchmarkSupport {
         }
     }
 
+    record OrderContinuationTemplate(SnapshotTemplate snapshot, long[] userIds, long[] orderIds) {
+        OrderContinuationTemplate {
+            userIds = userIds.clone();
+            orderIds = orderIds.clone();
+            if (snapshot == null || userIds.length != 256 || orderIds.length != 256) {
+                throw new IllegalArgumentException("order continuation template requires 256 orders");
+            }
+        }
+    }
+
     static void configureAccountLanes(int accountLanes) {
         if (accountLanes < 2 || accountLanes > Long.SIZE
                 || (accountLanes & (accountLanes - 1)) != 0) {
@@ -177,6 +188,94 @@ final class LinearPerpetualBenchmarkSupport {
         CoreMessage command = harness.command(CoreMessageType.CANCEL_ORDER, CommandSource.GATEWAY, userId,
                 TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(orderId)));
         return commandScenario(harness, command);
+    }
+
+    static Scenario amendRestingOrder(int accountLanes) {
+        Harness harness = base(accountLanes);
+        long userId = usersAcrossLanes(accountLanes, 1, 2_500).getFirst();
+        harness.adjust(userId, SAFE_BALANCE);
+        long originalOrderId = harness.nextOrderId();
+        harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, userId,
+                order(originalOrderId, CoreOrderSide.SELL, 101, 1, CoreTimeInForce.GTC)));
+        CoreMessage command = harness.command(CoreMessageType.AMEND_ORDER, CommandSource.GATEWAY, userId,
+                TradingCommandCodec.encodeAmendOrder(new AmendOrderCommand(
+                        originalOrderId, harness.nextOrderId(), "", 102L, 1L,
+                        CoreTimeInForce.GTC, null)));
+        return commandScenario(harness, command);
+    }
+
+    static OrderContinuationTemplate orderContinuationTemplate(int accountLanes) {
+        Harness harness = base(accountLanes);
+        long[] users = new long[256];
+        long[] orders = new long[256];
+        List<Long> selected = usersAcrossLanes(accountLanes, 256, 30_000);
+        try {
+            for (int index = 0; index < users.length; index++) {
+                users[index] = selected.get(index);
+                harness.adjust(users[index], SAFE_BALANCE);
+                orders[index] = harness.nextOrderId();
+                harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, users[index],
+                        order(orders[index], CoreOrderSide.SELL, 101, 1, CoreTimeInForce.GTC)));
+            }
+            return new OrderContinuationTemplate(harness.snapshotTemplate(accountLanes), users, orders);
+        } finally {
+            harness.close();
+        }
+    }
+
+    static Scenario cancelBurst256(OrderContinuationTemplate template) {
+        Harness harness = Harness.restore(template.snapshot());
+        CoreMessage[] commands = new CoreMessage[256];
+        for (int index = 0; index < commands.length; index++) {
+            commands[index] = harness.command(CoreMessageType.CANCEL_ORDER, CommandSource.GATEWAY,
+                    template.userIds()[index], TradingCommandCodec.encodeCancelOrder(
+                            new CancelOrderCommand(template.orderIds()[index])));
+        }
+        return burstScenario(harness, commands);
+    }
+
+    static Scenario amendBurst256(OrderContinuationTemplate template) {
+        Harness harness = Harness.restore(template.snapshot());
+        CoreMessage[] commands = new CoreMessage[256];
+        for (int index = 0; index < commands.length; index++) {
+            commands[index] = harness.command(CoreMessageType.AMEND_ORDER, CommandSource.GATEWAY,
+                    template.userIds()[index], TradingCommandCodec.encodeAmendOrder(new AmendOrderCommand(
+                            template.orderIds()[index], harness.nextOrderId(), "", 102L, 1L,
+                            CoreTimeInForce.GTC, null)));
+        }
+        return burstScenario(harness, commands);
+    }
+
+    private static Scenario burstScenario(Harness harness, CoreMessage[] commands) {
+        return new Scenario() {
+            @Override
+            public long run() {
+                for (CoreMessage command : commands) harness.submit(command);
+                if (harness.pendingSubmissions() != 256) {
+                    throw new IllegalStateException("order continuation window did not reach 256");
+                }
+                harness.drainSubmitted();
+                return harness.state().stateHash();
+            }
+
+            @Override public long operations() { return 256; }
+            @Override public long maxBacklog() { return harness.maxMatchingBacklog(); }
+            @Override
+            public void verify() {
+                if (harness.pendingSubmissions() != 0) {
+                    throw new IllegalStateException("order continuation commands remain unfinished");
+                }
+                SnapshotTemplate completed = harness.snapshotTemplate(
+                        harness.state().laneTopology().accountLaneCount());
+                try (CoreProbeState restored = CoreProbeState.fromSnapshot(
+                        completed.productLine(), completed.bytes())) {
+                    if (restored.tradingState().businessStateHash() != completed.businessStateHash()) {
+                        throw new IllegalStateException("order continuation snapshot recovery mismatch");
+                    }
+                }
+            }
+            @Override public void close() { harness.close(); }
+        };
     }
 
     static Scenario fullTakerFill(int accountLanes) {

@@ -110,6 +110,13 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         if (commitSequence == 0) runtime.enterLaneCommandScope(lane);
         else runtime.enterMatcherSettlementScope(lane, changes);
         try {
+            for (int index = 0; index < plan.preCancellationCount(); index++) {
+                long orderId = plan.preCancellationOrderId(index);
+                OrderRuntime order = lane.orders.get(orderId);
+                if (order != null && order.status() == CoreOrderStatus.OPEN) {
+                    runtime.cancelOrderInLane(order.userId(), orderId);
+                }
+            }
             RuntimeTreasuryDelta delta = plan.tradeCount() == 0
                     ? EMPTY_TREASURY_DELTA : touchedLaneTreasuryDeltas[laneSlot(laneId)];
             if (runtime.productLine().isDerivative()) {

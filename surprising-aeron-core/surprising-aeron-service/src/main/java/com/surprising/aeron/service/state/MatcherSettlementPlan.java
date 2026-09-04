@@ -15,10 +15,19 @@ public final class MatcherSettlementPlan {
     private final int orderCount;
     private final List<MatcherEvent> matcherEvents;
     private final int tradeCount;
+    private final long[] preCancellationOrderIds;
 
     private MatcherSettlementPlan(long coreSequence, long takerOrderId, long activeUserId,
                                   long requiredLaneMask, long[] orderIds, int orderCount,
                                   List<MatcherEvent> matcherEvents, int tradeCount) {
+        this(coreSequence, takerOrderId, activeUserId, requiredLaneMask, orderIds, orderCount,
+                matcherEvents, tradeCount, new long[0]);
+    }
+
+    private MatcherSettlementPlan(long coreSequence, long takerOrderId, long activeUserId,
+                                  long requiredLaneMask, long[] orderIds, int orderCount,
+                                  List<MatcherEvent> matcherEvents, int tradeCount,
+                                  long[] preCancellationOrderIds) {
         this.coreSequence = coreSequence;
         this.takerOrderId = takerOrderId;
         this.activeUserId = activeUserId;
@@ -27,6 +36,7 @@ public final class MatcherSettlementPlan {
         this.orderCount = orderCount;
         this.matcherEvents = matcherEvents;
         this.tradeCount = tradeCount;
+        this.preCancellationOrderIds = preCancellationOrderIds;
     }
 
     public static MatcherSettlementPlan build(long coreSequence, long takerOrderId, long activeUserId,
@@ -155,6 +165,14 @@ public final class MatcherSettlementPlan {
     public int matcherEventCount() { return matcherEvents.size(); }
     public MatcherEvent matcherEvent(int index) { return matcherEvents.get(index); }
     public int tradeCount() { return tradeCount; }
+    public MatcherSettlementPlan preCancellations(long[] orderIds) {
+        if (orderIds == null) throw new IllegalArgumentException("pre-cancellation ids are required");
+        if (orderIds.length == 0) return this;
+        return new MatcherSettlementPlan(coreSequence, takerOrderId, activeUserId,
+                requiredLaneMask, this.orderIds, orderCount, matcherEvents, tradeCount, orderIds.clone());
+    }
+    public int preCancellationCount() { return preCancellationOrderIds.length; }
+    long preCancellationOrderId(int index) { return preCancellationOrderIds[index]; }
     public boolean matcherEventTouchesLane(int index, int laneId, TradingRuntimeState runtime) {
         MatcherEvent event = matcherEvents.get(index);
         return runtime.topology().accountLaneId(activeUserId) == laneId
