@@ -17,6 +17,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
 
     private TradingRuntimeState runtime;
     private TradingRuntimeState.MatcherSettlementChanges changes;
+    private RuntimeIdentityRegistry identities;
     private long coreSequence;
     private long userId;
     private long orderId;
@@ -29,6 +30,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
     LaneCancelEvent prepare(long sequence, long ownerUserId, long targetOrderId,
                             long timestamp, long clusterPosition, int ownerLaneId,
                             TradingRuntimeState owner,
+                            RuntimeIdentityRegistry identityRegistry,
                             TradingRuntimeState.MatcherSettlementChanges commandChanges) {
         if (sequence <= 0 || ownerUserId <= 0 || targetOrderId <= 0 || timestamp < 0 || clusterPosition < 0
                 || ownerLaneId < 0 || owner == null || commandChanges == null || coreSequence != 0 || completed) {
@@ -41,6 +43,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
         commitClusterPosition = clusterPosition;
         laneId = ownerLaneId;
         runtime = owner;
+        identities = identityRegistry;
         changes = commandChanges;
         return this;
     }
@@ -53,7 +56,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
         try {
             runtime.cancelOrderInLane(userId, orderId);
             runtime.stampOrderInLane(lane, orderId, commitTimestamp, commitClusterPosition);
-            changes.prepareLaneTerminal(laneId, null, lane);
+            changes.prepareLaneTerminal(laneId, identities, lane);
             lane.applied(coreSequence);
             lane.committed(coreSequence);
             runtime.publishLaneHashes(lane);
@@ -74,6 +77,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
     public int laneId() { return laneId; }
     public long requiredLaneMask() { return 1L << laneId; }
     public boolean complete() { return (boolean) COMPLETED.getAcquire(this); }
+    RuntimeIdentityRegistry identities() { return identities; }
 
     TradingRuntimeState.MatcherSettlementChanges takeChanges() {
         if (!complete() || changes == null) throw new IllegalStateException("cancel event is incomplete");
@@ -85,6 +89,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
     void clear() {
         if (!complete() || changes != null) throw new IllegalStateException("cancel event was not collected");
         runtime = null;
+        identities = null;
         coreSequence = 0;
         userId = 0;
         orderId = 0;
@@ -98,6 +103,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
         if (complete()) throw new IllegalStateException("completed cancel event must be collected");
         changes = null;
         runtime = null;
+        identities = null;
         coreSequence = 0;
         userId = 0;
         orderId = 0;

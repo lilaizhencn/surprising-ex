@@ -1,5 +1,6 @@
 package com.surprising.aeron.service;
 
+import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreMessageType;
@@ -20,6 +21,7 @@ final class LinearPerpetualSaturationWorkload {
     // Keep saturation pairs on a level that the restored density fixture never uses. Otherwise an IOC can
     // consume a fixture order and leave its paired GTC behind, making the benchmark measure fixture cleanup.
     private static final long PRICE_TICKS = 1_000;
+    private static final long MARK_REFRESH_INTERVAL_MILLIS = 4_000;
     private static final long PROGRESS_TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(30);
 
     private LinearPerpetualSaturationWorkload() {
@@ -90,6 +92,7 @@ final class LinearPerpetualSaturationWorkload {
         }
         var harness = LinearPerpetualBenchmarkSupport.Harness.restore(template.snapshot());
         int openingActiveOrders = activeOrderCount(harness.state());
+        int openingClientIdentities = harness.state().runtimeClientIdentityCount();
         int symbolCount = template.symbols().size();
         int directionCount = operationsPerRun / operationsPerDirection;
         int completionBatchSize = maxInFlight < 64 ? 2 : Math.min(64, maxInFlight / 4);
@@ -123,6 +126,8 @@ final class LinearPerpetualSaturationWorkload {
             private int completedPairsInDirection;
             private long firstScheduledEntryNanos;
             private int scheduledEntrySequence;
+            private long nextMarkRefreshAt = Math.addExact(
+                    harness.nextCommandTimestamp(), MARK_REFRESH_INTERVAL_MILLIS);
 
             @Override
             public int terminalTombstones() {
@@ -131,6 +136,7 @@ final class LinearPerpetualSaturationWorkload {
 
             @Override
             public long run() {
+                refreshMarkPricesIfRequired();
                 long acceptedCoreBefore = harness.acceptedCoreMessages();
                 long terminalCoreBefore = harness.terminalCoreMessages();
                 long terminalTradesBefore = harness.terminalTradeCount();
@@ -184,6 +190,23 @@ final class LinearPerpetualSaturationWorkload {
                     throw new IllegalStateException("saturation workload lost completion latency samples");
                 }
                 return harness.state().snapshotBusinessStateHash();
+            }
+
+            private void refreshMarkPricesIfRequired() {
+                long refreshTimestamp = harness.nextCommandTimestamp();
+                if (refreshTimestamp < nextMarkRefreshAt) return;
+                for (String symbol : template.symbols()) {
+                    var current = harness.state().runtimeMarkPrice(symbol);
+                    if (current == null) {
+                        throw new IllegalStateException("saturation mark price is missing: " + symbol);
+                    }
+                    harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE,
+                            CommandSource.KAFKA_INPUT_BRIDGE, 0,
+                            TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
+                                    symbol, current.instrumentVersion(), current.markPriceTicks(),
+                                    Math.incrementExact(current.priceSequence()), refreshTimestamp))));
+                }
+                nextMarkRefreshAt = Math.addExact(refreshTimestamp, MARK_REFRESH_INTERVAL_MILLIS);
             }
 
             private int completeReady(LinearPerpetualBenchmarkSupport.Harness target) {
@@ -463,6 +486,7 @@ final class LinearPerpetualSaturationWorkload {
             public void verify() {
                 long closingFunds = LinearPerpetualMixedWorkload.totalFunds(harness.state().tradingState());
                 int closingActiveOrders = activeOrderCount(harness.state());
+                int closingClientIdentities = harness.state().runtimeClientIdentityCount();
                 int parallelSettlementLanes = 0;
                 CoreLaneMetrics laneMetrics = harness.state().laneMetrics();
                 for (int highWaterMark : laneMetrics.accountLaneQueueHighWaterMarks()) {
@@ -502,7 +526,8 @@ final class LinearPerpetualSaturationWorkload {
                         || completedPairsInDirection != symbolCount
                         || harness.pendingSubmissions() != 0
                         || closingFunds != template.openingFunds()
-                        || closingActiveOrders != openingActiveOrders) {
+                        || closingActiveOrders != openingActiveOrders
+                        || closingClientIdentities != openingClientIdentities) {
                     throw new IllegalStateException("saturation workload invariant failed: samples="
                             + latencySamples + '/' + operationsPerRun
                             + ", scheduled=" + scheduledOperations + '/' + operationsPerRun
@@ -524,7 +549,8 @@ final class LinearPerpetualSaturationWorkload {
                             + ", completedPairs=" + completedPairsInDirection + '/' + symbolCount
                             + ", pending=" + harness.pendingSubmissions()
                             + ", funds=" + template.openingFunds() + '/' + closingFunds
-                            + ", activeOrders=" + openingActiveOrders + '/' + closingActiveOrders);
+                            + ", activeOrders=" + openingActiveOrders + '/' + closingActiveOrders
+                            + ", clientIdentities=" + openingClientIdentities + '/' + closingClientIdentities);
                 }
             }
 

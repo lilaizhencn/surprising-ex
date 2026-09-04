@@ -17,17 +17,13 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
     private volatile String[] assets = new String[16];
     private final Map<String, Integer> symbolIds = new HashMap<>();
     private volatile String[] symbols = new String[16];
-    private final Map<ClientIdentity, Long> clientKeys = new HashMap<>();
-    private final Map<Long, ClientIdentity> clients = new ConcurrentHashMap<>();
-    private final LongLongHashMap clientAllocationKeys = new LongLongHashMap();
-    private final LongLongHashMap clientKeyAllocations = new LongLongHashMap();
+    private final Map<Long, ClientIdentityEntry> clients = new ConcurrentHashMap<>();
     private final Map<PositionIdentity, Long> positionKeys = new HashMap<>();
     private final Map<Long, PositionIdentity> positions = new ConcurrentHashMap<>();
     private final LongLongHashMap positionAllocationKeys = new LongLongHashMap();
     private final LongLongHashMap positionKeyAllocations = new LongLongHashMap();
     private int nextAssetId;
     private int nextSymbolId;
-    private long nextClientKey = 1;
     private long nextPositionKey = 1;
     private long dictionaryVersion;
     private final RuntimeFactFrame.FactIdentitySlice liveFactIdentitySlice =
@@ -102,16 +98,12 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
         if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
         if (clientOrderId == null || clientOrderId.isBlank()) return 0;
         ClientIdentity identity = new ClientIdentity(userId, clientOrderId);
-        Long existing = clientKeys.get(identity);
-        if (existing != null) return existing;
         long key = deterministicKey(userId, clientOrderId);
-        ClientIdentity collision = clients.putIfAbsent(key, identity);
-        if (collision != null && !collision.equals(identity)) {
+        ClientIdentityEntry collision = clients.putIfAbsent(key, new ClientIdentityEntry(identity));
+        if (collision != null && !collision.identity.equals(identity)) {
             throw new IllegalStateException("deterministic client identity collision");
         }
-        clientKeys.put(identity, key);
-        trackAllocation(clientAllocationKeys, clientKeyAllocations, nextClientKey++, key);
-        dictionaryVersion = Math.incrementExact(dictionaryVersion);
+        if (collision == null) dictionaryVersion = Math.incrementExact(dictionaryVersion);
         return key;
     }
 
@@ -120,17 +112,34 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
         if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
         if (clientOrderId == null || clientOrderId.isBlank()) return new PreparedClientKey(0, false);
         ClientIdentity identity = new ClientIdentity(userId, clientOrderId);
-        Long existing = clientKeys.get(identity);
-        if (existing != null) return new PreparedClientKey(existing, false);
         long key = deterministicKey(userId, clientOrderId);
-        ClientIdentity collision = clients.putIfAbsent(key, identity);
-        if (collision != null && !collision.equals(identity)) {
-            throw new IllegalStateException("deterministic client identity collision");
+        ClientIdentityEntry existing = clients.get(key);
+        if (existing != null) {
+            if (!existing.identity.equals(identity)) {
+                throw new IllegalStateException("deterministic client identity collision");
+            }
+            existing.references = Math.incrementExact(existing.references);
+            return new PreparedClientKey(key, true);
         }
-        clientKeys.put(identity, key);
-        trackAllocation(clientAllocationKeys, clientKeyAllocations, nextClientKey++, key);
+        ClientIdentityEntry collision = clients.putIfAbsent(key, new ClientIdentityEntry(identity));
+        if (collision != null) {
+            if (!collision.identity.equals(identity)) {
+                throw new IllegalStateException("deterministic client identity collision");
+            }
+            collision.references = Math.incrementExact(collision.references);
+            return new PreparedClientKey(key, true);
+        }
         dictionaryVersion = Math.incrementExact(dictionaryVersion);
         return new PreparedClientKey(key, true);
+    }
+
+    private void releaseClientKeyReference(long userId, String clientOrderId, long clientKey) {
+        ClientIdentityEntry existing = clients.get(clientKey);
+        if (existing == null || existing.identity.userId() != userId
+                || !existing.identity.clientOrderId().equals(clientOrderId)) {
+            throw new IllegalStateException("deterministic client identity collision");
+        }
+        if (--existing.references == 0) clients.remove(clientKey, existing);
     }
 
     public void rollbackPreparedClientKey(
@@ -139,45 +148,33 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
         if (userId <= 0 || clientOrderId == null || prepared == null || !prepared.allocated()) {
             throw new IllegalArgumentException("invalid prepared client key rollback");
         }
-        ClientIdentity identity = new ClientIdentity(userId, clientOrderId);
-        long allocation = nextClientKey - 1;
-        if (prepared.key() == 0 || clientAllocationKeys.get(allocation) != prepared.key()
-                || !Long.valueOf(prepared.key()).equals(clientKeys.get(identity))
-                || !identity.equals(clients.get(prepared.key()))) {
-            throw new IllegalStateException("prepared client key is no longer rollback-safe");
-        }
-        clientKeys.remove(identity);
-        clients.remove(prepared.key());
-        clientAllocationKeys.removeKey(allocation);
-        if (clientKeyAllocations.removeKeyIfAbsent(prepared.key(), allocation) != allocation) {
-            throw new IllegalStateException("client identity allocation index is inconsistent");
-        }
-        nextClientKey = allocation;
+        releaseClientKeyReference(userId, clientOrderId, prepared.key());
     }
 
     public Long findClientKey(long userId, String clientOrderId) {
         assertOwner();
         if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
         if (clientOrderId == null || clientOrderId.isBlank()) return null;
-        return clientKeys.get(new ClientIdentity(userId, clientOrderId));
+        long key = deterministicKey(userId, clientOrderId);
+        ClientIdentityEntry existing = clients.get(key);
+        return existing != null && existing.identity.userId() == userId
+                && existing.identity.clientOrderId().equals(clientOrderId) ? key : null;
     }
 
     public String clientOrderId(long userId, long clientKey) {
         if (clientKey == 0) return "";
-        ClientIdentity identity = clients.get(clientKey);
-        if (identity == null || identity.userId() != userId) {
+        ClientIdentityEntry entry = clients.get(clientKey);
+        if (entry == null || entry.identity.userId() != userId) {
             throw new IllegalArgumentException("unknown runtime client key: " + userId + '/' + clientKey);
         }
-        return identity.clientOrderId();
+        return entry.identity.clientOrderId();
     }
 
     public void releaseClientKey(long userId, long clientKey) {
         assertOwner();
-        ClientIdentity identity = clients.get(clientKey);
-        if (identity == null || identity.userId() != userId) return;
-        clients.remove(clientKey, identity);
-        clientKeys.remove(identity, clientKey);
-        removeAllocation(clientAllocationKeys, clientKeyAllocations, clientKey);
+        ClientIdentityEntry entry = clients.get(clientKey);
+        if (entry == null || entry.identity.userId() != userId) return;
+        if (--entry.references == 0) clients.remove(clientKey, entry);
     }
 
     public long positionKey(long userId, String positionKey) {
@@ -268,6 +265,11 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
         return dictionaryVersion;
     }
 
+    public int clientIdentityCount() {
+        assertOwner();
+        return clients.size();
+    }
+
     RuntimeFactFrame.FactIdentitySlice liveFactIdentitySlice() {
         return liveFactIdentitySlice;
     }
@@ -282,6 +284,8 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
 
     public Snapshot snapshot() {
         assertOwner();
+        Map<ClientIdentity, Long> clientKeys = new HashMap<>(clients.size());
+        clients.forEach((key, entry) -> clientKeys.put(entry.identity, key));
         return new Snapshot(assetIds, symbolIds, clientKeys, positionKeys,
                 nextAssetId, nextSymbolId, clientKeys.size() + 1L, positionKeys.size() + 1L);
     }
@@ -339,8 +343,7 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
             registry.symbols = storeIdentity(registry.symbols, id, name);
         });
         snapshot.clientKeys().forEach((identity, key) -> {
-            registry.clientKeys.put(identity, key);
-            registry.clients.put(key, identity);
+            registry.clients.put(key, new ClientIdentityEntry(identity));
         });
         snapshot.positionKeys().forEach((identity, key) -> {
             registry.positionKeys.put(identity, key);
@@ -348,7 +351,6 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
         });
         registry.nextAssetId = snapshot.nextAssetId();
         registry.nextSymbolId = snapshot.nextSymbolId();
-        registry.nextClientKey = snapshot.nextClientKey();
         registry.nextPositionKey = snapshot.nextPositionKey();
         registry.dictionaryVersion = Math.addExact(
                 Math.addExact(snapshot.nextAssetId(), snapshot.nextSymbolId()),
@@ -384,6 +386,15 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
             if (key < 0 || (key == 0 && allocated)) {
                 throw new IllegalArgumentException("invalid prepared client key");
             }
+        }
+    }
+
+    private static final class ClientIdentityEntry {
+        private final ClientIdentity identity;
+        private long references = 1;
+
+        private ClientIdentityEntry(ClientIdentity identity) {
+            this.identity = identity;
         }
     }
 

@@ -54,12 +54,6 @@ public final class RuntimeFactFrame implements RuntimeFactView {
         void triggerOrder(CoreTriggerOrderState value);
     }
 
-    public interface IdentityReleaseConsumer {
-        void clientOrder(long userId, long clientKey, Long afterOrderId);
-        void position(long positionKey, PositionRuntime after);
-        void riskSnapshot(long riskKey, RiskSnapshotRuntime after);
-    }
-
     private final ProductLine productLine;
     private final long previousSequence;
     private final long sequence;
@@ -192,16 +186,6 @@ public final class RuntimeFactFrame implements RuntimeFactView {
             group.liquidations.forEach(change -> consumer.liquidation(change.after));
             group.algoOrders.forEach(change -> consumer.algoOrder(change.after));
             group.triggerOrders.forEach(change -> consumer.triggerOrder(change.after));
-        }
-    }
-
-    void visitIdentityReleases(IdentityReleaseConsumer consumer) {
-        Objects.requireNonNull(consumer, "identity release consumer");
-        for (AccountLaneOwnerGroup group : accountLaneGroups) {
-            group.clientOrders.forEach(change ->
-                    consumer.clientOrder(change.key.userId(), change.key.clientKey(), change.afterOrderId));
-            group.positions.forEach(change -> consumer.position(change.positionKey, change.after));
-            group.riskSnapshots.forEach(change -> consumer.riskSnapshot(change.riskKey, change.after));
         }
     }
 
@@ -1359,17 +1343,6 @@ public final class RuntimeFactFrame implements RuntimeFactView {
                 lane.liquidations.forEachChanged((key, before, after) -> consumer.liquidation(after));
                 lane.algoOrders.forEachChanged((key, before, after) -> consumer.algoOrder(after));
                 lane.triggerOrders.forEachChanged((key, before, after) -> consumer.triggerOrder(after));
-            }
-        }
-
-        void visitIdentityReleases(IdentityReleaseConsumer consumer) {
-            Objects.requireNonNull(consumer, "identity release consumer");
-            for (LaneChanges lane : lanes) {
-                if (lane == null || !lane.hasChanges()) continue;
-                lane.clientOrders.forEachChanged((key, before, after) ->
-                        consumer.clientOrder(key.userId(), key.clientKey(), after));
-                lane.positions.forEachChanged((key, before, after) -> consumer.position(key, after));
-                lane.riskSnapshots.forEachChanged((key, before, after) -> consumer.riskSnapshot(key, after));
             }
         }
 

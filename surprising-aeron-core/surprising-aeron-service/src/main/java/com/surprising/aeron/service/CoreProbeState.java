@@ -99,8 +99,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
-public final class CoreProbeState implements AutoCloseable,
-        com.surprising.aeron.service.state.RuntimeFactFrame.IdentityReleaseConsumer {
+public final class CoreProbeState implements AutoCloseable {
     @FunctionalInterface
     interface CommitFaultInjector {
         void inject(String phase);
@@ -2073,6 +2072,7 @@ public final class CoreProbeState implements AutoCloseable,
             putPendingMatching(pending);
             laneCommandContexts.required(sequence).rejectMatching(resultCode);
             pendingMatching.completeSubmission(sequence);
+            signalPendingMatchingReady(sequence);
             appliedCommandCount = sequence;
             recordSourceSequence(sourceKey, message.header().sourceSequence());
             long stateHash = stateHash(cachedBusinessStateHash, message.header().commandId(),
@@ -3250,7 +3250,7 @@ public final class CoreProbeState implements AutoCloseable,
                     if (matchingResult.accepted()) {
                         var cancelEvent = runtimePlaceOrderState.dispatchCancel(
                                 sequence, pending.command().header().userId(), command.orderId(),
-                                clusterTimestamp, clusterPosition);
+                                clusterTimestamp, clusterPosition, runtimePlaceOrderIdentities);
                         pending.cancel(cancelEvent, applyStartNanos);
                         suspendMatchingCommitContext(pending);
                         return null;
@@ -4454,6 +4454,10 @@ public final class CoreProbeState implements AutoCloseable,
         return terminalRetention.tombstoneCount();
     }
 
+    int runtimeClientIdentityCount() {
+        return runtimePlaceOrderIdentities.clientIdentityCount();
+    }
+
     TerminalStateRetention terminalRetention() {
         return terminalRetention;
     }
@@ -5458,30 +5462,6 @@ public final class CoreProbeState implements AutoCloseable,
             } finally {
                 active = false;
             }
-        }
-    }
-
-    @Override
-    public void clientOrder(long userId, long clientKey, Long afterOrderId) {
-        if (afterOrderId == null && runtimePlaceOrderState.orderIdByClient(userId, clientKey) == null) {
-            runtimePlaceOrderIdentities.releaseClientKey(userId, clientKey);
-        }
-    }
-
-    @Override
-    public void position(long positionKey, com.surprising.aeron.service.state.PositionRuntime after) {
-        releaseRetiredPositionIdentity(positionKey, after);
-    }
-
-    @Override
-    public void riskSnapshot(long riskKey, com.surprising.aeron.service.state.RiskSnapshotRuntime after) {
-        releaseRetiredPositionIdentity(riskKey, after);
-    }
-
-    private void releaseRetiredPositionIdentity(long positionKey, Object after) {
-        if (after == null && runtimePlaceOrderState.position(positionKey) == null
-                && runtimePlaceOrderState.riskSnapshot(positionKey) == null) {
-            runtimePlaceOrderIdentities.releasePositionKey(positionKey);
         }
     }
 

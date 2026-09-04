@@ -36,6 +36,39 @@ import org.junit.jupiter.params.provider.MethodSource;
 class CoreMatchingStateTest {
 
     @Test
+    void inFlightSynchronousRejectionIsPublishedAsReadyAndDoesNotBlockThePendingHead() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+            applyInstrument(state);
+            apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
+            apply(state, 2, 22, CoreMessageType.ADJUST_BALANCE,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
+            CoreMessage first = message(state, 3, 11, CoreMessageType.PLACE_ORDER,
+                    place(101, CoreOrderSide.SELL, 100, 1,
+                            ReservationKind.DERIVATIVE_MARGIN, "USDT", 100));
+            assertThat(state.apply(first).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+
+            CoreMessage stale = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PLACE_ORDER,
+                    UUID.randomUUID(), state.productLine(), CommandSource.GATEWAY, 77, 4, 22,
+                    6_001, 4), place(202, CoreOrderSide.BUY, 100, 1,
+                    ReservationKind.DERIVATIVE_MARGIN, "USDT", 100));
+            assertThat(state.apply(stale).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+
+            CoreResponse firstCompleted = state.completeMatchingSynchronously(
+                    state.matchingSequence(first.header().commandId()), 6_001, 4);
+            assertThat(firstCompleted).isNotNull();
+            CoreResponse[] rejected = new CoreResponse[1];
+            int completed = state.commitReadyMatching(1, 6_001, 4, true,
+                    (sequence, response) -> rejected[0] = response);
+
+            assertThat(completed).isOne();
+            assertThat(rejected[0]).isNotNull();
+            assertThat(rejected[0].resultCode()).isEqualTo(CoreResultCode.STALE_MARK_PRICE);
+            assertThat(state.pendingMatchingCount()).isZero();
+        }
+    }
+
+    @Test
     void inFlightIdempotencyUsesPendingIndexWithoutPollutingTerminalResultLedger() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applyInstrument(state);
@@ -88,8 +121,16 @@ class CoreMatchingStateTest {
             CoreResponse completed = drainMatching(state, pending, crossing);
             assertThat(completed.status()).isEqualTo(ResponseStatus.APPLIED);
 
-            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.CANCELED);
-            assertThat(state.tradingState().order(202).executedQuantitySteps()).isEqualTo(2);
+            assertThat(state.tradingState().order(202)).isNull();
+            assertThat(state.runtimeClientIdentityCount()).isZero();
+            assertThat(state.terminalRetention().containsOrder(202, 8, "client-202")).isTrue();
+            CoreMessage duplicateClientId = message(state, 5, 8, CoreMessageType.PLACE_ORDER,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(
+                            203, "BTC-USDT", 1, CoreOrderSide.BUY, 100, 1, false,
+                            com.surprising.aeron.protocol.CoreMarginMode.CROSS,
+                            com.surprising.aeron.protocol.CorePositionSide.NET,
+                            CoreOrderType.LIMIT, CoreTimeInForce.IOC, false, "client-202")));
+            assertThat(state.apply(duplicateClientId).status()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(state.tradingState().user(8).balances().get("USDT").availableUnits()).isEqualTo(300);
             assertThat(state.tradingState().user(8).balances().get("USDT").lockedUnits()).isZero();
             assertThat(state.tradingState().user(8).totalUnits("BTC")).isEqualTo(2);
@@ -649,12 +690,14 @@ class CoreMatchingStateTest {
 
             assertThat(state.tradingState().orders().values())
                     .noneMatch(order -> order.status() == CoreOrderStatus.OPEN);
-            assertThat(state.tradingState().order(101).status()).isEqualTo(CoreOrderStatus.FILLED);
-            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.CANCELED);
-            assertThat(state.tradingState().order(203).status()).isEqualTo(CoreOrderStatus.FILLED);
+            assertThat(state.tradingState().order(101)).isNull();
+            assertThat(state.tradingState().order(202)).isNull();
+            assertThat(state.tradingState().order(203)).isNull();
+            assertThat(state.terminalRetention().containsOrder(101, 11, "")).isTrue();
+            assertThat(state.terminalRetention().containsOrder(202, 22, "")).isTrue();
+            assertThat(state.terminalRetention().containsOrder(203, 22, "")).isTrue();
             try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
-                assertThat(restored.tradingState().orders().values())
-                        .noneMatch(order -> order.status() == CoreOrderStatus.OPEN);
+                assertThat(restored.tradingState().orders()).isEmpty();
             }
         }
     }

@@ -38,4 +38,19 @@ class RuntimeIdentityRegistryTest {
         assertThat(identities.findPositionKey(1003, "ETH-USDT:NET")).isNull();
         assertThat(identities.positionCheckpoint()).isEqualTo(checkpoint);
     }
+
+    @Test
+    void clientIdentityReferenceProtectsAReusedKeyFromAnOlderTerminalRelease() {
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        var first = identities.prepareClientKey(1001, "client-1");
+        var reused = identities.prepareClientKey(1001, "client-1");
+
+        identities.releaseClientKey(1001, first.key());
+
+        assertThat(identities.clientIdentityCount()).isOne();
+        assertThat(identities.clientOrderId(1001, reused.key())).isEqualTo("client-1");
+
+        identities.rollbackPreparedClientKey(1001, "client-1", reused);
+        assertThat(identities.clientIdentityCount()).isZero();
+    }
 }

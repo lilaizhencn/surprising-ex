@@ -104,6 +104,7 @@ public final class LaneReplaceEvent implements SettlementLaneWorker.Command {
     public int laneId() { return laneId; }
     public long requiredLaneMask() { return 1L << laneId; }
     public boolean complete() { return (boolean) COMPLETED.getAcquire(this); }
+    RuntimeIdentityRegistry identities() { return identities; }
 
     TradingRuntimeState.MatcherSettlementChanges takeChanges() {
         if (!complete() || changes == null) throw new IllegalStateException("replace event is incomplete");
