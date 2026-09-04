@@ -393,7 +393,7 @@ class ClusterFundsReconcileTest {
         for (int index = 1; index <= count; index++) {
             values.add(new CoreLiquidationWorkView.Resolution(index, 1, "BTC-USDT", "USDT",
                     CoreMarginMode.CROSS, CorePositionSide.NET, 1, 1, 1, 1,
-                    purpose));
+                    purpose == CoreLiquidationWorkView.Purpose.INSURANCE ? 1 : 0, purpose));
         }
         return values;
     }

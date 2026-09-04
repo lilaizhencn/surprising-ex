@@ -51,4 +51,16 @@ class CoreLiquidationWorkCodecTest {
         assertThat(CoreLiquidationProgressCodec.decode(CoreLiquidationProgressCodec.encode(continuing)))
                 .isEqualTo(continuing);
     }
+
+    @Test
+    void roundTripsDeterministicInsuranceRecommendation() {
+        var resolution = new CoreLiquidationWorkView.Resolution(
+                7, 11, "BTC-USDT", "USDT", CoreMarginMode.ISOLATED, CorePositionSide.LONG,
+                3, 19, 5, 100, 37, CoreLiquidationWorkView.Purpose.INSURANCE);
+        var work = new CoreLiquidationWorkView(ProductLine.LINEAR_PERPETUAL,
+                7, true, null, List.of(), List.of(resolution));
+
+        assertThat(CoreLiquidationWorkCodec.decodeWork(CoreLiquidationWorkCodec.encodeWork(work)))
+                .isEqualTo(work);
+    }
 }

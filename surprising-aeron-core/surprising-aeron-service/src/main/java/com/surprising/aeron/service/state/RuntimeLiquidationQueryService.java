@@ -40,7 +40,8 @@ public final class RuntimeLiquidationQueryService {
 
     public static CoreLiquidationWorkView work(
             TradingRuntimeState runtime, RuntimeIdentityRegistry identities, ProductLine productLine,
-            CoreLiquidationWorkView.Query query, Iterable<Long> candidateIds) {
+            CoreLiquidationWorkView.Query query, Iterable<Long> candidateIds,
+            Iterable<Long> allCandidateIds) {
         ArrayList<CoreLiquidationActionView> actions = new ArrayList<>();
         ArrayList<CoreLiquidationWorkView.Resolution> resolutions = new ArrayList<>();
         CoreRiskScanContinuation continuation = continuation(runtime, identities, query.purpose());
@@ -49,6 +50,8 @@ public final class RuntimeLiquidationQueryService {
                 productLine, nextCursor, false, continuation, actions, resolutions)).length;
         int scanned = 0;
         boolean complete = true;
+        java.util.Map<Long, Long> insuranceAllocations = query.purpose() == CoreLiquidationWorkView.Purpose.INSURANCE
+                ? InsuranceAllocationPolicy.allocations(runtime, identities, allCandidateIds) : java.util.Map.of();
         for (Long liquidationId : candidateIds) {
             if (liquidationId == null || liquidationId <= query.afterLiquidationId()) continue;
             if (++scanned > RuntimeOperationalQueryService.MAX_INDEX_SCAN) {
@@ -79,7 +82,8 @@ public final class RuntimeLiquidationQueryService {
                 CoreInstrumentState instrument = runtime.instrument(symbol);
                 resolution = new CoreLiquidationWorkView.Resolution(value.liquidationId(), value.userId(), symbol,
                         instrument.settleAsset(), value.marginMode(), value.positionSide(), value.instrumentVersion(),
-                        value.triggerPriceSequence(), value.signedQuantitySteps(), value.deficitUnits(), query.purpose());
+                        value.triggerPriceSequence(), value.signedQuantitySteps(), value.deficitUnits(),
+                        insuranceAllocations.getOrDefault(value.liquidationId(), 0L), query.purpose());
                 resolutions.add(resolution);
             }
             long candidateCursor = value.liquidationId();

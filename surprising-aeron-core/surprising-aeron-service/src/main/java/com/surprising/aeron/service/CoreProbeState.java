@@ -671,7 +671,8 @@ public final class CoreProbeState implements AutoCloseable {
                 java.util.NavigableSet<Long> candidates = liquidationIndex.activeIds()
                         .tailSet(query.afterLiquidationId(), false);
                 var work = com.surprising.aeron.service.state.RuntimeLiquidationQueryService.work(
-                        runtimePlaceOrderState, runtimePlaceOrderIdentities, productLine, query, candidates);
+                        runtimePlaceOrderState, runtimePlaceOrderIdentities, productLine, query, candidates,
+                        liquidationIndex.activeIds());
                 return new CoreResponse(ResponseStatus.OK, appliedCommandCount, cachedBusinessStateHash,
                         com.surprising.aeron.protocol.CoreLiquidationWorkCodec.encodeWork(work));
             } catch (com.surprising.aeron.service.state.RuntimeOperationalQueryService.QueryTooLargeException exception) {
@@ -4963,7 +4964,8 @@ public final class CoreProbeState implements AutoCloseable {
             case RESOLVE_LIQUIDATION -> {
                 var command = TradingCommandCodec.decodeResolveLiquidation(message.payloadUnsafe());
                 RuntimePerpetualLiquidationProcessor.applyResolutionRuntime(
-                        command, runtimePlaceOrderState, runtimePlaceOrderIdentities);
+                        command, runtimePlaceOrderState, runtimePlaceOrderIdentities,
+                        liquidationIndex.activeIds());
                 refreshSnapshotProjection();
             }
             case CONTINUE_RISK_SCAN -> {

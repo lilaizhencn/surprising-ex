@@ -93,6 +93,44 @@ public class LinearPerpetualCoreBenchmark {
     }
 
     @Benchmark
+    public long multiUserLiquidationPlanning(RiskScanState state) {
+        return state.scenario.run();
+    }
+
+    @Benchmark
+    public long liquidationManyOrderCancellation(LiquidationCancellationState state) {
+        return state.scenario.run();
+    }
+
+    @Benchmark
+    @BenchmarkMode(Mode.Throughput)
+    @OutputTimeUnit(TimeUnit.SECONDS)
+    public long liquidationBurst256(LiquidationBurstState state, MixedWorkloadCounters counters) {
+        long result = state.scenario.run();
+        recordCounters(state.scenario, counters);
+        return result;
+    }
+
+    @Benchmark
+    public long insuranceShortfallAllocation(InsuranceShortfallQueryState state) {
+        return state.scenario.run();
+    }
+
+    @Benchmark
+    public long insuranceToAdl(InsuranceToAdlState state) {
+        return state.scenario.run();
+    }
+
+    @Benchmark
+    @BenchmarkMode(Mode.Throughput)
+    @OutputTimeUnit(TimeUnit.SECONDS)
+    public long liquidationWithTrading(LiquidationWithTradingState state, MixedWorkloadCounters counters) {
+        long result = state.scenario.run();
+        recordCounters(state.scenario, counters);
+        return result;
+    }
+
+    @Benchmark
     public long snapshotRecovery(SnapshotRecoveryState state) {
         return state.scenario.run();
     }
@@ -413,6 +451,73 @@ public class LinearPerpetualCoreBenchmark {
         @Override
         LinearPerpetualBenchmarkSupport.Scenario createScenario() {
             return LinearPerpetualBenchmarkSupport.liquidationExecution(accountLanes);
+        }
+    }
+
+    @State(Scope.Thread)
+    public static class LiquidationCancellationState extends InvocationState {
+        @Param("256")
+        public int openOrders;
+
+        @Override
+        LinearPerpetualBenchmarkSupport.Scenario createScenario() {
+            return LinearPerpetualBenchmarkSupport.liquidationBatchExecution(accountLanes, 1, openOrders);
+        }
+    }
+
+    @State(Scope.Thread)
+    public static class LiquidationBurstState extends InvocationState {
+        @Override
+        LinearPerpetualBenchmarkSupport.Scenario createScenario() {
+            return LinearPerpetualBenchmarkSupport.liquidationBatchExecution(accountLanes, 256, 0);
+        }
+    }
+
+    @State(Scope.Thread)
+    public static class InsuranceShortfallQueryState extends InvocationState {
+        @Override
+        LinearPerpetualBenchmarkSupport.Scenario createScenario() {
+            return LinearPerpetualBenchmarkSupport.insuranceShortfall(accountLanes, 256, false);
+        }
+    }
+
+    @State(Scope.Thread)
+    public static class InsuranceToAdlState extends InvocationState {
+        @Override
+        LinearPerpetualBenchmarkSupport.Scenario createScenario() {
+            return LinearPerpetualBenchmarkSupport.insuranceShortfall(accountLanes, 256, true);
+        }
+    }
+
+    @State(Scope.Thread)
+    public static class LiquidationWithTradingState extends InvocationState {
+        @Param("1000")
+        public int activeUsers;
+
+        @Param("256")
+        public int symbols;
+
+        @Param("1")
+        public int hftRounds;
+
+        @Param("20")
+        public int hftBatchSize;
+
+        @Param("256")
+        public int maxInFlight;
+
+        private LinearPerpetualMixedWorkload.Template template;
+
+        @Setup(Level.Trial)
+        public void setUpTrial() {
+            LinearPerpetualBenchmarkSupport.configureAccountLanes(accountLanes);
+            template = LinearPerpetualMixedWorkload.template(accountLanes, activeUsers, symbols);
+        }
+
+        @Override
+        LinearPerpetualBenchmarkSupport.Scenario createScenario() {
+            return LinearPerpetualMixedWorkload.productionScenario(
+                    template, hftRounds, hftBatchSize, maxInFlight);
         }
     }
 

@@ -1839,18 +1839,29 @@ public final class TradingCoreReducer {
                     throw new CoreStateRejectedException("LIQUIDATION_STATE_CONFLICT",
                             "insurance resolution requires insurance state");
                 }
-                if (command.coveredUnits() <= 0 || command.coveredUnits() > liquidation.deficitUnits()) {
+                if (command.coveredUnits() > liquidation.deficitUnits()) {
                     throw new CoreStateRejectedException("INSURANCE_COVER_EXCEEDS_DEFICIT",
                             "insurance coverage must be within liquidation deficit");
                 }
                 long available = treasury.insuranceBalances().getOrDefault(instrument.settleAsset(), 0L);
+                if (!InsuranceAllocationPolicy.isNext(state, liquidation.liquidationId())) {
+                    throw new CoreStateRejectedException("INSURANCE_RESOLUTION_ORDER_MISMATCH",
+                            "insurance claims must resolve in deterministic priority order");
+                }
+                long expectedCoverage = InsuranceAllocationPolicy.expectedCoverage(state, liquidation.liquidationId());
+                if (command.coveredUnits() != expectedCoverage) {
+                    throw new CoreStateRejectedException("INSURANCE_ALLOCATION_MISMATCH",
+                            "insurance coverage does not match deterministic allocation");
+                }
                 if (command.coveredUnits() > available) {
                     throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
                             "insurance fund balance is insufficient");
                 }
-                treasury = treasury.adjustInsurance(instrument.settleAsset(),
-                        Math.negateExact(command.coveredUnits())).adjustDeficit(
-                        instrument.settleAsset(), Math.negateExact(command.coveredUnits()));
+                if (command.coveredUnits() != 0) {
+                    treasury = treasury.adjustInsurance(instrument.settleAsset(),
+                            Math.negateExact(command.coveredUnits())).adjustDeficit(
+                            instrument.settleAsset(), Math.negateExact(command.coveredUnits()));
+                }
                 nextStatus = command.coveredUnits() == liquidation.deficitUnits()
                         ? CoreLiquidationState.Status.COMPLETED : CoreLiquidationState.Status.ADL_REQUIRED;
             }

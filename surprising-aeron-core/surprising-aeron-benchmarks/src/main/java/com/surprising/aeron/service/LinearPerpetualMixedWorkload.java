@@ -55,7 +55,7 @@ final class LinearPerpetualMixedWorkload {
     static final int DEFAULT_HFT_BATCH_SIZE = 20;
     static final int HEAVY_WORK_BATCH_SIZE = 64;
     static final int OPEN_ORDER_USER_CAP = 128;
-    private static final int MATCHING_DRAIN_THRESHOLD = Math.max(1, CoreProbeState.MAX_PENDING_MATCHING / 2);
+    private static final int MATCHING_DRAIN_THRESHOLD = 256;
     private static final String SETTLE_ASSET = "USDT";
     private static final long ENTRY_PRICE = 100;
     private static final long SAFE_MARK = 99;
@@ -239,20 +239,32 @@ final class LinearPerpetualMixedWorkload {
     }
 
     static Scenario productionScenario(Template template, int hftRounds, int hftBatchSize) {
-        return scenario(template, hftRounds, hftBatchSize, false);
+        return scenario(template, hftRounds, hftBatchSize, false, MATCHING_DRAIN_THRESHOLD);
+    }
+
+    static Scenario productionScenario(Template template, int hftRounds, int hftBatchSize, int maxInFlight) {
+        return scenario(template, hftRounds, hftBatchSize, false, maxInFlight);
     }
 
     static StatefulScenario scaleScenario(Template template, int hftRounds, int hftBatchSize) {
-        return scenario(template, hftRounds, hftBatchSize, false);
+        return scenario(template, hftRounds, hftBatchSize, false, MATCHING_DRAIN_THRESHOLD);
     }
 
     private static StatefulScenario scenario(Template template, int hftRounds, int hftBatchSize,
                                              boolean completeHeavyCycles) {
+        return scenario(template, hftRounds, hftBatchSize, completeHeavyCycles, MATCHING_DRAIN_THRESHOLD);
+    }
+
+    private static StatefulScenario scenario(Template template, int hftRounds, int hftBatchSize,
+                                             boolean completeHeavyCycles, int maxInFlight) {
         if (hftRounds < 1 || hftRounds > 10_000) {
             throw new IllegalArgumentException("hftRounds must be in [1,10000]");
         }
         if (hftBatchSize < 1 || hftBatchSize > PlaceOrderBatchCommand.MAX_ORDERS) {
             throw new IllegalArgumentException("hftBatchSize exceeds the order batch protocol limit");
+        }
+        if (maxInFlight != 256) {
+            throw new IllegalArgumentException("performance validation requires exactly 256 in-flight");
         }
         Harness harness = Harness.restore(template.snapshot(), !completeHeavyCycles);
         return new StatefulScenario() {
@@ -261,6 +273,7 @@ final class LinearPerpetualMixedWorkload {
             private long terminalOperations;
             private long acceptedCoreMessages;
             private long terminalCoreMessages;
+            private long terminalTrades;
             private long maxBacklog;
             private long laneOperations;
             private long[] laneOperationsByType = new long[CoreLaneMetrics.OPERATION_TYPE_COUNT];
@@ -283,11 +296,12 @@ final class LinearPerpetualMixedWorkload {
                 long terminalBefore = harness.terminalMessages();
                 long acceptedCoreBefore = harness.acceptedCoreMessages();
                 long terminalCoreBefore = harness.terminalCoreMessages();
+                long terminalTradesBefore = harness.terminalTradeCount();
                 long[] laneOperationsBefore = completedLaneOperations(harness.state());
                 harness.beginBusinessLatencies(100_000);
                 for (int round = 0; round < hftRounds; round++) {
                     int[] tradingSymbols = tradingSymbolIndices(template.scaleConfig(), round);
-                    executeHftBurstsPipelined(harness, template, hftBatchSize, tradingSymbols);
+                    executeHftBurstsPipelined(harness, template, hftBatchSize, tradingSymbols, maxInFlight);
                     int[] lifecycleSymbols = template.scaleConfig().trafficProfile()
                             == LinearPerpetualTrafficProfile.MARK_PRICE_STORM
                             ? allIndices(template.symbols().size()) : tradingSymbols;
@@ -345,6 +359,7 @@ final class LinearPerpetualMixedWorkload {
                         harness.acceptedCoreMessages(), acceptedCoreBefore);
                 terminalCoreMessages = Math.subtractExact(
                         harness.terminalCoreMessages(), terminalCoreBefore);
+                terminalTrades = Math.subtractExact(harness.terminalTradeCount(), terminalTradesBefore);
                 maxBacklog = harness.maxMatchingBacklog();
                 long[] laneOperationsAfter = completedLaneOperations(harness.state());
                 laneOperations = 0;
@@ -435,6 +450,11 @@ final class LinearPerpetualMixedWorkload {
             @Override
             public long terminalCoreMessages() {
                 return terminalCoreMessages;
+            }
+
+            @Override
+            public long terminalTrades() {
+                return terminalTrades;
             }
 
             @Override
@@ -558,7 +578,7 @@ final class LinearPerpetualMixedWorkload {
     }
 
     private static void executeHftBurstsPipelined(Harness harness, Template template, int hftBatchSize,
-                                                  int[] symbolIndices) {
+                                                  int[] symbolIndices, int maxInFlight) {
         List<List<Long>> quoteOrderIds = new ArrayList<>(symbolIndices.length);
         for (int index : symbolIndices) {
             List<Long> symbolOrderIds = new ArrayList<>(hftBatchSize);
@@ -572,7 +592,8 @@ final class LinearPerpetualMixedWorkload {
             quoteOrderIds.add(List.copyOf(symbolOrderIds));
             submitPipelined(harness, harness.batchCommand(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY,
                     template.hftMakers().get(index),
-                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)), orders.size()));
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)), orders.size()),
+                    maxInFlight);
         }
         harness.drainSubmitted();
         for (int cursor = 0; cursor < symbolIndices.length; cursor++) {
@@ -581,7 +602,8 @@ final class LinearPerpetualMixedWorkload {
                     .map(CancelOrderCommand::new).toList();
             submitPipelined(harness, harness.batchCommand(CoreMessageType.CANCEL_ORDER_BATCH, CommandSource.GATEWAY,
                     template.hftMakers().get(index),
-                    TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(orders)), orders.size()));
+                    TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(orders)), orders.size()),
+                    maxInFlight);
         }
         harness.drainSubmitted();
         long[] sellLiquidityOrderIds = new long[symbolIndices.length];
@@ -591,7 +613,7 @@ final class LinearPerpetualMixedWorkload {
             sellLiquidityOrderIds[cursor] = orderId;
             submitPipelined(harness, harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY,
                     template.hftMakers().get(index), order(orderId, template.symbols().get(index),
-                            CoreOrderSide.SELL, 101, hftBatchSize * 2L, CoreTimeInForce.GTC)));
+                            CoreOrderSide.SELL, 101, hftBatchSize * 2L, CoreTimeInForce.GTC)), maxInFlight);
         }
         harness.drainSubmitted();
         for (int index : symbolIndices) {
@@ -602,14 +624,15 @@ final class LinearPerpetualMixedWorkload {
             }
             submitPipelined(harness, harness.batchCommand(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY,
                     template.hftTakers().get(index),
-                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)), orders.size()));
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)), orders.size()),
+                    maxInFlight);
         }
         harness.drainSubmitted();
         for (int cursor = 0; cursor < symbolIndices.length; cursor++) {
             int index = symbolIndices[cursor];
             submitPipelined(harness, harness.command(CoreMessageType.CANCEL_ORDER, CommandSource.GATEWAY,
                     template.hftMakers().get(index), TradingCommandCodec.encodeCancelOrder(
-                            new CancelOrderCommand(sellLiquidityOrderIds[cursor]))));
+                            new CancelOrderCommand(sellLiquidityOrderIds[cursor]))), maxInFlight);
         }
         harness.drainSubmitted();
         long[] buyLiquidityOrderIds = new long[symbolIndices.length];
@@ -619,14 +642,14 @@ final class LinearPerpetualMixedWorkload {
             buyLiquidityOrderIds[cursor] = orderId;
             submitPipelined(harness, harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY,
                     template.hftMakers().get(index), order(orderId, template.symbols().get(index),
-                            CoreOrderSide.BUY, 99, hftBatchSize * 2L, CoreTimeInForce.GTC)));
+                            CoreOrderSide.BUY, 99, hftBatchSize * 2L, CoreTimeInForce.GTC)), maxInFlight);
         }
         harness.drainSubmitted();
         for (int cursor = 0; cursor < symbolIndices.length; cursor++) {
             int index = symbolIndices[cursor];
             submitPipelined(harness, harness.command(CoreMessageType.CANCEL_ORDER, CommandSource.GATEWAY,
                     template.hftMakers().get(index), TradingCommandCodec.encodeCancelOrder(
-                            new CancelOrderCommand(buyLiquidityOrderIds[cursor]))));
+                            new CancelOrderCommand(buyLiquidityOrderIds[cursor]))), maxInFlight);
         }
         harness.drainSubmitted();
         for (int index : symbolIndices) {
@@ -637,14 +660,15 @@ final class LinearPerpetualMixedWorkload {
             }
             submitPipelined(harness, harness.batchCommand(CoreMessageType.PLACE_ORDER_BATCH, CommandSource.GATEWAY,
                     template.hftTakers().get(index),
-                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)), orders.size()));
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)), orders.size()),
+                    maxInFlight);
         }
         harness.drainSubmitted();
     }
 
-    private static void submitPipelined(Harness harness, CoreMessage command) {
+    private static void submitPipelined(Harness harness, CoreMessage command, int maxInFlight) {
         harness.submit(command);
-        if (harness.state().pendingMatchingCount() >= MATCHING_DRAIN_THRESHOLD) harness.drainSubmitted();
+        if (harness.pendingSubmissions() >= maxInFlight) harness.drainSubmitted();
     }
 
     private static void exerciseLifecycle(Harness harness, Template template, int index,

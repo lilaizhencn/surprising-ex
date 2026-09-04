@@ -119,6 +119,19 @@ business ops、Core messages 或 fills 重复相加。
 Core messages、fills/trades、backlog、尾延迟及资金不变量；内部 owner commit 分数只用于定位
 seal/journal/index/hash/projection/encode/snapshot 的阶段容量，不能替代 API TPS。
 
+强平专项由 `LinearPerpetualCoreBenchmark` 的六个真实状态机场景覆盖：
+
+- `multiUserLiquidationPlanning`：同一标记价批量触发多用户爆仓并完成有界 Lane risk continuation；
+- `liquidationManyOrderCancellation`：一个待强平持仓带 256 个合法 reduce-only 活动订单，测量 cursor 撤单及结算；
+- `liquidationBurst256`：每个 invocation 提交一个原生 `EXECUTE_LIQUIDATION_BATCH`，持续处理 256 个强平 business item；
+- `insuranceShortfallAllocation`：256 个未决 deficit 共享不足的保险基金，查询确定性建议份额；
+- `insuranceToAdl`：按建议消耗保险份额后执行真实 `EXECUTE_ADL`，要求 deficit 清零；
+- `liquidationWithTrading`：1,000 活跃用户、256 活跃 symbol 的普通挂撤/成交流与完整强平、保险、ADL 生命周期混合运行，
+  驱动端严格限制 256 个 matching Core message 在途。
+
+这些 JMH teardown 均验证资金/订单/强平终态和完成态 snapshot 恢复。`liquidationBurst256` 的主分数是 batch/s，
+必须使用 AuxCounters 的 `terminalBusinessOperations` 作为展开后的强平 items/s；不得把 batch/s 当成业务吞吐。
+
 `tests` 模式覆盖 typed fact frame/service 财务矩阵、六产品线 V17
 `SharedProductLineSnapshotContractTest`、protocol V10、exporter（包含 JDBC/Postgres projector）、
 gateway fanout consumers、market-data `CoreMarketDataProjectionTest` 和 benchmark 小规模真实场景。

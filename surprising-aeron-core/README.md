@@ -365,5 +365,9 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
 - Risk continuation 按确定性的 `accountLaneId` 升序、Lane 内 `userId` 升序推进；默认64 work-unit上限覆盖实际持仓和预留遍历，
   不是用户数量。当前 Lane 在一次 Lane task 内连续处理本 Lane 的用户和单用户分页，owner 只在 Lane completion 边界更新 cursor
   与全局 liquidationId，不再逐用户同步往返；中途 cursor 由 trading snapshot 和 Cluster Log 恢复。
+- 同一结算资产出现多个 `INSURANCE_REQUIRED` 时，保险基金按当前未决 deficit 比例生成确定性建议份额；除不尽的最小单位按
+  `triggerPriceSequence、userId、symbol、positionSide、liquidationId` 分配。`RESOLVE_LIQUIDATION` 只能按该优先级逐项提交，
+  Core 会按当前权威状态重算并校验 `recommendedCoveredUnits`，禁止调用方抢占后续用户份额；余额耗尽时允许 0 覆盖并确定性转入 ADL。
+  该扫描、排序和大整数除法只位于 insurance 查询/结算边界，不进入 matcher、Account Lane 成交或 risk scan 热路径。
 - 每个 matcher shard 固定为一个同步 engine；Account Lane 是固定线程拥有的执行边界。正式性能验收仍固定单 shard，
   wait strategy 只控制空闲等待，不改变业务语义。

@@ -21,18 +21,22 @@ import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.ExecuteLiquidationBatchAction;
 import com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand;
+import com.surprising.aeron.protocol.ExecuteAdlCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
+import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.state.CoreRiskState;
+import com.surprising.aeron.service.state.CoreLiquidationState;
 import com.surprising.aeron.service.state.LaneTopology;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.UUID;
@@ -402,6 +406,142 @@ final class LinearPerpetualBenchmarkSupport {
         };
     }
 
+    static Scenario liquidationBatchExecution(int accountLanes, int liquidationUsers, int openOrders) {
+        if (liquidationUsers < 1 || liquidationUsers > 256 || openOrders < 0 || openOrders > 256) {
+            throw new IllegalArgumentException("invalid liquidation batch benchmark scale");
+        }
+        Harness harness = positionedUsers(accountLanes, liquidationUsers, Math.max(10, openOrders));
+        List<Long> users = usersAcrossLanes(accountLanes, liquidationUsers + 1, 20_000);
+        long cancellationUser = users.get(1);
+        for (int index = 0; index < openOrders; index++) {
+            long orderId = harness.nextOrderId();
+            harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, cancellationUser,
+                    reduceOnlyOrder(orderId, 110 + index)));
+        }
+        harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
+                TradingCommandCodec.encodeApplyMarkPrice(
+                        new ApplyMarkPriceCommand(SYMBOL, 1, ADVERSE_PRICE, 2, BASE_EPOCH_MILLIS + 1))));
+        while (!harness.state.runtimeRiskScanComplete(SYMBOL)) {
+            harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN, CommandSource.OPERATIONS, 0,
+                    TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64))));
+        }
+        List<CoreLiquidationActionView> actions = harness.executionWork().actions();
+        if (actions.size() != liquidationUsers) {
+            throw new IllegalStateException("expected " + liquidationUsers + " liquidation actions, got "
+                    + actions.size());
+        }
+        List<ExecuteLiquidationBatchAction> batchActions = actions.stream()
+                .map(action -> new ExecuteLiquidationBatchAction(action.liquidationId(), action.userId(),
+                        action.symbol(), action.instrumentVersion(), action.triggerPriceSequence(),
+                        action.markPriceTicks(), action.cursorOrderId()))
+                .toList();
+        CoreMessage command = harness.command(CoreMessageType.EXECUTE_LIQUIDATION_BATCH, CommandSource.OPERATIONS,
+                0, TradingCommandCodec.encodeExecuteLiquidationBatch(new ExecuteLiquidationBatchCommand(
+                        batchActions, ExecuteLiquidationBatchCommand.MAX_CANCEL_ORDERS, 0, null, 0)));
+        return new Scenario() {
+            @Override public long run() { return harness.execute(command).stateHash(); }
+            @Override public long operations() { return actions.size(); }
+            @Override public long maxBacklog() { return harness.maxMatchingBacklog(); }
+            @Override public void verify() {
+                for (CoreLiquidationActionView action : actions) {
+                    CoreLiquidationState value = harness.state.tradingState().riskState().liquidations()
+                            .get(action.liquidationId());
+                    if (value == null || value.status() != CoreLiquidationState.Status.COMPLETED
+                            && value.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) {
+                        throw new IllegalStateException("liquidation batch did not reach a settlement boundary");
+                    }
+                }
+                verifySnapshot(harness);
+            }
+            @Override public void close() { harness.close(); }
+        };
+    }
+
+    static Scenario insuranceShortfall(int accountLanes, int liquidationUsers, boolean resolveToAdl) {
+        Harness harness = positionedUsers(accountLanes, liquidationUsers);
+        harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
+                TradingCommandCodec.encodeApplyMarkPrice(
+                        new ApplyMarkPriceCommand(SYMBOL, 1, 1, 2, BASE_EPOCH_MILLIS + 1))));
+        while (!harness.state.runtimeRiskScanComplete(SYMBOL)) {
+            harness.execute(harness.command(CoreMessageType.CONTINUE_RISK_SCAN, CommandSource.OPERATIONS, 0,
+                    TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64))));
+        }
+        List<CoreLiquidationActionView> actions = harness.executionWork().actions();
+        List<ExecuteLiquidationBatchAction> batchActions = actions.stream()
+                .map(action -> new ExecuteLiquidationBatchAction(action.liquidationId(), action.userId(),
+                        action.symbol(), action.instrumentVersion(), action.triggerPriceSequence(),
+                        action.markPriceTicks(), action.cursorOrderId()))
+                .toList();
+        harness.execute(harness.command(CoreMessageType.EXECUTE_LIQUIDATION_BATCH, CommandSource.OPERATIONS, 0,
+                TradingCommandCodec.encodeExecuteLiquidationBatch(new ExecuteLiquidationBatchCommand(
+                        batchActions, ExecuteLiquidationBatchCommand.MAX_CANCEL_ORDERS, 0, null, 0))));
+        if (!resolveToAdl) {
+            return new Scenario() {
+                private CoreLiquidationWorkView work;
+                @Override public long run() { work = harness.insuranceWork(); return work.resolutions().size(); }
+                @Override public long operations() { return liquidationUsers; }
+                @Override public void verify() {
+                    if (work == null || work.resolutions().size() != liquidationUsers
+                            || work.resolutions().stream().mapToLong(
+                                    CoreLiquidationWorkView.Resolution::recommendedCoveredUnits).sum() <= 0) {
+                        throw new IllegalStateException("insurance shortfall allocation was not produced");
+                    }
+                    verifySnapshot(harness);
+                }
+                @Override public void close() { harness.close(); }
+            };
+        }
+        CoreLiquidationWorkView.Resolution resolution = harness.insuranceWork().resolutions().stream()
+                .min(Comparator.comparingLong(CoreLiquidationWorkView.Resolution::triggerPriceSequence)
+                        .thenComparingLong(CoreLiquidationWorkView.Resolution::userId)
+                        .thenComparing(CoreLiquidationWorkView.Resolution::symbol)
+                        .thenComparingInt(value -> value.positionSide().ordinal())
+                        .thenComparingLong(CoreLiquidationWorkView.Resolution::liquidationId))
+                .orElseThrow();
+        long adlUser = usersAcrossLanes(accountLanes, liquidationUsers + 1, 20_000).getFirst();
+        var adlPosition = harness.state.tradingState().user(adlUser).positions().get(SYMBOL);
+        long residual = Math.subtractExact(
+                harness.state.tradingState().riskState().liquidations().get(resolution.liquidationId()).deficitUnits(),
+                resolution.recommendedCoveredUnits());
+        long profitPerStep = Math.subtractExact(ENTRY_PRICE, 1);
+        long closeQuantity = Math.floorDiv(Math.addExact(residual, profitPerStep - 1), profitPerStep);
+        CoreMessage resolve = harness.command(CoreMessageType.RESOLVE_LIQUIDATION, CommandSource.OPERATIONS, 0,
+                TradingCommandCodec.encodeResolveLiquidation(new ResolveLiquidationCommand(
+                        resolution.liquidationId(), ResolveLiquidationCommand.Resolution.INSURANCE,
+                        resolution.recommendedCoveredUnits())));
+        CoreMessage executeAdl = harness.command(CoreMessageType.EXECUTE_ADL, CommandSource.OPERATIONS, 0,
+                TradingCommandCodec.encodeExecuteAdl(new ExecuteAdlCommand(
+                        resolution.liquidationId(), adlUser, SYMBOL, CoreMarginMode.CROSS, CorePositionSide.NET,
+                        adlPosition.signedQuantitySteps(), adlPosition.entryPriceTicks(), 2,
+                        closeQuantity, residual)));
+        return new Scenario() {
+            @Override public long run() {
+                harness.execute(resolve);
+                return harness.execute(executeAdl).stateHash();
+            }
+            @Override public long operations() { return 2; }
+            @Override public void verify() {
+                CoreLiquidationState value = harness.state.tradingState().riskState().liquidations()
+                        .get(resolution.liquidationId());
+                if (value == null || value.status() != CoreLiquidationState.Status.COMPLETED
+                        || value.deficitUnits() != 0) {
+                    throw new IllegalStateException("insurance shortfall did not complete through ADL");
+                }
+                verifySnapshot(harness);
+            }
+            @Override public void close() { harness.close(); }
+        };
+    }
+
+    private static void verifySnapshot(Harness harness) {
+        SnapshotTemplate snapshot = harness.snapshotTemplate(harness.state.laneTopology().accountLaneCount());
+        try (CoreProbeState restored = CoreProbeState.fromSnapshot(snapshot.productLine(), snapshot.bytes())) {
+            if (restored.tradingState().businessStateHash() != snapshot.businessStateHash()) {
+                throw new IllegalStateException("liquidation benchmark snapshot recovery mismatch");
+            }
+        }
+    }
+
     static SnapshotTemplate recoveryTemplate(int accountLanes, int makerDepth) {
         try (Scenario scenario = multiLaneMatching(accountLanes, makerDepth)) {
             scenario.run();
@@ -523,19 +663,31 @@ final class LinearPerpetualBenchmarkSupport {
     }
 
     private static Harness positionedUsers(int accountLanes, int riskUsers) {
-        validateScale("riskUsers", accountLanes, riskUsers);
+        return positionedUsers(accountLanes, riskUsers, 10);
+    }
+
+    private static Harness positionedUsers(int accountLanes, int riskUsers, int positionQuantity) {
+        if (riskUsers < 1 || riskUsers > MAX_BENCHMARK_SCALE) {
+            throw new IllegalArgumentException("riskUsers must be positive and at most " + MAX_BENCHMARK_SCALE);
+        }
+        if (positionQuantity < 1 || positionQuantity > MAX_BENCHMARK_SCALE) {
+            throw new IllegalArgumentException("positionQuantity must be positive and at most "
+                    + MAX_BENCHMARK_SCALE);
+        }
         Harness harness = base(accountLanes);
         List<Long> users = usersAcrossLanes(accountLanes, riskUsers + 1, 20_000);
         long safeShort = users.getFirst();
         harness.adjust(safeShort, SAFE_BALANCE);
         harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, safeShort,
                 order(harness.nextOrderId(), CoreOrderSide.SELL, ENTRY_PRICE,
-                        Math.multiplyExact(riskUsers, 10L), CoreTimeInForce.GTC)));
+                        Math.multiplyExact(riskUsers, (long) positionQuantity), CoreTimeInForce.GTC)));
         for (int index = 1; index <= riskUsers; index++) {
             long vulnerableLong = users.get(index);
-            harness.adjust(vulnerableLong, LIQUIDATION_BALANCE);
+            harness.adjust(vulnerableLong, Math.floorDiv(
+                    Math.multiplyExact(LIQUIDATION_BALANCE, positionQuantity), 10));
             harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, vulnerableLong,
-                    order(harness.nextOrderId(), CoreOrderSide.BUY, ENTRY_PRICE, 10, CoreTimeInForce.IOC)));
+                    order(harness.nextOrderId(), CoreOrderSide.BUY, ENTRY_PRICE,
+                            positionQuantity, CoreTimeInForce.IOC)));
         }
         return harness;
     }
@@ -567,6 +719,12 @@ final class LinearPerpetualBenchmarkSupport {
         return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, SYMBOL, 1, side, price,
                 quantity, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 timeInForce, false, "jmh-" + orderId));
+    }
+
+    private static byte[] reduceOnlyOrder(long orderId, long price) {
+        return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, SYMBOL, 1,
+                CoreOrderSide.SELL, price, 1, true, CoreMarginMode.CROSS, CorePositionSide.NET,
+                CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "jmh-ro-" + orderId));
     }
 
     private static UpsertInstrumentCommand instrument() {
@@ -920,6 +1078,25 @@ final class LinearPerpetualBenchmarkSupport {
             terminalCoreMessages++;
             if (response.status() != ResponseStatus.OK) {
                 throw new IllegalStateException("liquidation work query failed: " + response.resultCode());
+            }
+            return CoreLiquidationWorkCodec.decodeWork(response.data());
+        }
+
+        CoreLiquidationWorkView insuranceWork() {
+            CoreMessage query = new CoreMessage(CoreMessageHeader.query(CoreMessageType.LIQUIDATION_WORK_QUERY,
+                    new UUID(100, sequences.clusterPosition++), productLine(),
+                    CommandSource.OPERATIONS, sourceId(CommandSource.OPERATIONS), 0, 0,
+                    benchmarkTimestamp(sequences.clusterPosition), sequences.clusterPosition),
+                    CoreLiquidationWorkCodec.encodeQuery(productLine(),
+                            CoreLiquidationWorkView.Purpose.INSURANCE, 0, 1_000, 1_048_576));
+            executedMessages++;
+            CoreResponse response = state.apply(query);
+            acceptedMessages++;
+            terminalMessages++;
+            acceptedCoreMessages++;
+            terminalCoreMessages++;
+            if (response.status() != ResponseStatus.OK) {
+                throw new IllegalStateException("insurance work query failed: " + response.resultCode());
             }
             return CoreLiquidationWorkCodec.decodeWork(response.data());
         }

@@ -472,13 +472,57 @@ class CoreLifecycleStateTest {
         long deficit = liquidated.riskState().liquidations().get(1L).deficitUnits();
         TradingCoreState funded = reducer.adjustInsuranceFund(liquidated,
                 new com.surprising.aeron.protocol.AdjustInsuranceFundCommand("USDT", 25));
+        long coverage = InsuranceAllocationPolicy.expectedCoverage(funded, 1);
 
         TradingCoreState resolved = reducer.resolveLiquidation(funded,
-                new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, 25));
+                new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, coverage));
 
-        assertThat(resolved.treasuryState().insuranceBalances()).containsEntry("USDT", 100L);
-        assertThat(resolved.riskState().liquidations().get(1L).deficitUnits()).isEqualTo(deficit - 25);
+        assertThat(resolved.treasuryState().insuranceBalances().getOrDefault("USDT", 0L)).isZero();
+        assertThat(resolved.riskState().liquidations().get(1L).deficitUnits()).isEqualTo(deficit - coverage);
         assertThat(resolved.riskState().liquidations().get(1L).status())
+                .isEqualTo(CoreLiquidationState.Status.ADL_REQUIRED);
+    }
+
+    @Test
+    void insuranceShortfallIsProRataAndIndependentOfLaneLiquidationOrder() {
+        TradingCoreState state = stateWithUser(ProductLine.LINEAR_PERPETUAL,
+                ContractType.LINEAR_PERPETUAL, 1, 10, 100, 100, 100);
+        state = withPositionAndBalance(state, 2, 10, 100, 100, 100);
+        state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand("BTC-USDT", 1, 1, 1,
+                1_700_000_000_000L));
+        for (CoreLiquidationState plan : List.copyOf(state.riskState().liquidations().values())) {
+            state = reducer.executeLiquidation(state,
+                    new ExecuteLiquidationCommand(plan.liquidationId(), plan.triggerPriceSequence(), 1, 0));
+        }
+        state = reducer.adjustInsuranceFund(state,
+                new com.surprising.aeron.protocol.AdjustInsuranceFundCommand("USDT", 1));
+
+        CoreLiquidationState firstUser = state.riskState().liquidations().values().stream()
+                .filter(value -> value.userId() == 1).findFirst().orElseThrow();
+        CoreLiquidationState secondUser = state.riskState().liquidations().values().stream()
+                .filter(value -> value.userId() == 2).findFirst().orElseThrow();
+        long firstCoverage = InsuranceAllocationPolicy.expectedCoverage(state, firstUser.liquidationId());
+        long secondCoverage = InsuranceAllocationPolicy.expectedCoverage(state, secondUser.liquidationId());
+
+        assertThat(firstCoverage).isEqualTo(secondCoverage + 1);
+        assertThat(firstCoverage + secondCoverage)
+                .isEqualTo(state.treasuryState().insuranceBalances().get("USDT"));
+        TradingCoreState beforeAllocation = state;
+        assertThatThrownBy(() -> reducer.resolveLiquidation(beforeAllocation,
+                new ResolveLiquidationCommand(secondUser.liquidationId(),
+                        ResolveLiquidationCommand.Resolution.INSURANCE, secondCoverage + 1)))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("INSURANCE_RESOLUTION_ORDER_MISMATCH"));
+
+        TradingCoreState allocated = reducer.resolveLiquidation(beforeAllocation,
+                new ResolveLiquidationCommand(firstUser.liquidationId(),
+                        ResolveLiquidationCommand.Resolution.INSURANCE, firstCoverage));
+        long remainingCoverage = InsuranceAllocationPolicy.expectedCoverage(
+                allocated, secondUser.liquidationId());
+        allocated = reducer.resolveLiquidation(allocated,
+                new ResolveLiquidationCommand(secondUser.liquidationId(),
+                        ResolveLiquidationCommand.Resolution.INSURANCE, remainingCoverage));
+        assertThat(allocated.riskState().liquidations().get(secondUser.liquidationId()).status())
                 .isEqualTo(CoreLiquidationState.Status.ADL_REQUIRED);
     }
 
@@ -493,15 +537,16 @@ class CoreLifecycleStateTest {
         long deficit = state.riskState().liquidations().get(1L).deficitUnits();
         state = reducer.adjustInsuranceFund(state,
                 new com.surprising.aeron.protocol.AdjustInsuranceFundCommand("USDT", 25));
+        long coverage = InsuranceAllocationPolicy.expectedCoverage(state, 1);
         state = reducer.resolveLiquidation(state,
-                new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, 25));
+                new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, coverage));
         long before = totalEconomicEquity(state, "USDT");
         TradingCoreState beforeAdl = state;
 
         var command = new com.surprising.aeron.protocol.ExecuteAdlCommand(1, 2, "BTC-USDT",
                 com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                 com.surprising.aeron.protocol.CorePositionSide.NET,
-                -10, 200, 1, 5, deficit - 25);
+                -10, 200, 1, 5, deficit - coverage);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtimeResolved = RuntimePerpetualLiquidationProcessor.simulateAdl(
                 state, command, identities);
@@ -527,8 +572,9 @@ class CoreLifecycleStateTest {
         state = reducer.executeLiquidation(state, new ExecuteLiquidationCommand(1, 1, 1, 0));
         state = reducer.adjustInsuranceFund(state,
                 new com.surprising.aeron.protocol.AdjustInsuranceFundCommand("USDT", 25));
+        long coverage = InsuranceAllocationPolicy.expectedCoverage(state, 1);
         TradingCoreState beforeAdl = reducer.resolveLiquidation(state,
-                new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, 25));
+                new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, coverage));
         long residual = beforeAdl.riskState().liquidations().get(1L).deficitUnits();
 
         assertThatThrownBy(() -> RuntimePerpetualLiquidationProcessor.simulateAdl(beforeAdl,

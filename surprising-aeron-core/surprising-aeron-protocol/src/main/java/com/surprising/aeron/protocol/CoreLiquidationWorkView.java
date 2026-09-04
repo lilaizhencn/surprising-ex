@@ -43,12 +43,15 @@ public record CoreLiquidationWorkView(ProductLine productLine,
     public record Resolution(long liquidationId, long userId, String symbol, String asset,
                              CoreMarginMode marginMode, CorePositionSide positionSide,
                              long instrumentVersion, long triggerPriceSequence,
-                             long signedQuantitySteps, long deficitUnits, Purpose purpose) {
+                             long signedQuantitySteps, long deficitUnits, long recommendedCoveredUnits,
+                             Purpose purpose) {
         public Resolution {
             if (liquidationId <= 0 || userId <= 0 || symbol == null || symbol.isBlank()
                     || asset == null || asset.isBlank() || marginMode == null || positionSide == null
                     || instrumentVersion <= 0 || triggerPriceSequence <= 0 || signedQuantitySteps == 0
-                    || deficitUnits <= 0 || purpose == null || purpose == Purpose.EXECUTION) {
+                    || deficitUnits <= 0 || recommendedCoveredUnits < 0 || recommendedCoveredUnits > deficitUnits
+                    || purpose == null || purpose == Purpose.EXECUTION
+                    || purpose == Purpose.ADL && recommendedCoveredUnits != 0) {
                 throw new IllegalArgumentException("invalid Core liquidation resolution work");
             }
         }

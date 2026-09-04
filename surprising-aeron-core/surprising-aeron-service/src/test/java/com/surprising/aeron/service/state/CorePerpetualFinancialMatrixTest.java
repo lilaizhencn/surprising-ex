@@ -186,6 +186,7 @@ class CorePerpetualFinancialMatrixTest {
         TradingCoreState funded = reducer.adjustInsuranceFund(liquidated,
                 new com.surprising.aeron.protocol.AdjustInsuranceFundCommand(
                         variant.settleAsset(), insuranceCoverage));
+        insuranceCoverage = InsuranceAllocationPolicy.expectedCoverage(funded, 1);
         TradingCoreState beforeAdl = reducer.resolveLiquidation(funded,
                 new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE,
                         insuranceCoverage));
@@ -666,6 +667,7 @@ class CorePerpetualFinancialMatrixTest {
         long coverage = full ? deficit : 25;
         TradingCoreState funded = reducer.adjustInsuranceFund(liquidated,
                 new com.surprising.aeron.protocol.AdjustInsuranceFundCommand(variant.settleAsset(), coverage));
+        coverage = InsuranceAllocationPolicy.expectedCoverage(funded, 1);
         ResolveLiquidationCommand command = new ResolveLiquidationCommand(
                 1, ResolveLiquidationCommand.Resolution.INSURANCE, coverage);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
@@ -676,12 +678,16 @@ class CorePerpetualFinancialMatrixTest {
         RuntimeStateParityChecker.assertMatches(ending, identities, runtimeEnding);
 
         CoreLiquidationState result = ending.riskState().liquidations().get(1L);
-        assertThat(result.deficitUnits()).isEqualTo(full ? 0 : deficit - coverage);
+        assertThat(result.deficitUnits()).isEqualTo(deficit - coverage);
         assertThat(result.status()).isEqualTo(full
                 ? CoreLiquidationState.Status.COMPLETED : CoreLiquidationState.Status.ADL_REQUIRED);
-        assertThat(ending.treasuryState().insuranceBalances()).containsEntry(variant.settleAsset(), 100L);
+        long expectedInsuranceBalance = funded.treasuryState().insuranceBalances()
+                .getOrDefault(variant.settleAsset(), 0L) - coverage;
+        assertThat(ending.treasuryState().insuranceBalances().getOrDefault(variant.settleAsset(), 0L))
+                .isEqualTo(expectedInsuranceBalance);
         return row(variant, full ? "INSURANCE_FULL" : "INSURANCE_PARTIAL", opening, ending, List.of(), false, false,
-                funds(100, 0, 0, 0, -100, 0, 0, 100, 0, 0, 0, 100));
+                funds(100, 0, 0, 0, -100, 0, 0, expectedInsuranceBalance,
+                        0, 0, 0, expectedInsuranceBalance));
     }
 
     private Row adlOrder(Variant variant) {
@@ -691,17 +697,19 @@ class CorePerpetualFinancialMatrixTest {
                 new ExecuteLiquidationCommand(1, liquidationSequence(marked), 1, 0));
         TradingCoreState funded = reducer.adjustInsuranceFund(liquidated,
                 new com.surprising.aeron.protocol.AdjustInsuranceFundCommand(variant.settleAsset(), 25));
+        long insuranceCoverage = InsuranceAllocationPolicy.expectedCoverage(funded, 1);
         TradingCoreState ending = reducer.resolveLiquidation(funded,
-                new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, 25));
+                new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE,
+                        insuranceCoverage));
         List<com.surprising.aeron.protocol.CoreAdlCandidateView> candidates =
                 reducer.adlCandidates(ending, variant.settleAsset(), 10);
 
         assertThat(candidates).extracting(candidate -> candidate.userId()).containsExactly(MAKER_ID, SECOND_MAKER_ID);
-        long residual = linearOrInverse(variant, 865, 98_875);
+        long residual = ending.riskState().liquidations().get(1L).deficitUnits();
         long makerOpening = linearOrInverse(variant, 5_480, 200_833);
         return row(variant, "ADL_ORDER", ending, ending, List.of(MAKER_ID, SECOND_MAKER_ID), true, true,
-                funds(0, makerOpening, 0, 100 - residual, 0, 0, 0, 0,
-                        0, makerOpening, 0, 100 - residual));
+                funds(0, makerOpening, 0, -residual, 0, 0, 0, 0,
+                        0, makerOpening, 0, -residual));
     }
 
     private Row adlCoverage(Variant variant) {
@@ -709,13 +717,16 @@ class CorePerpetualFinancialMatrixTest {
         TradingCoreState marked = mark(opening, variant, 1, 1);
         TradingCoreState liquidated = reducer.executeLiquidation(marked,
                 new ExecuteLiquidationCommand(1, liquidationSequence(marked), 1, 0));
-        long insuranceCoverage = variant.type() == ContractType.LINEAR_PERPETUAL ? 25 : 50_000;
+        long requestedInsuranceCoverage = variant.type() == ContractType.LINEAR_PERPETUAL ? 25 : 50_000;
         TradingCoreState funded = reducer.adjustInsuranceFund(liquidated,
-                new com.surprising.aeron.protocol.AdjustInsuranceFundCommand(variant.settleAsset(), insuranceCoverage));
+                new com.surprising.aeron.protocol.AdjustInsuranceFundCommand(
+                        variant.settleAsset(), requestedInsuranceCoverage));
+        long insuranceCoverage = InsuranceAllocationPolicy.expectedCoverage(funded, 1);
+        long extraInsuranceCoverage = insuranceCoverage - requestedInsuranceCoverage;
         TradingCoreState beforeAdl = reducer.resolveLiquidation(funded,
                 new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE,
                         insuranceCoverage));
-        long residual = linearOrInverse(variant, 865, 48_900);
+        long residual = beforeAdl.riskState().liquidations().get(1L).deficitUnits();
         ExecuteAdlCommand command = new ExecuteAdlCommand(1, MAKER_ID, SYMBOL, variant.marginMode(),
                 CorePositionSide.NET, -QUANTITY, 200,
                 beforeAdl.riskState().markPrices().get(SYMBOL).priceSequence(), 5, residual);
@@ -727,17 +738,17 @@ class CorePerpetualFinancialMatrixTest {
         RuntimeStateParityChecker.assertMatches(ending, identities, runtimeEnding);
 
         long targetCashFlow = linearOrInverse(variant, 130, 850);
-        long targetEndingEconomic = linearOrInverse(variant, 2_125, 51_600);
+        long targetEndingEconomic = linearOrInverse(variant, 2_125, 51_600) + extraInsuranceCoverage;
         assertThat(ending.user(MAKER_ID).positions().get(SYMBOL).signedQuantitySteps()).isEqualTo(-5);
         assertThat(ending.riskState().liquidations().get(1L).status())
                 .isEqualTo(CoreLiquidationState.Status.COMPLETED);
         assertThat(ending.riskState().liquidations().get(1L).deficitUnits()).isZero();
         assertThat(ending.user(MAKER_ID).totalUnits(variant.settleAsset()))
-                .isEqualTo(linearOrInverse(variant, 1_130, 1_850));
+                .isEqualTo(linearOrInverse(variant, 1_130, 1_850) + extraInsuranceCoverage);
         return row(variant, "ADL_COVERAGE", beforeAdl, ending, List.of(MAKER_ID), true, true,
-                funds(0, linearOrInverse(variant, 2_990, 100_500), 0, 100 - residual,
+                funds(0, linearOrInverse(variant, 2_990, 100_500), 0, -residual,
                         0, Math.negateExact(residual), 0, residual,
-                        0, targetEndingEconomic, 0, 100));
+                        0, targetEndingEconomic, 0, 0));
     }
 
     private Row snapshotContinuation(Variant variant) {

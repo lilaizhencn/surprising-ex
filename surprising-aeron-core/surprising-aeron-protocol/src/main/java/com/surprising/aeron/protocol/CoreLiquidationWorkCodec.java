@@ -8,7 +8,7 @@ import java.util.List;
 
 public final class CoreLiquidationWorkCodec {
 
-    private static final int VERSION = 3;
+    private static final int VERSION = 4;
     private static final int MAX_ACTIONS = 1_000;
     private static final int MAX_TEXT_BYTES = 64;
 
@@ -94,6 +94,7 @@ public final class CoreLiquidationWorkCodec {
             writer.longValue(resolution.triggerPriceSequence());
             writer.longValue(resolution.signedQuantitySteps());
             writer.longValue(resolution.deficitUnits());
+            writer.longValue(resolution.recommendedCoveredUnits());
             writer.byteValue(resolution.purpose().ordinal());
         }
         return writer.toByteArray();
@@ -137,6 +138,7 @@ public final class CoreLiquidationWorkCodec {
             long triggerPriceSequence = reader.positiveLong("triggerPriceSequence");
             long signedQuantitySteps = reader.nonZeroLong("signedQuantitySteps");
             long deficitUnits = reader.positiveLong("deficitUnits");
+            long recommendedCoveredUnits = reader.nonNegativeLong("recommendedCoveredUnits");
             int purposeCode = reader.byteValue();
             if (purposeCode <= CoreLiquidationWorkView.Purpose.EXECUTION.ordinal()
                     || purposeCode >= CoreLiquidationWorkView.Purpose.values().length) {
@@ -144,7 +146,7 @@ public final class CoreLiquidationWorkCodec {
             }
             resolutions.add(new CoreLiquidationWorkView.Resolution(liquidationId, userId, symbol, asset,
                     marginMode, positionSide, instrumentVersion, triggerPriceSequence, signedQuantitySteps,
-                    deficitUnits, CoreLiquidationWorkView.Purpose.values()[purposeCode]));
+                    deficitUnits, recommendedCoveredUnits, CoreLiquidationWorkView.Purpose.values()[purposeCode]));
         }
         reader.requireConsumed();
         try {

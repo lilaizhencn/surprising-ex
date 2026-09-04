@@ -197,7 +197,7 @@ public final class RuntimePerpetualLiquidationProcessor {
             throw new IllegalArgumentException("invalid liquidation resolution simulation");
         }
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-        return applyResolutionRuntime(command, runtime, identities);
+        return applyResolutionRuntime(command, runtime, identities, before.riskState().liquidations().keySet());
     }
 
     public static TradingRuntimeState applyResolution(TradingCoreState before,
@@ -208,12 +208,13 @@ public final class RuntimePerpetualLiquidationProcessor {
                 || before.revision() != runtime.revision()) {
             throw new IllegalArgumentException("invalid liquidation resolution apply");
         }
-        return applyResolutionRuntime(command, runtime, identities);
+        return applyResolutionRuntime(command, runtime, identities, before.riskState().liquidations().keySet());
     }
 
     public static TradingRuntimeState applyResolutionRuntime(ResolveLiquidationCommand command,
                                                              TradingRuntimeState runtime,
-                                                             RuntimeIdentityRegistry identities) {
+                                                             RuntimeIdentityRegistry identities,
+                                                             Iterable<Long> candidateIds) {
         if (command == null || runtime == null || identities == null || !runtime.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid liquidation resolution apply");
         }
@@ -236,18 +237,31 @@ public final class RuntimePerpetualLiquidationProcessor {
                     throw new CoreStateRejectedException("LIQUIDATION_STATE_CONFLICT",
                             "insurance resolution requires insurance state");
                 }
-                if (command.coveredUnits() <= 0 || command.coveredUnits() > liquidation.deficitUnits()) {
+                if (command.coveredUnits() > liquidation.deficitUnits()) {
                     throw new CoreStateRejectedException("INSURANCE_COVER_EXCEEDS_DEFICIT",
                             "insurance coverage must be within liquidation deficit");
                 }
                 int assetId = identities.assetId(instrument.settleAsset());
+                if (!InsuranceAllocationPolicy.isNext(runtime, identities, candidateIds,
+                        liquidation.liquidationId())) {
+                    throw new CoreStateRejectedException("INSURANCE_RESOLUTION_ORDER_MISMATCH",
+                            "insurance claims must resolve in deterministic priority order");
+                }
+                long expectedCoverage = InsuranceAllocationPolicy.expectedCoverage(
+                        runtime, identities, candidateIds, liquidation.liquidationId());
+                if (command.coveredUnits() != expectedCoverage) {
+                    throw new CoreStateRejectedException("INSURANCE_ALLOCATION_MISMATCH",
+                            "insurance coverage does not match deterministic allocation");
+                }
                 if (command.coveredUnits() > runtime.treasury().insurance(assetId)) {
                     throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
                             "insurance fund balance is insufficient");
                 }
                 changedAssetId = assetId;
-                treasuryDelta.addInsurance(assetId, Math.negateExact(command.coveredUnits()));
-                treasuryDelta.addDeficit(assetId, Math.negateExact(command.coveredUnits()));
+                if (command.coveredUnits() != 0) {
+                    treasuryDelta.addInsurance(assetId, Math.negateExact(command.coveredUnits()));
+                    treasuryDelta.addDeficit(assetId, Math.negateExact(command.coveredUnits()));
+                }
                 nextDeficit = Math.subtractExact(nextDeficit, command.coveredUnits());
                 nextStatus = nextDeficit == 0 ? CoreLiquidationState.Status.COMPLETED
                         : CoreLiquidationState.Status.ADL_REQUIRED;
