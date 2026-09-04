@@ -95,14 +95,17 @@ class LaneCommandContextRingTest {
             LaneCommandContextRing ring = new LaneCommandContextRing(4, 4);
             LaneCommandContextRing.Context context = ring.claim(2);
             context.admission(admission);
-            PendingMatching.CommitContext suspended = new PendingMatching.CommitContext(
-                    List.of(7L), List.of(11L), new long[]{7}, new long[]{11},
-                    RuntimeFundsDelta.empty(), true, false);
-            context.suspendCommitContext(suspended);
+            context.suspendCommitContext(
+                    List.of(7L), List.of(11L), RuntimeFundsDelta.empty(), true, false);
 
             assertThat(context.admission()).isSameAs(admission);
             assertThat(context.hasCommitContext()).isTrue();
-            assertThat(context.takeCommitContext()).isSameAs(suspended);
+            assertThat(context.commitChangedUserIds()).containsExactly(7L);
+            assertThat(context.commitChangedOrderIds()).containsExactly(11L);
+            assertThat(context.commitFundsDelta()).isSameAs(RuntimeFundsDelta.empty());
+            assertThat(context.commitSnapshotDirty()).isTrue();
+            assertThat(context.commitSnapshotProvisionalOnly()).isFalse();
+            context.clearCommitContext();
             assertThat(context.hasCommitContext()).isFalse();
 
             admission.releaseUnused();

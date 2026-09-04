@@ -65,10 +65,15 @@ final class LaneCommandContextRing {
         private CoreMatchingResult matchingResult;
         private CoreMatchingResult completedMatchingResult;
         private CoreAdmissionReservation admission;
-        private PendingMatching.CommitContext commitContext;
+        private java.util.List<Long> commitChangedUserIds;
+        private java.util.List<Long> commitChangedOrderIds;
+        private com.surprising.aeron.service.state.RuntimeFundsDelta commitFundsDelta;
+        private boolean commitSnapshotDirty;
+        private boolean commitSnapshotProvisionalOnly;
         private CoreResultCode matchingRejection;
         private boolean pendingReady;
         private PendingMatching pending;
+        private final PendingMatching reusablePending = new PendingMatching();
         private Context(int laneCount) {
             if (laneCount <= 0 || laneCount > Long.SIZE) {
                 throw new IllegalArgumentException("invalid account lane count");
@@ -81,6 +86,7 @@ final class LaneCommandContextRing {
         CoreMatchingResult matchingResult() { return matchingResult; }
         CoreAdmissionReservation admission() { return admission; }
         PendingMatching pending() { return pending; }
+        PendingMatching reusablePending() { return reusablePending; }
 
         void pending(PendingMatching value) {
             if (value == null || value.sequence() != coreSequence) {
@@ -96,21 +102,48 @@ final class LaneCommandContextRing {
             admission = value;
         }
 
-        void suspendCommitContext(PendingMatching.CommitContext value) {
-            if (value == null || commitContext != null) {
+        void suspendCommitContext(java.util.List<Long> changedUserIds,
+                                  java.util.List<Long> changedOrderIds,
+                                  com.surprising.aeron.service.state.RuntimeFundsDelta fundsDelta,
+                                  boolean snapshotDirty, boolean snapshotProvisionalOnly) {
+            if (changedUserIds == null || changedOrderIds == null || fundsDelta == null
+                    || commitChangedUserIds != null) {
                 throw new IllegalStateException("invalid suspended sequence commit context");
             }
-            commitContext = value;
+            commitChangedUserIds = changedUserIds;
+            commitChangedOrderIds = changedOrderIds;
+            commitFundsDelta = fundsDelta;
+            commitSnapshotDirty = snapshotDirty;
+            commitSnapshotProvisionalOnly = snapshotProvisionalOnly;
         }
 
-        PendingMatching.CommitContext takeCommitContext() {
-            PendingMatching.CommitContext value = commitContext;
-            if (value == null) throw new IllegalStateException("sequence commit context is missing");
-            commitContext = null;
+        java.util.List<Long> commitChangedUserIds() { return requiredCommit(commitChangedUserIds); }
+        java.util.List<Long> commitChangedOrderIds() { return requiredCommit(commitChangedOrderIds); }
+        com.surprising.aeron.service.state.RuntimeFundsDelta commitFundsDelta() {
+            return requiredCommit(commitFundsDelta);
+        }
+        boolean commitSnapshotDirty() { requireCommit(); return commitSnapshotDirty; }
+        boolean commitSnapshotProvisionalOnly() { requireCommit(); return commitSnapshotProvisionalOnly; }
+
+        void clearCommitContext() {
+            requireCommit();
+            commitChangedUserIds = null;
+            commitChangedOrderIds = null;
+            commitFundsDelta = null;
+            commitSnapshotDirty = false;
+            commitSnapshotProvisionalOnly = false;
+        }
+
+        private void requireCommit() {
+            if (commitChangedUserIds == null) throw new IllegalStateException("sequence commit context is missing");
+        }
+
+        private <T> T requiredCommit(T value) {
+            requireCommit();
             return value;
         }
 
-        boolean hasCommitContext() { return commitContext != null; }
+        boolean hasCommitContext() { return commitChangedUserIds != null; }
 
         void publishMatchingCompletion(CoreMatchingResult result) {
             if (result == null || result.nativeCommand().coreSequence() != coreSequence) {
@@ -193,7 +226,11 @@ final class LaneCommandContextRing {
             matchingResult = null;
             completedMatchingResult = null;
             admission = null;
-            commitContext = null;
+            commitChangedUserIds = null;
+            commitChangedOrderIds = null;
+            commitFundsDelta = null;
+            commitSnapshotDirty = false;
+            commitSnapshotProvisionalOnly = false;
             matchingRejection = null;
             pendingReady = false;
             pending = null;

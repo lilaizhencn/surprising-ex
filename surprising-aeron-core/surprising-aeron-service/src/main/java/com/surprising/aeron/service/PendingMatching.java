@@ -10,15 +10,15 @@ import java.util.List;
 import java.util.Objects;
 
 final class PendingMatching {
-    private final long sequence;
-    private final Operation operation;
+    private long sequence;
+    private Operation operation;
     private CoreMessage command;
-    private final CommandFingerprint fingerprint;
+    private CommandFingerprint fingerprint;
     private List<Long> preMatchingCancellationOrderIds;
-    private final RuntimeProjectionPoint beforeProjection;
-    private final long beforeBusinessStateHash;
-    private final long beforeFundsStateHash;
-    private final RuntimeFundsDelta fundsDelta;
+    private RuntimeProjectionPoint beforeProjection;
+    private long beforeBusinessStateHash;
+    private long beforeFundsStateHash;
+    private RuntimeFundsDelta fundsDelta;
     private DecodedMatchingCommand decodedCommand;
     private ResolvedMatchingAdmission admission;
     private CoreAdmissionReservation capacityReservation;
@@ -35,6 +35,9 @@ final class PendingMatching {
     private boolean settlementReady;
     private boolean dispatchOnly;
     private boolean pipelinedSettlementCounted;
+
+    PendingMatching() {
+    }
 
     PendingMatching(long sequence, Operation operation, CoreMessage command,
                     RuntimeProjectionPoint beforeProjection,
@@ -97,6 +100,16 @@ final class PendingMatching {
                     List<Long> preMatchingCancellationOrderIds, RuntimeProjectionPoint beforeProjection,
                     long beforeBusinessStateHash, long beforeFundsStateHash, RuntimeFundsDelta fundsDelta,
                     DecodedMatchingCommand decodedCommand, ResolvedMatchingAdmission admission) {
+        initialize(sequence, operation, command, fingerprint, preMatchingCancellationOrderIds,
+                beforeProjection, beforeBusinessStateHash, beforeFundsStateHash, fundsDelta,
+                decodedCommand, admission);
+    }
+
+    PendingMatching initialize(long sequence, Operation operation, CoreMessage command,
+                               CommandFingerprint fingerprint, List<Long> preMatchingCancellationOrderIds,
+                               RuntimeProjectionPoint beforeProjection, long beforeBusinessStateHash,
+                               long beforeFundsStateHash, RuntimeFundsDelta fundsDelta,
+                               DecodedMatchingCommand decodedCommand, ResolvedMatchingAdmission admission) {
         if (sequence <= 0 || operation == null || command == null || preMatchingCancellationOrderIds == null
                 || fingerprint == null || beforeProjection == null || fundsDelta == null || decodedCommand == null
                 || command.header().kind() != com.surprising.aeron.protocol.WireMessageKind.COMMAND) {
@@ -114,6 +127,21 @@ final class PendingMatching {
         this.fundsDelta = fundsDelta;
         this.decodedCommand = decodedCommand;
         this.admission = admission;
+        capacityReservation = null;
+        pendingStateHash = 0;
+        commitFenceTimestamp = 0;
+        commitFenceClusterPosition = 0;
+        commitFenceEstablished = false;
+        settlementEvent = null;
+        settlementPlan = null;
+        settlementApplyStartNanos = 0;
+        placeAdmission = null;
+        admittedMatchingOrder = null;
+        matchingSubmitted = false;
+        settlementReady = false;
+        dispatchOnly = false;
+        pipelinedSettlementCounted = false;
+        return this;
     }
 
     PendingMatching withCommand(CoreMessage nextCommand) {
@@ -202,9 +230,19 @@ final class PendingMatching {
     }
     long pendingStateHash() { return pendingStateHash; }
     com.surprising.aeron.service.state.MatcherSettlementEvent settlementEvent() { return settlementEvent; }
+    com.surprising.aeron.service.state.MatcherSettlementEvent takeSettlementEvent() {
+        var value = settlementEvent;
+        settlementEvent = null;
+        return value;
+    }
     com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan() { return settlementPlan; }
     long settlementApplyStartNanos() { return settlementApplyStartNanos; }
     PlaceAdmissionEvent placeAdmission() { return placeAdmission; }
+    PlaceAdmissionEvent takePlaceAdmission() {
+        PlaceAdmissionEvent value = placeAdmission;
+        placeAdmission = null;
+        return value;
+    }
     void placeAdmission(PlaceAdmissionEvent event) {
         if (event == null || placeAdmission != null || operation != Operation.PLACE) {
             throw new IllegalStateException("invalid place admission continuation");
@@ -273,9 +311,4 @@ final class PendingMatching {
         SETTLEMENT
     }
 
-    record CommitContext(List<Long> changedUserIds, List<Long> changedOrderIds,
-                         long[] accumulatedUserIds, long[] accumulatedOrderIds,
-                         RuntimeFundsDelta fundsDelta, boolean snapshotDirty,
-                         boolean snapshotProvisionalOnly) {
-    }
 }

@@ -125,6 +125,11 @@ final class LinearPerpetualSaturationWorkload {
             private int scheduledEntrySequence;
 
             @Override
+            public int terminalTombstones() {
+                return harness.state().terminalRetentionTombstoneCount();
+            }
+
+            @Override
             public long run() {
                 long acceptedCoreBefore = harness.acceptedCoreMessages();
                 long terminalCoreBefore = harness.terminalCoreMessages();

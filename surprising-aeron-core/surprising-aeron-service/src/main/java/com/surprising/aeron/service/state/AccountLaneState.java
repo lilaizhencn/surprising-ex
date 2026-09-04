@@ -15,24 +15,32 @@ import java.util.HashMap;
 import java.util.HashSet;
 
 public final class AccountLaneState {
+    private static final int INITIAL_ENTITY_CAPACITY = Math.max(16,
+            Integer.getInteger("surprising.aeron.lane-initial-entities", 1_024));
     private final int laneId;
     private final int queueCapacity;
-    private final LongHashSet userIds = new LongHashSet();
-    final LongObjectHashMap<UserRuntime> users = new LongObjectHashMap<>();
-    final LongObjectHashMap<IntObjectHashMap<BalanceRuntime>> balances = new LongObjectHashMap<>();
-    final LongObjectHashMap<OrderRuntime> orders = new LongObjectHashMap<>();
-    final LongObjectHashMap<ReservationRuntime> reservations = new LongObjectHashMap<>();
-    final LongObjectHashMap<LongHashSet> reservationIdsByUser = new LongObjectHashMap<>();
-    final LongObjectHashMap<PositionRuntime> positions = new LongObjectHashMap<>();
-    final LongObjectHashMap<LongHashSet> positionKeysByUser = new LongObjectHashMap<>();
+    private final LongHashSet userIds = new LongHashSet(INITIAL_ENTITY_CAPACITY);
+    final LongObjectHashMap<UserRuntime> users = new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
+    final LongObjectHashMap<IntObjectHashMap<BalanceRuntime>> balances =
+            new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
+    final LongObjectHashMap<OrderRuntime> orders = new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
+    final LongObjectHashMap<ReservationRuntime> reservations =
+            new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
+    final LongObjectHashMap<LongHashSet> reservationIdsByUser =
+            new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
+    final LongObjectHashMap<PositionRuntime> positions = new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
+    final LongObjectHashMap<LongHashSet> positionKeysByUser =
+            new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
     final IntObjectHashMap<LongObjectHashMap<LongHashSet>> positionKeysBySymbolAndUser
             = new IntObjectHashMap<>();
     final LongObjectHashMap<LiquidationRuntime> liquidations = new LongObjectHashMap<>();
     final LongObjectHashMap<IntObjectHashMap<LongObjectHashMap<Long>>> activeLiquidationIndex
             = new LongObjectHashMap<>();
     final LongObjectHashMap<RiskSnapshotRuntime> riskSnapshots = new LongObjectHashMap<>();
-    final LongObjectHashMap<LongLongHashMap> clientOrderIndex = new LongObjectHashMap<>();
-    final LongObjectHashMap<LongHashSet> clientKeysByOrderId = new LongObjectHashMap<>();
+    final LongObjectHashMap<LongLongHashMap> clientOrderIndex =
+            new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
+    final LongObjectHashMap<LongHashSet> clientKeysByOrderId =
+            new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
     final Map<CoreLeverageKey, Long> leverages = new HashMap<>();
     final LongObjectHashMap<HashSet<CoreLeverageKey>> leverageKeysByUser = new LongObjectHashMap<>();
     /**

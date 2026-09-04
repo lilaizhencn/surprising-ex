@@ -129,6 +129,30 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
         forEachSorted(orderIds, id -> observeOrder(state.orders().get(id), acknowledgedSequence));
     }
 
+    void retainPrunedOrders(TradingRuntimeState state, long coreSequence) {
+        if (state == null || coreSequence <= 0) {
+            throw new IllegalArgumentException("invalid pruned terminal order retention");
+        }
+        visitingExportSequence = coreSequence;
+        try {
+            state.acceptChangedTerminalOrders(this::retainPrunedOrder);
+        } finally {
+            visitingExportSequence = 0;
+        }
+        trimTombstones();
+    }
+
+    private void retainPrunedOrder(OrderRuntime order) {
+        EntityKey key = new EntityKey(EntityType.ORDER, order.orderId());
+        if (tombstones.containsKey(key)) return;
+        RetainedEntity retained = new RetainedEntity(key, order.userId(),
+                normalizeClientId(order.clientOrderId()), visitingExportSequence);
+        RetainedEntity previous = tombstones.put(key, retained);
+        if (previous != null) tombstoneDigest ^= entryDigest(previous);
+        tombstoneDigest ^= entryDigest(retained);
+        indexTombstone(retained);
+    }
+
     TerminalPruneBatch eligible(TradingCoreState state, long acknowledgedSequence, int limit) {
         if (state == null || acknowledgedSequence < 0 || limit <= 0) {
             throw new IllegalArgumentException("invalid terminal prune request");
@@ -184,6 +208,10 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
         complete(EntityType.ALGO, batch.algoOrderIds(), acknowledgedSequence);
         complete(EntityType.TRIGGER, batch.triggerOrderIds(), acknowledgedSequence);
         complete(EntityType.LIQUIDATION, batch.liquidationIds(), acknowledgedSequence);
+        trimTombstones();
+    }
+
+    private void trimTombstones() {
         while (tombstones.size() > MAX_TOMBSTONES) {
             EntityKey key = tombstones.keySet().iterator().next();
             RetainedEntity removed = tombstones.remove(key);

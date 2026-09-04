@@ -18,6 +18,7 @@ class CorePerpetualEndToEndBenchmarkTest {
             assertThat(result.matchedQuantity()).isEqualTo(makerDepth);
             assertThat(result.latenciesNanos()).hasSize(makerDepth + 1);
             assertThat(result.pendingMatching()).isZero();
+            assertThat(result.terminalTombstones()).isGreaterThanOrEqualTo(makerDepth + 1);
         }
     }
 }

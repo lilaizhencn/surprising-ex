@@ -237,6 +237,7 @@ public class LinearPerpetualCoreBenchmark {
         counters.laneSettlementOperations += scenario.laneOperations(1);
         counters.laneQueryOperations += scenario.laneOperations(2);
         counters.laneRiskOperations += scenario.laneOperations(3);
+        counters.terminalTombstones = scenario.terminalTombstones();
         if (scenario instanceof LinearPerpetualSaturationWorkload.SaturationScenario saturation) {
             counters.matchingWindowSamples += saturation.windowSamples();
             counters.matchingFullWindowSamples += saturation.fullWindowSamples();
@@ -550,6 +551,7 @@ public class LinearPerpetualCoreBenchmark {
         public long matchingFullWindowSamples;
         public long matchingRefillOperations;
         public long matchingProducerStarvationSamples;
+        public long terminalTombstones;
 
         @Setup(Level.Iteration)
         public void reset() {
@@ -572,6 +574,7 @@ public class LinearPerpetualCoreBenchmark {
             matchingFullWindowSamples = 0;
             matchingRefillOperations = 0;
             matchingProducerStarvationSamples = 0;
+            terminalTombstones = 0;
         }
     }
 }

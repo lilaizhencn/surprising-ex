@@ -1,5 +1,6 @@
 package com.surprising.aeron.service;
 
+import com.surprising.aeron.protocol.CoreMessage;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -56,7 +57,7 @@ final class PendingMatchingRing {
         if (pending == null) throw new IllegalArgumentException("pending matching is required");
         int index = slot(pending.sequence());
         PendingMatching existing = pendingAt(index);
-        if (existing != null) {
+        if (existing != null && linked(index)) {
             if (existing.sequence() != pending.sequence()) {
                 throw new IllegalStateException("pending matching sequence window is full");
             }
@@ -70,7 +71,9 @@ final class PendingMatchingRing {
             throw new IllegalStateException("pending matching ring is full");
         }
         requireAvailableCommandId(pending, null);
-        contexts.claim(pending.sequence()).pending(pending);
+        LaneCommandContextRing.Context context = contexts.claimed(pending.sequence())
+                ? contexts.required(pending.sequence()) : contexts.claim(pending.sequence());
+        context.pending(pending);
         previousSlots[index] = tail;
         nextSlots[index] = -1;
         if (tail == -1) head = index;
@@ -81,9 +84,32 @@ final class PendingMatchingRing {
         size++;
     }
 
+    PendingMatching acquire(long sequence, PendingMatching.Operation operation, CoreMessage command,
+                            com.surprising.aeron.protocol.CommandFingerprint fingerprint,
+                            java.util.List<Long> preMatchingCancellationOrderIds,
+                            com.surprising.aeron.service.state.RuntimeProjectionPoint beforeProjection,
+                            long beforeBusinessStateHash, long beforeFundsStateHash,
+                            com.surprising.aeron.service.state.RuntimeFundsDelta fundsDelta,
+                            DecodedMatchingCommand decodedCommand, ResolvedMatchingAdmission admission) {
+        LaneCommandContextRing.Context context = contexts.claim(sequence);
+        PendingMatching pending = context.reusablePending().initialize(sequence, operation, command, fingerprint,
+                preMatchingCancellationOrderIds, beforeProjection, beforeBusinessStateHash, beforeFundsStateHash,
+                fundsDelta, decodedCommand, admission);
+        context.pending(pending);
+        return pending;
+    }
+
     PendingMatching get(long sequence) {
-        PendingMatching pending = pendingAt(slot(sequence));
+        int index = slot(sequence);
+        if (!linked(index)) return null;
+        PendingMatching pending = pendingAt(index);
         return pending != null && pending.sequence() == sequence ? pending : null;
+    }
+
+    void discardPrepared(long sequence) {
+        int index = slot(sequence);
+        if (linked(index)) throw new IllegalStateException("cannot discard linked pending matching");
+        if (contexts.claimed(sequence)) contexts.discard(sequence);
     }
 
     boolean contains(long sequence) {
@@ -254,12 +280,17 @@ final class PendingMatchingRing {
 
     private int indexOf(long sequence) {
         int index = slot(sequence);
+        if (!linked(index)) return -1;
         PendingMatching pending = pendingAt(index);
         return pending != null && pending.sequence() == sequence ? index : -1;
     }
 
     private int slot(long sequence) {
         return (int) sequence & mask;
+    }
+
+    private boolean linked(int index) {
+        return head == index || previousSlots[index] != -1 || nextSlots[index] != -1;
     }
 
     private PendingMatching pendingAt(int index) {

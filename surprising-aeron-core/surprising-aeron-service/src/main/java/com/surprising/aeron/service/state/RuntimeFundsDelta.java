@@ -98,10 +98,10 @@ public final class RuntimeFundsDelta {
     public RuntimeFundsDelta plus(RuntimeFundsDelta other) {
         if (other == null || other.postings.isEmpty()) return this;
         if (postings.isEmpty()) return other;
-        ArrayList<RuntimeFactFrame.FundsPosting> merged = new ArrayList<>(postings.size() + other.postings.size());
-        merged.addAll(postings);
-        merged.addAll(other.postings);
-        return fromPatchPostings(merged);
+        RuntimeFundsAccumulator accumulator = new RuntimeFundsAccumulator(postings.size() + other.postings.size());
+        accumulator.add(this);
+        accumulator.add(other);
+        return accumulator.toDelta();
     }
 
     public int postingCount() {

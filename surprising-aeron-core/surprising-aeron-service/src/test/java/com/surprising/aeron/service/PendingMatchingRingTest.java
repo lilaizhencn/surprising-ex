@@ -121,11 +121,34 @@ class PendingMatchingRingTest {
         assertThat(ring.dispatchHead()).isNull();
     }
 
+    @Test
+    void reusesTheSequenceContextPendingCarrierAfterTheSlotIsReleased() {
+        PendingMatchingRing ring = new PendingMatchingRing(4, 1, 4);
+        PendingMatching first = acquire(ring, 1, UUID.randomUUID(), 1001);
+        ring.put(first);
+        ring.remove(1);
+
+        PendingMatching reused = acquire(ring, 5, UUID.randomUUID(), 1002);
+
+        assertThat(reused).isSameAs(first);
+        assertThat(reused.sequence()).isEqualTo(5);
+        assertThat(reused.command().header().userId()).isEqualTo(1002);
+        ring.discardPrepared(5);
+    }
+
     private static PendingMatching pending(long sequence, UUID commandId, long userId) {
         return new PendingMatching(sequence, PendingMatching.Operation.PLACE,
                 command(commandId, userId), new RuntimeProjectionPoint(
                         0, TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL)),
                 1, 1, RuntimeFundsDelta.empty());
+    }
+
+    private static PendingMatching acquire(PendingMatchingRing ring, long sequence, UUID commandId, long userId) {
+        CoreMessage command = command(commandId, userId);
+        return ring.acquire(sequence, PendingMatching.Operation.PLACE, command,
+                com.surprising.aeron.protocol.CommandFingerprint.of(command), java.util.List.of(),
+                new RuntimeProjectionPoint(0, TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL)),
+                1, 1, RuntimeFundsDelta.empty(), DecodedMatchingCommand.decode(command), null);
     }
 
     private static CoreMessage command(UUID commandId, long userId) {

@@ -17,17 +17,17 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         }
     }
 
-    private final long coreSequence;
-    private final long userId;
-    private final ResolvedPlaceOrder order;
-    private final UUID commandId;
-    private final long openInterestSteps;
-    private final RuntimeOrderAdmission.AdmissionIdentity identity;
-    private final RuntimeIdentityRegistry.PreparedClientKey preparedClientKey;
-    private final int symbolId;
-    private final int assetId;
-    private final int laneId;
-    private final TradingRuntimeState runtime;
+    private long coreSequence;
+    private long userId;
+    private ResolvedPlaceOrder order;
+    private UUID commandId;
+    private long openInterestSteps;
+    private RuntimeOrderAdmission.AdmissionIdentity identity;
+    private RuntimeIdentityRegistry.PreparedClientKey preparedClientKey;
+    private int symbolId;
+    private int assetId;
+    private int laneId;
+    private TradingRuntimeState runtime;
     private CoreMatchingOrder matchingOrder;
     private UserRuntime admittedUser;
     private OrderRuntime admittedOrder;
@@ -36,10 +36,13 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     @SuppressWarnings("FieldMayBeFinal")
     private boolean completed;
 
-    PlaceAdmissionEvent(long coreSequence, long userId, ResolvedPlaceOrder order, UUID commandId,
-                        long openInterestSteps, RuntimeOrderAdmission.AdmissionIdentity identity,
-                        RuntimeIdentityRegistry.PreparedClientKey preparedClientKey,
-                        int symbolId, int assetId, int laneId, TradingRuntimeState runtime) {
+    PlaceAdmissionEvent() {
+    }
+
+    PlaceAdmissionEvent prepare(long coreSequence, long userId, ResolvedPlaceOrder order, UUID commandId,
+                                long openInterestSteps, RuntimeOrderAdmission.AdmissionIdentity identity,
+                                RuntimeIdentityRegistry.PreparedClientKey preparedClientKey,
+                                int symbolId, int assetId, int laneId, TradingRuntimeState runtime) {
         if (coreSequence <= 0 || userId <= 0 || order == null || commandId == null || openInterestSteps < 0
                 || identity == null || preparedClientKey == null || symbolId < 0 || assetId < 0
                 || laneId < 0 || runtime == null) {
@@ -56,6 +59,27 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         this.assetId = assetId;
         this.laneId = laneId;
         this.runtime = runtime;
+        matchingOrder = null;
+        admittedUser = null;
+        admittedOrder = null;
+        admittedReservation = null;
+        rejection = null;
+        COMPLETED.set(this, false);
+        return this;
+    }
+
+    void clear() {
+        if (!complete()) throw new IllegalStateException("cannot recycle an incomplete place admission");
+        order = null;
+        commandId = null;
+        identity = null;
+        preparedClientKey = null;
+        runtime = null;
+        matchingOrder = null;
+        admittedUser = null;
+        admittedOrder = null;
+        admittedReservation = null;
+        rejection = null;
     }
 
     @Override
@@ -91,6 +115,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     public boolean complete() {
         return (boolean) COMPLETED.getAcquire(this);
     }
+
 
     public long coreSequence() { return coreSequence; }
     public long userId() { return userId; }

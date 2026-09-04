@@ -19,32 +19,43 @@ public final class CoreCommandResultCodec {
         if (result == null) {
             throw new IllegalArgumentException("command result is required");
         }
-        if (result.orders().size() > MAX_ITEMS || result.executions().size() > MAX_ITEMS) {
+        return encode(result.coreSequence(), result.commandId(), result.orderId(), result.instrumentVersion(),
+                result.matcherSequence(), result.matcherPrefixBefore(), result.matcherPrefixAfter(),
+                result.orders(), result.executions());
+    }
+
+    public static byte[] encode(long coreSequence, UUID commandId, long orderId, long instrumentVersion,
+                                long matcherSequence, long matcherPrefixBefore, long matcherPrefixAfter,
+                                List<CoreOrderStateView> orders, List<CoreExecutionView> executions) {
+        if (commandId == null || orders == null || executions == null) {
+            throw new IllegalArgumentException("command result fields are required");
+        }
+        if (orders.size() > MAX_ITEMS || executions.size() > MAX_ITEMS) {
             throw new IllegalArgumentException("command result is too large");
         }
         int ordersLength = Integer.BYTES * 2;
-        for (CoreOrderStateView order : result.orders()) {
+        for (CoreOrderStateView order : orders) {
             ordersLength = Math.addExact(ordersLength, CoreStateQueryCodec.encodedOrderStateLength(order));
         }
         int length = Math.addExact(Math.addExact(Integer.BYTES + IDENTITY_LENGTH, Integer.BYTES), ordersLength);
         length = Math.addExact(length, Integer.BYTES);
-        length = Math.addExact(length, Math.multiplyExact(result.executions().size(), EXECUTION_LENGTH));
+        length = Math.addExact(length, Math.multiplyExact(executions.size(), EXECUTION_LENGTH));
         ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
         buffer.putInt(VERSION);
-        buffer.putLong(result.coreSequence());
-        buffer.putLong(result.commandId().getMostSignificantBits());
-        buffer.putLong(result.commandId().getLeastSignificantBits());
-        buffer.putLong(result.orderId());
-        buffer.putLong(result.instrumentVersion());
-        buffer.putLong(result.matcherSequence());
-        buffer.putLong(result.matcherPrefixBefore());
-        buffer.putLong(result.matcherPrefixAfter());
+        buffer.putLong(coreSequence);
+        buffer.putLong(commandId.getMostSignificantBits());
+        buffer.putLong(commandId.getLeastSignificantBits());
+        buffer.putLong(orderId);
+        buffer.putLong(instrumentVersion);
+        buffer.putLong(matcherSequence);
+        buffer.putLong(matcherPrefixBefore);
+        buffer.putLong(matcherPrefixAfter);
         buffer.putInt(ordersLength);
         buffer.putInt(1);
-        buffer.putInt(result.orders().size());
-        result.orders().forEach(order -> CoreStateQueryCodec.writeOrderState(buffer, order));
-        buffer.putInt(result.executions().size());
-        result.executions().forEach(execution -> buffer
+        buffer.putInt(orders.size());
+        orders.forEach(order -> CoreStateQueryCodec.writeOrderState(buffer, order));
+        buffer.putInt(executions.size());
+        executions.forEach(execution -> buffer
                 .putLong(execution.takerOrderId())
                 .putLong(execution.makerOrderId())
                 .putLong(execution.takerUserId())

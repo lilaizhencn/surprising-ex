@@ -21,29 +21,32 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     }
 
 
-    private final long commitSequence;
-    private final long requiredLaneMask;
-    private final long commitTimestamp;
-    private final long commitClusterPosition;
-    private final MatcherSettlementPlan plan;
-    private final TradingRuntimeState runtime;
-    private final RuntimeIdentityRegistry identities;
-    private final CoreInstrumentState instrument;
-    private final int baseAssetId;
-    private final int quoteAssetId;
-    private final int settleAssetId;
-    private final RuntimeTreasuryDelta[] touchedLaneTreasuryDeltas;
+    private long commitSequence;
+    private long requiredLaneMask;
+    private long commitTimestamp;
+    private long commitClusterPosition;
+    private MatcherSettlementPlan plan;
+    private TradingRuntimeState runtime;
+    private RuntimeIdentityRegistry identities;
+    private CoreInstrumentState instrument;
+    private int baseAssetId;
+    private int quoteAssetId;
+    private int settleAssetId;
+    private RuntimeTreasuryDelta[] touchedLaneTreasuryDeltas;
     private TradingRuntimeState.MatcherSettlementChanges changes;
     private RuntimeFundsDelta collectedFundsDelta = RuntimeFundsDelta.empty();
     @SuppressWarnings("FieldMayBeFinal")
     private long completedLaneMask;
     private boolean collected;
 
-    MatcherSettlementEvent(long commitSequence, long requiredLaneMask,
-                           long commitTimestamp, long commitClusterPosition,
-                           MatcherSettlementPlan plan, TradingRuntimeState runtime,
-                           RuntimeIdentityRegistry identities, CoreInstrumentState instrument,
-                           int baseAssetId, int quoteAssetId, int settleAssetId, int laneCount) {
+    MatcherSettlementEvent() {
+    }
+
+    MatcherSettlementEvent prepare(long commitSequence, long requiredLaneMask,
+                                   long commitTimestamp, long commitClusterPosition,
+                                   MatcherSettlementPlan plan, TradingRuntimeState runtime,
+                                   RuntimeIdentityRegistry identities, CoreInstrumentState instrument,
+                                   int baseAssetId, int quoteAssetId, int settleAssetId, int laneCount) {
         if (commitSequence < 0 || requiredLaneMask == 0
                 || (commitSequence == 0 && (commitTimestamp != -1 || commitClusterPosition != -1))
                 || (commitSequence != 0 && (commitTimestamp < 0 || commitClusterPosition < 0))
@@ -64,14 +67,37 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         this.settleAssetId = settleAssetId;
         this.changes = commitSequence == 0 ? null : runtime.acquireMatcherSettlementChanges();
         if (plan.tradeCount() == 0) {
-            touchedLaneTreasuryDeltas = null;
+            if (touchedLaneTreasuryDeltas != null) {
+                for (RuntimeTreasuryDelta delta : touchedLaneTreasuryDeltas) delta.clear();
+            }
         } else {
-            touchedLaneTreasuryDeltas = new RuntimeTreasuryDelta[Long.bitCount(requiredLaneMask)];
-            for (int index = 0; index < touchedLaneTreasuryDeltas.length; index++) {
-                touchedLaneTreasuryDeltas[index] = new RuntimeTreasuryDelta();
+            if (touchedLaneTreasuryDeltas == null || touchedLaneTreasuryDeltas.length != laneCount) {
+                touchedLaneTreasuryDeltas = new RuntimeTreasuryDelta[laneCount];
+                for (int index = 0; index < laneCount; index++) {
+                    touchedLaneTreasuryDeltas[index] = new RuntimeTreasuryDelta();
+                }
+            } else {
+                for (RuntimeTreasuryDelta delta : touchedLaneTreasuryDeltas) delta.clear();
             }
         }
+        collectedFundsDelta = RuntimeFundsDelta.empty();
+        collected = false;
+        COMPLETED_LANE_MASK.set(this, 0L);
+        return this;
     }
+
+    void clear() {
+        if (!complete() || changes != null) {
+            throw new IllegalStateException("cannot recycle an incomplete matcher settlement");
+        }
+        plan = null;
+        runtime = null;
+        identities = null;
+        instrument = null;
+        collectedFundsDelta = RuntimeFundsDelta.empty();
+        collected = false;
+    }
+
 
     @Override
     public void execute(AccountLaneState lane) {
@@ -84,7 +110,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         if (commitSequence == 0) runtime.enterLaneCommandScope(lane);
         else runtime.enterMatcherSettlementScope(lane, changes);
         try {
-            RuntimeTreasuryDelta delta = touchedLaneTreasuryDeltas == null
+            RuntimeTreasuryDelta delta = plan.tradeCount() == 0
                     ? EMPTY_TREASURY_DELTA : touchedLaneTreasuryDeltas[laneSlot(laneId)];
             if (runtime.productLine().isDerivative()) {
                 RuntimePerpetualMatchProcessor.applyLane(plan.takerOrderId(), plan, laneId,
@@ -98,10 +124,10 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
                 runtime.stampMatcherOrders(lane, plan, commitTimestamp, commitClusterPosition);
             }
             if (commitSequence != 0) {
+                changes.prepareLaneTerminal(laneId, identities, lane);
                 lane.applied(commitSequence);
                 lane.committed(commitSequence);
                 runtime.publishLaneHashes(lane);
-                changes.prepareLaneTerminal(laneId, identities);
             }
         } finally {
             if (commitSequence == 0) runtime.exitLaneCommandScope(lane);
@@ -147,7 +173,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         if (!complete()) return null;
         if (collected) throw new IllegalStateException("matcher settlement event was already collected");
         collected = true;
-        if (touchedLaneTreasuryDeltas == null) return EMPTY_TREASURY_DELTA;
+        if (plan.tradeCount() == 0) return EMPTY_TREASURY_DELTA;
         RuntimeTreasuryDelta aggregate = null;
         for (RuntimeTreasuryDelta delta : touchedLaneTreasuryDeltas) {
             if (aggregate == null) aggregate = delta;

@@ -74,7 +74,8 @@ public final class CorePerpetualEndToEndBenchmark {
             run(state, sequences, warmupCycles, makerDepth, false);
             Result result = run(state, sequences, cycles, makerDepth, true);
             return new BaselineResult(result.cycles(), result.makerDepth(), result.elapsedNanos(), result.latencies(),
-                    result.matchedQuantity(), state.pendingMatchingCount());
+                    result.matchedQuantity(), state.pendingMatchingCount(),
+                    state.terminalRetentionTombstoneCount());
         }
     }
 
@@ -219,7 +220,7 @@ public final class CorePerpetualEndToEndBenchmark {
     }
 
     public record BaselineResult(int cycles, int makerDepth, long elapsedNanos, long[] latenciesNanos,
-                                 long matchedQuantity, int pendingMatching) {
+                                 long matchedQuantity, int pendingMatching, int terminalTombstones) {
         public BaselineResult {
             latenciesNanos = latenciesNanos.clone();
         }

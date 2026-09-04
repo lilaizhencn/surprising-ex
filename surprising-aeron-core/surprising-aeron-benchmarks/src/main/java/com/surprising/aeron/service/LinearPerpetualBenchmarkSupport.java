@@ -107,6 +107,10 @@ final class LinearPerpetualBenchmarkSupport {
             return 0;
         }
 
+        default int terminalTombstones() {
+            return 0;
+        }
+
         default long laneOperations() {
             return 0;
         }
