@@ -475,6 +475,9 @@ public final class RuntimePerpetualLiquidationProcessor {
     private static boolean executable(TradingRuntimeState runtime, LiquidationRuntime liquidation,
                                       RuntimeIdentityRegistry identities) {
         String symbol = identities.symbol(liquidation.symbolId());
+        CoreInstrumentState instrument = runtime.instrument(symbol);
+        if (instrument == null || !CoreRiskPolicy.canLiquidate(
+                instrument.contractType(), liquidation.signedQuantitySteps())) return false;
         long positionKey = identities.positionKey(liquidation.userId(),
                 positionKey(symbol, liquidation.positionSide()));
         PositionRuntime position = runtime.position(positionKey);

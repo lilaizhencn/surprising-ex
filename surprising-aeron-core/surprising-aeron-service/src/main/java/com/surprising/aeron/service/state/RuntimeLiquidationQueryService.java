@@ -26,6 +26,9 @@ public final class RuntimeLiquidationQueryService {
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "liquidation mark price changed");
         }
         String symbol = identities.symbol(liquidation.symbolId());
+        CoreInstrumentState instrument = runtime.instrument(symbol);
+        if (instrument == null || !CoreRiskPolicy.canLiquidate(
+                instrument.contractType(), liquidation.signedQuantitySteps())) return false;
         String positionName = liquidation.positionSide() == com.surprising.aeron.protocol.CorePositionSide.NET
                 ? symbol : symbol + ':' + liquidation.positionSide().name();
         Long positionKey = identities.findPositionKey(liquidation.userId(), positionName);

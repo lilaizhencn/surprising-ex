@@ -13,6 +13,11 @@ final class CoreRiskPolicy {
     private CoreRiskPolicy() {
     }
 
+    /** Fully paid option longs carry no liquidation margin in the supported non-PM model. */
+    static boolean canLiquidate(com.surprising.instrument.api.model.ContractType type, long quantity) {
+        return quantity != 0 && !(type.isOption() && quantity > 0);
+    }
+
     static CoreRiskStatus status(long ratioPpm) {
         return ratioPpm >= LIQUIDATION_MARGIN_RATIO_PPM ? CoreRiskStatus.LIQUIDATION
                 : ratioPpm >= WARNING_MARGIN_RATIO_PPM ? CoreRiskStatus.WARNING : CoreRiskStatus.NORMAL;

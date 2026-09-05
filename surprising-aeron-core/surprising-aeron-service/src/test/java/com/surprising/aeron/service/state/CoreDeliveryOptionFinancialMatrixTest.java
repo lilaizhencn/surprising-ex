@@ -328,6 +328,72 @@ class CoreDeliveryOptionFinancialMatrixTest {
 
     private final TradingCoreReducer reducer = new TradingCoreReducer();
 
+    @Test
+    void deliveryAdlCandidatesIncludeProfitablePositionsAcrossMarginModesAndRestore() {
+        for (Variant variant : VARIANTS.subList(0, 4)) {
+            TradingCoreState state = oppositePositions(variant, WALLET, WALLET);
+            state = reducer.applyMarkPrice(state, new ApplyMarkPriceCommand(
+                    variant.symbol(), 1, 120, 2, 1_700_000_000_001L));
+            var candidates = reducer.adlCandidates(state, variant.settleAsset(), 10);
+            assertThat(candidates).as(variant.key()).hasSize(1);
+            assertThat(candidates.getFirst().userId()).isEqualTo(USER_ID);
+            assertThat(candidates.getFirst().unrealizedProfitUnits())
+                    .isEqualTo(variant.type().isInverse() ? 33 : 40);
+            TradingCoreState restored = TradingStateSnapshotCodec.decode(
+                    TradingStateSnapshotCodec.encode(state), variant.productLine());
+            RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+            TradingRuntimeState runtime = RuntimeStateProjector.project(restored, identities);
+            try {
+                var index = new AdlPositionIndex(restored, identities);
+                assertThat(RuntimeRiskQueryService.adlCandidates(runtime, identities,
+                        variant.settleAsset(), index.positions(variant.settleAsset()), 10))
+                        .containsExactlyElementsOf(candidates);
+                assertThat(reducer.adlCandidates(restored, variant.settleAsset(), 10))
+                        .containsExactlyElementsOf(candidates);
+                assertThat(total(restored, variant.settleAsset())).isEqualTo(2 * WALLET);
+            } finally {
+                runtime.close();
+            }
+        }
+    }
+
+    @Test
+    void nonPortfolioOptionLongIsNotLiquidatedWhenAnotherShortMakesAccountUnsafe() {
+        Variant option = VARIANTS.get(4);
+        String shortSymbol = option.symbol() + "-SHORT";
+        TradingCoreState opening = fundedState(option, USER_ID, 100);
+        opening = reducer.upsertInstrument(opening, instrument(option, shortSymbol));
+        opening = addPosition(opening, USER_ID, option.symbol(), 1, 10, 0, option);
+        opening = addPosition(opening, USER_ID, shortSymbol, -10, 10, 0, option);
+        ApplyMarkPriceCommand mark = new ApplyMarkPriceCommand(shortSymbol, 1, 100, 1,
+                1_700_000_000_001L);
+        TradingCoreState marked = reducer.applyMarkPrice(opening, mark);
+        assertThat(marked.riskState().liquidations().values())
+                .extracting(CoreLiquidationState::symbol).containsExactly(shortSymbol);
+        assertThat(marked.user(USER_ID).positions().get(option.symbol()).signedQuantitySteps()).isEqualTo(1);
+        assertThat(total(marked, option.settleAsset())).isEqualTo(100);
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimePerpetualRiskProcessor.simulateMarkPrice(
+                opening, mark, opening.users().keySet(), identities);
+        try {
+            RuntimeStateParityChecker.assertMatches(marked, identities, runtime);
+            assertThat(TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(marked),
+                    ProductLine.OPTION)).isEqualTo(marked);
+            // An already queued plan must not bypass the non-PM long-position protection.
+            runtime.putLiquidation(new LiquidationRuntime(99, USER_ID,
+                    identities.symbolId(option.symbol()), CoreMarginMode.CROSS, CorePositionSide.NET,
+                    1, 1, 1, 1, 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED, 0));
+            var execution = new com.surprising.aeron.protocol.ExecuteLiquidationCommand(99, 1, 100, 0);
+            assertThat(RuntimeLiquidationQueryService.isExecutable(runtime, identities, execution)).isFalse();
+            RuntimePerpetualLiquidationProcessor.applyExecutionRuntime(execution, List.of(), runtime, identities);
+            assertThat(runtime.liquidation(99).status()).isEqualTo(CoreLiquidationState.Status.CANCELED);
+            assertThat(runtime.position(identities.positionKey(USER_ID, option.symbol()))
+                    .signedQuantitySteps()).isEqualTo(1);
+        } finally {
+            runtime.close();
+        }
+    }
+
     private List<Row> allRows() {
         return VARIANTS.stream().map(variant -> variant.type().isOption()
                 ? optionRow(variant) : deliveryRow(variant)).toList();
@@ -414,7 +480,8 @@ class CoreDeliveryOptionFinancialMatrixTest {
     private TradingCoreState addPosition(TradingCoreState state, long userId, String symbol, long quantity,
                                          long entryPrice, long positionMargin, Variant variant) {
         CoreUserState current = state.user(userId);
-        AssetBalance balance = current.balances().get(variant.settleAsset()).reserve(positionMargin);
+        AssetBalance balance = current.balances().get(variant.settleAsset());
+        if (positionMargin > 0) balance = balance.reserve(positionMargin);
         Map<String, AssetBalance> balances = new TreeMap<>(current.balances());
         balances.put(variant.settleAsset(), balance);
         Map<String, CorePositionState> positions = new TreeMap<>(current.positions());

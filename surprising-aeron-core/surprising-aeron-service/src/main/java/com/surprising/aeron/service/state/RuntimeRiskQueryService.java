@@ -91,7 +91,8 @@ public final class RuntimeRiskQueryService {
             CoreInstrumentState instrument = runtime.instrument(key.symbol());
             if (position == null || position.signedQuantitySteps() == 0
                     || !identities.asset(position.assetId()).equals(normalizedAsset)
-                    || mark == null || instrument == null || !instrument.contractType().isPerpetual()
+                    || mark == null || instrument == null
+                    || !(instrument.contractType().isPerpetual() || instrument.contractType().isDelivery())
                     || !instrument.settleAsset().equals(normalizedAsset)) continue;
             long profit = CoreContractMath.pnlUnits(instrument, position.signedQuantitySteps(),
                     position.entryPriceTicks(), mark.markPriceTicks());

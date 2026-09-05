@@ -1266,7 +1266,8 @@ public final class TradingCoreReducer {
                     && value.status() != CoreLiquidationState.Status.COMPLETED
                     && value.status() != CoreLiquidationState.Status.CANCELED).findFirst().orElse(null);
         }
-        if (status != CoreRiskStatus.LIQUIDATION) {
+        if (status != CoreRiskStatus.LIQUIDATION
+                || !CoreRiskPolicy.canLiquidate(instrument.contractType(), position.signedQuantitySteps())) {
             if (active != null && active.status() == CoreLiquidationState.Status.PLANNED) {
                 liquidations.put(active.liquidationId(), active.canceled());
             }
@@ -1783,6 +1784,9 @@ public final class TradingCoreReducer {
     }
 
     private static boolean isLiquidationExecutable(TradingCoreState state, CoreLiquidationState liquidation) {
+        CoreInstrumentState instrument = state.instruments().get(liquidation.symbol());
+        if (instrument == null || !CoreRiskPolicy.canLiquidate(
+                instrument.contractType(), liquidation.signedQuantitySteps())) return false;
         CoreUserState user = state.user(liquidation.userId());
         CorePositionState position = user == null ? null
                 : user.positions().get(positionKey(liquidation.symbol(), liquidation.positionSide()));
@@ -2009,7 +2013,8 @@ public final class TradingCoreReducer {
                 if (position.signedQuantitySteps() == 0 || !position.marginAsset().equals(normalizedAsset)) continue;
                 CoreInstrumentState instrument = state.instruments().get(position.symbol());
                 CoreMarkPriceState mark = state.riskState().markPrices().get(position.symbol());
-                if (instrument == null || mark == null || !instrument.contractType().isPerpetual()
+                if (instrument == null || mark == null
+                        || !(instrument.contractType().isPerpetual() || instrument.contractType().isDelivery())
                         || !instrument.settleAsset().equals(normalizedAsset)) continue;
                 long profit = CoreContractMath.pnlUnits(instrument, position.signedQuantitySteps(),
                         position.entryPriceTicks(), mark.markPriceTicks());

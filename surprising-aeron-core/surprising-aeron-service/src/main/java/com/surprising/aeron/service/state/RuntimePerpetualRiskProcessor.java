@@ -330,7 +330,8 @@ public final class RuntimePerpetualRiskProcessor {
         runtime.putRiskSnapshot(identities.preparedPositionKey(userId, positionKey), new RiskSnapshotRuntime(userId,
                 symbolId, position.positionSide(), priceSequence, equity, unrealized, maintenance, ratio, status));
         LiquidationRuntime active = runtime.activeLiquidation(userId, symbolId, position.positionSide());
-        if (status != CoreRiskStatus.LIQUIDATION) {
+        if (status != CoreRiskStatus.LIQUIDATION
+                || !CoreRiskPolicy.canLiquidate(instrument.contractType(), position.signedQuantitySteps())) {
             if (active != null && active.status() == CoreLiquidationState.Status.PLANNED) {
                 runtime.replaceLiquidation(new LiquidationRuntime(active.liquidationId(), active.userId(),
                         active.symbolId(), active.marginMode(), active.positionSide(), active.instrumentVersion(),

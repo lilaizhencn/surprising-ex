@@ -3129,3 +3129,44 @@
 - GC/heap：SPOT/LINEAR分别6/5个GC事件，暂停phase26/23，总暂停0.325/0.241ms，phase p50/p95/p99/max=0.010/0.029/0.032/0.032ms及0.010/0.016/0.028/0.028ms；heap committed2GiB，After-GC末299892736/197132288B、峰408944640/247463936B。短窗口仍在初始化增长，不能证明无泄漏。NMT退出reserved/committed分别38015975042/2277846658B和38005861080/2265246424B（ZGC地址预留不等于物理占用），各category首末/峰值保存在analysis。Direct计数/字节0，因为没有真实Aeron传输，不能认证native池。
 - 调度/JIT/IO：ThreadPark64/66次、聚合13.40/12.27s（跨线程相加，主要Lane和JMH等待）；safepoint31/28次、最大begin0.211/0.162ms。编译5126/5178次、总22.96/22.57s、最大529.5/507.9ms，说明尚未充分预热。异常/IO含JMH反射探测、lambda链接、jffi解包、快照/夹具打印及JMH进程间socket，不能当业务异常数量或生产owner IO验收。22个系统样本Speed_Limit均100、swap0；OS上下文切换、FD峰值、完整native池和分业务三阶段延迟未采全。
 - 结论：本轮完成第一阶段回调边界实现，定向69项通过；JMH/JFR提供当前指定两线批量场景的部分诊断证据。既有扩展测试失败已单列，真实三节点选举/网络分区/高速追赶、其余四线JMH、API尾延迟与长稳泄漏未完成，不宣称完整交易链路或Cluster HA验收通过。下一阶段应先做真实Cluster的背压/慢消费者/重放与切主验证，而不是沿用内部Harness跑分推断生产容量。
+
+## PV-20260905-256-135：交割 ADL 候选与非 PM 期权多头保护（采集前锁定）
+
+- 被测代码：master ba908e38 + 本轮固定工作区 diff；对照 commit：不适用（仅验证当前 master）。修复交割 ADL 查询过滤，以及非 PM 期权多头强平计划/执行保护；不包含完整 OKX 期权保证金、接管、期权 ADL 改造。
+- 环境：Oracle GraalVM 25.0.1 HotSpot、Maven3.9.16，macOS26.7 x86_64/i9-9880H 8C16T/16GiB。JVM -Xms2g -Xmx2g -XX:+UseZGC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC、matching-engines=1，jdk.internal.misc opens/exports。开始前 Speed_Limit100、swap0；每5s记录系统限制和swap。
+- 场景：DerivativeRiskBoundaryBenchmark.riskAndAdl，分别 LINEAR_DELIVERY、INVERSE_DELIVERY、OPTION；4 Account Lane、1matcher、257用户（256交易用户+1maker）、2symbol、外部连接0，maxInFlight固定256。每用户经实际下单成交持有 RISK-LONG +1、RISK-SHORT -10，初始成交价100；随后扣除可用余额，保留已冻结保证金，外部调整计入期初资金。maker资金1e9，测量期间保留1笔maker挂单。币本位 multiplier=100/settleScale=100，其他为1；期权CALL/strike100。
+- 每invocation执行256次标记价更新（两symbol各128次，long120/short300），然后按64 work units续扫至风险扫描完成；交割额外查询1次ADL候选并确认盈利用户存在。期权终检要求256空头计划、多头无非终态强平计划且持仓保留。窗口256是进程内driver参数；标记价命令顺序完成，不能表述为256个并发网络请求或生产容量。闭环饱和、CO未修正，测量阶段无成交/batch，fills/s=0，订单成交在setup；query单列、不计business ops。
+- 无profiler主轮1fork/1thread、warmup2×2s、measurement3×2s；GC轮1fork、warmup1×2s、measurement2×2s，-prof gc；JFR每线单独1fork、warmup1×2s、measurement2×2s，使用PV134的明确profile.jfc，NMTsummary/PrintNMTStatistics和GC/safepoint日志。主轮与GC轮后各冷却30s，所有参数开始后不调整。
+- 通过阈值：business/Core accepted=terminal、unfinished0、资金守恒、非负余额/冻结、原始持仓不变及快照hash/资金一致；业务拒绝/技术错误/超时0；交割候选非空，期权多头保护成立。无吞吐数值门槛，此轮为新业务边界诊断。原始JMH主分数invocations/s，同时由计数和样本时长报告terminal business ops/s、Core messages/s，查询额外单列。最大/期末matcher backlog在本轮标记价场景为0，不代表入口排队0。
+- 无profiler结果用于场景吞吐，带profiler结果仅归因。JFR DataLoss>0、Speed_Limit<100或swap>0则性能轮无效；短预热/JIT、业务分段全分位、真实Aeron/native池、API/WebSocket、六线端到端、长期泄漏均未覆盖，最多部分验证。没有新增长期持仓容器；本轮不以短录制证明无泄漏。
+- artifact：target/qualification/20260905-risk-boundaries-256-r135/；run.sh保存完整命令，输入/输出SHA清单包含jar、diff、JFC、JSON及JFR。构建夹具失败：首轮测试辅助函数不接受零保证金，已修正；新基准续扫4096超过现有scanBatchSize被拒绝，改为64并重跑通过。这些失败未采集性能分数。
+
+### PV-135 结果（2026-09-05，原始 UTC 采集时间见 system-samples.txt）
+
+- 46项service回归（含六线快照）与3项benchmark夹具验证通过。执行本轮run.sh完成主轮、GC轮和三条线JFR。资金、余额、持仓、快照、accepted/terminal与unfinished检查通过；JFR DataLoss0，系统采样Speed_Limit100/swap0。
+- 发现基准错误地在续扫循环调用tradingState()，每次都物化全部账户/持仓并回读Lane。该轮标记为夹具干扰诊断，不能作为风险主链路吞吐验收。主分数按LINEAR_DELIVERY/INVERSE_DELIVERY/OPTION顺序4.043514±1.912002、4.048983±0.944450、4.195150±1.549850 invocations/s；每invocation固定324business/Core commands（256标记价+68续扫），即1310.099±619.489、1311.870±306.002、1359.228±502.151 terminal business ops/s，业务Core messages/s相同。测量总终态8424/8748/8748；额外ADL查询26/27/0，fills=0。所有unfinished=0，技术拒绝和超时0。
+- GC轮分配率327.409/374.046/330.639MiB/s，每business op317444/351972/295279B（包含错误的全状态物化）；GC次数6/6/6、时间38/39/37ms。上述分配不是生产risk纯计算成本。
+- JFR时长8.541/8.540/8.639s，大小3739766/3899605/3722665B；采样分配权重2.555/2.834/2.477GB（299.201/331.822/286.746MB/s），TLAB2.506/2.786/2.427GB，非TLAB43.669/43.246/43.609MB，最大对象8388624B。聚合risk角色实际为执行Core的owner/JMH worker，CPU样本52/73/68，Lane17/22/17，matcher25/19/19；主要干扰栈RuntimeStateMaterializer→pendingReservedUnits→LaneMutationTask.await，另有首次matcher native库加载与risk续扫。角色标签不代表独立风险线程。
+- GC pause phase总0.266/0.350/0.294ms，p50=0.009/0.009/0.010ms，p95/p99/max分别0.048/0.048/0.048、0.032/0.048/0.048、0.045/0.045/0.045ms；AfterGC末119537664/92274688/117440512B，committed2GiB。Safepoint25/28/25次，max0.089/0.071/0.111ms；JIT4572/4907/4434次，最长254.389/210.843/247.311ms，窗口未充分越过初始化。Park44/40/48次含JMH迭代等待；Direct bytes/count0仅指此进程内场景，NMT各类别首末峰值和delta均保存在analysis。异常和I/O包含JMH反射探测、类加载、native解包、snapshot终检，不能作为生产owner I/O门禁证据。
+- SHA、完整计数/栈/分配类/GC/JIT/NativeMemoryUsage/IO结果在input-sha256.txt、output-sha256.txt、各线summary/analysis。分业务三段延迟、对象数/op、真实native池、长稳泄漏、API/WebSocket与其余三线JMH未测；修复夹具后另开PV136，不改写本轮或比较旧版本。
+
+## PV-20260905-256-136：修正风险基准计时路径（采集前锁定）
+
+- 被测master ba908e38 + 本轮固定diff，对照commit：不适用（仅验证当前master）。生产改动与PV135相同，基准续扫循环改为CoreProbeState.runtimeRiskScan直接读取两symbol扫描状态；资金、订单和快照全量物化只发生在setup/终检边界。
+- 环境、HotSpot25/JVM参数/ZGC、机器、257用户/2symbol/4Lane/1matcher、固定maxInFlight256、持仓/资金/maker、业务动作比例及计数口径、1fork/1thread、主轮2×2s预热+3×2s测量、GC/JFR各1×2s预热+2×2s测量、两段30s冷却与profile.jfc均按PV135采集前定义锁定。mark命令仍顺序完成，因此只用于进程内风险组件诊断；不声称256网络并发容量。通过条件仍为全部资金/持仓/快照/终态检查通过，技术拒绝/超时0，DataLoss0、Speed_Limit100、swap0，不设吞吐门槛。
+- 执行target/qualification/20260905-risk-boundaries-256-r136/run.sh，输入/输出SHA和原始JFR/summary/analysis记录于同目录。完整API延迟、native池、长稳泄漏、期权卖方强平接管/期权ADL与完整OKX保证金规则仍未验证；本轮最多部分验证。开始后不修改参数。
+
+### PV-136 结果（2026-09-05，采集 UTC 时刻见 system-samples.txt）
+
+- HotSpot25构建与测试通过：`mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am '-Dtest=DerivativeRiskBoundaryBenchmarkTest,CoreDeliveryOptionFinancialMatrixTest,CoreRiskStateTest,CorePerpetualFinancialMatrixTest,CoreNativeSnapshotProductLineTest,SharedProductLineSnapshotContractTest' -Dsurefire.failIfNoSpecifiedTests=false package`。Service46项+benchmark3项=49项，0失败；tests.log保存完整结果。覆盖交割两方向合约/全仓逐仓候选和快照、期权混合多空账户保护与已排队强平取消、既有永续资金矩阵和六线快照。
+- jar SHA256=1a7d543321f56b6c8c2bd6fccc7c5c1fa04f523cd305f304eb79d4f24a8688b5；diff SHA256=7f424b7980acd6659e428dd1e37b76cbab2e532666cc7d21ef1120f9e324d7ac；JFC SHA256=4dbdbd4994757dc2e6930dee513d8ee298d687d9f298bc27434455d499784dc7。新增基准源文件单独列于input-sha256.txt，输出SHA见output-sha256.txt。
+- 无profiler主轮，按LINEAR_DELIVERY/INVERSE_DELIVERY/OPTION顺序：77.072009±58.147883、64.153760±61.774598、105.490666±69.276450 invocations/s。每invocation324终态业务命令，分别24971.331±18839.914、20785.818±20014.970、34178.976±22445.570 terminal business ops/s，业务Core messages/s相同；交割额外77.072/64.154 queries/s（所有Core消息含query时为25048.403/20849.972 messages/s），期权无query。短预热3个测量样本的99.9%区间很宽，只作为指定重风险场景诊断，不推断普通交易或网络并发容量。
+- 主轮accepted/terminal business与业务Core计数分别150984/125388/206064，额外query466/387/0；两个unfinished=0、资金/余额/冻结/持仓及恢复检查均通过。测量阶段fills/trades=0、batches/items=0，初始成交及资金调整在setup中；拒绝、技术错误、超时0，期末风险续扫完成，matcher backlog为0。期权保留256空头PLANNED任务和256用户多头持仓，这些计划不是未终态Core消息，也不表示强平执行已完成。
+- 独立GC轮：分配率700.800/1094.495/913.569MiB/s，每business op38653.019/73529.480/35002.252B，GC次数8/18/8、GC时间23/71/19ms（非纯STW），不使用profiler分数替代主轮。
+- JFR时长8.556/8.357/8.206s，原始大小4089821/4574512/4168790B，DataLoss均0。全录制采样分配权重4.725/6.606/5.611GB，对应552.263/790.419/683.819MB/s；TLAB4.688/6.576/5.583GB，非TLAB35.111/33.122/28.372MB，最大对象8388624B。采样含setup与终检，不能从权重推断精确对象数/op。
+- 分组CPU（聚合risk标签实为Core owner/JMH worker）：owner131/124/159、Lane54/82/62、matcher28/22/17、other6/4/6；主要业务栈PositionUserIndex.users的TreeSet物化、LiquidationIndex/RiskSnapshotIndex的TreeMap更新，首次native库加载仍占matcher样本。分配按owner3.461/2.851/4.160GB、Lane1.194/3.683/1.381GB；币本位包含反向合约数学的BigInteger分配。具体class/thread/site及CPU load见analysis，未将初始化/空闲park计为撮合业务热点。
+- GC phase pause总0.421/0.416/0.438ms，p50=0.011/0.009/0.010ms，p95=0.030/0.035/0.048ms，p99/max=0.046/0.044/0.048ms；AfterGC末98566144/100663296/98566144B，峰146800640/134217728/140509184B，heap committed2GiB。短窗口live set受初始化影响，不证明无泄漏。
+- NMT退出reserved/committed分别37991662010/2257732026、37991869689/2256473337、37990910184/2253093096B，地址预留不等于物理内存；各category首末/峰值/delta在analysis。Direct bytes/count全程采样0，场景无真实Aeron/Netty池，不能作生产堆外验收。
+- Safepoint30/33/30次、最大0.099/0.082/0.784ms；期权0.784ms需在后续单业务尾延迟采集中对照，本轮没有相应延迟直方图。JIT4673/4955/4726次、总10.593/8.407/6.559s、最长245.170/172.982/184.742ms，明显包含编译预热。ThreadPark113/248/208次，累计13.625/14.795/13.517s是跨线程相加、含迭代等待。异常、file/socket I/O仍有JMH反射探测、类加载/native解包、snapshot验证；不能宣称生产owner I/O门禁通过。系统采样Speed_Limit均100、swap0。
+- 脚本异常：首个JFR fork已正常完成，随后采样ps遇到目标进程退出，在set-e下使编排退出。原始LINEAR JFR/JSON完整保留；使用resume-profile.sh按已锁定参数仅完成其分析和剩余两条线JFR，修正退出后的ps非零处理。没有重跑已完成主轮、GC轮或覆盖原始数据。
+- 结论：本轮两项运行时边界修复及49项回归完成，三线JMH/JFR部分验证完成；逐业务三段延迟、OS调度全量指标、长期泄漏、真实Aeron三节点/API/WebSocket/外围native池、完整期权资金和接管模型仍缺失。未启动PG/exporter/wallet，未比较旧版本。完整OKX期权风险改造尚未完成。

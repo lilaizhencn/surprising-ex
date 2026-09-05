@@ -835,3 +835,13 @@ Topic、端口、磁盘、监控阈值和故障演练的精确清单待生产 Ru
 - 其他模块的 README 位于各自模块目录下。
 
 新的部署、产品线、资金模型、撮合和压测文档请按主题补回，并同步更新本文档入口。
+
+### 期权风险与交割 ADL 的修复边界
+
+当前六条产品线仍各自隔离。本轮参照 OKX 非组合保证金规则：已全额支付权利金的期权多头不参与普通强平；`CoreRiskPolicy.canLiquidate` 同时约束风险计划生成、`RuntimeLiquidationQueryService` 执行检查和 `RuntimePerpetualLiquidationProcessor` 最终执行，已排队的多头计划会取消并保留持仓。账户风险状态仍可由其他空头持仓触发，不能把账户风险状态直接等同于每个持仓都应强平。
+
+`RuntimeRiskQueryService` 与 `TradingCoreReducer.adlCandidates` 已补上 U 本位、币本位交割合约候选，按原有规则排除无盈利、结算资产不匹配和零持仓。此项修复保持现有 ADL 排序与执行现金模型；尚未实现 OKX 的完整期权 ADL、仓位接管、基金阈值及缓冲规则。
+
+后续期权保证金改造必须成套区分钱包现金、期权市值、展示浮盈及可用保证金；不能单独把风险权益改成钱包加期权市值。OKX 普通期权保证金还依赖指数价、同到期远期标记价、虚值额及仓位档位系数，当前 `ApplyMarkPriceCommand` 只提供单一合约标记价。本轮没有将缺失输入用行权价代替，也尚未完成期权空头强平现金与履约义务接管修复。以上是明确的未完范围，不代表六产品线风险模型已完整对齐 OKX。
+
+规则依据：[OKX 期权保证金](https://www.okx.com/help/ii-option-margin)、[强平说明](https://www.okx.com/en-us/help/forced-liquidation-faq)、[ADL 机制](https://www.okx.com/help/iv-introduction-to-auto-deleveraging-adl)。回归用例位于 `CoreDeliveryOptionFinancialMatrixTest`，受影响场景基准为 `DerivativeRiskBoundaryBenchmark`；性能采集口径和结果统一追加至根目录 `PERFORMANCE_VALIDATION.md`。
