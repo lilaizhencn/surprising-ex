@@ -31,6 +31,14 @@ class CoreMessageCodecTest {
     }
 
     @Test
+    void preservesTheCanonicalCommandFingerprintVector() {
+        CoreMessage message = command(UUID.fromString("00112233-4455-6677-8899-aabbccddeeff"), 42, 99, 7);
+
+        assertThat(CommandFingerprint.of(message).toString())
+                .isEqualTo("c70c075ab1970934ab096f64234a58723fe073becea073d8335a4f60358a87b8");
+    }
+
+    @Test
     void encodesIntoReusableDestinationWithoutTouchingItsTail() {
         CoreMessage message = command(UUID.fromString("00112233-4455-6677-8899-aabbccddeeff"), 42, 99, 7);
         byte[] destination = new byte[256];

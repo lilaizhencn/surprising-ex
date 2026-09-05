@@ -33,6 +33,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     private static final int CHANGE_KEY_COMPACTION_THRESHOLD = 512;
     private static final int PARALLEL_SETTLEMENT_MIN_LANE_OPERATIONS = Math.max(2,
             Integer.getInteger("surprising.aeron.parallel-settlement-min-lane-operations", 2));
+    private static final int LANE_COMPLETION_SPINS = Math.max(0,
+            Integer.getInteger("surprising.aeron.lane-completion-spins", 1_024));
 
     private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
     private long revision;
@@ -42,10 +44,6 @@ public final class TradingRuntimeState implements AutoCloseable {
     private final SettlementLaneWorker[] laneWorkers;
     private final LaneSequenceQueue[] placeAdmissionReadyQueues;
     private final LaneSequenceQueue[] matcherSettlementReadyQueues;
-    private final java.util.concurrent.atomic.AtomicLong placeAdmissionReadyLaneMask =
-            new java.util.concurrent.atomic.AtomicLong();
-    private final java.util.concurrent.atomic.AtomicLong matcherSettlementReadyLaneMask =
-            new java.util.concurrent.atomic.AtomicLong();
     private final LaneMutationTask[] laneMutationTasks;
     private final long[] laneMutationStartedNanosScratch;
     private final Object[] laneMutationResultsScratch;
@@ -1204,6 +1202,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             Thread current = Thread.currentThread();
             waiter = current;
             try {
+                int spins = LANE_COMPLETION_SPINS;
+                while (!completed && spins-- > 0) Thread.onSpinWait();
                 while (!completed) {
                     java.util.concurrent.locks.LockSupport.park(this);
                     if (Thread.interrupted()) interrupted = true;
@@ -1515,9 +1515,11 @@ public final class TradingRuntimeState implements AutoCloseable {
     private long stageLaneMutationFromScratch(long coreSequence) {
         LaneCommitEvent event = dispatchLaneMutationFromScratch(coreSequence);
         if (event == null) return 0;
+        int idle = 0;
         while (!event.complete()) {
-            assertAccountLanesHealthy();
-            Thread.onSpinWait();
+            if ((idle++ & 1_023) == 0) assertAccountLanesHealthy();
+            if (idle <= LANE_COMPLETION_SPINS) Thread.onSpinWait();
+            else Thread.yield();
         }
         long laneMask = event.requiredLaneMask();
         releaseLaneCommit(event);
@@ -1794,13 +1796,11 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     void publishPlaceAdmissionReady(int laneId, long coreSequence) {
         placeAdmissionReadyQueues[laneId].publish(coreSequence);
-        markLaneReady(placeAdmissionReadyLaneMask, laneId);
     }
 
     public long takePlaceAdmissionReadyLaneMask() {
         assertOwner();
-        return placeAdmissionReadyLaneMask.getAcquire() == 0
-                ? 0 : placeAdmissionReadyLaneMask.getAndSet(0);
+        return readyLaneMask(placeAdmissionReadyQueues);
     }
 
     public long pollPlaceAdmissionReady(int laneId) {
@@ -1813,13 +1813,11 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     void publishMatcherSettlementReady(int laneId, long coreSequence) {
         matcherSettlementReadyQueues[laneId].publish(coreSequence);
-        markLaneReady(matcherSettlementReadyLaneMask, laneId);
     }
 
     public long takeMatcherSettlementReadyLaneMask() {
         assertOwner();
-        return matcherSettlementReadyLaneMask.getAcquire() == 0
-                ? 0 : matcherSettlementReadyLaneMask.getAndSet(0);
+        return readyLaneMask(matcherSettlementReadyQueues);
     }
 
     public long pollMatcherSettlementReady(int laneId) {
@@ -1830,12 +1828,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         return matcherSettlementReadyQueues[laneId].poll();
     }
 
-    private static void markLaneReady(java.util.concurrent.atomic.AtomicLong readyMask, int laneId) {
-        long laneBit = 1L << laneId;
-        long current;
-        do {
-            current = readyMask.getPlain();
-        } while (!readyMask.weakCompareAndSetRelease(current, current | laneBit));
+    private static long readyLaneMask(LaneSequenceQueue[] queues) {
+        long mask = 0;
+        for (int laneId = 0; laneId < queues.length; laneId++) {
+            if (queues[laneId].hasPending()) mask |= 1L << laneId;
+        }
+        return mask;
     }
 
     public CoreMatchingOrder collectPlaceAdmission(PlaceAdmissionEvent event) {
@@ -4208,7 +4206,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         });
         changedLiquidations.forEach((liquidationId, value) ->
                 consumer.liquidation(liquidationId, null, value));
-        changedRiskSnapshots.forEach((riskKey, value) -> consumer.riskSnapshot(riskKey, null, value));
         changedAlgoOrders.forEach(algoOrderId -> consumer.algoOrder(algoOrderId, null, algoOrder(algoOrderId)));
         changedTriggerOrders.forEach(triggerOrderId ->
                 consumer.triggerOrder(triggerOrderId, null, triggerOrder(triggerOrderId)));
@@ -4247,35 +4244,36 @@ public final class TradingRuntimeState implements AutoCloseable {
         return Math.subtractExact(revision, totalPendingReservations);
     }
 
-    public RuntimeFundsDelta prepareFundsDelta() {
+    public void appendFundsDelta(RuntimeFundsAccumulator accumulator) {
         assertOwner();
-        ArrayList<RuntimeFundsDelta.Posting> postings = new ArrayList<>();
-        addBalancePostings(postings, patchBalancesBeforeByLane);
+        if (accumulator == null) throw new IllegalArgumentException("funds accumulator is required");
+        for (LaneBalancePatches balances : patchBalancesBeforeByLane) {
+            appendBalanceFundsDelta(balances, accumulator);
+        }
         treasury.changedAssets().forEach(assetId -> {
             RuntimeFactFrame.TreasuryAssetValue before = treasury.patchAssetBefore(assetId);
             RuntimeFactFrame.TreasuryAssetValue after = treasuryAssetValue(assetId);
-            addFundsPosting(postings, assetId, FundsPosting.OwnerKind.TREASURY, 0,
+            accumulator.add(assetId, FundsPosting.OwnerKind.TREASURY, 0,
                     FundsPosting.Subledger.FEE, Math.subtractExact(fee(after), fee(before)));
-            addFundsPosting(postings, assetId, FundsPosting.OwnerKind.TREASURY, 0,
+            accumulator.add(assetId, FundsPosting.OwnerKind.TREASURY, 0,
                     FundsPosting.Subledger.INSURANCE,
                     Math.subtractExact(insurance(after), insurance(before)));
-            addFundsPosting(postings, assetId, FundsPosting.OwnerKind.TREASURY, 0,
+            accumulator.add(assetId, FundsPosting.OwnerKind.TREASURY, 0,
                     FundsPosting.Subledger.DEFICIT,
                     Math.negateExact(Math.subtractExact(deficit(after), deficit(before))));
-            addFundsPosting(postings, assetId, FundsPosting.OwnerKind.TREASURY, 0,
+            accumulator.add(assetId, FundsPosting.OwnerKind.TREASURY, 0,
                     FundsPosting.Subledger.LIQUIDATION_FEE,
                     Math.subtractExact(liquidationFee(after), liquidationFee(before)));
-            addFundsPosting(postings, assetId, FundsPosting.OwnerKind.TREASURY, 0,
+            accumulator.add(assetId, FundsPosting.OwnerKind.TREASURY, 0,
                     FundsPosting.Subledger.FUNDING_RESIDUAL,
                     Math.subtractExact(fundingResidual(after), fundingResidual(before)));
-            addFundsPosting(postings, assetId, FundsPosting.OwnerKind.TREASURY, 0,
+            accumulator.add(assetId, FundsPosting.OwnerKind.TREASURY, 0,
                     FundsPosting.Subledger.ROUNDING_RESIDUAL,
                     Math.subtractExact(roundingResidual(after), roundingResidual(before)));
-            addFundsPosting(postings, assetId, FundsPosting.OwnerKind.TREASURY, 0,
+            accumulator.add(assetId, FundsPosting.OwnerKind.TREASURY, 0,
                     FundsPosting.Subledger.CLEARING_PNL,
                     Math.subtractExact(clearingPnl(after), clearingPnl(before)));
         });
-        return RuntimeFundsDelta.fromDistinct(postings);
     }
 
     private static void prepareBalanceFundsDelta(LaneBalancePatches patches,
@@ -4295,34 +4293,20 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    private static void addBalancePostings(ArrayList<RuntimeFundsDelta.Posting> postings,
-                                           LaneBalancePatches[] patches) {
-        for (LaneBalancePatches balances : patches) {
-            addBalancePostings(postings, balances);
-        }
-    }
-
-    private static void addBalancePostings(ArrayList<RuntimeFundsDelta.Posting> postings,
-                                           LaneBalancePatches balances) {
+    private static void appendBalanceFundsDelta(LaneBalancePatches balances,
+                                                RuntimeFundsAccumulator accumulator) {
         for (int index = 0; index < balances.size(); index++) {
             long userId = balances.userId(index);
             int assetId = balances.assetId(index);
             RuntimeFactFrame.UserBalance before = balances.before(index);
             RuntimeFactFrame.UserBalance after = balances.after(index);
-            addFundsPosting(postings, assetId, FundsPosting.OwnerKind.USER, userId,
+            accumulator.add(assetId, FundsPosting.OwnerKind.USER, userId,
                     FundsPosting.Subledger.AVAILABLE,
                     Math.subtractExact(available(after), available(before)));
-            addFundsPosting(postings, assetId, FundsPosting.OwnerKind.USER, userId,
+            accumulator.add(assetId, FundsPosting.OwnerKind.USER, userId,
                     FundsPosting.Subledger.LOCKED,
                     Math.subtractExact(locked(after), locked(before)));
         }
-    }
-
-    private static void addFundsPosting(ArrayList<RuntimeFundsDelta.Posting> postings, int assetId,
-                                        FundsPosting.OwnerKind ownerKind, long ownerId,
-                                        FundsPosting.Subledger subledger, long units) {
-        if (units != 0) postings.add(new RuntimeFundsDelta.Posting(
-                assetId, ownerKind, ownerId, subledger, units));
     }
 
     private static long available(RuntimeFactFrame.UserBalance value) {

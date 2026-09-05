@@ -79,6 +79,12 @@ public final class RuntimeCommitJournal implements AutoCloseable {
     public boolean activated() { return activated; }
 
     public AdmissionReservation reserveAdmission(int entriesRequired) {
+        reserveEntries(entriesRequired);
+        return new AdmissionReservation(this, entriesRequired);
+    }
+
+    /** Allocation-free reservation used by the Product Core owner hot path. */
+    public void reserveEntries(int entriesRequired) {
         requireHealthy();
         if (entriesRequired < 1) throw new IllegalArgumentException("journal reservation must be positive");
         if (entriesRequired > capacity - reservedEntries) {
@@ -86,7 +92,22 @@ public final class RuntimeCommitJournal implements AutoCloseable {
             throw new CoreStateRejectedException("MATCHING_BACKPRESSURE", "commit admission is full");
         }
         reservedEntries = Math.addExact(reservedEntries, entriesRequired);
-        return new AdmissionReservation(this, entriesRequired);
+    }
+
+    public void releaseEntries(int entries) {
+        requireHealthy();
+        if (entries < 1 || entries > reservedEntries) {
+            throw new IllegalStateException("invalid commit admission release");
+        }
+        reservedEntries = Math.subtractExact(reservedEntries, entries);
+    }
+
+    public long publishReserved(long sequence) {
+        requireHealthy();
+        if (reservedEntries < 1) throw new IllegalStateException("commit admission is not reserved");
+        long published = publish(sequence, businessStateHash, fundsStateHash);
+        reservedEntries--;
+        return published;
     }
 
     public AdmissionReservation reserveAdmission(int entriesRequired, long bytesRequired) {

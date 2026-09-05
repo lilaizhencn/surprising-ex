@@ -6,33 +6,25 @@ import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
 
 /** Sequence-local fan-out that advances every affected Account Lane without an owner-side per-lane barrier. */
 public final class LaneCommitEvent implements SettlementLaneWorker.Command {
-    private static final VarHandle COMPLETED_LANE_MASK;
-
-    static {
-        try {
-            COMPLETED_LANE_MASK = MethodHandles.lookup().findVarHandle(
-                    LaneCommitEvent.class, "completedLaneMask", long.class);
-        } catch (ReflectiveOperationException exception) {
-            throw new ExceptionInInitializerError(exception);
-        }
-    }
+    private static final int CACHE_LINE_LONGS = 16;
+    private static final VarHandle LONGS = MethodHandles.arrayElementVarHandle(long[].class);
 
     private final LongArrayList[] usersByLane;
+    private final long[] completedLanes;
     private TradingRuntimeState runtime;
     private long coreSequence;
     private long requiredLaneMask;
-    @SuppressWarnings("unused")
-    private volatile long completedLaneMask;
 
     LaneCommitEvent(int laneCount) {
         usersByLane = new LongArrayList[laneCount];
+        completedLanes = new long[Math.multiplyExact(laneCount, CACHE_LINE_LONGS)];
         for (int laneId = 0; laneId < laneCount; laneId++) usersByLane[laneId] = new LongArrayList(4);
     }
 
     LaneCommitEvent prepare(long sequence, long laneMask, LongArrayList[] routedUsers,
                             TradingRuntimeState owner) {
         if (sequence <= 0 || laneMask == 0 || routedUsers == null || owner == null
-                || coreSequence != 0 || completedLaneMask != 0) {
+                || coreSequence != 0 || completedLaneMask() != 0) {
             throw new IllegalStateException("invalid Account Lane commit event");
         }
         coreSequence = sequence;
@@ -56,15 +48,24 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
         long startedNanos = System.nanoTime();
         runtime.applyLaneUsers(lane, usersByLane[laneId], coreSequence);
         runtime.recordSequenceCommitLaneOperation(laneId, System.nanoTime() - startedNanos);
-        long previous = (long) COMPLETED_LANE_MASK.getAndBitwiseOrRelease(this, laneBit);
-        if ((previous & laneBit) != 0) {
+        int completionOffset = laneId * CACHE_LINE_LONGS;
+        if ((long) LONGS.getAcquire(completedLanes, completionOffset) != 0) {
             throw new IllegalStateException("Account Lane committed the same sequence twice");
         }
+        LONGS.setRelease(completedLanes, completionOffset, 1L);
     }
 
     public long coreSequence() { return coreSequence; }
     public long requiredLaneMask() { return requiredLaneMask; }
-    public long completedLaneMask() { return (long) COMPLETED_LANE_MASK.getAcquire(this); }
+    public long completedLaneMask() {
+        long mask = 0;
+        for (int laneId = 0; laneId < usersByLane.length; laneId++) {
+            if ((long) LONGS.getAcquire(completedLanes, laneId * CACHE_LINE_LONGS) != 0) {
+                mask |= 1L << laneId;
+            }
+        }
+        return mask;
+    }
     public boolean complete() { return completedLaneMask() == requiredLaneMask; }
 
     void clear() {
@@ -73,7 +74,7 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
     }
 
     void discard() {
-        if (completedLaneMask != 0) throw new IllegalStateException("started Account Lane commit cannot be discarded");
+        if (completedLaneMask() != 0) throw new IllegalStateException("started Account Lane commit cannot be discarded");
         reset();
     }
 
@@ -82,6 +83,8 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
         runtime = null;
         coreSequence = 0;
         requiredLaneMask = 0;
-        COMPLETED_LANE_MASK.setRelease(this, 0L);
+        for (int laneId = 0; laneId < usersByLane.length; laneId++) {
+            LONGS.setRelease(completedLanes, laneId * CACHE_LINE_LONGS, 0L);
+        }
     }
 }

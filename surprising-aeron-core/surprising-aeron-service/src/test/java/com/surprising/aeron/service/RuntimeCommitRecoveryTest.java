@@ -951,8 +951,7 @@ class RuntimeCommitRecoveryTest {
                 Map.entry("liquidation", indexSnapshot(field(state, "liquidationIndex"))),
                 Map.entry("timer", indexSnapshot(field(state, "cancelAllAfterIndex"))),
                 Map.entry("active-order", indexSnapshot(field(state, "activeOrderIndex"))),
-                Map.entry("adl-position", indexSnapshot(field(state, "adlPositionIndex"))),
-                Map.entry("risk-snapshot", indexSnapshot(field(state, "riskSnapshotIndex"))));
+                Map.entry("adl-position", indexSnapshot(field(state, "adlPositionIndex"))));
     }
 
     private static void assertIndexesEqualCanonicalRebuild(CoreProbeState state) throws Exception {
@@ -975,9 +974,7 @@ class RuntimeCommitRecoveryTest {
                 Map.entry("active-order", indexSnapshot(
                         new com.surprising.aeron.service.state.ActiveOrderIndex(core, identities))),
                 Map.entry("adl-position", indexSnapshot(
-                        new com.surprising.aeron.service.state.AdlPositionIndex(core, identities))),
-                Map.entry("risk-snapshot", indexSnapshot(
-                        new com.surprising.aeron.service.state.RiskSnapshotIndex(core))));
+                        new com.surprising.aeron.service.state.AdlPositionIndex(core, identities))));
         assertThat(allIndexSnapshots(state)).isEqualTo(rebuilt);
     }
 

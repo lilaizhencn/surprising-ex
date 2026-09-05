@@ -86,11 +86,20 @@ Archive 本地 control 为 1 MiB；term buffer 使用非 sparse 文件。线程�
 不全量 materialize，也不等待后台 projection。显式 snapshot/query fence 直接从权威 runtime
 构造不可变视图；任何 sequence、hash、产品线或 Lane 拓扑不匹配均在替换状态前 fail closed。
 
-`RuntimeFactIndexes` 的唯一 fact frame apply 入口覆盖九个索引：`PositionUserIndex`、`OpenInterestIndex`、
+`RuntimeFactIndexes` 的唯一变更提交入口覆盖八个必要查询索引：`PositionUserIndex`、`OpenInterestIndex`、
 `TriggerOrderIndex`、`AlgoOrderIndex`、`LiquidationIndex`、`CancelAllAfterIndex`、`ActiveOrderIndex`、
-`AdlPositionIndex` 与 `RiskSnapshotIndex`。terminal ID 只在运行时索引和恢复所需边界保留，不为历史投影维护 tombstone。
+`AdlPositionIndex`。风险快照直接保存在权威 runtime 中，不再维护无人读取的重复索引。terminal ID 只在运行时索引和恢复所需边界保留，不为历史投影维护 tombstone。
 订单的 canonical business/export view 只在 owner 的 `prepareCommitPatch` 中由一处 `recordOrder` producer 预封装；
 fact frame 的 typed change 随后由 index 和恢复边界直接读取，不再生成 `businessAfter` / `exportAfter` 状态副本。
+
+`PositionUserIndex` 按 symbol 与 Account Lane 保存有序 primitive user id；风险 continuation 直接在目标 Lane
+二分推进，不再为 mark 命令装箱构造 `TreeSet`，也不再从其他 Lane 的用户上重复跳过。Lane 完成通知通过每 Lane
+SPSC 队列发布，matcher settlement 与 sequence commit 的完成位按缓存行隔离，避免多个 Lane 对同一原子 mask 写竞争。
+matcher pipeline 的生产、执行、完成和消费游标同样隔离缓存行；这些边界仍保留 release/acquire 可见性与 sequence 校验。
+
+owner 的 commit admission 仍在变更前完成容量预留并在发布时严格消费，但 steady-state reservation 可回收，journal
+使用 owner-owned primitive 计数，不再为每条命令额外创建 journal reservation。资金变更直接追加到可复用 primitive
+accumulator；canonical 资金对象只在协议、查询或恢复边界物化。
 
 owner 提交暂存采用可复用 `RuntimeFactFrame.Builder`；reset 只清理本轮触碰的槽位，materialized fact frame 仍持有独立不可变值。
 用户与余额 before-value 按 Account Lane 写入 primitive journal，避免共享 `ConcurrentHashMap<Long, ...>` 的装箱和节点竞争；

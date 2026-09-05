@@ -159,7 +159,7 @@ class CoreRiskStateTest {
 
         RuntimePerpetualRiskProcessor.applyMarkPriceRuntime(
                 new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 1, 1_700_000_000_000L),
-                state.users().keySet(), runtime, identities);
+                runtime, identities);
 
         assertThat(runtime.revision()).isEqualTo(revisionBefore + 1);
         assertThat(runtime.riskScan(identities.symbolId("BTC-USDT")).riskComplete()).isFalse();

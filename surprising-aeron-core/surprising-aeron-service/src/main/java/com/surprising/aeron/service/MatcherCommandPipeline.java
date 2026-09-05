@@ -20,10 +20,10 @@ final class MatcherCommandPipeline implements AutoCloseable {
     private final int mask;
     private volatile Thread worker;
     private Runnable startupAction;
-    private volatile long submittedPosition;
-    private volatile long consumedPosition;
-    private volatile long workerPosition;
-    private volatile long completedPosition;
+    private final PaddedSequence submittedPosition = new PaddedSequence();
+    private final PaddedSequence consumedPosition = new PaddedSequence();
+    private final PaddedSequence workerPosition = new PaddedSequence();
+    private final PaddedSequence completedPosition = new PaddedSequence();
     private volatile boolean accepting;
     private volatile int submissionHighWaterMark;
     private volatile int completionHighWaterMark;
@@ -88,8 +88,8 @@ final class MatcherCommandPipeline implements AutoCloseable {
     private void submitInternal(long token, Supplier<?> command) {
         if (token == 0 || command == null) throw new IllegalArgumentException("matcher command is invalid");
         if (!accepting) throw new RejectedExecutionException("matcher pipeline is closed");
-        long position = submittedPosition;
-        if (position - consumedPosition >= slots.length) {
+        long position = submittedPosition.value;
+        if (position - consumedPosition.value >= slots.length) {
             throw new RejectedExecutionException("matcher pipeline is full");
         }
         Slot slot = slots[(int) position & mask];
@@ -98,10 +98,10 @@ final class MatcherCommandPipeline implements AutoCloseable {
         }
         slot.token = token;
         slot.command = command;
-        submittedPosition = position + 1;
-        int depth = Math.toIntExact(submittedPosition - consumedPosition);
+        submittedPosition.value = position + 1;
+        int depth = Math.toIntExact(position + 1 - consumedPosition.value);
         submissionHighWaterMark = Math.max(submissionHighWaterMark, depth);
-        if (position == workerPosition) LockSupport.unpark(worker);
+        if (position == workerPosition.value) LockSupport.unpark(worker);
     }
 
     CoreMatchingResult poll(long expectedCoreSequence) {
@@ -118,16 +118,16 @@ final class MatcherCommandPipeline implements AutoCloseable {
      * to drain completed matching work without probing every pending Core sequence.
      */
     long completedMatchingSequence() {
-        long position = consumedPosition;
-        if (position >= completedPosition) return 0;
+        long position = consumedPosition.value;
+        if (position >= completedPosition.value) return 0;
         long token = slots[(int) position & mask].token;
         return token > 0 ? token : 0;
     }
 
     private Object pollResult(long expectedToken) {
         if (expectedToken == 0) throw new IllegalArgumentException("matcher token must be non-zero");
-        long position = consumedPosition;
-        if (position >= completedPosition) return null;
+        long position = consumedPosition.value;
+        if (position >= completedPosition.value) return null;
         Slot slot = slots[(int) position & mask];
         // A shard still publishes completions in its own submission order. The owner can probe
         // pending commands in a different (Core sequence) order, so a non-head token is simply
@@ -137,7 +137,7 @@ final class MatcherCommandPipeline implements AutoCloseable {
         Object result = slot.result;
         Throwable failure = slot.failure;
         slot.clear();
-        consumedPosition = position + 1;
+        consumedPosition.value = position + 1;
         if (failure != null) {
             if (failure instanceof RuntimeException runtimeFailure) throw runtimeFailure;
             if (failure instanceof Error error) throw error;
@@ -176,15 +176,19 @@ final class MatcherCommandPipeline implements AutoCloseable {
     }
 
     int submissionDepth() {
-        return Math.toIntExact(submittedPosition - workerPosition);
+        return Math.toIntExact(submittedPosition.value - workerPosition.value);
     }
 
     int completionDepth() {
-        return Math.toIntExact(completedPosition - consumedPosition);
+        return Math.toIntExact(completedPosition.value - consumedPosition.value);
     }
 
     int inFlight() {
-        return Math.toIntExact(submittedPosition - consumedPosition);
+        return Math.toIntExact(submittedPosition.value - consumedPosition.value);
+    }
+
+    long submittedPosition() {
+        return submittedPosition.value;
     }
 
     int capacity() {
@@ -209,10 +213,10 @@ final class MatcherCommandPipeline implements AutoCloseable {
             started = true;
         }
         if (startupFailure != null) return;
-        long position = workerPosition;
+        long position = workerPosition.value;
         int idle = 0;
-        while (accepting || position < submittedPosition) {
-            if (position >= submittedPosition) {
+        while (accepting || position < submittedPosition.value) {
+            if (position >= submittedPosition.value) {
                 if (idle++ < WORKER_IDLE_SPINS) Thread.onSpinWait();
                 else LockSupport.parkNanos(this, WORKER_IDLE_PARK_NANOS);
                 continue;
@@ -230,10 +234,10 @@ final class MatcherCommandPipeline implements AutoCloseable {
                 }
             }
             position++;
-            workerPosition = position;
-            completedPosition = position;
+            workerPosition.value = position;
+            completedPosition.value = position;
             completionHighWaterMark = Math.max(completionHighWaterMark,
-                    Math.toIntExact(position - consumedPosition));
+                    Math.toIntExact(position - consumedPosition.value));
         }
         if (shutdownAction != null) {
             try {
@@ -321,5 +325,13 @@ final class MatcherCommandPipeline implements AutoCloseable {
             result = null;
             failure = null;
         }
+    }
+
+    private static final class PaddedSequence {
+        @SuppressWarnings("unused")
+        private long p01, p02, p03, p04, p05, p06, p07;
+        private volatile long value;
+        @SuppressWarnings("unused")
+        private long p11, p12, p13, p14, p15, p16, p17;
     }
 }

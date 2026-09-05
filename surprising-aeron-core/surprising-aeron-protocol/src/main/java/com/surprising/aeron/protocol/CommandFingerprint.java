@@ -9,7 +9,8 @@ public final class CommandFingerprint {
 
     public static final int LENGTH = 32;
     private static final int CANONICAL_VERSION = 1;
-    private static final ThreadLocal<MessageDigest> DIGEST = ThreadLocal.withInitial(CommandFingerprint::newDigest);
+    private static final int HEADER_LENGTH = Integer.BYTES * 8 + Long.BYTES;
+    private static final ThreadLocal<Scratch> SCRATCH = ThreadLocal.withInitial(Scratch::new);
     private final byte[] value;
 
     private CommandFingerprint(byte[] value) {
@@ -27,17 +28,21 @@ public final class CommandFingerprint {
         Objects.requireNonNull(message, "message");
         CoreMessageHeader header = message.header();
         byte[] payload = message.payloadUnsafe();
-        MessageDigest digest = DIGEST.get();
+        Scratch scratch = SCRATCH.get();
+        MessageDigest digest = scratch.digest;
         digest.reset();
-        updateInt(digest, CANONICAL_VERSION);
-        updateInt(digest, header.schemaVersion());
-        updateInt(digest, header.messageType().wireCode());
-        updateInt(digest, ProductLineWireCode.encode(header.productLine()));
-        updateInt(digest, header.route().shardCode());
-        updateInt(digest, header.route().version());
-        updateInt(digest, header.source().wireCode());
-        updateLong(digest, header.userId());
-        updateInt(digest, payload.length);
+        int offset = 0;
+        offset = putInt(scratch.header, offset, CANONICAL_VERSION);
+        offset = putInt(scratch.header, offset, header.schemaVersion());
+        offset = putInt(scratch.header, offset, header.messageType().wireCode());
+        offset = putInt(scratch.header, offset, ProductLineWireCode.encode(header.productLine()));
+        offset = putInt(scratch.header, offset, header.route().shardCode());
+        offset = putInt(scratch.header, offset, header.route().version());
+        offset = putInt(scratch.header, offset, header.source().wireCode());
+        offset = putLong(scratch.header, offset, header.userId());
+        offset = putInt(scratch.header, offset, payload.length);
+        if (offset != HEADER_LENGTH) throw new IllegalStateException("invalid fingerprint header length");
+        digest.update(scratch.header, 0, offset);
         digest.update(payload);
         return new CommandFingerprint(digest.digest(), true);
     }
@@ -85,17 +90,28 @@ public final class CommandFingerprint {
         }
     }
 
-    private static void updateInt(MessageDigest digest, int value) {
-        updateLong(digest, Integer.toUnsignedLong(value), Integer.BYTES);
+    private static int putInt(byte[] target, int offset, int value) {
+        target[offset] = (byte) value;
+        target[offset + 1] = (byte) (value >>> 8);
+        target[offset + 2] = (byte) (value >>> 16);
+        target[offset + 3] = (byte) (value >>> 24);
+        return offset + Integer.BYTES;
     }
 
-    private static void updateLong(MessageDigest digest, long value) {
-        updateLong(digest, value, Long.BYTES);
+    private static int putLong(byte[] target, int offset, long value) {
+        target[offset] = (byte) value;
+        target[offset + 1] = (byte) (value >>> 8);
+        target[offset + 2] = (byte) (value >>> 16);
+        target[offset + 3] = (byte) (value >>> 24);
+        target[offset + 4] = (byte) (value >>> 32);
+        target[offset + 5] = (byte) (value >>> 40);
+        target[offset + 6] = (byte) (value >>> 48);
+        target[offset + 7] = (byte) (value >>> 56);
+        return offset + Long.BYTES;
     }
 
-    private static void updateLong(MessageDigest digest, long value, int bytes) {
-        for (int shift = 0; shift < bytes * Byte.SIZE; shift += Byte.SIZE) {
-            digest.update((byte) (value >>> shift));
-        }
+    private static final class Scratch {
+        private final MessageDigest digest = newDigest();
+        private final byte[] header = new byte[HEADER_LENGTH];
     }
 }

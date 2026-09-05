@@ -9,7 +9,6 @@ import com.surprising.aeron.service.state.CancelAllAfterIndex;
 import com.surprising.aeron.service.state.ActiveOrderIndex;
 import com.surprising.aeron.service.state.AdlPositionIndex;
 import com.surprising.aeron.service.state.PositionUserIndex;
-import com.surprising.aeron.service.state.RiskSnapshotIndex;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.state.RuntimeFactFrame;
@@ -35,7 +34,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
     private final CancelAllAfterIndex timers;
     private final ActiveOrderIndex activeOrders;
     private final AdlPositionIndex adlPositions;
-    private final RiskSnapshotIndex riskSnapshots;
     private final RuntimeFactIndexes factIndexes;
     private RuntimeIdentityRegistry identities;
     private TradingRuntimeState runtimeState;
@@ -93,16 +91,15 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 : new DeterministicExchangeCoreAdapter(
                         initialState, activeOrders.orders(), coreSequence, matcherSnapshot, activateImmediately,
                         expectedCoreBusinessStateHash);
-        this.positionUsers = new PositionUserIndex(initialState, identities);
+        this.positionUsers = new PositionUserIndex(initialState, identities, topology);
         this.openInterest = new OpenInterestIndex(initialState, identities);
         this.triggers = new TriggerOrderIndex(initialState);
         this.algos = new AlgoOrderIndex(initialState);
         this.liquidations = new LiquidationIndex(initialState);
         this.timers = new CancelAllAfterIndex(initialState);
         this.adlPositions = new AdlPositionIndex(initialState, identities);
-        this.riskSnapshots = new RiskSnapshotIndex(initialState);
         this.factIndexes = new RuntimeFactIndexes(positionUsers, openInterest, triggers, algos, liquidations,
-                timers, activeOrders, adlPositions, riskSnapshots);
+                timers, activeOrders, adlPositions);
         this.matcherReady = CompletableFuture.completedFuture(null);
         if (activateImmediately) activate();
     }
@@ -289,15 +286,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     AdlPositionIndex adlPositionsForConstruction() {
         return adlPositions;
-    }
-
-    public RiskSnapshotIndex riskSnapshots() {
-        assertOwner();
-        return riskSnapshots;
-    }
-
-    RiskSnapshotIndex riskSnapshotsForConstruction() {
-        return riskSnapshots;
     }
 
     void commitRuntimeChanges(TradingRuntimeState state, RuntimeIdentityRegistry identityView) {

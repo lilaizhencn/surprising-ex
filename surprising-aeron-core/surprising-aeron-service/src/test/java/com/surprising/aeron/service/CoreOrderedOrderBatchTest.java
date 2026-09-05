@@ -40,7 +40,6 @@ import com.surprising.aeron.service.state.AlgoOrderIndex;
 import com.surprising.aeron.service.state.LiquidationIndex;
 import com.surprising.aeron.service.state.CancelAllAfterIndex;
 import com.surprising.aeron.service.state.AdlPositionIndex;
-import com.surprising.aeron.service.state.RiskSnapshotIndex;
 import com.surprising.aeron.service.state.RuntimeCommitJournal;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -234,9 +233,7 @@ class CoreOrderedOrderBatchTest {
             var shardsField = MatcherPipelineGroup.class.getDeclaredField("shards");
             shardsField.setAccessible(true);
             var shards = (MatcherCommandPipeline[]) shardsField.get(group);
-            var positionField = MatcherCommandPipeline.class.getDeclaredField("submittedPosition");
-            positionField.setAccessible(true);
-            long submittedBefore = positionField.getLong(shards[0]);
+            long submittedBefore = shards[0].submittedPosition();
             CoreMessage cancel = command(CoreMessageType.CANCEL_ORDER_BATCH, UUID.randomUUID(), 6,
                     TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
                             new CancelOrderCommand(18_001), new CancelOrderCommand(18_001),
@@ -257,7 +254,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(items.get(1).resultCode()).isEqualTo(CoreResultCode.MATCHING_REJECTED);
             assertThat(items.get(3).resultCode()).isEqualTo(CoreResultCode.ORDER_NOT_FOUND);
             assertThat(items).extracting(CoreOrderBatchResult.Item::index).containsExactly(0, 1, 2, 3, 4, 5);
-            assertThat(positionField.getLong(shards[0]) - submittedBefore).isEqualTo(2);
+            assertThat(shards[0].submittedPosition() - submittedBefore).isEqualTo(2);
             assertThat(state.pendingMatchingCount()).isZero();
             assertThat(state.tradingState().users().get(1001L).balances()).isEqualTo(before);
             assertThat(state.tradingState().users().get(1001L).reservations()).isEmpty();
@@ -718,8 +715,7 @@ class CoreOrderedOrderBatchTest {
                 Map.entry("liquidation", indexSnapshot(field(state, "liquidationIndex"))),
                 Map.entry("timer", indexSnapshot(field(state, "cancelAllAfterIndex"))),
                 Map.entry("active-order", indexSnapshot(field(state, "activeOrderIndex"))),
-                Map.entry("adl-position", indexSnapshot(field(state, "adlPositionIndex"))),
-                Map.entry("risk-snapshot", indexSnapshot(field(state, "riskSnapshotIndex"))));
+                Map.entry("adl-position", indexSnapshot(field(state, "adlPositionIndex"))));
     }
 
     private static Map<String, Object> indexSnapshot(Object index) throws Exception {

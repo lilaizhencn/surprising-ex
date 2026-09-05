@@ -1,17 +1,22 @@
 package com.surprising.aeron.service.matching;
 
 import com.surprising.aeron.service.state.LaneTopology;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicLongArray;
 
 final class MatcherEvidenceLedger {
 
+    private static final int CACHE_LINE_LONGS = 16;
+    private static final VarHandle LONGS = MethodHandles.arrayElementVarHandle(long[].class);
+
     private final LaneTopology topology;
-    private final AtomicLongArray issuedSequences;
-    private final AtomicLongArray shardSequences;
-    private final AtomicLongArray shardPrefixes;
-    private final AtomicLongArray shardNativeSequences;
+    private final int shardCount;
+    private final long[] issuedSequences;
+    private final long[] shardSequences;
+    private final long[] shardPrefixes;
+    private final long[] shardNativeSequences;
 
     MatcherEvidenceLedger(LaneTopology topology) {
         this(topology, 0, initialProgress(topology));
@@ -23,18 +28,21 @@ final class MatcherEvidenceLedger {
             throw new IllegalArgumentException("invalid matcher evidence restore");
         }
         this.topology = topology;
-        this.shardSequences = new AtomicLongArray(progress.size());
-        this.shardPrefixes = new AtomicLongArray(progress.size());
-        this.shardNativeSequences = new AtomicLongArray(progress.size());
-        this.issuedSequences = new AtomicLongArray(progress.size());
+        this.shardCount = progress.size();
+        int paddedLength = Math.multiplyExact(shardCount, CACHE_LINE_LONGS);
+        this.shardSequences = new long[paddedLength];
+        this.shardPrefixes = new long[paddedLength];
+        this.shardNativeSequences = new long[paddedLength];
+        this.issuedSequences = new long[paddedLength];
         boolean[] restored = new boolean[progress.size()];
         for (MatcherShardProgress shard : progress) {
             int index = index(shard.matcherShardId());
             if (restored[index]) throw new IllegalArgumentException("duplicate matcher shard progress");
             restored[index] = true;
-            shardSequences.set(index, shard.matcherSequence());
-            issuedSequences.set(index, Math.max(sequenceFloor, shard.matcherSequence()));
-            shardPrefixes.set(index, shard.prefixDigest());
+            int offset = offset(index);
+            shardSequences[offset] = shard.matcherSequence();
+            issuedSequences[offset] = Math.max(sequenceFloor, shard.matcherSequence());
+            shardPrefixes[offset] = shard.prefixDigest();
         }
         for (boolean present : restored) {
             if (!present) throw new IllegalArgumentException("incomplete matcher shard progress");
@@ -42,7 +50,10 @@ final class MatcherEvidenceLedger {
     }
 
     long nextSequence(int matcherShardId) {
-        return issuedSequences.incrementAndGet(index(matcherShardId));
+        int offset = offset(index(matcherShardId));
+        long next = Math.incrementExact((long) LONGS.getAcquire(issuedSequences, offset));
+        LONGS.setRelease(issuedSequences, offset, next);
+        return next;
     }
 
     CoreMatchingResult bind(
@@ -64,18 +75,20 @@ final class MatcherEvidenceLedger {
                 coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
                 orderId, instrumentVersion,
                 nativeSequence, sequence, aeronTimestamp, matcherShardId);
-        long before = shardPrefixes.get(index);
+        int offset = offset(index);
+        long before = (long) LONGS.getAcquire(shardPrefixes, offset);
         long after = MatcherPrefixDigest.next(before, nativeCommand, result);
-        if (!shardPrefixes.compareAndSet(index, before, after)) {
-            throw new IllegalStateException("matcher shard prefix advanced outside its single-writer order");
-        }
+        LONGS.setRelease(shardPrefixes, offset, after);
         return result.withEvidence(nativeCommand, new CoreMatchingResult.MatcherPrefix(before, after));
     }
 
     List<MatcherShardProgress> snapshot() {
-        ArrayList<MatcherShardProgress> progress = new ArrayList<>(shardSequences.length());
-        for (int index = 0; index < shardSequences.length(); index++) {
-            progress.add(new MatcherShardProgress(index - 1, shardSequences.get(index), shardPrefixes.get(index)));
+        ArrayList<MatcherShardProgress> progress = new ArrayList<>(shardCount);
+        for (int index = 0; index < shardCount; index++) {
+            int offset = offset(index);
+            progress.add(new MatcherShardProgress(index - 1,
+                    (long) LONGS.getAcquire(shardSequences, offset),
+                    (long) LONGS.getAcquire(shardPrefixes, offset)));
         }
         return List.copyOf(progress);
     }
@@ -87,11 +100,19 @@ final class MatcherEvidenceLedger {
         return matcherShardId + 1;
     }
 
-    private static void advanceStrictly(AtomicLongArray values, int index, long next, String message) {
-        long previous = values.get(index);
-        if (next <= previous || !values.compareAndSet(index, previous, next)) {
+    private static void advanceStrictly(long[] values, int index, long next, String message) {
+        int offset = offset(index);
+        long previous = (long) LONGS.getAcquire(values, offset);
+        if (next <= previous) {
             throw new IllegalStateException(message + " previous=" + previous + " next=" + next);
         }
+        // A matching shard has one owner thread. Release publication is sufficient for the
+        // snapshot fence and avoids a locked compare-and-set on every matched command.
+        LONGS.setRelease(values, offset, next);
+    }
+
+    private static int offset(int index) {
+        return index * CACHE_LINE_LONGS;
     }
 
     private static List<MatcherShardProgress> initialProgress(LaneTopology topology) {

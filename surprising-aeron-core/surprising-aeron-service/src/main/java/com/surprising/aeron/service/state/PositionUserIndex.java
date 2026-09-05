@@ -5,41 +5,73 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.NavigableSet;
 import java.util.TreeSet;
-import org.eclipse.collections.api.iterator.LongIterator;
 import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
-import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
+import org.eclipse.collections.impl.list.mutable.primitive.LongArrayList;
 
 public final class PositionUserIndex {
 
-    private final Map<String, LongHashSet> usersBySymbol = new HashMap<>();
+    // Membership changes are much less frequent than mark/risk cursor reads. Keep the
+    // authoritative users ordered in a primitive array so online scans never materialize a
+    // boxed TreeSet or linearly rescan a hash set for every successor.
+    private final LaneTopology topology;
+    private final Map<String, LongArrayList[]> usersBySymbol = new HashMap<>();
     private final Map<String, LongIntHashMap> positionCountsBySymbol = new HashMap<>();
 
     public PositionUserIndex(TradingCoreState state) {
+        this.topology = LaneTopology.configured(Boolean.getBoolean("surprising.aeron.p10-characterization"));
         rebuild(state);
     }
 
     public PositionUserIndex(TradingCoreState state, RuntimeIdentityRegistry identities) {
+        this(state, identities,
+                LaneTopology.configured(Boolean.getBoolean("surprising.aeron.p10-characterization")));
+    }
+
+    public PositionUserIndex(TradingCoreState state, RuntimeIdentityRegistry identities, LaneTopology topology) {
+        if (topology == null) throw new IllegalArgumentException("lane topology is required");
+        this.topology = topology;
         rebuild(state, identities);
     }
 
     public NavigableSet<Long> users(String symbol) {
-        LongHashSet users = usersBySymbol.get(OrderReservation.normalizeSymbol(symbol));
-        if (users == null) return Collections.emptyNavigableSet();
+        LongArrayList[] lanes = usersBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+        if (lanes == null) return Collections.emptyNavigableSet();
         TreeSet<Long> sorted = new TreeSet<>();
-        users.forEach(sorted::add);
+        for (LongArrayList users : lanes) users.forEach(sorted::add);
         return Collections.unmodifiableNavigableSet(sorted);
     }
 
     public Long higherUser(String symbol, long cursorUserId) {
-        LongHashSet users = usersBySymbol.get(OrderReservation.normalizeSymbol(symbol));
-        if (users == null) return null;
-        long higher = Long.MAX_VALUE;
-        LongIterator iterator = users.longIterator();
-        while (iterator.hasNext()) {
-            long userId = iterator.next();
-            if (userId > cursorUserId && userId < higher) higher = userId;
+        long higher = higherUserId(symbol, cursorUserId);
+        return higher == 0 ? null : higher;
+    }
+
+    /** Returns zero at end; the online risk path stays primitive and allocation-free. */
+    public long higherUserId(String symbol, long cursorUserId) {
+        LongArrayList[] lanes = usersBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+        if (lanes == null) return 0;
+        long higher = 0;
+        for (LongArrayList users : lanes) {
+            long candidate = higherUserId(users, cursorUserId);
+            if (candidate != 0 && (higher == 0 || candidate < higher)) higher = candidate;
         }
-        return higher == Long.MAX_VALUE ? null : higher;
+        return higher;
+    }
+
+    /** Returns the next user owned by one Account Lane without inspecting other lanes. */
+    public long higherUserId(String symbol, int accountLaneId, long cursorUserId) {
+        if (accountLaneId < 0 || accountLaneId >= topology.accountLaneCount()) {
+            throw new IllegalArgumentException("invalid Account Lane id");
+        }
+        LongArrayList[] lanes = usersBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+        return lanes == null ? 0 : higherUserId(lanes[accountLaneId], cursorUserId);
+    }
+
+    private static long higherUserId(LongArrayList users, long cursorUserId) {
+        if (users.isEmpty()) return 0;
+        int index = users.binarySearch(cursorUserId);
+        index = index >= 0 ? index + 1 : -index - 1;
+        return index == users.size() ? 0 : users.get(index);
     }
 
     void apply(RuntimePositionIndexValue previous, RuntimePositionIndexValue current) {
@@ -49,8 +81,9 @@ public final class PositionUserIndex {
 
     public void rebuild(TradingCoreState state) {
         usersBySymbol.clear();
+        positionCountsBySymbol.clear();
         state.users().values().forEach(user -> user.positions().values()
-                .forEach(position -> add(position.symbol(), user.userId())));
+                .forEach(position -> addPosition(RuntimePositionIndexValue.from(user.userId(), position))));
     }
 
     public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {
@@ -81,13 +114,27 @@ public final class PositionUserIndex {
     }
 
     private void add(String symbol, long userId) {
-        usersBySymbol.computeIfAbsent(symbol, ignored -> new LongHashSet()).add(userId);
+        LongArrayList[] lanes = usersBySymbol.computeIfAbsent(symbol, ignored -> newLaneLists());
+        LongArrayList users = lanes[topology.accountLaneId(userId)];
+        int index = users.binarySearch(userId);
+        if (index >= 0) return;
+        users.addAtIndex(-index - 1, userId);
     }
 
     private void remove(String symbol, long userId) {
-        LongHashSet users = usersBySymbol.get(symbol);
-        if (users == null) return;
-        users.remove(userId);
-        if (users.isEmpty()) usersBySymbol.remove(symbol);
+        LongArrayList[] lanes = usersBySymbol.get(symbol);
+        if (lanes == null) return;
+        LongArrayList users = lanes[topology.accountLaneId(userId)];
+        int index = users.binarySearch(userId);
+        if (index >= 0) users.removeAtIndex(index);
+        boolean empty = true;
+        for (LongArrayList lane : lanes) empty &= lane.isEmpty();
+        if (empty) usersBySymbol.remove(symbol);
+    }
+
+    private LongArrayList[] newLaneLists() {
+        LongArrayList[] lanes = new LongArrayList[topology.accountLaneCount()];
+        for (int laneId = 0; laneId < lanes.length; laneId++) lanes[laneId] = new LongArrayList();
+        return lanes;
     }
 }

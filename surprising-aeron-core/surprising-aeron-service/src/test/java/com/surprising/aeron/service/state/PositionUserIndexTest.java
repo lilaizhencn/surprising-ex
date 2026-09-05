@@ -66,10 +66,18 @@ class PositionUserIndexTest {
                 Map.of(2L, positionedUser(2, position), 7L, positionedUser(7, position),
                         11L, positionedUser(11, position)),
                 Map.of(), Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
-        PositionUserIndex index = new PositionUserIndex(state);
+        LaneTopology topology = LaneTopology.productionDefault();
+        PositionUserIndex index = new PositionUserIndex(state, new RuntimeIdentityRegistry(), topology);
 
         assertThat(index.higherUser("BTC-USDT", 7)).isEqualTo(11L);
         assertThat(index.higherUser("BTC-USDT", 11)).isNull();
+        for (int laneId = 0; laneId < topology.accountLaneCount(); laneId++) {
+            int expectedLane = laneId;
+            long expected = state.users().keySet().stream()
+                    .filter(userId -> topology.accountLaneId(userId) == expectedLane)
+                    .mapToLong(Long::longValue).min().orElse(0);
+            assertThat(index.higherUserId("BTC-USDT", laneId, 0)).isEqualTo(expected);
+        }
     }
 
     private static CoreUserState positionedUser(long userId, CorePositionState position) {

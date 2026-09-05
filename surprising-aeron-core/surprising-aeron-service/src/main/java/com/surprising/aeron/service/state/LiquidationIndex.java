@@ -6,12 +6,13 @@ import java.util.NavigableSet;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 
 public final class LiquidationIndex {
 
     private final Map<LiquidationKey, NavigableSet<Long>> activeIds = new TreeMap<>();
     private final NavigableSet<Long> allActiveIds = new TreeSet<>();
-    private final Map<Long, LiquidationKey> keysById = new TreeMap<>();
+    private final LongObjectHashMap<LiquidationKey> keysById = new LongObjectHashMap<>();
 
     public LiquidationIndex(TradingCoreState state) {
         rebuild(state);
@@ -34,13 +35,18 @@ public final class LiquidationIndex {
     }
 
     void apply(long liquidationId, LiquidationRuntime after, RuntimeFactFrame.IdentityView identities) {
-        LiquidationKey previous = keysById.remove(liquidationId);
-        if (previous != null) remove(liquidationId, previous);
-        if (isActive(after)) {
-            LiquidationKey key = new LiquidationKey(after.userId(), identities.symbol(after.symbolId()),
-                    after.positionSide());
-            keysById.put(liquidationId, key);
-            add(liquidationId, key);
+        LiquidationKey previous = keysById.get(liquidationId);
+        LiquidationKey current = isActive(after)
+                ? new LiquidationKey(after.userId(), identities.symbol(after.symbolId()), after.positionSide())
+                : null;
+        if (java.util.Objects.equals(previous, current)) return;
+        if (previous != null) {
+            keysById.remove(liquidationId);
+            remove(liquidationId, previous);
+        }
+        if (current != null) {
+            keysById.put(liquidationId, current);
+            add(liquidationId, current);
         }
     }
 

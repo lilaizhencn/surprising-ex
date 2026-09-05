@@ -9,7 +9,6 @@ public final class RuntimeFactIndexes implements RuntimeFactFrame.ChangeConsumer
     private final CancelAllAfterIndex timers;
     private final ActiveOrderIndex activeOrders;
     private final AdlPositionIndex adlPositions;
-    private final RiskSnapshotIndex riskSnapshots;
     private ApplyStats lastApplyStats = ApplyStats.EMPTY;
     private RuntimeFactFrame.IdentityView activeIdentities;
     private int positionVisits;
@@ -18,13 +17,11 @@ public final class RuntimeFactIndexes implements RuntimeFactFrame.ChangeConsumer
     private int liquidationVisits;
     private int timerVisits;
     private int orderVisits;
-    private int riskVisits;
 
     public RuntimeFactIndexes(PositionUserIndex positionUsers, OpenInterestIndex openInterest,
                                 TriggerOrderIndex triggers, AlgoOrderIndex algos,
                                 LiquidationIndex liquidations, CancelAllAfterIndex timers,
-                                ActiveOrderIndex activeOrders, AdlPositionIndex adlPositions,
-                                RiskSnapshotIndex riskSnapshots) {
+                                ActiveOrderIndex activeOrders, AdlPositionIndex adlPositions) {
         this.positionUsers = require(positionUsers, "position-user");
         this.openInterest = require(openInterest, "open-interest");
         this.triggers = require(triggers, "trigger");
@@ -33,7 +30,6 @@ public final class RuntimeFactIndexes implements RuntimeFactFrame.ChangeConsumer
         this.timers = require(timers, "timer");
         this.activeOrders = require(activeOrders, "active-order");
         this.adlPositions = require(adlPositions, "ADL-position");
-        this.riskSnapshots = require(riskSnapshots, "risk-snapshot");
     }
 
     public void applyCurrent(TradingRuntimeState runtime, RuntimeFactFrame.IdentityView identities) {
@@ -41,12 +37,12 @@ public final class RuntimeFactIndexes implements RuntimeFactFrame.ChangeConsumer
             throw new IllegalArgumentException("runtime changed indexes are invalid");
         }
         activeIdentities = identities;
-        positionVisits = triggerVisits = algoVisits = liquidationVisits = timerVisits = orderVisits = riskVisits = 0;
+        positionVisits = triggerVisits = algoVisits = liquidationVisits = timerVisits = orderVisits = 0;
         try {
             runtime.visitPreparedMatcherIndexes(this);
             runtime.visitChangedIndexes(this);
             lastApplyStats = new ApplyStats(positionVisits, positionVisits, triggerVisits, algoVisits,
-                    liquidationVisits, timerVisits, orderVisits, positionVisits, riskVisits);
+                    liquidationVisits, timerVisits, orderVisits, positionVisits);
         } finally {
             activeIdentities = null;
         }
@@ -89,12 +85,6 @@ public final class RuntimeFactIndexes implements RuntimeFactFrame.ChangeConsumer
     }
 
     @Override
-    public void riskSnapshot(long riskKey, RiskSnapshotRuntime before, RiskSnapshotRuntime after) {
-        riskSnapshots.apply(riskKey, after, activeIdentities);
-        riskVisits++;
-    }
-
-    @Override
     public void algoOrder(long algoOrderId, CoreAlgoOrderState before, CoreAlgoOrderState after) {
         algos.apply(algoOrderId, after);
         algoVisits++;
@@ -123,7 +113,6 @@ public final class RuntimeFactIndexes implements RuntimeFactFrame.ChangeConsumer
         timers.rebuild(state);
         activeOrders.rebuild(state, identities);
         adlPositions.rebuild(state, identities);
-        riskSnapshots.rebuild(state);
         lastApplyStats = ApplyStats.EMPTY;
     }
 
@@ -138,7 +127,7 @@ public final class RuntimeFactIndexes implements RuntimeFactFrame.ChangeConsumer
 
     record ApplyStats(int positionUserVisits, int openInterestVisits, int triggerVisits, int algoVisits,
                       int liquidationVisits, int timerVisits, int activeOrderVisits,
-                      int adlPositionVisits, int riskSnapshotVisits) {
-        private static final ApplyStats EMPTY = new ApplyStats(0, 0, 0, 0, 0, 0, 0, 0, 0);
+                      int adlPositionVisits) {
+        private static final ApplyStats EMPTY = new ApplyStats(0, 0, 0, 0, 0, 0, 0, 0);
     }
 }

@@ -74,7 +74,6 @@ class RuntimeChangedIndexCommitTest {
         indexes.coordinator.applyCurrent(runtime, identities);
 
         assertThat(runtime.riskSnapshot(positionKey)).isEqualTo(risk);
-        assertThat(indexes.riskSnapshots.keys(userId)).containsExactly("7:BTC-USDT:NET");
 
         runtime.clearChangedKeys();
         runtime.executeUserRisk(userId, () -> {
@@ -86,7 +85,6 @@ class RuntimeChangedIndexCommitTest {
         runtime.releaseRetiredPositionIdentities(identities);
 
         assertThat(runtime.riskSnapshot(positionKey)).isNull();
-        assertThat(indexes.riskSnapshots.keys(userId)).isEmpty();
         assertThat(identities.findPositionKey(userId, "BTC-USDT:NET")).isNull();
         runtime.close();
     }
@@ -134,14 +132,12 @@ class RuntimeChangedIndexCommitTest {
         CancelAllAfterIndex timers = new CancelAllAfterIndex(state);
         ActiveOrderIndex activeOrders = new ActiveOrderIndex(state, identities);
         AdlPositionIndex adlPositions = new AdlPositionIndex(state, identities);
-        RiskSnapshotIndex riskSnapshots = new RiskSnapshotIndex(state);
-        return new IndexSet(positionUsers, openInterest, activeOrders, liquidations, riskSnapshots,
+        return new IndexSet(positionUsers, openInterest, activeOrders, liquidations,
                 new RuntimeFactIndexes(positionUsers, openInterest, triggers, algos, liquidations,
-                        timers, activeOrders, adlPositions, riskSnapshots));
+                        timers, activeOrders, adlPositions));
     }
 
     private record IndexSet(PositionUserIndex positionUsers, OpenInterestIndex openInterest,
                             ActiveOrderIndex activeOrders, LiquidationIndex liquidations,
-                            RiskSnapshotIndex riskSnapshots,
                             RuntimeFactIndexes coordinator) { }
 }

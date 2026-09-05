@@ -18,8 +18,8 @@ final class SettlementLaneWorker implements AutoCloseable {
     private final WaitStrategy waitStrategy;
     private final AccountLaneState lane;
     private final Thread thread;
-    private volatile long producerSequence;
-    private volatile long consumerSequence;
+    private final PaddedSequence producerSequence = new PaddedSequence();
+    private final PaddedSequence consumerSequence = new PaddedSequence();
     private volatile boolean started;
     private volatile boolean running = true;
     private volatile Throwable failure;
@@ -45,22 +45,26 @@ final class SettlementLaneWorker implements AutoCloseable {
         if (command == null) throw new IllegalArgumentException("settlement command is required");
         rethrowFailure();
         if (!running) throw new RejectedExecutionException("settlement lane is closed");
-        long next = producerSequence;
-        if (next - consumerSequence >= commands.length) {
+        long next = producerSequence.value;
+        long consumed = consumerSequence.value;
+        if (next - consumed >= commands.length) {
             throw new RejectedExecutionException("settlement lane queue is full");
         }
         commands[(int) next & indexMask] = command;
-        producerSequence = next + 1;
-        if (waitStrategy == WaitStrategy.BLOCKING && next == consumerSequence) LockSupport.unpark(thread);
+        producerSequence.value = next + 1;
+        // An empty-queue check based on the consumer cursor can observe an older value just as
+        // the worker parks, losing the only wake-up. LockSupport permits coalesce, so publishing
+        // to a blocking worker always issues the notification.
+        if (waitStrategy == WaitStrategy.BLOCKING) LockSupport.unpark(thread);
         return next + 1;
     }
 
     int depth() {
-        return Math.toIntExact(producerSequence - consumerSequence);
+        return Math.toIntExact(producerSequence.value - consumerSequence.value);
     }
 
     boolean hasCapacity() {
-        return producerSequence - consumerSequence < commands.length;
+        return producerSequence.value - consumerSequence.value < commands.length;
     }
 
     Throwable failure() {
@@ -72,19 +76,19 @@ final class SettlementLaneWorker implements AutoCloseable {
     }
 
     private void run() {
-        long next = consumerSequence;
+        long next = consumerSequence.value;
         try {
             lane.bindOwner();
             started = true;
-            while (running || next < producerSequence) {
-                if (next < producerSequence) {
+            while (running || next < producerSequence.value) {
+                if (next < producerSequence.value) {
                     int index = (int) next & indexMask;
                     Command command = commands[index];
                     if (command == null) throw new IllegalStateException("settlement lane publication gap");
                     command.execute(lane);
                     commands[index] = null;
                     next++;
-                    consumerSequence = next;
+                    consumerSequence.value = next;
                     continue;
                 }
                 switch (waitStrategy) {
@@ -138,4 +142,12 @@ final class SettlementLaneWorker implements AutoCloseable {
     }
 
     private enum WaitStrategy { BUSY_SPIN, YIELDING, BLOCKING }
+
+    private static final class PaddedSequence {
+        @SuppressWarnings("unused")
+        private long p01, p02, p03, p04, p05, p06, p07;
+        private volatile long value;
+        @SuppressWarnings("unused")
+        private long p11, p12, p13, p14, p15, p16, p17;
+    }
 }

@@ -9,16 +9,8 @@ import java.lang.invoke.VarHandle;
  */
 public final class MatcherSettlementEvent implements SettlementLaneWorker.Command {
     private static final RuntimeTreasuryDelta EMPTY_TREASURY_DELTA = new RuntimeTreasuryDelta(1);
-    private static final VarHandle COMPLETED_LANE_MASK;
-
-    static {
-        try {
-            COMPLETED_LANE_MASK = MethodHandles.lookup().findVarHandle(
-                    MatcherSettlementEvent.class, "completedLaneMask", long.class);
-        } catch (ReflectiveOperationException failure) {
-            throw new ExceptionInInitializerError(failure);
-        }
-    }
+    private static final int CACHE_LINE_LONGS = 16;
+    private static final VarHandle LONGS = MethodHandles.arrayElementVarHandle(long[].class);
 
 
     private long commitSequence;
@@ -42,8 +34,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     private boolean isolatedChanges;
     private boolean treasuryTrades;
     private RuntimeFundsDelta collectedFundsDelta = RuntimeFundsDelta.empty();
-    @SuppressWarnings("FieldMayBeFinal")
-    private long completedLaneMask;
+    private long[] completedLanes;
     private boolean collected;
 
     MatcherSettlementEvent() {
@@ -97,7 +88,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         }
         collectedFundsDelta = RuntimeFundsDelta.empty();
         collected = false;
-        COMPLETED_LANE_MASK.set(this, 0L);
+        resetCompletions(laneCount);
         return this;
     }
 
@@ -148,7 +139,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         prepareTreasuryDeltas(laneCount, treasuryTrades);
         collectedFundsDelta = RuntimeFundsDelta.empty();
         collected = false;
-        COMPLETED_LANE_MASK.set(this, 0L);
+        resetCompletions(laneCount);
         return this;
     }
 
@@ -215,18 +206,17 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             if (changes == null) runtime.exitLaneCommandScope(lane);
             else runtime.exitMatcherSettlementScope(lane, changes);
         }
-        // The owner may recycle the event as soon as the final completed bit is visible. Keep
-        // notification dependencies in Lane-local variables before publishing that bit.
+        // Publish each Lane independently. The owner validates the event-wide completion fence,
+        // avoiding a contended atomic OR written by every Lane.
         TradingRuntimeState completionRuntime = runtime;
         long completionSequence = plan.coreSequence();
         completionRuntime.recordMatcherLaneOperation(lane, System.nanoTime() - startedNanos);
-        long previous = (long) COMPLETED_LANE_MASK.getAndBitwiseOrRelease(this, laneMask);
-        if ((previous & laneMask) != 0) {
+        int completionOffset = laneId * CACHE_LINE_LONGS;
+        if ((long) LONGS.getAcquire(completedLanes, completionOffset) != 0) {
             throw new IllegalStateException("account lane completed the same matcher fact twice");
         }
-        if ((previous | laneMask) == requiredLaneMask) {
-            completionRuntime.publishMatcherSettlementReady(laneId, completionSequence);
-        }
+        LONGS.setRelease(completedLanes, completionOffset, 1L);
+        completionRuntime.publishMatcherSettlementReady(laneId, completionSequence);
     }
 
     private void applyPlan(AccountLaneState lane, int laneId, MatcherSettlementPlan value,
@@ -274,7 +264,13 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     public long commitSequence() { return commitSequence; }
     public long requiredLaneMask() { return requiredLaneMask; }
     public long completedLaneMask() {
-        return (long) COMPLETED_LANE_MASK.getAcquire(this);
+        long mask = 0;
+        for (int laneId = 0; laneId < completedLanes.length / CACHE_LINE_LONGS; laneId++) {
+            if ((long) LONGS.getAcquire(completedLanes, laneId * CACHE_LINE_LONGS) != 0) {
+                mask |= 1L << laneId;
+            }
+        }
+        return mask;
     }
     public boolean complete() { return completedLaneMask() == requiredLaneMask; }
     MatcherSettlementPlan plan() { return plan; }
@@ -320,5 +316,13 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             throw new IllegalStateException("matcher fact has no treasury slot for lane " + laneId);
         }
         return Long.bitCount(requiredLaneMask & (laneBit - 1));
+    }
+
+    private void resetCompletions(int laneCount) {
+        int length = Math.multiplyExact(laneCount, CACHE_LINE_LONGS);
+        if (completedLanes == null || completedLanes.length != length) completedLanes = new long[length];
+        else for (int laneId = 0; laneId < laneCount; laneId++) {
+            LONGS.setRelease(completedLanes, laneId * CACHE_LINE_LONGS, 0L);
+        }
     }
 }
