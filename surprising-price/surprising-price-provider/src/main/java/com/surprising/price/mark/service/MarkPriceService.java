@@ -1,0 +1,287 @@
+package com.surprising.price.mark.service;
+
+import com.surprising.price.api.model.IndexPriceEvent;
+import com.surprising.price.api.model.MarkPriceEvent;
+import com.surprising.price.api.model.MarkPricePublishedEvent;
+import com.surprising.price.api.model.PerpBookTickerEvent;
+import com.surprising.price.api.model.PerpFundingRateEvent;
+import com.surprising.price.api.model.PerpTradeEvent;
+import com.surprising.price.api.model.PricePublishedEvent;
+import com.surprising.price.api.model.PriceStatus;
+import com.surprising.price.consumer.LatestMarkPriceCache;
+import com.surprising.price.mark.config.MarkPriceProperties;
+import com.surprising.price.mark.model.BasisWindow;
+import com.surprising.price.mark.model.MarkPriceEncoding;
+import com.surprising.trading.api.KafkaSymbolKeyValidator;
+import com.surprising.trading.api.model.PublicTradeEvent;
+import java.math.BigDecimal;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.stereotype.Service;
+import tools.jackson.databind.ObjectMapper;
+
+@Service
+    public class MarkPriceService {
+
+    private static final Logger log = LoggerFactory.getLogger(MarkPriceService.class);
+    private static final String SEQUENCE_MODULE = "price-mark";
+
+    private final ObjectMapper objectMapper;
+    private final MarkPriceProperties properties;
+    private final MarkPriceCalculator markPriceCalculator;
+    private final MarkPriceCoordinationService coordinationService;
+    private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final LatestMarkPriceCache latestMarkPriceCache;
+    private final PublicTradeEventMapper publicTradeEventMapper;
+    private MarkPriceCorePublisher corePublisher = null;
+    private final String nodeId;
+
+    private final ConcurrentHashMap<String, IndexPriceEvent> indexPrices = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, PerpBookTickerEvent> bookTickers = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, PerpTradeEvent> trades = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, PerpFundingRateEvent> fundingRates = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, BasisWindow> basisWindows = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, MarkPriceEncoding> encodings = new ConcurrentHashMap<>();
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public MarkPriceService(ObjectMapper objectMapper,
+                            MarkPriceProperties properties,
+                            MarkPriceCalculator markPriceCalculator,
+                            MarkPriceCoordinationService coordinationService,
+                            @Qualifier("markKafkaTemplate") KafkaTemplate<String, Object> kafkaTemplate,
+                            LatestMarkPriceCache latestMarkPriceCache,
+                            PublicTradeEventMapper publicTradeEventMapper) {
+        this.objectMapper = objectMapper;
+        this.properties = properties;
+        this.markPriceCalculator = markPriceCalculator;
+        this.coordinationService = coordinationService;
+        this.kafkaTemplate = kafkaTemplate;
+        this.latestMarkPriceCache = latestMarkPriceCache;
+        this.publicTradeEventMapper = publicTradeEventMapper;
+        this.nodeId = resolveNodeId(properties.getCoordination().getNodeId());
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setCorePublisher(MarkPriceCorePublisher corePublisher) {
+        this.corePublisher = corePublisher;
+    }
+
+    public void acceptIndexPrice(IndexPriceEvent event) {
+        if (event == null || event.symbol() == null || event.symbol().isBlank()) {
+            throw new IllegalArgumentException("index price event is required");
+        }
+        indexPrices.compute(event.symbol(),
+                (ignored, current) -> current == null || newer(event, current) ? event : current);
+    }
+
+    @KafkaListener(topics = "#{__listener.bookTickerTopic()}", groupId = "#{__listener.groupId()}")
+    public void onBookTicker(ConsumerRecord<String, String> record) {
+        requireCurrentProductTopic(record.topic(), bookTickerTopic(), "book ticker");
+        onBookTicker(record.value());
+    }
+
+    void onBookTicker(String payload) {
+        parse(payload, PerpBookTickerEvent.class, "book ticker", event -> bookTickers.put(event.symbol(), event));
+    }
+
+    @KafkaListener(topics = "#{__listener.matchTradesTopic()}", groupId = "#{__listener.groupId()}")
+    public void onTrade(ConsumerRecord<String, String> record) {
+        requireCurrentProductTopic(record.topic(), matchTradesTopic(), "match trade");
+        try {
+            PublicTradeEvent event = objectMapper.readValue(record.value(), PublicTradeEvent.class);
+            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "match trade");
+            acceptTrade(publicTradeEventMapper.toPerpTradeEvent(event));
+        } catch (Exception ex) {
+            log.warn("Dropped invalid match trade payload: {}", ex.getMessage());
+        }
+    }
+
+    void acceptTrade(PerpTradeEvent event) {
+        if (event == null || event.symbol() == null || event.symbol().isBlank()) {
+            throw new IllegalArgumentException("trade event is required");
+        }
+        trades.put(event.symbol(), event);
+    }
+
+    @KafkaListener(topics = "#{__listener.fundingRateTopic()}",
+            groupId = "#{__listener.groupId()}",
+            autoStartup = "#{__listener.fundingRateListenerEnabled()}")
+    public void onFundingRate(ConsumerRecord<String, String> record) {
+        requireCurrentProductTopic(record.topic(), fundingRateTopic(), "funding rate");
+        onFundingRate(record.value());
+    }
+
+    void onFundingRate(String payload) {
+        parse(payload, PerpFundingRateEvent.class, "funding rate", event -> fundingRates.put(event.symbol(), event));
+    }
+
+    public void publishMarkPrices() {
+        Instant now = Instant.now();
+        for (String symbol : symbols()) {
+            try {
+                publishSymbol(symbol, now);
+            } catch (Exception ex) {
+                log.error("Failed to publish mark price for symbol={}", symbol, ex);
+            }
+        }
+    }
+
+    private boolean publishSymbol(String symbol, Instant now) {
+        IndexPriceEvent index = indexPrices.get(symbol);
+        if (!fresh(index, now)) {
+            return false;
+        }
+        MarkPriceEncoding encoding;
+        try {
+            encoding = coordinationService.currentEncoding(symbol);
+        } catch (IllegalStateException ex) {
+            if (ex.getMessage() != null && ex.getMessage().startsWith("mark price encoding not found for ")) {
+                return false;
+            }
+            throw ex;
+        }
+        PerpBookTickerEvent book = bookTickers.get(symbol);
+        if (!fresh(book, now)) {
+            book = syntheticBookTicker(index, now);
+        }
+        PerpTradeEvent trade = trades.get(symbol);
+        if (!fresh(trade, now)) {
+            trade = syntheticTrade(index, now);
+        }
+        if (!ownsSymbol(symbol)) {
+            return false;
+        }
+
+        BasisWindow window = basisWindows.computeIfAbsent(symbol, ignored -> new BasisWindow());
+        window.add(now, markPriceCalculator.basis(index, book), properties.getCalculation().getBasisWindow());
+        BigDecimal basisAverage = window.average(now, properties.getCalculation().getBasisWindow(),
+                properties.getCalculation().getScale());
+
+        long sequence = coordinationService.nextSequence(SEQUENCE_MODULE, symbol);
+        encodings.putIfAbsent(symbol, encoding);
+        encoding = encodings.get(symbol);
+        MarkPriceEvent event = markPriceCalculator.calculate(symbol, sequence, index, book, trade,
+                fundingRates.get(symbol), basisAverage, encoding, now);
+        latestMarkPriceCache.update(event);
+        if (corePublisher != null) {
+            corePublisher.publish(event);
+        }
+        MarkPricePublishedEvent publication = new MarkPricePublishedEvent(event, index, book, trade,
+                fundingRates.get(symbol), basisAverage,
+                properties.getCalculation().getBasisWindow().toSeconds(), now);
+        kafkaTemplate.send(properties.priceEventsTopic(), symbol, PricePublishedEvent.mark(publication));
+        return true;
+    }
+
+    public String bookTickerTopic() {
+        return properties.bookTickerTopic();
+    }
+
+    public String matchTradesTopic() {
+        return properties.matchTradesTopic();
+    }
+
+    public String fundingRateTopic() {
+        return properties.fundingRateTopic();
+    }
+
+    public boolean fundingRateListenerEnabled() {
+        return properties.isFundingRateExpected();
+    }
+
+    public String groupId() {
+        return properties.getKafka().getGroupId();
+    }
+
+    private PerpBookTickerEvent syntheticBookTicker(IndexPriceEvent index, Instant now) {
+        return new PerpBookTickerEvent(index.symbol(), index.indexPrice(), index.indexPrice(), index.sequence(), now);
+    }
+
+    private PerpTradeEvent syntheticTrade(IndexPriceEvent index, Instant now) {
+        return new PerpTradeEvent(index.symbol(), "index-bootstrap-" + index.sequence(), index.sequence(), now,
+                index.indexPrice(), BigDecimal.ONE, "BUY");
+    }
+
+    private Set<String> symbols() {
+        Set<String> symbols = ConcurrentHashMap.newKeySet();
+        symbols.addAll(indexPrices.keySet());
+        symbols.addAll(bookTickers.keySet());
+        symbols.addAll(trades.keySet());
+        return symbols;
+    }
+
+    private boolean ownsSymbol(String symbol) {
+        if (!properties.getCoordination().isEnabled()) {
+            return true;
+        }
+        return coordinationService.acquireLease(SEQUENCE_MODULE, symbol, nodeId,
+                properties.getCoordination().getLeaseDuration());
+    }
+
+    private void requireCurrentProductTopic(String topic, String expectedTopic, String streamName) {
+        if (!expectedTopic.equals(topic)) {
+            throw new ProductTopicMismatchException(streamName + " topic must match current product line: expected="
+                    + expectedTopic + " actual=" + topic);
+        }
+    }
+
+    private boolean fresh(IndexPriceEvent event, Instant now) {
+        return event != null
+                && event.indexPrice() != null
+                && usableIndexStatus(event.status())
+                && fresh(event.eventTime(), now);
+    }
+
+    private boolean usableIndexStatus(PriceStatus status) {
+        return status == PriceStatus.HEALTHY || status == PriceStatus.DEGRADED;
+    }
+
+    private boolean fresh(PerpBookTickerEvent event, Instant now) {
+        return event != null && event.bestBidPrice().compareTo(event.bestAskPrice()) <= 0 && fresh(event.eventTime(), now);
+    }
+
+    private boolean fresh(PerpTradeEvent event, Instant now) {
+        return event != null && fresh(event.tradeTime(), now);
+    }
+
+    private boolean fresh(Instant eventTime, Instant now) {
+        return eventTime != null && Duration.between(eventTime, now).compareTo(properties.getCalculation().getMaxInputAge()) <= 0;
+    }
+
+    private boolean newer(IndexPriceEvent candidate, IndexPriceEvent current) {
+        return candidate.sequence() > current.sequence()
+                || candidate.sequence() == current.sequence()
+                && candidate.eventTime() != null
+                && (current.eventTime() == null || candidate.eventTime().isAfter(current.eventTime()));
+    }
+
+    private String resolveNodeId(String configured) {
+        if (configured != null && !configured.isBlank()) {
+            return configured.trim();
+        }
+        return "mark-" + UUID.randomUUID();
+    }
+
+    private <T> void parse(String payload, Class<T> type, String name, java.util.function.Consumer<T> consumer) {
+        try {
+            consumer.accept(objectMapper.readValue(payload, type));
+        } catch (Exception ex) {
+            log.warn("Dropped invalid {} payload: {}", name, ex.getMessage());
+        }
+    }
+
+    static final class ProductTopicMismatchException extends RuntimeException {
+        private ProductTopicMismatchException(String message) {
+            super(message);
+        }
+    }
+}

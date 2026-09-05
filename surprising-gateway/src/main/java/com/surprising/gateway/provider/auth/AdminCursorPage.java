@@ -40,13 +40,7 @@ final class AdminCursorPage {
                 long id = Long.parseLong(decoded.substring(split + 1));
                 return new Cursor(timestamp, id);
             }
-            split = decoded.indexOf(':');
-            if (split <= 0 || split == decoded.length() - 1) {
-                throw new IllegalArgumentException("invalid cursor");
-            }
-            long epochMillis = Long.parseLong(decoded.substring(0, split));
-            long id = Long.parseLong(decoded.substring(split + 1));
-            return new Cursor(Instant.ofEpochMilli(epochMillis), id);
+            throw new IllegalArgumentException("invalid cursor");
         } catch (IllegalArgumentException ex) {
             throw new IllegalArgumentException("invalid cursor", ex);
         }

@@ -1,0 +1,1022 @@
+package com.surprising.marketmaker.provider.service;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.surprising.account.api.client.AccountRpcApi;
+import com.surprising.account.api.model.AccountType;
+import com.surprising.account.api.model.BalanceQueryResponse;
+import com.surprising.account.api.model.BalanceResponse;
+import com.surprising.account.api.model.PositionMarginAdjustmentRequest;
+import com.surprising.account.api.model.PositionMarginAdjustmentResponse;
+import com.surprising.account.api.model.PositionMarginResponse;
+import com.surprising.account.api.model.PositionModeResponse;
+import com.surprising.account.api.model.PositionModeUpdateRequest;
+import com.surprising.account.api.model.PositionQueryResponse;
+import com.surprising.account.api.model.PositionResponse;
+import com.surprising.account.api.model.ProductBalanceQueryResponse;
+import com.surprising.account.api.model.ProductBalanceResponse;
+import com.surprising.account.api.model.ProductTransferRequest;
+import com.surprising.account.api.model.ProductTransferResponse;
+import com.surprising.instrument.api.client.InstrumentRpcApi;
+import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
+import com.surprising.instrument.api.model.ContractType;
+import com.surprising.instrument.api.model.InstrumentQueryResponse;
+import com.surprising.instrument.api.model.InstrumentResponse;
+import com.surprising.instrument.api.model.InstrumentSnapshotResponse;
+import com.surprising.instrument.api.model.InstrumentStatus;
+import com.surprising.instrument.api.model.InstrumentType;
+import com.surprising.marketmaker.api.model.MarketMakerRunRequest;
+import com.surprising.marketmaker.api.model.MarketMakerStrategyStatus;
+import com.surprising.marketmaker.provider.config.MarketMakerProductLineContext;
+import com.surprising.marketmaker.provider.config.MarketMakerProperties;
+import com.surprising.marketmaker.provider.model.ReferenceOrderBookLevel;
+import com.surprising.marketmaker.provider.model.ReferenceOrderBookSnapshot;
+import com.surprising.marketmaker.provider.model.StrategyConfigOverride;
+import com.surprising.marketmaker.provider.repository.MarketMakerReferenceSampleRepository;
+import com.surprising.marketmaker.provider.repository.MarketMakerReferenceSampleRepository.MarketMakerReferenceSampleWrite;
+import com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepository;
+import com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepository.CursorPage;
+import com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepository.MarketMakerRunEventRecord;
+import com.surprising.marketmaker.provider.repository.MarketMakerRunEventRepository.MarketMakerRunEventWrite;
+import com.surprising.marketmaker.provider.repository.MarketMakerStrategyOverrideStore;
+import com.surprising.price.api.model.MarkPriceEvent;
+import com.surprising.price.api.model.PriceStatus;
+import com.surprising.price.consumer.LatestMarkPriceCache;
+import com.surprising.price.consumer.MarkPriceConsumerProperties;
+import com.surprising.product.api.ProductLine;
+import com.surprising.trading.api.model.AmendOrderBatchResponse;
+import com.surprising.trading.api.model.AmendOrderRequest;
+import com.surprising.trading.api.model.AmendOrderResponse;
+import com.surprising.trading.api.model.AlgoOrderBatchResponse;
+import com.surprising.trading.api.model.AlgoOrderQueryResponse;
+import com.surprising.trading.api.model.AlgoOrderResponse;
+import com.surprising.trading.api.model.BatchAmendOrdersRequest;
+import com.surprising.trading.api.model.BatchCancelOrdersRequest;
+import com.surprising.trading.api.model.BatchPlaceOrderRequest;
+import com.surprising.trading.api.model.CancelAllAfterRequest;
+import com.surprising.trading.api.model.CancelAllAfterResponse;
+import com.surprising.trading.api.model.CancelAlgoOrderRequest;
+import com.surprising.trading.api.model.CancelOrderRequest;
+import com.surprising.trading.api.model.CancelOpenAlgoOrdersRequest;
+import com.surprising.trading.api.model.CancelOpenOrdersRequest;
+import com.surprising.trading.api.model.ClosePositionRequest;
+import com.surprising.trading.api.model.MarginMode;
+import com.surprising.trading.api.model.OrderBookLevel;
+import com.surprising.trading.api.model.OrderBookSnapshotResponse;
+import com.surprising.trading.api.model.OrderBatchResponse;
+import com.surprising.trading.api.model.OrderBatchItemResponse;
+import com.surprising.trading.api.model.OrderCommandReceipt;
+import com.surprising.trading.api.model.OrderCommandResult;
+import com.surprising.trading.api.model.OrderQueryResponse;
+import com.surprising.trading.api.model.OrderResponse;
+import com.surprising.trading.api.model.OrderSide;
+import com.surprising.trading.api.model.OrderStatus;
+import com.surprising.trading.api.model.OrderType;
+import com.surprising.trading.api.model.PlaceAlgoOrderRequest;
+import com.surprising.trading.api.model.PlaceOrderRequest;
+import com.surprising.trading.api.model.PositionMode;
+import com.surprising.trading.api.model.PositionSide;
+import com.surprising.trading.api.model.TestOrderResponse;
+import com.surprising.trading.api.model.TimeInForce;
+import com.surprising.trading.api.client.MarketDataRpcApi;
+import com.surprising.trading.api.client.OrderRpcApi;
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.Optional;
+import java.util.zip.CRC32;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+
+class MarketMakerServiceTest {
+
+    private static final ObjectMapper ORDER_OBJECT_MAPPER = JsonMapper.builder()
+            .findAndAddModules()
+            .build();
+
+    @AfterEach
+    void clearProductLineContext() {
+        MarketMakerProductLineContext.clear();
+    }
+
+    @Test
+    void runOncePlacesPostOnlyQuotesThroughOrderRpc() {
+        Fixtures fixtures = new Fixtures(List.of());
+        MarketMakerService service = fixtures.service();
+
+        var response = service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+
+        assertThat(response.strategies()).singleElement()
+                .satisfies(strategy -> {
+                    assertThat(strategy.status()).isEqualTo(MarketMakerStrategyStatus.RUNNING);
+                    assertThat(strategy.productLine()).isEqualTo(ProductLine.LINEAR_PERPETUAL);
+                    assertThat(strategy.lastTraceId()).isNotBlank();
+                });
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(6);
+        assertThat(fixtures.orderRpc.placeRequests)
+                .allSatisfy(request -> {
+                    assertThat(request.timeInForce()).isEqualTo(TimeInForce.GTX);
+                    assertThat(request.postOnly()).isTrue();
+                    assertThat(request.orderType()).isEqualTo(OrderType.LIMIT);
+                    assertThat(request.userId()).isEqualTo(900001L);
+                });
+        assertThat(fixtures.orderRpc.productLinesDuringOpenOrders).containsOnly(ProductLine.LINEAR_PERPETUAL);
+        assertThat(fixtures.orderRpc.productLinesDuringPlace).containsOnly(ProductLine.LINEAR_PERPETUAL);
+        assertThat(MarketMakerProductLineContext.current()).isNull();
+    }
+
+    @Test
+    void spotColdStartUsesMarkPriceWhenTheLocalBookIsEmpty() {
+        Fixtures fixtures = new Fixtures(List.of());
+        fixtures.productLine = ProductLine.SPOT;
+        fixtures.symbol = "BTC-USDT-SPOT";
+        fixtures.bestBidTicks = 0;
+        fixtures.bestAskTicks = 0;
+        MarketMakerService service = fixtures.service();
+
+        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", fixtures.symbol, ProductLine.SPOT));
+
+        assertThat(fixtures.orderRpc.placeRequests).isNotEmpty();
+        assertThat(fixtures.orderRpc.placeRequests)
+                .allSatisfy(request -> assertThat(request.priceTicks()).isPositive());
+    }
+
+    @Test
+    void runOnceSplitsQuoteBatchesAtTheOrderServiceLimit() {
+        Fixtures fixtures = new Fixtures(List.of(), 40);
+        fixtures.orderRpc.batchSupported = true;
+        fixtures.orderLevels = 20;
+        MarketMakerService service = fixtures.service();
+
+        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+
+        assertThat(fixtures.orderRpc.batchPlaceRequests).hasSize(2);
+        assertThat(fixtures.orderRpc.batchPlaceRequests.get(0).orders()).hasSize(20);
+        assertThat(fixtures.orderRpc.batchPlaceRequests.get(1).orders()).hasSize(10);
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(30);
+    }
+
+    @Test
+    void runOnceDoesNotRunStrategiesFromAnotherProductLine() {
+        Fixtures fixtures = new Fixtures(List.of());
+        MarketMakerService service = fixtures.service();
+
+        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT", ProductLine.INVERSE_PERPETUAL));
+
+        assertThat(fixtures.orderRpc.placeRequests).isEmpty();
+        assertThat(fixtures.orderRpc.cancelRequests).isEmpty();
+    }
+
+    @Test
+    void runOnceRecordsReferenceMarketSampleWhenSnapshotIsAvailable() {
+        Fixtures fixtures = new Fixtures(List.of());
+        FakeReferenceSampleRepository sampleRepository = new FakeReferenceSampleRepository();
+        ReferenceOrderBookSnapshot snapshot = new ReferenceOrderBookSnapshot("BINANCE_USDM", "WEBSOCKET", "BTC-USDT",
+                List.of(new ReferenceOrderBookLevel(49_990L, 3L)),
+                List.of(new ReferenceOrderBookLevel(50_020L, 7L)),
+                Instant.parse("2026-01-01T00:00:01Z"));
+        MarketMakerService service = fixtures.service(
+                fixtures.runEventRepository, sampleRepository, (symbol, productLine, instrument) -> snapshot);
+
+        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+
+        assertThat(sampleRepository.referenceSamples).singleElement()
+                .satisfies(sample -> {
+                    assertThat(sample.strategyId()).isEqualTo("btc-usdt-mm-a");
+                    assertThat(sample.productLine()).isEqualTo(ProductLine.LINEAR_PERPETUAL);
+                    assertThat(sample.symbol()).isEqualTo("BTC-USDT");
+                    assertThat(sample.sourceName()).isEqualTo("BINANCE_USDM");
+                    assertThat(sample.transport()).isEqualTo("WEBSOCKET");
+                    assertThat(sample.bidLevels()).isEqualTo(1);
+                    assertThat(sample.askLevels()).isEqualTo(1);
+                    assertThat(sample.spreadTicks()).isEqualTo(30L);
+                });
+    }
+
+    @Test
+    void runOnceCancelsOffTargetOwnedQuotesBeforeReposting() {
+        String prefix = accountPrefix(ProductLine.LINEAR_PERPETUAL, "btc-usdt-mm-a", "BTC-USDT", 900001L);
+        OrderResponse staleBid = order(7L, 900001L, prefix + "b0-1", OrderSide.BUY,
+                49_000L, 10L, OrderStatus.ACCEPTED);
+        Fixtures fixtures = new Fixtures(List.of(staleBid));
+        fixtures.orderRpc.jsonRoundTripReceipts = true;
+        MarketMakerService service = fixtures.service();
+
+        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+
+        assertThat(fixtures.orderRpc.cancelRequests).singleElement()
+                .extracting(CancelOrderRequest::orderId)
+                .isEqualTo(7L);
+        assertThat(fixtures.orderRpc.cancelBatchCalls).isEqualTo(1);
+        assertThat(fixtures.orderRpc.productLinesDuringCancel).containsOnly(ProductLine.LINEAR_PERPETUAL);
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(6);
+    }
+
+    @Test
+    void limitsCombinedCancelAndPlaceOperationsPerCycle() {
+        Fixtures fixtures = new Fixtures(List.of(), 2);
+        MarketMakerService service = fixtures.service();
+
+        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(2);
+    }
+
+    @Test
+    void staleTwentyLevelLadderReservesBudgetForImmediateReplacements() {
+        Fixtures fixtures = new Fixtures(staleTwentyLevelOrders(), 40);
+        fixtures.orderLevels = 20;
+        fixtures.maxOpenOrders = 60;
+
+        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+
+        assertThat(fixtures.orderRpc.cancelRequests).hasSize(20);
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(20);
+        assertThat(fixtures.orderRpc.cancelRequests.size() + fixtures.orderRpc.placeRequests.size()).isEqualTo(40);
+    }
+
+    @Test
+    void reconciliationHonorsOperationBudgetBoundariesAndEventuallyDrainsStaleOrders() {
+        for (int budget : List.of(0, 1, 20, 39, 40)) {
+            Fixtures fixtures = new Fixtures(staleTwentyLevelOrders(), budget);
+            fixtures.orderLevels = 20;
+            fixtures.maxOpenOrders = 60;
+            MarketMakerService service = fixtures.service();
+            int cycles = budget == 0 ? 3 : 90;
+
+            for (int cycle = 0; cycle < cycles; cycle++) {
+                int operationsBefore = fixtures.orderRpc.cancelRequests.size()
+                        + fixtures.orderRpc.placeRequests.size();
+                service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+                int operationsAfter = fixtures.orderRpc.cancelRequests.size()
+                        + fixtures.orderRpc.placeRequests.size();
+                assertThat(operationsAfter - operationsBefore)
+                        .as("budget=%s cycle=%s", budget, cycle)
+                        .isLessThanOrEqualTo(budget);
+                if (fixtures.orderRpc.cancelRequests.size() == 40
+                        && fixtures.orderRpc.placeRequests.size() == 40) {
+                    break;
+                }
+            }
+
+            if (budget == 0) {
+                assertThat(fixtures.orderRpc.cancelRequests).isEmpty();
+                assertThat(fixtures.orderRpc.placeRequests).isEmpty();
+            } else {
+                assertThat(fixtures.orderRpc.cancelRequests).hasSize(40);
+                assertThat(fixtures.orderRpc.placeRequests).hasSize(40);
+                int cancels = fixtures.orderRpc.cancelRequests.size();
+                int places = fixtures.orderRpc.placeRequests.size();
+                service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+                assertThat(fixtures.orderRpc.cancelRequests).hasSize(cancels);
+                assertThat(fixtures.orderRpc.placeRequests).hasSize(places);
+            }
+        }
+    }
+
+    @Test
+    void failedStaleCancellationConsumesBudgetWithoutUnnecessaryReplacement() {
+        List<OrderResponse> staleOrders = staleTwentyLevelOrders();
+        Fixtures fixtures = new Fixtures(staleOrders, 40);
+        fixtures.orderLevels = 20;
+        fixtures.maxOpenOrders = 60;
+        fixtures.orderRpc.failedCancelOrderIds.add(staleOrders.get(0).orderId());
+
+        fixtures.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+
+        assertThat(fixtures.orderRpc.cancelRequests).hasSize(20);
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(19);
+        assertThat(fixtures.orderRpc.cancelRequests.size() + fixtures.orderRpc.placeRequests.size())
+                .isLessThanOrEqualTo(40);
+        assertThat(fixtures.orderRpc.placeRequests)
+                .noneMatch(request -> request.side() == staleOrders.get(0).side()
+                        && request.priceTicks() == staleOrders.get(0).priceTicks());
+    }
+
+    @Test
+    void correctedTwentyByTwoLifecycleIsVisibleInAdminMetrics() {
+        Fixtures fixtures = new Fixtures(List.of(), 40);
+        fixtures.orderLevels = 20;
+        fixtures.maxOpenOrders = 60;
+        fixtures.priceTickUnits = 10_000_000L;
+        fixtures.markPriceUnits = 7_808_312_833_333L;
+        fixtures.bestBidTicks = 780_820L;
+        fixtures.bestAskTicks = 780_842L;
+        MarketMakerService service = fixtures.service();
+
+        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        var metrics = service.adminMetrics(100);
+
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(40)
+                .allSatisfy(request -> assertThat(request.quantitySteps()).isPositive());
+        assertThat(fixtures.orderRpc.placeRequests.stream().filter(request -> request.side() == OrderSide.BUY)
+                .map(PlaceOrderRequest::priceTicks).distinct()).hasSize(20);
+        assertThat(fixtures.orderRpc.placeRequests.stream().filter(request -> request.side() == OrderSide.SELL)
+                .map(PlaceOrderRequest::priceTicks).distinct()).hasSize(20);
+        long highestBid = fixtures.orderRpc.placeRequests.stream()
+                .filter(request -> request.side() == OrderSide.BUY)
+                .mapToLong(PlaceOrderRequest::priceTicks)
+                .max()
+                .orElseThrow();
+        long lowestAsk = fixtures.orderRpc.placeRequests.stream()
+                .filter(request -> request.side() == OrderSide.SELL)
+                .mapToLong(PlaceOrderRequest::priceTicks)
+                .min()
+                .orElseThrow();
+        assertThat(highestBid).isLessThan(lowestAsk);
+        assertThat(metrics.rows()).singleElement().satisfies(row -> {
+            assertThat(row.ownedOpenOrders()).isEqualTo(40L);
+            assertThat(row.ownedBidOrders()).isEqualTo(20L);
+            assertThat(row.ownedAskOrders()).isEqualTo(20L);
+            assertThat(row.desiredQuoteCount()).isEqualTo(40L);
+            assertThat(row.matchedDesiredQuotes()).isEqualTo(40L);
+            assertThat(row.missingDesiredQuotes()).isZero();
+            assertThat(row.staleOwnedOrders()).isZero();
+            assertThat(row.markPriceTicks()).isEqualTo(780_831L);
+            assertThat(row.bestBidTicks()).isEqualTo(780_820L);
+            assertThat(row.bestAskTicks()).isEqualTo(780_842L);
+            assertThat(row.quoteCoveragePpm()).isEqualTo(1_000_000L);
+        });
+    }
+
+    @Test
+    void tinyAnchorDepthReductionIsVisibleInAdminMetrics() {
+        Fixtures fixtures = new Fixtures(List.of(), 40);
+        fixtures.orderLevels = 20;
+        fixtures.maxOpenOrders = 60;
+        fixtures.priceTickUnits = 100_000_000_000L;
+        fixtures.markPriceUnits = 7_808_312_833_333L;
+        fixtures.bestBidTicks = 77L;
+        fixtures.bestAskTicks = 79L;
+        MarketMakerService service = fixtures.service();
+
+        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        var metrics = service.adminMetrics(100);
+
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(2);
+        assertThat(metrics.rows()).singleElement().satisfies(row -> {
+            assertThat(row.desiredBidQuotes()).isEqualTo(1L);
+            assertThat(row.desiredAskQuotes()).isEqualTo(1L);
+        });
+        assertThat(metrics.anomalies()).extracting(MarketMakerService.MarketMakerAnomaly::type)
+                .contains("REDUCED_DISTINCT_DEPTH");
+    }
+
+    @Test
+    void restartedProviderDoesNotReuseClientOrderIdsFromPreviousInstance() {
+        Fixtures first = new Fixtures(List.of());
+        first.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        List<String> firstIds = first.orderRpc.placeRequests.stream()
+                .map(PlaceOrderRequest::clientOrderId)
+                .toList();
+
+        Fixtures second = new Fixtures(List.of());
+        second.service().runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        List<String> secondIds = second.orderRpc.placeRequests.stream()
+                .map(PlaceOrderRequest::clientOrderId)
+                .toList();
+
+        assertThat(secondIds).doesNotContainAnyElementsOf(firstIds);
+        assertThat(secondIds).allSatisfy(id -> assertThat(id).startsWith("mm-"));
+    }
+
+    @Test
+    void reusesLocalOrderSnapshotBetweenFastCycles() {
+        Fixtures fixtures = new Fixtures(List.of());
+        MarketMakerService service = fixtures.service();
+
+        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+
+        assertThat(fixtures.orderRpc.openOrdersCalls).isEqualTo(1);
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(6);
+    }
+
+    @Test
+    void adminMetricsReportsQuoteQualityAndAnomalies() {
+        Fixtures fixtures = new Fixtures(List.of());
+        MarketMakerService service = fixtures.service();
+
+        var metrics = service.adminMetrics(100);
+
+        assertThat(metrics.nodeId()).isEqualTo("mm-test");
+        assertThat(metrics.totals().strategyCount()).isEqualTo(1L);
+        assertThat(metrics.totals().metricRows()).isEqualTo(1L);
+        assertThat(metrics.totals().criticalAnomalies()).isEqualTo(1L);
+        assertThat(metrics.totals().warnAnomalies()).isEqualTo(1L);
+        assertThat(metrics.rows()).singleElement()
+                .satisfies(row -> {
+                    assertThat(row.strategyId()).isEqualTo("btc-usdt-mm-a");
+                    assertThat(row.productLine()).isEqualTo(ProductLine.LINEAR_PERPETUAL);
+                    assertThat(row.symbol()).isEqualTo("BTC-USDT");
+                    assertThat(row.accountId()).isEqualTo(900001L);
+                    assertThat(row.qualityStatus()).isEqualTo("CRITICAL");
+                    assertThat(row.desiredQuoteCount()).isEqualTo(6L);
+                    assertThat(row.missingDesiredQuotes()).isEqualTo(6L);
+                    assertThat(row.ownedOpenOrders()).isZero();
+                    assertThat(row.quoteCoveragePpm()).isZero();
+                    assertThat(row.bestBidTicks()).isEqualTo(49_990L);
+                    assertThat(row.bestAskTicks()).isEqualTo(50_010L);
+                    assertThat(row.markPriceTicks()).isEqualTo(50_000L);
+                });
+        assertThat(metrics.anomalies())
+                .extracting(MarketMakerService.MarketMakerAnomaly::type)
+                .containsExactlyInAnyOrder("MISSING_DESIRED_QUOTES", "NO_LIVE_QUOTES");
+    }
+
+    @Test
+    void updateStrategyConfigAppliesPersistentOverridesToQuotePlanning() {
+        Fixtures fixtures = new Fixtures(List.of());
+        MarketMakerService service = fixtures.service();
+
+        var config = service.updateStrategyConfig("btc-usdt-mm-a",
+                new MarketMakerService.MarketMakerStrategyConfigUpdateRequest(
+                        true, 25L, "CROSS", 40L, 12L, 500L, 500_000L, 2, "quote tuning"),
+                "1001");
+        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+
+        assertThat(config.effective().baseQuantitySteps()).isEqualTo(25L);
+        assertThat(config.effective().orderLevels()).isEqualTo(2);
+        assertThat(config.override().updatedByAdminUserId()).isEqualTo("1001");
+        assertThat(fixtures.orderRpc.placeRequests).hasSize(4);
+        assertThat(fixtures.orderRpc.placeRequests)
+                .allSatisfy(request -> assertThat(request.quantitySteps()).isEqualTo(25L));
+    }
+
+    @Test
+    void runOnceRecordsStrategyRunEvents() {
+        Fixtures fixtures = new Fixtures(List.of());
+        FakeRunEventRepository runEventRepository = new FakeRunEventRepository();
+        MarketMakerService service = fixtures.service(runEventRepository);
+
+        service.runOnce(new MarketMakerRunRequest("btc-usdt-mm-a", "BTC-USDT"));
+
+        assertThat(runEventRepository.events)
+                .extracting(MarketMakerRunEventWrite::eventType)
+                .contains("QUOTE_RECONCILED", "CYCLE_SUCCESS");
+        assertThat(runEventRepository.events)
+                .filteredOn(event -> "QUOTE_RECONCILED".equals(event.eventType()))
+                .singleElement()
+                .satisfies(event -> {
+                    assertThat(event.strategyId()).isEqualTo("btc-usdt-mm-a");
+                    assertThat(event.productLine()).isEqualTo(ProductLine.LINEAR_PERPETUAL);
+                    assertThat(event.symbol()).isEqualTo("BTC-USDT");
+                    assertThat(event.accountId()).isEqualTo(900001L);
+                    assertThat(event.submittedOrders()).isEqualTo(6L);
+                    assertThat(event.traceId()).isNotBlank();
+                });
+    }
+
+    @Test
+    void runLogsWithCursorDelegatesNormalizedFiltersToRepository() {
+        Fixtures fixtures = new Fixtures(List.of());
+        FakeRunEventRepository runEventRepository = new FakeRunEventRepository();
+        MarketMakerService service = fixtures.service(runEventRepository);
+        Instant createdAt = Instant.parse("2026-07-03T00:00:00Z");
+        runEventRepository.runEventPage = new CursorPage<>(List.of(new MarketMakerRunEventRecord(
+                77L, "btc-usdt-mm-a", ProductLine.LINEAR_PERPETUAL, "BTC-USDT", 900001L, "mm-test", 9L,
+                "QUOTE_RECONCILED", 2L, 1L, 0L, null, null, "trace-1", createdAt)),
+                "next", true, "createdAt.desc", 25);
+
+        var response = service.runLogs(ProductLine.LINEAR_PERPETUAL, "btc-usdt-mm-a", "btc-usdt", 900001L,
+                "QUOTE_RECONCILED", 25, "cursor", "createdAt.desc");
+
+        assertThat(response.events()).singleElement()
+                .satisfies(event -> assertThat(event.eventId()).isEqualTo(77L));
+        assertThat(response.nextCursor()).isEqualTo("next");
+        assertThat(response.hasMore()).isTrue();
+        assertThat(response.sort()).isEqualTo("createdAt.desc");
+        assertThat(response.limit()).isEqualTo(25);
+        assertThat(runEventRepository.lastRunEventsPageProductLine).isEqualTo(ProductLine.LINEAR_PERPETUAL);
+        assertThat(runEventRepository.lastRunEventsPageStrategyId).isEqualTo("BTC-USDT-MM-A");
+        assertThat(runEventRepository.lastRunEventsPageSymbol).isEqualTo("BTC-USDT");
+        assertThat(runEventRepository.lastRunEventsPageCursor).isEqualTo("cursor");
+        assertThat(runEventRepository.lastRunEventsPageSort).isEqualTo("createdAt.desc");
+    }
+
+    private static String accountPrefix(ProductLine productLine, String strategyId, String symbol, long accountId) {
+        CRC32 crc32 = new CRC32();
+        crc32.update((productLine.name() + ":" + strategyId + ":" + symbol).getBytes(StandardCharsets.UTF_8));
+        return "mm-" + Long.toUnsignedString(crc32.getValue(), 36) + "-" + accountId + "-";
+    }
+
+    private static OrderResponse order(long orderId,
+                                       long userId,
+                                       String clientOrderId,
+                                       OrderSide side,
+                                       long priceTicks,
+                                       long remainingQuantity,
+                                       OrderStatus status) {
+        return orderAt(orderId, userId, clientOrderId, side, priceTicks, remainingQuantity, status,
+                Instant.parse("2026-01-01T00:00:00Z"));
+    }
+
+    private static List<OrderResponse> staleTwentyLevelOrders() {
+        String prefix = accountPrefix(ProductLine.LINEAR_PERPETUAL, "btc-usdt-mm-a", "BTC-USDT", 900001L);
+        List<OrderResponse> orders = new ArrayList<>();
+        for (int level = 0; level < 20; level++) {
+            orders.add(order(1_000L + level, 900001L, prefix + "b" + level + "-1", OrderSide.BUY,
+                    49_995L - 10L * level, 10L, OrderStatus.ACCEPTED));
+            orders.add(order(2_000L + level, 900001L, prefix + "s" + level + "-1", OrderSide.SELL,
+                    50_005L + 10L * level, 10L, OrderStatus.ACCEPTED));
+        }
+        return List.copyOf(orders);
+    }
+
+    private static OrderResponse orderAt(long orderId,
+                                         long userId,
+                                         String clientOrderId,
+                                         OrderSide side,
+                                         long priceTicks,
+                                         long remainingQuantity,
+                                         OrderStatus status,
+                                         Instant now) {
+        return new OrderResponse(orderId, userId, clientOrderId, "BTC-USDT", 1L, side, OrderType.LIMIT,
+                TimeInForce.GTX, priceTicks, remainingQuantity, 0L, remainingQuantity, MarginMode.CROSS,
+                PositionSide.NET, -100L, 500L, false, true, status, null, now, now);
+    }
+
+    private static final class Fixtures {
+        private final FakeOrderRpc orderRpc;
+        private final FakeRunEventRepository runEventRepository = new FakeRunEventRepository();
+        private final FakeReferenceSampleRepository referenceSampleRepository =
+                new FakeReferenceSampleRepository();
+        private final int maxOrderOperationsPerCycle;
+        private int orderLevels = 3;
+        private int maxOpenOrders = 30;
+        private long priceTickUnits = 100L;
+        private long markPriceUnits = 5_000_000L;
+        private long bestBidTicks = 49_990L;
+        private long bestAskTicks = 50_010L;
+        private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
+        private String symbol = "BTC-USDT";
+
+        private Fixtures(List<OrderResponse> openOrders) {
+            this(openOrders, 40);
+        }
+
+        private Fixtures(List<OrderResponse> openOrders, int maxOrderOperationsPerCycle) {
+            this.orderRpc = new FakeOrderRpc(openOrders);
+            this.maxOrderOperationsPerCycle = maxOrderOperationsPerCycle;
+        }
+
+        private MarketMakerService service() {
+            return service(runEventRepository, referenceSampleRepository, ReferenceMarketProvider.disabled());
+        }
+
+        private MarketMakerService service(MarketMakerRunEventRepository runEventRepository) {
+            return service(runEventRepository, referenceSampleRepository, ReferenceMarketProvider.disabled());
+        }
+
+        private MarketMakerService service(MarketMakerRunEventRepository runEventRepository,
+                                           MarketMakerReferenceSampleRepository referenceSampleRepository,
+                                           ReferenceMarketProvider referenceMarketProvider) {
+            MarketMakerProperties properties = properties();
+            InstrumentSnapshotCache snapshotCache = new InstrumentSnapshotCache();
+            snapshotCache.replace(productLine,
+                    List.of(new FakeInstrumentRpc(priceTickUnits).latest(symbol, productLine)));
+            return new MarketMakerService(properties, markPriceCache(),
+                    new FakeMarketDataRpc(bestBidTicks, bestAskTicks), orderRpc, new FakeAccountRpc(), new QuotePlanner(),
+                    referenceMarketProvider, (productLine, strategyId, symbol, ownerId, leaseDuration) -> true,
+                    new FakeOverrideStore(), runEventRepository, referenceSampleRepository, snapshotCache);
+        }
+
+        private LatestMarkPriceCache markPriceCache() {
+            MarkPriceConsumerProperties consumerProperties = new MarkPriceConsumerProperties();
+            consumerProperties.setProductLine(productLine);
+            consumerProperties.setMaxAge(Duration.ofSeconds(3));
+            LatestMarkPriceCache cache = new LatestMarkPriceCache(consumerProperties);
+            Instant now = Instant.now();
+            BigDecimal price = BigDecimal.valueOf(50_000L);
+            cache.update(new MarkPriceEvent(productLine, symbol, 1L,
+                    markPriceUnits, 50_000L, price, price, price, price, price,
+                    BigDecimal.valueOf(bestBidTicks), BigDecimal.valueOf(bestAskTicks), BigDecimal.ZERO,
+                    now.plusSeconds(3600), 3600L, BigDecimal.ZERO, 60L,
+                    BigDecimal.valueOf(49_000L), BigDecimal.valueOf(51_000L), 1L,
+                    PriceStatus.HEALTHY, now, now));
+            return cache;
+        }
+
+        private MarketMakerProperties properties() {
+            MarketMakerProperties properties = new MarketMakerProperties();
+            properties.getEngine().setNodeId("mm-test");
+            properties.getCoordination().setEnabled(false);
+            properties.getQuoting().setOrderLevels(orderLevels);
+            properties.getQuoting().setMinSpreadTicks(10L);
+            properties.getQuoting().setLevelSpacingTicks(10L);
+            properties.getQuoting().setRefreshThresholdTicks(2L);
+            properties.getQuoting().setMaxOrderOperationsPerCycle(maxOrderOperationsPerCycle);
+            properties.getQuoting().setMaxOpenOrdersPerAccountSymbol(maxOpenOrders);
+            properties.getRisk().setMaxInventorySteps(1000L);
+            MarketMakerProperties.Strategy strategy = new MarketMakerProperties.Strategy();
+            strategy.setStrategyId("btc-usdt-mm-a");
+            strategy.setProductLine(productLine);
+            strategy.setEnabled(true);
+            strategy.setAccountIds(List.of(900001L));
+            strategy.setSymbols(List.of(symbol));
+            strategy.setBaseQuantitySteps(10L);
+            strategy.setMarginMode(MarginMode.CROSS);
+            properties.setStrategies(List.of(strategy));
+            return properties;
+        }
+    }
+
+    private static final class FakeOverrideStore implements MarketMakerStrategyOverrideStore {
+        private final Map<String, StrategyConfigOverride> overrides = new HashMap<>();
+
+        @Override
+        public List<StrategyConfigOverride> findAll() {
+            return List.copyOf(overrides.values());
+        }
+
+        @Override
+        public Optional<StrategyConfigOverride> find(ProductLine productLine, String strategyId) {
+            return Optional.ofNullable(overrides.get(key(productLine, strategyId)));
+        }
+
+        @Override
+        public StrategyConfigOverride save(StrategyConfigOverride override) {
+            String key = key(override.productLine(), override.strategyId());
+            long version = overrides.containsKey(key)
+                    ? overrides.get(key).version() + 1L
+                    : 1L;
+            StrategyConfigOverride saved = new StrategyConfigOverride(
+                    override.strategyId(), override.productLine(), override.enabled(), override.baseQuantitySteps(), override.marginMode(),
+                    override.spreadTicks(), override.levelSpacingTicks(), override.maxInventorySteps(),
+                    override.maxInventorySkewPpm(), override.orderLevels(), override.updatedByAdminUserId(),
+                    override.reason(), override.updatedAt(), version);
+            overrides.put(key, saved);
+            return saved;
+        }
+
+        @Override
+        public void delete(ProductLine productLine, String strategyId) {
+            overrides.remove(key(productLine, strategyId));
+        }
+
+        private String key(ProductLine productLine, String strategyId) {
+            return productLine.name() + ":" + strategyId;
+        }
+    }
+
+    private static final class FakeRunEventRepository implements MarketMakerRunEventRepository {
+        private final List<MarketMakerRunEventWrite> events = new ArrayList<>();
+        private CursorPage<MarketMakerRunEventRecord> runEventPage =
+                new CursorPage<>(List.of(), null, false, "createdAt.desc", 100);
+        private String lastRunEventsPageStrategyId;
+        private ProductLine lastRunEventsPageProductLine;
+        private String lastRunEventsPageSymbol;
+        private Long lastRunEventsPageAccountId;
+        private String lastRunEventsPageEventType;
+        private int lastRunEventsPageLimit;
+        private String lastRunEventsPageCursor;
+        private String lastRunEventsPageSort;
+
+        @Override
+        public void record(MarketMakerRunEventWrite event) {
+            events.add(event);
+        }
+
+        @Override
+        public List<MarketMakerRunEventRecord> find(ProductLine productLine,
+                                                    String strategyId,
+                                                    String symbol,
+                                                    Long accountId,
+                                                    String eventType,
+                                                    int limit) {
+            return List.of();
+        }
+
+        @Override
+        public CursorPage<MarketMakerRunEventRecord> findPage(ProductLine productLine,
+                                                              String strategyId,
+                                                              String symbol,
+                                                              Long accountId,
+                                                              String eventType,
+                                                              int limit,
+                                                              String cursor,
+                                                              String sort) {
+            lastRunEventsPageProductLine = productLine;
+            lastRunEventsPageStrategyId = strategyId;
+            lastRunEventsPageSymbol = symbol;
+            lastRunEventsPageAccountId = accountId;
+            lastRunEventsPageEventType = eventType;
+            lastRunEventsPageLimit = limit;
+            lastRunEventsPageCursor = cursor;
+            lastRunEventsPageSort = sort;
+            return runEventPage;
+        }
+    }
+
+    private static final class FakeReferenceSampleRepository implements MarketMakerReferenceSampleRepository {
+        private final List<MarketMakerReferenceSampleWrite> referenceSamples = new ArrayList<>();
+
+        @Override
+        public void record(MarketMakerReferenceSampleWrite sample) {
+            referenceSamples.add(sample);
+        }
+    }
+
+    private static final class FakeOrderRpc implements OrderRpcApi {
+        private final List<OrderResponse> openOrders;
+        private final List<PlaceOrderRequest> placeRequests = new ArrayList<>();
+        private final List<CancelOrderRequest> cancelRequests = new ArrayList<>();
+        private final List<ProductLine> productLinesDuringPlace = new ArrayList<>();
+        private final List<ProductLine> productLinesDuringCancel = new ArrayList<>();
+        private final List<ProductLine> productLinesDuringOpenOrders = new ArrayList<>();
+        private final List<BatchPlaceOrderRequest> batchPlaceRequests = new ArrayList<>();
+        private final List<Long> failedCancelOrderIds = new ArrayList<>();
+        private boolean batchSupported = true;
+        private boolean jsonRoundTripReceipts;
+        private int openOrdersCalls;
+        private int cancelBatchCalls;
+
+        private FakeOrderRpc(List<OrderResponse> openOrders) {
+            this.openOrders = new ArrayList<>(openOrders);
+        }
+
+        @Override
+        public OrderCommandReceipt place(PlaceOrderRequest request) {
+            productLinesDuringPlace.add(MarketMakerProductLineContext.current());
+            placeRequests.add(request);
+            OrderResponse placed = orderAt(1000L + placeRequests.size(), request.userId(), request.clientOrderId(),
+                    request.side(), request.priceTicks(), request.quantitySteps(), OrderStatus.ACCEPTED, Instant.now());
+            openOrders.add(placed);
+            return terminal(placed);
+        }
+
+        @Override
+        public OrderCommandReceipt placeBatch(BatchPlaceOrderRequest request) {
+            if (!batchSupported) {
+                throw new UnsupportedOperationException();
+            }
+            batchPlaceRequests.add(request);
+            List<OrderBatchItemResponse> results = new ArrayList<>();
+            for (int i = 0; i < request.orders().size(); i++) {
+                PlaceOrderRequest placeRequest = request.orders().get(i);
+                productLinesDuringPlace.add(MarketMakerProductLineContext.current());
+                placeRequests.add(placeRequest);
+                OrderResponse placed = orderAt(2_000L + batchPlaceRequests.size() * 100L + i,
+                        placeRequest.userId(), placeRequest.clientOrderId(), placeRequest.side(),
+                        placeRequest.priceTicks(), placeRequest.quantitySteps(), OrderStatus.ACCEPTED, Instant.now());
+                openOrders.add(placed);
+                results.add(new OrderBatchItemResponse(i, true, "completed",
+                        placed));
+            }
+            return terminal(new OrderBatchResponse(results.size(), results.size(), 0, results));
+        }
+
+        @Override
+        public TestOrderResponse test(PlaceOrderRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public OrderCommandReceipt amend(AmendOrderRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public OrderCommandReceipt amendBatch(BatchAmendOrdersRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public OrderResponse closePosition(ClosePositionRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public OrderCommandReceipt cancel(CancelOrderRequest request) {
+            productLinesDuringCancel.add(MarketMakerProductLineContext.current());
+            cancelRequests.add(request);
+            openOrders.removeIf(order -> order.orderId() == request.orderId());
+            return terminal(order(request.orderId(), request.userId(), "canceled", OrderSide.BUY,
+                    1L, 0L, OrderStatus.CANCELED));
+        }
+
+        @Override
+        public OrderCommandReceipt cancelBatch(BatchCancelOrdersRequest request) {
+            cancelBatchCalls++;
+            List<OrderBatchItemResponse> results = new ArrayList<>();
+            for (int i = 0; i < request.orders().size(); i++) {
+                CancelOrderRequest cancelRequest = request.orders().get(i);
+                productLinesDuringCancel.add(MarketMakerProductLineContext.current());
+                cancelRequests.add(cancelRequest);
+                boolean success = !failedCancelOrderIds.contains(cancelRequest.orderId());
+                if (success) {
+                    openOrders.removeIf(order -> order.orderId() == cancelRequest.orderId());
+                }
+                results.add(new OrderBatchItemResponse(i, success, success ? "completed" : "failed", success
+                        ? order(cancelRequest.orderId(), cancelRequest.userId(), "canceled", OrderSide.BUY,
+                                1L, 0L, OrderStatus.CANCELED)
+                        : null));
+            }
+            int succeeded = (int) results.stream().filter(OrderBatchItemResponse::success).count();
+            return terminal(new OrderBatchResponse(results.size(), succeeded, results.size() - succeeded, results));
+        }
+
+        private OrderCommandReceipt terminal(OrderCommandResult result) {
+            UUID commandId = UUID.nameUUIDFromBytes(("fake:" + result).getBytes(StandardCharsets.UTF_8));
+            OrderCommandReceipt receipt = new OrderCommandReceipt(commandId, "TERMINAL", "NONE", "completed",
+                    OrderCommandReceipt.commandResultUrl(commandId), List.of(), null, result, null);
+            if (!jsonRoundTripReceipts) {
+                return receipt;
+            }
+            try {
+                return ORDER_OBJECT_MAPPER.readValue(ORDER_OBJECT_MAPPER.writeValueAsString(receipt),
+                        OrderCommandReceipt.class);
+            } catch (Exception ex) {
+                throw new AssertionError("maker receipt JSON round-trip failed", ex);
+            }
+        }
+
+        @Override
+        public OrderBatchResponse cancelOpen(CancelOpenOrdersRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public CancelAllAfterResponse cancelAllAfter(CancelAllAfterRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public AlgoOrderResponse placeAlgo(PlaceAlgoOrderRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public AlgoOrderResponse cancelAlgo(CancelAlgoOrderRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public AlgoOrderBatchResponse cancelOpenAlgo(CancelOpenAlgoOrdersRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public AlgoOrderResponse getAlgo(long algoOrderId) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public AlgoOrderQueryResponse openAlgoOrders(long userId, String symbol, int limit) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public OrderResponse get(long orderId) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public OrderResponse getByClientOrderId(long userId, String clientOrderId) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public OrderQueryResponse openOrders(long userId, String symbol, int limit, String cursor) {
+            productLinesDuringOpenOrders.add(MarketMakerProductLineContext.current());
+            openOrdersCalls++;
+            return new OrderQueryResponse(openOrders.size(), openOrders);
+        }
+    }
+
+    private static final class FakeMarketDataRpc implements MarketDataRpcApi {
+        private final long bestBidTicks;
+        private final long bestAskTicks;
+
+        private FakeMarketDataRpc(long bestBidTicks, long bestAskTicks) {
+            this.bestBidTicks = bestBidTicks;
+            this.bestAskTicks = bestAskTicks;
+        }
+
+        @Override
+        public OrderBookSnapshotResponse orderBook(String symbol, int depth) {
+            Instant now = Instant.parse("2026-01-01T00:00:00Z");
+            return new OrderBookSnapshotResponse(symbol, 1L, depth,
+                    List.of(new OrderBookLevel(bestBidTicks, 100L, 1L)),
+                    List.of(new OrderBookLevel(bestAskTicks, 100L, 1L)), now);
+        }
+
+    }
+
+    private static final class FakeInstrumentRpc implements InstrumentRpcApi {
+        private final long priceTickUnits;
+
+        private FakeInstrumentRpc(long priceTickUnits) {
+            this.priceTickUnits = priceTickUnits;
+        }
+
+        @Override
+        public InstrumentResponse latest(String symbol, ProductLine productLine) {
+            ProductLine effectiveProductLine = productLine == null ? ProductLine.LINEAR_PERPETUAL : productLine;
+            InstrumentType instrumentType = switch (effectiveProductLine) {
+                case SPOT -> InstrumentType.SPOT;
+                case LINEAR_PERPETUAL, INVERSE_PERPETUAL -> InstrumentType.PERPETUAL;
+                case LINEAR_DELIVERY, INVERSE_DELIVERY -> InstrumentType.DELIVERY;
+                case OPTION -> InstrumentType.OPTION;
+            };
+            ContractType contractType = ContractType.valueOf(effectiveProductLine.contractTypeCode());
+            Instant now = Instant.parse("2026-01-01T00:00:00Z");
+            return new InstrumentResponse(symbol, 1L, instrumentType, contractType,
+                    "BTC", "USDT", "USDT", 1_000_000L, "BTC", priceTickUnits, 1L, 1L, 1_000_000L,
+                    1L, 1_000_000_000_000L, 1L, 2, 0, List.of("LIMIT"), List.of("GTX"), true,
+                    true, true, 100_000_000L, 10_000L, 5_000L, -100L, 500L,
+                    1_000_000_000L, 300_000L, 250_000_000L, 8, 100L, 3_000L, -3_000L,
+                    10_000_000L, 3, null, null, null, null, null, null, null,
+                    InstrumentStatus.TRADING, now, now, now, List.of(), List.of());
+        }
+
+        @Override
+        public InstrumentResponse version(String symbol, long version) {
+            return latest(symbol, null);
+        }
+
+        @Override
+        public InstrumentQueryResponse list(ProductLine productLine, InstrumentType type, InstrumentStatus status) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public InstrumentSnapshotResponse snapshot(ProductLine productLine) {
+            return new InstrumentSnapshotResponse(productLine, 1L, "test", List.of(latest("BTC-USDT")));
+        }
+    }
+
+    private static final class FakeAccountRpc implements AccountRpcApi {
+        @Override
+        public BalanceResponse balance(long userId, String asset) {
+            return new BalanceResponse(userId, asset, 1_000_000_000L, 0L, 1_000_000_000L,
+                    Instant.parse("2026-01-01T00:00:00Z"));
+        }
+
+        @Override
+        public BalanceQueryResponse balances(long userId) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ProductBalanceResponse productBalance(long userId, AccountType accountType, String asset) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ProductBalanceQueryResponse productBalances(long userId, AccountType accountType) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ProductTransferResponse transfer(ProductTransferRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public PositionModeResponse positionMode(long userId) {
+            return positionMode(userId, null);
+        }
+
+        @Override
+        public PositionModeResponse positionMode(long userId, ProductLine productLine) {
+            return new PositionModeResponse(ProductLine.LINEAR_PERPETUAL, userId, PositionMode.ONE_WAY,
+                    Instant.parse("2026-01-01T00:00:00Z"));
+        }
+
+        @Override
+        public PositionModeResponse updatePositionMode(PositionModeUpdateRequest request) {
+            return new PositionModeResponse(ProductLine.LINEAR_PERPETUAL, request.userId(), request.positionMode(),
+                    Instant.parse("2026-01-01T00:00:00Z"));
+        }
+
+        @Override
+        public PositionResponse position(long userId, String symbol, String marginMode, String positionSide) {
+            return new PositionResponse(userId, symbol, 1L, MarginMode.CROSS, PositionSide.NET,
+                    0L, 0L, 0L, Instant.parse("2026-01-01T00:00:00Z"));
+        }
+
+        @Override
+        public PositionMarginResponse positionMargin(long userId, String symbol, String marginMode) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public PositionMarginAdjustmentResponse adjustPositionMargin(PositionMarginAdjustmentRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public PositionQueryResponse positions(long userId, String positionSide) {
+            throw new UnsupportedOperationException();
+        }
+    }
+}

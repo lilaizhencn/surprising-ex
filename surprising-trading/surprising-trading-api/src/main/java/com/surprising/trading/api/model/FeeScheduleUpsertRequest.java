@@ -1,10 +1,12 @@
 package com.surprising.trading.api.model;
 
 import com.surprising.product.api.ProductLine;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import java.time.Instant;
 
 public record FeeScheduleUpsertRequest(
-        Long feeScheduleId,
+        @NotNull @Positive Long feeScheduleId,
         ProductLine productLine,
         long userId,
         String symbol,

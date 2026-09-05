@@ -27,7 +27,6 @@ class ExpiringContractSettlementConsumerTest {
         RecordingFanoutService fanoutService = new RecordingFanoutService();
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
-        properties.getKafka().setProductTopicsEnabled(true);
         ExpiringContractSettlementConsumer consumer =
                 new ExpiringContractSettlementConsumer(objectMapper, fanoutService, properties);
         DeliverySettlementEvent event = deliveryEvent("BTC-USDT-260327");
@@ -44,7 +43,6 @@ class ExpiringContractSettlementConsumerTest {
         RecordingFanoutService fanoutService = new RecordingFanoutService();
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductLine(ProductLine.OPTION);
-        properties.getKafka().setProductTopicsEnabled(true);
         ExpiringContractSettlementConsumer consumer =
                 new ExpiringContractSettlementConsumer(objectMapper, fanoutService, properties);
         OptionExerciseEvent event = optionEvent("BTC-USDT-260925-70000-C");
@@ -80,7 +78,6 @@ class ExpiringContractSettlementConsumerTest {
         RecordingFanoutService fanoutService = new RecordingFanoutService();
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
-        properties.getKafka().setProductTopicsEnabled(true);
         ExpiringContractSettlementConsumer consumer =
                 new ExpiringContractSettlementConsumer(objectMapper, fanoutService, properties);
 
@@ -102,7 +99,6 @@ class ExpiringContractSettlementConsumerTest {
         RecordingFanoutService fanoutService = new RecordingFanoutService();
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductLine(ProductLine.OPTION);
-        properties.getKafka().setProductTopicsEnabled(true);
         ExpiringContractSettlementConsumer consumer =
                 new ExpiringContractSettlementConsumer(objectMapper, fanoutService, properties);
 
@@ -122,7 +118,6 @@ class ExpiringContractSettlementConsumerTest {
     void exposesResolvedLifecycleTopicsAndGroupFromProperties() {
         AccountProperties properties = new AccountProperties();
         properties.getKafka().setProductLine(ProductLine.LINEAR_DELIVERY);
-        properties.getKafka().setProductTopicsEnabled(true);
         ExpiringContractSettlementConsumer deliveryConsumer = new ExpiringContractSettlementConsumer(
                 new ObjectMapper(), new RecordingFanoutService(), properties);
 
@@ -156,7 +151,7 @@ class ExpiringContractSettlementConsumerTest {
         private OptionExerciseEvent optionEvent;
 
         private RecordingFanoutService() {
-            super(null, null, null);
+            super(null, null);
         }
 
         @Override

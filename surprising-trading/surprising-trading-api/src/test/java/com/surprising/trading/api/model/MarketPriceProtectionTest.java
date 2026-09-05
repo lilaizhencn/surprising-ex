@@ -15,11 +15,13 @@ class MarketPriceProtectionTest {
     }
 
     @Test
-    void appliesSellSlippageByRoundingDown() {
+    void appliesSellSlippageByRoundingAwayFromTheMarkPrice() {
         assertThat(MarketPriceProtection.protectedPriceTicks(OrderSide.SELL, 100_000L, 10_000L))
                 .isEqualTo(99_000L);
         assertThat(MarketPriceProtection.protectedPriceTicks(OrderSide.SELL, 101L, 10_000L))
-                .isEqualTo(100L);
+                .isEqualTo(99L);
+        assertThat(MarketPriceProtection.protectedPriceTicks(OrderSide.SELL, 78L, 10_000L))
+                .isEqualTo(77L);
     }
 
     @Test

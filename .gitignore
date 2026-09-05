@@ -1,8 +1,16 @@
 target/
 .idea/
 *.iml
+.classpath
+.project
+.settings/
 .DS_Store
 *.log
+*.pid
+javacore.*.txt
 logs/
+.local-logs/
 data/
 .codegraph/
+reports/capacity/**/resources.tsv
+reports/capacity/**/resource-monitor.stop

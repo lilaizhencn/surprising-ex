@@ -16,9 +16,11 @@ public record ProductTransferResult(
         Instant createdAt,
         Instant updatedAt) {
 
-    static ProductTransferResult from(ProductTransferState state) {
-        return new ProductTransferResult(state.transferId(), state.userId(), state.sourceAccountType(),
-                state.targetAccountType(), state.asset(), state.amountUnits(), state.referenceId(), state.status(),
-                state.errorCode(), state.errorMessage(), state.createdAt(), state.updatedAt());
+    static ProductTransferResult from(long transferId, ProductTransferCommand command,
+                                      ProductTransferStatus status, String errorCode, String errorMessage,
+                                      Instant startedAt) {
+        return new ProductTransferResult(transferId, command.userId(), command.sourceAccountType(),
+                command.targetAccountType(), command.asset(), command.amountUnits(), command.referenceId(), status,
+                errorCode, errorMessage, startedAt, Instant.now());
     }
 }

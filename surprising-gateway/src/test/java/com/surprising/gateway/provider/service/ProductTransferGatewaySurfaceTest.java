@@ -1,12 +1,10 @@
 package com.surprising.gateway.provider.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.surprising.account.api.model.ProductTransferOperationRequest;
 import com.surprising.gateway.provider.auth.AuthModels.JwtPrincipal;
 import com.surprising.gateway.provider.auth.AuthService;
 import com.surprising.gateway.provider.config.GatewayProperties;
@@ -24,24 +22,18 @@ class ProductTransferGatewaySurfaceTest {
 
     @Test
     void postGatewayTransferReturnsCompletedTransferContract() {
-        ProductTransferStore store = mock(ProductTransferStore.class);
         ProductAccountClient accountClient = mock(ProductAccountClient.class);
-        java.util.concurrent.atomic.AtomicReference<ProductTransferState> pending =
-                new java.util.concurrent.atomic.AtomicReference<>();
-        when(store.createOrGet(any(ProductTransferCreateRequest.class))).thenAnswer(invocation -> {
-            ProductTransferCreateRequest request = invocation.getArgument(0);
-            ProductTransferState state = ProductTransferState.pending(321L, request, Instant.now());
-            pending.set(state);
-            return state;
-        });
-        when(store.lock(321L)).thenAnswer(invocation -> pending.get());
-        when(store.update(any(ProductTransferState.class), any(ProductTransferState.class)))
-                .thenAnswer(invocation -> invocation.getArgument(1));
-        when(store.recoverable(org.mockito.ArgumentMatchers.anyInt())).thenReturn(java.util.List.of());
-        when(accountClient.adjust(anyString(), anyLong(), anyString(), anyString(), anyLong(), anyString()))
+        when(accountClient.transferOut(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(ProductTransferOperationRequest.class)))
+                .thenReturn(ProductAccountAdjustment.applied("ok"));
+        when(accountClient.transferIn(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(ProductTransferOperationRequest.class)))
+                .thenReturn(ProductAccountAdjustment.applied("ok"));
+        when(accountClient.completeTransfer(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(ProductTransferOperationRequest.class)))
                 .thenReturn(ProductAccountAdjustment.applied("ok"));
         GatewayProxyService proxy = new GatewayProxyService(properties(), new RestTemplate(), userAuthService(),
-                null, null, new ObjectMapper(), new ProductTransferCoordinator(store, accountClient));
+                null, null, new ObjectMapper(), new ProductTransferCoordinator(accountClient));
         MockHttpServletRequest servletRequest = new MockHttpServletRequest(
                 "POST", "/api/v1/gateway/account/transfers");
         servletRequest.addHeader("Authorization", "Bearer user");
@@ -54,7 +46,7 @@ class ProductTransferGatewaySurfaceTest {
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         assertThat(new String(response.getBody(), StandardCharsets.UTF_8))
-                .contains("\"transferId\":321")
+                .contains("\"transferId\":")
                 .contains("\"status\":\"COMPLETED\"");
     }
 

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.surprising</groupId>
+        <artifactId>surprising-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+        <relativePath>../surprising-parent/pom.xml</relativePath>
+    </parent>
+
+    <artifactId>surprising-aeron-core</artifactId>
+    <packaging>pom</packaging>
+    <name>surprising-aeron-core</name>
+    <description>按产品线隔离的 Aeron Cluster 交易核心</description>
+
+    <modules>
+        <module>surprising-aeron-protocol</module>
+        <module>surprising-aeron-service</module>
+        <module>surprising-aeron-client</module>
+        <module>surprising-aeron-tools</module>
+        <module>surprising-aeron-benchmarks</module>
+    </modules>
+</project>

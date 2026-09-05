@@ -1,0 +1,110 @@
+package com.surprising.aeron.protocol;
+
+public enum CoreResultCode {
+    NONE(0),
+    PRODUCT_LINE_MISMATCH(1),
+    INVALID_MESSAGE(2),
+    STALE_SOURCE_SEQUENCE(3),
+    INSUFFICIENT_AVAILABLE_BALANCE(10),
+    DUPLICATE_ORDER_ID(11),
+    REDUCE_ONLY_REQUIRES_POSITION_STATE(12),
+    INVALID_RESERVATION_KIND(13),
+    INVALID_DERIVATIVE_RESERVATION_ASSET(14),
+    INVALID_SPOT_RESERVATION_ASSET(15),
+    INVALID_USER_ID(16),
+    ORDER_NOT_FOUND(17),
+    ORDER_OWNER_MISMATCH(18),
+    ARITHMETIC_OVERFLOW(19),
+    ENTITY_NOT_FOUND(20),
+    INVALID_COMMAND(21),
+    INSUFFICIENT_LOCKED_BALANCE(22),
+    INSUFFICIENT_ORDER_RESERVATION(23),
+    DERIVATIVE_CLOSE_REQUIRES_PNL_MODEL(24),
+    INVALID_MARGIN_ALLOCATION(25),
+    MATCHING_REJECTED(26),
+    INVALID_REPLACEMENT_RESERVATION(27),
+    INSTRUMENT_VERSION_OPEN_BOOK_MISMATCH(28),
+    SELF_TRADE_PREVENTED(29),
+    OPTION_MATCH_REQUIRES_PREMIUM_MODEL(30),
+    INVALID_CONTRACT_TYPE(31),
+    STALE_INSTRUMENT_VERSION(32),
+    INSTRUMENT_VERSION_IN_USE(33),
+    INSTRUMENT_NOT_FOUND(34),
+    INSTRUMENT_VERSION_CONFLICT(35),
+    STALE_MARK_PRICE(36),
+    INVALID_OPTION_TYPE(37),
+    INSTRUMENT_ORDER_MISMATCH(38),
+    INVALID_ORDER_PRICE(39),
+    REDUCE_ONLY_UNSUPPORTED(40),
+    REDUCE_ONLY_CAPACITY_EXCEEDED(41),
+    PRODUCT_LINE_UNSUPPORTED(42),
+    MARK_PRICE_NOT_FOUND(43),
+    INVALID_SETTLEMENT_PRICE(44),
+    STALE_SETTLEMENT_ID(45),
+    LIQUIDATION_NOT_FOUND(46),
+    LIQUIDATION_STATE_CONFLICT(47),
+    POSITION_NOT_FOUND(48),
+    INSURANCE_COVER_EXCEEDS_DEFICIT(49),
+    INSTRUMENT_SETTLED(50),
+    INSURANCE_COVER_MISMATCH(51),
+    POSITION_MODE_SWITCH_BLOCKED(52),
+    POSITION_MODE_MISMATCH(53),
+    POSITION_MARGIN_ADJUSTMENT_INVALID(54),
+    POSITION_MARGIN_INSUFFICIENT(55),
+    DUPLICATE_CLIENT_ORDER_ID(56),
+    ADL_POSITION_CONFLICT(57),
+    ADL_PROFIT_INSUFFICIENT(58),
+    POSITION_NOTIONAL_LIMIT_EXCEEDED(59),
+    EXPORT_BACKLOG_FULL(60),
+    EXPORT_ACK_AHEAD(61),
+    OPEN_INTEREST_LIMIT_EXCEEDED(62),
+    RISK_BRACKET_EXCEEDED(63),
+    LEVERAGE_EXCEEDS_RISK_BRACKET(64),
+    SOURCE_SEQUENCE_TRACKING_FULL(65),
+    MATCHING_PENDING(66),
+    LIFECYCLE_IN_PROGRESS(67),
+    IDEMPOTENCY_CONFLICT(68),
+    RESULT_UNKNOWN_OUTSIDE_RETENTION(69),
+    STALE_RISK_SCAN_CONTROL_VERSION(70),
+    BOOK_QUERY_RESPONSE_TOO_LARGE(71),
+    BOOK_BOOTSTRAP_CURSOR_INVALID(72),
+    MATCHING_BACKPRESSURE(73),
+    FUNDS_IDEMPOTENCY_RETENTION_FULL(74),
+    QUERY_RESPONSE_TOO_LARGE(75);
+
+    private static final CoreResultCode[] BY_WIRE_CODE = new CoreResultCode[76];
+
+    static {
+        for (CoreResultCode value : values()) {
+            BY_WIRE_CODE[value.wireCode] = value;
+        }
+    }
+
+    private final int wireCode;
+
+    CoreResultCode(int wireCode) {
+        this.wireCode = wireCode;
+    }
+
+    public int wireCode() {
+        return wireCode;
+    }
+
+    public static CoreResultCode fromWireCode(int wireCode) {
+        CoreResultCode result = wireCode >= 0 && wireCode < BY_WIRE_CODE.length
+                ? BY_WIRE_CODE[wireCode]
+                : null;
+        if (result == null) {
+            throw new ProtocolException("unsupported result code: " + wireCode);
+        }
+        return result;
+    }
+
+    public static CoreResultCode fromRejectionCode(String code) {
+        try {
+            return valueOf(code);
+        } catch (IllegalArgumentException exception) {
+            return INVALID_COMMAND;
+        }
+    }
+}

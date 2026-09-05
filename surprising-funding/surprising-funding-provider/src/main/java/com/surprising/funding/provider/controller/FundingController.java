@@ -100,6 +100,13 @@ public class FundingController {
         return runtimeConfigService.current();
     }
 
+    @PostMapping("/admin/run-cycle")
+    public FundingService.SettlementCycle runCycle(
+            @RequestHeader(value = "X-Admin-User-Id", required = false) String adminUserId) {
+        requireAdmin(adminUserId);
+        return fundingService.settleDueRates();
+    }
+
     @PostMapping("/admin/runtime-config")
     public Map<String, Object> updateRuntimeConfig(@RequestHeader("X-Admin-User-Id") String adminUserId,
                                                    @RequestBody RuntimeConfigUpdate request) {
@@ -129,5 +136,11 @@ public class FundingController {
             Integer paymentPageSize,
             Integer maxPagesPerRun,
             Integer reconcileBatchSize) {
+    }
+
+    private void requireAdmin(String adminUserId) {
+        if (adminUserId == null || adminUserId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "admin identity header is required");
+        }
     }
 }

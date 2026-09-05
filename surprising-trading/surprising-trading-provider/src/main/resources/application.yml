@@ -1,0 +1,80 @@
+server:
+  port: 9084
+
+spring:
+  application:
+    name: surprising-trading-provider
+  task:
+    scheduling:
+      pool:
+        size: 8
+      thread-name-prefix: trading-scheduler-
+      shutdown:
+        await-termination: true
+        await-termination-period: 10s
+  datasource:
+    url: jdbc:postgresql://localhost:5432/surprising_exchange
+    username: surprising
+    password: surprising
+    hikari:
+      maximum-pool-size: 30
+      minimum-idle: 5
+      connection-timeout: 3000
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      group:
+        readiness:
+          include: readinessState,markPriceReadiness
+
+surprising:
+  price:
+    consumer:
+      bootstrap-servers: localhost:9092
+      product-line: ${PRODUCT_LINE}
+      topic: surprising.perp.price.events.v1
+      group-id: surprising-trading-mark-price-${HOSTNAME:${random.uuid}}
+      max-age: 15s
+      allowed-future-skew: 1s
+      concurrency: 1
+      max-poll-records: 500
+  trading:
+    order:
+      kafka:
+        bootstrap-servers: localhost:9092
+        product-line: ${PRODUCT_LINE}
+        instrument-lifecycle-drain-topic: surprising.instrument.lifecycle-drain.v1
+      aeron:
+        hostnames: ${AERON_CLUSTER_HOSTNAMES:localhost,localhost,localhost}
+        egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}
+        response-timeout: ${AERON_RESPONSE_TIMEOUT:5s}
+        client-connections: ${AERON_CLIENT_CONNECTIONS:4}
+        node-id: ${TRADING_NODE_ID:0}
+      event-publish:
+        send-timeout: 3s
+      risk:
+        market-max-slippage-ppm: 10000
+        market-max-mark-age-ms: 5000
+        limit-price-protection-enabled: true
+        limit-price-band-ppm: 50000
+        limit-price-max-mark-age-ms: 15000
+      algo:
+        enabled: true
+        claim-batch-size: 100
+        claim-lease: 30s
+        scan-delay-ms: 250
+        min-interval-seconds: 1
+        max-interval-seconds: 86400
+        min-duration-seconds: 5
+        max-duration-seconds: 86400
+    trigger:
+      product-line: ${PRODUCT_LINE}
+      execution:
+        trigger-batch-size: 200
+        max-trigger-scan-pages: ${TRIGGER_MAX_SCAN_PAGES:16}
+        stale-triggering-after: 30s
+        maintenance-delay-ms: 1000

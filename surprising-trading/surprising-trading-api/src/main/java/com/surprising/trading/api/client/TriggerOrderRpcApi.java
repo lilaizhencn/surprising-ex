@@ -21,10 +21,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 
 @FeignClient(
-        name = "surprising-trigger-provider",
+        name = "surprising-trading-provider",
         contextId = "triggerOrderRpcApi",
         path = TradingApiPaths.TRIGGER_ORDER_BASE_PATH,
-        url = "${surprising.clients.trigger.base-url:http://localhost:9084}")
+        url = "${surprising.clients.trading.base-url:http://localhost:9084}")
 public interface TriggerOrderRpcApi {
 
     @PostMapping
@@ -43,11 +43,13 @@ public interface TriggerOrderRpcApi {
     TriggerOrderBatchResponse cancelOpen(@Valid @RequestBody CancelOpenTriggerOrdersRequest request);
 
     @GetMapping("/{triggerOrderId}")
-    TriggerOrderResponse get(@PathVariable("triggerOrderId") @Positive long triggerOrderId);
+    TriggerOrderResponse get(@RequestParam("userId") @Positive long userId,
+                             @PathVariable("triggerOrderId") @Positive long triggerOrderId);
 
     @GetMapping("/open")
     TriggerOrderQueryResponse openOrders(@RequestParam("userId") @Positive long userId,
                                          @RequestParam(value = "symbol", required = false) String symbol,
                                          @RequestParam(value = "limit", defaultValue = "100")
-                                         @Min(1) @Max(1000) int limit);
+                                         @Min(1) @Max(1000) int limit,
+                                         @RequestParam(value = "cursor", required = false) String cursor);
 }

@@ -76,7 +76,6 @@ surprising:
     security:
       user-id-header: X-User-Id
       require-identity-for-private-routes: true
-      allow-user-id-header-fallback: ${GATEWAY_ALLOW_USER_ID_HEADER_FALLBACK:false}
       admin-roles:
         - SUPPORT
         - ADMIN
@@ -158,7 +157,7 @@ surprising:
         target-prefix: /api/v1/price/fx
         private-route: false
       price-mark:
-        base-url: ${GATEWAY_ROUTE_PRICE_MARK_BASE_URL:http://localhost:9083}
+        base-url: ${GATEWAY_ROUTE_PRICE_MARK_BASE_URL:http://localhost:9082}
         target-prefix: /api/v1/price/mark
         private-route: false
         product-routes:
@@ -209,7 +208,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_TRADING_LEVERAGE_OPTION_BASE_URL:http://localhost:9084}
       trading-market:
-        base-url: http://localhost:9085
+        base-url: http://localhost:9081
         target-prefix: /api/v1/trading/market
         private-route: false
         product-routes:
@@ -225,25 +224,8 @@ surprising:
             base-url: ${GATEWAY_ROUTE_TRADING_MARKET_INVERSE_DELIVERY_BASE_URL:}
           OPTION:
             base-url: ${GATEWAY_ROUTE_TRADING_MARKET_OPTION_BASE_URL:}
-      trading-trades:
-        base-url: http://localhost:9085
-        target-prefix: /api/v1/trading/market
-        private-route: true
-        product-routes:
-          SPOT:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRADES_SPOT_BASE_URL:http://localhost:9085}
-          LINEAR_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRADES_LINEAR_PERPETUAL_BASE_URL:http://localhost:9085}
-          INVERSE_PERPETUAL:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRADES_INVERSE_PERPETUAL_BASE_URL:http://localhost:9085}
-          LINEAR_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRADES_LINEAR_DELIVERY_BASE_URL:http://localhost:9085}
-          INVERSE_DELIVERY:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRADES_INVERSE_DELIVERY_BASE_URL:http://localhost:9085}
-          OPTION:
-            base-url: ${GATEWAY_ROUTE_TRADING_TRADES_OPTION_BASE_URL:http://localhost:9085}
       trading-trigger:
-        base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_BASE_URL:http://localhost:9095}
+        base-url: ${GATEWAY_ROUTE_TRADING_PROVIDER_BASE_URL:http://localhost:9084}
         target-prefix: /api/v1/trading/trigger-orders
         private-route: true
         product-routes:
@@ -311,7 +293,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_RISK_OPTION_BASE_URL:}
       liquidation:
-        base-url: ${GATEWAY_ROUTE_LIQUIDATION_BASE_URL:http://localhost:9088}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
         target-prefix: /api/v1/liquidations
         private-route: true
         product-routes:
@@ -345,7 +327,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_FUNDING_OPTION_BASE_URL:}
       insurance:
-        base-url: ${GATEWAY_ROUTE_INSURANCE_BASE_URL:http://localhost:9090}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
         target-prefix: /api/v1/insurance
         private-route: true
         product-routes:
@@ -362,7 +344,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_INSURANCE_OPTION_BASE_URL:}
       adl:
-        base-url: ${GATEWAY_ROUTE_ADL_BASE_URL:http://localhost:9091}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
         target-prefix: /api/v1/adl
         private-route: true
         product-routes:
@@ -399,10 +381,6 @@ surprising:
         base-url: http://localhost:8002
         target-prefix: /wallet/v1
         private-route: true
-      websocket:
-        base-url: http://localhost:9093
-        target-prefix: /ws
-        private-route: false
     admin-routes:
       instrument:
         base-url: http://localhost:9080
@@ -464,7 +442,7 @@ surprising:
         target-prefix: /api/v1/price/fx
         private-route: true
       price-mark:
-        base-url: ${GATEWAY_ROUTE_PRICE_MARK_BASE_URL:http://localhost:9083}
+        base-url: ${GATEWAY_ROUTE_PRICE_MARK_BASE_URL:http://localhost:9082}
         target-prefix: /api/v1/price/mark
         private-route: true
         product-routes:
@@ -532,7 +510,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_TRADING_OPTION_BASE_URL:}
       trading-market:
-        base-url: http://localhost:9085
+        base-url: http://localhost:9081
         target-prefix: /api/v1/trading/market
         private-route: true
         product-routes:
@@ -549,7 +527,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_TRADING_MARKET_OPTION_BASE_URL:}
       trading-trigger:
-        base-url: ${GATEWAY_ROUTE_TRADING_TRIGGER_BASE_URL:http://localhost:9095}
+        base-url: ${GATEWAY_ROUTE_TRADING_PROVIDER_BASE_URL:http://localhost:9084}
         target-prefix: /api/v1/admin/trading/trigger-orders
         private-route: true
         product-routes:
@@ -617,7 +595,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_RISK_OPTION_BASE_URL:}
       liquidation:
-        base-url: ${GATEWAY_ROUTE_LIQUIDATION_BASE_URL:http://localhost:9088}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
         target-prefix: /api/v1/liquidations
         private-route: true
         product-routes:
@@ -634,7 +612,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_LIQUIDATION_OPTION_BASE_URL:}
       liquidation-admin:
-        base-url: ${GATEWAY_ROUTE_LIQUIDATION_BASE_URL:http://localhost:9088}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
         target-prefix: /api/v1/admin/liquidations
         private-route: true
         product-routes:
@@ -668,7 +646,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_FUNDING_OPTION_BASE_URL:}
       insurance:
-        base-url: ${GATEWAY_ROUTE_INSURANCE_BASE_URL:http://localhost:9090}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
         target-prefix: /api/v1/insurance
         private-route: true
         product-routes:
@@ -685,7 +663,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_INSURANCE_OPTION_BASE_URL:}
       insurance-admin:
-        base-url: ${GATEWAY_ROUTE_INSURANCE_BASE_URL:http://localhost:9090}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
         target-prefix: /api/v1/insurance/admin
         private-route: true
         product-routes:
@@ -702,7 +680,7 @@ surprising:
           OPTION:
             base-url: ${GATEWAY_ROUTE_INSURANCE_OPTION_BASE_URL:}
       adl:
-        base-url: ${GATEWAY_ROUTE_ADL_BASE_URL:http://localhost:9091}
+        base-url: ${GATEWAY_ROUTE_DERIVATIVES_LIFECYCLE_BASE_URL:http://localhost:9087}
         target-prefix: /api/v1/adl
         private-route: true
         product-routes:
@@ -746,51 +724,28 @@ surprising:
         basic-auth-username: ${SW_WALLET_ADMIN_USERNAME:admin}
         basic-auth-password: ${SW_WALLET_ADMIN_PASSWORD:}
       websocket-admin:
-        base-url: http://localhost:9093
+        base-url: ${GATEWAY_SELF_BASE_URL:http://localhost:9094}
         target-prefix: /api/v1/admin/websocket
         private-route: true
-    observability:
-      kafka:
-        enabled: ${ADMIN_KAFKA_LAG_ENABLED:false}
-        bootstrap-servers: ${ADMIN_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
-        client-id: surprising-gateway-admin-monitor
-        product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
-        product-topics-enabled: ${PRODUCT_TOPICS_ENABLED:false}
-        request-timeout: 3s
-        max-partitions-per-group: 200
-        consumer-groups:
-          - group-id: surprising-matching-v1
-            topics:
-              - surprising.perp.order.commands.v1
-          - group-id: surprising-linear-perp-account-user-command-v1
-            topics:
-              - surprising.linear-perp.account.user.commands.v1
-          - group-id: surprising-risk-v1
-            topics:
-              - surprising.account.position.events.v1
-          - group-id: surprising-liquidation-v1
-            topics:
-              - surprising.perp.liquidation.candidates.v1
-              - surprising.perp.match.results.v1
-          - group-id: surprising-trigger-v1
-            topics:
-              - surprising.perp.mark.price.v1
-              - surprising.perp.index.price.v1
-              - surprising.perp.match.trades.v1
-              - surprising.account.position.events.v1
-          - group-id: surprising-mark-price-v1
-            topics:
-              - surprising.perp.index.price.v1
-              - surprising.perp.book.ticker.v1
-              - surprising.perp.trade.events.v1
-              - surprising.perp.funding.rate.v1
-          - group-id: surprising-insurance-v1
-            topics:
-              - surprising.account.liquidation-fee.events.v1
-      web-socket:
-        enabled: true
-        admin-route: websocket-admin
-      prometheus:
-        enabled: true
-        sample-preview-limit: 8
-        max-body-bytes: 1000000
+  websocket:
+    kafka:
+      bootstrap-servers: ${SURPRISING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+      product-line: ${PRODUCT_LINE}
+      # 合并部署后仍要求每个 Gateway 实例使用唯一 consumer group，确保公共行情在每个节点本地 fanout。
+      group-id: ${SURPRISING_WEBSOCKET_GROUP_ID:surprising-websocket-${HOSTNAME:${random.uuid}}}
+      concurrency: 2
+      max-poll-records: 1000
+    session:
+      max-subscriptions: 200
+      outbound-queue-capacity: 1000
+      send-timeout: 5s
+    security:
+      user-id-header: X-User-Id
+      issuer: surprising-ex-gateway
+      jwt-secret: ${GATEWAY_JWT_SECRET:local-dev-change-me-surprising-ex-gateway-secret-2026}
+      allowed-origins:
+        - ${SURPRISING_WS_ALLOWED_ORIGIN:*}
+    fanout:
+      candle-partial-coalesce-window: 250ms
+      mark-price-max-age: 3s
+      mark-price-allowed-future-skew: 1s

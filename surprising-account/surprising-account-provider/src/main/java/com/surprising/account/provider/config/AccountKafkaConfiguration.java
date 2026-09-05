@@ -1,7 +1,5 @@
 package com.surprising.account.provider.config;
 
-import com.surprising.account.provider.service.AccountCommandPoisonPillException;
-import com.surprising.account.provider.service.PositionCacheRebalanceListener;
 import java.util.HashMap;
 import java.util.Map;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -9,7 +7,6 @@ import org.apache.kafka.clients.consumer.CooperativeStickyAssignor;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
-import org.apache.kafka.common.TopicPartition;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
@@ -19,9 +16,7 @@ import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
-import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
-import org.springframework.kafka.transaction.KafkaTransactionManager;
 import org.springframework.util.backoff.FixedBackOff;
 
 @Configuration
@@ -81,64 +76,6 @@ public class AccountKafkaConfiguration {
         factory.setConcurrency(properties.getKafka().getConcurrency());
         factory.setBatchListener(true);
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.BATCH);
-        return factory;
-    }
-
-    @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, String> accountUserCommandKafkaListenerContainerFactory(
-            ConsumerFactory<String, String> accountConsumerFactory,
-            AccountProperties properties,
-            KafkaTemplate<String, String> accountKafkaTemplate) {
-        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(accountConsumerFactory);
-        factory.setConcurrency(properties.getKafka().getUserCommandConcurrency());
-        factory.setBatchListener(true);
-        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.BATCH);
-        if (accountKafkaTemplate.getProducerFactory() != null) {
-            factory.getContainerProperties().setKafkaAwareTransactionManager(
-                    new KafkaTransactionManager<>(accountKafkaTemplate.getProducerFactory()));
-        }
-        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(
-                accountKafkaTemplate,
-                (record, ex) -> new TopicPartition(properties.getKafka().getUserCommandsDltTopic(),
-                        record.partition()));
-        DefaultErrorHandler errorHandler = new DefaultErrorHandler(
-                recoverer, new FixedBackOff(1_000L, Long.MAX_VALUE));
-        errorHandler.addNotRetryableExceptions(AccountCommandPoisonPillException.class);
-        factory.setCommonErrorHandler(errorHandler);
-        return factory;
-    }
-
-    /**
-     * 仓位投影失败时必须失败关闭：分区会无限重试，消费者同时移除 Redis 就绪标记。
-     * 已提交的资金仓位事件不能被跳过。
-     */
-    @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, String> accountPositionCacheKafkaListenerContainerFactory(
-            ConsumerFactory<String, String> accountConsumerFactory,
-            AccountProperties properties,
-            PositionCacheRebalanceListener rebalanceListener) {
-        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(accountConsumerFactory);
-        factory.setConcurrency(properties.getKafka().getConcurrency());
-        factory.setBatchListener(false);
-        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
-        factory.getContainerProperties().setConsumerRebalanceListener(rebalanceListener);
-        factory.setCommonErrorHandler(new DefaultErrorHandler(new FixedBackOff(1_000L, Long.MAX_VALUE)));
-        return factory;
-    }
-
-    /** 账户状态异步投影使用独立容器，不能改变持仓 JVM 快照的就绪状态。 */
-    @Bean(name = "accountStateProjectionKafkaListenerContainerFactory")
-    public ConcurrentKafkaListenerContainerFactory<String, String> accountStateProjectionKafkaListenerContainerFactory(
-            ConsumerFactory<String, String> accountConsumerFactory,
-            AccountProperties properties) {
-        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(accountConsumerFactory);
-        factory.setConcurrency(properties.getKafka().getConcurrency());
-        factory.setBatchListener(false);
-        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
-        factory.setCommonErrorHandler(new DefaultErrorHandler(new FixedBackOff(1_000L, Long.MAX_VALUE)));
         return factory;
     }
 

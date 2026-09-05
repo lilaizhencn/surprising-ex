@@ -1,0 +1,149 @@
+server:
+  port: 9082
+
+spring:
+  application:
+    name: surprising-price-provider
+  task:
+    scheduling:
+      pool:
+        size: 9
+      thread-name-prefix: price-scheduler-
+      shutdown:
+        await-termination: true
+        await-termination-period: 10s
+  datasource:
+    url: jdbc:postgresql://localhost:5432/surprising_exchange
+    username: surprising
+    password: surprising
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 3000
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+surprising:
+  price:
+    consumer:
+      bootstrap-servers: localhost:9092
+      product-line: ${PRODUCT_LINE}
+      topic: surprising.perp.price.events.v1
+      group-id: surprising-mark-price-query-${HOSTNAME:${random.uuid}}
+      max-age: 3s
+      allowed-future-skew: 1s
+      concurrency: 1
+      max-poll-records: 500
+    index:
+      required-symbols: ${PRICE_INDEX_REQUIRED_SYMBOLS:}
+      kafka:
+        bootstrap-servers: localhost:9092
+        product-line: ${PRODUCT_LINE}
+        price-events-topic: surprising.perp.price.events.v1
+        group-id: surprising-index-price-v1
+        cache-group-id: surprising-index-price-cache-${HOSTNAME:${random.uuid}}
+        concurrency: 2
+        max-poll-records: 500
+      calculation:
+        poll-delay-ms: ${PRICE_INDEX_POLL_DELAY_MS:1000}
+        max-source-age: ${PRICE_INDEX_MAX_SOURCE_AGE:5s}
+        outlier-threshold: 0.01
+        min-valid-sources: ${PRICE_INDEX_MIN_VALID_SOURCES:3}
+        scale: 18
+        conversion-cache-ttl: 30s
+      http:
+        connect-timeout: 2s
+        request-timeout: 3s
+        max-concurrent-requests: 32
+        user-agent: surprising-price/1.0
+        proxy-enabled: ${SURPRISING_PRICE_INDEX_HTTP_PROXY_ENABLED:false}
+        proxy-host: ${SURPRISING_PRICE_INDEX_HTTP_PROXY_HOST:127.0.0.1}
+        proxy-port: ${SURPRISING_PRICE_INDEX_HTTP_PROXY_PORT:7897}
+      web-socket:
+        enabled: true
+        rest-fallback-enabled: false
+        refresh-delay-ms: 30000
+        idle-timeout: ${PRICE_INDEX_WS_IDLE_TIMEOUT:20s}
+        reconnect-initial-delay: ${PRICE_INDEX_WS_RECONNECT_INITIAL_DELAY:1s}
+        reconnect-max-delay: ${PRICE_INDEX_WS_RECONNECT_MAX_DELAY:30s}
+        health-check-interval: ${PRICE_INDEX_WS_HEALTH_CHECK_INTERVAL:5s}
+      coordination:
+        enabled: true
+        node-id:
+        lease-duration: 15s
+      aeron:
+        hostnames: ${AERON_CLUSTER_HOSTNAMES:localhost,localhost,localhost}
+        egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}
+        response-timeout: 5s
+        client-connections: 1
+      audit:
+        retention: 3d
+        cleanup-delay-ms: 60000
+        cleanup-batch-size: 10000
+        max-batches-per-run: 10
+      fiat:
+        enabled: true
+        refresh-delay-ms: 3600000
+        stale-after: 30h
+        provider: OPEN_ER_API
+        base-url: https://open.er-api.com
+        path: /v6/latest/{base}
+        base-currency: USD
+        quote-currencies:
+          - CNY
+          - EUR
+          - JPY
+          - KRW
+          - GBP
+          - AUD
+          - CAD
+          - HKD
+          - TWD
+          - SGD
+          - INR
+          - BRL
+          - TRY
+          - VND
+          - THB
+          - PHP
+          - IDR
+          - MYR
+        stable-coin:
+          enabled: true
+          refresh-delay-ms: 10000
+          stale-after: 5m
+          currency: USDT
+          fiat-currency: USD
+          base-url: https://api.exchange.coinbase.com
+          path: /products/USDT-USD/ticker
+          parser: COINBASE_TICKER
+          fallback-rate: 1
+    mark:
+      kafka:
+        bootstrap-servers: localhost:9092
+        product-line: ${PRODUCT_LINE}
+        concurrency: 2
+        max-poll-records: 500
+      topics:
+        book-ticker-topic: surprising.perp.book.ticker.v1
+        funding-rate-topic: surprising.perp.funding.rate.v1
+        price-events-topic: surprising.perp.price.events.v1
+      calculation:
+        publish-interval-ms: ${MARK_PUBLISH_INTERVAL_MS:1000}
+        basis-window: 60s
+        max-input-age: 15s
+        clamp-ratio: 0.03
+        default-funding-interval-hours: 8
+        scale: 18
+      coordination:
+        enabled: true
+        node-id:
+        lease-duration: 15s
+      audit:
+        retention: 3d
+        cleanup-delay-ms: 60000
+        cleanup-batch-size: 10000
+        max-batches-per-run: 10

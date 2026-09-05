@@ -15,7 +15,6 @@ public class InstrumentLifecycleDrainRepository {
 
     private static final Set<InstrumentLifecycleDrainComponent> REQUIRED_COMPONENTS =
             Set.of(InstrumentLifecycleDrainComponent.ORDER,
-                    InstrumentLifecycleDrainComponent.TRIGGER,
                     InstrumentLifecycleDrainComponent.ACCOUNT);
 
     private final JdbcTemplate jdbcTemplate;
@@ -48,7 +47,7 @@ public class InstrumentLifecycleDrainRepository {
                  WHERE product_line = ?
                    AND symbol = ?
                    AND instrument_version = ?
-                   AND component IN ('ORDER', 'TRIGGER', 'ACCOUNT')
+                   AND component IN ('ORDER', 'ACCOUNT')
                 """, Integer.class, productLine.name(), symbol, instrumentVersion);
         return count != null && count == REQUIRED_COMPONENTS.size();
     }

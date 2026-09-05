@@ -14,10 +14,10 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
 @FeignClient(
-        name = "surprising-mark-price-provider",
+        name = "surprising-price-provider",
         contextId = "markPriceRpcApi",
         path = PriceApiPaths.MARK_BASE_PATH,
-        url = "${surprising.clients.mark-price.base-url:http://localhost:9083}")
+        url = "${surprising.clients.mark-price.base-url:http://localhost:9082}")
 public interface MarkPriceRpcApi {
 
     @GetMapping("/latest")

@@ -22,7 +22,6 @@ class GatewayProductRoutesConfigurationTest {
         assertProductRouteMatrix(properties.getRoutes().get("trading"));
         assertProductRouteMatrix(properties.getRoutes().get("trading-leverage"));
         assertProductRouteMatrix(properties.getRoutes().get("trading-market"));
-        assertProductRouteMatrix(properties.getRoutes().get("trading-trades"));
         assertProductRouteMatrix(properties.getRoutes().get("trading-trigger"));
         assertProductRouteMatrix(properties.getRoutes().get("account"));
         assertProductRouteMatrix(properties.getRoutes().get("risk"));
@@ -31,6 +30,11 @@ class GatewayProductRoutesConfigurationTest {
         assertProductRouteMatrix(properties.getAdminRoutes().get("trading-fees"));
         assertProductRouteMatrix(properties.getAdminRoutes().get("account"));
         assertProductRouteMatrix(properties.getAdminRoutes().get("market-maker"));
+
+        assertThat(properties.getRoutes().get("price-mark").getBaseUrl())
+                .isEqualTo("http://localhost:9082");
+        assertThat(properties.getAdminRoutes().get("price-mark").getBaseUrl())
+                .isEqualTo("http://localhost:9082");
 
         GatewayProperties.BackendRoute trading = properties.getRoutes().get("trading");
         GatewayProperties.BackendRoute optionRoute = trading.resolve(ProductLine.OPTION);

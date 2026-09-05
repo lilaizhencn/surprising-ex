@@ -1,76 +1,61 @@
 package com.surprising.gateway.provider.service;
 
+import com.surprising.account.api.model.AccountType;
+import com.surprising.account.api.model.ProductTransferOperationRequest;
 import com.surprising.product.api.ProductLine;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
+import java.time.Instant;
 import java.util.Locale;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
-public class ProductTransferCoordinator {
+public final class ProductTransferCoordinator {
 
-    private final ProductTransferStore store;
     private final ProductAccountClient accountClient;
 
-    @Autowired
-    public ProductTransferCoordinator(ProductTransferStore store, ProductAccountClient accountClient) {
-        this.store = store;
+    public ProductTransferCoordinator(ProductAccountClient accountClient) {
         this.accountClient = accountClient;
-    }
-
-    public ProductTransferCoordinator(ProductTransferRepository repository,
-                                      HttpProductAccountClient accountClient) {
-        this((ProductTransferStore) repository, (ProductAccountClient) accountClient);
     }
 
     public ProductTransferResult transfer(ProductTransferCommand command) {
         validate(command);
-        String source = normalizeAccountType(command.sourceAccountType());
-        String target = normalizeAccountType(command.targetAccountType());
-        if (providerAccountType(source).equals(providerAccountType(target))) {
-            throw new IllegalArgumentException("source and target are the same account");
+        Instant startedAt = Instant.now();
+        ProductTransferOperationRequest operation = operation(command);
+        ProductAccountAdjustment debit = accountClient.transferOut(
+                providerAccountType(operation.sourceAccountType()), operation);
+        if (debit.status() == ProductAccountAdjustment.Status.REJECTED) {
+            return result(operation.transferId(), command, ProductTransferStatus.FAILED,
+                    "SOURCE_DEBIT_REJECTED", debit.errorMessage(), startedAt);
         }
-        ProductTransferCreateRequest request = new ProductTransferCreateRequest(command.userId(),
-                command.idempotencyKey().trim(), fingerprint(command, source, target), source, target,
-                command.asset().trim().toUpperCase(Locale.ROOT), command.amountUnits(), command.referenceId().trim(),
-                command.reason() == null ? "" : command.reason().trim());
-        ProductTransferState created = store.createOrGet(request);
-        if (!created.requestFingerprint().equals(request.requestFingerprint())) {
-            throw new ProductTransferConflictException("idempotency key is already used by a different transfer");
+        if (debit.status() == ProductAccountAdjustment.Status.UNKNOWN) {
+            return result(operation.transferId(), command, ProductTransferStatus.PENDING,
+                    "SOURCE_DEBIT_UNKNOWN", debit.errorMessage(), startedAt);
         }
-        ProductTransferState state = store.lock(created.transferId());
-        if (state == null) {
-            throw new IllegalStateException("product transfer state disappeared: " + created.transferId());
-        }
-        return ProductTransferResult.from(drive(state));
+        return forward(operation, command, startedAt);
     }
 
     public int reconcile(int limit) {
-        if (limit <= 0) {
-            throw new IllegalArgumentException("reconciliation limit must be positive");
-        }
+        if (limit <= 0) throw new IllegalArgumentException("reconciliation limit must be positive");
         int processed = 0;
-        for (ProductTransferState state : store.recoverable(limit)) {
-            try {
-                drive(state);
-            } catch (RuntimeException ex) {
-                ProductTransferState retry = state.status(retryStatus(state.status()),
-                        "RECOVERY_ATTEMPT_FAILED", safeMessage(ex));
-                store.update(state, retry);
+        for (ProductLine productLine : ProductLine.values()) {
+            if (processed == limit) break;
+            for (ProductTransferOperationRequest operation
+                    : accountClient.pendingTransfers(productLine, limit - processed)) {
+                forward(operation, command(operation), Instant.now());
+                processed++;
+                if (processed == limit) break;
             }
-            processed++;
         }
         return processed;
     }
 
-    public ProductTransferResult transferJson(long userId,
-                                              byte[] body,
-                                              String suppliedIdempotencyKey,
-                                              ObjectMapper objectMapper) {
+    public ProductTransferResult transferJson(long userId, byte[] body, String suppliedIdempotencyKey,
+                                               ObjectMapper objectMapper) {
         if (body == null || body.length == 0) {
             throw new IllegalArgumentException("transfer request body is required");
         }
@@ -81,156 +66,94 @@ public class ProductTransferCoordinator {
             return transfer(new ProductTransferCommand(userId, key, request.sourceAccountType(),
                     request.targetAccountType(), request.asset(), request.amountUnits(), request.referenceId(),
                     request.reason()));
-        } catch (RuntimeException ex) {
-            if (ex instanceof ProductTransferConflictException || ex instanceof IllegalArgumentException) {
-                throw ex;
+        } catch (RuntimeException exception) {
+            if (exception instanceof IllegalArgumentException) {
+                throw exception;
             }
-            throw new IllegalArgumentException("transfer request body is invalid", ex);
+            throw new IllegalArgumentException("transfer request body is invalid", exception);
         }
     }
 
-    private ProductTransferState drive(ProductTransferState state) {
-        if (state.status().terminal()) {
-            return state;
+    private ProductTransferResult forward(ProductTransferOperationRequest operation,
+                                          ProductTransferCommand command,
+                                          Instant startedAt) {
+        ProductAccountAdjustment credit = accountClient.transferIn(
+                providerAccountType(operation.targetAccountType()), operation);
+        if (credit.status() != ProductAccountAdjustment.Status.APPLIED) {
+            return result(operation.transferId(), command, ProductTransferStatus.SOURCE_DEBITED,
+                    "TARGET_CREDIT_PENDING", credit.errorMessage(), startedAt);
         }
-        return switch (state.status()) {
-            case PENDING, SOURCE_DEBIT_UNKNOWN -> debitSource(state);
-            case SOURCE_DEBITED, TARGET_CREDIT_UNKNOWN -> creditTarget(state);
-            case COMPENSATION_REQUIRED -> compensateSource(state);
-            case COMPLETED, FAILED -> state;
-        };
+        ProductAccountAdjustment completion = accountClient.completeTransfer(
+                providerAccountType(operation.sourceAccountType()), operation);
+        if (completion.status() != ProductAccountAdjustment.Status.APPLIED) {
+            return result(operation.transferId(), command, ProductTransferStatus.SOURCE_DEBITED,
+                    "SOURCE_COMPLETION_PENDING", completion.errorMessage(), startedAt);
+        }
+        return result(operation.transferId(), command, ProductTransferStatus.COMPLETED, null, null, startedAt);
     }
 
-    private ProductTransferState debitSource(ProductTransferState state) {
-        ProductAccountAdjustment adjustment;
+    private ProductTransferOperationRequest operation(ProductTransferCommand command) {
+        AccountType source = accountType(command.sourceAccountType());
+        AccountType target = accountType(command.targetAccountType());
+        ProductLine sourceLine = productLine(source);
+        ProductLine targetLine = productLine(target);
+        if (sourceLine == targetLine) throw new IllegalArgumentException("source and target are the same account");
+        return new ProductTransferOperationRequest(transferId(command.userId(), command.idempotencyKey()),
+                command.userId(), sourceLine, targetLine, source, target,
+                command.asset().trim().toUpperCase(Locale.ROOT), command.amountUnits(),
+                command.referenceId().trim(), command.reason() == null ? "" : command.reason().trim());
+    }
+
+    private ProductTransferCommand command(ProductTransferOperationRequest operation) {
+        return new ProductTransferCommand(operation.userId(), Long.toString(operation.transferId()),
+                operation.sourceAccountType().name(), operation.targetAccountType().name(), operation.asset(),
+                operation.amountUnits(), operation.referenceId(), operation.reason());
+    }
+
+    private ProductTransferResult result(long transferId, ProductTransferCommand command,
+                                         ProductTransferStatus status, String errorCode, String errorMessage,
+                                         Instant startedAt) {
+        return ProductTransferResult.from(transferId, command, status, errorCode, errorMessage, startedAt);
+    }
+
+    private long transferId(long userId, String idempotencyKey) {
         try {
-            adjustment = accountClient.adjust(providerAccountType(state.sourceAccountType()),
-                    Math.negateExact(state.amountUnits()), providerReference(state, "debit"), state.reason(),
-                    state.userId(), state.asset());
-        } catch (RuntimeException ex) {
-            adjustment = ProductAccountAdjustment.unknown(safeMessage(ex));
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest((userId + ":" + idempotencyKey.trim()).getBytes(StandardCharsets.UTF_8));
+            long value = ByteBuffer.wrap(digest).order(ByteOrder.BIG_ENDIAN).getLong() & Long.MAX_VALUE;
+            return value == 0 ? 1 : value;
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
         }
-        return switch (adjustment.status()) {
-            case APPLIED -> drive(transition(state, state.status(ProductTransferStatus.SOURCE_DEBITED, null, null)));
-            case REJECTED -> transition(state, state.status(ProductTransferStatus.FAILED, "SOURCE_DEBIT_REJECTED",
-                    adjustment.errorMessage()));
-            case UNKNOWN -> transition(state, state.status(ProductTransferStatus.SOURCE_DEBIT_UNKNOWN,
-                    "SOURCE_DEBIT_UNKNOWN", adjustment.errorMessage()));
-        };
     }
 
-    private ProductTransferState creditTarget(ProductTransferState state) {
-        ProductAccountAdjustment adjustment;
+    private AccountType accountType(String value) {
         try {
-            adjustment = accountClient.adjust(providerAccountType(state.targetAccountType()), state.amountUnits(),
-                    providerReference(state, "credit"), state.reason(), state.userId(), state.asset());
-        } catch (RuntimeException ex) {
-            adjustment = ProductAccountAdjustment.unknown(safeMessage(ex));
-        }
-        return switch (adjustment.status()) {
-            case APPLIED -> transition(state, state.status(ProductTransferStatus.COMPLETED, null, null));
-            case UNKNOWN -> transition(state, state.status(ProductTransferStatus.TARGET_CREDIT_UNKNOWN,
-                    "TARGET_CREDIT_UNKNOWN", adjustment.errorMessage()));
-            case REJECTED -> compensateSource(transition(state, state.status(ProductTransferStatus.COMPENSATION_REQUIRED,
-                    "TARGET_CREDIT_REJECTED", adjustment.errorMessage())));
-        };
-    }
-
-    private ProductTransferState compensateSource(ProductTransferState state) {
-        ProductAccountAdjustment adjustment;
-        try {
-            adjustment = accountClient.adjust(providerAccountType(state.sourceAccountType()), state.amountUnits(),
-                    providerReference(state, "compensate"), state.reason(), state.userId(), state.asset());
-        } catch (RuntimeException ex) {
-            adjustment = ProductAccountAdjustment.unknown(safeMessage(ex));
-        }
-        return switch (adjustment.status()) {
-            case APPLIED -> transition(state, state.status(ProductTransferStatus.FAILED, "TARGET_CREDIT_REJECTED",
-                    state.errorMessage()));
-            case REJECTED, UNKNOWN -> transition(state, state.status(ProductTransferStatus.COMPENSATION_REQUIRED,
-                    "COMPENSATION_REQUIRED", adjustment.errorMessage()));
-        };
-    }
-
-    private ProductTransferState transition(ProductTransferState previous, ProductTransferState next) {
-        ProductTransferState current = store.update(previous, next);
-        if (current == null) {
-            throw new IllegalStateException("product transfer transition returned no state");
-        }
-        return current.status() == next.status() ? current : drive(current);
-    }
-
-    private String providerReference(ProductTransferState state, String stage) {
-        return "gateway-transfer:" + state.transferId() + ":" + stage;
-    }
-
-    private ProductTransferStatus retryStatus(ProductTransferStatus status) {
-        return switch (status) {
-            case PENDING, SOURCE_DEBIT_UNKNOWN -> ProductTransferStatus.SOURCE_DEBIT_UNKNOWN;
-            case SOURCE_DEBITED, TARGET_CREDIT_UNKNOWN -> ProductTransferStatus.TARGET_CREDIT_UNKNOWN;
-            case COMPENSATION_REQUIRED -> ProductTransferStatus.COMPENSATION_REQUIRED;
-            case COMPLETED, FAILED -> status;
-        };
-    }
-
-    private String safeMessage(RuntimeException ex) {
-        String message = ex.getMessage();
-        return message == null || message.isBlank() ? ex.getClass().getSimpleName() : message.substring(0,
-                Math.min(message.length(), 512));
-    }
-
-    private String fingerprint(ProductTransferCommand command, String source, String target) {
-        String canonical = command.userId() + "\n" + source + "\n" + target + "\n"
-                + command.asset().trim().toUpperCase(Locale.ROOT) + "\n" + command.amountUnits() + "\n"
-                + command.referenceId().trim() + "\n" + (command.reason() == null ? "" : command.reason().trim());
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                    .digest(canonical.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("SHA-256 is unavailable", ex);
+            return AccountType.valueOf(value.trim().toUpperCase(Locale.ROOT));
+        } catch (RuntimeException exception) {
+            throw new IllegalArgumentException("unsupported account type: " + value, exception);
         }
     }
 
-    private String normalizeAccountType(String value) {
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException("account type is required");
-        }
-        String normalized = value.trim().toUpperCase(Locale.ROOT);
-        providerAccountType(normalized);
-        return normalized;
+    private String providerAccountType(AccountType accountType) {
+        return accountType == AccountType.FUNDING ? AccountType.SPOT.name() : accountType.name();
     }
 
-    private String providerAccountType(String accountType) {
-        return switch (accountType) {
-            case "FUNDING", "SPOT" -> "SPOT";
-            case "USDT_PERPETUAL", "COIN_PERPETUAL", "USDT_DELIVERY", "COIN_DELIVERY", "OPTION" -> accountType;
-            default -> throw new IllegalArgumentException("unsupported account type: " + accountType);
-        };
-    }
-
-    static ProductLine productLine(String accountType) {
-        return switch (accountType) {
-            case "FUNDING", "SPOT" -> ProductLine.SPOT;
-            case "USDT_PERPETUAL" -> ProductLine.LINEAR_PERPETUAL;
-            case "COIN_PERPETUAL" -> ProductLine.INVERSE_PERPETUAL;
-            case "USDT_DELIVERY" -> ProductLine.LINEAR_DELIVERY;
-            case "COIN_DELIVERY" -> ProductLine.INVERSE_DELIVERY;
-            case "OPTION" -> ProductLine.OPTION;
-            default -> throw new IllegalArgumentException("unsupported account type: " + accountType);
-        };
+    static ProductLine productLine(AccountType accountType) {
+        return accountType == AccountType.FUNDING ? ProductLine.SPOT : accountType.productLine()
+                .orElseThrow(() -> new IllegalArgumentException("unsupported account type: " + accountType));
     }
 
     private void validate(ProductTransferCommand command) {
-        if (command == null || command.userId() <= 0L) {
-            throw new IllegalArgumentException("userId is required");
-        }
-        if (command.idempotencyKey() == null || !command.idempotencyKey().trim().matches("[A-Za-z0-9._:-]{1,128}")) {
+        if (command == null || command.userId() <= 0) throw new IllegalArgumentException("userId is required");
+        if (command.idempotencyKey() == null
+                || !command.idempotencyKey().trim().matches("[A-Za-z0-9._:-]{1,128}")) {
             throw new IllegalArgumentException("idempotency key must be 1-128 safe characters");
         }
         if (command.asset() == null || !command.asset().trim().matches("[A-Za-z0-9]{1,20}")) {
             throw new IllegalArgumentException("asset is invalid");
         }
-        if (command.amountUnits() <= 0L || command.referenceId() == null
+        if (command.amountUnits() <= 0 || command.referenceId() == null
                 || command.referenceId().isBlank() || command.referenceId().trim().length() > 128) {
             throw new IllegalArgumentException("amount and referenceId are invalid");
         }

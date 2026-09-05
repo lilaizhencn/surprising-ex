@@ -8,6 +8,8 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.MarkPricePublishedEvent;
+import com.surprising.price.api.model.IndexPriceEvent;
+import com.surprising.price.api.model.PricePublishedEvent;
 import com.surprising.price.api.model.PriceStatus;
 import com.surprising.product.api.ProductLine;
 import java.math.BigDecimal;
@@ -32,11 +34,13 @@ class MarkPriceKafkaConsumerTest {
                 now.plusSeconds(3600), 3600L, BigDecimal.ZERO, 60L,
                 new BigDecimal("57000"), new BigDecimal("61000"), 1L,
                 PriceStatus.HEALTHY, now, now);
-        MarkPricePublishedEvent publication = new MarkPricePublishedEvent(result, null, null, null, null,
+        IndexPriceEvent indexInput = new IndexPriceEvent("BTC-USDT", price, 1L, PriceStatus.HEALTHY,
+                0, 0, BigDecimal.ZERO, now, List.of());
+        MarkPricePublishedEvent publication = new MarkPricePublishedEvent(result, indexInput, null, null, null,
                 BigDecimal.ZERO, 60L, now);
 
         consumer.onMarkPrice(new ConsumerRecord<>(properties.resolvedTopic(), 0, 0L, "BTC-USDT",
-                new ObjectMapper().writeValueAsString(publication)));
+                new ObjectMapper().writeValueAsString(PricePublishedEvent.mark(publication))));
 
         assertThat(cache.latest("BTC-USDT")).contains(result);
     }
@@ -51,6 +55,19 @@ class MarkPriceKafkaConsumerTest {
                 "BTC-USDT", "{not-json"))).doesNotThrowAnyException();
 
         assertThat(cache.latest("BTC-USDT")).isEmpty();
+    }
+
+    @Test
+    void skipsUnconfiguredSymbolsBeforeDeserializingThePublication() {
+        MarkPriceConsumerProperties properties = new MarkPriceConsumerProperties();
+        properties.setRequiredSymbols(List.of("BTC-USDT"));
+        LatestMarkPriceCache cache = new LatestMarkPriceCache(properties);
+        MarkPriceKafkaConsumer consumer = new MarkPriceKafkaConsumer(new ObjectMapper(), cache, properties);
+
+        assertThatCode(() -> consumer.onMarkPrice(new ConsumerRecord<>(properties.resolvedTopic(), 0, 0L,
+                "ETH-USDT", "{not-json"))).doesNotThrowAnyException();
+
+        assertThat(cache.latest("ETH-USDT")).isEmpty();
     }
 
     @Test
@@ -76,10 +93,12 @@ class MarkPriceKafkaConsumerTest {
     private void publish(MarkPriceKafkaConsumer consumer,
                          MarkPriceConsumerProperties properties,
                          MarkPriceEvent event) throws Exception {
-        MarkPricePublishedEvent publication = new MarkPricePublishedEvent(event, null, null, null, null,
+        IndexPriceEvent indexInput = new IndexPriceEvent("BTC-USDT", event.indexPrice(), event.sequence(),
+                PriceStatus.HEALTHY, 0, 0, BigDecimal.ZERO, event.eventTime(), List.of());
+        MarkPricePublishedEvent publication = new MarkPricePublishedEvent(event, indexInput, null, null, null,
                 BigDecimal.ZERO, 60L, event.eventTime());
         consumer.onMarkPrice(new ConsumerRecord<>(properties.resolvedTopic(), 0, event.sequence(), event.symbol(),
-                new ObjectMapper().writeValueAsString(publication)));
+                new ObjectMapper().writeValueAsString(PricePublishedEvent.mark(publication))));
     }
 
     private MarkPriceEvent mark(long ticks, long sequence) {

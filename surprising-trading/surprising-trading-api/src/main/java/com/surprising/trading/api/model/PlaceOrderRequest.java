@@ -8,7 +8,7 @@ import jakarta.validation.constraints.Size;
 
 public record PlaceOrderRequest(
         @Positive long userId,
-        @Size(max = 64) String clientOrderId,
+        @NotBlank @Size(max = 64) String clientOrderId,
         @NotBlank @Size(max = 64) String symbol,
         @NotNull OrderSide side,
         @NotNull OrderType orderType,

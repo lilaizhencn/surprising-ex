@@ -1,0 +1,408 @@
+package com.surprising.aeron.service.state;
+
+import java.nio.charset.StandardCharsets;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
+import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
+
+public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityView {
+
+    // Forward and allocation indexes are owner-only. Monotonic asset/symbol
+    // dictionaries use volatile array publication; releasable client/position
+    // identities remain concurrent for asynchronous Core Fact materializers.
+    private final Map<String, Integer> assetIds = new HashMap<>();
+    private volatile String[] assets = new String[16];
+    private final Map<String, Integer> symbolIds = new HashMap<>();
+    private volatile String[] symbols = new String[16];
+    private final Map<Long, ClientIdentityEntry> clients = new ConcurrentHashMap<>();
+    private final Map<PositionIdentity, Long> positionKeys = new HashMap<>();
+    private final Map<Long, PositionIdentity> positions = new ConcurrentHashMap<>();
+    private final LongLongHashMap positionAllocationKeys = new LongLongHashMap();
+    private final LongLongHashMap positionKeyAllocations = new LongLongHashMap();
+    private int nextAssetId;
+    private int nextSymbolId;
+    private long nextPositionKey = 1;
+    private long dictionaryVersion;
+    private final RuntimeFactFrame.FactIdentitySlice liveFactIdentitySlice =
+            new RuntimeFactFrame.FactIdentitySlice(
+                    java.util.List.of(), java.util.List.of(), java.util.List.of(), java.util.List.of(), 0, this);
+    private Thread owner;
+
+    public void assertOwner() {
+        Thread current = Thread.currentThread();
+        if (owner == null) owner = current;
+        else if (owner != current) throw new IllegalStateException("runtime identities are bound to another thread");
+    }
+
+    public void releaseOwnerForHandoff() {
+        owner = null;
+    }
+
+    public int assetId(String asset) {
+        assertOwner();
+        String normalized = AssetBalance.normalizeAsset(asset);
+        Integer existing = assetIds.get(normalized);
+        if (existing != null) return existing;
+        int id = nextAssetId++;
+        assetIds.put(normalized, id);
+        assets = storeIdentity(assets, id, normalized);
+        dictionaryVersion = Math.incrementExact(dictionaryVersion);
+        return id;
+    }
+
+    public Integer findAssetId(String asset) {
+        assertOwner();
+        return assetIds.get(AssetBalance.normalizeAsset(asset));
+    }
+
+    public String asset(int assetId) {
+        String[] current = assets;
+        String asset = assetId < 0 || assetId >= current.length ? null : current[assetId];
+        if (asset == null) throw new IllegalArgumentException("unknown runtime asset id: " + assetId);
+        return asset;
+    }
+
+    public int symbolId(String symbol) {
+        assertOwner();
+        String normalized = OrderReservation.normalizeSymbol(symbol);
+        Integer existing = symbolIds.get(normalized);
+        if (existing != null) return existing;
+        int id = nextSymbolId++;
+        symbolIds.put(normalized, id);
+        symbols = storeIdentity(symbols, id, normalized);
+        dictionaryVersion = Math.incrementExact(dictionaryVersion);
+        return id;
+    }
+
+    public Integer findSymbolId(String symbol) {
+        assertOwner();
+        return symbolIds.get(OrderReservation.normalizeSymbol(symbol));
+    }
+
+    public String symbol(int symbolId) {
+        return preparedSymbol(symbolId);
+    }
+
+    String preparedSymbol(int symbolId) {
+        String[] current = symbols;
+        String symbol = symbolId < 0 || symbolId >= current.length ? null : current[symbolId];
+        if (symbol == null) throw new IllegalArgumentException("unknown runtime symbol id: " + symbolId);
+        return symbol;
+    }
+
+    public long clientKey(long userId, String clientOrderId) {
+        assertOwner();
+        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
+        if (clientOrderId == null || clientOrderId.isBlank()) return 0;
+        ClientIdentity identity = new ClientIdentity(userId, clientOrderId);
+        long key = deterministicKey(userId, clientOrderId);
+        ClientIdentityEntry collision = clients.putIfAbsent(key, new ClientIdentityEntry(identity));
+        if (collision != null && !collision.identity.equals(identity)) {
+            throw new IllegalStateException("deterministic client identity collision");
+        }
+        if (collision == null) dictionaryVersion = Math.incrementExact(dictionaryVersion);
+        return key;
+    }
+
+    public PreparedClientKey prepareClientKey(long userId, String clientOrderId) {
+        assertOwner();
+        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
+        if (clientOrderId == null || clientOrderId.isBlank()) return new PreparedClientKey(0, false);
+        ClientIdentity identity = new ClientIdentity(userId, clientOrderId);
+        long key = deterministicKey(userId, clientOrderId);
+        ClientIdentityEntry existing = clients.get(key);
+        if (existing != null) {
+            if (!existing.identity.equals(identity)) {
+                throw new IllegalStateException("deterministic client identity collision");
+            }
+            existing.references = Math.incrementExact(existing.references);
+            return new PreparedClientKey(key, true);
+        }
+        ClientIdentityEntry collision = clients.putIfAbsent(key, new ClientIdentityEntry(identity));
+        if (collision != null) {
+            if (!collision.identity.equals(identity)) {
+                throw new IllegalStateException("deterministic client identity collision");
+            }
+            collision.references = Math.incrementExact(collision.references);
+            return new PreparedClientKey(key, true);
+        }
+        dictionaryVersion = Math.incrementExact(dictionaryVersion);
+        return new PreparedClientKey(key, true);
+    }
+
+    private void releaseClientKeyReference(long userId, String clientOrderId, long clientKey) {
+        ClientIdentityEntry existing = clients.get(clientKey);
+        if (existing == null || existing.identity.userId() != userId
+                || !existing.identity.clientOrderId().equals(clientOrderId)) {
+            throw new IllegalStateException("deterministic client identity collision");
+        }
+        if (--existing.references == 0) clients.remove(clientKey, existing);
+    }
+
+    public void rollbackPreparedClientKey(
+            long userId, String clientOrderId, PreparedClientKey prepared) {
+        assertOwner();
+        if (userId <= 0 || clientOrderId == null || prepared == null || !prepared.allocated()) {
+            throw new IllegalArgumentException("invalid prepared client key rollback");
+        }
+        releaseClientKeyReference(userId, clientOrderId, prepared.key());
+    }
+
+    public Long findClientKey(long userId, String clientOrderId) {
+        assertOwner();
+        if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
+        if (clientOrderId == null || clientOrderId.isBlank()) return null;
+        long key = deterministicKey(userId, clientOrderId);
+        ClientIdentityEntry existing = clients.get(key);
+        return existing != null && existing.identity.userId() == userId
+                && existing.identity.clientOrderId().equals(clientOrderId) ? key : null;
+    }
+
+    public String clientOrderId(long userId, long clientKey) {
+        if (clientKey == 0) return "";
+        ClientIdentityEntry entry = clients.get(clientKey);
+        if (entry == null || entry.identity.userId() != userId) {
+            throw new IllegalArgumentException("unknown runtime client key: " + userId + '/' + clientKey);
+        }
+        return entry.identity.clientOrderId();
+    }
+
+    public void releaseClientKey(long userId, long clientKey) {
+        assertOwner();
+        ClientIdentityEntry entry = clients.get(clientKey);
+        if (entry == null || entry.identity.userId() != userId) return;
+        if (--entry.references == 0) clients.remove(clientKey, entry);
+    }
+
+    public long positionKey(long userId, String positionKey) {
+        assertOwner();
+        if (userId <= 0 || positionKey == null || positionKey.isBlank()) {
+            throw new IllegalArgumentException("invalid position identity");
+        }
+        PositionIdentity identity = new PositionIdentity(userId, positionKey);
+        Long existing = positionKeys.get(identity);
+        if (existing != null) return existing;
+        long key = deterministicPositionKey(identity);
+        PositionIdentity collision = positions.putIfAbsent(key, identity);
+        if (collision != null && !collision.equals(identity)) {
+            throw new IllegalStateException("deterministic position identity collision");
+        }
+        positionKeys.put(identity, key);
+        trackAllocation(positionAllocationKeys, positionKeyAllocations, nextPositionKey++, key);
+        dictionaryVersion = Math.incrementExact(dictionaryVersion);
+        return key;
+    }
+
+    public Long findPositionKey(long userId, String positionKey) {
+        assertOwner();
+        if (userId <= 0 || positionKey == null || positionKey.isBlank()) return null;
+        return positionKeys.get(new PositionIdentity(userId, positionKey));
+    }
+
+    public long positionCheckpoint() {
+        assertOwner();
+        return nextPositionKey;
+    }
+
+    public void rollbackPositionKeys(long checkpoint) {
+        assertOwner();
+        if (checkpoint <= 0 || checkpoint > nextPositionKey) {
+            throw new IllegalArgumentException("invalid position identity checkpoint");
+        }
+        while (nextPositionKey > checkpoint) {
+            long allocation = --nextPositionKey;
+            long key = positionAllocationKeys.removeKeyIfAbsent(allocation, 0);
+            if (key == 0) continue;
+            if (positionKeyAllocations.removeKeyIfAbsent(key, allocation) != allocation) {
+                throw new IllegalStateException("position identity allocation index is inconsistent");
+            }
+            PositionIdentity identity = positions.remove(key);
+            if (identity == null || !Long.valueOf(key).equals(positionKeys.remove(identity))) {
+                throw new IllegalStateException("position identity checkpoint is inconsistent");
+            }
+        }
+    }
+
+    private static long deterministicPositionKey(PositionIdentity identity) {
+        long hash = 0xcbf29ce484222325L;
+        long userId = identity.userId();
+        for (int shift = 0; shift < Long.SIZE; shift += Byte.SIZE) {
+            hash = (hash ^ (userId >>> shift & 0xffL)) * 0x100000001b3L;
+        }
+        for (byte value : identity.positionKey().getBytes(StandardCharsets.UTF_8)) {
+            hash = (hash ^ (value & 0xffL)) * 0x100000001b3L;
+        }
+        long key = hash & Long.MAX_VALUE;
+        return key == 0 ? 1 : key;
+    }
+
+    long preparedPositionKey(long userId, String positionKey) {
+        Long key = positionKeys.get(new PositionIdentity(userId, positionKey));
+        if (key == null) throw new IllegalStateException("position identity was not prepared by the Sequencer");
+        return key;
+    }
+
+    public String positionKey(long userId, long positionKey) {
+        PositionIdentity identity = positions.get(positionKey);
+        if (identity == null || identity.userId() != userId) {
+            throw new IllegalArgumentException("unknown runtime position key: " + userId + '/' + positionKey);
+        }
+        return identity.positionKey();
+    }
+
+    public PositionIdentity positionIdentity(long positionKey) {
+        PositionIdentity identity = positions.get(positionKey);
+        if (identity == null) {
+            throw new IllegalArgumentException("unknown runtime position key: " + positionKey);
+        }
+        return identity;
+    }
+
+    public long dictionaryVersion() {
+        return dictionaryVersion;
+    }
+
+    public int clientIdentityCount() {
+        assertOwner();
+        return clients.size();
+    }
+
+    RuntimeFactFrame.FactIdentitySlice liveFactIdentitySlice() {
+        return liveFactIdentitySlice;
+    }
+
+    public void releasePositionKey(long positionKey) {
+        assertOwner();
+        PositionIdentity identity = positions.remove(positionKey);
+        if (identity == null) return;
+        positionKeys.remove(identity, positionKey);
+        removeAllocation(positionAllocationKeys, positionKeyAllocations, positionKey);
+    }
+
+    public Snapshot snapshot() {
+        assertOwner();
+        Map<ClientIdentity, Long> clientKeys = new HashMap<>(clients.size());
+        clients.forEach((key, entry) -> clientKeys.put(entry.identity, key));
+        return new Snapshot(assetIds, symbolIds, clientKeys, positionKeys,
+                nextAssetId, nextSymbolId, clientKeys.size() + 1L, positionKeys.size() + 1L);
+    }
+
+    private static long deterministicKey(long userId, String value) {
+        long hash = 0xcbf29ce484222325L;
+        for (int shift = 0; shift < Long.SIZE; shift += Byte.SIZE) {
+            hash = (hash ^ (userId >>> shift & 0xffL)) * 0x100000001b3L;
+        }
+        for (byte character : value.getBytes(StandardCharsets.UTF_8)) {
+            hash = (hash ^ (character & 0xffL)) * 0x100000001b3L;
+        }
+        long key = hash & Long.MAX_VALUE;
+        return key == 0 ? 1 : key;
+    }
+
+    private static String[] storeIdentity(String[] values, int id, String value) {
+        String[] target = values;
+        if (id >= target.length) {
+            int capacity = target.length;
+            while (capacity <= id) capacity = Math.multiplyExact(capacity, 2);
+            target = java.util.Arrays.copyOf(target, capacity);
+        }
+        target[id] = value;
+        return target;
+    }
+
+    private static void trackAllocation(LongLongHashMap allocations, LongLongHashMap allocationsByKey,
+                                        long allocation, long key) {
+        if (allocations.containsKey(allocation) || allocationsByKey.containsKey(key)) {
+            throw new IllegalStateException("runtime identity allocation collision");
+        }
+        allocations.put(allocation, key);
+        allocationsByKey.put(key, allocation);
+    }
+
+    private static void removeAllocation(LongLongHashMap allocations, LongLongHashMap allocationsByKey,
+                                         long key) {
+        long allocation = allocationsByKey.removeKeyIfAbsent(key, 0);
+        if (allocation == 0) return;
+        if (allocations.removeKeyIfAbsent(allocation, key) != key) {
+            throw new IllegalStateException("runtime identity allocation index is inconsistent");
+        }
+    }
+
+    public static RuntimeIdentityRegistry restore(Snapshot snapshot) {
+        if (snapshot == null) throw new IllegalArgumentException("identity snapshot is required");
+        RuntimeIdentityRegistry registry = new RuntimeIdentityRegistry();
+        snapshot.assetIds().forEach((name, id) -> {
+            registry.assetIds.put(name, id);
+            registry.assets = storeIdentity(registry.assets, id, name);
+        });
+        snapshot.symbolIds().forEach((name, id) -> {
+            registry.symbolIds.put(name, id);
+            registry.symbols = storeIdentity(registry.symbols, id, name);
+        });
+        snapshot.clientKeys().forEach((identity, key) -> {
+            registry.clients.put(key, new ClientIdentityEntry(identity));
+        });
+        snapshot.positionKeys().forEach((identity, key) -> {
+            registry.positionKeys.put(identity, key);
+            registry.positions.put(key, identity);
+        });
+        registry.nextAssetId = snapshot.nextAssetId();
+        registry.nextSymbolId = snapshot.nextSymbolId();
+        registry.nextPositionKey = snapshot.nextPositionKey();
+        registry.dictionaryVersion = Math.addExact(
+                Math.addExact(snapshot.nextAssetId(), snapshot.nextSymbolId()),
+                Math.addExact(snapshot.nextClientKey() - 1, snapshot.nextPositionKey() - 1));
+        return registry;
+    }
+
+    public record Snapshot(Map<String, Integer> assetIds, Map<String, Integer> symbolIds,
+                           Map<ClientIdentity, Long> clientKeys, Map<PositionIdentity, Long> positionKeys,
+                           int nextAssetId, int nextSymbolId, long nextClientKey, long nextPositionKey) {
+        public Snapshot {
+            assetIds = Collections.unmodifiableMap(new TreeMap<>(assetIds));
+            symbolIds = Collections.unmodifiableMap(new TreeMap<>(symbolIds));
+            clientKeys = Collections.unmodifiableMap(new TreeMap<>(clientKeys));
+            positionKeys = Collections.unmodifiableMap(new TreeMap<>(positionKeys));
+            if (nextAssetId < assetIds.size() || nextSymbolId < symbolIds.size()
+                    || nextClientKey <= clientKeys.size() || nextPositionKey <= positionKeys.size()) {
+                throw new IllegalArgumentException("invalid identity snapshot cursors");
+            }
+        }
+    }
+
+    public record ClientIdentity(long userId, String clientOrderId) implements Comparable<ClientIdentity> {
+        @Override
+        public int compareTo(ClientIdentity other) {
+            int result = Long.compare(userId, other.userId);
+            return result != 0 ? result : clientOrderId.compareTo(other.clientOrderId);
+        }
+    }
+
+    public record PreparedClientKey(long key, boolean allocated) {
+        public PreparedClientKey {
+            if (key < 0 || (key == 0 && allocated)) {
+                throw new IllegalArgumentException("invalid prepared client key");
+            }
+        }
+    }
+
+    private static final class ClientIdentityEntry {
+        private final ClientIdentity identity;
+        private long references = 1;
+
+        private ClientIdentityEntry(ClientIdentity identity) {
+            this.identity = identity;
+        }
+    }
+
+    public record PositionIdentity(long userId, String positionKey) implements Comparable<PositionIdentity> {
+        @Override
+        public int compareTo(PositionIdentity other) {
+            int result = Long.compare(userId, other.userId);
+            return result != 0 ? result : positionKey.compareTo(other.positionKey);
+        }
+    }
+}

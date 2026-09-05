@@ -31,22 +31,24 @@ surprising:
     consumer:
       bootstrap-servers: localhost:9092
       product-line: ${PRODUCT_LINE}
-      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
-      topic: surprising.perp.mark.price.v1
+      topic: surprising.perp.price.events.v1
       group-id: surprising-funding-mark-price-${HOSTNAME:${random.uuid}}
       max-age: 10s
       allowed-future-skew: 1s
       concurrency: 1
       max-poll-records: 500
   funding:
+    aeron:
+      hostnames: ${AERON_CLUSTER_HOSTNAMES:localhost,localhost,localhost}
+      egress-hostname: ${AERON_CLIENT_EGRESS_HOSTNAME:localhost}
+      response-timeout: ${AERON_RESPONSE_TIMEOUT:5s}
+      client-connections: ${AERON_CLIENT_CONNECTIONS:2}
     kafka:
       bootstrap-servers: localhost:9092
       product-line: ${PRODUCT_LINE}
-      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED}
       funding-rate-topic: surprising.perp.funding.rate.v1
       cache-group-id: surprising-funding-rate-cache-${HOSTNAME:${random.uuid}}
       concurrency: 1
-      command-results-concurrency: 4
       max-poll-records: 500
     calculation:
       publish-delay-ms: 1000
@@ -55,9 +57,7 @@ surprising:
     settlement:
       settle-delay-ms: 1000
       batch-size: 20
-      payment-page-size: 500
-      max-pages-per-run: 20
-      reconcile-batch-size: 500
+      max-pages-per-run: ${FUNDING_MAX_PAGES_PER_RUN:8}
     coordination:
       enabled: true
       node-id:

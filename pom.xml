@@ -15,20 +15,15 @@
     <modules>
         <module>surprising-parent</module>
         <module>surprising-product-api</module>
-        <module>surprising-event-store</module>
+        <module>surprising-aeron-core</module>
         <module>surprising-instrument</module>
-        <module>surprising-candlestick</module>
+        <module>surprising-market-data</module>
         <module>surprising-price</module>
         <module>surprising-trading</module>
         <module>surprising-account</module>
-        <module>surprising-adl</module>
         <module>surprising-funding</module>
-        <module>surprising-insurance</module>
-        <module>surprising-liquidation</module>
-        <module>surprising-risk</module>
+        <module>surprising-derivatives-lifecycle</module>
         <module>surprising-gateway</module>
-        <module>surprising-websocket</module>
-        <module>surprising-market-maker</module>
-        <module>surprising-finance-ops</module>
+        <module>surprising-maker</module>
     </modules>
 </project>

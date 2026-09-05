@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.surprising</groupId>
+        <artifactId>surprising-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+        <relativePath>../../surprising-parent/pom.xml</relativePath>
+    </parent>
+
+    <artifactId>surprising-aeron-service</artifactId>
+    <name>surprising-aeron-service</name>
+    <description>单产品线确定性 ClusteredService 和节点启动器</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.surprising</groupId>
+            <artifactId>surprising-aeron-protocol</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.surprising</groupId>
+            <artifactId>surprising-instrument-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.aeron</groupId>
+            <artifactId>aeron-all</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>exchange.core2</groupId>
+            <artifactId>exchange-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.2.0</version>
+                <executions>
+                    <execution>
+                        <id>verify-exchange-core-artifact</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <property name="exchange-core.artifact.path"
+                                          location="${settings.localRepository}/exchange/core2/exchange-core/${exchange-core.version}/exchange-core-${exchange-core.version}.jar"/>
+                                <available file="${exchange-core.artifact.path}" property="exchange-core.artifact.exists"/>
+                                <fail unless="exchange-core.artifact.exists"
+                                      message="Pinned exchange-core artifact is missing: ${exchange-core.artifact.path}"/>
+                                <checksum file="${exchange-core.artifact.path}" algorithm="SHA-256"
+                                          property="exchange-core.actual.sha256"/>
+                                <condition property="exchange-core.checksum.matches">
+                                    <equals arg1="${exchange-core.actual.sha256}" arg2="${exchange-core.sha256}"
+                                            casesensitive="false" trim="true"/>
+                                </condition>
+                                <fail unless="exchange-core.checksum.matches"
+                                      message="exchange-core artifact SHA-256 does not match the pinned build"/>
+                                <loadresource property="exchange-core.provenance">
+                                    <zipentry zipfile="${exchange-core.artifact.path}"
+                                              name="META-INF/surprising-exchange-core.properties"/>
+                                </loadresource>
+                                <condition property="exchange-core.provenance.matches">
+                                    <and>
+                                        <contains string="${exchange-core.provenance}"
+                                                  substring="fork.git.sha=${exchange-core.git-sha}"/>
+                                        <contains string="${exchange-core.provenance}"
+                                                  substring="fork.git.dirty=false"/>
+                                    </and>
+                                </condition>
+                                <fail unless="exchange-core.provenance.matches"
+                                      message="exchange-core artifact provenance does not match the pinned clean fork commit"/>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.6.1</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <finalName>surprising-aeron-service</finalName>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <transformers combine.self="override">
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>com.surprising.aeron.service.SurprisingClusterNode</mainClass>
+                                </transformer>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

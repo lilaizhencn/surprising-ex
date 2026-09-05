@@ -42,8 +42,7 @@ surprising:
     consumer:
       bootstrap-servers: localhost:9092
       product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
-      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED:true}
-      topic: surprising.perp.mark.price.v1
+      topic: surprising.perp.price.events.v1
       group-id: surprising-account-mark-price-${HOSTNAME:${random.uuid}}
       max-age: 5s
       allowed-future-skew: 1s
@@ -51,10 +50,15 @@ surprising:
       max-poll-records: 500
   account:
     internal-service-secret: ${ACCOUNT_INTERNAL_SERVICE_SECRET:}
+    aeron:
+      source-identity: account-${HOSTNAME:node}
+      hostnames: ${AERON_CLUSTER_HOSTNAMES:localhost,localhost,localhost}
+      egress-hostname: ${AERON_EGRESS_HOSTNAME:localhost}
+      response-timeout: ${AERON_RESPONSE_TIMEOUT:5s}
+      client-connections: ${AERON_CLIENT_CONNECTIONS:4}
     kafka:
       bootstrap-servers: localhost:9092
       product-line: ${PRODUCT_LINE:LINEAR_PERPETUAL}
-      product-topics-enabled: ${PRODUCT_TOPICS_ENABLED:true}
       group-id: surprising-account-v1
       client-id: surprising-account-${HOSTNAME:${random.uuid}}
       order-commands-topic: surprising.perp.order.commands.v1
@@ -68,32 +72,11 @@ surprising:
       option-exercises-topic: surprising.option.option.exercises.v1
       instrument-lifecycle-drain-topic: surprising.instrument.lifecycle-drain.v1
       concurrency: 2
-      # 用户命令按用户键分区；每个分区独占消费者，避免做市流量阻塞资金命令。
-      user-command-concurrency: ${ACCOUNT_USER_COMMAND_CONCURRENCY:32}
       max-poll-records: 500
     cache:
       contract-spec-max-entries: 4096
       instrument-type-max-entries: 4096
       spot-instrument-spec-max-entries: 4096
-    position-cache:
-      key-prefix: ${POSITION_REDIS_KEY_PREFIX:surprising:position:v1}
-      rebuild-batch-size: 1000
-      reconcile-delay-ms: 10000
-      ready-ttl: 30s
-      lock-ttl: 30s
-      accelerator-threads: 4
-      accelerator-queue-capacity: 10000
     position-margin:
       max-risk-snapshot-age: 10s
       removal-buffer-ppm: 50000
-    trade-settlement:
-      stale-after: 1m
-    command-wait:
-      timeout: 10s
-      poll-delay-ms: 20
-      completed-cache-ttl: ${ACCOUNT_COMMAND_RESULT_CACHE_TTL:5m}
-      completed-cache-max-entries: ${ACCOUNT_COMMAND_RESULT_CACHE_MAX_ENTRIES:10000}
-    wal:
-      directory: ${ACCOUNT_WAL_DIR:data/account-wal}
-      projection-delay-ms: ${ACCOUNT_WAL_PROJECTION_DELAY_MS:25}
-      projection-batch-size: ${ACCOUNT_WAL_PROJECTION_BATCH_SIZE:100}

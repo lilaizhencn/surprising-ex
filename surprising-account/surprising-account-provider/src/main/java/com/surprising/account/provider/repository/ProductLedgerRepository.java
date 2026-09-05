@@ -13,8 +13,7 @@ import org.springframework.stereotype.Repository;
 /**
  * 产品账本单表仓储。
  *
- * <p>在线账户 reducer 不依赖本仓储。写入入口只有异步账本投影，查询入口只读取本表，
- * 这样不会把旧的逐类写入方法重新变成资金热路径。</p>
+ * <p>在线账户 reducer 不依赖本仓储。写入入口只有异步账本投影，查询入口只读取本表。</p>
  */
 @Repository
 public class ProductLedgerRepository {

@@ -31,19 +31,4 @@ public record OrderReserveAccountCommand(
         }
     }
 
-    /** 兼容未启用账户版本栅栏的旧调用方。 */
-    public OrderReserveAccountCommand(long orderId,
-                                      String symbol,
-                                      OrderSide side,
-                                      OrderReservationKind reservationKind,
-                                      AccountType accountType,
-                                      String asset,
-                                      MarginMode marginMode,
-                                      PositionSide positionSide,
-                                      long orderQuantitySteps,
-                                      boolean reduceOnly,
-                                      long reservedUnits) {
-        this(orderId, symbol, side, reservationKind, accountType, asset, marginMode, positionSide,
-                orderQuantitySteps, reduceOnly, reservedUnits, 0L);
-    }
 }

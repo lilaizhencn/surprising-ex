@@ -27,9 +27,6 @@ public class FundingRuntimeConfigService {
         settlement.put("enabled", properties.getSettlement().isEnabled());
         settlement.put("settleDelayMs", properties.getSettlement().getSettleDelayMs());
         settlement.put("batchSize", properties.getSettlement().getBatchSize());
-        settlement.put("paymentPageSize", properties.getSettlement().getPaymentPageSize());
-        settlement.put("maxPagesPerRun", properties.getSettlement().getMaxPagesPerRun());
-        settlement.put("reconcileBatchSize", properties.getSettlement().getReconcileBatchSize());
 
         Map<String, Object> coordination = new LinkedHashMap<>();
         coordination.put("enabled", properties.getCoordination().isEnabled());
@@ -72,18 +69,6 @@ public class FundingRuntimeConfigService {
         if (settlementBatchSize != null) {
             properties.getSettlement().setBatchSize(
                     bounded(settlementBatchSize, 1, 10_000, "settlementBatchSize"));
-        }
-        if (paymentPageSize != null) {
-            properties.getSettlement().setPaymentPageSize(
-                    bounded(paymentPageSize, 1, 10_000, "paymentPageSize"));
-        }
-        if (maxPagesPerRun != null) {
-            properties.getSettlement().setMaxPagesPerRun(
-                    bounded(maxPagesPerRun, 1, 1_000, "maxPagesPerRun"));
-        }
-        if (reconcileBatchSize != null) {
-            properties.getSettlement().setReconcileBatchSize(
-                    bounded(reconcileBatchSize, 1, 10_000, "reconcileBatchSize"));
         }
         return current();
     }

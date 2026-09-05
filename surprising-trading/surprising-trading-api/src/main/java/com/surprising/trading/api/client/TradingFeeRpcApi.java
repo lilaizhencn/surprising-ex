@@ -11,10 +11,10 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
 @FeignClient(
-        name = "surprising-order-provider",
+        name = "surprising-trading-provider",
         contextId = "tradingFeeRpcApi",
         path = TradingApiPaths.INTERNAL_FEE_BASE_PATH,
-        url = "${surprising.clients.order.base-url:http://localhost:9084}")
+        url = "${surprising.clients.trading.base-url:http://localhost:9084}")
 public interface TradingFeeRpcApi {
 
     /** 其他模块唯一使用的费率查询入口；启动时用于初始化本地 JVM 快照。 */

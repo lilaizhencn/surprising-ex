@@ -7,11 +7,12 @@
 
 ## 模块
 
-- `surprising-gateway`：Spring Boot 白名单代理。
+- `surprising-gateway`：Spring Boot 白名单代理、WebSocket 连接管理和 Kafka fanout。
 
 ## 入口
 
 - HTTP 端口：`9094`
+- WebSocket 路径：`/ws/v1`
 - Gateway 前缀：`/api/v1/gateway/{service}`
 - 后台 Gateway 前缀：`/api/v1/admin/gateway/{service}`
 - 后台本地接口前缀：`/api/v1/admin/...`
@@ -45,16 +46,16 @@ curl 'http://localhost:9094/api/v1/admin/system/health' \
 | `candlestick` | `http://localhost:9081/api/v1/candlestick` | 否 |
 | `price-index` | `http://localhost:9082/api/v1/price/index` | 否 |
 | `price-fx` | `http://localhost:9082/api/v1/price/fx` | 否 |
-| `price-mark` | `http://localhost:9083/api/v1/price/mark` | 否 |
+| `price-mark` | `http://localhost:9082/api/v1/price/mark` | 否 |
 | `trading` | `http://localhost:9084/api/v1/trading/orders` | 是 |
-| `trading-market` | `http://localhost:9085/api/v1/trading/market` | 否 |
+| `trading-market` | `http://localhost:9081/api/v1/trading/market` | 否 |
 | `trading-trigger` | `http://localhost:9084/api/v1/trading/trigger-orders` | 是 |
 | `account` | `http://localhost:9086/api/v1/accounts` | 是 |
-| `risk` | `http://localhost:9088/api/v1/risk` | 是 |
-| `liquidation` | `http://localhost:9088/api/v1/liquidations` | 是 |
+| `risk` | `http://localhost:9087/api/v1/risk` | 是 |
+| `liquidation` | `http://localhost:9087/api/v1/liquidations` | 是 |
 | `funding` | `http://localhost:9089/api/v1/funding` | 否 |
-| `insurance` | `http://localhost:9090/api/v1/insurance` | 是 |
-| `adl` | `http://localhost:9091/api/v1/adl` | 是 |
+| `insurance` | `http://localhost:9087/api/v1/insurance` | 是 |
+| `adl` | `http://localhost:9087/api/v1/adl` | 是 |
 | `market-maker` | `http://localhost:9096/api/v1/market-maker` | 是 |
 | `wallet` | `http://localhost:8002/wallet/v1` | 是 |
 
@@ -62,10 +63,10 @@ Gateway 会拒绝未知 service 名称。它不会把用户输入拼成任意后
 
 ## 安全模型
 
-当前实现要求私有路由携带 `X-User-Id` 或 `Authorization`。生产环境应在 gateway 前完成认证，只有 token/session 验证通过后才注入可信 `X-User-Id`。
+当前实现要求私有路由携带经过校验的 `Authorization: Bearer`。gateway 完成认证后向下游注入可信 `X-User-Id`。
 `X-Trace-Id` 所有路由都可以带；gateway 会清洗、回写给客户端并转发给后端 provider。它只用于可观测性和排障，不能参与认证或鉴权判断。
 
-后台路径 `/api/v1/admin/...` 不使用普通前端的 `X-User-Id` fallback，只接受具备 `SUPPORT`、`ADMIN` 或 `SUPER_ADMIN` 的 Bearer Token，并继续用权限点限制实际访问范围。后台代理会向下游注入 `X-Admin-User-Id`、`X-Admin-Username`、`X-Admin-Roles`；客服只读接口 `/api/v1/admin/support/users/{userId}/overview` 只聚合 gateway 本地用户状态和合规摘要，不查询账户、订单、成交或风险在线服务；客服工单接口 `/api/v1/admin/support/tickets` 支持工单查询、创建、备注时间线和状态变更，写操作要求 `admin.support.write`。原跨域用户详情接口 `/api/v1/admin/users/{userId}/profile` 已移除。合规风控接口 `/api/v1/admin/compliance/...` 管理 KYC 档案、风险标签和 AML case。风控后台代理服务名 `risk-admin` 转发到 `/api/v1/admin/risk`，仅用于规则覆盖和爆仓候选后台分页查询。强平后台代理服务名 `liquidation-admin` 转发到 `/api/v1/admin/liquidations`，用于强平订单分页和候选取消运营动作。管理员 TOTP 2FA 可通过 `/api/v1/admin/security/mfa` 绑定、确认和关闭，生产环境可设置 `surprising.gateway.security.require-admin-mfa=true` 强制管理员登录提供动态码。
+后台路径 `/api/v1/admin/...` 只接受具备 `SUPPORT`、`ADMIN` 或 `SUPER_ADMIN` 的 Bearer Token，并继续用权限点限制实际访问范围。后台代理会向下游注入 `X-Admin-User-Id`、`X-Admin-Username`、`X-Admin-Roles`；客服只读接口 `/api/v1/admin/support/users/{userId}/overview` 只聚合 gateway 本地用户状态和合规摘要，不查询账户、订单、成交或风险在线服务；客服工单接口 `/api/v1/admin/support/tickets` 支持工单查询、创建、备注时间线和状态变更，写操作要求 `admin.support.write`。原跨域用户详情接口 `/api/v1/admin/users/{userId}/profile` 已移除。合规风控接口 `/api/v1/admin/compliance/...` 管理 KYC 档案、风险标签和 AML case。风控后台代理服务名 `risk-admin` 转发到 `/api/v1/admin/risk`，仅用于规则覆盖和爆仓候选后台分页查询。强平后台代理服务名 `liquidation-admin` 转发到 `/api/v1/admin/liquidations`，用于强平订单分页和候选取消运营动作。管理员 TOTP 2FA 可通过 `/api/v1/admin/security/mfa` 绑定、确认和关闭，生产环境可设置 `surprising.gateway.security.require-admin-mfa=true` 强制管理员登录提供动态码。
 
 用户列表 `GET /api/v1/admin/users` 支持 `createdAt.desc`、`createdAt.asc` 游标分页，响应返回 `nextCursor`、`hasMore`、`sort`、`limit`；用户状态和角色写操作仍属于敏感操作，需要审批单。
 会话列表 `GET /api/v1/admin/sessions` 与 `GET /api/v1/admin/users/{userId}/sessions` 支持 `createdAt.desc`、`createdAt.asc` 游标分页，响应返回 `nextCursor`、`hasMore`、`sort`、`limit`；撤销会话仍属于敏感操作，需要审批单。
@@ -89,10 +90,10 @@ gateway 本地核心后台列表使用统一游标分页协议：`/api/v1/admin/
 `createdAt.desc`、`createdAt.asc`。
 
 跨表订单时间线、行情/交易运营指标、账户估值、资金对账和日终报表明确不在
-gateway 中实现。后续 `surprising-finance-ops` 模块必须配置独立数据源和独立物理数据库，
+gateway 中实现。后续财务运营模块必须配置独立数据源和独立物理数据库，
 通过领域事件、outbox 或受控 CDC 建立查询投影，禁止对交易主库执行报表 JOIN。
 
-系统监控接口位于 `/api/v1/admin/system`：`/routes` 返回普通和后台路由配置，`/health` 统一巡检后端 `/actuator/health`，`/observability` 聚合 Kafka consumer lag、WebSocket 连接/订阅指标和各后端 `/actuator/prometheus` 抓取状态。这些接口需要 `admin.system.read`。Kafka lag 默认关闭，生产可通过 `ADMIN_KAFKA_LAG_ENABLED=true` 和 `ADMIN_KAFKA_BOOTSTRAP_SERVERS` 开启。依赖业务库聚合的 `/metrics` 与本地告警中心已移除；以后应从独立运营数据库或可观测性平台提供。
+系统管理接口位于 `/api/v1/admin/system`：`/routes` 返回普通和后台路由配置，`/health` 统一巡检后端 `/actuator/health`。这些接口需要 `admin.system.read`。后台 Kafka lag、WebSocket 连接指标和 Prometheus 抓取不在 Gateway 中实现，应由独立可观测性平台提供。
 
 下游 `trading-orders` 和 `trading-trigger` 后台代理仍保留单一领域内、受限分页的客服操作明细。
 跨领域时间线和聚合运营报表统一归属上述独立财务运营数据库。
@@ -113,7 +114,7 @@ gateway 中实现。后续 `surprising-finance-ops` 模块必须配置独立数�
 
 不要把内部 provider 端口直接暴露到公网。公共客户端应使用：
 
-- 开发/生产部署：`surprising-gateway` 的 `9094` 提供 REST，`surprising-websocket-provider` 的 `9093` 提供 `/ws/v1` 实时推送。
+- 开发/生产部署：`surprising-gateway` 的 `9094` 同时提供 REST 和 `/ws/v1` 实时推送。
 
 ## 水平扩展
 
@@ -139,7 +140,7 @@ surprising:
       read-timeout: 30s
     routes:
       candlestick:
-        base-url: http://surprising-candlestick:9081
+        base-url: http://surprising-market-data:9081
         target-prefix: /api/v1/candlestick
         private-route: false
       account:
@@ -147,7 +148,7 @@ surprising:
         target-prefix: /api/v1/accounts
         private-route: true
       trading-trigger:
-        base-url: http://surprising-trigger:9095
+        base-url: http://surprising-trading-provider:9084
         target-prefix: /api/v1/trading/trigger-orders
         private-route: true
 ```

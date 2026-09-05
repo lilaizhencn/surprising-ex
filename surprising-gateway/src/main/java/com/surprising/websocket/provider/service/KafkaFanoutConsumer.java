@@ -1,0 +1,418 @@
+package com.surprising.websocket.provider.service;
+
+import com.surprising.account.api.model.PositionUpdatedEvent;
+import com.surprising.candlestick.api.model.CandleUpdatedEvent;
+import com.surprising.product.api.ProductLine;
+import com.surprising.price.api.model.IndexPriceEvent;
+import com.surprising.price.api.model.MarkPriceEvent;
+import com.surprising.price.api.model.PerpFundingRateEvent;
+import com.surprising.price.api.model.PriceEventType;
+import com.surprising.price.api.model.PricePublishedEvent;
+import com.surprising.price.api.model.PriceStatus;
+import com.surprising.risk.api.model.RiskAccountUpdatedEvent;
+import com.surprising.risk.api.model.RiskPositionUpdatedEvent;
+import com.surprising.trading.api.KafkaSymbolKeyValidator;
+import com.surprising.trading.api.model.OrderEvent;
+import com.surprising.trading.api.model.TriggerOrderUpdatedEvent;
+import com.surprising.websocket.api.model.ExecutionReportEvent;
+import com.surprising.websocket.api.model.SubscriptionTopic;
+import com.surprising.websocket.api.model.WsChannel;
+import com.surprising.websocket.provider.config.WebSocketProperties;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.time.Duration;
+import java.time.Instant;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.stereotype.Service;
+import tools.jackson.databind.ObjectMapper;
+
+/**
+ * Consumes domain events and pushes them only to clients connected to this node.
+ *
+ * <p>Each WebSocket node intentionally uses its own Kafka consumer group. Public market data must
+ * reach every node for local fanout; private account/order/position events are filtered again by
+ * authenticated user subscriptions before leaving the process.</p>
+ */
+@Service
+public class KafkaFanoutConsumer {
+
+    private static final Logger log = LoggerFactory.getLogger(KafkaFanoutConsumer.class);
+
+    private final ObjectMapper objectMapper;
+    private final SubscriptionRegistry registry;
+    private final CandleUpdateCoalescer candleUpdateCoalescer;
+    private final WebSocketProperties properties;
+
+    public KafkaFanoutConsumer(ObjectMapper objectMapper,
+                               SubscriptionRegistry registry,
+                               CandleUpdateCoalescer candleUpdateCoalescer) {
+        this(objectMapper, registry, candleUpdateCoalescer, defaultTestProperties());
+    }
+
+    @Autowired
+    public KafkaFanoutConsumer(ObjectMapper objectMapper,
+                               SubscriptionRegistry registry,
+                               CandleUpdateCoalescer candleUpdateCoalescer,
+                               WebSocketProperties properties) {
+        this.objectMapper = objectMapper;
+        this.registry = registry;
+        this.candleUpdateCoalescer = candleUpdateCoalescer;
+        this.properties = properties;
+    }
+
+    private static WebSocketProperties defaultTestProperties() {
+        WebSocketProperties properties = new WebSocketProperties();
+        properties.getKafka().setProductLine(ProductLine.LINEAR_PERPETUAL);
+        return properties;
+    }
+
+    public void onCandle(ConsumerRecord<String, String> record) {
+        try {
+            requireCurrentProductTopic(record.topic(), candleTopic(), "candle update");
+            CandleUpdatedEvent event = objectMapper.readValue(record.value(), CandleUpdatedEvent.class);
+            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "candle update");
+            candleUpdateCoalescer.publish(event, fanoutProductLine());
+        } catch (Exception ex) {
+            log.error("Failed to fanout candle update: {}", ex.getMessage(), ex);
+            throw new IllegalStateException("failed to fanout candle update", ex);
+        }
+    }
+
+    @KafkaListener(
+            topics = "#{__listener.candleTopic()}",
+            groupId = "#{__listener.groupId()}",
+            containerFactory = "webSocketKafkaBatchListenerContainerFactory")
+    public void onCandleBatch(List<ConsumerRecord<String, String>> records) {
+        for (ConsumerRecord<String, String> record : records) {
+            onCandle(record);
+        }
+    }
+
+    public void onPriceEvent(ConsumerRecord<String, String> record) {
+        try {
+            Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped = new LinkedHashMap<>();
+            dispatchPriceEvent(record, grouped);
+            publishBatches(grouped);
+        } catch (Exception ex) {
+            log.error("Failed to fanout price event: {}", ex.getMessage(), ex);
+            throw new IllegalStateException("failed to fanout price event", ex);
+        }
+    }
+
+    @KafkaListener(
+            topics = "#{__listener.priceEventsTopic()}",
+            groupId = "#{__listener.groupId()}",
+            containerFactory = "webSocketKafkaBatchListenerContainerFactory")
+    public void onPriceEventBatch(List<ConsumerRecord<String, String>> records) {
+        Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped = new LinkedHashMap<>();
+        for (ConsumerRecord<String, String> record : records) {
+            try {
+                dispatchPriceEvent(record, grouped);
+            } catch (Exception ex) {
+                log.warn("Dropped invalid price event topic={} partition={} offset={}: {}",
+                        record.topic(), record.partition(), record.offset(), ex.getMessage());
+            }
+        }
+        publishBatches(grouped);
+    }
+
+    private void dispatchPriceEvent(ConsumerRecord<String, String> record,
+                                    Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped)
+            throws Exception {
+        requireCurrentProductTopic(record.topic(), priceEventsTopic(), "price event");
+        PricePublishedEvent publication = objectMapper.readValue(record.value(), PricePublishedEvent.class);
+        KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), publication.symbol(), "price event");
+        if (publication.eventType() == PriceEventType.INDEX_PRICE) {
+            IndexPriceEvent event = publication.indexPrice();
+            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "index price");
+            addBatch(grouped, topic(WsChannel.INDEX_PRICE, event.symbol(), null), event, event.eventTime());
+            return;
+        }
+        if (publication.eventType() == PriceEventType.MARK_PRICE) {
+            MarkPriceEvent event = publication.markPrice() == null ? null : publication.markPrice().result();
+            if (event == null) {
+                throw new IllegalArgumentException("mark price publication result is required");
+            }
+            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "mark price");
+            if (isFreshMarkPrice(event)) {
+                addBatch(grouped, topic(WsChannel.MARK_PRICE, event.symbol(), null), event, event.eventTime());
+            }
+            return;
+        }
+        throw new IllegalArgumentException("unsupported price event type: " + publication.eventType());
+    }
+
+    private boolean isFreshMarkPrice(MarkPriceEvent event) {
+        if (event == null || event.productLine() != properties.getKafka().getProductLine()
+                || event.instrumentVersion() <= 0 || event.markPriceUnits() <= 0 || event.markPriceTicks() <= 0
+                || event.sequence() <= 0 || event.eventTime() == null || event.publishedAt() == null
+                || event.status() == null || event.status() == PriceStatus.STALE
+                || event.status() == PriceStatus.INSUFFICIENT_SOURCES
+                || event.publishedAt().isBefore(event.eventTime())) {
+            return false;
+        }
+        Instant now = Instant.now();
+        Duration maxAge = properties.getFanout().getMarkPriceMaxAge();
+        Duration futureSkew = properties.getFanout().getMarkPriceAllowedFutureSkew();
+        return maxAge != null && !maxAge.isNegative() && !maxAge.isZero()
+                && futureSkew != null && !futureSkew.isNegative()
+                && !event.eventTime().isBefore(now.minus(maxAge))
+                && !event.eventTime().isAfter(now.plus(futureSkew))
+                && !event.publishedAt().isAfter(now.plus(futureSkew));
+    }
+
+    public void onFundingRate(ConsumerRecord<String, String> record) {
+        try {
+            requireCurrentProductTopic(record.topic(), fundingRateTopic(), "funding rate");
+            PerpFundingRateEvent event = objectMapper.readValue(record.value(), PerpFundingRateEvent.class);
+            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "funding rate");
+            registry.publish(topic(WsChannel.FUNDING_RATE, event.symbol(), null), event, event.eventTime());
+        } catch (Exception ex) {
+            log.error("Failed to fanout funding rate: {}", ex.getMessage(), ex);
+            throw new IllegalStateException("failed to fanout funding rate", ex);
+        }
+    }
+
+    @KafkaListener(
+            topics = "#{__listener.fundingRateTopic()}",
+            groupId = "#{__listener.groupId()}",
+            autoStartup = "#{__listener.fundingRateListenerEnabled()}",
+            containerFactory = "webSocketKafkaBatchListenerContainerFactory")
+    public void onFundingRateBatch(List<ConsumerRecord<String, String>> records) {
+        try {
+            Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped = new LinkedHashMap<>();
+            for (ConsumerRecord<String, String> record : records) {
+                requireCurrentProductTopic(record.topic(), fundingRateTopic(), "funding rate");
+                PerpFundingRateEvent event = objectMapper.readValue(record.value(), PerpFundingRateEvent.class);
+                KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "funding rate");
+                addBatch(grouped, topic(WsChannel.FUNDING_RATE, event.symbol(), null), event, event.eventTime());
+            }
+            publishBatches(grouped);
+        } catch (Exception ex) {
+            log.error("Failed to batch fanout funding rate: {}", ex.getMessage(), ex);
+            throw new IllegalStateException("failed to batch fanout funding rate", ex);
+        }
+    }
+
+    @KafkaListener(
+            topics = "#{__listener.orderEventsTopic()}",
+            groupId = "#{__listener.groupId()}",
+            containerFactory = "webSocketKafkaListenerContainerFactory")
+    public void onOrderEvent(ConsumerRecord<String, String> record) {
+        try {
+            requireCurrentProductTopic(record.topic(), orderEventsTopic(), "order event");
+            OrderEvent event = objectMapper.readValue(record.value(), OrderEvent.class);
+            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "order event");
+            registry.publish(topic(WsChannel.ORDERS, event.symbol(), event.userId()), event, event.eventTime());
+            publishExecutionReport(fromOrderEvent(event));
+        } catch (Exception ex) {
+            log.error("Failed to fanout order event: {}", ex.getMessage(), ex);
+            throw new IllegalStateException("failed to fanout order event", ex);
+        }
+    }
+
+    @KafkaListener(
+            topics = "#{__listener.triggerOrderEventsTopic()}",
+            groupId = "#{__listener.groupId()}",
+            containerFactory = "webSocketKafkaListenerContainerFactory")
+    public void onTriggerOrderEvent(ConsumerRecord<String, String> record) {
+        try {
+            requireCurrentProductTopic(record.topic(), triggerOrderEventsTopic(), "trigger order event");
+            TriggerOrderUpdatedEvent event = objectMapper.readValue(record.value(), TriggerOrderUpdatedEvent.class);
+            KafkaSymbolKeyValidator.requireMatchingSymbol(
+                    record.key(), event.order().symbol(), "trigger order event");
+            if (event.productLine() != properties.getKafka().getProductLine()) {
+                throw new ProductTopicMismatchException("trigger order event product line must match websocket node: "
+                        + "expected=" + properties.getKafka().getProductLine() + " actual=" + event.productLine());
+            }
+            registry.publish(topic(WsChannel.TRIGGER_ORDERS, event.order().symbol(), event.order().userId()),
+                    event, event.eventTime());
+        } catch (Exception ex) {
+            log.error("Failed to fanout trigger order event: {}", ex.getMessage(), ex);
+            throw new IllegalStateException("failed to fanout trigger order event", ex);
+        }
+    }
+
+    @KafkaListener(
+            topics = "#{__listener.positionEventsTopic()}",
+            groupId = "#{__listener.groupId()}",
+            containerFactory = "webSocketKafkaListenerContainerFactory")
+    public void onPosition(ConsumerRecord<String, String> record) {
+        try {
+            requireCurrentProductTopic(record.topic(), positionEventsTopic(), "position update");
+            PositionUpdatedEvent event = objectMapper.readValue(record.value(), PositionUpdatedEvent.class);
+            requireMatchingPositionKey(record.key(), event);
+            registry.publish(topic(WsChannel.POSITIONS, event.symbol(), event.userId()), event, event.eventTime());
+        } catch (Exception ex) {
+            log.error("Failed to fanout position update: {}", ex.getMessage(), ex);
+            throw new IllegalStateException("failed to fanout position update", ex);
+        }
+    }
+
+    @KafkaListener(
+            topics = "#{__listener.accountRiskEventsTopic()}",
+            groupId = "#{__listener.groupId()}",
+            containerFactory = "webSocketKafkaListenerContainerFactory")
+    public void onAccountRisk(ConsumerRecord<String, String> record) {
+        try {
+            requireCurrentProductTopic(record.topic(), accountRiskEventsTopic(), "account risk update");
+            RiskAccountUpdatedEvent event = objectMapper.readValue(record.value(), RiskAccountUpdatedEvent.class);
+            requireMatchingAccountRiskKey(record.key(), event);
+            registry.publish(topic(WsChannel.ACCOUNT_RISK, SubscriptionTopic.WILDCARD, event.userId()),
+                    event, event.eventTime());
+        } catch (Exception ex) {
+            log.error("Failed to fanout account risk update: {}", ex.getMessage(), ex);
+            throw new IllegalStateException("failed to fanout account risk update", ex);
+        }
+    }
+
+    @KafkaListener(
+            topics = "#{__listener.positionRiskEventsTopic()}",
+            groupId = "#{__listener.groupId()}",
+            containerFactory = "webSocketKafkaListenerContainerFactory")
+    public void onPositionRisk(ConsumerRecord<String, String> record) {
+        try {
+            requireCurrentProductTopic(record.topic(), positionRiskEventsTopic(), "position risk update");
+            RiskPositionUpdatedEvent event = objectMapper.readValue(record.value(), RiskPositionUpdatedEvent.class);
+            KafkaSymbolKeyValidator.requireMatchingSymbol(record.key(), event.symbol(), "position risk update");
+            registry.publish(topic(WsChannel.POSITION_RISK, event.symbol(), event.userId()), event, event.eventTime());
+        } catch (Exception ex) {
+            log.error("Failed to fanout position risk update: {}", ex.getMessage(), ex);
+            throw new IllegalStateException("failed to fanout position risk update", ex);
+        }
+    }
+
+    public String groupId() {
+        return properties.getKafka().getGroupId();
+    }
+
+    public String candleTopic() {
+        return properties.getKafka().getCandleTopic();
+    }
+
+    public String priceEventsTopic() {
+        return properties.getKafka().getPriceEventsTopic();
+    }
+
+    public String fundingRateTopic() {
+        return properties.getKafka().getFundingRateTopic();
+    }
+
+    public boolean fundingRateListenerEnabled() {
+        return properties.getKafka().isFundingRateTopicEnabled();
+    }
+
+    public String orderEventsTopic() {
+        return properties.getKafka().getOrderEventsTopic();
+    }
+
+    public String triggerOrderEventsTopic() {
+        return properties.getKafka().getTriggerOrderEventsTopic();
+    }
+
+    public String positionEventsTopic() {
+        return properties.getKafka().getPositionEventsTopic();
+    }
+
+    public String accountRiskEventsTopic() {
+        return properties.getKafka().getAccountRiskEventsTopic();
+    }
+
+    public String positionRiskEventsTopic() {
+        return properties.getKafka().getPositionRiskEventsTopic();
+    }
+
+    private void requireMatchingAccountRiskKey(String recordKey, RiskAccountUpdatedEvent event) {
+        String expected = event.userId() + ":" + event.accountType() + ":" + event.settleAsset();
+        String normalizedKey = recordKey == null ? "" : recordKey.trim();
+        if (!expected.equalsIgnoreCase(normalizedKey)) {
+            throw new IllegalArgumentException("account risk key mismatch: expected=" + expected
+                    + ", actual=" + recordKey);
+        }
+    }
+
+    private void requireMatchingPositionKey(String recordKey, PositionUpdatedEvent event) {
+        if (event.productLine() != properties.getKafka().getProductLine()) {
+            throw new IllegalArgumentException("position update product line must match WebSocket provider");
+        }
+        if (!event.partitionKey().equals(recordKey)) {
+            throw new IllegalArgumentException("position update Kafka key must be " + event.partitionKey());
+        }
+    }
+
+    private void requireCurrentProductTopic(String topic, String expectedTopic, String streamName) {
+        if (!expectedTopic.equals(topic)) {
+            throw new ProductTopicMismatchException(streamName + " topic must match current product line: expected="
+                    + expectedTopic + " actual=" + topic);
+        }
+    }
+
+    private void publishExecutionReport(ExecutionReportEvent report) {
+        registry.publish(topic(WsChannel.EXECUTION_REPORTS, report.symbol(), report.userId()),
+                report, report.eventTime());
+    }
+
+    private SubscriptionTopic topic(WsChannel channel, String symbol, Long userId) {
+        return new SubscriptionTopic(channel, symbol, null, userId, fanoutProductLine());
+    }
+
+    private ProductLine fanoutProductLine() {
+        return properties.getKafka().getProductLine();
+    }
+
+    static final class ProductTopicMismatchException extends RuntimeException {
+        private ProductTopicMismatchException(String message) {
+            super(message);
+        }
+    }
+
+    private ExecutionReportEvent fromOrderEvent(OrderEvent event) {
+        return new ExecutionReportEvent(
+                "ORDER_EVENT",
+                event.userId(),
+                event.symbol(),
+                event.orderId(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                name(event.eventType()),
+                null,
+                name(event.status()),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                event.reason(),
+                event.traceId(),
+                event.eventTime());
+    }
+
+    private String name(Enum<?> value) {
+        return value == null ? null : value.name();
+    }
+
+    private void addBatch(Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped,
+                          SubscriptionTopic topic,
+                          Object payload,
+                          Instant eventTime) {
+        grouped.computeIfAbsent(topic, ignored -> new ArrayList<>())
+                .add(new SubscriptionRegistry.TimedPayload(payload, eventTime));
+    }
+
+    private void publishBatches(Map<SubscriptionTopic, List<SubscriptionRegistry.TimedPayload>> grouped) {
+        grouped.forEach(registry::publishTimedBatch);
+    }
+}

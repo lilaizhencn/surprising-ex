@@ -24,7 +24,6 @@ import com.surprising.account.api.model.ProductTransferResponse;
 import com.surprising.account.provider.service.AccountService;
 import com.surprising.account.provider.service.AccountCommandGateway;
 import com.surprising.account.provider.service.AccountCommandTimeoutException;
-import com.surprising.account.provider.service.PositionCacheUnavailableException;
 import com.surprising.account.provider.config.AccountProperties;
 import com.surprising.product.api.ProductLine;
 import java.nio.charset.StandardCharsets;
@@ -255,8 +254,6 @@ public class AccountController {
             return accountService.position(userId, symbol, marginMode, positionSide);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (PositionCacheUnavailableException ex) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         }
     }
 
@@ -279,8 +276,6 @@ public class AccountController {
             return accountService.positionMargin(userId, symbol, marginMode);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (PositionCacheUnavailableException ex) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         }
     }
 
@@ -305,8 +300,6 @@ public class AccountController {
             return accountService.positions(userId, positionSide);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (PositionCacheUnavailableException ex) {
-            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage(), ex);
         }
     }
 

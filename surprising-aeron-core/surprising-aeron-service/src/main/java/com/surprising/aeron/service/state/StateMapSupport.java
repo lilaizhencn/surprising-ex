@@ -1,0 +1,978 @@
+package com.surprising.aeron.service.state;
+
+import java.lang.ref.WeakReference;
+import java.util.AbstractMap;
+import java.util.AbstractSet;
+import java.util.ArrayDeque;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.Deque;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.NavigableMap;
+import java.util.NavigableSet;
+import java.util.Set;
+import java.util.SortedMap;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicReferenceArray;
+import java.util.function.Function;
+
+@SuppressWarnings("unchecked")
+public final class StateMapSupport {
+
+    private StateMapSupport() {
+    }
+
+    static <K, V> NavigableMap<K, V> freezeSorted(Map<K, V> values) {
+        if (values instanceof FrozenMap<?, ?>) {
+            return (NavigableMap<K, V>) values;
+        }
+        NavigableMap<K, V> sorted = values instanceof NavigableMap<?, ?> navigable
+                ? (NavigableMap<K, V>) navigable : new TreeMap<>(values);
+        if (sorted instanceof DeltaMap<?, ?> delta) {
+            ((DeltaMap<K, V>) delta).freezeLineage();
+        }
+        return new FrozenMap<>(sorted);
+    }
+
+    public static <K, V> NavigableMap<K, V> delta(Map<K, V> values) {
+        NavigableMap<K, V> base = raw(values);
+        if (base == null) {
+            base = new TreeMap<>(values);
+        }
+        if (base instanceof DeltaMap<?, ?> previous) {
+            DeltaMap<K, V> typed = (DeltaMap<K, V>) previous;
+            return new DeltaMap<>(typed.tree, typed);
+        }
+        return new DeltaMap<>(PersistentTreeMap.from(base), base);
+    }
+
+    static <K extends Comparable<? super K>, V> NavigableMap<K, V> deferredDelta(
+            Map<K, V> values, Set<K> changedKeys, Set<K> presentKeys, Function<K, V> loader) {
+        if (changedKeys == null || presentKeys == null || loader == null
+                || !changedKeys.containsAll(presentKeys)) {
+            throw new IllegalArgumentException("invalid deferred state delta");
+        }
+        if (changedKeys.isEmpty()) return freezeSorted(values);
+        NavigableMap<K, V> base = raw(values);
+        if (base == null) base = new TreeMap<>(values);
+        Set<K> orderedChangedKeys = changedKeys instanceof NavigableSet<?>
+                ? changedKeys : Collections.unmodifiableSet(new TreeSet<>(changedKeys));
+        return new LazyDeltaMap<>(base, orderedChangedKeys, presentKeys, loader, true);
+    }
+
+    static boolean isDelta(Map<?, ?> values) {
+        if (values instanceof DeltaMap<?, ?> || values instanceof LazyDeltaMap<?, ?>) return true;
+        return values instanceof FrozenMap<?, ?> frozen && isDelta(frozen.raw());
+    }
+
+    static boolean isDeferred(Map<?, ?> values) {
+        if (values instanceof LazyDeltaMap<?, ?> lazy) return lazy.deferred();
+        return values instanceof FrozenMap<?, ?> frozen && isDeferred(frozen.raw());
+    }
+
+    public static void requireDeltaLineage(Map<?, ?> before, Map<?, ?> after, String name) {
+        if (before == after || isDeltaDescendantOf(before, after)
+                || java.util.Objects.equals(before, after)) return;
+        throw new IllegalStateException("online runtime transition is not a delta: " + name);
+    }
+
+    static boolean isFrozen(Map<?, ?> values) {
+        return values instanceof FrozenMap<?, ?>;
+    }
+
+    static boolean retainsStrongDeltaBase(Map<?, ?> values) {
+        NavigableMap<?, ?> raw = rawUntyped(values);
+        return raw instanceof DeltaMap<?, ?> delta && delta.retainsStrongBase();
+    }
+
+    static <K> Set<K> changedKeys(Map<K, ?> values) {
+        if (values instanceof DeltaMap<?, ?> delta) return (Set<K>) delta.changedKeys();
+        if (values instanceof LazyDeltaMap<?, ?> delta) return (Set<K>) delta.changedKeys();
+        if (values instanceof FrozenMap<?, ?> frozen) return changedKeys((Map<K, ?>) frozen.raw());
+        return Set.of();
+    }
+
+    /**
+     * Returns every key changed between two related persistent-map versions. A single state transition may
+     * create several nested deltas for the same map, for example while pruning multiple orders of one user.
+     */
+    public static <K> Set<K> changedKeys(Map<K, ?> before, Map<K, ?> after) {
+        if (before == after) return Set.of();
+        NavigableMap<K, ?> rawBefore = (NavigableMap<K, ?>) rawUntyped(before);
+        NavigableMap<K, ?> current = (NavigableMap<K, ?>) rawUntyped(after);
+        if (rawBefore != null && (current instanceof DeltaMap<?, ?> || current instanceof LazyDeltaMap<?, ?>)) {
+            Set<K> changed = new TreeSet<>(rawBefore.comparator());
+            while (current instanceof DeltaMap<?, ?> || current instanceof LazyDeltaMap<?, ?>) {
+                NavigableMap<K, ?> base;
+                if (current instanceof DeltaMap<?, ?> delta) {
+                    changed.addAll((Set<K>) delta.changedKeys());
+                    base = (NavigableMap<K, ?>) delta.base();
+                } else {
+                    LazyDeltaMap<?, ?> delta = (LazyDeltaMap<?, ?>) current;
+                    changed.addAll((Set<K>) delta.changedKeys());
+                    base = (NavigableMap<K, ?>) delta.base();
+                }
+                if (base == rawBefore) return Collections.unmodifiableSet(changed);
+                current = base;
+            }
+        }
+        Set<K> changed = new TreeSet<>(rawBefore == null ? null : rawBefore.comparator());
+        changed.addAll(before.keySet());
+        changed.addAll(after.keySet());
+        changed.removeIf(key -> java.util.Objects.equals(before.get(key), after.get(key)));
+        return Collections.unmodifiableSet(changed);
+    }
+
+    static boolean isDirectDeltaOf(Map<?, ?> before, Map<?, ?> after) {
+        if (before == after) return true;
+        NavigableMap<?, ?> rawBefore = rawUntyped(before);
+        NavigableMap<?, ?> rawAfter = rawUntyped(after);
+        if (rawAfter instanceof DeltaMap<?, ?> delta) return delta.base() == rawBefore;
+        return rawAfter instanceof LazyDeltaMap<?, ?> lazy && lazy.base() == rawBefore;
+    }
+
+    static boolean isDeltaDescendantOf(Map<?, ?> before, Map<?, ?> after) {
+        if (before == after) return true;
+        NavigableMap<?, ?> rawBefore = rawUntyped(before);
+        NavigableMap<?, ?> current = rawUntyped(after);
+        while (current instanceof DeltaMap<?, ?> || current instanceof LazyDeltaMap<?, ?>) {
+            NavigableMap<?, ?> base = current instanceof DeltaMap<?, ?> delta
+                    ? delta.base() : ((LazyDeltaMap<?, ?>) current).base();
+            if (base == rawBefore) return true;
+            current = base;
+        }
+        return false;
+    }
+
+    private static NavigableMap<?, ?> rawUntyped(Map<?, ?> values) {
+        if (values instanceof FrozenMap<?, ?> frozen) return frozen.raw();
+        return values instanceof NavigableMap<?, ?> navigable ? navigable : null;
+    }
+
+    private static <K, V> NavigableMap<K, V> raw(Map<K, V> values) {
+        if (values instanceof FrozenMap<?, ?> frozen) {
+            return (NavigableMap<K, V>) frozen.raw();
+        }
+        return values instanceof NavigableMap<?, ?> navigable
+                ? (NavigableMap<K, V>) navigable : null;
+    }
+
+    private static final class FrozenMap<K, V> extends AbstractMap<K, V> implements NavigableMap<K, V> {
+        private final NavigableMap<K, V> raw;
+        private final NavigableMap<K, V> delegate;
+
+        private FrozenMap(NavigableMap<K, V> raw) {
+            this.raw = raw;
+            this.delegate = Collections.unmodifiableNavigableMap(raw);
+        }
+
+        private NavigableMap<K, V> raw() {
+            return raw;
+        }
+
+        @Override
+        public int size() { return delegate.size(); }
+
+        @Override
+        public boolean isEmpty() { return delegate.isEmpty(); }
+
+        @Override
+        public boolean containsKey(Object key) { return delegate.containsKey(key); }
+
+        @Override
+        public boolean containsValue(Object value) { return delegate.containsValue(value); }
+
+        @Override
+        public V get(Object key) { return delegate.get(key); }
+
+        @Override
+        public Set<Entry<K, V>> entrySet() { return delegate.entrySet(); }
+
+        @Override
+        public NavigableSet<K> keySet() { return delegate.navigableKeySet(); }
+
+        @Override
+        public Comparator<? super K> comparator() { return delegate.comparator(); }
+
+        @Override
+        public Entry<K, V> lowerEntry(K key) { return delegate.lowerEntry(key); }
+
+        @Override
+        public K lowerKey(K key) { return delegate.lowerKey(key); }
+
+        @Override
+        public Entry<K, V> floorEntry(K key) { return delegate.floorEntry(key); }
+
+        @Override
+        public K floorKey(K key) { return delegate.floorKey(key); }
+
+        @Override
+        public Entry<K, V> ceilingEntry(K key) { return delegate.ceilingEntry(key); }
+
+        @Override
+        public K ceilingKey(K key) { return delegate.ceilingKey(key); }
+
+        @Override
+        public Entry<K, V> higherEntry(K key) { return delegate.higherEntry(key); }
+
+        @Override
+        public K higherKey(K key) { return delegate.higherKey(key); }
+
+        @Override
+        public Entry<K, V> firstEntry() { return delegate.firstEntry(); }
+
+        @Override
+        public Entry<K, V> lastEntry() { return delegate.lastEntry(); }
+
+        @Override
+        public Entry<K, V> pollFirstEntry() { throw new UnsupportedOperationException("state map is immutable"); }
+
+        @Override
+        public Entry<K, V> pollLastEntry() { throw new UnsupportedOperationException("state map is immutable"); }
+
+        @Override
+        public NavigableMap<K, V> descendingMap() { return delegate.descendingMap(); }
+
+        @Override
+        public NavigableSet<K> navigableKeySet() { return delegate.navigableKeySet(); }
+
+        @Override
+        public NavigableSet<K> descendingKeySet() { return delegate.descendingKeySet(); }
+
+        @Override
+        public NavigableMap<K, V> subMap(K fromKey, boolean fromInclusive, K toKey, boolean toInclusive) {
+            return delegate.subMap(fromKey, fromInclusive, toKey, toInclusive);
+        }
+
+        @Override
+        public NavigableMap<K, V> headMap(K toKey, boolean inclusive) { return delegate.headMap(toKey, inclusive); }
+
+        @Override
+        public NavigableMap<K, V> tailMap(K fromKey, boolean inclusive) { return delegate.tailMap(fromKey, inclusive); }
+
+        @Override
+        public SortedMap<K, V> subMap(K fromKey, K toKey) { return delegate.subMap(fromKey, toKey); }
+
+        @Override
+        public SortedMap<K, V> headMap(K toKey) { return delegate.headMap(toKey); }
+
+        @Override
+        public SortedMap<K, V> tailMap(K fromKey) { return delegate.tailMap(fromKey); }
+
+        @Override
+        public K firstKey() { return delegate.firstKey(); }
+
+        @Override
+        public K lastKey() { return delegate.lastKey(); }
+    }
+
+    private static final class LazyDeltaMap<K extends Comparable<? super K>, V>
+            extends AbstractMap<K, V> implements NavigableMap<K, V> {
+        private final NavigableMap<K, V> base;
+        private final Set<K> changedKeys;
+        private final Set<K> presentKeys;
+        private final Function<K, V> loader;
+        private final boolean deferred;
+        private final int size;
+        private final Object[] changedKeysByIndex;
+        private final boolean[] presentByIndex;
+        private final AtomicReferenceArray<Object> resolvedValues;
+        private volatile NavigableMap<K, V> materialized;
+
+        private LazyDeltaMap(NavigableMap<K, V> base, Set<K> changedKeys, Set<K> presentKeys,
+                             Function<K, V> loader, boolean deferred) {
+            this.base = base;
+            this.changedKeys = changedKeys;
+            this.presentKeys = presentKeys;
+            this.loader = loader;
+            this.deferred = deferred;
+            changedKeysByIndex = changedKeys.toArray();
+            presentByIndex = new boolean[changedKeysByIndex.length];
+            resolvedValues = new AtomicReferenceArray<>(changedKeysByIndex.length);
+            int nextSize = base.size();
+            for (int index = 0; index < changedKeysByIndex.length; index++) {
+                K key = (K) changedKeysByIndex[index];
+                boolean existed = base.containsKey(key);
+                boolean exists = this.presentKeys.contains(key);
+                presentByIndex[index] = exists;
+                if (existed && !exists) nextSize--;
+                else if (!existed && exists) nextSize++;
+            }
+            size = nextSize;
+        }
+
+        private NavigableMap<K, V> base() {
+            return base;
+        }
+
+        private Set<K> changedKeys() {
+            return changedKeys;
+        }
+
+        private boolean deferred() {
+            return deferred;
+        }
+
+        private NavigableMap<K, V> materialized() {
+            NavigableMap<K, V> current = materialized;
+            if (current != null) return current;
+            TreeMap<K, V> next = new TreeMap<>(base.comparator());
+            next.putAll(base);
+            for (int index = 0; index < changedKeysByIndex.length; index++) {
+                K key = (K) changedKeysByIndex[index];
+                V value = presentByIndex[index] ? resolvedValue(index, key) : null;
+                if (value == null) next.remove(key); else next.put(key, value);
+            }
+            current = Collections.unmodifiableNavigableMap(next);
+            materialized = current;
+            return current;
+        }
+
+        @Override
+        public V get(Object key) {
+            int index = changedIndex(key);
+            if (index < 0) return base.get(key);
+            return presentByIndex[index] ? resolvedValue(index, (K) key) : null;
+        }
+
+        @Override
+        public boolean containsKey(Object key) {
+            int index = changedIndex(key);
+            return index < 0 ? base.containsKey(key) : presentByIndex[index];
+        }
+
+        private V resolvedValue(int index, K key) {
+            Object current = resolvedValues.get(index);
+            if (current != null) return (V) current;
+            synchronized (resolvedValues) {
+                current = resolvedValues.get(index);
+                if (current == null) {
+                    current = java.util.Objects.requireNonNull(loader.apply(key),
+                            "deferred state value is required");
+                    resolvedValues.set(index, current);
+                }
+            }
+            return (V) current;
+        }
+
+        private int changedIndex(Object key) {
+            if (key == null) return -1;
+            K candidate = (K) key;
+            Comparator<? super K> comparator = base.comparator();
+            int low = 0;
+            int high = changedKeysByIndex.length - 1;
+            while (low <= high) {
+                int middle = (low + high) >>> 1;
+                K current = (K) changedKeysByIndex[middle];
+                int comparison = comparator == null
+                        ? ((Comparable<? super K>) current).compareTo(candidate)
+                        : comparator.compare(current, candidate);
+                if (comparison < 0) low = middle + 1;
+                else if (comparison > 0) high = middle - 1;
+                else return middle;
+            }
+            return -1;
+        }
+
+        @Override
+        public int size() {
+            return size;
+        }
+
+        @Override
+        public Set<Entry<K, V>> entrySet() { return materialized().entrySet(); }
+
+        @Override
+        public Comparator<? super K> comparator() { return base.comparator(); }
+
+        @Override
+        public Entry<K, V> lowerEntry(K key) { return materialized().lowerEntry(key); }
+
+        @Override
+        public K lowerKey(K key) { return materialized().lowerKey(key); }
+
+        @Override
+        public Entry<K, V> floorEntry(K key) { return materialized().floorEntry(key); }
+
+        @Override
+        public K floorKey(K key) { return materialized().floorKey(key); }
+
+        @Override
+        public Entry<K, V> ceilingEntry(K key) { return materialized().ceilingEntry(key); }
+
+        @Override
+        public K ceilingKey(K key) { return materialized().ceilingKey(key); }
+
+        @Override
+        public Entry<K, V> higherEntry(K key) { return materialized().higherEntry(key); }
+
+        @Override
+        public K higherKey(K key) { return materialized().higherKey(key); }
+
+        @Override
+        public Entry<K, V> firstEntry() { return materialized().firstEntry(); }
+
+        @Override
+        public Entry<K, V> lastEntry() { return materialized().lastEntry(); }
+
+        @Override
+        public Entry<K, V> pollFirstEntry() { throw new UnsupportedOperationException("state map is immutable"); }
+
+        @Override
+        public Entry<K, V> pollLastEntry() { throw new UnsupportedOperationException("state map is immutable"); }
+
+        @Override
+        public NavigableMap<K, V> descendingMap() { return materialized().descendingMap(); }
+
+        @Override
+        public NavigableSet<K> navigableKeySet() { return materialized().navigableKeySet(); }
+
+        @Override
+        public NavigableSet<K> descendingKeySet() { return materialized().descendingKeySet(); }
+
+        @Override
+        public NavigableMap<K, V> subMap(K fromKey, boolean fromInclusive, K toKey, boolean toInclusive) {
+            return materialized().subMap(fromKey, fromInclusive, toKey, toInclusive);
+        }
+
+        @Override
+        public NavigableMap<K, V> headMap(K toKey, boolean inclusive) {
+            return materialized().headMap(toKey, inclusive);
+        }
+
+        @Override
+        public NavigableMap<K, V> tailMap(K fromKey, boolean inclusive) {
+            return materialized().tailMap(fromKey, inclusive);
+        }
+
+        @Override
+        public SortedMap<K, V> subMap(K fromKey, K toKey) { return materialized().subMap(fromKey, toKey); }
+
+        @Override
+        public SortedMap<K, V> headMap(K toKey) { return materialized().headMap(toKey); }
+
+        @Override
+        public SortedMap<K, V> tailMap(K fromKey) { return materialized().tailMap(fromKey); }
+
+        @Override
+        public K firstKey() { return materialized().firstKey(); }
+
+        @Override
+        public K lastKey() { return materialized().lastKey(); }
+    }
+
+    private static final class DeltaMap<K, V> extends AbstractMap<K, V> implements NavigableMap<K, V> {
+        private NavigableMap<K, V> base;
+        private WeakReference<NavigableMap<K, V>> lineageBase;
+        private final TreeSet<K> changedKeys;
+        private PersistentTreeMap<K, V> tree;
+        private boolean frozen;
+
+        private DeltaMap(PersistentTreeMap<K, V> tree, NavigableMap<K, V> base) {
+            this.tree = tree;
+            this.base = base;
+            this.changedKeys = new TreeSet<>(tree.comparator());
+        }
+
+        private NavigableMap<K, V> base() {
+            NavigableMap<K, V> current = base;
+            if (current != null) return current;
+            current = lineageBase.get();
+            return current == null ? tree : current;
+        }
+
+        private void freezeLineage() {
+            if (frozen) return;
+            NavigableMap<K, V> lineage = base;
+            while (lineage instanceof DeltaMap<?, ?> delta && !delta.frozen) {
+                DeltaMap<K, V> previous = (DeltaMap<K, V>) delta;
+                changedKeys.addAll(previous.changedKeys);
+                lineage = previous.base;
+            }
+            lineageBase = new WeakReference<>(lineage);
+            base = null;
+            frozen = true;
+        }
+
+        private boolean retainsStrongBase() {
+            return base != null;
+        }
+
+        private Set<K> changedKeys() {
+            return Collections.unmodifiableSet(changedKeys);
+        }
+
+        @Override
+        public V get(Object key) { return tree.get(key); }
+
+        @Override
+        public boolean containsKey(Object key) { return tree.containsKey(key); }
+
+        @Override
+        public int size() { return tree.size(); }
+
+        @Override
+        public V put(K key, V value) {
+            if (key == null || value == null) throw new NullPointerException("state map does not allow null");
+            V previous = tree.get(key);
+            if (java.util.Objects.equals(previous, value)) return previous;
+            tree = tree.withPut(key, value, previous != null);
+            changedKeys.add(key);
+            return previous;
+        }
+
+        @Override
+        public V remove(Object key) {
+            if (!tree.containsKey(key)) return null;
+            V previous = tree.get(key);
+            tree = tree.without(key);
+            changedKeys.add((K) key);
+            return previous;
+        }
+
+        @Override
+        public Set<Entry<K, V>> entrySet() { return tree.entrySet(); }
+
+        @Override
+        public Comparator<? super K> comparator() { return tree.comparator(); }
+
+        @Override
+        public Entry<K, V> lowerEntry(K key) { return tree.lowerEntry(key); }
+
+        @Override
+        public K lowerKey(K key) { return tree.lowerKey(key); }
+
+        @Override
+        public Entry<K, V> floorEntry(K key) { return tree.floorEntry(key); }
+
+        @Override
+        public K floorKey(K key) { return tree.floorKey(key); }
+
+        @Override
+        public Entry<K, V> ceilingEntry(K key) { return tree.ceilingEntry(key); }
+
+        @Override
+        public K ceilingKey(K key) { return tree.ceilingKey(key); }
+
+        @Override
+        public Entry<K, V> higherEntry(K key) { return tree.higherEntry(key); }
+
+        @Override
+        public K higherKey(K key) { return tree.higherKey(key); }
+
+        @Override
+        public Entry<K, V> firstEntry() { return tree.firstEntry(); }
+
+        @Override
+        public Entry<K, V> lastEntry() { return tree.lastEntry(); }
+
+        @Override
+        public Entry<K, V> pollFirstEntry() { throw new UnsupportedOperationException("state map is immutable"); }
+
+        @Override
+        public Entry<K, V> pollLastEntry() { throw new UnsupportedOperationException("state map is immutable"); }
+
+        @Override
+        public NavigableMap<K, V> descendingMap() { return tree.materialized().descendingMap(); }
+
+        @Override
+        public NavigableSet<K> navigableKeySet() { return tree.materialized().navigableKeySet(); }
+
+        @Override
+        public NavigableSet<K> descendingKeySet() { return tree.materialized().descendingKeySet(); }
+
+        @Override
+        public NavigableMap<K, V> subMap(K fromKey, boolean fromInclusive, K toKey, boolean toInclusive) {
+            return tree.materialized().subMap(fromKey, fromInclusive, toKey, toInclusive);
+        }
+
+        @Override
+        public NavigableMap<K, V> headMap(K toKey, boolean inclusive) {
+            return tree.materialized().headMap(toKey, inclusive);
+        }
+
+        @Override
+        public NavigableMap<K, V> tailMap(K fromKey, boolean inclusive) {
+            return tree.materialized().tailMap(fromKey, inclusive);
+        }
+
+        @Override
+        public SortedMap<K, V> subMap(K fromKey, K toKey) { return tree.materialized().subMap(fromKey, toKey); }
+
+        @Override
+        public SortedMap<K, V> headMap(K toKey) { return tree.materialized().headMap(toKey); }
+
+        @Override
+        public SortedMap<K, V> tailMap(K fromKey) { return tree.materialized().tailMap(fromKey); }
+
+        @Override
+        public K firstKey() { return tree.firstKey(); }
+
+        @Override
+        public K lastKey() { return tree.lastKey(); }
+    }
+
+    private static final class PersistentTreeMap<K, V> extends AbstractMap<K, V>
+            implements NavigableMap<K, V> {
+        private final Node<K, V> root;
+        private final Comparator<? super K> comparator;
+        private final int size;
+
+        private PersistentTreeMap(Node<K, V> root, Comparator<? super K> comparator, int size) {
+            this.root = root;
+            this.comparator = comparator;
+            this.size = size;
+        }
+
+        private static <K, V> PersistentTreeMap<K, V> from(Map<K, V> source) {
+            Comparator<? super K> comparator = source instanceof SortedMap<?, ?> sorted
+                    ? ((SortedMap<K, V>) sorted).comparator() : null;
+            Iterator<Entry<K, V>> entries = source.entrySet().iterator();
+            Node<K, V> root = balanced(entries, source.size());
+            if (entries.hasNext()) throw new IllegalStateException("state map size changed during projection");
+            return new PersistentTreeMap<>(root, comparator, source.size());
+        }
+
+        private static <K, V> Node<K, V> balanced(Iterator<Entry<K, V>> entries, int size) {
+            if (size == 0) return null;
+            int leftSize = size >>> 1;
+            Node<K, V> left = balanced(entries, leftSize);
+            if (!entries.hasNext()) throw new IllegalStateException("state map size changed during projection");
+            Entry<K, V> entry = entries.next();
+            Node<K, V> right = balanced(entries, size - leftSize - 1);
+            return new Node<>(entry.getKey(), entry.getValue(), left, right);
+        }
+
+        private PersistentTreeMap<K, V> withPut(K key, V value, boolean existed) {
+            Node<K, V> next = insert(root, key, value);
+            if (next == root) return this;
+            int nextSize = existed ? size : Math.incrementExact(size);
+            return new PersistentTreeMap<>(next, comparator, nextSize);
+        }
+
+        private PersistentTreeMap<K, V> without(Object key) {
+            Node<K, V> next = delete(root, (K) key);
+            return next == root ? this : new PersistentTreeMap<>(next, comparator, Math.decrementExact(size));
+        }
+
+        private int compare(K left, K right) {
+            return comparator == null
+                    ? ((Comparable<? super K>) left).compareTo(right)
+                    : comparator.compare(left, right);
+        }
+
+        private Node<K, V> insert(Node<K, V> node, K key, V value) {
+            if (node == null) return new Node<>(key, value, null, null);
+            int comparison = compare(key, node.key);
+            if (comparison == 0) {
+                return java.util.Objects.equals(value, node.value)
+                        ? node : new Node<>(key, value, node.left, node.right);
+            }
+            if (comparison < 0) {
+                Node<K, V> left = insert(node.left, key, value);
+                return left == node.left ? node
+                        : balance(new Node<>(node.key, node.value, left, node.right));
+            }
+            Node<K, V> right = insert(node.right, key, value);
+            return right == node.right ? node
+                    : balance(new Node<>(node.key, node.value, node.left, right));
+        }
+
+        private Node<K, V> delete(Node<K, V> node, K key) {
+            if (node == null) return null;
+            int comparison = compare(key, node.key);
+            if (comparison < 0) {
+                Node<K, V> left = delete(node.left, key);
+                return left == node.left ? node
+                        : balance(new Node<>(node.key, node.value, left, node.right));
+            }
+            if (comparison > 0) {
+                Node<K, V> right = delete(node.right, key);
+                return right == node.right ? node
+                        : balance(new Node<>(node.key, node.value, node.left, right));
+            }
+            if (node.left == null) return node.right;
+            if (node.right == null) return node.left;
+            Node<K, V> successor = minimum(node.right);
+            return balance(new Node<>(successor.key, successor.value, node.left, deleteMinimum(node.right)));
+        }
+
+        private static <K, V> Node<K, V> deleteMinimum(Node<K, V> node) {
+            if (node.left == null) return node.right;
+            return balance(new Node<>(node.key, node.value, deleteMinimum(node.left), node.right));
+        }
+
+        private static <K, V> Node<K, V> minimum(Node<K, V> node) {
+            Node<K, V> current = node;
+            while (current.left != null) current = current.left;
+            return current;
+        }
+
+        private static <K, V> Node<K, V> balance(Node<K, V> node) {
+            int factor = height(node.left) - height(node.right);
+            if (factor > 1) {
+                if (height(node.left.left) < height(node.left.right)) {
+                    Node<K, V> left = rotateLeft(node.left);
+                    node = new Node<>(node.key, node.value, left, node.right);
+                }
+                return rotateRight(node);
+            }
+            if (factor < -1) {
+                if (height(node.right.right) < height(node.right.left)) {
+                    Node<K, V> right = rotateRight(node.right);
+                    node = new Node<>(node.key, node.value, node.left, right);
+                }
+                return rotateLeft(node);
+            }
+            return node;
+        }
+
+        private static <K, V> Node<K, V> rotateLeft(Node<K, V> node) {
+            Node<K, V> right = node.right;
+            Node<K, V> moved = right.left;
+            return new Node<>(right.key, right.value,
+                    new Node<>(node.key, node.value, node.left, moved), right.right);
+        }
+
+        private static <K, V> Node<K, V> rotateRight(Node<K, V> node) {
+            Node<K, V> left = node.left;
+            Node<K, V> moved = left.right;
+            return new Node<>(left.key, left.value,
+                    left.left, new Node<>(node.key, node.value, moved, node.right));
+        }
+
+        private static int height(Node<?, ?> node) { return node == null ? 0 : node.height; }
+
+        private NavigableMap<K, V> materialized() {
+            TreeMap<K, V> values = new TreeMap<>(comparator);
+            values.putAll(this);
+            return values;
+        }
+
+        private Entry<K, V> entry(Node<K, V> node) { return node; }
+
+        private Node<K, V> seek(K key, boolean lower, boolean inclusive) {
+            Node<K, V> current = root;
+            Node<K, V> candidate = null;
+            while (current != null) {
+                int comparison = compare(key, current.key);
+                boolean take = lower
+                        ? comparison > 0 || (inclusive && comparison == 0)
+                        : comparison < 0 || (inclusive && comparison == 0);
+                if (take) {
+                    candidate = current;
+                    current = lower ? current.right : current.left;
+                } else {
+                    current = lower ? current.left : current.right;
+                }
+            }
+            return candidate;
+        }
+
+        @Override
+        public int size() { return size; }
+
+        @Override
+        public boolean isEmpty() { return root == null; }
+
+        @Override
+        public boolean containsKey(Object key) { return find((K) key) != null; }
+
+        @Override
+        public boolean containsValue(Object value) {
+            for (Entry<K, V> entry : entrySet()) {
+                if (java.util.Objects.equals(entry.getValue(), value)) return true;
+            }
+            return false;
+        }
+
+        @Override
+        public V get(Object key) {
+            Node<K, V> node = find((K) key);
+            return node == null ? null : node.value;
+        }
+
+        private Node<K, V> find(K key) {
+            Node<K, V> current = root;
+            while (current != null) {
+                int comparison = compare(key, current.key);
+                if (comparison == 0) return current;
+                current = comparison < 0 ? current.left : current.right;
+            }
+            return null;
+        }
+
+        @Override
+        public Set<Entry<K, V>> entrySet() {
+            return new AbstractSet<>() {
+                @Override
+                public Iterator<Entry<K, V>> iterator() {
+                    return new Iterator<>() {
+                        private final Deque<Node<K, V>> stack = initialize();
+
+                        private Deque<Node<K, V>> initialize() {
+                            Deque<Node<K, V>> values = new ArrayDeque<>();
+                            pushLeft(root, values);
+                            return values;
+                        }
+
+                        private void pushLeft(Node<K, V> node, Deque<Node<K, V>> values) {
+                            Node<K, V> current = node;
+                            while (current != null) {
+                                values.push(current);
+                                current = current.left;
+                            }
+                        }
+
+                        @Override
+                        public boolean hasNext() { return !stack.isEmpty(); }
+
+                        @Override
+                        public Entry<K, V> next() {
+                            if (stack.isEmpty()) throw new java.util.NoSuchElementException();
+                            Node<K, V> node = stack.pop();
+                            pushLeft(node.right, stack);
+                            return node;
+                        }
+                    };
+                }
+
+                @Override
+                public int size() { return PersistentTreeMap.this.size(); }
+            };
+        }
+
+        @Override
+        public Comparator<? super K> comparator() { return comparator; }
+
+        @Override
+        public Entry<K, V> lowerEntry(K key) { return entry(seek(key, true, false)); }
+
+        @Override
+        public K lowerKey(K key) { return keyOf(lowerEntry(key)); }
+
+        @Override
+        public Entry<K, V> floorEntry(K key) { return entry(seek(key, true, true)); }
+
+        @Override
+        public K floorKey(K key) { return keyOf(floorEntry(key)); }
+
+        @Override
+        public Entry<K, V> ceilingEntry(K key) { return entry(seek(key, false, true)); }
+
+        @Override
+        public K ceilingKey(K key) { return keyOf(ceilingEntry(key)); }
+
+        @Override
+        public Entry<K, V> higherEntry(K key) { return entry(seek(key, false, false)); }
+
+        @Override
+        public K higherKey(K key) { return keyOf(higherEntry(key)); }
+
+        private K keyOf(Entry<K, V> entry) { return entry == null ? null : entry.getKey(); }
+
+        @Override
+        public Entry<K, V> firstEntry() { return entry(root == null ? null : minimum(root)); }
+
+        @Override
+        public Entry<K, V> lastEntry() {
+            if (root == null) return null;
+            Node<K, V> current = root;
+            while (current.right != null) current = current.right;
+            return entry(current);
+        }
+
+        @Override
+        public K firstKey() {
+            Entry<K, V> entry = firstEntry();
+            if (entry == null) throw new java.util.NoSuchElementException();
+            return entry.getKey();
+        }
+
+        @Override
+        public K lastKey() {
+            Entry<K, V> entry = lastEntry();
+            if (entry == null) throw new java.util.NoSuchElementException();
+            return entry.getKey();
+        }
+
+        @Override
+        public Entry<K, V> pollFirstEntry() { throw new UnsupportedOperationException("state map is immutable"); }
+
+        @Override
+        public Entry<K, V> pollLastEntry() { throw new UnsupportedOperationException("state map is immutable"); }
+
+        @Override
+        public NavigableMap<K, V> descendingMap() { return materialized().descendingMap(); }
+
+        @Override
+        public NavigableSet<K> navigableKeySet() { return materialized().navigableKeySet(); }
+
+        @Override
+        public NavigableSet<K> descendingKeySet() { return materialized().descendingKeySet(); }
+
+        @Override
+        public NavigableMap<K, V> subMap(K fromKey, boolean fromInclusive, K toKey, boolean toInclusive) {
+            return materialized().subMap(fromKey, fromInclusive, toKey, toInclusive);
+        }
+
+        @Override
+        public NavigableMap<K, V> headMap(K toKey, boolean inclusive) {
+            return materialized().headMap(toKey, inclusive);
+        }
+
+        @Override
+        public NavigableMap<K, V> tailMap(K fromKey, boolean inclusive) {
+            return materialized().tailMap(fromKey, inclusive);
+        }
+
+        @Override
+        public SortedMap<K, V> subMap(K fromKey, K toKey) { return materialized().subMap(fromKey, toKey); }
+
+        @Override
+        public SortedMap<K, V> headMap(K toKey) { return materialized().headMap(toKey); }
+
+        @Override
+        public SortedMap<K, V> tailMap(K fromKey) { return materialized().tailMap(fromKey); }
+
+        private static final class Node<K, V> implements Entry<K, V> {
+            private final K key;
+            private final V value;
+            private final Node<K, V> left;
+            private final Node<K, V> right;
+            private final int height;
+
+            private Node(K key, V value, Node<K, V> left, Node<K, V> right) {
+                this.key = key;
+                this.value = value;
+                this.left = left;
+                this.right = right;
+                this.height = 1 + Math.max(height(left), height(right));
+            }
+
+            @Override
+            public K getKey() { return key; }
+
+            @Override
+            public V getValue() { return value; }
+
+            @Override
+            public V setValue(V value) { throw new UnsupportedOperationException("state map is immutable"); }
+
+            @Override
+            public boolean equals(Object other) {
+                return other instanceof Entry<?, ?> entry
+                        && java.util.Objects.equals(key, entry.getKey())
+                        && java.util.Objects.equals(value, entry.getValue());
+            }
+
+            @Override
+            public int hashCode() {
+                return java.util.Objects.hashCode(key) ^ java.util.Objects.hashCode(value);
+            }
+
+        }
+    }
+}

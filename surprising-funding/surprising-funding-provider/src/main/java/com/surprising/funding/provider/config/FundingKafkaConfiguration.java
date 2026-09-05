@@ -43,48 +43,15 @@ public class FundingKafkaConfiguration {
     }
 
     @Bean
-    public ProducerFactory<String, String> fundingAccountCommandProducerFactory(FundingProperties properties) {
-        Map<String, Object> config = new HashMap<>();
-        config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, properties.getKafka().getBootstrapServers());
-        config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        config.put(ProducerConfig.ACKS_CONFIG, "all");
-        config.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
-        config.put(ProducerConfig.COMPRESSION_TYPE_CONFIG, "zstd");
-        config.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 5);
-        return new DefaultKafkaProducerFactory<>(config);
-    }
-
-    @Bean
-    public KafkaTemplate<String, String> fundingAccountCommandKafkaTemplate(
-            @Qualifier("fundingAccountCommandProducerFactory")
-            ProducerFactory<String, String> fundingAccountCommandProducerFactory) {
-        return new KafkaTemplate<>(fundingAccountCommandProducerFactory);
-    }
-
-    @Bean
     public ConsumerFactory<String, String> fundingRateCacheConsumerFactory(FundingProperties properties) {
         return new DefaultKafkaConsumerFactory<>(consumerProperties(
                 properties, properties.getKafka().getCacheGroupId()));
     }
 
     @Bean
-    public ConsumerFactory<String, String> fundingCommandResultsConsumerFactory(FundingProperties properties) {
-        return new DefaultKafkaConsumerFactory<>(consumerProperties(
-                properties, properties.getKafka().getCommandResultsGroupId()));
-    }
-
-    @Bean
     public ConsumerFactory<String, String> fundingInstrumentSnapshotConsumerFactory(FundingProperties properties) {
         return new DefaultKafkaConsumerFactory<>(consumerProperties(
                 properties, properties.getKafka().getInstrumentSnapshotGroupId()));
-    }
-
-    @Bean
-    public ConsumerFactory<String, String> fundingAccountStateSnapshotConsumerFactory(
-            FundingProperties properties) {
-        return new DefaultKafkaConsumerFactory<>(consumerProperties(
-                properties, properties.getKafka().getAccountStateSnapshotGroupId()));
     }
 
     private Map<String, Object> consumerProperties(FundingProperties properties, String groupId) {
@@ -111,18 +78,6 @@ public class FundingKafkaConfiguration {
         return factory;
     }
 
-    @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, String> fundingCommandResultsKafkaListenerContainerFactory(
-            @Qualifier("fundingCommandResultsConsumerFactory") ConsumerFactory<String, String> consumerFactory,
-            FundingProperties properties) {
-        ConcurrentKafkaListenerContainerFactory<String, String> factory = new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(consumerFactory);
-        factory.setConcurrency(Math.max(1, properties.getKafka().getCommandResultsConcurrency()));
-        factory.setBatchListener(true);
-        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.BATCH);
-        return factory;
-    }
-
     @Bean(name = "fundingInstrumentSnapshotKafkaListenerContainerFactory")
     public ConcurrentKafkaListenerContainerFactory<String, String>
     fundingInstrumentSnapshotKafkaListenerContainerFactory(
@@ -136,18 +91,4 @@ public class FundingKafkaConfiguration {
         return factory;
     }
 
-    @Bean(name = "fundingAccountStateSnapshotKafkaListenerContainerFactory")
-    public ConcurrentKafkaListenerContainerFactory<String, String>
-    fundingAccountStateSnapshotKafkaListenerContainerFactory(
-            @Qualifier("fundingAccountStateSnapshotConsumerFactory")
-            ConsumerFactory<String, String> consumerFactory) {
-        ConcurrentKafkaListenerContainerFactory<String, String> factory =
-                new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(consumerFactory);
-        factory.setBatchListener(true);
-        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.BATCH);
-        factory.setCommonErrorHandler(new org.springframework.kafka.listener.DefaultErrorHandler(
-                new org.springframework.util.backoff.FixedBackOff(1_000L, Long.MAX_VALUE)));
-        return factory;
-    }
 }

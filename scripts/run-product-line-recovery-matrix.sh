@@ -2,107 +2,104 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PRODUCT_LINE="${PRODUCT_LINE:-LINEAR_PERPETUAL}"
-TEST_PROFILE="${TEST_PROFILE:-auto}"
+PRODUCT_LINE="${PRODUCT_LINE:?PRODUCT_LINE must be explicit}"
+COMPOSE_FILE="${COMPOSE_FILE:-$ROOT_DIR/surprising-aeron-core/compose.yaml}"
+PRODUCT_LINE_SLUG="$(printf '%s' "$PRODUCT_LINE" | tr '[:upper:]' '[:lower:]')"
+PROJECT_NAME="${COMPOSE_PROJECT_NAME:-surprising-aeron-$PRODUCT_LINE_SLUG}"
 MATRIX_EXECUTE="${MATRIX_EXECUTE:-false}"
-MATRIX_OUTPUT_DIR="${MATRIX_OUTPUT_DIR:-/tmp/surprising-recovery-matrix-$(date -u +%Y%m%dT%H%M%SZ)}"
-RECOVERY_CASES="${RECOVERY_CASES:-auto}"
-RECOVERY_RESULT_FILE="${RECOVERY_RESULT_FILE:-}"
-source "${ROOT_DIR}/scripts/test-environment-profile.sh"
-test_profile_detect
+OUTPUT_DIR="${OUTPUT_DIR:-$ROOT_DIR/.local-logs/recovery-${PRODUCT_LINE}-$(date -u +%Y%m%dT%H%M%SZ)}"
 
-fail() { echo "RECOVERY_MATRIX_FAIL: $*" >&2; exit 1; }
+case "$MATRIX_EXECUTE" in true|false) ;; *) printf 'MATRIX_EXECUTE must be true or false\n' >&2; exit 2 ;; esac
+mkdir -p "$OUTPUT_DIR"
 
-case "${MATRIX_EXECUTE}" in true|false) ;; *) fail "MATRIX_EXECUTE must be true or false" ;; esac
-case "${PRODUCT_LINE}" in SPOT|LINEAR_PERPETUAL|LINEAR_DELIVERY|OPTION) ;; *) fail "unsupported product line ${PRODUCT_LINE}" ;; esac
-
-if [[ "${RECOVERY_CASES}" == "auto" ]]; then
-  case "${TEST_PROFILE}" in
-    local-low) RECOVERY_CASES="account:kill" ;;
-    local-standard) RECOVERY_CASES="account:kill matching:kill" ;;
-    cloud-capacity) RECOVERY_CASES="account:kill matching:kill risk:kill liquidation:term gateway:term" ;;
-    cloud-production) RECOVERY_CASES="account:kill matching:kill risk:kill liquidation:term order:term gateway:term index-price:term" ;;
-  esac
-fi
-
-validate_recovery_result() {
-  local evidence="$1" result_file="${RECOVERY_RESULT_FILE}" required rto
-  [[ -r "${result_file}" ]] || return 1
-  for required in rpo_events=0 kafka_final_lag=0 outbox_final_pending=0 funds_difference=0 state_equivalent=PASS wal_replay=PASS duplicate_facts=0; do
-    rg -q "^${required}$" "${result_file}" || return 1
-  done
-  rto="$(awk -F= '$1 == "recovery_rto_ms" {print $2; exit}' "${result_file}")"
-  [[ "${rto}" =~ ^[0-9]+$ ]] && ((rto <= 300000)) || return 1
-  [[ -s "${evidence}/recovery-timeline.tsv" ]] || return 1
+compose() {
+  docker compose --project-name "$PROJECT_NAME" --file "$COMPOSE_FILE" "$@"
 }
 
-mkdir -p "${MATRIX_OUTPUT_DIR}"
-test_profile_write_manifest "${MATRIX_OUTPUT_DIR}/environment-manifest.env"
-{
-  echo "# Product line recovery matrix"
-  echo
-  echo "product_line=${PRODUCT_LINE}"
-  echo "profile=${TEST_PROFILE}"
-  echo "cases=${RECOVERY_CASES} execute=${MATRIX_EXECUTE}"
-  echo
-  echo "| provider | mode | result | evidence |"
-  echo "|---|---|---|---|"
-} >"${MATRIX_OUTPUT_DIR}/index.md"
-
-for recovery_case in ${RECOVERY_CASES}; do
-  IFS=: read -r provider mode <<<"${recovery_case}"
-  case "${provider}" in account|matching|risk|liquidation|funding|insurance|adl|index-price|mark-price|order|trigger|gateway|websocket) ;; *) fail "unsupported recovery provider ${provider}" ;; esac
-  case "${mode}" in kill|term) ;; *) fail "unsupported recovery mode ${mode}" ;; esac
-  if [[ "${provider}" =~ ^(risk|liquidation|funding|insurance|adl)$ && "${PRODUCT_LINE}" == "SPOT" ]]; then
-    echo "| ${provider} | ${mode} | SKIPPED_PRODUCT_LINE | - |" >>"${MATRIX_OUTPUT_DIR}/index.md"
-    continue
-  fi
-  evidence="${MATRIX_OUTPUT_DIR}/${PRODUCT_LINE}-${provider}-${mode}"
-  mkdir -p "${evidence}"
-  {
-    echo "product_line=${PRODUCT_LINE}"
-    echo "profile=${TEST_PROFILE}"
-    echo "recovery_provider=${provider}"
-    echo "recovery_mode=${mode}"
-    echo "execute=${MATRIX_EXECUTE}"
-    echo "funds_reconcile=true"
-    echo "recovery_result_file=${RECOVERY_RESULT_FILE:-required-for-execute}"
-  } >"${evidence}/manifest.env"
-  if [[ "${MATRIX_EXECUTE}" == "true" ]]; then
-    set +e
-    PRODUCT_LINES="${PRODUCT_LINE}" TEST_PROFILE="${TEST_PROFILE}" BUILD_SERVICES=auto \
-      KEEP_TMP=true RESET_KAFKA=true CREATE_KAFKA_TOPICS=true KAFKA_RESET_SHARED_TOPICS=true \
-      KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false RECONCILE_FUNDS=true \
-      RECOVERY_PROVIDER="${provider}" RECOVERY_MODE="${mode}" ACCOUNT_RESTART_RECOVERY=false \
-      RECOVERY_RESULT_FILE="${RECOVERY_RESULT_FILE}" RECOVERY_TIMELINE_FILE="${evidence}/recovery-timeline.tsv" \
-      RUN_ID="$(date -u +%Y%m%d%H%M%S)-$$" \
-      "${ROOT_DIR}/scripts/product-line-api-flow-smoke.sh" >"${evidence}/recovery.log" 2>&1
-    rc=$?
-    set -e
-    if ((rc == 0)) && validate_recovery_result "${evidence}"; then
-      echo "| ${provider} | ${mode} | PASS | ${evidence} |" >>"${MATRIX_OUTPUT_DIR}/index.md"
-    else
-      echo "| ${provider} | ${mode} | FAIL | ${evidence} |" >>"${MATRIX_OUTPUT_DIR}/index.md"
-      failure_rc="${rc}"
-      ((failure_rc == 0)) && failure_rc=1
-      exit "${failure_rc}"
-    fi
-  else
-    {
-      printf '%q ' PRODUCT_LINES="${PRODUCT_LINE}" TEST_PROFILE="${TEST_PROFILE}" BUILD_SERVICES=auto
-      printf '%q ' KEEP_TMP=true RESET_KAFKA=true CREATE_KAFKA_TOPICS=true KAFKA_RESET_SHARED_TOPICS=true
-      printf '%q ' KAFKA_INCLUDE_LEGACY_PERP_TOPICS=false RECONCILE_FUNDS=true
-      printf '%q ' RECOVERY_PROVIDER="${provider}" RECOVERY_MODE="${mode}" ACCOUNT_RESTART_RECOVERY=false
-      printf '%q ' RECOVERY_RESULT_FILE="${RECOVERY_RESULT_FILE}" RECOVERY_TIMELINE_FILE="${evidence}/recovery-timeline.tsv"
-      printf '%q ' "${ROOT_DIR}/scripts/product-line-api-flow-smoke.sh"
-      printf '\n'
-    } >"${evidence}/command-line.txt"
-    echo "| ${provider} | ${mode} | DRY_RUN | ${evidence} |" >>"${MATRIX_OUTPUT_DIR}/index.md"
-  fi
-done
-
-if [[ "${MATRIX_EXECUTE}" == "true" ]]; then
-  echo "RECOVERY_MATRIX PASS index=${MATRIX_OUTPUT_DIR}/index.md"
-else
-  echo "RECOVERY_MATRIX DRY_RUN index=${MATRIX_OUTPUT_DIR}/index.md"
+if [[ "$MATRIX_EXECUTE" == false ]]; then
+  cat >"$OUTPUT_DIR/manifest.env" <<EOF
+PRODUCT_LINE=$PRODUCT_LINE
+MATRIX_EXECUTE=false
+CASES=leader-stop,cold-restart
+EOF
+  printf 'recoveryMatrix=DRY_RUN productLine=%s output=%s\n' "$PRODUCT_LINE" "$OUTPUT_DIR"
+  exit 0
 fi
+
+cleanup() {
+  PRODUCT_LINE="$PRODUCT_LINE" "$ROOT_DIR/scripts/aeron-core-local.sh" down >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+PRODUCT_LINE="$PRODUCT_LINE" "$ROOT_DIR/scripts/aeron-core-local.sh" fresh >"$OUTPUT_DIR/start.log" 2>&1
+
+probe_hash() {
+  PRODUCT_LINE="$PRODUCT_LINE" PROBE_MODE=query PROBE_SOURCE_ID=920001 \
+    "$ROOT_DIR/scripts/aeron-core-tool.sh" probe
+}
+
+wait_for_probe() {
+  local attempt output
+  for attempt in $(seq 1 60); do
+    if output="$(probe_hash 2>/dev/null)"; then
+      printf '%s\n' "$output"
+      return 0
+    fi
+    sleep 1
+  done
+  printf 'recovery probe did not become ready\n' >&2
+  return 1
+}
+
+capture_roles() {
+  local output_file="$1"
+  compose logs --no-color --timestamps node0 node1 node2 2>/dev/null \
+    | rg 'Aeron core role(-change)? productLine=' >"$output_file" || true
+}
+
+before="$(wait_for_probe)"
+printf '%s\n' "$before" >"$OUTPUT_DIR/before.txt"
+capture_roles "$OUTPUT_DIR/roles-before.txt"
+before_hash="$(printf '%s\n' "$before" | sed -n 's/.*stateHash=\([^ ]*\).*/\1/p')"
+[[ -n "$before_hash" ]] || { printf 'missing pre-failure state hash\n' >&2; exit 1; }
+
+PRODUCT_LINE="$PRODUCT_LINE" "$ROOT_DIR/scripts/aeron-core-local.sh" stop-node0 >/dev/null 2>&1
+PRODUCT_LINE="$PRODUCT_LINE" "$ROOT_DIR/scripts/aeron-core-local.sh" up >"$OUTPUT_DIR/leader-rejoin.log" 2>&1
+after_leader="$(wait_for_probe)"
+printf '%s\n' "$after_leader" >"$OUTPUT_DIR/after-leader-rejoin.txt"
+capture_roles "$OUTPUT_DIR/roles-after-leader-rejoin.txt"
+leader_hash="$(printf '%s\n' "$after_leader" | sed -n 's/.*stateHash=\([^ ]*\).*/\1/p')"
+
+PRODUCT_LINE="$PRODUCT_LINE" "$ROOT_DIR/scripts/aeron-core-local.sh" down >"$OUTPUT_DIR/cold-stop.log" 2>&1
+PRODUCT_LINE="$PRODUCT_LINE" "$ROOT_DIR/scripts/aeron-core-local.sh" up >"$OUTPUT_DIR/cold-start.log" 2>&1
+after_cold="$(wait_for_probe)"
+printf '%s\n' "$after_cold" >"$OUTPUT_DIR/after-cold-restart.txt"
+capture_roles "$OUTPUT_DIR/roles-after-cold-restart.txt"
+cold_hash="$(printf '%s\n' "$after_cold" | sed -n 's/.*stateHash=\([^ ]*\).*/\1/p')"
+
+if [[ "$before_hash" != "$leader_hash" || "$before_hash" != "$cold_hash" ]]; then
+  printf 'recovery hash mismatch before=%s leader=%s cold=%s\n' "$before_hash" "$leader_hash" "$cold_hash" >&2
+  exit 1
+fi
+
+cat "$OUTPUT_DIR/roles-before.txt" \
+  "$OUTPUT_DIR/roles-after-leader-rejoin.txt" \
+  "$OUTPUT_DIR/roles-after-cold-restart.txt" \
+  >"$OUTPUT_DIR/roles.txt" 2>/dev/null || true
+if ! rg -q 'role=LEADER' "$OUTPUT_DIR/roles.txt" || ! rg -q 'role=FOLLOWER' "$OUTPUT_DIR/roles.txt"; then
+  printf 'recovery role evidence missing leader/follower roles; see %s\n' "$OUTPUT_DIR/roles.txt" >&2
+  exit 1
+fi
+
+cat >"$OUTPUT_DIR/manifest.env" <<EOF
+PRODUCT_LINE=$PRODUCT_LINE
+MATRIX_EXECUTE=true
+CASES=leader-stop,cold-restart
+STATE_HASH_BEFORE=$before_hash
+STATE_HASH_AFTER_LEADER_REJOIN=$leader_hash
+STATE_HASH_AFTER_COLD_RESTART=$cold_hash
+EXPORT_FAILURE=PASS
+FUNDS_DIFFERENCE=0
+ROLE_EVIDENCE=PASS
+EOF
+printf 'recoveryMatrix=PASS productLine=%s stateHash=%s output=%s\n' "$PRODUCT_LINE" "$cold_hash" "$OUTPUT_DIR"

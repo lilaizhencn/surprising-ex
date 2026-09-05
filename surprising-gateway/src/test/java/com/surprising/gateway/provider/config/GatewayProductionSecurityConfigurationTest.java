@@ -45,7 +45,6 @@ class GatewayProductionSecurityConfigurationTest {
         properties.setDeploymentProfile("production");
 
         GatewayProperties.Security security = properties.getSecurity();
-        security.setAllowUserIdHeaderFallback(false);
         security.setRequireAdminMfa(true);
         security.setAdminIpAllowlist(List.of("10.0.0.0/8"));
         security.setTrustedProxyIpAllowlist(List.of("10.0.0.0/8"));
@@ -178,7 +177,6 @@ class GatewayProductionSecurityConfigurationTest {
 
         assertThat(properties.getDeploymentProfile()).isEqualTo("production");
         assertThat(properties.getSecurity().isRequireIdentityForPrivateRoutes()).isTrue();
-        assertThat(properties.getSecurity().isAllowUserIdHeaderFallback()).isFalse();
         assertThat(properties.getSecurity().isRequireAdminMfa()).isTrue();
         assertThat(properties.getSecurity().getAdminIpAllowlist()).containsExactly("10.0.0.0/8");
         assertThat(properties.getSecurity().getTrustedProxyIpAllowlist()).containsExactly("192.0.2.0/24");

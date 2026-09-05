@@ -1,5 +1,14 @@
--- Surprising Exchange initial PostgreSQL schema.
--- This project is new, so schema initialization is kept in one root SQL file.
+-- Surprising Exchange PostgreSQL production baseline.
+-- PostgreSQL 18+; execute once on an empty database with psql.
+-- This file contains the complete pre-launch schema and required seed data.
+-- After the first production release, never edit this baseline for upgrades;
+-- add an immutable versioned script under migrations/ instead.
+
+\set ON_ERROR_STOP on
+
+BEGIN;
+
+-- 01. Instrument definitions, lifecycle metadata and index sources.
 
 CREATE TABLE IF NOT EXISTS instruments (
     symbol                      TEXT NOT NULL,
@@ -369,25 +378,12 @@ CREATE TABLE IF NOT EXISTS instrument_lifecycle_drain_acks (
                          'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
     ),
     CONSTRAINT instrument_lifecycle_drain_component_check CHECK (
-        component IN ('ORDER', 'TRIGGER', 'ACCOUNT')
+        component IN ('ORDER', 'ACCOUNT')
     )
 );
 
 CREATE INDEX IF NOT EXISTS instrument_lifecycle_drain_ready_idx
     ON instrument_lifecycle_drain_acks (product_line, symbol, instrument_version);
-
-CREATE TABLE IF NOT EXISTS trading_trigger_instrument_lifecycle_fences (
-    product_line        TEXT NOT NULL,
-    symbol              TEXT NOT NULL,
-    instrument_version  BIGINT NOT NULL DEFAULT 0,
-    blocked             BOOLEAN NOT NULL DEFAULT FALSE,
-    updated_at          TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (product_line, symbol),
-    CONSTRAINT trading_trigger_instrument_lifecycle_fence_product_line_check CHECK (
-        product_line IN ('SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
-                         'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
-    )
-);
 
 INSERT INTO instruments (
     symbol, version, instrument_type, contract_type, base_asset, quote_asset, settle_asset,
@@ -495,6 +491,196 @@ INSERT INTO instrument_index_sources (
  'USDT', 'USDT', NULL, NULL, NULL, 'DISCOUNT', 'MULTIPLY', 500000,
  TRUE, 'wss://ws.kraken.com/v2', '{"method":"subscribe","params":{"channel":"ticker","symbol":["ETH/USDT"]}}', 'KRAKEN_TICKER', 1000000)
 ON CONFLICT (symbol, version, source) DO NOTHING;
+
+-- Complete launch catalog: twenty mainstream markets for each of the six ProductLines.
+-- BTC-USDT and ETH-USDT above remain the canonical U-margined perpetual symbols.
+CREATE TEMP TABLE surprising_launch_instruments (
+    product_line       TEXT NOT NULL,
+    symbol             TEXT NOT NULL,
+    instrument_type    TEXT NOT NULL,
+    contract_type      TEXT NOT NULL,
+    base_asset         TEXT NOT NULL,
+    quote_asset        TEXT NOT NULL,
+    settle_asset       TEXT NOT NULL,
+    contract_value_asset TEXT NOT NULL,
+    price_tick_units   BIGINT NOT NULL,
+    quantity_step_units BIGINT NOT NULL,
+    price_precision    INTEGER NOT NULL,
+    quantity_precision INTEGER NOT NULL,
+    expiry_time        TIMESTAMPTZ,
+    delivery_time      TIMESTAMPTZ,
+    underlying_symbol  TEXT,
+    strike_price_units BIGINT,
+    option_type        TEXT,
+    settlement_method  TEXT,
+    funding_interval_hours INTEGER NOT NULL,
+    PRIMARY KEY (product_line, symbol)
+) ON COMMIT DROP;
+
+WITH assets(base_asset, price_tick_units, quantity_step_units, price_precision,
+            quantity_precision, option_strike_units) AS (
+    VALUES
+        ('BTC', 10000000::BIGINT, 100000::BIGINT, 1, 3, 100000::BIGINT),
+        ('ETH', 1000000::BIGINT, 1000000::BIGINT, 2, 3, 10000::BIGINT),
+        ('SOL', 100000::BIGINT, 10000000::BIGINT, 3, 2, 1000::BIGINT),
+        ('XRP', 1000::BIGINT, 100000000::BIGINT, 5, 1, 10::BIGINT),
+        ('DOGE', 100::BIGINT, 100000000::BIGINT, 6, 1, 1::BIGINT),
+        ('BNB', 100000::BIGINT, 10000000::BIGINT, 3, 2, 2000::BIGINT),
+        ('ADA', 1000::BIGINT, 100000000::BIGINT, 5, 1, 10::BIGINT),
+        ('AVAX', 10000::BIGINT, 10000000::BIGINT, 4, 2, 500::BIGINT),
+        ('LINK', 10000::BIGINT, 10000000::BIGINT, 4, 2, 100::BIGINT),
+        ('DOT', 1000::BIGINT, 10000000::BIGINT, 4, 2, 50::BIGINT),
+        ('LTC', 10000::BIGINT, 1000000::BIGINT, 3, 3, 500::BIGINT),
+        ('BCH', 100000::BIGINT, 1000000::BIGINT, 2, 3, 2000::BIGINT),
+        ('TRX', 10::BIGINT, 100000000::BIGINT, 6, 1, 1::BIGINT),
+        ('TON', 1000::BIGINT, 10000000::BIGINT, 4, 2, 50::BIGINT),
+        ('SUI', 1000::BIGINT, 10000000::BIGINT, 4, 2, 50::BIGINT),
+        ('APT', 1000::BIGINT, 10000000::BIGINT, 4, 2, 100::BIGINT),
+        ('NEAR', 1000::BIGINT, 10000000::BIGINT, 4, 2, 50::BIGINT),
+        ('UNI', 1000::BIGINT, 10000000::BIGINT, 4, 2, 100::BIGINT),
+        ('AAVE', 100000::BIGINT, 1000000::BIGINT, 2, 3, 1000::BIGINT),
+        ('ETC', 10000::BIGINT, 10000000::BIGINT, 3, 2, 500::BIGINT)
+), product_lines(product_line, instrument_type, contract_type) AS (
+    VALUES
+        ('SPOT', 'SPOT', 'SPOT'),
+        ('LINEAR_PERPETUAL', 'PERPETUAL', 'LINEAR_PERPETUAL'),
+        ('INVERSE_PERPETUAL', 'PERPETUAL', 'INVERSE_PERPETUAL'),
+        ('LINEAR_DELIVERY', 'DELIVERY', 'LINEAR_DELIVERY'),
+        ('INVERSE_DELIVERY', 'DELIVERY', 'INVERSE_DELIVERY'),
+        ('OPTION', 'OPTION', 'VANILLA_OPTION')
+)
+INSERT INTO surprising_launch_instruments (
+    product_line, symbol, instrument_type, contract_type, base_asset, quote_asset,
+    settle_asset, contract_value_asset, price_tick_units, quantity_step_units,
+    price_precision, quantity_precision, expiry_time, delivery_time,
+    underlying_symbol, strike_price_units, option_type, settlement_method,
+    funding_interval_hours
+)
+SELECT p.product_line,
+       CASE p.product_line
+           WHEN 'SPOT' THEN a.base_asset || '-USDT-SPOT'
+           WHEN 'LINEAR_PERPETUAL' THEN a.base_asset || '-USDT'
+           WHEN 'INVERSE_PERPETUAL' THEN a.base_asset || '-USD-INVERSE-PERP'
+           WHEN 'LINEAR_DELIVERY' THEN a.base_asset || '-USDT-20271231'
+           WHEN 'INVERSE_DELIVERY' THEN a.base_asset || '-USD-INVERSE-20271231'
+           WHEN 'OPTION' THEN a.base_asset || '-USDT-20271231-' || a.option_strike_units || '-C'
+       END,
+       p.instrument_type,
+       p.contract_type,
+       a.base_asset,
+       CASE WHEN p.product_line IN ('INVERSE_PERPETUAL', 'INVERSE_DELIVERY') THEN 'USD' ELSE 'USDT' END,
+       CASE WHEN p.product_line IN ('INVERSE_PERPETUAL', 'INVERSE_DELIVERY') THEN a.base_asset ELSE 'USDT' END,
+       CASE WHEN p.product_line IN ('INVERSE_PERPETUAL', 'INVERSE_DELIVERY') THEN 'USD' ELSE 'USDT' END,
+       a.price_tick_units,
+       a.quantity_step_units,
+       a.price_precision,
+       a.quantity_precision,
+       CASE WHEN p.product_line IN ('LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+            THEN TIMESTAMPTZ '2027-12-31 08:00:00+00' END,
+       CASE WHEN p.product_line IN ('LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION')
+            THEN TIMESTAMPTZ '2027-12-31 08:05:00+00' END,
+       CASE WHEN p.product_line = 'OPTION' THEN a.base_asset || '-USDT-SPOT' END,
+       CASE WHEN p.product_line = 'OPTION' THEN a.option_strike_units END,
+       CASE WHEN p.product_line = 'OPTION' THEN 'CALL' END,
+       CASE WHEN p.product_line IN ('LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION') THEN 'CASH' END,
+       CASE WHEN p.product_line IN ('LINEAR_PERPETUAL', 'INVERSE_PERPETUAL') THEN 8 ELSE 0 END
+  FROM assets a
+ CROSS JOIN product_lines p;
+
+INSERT INTO instruments (
+    symbol, version, instrument_type, contract_type, base_asset, quote_asset, settle_asset,
+    contract_multiplier_ppm, contract_value_asset, price_tick_units, quantity_step_units,
+    min_quantity_steps, max_quantity_steps, min_notional_units, max_notional_units,
+    notional_multiplier_units, price_precision, quantity_precision,
+    supported_order_types, supported_time_in_force, post_only_enabled, reduce_only_enabled,
+    market_order_enabled, max_leverage_ppm, initial_margin_rate_ppm,
+    maintenance_margin_rate_ppm, maker_fee_rate_ppm, taker_fee_rate_ppm,
+    max_position_notional_units, user_open_interest_limit_rate_ppm,
+    user_open_interest_limit_floor_units, funding_interval_hours, interest_rate_ppm,
+    funding_rate_cap_ppm, funding_rate_floor_ppm, impact_notional_units,
+    min_valid_index_sources, expiry_time, delivery_time, underlying_symbol,
+    strike_price_units, option_type, option_exercise_style, settlement_method,
+    status, effective_time, created_at, updated_at
+)
+SELECT symbol, 1, instrument_type, contract_type, base_asset, quote_asset, settle_asset,
+       1000000, contract_value_asset, price_tick_units, quantity_step_units,
+       1, 1000000, 1, 1000000000000000, 1, price_precision, quantity_precision,
+       CASE WHEN instrument_type IN ('SPOT', 'PERPETUAL') THEN 'LIMIT,MARKET' ELSE 'LIMIT' END,
+       'GTC,IOC,FOK,GTX', TRUE, instrument_type <> 'SPOT',
+       instrument_type IN ('SPOT', 'PERPETUAL'), 100000000, 10000, 5000, 200, 500,
+       1000000000000000000, 1000000, 1000000000000000000,
+       funding_interval_hours,
+       CASE WHEN instrument_type = 'PERPETUAL' THEN 100 ELSE 0 END,
+       CASE WHEN instrument_type = 'PERPETUAL' THEN 3000 ELSE 0 END,
+       CASE WHEN instrument_type = 'PERPETUAL' THEN -3000 ELSE 0 END,
+       1000000000000, 3, expiry_time, delivery_time, underlying_symbol,
+       strike_price_units, option_type,
+       CASE WHEN instrument_type = 'OPTION' THEN 'EUROPEAN' END,
+       settlement_method, 'TRADING', now(), now(), now()
+  FROM surprising_launch_instruments
+ON CONFLICT (symbol, version) DO NOTHING;
+
+INSERT INTO instrument_current_versions (symbol, version, updated_at)
+SELECT symbol, 1, now() FROM surprising_launch_instruments
+ON CONFLICT (symbol) DO UPDATE SET version = EXCLUDED.version, updated_at = EXCLUDED.updated_at;
+
+INSERT INTO instrument_product_current_versions (product_line, symbol, version, updated_at)
+SELECT product_line, symbol, 1, now() FROM surprising_launch_instruments
+ON CONFLICT (product_line, symbol) DO UPDATE SET
+    version = EXCLUDED.version,
+    updated_at = EXCLUDED.updated_at;
+
+INSERT INTO instrument_symbol_sequences (symbol, version, updated_at)
+SELECT symbol, 1, now() FROM surprising_launch_instruments
+ON CONFLICT (symbol) DO UPDATE SET
+    version = GREATEST(instrument_symbol_sequences.version, EXCLUDED.version),
+    updated_at = EXCLUDED.updated_at;
+
+INSERT INTO instrument_risk_brackets (
+    symbol, version, bracket_no, notional_floor_units, notional_cap_units,
+    max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm
+)
+SELECT seed.symbol, 1, bracket.bracket_no, bracket.notional_floor_units,
+       bracket.notional_cap_units, bracket.max_leverage_ppm,
+       bracket.initial_margin_rate_ppm, bracket.maintenance_margin_rate_ppm
+  FROM surprising_launch_instruments seed
+ CROSS JOIN (VALUES
+    (1, 0::BIGINT, 100000000000000::BIGINT, 100000000::BIGINT, 10000::BIGINT, 5000::BIGINT),
+    (2, 100000000000000::BIGINT, 500000000000000::BIGINT, 50000000::BIGINT, 20000::BIGINT, 10000::BIGINT),
+    (3, 500000000000000::BIGINT, 1000000000000000000::BIGINT, 20000000::BIGINT, 50000::BIGINT, 25000::BIGINT)
+ ) AS bracket(bracket_no, notional_floor_units, notional_cap_units, max_leverage_ppm,
+              initial_margin_rate_ppm, maintenance_margin_rate_ppm)
+ WHERE seed.product_line <> 'SPOT'
+ON CONFLICT (symbol, version, bracket_no) DO NOTHING;
+
+INSERT INTO instrument_index_sources (
+    symbol, version, source, enabled, base_url, path, source_symbol, parser,
+    quote_currency, target_quote_currency, conversion_base_url, conversion_path,
+    conversion_parser, conversion_mode, conversion_operation,
+    fallback_weight_multiplier_ppm, websocket_enabled, websocket_url,
+    websocket_subscribe_message, websocket_parser, weight_ppm
+)
+SELECT seed.symbol, 1, source.source, TRUE, source.base_url,
+       CASE source.source
+           WHEN 'BINANCE' THEN '/api/v3/ticker/bookTicker?symbol=' || seed.base_asset || 'USDT'
+           WHEN 'OKX' THEN '/api/v5/market/ticker?instId=' || seed.base_asset || '-USDT'
+           WHEN 'BYBIT' THEN '/v5/market/tickers?category=spot&symbol=' || seed.base_asset || 'USDT'
+       END,
+       CASE WHEN source.source = 'OKX' THEN seed.base_asset || '-USDT'
+            ELSE seed.base_asset || 'USDT' END,
+       source.parser, 'USDT', 'USDT', NULL, NULL, NULL, 'DISCOUNT', 'MULTIPLY',
+       500000, FALSE, NULL, NULL, NULL, 1000000
+  FROM surprising_launch_instruments seed
+ CROSS JOIN (VALUES
+    ('BINANCE', 'https://api.binance.com', 'BINANCE_BOOK_TICKER'),
+    ('OKX', 'https://www.okx.com', 'OKX_TICKER'),
+    ('BYBIT', 'https://api.bybit.com', 'BYBIT_TICKER')
+ ) AS source(source, base_url, parser)
+ON CONFLICT (symbol, version, source) DO NOTHING;
+
+\ir okx-instrument-seed.sql
+
+-- 02. Public market data, candles, index and mark-price history.
 
 CREATE TABLE IF NOT EXISTS candlestick_candles (
     symbol              TEXT NOT NULL,
@@ -665,6 +851,8 @@ CREATE INDEX IF NOT EXISTS price_mark_ticks_query_idx
 CREATE INDEX IF NOT EXISTS price_mark_ticks_retention_idx
     ON price_mark_ticks USING BRIN (event_time) WITH (pages_per_range = 64);
 
+-- 03. Funding-rate history and settlement projections.
+
 CREATE SEQUENCE IF NOT EXISTS funding_settlement_id_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
 CREATE SEQUENCE IF NOT EXISTS funding_payment_id_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 4096;
 
@@ -795,13 +983,14 @@ CREATE INDEX IF NOT EXISTS funding_payments_pending_command_idx
     INCLUDE (settlement_id, user_id)
     WHERE status = 'PENDING';
 
+-- 04. Trading configuration and historical order/execution projections.
+
 CREATE SEQUENCE IF NOT EXISTS trading_order_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS trading_event_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS trading_command_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS trading_outbox_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS trading_spot_reservation_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS trading_fee_schedule_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
-CREATE SEQUENCE IF NOT EXISTS trading_trigger_order_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
 CREATE SEQUENCE IF NOT EXISTS trading_algo_order_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
 
 CREATE TABLE IF NOT EXISTS trading_fee_schedules (
@@ -1075,7 +1264,6 @@ CREATE INDEX IF NOT EXISTS trading_orders_open_query_idx
     ON trading_orders (user_id, symbol, created_at DESC)
     WHERE status IN ('ACCEPTED', 'PARTIALLY_FILLED', 'CANCEL_REQUESTED');
 
--- Redis open-order projection rebuilds and PostgreSQL fallback use product-scoped order-id keysets.
 CREATE INDEX IF NOT EXISTS trading_orders_open_view_user_idx
     ON trading_orders (product_line, user_id, order_id DESC)
     WHERE status IN ('ACCEPTED', 'PARTIALLY_FILLED');
@@ -1148,192 +1336,6 @@ SELECT product_line,
        MAX(updated_at) AS updated_at
   FROM trading_symbol_open_interest_shards
  GROUP BY product_line, symbol;
-
-CREATE TABLE IF NOT EXISTS trading_trigger_orders (
-    trigger_order_id           BIGINT PRIMARY KEY,
-    product_line               TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
-    user_id                    BIGINT NOT NULL,
-    client_trigger_order_id    TEXT,
-    oco_group_id               TEXT,
-    symbol                     TEXT NOT NULL,
-    side                       TEXT NOT NULL,
-    trigger_type               TEXT NOT NULL,
-    trigger_condition          TEXT NOT NULL,
-    trigger_price_ticks        BIGINT NOT NULL,
-    activation_price_ticks     BIGINT,
-    callback_rate_ppm          BIGINT,
-    highest_price_ticks        BIGINT,
-    lowest_price_ticks         BIGINT,
-    activated_at               TIMESTAMPTZ,
-    order_type                 TEXT NOT NULL,
-    time_in_force              TEXT NOT NULL,
-    price_ticks                BIGINT NOT NULL,
-    quantity_steps             BIGINT NOT NULL,
-    margin_mode                TEXT NOT NULL DEFAULT 'CROSS',
-    position_side              TEXT NOT NULL DEFAULT 'NET',
-    status                     TEXT NOT NULL,
-    placed_order_id            BIGINT,
-    trigger_sequence           BIGINT,
-    triggered_price_ticks      BIGINT,
-    reject_reason              TEXT,
-    trace_id                   TEXT,
-    expires_at                 TIMESTAMPTZ,
-    triggered_at               TIMESTAMPTZ,
-    created_at                 TIMESTAMPTZ NOT NULL,
-    updated_at                 TIMESTAMPTZ NOT NULL,
-    CONSTRAINT trading_trigger_orders_user_positive CHECK (user_id > 0),
-    CONSTRAINT trading_trigger_orders_product_line_check CHECK (
-        product_line IN (
-            'SPOT',
-            'LINEAR_PERPETUAL',
-            'INVERSE_PERPETUAL',
-            'LINEAR_DELIVERY',
-            'INVERSE_DELIVERY',
-            'OPTION'
-        )
-    ),
-    CONSTRAINT trading_trigger_orders_client_id_length CHECK (
-        client_trigger_order_id IS NULL OR length(client_trigger_order_id) <= 64
-    ),
-    CONSTRAINT trading_trigger_orders_oco_group_length CHECK (
-        oco_group_id IS NULL OR length(oco_group_id) <= 64
-    ),
-    CONSTRAINT trading_trigger_orders_symbol_format CHECK (symbol ~ '^[A-Z0-9][A-Z0-9_-]{1,63}$'),
-    CONSTRAINT trading_trigger_orders_symbol_fk
-        FOREIGN KEY (symbol) REFERENCES instrument_current_versions(symbol),
-    CONSTRAINT trading_trigger_orders_side_check CHECK (side IN ('BUY', 'SELL')),
-    CONSTRAINT trading_trigger_orders_position_side_check CHECK (position_side IN ('NET', 'LONG', 'SHORT')),
-    CONSTRAINT trading_trigger_orders_type_check CHECK (
-        trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS', 'TRAILING_STOP')
-    ),
-    CONSTRAINT trading_trigger_orders_condition_check CHECK (
-        trigger_condition IN ('GREATER_OR_EQUAL', 'LESS_OR_EQUAL')
-    ),
-    CONSTRAINT trading_trigger_orders_order_type_check CHECK (order_type IN ('LIMIT', 'MARKET')),
-    CONSTRAINT trading_trigger_orders_tif_check CHECK (time_in_force IN ('GTC', 'IOC', 'FOK')),
-    CONSTRAINT trading_trigger_orders_margin_mode_check CHECK (margin_mode IN ('CROSS', 'ISOLATED')),
-    CONSTRAINT trading_trigger_orders_status_check CHECK (
-        status IN ('PENDING', 'TRIGGERING', 'TRIGGERED', 'TRIGGER_FAILED', 'CANCELED', 'EXPIRED')
-    ),
-    CONSTRAINT trading_trigger_orders_long_values CHECK (
-        (
-            (trigger_type = 'TRAILING_STOP' AND trigger_price_ticks >= 0)
-            OR (trigger_type <> 'TRAILING_STOP' AND trigger_price_ticks > 0)
-        )
-        AND (activation_price_ticks IS NULL OR activation_price_ticks >= 0)
-        AND (callback_rate_ppm IS NULL OR callback_rate_ppm BETWEEN 1000 AND 100000)
-        AND (highest_price_ticks IS NULL OR highest_price_ticks > 0)
-        AND (lowest_price_ticks IS NULL OR lowest_price_ticks > 0)
-        AND price_ticks >= 0
-        AND quantity_steps > 0
-        AND (trigger_sequence IS NULL OR trigger_sequence > 0)
-        AND (triggered_price_ticks IS NULL OR triggered_price_ticks > 0)
-    ),
-    CONSTRAINT trading_trigger_orders_trailing_check CHECK (
-        (
-            trigger_type = 'TRAILING_STOP'
-            AND callback_rate_ppm IS NOT NULL
-            AND order_type = 'MARKET'
-        )
-        OR (
-            trigger_type <> 'TRAILING_STOP'
-            AND activation_price_ticks IS NULL
-            AND callback_rate_ppm IS NULL
-            AND highest_price_ticks IS NULL
-            AND lowest_price_ticks IS NULL
-            AND activated_at IS NULL
-        )
-    ),
-    CONSTRAINT trading_trigger_orders_market_price_zero CHECK (
-        order_type <> 'MARKET' OR price_ticks = 0
-    ),
-    CONSTRAINT trading_trigger_orders_triggered_state_check CHECK (
-        (status IN ('TRIGGERED', 'TRIGGER_FAILED') AND placed_order_id IS NOT NULL)
-        OR (status NOT IN ('TRIGGERED', 'TRIGGER_FAILED'))
-    )
-);
-
-ALTER TABLE trading_trigger_orders
-    ADD COLUMN IF NOT EXISTS product_line TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL';
-
-ALTER TABLE trading_trigger_orders
-    DROP CONSTRAINT IF EXISTS trading_trigger_orders_product_line_check;
-
-ALTER TABLE trading_trigger_orders
-    ADD CONSTRAINT trading_trigger_orders_product_line_check CHECK (
-        product_line IN (
-            'SPOT',
-            'LINEAR_PERPETUAL',
-            'INVERSE_PERPETUAL',
-            'LINEAR_DELIVERY',
-            'INVERSE_DELIVERY',
-            'OPTION'
-        )
-    );
-
-UPDATE trading_trigger_orders t
-   SET product_line = CASE i.contract_type
-       WHEN 'SPOT' THEN 'SPOT'
-       WHEN 'LINEAR_PERPETUAL' THEN 'LINEAR_PERPETUAL'
-       WHEN 'INVERSE_PERPETUAL' THEN 'INVERSE_PERPETUAL'
-       WHEN 'LINEAR_DELIVERY' THEN 'LINEAR_DELIVERY'
-       WHEN 'INVERSE_DELIVERY' THEN 'INVERSE_DELIVERY'
-       WHEN 'VANILLA_OPTION' THEN 'OPTION'
-       ELSE t.product_line
-   END
-  FROM instrument_current_versions c
-  JOIN instruments i ON i.symbol = c.symbol AND i.version = c.version
- WHERE c.symbol = t.symbol;
-
-DROP INDEX IF EXISTS trading_trigger_orders_user_client_uidx;
-DROP INDEX IF EXISTS trading_trigger_orders_user_status_idx;
-DROP INDEX IF EXISTS trading_trigger_orders_user_oco_idx;
-DROP INDEX IF EXISTS trading_trigger_orders_symbol_gte_idx;
-DROP INDEX IF EXISTS trading_trigger_orders_symbol_lte_idx;
-DROP INDEX IF EXISTS trading_trigger_orders_trailing_pending_idx;
-DROP INDEX IF EXISTS trading_trigger_orders_expiry_idx;
-DROP INDEX IF EXISTS trading_trigger_orders_triggering_idx;
-
-CREATE UNIQUE INDEX IF NOT EXISTS trading_trigger_orders_user_client_uidx
-    ON trading_trigger_orders (product_line, user_id, client_trigger_order_id)
-    WHERE client_trigger_order_id IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS trading_trigger_orders_user_status_idx
-    ON trading_trigger_orders (product_line, user_id, status, created_at DESC, trigger_order_id DESC);
-
-CREATE INDEX IF NOT EXISTS trading_trigger_orders_user_oco_idx
-    ON trading_trigger_orders (product_line, user_id, symbol, margin_mode, oco_group_id, status, updated_at DESC)
-    WHERE oco_group_id IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS trading_trigger_orders_symbol_gte_idx
-    ON trading_trigger_orders (product_line, symbol, trigger_price_ticks, trigger_order_id)
-    WHERE status = 'PENDING'
-      AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
-      AND trigger_condition = 'GREATER_OR_EQUAL';
-
-CREATE INDEX IF NOT EXISTS trading_trigger_orders_symbol_lte_idx
-    ON trading_trigger_orders (product_line, symbol, trigger_price_ticks DESC, trigger_order_id)
-    WHERE status = 'PENDING'
-      AND trigger_type IN ('TAKE_PROFIT', 'STOP_LOSS')
-      AND trigger_condition = 'LESS_OR_EQUAL';
-
-CREATE INDEX IF NOT EXISTS trading_trigger_orders_trailing_pending_idx
-    ON trading_trigger_orders (product_line, symbol, trigger_order_id)
-    WHERE status = 'PENDING'
-      AND trigger_type = 'TRAILING_STOP';
-
-CREATE INDEX IF NOT EXISTS trading_trigger_orders_expiry_idx
-    ON trading_trigger_orders (product_line, expires_at, trigger_order_id)
-    WHERE status = 'PENDING'
-      AND expires_at IS NOT NULL;
-
-CREATE INDEX IF NOT EXISTS trading_trigger_orders_triggering_idx
-    ON trading_trigger_orders (product_line, updated_at, trigger_order_id)
-    WHERE status = 'TRIGGERING';
-
-CREATE INDEX IF NOT EXISTS trading_trigger_orders_trace_idx
-    ON trading_trigger_orders (trace_id)
-    WHERE trace_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS trading_order_events (
     event_id            BIGINT PRIMARY KEY,
@@ -1569,6 +1571,9 @@ CREATE INDEX IF NOT EXISTS trading_match_trades_trace_idx
     ON trading_match_trades (trace_id)
     WHERE trace_id IS NOT NULL;
 
+-- 05. Account history, reconciliation projections and administrative adjustments.
+-- Aeron Core remains authoritative for online balances, reservations and positions.
+
 CREATE SEQUENCE IF NOT EXISTS account_ledger_entry_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS account_product_ledger_entry_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 CREATE SEQUENCE IF NOT EXISTS account_product_transfer_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 128;
@@ -1627,6 +1632,8 @@ VALUES
 ('BTC', 100000000, now(), now()),
 ('ETH', 1000000000000000000, now(), now())
 ON CONFLICT (asset) DO NOTHING;
+
+\ir okx-asset-scales.sql
 
 CREATE TABLE IF NOT EXISTS account_balances (
     user_id             BIGINT NOT NULL,
@@ -1752,7 +1759,9 @@ CREATE TABLE IF NOT EXISTS account_product_transfers (
     CONSTRAINT account_product_transfers_status_check CHECK (status IN ('COMPLETED'))
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS account_product_transfers_reference_uidx
+DROP INDEX IF EXISTS account_product_transfers_reference_uidx;
+
+CREATE INDEX IF NOT EXISTS account_product_transfers_reference_idx
     ON account_product_transfers (user_id, reference_id);
 
 CREATE INDEX IF NOT EXISTS account_product_transfers_user_time_idx
@@ -1947,8 +1956,6 @@ CREATE INDEX IF NOT EXISTS account_spot_reservations_user_idx
 CREATE INDEX IF NOT EXISTS account_spot_reservations_symbol_idx
     ON account_spot_order_reservations (symbol, status, updated_at DESC);
 
-ALTER TABLE trading_trigger_orders
-    DROP CONSTRAINT IF EXISTS trading_trigger_orders_placed_order_fk;
 ALTER TABLE trading_order_events
     DROP CONSTRAINT IF EXISTS trading_order_events_order_fk;
 ALTER TABLE trading_match_results
@@ -2534,47 +2541,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS risk_liquidation_candidates_active_uidx
 CREATE INDEX IF NOT EXISTS risk_liquidation_candidates_status_idx
     ON risk_liquidation_candidates (product_line, status, event_time ASC);
 
-CREATE TABLE IF NOT EXISTS risk_admin_rule_overrides (
-    rule_code                    TEXT PRIMARY KEY,
-    rule_name                    TEXT NOT NULL,
-    rule_type                    TEXT NOT NULL,
-    enabled                      BOOLEAN NOT NULL DEFAULT TRUE,
-    warning_margin_ratio_ppm     BIGINT,
-    liquidation_margin_ratio_ppm BIGINT,
-    scan_delay_ms                BIGINT,
-    scan_batch_size              INTEGER,
-    admin_user_id                TEXT NOT NULL,
-    reason                       TEXT NOT NULL,
-    created_at                   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at                   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT risk_admin_rule_overrides_code_check CHECK (rule_code ~ '^[A-Z0-9_.:-]{2,96}$'),
-    CONSTRAINT risk_admin_rule_overrides_type_check CHECK (
-        rule_type IN ('GLOBAL_MARGIN', 'SCAN_CONTROL')
-    ),
-    CONSTRAINT risk_admin_rule_overrides_margin_check CHECK (
-        warning_margin_ratio_ppm IS NULL OR warning_margin_ratio_ppm >= 0
-    ),
-    CONSTRAINT risk_admin_rule_overrides_liquidation_check CHECK (
-        liquidation_margin_ratio_ppm IS NULL OR liquidation_margin_ratio_ppm >= 0
-    ),
-    CONSTRAINT risk_admin_rule_overrides_margin_order_check CHECK (
-        warning_margin_ratio_ppm IS NULL
-        OR liquidation_margin_ratio_ppm IS NULL
-        OR warning_margin_ratio_ppm < liquidation_margin_ratio_ppm
-    ),
-    CONSTRAINT risk_admin_rule_overrides_scan_delay_check CHECK (
-        scan_delay_ms IS NULL OR scan_delay_ms >= 0
-    ),
-    CONSTRAINT risk_admin_rule_overrides_batch_check CHECK (
-        scan_batch_size IS NULL OR scan_batch_size BETWEEN 1 AND 10000
-    ),
-    CONSTRAINT risk_admin_rule_overrides_admin_present CHECK (length(admin_user_id) > 0),
-    CONSTRAINT risk_admin_rule_overrides_reason_present CHECK (length(reason) BETWEEN 1 AND 500)
-);
-
-CREATE INDEX IF NOT EXISTS risk_admin_rule_overrides_type_idx
-    ON risk_admin_rule_overrides (rule_type, updated_at DESC);
-
 CREATE TABLE IF NOT EXISTS risk_outbox_events (
     id                  BIGINT PRIMARY KEY,
     topic               TEXT NOT NULL,
@@ -2601,6 +2567,8 @@ CREATE INDEX IF NOT EXISTS risk_outbox_pending_key_idx
 CREATE INDEX IF NOT EXISTS risk_outbox_published_cleanup_idx
     ON risk_outbox_events (published_at, id)
     WHERE published_at IS NOT NULL;
+
+-- 06. Risk, liquidation, insurance fund and ADL history.
 
 CREATE SEQUENCE IF NOT EXISTS liquidation_order_seq AS BIGINT START WITH 1 INCREMENT BY 1 CACHE 1024;
 
@@ -2986,6 +2954,8 @@ DROP INDEX IF EXISTS adl_events_asset_symbol_time_idx;
 CREATE INDEX IF NOT EXISTS adl_events_asset_symbol_time_idx
     ON adl_events (account_type, asset, symbol, created_at DESC);
 
+-- 07. Market-maker operational state and audit samples.
+
 CREATE TABLE IF NOT EXISTS market_maker_strategy_leases (
     product_line                TEXT NOT NULL DEFAULT 'LINEAR_PERPETUAL',
     strategy_id                 TEXT NOT NULL,
@@ -3197,6 +3167,8 @@ CREATE INDEX IF NOT EXISTS market_maker_reference_samples_symbol_time_idx
 DROP INDEX IF EXISTS market_maker_reference_samples_transport_time_idx;
 CREATE INDEX IF NOT EXISTS market_maker_reference_samples_transport_time_idx
     ON market_maker_reference_samples (product_line, transport, sampled_at DESC);
+
+-- 08. Gateway identity, security, wallet workflow, compliance and support.
 
 CREATE TABLE IF NOT EXISTS gateway_users (
     user_id             BIGSERIAL PRIMARY KEY,
@@ -3885,54 +3857,6 @@ CREATE INDEX IF NOT EXISTS gateway_admin_operation_logs_trace_idx
     ON gateway_admin_operation_logs (trace_id)
     WHERE trace_id IS NOT NULL;
 
-CREATE SEQUENCE IF NOT EXISTS gateway_product_transfer_seq;
-
-CREATE TABLE IF NOT EXISTS gateway_product_transfers (
-    transfer_id          BIGINT PRIMARY KEY DEFAULT nextval('gateway_product_transfer_seq'),
-    user_id              BIGINT NOT NULL REFERENCES gateway_users(user_id),
-    idempotency_key      VARCHAR(128) NOT NULL,
-    request_fingerprint  VARCHAR(64) NOT NULL,
-    source_account_type  VARCHAR(32) NOT NULL,
-    target_account_type  VARCHAR(32) NOT NULL,
-    asset                VARCHAR(20) NOT NULL,
-    amount_units         BIGINT NOT NULL CHECK (amount_units > 0),
-    reference_id         VARCHAR(128) NOT NULL,
-    reason               VARCHAR(128) NOT NULL DEFAULT '',
-    status               VARCHAR(32) NOT NULL,
-    error_code           VARCHAR(64),
-    error_message        VARCHAR(512),
-    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
-    completed_at         TIMESTAMPTZ,
-    CONSTRAINT gateway_product_transfers_status_check CHECK (
-        status IN ('PENDING', 'SOURCE_DEBIT_UNKNOWN', 'SOURCE_DEBITED', 'TARGET_CREDIT_UNKNOWN',
-                   'COMPENSATION_REQUIRED', 'COMPLETED', 'FAILED')
-    ),
-    CONSTRAINT gateway_product_transfers_accounts_check CHECK (source_account_type <> target_account_type)
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS gateway_product_transfers_user_key_uidx
-    ON gateway_product_transfers (user_id, idempotency_key);
-CREATE INDEX IF NOT EXISTS gateway_product_transfers_status_idx
-    ON gateway_product_transfers (status, updated_at);
-CREATE INDEX IF NOT EXISTS gateway_product_transfers_user_time_idx
-    ON gateway_product_transfers (user_id, created_at DESC, transfer_id DESC);
-
-CREATE SEQUENCE IF NOT EXISTS gateway_product_transfer_event_seq;
-
-CREATE TABLE IF NOT EXISTS gateway_product_transfer_events (
-    event_id       BIGINT PRIMARY KEY DEFAULT nextval('gateway_product_transfer_event_seq'),
-    transfer_id    BIGINT NOT NULL REFERENCES gateway_product_transfers(transfer_id),
-    from_status    VARCHAR(32),
-    to_status      VARCHAR(32) NOT NULL,
-    error_code     VARCHAR(64),
-    error_message  VARCHAR(512),
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS gateway_product_transfer_events_transfer_time_idx
-    ON gateway_product_transfer_events (transfer_id, created_at, event_id);
-
 CREATE TABLE IF NOT EXISTS gateway_admin_approval_requests (
     approval_id          BIGSERIAL PRIMARY KEY,
     requester_user_id    BIGINT NOT NULL REFERENCES gateway_users(user_id),
@@ -3971,3 +3895,589 @@ CREATE INDEX IF NOT EXISTS gateway_admin_approval_requests_service_time_idx
 CREATE INDEX IF NOT EXISTS gateway_admin_approval_requests_consumed_trace_idx
     ON gateway_admin_approval_requests (consumed_trace_id)
     WHERE consumed_trace_id IS NOT NULL;
+
+-- 09. Aeron Core audit, history projections and WebSocket delivery audit.
+
+CREATE TABLE IF NOT EXISTS core_event_projection (
+    product_line VARCHAR(32) NOT NULL,
+    export_sequence BIGINT NOT NULL,
+    applied_command_count BIGINT NOT NULL,
+    business_state_hash BIGINT NOT NULL,
+    command_id UUID NOT NULL,
+    command_type VARCHAR(64) NOT NULL,
+    command_status VARCHAR(16) NOT NULL,
+    result_code VARCHAR(64) NOT NULL,
+    user_id BIGINT NOT NULL,
+    before_business_state_hash BIGINT NOT NULL,
+    before_funds_state_hash BIGINT NOT NULL,
+    funds_state_hash BIGINT NOT NULL,
+    matcher_sequence_before BIGINT NOT NULL,
+    matcher_sequence BIGINT NOT NULL,
+    matcher_prefix_before BIGINT NOT NULL,
+    matcher_prefix_after BIGINT NOT NULL,
+    cluster_position BIGINT NOT NULL,
+    raw_event BYTEA NOT NULL,
+    projected_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (product_line, export_sequence)
+);
+
+CREATE INDEX IF NOT EXISTS idx_core_event_projection_command
+    ON core_event_projection (product_line, command_id);
+
+CREATE TABLE IF NOT EXISTS core_funds_posting_projection (
+    product_line VARCHAR(32) NOT NULL,
+    export_sequence BIGINT NOT NULL,
+    posting_index INTEGER NOT NULL,
+    asset VARCHAR(20) NOT NULL,
+    owner_kind VARCHAR(16) NOT NULL,
+    owner_id BIGINT NOT NULL,
+    subledger VARCHAR(32) NOT NULL,
+    units BIGINT NOT NULL,
+    PRIMARY KEY (product_line, export_sequence, posting_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_core_funds_posting_owner
+    ON core_funds_posting_projection (product_line, owner_kind, owner_id, asset, export_sequence);
+
+CREATE TABLE IF NOT EXISTS core_user_fact_projection (
+    product_line VARCHAR(32) NOT NULL,
+    export_sequence BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    user_revision BIGINT NOT NULL,
+    raw_user_delta BYTEA NOT NULL,
+    PRIMARY KEY (product_line, export_sequence, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS core_order_projection (
+    product_line VARCHAR(32) NOT NULL,
+    order_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    client_order_id VARCHAR(64),
+    symbol VARCHAR(64) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    created_at_epoch_ms BIGINT NOT NULL,
+    updated_at_epoch_ms BIGINT NOT NULL,
+    cluster_position BIGINT NOT NULL,
+    order_revision BIGINT NOT NULL,
+    export_sequence BIGINT NOT NULL,
+    raw_order_state BYTEA NOT NULL,
+    PRIMARY KEY (product_line, order_id),
+    UNIQUE (product_line, user_id, client_order_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_core_order_projection_user_status
+    ON core_order_projection (product_line, user_id, status, order_id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_core_order_projection_symbol_status
+    ON core_order_projection (product_line, symbol, status, order_id DESC);
+
+CREATE TABLE IF NOT EXISTS core_execution_projection (
+    product_line VARCHAR(32) NOT NULL,
+    export_sequence BIGINT NOT NULL,
+    execution_index INTEGER NOT NULL,
+    taker_order_id BIGINT NOT NULL,
+    maker_order_id BIGINT NOT NULL,
+    taker_user_id BIGINT NOT NULL,
+    maker_user_id BIGINT NOT NULL,
+    symbol VARCHAR(64) NOT NULL,
+    instrument_version BIGINT NOT NULL,
+    taker_side VARCHAR(8) NOT NULL,
+    taker_fee_rate_ppm BIGINT NOT NULL,
+    maker_fee_rate_ppm BIGINT NOT NULL,
+    price_ticks BIGINT NOT NULL,
+    quantity_steps BIGINT NOT NULL,
+    occurred_at_epoch_ms BIGINT NOT NULL,
+    PRIMARY KEY (product_line, export_sequence, execution_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_core_execution_projection_taker
+    ON core_execution_projection (product_line, taker_user_id, export_sequence DESC);
+
+CREATE INDEX IF NOT EXISTS idx_core_execution_projection_maker
+    ON core_execution_projection (product_line, maker_user_id, export_sequence DESC);
+
+CREATE INDEX IF NOT EXISTS idx_core_execution_projection_symbol_time
+    ON core_execution_projection (product_line, symbol, occurred_at_epoch_ms DESC, export_sequence DESC);
+
+CREATE TABLE IF NOT EXISTS core_funding_settlement_projection (
+    product_line VARCHAR(32) NOT NULL,
+    settlement_id BIGINT NOT NULL,
+    export_sequence BIGINT NOT NULL,
+    symbol VARCHAR(64) NOT NULL,
+    instrument_version BIGINT NOT NULL,
+    funding_rate_ppm BIGINT NOT NULL,
+    command_status VARCHAR(32) NOT NULL,
+    result_code VARCHAR(64) NOT NULL,
+    total_long_payment_units BIGINT NOT NULL,
+    total_short_payment_units BIGINT NOT NULL,
+    position_count INTEGER NOT NULL,
+    occurred_at_epoch_ms BIGINT NOT NULL,
+    PRIMARY KEY (product_line, symbol, settlement_id),
+    UNIQUE (product_line, export_sequence)
+);
+
+CREATE INDEX IF NOT EXISTS idx_core_funding_settlement_symbol
+    ON core_funding_settlement_projection (product_line, symbol, settlement_id DESC);
+
+CREATE TABLE IF NOT EXISTS core_funding_payment_projection (
+    payment_id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    product_line VARCHAR(32) NOT NULL,
+    export_sequence BIGINT NOT NULL,
+    payment_index INTEGER NOT NULL,
+    settlement_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    symbol VARCHAR(64) NOT NULL,
+    margin_mode VARCHAR(16) NOT NULL,
+    position_side VARCHAR(16) NOT NULL,
+    asset VARCHAR(20) NOT NULL,
+    signed_quantity_steps BIGINT NOT NULL,
+    notional_units BIGINT NOT NULL,
+    funding_rate_ppm BIGINT NOT NULL,
+    amount_units BIGINT NOT NULL,
+    occurred_at_epoch_ms BIGINT NOT NULL,
+    UNIQUE (product_line, export_sequence, payment_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_core_funding_payment_user
+    ON core_funding_payment_projection (product_line, user_id, payment_id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_core_funding_payment_user_symbol
+    ON core_funding_payment_projection (product_line, user_id, symbol, payment_id DESC);
+
+CREATE TABLE IF NOT EXISTS core_liquidation_projection (
+    product_line VARCHAR(32) NOT NULL,
+    liquidation_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    symbol VARCHAR(64) NOT NULL,
+    asset VARCHAR(20) NOT NULL,
+    margin_mode VARCHAR(16) NOT NULL,
+    position_side VARCHAR(16) NOT NULL,
+    instrument_version BIGINT NOT NULL,
+    trigger_price_sequence BIGINT NOT NULL,
+    signed_quantity_steps BIGINT NOT NULL,
+    close_quantity_steps BIGINT NOT NULL,
+    deficit_units BIGINT NOT NULL,
+    execution_price_ticks BIGINT NOT NULL,
+    liquidation_fee_rate_ppm BIGINT NOT NULL,
+    liquidation_fee_units BIGINT NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    export_sequence BIGINT NOT NULL,
+    updated_at_epoch_ms BIGINT NOT NULL,
+    PRIMARY KEY (product_line, liquidation_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_core_liquidation_pending
+    ON core_liquidation_projection (product_line, status, liquidation_id);
+
+CREATE INDEX IF NOT EXISTS idx_core_liquidation_user
+    ON core_liquidation_projection (product_line, user_id, liquidation_id DESC);
+
+CREATE TABLE IF NOT EXISTS core_treasury_projection (
+    product_line VARCHAR(32) NOT NULL,
+    asset VARCHAR(20) NOT NULL,
+    fee_balance_units BIGINT NOT NULL,
+    insurance_balance_units BIGINT NOT NULL,
+    insurance_deficit_units BIGINT NOT NULL,
+    liquidation_fee_units BIGINT NOT NULL,
+    funding_residual_units BIGINT NOT NULL,
+    rounding_residual_units BIGINT NOT NULL,
+    clearing_pnl_units BIGINT NOT NULL,
+    export_sequence BIGINT NOT NULL,
+    updated_at_epoch_ms BIGINT NOT NULL,
+    PRIMARY KEY (product_line, asset)
+);
+
+CREATE TABLE IF NOT EXISTS core_projection_watermark (
+    product_line VARCHAR(32) NOT NULL,
+    last_export_sequence BIGINT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (product_line),
+    CHECK (last_export_sequence >= 0)
+);
+
+INSERT INTO core_projection_watermark (product_line, last_export_sequence)
+VALUES ('SPOT', 0), ('LINEAR_PERPETUAL', 0), ('INVERSE_PERPETUAL', 0),
+       ('LINEAR_DELIVERY', 0), ('INVERSE_DELIVERY', 0), ('OPTION', 0)
+ON CONFLICT (product_line) DO NOTHING;
+
+-- 10. Baseline identity. Application upgrades use migrations/ after launch.
+
+CREATE TABLE IF NOT EXISTS surprising_schema_metadata (
+    baseline_version TEXT PRIMARY KEY,
+    initialized_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    postgres_version TEXT NOT NULL
+);
+
+INSERT INTO surprising_schema_metadata (baseline_version, postgres_version)
+VALUES ('2026.08.18', current_setting('server_version'))
+ON CONFLICT (baseline_version) DO NOTHING;
+
+-- 11. Database catalog documentation and shared domain constraints.
+-- PostgreSQL stores descriptions through COMMENT ON rather than inline column syntax.
+
+DO $$
+DECLARE
+    item RECORD;
+    table_description TEXT;
+    column_description TEXT;
+    constraint_name TEXT;
+    generic_columns TEXT;
+BEGIN
+    FOR item IN
+        SELECT c.relname AS table_name
+          FROM pg_class c
+         WHERE c.relnamespace = 'public'::regnamespace
+           AND c.relkind IN ('r', 'p')
+         ORDER BY c.relname
+    LOOP
+        table_description := CASE
+            WHEN item.table_name = 'instruments' THEN '合约版本主表；Instrument Provider 的 PostgreSQL 配置权威。'
+            WHEN item.table_name = 'instrument_current_versions' THEN 'symbol 当前生效版本指针。'
+            WHEN item.table_name = 'instrument_product_current_versions' THEN '按产品线隔离的 symbol 当前版本指针。'
+            WHEN item.table_name = 'surprising_schema_metadata' THEN '数据库首发基线版本和 PostgreSQL 版本记录。'
+            WHEN item.table_name LIKE 'instrument_%' THEN '合约配置、风险档位、指数源或生命周期审计数据。'
+            WHEN item.table_name LIKE 'price_%' THEN '指数价、标记价、汇率或行情处理状态的历史数据。'
+            WHEN item.table_name LIKE 'candlestick_%' THEN 'K 线聚合结果和查询投影。'
+            WHEN item.table_name LIKE 'trading_%' THEN '交易配置、订单、成交或交易审计投影；不作为 Aeron 在线状态权威。'
+            WHEN item.table_name LIKE 'account_%' THEN '账户历史、审计或对账投影；不作为 Aeron 在线资金权威。'
+            WHEN item.table_name LIKE 'funding_%' THEN '资金费率、结算和支付历史投影。'
+            WHEN item.table_name LIKE 'risk_%' THEN '风险快照、强平候选或风险审计投影。'
+            WHEN item.table_name LIKE 'liquidation_%' THEN '强平执行和人工操作历史。'
+            WHEN item.table_name LIKE 'insurance_%' THEN '保险基金余额、流水和亏损覆盖历史。'
+            WHEN item.table_name LIKE 'adl_%' THEN '自动减仓事件、执行 Saga 和审计历史。'
+            WHEN item.table_name LIKE 'market_maker_%' THEN '做市策略租约、覆盖配置和运行审计。'
+            WHEN item.table_name LIKE 'gateway_%' THEN 'Gateway 用户、安全、钱包、合规、通知或管理审计数据。'
+            WHEN item.table_name LIKE 'core_%' THEN 'Aeron Core Export 经 Kafka 投影的历史、审计或查询数据。'
+            ELSE format('Surprising Exchange 业务表：%s。', item.table_name)
+        END;
+        EXECUTE format('COMMENT ON TABLE %I.%I IS %L', 'public', item.table_name, table_description);
+    END LOOP;
+
+    FOR item IN
+        SELECT c.relname AS table_name,
+               a.attname AS column_name,
+               format_type(a.atttypid, a.atttypmod) AS data_type
+          FROM pg_attribute a
+          JOIN pg_class c ON c.oid = a.attrelid
+         WHERE c.relnamespace = 'public'::regnamespace
+           AND c.relkind IN ('r', 'p')
+           AND a.attnum > 0
+           AND NOT a.attisdropped
+         ORDER BY c.relname, a.attnum
+    LOOP
+        column_description := CASE item.column_name
+            WHEN 'product_line' THEN '产品线代码；限定为 SPOT、两类永续、两类交割或 OPTION。'
+            WHEN 'symbol' THEN '交易标的或合约的全局唯一代码。'
+            WHEN 'version' THEN '配置或业务对象版本号；新版本必须单调递增。'
+            WHEN 'instrument_version' THEN '命令、订单、持仓或事件绑定的合约版本号。'
+            WHEN 'instrument_type' THEN '产品大类：现货、永续、交割或期权。'
+            WHEN 'contract_type' THEN '精确合约类型及正向/反向计价方式。'
+            WHEN 'base_asset' THEN '交易对基础资产代码。'
+            WHEN 'quote_asset' THEN '交易对报价资产代码。'
+            WHEN 'settle_asset' THEN '资金、盈亏和费用的结算资产代码。'
+            WHEN 'asset' THEN '资产代码。'
+            WHEN 'margin_asset' THEN '保证金资产代码。'
+            WHEN 'contract_value_asset' THEN '合约面值计价资产。'
+            WHEN 'underlying_symbol' THEN '期权或衍生品关联的标的 symbol。'
+            WHEN 'status' THEN '当前业务状态；允许值由所在表的 CHECK 约束限定。'
+            WHEN 'side' THEN '订单或仓位方向。'
+            WHEN 'taker_side' THEN '成交中吃单方的买卖方向。'
+            WHEN 'position_side' THEN '持仓方向：NET、LONG 或 SHORT。'
+            WHEN 'margin_mode' THEN '保证金模式：CROSS 或 ISOLATED。'
+            WHEN 'account_type' THEN '产品账户类型，用于资金和风险隔离。'
+            WHEN 'order_type' THEN '订单类型。'
+            WHEN 'time_in_force' THEN '订单有效方式。'
+            WHEN 'settlement_method' THEN '到期结算方式。'
+            WHEN 'option_type' THEN '期权方向：CALL 或 PUT。'
+            WHEN 'option_exercise_style' THEN '期权行权风格。'
+            WHEN 'price_ticks' THEN '按合约 price_tick_units 量化后的整数价格。'
+            WHEN 'mark_price_ticks' THEN '按合约精度量化后的标记价格。'
+            WHEN 'execution_price_ticks' THEN '实际执行或强平成交价格 tick。'
+            WHEN 'entry_price_ticks' THEN '持仓平均开仓价格 tick。'
+            WHEN 'strike_price_units' THEN '期权行权价的最小精度整数值。'
+            WHEN 'quantity_steps' THEN '按 quantity_step_units 量化后的订单或成交数量。'
+            WHEN 'signed_quantity_steps' THEN '带多空符号的持仓数量 step。'
+            WHEN 'close_quantity_steps' THEN '本次关闭或强平的数量 step。'
+            WHEN 'executed_quantity_steps' THEN '已经成交的数量 step。'
+            WHEN 'remaining_quantity_steps' THEN '尚未成交的数量 step。'
+            WHEN 'amount_units' THEN '资产最小精度整数金额；正负含义由业务事件决定。'
+            WHEN 'available_units' THEN '可用余额的最小精度整数值。'
+            WHEN 'locked_units' THEN '已锁定余额的最小精度整数值。'
+            WHEN 'reserved_units' THEN '订单或业务流程预占的最小精度整数金额。'
+            WHEN 'deficit_units' THEN '尚未覆盖亏损的最小精度整数金额。'
+            WHEN 'fee_units' THEN '手续费的最小精度整数金额。'
+            WHEN 'position_margin_units' THEN '持仓保证金的最小精度整数金额。'
+            WHEN 'realized_pnl_units' THEN '已实现盈亏的最小精度整数金额。'
+            WHEN 'unrealized_pnl_units' THEN '未实现盈亏的最小精度整数金额。'
+            WHEN 'notional_units' THEN '名义价值的最小精度整数金额。'
+            WHEN 'maker_fee_rate_ppm' THEN '挂单方手续费率，单位 ppm（一百万分之一）。'
+            WHEN 'taker_fee_rate_ppm' THEN '吃单方手续费率，单位 ppm（一百万分之一）。'
+            WHEN 'funding_rate_ppm' THEN '资金费率，单位 ppm（一百万分之一）。'
+            WHEN 'initial_margin_rate_ppm' THEN '初始保证金率，单位 ppm。'
+            WHEN 'maintenance_margin_rate_ppm' THEN '维持保证金率，单位 ppm。'
+            WHEN 'liquidation_fee_rate_ppm' THEN '强平手续费率，单位 ppm。'
+            WHEN 'max_leverage_ppm' THEN '最大杠杆倍数，使用 ppm 定点表示。'
+            WHEN 'weight_ppm' THEN '指数源权重，单位 ppm。'
+            WHEN 'command_id' THEN '跨重试保持不变的幂等命令 UUID。'
+            WHEN 'client_order_id' THEN '用户侧订单幂等标识。'
+            WHEN 'order_id' THEN '系统订单唯一标识。'
+            WHEN 'user_id' THEN '用户唯一标识；系统账户的取值规则由业务模块定义。'
+            WHEN 'event_id' THEN '不可变业务事件唯一标识。'
+            WHEN 'trace_id' THEN '跨服务请求链路追踪标识。'
+            WHEN 'reference_id' THEN '外部或跨账本业务引用标识。'
+            WHEN 'idempotency_key' THEN '调用方提供的幂等键。'
+            WHEN 'request_fingerprint' THEN '规范化请求内容的指纹，用于检测幂等键冲突。'
+            WHEN 'export_sequence' THEN 'Aeron Core Export 在产品线内连续递增的序列号。'
+            WHEN 'before_business_state_hash' THEN '应用当前 Core Fact 前的确定性业务状态哈希。'
+            WHEN 'before_funds_state_hash' THEN '应用当前 Core Fact 前的确定性资金状态哈希。'
+            WHEN 'funds_state_hash' THEN '应用当前 Core Fact 后的确定性资金状态哈希。'
+            WHEN 'matcher_sequence_before' THEN '当前 Core Fact 覆盖的撮合结果区间起始序列；等于上一条事实的 matcher_sequence。'
+            WHEN 'matcher_sequence' THEN '当前 Core Fact 应用后的撮合结果累计序列。'
+            WHEN 'matcher_prefix_before' THEN '当前 Core Fact 覆盖撮合结果前的不可变前缀摘要。'
+            WHEN 'matcher_prefix_after' THEN '当前 Core Fact 覆盖撮合结果后的不可变前缀摘要。'
+            WHEN 'posting_index' THEN '同一 Core Fact 内资金分录的零基连续索引。'
+            WHEN 'owner_kind' THEN '资金分录所有者类型：用户或 Treasury。'
+            WHEN 'subledger' THEN '资金分录所属的可用、冻结、费用、保险等子账本。'
+            WHEN 'units' THEN '资金分录的有符号最小精度整数金额。'
+            WHEN 'source_sequence' THEN '事件源在 source_id 范围内单调递增的序列号。'
+            WHEN 'cluster_position' THEN 'Aeron Cluster Log 中提交该状态的逻辑位置。'
+            WHEN 'revision' THEN '业务实体修订号；每次权威变更递增。'
+            WHEN 'cache_revision' THEN '缓存或查询投影修订号。'
+            WHEN 'created_at' THEN '记录创建时间，带时区。'
+            WHEN 'updated_at' THEN '记录最后更新时间，带时区。'
+            WHEN 'effective_time' THEN '配置或规则开始生效的时间。'
+            WHEN 'expiry_time' THEN '合约停止交易或期权到期的时间。'
+            WHEN 'delivery_time' THEN '交割或现金结算执行时间。'
+            WHEN 'event_time' THEN '业务事件实际发生时间。'
+            WHEN 'occurred_at_epoch_ms' THEN '业务事件发生时间，Unix epoch 毫秒。'
+            WHEN 'projected_at' THEN '异步投影写入 PostgreSQL 的时间。'
+            WHEN 'published_at' THEN '事件成功发布到 Kafka 的时间；NULL 表示待发布。'
+            WHEN 'payload' THEN '结构化业务事件 JSON 载荷。'
+            WHEN 'raw_event' THEN '未经转换的 Core Export 二进制事件。'
+            WHEN 'raw_order_state' THEN '订单状态的版本化二进制快照。'
+            WHEN 'raw_user_delta' THEN '用户状态增量的版本化二进制载荷。'
+            WHEN 'error_code' THEN '稳定的机器可读错误代码。'
+            WHEN 'error_message' THEN '用于审计和排障的错误说明。'
+            ELSE CASE
+                WHEN item.column_name = 'id' THEN '表内记录的自增主键。'
+                WHEN item.column_name IN ('action', 'action_type') THEN '本条审计或业务记录执行的动作类型。'
+                WHEN item.column_name IN ('adjustment_kind', 'category', 'note_type', 'rule_type', 'source_type') THEN
+                    format('`%s` 的业务分类。', item.column_name)
+                WHEN item.column_name IN ('admin_username', 'requester_username', 'approver_username', 'username') THEN
+                    format('执行或关联该操作的%s。', item.column_name)
+                WHEN item.column_name IN ('admin_reason', 'decision_reason', 'last_error', 'reason', 'reject_reason',
+                                          'rejection_reason', 'skipped_reason') THEN
+                    format('该记录的%s说明，用于审计和排障。', item.column_name)
+                WHEN item.column_name IN ('aggregate_type', 'command_type', 'event_type', 'reference_type') THEN
+                    format('用于路由和反序列化的%s。', item.column_name)
+                WHEN item.column_name IN ('amount', 'price', 'price1', 'price2', 'rate', 'funding_rate',
+                                          'index_price', 'mark_price', 'open_price', 'high_price', 'low_price',
+                                          'close_price', 'ask_price', 'bid_price', 'best_ask_price',
+                                          'best_bid_price', 'last_trade_price', 'base_volume', 'quote_volume',
+                                          'basis_average', 'usdt_value') THEN
+                    format('`%s` 的十进制定点值；精度由对应合约或资产配置决定。', item.column_name)
+                WHEN item.column_name IN ('ask_levels', 'bid_levels', 'order_levels') THEN
+                    format('`%s` 的结构化盘口档位数据。', item.column_name)
+                WHEN item.column_name IN ('attempts', 'bracket_no', 'execution_index', 'payment_index',
+                                          'priority', 'risk_score', 'scan_batch_size', 'sequence',
+                                          'sequence_value', 'submitted_orders', 'canceled_orders',
+                                          'rejected_orders', 'min_valid_index_sources') THEN
+                    format('`%s` 对应的非负序号、次数或数量。', item.column_name)
+                WHEN item.column_name IN ('baseline_version', 'postgres_version') THEN
+                    format('初始化基线记录的%s。', item.column_name)
+                WHEN item.column_name IN ('base_currency', 'quote_currency', 'target_quote_currency', 'asset_symbol') THEN
+                    format('`%s` 使用的标准资产代码。', item.column_name)
+                WHEN item.column_name IN ('base_url', 'conversion_base_url', 'websocket_url', 'target_uri') THEN
+                    format('`%s` 的外部服务连接地址。', item.column_name)
+                WHEN item.column_name IN ('body', 'calculation_inputs', 'request_payload', 'result_payload',
+                                          'submitted_documents', 'wallet_response') THEN
+                    format('`%s` 的结构化 JSON 内容。', item.column_name)
+                WHEN item.column_name IN ('body_sha256', 'business_state_hash', 'code_hash', 'payload_sha256',
+                                          'request_body_sha256', 'request_sha256', 'sha256') THEN
+                    format('`%s` 的完整性或一致性校验摘要。', item.column_name)
+                WHEN item.column_name IN ('channel', 'component', 'destination', 'module', 'service', 'topic',
+                                          'transport', 'provider') THEN
+                    format('事件、调用或配置使用的%s标识。', item.column_name)
+                WHEN item.column_name IN ('clamp_high', 'clamp_low', 'configured_weight', 'effective_weight',
+                                          'total_configured_weight') THEN
+                    format('指数源聚合计算使用的 `%s` 权重或边界值。', item.column_name)
+                WHEN item.column_name IN ('conversion_mode', 'conversion_operation', 'margin_mode',
+                                          'position_mode', 'scan_margin_mode', 'target_margin_mode',
+                                          'maker_margin_mode', 'taker_margin_mode') THEN
+                    format('`%s` 的处理模式。', item.column_name)
+                WHEN item.column_name IN ('conversion_parser', 'parser', 'websocket_parser') THEN
+                    format('解析 `%s` 外部响应时使用的解析器类型。', item.column_name)
+                WHEN item.column_name IN ('conversion_path', 'path', 'request_path') THEN
+                    format('调用或取值使用的 `%s` 路径。', item.column_name)
+                WHEN item.column_name IN ('country', 'document_type', 'kyc_level', 'applicant_type') THEN
+                    format('KYC/合规流程记录的 `%s`。', item.column_name)
+                WHEN item.column_name IN ('description', 'label', 'summary', 'title') THEN
+                    format('面向管理端或用户展示的%s文本。', item.column_name)
+                WHEN item.column_name IN ('email', 'phone', 'ip_address', 'request_ip', 'user_agent') THEN
+                    format('安全审计或用户资料中的 `%s`。', item.column_name)
+                WHEN item.column_name IN ('enabled', 'post_only', 'reduce_only', 'scan_completed', 'success',
+                                          'maker_order_completed', 'taker_order_completed') THEN
+                    format('`%s` 的布尔开关或完成状态。', item.column_name)
+                WHEN item.column_name IN ('event_key', 'reference_key', 'external_reference', 'provider_reference',
+                                          'source_reference', 'spot_debit_reference') THEN
+                    format('跨系统关联和幂等处理使用的 `%s`。', item.column_name)
+                WHEN item.column_name IN ('file_size', 'funding_interval_hours', 'basis_window_seconds',
+                                          'time_until_funding_seconds', 'duration_ms', 'latency_millis',
+                                          'scan_delay_ms') THEN
+                    format('`%s` 的非负度量值，单位由字段名定义。', item.column_name)
+                WHEN item.column_name IN ('http_method', 'content_type', 'query_string') THEN
+                    format('HTTP 请求审计记录中的 `%s`。', item.column_name)
+                WHEN item.column_name IN ('ip_allowlist', 'permissions', 'admin_roles', 'supported_order_types',
+                                          'supported_time_in_force') THEN
+                    format('授权或能力控制使用的 `%s` 集合。', item.column_name)
+                WHEN item.column_name IN ('lease_until') THEN '租约失效时间；超过该时间后其他实例可接管。'
+                WHEN item.column_name IN ('maker_instrument_version', 'taker_instrument_version') THEN
+                    format('成交%s侧订单绑定的合约配置版本。', item.column_name)
+                WHEN item.column_name IN ('maker_position_side', 'taker_position_side', 'scan_position_side',
+                                          'target_position_side') THEN
+                    format('`%s` 对应的持仓方向。', item.column_name)
+                WHEN item.column_name IN ('target_side') THEN 'ADL 或强平目标用户的买卖方向。'
+                WHEN item.column_name IN ('object_key', 'original_filename', 'document_type') THEN
+                    format('上传文档在对象存储或原始请求中的 `%s`。', item.column_name)
+                WHEN item.column_name IN ('password_hash', 'token_hash', 'secret_ciphertext',
+                                          'totp_secret_ciphertext', 'api_key') THEN
+                    format('安全凭据 `%s` 的哈希、密文或公开标识；不得存储明文秘密。', item.column_name)
+                WHEN item.column_name IN ('participant_role') THEN '本次成交结算参与方角色：maker 或 taker。'
+                WHEN item.column_name IN ('period') THEN 'K 线周期代码，例如 1m、5m 或 1h。'
+                WHEN item.column_name IN ('sequence_name') THEN '业务序列名称；在所属序列表内唯一。'
+                WHEN item.column_name IN ('severity') THEN '风险标签严重级别，用于告警和处置优先级。'
+                WHEN item.column_name IN ('chain') THEN '充提资产所在的区块链网络代码。'
+                WHEN item.column_name IN ('permission_code', 'role_code', 'rule_code', 'scene_code',
+                                          'tag_code', 'tier_code') THEN
+                    format('供程序稳定引用的 `%s` 唯一代码。', item.column_name)
+                WHEN item.column_name IN ('permission_name', 'role_name', 'rule_name', 'source_name') THEN
+                    format('`%s` 的可读名称。', item.column_name)
+                WHEN item.column_name IN ('price_precision', 'quantity_precision') THEN
+                    format('`%s` 的小数位数。', item.column_name)
+                WHEN item.column_name IN ('purpose', 'visibility') THEN
+                    format('数据或配置的 `%s` 使用范围。', item.column_name)
+                WHEN item.column_name IN ('reservation_account_type', 'source_account_type', 'target_account_type') THEN
+                    format('资金预占或划转使用的 `%s`。', item.column_name)
+                WHEN item.column_name IN ('reservation_asset') THEN '订单资金预占使用的资产代码。'
+                WHEN item.column_name IN ('result', 'result_code') THEN
+                    format('命令、调用或投影处理的 `%s`。', item.column_name)
+                WHEN item.column_name IN ('source', 'source_partition', 'source_offset', 'source_symbol') THEN
+                    format('来源系统定位、去重或回放使用的 `%s`。', item.column_name)
+                WHEN item.column_name IN ('to_address') THEN '链上提现的目标地址。'
+                WHEN item.column_name IN ('websocket_subscribe_message') THEN '连接外部 WebSocket 后发送的订阅消息。'
+                WHEN item.column_name IN ('created_at_epoch_ms', 'updated_at_epoch_ms') THEN
+                    format('`%s`，Unix epoch 毫秒。', item.column_name)
+                WHEN item.column_name LIKE '%\_id' ESCAPE '\' THEN
+                    format('`%s` 对应业务对象的唯一标识。', item.column_name)
+                WHEN item.column_name LIKE '%\_units' ESCAPE '\' THEN
+                    format('`%s` 的最小精度整数值，禁止使用浮点数。', item.column_name)
+                WHEN item.column_name LIKE '%\_ppm' ESCAPE '\' THEN
+                    format('`%s` 的 ppm 定点值（一百万分之一）。', item.column_name)
+                WHEN item.column_name LIKE '%\_steps' ESCAPE '\' THEN
+                    format('`%s` 的离散数量 step。', item.column_name)
+                WHEN item.column_name LIKE '%\_ticks' ESCAPE '\' THEN
+                    format('`%s` 的离散价格 tick。', item.column_name)
+                WHEN item.column_name LIKE '%\_count' ESCAPE '\' THEN
+                    format('`%s` 的累计数量或本批次数量。', item.column_name)
+                WHEN item.column_name LIKE '%\_sequence' ESCAPE '\' THEN
+                    format('`%s` 的单调序列号。', item.column_name)
+                WHEN item.column_name LIKE '%\_revision' ESCAPE '\' THEN
+                    format('`%s` 的状态修订号。', item.column_name)
+                WHEN item.column_name LIKE '%\_at' ESCAPE '\' OR item.column_name LIKE '%\_time' ESCAPE '\' THEN
+                    format('`%s` 对应的业务时间。', item.column_name)
+                WHEN item.column_name LIKE '%\_enabled' ESCAPE '\' OR item.column_name LIKE 'is\_%' ESCAPE '\' THEN
+                    format('`%s` 功能开关或布尔状态。', item.column_name)
+                WHEN item.column_name LIKE '%\_status' ESCAPE '\' THEN
+                    format('`%s` 业务状态；允许值由所在表约束限定。', item.column_name)
+                ELSE format('表 `%s` 的 `%s` 业务属性，存储类型为 %s。',
+                            item.table_name, item.column_name, item.data_type)
+            END
+        END;
+        EXECUTE format('COMMENT ON COLUMN %I.%I.%I IS %L',
+                       'public', item.table_name, item.column_name, column_description);
+    END LOOP;
+
+    FOR item IN
+        SELECT c.relname AS table_name, a.attname AS column_name
+          FROM pg_attribute a
+          JOIN pg_class c ON c.oid = a.attrelid
+         WHERE c.relnamespace = 'public'::regnamespace
+           AND c.relkind IN ('r', 'p')
+           AND a.attnum > 0
+           AND NOT a.attisdropped
+           AND a.attname = 'product_line'
+    LOOP
+        constraint_name := left(item.table_name || '_product_line_domain_ck', 63);
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+             WHERE conrelid = format('%I.%I', 'public', item.table_name)::regclass
+               AND conname = constraint_name
+        ) THEN
+            EXECUTE format(
+                'ALTER TABLE %I.%I ADD CONSTRAINT %I CHECK (%I IN (%L,%L,%L,%L,%L,%L))',
+                'public', item.table_name, constraint_name, item.column_name,
+                'SPOT', 'LINEAR_PERPETUAL', 'INVERSE_PERPETUAL',
+                'LINEAR_DELIVERY', 'INVERSE_DELIVERY', 'OPTION');
+        END IF;
+    END LOOP;
+
+    FOR item IN
+        SELECT c.relname AS table_name, a.attname AS column_name
+          FROM pg_attribute a
+          JOIN pg_class c ON c.oid = a.attrelid
+         WHERE c.relnamespace = 'public'::regnamespace
+           AND c.relkind IN ('r', 'p')
+           AND a.attnum > 0
+           AND NOT a.attisdropped
+           AND a.atttypid IN ('int2'::regtype, 'int4'::regtype, 'int8'::regtype)
+           AND (a.attname IN ('version', 'instrument_version')
+                OR a.attname ~ '(_sequence|_revision|_count)$'
+                OR a.attname IN ('sequence', 'revision', 'attempts', 'cluster_position'))
+    LOOP
+        constraint_name := left(item.table_name || '_' || item.column_name, 50)
+                           || '_' || substr(md5(item.table_name || '.' || item.column_name), 1, 8)
+                           || '_ck';
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+             WHERE conrelid = format('%I.%I', 'public', item.table_name)::regclass
+               AND conname = constraint_name
+        ) THEN
+            EXECUTE format(
+                'ALTER TABLE %I.%I ADD CONSTRAINT %I CHECK (%I %s)',
+                'public', item.table_name, constraint_name, item.column_name,
+                CASE WHEN item.column_name IN ('version', 'instrument_version')
+                     THEN '> 0' ELSE '>= 0' END);
+        END IF;
+    END LOOP;
+
+    IF EXISTS (
+        SELECT 1
+          FROM pg_attribute a
+          JOIN pg_class c ON c.oid = a.attrelid
+          LEFT JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = a.attnum
+         WHERE c.relnamespace = 'public'::regnamespace
+           AND c.relkind IN ('r', 'p')
+           AND a.attnum > 0
+           AND NOT a.attisdropped
+           AND d.description IS NULL
+    ) THEN
+        RAISE EXCEPTION 'schema documentation gate failed: uncommented columns remain';
+    END IF;
+
+    SELECT string_agg(c.relname || '.' || a.attname, ', ' ORDER BY c.relname, a.attnum)
+      INTO generic_columns
+      FROM pg_attribute a
+      JOIN pg_class c ON c.oid = a.attrelid
+      JOIN pg_description d ON d.objoid = c.oid AND d.objsubid = a.attnum
+     WHERE c.relnamespace = 'public'::regnamespace
+       AND c.relkind IN ('r', 'p')
+       AND a.attnum > 0
+       AND NOT a.attisdropped
+       AND d.description LIKE '表 `%` 的 `%` 业务属性，存储类型为 %';
+    IF generic_columns IS NOT NULL THEN
+        RAISE EXCEPTION 'schema documentation gate failed: generic column descriptions remain: %', generic_columns;
+    END IF;
+
+END $$;
+
+COMMIT;
