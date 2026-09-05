@@ -10,7 +10,6 @@ import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreMarginMode;
-import com.surprising.aeron.protocol.CoreMatcherTransition;
 import com.surprising.aeron.protocol.CoreRiskScanControlView;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.matching.CoreMatchingOrder;
@@ -2174,7 +2173,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             CoreInstrumentState instrument = instrument(identities.symbol(taker.symbolId()));
             if (instrument == null) throw new IllegalStateException("match instrument is missing");
             if (productLine.isDerivative()) {
-                RuntimePerpetualMatchProcessor.validateAndPrepare(
+                RuntimeDerivativeMatchProcessor.validateAndPrepare(
                         takerOrderId, matchingResult.matcherEvents(), this, identities);
             } else {
                 RuntimeSpotMatchProcessor.validate(takerOrderId, matchingResult.matcherEvents(), this);
@@ -2225,7 +2224,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             CoreInstrumentState instrument = instrument(identities.symbol(taker.symbolId()));
             if (instrument == null) throw new IllegalStateException("match instrument is missing");
             if (productLine.isDerivative()) {
-                RuntimePerpetualMatchProcessor.validateAndPrepare(
+                RuntimeDerivativeMatchProcessor.validateAndPrepare(
                         takerOrderId, matchingResult.matcherEvents(), this, identities);
             } else {
                 RuntimeSpotMatchProcessor.validate(takerOrderId, matchingResult.matcherEvents(), this);

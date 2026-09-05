@@ -14,7 +14,6 @@ import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.protocol.ExecuteAdlCommand;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
-import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
@@ -199,7 +198,7 @@ class CorePerpetualFinancialMatrixTest {
         TradingRuntimeState runtime = RuntimeStateProjector.project(beforeAdl, identities);
         runtime.startAccountLanes();
         try {
-            RuntimePerpetualLiquidationProcessor.applyAdlRuntime(command, runtime, identities);
+            RuntimeDerivativeLiquidationProcessor.applyAdlRuntime(command, runtime, identities);
 
             RuntimeStateParityChecker.assertMatches(expected, identities, runtime);
             assertThat(runtime.accountLane(USER_ID).queueDepth()).isZero();
@@ -268,14 +267,14 @@ class CorePerpetualFinancialMatrixTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(ordered, identities);
 
-        assertThat(RuntimePerpetualLiquidationProcessor.applyCancellationAdvance(
+        assertThat(RuntimeDerivativeLiquidationProcessor.applyCancellationAdvance(
                 ordered, command, canceled, 702, runtime, identities)).isSameAs(runtime);
         RuntimeStateParityChecker.assertMatches(expected, identities, runtime);
 
         TradingCoreState canceledState = reducer.cancelLifecycleOrders(ordered, canceled);
         TradingCoreState executionExpected = reducer.executeLiquidationAfterCancellation(canceledState, command);
         TradingRuntimeState executionRuntime = RuntimeStateProjector.project(ordered, identities);
-        assertThat(RuntimePerpetualLiquidationProcessor.applyExecution(
+        assertThat(RuntimeDerivativeLiquidationProcessor.applyExecution(
                 ordered, command, canceled, executionRuntime, identities)).isSameAs(executionRuntime);
         RuntimeStateParityChecker.assertMatches(executionExpected, identities, executionRuntime);
     }
@@ -467,7 +466,7 @@ class CorePerpetualFinancialMatrixTest {
                 1, plan.triggerPriceSequence(), executionPrice, feeRate);
         RuntimeIdentityRegistry liquidationIdentities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtimeLiquidated = RuntimeStateProjector.project(marked, liquidationIdentities);
-        assertThat(RuntimePerpetualLiquidationProcessor.applyExecution(
+        assertThat(RuntimeDerivativeLiquidationProcessor.applyExecution(
                 marked, liquidationCommand, List.of(), runtimeLiquidated, liquidationIdentities))
                 .isSameAs(runtimeLiquidated);
         TradingCoreState ending = reducer.executeLiquidation(marked, liquidationCommand);
@@ -638,7 +637,7 @@ class CorePerpetualFinancialMatrixTest {
                 1, liquidationSequence(marked), 90, 100_000);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtimeEnding = RuntimeStateProjector.project(marked, identities);
-        assertThat(RuntimePerpetualLiquidationProcessor.applyExecution(
+        assertThat(RuntimeDerivativeLiquidationProcessor.applyExecution(
                 marked, command, List.of(), runtimeEnding, identities)).isSameAs(runtimeEnding);
         TradingCoreState ending = reducer.executeLiquidation(marked, command);
         RuntimeStateParityChecker.assertMatches(ending, identities, runtimeEnding);
@@ -672,7 +671,7 @@ class CorePerpetualFinancialMatrixTest {
                 1, ResolveLiquidationCommand.Resolution.INSURANCE, coverage);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtimeEnding = RuntimeStateProjector.project(funded, identities);
-        assertThat(RuntimePerpetualLiquidationProcessor.applyResolution(
+        assertThat(RuntimeDerivativeLiquidationProcessor.applyResolution(
                 funded, command, runtimeEnding, identities)).isSameAs(runtimeEnding);
         TradingCoreState ending = reducer.resolveLiquidation(funded, command);
         RuntimeStateParityChecker.assertMatches(ending, identities, runtimeEnding);
@@ -732,7 +731,7 @@ class CorePerpetualFinancialMatrixTest {
                 beforeAdl.riskState().markPrices().get(SYMBOL).priceSequence(), 5, residual);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtimeEnding = RuntimeStateProjector.project(beforeAdl, identities);
-        assertThat(RuntimePerpetualLiquidationProcessor.applyAdl(
+        assertThat(RuntimeDerivativeLiquidationProcessor.applyAdl(
                 beforeAdl, command, runtimeEnding, identities)).isSameAs(runtimeEnding);
         TradingCoreState ending = reducer.executeAdl(beforeAdl, command);
         RuntimeStateParityChecker.assertMatches(ending, identities, runtimeEnding);

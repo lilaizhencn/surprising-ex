@@ -23,7 +23,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
-class RuntimePerpetualMatchProcessorTest {
+class RuntimeDerivativeMatchProcessorTest {
 
     @Test
     void persistentApplyMutatesProvidedRuntimeAndMatchesAuthoritativeReducer() {
@@ -39,7 +39,7 @@ class RuntimePerpetualMatchProcessorTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
 
-        TradingRuntimeState applied = RuntimePerpetualMatchProcessor.applyRuntime(
+        TradingRuntimeState applied = RuntimeDerivativeMatchProcessor.applyRuntime(
                 11, matches, runtime, identities);
 
         assertThat(applied).isSameAs(runtime);
@@ -58,7 +58,7 @@ class RuntimePerpetualMatchProcessorTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
 
-        assertThatThrownBy(() -> RuntimePerpetualMatchProcessor.apply(before, 11,
+        assertThatThrownBy(() -> RuntimeDerivativeMatchProcessor.apply(before, 11,
                 List.of(trade(12, 8, 100, 1, true, true),
                         trade(99, 9, 100, 1, true, true)), runtime, identities))
                 .isInstanceOf(IllegalStateException.class)
@@ -82,7 +82,7 @@ class RuntimePerpetualMatchProcessorTest {
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
         runtime.putUser(new UserRuntime(ProductLine.LINEAR_PERPETUAL, 99, 999, unrelated.positionMode()));
 
-        RuntimePerpetualMatchProcessor.applyTransition(before, expected, 11, matches, runtime, identities);
+        RuntimeDerivativeMatchProcessor.applyTransition(before, expected, 11, matches, runtime, identities);
 
         assertThat(runtime.user(99).revision()).isEqualTo(999);
     }
@@ -103,7 +103,7 @@ class RuntimePerpetualMatchProcessorTest {
         TradingCoreState after = new TradingCoreReducer().applyMatches(before, 11, "BTC", "USDT", matches);
 
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        TradingRuntimeState simulated = RuntimePerpetualMatchProcessor.simulate(before, 11, matches, identities);
+        TradingRuntimeState simulated = RuntimeDerivativeMatchProcessor.simulate(before, 11, matches, identities);
 
         int assetId = identities.assetId("USDT");
         assertThat(simulated.treasury().fee(assetId))
@@ -137,7 +137,7 @@ class RuntimePerpetualMatchProcessorTest {
         TradingCoreState after = new TradingCoreReducer().applyMatches(before, 11, "BTC", "USDT", List.of());
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
 
-        TradingRuntimeState simulated = RuntimePerpetualMatchProcessor.simulate(before, 11, List.of(), identities);
+        TradingRuntimeState simulated = RuntimeDerivativeMatchProcessor.simulate(before, 11, List.of(), identities);
 
         RuntimeStateParityChecker.assertMatches(after, identities, simulated);
     }
@@ -201,7 +201,7 @@ class RuntimePerpetualMatchProcessorTest {
                 + closed.treasuryState().feeBalances().get("USDT")).isEqualTo(3_000_000_000_000L);
 
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        TradingRuntimeState runtime = RuntimePerpetualMatchProcessor.simulateTransition(
+        TradingRuntimeState runtime = RuntimeDerivativeMatchProcessor.simulateTransition(
                 readyToClose, closed, 14, betterFill, identities);
         RuntimeStateParityChecker.assertMatches(closed, identities, runtime);
     }
@@ -224,7 +224,7 @@ class RuntimePerpetualMatchProcessorTest {
         TradingCoreState after = new TradingCoreReducer().applyMatches(before, 11, "BTC", "USDT", matches);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
 
-        TradingRuntimeState simulated = RuntimePerpetualMatchProcessor.simulate(before, 11, matches, identities);
+        TradingRuntimeState simulated = RuntimeDerivativeMatchProcessor.simulate(before, 11, matches, identities);
 
         int assetId = identities.assetId("USDT");
         assertThat(simulated.treasury().fee(assetId))

@@ -55,6 +55,36 @@ class CoreProductLineArchitectureContractTest {
         }
     }
 
+    @Test
+    void productRulesRejectForeignInstrumentsAndUnsupportedLifecycleOperations() {
+        for (ProductLine line : ProductLine.values()) {
+            ProductTradingRules rules = ProductTradingRulesRegistry.forProductLine(line);
+            CoreInstrumentState own = reducer.upsertInstrument(TradingCoreState.empty(line), instrument(line))
+                    .instruments().values().iterator().next();
+            rules.requireInstrument(own);
+            for (ProductLine other : ProductLine.values()) {
+                if (other == line) continue;
+                CoreInstrumentState foreign = reducer.upsertInstrument(
+                        TradingCoreState.empty(other), instrument(other)).instruments().values().iterator().next();
+                assertThatThrownBy(() -> rules.requireInstrument(foreign))
+                        .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                                error -> assertThat(error.code()).isEqualTo("PRODUCT_LINE_UNSUPPORTED"));
+            }
+            if (!line.isFundingProduct()) {
+                assertThatThrownBy(() -> rules.fundingDeltaUnits(own, 1, 100, 1_000))
+                        .isInstanceOf(CoreStateRejectedException.class);
+            }
+            if (!line.isDeliveryProduct()) {
+                assertThatThrownBy(() -> rules.lifecycleCashDeltaUnits(own, 1, 100, 110))
+                        .isInstanceOf(CoreStateRejectedException.class);
+            }
+            if (line == ProductLine.OPTION) {
+                assertThat(rules.lifecycleCashDeltaUnits(own, 2, 100, 110)).isEqualTo(20);
+                assertThat(rules.lifecycleCashDeltaUnits(own, -2, 100, 110)).isEqualTo(-20);
+            }
+        }
+    }
+
     private static UpsertInstrumentCommand instrument(ProductLine productLine) {
         ContractType contractType = ContractType.valueOf(productLine.contractTypeCode());
         boolean inverse = contractType.isInverse();

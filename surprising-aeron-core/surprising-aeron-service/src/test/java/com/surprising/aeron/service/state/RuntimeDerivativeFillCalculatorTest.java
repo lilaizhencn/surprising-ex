@@ -15,7 +15,7 @@ import com.surprising.product.api.ProductLine;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-class RuntimePerpetualFillCalculatorTest {
+class RuntimeDerivativeFillCalculatorTest {
 
     @Test
     void opensLinearPositionAndPreservesExplainedLockedFunds() {
@@ -27,7 +27,7 @@ class RuntimePerpetualFillCalculatorTest {
         TradingRuntimeState runtime = runtime(symbolId, assetId, 200);
         OrderRuntime order = runtime.order(11);
 
-        RuntimePerpetualFillCalculator.apply(runtime, identities, instrument, order,
+        RuntimeDerivativeFillCalculator.apply(runtime, identities, instrument, order,
                 positionKey, 100, 2, true, 10_000_000, assetId);
         runtime.releaseTerminalReservation(11);
 
@@ -55,7 +55,7 @@ class RuntimePerpetualFillCalculatorTest {
         TradingRuntimeState runtime = runtime(symbolId, assetId, 21);
         TradingRuntimeSnapshot before = runtime.snapshot(1);
 
-        assertThatThrownBy(() -> RuntimePerpetualFillCalculator.apply(runtime, identities, instrument,
+        assertThatThrownBy(() -> RuntimeDerivativeFillCalculator.apply(runtime, identities, instrument,
                 runtime.order(11), positionKey, 100, 2, true, 10_000_000, assetId))
                 .isInstanceOf(CoreStateRejectedException.class);
 
@@ -72,7 +72,7 @@ class RuntimePerpetualFillCalculatorTest {
         TradingRuntimeState runtime = runtimeWithPosition(symbolId, assetId, positionKey,
                 CoreOrderSide.SELL, 1, false, 800, 120, 100);
 
-        RuntimePerpetualFillCalculator.apply(runtime, identities, instrument, runtime.order(11),
+        RuntimeDerivativeFillCalculator.apply(runtime, identities, instrument, runtime.order(11),
                 positionKey, 110, 1, true, 10_000_000, assetId);
         runtime.releaseTerminalReservation(11);
 
@@ -99,7 +99,7 @@ class RuntimePerpetualFillCalculatorTest {
         TradingRuntimeState runtime = runtimeWithPosition(symbolId, assetId, positionKey,
                 CoreOrderSide.BUY, 1, false, 800, 40, 20);
 
-        RuntimePerpetualFillCalculator.apply(runtime, identities, instrument, runtime.order(11),
+        RuntimeDerivativeFillCalculator.apply(runtime, identities, instrument, runtime.order(11),
                 positionKey, 120, 1, true, 10_000_000, assetId);
         runtime.releaseTerminalReservation(11);
 
@@ -121,7 +121,7 @@ class RuntimePerpetualFillCalculatorTest {
         TradingRuntimeState runtime = runtimeWithPosition(symbolId, assetId, positionKey,
                 CoreOrderSide.SELL, 3, false, 800, 220, 200);
 
-        RuntimePerpetualFillCalculator.apply(runtime, identities, instrument, runtime.order(11),
+        RuntimeDerivativeFillCalculator.apply(runtime, identities, instrument, runtime.order(11),
                 positionKey, 120, 3, true, 10_000_000, assetId);
         runtime.releaseTerminalReservation(11);
 
@@ -149,7 +149,7 @@ class RuntimePerpetualFillCalculatorTest {
                 CoreOrderSide.SELL, 3, true, 800, 220, 200);
         TradingRuntimeSnapshot before = runtime.snapshot(1);
 
-        assertThatThrownBy(() -> RuntimePerpetualFillCalculator.apply(runtime, identities, instrument,
+        assertThatThrownBy(() -> RuntimeDerivativeFillCalculator.apply(runtime, identities, instrument,
                 runtime.order(11), positionKey, 120, 3, true, 10_000_000, assetId))
                 .isInstanceOf(CoreStateRejectedException.class);
         assertThat(runtime.snapshot(1)).isEqualTo(before);

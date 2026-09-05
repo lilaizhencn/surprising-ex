@@ -12,7 +12,6 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
-import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;
@@ -389,7 +388,7 @@ class CoreLifecycleStateTest {
         assertThatThrownBy(() -> reducer.resolveLiquidation(liquidated, command))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         exception -> assertThat(exception.code()).isEqualTo("LIQUIDATION_DEFICIT_REMAINS"));
-        assertThatThrownBy(() -> RuntimePerpetualLiquidationProcessor.simulateResolution(
+        assertThatThrownBy(() -> RuntimeDerivativeLiquidationProcessor.simulateResolution(
                 liquidated, command, new RuntimeIdentityRegistry()))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         exception -> assertThat(exception.code()).isEqualTo("LIQUIDATION_DEFICIT_REMAINS"));
@@ -427,7 +426,7 @@ class CoreLifecycleStateTest {
         TradingCoreState recovered = reducer.applyMarkPrice(state, command);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         RuntimeStateParityChecker.assertMatches(recovered, identities,
-                RuntimePerpetualRiskProcessor.simulateMarkPrice(
+                RuntimeDerivativeRiskProcessor.simulateMarkPrice(
                         state, command, state.users().keySet(), identities));
 
         assertThat(recovered.riskState().liquidations().get(1L).status())
@@ -563,7 +562,7 @@ class CoreLifecycleStateTest {
                 com.surprising.aeron.protocol.CorePositionSide.NET,
                 -10, 200, 1, 5, deficit - coverage);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        TradingRuntimeState runtimeResolved = RuntimePerpetualLiquidationProcessor.simulateAdl(
+        TradingRuntimeState runtimeResolved = RuntimeDerivativeLiquidationProcessor.simulateAdl(
                 state, command, identities);
         TradingCoreState resolved = reducer.executeAdl(state, command);
         RuntimeStateParityChecker.assertMatches(resolved, identities, runtimeResolved);
@@ -592,7 +591,7 @@ class CoreLifecycleStateTest {
                 new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, coverage));
         long residual = beforeAdl.riskState().liquidations().get(1L).deficitUnits();
 
-        assertThatThrownBy(() -> RuntimePerpetualLiquidationProcessor.simulateAdl(beforeAdl,
+        assertThatThrownBy(() -> RuntimeDerivativeLiquidationProcessor.simulateAdl(beforeAdl,
                 new com.surprising.aeron.protocol.ExecuteAdlCommand(1, 2, "BTC-USDT",
                         com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                         com.surprising.aeron.protocol.CorePositionSide.NET,
@@ -600,7 +599,7 @@ class CoreLifecycleStateTest {
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         exception -> assertThat(exception.code()).isEqualTo("ADL_POSITION_CONFLICT"));
 
-        assertThatThrownBy(() -> RuntimePerpetualLiquidationProcessor.simulateAdl(beforeAdl,
+        assertThatThrownBy(() -> RuntimeDerivativeLiquidationProcessor.simulateAdl(beforeAdl,
                 new com.surprising.aeron.protocol.ExecuteAdlCommand(1, 2, "BTC-USDT",
                         com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                         com.surprising.aeron.protocol.CorePositionSide.NET,
@@ -608,7 +607,7 @@ class CoreLifecycleStateTest {
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         exception -> assertThat(exception.code()).isEqualTo("STALE_MARK_PRICE"));
 
-        assertThatThrownBy(() -> RuntimePerpetualLiquidationProcessor.simulateAdl(beforeAdl,
+        assertThatThrownBy(() -> RuntimeDerivativeLiquidationProcessor.simulateAdl(beforeAdl,
                 new com.surprising.aeron.protocol.ExecuteAdlCommand(1, 2, "BTC-USDT",
                         com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                         com.surprising.aeron.protocol.CorePositionSide.NET,

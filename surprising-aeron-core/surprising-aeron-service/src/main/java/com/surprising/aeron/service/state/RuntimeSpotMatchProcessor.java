@@ -36,7 +36,7 @@ public final class RuntimeSpotMatchProcessor {
         if (instrument == null || instrument.version() != taker.instrumentVersion()) {
             throw new IllegalStateException("runtime match instrument is missing");
         }
-        if (SettlementKernels.forInstrument(instrument).productLine()
+        if (ProductTradingRulesRegistry.forInstrument(instrument).productLine()
                 != com.surprising.product.api.ProductLine.SPOT) {
             throw new IllegalStateException("spot matcher received a non-spot settlement kernel");
         }

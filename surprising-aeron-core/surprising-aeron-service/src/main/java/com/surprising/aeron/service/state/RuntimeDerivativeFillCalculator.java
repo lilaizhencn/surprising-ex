@@ -2,10 +2,10 @@ package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
 
-/** Calculates one linear/inverse perpetual fill against the owner-thread Runtime. */
-public final class RuntimePerpetualFillCalculator {
+/** Calculates one derivative fill against the owner-thread Runtime. */
+public final class RuntimeDerivativeFillCalculator {
 
-    private RuntimePerpetualFillCalculator() {
+    private RuntimeDerivativeFillCalculator() {
     }
 
     public static void apply(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
@@ -27,7 +27,7 @@ public final class RuntimePerpetualFillCalculator {
                 || fillPriceTicks <= 0 || fillQuantitySteps <= 0 || leveragePpm <= 0 || settleAssetId < 0) {
             throw new IllegalArgumentException("invalid perpetual fill arguments");
         }
-        SettlementKernel kernel = SettlementKernels.forInstrument(instrument);
+        ProductTradingRules kernel = ProductTradingRulesRegistry.forInstrument(instrument);
         if (kernel.productLine() == com.surprising.product.api.ProductLine.SPOT
                 || order.symbolId() < 0 || settleAssetId < 0) {
             throw new IllegalArgumentException("runtime fill instrument identity mismatch");
@@ -51,11 +51,7 @@ public final class RuntimePerpetualFillCalculator {
         }
 
         MarkPriceRuntime riskMark = runtime.markPrice(order.symbolId());
-        if (instrument.contractType().isOption() && (riskMark == null
-                || riskMark.indexPriceTicks() <= 0 || riskMark.forwardPriceTicks() <= 0)) {
-            throw new CoreStateRejectedException("OPTION_RISK_PRICE_MISSING",
-                    "option fill requires index and same-expiry forward prices");
-        }
+        if (instrument.contractType().isOption()) OptionFillCalculator.requireRiskMark(riskMark);
         FillResult result = calculate(instrument, order, reservation, current,
                 balance.availableUnits(), balance.lockedUnits(), fillPriceTicks, fillQuantitySteps,
                 taker, leveragePpm, settleAssetId, riskMark);
@@ -81,7 +77,7 @@ public final class RuntimePerpetualFillCalculator {
                 || fillQuantitySteps > order.remainingQuantitySteps()) {
             throw new IllegalArgumentException("invalid perpetual fill calculation");
         }
-        SettlementKernel kernel = SettlementKernels.forInstrument(instrument);
+        ProductTradingRules kernel = ProductTradingRulesRegistry.forInstrument(instrument);
         long signedFill = order.side() == CoreOrderSide.BUY ? fillQuantitySteps : Math.negateExact(fillQuantitySteps);
         long currentQuantity = current == null ? 0 : current.signedQuantitySteps();
         long currentAbs = Math.absExact(currentQuantity);
@@ -104,9 +100,9 @@ public final class RuntimePerpetualFillCalculator {
         long feeDelta = CoreContractMath.feeDeltaUnits(instrument, fillPriceTicks, fillQuantitySteps, feeRatePpm);
         long premiumDebit = Math.max(0, Math.negateExact(premiumDelta));
         long feeDebit = Math.max(0, Math.negateExact(feeDelta));
-        long premiumMarginFunding = instrument.contractType().isOption() && premiumDelta > 0 && openSteps > 0
-                ? Math.min(marginIncrease,
-                CoreContractMath.optionPremiumUnits(instrument, fillPriceTicks, openSteps)) : 0;
+        long premiumMarginFunding = instrument.contractType().isOption()
+                ? OptionFillCalculator.premiumMarginFunding(
+                        instrument, premiumDelta, openSteps, marginIncrease, fillPriceTicks) : 0;
         long proportionalBudget = proportional(reservation.reservedUnits(), fillQuantitySteps,
                 order.remainingQuantitySteps());
         long fillReservationBudget = Math.min(reservation.reservedUnits(),
@@ -217,22 +213,10 @@ public final class RuntimePerpetualFillCalculator {
                                              long priceTicks,
                                              long leveragePpm,
                                              MarkPriceRuntime riskMark) {
-        if (openSteps == 0 || instrument.contractType().isOption() && signedFillSteps > 0) return 0;
-        long indexPriceTicks = riskMark == null ? 0 : riskMark.indexPriceTicks();
-        long projectedNotional = CoreContractMath.riskNotionalUnits(instrument,
-                Math.absExact(projectedQuantitySteps), instrument.contractType().isOption()
-                        ? indexPriceTicks : priceTicks);
-        var bracket = CoreContractMath.maintenanceRiskBracket(instrument, projectedNotional);
-        long bracketRate = bracket.initialMarginRatePpm();
-        long leverageRate = CoreContractMath.initialMarginRateFromLeverage(leveragePpm);
-        long effectiveRate = instrument.contractType().isOption() ? bracketRate
-                : Math.max(Math.max(instrument.initialMarginRatePpm(), bracketRate), leverageRate);
-        long marginPriceTicks = instrument.contractType().isOption()
-                ? riskMark.markPriceTicks() : priceTicks;
-        return CoreContractMath.openingMarginUnits(instrument,
-                signedFillSteps > 0 ? CoreOrderSide.BUY : CoreOrderSide.SELL,
-                marginPriceTicks, openSteps, effectiveRate,
-                indexPriceTicks, riskMark == null ? 0 : riskMark.forwardPriceTicks(),
-                bracket.optionMarginFactorPpm());
+        return instrument.contractType().isOption()
+                ? OptionFillCalculator.openingMarginForFill(instrument, projectedQuantitySteps, signedFillSteps,
+                openSteps, priceTicks, leveragePpm, riskMark)
+                : FuturesFillCalculator.openingMarginForFill(instrument, projectedQuantitySteps, signedFillSteps,
+                openSteps, priceTicks, leveragePpm, riskMark);
     }
 }

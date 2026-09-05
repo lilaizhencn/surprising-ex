@@ -2,13 +2,12 @@ package com.surprising.aeron.service.state;
 
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
-import com.surprising.aeron.service.matching.CoreMatchingResult;
 import java.util.List;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 
-public final class RuntimePerpetualMatchProcessor {
+public final class RuntimeDerivativeMatchProcessor {
 
-    private RuntimePerpetualMatchProcessor() {
+    private RuntimeDerivativeMatchProcessor() {
     }
 
     public static TradingRuntimeState simulate(TradingCoreState before, long takerOrderId,
@@ -264,7 +263,7 @@ public final class RuntimePerpetualMatchProcessor {
         Long configuredLeverage = runtime.leverage(
                 new CoreLeverageKey(order.userId(), instrument.symbol(), order.marginMode()));
         long leverage = configuredLeverage == null ? instrument.maxLeveragePpm() : configuredLeverage;
-        RuntimePerpetualFillCalculator.apply(runtime, identities, instrument, order,
+        RuntimeDerivativeFillCalculator.apply(runtime, identities, instrument, order,
                 identities.preparedPositionKey(order.userId(), positionKey(instrument.symbol(), order.positionSide())),
                 priceTicks, quantitySteps, taker, leverage, settleAssetId, treasuryDelta);
     }

@@ -43,7 +43,7 @@ public final class RuntimeSettlementProcessor {
         if (command.settlementId() == previousSettlement) {
             return new CoreSettlementProgressView(command.settlementId(), true, true, 0, 0, 0, 0);
         }
-        SettlementKernel kernel = SettlementKernels.forInstrument(instrument);
+        ProductTradingRules kernel = ProductTradingRulesRegistry.forInstrument(instrument);
         validateSettlement(kernel, command);
         TreasuryRuntime.LifecycleProgressRuntime previousProgress = runtime.treasury().lifecycleProgress(symbolId);
         boolean chunked = indexedUserIds != null && chunkCommandId != null;
@@ -129,7 +129,7 @@ public final class RuntimeSettlementProcessor {
             throw new IllegalArgumentException("settlement cursor must advance");
         }
         CoreInstrumentState instrument = requireInstrument(runtime, command);
-        validateSettlement(SettlementKernels.forInstrument(instrument), command);
+        validateSettlement(ProductTradingRulesRegistry.forInstrument(instrument), command);
         int symbolId = identities.symbolId(instrument.symbol());
         TreasuryRuntime.LifecycleProgressRuntime progress = runtime.treasury().lifecycleProgress(symbolId);
         validateProgress(progress, command, true);
@@ -143,7 +143,7 @@ public final class RuntimeSettlementProcessor {
     }
 
     private static RuntimeTreasuryDelta settleLane(TradingRuntimeState runtime,
-                                                   CoreInstrumentState instrument, SettlementKernel kernel,
+                                                   CoreInstrumentState instrument, ProductTradingRules kernel,
                                                    SettleInstrumentCommand command,
                                                    Iterable<Long> selectedUserIds, int symbolId, int assetId) {
         RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
@@ -158,7 +158,7 @@ public final class RuntimeSettlementProcessor {
 
     private static void settleUser(TradingRuntimeState runtime,
                                    CoreInstrumentState instrument,
-                                   SettlementKernel kernel, SettleInstrumentCommand command, long userId,
+                                   ProductTradingRules kernel, SettleInstrumentCommand command, long userId,
                                    int symbolId, int assetId, RuntimeTreasuryDelta treasuryDelta) {
         if (runtime.user(userId) == null) return;
         java.util.NavigableSet<Long> positionKeys = runtime.positionKeysForUserAndSymbol(userId, symbolId);
@@ -311,7 +311,7 @@ public final class RuntimeSettlementProcessor {
         return instrument;
     }
 
-    private static void validateSettlement(SettlementKernel kernel, SettleInstrumentCommand command) {
+    private static void validateSettlement(ProductTradingRules kernel, SettleInstrumentCommand command) {
         switch (kernel.productLine()) {
             case LINEAR_DELIVERY, INVERSE_DELIVERY, OPTION -> { }
             case SPOT, LINEAR_PERPETUAL, INVERSE_PERPETUAL -> throw new CoreStateRejectedException(

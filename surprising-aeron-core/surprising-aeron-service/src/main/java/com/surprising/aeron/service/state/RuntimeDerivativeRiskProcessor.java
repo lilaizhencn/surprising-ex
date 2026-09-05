@@ -4,16 +4,15 @@ import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.instrument.api.math.PerpetualContractMath;
 
-import java.util.Map;
 import java.util.NavigableSet;
 
 /** Applies perpetual mark-price risk work to the owner-thread Runtime. */
-public final class RuntimePerpetualRiskProcessor {
+public final class RuntimeDerivativeRiskProcessor {
 
     private static final ThreadLocal<PositionRiskScratch> POSITION_RISK =
             ThreadLocal.withInitial(PositionRiskScratch::new);
 
-    private RuntimePerpetualRiskProcessor() {
+    private RuntimeDerivativeRiskProcessor() {
     }
 
     public static TradingRuntimeState simulateMarkPrice(TradingCoreState before, ApplyMarkPriceCommand command,
@@ -54,7 +53,7 @@ public final class RuntimePerpetualRiskProcessor {
         if (current != null && command.priceSequence() <= current.priceSequence()) {
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "mark price sequence must increase");
         }
-        requireOptionRiskPrices(instrument, command.indexPriceTicks(), command.forwardPriceTicks());
+        OptionRiskRules.requireOptionRiskPrices(instrument, command.indexPriceTicks(), command.forwardPriceTicks());
         runtime.putMarkPrice(new MarkPriceRuntime(symbolId, instrument.version(), command.markPriceTicks(),
                 command.indexPriceTicks(), command.forwardPriceTicks(), command.priceSequence(),
                 command.generatedAtEpochMillis()));
@@ -70,14 +69,6 @@ public final class RuntimePerpetualRiskProcessor {
                 0, 0, "-", 0, 0, 0, 0, 0,
                 true, 0, 0, 0, 0, 0, 0, 0, 0));
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
-    }
-
-    private static void requireOptionRiskPrices(CoreInstrumentState instrument, long indexPriceTicks,
-                                                long forwardPriceTicks) {
-        if (instrument.contractType().isOption() && (indexPriceTicks <= 0 || forwardPriceTicks <= 0)) {
-            throw new CoreStateRejectedException("OPTION_RISK_PRICE_MISSING",
-                    "option mark requires index and same-expiry forward prices");
-        }
     }
 
     public static TradingRuntimeState simulateContinuation(TradingCoreState before, int maxWork,
@@ -352,7 +343,7 @@ public final class RuntimePerpetualRiskProcessor {
                 position.signedQuantitySteps(), mark.markPriceTicks(), mark.indexPriceTicks(),
                 mark.forwardPriceTicks());
         long equityDelta = instrument.contractType().isOption()
-                ? CoreContractMath.optionMarketValueUnits(instrument, position.signedQuantitySteps(),
+                ? OptionContractMath.optionMarketValueUnits(instrument, position.signedQuantitySteps(),
                 mark.markPriceTicks()) : unrealized;
         long equity = Math.addExact(position.positionMarginUnits(), equityDelta);
         long ratio = riskRatio(maintenance, equity);
@@ -407,7 +398,7 @@ public final class RuntimePerpetualRiskProcessor {
         result.priceSequence = mark.priceSequence();
         result.unrealized = unrealized;
         result.equityDelta = instrument.contractType().isOption()
-                ? CoreContractMath.optionMarketValueUnits(instrument, position.signedQuantitySteps(),
+                ? OptionContractMath.optionMarketValueUnits(instrument, position.signedQuantitySteps(),
                 mark.markPriceTicks()) : unrealized;
         result.maintenance = CoreContractMath.maintenanceMarginUnits(instrument,
                 position.signedQuantitySteps(), mark.markPriceTicks(), mark.indexPriceTicks(),

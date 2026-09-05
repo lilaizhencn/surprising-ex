@@ -12,7 +12,6 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     private static final int CACHE_LINE_LONGS = 16;
     private static final VarHandle LONGS = MethodHandles.arrayElementVarHandle(long[].class);
 
-
     private long commitSequence;
     private long requiredLaneMask;
     private long commitTimestamp;
@@ -162,7 +161,6 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         collected = false;
     }
 
-
     @Override
     public void execute(AccountLaneState lane) {
         long startedNanos = System.nanoTime();
@@ -230,7 +228,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             }
         }
         if (runtime.productLine().isDerivative()) {
-            RuntimePerpetualMatchProcessor.applyLane(value.takerOrderId(), value, laneId,
+            RuntimeDerivativeMatchProcessor.applyLane(value.takerOrderId(), value, laneId,
                     runtime, identities, valueInstrument, valueSettleAssetId, delta);
         } else {
             RuntimeSpotMatchProcessor.applyLane(value.takerOrderId(), value, laneId,

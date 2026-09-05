@@ -121,10 +121,10 @@ class RuntimeCommandProcessorTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
 
-        assertThat(RuntimeCommandProcessor.updatePositionMode(runtime, 7, command)).isTrue();
+        assertThat(DerivativeAccountCommandProcessor.updatePositionMode(runtime, 7, command)).isTrue();
 
         assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(expected);
-        assertThat(RuntimeCommandProcessor.updatePositionMode(runtime, 7, command)).isFalse();
+        assertThat(DerivativeAccountCommandProcessor.updatePositionMode(runtime, 7, command)).isFalse();
     }
 
     @Test
@@ -140,7 +140,7 @@ class RuntimeCommandProcessorTest {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
 
-        assertThat(RuntimeCommandProcessor.updateLeverage(runtime, identities, 7, command)).isTrue();
+        assertThat(DerivativeAccountCommandProcessor.updateLeverage(runtime, identities, 7, command)).isTrue();
 
         assertThat(RuntimeStateMaterializer.materialize(runtime, identities)).isEqualTo(expected);
     }

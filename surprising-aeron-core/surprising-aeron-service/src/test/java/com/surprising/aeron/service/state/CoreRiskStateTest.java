@@ -6,10 +6,7 @@ import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
-import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
-import com.surprising.aeron.protocol.PlaceOrderCommand;
-import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
 import com.surprising.instrument.api.model.ContractType;
@@ -64,7 +61,7 @@ class CoreRiskStateTest {
         TradingCoreState marked = reducer.applyMarkPrice(state, markCommand);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         RuntimeStateParityChecker.assertMatches(marked, identities,
-                RuntimePerpetualRiskProcessor.simulateMarkPrice(
+                RuntimeDerivativeRiskProcessor.simulateMarkPrice(
                         state, markCommand, state.users().keySet(), identities));
 
         CoreRiskSnapshot risk = marked.riskState().snapshots().get("7:BTC-USDT");
@@ -157,7 +154,7 @@ class CoreRiskStateTest {
         TradingRuntimeState runtime = RuntimeStateProjector.project(state, identities);
         long revisionBefore = runtime.revision();
 
-        RuntimePerpetualRiskProcessor.applyMarkPriceRuntime(
+        RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(
                 new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 1, 1_700_000_000_000L),
                 runtime, identities);
 
@@ -166,7 +163,7 @@ class CoreRiskStateTest {
         long positionKey = identities.preparedPositionKey(7, "BTC-USDT");
         assertThat(runtime.riskSnapshot(positionKey)).isNull();
 
-        RuntimePerpetualRiskProcessor.applyContinuationRuntime(64, state.users().keySet(), runtime, identities);
+        RuntimeDerivativeRiskProcessor.applyContinuationRuntime(64, state.users().keySet(), runtime, identities);
 
         assertThat(runtime.riskSnapshot(positionKey)).isNotNull();
     }
@@ -334,7 +331,7 @@ class CoreRiskStateTest {
         TradingRuntimeState runtime = RuntimeStateProjector.project(state, identities);
         runtime.startAccountLanes();
         try {
-            RuntimePerpetualRiskProcessor.applyMarkPrice(
+            RuntimeDerivativeRiskProcessor.applyMarkPrice(
                     state, command, state.users().keySet(), runtime, identities);
             for (int laneId = 0; laneId < runtime.topology().accountLaneCount(); laneId++) {
                 assertThat(runtime.accountLaneById(laneId).queueDepth()).isZero();
@@ -346,7 +343,7 @@ class CoreRiskStateTest {
             while (!first.riskState().scan().riskComplete()) {
                 TradingCoreState before = first;
                 first = reducer.continueRiskScan(before, 64);
-                RuntimePerpetualRiskProcessor.applyContinuation(
+                RuntimeDerivativeRiskProcessor.applyContinuation(
                         before, 64, before.users().keySet(), runtime, identities);
                 RuntimeStateParityChecker.assertMatches(first, identities, runtime);
             }
@@ -379,13 +376,13 @@ class CoreRiskStateTest {
         TradingRuntimeState runtime = RuntimeStateProjector.project(state, identities);
         runtime.startAccountLanes();
         try {
-            RuntimePerpetualRiskProcessor.applyMarkPrice(
+            RuntimeDerivativeRiskProcessor.applyMarkPrice(
                     state, command, state.users().keySet(), runtime, identities);
             RuntimeStateParityChecker.assertMatches(authoritative, identities, runtime);
             while (!authoritative.riskState().scan().riskComplete()) {
                 TradingCoreState before = authoritative;
                 authoritative = reducer.continueRiskScan(before, 7);
-                RuntimePerpetualRiskProcessor.applyContinuation(
+                RuntimeDerivativeRiskProcessor.applyContinuation(
                         before, 7, before.users().keySet(), runtime, identities);
                 RuntimeStateParityChecker.assertMatches(authoritative, identities, runtime);
             }
@@ -411,7 +408,7 @@ class CoreRiskStateTest {
                 1_700_000_000_001L);
         TradingCoreState after = reducer.applyMarkPrice(state, latest);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        TradingRuntimeState runtime = RuntimePerpetualRiskProcessor.simulateMarkPrice(
+        TradingRuntimeState runtime = RuntimeDerivativeRiskProcessor.simulateMarkPrice(
                 state, latest, state.users().keySet(), identities);
         RuntimeStateParityChecker.assertMatches(after, identities, runtime);
         assertThat(after.riskState().scan().scanStartPriceSequence()).isEqualTo(1);

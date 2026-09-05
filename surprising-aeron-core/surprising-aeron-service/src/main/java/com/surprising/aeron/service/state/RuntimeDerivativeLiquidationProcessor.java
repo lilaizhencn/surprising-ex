@@ -10,9 +10,9 @@ import java.util.Collection;
 import java.util.List;
 
 /** Runs perpetual liquidation settlement and insurance resolution on discardable Runtime projections. */
-public final class RuntimePerpetualLiquidationProcessor {
+public final class RuntimeDerivativeLiquidationProcessor {
 
-    private RuntimePerpetualLiquidationProcessor() {
+    private RuntimeDerivativeLiquidationProcessor() {
     }
 
     public static TradingRuntimeState simulateExecution(TradingCoreState before,
@@ -92,7 +92,7 @@ public final class RuntimePerpetualLiquidationProcessor {
         long signedCloseQuantity = position.signedQuantitySteps() > 0
                 ? closeQuantity : Math.negateExact(closeQuantity);
         long pnl = instrument.contractType().isOption()
-                ? CoreContractMath.optionMarketValueUnits(instrument, signedCloseQuantity,
+                ? OptionContractMath.optionMarketValueUnits(instrument, signedCloseQuantity,
                 command.executionPriceTicks())
                 : CoreContractMath.pnlUnits(instrument, signedCloseQuantity,
                 position.entryPriceTicks(), command.executionPriceTicks());
@@ -377,7 +377,7 @@ public final class RuntimePerpetualLiquidationProcessor {
             throw new CoreStateRejectedException("BALANCE_NOT_FOUND", "required balance is missing");
         }
         long closeCashDelta = instrument.contractType().isOption()
-                ? CoreContractMath.optionMarketValueUnits(instrument,
+                ? OptionContractMath.optionMarketValueUnits(instrument,
                 position.signedQuantitySteps() > 0 ? command.closeQuantitySteps()
                         : Math.negateExact(command.closeQuantitySteps()), mark.markPriceTicks())
                 : coverCapacity;

@@ -20,6 +20,35 @@ CROSS 只共享该 Core 内权益，ISOLATED 绑定 position identity。只保�
 | `surprising-aeron-client` | Leader 自动发现、切换处理和“超时即结果未知”同步客户端。 |
 | `surprising-aeron-tools` | Cluster 探针、状态 hash 查询和只读离线 replay 诊断；不得作为生产恢复或 snapshot 来源。 |
 
+## 六产品线规则归属
+
+`ProductTradingRulesRegistry` 以六个固定无状态实例选择规则，`SpotTradingRules`、
+`LinearPerpetualTradingRules`、`InversePerpetualTradingRules`、`LinearDeliveryTradingRules`、
+`InverseDeliveryTradingRules`、`OptionTradingRules` 各自定义产品身份、订单预留入口及支持的
+盈亏、资金费、交割/行权现金流。实现位于 service 模块的 `com.surprising.aeron.service.state` 包，
+保留包内可见性；规则类不拥有余额、订单、持仓或线程。
+
+- `RuntimeOrderAdmission` 保留身份、索引及校验次序；金额计算分到 `SpotOrderAdmission`、
+  `FuturesOrderAdmission`、`OptionOrderAdmission`。同类的 `reservationUnitsForState` 为 Reducer
+  状态值路径，保留其原有手续费预留口径，不混用 Runtime 的分片成交手续费预算。
+- `RuntimeSpotMatchProcessor` 负责现货；`RuntimeDerivativeMatchProcessor` 和
+  `RuntimeDerivativeFillCalculator` 保留共用成交执行/状态应用，`FuturesFillCalculator`、
+  `OptionFillCalculator` 分别承担保证金与期权权利金专属计算。
+- `OptionContractMath` 拥有期权保证金、权利金、估值和行权公式；正/反向开仓均价归
+  `LinearContractMath`/`InverseContractMath`，共用精确算术归 `CoreArithmetic`。
+- `DerivativeAccountCommandProcessor` 拥有持仓模式、杠杆和逐仓保证金命令。
+  `RuntimeDerivativeRiskProcessor`/`RuntimeDerivativeLiquidationProcessor` 是衍生品共用执行流程，
+  `OptionRiskRules` 负责期权价格要求；资金费仍由 `RuntimePerpetualFundingProcessor` 专门处理。
+- `ReducerSpotSettlement`、`ReducerDerivativeSettlement` 分离状态值成交逻辑，
+  `ReducerSettlementSupport` 只提供共用状态值资金操作。到期扫描/撤单/进度仍由
+  `RuntimeSettlementProcessor` 协调，现金流委托产品规则。
+
+`CoreProbeState` 继续协调幂等、sequence和提交，`TradingRuntimeState`/Account Lane继续唯一持有并修改
+权威状态。此整理不增加跨线程任务、状态副本、协议版本或快照格式。新增
+`ProductRulesRefactorBenchmark` 覆盖六条线的生产Core准入/成交/撤单及快照恢复，具体证据和验证范围见
+根目录 `PERFORMANCE_VALIDATION.md` 的 PV-140/PV-141：定向功能与恢复检查通过，
+性能采集受系统换页/CPU限速影响，仅作为诊断，尚未通过性能环境门禁。
+
 ## 当前按 Symbol 分片的 Matcher 流水线主链路
 
 每个 Product Core 仍只有一个 Aeron Cluster service owner，但可以在 fresh compatible state 启动前配置 1–64 个、

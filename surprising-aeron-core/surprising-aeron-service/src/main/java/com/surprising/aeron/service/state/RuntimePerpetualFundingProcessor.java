@@ -54,7 +54,7 @@ public final class RuntimePerpetualFundingProcessor {
         if (instrument.version() != command.instrumentVersion()) {
             throw new CoreStateRejectedException("INSTRUMENT_VERSION_CONFLICT", "instrument version differs");
         }
-        SettlementKernel kernel = SettlementKernels.forInstrument(instrument);
+        ProductTradingRules kernel = ProductTradingRulesRegistry.forInstrument(instrument);
         int symbolId = identities.symbolId(instrument.symbol());
         MarkPriceRuntime mark = runtime.markPrice(symbolId);
         if (mark == null) {
@@ -118,7 +118,7 @@ public final class RuntimePerpetualFundingProcessor {
     private static LaneFundingResult applyLane(ApplyFundingCommand command, Iterable<Long> selectedUserIds,
                                                TradingRuntimeState runtime, CoreInstrumentState instrument,
                                                int symbolId, int settleAssetId, long markPriceTicks) {
-        SettlementKernel kernel = SettlementKernels.forInstrument(instrument);
+        ProductTradingRules kernel = ProductTradingRulesRegistry.forInstrument(instrument);
         ArrayList<CoreFundingPaymentView> payments = new ArrayList<>();
         ArrayList<Long> changedUserIds = new ArrayList<>();
         RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();

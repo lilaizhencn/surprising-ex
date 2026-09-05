@@ -64,10 +64,10 @@ class CoreContractMathTest {
         assertThat(CoreContractMath.openingMarginUnits(
                 instrument, CoreOrderSide.SELL, 10, 2, 200_000, 100, 80,
                 1_200_000)).isEqualTo(44);
-        assertThat(CoreContractMath.optionSellOpenOrderMarginUnits(instrument,
+        assertThat(OptionContractMath.optionSellOpenOrderMarginUnits(instrument,
                 10, 10, 2, 100, 80, instrument.riskLimitBrackets().getFirst())).isEqualTo(24);
         assertThat(CoreContractMath.maintenanceMarginUnits(instrument, -2, 10, 100, 80)).isEqualTo(32);
-        assertThat(CoreContractMath.optionMarketValueUnits(instrument, -2, 10)).isEqualTo(-20);
+        assertThat(OptionContractMath.optionMarketValueUnits(instrument, -2, 10)).isEqualTo(-20);
     }
 
     @Test
@@ -96,13 +96,13 @@ class CoreContractMathTest {
 
     @Test
     void openInterestScalingUsesLongFastPathAndPreservesOverflowSemantics() {
-        assertThat(CoreContractMath.scaledFloorCapped(
+        assertThat(CoreArithmetic.scaledFloorCapped(
                 20_000, 250_000, 1_000_000, 1_000, 10_000)).isEqualTo(5_000);
-        assertThat(CoreContractMath.scaledFloorCapped(
+        assertThat(CoreArithmetic.scaledFloorCapped(
                 1, 1, 1_000_000, 1_000, 10_000)).isEqualTo(1_000);
-        assertThat(CoreContractMath.scaledFloorCapped(
+        assertThat(CoreArithmetic.scaledFloorCapped(
                 Long.MAX_VALUE, 1_000_000, 1_000_000, 0, 5_000)).isEqualTo(5_000);
-        assertThat(CoreContractMath.scaledFloorCapped(
+        assertThat(CoreArithmetic.scaledFloorCapped(
                 1, 1, 1, 10_000, 5_000)).isEqualTo(5_000);
     }
 }

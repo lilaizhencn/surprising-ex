@@ -16,7 +16,6 @@ import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.ExecuteAdlCommand;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
-import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
@@ -378,7 +377,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         assertThat(marked.user(USER_ID).positions().get(option.symbol()).signedQuantitySteps()).isEqualTo(1);
         assertThat(total(marked, option.settleAsset())).isEqualTo(100);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        TradingRuntimeState runtime = RuntimePerpetualRiskProcessor.simulateMarkPrice(
+        TradingRuntimeState runtime = RuntimeDerivativeRiskProcessor.simulateMarkPrice(
                 opening, mark, opening.users().keySet(), identities);
         try {
             RuntimeStateParityChecker.assertMatches(marked, identities, runtime);
@@ -391,7 +390,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
             var execution = new com.surprising.aeron.protocol.ExecuteLiquidationCommand(
                     99, 1, PREMIUM_PRICE, 0);
             assertThat(RuntimeLiquidationQueryService.isExecutable(runtime, identities, execution)).isFalse();
-            RuntimePerpetualLiquidationProcessor.applyExecutionRuntime(execution, List.of(), runtime, identities);
+            RuntimeDerivativeLiquidationProcessor.applyExecutionRuntime(execution, List.of(), runtime, identities);
             assertThat(runtime.liquidation(99).status()).isEqualTo(CoreLiquidationState.Status.CANCELED);
             assertThat(runtime.position(identities.positionKey(USER_ID, option.symbol()))
                     .signedQuantitySteps()).isEqualTo(1);
@@ -418,7 +417,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         assertThat(risk.status()).isEqualTo(CoreRiskStatus.LIQUIDATION);
         TradingCoreState beforeMark = opening;
         assertRuntimeParity(beforeMark, marked,
-                identities -> RuntimePerpetualRiskProcessor.simulateMarkPrice(
+                identities -> RuntimeDerivativeRiskProcessor.simulateMarkPrice(
                         beforeMark, mark, beforeMark.users().keySet(), identities));
     }
 
@@ -440,7 +439,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
                 .isEqualTo(3_980);
         assertThat(total(liquidated, option.settleAsset())).isEqualTo(2 * WALLET);
         assertRuntimeParity(marked, liquidated,
-                identities -> RuntimePerpetualLiquidationProcessor.simulateExecution(marked, liquidation, identities));
+                identities -> RuntimeDerivativeLiquidationProcessor.simulateExecution(marked, liquidation, identities));
 
         ResolveLiquidationCommand insurance = new ResolveLiquidationCommand(plan.liquidationId(),
                 ResolveLiquidationCommand.Resolution.INSURANCE, 2_020);
@@ -448,7 +447,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         assertThat(insured.riskState().liquidations().get(plan.liquidationId()).status())
                 .isEqualTo(CoreLiquidationState.Status.ADL_REQUIRED);
         assertRuntimeParity(liquidated, insured,
-                identities -> RuntimePerpetualLiquidationProcessor.simulateResolution(
+                identities -> RuntimeDerivativeLiquidationProcessor.simulateResolution(
                         liquidated, insurance, identities));
 
         ExecuteAdlCommand adl = new ExecuteAdlCommand(plan.liquidationId(), USER_ID, option.symbol(),
@@ -463,7 +462,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
                 .isEqualTo(CoreLiquidationState.Status.COMPLETED);
         assertThat(total(completed, option.settleAsset())).isEqualTo(2 * WALLET);
         assertRuntimeParity(insured, completed,
-                identities -> RuntimePerpetualLiquidationProcessor.simulateAdl(insured, adl, identities));
+                identities -> RuntimeDerivativeLiquidationProcessor.simulateAdl(insured, adl, identities));
         assertThat(TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(completed), ProductLine.OPTION))
                 .isEqualTo(completed);
     }
@@ -488,7 +487,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         assertThat(matched.user(MAKER_ID).balances().get(option.settleAsset()).lockedUnits()).isEqualTo(40);
 
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        try (TradingRuntimeState runtime = RuntimePerpetualMatchProcessor.simulate(
+        try (TradingRuntimeState runtime = RuntimeDerivativeMatchProcessor.simulate(
                 beforeMatch, 302, matches, identities)) {
             RuntimeStateParityChecker.assertMatches(matched, identities, runtime);
         }
@@ -515,7 +514,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         assertThat(total(closed, option.settleAsset())).isEqualTo(2 * WALLET);
 
         RuntimeIdentityRegistry closeIdentities = new RuntimeIdentityRegistry();
-        try (TradingRuntimeState runtime = RuntimePerpetualMatchProcessor.simulate(
+        try (TradingRuntimeState runtime = RuntimeDerivativeMatchProcessor.simulate(
                 beforeClose, 303, closeMatches, closeIdentities)) {
             RuntimeStateParityChecker.assertMatches(closed, closeIdentities, runtime);
         }
@@ -533,7 +532,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
 
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         try (TradingRuntimeState runtime = RuntimeStateProjector.project(state, identities)) {
-            assertThatThrownBy(() -> RuntimeCommandProcessor.updateLeverage(
+            assertThatThrownBy(() -> DerivativeAccountCommandProcessor.updateLeverage(
                     runtime, identities, USER_ID, command))
                     .isInstanceOfSatisfying(CoreStateRejectedException.class,
                             exception -> assertThat(exception.code())
@@ -585,7 +584,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
                 ? Math.max(variant.settlementPriceTicks() - STRIKE_PRICE, 0)
                 : Math.max(STRIKE_PRICE - variant.settlementPriceTicks(), 0);
         long expectedCashPerContract = Math.multiplyExact(intrinsicTicks, variant.notionalMultiplierUnits());
-        assertThat(CoreContractMath.optionSettlementCashUnits(
+        assertThat(OptionContractMath.optionSettlementCashUnits(
                 matched.instruments().get(variant.symbol()), variant.settlementPriceTicks()))
                 .as(variant.key() + " intrinsic cash per contract")
                 .isEqualTo(expectedCashPerContract);
