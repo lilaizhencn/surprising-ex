@@ -132,7 +132,7 @@ public class GatewayProxyService {
             return transferResponse(identity, request, body);
         }
         URI target = targetUri(service, route, request);
-        String bodyHash = bodySha256(body);
+        String bodyHash = adminRequest ? bodySha256(body) : null;
         ResponseEntity<byte[]> response;
         try {
             enforceAdminApprovalIfRequired(service, method, request, bodyHash, identity);
@@ -693,11 +693,7 @@ public class GatewayProxyService {
         }
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(body);
-            StringBuilder hex = new StringBuilder(digest.length * 2);
-            for (byte item : digest) {
-                hex.append(String.format("%02x", item));
-            }
-            return hex.toString();
+            return java.util.HexFormat.of().formatHex(digest);
         } catch (NoSuchAlgorithmException ex) {
             throw new IllegalStateException("SHA-256 is not available", ex);
         }
