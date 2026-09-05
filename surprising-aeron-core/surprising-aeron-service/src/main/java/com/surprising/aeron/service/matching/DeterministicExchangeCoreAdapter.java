@@ -64,8 +64,13 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private long restoredCoreSequence;
     private MatcherShardSnapshot[] restoredShardHashes;
     private boolean synchronousDispatchObserved;
-    private final ThreadLocal<Long> activeAeronTimestamp = ThreadLocal.withInitial(() -> 0L);
-    private final ThreadLocal<Boolean> matchingCommandActive = ThreadLocal.withInitial(() -> false);
+    private static final class MatcherCommandScope {
+        long aeronTimestamp;
+        boolean active;
+    }
+
+    private final ThreadLocal<MatcherCommandScope> commandScope =
+            ThreadLocal.withInitial(MatcherCommandScope::new);
 
     public DeterministicExchangeCoreAdapter() {
         this(true);
@@ -241,7 +246,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         int symbolId = ensureSymbol(command.symbol());
         users.add(userId);
         return directMatcher(() -> engine(symbolId).place(
-                activeAeronTimestamp.get(), command.orderId(), 0,
+                commandScope.get().aeronTimestamp, command.orderId(), 0,
                 command.matchingPriceTicks(), command.matchingPriceTicks(), command.quantitySteps(),
                 command.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
                 orderType(command), symbolId, userId));
@@ -338,14 +343,15 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         }
         Throwable failure = matcherFailure.get();
         if (failure != null) throw new IllegalStateException("matcher is poisoned by an earlier command", failure);
-        if (matchingCommandActive.get()) throw new IllegalStateException("nested synchronous matcher command");
+        MatcherCommandScope scope = commandScope.get();
+        if (scope.active) throw new IllegalStateException("nested synchronous matcher command");
         if (!synchronousDispatchObserved) {
             synchronousDispatchObserved = true;
             dispatchHighWaterMark.accumulateAndGet(1, Math::max);
         }
         try {
-            matchingCommandActive.set(true);
-            activeAeronTimestamp.set(aeronTimestamp);
+            scope.active = true;
+            scope.aeronTimestamp = aeronTimestamp;
             CoreMatchingResult result = command.get();
             int matcherShardId = controlShard ? -1 : matcherShardId(result);
             long sequence = matcherEvidence.nextSequence(matcherShardId);
@@ -355,8 +361,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             matcherFailure.compareAndSet(null, exception);
             throw exception;
         } finally {
-            activeAeronTimestamp.remove();
-            matchingCommandActive.remove();
+            scope.aeronTimestamp = 0;
+            scope.active = false;
         }
     }
 
@@ -408,19 +414,20 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             boolean controlShard,
             Supplier<CompletableFuture<CoreMatchingResult>> command) {
         CompletableFuture<CoreMatchingResult> submitted;
+        MatcherCommandScope scope = commandScope.get();
         try {
-            if (matchingCommandActive.get()) {
+            if (scope.active) {
                 throw new IllegalStateException("nested synchronous matcher command");
             }
-            matchingCommandActive.set(true);
-            activeAeronTimestamp.set(aeronTimestamp);
+            scope.active = true;
+            scope.aeronTimestamp = aeronTimestamp;
             submitted = command.get();
         } catch (RuntimeException exception) {
             matcherFailure.compareAndSet(null, exception);
             return CompletableFuture.failedFuture(exception);
         } finally {
-            activeAeronTimestamp.remove();
-            matchingCommandActive.remove();
+            scope.aeronTimestamp = 0;
+            scope.active = false;
         }
         if (submitted == null) {
             IllegalStateException failure = new IllegalStateException("matcher command returned no future");
@@ -475,7 +482,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private CompletableFuture<CoreMatchingResult> submitDirectPlace(
             long userId, int symbolId, CoreMatchingOrder command) {
         return completedMatcher(() -> engine(symbolId).place(
-                activeAeronTimestamp.get(), command.orderId(), 0,
+                commandScope.get().aeronTimestamp, command.orderId(), 0,
                 command.matchingPriceTicks(), command.matchingPriceTicks(), command.quantitySteps(),
                 command.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
                 orderType(command), symbolId, userId));
@@ -636,7 +643,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private CompletableFuture<CoreMatchingResult> submitDirectCancel(
             long userId, long orderId, int symbolId) {
         return completedMatcher(() -> engine(symbolId).cancel(
-                activeAeronTimestamp.get(), orderId, symbolId, userId));
+                commandScope.get().aeronTimestamp, orderId, symbolId, userId));
     }
 
     public CompletableFuture<CoreMatchingResult> cancelAsyncForContinuation(long userId, long orderId,
@@ -652,7 +659,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         int symbolId = ensureSymbol(symbol);
         users.add(userId);
         return directMatcher(() -> engine(symbolId).cancel(
-                activeAeronTimestamp.get(), orderId, symbolId, userId));
+                commandScope.get().aeronTimestamp, orderId, symbolId, userId));
     }
 
     public CompletableFuture<CoreMatchingResult> replaceOrderAsync(long userId, long orderId, String symbol,
@@ -707,7 +714,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     private CompletableFuture<CoreMatchingResult> submitDirectMove(
             long userId, long orderId, int symbolId, long newPriceTicks) {
         return completedMatcher(() -> engine(symbolId).move(
-                activeAeronTimestamp.get(), newPriceTicks, orderId, symbolId, userId));
+                commandScope.get().aeronTimestamp, newPriceTicks, orderId, symbolId, userId));
     }
 
     public CompletableFuture<Integer> orderBooksStateHashAsync() {

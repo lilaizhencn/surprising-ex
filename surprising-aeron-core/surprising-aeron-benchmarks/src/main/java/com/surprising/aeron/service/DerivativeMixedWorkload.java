@@ -171,6 +171,7 @@ final class DerivativeMixedWorkload {
                 long terminalCoreBefore = harness.terminalCoreMessages();
                 long[] laneBefore = completedLaneOperations(harness.state());
                 Set<Long> lifecycleOrders = new LinkedHashSet<>();
+                harness.refreshMarkPricesIfDue(template.symbols());
                 for (int round = 0; round < hftRounds; round++) {
                     executeTwoSidedBurst(harness, template, hftBatchSize, lifecycleOrders);
                     if (round < template.symbols().size()) executeHeavyWork(harness, template, round);
@@ -200,7 +201,9 @@ final class DerivativeMixedWorkload {
                             TradingCommandCodec.encodeContinueRiskScan(
                                     new ContinueRiskScanCommand(RISK_BATCH_SIZE))));
                 } else {
-                    long sequence = ++markSequences[index];
+                    long sequence = Math.incrementExact(Math.max(markSequences[index],
+                            target.state().runtimeMarkPrice(symbol).priceSequence()));
+                    markSequences[index] = sequence;
                     target.execute(target.command(CoreMessageType.APPLY_MARK_PRICE,
                             CommandSource.KAFKA_INPUT_BRIDGE, 0,
                             TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(

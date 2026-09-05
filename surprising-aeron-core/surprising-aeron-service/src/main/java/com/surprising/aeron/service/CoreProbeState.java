@@ -413,9 +413,9 @@ public final class CoreProbeState implements AutoCloseable {
                 && accountLaneReadQuery(message.header().messageType())) {
             if (singleUserLaneQuery(message.header().messageType()) && message.header().userId() > 0) {
                 runtimePlaceOrderState.readFence(
-                        message.header().userId(), runtimeProjectionJournal.publishedSequence());
+                        message.header().userId(), committedCoreSequence);
             } else {
-                runtimePlaceOrderState.readFenceAll(runtimeProjectionJournal.publishedSequence());
+                runtimePlaceOrderState.readFenceAll(committedCoreSequence);
             }
         }
         if (message.header().kind() == WireMessageKind.QUERY
@@ -880,7 +880,7 @@ public final class CoreProbeState implements AutoCloseable {
                                 true, "NO_NATIVE_COMMAND").withCoreSequence(nextAppliedCommandCount),
                         expectedLaneMask, validAccountLaneMask());
                 committedLaneMask = stageLaneMutation(
-                        nextCommitSequence(), commandChangedUserIds, commandLaneContext);
+                        nextAppliedCommandCount, commandChangedUserIds, commandLaneContext);
                 if (commandLaneContext.completedLaneMask() != expectedLaneMask) {
                     throw new IllegalStateException("single command account lane mask mismatch");
                 }
@@ -979,13 +979,14 @@ public final class CoreProbeState implements AutoCloseable {
         CoreResponse completed = tryActivatePipelinedOrderBatch(batch, pending)
                 ? null
                 : pendingOrderBatches.keySet().iterator().next() == sequence
-                ? activateOrderBatch(batch, pending) : null;
+                ? activateOrderBatch(batch, pending, false) : null;
         if (completed != null) return completed;
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, matchingPendingCode(),
                 appliedCommandCount, 0, pendingStateHash, EMPTY_RESPONSE_DATA);
     }
 
-    private CoreResponse activateOrderBatch(OrderBatchPending batch, PendingMatching pending) {
+    private CoreResponse activateOrderBatch(OrderBatchPending batch, PendingMatching pending,
+                                             boolean deferCompletion) {
         CoreAdmissionReservation reservation = sequenceAdmission(pending.sequence());
         if (reservation == null) throw new IllegalStateException("order batch admission reservation is missing");
         activateFactContext(reservation, pending.command(), pending.fingerprint());
@@ -1018,7 +1019,8 @@ public final class CoreProbeState implements AutoCloseable {
             clearFactContext();
             return null;
         }
-        CoreResponse response = startOrderBatchItem(batch, pending, batch.clusterTimestamp, batch.clusterPosition);
+        CoreResponse response = startOrderBatchItem(batch, pending, batch.clusterTimestamp,
+                batch.clusterPosition, deferCompletion);
         if (response == null) clearFactContext();
         return response;
     }
@@ -1246,7 +1248,8 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private CoreResponse startOrderBatchItem(OrderBatchPending batch, PendingMatching pending,
-                                             long clusterTimestamp, long clusterPosition) {
+                                             long clusterTimestamp, long clusterPosition,
+                                             boolean deferCompletion) {
         while (batch.nextIndex < batch.items.size()) {
             OrderBatchItem item = batch.items.get(batch.nextIndex);
             long runtimeRevisionBefore = runtimePlaceOrderState.revision();
@@ -1270,6 +1273,14 @@ public final class CoreProbeState implements AutoCloseable {
                         List.of());
                 batch.nextIndex++;
             }
+        }
+        if (deferCompletion) {
+            // Background activation has no response consumer. Even a batch with no native
+            // command must remain pending until the ordered completion pump publishes it.
+            batch.matchingApplied = true;
+            initializeOrderBatchLaneContext(batch, pending);
+            signalPendingMatchingReady(batch.sequence);
+            return null;
         }
         return finishOrderBatch(batch, pending, clusterTimestamp, clusterPosition);
     }
@@ -1458,7 +1469,7 @@ public final class CoreProbeState implements AutoCloseable {
         } else {
             applyCompletedOrderBatchItem(batch, pending, matchingResult);
         }
-        return startOrderBatchItem(batch, pending, clusterTimestamp, clusterPosition);
+        return startOrderBatchItem(batch, pending, clusterTimestamp, clusterPosition, false);
     }
 
     private void applyCompletedOrderBatchItem(OrderBatchPending batch, PendingMatching pending,
@@ -2955,7 +2966,7 @@ public final class CoreProbeState implements AutoCloseable {
                                     pending.command(), pending.fingerprint());
                             try {
                                 startOrderBatchItem(orderBatch, pending,
-                                        orderBatch.clusterTimestamp, orderBatch.clusterPosition);
+                                        orderBatch.clusterTimestamp, orderBatch.clusterPosition, true);
                             } finally {
                                 clearFactContext();
                             }
@@ -3062,7 +3073,7 @@ public final class CoreProbeState implements AutoCloseable {
             OrderBatchPending batch = pendingOrderBatches.get(pending.sequence());
             if (batch != null && !batch.started) {
                 if (tryActivatePipelinedOrderBatch(batch, pending)) continue;
-                activateOrderBatch(batch, pending);
+                activateOrderBatch(batch, pending, true);
                 return;
             }
             DeferredMatching deferred = deferredMatching.get(pending.sequence());
@@ -3664,7 +3675,7 @@ public final class CoreProbeState implements AutoCloseable {
         }
         materializeChangeAccumulators();
             long committedLaneMask = pending.settlementEvent() == null
-                    ? stageLaneMutation(nextCommitSequence(), changedUserIds.toPrimitiveArray(), laneContext)
+                    ? stageLaneMutation(sequence, changedUserIds.toPrimitiveArray(), laneContext)
                     : pending.settlementEvent().requiredLaneMask();
             if (laneContext.completedLaneMask() != laneContext.expectedLaneMask()) {
                 throw failMatching(pending, "account lane mask differs from immutable matcher result", null);
@@ -6338,10 +6349,6 @@ public final class CoreProbeState implements AutoCloseable {
         long laneMask = runtimePlaceOrderState.stageLaneMutation(sequence, userIds);
         context.completeLanes(laneMask);
         return laneMask;
-    }
-
-    private long nextCommitSequence() {
-        return Math.incrementExact(runtimeProjectionJournal.publishedSequence());
     }
 
     private long stageLaneMutation(

@@ -874,6 +874,19 @@ final class LinearPerpetualBenchmarkSupport {
             return benchmarkTimestamp(sequences.clusterPosition);
         }
 
+        void refreshMarkPricesIfDue(List<String> symbols) {
+            long now = nextCommandTimestamp();
+            for (String symbol : symbols) {
+                var mark = state.runtimeMarkPrice(symbol);
+                if (mark == null) throw new IllegalStateException("workload mark price is missing: " + symbol);
+                if (now - mark.generatedAtEpochMillis() < 1_000) continue;
+                execute(command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
+                        TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(symbol,
+                                mark.instrumentVersion(), mark.markPriceTicks(),
+                                Math.incrementExact(mark.priceSequence()), now))));
+            }
+        }
+
         void beginBusinessLatencies(int targetOperationsPerSecond) {
             businessLatencies = OpenLoopBusinessLatencyRecorder.createIfEnabled(targetOperationsPerSecond);
         }
@@ -1074,7 +1087,12 @@ final class LinearPerpetualBenchmarkSupport {
                     sequences.clusterPosition, awaitFirst, (sequence, response) -> {
                         PendingCommand pending = submittedMatching.peekFirst();
                         if (pending == null || pending.sequence != sequence) {
-                            throw new IllegalStateException("matching batch completion crossed submission order");
+                            throw new IllegalStateException("matching batch completion crossed submission order: actual="
+                                    + sequence + ", expected=" + (pending == null ? 0 : pending.sequence)
+                                    + ", expectedType=" + (pending == null ? "none" : pending.command.header().messageType())
+                                    + ", coreHead=" + state.firstPendingMatchingSequence()
+                                    + ", corePending=" + state.pendingMatchingCount()
+                                    + ", submitted=" + submittedMatching.size());
                         }
                         pending.response = response;
                         submittedMatching.removeFirst();
@@ -1111,6 +1129,9 @@ final class LinearPerpetualBenchmarkSupport {
             if (command.header().messageType() == CoreMessageType.PLACE_ORDER_BATCH
                     || command.header().messageType() == CoreMessageType.CANCEL_ORDER_BATCH
                     || command.header().messageType() == CoreMessageType.AMEND_ORDER_BATCH) {
+                if (TradingOrderBatchCodec.firstNonAppliedItem(response, operationWeight) >= 0) {
+                    validateBatchResponse(response, operationWeight);
+                }
                 if (deferBatchResponseValidation) {
                     deferredBatchResponse = response;
                     deferredBatchOperationWeight = operationWeight;

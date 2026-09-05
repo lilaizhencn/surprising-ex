@@ -251,12 +251,12 @@ final class SectionedCoreSnapshotParser {
             CoreProbeState candidate = null;
             try {
                 com.surprising.aeron.service.state.TradingRuntimeState.validateAccountLaneSnapshotManifest(
-                        accountLanes, manifest.projectionSequence(), tradingState, manifest.topology());
+                        accountLanes, manifest.coreSequence(), tradingState, manifest.topology());
                 candidate = CoreProbeState.prepareRestore(productLine, appliedCommandCount, probeValue,
                         commandResults, sourceSequences, tradingState, exportState, retention, matcherSnapshot,
                         manifest.projectionSequence(), feePolicies, pendingTransfers,
                         manifest.auditBusinessStateHash(), manifest.auditFundsStateHash());
-                candidate.restoreAccountLaneSnapshots(accountLanes, manifest.projectionSequence());
+                candidate.restoreAccountLaneSnapshots(accountLanes, manifest.coreSequence());
                 java.util.function.Consumer<CoreProbeState> observer = beforeActivationObserverForTest;
                 if (observer != null) observer.accept(candidate);
                 candidate.activate();

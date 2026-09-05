@@ -12,6 +12,35 @@ import org.junit.jupiter.api.Test;
 
 class LinearPerpetualBenchmarkSupportTest {
 
+    @Test
+    void longRunningDriverRefreshesPricesEvenWhenRiskWorkIsStillInFlight() throws Exception {
+        var template = LinearPerpetualMixedWorkload.template(4, 32, 2);
+        try (var harness = LinearPerpetualBenchmarkSupport.Harness.restore(template.snapshot())) {
+            var sequencesField = harness.getClass().getDeclaredField("sequences");
+            sequencesField.setAccessible(true);
+            Object sequences = sequencesField.get(harness);
+            var clockField = sequences.getClass().getDeclaredField("clusterPosition");
+            clockField.setAccessible(true);
+            clockField.setLong(sequences, Math.addExact(clockField.getLong(sequences), 6_000L * 1_024));
+            long now = harness.nextCommandTimestamp();
+            long before = harness.executedMessages();
+            harness.refreshMarkPricesIfDue(template.symbols());
+            assertThat(harness.executedMessages() - before).isEqualTo(template.symbols().size());
+            for (String symbol : template.symbols()) {
+                assertThat(harness.state().runtimeMarkPrice(symbol).generatedAtEpochMillis()).isEqualTo(now);
+            }
+            long refreshed = harness.executedMessages();
+            harness.refreshMarkPricesIfDue(template.symbols());
+            assertThat(harness.executedMessages()).isEqualTo(refreshed);
+            assertThat(harness.acceptedMessages()).isEqualTo(harness.terminalMessages());
+            var snapshot = harness.snapshotTemplate(4);
+            try (var restored = LinearPerpetualBenchmarkSupport.Harness.restore(snapshot)) {
+                assertThat(restored.state().tradingState().businessStateHash())
+                        .isEqualTo(harness.state().tradingState().businessStateHash());
+            }
+        }
+    }
+
     @org.junit.jupiter.api.RepeatedTest(8)
     void deepFillsRouteOnlyRelatedEventsAndConserveFundsAt256InFlight() {
         var template = LinearPerpetualBenchmarkSupport.deepFillBurstTemplate(4, 8);

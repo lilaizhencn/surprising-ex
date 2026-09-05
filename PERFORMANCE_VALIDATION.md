@@ -2956,3 +2956,53 @@
 
 - 修复后 `spot-retention-regression-after-2.log` 通过：Lane 在原 settlement 回收终态，余额端点合并整批原始资金边界，256在途连续三轮检查及snapshot通过。扩大测试另发现迟到 admission 通知路由越界、prepared position key 普通HashMap并发扩容、衍生品driver使用序号生成未来标记价时间；分别修正跳过已提交通知、并发索引和逻辑时钟，未放宽生产风险校验。
 - `spot-fix-affected-tests.log` 和 `spot-fix-affected-tests-2.log` 保留失败证据；后者service资金/恢复/批量13方法均通过，benchmark深成交8次通过但重复衍生品因未来标记价失败。最终 `identity-and-repeated-lifecycle.log` 的 identity并发回归、现货多轮、五条衍生品各8轮、深成交8次及其余Linear支持测试全部通过。上述是功能测试，不作为性能结果；未跑exporter/PG。
+
+## PV-20260905-256-129：现货终态及Lane并发修复后重新验证（采集前锁定，13:02 +08:00）
+
+- 被测commit=`fdeb207e`，对照commit=无（不运行旧版本）。新增变更：SPOT逐项批量Lane终态回收与整批余额端点合并、迟到admission通知过滤、position正向索引并发发布、衍生品driver标记价时间修正。jar SHA-256=`579fd694200d9553a6e01d555a69b1cea2eab6638d0bd77aab062dfb5a873768`。
+- 明确沿用PV-128锁定的机器/JDK、完整JVM/GC参数、场景A/B/C/D及资金持仓初态、并发用户/连接/symbol、业务计数口径和有效性条件：HotSpot25.0.1、Intel i9-9880H 8C16T、16GiB、macOS26.7；4GiB ZGC、AlwaysPreTouch、DisableExplicitGC、matcher=1、Lane=4、256in-flight；闭环饱和，CO未修正。一次只运行一个被测JVM；全部六产品线独立执行。主目标仍为场景A≥100000 terminal business ops/s，accepted=terminal、unfinished/期末backlog=0、资金/冻结/仓位/终态/snapshot正确。无profiler主轮f1/t1/wi3×3s/i3×5s，冷却20s，误差区间如实报告。
+- 九个主轮及九个profile顺序与PV-128相同；profile f1/t1/wi3×3s/i1×10s、`-prof gc`，启用NMT summary与退出统计、gc/safepoint日志、自定义JFR。JFR配置SHA-256=`4dbdbd4994757dc2e6930dee513d8ee298d687d9f298bc27434455d499784dc7`，NativeMemoryUsage/DirectBufferStatistics/ThreadAllocationStatistics 1s周期、execution20ms、TLAB/非TLAB分配及其他原配置事件；512MiB recording上限，检查实际覆盖时长与DataLoss。profiler数值不代替主吞吐。
+- 永续长稳沿用 `LinearPerpetualScaleSoakMain 1000 256 256 5 10 UNIFORM 1 20 32 600 30`：600s/30s采样、同JFR/NMT。额外SPOT长稳使用场景C的SPOT JMH，wi3×3s、i1×600s、f1/t1、gc profiler/JFR/NMT，以teardown资金和snapshot恢复检查验证终态增长修复。长稳沿用live set<1MiB/s、native buffer<256KiB/s、线程/FD/buffer count<0.01/s、至少3个GC后样本；缺失的spot FD/原生pool或三段业务分位明确列为部分验证，不从短测推出无泄漏。
+- 执行 `bash target/qualification/20260905-chain-256-r129/run.sh`；脚本SHA-256=`b3152f7fee06c2576f7d93344f370ba92bc478ed7885fb5694deec17e4113f56`，所有原始artifact在该目录。命令失败即停止后续轮次，修改代码/场景需再新建记录。未测试边界与PV-128相同：PG/exporter/wallet/真实Kafka-Aeron网络/API-WebSocket/native生产pool；仍不宣称所有架构优化已完成。
+
+### PV-129 终止结果与证据修正（2026-09-05，按采集顺序追加）
+
+- 九个主轮和九个短profile完成，但整轮无效/部分诊断：①主轮期间WallpaperAerials、视频解码、Metal编译及Spotlight出现明显CPU干扰；②长稳约430s出现 `matching batch completion crossed submission order`，600s未完成、SPOT600s未启动；③复核发现mixed只完整校验最后一个batch，可能漏掉中间item拒绝。因此撤回PV-128/PV-129中“mixed拒绝率0”的推断，不把任何历史reported terminal ops/s当作全成功业务容量。短轮资金余额与snapshot检查通过不等于每个批次item均成功。
+- 场景C覆盖范围修正：源码只执行订单生命周期、risk和适用产品资金费，未执行真实到期交割/行权/期权失效。此前锁定记录中的“交割/期权生命周期”表述过宽；本轮不能提供该范围验收证据，不修改已采数据或原定义。
+
+| 主轮（无profiler，仅诊断） | reported terminal business ops/s | terminal Core messages/s | fills/s |
+|---|---:|---:|---:|
+| U本位永续real mixed | 43658.270（99.9%误差±159045.704） | 4392.363 | 10333.134 |
+| service永续批量挂撤 | 40613.507（cycle×10240） | 2030.675 | 0 |
+| service现货批量挂撤 | 28611.340（cycle×10240） | 1430.567 | 0 |
+| 现货mixed | 21744.314 | 2070.887 | 未埋点，不记0 |
+| 币本位永续mixed | 48820.502 | 4653.679 | 未埋点，不记0 |
+| U本位交割mixed | 48073.134 | 4580.416 | 未埋点，不记0 |
+| 币本位交割mixed | 41615.724 | 3965.153 | 未埋点，不记0 |
+| 期权订单mixed | 43113.233 | 4107.836 | 未埋点，不记0 |
+| 深成交8 fills/order | 8684.681 | 8684.681 | 69477.450 |
+
+- 主轮完整误差、参数及raw samples见各`main-*.json/log`。service AuxCounters为EVENTS（#），表中由cycle主分数换算，不能把累计item计数当每秒吞吐。短轮已有driver的accepted/terminal、unfinished和期末backlog检查通过，窗口上限256；因漏检item状态不能据此认定错误率/拒绝率/超时率全0。非service各业务真实fill计数、三阶段按类型完整尾延迟等缺项保留。
+
+| gc profiler场景 | 分配MiB/s | bytes/JMH cycle | GC次数/时间ms |
+|---|---:|---:|---:|
+| 永续real mixed | 253.781 | 154132999.579（约7125 B/business op） | 4/622 |
+| service永续 | 260.693 | 94225118.400 | 2/133 |
+| service现货 | 162.412 | 107680781.176 | 6/117 |
+| 现货mixed | 158.927 | 279627328.000（约13004 B/business op） | 6/202 |
+| 币本位永续 | 374.313 | 260738270.588 | 8/914 |
+| U本位交割 | 302.126 | 177217876.400 | 4/433 |
+| 币本位交割 | 541.213 | 241576506.462 | 14/1471 |
+| 期权订单 | 360.012 | 168711834.667 | 4/448 |
+| 深成交 | 628.218 | 100865243.273 | 11/1401 |
+
+- profiler记录包含setup/warmup/teardown，GC总时间含并发工作，不等于停顿。deep每invocation新建/恢复fixture，分配含fixture，不可当成纯撮合每fill成本。以上每business op为driver计数换算，漏检拒绝问题同样影响该分母。
+- 长稳最近一次正常采样421.640s；前150s约50k→78k，后台CPU下降后连续30s窗口约148k～150k（同一commit，没有换版本）。未完成窗口及可能存在的item拒绝使其不能认定持续100k达标。线程14、FD13、Direct/Mapped bytes/count均0、swap0；风险workflow未完成数在约183～225波动，不能与未终态Core消息混淆。
+- 原始JFR：九个短文件约5～8MiB，`soak.jfr`约81MiB、summary434s、分析434.372s；所有10个summary的`jdk.DataLoss=0`。`*-summary.txt`、`*-analysis.txt`保存原始摘要/聚合，`jfr-sha256.txt`保存全部JFR SHA-256。采集命令见run.sh；分析命令为`jfr summary <file>`及`java -Xmx256m target/qualification/20260905-chain-256/JfrRead.java <file>`，均在性能进程停止后执行。
+- 长稳JFR CPU样本按线程：owner/harness12853、Lane3440、matcher1207、外围8；owner包含基准驱动，不是纯service owner。热点为`CommandFingerprint.of`/SHA、completion pump、Lane通知和settlement dispatch；matcher含`MatcherPrefixDigest`。Java分配采样权重总313399972096B（约721.5MB/s，含全录制），owner约154.6GB、Lane109.2GB、matcher49.6GB；top class为long[]、byte[]、OrderRuntime、Object[]、Long、NativeCommand/CoreMatchingResult、LongHashSet、ReservationRuntime、ThreadLocal.Entry。TLAB约294.6GB、非TLAB约19.7GB、最大采样对象8388624B。采样权重不提供精确对象数/op。
+- Heap/JIT/VM：JFR After-GC100点，最后530579456B、最大773849088B；排除首60s稳健斜率约172163B/s，但430s失败轮不能证明无泄漏。MBean日志若为0是无效GC池聚合样本，不当作真实heap归零。GC pause sum累计8.881ms，p50/p95/p99/max=0.086/0.172/0.251/0.251ms；safepoint351次，begin max0.180ms、同步max0.158ms；Compilation8932次、总56.609s、最长4.314s（含预热，不能说明短测已经充分预热）。详细事件及available codecache/deopt/类加载指标见summary/analysis，未对全部编译阶段单独分窗验收。
+- Native：退出NMT reserved74548625669B/committed4445204741B，ZGC巨量reserved是虚拟地址，不是RSS。JFR Heap committed固定4GiB；GC committed首4.5MB/末37.0MB/峰58.4MB，Code15.5→34.1MB、峰37.8MB，Class1.9→3.5MB，Thread约184→191KB、峰254KB，Other34.8→36.9KB。完整NMT category首末/峰值见soak-analysis；未验收生产Aeron/Netty/native pool分配释放余额。
+- 线程/IO：ThreadPark5323次，总82.386s（跨线程相加，主要Lane空闲，非锁竞争业务耗时）；owner/harness park累计17.338ms。owner/main存在类加载文件读和soak采样`printf`文件写，不能据此声称owner无同步IO或完整主链路验收；它们需与真实业务热段分窗区分。锁对象/墙钟等待全分布、OS上下文切换/pagefault、全业务三段p50/p90/p95/p99/p99.9/max、native池余额和完整长稳资金/恢复终检仍不齐备，结论为未通过完整验收。
+- 定位后的功能回归：`terminal-order-regression-before.log`确定性复现应回调[3,4,5]但只有[3,5]；背景全拒绝批次丢terminal。首次修复后的snapshot检查又暴露Core/projection fence混用；`terminal-order-regression-after-2.log`及`core-sequence-and-all-items-tests.log`修复后通过。新的`rejectedCancelContinuations`夹具已覆盖SPOT/LINEAR_PERPETUAL真实service、256窗口、254拒绝batch与相邻有效batch的顺序响应、资金及snapshot；不是容量基线。改动后必须另开PV-130，不能复用本轮数字。
+
+- 追加修复验证均通过：`rejected-continuation-jmh-fixture-tests.log`、`matcher-scope-tests.log`、`fence-v19-and-matcher-tests.log`、`fresh-mark-driver-tests.log`。包含11个非exporter快照编解码/损坏/被动恢复检查、拒绝批次后余额调整及查询fence、v18明确拒绝/v19恢复、每batch所有item状态与截断扫描、撮合作用域时间戳隔离、256窗口深成交8次、各产品线混合/资金/恢复，以及逻辑时间推进6s后的报价刷新。报价刷新与risk完成状态解耦，按1000ms逻辑时间按需发真实mark命令并计入业务量；未改变生产新鲜度校验。此前长稳未记录全部item失败原因，不能把它的所有拒绝归因为价格老化，只能说明修复了确定存在的驱动边界缺陷。

@@ -166,24 +166,24 @@ class CoreStateSnapshotCodecTest {
     }
 
     @Test
-    void onlyVersionSeventeenSectionedDecoderAcceptsRecoveryInput() {
+    void onlyVersionNineteenSectionedDecoderAcceptsRecoveryInput() {
         byte[] unsupported;
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             unsupported = state.snapshot(47);
         }
-        ByteBuffer.wrap(unsupported).order(ByteOrder.LITTLE_ENDIAN).putShort(Integer.BYTES, (short) 16);
+        ByteBuffer.wrap(unsupported).order(ByteOrder.LITTLE_ENDIAN).putShort(Integer.BYTES, (short) 18);
         UnsafeBuffer encoded = new UnsafeBuffer(unsupported);
 
         assertThatThrownBy(() -> CoreStateSnapshotCodec.decode(unsupported, ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class)
-                .hasMessageContaining("unsupported snapshot version: 16");
+                .hasMessageContaining("unsupported snapshot version: 18");
         assertThatThrownBy(() -> CoreStateSnapshotCodec.manifest(unsupported, ProductLine.SPOT))
                 .isInstanceOf(ProtocolException.class)
-                .hasMessageContaining("unsupported snapshot version: 16");
+                .hasMessageContaining("unsupported snapshot version: 18");
         SectionedCoreSnapshotCodec.RecoveryBuffer recovery = new SectionedCoreSnapshotCodec.RecoveryBuffer();
         assertThatThrownBy(() -> recovery.accept(encoded, 0, unsupported.length))
                 .isInstanceOf(ProtocolException.class)
-                .hasMessageContaining("unsupported snapshot version: 16");
+                .hasMessageContaining("unsupported snapshot version: 18");
     }
 
     @Test

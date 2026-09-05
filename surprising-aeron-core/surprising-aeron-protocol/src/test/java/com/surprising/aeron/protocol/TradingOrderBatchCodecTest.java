@@ -14,6 +14,30 @@ import org.junit.jupiter.api.Test;
 class TradingOrderBatchCodecTest {
 
     @Test
+    void statusScanFindsAMiddleRejectionWithoutSkippingAnyFrameBoundary() {
+        var items = List.of(
+                new CoreOrderBatchResult.Item(0, 1, 0, 0, ResponseStatus.APPLIED,
+                        CoreResultCode.NONE, null, List.of()),
+                new CoreOrderBatchResult.Item(1, 2, 0, 0, ResponseStatus.REJECTED,
+                        CoreResultCode.ORDER_NOT_FOUND, null, List.of()),
+                new CoreOrderBatchResult.Item(2, 3, 0, 0, ResponseStatus.APPLIED,
+                        CoreResultCode.NONE, null, List.of()));
+        byte[] encoded = TradingOrderBatchCodec.encodeResult(new CoreOrderBatchResult(items));
+        var response = new CoreResponse(ResponseStatus.APPLIED, 1, 1, encoded);
+        assertThat(TradingOrderBatchCodec.firstNonAppliedItem(response, 3)).isOne();
+        for (int length = 0; length < encoded.length; length++) {
+            var truncated = new CoreResponse(ResponseStatus.APPLIED, 1, 1, Arrays.copyOf(encoded, length));
+            assertThatThrownBy(() -> TradingOrderBatchCodec.firstNonAppliedItem(truncated, 3))
+                    .isInstanceOf(ProtocolException.class);
+        }
+        assertThatThrownBy(() -> TradingOrderBatchCodec.firstNonAppliedItem(response, 2))
+                .isInstanceOf(ProtocolException.class);
+        var applied = new CoreResponse(ResponseStatus.APPLIED, 1, 1,
+                TradingOrderBatchCodec.encodeResult(new CoreOrderBatchResult(List.of(items.getFirst()))));
+        assertThat(TradingOrderBatchCodec.firstNonAppliedItem(applied, 1)).isEqualTo(-1);
+    }
+
+    @Test
     void batchItemsHaveExactlyTheSingleCommandWireFormatAndCannotReadAcrossFrameBoundaries() {
         var orders = List.of(place(901, "客户-😀"), place(902, "second"));
         byte[] encoded = TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders));

@@ -54,6 +54,57 @@ import org.junit.jupiter.api.Test;
 class CoreOrderedOrderBatchTest {
 
     @Test
+    void deferredAllRejectedBatchStillPublishesItsTerminalBetweenAdjacentBatches() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, 100_000);
+            CoreMessage first = command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 2,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            place(81_001, "ordered-first-a", 1_000),
+                            place(81_002, "ordered-first-b", 1_000)))));
+            CoreMessage rejected = command(CoreMessageType.CANCEL_ORDER_BATCH, UUID.randomUUID(), 3,
+                    TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
+                            new CancelOrderCommand(99_991), new CancelOrderCommand(99_992)))));
+            CoreMessage last = command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 4,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            place(81_003, "ordered-last-a", 1_000),
+                            place(81_004, "ordered-last-b", 1_000)))));
+            var expected = new ArrayList<Long>();
+            for (CoreMessage message : List.of(first, rejected, last)) {
+                assertThat(state.apply(message).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+                expected.add(state.matchingSequence(message.header().commandId()));
+            }
+            var actual = new ArrayList<Long>();
+            var responses = new ArrayList<CoreResponse>();
+            long deadline = System.nanoTime() + 5_000_000_000L;
+            while (state.pendingMatchingCount() != 0 && System.nanoTime() < deadline) {
+                state.commitReadyMatching(256, 2_000, 4, false, (sequence, response) -> {
+                    actual.add(sequence);
+                    responses.add(response);
+                });
+            }
+            assertThat(actual).containsExactlyElementsOf(expected);
+            assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(TradingOrderBatchCodec.decodeResult(responses.get(1).data()).items())
+                    .allSatisfy(item -> {
+                        assertThat(item.status()).isEqualTo(ResponseStatus.REJECTED);
+                        assertThat(item.resultCode()).isEqualTo(CoreResultCode.ORDER_NOT_FOUND);
+                    });
+            applyBalance(state, 1001, 7, 5);
+            var query = new CoreMessage(CoreMessageHeader.query(CoreMessageType.USER_STATE_HASH_QUERY,
+                    UUID.randomUUID(), ProductLine.SPOT, CommandSource.GATEWAY, 77, 0, 1001, 2_000, 5),
+                    new byte[0]);
+            assertThat(state.apply(query).status()).isEqualTo(ResponseStatus.OK);
+            var balance = state.tradingState().users().get(1001L).balances().get("USDT");
+            assertThat(balance.availableUnits() + balance.lockedUnits()).isEqualTo(100_007);
+            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+                assertThat(restored.tradingState().businessStateHash())
+                        .isEqualTo(state.tradingState().businessStateHash());
+            }
+        }
+    }
+
+    @Test
     void coalescesSameMatcherCancellationsAndPreservesRejectedItemOrder() throws Exception {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applySpotInstrument(state);

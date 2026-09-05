@@ -122,6 +122,49 @@ public final class TradingOrderBatchCodec {
         return decodeResult(encoded);
     }
 
+    /** Checks every item status and frame boundary without materializing order/fill views.
+     * Returns -1 when every item applied. Nested order contents still require decodeResult.
+     */
+    public static int firstNonAppliedItem(CoreResponse response, int expectedCount) {
+        if (response == null) throw new IllegalArgumentException("batch response is required");
+        byte[] encoded = response.dataUnsafe();
+        if (encoded.length < 8 || encoded.length > MAX_BATCH_RESPONSE_BYTES) {
+            throw new ProtocolException("invalid order batch result payload");
+        }
+        ByteBuffer buffer = readable(encoded);
+        if (buffer.getInt() != PlaceOrderBatchCommand.WIRE_VERSION) {
+            throw new ProtocolException("unsupported order batch result version");
+        }
+        int count = readCount(buffer, CoreOrderBatchResult.MAX_ITEMS, "result");
+        if (count != expectedCount) throw new ProtocolException("order batch result count mismatch");
+        int firstRejected = -1;
+        for (int index = 0; index < count; index++) {
+            requireRemaining(buffer, Integer.BYTES, "result frame");
+            int length = buffer.getInt();
+            if (length < 44 || length > buffer.remaining()) {
+                throw new ProtocolException("invalid order batch result frame length");
+            }
+            int start = buffer.position();
+            if (buffer.getInt(start) != index) {
+                throw new ProtocolException("order batch result indexes must be contiguous");
+            }
+            int status = buffer.getInt(start + 28);
+            if (status != ResponseStatus.APPLIED.wireCode() && firstRejected < 0) firstRejected = index;
+            int orderLength = buffer.getInt(start + 36);
+            if (orderLength < 0 || orderLength > length - 44) {
+                throw new ProtocolException("invalid result order length");
+            }
+            int executions = buffer.getInt(start + 40 + orderLength);
+            if (executions < 0 || executions > 100_000
+                    || (long) executions * RESULT_EXECUTION_LENGTH != length - 44 - orderLength) {
+                throw new ProtocolException("invalid result execution count");
+            }
+            buffer.position(start + length);
+        }
+        requireConsumed(buffer, "order batch result");
+        return firstRejected;
+    }
+
     private static <T> byte[] encodeCommand(List<T> commands, ToIntFunction<T> size,
                                           BiConsumer<ByteBuffer, T> encoder) {
         if (commands == null || commands.isEmpty()) {

@@ -798,6 +798,9 @@ Topic、端口、磁盘、监控阈值和故障演练的精确清单待生产 Ru
   completion 将余额端点并入整批资金边界，不重复计入逐项资金 delta。混合负载校验拒绝运行态残留终态订单。
 - Lane 读取的 prepared position identity 索引使用并发发布，避免 owner 扩容时读取普通 HashMap；
   已进入 matcher/结束的批次忽略迟到 admission 通知，不再尝试路由不存在的下一项。
+- 延后启动且全部 item 被拒绝的批次仍保留到顺序 completion 边界，不能在无响应接收方的后台路径直接完成。
+  Account Lane 的提交、查询与快照 fence 统一使用 Core sequence，不与 projection sequence 混用；
+  对应 sectioned snapshot 格式为 v19，旧格式不做兼容 fallback。
 - `InsuranceAllocationPolicy.expectedCoverage` 只计算目标资产的目标索赔，不建立全资产结果 Map 或排序；
   保留整数精确分摊、确定性余数顺序和逐笔赔付后的重新计算。终态保留仅移除无人消费的审计 digest，
   资金命令幂等指纹、终态去重和 snapshot 数据不删除。
@@ -808,6 +811,11 @@ Topic、端口、磁盘、监控阈值和故障演练的精确清单待生产 Ru
 - service 每次对单会话最多 drain 16 个响应；待发响应同时受 64 条和 16MiB 上限约束，
   回收 buffer 总量上限 64KiB/会话。超限关闭慢会话，不丢弃或回滚已复制的交易命令。
 - `deepFillBurst256` 覆盖 256 个吃单在途和跨 Lane 深度成交；mixed/长稳计数不再物化全量状态。
+  mixed 每个批次都扫描所有 item 的终态状态，只有订单/成交视图的完整解码可以延到 teardown；
+  `rejectedCancelContinuations` 独立覆盖 256 窗口的拒绝批次响应，不拿拒绝吞吐代表成交容量。
+  撮合命令作用域复用每线程 primitive 状态，不逐命令 remove/recreate ThreadLocal Entry 或装箱时间戳。
+  长稳报价每1000ms逻辑时间按需刷新，与风险续扫进度独立；刷新走真实APPLY_MARK_PRICE并计入业务量，
+  不修改生产标记价有效期或把过期拒绝当作成功负载。
   `surprising.benchmark.openLoop` 独立控制限速，JFR 开关不再改变负载模型；
   单线程限速器标记为 paced driver，不能宣称已修正 coordinated omission。
 - 同 symbol 批量互斥、业务查询/非撮合写入 fence 和 snapshot fence 仍保留；

@@ -32,6 +32,24 @@ import org.junit.jupiter.api.Test;
 class DeterministicExchangeCoreAdapterTest {
 
     @Test
+    void reusedCommandScopeDoesNotLeakTimestampIntoTheNextCommand() {
+        try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
+            var first = adapter.executeWithEvidenceSync(1, new java.util.UUID(0, 1), 901, 1, 1234,
+                    () -> adapter.place(7, bid(901, 90)));
+            var second = adapter.executeWithEvidenceSync(2, new java.util.UUID(0, 2), 902, 1, 5678,
+                    () -> adapter.place(7, bid(902, 90)));
+            var unscoped = adapter.place(7, bid(903, 90));
+            assertThat(first.nativeMatcherResult().timestamp()).isEqualTo(1234);
+            assertThat(second.nativeMatcherResult().timestamp()).isEqualTo(5678);
+            assertThat(unscoped.nativeMatcherResult().timestamp()).isZero();
+            var async = adapter.executeWithEvidence(3, new java.util.UUID(0, 3), 904, 1, 9876,
+                    () -> adapter.placeAsync(7, bid(904, 90))).join();
+            assertThat(async.nativeMatcherResult().timestamp()).isEqualTo(9876);
+            assertThat(adapter.place(7, bid(905, 90)).nativeMatcherResult().timestamp()).isZero();
+        }
+    }
+
+    @Test
     void cancelBatchStopsAtFirstFailureAndReturnsSuccessfulPrefix() {
         List<CoreOrderState> orders = List.of(order(1), order(2), order(3));
         List<Long> submissions = new ArrayList<>();

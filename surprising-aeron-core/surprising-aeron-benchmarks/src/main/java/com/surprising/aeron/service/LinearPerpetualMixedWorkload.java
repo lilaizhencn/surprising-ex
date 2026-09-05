@@ -302,6 +302,7 @@ final class LinearPerpetualMixedWorkload {
                 long[] laneOperationsBefore = completedLaneOperations(harness.state());
                 terminalTradingOperations = 0;
                 harness.beginBusinessLatencies(100_000);
+                harness.refreshMarkPricesIfDue(template.symbols());
                 for (int round = 0; round < hftRounds; round++) {
                     int[] tradingSymbols = tradingSymbolIndices(template.scaleConfig(), round);
                     long tradingBefore = harness.terminalMessages();

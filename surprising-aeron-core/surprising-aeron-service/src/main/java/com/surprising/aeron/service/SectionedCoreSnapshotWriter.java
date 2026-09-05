@@ -60,7 +60,7 @@ final class SectionedCoreSnapshotWriter {
                 state.lastSourceSequences(), state.commandResults(),
                 state.exportState().snapshot(), state.feePolicies(), state.pendingTransfers(),
                 state.terminalRetention().copy(),
-                state.accountLaneSnapshots(state.snapshotProjectionSequence(), snapshotState));
+                state.accountLaneSnapshots(coreSequence, snapshotState));
     }
 
     static SectionedCoreSnapshotCodec.SectionedSnapshot encode(CoreSnapshotImage image) {

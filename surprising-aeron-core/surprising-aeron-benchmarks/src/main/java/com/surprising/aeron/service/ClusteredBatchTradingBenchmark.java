@@ -35,6 +35,7 @@ public class ClusteredBatchTradingBenchmark {
         public long terminalItems;
         public long queries;
         public long terminalTrades;
+        public long rejectedBusinessOperations;
     }
 
     @Benchmark
@@ -47,6 +48,19 @@ public class ClusteredBatchTradingBenchmark {
         counters.terminalBatches += 512;
         counters.terminalItems += 512L * workload.batchSize;
         counters.queries += 512;
+        return workload.terminal;
+    }
+
+    @Benchmark
+    public long rejectedCancelContinuations(Workload workload, Counters counters) {
+        workload.runRejectedContinuations();
+        counters.acceptedBusinessOperations += 258L * workload.batchSize;
+        counters.terminalBusinessOperations += 258L * workload.batchSize;
+        counters.acceptedCoreMessages += 258;
+        counters.terminalCoreMessages += 258;
+        counters.terminalBatches += 258;
+        counters.terminalItems += 258L * workload.batchSize;
+        counters.rejectedBusinessOperations += 254L * workload.batchSize;
         return workload.terminal;
     }
 
@@ -65,6 +79,8 @@ public class ClusteredBatchTradingBenchmark {
         private long terminal;
         private long queryResults;
         private long maxBacklog;
+        private boolean expectMissingCancels;
+        private long rejectedItems;
         private final long[] firstOrders = new long[256];
         private static final long BALANCE = 1_000_000_000L;
 
@@ -73,6 +89,8 @@ public class ClusteredBatchTradingBenchmark {
             if (maxInFlight != 256 || batchSize <= 0) throw new IllegalArgumentException("requires 256 in-flight");
             LinearPerpetualBenchmarkSupport.configureAccountLanes(accountLanes);
             sequence = terminal = queryResults = maxBacklog = 0;
+            expectMissingCancels = false;
+            rejectedItems = 0;
             service = new SurprisingClusteredService(productLine);
             Cluster cluster = (Cluster) Proxy.newProxyInstance(Cluster.class.getClassLoader(),
                     new Class<?>[]{Cluster.class}, (proxy, method, args) -> switch (method.getName()) {
@@ -98,9 +116,15 @@ public class ClusteredBatchTradingBenchmark {
                                     throw new IllegalStateException("batch rejected: " + response.resultCode());
                                 }
                                 var items = TradingOrderBatchCodec.decodeResult(response.data()).items();
-                                if (items.size() != batchSize || items.stream().anyMatch(
-                                        item -> item.status() != ResponseStatus.APPLIED || !item.executions().isEmpty())) {
-                                    throw new IllegalStateException("batch item or trade mismatch");
+                                if (items.size() != batchSize) throw new IllegalStateException("batch size mismatch");
+                                for (var item : items) {
+                                    if (!item.executions().isEmpty()) throw new IllegalStateException("unexpected trade");
+                                    if (item.status() == ResponseStatus.APPLIED) continue;
+                                    if (!expectMissingCancels || item.status() != ResponseStatus.REJECTED
+                                            || item.resultCode() != CoreResultCode.ORDER_NOT_FOUND) {
+                                        throw new IllegalStateException("unexpected batch rejection: " + item);
+                                    }
+                                    rejectedItems++;
                                 }
                                 terminal++;
                             }
@@ -161,6 +185,45 @@ public class ClusteredBatchTradingBenchmark {
         private void metrics() {
             send(new CoreMessage(CoreMessageHeader.query(CoreMessageType.LANE_METRICS_QUERY, UUID.randomUUID(),
                     productLine, CommandSource.GATEWAY, 77, 0, 0, 1_700_000_000_000L, 0), new byte[0]));
+        }
+
+        public void runRejectedContinuations() {
+            long before = terminal;
+            long rejectedBefore = rejectedItems;
+            expectMissingCancels = true;
+            for (int user = 0; user < 256; user++) {
+                if (user == 0 || user == 255) {
+                    firstOrders[user] = orderId;
+                    var orders = new ArrayList<PlaceOrderCommand>(batchSize);
+                    for (int item = 0; item < batchSize; item++) {
+                        orders.add(order(orderId++, CoreOrderSide.BUY, 90));
+                    }
+                    send(command(CoreMessageType.PLACE_ORDER_BATCH, 1_000 + user,
+                            TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders))));
+                } else {
+                    var missing = new ArrayList<CancelOrderCommand>(batchSize);
+                    for (int item = 0; item < batchSize; item++) {
+                        missing.add(new CancelOrderCommand(Long.MAX_VALUE - user - item * 256L));
+                    }
+                    send(command(CoreMessageType.CANCEL_ORDER_BATCH, 1_000 + user,
+                            TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(missing))));
+                }
+            }
+            drain();
+            expectMissingCancels = false;
+            for (int boundary = 0; boundary < 2; boundary++) {
+                int user = boundary == 0 ? 0 : 255;
+                var orders = new ArrayList<CancelOrderCommand>(batchSize);
+                for (int item = 0; item < batchSize; item++) {
+                    orders.add(new CancelOrderCommand(firstOrders[user] + item));
+                }
+                send(command(CoreMessageType.CANCEL_ORDER_BATCH, 1_000 + user,
+                        TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(orders))));
+            }
+            drain();
+            if (terminal - before != 258 || rejectedItems - rejectedBefore != 254L * batchSize) {
+                throw new IllegalStateException("rejected continuation lost its terminal response");
+            }
         }
 
         private void send(CoreMessage message) {
