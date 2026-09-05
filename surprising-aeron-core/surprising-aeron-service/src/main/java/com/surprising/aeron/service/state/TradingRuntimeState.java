@@ -159,8 +159,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             new java.util.ArrayDeque<>();
     private final java.util.ArrayDeque<LaneCancelEvent> laneCancelEventPool = new java.util.ArrayDeque<>();
     private final java.util.ArrayDeque<LaneReplaceEvent> laneReplaceEventPool = new java.util.ArrayDeque<>();
-    private final RuntimePerpetualMatchProcessor.BatchValidationScratch perpetualBatchValidationScratch =
-            new RuntimePerpetualMatchProcessor.BatchValidationScratch();
+    private final MatcherSettlementPlan.BatchValidationScratch matcherBatchValidationScratch =
+            new MatcherSettlementPlan.BatchValidationScratch();
     private Thread owner;
 
     public TradingRuntimeState() {
@@ -2282,8 +2282,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         for (int index = 0; index < primitiveTakerOrderIds.length; index++) {
             primitiveTakerOrderIds[index] = takerOrderIds.get(index);
         }
-        RuntimePerpetualMatchProcessor.validateAndPrepareBatch(
-                primitiveTakerOrderIds, matchingResults, this, identities, perpetualBatchValidationScratch);
+        MatcherSettlementPlan.validateAndPrepareBatch(
+                primitiveTakerOrderIds, matchingResults, this, identities, matcherBatchValidationScratch);
 
         MatcherSettlementEvent[] events = new MatcherSettlementEvent[settlements.size()];
         for (int index = 0; index < settlements.size(); index++) {
@@ -2300,17 +2300,17 @@ public final class TradingRuntimeState implements AutoCloseable {
         return aggregateTreasuryDeltaScratch;
     }
 
-    public MatcherSettlementEvent[] dispatchPerpetualMatcherSettlements(
+    public MatcherSettlementEvent[] dispatchMatcherSettlementBatch(
             long coreSequence, long[] takerOrderIds, long[] expectedLaneMasks,
             List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities,
             long commitTimestamp, long commitClusterPosition) {
         assertOwner();
-        if (!productLine.isDerivative() || coreSequence <= 0 || takerOrderIds == null
+        if (coreSequence <= 0 || takerOrderIds == null
                 || expectedLaneMasks == null || matchingResults == null || takerOrderIds.length == 0
                 || takerOrderIds.length != expectedLaneMasks.length
                 || takerOrderIds.length != matchingResults.size() || identities == null
                 || commitTimestamp < 0 || commitClusterPosition < 0) {
-            throw new IllegalArgumentException("invalid perpetual matcher settlement batch");
+            throw new IllegalArgumentException("invalid matcher settlement batch");
         }
         long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;
         MatcherSettlementPlan[] plans = new MatcherSettlementPlan[takerOrderIds.length];
@@ -2325,14 +2325,14 @@ public final class TradingRuntimeState implements AutoCloseable {
             CoreMatchingResult matchingResult = matchingResults.get(index);
             if (takerOrderId <= 0 || expectedLaneMask == 0 || (expectedLaneMask & ~validMask) != 0
                     || matchingResult == null || matchingResult.nativeCommand().coreSequence() != coreSequence) {
-                throw new IllegalArgumentException("invalid perpetual matcher settlement item");
+                throw new IllegalArgumentException("invalid matcher settlement item");
             }
             OrderRuntime taker = order(takerOrderId);
             if (taker == null) throw new IllegalStateException("taker order is missing");
             MatcherSettlementPlan plan = MatcherSettlementPlan.build(coreSequence, takerOrderId, taker.userId(),
                     new long[]{takerOrderId}, matchingResult, this, identities);
             if (plan.requiredLaneMask() != expectedLaneMask) {
-                throw new IllegalStateException("perpetual matcher settlement lane mask mismatch");
+                throw new IllegalStateException("matcher settlement lane mask mismatch");
             }
             plans[index] = plan;
             CoreInstrumentState instrument = instrument(identities.symbol(taker.symbolId()));
@@ -2343,8 +2343,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             settleAssetIds[index] = identities.assetId(instrument.settleAsset());
             batchLaneMask |= expectedLaneMask;
         }
-        RuntimePerpetualMatchProcessor.validateAndPrepareBatch(
-                takerOrderIds, matchingResults, this, identities, perpetualBatchValidationScratch);
+        MatcherSettlementPlan.validateAndPrepareBatch(
+                takerOrderIds, matchingResults, this, identities, matcherBatchValidationScratch);
         MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();
         if (event == null) event = new MatcherSettlementEvent();
         event.prepareBatch(coreSequence, batchLaneMask, commitTimestamp, commitClusterPosition,

@@ -12,9 +12,8 @@ class SpotMixedWorkloadTest {
     void qualificationWindowCloses256RealSpotCommandsAndPreservesAllAssets() {
         var template = SpotMixedWorkload.template(4, 256, 256);
         try (var scenario = SpotMixedWorkload.scenario(template, 1, 2)) {
-            scenario.run();
-            scenario.run();
-            scenario.run();
+            // Reuse the same state through multiple coalesced shared-maker settlements.
+            for (int cycle = 0; cycle < 8; cycle++) scenario.run();
             assertThat(scenario.maxBacklog()).isEqualTo(256);
             assertThat(scenario.acceptedOperations()).isEqualTo(scenario.terminalOperations());
             assertThat(scenario.acceptedCoreMessages()).isEqualTo(scenario.terminalCoreMessages());

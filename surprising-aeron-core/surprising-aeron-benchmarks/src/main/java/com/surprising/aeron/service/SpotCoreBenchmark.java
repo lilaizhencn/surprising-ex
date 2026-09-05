@@ -15,6 +15,7 @@ import org.openjdk.jmh.annotations.Setup;
 import org.openjdk.jmh.annotations.State;
 import org.openjdk.jmh.annotations.TearDown;
 import org.openjdk.jmh.annotations.Threads;
+import org.openjdk.jmh.annotations.Timeout;
 import org.openjdk.jmh.annotations.Warmup;
 
 @BenchmarkMode(Mode.Throughput)
@@ -26,6 +27,7 @@ import org.openjdk.jmh.annotations.Warmup;
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"
 })
 @Threads(1)
+@Timeout(time = 15, timeUnit = TimeUnit.MINUTES)
 public class SpotCoreBenchmark {
 
     @Benchmark
@@ -71,8 +73,9 @@ public class SpotCoreBenchmark {
 
         @Setup(Level.Trial)
         public void setUpTrial() {
-            if (maxInFlight != 256 || symbols != 256) {
-                throw new IllegalArgumentException("spot qualification requires 256 symbols/in-flight");
+            if (maxInFlight != 256 || symbols != 256 || hftBatchSize < 2) {
+                throw new IllegalArgumentException(
+                        "spot pipelined qualification requires 256 symbols/in-flight and batch size >= 2");
             }
             LinearPerpetualBenchmarkSupport.configureAccountLanes(accountLanes);
             SpotMixedWorkload.Template template = SpotMixedWorkload.template(accountLanes, activeUsers, symbols);

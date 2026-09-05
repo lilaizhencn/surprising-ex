@@ -371,3 +371,10 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
   该扫描、排序和大整数除法只位于 insurance 查询/结算边界，不进入 matcher、Account Lane 成交或 risk scan 热路径。
 - 每个 matcher shard 固定为一个同步 engine；Account Lane 是固定线程拥有的执行边界。正式性能验收仍固定单 shard，
   wait strategy 只控制空闲等待，不改变业务语义。
+
+### 现货批量 Lane 结算
+
+- `CoreProbeState.tryActivatePipelinedOrderBatch` 对现货与衍生品都使用 Lane 批量准入；同一 symbol 的批次所有权、同用户先后关系及 matcher shard 边界保持不变。
+- 准入成功后，`TradingRuntimeState.dispatchMatcherSettlementBatch` 将同一批次的成交按相关 Lane 合并为一次任务，owner 根据 completion 推进，不再为现货批次的每个 item 同步等待结算。`MatcherSettlementPlan` 校验整批累计成交量，防止多个 taker 对同一个 maker 超量扣减。
+- 现货仍由 `RuntimeSpotMatchProcessor` 独立执行 base/quote 资产冻结、成交、手续费与解冻；衍生品仍使用原资金/持仓内核，不混用金融规则。若全批预冻结不可行，先撤销该次未发布准入，再按既有逐项业务语义执行，保留“前一笔成交收入供后一笔下单”的部分成功行为。
+- 现货 JMH `SpotCoreBenchmark.productionMixedWorkload` 固定256 symbol/in-flight、batch size至少2，覆盖双向批量吃同一个 maker、剩余撤单及终态回收；默认15分钟iteration timeout给600秒测量和最终资金/恢复检查留出余量。性能证据统一追加根目录 `PERFORMANCE_VALIDATION.md`，不能据短测声称整个owner已无业务等待。

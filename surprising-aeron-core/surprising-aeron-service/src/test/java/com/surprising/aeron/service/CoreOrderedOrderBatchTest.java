@@ -54,6 +54,122 @@ import org.junit.jupiter.api.Test;
 class CoreOrderedOrderBatchTest {
 
     @Test
+    void spotPipelinedBatchSettlesSharedMakerOncePerLaneAndReclaimsEveryTerminal() throws Exception {
+        String priorLanes = System.getProperty("surprising.aeron.account-lanes");
+        System.setProperty("surprising.aeron.account-lanes", "4");
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, 10_000);
+            applyBalance(state, 1002, "BTC", 4, 2);
+            var maker = linearOrder(82_000, "shared-maker", CoreOrderSide.SELL, 1_000, 4);
+            drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 3,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(maker))), 1002));
+            var orders = List.of(place(82_001, "shared-a", 1_000), place(82_002, "shared-b", 1_000),
+                    place(82_003, "shared-c", 1_000), place(82_004, "shared-d", 1_000));
+            var message = command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 4,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)));
+            assertThat(state.apply(message).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            long sequence = state.matchingSequence(message.header().commandId());
+            Map<Long, Object> batches = field(state, "pendingOrderBatches");
+            assertThat((boolean) field(batches.get(sequence), "pipelined")).isTrue();
+            CoreResponse response = drainBatchAfterFirst(state, message, sequence);
+            assertThat(TradingOrderBatchCodec.firstNonAppliedItem(response, 4)).isEqualTo(-1);
+            var trading = state.tradingState();
+            assertThat(trading.user(1001).balances().get("BTC").availableUnits()).isEqualTo(4);
+            assertThat(trading.user(1001).balances().get("USDT").availableUnits()).isEqualTo(6_000);
+            assertThat(trading.user(1002).balances().get("USDT").availableUnits()).isEqualTo(4_000);
+            for (long user : new long[]{1001, 1002}) {
+                assertThat(trading.user(user).reservations()).isEmpty();
+                assertThat(trading.user(user).balances().values()).allSatisfy(balance ->
+                        assertThat(balance.lockedUnits()).isZero());
+            }
+            for (long orderId = 82_000; orderId <= 82_004; orderId++) assertThat(trading.order(orderId)).isNull();
+            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(trading.businessStateHash());
+            }
+        } finally {
+            if (priorLanes == null) System.clearProperty("surprising.aeron.account-lanes");
+            else System.setProperty("surprising.aeron.account-lanes", priorLanes);
+        }
+    }
+
+    @Test
+    void spotBatchPreservesEarlierFillProceedsForLaterItemAdmission() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, "BTC", 1, 1);
+            applyBalance(state, 1002, 2_000, 2);
+            drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 3,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            place(83_000, "proceeds-maker", 1_000)))), 1002));
+            var sell = linearOrder(83_001, "sell-first", CoreOrderSide.SELL, 1_000, 1);
+            var buy = place(83_002, "buy-with-proceeds", 1_000);
+            CoreResponse response = drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH,
+                    UUID.randomUUID(), 4, TradingOrderBatchCodec.encodePlaceOrderBatch(
+                            new PlaceOrderBatchCommand(List.of(sell, buy)))));
+            assertThat(TradingOrderBatchCodec.firstNonAppliedItem(response, 2)).isEqualTo(-1);
+            var trading = state.tradingState();
+            assertThat(trading.order(83_000)).isNull();
+            assertThat(trading.order(83_001)).isNull();
+            assertThat(trading.order(83_002).remainingQuantitySteps()).isOne();
+            assertThat(trading.user(1001).balances().get("USDT").lockedUnits()).isEqualTo(1_000);
+            assertThat(trading.user(1001).balances().get("USDT").availableUnits()).isZero();
+            assertThat(trading.user(1002).balances().get("USDT").availableUnits()).isEqualTo(1_000);
+            assertThat(trading.user(1002).balances().get("BTC").availableUnits()).isOne();
+            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(trading.businessStateHash());
+            }
+        }
+    }
+
+    @Test
+    void spotPipelinedFatalAfterFillPreservesFundsAndRecoversBySnapshotReplay() throws Exception {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, 10_000);
+            applyBalance(state, 1002, "BTC", 1, 2);
+            drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 3,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            linearOrder(84_000, "fatal-maker", CoreOrderSide.SELL, 1_000, 1)))), 1002));
+            byte[] recovery = state.snapshot();
+            long committedBefore = state.committedCoreSequence();
+            var message = command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 4,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            place(84_001, "fatal-taker", 1_000),
+                            linearOrder(84_002, "fatal-resting", CoreOrderSide.BUY, 900, 1)))));
+            assertThat(state.apply(message).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            long sequence = state.matchingSequence(message.header().commandId());
+            var matching = awaitMatching(state, sequence);
+            state.failOrderBatchAfterItemForTest(() -> {
+                throw new IllegalArgumentException("injected spot batch final commit failure");
+            });
+            Throwable divergence = org.assertj.core.api.Assertions.catchThrowable(
+                    () -> completeEventually(state, sequence, matching, 2_000, 4));
+            assertThat(divergence).isInstanceOf(
+                    com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class);
+            assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
+            TradingRuntimeState runtime = field(state, "runtimePlaceOrderState");
+            RuntimeIdentityRegistry identities = field(state, "runtimePlaceOrderIdentities");
+            int quote = identities.assetId("USDT");
+            assertThat(runtime.balance(1001, quote).availableUnits()).isEqualTo(8_100);
+            assertThat(runtime.balance(1001, quote).lockedUnits()).isEqualTo(900);
+            assertThat(runtime.balance(1002, quote).availableUnits()).isEqualTo(1_000);
+            assertThat(runtime.order(84_000)).isNull();
+            assertThat(runtime.order(84_001)).isNull();
+            assertThatThrownBy(() -> state.apply(message)).isSameAs(divergence);
+            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, recovery)) {
+                assertThat(TradingOrderBatchCodec.firstNonAppliedItem(drainBatch(restored, message), 2))
+                        .isEqualTo(-1);
+                var trading = restored.tradingState();
+                assertThat(trading.user(1001).balances().get("USDT").availableUnits()).isEqualTo(8_100);
+                assertThat(trading.user(1001).balances().get("USDT").lockedUnits()).isEqualTo(900);
+                assertThat(trading.user(1002).balances().get("USDT").availableUnits()).isEqualTo(1_000);
+                assertThat(trading.user(1001).balances().get("BTC").availableUnits()).isOne();
+            }
+        }
+    }
+
+    @Test
     void deferredAllRejectedBatchStillPublishesItsTerminalBetweenAdjacentBatches() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applySpotInstrument(state);
@@ -509,10 +625,13 @@ class CoreOrderedOrderBatchTest {
             long[] matcherPrefixBeforeFatal = ((long[]) field(state, "appliedMatcherPrefixDigests")).clone();
             long committedBeforeFatal = state.committedCoreSequence();
             var exportBeforeFatal = state.exportState().snapshot();
+            // A duplicate later item selects ordered partial-success admission. Pipelined fatal
+            // handling is covered separately; it has no second per-item matcher callback.
             CoreMessage fatalBatch = command(CoreMessageType.PLACE_ORDER_BATCH, fatalId, 3,
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
                             place(11_004, "fatal-fourth", 1_000),
-                            place(11_005, "fatal-fifth", 1_000)))));
+                            place(11_005, "fatal-fifth", 1_000),
+                            place(11_004, "fatal-duplicate", 1_000)))));
             assertThat(state.apply(fatalBatch).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             long fatalSequence = state.matchingSequence(fatalId);
             var acceptedFirst = awaitMatching(state, fatalSequence);
@@ -783,8 +902,7 @@ class CoreOrderedOrderBatchTest {
             int symbolId = identities.symbolId("BTC-USDT");
             CoreMessage batch = command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 2,
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
-                            place(15_101, "guard-first", 1_000),
-                            place(15_102, "guard-second", 1_000)))));
+                            place(15_101, "guard-first", 1_000)))));
             assertThat(state.apply(batch).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
 
             assertThatThrownBy(() -> runtime.putMarkPrice(new MarkPriceRuntime(
@@ -920,7 +1038,8 @@ class CoreOrderedOrderBatchTest {
         CoreMessage batch = command(CoreMessageType.PLACE_ORDER_BATCH, commandId, 2,
                 TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
                         place(15_401, "fatal-close-first", 1_000),
-                        place(15_402, "fatal-close-second", 1_000)))));
+                        place(15_402, "fatal-close-second", 1_000),
+                        place(15_401, "fatal-close-duplicate", 1_000)))));
         assertThat(state.apply(batch).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
         long sequence = state.matchingSequence(commandId);
         assertThat(state.completeMatching(sequence, awaitMatching(state, sequence), 2_000, 3)).isNull();
