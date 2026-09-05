@@ -481,35 +481,27 @@ final class LinearPerpetualMixedWorkload {
 
             @Override
             public int incompleteRiskScans() {
-                return (int) harness.state().tradingState().riskState().scans().values().stream()
-                        .filter(scan -> !scan.complete()).count();
+                return harness.state().incompleteRiskScanCount();
             }
 
             @Override
             public int incompleteFundingSettlements() {
-                int incomplete = 0;
-                for (String symbol : template.symbols()) {
-                    var progress = harness.state().tradingState().treasuryState().fundingProgress(symbol);
-                    if (progress != null) incomplete++;
-                }
-                return incomplete;
+                return harness.state().incompleteFundingCount();
             }
 
             @Override
             public int activeOrders() {
-                return (int) harness.state().tradingState().orders().values().stream()
-                        .filter(order -> order.status() == CoreOrderStatus.OPEN).count();
+                return harness.state().activeOrderCount();
             }
 
             @Override
             public int positions() {
-                return harness.state().tradingState().users().values().stream()
-                        .mapToInt(user -> user.positions().size()).sum();
+                return harness.state().positionCount();
             }
 
             @Override
             public int triggerOrders() {
-                return harness.state().tradingState().triggerOrders().size();
+                return harness.state().triggerOrderCount();
             }
 
             @Override

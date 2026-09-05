@@ -53,6 +53,28 @@ public final class AccountLaneState {
      */
     final LongObjectHashMap<CoreAlgoOrderState> algoOrders = new LongObjectHashMap<>();
     final LongObjectHashMap<CoreTriggerOrderState> triggerOrders = new LongObjectHashMap<>();
+    // Lane-owned lookup for placement checks; rebuilt from authoritative triggers on restore.
+    final LongObjectHashMap<LongHashSet> triggerIdsByUser = new LongObjectHashMap<>();
+
+    CoreTriggerOrderState putTrigger(CoreTriggerOrderState value) {
+        CoreTriggerOrderState previous = triggerOrders.put(value.triggerOrderId(), value);
+        if (previous != null && previous.userId() != value.userId()) unindexTrigger(previous);
+        triggerIdsByUser.getIfAbsentPut(value.userId(), LongHashSet::new).add(value.triggerOrderId());
+        return previous;
+    }
+
+    CoreTriggerOrderState removeTrigger(long id) {
+        CoreTriggerOrderState previous = triggerOrders.remove(id);
+        if (previous != null) unindexTrigger(previous);
+        return previous;
+    }
+
+    private void unindexTrigger(CoreTriggerOrderState value) {
+        LongHashSet ids = triggerIdsByUser.get(value.userId());
+        if (ids == null) throw new IllegalStateException("trigger user index is missing");
+        ids.remove(value.triggerOrderId());
+        if (ids.isEmpty()) triggerIdsByUser.remove(value.userId());
+    }
     final LongLongHashMap pendingReservationSequences = new LongLongHashMap();
     private final LongIntHashMap pendingReservationCountsByUser = new LongIntHashMap();
     private final LongObjectHashMap<IntLongHashMap> pendingReservedUnitsByUser = new LongObjectHashMap<>();

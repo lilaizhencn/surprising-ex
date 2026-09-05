@@ -83,6 +83,15 @@ public class LinearPerpetualCoreBenchmark {
     }
 
     @Benchmark
+    @BenchmarkMode(Mode.Throughput)
+    @OutputTimeUnit(TimeUnit.SECONDS)
+    public long deepFillBurst256(DeepFillBurstState state, MixedWorkloadCounters counters) {
+        long result = state.scenario.run();
+        recordCounters(state.scenario, counters);
+        return result;
+    }
+
+    @Benchmark
     public long riskScanLanePublishedCommit(RiskScanState state) {
         return state.scenario.run();
     }
@@ -401,6 +410,25 @@ public class LinearPerpetualCoreBenchmark {
         @Override
         LinearPerpetualBenchmarkSupport.Scenario createScenario() {
             return LinearPerpetualBenchmarkSupport.partialFill(accountLanes);
+        }
+    }
+
+    @State(Scope.Thread)
+    public static class DeepFillBurstState extends SnapshotBackedState {
+        @Param({"8", "32"})
+        public int makerDepth;
+        @Param("256")
+        public int maxInFlight;
+
+        @Override
+        LinearPerpetualBenchmarkSupport.SnapshotTemplate createTemplate() {
+            if (maxInFlight != 256) throw new IllegalArgumentException("maxInFlight must be 256");
+            return LinearPerpetualBenchmarkSupport.deepFillBurstTemplate(accountLanes, makerDepth);
+        }
+
+        @Override
+        LinearPerpetualBenchmarkSupport.Scenario createScenario() {
+            return LinearPerpetualBenchmarkSupport.deepFillBurst256(template, makerDepth);
         }
     }
 

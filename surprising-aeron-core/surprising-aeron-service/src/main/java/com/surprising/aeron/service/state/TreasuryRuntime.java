@@ -270,6 +270,11 @@ public final class TreasuryRuntime {
         assertOwner();
         return new IntObjectHashMap<>(fundingProgress);
     }
+
+    public int incompleteFundingCount() {
+        assertOwner();
+        return fundingProgress.size();
+    }
     public IntLongHashMap lifecycleSettlements() { assertOwner(); return new IntLongHashMap(lifecycleSettlements); }
     public IntObjectHashMap<LifecycleProgressRuntime> lifecycleProgresses() {
         assertOwner();

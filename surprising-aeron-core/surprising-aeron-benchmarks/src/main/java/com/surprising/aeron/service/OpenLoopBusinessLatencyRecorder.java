@@ -16,20 +16,22 @@ final class OpenLoopBusinessLatencyRecorder {
 
     private OpenLoopBusinessLatencyRecorder(int targetOperationsPerSecond) {
         this.targetOperationsPerSecond = targetOperationsPerSecond;
-        this.intervalNanos = TimeUnit.SECONDS.toNanos(1) / targetOperationsPerSecond;
+        this.intervalNanos = targetOperationsPerSecond == 0 ? 0
+                : TimeUnit.SECONDS.toNanos(1) / targetOperationsPerSecond;
     }
 
     static OpenLoopBusinessLatencyRecorder createIfEnabled(int targetOperationsPerSecond) {
         if (targetOperationsPerSecond <= 0) throw new IllegalArgumentException("target rate must be positive");
-        return new LinearPerpetualBusinessLatencyEvent().isEnabled()
-                ? new OpenLoopBusinessLatencyRecorder(targetOperationsPerSecond) : null;
+        boolean paced = Boolean.getBoolean("surprising.benchmark.openLoop");
+        return paced || new LinearPerpetualBusinessLatencyEvent().isEnabled()
+                ? new OpenLoopBusinessLatencyRecorder(paced ? targetOperationsPerSecond : 0) : null;
     }
 
     Token enter(CoreMessageType messageType, int operationWeight) {
         if (operationWeight <= 0) throw new IllegalArgumentException("operation weight must be positive");
         BusinessType type = BusinessType.classify(messageType);
         if (type == null) return null;
-        long scheduled = Math.addExact(firstEntryNanos,
+        long scheduled = intervalNanos == 0 ? System.nanoTime() : Math.addExact(firstEntryNanos,
                 Math.multiplyExact(scheduledBusinessOperations, intervalNanos));
         scheduledBusinessOperations = Math.addExact(scheduledBusinessOperations, operationWeight);
         while (System.nanoTime() < scheduled) Thread.onSpinWait();
@@ -140,8 +142,9 @@ final class OpenLoopBusinessLatencyRecorder {
         void commit(BusinessType type, int targetRate) {
             LinearPerpetualBusinessLatencyEvent event = new LinearPerpetualBusinessLatencyEvent();
             event.businessType = type.name();
-            event.loadModel = "OPEN_LOOP_CONSTANT_ARRIVAL";
-            event.coordinatedOmissionCorrected = true;
+            event.loadModel = targetRate == 0 ? "CLOSED_LOOP_FIXED_IN_FLIGHT"
+                    : "PACED_SINGLE_DRIVER_FIXED_IN_FLIGHT";
+            event.coordinatedOmissionCorrected = false;
             event.targetOperationsPerSecond = targetRate;
             event.operationsPerInvocation = Math.toIntExact(businessOperations);
             event.scheduledBusinessOperations = businessOperations;

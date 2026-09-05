@@ -787,6 +787,29 @@ Topic、端口、磁盘、监控阈值和故障演练的精确清单待生产 Ru
   回调、256 in-flight、20 items/batch、指标查询和非等待 completion pump；使用进程内模拟 transport，
   不代表外部 Aeron Cluster/API 容量。性能结果统一追加到 `PERFORMANCE_VALIDATION.md`。
 
+## 交易热路径的当前边界
+
+- 批量永续订单由 `PlaceBatchAdmissionEvent` 在用户 Account Lane 内计算杠杆、风险额度及冻结。
+  owner 仅准备不可变 instrument/identity/OI 输入；整批预准入失败时先撤销预冻结，再按既有逐项规则执行，
+  保留部分成功和前序成交释放资金的语义，不把整批失败转成资金校验豁免。
+- `MatcherSettlementPlan` 使用 owner 复用的 primitive 去重集合；深度成交按 maker Lane 建立事件索引，
+  不复制 fill。状态提交缓冲只为实际触及的 Lane 扩容。
+- `InsuranceAllocationPolicy.expectedCoverage` 只计算目标资产的目标索赔，不建立全资产结果 Map 或排序；
+  保留整数精确分摊、确定性余数顺序和逐笔赔付后的重新计算。终态保留仅移除无人消费的审计 digest，
+  资金命令幂等指纹、终态去重和 snapshot 数据不删除。
+- trigger 准入通过 Lane 内用户索引检查客户端 ID 与平仓容量；risk successor 直接读取 Lane 索引，
+  不逐步复制整个用户集合。risk successor 的渐进复杂度和异步 continuation 尚未完成改造。
+- 批量协议直接写入最终 frame，解码严格限制在单个 item 的 offset/length；公共响应的不可变所有权仍保留。
+  Aeron client 的超时检查使用既有插入顺序，新增请求唤醒 dispatcher；没有删除取消/重连的同步保护。
+- service 每次对单会话最多 drain 16 个响应；待发响应同时受 64 条和 16MiB 上限约束，
+  回收 buffer 总量上限 64KiB/会话。超限关闭慢会话，不丢弃或回滚已复制的交易命令。
+- `deepFillBurst256` 覆盖 256 个吃单在途和跨 Lane 深度成交；mixed/长稳计数不再物化全量状态。
+  `surprising.benchmark.openLoop` 独立控制限速，JFR 开关不再改变负载模型；
+  单线程限速器标记为 paced driver，不能宣称已修正 coordinated omission。
+- 同 symbol 批量互斥、业务查询/非撮合写入 fence 和 snapshot fence 仍保留；
+  未完成真实结算依赖和恢复验证前不能直接移除。网关仍同步代理并实时查询用户/会话状态，
+  本轮只移除普通请求的管理审计 body hash，不引入可能延迟冻结/登出生效的鉴权缓存。
+
 ## 文档
 
 当前保留的文档入口：

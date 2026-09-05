@@ -60,6 +60,10 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
         return ids == null ? 0 : ids.size();
     }
 
+    public int count() {
+        return ordersById.size();
+    }
+
     public NavigableSet<Long> ids(long userId, String symbol) {
         LongHashSet userIds = idsByUser.get(userId);
         LongHashSet symbolIds = idsBySymbol.get(OrderReservation.normalizeSymbol(symbol));

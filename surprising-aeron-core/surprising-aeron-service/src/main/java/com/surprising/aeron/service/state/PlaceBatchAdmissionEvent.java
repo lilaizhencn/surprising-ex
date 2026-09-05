@@ -22,7 +22,8 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     private long userId;
     private UUID commandId;
     private ResolvedPlaceOrder[] orders;
-    private long[] requiredReservations;
+    private long[] openInterestSteps;
+    private RuntimeOrderAdmission.AdmissionIdentity[] admissionIdentities;
     private RuntimeIdentityRegistry.PreparedClientKey[] clientKeys;
     private int[] symbolIds;
     private int[] assetIds;
@@ -41,17 +42,18 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
 
     PlaceBatchAdmissionEvent prepare(
             long coreSequence, long userId, UUID commandId, ResolvedPlaceOrder[] orders,
-            long[] requiredReservations,
+            long[] openInterestSteps, RuntimeOrderAdmission.AdmissionIdentity[] admissionIdentities,
             RuntimeIdentityRegistry.PreparedClientKey[] clientKeys,
             int[] symbolIds, int[] assetIds,
             CoreMatchingOrder[] matchingOrders, OrderRuntime[] admittedOrders,
             ReservationRuntime[] admittedReservations, int itemCount, int laneId,
             TradingRuntimeState runtime, TradingRuntimeState.MatcherSettlementChanges changes) {
         if (coreSequence <= 0 || userId <= 0 || commandId == null || orders == null
-                || requiredReservations == null || clientKeys == null || symbolIds == null
+                || openInterestSteps == null || admissionIdentities == null || clientKeys == null || symbolIds == null
                 || assetIds == null || matchingOrders == null || admittedOrders == null
                 || admittedReservations == null || itemCount <= 0
-                || itemCount > orders.length || itemCount > requiredReservations.length
+                || itemCount > orders.length || itemCount > openInterestSteps.length
+                || itemCount > admissionIdentities.length
                 || itemCount > clientKeys.length || itemCount > symbolIds.length || itemCount > assetIds.length
                 || itemCount > matchingOrders.length || itemCount > admittedOrders.length
                 || itemCount > admittedReservations.length || laneId < 0 || runtime == null || changes == null) {
@@ -61,7 +63,8 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         this.userId = userId;
         this.commandId = commandId;
         this.orders = orders;
-        this.requiredReservations = requiredReservations;
+        this.openInterestSteps = openInterestSteps;
+        this.admissionIdentities = admissionIdentities;
         this.clientKeys = clientKeys;
         this.symbolIds = symbolIds;
         this.assetIds = assetIds;
@@ -91,8 +94,11 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
             try {
                 for (int index = 0; index < itemCount; index++) {
                     ResolvedPlaceOrder order = orders[index];
+                    long requiredReservation = RuntimeOrderAdmission.requiredReservationPrepared(
+                            runtime, userId, order, openInterestSteps[index],
+                            lane.admissionOrderIndex(symbolIds[index]), admissionIdentities[index]);
                     RuntimeCommandProcessor.placeOrderPreparedInLane(runtime, lane, userId, order, commandId,
-                            requiredReservations[index], clientKeys[index].key(), symbolIds[index], assetIds[index],
+                            requiredReservation, clientKeys[index].key(), symbolIds[index], assetIds[index],
                             coreSequence);
                     admittedOrders[index] = lane.orders.get(order.orderId());
                     admittedReservations[index] = lane.reservations.get(order.orderId());
@@ -122,7 +128,8 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
             throw new IllegalStateException("cannot recycle an incomplete place batch admission");
         }
         orders = null;
-        requiredReservations = null;
+        openInterestSteps = null;
+        admissionIdentities = null;
         clientKeys = null;
         symbolIds = null;
         assetIds = null;

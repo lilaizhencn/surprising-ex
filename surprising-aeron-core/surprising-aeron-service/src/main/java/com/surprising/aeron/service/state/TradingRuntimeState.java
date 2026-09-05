@@ -85,6 +85,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     private final LongLongHashMap reservationLaneIds = new LongLongHashMap(4_096);
     private final LongLongHashMap positionLaneIds = new LongLongHashMap(4_096);
     private final LongLongHashMap matcherSettlementRemainingScratch = new LongLongHashMap();
+    private final LongHashSet matcherSettlementOrderScratch = new LongHashSet();
     private final LongObjectHashMap<UserRuntime> publishedUsers = new LongObjectHashMap<>(4_096);
     private final LongObjectHashMap<OrderRuntime> publishedOrders = new LongObjectHashMap<>(4_096);
     private final LongObjectHashMap<ReservationRuntime> publishedReservations = new LongObjectHashMap<>(4_096);
@@ -707,10 +708,12 @@ public final class TradingRuntimeState implements AutoCloseable {
             publishedLaneChanges[laneId].ensureAdmissionCapacity(expectedOrders);
         }
 
-        void ensureOrderCapacity(int expectedOrders) {
+        void ensureOrderCapacity(int expectedOrders, long laneMask) {
             if (expectedOrders <= 0) return;
-            for (PublishedLaneChanges changes : publishedLaneChanges) {
-                changes.ensureOrderCapacity(expectedOrders);
+            while (laneMask != 0) {
+                int laneId = Long.numberOfTrailingZeros(laneMask);
+                laneMask &= laneMask - 1;
+                publishedLaneChanges[laneId].ensureOrderCapacity(expectedOrders);
             }
         }
 
@@ -1674,7 +1677,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public PlaceBatchAdmissionEvent dispatchPlaceBatchAdmission(
             long coreSequence, long userId, java.util.UUID commandId,
-            ResolvedPlaceOrder[] orders, long[] requiredReservations,
+            ResolvedPlaceOrder[] orders, long[] openInterestSteps,
+            RuntimeOrderAdmission.AdmissionIdentity[] admissionIdentities,
             RuntimeIdentityRegistry.PreparedClientKey[] clientKeys, int[] symbolIds, int[] assetIds,
             CoreMatchingOrder[] matchingOrders,
             OrderRuntime[] admittedOrders, ReservationRuntime[] admittedReservations, int itemCount) {
@@ -1687,7 +1691,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         changes.ensureAdmissionCapacity(laneId, itemCount);
         PlaceBatchAdmissionEvent event = placeBatchAdmissionEventPool.pollFirst();
         if (event == null) event = new PlaceBatchAdmissionEvent();
-        event.prepare(coreSequence, userId, commandId, orders, requiredReservations,
+        event.prepare(coreSequence, userId, commandId, orders, openInterestSteps, admissionIdentities,
                 clientKeys, symbolIds, assetIds, matchingOrders, admittedOrders,
                 admittedReservations, itemCount, laneId, this, changes);
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
@@ -2053,6 +2057,12 @@ public final class TradingRuntimeState implements AutoCloseable {
     LongLongHashMap matcherSettlementRemainingScratch() {
         assertOwner();
         return matcherSettlementRemainingScratch;
+    }
+
+    LongHashSet matcherSettlementOrderScratch() {
+        assertOwner();
+        matcherSettlementOrderScratch.clear();
+        return matcherSettlementOrderScratch;
     }
 
     void completeMatcherPendingReservations(AccountLaneState lane, MatcherSettlementPlan plan) {
@@ -2788,11 +2798,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         patchTriggerOrdersBefore.forEach((id, before) -> {
             for (int laneId = 0; laneId < accountLanes.length; laneId++) {
                 int laneIndex = laneId;
-                onLane(laneIndex, lane -> { lane.triggerOrders.remove(id); return null; });
+                onLane(laneIndex, lane -> { lane.removeTrigger(id); return null; });
             }
             CoreTriggerOrderState restored = before.value();
             if (restored != null) onLane(restored.userId(), lane -> {
-                lane.triggerOrders.put(id, restored);
+                lane.putTrigger(restored);
                 return null;
             });
         });
@@ -2873,6 +2883,53 @@ public final class TradingRuntimeState implements AutoCloseable {
     IntObjectHashMap<BalanceRuntime> balancesForUser(long userId) {
         assertOwner();
         return onLane(userId, lane -> copyBalances(lane.balances.get(userId)));
+    }
+
+    long nextRiskReservationId(long userId, long cursor) {
+        AccountLaneState lane = riskCursorLane(userId);
+        LongHashSet ids = lane.reservationIdsByUser.get(userId);
+        long selected = 0;
+        if (ids != null) {
+            var iterator = ids.longIterator();
+            while (iterator.hasNext()) {
+                long id = iterator.next();
+                if (id > cursor && (selected == 0 || id < selected)) selected = id;
+            }
+        }
+        return selected;
+    }
+
+    long nextRiskPositionKey(long userId, String cursor, RuntimeIdentityRegistry identities) {
+        AccountLaneState lane = riskCursorLane(userId);
+        LongHashSet ids = lane.positionKeysByUser.get(userId);
+        long selected = 0;
+        String selectedIdentity = null;
+        if (ids != null) {
+            var iterator = ids.longIterator();
+            while (iterator.hasNext()) {
+                long id = iterator.next();
+                String identity = identities.positionKey(userId, id);
+                if (!"-".equals(cursor) && identity.compareTo(cursor) <= 0) continue;
+                if (selectedIdentity == null || identity.compareTo(selectedIdentity) < 0) {
+                    selected = id;
+                    selectedIdentity = identity;
+                }
+            }
+        }
+        return selected;
+    }
+
+    private AccountLaneState riskCursorLane(long userId) {
+        assertOwner();
+        AccountLaneState lane = laneCommandScope.get();
+        if (lane == null && !accountLanesStarted) {
+            // Recovery/projector execution is owner-confined until worker ownership is handed off.
+            lane = accountLanes[topology.accountLaneId(userId)];
+        }
+        if (lane == null || lane.laneId() != topology.accountLaneId(userId)) {
+            throw new IllegalStateException("risk cursor must run in the user's Lane");
+        }
+        return lane;
     }
 
     LongHashSet reservationIdsForUser(long userId) {
@@ -3006,6 +3063,11 @@ public final class TradingRuntimeState implements AutoCloseable {
     public RiskScanRuntime riskScan(int symbolId) {
         assertOwner();
         return riskScans.get(symbolId);
+    }
+
+    public int publishedPositionCount() {
+        assertOwner();
+        return publishedPositions.size();
     }
 
     public RiskScanRuntime firstIncompleteRiskScan() {
@@ -3167,7 +3229,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (triggerOrder == null) throw new IllegalArgumentException("invalid runtime trigger order");
         patchTriggerOrdersBefore.computeIfAbsent(triggerOrder.triggerOrderId(),
                 id -> new PatchBefore<>(triggerOrder(id)));
-        onLane(triggerOrder.userId(), lane -> lane.triggerOrders.put(triggerOrder.triggerOrderId(), triggerOrder));
+        onLane(triggerOrder.userId(), lane -> lane.putTrigger(triggerOrder));
         changedTriggerOrders.add(triggerOrder.triggerOrderId());
     }
 
@@ -3177,12 +3239,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         patchTriggerOrdersBefore.computeIfAbsent(triggerOrderId, id -> new PatchBefore<>(triggerOrder(id)));
         AccountLaneState scoped = laneCommandScope.get();
         if (scoped != null) {
-            scoped.triggerOrders.remove(triggerOrderId);
+            scoped.removeTrigger(triggerOrderId);
             changedTriggerOrders.add(triggerOrderId);
             return;
         }
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            onLane(laneId, lane -> lane.triggerOrders.remove(triggerOrderId));
+            onLane(laneId, lane -> lane.removeTrigger(triggerOrderId));
         }
         changedTriggerOrders.add(triggerOrderId);
     }
@@ -3216,6 +3278,41 @@ public final class TradingRuntimeState implements AutoCloseable {
     Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimersForRuntime() {
         assertOwner();
         return cancelAllAfterTimers;
+    }
+
+    boolean hasTriggerClient(long userId, String clientId) {
+        return onLane(userId, lane -> {
+            LongHashSet ids = lane.triggerIdsByUser.get(userId);
+            if (ids == null) return false;
+            var iterator = ids.longIterator();
+            while (iterator.hasNext()) {
+                if (lane.triggerOrders.get(iterator.next()).clientTriggerOrderId().equals(clientId)) return true;
+            }
+            return false;
+        });
+    }
+
+    long projectedTriggerCapacity(long userId, com.surprising.aeron.protocol.CoreTriggerOrderStateView view) {
+        return onLane(userId, lane -> {
+            long capacity = 0;
+            long sameOcoMax = 0;
+            LongHashSet ids = lane.triggerIdsByUser.get(userId);
+            if (ids != null) {
+                var iterator = ids.longIterator();
+                while (iterator.hasNext()) {
+                    CoreTriggerOrderState trigger = lane.triggerOrders.get(iterator.next());
+                    if (!trigger.status().open() || !trigger.symbol().equals(view.symbol())
+                            || trigger.marginMode() != view.marginMode()
+                            || trigger.positionSide() != view.positionSide() || trigger.side() != view.side()) continue;
+                    capacity = Math.addExact(capacity, trigger.quantitySteps());
+                    if (!view.ocoGroupId().isEmpty() && view.ocoGroupId().equals(trigger.ocoGroupId())) {
+                        sameOcoMax = Math.max(sameOcoMax, trigger.quantitySteps());
+                    }
+                }
+            }
+            return Math.addExact(Math.subtractExact(capacity, sameOcoMax),
+                    Math.max(sameOcoMax, view.quantitySteps()));
+        });
     }
 
     Map<Long, CoreTriggerOrderState> triggerOrdersForRuntime() {
@@ -3366,6 +3463,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 lane.leverageKeysByUser.clear();
                 lane.algoOrders.clear();
                 lane.triggerOrders.clear();
+                lane.triggerIdsByUser.clear();
                 return null;
             });
         }

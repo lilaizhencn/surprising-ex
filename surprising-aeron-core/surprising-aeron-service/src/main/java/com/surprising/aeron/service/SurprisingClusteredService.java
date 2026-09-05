@@ -30,6 +30,9 @@ import org.agrona.concurrent.UnsafeBuffer;
 public final class SurprisingClusteredService implements ClusteredService {
 
     private static final int MAX_PENDING_EGRESS_PER_SESSION = 64;
+    private static final int MAX_PENDING_EGRESS_BYTES_PER_SESSION = 16 * 1024 * 1024;
+    private static final int MAX_RECYCLED_EGRESS_BYTES_PER_SESSION = 64 * 1024;
+    private static final int EGRESS_DRAIN_BUDGET = 16;
     private static final int MATCHING_COMPLETION_BATCH_SIZE = 64;
     private static final int DEFERRED_INGRESS_BATCH_SIZE = 64;
     private static final long SNAPSHOT_TIMEOUT_SECONDS = 30;
@@ -219,7 +222,7 @@ public final class SurprisingClusteredService implements ClusteredService {
             Long sessionId = sessions.next();
             PendingEgress egress = pendingEgress.get(sessionId);
             if (egress == null || egress.session.isClosing()) {
-                if (egress != null) egress.queue.clear();
+                if (egress != null) egress.clearQueue();
                 sessions.remove();
                 work++;
                 continue;
@@ -389,7 +392,7 @@ public final class SurprisingClusteredService implements ClusteredService {
         if (egress.session != session) {
             // Aeron can reuse a numeric session id after reconnect. Never retain queued
             // responses or a proxy belonging to the previous session incarnation.
-            egress.queue.clear();
+            egress.clearQueue();
             egress.session = session;
             activeEgressSessions.remove(session.id());
         }
@@ -405,27 +408,28 @@ public final class SurprisingClusteredService implements ClusteredService {
         if (result < 0 && retryableOffer(result)) {
             enqueue(egress, egress.scratch, length);
         } else if (result < 0) {
-            egress.queue.clear();
+            egress.clearQueue();
             egress.session.close();
         }
     }
 
     private static int drain(PendingEgress egress) {
         if (egress.session.isClosing()) {
-            egress.queue.clear();
+            egress.clearQueue();
             return 0;
         }
         int work = 0;
-        while (!egress.queue.isEmpty()) {
+        while (!egress.queue.isEmpty() && work < EGRESS_DRAIN_BUDGET) {
             UnsafeBuffer encoded = egress.queue.peekFirst();
             long result = egress.session.offer(encoded, 0, encoded.capacity());
             if (result < 0 && retryableOffer(result)) {
                 break;
             }
             egress.queue.removeFirst();
+            egress.queuedBytes -= encoded.capacity();
             egress.recycle(encoded);
             if (result < 0) {
-                egress.queue.clear();
+                egress.clearQueue();
                 egress.session.close();
                 break;
             }
@@ -435,12 +439,14 @@ public final class SurprisingClusteredService implements ClusteredService {
     }
 
     private void enqueue(PendingEgress egress, byte[] encoded, int length) {
-        if (egress.queue.size() >= MAX_PENDING_EGRESS_PER_SESSION) {
-            egress.queue.clear();
+        if (egress.queue.size() >= MAX_PENDING_EGRESS_PER_SESSION
+                || length > MAX_PENDING_EGRESS_BYTES_PER_SESSION - egress.queuedBytes) {
+            egress.clearQueue();
             egress.session.close();
             return;
         }
         egress.queue.addLast(egress.copyForQueue(encoded, length));
+        egress.queuedBytes += length;
         activeEgressSessions.add(egress.session.id());
     }
 
@@ -453,6 +459,8 @@ public final class SurprisingClusteredService implements ClusteredService {
         private ClientSession session;
         private final ArrayDeque<UnsafeBuffer> queue = new ArrayDeque<>();
         private final ArrayDeque<UnsafeBuffer> recycled = new ArrayDeque<>();
+        private int queuedBytes;
+        private int recycledBytes;
         private byte[] scratch = new byte[4 * 1024];
         private UnsafeBuffer scratchBuffer = new UnsafeBuffer(scratch);
 
@@ -468,6 +476,7 @@ public final class SurprisingClusteredService implements ClusteredService {
 
         private UnsafeBuffer copyForQueue(byte[] source, int length) {
             UnsafeBuffer target = recycled.pollFirst();
+            if (target != null) recycledBytes -= target.capacity();
             if (target == null || target.capacity() != length) {
                 target = new UnsafeBuffer(new byte[length]);
             }
@@ -476,7 +485,18 @@ public final class SurprisingClusteredService implements ClusteredService {
         }
 
         private void recycle(UnsafeBuffer buffer) {
-            if (recycled.size() < MAX_PENDING_EGRESS_PER_SESSION) recycled.addLast(buffer);
+            if (recycled.size() < MAX_PENDING_EGRESS_PER_SESSION
+                    && buffer.capacity() <= MAX_RECYCLED_EGRESS_BYTES_PER_SESSION - recycledBytes) {
+                recycled.addLast(buffer);
+                recycledBytes += buffer.capacity();
+            }
+        }
+
+        private void clearQueue() {
+            queue.clear();
+            queuedBytes = 0;
+            recycled.clear();
+            recycledBytes = 0;
         }
     }
 

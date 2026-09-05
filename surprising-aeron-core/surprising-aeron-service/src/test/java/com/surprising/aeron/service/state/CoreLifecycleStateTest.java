@@ -504,6 +504,21 @@ class CoreLifecycleStateTest {
         long firstCoverage = InsuranceAllocationPolicy.expectedCoverage(state, firstUser.liquidationId());
         long secondCoverage = InsuranceAllocationPolicy.expectedCoverage(state, secondUser.liquidationId());
 
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(state, identities);
+        var reverseIds = new java.util.ArrayList<>(state.riskState().liquidations().keySet());
+        java.util.Collections.reverse(reverseIds);
+        var allAllocations = InsuranceAllocationPolicy.allocations(runtime, identities, reverseIds);
+        for (long id : reverseIds) {
+            assertThat(InsuranceAllocationPolicy.expectedCoverage(runtime, identities, reverseIds, id))
+                    .isEqualTo(allAllocations.get(id))
+                    .isEqualTo(InsuranceAllocationPolicy.expectedCoverage(state, id));
+        }
+        assertThat(InsuranceAllocationPolicy.isNext(runtime, identities, reverseIds, firstUser.liquidationId()))
+                .isTrue();
+        assertThat(InsuranceAllocationPolicy.isNext(runtime, identities, reverseIds, secondUser.liquidationId()))
+                .isFalse();
+
         assertThat(firstCoverage).isEqualTo(secondCoverage + 1);
         assertThat(firstCoverage + secondCoverage)
                 .isEqualTo(state.treasuryState().insuranceBalances().get("USDT"));

@@ -1024,7 +1024,7 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private boolean tryActivatePipelinedOrderBatch(OrderBatchPending batch, PendingMatching pending) {
-        if (!productLine.isDerivative() || batch.kind != OrderBatchKind.PLACE || batch.items.size() < 2
+        if (batch.sequentialAdmission || !productLine.isDerivative() || batch.kind != OrderBatchKind.PLACE || batch.items.size() < 2
                 || BENCHMARK_SKIP_MATCHING_SUBMIT
                 || pendingMatching.hasEarlierUser(batch.sequence, pending.command().header().userId())
                 || conflictsWithEarlierPipelinedBatch(batch)) {
@@ -1077,7 +1077,7 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private boolean preparePipelinedPerpetualPlaceBatch(OrderBatchPending batch, PendingMatching pending) {
-        if (!productLine.isDerivative() || batch.kind != OrderBatchKind.PLACE || batch.items.size() < 2
+        if (batch.sequentialAdmission || !productLine.isDerivative() || batch.kind != OrderBatchKind.PLACE || batch.items.size() < 2
                 || BENCHMARK_SKIP_MATCHING_SUBMIT) {
             return false;
         }
@@ -1086,8 +1086,6 @@ public final class CoreProbeState implements AutoCloseable {
             int batchMatcherShard = -1;
             batch.preparedSymbols.clear();
             batch.preparedSymbolSet.clear();
-            batch.preparedReservationUnitsByAsset.clear();
-            batch.preparedAvailableUnitsByAsset.clear();
             for (int index = 0; index < batch.items.size(); index++) {
                 OrderBatchItem item = batch.items.get(index);
                 PlaceOrderCommand command = (PlaceOrderCommand) item.command;
@@ -1106,28 +1104,10 @@ public final class CoreProbeState implements AutoCloseable {
                 var preparedClientKey = runtimePlaceOrderIdentities.prepareClientKey(
                         userId, resolved.clientOrderId());
                 int assetId = runtimePlaceOrderIdentities.assetId(resolved.reservationAsset());
-                long requiredReservation =
-                        com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservationPrepared(
-                                runtimePlaceOrderState, userId, resolved,
-                                batchOpenInterestSteps(batch, command.symbol()),
-                                batch.admissionOrderIndex, admissionIdentity);
-                long requiredForAsset = Math.addExact(
-                        batch.preparedReservationUnitsByAsset.get(assetId), requiredReservation);
-                batch.preparedReservationUnitsByAsset.put(assetId, requiredForAsset);
-                if (!batch.preparedAvailableUnitsByAsset.containsKey(assetId)) {
-                    long availableUnits = runtimePlaceOrderState.publishedAvailableBalance(userId, assetId);
-                    if (availableUnits == Long.MIN_VALUE) {
-                        throw new IllegalStateException("published available balance is missing");
-                    }
-                    batch.preparedAvailableUnitsByAsset.put(assetId, availableUnits);
-                }
-                if (batch.preparedAvailableUnitsByAsset.get(assetId) < requiredForAsset) {
-                    throw new CoreStateRejectedException(
-                            "INSUFFICIENT_AVAILABLE_BALANCE", "available balance is insufficient");
-                }
                 batch.preparedOrders[index] = resolved;
                 batch.preparedClientKeyValues[index] = preparedClientKey;
-                batch.preparedRequiredReservations[index] = requiredReservation;
+                batch.preparedOpenInterestSteps[index] = batchOpenInterestSteps(batch, command.symbol());
+                batch.preparedAdmissionIdentities[index] = admissionIdentity;
                 batch.preparedSymbolIds[index] = resolved.symbolId();
                 batch.preparedAssetIds[index] = assetId;
                 batch.preparedMatchingOrders[index] = new CoreMatchingOrder(
@@ -1137,7 +1117,6 @@ public final class CoreProbeState implements AutoCloseable {
                     batch.preparedSymbols.add(command.symbol());
                 }
                 batch.retainPreparedClientKey(userId, resolved.clientOrderId(), preparedClientKey);
-                batch.admissionOrderIndex.admitted(userId, resolved);
             }
             batch.pipelined = true;
             return true;
@@ -1148,8 +1127,6 @@ public final class CoreProbeState implements AutoCloseable {
             batch.currentPreMatchingCancellationOrderIds = List.of();
             batch.preparedSymbols.clear();
             batch.preparedSymbolSet.clear();
-            batch.preparedReservationUnitsByAsset.clear();
-            batch.preparedAvailableUnitsByAsset.clear();
             return false;
         }
     }
@@ -1158,7 +1135,7 @@ public final class CoreProbeState implements AutoCloseable {
             PendingMatching pending, OrderBatchPending batch) {
         batch.placeBatchAdmissionEvent = runtimePlaceOrderState.dispatchPlaceBatchAdmission(
                 pending.sequence(), pending.command().header().userId(), pending.command().header().commandId(),
-                batch.preparedOrders, batch.preparedRequiredReservations,
+                batch.preparedOrders, batch.preparedOpenInterestSteps, batch.preparedAdmissionIdentities,
                 batch.preparedClientKeyValues, batch.preparedSymbolIds, batch.preparedAssetIds,
                 batch.preparedMatchingOrders, batch.preparedAdmittedOrders,
                 batch.preparedAdmittedReservations, batch.items.size());
@@ -2965,8 +2942,26 @@ public final class CoreProbeState implements AutoCloseable {
                         runtimePlaceOrderState.discardPlaceBatchAdmission(batchAdmission);
                         runtimePlaceOrderState.releasePlaceBatchAdmission(batchAdmission);
                         orderBatch.placeBatchAdmissionEvent = null;
-                        throw failOrderBatch(orderBatch, pending,
-                                "asynchronous place batch admission diverged after prevalidation", rejection);
+                        unregisterPipelinedBatchSymbols(orderBatch);
+                        orderBatch.rollbackPreparedClientKeys(runtimePlaceOrderIdentities);
+                        orderBatch.pipelined = false;
+                        orderBatch.sequentialAdmission = true;
+                        orderBatch.admissionOrderIndex.reset(pending.command().header().userId());
+                        placeAdmissionReadyShardMask &= ~shardBit;
+                        if (orderBatch.commitStarted) {
+                            activateFactContext(sequenceAdmission(pending.sequence()),
+                                    pending.command(), pending.fingerprint());
+                            try {
+                                startOrderBatchItem(orderBatch, pending,
+                                        orderBatch.clusterTimestamp, orderBatch.clusterPosition);
+                            } finally {
+                                clearFactContext();
+                            }
+                        } else {
+                            orderBatch.started = false;
+                            submitDeferredMatchingAfterBatch();
+                        }
+                        break;
                     }
                     if (!orderBatch.admissionCollected) {
                         runtimePlaceOrderState.stagePlaceBatchAdmission(batchAdmission);
@@ -5170,6 +5165,13 @@ public final class CoreProbeState implements AutoCloseable {
                 runtimePlaceOrderState, runtimePlaceOrderIdentities);
     }
 
+    // Scalar observations of the committed owner view; no Lane reads or snapshot materialization.
+    int incompleteRiskScanCount() { return runtimePlaceOrderState.incompleteRiskScanCount(); }
+    int incompleteFundingCount() { return runtimePlaceOrderState.treasury().incompleteFundingCount(); }
+    int activeOrderCount() { return activeOrderIndex.count(); }
+    int positionCount() { return runtimePlaceOrderState.publishedPositionCount(); }
+    int triggerOrderCount() { return triggerOrderIndex.ids().size(); }
+
     TradingCoreState snapshotTradingState() {
         SnapshotFence fence = snapshotFence;
         if (fence != null && fence.snapshotState != null) return fence.snapshotState;
@@ -7011,6 +7013,7 @@ public final class CoreProbeState implements AutoCloseable {
         private boolean pipelineRegistered;
         private boolean laneCommitCompleted;
         private boolean pipelined;
+        private boolean sequentialAdmission;
         private final List<com.surprising.aeron.service.matching.CoreMatchingResult> pipelinedMatchingResults;
         private Throwable pipelinedMatchingFailure;
         private com.surprising.aeron.service.state.MatcherSettlementEvent[] settlementEvents;
@@ -7019,7 +7022,9 @@ public final class CoreProbeState implements AutoCloseable {
         private final ResolvedPlaceOrder[] preparedOrders;
         private final com.surprising.aeron.service.state.RuntimeIdentityRegistry.PreparedClientKey[]
                 preparedClientKeyValues;
-        private final long[] preparedRequiredReservations;
+        private final long[] preparedOpenInterestSteps;
+        private final com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionIdentity[]
+                preparedAdmissionIdentities;
         private final int[] preparedSymbolIds;
         private final int[] preparedAssetIds;
         private final CoreMatchingOrder[] preparedMatchingOrders;
@@ -7027,8 +7032,6 @@ public final class CoreProbeState implements AutoCloseable {
         private final com.surprising.aeron.service.state.ReservationRuntime[] preparedAdmittedReservations;
         private final ArrayList<String> preparedSymbols;
         private final HashSet<String> preparedSymbolSet;
-        private final IntLongHashMap preparedReservationUnitsByAsset;
-        private final IntLongHashMap preparedAvailableUnitsByAsset;
         private boolean settlementsCollected;
         private boolean cancellationsCollected;
         private boolean finishing;
@@ -7053,7 +7056,9 @@ public final class CoreProbeState implements AutoCloseable {
             preparedOrders = new ResolvedPlaceOrder[capacity];
             preparedClientKeyValues =
                     new com.surprising.aeron.service.state.RuntimeIdentityRegistry.PreparedClientKey[capacity];
-            preparedRequiredReservations = new long[capacity];
+            preparedOpenInterestSteps = new long[capacity];
+            preparedAdmissionIdentities =
+                    new com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionIdentity[capacity];
             preparedSymbolIds = new int[capacity];
             preparedAssetIds = new int[capacity];
             preparedMatchingOrders = new CoreMatchingOrder[capacity];
@@ -7062,8 +7067,6 @@ public final class CoreProbeState implements AutoCloseable {
                     new com.surprising.aeron.service.state.ReservationRuntime[capacity];
             preparedSymbols = new ArrayList<>(capacity);
             preparedSymbolSet = new HashSet<>(capacity);
-            preparedReservationUnitsByAsset = new IntLongHashMap(capacity);
-            preparedAvailableUnitsByAsset = new IntLongHashMap(capacity);
         }
 
         private OrderBatchPending initialize(OrderBatchKind kind, long clusterTimestamp,
@@ -7108,20 +7111,20 @@ public final class CoreProbeState implements AutoCloseable {
             pipelineRegistered = false;
             laneCommitCompleted = false;
             pipelined = false;
+            sequentialAdmission = false;
             pipelinedMatchingResults.clear();
             pipelinedMatchingFailure = null;
             settlementEvents = null;
             cancelEvent = null;
             placeBatchAdmissionEvent = null;
             java.util.Arrays.fill(preparedOrders, null);
+            java.util.Arrays.fill(preparedAdmissionIdentities, null);
             java.util.Arrays.fill(preparedClientKeyValues, null);
             java.util.Arrays.fill(preparedMatchingOrders, null);
             java.util.Arrays.fill(preparedAdmittedOrders, null);
             java.util.Arrays.fill(preparedAdmittedReservations, null);
             preparedSymbols.clear();
             preparedSymbolSet.clear();
-            preparedReservationUnitsByAsset.clear();
-            preparedAvailableUnitsByAsset.clear();
             settlementsCollected = false;
             cancellationsCollected = false;
             finishing = false;

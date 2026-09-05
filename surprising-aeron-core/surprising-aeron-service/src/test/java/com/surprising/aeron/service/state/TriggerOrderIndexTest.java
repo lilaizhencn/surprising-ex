@@ -33,6 +33,16 @@ class TriggerOrderIndexTest {
                 CoreRiskState.empty(), CoreTreasuryState.empty(), Map.of(), Map.of(), Map.of(), triggers);
         TriggerOrderIndex index = new TriggerOrderIndex(state);
 
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        try (TradingRuntimeState runtime = RuntimeStateProjector.project(state, identities)) {
+            assertThat(runtime.hasTriggerClient(7, "client-1")).isTrue();
+            assertThat(runtime.hasTriggerClient(8, "client-1")).isFalse();
+            runtime.removeTriggerOrder(1);
+            assertThat(runtime.hasTriggerClient(7, "client-1")).isFalse();
+            runtime.putTriggerOrder(triggers.get(1L));
+            assertThat(runtime.hasTriggerClient(7, "client-1")).isTrue();
+        }
+
         long upperId = index.maxPendingId("BTC-USDT");
         int phase = TriggerOrderIndex.PHASE_GREATER_OR_EQUAL;
         long priceCursor = Long.MAX_VALUE;

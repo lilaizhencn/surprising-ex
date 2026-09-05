@@ -247,6 +247,61 @@ final class LinearPerpetualBenchmarkSupport {
         return burstScenario(harness, commands);
     }
 
+    static SnapshotTemplate deepFillBurstTemplate(int accountLanes, int makerDepth) {
+        validateScale("makerDepth", accountLanes, makerDepth);
+        try (Harness harness = base(accountLanes)) {
+            List<Long> users = usersAcrossLanes(accountLanes, accountLanes + 256, 50_000);
+            for (long user : users) harness.adjust(user, SAFE_BALANCE);
+            for (int index = 0; index < Math.multiplyExact(256, makerDepth); index++) {
+                harness.execute(harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY,
+                        users.get(index % accountLanes),
+                        order(harness.nextOrderId(), CoreOrderSide.SELL, ENTRY_PRICE, 1, CoreTimeInForce.GTC)));
+            }
+            return harness.snapshotTemplate(accountLanes);
+        }
+    }
+
+    static Scenario deepFillBurst256(SnapshotTemplate template, int makerDepth) {
+        Harness harness = Harness.restore(template);
+        List<Long> users = usersAcrossLanes(template.accountLanes(), template.accountLanes() + 256, 50_000);
+        CoreMessage[] commands = new CoreMessage[256];
+        for (int index = 0; index < commands.length; index++) {
+            commands[index] = harness.command(CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY,
+                    users.get(template.accountLanes() + index),
+                    order(harness.nextOrderId(), CoreOrderSide.BUY, ENTRY_PRICE, makerDepth, CoreTimeInForce.IOC));
+        }
+        Scenario burst = burstScenario(harness, commands);
+        return new Scenario() {
+            @Override public long run() { return burst.run(); }
+            @Override public long operations() { return 256; }
+            @Override public long maxBacklog() { return burst.maxBacklog(); }
+            @Override public long terminalTrades() { return 256L * makerDepth; }
+            @Override public void verify() {
+                burst.verify();
+                var state = harness.state().tradingState();
+                long balances = 0;
+                long netPosition = 0;
+                for (var user : state.users().values()) {
+                    var balance = user.balances().get(SETTLE_ASSET);
+                    if (balance != null) balances = Math.addExact(balances,
+                            Math.addExact(balance.availableUnits(), balance.lockedUnits()));
+                    for (var position : user.positions().values()) {
+                        netPosition = Math.addExact(netPosition, position.signedQuantitySteps());
+                    }
+                    if (!user.reservations().isEmpty()) {
+                        throw new IllegalStateException("deep fill retained terminal reservations");
+                    }
+                }
+                long fees = state.treasuryState().feeBalances().getOrDefault(SETTLE_ASSET, 0L);
+                if (Math.addExact(balances, fees) != Math.multiplyExact(users.size(), SAFE_BALANCE)
+                        || netPosition != 0 || harness.state().activeOrderCount() != 0) {
+                    throw new IllegalStateException("deep fill violated funds, positions or terminal orders");
+                }
+            }
+            @Override public void close() { burst.close(); }
+        };
+    }
+
     static Scenario amendBurst256(OrderContinuationTemplate template) {
         Harness harness = Harness.restore(template.snapshot());
         CoreMessage[] commands = new CoreMessage[256];

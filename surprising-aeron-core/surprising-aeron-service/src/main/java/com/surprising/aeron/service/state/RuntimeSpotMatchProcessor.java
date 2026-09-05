@@ -105,7 +105,8 @@ public final class RuntimeSpotMatchProcessor {
             throw new IllegalArgumentException("invalid spot matcher settlement plan");
         }
         OrderRuntime localTaker = runtime.order(takerOrderId);
-        for (int index = 0; index < plan.matcherEventCount(); index++) {
+        for (int index = plan.firstMatcherEvent(laneId); index >= 0;
+                index = plan.nextMatcherEvent(index, laneId)) {
             MatcherEvent match = plan.matcherEvent(index);
             if (match.eventType() != MatcherEventType.TRADE
                     || !plan.matcherEventTouchesLane(index, laneId, runtime)) continue;

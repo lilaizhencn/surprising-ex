@@ -398,6 +398,31 @@ class CoreOrderedOrderBatchTest {
     }
 
     @Test
+    void laneBatchRejectionRollsBackProvisionalClientAndFundsBeforeOrderedItemsResume() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+            applyLinearPerpetualInstrument(state);
+            applyBalance(state, ProductLine.LINEAR_PERPETUAL, 1001, 1_000_000, 1);
+            var batch = command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.PLACE_ORDER_BATCH,
+                    UUID.randomUUID(), 2, TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(
+                            List.of(linearOrder(19_001, "same-client", CoreOrderSide.BUY, 500, 1),
+                                    linearOrder(19_002, "same-client", CoreOrderSide.BUY, 500, 1)))), 1001);
+            var result = TradingOrderBatchCodec.decodeResult(drainBatch(state, batch).data());
+            assertThat(result.items()).extracting(CoreOrderBatchResult.Item::status)
+                    .containsExactly(ResponseStatus.APPLIED, ResponseStatus.REJECTED);
+            assertThat(result.items().get(1).resultCode()).isEqualTo(CoreResultCode.DUPLICATE_CLIENT_ORDER_ID);
+            var user = state.tradingState().user(1001);
+            assertThat(user.reservations()).containsOnlyKeys(19_001L);
+            assertThat(user.balances().get("USDT").totalUnits()).isEqualTo(1_000_000);
+            assertThat(state.pendingMatchingCount()).isZero();
+            byte[] snapshot = state.snapshot();
+            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.LINEAR_PERPETUAL, snapshot)) {
+                assertThat(restored.tradingState().businessStateHash())
+                        .isEqualTo(state.tradingState().businessStateHash());
+            }
+        }
+    }
+
+    @Test
     void keepsPriorItemsButFailsStickyAfterMatcherDivergence() throws Exception {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applySpotInstrument(state);
@@ -474,7 +499,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.pendingMatching(fatalSequence).pendingStateHash()).isNotZero();
             assertThat(state.pendingMatchingCount()).isOne();
             assertThat(state.matchingSequence(fatalId)).isEqualTo(fatalSequence);
-            assertThat(state.snapshotHasOutstandingReservation()).isFalse();
+            assertThat(state.snapshotHasOutstandingReservation()).isTrue();
             assertThat((long[]) field(state, "appliedMatcherSequences")).containsExactly(matcherAfterFirst);
             assertThat((long[]) field(state, "appliedMatcherPrefixDigests"))
                     .containsExactly(matcherPrefixAfterFirst);
@@ -562,8 +587,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(amended.items()).extracting(CoreOrderBatchResult.Item::status)
                     .containsExactly(ResponseStatus.APPLIED, ResponseStatus.REJECTED);
             assertThat(amended.items().get(1).resultCode()).isEqualTo(CoreResultCode.ORDER_NOT_FOUND);
-            assertThat(state.tradingState().order(12_001).status())
-                    .isEqualTo(com.surprising.aeron.service.state.CoreOrderStatus.CANCELED);
+            assertThat(state.tradingState().order(12_001)).isNull();
             assertThat(state.tradingState().order(12_002).status())
                     .isEqualTo(com.surprising.aeron.service.state.CoreOrderStatus.OPEN);
 
@@ -574,8 +598,8 @@ class CoreOrderedOrderBatchTest {
             assertThat(canceled.items()).extracting(CoreOrderBatchResult.Item::status)
                     .containsExactly(ResponseStatus.APPLIED, ResponseStatus.REJECTED);
             assertThat(canceled.items().get(1).resultCode()).isEqualTo(CoreResultCode.ORDER_NOT_FOUND);
-            assertThat(state.tradingState().order(12_002).status())
-                    .isEqualTo(com.surprising.aeron.service.state.CoreOrderStatus.CANCELED);
+            assertThat(state.tradingState().order(12_002)).isNull();
+            assertThat(state.tradingState().user(1001).reservations()).isEmpty();
         }
     }
 
@@ -682,7 +706,7 @@ class CoreOrderedOrderBatchTest {
         long sequence = state.matchingSequence(commandId);
         assertThat(state.completeMatching(sequence, awaitMatching(state, sequence), 2_000, 3)).isNull();
         assertThat(runtime.order(15_001)).isNotNull();
-        assertThat(state.snapshotHasOutstandingReservation()).isFalse();
+        assertThat(state.snapshotHasOutstandingReservation()).isTrue();
 
         state.close();
 
@@ -804,7 +828,7 @@ class CoreOrderedOrderBatchTest {
                 throw new IllegalArgumentException("injected later pipelined item failure");
             });
             Throwable divergence = org.assertj.core.api.Assertions.catchThrowable(
-                    () -> state.completeMatching(sequence, first, 3_000, 3));
+                    () -> completeEventually(state, sequence, first, 3_000, 3));
 
             assertThat(divergence).isInstanceOf(
                     com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class);
@@ -821,8 +845,10 @@ class CoreOrderedOrderBatchTest {
             assertThat(runtime.position(takerPositionKey).signedQuantitySteps()).isEqualTo(1);
             assertThat(runtime.position(makerPositionKey).signedQuantitySteps()).isEqualTo(-1);
             assertThat(identities.snapshot()).isNotEqualTo(identityBefore);
-            assertThat(runtime.order(15_301)).isNotNull();
-            assertThat(runtime.order(15_302)).isNotNull();
+            assertThat(runtime.order(15_301)).isNull();
+            assertThat(runtime.order(15_302)).isNull();
+            assertThat(runtime.reservation(15_301)).isNull();
+            assertThat(runtime.reservation(15_302)).isNull();
             assertThat(state.snapshotProjectionSequence()).isEqualTo(projectionBefore);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
             assertThat(state.exportState().snapshot()).isEqualTo(exportBefore);

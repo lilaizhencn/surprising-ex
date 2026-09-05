@@ -13,6 +13,31 @@ import org.junit.jupiter.api.Test;
 class LinearPerpetualBenchmarkSupportTest {
 
     @Test
+    void deepFillsRouteOnlyRelatedEventsAndConserveFundsAt256InFlight() {
+        var template = LinearPerpetualBenchmarkSupport.deepFillBurstTemplate(4, 8);
+        try (var scenario = LinearPerpetualBenchmarkSupport.deepFillBurst256(template, 8)) {
+            scenario.run();
+            scenario.verify();
+            assertThat(scenario.maxBacklog()).isEqualTo(256);
+            assertThat(scenario.terminalTrades()).isEqualTo(2048);
+        }
+    }
+
+    @Test
+    void scalarProgressCountersMatchMaterializedStateWithoutFreezingProjection() {
+        try (var harness = LinearPerpetualBenchmarkSupport.Harness.create(4)) {
+            harness.adjust(100_001L, 100);
+            long before = harness.state().snapshotProjectionFreezeCount();
+            assertThat(harness.state().activeOrderCount()).isZero();
+            assertThat(harness.state().positionCount()).isZero();
+            assertThat(harness.state().triggerOrderCount()).isZero();
+            assertThat(harness.state().incompleteFundingCount()).isZero();
+            assertThat(harness.state().incompleteRiskScanCount()).isZero();
+            assertThat(harness.state().snapshotProjectionFreezeCount()).isEqualTo(before);
+        }
+    }
+
+    @Test
     void orderContinuationsSustainTheRequiredTwoHundredFiftySixInFlightWindow() {
         var template = LinearPerpetualBenchmarkSupport.orderContinuationTemplate(4);
         for (int round = 0; round < 64; round++) {

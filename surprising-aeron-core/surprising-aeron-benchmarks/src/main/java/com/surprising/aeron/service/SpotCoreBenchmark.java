@@ -55,8 +55,11 @@ public class SpotCoreBenchmark {
         @Param({"1000", "10000"})
         public int activeUsers;
 
-        @Param("4")
+        @Param("256")
         public int symbols;
+
+        @Param("256")
+        public int maxInFlight;
 
         @Param("96")
         public int hftRounds;
@@ -68,6 +71,9 @@ public class SpotCoreBenchmark {
 
         @Setup(Level.Trial)
         public void setUpTrial() {
+            if (maxInFlight != 256 || symbols != 256) {
+                throw new IllegalArgumentException("spot qualification requires 256 symbols/in-flight");
+            }
             LinearPerpetualBenchmarkSupport.configureAccountLanes(accountLanes);
             SpotMixedWorkload.Template template = SpotMixedWorkload.template(accountLanes, activeUsers, symbols);
             scenario = SpotMixedWorkload.scenario(template, hftRounds, hftBatchSize);

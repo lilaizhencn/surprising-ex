@@ -78,7 +78,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         this.changes = commitSequence != 0 || captureIsolatedChanges
                 ? runtime.acquireMatcherSettlementChanges() : null;
         if (changes != null) {
-            changes.ensureOrderCapacity(Math.addExact(plan.orderCount(), plan.preCancellationCount()));
+            changes.ensureOrderCapacity(Math.addExact(plan.orderCount(), plan.preCancellationCount()),
+                    requiredLaneMask);
         }
         if (plan.tradeCount() == 0) {
             if (touchedLaneTreasuryDeltas != null) {
@@ -142,7 +143,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         this.batchSettleAssetIds = settleAssetIds;
         this.isolatedChanges = true;
         this.changes = runtime.acquireMatcherSettlementChanges();
-        changes.ensureOrderCapacity(expectedOrders);
+        changes.ensureOrderCapacity(expectedOrders, requiredLaneMask);
         treasuryTrades = hasTrade(plans);
         prepareTreasuryDeltas(laneCount, treasuryTrades);
         collectedFundsDelta = RuntimeFundsDelta.empty();

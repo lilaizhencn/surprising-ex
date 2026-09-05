@@ -419,28 +419,13 @@ public final class RuntimePerpetualRiskProcessor {
 
     private static PositionEntry nextPosition(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                               long userId, String cursor) {
-        PositionEntry[] selected = new PositionEntry[1];
-        runtime.positionKeysForUser(userId).forEach(positionId -> {
-            PositionRuntime position = runtime.position(positionId);
-            if (position == null) return;
-            String symbol = identities.preparedSymbol(position.symbolId());
-            String key = position.positionSide() == com.surprising.aeron.protocol.CorePositionSide.NET
-                    ? symbol : symbol + ':' + position.positionSide().name();
-            if (!"-".equals(cursor) && key.compareTo(cursor) <= 0) return;
-            if (selected[0] == null || key.compareTo(selected[0].key()) < 0) {
-                selected[0] = new PositionEntry(key, position);
-            }
-        });
-        return selected[0];
+        long key = runtime.nextRiskPositionKey(userId, cursor, identities);
+        return key == 0 ? null : new PositionEntry(identities.positionKey(userId, key), runtime.position(key));
     }
 
     private static ReservationRuntime nextReservation(TradingRuntimeState runtime, long userId, long cursor) {
-        ReservationRuntime[] selected = new ReservationRuntime[1];
-        runtime.reservationIdsForUser(userId).forEach(orderId -> {
-            if (orderId <= cursor || selected[0] != null && orderId >= selected[0].orderId()) return;
-            selected[0] = runtime.reservation(orderId);
-        });
-        return selected[0];
+        long id = runtime.nextRiskReservationId(userId, cursor);
+        return id == 0 ? null : runtime.reservation(id);
     }
 
     private record PositionRisk(CoreInstrumentState instrument, long priceSequence,

@@ -8,6 +8,18 @@ import org.junit.jupiter.api.Test;
 
 class SpotMixedWorkloadTest {
 
+    @Test
+    void qualificationWindowCloses256RealSpotCommandsAndPreservesAllAssets() {
+        var template = SpotMixedWorkload.template(4, 256, 256);
+        try (var scenario = SpotMixedWorkload.scenario(template, 1, 2)) {
+            scenario.run();
+            assertThat(scenario.maxBacklog()).isEqualTo(256);
+            assertThat(scenario.acceptedOperations()).isEqualTo(scenario.terminalOperations());
+            assertThat(scenario.acceptedCoreMessages()).isEqualTo(scenario.terminalCoreMessages());
+            scenario.verify();
+        }
+    }
+
     private final String originalAccountLanes = System.getProperty("surprising.aeron.account-lanes");
 
     @AfterEach

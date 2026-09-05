@@ -59,8 +59,11 @@ public class DerivativeCoreBenchmark {
         @Param({"1000", "10000"})
         public int activeUsers;
 
-        @Param("4")
+        @Param("256")
         public int symbols;
+
+        @Param("256")
+        public int maxInFlight;
 
         @Param("32")
         public int hftRounds;
@@ -72,6 +75,9 @@ public class DerivativeCoreBenchmark {
 
         @Setup(Level.Trial)
         public void setUpTrial() {
+            if (maxInFlight != 256 || symbols != 256) {
+                throw new IllegalArgumentException("derivative qualification requires 256 symbols/in-flight");
+            }
             LinearPerpetualBenchmarkSupport.configureAccountLanes(accountLanes);
             var template = DerivativeMixedWorkload.template(
                     productLine, accountLanes, activeUsers, symbols);

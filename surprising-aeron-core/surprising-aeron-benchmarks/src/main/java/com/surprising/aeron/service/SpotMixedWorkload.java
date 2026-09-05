@@ -70,8 +70,8 @@ final class SpotMixedWorkload {
         if (activeUsers < accountLanes || activeUsers > LinearPerpetualBenchmarkSupport.MAX_BENCHMARK_SCALE) {
             throw new IllegalArgumentException("activeUsers must cover every lane and be at most 10000");
         }
-        if (symbolCount < 2 || symbolCount > 16 || activeUsers < symbolCount) {
-            throw new IllegalArgumentException("symbolCount must be in [2,16] and not exceed activeUsers");
+        if (symbolCount < 2 || symbolCount > 256 || activeUsers < symbolCount) {
+            throw new IllegalArgumentException("symbolCount must be in [2,256] and not exceed activeUsers");
         }
         List<String> symbols = symbols(symbolCount);
         List<String> baseAssets = baseAssets(symbolCount);

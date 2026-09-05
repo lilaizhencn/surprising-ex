@@ -718,9 +718,7 @@ public final class RuntimeCommandProcessor {
         if (runtime.triggerOrder(view.triggerOrderId()) != null) {
             throw new CoreStateRejectedException("DUPLICATE_TRIGGER_ORDER_ID", "trigger order already exists");
         }
-        boolean duplicateClient = runtime.triggerOrdersForRuntime().values().stream()
-                .anyMatch(order -> order.userId() == userId
-                        && order.clientTriggerOrderId().equals(view.clientTriggerOrderId()));
+        boolean duplicateClient = runtime.hasTriggerClient(userId, view.clientTriggerOrderId());
         if (duplicateClient) {
             throw new CoreStateRejectedException("DUPLICATE_CLIENT_TRIGGER_ORDER_ID",
                     "client trigger order id already exists");
@@ -836,19 +834,7 @@ public final class RuntimeCommandProcessor {
         }
         long openReduceOnly = runtime.openReduceOnlyQuantity(
                 userId, symbolId, view.positionSide(), closeSide, view.marginMode());
-        long triggerCapacity = 0;
-        long sameOcoGroupMax = 0;
-        for (CoreTriggerOrderState trigger : runtime.triggerOrdersForRuntime().values()) {
-            if (!trigger.status().open() || trigger.userId() != userId || !trigger.symbol().equals(view.symbol())
-                    || trigger.marginMode() != view.marginMode() || trigger.positionSide() != view.positionSide()
-                    || trigger.side() != closeSide) continue;
-            triggerCapacity = Math.addExact(triggerCapacity, trigger.quantitySteps());
-            if (!view.ocoGroupId().isEmpty() && view.ocoGroupId().equals(trigger.ocoGroupId())) {
-                sameOcoGroupMax = Math.max(sameOcoGroupMax, trigger.quantitySteps());
-            }
-        }
-        long projectedTriggerCapacity = Math.addExact(Math.subtractExact(triggerCapacity, sameOcoGroupMax),
-                Math.max(sameOcoGroupMax, view.quantitySteps()));
+        long projectedTriggerCapacity = runtime.projectedTriggerCapacity(userId, view);
         if (Math.addExact(openReduceOnly, projectedTriggerCapacity)
                 > Math.absExact(position.signedQuantitySteps())) {
             throw new CoreStateRejectedException("TRIGGER_CLOSE_CAPACITY_EXCEEDED",
