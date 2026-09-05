@@ -85,10 +85,14 @@ final class SettlementLaneWorker implements AutoCloseable {
                     int index = (int) next & indexMask;
                     Command command = commands[index];
                     if (command == null) throw new IllegalStateException("settlement lane publication gap");
-                    command.execute(lane);
+                    // The command reference is now local, so the ring slot can be released before
+                    // execution publishes its terminal notification. This makes queue depth and
+                    // capacity describe queued work only; observing terminal completion can no
+                    // longer race the worker's trailing cursor bookkeeping.
                     commands[index] = null;
                     next++;
                     consumerSequence.value = next;
+                    command.execute(lane);
                     continue;
                 }
                 switch (waitStrategy) {
