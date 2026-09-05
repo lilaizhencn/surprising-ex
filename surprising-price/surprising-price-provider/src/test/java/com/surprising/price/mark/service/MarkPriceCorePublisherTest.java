@@ -1,6 +1,7 @@
 package com.surprising.price.mark.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.price.api.model.MarkPriceEvent;
 import com.surprising.price.api.model.PriceStatus;
@@ -129,10 +130,35 @@ class MarkPriceCorePublisherTest {
         }
     }
 
+    @Test
+    void publishesExplicitOptionIndexAndSameExpiryForwardPrices() {
+        var command = MarkPriceCorePublisher.toCommand(optionEvent(BigDecimal.valueOf(102)));
+
+        assertThat(command.markPriceTicks()).isEqualTo(10);
+        assertThat(command.indexPriceTicks()).isEqualTo(100);
+        assertThat(command.forwardPriceTicks()).isEqualTo(102);
+    }
+
+    @Test
+    void rejectsOptionPublicationWithoutSameExpiryForwardPrice() {
+        assertThatThrownBy(() -> MarkPriceCorePublisher.toCommand(optionEvent(null)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("index and forward prices are required");
+        assertThat(MarkPriceCorePublisher.toCommand(event("BTC-USDT", 1)).indexPriceTicks()).isZero();
+    }
+
     private static MarkPriceEvent event(String symbol, long sequence) {
         Instant now = Instant.now();
         return new MarkPriceEvent(ProductLine.LINEAR_PERPETUAL, symbol, 1L, 100_000_000L, 100L,
-                BigDecimal.valueOf(100), BigDecimal.valueOf(100), null, null, null, null, null, null,
+                BigDecimal.valueOf(100), BigDecimal.valueOf(100), null, null, null, null, null, null, null,
                 null, 0L, null, 0L, null, null, sequence, PriceStatus.HEALTHY, now, now);
+    }
+
+    private static MarkPriceEvent optionEvent(BigDecimal forwardPrice) {
+        Instant now = Instant.now();
+        return new MarkPriceEvent(ProductLine.OPTION, "BTC-OPTION", 1L, 10_000_000L, 10L,
+                BigDecimal.TEN, BigDecimal.valueOf(100), forwardPrice,
+                null, null, null, null, null, null, null, 0L, null, 0L, null, null,
+                1, PriceStatus.HEALTHY, now, now);
     }
 }

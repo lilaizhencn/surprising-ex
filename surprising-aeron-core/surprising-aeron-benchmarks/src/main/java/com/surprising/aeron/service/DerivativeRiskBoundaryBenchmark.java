@@ -101,7 +101,10 @@ public class DerivativeRiskBoundaryBenchmark {
 
         private void mark(String symbol, long price) {
             harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE,
-                    0, TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(symbol, 1, price,
+                    0, TradingCommandCodec.encodeApplyMarkPrice(productLine == ProductLine.OPTION
+                            ? new ApplyMarkPriceCommand(symbol, 1, price, 100, 100,
+                            ++sequence, harness.nextCommandTimestamp())
+                            : new ApplyMarkPriceCommand(symbol, 1, price,
                             ++sequence, harness.nextCommandTimestamp()))));
         }
 

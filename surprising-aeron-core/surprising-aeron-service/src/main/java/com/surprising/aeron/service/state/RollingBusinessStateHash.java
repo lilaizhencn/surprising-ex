@@ -730,13 +730,15 @@ public final class RollingBusinessStateHash {
 
     private static long stableMark(CoreMarkPriceState value) {
         return canonical(CoreMarkPriceState.class).text(value.symbol()).number(value.instrumentVersion())
-                .number(value.markPriceTicks()).number(value.priceSequence())
+                .number(value.markPriceTicks()).number(value.indexPriceTicks()).number(value.forwardPriceTicks())
+                .number(value.priceSequence())
                 .number(value.generatedAtEpochMillis()).value();
     }
 
     private long stableMark(MarkPriceRuntime value) {
         return canonical(CoreMarkPriceState.class).text(identities.symbol(value.symbolId()))
-                .number(value.instrumentVersion()).number(value.markPriceTicks()).number(value.priceSequence())
+                .number(value.instrumentVersion()).number(value.markPriceTicks()).number(value.indexPriceTicks())
+                .number(value.forwardPriceTicks()).number(value.priceSequence())
                 .number(value.generatedAtEpochMillis()).value();
     }
 

@@ -289,6 +289,7 @@ public record TradingCoreState(
                 hash = CoreStateHash.mix(hash, bracket.maxLeveragePpm());
                 hash = CoreStateHash.mix(hash, bracket.initialMarginRatePpm());
                 hash = CoreStateHash.mix(hash, bracket.maintenanceMarginRatePpm());
+                hash = CoreStateHash.mix(hash, bracket.optionMarginFactorPpm());
             }
         }
         for (Map.Entry<CoreLeverageKey, Long> entry : leverages.entrySet()) {
@@ -337,6 +338,8 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, mark.symbol());
             hash = CoreStateHash.mix(hash, mark.instrumentVersion());
             hash = CoreStateHash.mix(hash, mark.markPriceTicks());
+            hash = CoreStateHash.mix(hash, mark.indexPriceTicks());
+            hash = CoreStateHash.mix(hash, mark.forwardPriceTicks());
             hash = CoreStateHash.mix(hash, mark.priceSequence());
             hash = CoreStateHash.mix(hash, mark.generatedAtEpochMillis());
         }

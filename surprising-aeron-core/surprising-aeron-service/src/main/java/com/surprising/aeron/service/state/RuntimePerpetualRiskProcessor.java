@@ -52,8 +52,10 @@ public final class RuntimePerpetualRiskProcessor {
         if (current != null && command.priceSequence() <= current.priceSequence()) {
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "mark price sequence must increase");
         }
+        requireOptionRiskPrices(instrument, command.indexPriceTicks(), command.forwardPriceTicks());
         runtime.putMarkPrice(new MarkPriceRuntime(symbolId, instrument.version(), command.markPriceTicks(),
-                command.priceSequence(), command.generatedAtEpochMillis()));
+                command.indexPriceTicks(), command.forwardPriceTicks(), command.priceSequence(),
+                command.generatedAtEpochMillis()));
         RiskScanRuntime currentScan = runtime.riskScan(symbolId);
         long scanStart = currentScan != null && !currentScan.riskComplete()
                 ? currentScan.scanStartPriceSequence() : command.priceSequence();
@@ -66,6 +68,14 @@ public final class RuntimePerpetualRiskProcessor {
                 0, 0, "-", 0, 0, 0, 0, 0,
                 true, 0, 0, 0, 0, 0, 0, 0, 0));
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+    }
+
+    private static void requireOptionRiskPrices(CoreInstrumentState instrument, long indexPriceTicks,
+                                                long forwardPriceTicks) {
+        if (instrument.contractType().isOption() && (indexPriceTicks <= 0 || forwardPriceTicks <= 0)) {
+            throw new CoreStateRejectedException("OPTION_RISK_PRICE_MISSING",
+                    "option mark requires index and same-expiry forward prices");
+        }
     }
 
     public static TradingRuntimeState simulateContinuation(TradingCoreState before, int maxWork,
@@ -253,7 +263,7 @@ public final class RuntimePerpetualRiskProcessor {
                 if (position.assetId() != settleAssetId) continue;
                 PositionRisk risk = risk(runtime, position, identities);
                 if (risk == null) continue;
-                unrealized = Math.addExact(unrealized, risk.unrealized());
+                unrealized = Math.addExact(unrealized, risk.equityDelta());
                 maintenance = Math.addExact(maintenance, risk.maintenance());
                 continue;
             }
@@ -313,8 +323,12 @@ public final class RuntimePerpetualRiskProcessor {
                                        RuntimeIdentityRegistry identities) {
         long unrealized = unrealized(position, instrument, mark.markPriceTicks());
         long maintenance = CoreContractMath.maintenanceMarginUnits(instrument,
-                position.signedQuantitySteps(), mark.markPriceTicks());
-        long equity = Math.addExact(position.positionMarginUnits(), unrealized);
+                position.signedQuantitySteps(), mark.markPriceTicks(), mark.indexPriceTicks(),
+                mark.forwardPriceTicks());
+        long equityDelta = instrument.contractType().isOption()
+                ? CoreContractMath.optionMarketValueUnits(instrument, position.signedQuantitySteps(),
+                mark.markPriceTicks()) : unrealized;
+        long equity = Math.addExact(position.positionMarginUnits(), equityDelta);
         long ratio = riskRatio(maintenance, equity);
         return putRiskAndLiquidation(runtime, userId, positionKey, position, instrument, mark.priceSequence(), equity,
                 unrealized, maintenance, ratio, nextLiquidationId, identities);
@@ -362,10 +376,13 @@ public final class RuntimePerpetualRiskProcessor {
         CoreInstrumentState instrument = runtime.instrument(identities.preparedSymbol(position.symbolId()));
         MarkPriceRuntime mark = runtime.markPrice(position.symbolId());
         if (instrument == null || mark == null) return null;
-        return new PositionRisk(instrument, mark.priceSequence(),
-                unrealized(position, instrument, mark.markPriceTicks()),
+        long unrealized = unrealized(position, instrument, mark.markPriceTicks());
+        long equityDelta = instrument.contractType().isOption()
+                ? CoreContractMath.optionMarketValueUnits(instrument, position.signedQuantitySteps(),
+                mark.markPriceTicks()) : unrealized;
+        return new PositionRisk(instrument, mark.priceSequence(), unrealized,
                 CoreContractMath.maintenanceMarginUnits(instrument, position.signedQuantitySteps(),
-                        mark.markPriceTicks()));
+                        mark.markPriceTicks(), mark.indexPriceTicks(), mark.forwardPriceTicks()), equityDelta);
     }
 
     private static long unrealized(PositionRuntime position, CoreInstrumentState instrument, long markPriceTicks) {
@@ -430,7 +447,7 @@ public final class RuntimePerpetualRiskProcessor {
     }
 
     private record PositionRisk(CoreInstrumentState instrument, long priceSequence,
-                                long unrealized, long maintenance) {
+                                long unrealized, long maintenance, long equityDelta) {
     }
 
     private record PositionEntry(String key, PositionRuntime position) {

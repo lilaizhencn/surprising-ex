@@ -17,8 +17,9 @@ public class InstrumentRiskBracketRepository {
     private static final String INSERT_SQL = """
             INSERT INTO instrument_risk_brackets (
                 symbol, version, bracket_no, notional_floor_units, notional_cap_units,
-                max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm,
+                option_margin_factor_ppm
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
 
     private final JdbcTemplate jdbcTemplate;
@@ -43,6 +44,7 @@ public class InstrumentRiskBracketRepository {
                 ps.setLong(6, bracket.maxLeveragePpm());
                 ps.setLong(7, bracket.initialMarginRatePpm());
                 ps.setLong(8, bracket.maintenanceMarginRatePpm());
+                ps.setLong(9, bracket.optionMarginFactorPpm());
             }
 
             @Override
@@ -60,7 +62,8 @@ public class InstrumentRiskBracketRepository {
         String tuplePredicate = tuplePredicate(keys, args);
         List<RiskBracketRow> rows = jdbcTemplate.query("""
                 SELECT symbol, version, bracket_no, notional_floor_units, notional_cap_units,
-                       max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm
+                       max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm,
+                       option_margin_factor_ppm
                   FROM instrument_risk_brackets
                  WHERE (symbol, version) IN (%s)
                  ORDER BY symbol, version, bracket_no
@@ -72,7 +75,8 @@ public class InstrumentRiskBracketRepository {
                         rs.getLong("notional_cap_units"),
                         rs.getLong("max_leverage_ppm"),
                         rs.getLong("initial_margin_rate_ppm"),
-                        rs.getLong("maintenance_margin_rate_ppm"))), args.toArray());
+                        rs.getLong("maintenance_margin_rate_ppm"),
+                        rs.getLong("option_margin_factor_ppm"))), args.toArray());
         Map<InstrumentVersionKey, List<RiskLimitBracket>> grouped = new LinkedHashMap<>();
         keys.forEach(key -> grouped.put(key, new ArrayList<>()));
         rows.forEach(row -> grouped.computeIfAbsent(row.key(), ignored -> new ArrayList<>()).add(row.bracket()));

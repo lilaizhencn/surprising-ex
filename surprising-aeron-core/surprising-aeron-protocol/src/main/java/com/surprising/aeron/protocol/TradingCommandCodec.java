@@ -9,7 +9,7 @@ import java.util.List;
 public final class TradingCommandCodec {
 
     private static final int PLACE_ORDER_VERSION = 4;
-    private static final int INSTRUMENT_RISK_V2_MARKER = 0x49525632;
+    private static final int INSTRUMENT_RISK_V3_MARKER = 0x49525633;
     private static final int AMEND_ORDER_V1_MARKER = 0x414d5631;
     private static final int TRANSFER_FUNDS_VERSION = 1;
 
@@ -462,7 +462,7 @@ public final class TradingCommandCodec {
         byte[] base = text(command.baseAsset());
         byte[] quote = text(command.quoteAsset());
         byte[] settle = text(command.settleAsset());
-        int bracketBytes = command.riskLimitBrackets().size() * (Integer.BYTES + Long.BYTES * 5);
+        int bracketBytes = command.riskLimitBrackets().size() * (Integer.BYTES + Long.BYTES * 6);
         ByteBuffer buffer = ByteBuffer.allocate(Short.BYTES * 4 + symbol.length + base.length + quote.length + settle.length
                         + Integer.BYTES * 4 + Long.BYTES * 14 + bracketBytes)
                 .order(ByteOrder.LITTLE_ENDIAN)
@@ -476,7 +476,7 @@ public final class TradingCommandCodec {
                 .putLong(command.maintenanceMarginRatePpm()).putLong(command.makerFeeRatePpm())
                 .putLong(command.takerFeeRatePpm()).putLong(command.expiryEpochMillis())
                 .putInt(command.optionTypeCode()).putLong(command.strikePriceTicks())
-                .putInt(INSTRUMENT_RISK_V2_MARKER)
+                .putInt(INSTRUMENT_RISK_V3_MARKER)
                 .putLong(command.maxLeveragePpm()).putLong(command.maxPositionNotionalUnits())
                 .putLong(command.userOpenInterestLimitRatePpm())
                 .putLong(command.userOpenInterestLimitFloorUnits())
@@ -484,7 +484,8 @@ public final class TradingCommandCodec {
         for (CoreRiskLimitBracket bracket : command.riskLimitBrackets()) {
             buffer.putInt(bracket.bracketNo()).putLong(bracket.notionalFloorUnits())
                     .putLong(bracket.notionalCapUnits()).putLong(bracket.maxLeveragePpm())
-                    .putLong(bracket.initialMarginRatePpm()).putLong(bracket.maintenanceMarginRatePpm());
+                    .putLong(bracket.initialMarginRatePpm()).putLong(bracket.maintenanceMarginRatePpm())
+                    .putLong(bracket.optionMarginFactorPpm());
         }
         return buffer.array();
     }
@@ -510,7 +511,7 @@ public final class TradingCommandCodec {
         int optionType = buffer.getInt();
         long strike = buffer.getLong();
         requireRemaining(buffer, Integer.BYTES + Long.BYTES * 4 + Integer.BYTES);
-        if (buffer.getInt() != INSTRUMENT_RISK_V2_MARKER) {
+        if (buffer.getInt() != INSTRUMENT_RISK_V3_MARKER) {
             throw new ProtocolException("invalid instrument risk policy marker");
         }
         long maxLeverage = buffer.getLong();
@@ -521,11 +522,11 @@ public final class TradingCommandCodec {
         if (bracketCount <= 0 || bracketCount > 128) {
             throw new ProtocolException("invalid risk bracket count");
         }
-        requireRemaining(buffer, bracketCount * (Integer.BYTES + Long.BYTES * 5));
+        requireRemaining(buffer, bracketCount * (Integer.BYTES + Long.BYTES * 6));
         java.util.List<CoreRiskLimitBracket> brackets = new java.util.ArrayList<>(bracketCount);
         for (int index = 0; index < bracketCount; index++) {
             brackets.add(new CoreRiskLimitBracket(buffer.getInt(), buffer.getLong(), buffer.getLong(),
-                    buffer.getLong(), buffer.getLong(), buffer.getLong()));
+                    buffer.getLong(), buffer.getLong(), buffer.getLong(), buffer.getLong()));
         }
         UpsertInstrumentCommand command = new UpsertInstrumentCommand(symbol, version, contractTypeCode,
                 base, quote, settle, multiplier, priceTick, settleScale, initialMargin, maintenanceMargin,
@@ -537,18 +538,19 @@ public final class TradingCommandCodec {
 
     public static byte[] encodeApplyMarkPrice(ApplyMarkPriceCommand command) {
         byte[] symbol = text(command.symbol());
-        return ByteBuffer.allocate(Short.BYTES + symbol.length + Long.BYTES * 4)
+        return ByteBuffer.allocate(Short.BYTES + symbol.length + Long.BYTES * 6)
                 .order(ByteOrder.LITTLE_ENDIAN).putShort((short) symbol.length).put(symbol)
                 .putLong(command.instrumentVersion()).putLong(command.markPriceTicks())
+                .putLong(command.indexPriceTicks()).putLong(command.forwardPriceTicks())
                 .putLong(command.priceSequence()).putLong(command.generatedAtEpochMillis()).array();
     }
 
     public static ApplyMarkPriceCommand decodeApplyMarkPrice(byte[] payload) {
         ByteBuffer buffer = readable(payload);
         String symbol = readText(buffer);
-        requireRemaining(buffer, Long.BYTES * 4);
+        requireRemaining(buffer, Long.BYTES * 6);
         ApplyMarkPriceCommand command = new ApplyMarkPriceCommand(symbol, buffer.getLong(), buffer.getLong(),
-                buffer.getLong(), buffer.getLong());
+                buffer.getLong(), buffer.getLong(), buffer.getLong(), buffer.getLong());
         requireConsumed(buffer);
         return command;
     }

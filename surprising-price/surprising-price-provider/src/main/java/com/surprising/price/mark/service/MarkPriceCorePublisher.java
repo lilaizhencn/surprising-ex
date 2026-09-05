@@ -10,6 +10,7 @@ import jakarta.annotation.PreDestroy;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Objects;
+import java.math.RoundingMode;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
@@ -128,9 +129,7 @@ public final class MarkPriceCorePublisher implements AutoCloseable {
     }
 
     private boolean sendAsync(MarkPriceEvent event) {
-        byte[] payload = TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                event.symbol(), event.instrumentVersion(), event.markPriceTicks(), event.sequence(),
-                Objects.requireNonNull(event.publishedAt(), "mark price publishedAt is required").toEpochMilli()));
+        byte[] payload = TradingCommandCodec.encodeApplyMarkPrice(toCommand(event));
         UUID commandId = markPriceCommandId(event);
         if (inFlightByCommandId.putIfAbsent(commandId, event) != null) {
             return true;
@@ -141,6 +140,27 @@ public final class MarkPriceCorePublisher implements AutoCloseable {
             inFlightByCommandId.remove(commandId, event);
         }
         return queued;
+    }
+
+    static ApplyMarkPriceCommand toCommand(MarkPriceEvent event) {
+        long publishedAt = Objects.requireNonNull(event.publishedAt(),
+                "mark price publishedAt is required").toEpochMilli();
+        if (event.productLine() != com.surprising.product.api.ProductLine.OPTION) {
+            return new ApplyMarkPriceCommand(event.symbol(), event.instrumentVersion(),
+                    event.markPriceTicks(), event.sequence(), publishedAt);
+        }
+        return new ApplyMarkPriceCommand(event.symbol(), event.instrumentVersion(), event.markPriceTicks(),
+                priceTicks(event, event.indexPrice()), priceTicks(event, event.sameExpiryForwardPrice()),
+                event.sequence(), publishedAt);
+    }
+
+    private static long priceTicks(MarkPriceEvent event, java.math.BigDecimal price) {
+        if (price == null || price.signum() <= 0 || event.markPrice() == null
+                || event.markPrice().signum() <= 0) {
+            throw new IllegalArgumentException("index and forward prices are required");
+        }
+        return price.multiply(java.math.BigDecimal.valueOf(event.markPriceTicks()))
+                .divide(event.markPrice(), 0, RoundingMode.HALF_UP).longValueExact();
     }
 
     private void onAdmission(UUID commandId, AeronClientPool.TryCommandResult result) {

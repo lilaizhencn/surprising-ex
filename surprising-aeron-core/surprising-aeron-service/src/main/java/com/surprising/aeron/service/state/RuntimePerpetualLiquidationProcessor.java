@@ -89,9 +89,12 @@ public final class RuntimePerpetualLiquidationProcessor {
         long remainingAbs = Math.subtractExact(currentAbs, closeQuantity);
         long releasedMargin = position.positionMarginUnits() == 0 ? 0
                 : proportional(position.positionMarginUnits(), closeQuantity, currentAbs);
-        long pnl = instrument.contractType().isOption() ? 0
-                : CoreContractMath.pnlUnits(instrument,
-                position.signedQuantitySteps() > 0 ? closeQuantity : Math.negateExact(closeQuantity),
+        long signedCloseQuantity = position.signedQuantitySteps() > 0
+                ? closeQuantity : Math.negateExact(closeQuantity);
+        long pnl = instrument.contractType().isOption()
+                ? CoreContractMath.optionMarketValueUnits(instrument, signedCloseQuantity,
+                command.executionPriceTicks())
+                : CoreContractMath.pnlUnits(instrument, signedCloseQuantity,
                 position.entryPriceTicks(), command.executionPriceTicks());
         long feeDue = Math.negateExact(CoreContractMath.feeDeltaUnits(instrument,
                 command.executionPriceTicks(), closeQuantity, command.liquidationFeeRatePpm()));
@@ -106,7 +109,7 @@ public final class RuntimePerpetualLiquidationProcessor {
         PositionRuntime nextPosition = new PositionRuntime(position.userId(), position.symbolId(), position.assetId(),
                 position.marginMode(), position.positionSide(), remainingAbs == 0 ? 0 : position.instrumentVersion(),
                 nextQuantity, remainingAbs == 0 ? 0 : position.entryPriceTicks(), nextEntryValue,
-                Math.addExact(position.realizedPnlUnits(), pnl),
+                Math.addExact(position.realizedPnlUnits(), instrument.contractType().isOption() ? 0 : pnl),
                 Math.subtractExact(position.positionMarginUnits(), releasedMargin));
         long insuranceDelta = Math.addExact(Math.negateExact(cash.appliedPnl()), cash.collectedFee());
         CoreLiquidationState.Status nextStatus = uncovered > 0
@@ -373,7 +376,12 @@ public final class RuntimePerpetualLiquidationProcessor {
         if (balance == null) {
             throw new CoreStateRejectedException("BALANCE_NOT_FOUND", "required balance is missing");
         }
-        long targetCashDelta = Math.subtractExact(coverCapacity, command.coveredUnits());
+        long closeCashDelta = instrument.contractType().isOption()
+                ? CoreContractMath.optionMarketValueUnits(instrument,
+                position.signedQuantitySteps() > 0 ? command.closeQuantitySteps()
+                        : Math.negateExact(command.closeQuantitySteps()), mark.markPriceTicks())
+                : coverCapacity;
+        long targetCashDelta = Math.subtractExact(closeCashDelta, command.coveredUnits());
         RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
         treasuryDelta.addClearing(settleAssetId, Math.negateExact(targetCashDelta));
         treasuryDelta.addDeficit(settleAssetId, Math.negateExact(command.coveredUnits()));
@@ -386,7 +394,8 @@ public final class RuntimePerpetualLiquidationProcessor {
         PositionRuntime nextPosition = new PositionRuntime(position.userId(), position.symbolId(), position.assetId(),
                 position.marginMode(), position.positionSide(), remainingAbs == 0 ? 0 : position.instrumentVersion(),
                 nextQuantity, remainingAbs == 0 ? 0 : position.entryPriceTicks(), nextEntryValue,
-                Math.addExact(position.realizedPnlUnits(), coverCapacity),
+                Math.addExact(position.realizedPnlUnits(),
+                        instrument.contractType().isOption() ? 0 : coverCapacity),
                 Math.subtractExact(position.positionMarginUnits(), releasedMargin));
         LiquidationRuntime current = runtime.liquidation(command.liquidationId());
         long nextDeficit = Math.subtractExact(current.deficitUnits(), command.coveredUnits());

@@ -87,7 +87,8 @@ public final class RuntimeStateMaterializer {
         runtime.markPricesForSnapshot().forEachKeyValue((symbolId, mark) -> {
             String symbol = identities.symbol(symbolId);
             marks.put(symbol, new CoreMarkPriceState(symbol, mark.instrumentVersion(), mark.markPriceTicks(),
-                    mark.priceSequence(), mark.generatedAtEpochMillis()));
+                    mark.indexPriceTicks(), mark.forwardPriceTicks(), mark.priceSequence(),
+                    mark.generatedAtEpochMillis()));
         });
         Map<String, CoreRiskSnapshot> riskSnapshots = new TreeMap<>();
         runtime.riskSnapshotsForSnapshot().forEachKeyValue((positionKey, risk) -> {

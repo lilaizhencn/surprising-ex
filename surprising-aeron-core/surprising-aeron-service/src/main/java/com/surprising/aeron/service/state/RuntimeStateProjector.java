@@ -81,7 +81,8 @@ public final class RuntimeStateProjector {
                         liquidation.liquidationFeeUnits(), liquidation.status(),
                         liquidation.nextCancelOrderId())));
         source.riskState().markPrices().forEach((symbol, mark) -> runtime.putMarkPrice(new MarkPriceRuntime(
-                identities.symbolId(symbol), mark.instrumentVersion(), mark.markPriceTicks(), mark.priceSequence(),
+                identities.symbolId(symbol), mark.instrumentVersion(), mark.markPriceTicks(),
+                mark.indexPriceTicks(), mark.forwardPriceTicks(), mark.priceSequence(),
                 mark.generatedAtEpochMillis())));
         source.riskState().snapshots().forEach((key, risk) -> runtime.putRiskSnapshot(
                 identities.positionKey(risk.userId(), positionKey(risk.symbol(), risk.positionSide())),

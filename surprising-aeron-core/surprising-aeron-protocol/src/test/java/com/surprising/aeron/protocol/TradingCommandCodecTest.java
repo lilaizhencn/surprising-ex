@@ -63,9 +63,10 @@ class TradingCommandCodecTest {
         UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 3, 1,
                 "BTC", "USDT", "USDT", 1, 1, 100_000_000, 100_000, 50_000, -10, 20,
                 0, -1, 0, 10_000_000, Long.MAX_VALUE, 0, Long.MAX_VALUE,
-                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE, 10_000_000, 100_000, 50_000)));
-        ApplyMarkPriceCommand markPrice = new ApplyMarkPriceCommand("BTC-USDT", 3, 60_500, 9,
-                1_700_000_000_000L);
+                java.util.List.of(new CoreRiskLimitBracket(1, 0, Long.MAX_VALUE,
+                        10_000_000, 100_000, 50_000, 1_250_000)));
+        ApplyMarkPriceCommand markPrice = new ApplyMarkPriceCommand("BTC-USDT", 3, 60_500,
+                60_000, 60_250, 9, 1_700_000_000_000L);
         ApplyFundingCommand funding = new ApplyFundingCommand(11, "BTC-USDT", 3, 100, 0, 128);
         ApplyFundingCommand chunkedFunding = new ApplyFundingCommand(12, "BTC-USDT", 3, -100,
                 42, 128);

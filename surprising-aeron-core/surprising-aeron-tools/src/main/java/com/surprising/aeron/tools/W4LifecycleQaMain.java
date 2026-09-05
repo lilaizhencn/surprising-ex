@@ -487,10 +487,15 @@ public final class W4LifecycleQaMain implements AutoCloseable {
         String optionStyleJson = type.isOption() ? "\"EUROPEAN\"" : "null";
         String settlementJson = spot || perpetual ? "null" : "\"CASH\"";
         String funding = perpetual ? "8,100,3000,-3000" : "0,0,0,0";
+        long maxLeverage = type.isOption() ? 1_000_000L : 100_000_000L;
+        long initialMargin = type.isOption() ? 100_000L : 10_000L;
+        long bracketInitialMargin = type.isOption() ? 150_000L : 10_000L;
+        long maintenanceMargin = type.isOption() ? 50_000L : 5_000L;
         String brackets = spot ? "[]"
                 : "[{\"bracketNo\":1,\"notionalFloorUnits\":0,\"notionalCapUnits\":5000000000000"
-                + ",\"maxLeveragePpm\":100000000,\"initialMarginRatePpm\":10000"
-                + ",\"maintenanceMarginRatePpm\":5000}]";
+                + ",\"maxLeveragePpm\":" + maxLeverage + ",\"initialMarginRatePpm\":"
+                + bracketInitialMargin + ",\"maintenanceMarginRatePpm\":" + maintenanceMargin
+                + ",\"optionMarginFactorPpm\":1000000}]";
         String sources = spot ? "[]"
                 : "[{\"source\":\"W4-A\",\"enabled\":true,\"baseUrl\":" + json(indexFeed.baseUrl()) + ","
                 + "\"path\":\"/w4-a\",\"sourceSymbol\":\"BTCUSDT\",\"parser\":\"BINANCE_BOOK_TICKER\","
@@ -512,9 +517,9 @@ public final class W4LifecycleQaMain implements AutoCloseable {
                 + "\"minNotionalUnits\":1,\"maxNotionalUnits\":1000000000000,\"notionalMultiplierUnits\":1,"
                 + "\"pricePrecision\":2,\"quantityPrecision\":3,\"supportedOrderTypes\":[\"LIMIT\"],"
                 + "\"supportedTimeInForce\":[\"GTC\",\"IOC\"],\"postOnlyEnabled\":true,\"reduceOnlyEnabled\":"
-                + (!spot) + ",\"marketOrderEnabled\":false,\"maxLeveragePpm\":100000000,"
-                + "\"initialMarginRatePpm\":10000,\"maintenanceMarginRatePpm\":"
-                + "5000,\"makerFeeRatePpm\":" + MAKER_FEE_RATE_PPM + ","
+                + (!spot) + ",\"marketOrderEnabled\":false,\"maxLeveragePpm\":" + maxLeverage + ","
+                + "\"initialMarginRatePpm\":" + initialMargin + ",\"maintenanceMarginRatePpm\":"
+                + maintenanceMargin + ",\"makerFeeRatePpm\":" + MAKER_FEE_RATE_PPM + ","
                 + "\"takerFeeRatePpm\":" + TAKER_FEE_RATE_PPM + ",\"maxPositionNotionalUnits\":25000000000000,"
                 + "\"userOpenInterestLimitRatePpm\":0,\"userOpenInterestLimitFloorUnits\":1,\"fundingIntervalHours\":"
                 + funding.split(",")[0] + ",\"interestRatePpm\":" + funding.split(",")[1]

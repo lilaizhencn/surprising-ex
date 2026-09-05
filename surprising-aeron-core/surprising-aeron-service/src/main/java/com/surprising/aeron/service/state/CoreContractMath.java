@@ -18,15 +18,22 @@ final class CoreContractMath {
             CoreInstrumentState instrument,
             CoreOrderSide side,
             long priceTicks,
-            long quantitySteps) {
+            long quantitySteps,
+            long indexPriceTicks,
+            long forwardPriceTicks) {
         if (quantitySteps <= 0 || instrument.contractType().isOption() && side == CoreOrderSide.BUY) {
             return 0;
         }
-        long initialMarginRatePpm = instrument.contractType() != com.surprising.instrument.api.model.ContractType.SPOT
-                ? riskBracket(instrument, notionalUnits(instrument, quantitySteps, priceTicks)).initialMarginRatePpm()
+        CoreRiskLimitBracket bracket = instrument.contractType() != com.surprising.instrument.api.model.ContractType.SPOT
+                ? riskBracket(instrument, riskNotionalUnits(instrument, quantitySteps,
+                instrument.contractType().isOption() ? indexPriceTicks : priceTicks))
+                : null;
+        long initialMarginRatePpm = bracket != null
+                ? bracket.initialMarginRatePpm()
                 : instrument.initialMarginRatePpm();
         return openingMarginUnits(instrument, side, priceTicks, quantitySteps,
-                initialMarginRatePpm);
+                initialMarginRatePpm, indexPriceTicks, forwardPriceTicks,
+                bracket == null ? 1_000_000L : bracket.optionMarginFactorPpm());
     }
 
     static long initialMarginRateFromLeverage(long leveragePpm) {
@@ -56,7 +63,22 @@ final class CoreContractMath {
             CoreOrderSide side,
             long priceTicks,
             long quantitySteps,
-            long initialMarginRatePpm) {
+            long initialMarginRatePpm,
+            long indexPriceTicks,
+            long forwardPriceTicks) {
+        return openingMarginUnits(instrument, side, priceTicks, quantitySteps, initialMarginRatePpm,
+                indexPriceTicks, forwardPriceTicks, 1_000_000L);
+    }
+
+    static long openingMarginUnits(
+            CoreInstrumentState instrument,
+            CoreOrderSide side,
+            long priceTicks,
+            long quantitySteps,
+            long initialMarginRatePpm,
+            long indexPriceTicks,
+            long forwardPriceTicks,
+            long optionMarginFactorPpm) {
         if (quantitySteps <= 0) {
             return 0;
         }
@@ -64,20 +86,14 @@ final class CoreContractMath {
             if (side == CoreOrderSide.BUY) {
                 return 0;
             }
+            requireOptionRiskPrices(indexPriceTicks, forwardPriceTicks);
             long premium = optionPremiumUnits(instrument, priceTicks, quantitySteps);
-            long risk;
-            try {
-                long numerator = Math.multiplyExact(instrument.strikePriceTicks(), quantitySteps);
-                numerator = Math.multiplyExact(numerator, instrument.notionalMultiplierUnits());
-                numerator = Math.multiplyExact(numerator, initialMarginRatePpm);
-                risk = divideCeiling(numerator, 1_000_000L);
-            } catch (ArithmeticException overflow) {
-                BigInteger riskNumerator = big(instrument.strikePriceTicks())
-                        .multiply(big(quantitySteps))
-                        .multiply(big(instrument.notionalMultiplierUnits()))
-                        .multiply(big(initialMarginRatePpm));
-                risk = divideCeiling(riskNumerator, PPM);
-            }
+            long outOfMoneyTicks = optionOutOfMoneyTicks(instrument, forwardPriceTicks);
+            long outOfMoneyRatePpm = scalePpmFloor(outOfMoneyTicks, forwardPriceTicks);
+            long riskRatePpm = Math.max(instrument.initialMarginRatePpm(),
+                    Math.max(0, Math.subtractExact(initialMarginRatePpm, outOfMoneyRatePpm)));
+            long riskTicks = scalePpmSquaredCeiling(indexPriceTicks, riskRatePpm, optionMarginFactorPpm);
+            long risk = optionPremiumUnits(instrument, riskTicks, quantitySteps);
             return Math.addExact(premium, risk);
         }
         return PerpetualContractMath.initialMarginUnits(instrument.contractType(), quantitySteps, priceTicks,
@@ -88,32 +104,57 @@ final class CoreContractMath {
     static long maintenanceMarginUnits(
             CoreInstrumentState instrument,
             long signedQuantitySteps,
-            long markPriceTicks) {
-        long maintenanceMarginRatePpm = instrument.contractType() != com.surprising.instrument.api.model.ContractType.SPOT
-                ? maintenanceRiskBracket(instrument, notionalUnits(instrument, Math.absExact(signedQuantitySteps), markPriceTicks))
-                .maintenanceMarginRatePpm()
+            long markPriceTicks,
+            long indexPriceTicks,
+            long forwardPriceTicks) {
+        CoreRiskLimitBracket bracket = instrument.contractType() != com.surprising.instrument.api.model.ContractType.SPOT
+                ? maintenanceRiskBracket(instrument, riskNotionalUnits(instrument,
+                Math.absExact(signedQuantitySteps), instrument.contractType().isOption()
+                        ? indexPriceTicks : markPriceTicks))
+                : null;
+        long maintenanceMarginRatePpm = bracket != null
+                ? bracket.maintenanceMarginRatePpm()
                 : instrument.maintenanceMarginRatePpm();
         if (instrument.contractType().isOption()) {
             if (signedQuantitySteps > 0) {
                 return 0;
             }
+            requireOptionRiskPrices(indexPriceTicks, forwardPriceTicks);
             long quantity = Math.absExact(signedQuantitySteps);
-            try {
-                long numerator = Math.multiplyExact(instrument.strikePriceTicks(), quantity);
-                numerator = Math.multiplyExact(numerator, instrument.notionalMultiplierUnits());
-                numerator = Math.multiplyExact(numerator, maintenanceMarginRatePpm);
-                return divideCeiling(numerator, 1_000_000L);
-            } catch (ArithmeticException overflow) {
-                BigInteger numerator = big(instrument.strikePriceTicks())
-                        .multiply(big(quantity))
-                        .multiply(big(instrument.notionalMultiplierUnits()))
-                        .multiply(big(maintenanceMarginRatePpm));
-                return divideCeiling(numerator, PPM);
-            }
+            long factor = bracket.optionMarginFactorPpm();
+            long underlyingRiskTicks = scalePpmSquaredCeiling(
+                    indexPriceTicks, maintenanceMarginRatePpm, factor);
+            long riskTicks = instrument.optionType() == OptionType.PUT
+                    ? Math.max(underlyingRiskTicks,
+                    scalePpmSquaredCeiling(markPriceTicks, maintenanceMarginRatePpm, factor))
+                    : underlyingRiskTicks;
+            return Math.addExact(optionPremiumUnits(instrument, markPriceTicks, quantity),
+                    optionPremiumUnits(instrument, riskTicks, quantity));
         }
         return PerpetualContractMath.maintenanceMarginUnits(instrument.contractType(), signedQuantitySteps,
                 markPriceTicks, instrument.notionalMultiplierUnits(), instrument.priceTickUnits(),
                 instrument.settleScaleUnits(), maintenanceMarginRatePpm);
+    }
+
+    static long optionSellOpenOrderMarginUnits(
+            CoreInstrumentState instrument,
+            long orderPriceTicks,
+            long markPriceTicks,
+            long quantitySteps,
+            long indexPriceTicks,
+            long forwardPriceTicks,
+            CoreRiskLimitBracket bracket) {
+        if (!instrument.contractType().isOption() || bracket == null || quantitySteps <= 0) {
+            throw new IllegalArgumentException("invalid option sell-open margin input");
+        }
+        long positionMargin = openingMarginUnits(instrument, CoreOrderSide.SELL, markPriceTicks,
+                quantitySteps, bracket.initialMarginRatePpm(), indexPriceTicks, forwardPriceTicks,
+                bracket.optionMarginFactorPpm());
+        long orderPremium = optionPremiumUnits(instrument, orderPriceTicks, quantitySteps);
+        long marginLessPremium = Math.max(0, Math.subtractExact(positionMargin, orderPremium));
+        long minimumRiskTicks = scalePpmCeiling(indexPriceTicks, instrument.initialMarginRatePpm());
+        long minimumOpenMargin = optionPremiumUnits(instrument, minimumRiskTicks, quantitySteps);
+        return Math.max(marginLessPremium, minimumOpenMargin);
     }
 
     static CoreRiskLimitBracket riskBracket(CoreInstrumentState instrument, long notionalUnits) {
@@ -174,6 +215,33 @@ final class CoreContractMath {
         }
     }
 
+    static long optionMarketValueUnits(CoreInstrumentState instrument, long signedQuantitySteps,
+                                       long markPriceTicks) {
+        long value = optionPremiumUnits(instrument, markPriceTicks, Math.absExact(signedQuantitySteps));
+        return signedQuantitySteps > 0 ? value : Math.negateExact(value);
+    }
+
+    private static long optionOutOfMoneyTicks(CoreInstrumentState instrument, long forwardPriceTicks) {
+        return instrument.optionType() == OptionType.CALL
+                ? Math.max(0, Math.subtractExact(instrument.strikePriceTicks(), forwardPriceTicks))
+                : Math.max(0, Math.subtractExact(forwardPriceTicks, instrument.strikePriceTicks()));
+    }
+
+    private static void requireOptionRiskPrices(long indexPriceTicks, long forwardPriceTicks) {
+        if (indexPriceTicks <= 0 || forwardPriceTicks <= 0) {
+            throw new CoreStateRejectedException("OPTION_RISK_PRICE_MISSING",
+                    "option margin requires index and same-expiry forward prices");
+        }
+    }
+
+    private static long scalePpmCeiling(long value, long ratePpm) {
+        try {
+            return divideCeiling(Math.multiplyExact(value, ratePpm), 1_000_000L);
+        } catch (ArithmeticException overflow) {
+            return divideCeiling(big(value).multiply(big(ratePpm)), PPM);
+        }
+    }
+
     static long optionSettlementCashUnits(
             CoreInstrumentState instrument,
             long underlyingSettlementPriceTicks) {
@@ -220,6 +288,31 @@ final class CoreContractMath {
         }
         return PerpetualContractMath.notionalUnits(instrument.contractType(), quantitySteps, priceTicks,
                 instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), instrument.settleScaleUnits());
+    }
+
+    static long riskNotionalUnits(CoreInstrumentState instrument, long quantitySteps, long referencePriceTicks) {
+        if (quantitySteps <= 0) return 0;
+        return instrument.contractType().isOption()
+                ? optionPremiumUnits(instrument, referencePriceTicks, quantitySteps)
+                : notionalUnits(instrument, quantitySteps, referencePriceTicks);
+    }
+
+    private static long scalePpmFloor(long value, long divisorValue) {
+        try {
+            return Math.multiplyExact(value, 1_000_000L) / divisorValue;
+        } catch (ArithmeticException overflow) {
+            return big(value).multiply(PPM).divide(big(divisorValue)).longValueExact();
+        }
+    }
+
+    private static long scalePpmSquaredCeiling(long value, long firstRatePpm, long secondRatePpm) {
+        try {
+            long numerator = Math.multiplyExact(Math.multiplyExact(value, firstRatePpm), secondRatePpm);
+            return divideCeiling(numerator, 1_000_000_000_000L);
+        } catch (ArithmeticException overflow) {
+            return divideCeiling(big(value).multiply(big(firstRatePpm)).multiply(big(secondRatePpm)),
+                    PPM.multiply(PPM));
+        }
     }
 
     static long fundingDeltaUnits(

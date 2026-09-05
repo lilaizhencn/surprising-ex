@@ -116,7 +116,7 @@ public final class ClusterInstrumentSeedMain {
             java.sql.Connection connection, String symbol, long version) throws Exception {
         String sql = """
                 SELECT bracket_no, notional_floor_units, notional_cap_units, max_leverage_ppm,
-                       initial_margin_rate_ppm, maintenance_margin_rate_ppm
+                       initial_margin_rate_ppm, maintenance_margin_rate_ppm, option_margin_factor_ppm
                   FROM instrument_risk_brackets
                  WHERE symbol=? AND version=? ORDER BY bracket_no
                 """;
@@ -129,7 +129,8 @@ public final class ClusterInstrumentSeedMain {
                     result.add(new CoreRiskLimitBracket(rows.getInt("bracket_no"),
                             rows.getLong("notional_floor_units"), rows.getLong("notional_cap_units"),
                             rows.getLong("max_leverage_ppm"), rows.getLong("initial_margin_rate_ppm"),
-                            rows.getLong("maintenance_margin_rate_ppm")));
+                            rows.getLong("maintenance_margin_rate_ppm"),
+                            rows.getLong("option_margin_factor_ppm")));
                 }
             }
         }

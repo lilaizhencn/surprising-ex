@@ -10,6 +10,8 @@ public record ResolvedPlaceOrder(
         long matchingPriceTicks,
         long reservationPriceTicks,
         long markPriceTicks,
+        long indexPriceTicks,
+        long forwardPriceTicks,
         long markPriceSequence,
         ReservationKind reservationKind,
         String reservationAsset,
@@ -20,7 +22,9 @@ public record ResolvedPlaceOrder(
     public ResolvedPlaceOrder {
         if (intent == null || instrument == null || symbolId < -1
                 || matchingPriceTicks <= 0 || reservationPriceTicks <= 0
-                || markPriceTicks <= 0 || markPriceSequence < 0 || reservationKind == null
+                || markPriceTicks <= 0 || indexPriceTicks < 0 || forwardPriceTicks < 0
+                || (indexPriceTicks == 0) != (forwardPriceTicks == 0)
+                || markPriceSequence < 0 || reservationKind == null
                 || reservationAsset == null || reservationAsset.isBlank()
                 || makerFeeRatePpm < -1_000_000 || makerFeeRatePpm > 1_000_000
                 || takerFeeRatePpm < -1_000_000 || takerFeeRatePpm > 1_000_000
@@ -28,6 +32,15 @@ public record ResolvedPlaceOrder(
             throw new IllegalArgumentException("invalid resolved place order");
         }
         reservationAsset = AssetBalance.normalizeAsset(reservationAsset);
+    }
+
+    public ResolvedPlaceOrder(PlaceOrderCommand intent, CoreInstrumentState instrument, int symbolId,
+                              long matchingPriceTicks, long reservationPriceTicks, long markPriceTicks,
+                              long markPriceSequence, ReservationKind reservationKind, String reservationAsset,
+                              long makerFeeRatePpm, long takerFeeRatePpm, long feePolicyVersion) {
+        this(intent, instrument, symbolId, matchingPriceTicks, reservationPriceTicks, markPriceTicks,
+                0, 0, markPriceSequence, reservationKind, reservationAsset, makerFeeRatePpm,
+                takerFeeRatePpm, feePolicyVersion);
     }
 
     public long orderId() { return intent.orderId(); }

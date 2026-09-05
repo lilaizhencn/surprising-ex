@@ -68,7 +68,8 @@ final class RuntimeSnapshotBuilder {
         Map<Integer, TradingRuntimeSnapshot.MarkPriceSnapshot> markPrices = new TreeMap<>();
         state.markPricesForSnapshot().forEachKeyValue((symbolId, mark) -> markPrices.put(symbolId,
                 new TradingRuntimeSnapshot.MarkPriceSnapshot(mark.instrumentVersion(), mark.markPriceTicks(),
-                        mark.priceSequence(), mark.generatedAtEpochMillis())));
+                        mark.indexPriceTicks(), mark.forwardPriceTicks(), mark.priceSequence(),
+                        mark.generatedAtEpochMillis())));
         Map<TradingRuntimeSnapshot.PositionKey, TradingRuntimeSnapshot.RiskSnapshot> riskSnapshots = new TreeMap<>();
         state.riskSnapshotsForSnapshot().forEachKeyValue((positionKey, risk) -> riskSnapshots.put(
                 new TradingRuntimeSnapshot.PositionKey(risk.userId(), positionKey),

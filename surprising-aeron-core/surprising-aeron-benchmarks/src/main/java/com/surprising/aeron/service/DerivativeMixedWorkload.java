@@ -87,7 +87,11 @@ final class DerivativeMixedWorkload {
                 harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE,
                         CommandSource.KAFKA_INPUT_BRIDGE, 0,
                         TradingCommandCodec.encodeApplyMarkPrice(
-                                new ApplyMarkPriceCommand(symbol, 1, ENTRY_PRICE, 1, BASE_EPOCH_MILLIS))));
+                                productLine == ProductLine.OPTION
+                                        ? new ApplyMarkPriceCommand(symbol, 1, ENTRY_PRICE, ENTRY_PRICE,
+                                        ENTRY_PRICE, 1, BASE_EPOCH_MILLIS)
+                                        : new ApplyMarkPriceCommand(symbol, 1, ENTRY_PRICE, 1,
+                                        BASE_EPOCH_MILLIS))));
             }
 
             List<Long> users = LinearPerpetualBenchmarkSupport.usersAcrossLanes(
@@ -206,8 +210,12 @@ final class DerivativeMixedWorkload {
                     markSequences[index] = sequence;
                     target.execute(target.command(CoreMessageType.APPLY_MARK_PRICE,
                             CommandSource.KAFKA_INPUT_BRIDGE, 0,
-                            TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                                    symbol, 1, 99, sequence, target.nextCommandTimestamp()))));
+                            TradingCommandCodec.encodeApplyMarkPrice(
+                                    source.productLine() == ProductLine.OPTION
+                                            ? new ApplyMarkPriceCommand(symbol, 1, 99, ENTRY_PRICE,
+                                            ENTRY_PRICE, sequence, target.nextCommandTimestamp())
+                                            : new ApplyMarkPriceCommand(symbol, 1, 99, sequence,
+                                            target.nextCommandTimestamp()))));
                 }
                 if (!source.productLine().isFundingProduct()) return;
                 if (target.state().tradingState().treasuryState().fundingSettlement(symbol)

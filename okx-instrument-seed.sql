@@ -53,7 +53,9 @@ INSERT INTO instruments (
 SELECT symbol, 1, instrument_type, contract_type, base_asset, quote_asset, settle_asset, contract_multiplier_ppm, contract_value_asset, price_tick_units, quantity_step_units,
        min_quantity_steps, max_quantity_steps, 1, 1000000000000000000, notional_multiplier_units, price_precision, quantity_precision,
        CASE WHEN instrument_type IN ('SPOT', 'PERPETUAL') THEN 'LIMIT,MARKET' ELSE 'LIMIT' END, 'GTC,IOC,FOK,GTX', TRUE, instrument_type <> 'SPOT',
-       instrument_type IN ('SPOT', 'PERPETUAL'), max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm,
+       instrument_type IN ('SPOT', 'PERPETUAL'), max_leverage_ppm,
+       CASE WHEN instrument_type = 'OPTION' THEN 100000 ELSE initial_margin_rate_ppm END,
+       CASE WHEN instrument_type = 'OPTION' THEN 50000 ELSE maintenance_margin_rate_ppm END,
        CASE WHEN instrument_type = 'SPOT' THEN 800 WHEN instrument_type = 'OPTION' THEN 200 ELSE 200 END,
        CASE WHEN instrument_type = 'SPOT' THEN 1000 WHEN instrument_type = 'OPTION' THEN 300 ELSE 500 END,
        1000000000000000000, 1000000, 25000000000000, funding_interval_hours, CASE WHEN instrument_type = 'PERPETUAL' THEN 100 ELSE 0 END,
@@ -80,12 +82,13 @@ ON CONFLICT (product_line, symbol) DO UPDATE SET version=EXCLUDED.version, updat
 INSERT INTO instrument_symbol_sequences (symbol, version, updated_at) SELECT symbol, 1, now() FROM surprising_okx_instruments
 ON CONFLICT (symbol) DO UPDATE SET version=GREATEST(instrument_symbol_sequences.version, EXCLUDED.version), updated_at=EXCLUDED.updated_at;
 
-INSERT INTO instrument_risk_brackets (symbol, version, bracket_no, notional_floor_units, notional_cap_units, max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm)
+INSERT INTO instrument_risk_brackets (symbol, version, bracket_no, notional_floor_units, notional_cap_units, max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm, option_margin_factor_ppm)
 SELECT symbol, 1, b.bracket_no, b.floor_units, b.cap_units, GREATEST(1000000::BIGINT, max_leverage_ppm / b.divisor),
-       GREATEST(1::BIGINT, LEAST(5000::BIGINT, CEIL(1000000000000.0 / GREATEST(1000000::BIGINT, max_leverage_ppm / b.divisor)))),
-       GREATEST(1::BIGINT, LEAST(5000::BIGINT, CEIL(1000000000000.0 / GREATEST(1000000::BIGINT, max_leverage_ppm / b.divisor)) / 2))
-  FROM surprising_okx_instruments CROSS JOIN (VALUES (1,0::BIGINT,100000000000000::BIGINT,1::BIGINT),(2,100000000000000::BIGINT,500000000000000::BIGINT,2::BIGINT),(3,500000000000000::BIGINT,1000000000000000000,5::BIGINT)) b(bracket_no,floor_units,cap_units,divisor)
-ON CONFLICT (symbol, version, bracket_no) DO UPDATE SET notional_floor_units=EXCLUDED.notional_floor_units, notional_cap_units=EXCLUDED.notional_cap_units, max_leverage_ppm=EXCLUDED.max_leverage_ppm, initial_margin_rate_ppm=EXCLUDED.initial_margin_rate_ppm, maintenance_margin_rate_ppm=EXCLUDED.maintenance_margin_rate_ppm;
+       CASE WHEN product_line = 'OPTION' THEN 150000 ELSE GREATEST(1::BIGINT, LEAST(5000::BIGINT, CEIL(1000000000000.0 / GREATEST(1000000::BIGINT, max_leverage_ppm / b.divisor)))) END,
+       CASE WHEN product_line = 'OPTION' THEN 50000 ELSE GREATEST(1::BIGINT, LEAST(5000::BIGINT, CEIL(1000000000000.0 / GREATEST(1000000::BIGINT, max_leverage_ppm / b.divisor)) / 2)) END,
+       b.option_margin_factor_ppm
+  FROM surprising_okx_instruments CROSS JOIN (VALUES (1,0::BIGINT,100000000000000::BIGINT,1::BIGINT,1000000::BIGINT),(2,100000000000000::BIGINT,500000000000000::BIGINT,2::BIGINT,1100000::BIGINT),(3,500000000000000::BIGINT,1000000000000000000,5::BIGINT,1200000::BIGINT)) b(bracket_no,floor_units,cap_units,divisor,option_margin_factor_ppm)
+ON CONFLICT (symbol, version, bracket_no) DO UPDATE SET notional_floor_units=EXCLUDED.notional_floor_units, notional_cap_units=EXCLUDED.notional_cap_units, max_leverage_ppm=EXCLUDED.max_leverage_ppm, initial_margin_rate_ppm=EXCLUDED.initial_margin_rate_ppm, maintenance_margin_rate_ppm=EXCLUDED.maintenance_margin_rate_ppm, option_margin_factor_ppm=EXCLUDED.option_margin_factor_ppm;
 
 INSERT INTO instrument_index_sources (symbol, version, source, enabled, base_url, path, source_symbol, parser, quote_currency, target_quote_currency, conversion_base_url, conversion_path, conversion_parser, conversion_mode, conversion_operation, fallback_weight_multiplier_ppm, websocket_enabled, websocket_url, websocket_subscribe_message, websocket_parser, weight_ppm)
 SELECT symbol, 1, 'OKX', TRUE, 'https://www.okx.com', CASE WHEN spot_index THEN '/api/v5/market/ticker?instId='||index_symbol ELSE '/api/v5/market/index-ticker?instId='||index_symbol END, index_symbol, 'OKX_TICKER', quote_asset, quote_asset, NULL, NULL, NULL, 'DISCOUNT', 'MULTIPLY', 500000, TRUE, 'wss://ws.okx.com:8443/ws/v5/public', CASE WHEN spot_index THEN '{"op":"subscribe","args":[{"channel":"tickers","instId":"'||index_symbol||'"}]}' ELSE '{"op":"subscribe","args":[{"channel":"index-tickers","instId":"'||index_symbol||'"}]}' END, 'OKX_TICKER', 1000000

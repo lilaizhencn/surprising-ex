@@ -29,7 +29,7 @@ class MarkPriceKafkaConsumerTest {
         Instant now = Instant.now();
         BigDecimal price = new BigDecimal("59000");
         MarkPriceEvent result = new MarkPriceEvent(ProductLine.LINEAR_PERPETUAL, "BTC-USDT", 1L,
-                5_900_000_000_000L, 590_000L, price, price, price, price, price,
+                5_900_000_000_000L, 590_000L, price, price, null, price, price, price,
                 new BigDecimal("58999"), new BigDecimal("59001"), BigDecimal.ZERO,
                 now.plusSeconds(3600), 3600L, BigDecimal.ZERO, 60L,
                 new BigDecimal("57000"), new BigDecimal("61000"), 1L,
@@ -105,7 +105,7 @@ class MarkPriceKafkaConsumerTest {
         Instant now = Instant.now();
         BigDecimal price = BigDecimal.valueOf(ticks, 1);
         return new MarkPriceEvent(ProductLine.LINEAR_PERPETUAL, "BTC-USDT", 1L,
-                ticks * 10_000_000L, ticks, price, price, price, price, price,
+                ticks * 10_000_000L, ticks, price, price, null, price, price, price,
                 price, price, BigDecimal.ZERO, now.plusSeconds(3600), 3600L, BigDecimal.ZERO, 60L,
                 price, price, sequence, PriceStatus.HEALTHY, now, now);
     }

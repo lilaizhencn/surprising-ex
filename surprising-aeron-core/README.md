@@ -146,7 +146,7 @@ mvn -pl :surprising-aeron-client,:surprising-aeron-tools -am test
 
 ## 实现状态与版本切换说明
 
-当前写格式为 command/envelope schema v4、trading snapshot v24、matcher snapshot v5 和
+当前写格式为 command/envelope schema v4、trading snapshot v25、matcher snapshot v5 和
 sectioned snapshot v18；decoder 和 startup 只接受这些当前版本，对任何旧版本 fail closed，不保留 legacy reader、兼容 reader
 或隐式降级。
 
@@ -164,7 +164,7 @@ P10-G 仍需真实 HTTP/JFR 长稳 artifact；没有对应 artifact 时不得宣
 - schema v4 header 包含 `commandId`、`productLine`、`source`、`sourceId`、`sourceSequence`、`userId`、
   外部提交时间、`correlationId` 和 route v3；旧 envelope/route 不再接受。
 - Instrument Provider 通过版本化 `UpsertInstrumentCommand` 下发保证金率、risk brackets、最大杠杆和
-  最大持仓名义价值；CoreInstrumentState 是运行时唯一参数副本，Risk Provider 只能查询 Core 快照。
+  最大持仓名义价值；期权 risk bracket 同时下发 `optionMarginFactorPpm`。CoreInstrumentState 是运行时唯一参数副本，Risk Provider 只能查询 Core 快照。
 - exchange-core 0.5.18-emporia 是唯一可执行订单簿（sole executable order book），独占价格树/FIFO；`GTX` 使用原生
   post-only 语义，外层不得查 book 后模拟，也不得建立并行可执行 book。
   Core 的 `CoreOrderState` 只保存业务元数据和活动状态，不保存可重建 FIFO 的 priority sequence。
@@ -310,7 +310,7 @@ reservation 和 matcher 提交。只读 preflight 只服务显式 dry-run/test A
 
 - 每个 command 在 owner 内产生不可变、按 `(asset, ownerKind, ownerId, subledger)` 组织的 `FundsDelta`；资金守恒和
   Aeron position 属于当前裁决。历史 Kafka/PG 出口暂不启用。
-- 当前写格式为 command/envelope v4、trading snapshot v24、matcher snapshot v5、
+- 当前写格式为 command/envelope v4、trading snapshot v25、matcher snapshot v5、
   sectioned snapshot v18。decoder、snapshot loader 和 startup 只接受当前版本；旧版本一律拒绝并 fail closed，只能从
   fresh compatible Product Core state 启动，不保留旧 codec reader、迁移读取路径或隐式降级。
 
@@ -356,7 +356,7 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
   直达管线，不创建 R1/R2 风险处理器；热路径用有界 correlation ring 接收不可变 `MatcherResult`，不进入
   exchange-core promises Map、不创建其 Future，也不提交 matcher 用户注册命令。事件链池对象只在 exchange-core 内复用；普通交易热路径不执行全局状态报告。
   开放订单报告和 Core 对账均为 O(活动订单数)，不做排序。
-- `Trading snapshot v24` 是唯一外层交易快照写格式；matcher snapshot v5 在直达模式只保存
+- `Trading snapshot v25` 是唯一外层交易快照写格式；matcher snapshot v5 在直达模式只保存
   `MATCHING_ENGINE_ROUTER/[0..N)`，不生成 `RISK_ENGINE` module，并按 `[-1, 0..N)` 保存 control/native shard 的独立
   evidence sequence 与 prefix。`sectioned snapshot v18` 按相同 Core/book prefix 拆分载荷，
   并保存按 laneId 升序的实际 Account Lane state section；三个 Member 必须运行完全相同的 topology、fork、配置和 schema。
@@ -369,11 +369,11 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
   registry、完整 engine/book hash，再以 O(活动订单数) 一次报告逐字段核对 OPEN 订单；全部通过后才替换内存状态。
 - snapshot、恢复、异步 continuation 的任何不确定失败都走失败关闭路径；不允许 clean-start 降级、订单回放、
   隐藏 FIFO、matcher journal 或跨 Member 部分恢复。
-- 只接受当前 v24/v18 的 fresh compatible state；command schema v4、export marker v10、trading snapshot v24、sectioned snapshot v18
+- 只接受当前 v25/v18 的 fresh compatible state；command schema v4、export marker v10、trading snapshot v25、sectioned snapshot v18
   以外的输入在 decode/startup 立即拒绝并 fail closed。没有旧 reader、迁移读取路径或使用 PostgreSQL 投影、clean-start、逐单回放
   修复不一致状态的例外。
 - `UPDATE_RISK_SCAN_CONTROL` 使用乐观版本检查，`RISK_SCAN_CONTROL_QUERY` 返回当前版本、启停、续跑间隔、
-  批次上限和审计元数据；状态随 Cluster Log/Archive 与 `Trading snapshot v24` 恢复。
+  批次上限和审计元数据；状态随 Cluster Log/Archive 与 `Trading snapshot v25` 恢复。
 - `APPLY_MARK_PRICE` 只提交新价格和初始化 risk/trigger cursor；用户风险、强平计划和触发单扫描只能由有界
   `CONTINUE_RISK_SCAN` 推进，不能在标记价命令中隐式执行首批扫描。
 - Risk continuation 按确定性的 `accountLaneId` 升序、Lane 内 `userId` 升序推进；默认64 work-unit上限覆盖实际持仓和预留遍历，

@@ -49,7 +49,11 @@ class SharedProductLineSnapshotContractTest {
             if (productLine.isDerivative()) {
                 assertApplied(applyTerminal(original, market(productLine, 1, CoreMessageType.APPLY_MARK_PRICE,
                         TradingCommandCodec.encodeApplyMarkPrice(
-                                new ApplyMarkPriceCommand(SYMBOL, 1, 100, 1, 1_700_000_000_000L)))));
+                                productLine == ProductLine.OPTION
+                                        ? new ApplyMarkPriceCommand(SYMBOL, 1, 100, 100, 100, 1,
+                                        1_700_000_000_000L)
+                                        : new ApplyMarkPriceCommand(SYMBOL, 1, 100, 1,
+                                        1_700_000_000_000L)))));
                 assertThat(original.tradingState().riskState().markPrices().get(SYMBOL).markPriceTicks())
                         .isEqualTo(100);
             }

@@ -103,7 +103,7 @@ public final class RuntimeOrderAdmission {
         long leverage = effectiveLeverage(runtime, instrument, order, userId);
         validateRiskLimits(runtime, instrument, position, order, admissionSummary, userId,
                 openInterestSteps, excluded, leverage);
-        return reservationUnits(instrument, position, order, leverage);
+        return reservationUnits(instrument, position, order, leverage, admissionSummary);
     }
 
     private static void validateReservation(
@@ -197,13 +197,15 @@ public final class RuntimeOrderAdmission {
         long totalOrders = Math.addExact(pending, order.quantitySteps());
         long signedOrders = order.side() == CoreOrderSide.BUY ? totalOrders : Math.negateExact(totalOrders);
         long projectedSteps = Math.absExact(Math.addExact(current, signedOrders));
-        long projectedNotional = CoreContractMath.notionalUnits(
-                instrument, projectedSteps, order.markPriceTicks());
+        long riskPriceTicks = instrument.contractType().isOption()
+                ? order.indexPriceTicks() : order.markPriceTicks();
+        long projectedNotional = CoreContractMath.riskNotionalUnits(
+                instrument, projectedSteps, riskPriceTicks);
         if (projectedNotional > instrument.maxPositionNotionalUnits()) {
             throw rejected("POSITION_NOTIONAL_LIMIT_EXCEEDED", "projected position exceeds instrument limit");
         }
         long openInterestNotional = openInterestSteps == 0 ? 0
-                : CoreContractMath.notionalUnits(instrument, openInterestSteps, order.markPriceTicks());
+                : CoreContractMath.riskNotionalUnits(instrument, openInterestSteps, riskPriceTicks);
         long scaledLimit = CoreContractMath.scaledFloorCapped(
                 openInterestNotional, instrument.userOpenInterestLimitRatePpm(), PPM,
                 instrument.userOpenInterestLimitFloorUnits(), instrument.maxPositionNotionalUnits());
@@ -214,15 +216,15 @@ public final class RuntimeOrderAdmission {
         if (projectedNotional > bracket.notionalCapUnits()) {
             throw rejected("RISK_BRACKET_EXCEEDED", "projected position exceeds risk bracket");
         }
-        if (leverage > bracket.maxLeveragePpm()
-                || CoreContractMath.initialMarginRateFromLeverage(leverage) < bracket.initialMarginRatePpm()) {
+        if (!instrument.contractType().isOption() && (leverage > bracket.maxLeveragePpm()
+                || CoreContractMath.initialMarginRateFromLeverage(leverage) < bracket.initialMarginRatePpm())) {
             throw rejected("LEVERAGE_EXCEEDS_RISK_BRACKET", "configured leverage exceeds risk bracket");
         }
     }
 
     private static long reservationUnits(
             CoreInstrumentState instrument, PositionRuntime position,
-            ResolvedPlaceOrder order, long leverage) {
+            ResolvedPlaceOrder order, long leverage, AdmissionSummary admissionSummary) {
         if (instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT) {
             if (order.side() == CoreOrderSide.SELL) return order.quantitySteps();
             long notional = Math.multiplyExact(order.reservationPriceTicks(), order.quantitySteps());
@@ -232,16 +234,46 @@ public final class RuntimeOrderAdmission {
         long current = position == null ? 0 : position.signedQuantitySteps();
         long signedOrder = order.side() == CoreOrderSide.BUY
                 ? order.quantitySteps() : Math.negateExact(order.quantitySteps());
+        if (instrument.contractType().isOption()) {
+            long currentAbs = Math.absExact(current);
+            boolean opposite = current != 0 && Long.signum(current) != Long.signum(signedOrder);
+            long closeSteps = opposite ? Math.min(currentAbs, order.quantitySteps()) : 0;
+            long openSteps = order.reduceOnly() ? 0 : Math.subtractExact(order.quantitySteps(), closeSteps);
+            long feeDebit = fragmentationSafeFeeDebit(instrument, order);
+            if (order.side() == CoreOrderSide.BUY) {
+                long premium = CoreContractMath.optionPremiumUnits(
+                        instrument, order.reservationPriceTicks(), order.quantitySteps());
+                long releasedMargin = position == null || closeSteps == 0 ? 0
+                        : proportional(position.positionMarginUnits(), closeSteps, currentAbs);
+                return Math.max(1, Math.max(0,
+                        Math.subtractExact(Math.addExact(premium, feeDebit), releasedMargin)));
+            }
+            if (openSteps == 0) return Math.max(1, feeDebit);
+            long totalSellOrders = Math.addExact(admissionSummary.pendingQuantity(), order.quantitySteps());
+            long projectedSigned = Math.subtractExact(current, totalSellOrders);
+            long projectedRisk = Math.max(0, Math.negateExact(projectedSigned));
+            long projectedNotional = CoreContractMath.riskNotionalUnits(
+                    instrument, projectedRisk, order.indexPriceTicks());
+            var bracket = CoreContractMath.maintenanceRiskBracket(instrument, projectedNotional);
+            long margin = CoreContractMath.optionSellOpenOrderMarginUnits(instrument,
+                    order.reservationPriceTicks(), order.markPriceTicks(), openSteps,
+                    order.indexPriceTicks(), order.forwardPriceTicks(), bracket);
+            return Math.max(1, Math.addExact(margin, feeDebit));
+        }
         long openSteps = order.reduceOnly() ? 0 : order.quantitySteps();
         long projectedRisk = Math.addExact(Math.absExact(current), order.quantitySteps());
         long projectedSigned = signedOrder > 0 ? projectedRisk : Math.negateExact(projectedRisk);
         long margin = openingMargin(instrument, projectedSigned, signedOrder, openSteps,
-                order.reservationPriceTicks(), leverage);
+                order.reservationPriceTicks(), leverage, order.indexPriceTicks(), order.forwardPriceTicks());
         long premium = instrument.contractType().isOption() && order.side() == CoreOrderSide.BUY
                 ? CoreContractMath.optionPremiumUnits(instrument, order.reservationPriceTicks(), order.quantitySteps())
                 : 0;
         long feeDebit = fragmentationSafeFeeDebit(instrument, order);
         return Math.max(1, Math.addExact(Math.addExact(margin, premium), feeDebit));
+    }
+
+    private static long proportional(long units, long part, long total) {
+        return part == total ? units : Math.multiplyExact(units, part) / total;
     }
 
     private static long effectiveLeverage(
@@ -261,15 +293,18 @@ public final class RuntimeOrderAdmission {
 
     private static long openingMargin(
             CoreInstrumentState instrument, long projectedQuantity, long signedFill, long openSteps,
-            long priceTicks, long leveragePpm) {
+            long priceTicks, long leveragePpm, long indexPriceTicks, long forwardPriceTicks) {
         if (openSteps == 0 || instrument.contractType().isOption() && signedFill > 0) return 0;
-        long projectedNotional = CoreContractMath.notionalUnits(
-                instrument, Math.absExact(projectedQuantity), priceTicks);
+        long projectedNotional = CoreContractMath.riskNotionalUnits(instrument,
+                Math.absExact(projectedQuantity), instrument.contractType().isOption()
+                        ? indexPriceTicks : priceTicks);
         var bracket = CoreContractMath.maintenanceRiskBracket(instrument, projectedNotional);
-        long rate = Math.max(Math.max(instrument.initialMarginRatePpm(), bracket.initialMarginRatePpm()),
+        long rate = instrument.contractType().isOption() ? bracket.initialMarginRatePpm()
+                : Math.max(Math.max(instrument.initialMarginRatePpm(), bracket.initialMarginRatePpm()),
                 CoreContractMath.initialMarginRateFromLeverage(leveragePpm));
         return CoreContractMath.openingMarginUnits(instrument,
-                signedFill > 0 ? CoreOrderSide.BUY : CoreOrderSide.SELL, priceTicks, openSteps, rate);
+                signedFill > 0 ? CoreOrderSide.BUY : CoreOrderSide.SELL, priceTicks, openSteps, rate,
+                indexPriceTicks, forwardPriceTicks, bracket.optionMarginFactorPpm());
     }
 
     private static CoreStateRejectedException rejected(String code, String message) {

@@ -286,6 +286,7 @@ CREATE TABLE IF NOT EXISTS instrument_risk_brackets (
     max_leverage_ppm        BIGINT NOT NULL,
     initial_margin_rate_ppm BIGINT NOT NULL,
     maintenance_margin_rate_ppm BIGINT NOT NULL,
+    option_margin_factor_ppm BIGINT NOT NULL DEFAULT 1000000,
     PRIMARY KEY (symbol, version, bracket_no),
     CONSTRAINT instrument_risk_brackets_instrument_fk
         FOREIGN KEY (symbol, version) REFERENCES instruments(symbol, version),
@@ -296,8 +297,24 @@ CREATE TABLE IF NOT EXISTS instrument_risk_brackets (
         AND max_leverage_ppm > 0
         AND initial_margin_rate_ppm > 0
         AND maintenance_margin_rate_ppm > 0
+        AND option_margin_factor_ppm BETWEEN 1 AND 10000000
     )
 );
+
+ALTER TABLE instrument_risk_brackets
+    ADD COLUMN IF NOT EXISTS option_margin_factor_ppm BIGINT NOT NULL DEFAULT 1000000;
+ALTER TABLE instrument_risk_brackets
+    DROP CONSTRAINT IF EXISTS instrument_risk_brackets_positive;
+ALTER TABLE instrument_risk_brackets
+    ADD CONSTRAINT instrument_risk_brackets_positive CHECK (
+        bracket_no > 0
+        AND notional_floor_units >= 0
+        AND notional_cap_units > notional_floor_units
+        AND max_leverage_ppm > 0
+        AND initial_margin_rate_ppm > 0
+        AND maintenance_margin_rate_ppm > 0
+        AND option_margin_factor_ppm BETWEEN 1 AND 10000000
+    );
 
 CREATE TABLE IF NOT EXISTS instrument_index_sources (
     symbol                      TEXT NOT NULL,
@@ -607,7 +624,10 @@ SELECT symbol, 1, instrument_type, contract_type, base_asset, quote_asset, settl
        1, 1000000, 1, 1000000000000000, 1, price_precision, quantity_precision,
        CASE WHEN instrument_type IN ('SPOT', 'PERPETUAL') THEN 'LIMIT,MARKET' ELSE 'LIMIT' END,
        'GTC,IOC,FOK,GTX', TRUE, instrument_type <> 'SPOT',
-       instrument_type IN ('SPOT', 'PERPETUAL'), 100000000, 10000, 5000, 200, 500,
+       instrument_type IN ('SPOT', 'PERPETUAL'),
+       CASE WHEN instrument_type = 'OPTION' THEN 1000000 ELSE 100000000 END,
+       CASE WHEN instrument_type = 'OPTION' THEN 100000 ELSE 10000 END,
+       CASE WHEN instrument_type = 'OPTION' THEN 50000 ELSE 5000 END, 200, 500,
        1000000000000000000, 1000000, 1000000000000000000,
        funding_interval_hours,
        CASE WHEN instrument_type = 'PERPETUAL' THEN 100 ELSE 0 END,
@@ -639,17 +659,20 @@ ON CONFLICT (symbol) DO UPDATE SET
 INSERT INTO instrument_risk_brackets (
     symbol, version, bracket_no, notional_floor_units, notional_cap_units,
     max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm
+    , option_margin_factor_ppm
 )
 SELECT seed.symbol, 1, bracket.bracket_no, bracket.notional_floor_units,
        bracket.notional_cap_units, bracket.max_leverage_ppm,
-       bracket.initial_margin_rate_ppm, bracket.maintenance_margin_rate_ppm
+       CASE WHEN seed.product_line = 'OPTION' THEN 150000 ELSE bracket.initial_margin_rate_ppm END,
+       CASE WHEN seed.product_line = 'OPTION' THEN 30000 ELSE bracket.maintenance_margin_rate_ppm END,
+       bracket.option_margin_factor_ppm
   FROM surprising_launch_instruments seed
  CROSS JOIN (VALUES
-    (1, 0::BIGINT, 100000000000000::BIGINT, 100000000::BIGINT, 10000::BIGINT, 5000::BIGINT),
-    (2, 100000000000000::BIGINT, 500000000000000::BIGINT, 50000000::BIGINT, 20000::BIGINT, 10000::BIGINT),
-    (3, 500000000000000::BIGINT, 1000000000000000000::BIGINT, 20000000::BIGINT, 50000::BIGINT, 25000::BIGINT)
+    (1, 0::BIGINT, 100000000000000::BIGINT, 100000000::BIGINT, 10000::BIGINT, 5000::BIGINT, 1000000::BIGINT),
+    (2, 100000000000000::BIGINT, 500000000000000::BIGINT, 50000000::BIGINT, 20000::BIGINT, 10000::BIGINT, 1100000::BIGINT),
+    (3, 500000000000000::BIGINT, 1000000000000000000::BIGINT, 20000000::BIGINT, 50000::BIGINT, 25000::BIGINT, 1200000::BIGINT)
  ) AS bracket(bracket_no, notional_floor_units, notional_cap_units, max_leverage_ppm,
-              initial_margin_rate_ppm, maintenance_margin_rate_ppm)
+              initial_margin_rate_ppm, maintenance_margin_rate_ppm, option_margin_factor_ppm)
  WHERE seed.product_line <> 'SPOT'
 ON CONFLICT (symbol, version, bracket_no) DO NOTHING;
 

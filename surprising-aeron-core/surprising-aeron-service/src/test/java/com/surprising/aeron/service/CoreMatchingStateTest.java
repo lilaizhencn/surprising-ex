@@ -843,7 +843,9 @@ class CoreMatchingStateTest {
         CoreMessage mark = new CoreMessage(CoreMessageHeader.command(CoreMessageType.APPLY_MARK_PRICE,
                 UUID.randomUUID(), productLine, CommandSource.KAFKA_INPUT_BRIDGE, 89, 1, 1,
                 1_000, 2), TradingCommandCodec.encodeApplyMarkPrice(
-                        new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 1, 1_000)));
+                        type.isOption()
+                                ? new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 100, 100, 1, 1_000)
+                                : new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 1, 1_000)));
         assertThat(state.apply(mark).status()).isEqualTo(ResponseStatus.APPLIED);
     }
 

@@ -210,6 +210,10 @@ public final class RuntimeCommandProcessor {
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument does not exist");
         }
+        if (instrument.contractType().isOption()) {
+            throw new CoreStateRejectedException("OPTION_LEVERAGE_UNSUPPORTED",
+                    "non-portfolio option margin is not leverage based");
+        }
         long minimumRate = Math.max(instrument.initialMarginRatePpm(),
                 CoreContractMath.riskBracket(instrument, 0).initialMarginRatePpm());
         if (CoreContractMath.initialMarginRateFromLeverage(command.leveragePpm()) < minimumRate) {

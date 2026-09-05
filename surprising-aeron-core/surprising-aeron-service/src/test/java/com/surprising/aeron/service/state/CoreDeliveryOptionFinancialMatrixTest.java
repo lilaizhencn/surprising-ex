@@ -13,13 +13,18 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreSettlementProgressView;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CoreTimeInForce;
+import com.surprising.aeron.protocol.ExecuteAdlCommand;
+import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
+import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.protocol.SettleInstrumentCommand;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
+import com.surprising.aeron.protocol.UpdateLeverageCommand;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.instrument.api.model.OptionType;
 import com.surprising.product.api.ProductLine;
+import exchange.core2.core.common.MatcherResult.MatcherEvent;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.LinkedHashSet;
@@ -365,7 +370,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         opening = reducer.upsertInstrument(opening, instrument(option, shortSymbol));
         opening = addPosition(opening, USER_ID, option.symbol(), 1, 10, 0, option);
         opening = addPosition(opening, USER_ID, shortSymbol, -10, 10, 0, option);
-        ApplyMarkPriceCommand mark = new ApplyMarkPriceCommand(shortSymbol, 1, 100, 1,
+        ApplyMarkPriceCommand mark = new ApplyMarkPriceCommand(shortSymbol, 1, 100, 100, 100, 1,
                 1_700_000_000_001L);
         TradingCoreState marked = reducer.applyMarkPrice(opening, mark);
         assertThat(marked.riskState().liquidations().values())
@@ -383,7 +388,8 @@ class CoreDeliveryOptionFinancialMatrixTest {
             runtime.putLiquidation(new LiquidationRuntime(99, USER_ID,
                     identities.symbolId(option.symbol()), CoreMarginMode.CROSS, CorePositionSide.NET,
                     1, 1, 1, 1, 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED, 0));
-            var execution = new com.surprising.aeron.protocol.ExecuteLiquidationCommand(99, 1, 100, 0);
+            var execution = new com.surprising.aeron.protocol.ExecuteLiquidationCommand(
+                    99, 1, PREMIUM_PRICE, 0);
             assertThat(RuntimeLiquidationQueryService.isExecutable(runtime, identities, execution)).isFalse();
             RuntimePerpetualLiquidationProcessor.applyExecutionRuntime(execution, List.of(), runtime, identities);
             assertThat(runtime.liquidation(99).status()).isEqualTo(CoreLiquidationState.Status.CANCELED);
@@ -391,6 +397,156 @@ class CoreDeliveryOptionFinancialMatrixTest {
                     .signedQuantitySteps()).isEqualTo(1);
         } finally {
             runtime.close();
+        }
+    }
+
+    @Test
+    void isolatedOptionShortEquityUsesFullMarkLiabilityInBothStateModels() {
+        Variant call = VARIANTS.get(4);
+        Variant isolated = new Variant(call.type(), CoreMarginMode.ISOLATED, call.optionType(), call.moneyness(),
+                call.settlementPriceTicks(), call.notionalMultiplierUnits(), call.settleScaleUnits(),
+                call.baseAsset(), call.quoteAsset(), call.settleAsset());
+        TradingCoreState opening = fundedState(isolated, MAKER_ID, WALLET);
+        opening = addPosition(opening, MAKER_ID, isolated.symbol(), -QUANTITY, PREMIUM_PRICE, 40, isolated);
+        ApplyMarkPriceCommand mark = new ApplyMarkPriceCommand(isolated.symbol(), 1, 30,
+                100, 100, 2, 1_700_000_000_001L);
+
+        TradingCoreState marked = reducer.applyMarkPrice(opening, mark);
+        CoreRiskSnapshot risk = marked.riskState().snapshots().get(MAKER_ID + ":" + isolated.symbol());
+        assertThat(risk.equityUnits()).isEqualTo(-20);
+        assertThat(risk.unrealizedPnlUnits()).isEqualTo(-40);
+        assertThat(risk.status()).isEqualTo(CoreRiskStatus.LIQUIDATION);
+        TradingCoreState beforeMark = opening;
+        assertRuntimeParity(beforeMark, marked,
+                identities -> RuntimePerpetualRiskProcessor.simulateMarkPrice(
+                        beforeMark, mark, beforeMark.users().keySet(), identities));
+    }
+
+    @Test
+    void optionShortLiquidationAndAdlCloseAtMarkAndConserveCashAcrossRuntimeRestore() {
+        Variant option = VARIANTS.get(4);
+        TradingCoreState matched = matchedOption(option);
+        ApplyMarkPriceCommand shock = new ApplyMarkPriceCommand(option.symbol(), 1, 3_000,
+                100, 100, 2, 1_700_000_000_001L);
+        TradingCoreState marked = reducer.applyMarkPrice(matched, shock);
+        CoreLiquidationState plan = marked.riskState().liquidations().values().iterator().next();
+        assertThat(plan.userId()).isEqualTo(MAKER_ID);
+
+        ExecuteLiquidationCommand liquidation = new ExecuteLiquidationCommand(
+                plan.liquidationId(), 2, 3_000, 0);
+        TradingCoreState liquidated = reducer.executeLiquidation(marked, liquidation);
+        assertThat(liquidated.user(MAKER_ID).positions().get(option.symbol()).signedQuantitySteps()).isZero();
+        assertThat(liquidated.riskState().liquidations().get(plan.liquidationId()).deficitUnits())
+                .isEqualTo(3_980);
+        assertThat(total(liquidated, option.settleAsset())).isEqualTo(2 * WALLET);
+        assertRuntimeParity(marked, liquidated,
+                identities -> RuntimePerpetualLiquidationProcessor.simulateExecution(marked, liquidation, identities));
+
+        ResolveLiquidationCommand insurance = new ResolveLiquidationCommand(plan.liquidationId(),
+                ResolveLiquidationCommand.Resolution.INSURANCE, 2_020);
+        TradingCoreState insured = reducer.resolveLiquidation(liquidated, insurance);
+        assertThat(insured.riskState().liquidations().get(plan.liquidationId()).status())
+                .isEqualTo(CoreLiquidationState.Status.ADL_REQUIRED);
+        assertRuntimeParity(liquidated, insured,
+                identities -> RuntimePerpetualLiquidationProcessor.simulateResolution(
+                        liquidated, insurance, identities));
+
+        ExecuteAdlCommand adl = new ExecuteAdlCommand(plan.liquidationId(), USER_ID, option.symbol(),
+                CoreMarginMode.CROSS, CorePositionSide.NET, QUANTITY, PREMIUM_PRICE, 2, 1, 1_960);
+        assertThat(reducer.adlCandidates(insured, option.settleAsset(), 10))
+                .extracting(com.surprising.aeron.protocol.CoreAdlCandidateView::userId)
+                .containsExactly(USER_ID);
+        TradingCoreState completed = reducer.executeAdl(insured, adl);
+        assertThat(completed.user(USER_ID).positions().get(option.symbol()).signedQuantitySteps()).isEqualTo(1);
+        assertThat(completed.user(USER_ID).totalUnits(option.settleAsset())).isEqualTo(3_020);
+        assertThat(completed.riskState().liquidations().get(plan.liquidationId()).status())
+                .isEqualTo(CoreLiquidationState.Status.COMPLETED);
+        assertThat(total(completed, option.settleAsset())).isEqualTo(2 * WALLET);
+        assertRuntimeParity(insured, completed,
+                identities -> RuntimePerpetualLiquidationProcessor.simulateAdl(insured, adl, identities));
+        assertThat(TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(completed), ProductLine.OPTION))
+                .isEqualTo(completed);
+    }
+
+    @Test
+    void optionSellOpenAndBuyCloseReserveNetCashAndRuntimeMatchKeepsParity() {
+        Variant option = VARIANTS.get(4);
+        TradingCoreState state = optionFundingState(option);
+        state = reducer.placeOrder(state, MAKER_ID, optionOrder(301, option, CoreOrderSide.SELL));
+        assertThat(state.user(MAKER_ID).reservations().get(301L).remainingUnits()).isEqualTo(20);
+        state = reducer.placeOrder(state, USER_ID, optionOrder(302, option, CoreOrderSide.BUY));
+        assertThat(state.user(USER_ID).reservations().get(302L).remainingUnits()).isEqualTo(20);
+
+        TradingCoreState beforeMatch = state;
+        List<MatcherEvent> matches =
+                List.of(trade(301, MAKER_ID, PREMIUM_PRICE, QUANTITY, true, true));
+        TradingCoreState matched = reducer.applyMatches(
+                beforeMatch, 302, option.baseAsset(), option.quoteAsset(), matches);
+        CorePositionState shortPosition = matched.user(MAKER_ID).positions().get(option.symbol());
+        assertThat(shortPosition.positionMarginUnits()).isEqualTo(40);
+        assertThat(matched.user(MAKER_ID).balances().get(option.settleAsset()).availableUnits()).isEqualTo(1_980);
+        assertThat(matched.user(MAKER_ID).balances().get(option.settleAsset()).lockedUnits()).isEqualTo(40);
+
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        try (TradingRuntimeState runtime = RuntimePerpetualMatchProcessor.simulate(
+                beforeMatch, 302, matches, identities)) {
+            RuntimeStateParityChecker.assertMatches(matched, identities, runtime);
+        }
+
+        PlaceOrderCommand buyClose = new PlaceOrderCommand(303, option.symbol(), 1,
+                CoreOrderSide.BUY, PREMIUM_PRICE, QUANTITY, true, option.marginMode(),
+                CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "");
+        TradingCoreState closing = reducer.placeOrder(matched, MAKER_ID, buyClose);
+        assertThat(closing.user(MAKER_ID).reservations().get(303L).remainingUnits()).isOne();
+        PlaceOrderCommand sellClose = new PlaceOrderCommand(304, option.symbol(), 1,
+                CoreOrderSide.SELL, PREMIUM_PRICE, QUANTITY, true, option.marginMode(),
+                CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "");
+        closing = reducer.placeOrder(closing, USER_ID, sellClose);
+        assertThat(closing.user(USER_ID).reservations().get(304L).remainingUnits()).isOne();
+        List<MatcherEvent> closeMatches =
+                List.of(trade(304, USER_ID, PREMIUM_PRICE, QUANTITY, true, true));
+        TradingCoreState beforeClose = closing;
+        TradingCoreState closed = reducer.applyMatches(
+                beforeClose, 303, option.baseAsset(), option.quoteAsset(), closeMatches);
+        assertThat(closed.user(MAKER_ID).positions().get(option.symbol()).signedQuantitySteps()).isZero();
+        assertThat(closed.user(USER_ID).positions().get(option.symbol()).signedQuantitySteps()).isZero();
+        assertThat(closed.user(MAKER_ID).totalUnits(option.settleAsset())).isEqualTo(WALLET);
+        assertThat(closed.user(USER_ID).totalUnits(option.settleAsset())).isEqualTo(WALLET);
+        assertThat(total(closed, option.settleAsset())).isEqualTo(2 * WALLET);
+
+        RuntimeIdentityRegistry closeIdentities = new RuntimeIdentityRegistry();
+        try (TradingRuntimeState runtime = RuntimePerpetualMatchProcessor.simulate(
+                beforeClose, 303, closeMatches, closeIdentities)) {
+            RuntimeStateParityChecker.assertMatches(closed, closeIdentities, runtime);
+        }
+    }
+
+    @Test
+    void nonPortfolioOptionRejectsLeverageConfigurationInBothStateModels() {
+        Variant option = VARIANTS.get(4);
+        TradingCoreState state = fundedState(option, USER_ID, WALLET);
+        UpdateLeverageCommand command = new UpdateLeverageCommand(
+                option.symbol(), CoreMarginMode.CROSS, 1_000_000);
+        assertThatThrownBy(() -> reducer.updateLeverage(state, USER_ID, command))
+                .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                        exception -> assertThat(exception.code()).isEqualTo("OPTION_LEVERAGE_UNSUPPORTED"));
+
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        try (TradingRuntimeState runtime = RuntimeStateProjector.project(state, identities)) {
+            assertThatThrownBy(() -> RuntimeCommandProcessor.updateLeverage(
+                    runtime, identities, USER_ID, command))
+                    .isInstanceOfSatisfying(CoreStateRejectedException.class,
+                            exception -> assertThat(exception.code())
+                                    .isEqualTo("OPTION_LEVERAGE_UNSUPPORTED"));
+        }
+    }
+
+    private static void assertRuntimeParity(TradingCoreState before, TradingCoreState expected,
+                                            java.util.function.Function<RuntimeIdentityRegistry,
+                                                    TradingRuntimeState> operation) {
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        try (TradingRuntimeState runtime = operation.apply(identities)) {
+            RuntimeStateParityChecker.assertMatches(expected, identities, runtime);
         }
     }
 
@@ -500,8 +656,10 @@ class CoreDeliveryOptionFinancialMatrixTest {
     private TradingCoreState fundedState(Variant variant, long userId, long wallet) {
         TradingCoreState state = reducer.upsertInstrument(TradingCoreState.empty(variant.productLine()),
                 instrument(variant));
-        state = reducer.applyMarkPrice(state,
-                new ApplyMarkPriceCommand(variant.symbol(), 1, ENTRY_PRICE, 1, 1_700_000_000_000L));
+        state = reducer.applyMarkPrice(state, variant.type().isOption()
+                ? new ApplyMarkPriceCommand(variant.symbol(), 1, PREMIUM_PRICE, 100, 100, 1,
+                1_700_000_000_000L)
+                : new ApplyMarkPriceCommand(variant.symbol(), 1, ENTRY_PRICE, 1, 1_700_000_000_000L));
         return reducer.adjustBalance(state, userId,
                 new BalanceAdjustmentCommand(variant.settleAsset(), wallet));
     }

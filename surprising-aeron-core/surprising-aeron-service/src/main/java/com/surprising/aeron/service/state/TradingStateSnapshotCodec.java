@@ -22,7 +22,7 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 24;
+    private static final int VERSION = 25;
     private static final int MAX_TEXT_BYTES = 64;
     private static final int MAX_AUDIT_TEXT_BYTES = 2_048;
 
@@ -131,6 +131,7 @@ public final class TradingStateSnapshotCodec {
                 writer.longValue(bracket.maxLeveragePpm());
                 writer.longValue(bracket.initialMarginRatePpm());
                 writer.longValue(bracket.maintenanceMarginRatePpm());
+                writer.longValue(bracket.optionMarginFactorPpm());
             });
         });
         writer.intValue(state.riskState().markPrices().size());
@@ -138,6 +139,8 @@ public final class TradingStateSnapshotCodec {
             writer.text(mark.symbol());
             writer.longValue(mark.instrumentVersion());
             writer.longValue(mark.markPriceTicks());
+            writer.longValue(mark.indexPriceTicks());
+            writer.longValue(mark.forwardPriceTicks());
             writer.longValue(mark.priceSequence());
             writer.longValue(mark.generatedAtEpochMillis());
         });
@@ -413,7 +416,8 @@ public final class TradingStateSnapshotCodec {
                         reader.positiveLong("risk bracket cap"),
                         reader.positiveLong("risk bracket max leverage"),
                         reader.positiveLong("risk bracket initial margin"),
-                        reader.positiveLong("risk bracket maintenance margin")));
+                        reader.positiveLong("risk bracket maintenance margin"),
+                        reader.positiveLong("option margin factor")));
             }
             CoreInstrumentState instrument = new CoreInstrumentState(symbol, instrumentVersion,
                     decodedType, baseAsset, quoteAsset, settleAsset, multiplier, priceTick, settleScale,
@@ -429,6 +433,7 @@ public final class TradingStateSnapshotCodec {
             String symbol = reader.text();
             CoreMarkPriceState mark = new CoreMarkPriceState(symbol,
                     reader.positiveLong("mark instrument version"), reader.positiveLong("mark price"),
+                    reader.nonNegativeLong("mark index price"), reader.nonNegativeLong("mark forward price"),
                     reader.positiveLong("price sequence"), reader.positiveLong("mark generated time"));
             putUnique(marks, symbol, mark);
         }

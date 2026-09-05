@@ -37,6 +37,8 @@ public final class CoreOrderDecisionResolver {
         MarkPriceRuntime mark = spotLimit ? null : runtime.markPrice(preparedSymbolId);
         if (!spotLimit) requireFreshMark(mark, instrument, clusterTimestamp);
         long markPriceTicks = spotLimit ? intent.limitPriceTicks() : mark.markPriceTicks();
+        long indexPriceTicks = spotLimit ? 0 : mark.indexPriceTicks();
+        long forwardPriceTicks = spotLimit ? 0 : mark.forwardPriceTicks();
         long markPriceSequence = spotLimit ? 0 : mark.priceSequence();
         long matchingPriceTicks = intent.orderType() == CoreOrderType.LIMIT
                 ? intent.limitPriceTicks() : protectedPrice(intent.side(), markPriceTicks);
@@ -49,7 +51,7 @@ public final class CoreOrderDecisionResolver {
                 : intent.side() == CoreOrderSide.BUY ? instrument.quoteAsset() : instrument.baseAsset();
         CoreFeeRate fee = runtime.resolveFee(userId, instrument.symbol(), clusterTimestamp, instrument);
         return new ResolvedPlaceOrder(intent, instrument, preparedSymbolId, matchingPriceTicks, reservationPriceTicks,
-                markPriceTicks, markPriceSequence, reservationKind, reservationAsset,
+                markPriceTicks, indexPriceTicks, forwardPriceTicks, markPriceSequence, reservationKind, reservationAsset,
                 fee.makerFeeRatePpm(), fee.takerFeeRatePpm(), fee.policyVersion());
     }
 
@@ -69,6 +71,8 @@ public final class CoreOrderDecisionResolver {
             throw new CoreStateRejectedException("MARK_PRICE_MISSING", "current instrument mark price is required");
         }
         long markPriceTicks = spotLimit ? intent.limitPriceTicks() : mark.markPriceTicks();
+        long indexPriceTicks = spotLimit ? 0 : mark.indexPriceTicks();
+        long forwardPriceTicks = spotLimit ? 0 : mark.forwardPriceTicks();
         long markPriceSequence = spotLimit ? 0 : mark.priceSequence();
         long matchingPriceTicks = intent.orderType() == CoreOrderType.LIMIT
                 ? intent.limitPriceTicks() : protectedPrice(intent.side(), markPriceTicks);
@@ -80,7 +84,7 @@ public final class CoreOrderDecisionResolver {
                 ? instrument.settleAsset()
                 : intent.side() == CoreOrderSide.BUY ? instrument.quoteAsset() : instrument.baseAsset();
         return new ResolvedPlaceOrder(intent, instrument, -1, matchingPriceTicks, reservationPriceTicks,
-                markPriceTicks, markPriceSequence, reservationKind, reservationAsset,
+                markPriceTicks, indexPriceTicks, forwardPriceTicks, markPriceSequence, reservationKind, reservationAsset,
                 instrument.makerFeeRatePpm(), instrument.takerFeeRatePpm(), 0);
     }
 
@@ -105,6 +109,9 @@ public final class CoreOrderDecisionResolver {
     private static long reservationPrice(PlaceOrderCommand intent, CoreInstrumentState instrument,
                                          long markPriceTicks, long matchingPriceTicks) {
         if (instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT) {
+            return matchingPriceTicks;
+        }
+        if (instrument.contractType().isOption()) {
             return matchingPriceTicks;
         }
         long lower = boundedMark(markPriceTicks, 1_000_000L - MARKET_MAX_SLIPPAGE_PPM, false);

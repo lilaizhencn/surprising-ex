@@ -80,7 +80,7 @@ class LatestMarkPriceCacheTest {
     private MarkPriceEvent event(ProductLine productLine, long sequence, Instant eventTime, PriceStatus status) {
         BigDecimal price = new BigDecimal("59001.00");
         return new MarkPriceEvent(productLine, "BTC-USDT", 7L, 5_900_100L, 59_001L,
-                price, price, price, price, price, price, price, BigDecimal.ZERO,
+                price, price, null, price, price, price, price, price, BigDecimal.ZERO,
                 eventTime.plusSeconds(3600), 3600L, BigDecimal.ZERO, 60L, price, price,
                 sequence, status, eventTime, eventTime);
     }

@@ -490,7 +490,9 @@ class TradingCoreReducerTest {
         TradingCoreState state = CoreStateTestFixtures.withInstrument(reducer, productLine);
         if (productLine.isDerivative()) {
             state = reducer.applyMarkPrice(state,
-                    new ApplyMarkPriceCommand("BTC-USDT", 1, 10, 1, 1));
+                    productLine == ProductLine.OPTION
+                            ? new ApplyMarkPriceCommand("BTC-USDT", 1, 10, 100, 100, 1, 1)
+                            : new ApplyMarkPriceCommand("BTC-USDT", 1, 10, 1, 1));
         }
         return reducer.adjustBalance(state, 101, new BalanceAdjustmentCommand(asset, units));
     }

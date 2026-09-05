@@ -26,7 +26,7 @@ class TradingStateSnapshotCodecTest {
                                 "BTC-OPTION", "BTC", "USDT", "USDT", 4)), 7,
                 new BalanceAdjustmentCommand("USDT", 50_000));
         state = reducer.applyMarkPrice(state,
-                new ApplyMarkPriceCommand("BTC-OPTION", 4, 500, 1, 1_000));
+                new ApplyMarkPriceCommand("BTC-OPTION", 4, 500, 1_000, 1_000, 1, 1_000));
         state = reducer.placeOrder(state, 7, new PlaceOrderCommand(71, "BTC-OPTION", 4, CoreOrderSide.BUY, 500, 2, false, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTX, true, "option-client-71"));
 
         TradingCoreState restored = TradingStateSnapshotCodec.decode(

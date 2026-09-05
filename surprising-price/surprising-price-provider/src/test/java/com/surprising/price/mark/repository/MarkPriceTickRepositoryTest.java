@@ -86,7 +86,7 @@ class MarkPriceTickRepositoryTest {
         Instant now = Instant.parse("2026-07-17T00:00:00Z");
         return new MarkPriceEvent(ProductLine.LINEAR_PERPETUAL, "BTC-USDT", 7L,
                 5_900_000_000_000L, 5_900_000L, new BigDecimal("59000.00"),
-                new BigDecimal("59000.00"), new BigDecimal("59000.00"),
+                new BigDecimal("59000.00"), null, new BigDecimal("59000.00"),
                 new BigDecimal("59000.00"), new BigDecimal("59000.00"),
                 new BigDecimal("58999.00"), new BigDecimal("59001.00"), BigDecimal.ZERO,
                 now.plusSeconds(3600), 3600L, BigDecimal.ZERO, 60L,

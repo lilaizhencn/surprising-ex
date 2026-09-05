@@ -176,6 +176,10 @@ public class InstrumentValidator {
             requirePositive("risk bracket maxLeveragePpm", bracket.maxLeveragePpm());
             requirePositive("risk bracket initialMarginRatePpm", bracket.initialMarginRatePpm());
             requirePositive("risk bracket maintenanceMarginRatePpm", bracket.maintenanceMarginRatePpm());
+            requirePositive("risk bracket optionMarginFactorPpm", bracket.optionMarginFactorPpm());
+            if (bracket.optionMarginFactorPpm() > 10_000_000L) {
+                throw new IllegalArgumentException("risk bracket optionMarginFactorPpm exceeds limit");
+            }
             previousCap = bracket.notionalCapUnits();
         }
     }
