@@ -2848,3 +2848,20 @@
 - 当前候选紧邻重跑为`56,879.114 terminal business ops/s`，三个样本`61,475.373/53,499.383/55,662.588`；Core messages=`5,722.260/s`、trades=`13,462.330/s`、Lane operations=`12,346.279/s`、Lane settlement=`8,904.538/s`。相对同机旧版平均提高约`1.18%`；Lane operations下降约`81.86%`、Lane settlement下降约`86.65%`。
 - 两版accepted/terminal business与Core均闭合，unfinished/rejected/error/timeout为0，内置资金、订单、持仓、强平终态和snapshot恢复通过。当前版没有出现此前怀疑的性能大幅回退，但每版仅3个且波动较大的样本，`+1.18%`不宣称统计显著；可确认的是新架构以基本持平吞吐显著减少Lane任务与往返，并修复了旧driver每阶段强制同步等待的计时边界。
 - artifact SHA-256：`pv109.json`=`8330e1b6c3160456728ca0ce1d1c45acce816401088ff2449f55d165c01d96a2`，`current.json`=`2e8fa6ce7baa68cfd602db876d6a0d50fbaff7bab3d80aeba58bccb58fb82366`。本轮为成对性能诊断，未执行GC/JFR或长稳，不升级为75k正式吞吐验收。
+
+### 2026-09-05 10:11:30 +08:00 — `PV-20260905-256-126` — `采集前锁定（重启后PV-109与当前版成对重跑）`
+
+#### 采集前锁定
+
+- 用户完成整机重启后，重新成对运行PV-109提交`d4e0a4c8`与当前提交`872293cb`。顺序仍为旧版先、当前版后；两个版本分别使用自身提交内benchmark driver，比较完整版本行为，并明确保留driver计时边界差异。
+- 两边固定同一命令口径：`LinearPerpetualCoreBenchmark.liquidationWithTrading`，LINEAR_PERPETUAL、matcher=1、4 Account Lane、1,000 users、256 symbols、20 items/batch、1 HFT round、32 lifecycle symbols/run、严格且仅256 in-flight；8GiB ZGC、AlwaysPreTouch、DisableExplicitGC，`fork=1,warmup=3x3s,measurement=3x5s,threads=1`。报告terminal business ops/s、Core messages/s、trades/s、Lane operations/s及三个原始样本。
+- 有效性要求两边accepted/terminal business及Core闭合、unfinished/rejected/error/timeout为0、期末backlog为0，并通过各自内置资金、余额/冻结、订单、持仓、强平终态与snapshot恢复。采集前系统uptime约11分钟、free memory=`84%`、swap=`0`，XProtect启动扫描已结束，无JFR/JMH/java压测残留；若采集中出现明显同机干扰或swap增长则该轮无效。
+- 环境：Oracle GraalVM Java HotSpot25.0.1、Maven3.9.16、Intel i9-9880H 8物理16逻辑CPU、16GiB、macOS26.7 x86_64。旧版JAR SHA-256=`725f7e9f9871fb78030dee4fe6f8e7fd9a9116b79bb509b3804a25f02d378a98`，当前JAR SHA-256=`b0cfad0823b8b2bf0f8d35666e37d21ea97c4dd9f005c28353b4d190d7442df3`；artifact固定`target/qualification/20260905T021130Z-reboot-pv109-vs-current-256/`。
+- 两边shaded JAR均构建成功。不测试PostgreSQL、exporter、wallet、Kafka、API、WebSocket、market-data、外部Aeron Cluster及其他五产品线。采集开始后不修改代码、场景、参数或比较顺序。
+
+#### PV-126采集结果
+
+- 重启后PV-109提交`d4e0a4c8`重跑为`54,966.218 terminal business ops/s`，三个样本`61,933.189/50,326.584/52,638.881`；Core messages=`5,529.832/s`、trades=`13,009.575/s`、Lane operations=`66,566.198/s`、Lane settlement=`65,194.325/s`。旧版仍未复现历史`79,629.981/s`。
+- 当前提交`872293cb`紧邻重跑为`57,335.397 terminal business ops/s`，三个样本`60,732.249/54,430.956/56,842.987`；Core messages=`5,768.148/s`、trades=`13,570.329/s`、Lane operations=`12,451.213/s`、Lane settlement=`8,978.771/s`。相对同机旧版吞吐提高约`4.31%`，Lane operations下降约`81.29%`，Lane settlement下降约`86.23%`。
+- 两版accepted/terminal business及Core闭合，unfinished/rejected/error/timeout为0，资金、订单、持仓、强平终态和snapshot恢复通过。测试后free memory=`74%`、swap仍为`0`，无残留JMH/JFR/java压测进程，数据有效。结论：重启清除了swap和残留任务干扰，但79.6k历史绝对值仍不可复现；同一重启窗口内当前版没有性能回退，并以略高吞吐显著减少Lane任务。
+- artifact SHA-256：`pv109.json`=`0c33d1f17f0a30b74ddb2a517eb59dad69a9e5825908691f3d660a3ccbb56a5c`，`current.json`=`9458e5837cc5465256aeceba137b754a62c8098514f5e6324c8e0d9d233d6ccc`。本轮未执行GC/JFR或长稳，不能据此声明75k正式性能验收或生产容量。
