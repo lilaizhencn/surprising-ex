@@ -20,6 +20,8 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     private final LongObjectHashMap<LongHashSet> idsByUser = new LongObjectHashMap<>();
     private final Map<String, LongHashSet> idsBySymbol = new HashMap<>();
     private final LongObjectHashMap<CoreOrderState> ordersById = new LongObjectHashMap<>();
+    // Owner-only bounded query scratch; never sized to total book depth.
+    private long[] pageScratch;
     private final RuntimeOrderAdmission.AdmissionSummary admissionSummary =
             new RuntimeOrderAdmission.AdmissionSummary();
 
@@ -218,11 +220,13 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
         if (beforeOrderId < 0 || limit < 1 || limit > MAX_PAGE_SIZE) {
             throw new IllegalArgumentException("invalid active-order page");
         }
-        String normalizedSymbol = OrderReservation.normalizeSymbol(symbol);
+        String normalizedSymbol = symbol == null || symbol.isBlank() ? null : OrderReservation.normalizeSymbol(symbol);
         LongHashSet source;
+        LongIterator allOrders = null;
         LongHashSet filter = null;
         if (userId == 0 && (normalizedSymbol == null || normalizedSymbol.isBlank())) {
-            source = new LongHashSet(ordersById.keySet().toArray());
+            source = null;
+            allOrders = ordersById.keySet().longIterator();
         } else if (userId == 0) {
             source = idsBySymbol.get(normalizedSymbol);
         } else if (normalizedSymbol == null || normalizedSymbol.isBlank()) {
@@ -239,15 +243,41 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
                 filter = userIds;
             }
         }
-        if (source == null || source.isEmpty()) return new Page(List.of(), 0);
-        long[] descending = source.toArray();
-        java.util.Arrays.sort(descending);
-        List<Long> result = new ArrayList<>(limit);
-        long nextCursor = 0;
-        for (int index = descending.length - 1; index >= 0; index--) {
-            long orderId = descending[index];
+        if (allOrders == null && (source == null || source.isEmpty())) return new Page(List.of(), 0);
+        if (pageScratch == null) pageScratch = new long[MAX_PAGE_SIZE + 1];
+        long[] descending = pageScratch;
+        int size = 0;
+        LongIterator iterator = allOrders == null ? source.longIterator() : allOrders;
+        while (iterator.hasNext()) {
+            long orderId = iterator.next();
             if (beforeOrderId != 0 && orderId >= beforeOrderId
                     || filter != null && !filter.contains(orderId)) continue;
+            if (size < limit + 1) {
+                int child = size++;
+                while (child > 0) {
+                    int parent = (child - 1) >>> 1;
+                    if (descending[parent] <= orderId) break;
+                    descending[child] = descending[parent];
+                    child = parent;
+                }
+                descending[child] = orderId;
+            } else if (orderId > descending[0]) {
+                int parent = 0;
+                while (parent * 2 + 1 < size) {
+                    int child = parent * 2 + 1;
+                    if (child + 1 < size && descending[child + 1] < descending[child]) child++;
+                    if (descending[child] >= orderId) break;
+                    descending[parent] = descending[child];
+                    parent = child;
+                }
+                descending[parent] = orderId;
+            }
+        }
+        java.util.Arrays.sort(descending, 0, size);
+        List<Long> result = new ArrayList<>(limit);
+        long nextCursor = 0;
+        for (int index = size - 1; index >= 0; index--) {
+            long orderId = descending[index];
             if (result.size() < limit) result.add(orderId);
             else { nextCursor = result.getLast(); break; }
         }

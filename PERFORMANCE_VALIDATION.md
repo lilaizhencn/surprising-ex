@@ -3311,3 +3311,14 @@
 - Safepoint、VM operation、JIT/deoptimization、file/socket I/O和异常聚合保存在各产品线view文件；异常以MethodHandle/反射和jnr初始化为主，没有基准业务失败。采样还包含类加载/JMH控制通信，未完成业务owner同步I/O逐栈排除，故不宣称主链路I/O门禁完成。
 - 系统采集窗口 CPU_Speed_Limit 均100、Pages throttled=0；Swapins832→832、Swapouts2431→2431、Pageouts48287→48287。满足本轮短诊断系统门禁，但没有长稳、多轮GC后live set/native slope、真实API/WebSocket与三节点HA证据。
 - 结论：这批分页、资金费基准及到期/配置保护修复通过已测功能/恢复场景，性能仅部分诊断；不宣称整体交易性能优化或资金全场景验收完成。全仓净额/保险不足处置仍需业务规则确认，随后才进行剩余性能优化。
+
+### PV-143 偿付修复与索引/币本位计算：采集前锁定（2026-09-06 00:52 +08:00）
+
+- 对照 commit：不适用（仅验证当前 master）。被测 commit 为本条预注册提交后的 master，在启动脚本记录 commit/JAR SHA；采集不修改代码/标准。仅诊断，不以此前版本或100k为目标，不声称完整容量验收。
+- 改动：全仓同symbol净额、逐仓偿付隔离、本页保险不足不应用账户变更、补资恢复；协议schema5/snapshot27；账户consumer失败不误确认和降序游标；PositionUserIndex成员不变时跳过重建、用户后继分页；ActiveOrderIndex有界heap分页；币本位精确long快路径。Lane独立准备/应用可以并行，仍有owner阶段等待。
+- 环境锁定：Intel i9-9880H 2.30GHz、16逻辑CPU/16GiB、macOS26.7 x86_64；Oracle GraalVM25.0.1 HotSpot、Maven3.9.16；G1，-Xms768m -Xmx768m；--add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED。每次一产品线，不并跑Maven/其他压测。
+- A场景：SettlementSolvencyBenchmark.pauseRefillResume，两交割及OPTION，各CROSS/ISOLATED。4 Account Lane、1 matcher/1 risk engine、1 symbol、maker999+256用户、固定maxInFlight256，无外部连接。同symbol分页有因果依赖，实际串行页面。maker初始10^9单位、其他用户成交后提走可用余额，仅留仓位保证金；entry100、结算1000。inverse multiplier/scale100，其他1，OPTION CALL strike100。每invocation一次不足暂停、一次补资、17页（16users/page）完成，19 terminal business ops/Core messages；测量fills0，fixture先成交256笔、无手续费。最终maker收益、亏方零现金/平仓、保险/clearing/进度清零、恢复hash一致；invocation恢复/校验不在计时内，GC/JFR包含这些成本，不冒充纯热路径分配。
+- B场景：ProductRulesRefactorBenchmark.committedProductWorkload，六产品线分别运行；accountLanes4、activeUsers256、symbols256、maxInFlight256、hftRounds8、hftBatchSize20；1 matcher/1 risk engine。fixture与真实业务为现有SpotMixedWorkload/DerivativeMixedWorkload：持续maker/taker成交、每symbol/round20maker挂单和20撤单、双向成交/风险mark更新，永续加funding。每invocation完整业务计数按aux accepted/terminal展开，不把invocation/s当业务ops/s。maker资金10^10，衍生品mark100；现货maker各base10^8/quote10^10、retail base10^4/quote10^6；零初始仓位。fixture做市者参与每轮，无独立外部做市服务；无API连接。逐用户资金、冻结、终态订单/持仓以及snapshot恢复在teardown核对。
+- 两场景均closed-loop，未修正coordinated omission，无固定到达率；JMH1thread/1fork，warmup2×2s、measurement3×2s、冷却2s。各跑无profiler主分数，另跑-prof gc + profile.jfc JFR、NMT summary/退出统计；带profiler仅归因，不能代替主分数。主分数/误差/CI/完整参数保存JSON。
+- 预定门禁：所有业务断言通过、accepted=terminal、unfinished0、余额资金等式成立、恢复一致，诊断分数有限且>0；不设容量承诺。JFR DataLoss>0、swap增长、CPU_Speed_Limit<100或OOM/资金不变量失败判该轮性能无效，不放宽条件补跑。缺少类型三段尾延迟/native池/长稳/真实Aeron网络证据，最多部分验证。
+- 原始路径：surprising-aeron-core/surprising-aeron-benchmarks/target/pv143/；脚本run.sh、main/gc JSON/log、原始JFR、summary及CPU/分配/GC/NMT/锁/VM/JIT/I/O视图、系统前后和逐秒thermal、输入输出SHA均保留。不运行PG/exporter/wallet。

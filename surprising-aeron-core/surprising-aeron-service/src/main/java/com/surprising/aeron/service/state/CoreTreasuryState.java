@@ -370,7 +370,13 @@ public record CoreTreasuryState(
     public record LifecycleProgress(long settlementId, long instrumentVersion, long settlementPriceTicks,
                                    long optionCashUnitsPerContract, boolean ordersComplete,
                                    int accountLaneId, long nextCursorOrderId,
-                                   long nextCursorUserId, UUID commandId) {
+                                   long nextCursorUserId, UUID commandId, long requiredInsuranceUnits) {
+        public LifecycleProgress(long settlementId, long instrumentVersion, long settlementPriceTicks,
+                                 long optionCashUnitsPerContract, boolean ordersComplete, int accountLaneId,
+                                 long nextCursorOrderId, long nextCursorUserId, UUID commandId) {
+            this(settlementId, instrumentVersion, settlementPriceTicks, optionCashUnitsPerContract, ordersComplete,
+                    accountLaneId, nextCursorOrderId, nextCursorUserId, commandId, 0);
+        }
         public LifecycleProgress(long settlementId, long instrumentVersion, long settlementPriceTicks,
                                  long optionCashUnitsPerContract, long nextCursorUserId, UUID commandId) {
             this(settlementId, instrumentVersion, settlementPriceTicks, optionCashUnitsPerContract,
@@ -379,6 +385,7 @@ public record CoreTreasuryState(
 
         public LifecycleProgress {
             if (settlementId <= 0 || instrumentVersion <= 0 || settlementPriceTicks < 0
+                    || requiredInsuranceUnits < 0 || requiredInsuranceUnits > 0 && !ordersComplete
                     || optionCashUnitsPerContract < 0 || accountLaneId < 0 || accountLaneId >= Long.SIZE
                     || nextCursorOrderId < 0 || nextCursorUserId < 0
                     || (!ordersComplete && nextCursorUserId != 0) || (ordersComplete && nextCursorOrderId != 0)

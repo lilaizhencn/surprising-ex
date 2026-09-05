@@ -267,8 +267,13 @@ class CoreDeliveryOptionFinancialMatrixTest {
         assertThat(beforeCrossCollateral).isEqualTo(180);
         long beforeTotal = total(state, "USDT");
 
-        TradingCoreState settled = reducer.settleInstrument(state,
-                new SettleInstrumentCommand(407, isolatedSymbol, 1, 100, 9_999));
+        var command = new SettleInstrumentCommand(407, isolatedSymbol, 1, 100, 9_999);
+        TradingCoreState paused = reducer.settleInstrument(state, command);
+        assertThat(paused.user(USER_ID).balances()).isEqualTo(beforeUser.balances());
+        assertThat(paused.user(USER_ID).positions()).isEqualTo(beforeUser.positions());
+        assertThat(paused.treasuryState().lifecycleProgress(isolatedSymbol).requiredInsuranceUnits()).isEqualTo(20);
+        state = reducer.adjustInsuranceFund(paused, new com.surprising.aeron.protocol.AdjustInsuranceFundCommand("USDT", 20));
+        TradingCoreState settled = reducer.settleInstrument(state, command);
 
         CoreUserState afterUser = settled.user(USER_ID);
         AssetBalance afterBalance = afterUser.balances().get("USDT");
@@ -282,8 +287,32 @@ class CoreDeliveryOptionFinancialMatrixTest {
         assertThat(afterUser.positions().get(isolatedSymbol).signedQuantitySteps()).isZero();
         assertThat(afterUser.positions().get(isolatedSymbol).realizedPnlUnits()).isEqualTo(-40);
         assertThat(settled.treasuryState().insuranceBalances()).doesNotContainKey("USDT");
-        assertThat(settled.treasuryState().clearingPnlBalances()).containsEntry("USDT", 20L);
-        assertThat(total(settled, "USDT")).isEqualTo(beforeTotal);
+        assertThat(settled.treasuryState().clearingPnlBalances()).containsEntry("USDT", 40L);
+        assertThat(total(settled, "USDT")).isEqualTo(beforeTotal + 20);
+    }
+
+    @Test
+    void netsCrossHedgePnlBeforeTestingSolvency() {
+        for (long direction : new long[]{1, -1}) {
+            Variant variant = VARIANTS.getFirst();
+            TradingCoreState state = fundedState(variant, USER_ID, 20);
+            String symbol = variant.symbol();
+            var longPosition = new CorePositionState(symbol, "USDT", CoreMarginMode.CROSS,
+                    CorePositionSide.LONG, 1, 1, direction > 0 ? 100 : 300, direction > 0 ? 100 : 300, 0, 10);
+            var shortPosition = new CorePositionState(symbol, "USDT", CoreMarginMode.CROSS,
+                    CorePositionSide.SHORT, 1, -1, direction > 0 ? 100 : 300, direction > 0 ? 100 : 300, 0, 10);
+            var user = new CoreUserState(state.productLine(), USER_ID, 2,
+                    Map.of("USDT", new AssetBalance("USDT", 0, 20)), Map.of(),
+                    Map.of(longPosition.key(), longPosition, shortPosition.key(), shortPosition),
+                    com.surprising.aeron.protocol.CorePositionMode.HEDGE);
+            state = new TradingCoreState(state.productLine(), 3, Map.of(USER_ID, user), Map.of(),
+                    state.instruments(), state.riskState(), state.treasuryState());
+            var settled = reducer.settleInstrument(state, new SettleInstrumentCommand(900, symbol, 1, 200, 0));
+            assertThat(settled.user(USER_ID).totalUnits("USDT")).isEqualTo(20);
+            assertThat(settled.user(USER_ID).balances().get("USDT").lockedUnits()).isZero();
+            assertThat(settled.treasuryState().lifecycleSettlement(symbol)).isEqualTo(900);
+            assertThat(settled.treasuryState().clearingPnlBalances()).isEmpty();
+        }
     }
 
     @Test

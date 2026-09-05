@@ -2846,7 +2846,7 @@ public final class CoreProbeState implements AutoCloseable {
 
     private List<Long> settlementUsers(String symbol, long cursorUserId, int maxUsers) {
         List<Long> selected = new ArrayList<>(Math.min(maxUsers, 64));
-        for (Long userId : positionUserIndex.users(symbol)) {
+        for (Long userId : positionUserIndex.usersAfter(symbol, cursorUserId)) {
             if (userId == null || userId <= cursorUserId) continue;
             if (selected.size() == maxUsers) break;
             selected.add(userId);
@@ -5401,7 +5401,7 @@ public final class CoreProbeState implements AutoCloseable {
             }
             case APPLY_FUNDING -> {
                 var command = TradingCommandCodec.decodeApplyFunding(message.payloadUnsafe());
-                Iterable<Long> indexedUserIds = positionUserIndex.users(command.symbol());
+                Iterable<Long> indexedUserIds = positionUserIndex.usersAfter(command.symbol(), command.cursorUserId());
                 var result = RuntimePerpetualFundingProcessor.applyRuntime(command, indexedUserIds,
                         message.header().commandId(), runtimePlaceOrderState, runtimePlaceOrderIdentities);
                 if (result.state() != runtimePlaceOrderState) {
@@ -6127,7 +6127,7 @@ public final class CoreProbeState implements AutoCloseable {
                                          UUID commandId) {
         long beforeRevision = runtimePlaceOrderState.revision();
         commandSettlementProgress = RuntimeSettlementProcessor.applyRuntime(command,
-                positionUserIndex.users(command.symbol()), commandId, activeOrderIndex,
+                positionUserIndex.usersAfter(command.symbol(), command.cursorUserId()), commandId, activeOrderIndex,
                 runtimePlaceOrderState, runtimePlaceOrderIdentities);
         if (runtimePlaceOrderState.revision() != beforeRevision) refreshSnapshotProjection();
     }

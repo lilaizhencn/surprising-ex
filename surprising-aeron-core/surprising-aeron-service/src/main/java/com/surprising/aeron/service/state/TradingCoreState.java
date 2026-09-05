@@ -457,6 +457,7 @@ public record TradingCoreState(
         for (Map.Entry<String, CoreTreasuryState.LifecycleProgress> entry
                 : treasuryState.lifecycleProgress().entrySet()) {
             CoreTreasuryState.LifecycleProgress progress = entry.getValue();
+            hash = CoreStateHash.mix(hash, progress.requiredInsuranceUnits());
             hash = CoreStateHash.mix(hash, entry.getKey());
             hash = CoreStateHash.mix(hash, progress.settlementId());
             hash = CoreStateHash.mix(hash, progress.instrumentVersion());

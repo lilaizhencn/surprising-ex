@@ -24,6 +24,9 @@ public final class PerpetualContractMath {
         validatePositionInputs(signedQuantitySteps, markPriceTicks, markPriceTicks, notionalMultiplierUnits,
                 priceTickUnits, settleScaleUnits);
         if (contractType.isInverse()) {
+            long numeratorLong = positiveProduct(positiveProduct(Math.abs(signedQuantitySteps), notionalMultiplierUnits), settleScaleUnits);
+            long denominatorLong = positiveProduct(markPriceTicks, priceTickUnits);
+            if (numeratorLong >= 0 && denominatorLong > 0) return roundedPositive(numeratorLong, denominatorLong);
             BigInteger quantity = big(signedQuantitySteps).abs();
             BigInteger numerator = quantity.multiply(big(notionalMultiplierUnits)).multiply(big(settleScaleUnits));
             BigInteger denominator = big(markPriceTicks).multiply(big(priceTickUnits));
@@ -49,6 +52,9 @@ public final class PerpetualContractMath {
         requirePositive(priceTickUnits, "priceTickUnits");
         requirePositive(settleScaleUnits, "settleScaleUnits");
         if (contractType.isInverse()) {
+            long numeratorLong = positiveProduct(notionalMultiplierUnits, settleScaleUnits);
+            long denominatorLong = positiveProduct(markPriceTicks, priceTickUnits);
+            if (numeratorLong >= 0 && denominatorLong > 0) return roundedPositive(numeratorLong, denominatorLong);
             BigInteger numerator = big(notionalMultiplierUnits).multiply(big(settleScaleUnits));
             BigInteger denominator = big(markPriceTicks).multiply(big(priceTickUnits));
             return toLongRounded(numerator, denominator);
@@ -71,7 +77,15 @@ public final class PerpetualContractMath {
         validatePositionInputs(signedQuantitySteps, entryPriceTicks, markPriceTicks, notionalMultiplierUnits,
                 priceTickUnits, settleScaleUnits);
         long priceDiff = Math.subtractExact(markPriceTicks, entryPriceTicks);
+        if (priceDiff == 0 || signedQuantitySteps == 0) return 0;
         if (contractType.isInverse()) {
+            long numeratorLong = positiveProduct(positiveProduct(positiveProduct(Math.abs(signedQuantitySteps),
+                    notionalMultiplierUnits), settleScaleUnits), Math.abs(priceDiff));
+            long denominatorLong = positiveProduct(positiveProduct(entryPriceTicks, markPriceTicks), priceTickUnits);
+            if (numeratorLong >= 0 && denominatorLong > 0) {
+                long rounded = roundedPositive(numeratorLong, denominatorLong);
+                return (signedQuantitySteps < 0) == (priceDiff < 0) ? rounded : -rounded;
+            }
             BigInteger inversePriceDiff = big(priceDiff);
             BigInteger numerator = big(signedQuantitySteps)
                     .multiply(big(notionalMultiplierUnits))
@@ -127,6 +141,10 @@ public final class PerpetualContractMath {
                 priceTickUnits, settleScaleUnits);
         requirePositive(marginRatePpm, "marginRatePpm");
         if (contractType.isInverse()) {
+            long numeratorLong = positiveProduct(positiveProduct(positiveProduct(Math.abs(signedQuantitySteps),
+                    notionalMultiplierUnits), settleScaleUnits), marginRatePpm);
+            long denominatorLong = positiveProduct(positiveProduct(markPriceTicks, priceTickUnits), 1_000_000L);
+            if (numeratorLong >= 0 && denominatorLong > 0) return divideCeiling(numeratorLong, denominatorLong);
             BigInteger quantity = big(signedQuantitySteps).abs();
             BigInteger numerator = quantity
                     .multiply(big(notionalMultiplierUnits))
@@ -170,6 +188,18 @@ public final class PerpetualContractMath {
         requirePositive(notionalMultiplierUnits, "notionalMultiplierUnits");
         requirePositive(priceTickUnits, "priceTickUnits");
         requirePositive(settleScaleUnits, "settleScaleUnits");
+    }
+
+    // Negative sentinel selects the exact wide-integer path; ordinary overflow creates no exception.
+    private static long positiveProduct(long left, long right) {
+        if (left < 0 || right < 0 || right != 0 && left > Long.MAX_VALUE / right) return -1;
+        return left * right;
+    }
+
+    private static long roundedPositive(long numerator, long denominator) {
+        long quotient = numerator / denominator;
+        long remainder = numerator % denominator;
+        return remainder >= denominator - remainder ? Math.incrementExact(quotient) : quotient;
     }
 
     private static long divideCeiling(BigInteger numerator, BigInteger denominator) {

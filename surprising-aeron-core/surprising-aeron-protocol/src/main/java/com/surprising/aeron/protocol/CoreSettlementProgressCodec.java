@@ -5,7 +5,7 @@ import java.nio.ByteOrder;
 
 public final class CoreSettlementProgressCodec {
 
-    private static final int LENGTH = Long.BYTES + Byte.BYTES * 2 + Long.BYTES * 2 + Integer.BYTES * 2;
+    private static final int LENGTH = Long.BYTES * 4 + Byte.BYTES * 2 + Integer.BYTES * 2;
 
     private CoreSettlementProgressCodec() {
     }
@@ -19,6 +19,7 @@ public final class CoreSettlementProgressCodec {
                 .putLong(view.nextCursorUserId())
                 .putInt(view.processedOrders())
                 .putInt(view.processedUsers())
+                .putLong(view.requiredInsuranceUnits())
                 .array();
     }
 
@@ -38,7 +39,7 @@ public final class CoreSettlementProgressCodec {
         }
         try {
             return new CoreSettlementProgressView(settlementId, complete == 1, ordersComplete == 1,
-                    buffer.getLong(), buffer.getLong(), buffer.getInt(), buffer.getInt());
+                    buffer.getLong(), buffer.getLong(), buffer.getInt(), buffer.getInt(), buffer.getLong());
         } catch (IllegalArgumentException exception) {
             throw new ProtocolException(exception.getMessage());
         }

@@ -104,5 +104,10 @@ class ActiveOrderIndexTest {
         assertThat(index.sortedIdsDescending("BTC-USDT")).containsExactly(9L, 8L, 7L);
         assertThat(index.sortedIdsDescending(11L)).containsExactly(9L, 7L);
         assertThat(index.sortedIdsDescending(999L)).isEmpty();
+        assertThat(index.page(0, null, 0, 1).orderIds()).containsExactly(9L);
+        assertThat(index.page(0, null, 9, 1).orderIds()).containsExactly(8L);
+        assertThat(index.page(11, "BTC-USDT", 0, 1).orderIds()).containsExactly(9L);
+        assertThat(index.page(11, "BTC-USDT", 9, 1).orderIds()).containsExactly(7L);
+        assertThat(index.page(11, "BTC-USDT", 7, 1).orderIds()).isEmpty();
     }
 }

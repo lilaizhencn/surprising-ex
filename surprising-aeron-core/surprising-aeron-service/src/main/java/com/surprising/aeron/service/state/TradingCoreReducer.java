@@ -1504,132 +1504,17 @@ public final class TradingCoreReducer {
                                                               Iterable<Long> indexedUserIds,
                                                               UUID chunkCommandId,
                                                               ActiveOrderIndex activeOrderIndex) {
-        CoreInstrumentState instrument = requireLifecycleInstrument(state, command.symbol(),
-                command.instrumentVersion());
-        ProductTradingRules kernel = ProductTradingRulesRegistry.forInstrument(instrument);
-        long previousSettlement = state.treasuryState().lifecycleSettlements()
-                .getOrDefault(instrument.symbol(), 0L);
-        if (command.settlementId() < previousSettlement) {
-            throw new CoreStateRejectedException("STALE_SETTLEMENT_ID", "lifecycle settlement id must increase");
+        // Simulation uses the same financial kernel as authoritative settlement.
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        TradingRuntimeState runtime = RuntimeStateProjector.project(state, identities);
+        try {
+            var progress = RuntimeSettlementProcessor.apply(state, command, indexedUserIds, chunkCommandId,
+                    activeOrderIndex, runtime, identities);
+            if (runtime.revision() == state.revision()) return new SettlementApplication(state, progress);
+            return new SettlementApplication(RuntimeStateMaterializer.materialize(runtime, identities), progress);
+        } finally {
+            runtime.close();
         }
-        if (command.settlementId() == previousSettlement) {
-            return new SettlementApplication(state, new com.surprising.aeron.protocol.CoreSettlementProgressView(
-                    command.settlementId(), true, true, 0, 0, 0, 0));
-        }
-        switch (kernel.productLine()) {
-            case LINEAR_DELIVERY, INVERSE_DELIVERY, OPTION -> { }
-            case SPOT, LINEAR_PERPETUAL, INVERSE_PERPETUAL -> throw new CoreStateRejectedException(
-                    "PRODUCT_LINE_UNSUPPORTED", "instrument settlement requires delivery or option product");
-        }
-        if (command.settlementPriceTicks() <= 0) {
-            throw new CoreStateRejectedException("INVALID_SETTLEMENT_PRICE", "delivery price must be positive");
-        }
-        CoreTreasuryState.LifecycleProgress previousProgress = state.treasuryState()
-                .lifecycleProgress(instrument.symbol());
-        boolean chunked = indexedUserIds != null && chunkCommandId != null;
-        if (chunked) {
-            if (previousProgress == null
-                    && (command.cursorUserId() != 0 || command.cursorOrderId() != 0)) {
-                throw new CoreStateRejectedException("INVALID_COMMAND", "settlement cursor must start at zero");
-            }
-            if (previousProgress != null && (previousProgress.settlementId() != command.settlementId()
-                    || previousProgress.instrumentVersion() != command.instrumentVersion()
-                    || previousProgress.settlementPriceTicks() != command.settlementPriceTicks()
-                    || previousProgress.optionCashUnitsPerContract() != command.optionCashUnitsPerContract()
-                    || previousProgress.ordersComplete() != (command.cursorOrderId() == 0)
-                    || previousProgress.nextCursorOrderId() != command.cursorOrderId()
-                    || previousProgress.nextCursorUserId() != command.cursorUserId())) {
-                throw new CoreStateRejectedException("INVALID_COMMAND", "settlement cursor does not match progress");
-            }
-        }
-        boolean ordersComplete = !chunked || previousProgress != null && previousProgress.ordersComplete();
-        TradingCoreState canceled = state;
-        List<CoreOrderState> selectedOrders = List.of();
-        boolean moreOrders = false;
-        if (!chunked) {
-            selectedOrders = activeOrderIndex == null
-                    ? state.orders().values().stream()
-                    .filter(order -> order.status() == CoreOrderStatus.OPEN && order.symbol().equals(instrument.symbol()))
-                    .toList()
-                    : activeOrderIndex.ids(instrument.symbol()).stream().map(state::order)
-                    .filter(java.util.Objects::nonNull).toList();
-            canceled = cancelOrders(state, selectedOrders);
-            ordersComplete = true;
-        } else if (!ordersComplete) {
-            LifecycleOrderChunk orderChunk = selectLifecycleOrders(state, activeOrderIndex, instrument.symbol(),
-                    command.cursorOrderId(), command.maxOrders());
-            selectedOrders = orderChunk.orders();
-            moreOrders = orderChunk.more();
-            canceled = cancelOrders(state, selectedOrders);
-            if (moreOrders) {
-                CoreTreasuryState nextTreasury = canceled.treasuryState().withLifecycleProgress(instrument.symbol(),
-                        new CoreTreasuryState.LifecycleProgress(command.settlementId(), command.instrumentVersion(),
-                                command.settlementPriceTicks(), command.optionCashUnitsPerContract(), false,
-                                selectedOrders.getLast().orderId(), 0, chunkCommandId));
-                TradingCoreState next = withTreasury(canceled, nextTreasury);
-                return new SettlementApplication(next, new com.surprising.aeron.protocol.CoreSettlementProgressView(
-                        command.settlementId(), false, false, selectedOrders.getLast().orderId(), 0,
-                        selectedOrders.size(), 0));
-            }
-            ordersComplete = true;
-        }
-        Map<Long, CoreUserState> users = StateMapSupport.delta(canceled.users());
-        CoreTreasuryState treasury = canceled.treasuryState();
-        java.util.ArrayList<Long> selectedUserIds = new java.util.ArrayList<>();
-        boolean moreUsers = false;
-        if (!chunked) {
-            if (indexedUserIds == null) canceled.users().keySet().forEach(selectedUserIds::add);
-            else indexedUserIds.forEach(selectedUserIds::add);
-        } else {
-            for (Long userId : indexedUserIds) {
-                if (userId == null || userId <= command.cursorUserId()) continue;
-                if (selectedUserIds.size() < command.maxUsers()) selectedUserIds.add(userId);
-                else {
-                    moreUsers = true;
-                    break;
-                }
-            }
-        }
-        for (Long userId : selectedUserIds) {
-            CoreUserState user = canceled.user(userId);
-            if (user == null) continue;
-            List<CorePositionState> settling = positionsForSymbol(user, instrument.symbol());
-            if (settling.isEmpty()) continue;
-            AssetBalance balance = requireBalance(user, instrument.settleAsset());
-            Map<String, AssetBalance> balances = StateMapSupport.delta(user.balances());
-            Map<String, CorePositionState> positions = StateMapSupport.delta(user.positions());
-            for (CorePositionState position : settling) {
-                long cashDelta = kernel.lifecycleCashDeltaUnits(instrument, position.signedQuantitySteps(),
-                        position.entryPriceTicks(), command.settlementPriceTicks());
-                LiquidationCashResult cash = applyLiquidationCash(balance, position.marginMode(),
-                        position.positionMarginUnits(), cashDelta, 0);
-                balance = cash.balance();
-                treasury = treasury.adjustClearingPnl(instrument.settleAsset(),
-                        Math.negateExact(cash.appliedDelta()));
-                positions.put(position.key(), new CorePositionState(instrument.symbol(), instrument.settleAsset(),
-                        position.marginMode(), position.positionSide(), 0, 0, 0, 0,
-                        Math.addExact(position.realizedPnlUnits(), cashDelta), 0));
-            }
-            balances.put(instrument.settleAsset(), balance);
-            users.put(user.userId(), user.transition(Math.incrementExact(user.revision()),
-                    balances, user.reservations(), positions, user.positionMode()));
-        }
-        boolean complete = !chunked || !moreUsers;
-        long nextCursorUserId = complete ? 0 : selectedUserIds.getLast();
-        if (complete) {
-            treasury = treasury.recordLifecycle(instrument.symbol(), command.settlementId());
-        } else {
-            treasury = treasury.withLifecycleProgress(instrument.symbol(), new CoreTreasuryState.LifecycleProgress(
-                    command.settlementId(), command.instrumentVersion(), command.settlementPriceTicks(),
-                    command.optionCashUnitsPerContract(), true, 0, nextCursorUserId, chunkCommandId));
-        }
-        TradingCoreState next = new TradingCoreState(canceled.productLine(), Math.incrementExact(canceled.revision()), users,
-                canceled.orders(), canceled.instruments(), canceled.riskState(), treasury,
-                canceled.leverages(), canceled.algoOrders(), canceled.cancelAllAfterTimers(), canceled.clientOrderIndex(),
-                canceled.triggerOrders());
-        return new SettlementApplication(next, new com.surprising.aeron.protocol.CoreSettlementProgressView(
-                command.settlementId(), complete, true, 0, nextCursorUserId,
-                selectedOrders.size(), selectedUserIds.size()));
     }
 
     public TradingCoreState cancelLifecycleOrders(TradingCoreState state, Collection<CoreOrderState> orders) {

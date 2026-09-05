@@ -847,3 +847,28 @@ Topic、端口、磁盘、监控阈值和故障演练的精确清单待生产 Ru
 `RuntimeRiskQueryService` 与 `TradingCoreReducer.adlCandidates` 同时覆盖 U 本位、币本位交割和期权候选，并排除无盈利、结算资产不匹配和零持仓。组合保证金（PM）是另一套组合 Greeks/情景风险模型，不属于当前 non-PM 实现范围。
 
 规则依据：[OKX 期权保证金](https://www.okx.com/help/ii-option-margin)、[强平说明](https://www.okx.com/en-us/help/forced-liquidation-faq)、[ADL 机制](https://www.okx.com/help/iv-introduction-to-auto-deleveraging-adl)。回归用例位于 `CoreDeliveryOptionFinancialMatrixTest`，受影响场景基准为 `DerivativeRiskBoundaryBenchmark`；性能采集口径和结果统一追加至根目录 `PERFORMANCE_VALIDATION.md`。
+
+### 到期结算的偿付边界与续结
+
+`RuntimeSettlementProcessor` 在 Account Lane 先计算本页最终值：同用户、同到期 symbol 的全仓盈亏先净额，
+逐仓分别计算损失，不把逐仓亏损从用户其他可用资金扣除。Lane 提交计划的所有权仅限当前有界页面；
+owner 汇总保险需求、检查 Treasury 后，再由原 Lane 应用余额和归零仓位。独立 Lane 可并行准备/应用，
+但 owner 仍等待生命周期阶段完成，不能将其描述为全异步交易架构。
+
+保险不足时，本页不修改用户余额/仓位、不消耗部分保险，已完成的撤单与前页不回滚；未付款义务保留在
+原仓位和固定结算参数中。`requiredInsuranceUnits` 表示本页总保险需求，不是扣除现有保险后的差额。
+补资后按相同结算 ID、价格和游标续结；已经完成的结算不能重复赔付。此前成功页面与未结仓位间可能有
+暂存清算余额，必须连同仓位义务核对，不能只检查现金端判断结算完成。本方案是保守暂停续结，
+不是自动到期 ADL，也不代表已经实现 OKX 全部违约处置政策。
+
+`ExpiringContractSettlementFanoutService` 按 Core 持久化游标恢复，订单游标严格递减；保险不足、查询失败、
+拒绝或缺失响应均抛出异常，由既有生命周期 Kafka consumer 重试，不能确认成功丢失事件。
+业务重试生成新 command ID，避免命中之前暂停页的去重响应；资金幂等仍由结算 ID/游标保证。
+`SettlementSolvencyBenchmarkTest` 覆盖两交割和期权的全仓/逐仓、部分补资不扣款、暂停后恢复、足额续结、
+重复完成以及最终资金守恒。
+
+协议 schema 为 **5**，sectioned snapshot 为 **27**，进度查询/响应和快照均保存本页保险需求。
+相关 producer/client/service 需同版本部署；不支持旧协议或旧快照兼容回退。
+`PositionUserIndex` 仅在成员关系变化时维护索引，分页按 primitive Lane 数组查后继；
+`ActiveOrderIndex` 使用 owner 复用的 1025 个 long 缓冲选取页面候选，排序有界，仍需扫描候选集合。
+`PerpetualContractMath` 币本位采用无溢出的精确 long 快路径，溢出范围使用 BigInteger 精确计算，舍入规则不变。

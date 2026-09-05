@@ -3,6 +3,7 @@ package com.surprising.aeron.service.state;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.surprising.aeron.protocol.CorePositionMode;
+import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.product.api.ProductLine;
 import java.util.Map;
 import java.util.TreeMap;
@@ -71,6 +72,10 @@ class PositionUserIndexTest {
 
         assertThat(index.higherUser("BTC-USDT", 7)).isEqualTo(11L);
         assertThat(index.higherUser("BTC-USDT", 11)).isNull();
+        assertThat(index.usersAfter("BTC-USDT", 2)).containsExactly(7L, 11L);
+        index.apply(new RuntimePositionIndexValue(7, "BTC-USDT", "USDT", CorePositionSide.NET, 1),
+                new RuntimePositionIndexValue(7, "BTC-USDT", "USDT", CorePositionSide.NET, 9));
+        assertThat(index.usersAfter("BTC-USDT", 0)).containsExactly(2L, 7L, 11L);
         for (int laneId = 0; laneId < topology.accountLaneCount(); laneId++) {
             int expectedLane = laneId;
             long expected = state.users().keySet().stream()

@@ -9,6 +9,35 @@ import org.junit.jupiter.api.Test;
 class PerpetualContractMathTest {
 
     @Test
+    void inverseFastAndWidePathsMatchIndependentDecimalOracle() {
+        java.util.Random random = new java.util.Random(719_003);
+        for (int i = 0; i < 5000; i++) {
+            long q = (random.nextInt(100_000) + 1L) * (random.nextBoolean() ? 1 : -1);
+            long entry = random.nextInt(100_000) + 1L;
+            long mark = random.nextInt(100_000) + 1L;
+            long multiplier = i % 2 == 0 ? 100 : 1_000_000;
+            long scale = i % 2 == 0 ? 100 : 100_000_000;
+            long tick = random.nextInt(100) + 1L;
+            var quantity = java.math.BigDecimal.valueOf(q);
+            var coefficient = java.math.BigDecimal.valueOf(multiplier).multiply(java.math.BigDecimal.valueOf(scale));
+            var denominator = java.math.BigDecimal.valueOf(mark).multiply(java.math.BigDecimal.valueOf(tick));
+            long notional = quantity.abs().multiply(coefficient)
+                    .divide(denominator, 0, java.math.RoundingMode.HALF_UP).longValueExact();
+            long pnl = quantity.multiply(coefficient).multiply(java.math.BigDecimal.valueOf(mark - entry))
+                    .divide(denominator.multiply(java.math.BigDecimal.valueOf(entry)), 0, java.math.RoundingMode.HALF_UP)
+                    .longValueExact();
+            long margin = quantity.abs().multiply(coefficient).multiply(java.math.BigDecimal.valueOf(50_000))
+                    .divide(denominator.multiply(java.math.BigDecimal.valueOf(1_000_000)), 0, java.math.RoundingMode.CEILING)
+                    .longValueExact();
+            for (ContractType type : new ContractType[]{ContractType.INVERSE_PERPETUAL, ContractType.INVERSE_DELIVERY}) {
+                assertThat(PerpetualContractMath.notionalUnits(type, q, mark, multiplier, tick, scale)).isEqualTo(notional);
+                assertThat(PerpetualContractMath.unrealizedPnlUnits(type, q, entry, mark, multiplier, tick, scale)).isEqualTo(pnl);
+                assertThat(PerpetualContractMath.initialMarginUnits(type, q, mark, multiplier, tick, scale, 50_000)).isEqualTo(margin);
+            }
+        }
+    }
+
+    @Test
     void calculatesLinearNotionalPnlAndMaintenanceMargin() {
         assertThat(PerpetualContractMath.notionalUnits(ContractType.LINEAR_PERPETUAL, 6L, 100L,
                 100L, 1L, 100_000_000L)).isEqualTo(60_000L);

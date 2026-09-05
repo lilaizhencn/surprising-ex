@@ -75,8 +75,25 @@ public final class PositionUserIndex {
     }
 
     void apply(RuntimePositionIndexValue previous, RuntimePositionIndexValue current) {
+        if (previous != null && current != null && previous.userId() == current.userId()
+                && previous.symbol().equals(current.symbol())) return;
         if (previous != null) removePosition(previous);
         if (current != null) addPosition(current);
+    }
+
+    /** Bounded online pagination: merges existing primitive Lane indexes without a full TreeSet copy. */
+    public Iterable<Long> usersAfter(String symbol, long afterUserId) {
+        String normalized = OrderReservation.normalizeSymbol(symbol);
+        return () -> new java.util.Iterator<>() {
+            private long next = higherUserId(normalized, afterUserId);
+            public boolean hasNext() { return next != 0; }
+            public Long next() {
+                if (next == 0) throw new java.util.NoSuchElementException();
+                long result = next;
+                next = higherUserId(normalized, result);
+                return result;
+            }
+        };
     }
 
     public void rebuild(TradingCoreState state) {

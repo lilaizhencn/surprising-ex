@@ -844,23 +844,23 @@ public final class RollingBusinessStateHash {
     private static long stableLifecycleProgress(CoreTreasuryState.LifecycleProgress value) {
         return lifecycleProgressHasher(value.settlementId(), value.instrumentVersion(), value.settlementPriceTicks(),
                 value.optionCashUnitsPerContract(), value.ordersComplete(), value.accountLaneId(),
-                value.nextCursorOrderId(), value.nextCursorUserId(), value.commandId());
+                value.nextCursorOrderId(), value.nextCursorUserId(), value.commandId(), value.requiredInsuranceUnits());
     }
 
     private long stableLifecycleProgress(TreasuryRuntime.LifecycleProgressRuntime value) {
         return lifecycleProgressHasher(value.settlementId(), value.instrumentVersion(), value.settlementPriceTicks(),
                 value.optionCashUnitsPerContract(), value.ordersComplete(), value.accountLaneId(),
-                value.nextCursorOrderId(), value.nextCursorUserId(), value.commandId());
+                value.nextCursorOrderId(), value.nextCursorUserId(), value.commandId(), value.requiredInsuranceUnits());
     }
 
     private static long lifecycleProgressHasher(long settlementId, long instrumentVersion,
                                                 long settlementPriceTicks, long optionCashUnitsPerContract,
                                                 boolean ordersComplete, int accountLaneId, long nextCursorOrderId,
-                                                long nextCursorUserId, Object commandId) {
+                                                long nextCursorUserId, Object commandId, long requiredInsuranceUnits) {
         return canonical(CoreTreasuryState.LifecycleProgress.class).number(settlementId).number(instrumentVersion)
                 .number(settlementPriceTicks).number(optionCashUnitsPerContract).flag(ordersComplete)
                 .number(accountLaneId).number(nextCursorOrderId).number(nextCursorUserId)
-                .text(String.valueOf(commandId)).value();
+                .text(String.valueOf(commandId)).number(requiredInsuranceUnits).value();
     }
 
     private static CanonicalHasher canonical(Class<?> type) {

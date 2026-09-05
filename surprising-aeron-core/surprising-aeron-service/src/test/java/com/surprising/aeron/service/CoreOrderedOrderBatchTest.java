@@ -675,7 +675,9 @@ class CoreOrderedOrderBatchTest {
     private static Map<String, Object> indexSnapshot(Object index) throws Exception {
         java.util.TreeMap<String, Object> snapshot = new java.util.TreeMap<>();
         for (var value : index.getClass().getDeclaredFields()) {
-            if (Modifier.isStatic(value.getModifiers()) || value.getName().equals("identities")) continue;
+            // Query scratch has no indexed business state and may be lazily allocated.
+            if (Modifier.isStatic(value.getModifiers()) || value.getName().equals("identities")
+                    || value.getName().equals("pageScratch")) continue;
             value.setAccessible(true);
             Object current = value.get(index);
             if (current instanceof Map<?, ?> map) current = new java.util.LinkedHashMap<>(map);

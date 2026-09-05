@@ -83,8 +83,33 @@ public final class RuntimeSettlementProcessor {
         ArrayList<Long> selectedUserIds = userPage.userIds();
         boolean moreUsers = chunked && !userPage.complete();
         int assetId = identities.assetId(instrument.settleAsset());
-        Object[] laneResults = runtime.executeOwnerSettlements(selectedUserIds,
-                ignored -> settleLane(runtime, instrument, kernel, command, selectedUserIds, symbolId, assetId));
+        Object[] prepared = runtime.executeLifecycleSettlements(selectedUserIds, Long::longValue,
+                ignored -> prepareLane(runtime, instrument, kernel, command, selectedUserIds, symbolId, assetId));
+        @SuppressWarnings("unchecked")
+        List<UserSettlement>[] plans = new List[runtime.topology().accountLaneCount()];
+        long requiredInsurance = 0;
+        for (int lane = 0; lane < plans.length; lane++) {
+            @SuppressWarnings("unchecked")
+            List<UserSettlement> lanePlans = (List<UserSettlement>) prepared[lane];
+            plans[lane] = lanePlans;
+            if (lanePlans != null) for (var plan : lanePlans)
+                requiredInsurance = Math.addExact(requiredInsurance, plan.insurance());
+        }
+        if (requiredInsurance > runtime.treasury().insurance(assetId)) {
+            UUID progressId = chunkCommandId == null ? new UUID(0, command.settlementId()) : chunkCommandId;
+            runtime.treasury().setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(
+                    command.settlementId(), command.instrumentVersion(), command.settlementPriceTicks(),
+                    command.optionCashUnitsPerContract(), true, 0, 0, command.cursorUserId(),
+                    progressId, requiredInsurance));
+            runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+            return new CoreSettlementProgressView(command.settlementId(), false, true, 0,
+                    command.cursorUserId(), selectedOrders.size(), 0, requiredInsurance);
+        }
+        if (requiredInsurance != 0) runtime.treasury().setInsurance(assetId,
+                Math.subtractExact(runtime.treasury().insurance(assetId), requiredInsurance),
+                runtime.treasury().insuranceDeficit(assetId));
+        Object[] laneResults = runtime.executeLifecycleSettlements(selectedUserIds, Long::longValue,
+                lane -> applyLane(runtime, assetId, plans[lane]));
         RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
         for (Object value : laneResults) {
             if (value instanceof RuntimeTreasuryDelta laneDelta) treasuryDelta.merge(laneDelta);
@@ -142,83 +167,72 @@ public final class RuntimeSettlementProcessor {
                 orders == null || orders.isEmpty() ? 1 : 2));
     }
 
-    private static RuntimeTreasuryDelta settleLane(TradingRuntimeState runtime,
-                                                   CoreInstrumentState instrument, ProductTradingRules kernel,
-                                                   SettleInstrumentCommand command,
-                                                   Iterable<Long> selectedUserIds, int symbolId, int assetId) {
-        RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
-        for (Long userId : selectedUserIds) {
-            if (userId != null && runtime.currentLaneOwns(userId)) {
-                settleUser(runtime, instrument, kernel, command, userId,
-                        symbolId, assetId, treasuryDelta);
+    // These plans cross the Lane -> insurance reservation -> Lane boundary. No account is
+    // mutated until every plan in the bounded page is affordable.
+    private record UserSettlement(long userId, BalanceRuntime balance, long[] keys,
+                                  PositionRuntime[] positions, long clearing, long insurance) { }
+
+    private static List<UserSettlement> prepareLane(TradingRuntimeState runtime, CoreInstrumentState instrument,
+                                                    ProductTradingRules kernel, SettleInstrumentCommand command,
+                                                    Iterable<Long> users, int symbolId, int assetId) {
+        ArrayList<UserSettlement> plans = new ArrayList<>();
+        for (long userId : users) {
+            if (!runtime.currentLaneOwns(userId) || runtime.user(userId) == null) continue;
+            var indexedKeys = runtime.positionKeysForUserAndSymbol(userId, symbolId);
+            if (indexedKeys.isEmpty()) continue;
+            long[] keys = new long[indexedKeys.size()];
+            PositionRuntime[] positions = new PositionRuntime[keys.length];
+            BalanceRuntime balance = runtime.balance(userId, assetId);
+            if (balance == null) throw new IllegalStateException("settlement balance is missing");
+            long available = balance.availableUnits();
+            long locked = balance.lockedUnits();
+            long crossPnl = 0, crossMargin = 0, totalPnl = 0, insurance = 0;
+            int index = 0;
+            for (long key : indexedKeys) {
+                PositionRuntime position = runtime.position(key);
+                if (position == null || position.signedQuantitySteps() == 0) continue;
+                long pnl = kernel.lifecycleCashDeltaUnits(instrument, position.signedQuantitySteps(),
+                        position.entryPriceTicks(), command.settlementPriceTicks());
+                totalPnl = Math.addExact(totalPnl, pnl);
+                long margin = position.positionMarginUnits();
+                locked = Math.subtractExact(locked, margin);
+                if (position.marginMode() == CoreMarginMode.CROSS) {
+                    crossPnl = Math.addExact(crossPnl, pnl);
+                    crossMargin = Math.addExact(crossMargin, margin);
+                } else {
+                    long equity = Math.addExact(margin, pnl);
+                    available = Math.addExact(available, Math.max(0, equity));
+                    if (equity < 0) insurance = Math.addExact(insurance, Math.negateExact(equity));
+                }
+                keys[index] = key;
+                positions[index++] = new PositionRuntime(userId, symbolId, assetId, position.marginMode(),
+                        position.positionSide(), 0, 0, 0, 0,
+                        Math.addExact(position.realizedPnlUnits(), pnl), 0);
             }
+            if (index == 0) continue;
+            long equity = Math.addExact(Math.addExact(available, crossMargin), crossPnl);
+            if (equity < 0) insurance = Math.addExact(insurance, Math.negateExact(equity));
+            Math.incrementExact(runtime.user(userId).revision());
+            plans.add(new UserSettlement(userId,
+                    new BalanceRuntime(userId, assetId, Math.max(0, equity), locked),
+                    keys, positions, Math.negateExact(totalPnl), insurance));
         }
-        return treasuryDelta;
+        return plans;
     }
 
-    private static void settleUser(TradingRuntimeState runtime,
-                                   CoreInstrumentState instrument,
-                                   ProductTradingRules kernel, SettleInstrumentCommand command, long userId,
-                                   int symbolId, int assetId, RuntimeTreasuryDelta treasuryDelta) {
-        if (runtime.user(userId) == null) return;
-        java.util.NavigableSet<Long> positionKeys = runtime.positionKeysForUserAndSymbol(userId, symbolId);
-        if (positionKeys.isEmpty()) return;
-        BalanceRuntime balance = runtime.balance(userId, assetId);
-        if (balance == null) throw new IllegalStateException("settlement balance is missing");
-        long available = balance.availableUnits();
-        long locked = balance.lockedUnits();
-        long clearingPnlDelta = 0;
-        boolean settled = false;
-        for (long positionKey : positionKeys) {
-            PositionRuntime position = runtime.position(positionKey);
-            if (position == null || position.signedQuantitySteps() == 0) continue;
-            settled = true;
-            long cashDelta = kernel.lifecycleCashDeltaUnits(instrument, position.signedQuantitySteps(),
-                    position.entryPriceTicks(), command.settlementPriceTicks());
-            Cash cash = applyCash(available, locked, position.marginMode(),
-                    position.positionMarginUnits(), cashDelta);
-            available = cash.available();
-            locked = cash.locked();
-            clearingPnlDelta = Math.addExact(clearingPnlDelta, Math.negateExact(cash.appliedDelta()));
-            runtime.replacePosition(positionKey, new PositionRuntime(userId, position.symbolId(),
-                    assetId, position.marginMode(), position.positionSide(), 0, 0, 0, 0,
-                    Math.addExact(position.realizedPnlUnits(), cashDelta),
-                    0));
-        }
-        if (!settled) return;
-        runtime.replaceBalance(new BalanceRuntime(userId, assetId, available, locked));
-        treasuryDelta.addClearing(assetId, clearingPnlDelta);
-        runtime.advanceUserRevision(userId);
-    }
-
-    private static Cash applyCash(long available, long locked, CoreMarginMode marginMode,
-                                  long releasedMargin, long pnl) {
-        long applied;
-        if (marginMode == CoreMarginMode.ISOLATED) {
-            if (pnl < 0) {
-                long consumed = Math.min(releasedMargin, Math.negateExact(pnl));
-                long remaining = Math.subtractExact(releasedMargin, consumed);
-                locked = Math.subtractExact(locked, releasedMargin);
-                available = Math.addExact(available, remaining);
-                applied = Math.negateExact(consumed);
-            } else {
-                locked = Math.subtractExact(locked, releasedMargin);
-                available = Math.addExact(available, Math.addExact(releasedMargin, pnl));
-                applied = pnl;
+    private static RuntimeTreasuryDelta applyLane(TradingRuntimeState runtime, int assetId,
+                                                  List<UserSettlement> plans) {
+        RuntimeTreasuryDelta delta = new RuntimeTreasuryDelta();
+        for (UserSettlement plan : plans) {
+            for (int index = 0; index < plan.keys().length; index++) {
+                if (plan.positions()[index] != null)
+                    runtime.replacePosition(plan.keys()[index], plan.positions()[index]);
             }
-        } else {
-            locked = Math.subtractExact(locked, releasedMargin);
-            available = Math.addExact(available, releasedMargin);
-            if (pnl >= 0) {
-                available = Math.addExact(available, pnl);
-                applied = pnl;
-            } else {
-                long debit = Math.min(available, Math.negateExact(pnl));
-                available = Math.subtractExact(available, debit);
-                applied = Math.negateExact(debit);
-            }
+            runtime.replaceBalance(plan.balance());
+            runtime.advanceUserRevision(plan.userId());
+            delta.addClearing(assetId, plan.clearing());
         }
-        return new Cash(available, locked, applied);
+        return delta;
     }
 
     private static UserPage selectUsers(Iterable<Long> indexedUserIds, TradingRuntimeState runtime,
@@ -296,8 +310,7 @@ public final class RuntimeSettlementProcessor {
 
     private static void validateProgress(TreasuryRuntime.LifecycleProgressRuntime progress,
                                          SettleInstrumentCommand command, boolean chunked) {
-        if (!chunked) return;
-        if (progress == null && (command.cursorUserId() != 0 || command.cursorOrderId() != 0)) {
+        if (chunked && progress == null && (command.cursorUserId() != 0 || command.cursorOrderId() != 0)) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "settlement cursor must start at zero");
         }
         if (progress != null && (progress.settlementId() != command.settlementId()
@@ -309,9 +322,6 @@ public final class RuntimeSettlementProcessor {
                 || progress.nextCursorUserId() != command.cursorUserId())) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "settlement cursor does not match progress");
         }
-    }
-
-    private record Cash(long available, long locked, long appliedDelta) {
     }
 
     private record UserPage(ArrayList<Long> userIds, int accountLaneId,

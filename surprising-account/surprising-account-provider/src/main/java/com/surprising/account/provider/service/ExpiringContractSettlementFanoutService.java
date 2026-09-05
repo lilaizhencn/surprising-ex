@@ -43,7 +43,7 @@ public class ExpiringContractSettlementFanoutService {
                         long optionCashUnitsPerContract, Instant settlementTime) {
         long settlementId = settlementTime.toEpochMilli();
         String identity = properties.getKafka().getProductLine() + ":lifecycle:" + symbol.toUpperCase()
-                + ':' + settlementId;
+                + ':' + settlementId + ':' + UUID.randomUUID();
         long cursor = 0;
         CoreSettlementProgressView persisted = decodeProgressOrQuery(symbol, settlementId, null);
         if (persisted != null && persisted.complete() && persisted.settlementId() == settlementId) return;
@@ -60,10 +60,14 @@ public class ExpiringContractSettlementFanoutService {
                             settlementId, symbol, version, settlementPriceTicks, optionCashUnitsPerContract,
                             cursor, SettleInstrumentCommand.DEFAULT_MAX_USERS, orderCursor,
                             SettleInstrumentCommand.DEFAULT_MAX_ORDERS)));
+            if (response == null) throw new IllegalStateException("Aeron settlement response missing");
             CoreSettlementProgressView progress = decodeProgressOrQuery(symbol, settlementId, response);
-            if (progress == null || progress.complete()) return;
+            if (progress.complete()) return;
+            if (progress.requiredInsuranceUnits() > 0) {
+                throw new IllegalStateException("settlement awaits insurance: required=" + progress.requiredInsuranceUnits());
+            }
             if (!progress.ordersComplete()) {
-                if (progress.nextCursorOrderId() <= orderCursor) {
+                if (progress.nextCursorOrderId() <= 0 || orderCursor != 0 && progress.nextCursorOrderId() >= orderCursor) {
                     throw new IllegalStateException("Aeron settlement order cursor did not advance");
                 }
                 orderCursor = progress.nextCursorOrderId();
@@ -81,20 +85,24 @@ public class ExpiringContractSettlementFanoutService {
     private CoreSettlementProgressView decodeProgressOrQuery(String symbol, long settlementId,
                                                               CoreResponse response) {
         CoreResponse effective = response;
+        if (response != null && response.commandStatus() != com.surprising.aeron.protocol.ResponseStatus.APPLIED) {
+            throw new IllegalStateException("Aeron settlement command rejected: " + response.resultCode());
+        }
         if (effective == null || effective.data().length == 0) {
-            try {
-                effective = aeron.query(CoreMessageType.SETTLEMENT_PROGRESS_QUERY, UUID.randomUUID(),
-                        CoreStateQueryCodec.encodeSettlementProgressQuery(symbol));
-            } catch (RuntimeException exception) {
-                return null;
-            }
+            effective = aeron.query(CoreMessageType.SETTLEMENT_PROGRESS_QUERY, UUID.randomUUID(),
+                    CoreStateQueryCodec.encodeSettlementProgressQuery(symbol));
         }
         if (effective == null || (effective.status() != com.surprising.aeron.protocol.ResponseStatus.OK
                 && effective.commandStatus() != com.surprising.aeron.protocol.ResponseStatus.APPLIED)
-                || effective.data().length == 0) return null;
+                || effective.data().length == 0) {
+            throw new IllegalStateException("Aeron settlement progress unavailable or rejected");
+        }
         CoreSettlementProgressView progress = CoreSettlementProgressCodec.decode(effective.data());
         if (progress.settlementId() != 0 && progress.settlementId() != settlementId) {
             throw new IllegalStateException("Aeron settlement progress mismatch");
+        }
+        if (response != null && progress.settlementId() != settlementId) {
+            throw new IllegalStateException("Aeron settlement command has no persisted progress");
         }
         return progress;
     }

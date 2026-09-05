@@ -275,9 +275,10 @@ public record TradingRuntimeSnapshot(
     public record LifecycleProgressSnapshot(long settlementId, long instrumentVersion,
                                             long settlementPriceTicks, long optionCashUnitsPerContract,
                                             boolean ordersComplete, int accountLaneId, long nextCursorOrderId,
-                                            long nextCursorUserId, UUID commandId) {
+                                            long nextCursorUserId, UUID commandId, long requiredInsuranceUnits) {
         public LifecycleProgressSnapshot {
             if (settlementId <= 0 || instrumentVersion <= 0 || settlementPriceTicks < 0
+                    || requiredInsuranceUnits < 0 || requiredInsuranceUnits > 0 && !ordersComplete
                     || optionCashUnitsPerContract < 0 || accountLaneId < 0 || accountLaneId >= Long.SIZE
                     || nextCursorOrderId < 0 || nextCursorUserId < 0
                     || (!ordersComplete && nextCursorUserId != 0)

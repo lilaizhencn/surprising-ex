@@ -22,7 +22,7 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 26;
+    private static final int VERSION = 27;
     private static final int MAX_TEXT_BYTES = 64;
     private static final int MAX_AUDIT_TEXT_BYTES = 2_048;
 
@@ -245,6 +245,7 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(progress.nextCursorUserId());
             writer.longValue(progress.commandId().getMostSignificantBits());
             writer.longValue(progress.commandId().getLeastSignificantBits());
+            writer.longValue(progress.requiredInsuranceUnits());
         });
         writer.intValue(state.leverages().size());
         state.leverages().forEach((key, leverage) -> {
@@ -550,7 +551,7 @@ public final class TradingStateSnapshotCodec {
                     reader.booleanValue(), reader.intValue(),
                     reader.nonNegativeLong("lifecycle progress order cursor"),
                     reader.nonNegativeLong("lifecycle progress user cursor"),
-                    new UUID(reader.longValue(), reader.longValue()));
+                    new UUID(reader.longValue(), reader.longValue()), reader.nonNegativeLong("required settlement insurance"));
             putUnique(lifecycleProgress, symbol, progress);
         }
         CoreTreasuryState treasuryState = new CoreTreasuryState(feeBalances, insuranceBalances,

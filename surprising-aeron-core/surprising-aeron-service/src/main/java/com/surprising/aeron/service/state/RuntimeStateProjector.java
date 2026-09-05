@@ -71,7 +71,7 @@ public final class RuntimeStateProjector {
                                 progress.instrumentVersion(), progress.settlementPriceTicks(),
                                 progress.optionCashUnitsPerContract(), progress.ordersComplete(),
                                 progress.accountLaneId(), progress.nextCursorOrderId(),
-                                progress.nextCursorUserId(), progress.commandId())));
+                                progress.nextCursorUserId(), progress.commandId(), progress.requiredInsuranceUnits())));
         source.riskState().liquidations().forEach((liquidationId, liquidation) ->
                 runtime.putLiquidation(new LiquidationRuntime(liquidationId, liquidation.userId(),
                         identities.symbolId(liquidation.symbol()), liquidation.marginMode(),

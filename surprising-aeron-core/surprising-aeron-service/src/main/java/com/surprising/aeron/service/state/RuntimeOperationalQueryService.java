@@ -64,7 +64,7 @@ public final class RuntimeOperationalQueryService {
         return progress == null
                 ? new CoreSettlementProgressView(treasury.lifecycleSettlement(symbolId), true, true, 0, 0, 0, 0)
                 : new CoreSettlementProgressView(progress.settlementId(), false, progress.ordersComplete(),
-                progress.nextCursorOrderId(), progress.nextCursorUserId(), 0, 0);
+                progress.nextCursorOrderId(), progress.nextCursorUserId(), 0, 0, progress.requiredInsuranceUnits());
     }
 
     public static List<CoreTriggerOrderStateView> triggerOrders(

@@ -151,7 +151,7 @@ public final class RuntimeStateMaterializer {
                 identities.symbol(id), new CoreTreasuryState.LifecycleProgress(value.settlementId(),
                         value.instrumentVersion(), value.settlementPriceTicks(), value.optionCashUnitsPerContract(),
                         value.ordersComplete(), value.accountLaneId(), value.nextCursorOrderId(),
-                        value.nextCursorUserId(), value.commandId())));
+                        value.nextCursorUserId(), value.commandId(), value.requiredInsuranceUnits())));
         CoreTreasuryState treasury = new CoreTreasuryState(fees, insurance, deficits, liquidationFees,
                 fundingResiduals, roundingResiduals, clearingPnl, funding, lifecycle,
                 fundingProgress, lifecycleProgress);
@@ -183,7 +183,7 @@ public final class RuntimeStateMaterializer {
             TreasuryRuntime.LifecycleProgressRuntime value) {
         return new CoreTreasuryState.LifecycleProgress(value.settlementId(), value.instrumentVersion(),
                 value.settlementPriceTicks(), value.optionCashUnitsPerContract(), value.ordersComplete(),
-                value.accountLaneId(), value.nextCursorOrderId(), value.nextCursorUserId(), value.commandId());
+                value.accountLaneId(), value.nextCursorOrderId(), value.nextCursorUserId(), value.commandId(), value.requiredInsuranceUnits());
     }
 
     static OrderReservation reservation(ReservationRuntime value, RuntimeFactFrame.IdentityView identities) {
