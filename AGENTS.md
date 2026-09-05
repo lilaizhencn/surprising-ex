@@ -36,6 +36,7 @@ Surprising-EX 是交易所后端核心项目。改动必须严谨，资金安全
 
 ### 性能验证档位与记录
 
+- 后续只验证当前 `main` 代码，不再检出、构建或重跑旧版本进行性能对照，也不再将历史版本结果用于新一轮性能比较。下述记录中的“对照 commit”统一填写“不适用（仅验证当前 main）”；历史记录保持原样，验收依据为采集前锁定的通过阈值及正确性要求。
 - 后续每次性能验证的 in-flight 必须固定为 `256`；不得采集、补跑、横向比较或以 `64`、`512`、`1024` 等其他 in-flight 档位形成 smoke、基线或验收结论。历史其他档位数据只能作为历史背景，不能与新的 `256 in-flight` 结果直接比较。
 - 性能采集开始前，必须先在根目录固定文件 `PERFORMANCE_VALIDATION.md` 的当次记录中写明并锁定基准标准与测试场景。基准标准至少包含通过阈值、对照 commit、JDK/JVM、机器与 CPU、JVM 参数、GC、JMH/JFR 参数、预热/测量/冷却时长和数据有效性条件；测试场景至少包含产品线、业务动作及比例、负载模型与到达率、活跃用户、连接、symbol、Account Lane、matcher/risk engine、做市状态、资金与持仓初态以及快照恢复检查。
 - 基准标准和测试场景一旦开始采集不得修改；如确需修改，必须终止该轮并新建一条记录，重新完成采集前定义。没有预先定义标准与场景的数据只能标记为诊断数据，不能作为性能验收结果。
@@ -52,7 +53,7 @@ Surprising-EX 是交易所后端核心项目。改动必须严谨，资金安全
 - 并发能力不能用 TPS 或 ops/s 代替，必须记录活跃用户数、并发连接数、固定 `256 in-flight`、活跃 symbol/产品线数量、Account Lane、matcher/risk engine 数量，以及 maker/taker、下单/撤单/成交/风险重操作比例。容量结论必须表述为“在 256 in-flight 及指定并发和负载组合下的持续终态 ops/s 与尾延迟”。
 - 延迟必须按业务类型分别统计入口到 accepted、accepted 到 terminal、入口到 terminal 三段；至少报告 p50、p90、p95、p99、p99.9 和 max，并记录样本数、直方图区间、超时上限及时间单位。下单、吃单成交、撤单、批量命令、触发单、风险扫描、强平、资金费、ADL、结算和 snapshot fence 不能混成一个平均值。
 - 并发与尾延迟测试优先使用 open-loop 或恒定到达率负载，必须说明是否修正 coordinated omission；报告预热、稳定运行和冷却时长。只报告平均延迟、客户端排队后延迟或短时峰值吞吐不能通过验收。
-- JMH 报告必须包含完整参数、fork、warmup、measurement、线程数、JVM 参数、GC、机器/CPU、负载模型和业务操作计数口径；至少输出主分数、误差/置信区间、`terminalBusinessOperations`、`terminalCoreMessages`、accepted/terminal 差值、unfinished、backlog，以及 `-prof gc` 的分配率、每操作分配字节、GC 次数和 GC 时间。带 profiler 的数值用于归因，不能替代无 profiler 的主吞吐结果；基线与修改后必须使用相同参数对照。
+- JMH 报告必须包含完整参数、fork、warmup、measurement、线程数、JVM 参数、GC、机器/CPU、负载模型和业务操作计数口径；至少输出主分数、误差/置信区间、`terminalBusinessOperations`、`terminalCoreMessages`、accepted/terminal 差值、unfinished、backlog，以及 `-prof gc` 的分配率、每操作分配字节、GC 次数和 GC 时间。带 profiler 的数值用于归因，不能替代无 profiler 的主吞吐结果；仅报告当前 `main` 在锁定场景下的实测表现，不作旧版本性能对照。
 - 每次交易主链路 JFR 采样至少检查并报告：
   - CPU 与热点：进程/机器 CPU、各线程 CPU load、execution samples、墙钟热点及 top methods/stacks；按交易 owner、matcher、风险、snapshot/projection、Core Fact、Aeron/Kafka/外围线程分组，禁止只给全 JVM 汇总。
   - Java 分配：总分配率（bytes/s）、每 business op 分配字节、对象数/operation、TLAB 与非 TLAB 分配、最大对象、top allocation class/thread/site，以及 `ObjectAllocationSample`、`ObjectAllocationInNewTLAB`、`ObjectAllocationOutsideTLAB`、`ThreadAllocationStatistics` 等可用事件。
@@ -97,5 +98,6 @@ Surprising-EX 是交易所后端核心项目。改动必须严谨，资金安全
 
 ## 提交
 
+- 后续仅在 `main` 分支开发、提交和推送；未经用户明确要求，不再创建或切换开发分支。
 - 每完成一个模块并通过测试后 commit and push。
 - 不提交 `.idea/`、`.local-logs/`、`data/`、本地运行产物。
