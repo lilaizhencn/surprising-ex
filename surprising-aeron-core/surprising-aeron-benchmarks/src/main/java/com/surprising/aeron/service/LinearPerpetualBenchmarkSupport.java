@@ -936,11 +936,12 @@ final class LinearPerpetualBenchmarkSupport {
 
         void drainSubmitted() {
             while (!submittedMatching.isEmpty()) {
-                drainOldestLatencyNanos();
-                if (submittedMatching.isEmpty()) continue;
-                commitReadyMatching(
-                        Math.min(255, submittedMatching.size()), false,
+                int completed = commitReadyMatching(
+                        Math.min(256, submittedMatching.size()), true,
                         (userId, entryNanos, acceptedNanos, terminalNanos) -> { });
+                if (completed == 0) {
+                    throw new IllegalStateException("matching completion pump made no progress");
+                }
             }
         }
 

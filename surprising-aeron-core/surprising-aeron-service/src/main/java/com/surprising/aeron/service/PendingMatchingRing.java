@@ -224,6 +224,16 @@ final class PendingMatchingRing {
         return userId > 0 && pendingByUser.get(userId) > 0;
     }
 
+    boolean hasEarlierUser(long sequence, long userId) {
+        if (sequence <= 0 || userId <= 0 || pendingByUser.get(userId) <= 1) return false;
+        for (int slot = head; slot != -1; slot = nextSlots[slot]) {
+            PendingMatching pending = pendingAt(slot);
+            if (pending == null || pending.sequence() >= sequence) return false;
+            if (pending.command().header().userId() == userId) return true;
+        }
+        return false;
+    }
+
     void forEach(Consumer<PendingMatching> consumer) {
         for (int slot = head; slot != -1; slot = nextSlots[slot]) {
             PendingMatching pending = pendingAt(slot);

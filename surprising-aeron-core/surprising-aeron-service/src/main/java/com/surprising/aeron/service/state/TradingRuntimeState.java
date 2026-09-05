@@ -736,6 +736,10 @@ public final class TradingRuntimeState implements AutoCloseable {
             prepareBalanceFundsDelta(balancePatches[laneId], laneFundsDeltas[laneId]);
         }
 
+        void prepareAdmissionLane(int laneId) {
+            prepareBalanceFundsDelta(balancePatches[laneId], laneFundsDeltas[laneId]);
+        }
+
         RuntimeFundsDelta collectFundsDelta(long laneMask) {
             aggregateFundsDelta.clear();
             for (int laneId = 0; laneId < laneFundsDeltas.length; laneId++) {
@@ -1668,18 +1672,27 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new IllegalStateException("asynchronous place batch admission requires Account Lane workers");
         }
         int laneId = topology.accountLaneId(userId);
+        MatcherSettlementChanges changes = acquireMatcherSettlementChanges();
+        changes.ensureOrderCapacity(itemCount);
         PlaceBatchAdmissionEvent event = placeBatchAdmissionEventPool.pollFirst();
         if (event == null) event = new PlaceBatchAdmissionEvent();
         event.prepare(coreSequence, userId, commandId, orders, requiredReservations,
                 clientKeys, symbolIds, assetIds, matchingOrders, admittedOrders,
-                admittedReservations, itemCount, laneId, this);
+                admittedReservations, itemCount, laneId, this, changes);
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
                 accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
-        laneWorkers[laneId].submit(event);
+        try {
+            laneWorkers[laneId].submit(event);
+        } catch (RuntimeException | Error failure) {
+            releaseMatcherSettlementChanges(event.discardChanges());
+            event.clear();
+            placeBatchAdmissionEventPool.addFirst(event);
+            throw failure;
+        }
         return event;
     }
 
-    public void collectPlaceBatchAdmission(PlaceBatchAdmissionEvent event) {
+    public void stagePlaceBatchAdmission(PlaceBatchAdmissionEvent event) {
         assertOwner();
         if (event == null || !event.complete() || event.rejection() != null) {
             throw new IllegalStateException("place batch admission is not collectable");
@@ -1703,6 +1716,35 @@ public final class TradingRuntimeState implements AutoCloseable {
             indexPendingReservation(userId, orderId, event.coreSequence(), nextTotal);
         }
         revision = Math.addExact(revision, event.itemCount());
+    }
+
+    public void collectPlaceBatchAdmission(
+            PlaceBatchAdmissionEvent event, RuntimeFundsAccumulator fundsAccumulator) {
+        assertOwner();
+        if (event == null || !event.complete() || event.rejection() != null) {
+            throw new IllegalStateException("place batch admission is not collectable");
+        }
+        int laneId = topology.accountLaneId(event.userId());
+        MatcherSettlementChanges changes = event.takeChanges();
+        try {
+            changes.publishedLaneChanges[laneId].commitTerminalToOwner(
+                    this, laneId, null, event.coreSequence());
+            LaneBalancePatches balances = changes.balancePatches[laneId];
+            for (int index = 0; index < balances.size(); index++) {
+                balances.publishAvailableAt(this, index);
+                changedUsers.add(balances.userId(index));
+                changedBalance(balances.userId(index), balances.assetId(index));
+            }
+            if (fundsAccumulator != null) changes.appendFundsDelta(1L << laneId, fundsAccumulator);
+        } finally {
+            releaseMatcherSettlementChanges(changes);
+        }
+    }
+
+    public void discardPlaceBatchAdmission(PlaceBatchAdmissionEvent event) {
+        assertOwner();
+        if (event == null) return;
+        releaseMatcherSettlementChanges(event.takeChanges());
     }
 
     public void releasePlaceBatchAdmission(PlaceBatchAdmissionEvent event) {
@@ -1813,7 +1855,9 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         if (event == null || !event.complete()) return null;
         RuntimeTreasuryDelta aggregate = event.collectTreasuryDelta();
-        unindexMatcherPendingReservations(event.plan());
+        for (int index = 0; index < event.planCount(); index++) {
+            unindexMatcherPendingReservations(event.plan(index));
+        }
         long laneMask = event.requiredLaneMask();
         MatcherSettlementChanges changes = event.commitSequence() != 0 || event.hasIsolatedChanges()
                 ? event.takeChanges() : null;
@@ -2229,16 +2273,23 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public MatcherSettlementEvent[] dispatchPerpetualMatcherSettlements(
             long coreSequence, long[] takerOrderIds, long[] expectedLaneMasks,
-            List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities) {
+            List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities,
+            long commitTimestamp, long commitClusterPosition) {
         assertOwner();
         if (!productLine.isDerivative() || coreSequence <= 0 || takerOrderIds == null
                 || expectedLaneMasks == null || matchingResults == null || takerOrderIds.length == 0
                 || takerOrderIds.length != expectedLaneMasks.length
-                || takerOrderIds.length != matchingResults.size() || identities == null) {
+                || takerOrderIds.length != matchingResults.size() || identities == null
+                || commitTimestamp < 0 || commitClusterPosition < 0) {
             throw new IllegalArgumentException("invalid perpetual matcher settlement batch");
         }
         long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;
         MatcherSettlementPlan[] plans = new MatcherSettlementPlan[takerOrderIds.length];
+        CoreInstrumentState[] instruments = new CoreInstrumentState[takerOrderIds.length];
+        int[] baseAssetIds = new int[takerOrderIds.length];
+        int[] quoteAssetIds = new int[takerOrderIds.length];
+        int[] settleAssetIds = new int[takerOrderIds.length];
+        long batchLaneMask = 0;
         for (int index = 0; index < takerOrderIds.length; index++) {
             long takerOrderId = takerOrderIds[index];
             long expectedLaneMask = expectedLaneMasks[index];
@@ -2255,15 +2306,31 @@ public final class TradingRuntimeState implements AutoCloseable {
                 throw new IllegalStateException("perpetual matcher settlement lane mask mismatch");
             }
             plans[index] = plan;
+            CoreInstrumentState instrument = instrument(identities.symbol(taker.symbolId()));
+            if (instrument == null) throw new IllegalStateException("match instrument is missing");
+            instruments[index] = instrument;
+            baseAssetIds[index] = identities.assetId(instrument.baseAsset());
+            quoteAssetIds[index] = identities.assetId(instrument.quoteAsset());
+            settleAssetIds[index] = identities.assetId(instrument.settleAsset());
+            batchLaneMask |= expectedLaneMask;
         }
         RuntimePerpetualMatchProcessor.validateAndPrepareBatch(
                 takerOrderIds, matchingResults, this, identities, perpetualBatchValidationScratch);
-        MatcherSettlementEvent[] events = new MatcherSettlementEvent[plans.length];
-        for (int index = 0; index < plans.length; index++) {
-            events[index] = dispatchMatcherSettlement(coreSequence, expectedLaneMasks[index], 0,
-                    -1, -1, plans[index], matchingResults.get(index), identities, true);
+        MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();
+        if (event == null) event = new MatcherSettlementEvent();
+        event.prepareBatch(coreSequence, batchLaneMask, commitTimestamp, commitClusterPosition,
+                plans, this, identities, instruments,
+                baseAssetIds, quoteAssetIds, settleAssetIds, accountLanes.length);
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            if ((batchLaneMask & 1L << laneId) == 0) continue;
+            if (!accountLanesStarted) event.execute(accountLanes[laneId]);
+            else {
+                accountLaneQueueHighWaterMarks[laneId] = Math.max(
+                        accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
+                laneWorkers[laneId].submit(event);
+            }
         }
-        return events;
+        return new MatcherSettlementEvent[]{event};
     }
 
     public MatcherSettlementEvent[] dispatchSpotMatcherSettlements(
