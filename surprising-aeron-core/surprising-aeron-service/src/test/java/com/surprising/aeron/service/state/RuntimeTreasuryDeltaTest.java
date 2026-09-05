@@ -52,7 +52,7 @@ class RuntimeTreasuryDeltaTest {
                 Map.of(),
                 Map.of("BTC-USDT", 7L),
                 Map.of("ETH-USDT", 3L),
-                Map.of("BTC-USDT", new CoreTreasuryState.FundingProgress(7, 1, 10_000, 11, fundingCommandId)),
+                Map.of("BTC-USDT", new CoreTreasuryState.FundingProgress(7, 1, 10_000, 0, 11, fundingCommandId, 60_000, 1)),
                 Map.of("ETH-USDT", new CoreTreasuryState.LifecycleProgress(3, 1, 60_000,
                         0, true, 0, 12, lifecycleCommandId)));
         TradingCoreState before = state(beforeTreasury, 1);

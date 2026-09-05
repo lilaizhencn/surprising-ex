@@ -22,7 +22,7 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 25;
+    private static final int VERSION = 26;
     private static final int MAX_TEXT_BYTES = 64;
     private static final int MAX_AUDIT_TEXT_BYTES = 2_048;
 
@@ -225,6 +225,8 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(progress.settlementId());
             writer.longValue(progress.instrumentVersion());
             writer.longValue(progress.fundingRatePpm());
+            writer.longValue(progress.markPriceTicks());
+            writer.longValue(progress.priceSequence());
             writer.intValue(progress.accountLaneId());
             writer.longValue(progress.nextCursorUserId());
             writer.longValue(progress.commandId().getMostSignificantBits());
@@ -525,12 +527,15 @@ public final class TradingStateSnapshotCodec {
         int fundingProgressCount = reader.count("funding progress");
         for (int index = 0; index < fundingProgressCount; index++) {
             String symbol = reader.text();
+            long settlementId = reader.positiveLong("funding progress settlement id");
+            long instrumentVersion = reader.positiveLong("funding progress instrument version");
+            long rate = reader.longValue();
+            long mark = reader.positiveLong("funding progress mark");
+            long priceSequence = reader.positiveLong("funding progress price sequence");
             CoreTreasuryState.FundingProgress progress = new CoreTreasuryState.FundingProgress(
-                    reader.positiveLong("funding progress settlement id"),
-                    reader.positiveLong("funding progress instrument version"),
-                    reader.longValue(), reader.intValue(),
+                    settlementId, instrumentVersion, rate, reader.intValue(),
                     reader.nonNegativeLong("funding progress cursor"),
-                    new UUID(reader.longValue(), reader.longValue()));
+                    new UUID(reader.longValue(), reader.longValue()), mark, priceSequence);
             putUnique(fundingProgress, symbol, progress);
         }
         Map<String, CoreTreasuryState.LifecycleProgress> lifecycleProgress = new TreeMap<>();

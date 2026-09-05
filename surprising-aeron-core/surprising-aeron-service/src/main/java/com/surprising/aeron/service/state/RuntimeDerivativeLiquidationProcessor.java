@@ -338,6 +338,9 @@ public final class RuntimeDerivativeLiquidationProcessor {
         if (liquidation.status() != CoreLiquidationState.Status.ADL_REQUIRED) {
             throw new CoreStateRejectedException("LIQUIDATION_STATE_CONFLICT", "ADL requires ADL state");
         }
+        if (runtime.treasury().fundingProgress(liquidation.symbolId()) != null) {
+            throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS", "funding position cut is in progress");
+        }
         if (!identities.symbol(liquidation.symbolId()).equals(command.symbol())
                 || command.targetUserId() == liquidation.userId()
                 || command.coveredUnits() > liquidation.deficitUnits()) {

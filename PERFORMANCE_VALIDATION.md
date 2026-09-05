@@ -3279,3 +3279,14 @@
 - NMT、DirectBuffer、heap/GC、线程、safepoint/VM operation、JIT/类加载、异常及文件/socket I/O均保存原始统计；OPTION Direct bytes/count为0，heap committed固定768MiB，线程采样约15；after-GC数据包含fixture和订单保留窗口的建立，短测不用于泄漏结论。I/O栈含类加载/JAR、JMH控制通信和诊断输出，不能将其计为交易业务I/O；本次代码差异没有新增文件/数据库/网络调用。真实Aeron/native pool、系统上下文切换和API accepted/terminal三段延迟未覆盖。
 - 源码最后仅调整新方法闭括号缩进，Java token及行数不变；clean JAR与这次格式修改执行语义相同。代码整理完成且定向功能/恢复验证通过；完整交易链路性能验收、长稳泄漏和真实三节点HA未完成。
 - 复现命令/环境/JFC/工具及SHA见当次commands.jsonl、run-performance.py、input-sha256.txt；最终逐文件SHA见output-sha256.txt；原始JAR SHA-256=d9a9105fd61b9abae447b1c4ef96694a093abbe22fe29ff758c7e5231e776c81。历史PV-140无效数据同样保留，不覆盖。
+
+### PV-142 生命周期分页修复：采集前锁定（2026-09-06 00:02 +08:00）
+
+- 本轮为真实生命周期路径的短时诊断，不是持续交易容量/无泄漏验收；不对旧代码作性能对照。对照 commit：不适用（仅验证当前 master）。被测代码为本条记录提交后的 master，采集前写入 artifact 的 commit/JAR SHA，不在采集中变更代码或标准。
+- 改动：交割续页互斥、全局订单/用户游标、实际本页 Lane mask；资金费固定价格/price sequence 及持仓 fence；snapshot v26；现货同资产校验与到期边界。全仓净额/保险不足及异步 owner 优化尚未完成。
+- 环境：Intel i9-9880H 2.30GHz、16 logical CPU、16GiB RAM、macOS x86_64；Oracle GraalVM 25.0.1 HotSpot、Maven 3.9.16；G1，-Xms512m -Xmx512m；额外参数 --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED。
+- 场景：LifecyclePaginationBenchmark 的 LINEAR_DELIVERY/INVERSE_DELIVERY/OPTION，及 FundingCutBenchmark 的 LINEAR_PERPETUAL/INVERSE_PERPETUAL。每次独立一个产品线，1 symbol、4 Account Lane、1 matcher/1 risk engine；固定 maxInFlight=256。生命周期同 symbol 后页依赖前页游标，实际页面串行，不冒充 256 页并发或 open-loop 容量；无外部 API 连接。fixture 内 maker 提供真实成交，并在订单撤销阶段保持待撤盘口；未启动独立做市服务。
+- 初态：256 用户各 1,000,000 settle units、maker 1,000,000,000；每用户成交买入 1、maker 卖出 256；零手续费。交割各用户额外挂买单 1，price90；到期 price120，16 orders/page、16 users/page，共 32 terminal business operations/Core messages。资金费 100000ppm、16 users/page 共17页，第一页后 mark100→200 一次，总18 business operations/messages。成交填充只发生在 fixture 建立，不计入测量业务 ops/fills。不覆盖逐仓、资不抵债或保险不足。
+- JMH：1 thread、1 fork、warmup 1×1s、measurement 2×1s；每轮冷却2s；无到达率控制、无 coordinated omission 修正。首轮无 profiler 主分数，第二轮 -prof gc + profile.jfc JFR、NMT summary/退出统计；JFR 开销不可忽略，不能替代主分数。Invocation setup/teardown 恢复和校验不在业务计时内，但 GC/JFR 包含这些工作，不能把 gc.alloc.rate.norm 当作纯交易热路径分配。
+- 预定门禁：业务执行不得异常，页数严格32/18，accepted=terminal，unfinished=0，期末未完成命令/资金差额/不应保留的冻结与仓位为0，恢复 hash 一致。主分数仅要求有限且>0，不能作为容量目标；阈值不对应历史吞吐。JFR DataLoss>0、swap计数增长、CPU_Speed_Limit<100、OOM或资金不变量失败判数据无效，不放宽重跑。
+- 原始产物：surprising-aeron-core/surprising-aeron-benchmarks/target/pv142/；保存 main/gc JSON、控制台、原始JFR、summary/view、NMT、环境前后值及SHA。未测 API 三段/类型尾延迟、真实集群网络、完整native pool峰值、长稳泄漏与故障切换，结论最多部分验证。功能回归先执行 mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am test，566项通过。

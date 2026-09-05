@@ -1378,6 +1378,8 @@ public final class TradingCoreReducer {
         }
         CoreTreasuryState.FundingProgress previousProgress = state.treasuryState()
                 .fundingProgress(instrument.symbol());
+        long fundingMark = previousProgress == null ? mark.markPriceTicks() : previousProgress.markPriceTicks();
+        long fundingPriceSequence = previousProgress == null ? mark.priceSequence() : previousProgress.priceSequence();
         boolean chunked = indexedUserIds != null && chunkCommandId != null;
         if (chunked) {
             if (previousProgress == null && command.cursorUserId() != 0) {
@@ -1417,7 +1419,7 @@ public final class TradingCoreReducer {
             java.util.ArrayList<Long> positionDeltas = new java.util.ArrayList<>(positions.size());
             for (CorePositionState position : positions) {
                 long positionDelta = kernel.fundingDeltaUnits(instrument,
-                        position.signedQuantitySteps(), mark.markPriceTicks(), command.fundingRatePpm());
+                        position.signedQuantitySteps(), fundingMark, command.fundingRatePpm());
                 positionDeltas.add(positionDelta);
                 delta = Math.addExact(delta, positionDelta);
             }
@@ -1442,7 +1444,7 @@ public final class TradingCoreReducer {
                 }
                 if (amount != 0) {
                     long notional = com.surprising.instrument.api.math.PerpetualContractMath.notionalUnits(
-                            instrument.contractType(), position.signedQuantitySteps(), mark.markPriceTicks(),
+                            instrument.contractType(), position.signedQuantitySteps(), fundingMark,
                             instrument.notionalMultiplierUnits(), instrument.priceTickUnits(),
                             instrument.settleScaleUnits());
                     payments.add(new com.surprising.aeron.protocol.CoreFundingPaymentView(
@@ -1461,7 +1463,7 @@ public final class TradingCoreReducer {
             UUID progressCommandId = chunkCommandId == null ? new UUID(0, 0) : chunkCommandId;
             treasury = treasury.withFundingProgress(instrument.symbol(), new CoreTreasuryState.FundingProgress(
                     command.settlementId(), command.instrumentVersion(), command.fundingRatePpm(),
-                    nextCursorUserId, progressCommandId));
+                    0, nextCursorUserId, progressCommandId, fundingMark, fundingPriceSequence));
         }
         var progress = new com.surprising.aeron.protocol.CoreFundingProgressView(
                 command.settlementId(), complete, nextCursorUserId, selectedUserIds.size());

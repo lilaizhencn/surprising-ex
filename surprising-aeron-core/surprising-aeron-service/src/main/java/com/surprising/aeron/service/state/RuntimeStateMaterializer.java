@@ -145,7 +145,7 @@ public final class RuntimeStateMaterializer {
         runtime.treasury().fundingProgresses().forEachKeyValue((id, value) -> fundingProgress.put(
                 identities.symbol(id), new CoreTreasuryState.FundingProgress(value.settlementId(),
                         value.instrumentVersion(), value.fundingRatePpm(), value.accountLaneId(),
-                        value.nextCursorUserId(), value.commandId())));
+                        value.nextCursorUserId(), value.commandId(), value.markPriceTicks(), value.priceSequence())));
         Map<String, CoreTreasuryState.LifecycleProgress> lifecycleProgress = new TreeMap<>();
         runtime.treasury().lifecycleProgresses().forEachKeyValue((id, value) -> lifecycleProgress.put(
                 identities.symbol(id), new CoreTreasuryState.LifecycleProgress(value.settlementId(),
@@ -175,7 +175,8 @@ public final class RuntimeStateMaterializer {
     static CoreTreasuryState.FundingProgress fundingProgress(
             TreasuryRuntime.FundingProgressRuntime value) {
         return new CoreTreasuryState.FundingProgress(value.settlementId(), value.instrumentVersion(),
-                value.fundingRatePpm(), value.accountLaneId(), value.nextCursorUserId(), value.commandId());
+                value.fundingRatePpm(), value.accountLaneId(), value.nextCursorUserId(), value.commandId(),
+                value.markPriceTicks(), value.priceSequence());
     }
 
     static CoreTreasuryState.LifecycleProgress lifecycleProgress(

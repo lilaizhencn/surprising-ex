@@ -140,6 +140,10 @@ public final class RuntimeCommandProcessor {
             throw new CoreStateRejectedException("STALE_INSTRUMENT_VERSION", "instrument version must increase");
         }
         int symbolId = identities.symbolId(instrument.symbol());
+        if (runtime.treasury().fundingProgress(symbolId) != null
+                || runtime.treasury().lifecycleProgress(symbolId) != null) {
+            throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS", "instrument lifecycle is in progress");
+        }
         identities.assetId(instrument.baseAsset());
         identities.assetId(instrument.quoteAsset());
         identities.assetId(instrument.settleAsset());

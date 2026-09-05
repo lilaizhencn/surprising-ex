@@ -109,7 +109,7 @@ final class RuntimeSnapshotBuilder {
                 new TradingRuntimeSnapshot.FundingProgressSnapshot(progress.settlementId(),
                         progress.instrumentVersion(), progress.fundingRatePpm(), progress.accountLaneId(),
                         progress.nextCursorUserId(),
-                        progress.commandId())));
+                        progress.commandId(), progress.markPriceTicks(), progress.priceSequence())));
         Map<Integer, Long> lifecycleSettlements = new TreeMap<>();
         state.treasury().lifecycleSettlements().forEachKeyValue(lifecycleSettlements::put);
         Map<Integer, TradingRuntimeSnapshot.LifecycleProgressSnapshot> lifecycleProgress = new TreeMap<>();

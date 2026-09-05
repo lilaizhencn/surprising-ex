@@ -356,17 +356,14 @@ public record CoreTreasuryState(
     }
 
     public record FundingProgress(long settlementId, long instrumentVersion, long fundingRatePpm,
-                                 int accountLaneId, long nextCursorUserId, UUID commandId) {
+                                 int accountLaneId, long nextCursorUserId, UUID commandId,
+                                 long markPriceTicks, long priceSequence) {
         public FundingProgress {
             if (settlementId <= 0 || instrumentVersion <= 0 || Math.absExact(fundingRatePpm) > 1_000_000
                     || accountLaneId < 0 || accountLaneId >= Long.SIZE
-                    || nextCursorUserId < 0 || commandId == null) {
+                    || nextCursorUserId < 0 || commandId == null || markPriceTicks <= 0 || priceSequence <= 0) {
                 throw new IllegalArgumentException("invalid funding progress");
             }
-        }
-        public FundingProgress(long settlementId, long instrumentVersion, long fundingRatePpm,
-                               long nextCursorUserId, UUID commandId) {
-            this(settlementId, instrumentVersion, fundingRatePpm, 0, nextCursorUserId, commandId);
         }
     }
 

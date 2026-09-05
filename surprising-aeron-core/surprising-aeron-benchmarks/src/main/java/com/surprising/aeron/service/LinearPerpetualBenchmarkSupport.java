@@ -874,6 +874,13 @@ final class LinearPerpetualBenchmarkSupport {
             return benchmarkTimestamp(sequences.clusterPosition);
         }
 
+        void advanceClockTo(long epochMillis) {
+            if (epochMillis < nextCommandTimestamp()) throw new IllegalArgumentException("clock cannot go backwards");
+            sequences.clusterPosition = Math.max(sequences.clusterPosition,
+                    Math.multiplyExact(Math.subtractExact(epochMillis, BASE_EPOCH_MILLIS),
+                            COMMANDS_PER_LOGICAL_MILLISECOND));
+        }
+
         void refreshMarkPricesIfDue(List<String> symbols) {
             long now = nextCommandTimestamp();
             for (String symbol : symbols) {

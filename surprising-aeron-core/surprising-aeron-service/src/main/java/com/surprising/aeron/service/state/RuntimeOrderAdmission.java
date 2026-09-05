@@ -50,7 +50,8 @@ public final class RuntimeOrderAdmission {
                 && runtime.treasury().lifecycleSettlement(symbolId) != 0;
         return new AdmissionIdentity(identities.findClientKey(userId, order.clientOrderId()),
                 symbolId < 0 ? null : symbolId,
-                identities.findPositionKey(userId, positionIdentity), lifecycleSettled);
+                identities.findPositionKey(userId, positionIdentity), lifecycleSettled,
+                symbolId >= 0 && runtime.treasury().fundingProgress(symbolId) != null);
     }
 
     public static long requiredReservationPrepared(
@@ -82,6 +83,9 @@ public final class RuntimeOrderAdmission {
         }
         if (identity.lifecycleSettled()) {
             throw rejected("INSTRUMENT_SETTLED", "instrument is already settled");
+        }
+        if (identity.fundingInProgress()) {
+            throw rejected("LIFECYCLE_IN_PROGRESS", "funding position cut is in progress");
         }
         validateReservation(runtime.productLine().isDerivative(), instrument, order);
         UserRuntime user = runtime.user(userId);
@@ -269,6 +273,6 @@ public final class RuntimeOrderAdmission {
     }
 
     public record AdmissionIdentity(
-            Long clientKey, Integer symbolId, Long positionKey, boolean lifecycleSettled) {
+            Long clientKey, Integer symbolId, Long positionKey, boolean lifecycleSettled, boolean fundingInProgress) {
     }
 }

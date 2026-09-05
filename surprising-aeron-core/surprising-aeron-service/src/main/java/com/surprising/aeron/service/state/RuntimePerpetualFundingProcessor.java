@@ -68,6 +68,8 @@ public final class RuntimePerpetualFundingProcessor {
         }
 
         TreasuryRuntime.FundingProgressRuntime previousProgress = runtime.treasury().fundingProgress(symbolId);
+        long fundingMark = previousProgress == null ? mark.markPriceTicks() : previousProgress.markPriceTicks();
+        long fundingPriceSequence = previousProgress == null ? mark.priceSequence() : previousProgress.priceSequence();
         boolean chunked = chunkCommandId != null;
         if (chunked) {
             if (previousProgress == null && command.cursorUserId() != 0) {
@@ -87,7 +89,7 @@ public final class RuntimePerpetualFundingProcessor {
 
         Object[] laneResults = runtime.executeLifecycleSettlements(selectedUserIds, Long::longValue,
                 ignored -> applyLane(command, selectedUserIds, runtime, instrument, symbolId,
-                        settleAssetId, mark.markPriceTicks()));
+                        settleAssetId, fundingMark));
         ArrayList<CoreFundingPaymentView> payments = new ArrayList<>();
         RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
         for (Object value : laneResults) {
@@ -107,7 +109,7 @@ public final class RuntimePerpetualFundingProcessor {
         } else {
             runtime.treasury().setFundingProgress(symbolId, new TreasuryRuntime.FundingProgressRuntime(
                     command.settlementId(), command.instrumentVersion(), command.fundingRatePpm(),
-                    userPage.accountLaneId(), nextCursorUserId, chunkCommandId));
+                    userPage.accountLaneId(), nextCursorUserId, chunkCommandId, fundingMark, fundingPriceSequence));
         }
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
         payments.sort(java.util.Comparator.comparingLong(CoreFundingPaymentView::userId));

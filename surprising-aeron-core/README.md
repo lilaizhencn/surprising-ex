@@ -1,5 +1,22 @@
 # Surprising Aeron 统一交易核心
 
+## 生命周期正确性修复（2026-09-06，分阶段验证）
+
+- `CoreProbeState` 放行同一结算的合法续页，但保留 symbol 生命周期互斥与参数/游标检查。
+  `RuntimeSettlementProcessor` 使用与撮合相同的全局降序订单游标和全局升序用户游标；completion mask 只覆盖本页用户。
+- `RuntimePerpetualFundingProcessor` 首批固定 mark price / price sequence，后续页和恢复后不读取新价格计费。
+  资金费期间同 symbol 的下单/改单/强平/ADL 等持仓变更受 fence 保护；标记价更新、风险扫描和查询仍可继续。
+  客户端遇到 `LIFECYCLE_IN_PROGRESS` 应先完成该 symbol 的有界资金费续页，再重试业务，不得计为成功成交。
+  此方案保留了同步生命周期等待，尚不是 owner 全异步优化的验收结果。
+- Funding progress 的计价基准进入 materialized/native snapshot 与恢复 hash；`TradingStateSnapshotCodec` 版本为 26，
+  不兼容旧版 snapshot，不提供旧格式 fallback。部署需清理/重建未上线环境的旧快照，禁止混用版本。
+- `CoreInstrumentState` 拒绝 base/quote 相同的资产配置。`CoreOrderDecisionResolver` 使用 Cluster 时间拒绝到期后新订单；
+  `CoreProbeState` 在撮合变更前拒绝未到期的普通交割，不隐含支持紧急提前结算。
+- 新增 `LifecyclePaginationBenchmark` / `FundingCutBenchmark` 与恢复回归：4 Lane、1 matcher、256 in-flight 窗口、
+  256 交易用户加做市账户；交割 256 个挂单、257 个持仓用户共 32 页，资金费 17 页中插入一次价格更新，逐页恢复。
+- 尚未完成：全仓多仓位净额结算、交割欠款/保险不足闭环，以及后续索引、币本位数学和 owner 异步性能优化。
+  不得据此宣称资金业务全部验收；交割缺口规则待确认，不能擅自把缺口转成 ADL。真实性能记录见根目录 `PERFORMANCE_VALIDATION.md`。
+
 本目录承载按产品线隔离的 Aeron Cluster 交易核心。每个 `ProductLine` 变体使用相同代码、独立 `clusterId`、
 端口空间、Archive 和数据卷；一个逻辑 Core 固定由三个 Member 组成，并管理该变体全部 symbol。
 

@@ -825,19 +825,20 @@ public final class RollingBusinessStateHash {
 
     private static long stableFundingProgress(CoreTreasuryState.FundingProgress value) {
         return fundingProgressHasher(value.settlementId(), value.instrumentVersion(), value.fundingRatePpm(),
-                value.accountLaneId(), value.nextCursorUserId(), value.commandId());
+                value.accountLaneId(), value.nextCursorUserId(), value.commandId(), value.markPriceTicks(), value.priceSequence());
     }
 
     private long stableFundingProgress(TreasuryRuntime.FundingProgressRuntime value) {
         return fundingProgressHasher(value.settlementId(), value.instrumentVersion(), value.fundingRatePpm(),
-                value.accountLaneId(), value.nextCursorUserId(), value.commandId());
+                value.accountLaneId(), value.nextCursorUserId(), value.commandId(), value.markPriceTicks(), value.priceSequence());
     }
 
     private static long fundingProgressHasher(long settlementId, long instrumentVersion, long fundingRatePpm,
-                                              int accountLaneId, long nextCursorUserId, Object commandId) {
+                                              int accountLaneId, long nextCursorUserId, Object commandId,
+                                              long markPriceTicks, long priceSequence) {
         return canonical(CoreTreasuryState.FundingProgress.class).number(settlementId).number(instrumentVersion)
                 .number(fundingRatePpm).number(accountLaneId).number(nextCursorUserId).text(String.valueOf(commandId))
-                .value();
+                .number(markPriceTicks).number(priceSequence).value();
     }
 
     private static long stableLifecycleProgress(CoreTreasuryState.LifecycleProgress value) {

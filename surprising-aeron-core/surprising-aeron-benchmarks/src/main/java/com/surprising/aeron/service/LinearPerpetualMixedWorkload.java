@@ -305,6 +305,19 @@ final class LinearPerpetualMixedWorkload {
                 harness.refreshMarkPricesIfDue(template.symbols());
                 for (int round = 0; round < hftRounds; round++) {
                     int[] tradingSymbols = tradingSymbolIndices(template.scaleConfig(), round);
+                    // A funding cut owns this symbol until its bounded pages finish. Do not
+                    // count rejected trades against that cut as successful mixed workload.
+                    for (int index : tradingSymbols) {
+                        while (fundingCursors[index] != 0) {
+                            var response = harness.execute(harness.command(CoreMessageType.APPLY_FUNDING,
+                                    CommandSource.OPERATIONS, 0, TradingCommandCodec.encodeApplyFunding(
+                                            new ApplyFundingCommand(fundingSettlementIds[index],
+                                                    template.symbols().get(index), 1,
+                                                    (index & 1) == 0 ? 100_000 : -100_000,
+                                                    fundingCursors[index], HEAVY_WORK_BATCH_SIZE))));
+                            fundingCursors[index] = CoreFundingProgressCodec.decode(response.data()).nextCursorUserId();
+                        }
+                    }
                     long tradingBefore = harness.terminalMessages();
                     executeHftBurstsPipelined(harness, template, hftBatchSize, tradingSymbols, maxInFlight);
                     terminalTradingOperations = Math.addExact(terminalTradingOperations,

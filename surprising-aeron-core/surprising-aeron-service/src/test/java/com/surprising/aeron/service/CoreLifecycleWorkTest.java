@@ -100,8 +100,8 @@ class CoreLifecycleWorkTest {
                 Map.of("BTC-USDT", new CoreMarkPriceState("BTC-USDT", 1, 60_000, 9, 1_000)),
                 Map.of(), Map.of(1L, planned, 2L, insurance, 3L, adl), Map.of(), 4);
         CoreTreasuryState treasury = new CoreTreasuryState(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
-                Map.of("BTC-USDT", new CoreTreasuryState.FundingProgress(11, 1, 100, 41,
-                        UUID.fromString("00000000-0000-0000-0000-000000000011"))),
+                Map.of("BTC-USDT", new CoreTreasuryState.FundingProgress(11, 1, 100, 0, 41,
+                        UUID.fromString("00000000-0000-0000-0000-000000000011"), 60_000, 9)),
                 Map.of("BTC-USDT", new CoreTreasuryState.LifecycleProgress(12, 1, 60_000,
                         0, false, 91, 0,
                         UUID.fromString("00000000-0000-0000-0000-000000000012"))));

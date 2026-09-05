@@ -332,17 +332,14 @@ public final class TreasuryRuntime {
     }
 
     public record FundingProgressRuntime(long settlementId, long instrumentVersion, long fundingRatePpm,
-                                         int accountLaneId, long nextCursorUserId, UUID commandId) {
+                                         int accountLaneId, long nextCursorUserId, UUID commandId,
+                                         long markPriceTicks, long priceSequence) {
         public FundingProgressRuntime {
             if (settlementId <= 0 || instrumentVersion <= 0 || Math.absExact(fundingRatePpm) > 1_000_000
                     || accountLaneId < 0 || accountLaneId >= Long.SIZE
-                    || nextCursorUserId < 0 || commandId == null) {
+                    || nextCursorUserId < 0 || commandId == null || markPriceTicks <= 0 || priceSequence <= 0) {
                 throw new IllegalArgumentException("invalid runtime funding progress");
             }
-        }
-        public FundingProgressRuntime(long settlementId, long instrumentVersion, long fundingRatePpm,
-                                      long nextCursorUserId, UUID commandId) {
-            this(settlementId, instrumentVersion, fundingRatePpm, 0, nextCursorUserId, commandId);
         }
     }
 

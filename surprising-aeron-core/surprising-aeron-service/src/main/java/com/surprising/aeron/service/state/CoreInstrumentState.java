@@ -35,6 +35,9 @@ public record CoreInstrumentState(
         baseAsset = AssetBalance.normalizeAsset(baseAsset);
         quoteAsset = AssetBalance.normalizeAsset(quoteAsset);
         settleAsset = AssetBalance.normalizeAsset(settleAsset);
+        if (baseAsset.equals(quoteAsset)) {
+            throw new CoreStateRejectedException("INVALID_COMMAND", "base and quote assets must differ");
+        }
         if (version <= 0 || contractType == null || notionalMultiplierUnits <= 0 || priceTickUnits <= 0
                 || settleScaleUnits <= 0 || initialMarginRatePpm <= 0 || maintenanceMarginRatePpm <= 0
                 || maxLeveragePpm < 1_000_000L || maxPositionNotionalUnits <= 0

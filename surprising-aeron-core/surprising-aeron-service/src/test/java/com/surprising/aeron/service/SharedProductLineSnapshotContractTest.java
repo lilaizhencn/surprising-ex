@@ -172,7 +172,8 @@ class SharedProductLineSnapshotContractTest {
         UUID commandId = UUID.nameUUIDFromBytes((productLine + ":" + source + ":" + sourceSequence + ":" + type)
                 .getBytes(StandardCharsets.UTF_8));
         return new CoreMessage(CoreMessageHeader.command(type, commandId, productLine, source, sourceId,
-                sourceSequence, userId, 1_700_000_000_000L + sourceSequence, sourceSequence), payload);
+                sourceSequence, userId, type == CoreMessageType.SETTLE_INSTRUMENT
+                        ? 2_000_000_000_000L : 1_700_000_000_000L + sourceSequence, sourceSequence), payload);
     }
 
     private static CoreResponse applyTerminal(CoreProbeState state, CoreMessage command) {

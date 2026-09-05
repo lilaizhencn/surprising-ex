@@ -2538,6 +2538,10 @@ public final class CoreProbeState implements AutoCloseable {
 
     private void validatePendingSettlement(DecodedMatchingCommand decodedCommand) {
         var command = decodedCommand.settlement();
+        var instrument = runtimePlaceOrderState.instrument(command.symbol());
+        if (instrument != null && instrument.expiryEpochMillis() > currentClusterTimestamp) {
+            throw new CoreStateRejectedException("INVALID_COMMAND", "instrument has not reached expiry");
+        }
         var progress = runtimeLifecycleProgress(command.symbol());
         if (progress == null && (command.cursorUserId() != 0 || command.cursorOrderId() != 0)) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "settlement cursor must start at zero");
@@ -2592,6 +2596,9 @@ public final class CoreProbeState implements AutoCloseable {
             }
         }
         Integer candidateSymbolId = runtimePlaceOrderIdentities.findSymbolId(candidate.symbol());
+        if (candidateSymbolId != null && runtimePlaceOrderState.treasury().fundingProgress(candidateSymbolId) != null) {
+            throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS", "funding position cut is in progress");
+        }
         boolean settlementProgress = candidateSymbolId != null
                 && runtimePlaceOrderState.treasury().lifecycleProgress(candidateSymbolId) != null;
         if (settlementProgress
@@ -2603,7 +2610,10 @@ public final class CoreProbeState implements AutoCloseable {
             boolean liquidationActive = candidateSymbolId != null
                     && runtimePlaceOrderState.hasActiveLiquidationConflict(
                     candidate.settlement() ? 0 : candidate.userId(), candidateSymbolId, candidate.lifecycleId());
-            if (settlementProgress || liquidationActive) {
+            boolean settlementContinuation = settlementProgress && candidate.settlement()
+                    && runtimePlaceOrderState.treasury().lifecycleProgress(candidateSymbolId).settlementId()
+                    == candidate.lifecycleId();
+            if (settlementProgress && !settlementContinuation || liquidationActive) {
                 throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS",
                         "matching lifecycle scope is in progress");
             }
@@ -2696,7 +2706,7 @@ public final class CoreProbeState implements AutoCloseable {
                                 liquidation.liquidationId(), true, false);
             }
             case SETTLEMENT -> new LifecycleScope(true, 0, decodedCommand.settlement().symbol(),
-                    0, true, false);
+                    decodedCommand.settlement().settlementId(), true, false);
             default -> new LifecycleScope(false, message.header().userId(),
                     matchingSymbol(message, operation, decodedCommand), 0, false, true);
         };
@@ -3995,9 +4005,13 @@ public final class CoreProbeState implements AutoCloseable {
             var liquidation = runtimePlaceOrderState.liquidation(command.liquidationId());
             if (liquidation != null) mask |= matchingAdapter.topology().accountLaneMask(liquidation.userId());
         } else if (pending.operation() == PendingMatching.Operation.SETTLEMENT) {
-            String symbol = pending.decodedCommand().settlement().symbol();
-            for (Long userId : positionUserIndex.users(symbol)) {
-                mask |= matchingAdapter.topology().accountLaneMask(userId);
+            var command = pending.decodedCommand().settlement();
+            var progress = runtimeLifecycleProgress(command.symbol());
+            if (progress != null && progress.ordersComplete()
+                    || !lifecycleOrders(0, command.symbol(), command.cursorOrderId(), command.maxOrders()).more()) {
+                for (long userId : settlementUsers(command.symbol(), command.cursorUserId(), command.maxUsers())) {
+                    mask |= matchingAdapter.topology().accountLaneMask(userId);
+                }
             }
         }
         return mask;

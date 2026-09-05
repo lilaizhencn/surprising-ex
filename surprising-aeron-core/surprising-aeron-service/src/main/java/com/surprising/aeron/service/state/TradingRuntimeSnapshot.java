@@ -261,11 +261,12 @@ public record TradingRuntimeSnapshot(
     }
 
     public record FundingProgressSnapshot(long settlementId, long instrumentVersion, long fundingRatePpm,
-                                          int accountLaneId, long nextCursorUserId, UUID commandId) {
+                                          int accountLaneId, long nextCursorUserId, UUID commandId,
+                                          long markPriceTicks, long priceSequence) {
         public FundingProgressSnapshot {
             if (settlementId <= 0 || instrumentVersion <= 0 || Math.absExact(fundingRatePpm) > 1_000_000
                     || accountLaneId < 0 || accountLaneId >= Long.SIZE
-                    || nextCursorUserId < 0 || commandId == null) {
+                    || nextCursorUserId < 0 || commandId == null || markPriceTicks <= 0 || priceSequence <= 0) {
                 throw new IllegalArgumentException("invalid snapshot funding progress");
             }
         }

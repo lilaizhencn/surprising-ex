@@ -28,6 +28,13 @@ public final class CoreOrderDecisionResolver {
             throw new CoreStateRejectedException("INSTRUMENT_VERSION_CONFLICT", "instrument version differs");
         }
 
+        if (instrument.expiryEpochMillis() > 0 && clusterTimestamp >= instrument.expiryEpochMillis()) {
+            Integer symbolId = identities.findSymbolId(instrument.symbol());
+            boolean settled = symbolId != null && runtime.treasury().lifecycleSettlement(symbolId) != 0;
+            throw new CoreStateRejectedException(settled ? "INSTRUMENT_SETTLED" : "INVALID_COMMAND",
+                    "expired instrument cannot accept new orders");
+        }
+
         boolean spotLimit = instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT
                 && intent.orderType() == CoreOrderType.LIMIT;
         Integer preparedSymbolId = identities.findSymbolId(instrument.symbol());

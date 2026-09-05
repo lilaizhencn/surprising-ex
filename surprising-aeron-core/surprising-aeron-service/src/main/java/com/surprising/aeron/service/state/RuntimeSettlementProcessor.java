@@ -223,52 +223,24 @@ public final class RuntimeSettlementProcessor {
 
     private static UserPage selectUsers(Iterable<Long> indexedUserIds, TradingRuntimeState runtime,
                                         int startLaneId, long startCursorUserId, int limit) {
-        ArrayList<Long> selected = new ArrayList<>();
-        int laneCount = runtime.topology().accountLaneCount();
-        int laneId = startLaneId;
-        long cursorUserId = startCursorUserId;
-        int lastSelectedLaneId = startLaneId;
-        while (laneId < laneCount) {
-            for (Long userId : indexedUserIds) {
-                if (userId == null || runtime.topology().accountLaneId(userId) != laneId
-                        || userId <= cursorUserId) continue;
-                if (selected.size() == limit) {
-                    return new UserPage(selected, lastSelectedLaneId, selected.getLast(), false);
-                }
-                selected.add(userId);
-                lastSelectedLaneId = laneId;
-            }
-            laneId++;
-            cursorUserId = 0;
-        }
-        return new UserPage(selected, laneCount - 1, 0, true);
+        // The command cursor is global, not Lane-local. Core selects this same order.
+        var page = RuntimePerpetualFundingProcessor.selectUsers(indexedUserIds, startCursorUserId, limit);
+        return new UserPage(page.userIds(), 0, page.nextCursorUserId(), page.complete());
     }
 
     private static OrderPage selectOrders(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                           ActiveOrderIndex index, String symbol, int startLaneId,
                                           long startCursorOrderId, int limit) {
-        ArrayList<CoreOrderState> selected = new ArrayList<>();
-        int laneCount = runtime.topology().accountLaneCount();
-        int laneId = startLaneId;
-        long cursorOrderId = startCursorOrderId;
-        int lastSelectedLaneId = startLaneId;
-        while (laneId < laneCount) {
-            for (long orderId : index.sortedIdsDescending(symbol)) {
-                CoreOrderState order = runtime.order(orderId) == null ? null
-                        : RuntimeStateMaterializer.orderSnapshot(runtime.order(orderId), identities);
-                if (order == null || order.status() != CoreOrderStatus.OPEN
-                        || runtime.topology().accountLaneId(order.userId()) != laneId
-                        || orderId <= cursorOrderId) continue;
-                if (selected.size() == limit) {
-                    return new OrderPage(selected, lastSelectedLaneId, selected.getLast().orderId(), false);
-                }
-                selected.add(order);
-                lastSelectedLaneId = laneId;
+        var page = index.page(0, symbol, startCursorOrderId, limit);
+        ArrayList<CoreOrderState> selected = new ArrayList<>(page.orderIds().size());
+        for (long orderId : page.orderIds()) {
+            OrderRuntime order = runtime.order(orderId);
+            if (order == null || order.status() != CoreOrderStatus.OPEN) {
+                throw new IllegalStateException("settlement active order index differs from runtime");
             }
-            laneId++;
-            cursorOrderId = 0;
+            selected.add(RuntimeStateMaterializer.orderSnapshot(order, identities));
         }
-        return new OrderPage(selected, laneCount - 1, 0, true);
+        return new OrderPage(selected, 0, page.nextCursorOrderId(), page.nextCursorOrderId() == 0);
     }
 
     private static List<CoreOrderState> openOrders(TradingRuntimeState runtime,

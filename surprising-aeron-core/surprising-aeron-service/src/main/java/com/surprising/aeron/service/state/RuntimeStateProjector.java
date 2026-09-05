@@ -61,7 +61,8 @@ public final class RuntimeStateProjector {
                 runtime.treasury().setFundingProgress(identities.symbolId(symbol),
                         new TreasuryRuntime.FundingProgressRuntime(progress.settlementId(),
                                 progress.instrumentVersion(), progress.fundingRatePpm(),
-                                progress.accountLaneId(), progress.nextCursorUserId(), progress.commandId())));
+                                progress.accountLaneId(), progress.nextCursorUserId(), progress.commandId(),
+                                progress.markPriceTicks(), progress.priceSequence())));
         source.treasuryState().lifecycleSettlements().forEach((symbol, settlementId) ->
                 runtime.treasury().setLifecycleSettlement(identities.symbolId(symbol), settlementId));
         source.treasuryState().lifecycleProgress().forEach((symbol, progress) ->
