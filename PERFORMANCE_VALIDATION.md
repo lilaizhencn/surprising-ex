@@ -3290,3 +3290,24 @@
 - JMH：1 thread、1 fork、warmup 1×1s、measurement 2×1s；每轮冷却2s；无到达率控制、无 coordinated omission 修正。首轮无 profiler 主分数，第二轮 -prof gc + profile.jfc JFR、NMT summary/退出统计；JFR 开销不可忽略，不能替代主分数。Invocation setup/teardown 恢复和校验不在业务计时内，但 GC/JFR 包含这些工作，不能把 gc.alloc.rate.norm 当作纯交易热路径分配。
 - 预定门禁：业务执行不得异常，页数严格32/18，accepted=terminal，unfinished=0，期末未完成命令/资金差额/不应保留的冻结与仓位为0，恢复 hash 一致。主分数仅要求有限且>0，不能作为容量目标；阈值不对应历史吞吐。JFR DataLoss>0、swap计数增长、CPU_Speed_Limit<100、OOM或资金不变量失败判数据无效，不放宽重跑。
 - 原始产物：surprising-aeron-core/surprising-aeron-benchmarks/target/pv142/；保存 main/gc JSON、控制台、原始JFR、summary/view、NMT、环境前后值及SHA。未测 API 三段/类型尾延迟、真实集群网络、完整native pool峰值、长稳泄漏与故障切换，结论最多部分验证。功能回归先执行 mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am test，566项通过。
+
+### PV-142 结果（2026-09-06 00:07–00:09 +08:00）
+
+- 被测 commit：1a801402；对照 commit：不适用（仅验证当前 master）。执行命令为 `bash surprising-aeron-core/surprising-aeron-benchmarks/target/pv142/run.sh`，脚本内保存五产品线的完整 JMH 参数。原始数据在 `target/pv142/run1/`，commit.txt、jar.sha256、output.sha256 保存代码与逐 JSON/JFR 校验。首次启动因 macOS Bash 3 对空数组的 nounset 行为，在 fork 前退出，没有生成测量数据；保留 pv142 根目录启动记录，修正启动脚本后采集标准与业务代码均未改变。
+- 功能命令：`mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am test`。Product API 12、协议84、instrument API13、service415、benchmark42，共566项通过；日志 `/tmp/product-fix-all-core-tests.log`。中间失败包括新 guard 的 Lane 回读 Treasury（改为 owner 准备 AdmissionIdentity 布尔值）、测试期权 mark 参数次序以及旧 mixed workload 跨 funding fence 交易（改为先续完该 symbol 的页），均在本轮构建前修复并全量重跑。未运行 PG/exporter/wallet。
+
+|产品线|无 profiler terminal business ops/s|GC+JFR ops/s（归因用）|gc.alloc.rate.norm B/op（含恢复）|gc.alloc.rate MiB/s|GC 次数 / 时间 ms（GC profiler）|
+|---|---:|---:|---:|---:|---:|
+|LINEAR_DELIVERY|2668.55|2638.93|1484220.64|883.63|14 / 43|
+|INVERSE_DELIVERY|2599.73|2531.45|1487383.31|859.96|13 / 39|
+|OPTION|2530.88|2453.01|1481752.32|840.70|13 / 39|
+|LINEAR_PERPETUAL|5875.00|5424.82|2280316.53|1187.87|23 / 51|
+|INVERSE_PERPETUAL|5385.36|5470.28|2301677.65|1211.87|24 / 50|
+
+- 业务计数：交割每 invocation 固定32个有界结算命令，共撤256单、结算257用户；资金费每 invocation 固定17个资金费命令和1次 mark update。各 invocation 校验 acceptedBusinessOperations=terminalBusinessOperations、acceptedCoreMessages=terminalCoreMessages，差值/unfinished 为0；本次不存在批量订单接口测量，测量 fills=0，fixture 成交另计。总累计计数、最大 backlog 和业务类型尾延迟未额外输出；不能作完整容量验收。JMH 仅2次 measurement，scoreError/CI 为 NaN，原始结果保留，不补造置信区间。
+- 五份 JFR 均约5s、1.4–1.5MiB，DataLoss=0。JFR profile 包含 invocation 恢复/验证，因此表内1.48–2.30MB/op不是纯业务热路径分配，不能据此认定交易每单分配这些字节；主吞吐只覆盖生命周期执行，也不能与普通下单/混合流量比较。
+- 以 INVERSE_DELIVERY 为例：分配样本 long[]26.35%、Object[]16.25%、byte[]15.62%、CoreOrderState8.63%；benchmark owner/恢复线程占88.41%，matcher线程分散占用，其余Lane与初始化线程见 allocation-by-thread/thread-cpu-load。CPU样本可见 awaitAnyMatchingCommitReady、TreeMap、matcher event、Lane worker构造和snapshot恢复；重建反复起线程使JIT/构造成本混入记录，不宣称已越过主要编译期。未创建独立风险、Aeron/Kafka或export线程，不能把这些分组缺失解释为零成本。监视器竞争样本0、ThreadPark241，未取得完整墙钟阻塞分解，不能宣称无等待。
+- 同一 JFR GC 全记录窗口18次pause、总60.4ms、p50 3.15ms、p95/p99/max 8.86ms；它包含启动/恢复，不能与GC profiler测量窗口13次39ms相混。NMT采样 heap512MiB、GC native69.0→69.4MiB、code22.0→31.3MiB、metaspace16.2→21.9MiB，全部类别与退出统计在 native-memory-committed/gc.log。DirectBufferStatistics事件0，TLAB精确分配事件0，仅 ObjectAllocationSample1210/ThreadAllocationStatistics40可用；native池峰值、对象数/op及TLAB内外精确分解缺失。
+- Safepoint、VM operation、JIT/deoptimization、file/socket I/O和异常聚合保存在各产品线view文件；异常以MethodHandle/反射和jnr初始化为主，没有基准业务失败。采样还包含类加载/JMH控制通信，未完成业务owner同步I/O逐栈排除，故不宣称主链路I/O门禁完成。
+- 系统采集窗口 CPU_Speed_Limit 均100、Pages throttled=0；Swapins832→832、Swapouts2431→2431、Pageouts48287→48287。满足本轮短诊断系统门禁，但没有长稳、多轮GC后live set/native slope、真实API/WebSocket与三节点HA证据。
+- 结论：这批分页、资金费基准及到期/配置保护修复通过已测功能/恢复场景，性能仅部分诊断；不宣称整体交易性能优化或资金全场景验收完成。全仓净额/保险不足处置仍需业务规则确认，随后才进行剩余性能优化。
