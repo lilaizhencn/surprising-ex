@@ -26,8 +26,9 @@ CROSS 只共享该 Core 内权益，ISOLATED 绑定 position identity。只保�
 数量为 2 的幂的 matcher shard。每个 shard 固定拥有一个 worker、一条预分配有界 SPSC ring 和一个独立的
 `SynchronousMatchingEngine(matchingEnginesNum=1)`；symbol 通过 `routeVersion=3` 稳定路由，运行中不 rebalance。
 exchange-core risk engine 固定为 0。不同 shard 的完成队列互不等待，同一 symbol 始终在同一 matcher worker 内保持 FIFO。
-各 shard 可以乱序完成并写回各自的 sequence context，但 owner 只从全局连续完成头按序安装 Account Lane 终态并发布 Aeron
-边界；因此撮合可以并行在途，同账户资金和订单仍保持确定性顺序。
+各 shard 可以在一条命令内部并行计算并写回各自的 sequence context，owner 在原始日志回调内收集 completion、
+安装 Account Lane 终态并返回响应。生产 `SurprisingClusteredService` 不再跨日志回调保留未完成命令；
+内部 Core harness 的跨命令流水线能力不能视为 Cluster service 的执行模型。
 snapshot、全盘口 bootstrap、全局状态 hash 和 userId=0 控制命令仍建立显式全分片 fence。
 
 PLACE 在进入 matcher 前先以单向事件投递给用户所属 Lane，由该 Lane 串行完成余额冻结、order/reservation 和 client-order
@@ -38,7 +39,7 @@ PLACE 在进入 matcher 前先以单向事件投递给用户所属 Lane，由该
 安装这些终态、合并 Treasury delta 并发布响应和 Aeron 边界。
 Account Lane 按 owner 发布的全局连续 Core sequence 串行应用，因此跨 symbol 的同账户事件不会因 matcher 乱序完成而重排。
 普通命令需要推进多个 Lane watermark 时使用可复用的 sequence-local `LaneCommitEvent` 一次投递到全部目标 SPSC ring，owner
-只观察 completion bitmap；允许固定 256 个 commit sequence 同时在途，不再逐 Lane `await/awaitConsumed`。同步命令响应边界仍等待
+观察 completion bitmap；Core 内部环容量仍为 256，但 Cluster 回调返回前必须收齐本条命令及其子撮合的终态。响应边界等待
 该 sequence 的完整 bitmap，查询和 snapshot fence 仍保留必要的一致性等待。不存在 Disruptor、逐命令 Future、临时 Runnable
 fan-out 或 Owner/Lane 所有权切换。
 
@@ -55,8 +56,21 @@ replica、projector 线程或 per-command freeze。普通命令只更新权威 m
 query/snapshot fence 直接物化。生产不启动 Core Fact materializer；`CoreExportEvent`/codec 仅作为未来历史出口的
 协议边界保留。
 
-Cluster 本地进度不写复制 timer。Aeron publication 遇到 `BACK_PRESSURED`/`ADMIN_ACTION` 时保留有界 egress，
-遇到 `CLOSED`/`NOT_CONNECTED`/`MAX_POSITION_EXCEEDED` 时 fail closed。默认 UDP term length 为 16 MiB，
+### Cluster 确定性日志回调边界
+
+`SurprisingClusteredService.onSessionMessage` 收到的是已经提交的日志输入，不是等待 owner 再发布的未提交命令。
+撮合、Lane 结算、风险/触发生成的子撮合、book query 收尾均在该回调返回前完成；无 client session 的重放/服务命令也执行同样边界。
+等待使用 `cluster.idleStrategy()`，本地 30 秒截止或中断只产生节点执行失败，不合成为可复制的业务拒绝。
+`doBackgroundWork` 固定返回 0：Aeron 1.53 的运行时同样禁止这里调用 `ClientSession.offer`。
+响应在原始日志回调内使用单个可复用缓冲区编码和投递；瞬时背压使用 Cluster idle strategy 重试，1 秒仍未投递则请求关闭会话，
+业务结果不回滚，客户端按原 commandId 查询。慢消费者最多占用这段重试预算，生产容量与超时策略仍需真实网络验证。
+回调未完成或执行异常转为 `AgentTerminationException`，避免 AgentRunner 仅记录异常后继续消费下一条日志。
+删除了 deferred ingress、pending-client、pending-query 及按会话 egress/recycle 队列。Snapshot 只捕获已完成回调的状态，发现遗留业务工作直接失败，
+不能在 snapshot 回调补做交易。此实现允许必要等待，不再以“owner 完全不等待”为验收目标。
+真实三节点选举/重放、完整容量与所有产品线性能尚需独立验证；内部 callback JMH 不能冒充 Cluster HA 吞吐。
+
+Cluster 本地进度不写复制 timer。Aeron publication 遇到 `BACK_PRESSURED`/`ADMIN_ACTION`/`NOT_CONNECTED` 时有界重试，
+遇到不可重试错误停止投递（结果未知，客户端用原 commandId 查询），日志回调内请求关闭失败会话。默认 UDP term length 为 16 MiB，
 Archive 本地 control 为 1 MiB；term buffer 使用非 sparse 文件。线程模式可显式配置，否则 12 CPU 及以上用
 `DEDICATED`，更小机器用 `SHARED_NETWORK`，避免在桌面环境制造无意义的 busy-spin 争用。
 

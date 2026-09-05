@@ -15,7 +15,7 @@ import org.agrona.concurrent.NoOpIdleStrategy;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.openjdk.jmh.annotations.*;
 
-/** Real service ingress/egress and non-waiting completion pump; no external transport. */
+/** Deterministic service log callbacks, with 256-request submission waves; no external transport. */
 @BenchmarkMode(Mode.Throughput)
 @OutputTimeUnit(TimeUnit.SECONDS)
 @Warmup(iterations = 3, time = 3)
@@ -152,9 +152,10 @@ public class ClusteredBatchTradingBenchmark {
             // Resting maker liquidity remains present throughout all iterations.
             CoreMessage maker = command(CoreMessageType.PLACE_ORDER, 1_256,
                     TradingCommandCodec.encodePlaceOrder(order(1, CoreOrderSide.SELL, 120)));
-            var response = service.state().apply(maker);
-            if (response.resultCode() != CoreResultCode.MATCHING_PENDING) throw new IllegalStateException("maker failed");
-            drain();
+            byte[] makerBytes = CoreMessageCodec.encode(maker);
+            service.onSessionMessage(null, 1_700_000_000_000L, new UnsafeBuffer(makerBytes),
+                    0, makerBytes.length, header);
+            service.state().assertClusterCallbackComplete();
         }
 
         public void run() {
@@ -229,12 +230,13 @@ public class ClusteredBatchTradingBenchmark {
         private void send(CoreMessage message) {
             byte[] bytes = CoreMessageCodec.encode(message);
             service.onSessionMessage(session, 1_700_000_000_000L, new UnsafeBuffer(bytes), 0, bytes.length, header);
+            service.state().assertClusterCallbackComplete();
             maxBacklog = Math.max(maxBacklog, service.state().pendingMatchingCount());
         }
 
         private void drain() {
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
-            // Deferred ingress is included: pendingMatchingCount alone is not an ingress fence.
+            // Only response delivery may remain outside the deterministic log callback.
             int work;
             do {
                 work = service.doBackgroundWork(System.nanoTime());

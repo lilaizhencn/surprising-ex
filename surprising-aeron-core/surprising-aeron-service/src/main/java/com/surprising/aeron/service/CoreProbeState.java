@@ -5128,6 +5128,15 @@ public final class CoreProbeState implements AutoCloseable {
         return fatalFailure;
     }
 
+    void assertClusterCallbackComplete() {
+        if (!activated) activate();
+        runtime.assertOwner();
+        assertHealthy();
+        if (!pendingMatching.isEmpty() || !queryIds.isEmpty()) {
+            throw new IllegalStateException("unfinished business work outside cluster log callback");
+        }
+    }
+
     private void assertHealthy() {
         if (commitPublicationFailure != null) throw commitPublicationFailure;
         if (runtimePlaceOrderState != null) runtimePlaceOrderState.assertAccountLanesHealthy();

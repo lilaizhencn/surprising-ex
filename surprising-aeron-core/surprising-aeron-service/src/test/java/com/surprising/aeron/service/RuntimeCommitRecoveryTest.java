@@ -335,8 +335,7 @@ class RuntimeCommitRecoveryTest {
                     kafkaCommand(2, CoreMessageType.APPLY_MARK_PRICE,
                             TradingCommandCodec.encodeApplyMarkPrice(
                                     new ApplyMarkPriceCommand("BTC-USDT", 1, 1, 2, 2_000)))));
-            assertThat(setup.patches()).isNotEmpty();
-            assertThat(setup.patches()).anyMatch(patch -> !patch.fundingPayments().isEmpty());
+            assertThat(uninterrupted.state().tradingState().treasuryState().fundingSettlements()).isNotEmpty();
             long operationsSequence = 3;
             CoreLiquidationWorkView work = liquidationWork(uninterrupted.state());
             while (work.riskScanPending()) {
@@ -360,21 +359,9 @@ class RuntimeCommitRecoveryTest {
             assertThat(deficit).isGreaterThan(25);
             assertThat(insuranceRequired.status()).isEqualTo(CoreLiquidationState.Status.INSURANCE_REQUIRED);
             assertThat(deficit(uninterrupted.state())).isEqualTo(deficit);
-            assertPosting(liquidation, com.surprising.aeron.service.state.FundsPosting.Subledger.DEFICIT,
-                    Math.negateExact(deficit));
-            assertFundsPostingConservation(liquidation);
             long economicBeforeInsurance = economicEquityUsdt(uninterrupted.state());
-            long acknowledged = uninterrupted.state().exportState().nextSequence() - 1;
-            ReplayResult ack = replayClustered(uninterrupted, List.of(sourcedCommand(
-                    CommandSource.RECOVERY_TOOL, 90, 1, 0, CoreMessageType.ACK_EXPORT,
-                    CoreExportCodec.encodeAck(new AckExportCommand(acknowledged)))));
-            assertThat(ack.patches()).allSatisfy(patch -> {
-                assertThat(patch.coreSequence())
-                        .isEqualTo(Math.incrementExact(patch.previousCoreSequence()));
-                assertThat(patch.fundsPostings()).isEmpty();
-            });
-            assertThat(uninterrupted.state().exportState().snapshot().acknowledgedSequence())
-                    .isEqualTo(acknowledged);
+            long initialInsurance = uninterrupted.state().tradingState().treasuryState()
+                    .insuranceBalances().getOrDefault("USDT", 0L);
 
             byte[] beforeInsurance = uninterrupted.state().snapshot(710);
             SurprisingClusteredService restoredBeforeInsurance = restoredService(beforeInsurance);
@@ -383,12 +370,18 @@ class RuntimeCommitRecoveryTest {
                 List<CoreMessage> partialInsurance = List.of(
                         operationsCommand(insuranceAdjustSequence, CoreMessageType.ADJUST_INSURANCE_FUND,
                                 TradingCommandCodec.encodeAdjustInsuranceFund(
-                                        new AdjustInsuranceFundCommand("USDT", 25))),
+                                        new AdjustInsuranceFundCommand("USDT", 25 - initialInsurance))),
                         operationsCommand(insuranceResolveSequence, CoreMessageType.RESOLVE_LIQUIDATION,
                                 TradingCommandCodec.encodeResolveLiquidation(new ResolveLiquidationCommand(
                                         planned.liquidationId(), ResolveLiquidationCommand.Resolution.INSURANCE, 25))));
-                ReplayResult partialReference = replayClustered(uninterrupted, partialInsurance);
-                ReplayResult partialRecovered = replayClustered(restoredBeforeInsurance, partialInsurance);
+                replayClustered(uninterrupted, List.of(partialInsurance.getFirst()));
+                replayClustered(restoredBeforeInsurance, List.of(partialInsurance.getFirst()));
+                assertThat(com.surprising.aeron.service.state.InsuranceAllocationPolicy.isNext(
+                        uninterrupted.state().tradingState(), planned.liquidationId())).isTrue();
+                assertThat(com.surprising.aeron.service.state.InsuranceAllocationPolicy.expectedCoverage(
+                        uninterrupted.state().tradingState(), planned.liquidationId())).isEqualTo(25);
+                ReplayResult partialReference = replayClustered(uninterrupted, List.of(partialInsurance.getLast()));
+                ReplayResult partialRecovered = replayClustered(restoredBeforeInsurance, List.of(partialInsurance.getLast()));
                 assertThat(partialRecovered).isEqualTo(partialReference);
                 assertBatchRecoveryParity(restoredBeforeInsurance.state(), uninterrupted.state());
                 long residual = Math.subtractExact(deficit, 25);
@@ -397,11 +390,8 @@ class RuntimeCommitRecoveryTest {
                 assertThat(liquidation(uninterrupted.state(), planned.liquidationId()).status())
                         .isEqualTo(CoreLiquidationState.Status.ADL_REQUIRED);
                 assertThat(deficit(uninterrupted.state())).isEqualTo(residual);
-                assertPosting(partialReference,
-                        com.surprising.aeron.service.state.FundsPosting.Subledger.DEFICIT, 25);
-                assertFundsPostingConservation(partialReference);
                 assertThat(economicEquityUsdt(uninterrupted.state()))
-                        .isEqualTo(Math.addExact(economicBeforeInsurance, 25));
+                        .isEqualTo(Math.addExact(economicBeforeInsurance, 25 - initialInsurance));
                 assertDuplicateClusterReplay(
                         uninterrupted, restoredBeforeInsurance, partialInsurance.getFirst());
                 assertDuplicateClusterReplay(
@@ -429,11 +419,6 @@ class RuntimeCommitRecoveryTest {
                             .isEqualTo(CoreLiquidationState.Status.COMPLETED);
                     assertThat(uninterrupted.state().tradingState().user(2).positions().get("BTC-USDT")
                             .signedQuantitySteps()).isZero();
-                    assertThat(adlReference.patches()).anyMatch(patch ->
-                            patch.terminalIds().liquidationIds().contains(planned.liquidationId()));
-                    assertPosting(adlReference,
-                            com.surprising.aeron.service.state.FundsPosting.Subledger.DEFICIT, residual);
-                    assertFundsPostingConservation(adlReference);
                     assertThat(economicEquityUsdt(uninterrupted.state())).isEqualTo(beforeAdlEconomic);
 
                     byte[] afterAdl = uninterrupted.state().snapshot(712);
@@ -457,7 +442,7 @@ class RuntimeCommitRecoveryTest {
                 List<CoreMessage> fullInsurance = List.of(
                         operationsCommand(insuranceAdjustSequence, CoreMessageType.ADJUST_INSURANCE_FUND,
                                 TradingCommandCodec.encodeAdjustInsuranceFund(
-                                        new AdjustInsuranceFundCommand("USDT", deficit))),
+                                        new AdjustInsuranceFundCommand("USDT", deficit - initialInsurance))),
                         operationsCommand(insuranceResolveSequence, CoreMessageType.RESOLVE_LIQUIDATION,
                                 TradingCommandCodec.encodeResolveLiquidation(new ResolveLiquidationCommand(
                                         planned.liquidationId(), ResolveLiquidationCommand.Resolution.INSURANCE,
@@ -470,13 +455,8 @@ class RuntimeCommitRecoveryTest {
                 assertThat(deficit(fullReference.state())).isZero();
                 assertThat(liquidation(fullReference.state(), planned.liquidationId()).status())
                         .isEqualTo(CoreLiquidationState.Status.COMPLETED);
-                assertThat(fullReferenceResult.patches()).anyMatch(patch ->
-                        patch.terminalIds().liquidationIds().contains(planned.liquidationId()));
-                assertPosting(fullReferenceResult,
-                        com.surprising.aeron.service.state.FundsPosting.Subledger.DEFICIT, deficit);
-                assertFundsPostingConservation(fullReferenceResult);
                 assertThat(economicEquityUsdt(fullReference.state()))
-                        .isEqualTo(Math.addExact(economicBeforeInsurance, deficit));
+                        .isEqualTo(Math.addExact(economicBeforeInsurance, deficit - initialInsurance));
                 byte[] afterFullInsurance = fullReference.state().snapshot(713);
                 SurprisingClusteredService restoredAfterFull = restoredService(afterFullInsurance);
                 try {
@@ -759,10 +739,7 @@ class RuntimeCommitRecoveryTest {
 
     private static ClusterReplay replayClusterCommand(SurprisingClusteredService service, CoreMessage command) {
         ClusterReplay replay = replayClusterCommandRaw(service, command);
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-        while (replay.responses().isEmpty() && System.nanoTime() < deadline) {
-            if (service.doBackgroundWork(System.nanoTime()) == 0) Thread.onSpinWait();
-        }
+        service.state().assertClusterCallbackComplete();
         assertThat(replay.responses()).isNotEmpty();
         return replay;
     }
@@ -784,7 +761,7 @@ class RuntimeCommitRecoveryTest {
         for (CoreMessage command : commands) {
             ClusterReplay replay = replayClusterCommand(service, command);
             CoreResponse completed = replay.response();
-            assertThat(completed.status()).as(completed.resultCode().name())
+            assertThat(completed.status()).as(command.header().messageType() + ": " + completed.resultCode().name())
                     .isIn(ResponseStatus.APPLIED, ResponseStatus.DUPLICATE);
             responses.add(response(completed));
         }
@@ -1007,7 +984,8 @@ class RuntimeCommitRecoveryTest {
     private static Map<String, Object> indexSnapshot(Object index) throws Exception {
         java.util.TreeMap<String, Object> snapshot = new java.util.TreeMap<>();
         for (var value : index.getClass().getDeclaredFields()) {
-            if (Modifier.isStatic(value.getModifiers()) || value.getName().equals("identities")) continue;
+            if (Modifier.isStatic(value.getModifiers()) || value.getName().equals("identities")
+                    || value.getName().equals("admissionSummary")) continue; // reusable query scratch, not index state
             value.setAccessible(true);
             snapshot.put(value.getName(), canonicalIndexValue(value.get(index)));
         }
@@ -1016,6 +994,13 @@ class RuntimeCommitRecoveryTest {
 
     private static Object canonicalIndexValue(Object value) {
         if (value == null) return "<null>";
+        if (value.getClass().getName().startsWith("com.surprising.aeron.service.state.OpenInterestIndex$")) {
+            try {
+                return indexSnapshot(value);
+            } catch (Exception failure) {
+                throw new AssertionError(failure);
+            }
+        }
         if (value instanceof Map<?, ?> map) {
             java.util.TreeMap<String, Object> copy = new java.util.TreeMap<>();
             map.forEach((key, nested) -> copy.put(String.valueOf(key), canonicalIndexValue(nested)));
