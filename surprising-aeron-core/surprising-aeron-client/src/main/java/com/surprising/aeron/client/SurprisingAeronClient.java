@@ -336,7 +336,9 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
             if (message.header().correlationId() < 0) {
                 return;
             }
-            responses.put(message.header().correlationId(), CoreProtocol.decodeResponse(message.payload()));
+            // The decoded message is private to this callback; response decoding establishes
+            // its own ownership before the Aeron fragment or this message can be released.
+            responses.put(message.header().correlationId(), CoreProtocol.decodeResponse(message.payloadUnsafe()));
         } catch (RuntimeException exception) {
             sessionFailure = new IllegalStateException("failed to decode Aeron Cluster egress response", exception);
         }

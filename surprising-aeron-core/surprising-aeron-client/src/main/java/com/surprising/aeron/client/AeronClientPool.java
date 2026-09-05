@@ -578,7 +578,10 @@ public final class AeronClientPool implements AutoCloseable {
         private final long sourceId;
         private final AtomicLong nextSequence = new AtomicLong();
         private final AtomicLong nextCorrelation = new AtomicLong();
-        private final Map<Long, Request> pending = new LinkedHashMap<>();
+        // Insertion order is deadline order: only the dispatcher assigns the same timeout
+        // immediately after each successful offer.
+        private final LinkedHashMap<Long, Request> pending = new LinkedHashMap<>();
+        private final java.util.SequencedCollection<Request> pendingInDeadlineOrder = pending.sequencedValues();
         private final Set<Long> claimedCorrelations = ConcurrentHashMap.newKeySet();
         private volatile Session session;
         private long reconnectAtNanos;
@@ -679,6 +682,7 @@ public final class AeronClientPool implements AutoCloseable {
                 request.releaseCorrelation();
                 return false;
             }
+            java.util.concurrent.locks.LockSupport.unpark(egressDispatcher.thread);
             failure = dispatcherFailure.get();
             if ((closed.get() || dispatcherStopped.get() || failure != null) && mailbox.remove(request)) {
                 if (failure == null) {
@@ -765,13 +769,11 @@ public final class AeronClientPool implements AutoCloseable {
                         expireAdmitted(lane);
                     }
                     if (!worked) {
-                        try {
-                            TimeUnit.MILLISECONDS.sleep(1);
-                        } catch (InterruptedException exception) {
+                        java.util.concurrent.locks.LockSupport.parkNanos(this, 100_000L);
+                        if (Thread.currentThread().isInterrupted()) {
                             if (!closed.get()) {
-                                Thread.currentThread().interrupt();
                                 dispatcherFailure.compareAndSet(null,
-                                        new IllegalStateException("Aeron dispatcher interrupted", exception));
+                                        new IllegalStateException("Aeron dispatcher interrupted"));
                             }
                             break;
                         }
@@ -924,8 +926,8 @@ public final class AeronClientPool implements AutoCloseable {
 
         private void expireAdmitted(AgentLane lane) {
             long now = System.nanoTime();
-            boolean expired = lane.pending.values().stream()
-                    .anyMatch(request -> now >= request.deadlineNanos);
+            boolean expired = !lane.pendingInDeadlineOrder.isEmpty()
+                    && now - lane.pendingInDeadlineOrder.getFirst().deadlineNanos >= 0;
             if (expired) {
                 lane.pending.values().forEach(Request::resultUnknown);
                 lane.pending.clear();
