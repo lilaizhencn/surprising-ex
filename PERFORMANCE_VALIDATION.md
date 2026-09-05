@@ -3204,3 +3204,14 @@
 - 正确性与有效性门禁：business/Core accepted 必须分别等于 terminal，两个 unfinished、技术错误、超时及期末 backlog 为0；所有批/item成功；用户与maker余额、冻结、持仓、订单终态、资金守恒、风险计划、long保护以及完成态 snapshot hash/资金恢复一致。交易 after-GC 稳态斜率 <1MiB/s、native buffer <256KiB/s、线程/FD/buffer count斜率 <0.01/s且至少3个有效GC样本；明显系统限速、swap、DataLoss或门禁不闭合使对应性能轮无效。
 - 已完成改动后定向测试：protocol 9项、service扩展交易/资金/风险/恢复测试176项、benchmark真实夹具29项及 ordered batch 8项均通过；一次 benchmark 运行暴露 Lane 条件 unpark 的 lost-wakeup，修复为生产者发布后无条件 unpark 并复跑通过。最终采集脚本会在 HotSpot 25 重新构建并运行核心受影响测试。artifact 固定为 `target/qualification/20260905-owner-lane-risk-256-r138/`，保存命令、环境、JAR/JFC/脚本 SHA、JSON、JFR、summary/views、系统样本和输出 SHA。
 - 不启动或测试 PostgreSQL、exporter、wallet、Kafka、API、WebSocket、market-data或真实三节点 Aeron Cluster；不运行旧版本、不改变 matcher 数、不采集其他 in-flight。交易长稳不是 open-loop API 容量测试，风险短轮不能证明长期无泄漏；未测项不纳入通过结论。采集开始后不修改上述参数、阈值或口径，失败与无效轮次照实追加。
+
+### PV-138 结果（采集前失败，2026-09-05 22:20 +08:00）
+
+- 尚未开始任何 JMH/JFR 性能采样。第一次预构建的 service 81项通过，但整类 `CoreOrderedOrderBatchTest` 命中 PV-134 已记录的4项旧 exporter/异步契约失败；保留 `earlier-known-tests-failures.log`，改为已知有效的8个受影响方法。第二次预构建 service 受影响测试通过，benchmark 29项中 `allLinearPerpetualScenariosCompleteOnFourAccountLanes` 的 `partialFill` 偶发看到 Lane queue depth=1；该轮在采集前终止，不产生性能结论。
+- 根因是 worker 执行 Lane 命令并发布 terminal completion 后才更新 ring consumer cursor。owner 合法观察到 terminal 后，测试/指标可能在 worker 执行尾声读取到瞬时 depth=1；这不是业务 mutation 未完成，但违反 terminal 时队列已排空的指标契约。生产修复把已读取到本地变量的 ring slot 和 consumer cursor 在执行命令前释放，使 terminal completion 只能发生在消费游标前移之后；同时保留本地命令引用，不允许覆盖影响执行。相同4-Lane全场景方法连续独立运行10次全部通过。修复提交为 `6cd2adf7`，因此 PV-138 的 `cd980758` 不再是最终代码，另开 PV-139。
+
+## PV-20260905-256-139：最终 owner/Lane/risk 热路径优化验收（采集前锁定）
+
+- 被测 git commit：`6cd2adf799953dcc99766f7e50d3c5572fe95efe`；对照 commit：不适用（仅验证当前 `master`）。完整修改范围沿用 PV-138，并增加 terminal completion 与 Lane ring consumer cursor 的确定性先后修复。PV-138 未采集任何性能数据，不作为对照。
+- 环境、JVM、交易场景、风险场景、固定 256 in-flight、4 Lane、1 matcher、用户/symbol/负载配置、预热/测量/冷却、JFR/NMT/GC参数、业务计数口径、正确性门禁及未测范围全部与 PV-138 相同。吞吐门槛保持交易 mixed `>=120,000 terminal business ops/s`、OPTION risk `>=40,000 terminal business/Core ops/s`；风险分配门槛保持 `<=15,000 B/business op`，长稳斜率门槛不变。采集开始后不修改参数或阈值。
+- 采集前额外门禁为4-Lane全业务 benchmark 方法连续10次通过，最终构建只选择8个仍有效的 ordered-batch方法，旧 exporter/历史异步断言不纳入当前路径。artifact 固定为 `target/qualification/20260905-owner-lane-risk-256-r139/`；保存失败/成功测试日志、环境、命令与 SHA。若系统限速、swap、DataLoss、资金/snapshot/终态门禁失败，则对应轮次无效并照实记录。
