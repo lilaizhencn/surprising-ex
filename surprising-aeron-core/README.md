@@ -89,6 +89,155 @@ mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/sur
 Service 415 项、Benchmark 功能测试 33 项及依赖模块 109 项，共 557 项通过，无失败或跳过。
 本次属于测试契约修正，未启动外围服务或重跑 JMH/JFR，不形成新的性能验收结论。
 
+## 交易事件出口与查询隔离审计（2026-09-06）
+
+审计基线：`e2c7ce29`（包含近期资金偿付与生命周期分页修复）。本节为第一步源码审计与后续实施方案，未实现新出口、查询投影或推送协议。
+当前会话无可调用的 CodeGraph 工具，依据源码调用、Kafka 生产/消费引用和配置核对；未连接运行环境，
+不能据此判断线上 Kafka 是否已有历史消息、PG 是否有旧投影数据，或给出查询延迟与推送吞吐数值。
+
+### 结论与现有链路
+
+**当前缺失的是 Core 已提交变更到外围的可靠出口，不是 WebSocket 发送组件。**
+单笔命令回执已经可以让发起方获得本次订单结果，但不包含对手方订单、完整成交与账户更新，
+也不能覆盖无 HTTP 请求的触发、资金费、强平、交割和行权。不能拿命令回执代替全量业务事件流。
+
+```mermaid
+flowchart LR
+    HTTP[下单与状态查询 HTTP] --> Pool[AeronClientPool]
+    Pool --> Core[Cluster service / Core owner]
+    Core --> Lane[Matcher 与 Account Lane]
+    Lane --> Commit[终态提交与结果保留]
+    Commit --> Receipt[本次命令回执]
+    Commit -. 尚未接通可靠业务出口 .-> Kafka[产品线 Kafka topic]
+    Kafka --> Read[外围查询视图：尚待补齐写入链路]
+    Kafka --> Fanout[KafkaFanoutConsumer]
+    Fanout --> Queue[每连接有界发送队列]
+    Queue --> Client[用户 WebSocket]
+```
+
+| 范围 | 当前类和方法 | 源码事实与影响 |
+| --- | --- | --- |
+| Cluster 回调 | `SurprisingClusteredService.onSessionMessage/processRequest/completeMatching` | 当前日志回调等待 matcher/Account Lane 终态；异步 book 查询也在回调中等待结果，然后回复。不能在这里接用户 fanout 或 Kafka 等待。 |
+| 回复 | `SurprisingClusteredService.offerResponse` | 对发起 session 回复；背压会有限重试，超时关闭 session。它不是广播出口，也不是完全无等待的发送。 |
+| 单笔提交 | `CoreProbeState.completeMatching` 及 `completeDispatchedMatcherSettlement/completeDispatchedCancel` | 结算、资金校验、推进提交序号、保留命令结果；事件设计要覆盖实际分派分支，不能只挂到一个通用方法。 |
+| 批量提交 | `CoreProbeState.applyCompletedOrderBatchItem/finishOrderBatch` | 逐项有状态与 executions；批次最终响应中的已回收订单视图可以为空。批次出口必须区分 itemIndex 和同一 item 的多笔 fill。 |
+| 内部变更提交 | `CoreProbeState.OwnerCommitPublisher.execute` → `TradingCoreRuntime.commitRuntimeChanges` → `RuntimeFactIndexes.applyCurrent` | 安装索引、汇总资金、推进 journal sequence，随后清除 changed keys；这是内部提交，不是业务 Kafka 发布。 |
+| 变更结构 | `RuntimeFactFrame`、`RuntimeCommitJournal.publish` | Fact 类型仍存在，但当前 owner 路径发布 sequence，journal 不保存可供外围持久消费的完整交易日志；不能把类名当成已启用出口。 |
+| 停用出口 | `CoreExportState.enabled/pending`、`CoreProbeState.apply` | enabled=false、pending 为空；ACK_EXPORT / EXPORT_BATCH_QUERY / EXPORT_STATUS_QUERY 返回 INVALID_MESSAGE。不能恢复对旧出口的轮询。 |
+| 命令回执 | `CoreProbeState.materializeCommandOrderViews/commandResultData`、`AeronOrderCommandService.receipt` | 普通 PLACE/CANCEL 回执围绕本次订单，单笔 executions 为空；HTTP 已可返回 TERMINAL/RESULT_UNKNOWN/NOT_ACCEPTED。终态去重记录不是订单历史库。 |
+
+### 公共和私有推送盘点
+
+| 数据 | 当前消费者/发送方法 | 缺口 |
+| --- | --- | --- |
+| 公共逐笔成交 | `CandlestickStreamConfiguration.candlestickTopology` 消费 `PublicTradeEvent`；价格服务也读取成交 | 在当前主源码未找到由 Core 成交发布 PublicTradeEvent 的完整生产链路；`WsChannel` 没有 trades 频道。 |
+| 盘口深度、最优买卖价 | `MatchingMarketDataService.orderBookSnapshot` → `MatchingAeronGateway.orderBookProjection`，另有 bootstrap 分页 | 仍通过 Core BOOK 查询；`ProductTopicNames` 定义 depth/bookTicker topic 不代表存在生产者，WS 也未定义对应频道。撤单、改单和挂单都改变盘口，不能仅用成交重建。 |
+| K 线 | `CandlestickStreamConfiguration.candlestickTopology` → `CandleUpdateCoalescer.publish` → `KafkaFanoutConsumer.onCandleBatch` | 聚合及 fanout 可复用，端到端仍依赖上游成交输入；不应重新做 K 线聚合。 |
+| 指数价、标记价、资金费率 | `KafkaFanoutConsumer.onPriceEventBatch/onFundingRate` | 有独立价格/费率输入与消费者；这不证明 Core 的成交/结算变更已发布。资金费率更新不等于用户实际资金费扣收。 |
+| 私有订单、执行报告 | `KafkaFanoutConsumer.onOrderEvent/fromOrderEvent` | OrderEvent 主要是状态和原因；转换出的 execution report 多个成交字段为空，不能代替真实成交报告，也不足以完整维护未完成订单列表。 |
+| 私有触发单 | `KafkaFanoutConsumer.onTriggerOrderEvent` | 已有消费和用户路由；当前未找到 Core 状态变更到该 topic 的完整生产链路。 |
+| 私有持仓 | `KafkaFanoutConsumer.onPosition` | 已有 productLine 和 partitionKey 检查；缺当前 Core 发布端。 |
+| 余额、冻结、账户状态 | `AccountService` 的状态查询；topic 定义中有 account.state | `WsChannel` 未提供余额/账户状态频道；accountRisk 不能替代余额和冻结的准确值。 |
+| 风险 | `KafkaFanoutConsumer.onAccountRisk/onPositionRisk` | 有消费者；需要核对并补齐 Core 强平/ADL/保险/风险状态到外围的变更源，不能从订单回执推算。 |
+
+现有可复用部分：`SubscriptionRegistry.publish/publishTimedBatch` 按订阅 topic 复用序列化结果，
+`ClientConnection.sendBatch/drain/watchSendTimeout` 使用有界队列与虚拟线程发送，满队列/超时关闭慢连接。
+发送队列不会无限增长；但 `sendBatch` 的溢出关闭分支会调用底层 `session.close`，
+其是否延迟 fanout 仍需故障测试，不能仅凭注释保证消费线程绝无阻塞。
+`WebSocketProperties.getGroupId` 与 application.yml 按产品线和节点构造消费组，同节点本地 fanout 可复用；
+部署时仍须保证实例组 ID 唯一。私有订阅由 `SubscriptionTopic.fromCommand` 绑定已认证 userId。
+
+`ClientWebSocketHandler.subscribe` 目前仅注册订阅并 ACK；`WsClientCommand` 没有续传游标，
+`WsServerMessage.event` 没有统一的流序号和快照水位。`CoreWebSocketEventId` 虽存在，但未见接入当前
+fanout 主路径。尚无“首次一致快照 + 增量 + 漏消息检测 + 断线补齐”的完整协议。
+
+### 查询是否影响交易链路
+
+**会竞争 Core 处理时间；已有读限流和实体上限不等于读写执行隔离。**
+`AeronClientPool.queryAsync` 按 `CoreQueryClass` 区分普通读与保留控制通道，最终仍通过
+`SurprisingAeronClient.offer` 进入 Cluster。纯内存查询不等待数据库，不代表不会增加后续交易排队时间；
+`RuntimeStateQueryService.userState` 还会构造并排序用户余额、预留、持仓等视图。具体影响需要混合负载测量。
+
+| 用户请求 | 当前调用路径 | 后续归属 |
+| --- | --- | --- |
+| 未完成订单、订单详情 | `OrderService.openOrders/get/getByClientOrderId` → `AeronOrderCommandService` → `OrderAeronGateway.openOrders/orderState/orderStateByClientOrderId` → Core | 常规 UI 查询改读外围投影；已回收终态订单不能继续依赖 Core 活动状态查询。 |
+| 余额、持仓 | `AccountService.balances/positions` → `AccountAeronGateway.userState` → Core USER_STATE_QUERY | 建用户读视图，按资产和完整 position identity 返回，不重新在外围裁决资金。 |
+| 未完成触发单 | `TriggerOrderAeronGateway.openOrders/query/get/getAsync` → Core trigger 查询 | 独立投影视图和用户增量；触发生成的普通子单要有关联 ID。 |
+| 盘口 | `MatchingAeronGateway.orderBookProjection/orderBookBootstrapPage` → Core | 外围读盘口用于展示；它不是第二个可执行撮合簿。bootstrap 只做受控初始化/补齐。 |
+| 历史订单 | `OrderService.historyOrders` → `AeronOrderProjectionRepository.historyOrders/execute` → PG | 已有读路径与 `ProjectionWatermarkWaiter`，但当前未找到 core_order_projection/core_projection_watermark 的生产写入链路；不能认定历史查询已完整可用。 |
+| 命令结果、风险与运营控制 | commandResult、preflight、风险/结算进度等 Core 查询 | 保留必要权威查询及限流，不能将业务校验改成依赖可能落后的外围视图。 |
+
+普通订单查询接口中仍有 `minExportSequence` 参数，但活动订单路径没有使用它；历史投影使用旧 export 水位。
+新协议应明确 `observedCoreSequence/minCoreSequence` 的含义与超时状态，不能把恒为零的
+requiredExportSequence 当成“投影已经追上”的证据，也不能假设 projection sequence 等于 core sequence。
+
+### 六条产品线必须覆盖的事件
+
+共同事件：挂单、部分/全部成交、撤单、改单、拒绝、释放冻结、触发/取消/过期、批量逐项结果。
+下表列出分线增量要求；资金单位和精度来自各 instrument，不能在通用发送器里写死 USDT/BTC 或重新计算结算。
+
+| ProductLine | 当前规则/执行类 | 分线事件重点 |
+| --- | --- | --- |
+| SPOT | `SpotTradingRules`、`RuntimeSpotMatchProcessor` | 买卖双方基础/报价资产、冻结和手续费；不伪造衍生品持仓。 |
+| LINEAR_PERPETUAL | `LinearPerpetualTradingRules`、`RuntimeDerivativeMatchProcessor` | 线性持仓、保证金、已实现盈亏；资金费、强平/ADL/保险相关账户变更。 |
+| INVERSE_PERPETUAL | `InversePerpetualTradingRules`、`RuntimeDerivativeMatchProcessor` | 反向合约数量与结算资产单位；其余按本线实际风险/资金费结果发布。 |
+| LINEAR_DELIVERY | `LinearDeliveryTradingRules`、`RuntimeSettlementProcessor` | 交割现金流、交割撤单/触发单处理、持仓归零与结算进度；不发布永续资金费。 |
+| INVERSE_DELIVERY | `InverseDeliveryTradingRules`、`RuntimeSettlementProcessor` | 反向交割现金流与精度、持仓归零、结算进度；不复用线性金额算法。 |
+| OPTION | `OptionTradingRules`、`OptionFillCalculator`、`RuntimeSettlementProcessor` | 买卖方权利金、卖方保证金、行权/到期失效及最终持仓；不套永续资金费模型。 |
+
+资金费入口检查 `RuntimePerpetualFundingProcessor.applyRuntime`，生命周期入口检查
+`RuntimeSettlementProcessor.applyRuntime/advanceCancellationRuntime`。最终发布统一消费 owner 已裁决的值；
+产品规则类继续只负责业务规则，不各自增加 Kafka/WS 发布器。所有事件包含 productLine、commandId、
+coreSequence 和批次内稳定序号；涉及合约时带 symbol/instrumentVersion，资产变更带 asset。
+私有持仓键保留 userId、symbol、marginMode、positionSide。
+
+### 后续按类和方法实施（以下为拟新增/拟调整，尚未实现）
+
+| 顺序 | 类和方法建议 | 职责与验收边界 |
+| --- | --- | --- |
+| 1 | 拟 `CommittedTradingBatchCodec.encode/decode`、`CommittedTradingBatchCapture.capture/seal` | 在变更/成交证据被清除或回收前，按 owner 已有 changed keys 与结算结果捕获最小必要值；包含双方订单、实际 fill、余额/冻结、持仓、触发单、必要财务记录与删除标记。只在资金校验和终态提交成功后对外可见；失败中间态不得发布。避免逐命令全状态副本。 |
+| 2 | 拟 `CommittedTradingEventRelay.pollCommitted/publishBatch/resumeFrom` | 独立外围进程，负责持久消费位置、重复处理和 Kafka 发布；消费端落后不反向进入 owner。其输入的可恢复性必须先落实，见下文。 |
+| 3 | 拟 `TradingEventProjector.applyBatch`；扩展现有 `AeronOrderProjectionRepository`，新增最少的用户/触发单读存储 | 幂等应用、版本拒旧、删除终态活动项；视图和对应水位原子推进。先核对缺失 schema/写入路径，不另建重复订单 repository。PG 历史和当前读视图的职责要明确。 |
+| 4 | 拟 `PublicMarketDataProjector.applyTrade/applyBookChange/snapshot` | 公共逐笔成交去隐私，按 symbol 建深度/最优价读视图，复用现有 PublicTradeEvent/K 线拓扑。为盘口定义自己的连续序号、删除档位与 snapshot 水位。 |
+| 5 | 调整 `KafkaFanoutConsumer`、`WsChannel`、`WsServerMessage` | 增加 trades/depth/bookTicker/accountState；私有订单携带足以更新 UI 的已裁决字段。延续产品线 topic 边界，不直接把内部账户 batch 发公共频道。 |
+| 6 | 拟 `SubscriptionBootstrapService.bootstrap/resume`，调整 `ClientWebSocketHandler.subscribe` | 先建立有界增量缓冲，再获取水位 S 的一致读快照，发送快照后只交付 S 之后的增量；缓冲溢出/保留期外必须明确要求重新同步。 |
+| 7 | 调整 `OrderService`、`AccountService`、`TriggerOrderService`、`MatchingMarketDataService` 的普通查询入口 | UI 读取外围快照，返回 observed 水位；要求读己之写时等待外围追上指定命令水位，超时明确返回未追上，不能静默把读流量切回 Core。 |
+
+**先解决可靠源，再实现第 2 项 relay。** 当前没有独立的可重放业务输出流，Aeron Transport/SBE 本身也不能补齐
+这个应用层缺口。单纯加内存队列，在进程崩溃或队列满时无法同时保证“不等外围”和“私有事件不丢”。
+优先验证从现有已提交 Cluster 日志及配对快照，在独立进程确定性恢复/重放并生成相同事件 ID 的可行性；
+这是拟实现的生产能力，不是把现有离线诊断工具直接上线。必须处理代码版本、快照包含的状态、日志保留、
+提交位置边界、内部触发/风险子命令，以及订单已回收后的历史重建范围。
+若采用主进程快速输出作为低延迟路径，只能把内存交接当加速，缺口补齐仍须有上述已证明的持久来源。
+在可靠源方案验收前，不接真实用户私有推送，不重启旧 Core-Fact exporter 作为替代。
+
+协议需要另外明确：公开流按 symbol 排序；私有流按 productLine + userId 排序；跨 topic 的同一业务变更
+通过批次 ID 和水位关联，不声称 Kafka 多 topic 天然原子可见。全局 coreSequence 对单个用户天然可能跳号，
+不能用“+1”检测其丢消息；需单用户流序号或可验证的 prevSequence。初始快照和续传游标应来自同一读模型，
+超过保留期明确重置。报价可按协议合并，成交/财务事件不能静默丢弃。
+
+### 实施验收清单
+
+- 六条线分别覆盖 maker/taker、部分成交、多 fill、撤改、批量混合成功/拒绝、冻结释放；验证账户和做市账户资金守恒。
+- 覆盖无 HTTP 请求的触发/OCO、资金费、强平/ADL/保险、交割/行权及持仓归零，不能只测下单请求返回。
+- relay/Kafka/读库/WS 各自停止、重启；在提交后发布前、发布后落水位前注入故障，验证不漏、可去重、按序恢复。
+- Leader 切换、快照恢复与提交边界重放，比较事件 ID/内容、终态订单和读视图水位；不得发布未提交日志派生结果。
+- 快照与订阅并发、断线重连、重复和乱序消息、保留期外游标、跨产品线/用户越权、慢连接断开均有明确结果。
+- 在固定 256 in-flight、1 个 matching engine 下运行实际受影响 JMH/JFR 与混合查询/推送负载，按根 AGENTS.md
+  预先锁定验收标准并追加 PERFORMANCE_VALIDATION.md；本次静态审计不替代这一步，也不承诺零性能成本。
+
+源码导航：
+[CoreProbeState](surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java)、
+[Cluster service](surprising-aeron-service/src/main/java/com/surprising/aeron/service/SurprisingClusteredService.java)、
+[Runtime 查询](surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeStateQueryService.java)、
+[订单服务](../surprising-trading/surprising-trading-provider/src/main/java/com/surprising/trading/order/service/OrderService.java)、
+[账户服务](../surprising-account/surprising-account-provider/src/main/java/com/surprising/account/provider/service/AccountService.java)、
+[触发单网关](../surprising-trading/surprising-trading-provider/src/main/java/com/surprising/trading/trigger/service/TriggerOrderAeronGateway.java)、
+[盘口网关](../surprising-market-data/surprising-market-data-provider/src/main/java/com/surprising/trading/matching/service/MatchingAeronGateway.java)、
+[Kafka fanout](../surprising-gateway/src/main/java/com/surprising/websocket/provider/service/KafkaFanoutConsumer.java)、
+[WS 连接](../surprising-gateway/src/main/java/com/surprising/websocket/provider/service/ClientConnection.java)、
+[产品线 topic](../surprising-product-api/src/main/java/com/surprising/product/api/ProductTopicNames.java)。
+
 ## 当前按 Symbol 分片的 Matcher 流水线主链路
 
 每个 Product Core 仍只有一个 Aeron Cluster service owner，但可以在 fresh compatible state 启动前配置 1–64 个、
