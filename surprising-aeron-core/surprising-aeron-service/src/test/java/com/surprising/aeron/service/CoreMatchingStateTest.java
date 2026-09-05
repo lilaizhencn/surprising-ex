@@ -10,10 +10,11 @@ import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
-import com.surprising.aeron.protocol.CoreExportCodec;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreResponse;
+import com.surprising.aeron.protocol.CoreCommandResultCodec;
+import com.surprising.aeron.protocol.CoreOrderStateView;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
@@ -184,19 +185,15 @@ class CoreMatchingStateTest {
             CoreResponse completed = drainMatching(state, state.apply(order), order);
 
             assertThat(completed.status()).isEqualTo(ResponseStatus.APPLIED);
-            state.exportState().pending();
-            CoreMessage exportQuery = new CoreMessage(CoreMessageHeader.query(
-                    CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(), ProductLine.SPOT,
-                    CommandSource.OPERATIONS, 88, 0, 0, 3, 3), CoreExportCodec.encodeBatchQuery(20));
-            var events = CoreExportCodec.decodeBatchResponse(state.apply(exportQuery).data()).events().stream()
-                    .map(message -> CoreExportCodec.decodeEvent(message.payload()))
-                    .filter(event -> event.commandId().equals(order.header().commandId()))
-                    .toList();
-
-            assertThat(events).singleElement()
-                    .satisfies(event -> assertThat(event.resultCode()).isEqualTo(CoreResultCode.NONE));
+            var result = CoreCommandResultCodec.decode(completed.data());
+            assertThat(result.commandId()).isEqualTo(order.header().commandId());
+            assertThat(result.coreSequence()).isEqualTo(completed.appliedCommandCount());
+            assertThat(orderIn(completed, 202).status()).isEqualTo("OPEN");
+            assertThat(orderIn(completed, 202).remainingQuantitySteps()).isEqualTo(2);
+            assertThat(result.executions()).isEmpty();
+            assertThat(state.tradingState().user(22).balances().get("USDT").lockedUnits()).isEqualTo(200);
+            assertThat(state.exportState().pending()).isEmpty();
             assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.OPEN);
-            assertThat(events.getFirst().terminalIds().orderIds()).isEmpty();
         }
     }
 
@@ -210,12 +207,13 @@ class CoreMatchingStateTest {
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 101)));
             apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
                     place(101, CoreOrderSide.SELL, 100, 1, ReservationKind.SPOT_ASSET, "BTC", 1));
-            apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
+            CoreResponse receipt4 = apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
                     place(202, CoreOrderSide.BUY, 0, 1, ReservationKind.SPOT_ASSET, "USDT", 100,
                             CoreOrderType.MARKET, CoreTimeInForce.IOC, 100, false));
 
-            assertThat(state.tradingState().order(202).priceTicks()).isZero();
-            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.FILLED);
+            assertThat(orderIn(receipt4, 202).priceTicks()).isZero();
+            assertThat(orderIn(receipt4, 202).status()).isEqualTo("FILLED");
+            assertThat(state.tradingState().order(202)).isNull();
             assertThat(state.tradingState().user(22).balances().get("USDT").lockedUnits()).isZero();
             assertThat(state.tradingState().orders().values())
                     .noneMatch(order -> order.status() == CoreOrderStatus.OPEN);
@@ -233,12 +231,13 @@ class CoreMatchingStateTest {
             apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
                     place(101, CoreOrderSide.SELL, 100, 5, ReservationKind.SPOT_ASSET, "BTC", 5));
             int restingBookHash = awaitMatchingHash(state);
-            apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
+            CoreResponse receipt4 = apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
                     place(202, CoreOrderSide.BUY, 100, 3, ReservationKind.SPOT_ASSET, "USDT", 300));
 
             assertThat(state.tradingState().order(101).status()).isEqualTo(CoreOrderStatus.OPEN);
             assertThat(state.tradingState().order(101).remainingQuantitySteps()).isEqualTo(2);
-            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.FILLED);
+            assertThat(orderIn(receipt4, 202).status()).isEqualTo("FILLED");
+            assertThat(state.tradingState().order(202)).isNull();
             assertThat(state.tradingState().user(11).totalUnits("BTC")).isEqualTo(7);
             assertThat(state.tradingState().user(11).totalUnits("USDT")).isEqualTo(300);
             assertThat(state.tradingState().user(22).totalUnits("BTC")).isEqualTo(3);
@@ -255,7 +254,8 @@ class CoreMatchingStateTest {
                 assertThat(awaitMatchingHash(restored)).isEqualTo(matchedBookHash);
                 apply(restored, 5, 22, CoreMessageType.PLACE_ORDER,
                         place(203, CoreOrderSide.BUY, 100, 2, ReservationKind.SPOT_ASSET, "USDT", 200));
-                assertThat(restored.tradingState().order(101).status()).isEqualTo(CoreOrderStatus.FILLED);
+                assertThat(restored.terminalRetention().containsOrder(101, 11, "")).isTrue();
+                assertThat(restored.tradingState().order(101)).isNull();
                 assertThat(restored.tradingState().orders().values())
                         .noneMatch(order -> order.status() == CoreOrderStatus.OPEN);
             }
@@ -387,11 +387,13 @@ class CoreMatchingStateTest {
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1_000)));
             apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
                     place(101, CoreOrderSide.SELL, 100, 2, ReservationKind.DERIVATIVE_MARGIN, "USDT", 300));
-            apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
+            CoreResponse receipt4 = apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
                     place(202, CoreOrderSide.BUY, 100, 2, ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
 
-            assertThat(state.tradingState().order(101).status()).isEqualTo(CoreOrderStatus.FILLED);
-            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.FILLED);
+            assertThat(state.terminalRetention().containsOrder(101, 11, "")).isTrue();
+            assertThat(state.tradingState().order(101)).isNull();
+            assertThat(orderIn(receipt4, 202).status()).isEqualTo("FILLED");
+            assertThat(state.tradingState().order(202)).isNull();
             assertThat(state.tradingState().user(11).positions().get("BTC-USDT").signedQuantitySteps()).isEqualTo(-2);
             assertThat(state.tradingState().user(22).positions().get("BTC-USDT").signedQuantitySteps()).isEqualTo(2);
             assertThat(state.tradingState().user(11).totalUnits("USDT")).isEqualTo(1_200);
@@ -487,15 +489,23 @@ class CoreMatchingStateTest {
                             ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
 
             assertThat(state.tradingState().order(203).status()).isEqualTo(CoreOrderStatus.OPEN);
-            assertThat(state.tradingState().order(204).status()).isEqualTo(CoreOrderStatus.CANCELED);
+            assertThat(state.terminalRetention().containsOrder(204, 22, "")).isTrue();
+            assertThat(state.tradingState().order(204)).isNull();
             assertThat(state.tradingState().order(205).status()).isEqualTo(CoreOrderStatus.OPEN);
-            apply(state, 8, 11, CoreMessageType.PLACE_ORDER,
+            assertThat(state.tradingState().user(22).positions().get("BTC-USDT").signedQuantitySteps()).isEqualTo(2);
+            assertThat(state.tradingState().user(22).reservations()).doesNotContainKey(204L);
+            CoreResponse receipt8 = apply(state, 8, 11, CoreMessageType.PLACE_ORDER,
                     placeWithFees(301, CoreOrderSide.BUY, 130, 2, false,
                             ReservationKind.DERIVATIVE_MARGIN, "USDT", 200,
                             CoreOrderType.LIMIT, CoreTimeInForce.IOC, 130, false, 0, 0));
-            assertThat(state.tradingState().order(203).status()).isEqualTo(CoreOrderStatus.FILLED);
-            assertThat(state.tradingState().order(204).status()).isEqualTo(CoreOrderStatus.CANCELED);
-            assertThat(state.tradingState().order(205).status()).isEqualTo(CoreOrderStatus.FILLED);
+            assertThat(orderIn(receipt8, 301).status()).isEqualTo("FILLED");
+            assertThat(orderIn(receipt8, 301).executedQuantitySteps()).isEqualTo(2);
+            assertThat(state.terminalRetention().containsOrder(203, 22, "")).isTrue();
+            assertThat(state.tradingState().order(203)).isNull();
+            assertThat(state.terminalRetention().containsOrder(204, 22, "")).isTrue();
+            assertThat(state.tradingState().order(204)).isNull();
+            assertThat(state.terminalRetention().containsOrder(205, 22, "")).isTrue();
+            assertThat(state.tradingState().order(205)).isNull();
             assertThat(state.tradingState().user(22).positions().get("BTC-USDT").signedQuantitySteps()).isZero();
         }
     }
@@ -514,13 +524,15 @@ class CoreMatchingStateTest {
                             CoreOrderType.LIMIT, CoreTimeInForce.GTC, 100, false, -50_000, 0));
 
             long fundsBefore = total(state, "USDT");
-            apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
+            CoreResponse receipt4 = apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
                     placeWithFees(202, CoreOrderSide.BUY, 100, 2, false,
                             ReservationKind.DERIVATIVE_MARGIN, "USDT", 200,
                             CoreOrderType.LIMIT, CoreTimeInForce.IOC, 100, false, 0, 100_000));
 
-            assertThat(state.tradingState().order(101).status()).isEqualTo(CoreOrderStatus.FILLED);
-            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.FILLED);
+            assertThat(state.terminalRetention().containsOrder(101, 11, "")).isTrue();
+            assertThat(state.tradingState().order(101)).isNull();
+            assertThat(orderIn(receipt4, 202).status()).isEqualTo("FILLED");
+            assertThat(state.tradingState().order(202)).isNull();
             assertThat(state.tradingState().user(11).positions().get("BTC-USDT").signedQuantitySteps())
                     .isEqualTo(-2);
             assertThat(state.tradingState().user(22).positions().get("BTC-USDT").signedQuantitySteps())
@@ -554,15 +566,17 @@ class CoreMatchingStateTest {
                             CoreOrderType.LIMIT, CoreTimeInForce.GTC, 110, false, 0, 100_000));
 
             long fundsBeforeClose = total(state, "USDT");
-            apply(state, 7, 22, CoreMessageType.PLACE_ORDER,
+            CoreResponse receipt7 = apply(state, 7, 22, CoreMessageType.PLACE_ORDER,
                     placeWithFees(204, CoreOrderSide.SELL, 0, 1, true,
                             ReservationKind.DERIVATIVE_MARGIN, "USDT", 1_000,
                             CoreOrderType.MARKET, CoreTimeInForce.IOC, 90, false, 0, 100_000));
 
-            assertThat(state.tradingState().order(204).status()).isEqualTo(CoreOrderStatus.FILLED);
+            assertThat(orderIn(receipt7, 204).status()).isEqualTo("FILLED");
+            assertThat(orderIn(receipt7, 204).executedQuantitySteps()).isEqualTo(1);
+            assertThat(state.tradingState().order(204)).isNull();
             assertThat(state.tradingState().user(22).positions().get("BTC-USDT").signedQuantitySteps()).isZero();
             assertThat(state.tradingState().user(22).balances().get("USDT").lockedUnits()).isZero();
-            assertThat(state.tradingState().user(22).reservations().get(204L).remainingUnits()).isZero();
+            assertThat(state.tradingState().user(22).reservations()).doesNotContainKey(204L);
             assertThat(total(state, "USDT")).isEqualTo(fundsBeforeClose);
         }
     }
@@ -593,13 +607,15 @@ class CoreMatchingStateTest {
             long fundsBefore = total(state, settlementAsset);
             long feeBefore = state.tradingState().treasuryState().feeBalances()
                     .getOrDefault(settlementAsset, 0L);
-            apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
+            CoreResponse receipt4 = apply(state, 4, 22, CoreMessageType.PLACE_ORDER,
                     placeWithFees(202, CoreOrderSide.BUY, 100, 2, false, reservationKind,
                             buyerAsset, buyerReservation, CoreOrderType.LIMIT, CoreTimeInForce.IOC,
                             100, false, 100_000, 200_000));
 
-            assertThat(state.tradingState().order(101).status()).isEqualTo(CoreOrderStatus.FILLED);
-            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.FILLED);
+            assertThat(state.terminalRetention().containsOrder(101, 11, "")).isTrue();
+            assertThat(state.tradingState().order(101)).isNull();
+            assertThat(orderIn(receipt4, 202).status()).isEqualTo("FILLED");
+            assertThat(state.tradingState().order(202)).isNull();
             assertThat(state.tradingState().treasuryState().feeBalances().getOrDefault(settlementAsset, 0L))
                     .isGreaterThan(feeBefore);
             assertThat(total(state, settlementAsset)).isEqualTo(fundsBefore);
@@ -607,7 +623,7 @@ class CoreMatchingStateTest {
     }
 
     @Test
-    void spotMatchExportsTheChangedTreasuryBalance() {
+    void spotMatchCommitsTheChangedTreasuryBalance() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applyInstrument(state, 100_000, 200_000);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
@@ -625,23 +641,14 @@ class CoreMatchingStateTest {
 
             CoreResponse completed = drainMatching(state, state.apply(buyer), buyer);
             assertThat(completed.status()).isEqualTo(ResponseStatus.APPLIED);
-            state.exportState().pending();
-            CoreMessage exportQuery = new CoreMessage(CoreMessageHeader.query(
-                    CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(), ProductLine.SPOT,
-                    CommandSource.OPERATIONS, 88, 0, 0, 5, 5), CoreExportCodec.encodeBatchQuery(20));
-            var event = CoreExportCodec.decodeBatchResponse(state.apply(exportQuery).data()).events().stream()
-                    .map(message -> CoreExportCodec.decodeEvent(message.payload()))
-                    .filter(value -> value.commandId().equals(buyer.header().commandId()))
-                    .max(java.util.Comparator.comparingLong(
-                            com.surprising.aeron.protocol.CoreExportEvent::exportSequence))
-                    .orElseThrow();
-
-            assertThat(event.fundsPostings()).anySatisfy(posting -> {
-                assertThat(posting.asset()).isEqualTo("USDT");
-                assertThat(posting.subledger())
-                        .isEqualTo(com.surprising.aeron.protocol.CoreFundsPostingView.Subledger.FEE);
-                assertThat(posting.units()).isEqualTo(60);
-            });
+            assertThat(orderIn(completed, 202).status()).isEqualTo("FILLED");
+            assertThat(orderIn(completed, 202).executedQuantitySteps()).isEqualTo(2);
+            assertThat(state.tradingState().treasuryState().feeBalances()).containsEntry("USDT", 60L);
+            assertThat(total(state, "USDT")).isEqualTo(240);
+            assertThat(total(state, "BTC")).isEqualTo(2);
+            assertThat(state.tradingState().user(11).totalUnits("USDT")).isEqualTo(180);
+            assertThat(state.tradingState().user(22).totalUnits("USDT")).isZero();
+            assertThat(state.exportState().pending()).isEmpty();
         }
     }
 
@@ -730,10 +737,13 @@ class CoreMatchingStateTest {
             try (CoreProbeState restored = CoreProbeState.fromSnapshot(productLine, snapshot)) {
                 assertThat(restored.tradingState()).isEqualTo(state.tradingState());
                 assertThat(awaitMatchingHash(restored)).isEqualTo(awaitMatchingHash(state));
-                apply(restored, 7, 22, CoreMessageType.PLACE_ORDER,
+                CoreResponse receipt7 = apply(restored, 7, 22, CoreMessageType.PLACE_ORDER,
                         place(202, CoreOrderSide.BUY, 100, 4, reservationKind, buyerAsset, 400));
 
-                assertThat(restored.tradingState().order(101).status()).isEqualTo(CoreOrderStatus.FILLED);
+                assertThat(orderIn(receipt7, 202).status()).isEqualTo("FILLED");
+                assertThat(orderIn(receipt7, 202).executedQuantitySteps()).isEqualTo(4);
+                assertThat(restored.terminalRetention().containsOrder(101, 11, "")).isTrue();
+                assertThat(restored.tradingState().order(101)).isNull();
                 assertThat(restored.tradingState().order(102).status()).isEqualTo(CoreOrderStatus.OPEN);
                 assertThat(restored.tradingState().order(102).remainingQuantitySteps()).isEqualTo(5);
             }
@@ -854,7 +864,13 @@ class CoreMatchingStateTest {
                 ? "BTC" : "USDT";
     }
 
-    private static void apply(
+    private static CoreOrderStateView orderIn(CoreResponse receipt, long orderId) {
+        return CoreCommandResultCodec.decode(receipt.data()).orders().stream()
+                .filter(order -> order.orderId() == orderId).findFirst()
+                .orElseThrow(() -> new AssertionError("missing order " + orderId + " in command receipt"));
+    }
+
+    private static CoreResponse apply(
             CoreProbeState state,
             long sequence,
             long userId,
@@ -865,6 +881,7 @@ class CoreMatchingStateTest {
         assertThat(response.status()).as("%s %s users=%s orders=%s", messageType, response.resultCode(),
                         state.tradingState().users().keySet(), state.tradingState().orders().keySet())
                 .isIn(ResponseStatus.APPLIED, ResponseStatus.OK);
+        return response;
     }
 
     private static CoreResponse drainMatching(CoreProbeState state, CoreResponse response, CoreMessage message) {

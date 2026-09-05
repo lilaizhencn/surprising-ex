@@ -68,6 +68,7 @@ class CoreOrderDecisionResolverTest {
     void spotLimitUsesItsLimitAndInstrumentDefaultWithoutAMark() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = runtime(spotInstrument());
+        identities.symbolId("BTC-USDT");
         PlaceOrderCommand intent = new PlaceOrderCommand(91, "BTC-USDT", 1, CoreOrderSide.SELL, 60_000, 2,
                 false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                 CoreTimeInForce.GTC, false, "client-91");

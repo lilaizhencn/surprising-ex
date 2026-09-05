@@ -30,7 +30,7 @@ class CoreCommandFingerprintTest {
         assertThat(conflict.resultCode().name()).isEqualTo("IDEMPOTENCY_CONFLICT");
         assertThat(state.probeValue()).isEqualTo(7);
         assertThat(state.appliedCommandCount()).isOne();
-        assertThat(state.exportState().nextSequence()).isEqualTo(2);
+        assertThat(state.exportState().nextSequence()).isEqualTo(1);
         assertThat(state.lastSourceSequences())
                 .containsEntry(new CoreProbeState.SourceKey(CommandSource.GATEWAY, 7), 1L);
     }

@@ -158,17 +158,24 @@ class CoreResultLedgerTest {
     }
 
     @Test
-    void requiredExportSequenceIsNotAppliedCommandCountAfterExportAck() {
+    void rejectedExportAckDoesNotAdvanceCommandProgress() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             state.apply(probe(UUID.randomUUID(), 1, 1));
             CoreMessage ack = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ACK_EXPORT,
                     UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 9, 1, 0,
                     2_000, 81), CoreExportCodec.encodeAck(new AckExportCommand(1)));
-            assertThat(state.apply(ack).status()).isEqualTo(ResponseStatus.APPLIED);
+            long hashBefore = state.stateHash();
+            long countBefore = state.appliedCommandCount();
+            CoreResponse rejected = state.apply(ack);
+            assertThat(rejected.status()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.INVALID_MESSAGE);
+            assertThat(state.stateHash()).isEqualTo(hashBefore);
+            assertThat(state.appliedCommandCount()).isEqualTo(countBefore);
+            assertThat(state.commandResults()).doesNotContainKey(ack.header().commandId());
 
             CoreResponse response = state.apply(probe(UUID.randomUUID(), 2, 2));
-            assertThat(response.appliedCommandCount()).isEqualTo(3);
-            assertThat(response.requiredExportSequence()).isEqualTo(2);
+            assertThat(response.appliedCommandCount()).isEqualTo(2);
+            assertThat(response.requiredExportSequence()).isZero();
             assertThat(response.requiredExportSequence()).isNotEqualTo(response.appliedCommandCount());
         }
     }

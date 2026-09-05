@@ -21,12 +21,10 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.protocol.CoreResponse;
-import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.CoreOrderBatchResult;
 import com.surprising.aeron.protocol.PlaceOrderBatchCommand;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
-import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
@@ -35,11 +33,6 @@ import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.MarkPriceRuntime;
-import com.surprising.aeron.service.state.TriggerOrderIndex;
-import com.surprising.aeron.service.state.AlgoOrderIndex;
-import com.surprising.aeron.service.state.LiquidationIndex;
-import com.surprising.aeron.service.state.CancelAllAfterIndex;
-import com.surprising.aeron.service.state.AdlPositionIndex;
 import com.surprising.aeron.service.state.RuntimeCommitJournal;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
@@ -296,23 +289,17 @@ class CoreOrderedOrderBatchTest {
             LaneCommandContextRing contexts = (LaneCommandContextRing) contextsField.get(state);
             assertThat(contexts.required(laterSequence).hasMatchingCompletion()).isFalse();
 
-            CoreResponse batchResponse = state.completeMatching(batchSequence, second, 2_001, 4);
+            CoreResponse batchResponse = completeEventually(state, batchSequence, second, 2_001, 4);
             assertThat(batchResponse).isNotNull();
             var laterResult = awaitMatching(state, laterSequence);
-            CoreResponse laterResponse = state.completeMatching(laterSequence, laterResult, 2_002, 5);
+            CoreResponse laterResponse = completeEventually(state, laterSequence, laterResult, 2_002, 5);
             assertThat(laterResponse).isNotNull();
-            state.exportState().pending();
-
-            var events = CoreExportCodec.decodeBatchResponse(state.apply(new CoreMessage(
-                    CoreMessageHeader.query(CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(),
-                            ProductLine.SPOT, CommandSource.GATEWAY, 77, 0, 1001, 2_003, 6),
-                    CoreExportCodec.encodeBatchQuery(256))).data()).events().stream()
-                    .map(message -> CoreExportCodec.decodeEvent(message.payload()))
-                    .filter(event -> event.commandId().equals(batchId) || event.commandId().equals(laterId))
-                    .toList();
-            assertThat(events).hasSize(2);
-            assertThat(events.get(0).exportSequence()).isLessThan(events.get(1).exportSequence());
-            assertThat(events).allSatisfy(event -> assertThat(event.terminalIds().orderIds()).isEmpty());
+            assertThat(batchResponse.status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(laterResponse.status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(batchResponse.appliedCommandCount()).isLessThan(laterResponse.appliedCommandCount());
+            assertThat(state.commandResults().get(batchId).responseData()).containsExactly(batchResponse.data());
+            assertThat(state.commandResults().get(laterId).responseData()).containsExactly(laterResponse.data());
+            assertThat(state.pendingMatchingCount()).isZero();
             assertThat(TradingOrderBatchCodec.decodeResult(batchResponse.data()).items())
                     .extracting(item -> item.order().orderId())
                     .containsExactly(9_001L, 9_002L);
@@ -323,7 +310,7 @@ class CoreOrderedOrderBatchTest {
     }
 
     @Test
-    void defersSinglePlacePreparationAndExportUntilTheActiveBatchCompletes() {
+    void defersSinglePlaceCompletionUntilTheActiveBatchCompletes() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 100_000);
@@ -351,34 +338,19 @@ class CoreOrderedOrderBatchTest {
             assertThat(duplicate.stateHash()).isEqualTo(deferred.stateHash());
             assertThat(state.pendingMatching()).containsKeys(
                     state.matchingSequence(laterId), state.matchingSequence(lastId));
-            var exportsBeforeBatchCompletion = CoreExportCodec.decodeBatchResponse(state.apply(new CoreMessage(
-                    CoreMessageHeader.query(CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(),
-                            ProductLine.SPOT, CommandSource.GATEWAY, 77, 0, 1001, 1_999, 4),
-                    CoreExportCodec.encodeBatchQuery(256))).data()).events().stream()
-                    .map(message -> CoreExportCodec.decodeEvent(message.payload()))
-                    .filter(event -> event.commandId().equals(laterId) || event.commandId().equals(lastId))
-                    .toList();
-            assertThat(exportsBeforeBatchCompletion).isEmpty();
+            assertThat(state.commandResults()).doesNotContainKey(laterId);
+            assertThat(state.commandResults()).doesNotContainKey(lastId);
 
             long batchSequence = state.matchingSequence(batchId);
             var batchMatching = awaitMatching(state, batchSequence);
-            CoreResponse batchResponse = state.completeMatching(batchSequence, batchMatching, 2_000, 4);
+            CoreResponse batchResponse = completeEventually(state, batchSequence, batchMatching, 2_000, 4);
             assertThat(batchResponse).isNotNull();
             assertThat(state.pendingMatching()).containsKeys(
                     state.matchingSequence(laterId), state.matchingSequence(lastId));
             assertThat(batchResponse.appliedCommandCount()).isEqualTo(batchSequence);
-            state.exportState().pending();
-            var eventsBeforeCompletions = CoreExportCodec.decodeBatchResponse(state.apply(new CoreMessage(
-                    CoreMessageHeader.query(CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(),
-                            ProductLine.SPOT, CommandSource.GATEWAY, 77, 0, 1001, 2_001, 5),
-                    CoreExportCodec.encodeBatchQuery(256))).data()).events().stream()
-                    .map(message -> CoreExportCodec.decodeEvent(message.payload()))
-                    .filter(event -> event.commandId().equals(batchId) || event.commandId().equals(laterId)
-                            || event.commandId().equals(lastId))
-                    .toList();
-            var appliedBeforeCompletions = eventsBeforeCompletions.stream()
-                    .map(event -> event.appliedCommandCount()).toList();
-            assertThat(appliedBeforeCompletions).containsExactly(batchSequence);
+            assertThat(state.commandResults().get(batchId).responseData()).containsExactly(batchResponse.data());
+            assertThat(state.commandResults()).doesNotContainKey(laterId);
+            assertThat(state.commandResults()).doesNotContainKey(lastId);
 
             long laterSequence = state.matchingSequence(laterId);
             var laterMatching = awaitMatching(state, laterSequence);
@@ -390,30 +362,13 @@ class CoreOrderedOrderBatchTest {
             CoreResponse lastResponse = completeEventually(state, lastSequence, lastMatching, 2_003, 7);
             assertThat(lastResponse).isNotNull();
             assertThat(lastResponse.status()).isEqualTo(ResponseStatus.APPLIED);
-            state.exportState().pending();
-
-            var events = CoreExportCodec.decodeBatchResponse(state.apply(new CoreMessage(
-                    CoreMessageHeader.query(CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(),
-                            ProductLine.SPOT, CommandSource.GATEWAY, 77, 0, 1001, 2_004, 8),
-                    CoreExportCodec.encodeBatchQuery(256))).data()).events().stream()
-                    .map(message -> CoreExportCodec.decodeEvent(message.payload()))
-                    .filter(event -> event.commandId().equals(batchId) || event.commandId().equals(laterId)
-                            || event.commandId().equals(lastId))
-                    .toList();
-            var batchEvent = events.stream().filter(event -> event.commandId().equals(batchId)).findFirst().orElseThrow();
-            var laterEvents = events.stream().filter(event -> event.commandId().equals(laterId)).toList();
-            var lastEvents = events.stream().filter(event -> event.commandId().equals(lastId)).toList();
-            assertThat(batchEvent.terminalIds().orderIds()).isEmpty();
-            assertThat(laterEvents).hasSize(1);
-            assertThat(lastEvents).hasSize(1);
-            assertThat(batchEvent.exportSequence()).isLessThan(laterEvents.getFirst().exportSequence());
-            assertThat(laterEvents.getFirst().terminalIds().orderIds()).isEmpty();
-            assertThat(lastEvents.getFirst().terminalIds().orderIds()).isEmpty();
+            assertThat(batchResponse.appliedCommandCount()).isLessThan(laterResponse.appliedCommandCount());
+            assertThat(laterResponse.appliedCommandCount()).isLessThan(lastResponse.appliedCommandCount());
+            assertThat(state.commandResults().get(laterId).responseData()).containsExactly(laterResponse.data());
+            assertThat(state.commandResults().get(lastId).responseData()).containsExactly(lastResponse.data());
+            assertThat(state.pendingMatchingCount()).isZero();
             assertThat(state.tradingState().orders().keySet())
                     .containsExactlyInAnyOrder(9_101L, 9_102L, 9_103L);
-            var appliedCounts = events.stream().map(event -> event.appliedCommandCount()).toList();
-            assertThat(java.util.stream.IntStream.range(1, appliedCounts.size())
-                    .allMatch(index -> appliedCounts.get(index - 1) < appliedCounts.get(index))).isTrue();
             assertThat(deferred.requiredExportSequence()).isZero();
             assertThat(lastDeferred.requiredExportSequence()).isZero();
         }
@@ -444,10 +399,9 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.tradingState().orders().keySet())
                     .containsExactlyInAnyOrderElementsOf(orders.stream()
                             .map(PlaceOrderCommand::orderId).toList());
-            var exportedBatch = state.exportState().snapshot().pendingEvents().stream()
-                    .map(message -> CoreExportCodec.decodeEvent(message.payloadUnsafe()))
-                    .filter(event -> event.commandId().equals(commandId)).findFirst().orElseThrow();
-            assertThat(exportedBatch.coreSequence()).isEqualTo(response.appliedCommandCount());
+            assertThat(state.commandResults().get(commandId).responseData()).containsExactly(response.data());
+            assertThat(state.commandResults().get(commandId).appliedCommandCount())
+                    .isEqualTo(response.appliedCommandCount());
 
             CoreResponse replay = state.apply(batch);
             assertThat(replay.status()).isEqualTo(ResponseStatus.DUPLICATE);
@@ -460,17 +414,14 @@ class CoreOrderedOrderBatchTest {
             assertThat(conflict.status()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(conflict.resultCode()).isEqualTo(CoreResultCode.IDEMPOTENCY_CONFLICT);
             assertThat(state.tradingState()).isEqualTo(stateAfterBatch);
-            state.exportState().pending();
-
-            var events = CoreExportCodec.decodeBatchResponse(state.apply(new CoreMessage(
+            CoreResponse exportQuery = state.apply(new CoreMessage(
                     CoreMessageHeader.query(CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(),
                             ProductLine.SPOT, CommandSource.GATEWAY, 77, 0, 1001, 2_000, 3),
-                    CoreExportCodec.encodeBatchQuery(256))).data()).events().stream()
-                    .map(message -> CoreExportCodec.decodeEvent(message.payload()))
-                    .filter(event -> event.commandId().equals(commandId)).toList();
-            assertThat(events).hasSize(1);
-            assertThat(response.requiredExportSequence()).isEqualTo(events.getFirst().exportSequence());
-            assertThat(events.getFirst().terminalIds().orderIds()).isEmpty();
+                    CoreExportCodec.encodeBatchQuery(256)));
+            assertThat(exportQuery.status()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(exportQuery.resultCode()).isEqualTo(CoreResultCode.INVALID_MESSAGE);
+            assertThat(response.requiredExportSequence()).isZero();
+            assertThat(state.exportState().pending()).isEmpty();
             assertThat(state.tradingState().orders().keySet())
                     .containsExactlyInAnyOrderElementsOf(orders.stream()
                             .map(PlaceOrderCommand::orderId).toList());
@@ -478,7 +429,7 @@ class CoreOrderedOrderBatchTest {
     }
 
     @Test
-    void exportsConservedFundsWhenABatchMatchesAnotherUser() {
+    void conservesFundsWhenABatchMatchesAnotherUser() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 2_000_000);
@@ -501,21 +452,24 @@ class CoreOrderedOrderBatchTest {
             CoreResponse response = drainBatch(state, takerBatch);
 
             assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
-            state.exportState().pending();
-            var event = CoreExportCodec.decodeBatchResponse(state.apply(new CoreMessage(
-                    CoreMessageHeader.query(CoreMessageType.EXPORT_BATCH_QUERY, UUID.randomUUID(),
-                            ProductLine.SPOT, CommandSource.GATEWAY, 77, 0, 1001, 2_000, 5),
-                    CoreExportCodec.encodeBatchQuery(256))).data()).events().stream()
-                    .map(message -> CoreExportCodec.decodeEvent(message.payload()))
-                    .filter(value -> value.commandId().equals(takerBatchId))
-                    .findFirst().orElseThrow();
-            assertThat(event.fundsPostings()).isNotEmpty();
-            assertThat(event.fundsPostings().stream()
-                    .collect(java.util.stream.Collectors.groupingBy(
-                            com.surprising.aeron.protocol.CoreFundsPostingView::asset,
-                            java.util.stream.Collectors.summingLong(
-                                    com.surprising.aeron.protocol.CoreFundsPostingView::units))))
-                    .allSatisfy((asset, units) -> assertThat(units).as(asset).isZero());
+            var items = TradingOrderBatchCodec.decodeResult(response.data()).items();
+            assertThat(items).allSatisfy(item -> assertThat(item.status()).isEqualTo(ResponseStatus.APPLIED));
+            assertThat(items.getFirst().order()).isNull();
+            assertThat(items.get(1).order().status()).isEqualTo("OPEN");
+            assertThat(state.terminalRetention().containsOrder(10_502, 1001, "batch-crossing-buy")).isTrue();
+            assertThat(state.terminalRetention().containsOrder(10_501, 1002, "batch-maker-sell")).isTrue();
+            assertThat(items.getFirst().executions()).hasSize(1);
+            assertThat(items.get(1).executions()).isEmpty();
+            assertThat(state.tradingState().orders().keySet()).containsExactly(10_503L);
+            assertThat(state.tradingState().user(1001).totalUnits("BTC")).isEqualTo(1_000);
+            assertThat(state.tradingState().user(1002).totalUnits("BTC")).isEqualTo(1_000);
+            assertThat(state.tradingState().user(1001).totalUnits("USDT")
+                    + state.tradingState().user(1002).totalUnits("USDT")
+                    + state.tradingState().treasuryState().feeBalances().getOrDefault("USDT", 0L))
+                    .isEqualTo(2_000_000);
+            assertThat(state.tradingState().user(1001).balances().get("USDT").lockedUnits()).isEqualTo(90_000);
+            assertThat(state.tradingState().user(1001).reservations()).containsOnlyKeys(10_503L);
+            assertThat(state.tradingState().user(1002).reservations()).isEmpty();
         }
     }
 

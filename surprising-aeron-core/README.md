@@ -49,6 +49,29 @@ CROSS 只共享该 Core 内权益，ISOLATED 绑定 position identity。只保�
 根目录 `PERFORMANCE_VALIDATION.md` 的 PV-140/PV-141：定向功能与恢复检查通过，
 性能采集受系统换页/CPU限速影响，仅作为诊断，尚未通过性能环境门禁。
 
+## Core 回归测试的当前状态契约
+
+`CoreMatchingStateTest` 从 `CoreCommandResultCodec` 解码本次单笔命令的订单终态；
+该响应只包含本次命令相关订单，不包含对手方订单或成交明细。对手方结果结合终态去重记录、
+活动订单回收、实际余额/冻结和持仓验证。`CoreOrderedOrderBatchTest` 验证逐项状态与成交明细，
+已回收订单的 `Item.order()` 可以为空；未完成命令不应出现在终态命令结果账本中。
+异步测试必须等待 Account Lane 结算完成，再验证提交顺序及重复请求返回的数据。
+
+`ACK_EXPORT`、`EXPORT_BATCH_QUERY`、`EXPORT_STATUS_QUERY` 已拒绝为 `INVALID_MESSAGE`，
+测试不再通过停用的 Core-Fact exporter 验证成交或资金变动。`RuntimeCommitRecoveryTest`
+直接比较恢复前后的命令响应、账户/持仓/财务状态与快照 hash，并检查资金守恒、终态回收、
+幂等重放以及损坏快照被原子拒绝。
+
+2026-09-05 按上述契约修复此前 31 个失败实例，仅修改测试及说明，生产代码不变。
+HotSpot JDK 25 验证命令：
+
+```bash
+mvn -pl surprising-aeron-core/surprising-aeron-service,surprising-aeron-core/surprising-aeron-benchmarks -am test
+```
+
+Service 415 项、Benchmark 功能测试 33 项及依赖模块 109 项，共 557 项通过，无失败或跳过。
+本次属于测试契约修正，未启动外围服务或重跑 JMH/JFR，不形成新的性能验收结论。
+
 ## 当前按 Symbol 分片的 Matcher 流水线主链路
 
 每个 Product Core 仍只有一个 Aeron Cluster service owner，但可以在 fresh compatible state 启动前配置 1–64 个、
