@@ -2865,3 +2865,63 @@
 - 当前提交`872293cb`紧邻重跑为`57,335.397 terminal business ops/s`，三个样本`60,732.249/54,430.956/56,842.987`；Core messages=`5,768.148/s`、trades=`13,570.329/s`、Lane operations=`12,451.213/s`、Lane settlement=`8,978.771/s`。相对同机旧版吞吐提高约`4.31%`，Lane operations下降约`81.29%`，Lane settlement下降约`86.23%`。
 - 两版accepted/terminal business及Core闭合，unfinished/rejected/error/timeout为0，资金、订单、持仓、强平终态和snapshot恢复通过。测试后free memory=`74%`、swap仍为`0`，无残留JMH/JFR/java压测进程，数据有效。结论：重启清除了swap和残留任务干扰，但79.6k历史绝对值仍不可复现；同一重启窗口内当前版没有性能回退，并以略高吞吐显著减少Lane任务。
 - artifact SHA-256：`pv109.json`=`0c33d1f17f0a30b74ddb2a517eb59dad69a9e5825908691f3d660a3ccbb56a5c`，`current.json`=`9458e5837cc5465256aeceba137b754a62c8098514f5e6324c8e0d9d233d6ccc`。本轮未执行GC/JFR或长稳，不能据此声明75k正式性能验收或生产容量。
+
+### 2026-09-05 10:43:00 +08:00 — `PV-20260905-256-127` — 采集前锁定：五项交易路径优化
+
+- 被测代码 `7d08fef3`；对照 `386ffeac`（生产代码与 `872293cb` 相同）。基线 detached worktree `/private/tmp/surprising-five-baseline-wTgsKx` 只加入同一份新 benchmark driver，SHA-256 `b58ec6f4ab1a4b562805a4694a322c707c81b829b009591512dc0fc2e9642d60`。已有 mixed driver 不变，测试期间不改代码或参数。
+- 改动：同 matcher 连续撤单合并任务；batch 最终响应单次物化、取消 executions 汇总复制；admission 仅预分配目标 Lane 实际写入缓冲；无异步查询时跳过 pending-client 扫描；仅运行指标查询放开撮合 fence，业务查询和非撮合写入仍保序，fence 后允许连续交易重新填充窗口。此外修复现货 batch inline Lane 通知被误判为单笔 continuation 的路由错误。
+- 环境：已检查 java/mvn，Oracle GraalVM 25.0.1 HotSpot、Maven 3.9.16、macOS 26.7 x86_64、Intel i9-9880H、8物理/16逻辑CPU、16GiB；采集前 swap=0。所有轮次 matcher=1、Account Lane=4、严格256 in-flight。JVM统一 `-Xms4g -Xmx4g -XX:+UseZGC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -Dsurprising.aeron.matching-engines=1 --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED`。4GiB与历史8GiB不同，仅比较本轮同参数结果。
+- 主轮：`fork=1,threads=1,warmup=3x3s,measurement=3x5s`，每轮间冷却20s；顺序固定 baseline mixed → current mixed → baseline service-linear → current service-linear → current service-spot。主吞吐不得用带 profiler 的数值代替。
+- mixed 场景：`LinearPerpetualCoreBenchmark.liquidationWithTrading -p accountLanes=4 -p activeUsers=1000 -p symbols=256 -p hftRounds=1 -p hftBatchSize=20 -p maxInFlight=256 -p lifecycleSymbolsPerRun=32`。U本位永续、模板每用户最多5持仓/10挂单，资金和初始持仓沿用固定 driver 的真实模板；maker/taker、双向批量挂单/成交/撤单及风险扫描、强平、保险、ADL按 `executeHftBurstsPipelined` 与 lifecycle 固定循环执行，不将数据依赖的强平次数强行混成固定订单比例。进程内做市流动性持续存在，外部连接0；闭环饱和负载、无固定到达率、未修正 coordinated omission。
+- service 场景：`ClusteredBatchTradingBenchmark.batchPlaceCancelWithMetrics -p accountLanes=4 -p batchSize=20 -p maxInFlight=256 -p productLine=LINEAR_PERPETUAL|SPOT`。256交易用户+1 maker、1模拟ClientSession、1symbol，每轮256个place batch后256个cancel batch，20 items/batch、每batch一个LANE_METRICS_QUERY；业务操作下单/撤单各50%，无成交，查询另计。用户各10亿USDT，初始无持仓；maker在120挂1单位卖单，用户90买单不交叉，现货maker另有1 BTC。真实service编解码、pendingClients、非等待completion pump和egress均计时，模拟transport/无外部Aeron。每轮512 Core messages、10240 business ops、512 queries，最大窗口256；撤单后用户可用恢复、冻结/持仓/reservation为空，只保留maker订单。iteration teardown比较资金与snapshot恢复。
+- 通过门槛：相关功能测试全通过（当前82项）；两套主轮相对各自基线终态business ops/s不低于95%，但三个样本仅用于诊断、不宣称统计显著。所有场景accepted/terminal business及Core闭合，unfinished/end backlog/error/timeout=0，主场景拒绝0；资金/余额/冻结/持仓/订单与snapshot正确。CPU明显干扰、swap增长或JFR DataLoss使该轮无效，失败照常记录。baseline spot已知可能存在batch通知错误，不采为可比较基线。
+- 归因轮：current mixed、service-linear、service-spot各 `fork=1,warmup=1x3s,measurement=1x10s`，同时 `-prof gc`、NMT summary/退出统计、明确JFR `target/qualification/20260905-five-paths-256/profile.jfc`（项目owner配置，ThreadPark阈值10ms、monitor阈值1ms，减少idle事件开销），保存原始jfr及GC/safepoint日志。记录采样与profiler扰动，不与主轮绝对吞吐横比。
+- 长稳：同一候选 `LinearPerpetualScaleSoakMain 1000 256 256 5 10 UNIFORM 1 20 32 600 30`，10分钟、30s间隔，真实mixed state持续复用、256窗口。相同JVM和JFR/NMT参数，检查多轮GC后live set、oldgen、direct/mapped、线程、FD和buffer余额；沿用内置门槛：live set 1MiB/s、native buffer 256KiB/s、threads/FD/buffer count 0.01/s，至少3个GC后样本。短轮不用于无泄漏结论。
+- 原始artifact统一 `target/qualification/20260905-five-paths-256/`，执行入口为该目录 `run.sh`（参数按本记录固定），测试日志为 `/tmp/surprising-five-final-tests.log`。采集后追加完整命令/校验、结果与JFR分析。
+- 范围：已测现货、U本位永续服务路径和直接受影响运行时/资金测试。未启动 PostgreSQL/exporter/wallet/Kafka/外部Aeron Cluster/API/WebSocket/market-data，其他四产品线未做真实服务级场景；共享资金矩阵不能替代其端到端验收。缺少分业务三段尾延迟、真实网络/外部做市或native库pool证据时，只能标记部分性能验证，不宣称100k容量或六产品线完整验收。
+
+#### PV-127执行与结果（2026-09-05 10:43～11:05 +08:00）
+
+- 代码/测试/README已提交推送 `7d08fef3`。HotSpot25 Maven精确测试共82项通过：service 68项、benchmark 14项，覆盖现货重复撤单/缺失订单/跨用户拒绝、同shard撤单队列提交次数、解冻与snapshot、运行指标/业务query fence、目标Lane预分配、RuntimeChangedIndexCommit、永续资金矩阵与mixed workload。新service场景现货/永续均连续运行两轮；现货测试曾暴露inline batch Lane通知误路由，修复后重新跑完上述测试。
+- 构建/执行命令：`mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am '-Dtest=ClusteredBatchTradingBenchmarkTest,LinearPerpetualBenchmarkSupportTest,CoreOrderedOrderBatchTest#coalescesSameMatcherCancellationsAndPreservesRejectedItemOrder+rejectsMixedUserCancelBatchBeforeAnyMutation,SurprisingClusteredServiceTest#operationalQueryDoesNotFenceLaterTradingButBusinessQueryDoes+deferredIngressCommitsMatchingBeforeTheFollowingFact+backgroundWorkAppliesMatchingExactlyOnceWithoutAReplicatedTimer+restoresSuccessfulSnapshotRoundTripWithoutTimingPoll,TradingRuntimeStateTest,RuntimeChangedIndexCommitTest,RuntimePerpetualMatchProcessorTest,CorePerpetualFinancialMatrixTest' -Dsurefire.failIfNoSpecifiedTests=false package`，日志见 `maven-tests.log`；性能执行 `bash target/qualification/20260905-five-paths-256/run.sh`，该脚本保存了全部实际JMH/JVM/soak命令。主轮与归因轮全部正常结束，soak exit=0。
+- 基线JAR SHA-256=`b935e181574a2b7fff711fe69b0b1cd2579c8338171593ce57c8b73c25fa9237`；候选JAR=`e047da2e31b753a7679b1ff56ac964d3cacdb8e5d8f3b806e969ec4147e2b6e0`。`profile.jfc`=`4dbdbd4994757dc2e6930dee513d8ee298d687d9f298bc27434455d499784dc7`，`run.sh`=`96aa8db571f7c7ab737973810ea4d14bf935e067406ea1c3b1bde6ef79e7e3e6`。全部原始/聚合artifact校验见同目录 `SHA256SUMS`。
+
+| 无profiler场景 | baseline terminal business ops/s | current terminal business ops/s | current Core messages/s | current trades/s |
+| --- | ---: | ---: | ---: | ---: |
+| 永续 risk/liquidation mixed | 40,520.265 | 72,674.834 | 7,311.184 | 17,200.960 |
+| 永续 service批量下单/撤单+metrics | 68,349.863 | 73,433.687 | 3,671.684 | 0 |
+| 现货 service批量下单/撤单+metrics | 未采集 | 47,360.998 | 2,368.050 | 0 |
+
+- mixed baseline三样本=`45043.723/39448.463/37068.609`，current=`72163.219/72272.078/73589.204`；JMH误差分别约`±74692.802/±14480.709 ops/s`（仅3样本的99.9% CI非常宽）。点估计提升79.35%，不得宣称统计显著或稳定提升79%。Lane operations从8741.112/s到15850.065/s、settlement从6317.736/s到11413.010/s，是吞吐升高后的每秒计数，不应解释为每operation任务变多。
+- service benchmark主分数是完整cycle/s，必须乘`10240 business items/cycle`；其AuxCounters使用`EVENTS`，单位`#`是样本累计数量，**不能把1044480等计数当作ops/s**。baseline/current线性永续为`6.674791/7.171259 cycles/s`（换算误差`±6381.624/±5005.783 business ops/s`），点估计提升7.44%；现货`4.625097 cycles/s`（换算误差`±16926.853`）。两套可比较主轮均满足预定95%无明显回退门槛，但都是部分诊断而非容量验收。
+- service的Core command messages=same batches，items/s=business ops/s，平均/最大batch size均20；每batch另有1个metrics query，query responses/s分别为同一场景的batches/s，不混入交易Core command分母。mixed按固定driver约3440 batches/s、68804 batch items/s，其余为单笔/风险业务；原始指标与业务动作不可跨场景混用。
+- mixed accepted/terminal business和Core均相等，unfinished/rejected/error/timeout均0；service每cycle校验512 batch终态与512 query结果，每item均APPLIED、无成交，并检查用户冻结归零、maker资金/挂单、终态订单回收和snapshot。service当前最大pendingMatching=256、baseline=1（指标查询fence使旧版内部串行，外部仍按256窗口投递），两版期末backlog=0。当前未把现货旧版的通知错误转成可比较性能结果。
+
+#### PV-127分配、JFR与边界核对
+
+| current归因场景 | `-prof gc` 分配率（JMH MB/sec） | 约 bytes/business op | MXBean GC count/time |
+| --- | ---: | ---: | ---: |
+| mixed | 421.705 | 7,034.6 | 10 / 319ms |
+| service永续 | 660.490 | 10,389.8 | 10 / 188ms |
+| service现货 | 384.732 | 9,265.6 | 12 / 87ms |
+
+- bytes/op由每cycle分配归一到business items，service包含模拟客户端编码/解码及校验，mixed与service不横比；没有本轮baseline GC对照，不宣称分配已降低某个百分比。MXBean计数与JFR逻辑GC周期口径不同。
+- 录制配置还会启用既有 `OpenLoopBusinessLatencyRecorder`：mixed/soak在每次run按100000计划business ops/s记录入口时间，包含其busy-spin；主轮未启用该记录器。归因/长稳不仅有JFR开销，还存在此负载驱动差异，不能替代无profiler主吞吐。这一实际边界按源码和JFR补充记录，采集前参数未被修改。
+- 原始JFR：`profile-mixed.jfr` 6,483,649 bytes/约17s，`profile-service-linear.jfr` 5,430,417 bytes/约15s，`profile-service-spot.jfr` 4,946,706 bytes/约15s，`soak.jfr` 91,108,501 bytes/约617s（包含fixture、600s循环、snapshot/recovery和退出）。四份 `jdk.DataLoss=0`。SHA-256依次为 `651899e7bf8079f72b4531d86676f7e605ae4fbe0b19e64f5cf36d47bcadba87`、`7338b95bd56a00ad198e8a0490aff9736795fcde1f29c412110cd41280e92fe9`、`48a85738c73d1f2ffd60385cb9687a19bfda39dcb4369493bcf01b97152439c7`、`abb65cff788248009797f3cb01fa7917b986e60a5bbcd1f5e2ff4688cb29e5f0`。
+- 分析命令：`jfr summary <file>`；`java -Xmx256m -m jdk.jfr/jdk.jfr.internal.tool.Main view --width 160 <view> <file>`；`java -Xmx256m JfrRead.java <file>`。采用流式RecordingFile分析，不输出整份JSON再交给jq；保存各文件 `*-summary.txt`、`*-analysis.txt` 和hot-methods/thread-cpu-load/allocation/GC/safepoint/VM/NMT/JIT/I/O等17个 `*-view-*.txt`。
+- mixed分配采样owner/harness约55.44%、Lane29.73%、matcher14.24%；top class为long[]、byte[]、OrderRuntime、Object[]、Long、CoreMatchingResult。service永续owner/harness约80.65%，现货约73.31%，其中包含模拟客户端response解码。snapshot/query采样归在实际执行owner/Lane线程，risk同样在Lane执行；没有独立Fact/export/Aeron/Kafka线程在本轮运行，不能借此评价这些外围组件。
+- mixed JFR记录380 execution+57 native samples；owner/harness 311、Lane68、matcher51、其余7，不能把包含park与驱动逻辑的样本直接称为纯业务CPU占比。mixed机器/进程CPU平均约23.9%/21.2%（机器总CPU归一）。短归因录制仍覆盖大量JIT：mixed编译7971次、总33.78s、最长614ms，不能视为完全预热后的精确CPU归因。
+- mixed JFR单次GC pause最大0.036ms；safepoint同步最大0.406ms、VM op最大0.591ms。GC后heap最大555.7MB，JVM heap committed固定4GiB。NMT退出total reserved/committed分别：mixed约74.531/4.445GB，service永续74.527/4.427GB，service现货74.522/4.422GB；reserved是虚拟地址预留，不是RSS。全部NMT category的first/last/max/delta见analysis与view，不能以Direct=0替代NMT。
+- mixed/service永续/service现货的JavaExceptionThrow分别1328/1280/1282，JavaErrorThrow分别153/129/130；含JDK MethodHandle/类加载探测，事件数不是业务错误数。I/O路径为JAR/JNI加载、benchmark stdout、JMH fork控制socket；未见交易业务同步数据库或外部网络路径。保留原始异常类型/站点与file/socket视图，不把启动和harness I/O隐去；生产实网I/O边界未验收。
+- 分业务三段延迟已按已有CSV histogram合并，完整p50/p90/p95/p99/p99.9/max、sample count在mixed/soak analysis末尾。直方图为2次幂桶，分位值是桶上界，max为精确值；范围1ns～30s，包含warmup/fixture且计划到达器按run重置。短profile实际LIQUIDATION仅4样本、ADL仅2样本，不足以评价其尾延迟；service新场景未埋三段延迟，吃单未独立分类、snapshot只测恢复总时长，均属于验收缺口。
+
+#### PV-127十分钟长稳与最终结论
+
+- `LinearPerpetualScaleSoakMain`运行601.802s，25,287,812 terminal business operations、2,543,748 terminal Core messages；平均42,020.139 business ops/s、4,226.884 Core messages/s，maxMatchingBacklog=256。资金不变量PASS、snapshot=16,268,323 bytes、恢复770.310ms。窗口吞吐从首30秒62,415.203下降到末段36,461.119；没有baseline长稳，因此不把下降直接归因本次改动，也不宣称持续达到72.7k。
+- 循环末仍有199个可恢复的分片risk scan工作流、funding incomplete=0；这是已完成Core命令留下的后续workflow状态，不是199条未终态Core message。本场景不能声称所有强平/风险工作流都已全量排空。
+- 内置448个GC通知样本的leak verdict=PASS，报告median slope=0。独立JFR `GCHeapSummary`在排除初60s后重新计算的GC后heap稳健斜率约75,448 bytes/s，**不是严格零增长**，低于锁定的1MiB/s门槛。GC后最大532,676,608 bytes，末次494,927,872 bytes；每30秒oldgen约166～233MB。线程/FD持续14/13，Direct/Mapped bytes/count均0，swap全程0；`pmset -g therm`未记录thermal/performance warning，scheduler/speed limit=100，可用CPU=16。不能仅凭本轮断言永久无泄漏或完全没有频率变化。
+- 长稳NMT退出reserved=74,543,576,027、committed=4,456,719,323 bytes；GC category committed约4.7→42.2MB、峰值51.0MB，Code21.5→38.9MB、峰值39.8MB，Metaspace23.3→34.2MB；Other34,816→36,864 bytes、峰值45,056。框架native pool/外部Aeron/Netty未启动，缺少其独立分配/释放余额，不能外推生产native泄漏结论。
+- 长稳逻辑GC94周期（ZGC major并非停顿式Full GC），累计pause7.867ms/约0.0013%，364个pause phase的p50/p95/p99/max=`0.015/0.048/0.056/0.064ms`；safepoint同步最大0.102ms、VM op最大3.197ms。编译10686次/总52.69s/最长1.755s；deoptimization按reason保存在view。未见allocation stall、晋升/疏散失败或DataLoss。JFR采样对象权重282.49GB，TLAB266.83GB、非TLAB16.50GB，最大已记录对象16,777,232 bytes；对象数/operation无法由采样权重精确还原。
+- 后段热点证据：`OpenLoopBusinessLatencyRecorder.enter`（计划到达率busy-spin）1541个采样；`TradingRuntimeState.triggerOrdersForRuntime` 在Lane内及owner查询边界构建TreeMap，`TradingCoreState.validateTrigger` 与监控 `incompleteFundingSettlements→tradingState→RuntimeStateMaterializer.materialize`全量物化也反复出现；TreeMap.Entry占长稳分配权重约51.90GB。每分钟分配约27～28GB而吞吐下降，提示状态相关物化成本值得下一轮消融。另有 `requiredReservationPrepared→effectiveLeverage→TradingRuntimeState.leverage→onLane` 的同步回读样本，不能宣称owner已经完全不等待。上述不属于本次五项，未在采集过程中继续改动，也未据采样给出虚构收益。
+- 长稳ORDER_BATCH三段p99桶上界分别134.218ms（entry→accepted）、67.109ms（accepted→terminal）、134.218ms（entry→terminal），p99.9为268.435/134.218/268.435ms，max为487.747/182.001/551.938ms，样本1,197,056；不能与单条GC pause混成同一延迟或作为无profiler API SLA。
+- **结论：五项实现、82项相关测试、现货/永续JMH/JFR及十分钟资金/snapshot/内存趋势验证完成；性能验收仍为部分验证。** 两套主对照满足预定不回退门槛，但仅三个样本、无baseline allocation/长稳对照，profile存在计划到达器和观察器成本；尚无生产API/真实Aeron/WebSocket、完整各业务尾延迟及其他四产品线服务级证据，不宣称100k或72.7k持续生产容量。
