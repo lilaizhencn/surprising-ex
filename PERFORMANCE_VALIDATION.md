@@ -3047,3 +3047,39 @@
 - 完成SPOT后主动终止排程以继续实现现货batch Lane合并结算，不是用测试中途修改生产代码。INVERSE_PERPETUAL主轮已启动，随后连同本轮调度明确终止，输出仅作为中止记录；余下4衍生品、service、拒绝continuation与deep待最终代码新轮重跑。PV-131不得被标为全部场景完成。
 - 后续实现定位：SPOT原逐item调用applyOrderBatchMatcherSettlement会同步等待Lane；现改为可流水化PLACE batch整批准入与一次/Lane最终结算，累计maker剩余量校验移至MatcherSettlementPlan共享协议边界，现货/衍生品金融内核不混用。单项/部分成功路径保留必要的逐项资金依赖。新回归覆盖四个taker吃同一maker、先卖后买收入复用、真实成交后fatal与快照重放；更新Spot JMH要求batch>=2并设置15min timeout。
 - 首轮广泛回归97项有3个旧逐item回调/临时准入容器假设失败，见spot-pipeline-full-regression.log；改为显式测试顺序分支，并增加独立SPOT pipeline fatal恢复覆盖，不放松资金/序列断言。spot-pipeline-boundary-tests.log已通过；最终跨产品线回归与性能采集另记，不提前宣称完成。
+
+## PV-20260905-256-132：现货批量Lane流水线候选（采集前锁定，2026-09-05）
+
+- 被测commit=`2cd0bfb3`，jar SHA-256=`56c7635cb29dd6fb7f3768f936b8d9f903eb1544bf2d4bd886e105c5e23c66a2`，无旧版对照、不开历史分支。源码变更：SPOT PLACE batch复用异步Lane准入/一次每Lane结算；整批累计maker剩余校验移至MatcherSettlementPlan；保留资产内核与部分成功资金依赖，Spot JMH要求batch>=2/15min timeout。最终目标回归`spot-pipeline-final-tests.log`及package构建通过，包括17个非exporter ordered-batch方法、runtime/lifecycle、六产品线snapshot契约、Spot8轮复用、derivative/linear mixed、service普通和拒绝256窗口。
+- 环境完整沿用PV-130：HotSpot25.0.1 Oracle GraalVM、Maven3.9.16、macOS26.7/x86_64、Intel i9-9880H 8C/16T、16GiB；`-Xms4g -Xmx4g -XX:+UseZGC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -Dsurprising.aeron.matching-engines=1 -Dsurprising.benchmark.openLoop=false --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED`。所有采样256in-flight、4Lane、1matcher，闭环饱和、无固定到达率、CO未修正，真实API并发连接不模拟为生产连接。
+- 场景A～E按PV-130实际源码定义固定：mixed1000用户/256symbol/1round/20items batch，永续lifecycle32symbol/run及初始最多5持仓/10挂单；SPOT双向批量挂撤和IOC共享maker部分成交/剩余撤单，maker/taker资金与初态不变，maker流动性持续存在；其他四衍生品订单/risk及适用资金费，不含到期交割行权。永续专用强平/保险/ADL每iteration一次，不表述成连续重操作。service256用户/1symbol/20batch/1模拟会话，普通10240items/512messages、挂撤各50%；拒绝5160items/258messages，其中5080预期拒绝/80成功；deep256taker/4maker/1symbol/8fills每order，每invocation恢复fixture。
+- 主轮f1/t1/wi3×3s/i3×5s、无profiler；profile wi3×3s/i1×10s/gc+NMTsummary+JFR512MiB/GC-safepoint log；冷却20s；所有JMH显式`-to 900s`。顺序SPOT main/profile→永续main/profile→其余四衍生品main/profile→service两个产品线普通及拒绝main/profile→deep main/profile→SPOT wi3×3s/i1×600s长稳（同profiler配置）。不重跑未改变长期状态的永续600s，PV-130同类长稳只能作为此前证据，不冒充本commit已重测。
+- 通过阈值保持mixed≥100000 terminal business ops/s、所有成功场景每item成功、accepted/terminal business与Core messages相等、unfinished/期末backlog0、资金/冻结/仓位/订单终态/snapshot恢复通过；风险workflow未完不等同unfinished Core message。拒绝场景必须严格匹配拒绝数，不作为成功交易容量。Spot长稳live set<1MiB/s、native buffer<256KiB/s、线程/FD/buffer count<0.01/s且≥3有效GC后样本，缺项为部分验证。后台明显CPU干扰、swap/throttling/JFR DataLoss判无效；profiler不替代主吞吐，无旧版对照不能承诺提升百分比。
+- 仍不测试PG/exporter/wallet、真实Aeron/Kafka/API/WebSocket和生产native池；完整每业务三段尾延迟/CO/OS与native余额缺项必须报告。任何失败即停，开始后不改生产代码或负载口径，新增变更另开轮。
+- 执行`bash target/qualification/20260905-chain-256-r132/run.sh`，SHA-256=`65346f0189960d2c703f27ed1c2fac4370874d5d966dfc1ee738f357e7537541`，JFR配置SHA-256=`4dbdbd4994757dc2e6930dee513d8ee298d687d9f298bc27434455d499784dc7`。全部原始artifact保存该目录，JFR分析仅在性能进程结束后执行，历史失败/中止记录不覆盖。
+
+### PV-132 系统限速终止（2026-09-05 15:01 +08:00）
+
+- 明确发现系统CPU限速，按预定义门槛将本轮性能验收判无效并停止：main-SPOT结束`CPU_Speed_Limit=50`，main永续结束37，main币本位永续开始43/结束37，profile永续结束39，profile币本位永续开始41。详见`cpu-limits.txt`和完整system-before/after；Scheduler_Limit100、Available_CPUs16不代表CPU没有限速。停止时空闲报告Speed_Limit100、AC供电/电池100%；这些读数不能区分具体散热或电源管理原因，不擅自改系统设置。
+- 四个main和四个profile完成；正在运行的INVERSE_DELIVERY main明确终止，空/不完整JSON保留。OPTION、两类service/拒绝continuation、deep及新SPOT600s尚未执行。前一版PV-131现货600s不能算作2cd0bfb3已完成长稳。最新代码目标回归及构建成功，但整轮性能/长期状态验收未完成。
+
+| 已完成主轮（无效诊断，非容量结论） | terminal business ops/s | 99.9%误差 | terminal Core messages/s |
+|---|---:|---:|---:|
+| SPOT mixed | 70625.044 | ±294369.235 | 6726.195 |
+| LINEAR_PERPETUAL mixed | 41350.450 | ±34786.025 | 4160.200 |
+| INVERSE_PERPETUAL mixed | 35655.067 | ±88773.841 | 3398.721 |
+| LINEAR_DELIVERY mixed | 156325.417 | ±36972.251 | 14894.712 |
+
+- 已完成场景每batch item检查及accepted=terminal/unfinished/期末backlog0、最终资金/冻结/订单/恢复检查通过。业务ops与消息分开；Spot和通用derivative driver未逐笔输出fill计数，不记为0，也不以理论batch size代替实际成交。不能从不同产品线/限速程度/单一short窗口比较改动收益或宣称100k完成。
+
+| gc profiler | MiB/s | B/JMH cycle（不是B/business op） | GC count / time ms（含并发） |
+|---|---:|---:|---:|
+| SPOT | 297.325 | 172922537.905 | 4 / 626 |
+| LINEAR_PERPETUAL | 253.468 | 148378258.105 | 4 / 698 |
+| INVERSE_PERPETUAL | 1104.593 | 236101314.353 | 18 / 730 |
+| LINEAR_DELIVERY | 1029.951 | 157305517.746 | 14 / 456 |
+
+- 四个JFR全部DataLoss0，summary时长SPOT27s/永续31s/币永续26s/线性交割22s；原始文件、`*-summary.txt`、`*-analysis.txt`、`jfr-sha256.txt`齐备。使用相同明确profile.jfc（高分配事件有开销）和相同流式聚合器，所有分析在压测停止后运行；不能把profiler吞吐替代main。SPOT全录制27.196s、分配权重6296259368B/231514170B/s、TLAB5957623880B、非TLAB344821304B、最大8388624B；owner/harness分配3860930272B、Lane1638533192B、matcher764078488B，CPU samples756/361/134。热栈仍是completion/Lane通知；录制还包含matcher native库初始化，不能当纯业务栈。
+- SPOT短JFR After-GC5点、末/峰505413632B（不能推导无泄漏），heap committed4GiB；NMT GC末/峰29.64MB，Other末67584B/峰77824B，Thread末196936B/峰229664B。pause23次累计0.642ms、p50/p95/p99/max=0.031/0.042/0.042/0.042ms；safepoint28次begin最大0.377ms、同步最大0.362ms。完整JIT/锁/异常/IO/native类别见原始聚合，缺分窗生产IO判定、完整三阶段分业务尾延迟、OS上下文切换/FD/native池余额和新版本长稳，故只能部分验证。
+- 追溯环境记录补充：PV-130 Spot main/profile结束Speed_Limit93/91，PV-131 Spot长稳结束52；这些轮次的性能结论同样无效，资金/恢复功能通过事实不变。PV-130永续main及soak前后读数100，但只有边界采样不能证明全过程从未限速；此前已因后台干扰/尾延迟等缺项判部分验证，不升级结论。
+- 尚未实现/未完成的范围明确保留：risk successor虽然去复制但仍重复扫描、risk命令仍有owner等待；同symbol batch排他和顺序部分成功路径仍有串行依赖；客户端剩余pending响应扫描/同步future回调及网关同步代理/鉴权查询未重构；保险expectedCoverage已缩小查询，但未建立持久有序索引；真实egress压力/API-WebSocket及全业务open-loop指标未验收。不宣称“十几个问题全部解决”或owner完全无等待。继续更改前需在持续不降频的环境完成当前候选的剩余JMH/JFR/长稳验证。
