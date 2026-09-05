@@ -1,6 +1,7 @@
 package com.surprising.aeron.service;
 
 import com.surprising.aeron.protocol.CoreMessage;
+import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.protocol.CoreProtocol;
@@ -1356,14 +1357,44 @@ public final class CoreProbeState implements AutoCloseable {
         OrderBatchPending batch = pendingOrderBatches.get(pending.sequence());
         if (batch == null) return;
         runtime.matcherReady().join();
+        if (batch.kind == OrderBatchKind.CANCEL) {
+            submitCancelBatchChunk(pending, batch);
+            return;
+        }
         matcherPipeline.submit(orderBatchMatcherShard(batch), pending.sequence(),
-                prepareOrderBatchMatchingCommand(pending, batch));
+                prepareOrderBatchMatchingCommand(pending, batch, batch.items.get(batch.nextIndex)));
+    }
+
+    private void submitCancelBatchChunk(PendingMatching pending, OrderBatchPending batch) {
+        int shard = orderBatchMatcherShard(batch);
+        int start = batch.nextIndex;
+        int end = start;
+        // Only independent cancellations on the same matcher are coalesced. Missing orders
+        // stay on the owner rejection path; cross-shard chunks keep original item order.
+        while (end < batch.items.size()) {
+            OrderBatchItem item = batch.items.get(end);
+            OrderRuntime order = runtimeOrder(item.orderId);
+            if (order == null || matchingAdapter.matcherShardId(runtimeOrderSymbol(order)) != shard) break;
+            item.matchingSubmission = prepareOrderBatchMatchingCommand(pending, batch, item);
+            end++;
+        }
+        if (end == start) throw new IllegalStateException("validated cancel chunk is empty");
+        batch.cancellationChunkEnd = end;
+        int chunkEnd = end;
+        matcherPipeline.submit(shard, pending.sequence(), () -> {
+            batch.pipelinedMatchingResults.clear();
+            for (int index = start; index < chunkEnd; index++) {
+                var result = batch.items.get(index).matchingSubmission.get();
+                batch.pipelinedMatchingResults.add(result);
+                if (matchingResultNeedsRecovery(pending, result)) break;
+            }
+            return batch.pipelinedMatchingResults.getFirst();
+        });
     }
 
     private java.util.function.Supplier<com.surprising.aeron.service.matching.CoreMatchingResult>
             prepareOrderBatchMatchingCommand(
-            PendingMatching pending, OrderBatchPending batch) {
-        OrderBatchItem item = batch.items.get(batch.nextIndex);
+            PendingMatching pending, OrderBatchPending batch, OrderBatchItem item) {
         long orderId;
         long instrumentVersion;
         java.util.function.Supplier<com.surprising.aeron.service.matching.CoreMatchingResult> submission;
@@ -1428,6 +1459,33 @@ public final class CoreProbeState implements AutoCloseable {
             return completePipelinedPerpetualPlaceBatch(
                     batch, pending, matchingResult, clusterTimestamp, clusterPosition);
         }
+        if (batch.kind == OrderBatchKind.CANCEL && !BENCHMARK_SKIP_MATCHING_SUBMIT) {
+            if (batch.pipelinedMatchingResults.isEmpty()
+                    || batch.pipelinedMatchingResults.getFirst() != matchingResult) {
+                throw failOrderBatch(batch, pending, "cancel chunk completion identity mismatch", null);
+            }
+            for (var result : batch.pipelinedMatchingResults) {
+                if (matchingResultNeedsRecovery(pending, result)) {
+                    throw failOrderBatch(batch, pending, "cancel chunk matcher divergence", null);
+                }
+                if (result != matchingResult) {
+                    validateMatchingEvidence(pending, result);
+                    applyMatcherProgress(result);
+                }
+                applyCompletedOrderBatchItem(batch, pending, result);
+            }
+            if (batch.nextIndex != batch.cancellationChunkEnd) {
+                throw failOrderBatch(batch, pending, "cancel chunk completion count mismatch", null);
+            }
+            batch.pipelinedMatchingResults.clear();
+        } else {
+            applyCompletedOrderBatchItem(batch, pending, matchingResult);
+        }
+        return startOrderBatchItem(batch, pending, clusterTimestamp, clusterPosition);
+    }
+
+    private void applyCompletedOrderBatchItem(OrderBatchPending batch, PendingMatching pending,
+                                              CoreMatchingResult matchingResult) {
         batch.lastMatchingResult = matchingResult;
         batch.retainMatchingResult(matchingResult);
         if (!BENCHMARK_SKIP_MATCHING_SUBMIT) {
@@ -1451,11 +1509,11 @@ public final class CoreProbeState implements AutoCloseable {
                         runtimeOrder(orderId));
             }
             appendOrderBatchResult(batch, item, status, resultCode, executions);
+            item.matchingSubmission = null;
             batch.nextIndex++;
         } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException exception) {
             throw failOrderBatch(batch, pending, "Core and matcher state diverged", exception);
         }
-        return startOrderBatchItem(batch, pending, clusterTimestamp, clusterPosition);
     }
 
     private CoreResponse completePipelinedPerpetualPlaceBatch(
@@ -1656,9 +1714,9 @@ public final class CoreProbeState implements AutoCloseable {
     private void appendOrderBatchResult(OrderBatchPending batch, OrderBatchItem item,
                                         ResponseStatus status, CoreResultCode resultCode,
                                         List<CoreExecutionView> executions) {
-        batch.results.add(new CoreOrderBatchResult.Item(batch.results.size(), item.orderId,
-                item.originalOrderId, item.replacementOrderId, status, resultCode,
-                null, executions));
+        item.status = status;
+        item.resultCode = resultCode;
+        item.executions = executions;
     }
 
     private CoreResponse finishOrderBatch(OrderBatchPending batch, PendingMatching pending,
@@ -1753,19 +1811,19 @@ public final class CoreProbeState implements AutoCloseable {
         }
         completeSnapshotProjectionBatch(committedLaneMask);
         materializeChangeAccumulators();
-        java.util.ArrayList<CoreOrderBatchResult.Item> resultItems = new java.util.ArrayList<>(batch.results.size());
-        java.util.ArrayList<CoreExecutionView> executions = new java.util.ArrayList<>();
-        for (CoreOrderBatchResult.Item item : batch.results) {
+        java.util.ArrayList<CoreOrderBatchResult.Item> resultItems = new java.util.ArrayList<>(batch.items.size());
+        long tradeCount = 0;
+        for (OrderBatchItem item : batch.items) {
             OrderRuntime order = runtimeOrder(item.orderId());
             if (order == null && item.originalOrderId() > 0) order = runtimeOrder(item.originalOrderId());
-            resultItems.add(new CoreOrderBatchResult.Item(item.index(), item.orderId(), item.originalOrderId(),
-                    item.replacementOrderId(), item.status(), item.resultCode(),
-                    order == null ? null : orderView(order), item.executions()));
-            executions.addAll(item.executions());
+            resultItems.add(new CoreOrderBatchResult.Item(resultItems.size(), item.orderId(), item.originalOrderId(),
+                    item.replacementOrderId(), item.status, item.resultCode,
+                    order == null ? null : orderView(order), item.executions));
+            tradeCount = Math.addExact(tradeCount, item.executions.size());
         }
         CoreOrderBatchResult result = new CoreOrderBatchResult(resultItems);
         byte[] responseData = TradingOrderBatchCodec.encodeResult(result);
-        terminalTradeCount = Math.addExact(terminalTradeCount, executions.size());
+        terminalTradeCount = Math.addExact(terminalTradeCount, tradeCount);
         validateFundsConservation(pending.command());
         commitMatchingSequence(batch.sequence);
         long businessStateHash = currentProjectionPoint == batch.beforeProjection
@@ -3873,8 +3931,15 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private static boolean isCommitCursorSafeWhileMatching(CoreMessage message) {
-        return message.header().kind() == WireMessageKind.COMMAND
-                && isMatchingCommand(message.header().messageType());
+        return isNonFencingQuery(message) || (message.header().kind() == WireMessageKind.COMMAND
+                && isMatchingCommand(message.header().messageType()));
+    }
+
+    // Operational counters, not a coherent account/order snapshot. Business queries retain
+    // the ingress fence, including command-result queries which must not overtake writes.
+    static boolean isNonFencingQuery(CoreMessage message) {
+        return message.header().kind() == WireMessageKind.QUERY
+                && message.header().messageType() == CoreMessageType.LANE_METRICS_QUERY;
     }
 
     private static boolean accountLaneReadQuery(CoreMessageType type) {
@@ -4353,7 +4418,9 @@ public final class CoreProbeState implements AutoCloseable {
             while ((sequence = runtimePlaceOrderState.pollMatcherSettlementReady(laneId)) != 0) {
                 PendingMatching pending = pendingMatching.get(sequence);
                 if (pending == null) continue;
-                if (!orderBatchLaneWorkPending(sequence)) pending.markSettlementReady();
+                // Batch items can collect their Lane event inline before this notification
+                // is drained. Their continuation belongs to OrderBatchPending, not PendingMatching.
+                if (!pendingOrderBatches.containsKey(sequence)) pending.markSettlementReady();
                 signalPendingMatchingReady(sequence);
             }
         }
@@ -6797,11 +6864,26 @@ public final class CoreProbeState implements AutoCloseable {
         AMEND
     }
 
-    private record OrderBatchItem(
-            long orderId,
-            long originalOrderId,
-            long replacementOrderId,
-            Object command) {
+    private static final class OrderBatchItem {
+        private final long orderId;
+        private final long originalOrderId;
+        private final long replacementOrderId;
+        private final Object command;
+        private ResponseStatus status;
+        private CoreResultCode resultCode;
+        private List<CoreExecutionView> executions;
+        private java.util.function.Supplier<CoreMatchingResult> matchingSubmission;
+
+        private OrderBatchItem(long orderId, long originalOrderId, long replacementOrderId, Object command) {
+            this.orderId = orderId;
+            this.originalOrderId = originalOrderId;
+            this.replacementOrderId = replacementOrderId;
+            this.command = command;
+        }
+
+        private long orderId() { return orderId; }
+        private long originalOrderId() { return originalOrderId; }
+        private long replacementOrderId() { return replacementOrderId; }
     }
 
     private record DeferredMatching(long clusterTimestamp, long clusterPosition, SourceKey sourceKey) {
@@ -6902,7 +6984,6 @@ public final class CoreProbeState implements AutoCloseable {
         private long clusterTimestamp;
         private long clusterPosition;
         private PendingMatching.Operation operation;
-        private final List<CoreOrderBatchResult.Item> results;
         private final PrimitiveLongChangeSet changedUserIds;
         private final PrimitiveLongChangeSet changedOrderIds;
         private final PrimitiveLongChangeSet runtimeChangedOrderIds;
@@ -6919,6 +7000,7 @@ public final class CoreProbeState implements AutoCloseable {
         private final List<PreparedClientAllocation> preparedClientKeys;
         private com.surprising.aeron.service.state.RuntimeTreasuryDelta treasuryDelta;
         private int nextIndex;
+        private int cancellationChunkEnd;
         private long sequence;
         private List<Long> currentPreMatchingCancellationOrderIds = List.of();
         private boolean started;
@@ -6959,7 +7041,6 @@ public final class CoreProbeState implements AutoCloseable {
         private OrderBatchPending(int requestedCapacity) {
             int capacity = Math.max(1, requestedCapacity);
             items = new ArrayList<>(capacity);
-            results = new ArrayList<>(capacity);
             changedUserIds = new PrimitiveLongChangeSet(capacity * 2);
             changedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
             runtimeChangedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
@@ -7003,7 +7084,6 @@ public final class CoreProbeState implements AutoCloseable {
             beforeProjection = null;
             runtimeCheckpoint = 0;
             positionIdentityCheckpoint = 0;
-            results.clear();
             changedUserIds.clear();
             changedOrderIds.clear();
             runtimeChangedOrderIds.clear();
@@ -7017,6 +7097,7 @@ public final class CoreProbeState implements AutoCloseable {
             if (treasuryDelta != null) treasuryDelta.clear();
             treasuryDelta = null;
             nextIndex = 0;
+            cancellationChunkEnd = 0;
             sequence = 0;
             currentPreMatchingCancellationOrderIds = List.of();
             started = false;

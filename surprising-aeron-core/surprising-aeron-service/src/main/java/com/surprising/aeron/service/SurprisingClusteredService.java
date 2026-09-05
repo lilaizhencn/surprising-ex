@@ -41,6 +41,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     private final Map<Long, PendingEgress> pendingEgress = new HashMap<>();
     private final Set<Long> activeEgressSessions = new HashSet<>();
     private final Map<Long, ArrayDeque<PendingClient>> pendingClients = new HashMap<>();
+    private int pendingQueryCount;
     private final ArrayDeque<DeferredInbound> deferredInbound = new ArrayDeque<>();
     private long snapshotFenceNotReadyCount;
     private long snapshotFenceTimeoutCount;
@@ -59,6 +60,7 @@ public final class SurprisingClusteredService implements ClusteredService {
         pendingEgress.clear();
         activeEgressSessions.clear();
         pendingClients.clear();
+        pendingQueryCount = 0;
         deferredInbound.clear();
         snapshotFenceNotReadyCount = 0;
         snapshotFenceTimeoutCount = 0;
@@ -96,6 +98,7 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     private boolean shouldDeferWhileMatching(CoreMessage request) {
         if (state.firstPendingMatchingSequence() == 0) return false;
+        if (CoreProbeState.isNonFencingQuery(request)) return false;
         return request.header().kind() != WireMessageKind.COMMAND
                 || (!CoreProbeState.isMatchingCommand(request.header().messageType())
                 && request.header().messageType() != CoreMessageType.ACK_EXPORT);
@@ -119,7 +122,10 @@ public final class SurprisingClusteredService implements ClusteredService {
                 result = queryResult;
             } else {
                 if (session != null) {
-                    pendingClients.computeIfAbsent(querySequence, ignored -> new ArrayDeque<>())
+                    pendingClients.computeIfAbsent(querySequence, ignored -> {
+                                pendingQueryCount++;
+                                return new ArrayDeque<>();
+                            })
                             .addLast(new PendingClient(session, request.header()));
                 }
                 return;
@@ -221,6 +227,7 @@ public final class SurprisingClusteredService implements ClusteredService {
             work += drain(egress);
             if (egress.queue.isEmpty()) sessions.remove();
         }
+        if (pendingQueryCount == 0) return work;
         Iterator<Map.Entry<Long, ArrayDeque<PendingClient>>> queries = pendingClients.entrySet().iterator();
         while (queries.hasNext()) {
             Map.Entry<Long, ArrayDeque<PendingClient>> entry = queries.next();
@@ -235,6 +242,7 @@ public final class SurprisingClusteredService implements ClusteredService {
                 }
             }
             queries.remove();
+            pendingQueryCount--;
         }
         return work;
     }
@@ -257,8 +265,8 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     private int drainDeferredIngress() {
         int deferred = 0;
-        while (state.firstPendingMatchingSequence() == 0
-                && !deferredInbound.isEmpty()
+        while (!deferredInbound.isEmpty()
+                && !shouldDeferWhileMatching(deferredInbound.peekFirst().request())
                 && deferred < DEFERRED_INGRESS_BATCH_SIZE) {
             DeferredInbound inbound = deferredInbound.removeFirst();
             processRequestNow(inbound.session(), inbound.request(),
@@ -287,6 +295,7 @@ public final class SurprisingClusteredService implements ClusteredService {
         pendingEgress.clear();
         activeEgressSessions.clear();
         pendingClients.clear();
+        pendingQueryCount = 0;
         deferredInbound.clear();
         this.cluster = null;
         if (state != null) {

@@ -54,6 +54,57 @@ import org.junit.jupiter.api.Test;
 class CoreOrderedOrderBatchTest {
 
     @Test
+    void coalescesSameMatcherCancellationsAndPreservesRejectedItemOrder() throws Exception {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, 100_000);
+            var before = state.tradingState().users().get(1001L).balances();
+            for (int index = 0; index < 4; index++) {
+                drainBatch(state, command(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 2 + index,
+                        TradingCommandCodec.encodePlaceOrder(place(18_001 + index, "chunk-" + index, 1_000))));
+            }
+            MatcherPipelineGroup group = field(state, "matcherPipeline");
+            var shardsField = MatcherPipelineGroup.class.getDeclaredField("shards");
+            shardsField.setAccessible(true);
+            var shards = (MatcherCommandPipeline[]) shardsField.get(group);
+            var positionField = MatcherCommandPipeline.class.getDeclaredField("submittedPosition");
+            positionField.setAccessible(true);
+            long submittedBefore = positionField.getLong(shards[0]);
+            CoreMessage cancel = command(CoreMessageType.CANCEL_ORDER_BATCH, UUID.randomUUID(), 6,
+                    TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
+                            new CancelOrderCommand(18_001), new CancelOrderCommand(18_001),
+                            new CancelOrderCommand(18_002),
+                            new CancelOrderCommand(99_999),
+                            new CancelOrderCommand(18_003), new CancelOrderCommand(18_004)))));
+            assertThat(state.apply(cancel).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            final CoreResponse[] terminal = {null};
+            long deadline = System.nanoTime() + 5_000_000_000L;
+            while (terminal[0] == null && System.nanoTime() < deadline) {
+                state.commitReadyMatching(256, 2_000, 6, false, (sequence, response) -> terminal[0] = response);
+            }
+            assertThat(terminal[0]).isNotNull();
+            var items = TradingOrderBatchCodec.decodeResult(terminal[0].data()).items();
+            assertThat(items).extracting(CoreOrderBatchResult.Item::status).containsExactly(
+                    ResponseStatus.APPLIED, ResponseStatus.REJECTED, ResponseStatus.APPLIED, ResponseStatus.REJECTED,
+                    ResponseStatus.APPLIED, ResponseStatus.APPLIED);
+            assertThat(items.get(1).resultCode()).isEqualTo(CoreResultCode.MATCHING_REJECTED);
+            assertThat(items.get(3).resultCode()).isEqualTo(CoreResultCode.ORDER_NOT_FOUND);
+            assertThat(items).extracting(CoreOrderBatchResult.Item::index).containsExactly(0, 1, 2, 3, 4, 5);
+            assertThat(positionField.getLong(shards[0]) - submittedBefore).isEqualTo(2);
+            assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(state.tradingState().users().get(1001L).balances()).isEqualTo(before);
+            assertThat(state.tradingState().users().get(1001L).reservations()).isEmpty();
+            assertThat(state.tradingState().users().get(1001L).positions()).isEmpty();
+            byte[] snapshot = state.snapshot();
+            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, snapshot)) {
+                assertThat(restored.tradingState().users().get(1001L).balances()).isEqualTo(before);
+                assertThat(restored.tradingState().businessStateHash())
+                        .isEqualTo(state.tradingState().businessStateHash());
+            }
+        }
+    }
+
+    @Test
     void isolatesOverlappingBatchesUntilTheActiveBatchCompletes() throws Exception {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applySpotInstrument(state);

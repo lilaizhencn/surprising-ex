@@ -770,6 +770,23 @@ Topic、端口、磁盘、监控阈值和故障演练的精确清单待生产 Ru
   `RISK_SCAN_CONTROL_QUERY` 查询，并以 `expectedVersion` 提交更新。PostgreSQL 只通过 Core Export→Kafka
   异步保留审计事实，不保存或覆盖当前配置。
 
+## 交易批量命令与查询边界
+
+- `CoreProbeState.submitCancelBatchChunk` 将连续、同 matcher 的有效撤单合并成一次队列任务，
+  matcher 内仍按输入顺序执行；owner 逐项校验 matcher sequence/prefix，保留逐项拒绝和资金解冻。
+  缺失订单在 owner 拒绝，跨 matcher 拆分为有序 chunk；改单不使用此优化。
+- batch item 直接保存本次执行结果，`finishOrderBatch` 在协议响应边界只构建一次最终 Item；
+  成交数量直接累加，不再复制 executions 到额外列表。Lane completion 按 batch/单笔所有权分流。
+- `TradingRuntimeState.MatcherSettlementChanges.ensureAdmissionCapacity` 只为 admission 所属 Lane
+  准备用户、订单和 reservation 缓冲；实际成交结算仍保留必要的持仓和索引变更容器。
+- `SurprisingClusteredService` 没有未完成异步查询时跳过 pending-client 查询扫描。
+  只有 `LANE_METRICS_QUERY` 可在撮合在途时读取运行指标；它不是资金/订单一致性快照。
+  资金、持仓、订单、命令结果和其他业务查询保留 ingress fence，指标查询也不能越过已排队的业务 fence。
+  fence 执行后，连续可入队的交易可重新填充流水线，不再每提交一条就清空全部撮合。
+- `ClusteredBatchTradingBenchmark.batchPlaceCancelWithMetrics` 覆盖现货和 U 本位永续的真实 service
+  回调、256 in-flight、20 items/batch、指标查询和非等待 completion pump；使用进程内模拟 transport，
+  不代表外部 Aeron Cluster/API 容量。性能结果统一追加到 `PERFORMANCE_VALIDATION.md`。
+
 ## 文档
 
 当前保留的文档入口：

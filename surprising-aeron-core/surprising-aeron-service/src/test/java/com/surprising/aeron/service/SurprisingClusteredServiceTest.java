@@ -54,6 +54,40 @@ import org.junit.jupiter.api.Test;
 class SurprisingClusteredServiceTest {
 
     @Test
+    void operationalQueryDoesNotFenceLaterTradingButBusinessQueryDoes() throws Exception {
+        SurprisingClusteredService service = service();
+        List<byte[]> responses = new CopyOnWriteArrayList<>();
+        service.onStart(cluster(), null);
+        try {
+            CoreProbeState state = service.state();
+            preparePendingPlace(state, 18_001);
+            var metrics = new CoreMessage(CoreMessageHeader.query(CoreMessageType.LANE_METRICS_QUERY,
+                    UUID.randomUUID(), ProductLine.SPOT, CommandSource.GATEWAY, 77, 0, 0, 1_000, 8), new byte[0]);
+            onSessionMessage(service, responses, metrics);
+            assertThat(responses).hasSize(1);
+            CoreMessage later = command(CoreMessageType.PLACE_ORDER, 3, 1001,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(18_002, "BTC-USDT", 1,
+                            CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS,
+                            CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "later")));
+            onSessionMessage(service, responses, later);
+            assertThat(state.matchingSequence(later.header().commandId())).isPositive();
+            Field count = SurprisingClusteredService.class.getDeclaredField("pendingQueryCount");
+            count.setAccessible(true);
+            assertThat(count.getInt(service)).isZero();
+
+            var query = new CoreMessage(CoreMessageHeader.query(CoreMessageType.USER_STATE_QUERY,
+                    UUID.randomUUID(), ProductLine.SPOT, CommandSource.GATEWAY, 77, 0, 1001, 1_000, 9), new byte[0]);
+            onSessionMessage(service, responses, query);
+            onSessionMessage(service, responses, metrics);
+            assertThat(responses).hasSize(1); // metrics must not overtake the earlier business fence
+            awaitBackgroundWork(service, () -> responses.size() == 4 && state.pendingMatchingCount() == 0);
+            assertThat(count.getInt(service)).isZero();
+        } finally {
+            service.onTerminate(null);
+        }
+    }
+
+    @Test
     void handsRuntimeOwnershipFromConstructionThreadToClusterServiceThread() throws Exception {
         SurprisingClusteredService service = service();
         AtomicReference<Throwable> failure = new AtomicReference<>();

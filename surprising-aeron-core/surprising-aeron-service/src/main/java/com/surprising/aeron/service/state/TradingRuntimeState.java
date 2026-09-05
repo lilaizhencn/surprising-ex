@@ -702,6 +702,11 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
         }
 
+        void ensureAdmissionCapacity(int laneId, int expectedOrders) {
+            if (expectedOrders <= 0) return;
+            publishedLaneChanges[laneId].ensureAdmissionCapacity(expectedOrders);
+        }
+
         void ensureOrderCapacity(int expectedOrders) {
             if (expectedOrders <= 0) return;
             for (PublishedLaneChanges changes : publishedLaneChanges) {
@@ -779,6 +784,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         private final LongHashSet removedOrderRoutes = new LongHashSet();
         private final LongHashSet removedReservationRoutes = new LongHashSet();
         private final ClientIdentityReleaseBuffer retiredClientIdentities = new ClientIdentityReleaseBuffer();
+
+        private void ensureAdmissionCapacity(int expectedOrders) {
+            users.ensureCapacity(1);
+            orders.ensureCapacity(expectedOrders);
+            reservations.ensureCapacity(expectedOrders);
+        }
 
         private void ensureOrderCapacity(int expectedOrders) {
             users.ensureCapacity(expectedOrders * 2);
@@ -1673,7 +1684,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         int laneId = topology.accountLaneId(userId);
         MatcherSettlementChanges changes = acquireMatcherSettlementChanges();
-        changes.ensureOrderCapacity(itemCount);
+        changes.ensureAdmissionCapacity(laneId, itemCount);
         PlaceBatchAdmissionEvent event = placeBatchAdmissionEventPool.pollFirst();
         if (event == null) event = new PlaceBatchAdmissionEvent();
         event.prepare(coreSequence, userId, commandId, orders, requiredReservations,

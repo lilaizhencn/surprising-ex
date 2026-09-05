@@ -14,6 +14,29 @@ import org.junit.jupiter.api.Test;
 class TradingRuntimeStateTest {
 
     @Test
+    void admissionOnlyPreallocatesWrittenBuffersInItsOwnerLane() throws Exception {
+        var constructor = TradingRuntimeState.MatcherSettlementChanges.class.getDeclaredConstructor(int.class);
+        constructor.setAccessible(true);
+        var changes = constructor.newInstance(4);
+        changes.ensureAdmissionCapacity(2, 20);
+        Field published = changes.getClass().getDeclaredField("publishedLaneChanges");
+        published.setAccessible(true);
+        Object[] lanes = (Object[]) published.get(changes);
+        for (int lane = 0; lane < lanes.length; lane++) {
+            for (String name : new String[]{"users", "orders", "reservations", "positions",
+                    "activeOrderValues", "positionIndexValues"}) {
+                Field bufferField = lanes[lane].getClass().getDeclaredField(name);
+                bufferField.setAccessible(true);
+                Object buffer = bufferField.get(lanes[lane]);
+                Field keys = buffer.getClass().getDeclaredField("keys");
+                keys.setAccessible(true);
+                assertThat(((long[]) keys.get(buffer)).length).as("lane %s %s", lane, name)
+                        .isEqualTo(lane == 2 && (name.equals("orders") || name.equals("reservations")) ? 32 : 8);
+            }
+        }
+    }
+
+    @Test
     void pendingReservationSequenceIndexKeepsSingleOrderOnPrimitivePath() {
         TradingRuntimeState.PendingReservationSequenceIndex index =
                 new TradingRuntimeState.PendingReservationSequenceIndex(4);
