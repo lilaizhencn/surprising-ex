@@ -3322,3 +3322,41 @@
 - 两场景均closed-loop，未修正coordinated omission，无固定到达率；JMH1thread/1fork，warmup2×2s、measurement3×2s、冷却2s。各跑无profiler主分数，另跑-prof gc + profile.jfc JFR、NMT summary/退出统计；带profiler仅归因，不能代替主分数。主分数/误差/CI/完整参数保存JSON。
 - 预定门禁：所有业务断言通过、accepted=terminal、unfinished0、余额资金等式成立、恢复一致，诊断分数有限且>0；不设容量承诺。JFR DataLoss>0、swap增长、CPU_Speed_Limit<100或OOM/资金不变量失败判该轮性能无效，不放宽条件补跑。缺少类型三段尾延迟/native池/长稳/真实Aeron网络证据，最多部分验证。
 - 原始路径：surprising-aeron-core/surprising-aeron-benchmarks/target/pv143/；脚本run.sh、main/gc JSON/log、原始JFR、summary及CPU/分配/GC/NMT/锁/VM/JIT/I/O视图、系统前后和逐秒thermal、输入输出SHA均保留。不运行PG/exporter/wallet。
+
+### PV-143 结果（2026-09-06 00:54–01:03 +08:00）
+
+- 被测 commit `6dcb7351`，对照 commit：不适用（仅验证当前 master）。`bash surprising-aeron-core/surprising-aeron-benchmarks/target/pv143/run.sh` 完成12个场景×无profiler/GC+JFR共24轮；JAR SHA-256 `c93d8ef6824af9e32301b579b4f838f83f6cbbc6254cf774dc1069109638e054`。输入记录、全部JSON/JFR和最终校验位于上述目录；`scores.mjs`/`scores.json`保存口径换算，`JfrDigest.java`/各digest.txt保存离线线程分组和GC分位。原始12份JFR共约40MiB，每份12–16秒；各summary包含事件配置的实际开启/数量。
+- 系统门禁失败：Swapins1280→1343，Swapouts2431→2431、Pageouts48287→48287；CPU_Speed_Limit全程100。没有因“只发生swap-in”放宽门禁，**本轮性能验收无效**，以下数字仅归档诊断，不作为性能提升、容量或旧版本比较证据。没有自动关闭用户的同机应用。
+- 功能测试通过：核心依赖/benchmark 573项（Product API12、协议86、instrument API14、service416、benchmark45），客户端38、工具59、账户生命周期13、账户保证金/划转12，共695个对应范围测试；重复执行的依赖测试不重复计数。额外3个偿付恢复参数测试再次通过，覆盖两margin mode。命令分别是 `mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am test`、`mvn -pl surprising-aeron-core/surprising-aeron-client,surprising-aeron-core/surprising-aeron-tools -am test`、账户provider `-am -Dtest=ExpiringContractSettlementFanoutServiceTest,ExpiringContractSettlementConsumerTest -Dsurefire.failIfNoSpecifiedTests=false test`，及 `-Dtest=MarginTransferMathTest,AccountMarginReleaseMathTest,ProductTransferInternalControllerTest`。日志 `/tmp/remaining-core-final3.log`、`/tmp/remaining-protocol-consumers.log`、`/tmp/remaining-account-final2.log`、`/tmp/remaining-account-math.log`、`/tmp/solvency-extra-tests.log`。
+- 开发中失败也已处理：旧协议golden同步schema5；新增索引测试缺少import；反射状态比较误把nullable查询scratch当业务索引（仅排除此scratch）；全局订单分页可选symbol被必填校验拒绝（修正可选参数并覆盖）。最终复跑成功。离线JFR聚合初次遇到无Java名字的native线程，聚合器修正后重新读取原始JFR，未重采样或修改标准。
+
+混合交易诊断（每秒；固定256 in-flight、4 Lane、1 matcher；误差为JMH 99.9% CI半宽，非真实集群容量）：
+
+|产品线|terminal business ops/s ± error|terminal Core messages/s|GC+JFR business ops/s|分配B/business op|分配MiB/s|GC次数/时间ms|
+|---|---:|---:|---:|---:|---:|---:|
+|SPOT|199749 ±18414|19024|195398|6106.8|1099.5|27/318|
+|LINEAR_PERPETUAL|172403 ±22563|16434|167956|6187.7|964.6|22/263|
+|INVERSE_PERPETUAL|169823 ±8613|16188|167380|6243.1|957.5|22/236|
+|LINEAR_DELIVERY|183391 ±24211|17474|177164|6074.8|999.1|26/309|
+|INVERSE_DELIVERY|181705 ±27209|17313|175765|6154.5|1000.8|31/345|
+|OPTION|186259 ±40879|17747|179552|6048.8|1003.7|30/346|
+
+- 六场景main/gc均输出 `funds=true snapshot=true terminal=true maxBacklog=256`；accepted/terminal business与Core指标一致、两个unfinished均0、期末命令积压0。每轮完整断言不等同于所有生产业务全覆盖；本场景的行情/风险/资金费及下撤单比例由已锁定fixture控制。GC每操作字节按实际business ops/invocation展开，非Core message字节。未独立输出本轮fills/s、batches/s、累计accepted计数及三段类型延迟，不能以已有aux每秒速率代替这些缺失指标。
+
+偿付续结诊断（每invocation19个business ops/Core messages，测量fills=0）：
+
+|产品线/模式|terminal business ops/s ± error|GC+JFR ops/s|分配B/op（含恢复）|分配MiB/s|GC次数/时间ms|
+|---|---:|---:|---:|---:|---:|
+|LINEAR_DELIVERY/CROSS|6037 ±4775|6092|2126971|1502.1|135/235|
+|LINEAR_DELIVERY/ISOLATED|6319 ±9787|5889|2125024|1477.2|63/129|
+|INVERSE_DELIVERY/CROSS|6173 ±10691|6014|2115709|1472.8|135/245|
+|INVERSE_DELIVERY/ISOLATED|6217 ±8343|5246|2116086|1329.9|288/477|
+|OPTION/CROSS|6065 ±6963|5759|2127131|1505.4|60/126|
+|OPTION/ISOLATED|6285 ±8640|5478|2128207|1391.1|250/400|
+
+- 这组分配含每invocation重建runtime、线程和快照校验，约2.12MB/op不能归因于生产结算计算。`run(false)`业务计时不物化全量状态；暂停页未动资金、部分补资不消耗和重复完成不赔付由`run(true)`功能路径验证。主分数区间很宽，不能精确推断结算容量，也不与混合交易混报。
+- JFR CPU/线程：12份DataLoss均0。以INVERSE_DELIVERY-MIX为例，CPU样本owner+fixture979、Account Lane257、matcher79、other8；没有独立risk/snapshot/fact/Aeron/Kafka线程样本不等于这些生产服务成本为0。JVM user平均22.29%、system1.65%，机器平均26.85%（相对整机CPU）；各线程CPU见thread-cpu-load。真实剩余等待栈是 `finishOrderBatch → RuntimeCommandProcessor.stampChangedOrdersByLane → executeOwnerSettlements → LaneMutationTask.await`；另有`readyLaneMask`就绪扫描和命令/状态hash编码栈，不能宣称owner已完全非阻塞。纯结算LINEAR_DELIVERY-CROSS的await占30.37%执行样本，并混有fixture恢复。
+- 分配/heap/GC：INVERSE_DELIVERY-MIX采样weight估计owner+fixture约6.30GB、Lane5.10GB、matcher1.52GB（全录制窗口估计，不是精确TLAB计数）；SPOT样本top为long[]17.02%、byte[]14.20%、OrderRuntime8.04%、Long6.73%。TLAB内/外精确事件均0，缺少对象数/op和精确最大对象。INVERSE_DELIVERY-MIX全JFR GC pause43次，总486.792ms，p50=12.680、p95=16.487、p99/max=22.593ms，包含预热/终检，不与表内measurement GC345ms混用。GC before/after、old/concurrent周期和原因见gc/view；没有长稳live-set斜率证据。
+- Native/Direct：NMT开启且保留全部类别/退出reserved与committed；同一inverse mixed heap committed768MiB，GC native74.3→75.2MiB、code21.3→37.7MiB、metaspace15.6→22.0MiB；DirectBuffer三个样本count/capacity/used均0。真实Aeron/Netty/Chronicle池、mapped buffer峰值及FD增长未测，不能据此断言无native泄漏。
+- 锁/VM/JIT/I/O：inverse mixed ThreadPark220，另见各contention-by-site；无完整墙钟RUNNABLE/BLOCKED/park占比、上下文切换和busy-spin按阶段占比。SafepointBegin48，但profile未记录完整End/同步时长，view显示Indefinite，不当作零停顿；因此不能与业务p99门禁核对。Compiler统计7663方法、总26.7s（多线程累计）、最长534ms、1 bailout，Deoptimization256；仍混入启动编译，不能证明完整窗口已越过主要JIT阶段。异常样本以MethodHandle/反射/jnr初始化为主，未发生基准业务失败。该inverse记录仅2个外围ObjectInputStream socket-read事件，未录到交易owner同步I/O；阈值采样缺失不能作为绝对无I/O证明。
+- 已测范围为当前核心与对应账户consumer/数学路径、六产品线fixture的资金/终态/快照恢复；未测PG/exporter/wallet（按要求）、真实模拟用户API/WebSocket、真实集群HA、独立做市进程、open-loop类型尾延迟、长稳/native泄漏。结论是**已测功能修复通过，性能仅诊断且系统门禁失败；整体交易链路验收未完成**。本轮未重构owner生命周期/订单stamp为全异步，也未把到期保险不足直接转成自动ADL或补齐跨产品组合保证金规则。
