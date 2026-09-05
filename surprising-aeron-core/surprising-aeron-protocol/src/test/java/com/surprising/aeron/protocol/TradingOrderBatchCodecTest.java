@@ -14,6 +14,41 @@ import org.junit.jupiter.api.Test;
 class TradingOrderBatchCodecTest {
 
     @Test
+    void batchItemsHaveExactlyTheSingleCommandWireFormatAndCannotReadAcrossFrameBoundaries() {
+        var orders = List.of(place(901, "客户-😀"), place(902, "second"));
+        byte[] encoded = TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders));
+        ByteBuffer frames = ByteBuffer.wrap(encoded).order(ByteOrder.LITTLE_ENDIAN);
+        frames.position(8);
+        for (int index = 0; index < orders.size(); index++) {
+            assertThat(frames.getInt()).isEqualTo(index);
+            int length = frames.getInt();
+            byte[] frame = new byte[length];
+            frames.get(frame);
+            assertThat(frame).isEqualTo(TradingCommandCodec.encodePlaceOrder(orders.get(index)));
+        }
+        assertThat(TradingOrderBatchCodec.decodePlaceOrderBatch(encoded).orders()).isEqualTo(orders);
+        byte[] malformed = encoded.clone();
+        ByteBuffer view = ByteBuffer.wrap(malformed).order(ByteOrder.LITTLE_ENDIAN);
+        view.putInt(12, view.getInt(12) - 1);
+        assertThatThrownBy(() -> TradingOrderBatchCodec.decodePlaceOrderBatch(malformed))
+                .isInstanceOf(ProtocolException.class).hasMessageContaining("truncated");
+    }
+
+    @Test
+    void offsetDecodersRejectTruncatedRangesEvenWhenBackingArrayContainsTheMissingBytes() {
+        byte[] order = TradingCommandCodec.encodePlaceOrder(place(903, "bounded"));
+        byte[] surrounding = new byte[order.length + 16];
+        System.arraycopy(order, 0, surrounding, 8, order.length);
+        assertThat(TradingCommandCodec.decodePlaceOrder(surrounding, 8, order.length))
+                .isEqualTo(place(903, "bounded"));
+        for (int length = 0; length < order.length; length++) {
+            int truncatedLength = length;
+            assertThatThrownBy(() -> TradingCommandCodec.decodePlaceOrder(surrounding, 8, truncatedLength))
+                    .isInstanceOf(ProtocolException.class);
+        }
+    }
+
+    @Test
     void roundTripsVersionedLengthPrefixedCanonicalBatchCommandsAndResults() {
         PlaceOrderCommand place = place(701, "place-701");
         CancelOrderCommand cancel = new CancelOrderCommand(701);

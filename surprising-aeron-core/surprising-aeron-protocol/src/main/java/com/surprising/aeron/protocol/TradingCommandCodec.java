@@ -190,9 +190,68 @@ public final class TradingCommandCodec {
         return payload;
     }
 
+    static int encodedPlaceOrderLength(PlaceOrderCommand command) {
+        return Integer.BYTES + Long.BYTES * 4 + Short.BYTES * 2 + Integer.BYTES * 5 + Byte.BYTES * 2
+                + commandTextLength(command.symbol(), false) + commandTextLength(command.clientOrderId(), true);
+    }
+
+    static void writePlaceOrder(ByteBuffer output, PlaceOrderCommand command) {
+        output.putInt(PLACE_ORDER_VERSION).putLong(command.orderId()).putLong(command.instrumentVersion());
+        putCommandText(output, command.symbol(), false);
+        output.putInt(command.side().wireCode()).putLong(command.limitPriceTicks()).putLong(command.quantitySteps())
+                .put((byte) (command.reduceOnly() ? 1 : 0)).putInt(command.marginMode().wireCode())
+                .putInt(command.positionSide().wireCode()).putInt(command.orderType().wireCode())
+                .putInt(command.timeInForce().wireCode()).put((byte) (command.postOnly() ? 1 : 0));
+        putCommandText(output, command.clientOrderId(), true);
+    }
+
+    static int encodedAmendOrderLength(AmendOrderCommand command) {
+        return Integer.BYTES * 2 + Long.BYTES * 2
+                + (command.priceTicks() == null ? 0 : Long.BYTES)
+                + (command.quantitySteps() == null ? 0 : Long.BYTES)
+                + (command.timeInForce() == null ? 0 : Integer.BYTES)
+                + (command.postOnly() == null ? 0 : Byte.BYTES)
+                + (command.newClientOrderId() == null ? 0
+                : Short.BYTES + commandTextLength(command.newClientOrderId(), true));
+    }
+
+    static void writeAmendOrder(ByteBuffer output, AmendOrderCommand command) {
+        int mask = (command.priceTicks() == null ? 0 : 1)
+                | (command.quantitySteps() == null ? 0 : 2)
+                | (command.timeInForce() == null ? 0 : 4)
+                | (command.postOnly() == null ? 0 : 8)
+                | (command.newClientOrderId() == null ? 0 : 16);
+        output.putInt(AMEND_ORDER_V1_MARKER).putLong(command.originalOrderId())
+                .putLong(command.replacementOrderId()).putInt(mask);
+        if ((mask & 1) != 0) output.putLong(command.priceTicks());
+        if ((mask & 2) != 0) output.putLong(command.quantitySteps());
+        if ((mask & 4) != 0) output.putInt(command.timeInForce().wireCode());
+        if ((mask & 8) != 0) output.put((byte) (command.postOnly() ? 1 : 0));
+        if ((mask & 16) != 0) putCommandText(output, command.newClientOrderId(), true);
+    }
+
+    private static int commandTextLength(String value, boolean optional) {
+        int length = value == null ? 0 : CoreStateQueryCodec.utf8Length(value);
+        if (length > MAX_TEXT_BYTES || !optional && length == 0) {
+            throw new IllegalArgumentException("invalid command text length");
+        }
+        return length;
+    }
+
+    private static void putCommandText(ByteBuffer output, String value, boolean optional) {
+        byte[] bytes = optional ? optionalText(value) : text(value);
+        output.putShort((short) bytes.length).put(bytes);
+    }
+
     public static PlaceOrderCommand decodePlaceOrder(byte[] payload) {
-        requireRange(payload, 0, Integer.BYTES + Long.BYTES * 2);
-        int offset = 0;
+        return decodePlaceOrder(payload, 0, payload == null ? 0 : payload.length);
+    }
+
+    static PlaceOrderCommand decodePlaceOrder(byte[] payload, int start, int length) {
+        requireRange(payload, start, length);
+        int limit = start + length;
+        requireRange(payload, start, Integer.BYTES + Long.BYTES * 2, limit);
+        int offset = start;
         int version = getInt(payload, offset);
         offset += Integer.BYTES;
         if (version != PLACE_ORDER_VERSION) {
@@ -202,17 +261,17 @@ public final class TradingCommandCodec {
         offset += Long.BYTES;
         long instrumentVersion = getLong(payload, offset);
         offset += Long.BYTES;
-        requireRange(payload, offset, Short.BYTES);
+        requireRange(payload, offset, Short.BYTES, limit);
         int symbolLength = getUnsignedShort(payload, offset);
         offset += Short.BYTES;
         if (symbolLength == 0 || symbolLength > MAX_TEXT_BYTES) {
             throw new ProtocolException("invalid text length: " + symbolLength);
         }
-        requireRange(payload, offset, symbolLength);
+        requireRange(payload, offset, symbolLength, limit);
         String symbol = new String(payload, offset, symbolLength, StandardCharsets.UTF_8);
         offset += symbolLength;
         requireRange(payload, offset, Integer.BYTES + Long.BYTES * 2 + Byte.BYTES + Integer.BYTES * 4
-                + Byte.BYTES + Short.BYTES);
+                + Byte.BYTES + Short.BYTES, limit);
         CoreOrderSide side = CoreOrderSide.fromWireCode(getInt(payload, offset));
         offset += Integer.BYTES;
         long limitPriceTicks = getLong(payload, offset);
@@ -240,10 +299,10 @@ public final class TradingCommandCodec {
         if (clientLength > MAX_TEXT_BYTES) {
             throw new ProtocolException("invalid optional text length: " + clientLength);
         }
-        requireRange(payload, offset, clientLength);
+        requireRange(payload, offset, clientLength, limit);
         String clientOrderId = new String(payload, offset, clientLength, StandardCharsets.UTF_8);
         offset += clientLength;
-        if (offset != payload.length) throw new ProtocolException("trailing bytes in trading command payload");
+        if (offset != limit) throw new ProtocolException("trailing bytes in trading command payload");
         return new PlaceOrderCommand(orderId, symbol, instrumentVersion, side, limitPriceTicks,
                 quantitySteps, reduceOnlyCode == 1, marginMode, positionSide,
                 orderType, timeInForce, postOnlyCode == 1, clientOrderId);
@@ -299,10 +358,15 @@ public final class TradingCommandCodec {
     }
 
     public static CancelOrderCommand decodeCancelOrder(byte[] payload) {
-        if (payload == null || payload.length != Long.BYTES) {
+        return decodeCancelOrder(payload, 0, payload == null ? 0 : payload.length);
+    }
+
+    static CancelOrderCommand decodeCancelOrder(byte[] payload, int offset, int length) {
+        requireRange(payload, offset, length);
+        if (length != Long.BYTES) {
             throw new ProtocolException("cancel order payload must be 8 bytes");
         }
-        return new CancelOrderCommand(ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN).getLong());
+        return new CancelOrderCommand(getLong(payload, offset));
     }
 
     public static byte[] encodeReplaceOrder(ReplaceOrderCommand command) {
@@ -357,7 +421,12 @@ public final class TradingCommandCodec {
     }
 
     public static AmendOrderCommand decodeAmendOrder(byte[] payload) {
-        ByteBuffer buffer = readable(payload);
+        return decodeAmendOrder(payload, 0, payload == null ? 0 : payload.length);
+    }
+
+    static AmendOrderCommand decodeAmendOrder(byte[] payload, int offset, int length) {
+        requireRange(payload, offset, length);
+        ByteBuffer buffer = ByteBuffer.wrap(payload, offset, length).order(ByteOrder.LITTLE_ENDIAN);
         requireRemaining(buffer, Integer.BYTES + Long.BYTES * 2 + Integer.BYTES);
         if (buffer.getInt() != AMEND_ORDER_V1_MARKER) {
             throw new ProtocolException("invalid amend order marker");
@@ -802,6 +871,12 @@ public final class TradingCommandCodec {
     private static void requireRange(byte[] payload, int offset, int length) {
         if (payload == null) throw new ProtocolException("payload is required");
         if (offset < 0 || length < 0 || offset > payload.length - length) {
+            throw new ProtocolException("truncated trading command payload");
+        }
+    }
+
+    private static void requireRange(byte[] payload, int offset, int length, int limit) {
+        if (length < 0 || offset < 0 || offset > limit - length) {
             throw new ProtocolException("truncated trading command payload");
         }
     }

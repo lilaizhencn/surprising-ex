@@ -332,7 +332,7 @@ public final class CoreStateQueryCodec {
         return Math.addExact(Integer.BYTES, bytes);
     }
 
-    private static int utf8Length(String value) {
+    static int utf8Length(String value) {
         int length = 0;
         for (int index = 0; index < value.length(); index++) {
             char current = value.charAt(index);
@@ -380,7 +380,11 @@ public final class CoreStateQueryCodec {
     }
 
     public static CoreOrderStateView decodeOrderState(byte[] encoded) {
-        Reader reader = new Reader(encoded);
+        return decodeOrderState(encoded, 0, encoded == null ? 0 : encoded.length);
+    }
+
+    static CoreOrderStateView decodeOrderState(byte[] encoded, int offset, int length) {
+        Reader reader = new Reader(encoded, offset, length);
         CoreOrderStateView state = readOrderState(reader);
         reader.requireConsumed();
         return state;
@@ -643,13 +647,23 @@ public final class CoreStateQueryCodec {
 
     private static final class Reader {
         private final byte[] input;
+        private final int limit;
         private int offset;
 
         Reader(byte[] input) {
+            this(input, 0, input == null ? 0 : input.length);
+        }
+
+        Reader(byte[] input, int offset, int length) {
             if (input == null) {
                 throw new ProtocolException("query state is required");
             }
+            if (offset < 0 || length < 0 || offset > input.length - length) {
+                throw new ProtocolException("invalid query state range");
+            }
             this.input = input;
+            this.offset = offset;
+            this.limit = offset + length;
         }
 
         void requireVersion() {
@@ -710,7 +724,7 @@ public final class CoreStateQueryCodec {
 
         int count(String field) {
             int value = intValue();
-            if (value < 0 || value > input.length) {
+            if (value < 0 || value > limit) {
                 throw new ProtocolException("invalid " + field + " count: " + value);
             }
             return value;
@@ -747,13 +761,13 @@ public final class CoreStateQueryCodec {
         }
 
         void requireConsumed() {
-            if (offset != input.length) {
+            if (offset != limit) {
                 throw new ProtocolException("trailing bytes in query state");
             }
         }
 
         private void require(int length) {
-            if (length < 0 || offset > input.length - length) {
+            if (length < 0 || offset > limit - length) {
                 throw new ProtocolException("truncated query state");
             }
         }

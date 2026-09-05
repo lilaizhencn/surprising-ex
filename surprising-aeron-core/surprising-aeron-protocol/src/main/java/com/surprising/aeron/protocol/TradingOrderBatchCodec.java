@@ -4,7 +4,8 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Function;
+import java.util.function.BiConsumer;
+import java.util.function.ToIntFunction;
 
 public final class TradingOrderBatchCodec {
 
@@ -17,15 +18,24 @@ public final class TradingOrderBatchCodec {
     }
 
     public static byte[] encodePlaceOrderBatch(PlaceOrderBatchCommand command) {
-        return encodeCommand(command.orders(), TradingCommandCodec::encodePlaceOrder);
+        return encodeCommand(command.orders(), TradingCommandCodec::encodedPlaceOrderLength,
+                TradingCommandCodec::writePlaceOrder);
     }
 
     public static byte[] encodeCancelOrderBatch(CancelOrderBatchCommand command) {
-        return encodeCommand(command.orders(), TradingCommandCodec::encodeCancelOrder);
+        List<CancelOrderCommand> orders = command.orders();
+        LittleEndianWriter buffer = new LittleEndianWriter(new byte[Integer.BYTES * 2
+                + orders.size() * (Integer.BYTES * 2 + Long.BYTES)]);
+        buffer.putInt(PlaceOrderBatchCommand.WIRE_VERSION).putInt(orders.size());
+        for (int index = 0; index < orders.size(); index++) {
+            buffer.putInt(index).putInt(Long.BYTES).putLong(orders.get(index).orderId());
+        }
+        return buffer.bytes;
     }
 
     public static byte[] encodeAmendOrderBatch(AmendOrderBatchCommand command) {
-        return encodeCommand(command.orders(), TradingCommandCodec::encodeAmendOrder);
+        return encodeCommand(command.orders(), TradingCommandCodec::encodedAmendOrderLength,
+                TradingCommandCodec::writeAmendOrder);
     }
 
     public static byte[] encode(PlaceOrderBatchCommand command) {
@@ -93,7 +103,7 @@ public final class TradingOrderBatchCodec {
         int count = readCount(buffer, CoreOrderBatchResult.MAX_ITEMS, "result");
         List<CoreOrderBatchResult.Item> items = new ArrayList<>(count);
         for (int index = 0; index < count; index++) {
-            byte[] frame = readFrame(buffer, "result");
+            ByteBuffer frame = readFrame(buffer, "result");
             CoreOrderBatchResult.Item item = decodeResultFrame(frame);
             if (item.index() != index) {
                 throw new ProtocolException("order batch result indexes must be contiguous");
@@ -112,34 +122,35 @@ public final class TradingOrderBatchCodec {
         return decodeResult(encoded);
     }
 
-    private static <T> byte[] encodeCommand(List<T> commands, Function<T, byte[]> encoder) {
+    private static <T> byte[] encodeCommand(List<T> commands, ToIntFunction<T> size,
+                                          BiConsumer<ByteBuffer, T> encoder) {
         if (commands == null || commands.isEmpty()) {
             throw new IllegalArgumentException("order batch must not be empty");
         }
-        byte[][] items = new byte[commands.size()][];
-        int itemIndex = 0;
+        int length = Integer.BYTES * 2;
         for (T command : commands) {
             if (command == null) throw new IllegalArgumentException("order batch item is required");
-            byte[] encoded = encoder.apply(command);
-            if (encoded.length == 0) throw new IllegalArgumentException("order batch item is empty");
-            items[itemIndex++] = encoded;
-        }
-        int length = Integer.BYTES * 2;
-        for (byte[] item : items) {
-            length = Math.addExact(length, Integer.BYTES * 2 + item.length);
+            length = Math.addExact(length, Integer.BYTES * 2 + size.applyAsInt(command));
         }
         if (length > MAX_BATCH_PAYLOAD_BYTES) {
             throw new IllegalArgumentException("order batch payload is too large");
         }
-        LittleEndianWriter buffer = new LittleEndianWriter(new byte[length]);
-        buffer.putInt(PlaceOrderBatchCommand.WIRE_VERSION).putInt(items.length);
-        for (int index = 0; index < items.length; index++) {
-            buffer.putInt(index).putInt(items[index].length).put(items[index]);
+        ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
+        buffer.putInt(PlaceOrderBatchCommand.WIRE_VERSION).putInt(commands.size());
+        for (int index = 0; index < commands.size(); index++) {
+            T command = commands.get(index);
+            buffer.putInt(index).putInt(size.applyAsInt(command));
+            encoder.accept(buffer, command);
         }
-        return buffer.bytes;
+        return buffer.array();
     }
 
-    private static <T> List<T> decodeCommand(byte[] encoded, int maxItems, Function<byte[], T> decoder) {
+    @FunctionalInterface
+    private interface FrameDecoder<T> {
+        T decode(byte[] bytes, int offset, int length);
+    }
+
+    private static <T> List<T> decodeCommand(byte[] encoded, int maxItems, FrameDecoder<T> decoder) {
         if (encoded == null || encoded.length > MAX_BATCH_PAYLOAD_BYTES
                 || encoded.length < Integer.BYTES * 2) {
             throw new ProtocolException("invalid order batch payload");
@@ -156,9 +167,13 @@ public final class TradingOrderBatchCodec {
             if (itemIndex != index) {
                 throw new ProtocolException("order batch indexes must be contiguous");
             }
-            byte[] item = readFrame(buffer, "command item");
+            int length = readLength(buffer, "command item length");
+            if (length == 0 || length > buffer.remaining()) {
+                throw new ProtocolException("invalid command item length: " + length);
+            }
             try {
-                items.add(decoder.apply(item));
+                items.add(decoder.decode(encoded, buffer.position(), length));
+                buffer.position(buffer.position() + length);
             } catch (IllegalArgumentException exception) {
                 throw new ProtocolException("invalid order batch item: " + exception.getMessage());
             }
@@ -174,8 +189,7 @@ public final class TradingOrderBatchCodec {
     }
 
     private static void writeResultFrame(LittleEndianWriter buffer, CoreOrderBatchResult.Item item) {
-        byte[] order = item.order() == null ? null : CoreStateQueryCodec.encodeOrderState(item.order());
-        int orderLength = order == null ? 0 : order.length;
+        int orderLength = item.order() == null ? 0 : CoreStateQueryCodec.encodedOrderStateLength(item.order());
         buffer
                 .putInt(item.index())
                 .putLong(item.orderId())
@@ -184,7 +198,12 @@ public final class TradingOrderBatchCodec {
                 .putInt(item.status().wireCode())
                 .putInt(item.resultCode().wireCode())
                 .putInt(orderLength);
-        if (order != null) buffer.put(order);
+        if (item.order() != null) {
+            ByteBuffer output = ByteBuffer.wrap(buffer.bytes, buffer.position, orderLength)
+                    .order(ByteOrder.LITTLE_ENDIAN);
+            CoreStateQueryCodec.writeOrderState(output, item.order());
+            buffer.position += orderLength;
+        }
         buffer
                 .putInt(item.executions().size());
         for (CoreExecutionView execution : item.executions()) {
@@ -222,8 +241,7 @@ public final class TradingOrderBatchCodec {
         }
     }
 
-    private static CoreOrderBatchResult.Item decodeResultFrame(byte[] encoded) {
-        ByteBuffer buffer = readable(encoded);
+    private static CoreOrderBatchResult.Item decodeResultFrame(ByteBuffer buffer) {
         requireRemaining(buffer, Integer.BYTES + Long.BYTES * 3 + Integer.BYTES * 3,
                 "result item");
         int index = buffer.getInt();
@@ -236,9 +254,9 @@ public final class TradingOrderBatchCodec {
         if (orderLength > buffer.remaining() - Integer.BYTES) {
             throw new ProtocolException("invalid result order length: " + orderLength);
         }
-        byte[] orderBytes = new byte[orderLength];
-        buffer.get(orderBytes);
-        CoreOrderStateView order = orderLength == 0 ? null : CoreStateQueryCodec.decodeOrderState(orderBytes);
+        CoreOrderStateView order = orderLength == 0 ? null : CoreStateQueryCodec.decodeOrderState(
+                buffer.array(), buffer.arrayOffset() + buffer.position(), orderLength);
+        buffer.position(buffer.position() + orderLength);
         requireRemaining(buffer, Integer.BYTES, "result executions");
         int executionCount = buffer.getInt();
         if (executionCount < 0 || executionCount > 100_000
@@ -271,13 +289,13 @@ public final class TradingOrderBatchCodec {
         return count;
     }
 
-    private static byte[] readFrame(ByteBuffer buffer, String kind) {
+    private static ByteBuffer readFrame(ByteBuffer buffer, String kind) {
         int length = readLength(buffer, kind + " length");
         if (length == 0 || length > buffer.remaining()) {
             throw new ProtocolException("invalid " + kind + " length: " + length);
         }
-        byte[] frame = new byte[length];
-        buffer.get(frame);
+        ByteBuffer frame = buffer.slice(buffer.position(), length).order(ByteOrder.LITTLE_ENDIAN);
+        buffer.position(buffer.position() + length);
         return frame;
     }
 
