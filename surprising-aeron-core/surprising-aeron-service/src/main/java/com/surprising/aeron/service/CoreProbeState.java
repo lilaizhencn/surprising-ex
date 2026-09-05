@@ -1645,7 +1645,8 @@ public final class CoreProbeState implements AutoCloseable {
                     } else {
                         batch.mergeTreasuryDelta(runtimePlaceOrderState.applyOrderBatchMatcherSettlement(
                                 pending.sequence(), expectedLaneMask(pending, matchingResult), command.orderId(),
-                                matchingResult, runtimePlaceOrderIdentities));
+                                matchingResult, runtimePlaceOrderIdentities,
+                                terminalRetention));
                     }
                 } else {
                     rejectPlaceOrderRuntime(pending.command().header().userId(), command.orderId(), pending.sequence());
@@ -1678,7 +1679,8 @@ public final class CoreProbeState implements AutoCloseable {
                     } else {
                         batch.mergeTreasuryDelta(runtimePlaceOrderState.applyOrderBatchMatcherSettlement(
                                 pending.sequence(), expectedLaneMask(pending, matchingResult), replacement.orderId(),
-                                matchingResult, runtimePlaceOrderIdentities));
+                                matchingResult, runtimePlaceOrderIdentities,
+                                terminalRetention));
                     }
                 }
                 return executionViews(replacement.orderId(), pending.command().header().userId(),
@@ -3015,7 +3017,9 @@ public final class CoreProbeState implements AutoCloseable {
             while ((sequence = runtimePlaceOrderState.pollPlaceAdmissionReady(laneId)) != 0) {
                 PendingMatching pending = pendingMatching.get(sequence);
                 OrderBatchPending batch = pending == null ? null : pendingOrderBatches.get(sequence);
-                if (pending == null || pending.placeAdmission() == null
+                if (pending == null || pending.isMatchingSubmitted()
+                        || batch != null && (batch.finishing || batch.nextIndex >= batch.items.size())
+                        || pending.placeAdmission() == null
                         && (batch == null || batch.placeBatchAdmissionEvent == null)) {
                     continue;
                 }

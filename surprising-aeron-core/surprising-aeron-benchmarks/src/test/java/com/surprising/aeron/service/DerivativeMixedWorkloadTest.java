@@ -31,7 +31,9 @@ class DerivativeMixedWorkloadTest {
             var template = DerivativeMixedWorkload.template(productLine, 4, 32, 2);
             assertThatCode(() -> {
                 try (var scenario = DerivativeMixedWorkload.scenario(template, 2, 4)) {
-                    assertThat(scenario.run()).isNotZero();
+                    for (int iteration = 0; iteration < 8; iteration++) {
+                        assertThat(scenario.run()).isNotZero();
+                    }
                     assertThat(scenario.acceptedOperations()).isEqualTo(scenario.terminalOperations());
                     assertThat(scenario.acceptedCoreMessages()).isEqualTo(scenario.terminalCoreMessages());
                     assertThat(scenario.maxBacklog()).isGreaterThan(1);

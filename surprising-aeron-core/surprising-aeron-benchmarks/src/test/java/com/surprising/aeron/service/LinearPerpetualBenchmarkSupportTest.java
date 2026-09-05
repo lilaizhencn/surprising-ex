@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 
 class LinearPerpetualBenchmarkSupportTest {
 
-    @Test
+    @org.junit.jupiter.api.RepeatedTest(8)
     void deepFillsRouteOnlyRelatedEventsAndConserveFundsAt256InFlight() {
         var template = LinearPerpetualBenchmarkSupport.deepFillBurstTemplate(4, 8);
         try (var scenario = LinearPerpetualBenchmarkSupport.deepFillBurst256(template, 8)) {

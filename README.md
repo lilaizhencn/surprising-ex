@@ -794,6 +794,10 @@ Topic、端口、磁盘、监控阈值和故障演练的精确清单待生产 Ru
   保留部分成功和前序成交释放资金的语义，不把整批失败转成资金校验豁免。
 - `MatcherSettlementPlan` 使用 owner 复用的 primitive 去重集合；深度成交按 maker Lane 建立事件索引，
   不复制 fill。状态提交缓冲只为实际触及的 Lane 扩容。
+- 现货逐项批量结算也在原 settlement Lane 回收终态订单、零额 reservation 和客户端 identity；
+  completion 将余额端点并入整批资金边界，不重复计入逐项资金 delta。混合负载校验拒绝运行态残留终态订单。
+- Lane 读取的 prepared position identity 索引使用并发发布，避免 owner 扩容时读取普通 HashMap；
+  已进入 matcher/结束的批次忽略迟到 admission 通知，不再尝试路由不存在的下一项。
 - `InsuranceAllocationPolicy.expectedCoverage` 只计算目标资产的目标索赔，不建立全资产结果 Map 或排序；
   保留整数精确分摊、确定性余数顺序和逐笔赔付后的重新计算。终态保留仅移除无人消费的审计 digest，
   资金命令幂等指纹、终态去重和 snapshot 数据不删除。

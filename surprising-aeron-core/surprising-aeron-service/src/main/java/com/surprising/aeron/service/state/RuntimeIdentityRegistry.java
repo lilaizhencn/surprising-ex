@@ -10,7 +10,7 @@ import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 
 public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityView {
 
-    // Forward and allocation indexes are owner-only. Monotonic asset/symbol
+    // Asset/symbol forward and allocation indexes are owner-only. Monotonic asset/symbol
     // dictionaries use volatile array publication; releasable client/position
     // identities remain concurrent for asynchronous Core Fact materializers.
     private final Map<String, Integer> assetIds = new HashMap<>();
@@ -18,7 +18,8 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
     private final Map<String, Integer> symbolIds = new HashMap<>();
     private volatile String[] symbols = new String[16];
     private final Map<Long, ClientIdentityEntry> clients = new ConcurrentHashMap<>();
-    private final Map<PositionIdentity, Long> positionKeys = new HashMap<>();
+    // Settlement Lanes read prepared keys while the owner prepares later sequences.
+    private final Map<PositionIdentity, Long> positionKeys = new ConcurrentHashMap<>();
     private final Map<Long, PositionIdentity> positions = new ConcurrentHashMap<>();
     private final LongLongHashMap positionAllocationKeys = new LongLongHashMap();
     private final LongLongHashMap positionKeyAllocations = new LongLongHashMap();

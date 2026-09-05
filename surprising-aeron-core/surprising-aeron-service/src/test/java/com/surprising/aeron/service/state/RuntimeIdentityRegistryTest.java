@@ -7,6 +7,41 @@ import org.junit.jupiter.api.Test;
 class RuntimeIdentityRegistryTest {
 
     @Test
+    void lanesKeepReadingPreparedKeysWhileOwnerExpandsTheDictionary() throws Exception {
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        long[] keys = new long[256];
+        for (int index = 0; index < keys.length; index++) {
+            keys[index] = identities.positionKey(index + 1, "BTC-USDT:NET");
+        }
+        var started = new java.util.concurrent.CountDownLatch(4);
+        var start = new java.util.concurrent.CountDownLatch(1);
+        try (var workers = java.util.concurrent.Executors.newFixedThreadPool(4)) {
+            var results = new java.util.ArrayList<java.util.concurrent.Future<?>>();
+            for (int lane = 0; lane < 4; lane++) {
+                results.add(workers.submit(() -> {
+                    started.countDown();
+                    start.await();
+                    for (int index = 0; index < 100_000; index++) {
+                        int slot = index & 255;
+                        long actual = identities.preparedPositionKey(slot + 1, "BTC-USDT:NET");
+                        if (actual != keys[slot]) throw new AssertionError("prepared identity changed");
+                    }
+                    return null;
+                }));
+            }
+            try {
+                assertThat(started.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            } finally {
+                start.countDown();
+            }
+            for (int index = 257; index < 50_000; index++) {
+                identities.positionKey(index, "BTC-USDT:NET");
+            }
+            for (var result : results) result.get(10, java.util.concurrent.TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
     void dictionaryVersionAdvancesOnlyWhenStableIdentitiesAreAllocatedAndSurvivesRestore() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         long initial = identities.dictionaryVersion();

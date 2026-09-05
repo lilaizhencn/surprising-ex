@@ -227,6 +227,11 @@ final class SpotMixedWorkload {
                     }
                     user.balances().values().forEach(SpotMixedWorkload::requireNonNegative);
                 });
+                state.orders().values().forEach(order -> {
+                    if (order.status() != CoreOrderStatus.OPEN) {
+                        throw new IllegalStateException("spot retained a terminal order: " + order.orderId());
+                    }
+                });
                 for (long orderId : latestLifecycleOrders) {
                     var order = state.orders().get(orderId);
                     var reservation = order == null ? null : state.user(order.userId()).reservations().get(orderId);

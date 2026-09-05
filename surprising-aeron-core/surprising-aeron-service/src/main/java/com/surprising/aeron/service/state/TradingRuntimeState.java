@@ -2123,7 +2123,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public RuntimeTreasuryDelta applyOrderBatchMatcherSettlement(
             long coreSequence, long expectedLaneMask, long takerOrderId,
-            CoreMatchingResult matchingResult, RuntimeIdentityRegistry identities) {
+            CoreMatchingResult matchingResult, RuntimeIdentityRegistry identities,
+            TerminalOrderSink terminalOrderSink) {
         if (!orderBatchMutationScope) {
             throw new IllegalStateException("blocking matcher settlement is restricted to one order batch");
         }
@@ -2135,9 +2136,16 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new IllegalStateException("matcher settlement lane mask mismatch");
         }
         MatcherSettlementEvent event = dispatchMatcherSettlement(coreSequence, expectedLaneMask,
-                0, -1, -1, plan, matchingResult, identities);
+                0, -1, -1, plan, matchingResult, identities, true);
         while (!event.complete()) Thread.onSpinWait();
-        RuntimeTreasuryDelta result = collectMatcherSettlement(event);
+        // Sequential batch items share one funds boundary. Carry Lane-computed endpoints into
+        // that boundary; appending an item delta separately would count the same mutation twice.
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            if ((expectedLaneMask & (1L << laneId)) != 0) {
+                patchBalancesBeforeByLane[laneId].mergeSequential(event.changes().balancePatches[laneId]);
+            }
+        }
+        RuntimeTreasuryDelta result = collectMatcherSettlement(event, null, terminalOrderSink);
         releaseMatcherSettlement(event);
         return result;
     }
@@ -5090,6 +5098,27 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     private static final class LaneBalancePatches {
+        private void mergeSequential(LaneBalancePatches source) {
+            for (int sourceIndex = 0; sourceIndex < source.size; sourceIndex++) {
+                long userId = source.userIds[sourceIndex];
+                int assetId = source.assetIds[sourceIndex];
+                int target = indexOf(userId, assetId);
+                if (target < 0) {
+                    target = size;
+                    add(userId, assetId, null, 0);
+                    presentBefore[target] = source.presentBefore[sourceIndex];
+                    availableBefore[target] = source.availableBefore[sourceIndex];
+                    lockedBefore[target] = source.lockedBefore[sourceIndex];
+                    pendingBefore[target] = source.pendingBefore[sourceIndex];
+                }
+                presentAfter[target] = source.presentAfter[sourceIndex];
+                capturedAfter[target] = source.capturedAfter[sourceIndex];
+                availableAfter[target] = source.availableAfter[sourceIndex];
+                lockedAfter[target] = source.lockedAfter[sourceIndex];
+                pendingAfter[target] = source.pendingAfter[sourceIndex];
+            }
+        }
+
         private long[] userIds = new long[8];
         private int[] assetIds = new int[8];
         private long[] availableBefore = new long[8];

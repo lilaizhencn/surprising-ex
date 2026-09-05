@@ -204,7 +204,7 @@ final class DerivativeMixedWorkload {
                     target.execute(target.command(CoreMessageType.APPLY_MARK_PRICE,
                             CommandSource.KAFKA_INPUT_BRIDGE, 0,
                             TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                                    symbol, 1, 99, sequence, BASE_EPOCH_MILLIS + sequence))));
+                                    symbol, 1, 99, sequence, target.nextCommandTimestamp()))));
                 }
                 if (!source.productLine().isFundingProduct()) return;
                 if (target.state().tradingState().treasuryState().fundingSettlement(symbol)
