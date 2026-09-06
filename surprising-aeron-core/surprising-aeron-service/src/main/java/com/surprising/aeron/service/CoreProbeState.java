@@ -2534,18 +2534,27 @@ public final class CoreProbeState implements AutoCloseable {
             long excludedOrderId) {
         long matchingPrice = CoreOrderDecisionResolver.resolve(runtimePlaceOrderState,
                 runtimePlaceOrderIdentities, userId, placement, currentClusterTimestamp).matchingPriceTicks();
-        long[] candidates = activeOrderIndex.sortedIds(userId, placement.symbol());
-        int size = 0;
-        for (long orderId : candidates) {
+        var candidates = activeOrderIndex.matchingIds(userId, placement.symbol());
+        org.eclipse.collections.impl.list.mutable.primitive.LongArrayList cancellations = null;
+        while (candidates.hasNext()) {
+            long orderId = candidates.next();
             if (orderId == excludedOrderId || orderId == placement.orderId()) continue;
             OrderRuntime order = runtimeOrder(orderId);
             if (order == null || order.status() != com.surprising.aeron.service.state.CoreOrderStatus.OPEN
                     || order.side() == placement.side()) continue;
             boolean crosses = placement.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY
                     ? matchingPrice >= order.priceTicks() : matchingPrice <= order.priceTicks();
-            if (crosses) candidates[size++] = orderId;
+            if (crosses) {
+                if (cancellations == null) {
+                    cancellations = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList();
+                }
+                cancellations.add(orderId);
+            }
         }
-        return size == candidates.length ? candidates : java.util.Arrays.copyOf(candidates, size);
+        if (cancellations == null) return EMPTY_ORDER_IDS;
+        long[] result = cancellations.toArray();
+        java.util.Arrays.sort(result);
+        return result;
     }
 
     private List<Long> preMatchingCloseCapacityCancellations(

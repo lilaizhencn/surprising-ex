@@ -511,6 +511,37 @@ class CoreMatchingStateTest {
     }
 
     @Test
+    void selfTradeScanCancelsOnlyCrossingOwnOrdersAndRestoresWithoutTradingWithSelf() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+            applyInstrument(state);
+            for (long user : new long[]{11, 22}) {
+                apply(state, user == 11 ? 1 : 2, user, CoreMessageType.ADJUST_BALANCE,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
+            }
+            apply(state, 3, 11, CoreMessageType.PLACE_ORDER,
+                    place(303, CoreOrderSide.SELL, 105, 1, ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
+            apply(state, 4, 11, CoreMessageType.PLACE_ORDER,
+                    place(101, CoreOrderSide.SELL, 100, 1, ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
+            apply(state, 5, 22, CoreMessageType.PLACE_ORDER,
+                    place(202, CoreOrderSide.SELL, 110, 1, ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
+            apply(state, 6, 11, CoreMessageType.PLACE_ORDER,
+                    place(400, CoreOrderSide.BUY, 105, 2, ReservationKind.DERIVATIVE_MARGIN, "USDT", 200));
+            assertThat(state.tradingState().order(101)).isNull();
+            assertThat(state.tradingState().order(303)).isNull();
+            assertThat(state.tradingState().order(202).status()).isEqualTo(CoreOrderStatus.OPEN);
+            assertThat(state.tradingState().order(400).executedQuantitySteps()).isZero();
+            assertThat(state.tradingState().user(11).reservations()).doesNotContainKeys(101L, 303L);
+            for (long user : new long[]{11, 22}) {
+                assertThat(state.tradingState().user(user).balances().get("USDT").totalUnits()).isEqualTo(2_000);
+                assertThat(state.tradingState().user(user).positions()).isEmpty();
+            }
+            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.LINEAR_PERPETUAL, state.snapshot())) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
+            }
+        }
+    }
+
+    @Test
     void linearPerpetualMatchConservesFundsWithMakerTakerFees() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state, -50_000, 100_000);

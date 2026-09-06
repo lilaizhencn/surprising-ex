@@ -16,6 +16,10 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
 
     public static final int MAX_PAGE_SIZE = 1_024;
     private static final NavigableSet<Long> EMPTY_IDS = Collections.emptyNavigableSet();
+    private static final LongIterator EMPTY_ITERATOR = new LongIterator() {
+        public boolean hasNext() { return false; }
+        public long next() { throw new java.util.NoSuchElementException(); }
+    };
 
     private final LongObjectHashMap<LongHashSet> idsByUser = new LongObjectHashMap<>();
     private final Map<String, LongHashSet> idsBySymbol = new HashMap<>();
@@ -77,7 +81,39 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
         return result.descendingSet();
     }
 
-    /** Primitive deterministic intersection used by the matcher command path. */
+    /**
+     * Owner-only, unordered primitive intersection. Consume before mutating this index.
+     * Each caller owns its cursor; nested inspections do not overwrite shared scratch.
+     */
+    public LongIterator matchingIds(long userId, String symbol) {
+        LongHashSet userIds = idsByUser.get(userId);
+        LongHashSet symbolIds = idsBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+        if (userIds == null || symbolIds == null) return EMPTY_ITERATOR;
+        LongHashSet source = userIds.size() <= symbolIds.size() ? userIds : symbolIds;
+        LongHashSet filter = source == userIds ? symbolIds : userIds;
+        LongIterator sourceIterator = source.longIterator();
+        return new LongIterator() {
+            private boolean ready;
+            private long next;
+            public boolean hasNext() {
+                while (!ready && sourceIterator.hasNext()) {
+                    long candidate = sourceIterator.next();
+                    if (filter.contains(candidate)) {
+                        next = candidate;
+                        ready = true;
+                    }
+                }
+                return ready;
+            }
+            public long next() {
+                if (!hasNext()) throw new java.util.NoSuchElementException();
+                ready = false;
+                return next;
+            }
+        };
+    }
+
+    /** Primitive deterministic intersection for callers requiring a materialized sorted result. */
     public long[] sortedIds(long userId, String symbol) {
         LongHashSet userIds = idsByUser.get(userId);
         LongHashSet symbolIds = idsBySymbol.get(OrderReservation.normalizeSymbol(symbol));

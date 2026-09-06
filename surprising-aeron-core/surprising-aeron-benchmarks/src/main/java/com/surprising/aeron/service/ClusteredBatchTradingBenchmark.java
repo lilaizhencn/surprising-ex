@@ -24,7 +24,10 @@ import org.openjdk.jmh.annotations.*;
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"})
 @Threads(1)
 public class ClusteredBatchTradingBenchmark {
-    /** Exercises ingress wire lookups and repeated batch settlement polling in the real service. */
+    /**
+     * Exercises ingress, repeated settlement polling, and existing-order admission scans.
+     * The maker accumulates same-symbol orders before taker/close waves, exercising STP and close capacity.
+     */
     @Benchmark
     public long decodedBatchAdmissionAndSettlement(Workload workload, Counters counters) {
         batchAmendRoundTripTrades(workload, counters);

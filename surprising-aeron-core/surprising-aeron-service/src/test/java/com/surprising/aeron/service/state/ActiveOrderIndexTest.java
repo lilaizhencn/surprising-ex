@@ -13,6 +13,39 @@ import org.junit.jupiter.api.Test;
 class ActiveOrderIndexTest {
 
     @Test
+    void primitiveIntersectionIsIndependentAndMatchesBothIndexDirections() {
+        Map<Long, CoreOrderState> orders = new HashMap<>();
+        for (long id = 1; id <= 12; id++) {
+            long user = id <= 9 ? 11 : 12;
+            String symbol = id % 3 == 0 ? "ETH-USDT" : "BTC-USDT";
+            orders.put(id, new CoreOrderState(id, ProductLine.SPOT, user, symbol, 1,
+                    CoreOrderSide.BUY, 100, 1, 0, 1, false, CoreOrderStatus.OPEN, 1));
+        }
+        var state = new TradingCoreState(ProductLine.SPOT, 1,
+                Map.of(11L, CoreUserState.empty(ProductLine.SPOT, 11),
+                        12L, CoreUserState.empty(ProductLine.SPOT, 12)), orders,
+                Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty());
+        var index = new ActiveOrderIndex(state);
+        for (long user : new long[]{11, 12, 99}) {
+            for (String symbol : new String[]{"BTC-USDT", "ETH-USDT", "NONE-USDT"}) {
+                var first = index.matchingIds(user, symbol);
+                var nested = index.matchingIds(user, symbol);
+                var actual = new java.util.TreeSet<Long>();
+                while (first.hasNext()) {
+                    assertThat(first.hasNext()).isTrue();
+                    long id = first.next();
+                    actual.add(id);
+                    assertThat(nested.next()).isEqualTo(id);
+                }
+                assertThat(nested.hasNext()).isFalse();
+                assertThat(actual).containsExactlyElementsOf(index.ids(user, symbol).descendingSet());
+                org.assertj.core.api.Assertions.assertThatThrownBy(first::next)
+                        .isInstanceOf(java.util.NoSuchElementException.class);
+            }
+        }
+    }
+
+    @Test
     void maintainsRiskAggregatesAcrossOrderUpdates() {
         CoreOrderState opening = new CoreOrderState(7, ProductLine.LINEAR_PERPETUAL, 11, "BTC-USDT", 1,
                 CoreOrderSide.BUY, 100, 5, 0, 5, false, CoreMarginMode.CROSS, CorePositionSide.NET,

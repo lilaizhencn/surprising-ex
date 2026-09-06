@@ -13,6 +13,9 @@ public record PositionCloseCapacity(
         long availableQuantitySteps,
         List<Commitment> newestFirst) {
 
+    private static final Comparator<Commitment> NEWEST_FIRST = Comparator.comparingLong(Commitment::corePosition)
+            .thenComparingLong(Commitment::orderId).reversed();
+
     public PositionCloseCapacity {
         if (positionQuantitySteps < 0 || requestedQuantitySteps < 0
                 || committedQuantitySteps < 0 || availableQuantitySteps < 0
@@ -65,8 +68,7 @@ public record PositionCloseCapacity(
             }
             requestedQuantity = Math.addExact(requestedQuantity, order.remainingQuantitySteps());
         }
-        commitments.sort(Comparator.comparingLong(Commitment::corePosition)
-                .thenComparingLong(Commitment::orderId).reversed());
+        commitments.sort(NEWEST_FIRST);
         long committed = Math.min(positionQuantity, requestedQuantity);
         return new PositionCloseCapacity(positionQuantity, requestedQuantity, committed,
                 Math.subtractExact(positionQuantity, committed), commitments);
@@ -87,24 +89,26 @@ public record PositionCloseCapacity(
         PositionRuntime position = positionKey == null ? null : runtime.position(positionKey);
         long positionQuantity = position == null ? 0 : Math.absExact(position.signedQuantitySteps());
         long requestedQuantity = 0;
-        ArrayList<Commitment> commitments = new ArrayList<>();
-        for (Long orderId : activeOrderIndex.ids(userId, normalizedSymbol)) {
-            if (orderId == null || orderId == excludedOrderId) continue;
+        ArrayList<Commitment> commitments = null;
+        var orderIds = activeOrderIndex.matchingIds(userId, normalizedSymbol);
+        while (orderIds.hasNext()) {
+            long orderId = orderIds.next();
+            if (orderId == excludedOrderId) continue;
             OrderRuntime order = runtime.order(orderId);
             if (order == null || order.status() != CoreOrderStatus.OPEN || order.userId() != userId
                     || !identities.symbol(order.symbolId()).equals(normalizedSymbol)
                     || order.positionSide() != positionSide || order.side() != closeSide) continue;
             if (order.reduceOnly()) {
+                if (commitments == null) commitments = new ArrayList<>();
                 commitments.add(new Commitment(order.orderId(), order.remainingQuantitySteps(),
                         order.clusterPosition()));
             }
             requestedQuantity = Math.addExact(requestedQuantity, order.remainingQuantitySteps());
         }
-        commitments.sort(Comparator.comparingLong(Commitment::corePosition)
-                .thenComparingLong(Commitment::orderId).reversed());
+        if (commitments != null) commitments.sort(NEWEST_FIRST);
         long committed = Math.min(positionQuantity, requestedQuantity);
         return new PositionCloseCapacity(positionQuantity, requestedQuantity, committed,
-                Math.subtractExact(positionQuantity, committed), commitments);
+                Math.subtractExact(positionQuantity, committed), commitments == null ? List.of() : commitments);
     }
 
     public void require(long quantitySteps) {

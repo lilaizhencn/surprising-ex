@@ -3600,3 +3600,24 @@
 - 六个全进程JFR各3次G1New，最长单次pause6.49–7.59ms，JavaMonitorEnter和DataLoss均0。仍有冷启动/JIT，CPU参数实际engine=wall；不能用本轮结果证明稳定CPU、尾延迟、无锁、无泄漏或生产零性能影响。
 - 证据：新目录含12个async-profiler JFR（业务/恢复）、6个JVM JFR、36个火焰图、collapsed、全部summary、事件JSON、聚合、测试/构建日志、运行入口/命令及SHA256SUMS。复现入口run.py有限调用新增decodedBatchAdmissionAndSettlement并校验计数。没有改生产配置、协议wireCode、资金计算和恢复格式。
 - 被测benchmark JAR SHA256：`069cc3c5bdac8cc9df02bec0f9f560428ed510b58dc3fac031efbd0448fcadd4`；被测源码补丁与最终提交对应，source.patch校验见证据目录SHA256SUMS。上述功能及目标分配修复通过，完整性能验收仍未完成。
+
+
+## 2026-09-06 已有订单扫描分配优化：采集前定义
+
+- 当前master基于2163389d；对照commit不适用（仅验证当前master）。依据上轮真实调用栈：PositionCloseCapacity.inspectRuntime→ActiveOrderIndex.ids构建TreeSet/TreeMap节点/Long，STP→sortedIds复制排序全部候选long[]。本轮只优化这两条路径，不复用跨线程财务结果、不删除正常协议/快照分配。
+- 实现：matchingIds提供owner只读primitive交集游标，扫描较小集合并过滤；每次调用独立游标，无共享可变缓冲，索引在游标消费期间不能修改。平仓容量仍按同样条件累加并按corePosition/orderId降序排列reduce-only撤单；STP先过滤交叉订单，仅实际撤单时分配结果并升序排序，空结果用已有EMPTY_ORDER_IDS。空commitment列表惰性创建，比较器静态复用。
+- 新游标仍有固定数量对象分配，并非全链路零分配；选择独立游标以支持嵌套检查且不增加持久订单副本。新增用户/币对交集、两种扫描方向、空集合、重复hasNext、游标耗尽及嵌套独立性测试；既有CoreMatchingStateTest覆盖最新reduce-only撤单优先级，六线场景覆盖资金与恢复。
+- JMH decodedBatchAdmissionAndSettlement场景注释明确当前maker多挂单与taker/平仓波次覆盖此路径；执行其有限入口，不执行timed JMH。使用同一HotSpot25/GraalVM、G1、512MiBheap、NMT/DebugNonSafepoints设置及4Account Lane/1matcher/256in-flight/batch2/257账户/1symbol，六线各独立JVM；1预执行轮、250ms停顿、2采样轮、轮间100ms停顿。每线采样7168 business ops、4096业务Core messages、2048fills。
+- 采集CPU参数1ms（已知macOS实际wall引擎）、alloc128KiB、lock1ms，业务和恢复分别async JFR；全进程profile.jfc。仍是有限诊断，非稳态CPU或吞吐/延迟验收。原始目录 `/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-06-order-scan/`。
+- 通过条件：相关Maven回归通过，六线资金/冻结/持仓/终态/快照hash及命令计数通过；源码无TreeSet物化和全候选排序分配调用，采样验证目标路径；游标存活期间无索引写入，排序仅在确有撤单结果时保留。无持续压测，不宣称无泄漏或生产零分配。
+
+### 已有订单扫描优化结果
+
+- 首轮新增交集测试因夹具遗漏订单所属用户触发TradingCoreState分区校验；只补齐测试用户，生产校验未放宽，失败日志已保留。最终相关reactor678项通过、0失败/错误/跳过；后补真实STP测试后CoreMatchingStateTest定向41项通过（含重复覆盖，不叠加宣称唯一测试数）。`mvn -pl :surprising-aeron-benchmarks -am -DskipTests package`成功。
+- 六线新JAR有限采样全部exit0，每线采样7168business ops、4096业务Core messages、2048fills，完整计数/用户与maker资金/冻结/持仓/终态订单/快照hash验证通过，unfinished/endBacklog0。真实STP测试使用非顺序orderId，确认只撤自己交叉订单、其他用户挂单保留、不产生自成交、余额守恒及快照恢复。既有测试确认reduce-only按最新提交优先撤单和后续平仓持仓归零。
+- 目标STP与inspectRuntime调用链未采到TreeMap$Entry、TreeSet、Long或long[]。源码已移除这些调用点的树集合物化及全候选复制排序；仅实际STP冲突时分配结果并排序，空结果共享不可变零长数组。没有把无冲突有限样本当作真实冲突路径零分配证明。
+- 仍存在的目标调用链采样权重：SPOT0.25MiB、LINEAR_PERPETUAL0.375MiB、INVERSE_PERPETUAL0.375MiB、LINEAR_DELIVERY0、INVERSE_DELIVERY0.5MiB、OPTION0.625MiB，包含独立primitive游标、PositionCloseCapacity及决策结果等。0样本并不代表没有对象；有订单时游标依然有O(1)分配，未引入共享可变游标/池以免破坏嵌套与所有权。
+- 当前全业务窗口分配权重（MiB，含夹具、查询与冷启动影响）：SPOT81.875、LINEAR_PERPETUAL84.875、INVERSE_PERPETUAL88.75、LINEAR_DELIVERY82.125、INVERSE_DELIVERY90.25、OPTION93.0。byte[]、long[]、OrderRuntime和协议/成交结果仍有分配；不能将不可变跨线程结果、查询输出及快照所需分配全部池化，也不能声称整条交易链路零分配。本轮没有旧代码重跑或吞吐对比。
+- 全进程JFR每线3次G1New，最长单次pause6.93–7.46ms，DataLoss/JavaMonitorEnter事件0。CPU参数实际wall引擎，预热不足，不输出稳态CPU、B/op、吞吐或分位延迟结论。JMH场景通过有限入口执行，未进行timed measurement。
+- 证据目录含原始async/JVM JFR、火焰图、collapsed/summary、事件JSON、分组指标、所有测试日志、有限入口/命令、源码patch及SHA256SUMS。未覆盖真实Aeron网络/网关/WS、长期泄漏和完整生产容量，仍不构成完整性能验收。
+- 被测benchmark JAR SHA256：`6b94d8079a4b74746ed612cd364a9d39045b00a1123d498d1d7ee63f76eddbd8`；源码最终提交和source.patch校验存于同目录revision.json、SHA256SUMS。
