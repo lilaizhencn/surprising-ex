@@ -24,6 +24,12 @@ import org.openjdk.jmh.annotations.*;
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"})
 @Threads(1)
 public class ClusteredBatchTradingBenchmark {
+    /** Exercises ingress wire lookups and repeated batch settlement polling in the real service. */
+    @Benchmark
+    public long decodedBatchAdmissionAndSettlement(Workload workload, Counters counters) {
+        batchAmendRoundTripTrades(workload, counters);
+        return batchPlaceCancelWithMetrics(workload, counters);
+    }
     @AuxCounters(AuxCounters.Type.EVENTS)
     @State(Scope.Thread)
     public static class Counters {

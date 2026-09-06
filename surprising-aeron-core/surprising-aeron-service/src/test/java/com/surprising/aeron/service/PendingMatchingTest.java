@@ -26,6 +26,28 @@ import org.junit.jupiter.api.Test;
 class PendingMatchingTest {
 
     @Test
+    void reusesBoxedKeyButNeverCarriesItIntoTheNextRingGeneration() {
+        CoreMessage command = command(1000);
+        var state = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
+        var projection = new RuntimeProjectionPoint(0, state);
+        var pending = new PendingMatching(1000, PendingMatching.Operation.PLACE, command,
+                projection, 0, 0, RuntimeFundsDelta.empty());
+        Long key = pending.sequenceKey();
+        assertThat(pending.sequenceKey()).isSameAs(key);
+        assertThat(pending.withCommand(command(1001)).sequenceKey()).isSameAs(key);
+        var batchOrder = new java.util.LinkedHashMap<Long, String>();
+        batchOrder.put(key, "first");
+        pending.initialize(2000, PendingMatching.Operation.PLACE, command,
+                CommandFingerprint.of(command), List.of(), projection, 0, 0,
+                RuntimeFundsDelta.empty(), DecodedMatchingCommand.decode(command), null);
+        assertThat(pending.sequenceKey()).isEqualTo(2000L).isNotSameAs(key);
+        batchOrder.put(pending.sequenceKey(), "second");
+        assertThat(batchOrder.keySet()).containsExactly(1000L, 2000L);
+        assertThat(batchOrder.get(key)).isEqualTo("first");
+        assertThat(batchOrder.remove(pending.sequenceKey())).isEqualTo("second");
+    }
+
+    @Test
     void transfersAdmissionReservationOutOfPendingExactlyOnce() {
         CoreMessage command = command(10);
         TradingCoreState beforeState = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);

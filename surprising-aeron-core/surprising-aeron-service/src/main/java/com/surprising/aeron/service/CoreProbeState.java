@@ -1044,7 +1044,7 @@ public final class CoreProbeState implements AutoCloseable {
         batch.sequence = sequence;
         putPendingMatching(pending);
         registerPendingLifecycle(pending);
-        pendingOrderBatches.put(sequence, batch);
+        pendingOrderBatches.put(pending.sequenceKey(), batch);
         pendingMatching.registerSubmission(sequence, orderBatchMatcherShard(batch));
         appliedCommandCount = sequence;
         refreshCommittedCoreSequence();
@@ -1433,7 +1433,7 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private void submitOrderBatchMatching(PendingMatching pending) {
-        OrderBatchPending batch = pendingOrderBatches.get(pending.sequence());
+        OrderBatchPending batch = pendingOrderBatches.get(pending.sequenceKey());
         if (batch == null) return;
         runtime.matcherReady().join();
         if (batch.kind == OrderBatchKind.CANCEL) {
@@ -2988,7 +2988,7 @@ public final class CoreProbeState implements AutoCloseable {
             matchingSubmissionCompleted(pending);
             return;
         }
-        if (pendingOrderBatches.containsKey(pending.sequence())) {
+        if (pendingOrderBatches.containsKey(pending.sequenceKey())) {
             submitOrderBatchMatching(pending);
             if (pending.isMatchingSubmitted()) matchingSubmissionCompleted(pending);
             return;
@@ -3064,7 +3064,7 @@ public final class CoreProbeState implements AutoCloseable {
                     break;
                 }
                 var admission = pending.placeAdmission();
-                OrderBatchPending orderBatch = pendingOrderBatches.get(pending.sequence());
+                OrderBatchPending orderBatch = pendingOrderBatches.get(pending.sequenceKey());
                 PlaceBatchAdmissionEvent batchAdmission = orderBatch == null
                         ? null : orderBatch.placeBatchAdmissionEvent;
                 if (admission == null && batchAdmission == null) {
@@ -3182,7 +3182,7 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private int pendingSubmissionShard(PendingMatching pending) {
-        OrderBatchPending batch = pendingOrderBatches.get(pending.sequence());
+        OrderBatchPending batch = pendingOrderBatches.get(pending.sequenceKey());
         return batch == null ? matcherShard(pending) : orderBatchMatcherShard(batch);
     }
 
@@ -3192,11 +3192,11 @@ public final class CoreProbeState implements AutoCloseable {
                     ? Long.MAX_VALUE : pendingOrderBatches.keySet().iterator().next();
             PendingMatching pending = pendingMatching.findFirst(value -> {
                         if (value.sequence() > throughSequence) return false;
-                        OrderBatchPending batch = pendingOrderBatches.get(value.sequence());
+                        OrderBatchPending batch = pendingOrderBatches.get(value.sequenceKey());
                         return batch == null ? deferredMatching.containsKey(value.sequence()) : !batch.started;
                     });
             if (pending == null) return;
-            OrderBatchPending batch = pendingOrderBatches.get(pending.sequence());
+            OrderBatchPending batch = pendingOrderBatches.get(pending.sequenceKey());
             if (batch != null && !batch.started) {
                 if (tryActivatePipelinedOrderBatch(batch, pending)) continue;
                 activateOrderBatch(batch, pending, true);
@@ -3318,7 +3318,7 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private boolean matchingControlCommand(PendingMatching pending) {
-        return pendingOrderBatches.containsKey(pending.sequence())
+        return pendingOrderBatches.containsKey(pending.sequenceKey())
                 || !pending.preMatchingCancellationOrderIds().isEmpty()
                 || pending.operation() == PendingMatching.Operation.LIQUIDATION
                 || pending.operation() == PendingMatching.Operation.LIQUIDATION_BATCH
@@ -3520,7 +3520,7 @@ public final class CoreProbeState implements AutoCloseable {
 
     private boolean placeAdmissionOutstanding(PendingMatching pending) {
         if (pending.placeAdmission() != null && !pending.isMatchingSubmitted()) return true;
-        OrderBatchPending batch = pendingOrderBatches.get(pending.sequence());
+        OrderBatchPending batch = pendingOrderBatches.get(pending.sequenceKey());
         return batch != null && batch.placeBatchAdmissionEvent != null && !pending.isMatchingSubmitted();
     }
 
@@ -4535,7 +4535,7 @@ public final class CoreProbeState implements AutoCloseable {
 
     private boolean matchingCommitReady(PendingMatching pending) {
         if (pending == null) return false;
-        OrderBatchPending batch = pendingOrderBatches.get(pending.sequence());
+        OrderBatchPending batch = pendingOrderBatches.get(pending.sequenceKey());
         if (batch != null && batch.placeBatchAdmissionEvent != null
                 && (!batch.placeBatchAdmissionEvent.complete() || !pending.isMatchingSubmitted())) return false;
         if (hasPendingMatchingRejection(pending.sequence())) return true;
@@ -4672,7 +4672,7 @@ public final class CoreProbeState implements AutoCloseable {
                     || pending.settlementEvent() != null || hasPendingMatchingRejection(pending.sequence())) {
                 return;
             }
-            OrderBatchPending batch = pendingOrderBatches.get(pending.sequence());
+            OrderBatchPending batch = pendingOrderBatches.get(pending.sequenceKey());
             if (batch != null) {
                 if (!batch.pipelined || !batch.admissionCollected || batch.settlementDispatched) return;
                 if (!batch.matchingApplied) {

@@ -13,6 +13,8 @@ import java.util.Objects;
 
 final class PendingMatching {
     private long sequence;
+    // Owner-only key for the insertion-ordered batch map; reused across polling attempts.
+    private Long sequenceKey;
     private Operation operation;
     private CoreMessage command;
     private CommandFingerprint fingerprint;
@@ -121,6 +123,7 @@ final class PendingMatching {
         }
         Objects.requireNonNull(command.header().commandId(), "commandId");
         this.sequence = sequence;
+        sequenceKey = null;
         this.operation = operation;
         this.command = command;
         this.fingerprint = fingerprint;
@@ -162,6 +165,7 @@ final class PendingMatching {
 
     private PendingMatching(PendingMatching source, CoreMessage nextCommand) {
         sequence = source.sequence;
+        sequenceKey = source.sequenceKey;
         operation = source.operation;
         command = nextCommand;
         fingerprint = source.fingerprint;
@@ -221,6 +225,10 @@ final class PendingMatching {
     }
 
     long sequence() { return sequence; }
+    Long sequenceKey() {
+        if (sequenceKey == null) sequenceKey = Long.valueOf(sequence);
+        return sequenceKey;
+    }
     Operation operation() { return operation; }
     CoreMessage command() { return command; }
     CommandFingerprint fingerprint() { return fingerprint; }

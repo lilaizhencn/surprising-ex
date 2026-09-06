@@ -29,10 +29,14 @@ public final class ProductLineWireCode {
     }
 
     public static ProductLine decode(int wireCode) {
-        return CODES.entrySet().stream()
-                .filter(entry -> entry.getValue() == wireCode)
-                .map(Map.Entry::getKey)
-                .findFirst()
-                .orElseThrow(() -> new ProtocolException("unsupported product line code: " + wireCode));
+        return switch (wireCode) {
+            case 1 -> ProductLine.SPOT;
+            case 2 -> ProductLine.LINEAR_PERPETUAL;
+            case 3 -> ProductLine.INVERSE_PERPETUAL;
+            case 4 -> ProductLine.LINEAR_DELIVERY;
+            case 5 -> ProductLine.INVERSE_DELIVERY;
+            case 6 -> ProductLine.OPTION;
+            default -> throw new ProtocolException("unsupported product line code: " + wireCode);
+        };
     }
 }

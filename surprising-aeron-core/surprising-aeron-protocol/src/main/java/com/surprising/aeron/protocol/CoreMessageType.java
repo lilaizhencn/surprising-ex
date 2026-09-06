@@ -1,7 +1,5 @@
 package com.surprising.aeron.protocol;
 
-import java.util.Arrays;
-
 public enum CoreMessageType {
     PROBE_INCREMENT(1, WireMessageKind.COMMAND),
     VERIFY_STATE_HASH(2, WireMessageKind.COMMAND),
@@ -98,6 +96,21 @@ public enum CoreMessageType {
     INSTRUMENT_MAINTENANCE_RESULT(223, WireMessageKind.RESPONSE),
     CORE_EVENT(300, WireMessageKind.EXPORT_EVENT);
 
+    private static final CoreMessageType[] BY_WIRE_CODE;
+
+    static {
+        CoreMessageType[] constants = values();
+        int max = 0;
+        for (CoreMessageType value : constants) max = Math.max(max, value.wireCode);
+        BY_WIRE_CODE = new CoreMessageType[max + 1];
+        for (CoreMessageType value : constants) {
+            if (value.wireCode < 0 || BY_WIRE_CODE[value.wireCode] != null) {
+                throw new ExceptionInInitializerError("duplicate or negative wire code");
+            }
+            BY_WIRE_CODE[value.wireCode] = value;
+        }
+    }
+
     private final int wireCode;
     private final WireMessageKind kind;
 
@@ -115,9 +128,10 @@ public enum CoreMessageType {
     }
 
     public static CoreMessageType fromWireCode(int wireCode) {
-        return Arrays.stream(values())
-                .filter(value -> value.wireCode == wireCode)
-                .findFirst()
-                .orElseThrow(() -> new ProtocolException("unsupported message type: " + wireCode));
+        if (wireCode >= 0 && wireCode < BY_WIRE_CODE.length) {
+            CoreMessageType value = BY_WIRE_CODE[wireCode];
+            if (value != null) return value;
+        }
+        throw new ProtocolException("unsupported message type: " + wireCode);
     }
 }

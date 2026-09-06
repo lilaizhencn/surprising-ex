@@ -3577,3 +3577,26 @@
 - 原始文件：24个有效async-profiler JFR（业务/恢复分开）和12个JVM JFR，另保留首轮失败JVM JFR；48个火焰图、collapsed调用栈、全部jfr summary、JVM事件JSON、命令commands.json、采样入口FiniteCoreProfile.java、run.py、analyze.py、metrics.py和SHA256SUMS位于上述证据目录。官方发行包/API和参数文档副本已保存。
 - 未测：真实Aeron三节点/网络、网关/数据库/Kafka/WS，资金费、强平、ADL、到期行权、非零费率、长期内存、稳态CPU、准确分配对象数/op、全量TLAB与最大对象、分业务延迟分位数/持续吞吐、完整safepoint/VM归因。仅做有限诊断，没有JMH定时测量，不构成完整性能验收。已发现两处应优先优化的分配路径，未发现此次样本中的资金/订单终态错误；不据此宣称项目无其他问题。
 - 被测benchmark JAR SHA256：`bfbe04ea99d25a1f041d53079f86728cab2a5317796a57354553f57e849ae4d9`；源码提交仍为`ae21a387`。本次仓库只追加验证记录，未修改生产逻辑。复现：在上述环境执行证据目录 `python3 run.py`，分析执行 `python3 analyze.py` 和 `python3 metrics.py`。
+
+
+## 2026-09-06 async-profiler 分配热点修复：采集前定义
+
+- 当前 master 基于 d0c0b73b 的修复工作区；对照commit不适用（仅验证当前master），不检出/重跑旧版，不形成旧版吞吐比较。协议5处解码删除逐调用Stream/枚举数组克隆；PendingMatching惰性复用owner-only Long key，初始化新序号时清空，同序号复制时共享。保留原LinkedHashMap插入顺序和全部提交边界，不新增Map或队列。
+- 每个被查批次/命令最多缓存一个Long，生命周期限于可复用PendingMatching槽位到下一次initialize；为既有有序Map提供稳定查询键，不增加逐轮状态快照。当前真实采样调用链明确要求减少反复装箱；效果待本轮验证，不预先声称零分配。
+- 新增JMH场景decodedBatchAdmissionAndSettlement组合真实入站、改单成交和批量挂撤，6产品线有限调用，继承既有Workload资金、订单、快照核对；本次按用户此前不压测约束不执行JMH timed measurement，性能验收仍未完成。
+- 采样环境/阈值/初态延续上一诊断：HotSpot GraalVM25.0.1、G1、512MiB固定heap、4 Account Lane、1 matcher、256 in-flight、256用户+1maker、1symbol，batch2、零费率、CROSS；1轮预执行、停250ms、2轮采样及轮间100ms停顿。每线7168采样business ops、4096业务Core messages、2048fills。不测持续到达率。
+- 本轮只运行CPU参数+alloc128KiB+lock1ms各线一次，明确macOS engine=wall，不当作精确CPU时间；JVM profile.jfc覆盖全进程，业务/恢复分开async JFR。JVM参数同上一轮，含NMT、DebugNonSafepoints。无稳定预热/吞吐阈值。
+- 通过条件：协议全部有效wireCode保持映射，非法边界/空洞拒绝不变；序号键复用和环槽代际隔离通过；相关协议/服务/bench Maven测试通过；六线有限断言通过、unfinished/endBacklog0。采样检查目标枚举数组/Stream及dispatch Long是否仍有样本，并以源码确认消除逐查询分配，不能单凭零样本证明绝对零分配。
+- 证据目录 `/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-06-fixes/`。仍不覆盖真实网络/网关/WS、资金费/强平/到期、长期泄漏、生产容量；本轮不得声称JMH/JFR完整性能验收。
+
+### 分配热点修复结果
+
+- HotSpot25上 `mvn -pl :surprising-aeron-benchmarks -am test`：110个测试类、677项通过，0失败/错误/跳过；包括协议有效码/空洞/边界、PendingMatching键复用/同序号复制/不同序号重置、批次有序推进/拒绝续批、六线资金和恢复测试。随后同reactor `-DskipTests package`成功。
+- 六个独立JVM的新JMH场景有限调用全部通过；每线总计含预执行10752 business ops、6144业务Core messages、3072fills，采样阶段仍为7168/4096/2048，计数断言通过。每线用户/maker资金、冻结、预占、仓位归零及快照hash一致，unfinished=0、endBacklog=0。未执行JMH定时测量、网络压测或容量验收。
+- 六线的5个目标协议lookup调用链分配样本均0；源码正常查找路径仅数组访问或switch，无逐调用values/Stream。非法码仍抛原ProtocolException，空洞不会误映射。
+- 原反复装箱查询已改为 `pending.sequenceKey()`：首次惰性装箱，后续轮询复用；batch插入也用同一键。有序LinkedHashMap未替换，顺序/拒绝/提交fence不变。代际重置与复制测试通过。单槽位至下一次initialize最多保留一个Long，不是全局增长缓存。
+- dispatchReadyPlaceSettlements含下游的Long样本权重为SPOT0.125MiB、LINEAR_PERPETUAL0.125MiB、INVERSE_PERPETUAL0、LINEAR_DELIVERY0.25MiB、INVERSE_DELIVERY0.125MiB、OPTION0.125MiB。大部分残留明确在completeMatching/applyMatcherProgress/applyPipelinedPlaceBatchResults，OPTION的1个样本仅归因到内联父帧，不能进一步断言具体来源；未声称整链路无Long分配。直接表查询不再逐轮产生新key的结论同时来自源码与代际复用测试，不依赖采样缺失。
+- 当前诊断业务窗口总分配采样权重（MiB）：SPOT90.50、LINEAR_PERPETUAL94.38、INVERSE_PERPETUAL90.50、LINEAR_DELIVERY97.12、INVERSE_DELIVERY95.62、OPTION96.88；仍含夹具响应验证和未充分预热，不作为精确B/op或吞吐改善百分比。源码/计数改动后的样本仅用于目标调用栈归因，不运行旧版对照。
+- 六个全进程JFR各3次G1New，最长单次pause6.49–7.59ms，JavaMonitorEnter和DataLoss均0。仍有冷启动/JIT，CPU参数实际engine=wall；不能用本轮结果证明稳定CPU、尾延迟、无锁、无泄漏或生产零性能影响。
+- 证据：新目录含12个async-profiler JFR（业务/恢复）、6个JVM JFR、36个火焰图、collapsed、全部summary、事件JSON、聚合、测试/构建日志、运行入口/命令及SHA256SUMS。复现入口run.py有限调用新增decodedBatchAdmissionAndSettlement并校验计数。没有改生产配置、协议wireCode、资金计算和恢复格式。
+- 被测benchmark JAR SHA256：`069cc3c5bdac8cc9df02bec0f9f560428ed510b58dc3fac031efbd0448fcadd4`；被测源码补丁与最终提交对应，source.patch校验见证据目录SHA256SUMS。上述功能及目标分配修复通过，完整性能验收仍未完成。
