@@ -26,7 +26,6 @@ import com.surprising.trading.api.model.OrderSide;
 import com.surprising.trading.api.model.OrderStatus;
 import com.surprising.trading.api.model.OrderType;
 import com.surprising.trading.api.model.PlaceOrderRequest;
-import com.surprising.trading.api.model.PositionMode;
 import com.surprising.trading.api.model.PositionSide;
 import com.surprising.trading.api.model.TestOrderResponse;
 import com.surprising.trading.api.model.TimeInForce;
@@ -221,13 +220,8 @@ public class OrderService {
         MarginMode marginMode = MarginMode.defaultIfNull(request.marginMode());
         PositionSide positionSide = PositionSide.defaultIfNull(request.positionSide());
         ProductLine productLine = currentProductLine();
-        PositionMode positionMode = placementStateService.positionMode(productLine, request.userId());
-        if (PositionMode.defaultIfNull(positionMode) == PositionMode.HEDGE && !positionSide.isHedgeSide()) {
-            throw new IllegalArgumentException("positionSide LONG or SHORT is required in HEDGE position mode");
-        }
-        ReduceOnlyPosition position = placementStateService.position(productLine, request.userId(), symbol, marginMode,
-                        positionSide)
-                .orElseThrow(() -> new IllegalStateException("open position not found"));
+        ReduceOnlyPosition position = placementStateService.requireClosePosition(
+                productLine, request.userId(), symbol, marginMode, positionSide);
         if (position.signedQuantitySteps() == 0L) {
             throw new IllegalStateException("open position not found");
         }

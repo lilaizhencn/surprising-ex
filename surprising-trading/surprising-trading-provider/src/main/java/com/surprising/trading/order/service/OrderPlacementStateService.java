@@ -37,9 +37,26 @@ public class OrderPlacementStateService {
     public Optional<ReduceOnlyPosition> position(ProductLine line, long userId, String symbol,
                                                  MarginMode mode, PositionSide side) {
         if (line == ProductLine.SPOT) return Optional.empty();
+        return position(state(line, userId), symbol, mode, side);
+    }
+
+    public ReduceOnlyPosition requireClosePosition(ProductLine line, long userId, String symbol,
+                                                   MarginMode mode, PositionSide side) {
+        if (line == ProductLine.SPOT) throw new IllegalStateException("open position not found");
+        CoreUserStateView state = state(line, userId);
+        if (state.positionMode() == com.surprising.aeron.protocol.CorePositionMode.HEDGE
+                && !PositionSide.defaultIfNull(side).isHedgeSide()) {
+            throw new IllegalArgumentException("positionSide LONG or SHORT is required in HEDGE position mode");
+        }
+        return position(state, symbol, mode, side)
+                .orElseThrow(() -> new IllegalStateException("open position not found"));
+    }
+
+    private static Optional<ReduceOnlyPosition> position(CoreUserStateView state, String symbol,
+                                                        MarginMode mode, PositionSide side) {
         MarginMode normalizedMode = MarginMode.defaultIfNull(mode);
         PositionSide normalizedSide = PositionSide.defaultIfNull(side);
-        return state(line, userId).positions().stream()
+        return state.positions().stream()
                 .filter(position -> position.symbol().equalsIgnoreCase(symbol))
                 .filter(position -> position.marginMode().name().equals(normalizedMode.name()))
                 .filter(position -> position.positionSide().name().equals(normalizedSide.name()))

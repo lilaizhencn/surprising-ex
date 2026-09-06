@@ -38,12 +38,10 @@ import com.surprising.trading.order.config.TradingOrderProperties;
 import com.surprising.trading.order.model.OrderRecord;
 import com.surprising.trading.order.repository.AeronOrderProjectionRepository;
 import com.surprising.trading.order.repository.ProjectionReadResult;
-import com.surprising.trading.order.model.ReduceOnlyPosition;
 import com.surprising.trading.order.model.ValidationResult;
 import java.time.Instant;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -116,12 +114,19 @@ class OrderServiceTest {
         verifyNoInteractions(aeronOrders, placementStateService);
     }
 
-    @Test
-    void closePositionUsesExplicitClientOrderIdForTheStableCloseOrder() {
-        OrderService service = service(ProductLine.LINEAR_PERPETUAL, aeronOrders);
-        when(placementStateService.position(ProductLine.LINEAR_PERPETUAL, 1001L, "BTC-USDT",
-                MarginMode.CROSS, PositionSide.NET))
-                .thenReturn(Optional.of(new ReduceOnlyPosition(5L, 7L)));
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("closePositions")
+    void closePositionReadsAccountOnceAndSubmitsAuthoritativeReduceOnlyOrder(ProductLine line, long quantity) {
+        var gateway = org.mockito.Mockito.mock(OrderAeronGateway.class);
+        var position = new com.surprising.aeron.protocol.CorePositionView(
+                "BTC-USDT", "USDT", 7, quantity, 100, 500, 0, 50);
+        when(gateway.userState(1001L)).thenReturn(new com.surprising.aeron.protocol.CoreUserStateView(
+                line, 1001, 7, List.of(), List.of(), List.of(position)));
+        TradingOrderProperties properties = new TradingOrderProperties();
+        properties.getKafka().setProductLine(line);
+        when(orderValidator.validate(any())).thenReturn(ValidationResult.ok(7L));
+        var service = new OrderService(properties, orderValidator, new OrderPlacementStateService(gateway),
+                aeronOrders, projection);
         when(aeronOrders.place(any(), any())).thenReturn(response(91, "close-1", OrderStatus.ACCEPTED));
 
         service.closePosition(new ClosePositionRequest(1001L, "close-1", "BTC-USDT",
@@ -130,6 +135,19 @@ class OrderServiceTest {
         ArgumentCaptor<PlaceOrderRequest> request = ArgumentCaptor.forClass(PlaceOrderRequest.class);
         verify(aeronOrders).place(request.capture(), any());
         assertThat(request.getValue().clientOrderId()).isEqualTo("close-1");
+        assertThat(request.getValue().side()).isEqualTo(quantity > 0 ? OrderSide.SELL : OrderSide.BUY);
+        assertThat(request.getValue().quantitySteps()).isEqualTo(Math.absExact(quantity));
+        assertThat(request.getValue().orderType()).isEqualTo(OrderType.MARKET);
+        assertThat(request.getValue().timeInForce()).isEqualTo(TimeInForce.IOC);
+        assertThat(request.getValue().reduceOnly()).isTrue();
+        verify(gateway, times(1)).userState(1001L);
+        org.mockito.Mockito.verifyNoMoreInteractions(gateway);
+    }
+
+    static java.util.stream.Stream<org.junit.jupiter.params.provider.Arguments> closePositions() {
+        return java.util.Arrays.stream(ProductLine.values()).filter(ProductLine::isDerivative)
+                .flatMap(line -> java.util.stream.Stream.of(5L, -5L)
+                        .map(quantity -> org.junit.jupiter.params.provider.Arguments.of(line, quantity)));
     }
 
     @Test

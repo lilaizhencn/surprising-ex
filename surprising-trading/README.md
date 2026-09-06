@@ -275,6 +275,10 @@ matching 保证金释放只允许 `reduceOnly=true` 订单没有预占快照。�
 
 用户主动平仓订单在发布撮合前会做 reduce-only 安全校验：
 
+`OrderService.closePosition` 通过 `OrderPlacementStateService.requireClosePosition` 只查询一次 Core 用户状态，
+从同一份结果校验持仓模式并按 symbol、保证金模式、持仓方向选择非零持仓，生成带原 clientOrderId 的市价 IOC reduce-only 单。
+查询结果只用于构造请求；随后 Core 仍按最新持仓和已占用可平数量完成最终校验，查询与下单之间的仓位变化不能导致反向开仓。
+
 - 多仓只能提交 reduce-only `SELL`。
 - 空仓只能提交 reduce-only `BUY`。
 - 已存在的未完成 reduce-only 平仓单会占用可平数量，新订单数量加上已有待平数量不能超过当前持仓。
