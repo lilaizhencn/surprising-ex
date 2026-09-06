@@ -3816,3 +3816,51 @@
 - 新轮仅当前master c28552c8加最终patch，不使用中止轮或历史版本比较。artifact新根：/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-07-core-allocation-final；精确源码patch/JAR SHA和命令独立归档。
 - 标准、环境、全部JVM/JMH/JFR参数、六产品1warm+2测量cycle、随后30秒冷却+U本位永续3×20秒预热+600秒连续测量，全部沿用上面“准备下单、小容器与Lane指标编码优化验证”的已锁定完整场景；固定256 in-flight、4Lane、1matcher、batch2、257用户、1模拟会话，原查询频率不变。唯一实现修正为计数器读取放入Lane任务内，未改变业务负载或计数口径。
 - 本轮通过要求：业务/Core accepted=terminal、unfinished/endBacklog0、拒绝/错误/超时0、六产品资金及快照断言全通过；持续全JVM gc.norm/3584 <10000 B/business op。GC>50ms、稳定live set净增>32MiB或native/线程/FD增长调查；DataLoss/降频/swap增长判环境无效。全量细项分析/限制/原件保留要求同前一预锁记录，本段开始采样后只追加结果。
+
+
+### 最终优化验证结果（2026-09-07 UTC+8）
+
+- 实现提交 `24dbf6b3`（master，已推送）；被测JAR由该提交的完全相同业务/测试源码构建，SHA256 `13f19409a96375c8245ba31048eb0898556570969aa2c155092338f82f3de3d5`。最终source.patch SHA256 `5118ee322d74c51f6325130ed705820cb5df7f4ef7f01fefbd0dc978845a73d2`；JFC/dylib校验同预锁记录，revision.json记录基底和最终提交。不比较历史源码、首轮中止数据或旧性能结果。
+- 完成三项：准备下单一次安装完整订单/预留，消除占位对象、占位UUID与ReservedOrder载体；小型每用户索引容量2、自然扩容、空索引清理不变，活跃订单同用户更新不删除再添加成员；指标协议直接编码，每Lane一次有完成屏障的任务读取全部计数器/元数据，不暴露运行时数组，finish后编码器封口。公开快照构造/访问防御复制和协议version1字节格式保持不变。
+- 测试：扩大reactor覆盖benchmarks/tools/account/trading/market-data/derivatives-lifecycle直接调用方，1060条实际通过、11条数据库条件跳过；最终Lane计数读取屏障修正后重新运行 `mvn -pl :surprising-aeron-benchmarks -am test package`，包含新增第49条TradingRuntimeState并发测试。独立PostgreSQL18.4按当前init.sql初始化，补跑MaintenanceIntegrationTest36条、InstrumentSeedCoreContractTest1条；按类最后一次运行去重，199类、1098条通过，0失败/错误/跳过。明细final-test-counts.json；不能把多次重跑重复计数。
+- 新增测试覆盖：准备预留安装对象身份、重复订单/别名拒绝前不多冻结、取消精确解冻；活跃订单100键扩容/部分成交更新/终态回收；独立Lane元数据/计数一致性；前序admission仍被阻塞时排队查询，必须读取其完成后的计数与耗时；直接编码旧协议逐字节相等、1/4/64Lane完整性、封口后禁止再写、计数溢出前不部分更新。现有10资产/100用户预留计数清理、六产品非零费用/资金/回滚和恢复测试继续通过。
+- 首轮新测试编译误用不存在的PARTIALLY_FILLED枚举，改为本项目实际OPEN部分成交状态后通过；日志保留于首轮目录。最终数据库第一次启动因artifact绝对路径过长超过macOS Unix socket103字节上限失败，PostgreSQL自行退出；使用新数据目录和短/tmp socket路径重试通过并停止数据库。两次失败日志均保留，没有隐藏、覆盖首轮证据或更改业务代码规避测试。
+- 最终六产品finite均exit0，每条1warm+2测量cycles、总10752业务操作/6144 Core messages/3072fills，六条共64512业务操作；每条用户/maker余额、冻结/预留、仓位、订单/client alias终态与snapshot业务hash/alias恢复均通过，原始JFR及summary在finite/。六产品短样本不用于吞吐容量结论。
+
+|U本位永续600秒测量指标|当前master实测|
+|---|---:|
+|terminal business operations|18,902,016|
+|terminal Core messages|10,801,152|
+|fills|5,400,576|
+|terminal batches / items|8,100,864 /16,201,728|
+|额外metrics查询|2,700,288|
+|带profiler terminal business ops/s|31,501.46|
+|带profiler terminal Core messages/s|18,000.83|
+|带profiler fills/s|9,000.42|
+|带profiler batches/s / items/s|13,500.63 /27,001.25|
+|全JVM分配率|288.88 MiB/s|
+|分配B/business op（含夹具/查询）|9,618.47|
+|measurement GC次数 / 时间|395 /3229ms|
+|measurement GC时间占比|约0.538%|
+
+- 最终持续轮00:04:58启动、00:16:04正常退出，async JFR连续600秒，JVM JFR665秒含预热及终检。acceptedBusinessOperations=terminalBusinessOperations、accepted/terminal Core messages相等、unfinished/endBacklog0、maxBacklog0（仅回调末观察）、拒绝/错误/超时0；600秒中途不重建服务，金融和snapshot终检全通过。预锁10000 B/business op分配阈值通过。JMH score8.789470 cycles/s，单measurement没有可用误差/置信区间，scorePercentiles不能当业务尾延迟。
+- 并发口径保持256 in-flight、257用户含maker、1模拟会话、1symbol、4Lane、1matcher；batch平均/最大2，原查询频率没有降低。主数值带profiler且为闭环最大速率；没有无profiler主轮、open-loop或业务入口/accepted/terminal三段p50/p90/p95/p99/p99.9/max，故只通过本轮分配与功能部分验证，不宣称生产容量或吞吐提升百分比。
+
+**实际分配归因**
+
+- 最终reserveOrder安装lambda下样本仅long[]（索引等必要工作），不再出现占位OrderRuntime、ReservationRuntime、UUID或ReservedOrder；完整OrderRuntime/ReservationRuntime仍在准备阶段按业务需要创建，不把必要不可变订单物化称为可全部消除。
+- encodeLaneMetrics调用链采样为byte[]、HeapByteBuffer、Encoder及有界任务/发布lambda，没有中间long[]快照。编码器只分配精确输出，不复用已经转交给响应的数组。完整metrics查询分类占5.15%分配，含请求/响应等边界；这不是全部可移除成本，夹具查询比例仍高于通常部署。
+- 小集合仍会首次创建/扩容：addUserEntity、indexPosition、clientIndex、pendingReserve的LongHashSet/primitive map及数组样本保留在targets.json。这一轮缩小常见小集合的初始数组并去掉无效活跃成员移除/重建，没有引入无限历史用户空缓存、共享可变业务对象或第二套索引，不能声称全链路0B。
+- 全async分配权重181,137,479,704B（抽样估计，窗口与TLAB统计不同），互斥分类owner41.74%、Lane19.47%、matcher9.61%、查询5.15%、夹具response decode14.06%、fixture request/setup7.10%、Core输出2.82%、snapshot0.04%。top class/site/完整栈在results.json、targets.json、alloc.collapsed/html；JIT行号不能机械当源码new表达式。未报告无法由抽样精确推导的对象数/业务操作。
+- 全JVM NewTLAB444269事件、refill bytes200,170,661,424，OutsideTLAB5744事件/251,635,544B；最大NewTLAB触发对象262160B、最大outside对象4,194,320B。refill bytes不等于触发对象大小之和。稳定分钟ThreadAllocation差分：owner202.26–205.16MiB/s、Lane合计55.52–56.32、matcher27.33–27.73，无持续上涨；含各线程实际执行的夹具/查询归属。
+
+**GC、内存、线程与VM**
+
+- 稳定窗口（记录第2分钟起）GC后heap45.31–47.29MiB，G1 oldGen均值26.48→26.54MiB；heap committed768MiB。全JVM GC444次（young435、old9），原因G1 Evacuation Pause434、System.gc8、Metadata GC Threshold2；JMH边界显式GC不混入600秒业务GC。pause p50 8.20ms、p95 8.95ms、p99 13.82ms、max21.32ms；没有promotion/evacuation failure记录，未触发50ms/32MiB告警。
+- NMT采样committed950.01–961.85MiB，最后950.93MiB；reserved首末2,335,993→2,331,248KiB。Tracing18.44–29.66MiB且两次明显释放，不能算业务native泄漏；Code首末37507→37464KiB、Metaspace22770→22898KiB。664个DirectBuffer事件count/capacity/used均0；本夹具不含真实Aeron/Netty/Chronicle native池流量，真实池分配/释放余额未验证。
+- 稳定active Java threads16，数字FD21次样本均15；CPU_Speed_Limit均100、swap/pageout0、JFR DataLoss0。10分钟未见持续堆/oldGen/native/FD/线程增长证据，不外推小时/天级无泄漏；未用heap histogram/OldObjectSample扰动运行。
+- JDK ExecutionSample61942，最高单栈8884为Thread.isInterrupted→SurprisingClusteredService.idleCommand，后续有LaneMutationTask.await等待真实准备/结算。夹具NoOpIdleStrategy会忙轮询；保留提交完成、中断、超时和可见性屏障，不误删正常等待。JFR process CPU load均值0.11423，machine均值0.13636/max0.46024；ThreadCPULoad原始均值owner0.06175、matcher0.01362、Lane约0.00576–0.01160，原值和线程分组在diagnostics.json/cpu.tsv。macOS async为wall，不能把等待线程墙钟份额当CPU占比。
+- async lock1ms门限0样本；JFR park/wait原始时长及栈在wait-io.tsv，主要为Lane空闲、JMH main和后台releaser；没有交易回调内JFR门限以上同步file/socket IO样本。没有样本不证明所有短IO/锁都不存在。
+- SafepointBegin481、最长进入0.129ms；ExecuteVMOperation512次/累计3722.74ms/max21.35ms，与GC停顿量级一致。Compilation31次/总6772.84ms/max584.39ms在编译线程，不当STW；Deoptimization286含启动。JavaExceptionThrow530、JavaErrorThrow136为可能重叠事件，主要启动/反射/MethodHandle及终检边界，稳定16:07–16:16 UTC的交易回调无异常样本；完整时间/栈在exceptions.tsv。
+- 样本未包含真实3节点Aeron网络、HTTP/Kafka/WS与全部风险重操作的持续混合容量；六产品资金/恢复由短JMH场景及相关回归补足，不扩大解释10分钟永续样本。性能验收范围和缺失的业务分段尾延迟如上，当前交付为全部三项局部优化及功能/分配验证完成。
+- 最终artifact根 `/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-07-core-allocation-final`，172个证据文件约192.67MiB（不计临时PG数据目录），包含源码/JAR、精确命令、两类原始JFR/summary、flamegraph、TLAB/CPU/GC/VM/异常/分钟趋势、NMT/FD/系统以及测试原件。SHA256SUMS自身SHA256 `8542ecbacc83852fc730fce902407e8aac6ac9a2c015c9346805fdb33c8574ad`。首轮中止和数据库初次启动失败原件保留；最终压测与临时数据库进程均已结束。
