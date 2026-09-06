@@ -3546,3 +3546,34 @@
 - 前端：管理后台 lint/build 通过；用户 Web 41 项测试及构建通过（lint 有既有提示，无错误）；Flutter analyze 无问题、53 项测试通过。浏览器桌面/移动端检查实际 React 页面及接口契约桩，覆盖必填原因、审批、日志差异、产品线和 Core 待确认/已确认，不等同真实网关全栈验收。
 - 原始日志、浏览器脚本/截图、源码补丁和 SHA256SUMS：`/Users/atomex/Desktop/surprising/instrument-current-evidence/2026-09-06/`。早期期权种子失败诊断另存，最终 1151 个配置校验通过。
 - 未测：本次修改后的三节点真实网络故障矩阵、真实网关至浏览器端到端、JMH/JFR、持续负载及生产容量。协议、JSON 字段和快照格式需前后端/Core 配套更新；产品未上线，不提供旧格式兼容。不能据功能测试声称零性能影响。
+
+
+## 2026-09-06 async-profiler 4.5 有限样本诊断：采集前定义
+
+- 当前 master 被测提交 `ae21a38735cd53820b1105296ba6bc5725a786fb`；对照 commit：不适用（仅验证当前 master）。不改生产代码。本条在采集前锁定，仅做诊断，不作为性能验收或吞吐对照。
+- 工具：官方最新版正式版 async-profiler 4.5（GitHub latest API 已核验），macOS 下载包 SHA256 `46d04ef81f532a065a0b3877e488aa706afa14aa2ea14433b323db9e6fda76dc`。HotSpot Oracle GraalVM 25.0.1、Maven 3.9.16；macOS x86_64、Intel i9-9880H、16 GiB RAM。
+- 固定场景：六产品线分别启动独立 JVM，复用 ClusteredBatchTradingBenchmark.Workload；1 个 matcher、4 Account Lane、256 in-flight、256 用户加 1 maker、1 symbol、1 个模拟 ClientSession。真实 Core/matcher，Aeron Cluster 网络回调为夹具；做市由同进程 maker 挂单维持，无独立做市进程、网络连接、数据库或 WS 推送。
+- 每 JVM 初始化后预执行 1 轮改单成交往返+批量挂撤单，停 250ms；诊断阶段固定 2 轮、轮间停 100ms，不按时长循环、不测到达率、不加持续负载。batchSize=2；每轮 3584 business ops（改单成交往返2560、挂撤1024）、2048终态Core业务messages、1024fills、512额外查询；每线采样7168 business ops、4096 Core业务messages、2048fills。有限预热不能保证 JIT 稳态。
+- 初态：每用户/maker 1,000,000,000 settle units；现货maker额外513 BTC最小单位；单symbol价格100、maker保留卖价120；费率为0，衍生品 CROSS，标记价100。每轮验证终态响应/成交数量，最终验证用户与maker余额、冻结、预占、仓位归零、仅剩maker挂单，以及快照恢复businessStateHash。资金费、强平、保险、到期结算不在该夹具覆盖范围。
+- JVM：`-Xms512m -Xmx512m -XX:+UseG1GC -XX:NativeMemoryTracking=summary -XX:+UnlockDiagnosticVMOptions -XX:+DebugNonSafepoints`，开放 jdk.internal.misc 和 java.util.zip。JVM自带JFR `settings=profile,dumponexit=true` 覆盖整个进程；async-profiler按业务与恢复两个窗口分别采集 CPU 1ms、wall 10ms、alloc 128KiB、lock 1ms，threads=true。JMH timed measurement：未运行；无固定测量秒数，执行完固定样本即停止。
+- 正确性通过条件：全部有限断言通过，未完成命令/期末积压为0，快照及资金核对通过。诊断数据条件：profiler成功产生可解析文件，检查DataLoss、采样错误及同机环境；采样不足、启动/JIT/夹具分配需单列，不能据缺失样本证明没有问题。观察热点必须追溯到实际业务调用路径；自旋、空闲park、恢复分配不直接定性为bug。
+- 产物目录 `/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-06/`，包含有限运行入口、命令、环境、原始JFR、火焰图和校验。本轮不提供requests/s、持续terminal business ops/s、分位延迟、长稳泄漏及生产容量结论；性能验收阈值不适用。
+
+### async-profiler 第一轮无效与第二轮采集前定义
+
+- 第一轮 SPOT 在 profiler.start 拒绝组合：`Cannot start wall clock with the selected event`。未进入采样业务窗口，无 CPU/alloc/wall 结果，不是业务断言失败。保留 SPOT.log、SPOT-jvm.jfr。原有限入口 finally 同样尝试不支持组合，未完成恢复验证，不能将该轮算作通过。
+- 第二轮在执行前改为独立 JVM 分开采集：每产品线各 CPU+alloc+lock（1ms/128KiB/1ms）和 wall（10ms）两次；业务与恢复各独立文件。其余场景、JVM及有限轮数不变。两种模式各自每线7168采样 business ops，不合并为容量测量；CPU在macOS的实现限制会单独注明。无持续压测，仍仅诊断。
+
+### async-profiler 第二轮结果与源码核对（仅诊断）
+
+- 2026-09-06 21:34–21:37 UTC+8，六产品线 × 两模式共12个独立JVM全部 exit 0。每次业务断言及最终用户/maker资金、冻结、预占、仓位、终态订单、快照恢复hash均通过。含预热每JVM acceptedCore=terminalCore=6144、queries=1536、unfinished=0、endBacklog=0；单次采样阶段7168 business ops、4096业务Core messages、2048fills。maxBacklog=0是回调完成后的内部观测，不是无并发的证明。
+- **平台口径纠正**：async-profiler 4.5 原始 `jdk.ActiveSetting` 显示 `event=cpu` 实际 `engine=wall`、kernelSymbols=false。文件名仍保留 cpu 以还原执行参数，但这些 ExecutionSample 不能当作 Linux perf CPU 时间。采样到大量 Graal JVMCI-native 编译线程，有限预热没有越过JIT，不能输出稳态CPU占比/吞吐。wall模式另有10ms全线程采样，空闲Lane的park及显式100ms节流sleep均需排除解释。
+- **确认的问题一：入站协议解码存在可避免的临时对象。** `CoreMessageType.fromWireCode`、`CommandSource.fromWireCode` 对 `values()` 建Stream；`ProductLineWireCode.decode` 对entrySet建Stream。真实入站 `CoreMessageFlyweightDecoder.decode` 调用栈在六线均采到枚举数组/Stream等分配；每线该调用链采样权重约5.12–7.12MiB，占整个诊断业务窗口样本权重约4%–6%。这不是响应验证夹具造成的。适合优先使用保留现有wireCode和非法值异常语义的直接查表/switch优化；本轮只定位，未修改协议代码。
+- **确认的问题二：结算调度轮询路径反复分配Long。** `CoreProbeState.dispatchReadyPlaceSettlements` 的Long采样权重每线10.38–13.75MiB，约8%–11%。源码存在 `pendingOrderBatches.get(pending.sequence())` 的boxed key查询，是候选来源；由于Graal内联归因，SPOT行号映射落在4670循环头，而该行调用的 `PendingMatchingRing.dispatchHead` 本身是primitive slot访问，所以不能错误归咎于ring，也不能将Map替换收益说成已经验证。下一步应隔离此调用的装箱及重复轮询，再保留原有批次顺序、拒绝、撤销和commit fence语义验证。
+- **观察而非bug：同步完成边界仍存在。** SPOT 10ms wall窗口owner115个样本中50个经过commitReadyMatching，14个叶子为onSpinWait；有17个含await，20个来自本诊断显式sleep。这些计数有包含关系，不能相加或当作端到端延迟。该边界保证有序log callback完成，不能为了消除等待直接删除。Account Lane空闲park不等同锁竞争。
+- 业务窗口分配权重（MiB，采样估计、非精确总字节，也非稳态B/op）：SPOT114.75、LINEAR_PERPETUAL126.38、INVERSE_PERPETUAL138.38、LINEAR_DELIVERY127.88、INVERSE_DELIVERY128.50、OPTION127.38。主要类含byte[]、Long、long[]、Stream、OrderRuntime；其中夹具 `lambda$setup$2` 响应复制/解码占23.88–30.88MiB/线，已独立标注，不归为交易owner业务必要开销。恢复窗口单独保存，没有混进这些业务数字。线程分组及各类/调用点明细见profile-aggregates.json和allocation-attribution.json。
+- 六个CPU参数轮次全进程JFR各4次G1New，最长单次pause6.63–7.16ms；含启动后GC live heap约23→29/30→31MiB，不能据短期增加认定泄漏。全进程JFR平均JVM CPU占机器容量15.0%–27.3%、机器18.2%–34.1%，仅环境背景，不能映射为业务CPU。180–207个Deoptimization及大量native JIT栈确认冷启动干扰。NMT退出汇总保存在各log，未采连续NMT/native池/FD轨迹，无法证明无泄漏。
+- profiler 1ms monitor阈值下业务窗口锁事件0；全进程profile.jfc采样的JavaMonitorEnter/DataLoss均0，不能证明不存在短锁或丢失之外的采样偏差。未采到profile.jfc阈值以上FileRead/SocketRead业务IO，但采样阈值下同步IO仍不能排除。CPU_Speed_Limit采集前后100，非连续热状态记录，不能承诺没有中途节流。
+- 原始文件：24个有效async-profiler JFR（业务/恢复分开）和12个JVM JFR，另保留首轮失败JVM JFR；48个火焰图、collapsed调用栈、全部jfr summary、JVM事件JSON、命令commands.json、采样入口FiniteCoreProfile.java、run.py、analyze.py、metrics.py和SHA256SUMS位于上述证据目录。官方发行包/API和参数文档副本已保存。
+- 未测：真实Aeron三节点/网络、网关/数据库/Kafka/WS，资金费、强平、ADL、到期行权、非零费率、长期内存、稳态CPU、准确分配对象数/op、全量TLAB与最大对象、分业务延迟分位数/持续吞吐、完整safepoint/VM归因。仅做有限诊断，没有JMH定时测量，不构成完整性能验收。已发现两处应优先优化的分配路径，未发现此次样本中的资金/订单终态错误；不据此宣称项目无其他问题。
+- 被测benchmark JAR SHA256：`bfbe04ea99d25a1f041d53079f86728cab2a5317796a57354553f57e849ae4d9`；源码提交仍为`ae21a387`。本次仓库只追加验证记录，未修改生产逻辑。复现：在上述环境执行证据目录 `python3 run.py`，分析执行 `python3 analyze.py` 和 `python3 metrics.py`。
