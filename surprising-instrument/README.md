@@ -141,8 +141,10 @@ producer 使用 `acks=all`、幂等、`zstd` 和 `max.in.flight.requests.per.con
 - `instrument_outbox_events`
 
 `init.sql` 通过 psql 的 `\ir` 引入 `okx-instrument-seed.sql` 和 `okx-asset-scales.sql`。两份文件是
-2026-08-20 UTC 从 OKX V5 Public API 生成的 live 快照：SPOT 1349、LINEAR_PERPETUAL 430、
-INVERSE_PERPETUAL 15、LINEAR_DELIVERY 148、INVERSE_DELIVERY 16、OPTION 2847。每个 symbol
+2026-08-20 UTC 从 OKX V5 Public API 生成的快照，每条产品线最多保留 512 个币对：SPOT 512、LINEAR_PERPETUAL 430、
+INVERSE_PERPETUAL 15、LINEAR_DELIVERY 148、INVERSE_DELIVERY 16、OPTION 512。不足 512 个的产品线全部保留。
+现货优先 USDT 报价，其次 BTC-USDT / ETH-USDT，再按 symbol 排序；其他产品线按到期时间（空值优先）、symbol 排序选取。
+筛选依据固定快照，不随初始化时间变化。每个 symbol
 绑定产品线当前版本、三档风险限额和 OKX 指数源；29 个单字符资产因现有账户资产约束被跳过。
 
 `LINEAR_PERPETUAL` 的 `BTC-USDT-SWAP` 在生成快照后应用产品线专用覆盖：`min_valid_index_sources=3`，
