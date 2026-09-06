@@ -105,6 +105,70 @@ public final class CoreProbeState implements AutoCloseable {
         void inject(String phase);
     }
 
+    private com.surprising.aeron.service.state.RealtimeStateCapture realtimeCapture;
+    com.surprising.aeron.service.state.RealtimeStateCapture attachRealtime(
+            com.surprising.aeron.client.RealtimeOutbox outbox) {
+        realtimeCapture = new com.surprising.aeron.service.state.RealtimeStateCapture(
+                outbox, productLine, runtimePlaceOrderIdentities);
+        runtimePlaceOrderState.realtimeCapture(realtimeCapture);
+        terminalRetention.realtimeOrderObserver(realtimeCapture::order);
+        return realtimeCapture;
+    }
+
+    private java.util.concurrent.CompletableFuture<com.surprising.aeron.service.state.RealtimeUserSnapshot> pendingRealtimeSnapshot;
+    private long realtimeSnapshotUser,realtimeSnapshotId,realtimeSnapshotPosition,realtimeSnapshotTimestamp,realtimeSnapshotExportSequence;
+    long realtimeExportSequence(){return runtimeProjectionJournal.publishedSequence();}
+    boolean realtimeSnapshotPending() { return pendingRealtimeSnapshot != null; }
+    void captureRealtimeSnapshot(long userId,long snapshotId,long position,long timestamp) {
+        if (realtimeCapture == null || pendingRealtimeSnapshot != null) return;
+        assertClusterCallbackComplete();
+        realtimeSnapshotExportSequence=realtimeExportSequence();
+        realtimeSnapshotUser=userId;realtimeSnapshotId=snapshotId;realtimeSnapshotPosition=position;realtimeSnapshotTimestamp=timestamp;
+        try { pendingRealtimeSnapshot=runtimePlaceOrderState.realtimeSnapshot(userId); }
+        catch (RuntimeException failure) { realtimeCapture.failed(); }
+    }
+    int pollRealtimeSnapshot() {
+        if (pendingRealtimeSnapshot == null || !pendingRealtimeSnapshot.isDone()) return 0;
+        var future=pendingRealtimeSnapshot;pendingRealtimeSnapshot=null;
+        try {
+            var snapshot=future.join();
+            realtimeCapture.begin(realtimeSnapshotPosition,realtimeSnapshotTimestamp,realtimeSnapshotId);
+            realtimeCapture.snapshot(realtimeSnapshotUser,snapshot,realtimeSnapshotExportSequence);realtimeCapture.commit();
+        } catch (RuntimeException failure) {
+            realtimeCapture.failed();
+            realtimeCapture.begin(realtimeSnapshotPosition,realtimeSnapshotTimestamp,realtimeSnapshotId);
+            realtimeCapture.emit(com.surprising.aeron.protocol.RealtimeFrame.Kind.SNAPSHOT_UNAVAILABLE,
+                    realtimeSnapshotUser,"","",new byte[0]);
+            realtimeCapture.commit();
+        }
+        return 1;
+    }
+
+    private java.util.concurrent.CompletableFuture<java.util.List<com.surprising.aeron.protocol.CoreBookLevelView>> realtimeBook;
+    private String realtimeBookSymbol;
+    private long realtimeBookPosition,realtimeBookTimestamp;
+    boolean realtimeBookPending() {return realtimeBook != null;}
+    void captureRealtimeBook(String symbol,long position,long timestamp) {
+        if(realtimeCapture==null || realtimeBook!=null)return;
+        assertClusterCallbackComplete();
+        realtimeBookSymbol=symbol;realtimeBookPosition=position;realtimeBookTimestamp=timestamp;
+        try {realtimeBook=matcherPipeline.readAtSubmissionFence(matchingAdapter.matcherShardId(symbol),
+                ()->matchingAdapter.orderBookLevelsAsync(symbol,20).join());}
+        catch(RuntimeException failure){realtimeCapture.failed();}
+    }
+    int pollRealtimeBook() {
+        if(realtimeBook==null || !realtimeBook.isDone())return 0;
+        var future=realtimeBook;realtimeBook=null;
+        try {
+            var levels=future.join();
+            realtimeCapture.begin(realtimeBookPosition,realtimeBookTimestamp,0);
+            realtimeCapture.emit(com.surprising.aeron.protocol.RealtimeFrame.Kind.BOOK,0,realtimeBookSymbol,realtimeBookSymbol,
+                    CoreStateQueryCodec.encodeOrderBookView(new com.surprising.aeron.protocol.CoreOrderBookView(realtimeBookPosition,levels)));
+            realtimeCapture.commit();
+        }catch(RuntimeException failure){realtimeCapture.failed();}
+        return 1;
+    }
+
     private static volatile CommitFaultInjector commitFaultInjector = ignored -> { };
 
     static void setCommitFaultInjectorForTest(CommitFaultInjector injector) {
@@ -1637,6 +1701,17 @@ public final class CoreProbeState implements AutoCloseable {
     private List<CoreExecutionView> applyOrderBatchMatcherResult(
             OrderBatchPending batch, OrderBatchItem item, PendingMatching pending,
             com.surprising.aeron.service.matching.CoreMatchingResult matchingResult) {
+        if (realtimeCapture != null && realtimeCapture.active() && matchingResult.accepted()) {
+            try {
+                long takerId = item.orderId();
+                int fill = 0;
+                for (MatcherEvent event : matchingResult.matcherEvents()) {
+                    if (event.eventType() == MatcherEventType.TRADE)
+                        realtimeCapture.trade(runtimeOrder(takerId), pending.sequence(), fill++, event.price(), event.size(),event.matchedOrderId(),event.matchedOrderUid());
+                }
+            } catch (RuntimeException failure) { realtimeCapture.failed(); }
+        }
+
         switch (batch.kind) {
             case PLACE -> {
                 PlaceOrderCommand command = (PlaceOrderCommand) item.command;
@@ -5903,6 +5978,7 @@ public final class CoreProbeState implements AutoCloseable {
                         throw new IllegalStateException("runtime commit must be admitted before mutation");
                     }
                     runtimePlaceOrderState.appendFundsDelta(commandFundsAccumulator);
+                    if (realtimeCapture != null) runtimePlaceOrderState.captureRealtimeChanges(realtimeCapture);
                     runtime.commitRuntimeChanges(runtimePlaceOrderState, runtimePlaceOrderIdentities);
                     commitFaultInjector.inject("indexes");
                     currentAdmission.publish(sequence);
@@ -6220,6 +6296,7 @@ public final class CoreProbeState implements AutoCloseable {
             long applyStartNanos) {
         com.surprising.aeron.service.state.MatcherSettlementEvent event = pending.settlementEvent();
         if (event == null) {
+            captureRealtimeTrades(settlementPlan);
             event = runtimePlaceOrderState.dispatchMatcherSettlement(
                     coreSequence, laneContext.expectedLaneMask(), coreSequence,
                     pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), settlementPlan,
@@ -6498,12 +6575,22 @@ public final class CoreProbeState implements AutoCloseable {
         return executions == null ? List.of() : List.copyOf(executions);
     }
 
+    private void captureRealtimeTrades(com.surprising.aeron.service.state.MatcherSettlementPlan plan) {
+        if (realtimeCapture == null || !realtimeCapture.active()) return;
+        try {
+            OrderRuntime taker = runtimeOrder(plan.takerOrderId());
+            for (int index = 0; index < plan.matcherEventCount(); index++) {
+                MatcherEvent match = plan.matcherEvent(index);
+                if (match.eventType() == MatcherEventType.TRADE)
+                    realtimeCapture.trade(taker, plan.coreSequence(), index, match.price(), match.size(),match.matchedOrderId(),match.matchedOrderUid());
+            }
+        } catch (RuntimeException failure) { realtimeCapture.failed(); }
+    }
+
     private static long tradeCount(com.surprising.aeron.service.state.MatcherSettlementPlan plan) {
         long trades = 0;
-        for (int index = 0; index < plan.matcherEventCount(); index++) {
-            MatcherEvent match = plan.matcherEvent(index);
-            if (match.eventType() == MatcherEventType.TRADE) trades++;
-        }
+        for (int index = 0; index < plan.matcherEventCount(); index++)
+            if (plan.matcherEvent(index).eventType() == MatcherEventType.TRADE) trades++;
         return trades;
     }
 

@@ -116,8 +116,12 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
         forEachSorted(orderIds, id -> observeOrder(state.orders().get(id), acknowledgedSequence));
     }
 
+    private java.util.function.Consumer<OrderRuntime> realtimeOrderObserver;
+    void realtimeOrderObserver(java.util.function.Consumer<OrderRuntime> observer) { realtimeOrderObserver=observer; }
+
     @Override
     public void accept(OrderRuntime order, long coreSequence) {
+        if (realtimeOrderObserver != null) realtimeOrderObserver.accept(order);
         retainPrunedOrder(order, coreSequence);
     }
 

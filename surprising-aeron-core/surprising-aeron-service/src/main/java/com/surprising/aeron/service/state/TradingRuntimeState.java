@@ -885,6 +885,10 @@ public final class TradingRuntimeState implements AutoCloseable {
             });
             positions.forEach((positionKey, position) -> {
                 state.changedPositions.put(positionKey, position);
+                if (position == null && state.realtimeCapture != null) {
+                    try { state.realtimeCapture.removedPosition(state.publishedPositions.get(positionKey)); }
+                    catch (RuntimeException failure) { state.realtimeCapture.failed(); }
+                }
                 putOrRemove(state.publishedPositions, positionKey, position);
                 if (position == null) state.positionLaneIds.removeKey(positionKey);
                 else state.positionLaneIds.put(positionKey, laneId + 1L);
@@ -2694,6 +2698,9 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void rollbackActiveCommand(long revisionCheckpoint, long coreSequence) {
         assertOwner();
+        // An aborted business patch may have staged provisional private values. Drop the outer
+        // realtime batch; authoritative snapshots heal it. Reliable replay captures committed fills only.
+        if (realtimeCapture != null && realtimeCapture.privateStateEnabled()) realtimeCapture.abort();
         if (revisionCheckpoint < 0 || coreSequence <= 0) {
             throw new IllegalArgumentException("invalid runtime command rollback checkpoint");
         }
@@ -3172,6 +3179,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             return null;
         });
         changedLeverages.add(key);
+        if (realtimeCapture != null) realtimeCapture.leverage(key,leveragePpm);
     }
 
     public CoreAlgoOrderState algoOrder(long algoOrderId) {
@@ -4120,6 +4128,43 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
+    /** Captures only touched entities at the published-owner boundary; does not enumerate account state. */
+    public java.util.concurrent.CompletableFuture<RealtimeUserSnapshot> realtimeSnapshot(long userId) {
+        assertOwner();
+        int laneId=topology.accountLaneId(userId);
+        var future=new java.util.concurrent.CompletableFuture<RealtimeUserSnapshot>();
+        SettlementLaneWorker.Command task=lane->{
+            try { future.complete(RealtimeUserSnapshot.capture(lane,userId)); }
+            catch (RuntimeException failure) { future.completeExceptionally(failure); }
+        };
+        if (!accountLanesStarted) task.execute(accountLanes[laneId]);
+        else {
+            // This boundary uses one existing FIFO slot and never waits on the owner.
+            if (laneWorkers[laneId].depth()!=0 || !laneWorkers[laneId].hasCapacity())
+                return java.util.concurrent.CompletableFuture.failedFuture(new java.util.concurrent.RejectedExecutionException("snapshot lane busy"));
+            laneWorkers[laneId].submit(task);
+        }
+        return future;
+    }
+
+    private RealtimeStateCapture realtimeCapture;
+
+    public void realtimeCapture(RealtimeStateCapture capture) { assertOwner(); realtimeCapture = capture; }
+
+    public void captureRealtimeChanges(RealtimeStateCapture capture) {
+        assertOwner();
+        if (capture == null || !capture.privateStateEnabled()) return;
+        try {
+            changedRiskSnapshots.forEach((id,value) -> capture.risk(value));
+            changedUsers.forEach(id -> capture.metadata(user(id)));
+            changedReservations.forEach(id -> capture.reservation(reservation(id)));
+            changedOrders.forEach((orderId, value) -> capture.order(value));
+            changedPositions.forEach((positionKey, value) -> {
+                if(value==null)capture.removedPosition(currentPatchPositionBefore(positionKey));else capture.position(value);
+            });
+        } catch (RuntimeException failure) { capture.failed(); }
+    }
+
     public LongHashSet changedUsers() {
         assertOwner();
         return new LongHashSet(changedUsers);
@@ -4206,8 +4251,13 @@ public final class TradingRuntimeState implements AutoCloseable {
         changedLiquidations.forEach((liquidationId, value) ->
                 consumer.liquidation(liquidationId, null, value));
         changedAlgoOrders.forEach(algoOrderId -> consumer.algoOrder(algoOrderId, null, algoOrder(algoOrderId)));
-        changedTriggerOrders.forEach(triggerOrderId ->
-                consumer.triggerOrder(triggerOrderId, null, triggerOrder(triggerOrderId)));
+        changedTriggerOrders.forEach(triggerOrderId -> {
+            CoreTriggerOrderState value = triggerOrder(triggerOrderId);
+            if (realtimeCapture != null && realtimeCapture.active()) {
+                try { realtimeCapture.trigger(value); } catch (RuntimeException failure) { realtimeCapture.failed(); }
+            }
+            consumer.triggerOrder(triggerOrderId, null, value);
+        });
         changedCancelAllAfterTimers.forEach(key -> consumer.timer(key, null, cancelAllAfterTimer(key)));
     }
 
@@ -5205,6 +5255,9 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
             long userId = userIds[index];
             int assetId = assetIds[index];
+            if (state.realtimeCapture != null) state.realtimeCapture.balance(userId, assetId,
+                    presentAfter[index] ? availableAfter[index] : 0,
+                    presentAfter[index] ? lockedAfter[index] : 0);
             IntLongHashMap balances = state.publishedAvailableBalances.get(userId);
             if (!presentAfter[index]) {
                 if (balances != null) {

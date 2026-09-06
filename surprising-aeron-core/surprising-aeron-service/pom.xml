@@ -17,6 +17,9 @@
 
     <dependencies>
         <dependency>
+            <groupId>com.surprising</groupId><artifactId>surprising-aeron-client</artifactId><version>${project.version}</version>
+        </dependency>
+        <dependency>
             <groupId>com.surprising</groupId>
             <artifactId>surprising-aeron-protocol</artifactId>
             <version>${project.version}</version>

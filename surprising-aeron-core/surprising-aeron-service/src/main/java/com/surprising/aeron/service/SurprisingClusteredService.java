@@ -30,6 +30,16 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     private final ProductLine productLine;
     private CoreProbeState state;
+    private com.surprising.aeron.client.RealtimeOutbox realtimeOutbox;
+    private com.surprising.aeron.client.AeronRealtimeSender realtimeSender;
+    private com.surprising.aeron.client.AeronRealtimeReceiver realtimeControl;
+    private com.surprising.aeron.service.state.RealtimeStateCapture realtimeCapture;
+    private final org.agrona.concurrent.ManyToOneConcurrentArrayQueue<com.surprising.aeron.protocol.RealtimeFrame>
+            snapshotRequests = new org.agrona.concurrent.ManyToOneConcurrentArrayQueue<>(256);
+    private boolean realtimeLeader;
+    private long lastCommittedPosition;
+    private long nextRealtimeSnapshotNs;
+
     private Cluster cluster;
     private IdleStrategy idleStrategy;
     private byte[] responseScratch = new byte[4 * 1024];
@@ -61,6 +71,26 @@ public final class SurprisingClusteredService implements ClusteredService {
         if (snapshotImage != null) {
             loadSnapshot(snapshotImage);
         }
+        lastCommittedPosition = Math.max(0, cluster.logPosition());
+        realtimeLeader = cluster.role() == Cluster.Role.LEADER;
+        String channel = System.getProperty("surprising.realtime.channel", "");
+        if (!channel.isBlank() && realtimeOutbox == null) {
+            realtimeOutbox = new com.surprising.aeron.client.RealtimeOutbox(8192, 8 * 1024 * 1024);
+            realtimeCapture = state.attachRealtime(realtimeOutbox);
+            String directory = System.getProperty("surprising.realtime.directory", io.aeron.CommonContext.getAeronDirectoryName());
+            realtimeSender = new com.surprising.aeron.client.AeronRealtimeSender(realtimeOutbox, directory,
+                    channel, Integer.getInteger("surprising.realtime.stream", 2101));
+            String control = System.getProperty("surprising.realtime.control-channel", "");
+            if (!control.isBlank()) realtimeControl = new com.surprising.aeron.client.AeronRealtimeReceiver(
+                    directory, control, Integer.getInteger("surprising.realtime.control-stream", 2102), frame -> {
+                        if (frame.productLine() == productLine && frame.snapshotId() > 0 && frame.payloadLength() == 0
+                                && frame.ordinal() == 0 && frame.sequence() == 0
+                                && ((frame.userId() > 0 && frame.kind() == com.surprising.aeron.protocol.RealtimeFrame.Kind.SNAPSHOT_REQUEST)
+                                || (frame.userId() == 0 && frame.kind() == com.surprising.aeron.protocol.RealtimeFrame.Kind.BOOK_REQUEST
+                                    && frame.symbol().matches("[A-Z0-9][A-Z0-9_-]{1,63}"))))
+                            snapshotRequests.offer(frame);
+                    });
+        }
     }
 
     @Override
@@ -87,7 +117,24 @@ public final class SurprisingClusteredService implements ClusteredService {
         }
     }
 
+    void attachRealtimeForTest(com.surprising.aeron.client.RealtimeOutbox outbox) {
+        realtimeOutbox = outbox;
+        realtimeCapture = state.attachRealtime(outbox);
+    }
+
     private void processRequest(ClientSession session, CoreMessage request, long timestamp, long clusterPosition) {
+        if (realtimeCapture != null && realtimeLeader) {
+            try { realtimeCapture.begin(clusterPosition, timestamp, 0,state.realtimeExportSequence()); }
+            catch (RuntimeException failure) { realtimeCapture.failed(); }
+        }
+        try {
+            processCommittedRequest(session, request, timestamp, clusterPosition);
+        } finally {
+            if (realtimeCapture != null) realtimeCapture.abort();
+        }
+    }
+
+    private void processCommittedRequest(ClientSession session, CoreMessage request, long timestamp, long clusterPosition) {
         state.assertClusterCallbackComplete();
         long deadline = System.nanoTime() + COMMAND_TIMEOUT_NANOS;
         CoreResponse result = state.apply(request, timestamp, clusterPosition);
@@ -116,6 +163,8 @@ public final class SurprisingClusteredService implements ClusteredService {
             result = queryResult;
         }
         state.assertClusterCallbackComplete();
+        lastCommittedPosition = clusterPosition;
+        if (realtimeCapture != null) realtimeCapture.commit(state.realtimeExportSequence());
         if (session != null) {
             offerResponse(session, request.header().response(responseType(request.header())), result);
         }
@@ -201,13 +250,23 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     @Override
     public void onRoleChange(Cluster.Role newRole) {
+        realtimeLeader = newRole == Cluster.Role.LEADER;
+        if (realtimeCapture != null) realtimeCapture.abort();
         System.out.printf("Aeron core role-change productLine=%s role=%s%n", productLine, newRole);
     }
 
     @Override
     public int doBackgroundWork(long nowNs) {
-        // Aeron 1.53 also prohibits ClientSession.offer from this lifecycle callback.
-        return 0;
+        if (realtimeCapture == null || !realtimeLeader) return 0;
+        int work=state.pollRealtimeSnapshot()+state.pollRealtimeBook();
+        if (state.realtimeSnapshotPending() || state.realtimeBookPending() || nowNs < nextRealtimeSnapshotNs) return work;
+        var request = snapshotRequests.poll();
+        if (request == null) return 0;
+        nextRealtimeSnapshotNs = nowNs + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(10);
+        if(request.kind()==com.surprising.aeron.protocol.RealtimeFrame.Kind.BOOK_REQUEST)
+            state.captureRealtimeBook(request.symbol(),lastCommittedPosition,cluster.time());
+        else state.captureRealtimeSnapshot(request.userId(), request.snapshotId(), lastCommittedPosition, cluster.time());
+        return 1;
     }
 
     @Override
@@ -215,6 +274,10 @@ public final class SurprisingClusteredService implements ClusteredService {
         responseSequence = 0;
         matchingResponse = null;
         this.cluster = null;
+        if (realtimeControl != null) { realtimeControl.close(); realtimeControl = null; }
+        if (realtimeSender != null) { realtimeSender.close(); realtimeSender = null; }
+        realtimeCapture = null;
+        realtimeOutbox = null;
         if (state != null) {
             state.close();
             state = null;
@@ -269,6 +332,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     private void replaceState(CoreProbeState restored) {
         state.close();
         state = restored;
+        if (realtimeOutbox != null) realtimeCapture = state.attachRealtime(realtimeOutbox);
     }
 
     @FunctionalInterface

@@ -12,6 +12,26 @@ import org.junit.jupiter.api.Test;
 class MatcherCommandPipelineTest {
 
     @Test
+    void backgroundReadObservesItsSubmissionFenceAndFailureDoesNotPoisonTrading() throws Exception {
+        var entered=new CountDownLatch(1);var release=new CountDownLatch(1);
+        var value=new java.util.concurrent.atomic.AtomicInteger();
+        try(var pipeline=new MatcherCommandPipeline(4)) {
+            pipeline.submit(1,()->{entered.countDown();await(release);value.set(1);return new CoreMatchingResult(true,"ONE");});
+            assertThat(entered.await(5,TimeUnit.SECONDS)).isTrue();
+            var snapshot=pipeline.readAtSubmissionFence(value::get);
+            pipeline.submit(2,()->{value.set(2);return new CoreMatchingResult(true,"TWO");});
+            release.countDown();
+            assertThat(snapshot.get(5,TimeUnit.SECONDS)).isEqualTo(1);
+            assertThat(pipeline.await(1,TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("ONE");
+            assertThat(pipeline.await(2,TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("TWO");
+            var failed=pipeline.readAtSubmissionFence(()->{throw new IllegalArgumentException("read failed");});
+            assertThatThrownBy(()->failed.get(5,TimeUnit.SECONDS)).hasCauseInstanceOf(IllegalArgumentException.class);
+            pipeline.submit(3,()->new CoreMatchingResult(true,"THREE"));
+            assertThat(pipeline.await(3,TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("THREE");
+        } finally {release.countDown();}
+    }
+
+    @Test
     void keepsABoundedWindowAndPublishesCompletionsInCommandOrder() throws Exception {
         CountDownLatch firstStarted = new CountDownLatch(1);
         CountDownLatch releaseFirst = new CountDownLatch(1);

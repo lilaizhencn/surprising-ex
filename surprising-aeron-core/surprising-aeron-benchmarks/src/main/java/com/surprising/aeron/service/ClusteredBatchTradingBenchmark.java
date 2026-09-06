@@ -64,12 +64,26 @@ public class ClusteredBatchTradingBenchmark {
         return workload.terminal;
     }
 
+    @Benchmark
+    public long committedRealtimeTrades(Workload workload,Counters counters) {
+        workload.runRoundTripTrades();
+        counters.acceptedBusinessOperations+=1024;counters.terminalBusinessOperations+=1024;
+        counters.acceptedCoreMessages+=1024;counters.terminalCoreMessages+=1024;counters.terminalTrades+=512;
+        return workload.terminal;
+    }
+
     @State(Scope.Thread)
     public static class Workload implements AutoCloseable {
         @Param({"LINEAR_PERPETUAL", "SPOT"}) public ProductLine productLine;
         @Param("4") public int accountLanes;
         @Param("20") public int batchSize;
         @Param("256") public int maxInFlight;
+        @Param("false") public boolean realtime;
+        private com.surprising.aeron.client.RealtimeOutbox realtimeOutbox;
+        private Thread realtimeConsumer;
+        private volatile boolean consuming;
+        private boolean singleResponses;
+        private String settleAsset;
         private SurprisingClusteredService service;
         private ClientSession session;
         private final Header header = new Header(0, 0).buffer(new UnsafeBuffer(new byte[64]))
@@ -101,6 +115,14 @@ public class ClusteredBatchTradingBenchmark {
                         default -> defaultValue(method.getReturnType());
                     });
             service.onStart(cluster, null);
+            if(realtime) {
+                realtimeOutbox=new com.surprising.aeron.client.RealtimeOutbox(8192,8*1024*1024);
+                service.attachRealtimeForTest(realtimeOutbox);consuming=true;
+                realtimeConsumer=Thread.ofPlatform().name("realtime-benchmark-drain").start(()->{
+                    while(consuming){if(realtimeOutbox.poll()==null)java.util.concurrent.locks.LockSupport.parkNanos(100_000);}
+                    while(realtimeOutbox.poll()!=null){}
+                });
+            }
             session = (ClientSession) Proxy.newProxyInstance(ClientSession.class.getClassLoader(),
                     new Class<?>[]{ClientSession.class}, (proxy, method, args) -> switch (method.getName()) {
                         case "id" -> 91L;
@@ -115,6 +137,7 @@ public class ClusteredBatchTradingBenchmark {
                                 if (response.status() != ResponseStatus.APPLIED) {
                                     throw new IllegalStateException("batch rejected: " + response.resultCode());
                                 }
+                                if(singleResponses){terminal++;yield 1L;}
                                 var items = TradingOrderBatchCodec.decodeResult(response.data()).items();
                                 if (items.size() != batchSize) throw new IllegalStateException("batch size mismatch");
                                 for (var item : items) {
@@ -133,21 +156,22 @@ public class ClusteredBatchTradingBenchmark {
                         default -> defaultValue(method.getReturnType());
                     });
             service.onSessionOpen(session, 1_700_000_000_000L);
-            apply(CoreMessageType.UPSERT_INSTRUMENT, 0, TradingCommandCodec.encodeUpsertInstrument(
-                    new UpsertInstrumentCommand("JMH-BTC-USDT", 1,
-                            (productLine == ProductLine.SPOT ? ContractType.SPOT : ContractType.LINEAR_PERPETUAL).ordinal(),
-                            "BTC", "USDT", "USDT", 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0)));
-            if (productLine != ProductLine.SPOT) {
-                apply(CoreMessageType.APPLY_MARK_PRICE, 0, TradingCommandCodec.encodeApplyMarkPrice(
-                        new ApplyMarkPriceCommand("JMH-BTC-USDT", 1, 100, 1, 1_700_000_000_000L)));
-            }
+            ContractType type=ContractType.valueOf(productLine.contractTypeCode());
+            settleAsset=type.isInverse()?"BTC":"USDT";
+            apply(CoreMessageType.UPSERT_INSTRUMENT,0,TradingCommandCodec.encodeUpsertInstrument(
+                new UpsertInstrumentCommand("JMH-BTC-USDT",1,type.ordinal(),"BTC","USDT",settleAsset,1,1,
+                    type.isInverse()?1000:1,100_000,50_000,0,0,type.isDelivery()||type.isOption()?2_000_000_000_000L:0,
+                    type.isOption()?0:-1,type.isOption()?100:0)));
+            if(productLine.isDerivative())apply(CoreMessageType.APPLY_MARK_PRICE,0,TradingCommandCodec.encodeApplyMarkPrice(
+                type.isOption()?new ApplyMarkPriceCommand("JMH-BTC-USDT",1,100,100,100,1,1_700_000_000_000L)
+                :new ApplyMarkPriceCommand("JMH-BTC-USDT",1,100,1,1_700_000_000_000L)));
             for (int user = 0; user <= 256; user++) {
                 apply(CoreMessageType.ADJUST_BALANCE, 1_000 + user,
-                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", BALANCE)));
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(settleAsset, BALANCE)));
             }
             if (productLine == ProductLine.SPOT) {
                 apply(CoreMessageType.ADJUST_BALANCE, 1_256,
-                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 1)));
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 257)));
             }
             // Resting maker liquidity remains present throughout all iterations.
             CoreMessage maker = command(CoreMessageType.PLACE_ORDER, 1_256,
@@ -156,6 +180,33 @@ public class ClusteredBatchTradingBenchmark {
             service.onSessionMessage(null, 1_700_000_000_000L, new UnsafeBuffer(makerBytes),
                     0, makerBytes.length, header);
             service.state().assertClusterCallbackComplete();
+        }
+
+        public void runRoundTripTrades() {
+            long before=terminal;singleResponses=true;
+            try {
+                CoreMessage[] wave=new CoreMessage[maxInFlight];
+                for(int phase=0;phase<4;phase++) {
+                    for(int user=0;user<maxInFlight;user++) {
+                        long account=phase==0 || phase==3 ? 1256 : 1000+user;
+                        CoreOrderSide side=phase==0 || phase==2 ? CoreOrderSide.SELL : CoreOrderSide.BUY;
+                        wave[user]=command(CoreMessageType.PLACE_ORDER,account,
+                                TradingCommandCodec.encodePlaceOrder(order(orderId++,side,100)));
+                    }
+                    // Exactly 256 requests are ready at the entry boundary in every closed-loop wave.
+                    for(CoreMessage request:wave)send(request);
+                }
+                if(terminal-before!=1024)throw new IllegalStateException("realtime trade terminal mismatch");
+                if(realtime) {
+                    service.state().captureRealtimeSnapshot(1000,Math.max(1,sequence),sequence,1_700_000_000_000L);
+                    service.state().captureRealtimeBook("JMH-BTC-USDT",sequence,1_700_000_000_000L);
+                    long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(2);
+                    while(service.state().realtimeSnapshotPending() || service.state().realtimeBookPending()) {
+                        service.state().pollRealtimeSnapshot();service.state().pollRealtimeBook();
+                        if(System.nanoTime()>deadline)throw new IllegalStateException("realtime snapshot timed out");
+                    }
+                }
+            } finally {singleResponses=false;}
         }
 
         public void run() {
@@ -263,6 +314,11 @@ public class ClusteredBatchTradingBenchmark {
                     false, "cluster-batch-" + id);
         }
 
+        private static boolean nonFlat(com.surprising.aeron.service.state.CorePositionState p) {
+            return p.signedQuantitySteps()!=0 || p.positionMarginUnits()!=0 || p.entryPriceTicks()!=0
+                    || p.entryValueTicks()!=0 || p.instrumentVersion()!=0 || p.realizedPnlUnits()!=0;
+        }
+
         @TearDown(Level.Iteration)
         public void close() {
             if (service == null) return;
@@ -270,19 +326,19 @@ public class ClusteredBatchTradingBenchmark {
                 drain();
                 var state = service.state().tradingState();
                 for (int user = 0; user < 256; user++) {
-                    var balance = state.users().get(1_000L + user).balances().get("USDT");
+                    var balance = state.users().get(1_000L + user).balances().get(settleAsset);
                     if (balance.availableUnits() != BALANCE || balance.lockedUnits() != 0) {
                         throw new IllegalStateException("cancel did not restore user funds");
                     }
                     if (!state.users().get(1_000L + user).reservations().isEmpty()
-                            || !state.users().get(1_000L + user).positions().isEmpty()) {
+                            || state.users().get(1_000L + user).positions().values().stream().anyMatch(Workload::nonFlat)) {
                         throw new IllegalStateException("terminal user retained reservations or positions");
                     }
                 }
                 var maker = state.users().get(1_256L);
-                if (maker.balances().get("USDT").totalUnits() != BALANCE || !maker.positions().isEmpty()
+                if (maker.balances().get(settleAsset).totalUnits() != BALANCE || maker.positions().values().stream().anyMatch(Workload::nonFlat)
                         || maker.reservations().size() != 1) throw new IllegalStateException("maker funds mismatch");
-                if (productLine == ProductLine.SPOT && maker.balances().get("BTC").totalUnits() != 1) {
+                if (productLine == ProductLine.SPOT && maker.balances().get("BTC").totalUnits() != 257) {
                     throw new IllegalStateException("maker BTC conservation mismatch");
                 }
                 if (state.orders().size() != 1 || state.order(1) == null) {
@@ -298,6 +354,9 @@ public class ClusteredBatchTradingBenchmark {
                         terminal, terminal, maxBacklog, queryResults);
             } finally {
                 service.onTerminate(null);
+                consuming=false;
+                if(realtimeConsumer!=null){try{realtimeConsumer.join(5000);}catch(InterruptedException e){Thread.currentThread().interrupt();}}
+                if(realtimeOutbox!=null)System.out.println("realtimeDroppedBatches="+realtimeOutbox.droppedBatches());
                 service = null;
             }
         }

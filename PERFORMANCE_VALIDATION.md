@@ -3360,3 +3360,59 @@
 - Native/Direct：NMT开启且保留全部类别/退出reserved与committed；同一inverse mixed heap committed768MiB，GC native74.3→75.2MiB、code21.3→37.7MiB、metaspace15.6→22.0MiB；DirectBuffer三个样本count/capacity/used均0。真实Aeron/Netty/Chronicle池、mapped buffer峰值及FD增长未测，不能据此断言无native泄漏。
 - 锁/VM/JIT/I/O：inverse mixed ThreadPark220，另见各contention-by-site；无完整墙钟RUNNABLE/BLOCKED/park占比、上下文切换和busy-spin按阶段占比。SafepointBegin48，但profile未记录完整End/同步时长，view显示Indefinite，不当作零停顿；因此不能与业务p99门禁核对。Compiler统计7663方法、总26.7s（多线程累计）、最长534ms、1 bailout，Deoptimization256；仍混入启动编译，不能证明完整窗口已越过主要JIT阶段。异常样本以MethodHandle/反射/jnr初始化为主，未发生基准业务失败。该inverse记录仅2个外围ObjectInputStream socket-read事件，未录到交易owner同步I/O；阈值采样缺失不能作为绝对无I/O证明。
 - 已测范围为当前核心与对应账户consumer/数学路径、六产品线fixture的资金/终态/快照恢复；未测PG/exporter/wallet（按要求）、真实模拟用户API/WebSocket、真实集群HA、独立做市进程、open-loop类型尾延迟、长稳/native泄漏。结论是**已测功能修复通过，性能仅诊断且系统门禁失败；整体交易链路验收未完成**。本轮未重构owner生命周期/订单stamp为全异步，也未把到期保险不足直接转成自动ADL或补齐跨产品组合保证金规则。
+
+## 2026-09-06 实时出口及异步查询边界验证（采集前锁定）
+
+- 被测代码：当前 master，基础提交 `92cbb3aa` 加本次未提交实时出口实现；最终 diff 校验另追加。对照 commit：不适用（仅验证当前 master）。不运行旧版本，不以开关关闭数据作对照。
+- 修改点：提交回调内有界增量编码/outbox；异步 Account Lane 用户快照及 matcher 有界深度读；外围独立 Aeron sender/router/Valkey。可靠 Kafka 出口在独立 Archive replay 进程。
+- 机器/JVM：Intel i9-9880H 2.30GHz，16 logical CPU、16GiB、macOS 26.7；Oracle GraalVM 25.0.1 HotSpot / Maven 3.9.16。固定 G1，`-Xms768m -Xmx768m`，JMH fork 1、threads 1；不启用 OpenJ9。
+- 场景：`ClusteredBatchTradingBenchmark.committedRealtimeTrades`，六产品线逐个运行，4 Account Lane、1 matcher、257 活跃用户、1 symbol、零外部网络连接。每轮四个预构建 256 请求波次（固定 256 in-flight），maker 卖→256用户买→256用户卖→maker买；1024 terminal business ops/Core messages，512 fills，均普通限价单，无 batch，0手续费。现货 maker 初始257 BTC，其余结算资产每用户 BALANCE（源码常量）；衍生品零初始仓位，所有交易往返后恢复资金/冻结/仓位；保留 maker 挂单。每1024操作执行一次真实异步用户快照和深度读取，iteration teardown 验证全部用户及maker资金、终态与快照恢复hash。
+- 负载模型：closed-loop 256请求波次，无固定到达率；非 HTTP/Cluster 网络入口，不修正 coordinated omission，无独立做市进程（fixture maker 持续参与）。主分数 cycles/s 必须乘1024报告 terminal business ops/s，乘512报告 fills/s。不能将这些结果当作生产容量或网络请求吞吐。
+- 无 profiler 主轮：每产品3×3s warmup + 3×5s measurement，轮间冷却2s，JMH JSON。带 profiler归因轮：相同场景/时长，`-prof gc`、JFR profile配置、NMT summary，JFR原件/summary/相关view保留。总录制包括setup/teardown，分配不等同纯生产编码成本。JFR开销单独归因，不替代主轮吞吐。
+- 预锁定局部门禁：每产品主轮均值至少10,000 terminal business ops/s；accepted=terminal、unfinished=0、业务错误/超时0、资金不变量全部通过；outbox允许drop但记录数量。Java分配诊断目标≤64KiB/business op；单GC pause≤100ms。系统出现CPU throttling、新增swap或者JFR DataLoss则当轮无效。阈值是本机局部回归门禁，不是用户尚未给定的生产SLO。
+- 整体验收另要求：open-loop真实API三阶段各业务p50/p90/p95/p99/p99.9/max、真实WS慢节点故障/恢复、native/FD/heap长稳与各重业务覆盖。当前JMH不提供这些证据，缺失时必须标为部分验证，不能声称“零性能影响”或整体性能验收完成。
+- 命令：`mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am package -DskipTests`；随后逐产品 `java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar '.*committedRealtimeTrades' -p productLine=PRODUCT -p realtime=true -p maxInFlight=256 -p accountLanes=4 -f 1 -t 1 -wi 3 -w 3s -i 3 -r 5s -jvmArgsAppend '-Xms768m -Xmx768m -XX:+UseG1GC' -rf json -rff ARTIFACT/main-PRODUCT.json`。归因轮另加`-prof gc`和`-XX:NativeMemoryTracking=summary -XX:+UnlockDiagnosticVMOptions -XX:+PrintNMTStatistics -XX:StartFlightRecording=filename=ARTIFACT/PRODUCT.jfr,settings=profile,dumponexit=true`。
+- 原始产物目录：`/tmp/surprising-realtime-validation-20260906/`。测试后追加具体时间、校验和、指标、问题与未测范围，不修改上述标准。
+
+### 首轮执行结果：启动失败，全部无效
+
+12个 fork 在 warmup 前因 `IllegalAccessError: org.agrona.UnsafeApi cannot access jdk.internal.misc.Unsafe` 退出，JMH父进程仍返回0且JSON为空。原因是命令行 jvmArgsAppend 覆盖了注解中 Agrona 所需的 opens/exports。全部原始日志/JFR保留上述目录，不能作为吞吐、分配或业务正确性证据。没有业务样本，不作阈值判断。
+
+## 2026-09-06 实时出口验证第二轮（采集前重新锁定）
+
+- 标准、机器、JVM、六产品线、256 in-flight、257用户、1 symbol、4 Lane/1 matcher、1024普通单/512fills、资金/冻结/仓位/终态/恢复要求、3×3s预热+3×5s测量+2s冷却、各项门禁及所有未覆盖范围与上一条采集前记录完全相同；仅修正启动参数，另加 `-foe true` 使 fork 失败中止。
+- 被测 master 为 `92cbb3aa` 加当前实现；本次包含用户风险快照和失败快照的显式 UNAVAILABLE 帧。对照 commit：不适用（仅验证当前 master）。
+- 主轮 JVM 参数锁定：`--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED -Xms768m -Xmx768m -XX:+UseG1GC`。归因轮在此前明确的 profile JFR/NMT/gc 参数基础上使用相同 opens/exports。
+- 构建后按同一Python命令清单顺序逐产品运行，原始文件目录改为 `/tmp/surprising-realtime-validation-20260906-round2/`，保留旧轮全部文件；主轮不并行跑Maven或其它负载。
+
+### 第二轮结果与证据（2026-09-06 11:15–11:21）
+
+主轮全部通过预锁定的本机场景均值门禁，六产品accepted=terminal、unfinished/endBacklog=0、资金/冻结/仓位/订单及恢复hash校验通过，realtimeDroppedBatches=0。主轮CPU speed=100，swap持续9.50MiB无新增；并非零swap机器。
+
+|产品线|terminal business ops/s ± JMH error|fills/s|归因B/business op|分配MiB/s|measurement GC次数/时间ms|JFR最大pause ms|
+|---|---:|---:|---:|---:|---:|---:|
+|SPOT|25890 ±19214|12945|20569|492.25|21/212|22.5|
+|LINEAR_PERPETUAL|24018 ±3048|12009|22217|483.51|19/230|33.7|
+|INVERSE_PERPETUAL|26671 ±9486|13336|22160|504.30|21/190|21.3|
+|LINEAR_DELIVERY|25312 ±18085|12656|22225|522.25|21/199|21.0|
+|INVERSE_DELIVERY|25238 ±11537|12619|22149|519.61|22/207|20.9|
+|OPTION|24873 ±4391|12437|22276|494.75|20/221|31.5|
+
+- 单笔普通单所以 terminal Core messages/s 与 business ops/s相同；没有batch，不提供API requests/s。JMH auxiliary `#`是操作总计不是每秒速率；取主分数×1024/512换算。置信区间较宽，不作精确生产容量结论。每callback终态完成后内部backlog为0，入口256请求波次与内部backlog不是同一指标。
+- 严格按系统门禁，**五条衍生品归因轮出现CPU speed=97，判为无效性能验收数据**，上表对应归因列只用于诊断；SPOT归因轮speed=100。六份JFR均DataLoss=0，26–27秒原件保留，每份summary/views已生成。不能把无效轮与主轮混合宣称性能通过。
+- SPOT JFR：进程user平均12.26%/system2.25%、机器20.62%；ExecutionSample按线程分组owner/fixture1692、matcher11、Account Lane3、realtime-drain1、other3。owner热点包含既有Lane/Matcher completion等待、assertAccountLanesHealthy和readyLaneMask；独立风险/投影/可靠exporter/Aeron网络线程不在该JMH进程，不能据此认为它们免费。
+- 分配top byte[]36.94%、long[]8.53%、stream filter3.47%、OrderRuntime3.35%、RealtimeFrame2.98%。上述20–22KiB包含Core、fixture编码和周期查询，不是新增功能单独成本。TLAB内/外精确事件为0，缺对象数/op与精确最大对象。
+- SPOT全JFR GC pause总324ms/33次，p50=8.15、p90=19.5、p95=21.5、p99/p99.9/max=22.5ms；与measurement GC212ms窗口不同。post-GC heap first17,368,760B/last215,771,008B/max751,828,992B，混合iteration创建/销毁及young GC，不能据此证明live-set稳定，需更长稳态检查。
+- NMT SPOT退出reserved2,364,681,582B/committed983,829,870B；Java heap768MiB，GC native74.2→75.0MiB（峰75.6）、Code21.5→30.6MiB、Metaspace16.2→21.5MiB。5个DirectBuffer样本全部0：本场景只有outbox drain，未覆盖真实Aeron/Netty mapped/native池，不作无泄漏结论。
+- ThreadPark/monitor热点、线程峰值、JIT/异常、file/socket/GC/VM数据逐产品保存在 `*.views.txt`。SPOT SafepointBegin38但profile未启用完整End/同步事件，不能算真实最大停顿；JIT仍有编译和deopt，未证明整窗口越过所有预热。FileWrite/SocketWrite事件为0，不等于阈值采样证明绝对无I/O；静态调用边界无交易owner同步外部I/O。
+- 原始目录 `/tmp/surprising-realtime-validation-20260906-round2/`，`SHA256SUMS`列出日志/JFR/JSON校验。采样JAR备份 `benchmarks.jar` SHA256=`ee5e8db0b4ad8d52871dfd48b935ee9b339eec96141afe883c8cc53f7cc13442`。采样后新增rollback时整体丢弃私有暂存帧保护及对应故障测试；不改变本轮成交成功路径，但本轮不能覆盖该拒绝分支性能。
+- 结论：局部主轮及资金正确性通过；整体性能仅部分验证。未测真实API三阶段分类型p50/p90/p95/p99/p99.9/max、open-loop与coordinated omission修正、真实Cluster HA和独立做市进程、真实native/FD长稳、强平/资金费/ADL/到期等重业务的新增出口负载。没有提供生产SLO，不宣称“零性能影响”。
+
+## 2026-09-06 实时出口持续状态检查（采集前锁定）
+
+- 目的：检查同一个Core实例连续处理大量交易时是否出现OOM、outbox失控或资金/终态/恢复错误；不能替代生产24小时soak或全链路延迟验收。
+- 代码：当前master最终Core实现（包括rollback保护）；对照commit：不适用（仅验证当前master）。重建JAR，单独保存校验。
+- 机器/JDK/GC/资金/1 symbol/257用户/4 Lane/1 matcher/固定256请求波次与第二轮相同。代表产品SPOT及OPTION顺序运行，0外部连接，closed-loop，maker持续参与，1024普通单/512fills/1用户快照/1book读取每cycle；0手续费。其它四产品长稳本轮未覆盖，六产品短JMH及功能另有证据。
+- 每产品3×3s预热、1×180s measurement、不重建measurement内Core；启动前和产品之间冷却30s。强制GC只在JMH迭代间（`-gc true`）；同一heap768MiB、G1、opens/exports、NMT/JFR profile与gc profiler。完整recording含预热/终检，带profiler吞吐仅诊断。
+- 门禁：业务资金/终态/恢复检查通过、无OOM/业务错误/未完成、period末backlog0；JFR DataLoss0、CPU speed100、无新增swap，否则性能数据无效。检查GC后heap趋势、NMT类别/线程及outbox计数；180秒不能证明无长期泄漏，尤其真实Aeron native与WS连接未进入此场景。
+- 命令在第二轮相同命令基础上使用 `-gc true -i 1 -r 180s -prof gc` 并输出到 `/tmp/surprising-realtime-soak-20260906/`。所有系统采样、JSON/JFR及失败同样保留；不修改上述标准。

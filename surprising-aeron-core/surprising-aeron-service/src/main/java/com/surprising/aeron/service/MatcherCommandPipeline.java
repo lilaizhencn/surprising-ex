@@ -33,6 +33,17 @@ final class MatcherCommandPipeline implements AutoCloseable {
     private Runnable shutdownAction;
     private volatile Throwable shutdownFailure;
     private final int workerId;
+    private volatile BackgroundRead<?> backgroundRead;
+    <T> java.util.concurrent.CompletableFuture<T> readAtSubmissionFence(Supplier<T> read) {
+        if (!accepting || backgroundRead != null) return java.util.concurrent.CompletableFuture.failedFuture(
+                new RejectedExecutionException("matcher read mailbox unavailable"));
+        var future=new java.util.concurrent.CompletableFuture<T>();
+        backgroundRead=new BackgroundRead<>(submittedPosition.value,read,future);
+        LockSupport.unpark(worker);return future;
+    }
+    private record BackgroundRead<T>(long fence,Supplier<T> read,java.util.concurrent.CompletableFuture<T> future) {
+        void execute() {try {future.complete(read.get());}catch(RuntimeException failure){future.completeExceptionally(failure);}}
+    }
 
     MatcherCommandPipeline(int requestedCapacity) {
         this(0, requestedCapacity, true);
@@ -216,7 +227,14 @@ final class MatcherCommandPipeline implements AutoCloseable {
         long position = workerPosition.value;
         int idle = 0;
         while (accepting || position < submittedPosition.value) {
-            if (position >= submittedPosition.value) {
+            // Observe the submission cursor before the read mailbox. A later command publication
+            // therefore cannot overtake a read published by the same owner at an earlier fence.
+            long submitted=submittedPosition.value;
+            BackgroundRead<?> read=backgroundRead;
+            if(read!=null && position>=read.fence()) {
+                backgroundRead=null;read.execute();continue;
+            }
+            if (position >= submitted) {
                 if (idle++ < WORKER_IDLE_SPINS) Thread.onSpinWait();
                 else LockSupport.parkNanos(this, WORKER_IDLE_PARK_NANOS);
                 continue;
@@ -239,6 +257,8 @@ final class MatcherCommandPipeline implements AutoCloseable {
             completionHighWaterMark = Math.max(completionHighWaterMark,
                     Math.toIntExact(position - consumedPosition.value));
         }
+        BackgroundRead<?> unfinishedRead=backgroundRead;backgroundRead=null;
+        if(unfinishedRead!=null)unfinishedRead.future().completeExceptionally(new RejectedExecutionException("matcher stopped"));
         if (shutdownAction != null) {
             try {
                 shutdownAction.run();

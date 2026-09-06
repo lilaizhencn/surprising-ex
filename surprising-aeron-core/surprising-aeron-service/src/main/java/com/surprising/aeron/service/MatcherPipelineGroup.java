@@ -87,6 +87,10 @@ final class MatcherPipelineGroup implements AutoCloseable {
         return result;
     }
 
+    <T> java.util.concurrent.CompletableFuture<T> readAtSubmissionFence(int shardId,Supplier<T> read) {
+        return shard(shardId).readAtSubmissionFence(read);
+    }
+
     <T> T call(int shardId, Supplier<T> command, long timeoutNanos) {
         return shard(shardId).call(command, timeoutNanos);
     }

@@ -50,6 +50,73 @@ import org.junit.jupiter.api.Test;
 class SurprisingClusteredServiceTest {
 
     @Test
+    void exhaustedRealtimeOutboxDoesNotRejectOrLeaveUnsettledBusinessCommands() {
+        var service=service();service.onStart(cluster(),null);
+        var outbox=new com.surprising.aeron.client.RealtimeOutbox(2,128);service.attachRealtimeForTest(outbox);
+        try {
+            replayWithoutSession(service,timerInstrument());
+            replayWithoutSession(service,command(CoreMessageType.ADJUST_BALANCE,1,1001,
+                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",10000))));
+            replayWithoutSession(service,command(CoreMessageType.PLACE_ORDER,2,1001,
+                TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(20000,"BTC-USDT",1,
+                    CoreOrderSide.BUY,1000,2,false,CoreMarginMode.CROSS,CorePositionSide.NET,
+                    CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"overflow-order"))));
+            replayWithoutSession(service,command(CoreMessageType.CANCEL_ORDER,3,1001,
+                TradingCommandCodec.encodeCancelOrder(new com.surprising.aeron.protocol.CancelOrderCommand(20000))));
+            service.state().assertClusterCallbackComplete();
+            var user=service.state().tradingState().users().get(1001L);
+            assertThat(user.balances().get("USDT").availableUnits()).isEqualTo(10000);
+            assertThat(user.balances().get("USDT").lockedUnits()).isZero();
+            assertThat(user.reservations()).isEmpty();
+            assertThat(outbox.droppedBatches()).isPositive();
+        } finally {service.onTerminate(null);}
+    }
+
+    @Test
+    void realtimePublishesCommittedBalancesAndOrdersAndStopsOnFollower() {
+        var service=service(); service.onStart(cluster(),null);
+        var outbox=new com.surprising.aeron.client.RealtimeOutbox(1024,1_048_576);
+        service.attachRealtimeForTest(outbox);
+        try {
+            replayWithoutSession(service,timerInstrument());
+            replayWithoutSession(service,command(CoreMessageType.ADJUST_BALANCE,1,1001,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",10_000))));
+            var frames=drainRealtime(outbox);
+            assertThat(frames).anySatisfy(frame -> {
+                assertThat(frame.kind()).isEqualTo(com.surprising.aeron.protocol.RealtimeFrame.Kind.BALANCE);
+                var view=com.surprising.aeron.protocol.CoreStateQueryCodec.decodeUserState(frame.payload());
+                assertThat(view.balances().getFirst().availableUnits()).isEqualTo(10_000);
+            });
+            replayWithoutSession(service,command(CoreMessageType.PLACE_ORDER,2,1001,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(20_000,"BTC-USDT",1,
+                    CoreOrderSide.BUY,1_000,2,false,CoreMarginMode.CROSS,CorePositionSide.NET,
+                    CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"push-order"))));
+            assertThat(drainRealtime(outbox)).anySatisfy(frame -> {
+                assertThat(frame.kind()).isEqualTo(com.surprising.aeron.protocol.RealtimeFrame.Kind.ORDER);
+                assertThat(frame.userId()).isEqualTo(1001);
+            });
+            service.state().captureRealtimeSnapshot(1001,19,7,1234);
+            long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+            while(service.state().pollRealtimeSnapshot()==0 && System.nanoTime()<deadline)Thread.onSpinWait();
+            frames=drainRealtime(outbox);
+            assertThat(frames.getFirst().kind()).isEqualTo(com.surprising.aeron.protocol.RealtimeFrame.Kind.SNAPSHOT_BEGIN);
+            assertThat(frames.getLast().kind()).isEqualTo(com.surprising.aeron.protocol.RealtimeFrame.Kind.SNAPSHOT_END);
+            for(int n=0;n<frames.size();n++) assertThat(frames.get(n).ordinal()).isEqualTo(n);
+            service.onRoleChange(Cluster.Role.FOLLOWER);
+            replayWithoutSession(service,command(CoreMessageType.ADJUST_BALANCE,3,1001,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",1))));
+            assertThat(outbox.poll()).isNull();
+        } finally {service.onTerminate(null);}
+    }
+
+    private static java.util.List<com.surprising.aeron.protocol.RealtimeFrame> drainRealtime(
+            com.surprising.aeron.client.RealtimeOutbox outbox) {
+        var frames=new java.util.ArrayList<com.surprising.aeron.protocol.RealtimeFrame>();
+        byte[] bytes; while((bytes=outbox.poll())!=null) frames.add(com.surprising.aeron.protocol.RealtimeFrameCodec.decode(bytes));
+        return frames;
+    }
+
+    @Test
     void followerReplayAndLeaderCompleteEveryCallbackWithoutBackgroundPumps() {
         long expectedHash = 0;
         for (Cluster.Role role : new Cluster.Role[]{Cluster.Role.LEADER, Cluster.Role.FOLLOWER}) {
