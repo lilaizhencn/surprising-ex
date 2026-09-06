@@ -77,7 +77,7 @@ public final class RuntimeOrderAdmission {
             throw rejected("DUPLICATE_CLIENT_ORDER_ID", "clientOrderId already exists");
         }
         CoreInstrumentState instrument = runtime.instrument(order.symbol());
-        if (instrument == null || instrument.version() != order.instrumentVersion()
+        if (instrument == null || instrument.changeId() != order.instrumentChangeId()
                 || !instrument.equals(order.instrument())) {
             throw rejected("INSTRUMENT_ORDER_MISMATCH", "order instrument differs from Runtime");
         }

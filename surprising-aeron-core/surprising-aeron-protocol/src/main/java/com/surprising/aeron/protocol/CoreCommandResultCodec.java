@@ -19,12 +19,12 @@ public final class CoreCommandResultCodec {
         if (result == null) {
             throw new IllegalArgumentException("command result is required");
         }
-        return encode(result.coreSequence(), result.commandId(), result.orderId(), result.instrumentVersion(),
+        return encode(result.coreSequence(), result.commandId(), result.orderId(), result.instrumentChangeId(),
                 result.matcherSequence(), result.matcherPrefixBefore(), result.matcherPrefixAfter(),
                 result.orders(), result.executions());
     }
 
-    public static byte[] encode(long coreSequence, UUID commandId, long orderId, long instrumentVersion,
+    public static byte[] encode(long coreSequence, UUID commandId, long orderId, long instrumentChangeId,
                                 long matcherSequence, long matcherPrefixBefore, long matcherPrefixAfter,
                                 List<CoreOrderStateView> orders, List<CoreExecutionView> executions) {
         if (commandId == null || orders == null || executions == null) {
@@ -46,7 +46,7 @@ public final class CoreCommandResultCodec {
         buffer.putLong(commandId.getMostSignificantBits());
         buffer.putLong(commandId.getLeastSignificantBits());
         buffer.putLong(orderId);
-        buffer.putLong(instrumentVersion);
+        buffer.putLong(instrumentChangeId);
         buffer.putLong(matcherSequence);
         buffer.putLong(matcherPrefixBefore);
         buffer.putLong(matcherPrefixAfter);
@@ -79,7 +79,7 @@ public final class CoreCommandResultCodec {
         long coreSequence = buffer.getLong();
         UUID commandId = new UUID(buffer.getLong(), buffer.getLong());
         long orderId = buffer.getLong();
-        long instrumentVersion = buffer.getLong();
+        long instrumentChangeId = buffer.getLong();
         long matcherSequence = buffer.getLong();
         long matcherPrefixBefore = buffer.getLong();
         long matcherPrefixAfter = buffer.getLong();
@@ -101,7 +101,7 @@ public final class CoreCommandResultCodec {
             executions.add(new CoreExecutionView(buffer.getLong(), buffer.getLong(), buffer.getLong(),
                     buffer.getLong(), buffer.getLong(), buffer.getLong()));
         }
-        return new CoreCommandResultView(coreSequence, commandId, orderId, instrumentVersion, matcherSequence,
+        return new CoreCommandResultView(coreSequence, commandId, orderId, instrumentChangeId, matcherSequence,
                 matcherPrefixBefore, matcherPrefixAfter, orderViews, executions);
     }
 

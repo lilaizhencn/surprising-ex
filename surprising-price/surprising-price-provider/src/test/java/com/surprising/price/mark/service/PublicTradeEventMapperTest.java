@@ -19,15 +19,18 @@ import org.junit.jupiter.api.Test;
 class PublicTradeEventMapperTest {
 
     @Test
-    void mapsCanonicalTradeUsingTheEventInstrumentVersionScales() {
+    void mapsCanonicalTradeUsingTheEventInstrumentChangeIdScales() {
         Instant now = Instant.parse("2026-08-25T00:00:00Z");
         InstrumentSnapshotCache cache = new InstrumentSnapshotCache();
         cache.replace(ProductLine.LINEAR_PERPETUAL,
-                List.of(instrument(8L, 25L, 100L), instrument(9L, 50L, 1_000L)),
+                List.of(instrument(9L, 50L, 1_000L)),
                 Map.of("BTC", 100_000_000L, "USDT", 100_000_000L));
         MarkPriceProperties properties = new MarkPriceProperties();
+        var audit=org.mockito.Mockito.mock(com.surprising.instrument.api.client.InstrumentRpcApi.class);
+        org.mockito.Mockito.when(audit.tradeEncoding(ProductLine.LINEAR_PERPETUAL,"BTC-USDT",8L)).thenReturn(
+                new com.surprising.instrument.api.model.InstrumentTradeEncoding(25L,100L,100_000_000L,100_000_000L));
         PublicTradeEventMapper mapper = new PublicTradeEventMapper(
-                new MarkPriceEncodingService(properties, cache));
+                new MarkPriceEncodingService(properties, cache, audit));
 
         var trade = mapper.toPerpTradeEvent(new PublicTradeEvent("trade-8", 42L, "BTC-USDT", 8L,
                 OrderSide.BUY, 12_345L, 2_000_001L, now, "trace-8"));

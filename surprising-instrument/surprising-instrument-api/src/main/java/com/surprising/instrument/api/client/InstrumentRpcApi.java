@@ -27,10 +27,6 @@ public interface InstrumentRpcApi {
     InstrumentResponse latest(@RequestParam("symbol") @NotBlank String symbol,
                               @RequestParam(value = "productLine", required = false) ProductLine productLine);
 
-    @GetMapping("/version")
-    InstrumentResponse version(@RequestParam("symbol") @NotBlank String symbol,
-                               @RequestParam("version") long version);
-
     default InstrumentQueryResponse list(InstrumentType type, InstrumentStatus status) {
         return list(null, type, status);
     }
@@ -39,6 +35,10 @@ public interface InstrumentRpcApi {
     InstrumentQueryResponse list(@RequestParam(value = "productLine", required = false) ProductLine productLine,
                                  @RequestParam(value = "type", required = false) InstrumentType type,
                                  @RequestParam(value = "status", required = false) InstrumentStatus status);
+
+    @GetMapping("/trade-encoding")
+    com.surprising.instrument.api.model.InstrumentTradeEncoding tradeEncoding(@RequestParam("productLine") ProductLine productLine,
+            @RequestParam("symbol") String symbol, @RequestParam("changeId") long changeId);
 
     @GetMapping("/snapshot")
     InstrumentSnapshotResponse snapshot(@RequestParam("productLine") ProductLine productLine);

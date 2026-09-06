@@ -6,7 +6,7 @@ import java.util.Locale;
 public record OrderReservation(
         long orderId,
         String symbol,
-        long instrumentVersion,
+        long instrumentChangeId,
         ReservationKind kind,
         String asset,
         long reservedUnits,
@@ -15,7 +15,7 @@ public record OrderReservation(
         long orderQuantitySteps) {
 
     public OrderReservation {
-        if (orderId <= 0 || instrumentVersion <= 0 || kind == null || reservedUnits <= 0
+        if (orderId <= 0 || instrumentChangeId <= 0 || kind == null || reservedUnits <= 0
                 || releasedUnits < 0 || consumedUnits < 0
                 || Math.addExact(releasedUnits, consumedUnits) > reservedUnits || orderQuantitySteps <= 0) {
             throw new IllegalArgumentException("invalid order reservation");
@@ -27,12 +27,12 @@ public record OrderReservation(
     public static OrderReservation create(
             long orderId,
             String symbol,
-            long instrumentVersion,
+            long instrumentChangeId,
             ReservationKind kind,
             String asset,
             long reservedUnits,
             long orderQuantitySteps) {
-        return new OrderReservation(orderId, symbol, instrumentVersion, kind, asset,
+        return new OrderReservation(orderId, symbol, instrumentChangeId, kind, asset,
                 reservedUnits, 0, 0, orderQuantitySteps);
     }
 
@@ -49,7 +49,7 @@ public record OrderReservation(
             throw new CoreStateRejectedException("INSUFFICIENT_ORDER_RESERVATION",
                     "order reservation is insufficient for release");
         }
-        return new OrderReservation(orderId, symbol, instrumentVersion, kind, asset, reservedUnits,
+        return new OrderReservation(orderId, symbol, instrumentChangeId, kind, asset, reservedUnits,
                 Math.addExact(releasedUnits, units), consumedUnits, orderQuantitySteps);
     }
 
@@ -58,7 +58,7 @@ public record OrderReservation(
             throw new CoreStateRejectedException("INSUFFICIENT_ORDER_RESERVATION",
                     "order reservation is insufficient for fill");
         }
-        return new OrderReservation(orderId, symbol, instrumentVersion, kind, asset, reservedUnits,
+        return new OrderReservation(orderId, symbol, instrumentChangeId, kind, asset, reservedUnits,
                 releasedUnits, Math.addExact(consumedUnits, units), orderQuantitySteps);
     }
 
@@ -67,7 +67,7 @@ public record OrderReservation(
             throw new CoreStateRejectedException("INVALID_REPLACEMENT_RESERVATION",
                     "replacement reservation is below already settled units");
         }
-        return new OrderReservation(orderId, symbol, instrumentVersion, kind, asset, newReservedUnits,
+        return new OrderReservation(orderId, symbol, instrumentChangeId, kind, asset, newReservedUnits,
                 releasedUnits, consumedUnits, orderQuantitySteps);
     }
 

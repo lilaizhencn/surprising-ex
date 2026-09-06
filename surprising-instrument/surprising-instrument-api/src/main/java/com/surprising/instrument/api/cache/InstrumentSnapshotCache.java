@@ -2,7 +2,6 @@ package com.surprising.instrument.api.cache;
 
 import com.surprising.instrument.api.model.InstrumentEvent;
 import com.surprising.instrument.api.model.InstrumentResponse;
-import com.surprising.instrument.api.model.InstrumentSpecKey;
 import com.surprising.product.api.ProductLine;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -20,7 +19,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public final class InstrumentSnapshotCache {
 
     private final AtomicReference<State> state = new AtomicReference<>(
-            new State(Map.of(), Map.of(), Map.of(), false, java.util.Set.of()));
+            new State(Map.of(), Map.of(), false, java.util.Set.of()));
 
     public void replace(ProductLine productLine, List<InstrumentResponse> instruments) {
         replace(productLine, instruments, Map.of());
@@ -30,7 +29,6 @@ public final class InstrumentSnapshotCache {
                         List<InstrumentResponse> instruments,
                         Map<String, Long> assetScales) {
         requireProductLine(productLine);
-        Map<InstrumentSpecKey, InstrumentResponse> byVersion = new HashMap<>();
         Map<SymbolKey, InstrumentResponse> current = new HashMap<>();
         for (InstrumentResponse instrument : instruments == null ? List.<InstrumentResponse>of() : instruments) {
             if (instrument == null || instrument.contractType() == null
@@ -38,23 +36,17 @@ public final class InstrumentSnapshotCache {
                 continue;
             }
             InstrumentResponse immutable = InstrumentResponse.immutableCopy(instrument);
-            InstrumentSpecKey key = key(productLine, immutable);
-            byVersion.put(key, immutable);
             current.merge(new SymbolKey(productLine, immutable.symbol()), immutable,
                     InstrumentSnapshotCache::newer);
         }
         state.updateAndGet(previous -> {
-            Map<InstrumentSpecKey, InstrumentResponse> mergedVersions = new HashMap<>(previous.byVersion());
             Map<SymbolKey, InstrumentResponse> mergedCurrent = new HashMap<>(previous.current());
-            mergedVersions.keySet().removeIf(key -> key.productLine() == productLine);
-            mergedCurrent.keySet().removeIf(key -> key.productLine() == productLine);
-            mergedVersions.putAll(byVersion);
-            mergedCurrent.putAll(current);
+            current.forEach((key, value) -> mergedCurrent.merge(key, value, InstrumentSnapshotCache::newer));
             java.util.Set<ProductLine> initialized = new java.util.HashSet<>(previous.initializedProductLines());
             initialized.add(productLine);
             Map<ProductLine, Map<String, Long>> mergedScales = new HashMap<>(previous.assetScales());
             mergedScales.put(productLine, normalizeScales(assetScales));
-            return new State(Map.copyOf(mergedVersions), Map.copyOf(mergedCurrent),
+            return new State(Map.copyOf(mergedCurrent),
                     Map.copyOf(mergedScales), true,
                     java.util.Set.copyOf(initialized));
         });
@@ -65,7 +57,7 @@ public final class InstrumentSnapshotCache {
             return false;
         }
         if (event.symbol() == null || !normalize(event.symbol()).equals(normalize(event.snapshot().symbol()))
-                || event.version() != event.snapshot().version()) {
+                || event.changeId() != event.snapshot().lastChangeId()) {
             return false;
         }
         ProductLine productLine = event.productLine();
@@ -74,35 +66,30 @@ public final class InstrumentSnapshotCache {
             return false;
         }
         InstrumentResponse immutable = InstrumentResponse.immutableCopy(event.snapshot());
-        InstrumentSpecKey versionKey = key(productLine, immutable);
         SymbolKey symbolKey = new SymbolKey(productLine, immutable.symbol());
-        state.updateAndGet(previous -> {
-            InstrumentResponse oldVersion = previous.byVersion().get(versionKey);
-            if (oldVersion != null && oldVersion.equals(immutable)) {
-                return previous;
+        while (true) {
+            State previous = state.get();
+            InstrumentResponse oldVersion = previous.current().get(symbolKey);
+            if (oldVersion != null && oldVersion.lastChangeId() >= immutable.lastChangeId()) {
+                return false;
             }
-            Map<InstrumentSpecKey, InstrumentResponse> byVersion = new HashMap<>(previous.byVersion());
             Map<SymbolKey, InstrumentResponse> current = new HashMap<>(previous.current());
-            byVersion.put(versionKey, immutable);
             current.merge(symbolKey, immutable, InstrumentSnapshotCache::newer);
             java.util.Set<ProductLine> initialized = new java.util.HashSet<>(previous.initializedProductLines());
             initialized.add(productLine);
-            return new State(Map.copyOf(byVersion), Map.copyOf(current), previous.assetScales(), true,
+            State next = new State(Map.copyOf(current), previous.assetScales(), true,
                     java.util.Set.copyOf(initialized));
-        });
-        return true;
+            if (state.compareAndSet(previous, next)) return true;
+        }
     }
 
     public Optional<InstrumentResponse> current(ProductLine productLine, String symbol) {
         return Optional.ofNullable(state.get().current().get(new SymbolKey(productLine, normalize(symbol))));
     }
 
-    public Optional<InstrumentResponse> version(ProductLine productLine, String symbol, long version) {
-        if (version <= 0L) {
-            return Optional.empty();
-        }
-        return Optional.ofNullable(state.get().byVersion().get(
-                new InstrumentSpecKey(productLine, normalize(symbol), version)));
+    /** Reject a stale caller instead of selecting an old executable configuration. */
+    public Optional<InstrumentResponse> current(ProductLine productLine, String symbol, long expectedChangeId) {
+        return current(productLine, symbol).filter(value -> value.changeId() == expectedChangeId);
     }
 
     public List<InstrumentResponse> current(ProductLine productLine) {
@@ -137,10 +124,10 @@ public final class InstrumentSnapshotCache {
     }
 
     private static InstrumentResponse newer(InstrumentResponse left, InstrumentResponse right) {
-        if (right.version() > left.version()) {
+        if (right.lastChangeId() > left.lastChangeId()) {
             return right;
         }
-        if (right.version() < left.version()) {
+        if (right.lastChangeId() < left.lastChangeId()) {
             return left;
         }
         return compare(right.updatedAt(), left.updatedAt()) > 0 ? right : left;
@@ -157,10 +144,6 @@ public final class InstrumentSnapshotCache {
             return 1;
         }
         return left.compareTo(right);
-    }
-
-    private static InstrumentSpecKey key(ProductLine productLine, InstrumentResponse value) {
-        return new InstrumentSpecKey(productLine, normalize(value.symbol()), value.version());
     }
 
     private static void requireProductLine(ProductLine productLine) {
@@ -186,8 +169,7 @@ public final class InstrumentSnapshotCache {
         return symbol == null ? "" : symbol.trim().toUpperCase(java.util.Locale.ROOT);
     }
 
-    private record State(Map<InstrumentSpecKey, InstrumentResponse> byVersion,
-                         Map<SymbolKey, InstrumentResponse> current,
+    private record State(Map<SymbolKey, InstrumentResponse> current,
                          Map<ProductLine, Map<String, Long>> assetScales,
                          boolean ready,
                          java.util.Set<ProductLine> initializedProductLines) {

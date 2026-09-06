@@ -27,7 +27,7 @@ class MarkPriceEncodingServiceTest {
 
         MarkPriceEncoding encoding = service.encoding("BTC-USD", 8L);
 
-        assertThat(encoding.instrumentVersion()).isEqualTo(8L);
+        assertThat(encoding.instrumentChangeId()).isEqualTo(8L);
         assertThat(encoding.quoteScaleUnits()).isEqualTo(100_000_000L);
         assertThat(encoding.priceTickUnits()).isEqualTo(10L);
         assertThat(encoding.baseScaleUnits()).isEqualTo(100_000_000L);

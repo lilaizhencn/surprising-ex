@@ -26,13 +26,13 @@ public class InstrumentLifecycleDrainRepository {
     public void acknowledge(InstrumentLifecycleDrainEvent event, Instant now) {
         int rows = jdbcTemplate.update("""
                 INSERT INTO instrument_lifecycle_drain_acks (
-                    symbol, instrument_version, product_line, component, ready_at, updated_at
+                    symbol, instrument_change_id, product_line, component, ready_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT (symbol, instrument_version, component) DO UPDATE SET
+                ON CONFLICT (symbol, instrument_change_id, component) DO UPDATE SET
                     product_line = EXCLUDED.product_line,
                     ready_at = GREATEST(instrument_lifecycle_drain_acks.ready_at, EXCLUDED.ready_at),
                     updated_at = EXCLUDED.updated_at
-                """, event.symbol(), event.instrumentVersion(), event.productLine().name(),
+                """, event.symbol(), event.instrumentChangeId(), event.productLine().name(),
                 event.component().name(), Timestamp.from(event.readyAt()), Timestamp.from(now));
         if (rows != 1) {
             throw new IllegalStateException("生命周期清理确认写入失败: "
@@ -40,15 +40,15 @@ public class InstrumentLifecycleDrainRepository {
         }
     }
 
-    public boolean isReady(ProductLine productLine, String symbol, long instrumentVersion) {
+    public boolean isReady(ProductLine productLine, String symbol, long instrumentChangeId) {
         Integer count = jdbcTemplate.queryForObject("""
                 SELECT COUNT(DISTINCT component)::int
                   FROM instrument_lifecycle_drain_acks
                  WHERE product_line = ?
                    AND symbol = ?
-                   AND instrument_version = ?
+                   AND instrument_change_id = ?
                    AND component IN ('ORDER', 'ACCOUNT')
-                """, Integer.class, productLine.name(), symbol, instrumentVersion);
+                """, Integer.class, productLine.name(), symbol, instrumentChangeId);
         return count != null && count == REQUIRED_COMPONENTS.size();
     }
 }

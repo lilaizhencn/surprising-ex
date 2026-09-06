@@ -12,7 +12,7 @@ public record LiquidationCandidateEvent(
         String symbol,
         MarginMode marginMode,
         PositionSide positionSide,
-        long instrumentVersion,
+        long instrumentChangeId,
         String settleAsset,
         long signedQuantitySteps,
         long markPriceTicks,
@@ -25,7 +25,7 @@ public record LiquidationCandidateEvent(
     public LiquidationCandidateEvent {
         marginMode = Objects.requireNonNull(marginMode, "marginMode is required");
         positionSide = Objects.requireNonNull(positionSide, "positionSide is required");
-        if (candidateId <= 0L || snapshotId <= 0L || userId <= 0L || instrumentVersion <= 0L
+        if (candidateId <= 0L || snapshotId <= 0L || userId <= 0L || instrumentChangeId <= 0L
                 || positionRevision <= 0L || eventTime == null) {
             throw new IllegalArgumentException("invalid liquidation candidate identity or revision");
         }

@@ -68,7 +68,7 @@ class GatewayProxyServiceTest {
         properties.getRoutes().put("instrument", new GatewayProperties.BackendRoute(
                 "http://instrument:9080", "/api/v1/instruments", false));
         CapturingRestTemplate restTemplate = new CapturingRestTemplate();
-        restTemplate.responseBody = "{\"version\":7,\"instrumentVersion\":7,\"nested\":[{\"instrumentVersion\":8}]}"
+        restTemplate.responseBody = "{\"version\":7,\"instrumentChangeId\":7,\"nested\":[{\"instrumentChangeId\":8}]}"
                 .getBytes(StandardCharsets.UTF_8);
         GatewayProxyService controller = new GatewayProxyService(properties, restTemplate);
         MockHttpServletRequest request = new MockHttpServletRequest(
@@ -77,7 +77,7 @@ class GatewayProxyServiceTest {
         ResponseEntity<byte[]> response = controller.proxy("instrument", HttpMethod.GET, request, null);
 
         assertThat(new String(response.getBody(), StandardCharsets.UTF_8))
-                .doesNotContain("instrumentVersion")
+                .doesNotContain("instrumentChangeId")
                 .doesNotContain("version");
     }
 

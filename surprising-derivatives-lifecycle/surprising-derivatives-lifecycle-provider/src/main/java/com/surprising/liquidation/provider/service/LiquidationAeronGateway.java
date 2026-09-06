@@ -59,7 +59,7 @@ public class LiquidationAeronGateway implements AutoCloseable {
         if (work == null) throw new IllegalArgumentException("liquidation work is required");
         List<ExecuteLiquidationBatchAction> actions = work.actions().stream()
                 .map(action -> new ExecuteLiquidationBatchAction(action.liquidationId(), action.userId(), action.symbol(),
-                        action.instrumentVersion(), action.triggerPriceSequence(), action.markPriceTicks(),
+                        action.instrumentChangeId(), action.triggerPriceSequence(), action.markPriceTicks(),
                         action.cursorOrderId()))
                 .toList();
         boolean continueRiskScan = work.riskScanPending() && maxRiskScanUsers > 0;

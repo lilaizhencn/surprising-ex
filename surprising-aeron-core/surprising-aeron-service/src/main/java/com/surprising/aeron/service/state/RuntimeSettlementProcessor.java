@@ -66,7 +66,7 @@ public final class RuntimeSettlementProcessor {
                 long nextCursor = page.nextCursorOrderId();
                 runtime.treasury().setLifecycleProgress(symbolId,
                         new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
-                                command.instrumentVersion(), command.settlementPriceTicks(),
+                                command.instrumentChangeId(), command.settlementPriceTicks(),
                                 command.optionCashUnitsPerContract(), false, page.accountLaneId(),
                                 nextCursor, 0, chunkCommandId));
                 runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(),
@@ -98,7 +98,7 @@ public final class RuntimeSettlementProcessor {
         if (requiredInsurance > runtime.treasury().insurance(assetId)) {
             UUID progressId = chunkCommandId == null ? new UUID(0, command.settlementId()) : chunkCommandId;
             runtime.treasury().setLifecycleProgress(symbolId, new TreasuryRuntime.LifecycleProgressRuntime(
-                    command.settlementId(), command.instrumentVersion(), command.settlementPriceTicks(),
+                    command.settlementId(), command.instrumentChangeId(), command.settlementPriceTicks(),
                     command.optionCashUnitsPerContract(), true, 0, 0, command.cursorUserId(),
                     progressId, requiredInsurance));
             runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
@@ -122,7 +122,7 @@ public final class RuntimeSettlementProcessor {
         } else {
             runtime.treasury().setLifecycleProgress(symbolId,
                     new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
-                            command.instrumentVersion(), command.settlementPriceTicks(),
+                            command.instrumentChangeId(), command.settlementPriceTicks(),
                             command.optionCashUnitsPerContract(), true, userPage.accountLaneId(),
                             0, nextCursorUserId, chunkCommandId));
         }
@@ -160,7 +160,7 @@ public final class RuntimeSettlementProcessor {
         validateProgress(progress, command, true);
         cancelOrders(runtime, orders);
         runtime.treasury().setLifecycleProgress(symbolId,
-                new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(), command.instrumentVersion(),
+                new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(), command.instrumentChangeId(),
                         command.settlementPriceTicks(), command.optionCashUnitsPerContract(), false,
                         progress == null ? 0 : progress.accountLaneId(), nextCursorOrderId, 0, chunkCommandId));
         runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(),
@@ -292,8 +292,8 @@ public final class RuntimeSettlementProcessor {
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         }
-        if (command.instrumentVersion() < instrument.version()) {
-            throw new CoreStateRejectedException("INSTRUMENT_VERSION_CONFLICT",
+        if (command.instrumentChangeId() < instrument.changeId()) {
+            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT",
                     "instrument lifecycle version precedes execution version");
         }
         return instrument;
@@ -324,7 +324,7 @@ public final class RuntimeSettlementProcessor {
             throw new CoreStateRejectedException("INVALID_COMMAND", "settlement cursor must start at zero");
         }
         if (progress != null && (progress.settlementId() != command.settlementId()
-                || progress.instrumentVersion() != command.instrumentVersion()
+                || progress.instrumentChangeId() != command.instrumentChangeId()
                 || progress.settlementPriceTicks() != command.settlementPriceTicks()
                 || progress.optionCashUnitsPerContract() != command.optionCashUnitsPerContract()
                 || progress.ordersComplete() != (command.cursorOrderId() == 0)

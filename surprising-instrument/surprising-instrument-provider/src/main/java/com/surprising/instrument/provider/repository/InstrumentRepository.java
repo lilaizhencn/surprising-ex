@@ -27,7 +27,7 @@ public class InstrumentRepository {
 
     private static final String INSERT_INSTRUMENT_SQL = """
             INSERT INTO instruments (
-                symbol, version, instrument_type, contract_type, base_asset, quote_asset, settle_asset,
+                symbol, change_id, last_change_id, instrument_type, contract_type, base_asset, quote_asset, settle_asset,
                 contract_multiplier_ppm, contract_value_asset, price_tick_units, quantity_step_units,
                 min_quantity_steps, max_quantity_steps, min_notional_units, max_notional_units,
                 notional_multiplier_units,
@@ -41,7 +41,8 @@ public class InstrumentRepository {
                 expiry_time, delivery_time, underlying_symbol, strike_price_units,
                 option_type, option_exercise_style, settlement_method,
                 status, effective_time, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(contract_type,symbol) DO UPDATE SET change_id=EXCLUDED.change_id, last_change_id=EXCLUDED.last_change_id, instrument_type=EXCLUDED.instrument_type, base_asset=EXCLUDED.base_asset, quote_asset=EXCLUDED.quote_asset, settle_asset=EXCLUDED.settle_asset, contract_multiplier_ppm=EXCLUDED.contract_multiplier_ppm, contract_value_asset=EXCLUDED.contract_value_asset, price_tick_units=EXCLUDED.price_tick_units, quantity_step_units=EXCLUDED.quantity_step_units, min_quantity_steps=EXCLUDED.min_quantity_steps, max_quantity_steps=EXCLUDED.max_quantity_steps, min_notional_units=EXCLUDED.min_notional_units, max_notional_units=EXCLUDED.max_notional_units, notional_multiplier_units=EXCLUDED.notional_multiplier_units, price_precision=EXCLUDED.price_precision, quantity_precision=EXCLUDED.quantity_precision, supported_order_types=EXCLUDED.supported_order_types, supported_time_in_force=EXCLUDED.supported_time_in_force, post_only_enabled=EXCLUDED.post_only_enabled, reduce_only_enabled=EXCLUDED.reduce_only_enabled, market_order_enabled=EXCLUDED.market_order_enabled, max_leverage_ppm=EXCLUDED.max_leverage_ppm, initial_margin_rate_ppm=EXCLUDED.initial_margin_rate_ppm, maintenance_margin_rate_ppm=EXCLUDED.maintenance_margin_rate_ppm, maker_fee_rate_ppm=EXCLUDED.maker_fee_rate_ppm, taker_fee_rate_ppm=EXCLUDED.taker_fee_rate_ppm, max_position_notional_units=EXCLUDED.max_position_notional_units, user_open_interest_limit_rate_ppm=EXCLUDED.user_open_interest_limit_rate_ppm, user_open_interest_limit_floor_units=EXCLUDED.user_open_interest_limit_floor_units, funding_interval_hours=EXCLUDED.funding_interval_hours, interest_rate_ppm=EXCLUDED.interest_rate_ppm, funding_rate_cap_ppm=EXCLUDED.funding_rate_cap_ppm, funding_rate_floor_ppm=EXCLUDED.funding_rate_floor_ppm, impact_notional_units=EXCLUDED.impact_notional_units, min_valid_index_sources=EXCLUDED.min_valid_index_sources, expiry_time=EXCLUDED.expiry_time, delivery_time=EXCLUDED.delivery_time, underlying_symbol=EXCLUDED.underlying_symbol, strike_price_units=EXCLUDED.strike_price_units, option_type=EXCLUDED.option_type, option_exercise_style=EXCLUDED.option_exercise_style, settlement_method=EXCLUDED.settlement_method, status=EXCLUDED.status, effective_time=EXCLUDED.effective_time, updated_at=EXCLUDED.updated_at
             """;
 
     private static final int MAX_PAGE_LIMIT = 1000;
@@ -54,10 +55,6 @@ public class InstrumentRepository {
             new InstrumentSort("updatedAt.asc", "updatedAt", "i.updated_at", false),
             new InstrumentSort("createdAt.desc", "createdAt", "i.created_at", true),
             new InstrumentSort("createdAt.asc", "createdAt", "i.created_at", false));
-    private static final VersionSort VERSION_DESC = new VersionSort("version.desc", true);
-    private static final List<VersionSort> VERSION_SORTS = List.of(
-            VERSION_DESC,
-            new VersionSort("version.asc", false));
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -65,10 +62,10 @@ public class InstrumentRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    public void insert(String symbol, long version, InstrumentUpsertRequest request, Instant now) {
+    public void saveCurrent(String symbol, long changeId, long lastChangeId, InstrumentUpsertRequest request, Instant now) {
         Instant effectiveTime = request.effectiveTime() == null ? now : request.effectiveTime();
         jdbcTemplate.update(INSERT_INSTRUMENT_SQL,
-                symbol, version, request.instrumentType().name(), request.contractType().name(),
+                symbol, changeId, lastChangeId, request.instrumentType().name(), request.contractType().name(),
                 asset(request.baseAsset()), asset(request.quoteAsset()), asset(request.settleAsset()),
                 request.contractMultiplierPpm(), asset(request.contractValueAsset()),
                 request.priceTickUnits(), request.quantityStepUnits(), request.minQuantitySteps(),
@@ -88,31 +85,23 @@ public class InstrumentRepository {
                 request.status().name(), Timestamp.from(effectiveTime), Timestamp.from(now), Timestamp.from(now));
     }
 
-    public Optional<InstrumentResponse> version(String symbol, long version) {
-        return jdbcTemplate.query("SELECT * FROM instruments WHERE symbol = ? AND version = ?",
-                (rs, rowNum) -> toResponse(rs), symbol, version).stream().findFirst();
+    public Optional<InstrumentResponse> current(String symbol, ProductLine productLine) {
+        var rows = jdbcTemplate.query("SELECT * FROM instruments WHERE symbol=?" + (productLine == null ? "" : " AND contract_type=?"),
+                (rs,n)->toResponse(rs), productLine == null ? new Object[]{symbol} : new Object[]{symbol,productLine.contractTypeCode()});
+        if(rows.size()>1) throw new IllegalArgumentException("productLine is required for an ambiguous symbol");
+        return rows.stream().findFirst();
     }
 
-    public long maxVersion(String symbol) {
-        Long version = jdbcTemplate.queryForObject(
-                "SELECT COALESCE(MAX(version), 0) FROM instruments WHERE symbol = ?",
-                Long.class, symbol);
-        return version == null ? 0L : version;
-    }
-
-    public List<InstrumentResponse> list(List<InstrumentVersionKey> currentVersions,
+    public List<InstrumentResponse> list(ProductLine productLine,
                                          InstrumentType type,
                                          InstrumentStatus status) {
-        if (currentVersions == null || currentVersions.isEmpty()) {
-            return List.of();
-        }
         List<Object> args = new ArrayList<>();
         StringBuilder sql = new StringBuilder("""
                 SELECT i.*
                   FROM instruments i
                  WHERE 1 = 1
                 """);
-        appendVersionKeys(sql, args, currentVersions);
+        appendProductLine(sql, args, productLine);
         if (type != null) {
             sql.append(" AND i.instrument_type = ?");
             args.add(type.name());
@@ -133,11 +122,11 @@ public class InstrumentRepository {
                 SELECT *
                   FROM instruments
                  WHERE contract_type = ?
-                 ORDER BY symbol ASC, version ASC
+                 ORDER BY symbol ASC
                 """, (rs, rowNum) -> toResponse(rs), productLine.contractTypeCode());
     }
 
-    public InstrumentPage listPage(List<InstrumentVersionKey> currentVersions,
+    public InstrumentPage listPage(ProductLine productLine,
                                    InstrumentType type,
                                    InstrumentStatus status,
                                    int limit,
@@ -145,9 +134,6 @@ public class InstrumentRepository {
                                    String sort) {
         int safeLimit = limit(limit);
         InstrumentSort sortSpec = parseInstrumentSort(sort);
-        if (currentVersions == null || currentVersions.isEmpty()) {
-            return new InstrumentPage(List.of(), null, false, sortSpec.token(), safeLimit);
-        }
         InstrumentCursor decodedCursor = decodeInstrumentCursor(cursor);
         List<Object> args = new ArrayList<>();
         StringBuilder sql = new StringBuilder("""
@@ -155,7 +141,7 @@ public class InstrumentRepository {
                   FROM instruments i
                  WHERE 1 = 1
                 """);
-        appendVersionKeys(sql, args, currentVersions);
+        appendProductLine(sql, args, productLine);
         if (type != null) {
             sql.append(" AND i.instrument_type = ?");
             args.add(type.name());
@@ -175,42 +161,9 @@ public class InstrumentRepository {
         return page(fetchedRows, safeLimit, sortSpec.token(), row -> encodeInstrumentCursor(row, sortSpec));
     }
 
-    public InstrumentPage versionsPage(String symbol, int limit, String cursor, String sort) {
-        return versionsPage(symbol, null, limit, cursor, sort);
-    }
-
-    public InstrumentPage versionsPage(String symbol, ProductLine productLine, int limit, String cursor, String sort) {
-        int safeLimit = limit(limit);
-        VersionSort sortSpec = parseVersionSort(sort);
-        Long decodedCursor = decodeVersionCursor(cursor);
-        StringBuilder sql = new StringBuilder("""
-                SELECT *
-                  FROM instruments
-                 WHERE symbol = ?
-                """);
-        List<Object> args = new ArrayList<>();
-        args.add(symbol);
-        if (productLine != null) {
-            sql.append(" AND contract_type = ?");
-            args.add(productLine.contractTypeCode());
-        }
-        if (decodedCursor != null) {
-            sql.append(" AND version ").append(sortSpec.descending() ? "<" : ">").append(" ?");
-            args.add(decodedCursor);
-        }
-        sql.append(" ORDER BY version ").append(sortSpec.directionSql()).append(" LIMIT ?");
-        args.add(safeLimit + 1);
-        List<InstrumentResponse> fetchedRows = jdbcTemplate.query(sql.toString(), (rs, rowNum) -> toResponse(rs),
-                args.toArray());
-        return page(fetchedRows, safeLimit, sortSpec.token(), row -> encodeVersionCursor(row.version()));
-    }
-
-    public List<InstrumentResponse> expiringContractsDue(List<InstrumentVersionKey> currentVersions,
+    public List<InstrumentResponse> expiringContractsDue(ProductLine productLine,
                                                          Instant now,
                                                          int limit) {
-        if (currentVersions == null || currentVersions.isEmpty()) {
-            return List.of();
-        }
         List<Object> args = new ArrayList<>();
         StringBuilder sql = new StringBuilder("""
                 SELECT i.*
@@ -221,18 +174,15 @@ public class InstrumentRepository {
                    AND i.expiry_time <= ?
                 """);
         args.add(Timestamp.from(now));
-        appendVersionKeys(sql, args, currentVersions);
+        appendProductLine(sql, args, productLine);
         sql.append(" ORDER BY i.expiry_time ASC, i.symbol ASC LIMIT ?");
         args.add(limit(limit));
         return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> toResponse(rs), args.toArray());
     }
 
-    public List<InstrumentResponse> settlingContractsDue(List<InstrumentVersionKey> currentVersions,
+    public List<InstrumentResponse> settlingContractsDue(ProductLine productLine,
                                                          Instant now,
                                                          int limit) {
-        if (currentVersions == null || currentVersions.isEmpty()) {
-            return List.of();
-        }
         List<Object> args = new ArrayList<>();
         StringBuilder sql = new StringBuilder("""
                 SELECT i.*
@@ -243,34 +193,22 @@ public class InstrumentRepository {
                    AND i.delivery_time <= ?
                 """);
         args.add(Timestamp.from(now));
-        appendVersionKeys(sql, args, currentVersions);
+        appendProductLine(sql, args, productLine);
         sql.append(" ORDER BY i.delivery_time ASC, i.symbol ASC LIMIT ?");
         args.add(limit(limit));
         return jdbcTemplate.query(sql.toString(), (rs, rowNum) -> toResponse(rs), args.toArray());
     }
 
-    private void appendVersionKeys(StringBuilder sql,
-                                   List<Object> args,
-                                   List<InstrumentVersionKey> currentVersions) {
-        sql.append(" AND (i.symbol, i.version) IN (");
-        for (int index = 0; index < currentVersions.size(); index++) {
-            if (index > 0) {
-                sql.append(", ");
-            }
-            sql.append("(?, ?)");
-            InstrumentVersionKey key = currentVersions.get(index);
-            args.add(key.symbol());
-            args.add(key.version());
-        }
-        sql.append(")");
+    private void appendProductLine(StringBuilder sql, List<Object> args, ProductLine productLine) {
+        if (productLine != null) { sql.append(" AND i.contract_type=?"); args.add(productLine.contractTypeCode()); }
     }
 
     private InstrumentResponse toResponse(java.sql.ResultSet rs) throws java.sql.SQLException {
         String symbol = rs.getString("symbol");
-        long version = rs.getLong("version");
+        long changeId = rs.getLong("change_id");
         return new InstrumentResponse(
                 symbol,
-                version,
+                changeId,
                 InstrumentType.valueOf(rs.getString("instrument_type")),
                 ContractType.valueOf(rs.getString("contract_type")),
                 rs.getString("base_asset"),
@@ -318,7 +256,7 @@ public class InstrumentRepository {
                 rs.getTimestamp("created_at").toInstant(),
                 rs.getTimestamp("updated_at").toInstant(),
                 List.of(),
-                List.of());
+                List.of(), rs.getLong("last_change_id"));
     }
 
     private InstrumentPage page(List<InstrumentResponse> fetchedRows,
@@ -346,17 +284,6 @@ public class InstrumentRepository {
         }
         String normalized = value.trim();
         return INSTRUMENT_SORTS.stream()
-                .filter(item -> item.token().equals(normalized))
-                .findFirst()
-                .orElseThrow(() -> new IllegalArgumentException("unsupported sort: " + value));
-    }
-
-    private VersionSort parseVersionSort(String value) {
-        if (value == null || value.isBlank()) {
-            return VERSION_DESC;
-        }
-        String normalized = value.trim();
-        return VERSION_SORTS.stream()
                 .filter(item -> item.token().equals(normalized))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("unsupported sort: " + value));
@@ -402,18 +329,6 @@ public class InstrumentRepository {
         }
     }
 
-    private Long decodeVersionCursor(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        try {
-            String decoded = new String(Base64.getUrlDecoder().decode(value.trim()), StandardCharsets.UTF_8);
-            return Long.parseLong(decoded);
-        } catch (IllegalArgumentException ex) {
-            throw new IllegalArgumentException("invalid cursor", ex);
-        }
-    }
-
     private String encodeInstrumentCursor(InstrumentResponse response, InstrumentSort sort) {
         String sortValue = switch (sort.field()) {
             case "symbol" -> response.symbol();
@@ -422,10 +337,6 @@ public class InstrumentRepository {
             default -> throw new IllegalArgumentException("unsupported sort: " + sort.token());
         };
         return encode(sortValue + "|" + response.symbol());
-    }
-
-    private String encodeVersionCursor(long version) {
-        return encode(String.valueOf(version));
     }
 
     private String encode(String value) {
@@ -506,12 +417,6 @@ public class InstrumentRepository {
         }
     }
 
-    private record VersionSort(String token, boolean descending) {
-
-        String directionSql() {
-            return descending ? "DESC" : "ASC";
-        }
-    }
 
     private record InstrumentCursor(String sortValue, String symbol) {
     }

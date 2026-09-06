@@ -34,7 +34,7 @@ public final class ClusterApiAcceptanceMain {
     private final long seed;
     private final long sourceId;
     private final String symbol;
-    private final long instrumentVersion;
+    private final long instrumentChangeId;
     private long sequence;
 
     private ClusterApiAcceptanceMain(
@@ -42,13 +42,13 @@ public final class ClusterApiAcceptanceMain {
             SurprisingAeronClient client,
             long seed,
             String symbol,
-            long instrumentVersion) {
+            long instrumentChangeId) {
         this.productLine = productLine;
         this.client = client;
         this.seed = seed;
         this.sourceId = 280_000 + seed;
         this.symbol = symbol;
-        this.instrumentVersion = instrumentVersion;
+        this.instrumentChangeId = instrumentChangeId;
         this.sequence = System.currentTimeMillis();
     }
 
@@ -96,14 +96,14 @@ public final class ClusterApiAcceptanceMain {
         if (isPerpetual()) {
             applied(1, CoreMessageType.APPLY_MARK_PRICE,
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                            symbol, instrumentVersion, 100, 19_000_000_000L + seed, 1_700_000_000_000L)));
+                            symbol, instrumentChangeId, 100, 19_000_000_000L + seed, 1_700_000_000_000L)));
             applied(1, CoreMessageType.APPLY_FUNDING,
                     TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                            19_000_000_000L + seed, symbol, instrumentVersion, 10_000)));
+                            19_000_000_000L + seed, symbol, instrumentChangeId, 10_000)));
         } else if (isExpiring()) {
             applied(1, CoreMessageType.SETTLE_INSTRUMENT,
                     TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(
-                            19_100_000_000L + seed, symbol, instrumentVersion, 120,
+                            19_100_000_000L + seed, symbol, instrumentChangeId, 120,
                             productLine == ProductLine.OPTION ? 25 : 0)));
         }
     }
@@ -145,7 +145,7 @@ public final class ClusterApiAcceptanceMain {
     private UpsertInstrumentCommand instrument() {
         ContractType type = ContractType.valueOf(productLine.contractTypeCode());
         long expiry = type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0;
-        return new UpsertInstrumentCommand(symbol, instrumentVersion, type.ordinal(), "BTC", "USDT", settleAsset(),
+        return new UpsertInstrumentCommand(symbol, instrumentChangeId, type.ordinal(), "BTC", "USDT", settleAsset(),
                 1, 1, type.isInverse() ? 1_000 : 1, 100_000, 50_000, 0, 0,
                 expiry, type.isOption() ? 0 : -1, type.isOption() ? 100 : 0);
     }

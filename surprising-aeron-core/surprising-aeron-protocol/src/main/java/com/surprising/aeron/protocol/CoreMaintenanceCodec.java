@@ -14,8 +14,8 @@ public final class CoreMaintenanceCodec {
     public record Query(String symbol, long afterUserId, int limit) {
         public Query { symbol = CoreMaintenanceCodec.symbol(symbol); if (afterUserId < 0 || limit < 1 || limit > 32) throw new IllegalArgumentException("invalid maintenance query"); }
     }
-    public record Page(CoreInstrumentMaintenance state, long instrumentVersion, List<Long> userIds, boolean hasMore) {
-        public Page { userIds = List.copyOf(userIds); if (state == null || instrumentVersion <= 0 || userIds.size() > 32) throw new IllegalArgumentException("invalid maintenance page"); }
+    public record Page(CoreInstrumentMaintenance state, long instrumentChangeId, List<Long> userIds, boolean hasMore) {
+        public Page { userIds = List.copyOf(userIds); if (state == null || instrumentChangeId <= 0 || userIds.size() > 32) throw new IllegalArgumentException("invalid maintenance page"); }
     }
     public static byte[] encodeCommand(Command value) {
         var b = buffer(128); text(b, value.symbol()); b.putLong(value.expectedTaskId()); state(b, value.state()); return bytes(b);
@@ -32,7 +32,7 @@ public final class CoreMaintenanceCodec {
         catch (java.nio.BufferUnderflowException e) { throw new IllegalArgumentException("truncated maintenance query",e); }
     }
     public static byte[] encodePage(Page value) {
-        var b = buffer(512); state(b, value.state()); b.putLong(value.instrumentVersion()).putInt(value.hasMore() ? 1 : 0).putInt(value.userIds().size());
+        var b = buffer(512); state(b, value.state()); b.putLong(value.instrumentChangeId()).putInt(value.hasMore() ? 1 : 0).putInt(value.userIds().size());
         value.userIds().forEach(b::putLong); return bytes(b);
     }
     public static Page decodePage(byte[] bytes) {

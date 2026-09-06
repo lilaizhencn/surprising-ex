@@ -138,7 +138,7 @@ public final class DerivativeAccountCommandProcessor {
             nextMargin = Math.subtractExact(position.positionMarginUnits(), units);
         }
         runtime.replacePosition(positionKey, new PositionRuntime(position.userId(), position.symbolId(),
-                position.assetId(), position.marginMode(), position.positionSide(), position.instrumentVersion(),
+                position.assetId(), position.marginMode(), position.positionSide(), position.instrumentChangeId(),
                 position.signedQuantitySteps(), position.entryPriceTicks(), position.entryValueTicks(),
                 position.realizedPnlUnits(), nextMargin));
         runtime.advanceUserRevision(userId);

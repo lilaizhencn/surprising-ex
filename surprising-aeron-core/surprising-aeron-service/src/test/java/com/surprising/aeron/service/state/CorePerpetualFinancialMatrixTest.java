@@ -458,7 +458,7 @@ class CorePerpetualFinancialMatrixTest {
         CoreLiquidationState plan = marked.riskState().liquidations().get(1L);
         if (partial) {
             plan = new CoreLiquidationState(plan.liquidationId(), plan.userId(), plan.symbol(), plan.marginMode(),
-                    plan.positionSide(), plan.instrumentVersion(), plan.triggerPriceSequence(),
+                    plan.positionSide(), plan.instrumentChangeId(), plan.triggerPriceSequence(),
                     plan.signedQuantitySteps(), closeQuantity, 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED);
             marked = replaceLiquidation(marked, plan);
         }
@@ -530,7 +530,7 @@ class CorePerpetualFinancialMatrixTest {
         TradingCoreState marked = mark(funding.state(), variant, 150, 2);
         CoreLiquidationState plan = marked.riskState().liquidations().get(1L);
         plan = new CoreLiquidationState(plan.liquidationId(), plan.userId(), plan.symbol(), plan.marginMode(),
-                plan.positionSide(), plan.instrumentVersion(), plan.triggerPriceSequence(),
+                plan.positionSide(), plan.instrumentChangeId(), plan.triggerPriceSequence(),
                 plan.signedQuantitySteps(), 5, 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED);
         marked = replaceLiquidation(marked, plan);
         TradingCoreState ending = reducer.executeLiquidation(marked,
@@ -579,7 +579,7 @@ class CorePerpetualFinancialMatrixTest {
         TradingCoreState marked = mark(opening, variant, markPrice, 1);
         CoreLiquidationState plan = marked.riskState().liquidations().get(1L);
         plan = new CoreLiquidationState(plan.liquidationId(), plan.userId(), plan.symbol(), plan.marginMode(),
-                plan.positionSide(), plan.instrumentVersion(), plan.triggerPriceSequence(),
+                plan.positionSide(), plan.instrumentChangeId(), plan.triggerPriceSequence(),
                 plan.signedQuantitySteps(), 1, 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED);
         marked = replaceLiquidation(marked, plan);
         TradingCoreState ending = reducer.executeLiquidation(marked,
@@ -618,7 +618,7 @@ class CorePerpetualFinancialMatrixTest {
                         position.positionMarginUnits()));
         CoreLiquidationState plan = overflow.riskState().liquidations().get(1L);
         plan = new CoreLiquidationState(plan.liquidationId(), plan.userId(), plan.symbol(), plan.marginMode(),
-                plan.positionSide(), plan.instrumentVersion(), plan.triggerPriceSequence(),
+                plan.positionSide(), plan.instrumentChangeId(), plan.triggerPriceSequence(),
                 plan.signedQuantitySteps(), 1, 0, 0, 0, 0, CoreLiquidationState.Status.PLANNED);
         overflow = replaceLiquidation(overflow, plan);
         TradingCoreState overflowState = overflow;

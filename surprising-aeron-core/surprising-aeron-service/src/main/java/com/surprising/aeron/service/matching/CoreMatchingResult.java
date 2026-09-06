@@ -87,7 +87,7 @@ public final class CoreMatchingResult {
         NativeCommand command = new NativeCommand(coreSequence,
                 nativeCommand.commandIdMostSignificantBits(), nativeCommand.commandIdLeastSignificantBits(),
                 nativeCommand.orderId(),
-                nativeCommand.instrumentVersion(), nativeCommand.nativeSequence(), nativeCommand.matcherSequence(),
+                nativeCommand.instrumentChangeId(), nativeCommand.nativeSequence(), nativeCommand.matcherSequence(),
                 nativeCommand.aeronTimestamp(), nativeCommand.matcherShardId());
         return new CoreMatchingResult(accepted, resultCode, cancellations, successfulPrefixCount,
                 matcherStateChanged, command, matcherPrefix, nativeMatcherResult, matcherEvents, marketData);
@@ -156,20 +156,20 @@ public final class CoreMatchingResult {
     public record NativeCommand(long coreSequence,
                                 long commandIdMostSignificantBits,
                                 long commandIdLeastSignificantBits,
-                                long orderId, long instrumentVersion,
+                                long orderId, long instrumentChangeId,
                                 long nativeSequence, long matcherSequence, long aeronTimestamp,
                                 int matcherShardId) {
         public NativeCommand {
-            if (coreSequence < 0 || orderId < 0 || instrumentVersion < 0
+            if (coreSequence < 0 || orderId < 0 || instrumentChangeId < 0
                     || nativeSequence < 0 || matcherSequence < 0 || aeronTimestamp < 0 || matcherShardId < -1) {
                 throw new IllegalArgumentException("invalid native command identity");
             }
         }
 
-        public NativeCommand(long coreSequence, java.util.UUID commandId, long orderId, long instrumentVersion,
+        public NativeCommand(long coreSequence, java.util.UUID commandId, long orderId, long instrumentChangeId,
                              long nativeSequence, long matcherSequence, long aeronTimestamp) {
             this(coreSequence, commandId == null ? 0 : commandId.getMostSignificantBits(),
-                    commandId == null ? 0 : commandId.getLeastSignificantBits(), orderId, instrumentVersion,
+                    commandId == null ? 0 : commandId.getLeastSignificantBits(), orderId, instrumentChangeId,
                     nativeSequence, matcherSequence,
                     aeronTimestamp, -1);
         }

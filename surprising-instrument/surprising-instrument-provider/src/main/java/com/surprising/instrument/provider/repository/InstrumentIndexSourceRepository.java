@@ -16,12 +16,16 @@ public class InstrumentIndexSourceRepository {
 
     private static final String INSERT_SQL = """
             INSERT INTO instrument_index_sources (
-                symbol, version, source, enabled, base_url, path, source_symbol, parser,
+                symbol, product_line, source, enabled, base_url, path, source_symbol, parser,
                 quote_currency, target_quote_currency, conversion_base_url, conversion_path,
                 conversion_parser, conversion_mode, conversion_operation, fallback_weight_multiplier_ppm,
                 websocket_enabled, websocket_url, websocket_subscribe_message, websocket_parser, weight_ppm
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
+
+    public void delete(com.surprising.product.api.ProductLine line, String symbol) {
+        jdbcTemplate.update("DELETE FROM instrument_index_sources WHERE product_line=? AND symbol=?",line.name(),symbol);
+    }
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -29,7 +33,7 @@ public class InstrumentIndexSourceRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    public void insertBatch(String symbol, long version, List<IndexSourceConfig> sources) {
+    public void insertBatch(com.surprising.product.api.ProductLine productLine, String symbol, List<IndexSourceConfig> sources) {
         if (sources == null || sources.isEmpty()) {
             return;
         }
@@ -38,7 +42,7 @@ public class InstrumentIndexSourceRepository {
             public void setValues(PreparedStatement ps, int index) throws java.sql.SQLException {
                 IndexSourceConfig source = sources.get(index);
                 ps.setString(1, symbol);
-                ps.setLong(2, version);
+                ps.setString(2, productLine.name());
                 ps.setString(3, source.source());
                 ps.setBoolean(4, source.enabled());
                 ps.setString(5, source.baseUrl());
@@ -67,7 +71,7 @@ public class InstrumentIndexSourceRepository {
         });
     }
 
-    public Map<InstrumentVersionKey, List<IndexSourceConfig>> findAll(List<InstrumentVersionKey> keys) {
+    public Map<InstrumentKey, List<IndexSourceConfig>> findAll(List<InstrumentKey> keys) {
         if (keys == null || keys.isEmpty()) {
             return Map.of();
         }
@@ -76,10 +80,10 @@ public class InstrumentIndexSourceRepository {
         List<IndexSourceRow> rows = jdbcTemplate.query("""
                 SELECT *
                   FROM instrument_index_sources
-                 WHERE (symbol, version) IN (%s)
-                 ORDER BY symbol, version, source
+                 WHERE (symbol, product_line) IN (%s)
+                 ORDER BY symbol, product_line, source
                 """.formatted(tuplePredicate), (rs, rowNum) -> new IndexSourceRow(
-                new InstrumentVersionKey(rs.getString("symbol"), rs.getLong("version")),
+                new InstrumentKey(com.surprising.product.api.ProductLine.valueOf(rs.getString("product_line")), rs.getString("symbol")),
                 new IndexSourceConfig(
                         rs.getString("source"),
                         rs.getBoolean("enabled"),
@@ -100,22 +104,22 @@ public class InstrumentIndexSourceRepository {
                         rs.getString("websocket_subscribe_message"),
                         rs.getString("websocket_parser"),
                         rs.getLong("weight_ppm"))), args.toArray());
-        Map<InstrumentVersionKey, List<IndexSourceConfig>> grouped = new LinkedHashMap<>();
+        Map<InstrumentKey, List<IndexSourceConfig>> grouped = new LinkedHashMap<>();
         keys.forEach(key -> grouped.put(key, new ArrayList<>()));
         rows.forEach(row -> grouped.computeIfAbsent(row.key(), ignored -> new ArrayList<>()).add(row.source()));
         return grouped;
     }
 
-    private String tuplePredicate(List<InstrumentVersionKey> keys, List<Object> args) {
+    private String tuplePredicate(List<InstrumentKey> keys, List<Object> args) {
         StringBuilder sql = new StringBuilder();
         for (int index = 0; index < keys.size(); index++) {
             if (index > 0) {
                 sql.append(", ");
             }
             sql.append("(?, ?)");
-            InstrumentVersionKey key = keys.get(index);
+            InstrumentKey key = keys.get(index);
             args.add(key.symbol());
-            args.add(key.version());
+            args.add(key.productLine().name());
         }
         return sql.toString();
     }
@@ -128,6 +132,6 @@ public class InstrumentIndexSourceRepository {
         return value > 0 ? value : fallback;
     }
 
-    private record IndexSourceRow(InstrumentVersionKey key, IndexSourceConfig source) {
+    private record IndexSourceRow(InstrumentKey key, IndexSourceConfig source) {
     }
 }

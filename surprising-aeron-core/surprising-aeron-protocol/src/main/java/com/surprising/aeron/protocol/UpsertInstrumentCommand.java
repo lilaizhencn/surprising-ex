@@ -5,7 +5,32 @@ import java.util.List;
 
 public record UpsertInstrumentCommand(
         String symbol,
-        long instrumentVersion,
+        long instrumentChangeId,
+        int contractTypeCode,
+        String baseAsset,
+        String quoteAsset,
+        String settleAsset,
+        long notionalMultiplierUnits,
+        long priceTickUnits,
+        long settleScaleUnits,
+        long initialMarginRatePpm,
+        long maintenanceMarginRatePpm,
+        long makerFeeRatePpm,
+        long takerFeeRatePpm,
+        long expiryEpochMillis,
+        int optionTypeCode,
+        long strikePriceTicks,
+        long maxLeveragePpm,
+        long maxPositionNotionalUnits,
+        long userOpenInterestLimitRatePpm,
+        long userOpenInterestLimitFloorUnits,
+        List<CoreRiskLimitBracket> riskLimitBrackets,
+        int statusCode,
+        long lastChangeId) {
+
+    public UpsertInstrumentCommand(
+        String symbol,
+        long instrumentChangeId,
         int contractTypeCode,
         String baseAsset,
         String quoteAsset,
@@ -25,9 +50,11 @@ public record UpsertInstrumentCommand(
         long userOpenInterestLimitRatePpm,
         long userOpenInterestLimitFloorUnits,
         List<CoreRiskLimitBracket> riskLimitBrackets) {
+        this(symbol, instrumentChangeId, contractTypeCode, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits, priceTickUnits, settleScaleUnits, initialMarginRatePpm, maintenanceMarginRatePpm, makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionTypeCode, strikePriceTicks, maxLeveragePpm, maxPositionNotionalUnits, userOpenInterestLimitRatePpm, userOpenInterestLimitFloorUnits, riskLimitBrackets, 1, instrumentChangeId);
+    }
 
     public UpsertInstrumentCommand {
-        if (symbol == null || symbol.isBlank() || instrumentVersion <= 0 || contractTypeCode < 0
+        if (lastChangeId < instrumentChangeId || statusCode < 0 || statusCode > 4 || symbol == null || symbol.isBlank() || instrumentChangeId <= 0 || contractTypeCode < 0
                 || baseAsset == null || baseAsset.isBlank() || quoteAsset == null || quoteAsset.isBlank()
                 || settleAsset == null || settleAsset.isBlank() || notionalMultiplierUnits <= 0
                 || priceTickUnits <= 0 || settleScaleUnits <= 0 || initialMarginRatePpm <= 0
@@ -56,11 +83,11 @@ public record UpsertInstrumentCommand(
     }
 
     public UpsertInstrumentCommand(
-            String symbol, long instrumentVersion, int contractTypeCode, String baseAsset, String quoteAsset,
+            String symbol, long instrumentChangeId, int contractTypeCode, String baseAsset, String quoteAsset,
             String settleAsset, long notionalMultiplierUnits, long priceTickUnits, long settleScaleUnits,
             long initialMarginRatePpm, long maintenanceMarginRatePpm, long makerFeeRatePpm, long takerFeeRatePpm,
             long expiryEpochMillis, int optionTypeCode, long strikePriceTicks) {
-        this(symbol, instrumentVersion, contractTypeCode, baseAsset, quoteAsset, settleAsset,
+        this(symbol, instrumentChangeId, contractTypeCode, baseAsset, quoteAsset, settleAsset,
                 notionalMultiplierUnits, priceTickUnits, settleScaleUnits, initialMarginRatePpm,
                 maintenanceMarginRatePpm, makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionTypeCode,
                 strikePriceTicks, leverageFromRate(initialMarginRatePpm), Long.MAX_VALUE, 0, Long.MAX_VALUE,

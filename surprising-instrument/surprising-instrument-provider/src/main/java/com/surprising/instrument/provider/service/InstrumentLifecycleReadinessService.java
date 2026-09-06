@@ -22,7 +22,7 @@ public class InstrumentLifecycleReadinessService {
     }
 
     @Transactional(readOnly = true)
-    public boolean isReady(ProductLine productLine, String symbol, long instrumentVersion) {
-        return drainRepository.isReady(productLine, symbol, instrumentVersion);
+    public boolean isReady(ProductLine productLine, String symbol, long instrumentChangeId) {
+        return drainRepository.isReady(productLine, symbol, instrumentChangeId);
     }
 }

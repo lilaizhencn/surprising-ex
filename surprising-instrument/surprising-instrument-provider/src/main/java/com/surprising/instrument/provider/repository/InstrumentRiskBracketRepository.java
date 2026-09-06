@@ -16,11 +16,15 @@ public class InstrumentRiskBracketRepository {
 
     private static final String INSERT_SQL = """
             INSERT INTO instrument_risk_brackets (
-                symbol, version, bracket_no, notional_floor_units, notional_cap_units,
+                symbol, product_line, bracket_no, notional_floor_units, notional_cap_units,
                 max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm,
                 option_margin_factor_ppm
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """;
+
+    public void delete(com.surprising.product.api.ProductLine line, String symbol) {
+        jdbcTemplate.update("DELETE FROM instrument_risk_brackets WHERE product_line=? AND symbol=?",line.name(),symbol);
+    }
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -28,7 +32,7 @@ public class InstrumentRiskBracketRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    public void insertBatch(String symbol, long version, List<RiskLimitBracket> brackets) {
+    public void insertBatch(com.surprising.product.api.ProductLine productLine, String symbol, List<RiskLimitBracket> brackets) {
         if (brackets == null || brackets.isEmpty()) {
             return;
         }
@@ -37,7 +41,7 @@ public class InstrumentRiskBracketRepository {
             public void setValues(PreparedStatement ps, int index) throws java.sql.SQLException {
                 RiskLimitBracket bracket = brackets.get(index);
                 ps.setString(1, symbol);
-                ps.setLong(2, version);
+                ps.setString(2, productLine.name());
                 ps.setInt(3, bracket.bracketNo());
                 ps.setLong(4, bracket.notionalFloorUnits());
                 ps.setLong(5, bracket.notionalCapUnits());
@@ -54,21 +58,21 @@ public class InstrumentRiskBracketRepository {
         });
     }
 
-    public Map<InstrumentVersionKey, List<RiskLimitBracket>> findAll(List<InstrumentVersionKey> keys) {
+    public Map<InstrumentKey, List<RiskLimitBracket>> findAll(List<InstrumentKey> keys) {
         if (keys == null || keys.isEmpty()) {
             return Map.of();
         }
         List<Object> args = new ArrayList<>(keys.size() * 2);
         String tuplePredicate = tuplePredicate(keys, args);
         List<RiskBracketRow> rows = jdbcTemplate.query("""
-                SELECT symbol, version, bracket_no, notional_floor_units, notional_cap_units,
+                SELECT symbol, product_line, bracket_no, notional_floor_units, notional_cap_units,
                        max_leverage_ppm, initial_margin_rate_ppm, maintenance_margin_rate_ppm,
                        option_margin_factor_ppm
                   FROM instrument_risk_brackets
-                 WHERE (symbol, version) IN (%s)
-                 ORDER BY symbol, version, bracket_no
+                 WHERE (symbol, product_line) IN (%s)
+                 ORDER BY symbol, product_line, bracket_no
                 """.formatted(tuplePredicate), (rs, rowNum) -> new RiskBracketRow(
-                new InstrumentVersionKey(rs.getString("symbol"), rs.getLong("version")),
+                new InstrumentKey(com.surprising.product.api.ProductLine.valueOf(rs.getString("product_line")), rs.getString("symbol")),
                 new RiskLimitBracket(
                         rs.getInt("bracket_no"),
                         rs.getLong("notional_floor_units"),
@@ -77,26 +81,26 @@ public class InstrumentRiskBracketRepository {
                         rs.getLong("initial_margin_rate_ppm"),
                         rs.getLong("maintenance_margin_rate_ppm"),
                         rs.getLong("option_margin_factor_ppm"))), args.toArray());
-        Map<InstrumentVersionKey, List<RiskLimitBracket>> grouped = new LinkedHashMap<>();
+        Map<InstrumentKey, List<RiskLimitBracket>> grouped = new LinkedHashMap<>();
         keys.forEach(key -> grouped.put(key, new ArrayList<>()));
         rows.forEach(row -> grouped.computeIfAbsent(row.key(), ignored -> new ArrayList<>()).add(row.bracket()));
         return grouped;
     }
 
-    private String tuplePredicate(List<InstrumentVersionKey> keys, List<Object> args) {
+    private String tuplePredicate(List<InstrumentKey> keys, List<Object> args) {
         StringBuilder sql = new StringBuilder();
         for (int index = 0; index < keys.size(); index++) {
             if (index > 0) {
                 sql.append(", ");
             }
             sql.append("(?, ?)");
-            InstrumentVersionKey key = keys.get(index);
+            InstrumentKey key = keys.get(index);
             args.add(key.symbol());
-            args.add(key.version());
+            args.add(key.productLine().name());
         }
         return sql.toString();
     }
 
-    private record RiskBracketRow(InstrumentVersionKey key, RiskLimitBracket bracket) {
+    private record RiskBracketRow(InstrumentKey key, RiskLimitBracket bracket) {
     }
 }

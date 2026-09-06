@@ -11,7 +11,7 @@ public record ExecutionReportEvent(
         Long tradeId,
         Long counterpartyOrderId,
         Long counterpartyUserId,
-        Long instrumentVersion,
+        Long instrumentChangeId,
         String orderEventType,
         String commandType,
         String orderStatus,

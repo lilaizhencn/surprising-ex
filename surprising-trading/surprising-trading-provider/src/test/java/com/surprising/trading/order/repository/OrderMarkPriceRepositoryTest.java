@@ -17,7 +17,7 @@ class OrderMarkPriceRepositoryTest {
     void readsFreshVersionedFixedPointTicksFromKafkaCache() {
         LatestMarkPriceCache cache = mock(LatestMarkPriceCache.class);
         MarkPriceEvent event = mock(MarkPriceEvent.class);
-        when(event.instrumentVersion()).thenReturn(7L);
+        when(event.instrumentChangeId()).thenReturn(7L);
         when(event.markPriceTicks()).thenReturn(65_001L);
         when(cache.fresh("BTC-USDT", Duration.ofSeconds(5))).thenReturn(Optional.of(event));
         OrderMarkPriceRepository repository = new OrderMarkPriceRepository(cache);
@@ -27,10 +27,10 @@ class OrderMarkPriceRepositoryTest {
     }
 
     @Test
-    void rejectsMarkPriceEncodedForDifferentInstrumentVersion() {
+    void rejectsMarkPriceEncodedForDifferentInstrumentChangeId() {
         LatestMarkPriceCache cache = mock(LatestMarkPriceCache.class);
         MarkPriceEvent event = mock(MarkPriceEvent.class);
-        when(event.instrumentVersion()).thenReturn(8L);
+        when(event.instrumentChangeId()).thenReturn(8L);
         when(cache.fresh("BTC-USDT", Duration.ofMillis(1))).thenReturn(Optional.of(event));
         OrderMarkPriceRepository repository = new OrderMarkPriceRepository(cache);
 

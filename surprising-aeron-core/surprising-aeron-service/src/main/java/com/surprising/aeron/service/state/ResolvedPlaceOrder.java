@@ -45,7 +45,7 @@ public record ResolvedPlaceOrder(
 
     public long orderId() { return intent.orderId(); }
     public String symbol() { return intent.symbol(); }
-    public long instrumentVersion() { return intent.instrumentVersion(); }
+    public long instrumentChangeId() { return intent.instrumentChangeId(); }
     public com.surprising.aeron.protocol.CoreOrderSide side() { return intent.side(); }
     public long limitPriceTicks() { return intent.limitPriceTicks(); }
     public long quantitySteps() { return intent.quantitySteps(); }

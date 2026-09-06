@@ -47,14 +47,14 @@ public final class RuntimeDerivativeRiskProcessor {
         if (command == null || runtime == null || identities == null) {
             throw new IllegalArgumentException("invalid perpetual risk apply");
         }
-        CoreInstrumentState instrument = requireInstrument(runtime, command.symbol(), command.instrumentVersion());
+        CoreInstrumentState instrument = requireInstrument(runtime, command.symbol(), command.instrumentChangeId());
         int symbolId = identities.symbolId(instrument.symbol());
         MarkPriceRuntime current = runtime.markPrice(symbolId);
         if (current != null && command.priceSequence() <= current.priceSequence()) {
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "mark price sequence must increase");
         }
         OptionRiskRules.requireOptionRiskPrices(instrument, command.indexPriceTicks(), command.forwardPriceTicks());
-        runtime.putMarkPrice(new MarkPriceRuntime(symbolId, instrument.version(), command.markPriceTicks(),
+        runtime.putMarkPrice(new MarkPriceRuntime(symbolId, instrument.changeId(), command.markPriceTicks(),
                 command.indexPriceTicks(), command.forwardPriceTicks(), command.priceSequence(),
                 command.generatedAtEpochMillis()));
         RiskScanRuntime currentScan = runtime.riskScan(symbolId);
@@ -371,7 +371,7 @@ public final class RuntimeDerivativeRiskProcessor {
                 || !CoreRiskPolicy.canLiquidate(instrument.contractType(), position.signedQuantitySteps())) {
             if (active != null && active.status() == CoreLiquidationState.Status.PLANNED) {
                 runtime.replaceLiquidation(new LiquidationRuntime(active.liquidationId(), active.userId(),
-                        active.symbolId(), active.marginMode(), active.positionSide(), active.instrumentVersion(),
+                        active.symbolId(), active.marginMode(), active.positionSide(), active.instrumentChangeId(),
                         active.triggerPriceSequence(), active.signedQuantitySteps(), active.closeQuantitySteps(),
                         0, 0, 0, 0, CoreLiquidationState.Status.CANCELED, 0));
             }
@@ -380,7 +380,7 @@ public final class RuntimeDerivativeRiskProcessor {
         if (active != null) {
             if (active.status() == CoreLiquidationState.Status.PLANNED) {
                 runtime.replaceLiquidation(new LiquidationRuntime(active.liquidationId(), userId, symbolId,
-                        position.marginMode(), position.positionSide(), instrument.version(), priceSequence,
+                        position.marginMode(), position.positionSide(), instrument.changeId(), priceSequence,
                         position.signedQuantitySteps(), Math.absExact(position.signedQuantitySteps()),
                         0, 0, 0, 0, CoreLiquidationState.Status.PLANNED, 0));
             }
@@ -388,7 +388,7 @@ public final class RuntimeDerivativeRiskProcessor {
         }
         long liquidationId = nextLiquidationId;
         runtime.putLiquidation(new LiquidationRuntime(liquidationId, userId, symbolId, position.marginMode(),
-                position.positionSide(), instrument.version(), priceSequence, position.signedQuantitySteps(),
+                position.positionSide(), instrument.changeId(), priceSequence, position.signedQuantitySteps(),
                 Math.absExact(position.signedQuantitySteps()), 0, 0, 0, 0,
                 CoreLiquidationState.Status.PLANNED, 0));
         return Math.incrementExact(liquidationId);
@@ -431,8 +431,8 @@ public final class RuntimeDerivativeRiskProcessor {
     private static CoreInstrumentState requireInstrument(TradingRuntimeState runtime, String symbol, long version) {
         CoreInstrumentState instrument = runtime.instrument(symbol);
         if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        if (instrument.version() != version) {
-            throw new CoreStateRejectedException("INSTRUMENT_VERSION_CONFLICT", "instrument version differs");
+        if (instrument.changeId() != version) {
+            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT", "instrument version differs");
         }
         return instrument;
     }

@@ -4,7 +4,7 @@ import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CorePositionSide;
 
 public record PositionRuntime(long userId, int symbolId, int assetId, CoreMarginMode marginMode,
-                              CorePositionSide positionSide, long instrumentVersion,
+                              CorePositionSide positionSide, long instrumentChangeId,
                               long signedQuantitySteps, long entryPriceTicks, long entryValueTicks,
                               long realizedPnlUnits, long positionMarginUnits) {
     public PositionRuntime {
@@ -13,11 +13,11 @@ public record PositionRuntime(long userId, int symbolId, int assetId, CoreMargin
             throw new IllegalArgumentException("invalid runtime position");
         }
         if (signedQuantitySteps == 0) {
-            if (instrumentVersion != 0 || entryPriceTicks != 0 || entryValueTicks != 0
+            if (instrumentChangeId != 0 || entryPriceTicks != 0 || entryValueTicks != 0
                     || positionMarginUnits != 0) {
                 throw new IllegalArgumentException("flat runtime position contains open state");
             }
-        } else if (instrumentVersion <= 0 || entryPriceTicks <= 0 || entryValueTicks <= 0) {
+        } else if (instrumentChangeId <= 0 || entryPriceTicks <= 0 || entryValueTicks <= 0) {
             throw new IllegalArgumentException("open runtime position is incomplete");
         }
     }

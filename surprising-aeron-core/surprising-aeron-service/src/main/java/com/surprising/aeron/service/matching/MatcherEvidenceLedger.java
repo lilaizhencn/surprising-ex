@@ -60,7 +60,7 @@ final class MatcherEvidenceLedger {
             long coreSequence,
             java.util.UUID commandId,
             long orderId,
-            long instrumentVersion,
+            long instrumentChangeId,
             long aeronTimestamp,
             long sequence,
             int matcherShardId,
@@ -73,7 +73,7 @@ final class MatcherEvidenceLedger {
                 "matcher shard sequence is not strictly increasing");
         CoreMatchingResult.NativeCommand nativeCommand = new CoreMatchingResult.NativeCommand(
                 coreSequence, commandId.getMostSignificantBits(), commandId.getLeastSignificantBits(),
-                orderId, instrumentVersion,
+                orderId, instrumentChangeId,
                 nativeSequence, sequence, aeronTimestamp, matcherShardId);
         int offset = offset(index);
         long before = (long) LONGS.getAcquire(shardPrefixes, offset);

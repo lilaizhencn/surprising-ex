@@ -4686,13 +4686,13 @@ public final class TradingRuntimeState implements AutoCloseable {
                     "available balance is insufficient");
         }
         OrderRuntime order = new OrderRuntime(command.orderId(), productLine, userId, symbolId,
-                command.instrumentVersion(), command.side(), command.limitPriceTicks(), command.matchingPriceTicks(),
+                command.instrumentChangeId(), command.side(), command.limitPriceTicks(), command.matchingPriceTicks(),
                 command.quantitySteps(), 0, command.quantitySteps(), command.reduceOnly(), command.marginMode(),
                 command.positionSide(), command.orderType(), command.timeInForce(), command.postOnly(),
                 command.clientOrderId(), commandId, command.makerFeeRatePpm(), command.takerFeeRatePpm(),
                 0, 0, 0, CoreOrderStatus.OPEN, 1);
         ReservationRuntime reservation = new ReservationRuntime(command.orderId(), userId, symbolId,
-                command.instrumentVersion(), command.reservationKind(), assetId, requiredReservation,
+                command.instrumentChangeId(), command.reservationKind(), assetId, requiredReservation,
                 0, 0, command.quantitySteps());
         UserRuntime advanced = new UserRuntime(productLine, userId,
                 Math.incrementExact(user.revision()), user.positionMode());

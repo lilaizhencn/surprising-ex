@@ -203,7 +203,7 @@ final class LinearPerpetualSaturationWorkload {
                     harness.execute(harness.command(CoreMessageType.APPLY_MARK_PRICE,
                             CommandSource.KAFKA_INPUT_BRIDGE, 0,
                             TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                                    symbol, current.instrumentVersion(), current.markPriceTicks(),
+                                    symbol, current.instrumentChangeId(), current.markPriceTicks(),
                                     Math.incrementExact(current.priceSequence()), refreshTimestamp))));
                 }
                 nextMarkRefreshAt = Math.addExact(refreshTimestamp, MARK_REFRESH_INTERVAL_MILLIS);

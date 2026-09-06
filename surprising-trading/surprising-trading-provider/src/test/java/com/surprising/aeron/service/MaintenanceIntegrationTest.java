@@ -265,7 +265,7 @@ class MaintenanceIntegrationTest {
         Fixture() throws Exception {
             source.setUrl(System.getenv("MAINTENANCE_TEST_JDBC_URL")); source.setUser("maintenance");
             var jdbc = new JdbcTemplate(source);
-            jdbc.execute(Files.readString(Path.of("../../migrations/20260906_trading_maintenance.sql")));
+            // Dedicated test database must be initialized once with the root init.sql.
             jdbc.execute("TRUNCATE trading_maintenance_action,trading_maintenance_task RESTART IDENTITY CASCADE");
             repository = new MaintenanceRepository(jdbc); properties.getKafka().setProductLine(line);
             when(gateway.maintenance(anyString(),anyLong(),anyInt())).thenAnswer(i -> CoreMaintenanceCodec.decodePage(query(0,CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY,CoreMaintenanceCodec.encodeQuery(new CoreMaintenanceCodec.Query(i.getArgument(0),i.getArgument(1),i.getArgument(2)))).data()));

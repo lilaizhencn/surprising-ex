@@ -41,7 +41,7 @@ public class PerpetualAccountStateInternalController {
             var balances = state.balances().stream().map(value -> new PerpetualAccountStateUpdatedEvent.Balance(
                     value.asset(), value.availableUnits(), value.lockedUnits())).toList();
             var positions = state.positions().stream().map(value -> new PerpetualAccountStateUpdatedEvent.Position(
-                    value.symbol(), value.instrumentVersion(), MarginMode.valueOf(value.marginMode().name()),
+                    value.symbol(), value.instrumentChangeId(), MarginMode.valueOf(value.marginMode().name()),
                     PositionSide.valueOf(value.positionSide().name()), value.signedQuantitySteps(),
                     value.entryPriceTicks(), value.entryValueTicks(), value.realizedPnlUnits(), now)).toList();
             var margins = state.positions().stream().map(value -> new PerpetualAccountStateUpdatedEvent.PositionMargin(

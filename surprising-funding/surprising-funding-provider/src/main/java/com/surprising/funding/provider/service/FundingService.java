@@ -137,7 +137,7 @@ public class FundingService {
                             .getBytes(StandardCharsets.UTF_8));
                     CoreResponse response = aeron.commandWithResponse(CoreMessageType.APPLY_FUNDING, commandId,
                             TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                                    settlement.settlementId(), rate.symbol(), settlement.instrumentVersion(),
+                                    settlement.settlementId(), rate.symbol(), settlement.instrumentChangeId(),
                                     rate.fundingRatePpm(), cursor, ApplyFundingCommand.DEFAULT_MAX_USERS)));
                     pages++;
                     CoreFundingProgressView progress = decodeProgressOrQuery(rate.symbol(), settlement, response);

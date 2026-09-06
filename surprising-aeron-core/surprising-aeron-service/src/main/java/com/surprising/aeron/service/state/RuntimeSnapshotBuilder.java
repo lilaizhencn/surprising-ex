@@ -27,7 +27,7 @@ final class RuntimeSnapshotBuilder {
         Map<Long, TradingRuntimeSnapshot.OrderSnapshot> orders = new TreeMap<>();
         state.ordersForSnapshot().forEachKeyValue((orderId, order) -> orders.put(orderId,
                 new TradingRuntimeSnapshot.OrderSnapshot(order.productLine(), order.userId(), order.symbolId(),
-                        order.instrumentVersion(), order.side(), order.priceTicks(), order.quantitySteps(),
+                        order.instrumentChangeId(), order.side(), order.priceTicks(), order.quantitySteps(),
                         order.executedQuantitySteps(), order.remainingQuantitySteps(), order.reduceOnly(),
                         order.marginMode(), order.positionSide(), order.orderType(), order.timeInForce(),
                         order.postOnly(), order.clientOrderId(), order.commandId(), order.makerFeeRatePpm(),
@@ -38,7 +38,7 @@ final class RuntimeSnapshotBuilder {
         Map<Long, TradingRuntimeSnapshot.ReservationSnapshot> reservations = new TreeMap<>();
         state.reservationsForSnapshot().forEachKeyValue((orderId, reservation) -> reservations.put(orderId,
                 new TradingRuntimeSnapshot.ReservationSnapshot(reservation.userId(), reservation.symbolId(),
-                        reservation.instrumentVersion(), reservation.kind(), reservation.assetId(),
+                        reservation.instrumentChangeId(), reservation.kind(), reservation.assetId(),
                         reservation.totalReservedUnits(), reservation.releasedUnits(), reservation.consumedUnits(),
                         reservation.orderQuantitySteps())));
 
@@ -51,7 +51,7 @@ final class RuntimeSnapshotBuilder {
         state.positionsForSnapshot().forEachKeyValue((positionKey, position) -> positions.put(
                 new TradingRuntimeSnapshot.PositionKey(position.userId(), positionKey),
                 new TradingRuntimeSnapshot.PositionSnapshot(position.userId(), position.symbolId(), position.assetId(),
-                        position.marginMode(), position.positionSide(), position.instrumentVersion(),
+                        position.marginMode(), position.positionSide(), position.instrumentChangeId(),
                         position.signedQuantitySteps(), position.entryPriceTicks(), position.entryValueTicks(),
                         position.realizedPnlUnits(), position.positionMarginUnits())));
 
@@ -59,7 +59,7 @@ final class RuntimeSnapshotBuilder {
         state.liquidationsForSnapshot().forEachKeyValue((liquidationId, liquidation) -> liquidations.put(
                 liquidationId, new TradingRuntimeSnapshot.LiquidationSnapshot(liquidation.userId(),
                         liquidation.symbolId(), liquidation.marginMode(), liquidation.positionSide(),
-                        liquidation.instrumentVersion(), liquidation.triggerPriceSequence(),
+                        liquidation.instrumentChangeId(), liquidation.triggerPriceSequence(),
                         liquidation.signedQuantitySteps(), liquidation.closeQuantitySteps(),
                         liquidation.deficitUnits(), liquidation.executionPriceTicks(),
                         liquidation.liquidationFeeRatePpm(), liquidation.liquidationFeeUnits(),
@@ -67,7 +67,7 @@ final class RuntimeSnapshotBuilder {
 
         Map<Integer, TradingRuntimeSnapshot.MarkPriceSnapshot> markPrices = new TreeMap<>();
         state.markPricesForSnapshot().forEachKeyValue((symbolId, mark) -> markPrices.put(symbolId,
-                new TradingRuntimeSnapshot.MarkPriceSnapshot(mark.instrumentVersion(), mark.markPriceTicks(),
+                new TradingRuntimeSnapshot.MarkPriceSnapshot(mark.instrumentChangeId(), mark.markPriceTicks(),
                         mark.indexPriceTicks(), mark.forwardPriceTicks(), mark.priceSequence(),
                         mark.generatedAtEpochMillis())));
         Map<TradingRuntimeSnapshot.PositionKey, TradingRuntimeSnapshot.RiskSnapshot> riskSnapshots = new TreeMap<>();
@@ -107,7 +107,7 @@ final class RuntimeSnapshotBuilder {
         Map<Integer, TradingRuntimeSnapshot.FundingProgressSnapshot> fundingProgress = new TreeMap<>();
         state.treasury().fundingProgresses().forEachKeyValue((symbolId, progress) -> fundingProgress.put(symbolId,
                 new TradingRuntimeSnapshot.FundingProgressSnapshot(progress.settlementId(),
-                        progress.instrumentVersion(), progress.fundingRatePpm(), progress.accountLaneId(),
+                        progress.instrumentChangeId(), progress.fundingRatePpm(), progress.accountLaneId(),
                         progress.nextCursorUserId(),
                         progress.commandId(), progress.markPriceTicks(), progress.priceSequence())));
         Map<Integer, Long> lifecycleSettlements = new TreeMap<>();
@@ -115,7 +115,7 @@ final class RuntimeSnapshotBuilder {
         Map<Integer, TradingRuntimeSnapshot.LifecycleProgressSnapshot> lifecycleProgress = new TreeMap<>();
         state.treasury().lifecycleProgresses().forEachKeyValue((symbolId, progress) -> lifecycleProgress.put(symbolId,
                 new TradingRuntimeSnapshot.LifecycleProgressSnapshot(progress.settlementId(),
-                        progress.instrumentVersion(), progress.settlementPriceTicks(),
+                        progress.instrumentChangeId(), progress.settlementPriceTicks(),
                         progress.optionCashUnitsPerContract(), progress.ordersComplete(),
                         progress.accountLaneId(), progress.nextCursorOrderId(),
                         progress.nextCursorUserId(), progress.commandId(), progress.requiredInsuranceUnits())));

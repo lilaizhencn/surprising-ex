@@ -7,7 +7,7 @@ public record PublicTradeEvent(
         String tradeId,
         long sequence,
         String symbol,
-        long instrumentVersion,
+        long instrumentChangeId,
         OrderSide takerSide,
         long priceTicks,
         long quantitySteps,

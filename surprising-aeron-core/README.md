@@ -188,7 +188,7 @@ requiredExportSequence 当成“投影已经追上”的证据，也不能假设
 资金费入口检查 `RuntimePerpetualFundingProcessor.applyRuntime`，生命周期入口检查
 `RuntimeSettlementProcessor.applyRuntime/advanceCancellationRuntime`。最终发布统一消费 owner 已裁决的值；
 产品规则类继续只负责业务规则，不各自增加 Kafka/WS 发布器。所有事件包含 productLine、commandId、
-coreSequence 和批次内稳定序号；涉及合约时带 symbol/instrumentVersion，资产变更带 asset。
+coreSequence 和批次内稳定序号；涉及合约时带 symbol/instrumentChangeId，资产变更带 asset。
 私有持仓键保留 userId、symbol、marginMode、positionSide。
 
 ### 后续按类和方法实施（以下为拟新增/拟调整，尚未实现）

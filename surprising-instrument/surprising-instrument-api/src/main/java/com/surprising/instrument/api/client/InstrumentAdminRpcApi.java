@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
 
 @FeignClient(
@@ -48,28 +49,17 @@ public interface InstrumentAdminRpcApi {
                                  @RequestParam(value = "cursor", required = false) String cursor,
                                  @RequestParam(value = "sort", required = false) String sort);
 
-    default InstrumentQueryResponse versions(String symbol, int limit, String cursor, String sort) {
-        return versions(symbol, null, limit, cursor, sort);
-    }
-
-    @GetMapping("/{symbol}/versions")
-    InstrumentQueryResponse versions(@PathVariable("symbol") @NotBlank String symbol,
-                                     @RequestParam(value = "productLine", required = false) ProductLine productLine,
-                                     @RequestParam(value = "limit", defaultValue = "100") int limit,
-                                     @RequestParam(value = "cursor", required = false) String cursor,
-                                     @RequestParam(value = "sort", required = false) String sort);
-
     @PostMapping("/upsert")
-    InstrumentResponse upsert(@RequestBody @Valid InstrumentUpsertRequest request);
-
-    default InstrumentResponse updateStatus(String symbol, InstrumentStatus status) {
-        return updateStatus(symbol, null, status);
-    }
+    InstrumentResponse upsert(@RequestBody @Valid InstrumentUpsertRequest request,
+                              @RequestHeader("X-Admin-User-Id") String operator,
+                              @RequestParam("reason") String reason);
 
     @PostMapping("/{symbol}/status")
     InstrumentResponse updateStatus(@PathVariable("symbol") @NotBlank String symbol,
                                     @RequestParam(value = "productLine", required = false) ProductLine productLine,
-                                    @RequestParam("status") @NotNull InstrumentStatus status);
+                                    @RequestParam("status") @NotNull InstrumentStatus status,
+                                    @RequestHeader("X-Admin-User-Id") String operator,
+                                    @RequestParam("reason") String reason);
 
     /** 带不可变结算价关闭到期合约并发布交割/行权事件。 */
     @PostMapping("/{symbol}/settlement")
@@ -77,5 +67,7 @@ public interface InstrumentAdminRpcApi {
                                           @RequestParam("productLine") @NotNull ProductLine productLine,
                                           @RequestParam("settlementPriceTicks") long settlementPriceTicks,
                                           @RequestParam(value = "underlyingSettlementPriceUnits", required = false,
-                                                  defaultValue = "0") long underlyingSettlementPriceUnits);
+                                                  defaultValue = "0") long underlyingSettlementPriceUnits,
+                                          @RequestHeader("X-Admin-User-Id") String operator,
+                                          @RequestParam("reason") String reason);
 }

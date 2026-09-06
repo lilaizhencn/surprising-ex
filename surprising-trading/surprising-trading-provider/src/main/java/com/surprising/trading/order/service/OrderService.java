@@ -246,10 +246,10 @@ public class OrderService {
                                                  ValidationResult validation) {
         OrderAeronGateway.PreflightResult result = requireAeron().preflight(request, validation);
         if (!result.accepted()) {
-            return new TestOrderResponse(false, result.resultCode().name(), validation.instrumentVersion(),
+            return new TestOrderResponse(false, result.resultCode().name(), validation.instrumentChangeId(),
                     "CORE_PREFLIGHT", currentProductLine().accountTypeCode(), null, 0L);
         }
-        return new TestOrderResponse(true, null, validation.instrumentVersion(), "ACCEPTED",
+        return new TestOrderResponse(true, null, validation.instrumentChangeId(), "ACCEPTED",
                 currentProductLine().accountTypeCode(), result.view().reservationAsset(),
                 result.view().reservedUnits());
     }
@@ -647,7 +647,7 @@ public class OrderService {
     }
 
     private TestOrderResponse testRejected(ValidationResult validation, String stage) {
-        return new TestOrderResponse(false, validation.rejectReason(), validation.instrumentVersion(),
+        return new TestOrderResponse(false, validation.rejectReason(), validation.instrumentChangeId(),
                 stage, null, null, 0L);
     }
 
@@ -901,7 +901,7 @@ public class OrderService {
                 order.userId(),
                 order.clientOrderId(),
                 order.symbol(),
-                order.instrumentVersion(),
+                order.instrumentChangeId(),
                 order.side(),
                 order.orderType(),
                 order.timeInForce(),

@@ -9,7 +9,33 @@ import java.util.List;
 
 public record CoreInstrumentState(
         String symbol,
-        long version,
+        long changeId,
+        ContractType contractType,
+        String baseAsset,
+        String quoteAsset,
+        String settleAsset,
+        long notionalMultiplierUnits,
+        long priceTickUnits,
+        long settleScaleUnits,
+        long initialMarginRatePpm,
+        long maintenanceMarginRatePpm,
+        long makerFeeRatePpm,
+        long takerFeeRatePpm,
+        long expiryEpochMillis,
+        OptionType optionType,
+        long strikePriceTicks,
+        long maxLeveragePpm,
+        long maxPositionNotionalUnits,
+        long userOpenInterestLimitRatePpm,
+        long userOpenInterestLimitFloorUnits,
+        List<CoreRiskLimitBracket> riskLimitBrackets,
+        com.surprising.aeron.protocol.CoreInstrumentMaintenance maintenance,
+        com.surprising.instrument.api.model.InstrumentStatus status,
+        long lastChangeId) {
+
+    public CoreInstrumentState(
+        String symbol,
+        long changeId,
         ContractType contractType,
         String baseAsset,
         String quoteAsset,
@@ -30,15 +56,17 @@ public record CoreInstrumentState(
         long userOpenInterestLimitFloorUnits,
         List<CoreRiskLimitBracket> riskLimitBrackets,
         com.surprising.aeron.protocol.CoreInstrumentMaintenance maintenance) {
+        this(symbol, changeId, contractType, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits, priceTickUnits, settleScaleUnits, initialMarginRatePpm, maintenanceMarginRatePpm, makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionType, strikePriceTicks, maxLeveragePpm, maxPositionNotionalUnits, userOpenInterestLimitRatePpm, userOpenInterestLimitFloorUnits, riskLimitBrackets, maintenance, com.surprising.instrument.api.model.InstrumentStatus.TRADING, changeId);
+    }
 
-    public CoreInstrumentState(String symbol, long version, ContractType contractType, String baseAsset,
+    public CoreInstrumentState(String symbol, long changeId, ContractType contractType, String baseAsset,
             String quoteAsset, String settleAsset, long notionalMultiplierUnits, long priceTickUnits,
             long settleScaleUnits, long initialMarginRatePpm, long maintenanceMarginRatePpm,
             long makerFeeRatePpm, long takerFeeRatePpm, long expiryEpochMillis, OptionType optionType,
             long strikePriceTicks, long maxLeveragePpm, long maxPositionNotionalUnits,
             long userOpenInterestLimitRatePpm, long userOpenInterestLimitFloorUnits,
             List<CoreRiskLimitBracket> riskLimitBrackets) {
-        this(symbol, version, contractType, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits,
+        this(symbol, changeId, contractType, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits,
                 priceTickUnits, settleScaleUnits, initialMarginRatePpm, maintenanceMarginRatePpm,
                 makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionType, strikePriceTicks,
                 maxLeveragePpm, maxPositionNotionalUnits, userOpenInterestLimitRatePpm,
@@ -47,14 +75,26 @@ public record CoreInstrumentState(
     }
 
     public CoreInstrumentState withMaintenance(com.surprising.aeron.protocol.CoreInstrumentMaintenance value) {
-        return new CoreInstrumentState(symbol, version, contractType, baseAsset, quoteAsset, settleAsset,
+        return new CoreInstrumentState(symbol, changeId, contractType, baseAsset, quoteAsset, settleAsset,
                 notionalMultiplierUnits, priceTickUnits, settleScaleUnits, initialMarginRatePpm,
                 maintenanceMarginRatePpm, makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis,
                 optionType, strikePriceTicks, maxLeveragePpm, maxPositionNotionalUnits,
-                userOpenInterestLimitRatePpm, userOpenInterestLimitFloorUnits, riskLimitBrackets, value);
+                userOpenInterestLimitRatePpm, userOpenInterestLimitFloorUnits, riskLimitBrackets, value, status, lastChangeId);
+    }
+
+    public CoreInstrumentState withStatus(com.surprising.instrument.api.model.InstrumentStatus value, long auditId) {
+        return new CoreInstrumentState(symbol, changeId, contractType, baseAsset, quoteAsset, settleAsset,
+                notionalMultiplierUnits, priceTickUnits, settleScaleUnits, initialMarginRatePpm,
+                maintenanceMarginRatePpm, makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis,
+                optionType, strikePriceTicks, maxLeveragePpm, maxPositionNotionalUnits,
+                userOpenInterestLimitRatePpm, userOpenInterestLimitFloorUnits, riskLimitBrackets, maintenance, value, auditId);
     }
 
     public void requireTrading(boolean reduceOnly) {
+        if (status != com.surprising.instrument.api.model.InstrumentStatus.TRADING
+                && !(status == com.surprising.instrument.api.model.InstrumentStatus.SETTLING && reduceOnly)) {
+            throw new CoreStateRejectedException("INSTRUMENT_NOT_TRADING", "instrument status is " + status);
+        }
         var mode = maintenance.mode();
         if (mode != com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.TRADING
                 && !(mode == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.REDUCE_ONLY && reduceOnly)) {
@@ -66,11 +106,13 @@ public record CoreInstrumentState(
         return maintenance.mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT
                 && maintenance.taskId() == command.settlementId()
                 && maintenance.settlementPriceTicks() == command.settlementPriceTicks()
-                && version == command.instrumentVersion();
+                && changeId == command.instrumentChangeId();
     }
 
     public CoreInstrumentState {
         java.util.Objects.requireNonNull(maintenance, "maintenance");
+        java.util.Objects.requireNonNull(status, "status");
+        if (lastChangeId < changeId) throw new IllegalArgumentException("invalid instrument audit order");
         symbol = OrderReservation.normalizeSymbol(symbol);
         baseAsset = AssetBalance.normalizeAsset(baseAsset);
         quoteAsset = AssetBalance.normalizeAsset(quoteAsset);
@@ -78,7 +120,7 @@ public record CoreInstrumentState(
         if (baseAsset.equals(quoteAsset)) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "base and quote assets must differ");
         }
-        if (version <= 0 || contractType == null || notionalMultiplierUnits <= 0 || priceTickUnits <= 0
+        if (changeId <= 0 || contractType == null || notionalMultiplierUnits <= 0 || priceTickUnits <= 0
                 || settleScaleUnits <= 0 || initialMarginRatePpm <= 0 || maintenanceMarginRatePpm <= 0
                 || maxLeveragePpm < 1_000_000L || maxPositionNotionalUnits <= 0
                 || userOpenInterestLimitRatePpm < 0 || userOpenInterestLimitFloorUnits <= 0
@@ -129,13 +171,14 @@ public record CoreInstrumentState(
         } else if (command.optionTypeCode() != -1) {
             throw new CoreStateRejectedException("INVALID_OPTION_TYPE", "non-option must not set option type");
         }
-        return new CoreInstrumentState(command.symbol(), command.instrumentVersion(), contractType,
+        return new CoreInstrumentState(command.symbol(), command.instrumentChangeId(), contractType,
                 command.baseAsset(), command.quoteAsset(), command.settleAsset(),
                 command.notionalMultiplierUnits(), command.priceTickUnits(), command.settleScaleUnits(),
                 command.initialMarginRatePpm(), command.maintenanceMarginRatePpm(),
                 command.makerFeeRatePpm(), command.takerFeeRatePpm(), command.expiryEpochMillis(),
                 optionType, command.strikePriceTicks(), command.maxLeveragePpm(),
                 command.maxPositionNotionalUnits(), command.userOpenInterestLimitRatePpm(),
-                command.userOpenInterestLimitFloorUnits(), command.riskLimitBrackets());
+                command.userOpenInterestLimitFloorUnits(), command.riskLimitBrackets())
+                .withStatus(com.surprising.instrument.api.model.InstrumentStatus.values()[command.statusCode()], command.lastChangeId());
     }
 }

@@ -113,7 +113,7 @@ public final class CoreStateQueryCodec {
         state.reservations().forEach(reservation -> {
             writer.longValue(reservation.orderId());
             writer.text(reservation.symbol());
-            writer.longValue(reservation.instrumentVersion());
+            writer.longValue(reservation.instrumentChangeId());
             writer.intValue(reservation.kind().wireCode());
             writer.text(reservation.asset());
             writer.longValue(reservation.reservedUnits());
@@ -127,7 +127,7 @@ public final class CoreStateQueryCodec {
             writer.text(position.marginAsset());
             writer.intValue(position.marginMode().wireCode());
             writer.intValue(position.positionSide().wireCode());
-            writer.longValue(position.instrumentVersion());
+            writer.longValue(position.instrumentChangeId());
             writer.longValue(position.signedQuantitySteps());
             writer.longValue(position.entryPriceTicks());
             writer.longValue(position.entryValueTicks());
@@ -181,7 +181,7 @@ public final class CoreStateQueryCodec {
         for (CoreReservationView reservation : state.reservations()) {
             output.putLong(reservation.orderId());
             putText(output, reservation.symbol(), false);
-            output.putLong(reservation.instrumentVersion()).putInt(reservation.kind().wireCode());
+            output.putLong(reservation.instrumentChangeId()).putInt(reservation.kind().wireCode());
             putText(output, reservation.asset(), false);
             output.putLong(reservation.reservedUnits()).putLong(reservation.releasedUnits())
                     .putLong(reservation.consumedUnits()).putLong(reservation.orderQuantitySteps());
@@ -191,7 +191,7 @@ public final class CoreStateQueryCodec {
             putText(output, position.symbol(), false);
             putText(output, position.marginAsset(), false);
             output.putInt(position.marginMode().wireCode()).putInt(position.positionSide().wireCode())
-                    .putLong(position.instrumentVersion()).putLong(position.signedQuantitySteps())
+                    .putLong(position.instrumentChangeId()).putLong(position.signedQuantitySteps())
                     .putLong(position.entryPriceTicks()).putLong(position.entryValueTicks())
                     .putLong(position.realizedPnlUnits()).putLong(position.positionMarginUnits());
         }
@@ -217,7 +217,7 @@ public final class CoreStateQueryCodec {
         List<CoreReservationView> reservations = new ArrayList<>();
         for (int index = 0, count = reader.count("reservations"); index < count; index++) {
             reservations.add(new CoreReservationView(reader.positiveLong("orderId"), reader.text(),
-                    reader.positiveLong("instrumentVersion"),
+                    reader.positiveLong("instrumentChangeId"),
                     ReservationKind.fromWireCode(reader.intValue()), reader.text(),
                     reader.positiveLong("reservedUnits"), reader.nonNegativeLong("releasedUnits"),
                     reader.nonNegativeLong("consumedUnits"), reader.positiveLong("orderQuantitySteps")));
@@ -229,7 +229,7 @@ public final class CoreStateQueryCodec {
             CoreMarginMode marginMode = CoreMarginMode.fromWireCode(reader.intValue());
             CorePositionSide positionSide = CorePositionSide.fromWireCode(reader.intValue());
             positions.add(new CorePositionView(symbol, marginAsset, marginMode, positionSide,
-                    reader.nonNegativeLong("instrumentVersion"), reader.longValue(),
+                    reader.nonNegativeLong("instrumentChangeId"), reader.longValue(),
                     reader.nonNegativeLong("entryPriceTicks"), reader.nonNegativeLong("entryValueTicks"),
                     reader.longValue(), reader.nonNegativeLong("positionMarginUnits")));
         }
@@ -266,7 +266,7 @@ public final class CoreStateQueryCodec {
         output.putInt(VERSION).putLong(state.orderId())
                 .putInt(ProductLineWireCode.encode(state.productLine())).putLong(state.userId());
         putText(output, state.symbol(), false);
-        output.putLong(state.instrumentVersion()).putInt(state.side().wireCode())
+        output.putLong(state.instrumentChangeId()).putInt(state.side().wireCode())
                 .putLong(state.priceTicks()).putLong(state.quantitySteps())
                 .putLong(state.executedQuantitySteps()).putLong(state.remainingQuantitySteps())
                 .put((byte) (state.reduceOnly() ? 1 : 0)).putInt(state.marginMode().wireCode())
@@ -354,7 +354,7 @@ public final class CoreStateQueryCodec {
         writer.intValue(ProductLineWireCode.encode(state.productLine()));
         writer.longValue(state.userId());
         writer.text(state.symbol());
-        writer.longValue(state.instrumentVersion());
+        writer.longValue(state.instrumentChangeId());
         writer.intValue(state.side().wireCode());
         writer.longValue(state.priceTicks());
         writer.longValue(state.quantitySteps());
@@ -396,7 +396,7 @@ public final class CoreStateQueryCodec {
         ProductLine productLine = ProductLineWireCode.decode(reader.intValue());
         long userId = reader.positiveLong("userId");
         String symbol = reader.text();
-        long instrumentVersion = reader.positiveLong("instrumentVersion");
+        long instrumentChangeId = reader.positiveLong("instrumentChangeId");
         CoreOrderSide side = CoreOrderSide.fromWireCode(reader.intValue());
         long priceTicks = reader.nonNegativeLong("priceTicks");
         long quantitySteps = reader.positiveLong("quantitySteps");
@@ -417,7 +417,7 @@ public final class CoreStateQueryCodec {
         long updatedAt = reader.nonNegativeLong("updatedAt");
         long clusterPosition = reader.nonNegativeLong("clusterPosition");
         return new CoreOrderStateView(orderId, productLine, userId, symbol,
-                instrumentVersion, side, priceTicks, quantitySteps, executed, remaining, reduceOnly,
+                instrumentChangeId, side, priceTicks, quantitySteps, executed, remaining, reduceOnly,
                 marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId,
                 makerFee, takerFee, cumulativeFee, createdAt, updatedAt, clusterPosition,
                 reader.text(), reader.positiveLong("revision"));

@@ -21,11 +21,11 @@ public class PublicTradeEventMapper {
     public PerpTradeEvent toPerpTradeEvent(PublicTradeEvent event) {
         if (event == null || event.symbol() == null || event.symbol().isBlank()
                 || event.tradeId() == null || event.tradeId().isBlank() || event.sequence() < 0
-                || event.instrumentVersion() <= 0 || event.priceTicks() <= 0 || event.quantitySteps() <= 0
+                || event.instrumentChangeId() <= 0 || event.priceTicks() <= 0 || event.quantitySteps() <= 0
                 || event.eventTime() == null) {
             throw new IllegalArgumentException("canonical public trade is invalid");
         }
-        MarkPriceEncoding encoding = encodingService.encoding(event.symbol(), event.instrumentVersion());
+        MarkPriceEncoding encoding = encodingService.encoding(event.symbol(), event.instrumentChangeId());
         return new PerpTradeEvent(event.symbol(), event.tradeId(), event.sequence(), event.eventTime(),
                 decimal(event.priceTicks(), encoding.priceTickUnits(), encoding.quoteScaleUnits()),
                 decimal(event.quantitySteps(), encoding.quantityStepUnits(), encoding.baseScaleUnits()),

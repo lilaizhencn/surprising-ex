@@ -266,7 +266,7 @@ class CoreLifecycleStateTest {
         TradingCoreState settled = reducer.settleInstrument(state,
                 new SettleInstrumentCommand(74, "BTC-USDT", 3, 120, 0));
 
-        assertThat(settled.instruments().get("BTC-USDT").version()).isEqualTo(1);
+        assertThat(settled.instruments().get("BTC-USDT").changeId()).isEqualTo(1);
         assertThat(settled.users().values()).allSatisfy(user ->
                 assertThat(user.positions().get("BTC-USDT").signedQuantitySteps()).isZero());
     }

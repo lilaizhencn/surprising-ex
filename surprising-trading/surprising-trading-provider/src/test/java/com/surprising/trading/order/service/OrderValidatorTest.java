@@ -100,7 +100,7 @@ class OrderValidatorTest {
 
         assertThat(result.accepted()).isTrue();
         assertThat(result.instrumentType()).isEqualTo(InstrumentType.SPOT);
-        assertThat(result.instrumentVersion()).isEqualTo(3L);
+        assertThat(result.instrumentChangeId()).isEqualTo(3L);
     }
 
     @Test
@@ -469,7 +469,7 @@ class OrderValidatorTest {
         TradingOrderProperties properties = new TradingOrderProperties();
         properties.getRisk().setMarketMaxSlippagePpm(maxSlippagePpm);
         return new OrderValidator(lookup(rule), properties,
-                (symbol, instrumentVersion, maxAgeMs) -> markPriceTicks);
+                (symbol, instrumentChangeId, maxAgeMs) -> markPriceTicks);
     }
 
     private OrderValidator limitPriceBandValidator(InstrumentRule rule,
@@ -479,6 +479,6 @@ class OrderValidatorTest {
         properties.getRisk().setLimitPriceProtectionEnabled(true);
         properties.getRisk().setLimitPriceBandPpm(limitPriceBandPpm);
         return new OrderValidator(lookup(rule), properties,
-                (symbol, instrumentVersion, maxAgeMs) -> markPriceTicks);
+                (symbol, instrumentChangeId, maxAgeMs) -> markPriceTicks);
     }
 }

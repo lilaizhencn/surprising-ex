@@ -24,12 +24,12 @@ public interface TradingFeeRpcApi {
     @GetMapping("/effective")
     EffectiveTradingFeeResponse effective(@RequestParam("userId") @Positive long userId,
                                           @RequestParam("symbol") @NotBlank String symbol,
-                                          @RequestParam(value = "instrumentVersion", defaultValue = "0")
-                                          long instrumentVersion,
+                                          @RequestParam(value = "instrumentChangeId", defaultValue = "0")
+                                          long instrumentChangeId,
                                           @RequestParam(value = "productLine", required = false)
                                           ProductLine productLine);
 
-    default EffectiveTradingFeeResponse effective(long userId, String symbol, long instrumentVersion) {
-        return effective(userId, symbol, instrumentVersion, null);
+    default EffectiveTradingFeeResponse effective(long userId, String symbol, long instrumentChangeId) {
+        return effective(userId, symbol, instrumentChangeId, null);
     }
 }

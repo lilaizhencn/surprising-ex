@@ -43,16 +43,10 @@ public class InstrumentInternalController {
         }
     }
 
-    @GetMapping("/version")
-    public InstrumentResponse version(@RequestParam("symbol") String symbol,
-                                      @RequestParam("version") long version) {
-        try {
-            return instrumentService.version(symbol, version);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
-        }
+    @GetMapping("/trade-encoding")
+    public com.surprising.instrument.api.model.InstrumentTradeEncoding tradeEncoding(@RequestParam ProductLine productLine,
+            @RequestParam String symbol, @RequestParam long changeId) {
+        return instrumentService.tradeEncoding(productLine,symbol,changeId);
     }
 
     @GetMapping("/list")

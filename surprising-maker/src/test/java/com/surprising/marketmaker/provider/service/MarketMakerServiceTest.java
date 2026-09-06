@@ -939,8 +939,8 @@ class MarketMakerServiceTest {
         }
 
         @Override
-        public InstrumentResponse version(String symbol, long version) {
-            return latest(symbol, null);
+        public com.surprising.instrument.api.model.InstrumentTradeEncoding tradeEncoding(ProductLine productLine, String symbol, long changeId) {
+            throw new UnsupportedOperationException("maker never reads historical trade units");
         }
 
         @Override

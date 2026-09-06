@@ -30,7 +30,7 @@ public class FundingSettlementRepository {
                 .orElseThrow(() -> new IllegalStateException("fresh mark price not found for " + rate.symbol()));
         long settlementId = rate.fundingTime().toEpochMilli();
         if (settlementId <= 0) throw new IllegalArgumentException("funding time must produce a positive settlement id");
-        return new CoreSettlement(settlementId, markPrice.instrumentVersion());
+        return new CoreSettlement(settlementId, markPrice.instrumentChangeId());
     }
 
     public Optional<FundingSettlementResponse> latestCore(String symbol) {
@@ -50,6 +50,6 @@ public class FundingSettlementRepository {
         }, properties.getKafka().getProductLine().name(), symbol).stream().findFirst();
     }
 
-    public record CoreSettlement(long settlementId, long instrumentVersion) {
+    public record CoreSettlement(long settlementId, long instrumentChangeId) {
     }
 }

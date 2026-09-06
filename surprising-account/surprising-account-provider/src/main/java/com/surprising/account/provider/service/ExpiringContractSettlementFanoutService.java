@@ -27,13 +27,13 @@ public class ExpiringContractSettlementFanoutService {
     }
 
     public int fanout(DeliverySettlementEvent event) {
-        submit(event.symbol(), event.version(), event.settlementPriceTicks(), 0,
+        submit(event.symbol(), event.changeId(), event.settlementPriceTicks(), 0,
                 settlementTime(event.deliveryTime(), event.eventTime()));
         return 1;
     }
 
     public int fanout(OptionExerciseEvent event) {
-        submit(event.symbol(), event.version(), event.underlyingSettlementPriceUnits(),
+        submit(event.symbol(), event.changeId(), event.underlyingSettlementPriceUnits(),
                 event.cashSettlementUnitsPerContract(),
                 settlementTime(event.deliveryTime(), event.eventTime()));
         return 1;

@@ -18,34 +18,22 @@ class InstrumentSingleTableRepositoryTest {
     private final JdbcTemplate jdbcTemplate = mock(JdbcTemplate.class);
 
     @Test
-    void sequenceAllocationTouchesOnlySequenceTable() {
-        when(jdbcTemplate.queryForObject(any(String.class), any(Class.class), any(Object[].class)))
-                .thenReturn(8L);
-
-        long version = new InstrumentSequenceRepository(jdbcTemplate).next("BTC-USDT", 8L);
-
-        assertThat(version).isEqualTo(8L);
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbcTemplate).queryForObject(sql.capture(), any(Class.class), any(Object[].class));
-        assertThat(sql.getValue())
-                .contains("instrument_symbol_sequences")
-                .doesNotContain(" FROM instruments");
+    void auditSequenceDoesNotReadCurrentConfiguration() {
+        when(jdbcTemplate.queryForObject(any(String.class), any(Class.class))).thenReturn(8L);
+        assertThat(new InstrumentChangeLogRepository(jdbcTemplate).nextId()).isEqualTo(8L);
+        verify(jdbcTemplate).queryForObject("SELECT nextval('instrument_change_log_sequence')", Long.class);
     }
 
     @Test
-    void productCurrentVersionWritesOnlyProductPointerTable() {
+    void auditPreservesActorReasonAndBeforeAfterValues() {
         Instant now = Instant.parse("2026-01-01T00:00:00Z");
-
-        new InstrumentProductCurrentVersionRepository(jdbcTemplate)
-                .set(ProductLine.LINEAR_DELIVERY, "BTC-USDT-260327", 4L, now);
-
-        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        new InstrumentChangeLogRepository(jdbcTemplate).append(ProductLine.LINEAR_DELIVERY,
+                "BTC-USDT-260327", 4L, "operator-7", "maintenance", now,
+                "{\"status\":\"TRADING\"}", "{\"status\":\"HALT\"}");
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
-        verify(jdbcTemplate).update(sql.capture(), args.capture());
-        assertThat(sql.getValue())
-                .contains("instrument_product_current_versions")
-                .doesNotContain(" instruments ");
-        assertThat(args.getValue()).containsExactly(
-                "LINEAR_DELIVERY", "BTC-USDT-260327", 4L, Timestamp.from(now));
+        verify(jdbcTemplate).update(any(String.class), args.capture());
+        assertThat(args.getValue()).containsExactly("LINEAR_DELIVERY", "BTC-USDT-260327", 4L,
+                "operator-7", "maintenance", Timestamp.from(now),
+                "{\"status\":\"TRADING\"}", "{\"status\":\"HALT\"}");
     }
 }

@@ -34,7 +34,7 @@ public final class RuntimeLiquidationQueryService {
         Long positionKey = identities.findPositionKey(liquidation.userId(), positionName);
         PositionRuntime position = positionKey == null ? null : runtime.position(positionKey);
         RiskSnapshotRuntime risk = positionKey == null ? null : runtime.riskSnapshot(positionKey);
-        return position != null && position.instrumentVersion() == liquidation.instrumentVersion()
+        return position != null && position.instrumentChangeId() == liquidation.instrumentChangeId()
                 && position.marginMode() == liquidation.marginMode()
                 && position.signedQuantitySteps() == liquidation.signedQuantitySteps()
                 && risk != null && risk.priceSequence() == liquidation.triggerPriceSequence()
@@ -76,7 +76,7 @@ public final class RuntimeLiquidationQueryService {
             if (query.purpose() == CoreLiquidationWorkView.Purpose.EXECUTION) {
                 MarkPriceRuntime mark = runtime.markPrice(value.symbolId());
                 action = new CoreLiquidationActionView(value.liquidationId(), value.userId(), symbol,
-                        value.marginMode(), value.positionSide(), value.instrumentVersion(),
+                        value.marginMode(), value.positionSide(), value.instrumentChangeId(),
                         value.triggerPriceSequence(), value.signedQuantitySteps(), value.closeQuantitySteps(),
                         mark.markPriceTicks(), value.status().name(),
                         value.status() == CoreLiquidationState.Status.ORDERED ? value.nextCancelOrderId() : 0);
@@ -84,7 +84,7 @@ public final class RuntimeLiquidationQueryService {
             } else {
                 CoreInstrumentState instrument = runtime.instrument(symbol);
                 resolution = new CoreLiquidationWorkView.Resolution(value.liquidationId(), value.userId(), symbol,
-                        instrument.settleAsset(), value.marginMode(), value.positionSide(), value.instrumentVersion(),
+                        instrument.settleAsset(), value.marginMode(), value.positionSide(), value.instrumentChangeId(),
                         value.triggerPriceSequence(), value.signedQuantitySteps(), value.deficitUnits(),
                         insuranceAllocations.getOrDefault(value.liquidationId(), 0L), query.purpose());
                 resolutions.add(resolution);
@@ -125,7 +125,7 @@ public final class RuntimeLiquidationQueryService {
             return mark != null && mark.priceSequence() == value.triggerPriceSequence();
         }
         CoreInstrumentState instrument = runtime.instrument(identities.symbol(value.symbolId()));
-        return instrument != null && instrument.version() == value.instrumentVersion()
+        return instrument != null && instrument.changeId() == value.instrumentChangeId()
                 && instrument.contractType().productLine() == productLine;
     }
 

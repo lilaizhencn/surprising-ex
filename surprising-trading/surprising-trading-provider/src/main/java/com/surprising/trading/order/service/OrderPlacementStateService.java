@@ -74,6 +74,6 @@ public class OrderPlacementStateService {
     }
 
     private static ReduceOnlyPosition position(CorePositionView value) {
-        return new ReduceOnlyPosition(value.signedQuantitySteps(), value.instrumentVersion());
+        return new ReduceOnlyPosition(value.signedQuantitySteps(), value.instrumentChangeId());
     }
 }

@@ -6,7 +6,7 @@ import java.time.Instant;
 public record InstrumentLifecycleDrainEvent(
         int schemaVersion,
         String symbol,
-        long instrumentVersion,
+        long instrumentChangeId,
         ProductLine productLine,
         InstrumentLifecycleDrainComponent component,
         Instant readyAt) {
@@ -17,7 +17,7 @@ public record InstrumentLifecycleDrainEvent(
         if (schemaVersion != CURRENT_SCHEMA_VERSION) {
             throw new IllegalArgumentException("不支持的生命周期清理事件版本: " + schemaVersion);
         }
-        if (symbol == null || symbol.isBlank() || instrumentVersion <= 0
+        if (symbol == null || symbol.isBlank() || instrumentChangeId <= 0
                 || productLine == null || component == null || readyAt == null) {
             throw new IllegalArgumentException("生命周期清理事件字段不完整");
         }

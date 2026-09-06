@@ -242,7 +242,7 @@ public class GatewayProxyService {
         String normalizedService = service == null ? "" : service.trim().toLowerCase(Locale.ROOT);
         boolean instrumentResponse = normalizedService.equals("instrument")
                 || normalizedService.equals("instrument-admin");
-        if (!instrumentResponse && !containsJsonField(body, "instrumentVersion")) {
+        if (!instrumentResponse && !containsJsonField(body, "instrumentChangeId")) {
             return body;
         }
         try {
@@ -259,7 +259,7 @@ public class GatewayProxyService {
     private void removeInternalContractFields(Object value, boolean instrumentResponse) {
         if (value instanceof Map<?, ?> map) {
             Map<Object, Object> mutable = (Map<Object, Object>) map;
-            mutable.remove("instrumentVersion");
+            mutable.remove("instrumentChangeId");
             if (instrumentResponse) {
                 mutable.remove("version");
                 stringifyUnitField(mutable, "priceTickUnits");

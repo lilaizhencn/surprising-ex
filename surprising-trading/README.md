@@ -328,11 +328,11 @@ instrument 已经存储和 exchange-core 对齐的 long 规则边界：
 
 ## Instrument 版本绑定
 
-- 每个已接受订单都会保存校验时使用的 `instrument_version`。
+- 每个已接受订单都会保存校验时使用的 `instrument_change_id`。
 - `reduceOnly` 平仓单绑定当前持仓版本，因此用户可以安全平掉旧版本持仓。
-- Core place command 携带 `instrumentVersion`；撮合结果和订单元数据保留 taker command 版本。
+- Core place command 携带 `instrumentChangeId`；撮合结果和订单元数据保留 taker command 审计引用。
 - Core execution fact 同时关联 taker 和 maker 的订单元数据及 instrument version，历史投影可按双方各自合约版本解释成交。
-- ProductExecutionCore 遇到同一 symbol 已有不同 `instrument_version` 的开放订单时拒绝新的 `PLACE` command，避免 exchange-core 在同一个 book 里撮合不兼容的 tick/multiplier 版本。
+- ProductExecutionCore 遇到同一 symbol 已有不同 `instrument_change_id` 的开放订单时拒绝新的 `PLACE` command，避免 exchange-core 在同一个 book 里撮合不兼容的 tick/multiplier 配置。
 - 运维上，tick size、quantity step、multiplier、contract type、settlement asset 这类核心字段变更前，应先暂停交易并清理开放订单。
 
 ## 幂等和多节点
@@ -581,3 +581,7 @@ mvn -pl :surprising-trading-provider -am test
 mvn -pl :surprising-market-data-provider -am test
 rg -n "BigDecimal" surprising-trading -g '*.java'
 ```
+
+
+Instrument 仅保留当前配置；`instrumentChangeId` 引用交易计算参数对应的操作日志。
+纯状态更新使用独立的最近操作 ID，不使已有订单/持仓引用失效。后台低频同步到 Core，并展示确认结果。

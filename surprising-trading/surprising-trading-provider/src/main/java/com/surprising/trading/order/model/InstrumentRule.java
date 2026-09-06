@@ -6,7 +6,7 @@ import java.util.Set;
 
 public record InstrumentRule(
         String symbol,
-        long version,
+        long changeId,
         String status,
         InstrumentType instrumentType,
         ContractType contractType,
@@ -28,7 +28,7 @@ public record InstrumentRule(
         long initialMarginRatePpm) {
 
     public InstrumentRule(String symbol,
-                          long version,
+                          long changeId,
                           String status,
                           ContractType contractType,
                           Set<String> supportedOrderTypes,
@@ -43,7 +43,7 @@ public record InstrumentRule(
                           long notionalMultiplierUnits,
                           long maxLeveragePpm,
                           long initialMarginRatePpm) {
-        this(symbol, version, status, InstrumentType.PERPETUAL, contractType, "", "", "",
+        this(symbol, changeId, status, InstrumentType.PERPETUAL, contractType, "", "", "",
                 supportedOrderTypes, supportedTimeInForce, marketOrderEnabled, postOnlyEnabled,
                 reduceOnlyEnabled, 1L, minQuantitySteps, maxQuantitySteps, minNotionalUnits,
                 maxNotionalUnits, notionalMultiplierUnits, maxLeveragePpm, initialMarginRatePpm);

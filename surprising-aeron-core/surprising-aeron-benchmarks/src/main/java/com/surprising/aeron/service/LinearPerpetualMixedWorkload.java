@@ -405,7 +405,7 @@ final class LinearPerpetualMixedWorkload {
                 var action = work.actions().getFirst();
                 liquidationId = action.liquidationId();
                 var batchAction = new ExecuteLiquidationBatchAction(action.liquidationId(), action.userId(),
-                        action.symbol(), action.instrumentVersion(), action.triggerPriceSequence(),
+                        action.symbol(), action.instrumentChangeId(), action.triggerPriceSequence(),
                         action.markPriceTicks(), action.cursorOrderId());
                 var batch = new ExecuteLiquidationBatchCommand(List.of(batchAction),
                         ExecuteLiquidationBatchCommand.MAX_CANCEL_ORDERS, 0, null, 0);

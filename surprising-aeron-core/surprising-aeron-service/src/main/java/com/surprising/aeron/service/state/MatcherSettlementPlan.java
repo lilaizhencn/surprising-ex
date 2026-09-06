@@ -62,7 +62,7 @@ public final class MatcherSettlementPlan {
                     throw new IllegalStateException("runtime matched order is not open: " + takerOrderId);
                 }
                 CoreInstrumentState instrument = runtime.instrument(identities.symbol(taker.symbolId()));
-                if (instrument == null || instrument.version() != taker.instrumentVersion()) {
+                if (instrument == null || instrument.changeId() != taker.instrumentChangeId()) {
                     throw new IllegalStateException("runtime match instrument is missing");
                 }
                 preparePositionIdentity(runtime, identities, instrument, taker);
@@ -122,7 +122,7 @@ public final class MatcherSettlementPlan {
         }
         OrderRuntime taker = requireOpen(runtime, takerOrderId);
         CoreInstrumentState instrument = runtime.instrument(identities.symbol(taker.symbolId()));
-        if (instrument == null || instrument.version() != taker.instrumentVersion()) {
+        if (instrument == null || instrument.changeId() != taker.instrumentChangeId()) {
             throw new IllegalStateException("runtime match instrument is missing");
         }
         int expectedChanges = Math.max(2, result.matcherEvents().size() + result.cancellations().size()

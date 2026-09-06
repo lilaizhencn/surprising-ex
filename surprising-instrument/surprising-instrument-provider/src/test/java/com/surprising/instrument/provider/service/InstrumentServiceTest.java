@@ -140,52 +140,21 @@ class InstrumentServiceTest {
                 100_000L, 0L))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("必须先进入 SETTLING");
-        verify(storageService, org.mockito.Mockito.never()).insert(any(), anyLong(), any(), any());
+        verify(storageService, org.mockito.Mockito.never()).save(any(), any(), any(), any(), any());
     }
 
     @Test
-    void upsertCreatesImmutableLinearPerpetualV4AndAdvancesOnlyItsCurrentPointer() throws Exception {
-        String symbol = "BTC-USDT-SWAP";
-        InstrumentResponse v3 = linearPerpetual(symbol, 3L, 100_000_000_000L);
-        InstrumentUpsertRequest request = request(v3, 10_000_000L);
-        byte[] independentlySerializedV3 = OBJECT_MAPPER.writeValueAsBytes(v3);
-        StatefulSerializedInstrumentStorage storageService = new StatefulSerializedInstrumentStorage();
-        storageService.seedRow(symbol, 3L, independentlySerializedV3);
-        storageService.seedGlobalPointer(symbol, 3L);
-        storageService.seedGlobalPointer("ETH-USDT-SWAP", 7L);
-        storageService.seedProductPointer(ProductLine.LINEAR_PERPETUAL, symbol, 3L);
-        storageService.seedProductPointer(ProductLine.SPOT, "ETH-USDT", 11L);
-        storageService.seedProductPointer(ProductLine.INVERSE_PERPETUAL, "BTC-USD-SWAP", 13L);
-        Map<String, Long> globalPointersBefore = storageService.globalPointers();
-        Map<String, Long> productPointersBefore = storageService.productPointers();
-        InstrumentOutboxService outboxService = mock(InstrumentOutboxService.class);
-        InstrumentService service = new InstrumentService(storageService, mock(InstrumentValidator.class),
-                new InstrumentProperties(), outboxService);
-
-        byte[] persistedV3Before = storageService.persistedBytes(symbol, 3L);
-        InstrumentResponse created = service.upsert(request);
-        byte[] persistedV3After = storageService.persistedBytes(symbol, 3L);
-        InstrumentResponse independentlyReadV3 = storageService.persistedResponse(symbol, 3L);
-        InstrumentResponse current = service.latest(symbol, ProductLine.LINEAR_PERPETUAL);
-
-        assertThat(created.version()).isEqualTo(4L);
-        assertThat(created.priceTickUnits()).isEqualTo(10_000_000L);
-        assertThat(current).isEqualTo(created);
-        assertThat(storageService.insertedVersion()).isEqualTo(4L);
-        assertThat(storageService.insertedRequest()).isEqualTo(request);
-        assertThat(persistedV3Before).containsExactly(independentlySerializedV3);
-        assertThat(persistedV3After).containsExactly(independentlySerializedV3);
-        assertThat(independentlyReadV3).isEqualTo(v3);
-
-        Map<String, Long> expectedGlobalPointers = new HashMap<>(globalPointersBefore);
-        expectedGlobalPointers.put(symbol, 4L);
-        assertThat(storageService.globalPointers()).containsExactlyInAnyOrderEntriesOf(expectedGlobalPointers);
-        Map<String, Long> expectedProductPointers = new HashMap<>(productPointersBefore);
-        expectedProductPointers.put(ProductLine.LINEAR_PERPETUAL.name() + ":" + symbol, 4L);
-        assertThat(storageService.productPointers()).containsExactlyInAnyOrderEntriesOf(expectedProductPointers);
-        verify(outboxService).enqueue(eq("INSTRUMENT"), eq(4L),
-                eq("surprising.instrument.events.v1"), eq("LINEAR_PERPETUAL:" + symbol), eq("UPSERTED"),
-                any(Object.class), any(Instant.class));
+    void upsertPublishesCurrentConfigurationWithAuditReference() {
+        var storage = mock(InstrumentStorageService.class);
+        var outbox = mock(InstrumentOutboxService.class);
+        var result = linearPerpetual("BTC-USDT-SWAP", 4L, 10_000_000L);
+        var request = request(result, result.priceTickUnits());
+        when(storage.save(eq(result.symbol()), eq(request), eq("admin-1"), eq("maintenance"), any()))
+                .thenReturn(result);
+        var service = new InstrumentService(storage, mock(InstrumentValidator.class), new InstrumentProperties(), outbox);
+        assertThat(service.upsert(request, "admin-1", "maintenance")).isEqualTo(result);
+        verify(outbox).enqueue(eq("INSTRUMENT"), eq(4L), eq("surprising.instrument.events.v1"),
+                eq("LINEAR_PERPETUAL:BTC-USDT-SWAP"), eq("UPSERTED"), any(Object.class), any(Instant.class));
     }
 
     private InstrumentService service(InstrumentOutboxService outboxService, InstrumentProperties properties) {
@@ -307,98 +276,4 @@ class InstrumentServiceTest {
                 List.of());
     }
 
-    private final class StatefulSerializedInstrumentStorage extends InstrumentStorageService {
-        private final Map<String, Map<Long, byte[]>> rows = new HashMap<>();
-        private final Map<String, Long> globalPointers = new HashMap<>();
-        private final Map<String, Long> productPointers = new HashMap<>();
-        private InstrumentUpsertRequest insertedRequest;
-        private long insertedVersion;
-
-        private StatefulSerializedInstrumentStorage() {
-            super(null, null, null, null, null, null);
-        }
-
-        private void seedRow(String symbol, long version, byte[] serialized) {
-            rows.computeIfAbsent(symbol, ignored -> new HashMap<>()).put(version, serialized.clone());
-        }
-
-        private void seedGlobalPointer(String symbol, long version) {
-            globalPointers.put(symbol, version);
-        }
-
-        private void seedProductPointer(ProductLine productLine, String symbol, long version) {
-            productPointers.put(productLine.name() + ":" + symbol, version);
-        }
-
-        private byte[] persistedBytes(String symbol, long version) {
-            return rows.getOrDefault(symbol, Map.of()).get(version).clone();
-        }
-
-        private InstrumentResponse persistedResponse(String symbol, long version) {
-            try {
-                return OBJECT_MAPPER.readValue(persistedBytes(symbol, version), InstrumentResponse.class);
-            } catch (Exception ex) {
-                throw new AssertionError("failed to deserialize persisted instrument", ex);
-            }
-        }
-
-        private Map<String, Long> globalPointers() {
-            return Map.copyOf(globalPointers);
-        }
-
-        private Map<String, Long> productPointers() {
-            return Map.copyOf(productPointers);
-        }
-
-        private InstrumentUpsertRequest insertedRequest() {
-            return insertedRequest;
-        }
-
-        private long insertedVersion() {
-            return insertedVersion;
-        }
-
-        @Override
-        public long nextVersion(String symbol) {
-            return rows.getOrDefault(symbol, Map.of()).keySet().stream().mapToLong(Long::longValue).max().orElse(0L) + 1L;
-        }
-
-        @Override
-        public void insert(String symbol, long version, InstrumentUpsertRequest request, Instant now) {
-            insertedRequest = request;
-            insertedVersion = version;
-            seedRow(symbol, version, OBJECT_MAPPER.writeValueAsBytes(
-                    linearPerpetual(symbol, version, request.priceTickUnits())));
-        }
-
-        @Override
-        public void setCurrentVersion(String symbol, long version, Instant now) {
-            globalPointers.put(symbol, version);
-        }
-
-        @Override
-        public void setCurrentVersion(ProductLine productLine, String symbol, long version, Instant now) {
-            productPointers.put(productLine.name() + ":" + symbol, version);
-        }
-
-        @Override
-        public Optional<InstrumentResponse> latest(String symbol) {
-            Long version = globalPointers.get(symbol);
-            return version == null ? Optional.empty() : version(symbol, version);
-        }
-
-        @Override
-        public Optional<InstrumentResponse> latest(String symbol, ProductLine productLine) {
-            Long version = productPointers.get(productLine.name() + ":" + symbol);
-            return version == null ? Optional.empty() : version(symbol, version);
-        }
-
-        @Override
-        public Optional<InstrumentResponse> version(String symbol, long version) {
-            if (!rows.getOrDefault(symbol, Map.of()).containsKey(version)) {
-                return Optional.empty();
-            }
-            return Optional.of(persistedResponse(symbol, version));
-        }
-    }
 }

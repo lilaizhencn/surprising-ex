@@ -148,7 +148,7 @@ public final class PositionSnapshotCache {
         return left.productLine() == right.productLine()
                 && left.userId() == right.userId()
                 && left.symbol().equalsIgnoreCase(right.symbol())
-                && left.instrumentVersion() == right.instrumentVersion()
+                && left.instrumentChangeId() == right.instrumentChangeId()
                 && left.marginMode() == right.marginMode()
                 && left.positionSide() == right.positionSide()
                 && left.signedQuantitySteps() == right.signedQuantitySteps()

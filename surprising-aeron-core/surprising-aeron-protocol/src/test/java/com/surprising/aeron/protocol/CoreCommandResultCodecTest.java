@@ -24,7 +24,7 @@ class CoreCommandResultCodecTest {
         assertThat(restored.coreSequence()).isEqualTo(41);
         assertThat(restored.commandId()).isEqualTo(commandId);
         assertThat(restored.orderId()).isEqualTo(71);
-        assertThat(restored.instrumentVersion()).isEqualTo(9);
+        assertThat(restored.instrumentChangeId()).isEqualTo(9);
         assertThat(restored.matcherSequence()).isEqualTo(83);
         assertThat(restored.matcherPrefixBefore()).isEqualTo(0x1020_3040_5060_7080L);
         assertThat(restored.matcherPrefixAfter()).isEqualTo(0x1121_3141_5161_7181L);

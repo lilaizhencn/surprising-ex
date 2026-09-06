@@ -33,7 +33,7 @@ public final class RuntimeSpotMatchProcessor {
             return;
         }
         CoreInstrumentState instrument = runtime.instrument(identities.symbol(taker.symbolId()));
-        if (instrument == null || instrument.version() != taker.instrumentVersion()) {
+        if (instrument == null || instrument.changeId() != taker.instrumentChangeId()) {
             throw new IllegalStateException("runtime match instrument is missing");
         }
         if (ProductTradingRulesRegistry.forInstrument(instrument).productLine()

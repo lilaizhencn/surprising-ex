@@ -74,7 +74,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
         cancelOrders(runtime, canceledOrders == null ? List.of() : canceledOrders);
 
         CoreInstrumentState instrument = requireInstrument(runtime, identities.symbol(liquidation.symbolId()),
-                liquidation.instrumentVersion());
+                liquidation.instrumentChangeId());
         int settleAssetId = identities.assetId(instrument.settleAsset());
         long positionKey = identities.positionKey(liquidation.userId(),
                 positionKey(identities.symbol(liquidation.symbolId()), liquidation.positionSide()));
@@ -107,7 +107,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
         long nextEntryValue = remainingAbs == 0 ? 0
                 : proportional(position.entryValueTicks(), remainingAbs, currentAbs);
         PositionRuntime nextPosition = new PositionRuntime(position.userId(), position.symbolId(), position.assetId(),
-                position.marginMode(), position.positionSide(), remainingAbs == 0 ? 0 : position.instrumentVersion(),
+                position.marginMode(), position.positionSide(), remainingAbs == 0 ? 0 : position.instrumentChangeId(),
                 nextQuantity, remainingAbs == 0 ? 0 : position.entryPriceTicks(), nextEntryValue,
                 Math.addExact(position.realizedPnlUnits(), instrument.contractType().isOption() ? 0 : pnl),
                 Math.subtractExact(position.positionMarginUnits(), releasedMargin));
@@ -181,7 +181,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
         cancelOrders(runtime, canceledOrders == null ? List.of() : canceledOrders);
         LiquidationRuntime current = runtime.liquidation(command.liquidationId());
         LiquidationRuntime next = new LiquidationRuntime(current.liquidationId(), current.userId(),
-                current.symbolId(), current.marginMode(), current.positionSide(), current.instrumentVersion(),
+                current.symbolId(), current.marginMode(), current.positionSide(), current.instrumentChangeId(),
                 current.triggerPriceSequence(), current.signedQuantitySteps(), current.closeQuantitySteps(),
                 current.deficitUnits(), current.executionPriceTicks(), current.liquidationFeeRatePpm(),
                 current.liquidationFeeUnits(), CoreLiquidationState.Status.ORDERED, nextCursorOrderId);
@@ -227,7 +227,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
             throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
         }
         CoreInstrumentState instrument = requireInstrument(runtime, identities.symbol(liquidation.symbolId()),
-                liquidation.instrumentVersion());
+                liquidation.instrumentChangeId());
         LiquidationRuntime current = liquidation;
         CoreLiquidationState.Status nextStatus;
         long nextDeficit = liquidation.deficitUnits();
@@ -285,7 +285,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
             default -> throw new IllegalStateException("unknown liquidation resolution");
         }
         LiquidationRuntime nextLiquidation = new LiquidationRuntime(current.liquidationId(), current.userId(),
-                current.symbolId(), current.marginMode(), current.positionSide(), current.instrumentVersion(),
+                current.symbolId(), current.marginMode(), current.positionSide(), current.instrumentChangeId(),
                 current.triggerPriceSequence(), current.signedQuantitySteps(), current.closeQuantitySteps(),
                 nextDeficit, current.executionPriceTicks(), current.liquidationFeeRatePpm(),
                 current.liquidationFeeUnits(), nextStatus, 0);
@@ -347,7 +347,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
             throw new CoreStateRejectedException("INVALID_COMMAND", "ADL command does not match liquidation");
         }
         CoreInstrumentState instrument = requireInstrument(runtime, identities.symbol(liquidation.symbolId()),
-                liquidation.instrumentVersion());
+                liquidation.instrumentChangeId());
         MarkPriceRuntime mark = runtime.markPrice(liquidation.symbolId());
         if (mark == null || mark.priceSequence() != command.markPriceSequence()) {
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "ADL mark price changed");
@@ -395,7 +395,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
         long nextEntryValue = remainingAbs == 0 ? 0
                 : proportional(position.entryValueTicks(), remainingAbs, currentAbs);
         PositionRuntime nextPosition = new PositionRuntime(position.userId(), position.symbolId(), position.assetId(),
-                position.marginMode(), position.positionSide(), remainingAbs == 0 ? 0 : position.instrumentVersion(),
+                position.marginMode(), position.positionSide(), remainingAbs == 0 ? 0 : position.instrumentChangeId(),
                 nextQuantity, remainingAbs == 0 ? 0 : position.entryPriceTicks(), nextEntryValue,
                 Math.addExact(position.realizedPnlUnits(),
                         instrument.contractType().isOption() ? 0 : coverCapacity),
@@ -406,7 +406,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
                 ? CoreLiquidationState.Status.COMPLETED : CoreLiquidationState.Status.ADL_REQUIRED;
 
         LiquidationRuntime nextLiquidation = new LiquidationRuntime(current.liquidationId(), current.userId(),
-                current.symbolId(), current.marginMode(), current.positionSide(), current.instrumentVersion(),
+                current.symbolId(), current.marginMode(), current.positionSide(), current.instrumentChangeId(),
                 current.triggerPriceSequence(), current.signedQuantitySteps(), current.closeQuantitySteps(),
                 nextDeficit, current.executionPriceTicks(), current.liquidationFeeRatePpm(),
                 current.liquidationFeeUnits(), nextStatus, 0);
@@ -494,7 +494,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
                 positionKey(symbol, liquidation.positionSide()));
         PositionRuntime position = runtime.position(positionKey);
         RiskSnapshotRuntime risk = runtime.riskSnapshot(positionKey);
-        return position != null && position.instrumentVersion() == liquidation.instrumentVersion()
+        return position != null && position.instrumentChangeId() == liquidation.instrumentChangeId()
                 && position.marginMode() == liquidation.marginMode()
                 && position.signedQuantitySteps() == liquidation.signedQuantitySteps()
                 && risk != null && risk.priceSequence() == liquidation.triggerPriceSequence()
@@ -522,8 +522,8 @@ public final class RuntimeDerivativeLiquidationProcessor {
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         }
-        if (instrument.version() != version) {
-            throw new CoreStateRejectedException("INSTRUMENT_VERSION_CONFLICT", "instrument version differs");
+        if (instrument.changeId() != version) {
+            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT", "instrument version differs");
         }
         return instrument;
     }
@@ -531,7 +531,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
     private static LiquidationRuntime copy(LiquidationRuntime current, long deficit, long priceTicks,
                                            long feeRatePpm, CoreLiquidationState.Status status, long feeUnits) {
         return new LiquidationRuntime(current.liquidationId(), current.userId(), current.symbolId(),
-                current.marginMode(), current.positionSide(), current.instrumentVersion(),
+                current.marginMode(), current.positionSide(), current.instrumentChangeId(),
                 current.triggerPriceSequence(), current.signedQuantitySteps(), current.closeQuantitySteps(),
                 deficit, priceTicks, feeRatePpm, feeUnits, status, 0);
     }

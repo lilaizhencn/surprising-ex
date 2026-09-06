@@ -55,7 +55,7 @@ public class InstrumentOrderDrainService {
             InstrumentLifecycleDrainEvent ready = new InstrumentLifecycleDrainEvent(
                     InstrumentLifecycleDrainEvent.CURRENT_SCHEMA_VERSION,
                     event.symbol(),
-                    event.version(),
+                    event.changeId(),
                     properties.getKafka().getProductLine(),
                     InstrumentLifecycleDrainComponent.ORDER,
                     Instant.now());

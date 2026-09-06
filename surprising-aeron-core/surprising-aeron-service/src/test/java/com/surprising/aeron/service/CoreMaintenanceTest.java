@@ -13,6 +13,49 @@ class CoreMaintenanceTest {
 
     @ParameterizedTest
     @EnumSource(ProductLine.class)
+    void statusOnlyChangesPreserveOpenStateMathAndRecoverWithoutReleasingMaintenance(ProductLine line) {
+        try (var state=fixture(line)) {
+            applied(state,command(line,11,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(301,false,CoreOrderSide.SELL))));
+            applied(state,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(302,false,CoreOrderSide.BUY))));
+            applied(state,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(303,false,CoreOrderSide.BUY))));
+            long funds=com.surprising.aeron.service.state.RollingFundsStateHash.compute(state.tradingState());
+            var instrument=state.tradingState().instruments().get("BTC-USDT");
+            var halt=config(instrument,1,2,2);
+            applied(state,command(line,0,CoreMessageType.UPSERT_INSTRUMENT,TradingCommandCodec.encodeUpsertInstrument(halt)));
+            assertThat(state.tradingState().instruments().get("BTC-USDT").changeId()).isEqualTo(1);
+            assertThat(com.surprising.aeron.service.state.RollingFundsStateHash.compute(state.tradingState())).isEqualTo(funds);
+            var denied=apply(state,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(304,false,CoreOrderSide.BUY))));
+            assertThat(denied.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+            // A new calculation reference remains forbidden while an order or position uses the instrument.
+            var edit=apply(state,command(line,0,CoreMessageType.UPSERT_INSTRUMENT,TradingCommandCodec.encodeUpsertInstrument(config(instrument,3,3,2))));
+            assertThat(edit.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+            try (var restored=CoreProbeState.fromSnapshot(line,state.snapshot(501))) {
+                var recovered=restored.tradingState().instruments().get("BTC-USDT");
+                assertThat(recovered.status()).isEqualTo(com.surprising.instrument.api.model.InstrumentStatus.HALT);
+                assertThat(recovered.lastChangeId()).isEqualTo(2);
+                assertThat(com.surprising.aeron.service.state.RollingFundsStateHash.compute(restored.tradingState())).isEqualTo(funds);
+                applied(restored,gate(line,0,new CoreInstrumentMaintenance(999,CoreInstrumentMaintenance.Mode.HALTED,0)));
+                applied(restored,command(line,0,CoreMessageType.UPSERT_INSTRUMENT,TradingCommandCodec.encodeUpsertInstrument(config(instrument,1,4,1))));
+                assertThat(restored.tradingState().instruments().get("BTC-USDT").maintenance().taskId()).isEqualTo(999);
+                assertThat(apply(restored,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(305,false,CoreOrderSide.BUY)))).commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+                applied(restored,gate(line,999,CoreInstrumentMaintenance.TRADING));
+                applied(restored,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(306,false,CoreOrderSide.BUY))));
+                // A delayed pause cannot override the newer resume.
+                assertThat(apply(restored,command(line,0,CoreMessageType.UPSERT_INSTRUMENT,TradingCommandCodec.encodeUpsertInstrument(halt))).commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+            }
+        }
+    }
+
+    private static UpsertInstrumentCommand config(com.surprising.aeron.service.state.CoreInstrumentState v,long calculationId,long auditId,int status) {
+        return new UpsertInstrumentCommand(v.symbol(),calculationId,v.contractType().ordinal(),v.baseAsset(),v.quoteAsset(),v.settleAsset(),
+                v.notionalMultiplierUnits(),v.priceTickUnits(),v.settleScaleUnits(),v.initialMarginRatePpm(),v.maintenanceMarginRatePpm(),
+                v.makerFeeRatePpm(),v.takerFeeRatePpm(),v.expiryEpochMillis(),v.optionType()==null?-1:v.optionType().ordinal(),v.strikePriceTicks(),
+                v.maxLeveragePpm(),v.maxPositionNotionalUnits(),v.userOpenInterestLimitRatePpm(),v.userOpenInterestLimitFloorUnits(),v.riskLimitBrackets(),status,auditId);
+    }
+
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
     void gateSurvivesSnapshotRejectsOpeningAndRequiresTaskOwnership(ProductLine line) {
         try (var state = fixture(line)) {
             var mode = line == ProductLine.SPOT ? CoreInstrumentMaintenance.Mode.HALTED : CoreInstrumentMaintenance.Mode.REDUCE_ONLY;

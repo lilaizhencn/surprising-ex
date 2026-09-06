@@ -94,7 +94,7 @@ public final class W4LifecycleQaMain implements AutoCloseable {
     private final Map<String, Long> expectedFunds = new LinkedHashMap<>();
     private final List<String> rows = new ArrayList<>();
     private final List<SpotOrder> spotOrders = new ArrayList<>();
-    private final Map<String, Long> instrumentVersions = new LinkedHashMap<>();
+    private final Map<String, Long> instrumentChangeIds = new LinkedHashMap<>();
     private boolean reconciliationObserved;
     private boolean makerReconciliationObserved;
     private boolean providerBoundaryObserved;
@@ -447,11 +447,11 @@ public final class W4LifecycleQaMain implements AutoCloseable {
                         type.isInverse() ? 100 : 1, 1, type.isInverse() ? 100 : 1,
                         100_000, 100_000, MAKER_FEE_RATE_PPM, TAKER_FEE_RATE_PPM,
                         expiry, optionCode, strike)));
-        awaitTradingInstrumentVersion(symbol, version);
-        instrumentVersions.put(symbol, version);
+        awaitTradingInstrumentChangeId(symbol, version);
+        instrumentChangeIds.put(symbol, version);
     }
 
-    private void awaitTradingInstrumentVersion(String symbol, long version) {
+    private void awaitTradingInstrumentChangeId(String symbol, long version) {
         String body = "{\"userId\":" + makerUserId + ",\"clientOrderId\":"
                 + json("w4-version-probe-" + seed + '-' + symbol) + ",\"symbol\":" + json(symbol)
                 + ",\"side\":\"BUY\",\"orderType\":\"LIMIT\",\"timeInForce\":\"GTC\""
@@ -461,7 +461,7 @@ public final class W4LifecycleQaMain implements AutoCloseable {
         long observed = 0;
         while (Instant.now().isBefore(deadline)) {
             String response = request("command", "POST", "/api/v1/trading/orders/test", body, Map.of());
-            observed = jsonLong(response, "\"instrumentVersion\":", ',');
+            observed = jsonLong(response, "\"instrumentChangeId\":", ',');
             if (observed == version) return;
             try {
                 Thread.sleep(50L);
@@ -684,11 +684,11 @@ public final class W4LifecycleQaMain implements AutoCloseable {
     private void applyFunding(String symbol, long settlementId, long fundingRatePpm) {
         command(CoreMessageType.APPLY_FUNDING, 0,
                 TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                        settlementId, symbol, instrumentVersion(symbol), fundingRatePpm, 0, 256)));
+                        settlementId, symbol, instrumentChangeId(symbol), fundingRatePpm, 0, 256)));
     }
 
-    private long instrumentVersion(String symbol) {
-        Long version = instrumentVersions.get(symbol);
+    private long instrumentChangeId(String symbol) {
+        Long version = instrumentChangeIds.get(symbol);
         if (version == null) throw new IllegalStateException("instrument version unavailable: " + symbol);
         return version;
     }

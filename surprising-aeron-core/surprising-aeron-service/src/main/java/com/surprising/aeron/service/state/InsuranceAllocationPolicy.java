@@ -39,7 +39,7 @@ public final class InsuranceAllocationPolicy {
                 continue;
             }
             CoreInstrumentState instrument = runtime.instrument(identities.symbol(liquidation.symbolId()));
-            if (instrument == null || instrument.version() != liquidation.instrumentVersion()) continue;
+            if (instrument == null || instrument.changeId() != liquidation.instrumentChangeId()) continue;
             int assetId = identities.assetId(instrument.settleAsset());
             byAsset.computeIfAbsent(assetId, ignored -> new ArrayList<>())
                     .add(new Claim(liquidation, identities.symbol(liquidation.symbolId())));
@@ -59,7 +59,7 @@ public final class InsuranceAllocationPolicy {
         LiquidationRuntime target = runtime.liquidation(liquidationId);
         if (target == null || target.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) return 0;
         CoreInstrumentState instrument = runtime.instrument(identities.symbol(target.symbolId()));
-        if (instrument == null || instrument.version() != target.instrumentVersion()) return 0;
+        if (instrument == null || instrument.changeId() != target.instrumentChangeId()) return 0;
         int assetId = identities.assetId(instrument.settleAsset());
         BigInteger total = BigInteger.ZERO;
         int rank = 0;
@@ -95,7 +95,7 @@ public final class InsuranceAllocationPolicy {
         LiquidationRuntime claim = runtime.liquidation(id);
         if (claim == null || claim.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) return null;
         CoreInstrumentState instrument = runtime.instrument(identities.symbol(claim.symbolId()));
-        return instrument != null && instrument.version() == claim.instrumentVersion()
+        return instrument != null && instrument.changeId() == claim.instrumentChangeId()
                 && identities.assetId(instrument.settleAsset()) == assetId ? claim : null;
     }
 
@@ -125,7 +125,7 @@ public final class InsuranceAllocationPolicy {
                 continue;
             }
             CoreInstrumentState instrument = runtime.instrument(identities.symbol(liquidation.symbolId()));
-            if (instrument == null || instrument.version() != liquidation.instrumentVersion()) continue;
+            if (instrument == null || instrument.changeId() != liquidation.instrumentChangeId()) continue;
             if (identities.assetId(instrument.settleAsset()) != targetAssetId) continue;
             if (first == null || compare(liquidation, first, identities) < 0) first = liquidation;
         }
@@ -145,7 +145,7 @@ public final class InsuranceAllocationPolicy {
         for (CoreLiquidationState liquidation : state.riskState().liquidations().values()) {
             if (liquidation.status() != CoreLiquidationState.Status.INSURANCE_REQUIRED) continue;
             CoreInstrumentState instrument = state.instruments().get(liquidation.symbol());
-            if (instrument != null && instrument.version() == liquidation.instrumentVersion()
+            if (instrument != null && instrument.changeId() == liquidation.instrumentChangeId()
                     && asset.equals(instrument.settleAsset())) {
                 claims.add(new CoreClaim(liquidation));
             }
@@ -165,7 +165,7 @@ public final class InsuranceAllocationPolicy {
                 .filter(liquidation -> liquidation.status() == CoreLiquidationState.Status.INSURANCE_REQUIRED)
                 .filter(liquidation -> {
                     CoreInstrumentState instrument = state.instruments().get(liquidation.symbol());
-                    return instrument != null && instrument.version() == liquidation.instrumentVersion()
+                    return instrument != null && instrument.changeId() == liquidation.instrumentChangeId()
                             && targetAsset.equals(instrument.settleAsset());
                 })
                 .map(CoreClaim::new)

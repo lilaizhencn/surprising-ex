@@ -360,7 +360,7 @@ public class AccountService {
 
     private PositionResponse toCorePositionResponse(long userId,
                                                      com.surprising.aeron.protocol.CorePositionView position) {
-        return new PositionResponse(userId, position.symbol(), position.instrumentVersion(),
+        return new PositionResponse(userId, position.symbol(), position.instrumentChangeId(),
                 MarginMode.valueOf(position.marginMode().name()),
                 com.surprising.trading.api.model.PositionSide.valueOf(position.positionSide().name()),
                 position.signedQuantitySteps(), position.entryPriceTicks(), position.realizedPnlUnits(), Instant.now());
@@ -398,7 +398,7 @@ public class AccountService {
                                                           String symbol,
                                                           long version) {
         if (instrument == null || !normalizeSymbol(symbol).equals(normalizeSymbol(instrument.symbol()))
-                || instrument.version() != version) {
+                || instrument.changeId() != version) {
             throw new IllegalArgumentException("生命周期事件缺少匹配的不可变 instrument 快照");
         }
         return instrument;

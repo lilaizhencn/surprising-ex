@@ -321,6 +321,6 @@ class AeronOrderCommandServiceTest {
         return new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
                 1, 1, CoreCommandResultCodec.encode(new CoreCommandResultView(1,
                         UUID.fromString("10000000-0000-0000-0000-000000000003"),
-                        order.orderId(), order.instrumentVersion(), 1, 31, 37, List.of(order), executions)));
+                        order.orderId(), order.instrumentChangeId(), 1, 31, 37, List.of(order), executions)));
     }
 }

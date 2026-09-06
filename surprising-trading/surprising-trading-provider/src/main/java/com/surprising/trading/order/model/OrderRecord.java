@@ -16,7 +16,7 @@ public record OrderRecord(
         long userId,
         String clientOrderId,
         String symbol,
-        long instrumentVersion,
+        long instrumentChangeId,
         OrderSide side,
         OrderType orderType,
         TimeInForce timeInForce,
@@ -63,7 +63,7 @@ public record OrderRecord(
                        long userId,
                        String clientOrderId,
                        String symbol,
-                       long instrumentVersion,
+                       long instrumentChangeId,
                        OrderSide side,
                        OrderType orderType,
                        TimeInForce timeInForce,
@@ -82,7 +82,7 @@ public record OrderRecord(
                        Instant createdAt,
                        Instant updatedAt,
                        long revision) {
-        this(orderId, productLine, userId, clientOrderId, symbol, instrumentVersion, side, orderType, timeInForce,
+        this(orderId, productLine, userId, clientOrderId, symbol, instrumentChangeId, side, orderType, timeInForce,
                 priceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps, marginMode, positionSide,
                 makerFeeRatePpm, takerFeeRatePpm, reduceOnly, postOnly, null, null, 0L,
                 status, rejectReason, createdAt, updatedAt, revision, null);
@@ -93,7 +93,7 @@ public record OrderRecord(
                        long userId,
                        String clientOrderId,
                        String symbol,
-                       long instrumentVersion,
+                       long instrumentChangeId,
                        OrderSide side,
                        OrderType orderType,
                        TimeInForce timeInForce,
@@ -115,7 +115,7 @@ public record OrderRecord(
                        Instant createdAt,
                        Instant updatedAt,
                        long revision) {
-        this(orderId, productLine, userId, clientOrderId, symbol, instrumentVersion, side, orderType, timeInForce,
+        this(orderId, productLine, userId, clientOrderId, symbol, instrumentChangeId, side, orderType, timeInForce,
                 priceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps, marginMode, positionSide,
                 makerFeeRatePpm, takerFeeRatePpm, reduceOnly, postOnly, reservationAccountType, reservationAsset,
                 reservedUnits, status, rejectReason, createdAt, updatedAt, revision, null);

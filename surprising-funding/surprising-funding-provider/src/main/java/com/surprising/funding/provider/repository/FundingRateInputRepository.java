@@ -55,7 +55,7 @@ public class FundingRateInputRepository {
         }
         List<FundingRateInput> result = new ArrayList<>(markPrices.size());
         for (MarkPriceEvent mark : markPrices) {
-            var instrument = snapshotCache.version(productLine, mark.symbol(), mark.instrumentVersion()).orElse(null);
+            var instrument = snapshotCache.current(productLine, mark.symbol(), mark.instrumentChangeId()).orElse(null);
             if (instrument == null || instrument.status() != InstrumentStatus.TRADING
                     || instrument.fundingIntervalHours() <= 0 || mark.markPrice() == null
                     || mark.indexPrice() == null

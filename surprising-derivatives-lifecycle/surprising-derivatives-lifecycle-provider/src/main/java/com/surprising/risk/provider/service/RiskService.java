@@ -145,7 +145,7 @@ public class RiskService {
         if (risk == null) return candidate;
         return new LiquidationCandidateResponse(candidate.candidateId(), risk.priceSequence(), candidate.userId(),
                 candidate.symbol(), MarginMode.valueOf(risk.marginMode().name()), candidate.positionSide(),
-                risk.instrumentVersion(), candidate.accountType(), risk.settleAsset(), risk.signedQuantitySteps(),
+                risk.instrumentChangeId(), candidate.accountType(), risk.settleAsset(), risk.signedQuantitySteps(),
                 risk.markPriceTicks(), risk.equityUnits(), risk.maintenanceMarginUnits(), risk.marginRatioPpm(),
                 candidate.status(), candidate.eventTime());
     }
@@ -161,7 +161,7 @@ public class RiskService {
     private RiskPositionSnapshotResponse position(CoreRiskSnapshotView value, Instant eventTime) {
         return new RiskPositionSnapshotResponse(value.priceSequence(), value.userId(), value.symbol(),
                 MarginMode.valueOf(value.marginMode().name()), PositionSide.valueOf(value.positionSide().name()),
-                value.instrumentVersion(), value.settleAsset(), value.signedQuantitySteps(), value.entryPriceTicks(),
+                value.instrumentChangeId(), value.settleAsset(), value.signedQuantitySteps(), value.entryPriceTicks(),
                 value.markPriceTicks(), value.notionalUnits(), value.unrealizedPnlUnits(),
                 value.maintenanceMarginUnits(), value.positionMarginUnits(), value.marginRatioPpm(),
                 RiskStatus.valueOf(value.status()), eventTime);

@@ -13,14 +13,14 @@ class OkxInstrumentSeedContractTest {
 
     @Test
     void linearPerpetualBtcSwapHasCanonicalThreeSourcePublicWebSocketMatrix() throws IOException {
-        String sql = Files.readString(repositoryFile("okx-instrument-seed.sql"));
+        String sql = Files.readString(repositoryFile("init.sql"));
 
         assertThat(sql).contains(MATRIX_MARKER);
         int matrixStart = sql.indexOf(MATRIX_MARKER);
         String matrix = sql.substring(matrixStart, sql.indexOf("-- OKX catalog counts", matrixStart));
         assertThat(matrix)
                 .contains("UPDATE instruments SET min_valid_index_sources = 3")
-                .contains("WHERE contract_type = 'LINEAR_PERPETUAL' AND symbol = 'BTC-USDT-SWAP' AND version = 1")
+                .contains("WHERE contract_type = 'LINEAR_PERPETUAL' AND symbol = 'BTC-USDT-SWAP'")
                 .contains("'OKX', TRUE", "'BINANCE', TRUE", "'BYBIT', TRUE")
                 .contains("'wss://ws.okx.com:8443/ws/v5/public'")
                 .contains("'wss://stream.binance.com:9443/ws'")
@@ -34,7 +34,7 @@ class OkxInstrumentSeedContractTest {
 
     @Test
     void linearPerpetualBtcSwapUsesOneTenthUsdtPriceTicks() throws IOException {
-        String sql = Files.readString(repositoryFile("okx-instrument-seed.sql"));
+        String sql = Files.readString(repositoryFile("init.sql"));
 
         assertThat(sql).contains("""
                 UPDATE surprising_okx_instruments

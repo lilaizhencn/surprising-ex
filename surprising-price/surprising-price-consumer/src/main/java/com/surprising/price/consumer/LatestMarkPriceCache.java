@@ -96,7 +96,7 @@ public class LatestMarkPriceCache {
         if (event == null || event.productLine() == null || event.productLine() != properties.getProductLine()) {
             throw new IllegalArgumentException("mark price product line does not match consumer");
         }
-        if (event.instrumentVersion() <= 0 || event.markPriceUnits() <= 0 || event.markPriceTicks() <= 0
+        if (event.instrumentChangeId() <= 0 || event.markPriceUnits() <= 0 || event.markPriceTicks() <= 0
                 || event.sequence() <= 0 || event.eventTime() == null || event.publishedAt() == null) {
             throw new IllegalArgumentException("mark price fixed-point fields and timestamps must be positive");
         }

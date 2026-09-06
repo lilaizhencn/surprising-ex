@@ -18,7 +18,7 @@ public class MarkPriceTickRepository {
 
     private static final String INSERT_SQL = """
             INSERT INTO price_mark_ticks (
-                product_line, symbol, instrument_version, sequence, mark_price, mark_price_units,
+                product_line, symbol, instrument_change_id, sequence, mark_price, mark_price_units,
                 mark_price_ticks, index_price, price1, price2, last_trade_price,
                 best_bid_price, best_ask_price, funding_rate, next_funding_time, time_until_funding_seconds,
                 basis_average, basis_window_seconds, clamp_low, clamp_high, status, event_time, published_at,
@@ -44,7 +44,7 @@ public class MarkPriceTickRepository {
                 MarkPriceEvent event = record.event().result();
                 statement.setString(1, event.productLine().name());
                 statement.setString(2, event.symbol());
-                statement.setLong(3, event.instrumentVersion());
+                statement.setLong(3, event.instrumentChangeId());
                 statement.setLong(4, event.sequence());
                 statement.setBigDecimal(5, event.markPrice());
                 statement.setLong(6, event.markPriceUnits());

@@ -375,7 +375,7 @@ public class MarketMakerService {
             PositionResponse position = currentPosition(strategy, accountId, symbol, instrument);
             OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(symbol,
                     properties.getQuoting().getOrderBookDepth());
-            MarkPriceResponse markPrice = currentMarkPrice(productLine, symbol, instrument.version());
+            MarkPriceResponse markPrice = currentMarkPrice(productLine, symbol, instrument.changeId());
             ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(symbol, productLine, instrument);
             QuotePlan plan = !isTradableForProduct(instrument, productLine)
                     ? new QuotePlan(0L, position.signedQuantitySteps(), List.of(), 0)
@@ -642,7 +642,7 @@ public class MarketMakerService {
                 requireTradable(instrument, strategy.getProductLine());
                 OrderBookSnapshotResponse orderBook = marketDataRpcApi.orderBook(symbol,
                         properties.getQuoting().getOrderBookDepth());
-                MarkPriceResponse markPrice = currentMarkPrice(strategy.getProductLine(), symbol, instrument.version());
+                MarkPriceResponse markPrice = currentMarkPrice(strategy.getProductLine(), symbol, instrument.changeId());
                 ReferenceOrderBookSnapshot referenceOrderBook = referenceMarketProvider.snapshot(symbol,
                         strategy.getProductLine(), instrument);
                 long volatilityTicks = observeVolatility(strategy, symbol, instrument, orderBook, markPrice);
@@ -1186,11 +1186,11 @@ public class MarketMakerService {
         return productLine.name() + ":" + accountId + ":" + symbol;
     }
 
-    private MarkPriceResponse latestMarkPrice(String symbol, long instrumentVersion) {
+    private MarkPriceResponse latestMarkPrice(String symbol, long instrumentChangeId) {
         MarkPriceEvent event = markPriceCache.requireFresh(symbol);
-        if (event.instrumentVersion() != instrumentVersion) {
+        if (event.instrumentChangeId() != instrumentChangeId) {
             throw new IllegalStateException("mark price instrument version mismatch for " + symbol
-                    + ": expected=" + instrumentVersion + ", actual=" + event.instrumentVersion());
+                    + ": expected=" + instrumentChangeId + ", actual=" + event.instrumentChangeId());
         }
         return new MarkPriceResponse(event.symbol(), event.markPrice(), event.markPriceUnits(), event.indexPrice(),
                 event.price1(), event.price2(), event.lastTradePrice(), event.bestBidPrice(), event.bestAskPrice(),
@@ -1212,14 +1212,14 @@ public class MarketMakerService {
             // AccountRpcApi 只访问账户服务本地快照，不会在报价周期内查询数据库。
             var balance = accountRpcApi.balance(accountId, instrument.baseAsset());
             long inventory = balance == null ? 0L : Math.max(0L, balance.equityUnits());
-            return new PositionResponse(accountId, symbol, instrument.version(),
+            return new PositionResponse(accountId, symbol, instrument.changeId(),
                     strategy.getMarginMode(), PositionSide.NET, inventory, 0L, 0L, Instant.now());
         }
         return accountRpcApi.position(accountId, symbol, strategy.getMarginMode().name(), PositionSide.NET.name());
     }
 
-    private MarkPriceResponse currentMarkPrice(ProductLine productLine, String symbol, long instrumentVersion) {
-        return latestMarkPrice(symbol, instrumentVersion);
+    private MarkPriceResponse currentMarkPrice(ProductLine productLine, String symbol, long instrumentChangeId) {
+        return latestMarkPrice(symbol, instrumentChangeId);
     }
 
     private void requireTradable(InstrumentResponse instrument, ProductLine productLine) {

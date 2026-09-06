@@ -67,7 +67,7 @@ class InstrumentOrderDrainServiceTest {
         InstrumentEvent event = mock(InstrumentEvent.class);
         when(event.status()).thenReturn(InstrumentStatus.SETTLING);
         when(event.symbol()).thenReturn("BTC-USDT-260327");
-        when(event.version()).thenReturn(2L);
+        when(event.changeId()).thenReturn(2L);
         when(event.productLine()).thenReturn(ProductLine.LINEAR_DELIVERY);
         return event;
     }

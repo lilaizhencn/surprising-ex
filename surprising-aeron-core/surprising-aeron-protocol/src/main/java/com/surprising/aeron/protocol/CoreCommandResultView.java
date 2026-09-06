@@ -7,7 +7,7 @@ public record CoreCommandResultView(
         long coreSequence,
         UUID commandId,
         long orderId,
-        long instrumentVersion,
+        long instrumentChangeId,
         long matcherSequence,
         long matcherPrefixBefore,
         long matcherPrefixAfter,
@@ -16,7 +16,7 @@ public record CoreCommandResultView(
 
     public CoreCommandResultView {
         if (coreSequence <= 0 || commandId == null || commandId.equals(new UUID(0, 0))
-                || orderId <= 0 || instrumentVersion <= 0 || matcherSequence <= 0
+                || orderId <= 0 || instrumentChangeId <= 0 || matcherSequence <= 0
                 || matcherPrefixBefore == 0 || matcherPrefixAfter == 0) {
             throw new IllegalArgumentException("invalid command result identity");
         }

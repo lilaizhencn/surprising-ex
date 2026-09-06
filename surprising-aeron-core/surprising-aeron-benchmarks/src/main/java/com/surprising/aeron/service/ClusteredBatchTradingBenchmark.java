@@ -387,7 +387,7 @@ public class ClusteredBatchTradingBenchmark {
 
         private static boolean nonFlat(com.surprising.aeron.service.state.CorePositionState p) {
             return p.signedQuantitySteps()!=0 || p.positionMarginUnits()!=0 || p.entryPriceTicks()!=0
-                    || p.entryValueTicks()!=0 || p.instrumentVersion()!=0 || p.realizedPnlUnits()!=0;
+                    || p.entryValueTicks()!=0 || p.instrumentChangeId()!=0 || p.realizedPnlUnits()!=0;
         }
 
         @TearDown(Level.Iteration)

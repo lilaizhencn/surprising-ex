@@ -5,17 +5,17 @@ public record CorePositionView(
         String marginAsset,
         CoreMarginMode marginMode,
         CorePositionSide positionSide,
-        long instrumentVersion,
+        long instrumentChangeId,
         long signedQuantitySteps,
         long entryPriceTicks,
         long entryValueTicks,
         long realizedPnlUnits,
         long positionMarginUnits) {
 
-    public CorePositionView(String symbol, String marginAsset, long instrumentVersion,
+    public CorePositionView(String symbol, String marginAsset, long instrumentChangeId,
                             long signedQuantitySteps, long entryPriceTicks, long entryValueTicks,
                             long realizedPnlUnits, long positionMarginUnits) {
-        this(symbol, marginAsset, CoreMarginMode.CROSS, CorePositionSide.NET, instrumentVersion,
+        this(symbol, marginAsset, CoreMarginMode.CROSS, CorePositionSide.NET, instrumentChangeId,
                 signedQuantitySteps, entryPriceTicks, entryValueTicks, realizedPnlUnits, positionMarginUnits);
     }
 }

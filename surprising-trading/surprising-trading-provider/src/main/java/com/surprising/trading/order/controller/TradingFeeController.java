@@ -32,14 +32,14 @@ public class TradingFeeController {
             TradingApiPaths.INTERNAL_FEE_BASE_PATH + "/effective"})
     public EffectiveTradingFeeResponse effective(@RequestParam("userId") long userId,
                                                  @RequestParam("symbol") String symbol,
-                                                 @RequestParam(value = "instrumentVersion", defaultValue = "0")
-                                                 long instrumentVersion,
+                                                 @RequestParam(value = "instrumentChangeId", defaultValue = "0")
+                                                 long instrumentChangeId,
                                                  @RequestHeader(value = "X-Product-Line", required = false)
                                                  String productLineHeader,
                                                  @RequestParam(value = "productLine", required = false)
                                                  String productLineValue) {
         try {
-            return tradingFeeService.effectiveFee(userId, symbol, instrumentVersion,
+            return tradingFeeService.effectiveFee(userId, symbol, instrumentChangeId,
                     productLine(productLineValue, productLineHeader));
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);

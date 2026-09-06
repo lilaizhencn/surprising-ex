@@ -35,7 +35,7 @@ public record CoreTriggerOrderStateView(
         long createdAtEpochMillis,
         long updatedAtEpochMillis,
         long revision,
-        long instrumentVersion,
+        long instrumentChangeId,
         long makerFeeRatePpm,
         long takerFeeRatePpm) {
 
@@ -68,7 +68,7 @@ public record CoreTriggerOrderStateView(
                 || side == null || triggerType == null || triggerCondition == null || triggerPriceTicks < 0
                 || callbackRatePpm < 0 || orderType == null || timeInForce == null || quantitySteps <= 0
                 || marginMode == null || positionSide == null || status == null || revision < 0
-                || instrumentVersion < 0 || makerFeeRatePpm < -1_000_000L || makerFeeRatePpm > 1_000_000L
+                || instrumentChangeId < 0 || makerFeeRatePpm < -1_000_000L || makerFeeRatePpm > 1_000_000L
                 || takerFeeRatePpm < -1_000_000L || takerFeeRatePpm > 1_000_000L) {
             throw new IllegalArgumentException("invalid trigger order state");
         }
@@ -86,7 +86,7 @@ public record CoreTriggerOrderStateView(
                 callbackRatePpm, highestPriceTicks, lowestPriceTicks, activatedAtEpochMillis, orderType,
                 timeInForce, priceTicks, quantitySteps, marginMode, positionSide, status, placedOrderId,
                 triggerSequence, triggeredPriceTicks, rejectReason, traceId, expiresAtEpochMillis,
-                triggeredAtEpochMillis, clusterTimestamp, clusterTimestamp, revision, instrumentVersion,
+                triggeredAtEpochMillis, clusterTimestamp, clusterTimestamp, revision, instrumentChangeId,
                 makerFeeRatePpm, takerFeeRatePpm);
     }
 }

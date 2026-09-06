@@ -7,7 +7,7 @@ import java.time.Instant;
 /** 提交到 Aeron Core、用于交割或期权到期行权的结算命令载荷。 */
 public record ExpiringPositionSettlementAccountCommand(
         String symbol,
-        long instrumentVersion,
+        long instrumentChangeId,
         MarginMode marginMode,
         PositionSide positionSide,
         long settlementPriceTicks,
@@ -24,7 +24,7 @@ public record ExpiringPositionSettlementAccountCommand(
         if (!symbol.matches("[A-Z0-9][A-Z0-9_-]{1,63}")) {
             throw new IllegalArgumentException("invalid symbol: " + symbol);
         }
-        if (instrumentVersion <= 0 || settlementPriceTicks < 0 || cashSettlementUnitsPerContract < 0L) {
+        if (instrumentChangeId <= 0 || settlementPriceTicks < 0 || cashSettlementUnitsPerContract < 0L) {
             throw new IllegalArgumentException("到期结算价标识无效");
         }
         marginMode = MarginMode.defaultIfNull(marginMode);

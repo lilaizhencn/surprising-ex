@@ -9,7 +9,7 @@ public record OrderCommandEvent(
         long userId,
         String clientOrderId,
         String symbol,
-        long instrumentVersion,
+        long instrumentChangeId,
         OrderSide side,
         OrderType orderType,
         TimeInForce timeInForce,
@@ -50,7 +50,7 @@ public record OrderCommandEvent(
                              long userId,
                              String clientOrderId,
                              String symbol,
-                             long instrumentVersion,
+                             long instrumentChangeId,
                              OrderSide side,
                              OrderType orderType,
                              TimeInForce timeInForce,
@@ -64,7 +64,7 @@ public record OrderCommandEvent(
                              boolean postOnly,
                              Instant commandTime,
                              String traceId) {
-        this(commandType, commandId, orderId, userId, clientOrderId, symbol, instrumentVersion, side, orderType,
+        this(commandType, commandId, orderId, userId, clientOrderId, symbol, instrumentChangeId, side, orderType,
                 timeInForce, priceTicks, quantitySteps, marginMode, positionSide, makerFeeRatePpm, takerFeeRatePpm,
                 reduceOnly, postOnly, null, null, 0L, commandTime, traceId);
     }
@@ -75,7 +75,7 @@ public record OrderCommandEvent(
                              long userId,
                              String clientOrderId,
                              String symbol,
-                             long instrumentVersion,
+                             long instrumentChangeId,
                              OrderSide side,
                              OrderType orderType,
                              TimeInForce timeInForce,
@@ -88,7 +88,7 @@ public record OrderCommandEvent(
                              boolean postOnly,
                              Instant commandTime,
                              String traceId) {
-        this(commandType, commandId, orderId, userId, clientOrderId, symbol, instrumentVersion, side, orderType,
+        this(commandType, commandId, orderId, userId, clientOrderId, symbol, instrumentChangeId, side, orderType,
                 timeInForce, priceTicks, quantitySteps, marginMode, PositionSide.NET, makerFeeRatePpm,
                 takerFeeRatePpm, reduceOnly, postOnly, null, null, 0L, commandTime, traceId);
     }
@@ -99,7 +99,7 @@ public record OrderCommandEvent(
                              long userId,
                              String clientOrderId,
                              String symbol,
-                             long instrumentVersion,
+                             long instrumentChangeId,
                              OrderSide side,
                              OrderType orderType,
                              TimeInForce timeInForce,
@@ -110,7 +110,7 @@ public record OrderCommandEvent(
                              boolean reduceOnly,
                              boolean postOnly,
                              Instant commandTime) {
-        this(commandType, commandId, orderId, userId, clientOrderId, symbol, instrumentVersion, side, orderType,
+        this(commandType, commandId, orderId, userId, clientOrderId, symbol, instrumentChangeId, side, orderType,
                 timeInForce, priceTicks, quantitySteps, MarginMode.CROSS, PositionSide.NET, makerFeeRatePpm,
                 takerFeeRatePpm, reduceOnly, postOnly, null, null, 0L, commandTime, null);
     }
@@ -121,7 +121,7 @@ public record OrderCommandEvent(
                              long userId,
                              String clientOrderId,
                              String symbol,
-                             long instrumentVersion,
+                             long instrumentChangeId,
                              OrderSide side,
                              OrderType orderType,
                              TimeInForce timeInForce,
@@ -133,7 +133,7 @@ public record OrderCommandEvent(
                              boolean postOnly,
                              Instant commandTime,
                              String traceId) {
-        this(commandType, commandId, orderId, userId, clientOrderId, symbol, instrumentVersion, side, orderType,
+        this(commandType, commandId, orderId, userId, clientOrderId, symbol, instrumentChangeId, side, orderType,
                 timeInForce, priceTicks, quantitySteps, MarginMode.CROSS, PositionSide.NET, makerFeeRatePpm,
                 takerFeeRatePpm, reduceOnly, postOnly, null, null, 0L, commandTime, traceId);
     }

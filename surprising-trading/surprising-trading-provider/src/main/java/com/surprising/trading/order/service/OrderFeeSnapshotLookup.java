@@ -29,11 +29,11 @@ public class OrderFeeSnapshotLookup {
     public Optional<OrderFeeSnapshot> lookup(ProductLine requestedProductLine,
                                              long userId,
                                              String symbol,
-                                             long instrumentVersion,
+                                             long instrumentChangeId,
                                              Instant now) {
         ProductLine productLine = requestedProductLine == null
                 ? properties.getKafka().getProductLine() : requestedProductLine;
-        var instrument = instrumentSnapshotCache.version(productLine, symbol, instrumentVersion);
+        var instrument = instrumentSnapshotCache.current(productLine, symbol, instrumentChangeId);
         if (instrument.isEmpty()) {
             return Optional.empty();
         }

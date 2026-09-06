@@ -7,7 +7,7 @@ public record EffectiveTradingFeeResponse(
         long userId,
         ProductLine productLine,
         String symbol,
-        long instrumentVersion,
+        long instrumentChangeId,
         long makerFeeRatePpm,
         long takerFeeRatePpm,
         String source,

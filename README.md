@@ -624,13 +624,10 @@ psql -v ON_ERROR_STOP=1 \
   -f init.sql
 ```
 
-`init.sql` 是 PostgreSQL 18+ 的完整首发基线，在同一事务内创建配置、历史、审计、对账和 Aeron Core 投影表，
-并写入 `surprising_schema_metadata`。首发 instrument 使用 BTC、ETH、SOL、XRP、DOGE、BNB、ADA、AVAX、
-LINK、DOT、LTC、BCH、TRX、TON、SUI、APT、NEAR、UNI、AAVE、ETC，共 20 个主流资产；六个
-`ProductLine` 各初始化 20 个 symbol，总计 120 个。衍生品 symbol 使用产品线/到期日后缀，避免同库同名冲突。
-
-产品上线后不得通过修改 `init.sql` 升级存量数据库；新增 SQL 必须遵循 `migrations/README.md` 的版本、事务和
-验证规则。当前上线前日期补丁已全部折叠进基线，不需要再次执行。
+`init.sql` 是 PostgreSQL 18+ 的唯一初始化文件，直接在空库执行，不需要迁移文件或额外种子 SQL。
+六条产品线分别初始化现货 512、U 本位永续 430、币本位永续 15、U 本位交割 148、币本位交割 16、期权 30 个币对（仅保留行权价可精确表示的配置，上限 512）。
+每条产品线每个币对只有一份当前配置，修改前后的字段、操作人、原因和时间保存在 `instrument_change_log`。
+`changeId` / `instrumentChangeId` 是交易计算配置的审计引用，`lastChangeId` 是最新操作的顺序标识；均不提供历史配置选择。
 
 当前优先执行受影响模块测试：
 
@@ -898,12 +895,11 @@ Core + Aeron Cluster 的少量样本故障验证入口见 [deployment/local-faul
 市价/限价平仓依赖真实对手盘，不保证全部成交；整币对撤单会清除原有对手盘，后续只能由持有反向仓位的
 用户提交 reduce-only 流动性。若运营要求不依赖撮合的整体清退，应在创建任务时选 SETTLEMENT。
 本功能撤销普通单和触发单，不删除 TWAP 等算法任务；其子单仍受 Core 维护门控约束。
-Core 停止交易与产品服务的市场展示/下架状态是两个操作，市场展示由原有产品配置管理。
+产品配置状态通过后台控制任务同步到 Core；页面分别显示数据库配置与 Core 确认结果。维护任务的限制独立保留，普通恢复交易不能解除维护门控。
 
 ### 持久化、恢复与审批
 
-- 上线前在各 Trading Provider 使用的数据库执行 [增量 SQL](migrations/20260906_trading_maintenance.sql)；
-  新库 `init.sql` 已包含两张表。不要对现有库重新执行全量初始化。
+- 空库统一执行根目录 `init.sql`，其中已包含维护任务与动作表。
 - `trading_maintenance_task` 保存不可变请求、操作人和进度，`trading_maintenance_action` 保存发送前已提交的命令意图和实际结果。
   `(product_line, request_id)` 幂等，同一币对只能有一个未解除任务。数据库备份必须和 Core 运行恢复方案一并保留。
 - Worker 每次至多发送一条变更命令，默认间隔 1000 ms，由

@@ -20,7 +20,7 @@ public record PositionUpdatedEvent(
         long revision,
         long userId,
         String symbol,
-        long instrumentVersion,
+        long instrumentChangeId,
         MarginMode marginMode,
         PositionSide positionSide,
         long signedQuantitySteps,
@@ -40,8 +40,8 @@ public record PositionUpdatedEvent(
         if (schemaVersion != CURRENT_SCHEMA_VERSION) {
             throw new IllegalArgumentException("unsupported position event schemaVersion: " + schemaVersion);
         }
-        if (eventId <= 0L || revision <= 0L || instrumentVersion <= 0L) {
-            throw new IllegalArgumentException("eventId, revision, and instrumentVersion must be positive");
+        if (eventId <= 0L || revision <= 0L || instrumentChangeId <= 0L) {
+            throw new IllegalArgumentException("eventId, revision, and instrumentChangeId must be positive");
         }
         if (productLine == null) {
             throw new IllegalArgumentException("productLine is required");
@@ -73,7 +73,7 @@ public record PositionUpdatedEvent(
                 productLine,
                 userId,
                 symbol,
-                instrumentVersion,
+                instrumentChangeId,
                 marginMode,
                 positionSide,
                 signedQuantitySteps,

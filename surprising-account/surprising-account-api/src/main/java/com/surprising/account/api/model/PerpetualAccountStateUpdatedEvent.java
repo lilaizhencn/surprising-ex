@@ -93,7 +93,7 @@ public record PerpetualAccountStateUpdatedEvent(
     }
 
     public record Position(String symbol,
-                           long instrumentVersion,
+                           long instrumentChangeId,
                            MarginMode marginMode,
                            PositionSide positionSide,
                            long signedQuantitySteps,
@@ -107,10 +107,10 @@ public record PerpetualAccountStateUpdatedEvent(
             positionSide = PositionSide.defaultIfNull(positionSide);
             if (signedQuantitySteps == 0L) {
                 if (entryPriceTicks != 0L || entryValueTicks != 0L
-                        || (instrumentVersion < 0L)) {
+                        || (instrumentChangeId < 0L)) {
                     throw new IllegalArgumentException("flat position fields are invalid");
                 }
-            } else if (instrumentVersion <= 0L || entryPriceTicks <= 0L || entryValueTicks <= 0L) {
+            } else if (instrumentChangeId <= 0L || entryPriceTicks <= 0L || entryValueTicks <= 0L) {
                 throw new IllegalArgumentException("open position fields are incomplete");
             }
             if (updatedAt == null) {

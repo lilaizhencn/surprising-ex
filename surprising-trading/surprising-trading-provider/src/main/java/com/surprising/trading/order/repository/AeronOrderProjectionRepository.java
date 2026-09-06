@@ -211,7 +211,7 @@ public class AeronOrderProjectionRepository {
                 ? (view.executedQuantitySteps() == 0 ? OrderStatus.ACCEPTED : OrderStatus.PARTIALLY_FILLED)
                 : OrderStatus.valueOf(view.status());
         return new OrderResponse(view.orderId(), view.userId(), emptyToNull(view.clientOrderId()), view.symbol(),
-                view.instrumentVersion(), OrderSide.valueOf(view.side().name()), OrderType.valueOf(view.orderType().name()),
+                view.instrumentChangeId(), OrderSide.valueOf(view.side().name()), OrderType.valueOf(view.orderType().name()),
                 TimeInForce.valueOf(view.timeInForce().name()), view.priceTicks(), view.quantitySteps(),
                 view.executedQuantitySteps(), view.remainingQuantitySteps(), MarginMode.valueOf(view.marginMode().name()),
                 PositionSide.valueOf(view.positionSide().name()), view.makerFeeRatePpm(), view.takerFeeRatePpm(),

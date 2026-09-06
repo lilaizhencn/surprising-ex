@@ -19,10 +19,9 @@ Surprising Exchange 产品基础配置模块。它是现货、永续、交割和
 - 资金费率配置：永续产品的 funding interval、interest rate、cap/floor、impact notional。
 - 生命周期字段：交割和期权产品的到期时间、交割时间、结算方式、标的 symbol、行权价、期权类型和行权风格。
 - 指数价格成分源：外部现货源 REST/WS 配置、权重、USD/USDT 换算规则。
-- 版本管理：每次变更生成新 `version`，通过 `instrument_current_versions` 切换当前版本。
-- 多节点安全：`instrument_symbol_sequences` 为同一个 symbol 原子分配版本号，避免多个 admin 请求并发时 version 冲突。
-- 存储边界：每个 Repository 只访问一张表；`InstrumentStorageService` 在事务内聚合主版本、
-  全局/产品线当前版本指针、风险档位和指数源，并对附属配置执行批量补全。
+- 当前配置：每条产品线每个币对只有一份可执行配置，无历史配置查询或切换。
+- 修改审计：`instrument_change_log` 保存操作人、时间、原因与修改前后内容，配置和 outbox 同事务提交。
+- 并发修改：`InstrumentStorageService` 锁定币对登记行后更新当前配置、风险档位和指数源。
 
 ## long 单位模型
 
@@ -46,7 +45,7 @@ admin API 应直接提交这些整数字段。人类可读的小数格式放在�
 
 ```text
 instrument-provider
-  -> PostgreSQL instruments / instrument_current_versions
+  -> PostgreSQL instruments / instrument_change_log
   -> PostgreSQL instrument_outbox_events
   -> surprising.instrument.events.v1
   -> 各业务 JVM 的不可变合约快照（order / matching / account / risk / price / candlestick / market-maker）
@@ -58,7 +57,7 @@ instrument-provider
 - Instrument 变更通过 `surprising.instrument.events.v1` 广播；每个产品线使用独立 consumer group，在本 JVM 内原子替换快照。
 - 下单、撮合、账户、风控、指数价、标记价、K 线和做市热路径只读 JVM 快照；数据库仅用于 Instrument 服务写入、启动恢复和审计回源。
 - 启动加载统一由 `AbstractInstrumentSnapshotInitializer` 执行，增量事件统一由 `InstrumentSnapshotSupport.consume` 解析、校验并更新缓存；模块只保留产品线、消费组和派生配置刷新动作。
-- `InstrumentSpecKey` 归属 `surprising-instrument-api`，以 `ProductLine + symbol + version` 唯一定位不可变合约版本；基础 `product-api` 不承载 Instrument 内部缓存键。
+- JVM 缓存仅按 `ProductLine + symbol` 保存当前配置，按 `lastChangeId` 拒绝迟到事件。
 
 ## 状态语义
 
@@ -70,16 +69,10 @@ instrument-provider
 
 ## 接口
 
-查询当前版本：
+查询当前配置：
 
 ```bash
 curl 'http://localhost:9080/api/v1/instruments/latest?symbol=BTC-USDT'
-```
-
-查询指定版本：
-
-```bash
-curl 'http://localhost:9080/api/v1/instruments/version?symbol=BTC-USDT&version=1'
 ```
 
 查询列表：
@@ -101,14 +94,14 @@ curl -H 'X-Product-Line: LINEAR_PERPETUAL' \
 curl 'http://localhost:9080/api/v1/instruments/admin/list?type=PERPETUAL&status=TRADING&limit=100&sort=symbol.asc'
 ```
 
-后台查询当前产品详情和历史版本：
+后台查询当前产品详情和操作日志：
 
 ```bash
 curl 'http://localhost:9080/api/v1/instruments/admin/BTC-USDT'
-curl 'http://localhost:9080/api/v1/instruments/admin/BTC-USDT/versions?limit=50&sort=version.desc'
+curl 'http://localhost:9080/api/v1/instruments/admin/BTC-USDT/changes?productLine=SPOT&limit=50&beforeId=0'
 ```
 
-后台列表支持 `limit/cursor/sort` 游标分页。当前版本列表排序白名单为 `symbol.asc`、`symbol.desc`、`updatedAt.desc`、`updatedAt.asc`、`createdAt.desc`、`createdAt.asc`；历史版本排序白名单为 `version.desc`、`version.asc`。响应保留 `count/instruments`，并返回 `nextCursor`、`hasMore`、`sort`、`limit`。
+后台列表支持 `limit/cursor/sort` 游标分页。当前配置列表排序白名单为 `symbol.asc`、`symbol.desc`、`updatedAt.desc`、`updatedAt.asc`、`createdAt.desc`、`createdAt.asc`；日志按操作 ID 倒序，使用 `beforeId` 继续读取。响应保留 `count/instruments`，并返回 `nextCursor`、`hasMore`、`sort`、`limit`。
 
 更新状态：
 
@@ -125,35 +118,33 @@ surprising.instrument.events.v1
 ```
 
 事件 key 固定使用 `PRODUCT_LINE:SYMBOL`，事件内容必须包含产品线、序列和完整
-`InstrumentResponse` 快照，下游通过版本和更新时间丢弃旧事件，再以不可变引用整体替换本地缓存。
-producer 使用 `acks=all`、幂等、`zstd` 和 `max.in.flight.requests.per.connection=5`，让合约版本变更事件和交易、价格链路保持一致的可靠 Kafka 基线。
+`InstrumentResponse` 快照，下游通过操作日志 ID 丢弃旧事件，再以不可变引用整体替换本地缓存。
+producer 使用 `acks=all`、幂等、`zstd` 和 `max.in.flight.requests.per.connection=5`，让合约配置变更事件和交易、价格链路保持一致的可靠 Kafka 基线。
 
 ## 数据库
 
 根目录 [init.sql](../init.sql) 创建：
 
 - `instruments`
-- `instrument_current_versions`
-- `instrument_product_current_versions`
-- `instrument_symbol_sequences`
+- `instrument_symbols`（仅登记币对存在性）
+- `instrument_change_log`（操作日志）
 - `instrument_risk_brackets`
 - `instrument_index_sources`
 - `instrument_outbox_events`
 
-`init.sql` 通过 psql 的 `\ir` 引入 `okx-instrument-seed.sql` 和 `okx-asset-scales.sql`。两份文件是
+根目录 `init.sql` 包含全部结构、币对和资产精度数据，不依赖迁移文件或其他 SQL。币对数据来自
 2026-08-20 UTC 从 OKX V5 Public API 生成的快照，每条产品线最多保留 512 个币对：SPOT 512、LINEAR_PERPETUAL 430、
-INVERSE_PERPETUAL 15、LINEAR_DELIVERY 148、INVERSE_DELIVERY 16、OPTION 512。不足 512 个的产品线全部保留。
-现货优先 USDT 报价，其次 BTC-USDT / ETH-USDT，再按 symbol 排序；其他产品线按到期时间（空值优先）、symbol 排序选取。
+INVERSE_PERPETUAL 15、LINEAR_DELIVERY 148、INVERSE_DELIVERY 16、OPTION 30。不足 512 个的产品线全部保留。
+现货优先 USDT 报价，其次 BTC-USDT / ETH-USDT，再按 symbol 排序；期权仅保留行权价可精确表示的稳定币结算合约，按到期时间、symbol 排序；本快照共 30 个合格币对；其他产品线按到期时间（空值优先）、symbol 排序选取。
 筛选依据固定快照，不随初始化时间变化。每个 symbol
-绑定产品线当前版本、三档风险限额和 OKX 指数源；29 个单字符资产因现有账户资产约束被跳过。
+按产品线保存唯一当前配置、三档风险限额和指数源；29 个单字符资产因现有账户资产约束被跳过。
 
 `LINEAR_PERPETUAL` 的 `BTC-USDT-SWAP` 在生成快照后应用产品线专用覆盖：`min_valid_index_sources=3`，
 并配置 OKX `index-tickers`（`BTC-USDT`）、Binance Spot `btcusdt@ticker` 和 Bybit Spot
 `tickers.BTCUSDT` 三个相互独立的公共 WebSocket 指数源。价格服务默认关闭 REST fallback，市场探针只将
 来源为 `PUBLIC_WEBSOCKET`、连接健康、时间新鲜且 exchange 唯一的组件计入三源 quorum。
 
-OKX USDⓈ-margined 期权在初始化时统一映射到项目的 USDT 结算路径，coin-margined 期权保留 BTC/ETH
-结算资产。OKX 的交割费、行权费和强平费不等同于 maker/taker 默认费率，现有 `instruments` 字段只
+初始化期权统一使用项目的 USDT 结算路径，不加载与当前线性期权核心计量方式不一致的币本位期权。OKX 的交割费、行权费和强平费不等同于 maker/taker 默认费率，现有 `instruments` 字段只
 承载交易默认费率；交割固定费和期权行权费仍需由对应生命周期结算规则读取官方账户费率后处理。
 
 ## 本地运行
@@ -169,14 +160,14 @@ mvn -pl :surprising-instrument-provider -am spring-boot:run
 ## 生产注意事项
 
 - Instrument 是全系统唯一产品配置源，不要在撮合、风控、行情服务里再维护第二套 symbol 规则。
-- 查询接口无状态，可以多节点水平部署；写接口共享 PostgreSQL，通过 `instrument_symbol_sequences` 保证同 symbol 版本号单调递增。
-- instrument 版本、状态变更、交割和行权事件先与业务状态一起写入 `instrument_outbox_events`；发布器收到 Kafka ACK 后才标记成功，失败事件按指数退避重试，同一 `topic + event_key` 在多节点下保持顺序。
-- 到期版本进入 `SETTLING` 后，trading provider 先排空订单；Aeron Core 内的条件单状态随核心状态机一起收敛，account 再核对预占、成交消耗和释放。只有相同版本的 `ORDER`、`ACCOUNT` 确认全部写入 `instrument_lifecycle_drain_acks`，调度器才允许进入 `CLOSED` 并发布交割或行权事件。
-- 生命周期清理确认使用共享 topic `surprising.instrument.lifecycle-drain.v1`，以 symbol 为 key；重复确认按 `(symbol, instrument_version, component)` 幂等。
-- Instrument Service 才负责聚合主表、当前版本指针、风险档位、指数源和资产精度；单表 Repository 不执行跨表 JOIN。
+- 查询接口无状态，可以多节点水平部署；写接口共享 PostgreSQL，通过币对登记行锁串行修改，并在同一事务写入操作日志与 outbox 事件。
+- instrument 配置、状态变更、交割和行权事件先与业务状态一起写入 `instrument_outbox_events`；发布器收到 Kafka ACK 后才标记成功，失败事件按指数退避重试，同一 `topic + event_key` 在多节点下保持顺序。
+- 到期合约进入 `SETTLING` 后，trading provider 先排空订单；Aeron Core 内的条件单状态随核心状态机一起收敛，account 再核对预占、成交消耗和释放。只有同一次 SETTLING 操作的 `ORDER`、`ACCOUNT` 确认全部写入 `instrument_lifecycle_drain_acks`，调度器才允许进入 `CLOSED` 并发布交割或行权事件。
+- 生命周期清理确认使用共享 topic `surprising.instrument.lifecycle-drain.v1`，以 symbol 为 key；重复确认按 `(symbol, instrument_change_id, component)` 幂等。
+- Instrument Service 才负责聚合当前主表、风险档位、指数源和资产精度；单表 Repository 不执行跨表 JOIN。
 - 下游核心服务启动时加载快照，运行中消费 Kafka 增量事件；不要在每笔请求、撮合或风控计算时查询主库。
-- 修改 tick/step、杠杆、状态时必须生成新版本，不能原地覆盖历史版本。
-- 修改 instrument 默认 maker/taker 手续费率也必须生成新版本。已接受订单继续使用 `trading_orders` 上的费率快照；旧持仓继续使用开仓时绑定的合约数学版本。
+- 状态修改保留交易计算引用；修改 tick/step、费率或风险参数会关联新的审计记录，Core 在有挂单或持仓时拒绝替换计算配置。
+- 已接受订单继续使用订单费率快照；旧成交的计量单位从审计记录只读查询，不允许用该入口取回可执行历史配置。
 - 影响撮合和风控的配置变更需要审批流、审计日志和灰度生效时间。
 - 新增 symbol 时，先写 instrument，再创建/确认 Kafka partition，再启动外部价格源，最后开放交易。
 
@@ -185,3 +176,20 @@ mvn -pl :surprising-instrument-provider -am spring-boot:run
 ```bash
 mvn -pl :surprising-instrument-provider -am test
 ```
+
+## Core 同步与审计引用
+
+`changeId` 是当前交易计算参数对应的操作日志引用，`lastChangeId` 是最近一次配置操作的日志引用。
+纯状态修改只推进后者，因此已有订单、持仓、价格和资金费计算不会因暂停/恢复而引用失效。
+这两个标识不提供历史配置执行或回滚功能。内部 `/trade-encoding` 仅返回已提交成交的四个计量单位，供 K 线和价格消费者正确解码延迟事件。
+
+Trading Provider 的 `InstrumentCoreSyncService` 每轮最多发送一个控制命令，默认间隔 250 ms，并在失败后退避 5 秒。
+它使用独立维护客户端队列；确认成功后后台显示 Core 已确认，数据库保存成功不等于 Core 已应用。
+暂停、恢复与维护门控分别保存，普通恢复交易不能解除维护任务的限制。状态和审计引用随 Core 快照恢复。
+启动和 Kafka 增量均从当前配置缓存收敛；受阻的计算配置需要先完成撤单/平仓，再由后台任务重试。
+
+Pre-launch databases use only the root `init.sql`. Instruments retain one executable configuration per product line and symbol.
+Operational audit entries preserve actor, reason, time and before/after values. Status-only changes keep existing trading calculation references valid.
+
+初始化期权数量为 30（上限 512）：旧快照其余稳定币期权存在行权价无法按配置 tick 精确表示的问题。
+本次未改动其金融数值；补足数量需另行校准源数据。全部保留币对由 `InstrumentSeedCoreContractTest` 校验 Core 命令编码和配置约束。

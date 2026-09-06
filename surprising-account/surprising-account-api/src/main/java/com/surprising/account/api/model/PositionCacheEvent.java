@@ -16,7 +16,7 @@ public record PositionCacheEvent(
         ProductLine productLine,
         long userId,
         String symbol,
-        Long instrumentVersion,
+        Long instrumentChangeId,
         MarginMode marginMode,
         PositionSide positionSide,
         long signedQuantitySteps,
@@ -42,8 +42,8 @@ public record PositionCacheEvent(
         if (symbol == null || symbol.isBlank()) {
             throw new IllegalArgumentException("symbol is required");
         }
-        if (instrumentVersion == null || instrumentVersion <= 0L) {
-            throw new IllegalArgumentException("instrumentVersion must be positive");
+        if (instrumentChangeId == null || instrumentChangeId <= 0L) {
+            throw new IllegalArgumentException("instrumentChangeId must be positive");
         }
         marginMode = MarginMode.defaultIfNull(marginMode);
         positionSide = PositionSide.defaultIfNull(positionSide);

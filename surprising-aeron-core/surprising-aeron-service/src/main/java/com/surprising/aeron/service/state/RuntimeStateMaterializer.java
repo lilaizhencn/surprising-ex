@@ -30,7 +30,7 @@ public final class RuntimeStateMaterializer {
             }
             reservationsByUser.computeIfAbsent(reservation.userId(), ignored -> new TreeMap<>())
                     .put(orderId, new OrderReservation(orderId, identities.symbol(reservation.symbolId()),
-                            reservation.instrumentVersion(), reservation.kind(), identities.asset(reservation.assetId()),
+                            reservation.instrumentChangeId(), reservation.kind(), identities.asset(reservation.assetId()),
                             reservation.totalReservedUnits(), reservation.releasedUnits(), reservation.consumedUnits(),
                             reservation.orderQuantitySteps()));
         });
@@ -45,7 +45,7 @@ public final class RuntimeStateMaterializer {
             positionsByUser.computeIfAbsent(position.userId(), ignored -> new TreeMap<>())
                     .put(key, new CorePositionState(identities.symbol(position.symbolId()),
                             identities.asset(position.assetId()), position.marginMode(), position.positionSide(),
-                            position.instrumentVersion(), position.signedQuantitySteps(), position.entryPriceTicks(),
+                            position.instrumentChangeId(), position.signedQuantitySteps(), position.entryPriceTicks(),
                             position.entryValueTicks(), position.realizedPnlUnits(), position.positionMarginUnits()));
         });
 
@@ -73,7 +73,7 @@ public final class RuntimeStateMaterializer {
             if (runtime.pendingReservation(orderId, order.userId())) return;
             orders.put(orderId,
                 new CoreOrderState(orderId, order.productLine(), order.userId(), identities.symbol(order.symbolId()),
-                        order.instrumentVersion(), order.side(), order.priceTicks(), order.matchingPriceTicks(),
+                        order.instrumentChangeId(), order.side(), order.priceTicks(), order.matchingPriceTicks(),
                         order.quantitySteps(),
                         order.executedQuantitySteps(), order.remainingQuantitySteps(), order.reduceOnly(),
                         order.marginMode(), order.positionSide(), order.orderType(), order.timeInForce(),
@@ -86,7 +86,7 @@ public final class RuntimeStateMaterializer {
         Map<String, CoreMarkPriceState> marks = new TreeMap<>();
         runtime.markPricesForSnapshot().forEachKeyValue((symbolId, mark) -> {
             String symbol = identities.symbol(symbolId);
-            marks.put(symbol, new CoreMarkPriceState(symbol, mark.instrumentVersion(), mark.markPriceTicks(),
+            marks.put(symbol, new CoreMarkPriceState(symbol, mark.instrumentChangeId(), mark.markPriceTicks(),
                     mark.indexPriceTicks(), mark.forwardPriceTicks(), mark.priceSequence(),
                     mark.generatedAtEpochMillis()));
         });
@@ -100,7 +100,7 @@ public final class RuntimeStateMaterializer {
         Map<Long, CoreLiquidationState> liquidations = new TreeMap<>();
         runtime.liquidationsForSnapshot().forEachKeyValue((id, value) -> liquidations.put(id,
                 new CoreLiquidationState(id, value.userId(), identities.symbol(value.symbolId()), value.marginMode(),
-                        value.positionSide(), value.instrumentVersion(), value.triggerPriceSequence(),
+                        value.positionSide(), value.instrumentChangeId(), value.triggerPriceSequence(),
                         value.signedQuantitySteps(), value.closeQuantitySteps(), value.deficitUnits(),
                         value.executionPriceTicks(), value.liquidationFeeRatePpm(), value.liquidationFeeUnits(),
                         value.status(), value.nextCancelOrderId())));
@@ -144,12 +144,12 @@ public final class RuntimeStateMaterializer {
         Map<String, CoreTreasuryState.FundingProgress> fundingProgress = new TreeMap<>();
         runtime.treasury().fundingProgresses().forEachKeyValue((id, value) -> fundingProgress.put(
                 identities.symbol(id), new CoreTreasuryState.FundingProgress(value.settlementId(),
-                        value.instrumentVersion(), value.fundingRatePpm(), value.accountLaneId(),
+                        value.instrumentChangeId(), value.fundingRatePpm(), value.accountLaneId(),
                         value.nextCursorUserId(), value.commandId(), value.markPriceTicks(), value.priceSequence())));
         Map<String, CoreTreasuryState.LifecycleProgress> lifecycleProgress = new TreeMap<>();
         runtime.treasury().lifecycleProgresses().forEachKeyValue((id, value) -> lifecycleProgress.put(
                 identities.symbol(id), new CoreTreasuryState.LifecycleProgress(value.settlementId(),
-                        value.instrumentVersion(), value.settlementPriceTicks(), value.optionCashUnitsPerContract(),
+                        value.instrumentChangeId(), value.settlementPriceTicks(), value.optionCashUnitsPerContract(),
                         value.ordersComplete(), value.accountLaneId(), value.nextCursorOrderId(),
                         value.nextCursorUserId(), value.commandId(), value.requiredInsuranceUnits())));
         CoreTreasuryState treasury = new CoreTreasuryState(fees, insurance, deficits, liquidationFees,
@@ -174,20 +174,20 @@ public final class RuntimeStateMaterializer {
 
     static CoreTreasuryState.FundingProgress fundingProgress(
             TreasuryRuntime.FundingProgressRuntime value) {
-        return new CoreTreasuryState.FundingProgress(value.settlementId(), value.instrumentVersion(),
+        return new CoreTreasuryState.FundingProgress(value.settlementId(), value.instrumentChangeId(),
                 value.fundingRatePpm(), value.accountLaneId(), value.nextCursorUserId(), value.commandId(),
                 value.markPriceTicks(), value.priceSequence());
     }
 
     static CoreTreasuryState.LifecycleProgress lifecycleProgress(
             TreasuryRuntime.LifecycleProgressRuntime value) {
-        return new CoreTreasuryState.LifecycleProgress(value.settlementId(), value.instrumentVersion(),
+        return new CoreTreasuryState.LifecycleProgress(value.settlementId(), value.instrumentChangeId(),
                 value.settlementPriceTicks(), value.optionCashUnitsPerContract(), value.ordersComplete(),
                 value.accountLaneId(), value.nextCursorOrderId(), value.nextCursorUserId(), value.commandId(), value.requiredInsuranceUnits());
     }
 
     static OrderReservation reservation(ReservationRuntime value, RuntimeFactFrame.IdentityView identities) {
-        return new OrderReservation(value.orderId(), identities.symbol(value.symbolId()), value.instrumentVersion(),
+        return new OrderReservation(value.orderId(), identities.symbol(value.symbolId()), value.instrumentChangeId(),
                 value.kind(), identities.asset(value.assetId()), value.totalReservedUnits(), value.releasedUnits(),
                 value.consumedUnits(), value.orderQuantitySteps());
     }
@@ -197,7 +197,7 @@ public final class RuntimeStateMaterializer {
         String identity = identities.positionKey(value.userId(), positionKey);
         CorePositionState result = new CorePositionState(identities.symbol(value.symbolId()),
                 identities.asset(value.assetId()), value.marginMode(), value.positionSide(),
-                value.instrumentVersion(), value.signedQuantitySteps(), value.entryPriceTicks(),
+                value.instrumentChangeId(), value.signedQuantitySteps(), value.entryPriceTicks(),
                 value.entryValueTicks(), value.realizedPnlUnits(), value.positionMarginUnits());
         if (!result.key().equals(identity)) {
             throw new IllegalStateException("runtime position identity mismatch: " + positionKey);
@@ -208,7 +208,7 @@ public final class RuntimeStateMaterializer {
     public static CoreOrderState orderSnapshot(OrderRuntime value, RuntimeFactFrame.IdentityView identities) {
         if (value == null || identities == null) throw new IllegalArgumentException("runtime order is required");
         return new CoreOrderState(value.orderId(), value.productLine(), value.userId(),
-                identities.symbol(value.symbolId()), value.instrumentVersion(), value.side(), value.priceTicks(),
+                identities.symbol(value.symbolId()), value.instrumentChangeId(), value.side(), value.priceTicks(),
                 value.matchingPriceTicks(), value.quantitySteps(), value.executedQuantitySteps(),
                 value.remainingQuantitySteps(), value.reduceOnly(), value.marginMode(), value.positionSide(),
                 value.orderType(), value.timeInForce(), value.postOnly(), value.clientOrderId(), value.commandId(),
@@ -227,7 +227,7 @@ public final class RuntimeStateMaterializer {
                                             RuntimeFactFrame.IdentityView identities) {
         return new CoreLiquidationState(value.liquidationId(), value.userId(),
                 identities.symbol(value.symbolId()), value.marginMode(), value.positionSide(),
-                value.instrumentVersion(), value.triggerPriceSequence(), value.signedQuantitySteps(),
+                value.instrumentChangeId(), value.triggerPriceSequence(), value.signedQuantitySteps(),
                 value.closeQuantitySteps(), value.deficitUnits(), value.executionPriceTicks(),
                 value.liquidationFeeRatePpm(), value.liquidationFeeUnits(), value.status(),
                 value.nextCancelOrderId());

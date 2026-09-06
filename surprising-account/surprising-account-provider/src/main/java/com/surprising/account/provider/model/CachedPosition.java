@@ -9,7 +9,7 @@ public record CachedPosition(
         ProductLine productLine,
         long userId,
         String symbol,
-        Long instrumentVersion,
+        Long instrumentChangeId,
         MarginMode marginMode,
         PositionSide positionSide,
         long signedQuantitySteps,

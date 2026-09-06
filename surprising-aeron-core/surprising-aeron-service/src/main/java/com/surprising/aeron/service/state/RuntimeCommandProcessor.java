@@ -136,8 +136,21 @@ public final class RuntimeCommandProcessor {
         runtime.assertOwner();
         CoreInstrumentState instrument = CoreInstrumentState.from(runtime.productLine(), command);
         CoreInstrumentState current = runtime.instrument(instrument.symbol());
-        if (current != null && instrument.version() <= current.version()) {
-            throw new CoreStateRejectedException("STALE_INSTRUMENT_VERSION", "instrument version must increase");
+        if (current != null && instrument.lastChangeId() <= current.lastChangeId()) {
+            if (instrument.withMaintenance(current.maintenance()).equals(current)) return;
+            throw new CoreStateRejectedException("STALE_INSTRUMENT_CHANGE_ID", "instrument audit id must increase");
+        }
+        if (current != null && instrument.changeId() == current.changeId()) {
+            var statusUpdate = current.withStatus(instrument.status(), instrument.lastChangeId());
+            if (!instrument.withMaintenance(current.maintenance()).equals(statusUpdate)) {
+                throw new CoreStateRejectedException("INVALID_COMMAND", "calculation changes require a new audit reference");
+            }
+            runtime.putInstrument(statusUpdate);
+            runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+            return;
+        }
+        if (current != null && instrument.changeId() < current.changeId()) {
+            throw new CoreStateRejectedException("STALE_INSTRUMENT_CHANGE_ID", "calculation audit id cannot decrease");
         }
         int symbolId = identities.symbolId(instrument.symbol());
         if (runtime.treasury().fundingProgress(symbolId) != null
@@ -155,7 +168,7 @@ public final class RuntimeCommandProcessor {
             if (position.symbolId() == symbolId && position.signedQuantitySteps() != 0) openState[0] = true;
         });
         if (current != null && openState[0]) {
-            throw new CoreStateRejectedException("INSTRUMENT_VERSION_IN_USE",
+            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_IN_USE",
                     "cannot replace instrument version with open state");
         }
         runtime.putInstrument(current == null ? instrument : instrument.withMaintenance(current.maintenance()));
@@ -258,13 +271,13 @@ public final class RuntimeCommandProcessor {
                     "available balance is insufficient");
         }
         OrderRuntime order = new OrderRuntime(command.orderId(), runtime.productLine(), userId, symbolId,
-                command.instrumentVersion(), command.side(), command.limitPriceTicks(), command.matchingPriceTicks(),
+                command.instrumentChangeId(), command.side(), command.limitPriceTicks(), command.matchingPriceTicks(),
                 command.quantitySteps(), 0, command.quantitySteps(), command.reduceOnly(), command.marginMode(),
                 command.positionSide(), command.orderType(), command.timeInForce(), command.postOnly(),
                 command.clientOrderId(), commandId, command.makerFeeRatePpm(), command.takerFeeRatePpm(),
                 0, 0, 0, CoreOrderStatus.OPEN, 1);
         ReservationRuntime reservation = new ReservationRuntime(command.orderId(), userId, symbolId,
-                command.instrumentVersion(), command.reservationKind(), assetId, requiredReservation,
+                command.instrumentChangeId(), command.reservationKind(), assetId, requiredReservation,
                 0, 0, command.quantitySteps());
         runtime.reserveOrder(command.orderId(), userId, clientKey, symbolId,
                 command.quantitySteps(), assetId, requiredReservation);
@@ -638,11 +651,11 @@ public final class RuntimeCommandProcessor {
         }
         validateTriggerPlacement(runtime, userId, symbolId, positionKey, view);
         CoreTriggerOrderState trigger = CoreTriggerOrderState.from(view);
-        if (trigger.instrumentVersion() == 0) {
-            trigger = trigger.withExecutionSnapshot(instrument.version(), instrument.makerFeeRatePpm(),
+        if (trigger.instrumentChangeId() == 0) {
+            trigger = trigger.withExecutionSnapshot(instrument.changeId(), instrument.makerFeeRatePpm(),
                     instrument.takerFeeRatePpm());
-        } else if (trigger.instrumentVersion() != instrument.version()) {
-            throw new CoreStateRejectedException("STALE_INSTRUMENT_VERSION",
+        } else if (trigger.instrumentChangeId() != instrument.changeId()) {
+            throw new CoreStateRejectedException("STALE_INSTRUMENT_CHANGE_ID",
                     "trigger order instrument version is stale");
         }
         runtime.putTriggerOrder(trigger);
@@ -695,7 +708,7 @@ public final class RuntimeCommandProcessor {
                 current.placedOrderId(), current.triggerSequence(), current.triggeredPriceTicks(), current.rejectReason(),
                 current.traceId(), current.expiresAtEpochMillis(), current.triggeredAtEpochMillis(),
                 current.createdAtEpochMillis(), Math.max(current.updatedAtEpochMillis(), activatedAtEpochMillis),
-                Math.incrementExact(current.revision()), current.instrumentVersion(), current.makerFeeRatePpm(),
+                Math.incrementExact(current.revision()), current.instrumentChangeId(), current.makerFeeRatePpm(),
                 current.takerFeeRatePpm()));
         incrementRevision(runtime);
         return true;
@@ -777,7 +790,7 @@ public final class RuntimeCommandProcessor {
                 current.expiresAtEpochMillis(), status == CoreTriggerOrderStatus.TRIGGERED
                         || status == CoreTriggerOrderStatus.TRIGGER_FAILED ? updatedAt : current.triggeredAtEpochMillis(),
                 current.createdAtEpochMillis(), updatedAt, Math.incrementExact(current.revision()),
-                current.instrumentVersion(), current.makerFeeRatePpm(), current.takerFeeRatePpm()));
+                current.instrumentChangeId(), current.makerFeeRatePpm(), current.takerFeeRatePpm()));
         incrementRevision(runtime);
     }
 

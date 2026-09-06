@@ -30,7 +30,7 @@ import org.junit.jupiter.api.Test;
 class TradingFeeServiceTest {
 
     @Test
-    void effectiveFeeUsesCurrentInstrumentVersionWhenVersionIsNotProvided() {
+    void effectiveFeeUsesCurrentInstrumentChangeIdWhenVersionIsNotProvided() {
         OrderFeeRepository feeRepository = mock(OrderFeeRepository.class);
         InstrumentRuleLookup instrumentRuleLookup = mock(InstrumentRuleLookup.class);
         OrderFeeSnapshotLookup feeSnapshotLookup = mock(OrderFeeSnapshotLookup.class);
@@ -46,7 +46,7 @@ class TradingFeeServiceTest {
         assertThat(response.userId()).isEqualTo(1001L);
         assertThat(response.productLine()).isEqualTo(ProductLine.LINEAR_PERPETUAL);
         assertThat(response.symbol()).isEqualTo("BTC-USDT");
-        assertThat(response.instrumentVersion()).isEqualTo(7L);
+        assertThat(response.instrumentChangeId()).isEqualTo(7L);
         assertThat(response.makerFeeRatePpm()).isEqualTo(-50L);
         assertThat(response.takerFeeRatePpm()).isEqualTo(350L);
         assertThat(response.source()).isEqualTo("VIP_SYMBOL");

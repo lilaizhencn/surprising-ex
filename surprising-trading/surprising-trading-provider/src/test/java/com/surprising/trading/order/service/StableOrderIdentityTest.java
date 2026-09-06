@@ -108,7 +108,7 @@ class StableOrderIdentityTest {
 
     private static CoreResponse commandResponse(PlaceOrderCommand command, String clientOrderId) {
         CoreOrderStateView order = new CoreOrderStateView(command.orderId(), ProductLine.LINEAR_PERPETUAL,
-                1001, command.symbol(), command.instrumentVersion(), command.side(), command.limitPriceTicks(),
+                1001, command.symbol(), command.instrumentChangeId(), command.side(), command.limitPriceTicks(),
                 command.quantitySteps(), 0, command.quantitySteps(), command.reduceOnly(), command.marginMode(),
                 command.positionSide(), command.orderType(), command.timeInForce(), command.postOnly(), clientOrderId,
                 UUID.randomUUID(), -10, 25, 0, 1_000, 1_000, 1,
@@ -116,7 +116,7 @@ class StableOrderIdentityTest {
         return new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED, CoreResultCode.NONE,
                 1, 1, CoreCommandResultCodec.encode(new CoreCommandResultView(1,
                         UUID.fromString("20000000-0000-0000-0000-000000000001"), command.orderId(),
-                        command.instrumentVersion(), 1, 41, 43, List.of(order), List.of())));
+                        command.instrumentChangeId(), 1, 41, 43, List.of(order), List.of())));
     }
 
 }

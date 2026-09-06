@@ -34,7 +34,7 @@ public class CoreRiskLiquidationProjectionRepository {
         };
         long cursor = afterId == null ? (descending ? Long.MAX_VALUE : 0L) : afterId;
         return jdbcTemplate.query("""
-                SELECT liquidation_id, user_id, symbol, asset, position_side, instrument_version,
+                SELECT liquidation_id, user_id, symbol, asset, position_side, instrument_change_id,
                        signed_quantity_steps, status, updated_at_epoch_ms
                   FROM core_liquidation_projection
                  WHERE product_line = ? AND status IN """ + statuses + " AND liquidation_id " + comparison
@@ -42,7 +42,7 @@ public class CoreRiskLiquidationProjectionRepository {
                         + direction + " LIMIT ?", (rs, rowNum) -> new LiquidationCandidateResponse(
                 rs.getLong("liquidation_id"), rs.getLong("liquidation_id"), rs.getLong("user_id"),
                 rs.getString("symbol"), MarginMode.CROSS,
-                PositionSide.valueOf(rs.getString("position_side")), rs.getLong("instrument_version"),
+                PositionSide.valueOf(rs.getString("position_side")), rs.getLong("instrument_change_id"),
                 productLine.accountTypeCode(), rs.getString("asset"), rs.getLong("signed_quantity_steps"),
                 0L, 0L, 0L, 0L, mapStatus(rs.getString("status")),
                 Instant.ofEpochMilli(rs.getLong("updated_at_epoch_ms"))), productLine.name(), cursor, limit);

@@ -4,5 +4,5 @@ import java.util.OptionalLong;
 
 public interface MarkPriceLookup {
 
-    OptionalLong latestMarkPriceTicks(String symbol, long instrumentVersion, long maxAgeMs);
+    OptionalLong latestMarkPriceTicks(String symbol, long instrumentChangeId, long maxAgeMs);
 }

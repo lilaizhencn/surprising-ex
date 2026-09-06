@@ -146,10 +146,10 @@ public final class MarkPriceCorePublisher implements AutoCloseable {
         long publishedAt = Objects.requireNonNull(event.publishedAt(),
                 "mark price publishedAt is required").toEpochMilli();
         if (event.productLine() != com.surprising.product.api.ProductLine.OPTION) {
-            return new ApplyMarkPriceCommand(event.symbol(), event.instrumentVersion(),
+            return new ApplyMarkPriceCommand(event.symbol(), event.instrumentChangeId(),
                     event.markPriceTicks(), event.sequence(), publishedAt);
         }
-        return new ApplyMarkPriceCommand(event.symbol(), event.instrumentVersion(), event.markPriceTicks(),
+        return new ApplyMarkPriceCommand(event.symbol(), event.instrumentChangeId(), event.markPriceTicks(),
                 priceTicks(event, event.indexPrice()), priceTicks(event, event.sameExpiryForwardPrice()),
                 event.sequence(), publishedAt);
     }

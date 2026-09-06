@@ -40,11 +40,8 @@ class InstrumentRepositoryTest {
                 response("ADA-USDT", 1, Instant.parse("2026-01-01T00:00:00Z")));
         when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn((List) rows);
 
-        List<InstrumentVersionKey> keys = rows.stream()
-                .map(row -> new InstrumentVersionKey(row.symbol(), row.version()))
-                .toList();
         InstrumentRepository.InstrumentPage page =
-                repository.listPage(keys, null, InstrumentStatus.TRADING, 2, null, "updatedAt.desc");
+                repository.listPage(ProductLine.LINEAR_PERPETUAL, null, InstrumentStatus.TRADING, 2, null, "updatedAt.desc");
 
         assertThat(page.instruments()).extracting(InstrumentResponse::symbol)
                 .containsExactly("ETH-USDT", "BTC-USDT");
@@ -58,27 +55,27 @@ class InstrumentRepositoryTest {
         verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
         assertThat(sql.getValue()).contains("ORDER BY i.updated_at DESC, i.symbol DESC LIMIT ?");
         assertThat(args.getValue()).containsExactly(
-                "ETH-USDT", 2L, "BTC-USDT", 3L, "ADA-USDT", 1L, "TRADING", 3);
+                "LINEAR_PERPETUAL", "TRADING", 3);
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     @Test
-    void versionsPageCanFilterByProductLine() {
+    void currentListCanFilterByProductLine() {
         when(jdbcTemplate.query(anyString(), any(RowMapper.class), any(Object[].class))).thenReturn(List.of());
 
-        repository.versionsPage("BTC-USDT", ProductLine.OPTION, 10, null, "version.desc");
+        repository.listPage(ProductLine.OPTION, null, null, 10, null, "symbol.asc");
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate).query(sql.capture(), any(RowMapper.class), args.capture());
-        assertThat(sql.getValue()).contains("contract_type = ?");
-        assertThat(args.getValue()).containsExactly("BTC-USDT", "VANILLA_OPTION", 11);
+        assertThat(sql.getValue()).contains("contract_type=?");
+        assertThat(args.getValue()).containsExactly("VANILLA_OPTION", 11);
     }
 
     @Test
     void listPageRejectsUnsupportedSort() {
         assertThatThrownBy(() -> repository.listPage(
-                List.of(new InstrumentVersionKey("BTC-USDT", 1L)),
+                ProductLine.LINEAR_DELIVERY,
                 null, null, 10, null, "status.desc"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("unsupported sort");
@@ -90,7 +87,7 @@ class InstrumentRepositoryTest {
         Instant now = Instant.parse("2026-03-27T08:00:00Z");
 
         repository.expiringContractsDue(
-                List.of(new InstrumentVersionKey("BTC-USDT-260327", 4L)), now, 25);
+                ProductLine.LINEAR_DELIVERY, now, 25);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
@@ -101,7 +98,7 @@ class InstrumentRepositoryTest {
                 .contains("i.expiry_time <= ?")
                 .doesNotContain("instrument_product_current_versions");
         assertThat(args.getValue()).containsExactly(
-                Timestamp.from(now), "BTC-USDT-260327", 4L, 25);
+                Timestamp.from(now), "LINEAR_DELIVERY", 25);
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
@@ -110,7 +107,7 @@ class InstrumentRepositoryTest {
         Instant now = Instant.parse("2026-03-27T08:05:00Z");
 
         repository.settlingContractsDue(
-                List.of(new InstrumentVersionKey("BTC-USDT-260327", 4L)), now, 25);
+                ProductLine.LINEAR_DELIVERY, now, 25);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
@@ -121,7 +118,7 @@ class InstrumentRepositoryTest {
                 .contains("i.delivery_time <= ?")
                 .doesNotContain("instrument_product_current_versions");
         assertThat(args.getValue()).containsExactly(
-                Timestamp.from(now), "BTC-USDT-260327", 4L, 25);
+                Timestamp.from(now), "LINEAR_DELIVERY", 25);
     }
 
     @Test
@@ -141,7 +138,7 @@ class InstrumentRepositoryTest {
                 "/ticker", "BTCUSDT", "BINANCE_BOOK_TICKER", "USDT", "USDT", null, null, null,
                 "DISCOUNT", "MULTIPLY", 500_000L, false, null, null, null, 1_000_000L)));
 
-        repository.insert("BTC-USDT-260327-50000-C", 2L, request, Instant.parse("2026-01-01T00:00:00Z"));
+        repository.saveCurrent("BTC-USDT-260327-50000-C", 2L, 2L, request, Instant.parse("2026-01-01T00:00:00Z"));
 
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
         verify(jdbcTemplate).update(anyString(), args.capture());

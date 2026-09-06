@@ -38,7 +38,7 @@ class OrderPlacementStateServiceTest {
                 MarginMode.ISOLATED, PositionSide.SHORT);
 
         assertThat(result.signedQuantitySteps()).isEqualTo(-5);
-        assertThat(result.instrumentVersion()).isEqualTo(7);
+        assertThat(result.instrumentChangeId()).isEqualTo(7);
         verify(aeron).userState(1001);
         verifyNoMoreInteractions(aeron);
     }

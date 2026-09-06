@@ -33,7 +33,7 @@ public class InstrumentSnapshotRuleLookup implements InstrumentRuleLookup {
     }
 
     private InstrumentRule toRule(InstrumentResponse value) {
-        return new InstrumentRule(value.symbol(), value.version(), value.status().name(), value.instrumentType(),
+        return new InstrumentRule(value.symbol(), value.changeId(), value.status().name(), value.instrumentType(),
                 value.contractType(), value.baseAsset(), value.quoteAsset(), value.settleAsset(),
                 value.supportedOrderTypes() == null ? Set.of() : Set.copyOf(value.supportedOrderTypes()),
                 value.supportedTimeInForce() == null ? Set.of() : Set.copyOf(value.supportedTimeInForce()),

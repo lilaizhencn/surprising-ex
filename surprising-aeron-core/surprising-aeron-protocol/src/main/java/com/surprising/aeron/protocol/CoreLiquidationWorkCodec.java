@@ -74,7 +74,7 @@ public final class CoreLiquidationWorkCodec {
             writer.text(action.symbol());
             writer.intValue(action.marginMode().wireCode());
             writer.intValue(action.positionSide().wireCode());
-            writer.longValue(action.instrumentVersion());
+            writer.longValue(action.instrumentChangeId());
             writer.longValue(action.triggerPriceSequence());
             writer.longValue(action.signedQuantitySteps());
             writer.longValue(action.closeQuantitySteps());
@@ -90,7 +90,7 @@ public final class CoreLiquidationWorkCodec {
             writer.text(resolution.asset());
             writer.intValue(resolution.marginMode().wireCode());
             writer.intValue(resolution.positionSide().wireCode());
-            writer.longValue(resolution.instrumentVersion());
+            writer.longValue(resolution.instrumentChangeId());
             writer.longValue(resolution.triggerPriceSequence());
             writer.longValue(resolution.signedQuantitySteps());
             writer.longValue(resolution.deficitUnits());
@@ -117,7 +117,7 @@ public final class CoreLiquidationWorkCodec {
                     reader.positiveLong("userId"), reader.text(),
                     CoreMarginMode.fromWireCode(reader.intValue()),
                     CorePositionSide.fromWireCode(reader.intValue()),
-                    reader.positiveLong("instrumentVersion"), reader.positiveLong("triggerPriceSequence"),
+                    reader.positiveLong("instrumentChangeId"), reader.positiveLong("triggerPriceSequence"),
                     reader.nonZeroLong("signedQuantitySteps"), reader.positiveLong("closeQuantitySteps"),
                     reader.positiveLong("markPriceTicks"), reader.text(),
                     reader.nonNegativeLong("cursorOrderId")));
@@ -134,7 +134,7 @@ public final class CoreLiquidationWorkCodec {
             String asset = reader.text();
             CoreMarginMode marginMode = CoreMarginMode.fromWireCode(reader.intValue());
             CorePositionSide positionSide = CorePositionSide.fromWireCode(reader.intValue());
-            long instrumentVersion = reader.positiveLong("instrumentVersion");
+            long instrumentChangeId = reader.positiveLong("instrumentChangeId");
             long triggerPriceSequence = reader.positiveLong("triggerPriceSequence");
             long signedQuantitySteps = reader.nonZeroLong("signedQuantitySteps");
             long deficitUnits = reader.positiveLong("deficitUnits");
@@ -145,7 +145,7 @@ public final class CoreLiquidationWorkCodec {
                 throw new ProtocolException("invalid liquidation resolution purpose");
             }
             resolutions.add(new CoreLiquidationWorkView.Resolution(liquidationId, userId, symbol, asset,
-                    marginMode, positionSide, instrumentVersion, triggerPriceSequence, signedQuantitySteps,
+                    marginMode, positionSide, instrumentChangeId, triggerPriceSequence, signedQuantitySteps,
                     deficitUnits, recommendedCoveredUnits, CoreLiquidationWorkView.Purpose.values()[purposeCode]));
         }
         reader.requireConsumed();

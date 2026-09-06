@@ -60,7 +60,7 @@ public final class RuntimeRiskQueryService {
                     instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), instrument.settleScaleUnits());
             long wallet = crossWalletBalance(runtime, identities, risk.userId(), instrument.settleAsset());
             result.add(new CoreRiskSnapshotView(risk.userId(), symbol, position.marginMode(), risk.positionSide(),
-                    position.instrumentVersion(), instrument.settleAsset(), position.signedQuantitySteps(),
+                    position.instrumentChangeId(), instrument.settleAsset(), position.signedQuantitySteps(),
                     position.entryPriceTicks(), mark.markPriceTicks(), notional, position.positionMarginUnits(),
                     risk.priceSequence(), wallet, risk.equityUnits(), risk.unrealizedPnlUnits(),
                     risk.maintenanceMarginUnits(), risk.marginRatioPpm(), risk.status().name()));

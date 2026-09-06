@@ -241,7 +241,7 @@ public final class RuntimeFactFrame implements RuntimeFactView {
 
     public static CoreOrderStateView exportOrderView(CoreOrderState order) {
         return new CoreOrderStateView(order.orderId(), order.productLine(), order.userId(), order.symbol(),
-                order.instrumentVersion(), order.side(), order.priceTicks(), order.quantitySteps(),
+                order.instrumentChangeId(), order.side(), order.priceTicks(), order.quantitySteps(),
                 order.executedQuantitySteps(), order.remainingQuantitySteps(), order.reduceOnly(),
                 order.marginMode(), order.positionSide(), order.orderType(), order.timeInForce(), order.postOnly(),
                 order.clientOrderId(), order.commandId(), order.makerFeeRatePpm(), order.takerFeeRatePpm(),

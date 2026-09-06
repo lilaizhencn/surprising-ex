@@ -363,7 +363,7 @@ public final class RuntimeProjectionState {
             String symbol = identities.symbol(change.symbolId());
             MarkPriceRuntime value = change.after();
             inverse.putOrRemove(marks, symbol, value == null ? null : new CoreMarkPriceState(symbol,
-                    value.instrumentVersion(), value.markPriceTicks(), value.indexPriceTicks(),
+                    value.instrumentChangeId(), value.markPriceTicks(), value.indexPriceTicks(),
                     value.forwardPriceTicks(), value.priceSequence(), value.generatedAtEpochMillis()));
         }
         for (RuntimeFactFrame.RiskScanChange change : global.riskScans()) {

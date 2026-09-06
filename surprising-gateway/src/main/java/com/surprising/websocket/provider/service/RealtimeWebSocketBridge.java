@@ -164,7 +164,7 @@ public final class RealtimeWebSocketBridge
                                 java.nio.ByteBuffer.wrap(f.payload())
                                         .order(java.nio.ByteOrder.LITTLE_ENDIAN);
                         yield Map.of(
-                                "instrumentVersion",
+                                "instrumentChangeId",
                                 b.getLong(),
                                 "orderId",
                                 Long.toString(b.getLong()),
@@ -188,7 +188,7 @@ public final class RealtimeWebSocketBridge
                                 java.nio.ByteBuffer.wrap(f.payload())
                                         .order(java.nio.ByteOrder.LITTLE_ENDIAN);
                         yield Map.of(
-                                "instrumentVersion",
+                                "instrumentChangeId",
                                 b.getLong(),
                                 "priceTicks",
                                 b.getLong(),

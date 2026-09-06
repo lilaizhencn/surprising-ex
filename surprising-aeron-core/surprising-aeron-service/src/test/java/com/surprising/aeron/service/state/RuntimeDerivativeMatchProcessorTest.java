@@ -239,7 +239,7 @@ class RuntimeDerivativeMatchProcessorTest {
 
     private static CoreUserState user(long userId, CoreOrderState order, long reservedUnits) {
         OrderReservation reservation = OrderReservation.create(order.orderId(), order.symbol(),
-                order.instrumentVersion(), ReservationKind.DERIVATIVE_MARGIN, "USDT", reservedUnits,
+                order.instrumentChangeId(), ReservationKind.DERIVATIVE_MARGIN, "USDT", reservedUnits,
                 order.quantitySteps());
         return new CoreUserState(ProductLine.LINEAR_PERPETUAL, userId, 1,
                 Map.of("USDT", new AssetBalance("USDT", 800, reservedUnits)),

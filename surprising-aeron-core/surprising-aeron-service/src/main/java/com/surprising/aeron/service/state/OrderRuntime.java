@@ -9,7 +9,7 @@ import com.surprising.product.api.ProductLine;
 import java.util.UUID;
 
 public record OrderRuntime(long orderId, ProductLine productLine, long userId, int symbolId,
-                           long instrumentVersion, CoreOrderSide side, long priceTicks,
+                           long instrumentChangeId, CoreOrderSide side, long priceTicks,
                            long matchingPriceTicks,
                            long quantitySteps, long executedQuantitySteps, long remainingQuantitySteps,
                            boolean reduceOnly, CoreMarginMode marginMode, CorePositionSide positionSide,
@@ -29,13 +29,13 @@ public record OrderRuntime(long orderId, ProductLine productLine, long userId, i
                 quantitySteps, 0, quantitySteps, canceled);
     }
 
-    public OrderRuntime(long orderId, long userId, int symbolId, long instrumentVersion,
+    public OrderRuntime(long orderId, long userId, int symbolId, long instrumentChangeId,
                         CoreOrderSide side, long priceTicks, boolean reduceOnly,
                         CoreMarginMode marginMode, CorePositionSide positionSide,
                         CoreOrderType orderType, CoreTimeInForce timeInForce,
                         long makerFeeRatePpm, long takerFeeRatePpm, long quantitySteps,
                         long executedQuantitySteps, long remainingQuantitySteps, boolean canceled) {
-        this(orderId, ProductLine.LINEAR_PERPETUAL, userId, symbolId, instrumentVersion, side, priceTicks,
+        this(orderId, ProductLine.LINEAR_PERPETUAL, userId, symbolId, instrumentChangeId, side, priceTicks,
                 priceTicks,
                 quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode,
                 positionSide, orderType, timeInForce, false, "", new UUID(0, orderId), makerFeeRatePpm,
@@ -43,7 +43,7 @@ public record OrderRuntime(long orderId, ProductLine productLine, long userId, i
     }
 
     public OrderRuntime {
-        if (orderId <= 0 || productLine == null || userId <= 0 || symbolId < 0 || instrumentVersion <= 0
+        if (orderId <= 0 || productLine == null || userId <= 0 || symbolId < 0 || instrumentChangeId <= 0
                 || side == null || priceTicks < 0 || matchingPriceTicks < 0
                 || quantitySteps <= 0 || executedQuantitySteps < 0
                 || remainingQuantitySteps < 0
@@ -59,28 +59,28 @@ public record OrderRuntime(long orderId, ProductLine productLine, long userId, i
     }
 
     public OrderRuntime(long orderId, ProductLine productLine, long userId, int symbolId,
-                        long instrumentVersion, CoreOrderSide side, long priceTicks,
+                        long instrumentChangeId, CoreOrderSide side, long priceTicks,
                         long quantitySteps, long executedQuantitySteps, long remainingQuantitySteps,
                         boolean reduceOnly, CoreMarginMode marginMode, CorePositionSide positionSide,
                         CoreOrderType orderType, CoreTimeInForce timeInForce, boolean postOnly,
                         String clientOrderId, UUID commandId, long makerFeeRatePpm, long takerFeeRatePpm,
                         long createdAtEpochMillis, long updatedAtEpochMillis, long clusterPosition,
                         CoreOrderStatus status, long revision) {
-        this(orderId, productLine, userId, symbolId, instrumentVersion, side, priceTicks, priceTicks,
+        this(orderId, productLine, userId, symbolId, instrumentChangeId, side, priceTicks, priceTicks,
                 quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode,
                 positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm,
                 takerFeeRatePpm, 0, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition, status, revision);
     }
 
     public OrderRuntime(long orderId, ProductLine productLine, long userId, int symbolId,
-                        long instrumentVersion, CoreOrderSide side, long priceTicks, long matchingPriceTicks,
+                        long instrumentChangeId, CoreOrderSide side, long priceTicks, long matchingPriceTicks,
                         long quantitySteps, long executedQuantitySteps, long remainingQuantitySteps,
                         boolean reduceOnly, CoreMarginMode marginMode, CorePositionSide positionSide,
                         CoreOrderType orderType, CoreTimeInForce timeInForce, boolean postOnly,
                         String clientOrderId, UUID commandId, long makerFeeRatePpm, long takerFeeRatePpm,
                         long createdAtEpochMillis, long updatedAtEpochMillis, long clusterPosition,
                         CoreOrderStatus status, long revision) {
-        this(orderId, productLine, userId, symbolId, instrumentVersion, side, priceTicks, matchingPriceTicks,
+        this(orderId, productLine, userId, symbolId, instrumentChangeId, side, priceTicks, matchingPriceTicks,
                 quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly, marginMode,
                 positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm,
                 takerFeeRatePpm, 0, createdAtEpochMillis, updatedAtEpochMillis, clusterPosition, status, revision);
@@ -91,7 +91,7 @@ public record OrderRuntime(long orderId, ProductLine productLine, long userId, i
     }
 
     public OrderRuntime withExecution(long executed, long remaining, CoreOrderStatus nextStatus, long nextRevision) {
-        return new OrderRuntime(orderId, productLine, userId, symbolId, instrumentVersion, side, priceTicks,
+        return new OrderRuntime(orderId, productLine, userId, symbolId, instrumentChangeId, side, priceTicks,
                 matchingPriceTicks,
                 quantitySteps, executed, remaining, reduceOnly, marginMode, positionSide, orderType, timeInForce,
                 postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits,
@@ -101,7 +101,7 @@ public record OrderRuntime(long orderId, ProductLine productLine, long userId, i
 
     public OrderRuntime withFill(long executed, long remaining, long feeUnits,
                                  CoreOrderStatus nextStatus, long nextRevision) {
-        return new OrderRuntime(orderId, productLine, userId, symbolId, instrumentVersion, side, priceTicks,
+        return new OrderRuntime(orderId, productLine, userId, symbolId, instrumentChangeId, side, priceTicks,
                 matchingPriceTicks, quantitySteps, executed, remaining, reduceOnly, marginMode, positionSide,
                 orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
                 Math.addExact(cumulativeFeeUnits, feeUnits), createdAtEpochMillis, updatedAtEpochMillis,
@@ -113,7 +113,7 @@ public record OrderRuntime(long orderId, ProductLine productLine, long userId, i
     }
 
     public OrderRuntime withCommitMetadata(long timestamp, long position) {
-        return new OrderRuntime(orderId, productLine, userId, symbolId, instrumentVersion, side, priceTicks,
+        return new OrderRuntime(orderId, productLine, userId, symbolId, instrumentChangeId, side, priceTicks,
                 matchingPriceTicks, quantitySteps, executedQuantitySteps, remainingQuantitySteps, reduceOnly,
                 marginMode, positionSide, orderType, timeInForce, postOnly, clientOrderId, commandId,
                 makerFeeRatePpm, takerFeeRatePpm, cumulativeFeeUnits, timestamp, timestamp, position, status, revision);

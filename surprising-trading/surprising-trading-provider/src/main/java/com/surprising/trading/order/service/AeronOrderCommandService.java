@@ -139,7 +139,7 @@ public class AeronOrderCommandService {
             com.surprising.trading.api.model.PlaceOrderRequest request,
             ValidationResult validation) {
         long limitPriceTicks = request.orderType() == OrderType.LIMIT ? request.priceTicks() : 0;
-        return new PlaceOrderCommand(orderId, request.symbol(), validation.instrumentVersion(),
+        return new PlaceOrderCommand(orderId, request.symbol(), validation.instrumentChangeId(),
                 side(request.side()), limitPriceTicks, request.quantitySteps(), request.reduceOnly(),
                 marginMode(request.marginMode()), positionSide(request.positionSide()),
                 orderType(request.orderType()), timeInForce(request.timeInForce()), request.postOnly(),
@@ -421,7 +421,7 @@ public class AeronOrderCommandService {
     private static OrderResponse requireOrder(CoreOrderStateView view, String message) {
         if (view == null) throw new IllegalStateException(message);
         return new OrderResponse(view.orderId(), view.userId(), emptyToNull(view.clientOrderId()), view.symbol(),
-                view.instrumentVersion(), OrderSide.valueOf(view.side().name()), OrderType.valueOf(view.orderType().name()),
+                view.instrumentChangeId(), OrderSide.valueOf(view.side().name()), OrderType.valueOf(view.orderType().name()),
                 TimeInForce.valueOf(view.timeInForce().name()), view.priceTicks(), view.quantitySteps(),
                 view.executedQuantitySteps(), view.remainingQuantitySteps(), MarginMode.valueOf(view.marginMode().name()),
                 PositionSide.valueOf(view.positionSide().name()), view.makerFeeRatePpm(), view.takerFeeRatePpm(),

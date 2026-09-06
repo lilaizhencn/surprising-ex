@@ -43,7 +43,7 @@ public final class RuntimeDerivativeMatchProcessor {
             return runtime;
         }
         CoreInstrumentState instrument = runtime.instrument(identities.symbol(taker.symbolId()));
-        if (instrument == null || instrument.version() != taker.instrumentVersion()) {
+        if (instrument == null || instrument.changeId() != taker.instrumentChangeId()) {
             throw new IllegalStateException("runtime match instrument is missing");
         }
         validateAndPrepare(takerOrderId, matches, runtime, identities);

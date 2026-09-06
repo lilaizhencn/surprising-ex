@@ -52,17 +52,6 @@ public class InstrumentController {
                         entry -> Long.toString(entry.getValue())));
     }
 
-    @GetMapping(InstrumentApiPaths.BASE_PATH + "/version")
-    public InstrumentResponse version(@RequestParam("symbol") String symbol, @RequestParam("version") long version) {
-        try {
-            return instrumentService.version(symbol, version);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        } catch (IllegalStateException ex) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, ex.getMessage(), ex);
-        }
-    }
-
     @GetMapping(InstrumentApiPaths.BASE_PATH + "/list")
     public InstrumentQueryResponse list(@RequestParam(value = "type", required = false) InstrumentType type,
                                         @RequestParam(value = "status", required = false) InstrumentStatus status,
@@ -110,27 +99,19 @@ public class InstrumentController {
         }
     }
 
-    @GetMapping(InstrumentApiPaths.ADMIN_BASE_PATH + "/{symbol}/versions")
-    public InstrumentQueryResponse versions(@PathVariable("symbol") String symbol,
-                                            @RequestParam(value = "limit", defaultValue = "100") int limit,
-                                            @RequestParam(value = "cursor", required = false) String cursor,
-                                            @RequestParam(value = "sort", required = false) String sort,
-                                            @RequestHeader(value = "X-Product-Line", required = false)
-                                            String productLineHeader,
-                                            @RequestParam(value = "productLine", required = false)
-                                            String productLineValue) {
-        try {
-            return instrumentService.versions(symbol, productLine(productLineValue, productLineHeader),
-                    limit, cursor, sort);
-        } catch (IllegalArgumentException ex) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
-        }
+    @GetMapping(InstrumentApiPaths.ADMIN_BASE_PATH + "/{symbol}/changes")
+    public java.util.List<com.surprising.instrument.provider.repository.InstrumentChangeLogRepository.Entry> changes(
+            @PathVariable String symbol,@RequestParam ProductLine productLine,
+            @RequestParam(defaultValue="0") long beforeId,@RequestParam(defaultValue="50") int limit) {
+        return instrumentService.changes(symbol,productLine,beforeId,limit);
     }
 
     @PostMapping(InstrumentApiPaths.ADMIN_BASE_PATH + "/upsert")
-    public InstrumentResponse upsert(@RequestBody InstrumentUpsertRequest request) {
+    public InstrumentResponse upsert(@RequestBody InstrumentUpsertRequest request,
+            @RequestHeader("X-Admin-User-Id") String operator,
+            @RequestParam(defaultValue="Admin configuration update") String reason) {
         try {
-            return instrumentService.upsert(request);
+            return instrumentService.upsert(request,operator,reason);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         }
@@ -142,9 +123,11 @@ public class InstrumentController {
                                            @RequestHeader(value = "X-Product-Line", required = false)
                                            String productLineHeader,
                                            @RequestParam(value = "productLine", required = false)
-                                           String productLineValue) {
+                                           String productLineValue,
+                                           @RequestHeader("X-Admin-User-Id") String operator,
+                                           @RequestParam(defaultValue="Admin trading status update") String reason) {
         try {
-            return instrumentService.updateStatus(symbol, productLine(productLineValue, productLineHeader), status);
+            return instrumentService.updateStatus(symbol, productLine(productLineValue, productLineHeader), status,operator,reason);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {
@@ -160,14 +143,16 @@ public class InstrumentController {
                                                  String productLineValue,
                                                  @RequestParam("settlementPriceTicks") long settlementPriceTicks,
                                                  @RequestParam(value = "underlyingSettlementPriceUnits",
-                                                         defaultValue = "0") long underlyingSettlementPriceUnits) {
+                                                         defaultValue = "0") long underlyingSettlementPriceUnits,
+                                                 @RequestHeader("X-Admin-User-Id") String operator,
+                                                 @RequestParam(value="reason", defaultValue="Admin settlement confirmation") String reason) {
         try {
             ProductLine productLine = productLine(productLineValue, productLineHeader);
             if (productLine == null) {
                 throw new IllegalArgumentException("settlement productLine is required");
             }
             return instrumentService.closeForSettlement(symbol, productLine, settlementPriceTicks,
-                    underlyingSettlementPriceUnits);
+                    underlyingSettlementPriceUnits,operator,reason);
         } catch (IllegalArgumentException ex) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage(), ex);
         } catch (IllegalStateException ex) {

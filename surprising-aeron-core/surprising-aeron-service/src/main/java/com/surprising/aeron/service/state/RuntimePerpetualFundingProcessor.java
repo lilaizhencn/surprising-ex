@@ -51,8 +51,8 @@ public final class RuntimePerpetualFundingProcessor {
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         }
-        if (instrument.version() != command.instrumentVersion()) {
-            throw new CoreStateRejectedException("INSTRUMENT_VERSION_CONFLICT", "instrument version differs");
+        if (instrument.changeId() != command.instrumentChangeId()) {
+            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT", "instrument version differs");
         }
         if (instrument.maintenance().mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT
                 || instrument.maintenance().mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.CLOSED) {
@@ -80,7 +80,7 @@ public final class RuntimePerpetualFundingProcessor {
                 throw new CoreStateRejectedException("INVALID_COMMAND", "funding cursor must start at zero");
             }
             if (previousProgress != null && (previousProgress.settlementId() != command.settlementId()
-                    || previousProgress.instrumentVersion() != command.instrumentVersion()
+                    || previousProgress.instrumentChangeId() != command.instrumentChangeId()
                     || previousProgress.fundingRatePpm() != command.fundingRatePpm()
                     || previousProgress.nextCursorUserId() != command.cursorUserId())) {
                 throw new CoreStateRejectedException("INVALID_COMMAND", "funding cursor does not match progress");
@@ -112,7 +112,7 @@ public final class RuntimePerpetualFundingProcessor {
             runtime.treasury().setFundingSettlement(symbolId, command.settlementId());
         } else {
             runtime.treasury().setFundingProgress(symbolId, new TreasuryRuntime.FundingProgressRuntime(
-                    command.settlementId(), command.instrumentVersion(), command.fundingRatePpm(),
+                    command.settlementId(), command.instrumentChangeId(), command.fundingRatePpm(),
                     userPage.accountLaneId(), nextCursorUserId, chunkCommandId, fundingMark, fundingPriceSequence));
         }
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));

@@ -2,16 +2,16 @@ package com.surprising.account.provider.model;
 
 public record PositionState(
         long signedQuantitySteps,
-        long instrumentVersion,
+        long instrumentChangeId,
         long entryPriceTicks,
         long entryValueTicks,
         long realizedPnlUnits) {
 
     public PositionState(long signedQuantitySteps,
-                         long instrumentVersion,
+                         long instrumentChangeId,
                          long entryPriceTicks,
                          long realizedPnlUnits) {
-        this(signedQuantitySteps, instrumentVersion, entryPriceTicks,
+        this(signedQuantitySteps, instrumentChangeId, entryPriceTicks,
                 defaultEntryValueTicks(signedQuantitySteps, entryPriceTicks), realizedPnlUnits);
     }
 

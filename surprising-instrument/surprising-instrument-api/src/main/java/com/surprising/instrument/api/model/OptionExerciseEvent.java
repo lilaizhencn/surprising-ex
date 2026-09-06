@@ -4,7 +4,7 @@ import java.time.Instant;
 
 public record OptionExerciseEvent(
         String symbol,
-        long version,
+        long changeId,
         String underlyingSymbol,
         long strikePriceUnits,
         long underlyingSettlementPriceUnits,
@@ -19,7 +19,7 @@ public record OptionExerciseEvent(
         InstrumentResponse instrument) {
 
     public OptionExerciseEvent {
-        if (symbol == null || symbol.isBlank() || version <= 0L || underlyingSymbol == null
+        if (symbol == null || symbol.isBlank() || changeId <= 0L || underlyingSymbol == null
                 || underlyingSymbol.isBlank() || strikePriceUnits <= 0L || underlyingSettlementPriceUnits <= 0L
                 || cashSettlementUnitsPerContract < 0L
                 || optionType == null || optionExerciseStyle == null || status != InstrumentStatus.CLOSED
@@ -27,7 +27,7 @@ public record OptionExerciseEvent(
             throw new IllegalArgumentException("期权行权事件必须携带有效合约和标的结算价");
         }
         if (instrument != null && (!symbol.equalsIgnoreCase(instrument.symbol())
-                || version != instrument.version() || instrument.instrumentType() != InstrumentType.OPTION
+                || changeId != instrument.changeId() || instrument.instrumentType() != InstrumentType.OPTION
                 || !underlyingSymbol.equalsIgnoreCase(instrument.underlyingSymbol())
                 || instrument.strikePriceUnits() == null || strikePriceUnits != instrument.strikePriceUnits()
                 || optionType != instrument.optionType() || optionExerciseStyle != instrument.optionExerciseStyle()

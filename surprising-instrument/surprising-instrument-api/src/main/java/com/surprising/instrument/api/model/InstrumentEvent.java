@@ -5,7 +5,7 @@ import com.surprising.product.api.ProductLine;
 
 public record InstrumentEvent(
         String symbol,
-        long version,
+        long changeId,
         InstrumentStatus status,
         InstrumentEventType eventType,
         Instant eventTime,

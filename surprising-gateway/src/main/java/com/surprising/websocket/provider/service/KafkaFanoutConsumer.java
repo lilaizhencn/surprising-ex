@@ -151,7 +151,7 @@ public class KafkaFanoutConsumer {
 
     private boolean isFreshMarkPrice(MarkPriceEvent event) {
         if (event == null || event.productLine() != properties.getKafka().getProductLine()
-                || event.instrumentVersion() <= 0 || event.markPriceUnits() <= 0 || event.markPriceTicks() <= 0
+                || event.instrumentChangeId() <= 0 || event.markPriceUnits() <= 0 || event.markPriceTicks() <= 0
                 || event.sequence() <= 0 || event.eventTime() == null || event.publishedAt() == null
                 || event.status() == null || event.status() == PriceStatus.STALE
                 || event.status() == PriceStatus.INSUFFICIENT_SOURCES

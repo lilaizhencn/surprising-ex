@@ -355,11 +355,11 @@ public record CoreTreasuryState(
         }
     }
 
-    public record FundingProgress(long settlementId, long instrumentVersion, long fundingRatePpm,
+    public record FundingProgress(long settlementId, long instrumentChangeId, long fundingRatePpm,
                                  int accountLaneId, long nextCursorUserId, UUID commandId,
                                  long markPriceTicks, long priceSequence) {
         public FundingProgress {
-            if (settlementId <= 0 || instrumentVersion <= 0 || Math.absExact(fundingRatePpm) > 1_000_000
+            if (settlementId <= 0 || instrumentChangeId <= 0 || Math.absExact(fundingRatePpm) > 1_000_000
                     || accountLaneId < 0 || accountLaneId >= Long.SIZE
                     || nextCursorUserId < 0 || commandId == null || markPriceTicks <= 0 || priceSequence <= 0) {
                 throw new IllegalArgumentException("invalid funding progress");
@@ -367,24 +367,24 @@ public record CoreTreasuryState(
         }
     }
 
-    public record LifecycleProgress(long settlementId, long instrumentVersion, long settlementPriceTicks,
+    public record LifecycleProgress(long settlementId, long instrumentChangeId, long settlementPriceTicks,
                                    long optionCashUnitsPerContract, boolean ordersComplete,
                                    int accountLaneId, long nextCursorOrderId,
                                    long nextCursorUserId, UUID commandId, long requiredInsuranceUnits) {
-        public LifecycleProgress(long settlementId, long instrumentVersion, long settlementPriceTicks,
+        public LifecycleProgress(long settlementId, long instrumentChangeId, long settlementPriceTicks,
                                  long optionCashUnitsPerContract, boolean ordersComplete, int accountLaneId,
                                  long nextCursorOrderId, long nextCursorUserId, UUID commandId) {
-            this(settlementId, instrumentVersion, settlementPriceTicks, optionCashUnitsPerContract, ordersComplete,
+            this(settlementId, instrumentChangeId, settlementPriceTicks, optionCashUnitsPerContract, ordersComplete,
                     accountLaneId, nextCursorOrderId, nextCursorUserId, commandId, 0);
         }
-        public LifecycleProgress(long settlementId, long instrumentVersion, long settlementPriceTicks,
+        public LifecycleProgress(long settlementId, long instrumentChangeId, long settlementPriceTicks,
                                  long optionCashUnitsPerContract, long nextCursorUserId, UUID commandId) {
-            this(settlementId, instrumentVersion, settlementPriceTicks, optionCashUnitsPerContract,
+            this(settlementId, instrumentChangeId, settlementPriceTicks, optionCashUnitsPerContract,
                     true, 0, 0, nextCursorUserId, commandId);
         }
 
         public LifecycleProgress {
-            if (settlementId <= 0 || instrumentVersion <= 0 || settlementPriceTicks < 0
+            if (settlementId <= 0 || instrumentChangeId <= 0 || settlementPriceTicks < 0
                     || requiredInsuranceUnits < 0 || requiredInsuranceUnits > 0 && !ordersComplete
                     || optionCashUnitsPerContract < 0 || accountLaneId < 0 || accountLaneId >= Long.SIZE
                     || nextCursorOrderId < 0 || nextCursorUserId < 0
@@ -393,10 +393,10 @@ public record CoreTreasuryState(
                 throw new IllegalArgumentException("invalid lifecycle progress");
             }
         }
-        public LifecycleProgress(long settlementId, long instrumentVersion, long settlementPriceTicks,
+        public LifecycleProgress(long settlementId, long instrumentChangeId, long settlementPriceTicks,
                                  long optionCashUnitsPerContract, boolean ordersComplete,
                                  long nextCursorOrderId, long nextCursorUserId, UUID commandId) {
-            this(settlementId, instrumentVersion, settlementPriceTicks, optionCashUnitsPerContract,
+            this(settlementId, instrumentChangeId, settlementPriceTicks, optionCashUnitsPerContract,
                     ordersComplete, 0, nextCursorOrderId, nextCursorUserId, commandId);
         }
     }

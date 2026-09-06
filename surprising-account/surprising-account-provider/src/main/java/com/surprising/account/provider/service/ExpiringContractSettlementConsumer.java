@@ -42,7 +42,7 @@ public class ExpiringContractSettlementConsumer {
             requireCurrentProductTopic(record.topic(), deliverySettlementsTopic(), "delivery settlement");
             int commands = requireFanoutService().fanout(event);
             log.info("Applied Aeron delivery settlement symbol={} version={} coreCommands={}",
-                    event.symbol(), event.version(), commands);
+                    event.symbol(), event.changeId(), commands);
         } catch (Exception ex) {
             log.error("Failed to process delivery settlement: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to process delivery settlement", ex);
@@ -61,7 +61,7 @@ public class ExpiringContractSettlementConsumer {
             requireCurrentProductTopic(record.topic(), optionExercisesTopic(), "option exercise");
             int commands = requireFanoutService().fanout(event);
             log.info("Applied Aeron option exercise symbol={} version={} coreCommands={}",
-                    event.symbol(), event.version(), commands);
+                    event.symbol(), event.changeId(), commands);
         } catch (Exception ex) {
             log.error("Failed to process option exercise: {}", ex.getMessage(), ex);
             throw new IllegalStateException("failed to process option exercise", ex);

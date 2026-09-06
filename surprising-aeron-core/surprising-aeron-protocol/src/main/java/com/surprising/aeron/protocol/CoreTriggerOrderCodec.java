@@ -33,7 +33,7 @@ public final class CoreTriggerOrderCodec {
         writer.longValue(state.expiresAtEpochMillis()); writer.longValue(state.triggeredAtEpochMillis());
         writer.longValue(state.createdAtEpochMillis()); writer.longValue(state.updatedAtEpochMillis());
         writer.longValue(state.revision());
-        writer.longValue(state.instrumentVersion()); writer.longValue(state.makerFeeRatePpm());
+        writer.longValue(state.instrumentChangeId()); writer.longValue(state.makerFeeRatePpm());
         writer.longValue(state.takerFeeRatePpm());
         return writer.bytes();
     }

@@ -74,7 +74,7 @@ public class MaintenanceService {
     public record Position(String userId, String symbol, String marginMode, String positionSide,
                            String signedQuantitySteps, String entryPriceTicks, String positionMarginUnits) { }
     public record Preview(ProductLine productLine, String symbol, String gateMode, String gateTaskId,
-                          String instrumentVersion, List<Position> positions, List<String> orderIds,
+                          String instrumentChangeId, List<Position> positions, List<String> orderIds,
                           List<String> triggerOrderIds, boolean moreUsers, String nextUserId,
                           boolean moreOrders, boolean moreTriggers) { }
     public Preview preview(String symbol, long userId, long afterUserId) {
@@ -87,7 +87,7 @@ public class MaintenanceService {
         }
         var open = core.openOrders(userId,symbol,0,21);
         var pending = core.openTriggers(userId,symbol,0,21);
-        return new Preview(line,symbol,page.state().mode().name(),Long.toString(page.state().taskId()),Long.toString(page.instrumentVersion()),
+        return new Preview(line,symbol,page.state().mode().name(),Long.toString(page.state().taskId()),Long.toString(page.instrumentChangeId()),
                 List.copyOf(positions),open.stream().limit(20).map(v -> Long.toString(v.orderId())).toList(),
                 pending.stream().limit(20).map(v -> Long.toString(v.triggerOrderId())).toList(),userId == 0 && page.hasMore(),
                 page.userIds().isEmpty() ? "0" : Long.toString(page.userIds().getLast()),open.size()>20,pending.size()>20);
@@ -144,7 +144,7 @@ public class MaintenanceService {
                 if (progress.settlementId() == task.taskId() && progress.complete()) { repository.phase(task,"VERIFY"); return; }
                 if (progress.settlementId() != 0 && progress.settlementId() != task.taskId() && !progress.complete()) throw new IllegalStateException("another settlement is in progress");
                 var page = core.maintenance(symbol,0,1);
-                var command = new SettleInstrumentCommand(task.taskId(),symbol,page.instrumentVersion(),task.priceTicks(),0,
+                var command = new SettleInstrumentCommand(task.taskId(),symbol,page.instrumentChangeId(),task.priceTicks(),0,
                         progress.settlementId() == task.taskId() ? progress.nextCursorUserId() : 0,16,
                         progress.settlementId() == task.taskId() ? progress.nextCursorOrderId() : 0,20);
                 plan(task,"settle:"+task.step(),new PlannedAction("SETTLE",0,0,null,command));
@@ -168,7 +168,7 @@ public class MaintenanceService {
             String key = "close:"+task.roundNo()+":"+owner+":"+position.marginMode()+":"+position.positionSide();
             String clientId = "maint-"+stable(task,key);
             var order = new PlaceOrderCommand(StableOrderIdentity.orderId(line,owner,clientId),task.request().symbol(),
-                    position.instrumentVersion(),position.signedQuantitySteps() > 0 ? CoreOrderSide.SELL : CoreOrderSide.BUY,
+                    position.instrumentChangeId(),position.signedQuantitySteps() > 0 ? CoreOrderSide.SELL : CoreOrderSide.BUY,
                     task.priceTicks(),Math.absExact(position.signedQuantitySteps()),true,position.marginMode(),position.positionSide(),
                     task.request().mode() == MaintenanceRequest.Mode.LIMIT ? CoreOrderType.LIMIT : CoreOrderType.MARKET,
                     CoreTimeInForce.IOC,false,clientId);

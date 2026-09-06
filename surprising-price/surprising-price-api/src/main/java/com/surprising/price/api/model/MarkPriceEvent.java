@@ -14,7 +14,7 @@ import java.time.Instant;
 public record MarkPriceEvent(
         ProductLine productLine,
         String symbol,
-        long instrumentVersion,
+        long instrumentChangeId,
         long markPriceUnits,
         long markPriceTicks,
         BigDecimal markPrice,

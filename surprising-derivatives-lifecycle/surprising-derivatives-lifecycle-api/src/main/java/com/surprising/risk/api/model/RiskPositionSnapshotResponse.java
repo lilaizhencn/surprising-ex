@@ -10,7 +10,7 @@ public record RiskPositionSnapshotResponse(
         String symbol,
         MarginMode marginMode,
         PositionSide positionSide,
-        long instrumentVersion,
+        long instrumentChangeId,
         String settleAsset,
         long signedQuantitySteps,
         long entryPriceTicks,
@@ -32,7 +32,7 @@ public record RiskPositionSnapshotResponse(
                                         long userId,
                                         String symbol,
                                         MarginMode marginMode,
-                                        long instrumentVersion,
+                                        long instrumentChangeId,
                                         String settleAsset,
                                         long signedQuantitySteps,
                                         long entryPriceTicks,
@@ -44,7 +44,7 @@ public record RiskPositionSnapshotResponse(
                                         long marginRatioPpm,
                                         RiskStatus status,
                                         Instant eventTime) {
-        this(snapshotId, userId, symbol, marginMode, PositionSide.NET, instrumentVersion, settleAsset,
+        this(snapshotId, userId, symbol, marginMode, PositionSide.NET, instrumentChangeId, settleAsset,
                 signedQuantitySteps, entryPriceTicks, markPriceTicks, notionalUnits, unrealizedPnlUnits,
                 maintenanceMarginUnits, positionMarginUnits, marginRatioPpm, status, eventTime);
     }
@@ -52,7 +52,7 @@ public record RiskPositionSnapshotResponse(
     public RiskPositionSnapshotResponse(long snapshotId,
                                         long userId,
                                         String symbol,
-                                        long instrumentVersion,
+                                        long instrumentChangeId,
                                         String settleAsset,
                                         long signedQuantitySteps,
                                         long entryPriceTicks,
@@ -63,7 +63,7 @@ public record RiskPositionSnapshotResponse(
                                         long marginRatioPpm,
                                         RiskStatus status,
                                         Instant eventTime) {
-        this(snapshotId, userId, symbol, MarginMode.CROSS, PositionSide.NET, instrumentVersion, settleAsset, signedQuantitySteps,
+        this(snapshotId, userId, symbol, MarginMode.CROSS, PositionSide.NET, instrumentChangeId, settleAsset, signedQuantitySteps,
                 entryPriceTicks, markPriceTicks, notionalUnits, unrealizedPnlUnits, maintenanceMarginUnits, 0L,
                 marginRatioPpm, status, eventTime);
     }

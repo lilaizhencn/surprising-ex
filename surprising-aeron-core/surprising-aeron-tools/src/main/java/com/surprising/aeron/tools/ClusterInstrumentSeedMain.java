@@ -41,12 +41,12 @@ public final class ClusterInstrumentSeedMain {
             int alreadyApplied = 0;
             for (InstrumentSeed instrument : instruments) {
                 UUID commandId = UUID.nameUUIDFromBytes((productLine + ":instrument:"
-                        + instrument.command().symbol() + ':' + instrument.command().instrumentVersion())
+                        + instrument.command().symbol() + ':' + instrument.command().instrumentChangeId())
                         .getBytes(StandardCharsets.UTF_8));
                 var response = clients.command(CoreMessageType.UPSERT_INSTRUMENT, commandId, 0,
                         TradingCommandCodec.encodeUpsertInstrument(instrument.command()));
                 if (response.commandStatus() == ResponseStatus.REJECTED
-                        && response.resultCode() == CoreResultCode.STALE_INSTRUMENT_VERSION) {
+                        && response.resultCode() == CoreResultCode.STALE_INSTRUMENT_CHANGE_ID) {
                     alreadyApplied++;
                     continue;
                 }
@@ -64,15 +64,15 @@ public final class ClusterInstrumentSeedMain {
     private static List<InstrumentSeed> load(
             String url, String user, String password, ProductLine productLine) throws Exception {
         String sql = """
-                SELECT i.symbol, i.version, i.contract_type, i.base_asset, i.quote_asset, i.settle_asset,
+                SELECT i.symbol, i.change_id, i.last_change_id, i.status, a.scale_units AS settle_scale_units, i.contract_type, i.base_asset, i.quote_asset, i.settle_asset,
                        i.notional_multiplier_units, i.price_tick_units, i.initial_margin_rate_ppm,
                        i.maintenance_margin_rate_ppm, i.maker_fee_rate_ppm, i.taker_fee_rate_ppm,
                        i.expiry_time, i.option_type, i.strike_price_units, i.max_leverage_ppm,
                        i.max_position_notional_units, i.user_open_interest_limit_rate_ppm,
                        i.user_open_interest_limit_floor_units
-                  FROM instrument_product_current_versions current
-                  JOIN instruments i ON i.symbol=current.symbol AND i.version=current.version
-                 WHERE current.product_line=? AND i.status='TRADING'
+                  FROM instruments i
+                  JOIN account_asset_scales a ON a.asset=i.settle_asset
+                 WHERE i.product_line=?
                  ORDER BY i.symbol
                 """;
         List<InstrumentSeed> result = new ArrayList<>();
@@ -82,7 +82,7 @@ public final class ClusterInstrumentSeedMain {
             try (var rows = statement.executeQuery()) {
                 while (rows.next()) {
                     List<CoreRiskLimitBracket> brackets = loadBrackets(connection, rows.getString("symbol"),
-                            rows.getLong("version"));
+                            productLine.name());
                     if (brackets.isEmpty()) {
                         brackets = List.of(new CoreRiskLimitBracket(1, 0,
                                 rows.getLong("max_position_notional_units"), rows.getLong("max_leverage_ppm"),
@@ -95,9 +95,9 @@ public final class ClusterInstrumentSeedMain {
                             : "CALL".equals(rows.getString("option_type")) ? 0 : 1;
                     long strike = rows.getObject("strike_price_units") == null ? 0
                             : rows.getLong("strike_price_units") / rows.getLong("price_tick_units");
-                    long settleScale = contractType.isInverse() ? 1_000L : 1L;
+                    long settleScale = contractType.isInverse() ? rows.getLong("settle_scale_units") : 1L;
                     result.add(new InstrumentSeed(new UpsertInstrumentCommand(rows.getString("symbol"),
-                            rows.getLong("version"), contractType.ordinal(), rows.getString("base_asset"),
+                            rows.getLong("change_id"), contractType.ordinal(), rows.getString("base_asset"),
                             rows.getString("quote_asset"), rows.getString("settle_asset"),
                             rows.getLong("notional_multiplier_units"), rows.getLong("price_tick_units"),
                             settleScale, rows.getLong("initial_margin_rate_ppm"),
@@ -105,7 +105,8 @@ public final class ClusterInstrumentSeedMain {
                             rows.getLong("taker_fee_rate_ppm"), expiry, optionType, strike,
                             rows.getLong("max_leverage_ppm"), rows.getLong("max_position_notional_units"),
                             rows.getLong("user_open_interest_limit_rate_ppm"),
-                            rows.getLong("user_open_interest_limit_floor_units"), brackets)));
+                            rows.getLong("user_open_interest_limit_floor_units"), brackets,
+                            com.surprising.instrument.api.model.InstrumentStatus.valueOf(rows.getString("status")).ordinal(), rows.getLong("last_change_id"))));
                 }
             }
         }
@@ -113,17 +114,17 @@ public final class ClusterInstrumentSeedMain {
     }
 
     private static List<CoreRiskLimitBracket> loadBrackets(
-            java.sql.Connection connection, String symbol, long version) throws Exception {
+            java.sql.Connection connection, String symbol, String productLine) throws Exception {
         String sql = """
                 SELECT bracket_no, notional_floor_units, notional_cap_units, max_leverage_ppm,
                        initial_margin_rate_ppm, maintenance_margin_rate_ppm, option_margin_factor_ppm
                   FROM instrument_risk_brackets
-                 WHERE symbol=? AND version=? ORDER BY bracket_no
+                 WHERE symbol=? AND product_line=? ORDER BY bracket_no
                 """;
         List<CoreRiskLimitBracket> result = new ArrayList<>();
         try (var statement = connection.prepareStatement(sql)) {
             statement.setString(1, symbol);
-            statement.setLong(2, version);
+            statement.setString(2, productLine);
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
                     result.add(new CoreRiskLimitBracket(rows.getInt("bracket_no"),

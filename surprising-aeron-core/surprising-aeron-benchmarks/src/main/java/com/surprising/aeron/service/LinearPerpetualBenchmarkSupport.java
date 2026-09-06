@@ -445,7 +445,7 @@ final class LinearPerpetualBenchmarkSupport {
         }
         CoreLiquidationActionView action = harness.executionWork().actions().getFirst();
         var batchAction = new ExecuteLiquidationBatchAction(action.liquidationId(), action.userId(), action.symbol(),
-                action.instrumentVersion(), action.triggerPriceSequence(), action.markPriceTicks(),
+                action.instrumentChangeId(), action.triggerPriceSequence(), action.markPriceTicks(),
                 action.cursorOrderId());
         var batch = new ExecuteLiquidationBatchCommand(List.of(batchAction),
                 ExecuteLiquidationBatchCommand.MAX_CANCEL_ORDERS, 0, null, 0);
@@ -495,7 +495,7 @@ final class LinearPerpetualBenchmarkSupport {
         }
         List<ExecuteLiquidationBatchAction> batchActions = actions.stream()
                 .map(action -> new ExecuteLiquidationBatchAction(action.liquidationId(), action.userId(),
-                        action.symbol(), action.instrumentVersion(), action.triggerPriceSequence(),
+                        action.symbol(), action.instrumentChangeId(), action.triggerPriceSequence(),
                         action.markPriceTicks(), action.cursorOrderId()))
                 .toList();
         CoreMessage command = harness.command(CoreMessageType.EXECUTE_LIQUIDATION_BATCH, CommandSource.OPERATIONS,
@@ -532,7 +532,7 @@ final class LinearPerpetualBenchmarkSupport {
         List<CoreLiquidationActionView> actions = harness.executionWork().actions();
         List<ExecuteLiquidationBatchAction> batchActions = actions.stream()
                 .map(action -> new ExecuteLiquidationBatchAction(action.liquidationId(), action.userId(),
-                        action.symbol(), action.instrumentVersion(), action.triggerPriceSequence(),
+                        action.symbol(), action.instrumentChangeId(), action.triggerPriceSequence(),
                         action.markPriceTicks(), action.cursorOrderId()))
                 .toList();
         harness.execute(harness.command(CoreMessageType.EXECUTE_LIQUIDATION_BATCH, CommandSource.OPERATIONS, 0,
@@ -889,7 +889,7 @@ final class LinearPerpetualBenchmarkSupport {
                 if (now - mark.generatedAtEpochMillis() < 1_000) continue;
                 execute(command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                         TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(symbol,
-                                mark.instrumentVersion(), mark.markPriceTicks(),
+                                mark.instrumentChangeId(), mark.markPriceTicks(),
                                 Math.incrementExact(mark.priceSequence()), now))));
             }
         }

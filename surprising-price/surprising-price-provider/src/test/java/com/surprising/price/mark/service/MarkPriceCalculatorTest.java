@@ -40,7 +40,7 @@ class MarkPriceCalculatorTest {
         assertThat(event.markPrice()).isEqualByComparingTo("101.000000000000000000");
         assertThat(event.markPriceUnits()).isEqualTo(10_100_000_000L);
         assertThat(event.markPriceTicks()).isEqualTo(10_100L);
-        assertThat(event.instrumentVersion()).isEqualTo(7L);
+        assertThat(event.instrumentChangeId()).isEqualTo(7L);
         assertThat(event.eventTime()).isEqualTo(now);
         assertThat(event.publishedAt()).isEqualTo(now);
         assertThat(event.status()).isEqualTo(PriceStatus.HEALTHY);

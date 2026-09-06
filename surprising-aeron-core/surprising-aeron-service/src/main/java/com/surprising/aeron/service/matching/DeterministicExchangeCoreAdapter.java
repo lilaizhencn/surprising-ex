@@ -289,10 +289,10 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long coreSequence,
             java.util.UUID commandId,
             long orderId,
-            long instrumentVersion,
+            long instrumentChangeId,
             long aeronTimestamp,
             Supplier<CompletableFuture<CoreMatchingResult>> command) {
-        return executeWithEvidence(coreSequence, commandId, orderId, instrumentVersion,
+        return executeWithEvidence(coreSequence, commandId, orderId, instrumentChangeId,
                 aeronTimestamp, false, command);
     }
 
@@ -300,10 +300,10 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long coreSequence,
             java.util.UUID commandId,
             long orderId,
-            long instrumentVersion,
+            long instrumentChangeId,
             long aeronTimestamp,
             Supplier<CompletableFuture<CoreMatchingResult>> command) {
-        return executeWithEvidence(coreSequence, commandId, orderId, instrumentVersion,
+        return executeWithEvidence(coreSequence, commandId, orderId, instrumentChangeId,
                 aeronTimestamp, true, command);
     }
 
@@ -311,10 +311,10 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long coreSequence,
             java.util.UUID commandId,
             long orderId,
-            long instrumentVersion,
+            long instrumentChangeId,
             long aeronTimestamp,
             Supplier<CoreMatchingResult> command) {
-        return executeWithEvidenceSync(coreSequence, commandId, orderId, instrumentVersion,
+        return executeWithEvidenceSync(coreSequence, commandId, orderId, instrumentChangeId,
                 aeronTimestamp, false, command);
     }
 
@@ -322,10 +322,10 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long coreSequence,
             java.util.UUID commandId,
             long orderId,
-            long instrumentVersion,
+            long instrumentChangeId,
             long aeronTimestamp,
             Supplier<CoreMatchingResult> command) {
-        return executeWithEvidenceSync(coreSequence, commandId, orderId, instrumentVersion,
+        return executeWithEvidenceSync(coreSequence, commandId, orderId, instrumentChangeId,
                 aeronTimestamp, true, command);
     }
 
@@ -333,11 +333,11 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long coreSequence,
             java.util.UUID commandId,
             long orderId,
-            long instrumentVersion,
+            long instrumentChangeId,
             long aeronTimestamp,
             boolean controlShard,
             Supplier<CoreMatchingResult> command) {
-        if (coreSequence <= 0 || commandId == null || orderId < 0 || instrumentVersion < 0
+        if (coreSequence <= 0 || commandId == null || orderId < 0 || instrumentChangeId < 0
                 || aeronTimestamp < 0 || command == null) {
             throw new IllegalArgumentException("invalid matcher command evidence");
         }
@@ -355,7 +355,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             CoreMatchingResult result = command.get();
             int matcherShardId = controlShard ? -1 : matcherShardId(result);
             long sequence = matcherEvidence.nextSequence(matcherShardId);
-            return bindMatcherEvidence(coreSequence, commandId, orderId, instrumentVersion,
+            return bindMatcherEvidence(coreSequence, commandId, orderId, instrumentChangeId,
                     aeronTimestamp, sequence, matcherShardId, result);
         } catch (RuntimeException exception) {
             matcherFailure.compareAndSet(null, exception);
@@ -370,11 +370,11 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long coreSequence,
             java.util.UUID commandId,
             long orderId,
-            long instrumentVersion,
+            long instrumentChangeId,
             long aeronTimestamp,
             boolean controlShard,
             Supplier<CompletableFuture<CoreMatchingResult>> command) {
-        if (coreSequence <= 0 || commandId == null || orderId < 0 || instrumentVersion < 0
+        if (coreSequence <= 0 || commandId == null || orderId < 0 || instrumentChangeId < 0
                 || aeronTimestamp < 0 || command == null) {
             return CompletableFuture.failedFuture(new IllegalArgumentException("invalid matcher command evidence"));
         }
@@ -392,7 +392,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         }
         dispatchHighWaterMark.accumulateAndGet(depth, Math::max);
         CompletableFuture<CoreMatchingResult> pipeline = executeWithEvidenceNow(
-                coreSequence, commandId, orderId, instrumentVersion, aeronTimestamp, controlShard, command);
+                coreSequence, commandId, orderId, instrumentChangeId, aeronTimestamp, controlShard, command);
         NonCancellableFuture<CoreMatchingResult> view = new NonCancellableFuture<>();
         pipeline.whenComplete((result, completionFailure) -> {
             dispatchInFlight.decrementAndGet();
@@ -409,7 +409,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long coreSequence,
             java.util.UUID commandId,
             long orderId,
-            long instrumentVersion,
+            long instrumentChangeId,
             long aeronTimestamp,
             boolean controlShard,
             Supplier<CompletableFuture<CoreMatchingResult>> command) {
@@ -438,7 +438,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             int matcherShardId = controlShard ? -1 : matcherShardId(result);
             long sequence = matcherEvidence.nextSequence(matcherShardId);
             return bindMatcherEvidence(coreSequence, commandId, orderId,
-                    instrumentVersion, aeronTimestamp, sequence, matcherShardId, result);
+                    instrumentChangeId, aeronTimestamp, sequence, matcherShardId, result);
         });
     }
 
@@ -446,7 +446,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long coreSequence,
             java.util.UUID commandId,
             long orderId,
-            long instrumentVersion,
+            long instrumentChangeId,
             long aeronTimestamp,
             long sequence,
             int matcherShardId,
@@ -457,7 +457,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             throw new IllegalStateException("matcher completion discarded after fatal divergence", matcherPoison);
         }
         CoreMatchingResult bound = matcherEvidence.bind(coreSequence, commandId, orderId,
-                instrumentVersion, aeronTimestamp, sequence,
+                instrumentChangeId, aeronTimestamp, sequence,
                 matcherShardId, result);
         if (bound.outcome() == CoreMatchingResult.Outcome.FATAL_DIVERGENCE) {
             matcherFailure.compareAndSet(null,

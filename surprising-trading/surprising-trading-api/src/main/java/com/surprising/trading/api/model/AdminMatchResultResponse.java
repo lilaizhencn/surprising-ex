@@ -7,7 +7,7 @@ public record AdminMatchResultResponse(
         long orderId,
         long userId,
         String symbol,
-        long instrumentVersion,
+        long instrumentChangeId,
         OrderCommandType commandType,
         String resultCode,
         long filledQuantitySteps,

@@ -16,12 +16,19 @@ public class MarkPriceEncodingService {
 
     private final MarkPriceProperties properties;
     private final InstrumentSnapshotCache snapshotCache;
+    private com.surprising.instrument.api.client.InstrumentRpcApi instrumentRpc;
 
-    @org.springframework.beans.factory.annotation.Autowired
     public MarkPriceEncodingService(MarkPriceProperties properties,
                                     @Qualifier("markInstrumentSnapshotCache") InstrumentSnapshotCache snapshotCache) {
         this.properties = properties == null ? new MarkPriceProperties() : properties;
         this.snapshotCache = snapshotCache;
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public MarkPriceEncodingService(MarkPriceProperties properties,
+            @Qualifier("markInstrumentSnapshotCache") InstrumentSnapshotCache cache,
+            com.surprising.instrument.api.client.InstrumentRpcApi rpc) {
+        this(properties,cache); this.instrumentRpc=rpc;
     }
 
     public MarkPriceEncoding currentEncoding(String symbol) {
@@ -33,21 +40,25 @@ public class MarkPriceEncodingService {
         return encoding(instrument);
     }
 
-    public MarkPriceEncoding encoding(String symbol, long instrumentVersion) {
+    public MarkPriceEncoding encoding(String symbol, long instrumentChangeId) {
         if (snapshotCache == null || !snapshotCache.initialized(properties.getKafka().getProductLine())) {
             throw new IllegalStateException("标记价格合约 JVM 快照尚未就绪");
         }
-        var instrument = snapshotCache.version(properties.getKafka().getProductLine(), symbol, instrumentVersion)
-                .orElseThrow(() -> notFound(symbol, instrumentVersion));
+        var instrument = snapshotCache.current(properties.getKafka().getProductLine(), symbol, instrumentChangeId).orElse(null);
+        if (instrument==null) {
+            if (instrumentRpc==null) throw notFound(symbol,instrumentChangeId);
+            var units=instrumentRpc.tradeEncoding(properties.getKafka().getProductLine(),symbol,instrumentChangeId);
+            return new MarkPriceEncoding(instrumentChangeId,units.quoteScaleUnits(),units.priceTickUnits(),units.baseScaleUnits(),units.quantityStepUnits());
+        }
         return encoding(instrument);
     }
 
     private MarkPriceEncoding encoding(com.surprising.instrument.api.model.InstrumentResponse instrument) {
         long quoteScaleUnits = snapshotCache.scale(properties.getKafka().getProductLine(), instrument.quoteAsset())
-                .orElseThrow(() -> notFound(instrument.symbol(), instrument.version()));
+                .orElseThrow(() -> notFound(instrument.symbol(), instrument.changeId()));
         long baseScaleUnits = snapshotCache.scale(properties.getKafka().getProductLine(), instrument.baseAsset())
-                .orElseThrow(() -> notFound(instrument.symbol(), instrument.version()));
-        return new MarkPriceEncoding(instrument.version(), quoteScaleUnits, instrument.priceTickUnits(),
+                .orElseThrow(() -> notFound(instrument.symbol(), instrument.changeId()));
+        return new MarkPriceEncoding(instrument.changeId(), quoteScaleUnits, instrument.priceTickUnits(),
                 baseScaleUnits, instrument.quantityStepUnits());
     }
 
@@ -55,8 +66,8 @@ public class MarkPriceEncodingService {
         return new IllegalStateException("mark price encoding not found for " + symbol);
     }
 
-    private IllegalStateException notFound(String symbol, long instrumentVersion) {
+    private IllegalStateException notFound(String symbol, long instrumentChangeId) {
         return new IllegalStateException("mark price encoding not found for " + symbol
-                + " version " + instrumentVersion);
+                + " version " + instrumentChangeId);
     }
 }

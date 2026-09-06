@@ -24,8 +24,8 @@ public final class CoreOrderDecisionResolver {
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         }
-        if (instrument.version() != intent.instrumentVersion()) {
-            throw new CoreStateRejectedException("INSTRUMENT_VERSION_CONFLICT", "instrument version differs");
+        if (instrument.changeId() != intent.instrumentChangeId()) {
+            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT", "instrument version differs");
         }
         instrument.requireTrading(intent.reduceOnly());
 
@@ -69,13 +69,13 @@ public final class CoreOrderDecisionResolver {
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         }
-        if (instrument.version() != intent.instrumentVersion()) {
-            throw new CoreStateRejectedException("INSTRUMENT_VERSION_CONFLICT", "instrument version differs");
+        if (instrument.changeId() != intent.instrumentChangeId()) {
+            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT", "instrument version differs");
         }
         boolean spotLimit = instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT
                 && intent.orderType() == CoreOrderType.LIMIT;
         CoreMarkPriceState mark = spotLimit ? null : state.riskState().markPrices().get(instrument.symbol());
-        if (!spotLimit && (mark == null || mark.instrumentVersion() != instrument.version())) {
+        if (!spotLimit && (mark == null || mark.instrumentChangeId() != instrument.changeId())) {
             throw new CoreStateRejectedException("MARK_PRICE_MISSING", "current instrument mark price is required");
         }
         long markPriceTicks = spotLimit ? intent.limitPriceTicks() : mark.markPriceTicks();
@@ -98,7 +98,7 @@ public final class CoreOrderDecisionResolver {
 
     private static void requireFreshMark(MarkPriceRuntime mark, CoreInstrumentState instrument,
                                          long clusterTimestamp) {
-        if (mark == null || mark.instrumentVersion() != instrument.version()) {
+        if (mark == null || mark.instrumentChangeId() != instrument.changeId()) {
             throw new CoreStateRejectedException("MARK_PRICE_MISSING", "current instrument mark price is required");
         }
         long age = Math.subtractExact(clusterTimestamp, mark.generatedAtEpochMillis());

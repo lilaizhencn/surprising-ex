@@ -263,7 +263,7 @@ public record TradingCoreState(
         }
         for (CoreInstrumentState instrument : instruments.values()) {
             hash = CoreStateHash.mix(hash, instrument.symbol());
-            hash = CoreStateHash.mix(hash, instrument.version());
+            hash = CoreStateHash.mix(hash, instrument.changeId());
             hash = CoreStateHash.mix(hash, instrument.contractType().ordinal());
             hash = CoreStateHash.mix(hash, instrument.baseAsset());
             hash = CoreStateHash.mix(hash, instrument.quoteAsset());
@@ -339,7 +339,7 @@ public record TradingCoreState(
         }
         for (CoreMarkPriceState mark : riskState.markPrices().values()) {
             hash = CoreStateHash.mix(hash, mark.symbol());
-            hash = CoreStateHash.mix(hash, mark.instrumentVersion());
+            hash = CoreStateHash.mix(hash, mark.instrumentChangeId());
             hash = CoreStateHash.mix(hash, mark.markPriceTicks());
             hash = CoreStateHash.mix(hash, mark.indexPriceTicks());
             hash = CoreStateHash.mix(hash, mark.forwardPriceTicks());
@@ -364,7 +364,7 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, liquidation.symbol());
             hash = CoreStateHash.mix(hash, liquidation.marginMode().wireCode());
             hash = CoreStateHash.mix(hash, liquidation.positionSide().wireCode());
-            hash = CoreStateHash.mix(hash, liquidation.instrumentVersion());
+            hash = CoreStateHash.mix(hash, liquidation.instrumentChangeId());
             hash = CoreStateHash.mix(hash, liquidation.triggerPriceSequence());
             hash = CoreStateHash.mix(hash, liquidation.signedQuantitySteps());
             hash = CoreStateHash.mix(hash, liquidation.closeQuantitySteps());
@@ -445,7 +445,7 @@ public record TradingCoreState(
             CoreTreasuryState.FundingProgress progress = entry.getValue();
             hash = CoreStateHash.mix(hash, entry.getKey());
             hash = CoreStateHash.mix(hash, progress.settlementId());
-            hash = CoreStateHash.mix(hash, progress.instrumentVersion());
+            hash = CoreStateHash.mix(hash, progress.instrumentChangeId());
             hash = CoreStateHash.mix(hash, progress.fundingRatePpm());
             hash = CoreStateHash.mix(hash, progress.markPriceTicks());
             hash = CoreStateHash.mix(hash, progress.priceSequence());
@@ -463,7 +463,7 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, progress.requiredInsuranceUnits());
             hash = CoreStateHash.mix(hash, entry.getKey());
             hash = CoreStateHash.mix(hash, progress.settlementId());
-            hash = CoreStateHash.mix(hash, progress.instrumentVersion());
+            hash = CoreStateHash.mix(hash, progress.instrumentChangeId());
             hash = CoreStateHash.mix(hash, progress.settlementPriceTicks());
             hash = CoreStateHash.mix(hash, progress.optionCashUnitsPerContract());
             hash = CoreStateHash.mix(hash, progress.ordersComplete());
@@ -635,7 +635,7 @@ public record TradingCoreState(
             if (reservation.remainingUnits() == 0) continue;
             hash = CoreStateHash.mix(hash, reservation.orderId());
             hash = CoreStateHash.mix(hash, reservation.symbol());
-            hash = CoreStateHash.mix(hash, reservation.instrumentVersion());
+            hash = CoreStateHash.mix(hash, reservation.instrumentChangeId());
             hash = CoreStateHash.mix(hash, reservation.kind().wireCode());
             hash = CoreStateHash.mix(hash, reservation.asset());
             hash = CoreStateHash.mix(hash, reservation.reservedUnits());
@@ -648,7 +648,7 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, position.marginAsset());
             hash = CoreStateHash.mix(hash, position.marginMode().wireCode());
             hash = CoreStateHash.mix(hash, position.positionSide().wireCode());
-            hash = CoreStateHash.mix(hash, position.instrumentVersion());
+            hash = CoreStateHash.mix(hash, position.instrumentChangeId());
             hash = CoreStateHash.mix(hash, position.signedQuantitySteps());
             hash = CoreStateHash.mix(hash, position.entryPriceTicks());
             hash = CoreStateHash.mix(hash, position.entryValueTicks());
@@ -663,7 +663,7 @@ public record TradingCoreState(
         hash = CoreStateHash.mix(hash, order.productLine().ordinal());
         hash = CoreStateHash.mix(hash, order.userId());
         hash = CoreStateHash.mix(hash, order.symbol());
-        hash = CoreStateHash.mix(hash, order.instrumentVersion());
+        hash = CoreStateHash.mix(hash, order.instrumentChangeId());
         hash = CoreStateHash.mix(hash, order.side().wireCode());
         hash = CoreStateHash.mix(hash, order.priceTicks());
         hash = CoreStateHash.mix(hash, order.matchingPriceTicks());

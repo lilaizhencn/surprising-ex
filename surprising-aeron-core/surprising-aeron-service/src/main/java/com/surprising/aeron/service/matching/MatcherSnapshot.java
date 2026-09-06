@@ -207,7 +207,7 @@ public record MatcherSnapshot(
         long hash = offset();
         for (var instrument : state.instruments().values()) {
             hash = mix(hash, instrument.symbol());
-            hash = mix(hash, instrument.version());
+            hash = mix(hash, instrument.changeId());
         }
         return hash;
     }

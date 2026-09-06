@@ -49,30 +49,15 @@ public class InstrumentService {
     }
 
     public InstrumentResponse latest(String symbol, ProductLine productLine) {
-        String normalizedSymbol = normalizeSymbol(symbol);
-        if (productLine == null) {
-            return latest(normalizedSymbol);
+        var value = storageService.latest(normalizeSymbol(symbol),productLine)
+                .orElseThrow(()->new IllegalStateException("instrument not found for productLine: "+symbol+":"+productLine));
+        if (productLine != null && value.contractType().productLine() != productLine) {
+            throw new IllegalStateException("instrument product current mismatch");
         }
-        Optional<InstrumentResponse> productCurrent = storageService.latest(normalizedSymbol, productLine);
-        if (productCurrent.isPresent()) {
-            InstrumentResponse response = productCurrent.get();
-            if (response.contractType().productLine() == productLine) {
-                return response;
-            }
-            throw new IllegalStateException("instrument product current mismatch: "
-                    + symbol + ":" + productLine.name() + ":" + response.contractType().name());
-        }
-        InstrumentResponse response = latest(normalizedSymbol);
-        if (response.contractType().productLine() == productLine) {
-            return response;
-        }
-        throw new IllegalStateException("instrument not found for productLine: " + symbol + ":" + productLine.name());
+        return value;
     }
 
-    public InstrumentResponse version(String symbol, long version) {
-        return storageService.version(normalizeSymbol(symbol), version)
-                .orElseThrow(() -> new IllegalStateException("instrument version not found: " + symbol + ":" + version));
-    }
+    public com.surprising.instrument.api.model.InstrumentTradeEncoding tradeEncoding(ProductLine line,String symbol,long id) { return storageService.tradeEncoding(line,normalizeSymbol(symbol),id); }
 
     public InstrumentQueryResponse list(InstrumentType type, InstrumentStatus status) {
         var rows = storageService.list(type, status);
@@ -97,9 +82,9 @@ public class InstrumentService {
         if (productLine == null) {
             throw new IllegalArgumentException("productLine is required");
         }
-        var rows = storageService.listAllVersions(productLine);
+        var rows = storageService.list(productLine,null,null);
         var assetScales = storageService.assetScales();
-        long sequence = rows.stream().mapToLong(InstrumentResponse::version).max().orElse(0L);
+        long sequence = rows.stream().mapToLong(InstrumentResponse::lastChangeId).max().orElse(0L);
         return new InstrumentSnapshotResponse(productLine, sequence,
                 snapshotChecksum(productLine, rows, assetScales), rows, assetScales);
     }
@@ -121,14 +106,9 @@ public class InstrumentService {
                 page.hasMore(), page.sort(), page.limit());
     }
 
-    public InstrumentQueryResponse versions(String symbol, int limit, String cursor, String sort) {
-        return versions(symbol, null, limit, cursor, sort);
-    }
-
-    public InstrumentQueryResponse versions(String symbol, ProductLine productLine, int limit, String cursor, String sort) {
-        var page = storageService.versionsPage(normalizeSymbol(symbol), productLine, limit, cursor, sort);
-        return new InstrumentQueryResponse(page.instruments().size(), page.instruments(), page.nextCursor(),
-                page.hasMore(), page.sort(), page.limit());
+    public java.util.List<com.surprising.instrument.provider.repository.InstrumentChangeLogRepository.Entry> changes(
+            String symbol,ProductLine line,long beforeId,int limit) {
+        return storageService.changes(line,normalizeSymbol(symbol),beforeId,limit);
     }
 
     @Transactional
@@ -136,17 +116,19 @@ public class InstrumentService {
         return upsert(request, InstrumentEventType.UPSERTED);
     }
 
+    @Transactional
+    public InstrumentResponse upsert(InstrumentUpsertRequest request,String operator,String reason) {
+        return upsert(request,InstrumentEventType.UPSERTED,operator,reason);
+    }
+
     private InstrumentResponse upsert(InstrumentUpsertRequest request, InstrumentEventType eventType) {
+        return upsert(request,eventType,"SYSTEM:INSTRUMENT",eventType.name());
+    }
+
+    private InstrumentResponse upsert(InstrumentUpsertRequest request,InstrumentEventType eventType,String operator,String reason) {
         instrumentValidator.validate(request);
-        String symbol = normalizeSymbol(request.symbol());
-        Instant now = Instant.now();
-        long version = storageService.nextVersion(symbol);
-        storageService.insert(symbol, version, request, now);
-        storageService.setCurrentVersion(request.contractType().productLine(), symbol, version, now);
-        storageService.setCurrentVersion(symbol, version, now);
-        InstrumentResponse response = storageService.version(symbol, version)
-                .orElseThrow(() -> new IllegalStateException("instrument insert failed: " + symbol));
-        publish(response, eventType);
+        InstrumentResponse response=storageService.save(normalizeSymbol(request.symbol()),request,operator,reason,Instant.now());
+        publish(response,eventType);
         return response;
     }
 
@@ -157,6 +139,12 @@ public class InstrumentService {
 
     @Transactional
     public InstrumentResponse updateStatus(String symbol, ProductLine productLine, InstrumentStatus status) {
+        return updateStatus(symbol,productLine,status,"SYSTEM:LIFECYCLE","Lifecycle state update");
+    }
+
+    @Transactional
+    public InstrumentResponse updateStatus(String symbol,ProductLine productLine,InstrumentStatus status,String operator,String reason) {
+        storageService.lockForUpdate(normalizeSymbol(symbol));
         InstrumentResponse current = latest(symbol, productLine);
         InstrumentUpsertRequest request = new InstrumentUpsertRequest(
                 current.symbol(), current.instrumentType(), current.contractType(), current.baseAsset(),
@@ -175,14 +163,14 @@ public class InstrumentService {
                 current.deliveryTime(), current.underlyingSymbol(), current.strikePriceUnits(),
                 current.optionType(), current.optionExerciseStyle(), current.settlementMethod(), status, Instant.now(),
                 current.riskLimitBrackets(), current.indexSources());
-        return upsert(request, InstrumentEventType.STATUS_CHANGED);
+        return upsert(request, InstrumentEventType.STATUS_CHANGED,operator,reason);
     }
 
     private void publish(InstrumentResponse response, InstrumentEventType eventType) {
         Instant eventTime = Instant.now();
-        InstrumentEvent event = new InstrumentEvent(response.symbol(), response.version(), response.status(),
-                eventType, eventTime, response, response.contractType().productLine(), response.version());
-        outboxService.enqueue("INSTRUMENT", response.version(),
+        InstrumentEvent event = new InstrumentEvent(response.symbol(), response.lastChangeId(), response.status(),
+                eventType, eventTime, response, response.contractType().productLine(), response.lastChangeId());
+        outboxService.enqueue("INSTRUMENT", response.lastChangeId(),
                 ProductTopicNames.INSTRUMENT_EVENTS_TOPIC, InstrumentEventKeys.key(event),
                 eventType.name(), event, eventTime);
     }
@@ -199,10 +187,10 @@ public class InstrumentService {
                                              long underlyingSettlementPriceUnits) {
         Instant eventTime = Instant.now();
         if (response.instrumentType() == InstrumentType.DELIVERY) {
-            outboxService.enqueue("INSTRUMENT", response.version(), deliverySettlementsTopic(response),
+            outboxService.enqueue("INSTRUMENT", response.lastChangeId(), deliverySettlementsTopic(response),
                     response.symbol(), "DELIVERY_SETTLEMENT", new DeliverySettlementEvent(
                     response.symbol(),
-                    response.version(),
+                    response.changeId(),
                     response.contractType(),
                     settlementPriceTicks,
                     response.expiryTime(),
@@ -214,10 +202,10 @@ public class InstrumentService {
             return;
         }
         if (response.instrumentType() == InstrumentType.OPTION) {
-            outboxService.enqueue("INSTRUMENT", response.version(), optionExercisesTopic(response),
+            outboxService.enqueue("INSTRUMENT", response.lastChangeId(), optionExercisesTopic(response),
                     response.symbol(), "OPTION_EXERCISE", new OptionExerciseEvent(
                     response.symbol(),
-                    response.version(),
+                    response.changeId(),
                     response.underlyingSymbol(),
                     response.strikePriceUnits(),
                     underlyingSettlementPriceUnits,
@@ -246,9 +234,16 @@ public class InstrumentService {
                                                  ProductLine productLine,
                                                  long settlementPriceTicks,
                                                  long underlyingSettlementPriceUnits) {
+        return closeForSettlement(symbol,productLine,settlementPriceTicks,underlyingSettlementPriceUnits,"SYSTEM:LIFECYCLE","Confirm settlement");
+    }
+
+    @Transactional
+    public InstrumentResponse closeForSettlement(String symbol, ProductLine productLine, long settlementPriceTicks,
+            long underlyingSettlementPriceUnits, String operator, String reason) {
         if (productLine == null || (!productLine.isDeliveryProduct() && productLine != ProductLine.OPTION)) {
             throw new IllegalArgumentException("交割或行权必须指定到期产品线");
         }
+        storageService.lockForUpdate(normalizeSymbol(symbol));
         InstrumentResponse current = latest(symbol, productLine);
         // 已关闭合约的重复请求必须幂等返回，不能再次创建版本或重复发布资金事件。
         if (current.status() == InstrumentStatus.CLOSED) {
@@ -257,7 +252,7 @@ public class InstrumentService {
         if (current.status() != InstrumentStatus.SETTLING) {
             throw new IllegalStateException("合约必须先进入 SETTLING 才能确认结算: " + current.symbol());
         }
-        InstrumentResponse closed = updateStatus(symbol, productLine, InstrumentStatus.CLOSED);
+        InstrumentResponse closed = updateStatus(symbol, productLine, InstrumentStatus.CLOSED,operator,reason);
         publishProductLifecycleEvent(closed, settlementPriceTicks, underlyingSettlementPriceUnits);
         return closed;
     }
@@ -325,8 +320,8 @@ public class InstrumentService {
             digest.update(productLine.name().getBytes(StandardCharsets.UTF_8));
             rows.stream()
                     .sorted(Comparator.comparing(InstrumentResponse::symbol)
-                            .thenComparingLong(InstrumentResponse::version))
-                    .forEach(row -> digest.update((row.symbol() + "|" + row.version() + "|"
+                            .thenComparingLong(InstrumentResponse::changeId))
+                    .forEach(row -> digest.update((row.symbol() + "|" + row.lastChangeId() + "|"
                             + row.status() + "|" + row.updatedAt() + "\n").getBytes(StandardCharsets.UTF_8)));
             assetScales.entrySet().stream()
                     .sorted(java.util.Map.Entry.comparingByKey())

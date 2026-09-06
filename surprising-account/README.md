@@ -38,7 +38,7 @@ Surprising Exchange 账户和产品结算模块。当前实现 long-based 基础
 
 - 余额使用 `availableUnits`、`lockedUnits`、`equityUnits`，全部是资产最小单位的 long。
 - 持仓使用 `signedQuantitySteps`，正数为净多，负数为净空。
-- 持仓保存 `instrumentVersion`，当前敞口的合约数学固定到开仓时的版本。
+- 持仓保存 `instrumentChangeId`，当前敞口绑定开仓时的计算参数审计记录；有敞口时禁止替换计算参数。
 - 持仓和持仓保证金都会保存 `marginMode`；单向净持仓链路下 `CROSS` 和 `ISOLATED` 都可执行。
 - 持仓查询响应返回 `positionSide = NET`。Core 当前按 `userId + symbol + marginMode` 保存一条净持仓；
   `account_positions` 只是这份 Core 状态的异步投影，hedge-mode `LONG/SHORT` 持仓还没有进入当前在线模型。
@@ -180,7 +180,7 @@ surprising:
 
 本地缓存只用于不可变读快照：
 
-- `contract-spec-max-entries` 按 `(symbol, instrumentVersion)` 缓存合约数学配置。
+- `contract-spec-max-entries` 按 `(symbol, instrumentChangeId)` 缓存合约数学配置。
 
 余额、持仓和保证金冻结由 Aeron Core 的有序 Cluster Log 和 Core Snapshot 维护；account-provider
 只通过 Aeron Client 提交命令和查询状态。`account-state-events-topic` 用于向下游广播完整账户快照，
@@ -197,7 +197,7 @@ Core Export backlog、Kafka 投影延迟和 PostgreSQL 投影延迟；数据库�
 ### 冻结的结算内核输入/输出
 
 - 每次结算只接受一个不可变 `SettlementKernelInput`：`productLine`、`operationId`、Core sequence、
-  `instrumentVersion`、命令前的用户/做市账户余额、冻结、预占、持仓、持仓保证金、订单生命周期、
+  `instrumentChangeId`、命令前的用户/做市账户余额、冻结、预占、持仓、持仓保证金、订单生命周期、
   Treasury 七账和本次操作所需的成交/资金费/强平/交割/行权参数。缺字段、版本不匹配、重复的
   `operationId` 或算术溢出必须拒绝，不能以数据库或缓存值补齐。
 - 内核只返回不可变 `SettlementKernelOutput`：命令后的账户/持仓/Treasury 状态、按资产排序的
@@ -237,7 +237,7 @@ Treasury 维护七个相互独立、可审计且允许有符号变动的 subledg
 3. `liquidation fee`：强平成交实际收上的强平费，不得按应收金额预先入账。
 4. `funding residual`：资金费按用户/持仓分配后的除法余数和结转，不能并入普通 funding 总额。
 5. `rounding residual`：手续费、价格换算或合约单位换算产生的舍入余数，必须保留原操作引用。
-6. `clearing PnL`：交割、期权结算及清算价导致的结算盈亏，必须保留产品线和 instrumentVersion。
+6. `clearing PnL`：交割、期权结算及清算价导致的结算盈亏，必须保留产品线和 instrumentChangeId。
 7. `deficit`：保险基金或清算资产无法覆盖的已确认缺口；金额和产生该缺口的 operationId 必须可追溯。
 
 `liquidation-work debt` 是 `CoreLiquidationState` 中按 liquidationId、purpose、cursor 和剩余金额
@@ -248,7 +248,7 @@ purpose 的有序 Core 命令和幂等 reference 消解；它不得与 aggregate
 
 ### 操作专属取整、余数和亏损
 
-- 每种操作使用固定的整数数学函数并在输入的 instrumentVersion 下执行：正向 fee charge 使用
+- 每种操作使用固定的整数数学函数并在输入的 instrumentChangeId 下执行：正向 fee charge 使用
   `ceiling`；资金费分摊使用朝零的 `truncate`；反向合约和既有价格公式需要的有符号金额使用
   `half-up`。不得把一种操作的取整模式套到另一种操作。
 - 每次除法都返回商和 exact `residual`。资金费余数写入 `funding residual`，其他金额/价格

@@ -182,7 +182,7 @@ public final class RuntimeDerivativeFillCalculator {
             nextEntryValue = Math.multiplyExact(Math.absExact(nextQuantity), nextEntryPrice);
         }
         PositionRuntime next = new PositionRuntime(order.userId(), order.symbolId(), settleAssetId,
-                order.marginMode(), order.positionSide(), nextQuantity == 0 ? 0 : order.instrumentVersion(),
+                order.marginMode(), order.positionSide(), nextQuantity == 0 ? 0 : order.instrumentChangeId(),
                 nextQuantity, nextEntryPrice, nextEntryValue,
                 Math.addExact(current == null ? 0 : current.realizedPnlUnits(), realizedPnl),
                 Math.addExact(remainingMargin, marginIncrease));

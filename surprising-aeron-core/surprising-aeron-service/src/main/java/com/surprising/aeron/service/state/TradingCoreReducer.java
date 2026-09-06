@@ -85,11 +85,11 @@ public final class TradingCoreReducer {
         validateTriggerPlacement(state, view, triggerOrderIndex);
         Map<Long, CoreTriggerOrderState> triggers = StateMapSupport.delta(state.triggerOrders());
         CoreTriggerOrderState trigger = CoreTriggerOrderState.from(view);
-        if (trigger.instrumentVersion() == 0) {
-            trigger = trigger.withExecutionSnapshot(instrument.version(), instrument.makerFeeRatePpm(),
+        if (trigger.instrumentChangeId() == 0) {
+            trigger = trigger.withExecutionSnapshot(instrument.changeId(), instrument.makerFeeRatePpm(),
                     instrument.takerFeeRatePpm());
-        } else if (trigger.instrumentVersion() != instrument.version()) {
-            throw new CoreStateRejectedException("STALE_INSTRUMENT_VERSION",
+        } else if (trigger.instrumentChangeId() != instrument.changeId()) {
+            throw new CoreStateRejectedException("STALE_INSTRUMENT_CHANGE_ID",
                     "trigger order instrument version is stale");
         }
         triggers.put(view.triggerOrderId(), trigger);
@@ -209,7 +209,7 @@ public final class TradingCoreReducer {
                 current.placedOrderId(), current.triggerSequence(), current.triggeredPriceTicks(), current.rejectReason(),
                 current.traceId(), current.expiresAtEpochMillis(), current.triggeredAtEpochMillis(), current.createdAtEpochMillis(),
                 Math.max(current.updatedAtEpochMillis(), activatedAtEpochMillis), Math.incrementExact(current.revision()),
-                current.instrumentVersion(), current.makerFeeRatePpm(), current.takerFeeRatePpm()));
+                current.instrumentChangeId(), current.makerFeeRatePpm(), current.takerFeeRatePpm()));
         return withTriggers(state, triggers);
     }
 
@@ -255,7 +255,7 @@ public final class TradingCoreReducer {
                 current.traceId(), current.expiresAtEpochMillis(), status == CoreTriggerOrderStatus.TRIGGERED
                         || status == CoreTriggerOrderStatus.TRIGGER_FAILED ? updatedAt : current.triggeredAtEpochMillis(),
                 current.createdAtEpochMillis(), updatedAt, Math.incrementExact(current.revision()),
-                current.instrumentVersion(), current.makerFeeRatePpm(), current.takerFeeRatePpm()));
+                current.instrumentChangeId(), current.makerFeeRatePpm(), current.takerFeeRatePpm()));
         return withTriggers(state, triggers);
     }
 
@@ -446,7 +446,7 @@ public final class TradingCoreReducer {
                             instrument.settleScaleUnits());
                     long walletBalance = crossWalletBalance(state, user, instrument.settleAsset());
                     return new com.surprising.aeron.protocol.CoreRiskSnapshotView(risk.userId(), risk.symbol(),
-                            position.marginMode(), risk.positionSide(), position.instrumentVersion(),
+                            position.marginMode(), risk.positionSide(), position.instrumentChangeId(),
                             instrument.settleAsset(), position.signedQuantitySteps(), position.entryPriceTicks(),
                             mark.markPriceTicks(), notional, position.positionMarginUnits(), risk.priceSequence(), walletBalance,
                             risk.equityUnits(), risk.unrealizedPnlUnits(), risk.maintenanceMarginUnits(),
@@ -561,7 +561,7 @@ public final class TradingCoreReducer {
         balances.put(nextBalance.asset(), nextBalance);
         Map<String, CorePositionState> positions = StateMapSupport.delta(user.positions());
         positions.put(key, new CorePositionState(position.symbol(), position.marginAsset(), position.marginMode(),
-                position.positionSide(), position.instrumentVersion(), position.signedQuantitySteps(),
+                position.positionSide(), position.instrumentChangeId(), position.signedQuantitySteps(),
                 position.entryPriceTicks(), position.entryValueTicks(), position.realizedPnlUnits(), nextMargin));
         CoreUserState nextUser = user.transition(Math.incrementExact(user.revision()),
                 balances, user.reservations(), positions, user.positionMode());
@@ -637,10 +637,10 @@ public final class TradingCoreReducer {
         AssetBalance currentBalance = currentUser.balances().getOrDefault(asset, new AssetBalance(asset, 0, 0));
         AssetBalance nextBalance = currentBalance.reserve(requiredReservation);
         OrderReservation reservation = OrderReservation.create(command.orderId(), command.symbol(),
-                command.instrumentVersion(),
+                command.instrumentChangeId(),
                 command.reservationKind(), asset, requiredReservation, command.quantitySteps());
         CoreOrderState order = new CoreOrderState(command.orderId(), state.productLine(), userId,
-                command.symbol(), command.instrumentVersion(), command.side(), command.limitPriceTicks(),
+                command.symbol(), command.instrumentChangeId(), command.side(), command.limitPriceTicks(),
                 command.matchingPriceTicks(),
                 command.quantitySteps(), 0,
                 command.quantitySteps(), command.reduceOnly(), command.marginMode(), command.positionSide(),
@@ -687,7 +687,7 @@ public final class TradingCoreReducer {
         if (!command.clientOrderId().isEmpty() && state.order(userId, command.clientOrderId()) != null) {
             throw new CoreStateRejectedException("DUPLICATE_CLIENT_ORDER_ID", "clientOrderId already exists");
         }
-        CoreInstrumentState instrument = requireInstrument(state, command.symbol(), command.instrumentVersion());
+        CoreInstrumentState instrument = requireInstrument(state, command.symbol(), command.instrumentChangeId());
         if (state.treasuryState().lifecycleSettlements().containsKey(instrument.symbol())) {
             throw new CoreStateRejectedException("INSTRUMENT_SETTLED", "instrument is already settled");
         }
@@ -884,7 +884,7 @@ public final class TradingCoreReducer {
         Map<Long, CoreOrderState> orders = StateMapSupport.delta(state.orders());
         CoreTreasuryState treasury = state.treasuryState();
         CoreOrderState taker = requireOpenOrder(orders, takerOrderId);
-        CoreInstrumentState instrument = requireInstrument(state, taker.symbol(), taker.instrumentVersion());
+        CoreInstrumentState instrument = requireInstrument(state, taker.symbol(), taker.instrumentChangeId());
         CoreMarkPriceState riskMark = state.productLine().isDerivative()
                 ? state.riskState().markPrices().get(instrument.symbol()) : null;
         if (instrument.contractType().isOption() && (riskMark == null
@@ -964,8 +964,23 @@ public final class TradingCoreReducer {
     public TradingCoreState upsertInstrument(TradingCoreState state, UpsertInstrumentCommand command) {
         CoreInstrumentState instrument = CoreInstrumentState.from(state.productLine(), command);
         CoreInstrumentState current = state.instruments().get(instrument.symbol());
-        if (current != null && instrument.version() <= current.version()) {
-            throw new CoreStateRejectedException("STALE_INSTRUMENT_VERSION", "instrument version must increase");
+        if (current != null && instrument.lastChangeId() <= current.lastChangeId()) {
+            if (instrument.withMaintenance(current.maintenance()).equals(current)) return state;
+            throw new CoreStateRejectedException("STALE_INSTRUMENT_CHANGE_ID", "instrument audit id must increase");
+        }
+        if (current != null && instrument.changeId() == current.changeId()) {
+            var statusUpdate = current.withStatus(instrument.status(), instrument.lastChangeId());
+            if (!instrument.withMaintenance(current.maintenance()).equals(statusUpdate)) {
+                throw new CoreStateRejectedException("INVALID_COMMAND", "calculation changes require a new audit reference");
+            }
+            Map<String, CoreInstrumentState> updated = StateMapSupport.delta(state.instruments());
+            updated.put(instrument.symbol(), statusUpdate);
+            return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()), state.users(), state.orders(),
+                    updated, state.riskState(), state.treasuryState(), state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(),
+                    state.clientOrderIndex(), state.triggerOrders());
+        }
+        if (current != null && instrument.changeId() < current.changeId()) {
+            throw new CoreStateRejectedException("STALE_INSTRUMENT_CHANGE_ID", "calculation audit id cannot decrease");
         }
         boolean openOrder = state.orders().values().stream()
                 .anyMatch(order -> order.status() == CoreOrderStatus.OPEN
@@ -975,11 +990,11 @@ public final class TradingCoreReducer {
                 .anyMatch(position -> position.symbol().equals(instrument.symbol())
                         && position.signedQuantitySteps() != 0);
         if (current != null && (openOrder || openPosition)) {
-            throw new CoreStateRejectedException("INSTRUMENT_VERSION_IN_USE",
+            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_IN_USE",
                     "cannot replace instrument version with open state");
         }
         Map<String, CoreInstrumentState> instruments = StateMapSupport.delta(state.instruments());
-        instruments.put(instrument.symbol(), instrument);
+        instruments.put(instrument.symbol(), current == null ? instrument : instrument.withMaintenance(current.maintenance()));
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
                 state.users(), state.orders(),
                 instruments, state.riskState(),
@@ -999,7 +1014,7 @@ public final class TradingCoreReducer {
     public TradingCoreState applyMarkPrice(TradingCoreState state, ApplyMarkPriceCommand command,
                                            PositionUserIndex positionUserIndex,
                                            LiquidationIndex liquidationIndex) {
-        CoreInstrumentState instrument = requireInstrument(state, command.symbol(), command.instrumentVersion());
+        CoreInstrumentState instrument = requireInstrument(state, command.symbol(), command.instrumentChangeId());
         CoreMarkPriceState current = state.riskState().markPrices().get(instrument.symbol());
         if (current != null && command.priceSequence() <= current.priceSequence()) {
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "mark price sequence must increase");
@@ -1010,7 +1025,7 @@ public final class TradingCoreReducer {
             throw new CoreStateRejectedException("OPTION_RISK_PRICE_MISSING",
                     "option mark requires index and same-expiry forward prices");
         }
-        marks.put(instrument.symbol(), new CoreMarkPriceState(instrument.symbol(), instrument.version(),
+        marks.put(instrument.symbol(), new CoreMarkPriceState(instrument.symbol(), instrument.changeId(),
                 command.markPriceTicks(), command.indexPriceTicks(), command.forwardPriceTicks(),
                 command.priceSequence(), command.generatedAtEpochMillis()));
         Map<String, CoreRiskState.RiskScan> scans = StateMapSupport.delta(state.riskState().scans());
@@ -1306,7 +1321,7 @@ public final class TradingCoreReducer {
             return nextLiquidationId;
         }
         CoreLiquidationState liquidation = new CoreLiquidationState(nextLiquidationId, userId, position.symbol(),
-                position.marginMode(), position.positionSide(), instrument.version(), priceSequence,
+                position.marginMode(), position.positionSide(), instrument.changeId(), priceSequence,
                 position.signedQuantitySteps(), Math.absExact(position.signedQuantitySteps()), 0,
                 0, 0, 0, CoreLiquidationState.Status.PLANNED);
         liquidations.put(nextLiquidationId, liquidation);
@@ -1365,7 +1380,7 @@ public final class TradingCoreReducer {
         if (!state.productLine().isFundingProduct()) {
             throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED", "funding requires perpetual product");
         }
-        CoreInstrumentState instrument = requireInstrument(state, command.symbol(), command.instrumentVersion());
+        CoreInstrumentState instrument = requireInstrument(state, command.symbol(), command.instrumentChangeId());
         ProductTradingRules kernel = ProductTradingRulesRegistry.forInstrument(instrument);
         long previousSettlement = state.treasuryState().fundingSettlements()
                 .getOrDefault(instrument.symbol(), 0L);
@@ -1386,7 +1401,7 @@ public final class TradingCoreReducer {
                 throw new CoreStateRejectedException("INVALID_COMMAND", "funding cursor must start at zero");
             }
             if (previousProgress != null && (previousProgress.settlementId() != command.settlementId()
-                    || previousProgress.instrumentVersion() != command.instrumentVersion()
+                    || previousProgress.instrumentChangeId() != command.instrumentChangeId()
                     || previousProgress.fundingRatePpm() != command.fundingRatePpm()
                     || previousProgress.nextCursorUserId() != command.cursorUserId())) {
                 throw new CoreStateRejectedException("INVALID_COMMAND", "funding cursor does not match progress");
@@ -1462,7 +1477,7 @@ public final class TradingCoreReducer {
         } else {
             UUID progressCommandId = chunkCommandId == null ? new UUID(0, 0) : chunkCommandId;
             treasury = treasury.withFundingProgress(instrument.symbol(), new CoreTreasuryState.FundingProgress(
-                    command.settlementId(), command.instrumentVersion(), command.fundingRatePpm(),
+                    command.settlementId(), command.instrumentChangeId(), command.fundingRatePpm(),
                     0, nextCursorUserId, progressCommandId, fundingMark, fundingPriceSequence));
         }
         var progress = new com.surprising.aeron.protocol.CoreFundingProgressView(
@@ -1554,13 +1569,13 @@ public final class TradingCoreReducer {
         if (nextCursorOrderId <= 0 || chunkCommandId == null) {
             throw new IllegalArgumentException("settlement cursor must advance");
         }
-        CoreInstrumentState instrument = requireInstrument(state, command.symbol(), command.instrumentVersion());
+        CoreInstrumentState instrument = requireInstrument(state, command.symbol(), command.instrumentChangeId());
         if (instrument.contractType().isOption()) {
             OptionContractMath.optionSettlementCashUnits(instrument, command.settlementPriceTicks());
         }
         CoreTreasuryState.LifecycleProgress progress = state.treasuryState().lifecycleProgress(command.symbol());
         if (progress != null && (progress.settlementId() != command.settlementId()
-                || progress.instrumentVersion() != command.instrumentVersion()
+                || progress.instrumentChangeId() != command.instrumentChangeId()
                 || progress.settlementPriceTicks() != command.settlementPriceTicks()
                 || progress.optionCashUnitsPerContract() != command.optionCashUnitsPerContract()
                 || progress.ordersComplete() || progress.nextCursorOrderId() != command.cursorOrderId()
@@ -1572,7 +1587,7 @@ public final class TradingCoreReducer {
         }
         TradingCoreState canceled = cancelLifecycleOrders(state, orders);
         CoreTreasuryState nextTreasury = canceled.treasuryState().withLifecycleProgress(command.symbol(),
-                new CoreTreasuryState.LifecycleProgress(command.settlementId(), command.instrumentVersion(),
+                new CoreTreasuryState.LifecycleProgress(command.settlementId(), command.instrumentChangeId(),
                         command.settlementPriceTicks(), command.optionCashUnitsPerContract(), false,
                         nextCursorOrderId, 0, chunkCommandId));
         return withTreasury(canceled, nextTreasury);
@@ -1629,7 +1644,7 @@ public final class TradingCoreReducer {
             return cancelLiquidation(state, liquidation);
         }
         CoreInstrumentState instrument = requireInstrument(state, liquidation.symbol(),
-                liquidation.instrumentVersion());
+                liquidation.instrumentChangeId());
         CoreUserState user = state.user(liquidation.userId());
         String positionKey = positionKey(liquidation.symbol(), liquidation.positionSide());
         CorePositionState position = user.positions().get(positionKey);
@@ -1670,7 +1685,7 @@ public final class TradingCoreReducer {
         long nextEntryValue = remainingAbs == 0 ? 0
                 : proportional(position.entryValueTicks(), remainingAbs, currentAbs);
         positions.put(positionKey, new CorePositionState(instrument.symbol(), instrument.settleAsset(),
-                position.marginMode(), position.positionSide(), remainingAbs == 0 ? 0 : position.instrumentVersion(),
+                position.marginMode(), position.positionSide(), remainingAbs == 0 ? 0 : position.instrumentChangeId(),
                 nextQuantity, remainingAbs == 0 ? 0 : position.entryPriceTicks(), nextEntryValue,
                 Math.addExact(position.realizedPnlUnits(), instrument.contractType().isOption() ? 0 : pnl),
                 Math.subtractExact(position.positionMarginUnits(), releasedMargin)));
@@ -1707,7 +1722,7 @@ public final class TradingCoreReducer {
                 : user.positions().get(positionKey(liquidation.symbol(), liquidation.positionSide()));
         CoreRiskSnapshot risk = state.riskState().snapshots().get(
                 riskKey(liquidation.userId(), liquidation.symbol(), liquidation.positionSide()));
-        return position != null && position.instrumentVersion() == liquidation.instrumentVersion()
+        return position != null && position.instrumentChangeId() == liquidation.instrumentChangeId()
                 && position.marginMode() == liquidation.marginMode()
                 && position.signedQuantitySteps() == liquidation.signedQuantitySteps()
                 && risk != null && risk.priceSequence() == liquidation.triggerPriceSequence()
@@ -1749,7 +1764,7 @@ public final class TradingCoreReducer {
             throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
         }
         CoreInstrumentState instrument = requireInstrument(state, liquidation.symbol(),
-                liquidation.instrumentVersion());
+                liquidation.instrumentChangeId());
         CoreLiquidationState.Status nextStatus;
         CoreTreasuryState treasury = state.treasuryState();
         switch (command.resolution()) {
@@ -1842,7 +1857,7 @@ public final class TradingCoreReducer {
             throw new CoreStateRejectedException("INVALID_COMMAND", "ADL command does not match liquidation");
         }
         CoreInstrumentState instrument = requireInstrument(state, liquidation.symbol(),
-                liquidation.instrumentVersion());
+                liquidation.instrumentChangeId());
         CoreMarkPriceState mark = state.riskState().markPrices().get(liquidation.symbol());
         if (mark == null || mark.priceSequence() != command.markPriceSequence()) {
             throw new CoreStateRejectedException("STALE_MARK_PRICE", "ADL mark price changed");
@@ -1887,7 +1902,7 @@ public final class TradingCoreReducer {
                 : proportional(position.entryValueTicks(), remainingAbs, currentAbs);
         Map<String, CorePositionState> positions = StateMapSupport.delta(target.positions());
         positions.put(positionKey, new CorePositionState(position.symbol(), position.marginAsset(),
-                position.marginMode(), position.positionSide(), remainingAbs == 0 ? 0 : position.instrumentVersion(),
+                position.marginMode(), position.positionSide(), remainingAbs == 0 ? 0 : position.instrumentChangeId(),
                 nextQuantity, remainingAbs == 0 ? 0 : position.entryPriceTicks(), nextEntryValue,
                 Math.addExact(position.realizedPnlUnits(),
                         instrument.contractType().isOption() ? 0 : coverCapacity),
@@ -2042,8 +2057,8 @@ public final class TradingCoreReducer {
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         }
-        if (instrument.version() != version) {
-            throw new CoreStateRejectedException("INSTRUMENT_VERSION_CONFLICT", "instrument version differs");
+        if (instrument.changeId() != version) {
+            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT", "instrument version differs");
         }
         return instrument;
     }
@@ -2054,8 +2069,8 @@ public final class TradingCoreReducer {
         if (instrument == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
         }
-        if (lifecycleVersion < instrument.version()) {
-            throw new CoreStateRejectedException("INSTRUMENT_VERSION_CONFLICT",
+        if (lifecycleVersion < instrument.changeId()) {
+            throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT",
                     "instrument lifecycle version precedes execution version");
         }
         return instrument;

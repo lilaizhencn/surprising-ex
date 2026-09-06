@@ -3532,3 +3532,17 @@
 - 未测：本次新功能的三节点真实网络故障矩阵、真实网关至浏览器全栈、推送、JMH/JFR、GC/分配、
   heap/native、线程阻塞归因、吞吐和分位延迟、长期泄漏。没有 JFR artifact，本条不构成主链路性能验收，
   不声称零性能影响、生产容量或完整生产上线验收。Core 仍保留原有查询与生命周期一致性 fence。
+
+
+## 2026-09-06 Instrument 当前配置与去版本功能验证（未进行性能采集）
+
+- 被测代码：当前 master 基于 `407871bf` 的本次改动，最终提交号及源码补丁校验见证据目录。对照 commit：不适用（仅验证当前 master）。
+- 环境：Oracle GraalVM 25.0.1 HotSpot、Maven 3.9.16、macOS 26.7 x86_64。按用户「不要进行压测，少量样本验证功能」执行，未定义或采集性能阈值、吞吐、分位延迟、GC/分配数据。
+- 变更：每产品线/币对仅一份当前配置；删除历史版本 API、配置版本表和缓存；不可变操作日志保留操作人、原因、时间与前后字段。计算参数审计 ID 与最新操作 ID 分离，暂停/恢复不改变存量订单/持仓的计算依据；后台控制线程通过独立 Aeron 维护客户端同步 Core，界面展示实际确认状态。
+- 协议、Core 状态与快照随字段更新；六线验证暂停、恢复、乱序更新、维护门控保留、资金不变及快照恢复。新增 `InstrumentPauseAdmissionBenchmark` 六产品线场景，通过 JUnit 各有限调用一次验证真实 Core 路径，未运行 JMH 定时测量，无 JFR artifact，不构成主链路性能验收。
+- 全 reactor `mvn test`（专用本地 PostgreSQL 的 INSTRUMENT_TEST_JDBC_URL 和 MAINTENANCE_TEST_JDBC_URL）：1487 通过、0 失败/错误；22 个既有 custody 数据库测试因未配置其专用数据库跳过。随后定向回归 39 项、订单审计字段回归 35 项均通过，重复覆盖不叠加为唯一测试数。真实 PostgreSQL 当前配置/日志事务测试通过。
+- 最终初始化使用 `psql -X -v ON_ERROR_STOP=1 ... -d instrument_current_validated -f init.sql`，完整事务成功。`INSTRUMENT_SEED_TEST_JDBC_URL=jdbc:postgresql://127.0.0.1:55439/instrument_current_validated mvn -pl :surprising-aeron-tools,:surprising-trading-provider -am -Dtest=InstrumentSeedCoreContractTest,InstrumentCoreSyncServiceTest -Dsurefire.failIfNoSpecifiedTests=false test`：7 项通过；逐条验证 1151 个初始化配置编码/解码并被 Core 接受。
+- 数据质量修复：31 个币本位配置的 base_asset 从错误 USD 修正为 settle_asset。原期权快照仅 30 个 USDT 结算合约的行权价能以现有整数 tick 精确表示，仅保留这些合格记录，未猜测或舍入价格。各线数量：SPOT 512、LINEAR_PERPETUAL 430、INVERSE_PERPETUAL 15、LINEAR_DELIVERY 148、INVERSE_DELIVERY 16、OPTION 30。期权补足 512 需要重新校准原始数据。
+- 前端：管理后台 lint/build 通过；用户 Web 41 项测试及构建通过（lint 有既有提示，无错误）；Flutter analyze 无问题、53 项测试通过。浏览器桌面/移动端检查实际 React 页面及接口契约桩，覆盖必填原因、审批、日志差异、产品线和 Core 待确认/已确认，不等同真实网关全栈验收。
+- 原始日志、浏览器脚本/截图、源码补丁和 SHA256SUMS：`/Users/atomex/Desktop/surprising/instrument-current-evidence/2026-09-06/`。早期期权种子失败诊断另存，最终 1151 个配置校验通过。
+- 未测：本次修改后的三节点真实网络故障矩阵、真实网关至浏览器端到端、JMH/JFR、持续负载及生产容量。协议、JSON 字段和快照格式需前后端/Core 配套更新；产品未上线，不提供旧格式兼容。不能据功能测试声称零性能影响。

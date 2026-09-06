@@ -48,19 +48,19 @@ public class TradingFeeService {
         this.coreImporter = coreImporter;
     }
 
-    public EffectiveTradingFeeResponse effectiveFee(long userId, String symbol, long instrumentVersion) {
-        return effectiveFee(userId, symbol, instrumentVersion, null);
+    public EffectiveTradingFeeResponse effectiveFee(long userId, String symbol, long instrumentChangeId) {
+        return effectiveFee(userId, symbol, instrumentChangeId, null);
     }
 
     public EffectiveTradingFeeResponse effectiveFee(long userId,
                                                     String symbol,
-                                                    long instrumentVersion,
+                                                    long instrumentChangeId,
                                                     ProductLine productLine) {
         if (userId <= 0) {
             throw new IllegalArgumentException("userId must be positive");
         }
         String normalizedSymbol = normalizeSymbol(symbol);
-        long resolvedVersion = instrumentVersion > 0 ? instrumentVersion : currentVersion(normalizedSymbol);
+        long resolvedVersion = instrumentChangeId > 0 ? instrumentChangeId : currentVersion(normalizedSymbol);
         Instant now = Instant.now();
         OrderFeeSnapshot snapshot = (feeSnapshotLookup == null
                 ? java.util.Optional.<OrderFeeSnapshot>empty()
@@ -182,7 +182,7 @@ public class TradingFeeService {
     private long currentVersion(String symbol) {
         InstrumentRule rule = instrumentRuleLookup.currentRule(symbol)
                 .orElseThrow(() -> new IllegalStateException("instrument not found: " + symbol));
-        return rule.version();
+        return rule.changeId();
     }
 
     private void requireCurrentProductLine(ProductLine requested) {

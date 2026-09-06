@@ -136,7 +136,7 @@ public final class RealtimeStateCapture {
                                         new CoreReservationView(
                                                 v.orderId(),
                                                 identities.symbol(v.symbolId()),
-                                                v.instrumentVersion(),
+                                                v.instrumentChangeId(),
                                                 v.kind(),
                                                 identities.asset(v.assetId()),
                                                 v.totalReservedUnits(),
@@ -153,7 +153,7 @@ public final class RealtimeStateCapture {
                                                 identities.asset(v.assetId()),
                                                 v.marginMode(),
                                                 v.positionSide(),
-                                                v.instrumentVersion(),
+                                                v.instrumentChangeId(),
                                                 v.signedQuantitySteps(),
                                                 v.entryPriceTicks(),
                                                 v.entryValueTicks(),
@@ -247,7 +247,7 @@ public final class RealtimeStateCapture {
                 new CoreReservationView(
                         r.orderId(),
                         identities.symbol(r.symbolId()),
-                        r.instrumentVersion(),
+                        r.instrumentChangeId(),
                         r.kind(),
                         identities.asset(r.assetId()),
                         r.totalReservedUnits(),
@@ -316,7 +316,7 @@ public final class RealtimeStateCapture {
                         identities.asset(p.assetId()),
                         p.marginMode(),
                         p.positionSide(),
-                        p.instrumentVersion(),
+                        p.instrumentChangeId(),
                         p.signedQuantitySteps(),
                         p.entryPriceTicks(),
                         p.entryValueTicks(),
@@ -342,7 +342,7 @@ public final class RealtimeStateCapture {
                             o.productLine(),
                             o.userId(),
                             identities.symbol(o.symbolId()),
-                            o.instrumentVersion(),
+                            o.instrumentChangeId(),
                             o.side(),
                             o.priceTicks(),
                             o.quantitySteps(),
@@ -402,7 +402,7 @@ public final class RealtimeStateCapture {
         byte[] data =
                 ByteBuffer.allocate(33)
                         .order(ByteOrder.LITTLE_ENDIAN)
-                        .putLong(taker.instrumentVersion())
+                        .putLong(taker.instrumentChangeId())
                         .putLong(price)
                         .putLong(quantity)
                         .putLong(matcherSequence)
@@ -436,7 +436,7 @@ public final class RealtimeStateCapture {
         execution(
                 taker.userId(),
                 taker.orderId(),
-                taker.instrumentVersion(),
+                taker.instrumentChangeId(),
                 identities.symbol(taker.symbolId()),
                 id,
                 price,
@@ -446,7 +446,7 @@ public final class RealtimeStateCapture {
         execution(
                 makerUserId,
                 makerOrderId,
-                taker.instrumentVersion(),
+                taker.instrumentChangeId(),
                 identities.symbol(taker.symbolId()),
                 id,
                 price,
