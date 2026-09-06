@@ -1,0 +1,20 @@
+spring:
+  application:
+    name: surprising-realtime-router
+  data:
+    redis:
+      host: ${VALKEY_HOST:127.0.0.1}
+      port: ${VALKEY_PORT:6379}
+      username: ${VALKEY_USERNAME:default}
+      password: ${VALKEY_PASSWORD:}
+      connect-timeout: 500ms
+      timeout: 500ms
+surprising:
+  realtime:
+    router:
+      directory: ${AERON_DIR:/dev/shm/aeron-router}
+      channel: ${REALTIME_ROUTER_CHANNEL:aeron:udp?endpoint=0.0.0.0:21010}
+      stream: 2101
+      node-stream: 2103
+      # Explicit per-product control destinations are required; see module README.
+      control-channels: {}

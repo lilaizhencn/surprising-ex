@@ -23,6 +23,7 @@
         <module>surprising-account</module>
         <module>surprising-funding</module>
         <module>surprising-derivatives-lifecycle</module>
+        <module>surprising-realtime</module>
         <module>surprising-gateway</module>
         <module>surprising-maker</module>
     </modules>

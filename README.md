@@ -1,5 +1,7 @@
 # surprising-ex
 
+实时推送与查询实现见 [surprising-realtime/README.md](surprising-realtime/README.md)：提交后有界 Aeron 出口、按用户/频道定向 WS 路由、Valkey 版本化快照与增量查询，以及独立 Archive 回放到原 Kafka 成交 topic 的可靠 K 线输入。部署需要按说明配置所有进程；性能门禁见 [PERFORMANCE_VALIDATION.md](PERFORMANCE_VALIDATION.md)，不能把已通过的功能测试当作零性能影响证明。
+
 
 Surprising-EX 是基于 Java 25、Aeron Cluster、PostgreSQL、Kafka 和 Valkey 的交易所后端。
 仓库覆盖现货、永续、交割和欧式现金结算期权四类业务线（六个 `ProductLine` 变体）；每个变体使用独立的
@@ -737,8 +739,7 @@ Kafka 集群或长时间容量验证的场景必须在交付记录中明确标�
 - Gateway 通过固定 Aeron agents 和有界 mailbox 向 Core 提交命令；Kafka、Order Provider、PostgreSQL 和
   Redis/Valkey 不参与资金预留、撮合或成交结算的同步裁决，也不承担核心恢复。
 - 关闭 Kafka 自动建 Topic，使用经过审查的配置创建仍在使用的外围输入 Topic；历史 Core Export Topic 暂不启用。
-- PostgreSQL、Kafka 或 WebSocket 不参与资金预留、撮合或成交结算的同步裁决；历史投影与公共行情历史数据待后续
-  单独接入，不进入交易 owner 热路径。
+- PostgreSQL、Kafka 或 WebSocket 不参与资金预留、撮合或成交结算的同步裁决；公共成交由独立 `CommittedTradeExportMain` 回放已提交 Archive 后写入原 Kafka topic，实时推送和 Valkey 查询见 realtime 模块说明，不进入交易 owner 的同步 I/O 路径。
 - 上线前按单个 ProductLine 变体运行做市、全链路资金守恒、Leader/follower/cold recovery、24 小时 soak
   和容量门禁；生产峰值不超过满足 SLO 的实测容量 70%。
 - 监控 Aeron election/commit position、Archive/snapshot、matcher queue/latency、Core p99/p99.9、GC、
