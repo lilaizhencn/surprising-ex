@@ -31,6 +31,8 @@ import tools.jackson.databind.ObjectMapper;
 
 @Service
     public class MarkPriceService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.surprising.realtime.api.RealtimeJsonPublisher realtime;
 
     private static final Logger log = LoggerFactory.getLogger(MarkPriceService.class);
     private static final String SEQUENCE_MODULE = "price-mark";
@@ -109,7 +111,7 @@ import tools.jackson.databind.ObjectMapper;
         if (event == null || event.symbol() == null || event.symbol().isBlank()) {
             throw new IllegalArgumentException("trade event is required");
         }
-        trades.put(event.symbol(), event);
+        trades.compute(event.symbol(),(symbol,current)->current==null || event.sequence()>current.sequence()?event:current);
     }
 
     @KafkaListener(topics = "#{__listener.fundingRateTopic()}",
@@ -121,7 +123,11 @@ import tools.jackson.databind.ObjectMapper;
     }
 
     void onFundingRate(String payload) {
-        parse(payload, PerpFundingRateEvent.class, "funding rate", event -> fundingRates.put(event.symbol(), event));
+        parse(payload, PerpFundingRateEvent.class, "funding rate", event -> {
+            fundingRates.put(event.symbol(), event);
+            if (realtime != null) realtime.publish(properties.getKafka().getProductLine(),
+                    com.surprising.aeron.protocol.RealtimeFrame.Kind.FUNDING,event.symbol(),event.symbol(),event.sequence(),event.eventTime(),event);
+        });
     }
 
     public void publishMarkPrices() {
@@ -179,6 +185,8 @@ import tools.jackson.databind.ObjectMapper;
                 fundingRates.get(symbol), basisAverage,
                 properties.getCalculation().getBasisWindow().toSeconds(), now);
         kafkaTemplate.send(properties.priceEventsTopic(), symbol, PricePublishedEvent.mark(publication));
+        if (realtime != null) realtime.publish(properties.getKafka().getProductLine(),
+                com.surprising.aeron.protocol.RealtimeFrame.Kind.MARK,symbol,symbol,event.sequence(),event.eventTime(),event);
         return true;
     }
 

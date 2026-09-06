@@ -15,6 +15,7 @@
     <description>Unified Aeron market projection and Kafka Streams candlestick provider</description>
 
     <dependencies>
+        <dependency><groupId>com.surprising</groupId><artifactId>surprising-realtime-api</artifactId><version>${project.version}</version></dependency>
         <dependency>
             <groupId>com.surprising</groupId>
             <artifactId>surprising-market-data-api</artifactId>

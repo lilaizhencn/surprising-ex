@@ -597,7 +597,7 @@ class MarketMakerServiceTest {
             Instant now = Instant.now();
             BigDecimal price = BigDecimal.valueOf(50_000L);
             cache.update(new MarkPriceEvent(productLine, symbol, 1L,
-                    markPriceUnits, 50_000L, price, price, price, price, price,
+                    markPriceUnits, 50_000L, price, price, null, price, price, price,
                     BigDecimal.valueOf(bestBidTicks), BigDecimal.valueOf(bestAskTicks), BigDecimal.ZERO,
                     now.plusSeconds(3600), 3600L, BigDecimal.ZERO, 60L,
                     BigDecimal.valueOf(49_000L), BigDecimal.valueOf(51_000L), 1L,

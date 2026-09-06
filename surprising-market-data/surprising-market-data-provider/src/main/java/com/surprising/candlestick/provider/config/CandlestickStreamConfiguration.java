@@ -42,6 +42,8 @@ import org.springframework.kafka.support.serializer.JacksonJsonSerde;
  * candle update events, and periodically lets the processor flush dirty snapshots to PostgreSQL.</p>
  */
 public class CandlestickStreamConfiguration {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.surprising.realtime.api.RealtimeJsonPublisher realtime;
 
     /**
      * Shared Streams configuration for all nodes in the same deployment group.
@@ -144,6 +146,11 @@ public class CandlestickStreamConfiguration {
                         CandleStores.SEQUENCE_STORE);
 
         updates.to(properties.getKafka().getCandleTopic(), Produced.with(Serdes.String(), updateSerde));
+        updates.foreach((key,event) -> {
+            if(realtime!=null) realtime.publish(properties.getKafka().getProductLine(),
+                    com.surprising.aeron.protocol.RealtimeFrame.Kind.CANDLE,event.symbol(),event.period(),
+                    event.emittedAt().toEpochMilli(),event.eventTime(),event);
+        });
 
         KStream<String, CandleUpdatedEvent> rollups = streamsBuilder
                 .stream(properties.getKafka().getCandleTopic(), Consumed.with(Serdes.String(), updateSerde))
@@ -157,6 +164,11 @@ public class CandlestickStreamConfiguration {
                         CandleStores.ROLLUP_SEEN_STORE,
                         CandleStores.ROLLUP_WATERMARK_STORE);
         rollups.to(properties.getKafka().getCandleTopic(), Produced.with(Serdes.String(), updateSerde));
+        rollups.foreach((key,event) -> {
+            if(realtime!=null) realtime.publish(properties.getKafka().getProductLine(),
+                    com.surprising.aeron.protocol.RealtimeFrame.Kind.CANDLE,event.symbol(),event.period(),
+                    event.emittedAt().toEpochMilli(),event.eventTime(),event);
+        });
         return updates;
     }
 

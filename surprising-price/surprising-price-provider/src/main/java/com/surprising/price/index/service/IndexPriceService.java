@@ -24,6 +24,8 @@ import org.springframework.stereotype.Service;
 
 @Service
     public class IndexPriceService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.surprising.realtime.api.RealtimeJsonPublisher realtime;
 
     private static final Logger log = LoggerFactory.getLogger(IndexPriceService.class);
     private static final String SEQUENCE_MODULE = "price-index";
@@ -94,6 +96,8 @@ import org.springframework.stereotype.Service;
         latestIndexPriceCache.update(event);
         markPriceService.acceptIndexPrice(event);
         kafkaTemplate.send(properties.getKafka().getPriceEventsTopic(), symbol, PricePublishedEvent.index(event));
+        if (realtime != null) realtime.publish(properties.getKafka().getProductLine(),
+                com.surprising.aeron.protocol.RealtimeFrame.Kind.INDEX,symbol,symbol,event.sequence(),event.eventTime(),event);
     }
 
     private boolean ownsSymbol(String symbol) {

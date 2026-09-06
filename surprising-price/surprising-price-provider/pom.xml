@@ -15,6 +15,7 @@
     <description>Unified index price, mark price, and exchange rate service</description>
 
     <dependencies>
+        <dependency><groupId>com.surprising</groupId><artifactId>surprising-realtime-api</artifactId><version>${project.version}</version></dependency>
         <dependency>
             <groupId>com.surprising</groupId>
             <artifactId>surprising-aeron-client</artifactId>
