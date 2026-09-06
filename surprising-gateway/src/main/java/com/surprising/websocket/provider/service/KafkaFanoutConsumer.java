@@ -40,6 +40,7 @@ import tools.jackson.databind.ObjectMapper;
  * authenticated user subscriptions before leaving the process.</p>
  */
 @Service
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name="surprising.realtime.enabled",havingValue="false",matchIfMissing=true)
 public class KafkaFanoutConsumer {
 
     private static final Logger log = LoggerFactory.getLogger(KafkaFanoutConsumer.class);

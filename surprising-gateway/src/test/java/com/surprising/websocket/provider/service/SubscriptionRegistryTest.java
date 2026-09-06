@@ -22,6 +22,22 @@ import tools.jackson.databind.ObjectMapper;
 class SubscriptionRegistryTest {
 
     @Test
+    void lifecycleIsBalancedAcrossDuplicatesDisconnectsAndFailedRegistration() {
+        var registry=new SubscriptionRegistry(new ObjectMapper(),new WebSocketProperties());
+        var lifecycle=mock(SubscriptionRegistry.RouteLifecycle.class);registry.routeLifecycle(lifecycle);
+        var connection=connection("node-membership");registry.add(connection);
+        var topic=new SubscriptionTopic(WsChannel.ORDERS,"BTC-USDT",null,1001L,ProductLine.SPOT);
+        registry.subscribe(connection,topic);registry.subscribe(connection,topic);
+        verify(lifecycle,org.mockito.Mockito.times(1)).subscribed(topic);
+        registry.remove(connection.id());verify(lifecycle,org.mockito.Mockito.times(1)).unsubscribed(topic);
+        assertThat(registry.subscriberCount(topic)).isZero();
+        var failed=connection("registration-failed");registry.add(failed);
+        org.mockito.Mockito.doThrow(new IllegalStateException("Valkey unavailable")).when(lifecycle).subscribed(topic);
+        org.assertj.core.api.Assertions.assertThatThrownBy(()->registry.subscribe(failed,topic)).isInstanceOf(IllegalStateException.class);
+        assertThat(registry.subscriberCount(topic)).isZero();
+    }
+
+    @Test
     void privateSymbolFanoutDoesNotLeakAcrossUsersAndAlsoReachesSameUserWildcard() {
         SubscriptionRegistry registry = new SubscriptionRegistry(new ObjectMapper(), new WebSocketProperties());
         ClientConnection user1001Symbol = connection("s-1001-symbol");

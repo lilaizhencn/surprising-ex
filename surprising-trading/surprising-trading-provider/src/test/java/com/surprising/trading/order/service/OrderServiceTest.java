@@ -69,6 +69,21 @@ class OrderServiceTest {
     @Mock
     private AeronOrderProjectionRepository projection;
 
+    @ParameterizedTest @EnumSource(ProductLine.class)
+    void enabledOpenOrderQueryUsesOnlyValkeyAndPassesTheRequiredWatermark(ProductLine product) {
+        var service=service(product,aeronOrders);
+        var queries=org.mockito.Mockito.mock(com.surprising.realtime.api.ValkeyUserQueries.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"realtimeQueries",queries);
+        when(queries.require(product,1001L,9L)).thenReturn(new com.surprising.realtime.api.UserReadView(
+            "READY","v",1,null,List.of(),List.of(),9,List.of()));
+        assertThat(service.openOrders(1001L,null,10,null,9L).orders()).isEmpty();
+        when(queries.require(product,1001L,9L)).thenThrow(new org.springframework.web.server.ResponseStatusException(
+            org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE));
+        assertThatThrownBy(()->service.openOrders(1001L,null,10,null,9L))
+            .isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        verifyNoInteractions(aeronOrders,projection);
+    }
+
     @Test
     void placeFailsClosedWithoutAeronGateway() {
         OrderService service = service(ProductLine.LINEAR_PERPETUAL);

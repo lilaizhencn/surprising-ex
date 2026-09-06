@@ -16,6 +16,7 @@
     <description>Frontend REST gateway for Surprising Exchange</description>
 
     <dependencies>
+        <dependency><groupId>com.surprising</groupId><artifactId>surprising-realtime-api</artifactId><version>${project.version}</version></dependency>
         <dependency>
             <groupId>com.surprising</groupId>
             <artifactId>surprising-product-api</artifactId>

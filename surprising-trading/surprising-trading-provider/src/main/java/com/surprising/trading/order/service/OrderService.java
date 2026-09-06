@@ -51,6 +51,8 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class OrderService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.surprising.realtime.api.ValkeyUserQueries realtimeQueries;
 
     private static final int MAX_CANCEL_BATCH_SIZE = 50;
     private static final String ACTIVE_ORDER_CURSOR_PREFIX = "core-open:v1:";
@@ -342,7 +344,9 @@ public class OrderService {
             throw new IllegalArgumentException("userId must be positive");
         }
         requireOrderId(orderId);
-        OrderResponse current = requireAeron().orderState(userId, orderId);
+        OrderResponse current = realtimeQueries==null ? requireAeron().orderState(userId,orderId)
+                : realtimeQueries.require(currentProductLine(),userId,minExportSequence).openOrders().stream()
+                .filter(v->v.orderId()==orderId).map(AeronOrderCommandService::toOrder).findFirst().orElse(null);
         if (current == null) throw new IllegalStateException("order not found: " + orderId);
         return current;
     }
@@ -356,7 +360,9 @@ public class OrderService {
             throw new IllegalArgumentException("userId must be positive");
         }
         String normalized = normalizeClientOrderId(clientOrderId);
-        OrderResponse current = requireAeron().orderStateByClientOrderId(userId, normalized);
+        OrderResponse current = realtimeQueries==null ? requireAeron().orderStateByClientOrderId(userId,normalized)
+                : realtimeQueries.require(currentProductLine(),userId,minExportSequence).openOrders().stream()
+                .filter(v->normalized.equals(v.clientOrderId())).map(AeronOrderCommandService::toOrder).findFirst().orElse(null);
         if (current == null) throw new IllegalStateException("order not found: " + normalized);
         return current;
     }
@@ -379,7 +385,12 @@ public class OrderService {
         }
         String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
         long beforeOrderId = decodeActiveOrderCursor(cursor);
-        List<OrderResponse> orders = requireAeron().openOrders(userId, normalizedSymbol, beforeOrderId, limit + 1);
+        List<OrderResponse> orders = realtimeQueries==null ? requireAeron().openOrders(userId, normalizedSymbol, beforeOrderId, limit + 1)
+                : realtimeQueries.require(currentProductLine(),userId,minExportSequence).openOrders().stream()
+                .filter(v->normalizedSymbol==null || normalizedSymbol.equals(v.symbol()))
+                .filter(v->beforeOrderId==0 || v.orderId()<beforeOrderId)
+                .sorted(java.util.Comparator.comparingLong(com.surprising.aeron.protocol.CoreOrderStateView::orderId).reversed())
+                .limit(limit+1).map(AeronOrderCommandService::toOrder).toList();
         boolean hasMore = orders.size() > limit;
         if (hasMore) orders = new ArrayList<>(orders.subList(0, limit));
         String nextCursor = hasMore && !orders.isEmpty()

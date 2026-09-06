@@ -44,6 +44,8 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class TriggerOrderService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.surprising.realtime.api.ValkeyUserQueries realtimeQueries;
 
     private static final Logger log = LoggerFactory.getLogger(TriggerOrderService.class);
     private static final long MIN_TRAILING_CALLBACK_RATE_PPM = 1_000L;
@@ -148,7 +150,9 @@ public class TriggerOrderService {
         if (userId <= 0 || triggerOrderId <= 0) {
             throw new IllegalArgumentException("userId and triggerOrderId must be positive");
         }
-        CoreTriggerOrderStateView value = aeronGateway.get(userId, triggerOrderId);
+        CoreTriggerOrderStateView value = realtimeQueries == null ? aeronGateway.get(userId, triggerOrderId)
+                : realtimeQueries.require(currentProductLine(), userId, null).triggerOrders().stream()
+                    .filter(order -> order.triggerOrderId() == triggerOrderId).findFirst().orElse(null);
         if (value == null || value.userId() != userId || value.productLine() != currentProductLine()) {
             throw new IllegalStateException("trigger order not found: " + triggerOrderId);
         }
@@ -259,8 +263,12 @@ public class TriggerOrderService {
         }
         String normalizedSymbol = symbol == null || symbol.isBlank() ? null : normalizeSymbol(symbol);
         long before = decodeOpenTriggerCursor(cursor);
-        List<TriggerOrderResponse> values = aeronGateway.openOrders(userId, normalizedSymbol, before, limit + 1)
-                .stream().map(TriggerOrderAeronGateway::response).toList();
+        List<CoreTriggerOrderStateView> states=realtimeQueries==null ? aeronGateway.openOrders(userId,normalizedSymbol,before,limit+1)
+                : realtimeQueries.require(currentProductLine(),userId,null).triggerOrders().stream()
+                .filter(v->normalizedSymbol==null || normalizedSymbol.equals(v.symbol()))
+                .filter(v->before==0 || v.triggerOrderId()<before)
+                .sorted(java.util.Comparator.comparingLong(CoreTriggerOrderStateView::triggerOrderId).reversed()).limit(limit+1).toList();
+        List<TriggerOrderResponse> values=states.stream().map(TriggerOrderAeronGateway::response).toList();
         boolean hasMore = values.size() > limit;
         List<TriggerOrderResponse> orders = hasMore ? values.subList(0, limit) : values;
         String next = hasMore && !orders.isEmpty()

@@ -2,7 +2,7 @@ package com.surprising.trading.api.model;
 
 import java.time.Instant;
 
-/** Public tick trade emitted directly from the matcher without account or database fields. */
+/** Public trade from committed business replay; no private account fields. Sequence is monotonic per product exporter. */
 public record PublicTradeEvent(
         String tradeId,
         long sequence,

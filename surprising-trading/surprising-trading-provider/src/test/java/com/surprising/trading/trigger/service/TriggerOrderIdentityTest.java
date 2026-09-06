@@ -23,6 +23,17 @@ import org.junit.jupiter.api.Test;
 class TriggerOrderIdentityTest {
 
     @Test
+    void privateTriggerQueryDoesNotReturnToCoreOnAReadViewMiss() {
+        var gateway=mock(TriggerOrderAeronGateway.class);var service=new TriggerOrderService(properties(),gateway);
+        var queries=mock(com.surprising.realtime.api.ValkeyUserQueries.class);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"realtimeQueries",queries);
+        when(queries.require(ProductLine.LINEAR_PERPETUAL,1001L,null)).thenReturn(
+            new com.surprising.realtime.api.UserReadView("READY","v",1,null,java.util.List.of(),java.util.List.of(),1,java.util.List.of()));
+        assertThatThrownBy(()->service.get(1001L,99L)).isInstanceOf(IllegalStateException.class);
+        org.mockito.Mockito.verifyNoInteractions(gateway);
+    }
+
+    @Test
     void placementSurvivesProviderReconstructionWithStableTemplate() {
         TriggerProperties properties = properties();
         TriggerOrderAeronGateway gateway = mock(TriggerOrderAeronGateway.class);

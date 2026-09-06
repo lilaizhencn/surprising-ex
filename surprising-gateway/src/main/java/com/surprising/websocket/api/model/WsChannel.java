@@ -3,6 +3,10 @@ package com.surprising.websocket.api.model;
 import java.util.Locale;
 
 public enum WsChannel {
+    TRADES("trades", true),
+    DEPTH("depth", true),
+    BOOK_TICKER("bookTicker", true),
+    ACCOUNT_STATE("accountState", false),
     CANDLES("candles", true),
     INDEX_PRICE("index", true),
     MARK_PRICE("mark", true),

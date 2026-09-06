@@ -414,7 +414,7 @@ public class AeronOrderCommandService {
                 .toList();
     }
 
-    private static OrderResponse toOrder(CoreOrderStateView view) {
+    static OrderResponse toOrder(CoreOrderStateView view) {
         return view == null ? null : requireOrder(view, "order query returned no order");
     }
 

@@ -144,7 +144,7 @@ class KafkaFanoutConsumerTest {
     private MarkPriceEvent markPriceEvent(Instant eventTime) {
         BigDecimal price = new BigDecimal("50000");
         return new MarkPriceEvent(ProductLine.LINEAR_PERPETUAL, "BTC-USDT", 1L, 5_000_000L, 50_000L,
-                price, price, price, price, price, new BigDecimal("49990"), new BigDecimal("50010"),
+                price, price, null, price, price, price, new BigDecimal("49990"), new BigDecimal("50010"),
                 BigDecimal.ZERO, eventTime.plusSeconds(3600), 3600L, BigDecimal.ZERO, 60L,
                 new BigDecimal("49000"), new BigDecimal("51000"), 1L, PriceStatus.HEALTHY,
                 eventTime, eventTime);

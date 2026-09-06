@@ -175,12 +175,12 @@ public class ClientConnection implements AutoCloseable {
         }
         writerThread.interrupt();
         timeoutWatcher.interrupt();
-        try {
-            if (session.isOpen()) {
-                session.close(status);
+        Thread.ofVirtual().name("websocket-close-" + session.getId()).start(() -> {
+            try {
+                if (session.isOpen()) session.close(status);
+            } catch (IOException ex) {
+                log.debug("failed to close websocket session={}: {}", session.getId(), ex.getMessage());
             }
-        } catch (IOException ex) {
-            log.debug("failed to close websocket session={}: {}", session.getId(), ex.getMessage());
-        }
+        });
     }
 }

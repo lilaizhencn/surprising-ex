@@ -22,6 +22,21 @@ import org.junit.jupiter.api.Test;
 class AccountServiceLocalSnapshotTest {
 
     @Test
+    void enabledReadViewNeverCallsCoreEvenWhenValkeyIsUnavailable() {
+        var projection=mock(AccountQueryService.class);var aeron=mock(AccountAeronGateway.class);
+        var queries=mock(com.surprising.realtime.api.ValkeyUserQueries.class);var service=service(aeron,projection);
+        org.springframework.test.util.ReflectionTestUtils.setField(service,"realtimeQueries",queries);
+        when(queries.require(ProductLine.LINEAR_PERPETUAL,1001L,null)).thenReturn(
+            new com.surprising.realtime.api.UserReadView("READY","v",1,snapshot(),List.of(),List.of(),1,List.of()));
+        assertThat(service.balance(1001L,"USDT").availableUnits()).isEqualTo(800);
+        assertThat(service.positions(1001L).count()).isEqualTo(1);
+        when(queries.require(ProductLine.LINEAR_PERPETUAL,1001L,null)).thenThrow(
+            new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE));
+        assertThatThrownBy(()->service.balance(1001L,"USDT")).isInstanceOf(org.springframework.web.server.ResponseStatusException.class);
+        verifyNoInteractions(aeron,projection);
+    }
+
+    @Test
     void balanceAndPositionsReadOnlyAeronStrongState() {
         AccountQueryService projection = mock(AccountQueryService.class);
         AccountAeronGateway aeron = mock(AccountAeronGateway.class);

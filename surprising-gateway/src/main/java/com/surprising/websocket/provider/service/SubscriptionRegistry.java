@@ -21,6 +21,12 @@ import tools.jackson.databind.ObjectMapper;
 @Service
 public class SubscriptionRegistry {
 
+    public interface RouteLifecycle {
+        void subscribed(SubscriptionTopic topic);
+        void unsubscribed(SubscriptionTopic topic);
+    }
+    private volatile RouteLifecycle routeLifecycle;
+    public void routeLifecycle(RouteLifecycle listener) {this.routeLifecycle=listener;}
     private final ObjectMapper objectMapper;
     private final WebSocketProperties properties;
     private final Map<String, ClientConnection> sessions = new ConcurrentHashMap<>();
@@ -54,11 +60,12 @@ public class SubscriptionRegistry {
         return connection;
     }
 
-    public void remove(String sessionId) {
+    public synchronized void remove(String sessionId) {
         ClientConnection connection = sessions.remove(sessionId);
         Set<SubscriptionTopic> topics = sessionTopics.remove(sessionId);
         if (topics != null && connection != null) {
             for (SubscriptionTopic topic : topics) {
+                if (routeLifecycle != null) routeLifecycle.unsubscribed(topic);
                 Set<ClientConnection> connections = subscribers.get(topic);
                 if (connections != null) {
                     connections.remove(connection);
@@ -73,19 +80,20 @@ public class SubscriptionRegistry {
         }
     }
 
-    public void subscribe(ClientConnection connection, SubscriptionTopic topic) {
+    public synchronized void subscribe(ClientConnection connection, SubscriptionTopic topic) {
         Set<SubscriptionTopic> topics = sessionTopics.computeIfAbsent(connection.id(), key -> ConcurrentHashMap.newKeySet());
         if (topics.size() >= properties.getSession().getMaxSubscriptions() && !topics.contains(topic)) {
             throw new IllegalStateException("maximum websocket subscriptions exceeded");
         }
+        if (!topics.contains(topic) && routeLifecycle != null) routeLifecycle.subscribed(topic);
         topics.add(topic);
         subscribers.computeIfAbsent(topic, key -> ConcurrentHashMap.newKeySet()).add(connection);
     }
 
-    public void unsubscribe(ClientConnection connection, SubscriptionTopic topic) {
+    public synchronized void unsubscribe(ClientConnection connection, SubscriptionTopic topic) {
         Set<SubscriptionTopic> topics = sessionTopics.get(connection.id());
         if (topics != null) {
-            topics.remove(topic);
+            if (topics.remove(topic) && routeLifecycle != null) routeLifecycle.unsubscribed(topic);
         }
         Set<ClientConnection> connections = subscribers.get(topic);
         if (connections != null) {
@@ -124,6 +132,16 @@ public class SubscriptionRegistry {
         if (!topic.channel().isPublicChannel() && !SubscriptionTopic.WILDCARD.equals(topic.symbol())) {
             sendTimedBatch(topic.withSymbol(SubscriptionTopic.WILDCARD), events);
         }
+    }
+
+    public void publishUserSnapshot(com.surprising.product.api.ProductLine product,long userId,Object payload) {
+        String encoded=objectMapper.writeValueAsString(new WsServerMessage("snapshot",null,null,null,null,
+                userId,product,payload,null,Instant.now()));
+        sessionTopics.forEach((sessionId,topics)->{
+            boolean subscribed=topics.stream().anyMatch(t->t.productLine()==product && t.userId()!=null && t.userId()==userId);
+            ClientConnection connection=sessions.get(sessionId);
+            if(subscribed && connection!=null && !connection.send(encoded))remove(sessionId);
+        });
     }
 
     public int subscriberCount(SubscriptionTopic topic) {

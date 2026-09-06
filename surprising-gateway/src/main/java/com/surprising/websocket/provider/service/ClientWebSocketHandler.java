@@ -15,6 +15,9 @@ import tools.jackson.databind.ObjectMapper;
 @Component
 public class ClientWebSocketHandler extends TextWebSocketHandler {
 
+    private RealtimeWebSocketBridge realtime;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    void realtime(RealtimeWebSocketBridge bridge) {this.realtime=bridge;}
     private final ObjectMapper objectMapper;
     private final SubscriptionRegistry registry;
     private final WebSocketProperties properties;
@@ -65,6 +68,11 @@ public class ClientWebSocketHandler extends TextWebSocketHandler {
         SubscriptionTopic topic = SubscriptionTopic.fromCommand(command, connection.authenticatedUserId());
         registry.subscribe(connection, topic);
         connection.send(objectMapper.writeValueAsString(WsServerMessage.ack(command.id(), topic)));
+        if(realtime!=null && topic.userId()!=null) {
+            var view=realtime.snapshot(topic.productLine(),topic.userId());
+            connection.send(objectMapper.writeValueAsString(new WsServerMessage("snapshot",command.id(),topic.channel().code(),
+                    topic.symbol(),topic.period(),topic.userId(),topic.productLine(),view,null,java.time.Instant.now())));
+        }
     }
 
     private void authenticate(ClientConnection connection, WsClientCommand command) {

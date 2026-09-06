@@ -49,6 +49,8 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class AccountService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.surprising.realtime.api.ValkeyUserQueries realtimeQueries;
 
     private final AccountProperties properties;
     private final AccountCommandGateway commandGateway;
@@ -330,7 +332,8 @@ public class AccountService {
     private CoreUserStateView coreSnapshot(ProductLine productLine, long userId) {
         requireUserId(userId);
         requireCurrentProduct(productLine);
-        CoreUserStateView state = aeronGateway.userState(userId);
+        CoreUserStateView state = realtimeQueries==null ? aeronGateway.userState(userId)
+                : realtimeQueries.require(productLine,userId,null).account();
         if (state == null) throw new AccountStateUnavailableException("Aeron 账户状态尚未初始化: "
                 + productLine + ':' + userId);
         return state;
