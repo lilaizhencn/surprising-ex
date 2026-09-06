@@ -46,6 +46,132 @@ import org.junit.jupiter.api.Test;
 class CoreOrderedOrderBatchTest {
 
     @Test
+    void spotAmendReusesLockedFundsAndRejectsUnaffordableIncreaseBeforeMatching() {
+        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, 1_000, 1);
+            applyBalance(state, 1002, "BTC", 1, 2);
+            drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 3,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            linearOrder(85_000, "funds-maker", CoreOrderSide.SELL, 1_100, 1)))), 1002));
+            drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 4,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            place(85_001, "funds-original", 1_000))))));
+
+            CoreResponse rejected = drainBatch(state, command(CoreMessageType.AMEND_ORDER_BATCH, UUID.randomUUID(), 5,
+                    TradingOrderBatchCodec.encodeAmendOrderBatch(new AmendOrderBatchCommand(List.of(
+                            new AmendOrderCommand(85_001, 85_002, "unaffordable", 1_100L, 1L,
+                                    CoreTimeInForce.GTC, false))))));
+            var item = TradingOrderBatchCodec.decodeResult(rejected.data()).items().getFirst();
+            assertThat(item.status()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(item.resultCode()).isEqualTo(CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
+            assertThat(item.executions()).isEmpty();
+            assertThat(state.tradingState().order(85_001)).isNotNull();
+            assertThat(state.tradingState().order(85_000)).isNotNull();
+            assertThat(state.tradingState().order(85_002)).isNull();
+
+            CoreResponse applied = drainBatch(state, command(CoreMessageType.AMEND_ORDER_BATCH, UUID.randomUUID(), 6,
+                    TradingOrderBatchCodec.encodeAmendOrderBatch(new AmendOrderBatchCommand(List.of(
+                            new AmendOrderCommand(85_001, 85_003, "affordable", 900L, 1L,
+                                    CoreTimeInForce.GTC, false))))));
+            assertThat(TradingOrderBatchCodec.firstNonAppliedItem(applied, 1)).isEqualTo(-1);
+            assertThat(state.tradingState().order(85_001)).isNull();
+            var balance = state.tradingState().user(1001).balances().get("USDT");
+            assertThat(balance.availableUnits()).isEqualTo(100);
+            assertThat(balance.lockedUnits()).isEqualTo(900);
+            drainBatch(state, command(CoreMessageType.CANCEL_ORDER_BATCH, UUID.randomUUID(), 7,
+                    TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
+                            new CancelOrderCommand(85_003))))));
+            assertThat(state.tradingState().user(1001).balances().get("USDT").availableUnits()).isEqualTo(1_000);
+            assertThat(state.tradingState().user(1001).reservations()).isEmpty();
+            try (var restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
+            }
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Timeout(10)
+    void spotAmendLaneFailureStopsTheBatchAndRecoversFromPriorSnapshotAndLog() throws Exception {
+        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        try {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, 10_000, 1);
+            applyBalance(state, 1001, "BTC", 1, 2);
+            applyBalance(state, 1002, "BTC", 1, 3);
+            drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 4,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            linearOrder(84_000, "fault-maker", CoreOrderSide.SELL, 1_100, 1)))), 1002));
+            drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 5,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            place(84_001, "fault-original", 1_000))))));
+            byte[] checkpoint = state.snapshot();
+            long committedBefore = state.committedCoreSequence();
+            long projectionBefore = state.snapshotProjectionSequence();
+            var exportBefore = state.exportState().snapshot();
+            var amend = command(CoreMessageType.AMEND_ORDER_BATCH, UUID.randomUUID(), 6,
+                    TradingOrderBatchCodec.encodeAmendOrderBatch(new AmendOrderBatchCommand(List.of(
+                            new AmendOrderCommand(84_001, 84_002, "fault-replacement", 1_100L, 1L,
+                                    CoreTimeInForce.GTC, false)))));
+            assertThat(state.apply(amend).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            long sequence = state.matchingSequence(amend.header().commandId());
+            var matching = awaitMatching(state, sequence);
+            assertThat(matching.matcherEvents()).isNotEmpty();
+            // Fault injection after the recoverable checkpoint: crediting this buyer's fill
+            // overflows inside the real settlement worker, before it can publish completion.
+            TradingRuntimeState runtime = field(state, "runtimePlaceOrderState");
+            RuntimeIdentityRegistry identities = field(state, "runtimePlaceOrderIdentities");
+            runtime.putBalance(new com.surprising.aeron.service.state.BalanceRuntime(
+                    1001, identities.assetId("BTC"), Long.MAX_VALUE, 0));
+
+            Throwable failure = org.assertj.core.api.Assertions.catchThrowable(() ->
+                    state.completeMatching(sequence, matching, 2_000, 6));
+            assertThat(failure).isInstanceOf(
+                    com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class)
+                    .hasRootCauseInstanceOf(ArithmeticException.class);
+            assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
+            assertThat(state.snapshotProjectionSequence()).isEqualTo(projectionBefore);
+            assertThat(state.exportState().snapshot()).isEqualTo(exportBefore);
+            assertThat(state.commandResults()).doesNotContainKey(amend.header().commandId());
+            assertThatThrownBy(() -> state.apply(probe(UUID.randomUUID(), 7))).isInstanceOf(RuntimeException.class);
+            assertThatThrownBy(state::snapshot).isInstanceOf(RuntimeException.class);
+
+            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, checkpoint)) {
+                CoreResponse response = drainBatch(restored, amend);
+                assertThat(TradingOrderBatchCodec.firstNonAppliedItem(response, 1)).isEqualTo(-1);
+                var trading = restored.tradingState();
+                assertThat(trading.user(1001).balances().get("BTC").availableUnits()).isEqualTo(2);
+                assertThat(trading.user(1001).balances().get("USDT").availableUnits()).isEqualTo(8_900);
+                assertThat(trading.user(1002).balances().get("USDT").availableUnits()).isEqualTo(1_100);
+                assertThat(trading.user(1002).balances().get("BTC").totalUnits()).isZero();
+                for (long user : new long[]{1001, 1002}) {
+                    assertThat(trading.user(user).reservations()).isEmpty();
+                    assertThat(trading.user(user).balances().values()).allSatisfy(balance ->
+                            assertThat(balance.lockedUnits()).isZero());
+                }
+                assertThat(trading.orders()).isEmpty();
+                long recoveredHash = trading.businessStateHash();
+                drainBatch(restored, amend); // replaying the duplicate must not settle the fill twice
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(recoveredHash);
+                try (CoreProbeState again = CoreProbeState.fromSnapshot(ProductLine.SPOT, restored.snapshot())) {
+                    assertThat(again.tradingState().businessStateHash()).isEqualTo(recoveredHash);
+                }
+            }
+        } finally {
+            // A failed worker rethrows on close. Still stop every other worker in this fault fixture.
+            TradingRuntimeState runtime = field(state, "runtimePlaceOrderState");
+            org.assertj.core.api.Assertions.catchThrowable(state::close);
+            if (runtime != null) {
+                for (Object worker : (Object[]) field(runtime, "laneWorkers")) {
+                    if (worker instanceof AutoCloseable closeable) {
+                        org.assertj.core.api.Assertions.catchThrowable(closeable::close);
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     void spotPipelinedBatchSettlesSharedMakerOncePerLaneAndReclaimsEveryTerminal() throws Exception {
         String priorLanes = System.getProperty("surprising.aeron.account-lanes");
         System.setProperty("surprising.aeron.account-lanes", "4");
@@ -1050,12 +1176,16 @@ class CoreOrderedOrderBatchTest {
     }
 
     private static CoreResponse drainBatchAfterFirst(CoreProbeState state, CoreMessage batch, long sequence) {
-        while (true) {
-            var matching = awaitMatching(state, sequence);
-            CoreResponse completed = state.completeMatching(state.matchingSequence(batch.header().commandId()), matching,
-                    batch.header().submittedAtEpochMillis(), batch.header().sourceSequence());
-            if (completed != null) return completed;
+        CoreResponse[] terminal = {null};
+        long deadline = System.nanoTime() + 5_000_000_000L;
+        while (terminal[0] == null && System.nanoTime() - deadline < 0) {
+            state.commitReadyMatching(256, batch.header().submittedAtEpochMillis(),
+                    batch.header().sourceSequence(), false, (completedSequence, response) -> {
+                        if (completedSequence == sequence) terminal[0] = response;
+                    });
         }
+        assertThat(terminal[0]).as("batch must reach a terminal response").isNotNull();
+        return terminal[0];
     }
 
     private static CoreResponse completeEventually(

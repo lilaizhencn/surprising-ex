@@ -1388,10 +1388,25 @@ public final class CoreProbeState implements AutoCloseable {
                 PlaceOrderCommand replacement = replacementForAmend(command, order);
                 ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(runtimePlaceOrderState,
                         runtimePlaceOrderIdentities, userId, replacement, currentClusterTimestamp);
-                com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservation(
+                long requiredReservation = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservation(
                         runtimePlaceOrderState, runtimePlaceOrderIdentities, userId, resolved,
                         batchOpenInterestSteps(batch, replacement.symbol()), batch.admissionOrderIndex,
                         command.originalOrderId());
+                if (productLine == ProductLine.SPOT) {
+                    var reservation = runtimePlaceOrderState.reservation(command.originalOrderId());
+                    int assetId = runtimePlaceOrderIdentities.assetId(resolved.reservationAsset());
+                    if (reservation == null || reservation.assetId() != assetId) {
+                        throw new IllegalStateException("spot amend original reservation is missing or mismatched");
+                    }
+                    // The previous item has crossed its completion fence; its published scalar
+                    // is current. Do not enqueue another Lane task just to preflight available funds.
+                    long available = runtimePlaceOrderState.publishedAvailableBalance(userId, assetId);
+                    if (available == Long.MIN_VALUE || requiredReservation > Math.addExact(
+                            available, reservation.reservedUnits())) {
+                        throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
+                                "available balance is insufficient for amended order");
+                    }
+                }
                 batch.currentPreMatchingCancellationOrderIds = preMatchingCloseCapacityCancellations(
                         userId, replacement, command.originalOrderId());
             }
@@ -1556,7 +1571,9 @@ public final class CoreProbeState implements AutoCloseable {
             appendOrderBatchResult(batch, item, status, resultCode, executions);
             item.matchingSubmission = null;
             batch.nextIndex++;
-        } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException exception) {
+        } catch (RuntimeException exception) {
+            // The matcher already applied this item. Operational settlement failures also require
+            // snapshot/log recovery; never turn them into an item rejection or retry this mutation.
             throw failOrderBatch(batch, pending, "Core and matcher state diverged", exception);
         }
     }
@@ -1746,6 +1763,8 @@ public final class CoreProbeState implements AutoCloseable {
                         runtimeOrder(command.originalOrderId()));
                 deferOrderBatchPreMatchingCancellations(batch, pending, matchingResult);
                 if (matchingResult.accepted()) {
+                    // The final cancel event also stamps and retires the original terminal order.
+                    // SPOT releases its funds earlier in the replacement reservation task.
                     batch.deferredCancellationOrderIds.add(command.originalOrderId());
                     requireOrderIdentityAvailable(pending.command().header().userId(), replacement);
                     reservePlaceOrderRuntime(pending.command().header().userId(), replacement,
@@ -6079,8 +6098,16 @@ public final class CoreProbeState implements AutoCloseable {
                 userId, resolved.clientOrderId());
         int symbolId = resolved.symbolId();
         int assetId = runtimePlaceOrderIdentities.assetId(resolved.reservationAsset());
+        long spotAmendOriginal = batch != null && batch.kind == OrderBatchKind.AMEND
+                && productLine == ProductLine.SPOT
+                ? ((AmendOrderCommand) batch.items.get(batch.nextIndex).command).originalOrderId() : 0;
         try {
             runtimePlaceOrderState.executeUserSettlement(userId, () -> {
+                // Reuse the existing reservation task and batch funds boundary. The matcher has
+                // replaced the old order, so its locked funds must be available to the replacement.
+                if (spotAmendOriginal != 0) {
+                    RuntimeCommandProcessor.cancelOrder(runtimePlaceOrderState, userId, spotAmendOriginal);
+                }
                 long requiredReservation = admissionIdentity == null
                         ? preparedRequiredReservation
                         : com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservationPrepared(

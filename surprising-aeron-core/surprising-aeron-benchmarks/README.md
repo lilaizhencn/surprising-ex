@@ -145,3 +145,8 @@ benchmark 六个 Maven 目标各自声明精确 class CSV；每次 invocation �
 `failIfNoSpecifiedTests=false` 只用于 reactor 依赖模块，不能用旧报告或漏跑目标类制造绿色结果。
 `test-verify-surefire-reports.sh` 是纯 shell/XML 回归入口，覆盖 stale green、suffix collision、
 multi-match、missing 与 fresh exact FQCN/简单类名成功场景，不会启动 JVM。
+
+
+## 现货批量改单结算与故障等待回归
+
+`ClusteredBatchTradingBenchmark.batchAmendRoundTripTrades` 固定256请求波次，使用真实服务日志回调、matcher和Account Lane完成双向批量改单成交；`batchSize=2`时每cycle2560业务操作、1536 Core消息、1024批次/2048条目及1024成交。SPOT用户卖出全部持有资产后改单，必须复用原单冻结；六产品线teardown均校验用户/maker资金、冻结、持仓、终态回收和快照恢复。采样参数、结果和未测范围统一见根目录 `PERFORMANCE_VALIDATION.md`，本地闭环fixture不能代表生产API/WS尾延迟或无内存泄漏。

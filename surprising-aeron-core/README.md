@@ -616,6 +616,8 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
 ### 现货批量 Lane 结算
 
 - `CoreProbeState.tryActivatePipelinedOrderBatch` 对现货与衍生品都使用 Lane 批量准入；同一 symbol 的批次所有权、同用户先后关系及 matcher shard 边界保持不变。
-- 准入成功后，`TradingRuntimeState.dispatchMatcherSettlementBatch` 将同一批次的成交按相关 Lane 合并为一次任务，owner 根据 completion 推进，不再为现货批次的每个 item 同步等待结算。`MatcherSettlementPlan` 校验整批累计成交量，防止多个 taker 对同一个 maker 超量扣减。
+- 对成功进入 pipelined place 的批次，`TradingRuntimeState.dispatchMatcherSettlementBatch` 将成交按相关 Lane 合并为一次任务，owner 根据 completion 推进。`MatcherSettlementPlan` 校验整批累计成交量，防止多个 taker 对同一个 maker 超量扣减。
+- 顺序现货下单批次和现货批量改单仍在每项结算完成后推进，以保留同一批次的资金可见性。`applyOrderBatchMatcherSettlement` 的等待定期检查 Lane 故障、中断及30秒期限；失败后不收集、不回收事件，Core 进入故障状态并依靠已有快照和日志恢复，不生成普通业务拒绝，也不后台继续结算下一条命令。
+- 现货批量改单先校验“可用余额 + 原单剩余冻结”是否足够，再提交 matcher；成功后在同一个现有 Lane 预占任务中解冻原单并冻结新单。余额不足在撮合前拒绝并保留原单，避免全额挂单用户改单时重复占资。此变更不增加 Lane 任务或资金提交阶段。
 - 现货仍由 `RuntimeSpotMatchProcessor` 独立执行 base/quote 资产冻结、成交、手续费与解冻；衍生品仍使用原资金/持仓内核，不混用金融规则。若全批预冻结不可行，先撤销该次未发布准入，再按既有逐项业务语义执行，保留“前一笔成交收入供后一笔下单”的部分成功行为。
 - 现货 JMH `SpotCoreBenchmark.productionMixedWorkload` 固定256 symbol/in-flight、batch size至少2，覆盖双向批量吃同一个 maker、剩余撤单及终态回收；默认15分钟iteration timeout给600秒测量和最终资金/恢复检查留出余量。性能证据统一追加根目录 `PERFORMANCE_VALIDATION.md`，不能据短测声称整个owner已无业务等待。

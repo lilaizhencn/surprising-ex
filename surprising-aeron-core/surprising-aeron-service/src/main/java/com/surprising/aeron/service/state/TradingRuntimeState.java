@@ -29,6 +29,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class TradingRuntimeState implements AutoCloseable {
 
     public static final int MAX_PENDING_TRANSFERS = 131_072;
+    private static final long ORDER_BATCH_SETTLEMENT_TIMEOUT_NANOS =
+            java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
     private static final int CHANGE_KEY_COMPACTION_THRESHOLD = 512;
     private static final int PARALLEL_SETTLEMENT_MIN_LANE_OPERATIONS = Math.max(2,
             Integer.getInteger("surprising.aeron.parallel-settlement-min-lane-operations", 2));
@@ -2138,7 +2140,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         MatcherSettlementEvent event = dispatchMatcherSettlement(coreSequence, expectedLaneMask,
                 0, -1, -1, plan, matchingResult, identities, true);
-        while (!event.complete()) Thread.onSpinWait();
+        awaitOrderBatchMatcherSettlement(event, System.nanoTime() + ORDER_BATCH_SETTLEMENT_TIMEOUT_NANOS);
         // Sequential batch items share one funds boundary. Carry Lane-computed endpoints into
         // that boundary; appending an item delta separately would count the same mutation twice.
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
@@ -2149,6 +2151,22 @@ public final class TradingRuntimeState implements AutoCloseable {
         RuntimeTreasuryDelta result = collectMatcherSettlement(event, null, terminalOrderSink);
         releaseMatcherSettlement(event);
         return result;
+    }
+
+    void awaitOrderBatchMatcherSettlement(MatcherSettlementEvent event, long deadlineNanos) {
+        // This is still a completion fence: no collection/recycling or next batch item on failure.
+        // Check operational failure periodically without a clock read on every spin.
+        int spins = 0;
+        while (!event.complete()) {
+            if ((spins++ & 1_023) == 0) {
+                assertAccountLanesHealthy();
+                if (Thread.currentThread().isInterrupted() || System.nanoTime() - deadlineNanos >= 0) {
+                    throw new IllegalStateException("order batch matcher settlement interrupted or timed out");
+                }
+            }
+            Thread.onSpinWait();
+        }
+        assertAccountLanesHealthy();
     }
 
     public RuntimeTreasuryDelta applyNoTradeMatcherSettlements(

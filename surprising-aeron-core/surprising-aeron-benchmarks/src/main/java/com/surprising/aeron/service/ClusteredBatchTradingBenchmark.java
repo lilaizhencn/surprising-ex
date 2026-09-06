@@ -72,6 +72,20 @@ public class ClusteredBatchTradingBenchmark {
         return workload.terminal;
     }
 
+    @Benchmark
+    public long batchAmendRoundTripTrades(Workload workload, Counters counters) {
+        workload.runAmendRoundTripTrades();
+        long business = 512L + 1024L * workload.batchSize;
+        counters.acceptedBusinessOperations += business;
+        counters.terminalBusinessOperations += business;
+        counters.acceptedCoreMessages += 1536;
+        counters.terminalCoreMessages += 1536;
+        counters.terminalBatches += 1024;
+        counters.terminalItems += 1024L * workload.batchSize;
+        counters.terminalTrades += 512L * workload.batchSize;
+        return workload.terminal;
+    }
+
     @State(Scope.Thread)
     public static class Workload implements AutoCloseable {
         @Param({"LINEAR_PERPETUAL", "SPOT"}) public ProductLine productLine;
@@ -95,6 +109,9 @@ public class ClusteredBatchTradingBenchmark {
         private long maxBacklog;
         private boolean expectMissingCancels;
         private long rejectedItems;
+        private boolean expectBatchTrades;
+        private long batchTrades;
+        private long makerBaseBalance;
         private final long[] firstOrders = new long[256];
         private static final long BALANCE = 1_000_000_000L;
 
@@ -105,6 +122,9 @@ public class ClusteredBatchTradingBenchmark {
             sequence = terminal = queryResults = maxBacklog = 0;
             expectMissingCancels = false;
             rejectedItems = 0;
+            expectBatchTrades = false;
+            batchTrades = 0;
+            makerBaseBalance = 1L + 256L * batchSize;
             service = new SurprisingClusteredService(productLine);
             Cluster cluster = (Cluster) Proxy.newProxyInstance(Cluster.class.getClassLoader(),
                     new Class<?>[]{Cluster.class}, (proxy, method, args) -> switch (method.getName()) {
@@ -141,7 +161,10 @@ public class ClusteredBatchTradingBenchmark {
                                 var items = TradingOrderBatchCodec.decodeResult(response.data()).items();
                                 if (items.size() != batchSize) throw new IllegalStateException("batch size mismatch");
                                 for (var item : items) {
-                                    if (!item.executions().isEmpty()) throw new IllegalStateException("unexpected trade");
+                                    if (!expectBatchTrades && !item.executions().isEmpty()) {
+                                        throw new IllegalStateException("unexpected trade");
+                                    }
+                                    batchTrades += item.executions().size();
                                     if (item.status() == ResponseStatus.APPLIED) continue;
                                     if (!expectMissingCancels || item.status() != ResponseStatus.REJECTED
                                             || item.resultCode() != CoreResultCode.ORDER_NOT_FOUND) {
@@ -171,7 +194,7 @@ public class ClusteredBatchTradingBenchmark {
             }
             if (productLine == ProductLine.SPOT) {
                 apply(CoreMessageType.ADJUST_BALANCE, 1_256,
-                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 257)));
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", makerBaseBalance)));
             }
             // Resting maker liquidity remains present throughout all iterations.
             CoreMessage maker = command(CoreMessageType.PLACE_ORDER, 1_256,
@@ -207,6 +230,50 @@ public class ClusteredBatchTradingBenchmark {
                     }
                 }
             } finally {singleResponses=false;}
+        }
+
+        public void runAmendRoundTripTrades() {
+            long before = terminal;
+            long fillsBefore = batchTrades;
+            expectBatchTrades = true;
+            try {
+                for (int phase = 0; phase < 6; phase++) {
+                    CoreMessage[] wave = new CoreMessage[maxInFlight];
+                    singleResponses = phase == 0 || phase == 4;
+                    for (int user = 0; user < maxInFlight; user++) {
+                        if (singleResponses) {
+                            CoreOrderSide side = phase == 0 ? CoreOrderSide.SELL : CoreOrderSide.BUY;
+                            wave[user] = command(CoreMessageType.PLACE_ORDER, 1256,
+                                    TradingCommandCodec.encodePlaceOrder(order(orderId++, side, 100, batchSize)));
+                        } else if (phase == 1 || phase == 3) {
+                            firstOrders[user] = orderId;
+                            var orders = new ArrayList<PlaceOrderCommand>(batchSize);
+                            for (int item = 0; item < batchSize; item++) {
+                                orders.add(order(orderId++, phase == 1 ? CoreOrderSide.BUY : CoreOrderSide.SELL,
+                                        phase == 1 ? 90 : 110));
+                            }
+                            wave[user] = command(CoreMessageType.PLACE_ORDER_BATCH, 1000 + user,
+                                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)));
+                        } else {
+                            var orders = new ArrayList<AmendOrderCommand>(batchSize);
+                            for (int item = 0; item < batchSize; item++) {
+                                long replacement = orderId++;
+                                orders.add(new AmendOrderCommand(firstOrders[user] + item, replacement,
+                                        "cluster-amend-" + replacement, 100L, 1L, CoreTimeInForce.GTC, false));
+                            }
+                            wave[user] = command(CoreMessageType.AMEND_ORDER_BATCH, 1000 + user,
+                                    TradingOrderBatchCodec.encodeAmendOrderBatch(new AmendOrderBatchCommand(orders)));
+                        }
+                    }
+                    // 256 requests ready before each wave enters the real service log callback.
+                    for (CoreMessage request : wave) send(request);
+                }
+                if (terminal - before != 1536 || batchTrades - fillsBefore != 512L * batchSize) {
+                    throw new IllegalStateException("amend batch terminal/fill mismatch");
+                }
+            } finally {
+                expectBatchTrades = singleResponses = false;
+            }
         }
 
         public void run() {
@@ -309,7 +376,11 @@ public class ClusteredBatchTradingBenchmark {
         }
 
         private PlaceOrderCommand order(long id, CoreOrderSide side, long price) {
-            return new PlaceOrderCommand(id, "JMH-BTC-USDT", 1, side, price, 1, false,
+            return order(id, side, price, 1);
+        }
+
+        private PlaceOrderCommand order(long id, CoreOrderSide side, long price, long quantity) {
+            return new PlaceOrderCommand(id, "JMH-BTC-USDT", 1, side, price, quantity, false,
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                     false, "cluster-batch-" + id);
         }
@@ -330,6 +401,10 @@ public class ClusteredBatchTradingBenchmark {
                     if (balance.availableUnits() != BALANCE || balance.lockedUnits() != 0) {
                         throw new IllegalStateException("cancel did not restore user funds");
                     }
+                    var base = state.users().get(1_000L + user).balances().get("BTC");
+                    if (productLine == ProductLine.SPOT && base != null && base.totalUnits() != 0) {
+                        throw new IllegalStateException("user BTC conservation mismatch");
+                    }
                     if (!state.users().get(1_000L + user).reservations().isEmpty()
                             || state.users().get(1_000L + user).positions().values().stream().anyMatch(Workload::nonFlat)) {
                         throw new IllegalStateException("terminal user retained reservations or positions");
@@ -338,7 +413,7 @@ public class ClusteredBatchTradingBenchmark {
                 var maker = state.users().get(1_256L);
                 if (maker.balances().get(settleAsset).totalUnits() != BALANCE || maker.positions().values().stream().anyMatch(Workload::nonFlat)
                         || maker.reservations().size() != 1) throw new IllegalStateException("maker funds mismatch");
-                if (productLine == ProductLine.SPOT && maker.balances().get("BTC").totalUnits() != 257) {
+                if (productLine == ProductLine.SPOT && maker.balances().get("BTC").totalUnits() != makerBaseBalance) {
                     throw new IllegalStateException("maker BTC conservation mismatch");
                 }
                 if (state.orders().size() != 1 || state.order(1) == null) {
