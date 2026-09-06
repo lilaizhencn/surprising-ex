@@ -48,11 +48,11 @@ python3 - "$DEST" <<'PY'
 import pathlib,shutil,sys,json,hashlib
 root=pathlib.Path.cwd(); dst=pathlib.Path(sys.argv[1]); jars={}
 for p in sorted(root.glob('**/target/*.jar')):
- if p.name.endswith('-exec.jar') or p.name in ('surprising-aeron-service.jar','surprising-aeron-tools.jar','surprising-aeron-benchmarks.jar'):
+ if p.name.endswith('-exec.jar') or p.name in ('surprising-aeron-service.jar','surprising-aeron-tools.jar','product-core-benchmarks.jar'):
   if p.name in jars: raise RuntimeError('duplicate artifact '+p.name)
   shutil.copy2(p,dst/'artifacts'/p.name); jars[p.name]=str(p.relative_to(root))
-assert 'surprising-aeron-service.jar' in jars and 'surprising-aeron-tools.jar' in jars
-shutil.copytree(root/'deployment/aws',dst/'deployment/aws')
+assert all(name in jars for name in ('surprising-aeron-service.jar','surprising-aeron-tools.jar','product-core-benchmarks.jar')), 'required executable artifact is missing'
+shutil.copytree(root/'deployment/aws',dst/'deployment/aws',ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
 shutil.copy2(root/'init.sql',dst/'init.sql')
 (dst/'manifest.json').write_text(json.dumps({'commit':dst.name,'artifacts':jars},indent=2)+'\n')
 with (dst/'SHA256SUMS').open('w') as f:

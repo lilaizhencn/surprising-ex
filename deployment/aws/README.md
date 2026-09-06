@@ -134,3 +134,9 @@ journalctl -u surprising-spot-probe --no-pager -n 30
 随后直接运行 `CoreOrderedOrderBatchTest`、`OrderBatchSettlementWaitTest`、`ProductLineClusterLayoutTest` 共 26 个测试，0 失败/错误/跳过。
 日志：`/home/ubuntu/build-logs/fork-package.log`、`backend-package.log`、`core-tests.log`，各有 `.exit` 文件；尚未执行云上全量测试。
 本地执行配置生成测试（六产品逐个生成、私网/成员唯一性/秘密值校验）、Shell 语法检查及 JDK25 `jfr configure` 参数检查。
+
+发布脚本实跑已通过。另在构建机以 512 MiB/进程运行三 Core + app MediaDriver 做启动检查（仅功能检查）：
+第一轮把三个私网地址合并到本机时，测试夹具没有拆开 21020 控制端口，产生 bind 冲突；该轮不能作为完整启动通过。
+修正测试夹具使用三个独立控制端口和隔离数据目录后，第二轮三个 Core 日志无 failure/bind conflict，只读 probe 返回 `status=OK`，所有测试进程已退出。
+证据在 `/home/ubuntu/build-logs/startup-smoke-round2.log` 与 `startup-smoke-f4a8cd90-round2/`；第一轮日志保留。
+这是同机三进程检查，不证明跨 EC2 网络、故障切换、资金回放或完整推送已经通过。
