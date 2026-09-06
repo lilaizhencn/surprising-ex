@@ -3694,3 +3694,41 @@
 - 指标处理：主JMH op=cycle，business ops/s=score×3584、Core messages/s=score×2048、fills/s=score×1024；aux Type.EVENTS为次数。gc norm/3584为包含夹具、查询和边界的B/business op，不能冒充纯matcher分配。没有无profiler业务主轮或完整尾延迟，不宣称生产容量或完整性能验收。
 - NMT每30秒采一次，系统/CPU throttle/swap每5秒；FD改用lsof -a -p pid -F f，仅计数字FD，保存原始字段输出。JFR流式分析线程、GC/TLAB/heap/NMT/direct/park/IO/safepoint/JIT及顶层分配栈；macOSwall不可当CPU精确占比。
 - Artifact：/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-06-allocation-opt（finite、sustained、response子目录），命令、JDK、源码patch/JAR/配置校验、原始JFR与聚合全部保留。采集开始后以上标准与场景不再修改，结果只追加。
+
+
+### 分配优化结果（2026-09-06 22:38–22:53 UTC+8）
+
+- 源码提交：`a1c079aea689cbd3d7d9a741eadce8597c330337`，已推送 master。全部只采当前源码，不作历史版本比较。JAR 在提交前由完全相同的工作区源码构建，SHA256 `5de21731ac17357245dc7cf797a3e99aa936edb348d993e8fabf87ec37b83635`。
+- 相关 reactor：`mvn -pl :surprising-aeron-benchmarks,:surprising-aeron-tools,:surprising-account-provider,:surprising-trading-provider,:surprising-market-data-provider,:surprising-derivatives-lifecycle-provider -am test`，1054 条实际执行通过；另有11个数据库条件跳过条目（含参数化模板）。随后独立 PostgreSQL18.4 临时 cluster，仅绑定127.0.0.1，用当前 init.sql 初始化，补跑 `MaintenanceIntegrationTest` 36条及 `InstrumentSeedCoreContractTest` 1条全部通过，无遗留跳过；数据库已停止。合计1091条通过，详细类计数在 tests.log/database-tests.log。第一次编译因误用 Eclipse Collections void removeKey 返回值失败，已修正为 get+remove 后重跑；保留 initial-compile-failure.log，不掩盖失败轮。
+- 新增/扩展回归覆盖公开 response 输入/输出防御复制、所有权转交及编码格式、提交序号共享只读数据；client alias 单键/多键升级降级、重复添加、移除不存在键、跨订单重绑定和终态清理；成交费用、revision、取消与 commit metadata 合并后的不可变前态。已有相关 reactor 覆盖非零费用、资金守恒、STP、回滚、快照与 Core 恢复；数据库补测包含六产品维护撤单、平仓、丢响应和重启恢复。
+- 六产品 finite 阶段均 exit0，每条1 warm+2测量cycle，共10752 business ops /6144 Core messages /3072 fills；全部用户/maker余额、冻结、仓位、终态订单/alias及snapshot hash一致，共64512业务操作。原始两类JFR、摘要、计数和命令在 finite/。
+
+|3分钟持续场景指标|SPOT|LINEAR_PERPETUAL|
+|---|---:|---:|
+|measurement business operations|4,867,072|5,300,736|
+|terminal Core messages|2,781,184|3,028,992|
+|fills|1,390,592|1,514,496|
+|带profiler terminal business ops/s|27,031.20|29,432.60|
+|带profiler terminal Core messages/s|15,446.40|16,818.63|
+|带profiler fills/s|7,723.20|8,409.31|
+|分配 MiB/s|287.91|307.66|
+|B/business op，包含夹具和查询|11,177.51|10,970.07|
+|measurement GC次数 / 时间ms|118 /947|126 /1018|
+
+- 每条均3×10秒warmup、1×180秒measurement；现货22:39:38–22:43:14，永续22:43:44–22:47:21，时间包括startup/终检。accepted=terminal、unfinished/endBacklog=0、maxBacklog0（仅回调末内部观察）、拒绝/业务错误/超时0；资金、预占、仓位归零、仅剩maker挂单和client alias、快照恢复全部通过。每cycle1536批/3072items，批平均/最大2，512单业务操作、512查询。总测量10,167,808业务操作；两个分配阈值均通过。
+- 只有单次measurement，没有可用业务吞吐置信区间；未提供无profiler主吞吐及入口/accepted/terminal分段p50至p99.9/max，不宣称吞吐提升百分比、生产容量或完整性能验收。上述数字是内部实际Core回调闭环256准备在途的指定场景，不是真实网络并发连接数或三节点Cluster TPS。
+
+|响应JMH（3×1秒warmup、3×1秒measurement）|dataBytes=0 B/op|dataBytes=4096 B/op|
+|---|---:|---:|
+|encodeCommittedResponse|0.000268|0.000511|
+|constructAndEncodeOwnedResponse|0.000253|0.000606|
+
+- 两个响应方法均近0 B/op并通过预锁阈值；这是JIT优化、已编码只读数据和复用目的缓冲区的场景，不包含新业务payload生成，也不代表public构造器/decoder/全部交易零分配。普通构造器和data()仍防御性复制，外部修改不会污染幂等保留结果；owned调用方禁止再改已转交数组。
+- **纠正此前响应采样的过强归因：** encodeResponsePayload 的源代码/字节码已经是写入复用数组和System.arraycopy，本身没有新建payload；本次微基准也验证编码无随payload长度增长的分配。永续综合profile依然把byte[]样本归到encodeResponsePayload:59，而现货同阶段权重仅0.23%，不可把优化JIT栈/行号机械解释为该源码行new数组，更不能按这个权重宣称消除了相同数量分配。本次实际消除的是明确的CoreResponse重复clone、decoder刚建数组后的再clone，以及metadata副本再clone；未额外修改已经复用的发送缓冲区。
+- **当前剩余分配：** 互斥采样分类的owner/Lane/matcher为38.09/18.66/8.26%（现货）、36.73/19.85/8.39%（永续）；高频Lane查询12.37/13.70%、夹具响应解码16.03/12.39%，单独保留不伪装生产成本。OrderRuntime仍有约2481.6/2420.7MiB权重，属于多个构造及状态路径，不是全部可删除；此次只合并已有提交元数据与成交/撤单状态的构造。OrderClientKeyIndex常见订单不再每单new LongHashSet，但primitive map扩容/rehash仍可分配，不能称整个索引绝对0B。top classes仍为byte[]、long[]、OrderRuntime，完整site/thread/stack权重在results.json及alloc.html/collapsed。
+- **Heap/GC：** 全JFR含预热/终检，GC146/155次，其中young137/146、old9/9；原因是G1 Evacuation Pause136/145、System.gc8/8、Metadata GC Threshold2/2，另有concurrent phase事件，不能把显式iteration边界GC都算进稳定交易。pause p50 8.10/8.14ms、p95 9.46/9.55ms、max20.23/19.45ms；measurement GC占测量时间约0.53/0.57%。稳定窗口（首heap事件后60秒起）的GC后占用约45.6–47.7MiB，未达到32MiB增长告警；heap committed固定768MiB。没有晋升/疏散失败事件。
+- **Java分配细节：** JFR NewTLAB事件138587/148442，对应refill bytes 63,130,067,888 /67,265,502,640；OutsideTLAB事件1925/1898、bytes170,476,520 /167,720,976；最大采样对象4,194,320B。NewTLAB最大触发对象131088/262160B。此为全进程记录含warmup/终检，refill字节并非精确对象大小累加；抽样不能推导精确对象数/业务操作。ThreadAllocationStatistics原始first/last保留，JVMCI线程个别计数回退不解释成负分配。
+- **NMT/堆外/FD：** 约30秒到210秒，reserved 2,335,376→2,341,247KiB /2,335,588→2,342,005KiB；committed953.50→959.36MiB /955.09→961.43MiB。主要增量Tracing5485/5991KiB，Code276/332KiB和NMT自身303/326KiB；不是业务native池泄漏证据。214/215次DirectBuffer统计count/capacity/used均0，本夹具不含真实Aeron/Netty缓冲池。数字FD全程16，fds-*.txt保留，本次已排除mmap/cwd等非FD条目。Java线程peak21，最后采样active16；iteration重建服务，累计thread start/end不能当存活线程增长。
+- **CPU/锁/等待/IO：** CPU_Speed_Limit均100，swap used均1202.50MiB不变，JFR DataLoss0。JFR CPULoad原始user+system均值约0.1200/0.1189；线程原始mean在diagnostics.json，不把wall样本比解释为CPU占用。owner壁钟样本17287/17285，其中commitReadyMatching10618/9045、onSpinWait4371/3412、await4445/3509，集合重叠不可相加；原有顺序提交边界未删除。async lock1ms门限0样本，记录配置门限以上交易回调同步file/socketIO为0，不等于所有锁/IO绝不存在。
+- **VM/JIT/异常：** SafepointBegin160/170，最长进入时间0.151/0.121ms；VM operation174/182，最长20.25/19.48ms，与GC停顿量级一致。Compilation37/38，累计8.51/9.89秒，最长834/837ms为编译线程工作，不是同长STW；Deoptimization284/282含启动，不能据此保证所有方法已完全稳定。类加载2369→4552/4598，卸载0，NMT类区及metaspace增量较小，code cache原件在runtime-stats.json。JavaExceptionThrow545/553和JavaErrorThrow134/136是事件数（可能同一throw同时产生两类事件），完整128层栈保留；集中在前30秒和收尾，有MethodHandle链接探测、JMH marker/反射、snapshot阶段jnr/ffi加载及符号探测。60秒后的稳定交易回调未采到异常，不能把启动探测数量当作业务失败；终检和恢复实际通过。
+- **证据与未测范围：** artifact根 `/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-06-allocation-opt`，165个证据文件约311MiB（清单不含停止的临时PG数据目录）。SHA256SUMS自身SHA256 `9b287f06514b2f7d2ef8ba15b31599a654a335c87c582a9d536f1238a431223d`；原始JFR、summary、HTML、collapsed、gc/heap/cpu/wait-io/jit-vm/thread-allocation TSV、NMT、FD、系统采样、命令和配置齐全。执行命令原件见finite/commands.json、sustained各产品command.json、response各场景command.json、database-commands.json。没有真实HTTP/Aeron传输/三节点故障、Kafka/WS吞吐，没有其他四产品的分钟级测量和小时级leak/OldObjectSample验收；本次为三处局部优化的正确性与分配部分验证，不能声称整链路零分配或长期无泄漏。
