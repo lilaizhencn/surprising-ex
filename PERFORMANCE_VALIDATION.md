@@ -3787,3 +3787,32 @@
 - VM/JIT：SafepointBegin520，最长进入0.399ms；VM operation551次、总3965ms、max21.94ms，与GC停顿量级一致。Compilation37次、累计8687ms、max868ms在编译线程，Deoptimization299含启动；类加载/code cache/native保留原JFR/NMT，不以单次长编译时间冒充STW。JavaExceptionThrow609/JavaErrorThrow136为可能重叠的事件计数，按时间排序集中启动/反射/MethodHandle/jnr探测和收尾；120–660秒的交易回调未采到异常。异常栈和时间完整保留exceptions.tsv，不将启动探测直接判成业务bug。
 - Artifact根 `/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-06-ten-minute`，107个证据文件约180.61MiB，含run.py精确命令、原始JFR/summary、alloc/wall HTML、NMT/FD/进程/系统、GC/CPU/VM/异常/分配分钟趋势及归因数据。SHA256SUMS自身SHA256 `e3d97e94c0add5f519afcc5a652c1bd569400607e9ed7e56fa1d12cca3acdf78`。
 - 交付为本次U本位永续Core内部连续600秒的诊断；其他五产品、真实三节点网络、HTTP/Kafka/WS、小时级长稳和完整业务分段尾延迟未在本轮验证。优先按上述重复构造、小容器、监控快照顺序设计局部改动，再以当前master固定256场景重新锁定指标验证。
+
+
+## 准备下单、小容器与 Lane 指标编码优化验证（采集前锁定，2026-09-07 UTC+8）
+
+- 被测：当前 master 的 c28552c8 加本次优化，采集前归档 patch/JAR SHA256，结果追加实际提交号；对照 commit：不适用（仅验证当前 master），不采旧版、不作历史百分比比较。
+- 修改范围：准备下单直接安装最终 OrderRuntime/ReservationRuntime；小基数的 per-user LongHashSet/LongLongHashMap/IntLongHashMap 初始容量2，按需增长、空集合照常移除；同用户活跃订单更新不重建成员关系。查询边界用有封口所有权转交的精确协议缓冲区，每Lane一次任务同时读取元数据与matcher指标，公开快照仍防御复制，保持原查询频率与任务完成屏障。
+- JMH更新：ClusteredBatchTradingBenchmark 的金融/终态/snapshot 终检增加直接指标聚合形状与公开数组隔离断言；持续循环本来就真实触发 prepared admission、成交/撤单、小索引与512次额外metrics查询，不减少这些动作。六产品均复用该实际JMH场景。
+- 环境：macOS26.7 x86_64，Intel i9-9880H 8C16T、16GiB；HotSpot Oracle GraalVM25.0.1+8、Maven3.9.16、async-profiler4.5。实际版本、进程与环境输出保存在artifact。无并行服务/压测，不启动wallet。
+- 预锁通过阈值：acceptedBusinessOperations=terminalBusinessOperations、accepted/terminal Core messages相等；unfinished/endBacklog=0，所有金融、索引终态与snapshot恢复断言通过，拒绝/错误/超时0。持续轮 gc.alloc.rate.norm/3584 <10000 B/business op（全JVM含夹具与查询），是当前源码分配阈值而非旧版收益承诺。GC最长pause>50ms、稳定GC后live set净增>32MiB、线程/FD/native持续单调增长需调查；JFR DataLoss、CPU_Speed_Limit<100、swap增长标记环境受扰/无效，金融错误立即停止。
+- 场景：固定256 in-flight、batch2、4Account Lane、1matcher、256用户+1maker、1symbol、1模拟ClientSession、realtime=false；真实SurprisingClusteredService回调、admission、matcher、Lane settlement、commit、response。每cycle3584 business ops/2048 Core messages/1024fills、1536batches/3072items（平均/最大2）+512单业务操作+512额外指标查询。动作包含批量挂单/改单成交、往返开平仓和批量挂撤单；闭环最大速率，不是固定到达率，不修正coordinated omission。
+- 金融初态：每用户/maker settle余额1,000,000,000，zero fees、CROSS、mark100、maker持续120卖挂单，现货maker BTC513。无独立做市进程，Core内真实maker账户持续有流动性。每cycle核对计数，iteration结束全部用户/maker资金守恒、冻结/预占及仓位归零、仅一个maker订单/client alias保留，snapshot业务hash/alias一致。
+- 阶段一：SPOT、LINEAR_PERPETUAL、INVERSE_PERPETUAL、LINEAR_DELIVERY、INVERSE_DELIVERY、OPTION逐条有限运行更新JMH场景，1warm+2measurement cycles；warm后250ms、cycle间100ms，每产品总10752业务操作/6144 Core messages/3072fills。固定512MiB G1，NMTsummary、DebugNonSafepoints、PrintNMTStatistics，JVM JFR profile；async4.5 alloc128KiB+lock1ms及macOS实际wall fallback（helper请求cpu，按真实ActiveSetting解释）。没有短样本吞吐容量结论。
+- 阶段二：冷却30秒，LINEAR_PERPETUAL f1/t1、3×20秒warmup、1×600秒连续measurement，中途不重建服务、不主动GC。固定768MiB G1、NMTsummary、DebugNonSafepoints、PrintNMTStatistics、enable-native-access、opens/exports jdk.internal.misc、opens java.util.zip；-prof gc、async event=wall;interval=10000000;alloc=128k;lock=1ms;threads=true;output=jfr；JVM JFR自定义allocation.jfc（SHA256 e59ae7afc138334cfe3bd62c04e0d451a56a5dbc1063e5f5480a9982c344a2e7）。gc=true仅JMH边界，foe=true；run.py/command.json保存逐项参数。
+- 指标：JMH op=cycle，business/s=score×3584、Core messages/s=score×2048、fills/s=score×1024、batches/s=score×1536、items/s=score×3072；aux EVENTS是计数。gc norm/3584为含夹具/查询的B/business op。系统每5秒、NMT/数字FD每30秒；按分钟GC后heap/oldGen/ThreadAllocation趋势、CPU/锁/IO/异常/VM/JIT归因，保留原始JFR、summary、flamegraph和SHA256清单。
+- 限制：带profiler值只能用于归因；无无profiler主轮、完整三段尾延迟/p99.9、open-loop或真实Aeron网络。单次measurement没有可用业务吞吐置信区间；仅部分性能验证，不宣称全链路零分配、三节点容量或小时级无泄漏。六产品短样本均测，10分钟仅U本位永续；HTTP/Kafka/WS与真实native池不在本次局部改动验证范围。
+- Artifact：/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-07-core-allocation；finite/与LINEAR_PERPETUAL/保留全部原件；当前参数开始采集后不可修改，失败与结果只追加。
+
+
+### 首轮中止与修正（2026-09-07 00:02 UTC+8）
+
+- 首轮六产品有限样本通过，但持续轮复核时发现新增指标编码在进入Lane任务前复制了计数器；PlaceAdmissionEvent/LaneCommitEvent也在Lane线程写这些数组，因此必须在同一次Lane任务内读取，不能依赖Core owner侧提前复制。该风险是本轮新增实现的复核发现，不把正常的既有Lane写入判为交易bug。
+- 已主动终止首轮JMH fork（SIGTERM，日志/部分JFR保留，终态验收不成立），不使用该轮作性能结论。artifact根原封保留。预锁记录于2026-09-06 23:58写入，轮次以跨午夜2026-09-07命名。
+- 修正将全部操作计数器读取与Lane元数据、matcher计数合并到同一Lane任务，Core owner等待完成；追加“前序排队admission未完成时发出查询”的并发回归，验证查询观察到其完成后的计数/耗时。
+
+## Lane指标读取屏障修正后重验（采集前锁定，2026-09-07 UTC+8）
+
+- 新轮仅当前master c28552c8加最终patch，不使用中止轮或历史版本比较。artifact新根：/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-07-core-allocation-final；精确源码patch/JAR SHA和命令独立归档。
+- 标准、环境、全部JVM/JMH/JFR参数、六产品1warm+2测量cycle、随后30秒冷却+U本位永续3×20秒预热+600秒连续测量，全部沿用上面“准备下单、小容器与Lane指标编码优化验证”的已锁定完整场景；固定256 in-flight、4Lane、1matcher、batch2、257用户、1模拟会话，原查询频率不变。唯一实现修正为计数器读取放入Lane任务内，未改变业务负载或计数口径。
+- 本轮通过要求：业务/Core accepted=terminal、unfinished/endBacklog0、拒绝/错误/超时0、六产品资金及快照断言全通过；持续全JVM gc.norm/3584 <10000 B/business op。GC>50ms、稳定live set净增>32MiB或native/线程/FD增长调查；DataLoss/降频/swap增长判环境无效。全量细项分析/限制/原件保留要求同前一预锁记录，本段开始采样后只追加结果。

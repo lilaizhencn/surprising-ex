@@ -989,6 +989,132 @@ class TradingRuntimeStateTest {
         }
     }
 
+    @Test
+    void preparedReservationInstallsExactValuesAndRejectsBeforeFreezing() {
+        try (TradingRuntimeState state = new TradingRuntimeState()) {
+            state.putUser(new UserRuntime(7));
+            state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
+            OrderRuntime order = new OrderRuntime(11, 7, 5, 2);
+            ReservationRuntime reservation = new ReservationRuntime(11, 7, 5, 1,
+                    com.surprising.aeron.protocol.ReservationKind.DERIVATIVE_MARGIN, 3, 200, 0, 0, 2);
+            state.startAccountLanes();
+            state.reserveOrder(order, reservation, 91);
+            assertThat(state.order(11)).isSameAs(order);
+            assertThat(state.reservation(11)).isSameAs(reservation);
+            assertThat(state.balance(7, 3).availableUnits()).isEqualTo(800);
+            assertThat(state.balance(7, 3).lockedUnits()).isEqualTo(200);
+            assertThatThrownBy(() -> state.reserveOrder(order, reservation, 92))
+                    .isInstanceOf(IllegalArgumentException.class);
+            var next = new OrderRuntime(12, 7, 5, 2);
+            var nextReservation = new ReservationRuntime(12, 7, 5, 1,
+                    com.surprising.aeron.protocol.ReservationKind.DERIVATIVE_MARGIN, 3, 200, 0, 0, 2);
+            assertThatThrownBy(() -> state.reserveOrder(next, nextReservation, 91))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThat(state.order(12)).isNull();
+            assertThat(state.balance(7, 3).lockedUnits()).isEqualTo(200);
+            state.cancelOrder(11, 7, 200);
+            assertThat(state.balance(7, 3).availableUnits()).isEqualTo(1_000);
+            assertThat(state.balance(7, 3).lockedUnits()).isZero();
+        }
+    }
+
+    @Test
+    void directMetricsReadMatchesLaneCountersWithIndependentOwners() {
+        LaneTopology topology = LaneTopology.productionDefault();
+        try (TradingRuntimeState state = new TradingRuntimeState(topology)) {
+            for (int lane = 0; lane < topology.accountLaneCount(); lane++) {
+                state.putUser(new UserRuntime(userForLane(topology, lane)));
+            }
+            state.startAccountLanes();
+            for (int lane = 0; lane < topology.accountLaneCount(); lane++) {
+                long user = userForLane(topology, lane);
+                state.executeUserSettlement(user, () -> { state.advanceUserRevision(user); return null; });
+            }
+            var encoder = new com.surprising.aeron.protocol.CoreLaneMetricsCodec.Encoder(
+                    1, topology.accountLaneCount(), 0, 16, 0, 0, 16, 0, 0, 16, 0, 0);
+            for (int lane = 0; lane < topology.accountLaneCount(); lane++) state.writeAccountLaneMetrics(lane, encoder);
+            var decoded = com.surprising.aeron.protocol.CoreLaneMetricsCodec.decode(encoder.finish());
+            for (int lane = 0; lane < topology.accountLaneCount(); lane++) {
+                var snapshot = state.accountLaneMetricsById(lane);
+                var view = state.accountLaneById(lane);
+                assertThat(decoded.accountLaneRevisions()[lane]).isEqualTo(view.revision());
+                assertThat(decoded.accountLaneAppliedSequences()[lane]).isEqualTo(view.appliedSequence());
+                assertThat(decoded.accountLaneCommittedSequences()[lane]).isEqualTo(view.committedSequence());
+                int offset = lane * 4;
+                assertThat(java.util.Arrays.copyOfRange(decoded.accountLaneCompletedOperations(), offset, offset + 4))
+                        .containsExactly(snapshot.completedOperations());
+                assertThat(java.util.Arrays.copyOfRange(decoded.accountLaneLatencySamples(), offset, offset + 4))
+                        .containsExactly(snapshot.latencySamples());
+                assertThat(java.util.Arrays.copyOfRange(decoded.accountLaneTotalLatencyNanos(), offset, offset + 4))
+                        .containsExactly(snapshot.totalLatencyNanos());
+                assertThat(java.util.Arrays.copyOfRange(decoded.accountLaneMaxLatencyNanos(), offset, offset + 4))
+                        .containsExactly(snapshot.maxLatencyNanos());
+            }
+        }
+    }
+
+    @Test
+    void activeOrderMembershipSurvivesUpdatesGrowthAndTerminalRemoval() {
+        AccountLaneState lane = new AccountLaneState(0, 16);
+        for (long id = 1; id <= 100; id++) lane.putOrder(new OrderRuntime(id, 7, 5, 2));
+        var membership = lane.activeOrderIdsByUser.get(7);
+        for (long id = 1; id <= 100; id++) {
+            OrderRuntime order = lane.orders.get(id);
+            lane.putOrder(order.withExecution(1, 1, CoreOrderStatus.OPEN, 2));
+            assertThat(lane.activeOrderIdsByUser.get(7)).isSameAs(membership);
+        }
+        assertThat(membership.size()).isEqualTo(100);
+        for (long id = 1; id <= 100; id++) {
+            lane.putOrder(lane.orders.get(id).withStatus(CoreOrderStatus.CANCELED, 3));
+        }
+        assertThat(lane.activeOrderIdsByUser).isEmpty();
+    }
+
+    @Test
+    void metricsIncludeEarlierQueuedAdmissionAfterItsCompletionFence() throws Exception {
+        try (TradingRuntimeState state = new TradingRuntimeState()) {
+            state.startAccountLanes();
+            Field workersField = TradingRuntimeState.class.getDeclaredField("laneWorkers");
+            workersField.setAccessible(true);
+            SettlementLaneWorker worker = ((SettlementLaneWorker[]) workersField.get(state))[0];
+            var entered = new java.util.concurrent.CountDownLatch(1);
+            var release = new java.util.concurrent.CountDownLatch(1);
+            worker.submit(lane -> {
+                entered.countDown();
+                try {
+                    if (!release.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                        throw new IllegalStateException("test admission was not released");
+                    }
+                } catch (InterruptedException failure) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(failure);
+                }
+                state.recordAdmissionLaneOperation(lane, 123);
+            });
+            assertThat(entered.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            Thread releaser = new Thread(() -> {
+                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(4);
+                while (worker.depth() == 0 && System.nanoTime() < deadline) Thread.onSpinWait();
+                release.countDown();
+            });
+            releaser.start();
+            try {
+                var encoder = new com.surprising.aeron.protocol.CoreLaneMetricsCodec.Encoder(
+                        1, 1, 0, 16, 0, 0, 16, 0, 0, 16, 0, 0);
+                state.writeAccountLaneMetrics(0, encoder);
+                var metrics = com.surprising.aeron.protocol.CoreLaneMetricsCodec.decode(encoder.finish());
+                int command = AccountLaneOperationType.COMMAND.ordinal();
+                assertThat(metrics.accountLaneCompletedOperations()[command]).isEqualTo(1);
+                assertThat(metrics.accountLaneLatencySamples()[command]).isEqualTo(1);
+                assertThat(metrics.accountLaneTotalLatencyNanos()[command]).isEqualTo(123);
+            } finally {
+                release.countDown();
+                releaser.join(5_000);
+                assertThat(releaser.isAlive()).isFalse();
+            }
+        }
+    }
+
     private static long userForLane(LaneTopology topology, int laneId) {
         for (long userId = 1; userId < 10_000; userId++) {
             if (topology.accountLaneId(userId) == laneId) return userId;

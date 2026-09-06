@@ -284,6 +284,25 @@ public final class TradingRuntimeState implements AutoCloseable {
                 completed, samples, totalLatency, maxLatency);
     }
 
+    /** Writes a single Lane snapshot; the encoder is exclusively handed off until onLane completes. */
+    public void writeAccountLaneMetrics(int laneId, com.surprising.aeron.protocol.CoreLaneMetricsCodec.Encoder encoder) {
+        assertOwner();
+        if (laneId < 0 || laneId >= accountLanes.length || encoder == null) {
+            throw new IllegalArgumentException("invalid Lane metrics request");
+        }
+        int depth = accountLanesStarted ? laneWorkers[laneId].depth() : 0;
+        int highWater = Math.max(depth, accountLaneQueueHighWaterMarks[laneId]);
+        onLane(laneId, lane -> {
+            // Admission/commit also update these counters on the Lane. Read them in this task,
+            // after preceding Lane events; the Core owner is waiting and cannot update them.
+            encoder.writeOperations(laneId, accountLaneCompletedOperations[laneId],
+                    accountLaneLatencySamples[laneId], accountLaneTotalLatencyNanos[laneId],
+                    accountLaneMaxLatencyNanos[laneId]);
+            lane.writeMetrics(encoder, depth, highWater);
+            return null;
+        });
+    }
+
     public void startAccountLanes() {
         assertOwner();
         if (accountLanesStarted) throw new IllegalStateException("account lanes are already started");
@@ -1271,9 +1290,6 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     private record CanceledOrder(OrderRuntime order, ReservationRuntime reservation) {
-    }
-
-    private record ReservedOrder(OrderRuntime order, ReservationRuntime reservation) {
     }
 
     private record TerminalOrderPrune(long orderId, long userId, long clientKey) {
@@ -4618,7 +4634,27 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void reserveOrder(long orderId, long userId, long clientKey, int symbolId,
                              long quantitySteps, int assetId, long reservedUnits) {
+        reserveOrder(new OrderRuntime(orderId, userId, symbolId, quantitySteps),
+                new ReservationRuntime(orderId, userId, assetId, reservedUnits), clientKey, reservedUnits);
+    }
+
+    /** Installs the prepared immutable values once, within the same reservation/capture boundary. */
+    void reserveOrder(OrderRuntime order, ReservationRuntime reservation, long clientKey) {
+        if (order == null || reservation == null || order.orderId() != reservation.orderId()
+                || order.userId() != reservation.userId() || order.symbolId() != reservation.symbolId()
+                || order.instrumentChangeId() != reservation.instrumentChangeId()
+                || order.quantitySteps() != reservation.orderQuantitySteps() || clientKey < 0) {
+            throw new IllegalArgumentException("invalid prepared reservation");
+        }
+        reserveOrder(order, reservation, clientKey, reservation.reservedUnits());
+    }
+
+    private void reserveOrder(OrderRuntime order, ReservationRuntime reservation,
+                              long clientKey, long reservedUnits) {
         assertOwner();
+        long orderId = order.orderId();
+        long userId = order.userId();
+        int assetId = reservation.assetId();
         if (order(orderId) != null) {
             throw new IllegalArgumentException("runtime order already exists: " + orderId);
         }
@@ -4627,7 +4663,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         captureReservationBefore(orderId);
         captureBalanceBefore(userId, assetId);
         if (clientKey != 0) captureClientOrderBefore(userId, clientKey);
-        ReservedOrder reserved = onLane(userId, lane -> {
+        onLane(userId, lane -> {
             LongLongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
             if (clientKey != 0 && userClientOrders != null && userClientOrders.containsKey(clientKey)) {
                 throw new IllegalArgumentException("runtime client order already exists: " + clientKey);
@@ -4639,21 +4675,19 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (balance == null) {
                 throw new IllegalArgumentException("runtime balance is not registered: " + userId + "/" + assetId);
             }
-            OrderRuntime order = new OrderRuntime(orderId, userId, symbolId, quantitySteps);
-            ReservationRuntime reservation = new ReservationRuntime(orderId, userId, assetId, reservedUnits);
             balance.reserve(reservedUnits);
             lane.putOrder(order);
             lane.reservations.put(orderId, reservation);
             addUserEntity(lane.reservationIdsByUser, userId, orderId);
             if (clientKey != 0) putClientOrderIndex(lane, userId, clientKey, orderId);
             captureBalanceAfter(lane, userId, assetId);
-            return new ReservedOrder(order, reservation);
+            return null;
         });
-        publishOrder(orderId, reserved.order());
-        publishReservation(orderId, reserved.reservation());
+        publishOrder(orderId, order);
+        publishReservation(orderId, reservation);
         orderLaneIds.put(orderId, topology.accountLaneId(userId) + 1L);
         reservationLaneIds.put(orderId, topology.accountLaneId(userId) + 1L);
-        changedOrder(orderId, reserved.order());
+        changedOrder(orderId, order);
         changedReservations.add(orderId);
         changedUsers.add(userId);
         changedBalance(userId, assetId);
@@ -4739,7 +4773,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
         LongHashSet keys = byUser.get(position.userId());
         if (keys == null) {
-            keys = new LongHashSet();
+            keys = new LongHashSet(2);
             byUser.put(position.userId(), keys);
         }
         keys.add(positionKey);
@@ -5021,7 +5055,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     private static void addUserEntity(LongObjectHashMap<LongHashSet> index, long userId, long entityId) {
         LongHashSet entities = index.get(userId);
         if (entities == null) {
-            entities = new LongHashSet();
+            entities = new LongHashSet(2);
             index.put(userId, entities);
         }
         entities.add(entityId);
@@ -5037,7 +5071,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     private static void putClientOrderIndex(AccountLaneState lane, long userId, long clientKey, long orderId) {
         LongLongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
         if (userClientOrders == null) {
-            userClientOrders = new LongLongHashMap();
+            userClientOrders = new LongLongHashMap(2);
             lane.clientOrderIndex.put(userId, userClientOrders);
         }
         boolean hadPrevious = userClientOrders.containsKey(clientKey);

@@ -432,6 +432,19 @@ public class ClusteredBatchTradingBenchmark {
                         || state.clientOrderIndex().values().stream().anyMatch(id -> id != 1L)) {
                     throw new IllegalStateException("terminal order retained client aliases");
                 }
+                var metrics = service.state().laneMetrics();
+                if (metrics.accountLaneCount() != accountLanes
+                        || metrics.accountLaneQueueDepths().length != accountLanes
+                        || metrics.accountLaneCompletedOperations().length != accountLanes * 4
+                        || metrics.accountLaneLatencySamples().length != accountLanes * 4) {
+                    throw new IllegalStateException("direct Lane metrics shape mismatch");
+                }
+                long[] revisions = metrics.accountLaneRevisions();
+                long firstRevision = revisions[0];
+                revisions[0] = -1;
+                if (metrics.accountLaneRevisions()[0] != firstRevision) {
+                    throw new IllegalStateException("Lane metrics exposed mutable snapshot arrays");
+                }
                 byte[] snapshot = service.state().snapshot();
                 try (CoreProbeState restored = CoreProbeState.fromSnapshot(productLine, snapshot)) {
                     if (restored.tradingState().businessStateHash() != state.businessStateHash()

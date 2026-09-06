@@ -279,10 +279,7 @@ public final class RuntimeCommandProcessor {
         ReservationRuntime reservation = new ReservationRuntime(command.orderId(), userId, symbolId,
                 command.instrumentChangeId(), command.reservationKind(), assetId, requiredReservation,
                 0, 0, command.quantitySteps());
-        runtime.reserveOrder(command.orderId(), userId, clientKey, symbolId,
-                command.quantitySteps(), assetId, requiredReservation);
-        runtime.replaceOrder(order);
-        runtime.replaceReservation(reservation);
+        runtime.reserveOrder(order, reservation, clientKey);
         runtime.putUser(new UserRuntime(runtime.productLine(), userId,
                 Math.incrementExact(user.revision()), user.positionMode()));
         incrementRevision(runtime);

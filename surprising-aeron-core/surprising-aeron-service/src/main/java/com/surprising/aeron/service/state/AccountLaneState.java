@@ -116,6 +116,16 @@ public final class AccountLaneState {
         bindOwner();
     }
 
+    void writeMetrics(com.surprising.aeron.protocol.CoreLaneMetricsCodec.Encoder encoder,
+                      int depth, int highWater) {
+        assertOwner();
+        encoder.writeLane(laneId, revision, appliedSequence, committedSequence,
+                depth, queueCapacity, highWater, 0, 0);
+        encoder.addOperation(laneId, AccountLaneOperationType.SETTLEMENT.ordinal(),
+                matcherSettlementOperations, matcherSettlementOperations,
+                matcherSettlementLatencyNanos, matcherSettlementMaxLatencyNanos);
+    }
+
     public int laneId() { return laneId; }
     public int queueCapacity() { return queueCapacity; }
     public long revision() { assertOwner(); return revision; }
@@ -154,7 +164,7 @@ public final class AccountLaneState {
         long nextUnits = Math.addExact(previousUnits, reservation.reservedUnits());
         pendingReservationSequences.put(orderId, coreSequence);
         if (unitsByAsset == null && nextUnits != 0) {
-            unitsByAsset = new IntLongHashMap();
+            unitsByAsset = new IntLongHashMap(2);
             pendingReservedUnitsByUser.put(reservation.userId(), unitsByAsset);
         }
         pendingReservationCountsByUser.put(reservation.userId(), nextUserCount);
@@ -227,7 +237,7 @@ public final class AccountLaneState {
                 return;
             }
             if (unitsByAsset == null) {
-                unitsByAsset = new IntLongHashMap();
+                unitsByAsset = new IntLongHashMap(2);
                 pendingReservedUnitsByUser.put(previous.userId(), unitsByAsset);
             }
             unitsByAsset.put(previous.assetId(), nextUnits);
@@ -236,7 +246,7 @@ public final class AccountLaneState {
             long replacementUnits = Math.addExact(existingReplacementUnits,
                     replacement.reservedUnits());
             if (unitsByAsset == null && replacementUnits != 0) {
-                unitsByAsset = new IntLongHashMap();
+                unitsByAsset = new IntLongHashMap(2);
                 pendingReservedUnitsByUser.put(previous.userId(), unitsByAsset);
             }
             if (unitsByAsset != null) {
@@ -331,6 +341,8 @@ public final class AccountLaneState {
     }
 
     private void replaceActiveOrder(OrderRuntime previous, OrderRuntime replacement) {
+        // Quantity/status updates within the active set do not change its membership.
+        if (active(previous) && active(replacement) && previous.userId() == replacement.userId()) return;
         if (active(previous)) removeActiveOrder(previous.userId(), previous.orderId());
         if (active(replacement)) addActiveOrder(replacement.userId(), replacement.orderId());
     }
@@ -338,7 +350,7 @@ public final class AccountLaneState {
     private void addActiveOrder(long userId, long orderId) {
         LongHashSet orderIds = activeOrderIdsByUser.get(userId);
         if (orderIds == null) {
-            orderIds = new LongHashSet();
+            orderIds = new LongHashSet(2);
             activeOrderIdsByUser.put(userId, orderIds);
         }
         orderIds.add(orderId);

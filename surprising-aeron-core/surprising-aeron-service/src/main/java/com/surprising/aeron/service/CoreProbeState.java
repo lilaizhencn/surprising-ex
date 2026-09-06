@@ -487,7 +487,7 @@ public final class CoreProbeState implements AutoCloseable {
                 && message.header().messageType() == CoreMessageType.LANE_METRICS_QUERY) {
             if (message.payloadUnsafe().length != 0) return rejected(CoreResultCode.INVALID_COMMAND);
             return new CoreResponse(ResponseStatus.OK, appliedCommandCount, cachedBusinessStateHash,
-                    com.surprising.aeron.protocol.CoreLaneMetricsCodec.encode(laneMetricsView()));
+                    encodeLaneMetrics());
         }
         if (message.header().messageType() == CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY) {
             try {
@@ -4886,54 +4886,8 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     public CoreLaneMetrics laneMetrics() {
-        runtime.assertOwner();
-        int count = matchingAdapter.topology().accountLaneCount();
-        long[] revisions = new long[count];
-        long[] applied = new long[count];
-        long[] committed = new long[count];
-        int[] queueDepths = new int[count];
-        int[] queueCapacities = new int[count];
-        int[] queueHighWaterMarks = new int[count];
-        long[] rejectedSubmissions = new long[count];
-        long[] oldestPendingSequences = new long[count];
-        long[] completedOperations = new long[count * CoreLaneMetrics.OPERATION_TYPE_COUNT];
-        long[] latencySamples = new long[completedOperations.length];
-        long[] totalLatencyNanos = new long[completedOperations.length];
-        long[] maxLatencyNanos = new long[completedOperations.length];
-        for (int laneId = 0; laneId < count; laneId++) {
-            var lane = runtimePlaceOrderState.accountLaneById(laneId);
-            var laneMetrics = runtimePlaceOrderState.accountLaneMetricsById(laneId);
-            revisions[laneId] = lane.revision();
-            applied[laneId] = lane.appliedSequence();
-            committed[laneId] = lane.committedSequence();
-            queueDepths[laneId] = laneMetrics.queueDepth();
-            queueCapacities[laneId] = laneMetrics.queueCapacity();
-            queueHighWaterMarks[laneId] = laneMetrics.queueHighWaterMark();
-            rejectedSubmissions[laneId] = laneMetrics.rejectedSubmissions();
-            oldestPendingSequences[laneId] = laneMetrics.oldestPendingSequence();
-            System.arraycopy(laneMetrics.completedOperations(), 0, completedOperations,
-                    laneId * CoreLaneMetrics.OPERATION_TYPE_COUNT, CoreLaneMetrics.OPERATION_TYPE_COUNT);
-            System.arraycopy(laneMetrics.totalLatencyNanos(), 0, totalLatencyNanos,
-                    laneId * CoreLaneMetrics.OPERATION_TYPE_COUNT, CoreLaneMetrics.OPERATION_TYPE_COUNT);
-            System.arraycopy(laneMetrics.latencySamples(), 0, latencySamples,
-                    laneId * CoreLaneMetrics.OPERATION_TYPE_COUNT, CoreLaneMetrics.OPERATION_TYPE_COUNT);
-            System.arraycopy(laneMetrics.maxLatencyNanos(), 0, maxLatencyNanos,
-                    laneId * CoreLaneMetrics.OPERATION_TYPE_COUNT, CoreLaneMetrics.OPERATION_TYPE_COUNT);
-        }
-        return new CoreLaneMetrics(matchingAdapter.topology().matchingEngineCount(), count,
-                matcherPipeline.submissionDepth(), matcherPipeline.capacity(),
-                matcherPipeline.submissionHighWaterMark(), matcherPipeline.completionDepth(),
-                matcherPipeline.capacity(), matcherPipeline.completionHighWaterMark(),
-                laneCommandContexts.inFlight(), laneCommandContexts.capacity(),
-                laneCommandContexts.highWaterMark(), committedCoreSequence,
-                revisions, applied, committed, queueDepths, queueCapacities, queueHighWaterMarks,
-                rejectedSubmissions, oldestPendingSequences,
-                completedOperations, latencySamples, totalLatencyNanos, maxLatencyNanos);
-    }
-
-    private com.surprising.aeron.protocol.CoreLaneMetricsView laneMetricsView() {
-        CoreLaneMetrics metrics = laneMetrics();
-        return new com.surprising.aeron.protocol.CoreLaneMetricsView(
+        var metrics = com.surprising.aeron.protocol.CoreLaneMetricsCodec.decode(encodeLaneMetrics());
+        return new CoreLaneMetrics(
                 metrics.matchingEngineCount(), metrics.accountLaneCount(),
                 metrics.matcherDispatchDepth(), metrics.matcherDispatchCapacity(),
                 metrics.matcherDispatchHighWaterMark(), metrics.matchingCompletionDepth(),
@@ -4947,6 +4901,22 @@ public final class CoreProbeState implements AutoCloseable {
                 metrics.accountLaneCompletedOperations(), metrics.accountLaneLatencySamples(),
                 metrics.accountLaneTotalLatencyNanos(),
                 metrics.accountLaneMaxLatencyNanos());
+    }
+
+    private byte[] encodeLaneMetrics() {
+        runtime.assertOwner();
+        int count = matchingAdapter.topology().accountLaneCount();
+        var encoder = new com.surprising.aeron.protocol.CoreLaneMetricsCodec.Encoder(
+                matchingAdapter.topology().matchingEngineCount(), count,
+                matcherPipeline.submissionDepth(), matcherPipeline.capacity(),
+                matcherPipeline.submissionHighWaterMark(), matcherPipeline.completionDepth(),
+                matcherPipeline.capacity(), matcherPipeline.completionHighWaterMark(),
+                laneCommandContexts.inFlight(), laneCommandContexts.capacity(),
+                laneCommandContexts.highWaterMark(), committedCoreSequence);
+        for (int laneId = 0; laneId < count; laneId++) {
+            runtimePlaceOrderState.writeAccountLaneMetrics(laneId, encoder);
+        }
+        return encoder.finish();
     }
 
     public long firstPendingMatchingSequence() {
