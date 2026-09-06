@@ -26,7 +26,7 @@ public final class CommittedTradeExportMain {
         if (args.length < 6 || args.length > 7)
             throw new IllegalArgumentException(
                     "usage: CommittedTradeExportMain PRODUCT_LINE CLUSTER_DIR AERON_DIR"
-                        + " ARCHIVE_CONTROL_CHANNEL KAFKA_BOOTSTRAP CHECKPOINT [CLUSTER_ID]");
+                            + " ARCHIVE_CONTROL_CHANNEL KAFKA_BOOTSTRAP CHECKPOINT [CLUSTER_ID]");
         ProductLine product = ProductLine.requireExternalCode(args[0]);
         Path checkpointPath = Path.of(args[5]).toAbsolutePath();
         Files.createDirectories(checkpointPath.getParent());
@@ -104,6 +104,7 @@ public final class CommittedTradeExportMain {
                                             .controlResponseChannel("aeron:ipc"));
                     var log = new RecordingLog(Path.of(args[1]).toFile(), false)) {
                 long cursor = checkpoint.logPosition();
+                long lastPartialCommit = -1;
                 long[] nextCheckpoint = {System.nanoTime() + checkpointInterval};
                 while (running.get()
                         && !Thread.currentThread().isInterrupted()
@@ -119,7 +120,7 @@ public final class CommittedTradeExportMain {
                     }
                     long committed =
                             Math.min(aeron.countersReader().getCounterValue(counter), stopAfter);
-                    if (committed <= cursor) {
+                    if (committed <= cursor || committed == lastPartialCommit) {
                         if (System.nanoTime() >= nextCheckpoint[0]) {
                             new TradeExportCheckpoint(
                                             product,
@@ -172,6 +173,7 @@ public final class CommittedTradeExportMain {
                     var trades = new ArrayList<RealtimeFrame>();
                     int[] messages = {0};
                     long[] delivered = {cursor};
+                    boolean[] partialMessage = {false};
                     var messageHeader = new MessageHeaderDecoder();
                     var sessionHeader = new SessionMessageHeaderDecoder();
                     var assembler =
@@ -241,7 +243,19 @@ public final class CommittedTradeExportMain {
                         }
                         Image image = subscription.imageAtIndex(0);
                         while (image.position() < safeEnd && !image.isClosed()) {
-                            int work = image.poll(assembler, 16);
+                            int work =
+                                    image.poll(
+                                            (buffer, offset, length, header) -> {
+                                                assembler.onFragment(
+                                                        buffer, offset, length, header);
+                                                partialMessage[0] =
+                                                        (header.flags()
+                                                                        & io.aeron.protocol
+                                                                                .DataHeaderFlyweight
+                                                                                .END_FLAG)
+                                                                == 0;
+                                            },
+                                            16);
                             if (work == 0) {
                                 if (System.nanoTime() > deadline)
                                     throw new IllegalStateException("archive replay stalled");
@@ -251,7 +265,12 @@ public final class CommittedTradeExportMain {
                         if (image.position() != safeEnd)
                             throw new IllegalStateException("incomplete committed archive replay");
                         sink.publish(trades);
-                        cursor = safeEnd;
+                        // A commit counter can stop at a fragment boundary. Resume from the last
+                        // complete Cluster message, never from the middle of a fragmented command.
+                        cursor = partialMessage[0] ? delivered[0] : safeEnd;
+                        lastPartialCommit = partialMessage[0] ? committed : -1;
+                        if (partialMessage[0])
+                            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(10));
                     }
                     if (System.nanoTime() >= nextCheckpoint[0]) {
                         new TradeExportCheckpoint(
@@ -259,7 +278,7 @@ public final class CommittedTradeExportMain {
                                 .write(checkpointPath);
                         System.out.printf(
                                 "trade-export product=%s committedPosition=%d exportedPosition=%d"
-                                    + " trades=%d%n",
+                                        + " trades=%d%n",
                                 product, committed, cursor, sink.tradeSequence());
                         nextCheckpoint[0] = System.nanoTime() + checkpointInterval;
                     }

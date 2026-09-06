@@ -251,6 +251,7 @@ public final class RealtimeRouter implements AutoCloseable {
                 long userId = Long.parseLong(user);
                 String key = entry.getKey() + ":" + userId;
                 if (outstanding.containsKey(key) || outstanding.size() >= 32) continue;
+                if (!requests.claim(entry.getKey(), userId)) continue;
                 long id =
                         java.util.concurrent.ThreadLocalRandom.current()
                                 .nextLong(1, Long.MAX_VALUE);
@@ -268,6 +269,7 @@ public final class RealtimeRouter implements AutoCloseable {
                                 new byte[0]);
                 if (entry.getValue().offer(new UnsafeBuffer(RealtimeFrameCodec.encode(request)))
                         > 0) outstanding.put(key, new Request(id, now));
+                else requests.releaseClaim(entry.getKey(), userId);
             }
         }
     }

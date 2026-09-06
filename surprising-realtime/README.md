@@ -40,6 +40,7 @@ Valkey 只保存可重建的查询视图，不裁决余额、风控或成交。�
    ```
 
 2. Router：构建 `mvn -pl surprising-realtime/surprising-realtime-provider -am package`，以 Spring Boot 启动。
+   可执行产物为 `surprising-realtime/surprising-realtime-provider/target/surprising-realtime-provider-1.0.0-SNAPSHOT-exec.jar`，使用 `java` 加上述 JVM 参数后 `-jar` 启动，并用 `--spring.config.additional-location=file:/path/to/router.yml` 加载外部配置。
    自带 `application.yml` 使用 `VALKEY_HOST/PORT/USERNAME/PASSWORD`、`AERON_DIR`、`REALTIME_ROUTER_CHANNEL`。
    在外部配置文件明确六条 control-channels：
 
@@ -92,7 +93,7 @@ Valkey TLS/ACL/集群地址使用标准 Spring Data Redis 配置；生产务必�
   旧业务查询中的 minExportSequence 使用单独的 Core 导出水位，不能拿 logPosition 代替。
 - 丢失一条私有推送允许暂时不展示，但 Valkey 不允许永久依赖有缺口的增量：提交帧需 BEGIN/END 连续完整，
   丢失整次提交通过 exportSequence 前后水位识别，source epoch 改变后旧视图变为 STALE。
-  每个活跃用户周期请求完整快照，即使之后没有交易，也能修复最后一次更新丢失。Router 重启同样重建 epoch 并补快照。
+  每个活跃用户最短每5秒请求一次完整快照，即使之后没有交易，也能修复最后一次更新丢失。Router 重启同样重建 epoch 并补快照。
 - Valkey 保存当前状态及短期终态 tombstone，完整快照移除旧 tombstone。它不提供永久订单/成交历史，executionReports 不落入 Valkey hash。
 
 ## 有界容量和故障行为
@@ -116,11 +117,15 @@ Aeron Sender/Outbox 同时提供 sent/dropped/failures/droppedBatches 计数。�
 它不消费可丢失的 realtime outbox，不在 live Core 内等待 Kafka。
 
 ```text
-com.surprising.aeron.tools.CommittedTradeExportMain \
+java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED \
+  --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED \
+  -cp surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar \
+  com.surprising.aeron.tools.CommittedTradeExportMain \
   PRODUCT_LINE CLUSTER_DIR AERON_DIR ARCHIVE_CONTROL_CHANNEL KAFKA_BOOTSTRAP CHECKPOINT [CLUSTER_ID]
 ```
 
 checkpoint 是 exporter 自己的 Core 快照/已处理logPosition/tradeSequence，SHA-256校验，Kafka事务确认后才原子保存。
+commit counter 暂停在 Aeron 分片中间时，恢复游标保留在前一个完整 Cluster 命令后；后续重读未完成命令，不从中间分片续读。
 Crash 在 Kafka确认与保存之间会重发相同 tradeId/sequence；K线按 sequence 去重，Kafka消费者使用 read_committed。
 Kafka长时间故障会使 exporter 落后，不能推进 checkpoint；Archive 保留期必须覆盖 exporter 的恢复位置。
 新 exporter 从0开始，需要完整保留的记录；缺失历史直接失败，不默默跳到当前。此进程读取本机/共享目录 RecordingLog 和 commit counter，部署在可访问这些数据的集群成员旁。
@@ -132,4 +137,7 @@ Kafka长时间故障会使 exporter 落后，不能推进 checkpoint；Archive �
 检查目标节点隔离、提交缺口失效和快照恢复。测试默认执行本机 redis-server 作为兼容测试；
 `-Drealtime.test.server=/path/to/valkey-server` 可改用真实 Valkey。没有真实 Valkey 结果时不能称为 Valkey 环境验收。
 `CommittedTradeExportIntegrationTest` 使用真实 MediaDriver/Archive 和 embedded Kafka KRaft，检查 commit fence 与重复恢复。
+已在本机从官方 8.0.1 源码构建 Valkey 并通过相同集成测试（2026-09-06），这不替代部署环境的 TLS/ACL/集群故障测试。
 六产品 `RealtimeWorkloadTest` 验证开启采集的成交往返资金/冻结/持仓/快照恢复；JMH/JFR范围及未测项单独记录。
+
+最终构建记录（2026-09-06）：`mvn package -Drealtime.test.server=/tmp/valkey-realtime-build/valkey-8.0.1/src/valkey-server` 全 reactor 成功，1410项测试中1388通过、22项提现数据库集成测试因未配置 `SURPRISING_WITHDRAWAL_IT_DATABASE_URL` 跳过，无失败。原始日志 `/tmp/realtime-final-package2.log`。Router可执行JAR也已使用独立MediaDriver和Valkey实际启动通过，记录 `/tmp/realtime-router-startup-result.log`。短JMH覆盖六产品线，SPOT/OPTION各180秒持续状态检查通过资金/终态和短期堆稳定检查；生产API尾延迟、真实集群切主和完整长期容量验收仍未完成，不能据此承诺零性能成本。

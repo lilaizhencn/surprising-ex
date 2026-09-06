@@ -3416,3 +3416,19 @@
 - 每产品3×3s预热、1×180s measurement、不重建measurement内Core；启动前和产品之间冷却30s。强制GC只在JMH迭代间（`-gc true`）；同一heap768MiB、G1、opens/exports、NMT/JFR profile与gc profiler。完整recording含预热/终检，带profiler吞吐仅诊断。
 - 门禁：业务资金/终态/恢复检查通过、无OOM/业务错误/未完成、period末backlog0；JFR DataLoss0、CPU speed100、无新增swap，否则性能数据无效。检查GC后heap趋势、NMT类别/线程及outbox计数；180秒不能证明无长期泄漏，尤其真实Aeron native与WS连接未进入此场景。
 - 命令在第二轮相同命令基础上使用 `-gc true -i 1 -r 180s -prof gc` 并输出到 `/tmp/surprising-realtime-soak-20260906/`。所有系统采样、JSON/JFR及失败同样保留；不修改上述标准。
+
+### 持续状态检查结果（2026-09-06 11:31–11:38）
+
+- 当前Core源对应 `461f331d`（随后只改外围Router/可靠exporter）；两个实例各连续180秒measurement，采样包含预热/终检共194秒。只测SPOT/OPTION，不扩展为六产品全业务长稳结论。
+- SPOT：4,993,024 terminal business ops/Core messages、2,496,512fills，27,734 ops/s（带profiler、单measurement无置信区间），19,858B/op、measurement GC1,661ms，JFR最大pause18.1ms。
+- OPTION：4,658,176 terminal business ops/Core messages、2,329,088fills，25,877 ops/s（同口径），21,497B/op、measurement GC1,680ms，JFR最大pause19.1ms。
+- 两者accepted=terminal、unfinished/endBacklog/max internalBacklog=0，realtimeDroppedBatches=0；全部用户和maker资金/冻结/仓位、保留挂单及快照恢复hash校验通过，无OOM和业务错误。
+- 系统约30秒采样一次，所采CPU speed均100，swap保持9.50MiB无新增；短于采样间隔的系统波动未能排除。JFR DataLoss均0。
+- GC后heap以30秒桶观察：SPOT稳定段每桶min45.4–45.5MiB/max46.8–47.3MiB；OPTION min45.3–45.8MiB/max46.8–47.1MiB。未观察到本次180秒稳定段持续增长。GC cause：SPOT G1 Evacuation224/System.gc8/Metadata2，OPTION226/8/2，显式GC位于迭代边界，不在每个业务操作中。
+- NMT退出SPOT reserved2,376,942,555B/committed986,428,379B，OPTION2,374,503,208B/988,441,384B；GC native约74.1→74.4MiB，线程native末值约0.12MiB，Code/Metaspace含启动编译增长（SPOT12.81→27.01MiB、11.55→21.41MiB；OPTION12.97→28.27MiB、11.55→21.84MiB）。线程start/end含预热实例及恢复验证，不应把累计start直接当成存活线程数。
+- JFR原件、summary、views、memory事件JSON、系统日志及JMH JSON位于 `/tmp/surprising-realtime-soak-20260906/`，原件SPOT约7.9MiB、OPTION约8.0MiB，校验见该目录SHA256SUMS。采样JAR未单独备份，之后被最终Maven打包替换，缺少该轮精确JAR二进制校验；保留源码commit、构建日志 `/tmp/realtime-soak-build.log` 和全部原始录制，故不作为完整可复现的发布性能认证。
+- 本轮通过已定义的资金、终态、短期状态容量检查；真实API三阶段尾延迟、真实Aeron/WS/native/FD长期稳定性、真实Cluster切主、其余四产品及风险/强平/资金费/ADL/到期重业务长稳仍未测。**整体生产性能验收仍未完成**；不会把三分钟稳定段表述为无长期泄漏或零交易性能成本。
+
+### 最终功能构建与交付记录（2026-09-06 11:44）
+
+`mvn package -Drealtime.test.server=/tmp/valkey-realtime-build/valkey-8.0.1/src/valkey-server` 全reactor成功：1410测试、1388通过、0失败/错误、22跳过。跳过均为缺少 `SURPRISING_WITHDRAWAL_IT_DATABASE_URL` 的提现数据库集成测试；按任务边界未启动wallet。实际Valkey验证覆盖目录租约、乱序版本、缺口重建、定向UDP和MDC控制路由；新增Spring属性绑定测试及分片中途commit counter测试通过。最终日志 `/tmp/realtime-final-package2.log`。Router可执行 `-exec.jar` 与独立MediaDriver、Valkey实际启动成功，记录 `/tmp/realtime-router-startup-result.log`。这些是功能/启动证据，不改变以上生产性能部分验证结论。

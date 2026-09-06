@@ -87,7 +87,7 @@ class CommittedTradeExportIntegrationTest {
                                 AeronCounters.CLUSTER_COMMIT_POSITION_TYPE_ID,
                                 0)) {
             archive.startRecording("aeron:ipc", 1001, SourceLocation.LOCAL);
-            try (var publication = aeron.addExclusivePublication("aeron:ipc", 1001)) {
+            try (var publication = aeron.addExclusivePublication("aeron:ipc?mtu=128", 1001)) {
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
                 int recordingCounter;
                 while ((recordingCounter =
@@ -158,14 +158,37 @@ class CommittedTradeExportIntegrationTest {
                 byte[] beforeCheckpoint = Files.readAllBytes(checkpoint);
                 assertThat(TradeExportCheckpoint.read(checkpoint, ProductLine.SPOT).tradeSequence())
                         .isZero();
-                counter.set(afterTrade);
-                runExport(
-                        clusterDir,
-                        directory,
-                        control,
-                        broker.getBrokersAsString(),
-                        checkpoint,
-                        afterTrade);
+                assertThat(afterTrade - beforeTrade).isGreaterThan(128);
+                counter.set(
+                        beforeTrade
+                                + 128); // Only the first fragment of the taker command is
+                                        // committed.
+                var export =
+                        java.util.concurrent.CompletableFuture.runAsync(
+                                () -> {
+                                    try {
+                                        runExport(
+                                                clusterDir,
+                                                directory,
+                                                control,
+                                                broker.getBrokersAsString(),
+                                                checkpoint,
+                                                afterTrade);
+                                    } catch (Exception e) {
+                                        throw new java.util.concurrent.CompletionException(e);
+                                    }
+                                });
+                try {
+                    Thread.sleep(1500);
+                    assertThat(export.isDone()).isFalse();
+                    assertThat(
+                                    TradeExportCheckpoint.read(checkpoint, ProductLine.SPOT)
+                                            .tradeSequence())
+                            .isZero();
+                } finally {
+                    counter.set(afterTrade);
+                }
+                export.get(15, TimeUnit.SECONDS);
                 assertThat(TradeExportCheckpoint.read(checkpoint, ProductLine.SPOT).tradeSequence())
                         .isEqualTo(1);
                 // Simulate Kafka commit succeeding just before the local checkpoint rename.

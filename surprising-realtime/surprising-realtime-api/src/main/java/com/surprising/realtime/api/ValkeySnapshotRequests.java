@@ -13,6 +13,24 @@ public final class ValkeySnapshotRequests {
         this.redis = redis;
     }
 
+    /**
+     * Rate-limit recovery snapshots outside Core; absolute deltas remain the ordinary update path.
+     */
+    public boolean claim(ProductLine product, long user) {
+        return Boolean.TRUE.equals(
+                redis.opsForValue()
+                        .setIfAbsent(
+                                claimKey(product, user), "1", java.time.Duration.ofSeconds(5)));
+    }
+
+    public void releaseClaim(ProductLine product, long user) {
+        redis.delete(claimKey(product, user));
+    }
+
+    private static String claimKey(ProductLine product, long user) {
+        return "rt:refresh-sent:{" + product.name() + ":" + user + "}";
+    }
+
     public void renew(ProductLine product, long user, long expiresAt) {
         if (product == null || user <= 0)
             throw new IllegalArgumentException("invalid snapshot identity");

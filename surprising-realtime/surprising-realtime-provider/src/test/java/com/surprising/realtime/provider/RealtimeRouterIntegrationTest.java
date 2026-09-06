@@ -142,7 +142,7 @@ class RealtimeRouterIntegrationTest {
                 assertThat(receivedB).noneMatch(f -> f.userId() == 42);
                 new ValkeySnapshotRequests(redis)
                         .renew(ProductLine.SPOT, 42, System.currentTimeMillis() + 30000);
-                RealtimeFrame request = control.poll(5, TimeUnit.SECONDS);
+                RealtimeFrame request = control.poll(10, TimeUnit.SECONDS);
                 assertThat(request).isNotNull();
                 assertThat(followerControl.poll(5, TimeUnit.SECONDS).snapshotId())
                         .isEqualTo(request.snapshotId());
@@ -159,7 +159,7 @@ class RealtimeRouterIntegrationTest {
                                 views.read(ProductLine.SPOT, 42, System.currentTimeMillis(), 15000)
                                         .status()
                                         .equals("STALE"));
-                RealtimeFrame replacement = control.poll(5, TimeUnit.SECONDS);
+                RealtimeFrame replacement = control.poll(10, TimeUnit.SECONDS);
                 assertThat(replacement).isNotNull();
                 snapshot(publication, replacement.snapshotId(), 300, 3, 9);
                 await(

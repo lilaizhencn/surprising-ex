@@ -23,6 +23,7 @@ public record RealtimeRouterProperties(
         this(directory, channel, stream, nodeStream, controlChannels, Map.of());
     }
 
+    @org.springframework.boot.context.properties.bind.ConstructorBinding
     public RealtimeRouterProperties {
         if (directory == null) directory = io.aeron.CommonContext.getAeronDirectoryName();
         if (channel == null || channel.isBlank())
