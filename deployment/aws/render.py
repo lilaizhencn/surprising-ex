@@ -21,7 +21,9 @@ APPS = {
     'gateway': ('surprising-gateway', 768),
     'maker': ('surprising-maker', 512),
 }
-OPENS = ['--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED', '--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED']
+OPENS = ['--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED',
+         '--add-opens=java.base/java.util.zip=ALL-UNNAMED',
+         '--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED']
 
 def validate(c):
     assert c['productLine'] in PRODUCTS, 'unknown productLine'
@@ -63,11 +65,14 @@ def render(c, output):
                    'workDirectory':work, 'arguments':args, 'environment':environment or {}})
         unitname = f'surprising-{lower}-{name}'
         unit = ['[Unit]', f'Description=Surprising {product} {name}', 'After=network-online.target', 'Wants=network-online.target']
+        if name == 'core':
+            unit += ['StartLimitIntervalSec=120', 'StartLimitBurst=3']
         if needs_driver:
             unit += [f'After=surprising-{lower}-driver.service', f'Requires=surprising-{lower}-driver.service']
         unit += ['[Service]', 'Type=simple', f'User={c["serviceUser"]}', 'UMask=0077',
                  f'ExecStart=/usr/bin/python3 {release}/deployment/aws/run-java.py /etc/surprising/{lower}/{name}.json',
-                 'LimitNOFILE=65536', 'TimeoutStopSec=120', 'KillSignal=SIGTERM', 'Restart=no',
+                 'LimitNOFILE=65536', 'TimeoutStopSec=120', 'KillSignal=SIGTERM',
+                 *(['Restart=on-failure', 'RestartSec=11'] if name == 'core' else ['Restart=no']),
                  '[Install]', 'WantedBy=multi-user.target', '']
         (dest / f'{unitname}.service').write_text('\n'.join(unit))
 

@@ -875,3 +875,7 @@ owner 汇总保险需求、检查 Treasury 后，再由原 Lane 应用余额和�
 `PositionUserIndex` 仅在成员关系变化时维护索引，分页按 primitive Lane 数组查后继；
 `ActiveOrderIndex` 使用 owner 复用的 1025 个 long 缓冲选取页面候选，排序有界，仍需扫描候选集合。
 `PerpetualContractMath` 币本位采用无溢出的精确 long 快路径，溢出范围使用 BigInteger 精确计算，舍入规则不变。
+
+## 本机故障恢复功能验证
+
+Core + Aeron Cluster 的少量样本故障验证入口见 [deployment/local-faults/README.md](deployment/local-faults/README.md)，当前执行记录见 [FAULT_RECOVERY_VALIDATION.md](FAULT_RECOVERY_VALIDATION.md)。不包含压测或推送验收。

@@ -97,6 +97,7 @@ class SurprisingClusterNodeThreadingModeTest {
                     Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                     "--enable-native-access=ALL-UNNAMED",
                     "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+                    "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
                     "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
                     "-Daeron.dir=" + aeronBaseDirectory,
                     "-Dsurprising.aeron.product-line=SPOT",

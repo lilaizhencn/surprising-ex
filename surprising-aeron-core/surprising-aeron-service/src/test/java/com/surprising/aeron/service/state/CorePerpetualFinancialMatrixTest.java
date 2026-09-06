@@ -670,9 +670,12 @@ class CorePerpetualFinancialMatrixTest {
         ResolveLiquidationCommand command = new ResolveLiquidationCommand(
                 1, ResolveLiquidationCommand.Resolution.INSURANCE, coverage);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        TradingRuntimeState runtimeEnding = RuntimeStateProjector.project(funded, identities);
+        TradingCoreState restoredFunded = TradingStateSnapshotCodec.decode(
+                TradingStateSnapshotCodec.encode(funded), variant.productLine());
+        assertThat(restoredFunded).isEqualTo(funded);
+        TradingRuntimeState runtimeEnding = RuntimeStateProjector.project(restoredFunded, identities);
         assertThat(RuntimeDerivativeLiquidationProcessor.applyResolution(
-                funded, command, runtimeEnding, identities)).isSameAs(runtimeEnding);
+                restoredFunded, command, runtimeEnding, identities)).isSameAs(runtimeEnding);
         TradingCoreState ending = reducer.resolveLiquidation(funded, command);
         RuntimeStateParityChecker.assertMatches(ending, identities, runtimeEnding);
 
@@ -730,9 +733,12 @@ class CorePerpetualFinancialMatrixTest {
                 CorePositionSide.NET, -QUANTITY, 200,
                 beforeAdl.riskState().markPrices().get(SYMBOL).priceSequence(), 5, residual);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        TradingRuntimeState runtimeEnding = RuntimeStateProjector.project(beforeAdl, identities);
+        TradingCoreState restoredBeforeAdl = TradingStateSnapshotCodec.decode(
+                TradingStateSnapshotCodec.encode(beforeAdl), variant.productLine());
+        assertThat(restoredBeforeAdl).isEqualTo(beforeAdl);
+        TradingRuntimeState runtimeEnding = RuntimeStateProjector.project(restoredBeforeAdl, identities);
         assertThat(RuntimeDerivativeLiquidationProcessor.applyAdl(
-                beforeAdl, command, runtimeEnding, identities)).isSameAs(runtimeEnding);
+                restoredBeforeAdl, command, runtimeEnding, identities)).isSameAs(runtimeEnding);
         TradingCoreState ending = reducer.executeAdl(beforeAdl, command);
         RuntimeStateParityChecker.assertMatches(ending, identities, runtimeEnding);
 

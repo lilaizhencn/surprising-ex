@@ -20,8 +20,6 @@ import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.FutureTask;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -110,48 +108,32 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
             throw new IllegalArgumentException("responseTimeout must be positive");
         }
         MediaDriver mediaDriver = newMediaDriver();
-        FutureTask<SurprisingAeronClient> connection = new FutureTask<>(
-                () -> new SurprisingAeronClient(productLine, hostnames, egressHostname,
-                        responseTimeout, mediaDriver, true));
-        Thread connector = new Thread(connection, "surprising-aeron-connect-" + productLine.topicSegment());
-        connector.setDaemon(true);
-        connector.start();
+        AsyncConnection connection = null;
         try {
-            return connection.get(responseTimeout.toNanos(), TimeUnit.NANOSECONDS);
-        } catch (java.util.concurrent.TimeoutException exception) {
-            closeMediaDriverBounded(mediaDriver);
-            connection.cancel(true);
+            // Keep connect and cleanup on one owner. A timeout must close the Aeron client
+            // before its driver; cancelling a separate connector races these lifetimes.
+            connection = new AsyncConnection(productLine, hostnames, egressHostname,
+                    responseTimeout, mediaDriver, true);
+            long deadline = System.nanoTime() + responseTimeout.toNanos();
+            IdleStrategy connectIdle = new BackoffIdleStrategy();
+            while (System.nanoTime() < deadline) {
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new IllegalStateException("interrupted connecting to Aeron Cluster");
+                }
+                SurprisingAeronClient connected = connection.poll();
+                if (connected != null) return connected;
+                connectIdle.idle();
+            }
             throw new io.aeron.exceptions.TimeoutException(
                     "timed out connecting to Aeron Cluster productLine=" + productLine);
-        } catch (InterruptedException exception) {
-            closeMediaDriverBounded(mediaDriver);
-            connection.cancel(true);
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("interrupted connecting to Aeron Cluster", exception);
-        } catch (ExecutionException exception) {
-            closeMediaDriverBounded(mediaDriver);
-            Throwable cause = exception.getCause();
-            if (cause instanceof RuntimeException runtimeException) {
-                throw runtimeException;
+        } catch (RuntimeException | Error failure) {
+            try {
+                if (connection != null) connection.close();
+                else mediaDriver.close();
+            } catch (RuntimeException | Error cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
             }
-            if (cause instanceof Error error) {
-                throw error;
-            }
-            throw new IllegalStateException("failed connecting to Aeron Cluster", cause);
-        } catch (RuntimeException exception) {
-            closeMediaDriverBounded(mediaDriver);
-            throw exception;
-        }
-    }
-
-    private static void closeMediaDriverBounded(MediaDriver mediaDriver) {
-        Thread closer = new Thread(mediaDriver::close, "surprising-aeron-media-driver-close");
-        closer.setDaemon(true);
-        closer.start();
-        try {
-            closer.join(250L);
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
+            throw failure;
         }
     }
 
@@ -536,13 +518,14 @@ public final class SurprisingAeronClient implements AeronClientPool.Session, Egr
                 return;
             }
             SurprisingAeronClient current = client;
-            if (current == null) {
-                connection.close();
-            } else {
-                current.close();
-            }
-            if (closeMediaDriver) {
-                mediaDriver.close();
+            try {
+                if (current == null) {
+                    connection.close();
+                } else {
+                    current.close();
+                }
+            } finally {
+                if (closeMediaDriver) mediaDriver.close();
             }
         }
 

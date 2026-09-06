@@ -476,12 +476,12 @@ public final class CoreProbeState implements AutoCloseable {
             }
         }
         if (message.header().kind() == WireMessageKind.QUERY
-                && message.header().messageType() == CoreMessageType.STATE_HASH_QUERY) {
-            return new CoreResponse(ResponseStatus.OK, appliedCommandCount, stateHash());
-        }
-        if (message.header().kind() == WireMessageKind.QUERY
-                && message.header().messageType() == CoreMessageType.BUSINESS_STATE_HASH_QUERY) {
-            return new CoreResponse(ResponseStatus.OK, appliedCommandCount, cachedBusinessStateHash);
+                && (message.header().messageType() == CoreMessageType.STATE_HASH_QUERY
+                || message.header().messageType() == CoreMessageType.BUSINESS_STATE_HASH_QUERY)) {
+            // Full hashes are explicit audit queries. The hot-path cached value is a snapshot
+            // audit anchor and does not track mutable account/order changes.
+            return new CoreResponse(ResponseStatus.OK, appliedCommandCount,
+                    canonicalBusinessStateHash(tradingState().businessStateHash()));
         }
         if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.LANE_METRICS_QUERY) {
@@ -4056,7 +4056,8 @@ public final class CoreProbeState implements AutoCloseable {
 
     private static boolean accountLaneReadQuery(CoreMessageType type) {
         return switch (type) {
-            case USER_STATE_HASH_QUERY, ORDER_STATE_HASH_QUERY, USER_STATE_QUERY, ORDER_STATE_QUERY,
+            case STATE_HASH_QUERY, BUSINESS_STATE_HASH_QUERY,
+                    USER_STATE_HASH_QUERY, ORDER_STATE_HASH_QUERY, USER_STATE_QUERY, ORDER_STATE_QUERY,
                     CLIENT_ORDER_STATE_QUERY, USER_OPEN_ORDERS_QUERY, TRIGGER_ORDER_QUERY,
                     USER_OPEN_TRIGGER_ORDERS_QUERY, FUNDING_PROGRESS_QUERY, SETTLEMENT_PROGRESS_QUERY,
                     ADL_CANDIDATE_QUERY, RISK_STATE_QUERY, ALGO_ORDER_QUERY, LIQUIDATION_WORK_QUERY,

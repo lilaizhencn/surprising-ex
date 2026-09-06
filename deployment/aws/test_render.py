@@ -25,6 +25,11 @@ class RenderTest(unittest.TestCase):
                     spec=json.loads((out/f'core{node}/core.json').read_text()); args=spec['arguments']
                     self.assertIn(f'-Dsurprising.aeron.node-id={node}',args)
                     self.assertIn('-Dsurprising.aeron.matching-engines=1',args)
+                    self.assertIn('--add-opens=java.base/java.util.zip=ALL-UNNAMED',args)
+                    unit=(out/f'core{node}/surprising-{product.lower()}-core.service').read_text()
+                    self.assertIn('Restart=on-failure',unit)
+                    self.assertIn('RestartSec=11',unit)
+                    self.assertIn('StartLimitBurst=3',unit)
                     self.assertIn(f'-Dsurprising.realtime.directory=/dev/shm/aeron-surprising-{product.lower()}-{node}',args)
                     self.assertFalse(any('delete' in arg for arg in args))
                 app=json.loads((out/'app/realtime.json').read_text())

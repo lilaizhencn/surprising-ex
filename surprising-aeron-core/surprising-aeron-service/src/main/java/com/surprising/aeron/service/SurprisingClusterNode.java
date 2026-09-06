@@ -26,7 +26,6 @@ public final class SurprisingClusterNode {
         ClusterTopology topology = ClusterTopology.fromSystemProperties();
         File nodeDirectory = topology.nodeDirectory().toFile();
         String aeronDirectoryName = topology.aeronDirectoryName();
-        ShutdownSignalBarrier barrier = new ShutdownSignalBarrier();
 
         MediaDriver.Context mediaDriverContext = new MediaDriver.Context()
                 .aeronDirectoryName(aeronDirectoryName)
@@ -45,6 +44,8 @@ public final class SurprisingClusterNode {
                 .archiveClientContext(replicationArchiveContext)
                 .localControlChannel(localArchiveControlChannel())
                 .recordingEventsEnabled(false)
+                .recordChecksum(io.aeron.archive.checksum.Checksums.crc32c())
+                .replayChecksum(io.aeron.archive.checksum.Checksums.crc32c())
                 .threadingMode(ArchiveThreadingMode.SHARED)
                 .replicationChannel(topology.replicationChannel());
 
@@ -70,6 +71,7 @@ public final class SurprisingClusterNode {
                 .archiveContext(localArchiveClient.clone())
                 .errorHandler(errorHandler("consensus-module"));
 
+        ShutdownSignalBarrier barrier = new ShutdownSignalBarrier();
         try (ClusteredMediaDriver ignored = ClusteredMediaDriver.launch(
                     mediaDriverContext.terminationHook(barrier::signalAll),
                     archiveContext,
@@ -93,6 +95,10 @@ public final class SurprisingClusterNode {
     }
 
     private static ErrorHandler errorHandler(String component) {
+        return errorHandler(component, status -> Runtime.getRuntime().halt(status));
+    }
+
+    static ErrorHandler errorHandler(String component, java.util.function.IntConsumer terminate) {
         return throwable -> {
             if (throwable instanceof AeronException aeronException
                     && aeronException.category() == AeronException.Category.WARN) {
@@ -102,6 +108,15 @@ public final class SurprisingClusterNode {
             }
             System.err.println("Aeron " + component + " failure");
             throwable.printStackTrace(System.err);
+            if (throwable instanceof AeronException aeronException
+                    && aeronException.category() == AeronException.Category.FATAL
+                    || throwable instanceof org.agrona.concurrent.AgentTerminationException
+                    || throwable instanceof Error) {
+                // Fatal conductor errors invalidate mapped buffers. Do not let Archive/Cluster
+                // continue or race graceful cleanup against already-unmapped counters.
+                // A supervisor must restart this member from its committed log/snapshot.
+                terminate.accept(1);
+            }
         };
     }
 
