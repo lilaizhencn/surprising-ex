@@ -229,10 +229,10 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         }
         if (runtime.productLine().isDerivative()) {
             RuntimeDerivativeMatchProcessor.applyLane(value.takerOrderId(), value, laneId,
-                    runtime, identities, valueInstrument, valueSettleAssetId, delta);
+                    runtime, identities, valueInstrument, valueSettleAssetId, delta, commitTimestamp, commitClusterPosition);
         } else {
             RuntimeSpotMatchProcessor.applyLane(value.takerOrderId(), value, laneId,
-                    runtime, valueInstrument, valueBaseAssetId, valueQuoteAssetId, delta);
+                    runtime, valueInstrument, valueBaseAssetId, valueQuoteAssetId, delta, commitTimestamp, commitClusterPosition);
         }
         runtime.completeMatcherPendingReservations(lane, value);
     }

@@ -137,7 +137,8 @@ public final class RuntimeDerivativeMatchProcessor {
     static void applyLane(long takerOrderId, MatcherSettlementPlan plan, int laneId,
                           TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                           CoreInstrumentState instrument, int settleAssetId,
-                          RuntimeTreasuryDelta treasuryDelta) {
+                          RuntimeTreasuryDelta treasuryDelta,
+                          long commitTimestamp, long commitPosition) {
         if (plan == null || treasuryDelta == null || laneId < 0
                 || laneId >= runtime.topology().accountLaneCount()) {
             throw new IllegalArgumentException("invalid perpetual matcher settlement plan");
@@ -151,13 +152,13 @@ public final class RuntimeDerivativeMatchProcessor {
             if (localTaker != null) {
                 localTaker = requireOpen(runtime, takerOrderId);
                 applyFill(runtime, identities, instrument, localTaker, match.price(), match.size(), true,
-                        settleAssetId, treasuryDelta);
+                        settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
             }
             OrderRuntime maker = runtime.order(match.matchedOrderId());
             if (maker != null) {
                 maker = requireOpen(runtime, maker.orderId());
                 applyFill(runtime, identities, instrument, maker, match.price(), match.size(), false,
-                        settleAssetId, treasuryDelta);
+                        settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
                 if (runtime.order(maker.orderId()).canceled()) {
                     long releaseUnits = runtime.reservation(maker.orderId()).reservedUnits();
                     runtime.releaseTerminalReservation(maker.orderId());
@@ -169,7 +170,8 @@ public final class RuntimeDerivativeMatchProcessor {
         if (localTaker != null) {
             if (!localTaker.canceled() && (localTaker.timeInForce().immediate()
                     || localTaker.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET)) {
-                runtime.replaceOrder(terminal(localTaker));
+                runtime.replaceOrder(localTaker.withStatus(CoreOrderStatus.CANCELED,
+                        Math.incrementExact(localTaker.revision()), commitTimestamp, commitPosition));
             }
             if (runtime.order(takerOrderId).canceled()) {
                 long releaseUnits = runtime.reservation(takerOrderId).reservedUnits();
@@ -260,12 +262,21 @@ public final class RuntimeDerivativeMatchProcessor {
                                   RuntimeIdentityRegistry identities, CoreInstrumentState instrument,
                                   OrderRuntime order, long priceTicks, long quantitySteps,
                                   boolean taker, int settleAssetId, RuntimeTreasuryDelta treasuryDelta) {
+        applyFill(runtime, identities, instrument, order, priceTicks, quantitySteps, taker,
+                settleAssetId, treasuryDelta, -1, -1);
+    }
+
+    private static void applyFill(TradingRuntimeState runtime,
+                                  RuntimeIdentityRegistry identities, CoreInstrumentState instrument,
+                                  OrderRuntime order, long priceTicks, long quantitySteps,
+                                  boolean taker, int settleAssetId, RuntimeTreasuryDelta treasuryDelta,
+                                       long commitTimestamp, long commitPosition) {
         Long configuredLeverage = runtime.leverage(
                 new CoreLeverageKey(order.userId(), instrument.symbol(), order.marginMode()));
         long leverage = configuredLeverage == null ? instrument.maxLeveragePpm() : configuredLeverage;
         RuntimeDerivativeFillCalculator.apply(runtime, identities, instrument, order,
                 identities.preparedPositionKey(order.userId(), positionKey(instrument.symbol(), order.positionSide())),
-                priceTicks, quantitySteps, taker, leverage, settleAssetId, treasuryDelta);
+                priceTicks, quantitySteps, taker, leverage, settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
     }
 
     private static OrderRuntime requireOpen(TradingRuntimeState runtime, long orderId) {

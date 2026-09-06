@@ -23,6 +23,15 @@ public final class RuntimeDerivativeFillCalculator {
                       long positionKey, long fillPriceTicks, long fillQuantitySteps,
                       boolean taker, long leveragePpm, int settleAssetId,
                       RuntimeTreasuryDelta treasuryDelta) {
+        apply(runtime, identities, instrument, order, positionKey, fillPriceTicks, fillQuantitySteps,
+                taker, leveragePpm, settleAssetId, treasuryDelta, -1, -1);
+    }
+
+    static void apply(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                      CoreInstrumentState instrument, OrderRuntime order,
+                      long positionKey, long fillPriceTicks, long fillQuantitySteps,
+                      boolean taker, long leveragePpm, int settleAssetId,
+                      RuntimeTreasuryDelta treasuryDelta, long commitTimestamp, long commitPosition) {
         if (runtime == null || identities == null || instrument == null || order == null || treasuryDelta == null
                 || fillPriceTicks <= 0 || fillQuantitySteps <= 0 || leveragePpm <= 0 || settleAssetId < 0) {
             throw new IllegalArgumentException("invalid perpetual fill arguments");
@@ -54,7 +63,7 @@ public final class RuntimeDerivativeFillCalculator {
         if (instrument.contractType().isOption()) OptionFillCalculator.requireRiskMark(riskMark);
         FillResult result = calculate(instrument, order, reservation, current,
                 balance.availableUnits(), balance.lockedUnits(), fillPriceTicks, fillQuantitySteps,
-                taker, leveragePpm, settleAssetId, riskMark);
+                taker, leveragePpm, settleAssetId, riskMark, commitTimestamp, commitPosition);
         runtime.replaceReservation(result.reservation());
         runtime.replaceBalance(new BalanceRuntime(order.userId(), settleAssetId,
                 result.availableUnits(), result.lockedUnits()));
@@ -70,6 +79,16 @@ public final class RuntimeDerivativeFillCalculator {
                                 long availableUnits, long lockedUnits, long fillPriceTicks,
                                 long fillQuantitySteps, boolean taker, long leveragePpm,
                                 int settleAssetId, MarkPriceRuntime riskMark) {
+        return calculate(instrument, order, reservation, current, availableUnits, lockedUnits,
+                fillPriceTicks, fillQuantitySteps, taker, leveragePpm, settleAssetId, riskMark, -1, -1);
+    }
+
+    static FillResult calculate(CoreInstrumentState instrument, OrderRuntime order,
+                                ReservationRuntime reservation, PositionRuntime current,
+                                long availableUnits, long lockedUnits, long fillPriceTicks,
+                                long fillQuantitySteps, boolean taker, long leveragePpm,
+                                int settleAssetId, MarkPriceRuntime riskMark,
+                                long commitTimestamp, long commitPosition) {
         if (instrument == null || order == null || reservation == null || availableUnits < 0 || lockedUnits < 0
                 || fillPriceTicks <= 0 || fillQuantitySteps <= 0 || leveragePpm <= 0 || settleAssetId < 0
                 || reservation.userId() != order.userId() || reservation.assetId() != settleAssetId
@@ -191,7 +210,7 @@ public final class RuntimeDerivativeFillCalculator {
                 Math.addExact(order.executedQuantitySteps(), fillQuantitySteps), nextRemainingQuantity,
                 Math.negateExact(feeDelta),
                 nextRemainingQuantity == 0 ? CoreOrderStatus.FILLED : order.status(),
-                Math.incrementExact(order.revision()));
+                Math.incrementExact(order.revision()), commitTimestamp, commitPosition);
 
         return new FillResult(nextOrder, reservation.consume(orderReservationDebit), next,
                 nextAvailable, nextLocked, Math.negateExact(feeDelta), Math.negateExact(appliedPnl));

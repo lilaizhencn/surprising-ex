@@ -303,6 +303,28 @@ class TradingRuntimeStateTest {
     }
 
     @Test
+    void reassigningAliasesDoesNotLeaveStaleReverseMappings() {
+        TradingRuntimeState state = new TradingRuntimeState();
+        state.putUser(new UserRuntime(7));
+        state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
+        state.reserveOrder(11, 7, 91, 5, 2, 3, 200);
+        state.reserveOrder(12, 7, 92, 5, 2, 3, 200);
+        state.putClientOrder(7, 93, 11);
+        state.putClientOrder(7, 94, 11);
+        state.putClientOrder(7, 93, 12);
+        state.removeClientOrder(7, 91);
+        state.removeClientOrder(7, 94);
+        state.markPendingReservation(7, 11, 4);
+        state.completePendingReservation(7, 11, 4);
+        assertThat(state.orderIdByClient(7, 91)).isNull();
+        assertThat(state.orderIdByClient(7, 94)).isNull();
+        assertThat(state.orderIdByClient(7, 92)).isEqualTo(12);
+        assertThat(state.orderIdByClient(7, 93)).isEqualTo(12);
+        assertThat(state.balance(7, 3).availableUnits()).isEqualTo(600);
+        assertThat(state.balance(7, 3).lockedUnits()).isEqualTo(400);
+    }
+
+    @Test
     void pendingReservationCountersTrackUsersAndAssetsInConstantTime() throws Exception {
         // Given: 10,000 pending reservations spread across 100 users and 10 assets.
         TradingRuntimeState state = new TradingRuntimeState();

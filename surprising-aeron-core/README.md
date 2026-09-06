@@ -282,6 +282,11 @@ query/snapshot fence 直接物化。生产不启动 Core Fact materializer；`Co
 `doBackgroundWork` 固定返回 0：Aeron 1.53 的运行时同样禁止这里调用 `ClientSession.offer`。
 响应在原始日志回调内使用单个可复用缓冲区编码和投递；瞬时背压使用 Cluster idle strategy 重试，1 秒仍未投递则请求关闭会话，
 业务结果不回滚，客户端按原 commandId 查询。慢消费者最多占用这段重试预算，生产容量与超时策略仍需真实网络验证。
+`CoreResponse` 的公开构造器及 `data()` 继续防御性复制。核心新编码完成且不再修改的终态 payload
+通过 `owned` 转交给不可变响应，与只读 `StoredResult` 共享；不得传入可复用发送缓冲区。修改提交序号只共享已封装的只读数据。
+Account Lane 的 `OrderClientKeyIndex` 用 primitive 单键索引保存常见订单，多别名才建立集合，回收时同步清理双向索引。
+撮合成交及 Lane 撤单在构造不可变 `OrderRuntime` 时写入已确定的提交元数据，避免紧接着再造一次同内容订单；
+没有状态变更的订单仍由提交阶段补齐元数据，资金修订号、发布 fence 和 snapshot 格式保持原有语义。
 回调未完成或执行异常转为 `AgentTerminationException`，避免 AgentRunner 仅记录异常后继续消费下一条日志。
 删除了 deferred ingress、pending-client、pending-query 及按会话 egress/recycle 队列。Snapshot 只捕获已完成回调的状态，发现遗留业务工作直接失败，
 不能在 snapshot 回调补做交易。此实现允许必要等待，不再以“owner 完全不等待”为验收目标。

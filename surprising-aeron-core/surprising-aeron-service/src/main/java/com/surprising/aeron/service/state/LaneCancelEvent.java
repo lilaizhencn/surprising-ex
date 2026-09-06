@@ -94,7 +94,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
                     // Include the terminal in this event even when timestamp/position are unchanged.
                     runtime.replaceOrder(order.withCommitMetadata(commitTimestamp, commitClusterPosition));
                 } else {
-                    runtime.cancelOrderInLane(userId, orderId);
+                    runtime.cancelOrderInLane(userId, orderId, commitTimestamp, commitClusterPosition);
                 }
                 runtime.stampOrderInLane(lane, orderId, commitTimestamp, commitClusterPosition);
             }

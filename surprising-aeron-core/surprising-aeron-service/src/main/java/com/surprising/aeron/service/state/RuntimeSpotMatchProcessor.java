@@ -99,7 +99,8 @@ public final class RuntimeSpotMatchProcessor {
 
     static void applyLane(long takerOrderId, MatcherSettlementPlan plan, int laneId,
                           TradingRuntimeState runtime, CoreInstrumentState instrument,
-                          int baseAssetId, int quoteAssetId, RuntimeTreasuryDelta treasuryDelta) {
+                          int baseAssetId, int quoteAssetId, RuntimeTreasuryDelta treasuryDelta,
+                          long commitTimestamp, long commitPosition) {
         if (plan == null || treasuryDelta == null || laneId < 0
                 || laneId >= runtime.topology().accountLaneCount()) {
             throw new IllegalArgumentException("invalid spot matcher settlement plan");
@@ -113,12 +114,12 @@ public final class RuntimeSpotMatchProcessor {
             if (localTaker != null) {
                 localTaker = requireOpen(runtime, takerOrderId);
                 applyFill(runtime, instrument, localTaker, match.price(), match.size(), true,
-                        baseAssetId, quoteAssetId, treasuryDelta);
+                        baseAssetId, quoteAssetId, treasuryDelta, commitTimestamp, commitPosition);
             }
             OrderRuntime maker = runtime.order(match.matchedOrderId());
             if (maker != null) {
                 applyFill(runtime, instrument, requireOpen(runtime, maker.orderId()), match.price(), match.size(),
-                        false, baseAssetId, quoteAssetId, treasuryDelta);
+                        false, baseAssetId, quoteAssetId, treasuryDelta, commitTimestamp, commitPosition);
                 releaseTerminalReservation(runtime, maker.orderId());
             }
         }
@@ -127,7 +128,7 @@ public final class RuntimeSpotMatchProcessor {
             if (!localTaker.canceled() && (localTaker.timeInForce().immediate()
                     || localTaker.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET)) {
                 runtime.replaceOrder(localTaker.withStatus(CoreOrderStatus.CANCELED,
-                        Math.incrementExact(localTaker.revision())));
+                        Math.incrementExact(localTaker.revision()), commitTimestamp, commitPosition));
             }
             releaseTerminalReservation(runtime, takerOrderId);
         }
@@ -140,6 +141,14 @@ public final class RuntimeSpotMatchProcessor {
     private static void applyFill(TradingRuntimeState runtime, CoreInstrumentState instrument, OrderRuntime order,
                                   long fillPriceTicks, long fillQuantitySteps, boolean taker,
                                   int baseAssetId, int quoteAssetId, RuntimeTreasuryDelta treasuryDelta) {
+        applyFill(runtime, instrument, order, fillPriceTicks, fillQuantitySteps, taker,
+                baseAssetId, quoteAssetId, treasuryDelta, -1, -1);
+    }
+
+    private static void applyFill(TradingRuntimeState runtime, CoreInstrumentState instrument, OrderRuntime order,
+                                  long fillPriceTicks, long fillQuantitySteps, boolean taker,
+                                  int baseAssetId, int quoteAssetId, RuntimeTreasuryDelta treasuryDelta,
+                                       long commitTimestamp, long commitPosition) {
         ReservationRuntime reservation = runtime.reservation(order.orderId());
         if (reservation == null || reservation.userId() != order.userId()) {
             throw new IllegalStateException("runtime spot reservation is missing");
@@ -181,7 +190,7 @@ public final class RuntimeSpotMatchProcessor {
                 Math.subtractExact(order.remainingQuantitySteps(), fillQuantitySteps),
                 Math.negateExact(feeDelta),
                 order.remainingQuantitySteps() == fillQuantitySteps ? CoreOrderStatus.FILLED : CoreOrderStatus.OPEN,
-                Math.incrementExact(order.revision()));
+                Math.incrementExact(order.revision()), commitTimestamp, commitPosition);
         replaceBalance(runtime, order.userId(), baseAssetId, base, nextBaseAvailable, nextBaseLocked);
         replaceBalance(runtime, order.userId(), quoteAssetId, quote, nextQuoteAvailable, nextQuoteLocked);
         runtime.replaceReservation(nextReservation);

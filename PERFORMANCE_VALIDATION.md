@@ -3677,3 +3677,20 @@
 - **环境和I/O：** 两轮所有5秒记录CPU_Speed_Limit=100，swap1202.50MiB无增加；DataLoss0。未采到配置阈值以上的交易processCommittedRequest栈文件/socket IO，不等于排除阈值以下全部IO。更多safepoint/VM事件、wait栈、CPU、GC桶、NMT类别、分配class/site/thread见JfrStats.java流式聚合输出和diagnostics.json，不物化百万条TLAB事件为大JSON。
 - 原始四份JFR（每线JVM+async）、六种模式火焰图（每线alloc/wall/lock）、collapsed/summary、JMH JSON、JFC、运行/流式分析脚本、系统/NMT日志、锁定JAR、源码提交和SHA256SUMS均在本轮证据目录。记录期包含若干初始化/终检事件，已单列边界。
 - **结论：持续负载能稳定定位上述真实分配路径，当前两线的业务正确性和短期状态回收通过。** 真实网络/Aeron三节点、HTTP/API三段分业务尾延迟、其余四线持续负载、非零费率、风险/资金费/强平/到期、WS、完整native池/FD和长期泄漏未测；整体仍仅部分性能验证，不是全栈容量验收。本轮不修改生产代码。
+
+
+## 2026-09-06 响应、client-order 索引与订单提交元数据分配优化（采集前锁定）
+
+- 被测代码：当前 master / 31fd98f8 加本次工作区修改；采集前保存 git diff SHA256、构建 JAR SHA256 和最终源码提交。对照 commit：不适用（仅验证当前 master）；不构建、重跑或比较旧版。
+- 修改：CoreResponse 显式编码数据所有权转交，公开构造及 data() 防御性复制；decoder 对其新建数组直接接管；withCommittedCoreSequence 共享已封装不可变数据。OrderClientKeyIndex 常见单键使用 primitive map，多别名才建 LongHashSet。成交/撤单不可变 OrderRuntime 合并状态和 commit metadata 构造，原 capture/publish/fence、六产品内核、财务修订和恢复格式不变。
+- JMH 场景更新：CoreResponseEncodingBenchmark.constructAndEncodeOwnedResponse 新增所有权构造+真实编码路径；ClusteredBatchTradingBenchmark.close 增加终态 client alias 回收和 snapshot 索引一致性断言。相关协议、账户/交易/行情/衍生生命周期调用方及工具测试扩大验证。
+- 环境：HotSpot Oracle GraalVM JDK25.0.1+8；Maven3.9.16；macOS26.7 x86_64，Intel i9-9880H 8C16T /16GiB。本机诊断，不是 AWS 容量承诺。
+- 基准阈值：业务 accepted=terminal、Core messages accepted=terminal，unfinished/endBacklog=0，资金/冻结/仓位/订单终态及 snapshot hash/alias 全部一致；任何财务失败立即停止。两条持续场景全 JVM 含夹具/查询的 gc.alloc.rate.norm 除3584必须 <12000 B/business op；编码微基准 encodeCommittedResponse <1 B/op、constructAndEncodeOwnedResponse <128 B/op，dataBytes=0/4096分别验证，无 payload 长度同比例复制。此阈值只验分配，不是全链路性能验收。
+- 数据有效性：无 JFR DataLoss、CPU_Speed_Limit 100、swap used 不增长、无外部压测。GC最长pause>50ms、稳定窗口GC后live set净增>32MiB、native/FD持续增长作为调查告警。采样值和无样本不能证明零锁/无泄漏；未具备全部分段尾延迟、open-loop和真实网络指标，仅部分性能验证。
+- 第一阶段：六产品 SPOT/LINEAR_PERPETUAL/INVERSE_PERPETUAL/LINEAR_DELIVERY/INVERSE_DELIVERY/OPTION 逐个运行 FiniteCoreProfile，直接调用更新后的实际 JMH 工作负载，1次warm cycle+2次measurement cycle（每cycle3584 business ops/2048 Core messages/1024 fills），warm后250ms，cycle间100ms；每条共10752/6144/3072，256 in-flight、batch2、4Account Lane、1matcher、256用户+1maker/1symbol/1模拟会话、realtime=false。固定512MiB G1、NMT summary、DebugNonSafepoints、PrintNMTStatistics；JFR profile；async-profiler4.5 alloc128KiB+lock1ms+wall10ms（旧helper cpu请求在macOS实际engine=wall），保留实际ActiveSetting。金融及snapshot终检每条执行。本阶段无吞吐容量结论。
+- 第二阶段：同一机器六条小样本完后冷却30秒，SPOT和LINEAR_PERPETUAL各运行 decodedBatchAdmissionAndSettlement，f1/t1、3×10s warmup、1×180s measurement、产品间cool30s、gc=true、foe=true。JVM -Xms768m -Xmx768m -XX:+UseG1GC -XX:NativeMemoryTracking=summary -XX:+UnlockDiagnosticVMOptions -XX:+DebugNonSafepoints -XX:+PrintNMTStatistics --enable-native-access=ALL-UNNAMED，opens/exports jdk.internal.misc，opens java.util.zip；StartFlightRecording 使用 artifact 内 allocation.jfc。-prof gc 与 async: event=wall;interval=10000000;alloc=128k;lock=1ms;threads=true;output=jfr，lib为 ~/.local/opt/async-profiler-4.5-macos/lib/libasyncProfiler.dylib。
+- 持续业务场景与上述有限场景一致：每cycle3584 business ops、2048业务Core messages、1024fills、512额外Lane指标查询；循环包含往返开/平仓成交、批量成交、挂单/撤单，保持原比例与查询频率。闭环最大速率，未修正coordinated omission；没有固定open-loop到达率。batch平均/最大2，每轮1536批/3072items及512单操作；实际参数/counters以JMH原件核对。用户初始settle余额1,000,000,000，SPOT maker BTC513，zero fees、CROSS、mark100、maker持续120卖挂单；不独立启动做市进程，但真实Core内流动性全程存在。完成后全部用户/maker资金恢复、无挂起预占、仓位归零，仅maker订单及一个client alias留存，快照业务hash/alias一致。
+- 第三阶段：响应微基准两个方法，dataBytes0/4096，f1/t1、3×1s warmup、3×1s measurement、G1固定512MiB、NMTsummary、-prof gc+JFR profile。此处是纯编码不涉及交易在途队列，业务全链路固定256设置不变，不引入其他in-flight档。
+- 指标处理：主JMH op=cycle，business ops/s=score×3584、Core messages/s=score×2048、fills/s=score×1024；aux Type.EVENTS为次数。gc norm/3584为包含夹具、查询和边界的B/business op，不能冒充纯matcher分配。没有无profiler业务主轮或完整尾延迟，不宣称生产容量或完整性能验收。
+- NMT每30秒采一次，系统/CPU throttle/swap每5秒；FD改用lsof -a -p pid -F f，仅计数字FD，保存原始字段输出。JFR流式分析线程、GC/TLAB/heap/NMT/direct/park/IO/safepoint/JIT及顶层分配栈；macOSwall不可当CPU精确占比。
+- Artifact：/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-06-allocation-opt（finite、sustained、response子目录），命令、JDK、源码patch/JAR/配置校验、原始JFR与聚合全部保留。采集开始后以上标准与场景不再修改，结果只追加。

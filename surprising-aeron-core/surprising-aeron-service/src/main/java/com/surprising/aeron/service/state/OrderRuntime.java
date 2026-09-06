@@ -101,15 +101,29 @@ public record OrderRuntime(long orderId, ProductLine productLine, long userId, i
 
     public OrderRuntime withFill(long executed, long remaining, long feeUnits,
                                  CoreOrderStatus nextStatus, long nextRevision) {
+        return withFill(executed, remaining, feeUnits, nextStatus, nextRevision, -1, -1);
+    }
+
+    OrderRuntime withFill(long executed, long remaining, long feeUnits,
+                          CoreOrderStatus nextStatus, long nextRevision,
+                          long commitTimestamp, long commitPosition) {
         return new OrderRuntime(orderId, productLine, userId, symbolId, instrumentChangeId, side, priceTicks,
                 matchingPriceTicks, quantitySteps, executed, remaining, reduceOnly, marginMode, positionSide,
                 orderType, timeInForce, postOnly, clientOrderId, commandId, makerFeeRatePpm, takerFeeRatePpm,
-                Math.addExact(cumulativeFeeUnits, feeUnits), createdAtEpochMillis, updatedAtEpochMillis,
-                clusterPosition, nextStatus, nextRevision);
+                Math.addExact(cumulativeFeeUnits, feeUnits),
+                commitTimestamp < 0 ? createdAtEpochMillis : commitTimestamp,
+                commitTimestamp < 0 ? updatedAtEpochMillis : commitTimestamp,
+                commitTimestamp < 0 ? clusterPosition : commitPosition, nextStatus, nextRevision);
     }
 
     public OrderRuntime withStatus(CoreOrderStatus nextStatus, long nextRevision) {
         return withExecution(executedQuantitySteps, remainingQuantitySteps, nextStatus, nextRevision);
+    }
+
+    OrderRuntime withStatus(CoreOrderStatus nextStatus, long nextRevision,
+                            long commitTimestamp, long commitPosition) {
+        return withFill(executedQuantitySteps, remainingQuantitySteps, 0, nextStatus, nextRevision,
+                commitTimestamp, commitPosition);
     }
 
     public OrderRuntime withCommitMetadata(long timestamp, long position) {

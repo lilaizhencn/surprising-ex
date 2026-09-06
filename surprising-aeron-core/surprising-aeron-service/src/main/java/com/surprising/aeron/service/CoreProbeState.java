@@ -987,7 +987,7 @@ public final class CoreProbeState implements AutoCloseable {
         byte[] responseData = commandResultData();
         storeResult(message.header().commandId(), StoredResult.owned(fingerprint, status, resultCode,
                 appliedCommandCount, requiredExportSequence, stateHash, responseData));
-        CoreResponse response = new CoreResponse(status, status, resultCode, appliedCommandCount,
+        CoreResponse response = CoreResponse.owned(status, status, resultCode, appliedCommandCount,
                 requiredExportSequence, stateHash, responseData);
         return releaseAdmission(commandAdmission, response);
     }
@@ -1942,7 +1942,7 @@ public final class CoreProbeState implements AutoCloseable {
         unregisterPipelinedBatchSymbols(batch);
         pendingOrderBatches.remove(batch.sequence);
         submitDeferredMatchingAfterBatch();
-        CoreResponse response = new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED,
+        CoreResponse response = CoreResponse.owned(ResponseStatus.APPLIED, ResponseStatus.APPLIED,
                 CoreResultCode.NONE, batch.sequence, requiredExportSequence, stateHash, responseData);
         releaseOrderBatchPending(batch);
         return releaseAdmission(capacityReservation, response);
@@ -2301,7 +2301,7 @@ public final class CoreProbeState implements AutoCloseable {
         if (placeAdmission == null) submitMatching(pending);
         else progressPlaceAdmissions();
         clearFactContext();
-        return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, matchingPendingCode(),
+        return CoreResponse.owned(ResponseStatus.OK, ResponseStatus.OK, matchingPendingCode(),
                 sequence, requiredExportSequence, stateHash, responseData);
     }
 
@@ -3845,7 +3845,7 @@ public final class CoreProbeState implements AutoCloseable {
         if (!deferredMatching.isEmpty() || !pendingOrderBatches.isEmpty()) {
             submitDeferredMatchingAfterBatch();
         }
-        CoreResponse response = new CoreResponse(
+        CoreResponse response = CoreResponse.owned(
                 status, status, resultCode, applied, requiredExportSequence, stateHash, responseData);
         return releaseAdmission(capacityReservation, response);
     }
@@ -3979,7 +3979,7 @@ public final class CoreProbeState implements AutoCloseable {
         runtimePlaceOrderState.releaseMatcherSettlement(pending.takeSettlementEvent());
         removePendingMatching(applied);
         if (!deferredMatching.isEmpty() || !pendingOrderBatches.isEmpty()) submitDeferredMatchingAfterBatch();
-        CoreResponse response = new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED,
+        CoreResponse response = CoreResponse.owned(ResponseStatus.APPLIED, ResponseStatus.APPLIED,
                 CoreResultCode.NONE, applied, requiredExportSequence, stateHash, responseData);
         return releaseAdmission(capacityReservation, response);
     }
@@ -4033,7 +4033,7 @@ public final class CoreProbeState implements AutoCloseable {
         runtimePlaceOrderState.releaseCancel(pending.takeCancelEvent());
         removePendingMatching(applied);
         if (!deferredMatching.isEmpty() || !pendingOrderBatches.isEmpty()) submitDeferredMatchingAfterBatch();
-        CoreResponse response = new CoreResponse(ResponseStatus.APPLIED, ResponseStatus.APPLIED,
+        CoreResponse response = CoreResponse.owned(ResponseStatus.APPLIED, ResponseStatus.APPLIED,
                 CoreResultCode.NONE, applied, requiredExportSequence, stateHash, responseData);
         return releaseAdmission(capacityReservation, response);
     }

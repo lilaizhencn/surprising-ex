@@ -428,9 +428,14 @@ public class ClusteredBatchTradingBenchmark {
                 if (state.orders().size() != 1 || state.order(1) == null) {
                     throw new IllegalStateException("terminal order retention mismatch");
                 }
+                if (state.clientOrderIndex().size() != 1
+                        || state.clientOrderIndex().values().stream().anyMatch(id -> id != 1L)) {
+                    throw new IllegalStateException("terminal order retained client aliases");
+                }
                 byte[] snapshot = service.state().snapshot();
                 try (CoreProbeState restored = CoreProbeState.fromSnapshot(productLine, snapshot)) {
-                    if (restored.tradingState().businessStateHash() != state.businessStateHash()) {
+                    if (restored.tradingState().businessStateHash() != state.businessStateHash()
+                            || !restored.tradingState().clientOrderIndex().equals(state.clientOrderIndex())) {
                         throw new IllegalStateException("snapshot recovery mismatch");
                     }
                 }

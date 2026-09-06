@@ -732,10 +732,8 @@ public final class TradingRuntimeState implements AutoCloseable {
                     removeUserEntity(lane.reservationIdsByUser, order.userId(), orderId);
                     changes.removeReservationRoute(orderId);
                 }
-                LongHashSet clientKeys = lane.clientKeysByOrderId.get(orderId);
-                if (clientKeys != null) {
-                    clientKeys.forEach(clientKey -> changes.retireClientIdentity(order.userId(), clientKey));
-                }
+                lane.clientKeysByOrderId.forEach(orderId,
+                        clientKey -> changes.retireClientIdentity(order.userId(), clientKey));
                 removeClientOrdersForOrder(lane, order.userId(), orderId);
             });
             changes.positions.forEach((positionKey, position) -> changes.positionIndexValues.put(positionKey,
@@ -1325,9 +1323,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         requirePendingReservationIndex(orderId, coreSequence, userId);
         PendingReservationCompletion completion = onLane(userId, accountLane -> {
             ReservationRuntime reservation = accountLane.reservations.get(orderId);
-            LongHashSet clientKeys = accountLane.clientKeysByOrderId.get(orderId);
             if (reservation != null) captureBalanceBefore(userId, reservation.assetId());
-            if (clientKeys != null) clientKeys.forEach(clientKey -> captureClientOrderBefore(userId, clientKey));
+            accountLane.clientKeysByOrderId.forEach(orderId, clientKey -> captureClientOrderBefore(userId, clientKey));
             accountLane.completePendingReservation(orderId, coreSequence);
             if (reservation != null) captureBalanceAfter(accountLane, userId, reservation.assetId());
             return new PendingReservationCompletion(reservation);
@@ -1383,11 +1380,9 @@ public final class TradingRuntimeState implements AutoCloseable {
             requirePendingReservationIndex(ref.orderId(), coreSequence, ref.userId());
             PendingReservationBatchCompletion completion = onLane(ref.userId(), lane -> {
                 ReservationRuntime reservation = lane.reservations.get(ref.orderId());
-                LongHashSet clientKeys = lane.clientKeysByOrderId.get(ref.orderId());
                 if (reservation != null) captureBalanceBefore(ref.userId(), reservation.assetId());
-                if (clientKeys != null) {
-                    clientKeys.forEach(clientKey -> captureClientOrderBefore(ref.userId(), clientKey));
-                }
+                lane.clientKeysByOrderId.forEach(ref.orderId(),
+                        clientKey -> captureClientOrderBefore(ref.userId(), clientKey));
                 lane.requirePendingReservationCompletion(ref.orderId(), coreSequence);
                 return new PendingReservationBatchCompletion(ref.orderId(), ref.userId(), reservation);
             });
@@ -2080,10 +2075,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             captureOrderBefore(orderId);
             captureReservationBefore(orderId);
             captureBalanceBefore(reservation.userId(), reservation.assetId());
-            LongHashSet clientKeys = lane.clientKeysByOrderId.get(orderId);
-            if (clientKeys != null) {
-                clientKeys.forEach(clientKey -> captureClientOrderBefore(reservation.userId(), clientKey));
-            }
+            lane.clientKeysByOrderId.forEach(orderId,
+                    clientKey -> captureClientOrderBefore(reservation.userId(), clientKey));
             lane.completePendingReservation(orderId, plan.coreSequence());
             captureBalanceAfter(lane, reservation.userId(), reservation.assetId());
         }
@@ -3950,6 +3943,11 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     public void cancelOrder(long orderId, long userId, long releaseUnits) {
+        cancelOrder(orderId, userId, releaseUnits, -1, -1);
+    }
+
+    private void cancelOrder(long orderId, long userId, long releaseUnits,
+                             long commitTimestamp, long commitPosition) {
         assertOwner();
         captureUserBefore(userId);
         captureOrderBefore(orderId);
@@ -3971,7 +3969,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             captureBalanceBefore(userId, reservation.assetId());
             balance.release(releaseUnits);
             OrderRuntime terminalOrder = order.withStatus(CoreOrderStatus.CANCELED,
-                    Math.incrementExact(order.revision()));
+                    Math.incrementExact(order.revision()), commitTimestamp, commitPosition);
             ReservationRuntime released = reservation.release(releaseUnits);
             lane.replacePendingReservation(reservation, released);
             lane.putOrder(terminalOrder);
@@ -3991,6 +3989,10 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     void cancelOrderInLane(long userId, long orderId) {
+        cancelOrderInLane(userId, orderId, -1, -1);
+    }
+
+    void cancelOrderInLane(long userId, long orderId, long commitTimestamp, long commitPosition) {
         AccountLaneState lane = laneCommandScope.get();
         if (lane == null || lane.laneId() != topology.accountLaneId(userId)
                 || matcherSettlementChangesScope.get() == null) {
@@ -4001,7 +4003,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (order == null || reservation == null || order.userId() != userId || order.status().terminal()) {
             throw new IllegalArgumentException("runtime order is not cancelable: " + orderId);
         }
-        cancelOrder(orderId, userId, reservation.reservedUnits());
+        cancelOrder(orderId, userId, reservation.reservedUnits(), commitTimestamp, commitPosition);
     }
 
     void replaceOrderInLane(AccountLaneState lane, long userId, long originalOrderId,
@@ -5044,12 +5046,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (hadPrevious && previousOrderId != orderId) {
             removeClientOrderReverse(lane, previousOrderId, clientKey);
         }
-        LongHashSet keys = lane.clientKeysByOrderId.get(orderId);
-        if (keys == null) {
-            keys = new LongHashSet();
-            lane.clientKeysByOrderId.put(orderId, keys);
-        }
-        keys.add(clientKey);
+        lane.clientKeysByOrderId.add(orderId, clientKey);
     }
 
     private static Long removeClientOrderIndex(AccountLaneState lane, long userId, long clientKey) {
@@ -5063,19 +5060,16 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     private static void removeClientOrderReverse(AccountLaneState lane, long orderId, long clientKey) {
-        LongHashSet keys = lane.clientKeysByOrderId.get(orderId);
-        if (keys == null) return;
-        keys.remove(clientKey);
-        if (keys.isEmpty()) lane.clientKeysByOrderId.remove(orderId);
+        lane.clientKeysByOrderId.remove(orderId, clientKey);
     }
 
     private static void removeClientOrdersForOrder(AccountLaneState lane, long userId, long orderId) {
-        LongHashSet keys = lane.clientKeysByOrderId.remove(orderId);
-        if (keys == null) return;
         LongLongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
-        if (userClientOrders == null) return;
-        keys.forEach(userClientOrders::removeKey);
-        if (userClientOrders.isEmpty()) lane.clientOrderIndex.remove(userId);
+        if (userClientOrders != null) {
+            lane.clientKeysByOrderId.forEach(orderId, userClientOrders::removeKey);
+            if (userClientOrders.isEmpty()) lane.clientOrderIndex.remove(userId);
+        }
+        lane.clientKeysByOrderId.remove(orderId);
     }
 
     private static void indexActiveLiquidation(AccountLaneState lane, LiquidationRuntime liquidation) {

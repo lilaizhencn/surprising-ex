@@ -95,7 +95,7 @@ public final class CoreProtocol {
         }
         byte[] data = new byte[dataLength];
         buffer.get(data);
-        return new CoreResponse(status, commandStatus, resultCode, routeVersion, committedCoreSequence,
+        return CoreResponse.decoded(status, commandStatus, resultCode, routeVersion, committedCoreSequence,
                 appliedCommandCount, requiredExportSequence, stateHash, data);
     }
 }

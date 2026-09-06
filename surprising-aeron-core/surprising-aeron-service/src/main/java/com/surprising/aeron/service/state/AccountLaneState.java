@@ -41,8 +41,7 @@ public final class AccountLaneState {
     final LongObjectHashMap<RiskSnapshotRuntime> riskSnapshots = new LongObjectHashMap<>();
     final LongObjectHashMap<LongLongHashMap> clientOrderIndex =
             new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
-    final LongObjectHashMap<LongHashSet> clientKeysByOrderId =
-            new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
+    final OrderClientKeyIndex clientKeysByOrderId = new OrderClientKeyIndex();
     final Map<CoreLeverageKey, Long> leverages = new HashMap<>();
     final LongObjectHashMap<HashSet<CoreLeverageKey>> leverageKeysByUser = new LongObjectHashMap<>();
     /**

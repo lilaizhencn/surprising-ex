@@ -48,6 +48,15 @@ public class CoreResponseEncodingBenchmark {
     }
 
     @Benchmark
+    public int constructAndEncodeOwnedResponse(ResponseState state) {
+        // Encoded bytes have the same read-only lifetime as Core's retained terminal result.
+        CoreResponse response = CoreResponse.owned(ResponseStatus.OK, ResponseStatus.APPLIED,
+                CoreResultCode.NONE, 41, 43, 47, state.encodedData);
+        return CoreMessageCodec.encodeResponse(
+                state.header, response, state.committedCoreSequence, state.destination);
+    }
+
+    @Benchmark
     public byte[] encodePlaceBatch(OrderBatchCodecState state) {
         return TradingOrderBatchCodec.encodePlaceOrderBatch(state.command);
     }
@@ -86,6 +95,7 @@ public class CoreResponseEncodingBenchmark {
 
         private CoreMessageHeader header;
         private CoreResponse response;
+        private byte[] encodedData;
         private byte[] destination;
         private long committedCoreSequence;
 
@@ -98,6 +108,7 @@ public class CoreResponseEncodingBenchmark {
             header = command.response(CoreMessageType.COMMAND_RESULT);
             byte[] data = new byte[dataBytes];
             for (int index = 0; index < data.length; index++) data[index] = (byte) index;
+            encodedData = data;
             response = new CoreResponse(ResponseStatus.OK, ResponseStatus.APPLIED, CoreResultCode.NONE,
                     41, 43, 47, data);
             destination = new byte[CoreMessageCodec.encodedResponseLength(response)];
