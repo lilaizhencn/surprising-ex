@@ -3621,3 +3621,59 @@
 - 全进程JFR每线3次G1New，最长单次pause6.93–7.46ms，DataLoss/JavaMonitorEnter事件0。CPU参数实际wall引擎，预热不足，不输出稳态CPU、B/op、吞吐或分位延迟结论。JMH场景通过有限入口执行，未进行timed measurement。
 - 证据目录含原始async/JVM JFR、火焰图、collapsed/summary、事件JSON、分组指标、所有测试日志、有限入口/命令、源码patch及SHA256SUMS。未覆盖真实Aeron网络/网关/WS、长期泄漏和完整生产容量，仍不构成完整性能验收。
 - 被测benchmark JAR SHA256：`6b94d8079a4b74746ed612cd364a9d39045b00a1123d498d1d7ee63f76eddbd8`；源码最终提交和source.patch校验存于同目录revision.json、SHA256SUMS。
+
+
+## 2026-09-06 整体Core链路持续分配诊断：采集前锁定
+
+- 用户本轮明确授权几分钟压测，覆盖此前不持续压测的限制。被测master提交b191a7aa9b9a3fa0c7062715671f509c565e376c；对照commit不适用（仅验证当前master）。仅采集，不在测量期间修改源码/参数。
+- 范围：SPOT和LINEAR_PERPETUAL各1×180s持续measurement，前3×10s warmup，独立JVM顺序运行，中间30s冷却。六线已有有限功能覆盖，其余四线本轮不形成持续性能结论。真实Core服务解码→owner准入→matcher→Account Lane结算→commit→响应编码，模拟Cluster/ClientSession；不包含真实Aeron网络、HTTP网关、数据库/Kafka/WS。实时出口关闭，maker由同进程fixture持续保留挂单参与往返交易，不等同独立做市进程。
+- 固定Workload decodedBatchAdmissionAndSettlement：256 in-flight、257活跃账户（256用户+1maker）、1模拟session、1symbol、4Account Lane、1matcher，batchSize2；每cycle3584business ops、2048业务Core messages、1024fills、512查询。closed-loop波次，无open-loop到达率；不输出coordinated-omission修正或API三段尾延迟。JMH主分数的op是cycle，报告时转换为terminal business ops/s；gc.alloc.rate.norm的B/op也必须除以3584才能标注B/business op。
+- 初态同既有场景：每账户settle资产1,000,000,000units，现货maker额外513 BTC units，价格100、永久maker挂单120，零费率、衍生品CROSS、mark100；六阶段改单成交往返+批量挂撤及查询。每cycle校验终态及fill数量，迭代末全量核对用户/maker余额、冻结、预占、持仓归零、只剩maker订单和恢复snapshot hash。
+- 环境：Oracle GraalVM25.0.1 HotSpot/Maven3.9.16，macOS26.7 x86_64、Intel i9-9880H 8C/16T、16GiB。JVM Xms=Xmx768MiB、G1、NMT summary/退出统计、UnlockDiagnosticVMOptions/DebugNonSafepoints，jdk.internal.misc和java.util.zip opens/exports。无OpenJ9。采集前swap已用1202.50MiB，监控新增swap/pageout，不把既有swap当作本轮分配。
+- JMH fork1、threads1、warmup3×10s、measurement1×180s、gc=true仅迭代边界、foe=true、prof gc。async-profiler4.5通过JMH集成：event=wall/interval10ms、alloc=128k、lock=1ms、threads=true、output=jfr，只采measurement；macOS不声称perf CPU。独立JVM JFR自定义allocation.jfc覆盖启动/预热/终检，含NewTLAB/OutsideTLAB、1s线程分配/CPU/DirectBuffer、safepoint/VM等事件。采样开销下吞吐仅诊断，没有无profiler主轮，不能作生产容量。
+- 采集前通过/告警标准：accepted=terminal、unfinished/endBacklog=0，资金及snapshot核对通过、无OOM/业务异常；DataLoss=0、CPU speed=100且无新增swap/pageout才可作稳定性能证据，否则标无效性能轮次并保留定位栈。GC pause>50ms或稳定窗口GC后heap净增>32MiB标记待查；owner交易栈出现同步文件/socket/database IO标记问题，需排除夹具/启动/快照。缺少长稳、native池余额、上下文切换及分业务尾延迟不能完整验收。
+- 每5s记录pmset热状态、swap/vm_stat、目标线程/进程CPU/RSS；每30s采集fork JVM NMT及FD数量，记录采样命令的额外扰动。不并行跑Maven/其它压测。按交易owner、matcher、Account Lane、查询/响应、夹具、JIT/其它分组分配，不能把客户端模拟解码算成Core业务分配。
+- 原始产物 `/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-06-sustained/`，含命令、JAR、JFC、JMH JSON、async/JVM JFR、系统/NMT日志、聚合和SHA256SUMS；失败轮次保留。180s不证明长期无泄漏或全产品线容量。
+- 锁定JAR SHA256 `6b94d8079a4b74746ed612cd364a9d39045b00a1123d498d1d7ee63f76eddbd8`；JFC SHA256 `e59ae7afc138334cfe3bd62c04e0d451a56a5dbc1063e5f5480a9982c344a2e7`。
+
+### 3分钟持续测量结果与整体分配归因
+
+2026-09-06 22:07–22:15 UTC+8，两条产品分别预热30秒、持续测量180秒，全部成功。业务源码未改，仅追加诊断记录。
+
+|指标|SPOT|LINEAR_PERPETUAL|
+|---|---:|---:|
+|终态business ops|4,906,496|5,085,696|
+|终态业务Core messages|2,803,712|2,906,112|
+|fills|1,401,856|1,453,056|
+|带profiler终态business ops/s|27,239|28,234|
+|JMH分配率 MiB/s|304.90|316.87|
+|B/business op（含夹具及查询）|11,746.79|11,777.51|
+|measurement GC次数/时间ms|125 / 995|130 / 1042|
+
+- 两边acceptedBusinessOperations=terminalBusinessOperations、acceptedCoreMessages=terminalCoreMessages，循环和终检断言全部通过，unfinished/endBacklog0、预期拒绝0。用户/maker余额、冻结、预占、仓位归零、终态订单仅剩maker挂单及snapshot恢复hash核对通过。maxBacklog0是回调完成时的内部指标，不能代替真实网络积压。counter/params/score/原始结果完整保留。
+- 本轮只有带profiler的单measurement，JMH主op是3584业务操作的一个cycle，GC norm原单位B/cycle已除3584。上述bytes/business op含512queries/cycle、夹具请求构造/响应解码和迭代边界开销，不能直接称作纯撮合每单开销。没有置信区间/无profiler主轮，不以此认定生产容量。
+
+|分配采样归属（互斥栈分类，占整次async分配权重）|SPOT|LINEAR_PERPETUAL|
+|---|---:|---:|
+|真实Core owner（剔除下列单列阶段）|37.6%|36.3%|
+|Account Lane|18.7%|20.2%|
+|matcher|7.9%|7.9%|
+|Core响应输出|2.3%|2.3%|
+|Lane监控查询|12.8%|12.8%|
+|夹具响应解码|14.6%|14.5%|
+|夹具请求/初始化|5.9%|5.9%|
+|快照/恢复边界|0.1%|0.1%|
+
+- 权重为async采样估计，非精确对象个数；整次权重53.57/55.56GiB。分类按栈优先级避免同一份权重重复计算：客户端响应解码、快照、监控查询、matcher、Lane、响应输出、owner、夹具。个别JIT内联行号可能指到调用后指令，不把某一源码行机械等同allocation表达式。
+- **下一优先级1：结果编码/payload生命周期。** 剔除夹具响应和监控查询后，CoreProtocol.encodeResponsePayload调用链byte[]权重约1280/1306MiB，CoreResponse构造约706/757MiB；源码CoreResponse构造防御性clone，batch结果编码和响应组包各生成数组。这是真实服务边界成本，适合检查能否直接写入有明确所有权的响应buffer、减少中间封装；不能直接删防御性复制或复用仍被异步读取的buffer。withCommittedCoreSequence虽也会复制，但本轮未采到该方法，不将其说成本轮主要热点。
+- **下一优先级2：client-order反向索引。** Account Lane的TradingRuntimeState.putClientOrderIndex在每个新orderId创建LongHashSet；该调用链权重约1157/1168MiB，其中long[]约629/636MiB。常见单clientKey订单也付出集合开销。可以评估单键存储、多别名才升级集合的表示，但必须保留改单/重试别名、终态回收和恢复语义，不能简单去掉索引。
+- **下一优先级3：订单状态重复物化。** OrderRuntime类总权重约2479/2533MiB；stampMatcherOrders/withCommitMetadata和Lane订单生命周期多次生成不可变记录。必须先证明哪些中间版本没有发布/被财务fact引用，才能合并构造；跨owner/Lane共享可变OrderRuntime并非可接受的“零分配”方案。
+- **单列监控成本而非交易bug：** 本夹具每4条业务Core消息另有1次Lane指标查询，laneMetrics/accountLaneMetricsById、CoreLaneMetrics/CoreLaneMetricsView和编码层多次生成/复制long[]。该12.8%不能套用到实际低频监控部署；下轮纯交易成本测量应把查询频率单独作为场景变量，不能在本轮中途偷偷改频率。
+- 先前修复的枚举解码、重复查询键和已有订单TreeSet不再是本轮主要热点；仍有Long/long[]用于真实状态和输出。整个系统尚未零分配，后续应按上述权重和所有权逐项验证，不能把所有数组都认定为浪费。
+- **GC和堆：** 全进程JFR（含预热/终检）GC154/161次，pause p50约7.99/8.08ms、p95约9.34/9.49ms、max20.57/21.83ms，均未触发50ms告警。以第一条heap事件起算60秒后的30秒桶，SPOT GC后45.14–47.60MiB、永续45.50–47.68MiB，无连续上升或32MiB净增告警。仅3分钟，不能证明长期无泄漏。
+- **NMT/native：** 约30秒至210秒NMT committed现货953.83→959.74MiB、永续955.69→962.12MiB；主要增长Tracing5549/5931KiB，另有Code288/374KiB及NMT自身304/326KiB。Java Heap committed768MiB不变，DirectBuffer采样count/capacity/used均0（不含真实Aeron/Netty池，不能推断生产堆外为0）。run.py的“FD count”实际上计lsof输出条目，包含mmap等，不能当作精确FD数，本轮未形成可靠FD趋势结论。
+- **线程/等待：** async锁1ms门限无事件、JFR DataLoss0；owner壁钟样本中commitReadyMatching为10898/17725与8871/16840，onSpinWait为4494与3299，await为4598与3403，集合有重叠不可相加。这是有序提交/等待边界，不能据此删除fence，也不能将wall百分比说成CPU占比。实际CPU/线程负载原件在cpu.tsv；全进程Compilation事件38/33、Deoptimization292/293包含启动，不保证所有窗口已JIT稳态。
+- **分配事件完整口径：** 全进程NewTLAB事件147070/152560、权重约66.65/69.64GB，OutsideTLAB1758/1848、对象字节166.54/168.49MB，所记录最大对象4,194,320B；包括启动、预热、快照，非measurement分母。ThreadAllocationStatistics部分native编译线程计数回退，原始first/last保留，不对其负差值做“负分配”解释；真实业务线程与async权重分开保存。未精确测量每个Java对象数/op。
+- **环境和I/O：** 两轮所有5秒记录CPU_Speed_Limit=100，swap1202.50MiB无增加；DataLoss0。未采到配置阈值以上的交易processCommittedRequest栈文件/socket IO，不等于排除阈值以下全部IO。更多safepoint/VM事件、wait栈、CPU、GC桶、NMT类别、分配class/site/thread见JfrStats.java流式聚合输出和diagnostics.json，不物化百万条TLAB事件为大JSON。
+- 原始四份JFR（每线JVM+async）、六种模式火焰图（每线alloc/wall/lock）、collapsed/summary、JMH JSON、JFC、运行/流式分析脚本、系统/NMT日志、锁定JAR、源码提交和SHA256SUMS均在本轮证据目录。记录期包含若干初始化/终检事件，已单列边界。
+- **结论：持续负载能稳定定位上述真实分配路径，当前两线的业务正确性和短期状态回收通过。** 真实网络/Aeron三节点、HTTP/API三段分业务尾延迟、其余四线持续负载、非零费率、风险/资金费/强平/到期、WS、完整native池/FD和长期泄漏未测；整体仍仅部分性能验证，不是全栈容量验收。本轮不修改生产代码。
