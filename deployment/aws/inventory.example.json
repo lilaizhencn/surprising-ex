@@ -1,0 +1,17 @@
+{
+  "productLine": "SPOT",
+  "coreHosts": ["10.0.1.10", "10.0.2.10", "10.0.3.10"],
+  "appHost": "10.0.1.20",
+  "releaseDirectory": "/opt/surprising/releases/REPLACE_WITH_COMMIT",
+  "dataDirectory": "/var/lib/surprising",
+  "javaHome": "/opt/java",
+  "serviceUser": "ubuntu",
+  "databaseUrl": "jdbc:postgresql://10.0.1.20:5432/surprising_exchange",
+  "databaseUser": "surprising",
+  "databasePassword": "REPLACE_ME",
+  "kafkaBootstrap": "10.0.1.20:9092",
+  "valkeyHost": "10.0.1.20",
+  "valkeyPassword": "REPLACE_ME",
+  "gatewayJwtSecret": "REPLACE_ME",
+  "accountInternalSecret": "REPLACE_ME"
+}
