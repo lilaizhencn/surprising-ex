@@ -169,6 +169,26 @@ class FundingServiceTest {
         verify(fixture.aeron, never()).commandWithResponse(any(), any(), any());
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value=com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.class,names={"SETTLEMENT","CLOSED"})
+    void clearanceSuppressesNewFundingWithoutClaimingPayment(com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode mode) {
+        var fixture=new Fixture(new FundingProperties());
+        var due=new FundingRateResponse("BTC-USDT",11,100,90,10,Instant.now().minusSeconds(1),8,"PREDICTED",Instant.now());
+        fixture.cache.update(due);
+        when(fixture.aeron.query(eq(CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY),any(),any()))
+                .thenReturn(maintenance(new com.surprising.aeron.protocol.CoreInstrumentMaintenance(7,mode,100)));
+        assertThat(fixture.service.settleDueRates().failedRates()).isZero();
+        verify(fixture.settlementRepository,never()).reserveCore(any());
+        verify(fixture.aeron,never()).commandWithResponse(any(),any(),any());
+        verify(fixture.rateRepository,never()).saveFinal(any());
+        assertThat(fixture.cache.duePredictions(Instant.now())).hasSize(mode==com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.CLOSED?0:1);
+    }
+
+    private static CoreResponse maintenance(com.surprising.aeron.protocol.CoreInstrumentMaintenance gate) {
+        return new CoreResponse(ResponseStatus.OK,0,0,com.surprising.aeron.protocol.CoreMaintenanceCodec.encodePage(
+                new com.surprising.aeron.protocol.CoreMaintenanceCodec.Page(gate,1,List.of(),false)));
+    }
+
     private static FundingRateInput rateInput() {
         return new FundingRateInput("BTC-USDT", 0, 100, 10, -3_750, 3_750, 8, Instant.now());
     }
@@ -193,6 +213,8 @@ class FundingServiceTest {
 
         private Fixture(FundingProperties properties) {
             when(leaseRepository.acquire(any(), any(), any())).thenReturn(true);
+            when(aeron.query(eq(CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY),any(),any()))
+                    .thenReturn(maintenance(com.surprising.aeron.protocol.CoreInstrumentMaintenance.TRADING));
             cache = new LatestFundingRateCache(properties);
             service = new FundingService(properties, leaseRepository, sequenceRepository, rateInputRepository,
                     rateRepository, settlementRepository, paymentRepository, cache, kafka, aeron);

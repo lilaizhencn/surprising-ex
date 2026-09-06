@@ -46,7 +46,7 @@ public class ExpiringContractSettlementFanoutService {
                 + ':' + settlementId + ':' + UUID.randomUUID();
         long cursor = 0;
         CoreSettlementProgressView persisted = decodeProgressOrQuery(symbol, settlementId, null);
-        if (persisted != null && persisted.complete() && persisted.settlementId() == settlementId) return;
+        if (persisted != null && persisted.complete() && persisted.settlementId() != 0) return;
         long orderCursor = 0;
         if (persisted != null && !persisted.complete()) {
             orderCursor = persisted.ordersComplete() ? 0 : persisted.nextCursorOrderId();
@@ -99,6 +99,18 @@ public class ExpiringContractSettlementFanoutService {
         }
         CoreSettlementProgressView progress = CoreSettlementProgressCodec.decode(effective.data());
         if (progress.settlementId() != 0 && progress.settlementId() != settlementId) {
+            // An early administrative clearance replaces the later scheduled expiry, only after Core closes it.
+            if (response == null && progress.complete()) {
+                var gateResponse = aeron.query(CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY, UUID.randomUUID(),
+                        com.surprising.aeron.protocol.CoreMaintenanceCodec.encodeQuery(
+                                new com.surprising.aeron.protocol.CoreMaintenanceCodec.Query(symbol, 0, 1)));
+                if (gateResponse == null || gateResponse.status() != com.surprising.aeron.protocol.ResponseStatus.OK) {
+                    throw new IllegalStateException("Aeron maintenance state unavailable");
+                }
+                var gate = com.surprising.aeron.protocol.CoreMaintenanceCodec.decodePage(gateResponse.data()).state();
+                if (gate.mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.CLOSED
+                        && gate.taskId() == progress.settlementId()) return progress;
+            }
             throw new IllegalStateException("Aeron settlement progress mismatch");
         }
         if (response != null && progress.settlementId() != settlementId) {

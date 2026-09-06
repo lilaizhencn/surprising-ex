@@ -803,7 +803,7 @@ Topic、端口、磁盘、监控阈值和故障演练的精确清单待生产 Ru
   已进入 matcher/结束的批次忽略迟到 admission 通知，不再尝试路由不存在的下一项。
 - 延后启动且全部 item 被拒绝的批次仍保留到顺序 completion 边界，不能在无响应接收方的后台路径直接完成。
   Account Lane 的提交、查询与快照 fence 统一使用 Core sequence，不与 projection sequence 混用；
-  对应 sectioned snapshot 格式为 v19，旧格式不做兼容 fallback。
+  对应 sectioned snapshot 当前格式为 v20，旧格式不做兼容 fallback。
 - `InsuranceAllocationPolicy.expectedCoverage` 只计算目标资产的目标索赔，不建立全资产结果 Map 或排序；
   保留整数精确分摊、确定性余数顺序和逐笔赔付后的重新计算。终态保留仅移除无人消费的审计 digest，
   资金命令幂等指纹、终态去重和 snapshot 数据不删除。
@@ -870,7 +870,7 @@ owner 汇总保险需求、检查 Treasury 后，再由原 Lane 应用余额和�
 `SettlementSolvencyBenchmarkTest` 覆盖两交割和期权的全仓/逐仓、部分补资不扣款、暂停后恢复、足额续结、
 重复完成以及最终资金守恒。
 
-协议 schema 为 **5**，sectioned snapshot 为 **27**，进度查询/响应和快照均保存本页保险需求。
+协议 schema 为 **5**，TradingStateSnapshotCodec 为 **28**，外层 sectioned snapshot 为 **20**，进度查询/响应和快照均保存本页保险需求。
 相关 producer/client/service 需同版本部署；不支持旧协议或旧快照兼容回退。
 `PositionUserIndex` 仅在成员关系变化时维护索引，分页按 primitive Lane 数组查后继；
 `ActiveOrderIndex` 使用 owner 复用的 1025 个 long 缓冲选取页面候选，排序有界，仍需扫描候选集合。
@@ -879,3 +879,76 @@ owner 汇总保险需求、检查 Treasury 后，再由原 Lane 应用余额和�
 ## 本机故障恢复功能验证
 
 Core + Aeron Cluster 的少量样本故障验证入口见 [deployment/local-faults/README.md](deployment/local-faults/README.md)，当前执行记录见 [FAULT_RECOVERY_VALIDATION.md](FAULT_RECOVERY_VALIDATION.md)。不包含压测或推送验收。
+
+## 运营撤单、平仓与清退 / Trading maintenance
+
+后台 `surprising-admin-web` 的「交易维护」页面使用
+`surprising-trading-provider` 内的 `maintenance.AdminMaintenanceController`、`MaintenanceService` 和
+`MaintenanceRepository`。任务必须指定产品线、精确币对、原因；可选择单用户或全部用户。
+**交易限制始终作用于整个币对**，单用户仅缩小被撤单/平仓的范围。六产品线任务、账户与 Core 隔离。
+
+| 方式 | 执行行为 | 完成后的交易状态 |
+| --- | --- | --- |
+| CANCEL 撤单 | 限制交易，撤普通单和待执行触发单，核对残留；不处置现货资产 | 保留 HALTED，运营另行审批恢复 |
+| MARKET 市价平仓 | 进入 REDUCE_ONLY，撤目标范围订单，再按仓位发 reduce-only 市价 IOC | 无残留才完成；保留限制，另行恢复 |
+| LIMIT 限价平仓 | 同上，使用审批时指定的价格 ticks、限价 IOC | 未成交部分保留仓位并阻塞，可重试剩余仓位 |
+| SETTLEMENT 固定价格清退 | 五条衍生品整币对按指定价格分批结算；期权输入标的结算价，按内在价值行权 | 完成后 CLOSED，不可恢复或改价 |
+
+现货仅开放 CANCEL。固定价格清退不允许单用户，避免破坏对手方资金守恒。
+市价/限价平仓依赖真实对手盘，不保证全部成交；整币对撤单会清除原有对手盘，后续只能由持有反向仓位的
+用户提交 reduce-only 流动性。若运营要求不依赖撮合的整体清退，应在创建任务时选 SETTLEMENT。
+本功能撤销普通单和触发单，不删除 TWAP 等算法任务；其子单仍受 Core 维护门控约束。
+Core 停止交易与产品服务的市场展示/下架状态是两个操作，市场展示由原有产品配置管理。
+
+### 持久化、恢复与审批
+
+- 上线前在各 Trading Provider 使用的数据库执行 [增量 SQL](migrations/20260906_trading_maintenance.sql)；
+  新库 `init.sql` 已包含两张表。不要对现有库重新执行全量初始化。
+- `trading_maintenance_task` 保存不可变请求、操作人和进度，`trading_maintenance_action` 保存发送前已提交的命令意图和实际结果。
+  `(product_line, request_id)` 幂等，同一币对只能有一个未解除任务。数据库备份必须和 Core 运行恢复方案一并保留。
+- Worker 每次至多发送一条变更命令，默认间隔 1000 ms，由
+  `surprising.trading.maintenance.step-delay-ms` 配置；多副本通过 `FOR UPDATE SKIP LOCKED` 协调。
+  管理请求使用独立 `MaintenanceAeronGateway` 连接/队列和 source identity，复用该产品线 Aeron 网络配置。
+  SQL 和网络等待不在 Core owner 内执行；Core 查询、生命周期结算仍经过原有一致性 fence，不能宣称零成本。
+- Core 保存维护 taskId、模式和价格，随日志、业务 hash、配对快照恢复；外部 instrument 元数据更新不会解除维护。
+  开仓、改单和触发执行受门控检查，撮合平仓始终 reduce-only，防止重试反向开仓。
+- 未知结果保留原命令和参数重试；明确拒绝的门控重新生成命令身份，防止永久命中旧拒绝。
+  固定清退前必须完成该币对已有资金费、强平、保险/ADL 和结算操作；进入后阻止新增竞争性强平和资金费切片。
+  保险不足时保留已完成页和原价格，本页不扣部分款，补足后续结。不可把提交成功当作结算完成。
+- 原定到期事件遇到提前清退，只有核对到 Core 的 CLOSED 和同一已完成结算身份才确认消费；
+  尚在清退或状态不可用仍重试。资金费服务在清退中暂停新资金费，CLOSED 后移除待处理预测，
+  不伪造资金费 FINAL 或付款记录。
+- BLOCKED 显示真实错误；撮合残留重新查询后按新轮次关闭剩余量。未知命令结果必须先核对，不能直接恢复交易。
+  release 本身也是可恢复的异步阶段。明确未进入维护的拒绝任务可取消；已进入固定清退的任务不能撤销。
+- API 复用网关 `trading-orders` 的写权限、审批和审计，不绕过已有审批中心。
+  Provider 仅应在现有受信内网开放，`X-Admin-User-Id` 和 `X-Product-Line` 由认证网关注入。
+
+### API 与部署契约
+
+基路径 `/api/v1/admin/trading/orders/maintenance`，所有请求必传 `productLine` 查询参数：
+GET 基路径为任务分页（`beforeId`），GET `/preview` 为 Core 当前残留（`symbol,userId,afterUserId`），
+GET `/{id}` 为详情，GET `/{id}/actions` 为操作分页（`afterKey`）；POST 基路径创建，
+POST `/{id}/retry` 重试，POST `/{id}/release` 解除。创建请求字段为
+`requestId,symbol,userId,mode,priceTicks,reason`。ID、价格和数量在 UI/API 中使用十进制整数字符串，避免 JS 精度丢失。
+预览最多 8 位持仓用户、20 笔普通单和 20 笔触发单，返回后续页标记，不是假设的全量计数。
+
+本次增加 Core 消息 52/128/223，TradingStateSnapshotCodec 从 27 升至 28、SectionedCoreSnapshotCodec 从 19 升至 20。
+Core 集群、协议消费者与 Trading Provider 需配套部署，**不支持混版本滚动升级或直接加载旧格式快照**。
+已有数据环境必须先在隔离环境完成对应版本的恢复/迁移演练，再安排停机升级；本变更不提供旧快照转换器，不能删掉旧数据绕过迁移。
+
+### 本机功能验证 / Functional verification
+
+HotSpot JDK 25 下运行受影响模块 Maven 测试；`MaintenanceIntegrationTest` 使用专用真实 PostgreSQL
+（环境变量 `MAINTENANCE_TEST_JDBC_URL`，数据库用户 `maintenance`），每例会清空两张维护表，**仅允许指向专用测试库**。
+该测试将网络边界接到真实 Core/matcher，覆盖六线撤单、五线市价/限价部分成交、双向仓清退、超时重试、
+Provider/Core 快照恢复、并发任务锁和资金守恒；不将它描述为真实网络全栈验收。
+`CoreMaintenanceTest` 覆盖门控、错误价格拒绝、快照与固定清退；`MaintenanceSettlementVerificationMain`
+有限执行五衍生品 × 全仓/逐仓的保险不足、部分补资、恢复、足额续结、逐用户现金/冻结/仓位核对。
+对应 JMH 场景 `SettlementSolvencyBenchmark` 新增 `settlementTrigger=MAINTENANCE`，本次按用户此前要求不做压测。
+未执行真实三节点维护故障矩阵、真实浏览器到生产网关全栈验收及新一轮 JMH/JFR 性能验收。
+
+English: Operators can cancel orders or select market IOC, limit IOC, or whole-instrument fixed-price clearance.
+Core owns the maintenance gate; PostgreSQL stores durable task intent and results. Matching closes retain unfilled positions,
+while fixed clearance pauses on insufficient insurance and resumes at the approved price. Only Core-confirmed residual checks
+complete a task. Deploy the SQL migration and matching Core/provider versions together; old snapshots require a separately
+verified migration. Functional tests do not establish production capacity or zero performance impact.

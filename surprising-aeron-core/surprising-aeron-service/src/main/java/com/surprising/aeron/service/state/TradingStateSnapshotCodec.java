@@ -22,7 +22,7 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 27;
+    private static final int VERSION = 28;
     private static final int MAX_TEXT_BYTES = 64;
     private static final int MAX_AUDIT_TEXT_BYTES = 2_048;
 
@@ -123,6 +123,9 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(instrument.maxPositionNotionalUnits());
             writer.longValue(instrument.userOpenInterestLimitRatePpm());
             writer.longValue(instrument.userOpenInterestLimitFloorUnits());
+            writer.longValue(instrument.maintenance().taskId());
+            writer.intValue(instrument.maintenance().mode().ordinal());
+            writer.longValue(instrument.maintenance().settlementPriceTicks());
             writer.intValue(instrument.riskLimitBrackets().size());
             instrument.riskLimitBrackets().forEach(bracket -> {
                 writer.intValue(bracket.bracketNo());
@@ -410,6 +413,12 @@ public final class TradingStateSnapshotCodec {
             long maxPosition = reader.positiveLong("max position notional");
             long openInterestRate = reader.nonNegativeLong("open interest limit rate");
             long openInterestFloor = reader.positiveLong("open interest limit floor");
+            long maintenanceTaskId = reader.nonNegativeLong("maintenance task");
+            int maintenanceMode = reader.intValue();
+            var maintenanceModes = com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.values();
+            if (maintenanceMode < 0 || maintenanceMode >= maintenanceModes.length) throw new ProtocolException("invalid maintenance mode");
+            var maintenance = new com.surprising.aeron.protocol.CoreInstrumentMaintenance(maintenanceTaskId,
+                    maintenanceModes[maintenanceMode], reader.nonNegativeLong("maintenance price"));
             int bracketCount = reader.count("risk limit brackets");
             if (bracketCount == 0) throw new ProtocolException("risk limit brackets are empty");
             java.util.List<CoreRiskLimitBracket> brackets = new java.util.ArrayList<>(bracketCount);
@@ -427,7 +436,7 @@ public final class TradingStateSnapshotCodec {
                     initialMargin, maintenanceMargin, makerFee, takerFee, expiry,
                     optionTypeCode < 0 ? null : OptionType.values()[optionTypeCode],
                     strikePrice, maxLeverage, maxPosition, openInterestRate, openInterestFloor,
-                    java.util.List.copyOf(brackets));
+                    java.util.List.copyOf(brackets), maintenance);
             putUnique(instruments, symbol, instrument);
         }
         Map<String, CoreMarkPriceState> marks = new TreeMap<>();

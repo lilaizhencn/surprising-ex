@@ -105,6 +105,18 @@ public class FundingService {
             dueRates++;
             if (!ownsSymbol(rate.symbol())) continue;
             try {
+                var gateResponse = aeron.query(CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY, UUID.randomUUID(),
+                        com.surprising.aeron.protocol.CoreMaintenanceCodec.encodeQuery(
+                                new com.surprising.aeron.protocol.CoreMaintenanceCodec.Query(rate.symbol(), 0, 1)));
+                if (gateResponse == null || gateResponse.status() != com.surprising.aeron.protocol.ResponseStatus.OK) {
+                    throw new IllegalStateException("Aeron maintenance state unavailable");
+                }
+                var gate = com.surprising.aeron.protocol.CoreMaintenanceCodec.decodePage(gateResponse.data()).state();
+                if (gate.mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.CLOSED) {
+                    latestFundingRateCache.removeIfCurrent(rate);
+                    continue; // No funding payment occurred; do not publish a false FINAL rate.
+                }
+                if (gate.mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT) continue;
                 FundingSettlementRepository.CoreSettlement settlement = settlementRepository.reserveCore(rate);
                 String commandPrefix = properties.getKafka().getProductLine() + ":funding:"
                         + rate.symbol() + ':' + settlement.settlementId();

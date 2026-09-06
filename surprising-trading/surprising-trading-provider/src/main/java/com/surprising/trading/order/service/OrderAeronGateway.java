@@ -31,7 +31,7 @@ public class OrderAeronGateway implements AutoCloseable {
         this(createClients(properties));
     }
 
-    OrderAeronGateway(AeronClientPool clients) {
+    public OrderAeronGateway(AeronClientPool clients) {
         this.clients = Objects.requireNonNull(clients, "clients");
     }
 
@@ -55,6 +55,7 @@ public class OrderAeronGateway implements AutoCloseable {
         return clients.commandResult(Objects.requireNonNull(commandId, "commandId"), 0L);
     }
 
+
     public CoreResponse command(CoreMessageType type, UUID commandId, long userId, byte[] payload) {
         CoreResponse response = clients.command(type, commandId, userId, payload);
         if (response.commandStatus() != ResponseStatus.APPLIED) {
@@ -76,6 +77,21 @@ public class OrderAeronGateway implements AutoCloseable {
             throw new IllegalStateException(response.resultCode().name() + ": Aeron user query failed");
         }
         return CoreStateQueryCodec.decodeUserState(response.data());
+    }
+
+    public com.surprising.aeron.protocol.CoreMaintenanceCodec.Page maintenance(String symbol, long afterUserId, int limit) {
+        var response = clients.query(CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY, UUID.randomUUID(), 0,
+                com.surprising.aeron.protocol.CoreMaintenanceCodec.encodeQuery(
+                        new com.surprising.aeron.protocol.CoreMaintenanceCodec.Query(symbol, afterUserId, limit)));
+        if (response.status() != ResponseStatus.OK) throw new IllegalStateException(response.resultCode() + ": maintenance query failed");
+        return com.surprising.aeron.protocol.CoreMaintenanceCodec.decodePage(response.data());
+    }
+
+    public com.surprising.aeron.protocol.CoreSettlementProgressView settlementProgress(String symbol) {
+        var response = clients.query(CoreMessageType.SETTLEMENT_PROGRESS_QUERY, UUID.randomUUID(), 0,
+                CoreStateQueryCodec.encodeSettlementProgressQuery(symbol));
+        if (response.status() != ResponseStatus.OK) throw new IllegalStateException(response.resultCode() + ": settlement query failed");
+        return com.surprising.aeron.protocol.CoreSettlementProgressCodec.decode(response.data());
     }
 
     public CoreOrderStateView orderState(long userId, long orderId) {

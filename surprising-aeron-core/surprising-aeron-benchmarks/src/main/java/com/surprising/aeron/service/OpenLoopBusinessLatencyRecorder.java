@@ -72,7 +72,7 @@ final class OpenLoopBusinessLatencyRecorder {
 
     enum BusinessType {
         PLACE_ORDER, TAKER_FILL, CANCEL_ORDER, AMEND_ORDER, ORDER_BATCH, TRIGGER_ORDER,
-        RISK_SCAN, LIQUIDATION, FUNDING, ADL, SETTLEMENT, SNAPSHOT_RECOVERY;
+        RISK_SCAN, LIQUIDATION, FUNDING, ADL, SETTLEMENT, MAINTENANCE, SNAPSHOT_RECOVERY;
 
         static BusinessType classify(CoreMessageType type) {
             return switch (Objects.requireNonNull(type, "message type")) {
@@ -88,6 +88,7 @@ final class OpenLoopBusinessLatencyRecorder {
                 case APPLY_FUNDING -> FUNDING;
                 case EXECUTE_ADL -> ADL;
                 case SETTLE_INSTRUMENT -> SETTLEMENT;
+                case UPDATE_INSTRUMENT_MAINTENANCE -> MAINTENANCE;
                 case PROBE_INCREMENT, VERIFY_STATE_HASH, ADJUST_BALANCE, UPSERT_INSTRUMENT,
                         ACK_EXPORT, UPDATE_POSITION_MODE, ADJUST_POSITION_MARGIN,
                         ADJUST_INSURANCE_FUND, UPDATE_LEVERAGE, UPSERT_ALGO_ORDER,
@@ -110,7 +111,8 @@ final class OpenLoopBusinessLatencyRecorder {
                         USER_OPEN_TRIGGER_ORDERS_RESULT, FUNDING_PROGRESS_RESULT,
                         SETTLEMENT_PROGRESS_RESULT, COMMAND_RESULT_RESULT,
                         RISK_SCAN_CONTROL_RESULT, ORDER_BOOK_BOOTSTRAP_RESULT,
-                        PENDING_TRANSFER_RESULT, LANE_METRICS_RESULT, CORE_EVENT -> null;
+                        PENDING_TRANSFER_RESULT, LANE_METRICS_RESULT, INSTRUMENT_MAINTENANCE_QUERY,
+                        INSTRUMENT_MAINTENANCE_RESULT, CORE_EVENT -> null;
             };
         }
     }

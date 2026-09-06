@@ -170,6 +170,24 @@ class GatewayProxyServiceTest {
     }
 
     @Test
+    void maintenanceCreationRetryAndReleaseAllRequireApprovalAndTradingPermission() {
+        for (String suffix : List.of("/maintenance", "/maintenance/9/retry", "/maintenance/9/release")) {
+            GatewayProperties properties=properties();
+            properties.getAdminRoutes().put("trading-orders",new GatewayProperties.BackendRoute(
+                    "http://trading-provider:9084","/api/v1/admin/trading/orders",true));
+            AuthService auth=adminAuthService();
+            var proxy=new GatewayProxyService(properties,new RestTemplate(),auth,null,new FakeApprovalRepository());
+            var request=new MockHttpServletRequest("POST","/api/v1/admin/gateway/trading-orders"+suffix);
+            request.addHeader("Authorization","Bearer admin");
+            request.addHeader("X-Product-Line","LINEAR_PERPETUAL");
+            assertThatThrownBy(()->proxy.proxy("trading-orders",HttpMethod.POST,request,"{}".getBytes()))
+                    .isInstanceOf(ResponseStatusException.class)
+                    .satisfies(e->assertThat(((ResponseStatusException)e).getStatusCode()).isEqualTo(HttpStatus.PRECONDITION_REQUIRED));
+            org.mockito.Mockito.verify(auth).requireAdminPermission(7L,List.of("ADMIN"),"admin.gateway.trading-orders.write");
+        }
+    }
+
+    @Test
     void riskAdminWriteRequiresApproval() {
         AuthService authService = adminAuthService();
         GatewayProxyService controller = new GatewayProxyService(

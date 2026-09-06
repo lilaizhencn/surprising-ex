@@ -489,6 +489,25 @@ public final class CoreProbeState implements AutoCloseable {
             return new CoreResponse(ResponseStatus.OK, appliedCommandCount, cachedBusinessStateHash,
                     com.surprising.aeron.protocol.CoreLaneMetricsCodec.encode(laneMetricsView()));
         }
+        if (message.header().messageType() == CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY) {
+            try {
+                var query = com.surprising.aeron.protocol.CoreMaintenanceCodec.decodeQuery(message.payloadUnsafe());
+                var instrument = runtimePlaceOrderState.instrument(query.symbol());
+                if (instrument == null) return rejected(CoreResultCode.ENTITY_NOT_FOUND);
+                var users = new java.util.ArrayList<Long>(query.limit());
+                boolean more = false;
+                for (long userId : positionUserIndex.usersAfter(query.symbol(), query.afterUserId())) {
+                    if (users.size() == query.limit()) { more = true; break; }
+                    users.add(userId);
+                }
+                return new CoreResponse(ResponseStatus.OK, appliedCommandCount, cachedBusinessStateHash,
+                        com.surprising.aeron.protocol.CoreMaintenanceCodec.encodePage(
+                                new com.surprising.aeron.protocol.CoreMaintenanceCodec.Page(
+                                        instrument.maintenance(), instrument.version(), users, more)));
+            } catch (IllegalArgumentException | java.nio.BufferUnderflowException exception) {
+                return rejected(CoreResultCode.INVALID_COMMAND);
+            }
+        }
         if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.USER_STATE_HASH_QUERY) {
             var query = com.surprising.aeron.service.state.RuntimeStateQueryService.userState(
@@ -2455,6 +2474,8 @@ public final class CoreProbeState implements AutoCloseable {
             throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND", "trigger order does not exist");
         }
         PlaceOrderCommand child = triggerPlacement(trigger, execute[2]);
+        var instrument = runtimePlaceOrderState.instrument(child.symbol());
+        if (instrument != null) instrument.requireTrading(false);
         var order = runtimePlaceOrderState.order(child.orderId());
         if (order == null || order.userId() != trigger.userId()) {
             throw new CoreStateRejectedException("ORDER_NOT_FOUND", "trigger child reservation is missing");
@@ -2633,7 +2654,10 @@ public final class CoreProbeState implements AutoCloseable {
     private void validatePendingSettlement(DecodedMatchingCommand decodedCommand) {
         var command = decodedCommand.settlement();
         var instrument = runtimePlaceOrderState.instrument(command.symbol());
-        if (instrument != null && instrument.expiryEpochMillis() > currentClusterTimestamp) {
+        if (instrument != null) RuntimeSettlementProcessor.validateSettlement(instrument,
+                com.surprising.aeron.service.state.ProductTradingRulesRegistry.forInstrument(instrument),command);
+        if (instrument != null && !instrument.administrativeSettlement(command)
+                && instrument.expiryEpochMillis() > currentClusterTimestamp) {
             throw new CoreStateRejectedException("INVALID_COMMAND", "instrument has not reached expiry");
         }
         var progress = runtimeLifecycleProgress(command.symbol());
@@ -5557,6 +5581,11 @@ public final class CoreProbeState implements AutoCloseable {
                 refreshSnapshotProjection();
                 commandRiskScanControl = runtimePlaceOrderState.riskScanControl();
             }
+            case UPDATE_INSTRUMENT_MAINTENANCE -> {
+                RuntimeCommandProcessor.updateInstrumentMaintenance(runtimePlaceOrderState, runtimePlaceOrderIdentities,
+                        com.surprising.aeron.protocol.CoreMaintenanceCodec.decodeCommand(message.payloadUnsafe()));
+                refreshSnapshotProjection();
+            }
             case UPSERT_FEE_POLICY -> {
                 runtimePlaceOrderState.upsertFeePolicy(
                         TradingCommandCodec.decodeUpsertFeePolicy(message.payloadUnsafe()));
@@ -5612,6 +5641,8 @@ public final class CoreProbeState implements AutoCloseable {
             case PLACE_TRIGGER_ORDER -> {
                 var trigger = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeState(message.payloadUnsafe())
                         .materializeCreation(clusterTimestamp);
+                var maintenanceInstrument = runtimePlaceOrderState.instrument(trigger.symbol());
+                if (maintenanceInstrument != null) maintenanceInstrument.requireTrading(false);
                 if (runtimePlaceOrderState.triggerOrder(trigger.triggerOrderId()) == null
                         && terminalRetention.containsTrigger(trigger.triggerOrderId(), message.header().userId(),
                         trigger.clientTriggerOrderId())) {

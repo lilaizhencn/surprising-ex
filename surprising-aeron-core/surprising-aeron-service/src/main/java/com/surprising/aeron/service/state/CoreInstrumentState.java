@@ -28,9 +28,49 @@ public record CoreInstrumentState(
         long maxPositionNotionalUnits,
         long userOpenInterestLimitRatePpm,
         long userOpenInterestLimitFloorUnits,
-        List<CoreRiskLimitBracket> riskLimitBrackets) {
+        List<CoreRiskLimitBracket> riskLimitBrackets,
+        com.surprising.aeron.protocol.CoreInstrumentMaintenance maintenance) {
+
+    public CoreInstrumentState(String symbol, long version, ContractType contractType, String baseAsset,
+            String quoteAsset, String settleAsset, long notionalMultiplierUnits, long priceTickUnits,
+            long settleScaleUnits, long initialMarginRatePpm, long maintenanceMarginRatePpm,
+            long makerFeeRatePpm, long takerFeeRatePpm, long expiryEpochMillis, OptionType optionType,
+            long strikePriceTicks, long maxLeveragePpm, long maxPositionNotionalUnits,
+            long userOpenInterestLimitRatePpm, long userOpenInterestLimitFloorUnits,
+            List<CoreRiskLimitBracket> riskLimitBrackets) {
+        this(symbol, version, contractType, baseAsset, quoteAsset, settleAsset, notionalMultiplierUnits,
+                priceTickUnits, settleScaleUnits, initialMarginRatePpm, maintenanceMarginRatePpm,
+                makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis, optionType, strikePriceTicks,
+                maxLeveragePpm, maxPositionNotionalUnits, userOpenInterestLimitRatePpm,
+                userOpenInterestLimitFloorUnits, riskLimitBrackets,
+                com.surprising.aeron.protocol.CoreInstrumentMaintenance.TRADING);
+    }
+
+    public CoreInstrumentState withMaintenance(com.surprising.aeron.protocol.CoreInstrumentMaintenance value) {
+        return new CoreInstrumentState(symbol, version, contractType, baseAsset, quoteAsset, settleAsset,
+                notionalMultiplierUnits, priceTickUnits, settleScaleUnits, initialMarginRatePpm,
+                maintenanceMarginRatePpm, makerFeeRatePpm, takerFeeRatePpm, expiryEpochMillis,
+                optionType, strikePriceTicks, maxLeveragePpm, maxPositionNotionalUnits,
+                userOpenInterestLimitRatePpm, userOpenInterestLimitFloorUnits, riskLimitBrackets, value);
+    }
+
+    public void requireTrading(boolean reduceOnly) {
+        var mode = maintenance.mode();
+        if (mode != com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.TRADING
+                && !(mode == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.REDUCE_ONLY && reduceOnly)) {
+            throw new CoreStateRejectedException("INVALID_COMMAND", "instrument is under maintenance");
+        }
+    }
+
+    public boolean administrativeSettlement(com.surprising.aeron.protocol.SettleInstrumentCommand command) {
+        return maintenance.mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT
+                && maintenance.taskId() == command.settlementId()
+                && maintenance.settlementPriceTicks() == command.settlementPriceTicks()
+                && version == command.instrumentVersion();
+    }
 
     public CoreInstrumentState {
+        java.util.Objects.requireNonNull(maintenance, "maintenance");
         symbol = OrderReservation.normalizeSymbol(symbol);
         baseAsset = AssetBalance.normalizeAsset(baseAsset);
         quoteAsset = AssetBalance.normalizeAsset(quoteAsset);

@@ -42,6 +42,7 @@ public enum CoreMessageType {
     TRANSFER_OUT(49, WireMessageKind.COMMAND),
     TRANSFER_IN(50, WireMessageKind.COMMAND),
     COMPLETE_TRANSFER(51, WireMessageKind.COMMAND),
+    UPDATE_INSTRUMENT_MAINTENANCE(52, WireMessageKind.COMMAND),
     STATE_HASH_QUERY(100, WireMessageKind.QUERY),
     BUSINESS_STATE_HASH_QUERY(101, WireMessageKind.QUERY),
     USER_STATE_HASH_QUERY(102, WireMessageKind.QUERY),
@@ -70,6 +71,7 @@ public enum CoreMessageType {
     ORDER_BOOK_BOOTSTRAP_QUERY(125, WireMessageKind.QUERY),
     PENDING_TRANSFER_QUERY(126, WireMessageKind.QUERY),
     LANE_METRICS_QUERY(127, WireMessageKind.QUERY),
+    INSTRUMENT_MAINTENANCE_QUERY(128, WireMessageKind.QUERY),
     COMMAND_RESULT(200, WireMessageKind.RESPONSE),
     STATE_HASH_RESULT(201, WireMessageKind.RESPONSE),
     USER_STATE_RESULT(202, WireMessageKind.RESPONSE),
@@ -93,6 +95,7 @@ public enum CoreMessageType {
     ORDER_BOOK_BOOTSTRAP_RESULT(220, WireMessageKind.RESPONSE),
     PENDING_TRANSFER_RESULT(221, WireMessageKind.RESPONSE),
     LANE_METRICS_RESULT(222, WireMessageKind.RESPONSE),
+    INSTRUMENT_MAINTENANCE_RESULT(223, WireMessageKind.RESPONSE),
     CORE_EVENT(300, WireMessageKind.EXPORT_EVENT);
 
     private final int wireCode;

@@ -382,6 +382,7 @@ public final class SurprisingClusteredService implements ClusteredService {
             case SETTLEMENT_PROGRESS_QUERY -> CoreMessageType.SETTLEMENT_PROGRESS_RESULT;
             case COMMAND_RESULT_QUERY -> CoreMessageType.COMMAND_RESULT_RESULT;
             case RISK_SCAN_CONTROL_QUERY -> CoreMessageType.RISK_SCAN_CONTROL_RESULT;
+            case INSTRUMENT_MAINTENANCE_QUERY -> CoreMessageType.INSTRUMENT_MAINTENANCE_RESULT;
             default -> requestHeader.kind() == WireMessageKind.QUERY
                     ? CoreMessageType.STATE_HASH_RESULT : CoreMessageType.COMMAND_RESULT;
         };

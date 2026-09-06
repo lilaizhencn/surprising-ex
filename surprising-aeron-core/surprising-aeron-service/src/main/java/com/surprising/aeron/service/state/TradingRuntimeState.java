@@ -3057,6 +3057,14 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     public boolean hasActiveLiquidationConflict(long userId, int symbolId, long excludedLiquidationId) {
+        return hasLiquidationConflict(userId,symbolId,excludedLiquidationId,false);
+    }
+
+    public boolean hasUnresolvedLiquidation(int symbolId) {
+        return hasLiquidationConflict(0,symbolId,0,true);
+    }
+
+    private boolean hasLiquidationConflict(long userId, int symbolId, long excludedLiquidationId, boolean includeDebt) {
         assertOwner();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             if (userId != 0 && laneId != topology.accountLaneId(userId)) continue;
@@ -3065,7 +3073,9 @@ public final class TradingRuntimeState implements AutoCloseable {
                 lane.liquidations.forEachValue(liquidation -> {
                 if (!found[0] && liquidation.liquidationId() != excludedLiquidationId
                         && (liquidation.status() == CoreLiquidationState.Status.PLANNED
-                        || liquidation.status() == CoreLiquidationState.Status.ORDERED)
+                        || liquidation.status() == CoreLiquidationState.Status.ORDERED
+                        || includeDebt && liquidation.status() != CoreLiquidationState.Status.COMPLETED
+                            && liquidation.status() != CoreLiquidationState.Status.CANCELED)
                         && (userId == 0 || liquidation.userId() == userId)
                         && (symbolId < 0 || liquidation.symbolId() == symbolId)) {
                     found[0] = true;

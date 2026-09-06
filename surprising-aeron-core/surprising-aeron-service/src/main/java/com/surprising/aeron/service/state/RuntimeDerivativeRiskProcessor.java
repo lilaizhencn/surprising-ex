@@ -360,6 +360,12 @@ public final class RuntimeDerivativeRiskProcessor {
         int symbolId = position.symbolId();
         runtime.putRiskSnapshot(identities.preparedPositionKey(userId, positionKey), new RiskSnapshotRuntime(userId,
                 symbolId, position.positionSide(), priceSequence, equity, unrealized, maintenance, ratio, status));
+        // Clearance owns the remaining positions at the approved price. Keep risk valuation,
+        // but do not create competing liquidations between settlement chunks.
+        if (instrument.maintenance().mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT
+                || instrument.maintenance().mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.CLOSED) {
+            return nextLiquidationId;
+        }
         LiquidationRuntime active = runtime.activeLiquidation(userId, symbolId, position.positionSide());
         if (status != CoreRiskStatus.LIQUIDATION
                 || !CoreRiskPolicy.canLiquidate(instrument.contractType(), position.signedQuantitySteps())) {

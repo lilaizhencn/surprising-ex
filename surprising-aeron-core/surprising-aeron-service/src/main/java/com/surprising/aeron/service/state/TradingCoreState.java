@@ -282,6 +282,9 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, instrument.maxPositionNotionalUnits());
             hash = CoreStateHash.mix(hash, instrument.userOpenInterestLimitRatePpm());
             hash = CoreStateHash.mix(hash, instrument.userOpenInterestLimitFloorUnits());
+            hash = CoreStateHash.mix(hash, instrument.maintenance().taskId());
+            hash = CoreStateHash.mix(hash, instrument.maintenance().mode().ordinal());
+            hash = CoreStateHash.mix(hash, instrument.maintenance().settlementPriceTicks());
             for (var bracket : instrument.riskLimitBrackets()) {
                 hash = CoreStateHash.mix(hash, bracket.bracketNo());
                 hash = CoreStateHash.mix(hash, bracket.notionalFloorUnits());

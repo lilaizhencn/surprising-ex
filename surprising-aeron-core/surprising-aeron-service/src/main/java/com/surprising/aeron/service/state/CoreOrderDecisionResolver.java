@@ -27,6 +27,7 @@ public final class CoreOrderDecisionResolver {
         if (instrument.version() != intent.instrumentVersion()) {
             throw new CoreStateRejectedException("INSTRUMENT_VERSION_CONFLICT", "instrument version differs");
         }
+        instrument.requireTrading(intent.reduceOnly());
 
         if (instrument.expiryEpochMillis() > 0 && clusterTimestamp >= instrument.expiryEpochMillis()) {
             Integer symbolId = identities.findSymbolId(instrument.symbol());

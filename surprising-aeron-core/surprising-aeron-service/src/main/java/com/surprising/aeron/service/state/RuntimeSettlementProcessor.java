@@ -44,7 +44,7 @@ public final class RuntimeSettlementProcessor {
             return new CoreSettlementProgressView(command.settlementId(), true, true, 0, 0, 0, 0);
         }
         ProductTradingRules kernel = ProductTradingRulesRegistry.forInstrument(instrument);
-        validateSettlement(kernel, command);
+        validateSettlement(instrument, kernel, command);
         TreasuryRuntime.LifecycleProgressRuntime previousProgress = runtime.treasury().lifecycleProgress(symbolId);
         boolean chunked = indexedUserIds != null && chunkCommandId != null;
         validateProgress(previousProgress, command, chunked);
@@ -154,7 +154,7 @@ public final class RuntimeSettlementProcessor {
             throw new IllegalArgumentException("settlement cursor must advance");
         }
         CoreInstrumentState instrument = requireInstrument(runtime, command);
-        validateSettlement(ProductTradingRulesRegistry.forInstrument(instrument), command);
+        validateSettlement(instrument, ProductTradingRulesRegistry.forInstrument(instrument), command);
         int symbolId = identities.symbolId(instrument.symbol());
         TreasuryRuntime.LifecycleProgressRuntime progress = runtime.treasury().lifecycleProgress(symbolId);
         validateProgress(progress, command, true);
@@ -191,8 +191,10 @@ public final class RuntimeSettlementProcessor {
             for (long key : indexedKeys) {
                 PositionRuntime position = runtime.position(key);
                 if (position == null || position.signedQuantitySteps() == 0) continue;
-                long pnl = kernel.lifecycleCashDeltaUnits(instrument, position.signedQuantitySteps(),
-                        position.entryPriceTicks(), command.settlementPriceTicks());
+                long pnl = instrument.contractType().isPerpetual()
+                        ? kernel.realizedPnlUnits(instrument, position.signedQuantitySteps(), position.entryPriceTicks(), command.settlementPriceTicks())
+                        : kernel.lifecycleCashDeltaUnits(instrument, position.signedQuantitySteps(),
+                            position.entryPriceTicks(), command.settlementPriceTicks());
                 totalPnl = Math.addExact(totalPnl, pnl);
                 long margin = position.positionMarginUnits();
                 locked = Math.subtractExact(locked, margin);
@@ -297,10 +299,18 @@ public final class RuntimeSettlementProcessor {
         return instrument;
     }
 
-    private static void validateSettlement(ProductTradingRules kernel, SettleInstrumentCommand command) {
+    public static void validateSettlement(CoreInstrumentState instrument, ProductTradingRules kernel, SettleInstrumentCommand command) {
+        if (instrument.maintenance().mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT
+                && !instrument.administrativeSettlement(command)) {
+            throw new CoreStateRejectedException("INVALID_COMMAND", "settlement differs from approved maintenance task");
+        }
         switch (kernel.productLine()) {
             case LINEAR_DELIVERY, INVERSE_DELIVERY, OPTION -> { }
-            case SPOT, LINEAR_PERPETUAL, INVERSE_PERPETUAL -> throw new CoreStateRejectedException(
+            case LINEAR_PERPETUAL, INVERSE_PERPETUAL -> {
+                if (!instrument.administrativeSettlement(command)) throw new CoreStateRejectedException(
+                        "PRODUCT_LINE_UNSUPPORTED", "perpetual settlement requires an approved maintenance gate");
+            }
+            case SPOT -> throw new CoreStateRejectedException(
                     "PRODUCT_LINE_UNSUPPORTED", "instrument settlement requires delivery or option product");
         }
         if (command.settlementPriceTicks() <= 0) {

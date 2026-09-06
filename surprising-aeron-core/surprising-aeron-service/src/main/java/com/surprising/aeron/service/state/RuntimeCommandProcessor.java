@@ -158,7 +158,51 @@ public final class RuntimeCommandProcessor {
             throw new CoreStateRejectedException("INSTRUMENT_VERSION_IN_USE",
                     "cannot replace instrument version with open state");
         }
-        runtime.putInstrument(instrument);
+        runtime.putInstrument(current == null ? instrument : instrument.withMaintenance(current.maintenance()));
+        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+    }
+
+    public static void updateInstrumentMaintenance(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+            com.surprising.aeron.protocol.CoreMaintenanceCodec.Command command) {
+        runtime.assertOwner();
+        var instrument = runtime.instrument(command.symbol());
+        if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
+        var before = instrument.maintenance();
+        var after = command.state();
+        if (before.equals(after)) return;
+        if (after.mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.CLOSED
+                && before.mode() != com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT) {
+            throw new CoreStateRejectedException("INVALID_COMMAND", "closed requires completed fixed-price clearance");
+        }
+        if (before.taskId() != command.expectedTaskId()
+                || (before.taskId() != 0 && after.taskId() != 0 && before.taskId() != after.taskId())) {
+            throw new CoreStateRejectedException("INVALID_COMMAND", "another maintenance task owns this instrument");
+        }
+        if (before.mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.CLOSED
+                || (before.mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT
+                    && (after.mode() != com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.CLOSED
+                        || after.settlementPriceTicks() != before.settlementPriceTicks()
+                        || runtime.treasury().lifecycleSettlement(identities.symbolId(command.symbol())) != before.taskId()))) {
+            throw new CoreStateRejectedException("INVALID_COMMAND", "settlement maintenance cannot be released or repriced");
+        }
+        if (runtime.productLine() == com.surprising.product.api.ProductLine.SPOT
+                && (after.mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.REDUCE_ONLY
+                    || after.mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT)) {
+            throw new CoreStateRejectedException("PRODUCT_LINE_UNSUPPORTED", "spot assets cannot be closed as positions");
+        }
+        int symbolId = identities.symbolId(command.symbol());
+        if (after.mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT
+                && runtime.treasury().lifecycleSettlement(symbolId) != 0) {
+            throw new CoreStateRejectedException("INVALID_COMMAND", "instrument settlement is already complete");
+        }
+        if (after.mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT
+                && runtime.hasUnresolvedLiquidation(symbolId)) {
+            throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS", "finish active liquidation, insurance and ADL work before fixed-price clearance");
+        }
+        if (runtime.treasury().fundingProgress(symbolId) != null || runtime.treasury().lifecycleProgress(symbolId) != null) {
+            throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS", "finish the active lifecycle operation first");
+        }
+        runtime.putInstrument(instrument.withMaintenance(after));
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
     }
 

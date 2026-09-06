@@ -54,6 +54,10 @@ public final class RuntimePerpetualFundingProcessor {
         if (instrument.version() != command.instrumentVersion()) {
             throw new CoreStateRejectedException("INSTRUMENT_VERSION_CONFLICT", "instrument version differs");
         }
+        if (instrument.maintenance().mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT
+                || instrument.maintenance().mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.CLOSED) {
+            throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS", "fixed-price clearance has stopped funding");
+        }
         ProductTradingRules kernel = ProductTradingRulesRegistry.forInstrument(instrument);
         int symbolId = identities.symbolId(instrument.symbol());
         MarkPriceRuntime mark = runtime.markPrice(symbolId);

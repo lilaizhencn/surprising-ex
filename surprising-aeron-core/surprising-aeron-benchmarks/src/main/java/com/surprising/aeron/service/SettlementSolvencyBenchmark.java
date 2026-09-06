@@ -12,6 +12,7 @@ import org.openjdk.jmh.annotations.*;
 public class SettlementSolvencyBenchmark {
     @Param({"LINEAR_DELIVERY", "INVERSE_DELIVERY", "OPTION"}) public ProductLine productLine;
     @Param({"CROSS", "ISOLATED"}) public CoreMarginMode marginMode;
+    @Param({"EXPIRY", "MAINTENANCE"}) public String settlementTrigger;
     @Param({"256"}) public int maxInFlight;
     private LinearPerpetualBenchmarkSupport.SnapshotTemplate template;
     private LinearPerpetualBenchmarkSupport.Harness harness;
@@ -23,18 +24,18 @@ public class SettlementSolvencyBenchmark {
     @Setup(Level.Trial)
     public void prepare() {
         if (maxInFlight != 256) throw new IllegalArgumentException("requires 256 in-flight window");
-        boolean inverse = productLine == ProductLine.INVERSE_DELIVERY;
+        boolean inverse = productLine == ProductLine.INVERSE_DELIVERY || productLine == ProductLine.INVERSE_PERPETUAL;
         boolean option = productLine == ProductLine.OPTION;
         asset = inverse ? "BTC" : "USDT";
         loss = inverse ? 90 : 900;
-        ContractType type = inverse ? ContractType.INVERSE_DELIVERY
-                : option ? ContractType.VANILLA_OPTION : ContractType.LINEAR_DELIVERY;
+        ContractType type = ContractType.valueOf(productLine.contractTypeCode());
+        if (type.isPerpetual() && !"MAINTENANCE".equals(settlementTrigger)) throw new IllegalArgumentException("perpetual clearance requires MAINTENANCE");
         try (var h = LinearPerpetualBenchmarkSupport.Harness.create(4, productLine)) {
             h.execute(h.command(CoreMessageType.UPSERT_INSTRUMENT, CommandSource.OPERATIONS, 0,
                     TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand("DEBT", 1,
                             type.ordinal(), "BTC", inverse ? "USD" : "USDT", asset, inverse ? 100 : 1,
                             1, inverse ? 100 : 1, 100_000, 50_000, 0, 0,
-                            2_000_000_000_000L, option ? 0 : -1, option ? 100 : 0))));
+                            type.isPerpetual() ? 0 : 2_000_000_000_000L, option ? 0 : -1, option ? 100 : 0))));
             h.execute(h.command(CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
                     TradingCommandCodec.encodeApplyMarkPrice(option
                             ? new ApplyMarkPriceCommand("DEBT", 1, 100, 100, 100, 1, h.nextCommandTimestamp())
@@ -51,6 +52,11 @@ public class SettlementSolvencyBenchmark {
             deficit = loss - state.user(1000).positions().get("DEBT").positionMarginUnits();
             if (deficit <= 0) throw new IllegalStateException("fixture must be insolvent");
             makerOpening = state.user(999).totalUnits(asset);
+            if ("MAINTENANCE".equals(settlementTrigger)) {
+                h.execute(h.command(CoreMessageType.UPDATE_INSTRUMENT_MAINTENANCE,CommandSource.OPERATIONS,0,
+                        CoreMaintenanceCodec.encodeCommand(new CoreMaintenanceCodec.Command("DEBT",0,
+                                new CoreInstrumentMaintenance(11,CoreInstrumentMaintenance.Mode.SETTLEMENT,1000)))));
+            }
             template = h.snapshotTemplate(4);
         }
     }
@@ -66,7 +72,7 @@ public class SettlementSolvencyBenchmark {
     @Setup(Level.Invocation)
     public void restore() {
         harness = LinearPerpetualBenchmarkSupport.Harness.restore(template);
-        harness.advanceClockTo(2_000_000_000_000L);
+        if (!"MAINTENANCE".equals(settlementTrigger)) harness.advanceClockTo(2_000_000_000_000L);
     }
 
     private CoreSettlementProgressView page(long cursor) {

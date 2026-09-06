@@ -3505,3 +3505,30 @@
 - 持续轮带profiler23,207 ops/s、19,715B/op、436.11MiB/s，measurement GC179次/1371ms；全194秒JFR GC pause197次/1532.86ms，p50=7.73、p95=8.57、p99=15.37、max17.92ms。稳定阶段30秒桶GC后heap min45.18–45.64MiB、max46.91–47.19MiB，未观察到该窗口持续增长；FD全部35。GC native74.1→74.4MiB、线程native末值0.12MiB、Code12.5→30.7MiB、Metaspace11.3→21.8MiB，后两者包含预热编译增长。持续轮CPU speed有93/95/97，故其吞吐仅诊断；不能用受降频三分钟负载证明长期无泄漏。
 - 精确产物位于`/tmp/surprising-batch-fixes-20260906/round2/`：最终JAR SHA256=`f782ae48ef7063cd5cf6d0b431a3ade2a32b78fad5fc4a0407d6e873eda3f418`；source.patch SHA256=`fb2e4f1b978e4c1cb8d24e7d13536831eb8eafc369a9eae6262c99812c9ba9fe`；JFR配置SHA256=`114575ecd54d9227700c212f1417cbe7afe342879535206dc6319b7a1e93d4ab`。原JFR短轮3,255,541B/27s，持续11,874,429B/194s；完整summary、26类view、metrics、逐组归因、系统日志和命令及文件校验见SHA256SUMS。
 - **结论：功能修复及最终SPOT短轮局部阈值通过，整体性能仍仅部分验证。** 五条衍生品首轮性能因降频无效；未测真实API/WS三阶段分业务p50/p90/p95/p99/p99.9/max、open-loop及coordinated omission、独立做市、生产集群切主、真实native池/FD及24小时长稳。没有这些证据，不宣称六线生产容量、长期无泄漏或“零性能影响”。
+
+## 2026-09-06 交易维护功能验证（未进行性能采集）
+
+- 被测代码：当前 master 基于 `40a32d5b9176ad2cc7eaabd2aa3a4cc02650cb9c` 的本次维护改动；
+  除 README 外的已暂存源码补丁 SHA256：`736b865f2259c42d8fdfb16a2a947cc42a40e378798792666c3e0f459accf6e1`。
+  对照 commit：不适用（仅验证当前 master）。验证时间为本机 2026-09-06，UTC+8。
+- 环境：Oracle GraalVM 25.0.1 HotSpot、Maven 3.9.16、macOS 26.7 x86_64，Intel i9-9880H、16 GiB RAM。
+  本次按用户此前「不要进行压测，少量样本验证功能」执行有限功能场景，没有预锁定性能阈值或采集吞吐指标。
+- 改动路径：六线维护门控、普通/触发撤单、五衍生品 reduce-only 市价/限价 IOC、固定价格清退、
+  原有到期/资金费任务与清退联动、持久任务恢复、Core 快照和资金核对。
+  `SettlementSolvencyBenchmark` 新增 `settlementTrigger=MAINTENANCE`，支持五条衍生品；未启动 JMH 定时测量。
+- Maven 命令：`MAINTENANCE_TEST_JDBC_URL=jdbc:postgresql://127.0.0.1:55439/postgres mvn -q -pl surprising-trading/surprising-trading-provider,surprising-account/surprising-account-provider,surprising-funding/surprising-funding-provider,surprising-gateway,surprising-aeron-core/surprising-aeron-benchmarks -am test`。
+  1248 项中 1226 通过、0 失败/错误；22 个已有 CustodyWithdrawalReconciliationPostgresTest 因未配置其专用数据库而跳过。
+  新维护集成测试使用独立 PostgreSQL，36 项全通过；Core 维护11、协议2、控制器2、网关审批套件29、
+  到期联动套件9、资金费套件9通过。最终 `mvn -q -DskipTests install` 全 reactor 构建通过。
+- 有限偿付验证：`java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/java.util.zip=ALL-UNNAMED -cp surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar com.surprising.aeron.service.MaintenanceSettlementVerificationMain`。
+  五衍生品 × CROSS/ISOLATED 共10例通过，复用固定 `maxInFlight=256` 的既有偿付夹具，逐例有限执行，无到达率或持续负载。
+  验证保险不足不扣部分款、补资、快照恢复、重复命令、逐用户余额/冻结/仓位、保险与清算总额守恒。
+- 发现并修复：错误清退价格必须在进入 matcher 前拒绝；明确门控拒绝与未知结果需要不同重试身份策略；
+  release 必须持久化为独立恢复阶段；已有强平/保险/ADL 不得被新清退冻结；晚到的到期事件仅在 Core 已 CLOSED 后确认，
+  资金费暂停期间不得伪造结算成功。新增强平测试最初只更新 mark 未执行风险扫描，补上真实 continuation 后通过，保留失败日志。
+- 证据目录：`/Users/atomex/Desktop/surprising/maintenance-evidence/2026-09-06/`，含最终测试/构建日志、
+  222 份 Surefire XML、有限偿付日志、源码补丁、浏览器 QA 脚本/截图及 `SHA256SUMS`。
+  浏览器验证使用接口契约桩；实际财务集成使用真实 PostgreSQL 与 Core/matcher，但网络边界在进程内连接。
+- 未测：本次新功能的三节点真实网络故障矩阵、真实网关至浏览器全栈、推送、JMH/JFR、GC/分配、
+  heap/native、线程阻塞归因、吞吐和分位延迟、长期泄漏。没有 JFR artifact，本条不构成主链路性能验收，
+  不声称零性能影响、生产容量或完整生产上线验收。Core 仍保留原有查询与生命周期一致性 fence。

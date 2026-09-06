@@ -158,6 +158,22 @@ class ExpiringContractSettlementFanoutServiceTest {
 
     private static long id() { return SETTLEMENT_TIME.toEpochMilli(); }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(value=com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.class,names={"SETTLEMENT","CLOSED"})
+    void laterExpiryAcknowledgesOnlyFullyClosedAdministrativeClearance(com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode mode) {
+        var aeron=mock(AccountAeronGateway.class);
+        when(aeron.query(eq(CoreMessageType.SETTLEMENT_PROGRESS_QUERY),any(),any()))
+                .thenReturn(response(new CoreSettlementProgressView(7,true,0,2)));
+        when(aeron.query(eq(CoreMessageType.INSTRUMENT_MAINTENANCE_QUERY),any(),any()))
+                .thenReturn(new CoreResponse(ResponseStatus.OK,0,0,com.surprising.aeron.protocol.CoreMaintenanceCodec.encodePage(
+                        new com.surprising.aeron.protocol.CoreMaintenanceCodec.Page(
+                                new com.surprising.aeron.protocol.CoreInstrumentMaintenance(7,mode,120),1,java.util.List.of(),false))));
+        var service=new ExpiringContractSettlementFanoutService(aeron,properties(ProductLine.LINEAR_DELIVERY));
+        if(mode==com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.CLOSED) assertThat(service.fanout(event())).isEqualTo(1);
+        else assertThatThrownBy(()->service.fanout(event())).hasMessageContaining("progress mismatch");
+        verify(aeron,never()).command(any(),any(),eq(0L),any());
+    }
+
     private static DeliverySettlementEvent event() {
         return new DeliverySettlementEvent("BTC-USDT-260327", 4, ContractType.LINEAR_DELIVERY,
                 100, SETTLEMENT_TIME, SETTLEMENT_TIME, ContractSettlementMethod.CASH,
