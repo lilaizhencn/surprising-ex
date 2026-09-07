@@ -3864,3 +3864,64 @@
 - SafepointBegin481、最长进入0.129ms；ExecuteVMOperation512次/累计3722.74ms/max21.35ms，与GC停顿量级一致。Compilation31次/总6772.84ms/max584.39ms在编译线程，不当STW；Deoptimization286含启动。JavaExceptionThrow530、JavaErrorThrow136为可能重叠事件，主要启动/反射/MethodHandle及终检边界，稳定16:07–16:16 UTC的交易回调无异常样本；完整时间/栈在exceptions.tsv。
 - 样本未包含真实3节点Aeron网络、HTTP/Kafka/WS与全部风险重操作的持续混合容量；六产品资金/恢复由短JMH场景及相关回归补足，不扩大解释10分钟永续样本。性能验收范围和缺失的业务分段尾延迟如上，当前交付为全部三项局部优化及功能/分配验证完成。
 - 最终artifact根 `/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-07-core-allocation-final`，172个证据文件约192.67MiB（不计临时PG数据目录），包含源码/JAR、精确命令、两类原始JFR/summary、flamegraph、TLAB/CPU/GC/VM/异常/分钟趋势、NMT/FD/系统以及测试原件。SHA256SUMS自身SHA256 `8542ecbacc83852fc730fce902407e8aac6ac9a2c015c9346805fdb33c8574ad`。首轮中止和数据库初次启动失败原件保留；最终压测与临时数据库进程均已结束。
+
+
+## 六产品无采样profiler吞吐测量（2026-09-07，采集前锁定）
+
+- 请求：优化后实测性能；只测试当前master a45769cc（业务24dbf6b3），不修改业务代码。对照commit：不适用（仅验证当前master），不与历史结果或不同采样配置作收益百分比比较。
+- 环境：HotSpot Oracle GraalVM25.0.1+8、Maven3.9.16，macOS26.7 x86_64、Intel i9-9880H8C16T/16GiB；启动前swap0、CPU_Speed_Limit100。本机有用户桌面应用运行，保留每30秒同机进程证据，不关闭用户应用；结果仅作共享本机指定场景测量。
+- 主轮：六产品按SPOT/LINEAR_PERPETUAL/INVERSE_PERPETUAL/LINEAR_DELIVERY/INVERSE_DELIVERY/OPTION依次独立JMH进程；每条f1/t1，3×10秒warmup、3×20秒measurement，每条前cool15秒，foe=true、gc=true（仅iteration边界）。主轮不启用async-profiler、JFR或-prof gc，不启用NMT；保留JVM GC日志与外部系统监控。固定-Xms768m -Xmx768m -XX:+UseG1GC、native-access、opens/exports jdk.internal.misc、opens java.util.zip；精确命令在各command.json。
+- 统一场景ClusteredBatchTradingBenchmark.decodedBatchAdmissionAndSettlement：256 in-flight、4Account Lane、1matcher、batch2、realtime=false、256用户+1maker/1symbol/1模拟ClientSession。每cycle3584 business ops/2048业务Core messages/1024fills/1536batches/3072items/512单业务操作/512额外metrics查询；保持原批量挂单、改单成交、往返开平仓与批量挂撤单比例和查询频率。Core实际onSessionMessage→admission→matcher→Lane settlement→commit→response，闭环最大速率，未修正coordinated omission，无open-loop到达率。
+- 初态：每用户/maker settle余额1,000,000,000，zero fees、CROSS、mark100、maker持续120卖挂单，现货maker BTC513；做市由真实Core内maker账户提供流动性，不是独立网络进程。每cycle核对计数，每iteration全部资金、冻结/预留、仓位、订单/client alias终态和snapshot业务hash/alias恢复核对。业务accepted=terminal、Core accepted=terminal、unfinished/endBacklog=0，拒绝/错误/超时0为硬性要求。
+- 预锁吞吐检查：每产品主轮均值>=20000 terminal business ops/s，3个measurement样本CV<=10%；此为本轮本机观察阈值，不代表生产SLA。任一财务失败停止；性能阈值失败如实记录/诊断，不改场景重定义通过。明显降频、swap增长或持续外部负载干扰必须标记无效/受扰，禁止用受扰数字作容量承诺。
+- 指标：JMH score×3584为business ops/s、×2048为Core messages/s、×1024为fills/s、×1536为batches/s、×3072为items/s。主分数与99.9%CI/误差、3次原值、CV、aux EVENTS计数全部保存；不能把JMH scorePercentiles当订单延迟。外部系统每5秒、数字FD与同机进程每30秒，JVM gc日志单列。
+- 诊断轮：主轮六产品完后冷却30秒，U本位永续相同业务参数，f1/t1、3×10秒warmup、1×180秒measurement。相同768MiB G1，追加NMTsummary、DebugNonSafepoints、PrintNMTStatistics、-prof gc和async4.5 wall10ms/alloc128KiB/lock1ms/threads/JFR；JVM JFR使用allocation.jfc，SHA256 e59ae7afc138334cfe3bd62c04e0d451a56a5dbc1063e5f5480a9982c344a2e7。此轮仅补GC/分配、CPU/线程/堆/native/IO/VM归因，不代替无采样主轮吞吐，不混算成同一置信区间。
+- 诊断阈值：gc.norm/3584<10000 B/business op，DataLoss0、CPU限速100、swap无增长、金融/终态全部通过；GC>50ms、稳定live set净增>32MiB或native/FD/线程持续增长需调查。保留原始JFR/summary、全部聚合、NMT/FD和SHA256清单。
+- 范围：本轮报告六产品内部终态吞吐及独立诊断，不含真实三节点Aeron网络/HTTP/Kafka/WS、全部风险重操作负载或入口/accepted/terminal三段尾延迟。单fork只有3measurement、闭环负载与桌面共享机器均限制外推；没有完整分段p99.9/open-loop/小时级长稳，只能标记部分性能验证。无业务修改，不重复刚通过的1098条回归，以每轮实际资金及snapshot断言核对当前构建。
+- Artifact根：/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-07-throughput；主轮各产品目录与diagnostic/严格分开。采样前归档当前源码提交、JAR和配置SHA256；本段开始采集后不修改，结果和失败只追加。
+
+
+### 六产品小批量轮停止：用户要求恢复15万对应场景（2026-09-07）
+
+- 用户指出关注的是此前约15万对应的mixed标准，本轮却沿用了近期分配诊断的batch2/单symbol/service回调场景，选择口径不符合其预期。两者不能据数值差异判断性能回退。
+- 已完成SPOT均值31451.51、LINEAR_PERPETUAL34355.91 terminal business ops/s；原始3measurement、资金与恢复均通过。INVERSE_PERPETUAL中途SIGTERM停止，其他三产品和诊断轮未启动；保留所有原件，不把未完成六产品轮认定完整通过。原artifact：2026-09-07-throughput，不覆盖预锁内容。
+
+## 按原mixed配置重测当前master（2026-09-07，采集前锁定）
+
+- 用户要求按约15万对应的压测标准验证。复用PV-133配置和300秒driver、原始profile.jfc，只有被测源码使用当前master a45769cc（业务24dbf6b3），artifact路径独立。对照commit：不适用（仅验证当前master）；读取旧记录仅为恢复场景参数，不检出旧版，不作历史性能百分比比较。
+- 精确driver：`LinearPerpetualScaleSoakMain 1000 256 256 5 10 UNIFORM 1 20 32 300 30`；U本位永续、1000活跃用户、256 listed/active symbol、每用户初始最多5持仓/10挂单、hftRounds1/batch20、lifecycleSymbolsPerRun32，4Lane/1matcher/固定256 in-flight。closed-loop饱和、openLoop=false、CO未修正；包含双向批量下单/成交/撤单、trigger/risk/资金费和每scenario一次强平→保险→ADL，内部maker持续供给，外部连接0。不把fill计入订单ops，实际比例由同一mixed driver和状态决定。
+- 初始账户资金/持仓沿用当前LinearPerpetualMixedWorkload模板与原配置；逐cycle accepted/terminal business/Core闭合、逐batch逐item成功；结束前用户/maker资金守恒、冻结/仓位/订单终态及snapshot hash恢复必须通过。允许可继续的risk工作流存在，必须与未终态Core命令区分；funding未完成单列。
+- JVM严格沿用原参数：HotSpot25.0.1 Oracle GraalVM、-Xms4g -Xmx4g -XX:+UseZGC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC、-Dsurprising.aeron.matching-engines=1、-Dsurprising.benchmark.openLoop=false、jdk.internal.misc opens/exports、NMTsummary/UnlockDiagnosticVMOptions/PrintNMTStatistics、JFR dumponexit/maxsize512m、gc/safepoint日志；不加async-profiler。原profile.jfc SHA256 `4dbdbd4994757dc2e6930dee513d8ee298d687d9f298bc27434455d499784dc7`，精确run.sh/JAR哈希在新目录revision.json。
+- 环境：macOS26.7/i9-9880H8C16T/16GiB、Maven3.9.16；本机桌面共享环境，不关闭用户应用。开始前冷却30秒；单JVM单owner，无单独预热，300秒中包含预热，30秒窗口逐个报告不丢低速窗口，最后未满窗口也计总量，最终verify/snapshot/restore计入原driver elapsed分母、setup单列。该轮有JFR开销，不能称无profiler主吞吐或JMH结果。
+- 阈值：用户关注150000 terminal business ops/s，本次按完整driver均值>=150000报告是否达到，同时保留全部30秒窗口，不能选峰值冒充达标。功能accepted=terminal、每batch每item成功、unfinished/endBacklog0、资金/snapshot正确为硬门槛。GC后live set斜率<1MiB/s、native<256KiB/s、线程/FD/pool count<0.01/s且>=3有效GC样本；核对JFR的真实GC后heap，不能仅用MBean零值判无增长。
+- 每5秒pmset/swap，每30秒所有进程CPU；Speed_Limit<100、swap增长、JFR DataLoss或显著后台干扰时性能结论标为无效/受扰，但保留完整负载与功能终检证据。不改阈值美化结果。非业务修改，不重复测试套件；此次driver自身金融与恢复校验直接约束压测。
+- 分析：保留原始soak.jfr、summary和流式JfrRead聚合（含分业务三阶段直方图），报告总吞吐、Core messages/s、sweep与命令延迟区别、分配/GC/heap/native/CPU/锁/IO/VM/JIT/异常/系统状态。无独立fill计数则标未输出，不推测fills/s；无逐item延迟则不能把batch直方图当item。现有JFR含setup及终检，需注明窗口。
+- 未测：其他五产品、API/真实Aeron3节点/Kafka/WS、生产native池、完整open-loop及小时级长稳，本轮仅原mixed标准下当前源码的五分钟性能验证。artifact：/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-07-mixed-standard；采样开始后本段不再修改，所有结果和失败只追加。
+
+
+### 原mixed标准当前代码结果（2026-09-07 09:07–09:13 UTC+8）
+
+- 只运行当前master a45769cc（业务24dbf6b3），没有更改业务代码、检出旧版本或调整负载追求数值。JAR SHA256 `13f19409a96375c8245ba31048eb0898556570969aa2c155092338f82f3de3d5`，原配置JFC SHA256 `4dbdbd4994757dc2e6930dee513d8ee298d687d9f298bc27434455d499784dc7`；新run.sh SHA256 `69461da6a3533383daea81df78a2eb46f54d95ac40d2a52caef2d5ce27acdae7`。已恢复1000用户/256币对/batch20/4GiB ZGC/300秒的原mixed参数，256 in-flight和1matcher不变。
+- **全程均值158417.667 terminal business ops/s，达到本轮150000目标**；47,937,232个terminal business operations、4,822,736个terminal Core messages、15937.645 terminal Core messages/s。driver elapsed302.600秒含首段预热及最终verify/snapshot/restore，setup3275.984ms单列；没有删去低速首段美化均值。run退出0、summary PASS、fundsInvariant=true。
+- 九个完整30秒窗口依次123681.524、162934.659、164085.434、163656.728、165014.378、164358.275、163877.842、164877.210、162858.513 business ops/s。首窗口含预热，之后已输出窗口范围162858.513–165014.378；最后不足30秒窗口计入全程总量，无单独窗口数字。不把最高窗口165014当全程均值。
+- 逐cycle business/Core accepted=terminal，逐batch逐item成功、未终态命令和期末消息backlog0；最大matching backlog256是运行中真实在途。终检余额/冻结/仓位/订单终态、maker资金及snapshot业务hash恢复通过；snapshot25,984,748B、恢复1278.260ms。期末222个可继续risk workflow是该mixed场景的存续业务状态，不是222个未终态Core消息；funding未完成0。driver没有独立fill、batch/items累计输出，不推测fills/s或用business数量充当Core消息数。
+- 此场景直接经Harness→CoreProbeState并流水化mixed工作，与先前小批量service回调场景不同；batch20的每item按业务操作计数，报告中同时列15937.645 Core messages/s防止误读成15.8万网络请求/s。无采样service小批量轮的31451/34356仅归属其自己的场景，不用于判断mixed退步。原记录约15万只是用于确认用户所指场景，本轮不作历史收益百分比比较。
+
+|JFR内部入口→终态（毫秒，直方图桶上界）|样本数|p50≤|p90≤|p95≤|p99≤|p99.9≤|max（实测）|
+|---|---:|---:|---:|---:|---:|---:|---:|
+|PLACE_ORDER|1,134,592|4.194304|4.194304|4.194304|8.388608|16.777216|21.142458|
+|CANCEL_ORDER|1,134,592|4.194304|4.194304|4.194304|8.388608|16.777216|19.407526|
+|ORDER_BATCH|2,269,184|16.777216|33.554432|33.554432|33.554432|67.108864|132.840270|
+|TRIGGER_ORDER|141,824|0.262144|0.524288|0.524288|0.524288|1.048576|10.511094|
+|RISK_SCAN|71,628|0.065536|0.131072|0.131072|0.262144|0.262144|1.126822|
+|FUNDING|70,912|0.131072|0.131072|0.131072|0.262144|0.524288|5.920921|
+
+- 全部三段（entryAccepted/acceptedTerminal/entryTerminal）p50/p90/p95/p99/p99.9/max及样本数见soak-analysis.txt；按2次幂纳秒桶上界输出，包含setup/预热，不是精确逐样本百分位。ORDER_BATCH是整批延迟，不能当单item延迟；真实API入口、CO修正及独立taker-fill分位未覆盖。LIQUIDATION仅2样本、ADL仅1样本，不用来认定持续强平/ADL性能。sweep p50/p95/p99/max=130912.457/153045.231/270989.297/530245.638μs是全业务周期耗时，也不是单订单延迟。批次max132.84ms如实保留，吞吐达标不表示尾延迟SLA达标。
+- JFR summary306秒、流式聚合306.491秒，原文件64,662,528B（约61.67MiB），DataLoss0。总分配采样权重247,553,782,808B、约807,703,270B/s；TLAB229,898,468,840B、非TLAB18,342,644,872B、最大对象33,554,448B。含setup/终检，不冒充JMH -prof gc精确B/business op或精确对象数/op。按owner/harness、Lane、matcher分配权重130,400,731,400/82,541,008,888/34,597,265,560B；CPU样本10893/2487/792，原class/site/线程栈保留。
+- JFR GC78次，ZGC Minor60次、Major18次；全部GC累计pause6.247ms，每GC累计pause分布p50/p95/p99/max=0.073/0.148/0.170/0.170ms；270个GCPhasePause最大单phase0.066ms，无ZAllocationStall/evacuation/promotion failure。JFR After-GC78点、末498MiB/峰684MiB，去首60秒稳健斜率132973B/s，低于1MiB/s。MBean342次信号的零斜率未被直接当作heap无增长，已用JFR交叉检查。
+- NMT末reserved74,531,854,517B、committed4,446,795,957B，heap committed固定4GiB（ZGC较大reserved是地址空间预留，非相同大小物理驻留）；Code末约31.45MiB、GC35.29MiB、Metaspace32.55MiB、Tracing20.82MiB，完整first/last/min/max分类在聚合。Direct/Mapped bytes/count全0、线程稳定14/FD13；未测真实Aeron/Netty等外部native池，不外推生产池无泄漏。
+- 62次外部系统采样Speed_Limit均100、swap0；JFR机器CPU均值0.147/max0.258、进程均值0.126，main ThreadCPULoad约0.062、四Lane约0.010–0.011、matcher约0.011。保留全部桌面进程采样，仍是共享本机环境。五分钟无达到预设泄漏斜率告警的证据，不宣称小时/天级无泄漏。
+- SafepointBegin279次/最大0.406ms，VMOperation943次/总30.087ms/max3.230ms；Compilation10805次/总31641ms/max1803.606ms为编译线程耗时，不当STW。CPU热点包括CommandFingerprint的SHA摘要、Core completion/admission通知、批次decode及Lane完成等待；此次只测性能，没有据此删除业务去重或完成屏障。
+- JavaExceptionThrow317/JavaErrorThrow153主要启动和反射/JNR能力探测；无JavaMonitorEnter contention、SocketRead/Write或ZAllocationStall事件。全录制FileRead2275次/10.044ms、FileWrite488次/10.750ms，主要类加载和driver采样stdout；不把“同为main线程”误认作交易持久化IO。新增全栈流式IoAudit核对首60秒之后CoreProbeState.apply调用链，stableCoreIo=0、stableCoreThrows=0，原始JFR及io-audit.txt保留，零样本仅代表本配置记录范围。
+- 结论：按用户所指mixed场景，当前代码全程吞吐达到150000目标且资金/终态/恢复与环境门槛通过。该场景是有JFR的单JVM Core内部五分钟闭环运行，无独立JMH主轮/置信区间、无真实三节点网络、无完整open-loop/API/item级尾延迟，整体仍属部分性能验证。不得用其替代真实服务网络容量或所有六产品的同标准验收。
+- Artifact `/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-07-mixed-standard`，24个文件130,656,879B，原始JFR、run/config/JAR校验、summary/全量分析、系统/GC/IO审计齐备，SHA256SUMS自身SHA256 `167453f757b7586e317d65b5a3f96a76be76a650ece77340456db0c7704382f5`。停止的小批量轮41文件65,316,696B、manifest SHA256 `d5dac6d620e1942ce5a4efadb0d28ef66bb809331ab459234d46bbc565b26985`，不覆盖或隐去中止事实。压测进程已全部退出。
