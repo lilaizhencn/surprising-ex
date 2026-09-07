@@ -643,6 +643,8 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
 
 云端容量工具的 `MATCH_ASYNC` 使用 `ClusterMarkPriceGate` 异步刷新到期标记价，`ClusterAsyncPair` 在一个slot中依次完成行情依赖、maker和taker；各worker分割同一个总在途窗口。maker/taker各自在发起至终态callback期间计时，结果收集不再增加延迟；输出 `requestToTerminal`，不冒充独立受理到终态阶段。每秒采样逻辑在途量，每10秒输出终态速率，并报告全局峰值、最终未完成量和六分位/HDR直方图。该模式目前只支持closed-loop offered=0。`capacity=PASS` 仅表示工具内置业务核对，不代表达到预先定义的性能门槛；云端命令、JFR、恢复及历史失败记录统一见根目录 [PERFORMANCE_VALIDATION.md](../PERFORMANCE_VALIDATION.md)。
 
+`AeronClientPool` 自动命令的来源序号由唯一egress dispatcher按实际offer顺序分配，避免生产线程与终态callback并发提交时出现“先分配、后入队”的来源乱序。生产者只在池化Request中保存命令字段和防御性payload副本，发送时构造一次不可变消息；显式prepared消息和查询不改调用方序号。明确NotAccepted、终态和结果不明的契约保持原样。
+
 
 ### 结算与批量响应的分配边界
 

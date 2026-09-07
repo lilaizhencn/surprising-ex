@@ -23,6 +23,40 @@ import org.junit.jupiter.api.Test;
 class AeronClientAgentTest {
 
     @Test
+    void sourceSequenceFollowsOfferOrderWhenProducersEnqueueInReverseCreationOrder() throws Exception {
+        var sent = new java.util.concurrent.CopyOnWriteArrayList<CoreMessage>();
+        var firstOffered = new CountDownLatch(1);
+        var bothOffered = new CountDownLatch(2);
+        try (var pool = pool(Duration.ofSeconds(2), () -> session(message -> {
+            sent.add(message);
+            firstOffered.countDown();
+            bothOffered.countDown();
+            return 1;
+        }))) {
+            // Deterministically model producer A being descheduled after claiming its Request slot.
+            var lanes = AeronClientPool.class.getDeclaredField("commandAgents");
+            lanes.setAccessible(true);
+            Object lane = ((Object[]) lanes.get(pool))[0];
+            var create = lane.getClass().getDeclaredMethod("oneWayFutureRequest", CoreMessageType.class,
+                    UUID.class, long.class, byte[].class);
+            create.setAccessible(true);
+            byte[] firstPayload = {1};
+            Object first = create.invoke(lane, CoreMessageType.APPLY_MARK_PRICE, UUID.randomUUID(), 1L, firstPayload);
+            Object second = create.invoke(lane, CoreMessageType.APPLY_MARK_PRICE, UUID.randomUUID(), 1L, new byte[]{2});
+            firstPayload[0] = 9;
+            var enqueue = lane.getClass().getDeclaredMethod("enqueue", first.getClass());
+            enqueue.setAccessible(true);
+            assertThat(enqueue.invoke(lane, second)).isEqualTo(true);
+            assertThat(firstOffered.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(enqueue.invoke(lane, first)).isEqualTo(true);
+            assertThat(bothOffered.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(sent).extracting(m -> m.header().sourceSequence()).containsExactly(1L, 2L);
+            assertThat(sent.get(0).payload()).containsExactly((byte) 2);
+            assertThat(sent.get(1).payload()).containsExactly((byte) 1);
+        }
+    }
+
+    @Test
     void tryCommandOnceReflectsTheSinglePublicationOffer() {
         AtomicInteger offers = new AtomicInteger();
         try (AeronClientPool pool = pool(Duration.ofSeconds(1), () -> session(message -> {

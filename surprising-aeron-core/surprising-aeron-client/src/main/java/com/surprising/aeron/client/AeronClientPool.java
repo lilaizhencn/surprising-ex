@@ -576,7 +576,8 @@ public final class AeronClientPool implements AutoCloseable {
         private final ArrayBlockingQueue<Request> availableRequests;
         private final int maxInFlight;
         private final long sourceId;
-        private final AtomicLong nextSequence = new AtomicLong();
+        // Only the egress dispatcher assigns source sequence, in actual offer order.
+        private long nextSequence;
         private final AtomicLong nextCorrelation = new AtomicLong();
         // Insertion order is deadline order: only the dispatcher assigns the same timeout
         // immediately after each successful offer.
@@ -633,10 +634,13 @@ public final class AeronClientPool implements AutoCloseable {
             if (mode.oneWay) {
                 correlationId = -correlationId;
             }
-            CoreMessage message = new CoreMessage(CoreMessageHeader.command(type, commandId, productLine,
-                    CommandSource.GATEWAY, sourceId, nextSequence.incrementAndGet(), userId,
-                    Instant.now().toEpochMilli(), correlationId), payload);
-            request.reset(message, commandId, mode, callback);
+            request.reset(null, commandId, mode, callback);
+            request.correlationId = correlationId;
+            request.commandType = type;
+            request.commandUserId = userId;
+            request.commandSubmittedMillis = Instant.now().toEpochMilli();
+            // Preserve the API's defensive payload copy without allocating an intermediate message/header.
+            request.commandPayload = payload.length == 0 ? payload : java.util.Arrays.copyOf(payload, payload.length);
             return request;
         }
 
@@ -661,7 +665,7 @@ public final class AeronClientPool implements AutoCloseable {
         }
 
         private boolean enqueue(Request request) {
-            long correlationId = request.message.header().correlationId();
+            long correlationId = request.correlationId;
             if (!claimedCorrelations.add(correlationId)) {
                 request.fail(new IllegalStateException(
                         "duplicate in-flight Aeron correlationId=" + correlationId));
@@ -890,6 +894,14 @@ public final class AeronClientPool implements AutoCloseable {
             }
             long offerResult;
             try {
+                if (request.commandType != null) {
+                    request.message = CoreMessage.owned(CoreMessageHeader.command(request.commandType,
+                            request.operationId, productLine, CommandSource.GATEWAY, lane.sourceId,
+                            ++lane.nextSequence, request.commandUserId, request.commandSubmittedMillis,
+                            request.correlationId), request.commandPayload);
+                    request.commandType = null;
+                    request.commandPayload = null;
+                }
                 offerResult = current.offer(request.message);
             } catch (RuntimeException exception) {
                 request.notAccepted(CoreCommandOutcome.notAccepted(Long.MIN_VALUE));
@@ -1095,6 +1107,11 @@ public final class AeronClientPool implements AutoCloseable {
     private static final class Request {
         private final AgentLane owner;
         private CoreMessage message;
+        private long correlationId;
+        private CoreMessageType commandType;
+        private long commandUserId;
+        private long commandSubmittedMillis;
+        private byte[] commandPayload;
         private UUID operationId;
         private RequestMode mode;
         private CompletableFuture<CoreCommandOutcome> commandFuture;
@@ -1115,7 +1132,10 @@ public final class AeronClientPool implements AutoCloseable {
 
         private synchronized void reset(CoreMessage message, UUID operationId, RequestMode mode,
                                         CommandAdmissionCallback admissionCallback) {
-            this.message = Objects.requireNonNull(message, "message");
+            this.message = message;
+            this.correlationId = message == null ? 0 : message.header().correlationId();
+            this.commandType = null;
+            this.commandPayload = null;
             this.operationId = Objects.requireNonNull(operationId, "operationId");
             this.mode = Objects.requireNonNull(mode, "mode");
             this.commandFuture = mode == RequestMode.COMMAND_OUTCOME ? new CompletableFuture<>() : null;
@@ -1285,6 +1305,9 @@ public final class AeronClientPool implements AutoCloseable {
 
         private synchronized void clear() {
             message = null;
+            commandType = null;
+            commandPayload = null;
+            correlationId = 0;
             operationId = null;
             mode = null;
             commandFuture = null;
@@ -1298,9 +1321,9 @@ public final class AeronClientPool implements AutoCloseable {
         }
 
         private synchronized void releaseCorrelation() {
-            if (correlationClaimed && message != null) {
+            if (correlationClaimed) {
                 correlationClaimed = false;
-                owner.releaseCorrelation(message.header().correlationId());
+                owner.releaseCorrelation(correlationId);
             }
         }
 
