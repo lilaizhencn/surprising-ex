@@ -6,6 +6,10 @@ Aeron Client 的普通异步请求遇到 `ADMIN_ACTION` 时会在原发送位置
 
 `ClusterMixedCapacityMain` ports the original mixed business workload to a real three-member cluster. It uses one FIFO command session, a separate reserved query session, and a global 256-request window. Commands are submitted asynchronously; state reads use cluster queries. Final checks cover retail positions/orders, HFT positions/reservations, treasury-inclusive funds, and liquidation/insurance/ADL. Use a fresh cluster data directory and report network query and real-time price-refresh costs separately.
 
+这里的256包含客户端排队；默认单个命令session最多64条已提交但未完成请求，不能把逻辑窗口当作集群内部积压。批量延迟按请求统计，业务吞吐按每批20项展开；Core命令数与网络查询数分别输出。客户端在原发送位置有界重试`ADMIN_ACTION`，保留顺序及命令身份，`tryCommandOnce`仍不重试。`adminActionRetries`是测量开始至最终核对结束的增量，含查询；`triggerExecutions`含预热，测量期数量以对应业务行的items为准。
+
+The 256-request window includes client queuing; the default command session permits at most 64 offered requests awaiting completion. Batch latency is measured per request, while business throughput expands its 20 items. Commands and queries are counted separately. Bounded, ordered `ADMIN_ACTION` retries preserve message identity; `tryCommandOnce` does not retry. The retry counter includes final verification queries, and `triggerExecutions` includes warmup; measured trigger counts are reported in the business rows.
+
 核心饱和诊断可单独使用 `MATCH_BATCH_STREAM`，`surprising.aeron.capacity-batch-size=20`（协议上限20）。买卖批次独立异步发送，256限制的是包含行情请求的全局逻辑请求数；每批20项时最多5120个订单项在途，不能与普通单256订单在途混为同一口径。订单吞吐按成功项数、Core消息按批次数加行情数、成交按批量响应各项实际execution统计（与普通单省略execution不同）；已成交订单可已从活动索引移除，order视图为空时必须有匹配的完整成交证据。延迟为批次终态时间，每项共享该批次延迟，不是单项独立完成时间。测量后核对每项状态、总计数、资金与订单簿。
 
 For a separate saturation diagnostic, use `MATCH_BATCH_STREAM` with `surprising.aeron.capacity-batch-size=20` (protocol maximum). Buy and sell batches are submitted independently. The global limit remains 256 logical requests, including price updates; at 20 items per batch this allows up to 5,120 outstanding order items. Report business items, Core requests, actual fills, and batch-terminal latency separately from ordinary orders. Final checks cover item status, counters, funds, and an empty order book.

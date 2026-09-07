@@ -4520,3 +4520,55 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 修正AeronClientPool非one-way请求：每个AgentLane仅持有一个dispatcher独占deferredAdminOffer；ADMIN_ACTION保留同一message/correlation/sourceSequence，在下一轮dispatcher原位置重试一次，期间正常poll egress/keepalive/处理其他session；成功前不offer本lane后续消息。沿用原queue deadline，到期仍NotAccepted，close回收未接收请求；真正断连/背压/未知等原语义不变，tryCommandOnce/one-way不重试。无额外线程/无交易状态机改动，新增计数adminActionRetries；mixed输出该计数从测量起到终检完成的增量，包含终检查询轮转，不能当业务命令重复数。
 - 回归覆盖ADMIN_ACTION后后续撤单不得越过、重试message及sourceSequence保持不变、egress继续轮询、持续ADMIN_ACTION有界到期/close释放，以及tryCommandOnce仍只尝试一次；执行client受影响测试及全部tools定向测试和HotSpot25打包。交易Core/撮合/结算未改，新的真实三节点X2与XJ承担受影响传输链路性能/资金验证，不执行本地JMH。
 - X2重锁：ceiling-x2/seed92006，30秒预热+300秒无JFR测量/完整cycle排空，当前master上述客户端修正提交，其他X参数、金融初态、窗口256、1FIFO命令连接和阈值完全不变。允许内部ADMIN_ACTION重试并单列，不允许最终NotAccepted/业务拒绝/未知/超时；容量/资金/生命周期门槛不放宽。XJ使用同一修正版，仍ceiling-xj/seed92003、30+180秒、90秒普通profile JFR；X2通过后才执行XJ。最后停止四VM，遵循用户本轮结束关机要求。
+
+### D/M已完成证据归档（普通独立单，非mixed口径）
+
+- D/M runtime均为7469f505，四机JAR SHA256 `407ffaaa3f6156153f43d4aeceeb430c9d67e956b1a2a35aa3ace1af8316291a`；当前master、不重跑旧版本，对照不适用。执行`python3 round.py d 1`及`python3 round.py m 4`，机器/JVM/普通单场景依照上文预锁。D通过：180.050秒、1,088,784订单、544,392真实fills，6,047.129订单/s、3,023.565 fills/s；44,089 mark，总命令1,132,873，submitted=completed、peak256、unfinished0，资金差/簿残留0。SELL/BUY p99分别54,919/47,677us，完整六分位见d/result.txt。
+- D四机90秒JFR约13:05:49..13:07:19 UTC，DataLoss0；node0为leader。+30..80秒owner单核CPU43.683%、matcher9.713%、四Lane4.000/4.272/4.210/4.639%，network-shared86.513%、archive21.241%、consensus27.501%。同期pidstat owner43.84%、调度等待0.14%，没有CPU计算饱和证据。定向MethodTiming中processCommittedRequest平均151.846us，总墙钟89.032秒；idleCommand累计65.198秒，占回调墙钟73.23%，包含自旋、让出和等待，不能解释成73.23%纯park或CPU。apply/prepareMatching/completeDispatchedMatcherSettlement均值10.397/9.037/8.722us，PlaceAdmission/MatcherSettlement事件4.246/7.547us，offerResponse0.615us；嵌套方法禁止相加。零调用方法的Long.MIN_VALUE哨兵已在离线导出器标记不可用，原始JFR不改。
+- D稳定窗口owner所在JVM加权采样分配61.202MB/s，约10,121B/订单；client129.785MB/s，约21,462B/订单，含协议/查询/外围分配，非逐订单精确追踪。三Core整段GC停顿总计0.242/0.226/0.197ms；node0 Direct buffer9,575,136B保持不变、GC后堆约237..245MB、NMT committed4,470,463,139→4,418,976,555B（包含4GiB堆）。完整CPU/分配/GC/native/锁/JIT/I/O输出见d下四份summary/audit/cpu/window及method-view；短采样不能证明零分配或无泄漏。
+- M无JFR通过：300.018秒，1,883,940订单、941,970 fills，6,279.423订单/s、3,139.712 fills/s；mark64,655、总命令1,948,595，submitted=completed、peak256、unfinished0、资金差/簿残留0，明确未接收重试25。SELL/BUY p99分别47,185/46,694us；29个完整10秒区间6,138.110..6,399.590，前6段/末6段均值6,260.511/6,272.893。node1为leader；中央系统采样machine CPU node0/1/2/load平均20.674/26.558/19.279/66.419%，swap/steal均0。四worker主要增加发压窗口自旋，不证明owner95%或硬件上限。完整六分位/GC/NMT/系统原始记录在m；D/M不与原本地mixed的18万直接作同口径比较。
+
+### X2真实三节点mixed主轮结果
+
+- runtime `91bfa106`，四机JAR SHA256 `43ed29610df1be23548a225bcb56de742d49ce9e9a7498c044d9c0e221fff429`一致。HotSpot25本地43个client及22个tools功能测试、打包通过（mixed4b-package.log）；此前旧测试仍要求ADMIN_ACTION只能尝试一次而失败，已按有序重试新语义修正并独立覆盖，失败日志mixed4-package.log保留。Core撮合/结算/确定性/等待策略未改。执行`python3 round.py x2 1`，30秒预热+300秒测量，约14:02..14:07 UTC，无JFR；正式中央CPU窗口14:02:55..14:06:46 UTC。其余预锁环境与金融初态不变，对照不适用。
+- 主轮PASS：实际300.345秒，**24,778.901 terminal business ops/s、2,689.291 terminal Core命令/s、5,813.055 fills/s**。offeredBusiness=terminalBusiness=7,442,210，offeredCore=terminalCore=807,714，真实fills1,745,920；另有10,912个网络query，不计business，也未包含在工具coreMessagesPerSec中，合计命令+查询818,626条。全局逻辑peak256、期末unfinished0；341个测量cycle、连同预热363个cycle。triggerExecutions字段11,616含预热，测量期间真正执行10,912次，不能混用。
+- 批量下单261,888请求/5,237,760项，批撤87,296请求/1,745,920项，平均及最大每批20。约871.958下单batches/s和290.653撤单batches/s；延迟直方图每请求一份，不能当批内每一项独立完成时刻。正式30个约10秒区间24,008.530..25,715.485 ops/s，前6段24,729.482、末6段24,734.500，无持续退化。ADMIN_ACTION有序内部重试43次（测量起至终检完成，包含查询），最终未接收/业务拒绝/未知/超时均0。
+- 资金差0，1769用户余额非负、零售持仓数量/敞口与挂单密度、HFT累计净仓及reservation回收全部通过；首次强平→保险→ADL闭环通过，保留已平仓历史realizedPnl。总账包括全部treasury与未覆盖deficit，不能重复加已包含在余额locked里的position margin。businessHash=71be3543461ce45d。强平等一次性动作发生于预热，不存在主轮强平延迟样本，不能宣称测量期重度强平吞吐已验证。
+
+| X2业务 | 请求数 | 展开业务项 | p50 us | p90 us | p95 us | p99 us | p99.9 us | max us |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 普通下单 | 174592 | 174592 | 40534 | 52756 | 54493 | 58589 | 116523 | 125435 |
+| 普通撤单 | 174592 | 174592 | 40239 | 88473 | 97779 | 108789 | 119996 | 146538 |
+| 标记价 | 65698 | 65698 | 39452 | 69730 | 76152 | 88997 | 116523 | 136708 |
+| 资金费 | 10912 | 10912 | 5881 | 7114 | 8028 | 8183 | 9207 | 90898 |
+| 风险续扫 | 10912 | 10912 | 5877 | 7098 | 8036 | 8187 | 9215 | 90898 |
+| 挂触发单 | 10912 | 10912 | 9003 | 13082 | 14106 | 16195 | 18481 | 20217 |
+| 执行触发单 | 10912 | 10912 | 9265 | 13352 | 14401 | 16457 | 18907 | 20676 |
+| 批量下单 | 261888 | 5237760 | 61341 | 88932 | 95944 | 108331 | 125894 | 146538 |
+| 批量撤单 | 87296 | 1745920 | 62619 | 79822 | 84934 | 91881 | 129499 | 138805 |
+
+- 上表均为入口→terminal，HDR三位有效数字、最大1分钟、closed-loop未修正CO；accepted在APPLIED终态核实，缺独立accepted时间，不能作为完整三段延迟验收。全部p99低于预锁1秒。
+- 中央5秒pidstat样本：node0 owner平均31.009%单核，范围28.4..33.6%、p5=29.6%、>=90%的样本占比0，调度等待0.098%；matcher8.919%、四Lane3.511/3.545/3.502/3.404%。node1/2 owner27.270/28.438%。四机machine CPU平均20.872/15.891/16.000/17.149%，swap/si/so/steal均0。**owner未接近95%，本轮不构成核心算力上限证据。**
+- 实际窗口边界补充：工具GLOBAL256是包含客户端排队的逻辑请求上限。AeronClientCapacity默认maxCommandInFlightPerSession=64，mixed采用一个FIFO命令连接，因此同时offer且等待终态的命令最多64，其余可能在mailbox中；预留query连接另行处理控制查询。没有改变本轮参数，不能把peak256说成集群内部已有256条待完成命令。原内存读取变成控制网络请求、部分依赖动作等待响应、Core逐回调完成边界均可能限制链路；需要结合XJ归因，不能仅凭此静态上限断言它就是全部瓶颈。
+
+- X2整个进程采集期三Core GC pause phase共108/113/105次，总计1.603/1.458/1.314ms，最大0.026/0.025/0.024ms；不是GC全部并发耗时。最终NMT committed4,309,170/4,306,205/4,306,045KB，均包含4GiB堆，reserved约68,580,000KB是虚拟地址预留。原始GC/NMT及计算结果x2/gc-nmt.json保留。上文batch速率按打印的300.345秒复算，应为871.957下单batches/s、290.652撤单batches/s（展开items/s分别17,439.145/5,813.048）；打印elapsed的舍入使其与使用完整纳秒的fillsPerSec有微小差异。
+
+### XJ mixed采样结果与本轮边界
+
+- 被测同一91bfa106/JAR `43ed29610df1be23548a225bcb56de742d49ce9e9a7498c044d9c0e221fff429`，`python3 round.py xj 1`；30秒预热+180秒测量，执行于约14:08..14:13 UTC。与X2同一三节点配置/负载/逻辑窗口256及默认session64上限，无Core等待策略修改。四份普通profile JFR均14:09:41..14:11:11 UTC、90秒，完整可读、DataLoss0；不用MethodTiming，采样结果不替代无JFR主轮。离线执行offline-xj.py，保存summary/audit/cpu/window、jfr view hot-methods/allocation-by-site及extra事件证据。
+- XJ PASS：180.025秒，4,430,583展开业务项、481,015命令、1,039,360真实fills，24,610.976业务项/s、2,671.939命令/s、5,773.431 fills/s；另有6,496查询。offered=terminal、peak256、unfinished0；203测量cycle/225总cycle。ADMIN_ACTION内部重试26（含终检查询），最终未接收/业务拒绝/未知/超时0；全部资金/零售/HFT/冻结/强平闭环核对通过，businessHash=eaac1341e8d6914d。全量六分位及类型计数xj/result.txt；最大业务p99=111,017us（普通撤单），全部低于1秒，批量下单/撤单p99=110,559/93,454us。
+- +30..80秒JFR，node0 owner31.039%单核、matcher9.091%、四Lane3.466/3.515/3.453/3.413%；network-shared59.102%、archive12.425%、consensus15.211%。load main79.016%、egress10.904%，不能将窗口轮询的main CPU当有效Core计算。正式中央pidstat node0 owner31.036%、最高33.0%、>=90%占比0，node1/2 owner28.709/28.691%；machine CPU node0/1/2/load21.136/15.864/16.000/16.909%，swap/si/so/steal全0。owner95%目标未达成，不宣称核心算力上限已测到。
+- owner CPU样本包含CommandFingerprint SHA摘要、TerminalStateRetention淘汰/查询、RuntimeIdentityRegistry、批量解码/响应编码和readFenceAll→LaneMutationTask.await；matcher样本包含MatcherPrefixDigest、真实撮合以及结果包装。网络线程主要在UDP poll/send，Archive负责记录文件；这都是不同职责，不把网络总CPU或Archive写盘错算成owner同步I/O。profile的park/monitor/I/O有时长阈值，+30..80秒未采到owner长I/O或monitor enter不等于所有短等待为零；本轮没有mixed阶段墙钟完整分解，不能把D普通单的73.23%直接套给mixed。
+- 稳定50秒窗口加权ObjectAllocationSample：node0/1/2 JVM约128.999/128.921/129.461MB/s，约5,242/5,238/5,260B/展开业务项，client约46.006MB/s、1,869B/业务项。分母采用XJ整轮实际业务速率，含协议/控制动作等整JVM分配，不是单笔交易精确成本；不用启动边界的全记录加权值替代稳定窗口。node0按线程owner64.472MB/s、matcher22.931MB/s、各Lane约10.2..10.4MB/s。热点包括批量响应byte[]、PlaceOrderCommand及字符串解码、stagePlaceBatchAdmission的LongLongHashMap扩容数组、OrderRuntime、MatcherEvidenceLedger字符串/结果包装、MatcherSettlementPlan；不是零分配。positionsForSnapshot该窗口采样权重0，仅表示未采中此栈。
+- profile未启用逐对象TLAB/OutsideTLAB事件，因此导出tlabBytes/outsideTlabBytes/maxObject=0表示缺事件，不能当零分配、零大对象或可精确计算对象数/operation。ThreadAllocationStatistics保留，但没有逐对象总数；完整热点及对象类/线程/调用栈在四份window/audit与allocation-view中。
+- 90秒三Core GC pause phase总计0.427/0.247/0.294ms，最大0.024/0.016/0.028ms；load总0.988ms、max0.033ms。node0 GC后堆182,452,224..322,961,408B，node1 222,298,112..308,281,344B，node2 209,715,200..301,989,888B；短窗口GC代际/触发时机不同，不能用首尾差认定泄漏。Core Direct buffer每节点8个/9,575,136B恒定，load6个/8,522,400B恒定；Core线程22、load17恒定。Aeron内存映射/全部native池未独立核算，Direct不代表全部堆外。
+- NMT recording期间committed node0 4,428,612,890→4,428,314,631B，峰值4,467,151,243B；node1 4,427,066,094→4,428,954,029B，峰值4,445,592,549B；node2 4,426,322,955→4,428,029,881B，峰值4,446,609,869B。load726,097,469→724,242,193B，峰值741,057,089B；各category原始事件和NMT文本保留。没有长期old-object/live-set/FD/native pool收支趋势，不能宣称无泄漏。
+- 三Core safepoint begin总计1.629/1.075/1.143ms，最大0.113/0.124/0.082ms；最慢VM operation18.144/14.438/14.642ms，均录制开始时RedefineClasses（load7.454ms），是采样启动开销，不归因给无JFR业务。记录期间仍有少量Compilation/Deoptimization（Core编译4/3/3、去优化20/15/18），不能宣称完全没有JIT干扰。约90秒的JavaMonitorWait来自JFR Recording Scheduler定时器，并非交易锁竞争；node1一次11.121ms FileWrite在archive-conductor写0-0.rec，非owner。标准profile没有全量异常throw事件，不能用空异常列表证明所有异常数量为0；工具实际终态错误检查通过。
+- 本轮完成的是指定U本位永续mixed组合的真实三节点持续发压/财务终态/采样诊断，属于部分性能验证。未测API/WS/Kafka、其他五产品线、open-loop、独立accepted时钟、每类强平/ADL持续尾延迟、全量短等待墙钟、长稳泄漏、新故障矩阵或快照恢复；本轮只改client有序管理操作重试及tools，Core状态机未改，先前恢复证据保留且不重复当成本轮结果。保持GLOBAL256、确定性及结算边界，下一次测试前应先明确是否调整session内部并发和控制依赖发压方式，不能通过无业务自旋实现95%。
+
+### 本轮停机
+
+- 按用户要求，X2/XJ终检通过、四机原始tar/JFR/监控/GC/NMT下载并离线校验后，执行`python3 stop-after-round.py`。GCP停止请求14:13:38 UTC发起、14:14:34 UTC完成；随后无过滤list读取逐台验证surprising-core-0、surprising-core-1、surprising-core-2、surprising-load均TERMINATED。原始instances-before-stop.json/instances-final.json/stop-instances.txt保存在core-ceiling artifact。
+- 保留四块80GB数据盘、集群测试目录及网络资源，磁盘仍计费；不是删除实例。本轮不再启动服务器，下次仅在用户明确要求测试后开机。
+
+- 本轮artifact根目录`/Users/atomex/Desktop/surprising/gcp-validation/2026-09-07-core-ceiling`，SHA256SUMS包含900文件/555,028,731B，清单自身SHA256 `6f01c4e3a13b93251d448ba9a595ecab613fc89ee5cc1fb5407324d8db2f4926`；排除清单自身、manifest-summary.json、编译缓存及符号链接，不含私钥。包含D/M、B与mixed失败、X02功能门槛、X2/XJ通过、四机原始记录、构建和停机证据。最终文档变更只执行git diff --check，未追加压测或重启VM。
