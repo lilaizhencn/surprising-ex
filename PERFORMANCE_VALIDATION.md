@@ -4357,3 +4357,62 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 ### 用户确认真实三节点为后续唯一性能执行环境
 
 - 用户在W2B进行期间明确：当前先验证真实三节点，不切换本地mixed策略；后续所有压测必须在真实三节点环境执行。已写入AGENTS.md，后续不再运行本地内存或mock Session JMH/性能采样。本轮已经完成的本地client JMH发生在此指令之前，只保留历史客户端诊断证据，不将其当作真实交易容量。正在进行的W1B/W2B及预定JFRB本身就是四台云主机（3个真实Core节点+独立压测机），场景和阈值不变；本次规则修改不改变被测jar源码7a23175f。
+
+### 真实三节点异步轮结果（2026-09-07，W1B/W2B/JFRB）
+
+- 被测源码7a23175f，规则提交a59f027a不改变jar；jar SHA256 `6abe5a33994709b2425f37ef517565de9ebe357331b56d0e48761ce3b0071a68`，四机一致。对照commit不适用（仅当前master）。6148d2a0的W1预热来源序号失败保留，不能作为有效吞吐。修复后的全部36个client测试与9个tools测试通过，HotSpot25打包通过；日志位于本轮artifact。来源顺序回归覆盖创建顺序与入队顺序相反、防御性payload复制。
+- artifact根目录 `/Users/atomex/Desktop/surprising/gcp-validation/2026-09-07-async-window`。执行入口为该目录 `python3 round.py w1b 1`、`python3 round.py w2b 2`、`python3 round.py jfrb 1`，实际远端systemd命令、JVM参数、监控和哈希保存在各轮目录。W1B约09:39..09:44 UTC，W2B约09:46..09:51，JFRB约09:57..10:03（含采样setup/verify）；每轮严格30秒预热、300秒测量/drain，实际端到端耗时见表。沿用上述预锁普通maker/taker、1000用户、256symbol、GLOBAL256、4命令连接、每Core 1 matcher/4 Lane、三台独立8vCPU/16GiB Core加独立同配压测机，不使用本地mixed/batch策略。
+
+| 指标 | W1B：1 worker | W2B：2 workers | JFRB：1 worker，诊断 |
+|---|---:|---:|---:|
+| 测量秒数 | 300.056 | 300.059 | 300.067 |
+| offered=accepted=terminal订单数 | 1,820,158 | 1,782,532 | 1,804,678 |
+| terminal business ops/s | 6,066.061 | 5,940.606 | 6,014.259 |
+| fills数 | 910,079 | 891,266 | 902,339 |
+| fills/s | 3,033.030 | 2,970.303 | 3,007.129 |
+| mark命令数 | 74,192 | 73,174 | 73,849 |
+| mark命令/s | 247.260 | 243.865 | 246.109 |
+| terminal Core消息数 | 1,894,350 | 1,855,706 | 1,878,527 |
+| terminal Core messages/s（订单+mark） | 6,313.321 | 6,184.471 | 6,260.368 |
+| 1秒采样在途均值 / 样本数 | 255.866 / 299 | 247.445 / 299 | 255.890 / 299 |
+| 最大逻辑在途 / 期末未完成 | 256 / 0 | 256 / 0 | 256 / 0 |
+| 明确NotAccepted瞬时重试 | 25 | 25 | 25 |
+| 业务失败、资金差、订单簿剩余level | 全部0 | 全部0 | 全部0 |
+
+- 三轮submittedRequests=completedRequests=表中Core消息数，订单数=2*fills。无业务拒绝/未知结果/超时，明确未接收重试单列；三轮预锁门槛均PASS。accepted计数仍来自APPLIED终态，缺少独立accepted时间与Core内部backlog，不能将客户端逻辑窗口（包含排队/重试）当作已进入集群的256条命令；旧pendingMax/completionQueueMax=-1明确为未观测。
+- 每类延迟从其实际发起到终态callback，单位微秒；HDR 3位有效数字、范围至1分钟，closed-loop未修正coordinated omission，不是完整生产open-loop尾延迟。
+
+| 轮次/类型 | 样本 | p50 | p90 | p95 | p99 | p99.9 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| W1B maker | 910079 | 42500 | 53608 | 59113 | 68485 | 76677 | 128581 |
+| W1B taker | 910079 | 39124 | 44367 | 45383 | 47054 | 49283 | 126877 |
+| W2B maker | 891266 | 42336 | 50266 | 53706 | 60227 | 66158 | 74645 |
+| W2B taker | 891266 | 39354 | 44761 | 45776 | 47448 | 49643 | 76480 |
+| JFRB maker | 902339 | 42762 | 56033 | 60751 | 69206 | 79626 | 150994 |
+| JFRB taker | 902339 | 38174 | 43876 | 45121 | 47677 | 56033 | 129826 |
+
+- W1B 29个完整10秒段5,969..6,151 ops/s，前6段均值6,060.856、末6段6,054.297；W2B 5,677..6,049，前6段5,910.306、末6段5,994.003。增加发起worker没有提升，按预锁差异<5%选择1 worker采JFR。结论仅为此配置、256窗口、此普通订单组合下约6千持续终态ops/s的平台，**不是交易Core或Aeron硬件的绝对上限，也不与历史15万/18万本地批量mixed口径比较**。
+- W2B管理侧IAP TLS连接出现UNEXPECTED_EOF，编排读取中断；云端systemd压测与四机连续监控未停。保留原错误日志，用`--resume`继续读取/收集同一次负载，没有重启该测量或清空数据。SSH复用连接后完成采集。各有效轮稳定监控区间swap/si/so/steal均0，无连续steal超限；四份JFR无DataLoss。
+
+### 三节点与客户端JFR归因
+
+- 原始JFR、profile配置、NMT前后、GC日志、vmstat/mpstat/pidstat/sar均保留。`JfrRead`是全录制聚合；`ClusterCpu`与`WindowAudit`裁剪各录制起点+120..290秒的稳定170秒，不把setup/verify的快照物化当逐笔热路径。采样期间leader为node2，其他两节点是真实follower并执行相同Core。
+- leader线程CPU按单逻辑CPU100%：clustered-service owner平均38.684%，matcher8.828%，四Lane分别3.253/3.631/3.400/3.543%，consensus22.005%、archive19.432%、共享sender/receiver75.700%、driver-conductor28.565%。client dispatcher19.164%、发起worker13.773%、receiver50.043%、sender24.944%。owner、matcher、Lane以及发起端均未占满单核；Aeron轮询/yield/native receive样本不能都解释为有效业务计算。
+- owner的显著等待栈是`processCommittedRequest → idleCommand → ClusteredServiceAgent.idle → BackoffIdleStrategy`。代码逐个已提交日志回调执行apply、等待该命令匹配/结算完成、检查回调完成，再返回响应；matcher/Lane存在park/调度。证据支持串行回调内的跨线程完成等待及传输/调度值得优先进一步分段测量，尚不足以把全部瓶颈唯一归因到某个线程。这个回调完成边界保护日志/状态/恢复一致性，不能直接移除来追数字。仅增加load worker不能绕过这个边界；尚缺提交、复制、各阶段和返回的独立墙钟埋点。
+- 稳定窗口sample weight：node0/1/2分别49.027/51.355/51.271 MB/s，约8,152/8,539/8,525 B/订单操作；client115.081 MB/s，约19,135 B/订单操作。这是加权采样估计，分母为本轮整体订单速率，包含mark及后台分配，不能当精确业务对象数。Core热点包括CoreCommandResultCodec响应字节、CoreOrderStateView、重复ResolvedPlaceOrder、changedBalance/changedAssets的IntHashSet、MatcherResult/CoreMatchingResult和身份映射扩容；窗口未采到positionsForSnapshot栈。不能只因出现在top就判业务错误或无条件删除必要状态。
+- client稳定窗口19.564GB加权分配中Long约15.285GB，主要是dispatcher扫描pending时`SurprisingAeronClient.takeResponse → ConcurrentHashMap.remove`装箱；另有迭代器和pollEgress lambda。这是明确后续分配优化候选，但当前dispatcher并未CPU饱和，不能声称删除后必然提高整个集群吞吐。本轮仅修复来源顺序，没有顺带重构响应交付。
+- profile没有开启完整NewTLAB/OutsideTLAB事件（计数0），不代表零分配；对象数/op、精确最大对象尚未测得。ThreadAllocationStatistics的区间端点不足以替代稳定窗口精确计数。全量类/线程/栈、分配分钟趋势保存在各`*.analysis.txt`、`*.window.txt`。
+- 用户限定后续真实三节点之前已完成的client JMH，仅补录历史证据：按前述预锁1fork/4线程/全局256、3×1s预热及3×1s测量，实际client dispatch即时Session终态1,408,767.896 ±307,740.717 client requests/s，491.810 ±4.018 B/request，GC 28次/44ms，trial offered=terminal=8,062,784、未完成0、来源序号断言通过。该短客户端边界诊断不含交易Core/资金模型，不参与云端主吞吐判定，之后未再运行本地性能基准。
+- 三Core全录制GC分别16/17/16次，GC暂停phase累计1.186/1.157/1.107ms、phase max0.027/0.029/0.033ms；client154次、phase累计8.335ms、max0.032ms。Core after-GC末值140.5/144.7/155.2MB、峰值274.7/278.9/251.7MB；client末值69.2MB、峰值79.7MB。暂停远小于业务尾延迟，不能把并发GC持续时间当暂停。单向增长持仓且仅数分钟，不证明无泄漏。
+- Core NMT total committed录制末较首增加21.849/19.135/23.871MB，峰值约4.457/4.459/4.465GB；client增加534.821MB至1.162GB（初始堆512MiB、最大2GiB，包含堆扩展，不能直接判堆外泄漏）。ZGC虚拟地址reserved不是物理用量。DirectBuffer采样：各Core固定8个/9,575,136B，client固定6个/8,522,400B；Core活动线程初始化16→21后稳定。未覆盖全部Aeron mmap/native池余额及长稳文件描述符趋势。
+- 全录制leader safepoint begin98次/max0.124ms；VM operation330次/max8.028ms；profile阈值内Compilation30次/累计6.533s、Deoptimization214次，包含初始化，稳定窗口编译线程CPU很低。client存在10:01:28 UTC的54.1ms `HandshakeAllThreads` VM operation，`safepoint=false`、caller ZWorkerYoung；它发生在测量期，需保留为并发GC握手长事件，不能说全程无VM长事件，也不能把它当全部业务线程54ms STW。完整JIT/code cache/metaspace/category见原始聚合。
+- 阈值内Core同步FileWrite出现在archive-conductor；leader全录制6次/50.757ms，未采到交易owner文件/socket/database同步I/O。profile阈值及UDP/JNI覆盖有限，未观察到不等于不存在所有系统调用。录制包含MethodHandle/LambdaForm初始化的NoSuchMethodError探测、client结束附近的PortUnreachableException及JFR.stop名称解析NumberFormatException；业务终态无失败，原始异常栈保留。未做完整墙钟/off-CPU归因、open-loop、六产品金融动作、快照/failover、长稳与native池全面审计，生产容量验收仍为部分验证。
+
+### 本轮全停恢复与证据索引
+
+- `python3 recover.py`先查询，然后全部停止三个Core服务，再启动相同async-jfrb持久化目录。重启前后`appliedCommandCount=2059545`、`stateHash=c21a0d02883d7b78`完全一致，机器校验见`recovery/comparison.json`；随后seed90743/prefixGCP-AJFRB的capacityVerify=PASS、fundsDiff=0、bookLevels=0。重启后不重新setup、不重置资金。
+- 服务10:06:12..13 UTC启动，19次查询连接超时记录保留，第20次查询10:12:20开始并成功，约6分钟恢复可用，不能称零停机或快速恢复。期间线程栈确认回调执行日志重放的MatcherSettlementPlan/commitReadyMatching。node1在10:12:10记录LEADER，node0在10:12:17随后记录LEADER和`quorum position went backwards: leaderCommitPosition=461479840 quorumPosition=0`警告；最终状态和资金核对通过，不据此宣称完整选举故障矩阵无风险。此次仅全停后持久化日志重放，未新建/恢复快照、未验证断电fsync承诺，也没有压测中故障注入。
+- 原始四份JFR大小及SHA256：node0 2,700,487B / `06c583eb3b0c58f3af5fd712aa5cce7ce8272781c454811d665f550a7a1456e5`；node1 2,772,338B / `05aa078f13b424b3e14cb79089fa297e66d32843a20f037361584bf329671d48`；node2 2,897,016B / `fc6ac654fde5d8875382313e535e674f1d0e96910988a1ad54ef23fd611406ea`；client 4,959,937B / `4f20b4a6d114f237a0221446ac26653d6852baa743961c221628ea4095b3ceef`。路径均为本轮artifact的`jfrb/surprising-*/`，聚合与原始事件配置同目录。
+- 结论：本轮压测器和生产client来源顺序问题已修复，45个定向功能测试、三轮真实三节点普通订单门槛、资金/订单簿核对与全停日志恢复通过。固定256窗口和此普通负载持续约6千订单操作/秒；绝对Core吞吐上限尚未证实，owner/matcher/Lane没有CPU饱和，后续须在真实三节点下进一步定位阶段等待，不能换本地策略给出更大数字代替。
+- 四台实例本轮09:22:29..31 UTC启动、10:13:54..56停止，最终`instances-final.json`逐台核验TERMINATED。实例、各80GB磁盘、VPC与原始数据保留，停止不是删除，磁盘仍计费；未确认赠金覆盖或最终账单。`instances-before-stop.json`因CLI名称过滤未匹配而为空，不能作运行状态证据；运行状态由各轮systemd/监控留证，最终实例清单使用未过滤项目查询。
+- 本轮artifact `SHA256SUMS`含417个文件、152,090,262B（不含清单自身），清单SHA256 `ec4592a371be0738969ea82a73f80a9272059554b1ac7106b9a97e9089a022f0`。包含失败轮、管理异常、功能测试、三轮数据、四份JFR、离线分析及恢复证据，排除编译/cache文件；私钥在旧artifact目录且未复制进本轮目录或清单。
