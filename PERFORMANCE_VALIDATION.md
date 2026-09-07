@@ -4445,3 +4445,21 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - S1源码3ca7e3d5、jar SHA256 `96126a4f3b77a3bf2b761f6bc2a0b33bad0f76ba5a63140e92b3447db66e84f0`完成300秒发压后通过资金/订单簿核对，但在总计数校验处FAIL，未输出有效capacity=PASS。工具误将响应executions空列表当作零成交；已核实CoreProbeState.commandResultData有意用List.of()省略成交数组，这是现有正确行为，不修改Core来迎合工具。原始失败保留在stream/s1，本轮数据不能用于正式吞吐通过结论。
 - 仅修正tools统计：校验响应orderId等于本次新单，定位其订单视图，强制qty=1、price=100、executed范围0..1且remaining=1-executed，然后累计executed。新单在自身提交回调内的已成交量，就是该命令产生的成交量；不累计对手订单视图，不依赖executions数组，也不凭发送量推测成交。补充协议encode/decode后的空成交数组/真实已成交订单、挂单零成交、重复对手视图、缺失/错误订单标识回归；失败总计数会明确输出各项数值。
 - S2独立目录`/var/lib/surprising/stream-s2`、seed90902/prefixSTREAM2，当前master修正提交/新jar哈希另记。除此之外完全沿用S1预锁：默认Core配置、三节点+load各8vCPU16GiB、GLOBAL256、1worker/4命令连接/1000用户/256symbol/1matcher4Lane、独立买卖GTC各半、30秒预热+300秒无JFR主测量、资金初态/行情前置/阈值/系统有效性规则不变；旧数据和失败jar单独保留，不重跑旧版或更改交易逻辑。
+
+### S2真实三节点持续异步发压结果
+
+- 被测源码`7469f505`，四机jar SHA256 `407ffaaa3f6156153f43d4aeceeb430c9d67e956b1a2a35aa3ace1af8316291a`一致；14个tools定向测试无失败，HotSpot25打包通过。只修改压测工具和说明，没有更改Core、client、撮合/结算协议或等待策略。执行命令：stream artifact目录`python3 round.py s2 1`；Core于12:29:40 UTC左右就绪，约12:30..12:35 UTC正式测量。对照commit不适用。
+- 主轮严格预锁普通买卖GTC独立异步提交、全局256、1worker、4命令连接+1预留、1000用户、256symbol、每Core1matcher/4Lane，默认BLOCKING Lane和集群backoff，30秒预热、300秒测量及排空，无JFR。实际测量/drain耗时300.044秒；**6,112.632 terminal business ops/s、3,056.316 fills/s、6,359.243 terminal Core messages/s**（含246.611 mark/s）。这是指定配置与业务组合的持续实测值，不是CPU已被压满或硬件绝对上限。
+- offered=accepted=terminal订单数1,834,058；来自本次新单响应已成交量的真实成交数917,029，严格满足订单数=2*fills。mark命令73,994，Core逻辑submitted=completed=1,908,052，最大逻辑在途256，期末unfinished=0；1秒在途采样299个、均值247.060。明确NotAccepted重试25次，业务拒绝/未知/超时/失败0，fundsDiff=0、bookLevels=0。accepted仍在APPLIED终态计数，未埋独立accepted时间；逻辑在途包含客户端排队和重试，不等同于集群内部backlog。
+- 29个完整10秒区间5,990.465..6,290.938 ops/s，区间均值6,117.292；前6段均值6,092.168、最后6段6,087.119，未呈持续退化。不能以最高10秒值作为持续容量。HDR三位有效数字、1分钟上限；closed-loop未修正CO，以下是发起到GTC命令终态，不是每个订单最后一笔成交的耗时。
+
+| 类型 | 样本数 | p50 us | p90 us | p95 us | p99 us | p99.9 us | max us |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| SELL GTC | 917029 | 41418 | 47939 | 49807 | 53575 | 58818 | 129564 |
+| BUY GTC | 917029 | 38699 | 43745 | 44793 | 46596 | 50036 | 118423 |
+
+- 聚合p50/p99/p99.9为39,944/52,068/57,343us，原始直方图保留。四机稳定区间各37个vmstat样本，machine CPU平均node0/1/2/load分别18.486/18.054/26.568/27.811%，最大25/24/29/30%；leader为node2，swap/si/so/steal全0，无预锁系统失效条件。没有本轮JFR，不能仅凭机器总CPU认定某条关键线程是否饱和；pidstat的-C java过滤也不能当完整命名线程采样。
+- 三Core启动至收集期间GC pause phase分别75/80/75次，总计1.088/1.085/1.019ms、max0.032/0.043/0.030ms；最终NMT committed为4,290,265/4,290,546/4,291,029KB，包含4GiB堆，reserved约68,572,000KB为ZGC虚拟地址预留，不是物理用量。GC/NMT/系统原始日志可查；缺少本轮Java分配/JFR、完整native池、长稳和阶段墙钟证据，不宣称零分配/无泄漏或全面生产容量验收。
+- 持续发压无逐单回包阻塞、无卖单终态→买单发起依赖、无定时休眠；保留256窗口背压、共享异步mark前置和最终排空。S1失败由工具成交计数误读造成，已补真实协议回归并重跑S2通过，未修改Core来规避检查。当前直接吞吐测试及预锁正确性门槛PASS；仍不把这个结果与旧本地mixed/batch或IOC链式负载混为同一口径。Core阶段等待/硬件绝对上限、open-loop及全部金融路径不属于本轮已证实结论。
+- 先前已取消的wait-diagnostics证据另有239文件/2,067,834,567B，清单SHA256 `5fa2099fb055e1dae011a6e3ab244f2fd843c17aefeff74f8388a1e73c6bfad4`；D0完成、D1按用户澄清取消、D2及其计划主轮未执行，不能引用D1为有效吞吐。S1失败jar和脚本已单独保留，S2修正版没有覆盖它们。
+- 四机本次11:57:16 UTC左右启动、12:37:19左右停止，`instances-final.json`逐台核验TERMINATED；保留四块80GB盘、测试数据与网络资源，磁盘仍计费。stream artifact清单194文件/129,113,384B（不含清单自身），SHA256SUMS自身哈希 `ee89fcce8bc0f83cbb5d375612606ca3438fad91c9e0ab80006c5feaa50e597a`，包含S1失败、S2通过、两版jar、功能测试/构建、部署哈希/系统数据与最终停机证据，不含私钥/编译缓存。
