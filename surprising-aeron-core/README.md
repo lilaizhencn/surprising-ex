@@ -376,6 +376,11 @@ mvn -pl :surprising-aeron-client,:surprising-aeron-tools -am test
 三节点部署与验证入口正在重新整理。一次只启动一条产品线；删除 Archive 或数据卷前必须先确认目标产品线，
 任何迁移工具只能在检测到既有状态时中止，不能自动删除状态。
 
+JDK25启动 `SurprisingClusterNode` 的Archive CRC校验还需
+`--add-opens=java.base/java.util.zip=ALL-UNNAMED`。`ClusterDerivativeSmokeMain` 在下单前提供当前时间标记价格；
+`ClusterCapacityMain` 的衍生品订单场景持续刷新mark并单列 `marketDataCommands`，总Core消息数包括这些行情输入。
+不能用过期固定时间或缺少mark的工具输入绕过Core的五秒行情新鲜度检查。云端验证记录见根目录 `PERFORMANCE_VALIDATION.md`。
+
 ## 实现状态与版本切换说明
 
 当前写格式为 command/envelope schema v4、trading snapshot v25、matcher snapshot v5 和

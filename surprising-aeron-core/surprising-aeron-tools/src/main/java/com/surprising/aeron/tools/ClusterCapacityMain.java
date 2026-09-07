@@ -69,6 +69,8 @@ public final class ClusterCapacityMain implements AutoCloseable {
     private final AtomicLong failures = new AtomicLong();
     private final AtomicReference<RuntimeException> firstFailure = new AtomicReference<>();
     private final Object[] symbolLocks;
+    private final long[] lastMarkRefreshMillis;
+    private final AtomicLong marketDataCommands = new AtomicLong();
     private final CapacityMetrics capacityMetrics;
 
     private ClusterCapacityMain(
@@ -99,6 +101,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
         this.workload = workload;
         this.symbolLocks = java.util.stream.IntStream.range(0, symbols.size())
                 .mapToObj(ignored -> new Object()).toArray(Object[]::new);
+        this.lastMarkRefreshMillis = new long[symbols.size()];
         this.capacityMetrics = new CapacityMetrics(offeredCommandsPerSecond == 0
                 ? 0 : Math.max(1, 1_000_000_000L / offeredCommandsPerSecond));
         this.clients = new AeronClientPool("capacity", productLine, hosts, egress, Duration.ofSeconds(10),
@@ -162,6 +165,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
         failures.set(0);
         firstFailure.set(null);
         capacityMetrics.reset();
+        marketDataCommands.set(0);
         nextPermitNanos.set(System.nanoTime());
         long started = System.nanoTime();
         execute(durationSeconds, true);
@@ -185,6 +189,9 @@ public final class ClusterCapacityMain implements AutoCloseable {
                 metrics.offered(), metrics.accepted(), metrics.finalized(), matchCount, failures.get(), elapsedSeconds,
                 metrics.finalizedPerSecond(), matchCount / elapsedSeconds, metrics.p50Micros(), metrics.p99Micros(),
                 metrics.p999Micros(), metrics.outboxMaxSequence());
+        System.out.printf("marketDataCommands=%d marketDataCommandsPerSec=%.3f totalTerminalCoreMessages=%d%n",
+                marketDataCommands.get(), marketDataCommands.get() / elapsedSeconds,
+                Math.addExact(metrics.finalized(), marketDataCommands.get()));
     }
 
     private void setup() {
@@ -281,6 +288,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
             while (System.nanoTime() < deadline && pending.size() < asyncInFlight) {
                 int pair = Math.floorMod(worker + Math.toIntExact(cycle), pairCount);
                 String symbol = symbol(worker, cycle);
+                refreshMarkIfDue(symbol, measured);
                 long makerOrder = nextOrderId.incrementAndGet();
                 long takerOrder = nextOrderId.incrementAndGet();
                 CoreOrderSide makerSide = CoreOrderSide.SELL;
@@ -374,12 +382,13 @@ public final class ClusterCapacityMain implements AutoCloseable {
             var response = clients.command(CoreMessageType.APPLY_MARK_PRICE,
                     stableId("mark-price:" + worker + ':' + cycle), firstUser(Math.floorMod(worker, pairCount)),
                     TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                            symbol, 1, PRICE_TICKS + (cycle & 1L), sequence, 1_700_000_000_000L)));
+                            symbol, 1, PRICE_TICKS + (cycle & 1L), sequence, System.currentTimeMillis())));
             record(response, System.nanoTime() - started, measured);
         }
     }
 
     private void submitOrder(long userId, PlaceOrderCommand command, boolean measured) {
+        refreshMarkIfDue(command.symbol(), measured);
         throttle();
         long started = System.nanoTime();
         if (measured) capacityMetrics.recordOffered();
@@ -414,6 +423,22 @@ public final class ClusterCapacityMain implements AutoCloseable {
         long remaining = permit - System.nanoTime();
         if (remaining > 0) {
             LockSupport.parkNanos(remaining);
+        }
+    }
+
+    private void refreshMarkIfDue(String symbol, boolean measured) {
+        if (productLine == ProductLine.SPOT) return;
+        int index = symbols.indexOf(symbol);
+        synchronized (symbolLocks[index]) {
+            long now = System.currentTimeMillis();
+            if (lastMarkRefreshMillis[index] != 0 && now >= lastMarkRefreshMillis[index]
+                    && now - lastMarkRefreshMillis[index] < 1_000) return;
+            long sequence = nextPriceSequence.incrementAndGet();
+            applied(CoreMessageType.APPLY_MARK_PRICE, 1,
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
+                            symbol, 1, PRICE_TICKS, sequence, now)), stableId("feed:" + seed + ':' + sequence));
+            lastMarkRefreshMillis[index] = now;
+            if (measured) marketDataCommands.incrementAndGet();
         }
     }
 

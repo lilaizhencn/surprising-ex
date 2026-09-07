@@ -4270,3 +4270,13 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 冷却15s后同配置JFR诊断轮：另一seed90702、symbol前缀GCP-JFR，30s warmup+300s measurement；节点JFR profile设置，通过jcmd启动三节点recording，包含setup/warmup/verify，maxsize512m、手动dump。不以带profiler结果替代主轮；分析leader/follower的CPU、Lane/matcher/Archive/Consensus、分配/GC/NMT/等待/IO。真实Cluster Archive同步/异步磁盘I/O须按线程区分，交易业务owner同步磁盘/网络/数据库I/O判失败。
 - 四节点vmstat/mpstat/pidstat、GC和NMT监测，记录CPU steal/频率/CPU与内存/磁盘/网络、上下文切换、swap。swap增长、JFR DataLoss、实例维护/重启或持续明显CPU steal（连续3个5s采样>5%）判相应性能轮无效；本轮不验证宿主机物理频率/硬件隔离。
 - 工具已知指标边界：accepted是在收到APPLIED终态时计数，并非独立受理时间；输出acceptanceToFinalization标签实际来源请求发起（taker含maker链路），只能作为当前工具完成延迟，不冒充三段延迟。pendingMax/completionQueueMax=-1代表未埋点；async固定窗口上限不能代替观测最大backlog。现有report主要p50/p99/p99.9，未提供全部业务类别/独立三段p90/p95，资金验证不独立核对每个持仓字段。记录这些缺口，首轮是受限容量实测，不宣称完整生产性能验收或已测吞吐绝对上限。单zone不代表跨zone/跨region故障安全性；profile默认抽样不提供精确objects/op、完整native池或五分钟长期无泄漏证明。
+
+### GCP采集前连接数校正（尚未开始性能采样）
+
+- 上述单连接方案作废、未采集性能数据：源码AeronClientCapacity默认每command session最多64在途，因此必须使用4个command session才能提供总256协议在途容量，另有1个reserved control session。最终锁定为1 workload worker、4 command connections+1 reserved connection、async-in-flight=256；其他场景、阈值、主轮/JFR参数保持上述定义。少量功能smoke不属于容量测量，未形成其他in-flight档位性能数据。
+
+### GCP功能前置发现与最终负载锁定（仍未开始性能采集）
+
+- 首次启动缺少Archive CRC所需 `--add-opens=java.base/java.util.zip=ALL-UNNAMED`，导致三节点退出，补充该JVM参数后正常选主。首次交易smoke被正确拒绝：CoreOrderDecisionResolver要求衍生品下单有<=5000ms的新鲜mark，旧工具未提前提供mark；异常采样同时显示MARK_PRICE_MISSING被既有CoreResultCode映射成INVALID_COMMAND，未改交易校验/协议枚举。
+- 工具修复：smoke下单前发送当前时间mark；ClusterCapacityMain在创建订单前按symbol每秒最多一次同步刷新mark，并单列marketDataCommands与totalTerminalCoreMessages。1个workload worker在pending对数<256时刷新，mark占用该空闲窗口，不另开并发生产者；4命令session总容量256保持。测量订单数=finalized，两单一fill，行情命令另外报告；总Core终态=finalized+marketDataCommands。负载包含这些必要行情输入；旧不带mark的场景未采集数据，不作性能对照。
+- 标记价格持续更新会触发实际risk状态变化，其成本属于云端负载。1秒刷新频率不保证极端阻塞后仍新鲜，任何STALE_MARK_PRICE/业务拒绝都判该轮失败，不能放宽Core五秒规则。当前master被测commit为本条+工具修复的提交；实际jar SHA和节点入口参数留存。主轮seed90701/JFR90702及30s+300s、阈值不变。错误smoke与异常JFR均仅功能诊断，无吞吐验收结论。
