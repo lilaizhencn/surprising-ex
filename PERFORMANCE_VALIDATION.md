@@ -3927,3 +3927,15 @@
 - Artifact `/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-07-mixed-standard`，24个文件130,656,879B，原始JFR、run/config/JAR校验、summary/全量分析、系统/GC/IO审计齐备，SHA256SUMS自身SHA256 `167453f757b7586e317d65b5a3f96a76be76a650ece77340456db0c7704382f5`。停止的小批量轮41文件65,316,696B、manifest SHA256 `d5dac6d620e1942ce5a4efadb0d28ef66bb809331ab459234d46bbc565b26985`，不覆盖或隐去中止事实。压测进程已全部退出。
 
 - 文件大小校正：上述soak.jfr经最终stat核验为64,662,208B（约61.67MiB）；先前精确字节数有录入误差。原始artifact及SHA256清单不变。
+
+
+## Owner批次完成优化（2026-09-07，采集前锁定）
+
+- 请求：优化owner串行收尾、Lane往返和无进展轮询。仅当前master；对照commit：不适用（仅验证当前master）。实际被测commit/JAR SHA在采集前保存至artifact。改动：纯撤单批次复用LaneCancelEvent完成Lane commit；等待未完成Lane的批次不进入收尾；批次响应直接编码owner临时items容器并回填帧长度，省去防御复制和重复长度计算。改单双阶段提交、资金校验、SHA256幂等、回调完成/快照/恢复边界保留。
+- 机器：macOS26.7 x86_64、Intel i9-9880H 8C16T、16GiB；HotSpot Oracle GraalVM25.0.1+8、Maven3.9.16。同机用户应用保留，5秒采集CPU_Speed_Limit/swap、30秒进程CPU；节流/swap新增/JFR DataLoss使轮次无效。每轮顺序执行，不并发压测。
+- Artifact：`/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-07-owner-completion`，包含JAR、命令、测试日志、系统/GC日志、JFR/config/分析、SHA256清单；不纳入git。
+- mixed主吞吐与采样：保持上一条用户确认的标准，LinearPerpetualScaleSoakMain参数 `1000 256 256 5 10 UNIFORM 1 20 32 300 30`。1000用户，256活跃symbol，初始每用户最多5持仓/10订单，UNIFORM，hftRounds1/batch20，lifecycleSymbols32，4Account Lane/1matcher，固定256 in-flight；0外部连接，夹具main同时生成请求与执行Core owner，内部maker持续保留流动性。包括双向下单/成交/撤单、触发/风险/资金费及每scenario一次强平→保险→ADL；不是风险风暴或真实Cluster网络容量。
+- mixed JVM：`-Xms4g -Xmx4g -XX:+UseZGC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -Dsurprising.aeron.matching-engines=1 -Dsurprising.benchmark.openLoop=false --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED`。闭环最高速率，未修正coordinated omission；无独立warmup，300秒包含首段预热，终检进入总耗时；另报30秒稳定窗口。主轮不启用JFR/async/NMT，保留GC日志；诊断轮添加NMT summary/PrintNMTStatistics及上一mixed原样profile.jfc，JFR maxsize512m、dumponexit，记录300秒业务+setup/终检；轮间冷却15秒。
+- mixed通过阈值：无profiler主轮持续terminal business ops/s≥150000；诊断轮只作归因，不计算优化收益百分比。每轮accepted=terminal business ops及Core messages、unfinished=0、期末命令backlog0、非预期拒绝/错误/超时0，资金/冻结/持仓/订单终态及snapshot恢复hash必须通过；报告fills/trades可用口径。稳定GC后live-set斜率<1MiB/s、native committed斜率<256KiB/s、线程/FD斜率<0.01/s，无allocation stall及恢复失败。
+- 六产品影响面JMH：新增`ClusteredBatchTradingBenchmark.ownerBatchCompletion`，逐产品独立进程SPOT、LINEAR_PERPETUAL、INVERSE_PERPETUAL、LINEAR_DELIVERY、INVERSE_DELIVERY、OPTION。f1/t1、warmup2×3s、measurement3×5s、每轮前冷却15s、`-prof gc -foe true`。JVM768MiB G1、1matcher、4Lane、batch20、256 in-flight、realtime=false、257用户含maker、1模拟会话/1symbol、余额每账户1e9结算单位、SPOT maker BTC余额5121单位、初始无用户持仓，maker持续挂120卖单。每cycle先2个place batch+254个missing cancel batch+2个有效cancel batch，再256个place+256个cancel batch；合计15400 business ops/770 Core messages、15400items/770batches、512metrics查询、5080预期ORDER_NOT_FOUND拒绝、0fill（另有六产品amend成交功能回归）。必须按拒绝与成功分别解释，不等同全成功成交吞吐。该轮对吞吐无生产容量断言；资金/snapshot/terminal硬断言，报告JMH误差、GC分配B/op、GC次数/时间。JMH该专用场景没有三段业务延迟，不能单独宣称完整性能验收。
+- JFR分析：沿用streaming JfrRead/IO audit，包含owner/Lane/matcher CPU、栈、allocation/TLAB、GC暂停/live-set/native/线程/FD、VM/JIT/异常/IO和三段分业务延迟p50/p90/p95/p99/p99.9/max（直方图桶上界）。分析owner忙轮询，不把CPU100%当有效计算100%。完整原始artifact保留；短测不证明长期无泄漏。真实3节点网络、外部API/Kafka/WS不在本次范围，回调同步约束明确保留。

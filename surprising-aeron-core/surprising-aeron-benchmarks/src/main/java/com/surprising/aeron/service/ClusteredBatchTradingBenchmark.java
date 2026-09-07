@@ -33,6 +33,13 @@ public class ClusteredBatchTradingBenchmark {
         batchAmendRoundTripTrades(workload, counters);
         return batchPlaceCancelWithMetrics(workload, counters);
     }
+    /** Fused batch cancellation commit, result encoding, and all-rejected continuation readiness. */
+    @Benchmark
+    public long ownerBatchCompletion(Workload workload, Counters counters) {
+        rejectedCancelContinuations(workload, counters);
+        return batchPlaceCancelWithMetrics(workload, counters);
+    }
+
     @AuxCounters(AuxCounters.Type.EVENTS)
     @State(Scope.Thread)
     public static class Counters {

@@ -46,6 +46,41 @@ import org.junit.jupiter.api.Test;
 class CoreOrderedOrderBatchTest {
 
     @Test
+    void cancelBatchCommitsInItsSettlementTaskAndKeepsDuplicateAndSnapshotResults() throws Exception {
+        try (var state = new CoreProbeState(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, 10_000);
+            drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 2,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            place(86_001, "cancel-fused-1", 1_000),
+                            place(86_002, "cancel-fused-2", 1_000))))));
+            TradingRuntimeState runtime = field(state, "runtimePlaceOrderState");
+            long[][] operations = field(runtime, "accountLaneCompletedOperations");
+            long before = java.util.Arrays.stream(operations).mapToLong(row -> row[1]).sum();
+            CoreMessage cancel = command(CoreMessageType.CANCEL_ORDER_BATCH, UUID.randomUUID(), 3,
+                    TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
+                            new CancelOrderCommand(86_001), new CancelOrderCommand(86_002),
+                            new CancelOrderCommand(86_003)))));
+            CoreResponse result = drainBatch(state, cancel);
+            assertThat(java.util.Arrays.stream(operations).mapToLong(row -> row[1]).sum())
+                    .as("no extra metadata or sequence-commit Lane task after cancellation").isEqualTo(before);
+            var items = TradingOrderBatchCodec.decodeResult(result.data()).items();
+            assertThat(items.get(0).status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(items.get(1).status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(items.get(2).resultCode()).isEqualTo(CoreResultCode.ORDER_NOT_FOUND);
+            assertThat(state.tradingState().user(1001).reservations()).isEmpty();
+            assertThat(state.tradingState().user(1001).balances().get("USDT").availableUnits()).isEqualTo(10_000);
+            assertThat(state.tradingState().order(86_001)).isNull();
+            assertThat(state.tradingState().order(86_002)).isNull();
+            assertThat(state.apply(cancel).data()).isEqualTo(result.data());
+            try (var restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
+                assertThat(restored.apply(cancel).data()).isEqualTo(result.data());
+            }
+        }
+    }
+
+    @Test
     void spotAmendReusesLockedFundsAndRejectsUnaffordableIncreaseBeforeMatching() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
             applySpotInstrument(state);

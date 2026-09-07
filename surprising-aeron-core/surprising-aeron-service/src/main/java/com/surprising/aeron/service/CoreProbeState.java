@@ -1829,10 +1829,12 @@ public final class CoreProbeState implements AutoCloseable {
         LaneCommandContextRing.Context laneContext = laneCommandContexts.required(batch.sequence);
         initializeOrderBatchLaneContext(batch, pending);
         if (batch.cancelEvent == null && !batch.deferredCancellationOrderIds.isEmpty()) {
+            // A pure cancel batch has no later reservation/fill mutations. Commit in its existing
+            // Lane event; amendments must retain the final fence after replacement settlement.
             batch.cancelEvent = runtimePlaceOrderState.dispatchCancelBatch(
                     batch.sequence, pending.command().header().userId(),
                     batch.deferredCancellationOrderIds.toPrimitiveArray(), clusterTimestamp, clusterPosition,
-                    runtimePlaceOrderIdentities);
+                    runtimePlaceOrderIdentities, batch.kind == OrderBatchKind.CANCEL);
         }
         if (batch.settlementEvents == null && !batch.deferredSettlementOrderIds.isEmpty()) {
             com.surprising.aeron.service.state.MatcherSettlementEvent[] perpetual =
@@ -1852,6 +1854,10 @@ public final class CoreProbeState implements AutoCloseable {
             }
             runtimePlaceOrderState.collectCancel(
                     batch.cancelEvent, commandFundsAccumulator, terminalRetention);
+            if (batch.cancelEvent.commitsLane()) {
+                laneContext.completeLanes(batch.cancelEvent.requiredLaneMask());
+                batch.laneCommitCompleted = true;
+            }
             runtimePlaceOrderState.releaseCancel(batch.cancelEvent);
             batch.cancellationsCollected = true;
             refreshSnapshotProjection();
@@ -1917,8 +1923,7 @@ public final class CoreProbeState implements AutoCloseable {
                     order == null ? null : orderView(order), item.executions));
             tradeCount = Math.addExact(tradeCount, item.executions.size());
         }
-        CoreOrderBatchResult result = new CoreOrderBatchResult(resultItems);
-        byte[] responseData = TradingOrderBatchCodec.encodeResult(result);
+        byte[] responseData = TradingOrderBatchCodec.encodeResultItems(resultItems);
         terminalTradeCount = Math.addExact(terminalTradeCount, tradeCount);
         validateFundsConservation(pending.command());
         commitMatchingSequence(batch.sequence);
@@ -4545,6 +4550,8 @@ public final class CoreProbeState implements AutoCloseable {
     private boolean matchingCommitReady(PendingMatching pending) {
         if (pending == null) return false;
         OrderBatchPending batch = pendingOrderBatches.get(pending.sequenceKey());
+        // A matcher result alone does not make a batch ready while its Lane work is outstanding.
+        if (batch != null && !batch.laneWorkComplete()) return false;
         if (batch != null && batch.placeBatchAdmissionEvent != null
                 && (!batch.placeBatchAdmissionEvent.complete() || !pending.isMatchingSubmitted())) return false;
         if (hasPendingMatchingRejection(pending.sequence())) return true;

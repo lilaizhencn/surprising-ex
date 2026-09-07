@@ -626,3 +626,10 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
 - 现货批量改单先校验“可用余额 + 原单剩余冻结”是否足够，再提交 matcher；成功后在同一个现有 Lane 预占任务中解冻原单并冻结新单。余额不足在撮合前拒绝并保留原单，避免全额挂单用户改单时重复占资。此变更不增加 Lane 任务或资金提交阶段。
 - 现货仍由 `RuntimeSpotMatchProcessor` 独立执行 base/quote 资产冻结、成交、手续费与解冻；衍生品仍使用原资金/持仓内核，不混用金融规则。若全批预冻结不可行，先撤销该次未发布准入，再按既有逐项业务语义执行，保留“前一笔成交收入供后一笔下单”的部分成功行为。
 - 现货 JMH `SpotCoreBenchmark.productionMixedWorkload` 固定256 symbol/in-flight、batch size至少2，覆盖双向批量吃同一个 maker、剩余撤单及终态回收；默认15分钟iteration timeout给600秒测量和最终资金/恢复检查留出余量。性能证据统一追加根目录 `PERFORMANCE_VALIDATION.md`，不能据短测声称整个owner已无业务等待。
+
+
+### Owner 批次完成路径
+
+纯撤单批次在已有 `LaneCancelEvent` 内更新订单提交元数据并完成该 Lane 的 sequence commit，owner 收集终态后不再单独补元数据或提交第二个 Lane 任务。改单仍需等待替换订单结算后再完成最终提交；不能套用纯撤单的完成条件。批次还有未完成 Lane 任务时，owner 等待其完成通知，不反复进入批次收尾。响应按相同线协议直接编码临时结果列表，不把该列表交给异步消费者。
+
+`SurprisingClusteredService` 继续在日志回调返回前完成交易，以保持快照、日志位置和恢复的一致性。mixed 夹具的跨请求流水线吞吐不能直接作为生产 Cluster 网络容量。

@@ -1951,6 +1951,14 @@ public final class TradingRuntimeState implements AutoCloseable {
             long coreSequence, long userId, long[] orderIds,
             long commitTimestamp, long commitClusterPosition,
             RuntimeIdentityRegistry identities) {
+        return dispatchCancelBatch(coreSequence, userId, orderIds, commitTimestamp,
+                commitClusterPosition, identities, false);
+    }
+
+    public LaneCancelEvent dispatchCancelBatch(
+            long coreSequence, long userId, long[] orderIds,
+            long commitTimestamp, long commitClusterPosition,
+            RuntimeIdentityRegistry identities, boolean commitLane) {
         assertOwner();
         if (!accountLanesStarted || orderIds == null || orderIds.length == 0) {
             throw new IllegalStateException("asynchronous cancel batch requires Account Lanes and orders");
@@ -1960,7 +1968,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         LaneCancelEvent event = laneCancelEventPool.pollFirst();
         if (event == null) event = new LaneCancelEvent();
         event.prepare(coreSequence, userId, orderIds, orderIds.length,
-                commitTimestamp, commitClusterPosition, laneId, false, this, identities, changes);
+                commitTimestamp, commitClusterPosition, laneId, commitLane, this, identities, changes);
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
                 accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
         try {

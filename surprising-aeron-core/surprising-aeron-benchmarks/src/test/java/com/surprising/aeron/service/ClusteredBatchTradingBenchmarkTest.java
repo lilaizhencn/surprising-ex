@@ -7,6 +7,21 @@ import com.surprising.product.api.ProductLine;
 class ClusteredBatchTradingBenchmarkTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
+    void ownerBatchCompletionClosesFundsAndRestoresSnapshot(ProductLine productLine) {
+        var workload = new ClusteredBatchTradingBenchmark.Workload();
+        workload.accountLanes = 4;
+        workload.productLine = productLine;
+        workload.batchSize = 20;
+        workload.maxInFlight = 256;
+        try (workload) {
+            workload.setup();
+            new ClusteredBatchTradingBenchmark().ownerBatchCompletion(
+                    workload, new ClusteredBatchTradingBenchmark.Counters());
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
     void amendTradesRestoreFundsAndPositionsAndRetainSnapshotAcrossReuse(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
         workload.accountLanes = 4;

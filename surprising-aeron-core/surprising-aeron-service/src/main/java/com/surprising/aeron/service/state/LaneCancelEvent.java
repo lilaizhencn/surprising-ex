@@ -115,6 +115,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
         completionRuntime.publishMatcherSettlementReady(completionLaneId, completionSequence);
     }
 
+    public boolean commitsLane() { return commitLane; }
     public long coreSequence() { return coreSequence; }
     public long userId() { return userId; }
     public long orderId() { return orderIds[0]; }

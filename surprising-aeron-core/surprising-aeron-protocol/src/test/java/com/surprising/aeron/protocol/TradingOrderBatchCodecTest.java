@@ -14,6 +14,24 @@ import org.junit.jupiter.api.Test;
 class TradingOrderBatchCodecTest {
 
     @Test
+    void ownerLocalResultEncodingValidatesIndexesAndDoesNotRetainTheList() {
+        var item = new CoreOrderBatchResult.Item(0, 42, 0, 0,
+                ResponseStatus.APPLIED, CoreResultCode.NONE, null, List.of());
+        var items = new ArrayList<>(List.of(item));
+        byte[] expected = TradingOrderBatchCodec.encodeResult(new CoreOrderBatchResult(items));
+        byte[] actual = TradingOrderBatchCodec.encodeResultItems(items);
+        items.clear();
+        assertThat(actual).isEqualTo(expected);
+        assertThat(TradingOrderBatchCodec.decodeResult(actual).items()).containsExactly(item);
+        assertThatThrownBy(() -> TradingOrderBatchCodec.encodeResultItems(items))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> TradingOrderBatchCodec.encodeResultItems(List.of(item, item)))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> TradingOrderBatchCodec.encodeResultItems(null))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void statusScanFindsAMiddleRejectionWithoutSkippingAnyFrameBoundary() {
         var items = List.of(
                 new CoreOrderBatchResult.Item(0, 1, 0, 0, ResponseStatus.APPLIED,

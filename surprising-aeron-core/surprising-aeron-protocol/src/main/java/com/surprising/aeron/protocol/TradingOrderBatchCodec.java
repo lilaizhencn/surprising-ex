@@ -69,8 +69,20 @@ public final class TradingOrderBatchCodec {
         if (result == null) {
             throw new IllegalArgumentException("order batch result is required");
         }
+        return encodeResultItems(result.items());
+    }
+
+    /** Synchronously encodes owner-local items without retaining or copying their container. */
+    public static byte[] encodeResultItems(List<CoreOrderBatchResult.Item> items) {
+        if (items == null || items.isEmpty() || items.size() > CoreOrderBatchResult.MAX_ITEMS) {
+            throw new IllegalArgumentException("invalid order batch result");
+        }
         int length = Integer.BYTES * 2;
-        for (CoreOrderBatchResult.Item item : result.items()) {
+        for (int index = 0; index < items.size(); index++) {
+            CoreOrderBatchResult.Item item = items.get(index);
+            if (item == null || item.index() != index) {
+                throw new IllegalArgumentException("order batch result indexes must be contiguous");
+            }
             length = Math.addExact(length,
                     Math.addExact(FRAME_LENGTH_BYTES, encodedResultFrameLength(item)));
         }
@@ -78,10 +90,15 @@ public final class TradingOrderBatchCodec {
             throw new IllegalArgumentException("order batch result is too large");
         }
         LittleEndianWriter buffer = new LittleEndianWriter(new byte[length]);
-        buffer.putInt(PlaceOrderBatchCommand.WIRE_VERSION).putInt(result.items().size());
-        for (CoreOrderBatchResult.Item item : result.items()) {
-            buffer.putInt(encodedResultFrameLength(item));
-            writeResultFrame(buffer, item);
+        buffer.putInt(PlaceOrderBatchCommand.WIRE_VERSION).putInt(items.size());
+        for (int index = 0; index < items.size(); index++) {
+            int frameOffset = buffer.position;
+            buffer.putInt(0);
+            writeResultFrame(buffer, items.get(index));
+            int end = buffer.position;
+            buffer.position = frameOffset;
+            buffer.putInt(end - frameOffset - FRAME_LENGTH_BYTES);
+            buffer.position = end;
         }
         return buffer.bytes;
     }
