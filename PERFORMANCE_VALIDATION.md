@@ -4416,3 +4416,13 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 结论：本轮压测器和生产client来源顺序问题已修复，45个定向功能测试、三轮真实三节点普通订单门槛、资金/订单簿核对与全停日志恢复通过。固定256窗口和此普通负载持续约6千订单操作/秒；绝对Core吞吐上限尚未证实，owner/matcher/Lane没有CPU饱和，后续须在真实三节点下进一步定位阶段等待，不能换本地策略给出更大数字代替。
 - 四台实例本轮09:22:29..31 UTC启动、10:13:54..56停止，最终`instances-final.json`逐台核验TERMINATED。实例、各80GB磁盘、VPC与原始数据保留，停止不是删除，磁盘仍计费；未确认赠金覆盖或最终账单。`instances-before-stop.json`因CLI名称过滤未匹配而为空，不能作运行状态证据；运行状态由各轮systemd/监控留证，最终实例清单使用未过滤项目查询。
 - 本轮artifact `SHA256SUMS`含417个文件、152,090,262B（不含清单自身），清单SHA256 `ec4592a371be0738969ea82a73f80a9272059554b1ac7106b9a97e9089a022f0`。包含失败轮、管理异常、功能测试、三轮数据、四份JFR、离线分析及恢复证据，排除编译/cache文件；私钥在旧artifact目录且未复制进本轮目录或清单。
+
+## 2026-09-07 真实三节点等待归因（采集前锁定）
+
+- 用户要求继续定位真实吞吐上限，不能把固定窗口功能通过当成核心饱和。本轮不改金融逻辑或移除回调完成边界；仅切换现有等待策略并采集以前profile阈值遗漏的短park/monitor事件。当前master本记录提交，runtime仍为7a23175f的同一jar（SHA256 6abe5a33994709b2425f37ef517565de9ebe357331b56d0e48761ce3b0071a68）；对照commit不适用，不构建旧版、不跑本地性能。已核对本地Aeron1.53.0源码：aeron.cluster.idle.strategy影响集群agent，故切换时不可仅归因到owner。
+- 使用原四台GCP新加坡同zone n2-custom-8-16384/Intel Cascade Lake/Ubuntu24.04/80GB pd-ssd，三独立真实Core+独立load。Temurin HotSpot25.0.4.1、Core4GiB ZGC/AlwaysPreTouch/NMT、load512MiB..2GiB ZGC/NMT、Aeron1.53.0/SHARED_NETWORK/Archive SHARED不变。每Core固定1matcher/4Lane；负载普通LINEAR_PERPETUAL MATCH_ASYNC，GLOBAL256、4命令session+1预留、1worker、1000用户/500对、256symbol，maker SELL GTC1@100和taker BUY IOC1@100各半，两单一fill，1秒mark门控。closed-loop offered0、不修正CO；初始每用户10^12 USDT、零持仓、零手续费、持续maker/taker，无batch/WS/Kafka/API。
+- 三个独立诊断配置均30秒预热+120秒测量/drain，至少15秒冷却，独立DATA_DIR/seed：D0 seed90801/WD0，默认BLOCKING Lane和集群backoff；D1 seed90802/WD1，仅Lane改BUSY_SPIN；D2 seed90803/WD2，仅集群idle改org.agrona.concurrent.BusySpinIdleStrategy、Lane恢复BLOCKING。D1四Lane空闲自旋消耗四核、D2包含consensus自旋，必须单列等待成本，不能把忙等CPU算业务饱和。所有三节点同步采用同一配置；不改变matcher数/in-flight/业务比例。
+- 三个诊断均全程三Core+client JFR，profile基础上ThreadPark和JavaMonitorEnter threshold=0ns/stackTrace=true，maxsize=512m。这是高开销短等待诊断，不用其绝对速率替代主轮。分析保守+70..140秒稳定区间；报告park耗时/次数/线程/栈、owner等待、matcher/Lane/transport/client线程CPU、分配/GC/heap/NMT与系统指标。无DataLoss/截断、swap增长、连续3个5秒steal>5%、业务错误/超时/资金差才有效；原始失败保留。
+- 门槛：三诊断各>=1000 terminal business ops/s、maker/taker p99<=1秒、订单offered=accepted=terminal=2*fills、逻辑submitted=completed=订单+mark、observed<=256、期末unfinished0、fundsDiff=bookLevels=0；NotAccepted重试单列。诊断排序仅用于选配置：只有某单项配置比D0高>=10%且通过全部门槛才选较快者，否则默认D0；不可把此规则推导成生产应默认忙等。
+- 选定配置另跑无JFR主轮M seed90804/WM，30秒预热+300秒测量，门槛同上；报告每10秒速率、在途均值、maker/taker六分位、Core messages/s与fills/s。如果仍无计算饱和，结论必须说明本配置的吞吐限制与剩余埋点缺口；不得称CPU绝对上限。诊断不引入源码业务改动，不补跑本地JMH。最后全停重启最后数据集、hash/applied计数与资金核对，随后停止四VM；保留磁盘。
+- artifact `/Users/atomex/Desktop/surprising/gcp-validation/2026-09-07-wait-diagnostics`，复制编排工具到此目录后调整，旧证据不可覆盖。本轮为等待策略归因，尚不覆盖open-loop、快照/故障矩阵、六产品金融路径、长期泄漏和完整阶段时间；CPU未满不等于可以增加并发状态修改或破坏确定性。
