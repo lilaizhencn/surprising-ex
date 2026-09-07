@@ -4258,3 +4258,15 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 原始artifact：`/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-07-owner-trigger-publication`，包含两个完整300秒mixed日志、六JMH JSON/日志、soak.jfr、profile、命令/构建与失败夹具日志、summary/gc-pauses、CPU/分配/等待/IO/native/VM/业务延迟及聚合源码；SHA256清单附后。全部测试、采样和分析进程已退出。
 
 - 本轮最终artifact清单：66文件、137731647B（不含清单），soak.jfr 69034138B/306.396秒；SHA256SUMS自身SHA256 `5d451ae2a0fd1e09773af059753887a80d53c816ee971ca57e7f8c8dc1a566d4`。
+
+## 2026-09-07 GCP三节点真实网络首轮（采集前锁定）
+
+- 用户授权创建四台VM并压测，仅当前master；业务jar源为da10ac0b（业务c26e0578），预锁提交后master仅文档差异。对照commit不适用，不重跑旧版、不与本机批量mixed吞吐作提升率比较。本轮没有业务代码改动，使用现有ClusterDerivativeSmokeMain、ClusterProbeMain、ClusterCapacityMain，未将本轮当新增业务JMH验收。
+- 项目surprising-ae591，asia-southeast1-b同zone，3个独立持久化Aeron Cluster节点+1独立client，均n2-custom-8-16384、8vCPU/16GiB、Intel Cascade Lake、Ubuntu24.04、80GB pd-ssd；Temurin HotSpot25.0.4.1+1。私网10.90.0.5/3/4为node0/1/2，client10.90.0.2；32总vCPU，IAP只作管理与artifact传输，业务走私网UDP；原始artifact位于/Users/atomex/Desktop/surprising/gcp-validation/2026-09-07，密钥不属于公开证据/归档。
+- 正确性前置：少量LINEAR_PERPETUAL双用户开仓、资金费、重复资金费拒绝，资金总和2000；停止/恢复节点并用相同seed verify。部署启动、失败与重试全部记录，不自动删除Archive和Cluster状态。
+- 容量场景：ClusterCapacityMain，LINEAR_PERPETUAL/MATCH_ASYNC，1000活跃用户（500 maker/taker对）、256symbol、1发起worker/1Aeron连接、固定async-in-flight=256待完成交易对；每对maker完成后才发taker，故至多256未完成交易命令，不是512。每对两条普通订单（SELL GTC maker + BUY IOC taker），price100/qty1，成交1fill；无batch，batches/items口径不适用。每账户初始USDT=10^12，零手续费、零初始持仓，持续maker和taker共同运行；单向建仓不声称平仓混合负载，库存状态增长属于此场景。查询在测量后验证全部账户资金总量、订单簿清空。
+- 每node默认4Account Lane/1matcher，Aeron1.53.0、MediaDriver SHARED_NETWORK、Archive SHARED；JVM -Xms4g -Xmx4g -XX:+UseZGC -XX:+AlwaysPreTouch -XX:NativeMemoryTracking=summary，加jdk.internal.misc opens/exports；持久化/GC日志在/var/lib/surprising，Aeron mmap位于/dev/shm。client -Xms512m -Xmx2g、ZGC，same opens/exports。无Kafka、WS、HTTP/API gateway。
+- 无profiler主轮：30s warmup+300s measurement，seed90701、symbol前缀GCP-MAIN；closed-loop无目标到达率，256窗口尽快补齐，没有CO修正。测量后drain、资金验证及重启后的相同seed verify；另采state hash对比无业务写入重启前后。首轮可用性门槛>=1000 terminal business ops/s（不是生产容量目标），offered=accepted=finalized、failures0、资金差0/挂单0、重启恢复一致；p99<=1s。全部失败保留，阈值不追改。
+- 冷却15s后同配置JFR诊断轮：另一seed90702、symbol前缀GCP-JFR，30s warmup+300s measurement；节点JFR profile设置，通过jcmd启动三节点recording，包含setup/warmup/verify，maxsize512m、手动dump。不以带profiler结果替代主轮；分析leader/follower的CPU、Lane/matcher/Archive/Consensus、分配/GC/NMT/等待/IO。真实Cluster Archive同步/异步磁盘I/O须按线程区分，交易业务owner同步磁盘/网络/数据库I/O判失败。
+- 四节点vmstat/mpstat/pidstat、GC和NMT监测，记录CPU steal/频率/CPU与内存/磁盘/网络、上下文切换、swap。swap增长、JFR DataLoss、实例维护/重启或持续明显CPU steal（连续3个5s采样>5%）判相应性能轮无效；本轮不验证宿主机物理频率/硬件隔离。
+- 工具已知指标边界：accepted是在收到APPLIED终态时计数，并非独立受理时间；输出acceptanceToFinalization标签实际来源请求发起（taker含maker链路），只能作为当前工具完成延迟，不冒充三段延迟。pendingMax/completionQueueMax=-1代表未埋点；async固定窗口上限不能代替观测最大backlog。现有report主要p50/p99/p99.9，未提供全部业务类别/独立三段p90/p95，资金验证不独立核对每个持仓字段。记录这些缺口，首轮是受限容量实测，不宣称完整生产性能验收或已测吞吐绝对上限。单zone不代表跨zone/跨region故障安全性；profile默认抽样不提供精确objects/op、完整native池或五分钟长期无泄漏证明。
