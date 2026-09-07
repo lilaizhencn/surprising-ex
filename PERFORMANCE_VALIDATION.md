@@ -4110,3 +4110,64 @@ TRIGGER_ORDER/entryTerminal n=138880 p0.500<=0.262144 p0.900<=0.524288 p0.950<=0
 - 计量澄清：上文编译“CPU秒”应理解为Compilation事件duration跨编译线程的累计墙钟时长，并非精确CPU计费时间；不能与主线程CPU百分比直接相加。新增JMH仅固定256提交wave/窗口，实际backlog为0，不能据此声称始终有256个请求同时在途；并发能力以mixed主轮实测maxBacklog256为准。补采前概述中的“六万以上”无统计意义，唯一计数口径为每cycle10752业务/1024Core/10240fill及实际JSON。
 
 - 最终artifact清单：86文件、253,420,225B（不含清单），SHA256SUMS自身SHA256 `fc0825b1545ac8736034eb501eff5ce498b5dbe6fb067ae7741bcaf69b88e381`。`analyze.sh`保存聚合命令。所有采集/分析进程已结束，未改动交易网络或部署配置。
+
+
+## 2026-09-07 吞吐上限复测（采集前锁定）
+
+- 用户要求在当前实现再次验证是否接近吞吐上限。本轮不改业务代码，只测当前master 6d2be0fa（与44e59b61业务源码一致，差异仅文档），重新构建当前HEAD并保存commit/jar SHA256；对照commit：不适用（仅验证当前master），不使用旧版本性能作比较。artifact `/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-07-throughput-recheck`。
+- 沿用mixed全300秒主口径：HotSpot25 Oracle GraalVM25.0.1+8、Maven3.9.16、macOS26.7 Intel i9-9880H 8C16T/16GiB；JVM `-Xms4g -Xmx4g -XX:+UseZGC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -Dsurprising.aeron.matching-engines=1 -Dsurprising.benchmark.openLoop=false --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED`。完整版本/系统信息随运行保存。先无profiler主轮300秒，再冷却15秒后同参数JFR/NMT轮300秒，每30秒驱动样本；没有独立warmup，模板setup后300秒包含JIT爬升。全窗口平均为主指标，事先另定+60..290秒线程与JIT诊断窗口，不拿后半段替换主结果。
+- 场景命令 `LinearPerpetualScaleSoakMain 1000 256 256 5 10 UNIFORM 1 20 32 300 30`：U本位永续、1000用户、256挂牌/活跃symbol、4 Account Lane、1 matcher、固定256in-flight、0真实网络连接、进程内Core入口，持续maker、确定性混合下单/撤单/开平仓/触发/风险扫描/资金费和32symbol生命周期轮转，最多5持仓/10挂单，每HFT batch20项。初始资金与持仓由固定模板构造，沿用驱动的用户/maker/Treasury资金与冻结/持仓/订单终态、snapshot restore/hash校验。所有business ops/消息/成交单位不混用；驱动不输出全分类fills/拒绝总数则明确缺项，不把business ops当成功成交数。
+- 通过阈值仍150000 terminal business ops/s；acceptedBusiness=terminalBusiness、acceptedCore=terminalCore、unfinished/endbacklog0、资金/恢复通过、业务错误/超时0。主轮只开GC/safepoint日志，不加采样器。JFR轮额外 `-XX:NativeMemoryTracking=summary -XX:+UnlockDiagnosticVMOptions -XX:+PrintNMTStatistics -XX:StartFlightRecording=settings=profile.jfc,filename=soak.jfr,dumponexit=true,maxsize=512m`，使用上一轮相同自定义配置，保存原始JFR/summary/view及分组CPU/分配/GC/heap/native/IO/锁/VM/JIT/业务三段延迟。profile数值仅归因，不替代主吞吐。
+- “接近当前配置上限”判据：闭环始终以256窗口尽快补充负载，稳定窗口owner单逻辑核平均>=95%、其余Lane/matcher未满载、线程热点说明瓶颈在owner串行计算而非持续IO/锁阻塞，后续30秒窗口没有持续爬升且JIT主要爬升已过去，资金与终态不积压。满足时只能说明当前负载/机器/JVM/配置的owner约束，不能证明整个软件或AWS绝对上限；不改变in-flight或matcher来抬高数字。不满足则明确未测到稳定上限。
+- 有效性：每5秒采集thermal/CPU speed limit/swap，每30秒记录同机进程CPU/RSS；CPU speed limit<100、swap增长、明显系统干扰节流或JFR DataLoss使对应轮无效，保留原始数据并单独记录补采。基准期间不并行构建/分析/其他压测，不终止用户应用。closed-loop无coordinated omission修正；三段业务延迟提供p50/90/95/99/99.9/max/样本数，风险低样本及snapshot fence缺口明确记录。
+- 无业务源码改动，因此不重复新增JMH或整套功能测试；当前实现已有709测试及六产品专用JMH回归通过，本轮仅复测mixed吞吐及饱和归因。真实三节点网络/API/WS/Kafka、open-loop、其他产品容量与长期泄漏证明仍未覆盖。命令、全部结果及SHA256按完成后追加，不覆盖前轮未达标数据。
+
+
+### 2026-09-07 吞吐复测结果（当前master 6d2be0fa）
+
+- 当前HEAD重新构建成功（HotSpot25，package -DskipTests），无业务代码改动。无profiler主轮与同参数JFR归因轮各完成300秒，所有系统采样CPU speed limit100、swap0，JFR DataLoss0，无失效补采。对照commit：不适用（仅验证当前master）。构建、JVM/环境、commit与jar/profile/run脚本SHA256保留artifact。
+- **本轮通过150000主吞吐阈值**：无profiler302.179秒，48,759,248 terminal business operations、4,905,424 terminal Core messages，161359.032 business ops/s、16233.525 Core messages/s。入口1000用户/256symbol、4Lane/1matcher/256in-flight、0外部连接；max matching backlog256。资金/冻结/持仓/终态与snapshot恢复通过，快照26,336,781B、restore1080.355ms。没有仅取最快片段替换全窗口。
+- 主轮第一个30秒窗口151664.786，此后8个完整30秒窗口（结束时间60.169～270.456秒）min159240.424/max165436.343，均值163799.425 business ops/s、CV1.155%，无持续爬升。该分段均值仅描述平台，主指标仍全窗口161359.032。sweep p50/p95/p99/max=130.211/152.380/166.811/564.220ms，是整个混合业务轮转耗时，不能当单订单延迟。
+- JFR归因轮302.161秒，47,850,704 business ops、4,814,032 Core messages，158361.757 business ops/s、15932.024 Core messages/s；Workload event中acceptedBusiness=terminalBusiness、acceptedCore=terminalCore，结束无未终态提交请求，max backlog256。资金/快照通过，snapshot25,947,684B、restore1052.649ms。驱动incompleteRiskScans=207是分页扫描继续计数，不是207个交易请求未完成；资金费继续计数0。无业务错误/超时；驱动未输出完整fills/拒绝率/全业务动作比例，不能把business ops全当成功成交。批量最大20项、batch item按操作计数，混合流量不把所有Core消息当batch。
+- **当前负载已接近owner约束下的平台**：JFR固定+60..290秒窗口，owner平均99.34%单逻辑核；Lane0/1/2/3=17.99/17.81/17.45/16.98%，matcher17.79%。JFR侧30秒窗口均值160957.492、CV0.784%，后半段没有持续爬升；主要JIT预热后仍有少量编译但不占满编译资源。满足预先owner>=95%、Lane/matcher未饱和、平台不爬升及无IO/锁阻塞的归因判据。只能说本机当前实现/负载/256窗口的平台约16万business ops/s，未证明整个软件或AWS硬件绝对上限，也没有通过扩大in-flight/增加matcher抬高结果。
+- Owner执行样本7363，互斥归类：batch settlement/completion1996(27.11%)、place admission682(9.26%)、fingerprint428(5.81%)、batch decode120(1.63%)、Lane task await461(6.26%)、matching wait/pump276(3.75%)、readiness coordination/poll350(4.75%)、other Core2840(38.57%)、harness/other210(2.85%)。这是抽样栈占比，不是精确业务耗时。仍有同步任务等待/协调轮询，CPU满不等于全是有效财务计算；提高吞吐需要减少owner串行路径与协调成本，单纯增加Lane/matcher预计收益有限，未实际测其收益。
+- 稳定窗口无JavaMonitorEnter、Core同步文件/网络IO=0、Core异常抛出=0；owner受限不是由持续锁竞争或同步外部IO造成的证据。整份JFR FileRead2277次/10.043ms、FileWrite488次/6.949ms、SocketRead/Write0，均保留启动/驱动日志IO栈。629次ThreadPark共22.477s是跨线程并含setup/关闭的累计，不可当owner单笔延迟；完整线程RUNNABLE/BLOCKED时间、OS上下文切换/page faults未额外采集，执行样本也不是严格wall-clock分析。
+- 分配：整份306.637秒JFR抽样权重244,215,846,208B≈796.433MB/s（约5082B/主测量business op，包含setup/teardown，仅粗归一），稳定+60..290秒抽样权重187,406,087,192B≈814.809MB/s。TLAB refill226,588,350,880B、nonTLAB18,315,349,344B、最大对象33,554,448B；数组/订单/撮合结果/协议输出等top class/thread/site在analysis.txt。精确对象数/op不可从抽样推得，TLAB refill不等于实际对象字节；没有重新JMH测B/op，不把本轮JFR估计冒充JMH数据。
+- GC/heap：78轮GC、270段GCPhasePause累计5.267ms（占JFR约0.00172%），pause p50/p95/p99/max=0.016/0.047/0.060/0.075ms；GC周期pause总和max0.162ms。heap committed固定4GiB，AfterGC约88.1～715.1MB、平均514.7MB。GC失败/AllocationRequiringGC/PromotionFailed/EvacuationFailed事件0。JFR AfterGC剔除前60秒robust slope+107683.5B/s，低于锁定驱动1MiB/s阈值；驱动GC通知粗表slope0不能替代JFR，不能宣称绝对无泄漏。
+- Native/长期状态：NMT稳定committed约4.442→4.436GB、峰值4.460GB，按每秒category合并robust slope+3325.8B/s；首末和斜率受中间波动影响，不等同。reserved约74.53GB含ZGC虚拟地址空间，非RSS；各NMT category/峰值首末在analysis.txt，PS/RSS系统样本保留。主轮线程12/FD11，JFR稳定14/FD13，Direct/Mapped bytes与数量0；稳定窗口线程start/end15/15，ClassLoad4/ClassUnload0，无净持续线程增长。只有5分钟，不是生产长期泄漏证明；真实Aeron/Netty/Kafka网络池未启动，不能证明外部池余额。
+- JIT/VM：全程10837次编译累计duration40.394秒（跨线程墙钟事件累计，不是CPU计费）；稳定窗口371次/2.240秒、max120.821ms、12次deopt，主要编译爬升已越过。Safepoint280次begin累计18.035ms/max6.642ms；VM operation935次累计37.879ms/max10.396ms。最大值在recording+287.23秒，VM长操作为ZWorkerYoung#2发起的HandshakeAllThreads（safepoint=false），同一时段出现6.64ms safepoint begin；不能把10.4ms都当成STW。它们会影响微秒业务尾部，因此GC pause很短不代表VM完全没有毫秒抖动，证据在vm-long.txt。
+
+业务三段延迟（JFR，单位ms；p值是64桶2的幂ns直方图上界，max精确，含setup）：
+
+```text
+ADL/acceptedTerminal n=1 p0.500<=0.004096 p0.900<=0.004096 p0.950<=0.004096 p0.990<=0.004096 p0.999<=0.004096 max=0.002370
+ADL/entryAccepted n=1 p0.500<=4.194304 p0.900<=4.194304 p0.950<=4.194304 p0.990<=4.194304 p0.999<=4.194304 max=2.291276
+ADL/entryTerminal n=1 p0.500<=4.194304 p0.900<=4.194304 p0.950<=4.194304 p0.990<=4.194304 p0.999<=4.194304 max=2.293646
+CANCEL_ORDER/acceptedTerminal n=1132544 p0.500<=4.194304 p0.900<=4.194304 p0.950<=4.194304 p0.990<=8.388608 p0.999<=16.777216 max=119.533554
+CANCEL_ORDER/entryAccepted n=1132544 p0.500<=0.002048 p0.900<=0.004096 p0.950<=0.004096 p0.990<=0.008192 p0.999<=0.032768 max=0.694546
+CANCEL_ORDER/entryTerminal n=1132544 p0.500<=4.194304 p0.900<=4.194304 p0.950<=4.194304 p0.990<=8.388608 p0.999<=16.777216 max=119.536070
+FUNDING/acceptedTerminal n=70784 p0.500<=0.000128 p0.900<=0.000256 p0.950<=0.000256 p0.990<=0.000512 p0.999<=0.001024 max=0.025528
+FUNDING/entryAccepted n=70784 p0.500<=0.131072 p0.900<=0.131072 p0.950<=0.131072 p0.990<=0.262144 p0.999<=0.524288 max=7.917730
+FUNDING/entryTerminal n=70784 p0.500<=0.131072 p0.900<=0.131072 p0.950<=0.131072 p0.990<=0.262144 p0.999<=0.524288 max=7.921246
+LIQUIDATION/acceptedTerminal n=2 p0.500<=0.004096 p0.900<=8.388608 p0.950<=8.388608 p0.990<=8.388608 p0.999<=8.388608 max=5.278218
+LIQUIDATION/entryAccepted n=2 p0.500<=4.194304 p0.900<=8.388608 p0.950<=8.388608 p0.990<=8.388608 p0.999<=8.388608 max=5.205765
+LIQUIDATION/entryTerminal n=2 p0.500<=4.194304 p0.900<=16.777216 p0.950<=16.777216 p0.990<=16.777216 p0.999<=16.777216 max=10.483983
+ORDER_BATCH/acceptedTerminal n=2265088 p0.500<=16.777216 p0.900<=33.554432 p0.950<=33.554432 p0.990<=33.554432 p0.999<=67.108864 max=336.582269
+ORDER_BATCH/entryAccepted n=2265088 p0.500<=0.032768 p0.900<=0.065536 p0.950<=0.065536 p0.990<=0.065536 p0.999<=0.131072 max=63.298000
+ORDER_BATCH/entryTerminal n=2265088 p0.500<=16.777216 p0.900<=33.554432 p0.950<=33.554432 p0.990<=33.554432 p0.999<=67.108864 max=336.620424
+PLACE_ORDER/acceptedTerminal n=1132544 p0.500<=4.194304 p0.900<=4.194304 p0.950<=4.194304 p0.990<=8.388608 p0.999<=8.388608 max=10.867069
+PLACE_ORDER/entryAccepted n=1132544 p0.500<=0.016384 p0.900<=0.016384 p0.950<=0.016384 p0.990<=0.032768 p0.999<=0.065536 max=2.146152
+PLACE_ORDER/entryTerminal n=1132544 p0.500<=4.194304 p0.900<=4.194304 p0.950<=4.194304 p0.990<=8.388608 p0.999<=8.388608 max=11.254607
+RISK_SCAN/acceptedTerminal n=71500 p0.500<=0.000128 p0.900<=0.000128 p0.950<=0.000256 p0.990<=0.000512 p0.999<=0.000512 max=0.017032
+RISK_SCAN/entryAccepted n=71500 p0.500<=0.131072 p0.900<=0.131072 p0.950<=0.131072 p0.990<=0.262144 p0.999<=0.262144 max=10.590349
+RISK_SCAN/entryTerminal n=71500 p0.500<=0.131072 p0.900<=0.131072 p0.950<=0.131072 p0.990<=0.262144 p0.999<=0.262144 max=10.592620
+TRIGGER_ORDER/acceptedTerminal n=141568 p0.500<=0.065536 p0.900<=0.262144 p0.950<=0.262144 p0.990<=0.262144 p0.999<=0.524288 max=4.167656
+TRIGGER_ORDER/entryAccepted n=141568 p0.500<=0.262144 p0.900<=0.262144 p0.950<=0.524288 p0.990<=0.524288 p0.999<=1.048576 max=9.607531
+TRIGGER_ORDER/entryTerminal n=141568 p0.500<=0.262144 p0.900<=0.524288 p0.950<=0.524288 p0.990<=1.048576 p0.999<=1.048576 max=12.337510
+```
+
+- ORDER_BATCH按整个最多20项请求统计：入口→终态p99≤33.554ms、p99.9≤67.109ms、max336.620ms；普通PLACE_ORDER p99/p99.9≤8.389ms，max11.255ms。闭环无coordinated omission修正，ADL/强平样本极少，snapshot仅恢复标量耗时而无fence直方图，不能给生产全部操作尾延迟保证。上限判断针对锁定mixed负载；真实API连接/三节点Aeron网络/open-loop及其他五产品容量仍未验证。
+- 结论：本轮15万阈值通过，观测到本机当前配置下约16万business ops/s的owner受限平台，Lane/matcher均未饱和；总体生产性能验收仍受上述指标/场景缺口限制。无业务修改，不重新运行无关JMH与已通过的709回归测试。
+- 原始artifact `/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-07-throughput-recheck`：soak.jfr 69,483,371B、约307秒，包含run.sh/profile.jfc/build.log/main/soak/GC/system/JVM日志、summary/view、CPU/owner分组、allocation/IO/NMT/JIT/VM/业务延迟；analyze.sh及Java聚合源码可复现。所有测量/分析进程已结束，结果将提交master。
+
+- 本轮最终清单：44文件、137,370,901B（不含清单），SHA256SUMS自身SHA256 `c794956c1d3af7637b73d0be20e407833420fb8d530c6649772957449ff20530`。
