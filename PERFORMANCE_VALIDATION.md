@@ -4012,3 +4012,5 @@ TRIGGER_ORDER/entryTerminal n=139776 p0.500<=0.262144 p0.900<=0.524288 p0.950<=0
 - 有效JFR原件 `/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-07-owner-completion/jfr-r2/soak.jfr`，66,798,258B、记录306秒，profile.jfc/summary/CPU/IO/NMT/三段延迟/系统/GC/原始命令均保留。artifact根 `/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-07-owner-completion`，校验清单与最终校验值在后续记录。
 
 - 最终artifact校验：69个文件、201,165,521B（不计清单本身），SHA256SUMS自身SHA256 `70419f25ee312fc6903c13af4261034e0663356bd955a3bfd5e386a7df925ba7`。保留无效首轮JFR和启动失败JMH，所有验证进程已退出。
+
+- 归档汇总校正：结果汇总脚本最初把手工jmh-summary.json误当原始JMH文件，已限制为jmh-r2-*并验证包含全部六产品；原始测量不变。更新派生结果后的最终清单为69文件、201,189,432B，SHA256SUMS自身SHA256 `36480ef051a9f18139e55f141e02273e605451c9bee26129970bf481876a4b7c`，以本条清单为准。
