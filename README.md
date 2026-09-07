@@ -1,6 +1,6 @@
 # surprising-ex
 
-真实三节点持续发压使用 `ClusterCapacityMain` 的 `surprising.aeron.capacity-workload=MATCH_STREAM`：买卖普通 GTC 单独立异步提交，不等待对手单回包；空出的请求槽持续补单，全局在途固定为256。仅保留满窗口背压、必要行情前置、测量边界排空及最终核对。成交数读取Core响应的executions，延迟按buy/sell命令发起至终态统计；GTC命令终态不代表该订单此刻已全部成交。此场景不同于maker GTC→taker IOC的MATCH_ASYNC，不能混用统计口径。所有性能执行均须使用真实三节点环境。
+真实三节点持续发压使用 `ClusterCapacityMain` 的 `surprising.aeron.capacity-workload=MATCH_STREAM`：买卖普通 GTC 单独立异步提交，不等待对手单回包；空出的请求槽持续补单，全局在途固定为256。仅保留满窗口背压、必要行情前置、测量边界排空及最终核对。每单固定一个数量单位，成交数读取Core响应中本次新订单的已成交数量，不重复统计对手单；当前Core有意省略executions数组。延迟按buy/sell命令发起至终态统计；GTC命令终态不代表该订单此刻已全部成交。此场景不同于maker GTC→taker IOC的MATCH_ASYNC，不能混用统计口径。所有性能执行均须使用真实三节点环境。
 
 实时推送与查询实现见 [surprising-realtime/README.md](surprising-realtime/README.md)：提交后有界 Aeron 出口、按用户/频道定向 WS 路由、Valkey 版本化快照与增量查询，以及独立 Archive 回放到原 Kafka 成交 topic 的可靠 K 线输入。部署需要按说明配置所有进程；性能门禁见 [PERFORMANCE_VALIDATION.md](PERFORMANCE_VALIDATION.md)，不能把已通过的功能测试当作零性能影响证明。
 

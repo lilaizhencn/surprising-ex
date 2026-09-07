@@ -4439,3 +4439,9 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 环境仍是三台独立GCP n2-custom-8-16384 Core加独立同配load、新加坡同zone/Intel Cascade Lake/Ubuntu24.04/80GB pd-ssd、Temurin HotSpot25.0.4.1；Core4GiB ZGC/AlwaysPreTouch/NMT、SHARED_NETWORK/Archive SHARED、默认集群backoff和BLOCKING Lane。每Core1matcher/4Lane；GLOBAL256、1发起worker、4命令连接+1预留、1000用户/500对、256symbol、LINEAR_PERPETUAL，SELL GTC1@100与BUY GTC1@100各半、无batch/撤单/费用/WS/Kafka/API，每用户初始10^12 USDT/零持仓，持续买卖，mark1秒门控。
 - 独立目录 `/var/lib/surprising/stream-s1`、seed90901/prefixSTREAM1，30秒预热+300秒测量/drain，启动前距离取消D1至少15秒；closed-loop offered0、不修正CO。本轮按用户要求直接执行无JFR主吞吐，不再切换Core等待策略诊断。四机每5秒系统监控及GC/NMT收集；阈值>=1000 terminal business ops/s、buy/sell p99各<=1秒、offered=accepted=terminal=2*真实fills、submitted=completed=订单+mark、最大逻辑请求<=256、期末unfinished0、资金差/订单簿剩余/错误/未知/超时0。NotAccepted重试单列，swap增长/连续3个5秒steal>5%/VM维护重启判失效。
 - 本轮仅验证工具独立发压后的真实持续吞吐与资金/终态；不把它和旧IOC链式场景混为同一业务口径。输出10秒分段、在途均值、buy/sell六分位、订单/Core消息/fill速率。Core未改，已完成的全停恢复证据保留，本轮不重复故障/快照测试；无本轮JFR、open-loop、完整阶段时间或CPU计算饱和证据时，不宣称硬件绝对上限。完成后停止四VM，artifact `/Users/atomex/Desktop/surprising/gcp-validation/2026-09-07-stream`。
+
+### 独立流S1统计失败及S2重锁
+
+- S1源码3ca7e3d5、jar SHA256 `96126a4f3b77a3bf2b761f6bc2a0b33bad0f76ba5a63140e92b3447db66e84f0`完成300秒发压后通过资金/订单簿核对，但在总计数校验处FAIL，未输出有效capacity=PASS。工具误将响应executions空列表当作零成交；已核实CoreProbeState.commandResultData有意用List.of()省略成交数组，这是现有正确行为，不修改Core来迎合工具。原始失败保留在stream/s1，本轮数据不能用于正式吞吐通过结论。
+- 仅修正tools统计：校验响应orderId等于本次新单，定位其订单视图，强制qty=1、price=100、executed范围0..1且remaining=1-executed，然后累计executed。新单在自身提交回调内的已成交量，就是该命令产生的成交量；不累计对手订单视图，不依赖executions数组，也不凭发送量推测成交。补充协议encode/decode后的空成交数组/真实已成交订单、挂单零成交、重复对手视图、缺失/错误订单标识回归；失败总计数会明确输出各项数值。
+- S2独立目录`/var/lib/surprising/stream-s2`、seed90902/prefixSTREAM2，当前master修正提交/新jar哈希另记。除此之外完全沿用S1预锁：默认Core配置、三节点+load各8vCPU16GiB、GLOBAL256、1worker/4命令连接/1000用户/256symbol/1matcher4Lane、独立买卖GTC各半、30秒预热+300秒无JFR主测量、资金初态/行情前置/阈值/系统有效性规则不变；旧数据和失败jar单独保留，不重跑旧版或更改交易逻辑。
