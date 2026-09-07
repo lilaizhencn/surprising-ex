@@ -4508,3 +4508,6 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 
 - X0源码9011266a/JAR 0ecf0798b160ecabbedcbf07f41f2f134e5ff62df8ee0d03dfffe9e939b40023；21定向测试及打包通过，四机哈希一致。真实集群初态1769用户/零售仓位与挂单密度检查通过；首个交易cycle后读取强平可执行工作为空，整体FAIL，未进入主轮，原始保留x0。
 - 网络真实时钟会在交易中刷新价格、推进风险扫描generation，旧本地合成时钟没有相同刷新频率。工具在读取可执行强平工作前必须先通过CONTINUE_RISK_SCAN完成当前generation；补此控制依赖，不改Core、不伪造强平action。X01用ceiling-x01/seed92004，仍warmup0/duration1完整cycle，仅功能门槛；其余X0参数/阈值不变，成功后才继续预锁X/XJ。
+
+- X01（7d1d0326/JAR 86df15166ae3c098029b0bdf47d4329b61e7f7957397db5b603074dfd9172152）完成强平、保险及ADL命令，但工具错误要求positions列表物理为空而FAIL。独立只读集群查询确认：EXECUTION/INSURANCE/ADL工作均为空且complete=true；强平用户余额/冻结/持仓数量/持仓保证金均0，保留一条realizedPnl=-990的平仓历史视图。这是正确Core语义，不删除历史或更改Core。工具改为验证经济敞口与保证金归零，增加有历史亏损的平仓视图、非零敞口/保证金拒绝回归。原始证据x01/loss-state.txt。
+- X02重锁：ceiling-x02/seed92005，X0同一完整cycle功能参数/阈值，仅修正上述平仓状态判定。通过后才运行原预锁X和XJ；不把X0/X01失败计入容量。

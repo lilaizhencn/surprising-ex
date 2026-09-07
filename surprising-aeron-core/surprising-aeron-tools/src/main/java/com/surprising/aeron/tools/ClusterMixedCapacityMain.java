@@ -253,9 +253,14 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
                 p.signedQuantitySteps(),p.entryPriceTicks(),adl.getFirst().triggerPriceSequence(),quantity,deficit)));
         if(!work(CoreLiquidationWorkView.Purpose.INSURANCE).resolutions().isEmpty()
                 || !work(CoreLiquidationWorkView.Purpose.ADL).resolutions().isEmpty()
-                || !user(users.getFirst()).positions().isEmpty())throw new IllegalStateException("loss lifecycle incomplete");
+                || !flat(user(users.getFirst()).positions()))throw new IllegalStateException("loss lifecycle incomplete");
         lossCompleted=true;
         System.out.println("mixedLossLifecycle=PASS liquidation=true insurance=true adl=true");
+    }
+
+    static boolean flat(List<CorePositionView> positions) {
+        // Closed positions can retain realized PnL history; economic exposure and margin must be zero.
+        return positions.stream().allMatch(p->p.signedQuantitySteps()==0 && p.positionMarginUnits()==0);
     }
 
     private CompletableFuture<Completed> send(CoreMessageType type,long user,byte[] payload,int weight,Consumer<CoreResponse> validation) {

@@ -41,4 +41,10 @@ class ClusterMixedCapacityTest {
         assertThat(ClusterMixedCapacityMain.treasuryFunds(t)).isEqualTo(48);
         assertThat(ClusterMixedCapacityMain.expectedFunds()).isEqualTo(1_768_000_000_125L);
     }
+
+    @Test void closedPositionWithRealizedLossIsFlatButLiveExposureOrMarginIsNot() {
+        assertThat(ClusterMixedCapacityMain.flat(List.of(new CorePositionView("S","USDT",0,0,0,0,-990,0)))).isTrue();
+        assertThat(ClusterMixedCapacityMain.flat(List.of(new CorePositionView("S","USDT",1,1,100,100,0,10)))).isFalse();
+        assertThat(ClusterMixedCapacityMain.flat(List.of(new CorePositionView("S","USDT",1,0,0,0,-990,10)))).isFalse();
+    }
 }
