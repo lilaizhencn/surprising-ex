@@ -3939,3 +3939,76 @@
 - mixed通过阈值：无profiler主轮持续terminal business ops/s≥150000；诊断轮只作归因，不计算优化收益百分比。每轮accepted=terminal business ops及Core messages、unfinished=0、期末命令backlog0、非预期拒绝/错误/超时0，资金/冻结/持仓/订单终态及snapshot恢复hash必须通过；报告fills/trades可用口径。稳定GC后live-set斜率<1MiB/s、native committed斜率<256KiB/s、线程/FD斜率<0.01/s，无allocation stall及恢复失败。
 - 六产品影响面JMH：新增`ClusteredBatchTradingBenchmark.ownerBatchCompletion`，逐产品独立进程SPOT、LINEAR_PERPETUAL、INVERSE_PERPETUAL、LINEAR_DELIVERY、INVERSE_DELIVERY、OPTION。f1/t1、warmup2×3s、measurement3×5s、每轮前冷却15s、`-prof gc -foe true`。JVM768MiB G1、1matcher、4Lane、batch20、256 in-flight、realtime=false、257用户含maker、1模拟会话/1symbol、余额每账户1e9结算单位、SPOT maker BTC余额5121单位、初始无用户持仓，maker持续挂120卖单。每cycle先2个place batch+254个missing cancel batch+2个有效cancel batch，再256个place+256个cancel batch；合计15400 business ops/770 Core messages、15400items/770batches、512metrics查询、5080预期ORDER_NOT_FOUND拒绝、0fill（另有六产品amend成交功能回归）。必须按拒绝与成功分别解释，不等同全成功成交吞吐。该轮对吞吐无生产容量断言；资金/snapshot/terminal硬断言，报告JMH误差、GC分配B/op、GC次数/时间。JMH该专用场景没有三段业务延迟，不能单独宣称完整性能验收。
 - JFR分析：沿用streaming JfrRead/IO audit，包含owner/Lane/matcher CPU、栈、allocation/TLAB、GC暂停/live-set/native/线程/FD、VM/JIT/异常/IO和三段分业务延迟p50/p90/p95/p99/p99.9/max（直方图桶上界）。分析owner忙轮询，不把CPU100%当有效计算100%。完整原始artifact保留；短测不证明长期无泄漏。真实3节点网络、外部API/Kafka/WS不在本次范围，回调同步约束明确保留。
+
+
+### Owner JMH启动修正（2026-09-07，重跑前锁定）
+
+- 上一轮SPOT JMH在warmup开始前IllegalAccessError：命令行-jvmArgsAppend覆盖注解中的add-opens/add-exports，Agrona无法访问jdk.internal.misc.Unsafe。没有有效measurement，其余五产品未启动；driver已因foe=true退出。原始jmh-SPOT.log保留，不作为业务失败或性能样本。
+- 仅修正JMH fork启动参数，完整为 `-Xms768m -Xmx768m -XX:+UseG1GC -Dsurprising.aeron.matching-engines=1 --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED`。重跑六产品参数、场景、阈值、采样和冷却完全沿用上条预锁定义，原始文件使用jmh-r2-*命名。仅当前master97d762d6，对照不适用。
+- mixed无profiler主轮已PASS：164631.242 business ops/s；JFR诊断轮功能PASS但180秒后出现同机diskimagesiod、iOS/watchOS update_dyld_sim_shared_cache及桌面应用CPU干扰，保留整轮，不把后半吞吐下降归因于交易代码。JMH继续记录同机负载，只用于场景功能/分配部分验证，不作生产容量断言。
+
+
+### Owner JFR环境无效后的补采（2026-09-07，采集前锁定）
+
+- 第一轮JFR末段09:51:02/07 CPU_Speed_Limit70、09:51:12/17为75，触发预锁环境无效条件。其135796.487 business ops/s及尾延迟不作验收；资金/snapshot PASS保留，不能以功能PASS替代性能有效性。无profiler主轮在09:45前结束，该轮系统样本CPU limit均100、swap0，不受这次限速影响。JMH-r2六产品已正常完成。
+- 当前CPU limit已连续恢复100，补采仅运行相同300秒mixed JFR，不重跑已通过无profiler主轮，不改代码/参数/阈值。当前master业务97d762d6及同一benchmarks.jar，profile.jfc完全相同；固定256 in-flight、1000用户/256symbol/4Lane/1matcher/batch20、4GiB ZGC、300秒闭环含首段预热、30秒窗口、15秒冷却；其余指标及不变量沿用本节原预锁定义。artifact子目录jfr-r2，保留原轮全部文件。
+
+
+### Owner优化最终验证结果（2026-09-07）
+
+- 被测业务commit `97d762d6`（已push master），benchmarks.jar SHA256 `0b3de994f8ea86475a1e923313e7d3a6bf525fc936d14d4d038f168ae0f6fc8c`；对照commit不适用，仅当前master。未改变主链路功能/线协议；700项测试、113个测试类，0失败/错误/跳过（protocol/client/instrument-api/service/benchmarks Maven依赖链）；其中六产品JMH夹具功能回归、批量撤改成交、实时出口和快照、资金校验均通过。新测试验证纯撤单无额外metadata/sequence Lane任务、混合成功/缺失订单拒绝、余额解冻、幂等和snapshot恢复。初次定向回归及全回归日志均归档。
+- 实际改动：纯撤单批次把metadata及Lane commit合入已有取消事件；改单双阶段提交仍保留。批次Lane工作未完成时不进入收尾；编码直接同步消费owner-local结果列表，保留所有索引/大小校验和不可变Item，编码完成后不引用临时容器，线协议未变。没有修改资金校验、SHA256幂等、快照一致性或生产回调同步完成约束。
+- 无profiler mixed主轮：elapsed 302.48s（setup 3414.207ms独立），terminal business ops 49,797,589 / **164,631.242 ops/s**；terminal Core messages 5,009,877 / 16,562.695 messages/s。持续均值包含预热及终检，达到预锁150000；snapshot 26,781,619B、restore 1109.565ms。
+- 有效JFR补采：elapsed 302.634s（setup 3155.659ms），terminal business ops 47,245,008 / 156,112.521 ops/s；terminal Core messages 4,753,104 / 15,705.766 messages/s。snapshot 25,688,183B、restore 1317.002ms。补采样本不代替无profiler主分数。
+- 两个有效mixed轮均status PASS、fundsInvariant=true，夹具逐cycle校验accepted/terminal business ops及Core messages相等、unfinished/end backlog0、最大matching backlog256；金融/余额冻结/持仓/快照hash全部通过。主轮189、补采222个incompleteRiskScans为待后续价格/风险命令推进的持久业务扫描状态，不是未完成Core命令；funding unfinished0。没有独立fills/s输出，不把business ops当fills。
+- 环境：无profiler主轮、补采系统CPU_Speed_Limit全部100、swap0；JFR DataLoss/JavaMonitorEnter/SocketRead/SocketWrite/ZAllocationStall均0。初次JFR于09:51限速70–75，已判无效并保留原件；初次JMH缺module exports启动失败也保留。JMH-r2六产品正常完成且该时段未记录限速。所有压测均结束。
+- 当前owner+夹具main第60–290秒平均单逻辑CPU99.40%；Lane0/1/2/3分别17.86/17.65/17.32/16.78%，matcher17.44%。整JVM CPU原始均值0.126、machine0.183（总16逻辑CPU归一）。owner仍是串行热点，不宣称瓶颈消失；main还承担请求生成。8303 owner样本中Lane await551、matching await/pump340、fingerprint473、batch decode145；分类互斥但不是准确墙钟占比。stampChangedOrdersByLane仍有36个样本（其他命令保留该逻辑），不能声称所有stamp路径被删除。主热点为指纹、ready队列检查/流水线推进、结果读取和终态保留；未据此删除一致性逻辑。
+- JFR分配估计239,017,983,216B /780,094,985.626B/s，约5059.12 B/business op（含setup/夹具，抽样权重）；NewTLAB refill221,521,513,032B、OutsideTLAB18,178,212,272B、最大对象33,554,448B。完整top class/site/线程分配在soak-analysis；不将抽样事件数当精确对象数/op，不宣称零分配。
+- ZGC77周期（59minor、18major），267暂停phase合计5.987ms，占306.396秒约0.00195%；phase p50/p95/p99/max0.016/0.049/0.059/0.441ms。AfterGC last550MiB、peak724MiB；剔除首60秒robust live-set斜率197713.96B/s <1MiB/s。NMT committed第60–290秒4,435,634,390→4,438,728,679B，robust斜率7239.11B/s <256KiB/s；4GiB heap固定，ZGC巨大reserved为地址空间，不当RSS。稳定14threads/13FD、direct/mapped/count0，终检恢复线程增加单列为边界，不当稳定泄漏。5分钟未见超阈值增长，不能外推小时/天级无泄漏。
+- SafepointBegin277/max2.153ms；VMOperation919/合计27.385ms/max2.054ms；Compilation10890/总30546.783ms/max1797.193ms在编译线程，不当STW。稳定60秒后CoreProbeState.apply栈IO及throw均0，startup/终检异常及驱动stdout单列于io-audit/soak-analysis。完整park/异常/CPU分钟分布保留；该夹具没有真实Aeron/Netty外部native池流量，不能外推外围池无泄漏。
+
+六产品专用JMH（带gc profiler，含32.987%预期拒绝，**不是全成功成交吞吐**）：
+
+| 产品 | terminal business ops/s ± JMH误差 | Core messages/s | B/business op | 分配MiB/s | GC次数/时间ms |
+|---|---:|---:|---:|---:|---:|
+| SPOT | 216388.93 ± 162773.12 | 10819.45 | 3595.06 | 725.20 | 31/322 |
+| LINEAR_PERPETUAL | 197498.34 ± 105182.60 | 9874.92 | 3556.73 | 657.24 | 28/318 |
+| INVERSE_PERPETUAL | 219832.55 ± 22773.97 | 10991.63 | 3590.50 | 739.33 | 32/355 |
+| LINEAR_DELIVERY | 211905.84 ± 182927.13 | 10595.29 | 3598.73 | 714.16 | 29/353 |
+| INVERSE_DELIVERY | 220263.37 ± 20319.22 | 11013.17 | 3608.86 | 744.94 | 32/354 |
+| OPTION | 213188.78 ± 120351.82 | 10659.44 | 3598.61 | 716.16 | 32/365 |
+
+- JMH主score为cycles/s，乘15400得到业务ops/s、乘770得到Core messages/s与batches/s，items/s等于业务ops/s，平均/最大batch20，fills0。AuxCounters EVENTS的score单位#是累计数量，**没有把它当ops/s**；accepted/terminal两组原始计数逐一相等，json保留rawData及误差/置信区间。短JMH误差偏宽且含桌面同机负载，只作本场景验证，不用于生产容量或收益百分比。资金/snapshot验证逐iteration执行；gc时间来自3个measurement（约15秒），比率需按实际measurement耗时解释。
+
+业务三段延迟（有效JFR补采，含setup/warmup；单位ms，p值为直方图桶上界，max精确）：
+
+```text
+ADL/acceptedTerminal n=1 p0.500<=0.002048 p0.900<=0.002048 p0.950<=0.002048 p0.990<=0.002048 p0.999<=0.002048 max=0.001038
+ADL/entryAccepted n=1 p0.500<=2.097152 p0.900<=2.097152 p0.950<=2.097152 p0.990<=2.097152 p0.999<=2.097152 max=1.724449
+ADL/entryTerminal n=1 p0.500<=2.097152 p0.900<=2.097152 p0.950<=2.097152 p0.990<=2.097152 p0.999<=2.097152 max=1.725487
+CANCEL_ORDER/acceptedTerminal n=1118208 p0.500<=4.194304 p0.900<=4.194304 p0.950<=8.388608 p0.990<=8.388608 p0.999<=16.777216 max=18.357829
+CANCEL_ORDER/entryAccepted n=1118208 p0.500<=0.002048 p0.900<=0.004096 p0.950<=0.004096 p0.990<=0.016384 p0.999<=0.032768 max=0.597705
+CANCEL_ORDER/entryTerminal n=1118208 p0.500<=4.194304 p0.900<=4.194304 p0.950<=8.388608 p0.990<=8.388608 p0.999<=16.777216 max=18.360460
+FUNDING/acceptedTerminal n=69888 p0.500<=0.000128 p0.900<=0.000256 p0.950<=0.000256 p0.990<=0.000512 p0.999<=0.001024 max=0.043020
+FUNDING/entryAccepted n=69888 p0.500<=0.131072 p0.900<=0.131072 p0.950<=0.131072 p0.990<=0.262144 p0.999<=0.524288 max=5.948740
+FUNDING/entryTerminal n=69888 p0.500<=0.131072 p0.900<=0.131072 p0.950<=0.131072 p0.990<=0.262144 p0.999<=0.524288 max=5.950464
+LIQUIDATION/acceptedTerminal n=2 p0.500<=0.002048 p0.900<=8.388608 p0.950<=8.388608 p0.990<=8.388608 p0.999<=8.388608 max=4.591466
+LIQUIDATION/entryAccepted n=2 p0.500<=4.194304 p0.900<=8.388608 p0.950<=8.388608 p0.990<=8.388608 p0.999<=8.388608 max=4.742774
+LIQUIDATION/entryTerminal n=2 p0.500<=4.194304 p0.900<=16.777216 p0.950<=16.777216 p0.990<=16.777216 p0.999<=16.777216 max=9.334240
+ORDER_BATCH/acceptedTerminal n=2236416 p0.500<=16.777216 p0.900<=33.554432 p0.950<=33.554432 p0.990<=33.554432 p0.999<=67.108864 max=343.192467
+ORDER_BATCH/entryAccepted n=2236416 p0.500<=0.032768 p0.900<=0.065536 p0.950<=0.065536 p0.990<=0.065536 p0.999<=0.131072 max=9.306980
+ORDER_BATCH/entryTerminal n=2236416 p0.500<=16.777216 p0.900<=33.554432 p0.950<=33.554432 p0.990<=33.554432 p0.999<=67.108864 max=343.196493
+PLACE_ORDER/acceptedTerminal n=1118208 p0.500<=4.194304 p0.900<=4.194304 p0.950<=4.194304 p0.990<=8.388608 p0.999<=16.777216 max=35.651483
+PLACE_ORDER/entryAccepted n=1118208 p0.500<=0.016384 p0.900<=0.016384 p0.950<=0.032768 p0.990<=0.032768 p0.999<=0.065536 max=15.701772
+PLACE_ORDER/entryTerminal n=1118208 p0.500<=4.194304 p0.900<=4.194304 p0.950<=4.194304 p0.990<=8.388608 p0.999<=16.777216 max=35.663524
+RISK_SCAN/acceptedTerminal n=70604 p0.500<=0.000128 p0.900<=0.000128 p0.950<=0.000256 p0.990<=0.000512 p0.999<=0.001024 max=0.017282
+RISK_SCAN/entryAccepted n=70604 p0.500<=0.065536 p0.900<=0.131072 p0.950<=0.131072 p0.990<=0.262144 p0.999<=0.262144 max=2.067729
+RISK_SCAN/entryTerminal n=70604 p0.500<=0.065536 p0.900<=0.131072 p0.950<=0.131072 p0.990<=0.262144 p0.999<=0.262144 max=2.068639
+TRIGGER_ORDER/acceptedTerminal n=139776 p0.500<=0.032768 p0.900<=0.262144 p0.950<=0.262144 p0.990<=0.262144 p0.999<=0.524288 max=5.081216
+TRIGGER_ORDER/entryAccepted n=139776 p0.500<=0.262144 p0.900<=0.262144 p0.950<=0.524288 p0.990<=0.524288 p0.999<=1.048576 max=13.449368
+TRIGGER_ORDER/entryTerminal n=139776 p0.500<=0.262144 p0.900<=0.524288 p0.950<=0.524288 p0.990<=1.048576 p0.999<=1.048576 max=14.828871
+```
+- ORDER_BATCH按整条批量命令统计，不能当单订单延迟；强平2/ADL1样本不足以给容量或可靠尾延迟结论。没有open-loop/coordinated omission修正、真实三节点网络与外部API/Kafka/WS吞吐，因此本次完成局部优化、回归和锁定mixed阈值验证，不宣称整个生产系统完整性能验收或零分配。
+- 有效JFR原件 `/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-07-owner-completion/jfr-r2/soak.jfr`，66,798,258B、记录306秒，profile.jfc/summary/CPU/IO/NMT/三段延迟/系统/GC/原始命令均保留。artifact根 `/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-07-owner-completion`，校验清单与最终校验值在后续记录。
+
+- 最终artifact校验：69个文件、201,165,521B（不计清单本身），SHA256SUMS自身SHA256 `70419f25ee312fc6903c13af4261034e0663356bd955a3bfd5e386a7df925ba7`。保留无效首轮JFR和启动失败JMH，所有验证进程已退出。
