@@ -380,6 +380,8 @@ JDK25启动 `SurprisingClusterNode` 的Archive CRC校验还需
 `--add-opens=java.base/java.util.zip=ALL-UNNAMED`。`ClusterDerivativeSmokeMain` 在下单前提供当前时间标记价格；
 `ClusterCapacityMain` 的衍生品订单场景持续刷新mark并单列 `marketDataCommands`，总Core消息数包括这些行情输入。
 不能用过期固定时间或缺少mark的工具输入绕过Core的五秒行情新鲜度检查。云端验证记录见根目录 `PERFORMANCE_VALIDATION.md`。
+`ClusterCapacityMain` 的异步成交和行情刷新通过 `ClusterOfferRetry` 处理明确未接收的ADMIN_ACTION/背压，保留原commandId和payload，最多10秒，另报 `transientOfferRetries`。
+ResultUnknown及断连等结果不自动重发，不能把Aeron offer重试次数计为额外成交或已接收业务。
 
 ## 实现状态与版本切换说明
 

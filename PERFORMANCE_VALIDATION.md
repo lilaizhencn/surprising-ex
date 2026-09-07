@@ -4280,3 +4280,9 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 首次启动缺少Archive CRC所需 `--add-opens=java.base/java.util.zip=ALL-UNNAMED`，导致三节点退出，补充该JVM参数后正常选主。首次交易smoke被正确拒绝：CoreOrderDecisionResolver要求衍生品下单有<=5000ms的新鲜mark，旧工具未提前提供mark；异常采样同时显示MARK_PRICE_MISSING被既有CoreResultCode映射成INVALID_COMMAND，未改交易校验/协议枚举。
 - 工具修复：smoke下单前发送当前时间mark；ClusterCapacityMain在创建订单前按symbol每秒最多一次同步刷新mark，并单列marketDataCommands与totalTerminalCoreMessages。1个workload worker在pending对数<256时刷新，mark占用该空闲窗口，不另开并发生产者；4命令session总容量256保持。测量订单数=finalized，两单一fill，行情命令另外报告；总Core终态=finalized+marketDataCommands。负载包含这些必要行情输入；旧不带mark的场景未采集数据，不作性能对照。
 - 标记价格持续更新会触发实际risk状态变化，其成本属于云端负载。1秒刷新频率不保证极端阻塞后仍新鲜，任何STALE_MARK_PRICE/业务拒绝都判该轮失败，不能放宽Core五秒规则。当前master被测commit为本条+工具修复的提交；实际jar SHA和节点入口参数留存。主轮seed90701/JFR90702及30s+300s、阈值不变。错误smoke与异常JFR均仅功能诊断，无吞吐验收结论。
+
+## 2026-09-07 GCP首轮失败与第二轮预锁定
+
+- 第一轮业务jar b293e295：真实网络smoke通过，三节点全部停止/启动后stateHash=b7908707c4eb3510一致，资金费和持仓复查通过。主容量seed90701运行期间出现Publication.ADMIN_ACTION(-3)，在刷新mark时由客户端明确返回NotAccepted，旧工具直接抛异常退出，未产出完整吞吐结果，判FAIL，不能称五分钟压测通过。原始main-failed-admin-action.log、main-failed-summary.txt、节点日志/系统监测均保留。错误发生在已知未接收的offer，不能误报为已提交交易丢失，也不能忽略为成功样本。
+- 修复仅限压测工具：ClusterOfferRetry对明确NotAccepted的ADMIN_ACTION/CLIENT_BACKPRESSURED保持原commandId与payload，1ms异步延迟、有界10s重试；ResultUnknown、NOT_CONNECTED、其他异常不重试。单列transientOfferRetries，逻辑offered/accepted/finalized不重复计数，raw offer尝试会多于逻辑命令数。客户端生产契约和Core业务代码不变。4项定向测试覆盖成功重试、非安全结果不重试、截止时间与指标回归。
+- 第二轮开始前停止三节点，保存旧目录与GC日志，切换新DATA_DIR=/var/lib/surprising/round2；不删除第一轮Archive/Cluster状态。第二轮主测seed90711/symbol=GCP-R2，JFR seed90712/symbol=GCP-JFR2；其余环境、4命令连接+1预留连接、单worker、256总在途窗口、1000用户/256symbol、1matcher/4Lane、每秒mark更新、30s预热/300s测量/15s冷却及>=1000business ops/s和p99<=1s阈值沿用前述定义。新jar源码为本次工具修复提交后的master，SHA随artifact记录，不比较前一失败轮性能。transport NotAccepted重试单列，业务拒绝/结果不明/超时仍要求0。

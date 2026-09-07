@@ -71,6 +71,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
     private final Object[] symbolLocks;
     private final long[] lastMarkRefreshMillis;
     private final AtomicLong marketDataCommands = new AtomicLong();
+    private final AtomicLong transientOfferRetries = new AtomicLong();
     private final CapacityMetrics capacityMetrics;
 
     private ClusterCapacityMain(
@@ -166,6 +167,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
         firstFailure.set(null);
         capacityMetrics.reset();
         marketDataCommands.set(0);
+        transientOfferRetries.set(0);
         nextPermitNanos.set(System.nanoTime());
         long started = System.nanoTime();
         execute(durationSeconds, true);
@@ -192,6 +194,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
         System.out.printf("marketDataCommands=%d marketDataCommandsPerSec=%.3f totalTerminalCoreMessages=%d%n",
                 marketDataCommands.get(), marketDataCommands.get() / elapsedSeconds,
                 Math.addExact(metrics.finalized(), marketDataCommands.get()));
+        System.out.printf("transientOfferRetries=%d%n", transientOfferRetries.get());
     }
 
     private void setup() {
@@ -296,7 +299,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
                 long started = System.nanoTime();
                 throttle();
                 if (measured) capacityMetrics.recordOffered();
-                CompletableFuture<CoreResponse> maker = clients.commandAsync(
+                CompletableFuture<CoreResponse> maker = commandAsync(
                         CoreMessageType.PLACE_ORDER, stableId("async-maker:" + makerOrder), firstUser(pair),
                         TradingCommandCodec.encodePlaceOrder(order(symbol, makerOrder, makerSide, CoreTimeInForce.GTC)));
                 throttle();
@@ -306,7 +309,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
                     }
                     record(response, System.nanoTime() - started, measured);
                     if (measured) capacityMetrics.recordOffered();
-                    return clients.commandAsync(CoreMessageType.PLACE_ORDER,
+                    return commandAsync(CoreMessageType.PLACE_ORDER,
                             stableId("async-taker:" + takerOrder), secondUser(pair),
                             TradingCommandCodec.encodePlaceOrder(order(symbol, takerOrder, takerSide, CoreTimeInForce.IOC)));
                 });
@@ -513,10 +516,16 @@ public final class ClusterCapacityMain implements AutoCloseable {
     }
 
     private void applied(CoreMessageType type, long userId, byte[] payload, UUID commandId) {
-        var response = clients.command(type, commandId, userId, payload);
+        var response = commandAsync(type, commandId, userId, payload).join();
         if (response.commandStatus() != ResponseStatus.APPLIED) {
             throw new IllegalStateException(type + " rejected status=" + response.commandStatus());
         }
+    }
+
+    private CompletableFuture<CoreResponse> commandAsync(
+            CoreMessageType type, UUID commandId, long userId, byte[] payload) {
+        return ClusterOfferRetry.submit(() -> clients.commandAsync(type, commandId, userId, payload),
+                transientOfferRetries::incrementAndGet);
     }
 
     private long firstUser(int pair) {
