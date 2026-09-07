@@ -4426,3 +4426,16 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 门槛：三诊断各>=1000 terminal business ops/s、maker/taker p99<=1秒、订单offered=accepted=terminal=2*fills、逻辑submitted=completed=订单+mark、observed<=256、期末unfinished0、fundsDiff=bookLevels=0；NotAccepted重试单列。诊断排序仅用于选配置：只有某单项配置比D0高>=10%且通过全部门槛才选较快者，否则默认D0；不可把此规则推导成生产应默认忙等。
 - 选定配置另跑无JFR主轮M seed90804/WM，30秒预热+300秒测量，门槛同上；报告每10秒速率、在途均值、maker/taker六分位、Core messages/s与fills/s。如果仍无计算饱和，结论必须说明本配置的吞吐限制与剩余埋点缺口；不得称CPU绝对上限。诊断不引入源码业务改动，不补跑本地JMH。最后全停重启最后数据集、hash/applied计数与资金核对，随后停止四VM；保留磁盘。
 - artifact `/Users/atomex/Desktop/surprising/gcp-validation/2026-09-07-wait-diagnostics`，复制编排工具到此目录后调整，旧证据不可覆盖。本轮为等待策略归因，尚不覆盖open-loop、快照/故障矩阵、六产品金融路径、长期泄漏和完整阶段时间；CPU未满不等于可以增加并发状态修改或破坏确定性。
+
+### 用户澄清压测脚本不得逐笔等待，终止等待策略诊断
+
+- D0已完成：648712订单/324356成交、120.072秒、5402.681订单操作/s、2701.341 fills/s，maker p99=80281us、taker p99=52690us，资金差/订单簿剩余/业务失败0。本轮高开销短等待JFR和原始结果保留于wait-diagnostics/d0，不能替代无profiler主吞吐。node0 +70..140s owner park累计49.226秒/70.323%窗口、p50约61us；并发线程等待不可求和成端到端延迟。
+- 用户明确所指是压测脚本发压不要等待，要求直接测真实三节点吞吐，因此停止D1负载（systemctl stop），保留中断日志/JFR，不作为有效测量；D2和原预定M均不执行。恢复默认Core等待配置，不修改交易Core。此前错误理解导致的额外诊断如实保留。CLI直连TLS失败经复用用户已有macOS代理恢复，业务私网不经过该代理。
+
+## 2026-09-07 独立普通订单持续流（采集前锁定）
+
+- 本轮工具新增MATCH_STREAM：每个空闲slot独立提交一条普通订单，无卖单终态→买单发起依赖，无定时park/sleep；只在GLOBAL256满时自旋背压，任意终态slot可回收。买卖按相同symbol/qty/price成对生成但独立发送，均用GTC容忍跨session到达顺序。到期后若尚欠一条配对买单，提交该买单后排空；不继续生成新订单对。行情过期时保留共享异步价格前置，不能绕过价格有效性金融规则。fills从每条真实Core响应executions累计，买卖到达顺序不影响统计；按buy/sell报告命令终态延迟，不能冒充每条订单完成全部成交延迟。
+- 仅改tools，生产Core/client/协议未改；测试覆盖独立买卖均在任一回包前提交、各自计时、失败不抑制已独立发送的另一单及原价格门控/256分区/重试/指标。使用HotSpot GraalVM25.0.1本地功能测试和打包，不跑本地性能；被测为当前master本工具提交，实际commit和jar SHA另记，对照不适用（不跑旧版本）。
+- 环境仍是三台独立GCP n2-custom-8-16384 Core加独立同配load、新加坡同zone/Intel Cascade Lake/Ubuntu24.04/80GB pd-ssd、Temurin HotSpot25.0.4.1；Core4GiB ZGC/AlwaysPreTouch/NMT、SHARED_NETWORK/Archive SHARED、默认集群backoff和BLOCKING Lane。每Core1matcher/4Lane；GLOBAL256、1发起worker、4命令连接+1预留、1000用户/500对、256symbol、LINEAR_PERPETUAL，SELL GTC1@100与BUY GTC1@100各半、无batch/撤单/费用/WS/Kafka/API，每用户初始10^12 USDT/零持仓，持续买卖，mark1秒门控。
+- 独立目录 `/var/lib/surprising/stream-s1`、seed90901/prefixSTREAM1，30秒预热+300秒测量/drain，启动前距离取消D1至少15秒；closed-loop offered0、不修正CO。本轮按用户要求直接执行无JFR主吞吐，不再切换Core等待策略诊断。四机每5秒系统监控及GC/NMT收集；阈值>=1000 terminal business ops/s、buy/sell p99各<=1秒、offered=accepted=terminal=2*真实fills、submitted=completed=订单+mark、最大逻辑请求<=256、期末unfinished0、资金差/订单簿剩余/错误/未知/超时0。NotAccepted重试单列，swap增长/连续3个5秒steal>5%/VM维护重启判失效。
+- 本轮仅验证工具独立发压后的真实持续吞吐与资金/终态；不把它和旧IOC链式场景混为同一业务口径。输出10秒分段、在途均值、buy/sell六分位、订单/Core消息/fill速率。Core未改，已完成的全停恢复证据保留，本轮不重复故障/快照测试；无本轮JFR、open-loop、完整阶段时间或CPU计算饱和证据时，不宣称硬件绝对上限。完成后停止四VM，artifact `/Users/atomex/Desktop/surprising/gcp-validation/2026-09-07-stream`。

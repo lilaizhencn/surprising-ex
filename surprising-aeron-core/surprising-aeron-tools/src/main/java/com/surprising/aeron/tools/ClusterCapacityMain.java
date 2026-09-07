@@ -144,8 +144,9 @@ public final class ClusterCapacityMain implements AutoCloseable {
         long offered = nonNegativeLong("surprising.aeron.capacity-offered-commands-per-second", 0);
         Workload workload = Workload.valueOf(System.getProperty(
                 "surprising.aeron.capacity-workload", "MATCH").trim().toUpperCase());
-        if (workload == Workload.MATCH_ASYNC && (workers > asyncInFlight || offered != 0)) {
-            throw new IllegalArgumentException("MATCH_ASYNC requires workers <= total in-flight and closed-loop offered=0");
+        if ((workload == Workload.MATCH_ASYNC || workload == Workload.MATCH_STREAM)
+                && (workers > asyncInFlight || offered != 0)) {
+            throw new IllegalArgumentException("async workloads require workers <= total in-flight and offered=0");
         }
         String mode = System.getProperty("surprising.aeron.capacity-mode", "run").trim().toLowerCase();
         try (ClusterCapacityMain benchmark = new ClusterCapacityMain(productLine, hosts, egress, symbols, seed,
@@ -190,14 +191,14 @@ public final class ClusterCapacityMain implements AutoCloseable {
         if (activeRequests.get() != 0 || submittedRequests.get() != completedRequests.get()) {
             throw new IllegalStateException("measurement requests not drained");
         }
-        if (workload == Workload.MATCH_ASYNC && peakRequests.get() > asyncInFlight) {
+        if ((workload == Workload.MATCH_ASYNC || workload == Workload.MATCH_STREAM) && peakRequests.get() > asyncInFlight) {
             throw new IllegalStateException("global request window exceeded");
         }
         verifyFundsAndBook();
         long matchCount = matches.get();
         double elapsedSeconds = elapsedNanos / 1_000_000_000.0;
         MetricsSnapshot metrics = capacityMetrics.snapshot(elapsedNanos);
-        if (workload == Workload.MATCH_ASYNC && (metrics.offered() != metrics.finalized()
+        if ((workload == Workload.MATCH_ASYNC || workload == Workload.MATCH_STREAM) && (metrics.offered() != metrics.finalized()
                 || metrics.accepted() != metrics.finalized() || metrics.finalized() != 2 * matchCount
                 || submittedRequests.get() != metrics.finalized() + marketDataCommands.get())) {
             throw new IllegalStateException("terminal business/Core/fill counters disagree");
@@ -219,8 +220,8 @@ public final class ClusterCapacityMain implements AutoCloseable {
                 asyncInFlight, peakRequests.get(), activeRequests.get(), submittedRequests.get(), completedRequests.get());
         System.out.printf("requestOccupancySampleIntervalSeconds=1 samples=%d mean=%.3f%n",
                 occupancySamples, occupancySamples == 0 ? 0.0 : (double) occupancySum / occupancySamples);
-        printLatency("maker", makerMetrics.snapshot(elapsedNanos));
-        printLatency("taker", takerMetrics.snapshot(elapsedNanos));
+        printLatency(workload == Workload.MATCH_STREAM ? "sell" : "maker", makerMetrics.snapshot(elapsedNanos));
+        printLatency(workload == Workload.MATCH_STREAM ? "buy" : "taker", takerMetrics.snapshot(elapsedNanos));
         capacityMetrics.printHistogram();
     }
 
@@ -262,6 +263,8 @@ public final class ClusterCapacityMain implements AutoCloseable {
                                 matchCycle(workerId, cycle++, measured);
                             } else if (workload == Workload.MATCH_ASYNC) {
                                 asyncMatch(workerId, deadline, measured);
+                            } else if (workload == Workload.MATCH_STREAM) {
+                                streamMatch(workerId, deadline, measured);
                             } else if (workload == Workload.CANCEL) {
                                 cancelCycle(workerId, measured);
                             } else if (workload == Workload.PLACE_ONLY) {
@@ -373,6 +376,54 @@ public final class ClusterCapacityMain implements AutoCloseable {
                 progress = true;
             }
             if (!progress) LockSupport.parkNanos(10_000L);
+        }
+    }
+
+    private void streamMatch(int worker, long deadline, boolean measured) {
+        int slots = slotsForWorker(asyncInFlight, workers, worker);
+        CompletableFuture<?>[] pending = new CompletableFuture<?>[slots];
+        long cycle = 0;
+        int count = 0;
+        boolean buyDue = false;
+        while (System.nanoTime() < deadline || count != 0 || buyDue) {
+            for (int slot = 0; slot < slots; slot++) {
+                if (pending[slot] != null && pending[slot].isDone()) {
+                    pending[slot].join(); // Already terminal: checks errors, never waits for a reply.
+                    pending[slot] = null;
+                    count--;
+                }
+                if (pending[slot] != null || (!buyDue && System.nanoTime() >= deadline)) continue;
+                int pair = Math.floorMod(worker + Math.toIntExact(cycle), pairCount);
+                String symbol = symbol(worker, cycle);
+                boolean buy = buyDue;
+                long user = buy ? secondUser(pair) : firstUser(pair);
+                long orderId = nextOrderId.incrementAndGet();
+                // Both sides are GTC: separate sessions may deliver either side first. No order
+                // waits for its counterpart's terminal. An already-started pair is balanced at
+                // the deadline, then every outstanding order is drained before verification.
+                pending[slot] = ClusterAsyncPair.independent(refreshMarkAsync(symbol, measured), () -> {
+                    if (measured) capacityMetrics.recordOffered();
+                    return commandAsync(CoreMessageType.PLACE_ORDER, stableId("stream:" + orderId), user,
+                            TradingCommandCodec.encodePlaceOrder(order(symbol, orderId,
+                                    buy ? CoreOrderSide.BUY : CoreOrderSide.SELL, CoreTimeInForce.GTC)));
+                }, (response, nanos) -> {
+                    record(response, nanos, measured);
+                    var result = com.surprising.aeron.protocol.CoreCommandResultCodec.decode(response.data());
+                    for (var execution : result.executions()) {
+                        if (execution.quantitySteps() != QUANTITY_STEPS || execution.priceTicks() != PRICE_TICKS) {
+                            throw new IllegalStateException("unexpected stream execution");
+                        }
+                    }
+                    if (measured) {
+                        (buy ? takerMetrics : makerMetrics).recordFinalized(nanos, 0);
+                        matches.addAndGet(result.executions().size());
+                    }
+                }, System::nanoTime);
+                count++;
+                if (buy) cycle++;
+                buyDue = !buy;
+            }
+            Thread.onSpinWait(); // Full window only: no timed sleep or per-order blocking.
         }
     }
 
@@ -737,6 +788,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
     private enum Workload {
         MATCH,
         MATCH_ASYNC,
+        MATCH_STREAM,
         PLACE_ONLY,
         CANCEL,
         MARK_PRICE

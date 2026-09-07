@@ -12,6 +12,44 @@ import org.junit.jupiter.api.Test;
 class ClusterAsyncPairTest {
     private static final CoreResponse OK = new CoreResponse(ResponseStatus.APPLIED, 1, 1);
 
+    @Test void independentOrdersAreBothSubmittedBeforeEitherReplyAndTimedSeparately() {
+        var price = new CompletableFuture<Void>();
+        var sell = new CompletableFuture<CoreResponse>();
+        var buy = new CompletableFuture<CoreResponse>();
+        var actions = new ArrayList<String>();
+        var clock = new AtomicLong(100);
+        var sellDone = ClusterAsyncPair.independent(price,
+                () -> { actions.add("sell"); return sell; },
+                (r, ns) -> actions.add("sell-terminal:" + ns), clock::get);
+        var buyDone = ClusterAsyncPair.independent(price,
+                () -> { actions.add("buy"); return buy; },
+                (r, ns) -> actions.add("buy-terminal:" + ns), clock::get);
+        assertThat(actions).isEmpty();
+        price.complete(null);
+        assertThat(actions).containsExactlyInAnyOrder("sell", "buy");
+        assertThat(sellDone).isNotDone();
+        assertThat(buyDone).isNotDone();
+        clock.set(130);
+        buy.complete(OK);
+        assertThat(buyDone).isCompleted();
+        assertThat(sellDone).isNotDone();
+        clock.set(170);
+        sell.complete(OK);
+        assertThat(actions).contains("buy-terminal:30", "sell-terminal:70");
+    }
+
+    @Test void independentFailureDoesNotSuppressAnotherAlreadySubmittedOrder() {
+        var sell = new CompletableFuture<CoreResponse>();
+        var buy = new CompletableFuture<CoreResponse>();
+        var ready = CompletableFuture.<Void>completedFuture(null);
+        var sellDone = ClusterAsyncPair.independent(ready, () -> sell, (r, ns) -> {}, System::nanoTime);
+        var buyDone = ClusterAsyncPair.independent(ready, () -> buy, (r, ns) -> {}, System::nanoTime);
+        sell.completeExceptionally(new IllegalStateException("rejected"));
+        buy.complete(OK);
+        assertThat(sellDone).isCompletedExceptionally();
+        assertThat(buyDone).isCompleted();
+    }
+
     @Test void priceDependencyDoesNotBlockAndEachOrderIsTimedAtItsOwnTerminal() {
         var price = new CompletableFuture<Void>();
         var maker = new CompletableFuture<CoreResponse>();

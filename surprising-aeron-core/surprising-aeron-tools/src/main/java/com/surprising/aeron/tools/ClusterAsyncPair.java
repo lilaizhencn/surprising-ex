@@ -10,6 +10,13 @@ import java.util.function.Supplier;
 final class ClusterAsyncPair {
     private ClusterAsyncPair() { }
 
+    /** An independent order: only price readiness is a prerequisite, never another order's result. */
+    static CompletableFuture<Void> independent(CompletableFuture<Void> price,
+            Supplier<CompletableFuture<CoreResponse>> submit,
+            BiConsumer<CoreResponse, Long> terminal, LongSupplier nanoTime) {
+        return price.thenCompose(ignored -> timed(submit, terminal, nanoTime));
+    }
+
     static CompletableFuture<Void> start(CompletableFuture<Void> price,
             Supplier<CompletableFuture<CoreResponse>> maker,
             Supplier<CompletableFuture<CoreResponse>> taker,
