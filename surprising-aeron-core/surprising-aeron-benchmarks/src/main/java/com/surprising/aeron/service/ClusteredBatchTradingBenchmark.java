@@ -52,6 +52,18 @@ public class ClusteredBatchTradingBenchmark {
         return workload.terminal;
     }
 
+    /** Trigger publication/removal plus successful batch place/cancel completion. */
+    @Benchmark
+    public long ownerTriggerAndBatchCompletion(Workload workload, Counters counters) {
+        workload.runTriggerRoundTrip();
+        counters.acceptedBusinessOperations += 1536;
+        counters.terminalBusinessOperations += 1536;
+        counters.acceptedCoreMessages += 1536;
+        counters.terminalCoreMessages += 1536;
+        counters.terminalTrades += 512;
+        return batchPlaceCancelWithMetrics(workload, counters);
+    }
+
     @AuxCounters(AuxCounters.Type.EVENTS)
     @State(Scope.Thread)
     public static class Counters {
@@ -288,6 +300,41 @@ public class ClusteredBatchTradingBenchmark {
             } finally {singleResponses=false;}
         }
 
+        public void runTriggerRoundTrip() {
+            long before = terminal;
+            singleResponses = true;
+            try {
+                for (int phase = 0; phase < 6; phase++) {
+                    CoreMessage[] wave = new CoreMessage[maxInFlight];
+                    for (int user = 0; user < maxInFlight; user++) {
+                        if (phase == 2) {
+                            firstOrders[user] = orderId++;
+                            var trigger = new com.surprising.aeron.service.state.CoreTriggerOrderState(
+                                    firstOrders[user], productLine, 1_000 + user, "trigger-" + firstOrders[user], "",
+                                    "JMH-BTC-USDT", CoreOrderSide.SELL, CoreTriggerOrderType.STOP_LOSS,
+                                    CoreTriggerCondition.LESS_OR_EQUAL, 90, 0, 0, 0, 0, 0,
+                                    CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1, CoreMarginMode.CROSS,
+                                    CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "",
+                                    0, 0, 1, 1, 1);
+                            wave[user] = command(CoreMessageType.PLACE_TRIGGER_ORDER, 1_000 + user,
+                                    CoreTriggerOrderCodec.encodeState(trigger.view()));
+                        } else if (phase == 3) {
+                            wave[user] = command(CoreMessageType.CANCEL_TRIGGER_ORDER, 1_000 + user,
+                                    CoreTriggerOrderCodec.encodeId(firstOrders[user]));
+                        } else {
+                            long account = phase == 0 || phase == 5 ? 1256 : 1000 + user;
+                            CoreOrderSide side = phase == 0 || phase == 4 ? CoreOrderSide.SELL : CoreOrderSide.BUY;
+                            wave[user] = command(CoreMessageType.PLACE_ORDER, account,
+                                    TradingCommandCodec.encodePlaceOrder(order(orderId++, side, 100)));
+                        }
+                    }
+                    for (CoreMessage message : wave) send(message);
+                    drain();
+                }
+                if (terminal - before != 1536) throw new IllegalStateException("trigger terminal mismatch");
+            } finally { singleResponses = false; }
+        }
+
         public void runAmendRoundTripTrades() {
             long before = terminal;
             long fillsBefore = batchTrades;
@@ -472,6 +519,8 @@ public class ClusteredBatchTradingBenchmark {
                 if (productLine == ProductLine.SPOT && maker.balances().get("BTC").totalUnits() != makerBaseBalance) {
                     throw new IllegalStateException("maker BTC conservation mismatch");
                 }
+                if (state.triggerOrders().values().stream().anyMatch(t -> t.status().open()))
+                    throw new IllegalStateException("open trigger retained after cancel");
                 if (state.orders().size() != 1 || state.order(1) == null) {
                     throw new IllegalStateException("terminal order retention mismatch");
                 }

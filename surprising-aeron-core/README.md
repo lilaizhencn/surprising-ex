@@ -641,3 +641,9 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
 `CoreProbeState.OrderBatchPending` 保留原始 matcher events，`TradingOrderBatchCodec.ResultSource` 在响应编码边界直接写成交字段，避免逐笔创建 `CoreExecutionView` 和结果 Item/List；协议格式、幂等响应字节不变。
 `RuntimeDerivativeMatchProcessor` 对同一 taker 的多笔成交使用 Lane 内 `FillCursor`，逐 fill 保留手续费舍入、保证金、盈亏及 Treasury 累计顺序，最后发布余额/持仓/订单/冻结状态。maker 仍逐笔应用，用户与订单 revision 保留逐笔增量；已发布状态对象不池化。每线程只有两个有界 cursor，结束或异常均清引用。并未实现整条链路零分配。
 新增 `ClusteredBatchTradingBenchmark.multiFillSettlementAndEncoding` 覆盖六产品 maker 20 笔小单被单 taker 吃完再平仓，并核对用户/做市资金、冻结、订单终态与快照恢复；性能记录统一见根目录 `PERFORMANCE_VALIDATION.md`。
+
+
+### Owner 触发单发布与批量 ID 边界
+
+`TradingRuntimeState` 沿用 `PublishedLaneChanges` 发布不可变 `CoreTriggerOrderState` 引用；owner 的 `publishedTriggerOrders` 只在 Lane 完成后合并更新，Lane 内查询仍访问自己拥有的状态。触发单变更缓冲携带最终值（删除为 null），`visitChangedIndexes` 不再逐 ID 跨 Lane 回查。取消/删除定位已有状态的 userId 对应 Lane；回滚及辅助快照替换同步更新 owner 视图。发布缓冲按首次触发单写入懒分配，普通撮合事件不会新增触发单数组。它是与现有 publishedOrders 一致的完成边界索引，不复制状态对象或对外暴露可变 Lane Map。
+批量 `finishOrderBatch` 将 ID 合并到已有 primitive 累加器，Lane 提交直接遍历批次 ID 集合，最后由 `materializeChangeAccumulators` 一次生成不可变列表；保留先前去重顺序、maker/运行时追加变更及完成屏障。新基准 `ownerTriggerAndBatchCompletion` 覆盖六产品开仓→挂止损→撤止损→平仓与批量下撤单，并核对资金/持仓/冻结/终态和快照恢复。

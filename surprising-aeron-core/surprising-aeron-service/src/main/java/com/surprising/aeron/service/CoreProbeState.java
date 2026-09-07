@@ -1889,8 +1889,11 @@ public final class CoreProbeState implements AutoCloseable {
                 refreshSnapshotProjection();
             }
         }
-        commandChangedUserIds = batch.changedUserIds.toImmutableList();
-        commandChangedOrderIds = batch.changedOrderIds.toImmutableList();
+        // Keep IDs primitive until materializeChangeAccumulators at the final boundary.
+        changedUserIds.addAll(batch.changedUserIds);
+        changedOrderIds.addAll(batch.changedOrderIds);
+        commandChangedUserIds = List.of();
+        commandChangedOrderIds = List.of();
         if (laneContext.expectedLaneMask() != batch.actualLaneMask) {
             throw failOrderBatch(batch, pending, "order batch account lane mask mismatch", null);
         }
@@ -1904,7 +1907,7 @@ public final class CoreProbeState implements AutoCloseable {
                     Math.incrementExact(runtimePlaceOrderState.revision()));
             committedLaneMask = batch.laneCommitCompleted
                     ? batch.actualLaneMask
-                    : stageLaneMutation(batch.sequence, commandChangedUserIds, laneContext);
+                    : stageLaneMutation(batch.sequence, batch.changedUserIds, laneContext);
             if (laneContext.completedLaneMask() != laneContext.expectedLaneMask()) {
                 throw new IllegalStateException("order batch account lane mask mismatch");
             }

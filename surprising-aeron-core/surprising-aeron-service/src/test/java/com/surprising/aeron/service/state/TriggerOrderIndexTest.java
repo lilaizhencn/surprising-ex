@@ -18,6 +18,73 @@ import org.junit.jupiter.api.Test;
 class TriggerOrderIndexTest {
 
     @Test
+    void ownerReadsPublishedTriggersAndRemovalWithoutSubmittingLaneTasks() throws Exception {
+        try (var runtime = new TradingRuntimeState(LaneTopology.productionDefault())) {
+            long user = 1;
+            while (runtime.topology().accountLaneId(user) != 3) user++;
+            var trigger = trigger(901, user, 100);
+            runtime.putTriggerOrder(trigger);
+            runtime.clearChangedKeys();
+            runtime.startAccountLanes();
+            var tasksField = TradingRuntimeState.class.getDeclaredField("laneMutationTasks");
+            tasksField.setAccessible(true);
+            var tasks = (Object[]) tasksField.get(runtime);
+            assertThat(tasks).containsOnlyNulls();
+            assertThat(runtime.triggerOrder(901)).isSameAs(trigger);
+            assertThat(runtime.triggerOrder(999)).isNull();
+            assertThat(tasks).as("owner lookup must not enqueue any Lane read").containsOnlyNulls();
+
+            var changed = trigger(901, user, 110);
+            runtime.putTriggerOrder(changed);
+            assertThat(runtime.triggerOrder(901)).isSameAs(changed);
+            var observed = new java.util.HashMap<Long, CoreTriggerOrderState>();
+            var consumer = new RuntimeFactFrame.ChangeConsumer() {
+                public void triggerOrder(long id, CoreTriggerOrderState before, CoreTriggerOrderState after) {
+                    observed.put(id, after);
+                }
+            };
+            runtime.visitChangedIndexes(consumer);
+            assertThat(observed).containsEntry(901L, changed);
+            assertThat(tasks[0]).isNull();
+            assertThat(tasks[1]).isNull();
+            assertThat(tasks[2]).isNull();
+            runtime.removeTriggerOrder(901);
+            runtime.visitChangedIndexes(consumer);
+            assertThat(runtime.triggerOrder(901)).isNull();
+            assertThat(observed).containsEntry(901L, null);
+
+            runtime.rollbackActiveCommand(runtime.revision(), 1);
+            assertThat(runtime.triggerOrder(901)).isSameAs(trigger);
+            assertThat(runtime.hasTriggerClient(user, trigger.clientTriggerOrderId())).isTrue();
+        }
+    }
+
+    @Test
+    void replacingAuxiliarySnapshotClearsPublishedTriggerIdentities() {
+        var initial = trigger(901, 7, 100);
+        var state = new TradingCoreState(ProductLine.SPOT, 0,
+                Map.of(7L, CoreUserState.empty(ProductLine.SPOT, 7)), Map.of(), Map.of(),
+                CoreRiskState.empty(), CoreTreasuryState.empty(), Map.of(), Map.of(), Map.of(), Map.of(901L, initial));
+        try (var runtime = RuntimeStateProjector.project(state, new RuntimeIdentityRegistry())) {
+            runtime.startAccountLanes();
+            assertThat(runtime.triggerOrder(901)).isEqualTo(initial);
+            runtime.replaceAuxiliaryState(TradingCoreState.empty(ProductLine.SPOT));
+            assertThat(runtime.triggerOrder(901)).isNull();
+            runtime.replaceAuxiliaryState(state);
+            assertThat(runtime.triggerOrder(901)).isEqualTo(initial);
+        }
+    }
+
+    private static CoreTriggerOrderState trigger(long id, long user, long price) {
+        return new CoreTriggerOrderState(id, ProductLine.SPOT, user, "published-" + id, "",
+                "BTC-USDT", CoreOrderSide.BUY, CoreTriggerOrderType.STOP_LOSS,
+                CoreTriggerCondition.GREATER_OR_EQUAL, price, 0, 0, 0, 0, 0,
+                CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1, CoreMarginMode.CROSS,
+                CorePositionSide.NET, CoreTriggerOrderStatus.PENDING, 0, 0, 0, "", "",
+                0, 0, 1, 1, 1);
+    }
+
+    @Test
     void candidatesPageBoundsAndResumesWithoutOmission() {
         Map<Long, CoreTriggerOrderState> triggers = new java.util.TreeMap<>();
         for (long id = 1; id <= 300; id++) {
