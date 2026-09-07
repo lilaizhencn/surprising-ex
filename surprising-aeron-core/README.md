@@ -641,7 +641,7 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
 
 `SurprisingClusteredService` 继续在日志回调返回前完成交易，以保持快照、日志位置和恢复的一致性。mixed 夹具的跨请求流水线吞吐不能直接作为生产 Cluster 网络容量。
 
-云端容量工具的结果还需要检查负载生成方式：`ClusterCapacityMain.asyncMatch` 当前同步等待到期标记价刷新，并在补充待完成交易对后收集结果；`acceptanceToFinalization` 标签包含客户端发起与收集等待，并非独立的 Core 受理到终态延迟。`capacity=PASS` 仅表示工具内置资金/订单簿检查通过，不代表达到预先定义的吞吐和尾延迟门槛。真实三节点 GCP 的命令、JFR、全停恢复和未达标记录统一见根目录 [PERFORMANCE_VALIDATION.md](../PERFORMANCE_VALIDATION.md)。
+云端容量工具的 `MATCH_ASYNC` 使用 `ClusterMarkPriceGate` 异步刷新到期标记价，`ClusterAsyncPair` 在一个slot中依次完成行情依赖、maker和taker；各worker分割同一个总在途窗口。maker/taker各自在发起至终态callback期间计时，结果收集不再增加延迟；输出 `requestToTerminal`，不冒充独立受理到终态阶段。每秒采样逻辑在途量，每10秒输出终态速率，并报告全局峰值、最终未完成量和六分位/HDR直方图。该模式目前只支持closed-loop offered=0。`capacity=PASS` 仅表示工具内置业务核对，不代表达到预先定义的性能门槛；云端命令、JFR、恢复及历史失败记录统一见根目录 [PERFORMANCE_VALIDATION.md](../PERFORMANCE_VALIDATION.md)。
 
 
 ### 结算与批量响应的分配边界
