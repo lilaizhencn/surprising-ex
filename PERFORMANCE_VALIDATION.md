@@ -4286,3 +4286,52 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 第一轮业务jar b293e295：真实网络smoke通过，三节点全部停止/启动后stateHash=b7908707c4eb3510一致，资金费和持仓复查通过。主容量seed90701运行期间出现Publication.ADMIN_ACTION(-3)，在刷新mark时由客户端明确返回NotAccepted，旧工具直接抛异常退出，未产出完整吞吐结果，判FAIL，不能称五分钟压测通过。原始main-failed-admin-action.log、main-failed-summary.txt、节点日志/系统监测均保留。错误发生在已知未接收的offer，不能误报为已提交交易丢失，也不能忽略为成功样本。
 - 修复仅限压测工具：ClusterOfferRetry对明确NotAccepted的ADMIN_ACTION/CLIENT_BACKPRESSURED保持原commandId与payload，1ms异步延迟、有界10s重试；ResultUnknown、NOT_CONNECTED、其他异常不重试。单列transientOfferRetries，逻辑offered/accepted/finalized不重复计数，raw offer尝试会多于逻辑命令数。客户端生产契约和Core业务代码不变。4项定向测试覆盖成功重试、非安全结果不重试、截止时间与指标回归。
 - 第二轮开始前停止三节点，保存旧目录与GC日志，切换新DATA_DIR=/var/lib/surprising/round2；不删除第一轮Archive/Cluster状态。第二轮主测seed90711/symbol=GCP-R2，JFR seed90712/symbol=GCP-JFR2；其余环境、4命令连接+1预留连接、单worker、256总在途窗口、1000用户/256symbol、1matcher/4Lane、每秒mark更新、30s预热/300s测量/15s冷却及>=1000business ops/s和p99<=1s阈值沿用前述定义。新jar源码为本次工具修复提交后的master，SHA随artifact记录，不比较前一失败轮性能。transport NotAccepted重试单列，业务拒绝/结果不明/超时仍要求0。
+
+## 2026-09-07 GCP第二轮结果：功能/日志恢复通过，性能门槛未通过
+
+- 采集源码 `a7d71ade`，对照commit不适用（仅当前master），业务代码仍为c26e0578；修复范围只有验证工具的新鲜mark与明确未接收请求重试。HotSpot25定向测试4项通过、Maven package通过；没有新增交易内核改动，未重跑无关JMH或服务全量测试。三节点及客户端jar SHA256均为 `e682de6b5a34a73c311f98982a88a73525b9d84ddcfd54619c2ae494d92421b5`。本轮没有中途改变锁定负载或阈值。
+- 环境、JVM、场景遵循上述第二轮预锁：新加坡同zone四台8vCPU/16GiB，三节点各4Lane/1matcher，客户端1000用户、256symbol、4命令session加1预留session，固定256待完成交易对/至多256交易链路命令。普通maker SELL GTC与taker BUY IOC各50%，两单一fill，无批量、无撤单、无API/WS/Kafka，持续单向建仓。每个用户初始10^12 USDT，样本资金费账户另为1000 USDT/人。封闭循环、不修正CO；这不是到达率容量曲线。
+- 命令/artifact根目录 `/Users/atomex/Desktop/surprising/gcp-validation/2026-09-07`（下文相对路径均基于此）。主轮通过 `systemd-run --unit=surprising-capacity-r2 --uid=bench ... /usr/bin/env CAPACITY_SEED=90711 SYMBOL_PREFIX=GCP-R2 /bin/bash /home/bench/run-capacity.sh` 启动；JFR轮使用unit surprising-capacity-jfr2、seed90712、prefix GCP-JFR2。完整环境参数在 `run-capacity.sh`、`start-node.sh` 和 extracted `core-unit.txt`；30秒预热、300秒测量，主轮结束至JFR启动冷却超过15秒。主轮启动08:46:04 UTC，09月07日08:52:09查询已正常退出；JFR轮约08:52:47至08:58:35 UTC，包括setup、warmup与末尾核对。两轮测量均完整300秒并drain完成，原始 stdout 保存在 `evidence-surprising-load/main-r2.log`、`jfr-r2.log`。
+
+| 指标 | 主轮（无profiler） | JFR诊断轮 |
+| --- | ---: | ---: |
+| 实测秒数（含末尾drain） | 300.012 | 300.011 |
+| offered / accepted / finalized订单操作 | 114810 / 114810 / 114810 | 114532 / 114532 / 114532 |
+| terminal business ops/s（下单） | 382.684 | 381.760 |
+| fills / fills/s | 57405 / 191.342 | 57266 / 190.880 |
+| mark终态命令 / 每秒 | 57405 / 191.342 | 57193 / 190.637 |
+| terminal Core messages总数（订单+mark） | 172215 | 171725 |
+| terminal Core messages/s（由上两类每秒相加） | 574.026 | 572.397 |
+| 工具完成延迟p50（ms） | 12.255 | 16.261 |
+| 工具完成延迟p99（ms） | 1393.557 | 1395.654 |
+| 工具完成延迟p99.9（ms） | 1411.383 | 1408.237 |
+| 业务失败、结果不明、超时 | 0 | 0 |
+| 明确未接收的临时offer重试 | 1 | 1 |
+| 资金差 / 测试symbol剩余book levels | 0 / 0 | 0 / 0 |
+
+- **判定FAIL：382.684 < 1000 business ops/s，1393.557ms > 1000ms。** stdout的 `capacity=PASS` 只代表内置业务核对，不代表外部性能门槛通过；`scope=LOCAL_CAPACITY` 是工具硬编码标签，实际为四台VM私网UDP。accepted在终态回包计数，订单accepted与terminal差为0，pending交易对已排空；行情仅在成功终态后计数。独立受理数/三段时间、观测最大backlog、p90/p95/max延迟、原始直方图没有完整埋点；pendingMax/completionQueueMax=-1不是零。不能把这些缺口补写成通过，也不能把订单与mark混在一起冒充订单吞吐。
+
+### 负载限速和CPU证据
+
+- 主轮mark命令数恰等于成交对数。`ClusterCapacityMain.asyncMatch` 在每个交易对前同步调用 `refreshMarkIfDue`，其 `applied(...).join()` 等待集群终态；256symbol轮转超过1秒后几乎每对都要刷新。这会把发起端串行限速。待完成集合还包含已经完成但尚未取走的future；取走前会先补入新交易对并等待其mark，因此taker记录的延迟混入压测线程收集等待。固定256是窗口上限，不代表真实同时有256个未完成请求。此证据表明负载未有效打满，不能把383 ops/s当作交易Core或Aeron的吞吐上限。
+- 系统vmstat稳定窗口（主轮08:47..08:51、JFR08:54..08:57 UTC）机器CPU忙比例：leader node0主轮5.29%/JFR5.53%，node1为4.13%/4.11%，node2为4.29%/4.36%，load为2.02%/1.83%。全采样swap使用/换入/换出均0，steal最大0，无持续steal失效条件。详见 `system-summary.txt` 及四节点vmstat/mpstat/pidstat/network原始文件。
+- JFR +60..290秒稳定区间（230秒，包含在测量内），按8逻辑CPU归一到“单个逻辑核100%”：leader clustered-service owner平均5.762%，matcher4.648%，各Lane0.304%/0.341%/0.361%/0.340%；transport sender/receiver16.893%，consensus4.334%，Archive2.637%，driver-conductor4.381%。follower owner约5.4%，同样不饱和。`jfr-cpu-node*.txt` 保留全部线程数据。
+- 稳定期CPU样本主要在UDP receive/send、driver idle/yield、owner的命令编解码/指纹/结算等待与响应；Lane的park栈是 `SettlementLaneWorker.run` 等待工作，不是锁竞争证据。profile有阈值的monitor事件未显示明显长锁竞争；不能据此断言不存在短锁或调度开销。`SurprisingClusteredService.processCommittedRequest` 在每条日志回调返回前结清pending matching，属于当前恢复一致性要求，不能直接删除，也不能用本机跨请求批量流水线吞吐替代它的网络实测。下一次有效容量测量应先修复工具的异步mark依赖与终态采样位置，再另行预锁；本轮没有偷偷更改负载重取漂亮数字。
+
+### JFR分配、GC与其他运行时证据
+
+- 三节点分别采集profile.jfc，maxsize512m，`jfr-control.py` 通过jcmd启动/停止；recording覆盖setup/warmup/测量/verify及结束后空闲，时长node0/1/2为462.965/461.928/462.787秒。profile配置、原始JFR、summary、聚合源码/输出均留存，DataLoss均0。CPU和分配另按+60..290秒裁剪；默认profile抽样开销未独立量化，带profiler吞吐只作诊断。
+- 稳定窗口ObjectAllocationSample加权分配，node0/1/2约3.837/3.762/3.792 MB/s（十进制），按诊断轮平均订单速率折算约10052/9853/9934 B/订单操作；**包含mark、Aeron和其他线程，属于抽样估计，不是精确单笔交易分配**。明显站点有CoreCommandResultCodec响应字节、CoreOrderStateView、消息头/解码payload、MatcherSettlementPlan、CoreMatchingResult、StoredResult、风险进度状态。不是零分配。没有ObjectAllocationInNewTLAB/OutsideTLAB有效事件，不能提供精确objects/op、最大对象和完整TLAB统计；汇总中的0表示缺少事件，不代表零成本。
+- 全recording每节点约4.4GB加权分配中，大量LongObjectHashMap/positionsForSnapshot发生在最初setup期间，而稳定裁剪窗口该站点权重为0。新建第二组256 instrument时旧组已有持仓，`RuntimeCommandProcessor` 的instrument校验会复制/扫描Lane状态；这是配置导入路径的优化线索，不能误判为每笔订单都复制全持仓。完整分配与裁剪结果均保留在 `jfr-analysis-node*.txt`、`jfr-window-node*.txt`。
+- 三节点heap committed均4GiB；全recording的After-GC used范围分别331350016..488636416、291504128..473956352、297795584..463470592B。node0记录5次ZGC Major（Warmup1、Proactive4），另外两节点4次。GC暂停phase数25/20/20，总暂停0.293/0.268/0.248ms，p99及max分别约0.014/0.018/0.017ms；并发GC总时长不能与暂停混用。各节点GC日志已保存。本轮GC暂停远小于工具p99，不能解释约1.4秒尾延迟。短时样本和单向增长持仓不足以证明无泄漏，follower After-GC末值上升也不能单独判泄漏。
+- NMT全recording total committed峰值约4.434/4.430/4.431GB，末值较首值下降11.77/12.61/8.32MB；全部category当前值、峰值、增量见聚合。JFR启动前/结束后的jcmd NMT原始输出单独保留。ZGC约64GiB heap虚拟地址预留不是实际占用64GiB内存。DirectBufferStatistics均为9575136B、8个buffer，采样期不变；Java活动线程数均21且稳定。不包含完整Aeron mmap/native池分配释放余额和长期文件描述符趋势，不能声称全部堆外无泄漏。
+- leader safepoint 45次，最长begin约0.103ms；VM operation记录120次、最长13.036ms；profile阈值内Compilation2次、总294.289ms/最长186.725ms，另有44次deoptimization，不能把这些计数当作全部JIT活动。其他节点对应数据在原始聚合。类加载/代码/NMT均留证，但未完成长稳和完整墙钟调度归因。
+- 稳定区间超过JFR阈值的文件写入出现在archive-conductor RecordingWriter，node0合计16.751ms；未观察到交易owner的同步文件/Socket/数据库I/O事件。Aeron使用UDP，profile事件阈值和JNI覆盖有限，未观察到不等于绝对没有系统调用。leader recording尾部08:58:35记录3次PortUnreachableException（客户端结束附近），JFR.stop期间Attach Listener有一次名称转数字的NumberFormatException；不是业务拒绝，未造成订单终态差异。原始异常和I/O栈仍保留。
+
+### 正确性、恢复、资源与验收范围
+
+- 修复后少量样本seed90720开仓/资金费核对通过，多空账户USDT总和2000、资金费净和0。两轮容量各1000账户资金总额核对及测试symbol订单簿清零通过。资金/余额核对不是六产品所有金融状态的全面审计；每用户完整持仓字段、手续费/平仓/强平/ADL/交割/行权未在本轮压力负载覆盖。
+- 两轮完成且没有其他业务写入时，三节点全停重启前后 `appliedCommandCount=380433`、`stateHash=8abed9ee70d6ce06` 完全一致；随后seed90711/90712两组capacityVerify以及90720 derivativeRecovery再次通过。09:01:38启动服务，node0约09:02:28重新成为leader；期间前两次10秒connect timeout保留为恢复未就绪的真实记录，第三次查询成功，不能称零停机恢复。leader恢复时还记录 `quorum position went backwards: leaderCommitPosition=85503296 quorumPosition=0` 警告；本轮业务hash核对通过，但未据此宣称完整故障矩阵无风险。此次验证是持久化日志重放，不包含新建快照恢复、运行中断网/kill/跨zone故障和高负载failover。
+- 四台实例运行约08:00:13..09:04:33 UTC，最终gcloud状态均TERMINATED（已停止，未删除），证据 `instances-final.json`、`stop-instances.log`。80GB盘各一块、VPC/规则和测试数据保留，磁盘继续计费。Cloud Billing Catalog当时返回新加坡N2自定义CPU 0.04094895 USD/vCPU-h、RAM 0.0054873 USD/GiB-h，四台仅compute约1.66155 USD/h；本次约1.78 USD compute估计，不含磁盘/IP/流量/税，不是最终账单，也未确认赠金余额是否覆盖。
+- 正式结论：**三节点真实网络交易、资金核对和全停日志恢复通过；固定负载的性能门槛FAIL，核心未被压满，生产容量验证未完成。** 前一ADMIN_ACTION失败轮保留，修复后主/JFR轮各一次安全重试且无业务失败。缺少完整延迟/backlog埋点、open-loop、六产品金融路径、snapshot/failover和长稳/native池证据，因此只能作部分验证，不与本机15万/18万批量mixed结果直接比较。本轮没有为追吞吐改变Core一致性规则。
+- artifact清单 `SHA256SUMS` 含255个非密钥文件、210111718B（不含清单自身），自身SHA256 `f095e42815ef20bac3c1669b03258170ba92e24682fdd6dd955c8dad50981422`。原始node0 JFR 3228761B，SHA256 `2934dafed3337930b54d853df13a102a3e85ff43268df5685176d38b5f02d86c`；node1 3205556B，`3c70e9b4721395009f389a6fa769203d76ee9b83651fa133763e0add22d1e63b`；node2 3214102B，`0aa8d5ce824b3a45f0ff00f2a97a9cc581ce452471d319b3524c4af4c63f51d2`。私钥、SSH元数据和构建缓存不在清单内，不得整体公开artifact父目录。
