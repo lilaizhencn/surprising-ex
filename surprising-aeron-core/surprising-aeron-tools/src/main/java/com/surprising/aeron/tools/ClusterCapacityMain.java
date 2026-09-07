@@ -13,6 +13,9 @@ import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreStateQueryCodec;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
+import com.surprising.aeron.protocol.PlaceOrderBatchCommand;
+import com.surprising.aeron.protocol.CoreOrderBatchResult;
+import com.surprising.aeron.protocol.TradingOrderBatchCodec;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
@@ -58,6 +61,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
     private final int durationSeconds;
     private final long offeredCommandsPerSecond;
     private final Workload workload;
+    private final int ordersPerRequest;
     private final AeronClientPool clients;
     private final AtomicLong nextOrderId;
     private final AtomicLong nextPriceSequence = new AtomicLong();
@@ -105,6 +109,11 @@ public final class ClusterCapacityMain implements AutoCloseable {
         this.durationSeconds = durationSeconds;
         this.offeredCommandsPerSecond = offeredCommandsPerSecond;
         this.workload = workload;
+        this.ordersPerRequest = workload == Workload.MATCH_BATCH_STREAM
+                ? positiveInt("surprising.aeron.capacity-batch-size", 20) : 1;
+        if (ordersPerRequest > PlaceOrderBatchCommand.MAX_ORDERS) {
+            throw new IllegalArgumentException("capacity-batch-size exceeds protocol limit");
+        }
         this.symbolLocks = java.util.stream.IntStream.range(0, symbols.size())
                 .mapToObj(ignored -> new Object()).toArray(Object[]::new);
         this.markGates = java.util.stream.IntStream.range(0, symbols.size())
@@ -144,7 +153,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
         long offered = nonNegativeLong("surprising.aeron.capacity-offered-commands-per-second", 0);
         Workload workload = Workload.valueOf(System.getProperty(
                 "surprising.aeron.capacity-workload", "MATCH").trim().toUpperCase());
-        if ((workload == Workload.MATCH_ASYNC || workload == Workload.MATCH_STREAM)
+        if (workload.asynchronous()
                 && (workers > asyncInFlight || offered != 0)) {
             throw new IllegalArgumentException("async workloads require workers <= total in-flight and offered=0");
         }
@@ -191,16 +200,17 @@ public final class ClusterCapacityMain implements AutoCloseable {
         if (activeRequests.get() != 0 || submittedRequests.get() != completedRequests.get()) {
             throw new IllegalStateException("measurement requests not drained");
         }
-        if ((workload == Workload.MATCH_ASYNC || workload == Workload.MATCH_STREAM) && peakRequests.get() > asyncInFlight) {
+        if (workload.asynchronous() && peakRequests.get() > asyncInFlight) {
             throw new IllegalStateException("global request window exceeded");
         }
         verifyFundsAndBook();
         long matchCount = matches.get();
         double elapsedSeconds = elapsedNanos / 1_000_000_000.0;
         MetricsSnapshot metrics = capacityMetrics.snapshot(elapsedNanos);
-        if ((workload == Workload.MATCH_ASYNC || workload == Workload.MATCH_STREAM) && (metrics.offered() != metrics.finalized()
+        if (workload.asynchronous() && (metrics.offered() != metrics.finalized()
                 || metrics.accepted() != metrics.finalized() || metrics.finalized() != 2 * matchCount
-                || submittedRequests.get() != metrics.finalized() + marketDataCommands.get())) {
+                || metrics.finalized() % ordersPerRequest != 0
+                || submittedRequests.get() != metrics.finalized() / ordersPerRequest + marketDataCommands.get())) {
             throw new IllegalStateException("terminal business/Core/fill counters disagree: offered="
                     + metrics.offered() + " accepted=" + metrics.accepted() + " terminal=" + metrics.finalized()
                     + " fills=" + matchCount + " submitted=" + submittedRequests.get()
@@ -217,14 +227,17 @@ public final class ClusterCapacityMain implements AutoCloseable {
                 metrics.p999Micros(), metrics.outboxMaxSequence());
         System.out.printf("marketDataCommands=%d marketDataCommandsPerSec=%.3f totalTerminalCoreMessages=%d%n",
                 marketDataCommands.get(), marketDataCommands.get() / elapsedSeconds,
-                Math.addExact(metrics.finalized(), marketDataCommands.get()));
+                Math.addExact(metrics.finalized() / ordersPerRequest, marketDataCommands.get()));
+        System.out.printf("ordersPerRequest=%d terminalOrderRequests=%d latencyScope=%s%n",
+                ordersPerRequest, metrics.finalized() / ordersPerRequest,
+                workload == Workload.MATCH_BATCH_STREAM ? "BATCH_TERMINAL_PER_ITEM" : "COMMAND_TERMINAL");
         System.out.printf("transientOfferRetries=%d%n", transientOfferRetries.get());
         System.out.printf("totalWindow=%d observedRequestMax=%d unfinishedRequests=%d submittedRequests=%d completedRequests=%d%n",
                 asyncInFlight, peakRequests.get(), activeRequests.get(), submittedRequests.get(), completedRequests.get());
         System.out.printf("requestOccupancySampleIntervalSeconds=1 samples=%d mean=%.3f%n",
                 occupancySamples, occupancySamples == 0 ? 0.0 : (double) occupancySum / occupancySamples);
-        printLatency(workload == Workload.MATCH_STREAM ? "sell" : "maker", makerMetrics.snapshot(elapsedNanos));
-        printLatency(workload == Workload.MATCH_STREAM ? "buy" : "taker", takerMetrics.snapshot(elapsedNanos));
+        printLatency(workload.stream() ? "sell" : "maker", makerMetrics.snapshot(elapsedNanos));
+        printLatency(workload.stream() ? "buy" : "taker", takerMetrics.snapshot(elapsedNanos));
         capacityMetrics.printHistogram();
     }
 
@@ -266,7 +279,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
                                 matchCycle(workerId, cycle++, measured);
                             } else if (workload == Workload.MATCH_ASYNC) {
                                 asyncMatch(workerId, deadline, measured);
-                            } else if (workload == Workload.MATCH_STREAM) {
+                            } else if (workload.stream()) {
                                 streamMatch(workerId, deadline, measured);
                             } else if (workload == Workload.CANCEL) {
                                 cancelCycle(workerId, measured);
@@ -400,21 +413,39 @@ public final class ClusterCapacityMain implements AutoCloseable {
                 String symbol = symbol(worker, cycle);
                 boolean buy = buyDue;
                 long user = buy ? secondUser(pair) : firstUser(pair);
-                long orderId = nextOrderId.incrementAndGet();
+                long firstOrderId = nextOrderId.getAndAdd(ordersPerRequest) + 1;
                 // Both sides are GTC: separate sessions may deliver either side first. No order
                 // waits for its counterpart's terminal. An already-started pair is balanced at
                 // the deadline, then every outstanding order is drained before verification.
                 pending[slot] = ClusterAsyncPair.independent(refreshMarkAsync(symbol, measured), () -> {
-                    if (measured) capacityMetrics.recordOffered();
-                    return commandAsync(CoreMessageType.PLACE_ORDER, stableId("stream:" + orderId), user,
-                            TradingCommandCodec.encodePlaceOrder(order(symbol, orderId,
-                                    buy ? CoreOrderSide.BUY : CoreOrderSide.SELL, CoreTimeInForce.GTC)));
+                    if (measured) for (int item = 0; item < ordersPerRequest; item++) capacityMetrics.recordOffered();
+                    boolean batch = workload == Workload.MATCH_BATCH_STREAM;
+                    byte[] payload;
+                    if (batch) {
+                        var orders = new java.util.ArrayList<PlaceOrderCommand>(ordersPerRequest);
+                        for (int item = 0; item < ordersPerRequest; item++) {
+                            orders.add(order(symbol, firstOrderId + item,
+                                    buy ? CoreOrderSide.BUY : CoreOrderSide.SELL, CoreTimeInForce.GTC));
+                        }
+                        payload = TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders));
+                    } else {
+                        payload = TradingCommandCodec.encodePlaceOrder(order(symbol, firstOrderId,
+                                buy ? CoreOrderSide.BUY : CoreOrderSide.SELL, CoreTimeInForce.GTC));
+                    }
+                    return commandAsync(batch ? CoreMessageType.PLACE_ORDER_BATCH : CoreMessageType.PLACE_ORDER,
+                            stableId("stream:" + firstOrderId), user, payload);
                 }, (response, nanos) -> {
-                    record(response, nanos, measured);
-                    var result = com.surprising.aeron.protocol.CoreCommandResultCodec.decode(response.data());
-                    long fills = streamFillCount(result, orderId);
+                    if (response.commandStatus() != ResponseStatus.APPLIED) {
+                        throw new IllegalStateException("stream command rejected " + response.resultCode());
+                    }
+                    long fills = workload == Workload.MATCH_BATCH_STREAM
+                            ? batchStreamFillCount(TradingOrderBatchCodec.decodeResult(response.data()), firstOrderId, ordersPerRequest)
+                            : streamFillCount(com.surprising.aeron.protocol.CoreCommandResultCodec.decode(response.data()), firstOrderId);
+                    for (int item = 0; item < ordersPerRequest; item++) record(response, nanos, measured);
                     if (measured) {
-                        (buy ? takerMetrics : makerMetrics).recordFinalized(nanos, 0);
+                        for (int item = 0; item < ordersPerRequest; item++) {
+                            (buy ? takerMetrics : makerMetrics).recordFinalized(nanos, 0);
+                        }
                         matches.addAndGet(fills);
                     }
                 }, System::nanoTime);
@@ -441,6 +472,25 @@ public final class ClusterCapacityMain implements AutoCloseable {
             return order.executedQuantitySteps();
         }
         throw new IllegalStateException("stream response is missing submitted order state");
+    }
+
+    static long batchStreamFillCount(CoreOrderBatchResult result, long firstOrderId, int expectedCount) {
+        if (result.items().size() != expectedCount) throw new IllegalStateException("batch item count mismatch");
+        long fills = 0;
+        for (int index = 0; index < expectedCount; index++) {
+            var item = result.items().get(index);
+            var order = item.order();
+            if (item.index() != index || item.orderId() != firstOrderId + index
+                    || item.status() != ResponseStatus.APPLIED || order == null
+                    || order.orderId() != item.orderId() || order.quantitySteps() != QUANTITY_STEPS
+                    || order.priceTicks() != PRICE_TICKS || order.executedQuantitySteps() < 0
+                    || order.executedQuantitySteps() > QUANTITY_STEPS
+                    || order.remainingQuantitySteps() != QUANTITY_STEPS - order.executedQuantitySteps()) {
+                throw new IllegalStateException("invalid batch stream item index=" + index);
+            }
+            fills += order.executedQuantitySteps();
+        }
+        return fills;
     }
 
     private void cancelOrders(String encodedOrders) {
@@ -805,9 +855,13 @@ public final class ClusterCapacityMain implements AutoCloseable {
         MATCH,
         MATCH_ASYNC,
         MATCH_STREAM,
+        MATCH_BATCH_STREAM,
         PLACE_ONLY,
         CANCEL,
-        MARK_PRICE
+        MARK_PRICE;
+
+        boolean stream() { return this == MATCH_STREAM || this == MATCH_BATCH_STREAM; }
+        boolean asynchronous() { return this == MATCH_ASYNC || stream(); }
     }
 
     @Override

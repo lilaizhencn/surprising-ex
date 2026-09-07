@@ -32,4 +32,30 @@ class ClusterStreamFillCountTest {
         assertThatThrownBy(() -> ClusterCapacityMain.streamFillCount(result(order(10, 1)), 11))
                 .isInstanceOf(IllegalStateException.class);
     }
+
+    private static CoreOrderBatchResult batch(CoreOrderBatchResult.Item... items) {
+        return TradingOrderBatchCodec.decodeResult(TradingOrderBatchCodec.encodeResult(
+                new CoreOrderBatchResult(List.of(items))));
+    }
+
+    private static CoreOrderBatchResult.Item item(int index, long id, long executed, ResponseStatus status) {
+        return new CoreOrderBatchResult.Item(index, id, 0, 0, status, CoreResultCode.NONE,
+                order(id, executed), List.of());
+    }
+
+    @Test void batchCountsActualExecutedUnitsAcrossDecodedItemsWithEmptyExecutionArrays() {
+        var result = batch(item(0, 10, 0, ResponseStatus.APPLIED), item(1, 11, 1, ResponseStatus.APPLIED));
+        assertThat(ClusterCapacityMain.batchStreamFillCount(result, 10, 2)).isEqualTo(1);
+    }
+
+    @Test void batchRejectsWrongCountIdentityAndRejectedItem() {
+        var result = batch(item(0, 10, 1, ResponseStatus.APPLIED));
+        assertThatThrownBy(() -> ClusterCapacityMain.batchStreamFillCount(result, 10, 2))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> ClusterCapacityMain.batchStreamFillCount(result, 11, 1))
+                .isInstanceOf(IllegalStateException.class);
+        var rejected = batch(item(0, 10, 0, ResponseStatus.REJECTED));
+        assertThatThrownBy(() -> ClusterCapacityMain.batchStreamFillCount(rejected, 10, 1))
+                .isInstanceOf(IllegalStateException.class);
+    }
 }

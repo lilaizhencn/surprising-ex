@@ -1,5 +1,9 @@
 # surprising-ex
 
+核心饱和诊断可单独使用 `MATCH_BATCH_STREAM`，`surprising.aeron.capacity-batch-size=20`（协议上限20）。买卖批次独立异步发送，256限制的是包含行情请求的全局逻辑请求数；每批20项时最多5120个订单项在途，不能与普通单256订单在途混为同一口径。订单吞吐按成功项数、Core消息按批次数加行情数、成交按逐项真实已成交数量统计；延迟为批次终态时间，每项共享该批次延迟，不是单项独立完成时间。测量后核对每项状态、总计数、资金与订单簿。
+
+For a separate saturation diagnostic, use `MATCH_BATCH_STREAM` with `surprising.aeron.capacity-batch-size=20` (protocol maximum). Buy and sell batches are submitted independently. The global limit remains 256 logical requests, including price updates; at 20 items per batch this allows up to 5,120 outstanding order items. Report business items, Core requests, actual fills, and batch-terminal latency separately from ordinary orders. Final checks cover item status, counters, funds, and an empty order book.
+
 真实三节点持续发压使用 `ClusterCapacityMain` 的 `surprising.aeron.capacity-workload=MATCH_STREAM`：买卖普通 GTC 单独立异步提交，不等待对手单回包；空出的请求槽持续补单，全局在途固定为256。仅保留满窗口背压、必要行情前置、测量边界排空及最终核对。每单固定一个数量单位，成交数读取Core响应中本次新订单的已成交数量，不重复统计对手单；当前Core有意省略executions数组。延迟按buy/sell命令发起至终态统计；GTC命令终态不代表该订单此刻已全部成交。此场景不同于maker GTC→taker IOC的MATCH_ASYNC，不能混用统计口径。所有性能执行均须使用真实三节点环境。
 
 实时推送与查询实现见 [surprising-realtime/README.md](surprising-realtime/README.md)：提交后有界 Aeron 出口、按用户/频道定向 WS 路由、Valkey 版本化快照与增量查询，以及独立 Archive 回放到原 Kafka 成交 topic 的可靠 K 线输入。部署需要按说明配置所有进程；性能门禁见 [PERFORMANCE_VALIDATION.md](PERFORMANCE_VALIDATION.md)，不能把已通过的功能测试当作零性能影响证明。

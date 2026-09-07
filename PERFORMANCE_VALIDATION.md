@@ -4478,3 +4478,10 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - D阶段诊断通过，单发压线程CPU约100%但主要在streamMatch扫描已满窗口；为排除发压端单线程限制，M仅将发压worker从1改为4，各自64在途、GLOBAL仍256，4命令连接+1预留不变。运行时仍为7469f505对应同一JAR；当前master，对照不适用。三Core各1matcher/4Lane、默认等待策略、所有机器/JVM/金融参数/独立GTC买卖/mark前置均沿用D；不执行批量单，不改Core。
 - 目录`/var/lib/surprising/ceiling-m`、seed91002/prefixCEILINGM，30秒预热+300秒测量及排空，不开JFR或MethodTiming；用5秒四机系统采样及GC/NMT确认有效性。阈值与D相同：>=1000订单/s、buy/sell p99<=1秒，offered=accepted=terminal=2*fills，submitted=completed=订单+mark、峰值<=256、最终0，资金差/订单簿剩余/业务错误0，重试单列，swap增长/连续3个5秒steal>5%或VM维护重启判无效。
 - 本轮用于确认增加发压线程能否提升相同普通单链路的持续处理率；不把四线程自旋CPU或短时最高值当核心计算饱和。报告完整300秒速率、10秒分段、尾延迟与资金核对；D的instrumentation值只做阶段归因，不与M混作无开销性能差异。
+
+### 用户指定 owner 接近95%并维持：B批量诊断（采集前锁定）
+
+- 用户进一步要求owner尽量达到95%CPU并保持，按有效业务计算解释。允许通过真实协议批量下单增加每次回调业务工作；不通过空循环/忙等制造95%，不修改Core一致性边界或默认等待策略。本工具新增MATCH_BATCH_STREAM，普通单结果单独保留。实际构建提交/JAR哈希另记，当前master、对照不适用。
+- B使用真实三Core+load原四VM/JDK/JVM/1matcher4Lane/256symbol/1000用户/资金初态/零手续费，GLOBAL256逻辑请求、4worker各64槽/4命令连接+1预留。每批20个同用户同symbol同方向GTC1@100，独立SELL批和BUY批各半；每批一条PLACE_ORDER_BATCH命令，最多5120个订单项在途（不同于普通单256项）。订单项offered/accepted/terminal逐项计数；Core消息=terminalItems/20+mark；fills从每个APPLIED新订单响应executedQty累计，不能依赖省略的executions数组。批次响应逐项校验数量、身份、状态和qty；每项共享批次发起至批次终态延迟，单独标明BATCH_TERMINAL_PER_ITEM，不能当逐项回包时刻。
+- B目录`/var/lib/surprising/ceiling-b`、seed91003/prefixCEILINGB，30秒预热+180秒测量/drain，首个正式progress后90秒四机JFR。Core使用D的profile+选定MethodTiming，client普通profile；+30..80秒看线程CPU与业务/等待栈，保留原始记录、DataLoss0。此轮仅诊断，后续无采样长轮必须另行预锁。目标owner单核CPU接近95%，同时必须报告idle/业务构成；达不到则如实记录，不能以CPU占用反推未经测试的吞吐。
+- 通过门槛：>=1000terminal订单项/s、buy/sell批次终态p99<=1秒、offered=accepted=terminal=2*fills，terminalItems能被20整除，submitted=completed=terminalItems/20+mark，peak<=256/期末0、资金差/订单簿剩余/失败0；NotAccepted单列。swap增长、连续3个5秒steal>5%、JFR DataLoss/截断判无效。Core未改，只执行tools定向功能测试/HotSpot25打包，本地不跑性能；批量真实金融核对在本轮三节点执行。
