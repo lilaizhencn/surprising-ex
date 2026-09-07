@@ -3925,3 +3925,5 @@
 - JavaExceptionThrow317/JavaErrorThrow153主要启动和反射/JNR能力探测；无JavaMonitorEnter contention、SocketRead/Write或ZAllocationStall事件。全录制FileRead2275次/10.044ms、FileWrite488次/10.750ms，主要类加载和driver采样stdout；不把“同为main线程”误认作交易持久化IO。新增全栈流式IoAudit核对首60秒之后CoreProbeState.apply调用链，stableCoreIo=0、stableCoreThrows=0，原始JFR及io-audit.txt保留，零样本仅代表本配置记录范围。
 - 结论：按用户所指mixed场景，当前代码全程吞吐达到150000目标且资金/终态/恢复与环境门槛通过。该场景是有JFR的单JVM Core内部五分钟闭环运行，无独立JMH主轮/置信区间、无真实三节点网络、无完整open-loop/API/item级尾延迟，整体仍属部分性能验证。不得用其替代真实服务网络容量或所有六产品的同标准验收。
 - Artifact `/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-07-mixed-standard`，24个文件130,656,879B，原始JFR、run/config/JAR校验、summary/全量分析、系统/GC/IO审计齐备，SHA256SUMS自身SHA256 `167453f757b7586e317d65b5a3f96a76be76a650ece77340456db0c7704382f5`。停止的小批量轮41文件65,316,696B、manifest SHA256 `d5dac6d620e1942ce5a4efadb0d28ef66bb809331ab459234d46bbc565b26985`，不覆盖或隐去中止事实。压测进程已全部退出。
+
+- 文件大小校正：上述soak.jfr经最终stat核验为64,662,208B（约61.67MiB）；先前精确字节数有录入误差。原始artifact及SHA256清单不变。
