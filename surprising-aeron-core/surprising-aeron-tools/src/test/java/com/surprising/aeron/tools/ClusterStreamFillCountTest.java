@@ -40,12 +40,27 @@ class ClusterStreamFillCountTest {
 
     private static CoreOrderBatchResult.Item item(int index, long id, long executed, ResponseStatus status) {
         return new CoreOrderBatchResult.Item(index, id, 0, 0, status, CoreResultCode.NONE,
-                order(id, executed), List.of());
+                order(id, executed), executed == 0 ? List.of()
+                        : List.of(new CoreExecutionView(id, 99, 1, 2, 100, 1)));
     }
 
-    @Test void batchCountsActualExecutedUnitsAcrossDecodedItemsWithEmptyExecutionArrays() {
+    @Test void batchCountsActualExecutionsAcrossDecodedItems() {
         var result = batch(item(0, 10, 0, ResponseStatus.APPLIED), item(1, 11, 1, ResponseStatus.APPLIED));
         assertThat(ClusterCapacityMain.batchStreamFillCount(result, 10, 2)).isEqualTo(1);
+    }
+
+    @Test void fullyFilledBatchItemMayOmitRetiredOrderViewButMustHaveMatchingExecution() {
+        var filled = new CoreOrderBatchResult.Item(0, 10, 0, 0, ResponseStatus.APPLIED,
+                CoreResultCode.NONE, null, List.of(new CoreExecutionView(10, 99, 1, 2, 100, 1)));
+        assertThat(ClusterCapacityMain.batchStreamFillCount(batch(filled), 10, 1)).isEqualTo(1);
+        var missing = new CoreOrderBatchResult.Item(0, 10, 0, 0, ResponseStatus.APPLIED,
+                CoreResultCode.NONE, null, List.of());
+        assertThatThrownBy(() -> ClusterCapacityMain.batchStreamFillCount(batch(missing), 10, 1))
+                .isInstanceOf(IllegalStateException.class);
+        var mismatch = new CoreOrderBatchResult.Item(0, 10, 0, 0, ResponseStatus.APPLIED,
+                CoreResultCode.NONE, null, List.of(new CoreExecutionView(11, 99, 1, 2, 100, 1)));
+        assertThatThrownBy(() -> ClusterCapacityMain.batchStreamFillCount(batch(mismatch), 10, 1))
+                .isInstanceOf(IllegalStateException.class);
     }
 
     @Test void batchRejectsWrongCountIdentityAndRejectedItem() {

@@ -4485,3 +4485,21 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - B使用真实三Core+load原四VM/JDK/JVM/1matcher4Lane/256symbol/1000用户/资金初态/零手续费，GLOBAL256逻辑请求、4worker各64槽/4命令连接+1预留。每批20个同用户同symbol同方向GTC1@100，独立SELL批和BUY批各半；每批一条PLACE_ORDER_BATCH命令，最多5120个订单项在途（不同于普通单256项）。订单项offered/accepted/terminal逐项计数；Core消息=terminalItems/20+mark；fills从每个APPLIED新订单响应executedQty累计，不能依赖省略的executions数组。批次响应逐项校验数量、身份、状态和qty；每项共享批次发起至批次终态延迟，单独标明BATCH_TERMINAL_PER_ITEM，不能当逐项回包时刻。
 - B目录`/var/lib/surprising/ceiling-b`、seed91003/prefixCEILINGB，30秒预热+180秒测量/drain，首个正式progress后90秒四机JFR。Core使用D的profile+选定MethodTiming，client普通profile；+30..80秒看线程CPU与业务/等待栈，保留原始记录、DataLoss0。此轮仅诊断，后续无采样长轮必须另行预锁。目标owner单核CPU接近95%，同时必须报告idle/业务构成；达不到则如实记录，不能以CPU占用反推未经测试的吞吐。
 - 通过门槛：>=1000terminal订单项/s、buy/sell批次终态p99<=1秒、offered=accepted=terminal=2*fills，terminalItems能被20整除，submitted=completed=terminalItems/20+mark，peak<=256/期末0、资金差/订单簿剩余/失败0；NotAccepted单列。swap增长、连续3个5秒steal>5%、JFR DataLoss/截断判无效。Core未改，只执行tools定向功能测试/HotSpot25打包，本地不跑性能；批量真实金融核对在本轮三节点执行。
+
+### B工具校验失败与B2重锁
+
+- B（399a8669，JAR c17043d3f7bbfd80d1c9c441a67a0571234dbc098de7207e5f2a5d7a33fdbf3b）预热期间工具报invalid batch stream item，未进入正式测量，没有有效吞吐。复核Core批量编码路径：finishOrderBatch从活动索引生成可空order视图，而OrderBatchPending.writeExecutions确实编码每项真实TRADE；普通单省略executions的规则不能套到批次。修正工具按真实batch executions校验taker ID/price/qty并计数，order存在时与executed核对；order为空时必须有完整qty1成交，不作无证据fallback。加入真实codec往返、已退休订单空视图/缺失成交/错误身份等回归；不改生产Core。
+- 尝试查询B首批历史command结果均返回RESULT_UNKNOWN_OUTSIDE_RETENTION，保留原始只读查询记录，不能将其当成功响应证据。B未启动JFR，归档脚本误带入上一轮D的同名JFR；这些文件是旧记录，不属于B采样，明确排除。修正归档仅在本轮成功启动recording时收取JFR，失败日志/旧文件原样保留。
+- B2目录`/var/lib/surprising/ceiling-b2`、seed91004/prefixCEILINGB2；当前master工具修正提交与JAR另记。除上述正确性计数修正外，全部沿用B预锁（20项批量、4worker、GLOBAL256、默认Core配置、30秒预热+180秒测量及90秒JFR、同一资金/状态/错误/系统门槛）。本轮仍只归因，目标95%是否达到据实报告。
+
+## 2026-09-07 原mixed业务接真实三节点（采集前锁定）
+
+- 用户改为要求原本本地mixed业务接入真实Aeron Cluster，并要求本轮结束停止四VM、下次明确要求测试才开机。B2未部署/未执行，停止继续简单批量诊断；保留B失败及修正代码/17测试通过记录。新增tools `ClusterMixedCapacityMain`，不实例化本地Core；沿用LinearPerpetualMixedWorkload UNIFORM的初态与八段交易动作，状态依赖由集群查询/命令响应获得，Core/client业务不改。
+- 四台原GCP n2-custom-8-16384/Intel Cascade Lake/Ubuntu24.04/80GB pd-ssd、新加坡同zone；三Core Temurin HotSpot25.0.4.1、4GiB ZGC/AlwaysPreTouch/NMT、默认BLOCKING/cluster backoff/SHARED_NETWORK/Archive SHARED、每Core1matcher4Lane；load512MiB..2GiB ZGC。当前master工具提交/四机JAR SHA另记，对照不适用，禁止本地性能。HotSpot25本地仅tools定向功能测试和打包。
+- 1000 retail+768做市/HFT+1强平用户=1769用户；256symbol、1..5仓、0..10挂单、持仓数量1..4按旧UNIFORM公式，HFT maker/taker跨Account Lane。普通账户各10^9 USDT、强平账户100、保险25，期初总资金1,768,000,000,125；零手续费。原始零售持仓及挂单保持，每轮HFT maker净空/用户净多20单位，核对累计cycle预期。保留原脚本买方流动性先撤再发SELL IOC的次序，不能将该IOC假算成交。
+- 每cycle每symbol：20项SELL GTC102/qty2批→20项撤单批→SELL GTC101/qty40→20项BUY IOC101/qty1→撤剩余卖单→BUY GTC99/qty40→撤买单→20项SELL IOC99/qty1。每symbol84business ops/8Core消息，256symbol交易部分21504 ops/2048Core消息/5120实际fills；32symbol轮转触发单挂单+执行及资金费/mark/risk动作，首次另有强平→保险→ADL。批次逐项APPLIED/身份校验，fills来自真实batch executions而非按发起量推算。交易类型计数与完整cycle预期逐项断言。
+- 单个FIFO命令连接+独立reserved查询连接、单发起线程、GLOBAL256请求（批最大20，最多5120订单项）。通过同一命令流顺序维护place/cancel/IOC依赖，交易八段连续提交，不逐单/逐阶段等回包；仅满窗口等待任意完成，控制查询前排空以保证读取已提交状态。资金费分页依据响应推进，独立命令源独占symbol期间避免非法交易。初态核对和结束核对不计吞吐。
+- 与旧本地口径差异明确：时间使用真实UTC而非合成时钟，价格超过1秒及时刷新；旧内存状态读取改为实际网络query并单列数量，不计business ops；risk工作页暴露全局pending，生命周期按全局pending继续预算64扫描，否则更新该symbol价格。保留每cycle32symbol预算，不能称逐条控制命令与旧版完全相同或用比例推导网络开销。closed-loop尽快补256，无CO修正；命令终态时间由egress完成future时记录，批延迟按请求计且展开项数另列，没有独立accepted时钟。owner目标接近95%，不修改等待策略或制造忙等来达标。
+- X0仅功能接通：目录ceiling-x0/seed92001，warmup0/duration1秒（跑完整cycle并排空），不把它作为容量结果；要求批次/全量资金账/零售仓位数量与挂单数量/HFT累计仓位和reservation/强平保险ADL完成全部通过。X主轮：ceiling-x/seed92002，30秒预热+300秒测量及完整cycle排空，无JFR；随后XJ诊断：ceiling-xj/seed92003，30秒预热+180秒测量，首正式progress后四机普通profile JFR90秒（不用MethodTiming），分析+30..80秒业务/等待栈。负载及阈值不变，系统采样5秒。X0失败不得进入主轮，修复后新目录新记录重锁。
+- 通过阈值：主轮>=1000terminal business ops/s、所有业务类型p99<=1秒、offeredBusiness=terminalBusiness、offeredCore=terminalCore、unfinished0/peak<=256、实际fills和交易类型计数匹配cycle、资金差0、各用户余额非负、零售持仓/挂单密度与HFT净仓/冻结核对通过，强平保险ADL闭环。传输NotAccepted/业务拒绝/未知/超时均判失败；不在FIFO命令中重试越过有依赖的后续命令。swap增长/连续三个5秒steal>5%/VM重启/JFR DataLoss或截断判无效。owner95%是单核口径观察目标，达不到明确报告，不把machine总CPU或spin当有效算力饱和。
+- 仅新增验证工具，不改交易状态机，故本轮不重复快照故障矩阵/全停恢复/六产品或长期泄漏验收；不能宣称完整生产容量。artifact仍在core-ceiling目录，失败保留。完成全部采集和核对后停止四VM并验证TERMINATED，保留磁盘，未经用户下一次测试指令不得再次开机。

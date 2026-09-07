@@ -1,6 +1,10 @@
 # surprising-ex
 
-核心饱和诊断可单独使用 `MATCH_BATCH_STREAM`，`surprising.aeron.capacity-batch-size=20`（协议上限20）。买卖批次独立异步发送，256限制的是包含行情请求的全局逻辑请求数；每批20项时最多5120个订单项在途，不能与普通单256订单在途混为同一口径。订单吞吐按成功项数、Core消息按批次数加行情数、成交按逐项真实已成交数量统计；延迟为批次终态时间，每项共享该批次延迟，不是单项独立完成时间。测量后核对每项状态、总计数、资金与订单簿。
+原mixed业务的真实集群入口为 `com.surprising.aeron.tools.ClusterMixedCapacityMain`：1000零售用户、256币对、4 Account Lane、1 matcher，包含批量下撤单/IOC、触发执行、资金费、风险扫描和一次强平保险ADL闭环。所有命令和状态查询走三节点，无本地Core；使用一个FIFO命令连接连续异步提交，固定全局256在途，另有reserved查询连接。使用`surprising.aeron.hostnames`、`surprising.aeron.egress-hostname`、`surprising.aeron.capacity-seed`及warmup/duration参数启动，必须使用独立空集群数据目录。原零售密度和HFT累计仓位、全部资金账在终检核对；真实时钟、网络查询与风险续扫的差异详见性能记录，不能与旧本地数字直接相除推算网络开销。
+
+`ClusterMixedCapacityMain` ports the original mixed business workload to a real three-member cluster. It uses one FIFO command session, a separate reserved query session, and a global 256-request window. Commands are submitted asynchronously; state reads use cluster queries. Final checks cover retail positions/orders, HFT positions/reservations, treasury-inclusive funds, and liquidation/insurance/ADL. Use a fresh cluster data directory and report network query and real-time price-refresh costs separately.
+
+核心饱和诊断可单独使用 `MATCH_BATCH_STREAM`，`surprising.aeron.capacity-batch-size=20`（协议上限20）。买卖批次独立异步发送，256限制的是包含行情请求的全局逻辑请求数；每批20项时最多5120个订单项在途，不能与普通单256订单在途混为同一口径。订单吞吐按成功项数、Core消息按批次数加行情数、成交按批量响应各项实际execution统计（与普通单省略execution不同）；已成交订单可已从活动索引移除，order视图为空时必须有匹配的完整成交证据。延迟为批次终态时间，每项共享该批次延迟，不是单项独立完成时间。测量后核对每项状态、总计数、资金与订单簿。
 
 For a separate saturation diagnostic, use `MATCH_BATCH_STREAM` with `surprising.aeron.capacity-batch-size=20` (protocol maximum). Buy and sell batches are submitted independently. The global limit remains 256 logical requests, including price updates; at 20 items per batch this allows up to 5,120 outstanding order items. Report business items, Core requests, actual fills, and batch-terminal latency separately from ordinary orders. Final checks cover item status, counters, funds, and an empty order book.
 

@@ -481,14 +481,27 @@ public final class ClusterCapacityMain implements AutoCloseable {
             var item = result.items().get(index);
             var order = item.order();
             if (item.index() != index || item.orderId() != firstOrderId + index
-                    || item.status() != ResponseStatus.APPLIED || order == null
-                    || order.orderId() != item.orderId() || order.quantitySteps() != QUANTITY_STEPS
-                    || order.priceTicks() != PRICE_TICKS || order.executedQuantitySteps() < 0
-                    || order.executedQuantitySteps() > QUANTITY_STEPS
-                    || order.remainingQuantitySteps() != QUANTITY_STEPS - order.executedQuantitySteps()) {
-                throw new IllegalStateException("invalid batch stream item index=" + index);
+                    || item.status() != ResponseStatus.APPLIED) {
+                throw new IllegalStateException("invalid batch stream item expectedId=" + (firstOrderId + index) + " actual=" + item);
             }
-            fills += order.executedQuantitySteps();
+            // Batch responses retain actual execution events. Filled orders may already be
+            // removed from the active order index, so their optional order view can be null.
+            long executed = 0;
+            for (var execution : item.executions()) {
+                if (execution.takerOrderId() != item.orderId() || execution.priceTicks() != PRICE_TICKS
+                        || execution.quantitySteps() != QUANTITY_STEPS) {
+                    throw new IllegalStateException("unexpected batch stream execution " + execution);
+                }
+                executed += execution.quantitySteps();
+            }
+            if (executed > QUANTITY_STEPS || (order == null && executed != QUANTITY_STEPS)
+                    || (order != null && (order.orderId() != item.orderId()
+                    || order.quantitySteps() != QUANTITY_STEPS || order.priceTicks() != PRICE_TICKS
+                    || order.executedQuantitySteps() != executed
+                    || order.remainingQuantitySteps() != QUANTITY_STEPS - executed))) {
+                throw new IllegalStateException("invalid batch stream quantities item=" + item);
+            }
+            fills += executed;
         }
         return fills;
     }
