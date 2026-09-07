@@ -85,6 +85,9 @@ public final class AeronClientPool implements AutoCloseable {
     private final AtomicBoolean dispatcherStopped = new AtomicBoolean();
     private final AtomicReference<MediaDriver> mediaDriver = new AtomicReference<>();
     private final AtomicReference<RuntimeException> dispatcherFailure = new AtomicReference<>();
+    private final AtomicLong adminActionRetries = new AtomicLong();
+
+    public long adminActionRetries() { return adminActionRetries.get(); }
 
     public AeronClientPool(
             String clientName,
@@ -588,6 +591,8 @@ public final class AeronClientPool implements AutoCloseable {
         private long reconnectAtNanos;
         private long reconnectMillis = MIN_RECONNECT_MILLIS;
         private long keepAliveAtNanos;
+        // Dispatcher-owned, bounded to one unaccepted request. Later offers cannot overtake it.
+        private Request deferredAdminOffer;
 
         private AgentLane(int mailboxCapacity, int maxInFlight, long sourceId) {
             this.mailbox = new ArrayBlockingQueue<>(mailboxCapacity);
@@ -865,6 +870,20 @@ public final class AeronClientPool implements AutoCloseable {
         }
 
         private boolean admitQueued(AgentLane lane) {
+            if (lane.deferredAdminOffer != null) {
+                Request request = lane.deferredAdminOffer;
+                if (System.nanoTime() - request.queueDeadlineNanos >= 0) {
+                    lane.deferredAdminOffer = null;
+                    request.notAccepted(CoreCommandOutcome.notAccepted(Publication.ADMIN_ACTION));
+                    return true;
+                }
+                if (lane.session == null || !lane.session.connected()) return false;
+                lane.deferredAdminOffer = null;
+                admit(lane, request);
+                // One retry per round. Repeated ADMIN_ACTION is no progress, so the normal
+                // dispatcher idle policy still applies if no session has other work.
+                return lane.deferredAdminOffer == null;
+            }
             boolean worked = false;
             while (true) {
                 Request next = lane.mailbox.peek();
@@ -882,6 +901,7 @@ public final class AeronClientPool implements AutoCloseable {
                     continue;
                 }
                 admit(lane, request);
+                if (lane.deferredAdminOffer != null) return worked;
             }
         }
 
@@ -917,6 +937,11 @@ public final class AeronClientPool implements AutoCloseable {
                     request.acceptedOneWay(offerResult);
                 }
             } else {
+                if (offerResult == Publication.ADMIN_ACTION && !request.oneWay()) {
+                    adminActionRetries.incrementAndGet();
+                    lane.deferredAdminOffer = request;
+                    return;
+                }
                 if ((offerResult == Publication.NOT_CONNECTED || offerResult == Publication.CLOSED)
                         && request.isQuery()) {
                     closeSession(lane);
@@ -975,6 +1000,11 @@ public final class AeronClientPool implements AutoCloseable {
 
         private void rejectQueuedAsClosed() {
             for (AgentLane lane : lanes) {
+                if (lane.deferredAdminOffer != null) {
+                    Request deferred = lane.deferredAdminOffer;
+                    lane.deferredAdminOffer = null;
+                    deferred.notAccepted(CoreCommandOutcome.notAccepted(Publication.CLOSED));
+                }
                 Request request;
                 while ((request = lane.mailbox.poll()) != null) {
                     request.notAccepted(CoreCommandOutcome.notAccepted(Publication.CLOSED));

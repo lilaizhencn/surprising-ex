@@ -30,6 +30,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     private long totalCycles, measuredCycles, lastReport, reportTerminal, started, triggerExecutions;
     private int lifecycleCursor;
     private boolean measured, lossCompleted;
+    private long adminRetriesBefore;
 
     public ClusterMixedCapacityMain() {
         if (Integer.getInteger("surprising.aeron.capacity-async-in-flight", WINDOW) != WINDOW)
@@ -112,7 +113,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     private void runFor(int seconds,boolean measure) {
         drain();
         measured=measure;
-        if(measure) { offered=terminal=coreOffered=coreTerminal=fills=queries=peak=0;stats.clear(); }
+        if(measure) { offered=terminal=coreOffered=coreTerminal=fills=queries=peak=0;stats.clear();adminRetriesBefore=client.adminActionRetries(); }
         started=lastReport=System.nanoTime(); reportTerminal=0;
         long end=started+TimeUnit.SECONDS.toNanos(seconds);
         while(System.nanoTime()<end) {
@@ -365,6 +366,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     }
     private void print() {
         double seconds=elapsed/1e9;
+        System.out.printf("adminActionRetries=%d%n",client.adminActionRetries()-adminRetriesBefore);
         System.out.printf(Locale.ROOT,"mixedCapacity=PASS elapsedSeconds=%.3f terminalBusinessOperations=%d offeredBusinessOperations=%d terminalCoreMessages=%d offeredCoreMessages=%d businessOpsPerSec=%.3f coreMessagesPerSec=%.3f fills=%d fillsPerSec=%.3f queries=%d unfinished=0 peakInFlight=%d measuredCycles=%d totalCycles=%d triggerExecutions=%d%n",
                 seconds,terminal,offered,coreTerminal,coreOffered,terminal/seconds,coreTerminal/seconds,fills,fills/seconds,queries,peak,measuredCycles,totalCycles,triggerExecutions);
         stats.forEach((type,s)->System.out.printf(Locale.ROOT,"business=%s items=%d requests=%d p50us=%d p90us=%d p95us=%d p99us=%d p999us=%d maxus=%d%n",type,s.items,s.latency.getTotalCount(),s.latency.getValueAtPercentile(50)/1000,s.latency.getValueAtPercentile(90)/1000,s.latency.getValueAtPercentile(95)/1000,s.latency.getValueAtPercentile(99)/1000,s.latency.getValueAtPercentile(99.9)/1000,s.latency.getMaxValue()/1000));

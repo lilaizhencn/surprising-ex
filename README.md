@@ -1,5 +1,7 @@
 # surprising-ex
 
+Aeron Client 的普通异步请求遇到 `ADMIN_ACTION` 时会在原发送位置有界重试，保留命令标识和 source sequence，避免后续撤单越过尚未提交的下单；`tryCommandOnce`/one-way仍只尝试一次。Client async requests retry transient `ADMIN_ACTION` in place within the original deadline while continuing egress and keepalive processing; one-shot APIs retain their existing semantics.
+
 原mixed业务的真实集群入口为 `com.surprising.aeron.tools.ClusterMixedCapacityMain`：1000零售用户、256币对、4 Account Lane、1 matcher，包含批量下撤单/IOC、触发执行、资金费、风险扫描和一次强平保险ADL闭环。所有命令和状态查询走三节点，无本地Core；使用一个FIFO命令连接连续异步提交，固定全局256在途，另有reserved查询连接。使用`surprising.aeron.hostnames`、`surprising.aeron.egress-hostname`、`surprising.aeron.capacity-seed`及warmup/duration参数启动，必须使用独立空集群数据目录。原零售密度和HFT累计仓位、全部资金账在终检核对；真实时钟、网络查询与风险续扫的差异详见性能记录，不能与旧本地数字直接相除推算网络开销。
 
 `ClusterMixedCapacityMain` ports the original mixed business workload to a real three-member cluster. It uses one FIFO command session, a separate reserved query session, and a global 256-request window. Commands are submitted asynchronously; state reads use cluster queries. Final checks cover retail positions/orders, HFT positions/reservations, treasury-inclusive funds, and liquidation/insurance/ADL. Use a fresh cluster data directory and report network query and real-time price-refresh costs separately.

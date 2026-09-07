@@ -4511,3 +4511,12 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 
 - X01（7d1d0326/JAR 86df15166ae3c098029b0bdf47d4329b61e7f7957397db5b603074dfd9172152）完成强平、保险及ADL命令，但工具错误要求positions列表物理为空而FAIL。独立只读集群查询确认：EXECUTION/INSURANCE/ADL工作均为空且complete=true；强平用户余额/冻结/持仓数量/持仓保证金均0，保留一条realizedPnl=-990的平仓历史视图。这是正确Core语义，不删除历史或更改Core。工具改为验证经济敞口与保证金归零，增加有历史亏损的平仓视图、非零敞口/保证金拒绝回归。原始证据x01/loss-state.txt。
 - X02重锁：ceiling-x02/seed92005，X0同一完整cycle功能参数/阈值，仅修正上述平仓状态判定。通过后才运行原预锁X和XJ；不把X0/X01失败计入容量。
+
+- X02功能门槛PASS：源码37648b18，四机JAR `2fb8ff05f175519fe7d0ba166a44afb45ea5ea9779806759c5a9f71dac56f68c`，22定向测试/HotSpot25打包通过。完整cycle终态22670business ops/3214命令/5120实际fills、812单列queries、最大在途256/末值0；各类型计数符合预定组成。全体资金差0、零售仓位与挂单分布、HFT仓位±20和reservation回收、强平保险ADL闭环通过，businessHash=63d4f9f85067ac49。该9.582秒完整cycle含首次风险续扫/强平控制，不作为持续容量结论。按预锁启动同runtime的X无JFR主轮。
+
+### X传输临时状态失败与有序重试修正、X2重锁
+
+- X完成初态及强平保险ADL后，在预热期间遇到ADMIN_ACTION(-3)，客户端将未接收返回为终态失败，主测量未完成，整体FAIL，保留x。Aeron官方说明该值表示尚未入队、可重试的管理操作（如日志段轮转）：https://github.com/aeron-io/aeron/wiki/Java-Programming-Guide 。不能将同一有序流中的失败下单重新排在已经发送的撤单后面。
+- 修正AeronClientPool非one-way请求：每个AgentLane仅持有一个dispatcher独占deferredAdminOffer；ADMIN_ACTION保留同一message/correlation/sourceSequence，在下一轮dispatcher原位置重试一次，期间正常poll egress/keepalive/处理其他session；成功前不offer本lane后续消息。沿用原queue deadline，到期仍NotAccepted，close回收未接收请求；真正断连/背压/未知等原语义不变，tryCommandOnce/one-way不重试。无额外线程/无交易状态机改动，新增计数adminActionRetries；mixed输出该计数从测量起到终检完成的增量，包含终检查询轮转，不能当业务命令重复数。
+- 回归覆盖ADMIN_ACTION后后续撤单不得越过、重试message及sourceSequence保持不变、egress继续轮询、持续ADMIN_ACTION有界到期/close释放，以及tryCommandOnce仍只尝试一次；执行client受影响测试及全部tools定向测试和HotSpot25打包。交易Core/撮合/结算未改，新的真实三节点X2与XJ承担受影响传输链路性能/资金验证，不执行本地JMH。
+- X2重锁：ceiling-x2/seed92006，30秒预热+300秒无JFR测量/完整cycle排空，当前master上述客户端修正提交，其他X参数、金融初态、窗口256、1FIFO命令连接和阈值完全不变。允许内部ADMIN_ACTION重试并单列，不允许最终NotAccepted/业务拒绝/未知/超时；容量/资金/生命周期门槛不放宽。XJ使用同一修正版，仍ceiling-xj/seed92003、30+180秒、90秒普通profile JFR；X2通过后才执行XJ。最后停止四VM，遵循用户本轮结束关机要求。

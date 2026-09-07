@@ -23,6 +23,63 @@ import org.junit.jupiter.api.Test;
 class AeronClientAgentTest {
 
     @Test
+    void adminActionRetriesKeepIdentityAndFifoWhilePollingEgress() throws Exception {
+        var adminSeen=new CountDownLatch(1);var polled=new CountDownLatch(3);
+        var allow=new AtomicBoolean();var mismatch=new AtomicBoolean();
+        var first=new AtomicReference<CoreMessage>();
+        var accepted=new java.util.concurrent.CopyOnWriteArrayList<CoreMessage>();
+        var responses=ConcurrentHashMap.<Long>newKeySet();
+        try(var pool=pool(Duration.ofSeconds(5),()->new AeronClientPool.Session() {
+            public long offer(CoreMessage message) {
+                first.compareAndSet(null,message);
+                if(!allow.get()) {
+                    if(message!=first.get())mismatch.set(true);
+                    adminSeen.countDown();return Publication.ADMIN_ACTION;
+                }
+                accepted.add(message);responses.add(message.header().correlationId());return 1;
+            }
+            public int pollEgress(int limit) { if(adminSeen.getCount()==0)polled.countDown();return 0; }
+            public CoreResponse takeResponse(long id) { return responses.remove(id)?new CoreResponse(ResponseStatus.APPLIED,1,1):null; }
+            public RuntimeException sessionFailure(){return null;}
+            public boolean keepAlive(){return true;}
+            public void close(){}
+        })) {
+            var a=pool.commandAsync(CoreMessageType.PLACE_ORDER,UUID.randomUUID(),1,new byte[0]);
+            assertThat(adminSeen.await(2,TimeUnit.SECONDS)).isTrue();
+            var b=pool.commandAsync(CoreMessageType.CANCEL_ORDER,UUID.randomUUID(),2,new byte[0]);
+            assertThat(polled.await(2,TimeUnit.SECONDS)).isTrue();
+            assertThat(a).isNotDone();assertThat(b).isNotDone();
+            allow.set(true);a.get(2,TimeUnit.SECONDS);b.get(2,TimeUnit.SECONDS);
+            assertThat(mismatch).isFalse();assertThat(accepted).hasSize(2);
+            assertThat(accepted.getFirst()).isSameAs(first.get());
+            assertThat(accepted.get(1).header().sourceSequence()).isEqualTo(first.get().header().sourceSequence()+1);
+            assertThat(pool.adminActionRetries()).isPositive();
+        }
+    }
+
+    @Test
+    void persistentAdminActionExpiresAsNotAcceptedAndCloseReleasesDeferredRequest() throws Exception {
+        try(var pool=pool(Duration.ofMillis(50),()->session(m->Publication.ADMIN_ACTION))) {
+            var result=pool.commandOutcomeAsync(CoreMessageType.PLACE_ORDER,UUID.randomUUID(),1,new byte[0]).get(2,TimeUnit.SECONDS);
+            assertThat(result).isInstanceOf(CoreCommandOutcome.NotAccepted.class);
+        }
+        var seen=new CountDownLatch(1);
+        var pool=pool(Duration.ofSeconds(5),()->session(m->{seen.countDown();return Publication.ADMIN_ACTION;}));
+        var result=pool.commandOutcomeAsync(CoreMessageType.PLACE_ORDER,UUID.randomUUID(),1,new byte[0]);
+        assertThat(seen.await(2,TimeUnit.SECONDS)).isTrue();pool.close();
+        assertThat(result.get(2,TimeUnit.SECONDS)).isInstanceOf(CoreCommandOutcome.NotAccepted.class);
+    }
+
+    @Test
+    void tryOnceStillReturnsAdminActionWithoutRetrying() {
+        try(var pool=pool(Duration.ofSeconds(1),()->session(m->Publication.ADMIN_ACTION))) {
+            assertThat(pool.tryCommandOnce(CoreMessageType.PLACE_ORDER,UUID.randomUUID(),1,new byte[0]))
+                    .isEqualTo(AeronClientPool.TryCommandResult.UNAVAILABLE);
+            assertThat(pool.adminActionRetries()).isZero();
+        }
+    }
+
+    @Test
     void sourceSequenceFollowsOfferOrderWhenProducersEnqueueInReverseCreationOrder() throws Exception {
         var sent = new java.util.concurrent.CopyOnWriteArrayList<CoreMessage>();
         var firstOffered = new CountDownLatch(1);
@@ -169,12 +226,11 @@ class AeronClientAgentTest {
     @Test
     void returnsTypedNegativeAdmissionWithoutRetry() throws Exception {
         AtomicInteger offers = new AtomicInteger();
-        long[] rawResults = {Publication.BACK_PRESSURED, Publication.NOT_CONNECTED, Publication.ADMIN_ACTION,
+        long[] rawResults = {Publication.BACK_PRESSURED, Publication.NOT_CONNECTED,
                 Publication.CLOSED, Publication.MAX_POSITION_EXCEEDED, -99};
         CoreCommandOutcome.NotAcceptedReason[] reasons = {
                 CoreCommandOutcome.NotAcceptedReason.CLIENT_BACKPRESSURED,
                 CoreCommandOutcome.NotAcceptedReason.NOT_CONNECTED,
-                CoreCommandOutcome.NotAcceptedReason.ADMIN_ACTION,
                 CoreCommandOutcome.NotAcceptedReason.CLOSED,
                 CoreCommandOutcome.NotAcceptedReason.MAX_POSITION_EXCEEDED,
                 CoreCommandOutcome.NotAcceptedReason.UNKNOWN};
