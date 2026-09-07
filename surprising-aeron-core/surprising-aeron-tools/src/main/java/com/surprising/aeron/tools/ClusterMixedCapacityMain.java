@@ -226,6 +226,9 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         throw new IllegalStateException("risk scan failed to drain");
     }
     private void lossLifecycle() {
+        // Real-time price refresh can advance the risk generation after setup. Finish its
+        // continuation before requesting executable liquidation work for that generation.
+        drainRisk();
         var actions=work(CoreLiquidationWorkView.Purpose.EXECUTION).actions();
         if(actions.size()!=1 || actions.getFirst().userId()!=users.getFirst())throw new IllegalStateException("expected dedicated liquidation: "+actions);
         var a=actions.getFirst();

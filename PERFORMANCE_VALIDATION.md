@@ -4503,3 +4503,8 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - X0仅功能接通：目录ceiling-x0/seed92001，warmup0/duration1秒（跑完整cycle并排空），不把它作为容量结果；要求批次/全量资金账/零售仓位数量与挂单数量/HFT累计仓位和reservation/强平保险ADL完成全部通过。X主轮：ceiling-x/seed92002，30秒预热+300秒测量及完整cycle排空，无JFR；随后XJ诊断：ceiling-xj/seed92003，30秒预热+180秒测量，首正式progress后四机普通profile JFR90秒（不用MethodTiming），分析+30..80秒业务/等待栈。负载及阈值不变，系统采样5秒。X0失败不得进入主轮，修复后新目录新记录重锁。
 - 通过阈值：主轮>=1000terminal business ops/s、所有业务类型p99<=1秒、offeredBusiness=terminalBusiness、offeredCore=terminalCore、unfinished0/peak<=256、实际fills和交易类型计数匹配cycle、资金差0、各用户余额非负、零售持仓/挂单密度与HFT净仓/冻结核对通过，强平保险ADL闭环。传输NotAccepted/业务拒绝/未知/超时均判失败；不在FIFO命令中重试越过有依赖的后续命令。swap增长/连续三个5秒steal>5%/VM重启/JFR DataLoss或截断判无效。owner95%是单核口径观察目标，达不到明确报告，不把machine总CPU或spin当有效算力饱和。
 - 仅新增验证工具，不改交易状态机，故本轮不重复快照故障矩阵/全停恢复/六产品或长期泄漏验收；不能宣称完整生产容量。artifact仍在core-ceiling目录，失败保留。完成全部采集和核对后停止四VM并验证TERMINATED，保留磁盘，未经用户下一次测试指令不得再次开机。
+
+### X0功能门槛失败与X01重锁
+
+- X0源码9011266a/JAR 0ecf0798b160ecabbedcbf07f41f2f134e5ff62df8ee0d03dfffe9e939b40023；21定向测试及打包通过，四机哈希一致。真实集群初态1769用户/零售仓位与挂单密度检查通过；首个交易cycle后读取强平可执行工作为空，整体FAIL，未进入主轮，原始保留x0。
+- 网络真实时钟会在交易中刷新价格、推进风险扫描generation，旧本地合成时钟没有相同刷新频率。工具在读取可执行强平工作前必须先通过CONTINUE_RISK_SCAN完成当前generation；补此控制依赖，不改Core、不伪造强平action。X01用ceiling-x01/seed92004，仍warmup0/duration1完整cycle，仅功能门槛；其余X0参数/阈值不变，成功后才继续预锁X/XJ。
