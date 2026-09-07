@@ -4171,3 +4171,5 @@ TRIGGER_ORDER/entryTerminal n=141568 p0.500<=0.262144 p0.900<=0.524288 p0.950<=0
 - 原始artifact `/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-07-throughput-recheck`：soak.jfr 69,483,371B、约307秒，包含run.sh/profile.jfc/build.log/main/soak/GC/system/JVM日志、summary/view、CPU/owner分组、allocation/IO/NMT/JIT/VM/业务延迟；analyze.sh及Java聚合源码可复现。所有测量/分析进程已结束，结果将提交master。
 
 - 本轮最终清单：44文件、137,370,901B（不含清单），SHA256SUMS自身SHA256 `c794956c1d3af7637b73d0be20e407833420fb8d530c6649772957449ff20530`。
+
+- 分配粗归一算术更正：244,215,846,208B / JFR主测量47,850,704 business ops = 5103.704B/op，上文“约5082B”更正为约5104B；原始字节权重、吞吐及全部采样文件不变，仍包含setup/teardown且不是精确逐op或JMH分配计量。
