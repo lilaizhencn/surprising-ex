@@ -4472,3 +4472,9 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 三Core的JFR在首个正式测量progress之后启动，profile基础启用JDK25的jdk.MethodTiming，定向计时processCommittedRequest/idleCommand、apply/prepareMatching/commitReadyMatching/completeDispatchedMatcherSettlement、matcher executeWithEvidenceSync、PlaceAdmissionEvent.execute/MatcherSettlementEvent.execute及offerResponse；保留完整方法签名和每事件invocations/min/avg/max，嵌套方法不可简单求和，墙钟时间包含等待而非纯CPU。MethodTiming采用endChunk，录制期间不手工flush/dump；结束后按原始事件及JDK jfr view核对聚合。加profile CPU/分配/GC/线程事件，不重新开启零阈值全量park，maxsize512m。client使用普通profile采样，避免改客户端行为。记录启停UTC，分析采样完整且处于测量中间的区间；有instrumentation开销，不作精确无开销耗时承诺。
 - 四机5秒vmstat/mpstat/pidstat/sar；pidstat按进程PID选取而非-C java名称过滤，以保留owner/Lane/matcher命名线程。报告每线程单核CPU、可运行但未获调度时间、等待/业务栈与阶段时间；全机总CPU不足以判断关键线程饱和。不改变Core一致性边界、不切换Core等待策略、不以停顿期间高CPU冒充有效业务计算。
 - artifact `/Users/atomex/Desktop/surprising/gcp-validation/2026-09-07-core-ceiling`。先完成普通单归因，再根据实际证据和用户批量选择确定后续算力饱和负载；不得未测先承诺一个通用算力上限。全部本轮工作结束停止VM，保留磁盘。该诊断不包含新快照/故障注入/长期泄漏或六产品金融场景；Core代码未改，不重复本地JMH。
+
+### 普通单四发压线程确认轮 M（采集前锁定）
+
+- D阶段诊断通过，单发压线程CPU约100%但主要在streamMatch扫描已满窗口；为排除发压端单线程限制，M仅将发压worker从1改为4，各自64在途、GLOBAL仍256，4命令连接+1预留不变。运行时仍为7469f505对应同一JAR；当前master，对照不适用。三Core各1matcher/4Lane、默认等待策略、所有机器/JVM/金融参数/独立GTC买卖/mark前置均沿用D；不执行批量单，不改Core。
+- 目录`/var/lib/surprising/ceiling-m`、seed91002/prefixCEILINGM，30秒预热+300秒测量及排空，不开JFR或MethodTiming；用5秒四机系统采样及GC/NMT确认有效性。阈值与D相同：>=1000订单/s、buy/sell p99<=1秒，offered=accepted=terminal=2*fills，submitted=completed=订单+mark、峰值<=256、最终0，资金差/订单簿剩余/业务错误0，重试单列，swap增长/连续3个5秒steal>5%或VM维护重启判无效。
+- 本轮用于确认增加发压线程能否提升相同普通单链路的持续处理率；不把四线程自旋CPU或短时最高值当核心计算饱和。报告完整300秒速率、10秒分段、尾延迟与资金核对；D的instrumentation值只做阶段归因，不与M混作无开销性能差异。
