@@ -144,28 +144,42 @@ public final class RuntimeDerivativeMatchProcessor {
             throw new IllegalArgumentException("invalid perpetual matcher settlement plan");
         }
         OrderRuntime localTaker = runtime.order(takerOrderId);
-        for (int index = plan.firstMatcherEvent(laneId); index >= 0;
-                index = plan.nextMatcherEvent(index, laneId)) {
-            MatcherEvent match = plan.matcherEvent(index);
-            if (match.eventType() != MatcherEventType.TRADE
-                    || !plan.matcherEventTouchesLane(index, laneId, runtime)) continue;
-            if (localTaker != null) {
-                localTaker = requireOpen(runtime, takerOrderId);
-                applyFill(runtime, identities, instrument, localTaker, match.price(), match.size(), true,
-                        settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
-            }
-            OrderRuntime maker = runtime.order(match.matchedOrderId());
-            if (maker != null) {
-                maker = requireOpen(runtime, maker.orderId());
-                applyFill(runtime, identities, instrument, maker, match.price(), match.size(), false,
-                        settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
-                if (runtime.order(maker.orderId()).canceled()) {
-                    long releaseUnits = runtime.reservation(maker.orderId()).reservedUnits();
-                    runtime.releaseTerminalReservation(maker.orderId());
-                    if (releaseUnits > 0) runtime.advanceUserRevision(maker.userId());
+        RuntimeDerivativeFillCalculator.FillCursor takerCursor = null;
+        if (localTaker != null && plan.tradeCount() > 1) {
+            Long configured = runtime.leverage(new CoreLeverageKey(localTaker.userId(), instrument.symbol(), localTaker.marginMode()));
+            takerCursor = RuntimeDerivativeFillCalculator.beginTaker(runtime, instrument, localTaker,
+                    identities.preparedPositionKey(localTaker.userId(), positionKey(instrument.symbol(), localTaker.positionSide())),
+                    configured == null ? instrument.maxLeveragePpm() : configured, settleAssetId,
+                    commitTimestamp, commitPosition);
+        }
+        try {
+            for (int index = plan.firstMatcherEvent(laneId); index >= 0;
+                    index = plan.nextMatcherEvent(index, laneId)) {
+                MatcherEvent match = plan.matcherEvent(index);
+                if (match.eventType() != MatcherEventType.TRADE
+                        || !plan.matcherEventTouchesLane(index, laneId, runtime)) continue;
+                if (localTaker != null) {
+                    if (takerCursor != null) takerCursor.applyNext(match.price(), match.size(), treasuryDelta);
+                    else {
+                        localTaker = requireOpen(runtime, takerOrderId);
+                        applyFill(runtime, identities, instrument, localTaker, match.price(), match.size(), true,
+                                settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
+                    }
+                }
+                OrderRuntime maker = runtime.order(match.matchedOrderId());
+                if (maker != null) {
+                    maker = requireOpen(runtime, maker.orderId());
+                    applyFill(runtime, identities, instrument, maker, match.price(), match.size(), false,
+                            settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
+                    if (runtime.order(maker.orderId()).canceled()) {
+                        long releaseUnits = runtime.reservation(maker.orderId()).reservedUnits();
+                        runtime.releaseTerminalReservation(maker.orderId());
+                        if (releaseUnits > 0) runtime.advanceUserRevision(maker.userId());
+                    }
                 }
             }
-        }
+            if (takerCursor != null) takerCursor.publish(runtime);
+        } finally { if (takerCursor != null) takerCursor.clear(); }
         localTaker = runtime.order(takerOrderId);
         if (localTaker != null) {
             if (!localTaker.canceled() && (localTaker.timeInForce().immediate()

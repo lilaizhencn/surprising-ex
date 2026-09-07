@@ -4014,3 +4014,17 @@ TRIGGER_ORDER/entryTerminal n=139776 p0.500<=0.262144 p0.900<=0.524288 p0.950<=0
 - 最终artifact校验：69个文件、201,165,521B（不计清单本身），SHA256SUMS自身SHA256 `70419f25ee312fc6903c13af4261034e0663356bd955a3bfd5e386a7df925ba7`。保留无效首轮JFR和启动失败JMH，所有验证进程已退出。
 
 - 归档汇总校正：结果汇总脚本最初把手工jmh-summary.json误当原始JMH文件，已限制为jmh-r2-*并验证包含全部六产品；原始测量不变。更新派生结果后的最终清单为69文件、201,189,432B，SHA256SUMS自身SHA256 `36480ef051a9f18139e55f141e02273e605451c9bee26129970bf481876a4b7c`，以本条清单为准。
+
+
+## 2026-09-07 结算容器、原始成交编码、taker 多 fill 标量状态（采集前锁定）
+
+- 对照 commit：不适用（仅验证当前 master）。被测 commit 为本条及代码通过测试后提交的 master HEAD，在 artifact/commit.txt 固化；不运行旧版本。采集目录 `/Users/atomex/Desktop/surprising/async-profiler-evidence/2026-09-07-settlement-allocation`。
+- 改动：事件私有批量数组复用；响应直接编码 matcher 成交；衍生品同一 taker 多 fill 保留逐笔财务计算，最终才物化状态。共享协议及状态代码，运行 core 依赖链全部测试和六产品多 fill 场景。
+- 环境：macOS 26.7 x86_64 / Intel i9-9880H 8C16T / 16GiB；Oracle GraalVM HotSpot 25.0.1+8，Maven 3.9.16。CPU/系统细节随运行保存。禁止并行跑其他基准/构建/分析；监控用户桌面干扰进程，CPU speed limit<100、swap 增长、明显节流、JFR DataLoss 的轮次无效。冷却15秒，正常退出不额外停机。
+- mixed 主吞吐：`LinearPerpetualScaleSoakMain 1000 256 256 5 10 UNIFORM 1 20 32 300 30`，固定256 in-flight，1 matcher/4 Account Lane，1000用户、256活跃/挂牌symbol、最多5持仓/10挂单、持续做市、每轮20 item batch及32 symbol生命周期检查；入口为进程内Core命令，0外部网络连接。沿用驱动确定性混合下单/撤单/开平仓/触发/风险/资金费路径与比例，原始分类计数保存；初始资金及持仓由驱动固定构造，结束核对用户/做市/Treasury、冻结、订单索引、恢复hash。主指标阈值150000 terminal business ops/s，accepted=terminal、unfinished/end backlog=0、错误/超时0；预期业务拒绝单独计数，不混入成功成交量。
+- mixed JVM：`-Xms4g -Xmx4g -XX:+UseZGC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -Dsurprising.aeron.matching-engines=1 -Dsurprising.benchmark.openLoop=false --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED`，预热由驱动完成，稳定300秒，每30秒采样。先无 profiler 主轮，再同参数300秒 JFR/NMT归因轮；closed-loop，无 coordinated omission 修正，不能宣称生产容量。主轮仅GC日志；归因轮新增NMT summary/退出统计及自定义profile.jfc/JFR512MiB上限/GC与safepoint日志。profile配置保存且不跨配置比较吞吐。
+- 新增 JMH：`ClusteredBatchTradingBenchmark.multiFillSettlementAndEncoding`，逐个 SPOT / LINEAR_PERPETUAL / INVERSE_PERPETUAL / LINEAR_DELIVERY / INVERSE_DELIVERY / OPTION，257用户含maker、1symbol、4 Lane/1 matcher、256 in-flight、0网络连接、realtime=false。每cycle四个256消息wave：maker 20单×1数量→用户单笔吃20 fill→用户20单→maker单笔吃20 fill；买卖price100，初始充足资金、零仓位，maker另有price120挂单；正常成交拒绝0，每iteration结束资金/持仓/冻结/订单/快照检查。每cycle10752 business ops、1024 Core messages/batches、10240 fills，平均batch10.5/max20；业务操作100%下单，约95.24%挂单+4.76%多fill吃单，开仓/平仓各半。JMH主score cycles/s按上述常数换算，AuxCounters EVENTS为计数而非速率。
+- JMH参数：f1/t1，warmup2×3秒，measurement3×5秒，`-prof gc -rf json -foe true`；`-Xms768m -Xmx768m -XX:+UseG1GC -Dsurprising.aeron.matching-engines=1`及上述opens/exports。通过要求每产品>=50000 business ops/s、分配<12000 B/business op、GC累计时间<measurement20%，并满足资金/快照及无积压/错误；报告95/99.9%置信区间以原始JMH为准，短场景不作为全系统容量。
+- 实际多fill长稳JFR：同新增JMH LINEAR_PERPETUAL 场景，warmup2×3秒，measurement1×300秒，f1/t1、256in-flight，JVM改为mixed的4GiB ZGC并增加相同JFR/NMT，不加gc profiler；记录 `multifill.jfr`，同时验证 iteration资金与快照。阈值为零错误/超时/积压、无DataLoss/系统干扰失效，不拿带JFR结果替代无profiler主吞吐。分析稳定窗口60秒后多次GC live set、线程数、Direct/NMT、文件描述符趋势，增长原因单独解释；短期稳定不代表永久无泄漏。
+- JFR全项：分组CPU/执行样本、分配类/线程/站点/TLAB/nonTLAB、heap/GC/停顿、NMT与Direct/Mapped、线程锁/park、safepoint、JIT/codecache、file/socket/exception及OS。mixed业务三段延迟按类型报告p50/90/95/99/99.9/max和样本数；新增多fill JMH无逐业务三段延迟事件，只能作为受影响路径分配/正确性验证。极少风险重操作样本不作尾延迟容量结论。缺失项如实标为部分验证；owner业务栈出现同步外部IO直接失败，驱动日志/启动JFR元数据IO另列。
+- 未测：AWS真实三节点网络、外部API/WebSocket/Kafka、open-loop到达率、生产长时间容量；没有因本机代码优化重新部署这些服务。完整执行命令、日志、参数、原始JSON/JFR、派生聚合和SHA256清单保留artifact，结果按后续条目追加。

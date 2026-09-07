@@ -36,6 +36,32 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     private long[] completedLanes;
     private boolean collected;
 
+    // Storage belongs to this pooled event, never to a shared owner scratch buffer.
+    private BatchStorage batchStorage;
+    static final class BatchStorage {
+        final MatcherSettlementPlan[] plans;
+        final CoreInstrumentState[] instruments;
+        final int[] baseAssetIds, quoteAssetIds, settleAssetIds;
+        BatchStorage(int size) {
+            plans = new MatcherSettlementPlan[size];
+            instruments = new CoreInstrumentState[size];
+            baseAssetIds = new int[size]; quoteAssetIds = new int[size]; settleAssetIds = new int[size];
+        }
+        void clear() {
+            java.util.Arrays.fill(plans, null);
+            java.util.Arrays.fill(instruments, null);
+        }
+    }
+    BatchStorage batchStorage(int size) {
+        if (plan != null) throw new IllegalStateException("settlement event is still active");
+        if (batchStorage == null || batchStorage.plans.length != size) batchStorage = new BatchStorage(size);
+        return batchStorage;
+    }
+    void discardBatchStorage() {
+        if (plan != null) throw new IllegalStateException("cannot discard active settlement");
+        if (batchStorage != null) batchStorage.clear();
+    }
+
     MatcherSettlementEvent() {
     }
 
@@ -147,6 +173,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             throw new IllegalStateException("cannot recycle an incomplete matcher settlement");
         }
         plan = null;
+        if (batchStorage != null) batchStorage.clear();
         batchPlans = null;
         runtime = null;
         identities = null;

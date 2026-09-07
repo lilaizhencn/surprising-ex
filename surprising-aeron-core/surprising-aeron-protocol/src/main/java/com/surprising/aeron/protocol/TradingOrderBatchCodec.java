@@ -103,6 +103,62 @@ public final class TradingOrderBatchCodec {
         return buffer.bytes;
     }
 
+    /** Borrowed only for the duration of encodeResultSource; no source references escape. */
+    public interface ResultSource {
+        int size();
+        long orderId(int index);
+        long originalOrderId(int index);
+        long replacementOrderId(int index);
+        ResponseStatus status(int index);
+        CoreResultCode resultCode(int index);
+        CoreOrderStateView order(int index);
+        int executionCount(int index);
+        /** Write exactly executionCount(index) records of six little-endian longs. */
+        void writeExecutions(int index, ByteBuffer output);
+    }
+
+    public static byte[] encodeResultSource(ResultSource source) {
+        if (source == null || source.size() <= 0 || source.size() > CoreOrderBatchResult.MAX_ITEMS) {
+            throw new IllegalArgumentException("invalid order batch result");
+        }
+        int length = Integer.BYTES * 2;
+        for (int index = 0; index < source.size(); index++) {
+            if (source.orderId(index) <= 0 || source.originalOrderId(index) < 0
+                    || source.replacementOrderId(index) < 0 || source.status(index) == null
+                    || source.resultCode(index) == null || source.executionCount(index) < 0) {
+                throw new IllegalArgumentException("invalid order batch result item");
+            }
+            int orderLength = source.order(index) == null ? 0
+                    : CoreStateQueryCodec.encodedOrderStateLength(source.order(index));
+            int frameLength = Math.addExact(Integer.BYTES * 5 + Long.BYTES * 3,
+                    Math.addExact(orderLength, Math.multiplyExact(source.executionCount(index), RESULT_EXECUTION_LENGTH)));
+            length = Math.addExact(length, Math.addExact(FRAME_LENGTH_BYTES, frameLength));
+        }
+        if (length > MAX_BATCH_RESPONSE_BYTES) throw new IllegalArgumentException("order batch result is too large");
+        ByteBuffer output = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
+        output.putInt(PlaceOrderBatchCommand.WIRE_VERSION).putInt(source.size());
+        for (int index = 0; index < source.size(); index++) {
+            int frameOffset = output.position();
+            output.putInt(0).putInt(index).putLong(source.orderId(index))
+                    .putLong(source.originalOrderId(index)).putLong(source.replacementOrderId(index))
+                    .putInt(source.status(index).wireCode()).putInt(source.resultCode(index).wireCode());
+            CoreOrderStateView order = source.order(index);
+            int orderLength = order == null ? 0 : CoreStateQueryCodec.encodedOrderStateLength(order);
+            output.putInt(orderLength);
+            if (order != null) CoreStateQueryCodec.writeOrderState(output, order);
+            int count = source.executionCount(index);
+            output.putInt(count);
+            int bytes = Math.multiplyExact(count, RESULT_EXECUTION_LENGTH);
+            ByteBuffer executions = output.slice(output.position(), bytes).order(ByteOrder.LITTLE_ENDIAN);
+            source.writeExecutions(index, executions);
+            if (executions.position() != bytes) throw new IllegalArgumentException("execution count differs from encoded data");
+            output.position(output.position() + bytes);
+            output.putInt(frameOffset, output.position() - frameOffset - FRAME_LENGTH_BYTES);
+        }
+        if (output.hasRemaining()) throw new IllegalArgumentException("batch result size changed during encoding");
+        return output.array();
+    }
+
     public static byte[] encodeBatchResult(CoreOrderBatchResult result) {
         return encodeResult(result);
     }

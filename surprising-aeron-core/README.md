@@ -633,3 +633,11 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
 纯撤单批次在已有 `LaneCancelEvent` 内更新订单提交元数据并完成该 Lane 的 sequence commit，owner 收集终态后不再单独补元数据或提交第二个 Lane 任务。改单仍需等待替换订单结算后再完成最终提交；不能套用纯撤单的完成条件。批次还有未完成 Lane 任务时，owner 等待其完成通知，不反复进入批次收尾。响应按相同线协议直接编码临时结果列表，不把该列表交给异步消费者。
 
 `SurprisingClusteredService` 继续在日志回调返回前完成交易，以保持快照、日志位置和恢复的一致性。mixed 夹具的跨请求流水线吞吐不能直接作为生产 Cluster 网络容量。
+
+
+### 结算与批量响应的分配边界
+
+`MatcherSettlementEvent` 持有自己的批量计划/币种数组，所有 Lane 完成且 owner 取走变更后清空引用并归池；不同在途事件不共享暂存数组。稳定 batch 大小复用存储，大小变化重新分配。
+`CoreProbeState.OrderBatchPending` 保留原始 matcher events，`TradingOrderBatchCodec.ResultSource` 在响应编码边界直接写成交字段，避免逐笔创建 `CoreExecutionView` 和结果 Item/List；协议格式、幂等响应字节不变。
+`RuntimeDerivativeMatchProcessor` 对同一 taker 的多笔成交使用 Lane 内 `FillCursor`，逐 fill 保留手续费舍入、保证金、盈亏及 Treasury 累计顺序，最后发布余额/持仓/订单/冻结状态。maker 仍逐笔应用，用户与订单 revision 保留逐笔增量；已发布状态对象不池化。每线程只有两个有界 cursor，结束或异常均清引用。并未实现整条链路零分配。
+新增 `ClusteredBatchTradingBenchmark.multiFillSettlementAndEncoding` 覆盖六产品 maker 20 笔小单被单 taker 吃完再平仓，并核对用户/做市资金、冻结、订单终态与快照恢复；性能记录统一见根目录 `PERFORMANCE_VALIDATION.md`。

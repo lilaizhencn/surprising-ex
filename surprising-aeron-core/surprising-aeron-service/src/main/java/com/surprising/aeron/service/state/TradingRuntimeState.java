@@ -2349,53 +2349,63 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new IllegalArgumentException("invalid matcher settlement batch");
         }
         long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;
-        MatcherSettlementPlan[] plans = new MatcherSettlementPlan[takerOrderIds.length];
-        CoreInstrumentState[] instruments = new CoreInstrumentState[takerOrderIds.length];
-        int[] baseAssetIds = new int[takerOrderIds.length];
-        int[] quoteAssetIds = new int[takerOrderIds.length];
-        int[] settleAssetIds = new int[takerOrderIds.length];
-        long batchLaneMask = 0;
-        for (int index = 0; index < takerOrderIds.length; index++) {
-            long takerOrderId = takerOrderIds[index];
-            long expectedLaneMask = expectedLaneMasks[index];
-            CoreMatchingResult matchingResult = matchingResults.get(index);
-            if (takerOrderId <= 0 || expectedLaneMask == 0 || (expectedLaneMask & ~validMask) != 0
-                    || matchingResult == null || matchingResult.nativeCommand().coreSequence() != coreSequence) {
-                throw new IllegalArgumentException("invalid matcher settlement item");
-            }
-            OrderRuntime taker = order(takerOrderId);
-            if (taker == null) throw new IllegalStateException("taker order is missing");
-            MatcherSettlementPlan plan = MatcherSettlementPlan.build(coreSequence, takerOrderId, taker.userId(),
-                    new long[]{takerOrderId}, matchingResult, this, identities);
-            if (plan.requiredLaneMask() != expectedLaneMask) {
-                throw new IllegalStateException("matcher settlement lane mask mismatch");
-            }
-            plans[index] = plan;
-            CoreInstrumentState instrument = instrument(identities.symbol(taker.symbolId()));
-            if (instrument == null) throw new IllegalStateException("match instrument is missing");
-            instruments[index] = instrument;
-            baseAssetIds[index] = identities.assetId(instrument.baseAsset());
-            quoteAssetIds[index] = identities.assetId(instrument.quoteAsset());
-            settleAssetIds[index] = identities.assetId(instrument.settleAsset());
-            batchLaneMask |= expectedLaneMask;
-        }
-        MatcherSettlementPlan.validateAndPrepareBatch(
-                takerOrderIds, matchingResults, this, identities, matcherBatchValidationScratch);
         MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();
         if (event == null) event = new MatcherSettlementEvent();
-        event.prepareBatch(coreSequence, batchLaneMask, commitTimestamp, commitClusterPosition,
-                plans, this, identities, instruments,
-                baseAssetIds, quoteAssetIds, settleAssetIds, accountLanes.length);
-        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            if ((batchLaneMask & 1L << laneId) == 0) continue;
-            if (!accountLanesStarted) event.execute(accountLanes[laneId]);
-            else {
-                accountLaneQueueHighWaterMarks[laneId] = Math.max(
-                        accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
-                laneWorkers[laneId].submit(event);
+        MatcherSettlementEvent.BatchStorage storage = event.batchStorage(takerOrderIds.length);
+        MatcherSettlementPlan[] plans = storage.plans;
+        CoreInstrumentState[] instruments = storage.instruments;
+        int[] baseAssetIds = storage.baseAssetIds;
+        int[] quoteAssetIds = storage.quoteAssetIds;
+        int[] settleAssetIds = storage.settleAssetIds;
+        boolean prepared = false;
+        try {
+            long batchLaneMask = 0;
+            for (int index = 0; index < takerOrderIds.length; index++) {
+                long takerOrderId = takerOrderIds[index];
+                long expectedLaneMask = expectedLaneMasks[index];
+                CoreMatchingResult matchingResult = matchingResults.get(index);
+                if (takerOrderId <= 0 || expectedLaneMask == 0 || (expectedLaneMask & ~validMask) != 0
+                        || matchingResult == null || matchingResult.nativeCommand().coreSequence() != coreSequence) {
+                    throw new IllegalArgumentException("invalid matcher settlement item");
+                }
+                OrderRuntime taker = order(takerOrderId);
+                if (taker == null) throw new IllegalStateException("taker order is missing");
+                MatcherSettlementPlan plan = MatcherSettlementPlan.build(coreSequence, takerOrderId, taker.userId(),
+                        new long[]{takerOrderId}, matchingResult, this, identities);
+                if (plan.requiredLaneMask() != expectedLaneMask) {
+                    throw new IllegalStateException("matcher settlement lane mask mismatch");
+                }
+                plans[index] = plan;
+                CoreInstrumentState instrument = instrument(identities.symbol(taker.symbolId()));
+                if (instrument == null) throw new IllegalStateException("match instrument is missing");
+                instruments[index] = instrument;
+                baseAssetIds[index] = identities.assetId(instrument.baseAsset());
+                quoteAssetIds[index] = identities.assetId(instrument.quoteAsset());
+                settleAssetIds[index] = identities.assetId(instrument.settleAsset());
+                batchLaneMask |= expectedLaneMask;
+            }
+            MatcherSettlementPlan.validateAndPrepareBatch(
+                    takerOrderIds, matchingResults, this, identities, matcherBatchValidationScratch);
+            prepared = true; // Once preparation starts, failures are fatal; never recycle a partially prepared event.
+            event.prepareBatch(coreSequence, batchLaneMask, commitTimestamp, commitClusterPosition,
+                    plans, this, identities, instruments,
+                    baseAssetIds, quoteAssetIds, settleAssetIds, accountLanes.length);
+            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+                if ((batchLaneMask & 1L << laneId) == 0) continue;
+                if (!accountLanesStarted) event.execute(accountLanes[laneId]);
+                else {
+                    accountLaneQueueHighWaterMarks[laneId] = Math.max(
+                            accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
+                    laneWorkers[laneId].submit(event);
+                }
+            }
+            return new MatcherSettlementEvent[]{event};
+        } finally {
+            if (!prepared) {
+                event.discardBatchStorage();
+                matcherSettlementEventPool.addFirst(event);
             }
         }
-        return new MatcherSettlementEvent[]{event};
     }
 
     public MatcherSettlementEvent[] dispatchSpotMatcherSettlements(
@@ -3554,11 +3564,16 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     public void advanceUserRevision(long userId) {
+        advanceUserRevision(userId, 1);
+    }
+
+    void advanceUserRevision(long userId, long count) {
+        if (count <= 0) throw new IllegalArgumentException("revision advance must be positive");
         assertOwner();
         captureUserBefore(userId);
         UserRuntime current = requireUser(userId);
         UserRuntime advanced = new UserRuntime(current.productLine(), userId,
-                Math.incrementExact(current.revision()), current.positionMode());
+                Math.addExact(current.revision(), count), current.positionMode());
         onLane(userId, lane -> lane.users.put(userId, advanced));
         publishUser(userId, advanced);
         if (laneCommandScope.get() == null) changedUsers.add(userId);

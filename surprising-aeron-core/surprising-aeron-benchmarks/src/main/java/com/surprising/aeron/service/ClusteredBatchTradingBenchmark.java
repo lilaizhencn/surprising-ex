@@ -40,6 +40,18 @@ public class ClusteredBatchTradingBenchmark {
         return batchPlaceCancelWithMetrics(workload, counters);
     }
 
+    /** Maker batches of small orders; each taker consumes batchSize distinct fills and then closes. */
+    @Benchmark
+    public long multiFillSettlementAndEncoding(Workload workload, Counters counters) {
+        workload.runMultiFillRoundTrip();
+        long business = 512L * (workload.batchSize + 1);
+        counters.acceptedBusinessOperations += business; counters.terminalBusinessOperations += business;
+        counters.acceptedCoreMessages += 1024; counters.terminalCoreMessages += 1024;
+        counters.terminalBatches += 1024; counters.terminalItems += business;
+        counters.terminalTrades += 512L * workload.batchSize;
+        return workload.terminal;
+    }
+
     @AuxCounters(AuxCounters.Type.EVENTS)
     @State(Scope.Thread)
     public static class Counters {
@@ -113,6 +125,7 @@ public class ClusteredBatchTradingBenchmark {
         private Thread realtimeConsumer;
         private volatile boolean consuming;
         private boolean singleResponses;
+        private int responseBatchSize;
         private String settleAsset;
         private SurprisingClusteredService service;
         private ClientSession session;
@@ -136,6 +149,7 @@ public class ClusteredBatchTradingBenchmark {
             if (maxInFlight != 256 || batchSize <= 0) throw new IllegalArgumentException("requires 256 in-flight");
             LinearPerpetualBenchmarkSupport.configureAccountLanes(accountLanes);
             sequence = terminal = queryResults = maxBacklog = 0;
+            responseBatchSize = batchSize;
             expectMissingCancels = false;
             rejectedItems = 0;
             expectBatchTrades = false;
@@ -175,7 +189,7 @@ public class ClusteredBatchTradingBenchmark {
                                 }
                                 if(singleResponses){terminal++;yield 1L;}
                                 var items = TradingOrderBatchCodec.decodeResult(response.data()).items();
-                                if (items.size() != batchSize) throw new IllegalStateException("batch size mismatch");
+                                if (items.size() != responseBatchSize) throw new IllegalStateException("batch size mismatch");
                                 for (var item : items) {
                                     if (!expectBatchTrades && !item.executions().isEmpty()) {
                                         throw new IllegalStateException("unexpected trade");
@@ -219,6 +233,32 @@ public class ClusteredBatchTradingBenchmark {
             service.onSessionMessage(null, 1_700_000_000_000L, new UnsafeBuffer(makerBytes),
                     0, makerBytes.length, header);
             service.state().assertClusterCallbackComplete();
+        }
+
+        public void runMultiFillRoundTrip() {
+            long before = terminal, tradesBefore = batchTrades;
+            expectBatchTrades = true;
+            try {
+                for (int phase = 0; phase < 4; phase++) {
+                    boolean resting = phase == 0 || phase == 2;
+                    responseBatchSize = resting ? batchSize : 1;
+                    CoreMessage[] wave = new CoreMessage[maxInFlight];
+                    for (int user = 0; user < maxInFlight; user++) {
+                        long account = phase == 0 || phase == 3 ? 1256 : 1000 + user;
+                        CoreOrderSide side = resting ? CoreOrderSide.SELL : CoreOrderSide.BUY;
+                        var orders = new ArrayList<PlaceOrderCommand>(responseBatchSize);
+                        for (int item = 0; item < responseBatchSize; item++) {
+                            orders.add(order(orderId++, side, 100, resting ? 1 : batchSize));
+                        }
+                        wave[user] = command(CoreMessageType.PLACE_ORDER_BATCH, account,
+                                TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)));
+                    }
+                    for (CoreMessage request : wave) send(request);
+                }
+                if (terminal - before != 1024 || batchTrades - tradesBefore != 512L * batchSize) {
+                    throw new IllegalStateException("multi-fill terminal/trade mismatch");
+                }
+            } finally { expectBatchTrades = false; responseBatchSize = batchSize; }
         }
 
         public void runRoundTripTrades() {

@@ -18,6 +18,64 @@ import org.junit.jupiter.api.Test;
 class RuntimeDerivativeFillCalculatorTest {
 
     @Test
+    void takerCursorPreservesPerFillRoundingReversalAndRevisionCounts() {
+        var identities = new RuntimeIdentityRegistry();
+        var instrument = instrument();
+        int symbol = identities.symbolId(instrument.symbol()), asset = identities.assetId(instrument.settleAsset());
+        long key = identities.positionKey(7, instrument.symbol());
+        try (var sequential = runtimeWithPosition(symbol, asset, key, CoreOrderSide.SELL, 4, false, 10_000, 120, 100);
+             var batched = runtimeWithPosition(symbol, asset, key, CoreOrderSide.SELL, 4, false, 10_000, 120, 100)) {
+            var expectedTreasury = new RuntimeTreasuryDelta();
+            var actualTreasury = new RuntimeTreasuryDelta();
+            var cursor = RuntimeDerivativeFillCalculator.beginTaker(batched, instrument, batched.order(11),
+                    key, 10_000_000, asset, 555, 999);
+            var before = batched.snapshot(1);
+            try {
+                for (long price : new long[]{111, 109, 113, 107}) {
+                    RuntimeDerivativeFillCalculator.apply(sequential, identities, instrument, sequential.order(11),
+                            key, price, 1, true, 10_000_000, asset, expectedTreasury, 555, 999);
+                    cursor.applyNext(price, 1, actualTreasury);
+                }
+                assertThat(batched.snapshot(1)).as("intermediate scalar state must not escape").isEqualTo(before);
+                cursor.publish(batched);
+            } finally { cursor.clear(); }
+            expectedTreasury.apply(sequential.treasury());
+            actualTreasury.apply(batched.treasury());
+            assertThat(batched.snapshot(1)).isEqualTo(sequential.snapshot(1));
+            assertThat(batched.position(key).signedQuantitySteps()).isEqualTo(-2);
+            assertThat(batched.order(11).revision()).isEqualTo(5);
+            assertThat(batched.user(7).revision()).isEqualTo(4);
+        }
+    }
+
+    @Test
+    void abortedTakerCursorDoesNotPublishPartialStateOrLeakIntoNextUse() {
+        var identities = new RuntimeIdentityRegistry();
+        var instrument = instrument();
+        int symbol = identities.symbolId(instrument.symbol()), asset = identities.assetId(instrument.settleAsset());
+        long key = identities.positionKey(7, instrument.symbol());
+        try (var runtime = runtime(symbol, asset, 200)) {
+            var before = runtime.snapshot(1);
+            var cursor = RuntimeDerivativeFillCalculator.beginTaker(runtime, instrument, runtime.order(11),
+                    key, 10_000_000, asset, 555, 999);
+            try {
+                cursor.applyNext(100, 1, new RuntimeTreasuryDelta());
+                assertThatThrownBy(() -> cursor.applyNext(100, 2, new RuntimeTreasuryDelta()))
+                        .isInstanceOf(IllegalArgumentException.class);
+            } finally { cursor.clear(); }
+            assertThat(runtime.snapshot(1)).isEqualTo(before);
+            var retry = RuntimeDerivativeFillCalculator.beginTaker(runtime, instrument, runtime.order(11),
+                    key, 10_000_000, asset, 555, 999);
+            try {
+                retry.applyNext(100, 2, new RuntimeTreasuryDelta());
+                retry.publish(runtime);
+            } finally { retry.clear(); }
+            assertThat(runtime.order(11).executedQuantitySteps()).isEqualTo(2);
+            assertThat(runtime.user(7).revision()).isEqualTo(1);
+        }
+    }
+
+    @Test
     void opensLinearPositionAndPreservesExplainedLockedFunds() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         CoreInstrumentState instrument = instrument();

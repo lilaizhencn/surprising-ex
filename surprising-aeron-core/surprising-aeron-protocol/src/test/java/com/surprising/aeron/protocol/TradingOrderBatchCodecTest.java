@@ -14,6 +14,50 @@ import org.junit.jupiter.api.Test;
 class TradingOrderBatchCodecTest {
 
     @Test
+    void rawExecutionSourcePreservesWireFormatAndEnforcesFrameBounds() {
+        var order = new CoreOrderStateView(701, ProductLine.LINEAR_PERPETUAL, 7,
+                "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 2, 0, 2, false, "FILLED", 3);
+        var executions = List.of(new CoreExecutionView(701, 702, 7, 8, 999, 1),
+                new CoreExecutionView(701, 703, 7, 9, 1_000, 1));
+        var items = List.of(new CoreOrderBatchResult.Item(0, 701, 0, 0,
+                        ResponseStatus.APPLIED, CoreResultCode.NONE, order, executions),
+                new CoreOrderBatchResult.Item(1, 704, 0, 0,
+                        ResponseStatus.REJECTED, CoreResultCode.ORDER_NOT_FOUND, null, List.of()));
+        class Source implements TradingOrderBatchCodec.ResultSource {
+            int declaredCount = 2;
+            public int size() { return items.size(); }
+            public long orderId(int i) { return items.get(i).orderId(); }
+            public long originalOrderId(int i) { return 0; }
+            public long replacementOrderId(int i) { return 0; }
+            public ResponseStatus status(int i) { return items.get(i).status(); }
+            public CoreResultCode resultCode(int i) { return items.get(i).resultCode(); }
+            public CoreOrderStateView order(int i) { return items.get(i).order(); }
+            public int executionCount(int i) { return i == 0 ? declaredCount : 0; }
+            public void writeExecutions(int i, ByteBuffer output) {
+                for (var e : items.get(i).executions()) {
+                    output.putLong(e.takerOrderId()).putLong(e.makerOrderId())
+                            .putLong(e.takerUserId()).putLong(e.makerUserId())
+                            .putLong(e.priceTicks()).putLong(e.quantitySteps());
+                }
+            }
+        }
+        var source = new Source();
+        var expected = new CoreOrderBatchResult(items);
+        byte[] encoded = TradingOrderBatchCodec.encodeResultSource(source);
+        assertThat(encoded).isEqualTo(TradingOrderBatchCodec.encodeResult(expected));
+        assertThat(TradingOrderBatchCodec.decodeResult(encoded)).isEqualTo(expected);
+        source.declaredCount = 3;
+        assertThatThrownBy(() -> TradingOrderBatchCodec.encodeResultSource(source))
+                .isInstanceOf(IllegalArgumentException.class);
+        source.declaredCount = 1;
+        assertThatThrownBy(() -> TradingOrderBatchCodec.encodeResultSource(source))
+                .isInstanceOf(java.nio.BufferOverflowException.class);
+        source.declaredCount = -1;
+        assertThatThrownBy(() -> TradingOrderBatchCodec.encodeResultSource(source))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void ownerLocalResultEncodingValidatesIndexesAndDoesNotRetainTheList() {
         var item = new CoreOrderBatchResult.Item(0, 42, 0, 0,
                 ResponseStatus.APPLIED, CoreResultCode.NONE, null, List.of());
