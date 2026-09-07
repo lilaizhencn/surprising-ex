@@ -4353,3 +4353,7 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 修复改到实际发送边界：仅dispatcher按offer顺序分配各lane sourceSequence。Request复用现有池，保存必要的命令字段/防御性payload副本，到首次offer才创建唯一CoreMessage/Header，不增加中间消息副本或生产者排序锁；查询/显式prepared消息保留调用方原序号。确定性测试用反转创建/入队顺序复现旧逻辑，并验证payload防御性复制；扩大到全部AeronClient测试。此修复影响生产客户端，新增ClientSourceOrderingBenchmark测量实际客户端提交/发送路径；交易Core业务未改，真实金融正确性和恢复由接下来的三节点交易轮验证。
 - 客户端JMH预锁：当前master修复提交、HotSpot GraalVM25.0.1、macOS26.7/i9-9880H/16逻辑CPU/16GiB，ZGC -Xms512m -Xmx512m，1fork/4线程、3×1s预热/3×1s测量、冷却15秒、-prof gc、JSON输出。4线程各至多64未完成请求，**全局256**，4命令session各64加1预留；每invocation64个独立请求，OperationsPerInvocation64。使用真实AeronClientPool与即时确定性Session，只计client terminal requests/s，不是Core business ops/s；mock session逐条校验严格递增来源序号，trial结束offered=terminal、unfinished0。门槛>=1000 client requests/s且无乱序/错误；保存主分数/误差/分配/GC。该边界基准没有撮合资金模型，不能替代云端资金与日志恢复证据；云端四份JFR覆盖修复后的真实客户端路径。
 - 原W1停止，不沿用失败数据。重锁W1B seed90741/prefixGCP-AW1B、DATA_DIR=/var/lib/surprising/async-w1b；W2B seed90742/prefixGCP-AW2B、目录async-w2b；JFRB seed90743/prefixGCP-AJFRB、目录async-jfrb。除本次来源顺序修复及独立seed/目录外，W1/W2 worker1/2、JFR择优规则、全部256窗口/1000用户/256symbol/1matcher/4Lane/四连接、30+300s、门槛、冷却、资金/恢复及数据有效性沿用上条；先提交/构建通过再采样，不重跑旧版。
+
+### 用户确认真实三节点为后续唯一性能执行环境
+
+- 用户在W2B进行期间明确：当前先验证真实三节点，不切换本地mixed策略；后续所有压测必须在真实三节点环境执行。已写入AGENTS.md，后续不再运行本地内存或mock Session JMH/性能采样。本轮已经完成的本地client JMH发生在此指令之前，只保留历史客户端诊断证据，不将其当作真实交易容量。正在进行的W1B/W2B及预定JFRB本身就是四台云主机（3个真实Core节点+独立压测机），场景和阈值不变；本次规则修改不改变被测jar源码7a23175f。
