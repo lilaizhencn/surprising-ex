@@ -36,7 +36,7 @@ final class SettlementLaneWorker implements AutoCloseable {
         commands = new Command[capacity];
         indexMask = capacity - 1;
         waitStrategy = configuredWaitStrategy();
-        spinLimit = Integer.parseInt(System.getProperty(SPIN_LIMIT_PROPERTY, "256"));
+        spinLimit = Integer.parseInt(System.getProperty(SPIN_LIMIT_PROPERTY, "0"));
         if (spinLimit < 0 || spinLimit > 4096)
             throw new IllegalArgumentException("settlement spin limit must be in [0,4096]");
         this.lane = lane;

@@ -4784,3 +4784,13 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 只有spin256较spin0吞吐至少提高5%、单命令p99不恶化超过20%才默认保留256，否则默认0保留安全休眠握手。不以忙等CPU充作有效计算。最后一轮原数据重启核对交易/生命周期cycle、注资与hash；结束停止四VM，再做离线分析。执行SETTLEMENT_SPIN_LIMIT=256/0 OPERATIONAL_JFR=1 python3 round.py os10/os11 97001/97002 256 60 30。无长期泄漏或最终饱和上限承诺。
 
 - OS10初始化STALE_MARK_PRICE，未测量；原日志三节点重放+诊断agent确认JMH-MIX-164-USDT clusterTimestamp=1788844077688、generatedAt=1788844077689，价龄-1ms。源主机chrony Last offset约+0.286ms，不能误归因为旧行情或放宽Core未来价格保护。工具新增真实2ms生成到发送等待，保留原始生成时间、不中途回填时间戳；只影响价格producer及初始化，不给交易流增加逐笔等待。初始price在取得发送容量后生成；实际价格速率按响应计数报告。原OS10/OS11比较取消，改OS12 seed97003 spin256、OS13 seed97004 spin0，相同30+60秒JFR及前述门槛；新工具构建后SHA另存，两个新档使用同一JAR。既有读可用率问题不在本次前两项修复范围，仍单列。
+
+### OS12/OS13结果及停机恢复（停机后简记）
+
+- 2026-09-08，当前master 7a4947fa（含0f444147），对照commit不适用；两档同JAR SHA256=6a13890d16ff03bd2ed0092d0ef76702e02d46ce2521276586e3875396266eb8。执行SETTLEMENT_SPIN_LIMIT=256/0 OPERATIONAL_JFR=1 python3 round.py os12/os13 97003/97004 256 60 30；硬件、业务、JVM与预锁相同。三Core全程存活，操作覆盖及资金核对通过，unfinished=0。
+- OS12 spin256：3606234 terminal business operations、357082 terminal Core messages、855073 fills，60.359s；59746.591 business ops/s、5915.987 Core messages/s、14166.495 fills/s。普通下单/撤单/批量下单/批量撤单p99分别49.119/101.777/100.466/74.907ms。245交易cycles、35生命周期，fundsDiff=0，hash=97556f569e28d682。
+- OS13 spin0：3649393 terminal business operations、361329 terminal Core messages、865313 fills，60.255s；60565.356 business ops/s、5996.619 Core messages/s、14360.742 fills/s。对应p99为47.087/101.842/100.925/72.744ms。248交易cycles、36生命周期、netDeposits=3000004500，fundsDiff=0，hash=dfd289160ec811cf。未达到预锁自旋收益门槛，最终默认改为0，保留可选参数和安全唤醒握手；不宣称整体吞吐提升或有效计算95%饱和。
+- 查询仍未达标：OS12 READY=3687/60347（6.11%），OS13=3257/60183（5.41%）；READY p99分别562/574us。独立价格终态响应14414/14557，约239/242次每秒；2ms价格生成等待只在工具价格producer，不更改Core新鲜度规则。查询问题未在本次两项修复中解决，不能称完整生产场景通过。
+- 八份JFR均DataLoss=0，原始文件大小/SHA在artifact的jfr-manifest.json，各文件旁保存summary。OS13 Leader core-2完整139s记录含初始化/预热/终检：callback 551921次平均169us，idleCommand约30.63s，commitReadyMatching 2839666次平均12.8us；存在等待协调成本，不将其算成有效业务CPU。完整记录/方法采样不能替代稳定测量窗口、无profiler吞吐或精确bytes/op；分配/native长期趋势与泄漏、正式JMH三节点运行及最终上限未验收。JMH场景已更新编译，本机没有执行性能测试；本机139项跨产品功能/资金/恢复测试通过，最终默认0另跑28项通过，与之前37项有重叠，不相加。
+- 原OS13日志恢复首次验证因未等Leader就绪而NOT_CONNECTED；保留失败证据。停机再启动四VM，等待本次进程回放并成为Leader后执行replay.py os13 retry，核对资金差0、248交易cycles及恢复的生命周期资金/持仓，hash仍为dfd289160ec811cf。业务断言通过后，清理已被systemd回收的临时load unit报not loaded，导致脚本退出非零、跳过末尾Core日志采集；不是业务核对失败。已修正清理脚本并语法检查，未为清理改动再启动服务器。readiness记录、原始result及异常均保留，不掩盖编排失败。
+- artifact根目录=/Users/atomex/Desktop/surprising/gcp-validation/2026-09-08-lane-handoff，os12/、os13/、os13-replay-retry/、financial-build.txt、default-zero-test.txt。四VM于05:32 UTC确认全部TERMINATED（instances-recovery-final.json）；未继续计费运行负载。云端默认参数由显式spin0验证，最终源码默认0构建通过；其余云端逻辑与7a4947fa一致。
