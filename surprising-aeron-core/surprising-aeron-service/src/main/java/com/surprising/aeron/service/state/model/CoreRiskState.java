@@ -47,7 +47,7 @@ public record CoreRiskState(
     }
 
     public static CoreRiskScanControlView defaultScanControl() {
-        return new CoreRiskScanControlView(1, "Aeron risk scan control", true, 1_000L, 64,
+        return new CoreRiskScanControlView(1, "Aeron risk scan control", true, 25L, 64,
                 "system", "default", 0);
     }
 

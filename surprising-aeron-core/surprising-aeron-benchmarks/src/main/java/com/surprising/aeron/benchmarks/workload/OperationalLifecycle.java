@@ -120,14 +120,19 @@ final class OperationalLifecycle implements AutoCloseable {
         price(RISK,1);
         long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
         long liquidationId=0;
+        long queries=0,batches=0,requeries=0,scanWork=0,scanDelayMs=0;
         while(liquidationId==0) {
-            if(System.nanoTime()>deadline)throw new IllegalStateException("liquidation starved by concurrent risk work");
+            if(System.nanoTime()>deadline)throw new IllegalStateException(
+                    "liquidation starved by concurrent risk work: queries="+queries+" batches="+batches
+                            +" requeries="+requeries+" scanWork="+scanWork+" scanDelayMs="+scanDelayMs);
             var work=work(CoreLiquidationWorkView.Purpose.EXECUTION);
+            queries++;
             var action=work.actions().stream().filter(a->a.userId()==victim).findFirst();
             int scanBudget=0;
             if(work.riskScanPending()) {
                 var control=CoreRiskScanControlCodec.decodeView(endpoint.query(
                         CoreMessageType.RISK_SCAN_CONTROL_QUERY,0,new byte[0]).data());
+                scanDelayMs=control.scanDelayMs();
                 long now=System.nanoTime();
                 if(control.enabled() && now>=nextRiskScanAtNanos) {
                     scanBudget=control.scanBatchSize();
@@ -135,11 +140,16 @@ final class OperationalLifecycle implements AutoCloseable {
                 }
             }
             if(!work.actions().isEmpty() || scanBudget>0) {
+                batches++;
                 var result=endpoint.liquidationBatch(work,scanBudget);
+                if(result==null)requeries++;
+                else scanWork+=result.riskScanContinuedUsers();
                 if(result!=null && result.pendingActions()==0 && result.obsoleteActions()==0
                         && action.isPresent()) liquidationId=action.get().liquidationId();
             }
         }
+        System.out.printf("liquidationScan queries=%d batches=%d requeries=%d scanWork=%d scanDelayMs=%d elapsedMs=%d%n",
+                queries,batches,requeries,scanWork,scanDelayMs,TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-started));
         long expectedId=liquidationId;
         var insurance=work(CoreLiquidationWorkView.Purpose.INSURANCE).resolutions().stream()
                 .filter(a->a.liquidationId()==expectedId).findFirst().orElseThrow();

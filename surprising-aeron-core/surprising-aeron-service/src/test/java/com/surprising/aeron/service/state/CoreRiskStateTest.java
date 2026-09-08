@@ -33,6 +33,19 @@ class CoreRiskStateTest {
     private final TradingCoreReducer reducer = new TradingCoreReducer();
 
     @Test
+    void defaultRiskCadencePreservesBoundedWorkAndSnapshotControl() {
+        TradingCoreState state = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
+        assertThat(state.riskState().scanControl().scanDelayMs()).isEqualTo(25);
+        assertThat(state.riskState().scanControl().scanBatchSize()).isEqualTo(64);
+        state = reducer.updateRiskScanControl(state, new UpdateRiskScanControlCommand(
+                1, "Operator cadence", true, 500, 32, "admin", "configuration"), 2_000);
+        TradingCoreState restored = TradingStateSnapshotCodec.decode(
+                TradingStateSnapshotCodec.encode(state), ProductLine.LINEAR_PERPETUAL);
+        assertThat(restored.riskState().scanControl()).isEqualTo(state.riskState().scanControl());
+        assertThat(restored.riskState().scanControl().scanDelayMs()).isEqualTo(500);
+    }
+
+    @Test
     void disabledRiskScanDoesNotCalculateRisk() {
         TradingCoreState state = reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL),
                 instrument(ContractType.LINEAR_PERPETUAL, 1));
