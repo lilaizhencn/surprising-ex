@@ -9,7 +9,6 @@ import com.surprising.aeron.service.state.model.CoreRiskSnapshot;
 import com.surprising.aeron.service.state.model.CoreRiskState;
 
 import java.util.Map;
-import java.util.Set;
 import java.util.HashMap;
 import java.util.function.Predicate;
 
@@ -63,13 +62,6 @@ public final class RollingBusinessStateHash {
     private final UserHashUpdater userHashUpdater = new UserHashUpdater();
 
     private record OwnedContribution(long value) {}
-
-    static long[] aggregateForTest(long[] additions, long[] removals) {
-        Aggregate aggregate = new Aggregate();
-        for (long contribution : additions) aggregate.add(contribution);
-        for (long contribution : removals) aggregate.remove(contribution);
-        return new long[]{aggregate.count, aggregate.sum, aggregate.xor};
-    }
 
     private RollingBusinessStateHash(TradingCoreState state, RuntimeIdentityRegistry identities) {
         productLine = state.productLine().ordinal();

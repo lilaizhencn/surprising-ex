@@ -19,22 +19,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
     private RuntimeDerivativeLiquidationProcessor() {
     }
 
-    public static TradingRuntimeState simulateExecution(TradingCoreState before,
-                                                        ExecuteLiquidationCommand command,
-                                                        RuntimeIdentityRegistry identities) {
-        return simulateExecution(before, command, List.of(), identities);
-    }
 
-    public static TradingRuntimeState simulateExecution(TradingCoreState before,
-                                                        ExecuteLiquidationCommand command,
-                                                        Collection<CoreOrderState> canceledOrders,
-                                                        RuntimeIdentityRegistry identities) {
-        if (before == null || command == null || identities == null || !before.productLine().isDerivative()) {
-            throw new IllegalArgumentException("invalid perpetual liquidation simulation");
-        }
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-        return applyExecutionRuntime(command, canceledOrders, runtime, identities);
-    }
 
     public static TradingRuntimeState applyExecution(TradingCoreState before,
                                                      ExecuteLiquidationCommand command,
@@ -137,18 +122,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
         return runtime;
     }
 
-    public static TradingRuntimeState simulateCancellationAdvance(TradingCoreState before,
-                                                                  ExecuteLiquidationCommand command,
-                                                                  Collection<CoreOrderState> canceledOrders,
-                                                                  long nextCursorOrderId,
-                                                                  RuntimeIdentityRegistry identities) {
-        if (before == null || command == null || identities == null || nextCursorOrderId <= 0
-                || !before.productLine().isDerivative()) {
-            throw new IllegalArgumentException("invalid liquidation cancellation simulation");
-        }
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-        return applyCancellationAdvanceRuntime(command, canceledOrders, nextCursorOrderId, runtime, identities);
-    }
 
     public static TradingRuntimeState applyCancellationAdvance(TradingCoreState before,
                                                                ExecuteLiquidationCommand command,
@@ -197,15 +170,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
         return runtime;
     }
 
-    public static TradingRuntimeState simulateResolution(TradingCoreState before,
-                                                         ResolveLiquidationCommand command,
-                                                         RuntimeIdentityRegistry identities) {
-        if (before == null || command == null || identities == null || !before.productLine().isDerivative()) {
-            throw new IllegalArgumentException("invalid liquidation resolution simulation");
-        }
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-        return applyResolutionRuntime(command, runtime, identities, before.riskState().liquidations().keySet());
-    }
 
     public static TradingRuntimeState applyResolution(TradingCoreState before,
                                                       ResolveLiquidationCommand command,
@@ -310,14 +274,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
         return runtime;
     }
 
-    public static TradingRuntimeState simulateAdl(TradingCoreState before, ExecuteAdlCommand command,
-                                                  RuntimeIdentityRegistry identities) {
-        if (before == null || command == null || identities == null || !before.productLine().isDerivative()) {
-            throw new IllegalArgumentException("invalid ADL simulation");
-        }
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-        return applyAdlRuntime(command, runtime, identities);
-    }
 
     public static TradingRuntimeState applyAdl(TradingCoreState before, ExecuteAdlCommand command,
                                                TradingRuntimeState runtime,

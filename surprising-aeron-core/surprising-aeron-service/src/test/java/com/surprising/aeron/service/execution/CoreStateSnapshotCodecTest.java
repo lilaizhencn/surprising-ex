@@ -270,15 +270,15 @@ class CoreStateSnapshotCodecTest {
     @Test
     void accountLanesRestoreWhileEveryConsumerIsPassiveThenOneActivationStartsAll() {
         byte[] control = populatedSnapshot(89);
-        AtomicReference<CoreProbeState.RestoreActivationState> beforeActivation = new AtomicReference<>();
-        SectionedCoreSnapshotParser.setBeforeActivationObserverForTest(state ->
-                beforeActivation.set(state.restoreActivationState()));
+        AtomicReference<CoreFaults.ActivationState> beforeActivation = new AtomicReference<>();
+        CoreFaults.beforeActivation(state ->
+                beforeActivation.set(CoreFaults.activationState(state)));
         try (CoreProbeState restored = CoreStateSnapshotCodec.decode(control, ProductLine.SPOT)) {
             assertThat(beforeActivation.get()).isNotNull();
             assertThat(beforeActivation.get().allPassive()).isTrue();
-            assertThat(restored.restoreActivationState().allActivated()).isTrue();
+            assertThat(CoreFaults.activationState(restored).allActivated()).isTrue();
         } finally {
-            SectionedCoreSnapshotParser.setBeforeActivationObserverForTest(null);
+            CoreFaults.beforeActivation(null);
         }
     }
 
@@ -287,7 +287,7 @@ class CoreStateSnapshotCodecTest {
         byte[] control = populatedSnapshot(90);
         AtomicReference<CoreProbeState> candidate = new AtomicReference<>();
         long threadsBefore = recoveryConsumerThreadCount();
-        SectionedCoreSnapshotParser.setBeforeActivationObserverForTest(state -> {
+        CoreFaults.beforeActivation(state -> {
             candidate.set(state);
             throw new IllegalStateException("injected passive candidate failure");
         });
@@ -296,10 +296,10 @@ class CoreStateSnapshotCodecTest {
                     .isInstanceOf(ProtocolException.class)
                     .hasMessageContaining("injected passive candidate failure");
             assertThat(candidate.get()).isNotNull();
-            assertThat(candidate.get().restoreActivationState().allPassive()).isTrue();
+            assertThat(CoreFaults.activationState(candidate.get()).allPassive()).isTrue();
             assertThat(recoveryConsumerThreadCount()).isEqualTo(threadsBefore);
         } finally {
-            SectionedCoreSnapshotParser.setBeforeActivationObserverForTest(null);
+            CoreFaults.beforeActivation(null);
         }
     }
 

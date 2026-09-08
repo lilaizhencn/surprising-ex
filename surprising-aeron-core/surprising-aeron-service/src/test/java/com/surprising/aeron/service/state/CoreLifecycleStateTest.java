@@ -180,7 +180,7 @@ class CoreLifecycleStateTest {
         ApplyFundingCommand cappedCommand = new ApplyFundingCommand(102, "BTC-USDT", 1, 10_000);
         TradingCoreReducer.FundingApplication cappedExpected = reducer.applyFundingWithFacts(capped, cappedCommand);
         RuntimeIdentityRegistry cappedIdentities = new RuntimeIdentityRegistry();
-        var cappedActual = RuntimePerpetualFundingProcessor.simulate(capped, cappedCommand,
+        var cappedActual = RuntimePerpetualFundingFixture.simulate(capped, cappedCommand,
                 null, null, cappedIdentities);
         RuntimeStateParityChecker.assertMatches(cappedExpected.state(), cappedIdentities, cappedActual.state());
         assertThat(cappedActual.payments()).isEqualTo(cappedExpected.payments());
@@ -216,7 +216,7 @@ class CoreLifecycleStateTest {
         TradingCoreState state = stateWithOppositePositions(ProductLine.LINEAR_PERPETUAL,
                 ContractType.LINEAR_PERPETUAL, 100, 10, 100);
         ApplyFundingCommand command = new ApplyFundingCommand(104, "BTC-USDT", 1, 10_000);
-        assertThatThrownBy(() -> RuntimePerpetualFundingProcessor.simulate(state, command,
+        assertThatThrownBy(() -> RuntimePerpetualFundingFixture.simulate(state, command,
                 null, null, new RuntimeIdentityRegistry()))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         exception -> assertThat(exception.code()).isEqualTo("MARK_PRICE_NOT_FOUND"));
@@ -224,13 +224,13 @@ class CoreLifecycleStateTest {
         TradingCoreState marked = reducer.applyMarkPrice(state,
                 new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 1, 1_700_000_000_000L));
         TradingCoreState funded = reducer.applyFunding(marked, command);
-        assertThatThrownBy(() -> RuntimePerpetualFundingProcessor.simulate(funded, command,
+        assertThatThrownBy(() -> RuntimePerpetualFundingFixture.simulate(funded, command,
                 null, null, new RuntimeIdentityRegistry()))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         exception -> assertThat(exception.code()).isEqualTo("STALE_SETTLEMENT_ID"));
 
         ApplyFundingCommand invalidCursor = new ApplyFundingCommand(105, "BTC-USDT", 1, 10_000, 1, 1);
-        assertThatThrownBy(() -> RuntimePerpetualFundingProcessor.simulate(marked, invalidCursor,
+        assertThatThrownBy(() -> RuntimePerpetualFundingFixture.simulate(marked, invalidCursor,
                 List.of(1L, 2L), UUID.fromString("00000000-0000-0000-0000-000000000105"),
                 new RuntimeIdentityRegistry()))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
@@ -394,7 +394,7 @@ class CoreLifecycleStateTest {
         assertThatThrownBy(() -> reducer.resolveLiquidation(liquidated, command))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         exception -> assertThat(exception.code()).isEqualTo("LIQUIDATION_DEFICIT_REMAINS"));
-        assertThatThrownBy(() -> RuntimeDerivativeLiquidationProcessor.simulateResolution(
+        assertThatThrownBy(() -> RuntimeDerivativeLiquidationFixture.simulateResolution(
                 liquidated, command, new RuntimeIdentityRegistry()))
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         exception -> assertThat(exception.code()).isEqualTo("LIQUIDATION_DEFICIT_REMAINS"));
@@ -432,7 +432,7 @@ class CoreLifecycleStateTest {
         TradingCoreState recovered = reducer.applyMarkPrice(state, command);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         RuntimeStateParityChecker.assertMatches(recovered, identities,
-                RuntimeDerivativeRiskProcessor.simulateMarkPrice(
+                RuntimeDerivativeRiskFixture.simulateMarkPrice(
                         state, command, state.users().keySet(), identities));
 
         assertThat(recovered.riskState().liquidations().get(1L).status())
@@ -568,7 +568,7 @@ class CoreLifecycleStateTest {
                 com.surprising.aeron.protocol.CorePositionSide.NET,
                 -10, 200, 1, 5, deficit - coverage);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        TradingRuntimeState runtimeResolved = RuntimeDerivativeLiquidationProcessor.simulateAdl(
+        TradingRuntimeState runtimeResolved = RuntimeDerivativeLiquidationFixture.simulateAdl(
                 state, command, identities);
         TradingCoreState resolved = reducer.executeAdl(state, command);
         RuntimeStateParityChecker.assertMatches(resolved, identities, runtimeResolved);
@@ -597,7 +597,7 @@ class CoreLifecycleStateTest {
                 new ResolveLiquidationCommand(1, ResolveLiquidationCommand.Resolution.INSURANCE, coverage));
         long residual = beforeAdl.riskState().liquidations().get(1L).deficitUnits();
 
-        assertThatThrownBy(() -> RuntimeDerivativeLiquidationProcessor.simulateAdl(beforeAdl,
+        assertThatThrownBy(() -> RuntimeDerivativeLiquidationFixture.simulateAdl(beforeAdl,
                 new com.surprising.aeron.protocol.ExecuteAdlCommand(1, 2, "BTC-USDT",
                         com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                         com.surprising.aeron.protocol.CorePositionSide.NET,
@@ -605,7 +605,7 @@ class CoreLifecycleStateTest {
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         exception -> assertThat(exception.code()).isEqualTo("ADL_POSITION_CONFLICT"));
 
-        assertThatThrownBy(() -> RuntimeDerivativeLiquidationProcessor.simulateAdl(beforeAdl,
+        assertThatThrownBy(() -> RuntimeDerivativeLiquidationFixture.simulateAdl(beforeAdl,
                 new com.surprising.aeron.protocol.ExecuteAdlCommand(1, 2, "BTC-USDT",
                         com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                         com.surprising.aeron.protocol.CorePositionSide.NET,
@@ -613,7 +613,7 @@ class CoreLifecycleStateTest {
                 .isInstanceOfSatisfying(CoreStateRejectedException.class,
                         exception -> assertThat(exception.code()).isEqualTo("STALE_MARK_PRICE"));
 
-        assertThatThrownBy(() -> RuntimeDerivativeLiquidationProcessor.simulateAdl(beforeAdl,
+        assertThatThrownBy(() -> RuntimeDerivativeLiquidationFixture.simulateAdl(beforeAdl,
                 new com.surprising.aeron.protocol.ExecuteAdlCommand(1, 2, "BTC-USDT",
                         com.surprising.aeron.protocol.CoreMarginMode.CROSS,
                         com.surprising.aeron.protocol.CorePositionSide.NET,

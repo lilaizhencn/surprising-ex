@@ -28,13 +28,6 @@ public final class RollingFundsStateHash {
     private boolean valueDirty = true;
     private long ownerGeneration;
 
-    static long[] aggregateForTest(long[] additions, long[] removals) {
-        Aggregate aggregate = new Aggregate();
-        for (long contribution : additions) aggregate.add(contribution);
-        for (long contribution : removals) aggregate.remove(contribution);
-        return new long[]{aggregate.count, aggregate.sum, aggregate.xor};
-    }
-
     private RollingFundsStateHash(TradingCoreState state, RuntimeIdentityRegistry identities) {
         if (state == null) throw new IllegalArgumentException("funds state is required");
         productLine = state.productLine().ordinal();

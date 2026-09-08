@@ -69,7 +69,7 @@ class CoreRiskStateTest {
         TradingCoreState marked = reducer.applyMarkPrice(state, markCommand);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         RuntimeStateParityChecker.assertMatches(marked, identities,
-                RuntimeDerivativeRiskProcessor.simulateMarkPrice(
+                RuntimeDerivativeRiskFixture.simulateMarkPrice(
                         state, markCommand, state.users().keySet(), identities));
 
         CoreRiskSnapshot risk = marked.riskState().snapshots().get("7:BTC-USDT");
@@ -416,7 +416,7 @@ class CoreRiskStateTest {
                 1_700_000_000_001L);
         TradingCoreState after = reducer.applyMarkPrice(state, latest);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        TradingRuntimeState runtime = RuntimeDerivativeRiskProcessor.simulateMarkPrice(
+        TradingRuntimeState runtime = RuntimeDerivativeRiskFixture.simulateMarkPrice(
                 state, latest, state.users().keySet(), identities);
         RuntimeStateParityChecker.assertMatches(after, identities, runtime);
         assertThat(after.riskState().scan().scanStartPriceSequence()).isEqualTo(1);

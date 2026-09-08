@@ -19,19 +19,6 @@ public final class RuntimeDerivativeRiskProcessor {
     private RuntimeDerivativeRiskProcessor() {
     }
 
-    public static TradingRuntimeState simulateMarkPrice(TradingCoreState before, ApplyMarkPriceCommand command,
-                                                        Iterable<Long> indexedUserIds,
-                                                        RuntimeIdentityRegistry identities) {
-        if (before == null || command == null || identities == null) {
-            throw new IllegalArgumentException("invalid perpetual risk simulation");
-        }
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-        applyMarkPriceRuntime(command, runtime, identities);
-        if (runtime.riskScanControl().enabled()) {
-            applyContinuationRuntime(runtime.riskScanControl().scanBatchSize(), indexedUserIds, runtime, identities);
-        }
-        return runtime;
-    }
 
     public static void applyMarkPrice(TradingCoreState before, ApplyMarkPriceCommand command,
                                       Iterable<Long> indexedUserIds, TradingRuntimeState runtime,
@@ -75,17 +62,6 @@ public final class RuntimeDerivativeRiskProcessor {
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
     }
 
-    public static TradingRuntimeState simulateContinuation(TradingCoreState before, int maxWork,
-                                                           Iterable<Long> indexedUserIds,
-                                                           RuntimeIdentityRegistry identities) {
-        if (before == null || identities == null) {
-            throw new IllegalArgumentException("invalid perpetual risk continuation");
-        }
-        if (maxWork <= 0 || maxWork > 4096) throw new IllegalArgumentException("invalid risk scan batch size");
-        TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
-        applyContinuationRuntime(maxWork, indexedUserIds, runtime, identities);
-        return runtime;
-    }
 
     public static void applyContinuation(TradingCoreState before, int maxWork,
                                          Iterable<Long> indexedUserIds, TradingRuntimeState runtime,

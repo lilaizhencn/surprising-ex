@@ -9,7 +9,6 @@ import com.surprising.aeron.protocol.CoreProtocol;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreCommandResultCodec;
-import com.surprising.aeron.protocol.CoreExecutionView;
 import com.surprising.aeron.protocol.CoreOrderStateView;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
@@ -29,7 +28,6 @@ import com.surprising.aeron.protocol.CoreLiquidationProgressCodec;
 import com.surprising.aeron.protocol.CoreLiquidationProgressView;
 import com.surprising.aeron.protocol.CoreLiquidationBatchResultCodec;
 import com.surprising.aeron.protocol.CoreLiquidationBatchResultView;
-import com.surprising.aeron.protocol.CoreOrderBatchResult;
 import com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand;
 import com.surprising.aeron.protocol.ExecuteLiquidationBatchAction;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
@@ -100,11 +98,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 public final class CoreProbeState implements AutoCloseable {
-    @FunctionalInterface
-    interface CommitFaultInjector {
-        void inject(String phase);
-    }
-
     private com.surprising.aeron.service.state.realtime.RealtimeStateCapture realtimeCapture;
     com.surprising.aeron.service.state.realtime.RealtimeStateCapture attachRealtime(
             com.surprising.aeron.client.RealtimeOutbox outbox) {
@@ -169,12 +162,6 @@ public final class CoreProbeState implements AutoCloseable {
         return 1;
     }
 
-    private static volatile CommitFaultInjector commitFaultInjector = ignored -> { };
-
-    static void setCommitFaultInjectorForTest(CommitFaultInjector injector) {
-        commitFaultInjector = injector == null ? ignored -> { } : injector;
-    }
-
     static final int MAX_IDEMPOTENCY_RESULTS = 128;
     static final long MAX_RESULT_LEDGER_BYTES = 32L * 1024 * 1024;
     static final int MAX_STORED_RESPONSE_BYTES = Math.toIntExact(MAX_RESULT_LEDGER_BYTES);
@@ -186,8 +173,6 @@ public final class CoreProbeState implements AutoCloseable {
     private static final int MAX_BOOK_BOOTSTRAP_SNAPSHOTS = 4;
     private static final int DEFAULT_TRIGGER_SCAN_BATCH_SIZE = 2;
     private static final System.Logger LOG = System.getLogger(CoreProbeState.class.getName());
-    private static final boolean BENCHMARK_SKIP_MATCHING_SUBMIT = Boolean.getBoolean(
-            "surprising.aeron.benchmark.skip-matching-submit");
     private static final int MATCHING_PHASE_LOG_INTERVAL = Integer.getInteger(
             "surprising.aeron.matching-phase-log-interval", 0);
     private static final boolean MATCHING_PHASE_METRICS_ENABLED = MATCHING_PHASE_LOG_INTERVAL > 0;
@@ -273,8 +258,6 @@ public final class CoreProbeState implements AutoCloseable {
     private boolean snapshotProjectionDirty;
     private boolean snapshotProjectionProvisionalOnly;
     private com.surprising.aeron.service.matching.FatalMatchingDivergenceException fatalFailure;
-    private Long orderBatchExpectedLaneMaskForTest;
-    private Runnable orderBatchAfterItemFaultForTest;
     private SnapshotFence snapshotFence;
     private long lastSnapshotId;
     private List<CoreOrderStateView> commandOrderViews = List.of();
@@ -1183,7 +1166,6 @@ public final class CoreProbeState implements AutoCloseable {
             return true;
         }
         if (batch.sequentialAdmission || batch.kind != OrderBatchKind.PLACE || batch.items.size() < 2
-                || BENCHMARK_SKIP_MATCHING_SUBMIT
                 || pendingMatching.hasEarlierUser(batch.sequence, pending.command().header().userId())
                 || !pending.clusterIndependent && conflictsWithEarlierPipelinedBatch(batch)) {
             return false;
@@ -1235,8 +1217,7 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private boolean preparePipelinedPlaceBatch(OrderBatchPending batch, PendingMatching pending) {
-        if (batch.sequentialAdmission || batch.kind != OrderBatchKind.PLACE || batch.items.size() < 2
-                || BENCHMARK_SKIP_MATCHING_SUBMIT) {
+        if (batch.sequentialAdmission || batch.kind != OrderBatchKind.PLACE || batch.items.size() < 2) {
             return false;
         }
         long userId = pending.command().header().userId();
@@ -1618,7 +1599,7 @@ public final class CoreProbeState implements AutoCloseable {
             return completePipelinedPlaceBatch(
                     batch, pending, matchingResult, clusterTimestamp, clusterPosition);
         }
-        if (batch.kind == OrderBatchKind.CANCEL && !BENCHMARK_SKIP_MATCHING_SUBMIT) {
+        if (batch.kind == OrderBatchKind.CANCEL) {
             if (batch.pipelinedMatchingResults.isEmpty()
                     || batch.pipelinedMatchingResults.getFirst() != matchingResult) {
                 throw failOrderBatch(batch, pending, "cancel chunk completion identity mismatch", null);
@@ -1647,12 +1628,10 @@ public final class CoreProbeState implements AutoCloseable {
                                               CoreMatchingResult matchingResult) {
         batch.lastMatchingResult = matchingResult;
         batch.retainMatchingResult(matchingResult);
-        if (!BENCHMARK_SKIP_MATCHING_SUBMIT) {
-            try {
-                batch.advanceMatcher(matchingResult);
-            } catch (IllegalArgumentException exception) {
-                throw failOrderBatch(batch, pending, "order batch matcher transition is not contiguous", exception);
-            }
+        try {
+            batch.advanceMatcher(matchingResult);
+        } catch (IllegalArgumentException exception) {
+            throw failOrderBatch(batch, pending, "order batch matcher transition is not contiguous", exception);
         }
         OrderBatchItem item = batch.items.get(batch.nextIndex);
         ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
@@ -1701,19 +1680,17 @@ public final class CoreProbeState implements AutoCloseable {
                 throw failOrderBatch(batch, pending,
                         "matcher continuation returned " + matchingResult.resultCode(), null);
             }
-            if (index > 0 && !BENCHMARK_SKIP_MATCHING_SUBMIT) {
+            if (index > 0) {
                 validateMatchingEvidence(pending, matchingResult);
                 applyMatcherProgress(matchingResult);
             }
             batch.lastMatchingResult = matchingResult;
             batch.retainMatchingResult(matchingResult);
-            if (!BENCHMARK_SKIP_MATCHING_SUBMIT) {
-                try {
-                    batch.advanceMatcher(matchingResult);
-                } catch (IllegalArgumentException exception) {
-                    throw failOrderBatch(batch, pending,
-                            "order batch matcher transition is not contiguous", exception);
-                }
+            try {
+                batch.advanceMatcher(matchingResult);
+            } catch (IllegalArgumentException exception) {
+                throw failOrderBatch(batch, pending,
+                        "order batch matcher transition is not contiguous", exception);
             }
             OrderBatchItem item = batch.items.get(batch.nextIndex);
             ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
@@ -1958,11 +1935,6 @@ public final class CoreProbeState implements AutoCloseable {
             }
             refreshSnapshotProjection();
         }
-        try {
-            runOrderBatchAfterItemFaultForTest();
-        } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException exception) {
-            throw failOrderBatch(batch, pending, "order batch pre-commit validation failed", exception);
-        }
         runtimePlaceOrderState.completePendingReservations(batch.sequence);
         if (!batch.laneCommitCompleted && !batch.runtimeChangedOrderIds.isEmpty()) {
             if (RuntimeCommandProcessor.stampChangedOrdersByLane(runtimePlaceOrderState,
@@ -2043,10 +2015,6 @@ public final class CoreProbeState implements AutoCloseable {
                     batch.changedUserIds.valueAt(index));
         }
         batch.actualLaneMask = expectedLaneMask;
-        if (orderBatchExpectedLaneMaskForTest != null) {
-            expectedLaneMask = orderBatchExpectedLaneMaskForTest;
-            orderBatchExpectedLaneMaskForTest = null;
-        }
         var finalMatchingResult = batch.lastMatchingResult == null
                 ? new com.surprising.aeron.service.matching.CoreMatchingResult(true, "NO_NATIVE_COMMAND")
                 .withCoreSequence(batch.sequence)
@@ -3082,14 +3050,6 @@ public final class CoreProbeState implements AutoCloseable {
 
     private void submitMatching(PendingMatching pending) {
         if (matchingSubmissionDeferred(pending.sequence())) return;
-        if (BENCHMARK_SKIP_MATCHING_SUBMIT) {
-            laneCommandContexts.required(pending.sequence()).publishMatchingCompletion(
-                    new com.surprising.aeron.service.matching.CoreMatchingResult(
-                            true, "BENCHMARK_SKIPPED").withCoreSequence(pending.sequence()));
-            pending.matchingSubmitted();
-            matchingSubmissionCompleted(pending);
-            return;
-        }
         if (pendingOrderBatches.containsKey(pending.sequenceKey())) {
             submitOrderBatchMatching(pending);
             if (pending.isMatchingSubmitted()) matchingSubmissionCompleted(pending);
@@ -3742,10 +3702,8 @@ public final class CoreProbeState implements AutoCloseable {
                     + " result=" + matchingResult.resultCode());
             throw failMatching(pending, detail, failure);
         }
-        if (!BENCHMARK_SKIP_MATCHING_SUBMIT) {
-            validateMatchingEvidence(pending, matchingResult);
-            applyMatcherProgress(matchingResult);
-        }
+        validateMatchingEvidence(pending, matchingResult);
+        applyMatcherProgress(matchingResult);
         if (pendingOrderBatches.containsKey(sequence)) {
             return completeOrderBatchMatching(sequence, matchingResult, clusterTimestamp, clusterPosition);
         }
@@ -4843,10 +4801,8 @@ public final class CoreProbeState implements AutoCloseable {
                                 "matcher continuation returned " + matching.resultCode(),
                                 batch.pipelinedMatchingFailure);
                     }
-                    if (!BENCHMARK_SKIP_MATCHING_SUBMIT) {
-                        validateMatchingEvidence(pending, matching);
-                        applyMatcherProgress(matching);
-                    }
+                    validateMatchingEvidence(pending, matching);
+                    applyMatcherProgress(matching);
                     batch.matcherTransition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(
                             matching.nativeCommand().matcherSequence() - 1, matching.matcherPrefix().before());
                     applyPipelinedPlaceBatchResults(batch, pending, matching);
@@ -5117,22 +5073,6 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     boolean activated() { return activated; }
-
-    RestoreActivationState restoreActivationState() {
-        return new RestoreActivationState(activated, runtime.activated(), matchingAdapter.activated(),
-                runtimeProjectionJournal.activated(), exportState.activated());
-    }
-
-    record RestoreActivationState(boolean core, boolean runtime, boolean matcher,
-                                  boolean projector, boolean exportMaterializer) {
-        boolean allPassive() {
-            return !core && !runtime && !matcher && !projector && !exportMaterializer;
-        }
-
-        boolean allActivated() {
-            return core && runtime && matcher && projector && exportMaterializer;
-        }
-    }
 
     PendingMatching pendingMatching(long sequence) {
         return pendingMatching.get(sequence);
@@ -5531,24 +5471,6 @@ public final class CoreProbeState implements AutoCloseable {
     boolean snapshotHasOutstandingReservation() {
         return currentAdmission != null
                 || runtimeProjectionJournal.hasOutstandingReservation();
-    }
-
-    void failOrderBatchLaneMaskPreflightForTest(long expectedLaneMask) {
-        if ((expectedLaneMask & ~validAccountLaneMask()) != 0) {
-            throw new IllegalArgumentException("test lane mask is outside configured topology");
-        }
-        orderBatchExpectedLaneMaskForTest = expectedLaneMask;
-    }
-
-    void failOrderBatchAfterItemForTest(Runnable fault) {
-        orderBatchAfterItemFaultForTest = fault;
-    }
-
-    private void runOrderBatchAfterItemFaultForTest() {
-        Runnable fault = orderBatchAfterItemFaultForTest;
-        if (fault == null) return;
-        orderBatchAfterItemFaultForTest = null;
-        fault.run();
     }
 
     Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> feePolicies() {
@@ -6153,14 +6075,12 @@ public final class CoreProbeState implements AutoCloseable {
             try {
                 long sequence = Math.incrementExact(runtimeProjectionJournal.publishedSequence());
                 try {
-                    commitFaultInjector.inject("preflight");
                     if (currentAdmission == null) {
                         throw new IllegalStateException("runtime commit must be admitted before mutation");
                     }
                     runtimePlaceOrderState.appendFundsDelta(commandFundsAccumulator);
                     if (realtimeCapture != null) runtimePlaceOrderState.captureRealtimeChanges(realtimeCapture);
                     runtime.commitRuntimeChanges(runtimePlaceOrderState, runtimePlaceOrderIdentities);
-                    commitFaultInjector.inject("indexes");
                     currentAdmission.publish(sequence);
                     currentProjectionPoint = new RuntimeProjectionPoint(sequence, null);
                     currentProjectionPoint.completeSequence();

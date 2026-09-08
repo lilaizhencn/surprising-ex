@@ -28,13 +28,8 @@ import java.util.UUID;
 
 final class SectionedCoreSnapshotParser {
 
-    private static volatile java.util.function.Consumer<CoreProbeState> beforeActivationObserverForTest;
 
     private SectionedCoreSnapshotParser() {
-    }
-
-    static void setBeforeActivationObserverForTest(java.util.function.Consumer<CoreProbeState> observer) {
-        beforeActivationObserverForTest = observer;
     }
 
     static Components parse(byte[][] payloads, ProductLine expectedProductLine) {
@@ -257,8 +252,6 @@ final class SectionedCoreSnapshotParser {
                         manifest.projectionSequence(), feePolicies, pendingTransfers,
                         manifest.auditBusinessStateHash(), manifest.auditFundsStateHash());
                 candidate.restoreAccountLaneSnapshots(accountLanes, manifest.coreSequence());
-                java.util.function.Consumer<CoreProbeState> observer = beforeActivationObserverForTest;
-                if (observer != null) observer.accept(candidate);
                 candidate.activate();
                 return candidate;
             } catch (RuntimeException exception) {

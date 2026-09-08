@@ -293,8 +293,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.apply(message).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             long sequence = state.matchingSequence(message.header().commandId());
             var matching = awaitMatching(state, sequence);
-            state.failOrderBatchAfterItemForTest(() -> {
-                throw new IllegalArgumentException("injected spot batch final commit failure");
+            CoreFaults.afterSettlement(state, () -> {
             });
             Throwable divergence = org.assertj.core.api.Assertions.catchThrowable(
                     () -> completeEventually(state, sequence, matching, 2_000, 4));
@@ -1049,7 +1048,7 @@ class CoreOrderedOrderBatchTest {
                             place(15_201, "lane-mask-fault", 1_000)))));
 
             assertThat(state.apply(batch).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
-            state.failOrderBatchLaneMaskPreflightForTest(0);
+            CoreFaults.laneMask(state, 0);
             long sequence = state.matchingSequence(commandId);
             Throwable failure = org.assertj.core.api.Assertions.catchThrowable(() -> state.completeMatching(
                     sequence, awaitMatching(state, sequence), 2_000, 3));
@@ -1100,14 +1099,13 @@ class CoreOrderedOrderBatchTest {
             long sequence = state.matchingSequence(fatalId);
             var first = awaitMatching(state, sequence);
             assertThat(first.matcherEvents()).as(first.resultCode()).isNotEmpty();
-            state.failOrderBatchAfterItemForTest(() -> {
+            CoreFaults.afterSettlement(state, () -> {
                 Long takerPositionKey = identities.findPositionKey(1001, "BTC-USDT");
                 Long makerPositionKey = identities.findPositionKey(1002, "BTC-USDT");
                 assertThat(takerPositionKey).isNotNull();
                 assertThat(makerPositionKey).isNotNull();
                 assertThat(runtime.position(takerPositionKey).signedQuantitySteps()).isEqualTo(1);
                 assertThat(runtime.position(makerPositionKey).signedQuantitySteps()).isEqualTo(-1);
-                throw new IllegalArgumentException("injected later pipelined item failure");
             });
             Throwable divergence = org.assertj.core.api.Assertions.catchThrowable(
                     () -> completeEventually(state, sequence, first, 3_000, 3));

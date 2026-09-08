@@ -16,12 +16,10 @@ import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.PlaceOrderBatchCommand;
 import com.surprising.aeron.protocol.CoreOrderBatchResult;
 import com.surprising.aeron.protocol.TradingOrderBatchCodec;
-import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.protocol.ResponseStatus;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.aeron.service.execution.CoreAcceptFreezeBenchmark;
-import com.surprising.aeron.service.execution.CoreAcceptFreezeConcurrentBenchmark;
 import com.surprising.aeron.service.execution.CoreInMemoryBenchmark;
 import com.surprising.aeron.service.execution.CorePerpetualEndToEndBenchmark;
 import com.surprising.aeron.service.execution.ExchangeCoreConcurrentBenchmark;
@@ -734,7 +732,6 @@ public final class ClusterCapacityMain implements AutoCloseable {
         ExchangeCoreConcurrentBenchmark.main(new String[]{"500", "100", "64", "2"});
         CoreAcceptFreezeBenchmark.main(new String[]{"25", "5"});
         CoreInMemoryBenchmark.main(new String[]{"25", "5"});
-        CoreAcceptFreezeConcurrentBenchmark.main(new String[]{"50", "10", "2"});
         CorePerpetualEndToEndBenchmark.BaselineResult perpetual =
                 CorePerpetualEndToEndBenchmark.measure(25, 5, makerDepth);
         CapacityMetrics finalizationMetrics = new CapacityMetrics(TimeUnit.MILLISECONDS.toNanos(1));

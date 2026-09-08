@@ -30,7 +30,7 @@ class ClusterCommandPipelineTest {
         try (Fixture f = new Fixture(product)) {
             f.setup();
             var outbox = new com.surprising.aeron.client.RealtimeOutbox(1024, 1_048_576);
-            f.service.attachRealtimeForTest(outbox);
+            CoreFaults.attachRealtime(f.service, outbox);
             var field = SurprisingClusteredService.class.getDeclaredField("snapshotRequests");
             field.setAccessible(true);
             @SuppressWarnings("unchecked")
@@ -335,7 +335,7 @@ class ClusterCommandPipelineTest {
             live.applyAll(liquidity); serial.applyAll(liquidity);
             live.responses.clear();
             var outbox = new com.surprising.aeron.client.RealtimeOutbox(1024, 1_048_576);
-            live.service.attachRealtimeForTest(outbox);
+            CoreFaults.attachRealtime(live.service, outbox);
             var first = batch ? live.placeBatch(11, "BTC-USDT", 1000)
                     : live.place(11, "BTC-USDT", 301, 100, 2, CoreOrderSide.BUY);
             var second = batch ? live.placeBatch(disjointUser(11), secondSymbol, 2000)

@@ -415,7 +415,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         assertThat(marked.user(USER_ID).positions().get(option.symbol()).signedQuantitySteps()).isEqualTo(1);
         assertThat(total(marked, option.settleAsset())).isEqualTo(100);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        TradingRuntimeState runtime = RuntimeDerivativeRiskProcessor.simulateMarkPrice(
+        TradingRuntimeState runtime = RuntimeDerivativeRiskFixture.simulateMarkPrice(
                 opening, mark, opening.users().keySet(), identities);
         try {
             RuntimeStateParityChecker.assertMatches(marked, identities, runtime);
@@ -455,7 +455,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         assertThat(risk.status()).isEqualTo(CoreRiskStatus.LIQUIDATION);
         TradingCoreState beforeMark = opening;
         assertRuntimeParity(beforeMark, marked,
-                identities -> RuntimeDerivativeRiskProcessor.simulateMarkPrice(
+                identities -> RuntimeDerivativeRiskFixture.simulateMarkPrice(
                         beforeMark, mark, beforeMark.users().keySet(), identities));
     }
 
@@ -477,7 +477,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
                 .isEqualTo(3_980);
         assertThat(total(liquidated, option.settleAsset())).isEqualTo(2 * WALLET);
         assertRuntimeParity(marked, liquidated,
-                identities -> RuntimeDerivativeLiquidationProcessor.simulateExecution(marked, liquidation, identities));
+                identities -> RuntimeDerivativeLiquidationFixture.simulateExecution(marked, liquidation, identities));
 
         ResolveLiquidationCommand insurance = new ResolveLiquidationCommand(plan.liquidationId(),
                 ResolveLiquidationCommand.Resolution.INSURANCE, 2_020);
@@ -485,7 +485,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         assertThat(insured.riskState().liquidations().get(plan.liquidationId()).status())
                 .isEqualTo(CoreLiquidationState.Status.ADL_REQUIRED);
         assertRuntimeParity(liquidated, insured,
-                identities -> RuntimeDerivativeLiquidationProcessor.simulateResolution(
+                identities -> RuntimeDerivativeLiquidationFixture.simulateResolution(
                         liquidated, insurance, identities));
 
         ExecuteAdlCommand adl = new ExecuteAdlCommand(plan.liquidationId(), USER_ID, option.symbol(),
@@ -500,7 +500,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
                 .isEqualTo(CoreLiquidationState.Status.COMPLETED);
         assertThat(total(completed, option.settleAsset())).isEqualTo(2 * WALLET);
         assertRuntimeParity(insured, completed,
-                identities -> RuntimeDerivativeLiquidationProcessor.simulateAdl(insured, adl, identities));
+                identities -> RuntimeDerivativeLiquidationFixture.simulateAdl(insured, adl, identities));
         assertThat(TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(completed), ProductLine.OPTION))
                 .isEqualTo(completed);
     }
@@ -525,7 +525,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         assertThat(matched.user(MAKER_ID).balances().get(option.settleAsset()).lockedUnits()).isEqualTo(40);
 
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        try (TradingRuntimeState runtime = RuntimeDerivativeMatchProcessor.simulate(
+        try (TradingRuntimeState runtime = RuntimeDerivativeMatchFixture.simulate(
                 beforeMatch, 302, matches, identities)) {
             RuntimeStateParityChecker.assertMatches(matched, identities, runtime);
         }
@@ -552,7 +552,7 @@ class CoreDeliveryOptionFinancialMatrixTest {
         assertThat(total(closed, option.settleAsset())).isEqualTo(2 * WALLET);
 
         RuntimeIdentityRegistry closeIdentities = new RuntimeIdentityRegistry();
-        try (TradingRuntimeState runtime = RuntimeDerivativeMatchProcessor.simulate(
+        try (TradingRuntimeState runtime = RuntimeDerivativeMatchFixture.simulate(
                 beforeClose, 303, closeMatches, closeIdentities)) {
             RuntimeStateParityChecker.assertMatches(closed, closeIdentities, runtime);
         }

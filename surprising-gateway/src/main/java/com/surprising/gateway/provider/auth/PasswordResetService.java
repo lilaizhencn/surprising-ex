@@ -78,10 +78,6 @@ public class PasswordResetService {
         return new ResetResult(true);
     }
 
-    String digestForTest(String code, String purpose, String destination) {
-        return digest(code, purpose, destination);
-    }
-
     private Optional<GatewayUserRepository.UserCredential> credential(String identifier) {
         if (identifier.contains("@")) {
             return persistence.credentialByEmail(identifier);

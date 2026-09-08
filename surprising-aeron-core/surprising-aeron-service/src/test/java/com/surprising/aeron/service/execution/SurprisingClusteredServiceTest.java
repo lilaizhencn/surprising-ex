@@ -109,7 +109,7 @@ class SurprisingClusteredServiceTest {
                         method.getName().equals("idleStrategy") ? idle : method.invoke(delegate, arguments));
         service.onStart(controlled, null);
         var outbox = new com.surprising.aeron.client.RealtimeOutbox(1024, 1_048_576);
-        service.attachRealtimeForTest(outbox);
+        CoreFaults.attachRealtime(service, outbox);
         try {
             service.state().apply(timerInstrument());
             service.state().apply(command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
@@ -176,7 +176,7 @@ class SurprisingClusteredServiceTest {
     @Test
     void exhaustedRealtimeOutboxDoesNotRejectOrLeaveUnsettledBusinessCommands() {
         var service=service();service.onStart(cluster(),null);
-        var outbox=new com.surprising.aeron.client.RealtimeOutbox(2,128);service.attachRealtimeForTest(outbox);
+        var outbox=new com.surprising.aeron.client.RealtimeOutbox(2,128);CoreFaults.attachRealtime(service, outbox);
         try {
             replayWithoutSession(service,timerInstrument());
             replayWithoutSession(service,command(CoreMessageType.ADJUST_BALANCE,1,1001,
@@ -200,7 +200,7 @@ class SurprisingClusteredServiceTest {
     void realtimePublishesCommittedBalancesAndOrdersAndStopsOnFollower() {
         var service=service(); service.onStart(cluster(),null);
         var outbox=new com.surprising.aeron.client.RealtimeOutbox(1024,1_048_576);
-        service.attachRealtimeForTest(outbox);
+        CoreFaults.attachRealtime(service, outbox);
         try {
             replayWithoutSession(service,timerInstrument());
             replayWithoutSession(service,command(CoreMessageType.ADJUST_BALANCE,1,1001,

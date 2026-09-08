@@ -214,11 +214,6 @@ public final class SurprisingClusteredService implements ClusteredService {
     int commandWindowSize() { return commandWindow.size(); }
     int commandWindowHighWaterMark() { return commandWindowHighWaterMark; }
 
-    void attachRealtimeForTest(com.surprising.aeron.client.RealtimeOutbox outbox) {
-        realtimeOutbox = outbox;
-        realtimeCapture = state.attachRealtime(outbox);
-    }
-
     private void processRequest(ClientSession session, CoreMessage request, long timestamp, long clusterPosition) {
         processingLogCallback = true;
         try {

@@ -88,7 +88,7 @@ class RuntimeDerivativeMatchProcessorTest {
         TradingRuntimeState runtime = RuntimeStateProjector.project(before, identities);
         runtime.putUser(new UserRuntime(ProductLine.LINEAR_PERPETUAL, 99, 999, unrelated.positionMode()));
 
-        RuntimeDerivativeMatchProcessor.applyTransition(before, expected, 11, matches, runtime, identities);
+        RuntimeDerivativeMatchFixture.applyTransition(before, expected, 11, matches, runtime, identities);
 
         assertThat(runtime.user(99).revision()).isEqualTo(999);
     }
@@ -109,7 +109,7 @@ class RuntimeDerivativeMatchProcessorTest {
         TradingCoreState after = new TradingCoreReducer().applyMatches(before, 11, "BTC", "USDT", matches);
 
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        TradingRuntimeState simulated = RuntimeDerivativeMatchProcessor.simulate(before, 11, matches, identities);
+        TradingRuntimeState simulated = RuntimeDerivativeMatchFixture.simulate(before, 11, matches, identities);
 
         int assetId = identities.assetId("USDT");
         assertThat(simulated.treasury().fee(assetId))
@@ -143,7 +143,7 @@ class RuntimeDerivativeMatchProcessorTest {
         TradingCoreState after = new TradingCoreReducer().applyMatches(before, 11, "BTC", "USDT", List.of());
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
 
-        TradingRuntimeState simulated = RuntimeDerivativeMatchProcessor.simulate(before, 11, List.of(), identities);
+        TradingRuntimeState simulated = RuntimeDerivativeMatchFixture.simulate(before, 11, List.of(), identities);
 
         RuntimeStateParityChecker.assertMatches(after, identities, simulated);
     }
@@ -207,7 +207,7 @@ class RuntimeDerivativeMatchProcessorTest {
                 + closed.treasuryState().feeBalances().get("USDT")).isEqualTo(3_000_000_000_000L);
 
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
-        TradingRuntimeState runtime = RuntimeDerivativeMatchProcessor.simulateTransition(
+        TradingRuntimeState runtime = RuntimeDerivativeMatchFixture.simulateTransition(
                 readyToClose, closed, 14, betterFill, identities);
         RuntimeStateParityChecker.assertMatches(closed, identities, runtime);
     }
@@ -230,7 +230,7 @@ class RuntimeDerivativeMatchProcessorTest {
         TradingCoreState after = new TradingCoreReducer().applyMatches(before, 11, "BTC", "USDT", matches);
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
 
-        TradingRuntimeState simulated = RuntimeDerivativeMatchProcessor.simulate(before, 11, matches, identities);
+        TradingRuntimeState simulated = RuntimeDerivativeMatchFixture.simulate(before, 11, matches, identities);
 
         int assetId = identities.assetId("USDT");
         assertThat(simulated.treasury().fee(assetId))

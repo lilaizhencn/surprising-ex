@@ -61,8 +61,6 @@ public final class RuntimeProjectionState {
     private long cachedFreezeSequence;
     private long freezeCount;
     private Throwable failure;
-    private volatile long failOnSequence = -1;
-    private volatile int failAfterMutations = -1;
     private final MutationJournal mutationJournal = new MutationJournal();
 
     public RuntimeProjectionState(TradingCoreState initial, long businessStateHash, long fundsStateHash) {
@@ -111,10 +109,10 @@ public final class RuntimeProjectionState {
     public void apply(List<RuntimeFactFrame> patches) {
         if (patches == null || patches.isEmpty()) throw new IllegalArgumentException("projection batch required");
         requireHealthy();
-        MutationJournal inverse = mutationJournal.reset(-1);
+        MutationJournal inverse = mutationJournal.reset();
         try {
             for (RuntimeFactFrame patch : patches) {
-                armInjectedFailure(patch, inverse);
+
                 applyPatch(patch, inverse);
             }
             cachedFreeze = null;
@@ -128,9 +126,9 @@ public final class RuntimeProjectionState {
 
     public void apply(RuntimeFactFrame patch) {
         requireHealthy();
-        MutationJournal inverse = mutationJournal.reset(-1);
+        MutationJournal inverse = mutationJournal.reset();
         try {
-            armInjectedFailure(patch, inverse);
+
             applyPatch(patch, inverse);
             cachedFreeze = null;
             cachedFreezeSequence = -1;
@@ -158,15 +156,6 @@ public final class RuntimeProjectionState {
         inverse.setSequence(patch.projectionSequence());
     }
 
-    private void armInjectedFailure(RuntimeFactFrame patch, MutationJournal inverse) {
-        int injectedFailureCount = patch != null && patch.projectionSequence() == failOnSequence
-                ? failAfterMutations : -1;
-        if (injectedFailureCount <= 0) return;
-        failOnSequence = -1;
-        failAfterMutations = -1;
-        inverse.armFailure(injectedFailureCount);
-    }
-
     private void rollbackFailedApplication(MutationJournal inverse, Throwable applyFailure) {
         try {
             inverse.rollback();
@@ -185,15 +174,6 @@ public final class RuntimeProjectionState {
     TradingCoreState freezeLastCompleteAfterFailure(long requestedSequence) {
         if (failure == null) throw new IllegalStateException("projection replica has not failed");
         return freezeInternal(requestedSequence);
-    }
-
-    void failAfterMutationsForTest(long projectionSequence, int mutationCount) {
-        requireHealthy();
-        if (projectionSequence <= sequence || mutationCount <= 0) {
-            throw new IllegalArgumentException("future sequence and positive mutation count required");
-        }
-        failOnSequence = projectionSequence;
-        failAfterMutations = mutationCount;
     }
 
     private TradingCoreState freezeInternal(long requestedSequence) {
@@ -447,11 +427,9 @@ public final class RuntimeProjectionState {
         private long[] previousLongs = new long[32];
         private boolean[] previousPresence = new boolean[32];
         private int size;
-        private int remainingUntilFailure;
 
-        private MutationJournal reset(int remainingUntilFailure) {
+        private MutationJournal reset() {
             release();
-            this.remainingUntilFailure = remainingUntilFailure;
             return this;
         }
 
@@ -472,14 +450,6 @@ public final class RuntimeProjectionState {
             previousValues[index] = current;
             previousPresence[index] = present;
             if (value == null) values.remove(key); else values.put(key, value);
-            afterMutation();
-        }
-
-        private void armFailure(int mutationCount) {
-            if (mutationCount <= 0 || remainingUntilFailure > 0) {
-                throw new IllegalStateException("projection mutation failure is already armed");
-            }
-            remainingUntilFailure = mutationCount;
         }
 
         private void putZeroOrRemove(Map<String, Long> values, String key, long value) {
@@ -490,28 +460,24 @@ public final class RuntimeProjectionState {
             int index = append(ROOT_REVISION);
             previousLongs[index] = revision;
             revision = value;
-            afterMutation();
         }
 
         private void setBusinessStateHash(long value) {
             int index = append(ROOT_BUSINESS_HASH);
             previousLongs[index] = businessStateHash;
             businessStateHash = value;
-            afterMutation();
         }
 
         private void setFundsStateHash(long value) {
             int index = append(ROOT_FUNDS_HASH);
             previousLongs[index] = fundsStateHash;
             fundsStateHash = value;
-            afterMutation();
         }
 
         private void setSequence(long value) {
             int index = append(ROOT_SEQUENCE);
             previousLongs[index] = sequence;
             sequence = value;
-            afterMutation();
         }
 
         private void setUserRevision(MutableUser user, long value) {
@@ -519,7 +485,6 @@ public final class RuntimeProjectionState {
             targets[index] = user;
             previousLongs[index] = user.revision;
             user.revision = value;
-            afterMutation();
         }
 
         private void setUserPositionMode(MutableUser user, CorePositionMode value) {
@@ -527,21 +492,18 @@ public final class RuntimeProjectionState {
             targets[index] = user;
             previousValues[index] = user.positionMode;
             user.positionMode = value;
-            afterMutation();
         }
 
         private void setNextLiquidationId(long value) {
             int index = append(NEXT_LIQUIDATION_ID);
             previousLongs[index] = nextLiquidationId;
             nextLiquidationId = value;
-            afterMutation();
         }
 
         private void setRiskScanControl(CoreRiskScanControlView value) {
             int index = append(RISK_SCAN_CONTROL);
             previousValues[index] = riskScanControl;
             riskScanControl = value;
-            afterMutation();
         }
 
         private int append(byte type) {
@@ -558,12 +520,6 @@ public final class RuntimeProjectionState {
             previousValues = java.util.Arrays.copyOf(previousValues, capacity);
             previousLongs = java.util.Arrays.copyOf(previousLongs, capacity);
             previousPresence = java.util.Arrays.copyOf(previousPresence, capacity);
-        }
-
-        private void afterMutation() {
-            if (remainingUntilFailure > 0 && --remainingUntilFailure == 0) {
-                throw new IllegalStateException("injected mutable projection failure");
-            }
         }
 
         private void rollback() {

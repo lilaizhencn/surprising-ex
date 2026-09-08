@@ -61,10 +61,6 @@ public class EmailVerificationService {
         return true;
     }
 
-    String digestForTest(String code, String purpose, String destination) {
-        return digest(code, purpose, destination);
-    }
-
     private String digest(String code, String purpose, String destination) {
         try {
             String pepper = properties.getSecurity().getVerificationCodePepper();

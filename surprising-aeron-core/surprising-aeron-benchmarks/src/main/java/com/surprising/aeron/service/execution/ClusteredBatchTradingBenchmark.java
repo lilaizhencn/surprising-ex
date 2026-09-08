@@ -238,7 +238,7 @@ public class ClusteredBatchTradingBenchmark {
             service.onStart(cluster, null);
             if(realtime) {
                 realtimeOutbox=new com.surprising.aeron.client.RealtimeOutbox(8192,8*1024*1024);
-                service.attachRealtimeForTest(realtimeOutbox);consuming=true;
+                RealtimeBenchmarkFixture.attach(service, realtimeOutbox);consuming=true;
                 realtimeConsumer=Thread.ofPlatform().name("realtime-benchmark-drain").start(()->{
                     while(consuming){if(realtimeOutbox.poll()==null)java.util.concurrent.locks.LockSupport.parkNanos(100_000);}
                     while(realtimeOutbox.poll()!=null){}

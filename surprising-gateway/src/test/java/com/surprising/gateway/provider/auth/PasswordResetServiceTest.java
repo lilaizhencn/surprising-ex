@@ -42,12 +42,12 @@ class PasswordResetServiceTest {
                 any(), any(), eq("127.0.0.1"), any()))
                 .thenReturn(new GatewayAuthChallengeRepository.Challenge(
                         12L, 42L, "PASSWORD_RESET", "EMAIL", "user@example.com",
-                        service.digestForTest("123456", "PASSWORD_RESET", "user@example.com"),
+                        VerificationCodeFixture.digest("123456", "PASSWORD_RESET", "user@example.com"),
                         now.plusSeconds(600), 0, null));
         when(challenges.findActive(eq(42L), eq("PASSWORD_RESET"), eq("user@example.com"), eq(now)))
                 .thenReturn(Optional.of(new GatewayAuthChallengeRepository.Challenge(
                         12L, 42L, "PASSWORD_RESET", "EMAIL", "user@example.com",
-                        service.digestForTest("123456", "PASSWORD_RESET", "user@example.com"),
+                        VerificationCodeFixture.digest("123456", "PASSWORD_RESET", "user@example.com"),
                         now.plusSeconds(600), 0, null)));
         when(challenges.consume(eq(12L), eq(42L), eq(now))).thenReturn(true);
         when(passwordHasher.hash("NewPassword1!")).thenReturn("new-hash");

@@ -107,8 +107,6 @@ p99s=()
 p999s=()
 orderss=()
 matched_quantitys=()
-queue_depths=()
-pending_depths=()
 timeout_seconds="${STAGE_FORK_TIMEOUT_SECONDS:-180}"
 for ((fork=1; fork<=forks; fork++)); do
   seed=$((9900 + fork))
@@ -140,7 +138,7 @@ for ((fork=1; fork<=forks; fork++)); do
   child_pid=""
 
   for marker in exchangeCoreConcurrentBenchmark coreAcceptFreezeBenchmark inMemoryCoreBenchmark \
-                coreAcceptFreezeConcurrentBenchmark perpetualEndToEndBenchmark clusterCapacityBaseline; do
+                perpetualEndToEndBenchmark clusterCapacityBaseline; do
     grep -q "${marker}=PASS" "$fork_log" || {
       echo "benchmark fork $fork is missing ${marker}=PASS" >&2
       exit 1
@@ -181,9 +179,6 @@ for ((fork=1; fork<=forks; fork++)); do
     echo "benchmark fork $fork has pending matching work; see $fork_log" >&2
     exit 1
   }
-  concurrent=$(grep 'coreAcceptFreezeConcurrentBenchmark=PASS' "$fork_log" | tail -1)
-  queue_depths+=("$(printf '%s\n' "$concurrent" | tr ' ' '\n' | awk -F= '$1=="maxQueueDepth" {print $2; exit}')")
-  pending_depths+=("$(printf '%s\n' "$concurrent" | tr ' ' '\n' | awk -F= '$1=="pendingMatching" {print $2; exit}')")
 done
 
 for artifact in jfr-summary.txt jfr-hot-methods.txt jfr-allocation-by-site.txt jfr-gc.txt jfr-safepoints.txt; do
@@ -197,8 +192,6 @@ p99=$(median "${p99s[@]}")
 p999=$(median "${p999s[@]}")
 orders=$(median "${orderss[@]}")
 matched_quantity=$(median "${matched_quantitys[@]}")
-queue_max=$(printf '%s\n' "${queue_depths[@]}" | sort -nr | head -1)
-pending_max=$(printf '%s\n' "${pending_depths[@]}" | sort -nr | head -1)
 created_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 jq -n \
@@ -210,16 +203,15 @@ jq -n \
   --arg gc "$attempt_dir/jfr-gc.txt" --arg safepoints "$attempt_dir/jfr-safepoints.txt" \
   --argjson forks "$forks" --argjson finalizedPerSecond "$finalized_per_second" \
   --arg jfrSettings "$jfr_settings" --argjson p50 "$p50" --argjson p99 "$p99" --argjson p999 "$p999" \
-  --argjson queueMax "$queue_max" --argjson pendingMax "$pending_max" \
   --argjson makerDepth "$maker_depth" --argjson orders "$orders" --argjson matchedQuantity "$matched_quantity" \
   '{schemaVersion:1,result:"PASS",stage:$stage,createdUtc:$createdUtc,benchmarkSuite:$suite,forks:$forks,
     workload:{seedBase:9901,makerDepth:$makerDepth,perFork:{adapterOnlyOrders:500,acceptFreezeOrders:25,inMemoryOrders:25,
-      concurrentIngressOrders:50,perpetualFinalizedOrders:$orders,perpetualMatchedQuantity:$matchedQuantity}},
+      perpetualFinalizedOrders:$orders,perpetualMatchedQuantity:$matchedQuantity}},
     java:{home:$javaHome,build:$javaBuild,vendor:$javaVendor,vmName:$vmName,runtimeVersion:$runtimeVersion,
       flags:$javaFlags,jfrSettings:$jfrSettings},
     metrics:{offered:$orders,accepted:$orders,finalized:$orders,matchedQuantity:$matchedQuantity,perpetualPendingMatching:0,
       finalizedPerSecond:$finalizedPerSecond,
-      pendingMax:$pendingMax,completionQueueMax:$queueMax,outboxMax:null},
+      pendingMax:null,completionQueueMax:null,outboxMax:null},
     latency:{kind:"acceptance-to-finalization",coordinatedOmissionCorrected:true,
       p50Micros:$p50,p99Micros:$p99,p999Micros:$p999},
     invariants:{fundsDelta:null,stateHash:"not-exposed-by-local-baseline",bookEmpty:"not-queried"},

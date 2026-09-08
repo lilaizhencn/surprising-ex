@@ -53,9 +53,33 @@
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <argLine>-javaagent:${project.build.directory}/test-fault-agent.jar --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED</argLine>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-antrun-plugin</artifactId>
                 <version>3.2.0</version>
                 <executions>
+                    <execution>
+                        <id>package-test-fault-agent</id>
+                        <phase>process-test-classes</phase>
+                        <goals><goal>run</goal></goals>
+                        <configuration>
+                            <skip>${maven.test.skip}</skip>
+                            <target>
+                                <jar destfile="${project.build.directory}/test-fault-agent.jar"
+                                     basedir="${project.build.testOutputDirectory}"
+                                     includes="**/CoreFaultAgent*.class">
+                                    <manifest>
+                                        <attribute name="Premain-Class" value="com.surprising.aeron.service.execution.CoreFaultAgent"/>
+                                    </manifest>
+                                </jar>
+                            </target>
+                        </configuration>
+                    </execution>
                     <execution>
                         <id>verify-exchange-core-artifact</id>
                         <phase>validate</phase>

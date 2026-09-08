@@ -22,7 +22,7 @@ class RealtimeWorkloadTest {
             field.setAccessible(true);
             var service = (SurprisingClusteredService) field.get(workload);
             var outbox = new com.surprising.aeron.client.RealtimeOutbox(65536, 32 * 1024 * 1024);
-            service.attachRealtimeForTest(outbox);
+            RealtimeBenchmarkFixture.attach(service, outbox);
             workload.runRoundTripTrades();
             int trades = 0, executions = 0, begins = 0, ends = 0;
             var ids = new java.util.HashSet<String>();

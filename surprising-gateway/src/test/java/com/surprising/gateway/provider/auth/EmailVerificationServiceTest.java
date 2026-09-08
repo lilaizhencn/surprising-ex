@@ -47,7 +47,7 @@ class EmailVerificationServiceTest {
         when(repository.findActive(eq(42L), eq("EMAIL_VERIFY"), eq("user@example.com"), eq(now)))
                 .thenReturn(Optional.of(new GatewayAuthChallengeRepository.Challenge(
                         11L, 42L, "EMAIL_VERIFY", "EMAIL", "user@example.com",
-                        service.digestForTest("123456", "EMAIL_VERIFY", "user@example.com"),
+                        VerificationCodeFixture.digest("123456", "EMAIL_VERIFY", "user@example.com"),
                         now.plusSeconds(600), 0, null)));
         when(repository.consume(eq(11L), eq(42L), any())).thenReturn(true);
 
