@@ -23,7 +23,9 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     private final AeronClientPool client;
     private final int window = Integer.getInteger("surprising.aeron.capacity-async-in-flight", WINDOW);
     private final int sessionWindow = Integer.getInteger("surprising.aeron.capacity-session-in-flight", 64);
-    private final boolean tradingStream = Boolean.getBoolean("surprising.aeron.mixed-trading-stream");
+    private final boolean operational = Boolean.getBoolean("surprising.aeron.mixed-operational");
+    private final boolean tradingStream = operational || Boolean.getBoolean("surprising.aeron.mixed-trading-stream");
+    private ClusterOperationalSideLoad sideLoad;
     private final ArrayDeque<Pending> pending = new ArrayDeque<>();
     private final long seed = Long.getLong("surprising.aeron.capacity-seed", 92001);
     private final long[] markSequence = new long[SYMBOLS], markTime = new long[SYMBOLS], mark = new long[SYMBOLS];
@@ -61,14 +63,26 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
             if (Boolean.getBoolean("surprising.aeron.mixed-verify-only")) {
                 run.totalCycles = Long.getLong("surprising.aeron.mixed-expected-cycles", 0);
                 run.lossCompleted = true;
+                if (run.operational) {
+                    run.sideLoad = new ClusterOperationalSideLoad(run.seed, run.users, run.mark, run.markSequence);
+                    run.sideLoad.restoreAudit(Long.getLong("surprising.aeron.operational-expected-cycles",0),
+                            Long.getLong("surprising.aeron.operational-expected-deposits",0));
+                }
                 run.verify();
                 return;
             }
             run.setup();
+            if (run.operational) {
+                run.sideLoad = new ClusterOperationalSideLoad(run.seed, run.users, run.mark, run.markSequence);
+                run.sideLoad.start();
+            }
             run.runFor(Integer.getInteger("surprising.aeron.capacity-warmup-seconds", 30), false);
             run.runFor(Integer.getInteger("surprising.aeron.capacity-duration-seconds", 300), true);
+            if (run.sideLoad != null) run.sideLoad.stop();
             run.verify();
+            if (run.sideLoad != null) run.sideLoad.print();
             run.print();
+            if (run.sideLoad != null) run.sideLoad.printComposite(run.terminal,run.coreTerminal,run.fills,run.elapsed);
         }
     }
 
@@ -129,12 +143,14 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         measured=measure;
         if(measure) { offered=terminal=coreOffered=coreTerminal=fills=queries=peak=0;stats.clear();adminRetriesBefore=client.adminActionRetries(); }
         started=lastReport=System.nanoTime(); reportTerminal=0;
+        if (sideLoad != null && measure) sideLoad.beginMeasurement(started);
         long end=started+TimeUnit.SECONDS.toNanos(seconds);
         while(System.nanoTime()<end) {
             cycle(); totalCycles++; if(measure)measuredCycles++;
         }
         drain();
         if(measure) elapsed=System.nanoTime()-started;
+        if (sideLoad != null && measure) sideLoad.endMeasurement(System.nanoTime());
         measured=false;
     }
     private long elapsed;
@@ -171,7 +187,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         drain();
     }
 
-    private void refresh(int i) { if(System.currentTimeMillis()-markTime[i]>=1000)price(i,mark[i]); }
+    private void refresh(int i) { if(sideLoad==null && System.currentTimeMillis()-markTime[i]>=1000)price(i,mark[i]); }
     private void price(int i,long value) {
         mark[i]=value;markTime[i]=System.currentTimeMillis();
         send(CoreMessageType.APPLY_MARK_PRICE,0,TradingCommandCodec.encodeApplyMarkPrice(
@@ -298,6 +314,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     private record Task(CoreMessageType type,int weight,long start,boolean counted,Consumer<CoreResponse> validation) {}
     private void space() { while(pending.size()>=window){reap();report();Thread.onSpinWait();} }
     private void reap() {
+        if (sideLoad != null) sideLoad.assertHealthy();
         // This tool has one ordered command session. Inspecting only its head avoids scanning
         // the whole in-flight window on every spin; no join occurs before completion.
         while (!pending.isEmpty() && pending.peekFirst().future().isDone()) {
@@ -350,12 +367,14 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
             if(b.asset().equals("USDT"))total=Math.addExact(total,Math.addExact(b.availableUnits(),b.lockedUnits()));
         }
         for(var t:treasury())if(t.asset().equals("USDT"))total=Math.addExact(total,treasuryFunds(t));
-        if(total!=expectedFunds()||!lossCompleted)throw new IllegalStateException("mixed funds/lifecycle mismatch actual="+total);
+        if (sideLoad != null) total = Math.addExact(total, sideLoad.verifyAndBalance());
+        long expected = Math.addExact(expectedFunds(), sideLoad == null ? 0 : sideLoad.netDeposits());
+        if(total!=expected||!lossCompleted)throw new IllegalStateException("mixed funds/lifecycle mismatch actual="+total+" expected="+expected);
         for(int i=0;i<SYMBOLS;i++)for(long id:new long[]{maker(i),taker(i)}) {
             String instrument=symbol(i);
-            var s=user(id);long expected=(id==maker(i)?-1:1)*totalCycles*BATCH;
+            var s=user(id);long expectedPosition=(id==maker(i)?-1:1)*totalCycles*BATCH;
             long actual=s.positions().stream().filter(p->p.symbol().equals(instrument)).mapToLong(CorePositionView::signedQuantitySteps).sum();
-            if(actual!=expected||!s.reservations().isEmpty())throw new IllegalStateException("HFT position/reservation mismatch user="+id+" expected="+expected+" actual="+actual);
+            if(actual!=expectedPosition||!s.reservations().isEmpty())throw new IllegalStateException("HFT position/reservation mismatch user="+id+" expected="+expectedPosition+" actual="+actual);
         }
         if(offered!=terminal||coreOffered!=coreTerminal||peak>window)throw new IllegalStateException("mixed terminal counters disagree");
         if(measuredCycles>0) {
@@ -392,5 +411,5 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         long items;final Histogram latency=new Histogram(TimeUnit.MINUTES.toNanos(1),3);
         void record(int weight,long ns){items+=weight;latency.recordValue(Math.max(1,ns));}
     }
-    @Override public void close(){client.close();}
+    @Override public void close(){try { if(sideLoad!=null)sideLoad.close(); } finally { client.close(); }}
 }

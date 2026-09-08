@@ -16,6 +16,7 @@
     <description>Cluster 探针、状态 hash 和离线回放工具</description>
 
     <dependencies>
+        <dependency><groupId>com.surprising</groupId><artifactId>surprising-realtime-api</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>org.springframework.kafka</groupId><artifactId>spring-kafka-test</artifactId><scope>test</scope></dependency>
         <dependency><groupId>com.surprising</groupId><artifactId>surprising-trading-api</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>org.apache.kafka</groupId><artifactId>kafka-clients</artifactId></dependency>

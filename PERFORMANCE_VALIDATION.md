@@ -4732,3 +4732,21 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - D0(seed95001)、Y0(95002)、S0(95003)各预热30秒+测量90秒、无JFR：D0所有等待默认，Y0仅全局aeron.cluster.idle.strategy=YieldingIdleStrategy，S0只配置service=YIELDING、consensus仍默认Backoff。三候选均全新数据目录；性能选用当前同JAR结果。S0若业务速率至少为Y0的95%、所有业务p99<1秒且consensus CPU稳定均值<80%单核，优先S0；否则选满足正确性/SLO者中速率最高档，不为了owner95%自旋。选定档执行F(seed95004)30+300秒无JFR长轮与J(seed95005)30+180秒、90秒JFR归因轮；长轮相对D0至少提高10%才称有吞吐收益，差异只归因当前同代码配置，短轮不称长期上限。
 - 正确性门槛：offered=terminal（业务项及Core命令分别相等）、unfinished0、peak<=256、资金差0、各用户非负、人口/零售订单与持仓/HFT持仓/冻结预留/强平保险ADL闭环验证PASS；所有未知/业务错误/超时均失败，不改变交易规则绕过失败。各类型p99<1秒作为原SLO；每轮最多1200秒systemd执行上限。swap/换页/steal或重启、JFR DataLoss使相关性能证据无效；管理IAP失败不等于业务失败，保留错误并读取独立systemd结果。
 - 四机5秒pidstat/mpstat/vmstat/sar采样。J轮首次正式progress后四机各90秒JFR，Core沿用phases.jfc的profile+MethodTiming，load普通profile，maxsize512m；检查DataLoss、owner/matcher/Lane/consensus CPU、方法等待与完整pump计数、分配栈及稳定+30..80秒权重、GC/native/direct/线程/停顿/异常，不相加嵌套方法墙钟。没有新交易状态结构或热路径改动，既有ownerProgressAndReservationTransitions JMH场景覆盖前次Core改动且已编译；本轮实际执行采用真实三节点网络工具，不运行本机mock JMH或把它当三节点证据。J轮后同数据三节点重启verify-only，核对实际cycles和业务hash；只称重启恢复，不称完整故障矩阵。原始证据存新artifact `/Users/atomex/Desktop/surprising/gcp-validation/2026-09-08-service-idle`。
+
+### 本轮中止与用户重新明确生产混合场景
+
+- 3e199104启动配置改动完成，32项相关功能测试通过（3项idle配置、6项启动/线程、23项服务回调），tools打包成功。首次测试代码错误引用不存在的ConsensusModule.Configuration.idleStrategySupplier，修正为当前Aeron实际使用的共享supplier后通过，原编译日志保留。四机部署同一JAR SHA256=0c275af46a806247549f1e126ab20e392ab9ade037e0409c4438afffc33c2509。
+- 第一次D0在发压前因历史/home/bench/async-d0.log已存在而被保护检查中止，未覆盖旧文件；改为serviceidle独立前缀，失败记录保留preflight-abort-*。管理API期间出现一次TLS EOF；四VM停机成功后重新启动，未将管理故障说成业务失败。
+- 第二次D0 setup及单次强平/保险/ADL闭环通过，但预热期间第一个交易cycle的批量单出现STALE_MARK_PRICE拒绝（orderId295001008413），工具按正确性门槛失败，未取得正式吞吐数据。原生Core过期价格保护未放宽，结果和四机监控已收集到d0目录。Y0/S0/F/J尚未执行，不能报告三档收益。
+- 用户随后明确实际场景必须为用户/做市商持续交易，与持续触发扫描、风控扫描、主动平仓、强平/爆仓并发，再加用户与做市商查询并达到饱和；因此取消前述纯交易档位，不能把风险操作放在setup、不能在周期控制查询前全局drain。新的场景、并发和有效性门槛须在准备后重新预锁，不修改已失败D0标准。
+- 查询路径核对：生产余额/持仓/挂单/触发单可通过ValkeyUserQueries读取异步读模型，无READY视图返回503且不回查Core；风控执行与管理员权威查询仍走Core。后续测量需包含真实读模型维护及其开销、查询可用性/新鲜度，不能凭独立session宣称查询与交易隔离。旧压力器价格刷新与交易生产者同线程，价格时间戳可能在背压等待前取得；新场景必须持续独立价格输入，保留过期判断。
+- 第二次失败清理于2026-09-08T03:27:19Z完成四VM停止；准备新场景期间不保留收费计算实例运行。所有原始日志及用户最新范围变更均保留，本次不宣称吞吐优化已验收。
+
+## 2026-09-08 生产并发混合场景OS0（采集前锁定）
+
+- 用户最新要求优先于旧纯交易方案。本次先验证新场景是否正确执行，再定义饱和长轮。OS0为当前master tools的mixed-operational=true，seed96001，30秒预热+30秒测量，最长1200秒；不是生产容量验收。实际三台GCP Core及一台load，硬件/JDK25/4GiB Core heap/2GiB load heap/ZGC/NMT、4Lane/1matcher/SHARED_NETWORK/Archive SHARED沿用前述环境，Core仅service=YIELDING、consensus默认Backoff，不修改交易语义。构建后记录commit及JAR SHA；不得重跑旧版本或覆盖失败目录。
+- 交易流保留1000零售、256symbols、1769用户、batch20和单FIFO256在途，交易阶段不排空。新增独立价格producer每500ms更新256symbols，最多16在途，在取得自身发送容量后生成时间戳，绝不放宽过期价格保护。独立生命周期producer使用单独8容量command session和reserved query session，每次只有一个必要依赖命令/查询在途，不让交易流drain；加4个用户/2个币对，总1773用户/258symbols。三个producer各有command+reserved query session（共6配置session），普通Valkey读无Core session；瞬时实际请求上限为交易256+价格16+控制1=273，分别记录，不能冒称全系统只有256在途。
+- 生命周期重复执行：开仓→资金费→reduce-only主动平仓并确认归零；再次开仓→挂止盈单→真实TRIGGER_ORDER_QUERY扫描→触发成交并确认TRIGGERED及归零；独立风险用户补入100USDT最小单位余额、开10单位仓→价格100降1→继续风险扫描直至自己的可执行强平动作→强平→25单位保险与剩余ADL→确认无仓位、无冻结及ADL终态。风险重操作使用专门样本账户/币对防止改变原零售/HFT预期状态，但风险扫描和交易在同一个Core同时执行，生命周期每轮都在测量期间发生，不能用setup单次闭环充数。
+- 原资金守恒终检增加4个样本账户余额和实际净注入：初始3*1e9，每完整生命周期额外100+25；资金费/保险/ADL内部转移不重复算注资，余额及全部treasury ledger精确核对。交易fills从响应解码；side普通单fills也解码，触发成交由唯一一单位maker流动性、TRIGGERED及一单位持仓归零确认计1笔，不把ADL当普通fill。单独报告各流requests/六分位及全体terminal business ops/Core messages/fills；背景控制未完成不得算终态吞吐。
+- 实际启用Core实时outbox→Aeron Router→Valkey读模型，Router和Valkey与load同机，必须单列资源开销；独立Valkey查询目标1000requests/s，遍历原1769用户（包括做市商），调用生产ValkeyUserQueries/物化逻辑，核对身份及exportSequence单调，503单独计数且禁止回查Core。此为读模型查询链路，不包括HTTP网关鉴权或WS客户端。Valkey用官方8.1.10 Linux binary，绑定load本机127.0.0.1:6381，独立实例，Router只有本产品的三节点控制destination。其他产品和业务进程不启动。
+- OS0门槛：所有交易及控制操作成功、资金差0、终态/冻结/持仓核对通过，测量期主动平仓/触发平仓/风险续扫/资金费/保险ADL和READY查询各至少一次；503/实际读QPS/新鲜度必须报告，不能用覆盖PASS冒充读可用性达标。正式饱和档还须预锁读可用率和尾延迟门槛。采集四机5秒系统与线程指标及各类请求计数，OS0不启动JFR；若失败，保留原日志，修复后新目录/seed重新预锁。完成正确性后再进行同场景逐级在途加压及JFR，不回到纯交易基准。
