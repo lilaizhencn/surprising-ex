@@ -4902,3 +4902,14 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 复现证据：五条衍生品的真实持仓重币对先于轻币对时，一次共享预算可被重币对全部消耗；新增用例五条均失败。修改为每次币对轮转最多8工作单位，沿用持久化的用户/持仓进度，单币对可在剩余预算中多次获调度；总预算仍64、默认25ms、精确令牌校验和30s候选期限不变。针对性10项测试通过，资金及快照恢复一致。
 - OS50/51/条件52/53，seed99701–99704，窗口256/512/条件1024/有效最快档；其他机器、JVM/JMH/JFR、混合负载与资金初态、30+60s诊断及30+120s无profiler持续、5%加档条件、正确性/p99/数据有效性门槛、本机先验与结束原日志恢复/四VM停机完全沿用OS46预锁。只测当前master，不对比旧版本；这是新的风险调度场景，不能与旧场景混算收益。查询READY及长期泄漏/完整分段延迟缺口继续单列。
 - artifact=/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-risk-slices；保留slice-before/after功能复现、全部构建/恢复/云端原始证据和commit/JAR SHA。新的预算轮转由真实三节点ClusterOperationalBenchmark混合运营JMH/JFR路径触发，不在本机执行性能基准。
+
+### OS50–OS53结果（2026-09-09）
+
+- 被测master 0f7173b2，tools SHA256=b8a0d4a76353249a4eec6adb9ae6f38963e4a3368ab8ed389711d853615c15d7。订单直接信封、共享预算、公平切片和控制Lane登记为同一构建；只验证当前master，不比较旧版。HotSpot25本机Core reactor 950项（949通过、1缺外部数据库跳过），六产品三独立JVM交易/SIGKILL日志恢复/快照恢复18项全部通过；服务、协议、客户端634类与待部署包字节一致。此前直接受影响生命周期provider和实时router测试已通过，后续切片未修改这些模块。
+- OS50窗口256，30+60s JFR/非fork JMH诊断：5956608业务项/567296 Core消息=offered、unfinished0，99089.721 terminal business ops/s、9437.116 terminal Core messages/s、23592.791 fills/s，资金差0。OS51窗口512：5913600业务项/563200消息=offered、unfinished0，98314.669 ops/s、9363.302 messages/s、23408.255 fills/s，资金差0。512未达到本轮5%增加条件，OS52未执行，选择256档持续验证。
+- OS53窗口256，30s预热+120.180s无JMH/JFR测量：12321792业务项/1173504 Core消息=offered，unfinished0、peakInFlight256，102528.022 terminal business ops/s、9764.574 terminal Core messages/s、24411.434 fills/s。含后台操作的composite另计为102506.561 ops/s（120.640s自己的边界），不与交易分母混算。批量大小20，下单/撤单/批量下单/批量撤单p99分别36.339/54.689/54.820/45.678ms；各类型完整样本数及p50/p90/p95/p99/p999/max在result.txt。闭环最大速率模型未修正coordinated omission，不作open-loop容量承诺。
+- OS50/51稳定Leader均core-2，owner99.82%/99.84%CPU、matcher19.04%/18.94%、Lane14.12–14.20%/13.22–13.32%；owner分配445.67/445.33MB/s。3745/3782个owner执行与本地方法样本中93/91包含等待栈，不能把样本比例当墙钟时间，CPU占满不等于95%有效计算。主要热点仍为UTF-8写入/长度、SHA-256输出转换、字符串与Map/primitive索引。未达到零分配，也未达到matcher/Lane同时计算饱和。
+- 八份JFR DataLoss0，OS50合计13792058字节、OS51合计13599322字节；逐文件SHA256/大小见各轮jfr-manifest.json。全程20类JFR视图与stable-window.json分开保存。OS51 Leader全程90次GC pause合计1.19ms，p99/max0.0269ms；NMT Java Heap committed4GiB，GC committed末21.2MB/峰38.2MB，Code末28.2MB。JMH SingleShotTime一操作为整轮，load B/op不能当Core每业务分配；本轮为真实三节点诊断和持续验证，不当作独立fork微基准。
+- OS50/51测量期强平/保险/ADL复合闭环最大3.574s/6.912s，OS53最大3.444s、完整运营闭环最大3.922s，未再触发30s候选期限；这是复合操作，不是单命令延迟。OS53测量期1064次实际风险续扫确认，完整运行42生命周期、净注资3000005250，订单/冻结/持仓/做市/强平损失和资金守恒核对通过。原云日志三节点重启后hash仍4166f9ff0b762e42，705cycles、fundsDiff0，见os53-replay-verify/result.txt。
+- OS53测量期Valkey READY7573/120162=6.302%，112589 unavailable，无Core查询回退；查询可用性仍不合格。云端负载为U本位永续混合运营，其他产品只做本机功能恢复。长期live set/native/Direct余额、对象/op、完整分段延迟、稳定期I/O及所有产品云端性能尚未完整验收；因此本次是改动正确性与指定场景吞吐平台的部分性能验证，不能宣称完整生产验收或绝对算力上限。README未修改。
+- 云端编排退出0，原日志恢复核对后finally停止surprising-core-0/1/2及surprising-load；instances-final.json确认四台全部TERMINATED。后续未经用户要求不再开机。
