@@ -4894,3 +4894,11 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 默认Core扫描控制间隔改为25ms，与现有生产协调器25ms调度相符；单次64工作预算、风险规则、精确令牌验证及30s候选期限不变。已保存的运营配置从快照恢复，不能被新默认覆盖。压测端新增每个强平闭环的查询/批次/过期拒绝/实际扫描工作计数，生产类不加入诊断钩子。
 - OS46/47/条件48/49，seed99601–99604，窗口256/512/条件1024/有效最快档，沿用OS38预锁的独立三Core+load、HotSpot25/ZGC/NMT、1matcher/4Lane、混合业务及用户币对资金初态、30+60s JMH/JFR诊断与30+120s无profiler持续轮、5%加档条件、正确性/p99/JFR有效性阈值、结束原日志恢复核对与停止四VM要求。配置改变是新场景，不与旧版本或1000ms场景比较性能收益。对照commit不适用，仅验证当前master。
 - artifact=/Users/atomex/Desktop/surprising/gcp-validation/2026-09-08-risk-cadence。先本机受影响测试及六产品18功能/恢复检查；开机前记录commit/JAR SHA。查询READY、完整分段延迟、长期泄漏等未达标范围继续单列，不宣称全面生产性能验收。
+
+- OS46（f9bcdca9，tools SHA256=60b2a18e2c16dba87cb6d7a13644c1ae01aa0a9275de2dda2ee11ca652a6685b）完成：5935104业务项/565248 Core消息=offered，unfinished0，98823.363 terminal business ops/s、9411.749 messages/s、23529.372 fills/s，资金和运营覆盖通过。四JFR DataLoss0。稳定Leader core-2 owner99.74%CPU、matcher18.90%、Lane13.96–14.06%；owner分配447.01MB/s，3733执行/本地方法样本中92包含等待栈。全程与稳定期视图分开保留，仅带profiler诊断。后续OS47窗口512仍超出强平30s期限：182次批次、19次过期重查、10432扫描工作单位；该轮无有效终态吞吐，OS48/49未执行，原日志持续轮恢复未执行。四VM全部TERMINATED。本机构建945项（944通过、1外部数据库跳过）、六产品18功能恢复通过。
+
+### 币对扫描额度轮转OS50–OS53采集前锁定（2026-09-09）
+
+- 复现证据：五条衍生品的真实持仓重币对先于轻币对时，一次共享预算可被重币对全部消耗；新增用例五条均失败。修改为每次币对轮转最多8工作单位，沿用持久化的用户/持仓进度，单币对可在剩余预算中多次获调度；总预算仍64、默认25ms、精确令牌校验和30s候选期限不变。针对性10项测试通过，资金及快照恢复一致。
+- OS50/51/条件52/53，seed99701–99704，窗口256/512/条件1024/有效最快档；其他机器、JVM/JMH/JFR、混合负载与资金初态、30+60s诊断及30+120s无profiler持续、5%加档条件、正确性/p99/数据有效性门槛、本机先验与结束原日志恢复/四VM停机完全沿用OS46预锁。只测当前master，不对比旧版本；这是新的风险调度场景，不能与旧场景混算收益。查询READY及长期泄漏/完整分段延迟缺口继续单列。
+- artifact=/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-risk-slices；保留slice-before/after功能复现、全部构建/恢复/云端原始证据和commit/JAR SHA。新的预算轮转由真实三节点ClusterOperationalBenchmark混合运营JMH/JFR路径触发，不在本机执行性能基准。

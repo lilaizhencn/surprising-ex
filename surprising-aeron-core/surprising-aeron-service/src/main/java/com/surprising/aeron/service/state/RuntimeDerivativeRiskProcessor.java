@@ -144,7 +144,10 @@ public final class RuntimeDerivativeRiskProcessor {
         while (remaining > 0) {
             RiskScanRuntime selected = runtime.firstRiskIncompleteScan();
             if (selected == null) break;
-            int work = applyContinuationRuntime(remaining, selected.symbolId(), positionUsers, runtime, identities);
+            // Rotate before a busy symbol consumes the command's whole budget. Saved user/position
+            // cursors preserve partial work; a lone symbol can receive successive slices.
+            int work = applyContinuationRuntime(Math.min(8, remaining), selected.symbolId(), positionUsers,
+                    runtime, identities);
             remaining -= Math.max(1, work);
         }
         return budget - remaining;
