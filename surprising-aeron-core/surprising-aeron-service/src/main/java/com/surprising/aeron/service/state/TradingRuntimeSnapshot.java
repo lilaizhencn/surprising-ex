@@ -261,7 +261,7 @@ public record TradingRuntimeSnapshot(
                                    boolean triggerComplete, int triggerPhase, long triggerPriceCursor,
                                    long triggerOrderCursor, long triggerUpperId, long triggerMarkPriceTicks,
                                    long triggerGeneratedAtEpochMillis, long triggerOcoOrderId,
-                                   long triggerOcoCursor) {
+                                   long triggerOcoCursor, long lastScheduledRevision) {
     }
 
     public record TreasurySnapshot(long feeUnits, long insuranceUnits, long insuranceDeficitUnits,

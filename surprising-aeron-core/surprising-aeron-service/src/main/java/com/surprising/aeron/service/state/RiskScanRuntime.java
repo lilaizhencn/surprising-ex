@@ -7,9 +7,24 @@ public record RiskScanRuntime(int symbolId, int accountLaneId, long priceSequenc
                               long riskIsolatedMarginUnits, long riskIsolatedReservationUnits,
                               boolean triggerComplete, int triggerPhase, long triggerPriceCursor,
                               long triggerOrderCursor, long triggerUpperId, long triggerMarkPriceTicks,
+                              long triggerGeneratedAtEpochMillis, long triggerOcoOrderId, long triggerOcoCursor, long lastScheduledRevision) {
+    public RiskScanRuntime(int symbolId, int accountLaneId, long priceSequence, long scanStartPriceSequence,
+                              long lastUserId, boolean riskComplete, long riskUserId, int riskPhase,
+                              String riskPositionCursor, long riskReservationCursor,
+                              long riskUnrealizedPnlUnits, long riskMaintenanceMarginUnits,
+                              long riskIsolatedMarginUnits, long riskIsolatedReservationUnits,
+                              boolean triggerComplete, int triggerPhase, long triggerPriceCursor,
+                              long triggerOrderCursor, long triggerUpperId, long triggerMarkPriceTicks,
                               long triggerGeneratedAtEpochMillis, long triggerOcoOrderId, long triggerOcoCursor) {
+        this(symbolId, accountLaneId, priceSequence, scanStartPriceSequence, lastUserId, riskComplete, riskUserId,
+                riskPhase, riskPositionCursor, riskReservationCursor, riskUnrealizedPnlUnits,
+                riskMaintenanceMarginUnits, riskIsolatedMarginUnits, riskIsolatedReservationUnits, triggerComplete,
+                triggerPhase, triggerPriceCursor, triggerOrderCursor, triggerUpperId, triggerMarkPriceTicks,
+                triggerGeneratedAtEpochMillis, triggerOcoOrderId, triggerOcoCursor, 0);
+    }
+
     public RiskScanRuntime {
-        if (symbolId < 0 || accountLaneId < 0 || accountLaneId >= Long.SIZE
+        if (lastScheduledRevision < 0 || symbolId < 0 || accountLaneId < 0 || accountLaneId >= Long.SIZE
                 || priceSequence < 0 || scanStartPriceSequence < 0
                 || scanStartPriceSequence > priceSequence || lastUserId < 0 || riskUserId < 0
                 || riskPhase < 0 || riskPhase > 2 || riskReservationCursor < 0
@@ -41,6 +56,15 @@ public record RiskScanRuntime(int symbolId, int accountLaneId, long priceSequenc
                 triggerMarkPriceTicks, triggerGeneratedAtEpochMillis, triggerOcoOrderId, triggerOcoCursor);
     }
 
+    public RiskScanRuntime withLastScheduledRevision(long revision) {
+        return new RiskScanRuntime(symbolId, accountLaneId, priceSequence, scanStartPriceSequence, lastUserId,
+                riskComplete, riskUserId, riskPhase, riskPositionCursor, riskReservationCursor,
+                riskUnrealizedPnlUnits, riskMaintenanceMarginUnits, riskIsolatedMarginUnits,
+                riskIsolatedReservationUnits, triggerComplete, triggerPhase, triggerPriceCursor, triggerOrderCursor,
+                triggerUpperId, triggerMarkPriceTicks, triggerGeneratedAtEpochMillis, triggerOcoOrderId,
+                triggerOcoCursor, revision);
+    }
+
     public boolean complete() {
         return riskComplete && triggerComplete;
     }
@@ -54,7 +78,7 @@ public record RiskScanRuntime(int symbolId, int accountLaneId, long priceSequenc
                 userId, phase, positionCursor, reservationCursor, unrealizedPnlUnits, maintenanceMarginUnits,
                 isolatedMarginUnits, isolatedReservationUnits, triggerComplete, triggerPhase, triggerPriceCursor,
                 triggerOrderCursor, triggerUpperId, triggerMarkPriceTicks, triggerGeneratedAtEpochMillis,
-                triggerOcoOrderId, triggerOcoCursor);
+                triggerOcoOrderId, triggerOcoCursor, lastScheduledRevision);
     }
 
     public RiskScanRuntime withTriggerProgress(boolean complete, int phase, long priceCursor, long orderCursor,
@@ -65,7 +89,7 @@ public record RiskScanRuntime(int symbolId, int accountLaneId, long priceSequenc
                 riskUserId, riskPhase, riskPositionCursor, riskReservationCursor, riskUnrealizedPnlUnits,
                 riskMaintenanceMarginUnits, riskIsolatedMarginUnits, riskIsolatedReservationUnits,
                 complete, phase, priceCursor, orderCursor, upperId, markPriceTicks, generatedAtEpochMillis,
-                triggerOcoOrderId, triggerOcoCursor);
+                triggerOcoOrderId, triggerOcoCursor, lastScheduledRevision);
     }
 
     public RiskScanRuntime withTriggerOcoProgress(long orderId, long cursor) {
@@ -74,13 +98,13 @@ public record RiskScanRuntime(int symbolId, int accountLaneId, long priceSequenc
                 riskUserId, riskPhase, riskPositionCursor, riskReservationCursor, riskUnrealizedPnlUnits,
                 riskMaintenanceMarginUnits, riskIsolatedMarginUnits, riskIsolatedReservationUnits,
                 triggerComplete, triggerPhase, triggerPriceCursor, triggerOrderCursor, triggerUpperId,
-                triggerMarkPriceTicks, triggerGeneratedAtEpochMillis, orderId, cursor);
+                triggerMarkPriceTicks, triggerGeneratedAtEpochMillis, orderId, cursor, lastScheduledRevision);
     }
 
     public RiskScanRuntime nextAccountLane(int laneId) {
         return new RiskScanRuntime(symbolId, laneId, priceSequence, scanStartPriceSequence, 0, false,
                 0, 0, "-", 0, 0, 0, 0, 0, triggerComplete, triggerPhase, triggerPriceCursor,
                 triggerOrderCursor, triggerUpperId, triggerMarkPriceTicks, triggerGeneratedAtEpochMillis,
-                triggerOcoOrderId, triggerOcoCursor);
+                triggerOcoOrderId, triggerOcoCursor, lastScheduledRevision);
     }
 }

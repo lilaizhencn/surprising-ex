@@ -177,6 +177,50 @@ class CoreRiskStateTest {
     }
 
     @Test
+    void refreshedEarlierSymbolCannotStarveAnUnvisitedRiskScan() {
+        var state = reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), instrument("BTC-USDT"));
+        state = reducer.upsertInstrument(state, instrument("ETH-USDT"));
+        var identities = new RuntimeIdentityRegistry();
+        var runtime = RuntimeStateProjector.project(state, identities);
+        for (String symbol : List.of("BTC-USDT", "ETH-USDT"))
+            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand(symbol, 1, 100, 1, 1000), runtime, identities);
+        int first = runtime.firstRiskIncompleteScan().symbolId();
+        int other = first == identities.symbolId("BTC-USDT") ? identities.symbolId("ETH-USDT") : identities.symbolId("BTC-USDT");
+        RuntimeDerivativeRiskProcessor.applyContinuationRuntime(64, new java.util.TreeSet<Long>(), runtime, identities);
+        assertThat(runtime.riskScan(first).riskComplete()).isTrue();
+        RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand(identities.symbol(first), 1, 100, 2, 1001), runtime, identities);
+        assertThat(runtime.firstRiskIncompleteScan().symbolId()).as("a refreshed completed symbol must go behind unvisited work").isEqualTo(other);
+        var materialized = RuntimeStateMaterializer.materialize(runtime, identities);
+        var restored = TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(materialized), ProductLine.LINEAR_PERPETUAL);
+        assertThat(restored.businessStateHash()).isEqualTo(materialized.businessStateHash());
+        var restoredIds = new RuntimeIdentityRegistry();
+        var restoredRuntime = RuntimeStateProjector.project(restored, restoredIds);
+        assertThat(restoredIds.symbol(restoredRuntime.firstRiskIncompleteScan().symbolId())).isEqualTo(identities.symbol(other));
+        assertThat(restored.riskState().scans().get(identities.symbol(first)).lastScheduledRevision()).isPositive();
+    }
+
+    @Test
+    void continuousUnrelatedPriceRefreshStillAllowsLiquidationDiscovery() {
+        var state = reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), instrument("BTC-USDT"));
+        state = reducer.upsertInstrument(state, instrument("ETH-USDT"));
+        state = reducer.adjustBalance(state, 7, new BalanceAdjustmentCommand("USDT", 100));
+        state = withPosition(state, new CorePositionState("ETH-USDT", "USDT", 1, 10, 100, 1000, 0, 100));
+        var ids = new RuntimeIdentityRegistry();
+        var runtime = RuntimeStateProjector.project(state, ids);
+        RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand("ETH-USDT", 1, 1, 1, 1000), runtime, ids);
+        var users = new java.util.TreeSet<>(state.users().keySet());
+        for (int i = 1; i <= 4; i++) {
+            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand("BTC-USDT", 1, 100, i, 1000+i), runtime, ids);
+            RuntimeDerivativeRiskProcessor.applyContinuationRuntime(64, users, runtime, ids);
+        }
+        var result = RuntimeStateMaterializer.materialize(runtime, ids);
+        assertThat(result.riskState().liquidations().values()).anySatisfy(liquidation -> {
+            assertThat(liquidation.userId()).isEqualTo(7);
+            assertThat(liquidation.symbol()).isEqualTo("ETH-USDT");
+        });
+    }
+
+    @Test
     void markPriceBeyondHighestRiskBracketStillProducesLiquidationSnapshot() {
         UpsertInstrumentCommand command = new UpsertInstrumentCommand("BTC-USDT", 1,
                 ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,

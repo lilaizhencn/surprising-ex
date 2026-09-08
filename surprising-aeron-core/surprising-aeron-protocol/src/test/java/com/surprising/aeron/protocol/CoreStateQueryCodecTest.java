@@ -13,6 +13,28 @@ import org.junit.jupiter.api.Test;
 class CoreStateQueryCodecTest {
 
     @Test
+    void directOrderEncodingMatchesCollectionWireFormatForUtf8AndOffsetBuffers() {
+        for (String clientId : new String[] {"", "ascii", "客户é😀", "bad\uD800tail\uDC00", "x".repeat(64)}) {
+            CoreOrderStateView order = new CoreOrderStateView(71, ProductLine.SPOT, 7, "BTC-USDT", 3,
+                    CoreOrderSide.BUY, 60_000, 2, 0, 2, false, CoreMarginMode.CROSS,
+                    CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false,
+                    clientId, new UUID(0, 71), -10, 20, 1_000, 1_001, 99, "OPEN", 1);
+            byte[] collection = CoreStateQueryCodec.encodeOpenOrders(new CoreOpenOrdersView(List.of(order)));
+            byte[] expected = java.util.Arrays.copyOfRange(collection, 8, collection.length);
+            assertThat(CoreStateQueryCodec.encodeOrderState(order)).containsExactly(expected);
+            ByteBuffer offset = ByteBuffer.allocateDirect(expected.length + 16).order(ByteOrder.LITTLE_ENDIAN);
+            offset.putLong(123);
+            CoreStateQueryCodec.writeOrderState(offset, order);
+            offset.putLong(456).flip();
+            assertThat(offset.getLong()).isEqualTo(123);
+            byte[] actual = new byte[expected.length];
+            offset.get(actual);
+            assertThat(actual).containsExactly(expected);
+            assertThat(offset.getLong()).isEqualTo(456);
+        }
+    }
+
+    @Test
     void roundTripsUserAndOrderViews() {
         CoreUserStateView user = new CoreUserStateView(ProductLine.LINEAR_PERPETUAL, 7, 3,
                 CorePositionMode.HEDGE,

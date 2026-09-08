@@ -46,6 +46,9 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
 
     public int assetId(String asset) {
         assertOwner();
+        // Exact dictionary hits were validated at insertion; normalize only misses.
+        Integer known = assetIds.get(asset);
+        if (known != null) return known;
         String normalized = AssetBalance.normalizeAsset(asset);
         Integer existing = assetIds.get(normalized);
         if (existing != null) return existing;
@@ -58,6 +61,8 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
 
     public Integer findAssetId(String asset) {
         assertOwner();
+        Integer known = assetIds.get(asset);
+        if (known != null) return known;
         return assetIds.get(AssetBalance.normalizeAsset(asset));
     }
 
@@ -70,6 +75,8 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
 
     public int symbolId(String symbol) {
         assertOwner();
+        Integer known = symbolIds.get(symbol);
+        if (known != null) return known;
         String normalized = OrderReservation.normalizeSymbol(symbol);
         Integer existing = symbolIds.get(normalized);
         if (existing != null) return existing;
@@ -82,6 +89,8 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
 
     public Integer findSymbolId(String symbol) {
         assertOwner();
+        Integer known = symbolIds.get(symbol);
+        if (known != null) return known;
         return symbolIds.get(OrderReservation.normalizeSymbol(symbol));
     }
 

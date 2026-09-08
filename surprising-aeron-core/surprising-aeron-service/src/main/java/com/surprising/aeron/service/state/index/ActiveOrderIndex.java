@@ -76,7 +76,8 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     }
 
     public int count(String symbol) {
-        LongHashSet ids = idsBySymbol.get(OrderReservation.normalizeSymbol(symbol));
+        LongHashSet ids = symbol == null ? null : idsBySymbol.get(symbol);
+        if (ids == null) ids = idsBySymbol.get(OrderReservation.normalizeSymbol(symbol));
         return ids == null ? 0 : ids.size();
     }
 

@@ -46,9 +46,10 @@ public final class RuntimeOrderAdmission {
         if (runtime == null || identities == null || order == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime order admission identity");
         }
+        String symbol = order.instrument().symbol().equals(order.symbol())
+                ? order.instrument().symbol() : OrderReservation.normalizeSymbol(order.symbol());
         String positionIdentity = order.positionSide() == CorePositionSide.NET
-                ? OrderReservation.normalizeSymbol(order.symbol())
-                : OrderReservation.normalizeSymbol(order.symbol()) + ':' + order.positionSide().name();
+                ? symbol : symbol + ':' + order.positionSide().name();
         int symbolId = order.symbolId();
         boolean lifecycleSettled = symbolId >= 0
                 && runtime.treasury().lifecycleSettlement(symbolId) != 0;

@@ -789,7 +789,7 @@ public final class RollingBusinessStateHash {
                 value.riskIsolatedReservationUnits(), value.triggerComplete(), value.triggerPhase(),
                 value.triggerPriceCursor(), value.triggerOrderCursor(), value.triggerUpperId(),
                 value.triggerMarkPriceTicks(), value.triggerGeneratedAtEpochMillis(), value.triggerOcoOrderId(),
-                value.triggerOcoCursor());
+                value.triggerOcoCursor(), value.lastScheduledRevision());
     }
 
     private long stableRiskScan(RiskScanRuntime value) {
@@ -800,7 +800,7 @@ public final class RollingBusinessStateHash {
                 value.riskIsolatedReservationUnits(), value.triggerComplete(), value.triggerPhase(),
                 value.triggerPriceCursor(), value.triggerOrderCursor(), value.triggerUpperId(),
                 value.triggerMarkPriceTicks(), value.triggerGeneratedAtEpochMillis(), value.triggerOcoOrderId(),
-                value.triggerOcoCursor());
+                value.triggerOcoCursor(), value.lastScheduledRevision());
     }
 
     private static long riskScanHasher(String symbol, int accountLaneId, long priceSequence,
@@ -812,7 +812,7 @@ public final class RollingBusinessStateHash {
                                        int triggerPhase, long triggerPriceCursor, long triggerOrderCursor,
                                        long triggerUpperId, long triggerMarkPriceTicks,
                                        long triggerGeneratedAtEpochMillis, long triggerOcoOrderId,
-                                       long triggerOcoCursor) {
+                                       long triggerOcoCursor, long lastScheduledRevision) {
         return canonical(CoreRiskState.RiskScan.class).text(symbol).number(accountLaneId).number(priceSequence)
                 .number(scanStartPriceSequence).number(lastUserId).flag(riskComplete).number(riskUserId)
                 .number(riskPhase).text(riskPositionCursor).number(riskReservationCursor)
@@ -820,7 +820,7 @@ public final class RollingBusinessStateHash {
                 .number(riskIsolatedMarginUnits).number(riskIsolatedReservationUnits).flag(triggerComplete)
                 .number(triggerPhase).number(triggerPriceCursor).number(triggerOrderCursor)
                 .number(triggerUpperId).number(triggerMarkPriceTicks).number(triggerGeneratedAtEpochMillis)
-                .number(triggerOcoOrderId).number(triggerOcoCursor).value();
+                .number(triggerOcoOrderId).number(triggerOcoCursor).number(lastScheduledRevision).value();
     }
 
     private static long stableFundingProgress(CoreTreasuryState.FundingProgress value) {

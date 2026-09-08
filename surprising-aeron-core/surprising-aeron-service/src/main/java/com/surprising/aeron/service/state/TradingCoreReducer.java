@@ -1059,7 +1059,8 @@ public final class TradingCoreReducer {
         scans.put(instrument.symbol(), new CoreRiskState.RiskScan(instrument.symbol(), accountLaneId,
                 command.priceSequence(), scanStart, lastUserId, !scanControl.enabled(),
                 0, 0, "-", 0, 0, 0, 0, 0,
-                true, 0, 0, 0, 0, 0, 0, 0, 0));
+                true, 0, 0, 0, 0, 0, 0, 0, 0,
+                currentScan == null ? 0 : currentScan.lastScheduledRevision()));
         CoreRiskState risk = new CoreRiskState(marks, state.riskState().snapshots(),
                 state.riskState().liquidations(), scans, state.riskState().nextLiquidationId(), scanControl);
         TradingCoreState withMark = new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
@@ -1091,7 +1092,9 @@ public final class TradingCoreReducer {
         if (!scanControl.enabled()) return state;
         maxUsers = Math.min(maxUsers, scanControl.scanBatchSize());
         CoreRiskState.RiskScan scan = state.riskState().scans().values().stream()
-                .filter(value -> !value.riskComplete()).findFirst().orElse(null);
+                .filter(value -> !value.riskComplete()).min(java.util.Comparator
+                        .comparingLong(CoreRiskState.RiskScan::lastScheduledRevision)
+                        .thenComparing(CoreRiskState.RiskScan::symbol)).orElse(null);
         if (scan == null) {
             return state;
         }
@@ -1152,7 +1155,7 @@ public final class TradingCoreReducer {
                                 progress.triggerUpperId(), progress.triggerMarkPriceTicks(),
                                 progress.triggerGeneratedAtEpochMillis())
                 : progress;
-        scans.put(scan.symbol(), nextScan);
+        scans.put(scan.symbol(), nextScan.withLastScheduledRevision(Math.incrementExact(state.revision())));
         CoreRiskState nextRisk = new CoreRiskState(state.riskState().markPrices(), snapshots, liquidations,
                 scans, nextLiquidationId, scanControl);
         return new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),

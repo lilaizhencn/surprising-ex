@@ -42,6 +42,27 @@ import org.openjdk.jmh.annotations.Warmup;
 public class CoreResponseEncodingBenchmark {
 
     @Benchmark
+    public byte[] encodeRealtimeOrder(RealtimeOrderState state) {
+        return com.surprising.aeron.protocol.RealtimeFrameCodec.encode(state.order.productLine(),
+                com.surprising.aeron.protocol.RealtimeFrame.Kind.ORDER, state.order.userId(), 47,
+                0, 1_001, 0, state.order.symbol(), "71",
+                com.surprising.aeron.protocol.CoreStateQueryCodec.encodeOrderState(state.order));
+    }
+
+    @State(Scope.Thread)
+    public static class RealtimeOrderState {
+        @Param({"SPOT", "LINEAR_PERPETUAL", "INVERSE_PERPETUAL", "LINEAR_DELIVERY", "INVERSE_DELIVERY", "OPTION"})
+        public String productLine;
+        private com.surprising.aeron.protocol.CoreOrderStateView order;
+
+        @Setup(Level.Trial)
+        public void setUp() {
+            order = new com.surprising.aeron.protocol.CoreOrderStateView(71, ProductLine.valueOf(productLine),
+                    7, "BTC-USDT", 3, CoreOrderSide.BUY, 60_000, 2, 1, 1, false, "PARTIALLY_FILLED", 1);
+        }
+    }
+
+    @Benchmark
     public int encodeCommittedResponse(ResponseState state) {
         return CoreMessageCodec.encodeResponse(
                 state.header, state.response, state.committedCoreSequence, state.destination);

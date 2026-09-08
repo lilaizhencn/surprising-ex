@@ -3,6 +3,20 @@ import com.surprising.product.api.ProductLine;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 class RealtimeFrameCodecTest {
+ @Test void directEncodingPreservesWireBytesAndPayloadIsolation() {
+  for(var p:ProductLine.values()) for(var k:RealtimeFrame.Kind.values()) {
+   byte[] payload={1,2,3};
+   var frame=new RealtimeFrame(p,k,42,Long.MAX_VALUE,31,123,4,"BTC-USDT","订单😀",payload);
+   byte[] encoded=RealtimeFrameCodec.encode(p,k,42,Long.MAX_VALUE,31,123,4,"BTC-USDT","订单😀",payload);
+   assertThat(encoded).containsExactly(RealtimeFrameCodec.encode(frame));
+   payload[0]=9;
+   assertThat(RealtimeFrameCodec.decode(encoded).payload()).containsExactly((byte)1,(byte)2,(byte)3);
+  }
+  assertThatThrownBy(()->RealtimeFrameCodec.encode(ProductLine.SPOT,RealtimeFrame.Kind.ORDER,
+    -1,0,0,0,0,"","",new byte[0])).isInstanceOf(IllegalArgumentException.class);
+  assertThatThrownBy(()->RealtimeFrameCodec.encode(ProductLine.SPOT,RealtimeFrame.Kind.ORDER,
+    1,0,0,0,0,"","",new byte[RealtimeFrameCodec.MAX_FRAME_BYTES])).isInstanceOf(IllegalArgumentException.class);
+ }
  @Test void roundTripsEveryProductAndKindWithoutPrecisionLoss() {
   for(var p:ProductLine.values()) for(var k:RealtimeFrame.Kind.values()) {
    byte[] payload={1,2,3}; var f=new RealtimeFrame(p,k,42,Long.MAX_VALUE,31,123,4,"BTC-USDT","订单",payload);

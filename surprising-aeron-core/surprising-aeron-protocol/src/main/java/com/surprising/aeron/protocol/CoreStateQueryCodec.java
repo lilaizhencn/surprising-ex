@@ -244,9 +244,10 @@ public final class CoreStateQueryCodec {
     }
 
     public static byte[] encodeOrderState(CoreOrderStateView state) {
-        Writer writer = new Writer(encodedOrderStateLength(state));
-        writeOrderState(writer, state);
-        return writer.toByteArray();
+        var output = java.nio.ByteBuffer.allocate(encodedOrderStateLength(state))
+                .order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        writeOrderState(output, state);
+        return output.array();
     }
 
     public static int encodedOrderStateLength(CoreOrderStateView state) {
@@ -284,12 +285,10 @@ public final class CoreStateQueryCodec {
     private static void putText(java.nio.ByteBuffer output, String value, boolean optional) {
         if (value == null) throw new IllegalArgumentException(optional
                 ? "optional query text is required" : "query text is required");
-        int length = utf8Length(value);
-        if (length > MAX_TEXT_BYTES || !optional && length == 0) {
-            throw new IllegalArgumentException(optional
-                    ? "invalid optional query text length" : "invalid query text length");
-        }
-        output.putInt(length);
+        // The caller sizes the complete message first. Backfill the byte count while
+        // encoding instead of scanning every string a second time for its length.
+        int lengthOffset = output.position();
+        output.putInt(0);
         for (int index = 0; index < value.length(); index++) {
             char current = value.charAt(index);
             if (current < 0x80) {
@@ -312,6 +311,12 @@ public final class CoreStateQueryCodec {
                 output.put((byte) (0x80 | current & 0x3f));
             }
         }
+        int length = output.position() - lengthOffset - Integer.BYTES;
+        if (length > MAX_TEXT_BYTES || !optional && length == 0) {
+            throw new IllegalArgumentException(optional
+                    ? "invalid optional query text length" : "invalid query text length");
+        }
+        output.putInt(lengthOffset, length);
     }
 
     private static int textLength(String value) {

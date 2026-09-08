@@ -58,7 +58,8 @@ public final class RuntimeDerivativeRiskProcessor {
         runtime.putRiskScan(new RiskScanRuntime(symbolId, accountLaneId,
                 command.priceSequence(), scanStart, lastUserId, disabled,
                 0, 0, "-", 0, 0, 0, 0, 0,
-                true, 0, 0, 0, 0, 0, 0, 0, 0));
+                true, 0, 0, 0, 0, 0, 0, 0, 0,
+                currentScan == null ? 0 : currentScan.lastScheduledRevision()));
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
     }
 
@@ -183,7 +184,7 @@ public final class RuntimeDerivativeRiskProcessor {
                     progress.triggerOrderCursor(), progress.triggerUpperId(), progress.triggerMarkPriceTicks(),
                     progress.triggerGeneratedAtEpochMillis(), 0, 0);
         }
-        runtime.putRiskScan(progress);
+        runtime.putRiskScan(progress.withLastScheduledRevision(Math.incrementExact(runtime.revision())));
         return maxWork - remaining;
     }
 
@@ -425,7 +426,7 @@ public final class RuntimeDerivativeRiskProcessor {
                 scan.riskIsolatedMarginUnits(), scan.riskIsolatedReservationUnits(), scan.triggerComplete(),
                 scan.triggerPhase(), scan.triggerPriceCursor(), scan.triggerOrderCursor(), scan.triggerUpperId(),
                 scan.triggerMarkPriceTicks(), scan.triggerGeneratedAtEpochMillis(), scan.triggerOcoOrderId(),
-                scan.triggerOcoCursor());
+                scan.triggerOcoCursor(), scan.lastScheduledRevision());
     }
 
     private static UserRuntime nextUser(TradingRuntimeState runtime, PositionUserIndex positionUsers,

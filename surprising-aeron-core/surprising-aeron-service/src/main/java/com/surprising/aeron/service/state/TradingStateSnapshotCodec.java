@@ -37,7 +37,7 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 29;
+    private static final int VERSION = 30;
     private static final int MAX_TEXT_BYTES = 64;
     private static final int MAX_AUDIT_TEXT_BYTES = 2_048;
 
@@ -219,6 +219,7 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(scan.triggerGeneratedAtEpochMillis());
             writer.longValue(scan.triggerOcoOrderId());
             writer.longValue(scan.triggerOcoCursor());
+            writer.longValue(scan.lastScheduledRevision());
         });
         writer.longValue(state.riskState().nextLiquidationId());
         CoreRiskScanControlView scanControl = state.riskState().scanControl();
@@ -535,7 +536,7 @@ public final class TradingStateSnapshotCodec {
                     reader.nonNegativeLong("trigger mark price"),
                     reader.nonNegativeLong("trigger generated time"),
                     reader.nonNegativeLong("trigger OCO order id"),
-                    reader.nonNegativeLong("trigger OCO cursor"));
+                    reader.nonNegativeLong("trigger OCO cursor"), reader.nonNegativeLong("risk scheduling revision"));
             putUnique(scans, scanSymbol, scan);
         }
         long nextLiquidationId = reader.positiveLong("next liquidation id");

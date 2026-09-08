@@ -7,6 +7,30 @@ import org.junit.jupiter.api.Test;
 class RuntimeIdentityRegistryTest {
 
     @Test
+    void exactIdentityHitsPreserveNormalizationAndRejectInvalidMisses() {
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        int symbol = identities.symbolId(" btc-usdt ");
+        int asset = identities.assetId(" usdt ");
+        long version = identities.dictionaryVersion();
+        for (String value : new String[] {"BTC-USDT", new String("BTC-USDT"), "btc-usdt", " BTC-USDT "}) {
+            assertThat(identities.symbolId(value)).isEqualTo(symbol);
+            assertThat(identities.findSymbolId(value)).isEqualTo(symbol);
+        }
+        for (String value : new String[] {"USDT", new String("USDT"), "usdt", " USDT "}) {
+            assertThat(identities.assetId(value)).isEqualTo(asset);
+            assertThat(identities.findAssetId(value)).isEqualTo(asset);
+        }
+        assertThat(identities.dictionaryVersion()).isEqualTo(version);
+        for (String value : new String[] {null, "", "BTC/USDT"}) {
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> identities.symbolId(value))
+                    .isInstanceOf(IllegalArgumentException.class);
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> identities.findSymbolId(value))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+        assertThat(identities.findSymbolId("ETH-USDT")).isNull();
+    }
+
+    @Test
     void lanesKeepReadingPreparedKeysWhileOwnerExpandsTheDictionary() throws Exception {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         long[] keys = new long[256];

@@ -11,16 +11,27 @@ public final class RealtimeFrameCodec {
     public static final int MAX_FRAME_BYTES = 1_048_576;
     private RealtimeFrameCodec() {}
     public static byte[] encode(RealtimeFrame frame) {
-        byte[] symbol = frame.symbol().getBytes(StandardCharsets.UTF_8);
-        byte[] entity = frame.entityId().getBytes(StandardCharsets.UTF_8);
-        byte[] payload = frame.payloadUnsafe();
+        return encode(frame.productLine(), frame.kind(), frame.userId(), frame.sequence(), frame.ordinal(),
+                frame.timestamp(), frame.snapshotId(), frame.symbol(), frame.entityId(), frame.payloadUnsafe());
+    }
+
+    /** Copies the payload directly into the returned envelope, retaining no caller-owned data. */
+    public static byte[] encode(ProductLine productLine, RealtimeFrame.Kind kind, long userId, long sequence,
+                                int ordinal, long timestamp, long snapshotId, String symbolValue,
+                                String entityId, byte[] payload) {
+        if (productLine == null || kind == null || userId < 0 || sequence < 0 || ordinal < 0
+                || timestamp < 0 || snapshotId < 0 || symbolValue == null || entityId == null || payload == null) {
+            throw new IllegalArgumentException("invalid realtime frame");
+        }
+        byte[] symbol = symbolValue.getBytes(StandardCharsets.UTF_8);
+        byte[] entity = entityId.getBytes(StandardCharsets.UTF_8);
         int length = Math.addExact(64, Math.addExact(symbol.length, Math.addExact(entity.length, payload.length)));
         if (symbol.length > 128 || entity.length > 256 || length > MAX_FRAME_BYTES)
             throw new IllegalArgumentException("realtime frame too large");
         ByteBuffer b = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
-        b.putInt(MAGIC).putInt(1).putInt(frame.productLine().ordinal()).putInt(frame.kind().ordinal());
-        b.putLong(frame.userId()).putLong(frame.sequence()).putInt(frame.ordinal());
-        b.putLong(frame.timestamp()).putLong(frame.snapshotId());
+        b.putInt(MAGIC).putInt(1).putInt(productLine.ordinal()).putInt(kind.ordinal());
+        b.putLong(userId).putLong(sequence).putInt(ordinal);
+        b.putLong(timestamp).putLong(snapshotId);
         put(b, symbol); put(b, entity); put(b, payload);
         return b.array();
     }

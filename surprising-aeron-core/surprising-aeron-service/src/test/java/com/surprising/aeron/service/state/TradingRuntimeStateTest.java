@@ -121,14 +121,16 @@ class TradingRuntimeStateTest {
     }
 
     @Test
-    void riskSchedulerSelectsTheLeastProgressedSymbolInsteadOfTheLowestSymbolId() {
+    void riskSchedulerSelectsLeastRecentlyServedWorkRegardlessOfUserProgress() {
         TradingRuntimeState state = new TradingRuntimeState();
-        state.putRiskScan(incompleteRiskScan(1, 900));
-        state.putRiskScan(incompleteRiskScan(2, 0));
+        state.putRiskScan(incompleteRiskScan(1, 0).withLastScheduledRevision(20));
+        state.putRiskScan(incompleteRiskScan(2, 900).withLastScheduledRevision(10));
 
         assertThat(state.firstRiskIncompleteScan().symbolId())
-                .as("global risk work must rotate to the least-progressed symbol")
+                .as("a low user cursor must not repeatedly preempt older work")
                 .isEqualTo(2);
+        state.putRiskScan(state.riskScan(2).withLastScheduledRevision(30));
+        assertThat(state.firstRiskIncompleteScan().symbolId()).isEqualTo(1);
     }
 
     @Test

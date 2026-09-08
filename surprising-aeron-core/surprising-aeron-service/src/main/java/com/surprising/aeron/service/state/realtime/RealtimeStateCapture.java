@@ -118,7 +118,6 @@ public final class RealtimeStateCapture {
         if (!active()) return;
         outbox.stage(
                 RealtimeFrameCodec.encode(
-                        new RealtimeFrame(
                                 product,
                                 kind,
                                 userId,
@@ -128,7 +127,7 @@ public final class RealtimeStateCapture {
                                 snapshotId,
                                 symbol,
                                 key,
-                                payload)));
+                                payload));
     }
 
     public void snapshot(long userId, RealtimeUserSnapshot snapshot, long exportSequence) {

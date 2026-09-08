@@ -491,7 +491,7 @@ public final class RuntimeCommandProcessor {
                 scan.riskIsolatedReservationUnits(), scan.triggerComplete(), scan.triggerPhase(),
                 scan.triggerPriceCursor(), scan.triggerOrderCursor(), scan.triggerUpperId(),
                 scan.triggerMarkPriceTicks(), scan.triggerGeneratedAtEpochMillis(), scan.triggerOcoOrderId(),
-                scan.triggerOcoCursor()));
+                scan.triggerOcoCursor(), scan.lastScheduledRevision()));
         incrementRevision(runtime);
     }
 

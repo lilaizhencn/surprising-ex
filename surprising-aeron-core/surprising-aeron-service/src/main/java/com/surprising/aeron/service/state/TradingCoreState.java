@@ -411,6 +411,7 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, scan.triggerGeneratedAtEpochMillis());
             hash = CoreStateHash.mix(hash, scan.triggerOcoOrderId());
             hash = CoreStateHash.mix(hash, scan.triggerOcoCursor());
+            hash = CoreStateHash.mix(hash, scan.lastScheduledRevision());
         }
         hash = CoreStateHash.mix(hash, riskState.nextLiquidationId());
         var scanControl = riskState.scanControl();

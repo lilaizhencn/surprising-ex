@@ -4849,3 +4849,14 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 若OS31正确性通过且业务终态速率比OS30高至少5%，执行OS32 seed99203窗口1024同配置；否则不继续增窗。OS33 seed99204取本次有效最快窗口，30s预热+120s不启JMH/JFR持续验证，再按该轮原日志重启核对hash和资金。任何失败轮不得作为吞吐上限，保留证据、停止加压。
 - 硬门槛：本机六产品三独立JVM交易/日志恢复/快照恢复全部通过后才开机；每档三Core存活、offered=terminal（消息及业务）、unfinished0、资金差0、业务覆盖PASS、单命令p99<1s、JFR DataLoss0；不以busy-spin证明有效CPU95%。固定当前业务模式，不作open-loop或长期泄漏结论；结束finally停止四VM并核实TERMINATED。
 - artifact=/Users/atomex/Desktop/surprising/gcp-validation/2026-09-08-prefix-scopes；保存被测commit/JAR SHA、执行参数、原始JFR/OS、JMH JSON、资金和恢复结果。此前18万本机数据不用于性能验收。
+
+- OS30（289268b3，tools SHA 2d9a7b04364cbcbb004c9f05024c453732b6828f4e57599dd7eef2a1f3dde6fb）完成：5698560业务项/542720 Core消息=offered、unfinished0，60.089s，94836.117 business ops/s、9032.011 Core messages/s、22580.028 fills/s，资金差0，389总cycles。综合后台95075.171 ops/s。READY3229/60079=5.37%，读模型仍不合格。四JFR DataLoss0；这是带JFR、非fork JMH的诊断点，不作正式无profiler上限。
+- OS30稳定窗口14:06:26.900–14:07:16.989 UTC，Leader core-1 owner99.78% CPU（user87.86/system11.92）、matcher18.76%、Lane13.64–13.88%；3736 owner执行/本地方法样本中73含等待栈（68顶层yield），仅样本比例，非精确墙钟。owner分配506.87MB/s，matcher91.77MB/s。完整窗口累计805428commands/161530前缀提交约4.99，hwm20、停机pending0。现场亲和性确认为0–7，未独占绑核。原始稳定/全程JFR视图在os30，不混合口径。
+- OS31窗口512再次因OperationalLifecycle强平候选等待30s失败，无有效吞吐；OS32/33未执行。四VM全部TERMINATED。随后在保留的部署JAR上用两个币对、四次功能续扫复现：刷新BTC后四次均选BTC，ETH始终未完成；不是压测重跑。修复为按lastScheduledRevision选择最久未获扫描机会的任务，并在行情刷新时保留该字段。
+
+### 风控调度修复后OS34–OS37预锁
+
+- 采集前补充同轮改动：身份字典/instrument/活跃单计数命中时复用已验证币对，费率和准入复用instrument的规范身份；订单导出直接UTF-8编码并回填字节长度，实时出口直接编码信封，省去临时Frame及payload克隆。新增UTF-8/偏移缓冲区/所有产品与事件kind的字节一致和所有权测试，独立encodeRealtimeOrder JMH场景；云端继续用真实ClusterOperationalBenchmark覆盖交易、实时导出和风控，独立微基准不在本机执行。SHA-256命令去重指纹保持原算法及完整输出。
+- 当前master新增每扫描一个long调度标记，纳入Runtime Fact、物化、全量/滚动hash和快照，续扫成功后取确定性Runtime revision；不使用墙钟调度。快照格式由29改为30，严格拒绝旧格式，不做兼容回退；旧云验证目录保留。资金、价格新鲜度、风险规则和30s超时不放宽。
+- 六产品本机三JVM功能/日志恢复/快照恢复及受影响全量测试通过后才开机。OS34/35/条件36/37分别替代OS30/31/32/33，seed99301–99304，窗口256/512/条件1024/有效最快档，30+60s诊断与30+120s无JFR无JMH持续轮，其他机器、JVM、负载、计数、通过阈值和结束停机要求全部沿用上面预锁；只测当前master，不与旧版本数据作性能收益比较。最终原日志重启核对。
+- artifact=/Users/atomex/Desktop/surprising/gcp-validation/2026-09-08-risk-fairness。任何失败都停止加档，不把无效轮计入吞吐平台；查询READY缺口和长期泄漏验证缺口继续单列。

@@ -3216,16 +3216,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     private static int compareRiskProgress(RiskScanRuntime left, RiskScanRuntime right) {
-        int accountLane = Integer.compare(left.accountLaneId(), right.accountLaneId());
-        if (accountLane != 0) return accountLane;
-        int completedUser = Long.compare(left.lastUserId(), right.lastUserId());
-        if (completedUser != 0) return completedUser;
-        int activeUser = Long.compare(left.riskUserId(), right.riskUserId());
-        if (activeUser != 0) return activeUser;
-        int phase = Integer.compare(left.riskPhase(), right.riskPhase());
-        if (phase != 0) return phase;
-        int reservation = Long.compare(left.riskReservationCursor(), right.riskReservationCursor());
-        return reservation != 0 ? reservation : Integer.compare(left.symbolId(), right.symbolId());
+        int scheduled = Long.compare(left.lastScheduledRevision(), right.lastScheduledRevision());
+        return scheduled != 0 ? scheduled : Integer.compare(left.symbolId(), right.symbolId());
     }
 
     public int incompleteRiskScanCount() {
@@ -3252,6 +3244,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public CoreInstrumentState instrument(String symbol) {
         assertOwner();
+        CoreInstrumentState known = symbol == null ? null : instruments.get(symbol);
+        if (known != null) return known;
         return instruments.get(OrderReservation.normalizeSymbol(symbol));
     }
 
@@ -3564,7 +3558,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     public CoreFeeRate resolveFee(long userId, String symbol, long clusterTimestamp,
                                   CoreInstrumentState instrument) {
         assertOwner();
-        String normalizedSymbol = OrderReservation.normalizeSymbol(symbol);
+        String normalizedSymbol = instrument.symbol().equals(symbol)
+                ? instrument.symbol() : OrderReservation.normalizeSymbol(symbol);
         CoreFeePolicyState selected = null;
         for (CoreFeePolicyState policy : feePolicies.values()) {
             if (policy.effective(userId, normalizedSymbol, clusterTimestamp)
