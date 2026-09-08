@@ -90,10 +90,10 @@ rm -f "$attempt_dir/$stage-result.json" "$attempt_dir/$stage-result.json.tmp" \
 find "$attempt_dir" -maxdepth 1 -type f \( -name "$stage-fork-*.jfr" -o -name "$stage-fork-*.log" \) -delete
 
 build_log="$attempt_dir/$stage-build.log"
-(cd "$repo_root" && mvn -pl surprising-aeron-core/surprising-aeron-tools -am \
+(cd "$repo_root" && mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am \
   -DskipTests clean package) >"$build_log" 2>&1
-jar="$repo_root/surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar"
-[[ -s "$jar" ]] || { echo "tools benchmark jar is missing" >&2; exit 1; }
+jar="$repo_root/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar"
+[[ -s "$jar" ]] || { echo "benchmark jar is missing" >&2; exit 1; }
 
 : >"$attempt_dir/jfr-summary.txt"
 : >"$attempt_dir/jfr-hot-methods.txt"
@@ -118,7 +118,7 @@ for ((fork=1; fork<=forks; fork++)); do
     "-Xlog:gc*,safepoint:file=$attempt_dir/$stage-fork-$fork-gc.log:time,uptime,level,tags:filecount=5,filesize=100M")
   "$java_bin" "${fork_java_flag_args[@]}" \
     -XX:StartFlightRecording="filename=$recording,settings=$jfr_settings,dumponexit=true" \
-    -cp "$jar" com.surprising.aeron.tools.ClusterCapacityMain --local-baseline "$seed" "$maker_depth" \
+    -cp "$jar" com.surprising.aeron.benchmarks.workload.ClusterCapacityMain --local-baseline "$seed" "$maker_depth" \
     >"$fork_log" 2>&1 &
   child_pid=$!
   started_at=$SECONDS

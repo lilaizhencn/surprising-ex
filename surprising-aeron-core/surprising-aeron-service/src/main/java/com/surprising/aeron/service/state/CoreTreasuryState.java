@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.AssetBalance;
+
 import java.util.Map;
 import java.util.Collections;
 import java.util.Set;

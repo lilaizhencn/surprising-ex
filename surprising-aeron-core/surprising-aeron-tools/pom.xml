@@ -32,10 +32,6 @@
             <version>${project.version}</version>
         </dependency>
         <dependency>
-            <groupId>org.hdrhistogram</groupId>
-            <artifactId>HdrHistogram</artifactId>
-        </dependency>
-        <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
@@ -69,7 +65,7 @@
                             <createDependencyReducedPom>false</createDependencyReducedPom>
                             <transformers combine.self="override">
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>com.surprising.aeron.tools.ClusterProbeMain</mainClass>
+                                    <mainClass>com.surprising.aeron.tools.diagnostics.ClusterProbeMain</mainClass>
                                 </transformer>
                             </transformers>
                         </configuration>

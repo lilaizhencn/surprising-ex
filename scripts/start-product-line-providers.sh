@@ -111,6 +111,7 @@ jar_path() {
   case "$1" in
     core) printf '%s/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar' "$ROOT_DIR" ;;
     tools) printf '%s/surprising-aeron-core/surprising-aeron-tools/target/surprising-aeron-tools.jar' "$ROOT_DIR" ;;
+    benchmarks) printf '%s/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar' "$ROOT_DIR" ;;
     instrument) printf '%s/surprising-instrument/surprising-instrument-provider/target/surprising-instrument-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
     market-data) printf '%s/surprising-market-data/surprising-market-data-provider/target/surprising-market-data-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
     price) printf '%s/surprising-price/surprising-price-provider/target/surprising-price-provider-1.0.0-SNAPSHOT-exec.jar' "$ROOT_DIR" ;;
@@ -378,7 +379,7 @@ start_core() {
     -Dsurprising.aeron.hostnames="$AERON_CLUSTER_HOSTNAMES" \
     -Dsurprising.aeron.egress-hostname="$AERON_EGRESS_HOSTNAME" \
     -Dsurprising.aeron.probe-mode=query -Dsurprising.aeron.source-id=910001 \
-    -cp "$(jar_path tools)" com.surprising.aeron.tools.ClusterProbeMain >"$LOG_DIR/core-probe.log" 2>&1; do
+    -cp "$(jar_path tools)" com.surprising.aeron.tools.diagnostics.ClusterProbeMain >"$LOG_DIR/core-probe.log" 2>&1; do
     (( SECONDS < deadline )) || fail "Aeron Core readiness timeout log=$LOG_DIR/core-probe.log"
     sleep 2
   done
@@ -449,6 +450,7 @@ cleanup_failed_start() {
 }
 
 run_test() {
+  [[ -f "$(jar_path benchmarks)" ]] || fail 'build surprising-aeron-benchmarks before lifecycle QA'
   stop_stack >/dev/null 2>&1 || true
   start_stack fresh
   trap 'stop_stack' EXIT INT TERM
@@ -461,7 +463,7 @@ run_test() {
     -Dsurprising.aeron.egress-hostname="$AERON_EGRESS_HOSTNAME" \
     -Dsurprising.aeron.lifecycle-manifest="$manifest" \
     -Dsurprising.aeron.lifecycle-seed="${TEST_SEED:-16001}" \
-    -cp "$(jar_path tools)" com.surprising.aeron.tools.ProductLineLifecycleQaMain
+    -cp "$(jar_path benchmarks)" com.surprising.aeron.benchmarks.workload.ProductLineLifecycleQaMain
   grep -q '^TEST_STATUS=PASS$' "$manifest" || fail "test manifest failed path=$manifest"
   grep -q '^FUNDS_DIFFERENCE=0$' "$manifest" || fail "funds reconciliation failed path=$manifest"
   printf 'PRODUCT_LINE_TEST=PASS productLine=%s runId=%s scope=FULL_HTTP_AERON\n' "$PRODUCT_LINE" "$RUN_ID"

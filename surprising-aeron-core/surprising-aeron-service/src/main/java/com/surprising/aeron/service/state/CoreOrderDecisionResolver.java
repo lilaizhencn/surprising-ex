@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.CoreFeeRate;
+import com.surprising.aeron.service.state.model.CoreMarkPriceState;
+
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CoreOrderType;
 import com.surprising.aeron.protocol.PlaceOrderCommand;

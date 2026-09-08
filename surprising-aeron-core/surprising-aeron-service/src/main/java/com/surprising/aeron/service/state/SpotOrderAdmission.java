@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.index.ActiveOrderIndex;
+
 import static com.surprising.aeron.service.state.ReducerSettlementSupport.*;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionSummary;

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.CoreOrderState;
+
 import com.surprising.aeron.service.state.TradingCoreState.ClientOrderKey;
 import java.util.Map;
 

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.CorePositionState;
+
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;

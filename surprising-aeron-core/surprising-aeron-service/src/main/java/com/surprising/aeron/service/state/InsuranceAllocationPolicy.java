@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.CoreLiquidationState;
+
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Comparator;

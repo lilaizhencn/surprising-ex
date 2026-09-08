@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.CoreRiskStatus;
+
 /**
  * Core-owned status policy. Margin rates and risk limits come from the versioned instrument;
  * this policy only maps the resulting margin ratio to an operational status.

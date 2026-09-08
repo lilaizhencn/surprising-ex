@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.AssetBalance;
+import com.surprising.aeron.service.state.model.CoreOrderState;
+
 import com.surprising.aeron.protocol.CoreOrderSide;
 import java.util.Map;
 import static com.surprising.aeron.service.state.ReducerSettlementSupport.*;

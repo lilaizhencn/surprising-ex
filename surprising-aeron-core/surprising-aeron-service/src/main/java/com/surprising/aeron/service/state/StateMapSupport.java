@@ -24,7 +24,7 @@ public final class StateMapSupport {
     private StateMapSupport() {
     }
 
-    static <K, V> NavigableMap<K, V> freezeSorted(Map<K, V> values) {
+    public static <K, V> NavigableMap<K, V> freezeSorted(Map<K, V> values) {
         if (values instanceof FrozenMap<?, ?>) {
             return (NavigableMap<K, V>) values;
         }

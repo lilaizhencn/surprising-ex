@@ -1,5 +1,11 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.CoreAlgoOrderState;
+import com.surprising.aeron.service.state.model.CoreCancelAllAfterKey;
+import com.surprising.aeron.service.state.model.CoreCancelAllAfterState;
+import com.surprising.aeron.service.state.model.CoreOrderStatus;
+import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
+
 import com.surprising.aeron.protocol.CoreAlgoOrderView;
 import com.surprising.aeron.protocol.CoreCancelAllAfterView;
 import com.surprising.aeron.protocol.CoreFundingProgressView;

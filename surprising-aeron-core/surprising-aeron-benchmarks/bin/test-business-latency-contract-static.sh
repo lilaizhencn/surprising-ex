@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 MODULE="${ROOT}/surprising-aeron-core/surprising-aeron-benchmarks"
 PROTOCOL="${ROOT}/surprising-aeron-core/surprising-aeron-protocol/src/main/java/com/surprising/aeron/protocol/CoreMessageType.java"
-RECORDER="${MODULE}/src/main/java/com/surprising/aeron/service/OpenLoopBusinessLatencyRecorder.java"
+RECORDER="${MODULE}/src/main/java/com/surprising/aeron/service/execution/OpenLoopBusinessLatencyRecorder.java"
 ANALYZER="${MODULE}/bin/analyze-owner-commit-jfr.sh"
 QUALIFIER="${MODULE}/bin/qualify-linear-perpetual-scale.sh"
 OUTPUT="${1:-${ROOT}/.omo/evidence/round8-static}"

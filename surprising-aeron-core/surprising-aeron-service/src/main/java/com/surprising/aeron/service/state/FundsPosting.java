@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.AssetBalance;
+
 public record FundsPosting(String asset, OwnerKind ownerKind, long ownerId, Subledger subledger, long units) {
 
     public FundsPosting {

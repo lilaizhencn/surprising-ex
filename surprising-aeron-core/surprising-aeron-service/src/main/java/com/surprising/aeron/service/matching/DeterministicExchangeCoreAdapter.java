@@ -5,7 +5,7 @@ import com.surprising.aeron.protocol.CoreBookLevelView;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.state.CoreInstrumentState;
-import com.surprising.aeron.service.state.CoreOrderState;
+import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.LaneTopology;
 import exchange.core2.core.SynchronousMatchingEngine;
@@ -867,7 +867,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         try {
             Map<Long, ReconciledOrder> expected = new HashMap<>();
             for (CoreOrderState order : activeOrders) {
-                if (order.status() != com.surprising.aeron.service.state.CoreOrderStatus.OPEN) {
+                if (order.status() != com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN) {
                     throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
                             "active-order index contains a terminal order");
                 }
@@ -912,7 +912,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         for (CoreOrderState order : activeOrders) {
             Integer symbolId = symbols.get(order.symbol());
             if (symbolId == null || topology.matcherShardId(symbolId) != shardId) continue;
-            if (order.status() != com.surprising.aeron.service.state.CoreOrderStatus.OPEN) {
+            if (order.status() != com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN) {
                 throw new FatalMatchingDivergenceException(operation, coreSequence, snapshotId,
                         "active-order index contains a terminal order");
             }

@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.CoreLiquidationState;
+import com.surprising.aeron.service.state.model.CoreOrderStatus;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

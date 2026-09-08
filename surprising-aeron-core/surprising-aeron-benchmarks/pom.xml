@@ -13,13 +13,22 @@
 
     <artifactId>surprising-aeron-benchmarks</artifactId>
     <name>surprising-aeron-benchmarks</name>
-    <description>Product Core 的 JMH 微基准，不连接外围服务</description>
+    <description>独立的 Product Core 基准、Cluster 压测和功能验证工具</description>
 
     <properties>
         <jmh.version>1.37</jmh.version>
     </properties>
 
     <dependencies>
+        <dependency>
+            <groupId>com.surprising</groupId>
+            <artifactId>surprising-aeron-tools</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.hdrhistogram</groupId>
+            <artifactId>HdrHistogram</artifactId>
+        </dependency>
         <dependency>
             <groupId>com.surprising</groupId>
             <artifactId>surprising-aeron-service</artifactId>

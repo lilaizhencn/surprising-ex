@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.CoreOrderStatus;
+
 import com.surprising.aeron.protocol.CoreOrderSide;
 
 /** Calculates one derivative fill against the owner-thread Runtime. */

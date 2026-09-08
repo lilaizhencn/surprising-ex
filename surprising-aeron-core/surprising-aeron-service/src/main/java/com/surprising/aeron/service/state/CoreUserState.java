@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.AssetBalance;
+import com.surprising.aeron.service.state.model.CorePositionState;
+
 import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.product.api.ProductLine;
 import java.util.HashMap;

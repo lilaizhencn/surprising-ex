@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.AssetBalance;
+
 import com.surprising.aeron.protocol.ReservationKind;
 import java.util.Locale;
 
@@ -140,7 +142,7 @@ public final class OrderReservation {
         return new OrderReservation(this, newReservedUnits, releasedUnits, consumedUnits);
     }
 
-    static String normalizeSymbol(String value) {
+    public static String normalizeSymbol(String value) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException("symbol is required");
         }

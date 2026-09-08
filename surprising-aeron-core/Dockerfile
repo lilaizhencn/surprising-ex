@@ -1,4 +1,4 @@
-FROM eclipse-temurin:25-jre
+FROM eclipse-temurin:25-jre AS runtime
 
 RUN groupadd --system --gid 10001 surprising \
     && useradd --system --uid 10001 --gid surprising --home-dir /var/lib/surprising --create-home surprising
@@ -12,3 +12,8 @@ RUN mkdir -p /var/lib/surprising/aeron \
 
 USER surprising
 ENTRYPOINT ["java", "--add-opens", "java.base/jdk.internal.misc=ALL-UNNAMED"]
+
+FROM runtime AS validation
+COPY --chown=surprising:surprising surprising-aeron-benchmarks/target/product-core-benchmarks.jar /opt/surprising/benchmarks.jar
+
+FROM runtime AS production

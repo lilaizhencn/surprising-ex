@@ -1,5 +1,10 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.index.ActiveOrderIndex;
+
+import com.surprising.aeron.service.state.model.CoreOrderState;
+import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -283,7 +288,7 @@ class RuntimeFactFrameTest {
         RuntimeFactFrame.OrderChange change = patch.accountLaneGroups().getFirst().orders().getFirst();
         TradingCoreState initial = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
         ActiveOrderIndex index = new ActiveOrderIndex(initial, identities);
-        index.apply(List.of(change), identities);
+        index.apply(change.orderId(), change.after(), identities);
         RuntimeProjectionState projection = new RuntimeProjectionState(initial, 0, 0);
         projection.apply(patch);
 

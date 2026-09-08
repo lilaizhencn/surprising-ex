@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.CoreLeverageKey;
+
 import com.surprising.aeron.protocol.CoreBalanceView;
 import com.surprising.aeron.protocol.CoreLeverageView;
 import com.surprising.aeron.protocol.CoreOrderStateView;

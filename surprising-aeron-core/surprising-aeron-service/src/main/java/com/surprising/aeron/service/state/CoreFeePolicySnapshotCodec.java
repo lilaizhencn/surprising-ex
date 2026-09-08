@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.CoreFeePolicyState;
+
 import com.surprising.aeron.protocol.ProtocolException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;

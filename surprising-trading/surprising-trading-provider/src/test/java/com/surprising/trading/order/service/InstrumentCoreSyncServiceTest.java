@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.CoreProbeState;
+import com.surprising.aeron.service.execution.CoreProbeState;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.*;
 import com.surprising.product.api.ProductLine;

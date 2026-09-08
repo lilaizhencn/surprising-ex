@@ -1,0 +1,45 @@
+package com.surprising.aeron.service.execution;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+
+import com.surprising.product.api.ProductLine;
+import org.junit.jupiter.api.Test;
+
+class DerivativeMixedWorkloadTest {
+
+    @Test
+    void remainingDerivativeLinesCloseAReal256MessageWindow() {
+        for (ProductLine productLine : new ProductLine[] {
+                ProductLine.INVERSE_PERPETUAL, ProductLine.LINEAR_DELIVERY,
+                ProductLine.INVERSE_DELIVERY, ProductLine.OPTION}) {
+            var template = DerivativeMixedWorkload.template(productLine, 4, 256, 256);
+            try (var scenario = DerivativeMixedWorkload.scenario(template, 1, 2)) {
+                scenario.run();
+                assertThat(scenario.maxBacklog()).as(productLine.name()).isEqualTo(256);
+                assertThat(scenario.acceptedOperations()).isEqualTo(scenario.terminalOperations());
+                assertThat(scenario.acceptedCoreMessages()).isEqualTo(scenario.terminalCoreMessages());
+                scenario.verify();
+            }
+        }
+    }
+
+    @Test
+    void everyDerivativeLineCompletesTheSameMixedOrderLifecycleAndRecoversExactly() {
+        for (ProductLine productLine : ProductLine.values()) {
+            if (!productLine.isDerivative()) continue;
+            var template = DerivativeMixedWorkload.template(productLine, 4, 32, 2);
+            assertThatCode(() -> {
+                try (var scenario = DerivativeMixedWorkload.scenario(template, 2, 4)) {
+                    for (int iteration = 0; iteration < 8; iteration++) {
+                        assertThat(scenario.run()).isNotZero();
+                    }
+                    assertThat(scenario.acceptedOperations()).isEqualTo(scenario.terminalOperations());
+                    assertThat(scenario.acceptedCoreMessages()).isEqualTo(scenario.terminalCoreMessages());
+                    assertThat(scenario.maxBacklog()).isGreaterThan(1);
+                    scenario.verify();
+                }
+            }).as(productLine.name()).doesNotThrowAnyException();
+        }
+    }
+}

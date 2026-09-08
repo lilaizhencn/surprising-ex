@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.CoreRiskStatus;
+
 import com.surprising.aeron.protocol.CorePositionSide;
 
 public record RiskSnapshotRuntime(long userId, int symbolId, CorePositionSide positionSide,

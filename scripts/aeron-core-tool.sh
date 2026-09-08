@@ -22,23 +22,29 @@ compose() {
 run_java_tool() {
   local main_class="$1"
   shift
+  local service=probe
+  local jar=/opt/surprising/tools.jar
+  if [[ "$main_class" == com.surprising.aeron.benchmarks.* ]]; then
+    service=workload
+    jar=/opt/surprising/benchmarks.jar
+  fi
   compose --profile tools run --rm --no-deps \
     -e "PRODUCT_LINE=$PRODUCT_LINE" \
     -e "AERON_HOSTNAMES=$HOSTNAMES" \
     -e "AERON_EGRESS_HOSTNAME=$EGRESS_HOSTNAME" \
-    --entrypoint java probe \
+    --entrypoint java "$service" \
     --add-opens java.base/jdk.internal.misc=ALL-UNNAMED \
     -Dsurprising.aeron.product-line="$PRODUCT_LINE" \
     -Dsurprising.aeron.hostnames="$HOSTNAMES" \
     -Dsurprising.aeron.egress-hostname="$EGRESS_HOSTNAME" \
-    "$@" -cp /opt/surprising/tools.jar "$main_class"
+    "$@" -cp "$jar" "$main_class"
 }
 
 tool="${1:-}"
 case "$tool" in
   probe)
     shift
-    run_java_tool com.surprising.aeron.tools.ClusterProbeMain \
+    run_java_tool com.surprising.aeron.tools.diagnostics.ClusterProbeMain \
       -Dsurprising.aeron.probe-mode="${PROBE_MODE:-query}" \
       -Dsurprising.aeron.source-id="${PROBE_SOURCE_ID:-910001}" \
       "$@"
@@ -55,11 +61,11 @@ case "$tool" in
       -e "RECONCILE_ASSET_TOTALS=$RECONCILE_ASSET_TOTALS" \
       --entrypoint java probe \
       --add-opens java.base/jdk.internal.misc=ALL-UNNAMED \
-      -cp /opt/surprising/tools.jar com.surprising.aeron.tools.ClusterFundsReconcileMain "$@"
+      -cp /opt/surprising/tools.jar com.surprising.aeron.tools.reconciliation.ClusterFundsReconcileMain "$@"
     ;;
   capacity)
     shift
-    run_java_tool com.surprising.aeron.tools.ClusterCapacityMain \
+    run_java_tool com.surprising.aeron.benchmarks.workload.ClusterCapacityMain \
       -Dsurprising.aeron.capacity-mode="${CAPACITY_MODE:-run}" \
       -Dsurprising.aeron.capacity-workload="${CAPACITY_WORKLOAD:-MATCH}" \
       -Dsurprising.aeron.capacity-duration-seconds="${CAPACITY_DURATION_SECONDS:-15}" \
@@ -73,7 +79,7 @@ case "$tool" in
     ;;
   lifecycle-capacity)
     shift
-    run_java_tool com.surprising.aeron.tools.ClusterLifecycleCapacityMain \
+    run_java_tool com.surprising.aeron.benchmarks.workload.ClusterLifecycleCapacityMain \
       -Dsurprising.aeron.lifecycle-pairs="${LIFECYCLE_PAIRS:-32}" \
       -Dsurprising.aeron.lifecycle-connections="${LIFECYCLE_CONNECTIONS:-8}" \
       "$@"

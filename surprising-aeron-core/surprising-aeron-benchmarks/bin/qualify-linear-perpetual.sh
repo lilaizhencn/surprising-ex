@@ -182,7 +182,7 @@ run_profile() {
 
 run_e2e() {
   "${JAVA}" "${MAIN_JVM_ARGS[@]}" -cp "${BENCHMARK_JAR}" \
-    com.surprising.aeron.service.CorePerpetualEndToEndBenchmark \
+    com.surprising.aeron.service.execution.CorePerpetualEndToEndBenchmark \
     "${E2E_CYCLES}" 100 "${E2E_MAKER_DEPTH}" \
     2>&1 | tee "${ARTIFACT_DIR}/e2e.log"
   grep -q 'perpetualEndToEndBenchmark=PASS' "${ARTIFACT_DIR}/e2e.log"

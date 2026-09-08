@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.CorePositionState;
+
 import com.surprising.aeron.protocol.CorePositionSide;
 
 record RuntimePositionIndexValue(long userId, String symbol, String asset,

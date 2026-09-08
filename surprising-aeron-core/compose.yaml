@@ -18,6 +18,19 @@ x-node-common: &node-common
       -Xmx${AERON_CORE_HEAP:-512m}
 
 services:
+  workload:
+    image: surprising/aeron-validation:${AERON_CORE_IMAGE_TAG:-local}
+    build:
+      context: .
+      target: validation
+    profiles: [tools]
+    init: true
+    hostname: probe
+    shm_size: 256mb
+    networks:
+      - cluster
+    command: ["--version"]
+
   node0:
     <<: *node-common
     hostname: node0
@@ -82,7 +95,10 @@ services:
       - /opt/surprising/tools.jar
 
   funds-smoke:
-    image: surprising/aeron-core:${AERON_CORE_IMAGE_TAG:-local}
+    image: surprising/aeron-validation:${AERON_CORE_IMAGE_TAG:-local}
+    build:
+      context: .
+      target: validation
     profiles: [tools]
     init: true
     hostname: funds-smoke
@@ -100,11 +116,14 @@ services:
       - -Dsurprising.aeron.smoke-seed=${FUNDS_SMOKE_SEED:-1}
       - -Dsurprising.aeron.smoke-mode=${FUNDS_SMOKE_MODE:-execute}
       - -cp
-      - /opt/surprising/tools.jar
-      - com.surprising.aeron.tools.ClusterFundsSmokeMain
+      - /opt/surprising/benchmarks.jar
+      - com.surprising.aeron.benchmarks.workload.ClusterFundsSmokeMain
 
   spot-match-smoke:
-    image: surprising/aeron-core:${AERON_CORE_IMAGE_TAG:-local}
+    image: surprising/aeron-validation:${AERON_CORE_IMAGE_TAG:-local}
+    build:
+      context: .
+      target: validation
     profiles: [tools]
     init: true
     hostname: spot-match-smoke
@@ -120,11 +139,14 @@ services:
       - -Dsurprising.aeron.smoke-seed=${SPOT_MATCH_SMOKE_SEED:-3001}
       - -Dsurprising.aeron.smoke-mode=${SPOT_MATCH_SMOKE_MODE:-execute}
       - -cp
-      - /opt/surprising/tools.jar
-      - com.surprising.aeron.tools.ClusterSpotMatchSmokeMain
+      - /opt/surprising/benchmarks.jar
+      - com.surprising.aeron.benchmarks.workload.ClusterSpotMatchSmokeMain
 
   derivative-smoke:
-    image: surprising/aeron-core:${AERON_CORE_IMAGE_TAG:-local}
+    image: surprising/aeron-validation:${AERON_CORE_IMAGE_TAG:-local}
+    build:
+      context: .
+      target: validation
     profiles: [tools]
     init: true
     hostname: derivative-smoke
@@ -141,11 +163,14 @@ services:
       - -Dsurprising.aeron.smoke-seed=${DERIVATIVE_SMOKE_SEED:-5001}
       - -Dsurprising.aeron.smoke-mode=${DERIVATIVE_SMOKE_MODE:-execute}
       - -cp
-      - /opt/surprising/tools.jar
-      - com.surprising.aeron.tools.ClusterDerivativeSmokeMain
+      - /opt/surprising/benchmarks.jar
+      - com.surprising.aeron.benchmarks.workload.ClusterDerivativeSmokeMain
 
   product-line-gate:
-    image: surprising/aeron-core:${AERON_CORE_IMAGE_TAG:-local}
+    image: surprising/aeron-validation:${AERON_CORE_IMAGE_TAG:-local}
+    build:
+      context: .
+      target: validation
     profiles: [tools]
     init: true
     hostname: product-line-gate
@@ -162,8 +187,8 @@ services:
       - -Dsurprising.aeron.smoke-seed=${PRODUCT_LINE_GATE_SEED:-7001}
       - -Dsurprising.aeron.smoke-mode=${PRODUCT_LINE_GATE_MODE:-execute}
       - -cp
-      - /opt/surprising/tools.jar
-      - com.surprising.aeron.tools.ClusterProductLineGateMain
+      - /opt/surprising/benchmarks.jar
+      - com.surprising.aeron.benchmarks.workload.ClusterProductLineGateMain
 
   export-smoke:
     image: surprising/aeron-core:${AERON_CORE_IMAGE_TAG:-local}

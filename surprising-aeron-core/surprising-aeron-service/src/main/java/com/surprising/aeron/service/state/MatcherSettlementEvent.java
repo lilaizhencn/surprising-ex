@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.CoreOrderStatus;
+
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 

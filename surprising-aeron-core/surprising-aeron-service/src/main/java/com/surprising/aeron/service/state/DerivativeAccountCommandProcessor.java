@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.CoreLeverageKey;
+import com.surprising.aeron.service.state.model.CoreOrderStatus;
+
 import com.surprising.aeron.protocol.AdjustPositionMarginCommand;
 import com.surprising.aeron.protocol.CorePositionMode;
 import com.surprising.aeron.protocol.UpdatePositionModeCommand;

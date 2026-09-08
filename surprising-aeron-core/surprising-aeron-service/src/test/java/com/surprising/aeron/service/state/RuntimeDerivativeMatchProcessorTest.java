@@ -1,5 +1,11 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.AssetBalance;
+import com.surprising.aeron.service.state.model.CoreOrderState;
+import com.surprising.aeron.service.state.model.CoreOrderStatus;
+import com.surprising.aeron.service.state.model.CorePositionState;
+import com.surprising.aeron.service.state.model.CoreRiskState;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static com.surprising.aeron.service.matching.MatcherEventFixtures.trade;
