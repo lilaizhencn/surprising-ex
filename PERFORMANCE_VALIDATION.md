@@ -4860,3 +4860,14 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 当前master新增每扫描一个long调度标记，纳入Runtime Fact、物化、全量/滚动hash和快照，续扫成功后取确定性Runtime revision；不使用墙钟调度。快照格式由29改为30，严格拒绝旧格式，不做兼容回退；旧云验证目录保留。资金、价格新鲜度、风险规则和30s超时不放宽。
 - 六产品本机三JVM功能/日志恢复/快照恢复及受影响全量测试通过后才开机。OS34/35/条件36/37分别替代OS30/31/32/33，seed99301–99304，窗口256/512/条件1024/有效最快档，30+60s诊断与30+120s无JFR无JMH持续轮，其他机器、JVM、负载、计数、通过阈值和结束停机要求全部沿用上面预锁；只测当前master，不与旧版本数据作性能收益比较。最终原日志重启核对。
 - artifact=/Users/atomex/Desktop/surprising/gcp-validation/2026-09-08-risk-fairness。任何失败都停止加档，不把无效轮计入吞吐平台；查询READY缺口和长期泄漏验证缺口继续单列。
+
+### OS34–OS37结果（2026-09-08，当前master 8ac8c550）
+
+- tools SHA256=92d08d97ffb36b60054c18f747478621fd27bf3ac5e4807afce053cddb084b7f；代码、协议、风控调度均为同一构建，不比较旧版本。本机HotSpot25受影响Core reactor 935项（934通过，1项缺INSTRUMENT_SEED_TEST_JDBC_URL跳过），实时路由reactor 170项全通过（含重复依赖测试，不相加）；六产品三JVM交易/SIGKILL日志恢复/快照恢复18项全通过。源码已推送master，README未修改。
+- OS34窗口256、30+60s、JFR+非fork JMH：6021120业务项/573440 Core消息=offered，unfinished0，99954.114 terminal business ops/s、9519.439 Core messages/s、23798.599 fills/s，资金差0。OS35窗口512同配置：6107136业务项/581632消息=offered，unfinished0，101530.090 ops/s、9669.532 messages/s、24173.831 fills/s，资金差0。两档仅约1.6%差异，未达到预锁5%加档条件，OS36未执行。
+- OS37窗口512、30+120s、无JMH/JFR：12235776业务项/1165312消息=offered，unfinished0、peakInFlight512，101853.611 terminal business ops/s、9700.344 Core messages/s、24250.860 fills/s；包含后台操作的composite为102075.009 ops/s，分别统计。下单/撤单/批量下单/批量撤单p99分别80.019/73.072/86.704/92.930ms，详细p50/p90/p95/p99/p999/max与样本数在os37/result.txt；闭环最大速率模型未修正coordinated omission，不作open-loop容量承诺或绝对算力上限。
+- OS34稳定Leader core-0 owner99.72%CPU、matcher18.94%、Lane14.12–14.22%；3738个owner执行/本地方法样本中94含等待栈。OS35稳定Leader core-2 owner99.78%、matcher19.33%、Lane14.45–14.60%；3704样本中74含等待栈。样本占比不等于墙钟时间，CPU占用不等于95%有效业务计算。owner稳定分配分别501.70/508.94MB/s；余下热点为SHA-256命令指纹、UTF-8编码/长度、字符串构造和Map索引访问，尚非零分配。
+- 两诊断轮全部八份JFR DataLoss0，SHA/大小见各轮jfr-manifest.json；完整记录JFR视图与稳定窗口数据分开。OS35 Leader完整记录GC总pause1.14ms、88次、p99/max0.0241ms；NMT heap committed4GiB，GC committed末22.7MB/峰39.6MB。未采到monitor contention不代表无等待；vmstat记录无swap交换。JMH SingleShotTime的一操作为整轮，load B/op不是Core业务分配；这是带采样诊断，不作为正式fork微基准结论。长期live set/native/Direct余额、对象/op、完整分段延迟和稳定期I/O归因仍未完整验收。
+- OS37资金差0、703交易cycles，后台6生命周期与净注资3000000750核对通过。原云端日志三节点重启后仍为hash d435c2835e720c7a、703cycles、fundsDiff0（os37-replay-verify/result.txt）。调度饥饿回归及本轮512档均通过，但测量期完整运营闭环最长29.561s，强平/保险/ADL闭环最长28.588s，仍需改进调度延迟；不能将复合闭环当单条命令p99。
+- OS37查询READY6793/120115=5.66%，其余113322 unavailable，没有回退查Core；读模型可用率仍不合格。当前结论为固定真实三节点、单matcher/四Lane混合场景的吞吐平台诊断与正确性验证，不能宣称完整生产性能验收。原始命令、JAR、日志、JMH JSON、JFR、OS监控与本机恢复证据均在上述artifact根目录。
+- 所有轮次与原日志恢复结束后，finally停止surprising-core-0/1/2及surprising-load，四台状态全部TERMINATED，见instances-final.json；编排退出0。后续未经用户要求不再开机。
