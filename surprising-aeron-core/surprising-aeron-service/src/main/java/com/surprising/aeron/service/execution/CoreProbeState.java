@@ -478,7 +478,8 @@ public final class CoreProbeState implements AutoCloseable {
         ensureRuntimePlaceOrderState();
         var instrument = runtimePlaceOrderState.instrument(command.symbol());
         if (instrument == null || command.reduceOnly()) return false;
-        window.candidateAccounts |= activeOrderIndex.participantMask(instrument.symbol());
+        window.candidateAccounts |= activeOrderIndex.counterpartyMask(
+                instrument.symbol(), command.side(), command.limitPriceTicks());
         addClusterScope(instrument.symbol(), command.orderId(), window);
         return true;
     }
@@ -4631,14 +4632,15 @@ public final class CoreProbeState implements AutoCloseable {
         return runtimePlaceOrderState.hasMatchingNotifications() || matcherPipeline.hasMatchingCompletions();
     }
 
-    private void pumpMatchingCommitCompletions(long clusterTimestamp, long clusterPosition) {
+    private void pumpMatchingCommitCompletions(long clusterTimestamp, long clusterPosition, long throughSequence) {
         long first = pendingMatching.firstSequence();
+        if (first > throughSequence) return;
         OrderBatchPending head = pendingOrderBatches.get(first);
         if (head != null && !head.started) {
             activateOrderBatch(head, pendingMatching.get(first), true);
         }
         drainMatchingCompletions();
-        dispatchReadyPlaceSettlements(clusterTimestamp, clusterPosition);
+        dispatchReadyPlaceSettlements(clusterTimestamp, clusterPosition, throughSequence);
     }
 
     private boolean matchingCommitReady(PendingMatching pending) {
@@ -4685,11 +4687,11 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private PendingMatching awaitAnyMatchingCommitReady(
-            long timeoutNanos, long clusterTimestamp, long clusterPosition) {
+            long timeoutNanos, long clusterTimestamp, long clusterPosition, long throughSequence) {
         long deadline = System.nanoTime() + timeoutNanos;
         int idle = 0;
-        while (!pendingMatching.isEmpty()) {
-            pumpMatchingCommitCompletions(clusterTimestamp, clusterPosition);
+        while (!pendingMatching.isEmpty() && pendingMatching.firstSequence() <= throughSequence) {
+            pumpMatchingCommitCompletions(clusterTimestamp, clusterPosition, throughSequence);
             PendingMatching ready = pollReadyPending();
             if (ready != null) return ready;
             long remaining = deadline - System.nanoTime();
@@ -4709,6 +4711,11 @@ public final class CoreProbeState implements AutoCloseable {
 
     int commitReadyMatching(int maxCompletions, long clusterTimestamp, long clusterPosition,
                             boolean awaitFirst, MatchingCommitHandler handler) {
+        return commitReadyMatching(maxCompletions, clusterTimestamp, clusterPosition, awaitFirst, Long.MAX_VALUE, handler);
+    }
+
+    int commitReadyMatching(int maxCompletions, long clusterTimestamp, long clusterPosition,
+                            boolean awaitFirst, long throughSequence, MatchingCommitHandler handler) {
         runtime.assertOwner();
         assertHealthy();
         if (maxCompletions <= 0 || handler == null) {
@@ -4716,14 +4723,15 @@ public final class CoreProbeState implements AutoCloseable {
         }
         beginDownstreamPublicationBatch();
         try {
-            pumpMatchingCommitCompletions(clusterTimestamp, clusterPosition);
+            pumpMatchingCommitCompletions(clusterTimestamp, clusterPosition, throughSequence);
             int completed = 0;
             int attempts = 0;
             while (attempts < maxCompletions) {
+                if (pendingMatching.firstSequence() > throughSequence) break;
                 PendingMatching pending = pollReadyPending();
                 if (pending == null && attempts == 0 && awaitFirst) {
                     pending = awaitAnyMatchingCommitReady(
-                            MATCHING_AWAIT_TIMEOUT_NANOS, clusterTimestamp, clusterPosition);
+                            MATCHING_AWAIT_TIMEOUT_NANOS, clusterTimestamp, clusterPosition, throughSequence);
                 }
                 if (pending == null) break;
                 long sequence = pending.sequence();
@@ -4744,7 +4752,7 @@ public final class CoreProbeState implements AutoCloseable {
                         long deadline = System.nanoTime() + MATCHING_AWAIT_TIMEOUT_NANOS;
                         int idle = 0;
                         while (response == null && System.nanoTime() < deadline) {
-                            pumpMatchingCommitCompletions(clusterTimestamp, clusterPosition);
+                            pumpMatchingCommitCompletions(clusterTimestamp, clusterPosition, throughSequence);
                             if (!matchingCommitReady(pending)) {
                                 if (idle++ < 1_024) Thread.onSpinWait();
                                 else java.util.concurrent.locks.LockSupport.parkNanos(this, 1_000L);
@@ -4765,7 +4773,7 @@ public final class CoreProbeState implements AutoCloseable {
                 attempts++;
                 matchingProgressSequence++;
                 if (response == null) {
-                    pumpMatchingCommitCompletions(clusterTimestamp, clusterPosition);
+                    pumpMatchingCommitCompletions(clusterTimestamp, clusterPosition, throughSequence);
                     continue;
                 }
                 handler.onCommitted(sequence, response);
@@ -4777,10 +4785,10 @@ public final class CoreProbeState implements AutoCloseable {
         }
     }
 
-    private void dispatchReadyPlaceSettlements(long clusterTimestamp, long clusterPosition) {
+    private void dispatchReadyPlaceSettlements(long clusterTimestamp, long clusterPosition, long throughSequence) {
         while (true) {
             PendingMatching pending = pendingMatching.dispatchHead();
-            if (pending == null || pending.operation() != PendingMatching.Operation.PLACE
+            if (pending == null || pending.sequence() > throughSequence || pending.operation() != PendingMatching.Operation.PLACE
                     || pending.settlementEvent() != null || hasPendingMatchingRejection(pending.sequence())) {
                 return;
             }

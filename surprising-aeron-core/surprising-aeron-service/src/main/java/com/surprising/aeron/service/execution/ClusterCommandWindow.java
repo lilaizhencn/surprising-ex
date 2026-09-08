@@ -8,49 +8,63 @@ import io.aeron.cluster.service.ClientSession;
 final class ClusterCommandWindow {
     static final int CAPACITY = 64;
     private final Entry[] entries = new Entry[CAPACITY];
-    private int size;
-    private long accounts, symbols;
-    private final org.eclipse.collections.impl.set.mutable.primitive.LongHashSet orders =
-            new org.eclipse.collections.impl.set.mutable.primitive.LongHashSet(CAPACITY * 20);
+    private int head, size;
     private final long[] candidateOrders = new long[20];
     private int candidateOrderCount;
+    private long candidateOrderMask;
     long candidateAccounts, candidateSymbols;
 
     void resetCandidate(long accountMask) {
         candidateAccounts = accountMask;
         candidateSymbols = 0;
         candidateOrderCount = 0;
+        candidateOrderMask = 0;
     }
 
-    void candidateOrder(long orderId) { candidateOrders[candidateOrderCount++] = orderId; }
+    void candidateOrder(long orderId) {
+        candidateOrders[candidateOrderCount++] = orderId;
+        candidateOrderMask |= com.surprising.aeron.service.state.TradingDependencyMask.account(orderId);
+    }
 
     ClusterCommandWindow() {
         for (int i = 0; i < entries.length; i++) entries[i] = new Entry();
     }
 
     boolean conflicts() {
-        if ((accounts & candidateAccounts) != 0 || (symbols & candidateSymbols) != 0) return true;
-        for (int i = 0; i < candidateOrderCount; i++) if (orders.contains(candidateOrders[i])) return true;
-        return false;
+        return conflictingPrefixSize() != 0;
+    }
+
+    int conflictingPrefixSize() {
+        for (int i = size - 1; i >= 0; i--) {
+            Entry entry = get(i);
+            if ((entry.accounts & candidateAccounts) != 0 || (entry.symbols & candidateSymbols) != 0) return i + 1;
+            if ((entry.orderMask & candidateOrderMask) == 0) continue;
+            for (int a = 0; a < candidateOrderCount; a++)
+                for (int b = 0; b < entry.orderCount; b++)
+                    if (candidateOrders[a] == entry.orders[b]) return i + 1;
+        }
+        return 0;
     }
 
     Entry add(ClientSession session, CoreMessage request, long timestamp, long position) {
         if (size == CAPACITY) throw new IllegalStateException("cluster command window is full");
-        Entry entry = entries[size++];
+        Entry entry = get(size++);
         entry.session = session;
         entry.request = request;
         entry.timestamp = timestamp;
         entry.position = position;
-        accounts |= candidateAccounts;
-        symbols |= candidateSymbols;
-        for (int i = 0; i < candidateOrderCount; i++) orders.add(candidateOrders[i]);
+        entry.accounts = candidateAccounts;
+        entry.symbols = candidateSymbols;
+        entry.orderCount = candidateOrderCount;
+        entry.orderMask = candidateOrderMask;
+        System.arraycopy(candidateOrders, 0, entry.orders, 0, candidateOrderCount);
         return entry;
     }
 
     void complete(long sequence, CoreResponse response) {
         boolean found = false;
         for (int i = 0; i < size; i++) {
-            Entry entry = entries[i];
+            Entry entry = get(i);
             if (entry.sequence == sequence) {
                 if (entry.response != null) throw new IllegalStateException("duplicate pipeline completion");
                 entry.response = response;
@@ -61,22 +75,31 @@ final class ClusterCommandWindow {
     }
 
     int size() { return size; }
-    Entry get(int index) { return entries[index]; }
+    Entry get(int index) { return entries[(head + index) & (CAPACITY - 1)]; }
 
     void clear() {
-        for (int i = 0; i < size; i++) {
-            Entry entry = entries[i];
+        removePrefix(size);
+    }
+
+    void removePrefix(int count) {
+        if (count < 0 || count > size) throw new IllegalArgumentException("invalid window prefix");
+        for (int i = 0; i < count; i++) {
+            Entry entry = get(i);
             entry.session = null;
             entry.request = null;
             entry.response = null;
             entry.sequence = entry.timestamp = entry.position = 0;
+            entry.accounts = entry.symbols = entry.orderMask = 0;
+            entry.orderCount = 0;
         }
-        size = 0;
-        accounts = symbols = 0;
-        orders.clear();
+        head = (head + count) & (CAPACITY - 1);
+        size -= count;
     }
 
     static final class Entry {
+        final long[] orders = new long[20];
+        int orderCount;
+        long accounts, symbols, orderMask;
         ClientSession session;
         CoreMessage request;
         CoreResponse response;

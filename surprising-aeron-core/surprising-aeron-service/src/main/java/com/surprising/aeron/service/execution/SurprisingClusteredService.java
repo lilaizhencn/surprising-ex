@@ -136,8 +136,7 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     private void processIngress(ClientSession session, CoreMessage request, long timestamp, long position) {
         boolean eligible = state.prepareClusterPipelineScope(request, commandWindow);
-        if (!eligible || commandWindow.conflicts()
-                || state.matchingSequence(request.header().commandId()) != 0) {
+        if (!eligible || state.matchingSequence(request.header().commandId()) != 0) {
             if (commandWindow.size() != 0) {
                 if (eligible) dependencyFences++; else controlFences++;
             }
@@ -145,7 +144,14 @@ public final class SurprisingClusteredService implements ClusteredService {
             // A preceding command may have changed maker accounts or removed the target order.
             eligible = state.prepareClusterPipelineScope(request, commandWindow);
         }
+        while (eligible && commandWindow.conflicts()) {
+            dependencyFences++;
+            drainCommandPrefix(commandWindow.conflictingPrefixSize());
+            // Re-evaluate against committed makers; the independent suffix remains in flight.
+            eligible = state.prepareClusterPipelineScope(request, commandWindow);
+        }
         if (!eligible) {
+            drainCommandWindow();
             processRequest(session, request, timestamp, position);
             return;
         }
@@ -166,17 +172,22 @@ public final class SurprisingClusteredService implements ClusteredService {
         if (entry.sequence != 0) state.pendingMatching(entry.sequence).establishCommitFence(timestamp, position);
         entry.response = entry.sequence == 0 ? result : null;
         commandWindowHighWaterMark = Math.max(commandWindowHighWaterMark, commandWindow.size());
-        if (commandWindow.size() == ClusterCommandWindow.CAPACITY) drainCommandWindow();
+        if (commandWindow.size() == ClusterCommandWindow.CAPACITY) drainCommandPrefix(1);
     }
 
     private void drainCommandWindow() {
-        int size = commandWindow.size();
+        drainCommandPrefix(commandWindow.size());
+    }
+
+    private void drainCommandPrefix(int size) {
         if (size == 0) return;
         drainedWindows++;
         drainedCommands += size;
         var last = commandWindow.get(size - 1);
         // Admissions are provisional; only the ordered commit phase publishes realtime state.
-        // A window is one atomic export group at its final log position.
+        // The deterministic committed prefix is one export group at its final log position.
+        long throughSequence = 0;
+        for (int i = 0; i < size; i++) throughSequence = Math.max(throughSequence, commandWindow.get(i).sequence);
         if (realtimeCapture != null && realtimeLeader) {
             try { realtimeCapture.begin(last.position, last.timestamp, 0, state.realtimeExportSequence()); }
             catch (RuntimeException failure) { realtimeCapture.failed(); }
@@ -184,17 +195,17 @@ public final class SurprisingClusteredService implements ClusteredService {
         long deadline = System.nanoTime() + COMMAND_TIMEOUT_NANOS;
         idleStrategy.reset();
         boolean checkMatching = true;
-        while (state.firstPendingMatchingSequence() != 0) {
+        while (state.firstPendingMatchingSequence() != 0 && state.firstPendingMatchingSequence() <= throughSequence) {
             long before = state.matchingProgressSequence();
             int completed = 0;
             if (checkMatching || state.hasMatchingNotifications())
                 completed = state.commitReadyMatching(MATCHING_COMPLETION_BATCH_SIZE,
-                        last.timestamp, last.position, false, matchingCommitHandler);
+                        last.timestamp, last.position, false, throughSequence, matchingCommitHandler);
             int work = completed != 0 || state.matchingProgressSequence() != before ? 1 : 0;
             checkMatching = work != 0;
             idleCommand(work, deadline);
         }
-        state.assertClusterCallbackComplete();
+        if (size == commandWindow.size()) state.assertClusterCallbackComplete();
         lastCommittedPosition = last.position;
         if (realtimeCapture != null) realtimeCapture.commit(state.realtimeExportSequence());
         // Keep client-visible completion in ingress order, including immediate rejections.
@@ -205,10 +216,10 @@ public final class SurprisingClusteredService implements ClusteredService {
                 offerResponse(entry.session, entry.request.header().response(responseType(entry.request.header())),
                         entry.response);
         }
-        commandWindow.clear();
+        commandWindow.removePrefix(size);
         // Continuous input can leave a new window open after every log poll. Dispatch
         // bounded asynchronous reads at this already-committed boundary; never wait for them.
-        progressRealtimeReads(System.nanoTime());
+        if (commandWindow.size() == 0) progressRealtimeReads(System.nanoTime());
     }
 
     int commandWindowSize() { return commandWindow.size(); }

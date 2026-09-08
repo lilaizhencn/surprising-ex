@@ -967,6 +967,18 @@ class RuntimeCommitRecoveryTest {
 
     private static Object canonicalIndexValue(Object value) {
         if (value == null) return "<null>";
+        if (value.getClass().getName().equals("com.surprising.aeron.service.state.index.OrderParticipantIndex")) {
+            try {
+                var sides = new java.util.TreeMap<String, Object>();
+                for (String name : List.of("bids", "asks")) {
+                    var field = value.getClass().getDeclaredField(name); field.setAccessible(true);
+                    var entries = new java.util.ArrayList<String>();
+                    collectPriceParticipants(field.get(value), entries);
+                    sides.put(name, entries);
+                }
+                return sides;
+            } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+        }
         if (value.getClass().getName().startsWith("com.surprising.aeron.service.state.OpenInterestIndex$")
                 || value.getClass().getName().startsWith("com.surprising.aeron.service.state.index.ActiveOrderIndex$")) {
             try {
@@ -999,6 +1011,21 @@ class RuntimeCommitRecoveryTest {
         }
         if (value.getClass().getName().startsWith("org.eclipse.collections")) return value.toString();
         return value;
+    }
+
+    private static void collectPriceParticipants(Object node, List<String> entries) throws ReflectiveOperationException {
+        if (node == null) return;
+        var type = node.getClass();
+        var left = type.getDeclaredField("left"); left.setAccessible(true);
+        var right = type.getDeclaredField("right"); right.setAccessible(true);
+        collectPriceParticipants(left.get(node), entries);
+        var values = new StringBuilder();
+        for (String name : List.of("price", "partition", "count")) {
+            var field = type.getDeclaredField(name); field.setAccessible(true);
+            values.append(field.get(node)).append(':');
+        }
+        entries.add(values.toString());
+        collectPriceParticipants(right.get(node), entries);
     }
 
     private static ReplayResult replay(CoreProbeState state, List<CoreMessage> commands) {

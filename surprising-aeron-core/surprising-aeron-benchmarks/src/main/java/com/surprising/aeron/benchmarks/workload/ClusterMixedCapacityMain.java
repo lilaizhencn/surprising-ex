@@ -71,19 +71,32 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
                 run.verify();
                 return;
             }
-            run.setup();
-            if (run.operational) {
-                run.sideLoad = new ClusterOperationalSideLoad(run.seed, run.users, run.mark, run.markSequence);
-                run.sideLoad.start();
-            }
-            run.runFor(Integer.getInteger("surprising.aeron.capacity-warmup-seconds", 30), false);
-            run.runFor(Integer.getInteger("surprising.aeron.capacity-duration-seconds", 300), true);
-            if (run.sideLoad != null) run.sideLoad.stop();
-            run.verify();
-            if (run.sideLoad != null) run.sideLoad.print();
-            run.print();
-            if (run.sideLoad != null) run.sideLoad.printComposite(run.terminal,run.coreTerminal,run.fills,run.elapsed);
+            run.prepareMeasuredRun();
+            run.measureRun();
+            run.finishMeasuredRun();
         }
+    }
+
+    void prepareMeasuredRun() {
+        setup();
+        if (operational) {
+            sideLoad = new ClusterOperationalSideLoad(seed, users, mark, markSequence);
+            sideLoad.start();
+        }
+        runFor(Integer.getInteger("surprising.aeron.capacity-warmup-seconds", 30), false);
+    }
+
+    long measureRun() {
+        runFor(Integer.getInteger("surprising.aeron.capacity-duration-seconds", 300), true);
+        return terminal;
+    }
+
+    void finishMeasuredRun() {
+        if (sideLoad != null) sideLoad.stop();
+        verify();
+        if (sideLoad != null) sideLoad.print();
+        print();
+        if (sideLoad != null) sideLoad.printComposite(terminal, coreTerminal, fills, elapsed);
     }
 
     static List<Long> users() {

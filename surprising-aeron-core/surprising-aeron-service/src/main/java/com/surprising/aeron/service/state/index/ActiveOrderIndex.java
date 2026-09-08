@@ -7,7 +7,6 @@ import com.surprising.aeron.service.state.RuntimeIdentityRegistry;
 import com.surprising.aeron.service.state.RuntimeOrderAdmission;
 import com.surprising.aeron.service.state.RuntimeStateMaterializer;
 import com.surprising.aeron.service.state.TradingCoreState;
-import com.surprising.aeron.service.state.TradingDependencyMask;
 
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
@@ -37,7 +36,7 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     private final Map<String, LongHashSet> idsBySymbol = new HashMap<>();
     // Owner-maintained participant counts: admission must include potential maker accounts
     // without scanning the order book on every incoming command. Removed with the last order.
-    private final Map<String, ParticipantMask> participantsBySymbol = new HashMap<>();
+    private final Map<String, OrderParticipantIndex> participantsBySymbol = new HashMap<>();
     private final LongObjectHashMap<CoreOrderState> ordersById = new LongObjectHashMap<>();
     // Owner-only bounded query scratch; never sized to total book depth.
     private long[] pageScratch;
@@ -85,9 +84,9 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
         return ordersById.size();
     }
 
-    public long participantMask(String symbol) {
-        ParticipantMask participants = participantsBySymbol.get(symbol);
-        return participants == null ? 0 : participants.mask;
+    public long counterpartyMask(String symbol, com.surprising.aeron.protocol.CoreOrderSide side, long limitPrice) {
+        OrderParticipantIndex participants = participantsBySymbol.get(symbol);
+        return participants == null ? 0 : participants.counterparties(side, limitPrice);
     }
 
     public CoreOrderState activeOrder(long orderId) {
@@ -374,7 +373,8 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
             return;
         }
         ordersById.put(orderId, current);
-        if (previous.userId() != current.userId() || !previous.symbol().equals(current.symbol())) {
+        if (previous.userId() != current.userId() || !previous.symbol().equals(current.symbol())
+                || previous.side() != current.side() || previous.matchingPriceTicks() != current.matchingPriceTicks()) {
             removeParticipant(previous);
             addParticipant(current);
         }
@@ -426,24 +426,15 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     }
 
     private void addParticipant(CoreOrderState order) {
-        ParticipantMask participants = participantsBySymbol.computeIfAbsent(order.symbol(), ignored -> new ParticipantMask());
-        int partition = TradingDependencyMask.partition(order.userId());
-        participants.counts[partition] = Math.incrementExact(participants.counts[partition]);
-        participants.mask |= 1L << partition;
+        participantsBySymbol.computeIfAbsent(order.symbol(), ignored -> new OrderParticipantIndex()).add(order);
     }
 
     private void removeParticipant(CoreOrderState order) {
-        ParticipantMask participants = participantsBySymbol.get(order.symbol());
-        int partition = TradingDependencyMask.partition(order.userId());
-        if (participants == null || participants.counts[partition] <= 0)
+        OrderParticipantIndex participants = participantsBySymbol.get(order.symbol());
+        if (participants == null)
             throw new IllegalStateException("active order participant count underflow");
-        if (--participants.counts[partition] == 0) participants.mask &= ~(1L << partition);
-        if (participants.mask == 0) participantsBySymbol.remove(order.symbol());
-    }
-
-    private static final class ParticipantMask {
-        private final int[] counts = new int[64];
-        private long mask;
+        participants.remove(order);
+        if (participants.mask() == 0) participantsBySymbol.remove(order.symbol());
     }
 
     private static void remove(LongObjectHashMap<LongHashSet> values, long key, long id) {

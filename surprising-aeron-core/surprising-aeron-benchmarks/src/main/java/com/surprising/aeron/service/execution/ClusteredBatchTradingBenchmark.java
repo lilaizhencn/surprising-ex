@@ -24,6 +24,16 @@ import org.openjdk.jmh.annotations.*;
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"})
 @Threads(1)
 public class ClusteredBatchTradingBenchmark {
+    /** Shared non-crossing maker liquidity plus alternating-symbol batches exercises price scopes and prefix commits. */
+    @Benchmark
+    public long priceScopedBatchWindows(Workload workload, Counters counters) {
+        workload.runPriceScopedBatchWindows();
+        counters.acceptedBusinessOperations += 512L * workload.batchSize + 4;
+        counters.terminalBusinessOperations += 512L * workload.batchSize + 4;
+        counters.acceptedCoreMessages += 516;
+        counters.terminalCoreMessages += 516;
+        return workload.terminal;
+    }
     @Benchmark
     public long independentBatchWindows(Workload workload, Counters counters) {
         workload.runIndependentBatchWindows();
@@ -478,6 +488,26 @@ public class ClusteredBatchTradingBenchmark {
                 drain();
                 if (terminal - before != 512 || service.commandWindowHighWaterMark() < 2)
                     throw new IllegalStateException("independent commands did not pipeline and complete");
+            } finally { singleResponses = false; }
+        }
+
+        public void runPriceScopedBatchWindows() {
+            long first = orderId++;
+            long second = orderId++;
+            String[] symbols = {"JMH-PIPE-A-USDT", pipelineSymbolB};
+            singleResponses = true;
+            try {
+                for (int i = 0; i < 2; i++) send(command(CoreMessageType.PLACE_ORDER, 1256,
+                        TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(i == 0 ? first : second,
+                                symbols[i], 1, CoreOrderSide.SELL, 120, 1, false, CoreMarginMode.CROSS,
+                                CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""))));
+                drain();
+                singleResponses = false;
+                runIndependentBatchWindows();
+                singleResponses = true;
+                for (long id : new long[]{first, second}) send(command(CoreMessageType.CANCEL_ORDER, 1256,
+                        TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(id))));
+                drain();
             } finally { singleResponses = false; }
         }
 

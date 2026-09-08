@@ -4840,3 +4840,12 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 
 - OS20 owner等待离线归因：相同稳定区间2769个owner样本中，327包含idleCommand，326顶层yield0全部沿processIngress:144→drainCommandWindow:195进入，未采到日志空闲yield；1925样本包含drain（其中含实际提交/编码工作，不能全算等待）。精确匹配部署JAR的Aeron1.53.0 agent字节码，其idle仅执行时钟/后台工作，不重入logAdapter.poll。现有采样无法分别量化准入、matcher、结算等待，也没有逐时刻commit-position/service-position差，不能声称已测出服务日志队列深度。结果见os20/owner-wait-attribution.json。
 - 下单scope无条件包含币对全部active挂单用户，未按方向/价格筛对手。复用当前功能fixture的小样本确认：两个不同用户在不同币对各挂卖102，空簿scope不冲突；同一旧用户在两币对各挂买80后scope冲突，实际执行两卖单无成交、旧用户状态完全不变。owner-dependency-diagnostic-fixed.txt记录false→true与资金/订单结果；前两次诊断启动/命令序号编排错误保留，无生产改动。按压测初始化规则离线重建首轮256笔卖方batch准入，保守scope共享旧买方用户使255个相邻边界均冲突；这只是指定阶段的模型重建，不替代全程逐命令测量，见owner-scope-reconstruction.json。可确认优化对象为过宽对手范围和整窗屏障；64bit碰撞另有保守性，但不能把本例归因为纯hash碰撞。未启动云VM或运行本机压测。
+
+### 2026-09-08 价格依赖与前缀提交：OS30–OS33预锁
+
+- 仅当前master，对照commit不适用。改动为方向/可成交价格参与者索引、冲突日志前缀提交（独立后缀保持在途）、容量边界仅完成最早一条；控制/快照仍全屏障。同时修复等价成交拆分的整单保证金舍入预算，保留冻结不足拒绝检查。Core节点使用生产tools JAR，负载使用独立benchmarks JAR，绝不在Core加载测试agent。
+- 延续真实GCP三Core+load，asia-southeast1-b、n2-custom-8-16384、HotSpot25、Core4GiB/load2GiB ZGC/NMT、1matcher/4Lane、SHARED_NETWORK、service YIELDING、Lane spin0。运营场景1773用户258symbol、batch20、交易连续异步、独立价格16/控制1、Valkey查询1000/s；单交易session在途与全局窗口一致。已有查询低READY独立报告，不能据交易通过宣称整套生产容量通过。
+- OS30 seed99201窗口256与OS31 seed99202窗口512，各30s业务预热+60s测量，四JFR（Core phases.jfc方法路径更新、load profile）及稳定CPU/分配/等待归因。通过真实外部Cluster的JMH SingleShotTime入口执行，单轮一个独立JVM、-f0 -wi0 -i1 -prof gc；JMH一操作表示整轮，s/op与load B/op不得当Core业务吞吐/分配。业务ops、消息、fills、backlog和资金用业务计数；Core分配用稳定JFR。
+- 若OS31正确性通过且业务终态速率比OS30高至少5%，执行OS32 seed99203窗口1024同配置；否则不继续增窗。OS33 seed99204取本次有效最快窗口，30s预热+120s不启JMH/JFR持续验证，再按该轮原日志重启核对hash和资金。任何失败轮不得作为吞吐上限，保留证据、停止加压。
+- 硬门槛：本机六产品三独立JVM交易/日志恢复/快照恢复全部通过后才开机；每档三Core存活、offered=terminal（消息及业务）、unfinished0、资金差0、业务覆盖PASS、单命令p99<1s、JFR DataLoss0；不以busy-spin证明有效CPU95%。固定当前业务模式，不作open-loop或长期泄漏结论；结束finally停止四VM并核实TERMINATED。
+- artifact=/Users/atomex/Desktop/surprising/gcp-validation/2026-09-08-prefix-scopes；保存被测commit/JAR SHA、执行参数、原始JFR/OS、JMH JSON、资金和恢复结果。此前18万本机数据不用于性能验收。

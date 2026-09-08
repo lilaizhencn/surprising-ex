@@ -22,6 +22,125 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class ClusterCommandPipelineTest {
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void prefixCommitReturnsWhileIndependentSuffixMatcherIsStillBlocked(ProductLine product) throws Exception {
+        try (Fixture live = new Fixture(product)) {
+            live.setup();
+            var a = live.place(11, "BTC-USDT", 1000, 80, 1, CoreOrderSide.BUY);
+            var b = live.place(disjointUser(11), disjointSymbol("BTC-USDT"), 2000, 80, 1, CoreOrderSide.BUY);
+            var c = live.place(11, "BTC-USDT", 3000, 79, 1, CoreOrderSide.BUY);
+            live.send(a);
+            var pending = live.service.state().pendingMatching(live.service.state().matchingSequence(a.header().commandId()));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (!pending.isMatchingSubmitted() && System.nanoTime() < deadline)
+                live.service.state().drainMatchingCompletions();
+            assertThat(pending.isMatchingSubmitted()).isTrue();
+            var field = CoreProbeState.class.getDeclaredField("matcherPipeline"); field.setAccessible(true);
+            var matcher = (MatcherPipelineGroup) field.get(live.service.state());
+            var entered = new CountDownLatch(1);
+            var release = new CountDownLatch(1);
+            var blocked = matcher.readAtSubmissionFence(0, () -> {
+                entered.countDown();
+                try { if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("suffix matcher timeout"); }
+                catch (InterruptedException failure) { throw new IllegalStateException(failure); }
+                return 1;
+            });
+            try {
+                assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+                live.send(b); live.send(c);
+                assertThat(blocked.isDone()).isFalse();
+                assertThat(live.responses).hasSize(1);
+                assertThat(live.service.commandWindowSize()).isEqualTo(2);
+            } finally { release.countDown(); }
+            live.tick();
+            assertThat(blocked.join()).isOne();
+            assertThat(live.responses).hasSize(3);
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void dependencyDrainsOnlyItsOrderedPrefixAndKeepsIndependentSuffix(ProductLine product) {
+        try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product);
+             Fixture replay = new Fixture(product, Cluster.Role.FOLLOWER)) {
+            var setup = live.setup(); serial.applyAll(setup); replay.applyAll(setup);
+            // Real fills in both independent batches; the suffix must not enter the prefix's realtime export.
+            long used = TradingDependencyMask.account(11) | TradingDependencyMask.account(disjointUser(11));
+            int symbolNumber = 0;
+            for (String symbol : List.of("BTC-USDT", disjointSymbol("BTC-USDT"))) {
+                long seller = 100;
+                while ((TradingDependencyMask.account(seller) & used) != 0) seller++;
+                used |= TradingDependencyMask.account(seller);
+                ContractType type = ContractType.valueOf(product.contractTypeCode());
+                String asset = product == ProductLine.SPOT || type.isInverse() ? "BTC" : "USDT";
+                var deposit = live.message(CoreMessageType.ADJUST_BALANCE, seller,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 20_000)));
+                var ask = live.place(seller, symbol, 100 + symbolNumber++, 80, 20, CoreOrderSide.SELL);
+                for (Fixture fixture : List.of(live, serial, replay)) { fixture.apply(deposit); fixture.apply(ask); }
+            }
+            live.responses.clear();
+            var outbox = new com.surprising.aeron.client.RealtimeOutbox(8192, 8 * 1024 * 1024);
+            CoreFaults.attachRealtime(live.service, outbox);
+            var a = live.placeBatch(11, "BTC-USDT", 1000);
+            var b = live.placeBatch(disjointUser(11), disjointSymbol("BTC-USDT"), 2000);
+            var c = live.place(11, "BTC-USDT", 3000, 79, 1, CoreOrderSide.BUY);
+            serial.apply(a); serial.apply(b); serial.apply(c);
+            live.send(a); live.send(b); live.send(c);
+            assertThat(live.responses).as("only the conflicting prefix has committed").hasSize(1);
+            assertThat(live.service.commandWindowSize()).as("independent suffix and new command remain").isEqualTo(2);
+            assertThat(live.service.state().matchingSequence(b.header().commandId())).isPositive();
+            int prefixTrades = 0;
+            byte[] bytes;
+            while ((bytes = outbox.poll()) != null) {
+                var frame = RealtimeFrameCodec.decode(bytes);
+                if (frame.kind() == RealtimeFrame.Kind.TRADE) {
+                    assertThat(frame.symbol()).isEqualTo("BTC-USDT");
+                    prefixTrades++;
+                }
+            }
+            assertThat(prefixTrades).isEqualTo(20);
+            live.tick();
+            replay.send(a); replay.send(b); replay.send(c); replay.tick();
+            assertThat(live.responses).hasSize(3).allSatisfy(r -> assertThat(r.status()).isEqualTo(ResponseStatus.APPLIED));
+            assertThat(live.hash()).isEqualTo(serial.hash()).isEqualTo(replay.hash());
+            assertThat(live.service.state().tradingState().users()).isEqualTo(serial.service.state().tradingState().users());
+            try (CoreProbeState restored = CoreProbeState.fromSnapshot(product, live.service.captureSnapshot(880))) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+            }
+        }
+    }
+
+    @Test
+    void nonCrossingSharedRestingBuyerDoesNotSerializeIndependentSellers() {
+        try (Fixture live = new Fixture(ProductLine.SPOT); Fixture serial = new Fixture(ProductLine.SPOT)) {
+            serial.applyAll(live.setup());
+            long a = 11, b = disjointUser(a), shared = b + 1;
+            while ((TradingDependencyMask.account(shared) & (TradingDependencyMask.account(a) | TradingDependencyMask.account(b))) != 0) shared++;
+            var deposit = live.message(CoreMessageType.ADJUST_BALANCE, shared,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 20_000)));
+            live.apply(deposit); serial.apply(deposit);
+            for (long user : new long[]{a, b}) {
+                var base = live.message(CoreMessageType.ADJUST_BALANCE, user,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 100)));
+                live.apply(base); serial.apply(base);
+            }
+            var lowA = live.place(shared, "BTC-USDT", 100, 80, 1, CoreOrderSide.BUY);
+            var lowB = live.place(shared, disjointSymbol("BTC-USDT"), 200, 80, 1, CoreOrderSide.BUY);
+            live.apply(lowA); live.apply(lowB); serial.apply(lowA); serial.apply(lowB);
+            live.responses.clear();
+            var sellA = live.place(a, "BTC-USDT", 300, 102, 1, CoreOrderSide.SELL);
+            var sellB = live.place(b, disjointSymbol("BTC-USDT"), 400, 102, 1, CoreOrderSide.SELL);
+            live.send(sellA); live.send(sellB);
+            assertThat(live.service.commandWindowSize()).isEqualTo(2);
+            assertThat(live.responses).isEmpty();
+            live.tick(); serial.apply(sellA); serial.apply(sellB);
+            assertThat(live.hash()).isEqualTo(serial.hash());
+            assertThat(live.service.state().tradingState().order(100).executedQuantitySteps()).isZero();
+            assertThat(live.service.state().tradingState().order(200).executedQuantitySteps()).isZero();
+        }
+    }
     private static final long TIME = 1_700_000_000_000L;
 
     @ParameterizedTest

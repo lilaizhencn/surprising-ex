@@ -24,6 +24,44 @@ import org.junit.jupiter.api.Test;
 class ActiveOrderIndexTest {
 
     @Test
+    void crossingParticipantMasksMatchOrdersThroughPriceChangesRemovalsAndRebuild() {
+        var random = new java.util.Random(8191);
+        var orders = new HashMap<Long, CoreOrderState>();
+        var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT));
+        for (int step = 0; step < 2_000; step++) {
+            long id = 1 + random.nextInt(150);
+            if (random.nextInt(4) == 0) {
+                orders.remove(id); index.applySnapshot(id, null);
+            } else {
+                var order = new CoreOrderState(id, ProductLine.SPOT, 1 + random.nextInt(200), "BTC-USDT", 1,
+                        random.nextBoolean() ? CoreOrderSide.BUY : CoreOrderSide.SELL,
+                        1 + random.nextInt(100), 2, 0, 2, false, CoreOrderStatus.OPEN, 1);
+                orders.put(id, order); index.applySnapshot(id, order);
+            }
+            if (step % 71 == 0) {
+                var users = new HashMap<Long, CoreUserState>();
+                orders.values().forEach(order -> users.put(order.userId(), CoreUserState.empty(ProductLine.SPOT, order.userId())));
+                index.rebuild(new TradingCoreState(ProductLine.SPOT, 1, users,
+                        orders, Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty()));
+            }
+            for (var side : CoreOrderSide.values()) {
+                for (long price : new long[]{0, 1, 50, 100, Long.MAX_VALUE}) {
+                    long expected = 0;
+                    for (var order : orders.values()) {
+                        if (order.side() != side && (price == 0 || (side == CoreOrderSide.BUY
+                                ? order.matchingPriceTicks() <= price : order.matchingPriceTicks() >= price)))
+                            expected |= TradingDependencyMask.account(order.userId());
+                    }
+                    assertThat(index.counterpartyMask("BTC-USDT", side, price)).isEqualTo(expected);
+                }
+            }
+        }
+        for (long id : orders.keySet()) index.applySnapshot(id, null);
+        assertThat(index.counterpartyMask("BTC-USDT", CoreOrderSide.BUY, 0)).isZero();
+        assertThat(index.counterpartyMask("BTC-USDT", CoreOrderSide.SELL, 0)).isZero();
+    }
+
+    @Test
     void participantMaskRetainsCollidingAccountsUntilTheirLastOrderIsRemoved() {
         long first = 11, colliding = first + 1;
         while (TradingDependencyMask.account(colliding) != TradingDependencyMask.account(first)) colliding++;
@@ -34,17 +72,22 @@ class ActiveOrderIndexTest {
                 CoreOrderSide.SELL, 100, 2, 0, 2, false, CoreOrderStatus.OPEN, 1);
         index.applySnapshot(1, a); index.applySnapshot(2, b);
         long mask = TradingDependencyMask.account(first);
-        assertThat(index.participantMask("BTC-USDT")).isEqualTo(mask);
+        assertThat(participantMask(index)).isEqualTo(mask);
         index.applySnapshot(1, a.fill(1));
-        assertThat(index.participantMask("BTC-USDT")).isEqualTo(mask);
+        assertThat(participantMask(index)).isEqualTo(mask);
         index.applySnapshot(1, null);
-        assertThat(index.participantMask("BTC-USDT")).isEqualTo(mask);
+        assertThat(participantMask(index)).isEqualTo(mask);
         index.applySnapshot(2, null);
-        assertThat(index.participantMask("BTC-USDT")).isZero();
+        assertThat(participantMask(index)).isZero();
         index.rebuild(new TradingCoreState(ProductLine.SPOT, 1,
                 Map.of(first, CoreUserState.empty(ProductLine.SPOT, first)), Map.of(1L, a),
                 Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty()));
-        assertThat(index.participantMask("BTC-USDT")).isEqualTo(mask);
+        assertThat(participantMask(index)).isEqualTo(mask);
+    }
+
+    private static long participantMask(ActiveOrderIndex index) {
+        return index.counterpartyMask("BTC-USDT", CoreOrderSide.BUY, 0)
+                | index.counterpartyMask("BTC-USDT", CoreOrderSide.SELL, 0);
     }
 
     @Test

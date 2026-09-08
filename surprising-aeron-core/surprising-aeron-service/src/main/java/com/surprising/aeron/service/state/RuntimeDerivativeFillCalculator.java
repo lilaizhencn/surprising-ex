@@ -245,11 +245,21 @@ public final class RuntimeDerivativeFillCalculator {
                 state.remaining);
         long fillReservationBudget = Math.min(state.reservedUnits(),
                 Math.max(feeDebit, proportionalBudget));
-        // The accepted reservation is authoritative when a better execution price raises the price-based formula.
+        // Allocate the accepted budget across equal-price partial fills as well: rounding
+        // each fill upward must not consume more margin than the whole order reserved.
+        // Worse prices still require the normal shortfall checks below.
         boolean betterFill = order.side() == CoreOrderSide.BUY
                 ? fillPriceTicks < order.matchingPriceTicks()
                 : fillPriceTicks > order.matchingPriceTicks();
-        if (betterFill && !instrument.contractType().isOption()) {
+        boolean samePriceRounding = fillPriceTicks == order.matchingPriceTicks() && closeSteps == 0
+                && marginIncrease > Math.max(0, fillReservationBudget - feeDebit)
+                && !instrument.contractType().isOption()
+                && reservation.totalReservedUnits() >= Math.addExact(
+                        openingMarginForFill(instrument, nextQuantity, signedFill, order.quantitySteps(),
+                                fillPriceTicks, leveragePpm, riskMark),
+                        Math.max(0, Math.negateExact(CoreContractMath.feeDeltaUnits(instrument,
+                                fillPriceTicks, order.quantitySteps(), Math.max(order.makerFeeRatePpm(), order.takerFeeRatePpm())))));
+        if ((betterFill || samePriceRounding) && !instrument.contractType().isOption()) {
             marginIncrease = Math.min(marginIncrease, Math.max(0,
                     Math.subtractExact(fillReservationBudget, Math.addExact(premiumDebit, feeDebit))));
         }
