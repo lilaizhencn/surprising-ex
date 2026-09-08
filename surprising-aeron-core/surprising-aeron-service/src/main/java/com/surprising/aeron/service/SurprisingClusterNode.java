@@ -12,9 +12,12 @@ import io.aeron.exceptions.AeronException;
 import java.io.File;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import org.agrona.ErrorHandler;
+import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.NoOpLock;
 import org.agrona.concurrent.ShutdownSignalBarrier;
+import org.agrona.concurrent.YieldingIdleStrategy;
 
 public final class SurprisingClusterNode {
 
@@ -24,6 +27,7 @@ public final class SurprisingClusterNode {
     @SuppressWarnings("try")
     public static void main(String[] args) {
         ClusterTopology topology = ClusterTopology.fromSystemProperties();
+        Supplier<IdleStrategy> serviceIdleStrategy = serviceIdleStrategySupplier();
         File nodeDirectory = topology.nodeDirectory().toFile();
         String aeronDirectoryName = topology.aeronDirectoryName();
 
@@ -83,6 +87,9 @@ public final class SurprisingClusterNode {
                     .clusterDir(clusterDirectory)
                     .clusteredService(new SurprisingClusteredService(topology.productLine()))
                     .errorHandler(errorHandler("clustered-service"));
+            if (serviceIdleStrategy != null) {
+                serviceContext.idleStrategySupplier(serviceIdleStrategy);
+            }
             try (ClusteredServiceContainer ignoredContainer = ClusteredServiceContainer.launch(
                     serviceContext.terminationHook(barrier::signalAll))) {
                 System.out.printf("Aeron core started productLine=%s nodeId=%d clusterId=%d host=%s%n",
@@ -139,6 +146,25 @@ public final class SurprisingClusterNode {
 
     static long coreClientLivenessTimeoutNs() {
         return TimeUnit.SECONDS.toNanos(30);
+    }
+
+    static Supplier<IdleStrategy> serviceIdleStrategySupplier() {
+        String configured = System.getProperty("surprising.aeron.service.idle-strategy");
+        if (configured == null || configured.isBlank()) {
+            configured = System.getenv("AERON_SERVICE_IDLE_STRATEGY");
+        }
+        return serviceIdleStrategySupplier(configured);
+    }
+
+    static Supplier<IdleStrategy> serviceIdleStrategySupplier(String configured) {
+        // Preserve Aeron's supplier and global property semantics when unset.
+        if (configured == null || configured.isBlank()) return null;
+        return switch (configured.trim().toUpperCase(Locale.ROOT)) {
+            case "BACKOFF" -> () -> io.aeron.driver.Configuration.agentIdleStrategy("backoff", null);
+            case "YIELDING" -> YieldingIdleStrategy::new;
+            default -> throw new IllegalArgumentException(
+                    "surprising.aeron.service.idle-strategy must be BACKOFF or YIELDING: " + configured);
+        };
     }
 
     static long corePublicationUnblockTimeoutNs() {

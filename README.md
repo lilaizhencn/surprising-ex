@@ -1,5 +1,9 @@
 # surprising-ex
 
+交易 service 可用 `-Dsurprising.aeron.service.idle-strategy=BACKOFF|YIELDING` 或 `AERON_SERVICE_IDLE_STRATEGY` 独立配置等待策略，系统属性优先。未配置时沿用 Aeron 默认及其全局属性；显式配置仅影响 service，不改变 consensus、网络或 Archive。YIELDING 会增加空闲轮询 CPU，应依据真实三节点吞吐、尾延迟和 CPU 实测选择。
+
+The trading service supports `-Dsurprising.aeron.service.idle-strategy=BACKOFF|YIELDING` or `AERON_SERVICE_IDLE_STRATEGY`, with the system property taking precedence. When unset, Aeron's defaults and global property retain their existing behavior. An explicit override affects only the service, leaving consensus, networking and Archive unchanged. YIELDING spends more CPU polling; select it using real three-node throughput, latency and CPU measurements.
+
 Core 的撮合完成轮询区分“阶段有进展”和“命令最终完成”：提交 matcher、消费完成通知或派发结算都会让等待策略看到有效进展；连续无进展时只检查完成队列游标，并保留健康、关闭及超时检查。每次进展后完整检查一轮，逐条日志回调内完成的确定性边界不变。`OrderReservation` 使用不可变值对象，内部金额变动复用已验证的币对/资产字符串；公开构造及恢复仍完整校验，金额范围与溢出检查不变，仍会创建新的金额状态对象。
 
 Core completion polling distinguishes stage progress from terminal commands. After an idle pass it probes completion cursors while retaining health, shutdown and timeout checks; each productive pass is followed by a full pass for owner-local continuations. Each log callback still completes its business work before returning. Immutable `OrderReservation` amount transitions reuse validated identity strings; public construction and restoration retain full validation, and numeric checks remain enforced. Transitions still allocate a new value object.
