@@ -4586,3 +4586,84 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 探索正确性门槛：offeredBusiness=terminalBusiness、offeredCore=terminalCore、实际fills=测量cycle*5120、每类型组成正确、期末unfinished0/peak<=该档window、资金差0/余额非负/零售与HFT持仓及冻结正确/一次强平闭环。所有最终未接收/拒绝/未知/超时判FAIL，ADMIN_ACTION内部有序重试单列；>=1000业务项/s，诊断p99<=10秒且另标是否达到原1秒SLO，不能以放大窗口掩盖尾延迟。连续3个5秒steal>5%、swap增长、VM维护重启、JFR DataLoss或截断均判无效。
 - 饱和判定分别报告：owner单核持续>=90%、尽量95%且业务占比清楚才称owner接近饱和；仅窗口增长、吞吐提升<5%而排队延迟上升只能称该配置链路进入平台，不能称CPU算力用尽。线程CPU、runnable调度等待、网络/owner/matcher/Lane、JFR分配/GC/heap/native/锁/IO/JIT均核查。真实吞吐取300秒整轮，峰值10秒不能代替。没有open-loop、完整阶段墙钟、长稳泄漏、新恢复矩阵或其余五产品/API/WS/Kafka验证时，只作当前场景部分性能结论。
 - Artifact `/Users/atomex/Desktop/surprising/gcp-validation/2026-09-08-saturation`；执行`python3 round.py <tag> <window>`，所有失败、构建、四机原始证据、输入与最终停机清单保留。运行时最多本次4小时，完成本次采集即停机，不留VM闲置。
+
+### 解除限制后的功能门槛及M1024
+
+- Runtime `78126c21`，四机JAR SHA256 `95aed2da87a2065bdf072e7e00deca4a9bb55ba910f3e11ad5ea314232afa1b9`一致。HotSpot25本地44个client及23个tools定向测试/打包通过；新回归确认256已提交请求可在任一响应前完成offer，第257条受session上限约束。四VM启动后API核验均Intel Cascade Lake/n2-custom-8-16384，guest family6/model85、4物理核/8逻辑CPU，实际JDK Temurin25.0.4.1。Core及等待策略未改，对照不适用。
+- F0功能PASS：完整cycle9.425秒（不是持续容量），22,639business ops/3,183命令/5,120真实fills、789查询、peak1024/unfinished0，资金差0、零售/HFT/冻结和一次强平保险ADL全部通过，businessHash=7e98dad607744c81。
+- M1024完整mixed PASS：90.183秒，2,376,758业务项、256,054命令、558,080真实fills，26,354.922业务项/s、2,839.281命令/s、6,188.327 fills/s，3,488查询。109测量cycle/134总cycle，offered=terminal、peak1024、unfinished0、资金/状态闭环通过。窗口扩大仍未形成owner饱和；中央5个5秒样本leader node0 owner28.8%、matcher8.4%、四Lane约3.2%、network-shared49.28%，load main80.16%、egress15.16%。该短档用于探索，不代替300秒确认，CPU窗口样本少；原始六分位、完整分段及系统证据在m1024。批量下单p99=271,843us、批撤148,111us。
+
+### 连续交易T256及网络线程独立诊断预锁
+
+- T256 PASS：实际90.182秒左右（精确值以t256/result.txt为准），46,022.686业务项/s、4,600.389命令/s、10,900.605 fills/s，global=session256始终有足够逻辑在途，资金/状态/计数终检通过。中央5个5秒样本leader node0 owner46.8%、matcher11.68%、network-shared84.04%（82.8..85.2%），load main100%但逻辑窗口满，不能因producer在窗口等待中自旋而认定发压计算瓶颈。T1024正在测量且未显示明显增幅，T4096仍按原预锁执行；不能未完成便替代最终结果。
+- D1在T三档全部完成后运行：同runtime78126c21/同JAR，按原规则从通过的T档选择窗口（最快且差<=5%优先较小），除Core MediaDriver从SHARED_NETWORK改为DEDICATED外完全相同，Archive仍SHARED、Core与Lane默认等待不变。仅使收包/发包分别拥有线程，不增加无业务spin，不改变复制/结算边界。启动脚本通过AERON_THREADING_MODE环境变量选择，未设置时保持SHARED_NETWORK；保存实际启动文件、systemd配置及线程数据。
+- D1 seed93008/ceiling-d1，30秒预热+90秒无JFR测量及终检，所有T档业务比例、资金/状态/错误/10秒p99诊断阈值和原1秒SLO单列、系统有效性规则不变。若D1持续速率高于所选T档超过5%，最终改用DF（seed93009/ceiling-df、30+300秒无JFR）和DJ（seed93010/ceiling-dj、30+180秒/90秒四机普通profile），window与D1相同；否则沿用TF/TJ及原网络模式。此决策在D1采集前固定，不能混用带采样和无采样结果挑峰值。
+
+- TJ/DJ采样开始前细化配置：三Core使用已验证JDK25 profile+定向MethodTiming（phases.jfc）统计processCommittedRequest、idleCommand、offerResponse、apply/prepareMatching/commitReadyMatching/completeDispatchedMatcherSettlement、matcher executeWithEvidenceSync及PlaceAdmission/MatcherSettlement事件；endChunk、90秒、max512m，load仍普通profile。这是针对owner未饱和原因的归因采样，不替代TF/DF无JFR主吞吐；记录完整签名，未调用方法标不可用，嵌套墙钟不求和。idleCommand包含让出/自旋/park，不叫纯阻塞或纯CPU；需要与单核CPU及样本共同解释，普通10ms park阈值无法覆盖短等待。这项配置在任何TJ/DJ采集之前固定，其余场景/阈值/窗口选择规则不变。
+
+- D1取消、DN1重锁：发现`/home/bench/async-d1.log`与前一天wait-diagnostics轮次重名，systemd append混入旧启动/progress记录。新D1已完成setup并发压约20秒后主动停止，原始污染日志及取消证据保留d1/d1-cancel.txt，不采用其吞吐或CPU结果，也未启动新JFR；不是交易正确性失败。归档脚本增加本地目录及远程日志不存在的前置检查。改为全新DN1/seed93011/ceiling-dn1/async-dn1.log，窗口256按T三档选择结果，所有D1参数与阈值保持不变；DF/DJ选择规则中的D1改指DN1有效结果。
+
+### T系列与DN1完成，选择长轮
+
+- 当前同一78126c21/同JAR，三档持续纯交易无控制查询、30+90秒，资金/状态/真实fills和计数均PASS，最终unfinished0、peak等于配置window；全部业务p99仍<1秒，swap/si/so/steal为0。窗口256→1024→4096没有提高持续吞吐，主要增加排队延迟，不能继续以扩大窗口证明Core CPU饱和。
+
+| 档位 | global/session | 秒 | terminal业务项/s | terminal命令/s | 实际fills/s | 业务项总数 | 命令总数 | fills总数 | 最大业务p99 us |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| T256 | 256/256 | 90.182 | 46022.686 | 4600.389 | 10900.605 | 4150425 | 414873 | 983040 | 104529 |
+| T1024 | 1024/1024 | 90.291 | 45730.245 | 4573.318 | 10830.770 | 4129025 | 412929 | 977920 | 293339 |
+| T4096 | 4096/4096 | 91.032 | 45834.366 | 4585.195 | 10855.045 | 4172409 | 417401 | 988160 | 979894 |
+| DN1独立收发 | 256/256 | 90.123 | 44858.218 | 4488.304 | 10623.662 | 4042773 | 404501 | 957440 | 107872 |
+
+- T256/T1024/T4096全量businessHash分别2c7226d204d3084f/955a20449ca3a0e4/51de9e611f562644，包含不同累计交易数量，不能互相比较哈希是否相等来判复制一致性。原始完整六分位、各类型items/requests、分段和四机系统数据分别在各tag；T4096计时包含最终完整cycle及排空。DN1是全新数据/新日志，未采用被取消D1的混杂记录。
+- DN1没有达到比T256高5%的预锁选择条件，按原算法选global=session256、SHARED_NETWORK执行TF（30+300无JFR）与TJ（30+180/90秒定向JFR）。独立收发线程无提升这一实测结果，不支持把共享网络线程约84%CPU直接认定为主要吞吐瓶颈。
+
+### 用户询问官网百万消息与本项目吞吐的区别
+
+- 官方Transport与Cluster均有高吞吐结果，不能简单归因“三节点本身只能每秒几千命令”。官网Cluster图表说明测试消息接收/持久化/复制/响应，并注明部分物理机和kernel bypass配置：https://aeron.io/aeron-open-source/ 。官方性能限制说明状态机业务顺序执行，平均50us/命令会将业务处理限制为20,000命令/s：https://aeron.io/docs/aeron-cluster/performance-limits/ 。这些消息基准不包含本项目的撮合、冻结/持仓、跨Lane结算和完整批量响应工作，不能直接拿本项目展开business ops/s与官方messages/s相除。
+- 本轮T256约46,023展开业务项/s对应约4,600逻辑Core命令/s，不能称每秒46,023条Aeron消息，也不能把三副本各执行一次加总成三倍逻辑吞吐。实际消息较小的普通指令与20项批量的大小不同，官方消息体/硬件/网络配置也必须匹配才能作传输比较。
+- 源码确认另一关键区别：LinearPerpetualMixedWorkload.submitPipelined调用Harness.submit，允许先将多条state.apply产生的pending入队，再drainSubmitted批量收取终态；SurprisingClusteredService.processCommittedRequest在每次回调中循环commitReadyMatching直至firstPendingMatchingSequence=0，必要时还等待queryResult，再assertClusterCallbackComplete后返回。后者保留当前确定性回调完成边界，但使等待matcher/Lane时不能处理下一个Core命令，owner不满核也可能进入吞吐平台。本轮不直接删除该正确性边界，TJ计时用于量化其成本，不能仅以“业务复杂”认定已无优化空间。
+
+### 等待策略诊断的条件预锁（尚未采集）
+
+- 用户要求不被原脚本规则限制并尝试饱和；前述首轮坚持默认等待策略用于定位，不能把这个自定控制变量扩展成禁止继续研究等待成本。保留每条回调必须完成撮合/结算的正确性边界，允许在证据满足时测试现有Aeron配置的调度代价，不修改交易Core源码。官方说明Backoff会从spin/yield进入park，Yielding在没有进展时Thread.yield：https://aeron.io/docs/agrona/agents-idle-strategies/ 。本次实际JAR的ClusteredServiceContainer.Configuration常量也核验`aeron.cluster.idle.strategy`默认BackoffIdleStrategy。
+- 只有TJ完整JFR/资金验证通过、leader owner稳定单核CPU<90%、processCommittedRequest内idleCommand累计墙钟比例>30%时，才启动Y1。Y1仅把三Core的`aeron.cluster.idle.strategy`设为`org.agrona.concurrent.YieldingIdleStrategy`，会作用于cluster agent/consensus及service的idle策略；网络仍SHARED_NETWORK、Archive SHARED、matcher/Lane和BLOCKING策略不改。global=session256、1FIFO+1reserved、同一纯交易业务/资金/用户/币对、同一78126c21/JAR，当前master不重跑旧版。保留满窗口、默认真实复制、每命令完成与全部终检；不是移除等待或改成异步未完成回调。
+- Y1 seed93012/ceiling-y1、30秒预热+90秒无JFR测量，资金/状态/计数/错误/系统有效性以及10秒p99诊断阈值与1秒SLO单列均沿用T。CPU接近100%本身不算成功；只有实际terminal业务速率比TF无JFR300秒结果提高超过10%，才继续YF（seed93013/ceiling-yf，30+300秒无JFR）及YJ（seed93014/ceiling-yj，30+180秒/90秒与TJ同样定向JFR）。否则记录额外CPU与无收益，结束并停机，不为了95%继续空转。YF/YJ如执行，停止之前保存TF/TJ和新选择的全部记录。
+- Yielding可能增加owner/consensus CPU及调度开销，必须单列CPU中yield/轮询/业务栈和墙钟构成，不能把100%线程CPU叫100%业务计算。此诊断的价值由真实吞吐、延迟和资金不变量决定；不将运行时参数自动写成生产默认，也不因此擅自调整Lane或交易一致性边界。
+
+### TF/TJ长轮完成及等待归因
+
+- TF无JFR主轮PASS，30秒预热、实际300.476秒测量：46,184.013 terminal业务项/s、4,614.156 terminal Core命令/s、10,939.436真实fills/s；13,877,196业务项、1,386,444命令、3,287,040 fills，642测量cycle/703总cycle。offered=terminal，unfinished0，peak256；资金差0、零余额亏损闭环/保险/ADL、零售持仓与挂单密度、HFT持仓及预留均PASS，businessHash=d7e121841faff3c1。没有测量期控制查询或触发执行，非原full mixed场景。
+- TF中央46个5秒系统样本：leader node1 owner单核47.652%（46.2..49.6%，>=90%样本0），另两副本43.778%/44.726%；四机整体CPU分别21.413%/29.804%/21.826%/23.304%，swap/si/so/steal0。10秒业务区间45,269.2..47,062.4项/s，持续运行未出现朝95%owner计算饱和的趋势。
+- TF各业务入口到terminal延迟，单位us，按p50/p90/p95/p99/p99.9/max：普通下单39124/49676/51314/54853/58851/72351（328704请求）；普通撤单39419/88276/96075/103415/110231/120979（328704）；标记价格36175/66813/78381/87883/94699/102367（71628）；批量下单74842/91553/95485/103153/110034/121896（493056批、9861120项）；批量撤单65994/82051/85065/89128/92930/97320（164352批、3287040项）。批量平均/最大20，速率与全部分位原文见tf/result.txt；未分离accepted段，也未修正closed-loop coordinated omission。
+- TJ同配置定向JFR归因轮PASS，180.497秒、46,821.946业务项/s、4,675.473命令/s、11,091.177 fills/s；8,451,203业务项、843,907命令、2,001,920 fills，391测量/452总cycle，offered=terminal、unfinished0、peak256、资金差0。四份JFR各90秒且DataLoss0，不替代TF主吞吐。
+- TJ leader node1在426119次processCommittedRequest中平均208886ns，累计墙钟89.010293434秒；13865908次idleCommand累计56.212391032秒，占回调墙钟63.153%；commitReadyMatching累计20.424482484秒。三个Core的idle/回调比例为66.567%/63.153%/64.490%。方法存在嵌套、跨线程和采样边界，不能把所有方法墙钟相加，也不能把idle全部说成park或CPU计算。leader中央22个5秒owner CPU均值49.191%、最大51.4%，匹配顺序回调等待期间未占满CPU的现象。
+- TJ满足此前条件预锁（资金/JFR有效、owner<90%、idle占比>30%），执行Y1既有Yielding配置诊断。保持三节点网络复制、逐回调完成边界、Lane BLOCKING及SHARED_NETWORK，仅调整cluster现有idle属性；依据实际吞吐是否比TF增加>10%决定是否执行YF/YJ长轮，不能以CPU数值取代收益。
+- TJ稳定JFR +30..80秒分配加权估计：三Core分别245.229/247.750/246.933 MB/s，约5237/5291/5274 bytes/business op，load154.748 MB/s、约3305 bytes/business op。全录制首个allocation sample包含录制前累积权重，不能拿全90秒直接相除夸大分配；TLAB精确事件未开启，objects/op和最大对象不可用。主要仍有批量编解码、OrderBatchItem/ResolvedPlaceOrder、结果复制与matcher evidence分配，并非零分配。
+- TJ leader四GB heap committed；9次ZGC（6 Major/Proactive、3 Minor/High Usage），GC总pause0.521ms、单phase最长0.028ms，After-GC 236978176..369098752 bytes，首尾262144000→304087040；direct8个/9575136 bytes不变。NMT total committed 4455890135→4432211395 bytes，峰值4469257951，reserved约70.3GB包含ZGC虚拟地址保留，不能解释为物理占用。22活跃Java线程稳定，13次编译共2500.277ms、最长347.058ms，59次deoptimization，定向MethodTiming重转换有额外开销。VM operation最长16.053ms、safepoint begin最长0.120ms；完整线程/分配/GC/NMT/VM/I/O汇总保存在每机audit/window/cpu/methods文件。短记录不足证明无泄漏，未达到完整生产性能验收。
+
+### Y1短轮完成，进入YF/YJ
+
+- Y1同JAR、实际90.316秒，76,199.579 terminal业务项/s、7,479.998 terminal Core命令/s、18,084.100 fills/s，6,882,026业务项/675,562命令/1,633,280 fills，319测量/418总cycle，offered=terminal、unfinished0、peak256、资金与状态PASS。比TF无JFR长轮业务项速率高64.991%，达到预锁>10%条件，继续YF/YJ长轮确认，短轮本身不作长期上限结论。
+- Y1各业务最大p99为79,036us，原1秒SLO通过；监控中央保守窗口仅1个5秒样本，三个owner均100%，该短窗口不足证明持续95%。保持完整原始监控，最终以YF中央长窗口与YJ样本拆分为准。Yielding会消耗CPU来轮询，不能把线程100%等同于纯交易计算100%。未改变生产默认值。
+
+### YF长轮完成，owner线程达到持续满核
+
+- YF无JFR、30秒预热+实际300.380秒，75,556.597 terminal业务项/s、7,417.300 terminal Core命令/s、17,931.394 fills/s。22,695,724业务项、2,228,012命令、5,386,240 fills，1052测量/1151总cycle，offered=terminal、unfinished0、peak256；资金差0、人口/零售持仓与订单/HFT持仓/冻结预留/初始化强平保险ADL检查PASS，businessHash=80c60cffb2a2d8f3。相同当前JAR、连续交易场景下，比默认等待TF长轮业务项速率高63.599%；不能移用成原full mixed场景性能。
+- 三个owner中央42个5秒样本（210秒）均值均99.990%，范围99.8..100.2%、所有样本>95%；这是单个逻辑CPU口径，计量抖动可能略超100%。独立现场5秒pidstat平均分别99.8/100.0/99.6%，user约63.7..66.2%、system约33.6..35.9%。真实达到owner线程持续95%观察目标，但包含Yielding调度和轮询，绝不称95%有效业务计算或交易算力绝对上限。
+- YF leader为node0，日志最新PID5234 role-change=LEADER。leader matcher17.724%、四Lane9.390/9.395/9.443/9.414%，network-shared87.133%、driver28.971%、archive22.810%、consensus99.990%。三机consensus也约100%，说明全局cluster idle属性增加额外CPU成本，不能只报告owner提升。四机machine CPU均值51.929/43.786/43.524/24.619%，swap/si/so/steal0；load main99.957%包含满窗口轮询，sender24.862/receiver34.138/egress15.371%。load后台apt-get仅1个5秒样本15.8%单核、python3同一短样本3.4%，保留同机干扰，不触发此前swap/steal/重启失效条件，不能据此宣称硬件噪声为零。
+- YF六分位p50/p90/p95/p99/p99.9/max，单位us：PLACE_ORDER 12500/29589/32325/36765/41451/52133（538624请求）；CANCEL_ORDER 12877/64028/71237/79822/88408/98828（538624）；APPLY_MARK_PRICE 18628/55443/60850/68747/80674/86310（73516）；PLACE_ORDER_BATCH 53018/68681/72024/78839/87752/99155（807936批/16158720项）；CANCEL_ORDER_BATCH 44564/56426/59047/63700/69926/79036（269312批/5386240项）。批量平均/最大20项，所有业务p99<1秒；ADMIN_ACTION有序重试131，不是业务失败。
+- 用户追问改动位置：78126c21改发压工具和可显式配置的client session容量构造入口（生产默认保留），未修改撮合、账户或结算规则；Y档只改测试VM的JAVA_TOOL_OPTIONS运行时等待策略。当前processCommittedRequest同步等待完成的业务边界仍存在；没有将其伪装成已实现无阻塞交易流水线。生产应避免主线程外部I/O阻塞及不必要的线程交接；若改为跨命令异步流水，需要先明确复制顺序、资金依赖、终态发布、回放及snapshot fence，不能直接删除等待和完成断言。
+
+### YJ最终归因、验证范围与停机
+
+- YJ 180.132秒，75,215.722业务项/s、7,385.690命令/s、17,850.009 fills/s；13,548,768业务项、1,330,400命令、3,215,360 fills，628测量/726总cycle，offered=terminal、unfinished0、peak256，资金与状态PASS，businessHash=c0b5c8437942a506。四JFR各90秒、DataLoss0；此带定向MethodTiming结果仅用于归因，主吞吐使用YF。所有原始业务六分位、各类型请求数/项数及10秒分段保存于yj/result.txt。
+- YJ leader node1（最新PID5311 role-change=LEADER），653091次processCommittedRequest平均135835ns、累计88.712615985秒；idleCommand累计30.333836064秒，占34.193%；commitReadyMatching累计35.448245631秒，58786477次调用，平均每条Core命令约90.013次，TJ约32.54次。单次回调更短，但检查更频繁，说明用更积极轮询减少休眠延迟，不是去掉同步完成等待。三副本owner中央18个5秒样本约99.91..99.92%单核。
+- YJ leader稳定+30..80秒2315个owner ExecutionSample+NativeMethodSample，互斥栈分类：commitReadyMatching 50.842%（含轮询，不全是有效业务）、state.apply 29.935%、idleCommand 15.896%、offerResponse 1.296%、其他及agent idle约2.03%。363个叶子样本为Thread.yield0；另见SHA2 fingerprint、HashMap/primitive map probe、OrderReservation字符检查、批量结果编码与结算分发。采样比例不是精确CPU或墙钟比例，不能用100%-15.896%推出有效业务算力。owner先前未满的主要可证优化点是顺序回调等待/调度，当前仍有结算完成检查和分配工作；没有证据认定已经耗尽硬件能提供的交易吞吐。
+- YJ稳定+30..80秒分配加权估计：三Core384.834/398.517/406.547 MB/s，约5116/5298/5405 bytes/business op；load205.457 MB/s、约2732 bytes/business op。每业务项分配仍高，吞吐提升会增加每秒GC压力；不能称零分配。定向事件的instrumentation成本和采样权重误差均存在。
+- YJ三个Core GC次数14/11/12、GC pause合计0.701/0.562/0.618ms，最长单phase0.017/0.031/0.026ms；对应After-GC范围249561088..400556032、278921216..415236096、230686720..413138944 bytes，4GiB heap committed固定。load45次Major/Proactive、总pause2.470ms、最长phase0.024ms，After-GC 67108864..115343360 bytes。短窗口GC pause不是当前百微秒回调/几十毫秒队列尾延迟的主要解释，但不排除分配和并发GC CPU成本。
+- YJ NMT total committed首尾：node0 4466130487→4429081581、node1 4456551287→4430088781、node2 4447855932→4425854672 bytes，峰值分别4467054682/4477534780/4462726788；load809774823→1123952830、峰值1126658420。load Java heap committed723517440→1050673152 bytes，解释大部分NMT增长，不能直接判native泄漏。Core direct均8个/9575136 bytes、load6个/8522400 bytes不变，活跃Java线程Core22/load17稳定。各类别NMT、top allocation class/thread/site、全量duration统计均在四机audit/window文件。
+- YJ leader9次Compilation共1579.703ms、最长348.222ms，53次Deoptimization、6次CompilationFailure事件（不等于交易失败），MethodTiming重转换带来的编译活动需保留。VM operation最长15.761ms、SafepointBegin最长0.123ms；17个超过profile阈值的ThreadPark共456.527ms，主要来自Lane，owner未采到超过阈值的park；JavaMonitorEnter、File/Socket I/O、Java异常事件计数0不能证明所有短操作不存在或全部事件均开启。没有发现owner同步外部I/O证据，但本轮不能据低阈值缺口完成严格无阻塞验收。
+- 四机补充systemd CPUQuotaPerSecUSec/MemoryMax均infinity、VmSwap0；此层cgroup cpu.max不存在、cpu.stat未暴露throttle计数，记不可用，不伪报nr_throttled=0。Core现场RSS约5.57..5.94百万KiB（含heap/native映射等），不能与ZGC几十GB reserved混淆。FD是单时点，不是增长斜率；mapped buffer/pool分配释放差额、长稳泄漏、精确objects/op、accepted两段延迟、open-loop/CO修正、JMH误差/置信区间及新snapshot/failover恢复未覆盖，因此这次结论为真实三节点容量/瓶颈诊断通过，完整生产性能验收仍为部分验证。没有在本地跑交易性能，也未测试API/WS/Kafka或六产品线并行。
+- 本轮代码构建与67项定向功能测试已在HotSpot JDK25通过，运行时78126c21和四机JAR SHA256保持一致；后续仅追加诊断文档与本地artifact工具，不改变交易源码。原固定session64造成实际窗口不足已由发压端可配置容量修正；去掉测量期控制排空是trading-stream独立场景，不用它冒充原mixed。
+- 所有采集与下载完成后执行`python3 stop-after-round.py`，2026-09-08 02:04:29 UTC开始停止，02:05:24 UTC完成；再次读取Compute API清单，surprising-core-0/1/2和surprising-load四台均TERMINATED，保留磁盘与数据。证据为artifact根目录stop-instances.txt、instances-before-stop.json、instances-final.json；后续只做本地离线分析，下次用户明确要求测试才开机。
+- Artifact封存：`/Users/atomex/Desktop/surprising/gcp-validation/2026-09-08-saturation/SHA256SUMS`，1131个文件、456320680 bytes，manifest SHA256=`6cf83da17d421c721027a34c079838153cde766079d8f620232ab2c603cf4ea7`。包含有效/无效轮次、四机raw/JFR/settings/系统数据、构建测试日志、当前runtime JAR、停机清单和最终离线分析源；不遍历父目录或SSH私钥，不包含manifest自身及可再生成的class/Python cache。最终选择YF/YJ，TF/TJ默认等待结果完整保留。
