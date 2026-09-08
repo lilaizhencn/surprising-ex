@@ -1,5 +1,9 @@
 # surprising-ex
 
+BLOCKING Account Lane 支持 `surprising.aeron.settlement-spin-limit`（0–4096 次，默认256）：短暂自旋后休眠，通过“声明休眠→重查发布游标”的握手避免丢失唤醒。owner 空轮询的完整健康巡检按1毫秒间隔执行，提交与完成边界仍逐次检查；不改变订单顺序或资金结算边界。
+
+BLOCKING Account Lanes support `surprising.aeron.settlement-spin-limit` (0–4096 iterations, default 256), then park using an announce-and-recheck handshake. Empty owner polling checks full health at one-millisecond intervals; admission and completion retain per-call checks. Order and settlement boundaries remain intact.
+
 Core 实时快照和盘口后台工作只在交易日志回调之外执行。Aeron 的 service idle 可以重入后台回调，因此交易结算期间保留快照请求，待交易回调结束后处理，避免读取未结算状态或覆盖当前实时事件批次。
 
 Realtime user/book snapshots run outside trading log callbacks. Aeron's service idle can reenter background work; snapshot requests remain queued until the trading callback returns, preserving settled-state reads and the current realtime event batch.

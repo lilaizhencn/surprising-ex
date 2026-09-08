@@ -8,6 +8,7 @@ import java.util.concurrent.locks.LockSupport;
 /** Permanent SPSC event loop for one Account Lane. */
 final class SettlementLaneWorker implements AutoCloseable {
     private static final String WAIT_STRATEGY_PROPERTY = "surprising.aeron.settlement-wait-strategy";
+    private static final String SPIN_LIMIT_PROPERTY = "surprising.aeron.settlement-spin-limit";
 
     interface Command {
         void execute(AccountLaneState lane);
@@ -16,6 +17,7 @@ final class SettlementLaneWorker implements AutoCloseable {
     private final Command[] commands;
     private final int indexMask;
     private final WaitStrategy waitStrategy;
+    private final int spinLimit;
     private final AccountLaneState lane;
     private final Thread thread;
     private final PaddedSequence producerSequence = new PaddedSequence();
@@ -23,6 +25,7 @@ final class SettlementLaneWorker implements AutoCloseable {
     private volatile boolean started;
     private volatile boolean running = true;
     private volatile Throwable failure;
+    private volatile boolean parkRequested;
 
     SettlementLaneWorker(String role, AccountLaneState lane, int requestedCapacity) {
         if (role == null || role.isBlank() || lane == null || requestedCapacity <= 0) {
@@ -33,6 +36,9 @@ final class SettlementLaneWorker implements AutoCloseable {
         commands = new Command[capacity];
         indexMask = capacity - 1;
         waitStrategy = configuredWaitStrategy();
+        spinLimit = Integer.parseInt(System.getProperty(SPIN_LIMIT_PROPERTY, "256"));
+        if (spinLimit < 0 || spinLimit > 4096)
+            throw new IllegalArgumentException("settlement spin limit must be in [0,4096]");
         this.lane = lane;
         thread = Thread.ofPlatform().daemon(true)
                 .name("core-" + role + "-lane-" + lane.laneId())
@@ -52,10 +58,10 @@ final class SettlementLaneWorker implements AutoCloseable {
         }
         commands[(int) next & indexMask] = command;
         producerSequence.value = next + 1;
-        // An empty-queue check based on the consumer cursor can observe an older value just as
-        // the worker parks, losing the only wake-up. LockSupport permits coalesce, so publishing
-        // to a blocking worker always issues the notification.
-        if (waitStrategy == WaitStrategy.BLOCKING) LockSupport.unpark(thread);
+        // The consumer announces parking BEFORE rechecking producerSequence. These volatile
+        // accesses ensure either it sees this publication or we observe its wake-up request.
+        // Do not replace this handshake with an empty-queue check on consumerSequence.
+        if (waitStrategy == WaitStrategy.BLOCKING && parkRequested) LockSupport.unpark(thread);
         return next + 1;
     }
 
@@ -77,6 +83,7 @@ final class SettlementLaneWorker implements AutoCloseable {
 
     private void run() {
         long next = consumerSequence.value;
+        int idleSpins = 0;
         try {
             lane.bindOwner();
             started = true;
@@ -93,12 +100,25 @@ final class SettlementLaneWorker implements AutoCloseable {
                     next++;
                     consumerSequence.value = next;
                     command.execute(lane);
+                    idleSpins = 0;
                     continue;
                 }
                 switch (waitStrategy) {
                     case BUSY_SPIN -> Thread.onSpinWait();
                     case YIELDING -> Thread.yield();
-                    case BLOCKING -> LockSupport.park(this);
+                    case BLOCKING -> {
+                        if (idleSpins < spinLimit) {
+                            idleSpins++;
+                            Thread.onSpinWait();
+                        } else {
+                            parkRequested = true;
+                            try {
+                                if (running && next >= producerSequence.value) LockSupport.park(this);
+                            } finally {
+                                parkRequested = false;
+                            }
+                        }
+                    }
                 }
             }
         } catch (Throwable laneFailure) {

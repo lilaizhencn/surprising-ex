@@ -50,6 +50,30 @@ import org.junit.jupiter.api.Test;
 class SurprisingClusteredServiceTest {
 
     @Test
+    void emptyPollingChecksSilentFailureWithinOneMillisecondAndCommandsNeverSkipHealth() throws Exception {
+        var service = service();
+        service.onStart(cluster(), null);
+        var state = service.state();
+        var field = CoreProbeState.class.getDeclaredField("snapshotAuditFailure");
+        field.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        var failureSlot = (AtomicReference<RuntimeException>) field.get(state);
+        try {
+            state.apply(timerInstrument());
+            long now = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            assertThat(state.hasMatchingNotifications(now)).isFalse();
+            var failure = new IllegalStateException("silent snapshot audit failure");
+            failureSlot.set(failure);
+            assertThat(state.hasMatchingNotifications(now + 999_999)).isFalse();
+            assertThatThrownBy(() -> state.apply(timerInstrument())).isSameAs(failure);
+            assertThatThrownBy(() -> state.hasMatchingNotifications(now + 1_000_000)).isSameAs(failure);
+        } finally {
+            failureSlot.set(null);
+            service.onTerminate(null);
+        }
+    }
+
+    @Test
     void stageProgressAndReentrantBackgroundDeferSnapshotUntilSettlementCompletes() throws Exception {
         var service = service();
         var responses = new CopyOnWriteArrayList<byte[]>();

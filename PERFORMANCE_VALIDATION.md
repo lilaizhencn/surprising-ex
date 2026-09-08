@@ -4776,3 +4776,9 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 查询实测4027 READY、56192 unavailable，共60219次（约1000/s），READY仅6.69%；READY p99=543us，但大部分503，整套生产场景未验收。无Core fallback；不能用coverage PASS掩盖可用性失败。保留Valkey现场os4-valkey.rdb及metadata/stats。Core后台快照10ms节流、Router每200ms最多扫描16用户，及饱和期间排队/丢帧需要下一步定位，尚未将其中某一项认定为唯一根因。
 - Leader短窗口owner99.8% CPU（user71.0%、system28.8%），matcher16.2%、各Lane7.9–8.0%；不能当作99.8%有效业务计算。Leader完整137s JFR（含初始化/预热/终检）DataLoss0；方法计时约567812次callback平均165us，idleCommand累计约30.8秒，仍有等待开销。GC pause总0.972ms、p99 0.0273ms，非本轮明显瓶颈；尚未完成稳定窗口分配/native/长期泄漏验收，也未执行这份云数据重启核对。
 - os4-build.txt记录38项相关测试通过；后续补齐Router自身错误处理和重连测试，router-reconnect-final.txt通过，此Router补丁尚未再次云端部署。JMH realtime重入场景已编译，未违反真实三节点约束去跑本机性能。所有原始JFR/日志位于2026-09-08-operational/os4。用户要求优先服务器验证、减少MD耗时后停止持续写记录，本条在停机后汇总。四VM均已确认TERMINATED(instances-stop-check.json)，无后台负载继续运行。
+
+## 2026-09-08 Lane交接与空轮询优化（采集前简要锁定）
+
+- 仅当前master：BLOCKING Lane有界自旋+volatile休眠握手、空轮询1ms健康巡检；提交/完成的完整健康与金融校验不变。JMH ownerProgressAndReservationTransitions加入spin-limit=0/256参数并编译；本机仅功能验证，37项针对性测试及139项跨产品资金/顺序/恢复测试通过（有重叠，不相加）。artifact=2026-09-08-lane-handoff。
+- OS10 seed97001 spin256、OS11 seed97002 spin0，均30s预热+60s测量，真实GCP三Core+load、8vCPU16GiB/HotSpot25/ZGC/Core4GiB/load2GiB/NMT/4Lane/1matcher/SHARED_NETWORK/serviceYIELDING、相同OS4混合场景（1773用户258symbol、batch20、交易256+价格16+控制1、查询1000/s）。两轮同JAR和JFR配置（Core phases.jfc、load profile），完整指标与资金/终态门槛继承OS4；不拿历史版本速率做收益基线。要求三节点存活、unfinished0、资金差0、操作覆盖PASS、单命令p99<1s、JFR DataLoss0；已知读可用率问题单列，不能称完整生产容量验收。
+- 只有spin256较spin0吞吐至少提高5%、单命令p99不恶化超过20%才默认保留256，否则默认0保留安全休眠握手。不以忙等CPU充作有效计算。最后一轮原数据重启核对交易/生命周期cycle、注资与hash；结束停止四VM，再做离线分析。执行SETTLEMENT_SPIN_LIMIT=256/0 OPERATIONAL_JFR=1 python3 round.py os10/os11 97001/97002 256 60 30。无长期泄漏或最终饱和上限承诺。

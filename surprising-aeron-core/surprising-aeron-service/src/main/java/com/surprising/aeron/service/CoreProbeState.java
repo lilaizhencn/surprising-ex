@@ -212,6 +212,7 @@ public final class CoreProbeState implements AutoCloseable {
     private long placeAdmissionReadyShardMask;
     // Owner-only scheduling evidence, never replicated state or a terminal-operation count.
     private long matchingProgressSequence;
+    private long nextMatchingHealthCheckNs = System.nanoTime();
     private final LinkedHashMap<Long, List<LifecycleScope>> pendingLifecycleScopes;
     private final LinkedHashMap<Long, OrderBatchPending> pendingOrderBatches;
     private final HashMap<String, OrderBatchPending> pipelinedBatchBySymbol = new HashMap<>();
@@ -4554,8 +4555,16 @@ public final class CoreProbeState implements AutoCloseable {
 
     /** Only external completion cursors; the caller must first exhaust owner-local progress. */
     boolean hasMatchingNotifications() {
-        // A failed Lane need not publish a completion. The empty path must still fail closed.
-        assertHealthy();
+        return hasMatchingNotifications(System.nanoTime());
+    }
+
+    boolean hasMatchingNotifications(long now) {
+        // A failed Lane need not publish a completion. Keep a bounded empty-path health
+        // check; apply/commit still check on every invocation, including ready notifications.
+        if (now - nextMatchingHealthCheckNs >= 0) {
+            assertHealthy();
+            nextMatchingHealthCheckNs = now + 1_000_000L;
+        }
         return runtimePlaceOrderState.hasMatchingNotifications() || matcherPipeline.hasMatchingCompletions();
     }
 

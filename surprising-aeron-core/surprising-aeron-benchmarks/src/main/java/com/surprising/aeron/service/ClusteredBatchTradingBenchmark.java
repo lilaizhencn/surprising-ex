@@ -25,7 +25,9 @@ import org.openjdk.jmh.annotations.*;
 @Threads(1)
 public class ClusteredBatchTradingBenchmark {
     /**
-     * Owner progress/empty polling plus reservation consume, partial fill and cancel release.
+     * Owner progress/empty polling plus bounded Lane spin/park handoffs, reservation consume,
+     * partial fill and cancel release. Use settlement-spin-limit=0/256 on the current build
+     * to distinguish wake-up scheduling cost from useful computation.
      * Kept as a scenario definition; performance execution must use the real-three-node harness.
      */
     @Benchmark
@@ -143,6 +145,8 @@ public class ClusteredBatchTradingBenchmark {
         @Param("20") public int batchSize;
         @Param("256") public int maxInFlight;
         @Param("false") public boolean realtime;
+        @Param({"0", "256"}) public int settlementSpinLimit;
+        private String previousSpinLimit;
         private com.surprising.aeron.client.RealtimeOutbox realtimeOutbox;
         private Thread realtimeConsumer;
         private volatile boolean consuming;
@@ -169,6 +173,8 @@ public class ClusteredBatchTradingBenchmark {
         @Setup(Level.Iteration)
         public void setup() {
             if (maxInFlight != 256 || batchSize <= 0) throw new IllegalArgumentException("requires 256 in-flight");
+            previousSpinLimit = System.getProperty("surprising.aeron.settlement-spin-limit");
+            System.setProperty("surprising.aeron.settlement-spin-limit", Integer.toString(settlementSpinLimit));
             LinearPerpetualBenchmarkSupport.configureAccountLanes(accountLanes);
             sequence = terminal = queryResults = maxBacklog = 0;
             responseBatchSize = batchSize;
@@ -574,6 +580,8 @@ public class ClusteredBatchTradingBenchmark {
                 if(realtimeConsumer!=null){try{realtimeConsumer.join(5000);}catch(InterruptedException e){Thread.currentThread().interrupt();}}
                 if(realtimeOutbox!=null)System.out.println("realtimeDroppedBatches="+realtimeOutbox.droppedBatches());
                 service = null;
+                if (previousSpinLimit == null) System.clearProperty("surprising.aeron.settlement-spin-limit");
+                else System.setProperty("surprising.aeron.settlement-spin-limit", previousSpinLimit);
             }
         }
 
