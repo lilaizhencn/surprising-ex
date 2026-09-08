@@ -37,6 +37,29 @@ import org.junit.jupiter.params.provider.MethodSource;
 class CoreMatchingStateTest {
 
     @Test
+    void emptyNotificationProbeStillDetectsAFailedLaneWithoutACompletion() throws Exception {
+        try (var state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+            applyInstrument(state);
+            var runtimeField = CoreProbeState.class.getDeclaredField("runtimePlaceOrderState");
+            runtimeField.setAccessible(true);
+            Object runtime = runtimeField.get(state);
+            var workersField = runtime.getClass().getDeclaredField("laneWorkers");
+            workersField.setAccessible(true);
+            Object worker = ((Object[]) workersField.get(runtime))[0];
+            var failureField = worker.getClass().getDeclaredField("failure");
+            failureField.setAccessible(true);
+            var failure = new IllegalStateException("injected lane failure before completion publication");
+            assertThat(state.hasMatchingNotifications()).isFalse();
+            failureField.set(worker, failure);
+            try {
+                assertThatThrownBy(state::hasMatchingNotifications).isSameAs(failure);
+            } finally {
+                failureField.set(worker, null);
+            }
+        }
+    }
+
+    @Test
     void inFlightSynchronousRejectionIsPublishedAsReadyAndDoesNotBlockThePendingHead() {
         try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);

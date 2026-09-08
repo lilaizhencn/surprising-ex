@@ -18,6 +18,33 @@ import org.junit.jupiter.api.parallel.Resources;
 class MatcherPipelineGroupTest {
 
     @Test
+    void emptyProbeDoesNotLoseALaterMatcherPublication() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        try (var pipelines = new MatcherPipelineGroup(2, 4, true)) {
+            try {
+                pipelines.submit(1, 42, () -> {
+                    entered.countDown();
+                    await(release);
+                    return new com.surprising.aeron.service.matching.CoreMatchingResult(true, "OK");
+                });
+                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                for (int i = 0; i < 4; i++) assertThat(pipelines.hasMatchingCompletions()).isFalse();
+                release.countDown();
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (!pipelines.hasMatchingCompletions() && System.nanoTime() < deadline) Thread.yield();
+                assertThat(pipelines.hasMatchingCompletions()).isTrue();
+                var completions = new ArrayList<Long>();
+                pipelines.drainMatchingCompletions((sequence, result) -> completions.add(sequence));
+                assertThat(completions).containsExactly(42L);
+                assertThat(pipelines.hasMatchingCompletions()).isFalse();
+            } finally {
+                release.countDown();
+            }
+        }
+    }
+
+    @Test
     void drainsCompletedShardHeadsWithoutProbingPendingSequences() {
         MatcherPipelineGroup pipelines = new MatcherPipelineGroup(2, 4, true);
         try {

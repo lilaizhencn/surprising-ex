@@ -56,10 +56,15 @@ final class MatcherPipelineGroup implements AutoCloseable {
         return result;
     }
 
-    /**
-     * Drains only completed matching heads. Control tokens remain at the shard head for their
-     * synchronous caller, so this operation is safe to run from the Core owner loop.
-     */
+    /** Read-only completion probe; synchronous control results belong to their caller. */
+    boolean hasMatchingCompletions() {
+        for (MatcherCommandPipeline shard : shards) {
+            if (shard.completedMatchingSequence() != 0) return true;
+        }
+        return false;
+    }
+
+    /** Drains matching heads only; synchronous control tokens remain for their caller. */
     void drainMatchingCompletions(MatchingCompletionConsumer consumer) {
         if (consumer == null) throw new IllegalArgumentException("matching completion consumer is required");
         for (int shardId = 0; shardId < shards.length; shardId++) {

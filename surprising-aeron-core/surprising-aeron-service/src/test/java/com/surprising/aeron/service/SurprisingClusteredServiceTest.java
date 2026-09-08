@@ -50,6 +50,79 @@ import org.junit.jupiter.api.Test;
 class SurprisingClusteredServiceTest {
 
     @Test
+    void stageProgressResetsIdleButAnEmptyMatcherWaitDoesNotCompleteTheCommand() throws Exception {
+        var service = service();
+        var responses = new CopyOnWriteArrayList<byte[]>();
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var progressWhilePending = new AtomicInteger();
+        var emptyPolls = new AtomicInteger();
+        var lastProgress = new AtomicLong(-1);
+        var idle = new org.agrona.concurrent.IdleStrategy() {
+            public void idle(int work) {
+                var state = service.state();
+                long sequence = state.firstPendingMatchingSequence();
+                if (sequence == 0) return;
+                assertThat(responses).isEmpty();
+                if (work > 0) progressWhilePending.incrementAndGet();
+                else if (state.pendingMatching(sequence).isMatchingSubmitted() && release.getCount() != 0) {
+                    assertThat(state.hasMatchingNotifications()).isFalse();
+                    long previous = lastProgress.getAndSet(state.matchingProgressSequence());
+                    if (previous >= 0) assertThat(state.matchingProgressSequence()).isEqualTo(previous);
+                    if (emptyPolls.incrementAndGet() == 4) release.countDown();
+                }
+                Thread.yield();
+            }
+            public void idle() { idle(0); }
+            public void reset() { }
+            public String alias() { return "controlled-matcher-test"; }
+        };
+        Cluster delegate = cluster();
+        Cluster controlled = (Cluster) Proxy.newProxyInstance(Cluster.class.getClassLoader(),
+                new Class<?>[]{Cluster.class}, (proxy, method, arguments) ->
+                        method.getName().equals("idleStrategy") ? idle : method.invoke(delegate, arguments));
+        service.onStart(controlled, null);
+        try {
+            service.state().apply(timerInstrument());
+            service.state().apply(command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))));
+            var field = CoreProbeState.class.getDeclaredField("matcherPipeline");
+            field.setAccessible(true);
+            var pipeline = (MatcherPipelineGroup) field.get(service.state());
+            var blocked = pipeline.readAtSubmissionFence(0, () -> {
+                entered.countDown();
+                try {
+                    if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("test matcher timeout");
+                } catch (InterruptedException failure) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(failure);
+                }
+                return 1;
+            });
+            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            var place = command(CoreMessageType.PLACE_ORDER, 2, 1001,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(904, "BTC-USDT", 1,
+                            CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS,
+                            CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "progress")));
+            onSessionMessage(service, responses, place);
+            assertThat(blocked.join()).isEqualTo(1);
+            assertThat(progressWhilePending.get()).isPositive();
+            assertThat(emptyPolls.get()).isEqualTo(4);
+            assertThat(responses).hasSize(1);
+            service.state().assertClusterCallbackComplete();
+            assertThat(service.state().tradingState().user(1001).balances().get("USDT").lockedUnits())
+                    .isEqualTo(2_000);
+            try (var restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, service.state().snapshot())) {
+                assertThat(restored.tradingState().businessStateHash())
+                        .isEqualTo(service.state().tradingState().businessStateHash());
+            }
+        } finally {
+            release.countDown();
+            service.onTerminate(null);
+        }
+    }
+
+    @Test
     void exhaustedRealtimeOutboxDoesNotRejectOrLeaveUnsettledBusinessCommands() {
         var service=service();service.onStart(cluster(),null);
         var outbox=new com.surprising.aeron.client.RealtimeOutbox(2,128);service.attachRealtimeForTest(outbox);

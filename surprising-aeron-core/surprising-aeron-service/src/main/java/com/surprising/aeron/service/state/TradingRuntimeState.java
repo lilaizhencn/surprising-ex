@@ -1850,6 +1850,16 @@ public final class TradingRuntimeState implements AutoCloseable {
         return readyLaneMask(placeAdmissionReadyQueues);
     }
 
+    /** Read-only SPSC cursor probe. A later publication is observed on the next owner poll. */
+    public boolean hasMatchingNotifications() {
+        assertOwner();
+        for (int lane = 0; lane < accountLanes.length; lane++) {
+            if (placeAdmissionReadyQueues[lane].hasPending()
+                    || matcherSettlementReadyQueues[lane].hasPending()) return true;
+        }
+        return false;
+    }
+
     public long pollPlaceAdmissionReady(int laneId) {
         assertOwner();
         if (laneId < 0 || laneId >= placeAdmissionReadyQueues.length) {

@@ -142,9 +142,18 @@ public final class SurprisingClusteredService implements ClusteredService {
         matchingResponse = null;
         idleStrategy.reset();
         // Includes matcher children created by risk/trigger commands, even without a client session.
+        boolean checkMatching = true;
         while (state.firstPendingMatchingSequence() != 0) {
-            int work = state.commitReadyMatching(MATCHING_COMPLETION_BATCH_SIZE,
-                    timestamp, clusterPosition, false, matchingCommitHandler);
+            long progressBefore = state.matchingProgressSequence();
+            int completed = 0;
+            if (checkMatching || state.hasMatchingNotifications()) {
+                completed = state.commitReadyMatching(MATCHING_COMPLETION_BATCH_SIZE,
+                        timestamp, clusterPosition, false, matchingCommitHandler);
+            }
+            // A dispatched stage is useful work even when no command is terminal yet.
+            int work = completed != 0 || state.matchingProgressSequence() != progressBefore ? 1 : 0;
+            // Always follow progress with another full pass: batch continuations may be owner-local.
+            checkMatching = work != 0;
             idleCommand(work, deadline);
         }
         if (responseSequence != 0) {

@@ -25,6 +25,16 @@ import org.openjdk.jmh.annotations.*;
 @Threads(1)
 public class ClusteredBatchTradingBenchmark {
     /**
+     * Owner progress/empty polling plus reservation consume, partial fill and cancel release.
+     * Kept as a scenario definition; performance execution must use the real-three-node harness.
+     */
+    @Benchmark
+    public long ownerProgressAndReservationTransitions(Workload workload, Counters counters) {
+        multiFillSettlementAndEncoding(workload, counters);
+        return batchPlaceCancelWithMetrics(workload, counters);
+    }
+
+    /**
      * Exercises ingress, repeated settlement polling, and existing-order admission scans.
      * The maker accumulates same-symbol orders before taker/close waves, exercising STP and close capacity.
      */

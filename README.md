@@ -1,5 +1,9 @@
 # surprising-ex
 
+Core 的撮合完成轮询区分“阶段有进展”和“命令最终完成”：提交 matcher、消费完成通知或派发结算都会让等待策略看到有效进展；连续无进展时只检查完成队列游标，并保留健康、关闭及超时检查。每次进展后完整检查一轮，逐条日志回调内完成的确定性边界不变。`OrderReservation` 使用不可变值对象，内部金额变动复用已验证的币对/资产字符串；公开构造及恢复仍完整校验，金额范围与溢出检查不变，仍会创建新的金额状态对象。
+
+Core completion polling distinguishes stage progress from terminal commands. After an idle pass it probes completion cursors while retaining health, shutdown and timeout checks; each productive pass is followed by a full pass for owner-local continuations. Each log callback still completes its business work before returning. Immutable `OrderReservation` amount transitions reuse validated identity strings; public construction and restoration retain full validation, and numeric checks remain enforced. Transitions still allocate a new value object.
+
 Aeron Client 的普通异步请求遇到 `ADMIN_ACTION` 时会在原发送位置有界重试，保留命令标识和 source sequence，避免后续撤单越过尚未提交的下单；`tryCommandOnce`/one-way仍只尝试一次。Client async requests retry transient `ADMIN_ACTION` in place within the original deadline while continuing egress and keepalive processing; one-shot APIs retain their existing semantics.
 
 原mixed业务的真实集群入口为 `com.surprising.aeron.tools.ClusterMixedCapacityMain`：1000零售用户、256币对、4 Account Lane、1 matcher，包含批量下撤单/IOC、触发执行、资金费、风险扫描和一次强平保险ADL闭环。所有命令和状态查询走三节点，无本地Core；使用一个FIFO命令连接连续异步提交，固定全局256在途，另有reserved查询连接。使用`surprising.aeron.hostnames`、`surprising.aeron.egress-hostname`、`surprising.aeron.capacity-seed`及warmup/duration参数启动，必须使用独立空集群数据目录。原零售密度和HFT累计仓位、全部资金账在终检核对；真实时钟、网络查询与风险续扫的差异详见性能记录，不能与旧本地数字直接相除推算网络开销。

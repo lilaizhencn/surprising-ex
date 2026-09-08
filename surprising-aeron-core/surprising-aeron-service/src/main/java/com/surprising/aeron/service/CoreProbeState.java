@@ -210,6 +210,8 @@ public final class CoreProbeState implements AutoCloseable {
     private final LinkedHashMap<SourceKey, Long> lastSourceSequences;
     private final PendingMatchingRing pendingMatching;
     private long placeAdmissionReadyShardMask;
+    // Owner-only scheduling evidence, never replicated state or a terminal-operation count.
+    private long matchingProgressSequence;
     private final LinkedHashMap<Long, List<LifecycleScope>> pendingLifecycleScopes;
     private final LinkedHashMap<Long, OrderBatchPending> pendingOrderBatches;
     private final HashMap<String, OrderBatchPending> pipelinedBatchBySymbol = new HashMap<>();
@@ -3167,6 +3169,7 @@ public final class CoreProbeState implements AutoCloseable {
             readyLaneMask &= readyLaneMask - 1;
             long sequence;
             while ((sequence = runtimePlaceOrderState.pollPlaceAdmissionReady(laneId)) != 0) {
+                matchingProgressSequence++;
                 PendingMatching pending = pendingMatching.get(sequence);
                 OrderBatchPending batch = pending == null ? null : pendingOrderBatches.get(sequence);
                 if (pending == null || pending.isMatchingSubmitted()
@@ -3191,6 +3194,7 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private void matchingSubmissionCompleted(PendingMatching pending) {
+        matchingProgressSequence++;
         int shard = pendingSubmissionShard(pending);
         pendingMatching.completeSubmission(pending.sequence());
         placeAdmissionReadyShardMask |= 1L << shard;
@@ -3234,6 +3238,7 @@ public final class CoreProbeState implements AutoCloseable {
             com.surprising.aeron.service.matching.CoreMatchingResult result) {
         if (result == null) throw new IllegalStateException("synchronous matcher returned no result");
         laneCommandContexts.required(sequence).publishMatchingCompletion(result.withCoreSequence(sequence));
+        matchingProgressSequence++;
         signalPendingMatchingReady(sequence);
     }
 
@@ -4543,6 +4548,17 @@ public final class CoreProbeState implements AutoCloseable {
         drainMatcherSettlementCompletions();
     }
 
+    long matchingProgressSequence() {
+        return matchingProgressSequence;
+    }
+
+    /** Only external completion cursors; the caller must first exhaust owner-local progress. */
+    boolean hasMatchingNotifications() {
+        // A failed Lane need not publish a completion. The empty path must still fail closed.
+        assertHealthy();
+        return runtimePlaceOrderState.hasMatchingNotifications() || matcherPipeline.hasMatchingCompletions();
+    }
+
     private void pumpMatchingCommitCompletions(long clusterTimestamp, long clusterPosition) {
         drainMatchingCompletions();
         dispatchReadyPlaceSettlements(clusterTimestamp, clusterPosition);
@@ -4574,6 +4590,7 @@ public final class CoreProbeState implements AutoCloseable {
             readyLaneMask &= readyLaneMask - 1;
             long sequence;
             while ((sequence = runtimePlaceOrderState.pollMatcherSettlementReady(laneId)) != 0) {
+                matchingProgressSequence++;
                 PendingMatching pending = pendingMatching.get(sequence);
                 if (pending == null) continue;
                 if (pending.settlementEvent() != null && !pending.settlementEvent().complete()) continue;
@@ -4669,6 +4686,7 @@ public final class CoreProbeState implements AutoCloseable {
                     }
                 }
                 attempts++;
+                matchingProgressSequence++;
                 if (response == null) {
                     pumpMatchingCommitCompletions(clusterTimestamp, clusterPosition);
                     continue;
@@ -4726,6 +4744,7 @@ public final class CoreProbeState implements AutoCloseable {
                             clusterTimestamp, clusterPosition);
                 }
                 batch.settlementDispatched = true;
+                matchingProgressSequence++;
                 pendingMatching.completeDispatch(pending.sequence());
                 pending.countPipelinedSettlement();
                 dispatchedSettlementInFlight++;
@@ -4746,6 +4765,7 @@ public final class CoreProbeState implements AutoCloseable {
                 throw new IllegalStateException("pipelined matcher settlement committed during dispatch");
             }
             pendingMatching.completeDispatch(pending.sequence());
+            matchingProgressSequence++;
             pending.countPipelinedSettlement();
             dispatchedSettlementInFlight++;
             dispatchedSettlementHighWaterMark = Math.max(
