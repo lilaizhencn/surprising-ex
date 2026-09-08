@@ -170,6 +170,7 @@ public class ClusteredBatchTradingBenchmark {
         private Thread realtimeConsumer;
         private volatile boolean consuming;
         private boolean singleResponses;
+        private java.util.Queue<RealtimeFrame> snapshotRequests;
         private final org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap batchRequestSizes =
                 new org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap(512);
         private final org.eclipse.collections.impl.set.mutable.primitive.LongHashSet singleRequestIds =
@@ -210,6 +211,13 @@ public class ClusteredBatchTradingBenchmark {
             batchTrades = 0;
             makerBaseBalance = 1L + 256L * batchSize;
             service = new SurprisingClusteredService(productLine);
+            try {
+                var requests = SurprisingClusteredService.class.getDeclaredField("snapshotRequests");
+                requests.setAccessible(true);
+                @SuppressWarnings("unchecked")
+                var queue = (java.util.Queue<RealtimeFrame>) requests.get(service);
+                snapshotRequests = queue;
+            } catch (ReflectiveOperationException failure) { throw new IllegalStateException(failure); }
             // Aeron invokes background callbacks while its service idle strategy is running.
             // Define that path here too; performance execution remains on the real cluster.
             var serviceIdle = new org.agrona.concurrent.IdleStrategy() {
@@ -475,6 +483,9 @@ public class ClusteredBatchTradingBenchmark {
 
         public void runIndependentBatchWindows() {
             long before = terminal;
+            if (realtime && snapshotRequests.isEmpty() && !service.state().realtimeSnapshotPending())
+                snapshotRequests.offer(new RealtimeFrame(productLine, RealtimeFrame.Kind.SNAPSHOT_REQUEST,
+                        1_000, 0, 0, 1_700_000_000_000L, sequence + 1, "", "", new byte[0]));
             for (int user = 0; user < 256; user++) {
                 firstOrders[user] = orderId;
                 String symbol = (user & 1) == 0 ? "JMH-PIPE-A-USDT" : pipelineSymbolB;

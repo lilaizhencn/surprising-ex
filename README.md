@@ -8,9 +8,9 @@ BLOCKING Account Lane 支持 `surprising.aeron.settlement-spin-limit`（0–4096
 
 BLOCKING Account Lanes support `surprising.aeron.settlement-spin-limit` (0–4096 iterations, default 0), then park using an announce-and-recheck handshake. Spinning is disabled by default because this three-node run did not demonstrate a gain. Empty owner polling checks full health at one-millisecond intervals; admission and completion retain per-call checks. Order and settlement boundaries remain intact.
 
-Core 实时快照和盘口后台工作只在交易日志回调之外执行。Aeron 的 service idle 可以重入后台回调，因此交易结算期间保留快照请求，待交易回调结束后处理，避免读取未结算状态或覆盖当前实时事件批次。
+Core 实时快照和盘口读取在已完成的窗口提交边界或无在途业务的后台回调中推进，保留10毫秒节流和有界异步读取，不等待读取结果。连续批量输入无需等待后台恰好遇到空窗口。Aeron service idle 重入时仍禁止在结算中读取，避免未提交状态进入快照或覆盖当前实时事件批次。
 
-Realtime user/book snapshots run outside trading log callbacks. Aeron's service idle can reenter background work; snapshot requests remain queued until the trading callback returns, preserving settled-state reads and the current realtime event batch.
+Realtime user/book reads progress at completed window boundaries or background callbacks with no pending trading, retaining ten-millisecond throttling and bounded asynchronous reads without waiting for results. Continuous batch input no longer requires a coincidentally empty background window. Reentrant Aeron service idle callbacks still cannot read during settlement, preserving committed snapshots and the current realtime event group.
 
 生产混合压力工具支持 `surprising.aeron.mixed-operational=true`：交易持续异步发压，独立生产者持续更新价格，风险生产者并发执行主动平仓、触发查询与执行、资金费、强平、保险及 ADL。普通用户/做市商查询调用生产 `ValkeyUserQueries`，配置 `surprising.aeron.operational-valkey-host/port` 和 `surprising.aeron.operational-query-rate`；需要实际运行实时 Router、Valkey，并启用 Core 实时出口。该工具测量 Core、读模型与查询物化，不包含 HTTP 网关鉴权或 WS 客户端传输。具体通过情况和饱和结论以 `PERFORMANCE_VALIDATION.md` 中的实测为准。
 

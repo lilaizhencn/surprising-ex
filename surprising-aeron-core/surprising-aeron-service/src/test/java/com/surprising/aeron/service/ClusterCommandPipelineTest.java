@@ -26,6 +26,46 @@ class ClusterCommandPipelineTest {
 
     @ParameterizedTest
     @EnumSource(ProductLine.class)
+    void continuousBatchesDispatchSnapshotAtCommittedBoundary(ProductLine product) throws Exception {
+        try (Fixture f = new Fixture(product)) {
+            f.setup();
+            var outbox = new com.surprising.aeron.client.RealtimeOutbox(1024, 1_048_576);
+            f.service.attachRealtimeForTest(outbox);
+            var field = SurprisingClusteredService.class.getDeclaredField("snapshotRequests");
+            field.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            var requests = (java.util.Queue<RealtimeFrame>) field.get(f.service);
+            f.send(f.placeBatch(11, "BTC-USDT", 1000));
+            requests.add(new RealtimeFrame(product, RealtimeFrame.Kind.SNAPSHOT_REQUEST,
+                    11, 0, 0, TIME, 900, "", "", new byte[0]));
+            assertThat(f.service.doBackgroundWork(System.nanoTime())).isZero();
+            f.send(f.placeBatch(11, "BTC-USDT", 2000));
+            assertThat(f.service.commandWindowSize()).isOne();
+            assertThat(requests.isEmpty()).as("continuous input must not starve a read at the preceding commit boundary").isTrue();
+            var pendingField = CoreProbeState.class.getDeclaredField("pendingRealtimeSnapshot");
+            pendingField.setAccessible(true);
+            var snapshot = (java.util.concurrent.CompletableFuture<?>) pendingField.get(f.service.state());
+            assertThat(snapshot).isNotNull();
+            snapshot.get(2, TimeUnit.SECONDS);
+            f.send(f.cancelBatch(11, 1000));
+            var frames = new ArrayList<RealtimeFrame>();
+            byte[] bytes;
+            while ((bytes = outbox.poll()) != null) {
+                var frame = RealtimeFrameCodec.decode(bytes);
+                if (frame.snapshotId() == 900) frames.add(frame);
+            }
+            assertThat(frames).anySatisfy(frame -> assertThat(frame.kind()).isEqualTo(RealtimeFrame.Kind.SNAPSHOT_END));
+            assertThat(frames.stream().filter(frame -> frame.kind() == RealtimeFrame.Kind.ORDER)).hasSize(20);
+            assertThat(frames).anySatisfy(frame -> {
+                assertThat(frame.kind()).isEqualTo(RealtimeFrame.Kind.USER);
+                assertThat(CoreStateQueryCodec.decodeUserState(frame.payload()).reservations()).hasSize(20);
+            });
+            f.tick();
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
     void independentTwentyItemBatchesSubmitBeforeEarlierMatcherFinishes(ProductLine product) throws Exception {
         try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
             serial.applyAll(live.setup());

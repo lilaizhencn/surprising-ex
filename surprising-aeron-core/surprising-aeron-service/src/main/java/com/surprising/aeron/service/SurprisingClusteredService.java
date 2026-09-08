@@ -206,6 +206,9 @@ public final class SurprisingClusteredService implements ClusteredService {
                         entry.response);
         }
         commandWindow.clear();
+        // Continuous input can leave a new window open after every log poll. Dispatch
+        // bounded asynchronous reads at this already-committed boundary; never wait for them.
+        progressRealtimeReads(System.nanoTime());
     }
 
     int commandWindowSize() { return commandWindow.size(); }
@@ -377,6 +380,11 @@ public final class SurprisingClusteredService implements ClusteredService {
     @Override
     public int doBackgroundWork(long nowNs) {
         if (processingLogCallback || commandWindow.size() != 0 || realtimeCapture == null || !realtimeLeader) return 0;
+        return progressRealtimeReads(nowNs);
+    }
+
+    private int progressRealtimeReads(long nowNs) {
+        if (realtimeCapture == null || !realtimeLeader) return 0;
         int work=state.pollRealtimeSnapshot()+state.pollRealtimeBook();
         if (state.realtimeSnapshotPending() || state.realtimeBookPending() || nowNs < nextRealtimeSnapshotNs) return work;
         var request = snapshotRequests.poll();

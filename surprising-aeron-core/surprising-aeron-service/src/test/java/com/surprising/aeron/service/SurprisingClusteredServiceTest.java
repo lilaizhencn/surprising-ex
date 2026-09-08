@@ -148,8 +148,9 @@ class SurprisingClusteredServiceTest {
             assertThat(service.state().tradingState().user(1001).balances().get("USDT").lockedUnits())
                     .isEqualTo(2_000);
             drainRealtime(outbox);
-            assertThat(requests).hasSize(1);
-            assertThat(service.doBackgroundWork(System.nanoTime())).isOne();
+            // Read dispatch is now allowed at the completed window boundary, but never
+            // during the reentrant idle callbacks above while settlement is pending.
+            assertThat(requests.isEmpty()).isTrue();
             long snapshotDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
             while (service.state().realtimeSnapshotPending() && System.nanoTime() < snapshotDeadline) {
                 service.doBackgroundWork(System.nanoTime());
