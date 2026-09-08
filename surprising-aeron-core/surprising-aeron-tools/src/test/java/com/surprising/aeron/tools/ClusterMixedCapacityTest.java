@@ -7,6 +7,14 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
 class ClusterMixedCapacityTest {
+    @Test void diagnosticCapacityMakesTheActualSessionLimitExplicit() {
+        var capacity=ClusterMixedCapacityMain.commandCapacity(2048,2048);
+        assertThat(capacity.commandSessions()).isEqualTo(1);
+        assertThat(capacity.maxCommandInFlightPerSession()).isEqualTo(2048);
+        assertThat(capacity.commandMailboxCapacity()).isEqualTo(2048);
+        assertThatThrownBy(()->ClusterMixedCapacityMain.commandCapacity(256,1024)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(()->ClusterMixedCapacityMain.commandCapacity(0,0)).isInstanceOf(IllegalArgumentException.class);
+    }
     private static CoreResponse response(CoreOrderBatchResult.Item... items) {
         return new CoreResponse(ResponseStatus.APPLIED,ResponseStatus.APPLIED,CoreResultCode.NONE,1,0,0,
                 TradingOrderBatchCodec.encodeResult(new CoreOrderBatchResult(List.of(items))));

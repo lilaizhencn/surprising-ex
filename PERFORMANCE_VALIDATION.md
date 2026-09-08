@@ -4572,3 +4572,17 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 保留四块80GB数据盘、集群测试目录及网络资源，磁盘仍计费；不是删除实例。本轮不再启动服务器，下次仅在用户明确要求测试后开机。
 
 - 本轮artifact根目录`/Users/atomex/Desktop/surprising/gcp-validation/2026-09-07-core-ceiling`，SHA256SUMS包含900文件/555,028,731B，清单自身SHA256 `6f01c4e3a13b93251d448ba9a595ecab613fc89ee5cc1fb5407324d8db2f4926`；排除清单自身、manifest-summary.json、编译缓存及符号链接，不含私钥。包含D/M、B与mixed失败、X02功能门槛、X2/XJ通过、四机原始记录、构建和停机证据。最终文档变更只执行git diff --check，未追加压测或重启VM。
+
+## 2026-09-08 解除发压器限制，定位真实三节点饱和（采集前锁定）
+
+- 用户明确要求不受旧脚本规则限制，尝试饱和并测吞吐；本次允许改变GLOBAL256限制和实际session提交窗口，已同步AGENTS。仍只验证当前master，不检出/重跑旧版，对照不适用；必须真实三Core+独立load，交易状态机、撮合/结算确定性边界不改，不用busy-spin伪造有效计算饱和。新请求授权重新启动四VM，全部完成后再次停止并核验TERMINATED。
+- 机器仍为GCP surprising-ae591/asia-southeast1-b，三台surprising-core-{0,1,2}加surprising-load，n2-custom-8-16384/Intel Cascade Lake/Ubuntu24.04/各80GB pd-ssd，业务私网10.90.0.0/24；启动后采集实际CPU/JDK配置校验。Core Temurin HotSpot25.0.4.1、4GiB ZGC/AlwaysPreTouch/NMT、SHARED_NETWORK/Archive SHARED、默认cluster backoff与BLOCKING Lane，每Core1matcher/4Lane；load512MiB..2GiB ZGC/NMT。管理经IAP与本机既有代理，交易UDP不经过代理。
+- 本次tools修改：支持显式global/session窗口，使用现有AeronClientCapacity的公开构造入口，生产默认64不变；单FIFO命令流完成队列改为只处理已完成队首，避免O(window)全表扫描和ArrayList搬移。预锁所有新档位global=session，mailbox等于global，reserved query窗口32，egress fragment limit128。1发起线程/1命令session+1reserved query session，batch协议上限仍20，不擅改协议。新增client回归验证256请求在任一响应之前全部offer且第257个受控，新增tools参数校验；本地仅HotSpot25功能测试和打包，实际runtime提交/JAR另记。
+- M1024完整mixed保留原1769用户、1000零售/256币对、初始1..5仓/0..10挂单、全部资金账1,768,000,000,125、零手续费、HFT八段交易及32symbol触发/资金费/风险控制、首次强平保险ADL，除窗口和完成队列外沿用X2组成。控制查询的金融依赖仍保留，单独报告其等待与查询数。
+- T系列为TRADING_STREAM诊断：相同初态、用户/Lane分配、金融资金和HFT八段交易（每cycle21504交易业务项/2048交易命令/5120实际fills），首次强平保险ADL在setup完成；测量只连续批量下撤单/普通流动性下撤单/BUY及SELL IOC、1秒真实mark刷新。跨cycle不排空、不查询、不串行资金费/触发/风险页，必须明确这是纯交易组合，不是完整mixed提高了相同比例吞吐。FIFO维持跨cycle依赖，开始和结束测量边界排空、最终远程检查全体资金/零售密度/HFT净仓=cycle*20与reservation。原先先撤bid再SELL IOC的业务次序保留，不能假算SELL IOC成交。
+- 先F0功能门槛：seed93001、ceiling-f0、global=session1024，warmup0/duration1完整mixed cycle，要求全部资金/状态/真实成交/计数/强平闭环通过，仅功能不计容量。成功后依次M1024（seed93002/global1024）、T256（93003/256）、T1024（93004/1024）、T4096（93005/4096），独立ceiling-tag目录；每档30秒预热+90秒测量及完整cycle排空、默认配置、无JFR。冷却为停止前档、归档后新建空目录启动下一档，不复用交易数据。
+- 探索结束，从T系列正确性通过档选择持续业务速率最高者；差异<=5%时优先较小窗口。TF（seed93006/ceiling-tf）用所选窗口30秒预热+300秒无JFR确认；TJ（seed93007/ceiling-tj）相同窗口30+180秒、首正式progress后四机普通profile JFR90秒/max512m，稳定分析+30..80秒。如网络线程接近满核而owner仍不足，先记录实际证据，再另预锁网络线程配置等诊断，不能边采边变参数；不会改Core一致性边界来跨过限制。
+- 所有档closed-loop持续补窗口、offered rate0、未修正CO，无固定发送休眠；响应时间起点为调用client异步提交前，不含此前payload构造，終点为egress回包完成future，含mailbox/在途/服务处理；按请求HDR三位有效数字、1分钟范围，批items独立展开计数。APPLIED核实accepted，没有独立accepted时钟；查询不算business、单独列数。各业务p50/p90/p95/p99/p99.9/max、10秒分段、实际峰值/期末backlog全部保留。
+- 探索正确性门槛：offeredBusiness=terminalBusiness、offeredCore=terminalCore、实际fills=测量cycle*5120、每类型组成正确、期末unfinished0/peak<=该档window、资金差0/余额非负/零售与HFT持仓及冻结正确/一次强平闭环。所有最终未接收/拒绝/未知/超时判FAIL，ADMIN_ACTION内部有序重试单列；>=1000业务项/s，诊断p99<=10秒且另标是否达到原1秒SLO，不能以放大窗口掩盖尾延迟。连续3个5秒steal>5%、swap增长、VM维护重启、JFR DataLoss或截断均判无效。
+- 饱和判定分别报告：owner单核持续>=90%、尽量95%且业务占比清楚才称owner接近饱和；仅窗口增长、吞吐提升<5%而排队延迟上升只能称该配置链路进入平台，不能称CPU算力用尽。线程CPU、runnable调度等待、网络/owner/matcher/Lane、JFR分配/GC/heap/native/锁/IO/JIT均核查。真实吞吐取300秒整轮，峰值10秒不能代替。没有open-loop、完整阶段墙钟、长稳泄漏、新恢复矩阵或其余五产品/API/WS/Kafka验证时，只作当前场景部分性能结论。
+- Artifact `/Users/atomex/Desktop/surprising/gcp-validation/2026-09-08-saturation`；执行`python3 round.py <tag> <window>`，所有失败、构建、四机原始证据、输入与最终停机清单保留。运行时最多本次4小时，完成本次采集即停机，不留VM闲置。

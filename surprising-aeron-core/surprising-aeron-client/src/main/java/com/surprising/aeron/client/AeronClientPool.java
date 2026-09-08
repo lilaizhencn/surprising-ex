@@ -124,6 +124,19 @@ public final class AeronClientPool implements AutoCloseable {
                 AeronClientCapacity.defaults().withCommandSessions(clientConnections), null, true);
     }
 
+    public AeronClientPool(
+            String clientName,
+            ProductLine productLine,
+            List<String> hostnames,
+            String egressHostname,
+            Duration responseTimeout,
+            String sourceIdentity,
+            String sourceEpoch,
+            AeronClientCapacity capacity) {
+        this(clientName, productLine, hostnames, egressHostname, responseTimeout,
+                sourceIdentity, sourceEpoch, capacity, null, true);
+    }
+
     AeronClientPool(
             String clientName,
             ProductLine productLine,

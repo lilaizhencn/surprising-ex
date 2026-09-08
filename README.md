@@ -10,6 +10,10 @@ Aeron Client 的普通异步请求遇到 `ADMIN_ACTION` 时会在原发送位置
 
 The 256-request window includes client queuing; the default command session permits at most 64 offered requests awaiting completion. Batch latency is measured per request, while business throughput expands its 20 items. Commands and queries are counted separately. Bounded, ordered `ADMIN_ACTION` retries preserve message identity; `tryCommandOnce` does not retry. The retry counter includes final verification queries, and `triggerExecutions` includes warmup; measured trigger counts are reported in the business rows.
 
+2026-09-08饱和诊断可通过`surprising.aeron.capacity-async-in-flight`和`surprising.aeron.capacity-session-in-flight`分别指定逻辑窗口及单连接实际提交窗口（生产客户端默认不变）。`surprising.aeron.mixed-trading-stream=true`在初始化核对强平后，仅连续执行原mixed八段交易及必要价格刷新，跨cycle不排空；此场景不包含测量期资金费/触发/风险页，必须与完整mixed分开报告。
+
+For saturation diagnostics, configure the logical and offered-request windows with `surprising.aeron.capacity-async-in-flight` and `surprising.aeron.capacity-session-in-flight`. Production defaults remain unchanged. `surprising.aeron.mixed-trading-stream=true` runs continuous trading cycles after the setup loss audit; it excludes funding, trigger, and risk-page control work from measurement and must be reported separately from full mixed workload results.
+
 核心饱和诊断可单独使用 `MATCH_BATCH_STREAM`，`surprising.aeron.capacity-batch-size=20`（协议上限20）。买卖批次独立异步发送，256限制的是包含行情请求的全局逻辑请求数；每批20项时最多5120个订单项在途，不能与普通单256订单在途混为同一口径。订单吞吐按成功项数、Core消息按批次数加行情数、成交按批量响应各项实际execution统计（与普通单省略execution不同）；已成交订单可已从活动索引移除，order视图为空时必须有匹配的完整成交证据。延迟为批次终态时间，每项共享该批次延迟，不是单项独立完成时间。测量后核对每项状态、总计数、资金与订单簿。
 
 For a separate saturation diagnostic, use `MATCH_BATCH_STREAM` with `surprising.aeron.capacity-batch-size=20` (protocol maximum). Buy and sell batches are submitted independently. The global limit remains 256 logical requests, including price updates; at 20 items per batch this allows up to 5,120 outstanding order items. Report business items, Core requests, actual fills, and batch-terminal latency separately from ordinary orders. Final checks cover item status, counters, funds, and an empty order book.

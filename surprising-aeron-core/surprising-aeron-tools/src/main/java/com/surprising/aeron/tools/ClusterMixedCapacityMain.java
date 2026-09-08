@@ -1,6 +1,7 @@
 package com.surprising.aeron.tools;
 
 import com.surprising.aeron.client.AeronClientPool;
+import com.surprising.aeron.client.AeronClientCapacity;
 import com.surprising.aeron.protocol.*;
 import com.surprising.aeron.service.state.LaneTopology;
 import com.surprising.instrument.api.model.ContractType;
@@ -20,7 +21,10 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     static final long BALANCE = 1_000_000_000L;
     private final List<Long> users = users();
     private final AeronClientPool client;
-    private final ArrayList<CompletableFuture<?>> pending = new ArrayList<>(WINDOW);
+    private final int window = Integer.getInteger("surprising.aeron.capacity-async-in-flight", WINDOW);
+    private final int sessionWindow = Integer.getInteger("surprising.aeron.capacity-session-in-flight", 64);
+    private final boolean tradingStream = Boolean.getBoolean("surprising.aeron.mixed-trading-stream");
+    private final ArrayDeque<Pending> pending = new ArrayDeque<>();
     private final long seed = Long.getLong("surprising.aeron.capacity-seed", 92001);
     private final long[] markSequence = new long[SYMBOLS], markTime = new long[SYMBOLS], mark = new long[SYMBOLS];
     private final long[] fundingId = new long[SYMBOLS], fundingCursor = new long[SYMBOLS];
@@ -33,16 +37,23 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     private long adminRetriesBefore;
 
     public ClusterMixedCapacityMain() {
-        if (Integer.getInteger("surprising.aeron.capacity-async-in-flight", WINDOW) != WINDOW)
-            throw new IllegalArgumentException("mixed capacity requires global 256 in-flight");
+        var capacity = commandCapacity(window, sessionWindow);
         orderId = 200_000_000_000L + seed * 1_000_000;
         // A single FIFO command session preserves dependent place/cancel/IOC ordering without
         // waiting for responses between trading stages. A separate reserved session handles reads.
         client = new AeronClientPool("mixed", ProductLine.LINEAR_PERPETUAL,
                 List.of(System.getProperty("surprising.aeron.hostnames").split(",")),
                 System.getProperty("surprising.aeron.egress-hostname"), Duration.ofSeconds(30),
-                1, "mixed-" + seed);
+                "mixed-" + seed, UUID.randomUUID().toString(), capacity);
+        System.out.printf("mixedConfig globalWindow=%d sessionWindow=%d commandSessions=1 reservedQuerySessions=1 batchSize=%d tradingStream=%s%n",
+                window, sessionWindow, BATCH, tradingStream);
         for (int i=0;i<SYMBOLS;i++) { mark[i]=100; fundingId[i]=10_000+i; }
+    }
+
+    static AeronClientCapacity commandCapacity(int window, int sessionWindow) {
+        if (window < 1 || window > 65536 || sessionWindow < 1 || sessionWindow > window)
+            throw new IllegalArgumentException("require 1 <= session window <= global window <= 65536");
+        return new AeronClientCapacity(1, 1, window, 64, sessionWindow, 32, 128);
     }
 
     public static void main(String[] args) throws Exception {
@@ -107,6 +118,9 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         drain();
         drainRisk();
         verifyPopulation();
+        // The trading-only diagnostic completes the same one-off loss audit before timing.
+        // It does not disguise sequential control queries as a continuously loaded matcher.
+        if (tradingStream) lossLifecycle();
         System.out.printf("mixedSetup=PASS users=%d retail=%d symbols=%d initialFunds=%d%n",users.size(),USERS,SYMBOLS,expectedFunds());
     }
 
@@ -140,6 +154,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         for(int i=0;i<SYMBOLS;i++)cancel(maker(i),liquidity[i]);
         // Preserve original mixed workload: bid cancellation precedes the sell IOC batch.
         for(int i=0;i<SYMBOLS;i++)batch(i,taker(i),CoreOrderSide.SELL,99,1,CoreTimeInForce.IOC);
+        if (tradingStream) return; // FIFO order also spans cycles; no cycle drain in this mode.
         drain();
         for(int n=0;n<32;n++)trigger((lifecycleCursor+n)%SYMBOLS);
         drain();
@@ -274,25 +289,25 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
             return new Completed(r,System.nanoTime());
         });
         // Completion processing belongs to this producer, never an egress callback thread.
-        pending.add(future);
-        tasks.put(future,new Task(type,weight,start,count,validation));
+        pending.addLast(new Pending(future,new Task(type,weight,start,count,validation)));
         peak=Math.max(peak,pending.size());
         reap();report();return future;
     }
-    private final IdentityHashMap<CompletableFuture<?>,Task> tasks=new IdentityHashMap<>();
+    private record Pending(CompletableFuture<Completed> future, Task task) {}
     private record Completed(CoreResponse response,long terminalNanos) {}
     private record Task(CoreMessageType type,int weight,long start,boolean counted,Consumer<CoreResponse> validation) {}
-    private void space() { while(pending.size()>=WINDOW){reap();report();Thread.onSpinWait();} }
+    private void space() { while(pending.size()>=window){reap();report();Thread.onSpinWait();} }
     private void reap() {
-        for(int i=pending.size()-1;i>=0;i--) {
-            var f=pending.get(i);if(!f.isDone())continue;
-            var completion=(Completed)f.join();var r=completion.response();var task=tasks.remove(f);
+        // This tool has one ordered command session. Inspecting only its head avoids scanning
+        // the whole in-flight window on every spin; no join occurs before completion.
+        while (!pending.isEmpty() && pending.peekFirst().future().isDone()) {
+            var entry=pending.removeFirst();
+            var completion=entry.future().join();var r=completion.response();var task=entry.task();
             if(task.validation()!=null)task.validation().accept(r);
             if(task.counted()) {
                 terminal+=task.weight();coreTerminal++;
                 stats.computeIfAbsent(task.type(),ignored->new Stats()).record(task.weight(),completion.terminalNanos()-task.start());
             }
-            pending.remove(i);
         }
     }
     private void drain() { while(!pending.isEmpty()){reap();report();Thread.onSpinWait();} }
@@ -342,15 +357,17 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
             long actual=s.positions().stream().filter(p->p.symbol().equals(instrument)).mapToLong(CorePositionView::signedQuantitySteps).sum();
             if(actual!=expected||!s.reservations().isEmpty())throw new IllegalStateException("HFT position/reservation mismatch user="+id+" expected="+expected+" actual="+actual);
         }
-        if(offered!=terminal||coreOffered!=coreTerminal||peak>WINDOW)throw new IllegalStateException("mixed terminal counters disagree");
+        if(offered!=terminal||coreOffered!=coreTerminal||peak>window)throw new IllegalStateException("mixed terminal counters disagree");
         if(measuredCycles>0) {
             if(fills!=measuredCycles*SYMBOLS*BATCH)throw new IllegalStateException("mixed actual fill count mismatch: "+fills);
             requireItems(CoreMessageType.PLACE_ORDER_BATCH,measuredCycles*SYMBOLS*BATCH*3);
             requireItems(CoreMessageType.CANCEL_ORDER_BATCH,measuredCycles*SYMBOLS*BATCH);
             requireItems(CoreMessageType.PLACE_ORDER,measuredCycles*SYMBOLS*2);
             requireItems(CoreMessageType.CANCEL_ORDER,measuredCycles*SYMBOLS*2);
-            requireItems(CoreMessageType.PLACE_TRIGGER_ORDER,measuredCycles*32);
-            requireItems(CoreMessageType.EXECUTE_TRIGGER_ORDER,measuredCycles*32);
+            if (!tradingStream) {
+                requireItems(CoreMessageType.PLACE_TRIGGER_ORDER,measuredCycles*32);
+                requireItems(CoreMessageType.EXECUTE_TRIGGER_ORDER,measuredCycles*32);
+            }
         }
         long hash=query(CoreMessageType.BUSINESS_STATE_HASH_QUERY,0,new byte[0]).stateHash();
         System.out.printf("mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=%d businessHash=%s%n",totalCycles,Long.toUnsignedString(hash,16));

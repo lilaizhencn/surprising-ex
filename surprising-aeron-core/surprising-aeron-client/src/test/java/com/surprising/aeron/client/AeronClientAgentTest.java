@@ -23,6 +23,38 @@ import org.junit.jupiter.api.Test;
 class AeronClientAgentTest {
 
     @Test
+    void configuredSessionWindowOffersMoreThan64BeforeAnyTerminalResponse() throws Exception {
+        var admitted=new CountDownLatch(256);
+        var release=new AtomicBoolean();
+        var accepted=ConcurrentHashMap.<Long>newKeySet();
+        var offers=new AtomicInteger();
+        try(var pool=new AeronClientPool("window", ProductLine.SPOT,
+                List.of("localhost","localhost","localhost"), "localhost", Duration.ofSeconds(5),
+                "window","epoch",new AeronClientCapacity(1,1,512,8,256,4,128),
+                ()->new AeronClientPool.Session() {
+                    public long offer(CoreMessage message) {
+                        accepted.add(message.header().correlationId());offers.incrementAndGet();admitted.countDown();return 1;
+                    }
+                    public int pollEgress(int limit){return 0;}
+                    public CoreResponse takeResponse(long id) {
+                        return release.get()&&accepted.remove(id)?new CoreResponse(ResponseStatus.APPLIED,1,1):null;
+                    }
+                    public RuntimeException sessionFailure(){return null;}
+                    public boolean keepAlive(){return true;}
+                    public void close(){}
+                },true)) {
+            var futures=new java.util.ArrayList<java.util.concurrent.CompletableFuture<CoreResponse>>();
+            for(int i=0;i<257;i++)futures.add(pool.commandAsync(CoreMessageType.PLACE_ORDER,UUID.randomUUID(),1,new byte[0]));
+            assertThat(admitted.await(2,TimeUnit.SECONDS)).isTrue();
+            assertThat(offers).hasValue(256);
+            assertThat(futures).allMatch(f->!f.isDone());
+            release.set(true);
+            for(var future:futures)future.get(2,TimeUnit.SECONDS);
+            assertThat(offers).hasValue(257);
+        }
+    }
+
+    @Test
     void adminActionRetriesKeepIdentityAndFifoWhilePollingEgress() throws Exception {
         var adminSeen=new CountDownLatch(1);var polled=new CountDownLatch(3);
         var allow=new AtomicBoolean();var mismatch=new AtomicBoolean();
