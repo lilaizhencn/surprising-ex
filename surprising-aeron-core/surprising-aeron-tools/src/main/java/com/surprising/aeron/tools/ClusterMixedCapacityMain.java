@@ -189,7 +189,8 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
 
     private void refresh(int i) { if(sideLoad==null && System.currentTimeMillis()-markTime[i]>=1000)price(i,mark[i]); }
     private void price(int i,long value) {
-        mark[i]=value;markTime[i]=System.currentTimeMillis();
+        space();
+        mark[i]=value;markTime[i]=GeneratedPriceClock.timestamp();
         send(CoreMessageType.APPLY_MARK_PRICE,0,TradingCommandCodec.encodeApplyMarkPrice(
                 new ApplyMarkPriceCommand(symbol(i),1,value,++markSequence[i],markTime[i])),1,null);
     }

@@ -69,7 +69,7 @@ final class ClusterOperationalSideLoad implements AutoCloseable {
                 if(pending.size()==16) pending.removeFirst().join();
                 pending.addLast(prices.send(CoreMessageType.APPLY_MARK_PRICE,0,
                         TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                                "JMH-MIX-"+i+"-USDT",1,marks[i],++sequences[i],System.currentTimeMillis()))));
+                                "JMH-MIX-"+i+"-USDT",1,marks[i],++sequences[i],GeneratedPriceClock.timestamp()))));
             }
             while(!pending.isEmpty())pending.removeFirst().join();
             initialPrices.complete(null);

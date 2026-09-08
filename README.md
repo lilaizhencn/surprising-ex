@@ -12,6 +12,8 @@ Realtime user/book snapshots run outside trading log callbacks. Aeron's service 
 
 The production-mix tool supports `surprising.aeron.mixed-operational=true`: asynchronous trading runs alongside independent price updates and a control producer exercising manual closes, trigger discovery/execution, funding, liquidations, insurance and ADL. User/maker reads call production `ValkeyUserQueries`; configure `surprising.aeron.operational-valkey-host/port` and `surprising.aeron.operational-query-rate`, with a real Router, Valkey and the Core realtime outlet running. This measures Core, read-model maintenance and query materialization, excluding HTTP gateway authentication and WS client delivery. See `PERFORMANCE_VALIDATION.md` for measured coverage and saturation results.
 
+合成价格在记录实际生成时间后等待2ms再发送，以覆盖已观测到的跨机1ms时钟边界；不回填时间戳、不修改Core新鲜度规则，独立交易流持续发送。Synthetic prices retain their actual generation time and wait 2ms before publication to cover the observed 1ms cross-host clock boundary; Core freshness checks and continuous trading submission are unchanged.
+
 交易 service 可用 `-Dsurprising.aeron.service.idle-strategy=BACKOFF|YIELDING` 或 `AERON_SERVICE_IDLE_STRATEGY` 独立配置等待策略，系统属性优先。未配置时沿用 Aeron 默认及其全局属性；显式配置仅影响 service，不改变 consensus、网络或 Archive。YIELDING 会增加空闲轮询 CPU，应依据真实三节点吞吐、尾延迟和 CPU 实测选择。
 
 The trading service supports `-Dsurprising.aeron.service.idle-strategy=BACKOFF|YIELDING` or `AERON_SERVICE_IDLE_STRATEGY`, with the system property taking precedence. When unset, Aeron's defaults and global property retain their existing behavior. An explicit override affects only the service, leaving consensus, networking and Archive unchanged. YIELDING spends more CPU polling; select it using real three-node throughput, latency and CPU measurements.

@@ -45,7 +45,7 @@ final class OperationalLifecycle implements AutoCloseable {
     private void price(String symbol,long value) {
         long seq=symbol.equals(ACTIVE)?++activeSequence:++riskSequence;
         endpoint.command(CoreMessageType.APPLY_MARK_PRICE,0,TradingCommandCodec.encodeApplyMarkPrice(
-                new ApplyMarkPriceCommand(symbol,1,value,seq,System.currentTimeMillis())));
+                new ApplyMarkPriceCommand(symbol,1,value,seq,GeneratedPriceClock.timestamp())));
     }
     private void place(long account,String symbol,CoreOrderSide side,long price,long quantity,
                        CoreTimeInForce tif,boolean reduceOnly) {
