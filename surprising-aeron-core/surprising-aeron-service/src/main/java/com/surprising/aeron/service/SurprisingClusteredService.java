@@ -32,6 +32,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     static final long PIPELINE_TIMER_ID = Long.MIN_VALUE + 101;
     private final ClusterCommandWindow commandWindow = new ClusterCommandWindow();
     private int commandWindowHighWaterMark;
+    private long drainedWindows, drainedCommands, dependencyFences, controlFences;
     private boolean pipelineTimerArmed;
 
     private final ProductLine productLine;
@@ -75,6 +76,7 @@ public final class SurprisingClusteredService implements ClusteredService {
         processingLogCallback = false;
         commandWindow.clear();
         commandWindowHighWaterMark = 0;
+        drainedWindows = drainedCommands = dependencyFences = controlFences = 0;
         pipelineTimerArmed = false;
         snapshotFenceNotReadyCount = 0;
         snapshotFenceTimeoutCount = 0;
@@ -136,6 +138,9 @@ public final class SurprisingClusteredService implements ClusteredService {
         boolean eligible = state.prepareClusterPipelineScope(request, commandWindow);
         if (!eligible || commandWindow.conflicts()
                 || state.matchingSequence(request.header().commandId()) != 0) {
+            if (commandWindow.size() != 0) {
+                if (eligible) dependencyFences++; else controlFences++;
+            }
             drainCommandWindow();
             // A preceding command may have changed maker accounts or removed the target order.
             eligible = state.prepareClusterPipelineScope(request, commandWindow);
@@ -156,7 +161,7 @@ public final class SurprisingClusteredService implements ClusteredService {
             }
         }
         var entry = commandWindow.add(session, request, timestamp, position);
-        CoreResponse result = state.apply(request, timestamp, position);
+        CoreResponse result = state.applyClusterCommand(request, timestamp, position);
         entry.sequence = state.matchingSequence(request.header().commandId());
         if (entry.sequence != 0) state.pendingMatching(entry.sequence).establishCommitFence(timestamp, position);
         entry.response = entry.sequence == 0 ? result : null;
@@ -167,6 +172,8 @@ public final class SurprisingClusteredService implements ClusteredService {
     private void drainCommandWindow() {
         int size = commandWindow.size();
         if (size == 0) return;
+        drainedWindows++;
+        drainedCommands += size;
         var last = commandWindow.get(size - 1);
         // Admissions are provisional; only the ordered commit phase publishes realtime state.
         // A window is one atomic export group at its final log position.
@@ -383,8 +390,9 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     @Override
     public void onTerminate(Cluster cluster) {
-        System.out.printf("Aeron core command-window productLine=%s highWaterMark=%d pending=%d%n",
-                productLine, commandWindowHighWaterMark, commandWindow.size());
+        System.out.printf("Aeron core command-window productLine=%s highWaterMark=%d pending=%d windows=%d commands=%d dependencyFences=%d controlFences=%d%n",
+                productLine, commandWindowHighWaterMark, commandWindow.size(), drainedWindows,
+                drainedCommands, dependencyFences, controlFences);
         commandWindow.clear();
         responseSequence = 0;
         matchingResponse = null;

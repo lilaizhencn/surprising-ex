@@ -4816,3 +4816,11 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 资金差0、249交易cycles、36运营生命周期、netDeposits3000004500；测量期间33次主动/触发闭环、33次强平保险ADL闭环、33次资金费、100次风险续扫。整段生命周期p99约1.974s，是多命令闭环，不混作单命令p99。查询READY3305/60194=5.49%，READY p99585us，多数请求仍unavailable；该既有问题未解决，无Core fallback，不能称完整生产场景通过。
 - 原云端数据重启，等待本次进程回放并选主后，replay.py os15 verify退出0，fundsDiff0、249cycles、业务hash仍3763c800c4aa9edc，后台生命周期按原36cycles/注资参数核对。round清理已回收load unit打印not loaded，但随后的日志采集、断言、replay及finally均完成；编排总退出0。四VM最终全部TERMINATED（instances-os15-final.json），不再运行负载。
 - 本机最终168项针对性功能检查和六产品线三JVM交易/日志恢复/快照恢复均PASS，未本机压测；两个发现的缺陷均有先失败后通过的回归证据。artifact仍为2026-09-08-command-pipeline，os15/、os15-replay-verify/、local-resume-fixed.txt、local-functional-resume/；源码与测试已推送master。
+
+### 批量跨日志窗口：OS16–OS19采集前锁定（2026-09-08）
+
+- 当前master工作树扩展独立单matcher分片PLACE/CANCEL batch，保留账户/订单簿依赖、逐日志提交和控制屏障；订单ID用有界primitive精确集合。修复推迟结算时间戳与整批拒绝后的submission head唤醒。新增六产品批量并行、成交资金/状态与串行一致、拒绝后推进测试及independentBatchWindows JMH场景。最终针对性162项通过，前一轮service全517项通过；本机六产品三JVM交易/SIGKILL日志恢复/快照恢复全部通过是启动云端的硬门槛，不执行本机性能测试。
+- 对照commit不适用，仅当前master同一JAR；commit/SHA保存artifact。四台GCP asia-southeast1-b n2-custom-8-16384，8vCPU16GiB（4物理核SMT，现场lscpu复核）；独立三Core+load，HotSpot25，Core4GiB/load2GiB ZGC/NMT、1matcher/4Lane、SHARED_NETWORK、serviceYIELDING、Lane spin0。业务沿用OS15连续异步交易+独立价格/风险/触发/平仓/强平/资金费/保险ADL控制与查询：1773用户258symbol、batch20，价格16/控制1，查询1000/s。交易FIFO不逐笔/逐批排空，只有总窗口背压和测量/核对边界；terminal交易与计入后台的composite分别报告。闭环最大速率模型，未修正coordinated omission，不作open-loop容量承诺。
+- OS16 seed99001窗口256、OS17 seed99002窗口512，各30秒预热+60秒测量；只有OS17终态交易速率较OS16增加至少5%且正确性/p99通过，才执行OS18 seed99003窗口1024同30+60秒，否则停止加窗口。随后OS19 seed99004在本轮有效最佳窗口执行30+120秒无JFR持续验证。每轮新数据目录，阶段后排空/资金核对为冷却，原数据OS19重启hash核对。参数变化只在上述预锁档位内，不改变业务以刷CPU。执行SETTLEMENT_SPIN_LIMIT=0 OPERATIONAL_JFR=1/0 python3 round.py <tag> <seed> <window> <seconds> 30。Core phases.jfc/load profile用于前三诊断档，最后无profiler，不将带采样速率作为无profiler主结果。
+- 每档三Core存活、terminal=offered、unfinished0、资金差0、业务覆盖PASS、各单命令p99<1s；带采样四JFR必须非空且DataLoss0，明显swap/throttling则无效。稳定测量epoch标记用于筛选OS CPU/JFR样本；owner/matcher/Lane分别报告CPU、业务热点与等待，窗口平均值/依赖与控制屏障次数单列。吞吐不再增长时识别固定配置瓶颈，不以忙等凑95%，不预先声称所有阶段同时有效饱和或绝对上限。
+- artifact=/Users/atomex/Desktop/surprising/gcp-validation/2026-09-08-batch-window；保存原始命令、环境、JAR校验、JFR/OS数据、错误及恢复结果。finally停止全部四VM并确认TERMINATED后离线分析。查询READY既有低可用率独立报告，未修复不能称生产场景验收；正式三节点JMH、完整分配/native长期泄漏验收仍缺失，本轮为执行模型与饱和诊断。

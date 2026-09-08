@@ -38,6 +38,7 @@ final class PendingMatching {
     private PlaceAdmissionEvent placeAdmission;
     private CoreMatchingOrder admittedMatchingOrder;
     private boolean matchingSubmitted;
+    boolean clusterIndependent;
     private boolean settlementReady;
     private boolean dispatchOnly;
     private boolean pipelinedSettlementCounted;
@@ -147,6 +148,7 @@ final class PendingMatching {
         placeAdmission = null;
         admittedMatchingOrder = null;
         matchingSubmitted = false;
+        clusterIndependent = false;
         settlementReady = false;
         dispatchOnly = false;
         pipelinedSettlementCounted = false;

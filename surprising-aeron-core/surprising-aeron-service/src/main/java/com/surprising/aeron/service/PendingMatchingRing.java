@@ -206,6 +206,11 @@ final class PendingMatchingRing {
         return index >= 0 && submissionHeads[matcherShard] == index;
     }
 
+    int submissionShard(long sequence) {
+        int index = indexOf(sequence);
+        return index < 0 ? -1 : submissionShards[index];
+    }
+
     PendingMatching submissionHead(int matcherShard) {
         int index = submissionHeads[matcherShard];
         return index < 0 ? null : pendingAt(index);

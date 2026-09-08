@@ -143,6 +143,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         measured=measure;
         if(measure) { offered=terminal=coreOffered=coreTerminal=fills=queries=peak=0;stats.clear();adminRetriesBefore=client.adminActionRetries(); }
         started=lastReport=System.nanoTime(); reportTerminal=0;
+        if (measure) System.out.println("measurementStartEpochMillis=" + System.currentTimeMillis());
         if (sideLoad != null && measure) sideLoad.beginMeasurement(started);
         long end=started+TimeUnit.SECONDS.toNanos(seconds);
         while(System.nanoTime()<end) {
@@ -151,6 +152,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         drain();
         if(measure) elapsed=System.nanoTime()-started;
         if (sideLoad != null && measure) sideLoad.endMeasurement(System.nanoTime());
+        if (measure) System.out.println("measurementEndEpochMillis=" + System.currentTimeMillis());
         measured=false;
     }
     private long elapsed;

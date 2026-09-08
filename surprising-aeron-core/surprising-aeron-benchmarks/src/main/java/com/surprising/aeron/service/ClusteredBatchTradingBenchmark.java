@@ -24,6 +24,15 @@ import org.openjdk.jmh.annotations.*;
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"})
 @Threads(1)
 public class ClusteredBatchTradingBenchmark {
+    @Benchmark
+    public long independentBatchWindows(Workload workload, Counters counters) {
+        workload.runIndependentBatchWindows();
+        counters.acceptedBusinessOperations += 512L * workload.batchSize;
+        counters.terminalBusinessOperations += 512L * workload.batchSize;
+        counters.acceptedCoreMessages += 512;
+        counters.terminalCoreMessages += 512;
+        return workload.terminal;
+    }
     /** Cross-callback independent orders, replicated timer drain, then independent cancellations. */
     @Benchmark
     public long independentCommandWindows(Workload workload, Counters counters) {
@@ -161,6 +170,8 @@ public class ClusteredBatchTradingBenchmark {
         private Thread realtimeConsumer;
         private volatile boolean consuming;
         private boolean singleResponses;
+        private final org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap batchRequestSizes =
+                new org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap(512);
         private final org.eclipse.collections.impl.set.mutable.primitive.LongHashSet singleRequestIds =
                 new org.eclipse.collections.impl.set.mutable.primitive.LongHashSet();
         private int responseBatchSize;
@@ -191,6 +202,7 @@ public class ClusteredBatchTradingBenchmark {
             LinearPerpetualBenchmarkSupport.configureAccountLanes(accountLanes);
             sequence = terminal = queryResults = maxBacklog = 0;
             singleRequestIds.clear();
+            batchRequestSizes.clear();
             responseBatchSize = batchSize;
             expectMissingCancels = false;
             rejectedItems = 0;
@@ -240,7 +252,10 @@ public class ClusteredBatchTradingBenchmark {
                                 }
                                 if(singleRequestIds.remove(message.header().correlationId())){terminal++;yield 1L;}
                                 var items = TradingOrderBatchCodec.decodeResult(response.data()).items();
-                                if (items.size() != responseBatchSize) throw new IllegalStateException("batch size mismatch");
+                                int expectedSize = batchRequestSizes.get(message.header().correlationId());
+                                batchRequestSizes.removeKey(message.header().correlationId());
+                                if (items.size() != expectedSize)
+                                    throw new IllegalStateException("batch size mismatch");
                                 for (var item : items) {
                                     if (!expectBatchTrades && !item.executions().isEmpty()) {
                                         throw new IllegalStateException("unexpected trade");
@@ -322,6 +337,7 @@ public class ClusteredBatchTradingBenchmark {
                     }
                     for (CoreMessage request : wave) send(request);
                 }
+                drain();
                 if (terminal - before != 1024 || batchTrades - tradesBefore != 512L * batchSize) {
                     throw new IllegalStateException("multi-fill terminal/trade mismatch");
                 }
@@ -457,6 +473,33 @@ public class ClusteredBatchTradingBenchmark {
             } finally { singleResponses = false; }
         }
 
+        public void runIndependentBatchWindows() {
+            long before = terminal;
+            for (int user = 0; user < 256; user++) {
+                firstOrders[user] = orderId;
+                String symbol = (user & 1) == 0 ? "JMH-PIPE-A-USDT" : pipelineSymbolB;
+                var orders = new ArrayList<PlaceOrderCommand>(batchSize);
+                for (int item = 0; item < batchSize; item++) {
+                    long id = orderId++;
+                    orders.add(new PlaceOrderCommand(id, symbol, 1, CoreOrderSide.BUY, 90, 1,
+                            false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+                            CoreTimeInForce.GTC, false, "batch-window-" + id));
+                }
+                send(command(CoreMessageType.PLACE_ORDER_BATCH, 1_000 + user,
+                        TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders))));
+            }
+            drain();
+            for (int user = 0; user < 256; user++) {
+                var orders = new ArrayList<CancelOrderCommand>(batchSize);
+                for (int item = 0; item < batchSize; item++) orders.add(new CancelOrderCommand(firstOrders[user] + item));
+                send(command(CoreMessageType.CANCEL_ORDER_BATCH, 1_000 + user,
+                        TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(orders))));
+            }
+            drain();
+            if (terminal - before != 512 || service.commandWindowHighWaterMark() < 2)
+                throw new IllegalStateException("independent batches did not pipeline and complete");
+        }
+
         public void run() {
             long terminalBefore = terminal;
             long queriesBefore = queryResults;
@@ -528,6 +571,10 @@ public class ClusteredBatchTradingBenchmark {
 
         private void send(CoreMessage message) {
             if (singleResponses) singleRequestIds.add(message.header().correlationId());
+            else if (message.header().messageType() == CoreMessageType.PLACE_ORDER_BATCH
+                    || message.header().messageType() == CoreMessageType.CANCEL_ORDER_BATCH
+                    || message.header().messageType() == CoreMessageType.AMEND_ORDER_BATCH)
+                batchRequestSizes.put(message.header().correlationId(), responseBatchSize);
             byte[] bytes = CoreMessageCodec.encode(message);
             service.onSessionMessage(session, 1_700_000_000_000L, new UnsafeBuffer(bytes), 0, bytes.length, header);
             maxBacklog = Math.max(maxBacklog, service.state().pendingMatchingCount());

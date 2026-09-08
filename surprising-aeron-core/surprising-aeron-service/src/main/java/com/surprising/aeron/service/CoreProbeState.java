@@ -443,42 +443,73 @@ public final class CoreProbeState implements AutoCloseable {
         return apply(message, message.header().submittedAtEpochMillis(), Math.addExact(appliedCommandCount, 1));
     }
 
-    /** Read only committed indexes; scopes are retained until the entire wave commits. */
+    private boolean clusterPipelineAdmission;
+
+    CoreResponse applyClusterCommand(CoreMessage message, long timestamp, long position) {
+        clusterPipelineAdmission = true;
+        try { return apply(message, timestamp, position); }
+        finally { clusterPipelineAdmission = false; }
+    }
+
+    /** Scopes include all batch items and resting counterparties, using owner indexes only. */
     boolean prepareClusterPipelineScope(CoreMessage message, ClusterCommandWindow window) {
         if (!activated) activate();
         runtime.assertOwner();
-        if (message.header().productLine() != productLine || message.header().userId() <= 0) return false;
-        String symbol;
-        long orderId;
+        long user = message.header().userId();
+        if (message.header().productLine() != productLine || user <= 0) return false;
+        window.resetCandidate(com.surprising.aeron.service.state.TradingDependencyMask.account(user));
         try {
             switch (message.header().messageType()) {
-                case PLACE_ORDER -> {
-                    var command = TradingCommandCodec.decodePlaceOrder(message.payloadUnsafe());
-                    ensureRuntimePlaceOrderState();
-                    var instrument = runtimePlaceOrderState.instrument(command.symbol());
-                    if (instrument == null) return false;
-                    symbol = instrument.symbol();
-                    orderId = command.orderId();
-                    // Close/reduce-only admission can cancel other orders; retain its full fence.
-                    if (command.reduceOnly()) return false;
+                case PLACE_ORDER -> { return addPlaceScope(
+                        TradingCommandCodec.decodePlaceOrder(message.payloadUnsafe()), window); }
+                case CANCEL_ORDER -> { return addCancelScope(user,
+                        TradingCommandCodec.decodeCancelOrder(message.payloadUnsafe()).orderId(), window); }
+                case PLACE_ORDER_BATCH -> {
+                    int shard = -1;
+                    for (var order : TradingOrderBatchCodec.decodePlaceOrderBatch(message.payloadUnsafe()).orders()) {
+                        if (!addPlaceScope(order, window)) return false;
+                        int current = matchingAdapter.matcherShardId(order.symbol());
+                        if (shard >= 0 && current != shard) return false;
+                        shard = current;
+                    }
+                    return true;
                 }
-                case CANCEL_ORDER -> {
-                    var command = TradingCommandCodec.decodeCancelOrder(message.payloadUnsafe());
-                    orderId = command.orderId();
-                    var order = activeOrderIndex.activeOrder(orderId);
-                    if (order == null || order.userId() != message.header().userId()) return false;
-                    symbol = order.symbol();
+                case CANCEL_ORDER_BATCH -> {
+                    int shard = -1;
+                    for (var order : TradingOrderBatchCodec.decodeCancelOrderBatch(message.payloadUnsafe()).orders()) {
+                        if (!addCancelScope(user, order.orderId(), window)) return false;
+                        int current = matchingAdapter.matcherShardId(activeOrderIndex.activeOrder(order.orderId()).symbol());
+                        if (shard >= 0 && current != shard) return false;
+                        shard = current;
+                    }
+                    return true;
                 }
                 default -> { return false; }
             }
         } catch (IllegalArgumentException | java.nio.BufferUnderflowException invalid) {
-            return false; // Normal apply path performs the existing rejection after the fence.
+            return false;
         }
-        window.candidateAccounts = com.surprising.aeron.service.state.TradingDependencyMask.account(
-                message.header().userId()) | activeOrderIndex.participantMask(symbol);
-        window.candidateSymbols = com.surprising.aeron.service.state.TradingDependencyMask.account(symbol.hashCode());
-        window.candidateOrders = com.surprising.aeron.service.state.TradingDependencyMask.account(orderId);
+    }
+
+    private boolean addPlaceScope(PlaceOrderCommand command, ClusterCommandWindow window) {
+        ensureRuntimePlaceOrderState();
+        var instrument = runtimePlaceOrderState.instrument(command.symbol());
+        if (instrument == null || command.reduceOnly()) return false;
+        window.candidateAccounts |= activeOrderIndex.participantMask(instrument.symbol());
+        addClusterScope(instrument.symbol(), command.orderId(), window);
         return true;
+    }
+
+    private boolean addCancelScope(long user, long orderId, ClusterCommandWindow window) {
+        var order = activeOrderIndex.activeOrder(orderId);
+        if (order == null || order.userId() != user) return false;
+        addClusterScope(order.symbol(), orderId, window);
+        return true;
+    }
+
+    private void addClusterScope(String symbol, long orderId, ClusterCommandWindow window) {
+        window.candidateSymbols |= com.surprising.aeron.service.state.TradingDependencyMask.account(symbol.hashCode());
+        window.candidateOrder(orderId);
     }
 
     public CoreResponse apply(CoreMessage message, long clusterTimestamp, long clusterPosition) {
@@ -1095,7 +1126,7 @@ public final class CoreProbeState implements AutoCloseable {
         pending.withPendingStateHash(pendingStateHash);
         CoreResponse completed = tryActivatePipelinedOrderBatch(batch, pending)
                 ? null
-                : pendingOrderBatches.keySet().iterator().next() == sequence
+                : !pending.clusterIndependent && pendingMatching.firstSequence() == sequence
                 ? activateOrderBatch(batch, pending, false) : null;
         if (completed != null) return completed;
         return new CoreResponse(ResponseStatus.OK, ResponseStatus.OK, matchingPendingCode(),
@@ -1143,10 +1174,18 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private boolean tryActivatePipelinedOrderBatch(OrderBatchPending batch, PendingMatching pending) {
+        if (pending.clusterIndependent && batch.kind == OrderBatchKind.CANCEL) {
+            if (batch.admissionOrderIndex == null)
+                batch.admissionOrderIndex = new BatchAdmissionOrderIndex(activeOrderIndex, batch.items.size());
+            batch.admissionOrderIndex.reset(pending.command().header().userId());
+            batch.started = true;
+            submitMatching(pending);
+            return true;
+        }
         if (batch.sequentialAdmission || batch.kind != OrderBatchKind.PLACE || batch.items.size() < 2
                 || BENCHMARK_SKIP_MATCHING_SUBMIT
                 || pendingMatching.hasEarlierUser(batch.sequence, pending.command().header().userId())
-                || conflictsWithEarlierPipelinedBatch(batch)) {
+                || !pending.clusterIndependent && conflictsWithEarlierPipelinedBatch(batch)) {
             return false;
         }
         if (batch.admissionOrderIndex == null) {
@@ -1478,6 +1517,7 @@ public final class CoreProbeState implements AutoCloseable {
         runtime.matcherReady().join();
         if (batch.kind == OrderBatchKind.CANCEL) {
             submitCancelBatchChunk(pending, batch);
+            if (pending.clusterIndependent) pending.matchingSubmitted();
             return;
         }
         matcherPipeline.submit(orderBatchMatcherShard(batch), pending.sequence(),
@@ -2154,7 +2194,7 @@ public final class CoreProbeState implements AutoCloseable {
     private CoreResponse beginMatching(CoreMessage message, long clusterTimestamp, long clusterPosition,
                                        SourceKey sourceKey, CommandFingerprint fingerprint) {
         PendingMatching.Operation operation = matchingOperation(message.header().messageType());
-        if (!pendingOrderBatches.isEmpty()) {
+        if (!pendingOrderBatches.isEmpty() && !clusterPipelineAdmission) {
             return deferMatching(message, clusterTimestamp, clusterPosition, sourceKey, operation, fingerprint);
         }
         return prepareMatching(message, clusterTimestamp, clusterPosition, sourceKey, operation, fingerprint, null);
@@ -2818,7 +2858,12 @@ public final class CoreProbeState implements AutoCloseable {
 
     private PendingMatching removePendingMatching(long sequence) {
         pendingLifecycleScopes.remove(sequence);
+        int shard = pendingMatching.submissionShard(sequence);
+        boolean releasesSubmissionHead = shard >= 0 && pendingMatching.isSubmissionHead(sequence, shard);
         PendingMatching removed = pendingMatching.remove(sequence);
+        // A wholly rejected batch can finish without submitting anything to the matcher.
+        // Its successor's Lane notification may already have been consumed while blocked.
+        if (releasesSubmissionHead) placeAdmissionReadyShardMask |= 1L << shard;
         refreshCommittedCoreSequence();
         return removed;
     }
@@ -2840,6 +2885,7 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private void putPendingMatching(PendingMatching pending) {
+        pending.clusterIndependent = clusterPipelineAdmission;
         if (pendingMatching.size() >= pendingMatching.capacity()) {
             throw new IllegalStateException("matching pending capacity is exhausted");
         }
@@ -3124,6 +3170,11 @@ public final class CoreProbeState implements AutoCloseable {
                 PlaceBatchAdmissionEvent batchAdmission = orderBatch == null
                         ? null : orderBatch.placeBatchAdmissionEvent;
                 if (admission == null && batchAdmission == null) {
+                    if (orderBatch != null && pending.clusterIndependent
+                            && orderBatch.kind == OrderBatchKind.CANCEL && orderBatch.started) {
+                        submitMatching(pending);
+                        if (pending.isMatchingSubmitted()) continue;
+                    }
                     // A prepared cancel/control command may have waited behind a place's
                     // asynchronous Lane admission. Resume it at the same shard submission
                     // head; it has no admission notification of its own to wake us later.
@@ -3235,7 +3286,7 @@ public final class CoreProbeState implements AutoCloseable {
             int shardId = pendingSubmissionShard(pending);
             if (!pendingMatching.isSubmissionHead(sequence, shardId)) return true;
         }
-        if (pendingOrderBatches.isEmpty()) return false;
+        if (pending != null && pending.clusterIndependent || pendingOrderBatches.isEmpty()) return false;
         return sequence > pendingOrderBatches.keySet().iterator().next();
     }
 
@@ -3645,6 +3696,10 @@ public final class CoreProbeState implements AutoCloseable {
         currentClusterPosition = clusterPosition;
         LaneCommandContextRing.Context laneContext = laneCommandContexts.required(sequence);
         OrderBatchPending waitingBatch = pendingOrderBatches.get(sequence);
+        if (waitingBatch != null && pending.clusterIndependent
+                && waitingBatch.kind == OrderBatchKind.CANCEL && !waitingBatch.commitStarted) {
+            beginPipelinedOrderBatchCommit(waitingBatch, pending);
+        }
         if (waitingBatch != null && waitingBatch.hasPendingLaneWork()) {
             if (!waitingBatch.laneWorkComplete()) return null;
             if (waitingBatch.pipelined && !waitingBatch.commitStarted) {
@@ -3909,8 +3964,9 @@ public final class CoreProbeState implements AutoCloseable {
 
     private void beginPipelinedOrderBatchCommit(OrderBatchPending batch, PendingMatching pending) {
         PlaceBatchAdmissionEvent admission = batch.placeBatchAdmissionEvent;
-        if (!batch.admissionCollected || admission == null || !admission.complete()
-                || admission.rejection() != null) {
+        boolean preparedCancel = pending.clusterIndependent && batch.kind == OrderBatchKind.CANCEL;
+        if (!preparedCancel && (!batch.admissionCollected || admission == null || !admission.complete()
+                || admission.rejection() != null)) {
             throw new IllegalStateException("pipelined order batch admission is not ready to commit");
         }
         CoreAdmissionReservation reservation = sequenceAdmission(pending.sequence());
@@ -3934,10 +3990,12 @@ public final class CoreProbeState implements AutoCloseable {
                 matcherSequence(-1), matcherPrefixDigest(-1));
         batch.commitStarted = true;
         beginSnapshotProjectionBatch();
-        runtimePlaceOrderState.collectPlaceBatchAdmission(admission, commandFundsAccumulator);
-        runtimePlaceOrderState.releasePlaceBatchAdmission(admission);
-        batch.placeBatchAdmissionEvent = null;
-        refreshSnapshotProjection();
+        if (!preparedCancel) {
+            runtimePlaceOrderState.collectPlaceBatchAdmission(admission, commandFundsAccumulator);
+            runtimePlaceOrderState.releasePlaceBatchAdmission(admission);
+            batch.placeBatchAdmissionEvent = null;
+            refreshSnapshotProjection();
+        }
     }
 
     private CoreResponse completeDispatchedMatcherSettlement(
@@ -4616,6 +4674,11 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private void pumpMatchingCommitCompletions(long clusterTimestamp, long clusterPosition) {
+        long first = pendingMatching.firstSequence();
+        OrderBatchPending head = pendingOrderBatches.get(first);
+        if (head != null && !head.started) {
+            activateOrderBatch(head, pendingMatching.get(first), true);
+        }
         drainMatchingCompletions();
         dispatchReadyPlaceSettlements(clusterTimestamp, clusterPosition);
     }
@@ -4770,6 +4833,9 @@ public final class CoreProbeState implements AutoCloseable {
                     LaneCommandContextRing.Context context = laneCommandContexts.required(pending.sequence());
                     com.surprising.aeron.service.matching.CoreMatchingResult matching = context.matchingCompletion();
                     if (matching == null) return;
+                    // Rejections release provisional funds on the owner. Keep those mutations
+                    // in the ordered commit context instead of speculative batch dispatch.
+                    for (var result : batch.pipelinedMatchingResults) if (!result.accepted()) return;
                     matching = context.takeMatchingCompletion();
                     pending.establishCommitFence(clusterTimestamp, clusterPosition);
                     if (matchingResultNeedsRecovery(pending, matching)) {
@@ -4790,14 +4856,14 @@ public final class CoreProbeState implements AutoCloseable {
                     batch.cancelEvent = runtimePlaceOrderState.dispatchCancelBatch(
                             batch.sequence, pending.command().header().userId(),
                             batch.deferredCancellationOrderIds.toPrimitiveArray(),
-                            clusterTimestamp, clusterPosition, runtimePlaceOrderIdentities);
+                            pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), runtimePlaceOrderIdentities);
                 }
                 if (!batch.deferredSettlementOrderIds.isEmpty()) {
                     batch.settlementEvents = runtimePlaceOrderState.dispatchMatcherSettlementBatch(
                             batch.sequence, batch.deferredSettlementOrderIds.toArray(),
                             batch.deferredSettlementExpectedLaneMasks.toArray(),
                             batch.deferredSettlementMatchingResults, runtimePlaceOrderIdentities,
-                            clusterTimestamp, clusterPosition);
+                            pending.commitFenceTimestamp(), pending.commitFenceClusterPosition());
                 }
                 batch.settlementDispatched = true;
                 matchingProgressSequence++;

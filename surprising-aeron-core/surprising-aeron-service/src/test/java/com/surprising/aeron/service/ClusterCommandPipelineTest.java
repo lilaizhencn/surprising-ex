@@ -26,6 +26,66 @@ class ClusterCommandPipelineTest {
 
     @ParameterizedTest
     @EnumSource(ProductLine.class)
+    void independentTwentyItemBatchesSubmitBeforeEarlierMatcherFinishes(ProductLine product) throws Exception {
+        try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
+            serial.applyAll(live.setup());
+            long other = disjointUser(11);
+            var topology = com.surprising.aeron.service.state.LaneTopology.productionDefault();
+            while (topology.accountLaneId(other) != topology.accountLaneId(11)
+                    || TradingDependencyMask.account(other) == TradingDependencyMask.account(11)) other++;
+            if (other != disjointUser(11)) {
+                String asset = ContractType.valueOf(product.contractTypeCode()).isInverse() ? "BTC" : "USDT";
+                var deposit = live.message(CoreMessageType.ADJUST_BALANCE, other,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 20_000)));
+                live.apply(deposit); serial.apply(deposit); live.responses.clear();
+            }
+            var a = live.placeBatch(11, "BTC-USDT", 1000);
+            var b = live.placeBatch(other, disjointSymbol("BTC-USDT"), 2000);
+            CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
+            var field = CoreProbeState.class.getDeclaredField("matcherPipeline"); field.setAccessible(true);
+            var matcher = (MatcherPipelineGroup) field.get(live.service.state());
+            var blocked = matcher.readAtSubmissionFence(0, () -> {
+                entered.countDown();
+                try { if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("test timeout"); }
+                catch (InterruptedException e) { throw new IllegalStateException(e); }
+                return 1;
+            });
+            try {
+                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                live.send(a); live.send(b);
+                assertThat(live.service.commandWindowSize()).isEqualTo(2);
+                var second = live.service.state().pendingMatching(live.service.state().matchingSequence(b.header().commandId()));
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+                while (!second.isMatchingSubmitted() && System.nanoTime() < deadline) {
+                    live.service.state().drainMatchingCompletions(); Thread.onSpinWait();
+                }
+                assertThat(second.isMatchingSubmitted()).as("second batch must reach matcher before first completion").isTrue();
+                assertThat(live.responses).isEmpty();
+            } finally { release.countDown(); }
+            live.tick(); assertThat(blocked.join()).isOne();
+            serial.apply(a); serial.apply(b);
+            assertThat(live.service.state().tradingState().orders()).isEqualTo(serial.service.state().tradingState().orders());
+            assertThat(live.service.state().tradingState().users()).isEqualTo(serial.service.state().tradingState().users());
+            assertThat(live.hash()).isEqualTo(serial.hash());
+            var ca = live.cancelBatch(11, 1000);
+            var cb = live.cancelBatch(other, 2000);
+            live.send(ca); live.send(cb);
+            assertThat(live.service.commandWindowSize()).isEqualTo(2);
+            live.tick(); serial.apply(ca); serial.apply(cb);
+            assertThat(live.hash()).isEqualTo(serial.hash());
+            assertThat(live.responses).hasSize(4).allSatisfy(response -> {
+                assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
+                assertThat(TradingOrderBatchCodec.decodeResult(response.data()).items())
+                        .hasSize(20).allSatisfy(item -> assertThat(item.status()).isEqualTo(ResponseStatus.APPLIED));
+            });
+            try (CoreProbeState restored = CoreProbeState.fromSnapshot(product, live.service.captureSnapshot(800))) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
     void independentCommandsEnterBeforeMatcherCompletesAndRecoverExactly(ProductLine product) throws Exception {
         try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product);
              Fixture replay = new Fixture(product, Cluster.Role.FOLLOWER)) {
@@ -95,6 +155,31 @@ class ClusterCommandPipelineTest {
             var balance = f.service.state().tradingState().user(11).balances().get("USDT");
             assertThat(balance.lockedUnits()).isEqualTo(80);
             assertThat(balance.availableUnits()).isEqualTo(20);
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void rejectedBatchAndIndependentOrdinaryOrderKeepProgressAndFunds(ProductLine product) {
+        try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
+            serial.applyAll(live.setup());
+            String asset = ContractType.valueOf(product.contractTypeCode()).isInverse() ? "BTC" : "USDT";
+            var withdraw = live.message(CoreMessageType.ADJUST_BALANCE, 11,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, -20_000)));
+            live.apply(withdraw); serial.apply(withdraw); live.responses.clear();
+            var rejected = live.placeBatch(11, "BTC-USDT", 1000);
+            var valid = live.place(disjointUser(11), disjointSymbol("BTC-USDT"), 2000, 80, 1, CoreOrderSide.BUY);
+            live.send(rejected); live.send(valid);
+            assertThat(live.service.commandWindowSize()).isEqualTo(2);
+            live.tick(); serial.apply(rejected); serial.apply(valid);
+            assertThat(live.hash()).isEqualTo(serial.hash());
+            assertThat(live.responses).hasSize(2);
+            assertThat(TradingOrderBatchCodec.decodeResult(live.responses.getFirst().data()).items())
+                    .allSatisfy(item -> assertThat(item.status()).isEqualTo(ResponseStatus.REJECTED));
+            assertThat(live.responses.getLast().status()).isEqualTo(ResponseStatus.APPLIED);
+            var cancel = live.cancel(disjointUser(11), 2000);
+            live.apply(cancel); serial.apply(cancel);
+            assertThat(live.hash()).isEqualTo(serial.hash());
         }
     }
 
@@ -179,6 +264,16 @@ class ClusterCommandPipelineTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
     void independentFillsSettleBothSidesAndMatchSerialFunds(ProductLine product) {
+        independentFills(product, false);
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void independentBatchFillsSettleBothSidesAndMatchSerialFunds(ProductLine product) {
+        independentFills(product, true);
+    }
+
+    private void independentFills(ProductLine product, boolean batch) {
         try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
             var setup = live.setup(); serial.applyAll(setup);
             long buyers = TradingDependencyMask.account(11) | TradingDependencyMask.account(disjointUser(11));
@@ -195,14 +290,16 @@ class ClusterCommandPipelineTest {
                             TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 20_000))),
                     live.message(CoreMessageType.ADJUST_BALANCE, makerB,
                             TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 20_000))),
-                    live.place(makerA, "BTC-USDT", 201, 100, 4, CoreOrderSide.SELL),
-                    live.place(makerB, secondSymbol, 202, 100, 4, CoreOrderSide.SELL));
+                    live.place(makerA, "BTC-USDT", 201, batch ? 80 : 100, batch ? 40 : 4, CoreOrderSide.SELL),
+                    live.place(makerB, secondSymbol, 202, batch ? 80 : 100, batch ? 40 : 4, CoreOrderSide.SELL));
             live.applyAll(liquidity); serial.applyAll(liquidity);
             live.responses.clear();
             var outbox = new com.surprising.aeron.client.RealtimeOutbox(1024, 1_048_576);
             live.service.attachRealtimeForTest(outbox);
-            var first = live.place(11, "BTC-USDT", 301, 100, 2, CoreOrderSide.BUY);
-            var second = live.place(disjointUser(11), secondSymbol, disjointOrder(301), 100, 2, CoreOrderSide.BUY);
+            var first = batch ? live.placeBatch(11, "BTC-USDT", 1000)
+                    : live.place(11, "BTC-USDT", 301, 100, 2, CoreOrderSide.BUY);
+            var second = batch ? live.placeBatch(disjointUser(11), secondSymbol, 2000)
+                    : live.place(disjointUser(11), secondSymbol, disjointOrder(301), 100, 2, CoreOrderSide.BUY);
             live.send(first); live.send(second);
             assertThat(live.service.commandWindowSize()).isEqualTo(2);
             live.tick(); serial.applyAll(List.of(first, second));
@@ -219,12 +316,12 @@ class ClusterCommandPipelineTest {
                     default -> { }
                 }
             }
-            assertThat(publicTrades).isEqualTo(2);
-            assertThat(executions).isEqualTo(4);
+            assertThat(publicTrades).isEqualTo(batch ? 40 : 2);
+            assertThat(executions).isEqualTo(batch ? 80 : 4);
             assertThat(begin).isOne(); assertThat(end).isOne();
             assertThat(live.hash()).isEqualTo(serial.hash());
-            assertThat(live.service.state().tradingState().order(201).executedQuantitySteps()).isEqualTo(2);
-            assertThat(live.service.state().tradingState().order(202).executedQuantitySteps()).isEqualTo(2);
+            assertThat(live.service.state().tradingState().order(201).executedQuantitySteps()).isEqualTo(batch ? 20 : 2);
+            assertThat(live.service.state().tradingState().order(202).executedQuantitySteps()).isEqualTo(batch ? 20 : 2);
             try (CoreProbeState restored = CoreProbeState.fromSnapshot(product, live.service.captureSnapshot(100))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
@@ -343,6 +440,20 @@ class ClusterCommandPipelineTest {
         CoreMessage cancel(long user, long order) {
             return message(CoreMessageType.CANCEL_ORDER, user,
                     TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(order)));
+        }
+        CoreMessage placeBatch(long user, String symbol, long firstId) {
+            List<PlaceOrderCommand> orders = new ArrayList<>();
+            for (int i = 0; i < 20; i++) orders.add(new PlaceOrderCommand(firstId+i, symbol, 1,
+                    CoreOrderSide.BUY, 80, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                    CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "batch-"+(firstId+i)));
+            return message(CoreMessageType.PLACE_ORDER_BATCH, user,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)));
+        }
+        CoreMessage cancelBatch(long user, long firstId) {
+            List<CancelOrderCommand> orders = new ArrayList<>();
+            for (int i = 0; i < 20; i++) orders.add(new CancelOrderCommand(firstId+i));
+            return message(CoreMessageType.CANCEL_ORDER_BATCH, user,
+                    TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(orders)));
         }
         void send(CoreMessage command) {
             byte[] bytes = CoreMessageCodec.encode(command);

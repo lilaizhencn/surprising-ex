@@ -9,16 +9,29 @@ final class ClusterCommandWindow {
     static final int CAPACITY = 64;
     private final Entry[] entries = new Entry[CAPACITY];
     private int size;
-    private long accounts, symbols, orders;
-    long candidateAccounts, candidateSymbols, candidateOrders;
+    private long accounts, symbols;
+    private final org.eclipse.collections.impl.set.mutable.primitive.LongHashSet orders =
+            new org.eclipse.collections.impl.set.mutable.primitive.LongHashSet(CAPACITY * 20);
+    private final long[] candidateOrders = new long[20];
+    private int candidateOrderCount;
+    long candidateAccounts, candidateSymbols;
+
+    void resetCandidate(long accountMask) {
+        candidateAccounts = accountMask;
+        candidateSymbols = 0;
+        candidateOrderCount = 0;
+    }
+
+    void candidateOrder(long orderId) { candidateOrders[candidateOrderCount++] = orderId; }
 
     ClusterCommandWindow() {
         for (int i = 0; i < entries.length; i++) entries[i] = new Entry();
     }
 
     boolean conflicts() {
-        return (accounts & candidateAccounts) != 0 || (symbols & candidateSymbols) != 0
-                || (orders & candidateOrders) != 0;
+        if ((accounts & candidateAccounts) != 0 || (symbols & candidateSymbols) != 0) return true;
+        for (int i = 0; i < candidateOrderCount; i++) if (orders.contains(candidateOrders[i])) return true;
+        return false;
     }
 
     Entry add(ClientSession session, CoreMessage request, long timestamp, long position) {
@@ -30,7 +43,7 @@ final class ClusterCommandWindow {
         entry.position = position;
         accounts |= candidateAccounts;
         symbols |= candidateSymbols;
-        orders |= candidateOrders;
+        for (int i = 0; i < candidateOrderCount; i++) orders.add(candidateOrders[i]);
         return entry;
     }
 
@@ -59,7 +72,8 @@ final class ClusterCommandWindow {
             entry.sequence = entry.timestamp = entry.position = 0;
         }
         size = 0;
-        accounts = symbols = orders = 0;
+        accounts = symbols = 0;
+        orders.clear();
     }
 
     static final class Entry {
