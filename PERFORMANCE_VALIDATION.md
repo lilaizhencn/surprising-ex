@@ -4700,3 +4700,15 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 正确性门槛沿用工具资金/状态终检：offered=terminal、unfinished0、peak<=256、实际fills=cycle*5120、资金差0、各用户非负、零售密度/HFT持仓/冻结预留/亏损闭环正确，所有业务错误/未知/超时判失败。30秒客户端/回调deadline不放宽；各业务六分位和吞吐仅诊断、不设CPU饱和或吞吐门槛。每轮最长600秒，异常立即收集线程/日志并停止本轮，区分资源不足与代码缺陷；修复后必须新目录/新seed/新预锁重跑，不能覆盖失败记录。
 - 每轮首次正式progress后，对三Core启动30秒profile+phases MethodTiming JFR、load普通profile，maxsize128m；保存JFR/settings/summary、GC/NMT、进程及vm_stat/swap采样。JFR不完整或DataLoss则该采样不用于归因，正确性结果独立保留。采集工具写在新artifact目录，未向repo新增scripts/docs。
 - 每轮正常完成后停止三Core，再用相同数据目录重新启动，通过mixed-verify-only及该轮实际totalCycles做Archive回放后资金/持仓/冻结/哈希核对；不重复setup或重新发交易。结束后只停止本次创建的本机进程，保留数据和日志，不影响用户其他进程。artifact `/Users/atomex/Desktop/surprising/gcp-validation/2026-09-08-owner-optimization/local-cluster`。这不是完整故障注入矩阵，也不验证WS/Kafka外部推送。
+
+### 本机两轮压力与重启回放结果
+
+- 使用已推送源码32a515c3，tools打包通过（package.txt）；实际运行tools.jar SHA256为b236cfad280e0dd01d960a856a04ecf72475319a354955d24a107d59e5922295。两个场景均为LINEAR_PERPETUAL，六产品线覆盖来自前述功能测试，不能把本次网络压力结果扩大成六产品线逐一压测通过。
+- LM full mixed实际60.254秒：1,332,876 terminal业务项、146,060 terminal Core命令、312,320 fills，分别22,121.028项/s、2,424.080命令/s、5,183.408 fills/s；61测量/62总cycle，1952查询，含预热1984次触发执行。各类型最大p99为238,944us。offered=terminal、unfinished0、peak256、资金差0，人口/持仓/冻结预留及亏损闭环终检PASS。三节点停止并从原日志重新启动后，62 cycle核对PASS，businessHash仍为3adae03f6df00ab2。
+- LT trading-stream实际120.401秒：4,501,375 terminal业务项、454,527 terminal Core命令、1,064,960 fills，分别37,386.421项/s、3,775.099命令/s、8,845.085 fills/s；208测量/222总cycle，测量查询/触发执行0。各类型最大p99为209,977us。offered=terminal、unfinished0、peak256、资金差0，状态终检PASS；同目录三节点重启回放222 cycle核对PASS，businessHash仍为3c2a38ce0726e5da。
+- 合计5,834,251业务项、600,587 Core命令、1,377,280 fills。本轮未发现新的交易业务错误，无需追加业务代码修复；这是有限时长和既定样本下的结果，不是无bug证明。回放核对通过新leader查询验证恢复后业务状态，没有逐个直连三个副本核对独立hash，也未执行强杀/网络分区等完整故障矩阵。
+- 两轮各四份JFR均完整30秒、DataLoss0。LT node0记录91,823次processCommittedRequest、460,576次commitReadyMatching、3,757,004次idleCommand；平均每个回调约5.016次完整pump和40.916次idle调用，表明等待循环不再每次执行完整pump。方法有嵌套且含等待墙钟，不把累计时长相加，也不把该计数当作CPU有效工作率或跨机器性能提升。OrderReservation内部金额更新仍分配不可变对象，不称零分配。
+- 回放新leader node1两轮均出现一次Aeron `quorum position went backwards` WARN，LM leaderCommitPosition=138739008、LT=471083840，quorumPosition均为0。警告发生在回放核对完成之前，不能归为最后停机噪声。核对实际运行JAR的ConsensusModuleAgent字节码（consensus-bytecode.txt）：updateLeaderPosition在quorumPosition低于已有commitPosition时记录告警，并使用proposeMaxRelease更新本地commitPosition；警告本身不能证明已提交业务状态回滚。两轮资金与恢复hash通过，但未采集告警瞬间的各follower位置，尚不能确定quorum估计降为0的完整原因，保留观察项，未屏蔽日志或改写Aeron提交语义。另有旧错误文件的log recording stopped: eos=true发生在前一组Core收到停止信号时，与上述回放WARN分开记录。
+- 本机运行中swap使用约增至3383MiB，同机IDE/浏览器及四JVM资源竞争存在；本次速率仅作诊断，不与此前独立云三节点结果比较，也不宣称吞吐上限或无性能回退。全量业务六分位、运行参数、JFR/GC/NMT、vm_stat/swap及进程采样保存在artifact，results.json汇总原始日志结果。
+- LM完成回放于2026-09-08T02:43:46Z，LT于02:48:58Z；02:48:58Z本次所有本机子进程均已停止。每轮3个运行Core及3个回放Core由SIGTERM退出（143），load及verify均正常退出0，processes-final.json与stop.txt留证。云VM没有启动。最终记录只追加本文件，不重新执行已通过的Java测试。
+- 证据目录SHA256SUMS最终覆盖173个文件、2,819,675,177 bytes，manifest SHA256为0d2196e95bbcc7582b4451eb57d36660735c0dc79f9b11ffbeffb08d5b6f506c；包含前述测试/打包日志及本机原始日志、JFR和持久化数据，未修改上一轮云测试artifact。
