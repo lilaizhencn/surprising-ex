@@ -98,6 +98,59 @@ class ClusterCommandPipelineTest {
         }
     }
 
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void cancellationBehindSlowIndependentPlaceAdmissionResumesInSubmissionOrder(ProductLine product) throws Exception {
+        try (Fixture f = new Fixture(product); Fixture serial = new Fixture(product)) {
+            serial.applyAll(f.setup());
+            long other = disjointUser(11);
+            long restingId = disjointOrder(101);
+            CoreMessage resting = f.place(other, disjointSymbol("BTC-USDT"), restingId, 80, 1, CoreOrderSide.BUY);
+            f.apply(resting); serial.apply(resting);
+            CoreMessage place = f.place(11, "BTC-USDT", 101, 80, 1, CoreOrderSide.BUY);
+            CoreMessage cancel = f.cancel(other, restingId);
+            var runtimeField = CoreProbeState.class.getDeclaredField("runtimePlaceOrderState");
+            runtimeField.setAccessible(true);
+            Object runtime = runtimeField.get(f.service.state());
+            var workersField = runtime.getClass().getDeclaredField("laneWorkers");
+            workersField.setAccessible(true);
+            Object[] workers = (Object[]) workersField.get(runtime);
+            CountDownLatch entered = new CountDownLatch(workers.length), release = new CountDownLatch(1);
+            Class<?> commandClass = Class.forName("com.surprising.aeron.service.state.SettlementLaneWorker$Command");
+            var submit = workers[0].getClass().getDeclaredMethod("submit", commandClass);
+            submit.setAccessible(true);
+            try {
+                for (Object worker : workers) {
+                    Object command = Proxy.newProxyInstance(commandClass.getClassLoader(), new Class<?>[]{commandClass},
+                            (p, method, args) -> {
+                                entered.countDown();
+                                if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("test lane timeout");
+                                return null;
+                            });
+                    submit.invoke(worker, command);
+                }
+                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                f.send(place); f.send(cancel);
+                assertThat(f.service.commandWindowSize()).isEqualTo(2);
+                assertThat(f.service.state().pendingMatching(f.service.state().matchingSequence(cancel.header().commandId()))
+                        .isMatchingSubmitted()).isFalse();
+            } finally { release.countDown(); }
+            var pending = f.service.state().pendingMatching(f.service.state().matchingSequence(cancel.header().commandId()));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (!pending.isMatchingSubmitted() && System.nanoTime() < deadline) {
+                f.service.state().drainMatchingCompletions();
+                Thread.onSpinWait();
+            }
+            assertThat(pending.isMatchingSubmitted()).as("deferred cancellation must resume after place admission").isTrue();
+            f.tick(); serial.apply(place); serial.apply(cancel);
+            assertThat(f.hash()).isEqualTo(serial.hash());
+            assertThat(f.responses).allSatisfy(r -> assertThat(r.status()).isEqualTo(ResponseStatus.APPLIED));
+            try (CoreProbeState restored = CoreProbeState.fromSnapshot(product, f.service.captureSnapshot(700))) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(f.hash());
+            }
+        }
+    }
+
     @Test
     void differentSymbolsSharingMakerAccountFenceBeforeFurtherAdmission() {
         try (Fixture live = new Fixture(ProductLine.SPOT); Fixture serial = new Fixture(ProductLine.SPOT)) {

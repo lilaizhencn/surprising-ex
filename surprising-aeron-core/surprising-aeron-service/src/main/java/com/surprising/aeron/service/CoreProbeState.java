@@ -3124,6 +3124,13 @@ public final class CoreProbeState implements AutoCloseable {
                 PlaceBatchAdmissionEvent batchAdmission = orderBatch == null
                         ? null : orderBatch.placeBatchAdmissionEvent;
                 if (admission == null && batchAdmission == null) {
+                    // A prepared cancel/control command may have waited behind a place's
+                    // asynchronous Lane admission. Resume it at the same shard submission
+                    // head; it has no admission notification of its own to wake us later.
+                    if (orderBatch == null && !deferredMatching.containsKey(pending.sequence())) {
+                        submitMatching(pending);
+                        if (pending.isMatchingSubmitted()) continue;
+                    }
                     placeAdmissionReadyShardMask &= ~shardBit;
                     break;
                 }
