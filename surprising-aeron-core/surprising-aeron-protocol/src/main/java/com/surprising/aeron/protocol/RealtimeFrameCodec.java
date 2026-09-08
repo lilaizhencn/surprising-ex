@@ -10,6 +10,28 @@ public final class RealtimeFrameCodec {
     private static final int MAGIC = 0x52544d31;
     public static final int MAX_FRAME_BYTES = 1_048_576;
     private RealtimeFrameCodec() {}
+
+    /** Encode an order payload in its final envelope; no intermediate payload or text arrays escape. */
+    public static byte[] encodeOrder(CoreOrderStateView order, long sequence, int ordinal,
+                                     long timestamp, long snapshotId) {
+        int payloadLength = CoreStateQueryCodec.encodedOrderStateLength(order);
+        if (order.productLine() == null || order.userId() < 0 || sequence < 0 || ordinal < 0
+                || timestamp < 0 || snapshotId < 0) {
+            throw new IllegalArgumentException("invalid realtime frame");
+        }
+        String entityId = Long.toString(order.orderId());
+        int symbolLength = CoreStateQueryCodec.utf8Length(order.symbol());
+        int length = Math.addExact(64, Math.addExact(payloadLength, symbolLength + entityId.length()));
+        if (length > MAX_FRAME_BYTES) throw new IllegalArgumentException("realtime frame too large");
+        ByteBuffer output = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
+        output.putInt(MAGIC).putInt(1).putInt(order.productLine().ordinal()).putInt(RealtimeFrame.Kind.ORDER.ordinal());
+        output.putLong(order.userId()).putLong(sequence).putInt(ordinal).putLong(timestamp).putLong(snapshotId);
+        CoreStateQueryCodec.putText(output, order.symbol(), false);
+        CoreStateQueryCodec.putText(output, entityId, false);
+        output.putInt(payloadLength);
+        CoreStateQueryCodec.writeOrderState(output, order);
+        return output.array();
+    }
     public static byte[] encode(RealtimeFrame frame) {
         return encode(frame.productLine(), frame.kind(), frame.userId(), frame.sequence(), frame.ordinal(),
                 frame.timestamp(), frame.snapshotId(), frame.symbol(), frame.entityId(), frame.payloadUnsafe());

@@ -2665,7 +2665,7 @@ public final class CoreProbeState implements AutoCloseable {
                 throw new CoreStateRejectedException("INVALID_COMMAND",
                         "risk scan continuation exceeds current control");
             }
-            var scan = runtimePlaceOrderState.firstIncompleteRiskScan();
+            var scan = runtimePlaceOrderState.firstRiskIncompleteScan();
             var continuation = command.riskScanContinuation();
             if (scan == null
                     || !runtimePlaceOrderIdentities.symbol(scan.symbolId()).equals(continuation.symbol())
@@ -4327,19 +4327,18 @@ public final class CoreProbeState implements AutoCloseable {
         commandLiquidationBatchResult = new CoreLiquidationBatchResultView(batch.actions().size(), applied, pending,
                 obsolete, processedOrders, 0);
         if (batch.riskScanContinuation() != null) {
-            var scan = runtimePlaceOrderState.firstIncompleteRiskScan();
+            var scan = runtimePlaceOrderState.firstRiskIncompleteScan();
             var continuation = batch.riskScanContinuation();
             if (scan != null
                     && runtimePlaceOrderIdentities.symbol(scan.symbolId()).equals(continuation.symbol())
                     && scan.priceSequence() == continuation.priceSequence()
                     && scan.lastUserId() == continuation.lastUserId()) {
                 long beforeRevision = runtimePlaceOrderState.revision();
-                RuntimeDerivativeRiskProcessor.applyContinuationRuntime(batch.maxRiskScanUsers(),
-                        scan.symbolId(), positionUserIndex, runtimePlaceOrderState,
-                        runtimePlaceOrderIdentities);
+                int riskWork = RuntimeDerivativeRiskProcessor.continueRiskBudget(batch.maxRiskScanUsers(),
+                        positionUserIndex, runtimePlaceOrderState, runtimePlaceOrderIdentities);
                 if (runtimePlaceOrderState.revision() != beforeRevision) refreshSnapshotProjection();
                 commandLiquidationBatchResult = new CoreLiquidationBatchResultView(batch.actions().size(), applied,
-                        pending, obsolete, processedOrders, batch.maxRiskScanUsers());
+                        pending, obsolete, processedOrders, riskWork);
             }
         }
     }
@@ -5621,8 +5620,8 @@ public final class CoreProbeState implements AutoCloseable {
                 long beforeRevision = runtimePlaceOrderState.revision();
                 int completedRiskWork = 0;
                 if (!activeScan.riskComplete()) {
-                    completedRiskWork = RuntimeDerivativeRiskProcessor.applyContinuationRuntime(command.maxUsers(),
-                            activeScan.symbolId(), positionUserIndex,
+                    completedRiskWork = RuntimeDerivativeRiskProcessor.continueRiskBudget(command.maxUsers(),
+                            positionUserIndex,
                             runtimePlaceOrderState, runtimePlaceOrderIdentities);
                 }
                 if (runtimePlaceOrderState.revision() != beforeRevision) {

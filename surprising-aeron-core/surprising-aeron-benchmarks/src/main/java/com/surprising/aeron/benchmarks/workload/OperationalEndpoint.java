@@ -41,6 +41,26 @@ final class OperationalEndpoint implements AutoCloseable {
         return send(type,user,payload).join();
     }
 
+    CoreLiquidationBatchResultView liquidationBatch(CoreLiquidationWorkView work, int maxRiskScanUsers) {
+        var command = ExecuteLiquidationBatchCommand.fromWork(work, 0, maxRiskScanUsers);
+        long start = System.nanoTime();
+        var response = client.commandAsync(CoreMessageType.EXECUTE_LIQUIDATION_BATCH,
+                new UUID(source, ++request), 0, TradingCommandCodec.encodeExecuteLiquidationBatch(command)).join();
+        if (response.commandStatus() != ResponseStatus.APPLIED) {
+            // A queried continuation can expire while prices advance; re-query, never retry the old token.
+            if (command.riskScanContinuation() != null && response.resultCode() == CoreResultCode.INVALID_COMMAND) {
+                owner.record("LIQUIDATION_BATCH_REQUERY", start, System.nanoTime());
+                return null;
+            }
+            throw new IllegalStateException("operational liquidation batch rejected: " + response.resultCode());
+        }
+        owner.record(CoreMessageType.EXECUTE_LIQUIDATION_BATCH.name(), start, System.nanoTime());
+        owner.recordBatchItems(start, command.actions().size()+(command.riskScanContinuation()==null?0:1));
+        var result = CoreLiquidationBatchResultCodec.decode(response.data());
+        if (result.riskScanContinuedUsers() > 0) owner.record("RISK_CONTINUATION_CONFIRMED", start, System.nanoTime());
+        return result;
+    }
+
     CoreResponse query(CoreMessageType type,long user,byte[] payload) {
         long start=System.nanoTime();
         var response=client.query(type,new UUID(source,++request),user,payload);

@@ -12,7 +12,7 @@ final class OperationalLifecycle implements AutoCloseable {
     private final OperationalEndpoint endpoint;
     private final ClusterOperationalSideLoad owner;
     private final long maker,user,riskMaker,victim;
-    private long id,activeSequence,riskSequence,fundingId=1,deposits,cycles;
+    private long id,activeSequence,riskSequence,fundingId=1,deposits,cycles,nextRiskScanAtNanos;
 
     OperationalLifecycle(long seed,ClusterOperationalSideLoad owner) {
         this.owner=owner;
@@ -121,18 +121,23 @@ final class OperationalLifecycle implements AutoCloseable {
         long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(30);
         long liquidationId=0;
         while(liquidationId==0) {
+            if(System.nanoTime()>deadline)throw new IllegalStateException("liquidation starved by concurrent risk work");
             var work=work(CoreLiquidationWorkView.Purpose.EXECUTION);
             var action=work.actions().stream().filter(a->a.userId()==victim).findFirst();
-            if(action.isPresent()) {
-                var a=action.get();liquidationId=a.liquidationId();
-                endpoint.command(CoreMessageType.EXECUTE_LIQUIDATION_BATCH,0,TradingCommandCodec.encodeExecuteLiquidationBatch(
-                        new ExecuteLiquidationBatchCommand(List.of(new ExecuteLiquidationBatchAction(a.liquidationId(),a.userId(),a.symbol(),
-                                a.instrumentChangeId(),a.triggerPriceSequence(),a.markPriceTicks(),a.cursorOrderId())),
-                                ExecuteLiquidationBatchCommand.MAX_CANCEL_ORDERS,0,null,0)));
-            }else {
-                if(System.nanoTime()>deadline)throw new IllegalStateException("liquidation starved by concurrent risk work");
-                endpoint.command(CoreMessageType.CONTINUE_RISK_SCAN,0,
-                        TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64)));
+            int scanBudget=0;
+            if(work.riskScanPending()) {
+                var control=CoreRiskScanControlCodec.decodeView(endpoint.query(
+                        CoreMessageType.RISK_SCAN_CONTROL_QUERY,0,new byte[0]).data());
+                long now=System.nanoTime();
+                if(control.enabled() && now>=nextRiskScanAtNanos) {
+                    scanBudget=control.scanBatchSize();
+                    nextRiskScanAtNanos=Math.addExact(now,TimeUnit.MILLISECONDS.toNanos(control.scanDelayMs()));
+                }
+            }
+            if(!work.actions().isEmpty() || scanBudget>0) {
+                var result=endpoint.liquidationBatch(work,scanBudget);
+                if(result!=null && result.pendingActions()==0 && result.obsoleteActions()==0
+                        && action.isPresent()) liquidationId=action.get().liquidationId();
             }
         }
         long expectedId=liquidationId;

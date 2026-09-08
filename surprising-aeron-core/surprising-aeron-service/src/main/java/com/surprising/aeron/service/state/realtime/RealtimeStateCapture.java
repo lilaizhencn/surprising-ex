@@ -382,12 +382,8 @@ public final class RealtimeStateCapture {
     }
 
     public void order(CoreOrderStateView o) {
-        emit(
-                RealtimeFrame.Kind.ORDER,
-                o.userId(),
-                o.symbol(),
-                Long.toString(o.orderId()),
-                CoreStateQueryCodec.encodeOrderState(o));
+        if (!active()) return;
+        outbox.stage(RealtimeFrameCodec.encodeOrder(o, sequence, ordinal++, timestamp, snapshotId));
     }
 
     public void trigger(CoreTriggerOrderState t) {

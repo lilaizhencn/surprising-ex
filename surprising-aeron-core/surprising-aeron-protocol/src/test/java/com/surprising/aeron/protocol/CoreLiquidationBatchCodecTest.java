@@ -13,6 +13,23 @@ import org.junit.jupiter.api.Test;
 class CoreLiquidationBatchCodecTest {
 
     @Test
+    void buildsProductionBatchWithExactContinuationAndActionFields() {
+        var action = new CoreLiquidationActionView(7,11,"BTC-USDT",CoreMarginMode.CROSS,
+                CorePositionSide.NET,3,19,10,5,60_000,"ORDERED",91);
+        var cursor = new CoreRiskScanContinuation("ETH-USDT",23,41);
+        var work = new CoreLiquidationWorkView(com.surprising.product.api.ProductLine.LINEAR_PERPETUAL,
+                7,true,cursor,List.of(action),List.of());
+        var expected = new ExecuteLiquidationBatchCommand(List.of(action(7,11,"BTC-USDT")),
+                ExecuteLiquidationBatchCommand.MAX_CANCEL_ORDERS,3_000,cursor,64);
+        assertThat(ExecuteLiquidationBatchCommand.fromWork(work,3_000,64)).isEqualTo(expected);
+        assertThat(ExecuteLiquidationBatchCommand.fromWork(work,3_000,0).riskScanContinuation()).isNull();
+        var scanOnly = new CoreLiquidationWorkView(work.productLine(),0,true,cursor,List.of(),List.of());
+        assertThat(ExecuteLiquidationBatchCommand.fromWork(scanOnly,0,64).actions()).isEmpty();
+        assertThatThrownBy(() -> ExecuteLiquidationBatchCommand.fromWork(scanOnly,0,0))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void roundTripsCanonicalBatchAndResult() {
         ExecuteLiquidationBatchCommand command = command(512);
 

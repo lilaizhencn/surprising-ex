@@ -56,18 +56,12 @@ public class LiquidationAeronGateway implements AutoCloseable {
     public CoreLiquidationBatchResultView executeBatch(CoreLiquidationWorkView work,
                                                        long liquidationFeeRatePpm,
                                                        int maxRiskScanUsers) {
-        if (work == null) throw new IllegalArgumentException("liquidation work is required");
-        List<ExecuteLiquidationBatchAction> actions = work.actions().stream()
-                .map(action -> new ExecuteLiquidationBatchAction(action.liquidationId(), action.userId(), action.symbol(),
-                        action.instrumentChangeId(), action.triggerPriceSequence(), action.markPriceTicks(),
-                        action.cursorOrderId()))
-                .toList();
-        boolean continueRiskScan = work.riskScanPending() && maxRiskScanUsers > 0;
-        var command = new ExecuteLiquidationBatchCommand(actions, ExecuteLiquidationBatchCommand.MAX_CANCEL_ORDERS,
-                liquidationFeeRatePpm, continueRiskScan ? work.riskScanContinuation() : null,
-                continueRiskScan ? maxRiskScanUsers : 0);
+        var command = ExecuteLiquidationBatchCommand.fromWork(work, liquidationFeeRatePpm, maxRiskScanUsers);
         byte[] payload = TradingCommandCodec.encodeExecuteLiquidationBatch(command);
-        var response = clients.command(CoreMessageType.EXECUTE_LIQUIDATION_BATCH, stableBatchCommandId(payload), 0,
+        // A risk page can advance within the same lastUserId (lane/position cursor).
+        // Each new scheduling attempt is a new command; transport retries retain this id.
+        UUID commandId = command.riskScanContinuation() == null ? stableBatchCommandId(payload) : UUID.randomUUID();
+        var response = clients.command(CoreMessageType.EXECUTE_LIQUIDATION_BATCH, commandId, 0,
                 payload);
         if (response.commandStatus() != ResponseStatus.APPLIED && response.commandStatus() != ResponseStatus.DUPLICATE) {
             throw new IllegalStateException(response.resultCode() + ": Aeron liquidation batch rejected");

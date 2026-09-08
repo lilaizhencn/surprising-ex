@@ -4871,3 +4871,12 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - OS37资金差0、703交易cycles，后台6生命周期与净注资3000000750核对通过。原云端日志三节点重启后仍为hash d435c2835e720c7a、703cycles、fundsDiff0（os37-replay-verify/result.txt）。调度饥饿回归及本轮512档均通过，但测量期完整运营闭环最长29.561s，强平/保险/ADL闭环最长28.588s，仍需改进调度延迟；不能将复合闭环当单条命令p99。
 - OS37查询READY6793/120115=5.66%，其余113322 unavailable，没有回退查Core；读模型可用率仍不合格。当前结论为固定真实三节点、单matcher/四Lane混合场景的吞吐平台诊断与正确性验证，不能宣称完整生产性能验收。原始命令、JAR、日志、JMH JSON、JFR、OS监控与本机恢复证据均在上述artifact根目录。
 - 所有轮次与原日志恢复结束后，finally停止surprising-core-0/1/2及surprising-load，四台状态全部TERMINATED，见instances-final.json；编排退出0。后续未经用户要求不再开机。
+
+### 直接订单信封与风险预算：OS38–OS41采集前锁定
+
+- 当前master：订单payload直接编码进最终实时信封（原协议字节不变）；强平工作查询、批次校验和执行统一公平选择；一次续扫在原总预算内推进多个币对，空检查也消耗预算。生产网关与独立压测共享fromWork命令构造，精确价格/游标拒绝保持；新的风险调度使用新commandId，单次传输重试保留原ID。风险批次读取Core扫描控制和延迟，不再在候选缺失时发送无令牌的独立CONTINUE_RISK_SCAN；过期拒绝重新查询、单独计数，不延长30s候选期限。复合业务计数按批次actions和续扫业务项展开，与Core消息分开。
+- 对照commit不适用，仅当前master同一构建，commit/JAR SHA留存。GCP asia-southeast1-b独立三Core+load，n2-custom-8-16384（8vCPU16GiB/4物理核SMT）、HotSpot25，Core4GiB/load2GiB、ZGC/NMT、1matcher/4Lane、SHARED_NETWORK、YIELDING、settlement spin0。仍为连续异步MATCH_STREAM混合单/撤单/batch20、1773总用户/258总symbol、独立行情16窗口/运营控制/1000每秒Valkey查询；普通交易不逐批排空。复合路径更改已明确，不能与旧场景比较性能收益或当生产微服务全栈测试。
+- OS38 seed99401窗口256、OS39 seed99402窗口512，均30s预热+60s测量。只有512的有效终态业务速率较本轮256增加至少5%且正确性/延迟通过，才执行OS40 seed99403窗口1024同配置；OS41 seed99404取有效最快窗口30+120s无JMH/JFR，然后原云端日志三节点重启核对业务hash/资金。阶段后排空和核对作为冷却；每档新数据目录，失败停止加档，finally停四VM并核实TERMINATED。
+- 前三档真实外部ClusterOperationalBenchmark，JMH SingleShotTime -f0 -wi0 -i1 -prof gc（每档独立JVM，一操作为整轮，仅诊断；load B/op不作为Core业务分配），Core phases.jfc/load profile、ThreadAllocationStatistics稳定采样；全部命令由round.py保存。稳定CPU/JFR分组owner/matcher/Lane，不把等待自旋算有效95%。保存全程JFR视图、SHA/大小、GC/NMT/OS和稳定窗口；沿用上一轮JVM详细参数和监控配置，不作旧版本对照。
+- 开机硬门槛：本机受影响模块测试、六产品三JVM功能/日志恢复/快照恢复通过。各档要求三Core存活、offered=terminal业务项与消息、unfinished0、资金差0、全部运营覆盖（包含实际RISK_CONTINUATION_CONFIRMED）、单交易命令p99<1s；带采样四JFR非空/DataLoss0、无明显swap/throttling。查询READY既有缺口、风险复合延迟和完整分段延迟/长期泄漏证据另报；不得宣称完整生产验收或绝对算力上限。
+- artifact=/Users/atomex/Desktop/surprising/gcp-validation/2026-09-08-direct-envelope-risk-budget。本机只运行构建、功能和离线分析；不执行独立本机微基准。风险预算及订单直接信封由更新的真实Cluster JMH业务路径覆盖。

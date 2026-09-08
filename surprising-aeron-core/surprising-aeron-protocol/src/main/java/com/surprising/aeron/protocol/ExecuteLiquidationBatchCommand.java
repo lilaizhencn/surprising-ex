@@ -14,6 +14,20 @@ public record ExecuteLiquidationBatchCommand(
     public static final int MAX_CANCEL_ORDERS = 1_024;
     public static final int MAX_RISK_SCAN_USERS = 4_096;
 
+    /** Preserve the exact queried continuation when combining execution and bounded risk work. */
+    public static ExecuteLiquidationBatchCommand fromWork(CoreLiquidationWorkView work,
+                                                          long liquidationFeeRatePpm, int maxRiskScanUsers) {
+        if (work == null) throw new IllegalArgumentException("liquidation work is required");
+        List<ExecuteLiquidationBatchAction> actions = work.actions().stream()
+                .map(action -> new ExecuteLiquidationBatchAction(action.liquidationId(), action.userId(), action.symbol(),
+                        action.instrumentChangeId(), action.triggerPriceSequence(), action.markPriceTicks(),
+                        action.cursorOrderId()))
+                .toList();
+        boolean continueScan = work.riskScanPending() && maxRiskScanUsers > 0;
+        return new ExecuteLiquidationBatchCommand(actions, MAX_CANCEL_ORDERS, liquidationFeeRatePpm,
+                continueScan ? work.riskScanContinuation() : null, continueScan ? maxRiskScanUsers : 0);
+    }
+
     public ExecuteLiquidationBatchCommand {
         if (actions == null || actions.size() > MAX_ACTIONS
                 || maxCancelOrders < 1 || maxCancelOrders > MAX_CANCEL_ORDERS

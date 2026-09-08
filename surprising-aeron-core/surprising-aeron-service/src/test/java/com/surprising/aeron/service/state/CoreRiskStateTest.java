@@ -221,6 +221,32 @@ class CoreRiskStateTest {
     }
 
     @Test
+    void sharedBudgetFindsLiquidationPastEmptySymbolsWithoutChangingFunds() {
+        var state = reducer.upsertInstrument(TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL), instrument("BTC-USDT"));
+        state = reducer.upsertInstrument(state, instrument("DOGE-USDT"));
+        state = reducer.upsertInstrument(state, instrument("ETH-USDT"));
+        state = reducer.adjustBalance(state, 7, new BalanceAdjustmentCommand("USDT", 100));
+        state = withPosition(state, new CorePositionState("ETH-USDT", "USDT", 1, 10, 100, 1000, 0, 100));
+        long funds = RollingFundsStateHash.compute(state);
+        var ids = new RuntimeIdentityRegistry();
+        var runtime = RuntimeStateProjector.project(state, ids);
+        var positions = new PositionUserIndex(state, ids, runtime.topology());
+        for (String symbol : List.of("BTC-USDT", "DOGE-USDT", "ETH-USDT"))
+            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand(symbol, 1, 1, 1, 1000), runtime, ids);
+        int work = RuntimeDerivativeRiskProcessor.continueRiskBudget(64, positions, runtime, ids);
+        assertThat(work).isBetween(3,64);
+        assertThat(runtime.firstRiskIncompleteScan()).isNull();
+        var result = RuntimeStateMaterializer.materialize(runtime, ids);
+        assertThat(RollingFundsStateHash.compute(result)).isEqualTo(funds);
+        assertThat(result.riskState().liquidations().values()).anySatisfy(liquidation -> {
+            assertThat(liquidation.userId()).isEqualTo(7);
+            assertThat(liquidation.symbol()).isEqualTo("ETH-USDT");
+        });
+        var restored = TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(result), result.productLine());
+        assertThat(restored.businessStateHash()).isEqualTo(result.businessStateHash());
+    }
+
+    @Test
     void markPriceBeyondHighestRiskBracketStillProducesLiquidationSnapshot() {
         UpsertInstrumentCommand command = new UpsertInstrumentCommand("BTC-USDT", 1,
                 ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,

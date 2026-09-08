@@ -282,7 +282,7 @@ public final class CoreStateQueryCodec {
         output.putLong(state.revision());
     }
 
-    private static void putText(java.nio.ByteBuffer output, String value, boolean optional) {
+    static void putText(java.nio.ByteBuffer output, String value, boolean optional) {
         if (value == null) throw new IllegalArgumentException(optional
                 ? "optional query text is required" : "query text is required");
         // The caller sizes the complete message first. Backfill the byte count while

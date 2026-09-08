@@ -3,6 +3,21 @@ import com.surprising.product.api.ProductLine;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 class RealtimeFrameCodecTest {
+ @Test void orderEnvelopeMatchesExistingWireFormatForAllProductsAndUtf8() {
+  for(var product:ProductLine.values()) for(String text:new String[]{"BTC-USDT","币对😀","bad\uD800", "x".repeat(64)}) {
+   var order=new CoreOrderStateView(Long.MAX_VALUE,product,42,text,3,CoreOrderSide.SELL,
+     100,2,1,1,false,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,
+     CoreTimeInForce.GTC,false,"客户😀",new java.util.UUID(1,2),0,0,1,2,3,"OPEN",9);
+   byte[] expected=RealtimeFrameCodec.encode(new RealtimeFrame(product,RealtimeFrame.Kind.ORDER,42,
+     Long.MAX_VALUE,31,123,4,text,Long.toString(order.orderId()),CoreStateQueryCodec.encodeOrderState(order)));
+   byte[] actual=RealtimeFrameCodec.encodeOrder(order,Long.MAX_VALUE,31,123,4);
+   assertThat(actual).containsExactly(expected);
+   assertThat(RealtimeFrameCodec.decode(actual).payload()).containsExactly(CoreStateQueryCodec.encodeOrderState(order));
+   actual[actual.length-1]^=1;
+   assertThat(RealtimeFrameCodec.encodeOrder(order,Long.MAX_VALUE,31,123,4)).containsExactly(expected);
+   assertThatThrownBy(()->RealtimeFrameCodec.encodeOrder(order,-1,0,0,0)).isInstanceOf(IllegalArgumentException.class);
+  }
+ }
  @Test void directEncodingPreservesWireBytesAndPayloadIsolation() {
   for(var p:ProductLine.values()) for(var k:RealtimeFrame.Kind.values()) {
    byte[] payload={1,2,3};

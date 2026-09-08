@@ -136,23 +136,13 @@ public final class RuntimeLiquidationQueryService {
             TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
             CoreLiquidationWorkView.Purpose purpose) {
         if (purpose != CoreLiquidationWorkView.Purpose.EXECUTION) return null;
-        RiskScanRuntime selected = null;
-        String selectedSymbol = null;
         var scans = runtime.riskScansForSnapshot();
         if (scans.size() > RuntimeOperationalQueryService.MAX_INDEX_SCAN) {
             throw new RuntimeOperationalQueryService.QueryTooLargeException();
         }
-        int[] symbolIds = scans.keySet().toArray();
-        java.util.Arrays.sort(symbolIds);
-        for (int symbolId : symbolIds) {
-            RiskScanRuntime candidate = scans.get(symbolId);
-            if (candidate != null && !candidate.riskComplete()) {
-                selected = candidate;
-                selectedSymbol = identities.symbol(symbolId);
-                break;
-            }
-        }
+        RiskScanRuntime selected = runtime.firstRiskIncompleteScan();
         return selected == null ? null
-                : new CoreRiskScanContinuation(selectedSymbol, selected.priceSequence(), selected.lastUserId());
+                : new CoreRiskScanContinuation(identities.symbol(selected.symbolId()),
+                        selected.priceSequence(), selected.lastUserId());
     }
 }

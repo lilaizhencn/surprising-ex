@@ -13,6 +13,7 @@ final class ClusterOperationalSideLoad implements AutoCloseable {
     private final AtomicReference<Throwable> failure = new AtomicReference<>();
     private final ConcurrentMap<String,Histogram> latency = new ConcurrentHashMap<>();
     private final AtomicLong fills=new AtomicLong(),lastTerminal=new AtomicLong();
+    private final AtomicLong extraBatchItems = new AtomicLong();
     private final OperationalEndpoint prices;
     private final OperationalLifecycle lifecycle;
     private final OperationalUserQueries queries;
@@ -86,6 +87,9 @@ final class ClusterOperationalSideLoad implements AutoCloseable {
     void recordFills(long start,long count) {
         if(start>=measurementStart && start<measurementEnd)fills.addAndGet(count);
     }
+    void recordBatchItems(long start, int items) {
+        if (start>=measurementStart && start<measurementEnd) extraBatchItems.addAndGet(Math.max(0,items-1));
+    }
     void beginMeasurement(long now){measurementStart=now;}
     void endMeasurement(long now){measurementEnd=now;}
     void assertHealthy(){Throwable t=failure.get();if(t!=null)throw new IllegalStateException("operational actor failed",t);}
@@ -116,7 +120,7 @@ final class ClusterOperationalSideLoad implements AutoCloseable {
         }
         lifecycle.print();queries.print();
         for(String required:List.of("MANUAL_CLOSE_CONFIRMED","TRIGGER_CLOSE_CONFIRMED",
-                "BANKRUPTCY_INSURANCE_ADL_CONFIRMED","CONTINUE_RISK_SCAN","APPLY_FUNDING","VALKEY_QUERY_READY")) {
+                "BANKRUPTCY_INSURANCE_ADL_CONFIRMED","RISK_CONTINUATION_CONFIRMED","APPLY_FUNDING","VALKEY_QUERY_READY")) {
             if(!latency.containsKey(required) || latency.get(required).getTotalCount()==0)
                 throw new IllegalStateException("measured operational coverage missing: "+required);
         }
@@ -130,8 +134,8 @@ final class ClusterOperationalSideLoad implements AutoCloseable {
         }
         double seconds=Math.max(elapsed,lastTerminal.get()-measurementStart)/1e9;
         System.out.printf(Locale.ROOT,"operationalComposite=PASS terminalBusinessOperations=%d terminalCoreMessages=%d fills=%d elapsedSeconds=%.3f businessOpsPerSec=%.3f coreMessagesPerSec=%.3f fillsPerSec=%.3f unfinished=0%n",
-                tradingItems+commands,tradingMessages+commands,tradingFills+fills.get(),seconds,
-                (tradingItems+commands)/seconds,(tradingMessages+commands)/seconds,(tradingFills+fills.get())/seconds);
+                tradingItems+commands+extraBatchItems.get(),tradingMessages+commands,tradingFills+fills.get(),seconds,
+                (tradingItems+commands+extraBatchItems.get())/seconds,(tradingMessages+commands)/seconds,(tradingFills+fills.get())/seconds);
     }
     @Override public void close() {
         try {stop();}finally {queries.close();lifecycle.close();prices.close();}

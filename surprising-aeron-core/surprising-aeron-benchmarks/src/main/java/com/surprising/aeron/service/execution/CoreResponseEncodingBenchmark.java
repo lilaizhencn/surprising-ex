@@ -43,10 +43,7 @@ public class CoreResponseEncodingBenchmark {
 
     @Benchmark
     public byte[] encodeRealtimeOrder(RealtimeOrderState state) {
-        return com.surprising.aeron.protocol.RealtimeFrameCodec.encode(state.order.productLine(),
-                com.surprising.aeron.protocol.RealtimeFrame.Kind.ORDER, state.order.userId(), 47,
-                0, 1_001, 0, state.order.symbol(), "71",
-                com.surprising.aeron.protocol.CoreStateQueryCodec.encodeOrderState(state.order));
+        return com.surprising.aeron.protocol.RealtimeFrameCodec.encodeOrder(state.order, 47, 0, 1_001, 0);
     }
 
     @State(Scope.Thread)

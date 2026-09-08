@@ -131,6 +131,25 @@ public final class RuntimeDerivativeRiskProcessor {
         return completedWork;
     }
 
+    /** Owner-only shared budget. Charge empty symbol visits too, so empty scans cannot form an unbounded loop. */
+    public static int continueRiskBudget(int maxWork, PositionUserIndex positionUsers,
+                                         TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+        if (runtime == null || identities == null || positionUsers == null || maxWork <= 0 || maxWork > 4096) {
+            throw new IllegalArgumentException("invalid risk scan budget");
+        }
+        runtime.assertOwner();
+        if (!runtime.riskScanControl().enabled()) return 0;
+        int budget = Math.min(maxWork, runtime.riskScanControl().scanBatchSize());
+        int remaining = budget;
+        while (remaining > 0) {
+            RiskScanRuntime selected = runtime.firstRiskIncompleteScan();
+            if (selected == null) break;
+            int work = applyContinuationRuntime(remaining, selected.symbolId(), positionUsers, runtime, identities);
+            remaining -= Math.max(1, work);
+        }
+        return budget - remaining;
+    }
+
     public static void syncScanProgress(TradingCoreState source, TradingRuntimeState runtime,
                                         RuntimeIdentityRegistry identities) {
         if (source == null || runtime == null || identities == null) {
