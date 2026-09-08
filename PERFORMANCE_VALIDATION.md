@@ -4806,3 +4806,13 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - OS14未通过：预热期间三节点同在drainCommandWindow停滞，30秒超时退出；客户端ResultUnknown，该轮没有可引用吞吐。原因是已准备撤单在同matcher分片前置下单Lane准入期间延后提交，准入推进循环遇到没有准入事件的撤单时清除了ready标记，未重新提交。小样本复现六产品线全部失败，修复在submission head重新提交已准备的非batch命令，仍保留未准备deferred/batch屏障；168项相关检查通过，本机三节点六产品恢复矩阵重跑后才允许再次开机。四VM已确认TERMINATED，OS14原始JFR/日志和失败结果保留。
 - OS15预锁：OS14全部业务/JVM/JFR/硬件/256窗口/30+60秒及验收门槛不变，seed98002，新建operational-os15数据；执行当前master修复构建并保存SHA，不比较历史版本性能。除OS14门槛外关注混合下单撤单持续进展，测量后原数据重启hash/资金核对，再停止四VM。artifact同根目录，local-resume-fixed.txt、deferred-cancel-regression.txt、local-functional-resume/、os15/、os15-replay-verify/。
 - OS14补充：三个Core退出后的.jfr均为0字节，未得到有效Core录制；诊断依据为三节点异常栈及六产品确定性复现，不能引用该轮JFR作热点或分配结论。
+
+### OS15结果（四VM确认停止后）
+
+- 当前master 2c123e9b，JAR SHA256=e5fdd3cb59441d9b003f57510f3edfd0bea77d6719ac1cb10145d5351fe20f68；参数按预锁，三Core全程存活。交易终态3655680业务项/348160 Core消息，分别等于offered，unfinished0；60.204秒，60721.766 business ops/s、5783.025 Core messages/s、14457.563 fills/s。计入并发后台命令为3670954业务项/363434 Core消息，60.236秒，60942.685 business ops/s、6033.484 Core messages/s、14450.338 fills/s。带JFR诊断，不是无profiler上限或新旧版本收益结论。
+- 普通下单/撤单/批量下单/批量撤单p99分别47.513/102.301/100.859/73.072ms。三个Core窗口highWaterMark均15、停服务pending0，跨消息推进实际生效。交易业务项约95.24%来自batch，batch仍为屏障；完整159秒Leader记录含初始化/预热/终检：processIngress553969次平均168us，屏障processCommittedRequest290453次平均267us，idleCommand约29.7秒（按平均值估算）。这些是嵌套方法，不相加；尚不能证明有效业务计算95%饱和。
+- Leader core-2，07:05:10–07:05:40 UTC七个5秒CPU样本：owner平均99.86%（user71.8%、system28.06%），matcher15.8%，四Lane8.23–8.26%；不把yield/等待算成有效业务计算。全部四份JFR DataLoss0，原始文件SHA/大小见os15/jfr-manifest.json。Leader GC总pause0.953ms、p99/max0.0249ms；无采样到的monitor contention不能推断无等待。Safepoint视图出现Indefinite，不能据此量化总停顿。
+- 完整记录ThreadAllocation视图owner28.2GB（68.13%）、matcher4.9GB、各Lane约2.1GB；采样分配压力byte[]33.05%、long[]9.75%、Long5.37%，仍非零分配。包含初始化/查询/终检，不除以仅测量期业务量当bytes/op。NMT heap committed4GiB，Other9.2MB，GC committed末20MB/峰40.3MB；20项离线JFR视图已保存。稳定窗口精确分配率、对象/op、Direct/Mapped余额、长期live-set/native泄漏与正式三节点JMH仍未验收，不能称完整性能验收。
+- 资金差0、249交易cycles、36运营生命周期、netDeposits3000004500；测量期间33次主动/触发闭环、33次强平保险ADL闭环、33次资金费、100次风险续扫。整段生命周期p99约1.974s，是多命令闭环，不混作单命令p99。查询READY3305/60194=5.49%，READY p99585us，多数请求仍unavailable；该既有问题未解决，无Core fallback，不能称完整生产场景通过。
+- 原云端数据重启，等待本次进程回放并选主后，replay.py os15 verify退出0，fundsDiff0、249cycles、业务hash仍3763c800c4aa9edc，后台生命周期按原36cycles/注资参数核对。round清理已回收load unit打印not loaded，但随后的日志采集、断言、replay及finally均完成；编排总退出0。四VM最终全部TERMINATED（instances-os15-final.json），不再运行负载。
+- 本机最终168项针对性功能检查和六产品线三JVM交易/日志恢复/快照恢复均PASS，未本机压测；两个发现的缺陷均有先失败后通过的回归证据。artifact仍为2026-09-08-command-pipeline，os15/、os15-replay-verify/、local-resume-fixed.txt、local-functional-resume/；源码与测试已推送master。
