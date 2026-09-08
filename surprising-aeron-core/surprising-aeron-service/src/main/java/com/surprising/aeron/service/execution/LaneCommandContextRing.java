@@ -208,6 +208,13 @@ final class LaneCommandContextRing {
             expectedLaneMask = expectedMask;
         }
 
+        void includeControlLanes(long laneMask, long validLaneMask) {
+            if (matchingResult == null || completedLaneMask != 0 || (laneMask & ~validLaneMask) != 0) {
+                throw new IllegalStateException("invalid synchronous control lane participants");
+            }
+            expectedLaneMask |= laneMask;
+        }
+
         void completeLanes(long laneMask) {
             if (matchingResult == null
                     || (laneMask & ~expectedLaneMask) != 0

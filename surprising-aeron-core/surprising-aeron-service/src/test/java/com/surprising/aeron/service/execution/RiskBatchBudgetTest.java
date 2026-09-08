@@ -28,6 +28,13 @@ class RiskBatchBudgetTest {
                                 type.isOption()?0:-1,type.isOption()?100:0))));
                 applied(state, mark(line,symbol,1));
             }
+            for(long user:new long[]{7,8}) applied(state,command(line,CoreMessageType.ADJUST_BALANCE,user,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(type.isInverse()?"BTC":"USDT",1_000_000))));
+            for(long user:new long[]{7,8}) applied(state,command(line,CoreMessageType.PLACE_ORDER,user,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100+user,"SYM4-USDT",1,
+                            user==7?CoreOrderSide.SELL:CoreOrderSide.BUY,100,1,false,CoreMarginMode.CROSS,
+                            CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"risk-"+user))));
+            long funds=com.surprising.aeron.service.state.RollingFundsStateHash.compute(state.tradingState());
             var first=work(state,line);
             applied(state, batch(line,first,2));
             assertThat(state.tradingState().riskState().scans().values().stream()
@@ -40,10 +47,11 @@ class RiskBatchBudgetTest {
             assertThat(next.riskScanContinuation().symbol()).isNotEqualTo(first.riskScanContinuation().symbol());
             try(var restored=CoreProbeState.fromSnapshot(line,state.snapshot(500))) {
                 assertThat(work(restored,line).riskScanContinuation()).isEqualTo(next.riskScanContinuation());
-                var finish=batch(line,next,4);
+                var finish=batch(line,next,64);
                 applied(state,finish);applied(restored,finish);
                 assertThat(state.tradingState().riskState().scans().values()).allMatch(s->s.riskComplete());
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
+                assertThat(com.surprising.aeron.service.state.RollingFundsStateHash.compute(state.tradingState())).isEqualTo(funds);
             }
         }
     }
@@ -64,11 +72,14 @@ class RiskBatchBudgetTest {
                         :new ApplyMarkPriceCommand(symbol,1,100,priceSequence,TIME)));
     }
     private CoreMessage command(ProductLine line,CoreMessageType type,byte[] payload) {
+        return command(line,type,0,payload);
+    }
+    private CoreMessage command(ProductLine line,CoreMessageType type,long user,byte[] payload) {
         long seq=++sequence;
         var id=UUID.randomUUID();
         return new CoreMessage(type==CoreMessageType.LIQUIDATION_WORK_QUERY
-                ? CoreMessageHeader.query(type,id,line,CommandSource.OPERATIONS,982,seq,0,TIME+seq,seq)
-                : CoreMessageHeader.command(type,id,line,CommandSource.OPERATIONS,982,seq,0,TIME+seq,seq),payload);
+                ? CoreMessageHeader.query(type,id,line,CommandSource.OPERATIONS,982,seq,user,TIME+seq,seq)
+                : CoreMessageHeader.command(type,id,line,CommandSource.OPERATIONS,982,seq,user,TIME+seq,seq),payload);
     }
     private static CoreResponse apply(CoreProbeState state,CoreMessage message) {
         var response=state.apply(message);

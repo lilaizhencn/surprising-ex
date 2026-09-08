@@ -3847,7 +3847,7 @@ public final class CoreProbeState implements AutoCloseable {
                 }
                 case LIQUIDATION_BATCH -> {
                     var command = pending.decodedCommand().liquidationBatch();
-                    applyLiquidationBatch(command, matchingResult);
+                    applyLiquidationBatch(command, matchingResult, laneContext);
                 }
                 case SETTLEMENT -> {
                     var command = pending.decodedCommand().settlement();
@@ -4266,7 +4266,8 @@ public final class CoreProbeState implements AutoCloseable {
 
     private void applyLiquidationBatch(
             com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand batch,
-            com.surprising.aeron.service.matching.CoreMatchingResult matchingResult) {
+            com.surprising.aeron.service.matching.CoreMatchingResult matchingResult,
+            LaneCommandContextRing.Context laneContext) {
         if (!matchingResult.accepted()) {
             int obsolete = batch.actions().stream()
                     .map(action -> runtimePlaceOrderState.liquidation(action.liquidationId()))
@@ -4336,6 +4337,11 @@ public final class CoreProbeState implements AutoCloseable {
                 long beforeRevision = runtimePlaceOrderState.revision();
                 int riskWork = RuntimeDerivativeRiskProcessor.continueRiskBudget(batch.maxRiskScanUsers(),
                         positionUserIndex, runtimePlaceOrderState, runtimePlaceOrderIdentities);
+                if (riskWork > 0) {
+                    // These synchronous control mutations are additional to immutable matcher fanout.
+                    runtimePlaceOrderState.acceptChangedUserIds(userId -> laneContext.includeControlLanes(
+                            matchingAdapter.topology().accountLaneMask(userId), validAccountLaneMask()));
+                }
                 if (runtimePlaceOrderState.revision() != beforeRevision) refreshSnapshotProjection();
                 commandLiquidationBatchResult = new CoreLiquidationBatchResultView(batch.actions().size(), applied,
                         pending, obsolete, processedOrders, riskWork);

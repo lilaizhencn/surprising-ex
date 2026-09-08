@@ -4880,3 +4880,9 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 前三档真实外部ClusterOperationalBenchmark，JMH SingleShotTime -f0 -wi0 -i1 -prof gc（每档独立JVM，一操作为整轮，仅诊断；load B/op不作为Core业务分配），Core phases.jfc/load profile、ThreadAllocationStatistics稳定采样；全部命令由round.py保存。稳定CPU/JFR分组owner/matcher/Lane，不把等待自旋算有效95%。保存全程JFR视图、SHA/大小、GC/NMT/OS和稳定窗口；沿用上一轮JVM详细参数和监控配置，不作旧版本对照。
 - 开机硬门槛：本机受影响模块测试、六产品三JVM功能/日志恢复/快照恢复通过。各档要求三Core存活、offered=terminal业务项与消息、unfinished0、资金差0、全部运营覆盖（包含实际RISK_CONTINUATION_CONFIRMED）、单交易命令p99<1s；带采样四JFR非空/DataLoss0、无明显swap/throttling。查询READY既有缺口、风险复合延迟和完整分段延迟/长期泄漏证据另报；不得宣称完整生产验收或绝对算力上限。
 - artifact=/Users/atomex/Desktop/surprising/gcp-validation/2026-09-08-direct-envelope-risk-budget。本机只运行构建、功能和离线分析；不执行独立本机微基准。风险预算及订单直接信封由更新的真实Cluster JMH业务路径覆盖。
+
+- OS38（eb7c633d）预热阶段三Core均因`duplicate or unexpected account lane completion`退出，无有效测量，OS39–41未执行；原始异常/JFR/监控和最终四VM TERMINATED证据在上述artifact。初始970项（1外部数据库跳过）与六产品18恢复检查通过不足以覆盖此组合路径，不能将该轮视为验收。随后向五条衍生品的批次预算用例加入真实成交持仓，五条均复现expected=0但实际Lane非零；风险状态更新涉及的账户未登记在撮合完成上下文中。修复仅在实际执行组合风险扫描后登记同步控制Lane，保留原matcher参与者、重复/越界/缺失ACK校验；12项针对性回归通过。
+
+### 控制Lane补齐后OS42–OS45预锁
+
+- OS42/43/条件44/45分别替代OS38/39/40/41，seed99501–99504；窗口、机器、JVM/JMH/JFR、30+60s/30+120s、行情与混合业务、预算、30s候选期限、通过阈值、先本机功能恢复再开机和结束停机要求完全沿用上条预锁。只验证当前master补齐控制Lane后的构建，不比较旧版本性能；被测commit/JAR SHA留存，最后原日志重启核对。artifact=/Users/atomex/Desktop/surprising/gcp-validation/2026-09-08-risk-control-lanes；保留mask-before/after功能复现与修复证据。

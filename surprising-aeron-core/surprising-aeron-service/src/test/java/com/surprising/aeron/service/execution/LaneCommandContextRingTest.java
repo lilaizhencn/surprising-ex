@@ -17,6 +17,24 @@ import org.junit.jupiter.api.Test;
 class LaneCommandContextRingTest {
 
     @Test
+    void synchronousControlLanesCannotEraseMatcherParticipantsOrWeakenAckValidation() {
+        var ring=new LaneCommandContextRing(4,4);
+        var context=ring.claim(1);
+        assertThatThrownBy(()->context.includeControlLanes(2,15)).isInstanceOf(IllegalStateException.class);
+        context.result(new CoreMatchingResult(true,"ACCEPTED").withCoreSequence(1),1,15);
+        context.includeControlLanes(2,15);
+        assertThat(context.expectedLaneMask()).isEqualTo(3);
+        assertThatThrownBy(()->context.includeControlLanes(16,15)).isInstanceOf(IllegalStateException.class);
+        context.completeLanes(2);
+        assertThat(context.complete()).isFalse();
+        assertThatThrownBy(()->context.completeLanes(2)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(()->context.completeLanes(4)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(()->context.includeControlLanes(4,15)).isInstanceOf(IllegalStateException.class);
+        context.completeLanes(1);
+        assertThat(context.complete()).isTrue();
+    }
+
+    @Test
     void commandContextDoesNotRetainAPerCommandMatchingFuture() {
         assertThat(Arrays.stream(LaneCommandContextRing.Context.class.getDeclaredFields())
                 .anyMatch(field -> field.getType() == java.util.concurrent.CompletableFuture.class)).isFalse();
