@@ -1,5 +1,9 @@
 # surprising-ex
 
+普通非 reduce-only 下单和撤单支持跨集群消息的有界在途窗口（最多64条）。按账户、订单簿和订单身份的保守依赖分区决定是否排空，账户范围包括该币对已有挂单的潜在成交对手；哈希碰撞只增加等待。批量命令、改单、风控、配置和一致性查询仍作为屏障。完成顺序保持确定，消息各自保留原始集群时间和日志位置；1毫秒集群定时事件负责低流量收尾（不是延迟上限），同一未触发定时器跨窗口复用。快照前完成全部在途业务；后台回调不推进交易。实时状态在窗口提交时按最终日志位置组成一个原子输出批次。
+
+Ordinary non-reduce-only placements and cancellations use a bounded cross-message window of at most 64 commands. Conservative account, book and order-identity partitions include potential resting counterparties; hash collisions only add fences. Batches, amendments, risk/configuration commands and coherent queries remain barriers. Completion is deterministic and retains each command's original cluster timestamp and log position. A replicated one-millisecond timer drains partial windows at low traffic (not a latency guarantee), with outstanding timers reused across windows. Snapshots drain all pending work; background callbacks never advance trading. Realtime changes form one atomic export group at the window's final log position.
+
 BLOCKING Account Lane 支持 `surprising.aeron.settlement-spin-limit`（0–4096 次，默认0）：可选短暂自旋后休眠，通过“声明休眠→重查发布游标”的握手避免丢失唤醒。本轮三节点未证实自旋收益，因此默认关闭。owner 空轮询的完整健康巡检按1毫秒间隔执行，提交与完成边界仍逐次检查；不改变订单顺序或资金结算边界。
 
 BLOCKING Account Lanes support `surprising.aeron.settlement-spin-limit` (0–4096 iterations, default 0), then park using an announce-and-recheck handshake. Spinning is disabled by default because this three-node run did not demonstrate a gain. Empty owner polling checks full health at one-millisecond intervals; admission and completion retain per-call checks. Order and settlement boundaries remain intact.
@@ -18,9 +22,9 @@ The production-mix tool supports `surprising.aeron.mixed-operational=true`: asyn
 
 The trading service supports `-Dsurprising.aeron.service.idle-strategy=BACKOFF|YIELDING` or `AERON_SERVICE_IDLE_STRATEGY`, with the system property taking precedence. When unset, Aeron's defaults and global property retain their existing behavior. An explicit override affects only the service, leaving consensus, networking and Archive unchanged. YIELDING spends more CPU polling; select it using real three-node throughput, latency and CPU measurements.
 
-Core 的撮合完成轮询区分“阶段有进展”和“命令最终完成”：提交 matcher、消费完成通知或派发结算都会让等待策略看到有效进展；连续无进展时只检查完成队列游标，并保留健康、关闭及超时检查。每次进展后完整检查一轮，逐条日志回调内完成的确定性边界不变。`OrderReservation` 使用不可变值对象，内部金额变动复用已验证的币对/资产字符串；公开构造及恢复仍完整校验，金额范围与溢出检查不变，仍会创建新的金额状态对象。
+Core 的撮合完成轮询区分“阶段有进展”和“命令最终完成”：提交 matcher、消费完成通知或派发结算都会让等待策略看到有效进展；连续无进展时只检查完成队列游标，并保留健康、关闭及超时检查。每次进展后完整检查一轮；跨消息窗口在上述依赖屏障或定时事件中按日志顺序完成。`OrderReservation` 使用不可变值对象，内部金额变动复用已验证的币对/资产字符串；公开构造及恢复仍完整校验，金额范围与溢出检查不变，仍会创建新的金额状态对象。
 
-Core completion polling distinguishes stage progress from terminal commands. After an idle pass it probes completion cursors while retaining health, shutdown and timeout checks; each productive pass is followed by a full pass for owner-local continuations. Each log callback still completes its business work before returning. Immutable `OrderReservation` amount transitions reuse validated identity strings; public construction and restoration retain full validation, and numeric checks remain enforced. Transitions still allocate a new value object.
+Core completion polling distinguishes stage progress from terminal commands. After an idle pass it probes completion cursors while retaining health, shutdown and timeout checks; each productive pass is followed by a full pass for owner-local continuations. Cross-message windows complete in log order at the dependency barriers or timer events described above. Immutable `OrderReservation` amount transitions reuse validated identity strings; public construction and restoration retain full validation, and numeric checks remain enforced. Transitions still allocate a new value object.
 
 Aeron Client 的普通异步请求遇到 `ADMIN_ACTION` 时会在原发送位置有界重试，保留命令标识和 source sequence，避免后续撤单越过尚未提交的下单；`tryCommandOnce`/one-way仍只尝试一次。Client async requests retry transient `ADMIN_ACTION` in place within the original deadline while continuing egress and keepalive processing; one-shot APIs retain their existing semantics.
 

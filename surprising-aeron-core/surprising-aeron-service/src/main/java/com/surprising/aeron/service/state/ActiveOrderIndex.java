@@ -23,6 +23,9 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
 
     private final LongObjectHashMap<LongHashSet> idsByUser = new LongObjectHashMap<>();
     private final Map<String, LongHashSet> idsBySymbol = new HashMap<>();
+    // Owner-maintained participant counts: admission must include potential maker accounts
+    // without scanning the order book on every incoming command. Removed with the last order.
+    private final Map<String, ParticipantMask> participantsBySymbol = new HashMap<>();
     private final LongObjectHashMap<CoreOrderState> ordersById = new LongObjectHashMap<>();
     // Owner-only bounded query scratch; never sized to total book depth.
     private long[] pageScratch;
@@ -68,6 +71,15 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
 
     public int count() {
         return ordersById.size();
+    }
+
+    public long participantMask(String symbol) {
+        ParticipantMask participants = participantsBySymbol.get(symbol);
+        return participants == null ? 0 : participants.mask;
+    }
+
+    public CoreOrderState activeOrder(long orderId) {
+        return ordersById.get(orderId);
     }
 
     public NavigableSet<Long> ids(long userId, String symbol) {
@@ -350,6 +362,10 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
             return;
         }
         ordersById.put(orderId, current);
+        if (previous.userId() != current.userId() || !previous.symbol().equals(current.symbol())) {
+            removeParticipant(previous);
+            addParticipant(current);
+        }
         if (previous.userId() != current.userId()) {
             remove(idsByUser, previous.userId(), orderId);
             add(idsByUser, current.userId(), orderId);
@@ -363,6 +379,7 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     public void rebuild(TradingCoreState state) {
         idsByUser.clear();
         idsBySymbol.clear();
+        participantsBySymbol.clear();
         ordersById.clear();
         state.orders().values().stream()
                 .filter(ActiveOrderIndex::isActive)
@@ -378,6 +395,7 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     }
 
     private void add(CoreOrderState order) {
+        addParticipant(order);
         ordersById.put(order.orderId(), order);
         LongHashSet userIds = idsByUser.get(order.userId());
         if (userIds == null) {
@@ -389,9 +407,31 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     }
 
     private void remove(CoreOrderState order) {
+        removeParticipant(order);
         ordersById.remove(order.orderId());
         remove(idsByUser, order.userId(), order.orderId());
         remove(idsBySymbol, order.symbol(), order.orderId());
+    }
+
+    private void addParticipant(CoreOrderState order) {
+        ParticipantMask participants = participantsBySymbol.computeIfAbsent(order.symbol(), ignored -> new ParticipantMask());
+        int partition = TradingDependencyMask.partition(order.userId());
+        participants.counts[partition] = Math.incrementExact(participants.counts[partition]);
+        participants.mask |= 1L << partition;
+    }
+
+    private void removeParticipant(CoreOrderState order) {
+        ParticipantMask participants = participantsBySymbol.get(order.symbol());
+        int partition = TradingDependencyMask.partition(order.userId());
+        if (participants == null || participants.counts[partition] <= 0)
+            throw new IllegalStateException("active order participant count underflow");
+        if (--participants.counts[partition] == 0) participants.mask &= ~(1L << partition);
+        if (participants.mask == 0) participantsBySymbol.remove(order.symbol());
+    }
+
+    private static final class ParticipantMask {
+        private final int[] counts = new int[64];
+        private long mask;
     }
 
     private static void remove(LongObjectHashMap<LongHashSet> values, long key, long id) {

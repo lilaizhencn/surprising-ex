@@ -24,6 +24,16 @@ import org.openjdk.jmh.annotations.*;
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"})
 @Threads(1)
 public class ClusteredBatchTradingBenchmark {
+    /** Cross-callback independent orders, replicated timer drain, then independent cancellations. */
+    @Benchmark
+    public long independentCommandWindows(Workload workload, Counters counters) {
+        workload.runIndependentCommandWindows();
+        counters.acceptedBusinessOperations += 512;
+        counters.terminalBusinessOperations += 512;
+        counters.acceptedCoreMessages += 512;
+        counters.terminalCoreMessages += 512;
+        return workload.terminal;
+    }
     /**
      * Owner progress/empty polling plus bounded Lane spin/park handoffs, reservation consume,
      * partial fill and cancel release. Use settlement-spin-limit=0/256 on the current build
@@ -151,8 +161,11 @@ public class ClusteredBatchTradingBenchmark {
         private Thread realtimeConsumer;
         private volatile boolean consuming;
         private boolean singleResponses;
+        private final org.eclipse.collections.impl.set.mutable.primitive.LongHashSet singleRequestIds =
+                new org.eclipse.collections.impl.set.mutable.primitive.LongHashSet();
         private int responseBatchSize;
         private String settleAsset;
+        private String pipelineSymbolB;
         private SurprisingClusteredService service;
         private ClientSession session;
         private final Header header = new Header(0, 0).buffer(new UnsafeBuffer(new byte[64]))
@@ -177,6 +190,7 @@ public class ClusteredBatchTradingBenchmark {
             System.setProperty("surprising.aeron.settlement-spin-limit", Integer.toString(settlementSpinLimit));
             LinearPerpetualBenchmarkSupport.configureAccountLanes(accountLanes);
             sequence = terminal = queryResults = maxBacklog = 0;
+            singleRequestIds.clear();
             responseBatchSize = batchSize;
             expectMissingCancels = false;
             rejectedItems = 0;
@@ -197,6 +211,7 @@ public class ClusteredBatchTradingBenchmark {
                         case "role" -> Cluster.Role.LEADER;
                         case "idleStrategy" -> realtime ? serviceIdle : NoOpIdleStrategy.INSTANCE;
                         case "timeUnit" -> TimeUnit.MILLISECONDS;
+                        case "scheduleTimer" -> true;
                         case "time", "logPosition" -> 1_700_000_000_000L;
                         default -> defaultValue(method.getReturnType());
                     });
@@ -223,7 +238,7 @@ public class ClusteredBatchTradingBenchmark {
                                 if (response.status() != ResponseStatus.APPLIED) {
                                     throw new IllegalStateException("batch rejected: " + response.resultCode());
                                 }
-                                if(singleResponses){terminal++;yield 1L;}
+                                if(singleRequestIds.remove(message.header().correlationId())){terminal++;yield 1L;}
                                 var items = TradingOrderBatchCodec.decodeResult(response.data()).items();
                                 if (items.size() != responseBatchSize) throw new IllegalStateException("batch size mismatch");
                                 for (var item : items) {
@@ -247,6 +262,21 @@ public class ClusteredBatchTradingBenchmark {
             service.onSessionOpen(session, 1_700_000_000_000L);
             ContractType type=ContractType.valueOf(productLine.contractTypeCode());
             settleAsset=type.isInverse()?"BTC":"USDT";
+            pipelineSymbolB = "JMH-PIPE-B-USDT";
+            while (com.surprising.aeron.service.state.TradingDependencyMask.account(pipelineSymbolB.hashCode())
+                    == com.surprising.aeron.service.state.TradingDependencyMask.account("JMH-PIPE-A-USDT".hashCode()))
+                pipelineSymbolB = "X" + pipelineSymbolB;
+            for (String symbol : new String[]{"JMH-PIPE-A-USDT", pipelineSymbolB}) {
+                apply(CoreMessageType.UPSERT_INSTRUMENT, 0, TradingCommandCodec.encodeUpsertInstrument(
+                        new UpsertInstrumentCommand(symbol, 1, type.ordinal(), "BTC", "USDT", settleAsset, 1, 1,
+                                type.isInverse() ? 1000 : 1, 100_000, 50_000, 0, 0,
+                                type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0,
+                                type.isOption() ? 0 : -1, type.isOption() ? 100 : 0)));
+                if (productLine.isDerivative()) apply(CoreMessageType.APPLY_MARK_PRICE, 0,
+                        TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
+                                ? new ApplyMarkPriceCommand(symbol, 1, 100, 100, 100, 1, 1_700_000_000_000L)
+                                : new ApplyMarkPriceCommand(symbol, 1, 100, 1, 1_700_000_000_000L)));
+            }
             apply(CoreMessageType.UPSERT_INSTRUMENT,0,TradingCommandCodec.encodeUpsertInstrument(
                 new UpsertInstrumentCommand("JMH-BTC-USDT",1,type.ordinal(),"BTC","USDT",settleAsset,1,1,
                     type.isInverse()?1000:1,100_000,50_000,0,0,type.isDelivery()||type.isOption()?2_000_000_000_000L:0,
@@ -268,6 +298,7 @@ public class ClusteredBatchTradingBenchmark {
             byte[] makerBytes = CoreMessageCodec.encode(maker);
             service.onSessionMessage(null, 1_700_000_000_000L, new UnsafeBuffer(makerBytes),
                     0, makerBytes.length, header);
+            service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, 1_700_000_000_001L);
             service.state().assertClusterCallbackComplete();
         }
 
@@ -311,6 +342,7 @@ public class ClusteredBatchTradingBenchmark {
                     // Exactly 256 requests are ready at the entry boundary in every closed-loop wave.
                     for(CoreMessage request:wave)send(request);
                 }
+                drain();
                 if(terminal-before!=1024)throw new IllegalStateException("realtime trade terminal mismatch");
                 if(realtime) {
                     service.state().captureRealtimeSnapshot(1000,Math.max(1,sequence),sequence,1_700_000_000_000L);
@@ -403,6 +435,28 @@ public class ClusteredBatchTradingBenchmark {
             }
         }
 
+        public void runIndependentCommandWindows() {
+            long before = terminal;
+            singleResponses = true;
+            try {
+                for (int user = 0; user < 256; user++) {
+                    long id = orderId++;
+                    firstOrders[user] = id;
+                    String symbol = (user & 1) == 0 ? "JMH-PIPE-A-USDT" : pipelineSymbolB;
+                    send(command(CoreMessageType.PLACE_ORDER, 1_000 + user,
+                            TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(id, symbol, 1,
+                                    CoreOrderSide.BUY, 90, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                                    CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "pipeline-" + id))));
+                }
+                drain();
+                for (int user = 0; user < 256; user++) send(command(CoreMessageType.CANCEL_ORDER, 1_000 + user,
+                        TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(firstOrders[user]))));
+                drain();
+                if (terminal - before != 512 || service.commandWindowHighWaterMark() < 2)
+                    throw new IllegalStateException("independent commands did not pipeline and complete");
+            } finally { singleResponses = false; }
+        }
+
         public void run() {
             long terminalBefore = terminal;
             long queriesBefore = queryResults;
@@ -473,15 +527,16 @@ public class ClusteredBatchTradingBenchmark {
         }
 
         private void send(CoreMessage message) {
+            if (singleResponses) singleRequestIds.add(message.header().correlationId());
             byte[] bytes = CoreMessageCodec.encode(message);
             service.onSessionMessage(session, 1_700_000_000_000L, new UnsafeBuffer(bytes), 0, bytes.length, header);
-            service.state().assertClusterCallbackComplete();
             maxBacklog = Math.max(maxBacklog, service.state().pendingMatchingCount());
         }
 
         private void drain() {
+            service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, 1_700_000_000_001L);
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
-            // Only response delivery may remain outside the deterministic log callback.
+            // A replicated timer drains the final partial command window, including at low traffic.
             int work;
             do {
                 work = service.doBackgroundWork(System.nanoTime());

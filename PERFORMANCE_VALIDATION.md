@@ -4794,3 +4794,11 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 八份JFR均DataLoss=0，原始文件大小/SHA在artifact的jfr-manifest.json，各文件旁保存summary。OS13 Leader core-2完整139s记录含初始化/预热/终检：callback 551921次平均169us，idleCommand约30.63s，commitReadyMatching 2839666次平均12.8us；存在等待协调成本，不将其算成有效业务CPU。完整记录/方法采样不能替代稳定测量窗口、无profiler吞吐或精确bytes/op；分配/native长期趋势与泄漏、正式JMH三节点运行及最终上限未验收。JMH场景已更新编译，本机没有执行性能测试；本机139项跨产品功能/资金/恢复测试通过，最终默认0另跑28项通过，与之前37项有重叠，不相加。
 - 原OS13日志恢复首次验证因未等Leader就绪而NOT_CONNECTED；保留失败证据。停机再启动四VM，等待本次进程回放并成为Leader后执行replay.py os13 retry，核对资金差0、248交易cycles及恢复的生命周期资金/持仓，hash仍为dfd289160ec811cf。业务断言通过后，清理已被systemd回收的临时load unit报not loaded，导致脚本退出非零、跳过末尾Core日志采集；不是业务核对失败。已修正清理脚本并语法检查，未为清理改动再启动服务器。readiness记录、原始result及异常均保留，不掩盖编排失败。
 - artifact根目录=/Users/atomex/Desktop/surprising/gcp-validation/2026-09-08-lane-handoff，os12/、os13/、os13-replay-retry/、financial-build.txt、default-zero-test.txt。四VM于05:32 UTC确认全部TERMINATED（instances-recovery-final.json）；未继续计费运行负载。云端默认参数由显式spin0验证，最终源码默认0构建通过；其余云端逻辑与7a4947fa一致。
+
+### 跨日志命令窗口：本机门槛与OS14预锁（2026-09-08）
+
+- 改动：普通非reduce-only下单/撤单最多64条在途；账户（含潜在maker）、币对和订单身份保守分区，冲突及控制/批量/查询命令排空；完成保持日志顺序，复制定时器收尾，快照排空，后台不修改交易状态。新增窗口及参与者索引，未宣称零分配。结算预计Lane修复排除无关运营账号；原回归用非零operator稳定复现五条衍生品失败，修复后通过。
+- 用户要求先本机功能后服务器压测。HotSpot25最终针对性检查162项通过（service116、benchmark场景功能46，无本机性能采样）；六产品线三个独立本机JVM依次执行小样本交易、SIGKILL后日志恢复及快照恢复，全部PASS才允许启动云VM。第一次交割发现上述真实故障；最初两次重启编排未遵守Aeron存活标记期限，保留失败记录，改为12秒正常保护期限，未删除日志或降低保护。
+- OS14预锁：仅当前master新构建，seed98001，四台原GCP n2-custom-8-16384，三个独立Core，1matcher/4Lane，HotSpot25、Core4GiB ZGC/NMT、service YIELDING、Lane spin0；1773用户258symbol混合运营，batch20，交易在途256+价格16+控制1、查询1000/s，预热30秒+测量60秒。执行SETTLEMENT_SPIN_LIMIT=0 OPERATIONAL_JFR=1 python3 round.py os14 98001 256 60 30。Core phases.jfc加入processIngress/drainCommandWindow/onTimerEvent；load profile。新计时方法不可与历史配置直接比较收益，也不可将嵌套方法耗时相加。
+- 门槛：全部三Core存活、terminal=offered、unfinished0、资金差0、业务覆盖PASS、单命令p99<1s、JFR DataLoss0；另观察窗口highWaterMark是否超过1，不能用owner忙等冒充有效计算。原数据重启后核对业务hash与资金/生命周期；整轮finally停止四VM并记录TERMINATED。已知查询READY低的问题独立报告，OS14为带采样诊断，不称完整生产容量、零泄漏或最终上限验收。
+- artifact=/Users/atomex/Desktop/surprising/gcp-validation/2026-09-08-command-pipeline；local-settlement-fixed.txt、settlement-actor-regression.txt、local-functional-fixed/、os14/、os14-replay-verify/；本机矩阵结果与云端源码commit/JAR SHA分别保存。正式JMH三节点与长稳分配/native完整验收尚未完成。

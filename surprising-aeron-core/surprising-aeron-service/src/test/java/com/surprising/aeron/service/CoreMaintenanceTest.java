@@ -98,14 +98,16 @@ class CoreMaintenanceTest {
             var repriced = apply(state,command(line,0,CoreMessageType.SETTLE_INSTRUMENT,
                     TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(801,"BTC-USDT",1,121,0))));
             assertThat(repriced.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-            var first = applied(state,command(line,0,CoreMessageType.SETTLE_INSTRUMENT,
+            // The operator is not a settlement participant. A nonzero actor must not add
+            // an unrelated account lane to either the first page or a recovered continuation.
+            var first = applied(state,command(line,1,CoreMessageType.SETTLE_INSTRUMENT,
                     TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(801,"BTC-USDT",1,120,0,0,1,0,1))));
             var progress = CoreSettlementProgressCodec.decode(first.data());
             try (var restored = CoreProbeState.fromSnapshot(line,state.snapshot(700))) {
                 int steps = 0;
                 while (!progress.complete()) {
                     assertThat(++steps).isLessThan(20);
-                    var message = command(line,0,CoreMessageType.SETTLE_INSTRUMENT,TradingCommandCodec.encodeSettleInstrument(
+                    var message = command(line,1,CoreMessageType.SETTLE_INSTRUMENT,TradingCommandCodec.encodeSettleInstrument(
                             new SettleInstrumentCommand(801,"BTC-USDT",1,120,0,progress.nextCursorUserId(),1,progress.nextCursorOrderId(),1)));
                     var response = applied(restored,message);
                     progress = CoreSettlementProgressCodec.decode(response.data());

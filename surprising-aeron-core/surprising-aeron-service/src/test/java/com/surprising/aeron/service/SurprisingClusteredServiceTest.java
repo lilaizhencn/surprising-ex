@@ -281,6 +281,7 @@ class SurprisingClusteredServiceTest {
     private static void replayWithoutSession(SurprisingClusteredService service, CoreMessage message) {
         byte[] encoded = CoreMessageCodec.encode(message);
         service.onSessionMessage(null, 1234, new UnsafeBuffer(encoded), 0, encoded.length, aeronHeader());
+        service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, 1235);
         service.state().assertClusterCallbackComplete();
     }
 
@@ -408,7 +409,7 @@ class SurprisingClusteredServiceTest {
     }
 
     @Test
-    void logCallbackCompletesMatchingExactlyOnceWithoutBackgroundWork() {
+    void loggedTimerCompletesMatchingExactlyOnceWithoutBackgroundWork() {
         SurprisingClusteredService service = service();
         List<byte[]> responses = new CopyOnWriteArrayList<>();
         service.onStart(cluster(), null);
@@ -757,6 +758,7 @@ class SurprisingClusteredServiceTest {
         byte[] encoded = CoreMessageCodec.encode(request);
         service.onSessionMessage(clientSession(responses), 1_000, new UnsafeBuffer(encoded), 0,
                 encoded.length, aeronHeader());
+        service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, 1_001);
     }
 
 

@@ -49,10 +49,11 @@ class CoreMatchingStateTest {
             var failureField = worker.getClass().getDeclaredField("failure");
             failureField.setAccessible(true);
             var failure = new IllegalStateException("injected lane failure before completion publication");
-            assertThat(state.hasMatchingNotifications()).isFalse();
+            long now = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(1);
+            assertThat(state.hasMatchingNotifications(now)).isFalse();
             failureField.set(worker, failure);
             try {
-                assertThatThrownBy(state::hasMatchingNotifications).isSameAs(failure);
+                assertThatThrownBy(() -> state.hasMatchingNotifications(now + 1_000_000)).isSameAs(failure);
             } finally {
                 failureField.set(worker, null);
             }

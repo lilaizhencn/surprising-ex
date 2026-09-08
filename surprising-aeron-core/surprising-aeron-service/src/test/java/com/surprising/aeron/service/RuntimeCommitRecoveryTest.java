@@ -738,6 +738,7 @@ class RuntimeCommitRecoveryTest {
 
     private static ClusterReplay replayClusterCommand(SurprisingClusteredService service, CoreMessage command) {
         ClusterReplay replay = replayClusterCommandRaw(service, command);
+        service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, command.header().submittedAtEpochMillis() + 1);
         service.state().assertClusterCallbackComplete();
         assertThat(replay.responses()).isNotEmpty();
         return replay;
@@ -966,7 +967,8 @@ class RuntimeCommitRecoveryTest {
 
     private static Object canonicalIndexValue(Object value) {
         if (value == null) return "<null>";
-        if (value.getClass().getName().startsWith("com.surprising.aeron.service.state.OpenInterestIndex$")) {
+        if (value.getClass().getName().startsWith("com.surprising.aeron.service.state.OpenInterestIndex$")
+                || value.getClass().getName().startsWith("com.surprising.aeron.service.state.ActiveOrderIndex$")) {
             try {
                 return indexSnapshot(value);
             } catch (Exception failure) {

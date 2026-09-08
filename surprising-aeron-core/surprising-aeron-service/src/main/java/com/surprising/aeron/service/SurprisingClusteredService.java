@@ -27,6 +27,12 @@ public final class SurprisingClusteredService implements ClusteredService {
     private static final int MATCHING_COMPLETION_BATCH_SIZE = 64;
     private static final long COMMAND_TIMEOUT_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
     private static final long SNAPSHOT_TIMEOUT_SECONDS = 30;
+    // Reserved service timer. Re-scheduling replaces the deadline; stale logged expirations
+    // simply drain the current wave. No local-clock choice changes business execution order.
+    static final long PIPELINE_TIMER_ID = Long.MIN_VALUE + 101;
+    private final ClusterCommandWindow commandWindow = new ClusterCommandWindow();
+    private int commandWindowHighWaterMark;
+    private boolean pipelineTimerArmed;
 
     private final ProductLine productLine;
     private CoreProbeState state;
@@ -46,7 +52,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     private IdleStrategy idleStrategy;
     private byte[] responseScratch = new byte[4 * 1024];
     private final UnsafeBuffer responseBuffer = new UnsafeBuffer(responseScratch);
-    // Only the active log callback owns these slots; no command survives its return.
+    // Synchronous barrier commands use these slots; ordinary orders use commandWindow.
     private long responseSequence;
     private CoreResponse matchingResponse;
     private final CoreProbeState.MatchingCommitHandler matchingCommitHandler = this::completeMatching;
@@ -67,6 +73,9 @@ public final class SurprisingClusteredService implements ClusteredService {
         responseSequence = 0;
         matchingResponse = null;
         processingLogCallback = false;
+        commandWindow.clear();
+        commandWindowHighWaterMark = 0;
+        pipelineTimerArmed = false;
         snapshotFenceNotReadyCount = 0;
         snapshotFenceTimeoutCount = 0;
         idleStrategy = cluster.idleStrategy();
@@ -111,14 +120,89 @@ public final class SurprisingClusteredService implements ClusteredService {
             return;
         }
         try {
-            processRequest(session, request, timestamp, header.position());
+            processingLogCallback = true;
+            processIngress(session, request, timestamp, header.position());
         } catch (org.agrona.concurrent.AgentTerminationException failure) {
             throw failure;
         } catch (RuntimeException failure) {
             // AgentRunner otherwise logs ordinary exceptions and may consume the next message.
             throw new org.agrona.concurrent.AgentTerminationException(failure);
+        } finally {
+            processingLogCallback = false;
         }
     }
+
+    private void processIngress(ClientSession session, CoreMessage request, long timestamp, long position) {
+        boolean eligible = state.prepareClusterPipelineScope(request, commandWindow);
+        if (!eligible || commandWindow.conflicts()
+                || state.matchingSequence(request.header().commandId()) != 0) {
+            drainCommandWindow();
+            // A preceding command may have changed maker accounts or removed the target order.
+            eligible = state.prepareClusterPipelineScope(request, commandWindow);
+        }
+        if (!eligible) {
+            processRequest(session, request, timestamp, position);
+            return;
+        }
+        if (commandWindow.size() == 0) {
+            state.assertClusterCallbackComplete();
+            if (!pipelineTimerArmed) {
+                long deadline = System.nanoTime() + COMMAND_TIMEOUT_NANOS;
+                long delay = Math.max(1, cluster.timeUnit().convert(1, java.util.concurrent.TimeUnit.MILLISECONDS));
+                idleStrategy.reset();
+                while (!cluster.scheduleTimer(PIPELINE_TIMER_ID, Math.addExact(timestamp, delay)))
+                    idleCommand(0, deadline);
+                pipelineTimerArmed = true;
+            }
+        }
+        var entry = commandWindow.add(session, request, timestamp, position);
+        CoreResponse result = state.apply(request, timestamp, position);
+        entry.sequence = state.matchingSequence(request.header().commandId());
+        if (entry.sequence != 0) state.pendingMatching(entry.sequence).establishCommitFence(timestamp, position);
+        entry.response = entry.sequence == 0 ? result : null;
+        commandWindowHighWaterMark = Math.max(commandWindowHighWaterMark, commandWindow.size());
+        if (commandWindow.size() == ClusterCommandWindow.CAPACITY) drainCommandWindow();
+    }
+
+    private void drainCommandWindow() {
+        int size = commandWindow.size();
+        if (size == 0) return;
+        var last = commandWindow.get(size - 1);
+        // Admissions are provisional; only the ordered commit phase publishes realtime state.
+        // A window is one atomic export group at its final log position.
+        if (realtimeCapture != null && realtimeLeader) {
+            try { realtimeCapture.begin(last.position, last.timestamp, 0, state.realtimeExportSequence()); }
+            catch (RuntimeException failure) { realtimeCapture.failed(); }
+        }
+        long deadline = System.nanoTime() + COMMAND_TIMEOUT_NANOS;
+        idleStrategy.reset();
+        boolean checkMatching = true;
+        while (state.firstPendingMatchingSequence() != 0) {
+            long before = state.matchingProgressSequence();
+            int completed = 0;
+            if (checkMatching || state.hasMatchingNotifications())
+                completed = state.commitReadyMatching(MATCHING_COMPLETION_BATCH_SIZE,
+                        last.timestamp, last.position, false, matchingCommitHandler);
+            int work = completed != 0 || state.matchingProgressSequence() != before ? 1 : 0;
+            checkMatching = work != 0;
+            idleCommand(work, deadline);
+        }
+        state.assertClusterCallbackComplete();
+        lastCommittedPosition = last.position;
+        if (realtimeCapture != null) realtimeCapture.commit(state.realtimeExportSequence());
+        // Keep client-visible completion in ingress order, including immediate rejections.
+        for (int i = 0; i < size; i++) {
+            var entry = commandWindow.get(i);
+            if (entry.response == null) throw new IllegalStateException("missing pipeline terminal response");
+            if (entry.session != null)
+                offerResponse(entry.session, entry.request.header().response(responseType(entry.request.header())),
+                        entry.response);
+        }
+        commandWindow.clear();
+    }
+
+    int commandWindowSize() { return commandWindow.size(); }
+    int commandWindowHighWaterMark() { return commandWindowHighWaterMark; }
 
     void attachRealtimeForTest(com.surprising.aeron.client.RealtimeOutbox outbox) {
         realtimeOutbox = outbox;
@@ -188,6 +272,10 @@ public final class SurprisingClusteredService implements ClusteredService {
     }
 
     private void completeMatching(long sequence, CoreResponse response) {
+        if (commandWindow.size() != 0) {
+            commandWindow.complete(sequence, response);
+            return;
+        }
         if (sequence == responseSequence) matchingResponse = response;
     }
 
@@ -237,6 +325,11 @@ public final class SurprisingClusteredService implements ClusteredService {
     private SectionedCoreSnapshotCodec.SectionedSnapshot captureSnapshotSections(
             long snapshotId, long deadlineNanos) {
         try {
+            processingLogCallback = true;
+            drainCommandWindow();
+            // Canonical control state at a snapshot boundary and on restore. An existing
+            // cluster timer may still expire; it is harmless and a subsequent schedule replaces it.
+            pipelineTimerArmed = false;
             state.assertClusterCallbackComplete();
             state.beginSnapshot(snapshotId, deadlineNanos);
             idleStrategy.reset();
@@ -254,6 +347,8 @@ public final class SurprisingClusteredService implements ClusteredService {
         } catch (CoreProbeState.SnapshotFenceTimeoutException timeout) {
             snapshotFenceTimeoutCount++;
             throw timeout;
+        } finally {
+            processingLogCallback = false;
         }
     }
 
@@ -274,7 +369,7 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     @Override
     public int doBackgroundWork(long nowNs) {
-        if (processingLogCallback || realtimeCapture == null || !realtimeLeader) return 0;
+        if (processingLogCallback || commandWindow.size() != 0 || realtimeCapture == null || !realtimeLeader) return 0;
         int work=state.pollRealtimeSnapshot()+state.pollRealtimeBook();
         if (state.realtimeSnapshotPending() || state.realtimeBookPending() || nowNs < nextRealtimeSnapshotNs) return work;
         var request = snapshotRequests.poll();
@@ -288,6 +383,9 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     @Override
     public void onTerminate(Cluster cluster) {
+        System.out.printf("Aeron core command-window productLine=%s highWaterMark=%d pending=%d%n",
+                productLine, commandWindowHighWaterMark, commandWindow.size());
+        commandWindow.clear();
         responseSequence = 0;
         matchingResponse = null;
         this.cluster = null;
@@ -307,12 +405,26 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     @Override
     public void onSessionClose(ClientSession session, long timestamp, CloseReason closeReason) {
+        drainFromLogEvent();
     }
 
     @Override
     public void onTimerEvent(long correlationId, long timestamp) {
-        // Reliable cluster timers are reserved for replicated business-time events.
-        // Matching and query completion finish in the originating log callback.
+        if (correlationId == PIPELINE_TIMER_ID) {
+            pipelineTimerArmed = false;
+            drainFromLogEvent();
+        }
+    }
+
+    private void drainFromLogEvent() {
+        processingLogCallback = true;
+        try {
+            drainCommandWindow();
+        } catch (RuntimeException failure) {
+            throw new org.agrona.concurrent.AgentTerminationException(failure);
+        } finally {
+            processingLogCallback = false;
+        }
     }
 
     CoreProbeState state() {

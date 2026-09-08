@@ -13,6 +13,30 @@ import org.junit.jupiter.api.Test;
 class ActiveOrderIndexTest {
 
     @Test
+    void participantMaskRetainsCollidingAccountsUntilTheirLastOrderIsRemoved() {
+        long first = 11, colliding = first + 1;
+        while (TradingDependencyMask.account(colliding) != TradingDependencyMask.account(first)) colliding++;
+        var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT));
+        var a = new CoreOrderState(1, ProductLine.SPOT, first, "BTC-USDT", 1,
+                CoreOrderSide.BUY, 100, 2, 0, 2, false, CoreOrderStatus.OPEN, 1);
+        var b = new CoreOrderState(2, ProductLine.SPOT, colliding, "BTC-USDT", 1,
+                CoreOrderSide.SELL, 100, 2, 0, 2, false, CoreOrderStatus.OPEN, 1);
+        index.applySnapshot(1, a); index.applySnapshot(2, b);
+        long mask = TradingDependencyMask.account(first);
+        assertThat(index.participantMask("BTC-USDT")).isEqualTo(mask);
+        index.applySnapshot(1, a.fill(1));
+        assertThat(index.participantMask("BTC-USDT")).isEqualTo(mask);
+        index.applySnapshot(1, null);
+        assertThat(index.participantMask("BTC-USDT")).isEqualTo(mask);
+        index.applySnapshot(2, null);
+        assertThat(index.participantMask("BTC-USDT")).isZero();
+        index.rebuild(new TradingCoreState(ProductLine.SPOT, 1,
+                Map.of(first, CoreUserState.empty(ProductLine.SPOT, first)), Map.of(1L, a),
+                Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty()));
+        assertThat(index.participantMask("BTC-USDT")).isEqualTo(mask);
+    }
+
+    @Test
     void primitiveIntersectionIsIndependentAndMatchesBothIndexDirections() {
         Map<Long, CoreOrderState> orders = new HashMap<>();
         for (long id = 1; id <= 12; id++) {

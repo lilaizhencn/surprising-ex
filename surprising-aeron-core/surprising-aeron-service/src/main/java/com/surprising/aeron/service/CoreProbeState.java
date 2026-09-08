@@ -443,6 +443,44 @@ public final class CoreProbeState implements AutoCloseable {
         return apply(message, message.header().submittedAtEpochMillis(), Math.addExact(appliedCommandCount, 1));
     }
 
+    /** Read only committed indexes; scopes are retained until the entire wave commits. */
+    boolean prepareClusterPipelineScope(CoreMessage message, ClusterCommandWindow window) {
+        if (!activated) activate();
+        runtime.assertOwner();
+        if (message.header().productLine() != productLine || message.header().userId() <= 0) return false;
+        String symbol;
+        long orderId;
+        try {
+            switch (message.header().messageType()) {
+                case PLACE_ORDER -> {
+                    var command = TradingCommandCodec.decodePlaceOrder(message.payloadUnsafe());
+                    ensureRuntimePlaceOrderState();
+                    var instrument = runtimePlaceOrderState.instrument(command.symbol());
+                    if (instrument == null) return false;
+                    symbol = instrument.symbol();
+                    orderId = command.orderId();
+                    // Close/reduce-only admission can cancel other orders; retain its full fence.
+                    if (command.reduceOnly()) return false;
+                }
+                case CANCEL_ORDER -> {
+                    var command = TradingCommandCodec.decodeCancelOrder(message.payloadUnsafe());
+                    orderId = command.orderId();
+                    var order = activeOrderIndex.activeOrder(orderId);
+                    if (order == null || order.userId() != message.header().userId()) return false;
+                    symbol = order.symbol();
+                }
+                default -> { return false; }
+            }
+        } catch (IllegalArgumentException | java.nio.BufferUnderflowException invalid) {
+            return false; // Normal apply path performs the existing rejection after the fence.
+        }
+        window.candidateAccounts = com.surprising.aeron.service.state.TradingDependencyMask.account(
+                message.header().userId()) | activeOrderIndex.participantMask(symbol);
+        window.candidateSymbols = com.surprising.aeron.service.state.TradingDependencyMask.account(symbol.hashCode());
+        window.candidateOrders = com.surprising.aeron.service.state.TradingDependencyMask.account(orderId);
+        return true;
+    }
+
     public CoreResponse apply(CoreMessage message, long clusterTimestamp, long clusterPosition) {
         if (!activated) activate();
         runtime.assertOwner();
@@ -4125,7 +4163,9 @@ public final class CoreProbeState implements AutoCloseable {
             com.surprising.aeron.service.matching.CoreMatchingResult result) {
         long mask = 0;
         long activeUserId = pending.command().header().userId();
-        if (activeUserId > 0) mask |= matchingAdapter.topology().accountLaneMask(activeUserId);
+        // Instrument settlement changes the selected position/order owners, not its operator.
+        if (activeUserId > 0 && pending.operation() != PendingMatching.Operation.SETTLEMENT)
+            mask |= matchingAdapter.topology().accountLaneMask(activeUserId);
         for (MatcherEvent match : result.matcherEvents()) {
             if (match.eventType() == MatcherEventType.TRADE) {
                 mask |= matchingAdapter.topology().accountLaneMask(match.matchedOrderUid());
