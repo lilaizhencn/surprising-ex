@@ -178,10 +178,18 @@ public class ClusteredBatchTradingBenchmark {
             batchTrades = 0;
             makerBaseBalance = 1L + 256L * batchSize;
             service = new SurprisingClusteredService(productLine);
+            // Aeron invokes background callbacks while its service idle strategy is running.
+            // Define that path here too; performance execution remains on the real cluster.
+            var serviceIdle = new org.agrona.concurrent.IdleStrategy() {
+                public void idle(int work) { if (realtime) service.doBackgroundWork(System.nanoTime()); }
+                public void idle() { idle(0); }
+                public void reset() { }
+                public String alias() { return "realtime-reentrant"; }
+            };
             Cluster cluster = (Cluster) Proxy.newProxyInstance(Cluster.class.getClassLoader(),
                     new Class<?>[]{Cluster.class}, (proxy, method, args) -> switch (method.getName()) {
                         case "role" -> Cluster.Role.LEADER;
-                        case "idleStrategy" -> NoOpIdleStrategy.INSTANCE;
+                        case "idleStrategy" -> realtime ? serviceIdle : NoOpIdleStrategy.INSTANCE;
                         case "timeUnit" -> TimeUnit.MILLISECONDS;
                         case "time", "logPosition" -> 1_700_000_000_000L;
                         default -> defaultValue(method.getReturnType());

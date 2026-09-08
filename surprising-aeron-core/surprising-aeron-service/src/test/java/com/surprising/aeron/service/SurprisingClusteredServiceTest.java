@@ -50,7 +50,7 @@ import org.junit.jupiter.api.Test;
 class SurprisingClusteredServiceTest {
 
     @Test
-    void stageProgressResetsIdleButAnEmptyMatcherWaitDoesNotCompleteTheCommand() throws Exception {
+    void stageProgressAndReentrantBackgroundDeferSnapshotUntilSettlementCompletes() throws Exception {
         var service = service();
         var responses = new CopyOnWriteArrayList<byte[]>();
         var entered = new java.util.concurrent.CountDownLatch(1);
@@ -63,6 +63,8 @@ class SurprisingClusteredServiceTest {
                 var state = service.state();
                 long sequence = state.firstPendingMatchingSequence();
                 if (sequence == 0) return;
+                assertThat(service.doBackgroundWork(System.nanoTime())).isZero();
+                assertThat(state.realtimeSnapshotPending()).isFalse();
                 assertThat(responses).isEmpty();
                 if (work > 0) progressWhilePending.incrementAndGet();
                 else if (state.pendingMatching(sequence).isMatchingSubmitted() && release.getCount() != 0) {
@@ -82,6 +84,8 @@ class SurprisingClusteredServiceTest {
                 new Class<?>[]{Cluster.class}, (proxy, method, arguments) ->
                         method.getName().equals("idleStrategy") ? idle : method.invoke(delegate, arguments));
         service.onStart(controlled, null);
+        var outbox = new com.surprising.aeron.client.RealtimeOutbox(1024, 1_048_576);
+        service.attachRealtimeForTest(outbox);
         try {
             service.state().apply(timerInstrument());
             service.state().apply(command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
@@ -100,6 +104,13 @@ class SurprisingClusteredServiceTest {
                 return 1;
             });
             assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            var requestsField = SurprisingClusteredService.class.getDeclaredField("snapshotRequests");
+            requestsField.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            var requests = (java.util.Queue<com.surprising.aeron.protocol.RealtimeFrame>) requestsField.get(service);
+            assertThat(requests.offer(new com.surprising.aeron.protocol.RealtimeFrame(ProductLine.SPOT,
+                    com.surprising.aeron.protocol.RealtimeFrame.Kind.SNAPSHOT_REQUEST,
+                    1001, 0, 0, 0, 91, "", "", new byte[0]))).isTrue();
             var place = command(CoreMessageType.PLACE_ORDER, 2, 1001,
                     TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(904, "BTC-USDT", 1,
                             CoreOrderSide.BUY, 1_000, 2, false, CoreMarginMode.CROSS,
@@ -112,6 +123,20 @@ class SurprisingClusteredServiceTest {
             service.state().assertClusterCallbackComplete();
             assertThat(service.state().tradingState().user(1001).balances().get("USDT").lockedUnits())
                     .isEqualTo(2_000);
+            drainRealtime(outbox);
+            assertThat(requests).hasSize(1);
+            assertThat(service.doBackgroundWork(System.nanoTime())).isOne();
+            long snapshotDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (service.state().realtimeSnapshotPending() && System.nanoTime() < snapshotDeadline) {
+                service.doBackgroundWork(System.nanoTime());
+                Thread.yield();
+            }
+            assertThat(service.state().realtimeSnapshotPending()).isFalse();
+            assertThat(drainRealtime(outbox)).anySatisfy(frame -> {
+                assertThat(frame.kind()).isEqualTo(com.surprising.aeron.protocol.RealtimeFrame.Kind.USER);
+                var user = com.surprising.aeron.protocol.CoreStateQueryCodec.decodeUserState(frame.payload());
+                assertThat(user.balances().getFirst().lockedUnits()).isEqualTo(2_000);
+            });
             try (var restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, service.state().snapshot())) {
                 assertThat(restored.tradingState().businessStateHash())
                         .isEqualTo(service.state().tradingState().businessStateHash());
@@ -121,6 +146,7 @@ class SurprisingClusteredServiceTest {
             service.onTerminate(null);
         }
     }
+
 
     @Test
     void exhaustedRealtimeOutboxDoesNotRejectOrLeaveUnsettledBusinessCommands() {

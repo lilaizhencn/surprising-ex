@@ -18,6 +18,7 @@ final class ClusterOperationalSideLoad implements AutoCloseable {
     private final OperationalUserQueries queries;
     private final long[] marks, sequences;
     private final List<Thread> threads = new ArrayList<>();
+    private final CompletableFuture<Void> initialPrices = new CompletableFuture<>();
     private volatile boolean running = true, priceRunning = true;
     private volatile long measurementStart = Long.MAX_VALUE, measurementEnd = Long.MAX_VALUE;
 
@@ -38,7 +39,15 @@ final class ClusterOperationalSideLoad implements AutoCloseable {
     }
 
     void start() {
-        startThread("operational-prices",this::feedPrices);
+        startThread("operational-prices",() -> {
+            try {feedPrices();} catch(Throwable error) {
+                initialPrices.completeExceptionally(error);
+                throw error;
+            }
+        });
+        // Setup can exceed the freshness bound. Establish every price before trading starts;
+        // subsequent refreshes run independently without draining the trading producer.
+        initialPrices.join();
         lifecycle.setup();
         startThread("operational-risk",() -> { while(running) lifecycle.cycle(); });
         startThread("operational-queries",() -> { while(running) queries.step(); });
@@ -63,6 +72,7 @@ final class ClusterOperationalSideLoad implements AutoCloseable {
                                 "JMH-MIX-"+i+"-USDT",1,marks[i],++sequences[i],System.currentTimeMillis()))));
             }
             while(!pending.isEmpty())pending.removeFirst().join();
+            initialPrices.complete(null);
             if(System.nanoTime()<next)LockSupport.parkNanos(next-System.nanoTime());
         }
     }

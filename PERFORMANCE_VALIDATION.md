@@ -4750,3 +4750,29 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 原资金守恒终检增加4个样本账户余额和实际净注入：初始3*1e9，每完整生命周期额外100+25；资金费/保险/ADL内部转移不重复算注资，余额及全部treasury ledger精确核对。交易fills从响应解码；side普通单fills也解码，触发成交由唯一一单位maker流动性、TRIGGERED及一单位持仓归零确认计1笔，不把ADL当普通fill。单独报告各流requests/六分位及全体terminal business ops/Core messages/fills；背景控制未完成不得算终态吞吐。
 - 实际启用Core实时outbox→Aeron Router→Valkey读模型，Router和Valkey与load同机，必须单列资源开销；独立Valkey查询目标1000requests/s，遍历原1769用户（包括做市商），调用生产ValkeyUserQueries/物化逻辑，核对身份及exportSequence单调，503单独计数且禁止回查Core。此为读模型查询链路，不包括HTTP网关鉴权或WS客户端。Valkey用官方8.1.10 Linux binary，绑定load本机127.0.0.1:6381，独立实例，Router只有本产品的三节点控制destination。其他产品和业务进程不启动。
 - OS0门槛：所有交易及控制操作成功、资金差0、终态/冻结/持仓核对通过，测量期主动平仓/触发平仓/风险续扫/资金费/保险ADL和READY查询各至少一次；503/实际读QPS/新鲜度必须报告，不能用覆盖PASS冒充读可用性达标。正式饱和档还须预锁读可用率和尾延迟门槛。采集四机5秒系统与线程指标及各类请求计数，OS0不启动JFR；若失败，保留原日志，修复后新目录/seed重新预锁。完成正确性后再进行同场景逐级在途加压及JFR，不回到纯交易基准。
+
+### OS0失败与OS1诊断预锁
+
+- OS0使用f0ba8406，JAR SHA256=48160fc7723605be442f2ba9fec926ec649319896e261f4870a40f948de02e3c。初始化闭环通过，预热批量订单因STALE_MARK_PRICE失败，同时独立actor的RESOLVE_LIQUIDATION被INVALID_COMMAND拒绝；未取得有效吞吐，不能声称完整混合场景通过。原始结果在2026-09-08-operational/os0。04:08:06Z Router另因MediaDriver keepalive age=1001ms超过1000ms退出，不能将失败后的查询视为可用。
+- 代码核对发现工具把保险赔付写死为min(25, deficit-1)，而实际Core要求严格等于InsuranceAllocationPolicy分配结果；工具改用LIQUIDATION_WORK_QUERY的recommendedCoveredUnits，不改保险策略，也不放宽价格5秒保护。OS1为当前master加该工具修复，seed96002，其余硬件/JVM/业务/窗口256+16+1、查询1000/s、30秒预热30秒测量及资金门槛继承OS0。独立6381测试Valkey清空并重启Router/driver，旧OS0证据保留。
+- OS1仅定位正确性：三Core加artifact内FreshnessAgent，通过ByteBuddy只在requireFreshMark抛出异常时记录前12次币对、clusterTimestamp和generatedAt；不改变参数/返回/异常，不输出私钥等敏感数据。工具及agent SHA保存在os1-jar.sha256和构建artifact。带诊断agent的数据不作正式性能结论；无需本机性能采样，仍真实三节点。执行FRESHNESS_PROBE=1 python3 round.py os1 96002 256 30 30。本机HotSpot25，7项相关工具测试及打包通过(os1-build.txt)。
+
+### OS1证据与OS2正确性预锁
+
+- OS1仍在预热失败，保险拒绝未再出现，但不能据此宣称测量覆盖通过。JAR=f9bb21a94c69b12fd25b85c01576de7c8cbf87e42a0ddb7ddcfe79e2d79a921b；04:18:05Z诊断捕获JMH-MIX-144-USDT的clusterTimestamp=1788841085027、generatedAt=1788841063626，价龄21401ms。该价格来自初始setup，独立刷新尚未完成首轮，交易已开始；不是负价龄/跨机时钟假设。保留os1三机异常、四机监控，禁止把失败预热速率当容量。
+- OS2(seed96003)在启动交易前等待独立价格producer第一遍256币对更新完成，后续持续异步更新，不在交易循环增加等待。初始价格失败会传播至启动方，不吞异常。其余OS1业务、30+30秒、真实三节点、256+16+1窗口、1000/s查询及资金/覆盖门槛不变；仍保留诊断agent以确认是否还有运行期过期，不作正式吞吐结论。执行FRESHNESS_PROBE=1 python3 round.py os2 96003 256 30 30；构建与SHA另存os2-*，不覆盖OS0/OS1。
+
+### OS2实际Core故障与OS3修复验证预锁
+
+- OS2 JAR=9aaded1b8e1925dad98423a3327ec18534cab830fc2a2a55a41bdcbfe91872d3。04:21:31Z原Leader core-2退出：unfinished business work outside cluster log callback。栈精确为processCommittedRequest→idleCommand→ClusteredServiceAgent.idle/doIdleWork→invokeBackgroundWork→doBackgroundWork→captureRealtimeSnapshot→assertClusterCallbackComplete。随后两个Follower报leader heartbeat timeout并选举core-1，发压器出现ResultUnknown，整轮失败。这是实际运行期Leader故障，不能与此前长回放的quorum startup WARN混为一谈，也不是价格保护误判。
+- 修复SurprisingClusteredService：owner线程boolean标记完整日志回调，在finally复位；重入后台工作直接返回0，既不启动快照，也不poll完成快照/盘口以免覆盖当前RealtimeStateCapture批次。请求仍留队列，正常回调间隙处理；不删除assertClusterCallbackComplete、不移走业务结算、不增加线程/锁/容器。扩展原真实matcher阻塞功能测试：idle重入后台时不取走排队快照，交易冻结完成后后台快照含正确2000冻结值且恢复hash一致。23项服务测试+9项工具测试通过；JMH现有realtime场景加入Aeron式idle重入定义并编译，不在本机执行性能基准。
+- OS3(seed96004)真实三节点验证该修复，30秒预热+60秒测量，其他OS2业务/硬件/JVM/窗口/价格/查询和严格资金门槛不变，不使用FreshnessAgent。Core和load启用启动期JFR，Core使用既有phases.jfc、load profile，maxsize256MiB，结束dump并采集原始文件；这是带采样的正确性及热点诊断，不作无profiler吞吐上限。要求全部操作/资金/覆盖PASS，无Leader退出/ResultUnknown，检查DataLoss后再决定正式加压；执行OPERATIONAL_JFR=1 python3 round.py os3 96004 256 60 30。OS3目录及SHA独立保留。
+
+### OS3/OS4现场结果（停机后简记）
+
+- OS3因core-1启动期实时Aeron客户端DriverTimeoutException(age1026ms>1000ms)触发默认错误处理器退出JVM而无效，发现后停止发压；两存活节点数字不作为三节点证据。修复实时Sender/Receiver及Router控制连接的异步错误处理，保留1000ms超时，错误计数并重连，不调用进程退出；空outbox的Sender也检测连接关闭。真实MediaDriver关闭/重启测试验证发送、接收恢复，Router独立测试验证控制重连和source epoch更新。
+- OS4实际命令OPERATIONAL_JFR=1 python3 round.py os4 96005 256 60 30，环境/业务同OS3，云端JAR ed850aaec5b7684515940826a0b5bf33b7f1f7eb72cd0d92696b3f5c0d4729e4；三节点全程存活，资金差0，251交易cycles、37重复生命周期，全部冻结/零售/HFT/强平保险ADL检查通过，businessHash=c9f49813717b7ac7。测量期有34次主动/触发闭环、33次保险ADL闭环、99次风险续扫、34次资金费；不是仅初始化覆盖。
+- 带JFR诊断：交易3677184终态业务项=offered，350208终态Core消息=offered，unfinished0，peak256；61051.079 business ops/s、5814.388 Core messages/s、14535.971 fills/s。计入后台已完成控制命令后61362.689 business ops/s、6173.399 Core messages/s、14524.062 fills/s，elapsed60.283s。普通下单p99 47.677ms、撤单99.352ms、批量下单98.172ms、批量撤单71.827ms。仅当前master工作树诊断，不是最终饱和上限，也没有新旧版本收益结论。
+- 查询实测4027 READY、56192 unavailable，共60219次（约1000/s），READY仅6.69%；READY p99=543us，但大部分503，整套生产场景未验收。无Core fallback；不能用coverage PASS掩盖可用性失败。保留Valkey现场os4-valkey.rdb及metadata/stats。Core后台快照10ms节流、Router每200ms最多扫描16用户，及饱和期间排队/丢帧需要下一步定位，尚未将其中某一项认定为唯一根因。
+- Leader短窗口owner99.8% CPU（user71.0%、system28.8%），matcher16.2%、各Lane7.9–8.0%；不能当作99.8%有效业务计算。Leader完整137s JFR（含初始化/预热/终检）DataLoss0；方法计时约567812次callback平均165us，idleCommand累计约30.8秒，仍有等待开销。GC pause总0.972ms、p99 0.0273ms，非本轮明显瓶颈；尚未完成稳定窗口分配/native/长期泄漏验收，也未执行这份云数据重启核对。
+- os4-build.txt记录38项相关测试通过；后续补齐Router自身错误处理和重连测试，router-reconnect-final.txt通过，此Router补丁尚未再次云端部署。JMH realtime重入场景已编译，未违反真实三节点约束去跑本机性能。所有原始JFR/日志位于2026-09-08-operational/os4。用户要求优先服务器验证、减少MD耗时后停止持续写记录，本条在停机后汇总。四VM均已确认TERMINATED(instances-stop-check.json)，无后台负载继续运行。

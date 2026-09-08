@@ -1,5 +1,9 @@
 # surprising-ex
 
+Core 实时快照和盘口后台工作只在交易日志回调之外执行。Aeron 的 service idle 可以重入后台回调，因此交易结算期间保留快照请求，待交易回调结束后处理，避免读取未结算状态或覆盖当前实时事件批次。
+
+Realtime user/book snapshots run outside trading log callbacks. Aeron's service idle can reenter background work; snapshot requests remain queued until the trading callback returns, preserving settled-state reads and the current realtime event batch.
+
 生产混合压力工具支持 `surprising.aeron.mixed-operational=true`：交易持续异步发压，独立生产者持续更新价格，风险生产者并发执行主动平仓、触发查询与执行、资金费、强平、保险及 ADL。普通用户/做市商查询调用生产 `ValkeyUserQueries`，配置 `surprising.aeron.operational-valkey-host/port` 和 `surprising.aeron.operational-query-rate`；需要实际运行实时 Router、Valkey，并启用 Core 实时出口。该工具测量 Core、读模型与查询物化，不包含 HTTP 网关鉴权或 WS 客户端传输。具体通过情况和饱和结论以 `PERFORMANCE_VALIDATION.md` 中的实测为准。
 
 The production-mix tool supports `surprising.aeron.mixed-operational=true`: asynchronous trading runs alongside independent price updates and a control producer exercising manual closes, trigger discovery/execution, funding, liquidations, insurance and ADL. User/maker reads call production `ValkeyUserQueries`; configure `surprising.aeron.operational-valkey-host/port` and `surprising.aeron.operational-query-rate`, with a real Router, Valkey and the Core realtime outlet running. This measures Core, read-model maintenance and query materialization, excluding HTTP gateway authentication and WS client delivery. See `PERFORMANCE_VALIDATION.md` for measured coverage and saturation results.

@@ -39,6 +39,8 @@ public final class SurprisingClusteredService implements ClusteredService {
     private boolean realtimeLeader;
     private long lastCommittedPosition;
     private long nextRealtimeSnapshotNs;
+    // Aeron's cluster idle strategy can reenter doBackgroundWork on this same thread.
+    private boolean processingLogCallback;
 
     private Cluster cluster;
     private IdleStrategy idleStrategy;
@@ -64,6 +66,7 @@ public final class SurprisingClusteredService implements ClusteredService {
         if (state == null) state = new CoreProbeState(productLine);
         responseSequence = 0;
         matchingResponse = null;
+        processingLogCallback = false;
         snapshotFenceNotReadyCount = 0;
         snapshotFenceTimeoutCount = 0;
         idleStrategy = cluster.idleStrategy();
@@ -123,14 +126,19 @@ public final class SurprisingClusteredService implements ClusteredService {
     }
 
     private void processRequest(ClientSession session, CoreMessage request, long timestamp, long clusterPosition) {
-        if (realtimeCapture != null && realtimeLeader) {
-            try { realtimeCapture.begin(clusterPosition, timestamp, 0,state.realtimeExportSequence()); }
-            catch (RuntimeException failure) { realtimeCapture.failed(); }
-        }
+        processingLogCallback = true;
         try {
+            if (realtimeCapture != null && realtimeLeader) {
+                try { realtimeCapture.begin(clusterPosition, timestamp, 0,state.realtimeExportSequence()); }
+                catch (RuntimeException failure) { realtimeCapture.failed(); }
+            }
             processCommittedRequest(session, request, timestamp, clusterPosition);
         } finally {
-            if (realtimeCapture != null) realtimeCapture.abort();
+            try {
+                if (realtimeCapture != null) realtimeCapture.abort();
+            } finally {
+                processingLogCallback = false;
+            }
         }
     }
 
@@ -266,7 +274,7 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     @Override
     public int doBackgroundWork(long nowNs) {
-        if (realtimeCapture == null || !realtimeLeader) return 0;
+        if (processingLogCallback || realtimeCapture == null || !realtimeLeader) return 0;
         int work=state.pollRealtimeSnapshot()+state.pollRealtimeBook();
         if (state.realtimeSnapshotPending() || state.realtimeBookPending() || nowNs < nextRealtimeSnapshotNs) return work;
         var request = snapshotRequests.poll();

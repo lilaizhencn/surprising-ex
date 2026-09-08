@@ -84,7 +84,8 @@ public final class RealtimeRouter implements AutoCloseable {
                     Aeron.connect(
                             new Aeron.Context()
                                     .aeronDirectoryName(config.directory())
-                                    .driverTimeoutMs(1000))) {
+                                    .driverTimeoutMs(1000)
+                                    .errorHandler(failure -> failures.increment()))) {
                 config.controlChannels()
                         .forEach(
                                 (p, c) -> {
@@ -96,7 +97,7 @@ public final class RealtimeRouter implements AutoCloseable {
                                     resetSource(p);
                                 });
                 long nextRefresh = 0;
-                while (running) {
+                while (running && !aeron.isClosed()) {
                     long now = System.currentTimeMillis();
                     if (now >= nextRefresh) {
                         refresh(aeron, now);

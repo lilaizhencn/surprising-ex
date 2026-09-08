@@ -18,7 +18,8 @@ public final class AeronRealtimeReceiver implements AutoCloseable {
     public AeronRealtimeReceiver(String directory, String channel, int streamId, Consumer<RealtimeFrame> handler) {
         worker = Thread.ofPlatform().name("realtime-aeron-receiver").unstarted(() -> {
             while (running) {
-                try (var aeron = Aeron.connect(new Aeron.Context().aeronDirectoryName(directory).driverTimeoutMs(1000))) {
+                try (var aeron = Aeron.connect(new Aeron.Context().aeronDirectoryName(directory).driverTimeoutMs(1000)
+                        .errorHandler(failure -> { ready = false; failures.increment(); }))) {
                     var assembler = new FragmentAssembler((buffer, offset, length, header) -> {
                         try {
                             if (length > RealtimeFrameCodec.MAX_FRAME_BYTES) {

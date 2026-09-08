@@ -138,8 +138,8 @@ final class OperationalLifecycle implements AutoCloseable {
         long expectedId=liquidationId;
         var insurance=work(CoreLiquidationWorkView.Purpose.INSURANCE).resolutions().stream()
                 .filter(a->a.liquidationId()==expectedId).findFirst().orElseThrow();
-        long coverage=Math.min(25,insurance.deficitUnits()-1);
-        if(coverage<=0)throw new IllegalStateException("expected insurance and ADL deficit");
+        long coverage=insurance.recommendedCoveredUnits();
+        if(coverage>=insurance.deficitUnits())throw new IllegalStateException("expected residual ADL deficit: "+insurance);
         endpoint.command(CoreMessageType.RESOLVE_LIQUIDATION,0,TradingCommandCodec.encodeResolveLiquidation(
                 new ResolveLiquidationCommand(liquidationId,ResolveLiquidationCommand.Resolution.INSURANCE,coverage)));
         var adl=work(CoreLiquidationWorkView.Purpose.ADL).resolutions().stream()

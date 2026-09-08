@@ -186,6 +186,23 @@ class RealtimeRouterIntegrationTest {
                 assertThat(receivedA).noneMatch(f -> f.sequence() == 400 && f.userId() == 42);
                 assertThat(receivedB).noneMatch(f -> f.userId() == 42);
                 assertThat(router.failures()).isZero();
+                // The optional router control client must never invoke Aeron's process-exit
+                // handler when its MediaDriver disappears.
+                String previousEpoch = redis.opsForValue().get("rt:source:SPOT");
+                publication.close();
+                aeron.close();
+                driver.close();
+                await(() -> router.failures() > 0);
+                try (var restarted = MediaDriver.launch(new MediaDriver.Context()
+                        .aeronDirectoryName(directory).dirDeleteOnStart(true).dirDeleteOnShutdown(true));
+                     var reconnected = Aeron.connect(new Aeron.Context().aeronDirectoryName(directory));
+                     var nextPublication = reconnected.addExclusivePublication("aeron:ipc", 2101)) {
+                    await(nextPublication::isConnected);
+                    // A restarted router control connection resets its source epoch before
+                    // using any previously materialized view.
+                    await(() -> requests.ready() && follower.ready());
+                    await(() -> !Objects.equals(previousEpoch, redis.opsForValue().get("rt:source:SPOT")));
+                }
             }
         } finally {
             factory.destroy();
