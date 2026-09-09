@@ -4819,7 +4819,11 @@ public final class CoreProbeState implements AutoCloseable {
             }
             OrderBatchPending batch = pendingOrderBatches.get(pending.sequenceKey());
             if (batch != null) {
-                if (!batch.pipelined || !batch.admissionCollected || batch.settlementDispatched) return;
+                // The ordinary commit loop can reach this batch after completing a cancel
+                // without another dispatch pass. Once it owns the commit, it also owns Lane
+                // dispatch; pumping while its event is pending must not submit it a second time.
+                if (!batch.pipelined || !batch.admissionCollected || batch.settlementDispatched
+                        || batch.commitStarted) return;
                 if (!batch.matchingApplied) {
                     LaneCommandContextRing.Context context = laneCommandContexts.required(pending.sequence());
                     com.surprising.aeron.service.matching.CoreMatchingResult matching = context.matchingCompletion();

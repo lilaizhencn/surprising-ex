@@ -24,6 +24,96 @@ import org.junit.jupiter.params.provider.EnumSource;
 class ClusterCommandPipelineTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
+    void ordinaryCommitAndSpeculativeDispatchCannotSubmitTheSameBatchTwice(ProductLine product) throws Exception {
+        try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
+            serial.applyAll(live.setup());
+            var state = live.service.state();
+            var command = live.placeBatch(11, "BTC-USDT", 8000);
+            long timestamp = command.header().submittedAtEpochMillis();
+            state.applyClusterCommand(command, timestamp, 0);
+            long sequence = state.matchingSequence(command.header().commandId());
+            var contextField = CoreProbeState.class.getDeclaredField("laneCommandContexts");
+            contextField.setAccessible(true);
+            var contexts = (LaneCommandContextRing) contextField.get(state);
+            var context = contexts.required(sequence);
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (!context.hasMatchingCompletion() && System.nanoTime() < deadline) state.drainMatchingCompletions();
+            assertThat(context.hasMatchingCompletion()).isTrue();
+            var runtimeField = CoreProbeState.class.getDeclaredField("runtimePlaceOrderState");
+            runtimeField.setAccessible(true);
+            Object runtime = runtimeField.get(state);
+            var workersField = runtime.getClass().getDeclaredField("laneWorkers");
+            workersField.setAccessible(true);
+            Object[] workers = (Object[]) workersField.get(runtime);
+            var entered = new CountDownLatch(workers.length);
+            var release = new CountDownLatch(1);
+            Class<?> commandClass = Class.forName("com.surprising.aeron.service.state.SettlementLaneWorker$Command");
+            var submit = workers[0].getClass().getDeclaredMethod("submit", commandClass);
+            submit.setAccessible(true);
+            try {
+                for (Object worker : workers) submit.invoke(worker, Proxy.newProxyInstance(commandClass.getClassLoader(),
+                        new Class<?>[]{commandClass}, (p, method, args) -> {
+                            entered.countDown();
+                            if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("test lane timeout");
+                            return null;
+                        }));
+                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+                assertThat(state.completeMatching(sequence, context.takeMatchingCompletion(), timestamp, 0)).isNull();
+                var batchesField = CoreProbeState.class.getDeclaredField("pendingOrderBatches");
+                batchesField.setAccessible(true);
+                var batch = ((java.util.Map<?, ?>) batchesField.get(state)).get(sequence);
+                var eventsField = batch.getClass().getDeclaredField("settlementEvents");
+                eventsField.setAccessible(true);
+                Object dispatched = eventsField.get(batch);
+                assertThat(dispatched).isNotNull();
+                var dispatch = CoreProbeState.class.getDeclaredMethod("dispatchReadyPlaceSettlements", long.class, long.class, long.class);
+                dispatch.setAccessible(true);
+                dispatch.invoke(state, timestamp, 0L, sequence);
+                assertThat(eventsField.get(batch)).as("one Lane settlement event per batch sequence").isSameAs(dispatched);
+            } finally { release.countDown(); }
+            assertThat(state.completeMatchingSynchronously(sequence, timestamp, 0).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            serial.apply(command);
+            assertThat(live.hash()).isEqualTo(serial.hash());
+            try (var restored = CoreProbeState.fromSnapshot(product, state.snapshot())) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+            }
+        }
+    }
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void independentBatchesSharingLanesKeepSettlementSequenceOrdered(ProductLine product) {
+        try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
+            serial.applyAll(live.setup());
+            var type = ContractType.valueOf(product.contractTypeCode());
+            String asset = type.isInverse() ? "BTC" : "USDT";
+            var batches = new ArrayList<CoreMessage>();
+            for (int i = 0; i < 64; i++) {
+                String symbol = "COIN" + i + "-USDT";
+                long user = 10_000 + i;
+                var setup = List.of(
+                        live.message(CoreMessageType.UPSERT_INSTRUMENT, 0,
+                                TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand(symbol, 1,
+                                        type.ordinal(), "BTC", "USDT", asset, 1, 1, type.isInverse() ? 1_000 : 1,
+                                        100_000, 50_000, 0, 0, type.isDelivery() || type.isOption() ? TIME + 100_000 : 0,
+                                        type.isOption() ? 0 : -1, type.isOption() ? 100 : 0))),
+                        live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
+                                TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
+                                        ? new ApplyMarkPriceCommand(symbol, 1, 100, 100, 100, 1, TIME)
+                                        : new ApplyMarkPriceCommand(symbol, 1, 100, 1, TIME))),
+                        live.message(CoreMessageType.ADJUST_BALANCE, user,
+                                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 20_000))));
+                live.applyAll(setup); serial.applyAll(setup);
+            }
+            for (int i = 0; i < 64; i++) batches.add(live.placeBatch(10_000 + i, "COIN" + i + "-USDT", 10_000 + i * 20));
+            live.responses.clear();
+            for (var command : batches) live.send(command);
+            live.tick(); serial.applyAll(batches);
+            assertThat(live.responses).hasSize(64).allSatisfy(r -> assertThat(r.commandStatus()).isEqualTo(ResponseStatus.APPLIED));
+            assertThat(live.hash()).isEqualTo(serial.hash());
+        }
+    }
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
     void scopeRefreshAndAdmissionShareOneDecodedBatch(ProductLine product) throws Exception {
         try (var fixture = new Fixture(product)) {
             fixture.setup();

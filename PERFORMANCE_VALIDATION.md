@@ -4936,3 +4936,16 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 诊断轮JMH SingleShotTime单线程单独JVM，-f0 -wi0 -i1 -prof gc，主计数来自业务终态，不能把一整轮JMH B/op解释为Core逐笔分配。四JFR：Core phases.jfc、load profile；稳定窗口裁首尾各5s，报告owner/matcher/Lane等CPU、分配、GC、NMT、线程锁/等待、JIT、安全点和I/O。CPU95%目标只用于定位有效业务饱和，不作为忙等通过证明。
 - 硬门槛：三Core存活、offered=terminal（消息及业务）、unfinished0、资金差0、业务覆盖PASS、单命令p99<1s、JFR DataLoss0、原日志与快照恢复一致。吞吐按实测报告，不以旧版本比较验收。查询READY比例、全部延迟三阶段和长期泄漏/完整native余额仍单列缺口，不能宣称整套生产容量验收。
 - artifact=/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-owner-five-fixes；执行python3 cloud.py，保存source commit/JAR SHA、命令/JMH JSON/JFR/监控/恢复。finally停止四VM并核实TERMINATED。README不改。
+
+
+### OS54失败与重复结算派发修复（2026-09-09）
+
+- 639cf54f本机Core reactor 974项（973通过、1项外部instrument数据库未配置跳过）、实时路由reactor172项通过，六产品三JVM交易/日志/快照恢复18项通过；635个service/protocol/client类在测试service.jar及部署service/tools/benchmarks包中逐字节相同。首轮回归仅旧测试对pendingReservationUsers强转旧容器失败，已修正测试读取类型，资金回滚断言保留。源码已推送master。
+- OS54 tools SHA256=40cd4af48f35b0f9f2f12af0b9ca2f1722ed83d4574d876a21fc4d5fe3fec2a9。三节点初始化及清算/保险/ADL检查通过，尚未取得有效测量结果时，01:55:41 UTC Leader core-1与Follower core-2因AccountLaneState.requireApplySequence退出；停止后续OS55–57，不能报告该轮吞吐或性能收益。raw JFR、OS与本次PID日志保存在2026-09-09-owner-five-fixes/os54，四VM已核实TERMINATED。
+- 本机六产品确定性小样本复现：普通commit路径已为一个batch派发结算，返回等待Lane时pump的预派发路径再次派发同一sequence。red用例六项全部识别第二个事件，异常incoming=7/applied=7，和云端退出栈一致。修复由commitStarted确定路径所有权，普通提交已接手的batch不再预派发；不删除Lane序号保护，也不扩大业务依赖屏障。补充64个独立batch共享4Lane的序号/资金状态核对及六产品双派发/快照回归。异常信息增加lane/incoming/applied/committed，只有失败时构造，不增加逐命令指标。
+
+### OS58–OS61采集前预锁
+
+- 仅修复后的当前master，对照commit不适用。沿用OS54预锁的机器/JDK/JVM/GC/NMT、三节点网络、1matcher/4Lane、所有运营业务/比例/资金初态、异步持续负载、风险超时及正确性/p99/DataLoss门槛；新代码重新clean verify并完成六产品三JVM18项恢复后才开机。
+- OS58/59/条件60/61 seed99901–99904分别为窗口256/512/条件1024/本轮最快档；前两档及条件档30s预热+60s诊断JMH/JFR，512比256至少高5%且正确性通过才开1024；末轮30+120s无profiler并按原日志恢复。所有指标/未测缺口与四VM finally停机要求不变，不与旧版本性能比较。
+- artifact=/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-owner-dispatch-fix；python3 cloud.py，新增回归同样只做本机功能验证，真实ClusterOperationalBenchmark仍覆盖普通撤单到后续批量单的持续异步路径。

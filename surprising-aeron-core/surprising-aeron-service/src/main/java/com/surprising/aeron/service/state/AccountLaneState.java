@@ -506,7 +506,9 @@ public final class AccountLaneState {
     void requireApplySequence(long coreSequence) {
         assertOwner();
         if (coreSequence <= appliedSequence) {
-            throw new IllegalStateException("account lane apply is out of order");
+            throw new IllegalStateException("account lane apply is out of order: lane=" + laneId
+                    + ", incoming=" + coreSequence + ", applied=" + appliedSequence
+                    + ", committed=" + committedSequence);
         }
     }
 
