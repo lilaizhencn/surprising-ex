@@ -128,7 +128,7 @@ public class ClusteredBatchTradingBenchmark {
         counters.terminalCoreMessages += 512;
         counters.terminalBatches += 512;
         counters.terminalItems += 512L * workload.batchSize;
-        counters.queries += 512;
+        if (workload.interleavedMetrics) counters.queries += 512;
         return workload.terminal;
     }
 
@@ -174,6 +174,8 @@ public class ClusteredBatchTradingBenchmark {
         @Param("20") public int batchSize;
         @Param("256") public int maxInFlight;
         @Param("false") public boolean realtime;
+        /** Explicitly separate trading capacity from the historical per-command audit query load. */
+        @Param("true") public boolean interleavedMetrics = true;
         @Param({"0", "256"}) public int settlementSpinLimit;
         private String previousSpinLimit;
         private com.surprising.aeron.client.RealtimeOutbox realtimeOutbox;
@@ -551,7 +553,7 @@ public class ClusteredBatchTradingBenchmark {
                 for (int item = 0; item < batchSize; item++) orders.add(order(orderId++, CoreOrderSide.BUY, 90));
                 send(command(CoreMessageType.PLACE_ORDER_BATCH, 1_000 + user,
                         TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders))));
-                metrics();
+                if (interleavedMetrics) metrics();
             }
             drain();
             for (int user = 0; user < 256; user++) {
@@ -559,10 +561,11 @@ public class ClusteredBatchTradingBenchmark {
                 for (int item = 0; item < batchSize; item++) orders.add(new CancelOrderCommand(firstOrders[user] + item));
                 send(command(CoreMessageType.CANCEL_ORDER_BATCH, 1_000 + user,
                         TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(orders))));
-                metrics();
+                if (interleavedMetrics) metrics();
             }
             drain();
-            if (terminal - terminalBefore != 512 || queryResults - queriesBefore != 512) {
+            if (terminal - terminalBefore != 512
+                    || queryResults - queriesBefore != (interleavedMetrics ? 512 : 0)) {
                 throw new IllegalStateException("accepted/terminal mismatch");
             }
         }
@@ -624,15 +627,22 @@ public class ClusteredBatchTradingBenchmark {
 
         private void drain() {
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+            long nextTimer = System.nanoTime();
             // Only functional setup/measurement boundaries drain. Commands in a wave remain pipelined.
             // Business completion progresses in logged callbacks; background work is read-only.
             int work;
             do {
-                service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, 1_700_000_000_001L);
+                long now = System.nanoTime();
+                // A timer callback appends a replicated fence, not just a completion poll.
+                // Mirror the production 1ms timer cadence; never fabricate a fence per spin.
+                if (now >= nextTimer) {
+                    service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, 1_700_000_000_001L);
+                    nextTimer = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(1);
+                }
                 work = service.doBackgroundWork(System.nanoTime());
                 if (System.nanoTime() > deadline) throw new IllegalStateException("service completion timeout");
-                if (service.pendingCommandCount() != 0)
-                    java.util.concurrent.locks.LockSupport.parkNanos(100_000);
+                // Spin only in this test driver; production ordering and waits are unchanged.
+                if (service.pendingCommandCount() != 0) Thread.onSpinWait();
             } while (work != 0 || service.pendingCommandCount() != 0);
         }
 

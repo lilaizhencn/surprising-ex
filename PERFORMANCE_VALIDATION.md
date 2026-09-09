@@ -5130,3 +5130,17 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 首轮两次线程累计CPU差分（覆盖测量中约516秒，百分比按单核）：Owner/JMH线程25.54%、matcher8.52%、Lane0/1/2/3为4.03/3.72/6.51/3.73%，未饱和。Thread.print捕获Owner停于测试夹具Workload.drain:635的parkNanos(100000)，matcher及Lane等待；脚本推进等待是需要进一步检查的因素，没有量化其独立影响或修改生产逻辑。
 - 首轮JFR664秒/约8.5MiB、DataLoss0、GC86次（83young/3old）、allocation samples72818，profile未开启New/OutsideTLAB，未取得有效-prof gc分数，故无精确每业务项分配/正式尾延迟结论。系统swap1396→1236.5MiB，采样未见CPU降频，磁盘约540GiB可用。启动存在JMH Unsafe废弃、native-access和Chronicle兼容提示，与本轮终检中断原因不同；未据此修改业务。
 - 收尾：本轮两次JVM及监控退出后清理/tmp/ex-core-10min（含retry、JFR、JSON、日志和线程采样）；只保留本摘要，不提供已删除原始产物为证据。本次无生产代码改动，无有效10分钟吞吐验收结果。
+
+## 2026-09-09 压测推进修正（采集前锁定）
+- 用户授权修正后继续本机测试；本轮先短测定位，不重新跑10分钟或操作云端。当前master6051aaec加benchmarks改动，无生产变更：drain保留回调/顺序/30秒deadline，移除固定100us休眠；新增interleavedMetrics参数，默认true保留历史查询场景，false显式分离交易测量，查询计数与断言同步，资金/持仓/快照检查保留。
+- HotSpot25.0.1/Maven3.9.16/macOS26.7/i9-9880H8C16T/16GiB。先六产品ClusteredBatchTradingBenchmarkTest；通过后当前构建JMH decodedBatchAdmissionAndSettlement，LINEAR_PERPETUAL/4Lane/1matcher/257账户/1symbol/256窗口/batch2/realtime=false/spin256。interleavedMetrics=true及false各独立fork，warmup2×5s、measurement1×30s、timeout2m、thread1，G1/Xms768m/Xmx768m/NMTsummary、JFR profile maxsize64m、-prof gc。3584business ops/2048业务消息/1024fills每cycle；查询分别512/0，batch1536/items3072。两者为当前代码不同负载，不冒充同口径优化对照。
+- 再运行历史18万对应LinearPerpetualScaleSoakMain 1000 256 256 5 10 UNIFORM 1 20 32 60 10，当前代码、4Lane/1matcher/256窗口/闭环，4GiB ZGC/AlwaysPreTouch/DisableExplicitGC，60秒含JIT及终检，无独立预热、不加profiler；它是Runtime直驱mixed，与服务回调基准分开报告，不与旧版计算回归比例。各场景初态与资金/快照断言沿用原脚本，任何失败原样记录并停止相关负载。
+- 所有轮次仅诊断，无绝对吞吐门槛；无真实三节点、业务分段延迟和长期内存验收结论。临时目录/tmp/ex-core-pump，磁盘低于10GiB停止，分析后清理本轮JFR/日志/测试报告。只保存必要摘要，不改README。
+- 采集前功能回归首轮52项/46错误：简单移除park使每个spin都调用onTimerEvent，后者每次追加一条replicated fence，快速耗尽8192队列；不是业务高负载下的容量结果。修正模拟定时器为生产配置的1ms节奏，避免伪造无限日志消息，不增加队列、不调用私有推进方法绕过日志、不修改生产代码。后续JMH以此最终脚本执行；此项节奏修正会影响结果，不能把差值全部归因于park删除。
+- 最终HotSpot25构建成功，ClusteredBatchTradingBenchmarkTest 52项全部通过，涵盖六产品及新增无查询重复交易，金融/订单/冻结/持仓/恢复断言保留。构建包SHA256=631332b1e878d04b226774c63ae74fad93905e88e3f8e617ab81c10ffaef61f7。
+- 服务回调JMH两轮均退出0：metrics=true 755.433 business ops/s（约431.676业务消息/s、215.838fills/s），terminal业务25088/Core14336，queries3584；false 973.885 business ops/s、556.505业务消息/s、278.253fills/s，terminal业务32256/Core18432、queries0。两组accepted/terminal一致、rejected0、unfinished/endBacklog0、资金与恢复通过。真实终检maxBacklog和commandWindow计数不代表始终256在途。含查询/不含查询B/business分别约11671.324/10543.246，GC profiler测量各1次/14ms与12ms；单样本无CI，JFR/脚本开销包含在结果中。
+- JFR metrics54秒/trading49秒含预热与终检，DataLoss均0、各4次GC，执行样本4631/4197，park218/190。此轮没有完整线程CPU/NMT差分、业务分段延迟、细粒度分配或长期内存采样，因此只作部分诊断，不能把spin CPU解释为有效计算饱和。
+- 历史对应Runtime直驱mixed退出0/PASS：elapsed60.896秒含终检，setup4269.624ms；6835716 terminal business operations、687620 Core messages，平均112252.369 business ops/s、11291.717消息/s，maxMatchingBacklog256，fundsInvariant=true、余额/持仓/冻结/订单及snapshot恢复检查通过，snapshot8407678B、restore419.491ms。10秒区间依次64857.079/134039.646/155231.036/79660.294/96151.429 ops/s，最后不足整段不单报；无独立预热，不取峰值为持续结果。incompleteRiskScans256是预算扫描剩余状态，非未终态消息，incompleteFunding0。
+- mixed过程中观测系统swap使用3908.75MiB、CPU speed100，存在换页风险但没有前后pageout差分证明其贡献，不归因全部差距；4GiB ZGC与无预热短轮不适合作历史302秒174729.238的回归量化。未采集mixed JFR/完整延迟，无真实三节点吞吐结论。终检sweep分位为整轮业务循环而非单订单延迟。
+- 结论：修正测试器后没有把回调吞吐抬高，反而暴露之前100us伪定时器推进与生产1ms节奏差异。固定分阶段发送+集中maker资金依赖+定时器排空不构成持续饱和负载；不能把755/974或之前5300当Core算力。Runtime直驱已证实当前可达十万量级，但尚未证明恢复历史持续17.47万。生产控制/依赖提交机制未变更，后续需独立设计持续回调负载及定位推进边界，不能简单删确定性屏障。
+- 收尾：全部本轮构建/测试/JMH/mixed进程结束；记录摘要后清理/tmp/ex-core-pump及benchmarks本轮surefire报告，不保留失效artifact路径，不修改README。

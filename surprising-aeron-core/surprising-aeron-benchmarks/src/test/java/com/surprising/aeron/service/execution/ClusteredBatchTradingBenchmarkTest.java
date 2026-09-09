@@ -7,6 +7,30 @@ import com.surprising.product.api.ProductLine;
 class ClusteredBatchTradingBenchmarkTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
+    void tradingWithoutInterleavedQueriesRetainsTerminalAndFinancialChecks(ProductLine productLine) {
+        var workload = new ClusteredBatchTradingBenchmark.Workload();
+        workload.accountLanes = 4;
+        workload.productLine = productLine;
+        workload.batchSize = 2;
+        workload.maxInFlight = 256;
+        workload.settlementSpinLimit = 256;
+        workload.interleavedMetrics = false;
+        try (workload) {
+            workload.setup();
+            var counters = new ClusteredBatchTradingBenchmark.Counters();
+            var benchmark = new ClusteredBatchTradingBenchmark();
+            benchmark.decodedBatchAdmissionAndSettlement(workload, counters);
+            benchmark.decodedBatchAdmissionAndSettlement(workload, counters);
+            org.junit.jupiter.api.Assertions.assertEquals(7168, counters.terminalBusinessOperations);
+            org.junit.jupiter.api.Assertions.assertEquals(counters.acceptedBusinessOperations,
+                    counters.terminalBusinessOperations);
+            org.junit.jupiter.api.Assertions.assertEquals(4096, counters.terminalCoreMessages);
+            org.junit.jupiter.api.Assertions.assertEquals(2048, counters.terminalTrades);
+            org.junit.jupiter.api.Assertions.assertEquals(0, counters.queries);
+        }
+    }
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
     void priceScopedPrefixScenarioKeepsFundsAndSnapshotCorrect(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
         workload.accountLanes = 4;
