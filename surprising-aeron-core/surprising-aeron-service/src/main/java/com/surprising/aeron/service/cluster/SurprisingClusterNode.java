@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.cluster;
 
-import com.surprising.aeron.service.execution.SurprisingClusteredService;
+import com.surprising.aeron.service.execution.ContinuousTradingClusterService;
 
 import io.aeron.archive.Archive;
 import io.aeron.archive.ArchiveThreadingMode;
@@ -87,7 +87,7 @@ public final class SurprisingClusterNode {
                     .aeronDirectoryName(aeronDirectoryName)
                     .archiveContext(localArchiveClient.clone())
                     .clusterDir(clusterDirectory)
-                    .clusteredService(new SurprisingClusteredService(topology.productLine()))
+                    .clusteredService(new ContinuousTradingClusterService(topology.productLine()))
                     .errorHandler(errorHandler("clustered-service"));
             if (serviceIdleStrategy != null) {
                 serviceContext.idleStrategySupplier(serviceIdleStrategy);

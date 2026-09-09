@@ -24,61 +24,26 @@ import org.junit.jupiter.params.provider.EnumSource;
 class ClusterCommandPipelineTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
-    void followerReplayBackpressuresLoggedTimersUntilLaneProgresses(ProductLine product) throws Exception {
-        for (boolean nextIsCommand : new boolean[]{false, true}) verifyFollowerReplayBackpressure(product, nextIsCommand);
-    }
-
-    private void verifyFollowerReplayBackpressure(ProductLine product, boolean nextIsCommand) throws Exception {
-        try (Fixture live = new Fixture(product, Cluster.Role.FOLLOWER); Fixture serial = new Fixture(product)) {
+    void fullIndependentWindowCompletesWithoutAnotherTimer(ProductLine product) {
+        try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
             serial.applyAll(live.setup());
-            var commands = new ArrayList<CoreMessage>();
             String asset = ContractType.valueOf(product.contractTypeCode()).isInverse() ? "BTC" : "USDT";
             for (int i = 0; i < ClusterCommandWindow.CAPACITY; i++) {
                 var funds = live.message(CoreMessageType.ADJUST_BALANCE, 10000 + i,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 20000)));
-                live.apply(funds); serial.apply(funds);
+                live.apply(funds);
+                serial.apply(funds);
             }
-            for (int i = 0; i < ClusterCommandWindow.CAPACITY; i++) {
-                commands.add(live.place(10000 + i, "BTC-USDT", 1000 + i, 80, 1, CoreOrderSide.BUY));
-            }
-            var field = TradingCoreRuntime.class.getDeclaredField("matcherPipeline");
-            field.setAccessible(true);
-            var matcher = (MatcherPipelineGroup) field.get(live.service.state());
-            var entered = new CountDownLatch(1);
-            var release = new CountDownLatch(1);
-            var blocked = matcher.readAtSubmissionFence(0, () -> {
-                entered.countDown();
-                try { if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("matcher release timeout"); }
-                catch (InterruptedException e) { throw new AssertionError(e); }
-                return 1;
-            });
-            assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
-            try {
-                commands.forEach(live::send);
-                assertThat(live.service.commandWindowSize()).isEqualTo(ClusterCommandWindow.CAPACITY);
-                // 重放已经记录的 1ms 定时器；快速追赶不应被本机消费速度变成节点故障。
-                for (int i = 0; i < 8192; i++)
-                    live.service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, TIME + i + 1);
-                var releaser = new Thread(() -> {
-                    try { Thread.sleep(30); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-                    release.countDown();
-                });
-                releaser.start();
-                try {
-                    if (nextIsCommand) {
-                        var next = live.place(11, disjointSymbol("BTC-USDT"), 8000, 80, 1, CoreOrderSide.BUY);
-                        commands.add(next);
-                        live.send(next);
-                    } else {
-                        live.service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, TIME + 8193);
-                    }
-                } finally { releaser.join(2000); }
-            } finally { release.countDown(); }
-            live.tick(); serial.applyAll(commands);
-            assertThat(blocked.join()).isOne();
-            assertThat(live.service.pendingCommandCount()).isZero();
+            var orders = new ArrayList<CoreMessage>();
+            for (int i = 0; i < ClusterCommandWindow.CAPACITY; i++)
+                orders.add(live.place(10000 + i, "BTC-USDT", 1000 + i, 80, 1, CoreOrderSide.BUY));
+            orders.forEach(live::send);
+            // 满窗口本身就是确定性提交边界；后续日志回调只轮询，不再注入额外timer栅栏。
+            live.progressUntil(() -> live.service.pendingCommandCount() == 0);
+            serial.applyAll(orders);
             assertThat(live.hash()).isEqualTo(serial.hash());
-            assertThat(live.service.state().tradingState().users()).isEqualTo(serial.service.state().tradingState().users());
+            assertThat(live.service.state().tradingState().users())
+                    .isEqualTo(serial.service.state().tradingState().users());
             try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.state().snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
@@ -143,7 +108,7 @@ class ClusterCommandPipelineTest {
                 live.responses.clear();
                 live.send(first);
                 long sequence = state.matchingSequence(first.header().commandId());
-                state.commits.pumpMatchingCommitCompletions(first.header().submittedAtEpochMillis(), 0, sequence);
+                live.service.pollCommands();
                 assertThat(state.commits.commitPublicationDeferred).as("batch waiting for matcher").isFalse();
                 live.send(next);
                 live.tick();
@@ -294,7 +259,7 @@ class ClusterCommandPipelineTest {
                         }));
                 assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
                 live.send(first);
-                live.service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, TIME + 1);
+                live.service.pollCommands();
                 live.send(second);
                 assertThat(live.service.commandWindowSize()).isEqualTo(2);
                 assertThat(live.responses).isEmpty();
@@ -980,7 +945,8 @@ class ClusterCommandPipelineTest {
             }
             assertThat(publicTrades).isEqualTo(batch ? 40 : 2);
             assertThat(executions).isEqualTo(batch ? 80 : 4);
-            assertThat(begin).isOne(); assertThat(end).isOne();
+            // 持续Owner按命令建立确定性提交边界，两条命令各有一组完整推送。
+            assertThat(begin).isEqualTo(2); assertThat(end).isEqualTo(2);
             assertThat(live.hash()).isEqualTo(serial.hash());
             assertThat(live.service.state().tradingState().order(201).executedQuantitySteps()).isEqualTo(batch ? 20 : 2);
             assertThat(live.service.state().tradingState().order(202).executedQuantitySteps()).isEqualTo(batch ? 20 : 2);
@@ -1011,7 +977,7 @@ class ClusterCommandPipelineTest {
     }
 
     @Test
-    void normalizedSymbolsShareIndependentWindowAndTimerSchedulingIsCoalescedAcrossWaves() {
+    void normalizedSymbolsCompleteWithoutSchedulingTimers() {
         try (Fixture f = new Fixture(ProductLine.SPOT)) {
             f.setup();
             f.send(f.place(11, "BTC-USDT", 101, 80, 1, CoreOrderSide.BUY));
@@ -1019,10 +985,10 @@ class ClusterCommandPipelineTest {
             assertThat(f.service.commandWindowSize()).isEqualTo(2);
             assertThat(f.responses).isEmpty();
             int scheduled = f.scheduledTimers;
-            assertThat(scheduled).isPositive();
+            assertThat(scheduled).isZero();
             f.tick();
             int afterTick = f.scheduledTimers;
-            assertThat(afterTick).isGreaterThan(scheduled);
+            assertThat(afterTick).isZero();
             f.send(f.cancel(11, 101));
             assertThat(f.scheduledTimers).isEqualTo(afterTick);
             f.tick();
@@ -1138,7 +1104,7 @@ class ClusterCommandPipelineTest {
         void tick() {
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
             do {
-                service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, TIME + 1);
+                service.pollCommands();
                 if (service.pendingCommandCount() == 0) return;
                 java.util.concurrent.locks.LockSupport.parkNanos(100_000);
             } while (System.nanoTime() < deadline);

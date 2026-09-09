@@ -27,15 +27,16 @@ public final class SurprisingClusteredService implements ClusteredService {
     private static final int MATCHING_COMPLETION_BATCH_SIZE = 64;
     private static final long COMMAND_TIMEOUT_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
     private static final long SNAPSHOT_TIMEOUT_SECONDS = 30;
-    // Reserved service timer. Re-scheduling replaces the deadline; stale logged expirations
-    // simply drain the current wave. No local-clock choice changes business execution order.
-    static final long PIPELINE_TIMER_ID = Long.MIN_VALUE + 101;
     private final ClusterCommandWindow commandWindow = new ClusterCommandWindow();
     private int commandWindowHighWaterMark;
     private long drainedWindows, drainedCommands, dependencyFences, controlFences;
-    private boolean pipelineTimerArmed;
     /** 已提交结果的异步出口，网络背压不占用交易回调的执行时间。 */
     private final DeferredSessionResponses pendingResponses = new DeferredSessionResponses();
+
+    /** 已编码终态跨线程出口；为空时由当前线程直接使用会话。 */
+    private final ResponseSink responseSink;
+    @FunctionalInterface
+    interface ResponseSink { void offer(ClientSession session, DirectBuffer buffer, int length); }
 
     private final ProductLine productLine;
     private TradingCoreRuntime state;
@@ -62,7 +63,10 @@ public final class SurprisingClusteredService implements ClusteredService {
     private long snapshotFenceNotReadyCount;
     private long snapshotFenceTimeoutCount;
 
-    public SurprisingClusteredService(ProductLine productLine) {
+    public SurprisingClusteredService(ProductLine productLine) { this(productLine, null); }
+
+    SurprisingClusteredService(ProductLine productLine, ResponseSink responseSink) {
+        this.responseSink = responseSink;
         if (productLine == null) {
             throw new IllegalArgumentException("product line is required");
         }
@@ -80,11 +84,10 @@ public final class SurprisingClusteredService implements ClusteredService {
         pendingIngress.clear();
         activeControl = null;
         controlResponse = null;
-        drainingSize = requestedDrainSize = 0;
+        drainingSize = 0;
         pendingResponses.clear();
         commandWindowHighWaterMark = 0;
         drainedWindows = drainedCommands = dependencyFences = controlFences = 0;
-        pipelineTimerArmed = false;
         snapshotFenceNotReadyCount = 0;
         snapshotFenceTimeoutCount = 0;
         idleStrategy = cluster.idleStrategy();
@@ -128,11 +131,14 @@ public final class SurprisingClusteredService implements ClusteredService {
         } catch (IllegalArgumentException exception) {
             return;
         }
+        acceptCommittedCommand(session, request, timestamp, header.position());
+    }
+
+    void acceptCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position) {
         try {
             processingLogCallback = true;
-            ensureProgressTimer(timestamp);
             pendingResponses.poll(System.nanoTime(), MATCHING_COMPLETION_BATCH_SIZE);
-            processIngress(session, request, timestamp, header.position());
+            processIngress(session, request, timestamp, position);
         } catch (org.agrona.concurrent.AgentTerminationException failure) {
             throw failure;
         } catch (RuntimeException failure) {
@@ -152,8 +158,6 @@ public final class SurprisingClusteredService implements ClusteredService {
     private CoreResponse controlResponse;
     /** 正在提交的确定性窗口前缀；不因下一次轮询的线程速度改变边界。 */
     private int drainingSize;
-    /** 日志定时器已经要求提交的窗口前缀；与正在完成的前缀分开，避免阻断无依赖准入。 */
-    private int requestedDrainSize;
     private long drainingSequence, progressDeadline;
 
     private void processIngress(ClientSession session, CoreMessage request, long timestamp, long position) {
@@ -183,34 +187,22 @@ public final class SurprisingClusteredService implements ClusteredService {
     private void progressCommandsInScope(boolean flushWindow) {
         for (int work = 0; work < MATCHING_COMPLETION_BATCH_SIZE; work++) {
             // 已确定的提交前缀不变；未完成时仍可准入与在途命令无依赖的后续订单。
+            if (drainingSize == 0 && commandWindow.size() != 0) beginCommandPrefix();
             if (drainingSize != 0) pollCommandPrefix();
-            if (drainingSize == 0 && requestedDrainSize != 0) beginCommandPrefix(requestedDrainSize);
             if (commandWindow.size() == ClusterCommandWindow.CAPACITY) return;
             if (activeControl != null) {
                 if (!pollControl()) return;
                 continue;
             }
             var next = pendingIngress.first();
-            if (next == null) {
-                if (flushWindow && commandWindow.size() != 0 && drainingSize == 0) {
-                    beginCommandPrefix(commandWindow.size());
-                    continue;
-                }
-                return;
-            }
-            if (next.command == null) {
-                requestedDrainSize = commandWindow.size();
-                pendingIngress.remove();
-                if (drainingSize == 0 && requestedDrainSize != 0) beginCommandPrefix(requestedDrainSize);
-                continue;
-            }
+            if (next == null) return;
             boolean eligible = state.prepareClusterPipelineScope(next.command, commandWindow);
             int prefix = !eligible || state.matchingSequence(next.command.header().commandId()) != 0
                     ? commandWindow.size() : commandWindow.conflictingPrefixSize();
             if (prefix != 0) {
                 if (drainingSize != 0) return;
                 if (eligible) dependencyFences++; else controlFences++;
-                beginCommandPrefix(prefix);
+                beginCommandPrefix();
                 continue;
             }
             if (!eligible) {
@@ -235,7 +227,6 @@ public final class SurprisingClusteredService implements ClusteredService {
             entry.response = entry.sequence == 0 ? result : null;
             pendingIngress.remove();
             commandWindowHighWaterMark = Math.max(commandWindowHighWaterMark, commandWindow.size());
-            if (commandWindow.size() == ClusterCommandWindow.CAPACITY && drainingSize == 0) beginCommandPrefix(1);
         }
     }
 
@@ -246,14 +237,15 @@ public final class SurprisingClusteredService implements ClusteredService {
         }
     }
 
-    private void beginCommandPrefix(int size) {
-        if (size == 0 || drainingSize != 0) throw new IllegalStateException("invalid command drain boundary");
-        drainingSize = size;
-        drainingSequence = 0;
+    /** 每条命令有固定提交边界，不能让各副本的线程完成速度改变推送分组。 */
+    private void beginCommandPrefix() {
+        if (commandWindow.size() == 0 || drainingSize != 0)
+            throw new IllegalStateException("invalid command drain boundary");
+        drainingSize = 1;
+        var last = commandWindow.get(0);
+        drainingSequence = last.sequence;
         drainedWindows++;
-        drainedCommands += size;
-        for (int i = 0; i < size; i++) drainingSequence = Math.max(drainingSequence, commandWindow.get(i).sequence);
-        var last = commandWindow.get(size - 1);
+        drainedCommands++;
         beginCapture(last.position, last.timestamp);
         progressDeadline = System.nanoTime() + COMMAND_TIMEOUT_NANOS;
     }
@@ -276,7 +268,6 @@ public final class SurprisingClusteredService implements ClusteredService {
                     entry.request.header().response(responseType(entry.request.header())), entry.response);
         }
         commandWindow.removePrefix(drainingSize);
-        requestedDrainSize = Math.max(0, requestedDrainSize - drainingSize);
         drainingSize = 0;
         drainingSequence = 0;
         state.runtimeState.releaseCompletedSequentialLaneStage();
@@ -391,9 +382,6 @@ public final class SurprisingClusteredService implements ClusteredService {
         try {
             processingLogCallback = true;
             finishSnapshotPrefix(deadlineNanos);
-            // Canonical control state at a snapshot boundary and on restore. An existing
-            // cluster timer may still expire; it is harmless and a subsequent schedule replaces it.
-            pipelineTimerArmed = false;
             state.assertClusterCallbackComplete();
             state.beginSnapshot(snapshotId, deadlineNanos);
             idleStrategy.reset();
@@ -460,7 +448,7 @@ public final class SurprisingClusteredService implements ClusteredService {
         pendingIngress.clear();
         activeControl = null;
         controlResponse = null;
-        drainingSize = requestedDrainSize = 0;
+        drainingSize = 0;
         pendingResponses.clear();
         responseSequence = 0;
         matchingResponse = null;
@@ -479,7 +467,6 @@ public final class SurprisingClusteredService implements ClusteredService {
     public void onSessionOpen(ClientSession session, long timestamp) {
         processingLogCallback = true;
         try {
-            ensureProgressTimer(timestamp);
             pendingResponses.poll(System.nanoTime(), MATCHING_COMPLETION_BATCH_SIZE);
             progressCommands(false);
         } catch (RuntimeException failure) {
@@ -489,49 +476,37 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     @Override
     public void onSessionClose(ClientSession session, long timestamp, CloseReason closeReason) {
-        pendingResponses.remove(session.id());
+        if (responseSink == null) pendingResponses.remove(session.id());
         drainFromLogEvent();
     }
 
+    /** 历史日志中的定时器不产生交易操作；交易由独立Owner持续推进。 */
     @Override
-    public void onTimerEvent(long correlationId, long timestamp) {
-        if (correlationId == PIPELINE_TIMER_ID) {
-            pipelineTimerArmed = false;
-            ensureProgressTimer(timestamp);
-            pendingResponses.poll(System.nanoTime(), MATCHING_COMPLETION_BATCH_SIZE);
-            drainFromLogEvent();
-        }
-    }
+    public void onTimerEvent(long correlationId, long timestamp) {}
 
-    private void ensureProgressTimer(long timestamp) {
-        if (pipelineTimerArmed) return;
-        long delay = Math.max(1, cluster.timeUnit().convert(1, java.util.concurrent.TimeUnit.MILLISECONDS));
-        // Every replica must publish one schedule per logged tick: dropping or coalescing a
-        // request breaks Aeron's expired-timer reconciliation during recovery. The SDK forbids
-        // retrying this administrative publication from doBackgroundWork/onRoleChange.
-        // Keep its bounded protocol retry here; matching, Lane and client egress never idle here.
-        long deadline = System.nanoTime() + COMMAND_TIMEOUT_NANOS;
-        while (!cluster.scheduleTimer(PIPELINE_TIMER_ID, Math.addExact(timestamp, delay))) {
-            if (Thread.currentThread().isInterrupted() || System.nanoTime() - deadline >= 0)
-                throw new org.agrona.concurrent.AgentTerminationException(
-                        new IllegalStateException("cluster progress timer publication interrupted or timed out"));
-            idleStrategy.idle();
-        }
-        pipelineTimerArmed = true;
-    }
+    private void drainFromLogEvent() { pollCommands(); }
 
-    private void drainFromLogEvent() {
+    /** 只能由持有交易状态的Owner线程调用；不属于Aeron的背景回调。 */
+    int pollCommands() {
+        int before = pendingCommandCount();
         processingLogCallback = true;
         try {
-            awaitIngressCapacity(null);
-            pendingIngress.add(null, null, 0, 0);
+            pendingResponses.poll(System.nanoTime(), MATCHING_COMPLETION_BATCH_SIZE);
             progressCommands(false);
+            int realtimeWork = pendingCommandCount() == 0 ? progressRealtimeReads(System.nanoTime()) : 0;
+            return (before != 0 || pendingCommandCount() != 0 ? 1 : 0) + realtimeWork;
+        } catch (org.agrona.concurrent.AgentTerminationException fatal) {
+            throw fatal;
         } catch (RuntimeException failure) {
             throw new org.agrona.concurrent.AgentTerminationException(failure);
         } finally {
+            commandWindow.releaseDecoded();
             processingLogCallback = false;
         }
     }
+
+    /** 角色切换和快照等控制边界先完成其前面的已复制命令。 */
+    void finishCommands() { finishSnapshotPrefix(snapshotDeadline()); }
 
     TradingCoreRuntime state() {
         if (state == null) throw new IllegalStateException("clustered service is not started");
@@ -576,14 +551,15 @@ public final class SurprisingClusteredService implements ClusteredService {
     }
 
     private void offerResponse(ClientSession session, CoreMessageHeader header, CoreResponse response) {
-        if (session.isClosing()) return;
+        if (responseSink == null && session.isClosing()) return;
         int length = CoreMessageCodec.encodedResponseLength(response);
         if (responseScratch.length < length) {
             responseScratch = new byte[length];
             responseBuffer.wrap(responseScratch);
         }
         CoreMessageCodec.encodeResponse(header, response, state.committedCoreSequence(), responseScratch);
-        pendingResponses.offer(session, responseBuffer, length, System.nanoTime());
+        if (responseSink != null) responseSink.offer(session, responseBuffer, length);
+        else pendingResponses.offer(session, responseBuffer, length, System.nanoTime());
     }
 
     private static boolean retryableOffer(long result) {

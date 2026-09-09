@@ -73,7 +73,7 @@ class SurprisingClusteredServiceTest {
                     encoded.length, aeronHeader());
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
             while (service.state().querySequence(query.header().commandId()) == 0 && System.nanoTime() < deadline) {
-                service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, 1001);
+                service.pollCommands();
                 java.util.concurrent.locks.LockSupport.parkNanos(100_000);
             }
             assertThat(service.state().querySequence(query.header().commandId())).isNotZero();
@@ -168,7 +168,7 @@ class SurprisingClusteredServiceTest {
             service.onSessionMessage(clientSession(responses), 1_000, new UnsafeBuffer(encoded), 0,
                     encoded.length, aeronHeader());
             for (int tick = 0; tick < 4; tick++) {
-                service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, 1_001 + tick);
+                service.pollCommands();
                 assertThat(service.doBackgroundWork(System.nanoTime())).isZero();
                 assertThat(responses).isEmpty();
                 assertThat(service.state().realtimeSnapshotPending()).isFalse();
@@ -361,7 +361,7 @@ class SurprisingClusteredServiceTest {
             int before = offers.get();
             service.doBackgroundWork(0);
             assertThat(offers).hasValue(before);
-            while (offers.get() < 3) service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, 1235);
+            while (offers.get() < 3) service.pollCommands();
             assertThat(offers).hasValue(3);
             assertThat(closes).hasValue(0);
             assertThat(service.state().probeValue()).isEqualTo(3);
@@ -645,7 +645,7 @@ class SurprisingClusteredServiceTest {
     }
 
     @Test
-    void loggedSessionOpenArmsProgressTimerAndBackgroundDoesNotRearm() {
+    void loggedSessionOpenAndBackgroundNeverScheduleProgressTimers() {
         SurprisingClusteredService service = service();
         AtomicInteger attempts = new AtomicInteger();
         AtomicLong correlationId = new AtomicLong();
@@ -655,10 +655,10 @@ class SurprisingClusteredServiceTest {
             preparePendingPlace(service.state(), 902);
             service.onSessionOpen(clientSession(responses), 1_000);
 
-            assertThat(attempts).hasValue(3);
-            assertThat(correlationId).hasValue(SurprisingClusteredService.PIPELINE_TIMER_ID);
+            assertThat(attempts).hasValue(0);
+            assertThat(correlationId).hasValue(0);
             service.doBackgroundWork(0);
-            assertThat(attempts).hasValue(3);
+            assertThat(attempts).hasValue(0);
         } finally {
             service.onTerminate(null);
         }
@@ -806,7 +806,7 @@ class SurprisingClusteredServiceTest {
     private static void finishCommands(SurprisingClusteredService service) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         do {
-            service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, 1235);
+            service.pollCommands();
             if (service.pendingCommandCount() == 0) return;
             java.util.concurrent.locks.LockSupport.parkNanos(100_000);
         } while (System.nanoTime() < deadline);

@@ -5235,3 +5235,41 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 命令：HotSpot25 Maven `-pl surprising-aeron-core/surprising-aeron-benchmarks -am package -Dtest=CommandReplicationTest -Dsurefire.failIfNoSpecifiedTests=false`。节点以benchmarks jar启动 `com.surprising.aeron.service.cluster.CommandReplicationNode`，配置前三节点拓扑、各自独立data/aeron目录及 `surprising.aeron.service.idle-strategy=YIELDING|BUSY_SPIN`；负载入口 `com.surprising.aeron.benchmarks.transport.CommandReplicationLoad`，`replication.batch=1|20`。生产启动器未添加测试开关，也未修改其idle默认值。
 - 初步结论：独立复制已建立可运行基线；批量展开后的13万items/s不是13万消息/s。单独切换service busy-spin没有让批量消息吞吐显著跃升，且尾延迟更差。真实Core路径还包含生产客户端/解码/撮合/账户/提交/响应，和此预编码最小ACK服务不同，不能把差额全归到owner。历史GCP成绩真实存在，环境/GC/并行资源/价格注入与代码均变化，现有证据不足以认定“今天代码无回退”或确定回退幅度；异步回调推进和提交粒度仍需进一步隔离。
 - 原始目录：/tmp/ex-local-backpressure、/tmp/ex-replication-yield-1及四个/tmp/ex-replication-clean-*，另/tmp/ex-replay-*.log和构建日志；分析完成后按用户要求全部清理，路径仅为历史来源，不能继续访问。四份正式load.log SHA256按表顺序：1a8b2772da38593a2db249c7f03b207a4110650ece86f4975d4788fff1e89d71 / dabadad182fb32ec9b85587ca6871d71a6807bb9e8fa2f9d6d1ef0843c16157f / 0d8487aeb921071eba41193f17043cb607b3863e8e8bda9688c73ba6eaca070f / 9d7e0720f01de09c8d4bfda0e3075b9f59d744387f2a6d1e8457963f0ebf3124。所有测试JVM已停止，云资源仍保持释放状态。
+
+## 2026-09-10 本机吞吐定位与修复验证（采集前锁定）
+- 用户明确要求定位吞吐并验证修复提升：先测本轮开始的当前master 047f81c4，再只修改有证据的瓶颈，以相同参数复测；不检出/构建历史版本，不与旧GCP数值计算回退比例。只用本机，云资源保持释放。
+- 主场景固定真实三JVM Cluster+一个客户端、LINEAR_PERPETUAL/1769用户/256币对/1matcher/4Lane、256全局及session在途、batch20、trading-stream=true/operational=false、seed112001；金融行情刷新、最终资金/持仓/冻结/终态检查不改变。HotSpot25.0.1/G1、Core512–768MiB/load128–512MiB、SHARED_NETWORK/YIELDING/spin0，预热10秒/测量30秒/测量后排空计入耗时，JFR profile maxsize32MiB/NMTsummary，ps每2秒。
+- 本机i9-9880H8C16T/16GiB/macOS26.7，磁盘531GiB。基线与修复测量时不并行编译/其他负载。通过条件offered=terminal/unfinished0、金融核对PASS、无节点退出或日志异常；短测吞吐改善至少10%才作为值得保留的性能方向，仍非云端容量验收。必要时同参数复测稳定性；改变负载/采样须另记诊断轮。
+- 优先检查满64窗口只提交1条的粒度、异步任务完成后的日志回调推进频率，以及客户端窗口/标记价控制栅栏。保持日志顺序、依赖、金融校验及Aeron后台不修改交易状态的要求。共享服务改动需六产品正确性测试及真实改动路径JMH/JFR、终态和快照检查；本轮/tmp/ex-throughput-*产物分析后清理，磁盘不足10GiB或300秒deadline停止。
+- 用户随后明确禁止依赖定时器，改动范围升级为持续Owner：Aeron服务线程交付已复制消息，独立Owner FIFO执行/连续轮询Lane，输出不可变终态由服务线程发送；每命令确定性提交，快照/角色/停止设FIFO边界。service仍YIELDING；新增Owner仅完全空闲时Backoff，有在途工作持续轮询。不存在后台修改交易状态或Owner调用实际Aeron API。
+- 新增线程边界JMH：ContinuousOwnerBenchmark.placeCancelWithoutTimers，六产品、256用户/单币对/256在途/1matcher/默认4Lane，256买单+256撤单，预热1×1秒/测量1×2秒/1fork/1thread，G1/512–768MiB/NMTsummary/-prof gc/JFR profile maxsize32MiB，关闭时核对全部余额/冻结及快照恢复、发送=终态。人为代理传输与短采样只作路径诊断，不当作三节点容量。网络修复轮仍严格使用上一段主场景参数；不并行编译。
+- 补充同参数六产品ClusteredBatchTradingBenchmark.independentBatchWindows，batchSize20/maxInFlight256/accountLanes4/realtime=false/interleavedMetrics=false/settlementSpinLimit0，其余JMH/JFR参数同上，覆盖连续轮询批量命令Map键复用。固定每命令一个提交分组后的网络重复轮使用相同主场景；另重启三个节点并回放after-egress测试目录，verify-only/expected-cycles52验证资金及业务hash，不发送新交易、不把恢复查询速率当吞吐。
+
+### 实际结果：持续推进及跨进程恢复
+- 生产节点现在使用 ContinuousTradingClusterService：独立 Owner 持续接收 FIFO 命令并轮询完成，不再申请交易推进定时器；仅完全空闲时退避。每命令固定提交边界保持副本确定性，快照/角色切换仍有生命周期栅栏，队列满仍有有界背压，不宣称所有等待已删除。OrderedCommitCoordinator 复用已有 sequenceKey，减少反复轮询的装箱。
+- 第一次独立 Owner 网络运行因 SDK 禁止后台 ClientSession.offer 失败，未计入有效性能；改为服务线程独立 Publication 编码标准 SessionMessageHeader，Owner 只交付不可变输出，随后网络测试通过。生产启动器没有测试开关，代理传输和诊断入口都在 benchmarks 模块。
+
+|同参数本机三节点轮次|业务终态 ops/s|Core 消息/s|普通下单 p99 ms|批量下单 p99 ms|
+|---|---:|---:|---:|---:|
+|当前 master 修改前|16388.494|1768.991|267.386|260.046|
+|独立 Owner、修复响应出口后|30732.600|3148.382|52.953|99.549|
+|固定提交边界、复用键后|33674.666|3429.278|44.367|77.594|
+|最终固定依赖复测|31849.707|3252.700|45.940|79.233|
+
+- 最终轮30.616秒，975104业务操作/99584消息 offered=terminal、unfinished0、peak256，230400成交/7525.528 fills/s；45测量周期/54总周期，资金差额0，持仓/冻结/清算生命周期核对PASS，业务hash d5e181b46869c760。三个节点最终 commands=windows=118844、pending0，无节点异常。相对基线业务吞吐约提升94.3%，消息吞吐约83.9%；不选择最高一轮代替最终结果。
+- 最终 Leader node2 的测量窗口JFR分配权重约115.08MiB/s、3788.73B/业务操作，13次GC暂停10.23–11.22ms；Owner Java/native样本959，matcher16、四Lane合计73。此前高频Map轮询Long权重约147.68MB；最终含 pumpMatchingCommitCompletions 的Long调用路径仍有约4.74MB，主要来自其下游，不能宣称零装箱。新增队列、编码和业务对象仍分配，绝对分配速率随吞吐上升；本轮没有证明零分配、无泄漏或Owner有效CPU达到95%。
+- 日志回放：52周期数据重启后金融核对PASS，hash仍为984fa3870c1a1441。真实快照首次跨JVM恢复暴露 exchange-core 的enum identity hash不稳定，保留状态校验并修复Order、DirectOrder、UserProfile和StateHashReportResult，改用稳定枚举编码。仅作废本轮已知不兼容测试快照、保留日志重放；未添加生产忽略hash或自动清数据逻辑。
+- fork固定到51c592625c16e53ffc9e2190e53c35dcfc72354f，0.5.18-emporia jar SHA256为33e4a1d0bce14050ca74ea5332c57ff9de82b9a3d74f4aa30673bbcf0470beb5，父pom同步固定。修复后三个节点真实快照均position125178272/recording5/term4；再次重启直接加载快照，三个节点windows=commands=0，56周期金融核对PASS，hash保持72d837de6737442。作废测试快照后的恢复曾出现一次quorum position went backwards警告，后续快照及恢复校验通过。
+- 最终 benchmarks -am verify：1102项，1101通过/0失败/0错误/1项数据库环境跳过；fork定向测试83项全部通过，包含两独立JVM身份hash扰动回归。六产品连续Owner尾部完成及在途快照/角色切换测试通过。
+
+|最终JMH产品|连续Owner循环/s|B/循环|批量窗口循环/s|B/循环|
+|---|---:|---:|---:|---:|
+|SPOT|103.176|5006954|14.300|45220779|
+|LINEAR_PERPETUAL|101.328|5054818|12.742|45857715|
+|INVERSE_PERPETUAL|101.214|5027949|14.394|45331426|
+|LINEAR_DELIVERY|88.025|5277011|13.269|45648340|
+|INVERSE_DELIVERY|93.110|5174174|13.331|45422254|
+|OPTION|95.516|5129746|12.871|45822762|
+
+- 上表12场景均通过金融和快照断言；连续循环512业务操作，批量循环10240业务操作/512消息。每场景仅1秒预热/2秒测量，连续GC6次、批量GC4次；分配包含代理及测试构造，不当生产单笔分配或三节点容量。真实网络短测同样是带JFR的定位对照，未覆盖完整运营后台侧载、WS/Valkey、云端隔离硬件和长稳，当前仍未测到有效算力饱和上限。
+- 原始来源/tmp/ex-throughput-before、after-egress、final、pinned、replay、snapshot-*、jmh及jmh-pinned；分析后按用户要求清理本轮日志/JFR/录制/临时脚本及测试报告，仅保留摘要、源码和构建包，以上路径不再作为可访问附件。基线load.log SHA256为269a9faa25105d9fea7c4dab1047424992e4003822fc4abd67c4a7b964545729，最终为37e290fdb7e41cadc5f17bbb9e3f156c2c95451bf22e7788afc2d425fc95422a。全部测试JVM已停止，未启动云资源，未修改README。

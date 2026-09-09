@@ -1036,9 +1036,11 @@ final class OrderedCommitCoordinator {
     void pumpMatchingCommitCompletions(long clusterTimestamp, long clusterPosition, long throughSequence) {
         long first = owner.pendingMatching.firstSequence();
         if (first > throughSequence) return;
-        OrderBatchPending head = owner.batches.pendingOrderBatches.get(first);
+        PendingMatching pending = owner.pendingMatching.get(first);
+        // 连续轮询复用命令已有的Map键，不为同一在途序号反复分配Long。
+        OrderBatchPending head = pending == null ? null : owner.batches.pendingOrderBatches.get(pending.sequenceKey());
         if (head != null && !head.started) {
-            owner.batches.activateOrderBatch(head, owner.pendingMatching.get(first), true);
+            owner.batches.activateOrderBatch(head, pending, true);
         }
         owner.drainMatchingCompletions();
         if (controlPending(first)) signalPendingMatchingReady(first);

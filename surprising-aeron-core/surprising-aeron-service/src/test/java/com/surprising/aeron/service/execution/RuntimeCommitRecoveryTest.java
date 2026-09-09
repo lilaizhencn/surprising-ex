@@ -740,7 +740,7 @@ class RuntimeCommitRecoveryTest {
         ClusterReplay replay = replayClusterCommandRaw(service, command);
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
         do {
-            service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, command.header().submittedAtEpochMillis() + 1);
+            service.pollCommands();
             if (service.pendingCommandCount() == 0) break;
             java.util.concurrent.locks.LockSupport.parkNanos(100_000);
         } while (System.nanoTime() < deadline);

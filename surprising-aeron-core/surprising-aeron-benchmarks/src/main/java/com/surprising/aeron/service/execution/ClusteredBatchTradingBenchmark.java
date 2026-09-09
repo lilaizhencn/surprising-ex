@@ -24,14 +24,14 @@ import org.openjdk.jmh.annotations.*;
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"})
 @Threads(1)
 public class ClusteredBatchTradingBenchmark {
-    /** 64笔订单及已记录定时器的快速重放，强制覆盖入口背压；用于诊断，不代表容量吞吐。 */
+    /** 满64条独立命令的提交边界必须覆盖整个窗口，不依赖额外timer补交剩余命令。 */
     @Benchmark
-    public long replicatedIngressBackpressure(Workload workload, Counters counters) throws Exception {
-        workload.runReplicatedIngressBackpressure();
-        counters.acceptedBusinessOperations += 128;
-        counters.terminalBusinessOperations += 128;
-        counters.acceptedCoreMessages += 128;
-        counters.terminalCoreMessages += 128;
+    public long fullWindowCommit(Workload workload, Counters counters) {
+        workload.runIndependentCommandWindows(true);
+        counters.acceptedBusinessOperations += 512;
+        counters.terminalBusinessOperations += 512;
+        counters.acceptedCoreMessages += 512;
+        counters.terminalCoreMessages += 512;
         return workload.terminal;
     }
     /** 单项批量命令走顺序撮合续接，覆盖等待期间的 owner 上下文交接；使用 batchSize=1。 */
@@ -493,47 +493,11 @@ public class ClusteredBatchTradingBenchmark {
             }
         }
 
-        public void runReplicatedIngressBackpressure() throws Exception {
-            var entered = new java.util.concurrent.CountDownLatch(1);
-            var release = new java.util.concurrent.CountDownLatch(1);
-            var blocked = service.state().matcherPipeline.readAtSubmissionFence(0, () -> {
-                entered.countDown();
-                try { if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("matcher release timeout"); }
-                catch (InterruptedException e) { throw new IllegalStateException(e); }
-                return 1;
-            });
-            long before = terminal;
-            singleResponses = true;
-            try {
-                if (!entered.await(2, TimeUnit.SECONDS)) throw new IllegalStateException("matcher gate timeout");
-                for (int user = 0; user < 64; user++) {
-                    long id = orderId++;
-                    firstOrders[user] = id;
-                    send(command(CoreMessageType.PLACE_ORDER, 1000 + user,
-                            TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(id, "JMH-PIPE-A-USDT", 1,
-                                    CoreOrderSide.BUY, 90, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
-                                    CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "replay-" + id))));
-                }
-                if (service.commandWindowSize() != 64) throw new IllegalStateException("replay window not full");
-                for (int tick = 0; tick < 8192; tick++)
-                    service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, 1_700_000_000_001L + tick);
-                var releaser = new Thread(() -> {
-                    try { Thread.sleep(2); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-                    release.countDown();
-                }, "replay-benchmark-release");
-                releaser.start();
-                try { service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, 1_700_000_008_193L); }
-                finally { releaser.join(2000); }
-                drain();
-                if (blocked.join() != 1) throw new IllegalStateException("matcher gate failed");
-                for (int user = 0; user < 64; user++) send(command(CoreMessageType.CANCEL_ORDER, 1000 + user,
-                        TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(firstOrders[user]))));
-                drain();
-                if (terminal - before != 128) throw new IllegalStateException("replay lost terminal results");
-            } finally { release.countDown(); singleResponses = false; }
+        public void runIndependentCommandWindows() {
+            runIndependentCommandWindows(false);
         }
 
-        public void runIndependentCommandWindows() {
+        public void runIndependentCommandWindows(boolean fullWindowBoundary) {
             long before = terminal;
             singleResponses = true;
             try {
@@ -546,7 +510,15 @@ public class ClusteredBatchTradingBenchmark {
                                     CoreOrderSide.BUY, 90, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
                                     CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "pipeline-" + id))));
                 }
-                drain();
+                if (fullWindowBoundary) {
+                    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                    while (service.pendingCommandCount() != 0) {
+                        service.onSessionOpen(session, 1_700_000_000_000L);
+                        if (System.nanoTime() > deadline)
+                            throw new IllegalStateException("full window waited for another timer");
+                        Thread.onSpinWait();
+                    }
+                } else drain();
                 for (int user = 0; user < 256; user++) send(command(CoreMessageType.CANCEL_ORDER, 1_000 + user,
                         TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(firstOrders[user]))));
                 drain();
@@ -688,23 +660,10 @@ public class ClusteredBatchTradingBenchmark {
 
         private void drain() {
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
-            long nextTimer = System.nanoTime();
-            // Only functional setup/measurement boundaries drain. Commands in a wave remain pipelined.
-            // Business completion progresses in logged callbacks; background work is read-only.
-            int work;
-            do {
-                long now = System.nanoTime();
-                // A timer callback appends a replicated fence, not just a completion poll.
-                // Mirror the production 1ms timer cadence; never fabricate a fence per spin.
-                if (now >= nextTimer) {
-                    service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, 1_700_000_000_001L);
-                    nextTimer = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(1);
-                }
-                work = service.doBackgroundWork(System.nanoTime());
+            while (service.pollCommands() != 0 || service.pendingCommandCount() != 0) {
                 if (System.nanoTime() > deadline) throw new IllegalStateException("service completion timeout");
-                // Spin only in this test driver; production ordering and waits are unchanged.
-                if (service.pendingCommandCount() != 0) Thread.onSpinWait();
-            } while (work != 0 || service.pendingCommandCount() != 0);
+                Thread.onSpinWait();
+            }
         }
 
         private CoreMessage command(CoreMessageType type, long user, byte[] payload) {
