@@ -4,6 +4,47 @@ import com.surprising.aeron.protocol.CoreResponse;
 
 /** 功能测试的有界等待适配器；生产集群只使用有限轮询推进。 */
 final class CoreTestCompletion {
+    static CoreResponse applyAsynchronously(TradingCoreRuntime owner,
+            com.surprising.aeron.protocol.CoreMessage message) {
+        owner.activate();
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+        var window = new ClusterCommandWindow();
+        boolean independent = owner.prepareClusterPipelineScope(message, window);
+        while (!independent && !owner.runtimeState.tryAcquireOwnerLaneAccess()) {
+            if (System.nanoTime() >= deadline) throw new AssertionError("Lane handoff timeout");
+            Thread.onSpinWait();
+        }
+        owner.runtimeState.enterAsynchronousCommandScope();
+        try {
+            long timestamp = message.header().submittedAtEpochMillis();
+            long position = message.header().sourceSequence();
+            CoreResponse response = owner.applyDecodedCommand(message, timestamp, position, window.decodedIfPresent(message), independent);
+            while (owner.hasPendingDirectCommand()) {
+                response = owner.pollDirectCommand();
+                if (System.nanoTime() >= deadline) throw new AssertionError("direct command timeout");
+                Thread.onSpinWait();
+            }
+            long requestedSequence = owner.matchingSequence(message.header().commandId());
+            CoreResponse[] completed = {response};
+            while (owner.firstPendingMatchingSequence() != 0) {
+                owner.commits.commitReadyMatching(64, timestamp, position, false,
+                        (sequence, result) -> { if (sequence == requestedSequence) completed[0] = result; });
+                if (System.nanoTime() >= deadline) throw new AssertionError("matching command timeout " + message.header().messageType()
+                        + " independent=" + independent + " requested=" + requestedSequence
+                        + " first=" + owner.firstPendingMatchingSequence()
+                        + " control=" + owner.commits.controlPending(requestedSequence)
+                        + " completion=" + owner.laneCommandContexts.required(requestedSequence).hasMatchingCompletion()
+                        + " result=" + owner.laneCommandContexts.required(requestedSequence).matchingResult()
+                        + " submitted=" + owner.pendingMatching(requestedSequence).isMatchingSubmitted());
+                Thread.onSpinWait();
+            }
+            return completed[0];
+        } finally {
+            owner.runtimeState.exitAsynchronousCommandScope();
+            owner.runtimeState.releaseOwnerLaneAccess();
+        }
+    }
+
     static CoreResponse completeMatchingSynchronously(TradingCoreRuntime owner, long requestedSequence,
                                                long clusterTimestamp,
                                                long clusterPosition) {

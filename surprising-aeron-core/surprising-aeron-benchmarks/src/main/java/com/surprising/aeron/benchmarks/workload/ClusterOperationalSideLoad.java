@@ -24,12 +24,16 @@ final class ClusterOperationalSideLoad implements AutoCloseable {
     private volatile long measurementStart = Long.MAX_VALUE, measurementEnd = Long.MAX_VALUE;
 
     ClusterOperationalSideLoad(long seed,List<Long> users,long[] marks,long[] sequences) {
+        this(seed, users, marks, sequences, 0);
+    }
+
+    ClusterOperationalSideLoad(long seed,List<Long> users,long[] marks,long[] sequences,int controlPageSize) {
         this.marks=marks.clone(); this.sequences=sequences.clone();
         OperationalEndpoint createdPrices=null;
         OperationalLifecycle createdLifecycle=null;
         try {
             createdPrices=new OperationalEndpoint(seed+1_000_000,"operational-prices",16,this);
-            createdLifecycle=new OperationalLifecycle(seed+2_000_000,this);
+            createdLifecycle=new OperationalLifecycle(seed+2_000_000,this,controlPageSize);
             queries=new OperationalUserQueries(users,this);
         } catch(RuntimeException | Error error) {
             if(createdLifecycle!=null)createdLifecycle.close();

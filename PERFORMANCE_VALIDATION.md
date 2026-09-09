@@ -5036,3 +5036,15 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 保留中间失败：旧同步完成断言、逐项批量同步 Lane 分支、交接后风险游标作用域、异步批量改单测试的终态核对时机，以及上述定时器恢复问题；日志未删除或覆盖。跨分片测试初版错误断言订单应被删除，实际正确终态为 CANCELED，已按既有生命周期核对并比较恢复后的完整账户状态。
 - 原始证据目录：`/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-async-commands/`。包含完整/定向构建日志、首次失败及修复后本地三进程目录、全部启动参数、节点日志、执行/恢复结果、快照检查和源码清单。最终 service.jar SHA-256 `643bcdf8df20dc6db0390eb2405bc1a1a88567e18bf385f95ef75105056010b8`；benchmarks.jar `ce91b09f506fb8c32858d49f015e0337df1df23f3f17f3185db2dfd8f3edfd02`；`source-manifest.json` `1d6339b45ddebc5beaa2ffd5712acd21a311740accc647930f36efcc001519e5`。
 - 结论：本次业务异步推进的功能与上述恢复验证通过；未作吞吐、并发上限、尾延迟、分配率或零分配承诺，性能验收留待用户重新授权真实三节点压测。
+
+## 2026-09-09 资金费与风险扫描移回 Account Lane
+
+- 基于 master `0f1b343f` 的工作树。本轮范围为 `APPLY_FUNDING`、`CONTINUE_RISK_SCAN` 及 `EXECUTE_LIQUIDATION_BATCH` 的风险扫描分支；不代表其他清算、ADL、到期结算、触发单控制业务已经全部移出 owner。owner 保留日志调度、财库合并、扫描游标/清算 ID 和终态提交；提交/回滚阶段仍使用原有 Lane 所有权交接。
+- 控制任务通过 `ControlLaneDispatcher` 派发到永久 Lane 线程，复用原任务槽；资金费按参与 Lane 并行计算，风险扫描按原有 8 单位片段和全局预算有序推进。每个账户片段之间不接管全部 Lane；完成结果由 owner 轮询收集，未完成立即返回。失败须收齐所有 Lane 后才能交接和回滚，禁止与账户修改并发回滚。
+- 直接命令跨回调保留原始日志上下文、准入额度和检查点；异步阶段未完成时禁止新命令越过及快照遗漏。批量清算的扫描续步沿原匹配序号继续，不能重复校验/应用已经消费的 matcher 证据。失败回滚同时检查未提升 revision 的账户变更，防止局部资金修改遗漏。
+- HotSpot JDK 25.0.1（Oracle GraalVM）、Maven 3.9.16。本地 `mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am verify`：1028 项中 1027 通过、1 项外部数据库条件跳过，0 失败/错误，service 633 项通过；后续入口/快照保护及重新打包的重点 44 项通过；同步/异步风险结果比较和基准编排编译的重点 17 项通过。
+- 新增永久 Lane 并行执行/阻塞隔离、失败收齐、在途快照拒绝、两永续产品资金费分页/重复命令/恢复后继续收付用例。五衍生品风险预算测试改走集群异步执行路径，并与同步结果及快照恢复比较。资金守恒检查使用账户与财库的经济总额；资金费会改变各用户分布，不能要求资金状态哈希不变。
+- 本地三个独立 JVM：六产品线各完成执行、SIGKILL 后日志恢复、快照后 SIGKILL 恢复，共 18 项通过，结束后节点/客户端全部退出。本次未连接云端或执行压测/JMH/JFR；benchmarks 模块只运行小样本 JUnit 功能测试。新增外部三节点 JMH 控制页参数 0/1/64（0 保持原编排），覆盖续页与跨 Lane 收集，只编译和功能检查，未采集性能数据。
+- 证据目录 `/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-lane-control/`：`verify.log`、`boundary-package.log`、`risk-parity-benchmark-compile.log`、`local-functional.log` 和 `local-functional/results.json`。保留中间失败日志：批量续步缺少重新调度导致超时、快照先检查了账户读栅栏、测试误用资金分布哈希判断守恒；修复后均通过，未放宽业务终态/资金断言。
+- 被测 service.jar SHA-256 `8f1ddde62e48de2bb6ba4d8d5d203a06ea4bd2602e51ab032e165a000ad6305e`；功能客户端 benchmarks.jar `926ab2f49dbcd8a5bb15a38494035d698c3b891ba316acadce22977525d9f450`；最终源码清单 `source-manifest.json` SHA-256 `7be62e709db9cd4a7fe0d6ca4942d2ef3c9e514e54df05e951087d9fc9886f17`。功能客户端 jar 在随后添加的 JMH 编排参数之前打包，交易服务与功能 Gate 未变化；新 JMH 源码已单独编译检查。
+- 结论：上述资金费/风险扫描路径的本地功能和恢复验证通过；不宣称 owner 已轻量化、全部账户业务 Lane 化、零分配或吞吐达标。README 未修改，性能验收仍待用户授权真实三节点压测。

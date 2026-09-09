@@ -569,6 +569,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     public CoreResponse apply(CoreMessage message, long clusterTimestamp, long clusterPosition) {
         if (!activated) activate();
         assertOwner();
+        if (pendingDirectCommand != null) throw new IllegalStateException("asynchronous control command is still active");
         admissionPreviousClusterTimestamp = currentClusterTimestamp;
         admissionPreviousClusterPosition = currentClusterPosition;
         currentClusterTimestamp = clusterTimestamp;
@@ -1035,8 +1036,25 @@ public final class TradingCoreRuntime implements AutoCloseable {
             status = ResponseStatus.REJECTED;
             resultCode = CoreResultCode.INVALID_COMMAND;
         }
+        if (controlContinuation != null) {
+            pendingDirectCommand = new PendingDirectCommand(message, clusterTimestamp, clusterPosition,
+                    sourceKey, fingerprint, commandAdmission, commandDemand, beforeProjection,
+                    beforeRuntimeRevision, runtimeCommandCheckpoint, positionIdentityCheckpoint);
+            return null;
+        }
+        return finishDirectCommand(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint, commandAdmission,
+                commandDemand, beforeProjection, beforeRuntimeRevision, runtimeCommandCheckpoint,
+                positionIdentityCheckpoint, status, resultCode);
+    }
+
+    private CoreResponse finishDirectCommand(CoreMessage message, long clusterTimestamp, long clusterPosition,
+            SourceKey sourceKey, CommandFingerprint fingerprint, CoreAdmissionReservation commandAdmission,
+            CoreAdmissionReservation.AdmissionDemand commandDemand, RuntimeProjectionPoint beforeProjection,
+            long beforeRuntimeRevision, long runtimeCommandCheckpoint, long positionIdentityCheckpoint,
+            ResponseStatus status, CoreResultCode resultCode) {
         if (status != ResponseStatus.APPLIED
-                && (commits.commitPublicationDirty || runtimeState.revision() != beforeRuntimeRevision)) {
+                && (commits.commitPublicationDirty || runtimeState.revision() != beforeRuntimeRevision
+                    || runtimeState.hasUncommittedCommandChanges())) {
             rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
                     Math.incrementExact(appliedCommandCount));
         }
@@ -1116,6 +1134,59 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 requiredExportSequence, stateHash, responseData);
         return releaseAdmission(commandAdmission, response);
     }
+
+    /** 当前直接命令的业务续步，只由日志回调中的 owner 推进。 */
+    private java.util.function.BooleanSupplier controlContinuation;
+    /** 保留原始命令、资金检查点及准入额度，异步完成前禁止提前提交。 */
+    private PendingDirectCommand pendingDirectCommand;
+    /** 业务阶段完成后保留结果，等待提交/回滚交接时禁止再次调用业务续步。 */
+    private ResponseStatus controlCompletionStatus;
+    private CoreResultCode controlCompletionCode;
+
+    void deferControl(java.util.function.BooleanSupplier continuation) {
+        if (controlContinuation != null || continuation == null) throw new IllegalStateException("nested control continuation");
+        controlContinuation = continuation;
+    }
+
+    boolean hasPendingDirectCommand() { return pendingDirectCommand != null; }
+
+    CoreResponse pollDirectCommand() {
+        assertOwner();
+        var pending = pendingDirectCommand;
+        if (pending == null) throw new IllegalStateException("no pending direct command");
+        if (controlCompletionStatus == null) {
+            try {
+                if (!controlContinuation.getAsBoolean()) return null;
+                controlCompletionStatus = ResponseStatus.APPLIED;
+                controlCompletionCode = CoreResultCode.NONE;
+            } catch (CoreStateRejectedException failure) {
+                controlCompletionStatus = ResponseStatus.REJECTED;
+                controlCompletionCode = CoreResultCode.fromRejectionCode(failure.code());
+            } catch (ArithmeticException failure) {
+                controlCompletionStatus = ResponseStatus.REJECTED;
+                controlCompletionCode = CoreResultCode.ARITHMETIC_OVERFLOW;
+            } catch (IllegalArgumentException failure) {
+                controlCompletionStatus = ResponseStatus.REJECTED;
+                controlCompletionCode = CoreResultCode.INVALID_COMMAND;
+            }
+        }
+        if (!runtimeState.tryAcquireOwnerLaneAccess()) return null;
+        ResponseStatus status = controlCompletionStatus;
+        CoreResultCode code = controlCompletionCode;
+        controlCompletionStatus = null;
+        controlCompletionCode = null;
+        controlContinuation = null;
+        pendingDirectCommand = null;
+        return finishDirectCommand(pending.message, pending.timestamp, pending.position, pending.sourceKey,
+                pending.fingerprint, pending.admission, pending.demand, pending.beforeProjection,
+                pending.beforeRevision, pending.checkpoint, pending.identityCheckpoint, status, code);
+    }
+
+    /** 仅异步控制命令需要跨日志回调保留的提交上下文。 */
+    private record PendingDirectCommand(CoreMessage message, long timestamp, long position,
+            SourceKey sourceKey, CommandFingerprint fingerprint, CoreAdmissionReservation admission,
+            CoreAdmissionReservation.AdmissionDemand demand, RuntimeProjectionPoint beforeProjection,
+            long beforeRevision, long checkpoint, long identityCheckpoint) { }
 
     long runtimePositionQuantity(long userId, String symbol) {
         long quantity = 0;
@@ -2102,7 +2173,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (!activated) activate();
         assertOwner();
         assertHealthy();
-        if (!pendingMatching.isEmpty() || !bookQueries.queryIds.isEmpty()) {
+        if (pendingDirectCommand != null || !pendingMatching.isEmpty() || !bookQueries.queryIds.isEmpty()) {
             throw new IllegalStateException("unfinished business work outside cluster log callback");
         }
     }
@@ -2601,7 +2672,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (!commits.commitPublicationDeferred || pending == null
                 || pending.settlementEvent() == null && pending.cancelEvent() == null
                 && pending.replaceEvent() == null
-                && !orderBatchLaneWorkPending(pending.sequence())) {
+                && !orderBatchLaneWorkPending(pending.sequence()) && !commits.controlPending(pending.sequence())) {
             throw new IllegalStateException("matching commit context cannot be suspended");
         }
         resultBuilder.materializeChangeAccumulators();

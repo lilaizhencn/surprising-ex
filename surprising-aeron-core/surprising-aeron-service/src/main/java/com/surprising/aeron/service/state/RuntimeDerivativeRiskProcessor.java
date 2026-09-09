@@ -153,6 +153,79 @@ public final class RuntimeDerivativeRiskProcessor {
         return budget - remaining;
     }
 
+    /** 风险预算续步：账户估值在 Lane，扫描游标及清算 ID 在 owner 按原顺序提交。 */
+    public static final class RiskWork {
+        /** 本命令固定预算和账户索引；后续控制命令不能越过此命令。 */
+        private final TradingRuntimeState runtime;
+        private final RuntimeIdentityRegistry identities;
+        private final PositionUserIndex positionUsers;
+        private final int budget;
+        /** 当前币对片段的固定输入和跨 Lane 游标。 */
+        private RiskScanRuntime initial, progress;
+        private CoreInstrumentState instrument;
+        private MarkPriceRuntime mark;
+        private int remaining, sliceBudget, sliceRemaining, settleAssetId, laneId;
+        private long nextLiquidationId;
+        /** 派发和完成标记保证重复轮询不会再次执行账户任务。 */
+        private boolean dispatched, complete;
+
+        public RiskWork(int maxWork, PositionUserIndex positionUsers, TradingRuntimeState runtime,
+                RuntimeIdentityRegistry identities) {
+            if (maxWork <= 0 || maxWork > 4096 || positionUsers == null || runtime == null || identities == null)
+                throw new IllegalArgumentException("invalid risk scan budget");
+            runtime.assertOwner();
+            this.runtime = runtime; this.identities = identities; this.positionUsers = positionUsers;
+            budget = runtime.riskScanControl().enabled()
+                    ? Math.min(maxWork, runtime.riskScanControl().scanBatchSize()) : 0;
+            remaining = budget;
+        }
+
+        public boolean poll() {
+            runtime.assertOwner();
+            if (complete) return true;
+            // 每次最多推进一个账户片段，不以等待循环阻塞日志回调。
+            if (initial == null) {
+                if (remaining == 0) return complete = true;
+                initial = runtime.firstRiskIncompleteScan();
+                if (initial == null) return complete = true;
+                progress = initial;
+                instrument = runtime.instrument(identities.symbol(initial.symbolId()));
+                mark = runtime.markPrice(initial.symbolId());
+                if (instrument == null || mark == null || mark.priceSequence() != initial.priceSequence())
+                    throw new IllegalStateException("risk scan input is missing");
+                settleAssetId = identities.assetId(instrument.settleAsset());
+                sliceBudget = sliceRemaining = Math.min(8, remaining);
+                nextLiquidationId = runtime.nextLiquidationId();
+            }
+            if (!dispatched) {
+                laneId = progress.accountLaneId();
+                runtime.dispatchRiskLane(laneId, () -> processLane(runtime, progress,
+                        positionUsers, null, instrument, mark, settleAssetId, initial.symbolId(),
+                        sliceRemaining, nextLiquidationId, identities));
+                dispatched = true;
+            }
+            if (!runtime.pollControlLanes()) return false;
+            dispatched = false;
+            LanePage page = (LanePage) runtime.controlLaneResult(laneId);
+            progress = page.scan();
+            nextLiquidationId = page.nextLiquidationId();
+            sliceRemaining -= page.workUnits();
+            if (page.complete()) {
+                progress = progress.accountLaneId() + 1 < runtime.topology().accountLaneCount()
+                        ? progress.nextAccountLane(progress.accountLaneId() + 1)
+                        : progress.withRiskProgress(true, 0, 0, "-", 0, 0, 0, 0, 0, progress.lastUserId());
+            }
+            if (sliceRemaining > 0 && !progress.riskComplete()) return false;
+            finishScan(runtime, initial, progress, nextLiquidationId);
+            runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+            remaining -= Math.max(1, sliceBudget - sliceRemaining);
+            initial = null;
+            return complete = remaining == 0 || runtime.firstRiskIncompleteScan() == null;
+        }
+
+        public int completedWork() { return budget - remaining; }
+    }
+
     public static void syncScanProgress(TradingCoreState source, TradingRuntimeState runtime,
                                         RuntimeIdentityRegistry identities) {
         if (source == null || runtime == null || identities == null) {
@@ -198,16 +271,21 @@ public final class RuntimeDerivativeRiskProcessor {
                 }
             }
         }
+        finishScan(runtime, initial, progress, nextLiquidationId);
+        return maxWork - remaining;
+    }
+
+    private static void finishScan(TradingRuntimeState runtime, RiskScanRuntime initial,
+            RiskScanRuntime progress, long nextLiquidationId) {
         if (nextLiquidationId != runtime.nextLiquidationId()) runtime.setNextLiquidationId(nextLiquidationId);
         if (progress.riskComplete() && initial.scanStartPriceSequence() != initial.priceSequence()) {
-            progress = new RiskScanRuntime(symbolId, 0, initial.priceSequence(), initial.priceSequence(), 0, false,
+            progress = new RiskScanRuntime(initial.symbolId(), 0, initial.priceSequence(), initial.priceSequence(), 0, false,
                     0, 0, "-", 0, 0, 0, 0, 0,
                     progress.triggerComplete(), progress.triggerPhase(), progress.triggerPriceCursor(),
                     progress.triggerOrderCursor(), progress.triggerUpperId(), progress.triggerMarkPriceTicks(),
                     progress.triggerGeneratedAtEpochMillis(), 0, 0);
         }
         runtime.putRiskScan(progress.withLastScheduledRevision(Math.incrementExact(runtime.revision())));
-        return maxWork - remaining;
     }
 
     private static LanePage processLane(TradingRuntimeState runtime, RiskScanRuntime initial,

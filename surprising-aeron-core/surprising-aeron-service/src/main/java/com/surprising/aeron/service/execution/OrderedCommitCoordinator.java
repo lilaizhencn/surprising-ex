@@ -98,6 +98,21 @@ final class OrderedCommitCoordinator {
         clusterPosition = pending.commitFenceClusterPosition();
         owner.currentClusterPosition = clusterPosition;
         LaneCommandContextRing.Context laneContext = owner.laneCommandContexts.required(sequence);
+        if (controlContinuationSequence == sequence) {
+            owner.restoreMatchingCommitContext(pending);
+            try {
+                if (!controlContinuation.getAsBoolean()) {
+                    owner.suspendMatchingCommitContext(pending);
+                    return null;
+                }
+                controlContinuation = null;
+                controlContinuationSequence = 0;
+                owner.runtimeState.completePendingReservations(sequence);
+                return finishAppliedMatching(pending, matchingResult, laneContext, null, controlApplyStartNanos);
+            } catch (RuntimeException failure) {
+                throw owner.failMatching(pending, "control Lane continuation failed", failure);
+            }
+        }
         OrderBatchPending waitingBatch = owner.batches.pendingOrderBatches.get(sequence);
         if (waitingBatch != null && pending.clusterIndependent
                 && waitingBatch.kind == OrderBatchKind.CANCEL && !waitingBatch.commitStarted()) {
@@ -158,7 +173,6 @@ final class OrderedCommitCoordinator {
         } else {
             laneContext.result(matchingResult, expectedLaneMask(pending, matchingResult), validAccountLaneMask());
         }
-        RuntimeProjectionPoint beforeProjection = pending.beforeProjection();
         owner.resultBuilder.commandOrderViews = List.of();
         owner.resultBuilder.commandChangedUserIds = List.of();
         owner.resultBuilder.commandChangedOrderIds = List.of();
@@ -174,8 +188,6 @@ final class OrderedCommitCoordinator {
         }
         owner.activateFactContext(capacityReservation, pending.command(), pending.fingerprint());
         beginCommitPublicationBatch();
-        ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
-        CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
         com.surprising.aeron.service.state.RuntimeTreasuryDelta settlementTreasuryDelta = null;
         try {
             switch (pending.operation()) {
@@ -299,6 +311,12 @@ final class OrderedCommitCoordinator {
                     }
                 }
             }
+            if (controlContinuation != null) {
+                controlContinuationSequence = sequence;
+                controlApplyStartNanos = applyStartNanos;
+                owner.suspendMatchingCommitContext(pending);
+                return null;
+            }
             owner.runtimeState.completePendingReservations(pending.sequence());
             if (pending.operation() == PendingMatching.Operation.PLACE
                     || pending.operation() == PendingMatching.Operation.REPLACE
@@ -311,6 +329,20 @@ final class OrderedCommitCoordinator {
         } catch (ArithmeticException | IllegalArgumentException exception) {
             throw owner.failMatching(pending, "Core and matcher state diverged", exception);
         }
+        return finishAppliedMatching(pending, matchingResult, laneContext, settlementTreasuryDelta, applyStartNanos);
+    }
+
+    /** 已校验撮合证据，账户阶段完成后只进入一次终态提交。 */
+    private CoreResponse finishAppliedMatching(PendingMatching pending, CoreMatchingResult matchingResult,
+            LaneCommandContextRing.Context laneContext, RuntimeTreasuryDelta settlementTreasuryDelta,
+            long applyStartNanos) {
+        long sequence = pending.sequence();
+        long clusterTimestamp = pending.commitFenceTimestamp();
+        long clusterPosition = pending.commitFenceClusterPosition();
+        RuntimeProjectionPoint beforeProjection = pending.beforeProjection();
+        CoreAdmissionReservation capacityReservation = owner.sequenceAdmission(sequence);
+        ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
+        CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
         RuntimeTreasuryDelta settledTreasuryDelta = settlementTreasuryDelta;
             if (settledTreasuryDelta != null) {
                 settledTreasuryDelta.apply(owner.runtimeState.treasury());
@@ -637,6 +669,18 @@ final class OrderedCommitCoordinator {
         if (!context.complete()) throw new IllegalStateException("account lane ACK barrier is incomplete");
     }
 
+    /** 控制命令窗口只有一个在途命令；无需另建按序号索引或任务队列。 */
+    private java.util.function.BooleanSupplier controlContinuation;
+    /** 跨回调保留的原始撮合序号及开始时刻。 */
+    private long controlContinuationSequence, controlApplyStartNanos;
+
+    boolean controlPending(long sequence) { return controlContinuation != null && controlContinuationSequence == sequence; }
+
+    void deferControl(java.util.function.BooleanSupplier continuation) {
+        if (controlContinuation != null) throw new IllegalStateException("control continuation already active");
+        controlContinuation = java.util.Objects.requireNonNull(continuation);
+    }
+
     void applyLiquidationBatch(
             com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand batch,
             com.surprising.aeron.service.matching.CoreMatchingResult matchingResult,
@@ -708,6 +752,24 @@ final class OrderedCommitCoordinator {
                     && scan.priceSequence() == continuation.priceSequence()
                     && scan.lastUserId() == continuation.lastUserId()) {
                 long beforeRevision = owner.runtimeState.revision();
+                if (owner.runtimeState.asynchronousCommands()) {
+                    var work = new RuntimeDerivativeRiskProcessor.RiskWork(batch.maxRiskScanUsers(),
+                            owner.positionUserIndex, owner.runtimeState, owner.identities);
+                    var result = owner.resultBuilder.commandLiquidationBatchResult;
+                    deferControl(() -> {
+                        if (!work.poll()) return false;
+                        if (!owner.runtimeState.tryAcquireOwnerLaneAccess()) return false;
+                        if (work.completedWork() > 0) owner.runtimeState.acceptChangedUserIds(userId ->
+                                laneContext.includeControlLanes(owner.matchingAdapter.topology().accountLaneMask(userId),
+                                        validAccountLaneMask()));
+                        if (owner.runtimeState.revision() != beforeRevision) requestCommitPublication();
+                        owner.resultBuilder.commandLiquidationBatchResult = new CoreLiquidationBatchResultView(
+                                batch.actions().size(), result.appliedActions(), result.pendingActions(),
+                                result.obsoleteActions(), result.processedOrders(), work.completedWork());
+                        return true;
+                    });
+                    return;
+                }
                 int riskWork = RuntimeDerivativeRiskProcessor.continueRiskBudget(batch.maxRiskScanUsers(),
                         owner.positionUserIndex, owner.runtimeState, owner.identities);
                 if (riskWork > 0) {
@@ -970,6 +1032,7 @@ final class OrderedCommitCoordinator {
             owner.batches.activateOrderBatch(head, owner.pendingMatching.get(first), true);
         }
         owner.drainMatchingCompletions();
+        if (controlPending(first)) signalPendingMatchingReady(first);
         dispatchReadyPlaceSettlements(clusterTimestamp, clusterPosition, throughSequence);
     }
 

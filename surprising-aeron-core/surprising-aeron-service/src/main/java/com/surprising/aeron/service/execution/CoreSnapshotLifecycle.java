@@ -80,6 +80,8 @@ final class CoreSnapshotLifecycle {
         if (snapshotId <= 0 || deadlineNanos <= 0) {
             throw new IllegalArgumentException("invalid snapshot fence");
         }
+        if (owner.hasPendingDirectCommand() || owner.commits.controlPending(owner.firstPendingMatchingSequence()))
+            throw new TradingCoreRuntime.SnapshotNotReadyException();
         if (snapshotFence != null) {
             if (snapshotFence.snapshotId == snapshotId) {
                 snapshotFence.deadlineNanos = Math.min(snapshotFence.deadlineNanos, deadlineNanos);

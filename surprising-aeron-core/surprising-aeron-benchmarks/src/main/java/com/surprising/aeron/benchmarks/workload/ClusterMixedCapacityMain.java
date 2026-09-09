@@ -25,6 +25,8 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     private final int sessionWindow = Integer.getInteger("surprising.aeron.capacity-session-in-flight", 64);
     private final boolean operational = Boolean.getBoolean("surprising.aeron.mixed-operational");
     private final boolean tradingStream = operational || Boolean.getBoolean("surprising.aeron.mixed-trading-stream");
+    /** 仅压测编排参数；0 保持原页大小，不改变生产服务配置。 */
+    private final int controlPageSize;
     private ClusterOperationalSideLoad sideLoad;
     private final ArrayDeque<Pending> pending = new ArrayDeque<>();
     private final long seed = Long.getLong("surprising.aeron.capacity-seed", 92001);
@@ -38,7 +40,12 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     private boolean measured, lossCompleted;
     private long adminRetriesBefore;
 
-    public ClusterMixedCapacityMain() {
+    public ClusterMixedCapacityMain() { this(0); }
+
+    ClusterMixedCapacityMain(int controlPageSize) {
+        if (controlPageSize < 0 || controlPageSize > 64)
+            throw new IllegalArgumentException("control page size must be in [0,64]");
+        this.controlPageSize = controlPageSize;
         var capacity = commandCapacity(window, sessionWindow);
         orderId = 200_000_000_000L + seed * 1_000_000;
         // A single FIFO command session preserves dependent place/cancel/IOC ordering without
@@ -49,6 +56,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
                 "mixed-" + seed, UUID.randomUUID().toString(), capacity);
         System.out.printf("mixedConfig globalWindow=%d sessionWindow=%d commandSessions=1 reservedQuerySessions=1 batchSize=%d tradingStream=%s%n",
                 window, sessionWindow, BATCH, tradingStream);
+        System.out.printf("mixedControlPageSize=%d%n", controlPageSize);
         for (int i=0;i<SYMBOLS;i++) { mark[i]=100; fundingId[i]=10_000+i; }
     }
 
@@ -80,7 +88,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     void prepareMeasuredRun() {
         setup();
         if (operational) {
-            sideLoad = new ClusterOperationalSideLoad(seed, users, mark, markSequence);
+            sideLoad = new ClusterOperationalSideLoad(seed, users, mark, markSequence, controlPageSize);
             sideLoad.start();
         }
         runFor(Integer.getInteger("surprising.aeron.capacity-warmup-seconds", 30), false);
@@ -213,7 +221,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
             funding(i);
             var work=work(CoreLiquidationWorkView.Purpose.EXECUTION);
             if(work.riskScanPending())send(CoreMessageType.CONTINUE_RISK_SCAN,0,
-                    TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64)),1,null);
+                    TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(controlPageSize == 0 ? 64 : controlPageSize)),1,null);
             else price(i,99);
         }
         lifecycleCursor=(lifecycleCursor+32)%SYMBOLS;
@@ -264,7 +272,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     private void funding(int i) {
         if(fundingComplete[i]) { fundingId[i]+=SYMBOLS;fundingComplete[i]=false; }
         var r=execute(CoreMessageType.APPLY_FUNDING,0,TradingCommandCodec.encodeApplyFunding(
-                new ApplyFundingCommand(fundingId[i],symbol(i),1,(i&1)==0?100_000:-100_000,fundingCursor[i],64)));
+                new ApplyFundingCommand(fundingId[i],symbol(i),1,(i&1)==0?100_000:-100_000,fundingCursor[i],controlPageSize == 0 ? 64 : controlPageSize)));
         var progress=CoreFundingProgressCodec.decode(r.data());
         fundingCursor[i]=progress.nextCursorUserId();fundingComplete[i]=progress.complete();
     }
@@ -287,7 +295,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     private void drainRisk() {
         for(int pages=0;pages<10000;pages++) {
             if(!work(CoreLiquidationWorkView.Purpose.EXECUTION).riskScanPending())return;
-            execute(CoreMessageType.CONTINUE_RISK_SCAN,0,TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64)));
+            execute(CoreMessageType.CONTINUE_RISK_SCAN,0,TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(controlPageSize == 0 ? 64 : controlPageSize)));
         }
         throw new IllegalStateException("risk scan failed to drain");
     }

@@ -512,6 +512,24 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
+    /** 集群控制阶段采用非阻塞派发；独立调用沿用调用方的同步完成契约。 */
+    public boolean asynchronousCommands() { assertOwner(); return asynchronousCommandScope; }
+
+    /** 控制账户任务的唯一派发/收集入口，与账户业务处理器分离。 */
+    private final ControlLaneDispatcher controlLanes = new ControlLaneDispatcher(this);
+
+    public void dispatchControlLanes(long laneMask, java.util.function.IntFunction<Object> operation) {
+        controlLanes.dispatch(laneMask, AccountLaneOperationType.SETTLEMENT, operation);
+    }
+
+    public void dispatchRiskLane(int laneId, java.util.function.Supplier<Object> operation) {
+        controlLanes.dispatch(1L << laneId, AccountLaneOperationType.RISK, ignored -> operation.get());
+    }
+
+    public boolean pollControlLanes() { return controlLanes.poll(); }
+
+    public Object controlLaneResult(int laneId) { return controlLanes.result(laneId); }
+
     public void readFence(long userId, long committedCoreSequence) {
         assertOwner();
         onLane(topology.accountLaneId(userId), lane -> {
@@ -2064,11 +2082,19 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void requireSnapshotFenceReady() {
         assertOwner();
+        if (controlLanes.pending()) throw new IllegalStateException("control Lane work is unfinished");
         pendingReservations.assertPendingReservationCounts();
         if (pendingReservations.totalPendingReservations != 0 || !pendingReservations.pendingReservationsBySequence.isEmpty()
                 || !pendingReservations.pendingReservationUsers.isEmpty() || snapshotProjectionStateDirty()) {
             throw new IllegalStateException("runtime contains unfinished reservation or patch work");
         }
+    }
+
+    /** 包含尚未提升 revision 的 Lane 修改，失败时也必须回滚。 */
+    public boolean hasUncommittedCommandChanges() {
+        assertOwner();
+        return snapshotProjectionStateDirty() || !treasury.changedAssets().isEmpty()
+                || !treasury.changedFundingSymbols().isEmpty() || !treasury.changedLifecycleSymbols().isEmpty();
     }
 
     boolean snapshotProjectionStateDirty() {

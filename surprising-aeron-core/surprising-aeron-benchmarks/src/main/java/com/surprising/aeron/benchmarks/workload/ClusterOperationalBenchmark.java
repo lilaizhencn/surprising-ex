@@ -13,11 +13,14 @@ import org.openjdk.jmh.annotations.*;
 @Fork(1)
 @Threads(1)
 public class ClusterOperationalBenchmark {
+    /** 外部三节点控制任务页大小；0 保持现有口径，1/64 覆盖续页与跨 Lane 收集。 */
+    @Param({"0", "1", "64"})
+    public int controlPageSize;
     private ClusterMixedCapacityMain workload;
 
     @Setup(Level.Trial)
     public void prepare() {
-        workload = new ClusterMixedCapacityMain();
+        workload = new ClusterMixedCapacityMain(controlPageSize);
         try {
             workload.verifyDependencyCollisionCoverage();
             workload.prepareMeasuredRun();

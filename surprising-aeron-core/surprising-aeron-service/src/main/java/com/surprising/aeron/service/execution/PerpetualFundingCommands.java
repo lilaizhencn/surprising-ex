@@ -14,8 +14,23 @@ final class PerpetualFundingCommands {
     void executeApplyFunding(CoreMessage message, long clusterTimestamp) {
         var command = TradingCommandCodec.decodeApplyFunding(message.payloadUnsafe());
         Iterable<Long> indexedUserIds = owner.positionUserIndex.usersAfter(command.symbol(), command.cursorUserId());
+        if (owner.runtimeState.asynchronousCommands()) {
+            var work = RuntimePerpetualFundingProcessor.prepare(command, indexedUserIds,
+                    message.header().commandId(), owner.runtimeState, owner.identities);
+            owner.deferControl(() -> {
+                if (!work.poll()) return false;
+                if (!owner.runtimeState.tryAcquireOwnerLaneAccess()) return false;
+                complete(work.result());
+                return true;
+            });
+            return;
+        }
         var result = RuntimePerpetualFundingProcessor.applyRuntime(command, indexedUserIds,
                 message.header().commandId(), owner.runtimeState, owner.identities);
+        complete(result);
+    }
+
+    private void complete(RuntimePerpetualFundingProcessor.FundingResult result) {
         if (result.state() != owner.runtimeState) {
             throw new IllegalStateException("funding processor replaced authoritative runtime state");
         }

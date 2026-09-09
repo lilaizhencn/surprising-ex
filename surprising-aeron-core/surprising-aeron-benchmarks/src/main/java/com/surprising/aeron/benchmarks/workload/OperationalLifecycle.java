@@ -9,12 +9,15 @@ import java.util.concurrent.TimeUnit;
 /** A separate control producer; its response dependencies never drain the trading producer. */
 final class OperationalLifecycle implements AutoCloseable {
     private static final String ACTIVE="OPS-ACT-USDT", RISK="OPS-RISK-USDT";
+    /** JMH 控制页参数；0 沿用原资金费页大小和运行中的风险预算。 */
+    private final int controlPageSize;
     private final OperationalEndpoint endpoint;
     private final ClusterOperationalSideLoad owner;
     private final long maker,user,riskMaker,victim;
     private long id,activeSequence,riskSequence,fundingId=1,deposits,cycles,nextRiskScanAtNanos;
 
-    OperationalLifecycle(long seed,ClusterOperationalSideLoad owner) {
+    OperationalLifecycle(long seed,ClusterOperationalSideLoad owner,int controlPageSize) {
+        this.controlPageSize=controlPageSize;
         this.owner=owner;
         endpoint=new OperationalEndpoint(seed,"operational-lifecycle",8,owner);
         maker=10_000_000L+seed*4;user=maker+1;riskMaker=maker+2;victim=maker+3;
@@ -61,7 +64,7 @@ final class OperationalLifecycle implements AutoCloseable {
         do {
             var response=endpoint.command(CoreMessageType.APPLY_FUNDING,0,
                     TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
-                            fundingId,ACTIVE,1,100_000,cursor,64)));
+                            fundingId,ACTIVE,1,100_000,cursor,controlPageSize == 0 ? 64 : controlPageSize)));
             cursor=CoreFundingProgressCodec.decode(response.data()).nextCursorUserId();
         }while(cursor!=0);
         fundingId++;
@@ -135,7 +138,7 @@ final class OperationalLifecycle implements AutoCloseable {
                 scanDelayMs=control.scanDelayMs();
                 long now=System.nanoTime();
                 if(control.enabled() && now>=nextRiskScanAtNanos) {
-                    scanBudget=control.scanBatchSize();
+                    scanBudget=controlPageSize == 0 ? control.scanBatchSize() : Math.min(controlPageSize,control.scanBatchSize());
                     nextRiskScanAtNanos=Math.addExact(now,TimeUnit.MILLISECONDS.toNanos(control.scanDelayMs()));
                 }
             }

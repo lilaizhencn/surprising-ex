@@ -265,6 +265,10 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     private boolean pollControl() {
         var request = activeControl.command;
+        if (state.hasPendingDirectCommand()) {
+            controlResponse = state.pollDirectCommand();
+            if (controlResponse == null) { checkProgressDeadline(); return false; }
+        }
         state.commits.commitReadyMatching(MATCHING_COMPLETION_BATCH_SIZE,
                 activeControl.timestamp, activeControl.position, false, matchingCommitHandler);
         if (state.firstPendingMatchingSequence() != 0) { checkProgressDeadline(); return false; }

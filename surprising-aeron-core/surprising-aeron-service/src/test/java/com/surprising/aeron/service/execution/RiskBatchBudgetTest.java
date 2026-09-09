@@ -38,7 +38,19 @@ class RiskBatchBudgetTest {
                                 CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"risk-"+user))));
             }
             long funds=com.surprising.aeron.service.state.RollingFundsStateHash.compute(state.tradingState());
-            applied(state,batch(line,work(state,line),16));
+            var firstBatch = batch(line, work(state, line), 16);
+            try (var reference = TradingCoreRuntime.fromSnapshot(line, state.snapshot(400))) {
+                var expected = reference.apply(firstBatch);
+                if (expected.resultCode() == CoreResultCode.MATCHING_PENDING)
+                    expected = CoreTestCompletion.completeMatchingSynchronously(reference,
+                            reference.matchingSequence(firstBatch.header().commandId()), TIME,
+                            firstBatch.header().sourceSequence());
+                var actual = apply(state, firstBatch);
+                assertThat(actual.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+                assertThat(actual.data()).isEqualTo(expected.data());
+                assertThat(state.tradingState().businessStateHash())
+                        .isEqualTo(reference.tradingState().businessStateHash());
+            }
             assertThat(state.tradingState().riskState().scans().get("SYM0-USDT").riskComplete()).isFalse();
             assertThat(state.tradingState().riskState().scans().get("SYM1-USDT").lastScheduledRevision()).isPositive();
             try(var restored=TradingCoreRuntime.fromSnapshot(line,state.snapshot(500))) {
@@ -123,11 +135,7 @@ class RiskBatchBudgetTest {
                 : CoreMessageHeader.command(type,id,line,CommandSource.OPERATIONS,982,seq,user,TIME+seq,seq),payload);
     }
     private static CoreResponse apply(TradingCoreRuntime state,CoreMessage message) {
-        var response=state.apply(message);
-        if(response.resultCode()==CoreResultCode.MATCHING_PENDING)
-            response=CoreTestCompletion.completeMatchingSynchronously(state, state.matchingSequence(message.header().commandId()),
-                    message.header().submittedAtEpochMillis(),message.header().sourceSequence());
-        return response;
+        return CoreTestCompletion.applyAsynchronously(state, message);
     }
     private static void applied(TradingCoreRuntime state,CoreMessage message) {
         var response=apply(state,message);

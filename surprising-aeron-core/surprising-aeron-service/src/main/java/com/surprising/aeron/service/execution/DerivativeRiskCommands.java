@@ -63,6 +63,21 @@ final class DerivativeRiskCommands {
         int pendingBefore = owner.pendingRiskScanCount();
         long startedAt = System.nanoTime();
         long beforeRevision = owner.runtimeState.revision();
+        if (owner.runtimeState.asynchronousCommands() && !activeScan.riskComplete()) {
+            var work = new RuntimeDerivativeRiskProcessor.RiskWork(command.maxUsers(),
+                    owner.positionUserIndex, owner.runtimeState, owner.identities);
+            owner.deferControl(() -> {
+                if (!work.poll()) return false;
+                if (!owner.runtimeState.tryAcquireOwnerLaneAccess()) return false;
+                if (owner.runtimeState.revision() != beforeRevision) owner.commits.requestCommitPublication();
+                int remaining = command.maxUsers() - work.completedWork();
+                if (remaining > 0 && owner.runtimeState.riskScan(activeScan.symbolId()).riskComplete())
+                    owner.triggers.evaluatePendingTriggerScan(symbol, remaining);
+                owner.logRiskScan("continuation", symbol, command.maxUsers(), pendingBefore, startedAt);
+                return true;
+            });
+            return;
+        }
         int completedRiskWork = 0;
         if (!activeScan.riskComplete()) {
             completedRiskWork = RuntimeDerivativeRiskProcessor.continueRiskBudget(command.maxUsers(),
