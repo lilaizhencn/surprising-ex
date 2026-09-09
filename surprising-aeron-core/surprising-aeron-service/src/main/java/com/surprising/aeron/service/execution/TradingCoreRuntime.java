@@ -119,6 +119,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /** 批量命令准备、结算派发与终态收集；仅交易 owner 推进。 */
     final OrderBatchExecutor batches = new OrderBatchExecutor(this);
+    /** 跨 matcher 清算撤单的非阻塞推进器。 */
+    final CrossShardCancellationCoordinator crossShardCancellations = new CrossShardCancellationCoordinator(this);
 
     /** 快照屏障与异步编码生命周期；不持有第二份交易状态。 */
     final CoreSnapshotLifecycle snapshots = new CoreSnapshotLifecycle(this);
@@ -1321,7 +1323,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     void submitMatching(PendingMatching pending) {
-        if (matchingSubmissionDeferred(pending.sequence())) return;
+        if (pending.crossShardCancellationStarted || matchingSubmissionDeferred(pending.sequence())) return;
         if (batches.pendingOrderBatches.containsKey(pending.sequenceKey())) {
             batches.submitOrderBatchMatching(pending);
             if (pending.isMatchingSubmitted()) matchingSubmissionCompleted(pending);
@@ -1332,7 +1334,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
             List<CoreOrderState> orders = batchCancellationOrders(pending);
             int shardId = singleMatcherShard(orders);
             if (shardId == -2) {
-                completeCrossShardLifecycleCancellation(pending, orders);
+                crossShardCancellations.start(pending, orders);
                 return;
             }
             matcherPipeline.submit(shardId < 0 ? matcherShard(pending) : shardId,
@@ -1354,33 +1356,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
             else if (shardId != orderShard) return -2;
         }
         return shardId;
-    }
-
-    void completeCrossShardLifecycleCancellation(
-            PendingMatching pending, List<CoreOrderState> orders) {
-        ArrayList<com.surprising.aeron.service.matching.CoreMatchingResult> results =
-                new ArrayList<>(orders.size());
-        boolean failed = false;
-        for (CoreOrderState order : orders) {
-            if (failed) {
-                results.add(new com.surprising.aeron.service.matching.CoreMatchingResult(
-                        false, "NOT_SUBMITTED"));
-                continue;
-            }
-            var result = matcherPipeline.call(matchingAdapter.matcherShardId(order.symbol()),
-                    () -> matchingAdapter.cancelForContinuation(
-                            order.userId(), order.orderId(), order.symbol()),
-                    MATCHING_AWAIT_TIMEOUT_NANOS);
-            results.add(result);
-            failed = !result.accepted();
-        }
-        var aggregate = matchingAdapter.aggregateCancellationResults(orders, results);
-        var evidenced = matchingAdapter.executeControlWithEvidenceSync(
-                pending.sequence(), pending.command().header().commandId(), 0, 0,
-                pending.command().header().submittedAtEpochMillis(), () -> aggregate);
-        publishMatchingCompletion(pending.sequence(), evidenced);
-        pending.matchingSubmitted();
-        matchingSubmissionCompleted(pending);
     }
 
     void progressPlaceAdmissions() {
@@ -1827,45 +1802,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return true;
     }
 
-    com.surprising.aeron.service.matching.CoreMatchingResult awaitMatchingResult(long sequence) {
-        return awaitMatchingResult(sequence, MATCHING_AWAIT_TIMEOUT_NANOS);
-    }
-
-    com.surprising.aeron.service.matching.CoreMatchingResult awaitMatchingResult(
-            long sequence, long timeoutNanos) {
-        if (fatalFailure != null) return null;
-        if (timeoutNanos <= 0) return null;
-        long deadline = System.nanoTime() + timeoutNanos;
-        PendingMatching pending = pendingMatching.get(sequence);
-        while (pending != null && placeAdmissionOutstanding(pending)
-                && !hasPendingMatchingRejection(sequence) && System.nanoTime() < deadline) {
-            progressPlaceAdmissions();
-            if (placeAdmissionOutstanding(pending)) Thread.onSpinWait();
-        }
-        if (hasPendingMatchingRejection(sequence)) return null;
-        int idle = 0;
-        while (pendingMatching.contains(sequence) && System.nanoTime() < deadline) {
-            drainMatchingCompletions();
-            if (hasPendingMatchingRejection(sequence)) return null;
-            LaneCommandContextRing.Context context = laneCommandContexts.required(sequence);
-            com.surprising.aeron.service.matching.CoreMatchingResult result = context.matchingResult();
-            if (result == null) result = context.takeMatchingCompletion();
-            if (result != null) return result;
-            long remainingNanos = deadline - System.nanoTime();
-            if (remainingNanos <= 0) break;
-            if (idle++ < 1_024) {
-                Thread.onSpinWait();
-            } else {
-                java.util.concurrent.locks.LockSupport.parkNanos(
-                        this, Math.min(remainingNanos, 1_000L));
-                if (Thread.currentThread().isInterrupted()) {
-                    throw new IllegalStateException("matching completion wait was interrupted");
-                }
-            }
-        }
-        return null;
-    }
-
     boolean placeAdmissionOutstanding(PendingMatching pending) {
         if (pending.placeAdmission() != null && !pending.isMatchingSubmitted()) return true;
         OrderBatchPending batch = batches.pendingOrderBatches.get(pending.sequenceKey());
@@ -1880,12 +1816,10 @@ public final class TradingCoreRuntime implements AutoCloseable {
     CompletableFuture<Integer> matchingStateHashAsync() {
         assertOwner();
         try {
-            int hash = matchingAdapter.topology().matchingEngineCount() == 1
-                    ? matcherPipeline.call(() -> matchingAdapter.orderBooksStateHashAsync().join(),
-                    MATCHING_AWAIT_TIMEOUT_NANOS)
-                    : matchingAdapter.aggregateBookHash(matcherPipeline.callEach(
-                    matchingAdapter::stateHashShard, MATCHING_AWAIT_TIMEOUT_NANOS));
-            return CompletableFuture.completedFuture(hash);
+            return matchingAdapter.topology().matchingEngineCount() == 1
+                    ? matcherPipeline.readAtSubmissionFence(0, () -> matchingAdapter.orderBooksStateHashAsync().join())
+                    : matcherPipeline.readEachAsync(matchingAdapter::stateHashShard)
+                    .thenApply(matchingAdapter::aggregateBookHash);
         } catch (RuntimeException failure) {
             return CompletableFuture.failedFuture(failure);
         }
@@ -1934,6 +1868,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     void drainMatchingCompletions() {
+        crossShardCancellations.poll();
         progressPlaceAdmissions();
         matcherPipeline.drainMatchingCompletions(this::publishMatchingCompletion);
         commits.drainMatcherSettlementCompletions();
@@ -2857,6 +2792,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
             sequenceAdmission(pending.sequence()).releaseUnused();
         });
         pendingMatching.clear();
+        crossShardCancellations.clear();
         admissions.pendingLifecycleScopes.clear();
         batches.pendingOrderBatches.clear();
         admissions.deferredMatching.clear();

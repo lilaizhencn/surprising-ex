@@ -5022,3 +5022,17 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - HotSpot JDK 25.0.1、Maven 3.9.16；`mvn -pl surprising-aeron-core/surprising-aeron-tools,surprising-aeron-core/surprising-aeron-benchmarks -am verify`：nonblocking3-verify.log BUILD SUCCESS，1016 项中 1015 通过、1 项数据库条件跳过，0 失败/错误；service 621 项通过。未执行云端/压测/JMH/JFR或新的三进程验证，本轮为本地功能回归。
 - 中间测试发现旧批量索引拒绝同币对并行，已修复；新增共享 maker 用例最初错误地读取已移除的全成交订单，改为保留一份余量核对部分成交；旧实时用例把 envelope 数等同命令数，已改成检查分组配对，业务事件数量断言未放宽。日志同目录 same-symbol-tests.log、same-symbol2-tests.log、nonblocking-verify.log、nonblocking2-verify.log 保留失败记录。
 - artifact：`/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-wait-audit/`。README 未改。尚未完成：同步 Lane 调用的分阶段续办、响应出口异步化、控制与直接查询的非阻塞完成调度；不宣称所有等待已消除或吞吐已改善。
+
+## 2026-09-09 交易命令异步推进与本地恢复验证
+
+- 范围：基于 master `85afef9c` 的当前工作树；只执行 HotSpot JDK 25.0.1（Oracle GraalVM）/ Maven 3.9.16 本地功能、资金与恢复验证。没有云端操作、压测、JMH 或 JFR；benchmarks 模块仅执行固定样本 JUnit 功能用例。README 未修改。
+- `SurprisingClusteredService` 将已复制入口、依赖前缀、控制命令结果分阶段保留，回调只做有限推进；日志中的推进边界也进入 FIFO，避免不同节点的完成速度改变窗口分组。队列限制 8192 项/64 MiB；耗尽按节点运行故障处理，不产生依赖本地线程速度的业务拒绝。快照仍必须完成此前已复制命令。
+- Lane 控制阶段使用有代次的异步所有权交接，取得唯一写入权后执行已有业务方法，并保留 Lane 作用域。普通准入、撮合与结算仍使用原有工作线程；控制阶段及逐项批量阶段暂由 owner 执行，结束后归还 Lane。集群命令作用域禁止退回同步 Lane 调用。挂起批量不会重新开始资金上下文，也不会重置已有准入索引；逐项准入使用该批原始日志时间与位置。
+- 盘口查询使用异步 matcher 读取；跨 matcher 分片清算撤单通过独立控制 token 提交、轮询，维持订单顺序、首个失败后的停止语义和既有提交证据。只供测试/基准使用的同步完成辅助方法移至对应测试或 benchmarks 模块。
+- 响应出口按会话 FIFO、公平轮询，有界保留编码数据（8192 项/16 MiB），不在交易回调里等待客户端恢复连接。保留原有一秒发送期限；超时/容量耗尽关闭慢会话，终态仍由 commandId 结果账本查询，不能回滚资金或改写业务结果。
+- 框架边界：持续的 1 ms 日志定时事件保障无新订单时也能完成待处理工作，带来固定日志开销。Aeron 1.53.0 禁止在 `doBackgroundWork`/`onRoleChange` 中调度定时器，其过期计数恢复要求逐个保留调度请求。因此定时器元数据发布保留最长 30 秒的协议重试，快照、启动、关闭仍有必要等待；不能宣称所有框架等待消失。控制阶段并行度与定时事件开销的吞吐影响尚未验证。
+- 完整回归：`mvn -pl surprising-aeron-core/surprising-aeron-tools,surprising-aeron-core/surprising-aeron-benchmarks -am verify`，`verify5.log` BUILD SUCCESS；1024 项中 1023 通过、1 项外部数据库条件跳过，0 失败/错误；service 629 项通过。覆盖六产品线资金、订单/批量生命周期、依赖前缀、重复命令、盘口、风控、保险基金、ADL、快照及恢复；新增阻塞 matcher/所有权交接、出口背压公平性、跨分片撤单与原日志时间等回归。
+- 真实本地三个独立 JVM 首轮：现货执行和日志恢复通过，快照恢复遇到定时器短暂背压；16 次立即尝试误判为节点故障。修复为上述有界协议重试后，重点 128 项测试全部通过并重新打包（`timer-recovery-build.log`）；随后六产品线各完成执行、SIGKILL 后日志恢复、快照后 SIGKILL 恢复，共 18 项全部通过。`local-functional-timerfix/results.json` 六项 `passed=true`；结束后所有验证节点和客户端均已退出。
+- 保留中间失败：旧同步完成断言、逐项批量同步 Lane 分支、交接后风险游标作用域、异步批量改单测试的终态核对时机，以及上述定时器恢复问题；日志未删除或覆盖。跨分片测试初版错误断言订单应被删除，实际正确终态为 CANCELED，已按既有生命周期核对并比较恢复后的完整账户状态。
+- 原始证据目录：`/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-async-commands/`。包含完整/定向构建日志、首次失败及修复后本地三进程目录、全部启动参数、节点日志、执行/恢复结果、快照检查和源码清单。最终 service.jar SHA-256 `643bcdf8df20dc6db0390eb2405bc1a1a88567e18bf385f95ef75105056010b8`；benchmarks.jar `ce91b09f506fb8c32858d49f015e0337df1df23f3f17f3185db2dfd8f3edfd02`；`source-manifest.json` `1d6339b45ddebc5beaa2ffd5712acd21a311740accc647930f36efcc001519e5`。
+- 结论：本次业务异步推进的功能与上述恢复验证通过；未作吞吐、并发上限、尾延迟、分配率或零分配承诺，性能验收留待用户重新授权真实三节点压测。

@@ -331,7 +331,7 @@ public class ClusteredBatchTradingBenchmark {
             byte[] makerBytes = CoreMessageCodec.encode(maker);
             service.onSessionMessage(null, 1_700_000_000_000L, new UnsafeBuffer(makerBytes),
                     0, makerBytes.length, header);
-            service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, 1_700_000_000_001L);
+            drain();
             service.state().assertClusterCallbackComplete();
         }
 
@@ -461,6 +461,7 @@ public class ClusteredBatchTradingBenchmark {
                     // 256 requests ready before each wave enters the real service log callback.
                     for (CoreMessage request : wave) send(request);
                 }
+                drain();
                 if (terminal - before != 1536 || batchTrades - fillsBefore != 512L * batchSize) {
                     throw new IllegalStateException("amend batch terminal/fill mismatch");
                 }
@@ -622,15 +623,17 @@ public class ClusteredBatchTradingBenchmark {
         }
 
         private void drain() {
-            service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, 1_700_000_000_001L);
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
-            // A replicated timer drains the final partial command window, including at low traffic.
+            // Only functional setup/measurement boundaries drain. Commands in a wave remain pipelined.
+            // Business completion progresses in logged callbacks; background work is read-only.
             int work;
             do {
+                service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, 1_700_000_000_001L);
                 work = service.doBackgroundWork(System.nanoTime());
                 if (System.nanoTime() > deadline) throw new IllegalStateException("service completion timeout");
-                if (work == 0) Thread.onSpinWait();
-            } while (work != 0 || service.state().pendingMatchingCount() != 0);
+                if (service.pendingCommandCount() != 0)
+                    java.util.concurrent.locks.LockSupport.parkNanos(100_000);
+            } while (work != 0 || service.pendingCommandCount() != 0);
         }
 
         private CoreMessage command(CoreMessageType type, long user, byte[] payload) {

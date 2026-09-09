@@ -47,6 +47,28 @@ final class SettlementLaneWorker implements AutoCloseable {
         rethrowFailure();
     }
 
+    /** owner 请求的交接代次；同一代次只派发一次预分配任务。 */
+    private long requestedHandoff;
+    /** Lane 完成此前所有任务并释放所有权后发布的代次。 */
+    private volatile long completedHandoff;
+    /** owner 释放临时所有权后发布的恢复代次。 */
+    private volatile long resumedHandoff;
+    /** 控制阶段交接任务不修改资金，仅转移唯一写入权。 */
+    private final Command handoffCommand = lane -> {
+        lane.releaseOwnerForHandoff();
+        completedHandoff = requestedHandoff;
+    };
+
+    void requestHandoff(long epoch) {
+        requestedHandoff = epoch;
+        submit(handoffCommand);
+    }
+    boolean handoffReady(long epoch) { return completedHandoff == epoch; }
+    void resumeHandoff(long epoch) {
+        resumedHandoff = epoch;
+        LockSupport.unpark(thread);
+    }
+
     long submit(Command command) {
         if (command == null) throw new IllegalArgumentException("settlement command is required");
         rethrowFailure();
@@ -87,7 +109,17 @@ final class SettlementLaneWorker implements AutoCloseable {
         try {
             lane.bindOwner();
             started = true;
+            long reboundHandoff = 0;
             while (running || next < producerSequence.value) {
+                if (completedHandoff > reboundHandoff) {
+                    if (resumedHandoff < completedHandoff) {
+                        if (!running) break;
+                        LockSupport.parkNanos(this, 1_000_000L);
+                        continue;
+                    }
+                    lane.bindOwner();
+                    reboundHandoff = completedHandoff;
+                }
                 if (next < producerSequence.value) {
                     int index = (int) next & indexMask;
                     Command command = commands[index];

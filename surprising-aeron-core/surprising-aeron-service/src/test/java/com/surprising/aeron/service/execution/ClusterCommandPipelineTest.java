@@ -22,6 +22,29 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class ClusterCommandPipelineTest {
+    @Test
+    void deferredSequentialBatchUsesOriginalLogTimeEvenWhenLaterIngressIsAfterExpiry() {
+        try (Fixture live = new Fixture(ProductLine.LINEAR_DELIVERY);
+             Fixture serial = new Fixture(ProductLine.LINEAR_DELIVERY)) {
+            serial.applyAll(live.setup());
+            var item = new PlaceOrderCommand(1000, "BTC-USDT", 1, CoreOrderSide.BUY, 80, 1,
+                    false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+                    CoreTimeInForce.GTC, false, "before-expiry");
+            var batch = live.message(CoreMessageType.PLACE_ORDER_BATCH, 11,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(item))));
+            var original = live.place(disjointUser(11), disjointSymbol("BTC-USDT"), 2000, 80, 1, CoreOrderSide.BUY);
+            var h = original.header();
+            var later = new CoreMessage(CoreMessageHeader.command(h.messageType(), h.commandId(),
+                    ProductLine.LINEAR_DELIVERY, CommandSource.OPERATIONS, 990, h.sourceSequence(),
+                    h.userId(), TIME + 200_000, h.correlationId()), original.payloadUnsafe());
+            live.send(batch); live.send(later); live.tick();
+            serial.apply(batch); serial.apply(later);
+            assertThat(TradingOrderBatchCodec.decodeResult(live.responses.getFirst().data()).items())
+                    .singleElement().satisfies(result -> assertThat(result.status()).isEqualTo(ResponseStatus.APPLIED));
+            assertThat(live.hash()).isEqualTo(serial.hash());
+        }
+    }
+
     @ParameterizedTest
     @EnumSource(ProductLine.class)
     void sameSymbolSharedMakerStillSettlesBeforeNextTakerAdmission(ProductLine product) {
@@ -37,6 +60,7 @@ class ClusterCommandPipelineTest {
             var first = live.place(11, "BTC-USDT", 100, 80, 1, CoreOrderSide.BUY);
             var second = live.place(disjointUser(11), "BTC-USDT", 200, 80, 1, CoreOrderSide.BUY);
             live.send(first); live.send(second);
+            live.progressUntil(() -> live.responses.size() == 1);
             assertThat(live.responses).hasSize(1);
             assertThat(live.service.commandWindowSize()).isOne();
             live.tick(); serial.apply(first); serial.apply(second);
@@ -131,7 +155,7 @@ class ClusterCommandPipelineTest {
                 dispatch.invoke(state.commits, timestamp, 0L, sequence);
                 assertThat(eventsField.get(batch)).as("one Lane settlement event per batch sequence").isSameAs(dispatched);
             } finally { release.countDown(); }
-            assertThat(state.commits.completeMatchingSynchronously(sequence, timestamp, 0).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(CoreTestCompletion.completeMatchingSynchronously(state, sequence, timestamp, 0).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             serial.apply(command);
             assertThat(live.hash()).isEqualTo(serial.hash());
             try (var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
@@ -187,7 +211,7 @@ class ClusterCommandPipelineTest {
             state.applyClusterCommand(command, TIME, 1000, decoded);
             var pending = state.pendingMatching(state.matchingSequence(command.header().commandId()));
             assertThat(pending.decodedCommand()).isSameAs(decoded);
-            var completed = state.commits.completeMatchingSynchronously(pending.sequence(), TIME, 1000);
+            var completed = CoreTestCompletion.completeMatchingSynchronously(state, pending.sequence(), TIME, 1000);
             assertThat(completed.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(TradingOrderBatchCodec.decodeResult(completed.data()).items()).hasSize(20);
         }
@@ -220,6 +244,7 @@ class ClusterCommandPipelineTest {
             try {
                 assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
                 live.send(b); live.send(c);
+                live.progressUntil(() -> live.responses.size() == 1);
                 assertThat(blocked.isDone()).isFalse();
                 assertThat(live.responses).hasSize(1);
                 assertThat(live.service.commandWindowSize()).isEqualTo(2);
@@ -258,6 +283,7 @@ class ClusterCommandPipelineTest {
             var c = live.place(11, "BTC-USDT", 3000, 79, 1, CoreOrderSide.BUY);
             serial.apply(a); serial.apply(b); serial.apply(c);
             live.send(a); live.send(b); live.send(c);
+            live.progressUntil(() -> live.responses.size() == 1);
             assertThat(live.responses).as("only the conflicting prefix has committed").hasSize(1);
             assertThat(live.service.commandWindowSize()).as("independent suffix and new command remain").isEqualTo(2);
             assertThat(live.service.state().matchingSequence(b.header().commandId())).isPositive();
@@ -329,6 +355,7 @@ class ClusterCommandPipelineTest {
                     11, 0, 0, TIME, 900, "", "", new byte[0]));
             assertThat(f.service.doBackgroundWork(System.nanoTime())).isZero();
             f.send(f.placeBatch(11, "BTC-USDT", 2000));
+            f.progressUntil(() -> requests.isEmpty());
             assertThat(f.service.commandWindowSize()).isOne();
             assertThat(requests.isEmpty()).as("continuous input must not starve a read at the preceding commit boundary").isTrue();
             var readsField = TradingCoreRuntime.class.getDeclaredField("realtimeReads");
@@ -339,6 +366,7 @@ class ClusterCommandPipelineTest {
             assertThat(snapshot).isNotNull();
             snapshot.get(2, TimeUnit.SECONDS);
             f.send(f.cancelBatch(11, 1000));
+            f.progressUntil(() -> !f.service.state().realtimeSnapshotPending());
             var frames = new ArrayList<RealtimeFrame>();
             byte[] bytes;
             while ((bytes = outbox.poll()) != null) {
@@ -479,6 +507,7 @@ class ClusterCommandPipelineTest {
             f.responses.clear();
             f.send(f.place(11, "BTC-USDT", 101, 80, 1, CoreOrderSide.BUY));
             f.send(f.place(11, disjointSymbol("BTC-USDT"), disjointOrder(101), 80, 1, CoreOrderSide.BUY));
+            f.progressUntil(() -> f.responses.size() == 1);
             assertThat(f.responses).hasSize(1);
             f.tick();
             assertThat(f.responses.get(0).status()).isEqualTo(ResponseStatus.APPLIED);
@@ -583,6 +612,7 @@ class ClusterCommandPipelineTest {
             CoreMessage second = live.place(disjointUser(11), secondSymbol, disjointOrder(301), 100, 2, CoreOrderSide.BUY);
             live.responses.clear();
             live.send(first); live.send(second);
+            live.progressUntil(() -> live.responses.size() == 1);
             assertThat(live.service.commandWindowSize()).isOne();
             assertThat(live.responses).hasSize(1);
             live.tick(); serial.applyAll(List.of(first, second));
@@ -680,6 +710,7 @@ class ClusterCommandPipelineTest {
             CoreMessage place = f.place(11, "BTC-USDT", 101, 80, 1, CoreOrderSide.BUY);
             f.send(place);
             f.service.onSessionClose(f.session, TIME + 1, io.aeron.cluster.codecs.CloseReason.CLIENT_ACTION);
+            f.tick();
             assertThat(f.service.commandWindowSize()).isZero();
             long hash = f.hash();
             f.send(place); f.tick();
@@ -700,10 +731,13 @@ class ClusterCommandPipelineTest {
             f.send(f.place(disjointUser(11), "btc-usdt", disjointOrder(101), 80, 1, CoreOrderSide.BUY));
             assertThat(f.service.commandWindowSize()).isEqualTo(2);
             assertThat(f.responses).isEmpty();
-            assertThat(f.scheduledTimers).isOne();
+            int scheduled = f.scheduledTimers;
+            assertThat(scheduled).isPositive();
             f.tick();
+            int afterTick = f.scheduledTimers;
+            assertThat(afterTick).isGreaterThan(scheduled);
             f.send(f.cancel(11, 101));
-            assertThat(f.scheduledTimers).isEqualTo(2);
+            assertThat(f.scheduledTimers).isEqualTo(afterTick);
             f.tick();
         }
     }
@@ -806,7 +840,23 @@ class ClusterCommandPipelineTest {
                     new UnsafeBuffer(bytes), 0, bytes.length,
                     new Header(0, 0).buffer(new UnsafeBuffer(new byte[64])).offset(0).initialTermId(0).positionBitsToShift(16));
         }
-        void tick() { service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, TIME + 1); }
+        void progressUntil(java.util.function.BooleanSupplier done) {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (!done.getAsBoolean() && System.nanoTime() < deadline) {
+                service.onSessionOpen(null, TIME + 1);
+                java.util.concurrent.locks.LockSupport.parkNanos(100_000);
+            }
+            assertThat(done.getAsBoolean()).as("bounded asynchronous progress").isTrue();
+        }
+        void tick() {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            do {
+                service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, TIME + 1);
+                if (service.pendingCommandCount() == 0) return;
+                java.util.concurrent.locks.LockSupport.parkNanos(100_000);
+            } while (System.nanoTime() < deadline);
+            throw new AssertionError("asynchronous commands did not complete");
+        }
         void apply(CoreMessage command) { send(command); tick(); }
         void applyAll(List<CoreMessage> commands) { commands.forEach(this::apply); }
         long hash() { return service.state().tradingState().businessStateHash(); }

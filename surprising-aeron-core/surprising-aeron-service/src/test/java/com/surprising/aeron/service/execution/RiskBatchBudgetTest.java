@@ -125,7 +125,7 @@ class RiskBatchBudgetTest {
     private static CoreResponse apply(TradingCoreRuntime state,CoreMessage message) {
         var response=state.apply(message);
         if(response.resultCode()==CoreResultCode.MATCHING_PENDING)
-            response=state.commits.completeMatchingSynchronously(state.matchingSequence(message.header().commandId()),
+            response=CoreTestCompletion.completeMatchingSynchronously(state, state.matchingSequence(message.header().commandId()),
                     message.header().submittedAtEpochMillis(),message.header().sourceSequence());
         return response;
     }

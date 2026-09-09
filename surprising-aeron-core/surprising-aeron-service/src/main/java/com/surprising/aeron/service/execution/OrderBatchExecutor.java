@@ -110,11 +110,14 @@ final class OrderBatchExecutor {
 
     CoreResponse activateOrderBatch(OrderBatchPending batch, PendingMatching pending,
                                              boolean deferCompletion) {
-        beginOrderBatchCommitContext(batch, pending);
+        boolean firstActivation = !batch.commitStarted();
+        if (firstActivation) beginOrderBatchCommitContext(batch, pending);
+        else owner.activateFactContext(owner.sequenceAdmission(pending.sequence()),
+                pending.command(), pending.fingerprint());
         if (batch.admissionOrderIndex == null) {
             batch.admissionOrderIndex = new BatchAdmissionOrderIndex(owner.activeOrderIndex, owner.identities, batch.items.size());
         }
-        batch.admissionOrderIndex.reset(pending.command().header().userId());
+        if (firstActivation) batch.admissionOrderIndex.reset(pending.command().header().userId());
         batch.started = true;
         if (preparePipelinedPlaceBatch(batch, pending)) {
             registerPipelinedBatchSymbols(batch, pending);
@@ -283,6 +286,12 @@ final class OrderBatchExecutor {
     CoreResponse startOrderBatchItem(OrderBatchPending batch, PendingMatching pending,
                                              long clusterTimestamp, long clusterPosition,
                                              boolean deferCompletion) {
+        if (!owner.runtimeState.tryEnterSequentialLaneStage()) {
+            batch.sequentialAdmission = true;
+            batch.started = false;
+            owner.clearFactContext();
+            return null;
+        }
         while (batch.nextIndex < batch.items.size()) {
             OrderBatchItem item = batch.items.get(batch.nextIndex);
             long runtimeRevisionBefore = owner.runtimeState.revision();
@@ -319,63 +328,72 @@ final class OrderBatchExecutor {
 
     void prepareOrderBatchItem(OrderBatchPending batch, OrderBatchItem item, long userId,
                                        UUID commandId) {
-        switch (batch.kind) {
-            case PLACE -> {
-                PlaceOrderCommand command = (PlaceOrderCommand) item.command;
-                owner.requireOrderIdentityAvailable(userId, command);
-                owner.reservePlaceOrderRuntime(userId, command, commandId, batch.sequence,
-                        batchOpenInterestSteps(batch, command.symbol()), batch.admissionOrderIndex, batch);
-                batch.currentPreMatchingCancellationOrderIds = owner.admissions.preMatchingCloseCapacityCancellations(
-                        userId, command, command.orderId());
-            }
-            case CANCEL -> {
-                batch.currentPreMatchingCancellationOrderIds = List.of();
-                CancelOrderCommand command = (CancelOrderCommand) item.command;
-                OrderRuntime order = owner.runtimeOrder(command.orderId());
-                if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
-                if (order.userId() != userId) {
-                    throw new CoreStateRejectedException("ORDER_OWNER_MISMATCH", "order belongs to another user");
+        long previousTimestamp = owner.currentClusterTimestamp;
+        long previousPosition = owner.currentClusterPosition;
+        owner.currentClusterTimestamp = batch.clusterTimestamp;
+        owner.currentClusterPosition = batch.clusterPosition;
+        try {
+            switch (batch.kind) {
+                case PLACE -> {
+                    PlaceOrderCommand command = (PlaceOrderCommand) item.command;
+                    owner.requireOrderIdentityAvailable(userId, command);
+                    owner.reservePlaceOrderRuntime(userId, command, commandId, batch.sequence,
+                            batchOpenInterestSteps(batch, command.symbol()), batch.admissionOrderIndex, batch);
+                    batch.currentPreMatchingCancellationOrderIds = owner.admissions.preMatchingCloseCapacityCancellations(
+                            userId, command, command.orderId());
                 }
-            }
-            case AMEND -> {
-                AmendOrderCommand command = (AmendOrderCommand) item.command;
-                OrderRuntime order = owner.runtimeOrder(command.originalOrderId());
-                if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
-                if (order.userId() != userId) {
-                    throw new CoreStateRejectedException("ORDER_OWNER_MISMATCH", "order belongs to another user");
-                }
-                if (order.status() != com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN
-                        || order.orderType() != com.surprising.aeron.protocol.CoreOrderType.LIMIT) {
-                    throw new CoreStateRejectedException("INVALID_COMMAND", "order is not amendable");
-                }
-                if (owner.runtimeState.order(command.replacementOrderId()) != null) {
-                    throw new CoreStateRejectedException("DUPLICATE_ORDER_ID", "replacement order already exists");
-                }
-                PlaceOrderCommand replacement = owner.replacementForAmend(command, order);
-                ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(owner.runtimeState,
-                        owner.identities, userId, replacement, owner.currentClusterTimestamp);
-                long requiredReservation = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservation(
-                        owner.runtimeState, owner.identities, userId, resolved,
-                        batchOpenInterestSteps(batch, replacement.symbol()), batch.admissionOrderIndex,
-                        command.originalOrderId());
-                if (owner.productLine == ProductLine.SPOT) {
-                    var reservation = owner.runtimeState.reservation(command.originalOrderId());
-                    int assetId = owner.identities.assetId(resolved.reservationAsset());
-                    if (reservation == null || reservation.assetId() != assetId) {
-                        throw new IllegalStateException("spot amend original reservation is missing or mismatched");
-                    }
-                    // The previous item has crossed its completion fence; its published scalar
-                    // is current. Do not enqueue another Lane task just to preflight available funds.
-                    long available = owner.runtimeState.publishedAvailableBalance(userId, assetId);
-                    if (available == Long.MIN_VALUE || requiredReservation > Math.addExact(
-                            available, reservation.reservedUnits())) {
-                        throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
-                                "available balance is insufficient for amended order");
+                case CANCEL -> {
+                    batch.currentPreMatchingCancellationOrderIds = List.of();
+                    CancelOrderCommand command = (CancelOrderCommand) item.command;
+                    OrderRuntime order = owner.runtimeOrder(command.orderId());
+                    if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
+                    if (order.userId() != userId) {
+                        throw new CoreStateRejectedException("ORDER_OWNER_MISMATCH", "order belongs to another user");
                     }
                 }
-                batch.currentPreMatchingCancellationOrderIds = owner.admissions.preMatchingCloseCapacityCancellations(
-                        userId, replacement, command.originalOrderId());
+                case AMEND -> {
+                    AmendOrderCommand command = (AmendOrderCommand) item.command;
+                    OrderRuntime order = owner.runtimeOrder(command.originalOrderId());
+                    if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
+                    if (order.userId() != userId) {
+                        throw new CoreStateRejectedException("ORDER_OWNER_MISMATCH", "order belongs to another user");
+                    }
+                    if (order.status() != com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN
+                            || order.orderType() != com.surprising.aeron.protocol.CoreOrderType.LIMIT) {
+                        throw new CoreStateRejectedException("INVALID_COMMAND", "order is not amendable");
+                    }
+                    if (owner.runtimeState.order(command.replacementOrderId()) != null) {
+                        throw new CoreStateRejectedException("DUPLICATE_ORDER_ID", "replacement order already exists");
+                    }
+                    PlaceOrderCommand replacement = owner.replacementForAmend(command, order);
+                    ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(owner.runtimeState,
+                            owner.identities, userId, replacement, owner.currentClusterTimestamp);
+                    long requiredReservation = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservation(
+                            owner.runtimeState, owner.identities, userId, resolved,
+                            batchOpenInterestSteps(batch, replacement.symbol()), batch.admissionOrderIndex,
+                            command.originalOrderId());
+                    if (owner.productLine == ProductLine.SPOT) {
+                        var reservation = owner.runtimeState.reservation(command.originalOrderId());
+                        int assetId = owner.identities.assetId(resolved.reservationAsset());
+                        if (reservation == null || reservation.assetId() != assetId) {
+                            throw new IllegalStateException("spot amend original reservation is missing or mismatched");
+                        }
+                        // The previous item has crossed its completion fence; its published scalar
+                        // is current. Do not enqueue another Lane task just to preflight available funds.
+                        long available = owner.runtimeState.publishedAvailableBalance(userId, assetId);
+                        if (available == Long.MIN_VALUE || requiredReservation > Math.addExact(
+                                available, reservation.reservedUnits())) {
+                            throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
+                                    "available balance is insufficient for amended order");
+                        }
+                    }
+                    batch.currentPreMatchingCancellationOrderIds = owner.admissions.preMatchingCloseCapacityCancellations(
+                            userId, replacement, command.originalOrderId());
+                }
             }
+        } finally {
+            owner.currentClusterTimestamp = previousTimestamp;
+            owner.currentClusterPosition = previousPosition;
         }
     }
 

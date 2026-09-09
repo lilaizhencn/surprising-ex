@@ -79,7 +79,7 @@ class CoreMatchingStateTest {
                     ReservationKind.DERIVATIVE_MARGIN, "USDT", 100));
             assertThat(state.apply(stale).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
 
-            CoreResponse firstCompleted = state.commits.completeMatchingSynchronously(
+            CoreResponse firstCompleted = CoreTestCompletion.completeMatchingSynchronously(state,
                     state.matchingSequence(first.header().commandId()), 6_001, 4);
             assertThat(firstCompleted).isNotNull();
             CoreResponse[] rejected = new CoreResponse[1];
@@ -381,7 +381,7 @@ class CoreMatchingStateTest {
             CoreResponse pending = state.apply(taker);
             assertThat(pending.resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             long matchingSequence = state.matchingSequence(taker.header().commandId());
-            var matching = state.awaitMatchingResult(matchingSequence);
+            var matching = CoreTestCompletion.awaitMatchingResult(state, matchingSequence);
             assertThat(matching).isNotNull();
             CoreResponse completed = completeUntilTerminalOrFailure(state, matchingSequence, matching,
                     taker.header().submittedAtEpochMillis(), taker.header().sourceSequence());
@@ -942,7 +942,7 @@ class CoreMatchingStateTest {
     private static CoreResponse drainMatching(TradingCoreRuntime state, CoreResponse response, CoreMessage message) {
         if (response.resultCode() != CoreResultCode.MATCHING_PENDING) return response;
         long sequence = state.matchingSequence(message.header().commandId());
-        CoreResponse completed = state.commits.completeMatchingSynchronously(sequence,
+        CoreResponse completed = CoreTestCompletion.completeMatchingSynchronously(state, sequence,
                 message.header().submittedAtEpochMillis(), message.header().sourceSequence());
         assertThat(completed).isNotNull();
         assertThat(completed.status()).isIn(ResponseStatus.APPLIED, ResponseStatus.REJECTED);

@@ -151,11 +151,11 @@ class ProductRecoveryLifecycleTest {
     private static CoreResponse apply(TradingCoreRuntime state, CoreMessage message) {
         CoreResponse result = state.apply(message);
         if (result.resultCode() == CoreResultCode.MATCHING_PENDING) {
-            result = state.commits.completeMatchingSynchronously(state.matchingSequence(message.header().commandId()),
+            result = CoreTestCompletion.completeMatchingSynchronously(state, state.matchingSequence(message.header().commandId()),
                     message.header().submittedAtEpochMillis(), message.header().sourceSequence());
         }
         while (state.firstPendingMatchingSequence() != 0) {
-            state.commits.completeMatchingSynchronously(state.firstPendingMatchingSequence(),
+            CoreTestCompletion.completeMatchingSynchronously(state, state.firstPendingMatchingSequence(),
                     message.header().submittedAtEpochMillis(), message.header().sourceSequence());
         }
         assertThat(result.commandStatus()).as("%s: %s", message.header().messageType(), result.resultCode())

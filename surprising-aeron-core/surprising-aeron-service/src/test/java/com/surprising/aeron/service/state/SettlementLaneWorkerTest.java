@@ -8,6 +8,38 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class SettlementLaneWorkerTest {
+    @org.junit.jupiter.api.Test
+    void controlOwnershipHandoffIsPolledAndQueuedWorkResumesOnlyAfterRelease() throws Exception {
+        var lane = new AccountLaneState(0, 8);
+        try (var worker = new SettlementLaneWorker("handoff", lane, 8)) {
+            for (long epoch = 1; epoch <= 8; epoch++) {
+                var entered = new CountDownLatch(1);
+                var release = new CountDownLatch(1);
+                var resumed = new CountDownLatch(1);
+                worker.submit(value -> {
+                    entered.countDown();
+                    try { if (!release.await(2, TimeUnit.SECONDS)) throw new AssertionError("release timeout"); }
+                    catch (InterruptedException e) { throw new AssertionError(e); }
+                });
+                assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+                worker.requestHandoff(epoch);
+                try { assertThat(worker.handoffReady(epoch)).isFalse(); }
+                finally { release.countDown(); }
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+                while (!worker.handoffReady(epoch) && System.nanoTime() < deadline) Thread.yield();
+                assertThat(worker.handoffReady(epoch)).isTrue();
+                lane.bindOwner();
+                worker.submit(value -> { value.assertOwner(); resumed.countDown(); });
+                lane.assertOwner();
+                assertThat(resumed.getCount()).isOne();
+                lane.releaseOwnerForHandoff();
+                worker.resumeHandoff(epoch);
+                assertThat(resumed.await(2, TimeUnit.SECONDS)).isTrue();
+                worker.assertHealthy();
+            }
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(ints = {0, 256})
     void parkedAndActiveHandoffsKeepOrderAndDrainBeforeClose(int spins) throws Exception {

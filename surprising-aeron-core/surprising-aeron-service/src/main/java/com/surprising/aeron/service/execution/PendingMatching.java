@@ -38,6 +38,8 @@ final class PendingMatching {
     private PlaceAdmissionEvent placeAdmission;
     private CoreMatchingOrder admittedMatchingOrder;
     private boolean matchingSubmitted;
+    /** 跨分片清算撤单已进入异步协调队列，防止重复派发。 */
+    boolean crossShardCancellationStarted;
     boolean clusterIndependent;
     private boolean settlementReady;
     private boolean dispatchOnly;
@@ -148,6 +150,7 @@ final class PendingMatching {
         placeAdmission = null;
         admittedMatchingOrder = null;
         matchingSubmitted = false;
+        crossShardCancellationStarted = false;
         clusterIndependent = false;
         settlementReady = false;
         dispatchOnly = false;
@@ -191,6 +194,7 @@ final class PendingMatching {
         placeAdmission = source.placeAdmission;
         admittedMatchingOrder = source.admittedMatchingOrder;
         matchingSubmitted = source.matchingSubmitted;
+        crossShardCancellationStarted = source.crossShardCancellationStarted;
         settlementReady = source.settlementReady;
         dispatchOnly = source.dispatchOnly;
         pipelinedSettlementCounted = source.pipelinedSettlementCounted;

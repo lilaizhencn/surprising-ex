@@ -87,13 +87,25 @@ final class MatcherCommandPipeline implements AutoCloseable {
         if (command == null || timeoutNanos <= 0) {
             throw new IllegalArgumentException("matcher control call is invalid");
         }
-        long token = -Math.incrementExact(controlSequence);
-        submitInternal(token, command);
+        long token = submitControl(command);
         Object result = awaitResult(token, timeoutNanos);
         if (result == null) throw new IllegalStateException("matcher control call timed out");
         @SuppressWarnings("unchecked")
         T typed = (T) result;
         return typed;
+    }
+
+    /** 控制命令使用独立负 token；提交和收集分离，owner 不等待 matcher。 */
+    long submitControl(Supplier<?> command) {
+        controlSequence = Math.incrementExact(controlSequence);
+        long token = -controlSequence;
+        submitInternal(token, command);
+        return token;
+    }
+
+    Object pollControl(long token) {
+        if (token >= 0) throw new IllegalArgumentException("matcher control token must be negative");
+        return pollResult(token);
     }
 
     private void submitInternal(long token, Supplier<?> command) {
@@ -125,7 +137,7 @@ final class MatcherCommandPipeline implements AutoCloseable {
 
     /**
      * Returns the positive matching token at the completion head, or zero when the head is
-     * either not complete or belongs to a synchronous control call. The owner uses this probe
+     * either not complete or belongs to a control call. The owner uses this probe
      * to drain completed matching work without probing every pending Core sequence.
      */
     long completedMatchingSequence() {
@@ -156,14 +168,6 @@ final class MatcherCommandPipeline implements AutoCloseable {
         }
         if (result == null) throw new IllegalStateException("matcher pipeline returned no result");
         return result;
-    }
-
-    CoreMatchingResult await(long expectedCoreSequence, long timeoutNanos) {
-        if (timeoutNanos <= 0) return null;
-        Object result = awaitResult(expectedCoreSequence, timeoutNanos);
-        if (result == null) return null;
-        if (result instanceof CoreMatchingResult matchingResult) return matchingResult;
-        throw new IllegalStateException("matcher pipeline returned an invalid matching result");
     }
 
     private Object awaitResult(long expectedToken, long timeoutNanos) {

@@ -56,7 +56,7 @@ final class MatcherPipelineGroup implements AutoCloseable {
         return result;
     }
 
-    /** Read-only completion probe; synchronous control results belong to their caller. */
+    /** Read-only completion probe; control results belong to their caller. */
     boolean hasMatchingCompletions() {
         for (MatcherCommandPipeline shard : shards) {
             if (shard.completedMatchingSequence() != 0) return true;
@@ -64,7 +64,7 @@ final class MatcherPipelineGroup implements AutoCloseable {
         return false;
     }
 
-    /** Drains matching heads only; synchronous control tokens remain for their caller. */
+    /** Drains matching heads only; control tokens remain for their caller. */
     void drainMatchingCompletions(MatchingCompletionConsumer consumer) {
         if (consumer == null) throw new IllegalArgumentException("matching completion consumer is required");
         for (int shardId = 0; shardId < shards.length; shardId++) {
@@ -84,16 +84,23 @@ final class MatcherPipelineGroup implements AutoCloseable {
         }
     }
 
-    CoreMatchingResult await(long coreSequence, long timeoutNanos) {
-        int encodedShard = shardByToken.get(coreSequence);
-        if (encodedShard == 0) return null;
-        CoreMatchingResult result = shards[encodedShard - 1].await(coreSequence, timeoutNanos);
-        if (result != null) shardByToken.removeKey(coreSequence);
-        return result;
-    }
-
     <T> java.util.concurrent.CompletableFuture<T> readAtSubmissionFence(int shardId,Supplier<T> read) {
         return shard(shardId).readAtSubmissionFence(read);
+    }
+
+    long submitControl(int shardId, Supplier<?> command) { return shard(shardId).submitControl(command); }
+    Object pollControl(int shardId, long token) { return shard(shardId).pollControl(token); }
+
+    /** 查询边界并行读取各分片，仅在所有 Future 完成后聚合；join 不等待未完成任务。 */
+    <T> java.util.concurrent.CompletableFuture<java.util.List<T>> readEachAsync(IntFunction<T> read) {
+        var futures = new java.util.ArrayList<java.util.concurrent.CompletableFuture<T>>(shards.length);
+        for (int shardId = 0; shardId < shards.length; shardId++) {
+            int current = shardId;
+            futures.add(readAtSubmissionFence(shardId, () -> read.apply(current)));
+        }
+        return java.util.concurrent.CompletableFuture.allOf(
+                futures.toArray(java.util.concurrent.CompletableFuture[]::new))
+                .thenApply(ignored -> futures.stream().map(java.util.concurrent.CompletableFuture::join).toList());
     }
 
     <T> T call(int shardId, Supplier<T> command, long timeoutNanos) {

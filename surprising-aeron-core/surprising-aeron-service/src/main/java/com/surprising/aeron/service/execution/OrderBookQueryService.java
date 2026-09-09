@@ -50,10 +50,12 @@ final class OrderBookQueryService {
         var query = CoreStateQueryCodec.decodeOrderBookQuery(message.payloadUnsafe());
         long queryId = nextAsyncQueryId++;
         try {
-            var levels = owner.matcherPipeline.call(owner.matchingAdapter.matcherShardId(query.symbol()),
-                    () -> owner.matchingAdapter.orderBookLevelsAsync(query.symbol(), query.depth()).join(),
-                    TradingCoreRuntime.MATCHING_AWAIT_TIMEOUT_NANOS);
-            completedBookQueries.put(queryId, CompletedBookQuery.single(levels));
+            owner.matcherPipeline.readAtSubmissionFence(owner.matchingAdapter.matcherShardId(query.symbol()),
+                    () -> owner.matchingAdapter.orderBookLevelsAsync(query.symbol(), query.depth()).join())
+                    .whenComplete((levels, failure) -> {
+                        if (failure != null) failedQueries.put(queryId, true);
+                        else completedBookQueries.put(queryId, CompletedBookQuery.single(levels));
+                    });
         } catch (RuntimeException failure) {
             failedQueries.put(queryId, true);
         }
@@ -74,14 +76,16 @@ final class OrderBookQueryService {
         long queryId = nextAsyncQueryId++;
         try {
             var snapshot = owner.matchingAdapter.topology().matchingEngineCount() == 1
-                    ? owner.matcherPipeline.call(
-                    () -> owner.matchingAdapter.orderBookBootstrapAsync(query.depth()).join(),
-                    TradingCoreRuntime.MATCHING_AWAIT_TIMEOUT_NANOS)
-                    : owner.matchingAdapter.mergeBookBootstrapShards(owner.matcherPipeline.callEach(
-                    shardId -> owner.matchingAdapter.orderBookBootstrapShard(shardId, query.depth()),
-                    TradingCoreRuntime.MATCHING_AWAIT_TIMEOUT_NANOS));
-            completedBookQueries.put(queryId, CompletedBookQuery.bootstrap(
-                    message.header().commandId().toString(), query, snapshot));
+                    ? owner.matcherPipeline.readAtSubmissionFence(0,
+                    () -> owner.matchingAdapter.orderBookBootstrapAsync(query.depth()).join())
+                    : owner.matcherPipeline.readEachAsync(
+                    shardId -> owner.matchingAdapter.orderBookBootstrapShard(shardId, query.depth()))
+                    .thenApply(owner.matchingAdapter::mergeBookBootstrapShards);
+            snapshot.whenComplete((value, failure) -> {
+                if (failure != null) failedQueries.put(queryId, true);
+                else completedBookQueries.put(queryId, CompletedBookQuery.bootstrap(
+                        message.header().commandId().toString(), query, value));
+            });
         } catch (RuntimeException failure) {
             failedQueries.put(queryId, true);
         }

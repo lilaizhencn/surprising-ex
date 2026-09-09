@@ -64,7 +64,7 @@ final class MatcherSettlementDispatcher {
                 captureIsolatedChanges);
         for (int laneId = 0; laneId < owner.accountLanes.length; laneId++) {
             if ((expectedLaneMask & 1L << laneId) == 0) continue;
-            if (!owner.accountLanesStarted) {
+            if (!owner.accountLanesStarted || owner.ownerLaneAccess) {
                 event.execute(owner.accountLanes[laneId]);
             } else {
                 owner.accountLaneQueueHighWaterMarks[laneId] = Math.max(
@@ -183,7 +183,7 @@ final class MatcherSettlementDispatcher {
                     baseAssetIds, quoteAssetIds, settleAssetIds, owner.accountLanes.length);
             for (int laneId = 0; laneId < owner.accountLanes.length; laneId++) {
                 if ((batchLaneMask & 1L << laneId) == 0) continue;
-                if (!owner.accountLanesStarted) event.execute(owner.accountLanes[laneId]);
+                if (!owner.accountLanesStarted || owner.ownerLaneAccess) event.execute(owner.accountLanes[laneId]);
                 else {
                     owner.accountLaneQueueHighWaterMarks[laneId] = Math.max(
                             owner.accountLaneQueueHighWaterMarks[laneId], owner.laneWorkers[laneId].depth() + 1);

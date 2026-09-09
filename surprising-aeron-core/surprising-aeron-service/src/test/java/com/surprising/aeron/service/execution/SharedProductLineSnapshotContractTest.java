@@ -180,7 +180,7 @@ class SharedProductLineSnapshotContractTest {
         CoreResponse response = state.apply(command);
         if (response.resultCode() != CoreResultCode.MATCHING_PENDING) return response;
         long matchingSequence = state.matchingSequence(command.header().commandId());
-        return state.commits.completeMatchingSynchronously(matchingSequence,
+        return CoreTestCompletion.completeMatchingSynchronously(state, matchingSequence,
                 command.header().submittedAtEpochMillis(), command.header().sourceSequence());
     }
 

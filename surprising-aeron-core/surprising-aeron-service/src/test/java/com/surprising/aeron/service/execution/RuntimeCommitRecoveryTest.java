@@ -738,7 +738,13 @@ class RuntimeCommitRecoveryTest {
 
     private static ClusterReplay replayClusterCommand(SurprisingClusteredService service, CoreMessage command) {
         ClusterReplay replay = replayClusterCommandRaw(service, command);
-        service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, command.header().submittedAtEpochMillis() + 1);
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+        do {
+            service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, command.header().submittedAtEpochMillis() + 1);
+            if (service.pendingCommandCount() == 0) break;
+            java.util.concurrent.locks.LockSupport.parkNanos(100_000);
+        } while (System.nanoTime() < deadline);
+        assertThat(service.pendingCommandCount()).isZero();
         service.state().assertClusterCallbackComplete();
         assertThat(replay.responses()).isNotEmpty();
         return replay;

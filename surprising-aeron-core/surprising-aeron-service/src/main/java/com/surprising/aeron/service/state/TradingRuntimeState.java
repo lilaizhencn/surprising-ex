@@ -122,6 +122,14 @@ public final class TradingRuntimeState implements AutoCloseable {
             new java.util.ArrayDeque<>();
     /** 账户 Lane 是否已启动，区分恢复阶段和运行阶段。 */
     boolean accountLanesStarted;
+    /** 控制阶段已通过异步交接取得全部 Lane 的唯一写入权。 */
+    boolean ownerLaneAccess;
+    /** 当前是否存在尚未完成的所有权交接。 */
+    private boolean laneHandoffRequested;
+    /** 交接代次，防止上一轮释放被误认为新一轮完成。 */
+    private long laneHandoffEpoch;
+    /** 交接无进展只触发节点故障，不转换成与线程速度相关的业务拒绝。 */
+    private long laneHandoffDeadline;
 
     /** 各币对当前标记价，由所属产品运行时独立维护。 */
     final IntObjectHashMap<MarkPriceRuntime> markPrices = new IntObjectHashMap<>();
@@ -435,6 +443,64 @@ public final class TradingRuntimeState implements AutoCloseable {
         accountLanesStarted = true;
     }
 
+    /** 集群命令推进作用域内禁止退回跨线程同步调用；独立恢复/快照 API 不在此作用域。 */
+    private boolean asynchronousCommandScope;
+
+    public void enterAsynchronousCommandScope() {
+        assertOwner();
+        if (asynchronousCommandScope) throw new IllegalStateException("nested asynchronous command scope");
+        asynchronousCommandScope = true;
+    }
+
+    public void exitAsynchronousCommandScope() {
+        assertOwner();
+        asynchronousCommandScope = false;
+    }
+
+    /** 逐项批量业务只有取得唯一写入权后才能进入；失败返回表示下次继续轮询。 */
+    public boolean tryEnterSequentialLaneStage() {
+        return !asynchronousCommandScope || tryAcquireOwnerLaneAccess();
+    }
+
+    /** 批量阶段结束后归还 Lane；仍在交接或批量上下文中的所有权不能提前释放。 */
+    public void releaseCompletedSequentialLaneStage() {
+        if (ownerLaneAccess && !orderBatchMutationScope) releaseOwnerLaneAccess();
+    }
+
+    public boolean tryAcquireOwnerLaneAccess() {
+        assertOwner();
+        assertAccountLanesHealthy();
+        if (ownerLaneAccess) return true;
+        if (!accountLanesStarted) { ownerLaneAccess = true; return true; }
+        if (!laneHandoffRequested) {
+            laneHandoffEpoch = Math.incrementExact(laneHandoffEpoch);
+            laneHandoffRequested = true;
+            laneHandoffDeadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+            for (SettlementLaneWorker worker : laneWorkers) worker.requestHandoff(laneHandoffEpoch);
+        }
+        for (SettlementLaneWorker worker : laneWorkers) {
+            if (!worker.handoffReady(laneHandoffEpoch)) {
+                if (Thread.currentThread().isInterrupted() || System.nanoTime() - laneHandoffDeadline >= 0)
+                    throw new IllegalStateException("Account Lane ownership handoff interrupted or timed out");
+                return false;
+            }
+        }
+        for (AccountLaneState lane : accountLanes) lane.bindOwner();
+        ownerLaneAccess = true;
+        return true;
+    }
+
+    public void releaseOwnerLaneAccess() {
+        assertOwner();
+        if (ownerLaneAccess && accountLanesStarted)
+            for (AccountLaneState lane : accountLanes) lane.releaseOwnerForHandoff();
+        ownerLaneAccess = false;
+        if (laneHandoffRequested) {
+            for (SettlementLaneWorker worker : laneWorkers) worker.resumeHandoff(laneHandoffEpoch);
+            laneHandoffRequested = false;
+        }
+    }
+
     public void assertAccountLanesHealthy() {
         assertOwner();
         if (!accountLanesStarted) return;
@@ -492,7 +558,11 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
             return operation.apply(scoped);
         }
+        if (ownerLaneAccess) return inLaneCommandScope(accountLanes[laneId], operation);
         if (!accountLanesStarted) return operation.apply(accountLanes[laneId]);
+        if (asynchronousCommandScope)
+            throw new org.agrona.concurrent.AgentTerminationException(
+                    new IllegalStateException("asynchronous command requires Lane execution ownership"));
         LaneMutationTask task = laneMutationTasks[laneId];
         if (task == null) {
             task = new LaneMutationTask(laneId);
@@ -648,7 +718,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         int selectedCount = Long.bitCount(selectedLaneMask);
         int laneOperations = Math.max(workItems, selectedCount);
         if (!allowParallel || selectedCount < 2
-                || laneOperations < PARALLEL_SETTLEMENT_MIN_LANE_OPERATIONS || !accountLanesStarted) {
+                || laneOperations < PARALLEL_SETTLEMENT_MIN_LANE_OPERATIONS || !accountLanesStarted || ownerLaneAccess) {
             for (int laneId = 0; laneId < accountLanes.length; laneId++) {
                 if ((selectedLaneMask & 1L << laneId) == 0) continue;
                 int currentLaneId = laneId;
@@ -1168,6 +1238,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     @Override
     public void close() {
+        releaseOwnerLaneAccess();
         accountLanesStarted = false;
         for (SettlementLaneWorker worker : laneWorkers) {
             if (worker != null) worker.close();
@@ -1355,6 +1426,9 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     void awaitLaneCommit(LaneCommitEvent event, long deadlineNanos) {
+        if (asynchronousCommandScope && !event.complete())
+            throw new org.agrona.concurrent.AgentTerminationException(
+                    new IllegalStateException("asynchronous command cannot await Lane commit"));
         int idle = 0;
         while (!event.complete()) {
             if ((idle++ & 1_023) == 0) {
@@ -1385,7 +1459,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         LaneCommitEvent event = laneCommitEventPool.pollFirst();
         if (event == null) event = new LaneCommitEvent(accountLanes.length);
         event.prepare(coreSequence, laneMask, laneUserScratch, this);
-        if (!accountLanesStarted) {
+        if (!accountLanesStarted || ownerLaneAccess) {
             for (int laneId = 0; laneId < accountLanes.length; laneId++) {
                 if ((laneMask & 1L << laneId) == 0) continue;
                 event.execute(accountLanes[laneId]);
@@ -1407,7 +1481,8 @@ public final class TradingRuntimeState implements AutoCloseable {
                 if ((laneMask & laneBit) == 0) continue;
                 accountLaneQueueHighWaterMarks[laneId] = Math.max(
                         accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
-                laneWorkers[laneId].submit(event);
+                if (ownerLaneAccess) event.execute(accountLanes[laneId]);
+            else laneWorkers[laneId].submit(event);
                 dispatchedLaneCommitSequences[laneId] = coreSequence;
                 submittedMask |= laneBit;
             }
@@ -1452,7 +1527,8 @@ public final class TradingRuntimeState implements AutoCloseable {
                 preparedClientKey, symbolId, assetId, laneId, this);
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
                 accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
-        laneWorkers[laneId].submit(event);
+        if (ownerLaneAccess) event.execute(accountLanes[laneId]);
+            else laneWorkers[laneId].submit(event);
         return event;
     }
 
@@ -1485,7 +1561,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
                 accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
         try {
-            laneWorkers[laneId].submit(event);
+            if (ownerLaneAccess) event.execute(accountLanes[laneId]);
+            else laneWorkers[laneId].submit(event);
         } catch (RuntimeException | Error failure) {
             releaseMatcherSettlementChanges(event.discardChanges());
             event.clear();
@@ -1717,7 +1794,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
                 accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
         try {
-            laneWorkers[laneId].submit(event);
+            if (ownerLaneAccess) event.execute(accountLanes[laneId]);
+            else laneWorkers[laneId].submit(event);
         } catch (RuntimeException | Error failure) {
             event.discard();
             releaseMatcherSettlementChanges(changes);
@@ -1752,7 +1830,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
                 accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
         try {
-            laneWorkers[laneId].submit(event);
+            if (ownerLaneAccess) event.execute(accountLanes[laneId]);
+            else laneWorkers[laneId].submit(event);
         } catch (RuntimeException | Error failure) {
             event.discard();
             releaseMatcherSettlementChanges(changes);
@@ -1808,7 +1887,8 @@ public final class TradingRuntimeState implements AutoCloseable {
                 laneId, this, identities, changes);
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
                 accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
-        laneWorkers[laneId].submit(event);
+        if (ownerLaneAccess) event.execute(accountLanes[laneId]);
+            else laneWorkers[laneId].submit(event);
         return event;
     }
 

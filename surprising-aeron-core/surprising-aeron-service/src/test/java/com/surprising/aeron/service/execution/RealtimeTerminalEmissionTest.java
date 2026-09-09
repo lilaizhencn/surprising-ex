@@ -64,7 +64,7 @@ class RealtimeTerminalEmissionTest {
         if(capture!=null)capture.begin(seq,TIME+seq,0,state.realtimeExportSequence());
         var response=state.apply(message);
         if(response.resultCode()==CoreResultCode.MATCHING_PENDING)
-            response=state.commits.completeMatchingSynchronously(state.matchingSequence(message.header().commandId()),TIME+seq,seq);
+            response=CoreTestCompletion.completeMatchingSynchronously(state, state.matchingSequence(message.header().commandId()),TIME+seq,seq);
         if(response.commandStatus()!=ResponseStatus.APPLIED)throw new IllegalStateException(label+" "+response.resultCode());
         if(capture==null)return;
         capture.commit(state.realtimeExportSequence());

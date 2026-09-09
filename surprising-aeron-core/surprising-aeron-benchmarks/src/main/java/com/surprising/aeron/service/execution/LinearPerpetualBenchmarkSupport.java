@@ -1055,7 +1055,7 @@ final class LinearPerpetualBenchmarkSupport {
                             + " pendingCount=" + state.pendingMatchingCount()
                             + " submittedCount=" + submittedMatching.size());
                 }
-                CoreMatchingResult matching = state.awaitMatchingResult(pending.sequence);
+                CoreMatchingResult matching = BenchmarkMatchingAwait.awaitMatchingResult(state, pending.sequence);
                 if (matching == null) continue;
                 nativeMatchingResult = matching.resultCode();
                 pending.response = state.completeMatching(pending.sequence, matching,

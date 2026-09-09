@@ -101,10 +101,10 @@ class MatcherPipelineGroupTest {
             pipelines.submit(secondShard, 2, () -> adapter.executeWithEvidenceSync(
                     2, UUID.randomUUID(), 2, 1, 1_001, () -> adapter.place(102, second)));
 
-            assertThat(pipelines.await(2, TimeUnit.SECONDS.toNanos(5)).accepted()).isTrue();
+            assertThat(await(pipelines, 2, TimeUnit.SECONDS.toNanos(5)).accepted()).isTrue();
             assertThat(pipelines.poll(1)).isNull();
             releaseFirst.countDown();
-            assertThat(pipelines.await(1, TimeUnit.SECONDS.toNanos(5)).accepted()).isTrue();
+            assertThat(await(pipelines, 1, TimeUnit.SECONDS.toNanos(5)).accepted()).isTrue();
         } finally {
             pipelines.closeShards(adapter::closeShard);
             if (previous == null) System.clearProperty("surprising.aeron.matching-engines");
@@ -124,5 +124,15 @@ class MatcherPipelineGroupTest {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("matcher wait interrupted", exception);
         }
+    }
+    private static com.surprising.aeron.service.matching.CoreMatchingResult await(
+            MatcherPipelineGroup pipeline, long sequence, long timeout) {
+        long deadline = System.nanoTime() + timeout;
+        do {
+            var result = pipeline.poll(sequence);
+            if (result != null) return result;
+            Thread.onSpinWait();
+        } while (System.nanoTime() < deadline);
+        return null;
     }
 }

@@ -22,12 +22,12 @@ class MatcherCommandPipelineTest {
             pipeline.submit(2,()->{value.set(2);return new CoreMatchingResult(true,"TWO");});
             release.countDown();
             assertThat(snapshot.get(5,TimeUnit.SECONDS)).isEqualTo(1);
-            assertThat(pipeline.await(1,TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("ONE");
-            assertThat(pipeline.await(2,TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("TWO");
+            assertThat(await(pipeline, 1,TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("ONE");
+            assertThat(await(pipeline, 2,TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("TWO");
             var failed=pipeline.readAtSubmissionFence(()->{throw new IllegalArgumentException("read failed");});
             assertThatThrownBy(()->failed.get(5,TimeUnit.SECONDS)).hasCauseInstanceOf(IllegalArgumentException.class);
             pipeline.submit(3,()->new CoreMatchingResult(true,"THREE"));
-            assertThat(pipeline.await(3,TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("THREE");
+            assertThat(await(pipeline, 3,TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("THREE");
         } finally {release.countDown();}
     }
 
@@ -53,10 +53,10 @@ class MatcherCommandPipelineTest {
                     .hasMessageContaining("full");
 
             releaseFirst.countDown();
-            assertThat(pipeline.await(1, TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("ONE");
-            assertThat(pipeline.await(2, TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("TWO");
-            assertThat(pipeline.await(3, TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("THREE");
-            assertThat(pipeline.await(4, TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("FOUR");
+            assertThat(await(pipeline, 1, TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("ONE");
+            assertThat(await(pipeline, 2, TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("TWO");
+            assertThat(await(pipeline, 3, TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("THREE");
+            assertThat(await(pipeline, 4, TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("FOUR");
             assertThat(pipeline.inFlight()).isZero();
             assertThat(pipeline.completionHighWaterMark()).isPositive();
         }
@@ -69,7 +69,7 @@ class MatcherCommandPipelineTest {
                 throw new IllegalStateException("matcher failed");
             });
 
-            assertThatThrownBy(() -> pipeline.await(1, TimeUnit.SECONDS.toNanos(5)))
+            assertThatThrownBy(() -> await(pipeline, 1, TimeUnit.SECONDS.toNanos(5)))
                     .isInstanceOf(IllegalStateException.class)
                     .hasMessageContaining("matcher failed");
         }
@@ -81,10 +81,10 @@ class MatcherCommandPipelineTest {
             pipeline.submit(20, () -> new CoreMatchingResult(true, "FIRST-SUBMITTED"));
             pipeline.submit(10, () -> new CoreMatchingResult(true, "SECOND-SUBMITTED"));
 
-            assertThat(pipeline.await(10, TimeUnit.MILLISECONDS.toNanos(1))).isNull();
-            assertThat(pipeline.await(20, TimeUnit.SECONDS.toNanos(5)).resultCode())
+            assertThat(await(pipeline, 10, TimeUnit.MILLISECONDS.toNanos(1))).isNull();
+            assertThat(await(pipeline, 20, TimeUnit.SECONDS.toNanos(5)).resultCode())
                     .isEqualTo("FIRST-SUBMITTED");
-            assertThat(pipeline.await(10, TimeUnit.SECONDS.toNanos(5)).resultCode())
+            assertThat(await(pipeline, 10, TimeUnit.SECONDS.toNanos(5)).resultCode())
                     .isEqualTo("SECOND-SUBMITTED");
         }
     }
@@ -98,9 +98,9 @@ class MatcherCommandPipelineTest {
                 pipeline.submit(first, () -> new CoreMatchingResult(true, "FIRST"));
                 pipeline.submit(second, () -> new CoreMatchingResult(true, "SECOND"));
 
-                assertThat(pipeline.await(first, TimeUnit.SECONDS.toNanos(5)).resultCode())
+                assertThat(await(pipeline, first, TimeUnit.SECONDS.toNanos(5)).resultCode())
                         .isEqualTo("FIRST");
-                assertThat(pipeline.await(second, TimeUnit.SECONDS.toNanos(5)).resultCode())
+                assertThat(await(pipeline, second, TimeUnit.SECONDS.toNanos(5)).resultCode())
                         .isEqualTo("SECOND");
                 assertThat(pipeline.inFlight()).isZero();
                 java.util.concurrent.locks.LockSupport.parkNanos(TimeUnit.MICROSECONDS.toNanos(200));
@@ -117,5 +117,15 @@ class MatcherCommandPipelineTest {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("test matcher interrupted", exception);
         }
+    }
+    private static com.surprising.aeron.service.matching.CoreMatchingResult await(
+            MatcherCommandPipeline pipeline, long sequence, long timeout) {
+        long deadline = System.nanoTime() + timeout;
+        do {
+            var result = pipeline.poll(sequence);
+            if (result != null) return result;
+            Thread.onSpinWait();
+        } while (System.nanoTime() < deadline);
+        return null;
     }
 }
