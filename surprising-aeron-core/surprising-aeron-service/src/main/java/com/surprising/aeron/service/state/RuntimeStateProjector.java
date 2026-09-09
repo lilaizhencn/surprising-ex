@@ -100,7 +100,7 @@ public final class RuntimeStateProjector {
                 scan.riskIsolatedMarginUnits(), scan.riskIsolatedReservationUnits(), scan.triggerComplete(),
                 scan.triggerPhase(), scan.triggerPriceCursor(), scan.triggerOrderCursor(), scan.triggerUpperId(),
                 scan.triggerMarkPriceTicks(), scan.triggerGeneratedAtEpochMillis(), scan.triggerOcoOrderId(),
-                scan.triggerOcoCursor(), scan.lastScheduledRevision())));
+                scan.triggerOcoCursor(), scan.lastScheduledRevision(), scan.laneProgress())));
         runtime.setNextLiquidationId(source.riskState().nextLiquidationId());
         source.orders().forEach((orderId, order) -> {
             runtime.putOrder(toRuntimeOrder(order, identities));

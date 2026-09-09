@@ -195,7 +195,8 @@ public final class SurprisingClusteredService implements ClusteredService {
                 continue;
             }
             if (!eligible) {
-                if (!state.runtimeState.tryAcquireOwnerLaneAccess()) return;
+                if (state.requiresOwnerLaneAccessForPreparation(next.command)
+                        && !state.runtimeState.tryAcquireOwnerLaneAccess()) return;
                 activeControl = next;
                 state.assertClusterCallbackComplete();
                 beginCapture(next.position, next.timestamp);

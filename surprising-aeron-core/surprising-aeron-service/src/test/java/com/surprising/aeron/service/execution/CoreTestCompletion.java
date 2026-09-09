@@ -10,7 +10,8 @@ final class CoreTestCompletion {
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
         var window = new ClusterCommandWindow();
         boolean independent = owner.prepareClusterPipelineScope(message, window);
-        while (!independent && !owner.runtimeState.tryAcquireOwnerLaneAccess()) {
+        while (!independent && owner.requiresOwnerLaneAccessForPreparation(message)
+                && !owner.runtimeState.tryAcquireOwnerLaneAccess()) {
             if (System.nanoTime() >= deadline) throw new AssertionError("Lane handoff timeout");
             Thread.onSpinWait();
         }

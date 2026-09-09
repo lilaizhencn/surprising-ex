@@ -477,6 +477,13 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /** 当前信封不可变解码结果；作用域重算不会再次解码。 */
     DecodedMatchingCommand decodedIngressCommand;
 
+    /** 资金费和风险任务只读取 owner 元数据即可派发，无需先停驻全部账户 Lane。 */
+    boolean requiresOwnerLaneAccessForPreparation(CoreMessage message) {
+        return message.header().messageType() != CoreMessageType.APPLY_FUNDING
+                && (message.header().messageType() != CoreMessageType.CONTINUE_RISK_SCAN
+                    || runtimeState.firstRiskIncompleteScan() == null);
+    }
+
     CoreResponse applyClusterCommand(CoreMessage message, long timestamp, long position) {
         return applyClusterCommand(message, timestamp, position, null);
     }
@@ -1036,7 +1043,14 @@ public final class TradingCoreRuntime implements AutoCloseable {
             status = ResponseStatus.REJECTED;
             resultCode = CoreResultCode.INVALID_COMMAND;
         }
-        if (controlContinuation != null) {
+        if (controlContinuation == null && runtimeState.asynchronousCommands()
+                && (message.header().messageType() == CoreMessageType.APPLY_FUNDING
+                    || message.header().messageType() == CoreMessageType.CONTINUE_RISK_SCAN)) {
+            // 校验失败或空任务也要在账户交接完成后进入统一提交/回滚路径。
+            controlCompletionStatus = status;
+            controlCompletionCode = resultCode;
+        }
+        if (controlContinuation != null || controlCompletionStatus != null) {
             pendingDirectCommand = new PendingDirectCommand(message, clusterTimestamp, clusterPosition,
                     sourceKey, fingerprint, commandAdmission, commandDemand, beforeProjection,
                     beforeRuntimeRevision, runtimeCommandCheckpoint, positionIdentityCheckpoint);

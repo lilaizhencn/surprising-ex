@@ -19,7 +19,6 @@ final class PerpetualFundingCommands {
                     message.header().commandId(), owner.runtimeState, owner.identities);
             owner.deferControl(() -> {
                 if (!work.poll()) return false;
-                if (!owner.runtimeState.tryAcquireOwnerLaneAccess()) return false;
                 complete(work.result());
                 return true;
             });

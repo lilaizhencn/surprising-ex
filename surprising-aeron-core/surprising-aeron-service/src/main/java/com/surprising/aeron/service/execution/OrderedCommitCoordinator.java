@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.execution;
 
+import com.surprising.aeron.service.state.RiskScanCoordinator;
+
 import static com.surprising.aeron.service.execution.TradingCoreRuntime.*;
 
 import com.surprising.aeron.service.execution.CommandResultLedger.StoredResult;
@@ -753,7 +755,7 @@ final class OrderedCommitCoordinator {
                     && scan.lastUserId() == continuation.lastUserId()) {
                 long beforeRevision = owner.runtimeState.revision();
                 if (owner.runtimeState.asynchronousCommands()) {
-                    var work = new RuntimeDerivativeRiskProcessor.RiskWork(batch.maxRiskScanUsers(),
+                    var work = new RiskScanCoordinator(batch.maxRiskScanUsers(),
                             owner.positionUserIndex, owner.runtimeState, owner.identities);
                     var result = owner.resultBuilder.commandLiquidationBatchResult;
                     deferControl(() -> {

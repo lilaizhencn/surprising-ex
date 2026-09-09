@@ -522,8 +522,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         controlLanes.dispatch(laneMask, AccountLaneOperationType.SETTLEMENT, operation);
     }
 
-    public void dispatchRiskLane(int laneId, java.util.function.Supplier<Object> operation) {
-        controlLanes.dispatch(1L << laneId, AccountLaneOperationType.RISK, ignored -> operation.get());
+    public void dispatchRiskLanes(long laneMask, java.util.function.IntFunction<Object> operation) {
+        controlLanes.dispatch(laneMask, AccountLaneOperationType.RISK, operation);
     }
 
     public boolean pollControlLanes() { return controlLanes.poll(); }

@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state.model;
 
+import java.util.List;
+
 import com.surprising.aeron.service.state.StateMapSupport;
 
 import com.surprising.aeron.protocol.CoreRiskScanControlView;
@@ -88,7 +90,40 @@ public record CoreRiskState(
             long triggerMarkPriceTicks,
             long triggerGeneratedAtEpochMillis,
             long triggerOcoOrderId,
-            long triggerOcoCursor, long lastScheduledRevision) {
+            long triggerOcoCursor, long lastScheduledRevision,
+            /** 各 Lane 独立恢复的风险进度；空列表表示扫描尚未分派。 */ List<RiskLaneProgress> laneProgress) {
+        public RiskScan(
+                String symbol,
+                int accountLaneId,
+                long priceSequence,
+                long scanStartPriceSequence,
+                long lastUserId,
+                boolean riskComplete,
+                long riskUserId,
+                int riskPhase,
+                String riskPositionCursor,
+                long riskReservationCursor,
+                long riskUnrealizedPnlUnits,
+                long riskMaintenanceMarginUnits,
+                long riskIsolatedMarginUnits,
+                long riskIsolatedReservationUnits,
+                boolean triggerComplete,
+                int triggerPhase,
+                long triggerPriceCursor,
+                long triggerOrderCursor,
+                long triggerUpperId,
+                long triggerMarkPriceTicks,
+                long triggerGeneratedAtEpochMillis,
+                long triggerOcoOrderId,
+                long triggerOcoCursor, long lastScheduledRevision) {
+            this(symbol, accountLaneId, priceSequence, scanStartPriceSequence, lastUserId, riskComplete, riskUserId,
+                    riskPhase, riskPositionCursor, riskReservationCursor, riskUnrealizedPnlUnits,
+                    riskMaintenanceMarginUnits, riskIsolatedMarginUnits, riskIsolatedReservationUnits,
+                    triggerComplete, triggerPhase, triggerPriceCursor, triggerOrderCursor, triggerUpperId,
+                    triggerMarkPriceTicks, triggerGeneratedAtEpochMillis, triggerOcoOrderId, triggerOcoCursor,
+                    lastScheduledRevision, List.of());
+        }
+
 
         public RiskScan(
             String symbol,
@@ -122,6 +157,8 @@ public record CoreRiskState(
         }
 
         public RiskScan {
+            laneProgress = List.copyOf(laneProgress);
+            if (laneProgress.size() > Long.SIZE) throw new IllegalArgumentException("too many risk Lanes");
             if (lastScheduledRevision < 0 || accountLaneId < 0 || accountLaneId >= Long.SIZE || priceSequence < 0 || scanStartPriceSequence < 0
                     || scanStartPriceSequence > priceSequence || lastUserId < 0 || riskUserId < 0
                     || riskPhase < 0 || riskPhase > 2 || riskReservationCursor < 0
@@ -172,7 +209,16 @@ public record CoreRiskState(
                     riskUnrealizedPnlUnits, riskMaintenanceMarginUnits, riskIsolatedMarginUnits,
                     riskIsolatedReservationUnits, triggerComplete, triggerPhase, triggerPriceCursor,
                     triggerOrderCursor, triggerUpperId, triggerMarkPriceTicks, triggerGeneratedAtEpochMillis,
-                    triggerOcoOrderId, triggerOcoCursor, revision);
+                    triggerOcoOrderId, triggerOcoCursor, revision, laneProgress);
+        }
+
+        public RiskScan withLaneProgress(List<RiskLaneProgress> progress) {
+            return new RiskScan(symbol, accountLaneId, priceSequence, scanStartPriceSequence, lastUserId,
+                    riskComplete, riskUserId, riskPhase, riskPositionCursor, riskReservationCursor,
+                    riskUnrealizedPnlUnits, riskMaintenanceMarginUnits, riskIsolatedMarginUnits,
+                    riskIsolatedReservationUnits, triggerComplete, triggerPhase, triggerPriceCursor,
+                    triggerOrderCursor, triggerUpperId, triggerMarkPriceTicks, triggerGeneratedAtEpochMillis,
+                    triggerOcoOrderId, triggerOcoCursor, lastScheduledRevision, progress);
         }
 
         public boolean complete() {
@@ -196,7 +242,7 @@ public record CoreRiskState(
                     riskUserId, riskPhase, riskPositionCursor, riskReservationCursor,
                     riskUnrealizedPnlUnits, riskMaintenanceMarginUnits, riskIsolatedMarginUnits,
                     riskIsolatedReservationUnits, complete, phase, priceCursor, orderCursor, upperId,
-                    markPriceTicks, generatedAtEpochMillis, triggerOcoOrderId, triggerOcoCursor, lastScheduledRevision);
+                    markPriceTicks, generatedAtEpochMillis, triggerOcoOrderId, triggerOcoCursor, lastScheduledRevision, laneProgress);
         }
 
         public RiskScan withTriggerOcoProgress(long orderId, long cursor) {
@@ -205,7 +251,7 @@ public record CoreRiskState(
                     riskUnrealizedPnlUnits, riskMaintenanceMarginUnits, riskIsolatedMarginUnits,
                     riskIsolatedReservationUnits, triggerComplete, triggerPhase, triggerPriceCursor,
                     triggerOrderCursor, triggerUpperId, triggerMarkPriceTicks, triggerGeneratedAtEpochMillis,
-                    orderId, cursor, lastScheduledRevision);
+                    orderId, cursor, lastScheduledRevision, laneProgress);
         }
 
         public RiskScan nextAccountLane(int laneId) {

@@ -1,4 +1,6 @@
 package com.surprising.aeron.service.execution;
+
+import com.surprising.aeron.service.state.RiskScanCoordinator;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.TradingCommandCodec;
 import com.surprising.aeron.protocol.ExecuteLiquidationCommand;
@@ -64,15 +66,16 @@ final class DerivativeRiskCommands {
         long startedAt = System.nanoTime();
         long beforeRevision = owner.runtimeState.revision();
         if (owner.runtimeState.asynchronousCommands() && !activeScan.riskComplete()) {
-            var work = new RuntimeDerivativeRiskProcessor.RiskWork(command.maxUsers(),
+            var work = new RiskScanCoordinator(command.maxUsers(),
                     owner.positionUserIndex, owner.runtimeState, owner.identities);
             owner.deferControl(() -> {
                 if (!work.poll()) return false;
-                if (!owner.runtimeState.tryAcquireOwnerLaneAccess()) return false;
                 if (owner.runtimeState.revision() != beforeRevision) owner.commits.requestCommitPublication();
                 int remaining = command.maxUsers() - work.completedWork();
-                if (remaining > 0 && owner.runtimeState.riskScan(activeScan.symbolId()).riskComplete())
+                if (remaining > 0 && owner.runtimeState.riskScan(activeScan.symbolId()).riskComplete()) {
+                    if (!owner.runtimeState.tryAcquireOwnerLaneAccess()) return false;
                     owner.triggers.evaluatePendingTriggerScan(symbol, remaining);
+                }
                 owner.logRiskScan("continuation", symbol, command.maxUsers(), pendingBefore, startedAt);
                 return true;
             });

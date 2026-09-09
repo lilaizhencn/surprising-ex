@@ -109,6 +109,52 @@ class RiskBatchBudgetTest {
         }
     }
 
+    @org.junit.jupiter.api.Test
+    void asynchronousRiskIdOverflowRollsBackAllLaneChangesAndFollowingCommandWorks() {
+        ProductLine line = ProductLine.LINEAR_PERPETUAL;
+        try (var state = new TradingCoreRuntime(line)) {
+            applied(state, command(line, CoreMessageType.UPSERT_INSTRUMENT,
+                    TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand("BTC-USDT", 1,
+                            ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
+                            100_000, 50_000, 0, 0, 0, -1, 0))));
+            applied(state, mark(line, "BTC-USDT", 1));
+            for (long user : new long[]{7, 8}) {
+                applied(state, command(line, CoreMessageType.ADJUST_BALANCE, user,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 100))));
+                applied(state, command(line, CoreMessageType.PLACE_ORDER, user,
+                        TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100 + user, "BTC-USDT", 1,
+                                user == 7 ? CoreOrderSide.SELL : CoreOrderSide.BUY, 100, 1, false,
+                                CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+                                CoreTimeInForce.GTC, false, "overflow-" + user))));
+            }
+            applied(state, command(line, CoreMessageType.ADJUST_BALANCE, 8,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", -90))));
+            // 仅功能测试将编号放到边界；通过随后正常的行情命令提交为恢复基线。
+            state.runtimeState.setNextLiquidationId(Long.MAX_VALUE);
+            applied(state, command(line, CoreMessageType.APPLY_MARK_PRICE,
+                    TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand("BTC-USDT", 1, 80, 2, TIME))));
+            var before = state.tradingState();
+            var scan = command(line, CoreMessageType.CONTINUE_RISK_SCAN,
+                    TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64)));
+            assertThat(state.requiresOwnerLaneAccessForPreparation(scan)).isFalse();
+            var response = apply(state, scan);
+            assertThat(response.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(response.resultCode()).isEqualTo(CoreResultCode.ARITHMETIC_OVERFLOW);
+            assertThat(state.tradingState()).isEqualTo(before);
+            assertThat(state.tradingState().businessStateHash()).isEqualTo(before.businessStateHash());
+            try (var restored = TradingCoreRuntime.fromSnapshot(line, state.snapshot(600))) {
+                var normalPrice = mark(line, "BTC-USDT", 3);
+                applied(state, normalPrice); applied(restored, normalPrice);
+                var normalScan = command(line, CoreMessageType.CONTINUE_RISK_SCAN,
+                        TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64)));
+                applied(state, normalScan); applied(restored, normalScan);
+                assertThat(state.tradingState().riskState().liquidations()).isEmpty();
+                assertThat(state.tradingState().businessStateHash()).isEqualTo(restored.tradingState().businessStateHash());
+                assertThat(state.tradingState().users()).isEqualTo(before.users());
+            }
+        }
+    }
+
     private CoreLiquidationWorkView work(TradingCoreRuntime state,ProductLine line) {
         var response=apply(state,command(line,CoreMessageType.LIQUIDATION_WORK_QUERY,
                 CoreLiquidationWorkCodec.encodeQuery(line,CoreLiquidationWorkView.Purpose.EXECUTION,0,1000,1_048_576)));

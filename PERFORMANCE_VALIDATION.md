@@ -5048,3 +5048,16 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 证据目录 `/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-lane-control/`：`verify.log`、`boundary-package.log`、`risk-parity-benchmark-compile.log`、`local-functional.log` 和 `local-functional/results.json`。保留中间失败日志：批量续步缺少重新调度导致超时、快照先检查了账户读栅栏、测试误用资金分布哈希判断守恒；修复后均通过，未放宽业务终态/资金断言。
 - 被测 service.jar SHA-256 `8f1ddde62e48de2bb6ba4d8d5d203a06ea4bd2602e51ab032e165a000ad6305e`；功能客户端 benchmarks.jar `926ab2f49dbcd8a5bb15a38494035d698c3b891ba316acadce22977525d9f450`；最终源码清单 `source-manifest.json` SHA-256 `7be62e709db9cd4a7fe0d6ca4942d2ef3c9e514e54df05e951087d9fc9886f17`。功能客户端 jar 在随后添加的 JMH 编排参数之前打包，交易服务与功能 Gate 未变化；新 JMH 源码已单独编译检查。
 - 结论：上述资金费/风险扫描路径的本地功能和恢复验证通过；不宣称 owner 已轻量化、全部账户业务 Lane 化、零分配或吞吐达标。README 未修改，性能验收仍待用户授权真实三节点压测。
+
+
+## 2026-09-09 风险任务按 Lane 并行拆分（仅本地功能验证）
+
+- 被测代码：master，基线 `30b53eba` 加本次变更；精确源文件与构建包哈希见下述 `source-manifest.json`。对照 commit：不适用。用户明确要求不上云、不压测，因此未执行 JMH/JFR，不作吞吐、分配或延迟验收结论。
+- 拆分：`RiskScanCoordinator` 在 owner 分配有界预算和连续清算编号；`RiskLaneProcessor` 在各账户 Lane 并行估值、更新已有风险/清算；`RiskLiquidationBatch` 将 owner 分配的新增清算编号交回所属 Lane 写入。只在产生新增清算时增加该写入阶段，空 Lane 通过现有持仓用户索引排除。
+- 每个 Lane 的独立游标 `RiskLaneProgress` 进入快照、投影、恢复和业务哈希。资金费/风险扫描派发前不再接管全部 Lane；最终提交、失败回滚和触发扫描所需交接仍保留，其他控制操作未在本次全部改造。状态形式的同步风险入口使用相同预算/提交顺序，风险公式仍由原有独立计算路径验证。
+- 格式边界：交易状态快照格式由 30 更新为 31；不提供旧格式兼容分支。此次恢复证据仅覆盖本版本产生的日志/快照，后续服务器功能验证应使用新初始化测试数据，不把旧版本日志重算结果视为本次保证。
+- 环境：macOS 26.7 x86_64；Oracle GraalVM HotSpot JDK 25.0.1，Maven 3.9.16。执行 `mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am verify`：1,032 项，1,031 通过、0 失败、0 错误、1 项外部数据库测试跳过；service 637 项通过。JMH 增加 `controlPageSize=4` 场景参数并编译，未运行性能采样。
+- 新增正确性用例：分别阻塞首/末 Lane，验证其他 Lane 已完成估值且清算编号不受完成顺序影响；多个 Lane 同时保留部分游标后快照恢复，使用 1/3/7 预算续扫并更新标记价；清算编号溢出不部分写入，完整命令回滚后继续交易控制及快照恢复。用户余额、持仓、财库与恢复结果核对均通过。
+- 本地三独立 JVM：六产品线分别执行功能样本、SIGKILL 后日志恢复、快照后 SIGKILL 恢复，共 18/18 PASS。仅少量功能样本，无压测。节点使用 ZGC、Xms64m/Xmx512m、SHARED_NETWORK，按产品线依次启动并关闭。
+- 原始记录：`/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-parallel-risk/`，包含 `verify.log`、`parallel-tests.log`、`rejection-tests.log`、`local-functional.log`、各节点启动参数和日志、`local-functional/results.json`。首轮失败记录保留：旧同步入口仍按单游标顺序扫描，且空币对被按 Lane 多扣预算；修正调度与空 Lane 排除后原有风险断言通过，未放宽金融断言。
+- 源文件清单 SHA-256：`571659363add3974393f81ce2295b9ca513290b0b407b409f299943e9de845e4`；service.jar：`6b0e17ba95525d65924df7ab95ef17c294700cf13e88252d0f13daa551cb792f`；benchmarks.jar：`c0823cc26958d29512e19a4bb6c59d7791ad7d2759430d2a36899d932dc36168`。未修改 README。

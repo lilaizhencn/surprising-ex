@@ -122,7 +122,7 @@ public final class RuntimeStateMaterializer {
                     scan.riskIsolatedMarginUnits(), scan.riskIsolatedReservationUnits(), scan.triggerComplete(),
                     scan.triggerPhase(), scan.triggerPriceCursor(), scan.triggerOrderCursor(), scan.triggerUpperId(),
                     scan.triggerMarkPriceTicks(), scan.triggerGeneratedAtEpochMillis(), scan.triggerOcoOrderId(),
-                    scan.triggerOcoCursor(), scan.lastScheduledRevision()));
+                    scan.triggerOcoCursor(), scan.lastScheduledRevision(), scan.laneProgress()));
         });
         CoreRiskState risk = new CoreRiskState(marks, riskSnapshots, liquidations, scans,
                 runtime.nextLiquidationId(), runtime.riskScanControl());
@@ -251,7 +251,7 @@ public final class RuntimeStateMaterializer {
                 value.riskIsolatedMarginUnits(), value.riskIsolatedReservationUnits(), value.triggerComplete(),
                 value.triggerPhase(), value.triggerPriceCursor(), value.triggerOrderCursor(), value.triggerUpperId(),
                 value.triggerMarkPriceTicks(), value.triggerGeneratedAtEpochMillis(), value.triggerOcoOrderId(),
-                value.triggerOcoCursor(), value.lastScheduledRevision());
+                value.triggerOcoCursor(), value.lastScheduledRevision(), value.laneProgress());
     }
 
     static final class SnapshotTraversalProbe {

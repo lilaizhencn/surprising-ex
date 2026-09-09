@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.RiskLaneProgress;
+
 import com.surprising.aeron.service.state.model.CoreAlgoOrderState;
 import com.surprising.aeron.service.state.model.CoreCancelAllAfterKey;
 import com.surprising.aeron.service.state.model.CoreCancelAllAfterState;
@@ -261,7 +263,8 @@ public record TradingRuntimeSnapshot(
                                    boolean triggerComplete, int triggerPhase, long triggerPriceCursor,
                                    long triggerOrderCursor, long triggerUpperId, long triggerMarkPriceTicks,
                                    long triggerGeneratedAtEpochMillis, long triggerOcoOrderId,
-                                   long triggerOcoCursor, long lastScheduledRevision) {
+                                   long triggerOcoCursor, long lastScheduledRevision,
+            java.util.List<RiskLaneProgress> laneProgress) {
     }
 
     public record TreasurySnapshot(long feeUnits, long insuranceUnits, long insuranceDeficitUnits,

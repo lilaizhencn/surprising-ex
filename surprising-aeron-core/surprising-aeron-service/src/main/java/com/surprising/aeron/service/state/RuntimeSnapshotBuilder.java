@@ -86,7 +86,7 @@ final class RuntimeSnapshotBuilder {
                         scan.riskIsolatedReservationUnits(), scan.triggerComplete(), scan.triggerPhase(),
                         scan.triggerPriceCursor(), scan.triggerOrderCursor(), scan.triggerUpperId(),
                         scan.triggerMarkPriceTicks(), scan.triggerGeneratedAtEpochMillis(), scan.triggerOcoOrderId(),
-                        scan.triggerOcoCursor(), scan.lastScheduledRevision())));
+                        scan.triggerOcoCursor(), scan.lastScheduledRevision(), scan.laneProgress())));
 
         Map<Integer, TradingRuntimeSnapshot.TreasurySnapshot> treasury = new TreeMap<>();
         TreeSet<Integer> treasuryAssets = new TreeSet<>();

@@ -17,6 +17,7 @@ import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import com.surprising.aeron.service.state.model.CorePositionState;
 import com.surprising.aeron.service.state.model.CoreRiskSnapshot;
 import com.surprising.aeron.service.state.model.CoreRiskState;
+import com.surprising.aeron.service.state.model.RiskLaneProgress;
 import com.surprising.aeron.service.state.model.CoreRiskStatus;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 
@@ -1056,11 +1057,19 @@ public final class TradingCoreReducer {
         int accountLaneId = currentScan != null && !currentScan.riskComplete()
                 ? currentScan.accountLaneId() : 0;
         CoreRiskScanControlView scanControl = state.riskState().scanControl();
-        scans.put(instrument.symbol(), new CoreRiskState.RiskScan(instrument.symbol(), accountLaneId,
+        CoreRiskState.RiskScan markedScan = new CoreRiskState.RiskScan(instrument.symbol(), accountLaneId,
                 command.priceSequence(), scanStart, lastUserId, !scanControl.enabled(),
                 0, 0, "-", 0, 0, 0, 0, 0,
                 true, 0, 0, 0, 0, 0, 0, 0, 0,
-                currentScan == null ? 0 : currentScan.lastScheduledRevision()));
+                currentScan == null ? 0 : currentScan.lastScheduledRevision());
+        if (scanControl.enabled() && currentScan != null && !currentScan.riskComplete()
+                && !currentScan.laneProgress().isEmpty()) {
+            var laneProgress = new java.util.ArrayList<RiskLaneProgress>(currentScan.laneProgress().size());
+            for (var lane : currentScan.laneProgress()) laneProgress.add(new RiskLaneProgress(lane.lastUserId(),
+                    lane.complete(), 0, 0, "-", 0, 0, 0, 0, 0));
+            markedScan = markedScan.withLaneProgress(laneProgress);
+        }
+        scans.put(instrument.symbol(), markedScan);
         CoreRiskState risk = new CoreRiskState(marks, state.riskState().snapshots(),
                 state.riskState().liquidations(), scans, state.riskState().nextLiquidationId(), scanControl);
         TradingCoreState withMark = new TradingCoreState(state.productLine(), Math.incrementExact(state.revision()),
@@ -1106,46 +1115,68 @@ public final class TradingCoreReducer {
         Map<String, CoreRiskSnapshot> snapshots = StateMapSupport.delta(state.riskState().snapshots());
         Map<Long, CoreLiquidationState> liquidations = StateMapSupport.delta(state.riskState().liquidations());
         long nextLiquidationId = state.riskState().nextLiquidationId();
-        CoreRiskState.RiskScan progress = scan;
-        int remainingWork = maxUsers;
-        while (remainingWork > 0 && !progress.riskComplete()) {
-            CoreUserState user = progress.riskUserId() == 0
-                    ? nextRiskUser(state, positionUserIndex, scan.symbol(), progress.accountLaneId(),
-                    progress.lastUserId())
-                    : state.user(progress.riskUserId());
-            if (user == null) {
-                if (progress.accountLaneId() + 1 < topology.accountLaneCount()) {
-                    progress = progress.nextAccountLane(progress.accountLaneId() + 1);
-                    continue;
-                }
-                progress = progress.withRiskProgress(true, 0, 0, "-", 0,
-                        0, 0, 0, 0, progress.lastUserId());
-                break;
-            }
-            if (progress.riskUserId() == 0) {
-                progress = progress.withRiskProgress(false, user.userId(), 0, "-", 0,
-                        0, 0, 0, 0, progress.lastUserId());
-            }
-            RiskUserPage page = processRiskUserPage(state, progress, user, instrument, mark, remainingWork,
-                    snapshots, liquidations, nextLiquidationId, liquidationIndex);
-            progress = page.scan();
-            nextLiquidationId = page.nextLiquidationId();
-            remainingWork -= Math.max(1, page.workUnits());
-            if (page.userComplete()) {
-                progress = progress.withRiskProgress(false, 0, 0, "-", 0,
+        int laneCount = topology.accountLaneCount();
+        if (!scan.laneProgress().isEmpty() && scan.laneProgress().size() != laneCount)
+            throw new IllegalStateException("risk scan Lane topology differs");
+        var laneScans = new CoreRiskState.RiskScan[laneCount];
+        int[] allocations = new int[laneCount];
+        int participants = 0;
+        for (int lane = 0; lane < laneCount; lane++) {
+            RiskLaneProgress cursor = scan.laneProgress().isEmpty()
+                    ? (lane == scan.accountLaneId() ? riskLaneCursor(scan, scan.riskComplete())
+                        : new RiskLaneProgress(0, lane < scan.accountLaneId(), 0, 0, "-", 0, 0, 0, 0, 0))
+                    : scan.laneProgress().get(lane);
+            if (!cursor.complete() && cursor.userId() == 0
+                    && nextRiskUser(state, positionUserIndex, scan.symbol(), lane, cursor.lastUserId()) == null)
+                cursor = new RiskLaneProgress(cursor.lastUserId(), true, 0, 0, "-", 0, 0, 0, 0, 0);
+            laneScans[lane] = riskLaneInput(scan, lane, cursor);
+            if (!cursor.complete()) participants++;
+        }
+        int selectedCount = Math.min(participants, maxUsers);
+        int assigned = 0;
+        int nextLane = scan.accountLaneId();
+        for (int offset = 0; offset < laneCount && assigned < selectedCount; offset++) {
+            int lane = (scan.accountLaneId() + offset) % laneCount;
+            if (laneScans[lane].riskComplete()) continue;
+            allocations[lane] = maxUsers / selectedCount + (assigned < maxUsers % selectedCount ? 1 : 0);
+            nextLane = (lane + 1) % laneCount;
+            assigned++;
+        }
+        // 状态形式的同步入口也按 Lane 编号提交；账户风险公式仍独立计算。
+        for (int lane = 0; lane < laneCount; lane++) {
+            if (allocations[lane] == 0) continue;
+            CoreRiskState.RiskScan laneScan = laneScans[lane];
+            int remainingWork = allocations[lane];
+            while (remainingWork > 0) {
+                CoreUserState user = laneScan.riskUserId() == 0
+                        ? nextRiskUser(state, positionUserIndex, scan.symbol(), lane, laneScan.lastUserId())
+                        : state.user(laneScan.riskUserId());
+                if (user == null) break;
+                if (laneScan.riskUserId() == 0)
+                    laneScan = laneScan.withRiskProgress(false, user.userId(), 0, "-", 0,
+                            0, 0, 0, 0, laneScan.lastUserId());
+                RiskUserPage page = processRiskUserPage(state, laneScan, user, instrument, mark, remainingWork,
+                        snapshots, liquidations, nextLiquidationId, liquidationIndex);
+                laneScan = page.scan();
+                nextLiquidationId = page.nextLiquidationId();
+                remainingWork -= Math.max(1, page.workUnits());
+                if (page.userComplete()) laneScan = laneScan.withRiskProgress(false, 0, 0, "-", 0,
                         0, 0, 0, 0, user.userId());
             }
+            if (laneScan.riskUserId() == 0 && nextRiskUser(state, positionUserIndex, scan.symbol(), lane,
+                    laneScan.lastUserId()) == null)
+                laneScan = laneScan.withRiskProgress(true, 0, 0, "-", 0, 0, 0, 0, 0, laneScan.lastUserId());
+            laneScans[lane] = laneScan;
         }
-        if (!progress.riskComplete() && progress.riskUserId() == 0
-                && nextRiskUser(state, positionUserIndex, scan.symbol(), progress.accountLaneId(),
-                progress.lastUserId()) == null) {
-            if (progress.accountLaneId() + 1 < topology.accountLaneCount()) {
-                progress = progress.nextAccountLane(progress.accountLaneId() + 1);
-            } else {
-                progress = progress.withRiskProgress(true, 0, 0, "-", 0,
-                        0, 0, 0, 0, progress.lastUserId());
-            }
+        var laneProgress = new java.util.ArrayList<RiskLaneProgress>(laneCount);
+        boolean complete = true;
+        for (var laneScan : laneScans) {
+            laneProgress.add(riskLaneCursor(laneScan, laneScan.riskComplete()));
+            complete &= laneScan.riskComplete();
         }
+        if (complete) nextLane = laneCount - 1;
+        if (!complete) while (laneScans[nextLane].riskComplete()) nextLane = (nextLane + 1) % laneCount;
+        CoreRiskState.RiskScan progress = laneScans[nextLane].withLaneProgress(laneProgress);
         Map<String, CoreRiskState.RiskScan> scans = StateMapSupport.delta(state.riskState().scans());
         CoreRiskState.RiskScan nextScan = progress.riskComplete()
                 && scan.scanStartPriceSequence() != scan.priceSequence()
@@ -1163,6 +1194,22 @@ public final class TradingCoreReducer {
                 state.instruments(), nextRisk, state.treasuryState(),
                 state.leverages(), state.algoOrders(), state.cancelAllAfterTimers(), state.clientOrderIndex(),
                 state.triggerOrders());
+    }
+
+    private static RiskLaneProgress riskLaneCursor(CoreRiskState.RiskScan scan, boolean complete) {
+        return new RiskLaneProgress(scan.lastUserId(), complete, scan.riskUserId(), scan.riskPhase(),
+                scan.riskPositionCursor(), scan.riskReservationCursor(), scan.riskUnrealizedPnlUnits(),
+                scan.riskMaintenanceMarginUnits(), scan.riskIsolatedMarginUnits(), scan.riskIsolatedReservationUnits());
+    }
+
+    private static CoreRiskState.RiskScan riskLaneInput(CoreRiskState.RiskScan scan, int lane, RiskLaneProgress cursor) {
+        return new CoreRiskState.RiskScan(scan.symbol(), lane, scan.priceSequence(), scan.scanStartPriceSequence(),
+                cursor.lastUserId(), cursor.complete(), cursor.userId(), cursor.phase(), cursor.positionCursor(),
+                cursor.reservationCursor(), cursor.unrealizedPnlUnits(), cursor.maintenanceMarginUnits(),
+                cursor.isolatedMarginUnits(), cursor.isolatedReservationUnits(), scan.triggerComplete(),
+                scan.triggerPhase(), scan.triggerPriceCursor(), scan.triggerOrderCursor(), scan.triggerUpperId(),
+                scan.triggerMarkPriceTicks(), scan.triggerGeneratedAtEpochMillis(), scan.triggerOcoOrderId(),
+                scan.triggerOcoCursor(), scan.lastScheduledRevision());
     }
 
     public TradingCoreState updateRiskScanControl(TradingCoreState state,

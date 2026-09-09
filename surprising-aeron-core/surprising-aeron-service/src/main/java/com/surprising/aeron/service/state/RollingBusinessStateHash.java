@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.RiskLaneProgress;
+
 import com.surprising.aeron.service.state.model.AssetBalance;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.model.CoreMarkPriceState;
@@ -789,7 +791,7 @@ public final class RollingBusinessStateHash {
                 value.riskIsolatedReservationUnits(), value.triggerComplete(), value.triggerPhase(),
                 value.triggerPriceCursor(), value.triggerOrderCursor(), value.triggerUpperId(),
                 value.triggerMarkPriceTicks(), value.triggerGeneratedAtEpochMillis(), value.triggerOcoOrderId(),
-                value.triggerOcoCursor(), value.lastScheduledRevision());
+                value.triggerOcoCursor(), value.lastScheduledRevision(), value.laneProgress());
     }
 
     private long stableRiskScan(RiskScanRuntime value) {
@@ -800,7 +802,7 @@ public final class RollingBusinessStateHash {
                 value.riskIsolatedReservationUnits(), value.triggerComplete(), value.triggerPhase(),
                 value.triggerPriceCursor(), value.triggerOrderCursor(), value.triggerUpperId(),
                 value.triggerMarkPriceTicks(), value.triggerGeneratedAtEpochMillis(), value.triggerOcoOrderId(),
-                value.triggerOcoCursor(), value.lastScheduledRevision());
+                value.triggerOcoCursor(), value.lastScheduledRevision(), value.laneProgress());
     }
 
     private static long riskScanHasher(String symbol, int accountLaneId, long priceSequence,
@@ -812,15 +814,21 @@ public final class RollingBusinessStateHash {
                                        int triggerPhase, long triggerPriceCursor, long triggerOrderCursor,
                                        long triggerUpperId, long triggerMarkPriceTicks,
                                        long triggerGeneratedAtEpochMillis, long triggerOcoOrderId,
-                                       long triggerOcoCursor, long lastScheduledRevision) {
-        return canonical(CoreRiskState.RiskScan.class).text(symbol).number(accountLaneId).number(priceSequence)
+                                       long triggerOcoCursor, long lastScheduledRevision,
+                                       java.util.List<RiskLaneProgress> lanes) {
+        CanonicalHasher hash = canonical(CoreRiskState.RiskScan.class).text(symbol).number(accountLaneId).number(priceSequence)
                 .number(scanStartPriceSequence).number(lastUserId).flag(riskComplete).number(riskUserId)
                 .number(riskPhase).text(riskPositionCursor).number(riskReservationCursor)
                 .number(riskUnrealizedPnlUnits).number(riskMaintenanceMarginUnits)
                 .number(riskIsolatedMarginUnits).number(riskIsolatedReservationUnits).flag(triggerComplete)
                 .number(triggerPhase).number(triggerPriceCursor).number(triggerOrderCursor)
                 .number(triggerUpperId).number(triggerMarkPriceTicks).number(triggerGeneratedAtEpochMillis)
-                .number(triggerOcoOrderId).number(triggerOcoCursor).number(lastScheduledRevision).value();
+                .number(triggerOcoOrderId).number(triggerOcoCursor).number(lastScheduledRevision).number(lanes.size());
+        for (var lane : lanes) hash.number(lane.lastUserId()).flag(lane.complete()).number(lane.userId())
+                .number(lane.phase()).text(lane.positionCursor()).number(lane.reservationCursor())
+                .number(lane.unrealizedPnlUnits()).number(lane.maintenanceMarginUnits())
+                .number(lane.isolatedMarginUnits()).number(lane.isolatedReservationUnits());
+        return hash.value();
     }
 
     private static long stableFundingProgress(CoreTreasuryState.FundingProgress value) {

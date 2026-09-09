@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.model.RiskLaneProgress;
+
 import com.surprising.aeron.service.state.model.AssetBalance;
 import com.surprising.aeron.service.state.model.CoreAlgoOrderState;
 import com.surprising.aeron.service.state.model.CoreCancelAllAfterKey;
@@ -37,7 +39,7 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 30;
+    private static final int VERSION = 31;
     private static final int MAX_TEXT_BYTES = 64;
     private static final int MAX_AUDIT_TEXT_BYTES = 2_048;
 
@@ -220,6 +222,19 @@ public final class TradingStateSnapshotCodec {
             writer.longValue(scan.triggerOcoOrderId());
             writer.longValue(scan.triggerOcoCursor());
             writer.longValue(scan.lastScheduledRevision());
+            writer.intValue(scan.laneProgress().size());
+            for (var lane : scan.laneProgress()) {
+                writer.longValue(lane.lastUserId());
+                writer.byteValue(lane.complete() ? 1 : 0);
+                writer.longValue(lane.userId());
+                writer.intValue(lane.phase());
+                writer.text(lane.positionCursor());
+                writer.longValue(lane.reservationCursor());
+                writer.longValue(lane.unrealizedPnlUnits());
+                writer.longValue(lane.maintenanceMarginUnits());
+                writer.longValue(lane.isolatedMarginUnits());
+                writer.longValue(lane.isolatedReservationUnits());
+            }
         });
         writer.longValue(state.riskState().nextLiquidationId());
         CoreRiskScanControlView scanControl = state.riskState().scanControl();
@@ -536,7 +551,7 @@ public final class TradingStateSnapshotCodec {
                     reader.nonNegativeLong("trigger mark price"),
                     reader.nonNegativeLong("trigger generated time"),
                     reader.nonNegativeLong("trigger OCO order id"),
-                    reader.nonNegativeLong("trigger OCO cursor"), reader.nonNegativeLong("risk scheduling revision"));
+                    reader.nonNegativeLong("trigger OCO cursor"), reader.nonNegativeLong("risk scheduling revision"), readRiskLanes(reader));
             putUnique(scans, scanSymbol, scan);
         }
         long nextLiquidationId = reader.positiveLong("next liquidation id");
@@ -715,6 +730,19 @@ public final class TradingStateSnapshotCodec {
         byte[] toByteArray() {
             return output.toByteArray();
         }
+    }
+
+    private static java.util.List<RiskLaneProgress> readRiskLanes(Reader reader) {
+        int count = reader.count("risk Lanes");
+        if (count > Long.SIZE) throw new IllegalArgumentException("too many risk Lanes");
+        var lanes = new java.util.ArrayList<RiskLaneProgress>(count);
+        for (int i = 0; i < count; i++) lanes.add(new RiskLaneProgress(
+                reader.nonNegativeLong("Lane completed user"), reader.booleanValue(),
+                reader.nonNegativeLong("Lane active user"), reader.intValue(), reader.text(),
+                reader.nonNegativeLong("Lane reservation cursor"), reader.longValue(),
+                reader.nonNegativeLong("Lane maintenance margin"), reader.nonNegativeLong("Lane isolated margin"),
+                reader.nonNegativeLong("Lane isolated reservation")));
+        return lanes;
     }
 
     private static final class Reader {
