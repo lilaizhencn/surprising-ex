@@ -12,7 +12,9 @@ import java.util.UUID;
 /** 独立 benchmarks 模块中的三 JVM 少量命令验证入口；与 JMH 共用场景，不进入交易服务包。 */
 public final class SmallControlReproMain {
     private static final ProductLine PRODUCT = ProductLine.LINEAR_PERPETUAL;
-    private static final List<String> HOSTS = List.of("127.0.0.1", "127.0.0.1", "127.0.0.1");
+    private static final List<String> HOSTS = List.of(System.getProperty("surprising.aeron.hostnames",
+            "127.0.0.1,127.0.0.1,127.0.0.1").split(","));
+    private static final String EGRESS_HOST = System.getProperty("surprising.aeron.egress-hostname", "127.0.0.1");
     private long sequence;
     private final SurprisingAeronClient client;
 
@@ -23,7 +25,7 @@ public final class SmallControlReproMain {
             throw new IllegalArgumentException("expected pool|ready|orders|verify-orders|trigger|verify-trigger");
         if (args[0].equals("pool")) {
             try (var pool = new AeronClientPool("small-control-repro", PRODUCT, HOSTS,
-                    "127.0.0.1", Duration.ofSeconds(10), 2)) {
+                    EGRESS_HOST, Duration.ofSeconds(10), 2)) {
                 var response = pool.command(CoreMessageType.UPSERT_INSTRUMENT, UUID.randomUUID(), 1,
                         TradingCommandCodec.encodeUpsertInstrument(instrument("REPRO-POOL")));
                 requireApplied(response);
@@ -34,7 +36,7 @@ public final class SmallControlReproMain {
             }
             return;
         }
-        try (var client = SurprisingAeronClient.connect(PRODUCT, HOSTS, "127.0.0.1", Duration.ofSeconds(10))) {
+        try (var client = SurprisingAeronClient.connect(PRODUCT, HOSTS, EGRESS_HOST, Duration.ofSeconds(10))) {
             var run = new SmallControlReproMain(client);
             if (args[0].equals("ready")) {
                 run.query(CoreMessageType.TREASURY_STATE_QUERY, 0, new byte[0]);
