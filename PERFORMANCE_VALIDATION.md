@@ -4913,3 +4913,15 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - OS50/51测量期强平/保险/ADL复合闭环最大3.574s/6.912s，OS53最大3.444s、完整运营闭环最大3.922s，未再触发30s候选期限；这是复合操作，不是单命令延迟。OS53测量期1064次实际风险续扫确认，完整运行42生命周期、净注资3000005250，订单/冻结/持仓/做市/强平损失和资金守恒核对通过。原云日志三节点重启后hash仍4166f9ff0b762e42，705cycles、fundsDiff0，见os53-replay-verify/result.txt。
 - OS53测量期Valkey READY7573/120162=6.302%，112589 unavailable，无Core查询回退；查询可用性仍不合格。云端负载为U本位永续混合运营，其他产品只做本机功能恢复。长期live set/native/Direct余额、对象/op、完整分段延迟、稳定期I/O及所有产品云端性能尚未完整验收；因此本次是改动正确性与指定场景吞吐平台的部分性能验证，不能宣称完整生产验收或绝对算力上限。README未修改。
 - 云端编排退出0，原日志恢复核对后finally停止surprising-core-0/1/2及surprising-load；instances-final.json确认四台全部TERMINATED。后续未经用户要求不再开机。
+
+### Owner串行工作审计（2026-09-09，仅离线分析与少量功能观测）
+
+- 未开云主机、未执行新性能测试、未修改生产Java代码或README。读取同一被测构建0f7173b2的OS50/51原始JFR，在测量起止各剔除5s后分析Leader core-2；owner样本3745/3782，分配样本9017/9093。采样权重估计不是精确对象/调用次数，inclusive路径不可相加；另保存互斥归类。artifact=/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-owner-audit，audit-manifest.json记录证据SHA/范围，脚本与Java功能观测器均在仓库外。
+- 明确重复：TerminalStateRetention.accept调用realtimeOrderObserver，随后TradingRuntimeState.captureRealtimeChanges再次发送同一终态订单。HotSpot25六产品共48个少量功能观测动作全部执行，普通完整成交两个订单各重复一次、撤单重复一次；20笔批量成交的40个订单输出80个ORDER帧，40帧payload逐字节重复。U本位样本总148帧/30688字节，其中重复40帧/10780字节。成交TRADE一条、私有EXECUTION两条是不同受众数据，不属于重复。全平样本POSITION未发现重复，不依据相似调用名误报。
+- RealtimeStateCapture调用栈占owner执行样本21.58%/21.95%、分配采样权重33.75%/35.46%；其中终态回调的实时编码单独占7.00%/7.24%执行样本、10.22%/11.02%分配权重。这部分有真实重复证据，不能把全部推送或全部编码都判为无用，也不能据此承诺吞吐增长比例。
+- 入口重复解码：prepareClusterPipelineScope完整decodePlaceOrder/Batch后，beginOrderBatchMatching或prepareMatching再次DecodedMatchingCommand.decode；依赖冲突重算还会重新解码。scope调用栈占2.67%/3.23%执行样本、6.20%/5.71%分配权重。动态依赖需重算，输入命令的不可变解码结果可复用。
+- 索引数组反复分配：stagePlaceBatchAdmission中publishedOrders/publishedReservations/orderLaneIds/reservationLaneIds的put进入Eclipse Collections 11.0.0 rehashAndGrow/allocateTable，JFR提供行号与完整栈。核对实际依赖源码：活跃项+删除标记触发rehash，函数名虽有Grow但可缩容。64次单元素put/remove功能样本，峰值活跃1、期末0，却换表27次；不属于业务要求创建新数组，也不能误报为泄漏。需优化高频删除容器/维护方式，保留必要owner索引及跨线程所有权。
+- 额外可精简工作：TradingOrderBatchCodec.encodeResultSource对同一order长度计算两次；TerminalStateRetention.normalizeClientId在已验证订单身份的查重/保留路径反复getBytes，仅求长度（约2.22%/2.43%分配权重，其他输入边界仍需校验）；RuntimeIdentityRegistry.findPositionKey/positionKey反复构造PositionIdentity查表，整个身份字典路径约7%执行/9%分配，不能把全部字典成本当可删除；trimTombstones每清一个业务去重记录重建迭代器；finishOrderBatch完成前物化变更ID列表后本路径不再消费，普通命令及挂起恢复仍有消费者；trade公私事件重复拼接相同id。小项应限定调用路径精简，不用新重复容器替代。
+- 过度保守依赖：ClusterCommandWindow对账户/币对的64位掩码相交直接判冲突，没有像orderId一样精确复核。少量功能观测：user1与user23、SYM0-USDT与SYM102-USDT分别产生无关实体碰撞；是额外串行化，但本次未测云端误冲突频率或性能影响。真实资金/同币对依赖仍必须保持，不得直接删除drain循环。
+- 已排除误判：projectSnapshotNow热路径只推进变更索引/提交点，不逐命令做全量快照；资金守恒使用增量accumulator，不遍历全部账户；SHA-256保持同commandId不同payload冲突保护，约6%owner执行样本，不能删除。ImmutableLongArrayList底层为long[]，不能称为每个ID都装箱。当前等待栈约2.4%执行样本，不能换算精确墙钟；实际还存在owner egress offer失败最多重试1s的同步等待，当前egress栈仅0.77–1.04%，不是已证实主瓶颈，慢接入需独立验证。所选窗口未见达到记录阈值的owner锁/文件/socket事件，不等于完全无阻塞。
+- 建议优先级：去掉重复终态推送、复用命令解码、处理索引rehash分配；随后精简身份/长度等重复转换，并评估将不可变提交数据的出口编码移到有界出口线程。OrderRuntime/PositionRuntime是record而BalanceRuntime可变，异步化必须冻结所需值并保证身份字典与缓冲区生命周期，不能跨线程直接读取可变余额。当前审计没有新增性能收益结论。
