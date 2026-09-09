@@ -112,6 +112,8 @@ final class OrderBatchExecutor {
                                              boolean deferCompletion) {
         boolean firstActivation = !batch.commitStarted();
         if (firstActivation) beginOrderBatchCommitContext(batch, pending);
+        else if (owner.laneCommandContexts.required(pending.sequence()).hasCommitContext())
+            owner.restoreMatchingCommitContext(pending);
         else owner.activateFactContext(owner.sequenceAdmission(pending.sequence()),
                 pending.command(), pending.fingerprint());
         if (batch.admissionOrderIndex == null) {
@@ -122,7 +124,7 @@ final class OrderBatchExecutor {
         if (preparePipelinedPlaceBatch(batch, pending)) {
             registerPipelinedBatchSymbols(batch, pending);
             dispatchPipelinedPlaceBatchAdmission(pending, batch);
-            owner.clearFactContext();
+            owner.suspendMatchingCommitContext(pending);
             return null;
         }
         CoreResponse response = startOrderBatchItem(batch, pending, batch.clusterTimestamp,
@@ -289,7 +291,7 @@ final class OrderBatchExecutor {
         if (!owner.runtimeState.tryEnterSequentialLaneStage()) {
             batch.sequentialAdmission = true;
             batch.started = false;
-            owner.clearFactContext();
+            owner.suspendMatchingCommitContext(pending);
             return null;
         }
         while (batch.nextIndex < batch.items.size()) {
@@ -301,6 +303,8 @@ final class OrderBatchExecutor {
                 pending = pending.withPreMatchingCancellations(batch.currentPreMatchingCancellationOrderIds);
                 owner.pendingMatching.put(pending);
                 owner.submitMatching(pending);
+                // 撮合跨回调完成；变更上下文归本序号持有，不能占用下一条命令的 owner。
+                owner.suspendMatchingCommitContext(pending);
                 return null;
             } catch (CoreStateRejectedException exception) {
                 requireUnchangedRejectedBatchItem(batch, pending, runtimeRevisionBefore, exception);
@@ -321,6 +325,7 @@ final class OrderBatchExecutor {
             batch.matchingApplied = true;
             initializeOrderBatchLaneContext(batch, pending);
             owner.commits.signalPendingMatchingReady(batch.sequence);
+            owner.suspendMatchingCommitContext(pending);
             return null;
         }
         return finishOrderBatch(batch, pending, clusterTimestamp, clusterPosition);
@@ -766,7 +771,10 @@ final class OrderBatchExecutor {
             boolean finalLaneCommit = batch.settlementEvents[0].commitSequence() != 0;
             RuntimeTreasuryDelta delta = owner.runtimeState.collectMatcherSettlements(
                     batch.settlementEvents, owner.commandFundsAccumulator, owner.terminalRetention);
-            if (delta == null) return null;
+            if (delta == null) {
+                owner.suspendMatchingCommitContext(pending);
+                return null;
+            }
             batch.mergeTreasuryDelta(delta);
             batch.settlementsCollected = true;
             if (finalLaneCommit) {

@@ -118,6 +118,7 @@ final class OrderedCommitCoordinator {
         OrderBatchPending waitingBatch = owner.batches.pendingOrderBatches.get(sequence);
         // 尚未完成的 Lane 工作仍拥有挂起的上下文，不能提前占用 owner 发布批次。
         if (waitingBatch != null && waitingBatch.hasPendingLaneWork() && !waitingBatch.laneWorkComplete()) return null;
+        if (waitingBatch != null && laneContext.hasCommitContext()) owner.restoreMatchingCommitContext(pending);
         if (waitingBatch != null && pending.clusterIndependent
                 && waitingBatch.kind == OrderBatchKind.CANCEL && !waitingBatch.commitStarted()) {
             owner.batches.beginPipelinedOrderBatchCommit(waitingBatch, pending);

@@ -7,6 +7,26 @@ import com.surprising.product.api.ProductLine;
 class ClusteredBatchTradingBenchmarkTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
+    void sequentialBatchHandoffPreservesTerminalFundsAndSnapshot(ProductLine productLine) {
+        var workload = new ClusteredBatchTradingBenchmark.Workload();
+        workload.accountLanes = 4;
+        workload.productLine = productLine;
+        workload.batchSize = 1;
+        workload.maxInFlight = 256;
+        workload.realtime = true;
+        try (workload) {
+            workload.setup();
+            var counters = new ClusteredBatchTradingBenchmark.Counters();
+            new ClusteredBatchTradingBenchmark().sequentialBatchContextHandoff(workload, counters);
+            org.junit.jupiter.api.Assertions.assertEquals(512, counters.terminalBusinessOperations);
+            org.junit.jupiter.api.Assertions.assertEquals(counters.acceptedBusinessOperations,
+                    counters.terminalBusinessOperations);
+            org.junit.jupiter.api.Assertions.assertEquals(counters.acceptedCoreMessages,
+                    counters.terminalCoreMessages);
+        }
+    }
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
     void tradingWithoutInterleavedQueriesRetainsTerminalAndFinancialChecks(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
         workload.accountLanes = 4;

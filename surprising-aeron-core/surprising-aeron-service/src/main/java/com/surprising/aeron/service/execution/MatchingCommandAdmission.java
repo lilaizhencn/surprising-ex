@@ -314,9 +314,10 @@ final class MatchingCommandAdmission {
         if (TradingCoreRuntime.MATCHING_PHASE_METRICS_ENABLED) {
             owner.matchingPhaseMetrics.recordPrepare(System.nanoTime() - matchingStartNanos);
         }
+        // 当前准入已结束；推进其他序号的异步续接前先释放 owner 的事实上下文。
+        owner.clearFactContext();
         if (placeAdmission == null) owner.submitMatching(pending);
         else owner.progressPlaceAdmissions();
-        owner.clearFactContext();
         return CoreResponse.owned(ResponseStatus.OK, ResponseStatus.OK, TradingCoreRuntime.matchingPendingCode(),
                 sequence, requiredExportSequence, stateHash, responseData);
     }

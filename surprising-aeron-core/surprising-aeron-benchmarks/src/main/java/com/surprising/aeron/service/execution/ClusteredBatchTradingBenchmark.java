@@ -24,6 +24,12 @@ import org.openjdk.jmh.annotations.*;
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"})
 @Threads(1)
 public class ClusteredBatchTradingBenchmark {
+    /** 单项批量命令走顺序撮合续接，覆盖等待期间的 owner 上下文交接；使用 batchSize=1。 */
+    @Benchmark
+    public long sequentialBatchContextHandoff(Workload workload, Counters counters) {
+        if (workload.batchSize != 1) throw new IllegalArgumentException("requires batchSize=1");
+        return independentBatchWindows(workload, counters);
+    }
     /** 异步 Lane 完成后才恢复提交上下文：覆盖普通单、改单和批量撤单的服务回调路径。 */
     @Benchmark
     public long laneCompletionContextHandoff(Workload workload, Counters counters) {

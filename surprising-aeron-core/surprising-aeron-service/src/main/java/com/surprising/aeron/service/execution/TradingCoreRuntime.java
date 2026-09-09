@@ -1511,8 +1511,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                         orderBatch.admissionOrderIndex.reset(pending.command().header().userId());
                         placeAdmissionReadyShardMask &= ~shardBit;
                         if (orderBatch.commitStarted()) {
-                            activateFactContext(sequenceAdmission(pending.sequence()),
-                                    pending.command(), pending.fingerprint());
+                            restoreMatchingCommitContext(pending);
                             try {
                                 batches.startOrderBatchItem(orderBatch, pending,
                                         orderBatch.clusterTimestamp, orderBatch.clusterPosition, true);
@@ -2703,7 +2702,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (!commits.commitPublicationDeferred || pending == null
                 || pending.settlementEvent() == null && pending.cancelEvent() == null
                 && pending.replaceEvent() == null
-                && !orderBatchLaneWorkPending(pending.sequence()) && !commits.controlPending(pending.sequence())) {
+                && !batches.pendingOrderBatches.containsKey(pending.sequence())
+                && !commits.controlPending(pending.sequence())) {
             throw new IllegalStateException("matching commit context cannot be suspended");
         }
         resultBuilder.materializeChangeAccumulators();
@@ -2717,11 +2717,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         resultBuilder.commandChangedOrderIds = List.of();
         resultBuilder.resetChangeAccumulators();
         clearFactContext();
-    }
-
-    boolean orderBatchLaneWorkPending(long sequence) {
-        OrderBatchPending batch = batches.pendingOrderBatches.get(sequence);
-        return batch != null && batch.hasPendingLaneWork();
     }
 
     void restoreMatchingCommitContext(PendingMatching pending) {

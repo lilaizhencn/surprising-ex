@@ -5180,3 +5180,12 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - core0/1因致命退出JFR主文件为空；core2为1414353B，不能替代失败leader完整热点。线程监控分别15/13/20个5秒样本，三节点最小磁盘可用约41.25/41.61/41.30GB，无磁盘满证据。未形成稳定测量窗口，不把启动/失败过程CPU当吞吐上限或95%有效计算证据。
 - 本轮节点退出后已成功收集日志/采样并清理云端ex-gcp-188a10bd；上一轮ex-gcp-current/ex-gcp-current-direct残留已在部署前清理。分析后删除本地/tmp/ex-gcp-188a10bd，只保留本摘要，不改README。最终停机状态核实后补记。
 - 最终gcloud重新查询确认surprising-core-0/1/2与surprising-load全部TERMINATED；本轮压测未通过，待继续修复批次上下文遗漏分支后再测，不留下运行中的云实例。
+
+## 2026-09-09 批量命令异步提交上下文补漏（本地功能验证）
+- 基于 master 65318bf8 修复，HotSpot Oracle GraalVM 25.0.1 / Maven 3.9.16 / macOS i9-9880H、16GiB；本轮仅功能验证，不启动云实例、不执行吞吐压测，也不清理业务历史数据。磁盘可用约534–535GiB。
+- 根因补充：顺序批量命令在准入、逐项撮合及等待完成发布时返回 null，却仍持有 owner 发布批次；下一次准入触发重入保护。OrderBatchExecutor 的上述异步返回点现在保存到已有序号上下文，激活/完成时恢复；补齐批量结算尚未完成时的挂起路径。保留重入、提交顺序、资金依赖及 Lane 完成检查，未新增同步等待或生产测试钩子。
+- 同时修正 MatchingCommandAdmission：当前准入结束后先 clearFactContext，再 progressPlaceAdmissions，避免推进旧批量准入拒绝续接时占用其恢复位置。复现此分支时保留原释放顺序，六条产品线均报 AgentTerminationException / another owner commit context is active（restoreMatchingCommitContext ← progressPlaceAdmissions ← prepareMatching）；应用修复后通过。
+- 第一项修复前，单项批量订单进入顺序撮合等待的六产品回归均检测到 commitPublicationDeferred 仍为 true。最终回归经真实 service 会话回调覆盖单项批量、部分拒绝后继续撮合、挂起提交后批量准入全拒绝，再接收独立订单；检查逐项结果、账户精确一致、串行业务 hash 和快照恢复。此前未完成 Lane 重复轮询回归继续通过。
+- 最终命令：JAVA_HOME=/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home，PATH 前置其 bin，mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am verify。22:43:30结束，耗时5分20秒，1076项：1075通过、0失败、0错误、1项 InstrumentSeedCoreContractTest 因数据库环境跳过；其中 ClusterCommandPipelineTest 132项通过。
+- 新增 sequentialBatchContextHandoff JMH 场景（batchSize=1）及六产品功能调用，检查512项业务/消息 accepted=terminal，场景内余额/冻结/订单终态、资金及快照断言通过。未运行 JMH 测量/JFR 性能采样：性能执行需真实三节点，本轮未开机；不宣称云端故障验收完成、吞吐提升、零分配或无泄漏，须后续真实三节点复测。
+- 原始本轮 /tmp/ex-batch-context-*.log、/tmp/ex-admission-context-red.log 及本轮 Maven surefire/failsafe 报告分析后清理，仅保留此摘要、源码及可复用构建包；不将删除的日志路径当作可访问证据，不修改 README。

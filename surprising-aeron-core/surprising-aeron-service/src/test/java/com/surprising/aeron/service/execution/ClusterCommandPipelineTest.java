@@ -24,6 +24,83 @@ import org.junit.jupiter.params.provider.EnumSource;
 class ClusterCommandPipelineTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
+    void newAdmissionCanResumeRejectedBatchWithSuspendedCommit(ProductLine product) {
+        try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
+            serial.applyAll(live.setup());
+            String asset = ContractType.valueOf(product.contractTypeCode()).isInverse() ? "BTC" : "USDT";
+            var withdraw = live.message(CoreMessageType.ADJUST_BALANCE, 11,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, -20_000)));
+            live.apply(withdraw); serial.apply(withdraw);
+            live.responses.clear();
+            var first = live.placeBatch(11, "BTC-USDT", 1000);
+            live.send(first);
+            var state = live.service.state();
+            long sequence = state.matchingSequence(first.header().commandId());
+            var batch = state.batches.pendingOrderBatches.get(sequence);
+            var pending = state.pendingMatching.get(sequence);
+            // 模拟延迟激活已开始提交、但 Lane 批量准入尚未被 owner 收集的边界。
+            state.batches.beginOrderBatchCommitContext(batch, pending);
+            state.suspendMatchingCommitContext(pending);
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (!batch.placeBatchAdmissionEvent.complete() && System.nanoTime() < deadline) Thread.onSpinWait();
+            assertThat(batch.placeBatchAdmissionEvent.complete()).isTrue();
+            assertThat(batch.placeBatchAdmissionEvent.rejection()).isNotNull();
+            var next = live.place(disjointUser(11), disjointSymbol("BTC-USDT"), 8000, 80, 1, CoreOrderSide.BUY);
+            live.send(next);
+            live.tick(); serial.apply(first); serial.apply(next);
+            assertThat(live.responses).hasSize(2);
+            assertThat(TradingOrderBatchCodec.decodeResult(live.responses.getFirst().data()).items())
+                    .allSatisfy(item -> assertThat(item.status()).isEqualTo(ResponseStatus.REJECTED));
+            assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(state.tradingState().users()).isEqualTo(serial.service.state().tradingState().users());
+            assertThat(live.hash()).isEqualTo(serial.hash());
+            try (var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void batchMatcherWaitReleasesOwnerPublicationContext(ProductLine product) {
+        for (boolean partialRejection : new boolean[]{false, true}) {
+            try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
+                serial.applyAll(live.setup());
+                if (partialRejection) {
+                    var resting = live.place(11, "BTC-USDT", 101, 80, 1, CoreOrderSide.BUY);
+                    live.apply(resting); serial.apply(resting);
+                }
+                var batch = TradingOrderBatchCodec.decodePlaceOrderBatch(live.placeBatch(11, "BTC-USDT", 101).payload());
+                var first = live.message(CoreMessageType.PLACE_ORDER_BATCH, 11,
+                        TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(
+                                partialRejection ? batch.orders() : batch.orders().subList(0, 1))));
+                var next = live.place(disjointUser(11), disjointSymbol("BTC-USDT"),
+                        disjointOrder(8000), 80, 1, CoreOrderSide.BUY);
+                var state = live.service.state();
+                live.responses.clear();
+                live.send(first);
+                long sequence = state.matchingSequence(first.header().commandId());
+                state.commits.pumpMatchingCommitCompletions(first.header().submittedAtEpochMillis(), 0, sequence);
+                assertThat(state.commits.commitPublicationDeferred).as("batch waiting for matcher").isFalse();
+                live.send(next);
+                live.tick();
+                assertThat(live.responses).hasSize(2).allSatisfy(response ->
+                        assertThat(response.commandStatus()).isEqualTo(ResponseStatus.APPLIED));
+                assertThat(TradingOrderBatchCodec.decodeResult(live.responses.getFirst().data()).items()
+                        .stream().filter(item -> item.status() == ResponseStatus.REJECTED).count())
+                        .isEqualTo(partialRejection ? 1 : 0);
+                serial.apply(first); serial.apply(next);
+                assertThat(state.tradingState().users()).isEqualTo(serial.service.state().tradingState().users());
+                assertThat(live.hash()).isEqualTo(serial.hash());
+                try (var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
+                    assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+                }
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
     void incompleteLanePollKeepsCommitContextSuspendedForNextAdmission(ProductLine product) throws Exception {
         for (CoreMessageType type : List.of(CoreMessageType.PLACE_ORDER, CoreMessageType.CANCEL_ORDER,
                 CoreMessageType.AMEND_ORDER, CoreMessageType.CANCEL_ORDER_BATCH)) {
