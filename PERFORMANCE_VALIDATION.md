@@ -5087,3 +5087,8 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 收尾：HotSpot25 Maven package 成功；精确回归 ClusterCommandPipelineTest(108)、AsyncFundingCommandTest(2)、ParallelRiskScanTest(5)、ClusterMixedCapacityTest(6)、OperationalLifecycleAuditTest(1)，共122通过、0失败/错误/跳过。它们不替代失败的真实三 JVM 验证。
 - 本次唯一 Java 改动为生命周期测试器初始化 mark/index/forward 和当前行情时间；实际生命周期复测仍被接入失败阻断，不能宣称该测试器端到端通过。生产控制迁移未改动。源码路径证据：SurprisingClusteredService:205 在控制命令入口取得 owner Lane 访问权；TradingRuntimeState:onLane(584)、executeLaneMutations(743) 在 ownerLaneAccess 分支同步执行；RuntimeDerivativeLiquidationProcessor:373 ADL 双账户写入、RuntimeSettlementProcessor:91/116 两阶段到期结算、TriggerOrderCommands 控制更新均仍可能由 owner 执行。风险 scanLane 已有实际 Lane JFR 样本。
 - 原始结果 summary.json、完整命令 run.py/*command.json、jar hashes 和 artifacts.sha256 均在上述 artifact 目录。有效 JFR node2 135秒、1.7MiB、DataLoss=0；其余两节点 JFR 为空，无 leader 热点结论。未完成 mixed 终态/恢复/财务验证，无有效吞吐数字，无泄漏结论；所有本次节点/负载进程已停止，未操作云服务器。
+
+### 2026-09-09 磁盘因素与产物清理补记
+- 用户反馈刚才磁盘满，要求以后每轮分析结束清理测试产物。本次复核磁盘可用约547 GiB，但整个 gcp-validation 目录已不存在，无法回查失败时的 ENOSPC/写入失败日志；以上原始 artifact 路径现在不可访问，仅保留历史摘要。
+- EXCHANGE_CORE_FAILURE 是通用错误码，TradingCoreRuntime 的 RuntimeException 捕获路径未保留原始异常原因。磁盘满可能导致存储/通信相关失败，但现有证据不足以确认其与本次触发错误的因果关系；此前异常记录不是已证明的生产业务缺陷，根因仍待复现确认。
+- 清理剩余五个 Aeron 模块 target/surefire-reports（约3.54 MiB）；保留源码、构建包和既有验证摘要。项目 AGENTS.md 已加入分析后清理及磁盘检查要求。本轮未重新启动测试或云服务器。
