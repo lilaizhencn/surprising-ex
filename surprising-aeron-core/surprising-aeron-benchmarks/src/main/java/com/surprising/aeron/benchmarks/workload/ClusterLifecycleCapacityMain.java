@@ -91,6 +91,12 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
     private void setup() {
         applied(CoreMessageType.UPSERT_INSTRUMENT, 1,
                 TradingCommandCodec.encodeUpsertInstrument(instrument()), "instrument");
+        // 与生产准入一致：建仓前提供新鲜标记价；期权同时提供指数价和远期价。
+        applied(CoreMessageType.APPLY_MARK_PRICE, 1,
+                TradingCommandCodec.encodeApplyMarkPrice(productLine == ProductLine.OPTION
+                        ? new ApplyMarkPriceCommand(symbol, 1, 100, 100, 100, 1, System.currentTimeMillis())
+                        : new ApplyMarkPriceCommand(symbol, 1, 100, 1, System.currentTimeMillis())),
+                "mark:initial");
         for (int pair = 0; pair < pairs; pair++) {
             long shortUser = shortUser(pair);
             long longUser = longUser(pair);
@@ -110,13 +116,13 @@ public final class ClusterLifecycleCapacityMain implements AutoCloseable {
     private void liquidationStorm() {
         applied(CoreMessageType.APPLY_MARK_PRICE, 1,
                 TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                        symbol, 1, 100, 1, 1_700_000_000_000L)),
+                        symbol, 1, 100, 2, System.currentTimeMillis())),
                 "mark:normal");
         long markPrice = productLine == ProductLine.INVERSE_PERPETUAL ? 25 : 80;
         long started = System.nanoTime();
         applied(CoreMessageType.APPLY_MARK_PRICE, 1,
                 TradingCommandCodec.encodeApplyMarkPrice(new ApplyMarkPriceCommand(
-                        symbol, 1, markPrice, 2, 1_700_000_000_000L)),
+                        symbol, 1, markPrice, 3, System.currentTimeMillis())),
                 "mark:shock");
         var work = CoreLiquidationWorkCodec.decodeWork(query(
                 CoreMessageType.LIQUIDATION_WORK_QUERY, 0, CoreLiquidationWorkCodec.encodeQuery(productLine,

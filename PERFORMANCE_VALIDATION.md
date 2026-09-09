@@ -5071,3 +5071,19 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - HotSpot JDK 25.0.1、Maven 3.9.16、macOS 本机。`mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am verify`：1040 项，1039 通过，0 失败/错误，1 项缺少 INSTRUMENT_SEED_TEST_JDBC_URL 跳过；service 645 项通过。随后仅移除无调用的方法/补注释并重新 package。JMH 增加控制页 2/8 参数，只编译；不上云、不压测、不运行 JMH/JFR，无吞吐、分配或延迟验收结论。
 - 最终构建本地三独立 JVM：六产品线执行/日志恢复/快照恢复首次 17/18 通过；期权最后一次客户端连接超时，节点存在复制告警。保留原数据重启复核通过，未发现状态不一致；不把首轮失败抹去或视为恢复耗时稳定的证据。测试进程全部退出。此前构建的恢复轮次因去掉临时对象后重新打包而主动中止，日志保留。
 - 证据：`/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-control-progress/`，包含复现/中间失败日志、`verify-final-2.log`、`package-final.log`、`local-functional-final.log`、`recheck-option.log`、`validation-summary.json`、`source-manifest.sha256` 和逐节点参数/日志。未改 README。service.jar SHA-256 `ccba9ba8b895548b3766ac54fee2b9d7f8795f9b633660836b390e9319640a21`；benchmarks.jar `e408265b4478bda3238d46254c0578dc729103b9c2a351360a6b439f67ddbef4`。
+
+## 2026-09-09 本机控制业务诊断（采集前锁定）
+- 用户本轮明确允许本机小规模压测；当前 master 8ca25a6a，非服务器吞吐验收，无旧版对照，不修改交易逻辑。
+- HotSpot GraalVM 25.0.1 / Maven 3.9.16；macOS x86_64，16 logical CPU / 16 GiB；本机三个独立 JVM，loopback UDP + 真实日志复制。每 JVM Xms64m/Xmx512m、ZGC、SHARED_NETWORK、YIELDING；4 Account Lanes、1 matcher、0独立 risk engine。同机及短预热限制绝对性能结论。
+- ClusterMixedCapacityMain 默认 mixed（非 operational / 非 trading-stream）：预热1秒、测量5秒（完整业务循环结束才排空，允许超时长）；256 全局在途、64 session窗口、1命令+1查询session；固定1769账户/256symbols，每账户初态按现有 setup；批量报价/撤单/IOC、触发、资金费、风险及一次强平/保险/ADL账务核对。闭环发压，不修正 coordinated omission，不将该脚本当作生产连续混合饱和证明。
+- 五衍生产品各8对账户/2连接，现有 ClusterLifecycleCapacityMain 强平或到期结算，串行小样本仅验证正确性。混合场景停止后保留日志重启，用 verify-only 核对相同 cycles 的余额、持仓、冻结及业务 hash；不新做故障注入全矩阵。
+- 通过条件：所有脚本 PASS、mixed offered/terminal 相等、unfinished=0、fundsDiff=0、恢复 hash 相同，无业务异常。失败原样保留并定位；不设吞吐通过阈值。
+- JFR: 三个 mixed 服务节点 startup profile recording，退出落盘；含初始化，诊断归因用；不运行 JMH（未修改生产路径），不宣称无泄漏。Valkey/WS/微服务入口未测。
+- artifact：/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-local-control-audit；命令、jar SHA256、日志、结果随运行保存。节点全部退出后结束。
+- 首轮结果：mixed 初始化通过，进入触发路径后 leader `TRIGGER coreSequence=16757 EXCHANGE_CORE_FAILURE`，客户端 ResultUnknown；另一 follower 的 timer 入队出现 backlog capacity exhausted。mixed 未到测量窗口，恢复核对未执行，不能报告吞吐或资金通过。五个 lifecycle 均在第一笔 PLACE_ORDER INVALID_COMMAND，尚未触达生命周期。JFR 仅 node2 有效（另两节点异常退出留下空文件），可见触发收尾在 clustered-service、scanLane 在 account-lane。
+- 第二轮（采集前）：只修测试器缺少初始新鲜 mark/期权 index+forward 及历史价格时间；保持五产品8对账户、2连接和节点配置，再跑 lifecycle。artifact 为上述目录/lifecycle-recheck；本轮仍为正确性诊断，不设吞吐结论，不更改生产代码。
+- 第二轮五个客户端均首条 UPSERT_INSTRUMENT NOT_CONNECTED，未进入业务；判为启动/接入失败，不能用于判断 mark 修正效果。第三轮只新增只读 TREASURY_STATE_QUERY 可用性门槛（最长12次、每次15秒，业务命令不重试），其他参数保持不变，artifact 为 ready-recheck。
+- 第三轮：LINEAR_PERPETUAL / INVERSE_PERPETUAL / LINEAR_DELIVERY 的只读请求均成功，但随后连接池第一条命令仍 NOT_CONNECTED，根因未定位，不可仅归咎启动选举。INVERSE_DELIVERY 节点启动 MediaDriver 10秒无响应；runner 清理 killpg 出现 PermissionError，已单独 TERM 剩余 PID 65877 并确认退出；OPTION 第三轮未执行。不继续重复无效负载。
+- 收尾：HotSpot25 Maven package 成功；精确回归 ClusterCommandPipelineTest(108)、AsyncFundingCommandTest(2)、ParallelRiskScanTest(5)、ClusterMixedCapacityTest(6)、OperationalLifecycleAuditTest(1)，共122通过、0失败/错误/跳过。它们不替代失败的真实三 JVM 验证。
+- 本次唯一 Java 改动为生命周期测试器初始化 mark/index/forward 和当前行情时间；实际生命周期复测仍被接入失败阻断，不能宣称该测试器端到端通过。生产控制迁移未改动。源码路径证据：SurprisingClusteredService:205 在控制命令入口取得 owner Lane 访问权；TradingRuntimeState:onLane(584)、executeLaneMutations(743) 在 ownerLaneAccess 分支同步执行；RuntimeDerivativeLiquidationProcessor:373 ADL 双账户写入、RuntimeSettlementProcessor:91/116 两阶段到期结算、TriggerOrderCommands 控制更新均仍可能由 owner 执行。风险 scanLane 已有实际 Lane JFR 样本。
+- 原始结果 summary.json、完整命令 run.py/*command.json、jar hashes 和 artifacts.sha256 均在上述 artifact 目录。有效 JFR node2 135秒、1.7MiB、DataLoss=0；其余两节点 JFR 为空，无 leader 热点结论。未完成 mixed 终态/恢复/财务验证，无有效吞吐数字，无泄漏结论；所有本次节点/负载进程已停止，未操作云服务器。
