@@ -4949,3 +4949,18 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 仅修复后的当前master，对照commit不适用。沿用OS54预锁的机器/JDK/JVM/GC/NMT、三节点网络、1matcher/4Lane、所有运营业务/比例/资金初态、异步持续负载、风险超时及正确性/p99/DataLoss门槛；新代码重新clean verify并完成六产品三JVM18项恢复后才开机。
 - OS58/59/条件60/61 seed99901–99904分别为窗口256/512/条件1024/本轮最快档；前两档及条件档30s预热+60s诊断JMH/JFR，512比256至少高5%且正确性通过才开1024；末轮30+120s无profiler并按原日志恢复。所有指标/未测缺口与四VM finally停机要求不变，不与旧版本性能比较。
 - artifact=/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-owner-dispatch-fix；python3 cloud.py，新增回归同样只做本机功能验证，真实ClusterOperationalBenchmark仍覆盖普通撤单到后续批量单的持续异步路径。
+
+
+### OS58–OS61结果与精确依赖开销复核
+
+- 被测046fb74a，tools SHA256=35c283ce1915005ac1bdc317df018d4a94cbd1f30a52f288a7807e94c382630e。本机Core reactor986项（985通过，1外部DB跳过），六产品18项三JVM恢复全通过。OS58窗口256为100905.004 terminal business ops/s、9610.000 messages/s、24025.001 fills/s；OS59窗口512为97899.801 ops/s，未满足加档5%条件，OS60未执行。两诊断轮三Core存活、业务/消息offered=terminal、unfinished0、资金差0、八份JFR DataLoss0。
+- OS61窗口256无profiler，120.116s完成12300288业务项/1171456消息，分别102403.615 ops/s、9752.725 messages/s、24381.813 fills/s；业务/消息offered=terminal、unfinished0、资金差0。下单/撤单/批量下单/批量撤单p99为32.440/54.951/62.324/46.596ms。原日志重启恢复706 cycles，hash c1ff16211fd20d53、资金/持仓/预留校验一致；四VM已核实TERMINATED。恢复选举有quorum-position警告，随后恢复检查通过，不能因此宣称全程无警告。
+- OS58稳定Leader core-0 owner99.82% CPU、matcher18.08%、Lane13.08–13.14%；owner分配339.56MB/s。OS59 owner99.84%、owner分配332.51MB/s。OS58 owner3646执行样本中实时出口13.69%、精确依赖判定12.40%、身份字典8.01%、指纹5.79%，均为包含调用栈比例不可相加。原终态回调重复编码已删除；六个替换owner索引的循环增删测试保持原数组。仍有PendingReservationSequenceIndex的LongHashSet建表/扩容等其它分配，不宣称整个Core零分配。
+- 发现精确依赖检查重复比较同批20个相同(symbol,side,price)范围，并对不同batch的20个订单做两两比较；补充修复为复用原范围数组压缩完全相同的描述符，订单数组改为固定64槽精确索引（最多20个正orderId、零表示空、移除前缀时清空复用）。不增加Map/状态副本，不合并不同价格/方向，不省略任何订单ID或真实对手方检查。新测试覆盖20项保留、掩码碰撞、探测环回及移除复用。
+- OS61 Valkey测量READY1965/(1965+117909)=1.64%，仍不合格，且缺open-loop三阶段延迟、长期泄漏/完整native余额；仅为上述场景下交易与恢复部分验证。完整参数、JMH GC诊断、JFR views、稳定CPU/分配、GC/NMT/线程/安全点/JIT/IO及原始证据位于2026-09-09-owner-dispatch-fix，不用历史版本数字计算性能收益。
+
+### OS62–OS65采集前预锁
+
+- 仅上述依赖压缩修复后的当前master，对照commit不适用。沿用OS58全部环境/三节点拓扑、业务与资金初态、1matcher/4Lane、连续异步运营组合、阈值、JFR配置、JMH参数和正确性/恢复要求；新构建通过本机六产品回归与18项三JVM恢复后才开机。
+- OS62 seed100001窗口256、OS63 seed100002窗口512，各30s预热+60s带JMH/JFR诊断；仅512正确且比256至少快5%才执行OS64 seed100003窗口1024。OS65 seed100004取本轮最快有效档，30+120s无profiler、之后原日志重启核对。任何失败停止后续档，finally停止四VM并核实TERMINATED。
+- artifact=/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-compact-dependencies；python3 cloud.py。真实ClusterOperationalBenchmark的20项同范围批量单和碰撞订单/账户覆盖本次路径；查询READY及长期验收缺口继续单列，不以owner忙等或无profiler短轮推导绝对算力上限。

@@ -7,6 +7,50 @@ import org.junit.jupiter.api.Test;
 
 class ClusterCommandWindowTest {
     @Test
+    void identicalRangesAreVisitedOnceButEveryOrderIdentityStillConflicts() {
+        var window = new ClusterCommandWindow();
+        window.resetCandidate(7);
+        for (long id = 1; id <= 20; id++) window.candidateOrder(id, "BTC-USDT",
+                com.surprising.aeron.protocol.CoreOrderSide.BUY, 100);
+        var entry = window.add(null, null, 0, 0);
+        assertThat(entry.scopeCount).isOne();
+        assertThat(java.util.Arrays.stream(entry.orders).filter(id -> id != 0).count()).isEqualTo(20);
+        for (long id = 1; id <= 20; id++) {
+            window.resetCandidate(0);
+            window.candidateOrder(id);
+            assertThat(window.conflicts()).isTrue();
+        }
+        window.clear();
+        window.resetCandidate(0);
+        window.candidateOrder(21, "BTC-USDT", com.surprising.aeron.protocol.CoreOrderSide.BUY, 100);
+        window.candidateOrder(22, "BTC-USDT", com.surprising.aeron.protocol.CoreOrderSide.BUY, 101);
+        window.candidateOrder(23, "BTC-USDT", com.surprising.aeron.protocol.CoreOrderSide.SELL, 100);
+        window.candidateOrder(24, "ETH-USDT", com.surprising.aeron.protocol.CoreOrderSide.BUY, 100);
+        assertThat(window.add(null, null, 0, 0).scopeCount).isEqualTo(4);
+    }
+
+    @Test
+    void exactOrderTableHandlesCollisionsAndWraparoundWithoutRetainingRemovedEntries() {
+        var window = new ClusterCommandWindow();
+        long[] ids = new long[21];
+        long next = 1;
+        for (int i = 0; i < ids.length; i++) {
+            while (TradingDependencyMask.partition(next) != 63) next++;
+            ids[i] = next++;
+        }
+        window.resetCandidate(0);
+        for (int i = 0; i < 20; i++) window.candidateOrder(ids[i]);
+        var entry = window.add(null, null, 0, 0);
+        for (int i = 0; i < ids.length; i++) {
+            window.resetCandidate(0);
+            window.candidateOrder(ids[i]);
+            assertThat(window.conflicts()).isEqualTo(i < 20);
+        }
+        window.removePrefix(1);
+        assertThat(java.util.Arrays.stream(entry.orders).allMatch(id -> id == 0)).isTrue();
+        assertThat(window.conflicts()).isFalse();
+    }
+    @Test
     void accountAndSymbolMaskCollisionsDoNotFenceUnrelatedCommands() {
         var window = new ClusterCommandWindow();
         long first = 1, collision = 2;

@@ -20,17 +20,18 @@ final class ClusterCommandWindow {
     private ActiveOrderIndex participants;
     private CoreMessage decodedSource;
     private DecodedMatchingCommand decoded;
-    private int candidateOrderCount;
+    private int candidateOrderCount, candidateScopeCount;
     private long candidateOrderMask;
     long candidateAccounts, candidateSymbols;
 
     void resetCandidate(long userId) {
-        java.util.Arrays.fill(candidateOrderSymbols, 0, candidateOrderCount, null);
-        java.util.Arrays.fill(candidateSides, 0, candidateOrderCount, null);
+        java.util.Arrays.fill(candidateOrderSymbols, 0, candidateScopeCount, null);
+        java.util.Arrays.fill(candidateSides, 0, candidateScopeCount, null);
         candidateUser = userId;
         candidateAccounts = userId == 0 ? 0 : TradingDependencyMask.account(userId);
         candidateSymbols = 0;
         candidateOrderCount = 0;
+        candidateScopeCount = 0;
         candidateOrderMask = 0;
     }
 
@@ -53,12 +54,17 @@ final class ClusterCommandWindow {
     void releaseDecoded() { decodedSource = null; decoded = null; }
 
     void candidateOrder(long orderId, String symbol, CoreOrderSide side, long price) {
-        candidateOrders[candidateOrderCount] = orderId;
-        candidateOrderSymbols[candidateOrderCount] = symbol;
-        candidateSides[candidateOrderCount] = side;
-        candidatePrices[candidateOrderCount++] = price;
-        if (symbol != null) candidateSymbols |= TradingDependencyMask.account(symbol.hashCode());
-        candidateOrderMask |= com.surprising.aeron.service.state.TradingDependencyMask.account(orderId);
+        candidateOrders[candidateOrderCount++] = orderId;
+        candidateOrderMask |= TradingDependencyMask.account(orderId);
+        if (symbol == null) return;
+        // Keep every order identity, but visit an identical matching range only once.
+        for (int i = 0; i < candidateScopeCount; i++)
+            if (side == candidateSides[i] && price == candidatePrices[i]
+                    && symbol.equals(candidateOrderSymbols[i])) return;
+        candidateOrderSymbols[candidateScopeCount] = symbol;
+        candidateSides[candidateScopeCount] = side;
+        candidatePrices[candidateScopeCount++] = price;
+        candidateSymbols |= TradingDependencyMask.account(symbol.hashCode());
     }
 
     ClusterCommandWindow() {
@@ -73,16 +79,21 @@ final class ClusterCommandWindow {
         for (int i = size - 1; i >= 0; i--) {
             Entry entry = get(i);
             if ((entry.symbols & candidateSymbols) != 0) {
-                for (int a = 0; a < candidateOrderCount; a++)
-                    for (int b = 0; b < entry.orderCount; b++)
+                for (int a = 0; a < candidateScopeCount; a++)
+                    for (int b = 0; b < entry.scopeCount; b++)
                         if (candidateOrderSymbols[a] != null
                                 && candidateOrderSymbols[a].equals(entry.orderSymbols[b])) return i + 1;
             }
             if ((entry.accounts & candidateAccounts) != 0 && accountsConflict(entry)) return i + 1;
             if ((entry.orderMask & candidateOrderMask) == 0) continue;
-            for (int a = 0; a < candidateOrderCount; a++)
-                for (int b = 0; b < entry.orderCount; b++)
-                    if (candidateOrders[a] == entry.orders[b]) return i + 1;
+            for (int a = 0; a < candidateOrderCount; a++) {
+                long orderId = candidateOrders[a];
+                int slot = TradingDependencyMask.partition(orderId);
+                while (entry.orders[slot] != 0) {
+                    if (entry.orders[slot] == orderId) return i + 1;
+                    slot = (slot + 1) & 63;
+                }
+            }
         }
         return 0;
     }
@@ -91,17 +102,17 @@ final class ClusterCommandWindow {
         if (candidateUser != 0 && candidateUser == entry.userId) return true;
         // Same-symbol commands already fence above. Until a prefix commits, its resting
         // counterparties remain in the owner index; no order-book copy is needed here.
-        for (int a = 0; a < candidateOrderCount; a++) {
+        for (int a = 0; a < candidateScopeCount; a++) {
             if (candidateSides[a] == null) continue;
             if (participants.hasCounterparty(candidateOrderSymbols[a], candidateSides[a], candidatePrices[a], entry.userId))
                 return true;
-            for (int b = 0; b < entry.orderCount; b++) {
+            for (int b = 0; b < entry.scopeCount; b++) {
                 if (entry.sides[b] != null && participants.counterpartiesOverlap(
                         candidateOrderSymbols[a], candidateSides[a], candidatePrices[a],
                         entry.orderSymbols[b], entry.sides[b], entry.prices[b])) return true;
             }
         }
-        for (int b = 0; b < entry.orderCount; b++)
+        for (int b = 0; b < entry.scopeCount; b++)
             if (entry.sides[b] != null && participants.hasCounterparty(
                     entry.orderSymbols[b], entry.sides[b], entry.prices[b], candidateUser)) return true;
         return false;
@@ -117,12 +128,17 @@ final class ClusterCommandWindow {
         entry.accounts = candidateAccounts;
         entry.userId = candidateUser;
         entry.symbols = candidateSymbols;
-        entry.orderCount = candidateOrderCount;
+        entry.scopeCount = candidateScopeCount;
         entry.orderMask = candidateOrderMask;
-        System.arraycopy(candidateOrders, 0, entry.orders, 0, candidateOrderCount);
-        System.arraycopy(candidateOrderSymbols, 0, entry.orderSymbols, 0, candidateOrderCount);
-        System.arraycopy(candidateSides, 0, entry.sides, 0, candidateOrderCount);
-        System.arraycopy(candidatePrices, 0, entry.prices, 0, candidateOrderCount);
+        for (int i = 0; i < candidateOrderCount; i++) {
+            long orderId = candidateOrders[i];
+            int slot = TradingDependencyMask.partition(orderId);
+            while (entry.orders[slot] != 0 && entry.orders[slot] != orderId) slot = (slot + 1) & 63;
+            entry.orders[slot] = orderId;
+        }
+        System.arraycopy(candidateOrderSymbols, 0, entry.orderSymbols, 0, candidateScopeCount);
+        System.arraycopy(candidateSides, 0, entry.sides, 0, candidateScopeCount);
+        System.arraycopy(candidatePrices, 0, entry.prices, 0, candidateScopeCount);
         return entry;
     }
 
@@ -158,21 +174,24 @@ final class ClusterCommandWindow {
             entry.sequence = entry.timestamp = entry.position = 0;
             entry.accounts = entry.symbols = entry.orderMask = 0;
             entry.userId = 0;
-            java.util.Arrays.fill(entry.orderSymbols, 0, entry.orderCount, null);
-            java.util.Arrays.fill(entry.sides, 0, entry.orderCount, null);
-            entry.orderCount = 0;
+            java.util.Arrays.fill(entry.orders, 0);
+            java.util.Arrays.fill(entry.orderSymbols, 0, entry.scopeCount, null);
+            java.util.Arrays.fill(entry.sides, 0, entry.scopeCount, null);
+            entry.scopeCount = 0;
         }
         head = (head + count) & (CAPACITY - 1);
         size -= count;
     }
 
     static final class Entry {
-        final long[] orders = new long[20];
+        // Protocol order IDs are positive. A 64-slot table holds at most 20 identities;
+        // zero is empty, and the entire owner-owned table is reused with its window entry.
+        final long[] orders = new long[64];
         final String[] orderSymbols = new String[20];
         final CoreOrderSide[] sides = new CoreOrderSide[20];
         final long[] prices = new long[20];
         long userId;
-        int orderCount;
+        int scopeCount;
         long accounts, symbols, orderMask;
         ClientSession session;
         CoreMessage request;
