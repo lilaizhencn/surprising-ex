@@ -24,6 +24,11 @@ import org.openjdk.jmh.annotations.*;
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"})
 @Threads(1)
 public class ClusteredBatchTradingBenchmark {
+    /** 异步 Lane 完成后才恢复提交上下文：覆盖普通单、改单和批量撤单的服务回调路径。 */
+    @Benchmark
+    public long laneCompletionContextHandoff(Workload workload, Counters counters) {
+        return decodedBatchAdmissionAndSettlement(workload, counters);
+    }
     /** Shared non-crossing maker liquidity plus alternating-symbol batches exercises price scopes and prefix commits. */
     @Benchmark
     public long priceScopedBatchWindows(Workload workload, Counters counters) {

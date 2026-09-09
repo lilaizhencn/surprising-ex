@@ -24,6 +24,75 @@ import org.junit.jupiter.params.provider.EnumSource;
 class ClusterCommandPipelineTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
+    void incompleteLanePollKeepsCommitContextSuspendedForNextAdmission(ProductLine product) throws Exception {
+        for (CoreMessageType type : List.of(CoreMessageType.PLACE_ORDER, CoreMessageType.CANCEL_ORDER,
+                CoreMessageType.AMEND_ORDER, CoreMessageType.CANCEL_ORDER_BATCH)) {
+            try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
+                serial.applyAll(live.setup());
+                if (type != CoreMessageType.PLACE_ORDER) {
+                    var resting = type == CoreMessageType.CANCEL_ORDER_BATCH
+                            ? live.placeBatch(11, "BTC-USDT", 101)
+                            : live.place(11, "BTC-USDT", 101, 80, 1, CoreOrderSide.BUY);
+                    live.apply(resting); serial.apply(resting);
+                }
+                CoreMessage first = switch (type) {
+                    case CANCEL_ORDER -> live.cancel(11, 101);
+                    case CANCEL_ORDER_BATCH -> live.cancelBatch(11, 101);
+                    case AMEND_ORDER -> live.message(type, 11, TradingCommandCodec.encodeAmendOrder(
+                            new AmendOrderCommand(101, 102, "replace-102", 81L, 1L, CoreTimeInForce.GTC, false)));
+                    default -> live.place(11, "BTC-USDT", 101, 80, 1, CoreOrderSide.BUY);
+                };
+                var state = live.service.state();
+                long timestamp = first.header().submittedAtEpochMillis();
+                state.applyClusterCommand(first, timestamp, 0);
+                long sequence = state.matchingSequence(first.header().commandId());
+                var matching = CoreTestCompletion.awaitMatchingResult(state, sequence);
+                assertThat(matching).isNotNull();
+                var field = state.runtimeState.getClass().getDeclaredField("laneWorkers");
+                field.setAccessible(true);
+                Object[] workers = (Object[]) field.get(state.runtimeState);
+                var entered = new CountDownLatch(workers.length);
+                var release = new CountDownLatch(1);
+                Class<?> task = Class.forName("com.surprising.aeron.service.state.SettlementLaneWorker$Command");
+                var submit = workers[0].getClass().getDeclaredMethod("submit", task);
+                submit.setAccessible(true);
+                CoreMessage next = live.place(disjointUser(11), disjointSymbol("BTC-USDT"),
+                        disjointOrder(8000), 80, 1, CoreOrderSide.BUY);
+                try {
+                    for (Object worker : workers) submit.invoke(worker, Proxy.newProxyInstance(task.getClassLoader(),
+                            new Class<?>[]{task}, (proxy, method, args) -> {
+                                entered.countDown();
+                                if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("Lane release timeout");
+                                return null;
+                            }));
+                    assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+                    assertThat(state.completeMatching(sequence, matching, timestamp, 0)).isNull();
+                    assertThat(state.laneCommandContexts.required(sequence).hasCommitContext()).isTrue();
+                    for (int i = 0; i < 3; i++) {
+                        assertThat(state.completeMatching(sequence, matching, timestamp, 0)).isNull();
+                        assertThat(state.commits.commitPublicationDeferred).as("%s pending poll", type).isFalse();
+                        assertThat(state.laneCommandContexts.required(sequence).hasCommitContext()).isTrue();
+                    }
+                    state.applyClusterCommand(next, next.header().submittedAtEpochMillis(), 0);
+                } finally { release.countDown(); }
+                assertThat(CoreTestCompletion.completeMatchingSynchronously(state, sequence, timestamp, 0).commandStatus())
+                        .isEqualTo(ResponseStatus.APPLIED);
+                long nextSequence = state.matchingSequence(next.header().commandId());
+                assertThat(CoreTestCompletion.completeMatchingSynchronously(state, nextSequence, next.header().submittedAtEpochMillis(), 0).commandStatus())
+                        .isEqualTo(ResponseStatus.APPLIED);
+                serial.apply(first); serial.apply(next);
+                assertThat(serial.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+                assertThat(state.tradingState().users()).as("%s account parity", type)
+                        .isEqualTo(serial.service.state().tradingState().users());
+                assertThat(live.hash()).as("%s hash parity", type).isEqualTo(serial.hash());
+                try (var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
+                    assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+                }
+            }
+        }
+    }
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
     void triggerChildSurvivesLaneHandoffAndOrderIdCollision(ProductLine product) {
         for (int matchedQuantity : new int[]{0, 1, 10}) {
             boolean fill = matchedQuantity != 0;

@@ -5158,3 +5158,13 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 本轮仅修改SmallControlReproMain读取hostnames/egress系统属性，默认仍支持原本地地址；HotSpot25 Maven package -DskipTests成功，未修改生产代码；因用户取消小样本，不宣称修改后的工具已完成云端功能验证。已有52项回归属于上一轮压测器修正，不替代新发现异常的回归。
 - 最新轮节点停止后成功收集node日志/JFR/monitor与capacity日志并删除云端ex-gcp-current-direct目录；本地分析后清理/tmp/ex-gcp-current。第一轮归档失败留下的云端ex-gcp-current目录未在最终停止前补清（旧测试文件，非业务数据），下次开机需先清理；未为删除临时文件再次开机。四VM最终状态另行核实，不保留已清理artifact链接。
 - 最终核实四实例全部TERMINATED。两个发生致命异常的leader JFR主文件为空，不能提供其完整JFR热点/分配结论；上述根异常来自节点原始日志，非采样推测。本轮没有有效吞吐结果，新生产批次上下文异常尚未修复。
+
+## 2026-09-09 异步提交上下文恢复修复（本地验证预锁）
+- 用户要求修复，并询问历史数据：云端为新目录，故不清空历史数据/不启动云端。基于4eeb943a，在本机全新内存fixture复现，六产品PLACE首次Lane派发后挂起，Lane被测试门闩阻塞，第二次轮询提前restore上下文、completeDispatchedMatcherSettlement因event未完成返回null，commitPublicationDeferred留为true；6/6复现失败，排除历史数据。取消/改单存在同样调用顺序，批量分支也检查了开启前的Lane readiness。
+- 修复只在恢复上下文/开启批次前检查对应事件完成状态，未完成保持已有挂起上下文，不清除脏状态、不增加任务/容器/等待/全局屏障，不删除重入保护。回归放行后插入独立订单、串行对照业务hash及snapshot恢复；覆盖6产品的普通单、撤单、改单和批量撤单。中间串行hash差异来自新fixture误用TIME而非command原时间，修正测试时间后原120项pipeline回归全通过；未放宽财务/状态断言。
+- 最终执行HotSpot GraalVM25.0.1、macOS i9-9880H8C16T/16GiB，Maven benchmarks -am verify。新增JMH laneCompletionContextHandoff覆盖相同普通单/改单/批量撤单回调路径，LINEAR_PERPETUAL/4Lane/1matcher/257账户/1symbol/batch2/maxInFlight256/interleavedMetrics=false/realtime=false/spin256，f1/t1/warmup1×1秒/measurement1×2秒/timeout2m，G1/Xms768m/Xmx768m/NMTsummary/profile JFR maxsize32m/-prof gc。功能边界诊断，不作吞吐/长期内存/云端验收；3584业务项、2048消息、1024fills每invocation，资金/持仓/冻结及恢复由fixture终检。运行前磁盘检查，分析后清理/tmp/ex-commit-context及本轮测试报告，不写README。
+- 扩展批量撤单时，新增fixture把独立订单ID取为103，实际与批量101..120重叠，串行对照正确拒绝该新单；该测试直接调用applyClusterCommand、未经过服务依赖判定，因此不能作为真实独立准入样本。修正为8000范围外ID，并新增串行终态APPLIED及账户状态精确相等断言，未放宽hash。第一次完整service657项中6项均为该fixture错误，其余通过，修正后重新执行。
+- 最终benchmarks -am verify成功：1058项、1057通过、0失败/错误、1项缺少数据库环境跳过，其中service657/benchmark177全部通过。新增6产品×4操作共24情形保持Lane未完成、重复3次轮询再准入独立订单，随后验证双命令APPLIED、账户精确一致、串行hash和快照恢复一致。
+- JMH laneCompletionContextHandoff退出0，测量完整1cycle=3584business ops/2048Core消息/1024fills/1536batches/3072items，accepted=terminal、rejected0、unfinished/endBacklog0、查询0，金融/订单/持仓/冻结/快照恢复终检通过。短轮score0.260921528cycle/s，gc.alloc.rate18.7567MB/s、gc.alloc.rate.norm77396968B/cycle、measurement gc.count0；含初始化/终检影响且未稳态，不用于评价吞吐改善或精确每单分配，不作云端结论。
+- profile JFR10秒、DataLoss0、执行样本683/分配样本431/GC3次（含启动）；没有长稳、完整NMT差分/线程CPU与业务尾延迟证据，不宣称零分配、无泄漏或已修复全部吞吐问题。service SHA256=096a4cd3d68c7c737f2f6db17760ef13043581a92db01d3b1e67ba1f148bb9a5，benchmarks SHA256=19c45b7eaef503046707fb327200a7967c255db7e32290ffc267ed224c70f537。
+- 本轮未启动云端/未清空历史数据；修复与本地验证完成，真实云端持续负载尚待复测。全部本轮测试/JMH进程退出，分析后清理/tmp/ex-commit-context和本轮surefire/failsafe报告，保留源码及摘要，不改README。
