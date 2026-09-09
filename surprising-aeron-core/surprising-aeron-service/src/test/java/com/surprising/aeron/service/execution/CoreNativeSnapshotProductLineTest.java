@@ -13,13 +13,13 @@ class CoreNativeSnapshotProductLineTest {
     void restoresPairedNativeSnapshotForEveryProductLine(ProductLine productLine) {
         byte[] snapshot;
         int bookHash;
-        try (CoreProbeState state = new CoreProbeState(productLine)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(productLine)) {
             snapshot = state.snapshot(101);
             bookHash = state.matchingStateHashAsync().join();
         }
 
-        CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(productLine, snapshot);
-        try (CoreProbeState restored = CoreProbeState.fromSnapshot(productLine, snapshot)) {
+        CoreSnapshotManifest manifest = TradingCoreRuntime.inspectSnapshot(productLine, snapshot);
+        try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(productLine, snapshot)) {
             assertThat(manifest.productLine()).isEqualTo(productLine);
             assertThat(manifest.coreShardId()).isEqualTo("default");
             assertThat(manifest.routeVersion()).isEqualTo(3);

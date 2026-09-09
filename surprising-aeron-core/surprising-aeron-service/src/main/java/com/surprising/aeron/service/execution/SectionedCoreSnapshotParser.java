@@ -34,8 +34,8 @@ final class SectionedCoreSnapshotParser {
 
     static Components parse(byte[][] payloads, ProductLine expectedProductLine) {
         HeaderManifest manifest = SectionedCoreSnapshotValidation.parseHeader(payloads[0], expectedProductLine);
-        Map<CoreProbeState.SourceKey, Long> sourceSequences = parseSources(payloads[1]);
-        Map<UUID, CoreProbeState.StoredResult> commandResults = parseResults(payloads[2]);
+        Map<TradingCoreRuntime.SourceKey, Long> sourceSequences = parseSources(payloads[1]);
+        Map<UUID, CommandResultLedger.StoredResult> commandResults = parseResults(payloads[2]);
         OutboxSnapshot outbox = parseOutbox(payloads[3]);
         MatcherSnapshot matcherSnapshot = MatcherSnapshotCodec.decode(payloads[4]);
         TradingCoreState tradingState = TradingStateSnapshotCodec.decode(payloads[5], manifest.productLine());
@@ -104,29 +104,29 @@ final class SectionedCoreSnapshotParser {
         }
     }
 
-    private static Map<CoreProbeState.SourceKey, Long> parseSources(byte[] payload) {
+    private static Map<TradingCoreRuntime.SourceKey, Long> parseSources(byte[] payload) {
         ByteBuffer sources = wrap(payload);
-        int sourceCount = readCount(sources, CoreProbeState.MAX_SOURCE_SEQUENCES, "source sequence");
+        int sourceCount = readCount(sources, TradingCoreRuntime.MAX_SOURCE_SEQUENCES, "source sequence");
         if (sources.remaining() != (long) sourceCount * SectionedCoreSnapshotCodec.SOURCE_SEQUENCE_LENGTH) {
             throw new ProtocolException("invalid snapshot source section length");
         }
-        Map<CoreProbeState.SourceKey, Long> sourceSequences = new LinkedHashMap<>();
+        Map<TradingCoreRuntime.SourceKey, Long> sourceSequences = new LinkedHashMap<>();
         for (int index = 0; index < sourceCount; index++) {
             CommandSource source = CommandSource.fromWireCode(sources.getInt());
             if (sources.getInt() != 0) throw new ProtocolException("invalid snapshot source reserved field");
             long sourceId = sources.getLong();
             long sequence = sources.getLong();
-            if (sequence < 0 || sourceSequences.put(new CoreProbeState.SourceKey(source, sourceId), sequence) != null) {
+            if (sequence < 0 || sourceSequences.put(new TradingCoreRuntime.SourceKey(source, sourceId), sequence) != null) {
                 throw new ProtocolException("invalid snapshot source sequence");
             }
         }
         return sourceSequences;
     }
 
-    private static Map<UUID, CoreProbeState.StoredResult> parseResults(byte[] payload) {
+    private static Map<UUID, CommandResultLedger.StoredResult> parseResults(byte[] payload) {
         ByteBuffer results = wrap(payload);
-        int resultCount = readCount(results, CoreProbeState.MAX_IDEMPOTENCY_RESULTS, "result");
-        Map<UUID, CoreProbeState.StoredResult> commandResults = new LinkedHashMap<>();
+        int resultCount = readCount(results, TradingCoreRuntime.MAX_IDEMPOTENCY_RESULTS, "result");
+        Map<UUID, CommandResultLedger.StoredResult> commandResults = new LinkedHashMap<>();
         for (int index = 0; index < resultCount; index++) {
             SnapshotResult result = readResult(results);
             if (commandResults.put(result.commandId(), result.value()) != null) {
@@ -192,7 +192,7 @@ final class SectionedCoreSnapshotParser {
         byte[] responseData = new byte[responseLength];
         source.get(responseData);
         source.limit(limit);
-        return new SnapshotResult(commandId, new CoreProbeState.StoredResult(
+        return new SnapshotResult(commandId, new CommandResultLedger.StoredResult(
                 CommandFingerprint.fromBytes(fingerprint), status, resultCode, appliedCommandCount,
                 requiredExportSequence, stateHash, responseData, retentionSequence));
     }
@@ -218,7 +218,7 @@ final class SectionedCoreSnapshotParser {
         }
     }
 
-    private record SnapshotResult(UUID commandId, CoreProbeState.StoredResult value) {
+    private record SnapshotResult(UUID commandId, CommandResultLedger.StoredResult value) {
     }
 
     private record OutboxSnapshot(long acknowledgedSequence, long nextSequence, List<CoreMessage> events,
@@ -229,8 +229,8 @@ final class SectionedCoreSnapshotParser {
             ProductLine productLine,
             long appliedCommandCount,
             long probeValue,
-            Map<UUID, CoreProbeState.StoredResult> commandResults,
-            Map<CoreProbeState.SourceKey, Long> sourceSequences,
+            Map<UUID, CommandResultLedger.StoredResult> commandResults,
+            Map<TradingCoreRuntime.SourceKey, Long> sourceSequences,
             CoreExportState exportState,
             MatcherSnapshot matcherSnapshot,
             TradingCoreState tradingState,
@@ -241,13 +241,13 @@ final class SectionedCoreSnapshotParser {
             HeaderManifest manifest,
             long checksum) {
 
-        CoreProbeState restore(ProductLine expectedProductLine) {
+        TradingCoreRuntime restore(ProductLine expectedProductLine) {
             requireProductLine(expectedProductLine);
-            CoreProbeState candidate = null;
+            TradingCoreRuntime candidate = null;
             try {
                 com.surprising.aeron.service.state.TradingRuntimeState.validateAccountLaneSnapshotManifest(
                         accountLanes, manifest.coreSequence(), tradingState, manifest.topology());
-                candidate = CoreProbeState.prepareRestore(productLine, appliedCommandCount, probeValue,
+                candidate = TradingCoreRuntime.prepareRestore(productLine, appliedCommandCount, probeValue,
                         commandResults, sourceSequences, tradingState, exportState, retention, matcherSnapshot,
                         manifest.projectionSequence(), feePolicies, pendingTransfers,
                         manifest.auditBusinessStateHash(), manifest.auditFundsStateHash());

@@ -43,7 +43,7 @@ class SharedProductLineSnapshotContractTest {
         CoreMessage funding = gateway(productLine, 1, USER_ID, CoreMessageType.ADJUST_BALANCE,
                 TradingCommandCodec.encodeBalanceAdjustment(
                         new BalanceAdjustmentCommand(settleAsset(productLine), BALANCE_UNITS)));
-        try (CoreProbeState original = new CoreProbeState(productLine)) {
+        try (TradingCoreRuntime original = new TradingCoreRuntime(productLine)) {
             assertApplied(applyTerminal(original, operations(productLine, 1, CoreMessageType.UPSERT_INSTRUMENT,
                     TradingCommandCodec.encodeUpsertInstrument(instrument(productLine)))));
             if (productLine.isDerivative()) {
@@ -73,7 +73,7 @@ class SharedProductLineSnapshotContractTest {
 
             assertProductSpecificLifecycle(productLine, original);
             byte[] snapshot = original.snapshot(800 + productLine.ordinal());
-            CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(productLine, snapshot);
+            CoreSnapshotManifest manifest = TradingCoreRuntime.inspectSnapshot(productLine, snapshot);
             long laneFence = original.appliedCommandCount();
             long stateHash = original.stateHash();
             long businessHash = original.snapshotBusinessStateHash();
@@ -82,11 +82,11 @@ class SharedProductLineSnapshotContractTest {
 
             assertThat(manifest.productLine()).isEqualTo(productLine);
             assertThat(manifest.schemaVersion()).isEqualTo(SectionedCoreSnapshotCodec.VERSION);
-            assertThatThrownBy(() -> CoreProbeState.fromSnapshot(other(productLine), snapshot))
+            assertThatThrownBy(() -> TradingCoreRuntime.fromSnapshot(other(productLine), snapshot))
                     .isInstanceOf(ProtocolException.class)
                     .hasMessageContaining("product line");
 
-            try (CoreProbeState restored = CoreProbeState.fromSnapshot(productLine, snapshot)) {
+            try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(productLine, snapshot)) {
                 assertThat(restored.productLine()).isEqualTo(productLine);
                 assertThat(restored.tradingState()).isEqualTo(original.tradingState());
                 assertThat(restored.stateHash()).isEqualTo(stateHash);
@@ -106,7 +106,7 @@ class SharedProductLineSnapshotContractTest {
         }
     }
 
-    private static void assertProductSpecificLifecycle(ProductLine productLine, CoreProbeState state) {
+    private static void assertProductSpecificLifecycle(ProductLine productLine, TradingCoreRuntime state) {
         if (productLine.isFundingProduct()) {
             CoreResponse funding = applyTerminal(state, market(productLine, 2, CoreMessageType.APPLY_FUNDING,
                     TradingCommandCodec.encodeApplyFunding(new ApplyFundingCommand(
@@ -176,11 +176,11 @@ class SharedProductLineSnapshotContractTest {
                         ? 2_000_000_000_000L : 1_700_000_000_000L + sourceSequence, sourceSequence), payload);
     }
 
-    private static CoreResponse applyTerminal(CoreProbeState state, CoreMessage command) {
+    private static CoreResponse applyTerminal(TradingCoreRuntime state, CoreMessage command) {
         CoreResponse response = state.apply(command);
         if (response.resultCode() != CoreResultCode.MATCHING_PENDING) return response;
         long matchingSequence = state.matchingSequence(command.header().commandId());
-        return state.completeMatchingSynchronously(matchingSequence,
+        return state.commits.completeMatchingSynchronously(matchingSequence,
                 command.header().submittedAtEpochMillis(), command.header().sourceSequence());
     }
 
@@ -199,7 +199,7 @@ class SharedProductLineSnapshotContractTest {
         };
     }
 
-    private static long economicAssetUnits(CoreProbeState state, String asset) {
+    private static long economicAssetUnits(TradingCoreRuntime state, String asset) {
         long total = state.tradingState().users().values().stream()
                 .map(user -> user.balances().get(asset))
                 .filter(java.util.Objects::nonNull)

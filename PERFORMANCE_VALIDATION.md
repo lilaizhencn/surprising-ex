@@ -4979,3 +4979,22 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - OS65原始日志重启校验799 cycles、businessHash=f43ecae2d8e13bf，资金/持仓/预留/损失全部PASS。恢复选举仍记录quorum position went backwards警告，随后确定性业务核对通过。原始日志、JFR、监控、代码SHA、构建与18项功能证据均位于/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-compact-dependencies；执行命令python3 cloud.py，离线analyze.py/stable.py/inspect_jfr.py，不做本机性能测试。
 - Valkey READY4576/119879=3.817%，115303 unavailable，无Core查询回退；查询可用性仍不合格。云端只测U本位永续运营吞吐，其他五产品完成了功能/恢复而未做云端性能。对象/op、长期GC后live set、完整Direct/native余额、稳定期全量I/O及三阶段延迟仍未完整验收，因此这是五项修复正确性与指定负载性能的部分验证，不能宣称生产全面验收或绝对算力上限；不作旧版性能增幅比较。README未修改。
 - 云端编排退出0，原日志恢复后finally停止四VM；本轮cloud.log记录ALL FOUR VMS TERMINATED，fresh instances-final.json确认surprising-core-0/1/2及surprising-load全部TERMINATED。后续未经用户要求不再开机。
+
+
+## 2026-09-09 Runtime 职责收敛及本地正确性验证
+
+- 被测代码：master 基于 `e44147d8` 的本次工作树；对照 commit 不适用。用户明确要求本轮仅本地验证，不启动云服务器、不执行压测；JMH/JFR 与真实三节点性能验收延后，本记录不构成吞吐或零分配结论。
+- 删除 `CoreProbeState` 及旧资源包装层，由 `TradingCoreRuntime` 作为唯一交易 owner，直接持有同一份 `TradingRuntimeState`、身份字典和 matcher。准入、批量执行、有序提交、结果账本、查询、实时读取及快照分别拥有自身在途变量；余额、币对配置、资金费、衍生品风险/账户、触发单、到期结算按功能拆分，沿用原有产品计算处理器和产品隔离。新增类和字段说明责任、生命周期及线程归属。
+- `TradingRuntimeState` 中结算派发、预留索引、primitive 变更/回滚缓冲独立；没有增加第二份权威账户状态。批量 Lane 派发共用一条实现，以唯一提交阶段避免重复派发；保留依赖、资金核对和有序提交边界。提交水位移除无副作用逐个自增循环。修复外线程调用 close 在拒绝前污染 closed 标志的问题，新增六产品线回归。
+- 环境：本机 macOS x86_64，Oracle GraalVM 25.0.1 / HotSpot，Maven 3.9.16；执行前检查 java/mvn 版本。
+- 核心 reactor：`mvn -pl surprising-aeron-core/surprising-aeron-tools,surprising-aeron-core/surprising-aeron-benchmarks -am clean verify`，`verify3.log` BUILD SUCCESS，994 项中 993 通过、1 项数据库条件跳过；service 599 项全部通过。benchmarks 模块仅运行 JUnit 正确性测试，未启动 JMH 或吞吐采集。
+- 本机以 `local-functional.py` 启动三个独立 JVM，六产品线逐一进行小样本业务、全节点 SIGKILL 后日志恢复、快照后 SIGKILL 恢复；18/18 PASS。使用真实 Aeron Cluster 日志复制，网络为 localhost；不作为真实多服务器性能结果。恢复等待遵守 Archive/Cluster mark-file 存活保护时间，不删除持久化元数据。结束已停止节点。
+- 使用独立 PostgreSQL 18.4 临时测试库，按根 `init.sql` 初始化。`MAINTENANCE_TEST_JDBC_URL` 指向本机测试库，执行 provider 的 `MaintenanceIntegrationTest,InstrumentCoreSyncServiceTest`：42/42 通过。再以 `INSTRUMENT_SEED_TEST_JDBC_URL` 执行工具模块 `InstrumentSeedCoreContractTest`：1/1 通过，补齐上述跳过项。临时数据库已停止，未启动 wallet。
+- 异常如实记录：较早 `verify.log` 中 Archive 临时 UDP 端口碰撞（Address already in use），之后完整 clean verify 成功，未通过删除校验规避。早期 provider 无数据库时维护测试被条件跳过，已用真实隔离库补跑。提取过程中的反射测试路径已更新到实际组件；未放宽业务断言。
+- 测试后仅完善常量注释、移除重复 import、整理提取方法缩进；`final-package.log` 对最终源码重新 package 成功。最终 service/benchmarks 中共享 656 个 Aeron class 字节一致；无 CoreProbeState class。README 未改。
+- 原始日志、恢复结果与测试脚本：`/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-runtime-owner`。未验证云端吞吐、长稳分配及 Valkey 问题；本次不宣称这些问题已解决。
+
+- `/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-runtime-owner/local-functional/service.jar`: SHA-256 `4441bf80eab6d20127562af6382c65cd1adf8cc93228943a29d45d5ae8fc066f`。
+- `/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-runtime-owner/local-functional/benchmarks.jar`: SHA-256 `1ad1308df8da9b2c3d6c99f2c22223e8f52f37f2c3931a7a04337e73a6c6efa9`。
+- `surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar`: SHA-256 `4d734a9586da1c0521d51018588d84f84c9977f1d9273d50530ef80d559bf1f5`。
+- `surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar`: SHA-256 `8ccf56eb3fd1033ea993d8e3b7ef184a3d51aeeeeed756820659241aebb364a6`。

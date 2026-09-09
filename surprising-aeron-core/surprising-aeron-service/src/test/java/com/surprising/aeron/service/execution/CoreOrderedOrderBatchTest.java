@@ -47,14 +47,14 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void cancelBatchCommitsInItsSettlementTaskAndKeepsDuplicateAndSnapshotResults() throws Exception {
-        try (var state = new CoreProbeState(ProductLine.SPOT)) {
+        try (var state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 10_000);
             drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 2,
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
                             place(86_001, "cancel-fused-1", 1_000),
                             place(86_002, "cancel-fused-2", 1_000))))));
-            TradingRuntimeState runtime = field(state, "runtimePlaceOrderState");
+            TradingRuntimeState runtime = field(state, "runtimeState");
             long[][] operations = field(runtime, "accountLaneCompletedOperations");
             long before = java.util.Arrays.stream(operations).mapToLong(row -> row[1]).sum();
             CoreMessage cancel = command(CoreMessageType.CANCEL_ORDER_BATCH, UUID.randomUUID(), 3,
@@ -73,7 +73,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.tradingState().order(86_001)).isNull();
             assertThat(state.tradingState().order(86_002)).isNull();
             assertThat(state.apply(cancel).data()).isEqualTo(result.data());
-            try (var restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+            try (var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
                 assertThat(restored.apply(cancel).data()).isEqualTo(result.data());
             }
@@ -82,7 +82,7 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void spotAmendReusesLockedFundsAndRejectsUnaffordableIncreaseBeforeMatching() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 1_000, 1);
             applyBalance(state, 1002, "BTC", 1, 2);
@@ -119,7 +119,7 @@ class CoreOrderedOrderBatchTest {
                             new CancelOrderCommand(85_003))))));
             assertThat(state.tradingState().user(1001).balances().get("USDT").availableUnits()).isEqualTo(1_000);
             assertThat(state.tradingState().user(1001).reservations()).isEmpty();
-            try (var restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+            try (var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
             }
         }
@@ -128,7 +128,7 @@ class CoreOrderedOrderBatchTest {
     @Test
     @org.junit.jupiter.api.Timeout(10)
     void spotAmendLaneFailureStopsTheBatchAndRecoversFromPriorSnapshotAndLog() throws Exception {
-        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT);
         try {
             applySpotInstrument(state);
             applyBalance(state, 1001, 10_000, 1);
@@ -154,8 +154,8 @@ class CoreOrderedOrderBatchTest {
             assertThat(matching.matcherEvents()).isNotEmpty();
             // Fault injection after the recoverable checkpoint: crediting this buyer's fill
             // overflows inside the real settlement worker, before it can publish completion.
-            TradingRuntimeState runtime = field(state, "runtimePlaceOrderState");
-            RuntimeIdentityRegistry identities = field(state, "runtimePlaceOrderIdentities");
+            TradingRuntimeState runtime = field(state, "runtimeState");
+            RuntimeIdentityRegistry identities = field(state, "identities");
             runtime.putBalance(new com.surprising.aeron.service.state.BalanceRuntime(
                     1001, identities.assetId("BTC"), Long.MAX_VALUE, 0));
 
@@ -171,7 +171,7 @@ class CoreOrderedOrderBatchTest {
             assertThatThrownBy(() -> state.apply(probe(UUID.randomUUID(), 7))).isInstanceOf(RuntimeException.class);
             assertThatThrownBy(state::snapshot).isInstanceOf(RuntimeException.class);
 
-            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, checkpoint)) {
+            try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, checkpoint)) {
                 CoreResponse response = drainBatch(restored, amend);
                 assertThat(TradingOrderBatchCodec.firstNonAppliedItem(response, 1)).isEqualTo(-1);
                 var trading = restored.tradingState();
@@ -188,13 +188,13 @@ class CoreOrderedOrderBatchTest {
                 long recoveredHash = trading.businessStateHash();
                 drainBatch(restored, amend); // replaying the duplicate must not settle the fill twice
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(recoveredHash);
-                try (CoreProbeState again = CoreProbeState.fromSnapshot(ProductLine.SPOT, restored.snapshot())) {
+                try (TradingCoreRuntime again = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, restored.snapshot())) {
                     assertThat(again.tradingState().businessStateHash()).isEqualTo(recoveredHash);
                 }
             }
         } finally {
             // A failed worker rethrows on close. Still stop every other worker in this fault fixture.
-            TradingRuntimeState runtime = field(state, "runtimePlaceOrderState");
+            TradingRuntimeState runtime = field(state, "runtimeState");
             org.assertj.core.api.Assertions.catchThrowable(state::close);
             if (runtime != null) {
                 for (Object worker : (Object[]) field(runtime, "laneWorkers")) {
@@ -210,7 +210,7 @@ class CoreOrderedOrderBatchTest {
     void spotPipelinedBatchSettlesSharedMakerOncePerLaneAndReclaimsEveryTerminal() throws Exception {
         String priorLanes = System.getProperty("surprising.aeron.account-lanes");
         System.setProperty("surprising.aeron.account-lanes", "4");
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 10_000);
             applyBalance(state, 1002, "BTC", 4, 2);
@@ -223,7 +223,7 @@ class CoreOrderedOrderBatchTest {
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)));
             assertThat(state.apply(message).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             long sequence = state.matchingSequence(message.header().commandId());
-            Map<Long, Object> batches = field(state, "pendingOrderBatches");
+            Map<Long, Object> batches = field(state.batches, "pendingOrderBatches");
             assertThat((boolean) field(batches.get(sequence), "pipelined")).isTrue();
             CoreResponse response = drainBatchAfterFirst(state, message, sequence);
             assertThat(TradingOrderBatchCodec.firstNonAppliedItem(response, 4)).isEqualTo(-1);
@@ -237,7 +237,7 @@ class CoreOrderedOrderBatchTest {
                         assertThat(balance.lockedUnits()).isZero());
             }
             for (long orderId = 82_000; orderId <= 82_004; orderId++) assertThat(trading.order(orderId)).isNull();
-            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+            try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(trading.businessStateHash());
             }
         } finally {
@@ -248,7 +248,7 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void spotBatchPreservesEarlierFillProceedsForLaterItemAdmission() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, "BTC", 1, 1);
             applyBalance(state, 1002, 2_000, 2);
@@ -269,7 +269,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(trading.user(1001).balances().get("USDT").availableUnits()).isZero();
             assertThat(trading.user(1002).balances().get("USDT").availableUnits()).isEqualTo(1_000);
             assertThat(trading.user(1002).balances().get("BTC").availableUnits()).isOne();
-            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+            try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(trading.businessStateHash());
             }
         }
@@ -277,7 +277,7 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void spotPipelinedFatalAfterFillPreservesFundsAndRecoversBySnapshotReplay() throws Exception {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 10_000);
             applyBalance(state, 1002, "BTC", 1, 2);
@@ -300,8 +300,8 @@ class CoreOrderedOrderBatchTest {
             assertThat(divergence).isInstanceOf(
                     com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBefore);
-            TradingRuntimeState runtime = field(state, "runtimePlaceOrderState");
-            RuntimeIdentityRegistry identities = field(state, "runtimePlaceOrderIdentities");
+            TradingRuntimeState runtime = field(state, "runtimeState");
+            RuntimeIdentityRegistry identities = field(state, "identities");
             int quote = identities.assetId("USDT");
             assertThat(runtime.balance(1001, quote).availableUnits()).isEqualTo(8_100);
             assertThat(runtime.balance(1001, quote).lockedUnits()).isEqualTo(900);
@@ -309,7 +309,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(runtime.order(84_000)).isNull();
             assertThat(runtime.order(84_001)).isNull();
             assertThatThrownBy(() -> state.apply(message)).isSameAs(divergence);
-            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, recovery)) {
+            try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, recovery)) {
                 assertThat(TradingOrderBatchCodec.firstNonAppliedItem(drainBatch(restored, message), 2))
                         .isEqualTo(-1);
                 var trading = restored.tradingState();
@@ -323,7 +323,7 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void deferredAllRejectedBatchStillPublishesItsTerminalBetweenAdjacentBatches() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 100_000);
             CoreMessage first = command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 2,
@@ -346,7 +346,7 @@ class CoreOrderedOrderBatchTest {
             var responses = new ArrayList<CoreResponse>();
             long deadline = System.nanoTime() + 5_000_000_000L;
             while (state.pendingMatchingCount() != 0 && System.nanoTime() < deadline) {
-                state.commitReadyMatching(256, 2_000, 4, false, (sequence, response) -> {
+                state.commits.commitReadyMatching(256, 2_000, 4, false, (sequence, response) -> {
                     actual.add(sequence);
                     responses.add(response);
                 });
@@ -365,7 +365,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.apply(query).status()).isEqualTo(ResponseStatus.OK);
             var balance = state.tradingState().users().get(1001L).balances().get("USDT");
             assertThat(balance.availableUnits() + balance.lockedUnits()).isEqualTo(100_007);
-            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+            try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash())
                         .isEqualTo(state.tradingState().businessStateHash());
             }
@@ -374,7 +374,7 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void coalescesSameMatcherCancellationsAndPreservesRejectedItemOrder() throws Exception {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 100_000);
             var before = state.tradingState().users().get(1001L).balances();
@@ -397,7 +397,7 @@ class CoreOrderedOrderBatchTest {
             final CoreResponse[] terminal = {null};
             long deadline = System.nanoTime() + 5_000_000_000L;
             while (terminal[0] == null && System.nanoTime() < deadline) {
-                state.commitReadyMatching(256, 2_000, 6, false, (sequence, response) -> terminal[0] = response);
+                state.commits.commitReadyMatching(256, 2_000, 6, false, (sequence, response) -> terminal[0] = response);
             }
             assertThat(terminal[0]).isNotNull();
             var items = TradingOrderBatchCodec.decodeResult(terminal[0].data()).items();
@@ -413,7 +413,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.tradingState().users().get(1001L).reservations()).isEmpty();
             assertThat(state.tradingState().users().get(1001L).positions()).isEmpty();
             byte[] snapshot = state.snapshot();
-            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, snapshot)) {
+            try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, snapshot)) {
                 assertThat(restored.tradingState().users().get(1001L).balances()).isEqualTo(before);
                 assertThat(restored.tradingState().businessStateHash())
                         .isEqualTo(state.tradingState().businessStateHash());
@@ -423,7 +423,7 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void isolatesOverlappingBatchesUntilTheActiveBatchCompletes() throws Exception {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 100_000);
             UUID batchId = UUID.randomUUID();
@@ -444,7 +444,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.completeMatching(batchSequence, first, 2_000, 3)).isNull();
             var second = awaitMatching(state, batchSequence);
 
-            var contextsField = CoreProbeState.class.getDeclaredField("laneCommandContexts");
+            var contextsField = TradingCoreRuntime.class.getDeclaredField("laneCommandContexts");
             contextsField.setAccessible(true);
             LaneCommandContextRing contexts = (LaneCommandContextRing) contextsField.get(state);
             assertThat(contexts.required(laterSequence).hasMatchingCompletion()).isFalse();
@@ -471,7 +471,7 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void defersSinglePlaceCompletionUntilTheActiveBatchCompletes() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 100_000);
             UUID batchId = UUID.randomUUID();
@@ -536,7 +536,7 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void processesMaximumBatchesInInputOrder() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, Math.multiplyExact(PlaceOrderBatchCommand.MAX_ORDERS, 1_000L));
             UUID commandId = UUID.randomUUID();
@@ -590,7 +590,7 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void conservesFundsWhenABatchMatchesAnotherUser() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 2_000_000);
             applyBalance(state, 1002, "BTC", 2_000, 2);
@@ -635,7 +635,7 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void perpetualBatchAdmissionIncludesEarlierItemsAndConservesReservedFunds() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 1,
                     ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
                     1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0,
@@ -677,7 +677,7 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void laneBatchRejectionRollsBackProvisionalClientAndFundsBeforeOrderedItemsResume() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applyLinearPerpetualInstrument(state);
             applyBalance(state, ProductLine.LINEAR_PERPETUAL, 1001, 1_000_000, 1);
             var batch = command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.PLACE_ORDER_BATCH,
@@ -693,7 +693,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(user.balances().get("USDT").totalUnits()).isEqualTo(1_000_000);
             assertThat(state.pendingMatchingCount()).isZero();
             byte[] snapshot = state.snapshot();
-            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.LINEAR_PERPETUAL, snapshot)) {
+            try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, snapshot)) {
                 assertThat(restored.tradingState().businessStateHash())
                         .isEqualTo(state.tradingState().businessStateHash());
             }
@@ -702,7 +702,7 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void keepsPriorItemsButFailsStickyAfterMatcherDivergence() throws Exception {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 10_000);
             UUID commandId = UUID.randomUUID();
@@ -729,11 +729,11 @@ class CoreOrderedOrderBatchTest {
                     .isEqualTo(com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN);
 
             UUID fatalId = UUID.randomUUID();
-            TradingRuntimeState runtime = field(state, "runtimePlaceOrderState");
-            RuntimeIdentityRegistry identities = field(state, "runtimePlaceOrderIdentities");
+            TradingRuntimeState runtime = field(state, "runtimeState");
+            RuntimeIdentityRegistry identities = field(state, "identities");
             int quoteAssetId = identities.assetId("USDT");
-            long[] matcherBeforeFatal = ((long[]) field(state, "appliedMatcherSequences")).clone();
-            long[] matcherPrefixBeforeFatal = ((long[]) field(state, "appliedMatcherPrefixDigests")).clone();
+            long[] matcherBeforeFatal = ((long[]) field(state.commits, "appliedMatcherSequences")).clone();
+            long[] matcherPrefixBeforeFatal = ((long[]) field(state.commits, "appliedMatcherPrefixDigests")).clone();
             long committedBeforeFatal = state.committedCoreSequence();
             var exportBeforeFatal = state.exportState().snapshot();
             // A duplicate later item selects ordered partial-success admission. Pipelined fatal
@@ -750,8 +750,8 @@ class CoreOrderedOrderBatchTest {
             assertThat(runtime.order(11_004)).isNotNull();
             LaneCommandContextRing contexts = field(state, "laneCommandContexts");
             LaneCommandContextRing.Context claimedContext = contexts.required(fatalSequence);
-            long[] matcherAfterFirst = ((long[]) field(state, "appliedMatcherSequences")).clone();
-            long[] matcherPrefixAfterFirst = ((long[]) field(state, "appliedMatcherPrefixDigests")).clone();
+            long[] matcherAfterFirst = ((long[]) field(state.commits, "appliedMatcherSequences")).clone();
+            long[] matcherPrefixAfterFirst = ((long[]) field(state.commits, "appliedMatcherPrefixDigests")).clone();
             assertThat(matcherAfterFirst).isNotEqualTo(matcherBeforeFatal);
             assertThat(matcherPrefixAfterFirst).isNotEqualTo(matcherPrefixBeforeFatal);
             assertThat((int) invoke(runtime, "pendingReservationCount", new Class<?>[]{long.class}, 1001L))
@@ -781,8 +781,8 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.pendingMatchingCount()).isOne();
             assertThat(state.matchingSequence(fatalId)).isEqualTo(fatalSequence);
             assertThat(state.snapshotHasOutstandingReservation()).isTrue();
-            assertThat((long[]) field(state, "appliedMatcherSequences")).containsExactly(matcherAfterFirst);
-            assertThat((long[]) field(state, "appliedMatcherPrefixDigests"))
+            assertThat((long[]) field(state.commits, "appliedMatcherSequences")).containsExactly(matcherAfterFirst);
+            assertThat((long[]) field(state.commits, "appliedMatcherPrefixDigests"))
                     .containsExactly(matcherPrefixAfterFirst);
             assertThat(state.committedCoreSequence()).isEqualTo(committedBeforeFatal);
             assertThat(state.exportState().snapshot()).isEqualTo(exportBeforeFatal);
@@ -820,7 +820,7 @@ class CoreOrderedOrderBatchTest {
         return method.invoke(target, arguments);
     }
 
-    private static Map<String, Map<String, Object>> allIndexSnapshots(CoreProbeState state) throws Exception {
+    private static Map<String, Map<String, Object>> allIndexSnapshots(TradingCoreRuntime state) throws Exception {
         return Map.ofEntries(
                 Map.entry("position-user", indexSnapshot(field(state, "positionUserIndex"))),
                 Map.entry("open-interest", indexSnapshot(field(state, "openInterestIndex"))),
@@ -850,7 +850,7 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void executesCancelAndAmendBatchesWithOrderedPerItemOutcomes() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 100_000);
 
@@ -887,7 +887,7 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void amendPartialMatcherFailureMustFailStickyBeforeRecordingBusinessRejection() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 100_000);
             CoreMessage place = command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 2,
@@ -927,7 +927,7 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void rejectsMixedUserCancelBatchBeforeAnyMutation() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 100_000);
             applyBalance(state, 1002, 100_000, 2);
@@ -968,11 +968,11 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void closeDoesNotRollBackAnInterruptedBatchAfterObservedMatcherFact() throws Exception {
-        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT);
         applySpotInstrument(state);
         applyBalance(state, 1001, 20_000);
-        TradingRuntimeState runtime = field(state, "runtimePlaceOrderState");
-        RuntimeIdentityRegistry identities = field(state, "runtimePlaceOrderIdentities");
+        TradingRuntimeState runtime = field(state, "runtimeState");
+        RuntimeIdentityRegistry identities = field(state, "identities");
         int quoteAssetId = identities.assetId("USDT");
         long availableBefore = runtime.balance(1001, quoteAssetId).availableUnits();
         long lockedBefore = runtime.balance(1001, quoteAssetId).lockedUnits();
@@ -1005,12 +1005,12 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void rejectsUnsupportedRuntimeDomainBeforeItsFirstMutationDuringBatch() throws Exception {
-        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT);
         try {
             applySpotInstrument(state);
             applyBalance(state, 1001, 20_000);
-            TradingRuntimeState runtime = field(state, "runtimePlaceOrderState");
-            RuntimeIdentityRegistry identities = field(state, "runtimePlaceOrderIdentities");
+            TradingRuntimeState runtime = field(state, "runtimeState");
+            RuntimeIdentityRegistry identities = field(state, "identities");
             int symbolId = identities.symbolId("BTC-USDT");
             CoreMessage batch = command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 2,
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
@@ -1030,10 +1030,10 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void finalLaneMaskFailureStopsWithoutRollingBackObservedMatcherFact() throws Exception {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 20_000);
-            TradingRuntimeState runtime = field(state, "runtimePlaceOrderState");
+            TradingRuntimeState runtime = field(state, "runtimeState");
             var lanesBefore = List.of(runtime.accountLanes());
             var indexesBefore = allIndexSnapshots(state);
             long revisionBefore = runtime.revision();
@@ -1068,7 +1068,7 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void pipelinedFatalAfterRealFillKeepsAppliedLaneStateForSnapshotLogRecovery() throws Exception {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applyLinearPerpetualInstrument(state);
             applyBalance(state, ProductLine.LINEAR_PERPETUAL, 1001, 1_000_000, 1);
             applyBalance(state, ProductLine.LINEAR_PERPETUAL, 1002, 1_000_000, 2);
@@ -1078,8 +1078,8 @@ class CoreOrderedOrderBatchTest {
                                     15_301, "position-maker", CoreOrderSide.SELL, 1_000, 1)))), 1002);
             assertThat(drainBatch(state, maker).status()).isEqualTo(ResponseStatus.APPLIED);
 
-            TradingRuntimeState runtime = field(state, "runtimePlaceOrderState");
-            RuntimeIdentityRegistry identities = field(state, "runtimePlaceOrderIdentities");
+            TradingRuntimeState runtime = field(state, "runtimeState");
+            RuntimeIdentityRegistry identities = field(state, "identities");
             var identityBefore = identities.snapshot();
             var lanesBefore = List.of(runtime.accountLanes());
             var indexesBefore = allIndexSnapshots(state);
@@ -1112,8 +1112,8 @@ class CoreOrderedOrderBatchTest {
 
             assertThat(divergence).isInstanceOf(
                     com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class);
-            long[] observedSequences = ((long[]) field(state, "appliedMatcherSequences")).clone();
-            long[] observedPrefixes = ((long[]) field(state, "appliedMatcherPrefixDigests")).clone();
+            long[] observedSequences = ((long[]) field(state.commits, "appliedMatcherSequences")).clone();
+            long[] observedPrefixes = ((long[]) field(state.commits, "appliedMatcherPrefixDigests")).clone();
             assertThat(java.util.Arrays.stream(observedSequences).anyMatch(value -> value > 0)).isTrue();
             assertThat(java.util.Arrays.stream(observedPrefixes).anyMatch(value -> value
                     != com.surprising.aeron.service.matching.CoreMatchingResult.MatcherPrefix.initialDigest()))
@@ -1141,7 +1141,7 @@ class CoreOrderedOrderBatchTest {
 
     @Test
     void fatalTeardownReleasesAdmissionWithoutErasingMatcherForensics() throws Exception {
-        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT);
         applySpotInstrument(state);
         applyBalance(state, 1001, 20_000);
         RuntimeCommitJournal journal = field(state, "runtimeProjectionJournal");
@@ -1154,8 +1154,8 @@ class CoreOrderedOrderBatchTest {
         assertThat(state.apply(batch).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
         long sequence = state.matchingSequence(commandId);
         assertThat(state.completeMatching(sequence, awaitMatching(state, sequence), 2_000, 3)).isNull();
-        long[] matcherSequences = ((long[]) field(state, "appliedMatcherSequences")).clone();
-        long[] matcherPrefixes = ((long[]) field(state, "appliedMatcherPrefixDigests")).clone();
+        long[] matcherSequences = ((long[]) field(state.commits, "appliedMatcherSequences")).clone();
+        long[] matcherPrefixes = ((long[]) field(state.commits, "appliedMatcherPrefixDigests")).clone();
         Throwable divergence = org.assertj.core.api.Assertions.catchThrowable(() -> state.completeMatching(
                 sequence, new com.surprising.aeron.service.matching.CoreMatchingResult(
                         false, "EXCHANGE_CORE_FAILURE"), 2_001, 4));
@@ -1170,14 +1170,14 @@ class CoreOrderedOrderBatchTest {
         assertThat(journal.metrics().reservedBytes()).isZero();
         assertThat(state.exportState().metrics().reservedEvents()).isZero();
         assertThat(state.exportState().metrics().reservedBytes()).isZero();
-        assertThat((long[]) field(state, "appliedMatcherSequences")).containsExactly(matcherSequences);
-        assertThat((long[]) field(state, "appliedMatcherPrefixDigests")).containsExactly(matcherPrefixes);
+        assertThat((long[]) field(state.commits, "appliedMatcherSequences")).containsExactly(matcherSequences);
+        assertThat((long[]) field(state.commits, "appliedMatcherPrefixDigests")).containsExactly(matcherPrefixes);
         assertThat(state.takeMatchingResult(sequence)).isNull();
     }
 
     @Test
     void rejectsProductLineMismatchBeforeAnyBatchMutation() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             TradingCoreState before = state.tradingState();
             long appliedBefore = state.appliedCommandCount();
@@ -1201,18 +1201,18 @@ class CoreOrderedOrderBatchTest {
         }
     }
 
-    private static CoreResponse drainBatch(CoreProbeState state, CoreMessage batch) {
+    private static CoreResponse drainBatch(TradingCoreRuntime state, CoreMessage batch) {
         CoreResponse initial = state.apply(batch);
         if (initial.resultCode() != CoreResultCode.MATCHING_PENDING) return initial;
         long sequence = state.matchingSequence(batch.header().commandId());
         return drainBatchAfterFirst(state, batch, sequence);
     }
 
-    private static CoreResponse drainBatchAfterFirst(CoreProbeState state, CoreMessage batch, long sequence) {
+    private static CoreResponse drainBatchAfterFirst(TradingCoreRuntime state, CoreMessage batch, long sequence) {
         CoreResponse[] terminal = {null};
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (terminal[0] == null && System.nanoTime() - deadline < 0) {
-            state.commitReadyMatching(256, batch.header().submittedAtEpochMillis(),
+            state.commits.commitReadyMatching(256, batch.header().submittedAtEpochMillis(),
                     batch.header().sourceSequence(), false, (completedSequence, response) -> {
                         if (completedSequence == sequence) terminal[0] = response;
                     });
@@ -1222,7 +1222,7 @@ class CoreOrderedOrderBatchTest {
     }
 
     private static CoreResponse completeEventually(
-            CoreProbeState state, long sequence,
+            TradingCoreRuntime state, long sequence,
             com.surprising.aeron.service.matching.CoreMatchingResult matching,
             long clusterTimestamp, long clusterPosition) {
         CoreResponse completed = null;
@@ -1236,7 +1236,7 @@ class CoreOrderedOrderBatchTest {
     }
 
     private static com.surprising.aeron.service.matching.CoreMatchingResult awaitMatching(
-            CoreProbeState state, long sequence) {
+            TradingCoreRuntime state, long sequence) {
         com.surprising.aeron.service.matching.CoreMatchingResult matching = null;
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (matching == null && System.nanoTime() < deadline) {
@@ -1257,7 +1257,7 @@ class CoreOrderedOrderBatchTest {
         return new PlaceOrderCommand(orderId, "BTC-USDT", 1, side, priceTicks, quantitySteps, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, clientOrderId);
     }
 
-    private static void applySpotInstrument(CoreProbeState state) {
+    private static void applySpotInstrument(TradingCoreRuntime state) {
         UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 1,
                 ContractType.SPOT.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
                 100_000, 50_000, 0, 0, 0, -1, 0);
@@ -1268,7 +1268,7 @@ class CoreOrderedOrderBatchTest {
                 .isEqualTo(ResponseStatus.APPLIED);
     }
 
-    private static void applyLinearPerpetualInstrument(CoreProbeState state) {
+    private static void applyLinearPerpetualInstrument(TradingCoreRuntime state) {
         UpsertInstrumentCommand instrument = new UpsertInstrumentCommand("BTC-USDT", 1,
                 ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
                 100_000, 50_000, 0, 0, 0, -1, 0,
@@ -1294,22 +1294,22 @@ class CoreOrderedOrderBatchTest {
                 CoreTimeInForce.GTC, false, clientOrderId);
     }
 
-    private static void applyBalance(CoreProbeState state, long userId, long units) {
+    private static void applyBalance(TradingCoreRuntime state, long userId, long units) {
         applyBalance(state, userId, units, 1);
     }
 
-    private static void applyBalance(CoreProbeState state, long userId, long units, long sourceSequence) {
+    private static void applyBalance(TradingCoreRuntime state, long userId, long units, long sourceSequence) {
         applyBalance(state, userId, "USDT", units, sourceSequence);
     }
 
-    private static void applyBalance(CoreProbeState state, long userId, String asset, long units,
+    private static void applyBalance(TradingCoreRuntime state, long userId, String asset, long units,
                                      long sourceSequence) {
         assertThat(state.apply(command(CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), sourceSequence,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, units)), userId))
                 .status()).isEqualTo(ResponseStatus.APPLIED);
     }
 
-    private static void applyBalance(CoreProbeState state, ProductLine productLine,
+    private static void applyBalance(TradingCoreRuntime state, ProductLine productLine,
                                      long userId, long units, long sourceSequence) {
         assertThat(state.apply(command(productLine, CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(),
                 sourceSequence, TradingCommandCodec.encodeBalanceAdjustment(

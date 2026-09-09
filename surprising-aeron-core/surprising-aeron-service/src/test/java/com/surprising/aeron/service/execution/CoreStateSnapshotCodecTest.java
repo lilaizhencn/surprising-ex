@@ -56,14 +56,14 @@ class CoreStateSnapshotCodecTest {
                 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
                 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31
         });
-        CoreProbeState.StoredResult stored = new CoreProbeState.StoredResult(
+        CommandResultLedger.StoredResult stored = new CommandResultLedger.StoredResult(
                 fingerprint, ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 17, 77, response, 4);
-        CoreProbeState original = CoreProbeStateRestoreTestSupport.restore(ProductLine.SPOT, 1, 0,
+        TradingCoreRuntime original = TradingCoreRuntimeRestoreTestSupport.restore(ProductLine.SPOT, 1, 0,
                 Map.of(commandId, stored), Map.of(),
                 com.surprising.aeron.service.state.TradingCoreState.empty(ProductLine.SPOT),
                 new CoreExportState());
 
-        CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, original.snapshot());
+        TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, original.snapshot());
 
         assertThat(restored.commandResults().get(commandId).responseData()).containsExactly(response);
         assertThat(restored.commandResults().get(commandId).fingerprint()).isEqualTo(fingerprint);
@@ -75,7 +75,7 @@ class CoreStateSnapshotCodecTest {
 
     @Test
     void snapshotUsesDeterministicBoundedSectionOrder() {
-        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT);
         try {
             byte[] snapshot = state.snapshot(41);
             ByteBuffer buffer = ByteBuffer.wrap(snapshot).order(ByteOrder.LITTLE_ENDIAN);
@@ -100,7 +100,7 @@ class CoreStateSnapshotCodecTest {
 
     @Test
     void rejectsTruncationOversizeInvalidSectionMetadataChecksumAndTrailingGarbage() {
-        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT);
         try {
             byte[] snapshot = state.snapshot(42);
             byte[] invalidCount = snapshot.clone();
@@ -138,7 +138,7 @@ class CoreStateSnapshotCodecTest {
 
     @Test
     void rejectsMutationAndTruncationAtEverySectionBoundary() {
-        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT);
         try {
             byte[] snapshot = state.snapshot(48);
             ByteBuffer layout = ByteBuffer.wrap(snapshot).order(ByteOrder.LITTLE_ENDIAN);
@@ -168,7 +168,7 @@ class CoreStateSnapshotCodecTest {
     @Test
     void onlyVersionNineteenSectionedDecoderAcceptsRecoveryInput() {
         byte[] unsupported;
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             unsupported = state.snapshot(47);
         }
         ByteBuffer.wrap(unsupported).order(ByteOrder.LITTLE_ENDIAN).putShort(Integer.BYTES, (short) 18);
@@ -189,7 +189,7 @@ class CoreStateSnapshotCodecTest {
     @Test
     void rejectsMissingDuplicateAndMisroutedAccountLaneSectionsAfterChecksumRecomputation() {
         byte[] snapshot;
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             snapshot = state.snapshot(49);
         }
         byte[] duplicate = mutateSectionId(snapshot, 11, 10);
@@ -217,15 +217,15 @@ class CoreStateSnapshotCodecTest {
                     43, 1, tradingState.businessStateHash(), tradingState,
                     new ActiveOrderIndex(tradingState).orders()).join();
         }
-        CoreProbeState outboxSource = new CoreProbeState(ProductLine.SPOT);
+        TradingCoreRuntime outboxSource = new TradingCoreRuntime(ProductLine.SPOT);
         CoreMessage increment = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
                 UUID.fromString("00000000-0000-0000-0000-000000000043"), ProductLine.SPOT,
                 CommandSource.GATEWAY, 43, 1, 7, 1_000, 43), CoreProtocol.probePayload(3));
         assertThat(outboxSource.apply(increment).status()).isEqualTo(ResponseStatus.APPLIED);
-        CoreProbeState original = CoreProbeStateRestoreTestSupport.restore(ProductLine.SPOT, 1, 3,
+        TradingCoreRuntime original = TradingCoreRuntimeRestoreTestSupport.restore(ProductLine.SPOT, 1, 3,
                 outboxSource.commandResults(), outboxSource.lastSourceSequences(), tradingState,
                 outboxSource.exportState(), matcherSnapshot);
-        CoreProbeState restored = null;
+        TradingCoreRuntime restored = null;
         try {
             byte[] first = CoreStateSnapshotCodec.encode(original, matcherSnapshot);
             restored = CoreStateSnapshotCodec.decode(first, ProductLine.SPOT);
@@ -273,7 +273,7 @@ class CoreStateSnapshotCodecTest {
         AtomicReference<CoreFaults.ActivationState> beforeActivation = new AtomicReference<>();
         CoreFaults.beforeActivation(state ->
                 beforeActivation.set(CoreFaults.activationState(state)));
-        try (CoreProbeState restored = CoreStateSnapshotCodec.decode(control, ProductLine.SPOT)) {
+        try (TradingCoreRuntime restored = CoreStateSnapshotCodec.decode(control, ProductLine.SPOT)) {
             assertThat(beforeActivation.get()).isNotNull();
             assertThat(beforeActivation.get().allPassive()).isTrue();
             assertThat(CoreFaults.activationState(restored).allActivated()).isTrue();
@@ -285,7 +285,7 @@ class CoreStateSnapshotCodecTest {
     @Test
     void passiveCandidateConstructionFailureClosesEveryResourceWithoutStartingConsumers() {
         byte[] control = populatedSnapshot(90);
-        AtomicReference<CoreProbeState> candidate = new AtomicReference<>();
+        AtomicReference<TradingCoreRuntime> candidate = new AtomicReference<>();
         long threadsBefore = recoveryConsumerThreadCount();
         CoreFaults.beforeActivation(state -> {
             candidate.set(state);
@@ -311,7 +311,7 @@ class CoreStateSnapshotCodecTest {
             matcherSnapshot = adapter.snapshotAsync(
                     73, 1, empty.businessStateHash(), empty, List.of()).join();
         }
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT,
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT,
                 (snapshotId, coreSequence, businessStateHash, tradingState, activeOrders) ->
                         java.util.concurrent.CompletableFuture.completedFuture(matcherSnapshot))) {
             CoreMessage increment = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
@@ -327,7 +327,7 @@ class CoreStateSnapshotCodecTest {
             }
             assertThat(snapshot).isNotNull();
 
-            CoreSnapshotManifest manifest = CoreProbeState.inspectSnapshot(ProductLine.SPOT, snapshot);
+            CoreSnapshotManifest manifest = TradingCoreRuntime.inspectSnapshot(ProductLine.SPOT, snapshot);
 
             assertThat(manifest.schemaVersion()).isEqualTo(SectionedCoreSnapshotCodec.VERSION);
             assertThat(manifest.snapshotId()).isEqualTo(73);
@@ -351,7 +351,7 @@ class CoreStateSnapshotCodecTest {
     @Test
     void rejectsEveryPairedManifestMismatchAfterChecksumRecomputation() {
         byte[] snapshot;
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             assertThat(state.apply(new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
                     UUID.fromString("00000000-0000-0000-0000-000000000074"), ProductLine.SPOT,
                     CommandSource.GATEWAY, 74, 1, 7, 1_000, 74), CoreProtocol.probePayload(3))).status())
@@ -392,7 +392,7 @@ class CoreStateSnapshotCodecTest {
     @Test
     void rejectsWrongProductLineBeforeDecodingOtherV9Sections() {
         byte[] snapshot;
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             snapshot = state.snapshot(75);
         }
 
@@ -418,7 +418,7 @@ class CoreStateSnapshotCodecTest {
     @Test
     void checksumProtectsClusterTimestampAndPositionManifestFields() {
         byte[] snapshot;
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             snapshot = state.snapshot(76);
         }
 
@@ -443,7 +443,7 @@ class CoreStateSnapshotCodecTest {
                 new UUID(0, sequence), ProductLine.SPOT, CommandSource.GATEWAY, sequence, 1, 7,
                 1_000, sequence),
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 25)));
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             assertThat(state.apply(adjustment).status()).isEqualTo(ResponseStatus.APPLIED);
             return state.snapshot(sequence);
         }

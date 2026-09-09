@@ -709,7 +709,7 @@ public class ClusteredBatchTradingBenchmark {
                     throw new IllegalStateException("Lane metrics exposed mutable snapshot arrays");
                 }
                 byte[] snapshot = service.state().snapshot();
-                try (CoreProbeState restored = CoreProbeState.fromSnapshot(productLine, snapshot)) {
+                try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(productLine, snapshot)) {
                     if (restored.tradingState().businessStateHash() != state.businessStateHash()
                             || !restored.tradingState().clientOrderIndex().equals(state.clientOrderIndex())) {
                         throw new IllegalStateException("snapshot recovery mismatch");

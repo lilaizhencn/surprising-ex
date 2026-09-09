@@ -57,7 +57,7 @@ public final class FaultClientMain {
                             offset += (length + 31) & ~31;
                         }
                     }
-                    try (var state = com.surprising.aeron.service.execution.CoreProbeState.fromSnapshot(PRODUCT, payload.toByteArray())) {
+                    try (var state = com.surprising.aeron.service.execution.TradingCoreRuntime.fromSnapshot(PRODUCT, payload.toByteArray())) {
                         emit(Map.of("logPosition", snapshot.logPosition, "businessHash", state.tradingState().businessStateHash(),
                                 "coreSequence", state.committedCoreSequence()));
                     }

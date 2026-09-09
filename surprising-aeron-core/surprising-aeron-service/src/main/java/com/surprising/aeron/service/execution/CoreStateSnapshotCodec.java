@@ -13,7 +13,7 @@ final class CoreStateSnapshotCodec {
     private CoreStateSnapshotCodec() {
     }
 
-    static byte[] encode(CoreProbeState state, MatcherSnapshot matcherSnapshot) {
+    static byte[] encode(TradingCoreRuntime state, MatcherSnapshot matcherSnapshot) {
         return SectionedCoreSnapshotCodec.encode(state, matcherSnapshot).toByteArray();
     }
 
@@ -22,7 +22,7 @@ final class CoreStateSnapshotCodec {
         return SectionedCoreSnapshotCodec.manifest(snapshot, expectedProductLine);
     }
 
-    static CoreProbeState decode(byte[] snapshot, ProductLine expectedProductLine) {
+    static TradingCoreRuntime decode(byte[] snapshot, ProductLine expectedProductLine) {
         rejectOversizedSnapshot(snapshot);
         return SectionedCoreSnapshotCodec.decode(snapshot, expectedProductLine);
     }

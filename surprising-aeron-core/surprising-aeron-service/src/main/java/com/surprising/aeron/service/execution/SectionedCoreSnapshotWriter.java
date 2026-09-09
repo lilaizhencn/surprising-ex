@@ -23,7 +23,7 @@ final class SectionedCoreSnapshotWriter {
     }
 
     static SectionedCoreSnapshotCodec.SectionedSnapshot encode(
-            CoreProbeState state,
+            TradingCoreRuntime state,
             MatcherSnapshot matcherSnapshot,
             long snapshotId,
             long coreSequence,
@@ -34,7 +34,7 @@ final class SectionedCoreSnapshotWriter {
     }
 
     static CoreSnapshotImage capture(
-            CoreProbeState state,
+            TradingCoreRuntime state,
             MatcherSnapshot matcherSnapshot,
             long snapshotId,
             long coreSequence,
@@ -44,7 +44,7 @@ final class SectionedCoreSnapshotWriter {
             throw new IllegalStateException("pending matcher continuations cannot be snapshotted");
         }
         var snapshotState = state.snapshotTradingState();
-        long businessStateHash = CoreProbeState.canonicalBusinessStateHash(
+        long businessStateHash = TradingCoreRuntime.canonicalBusinessStateHash(
                 snapshotState.businessStateHash(), state.feePolicies(), state.pendingTransfers());
         long fundsStateHash = com.surprising.aeron.service.state.RollingFundsStateHash.compute(snapshotState);
         matcherSnapshot.verifyCoreManifest(state.productLine(), state.appliedCommandCount(), businessStateHash);
@@ -188,7 +188,7 @@ final class SectionedCoreSnapshotWriter {
         buffer.put(encoded);
     }
 
-    private static byte[] sources(Map<CoreProbeState.SourceKey, Long> sourceSequences) {
+    private static byte[] sources(Map<TradingCoreRuntime.SourceKey, Long> sourceSequences) {
         int count = sourceSequences.size();
         int length = Math.toIntExact(Integer.BYTES + Math.multiplyExact(
                 (long) count, SectionedCoreSnapshotCodec.SOURCE_SEQUENCE_LENGTH));
@@ -202,9 +202,9 @@ final class SectionedCoreSnapshotWriter {
         return buffer.array();
     }
 
-    private static byte[] results(Map<UUID, CoreProbeState.StoredResult> commandResults) {
+    private static byte[] results(Map<UUID, CommandResultLedger.StoredResult> commandResults) {
         long length = Integer.BYTES;
-        for (CoreProbeState.StoredResult result : commandResults.values()) {
+        for (CommandResultLedger.StoredResult result : commandResults.values()) {
             length = Math.addExact(length, Math.addExact(Integer.BYTES, resultEntryLength(result)));
         }
         requireSectionLength(Math.toIntExact(length));
@@ -234,7 +234,7 @@ final class SectionedCoreSnapshotWriter {
         return buffer.array();
     }
 
-    private static void putResult(ByteBuffer buffer, UUID commandId, CoreProbeState.StoredResult result) {
+    private static void putResult(ByteBuffer buffer, UUID commandId, CommandResultLedger.StoredResult result) {
         byte[] responseData = result.responseData();
         buffer.putInt(resultEntryLength(result));
         buffer.putLong(commandId.getMostSignificantBits());
@@ -250,7 +250,7 @@ final class SectionedCoreSnapshotWriter {
         buffer.put(responseData);
     }
 
-    private static int resultEntryLength(CoreProbeState.StoredResult result) {
+    private static int resultEntryLength(CommandResultLedger.StoredResult result) {
         return Math.addExact(CoreStateSnapshotCodec.RESULT_FIXED_LENGTH, result.responseData().length);
     }
 

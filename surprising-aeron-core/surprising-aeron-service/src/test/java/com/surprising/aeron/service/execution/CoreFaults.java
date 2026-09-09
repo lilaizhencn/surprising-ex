@@ -10,48 +10,48 @@ import java.util.function.Consumer;
 public final class CoreFaults {
     private static final Map<Object, Long> laneMasks = new IdentityHashMap<>();
     private static final Map<Object, Runnable> settlements = new IdentityHashMap<>();
-    private static Consumer<CoreProbeState> activation;
+    private static Consumer<TradingCoreRuntime> activation;
 
-    static void laneMask(CoreProbeState state, long mask) {
+    static void laneMask(TradingCoreRuntime state, long mask) {
         requireAgent();
         laneMasks.put(state, mask);
     }
 
-    static void afterSettlement(CoreProbeState state, Runnable assertion) {
+    static void afterSettlement(TradingCoreRuntime state, Runnable assertion) {
         requireAgent();
         settlements.put(state, assertion);
     }
 
-    static void beforeActivation(Consumer<CoreProbeState> observer) {
+    static void beforeActivation(Consumer<TradingCoreRuntime> observer) {
         requireAgent();
         activation = observer;
     }
 
     public static void observeActivation(Object candidate) {
-        if (activation != null) activation.accept((CoreProbeState) candidate);
+        if (activation != null) activation.accept((TradingCoreRuntime) candidate);
     }
 
     public static void afterLaneContext(Object state, Object batch) {
-        Long mask = laneMasks.remove(state);
+        Long mask = laneMasks.remove(((OrderBatchExecutor) state).owner);
         if (mask != null) set(batch, "actualLaneMask", mask);
     }
 
     public static void afterSettlement(Object state, Object batch) {
-        Runnable assertion = settlements.remove(state);
+        Runnable assertion = settlements.remove(((OrderBatchExecutor) state).owner);
         if (assertion == null) return;
         assertion.run();
         set(batch, "actualLaneMask", (long) get(batch, "actualLaneMask") ^ 1L);
     }
 
     static void attachRealtime(SurprisingClusteredService service, RealtimeOutbox outbox) {
-        CoreProbeState state = (CoreProbeState) get(service, "state");
+        TradingCoreRuntime state = (TradingCoreRuntime) get(service, "state");
         set(service, "realtimeOutbox", outbox);
         set(service, "realtimeCapture", state.attachRealtime(outbox));
     }
 
-    static ActivationState activationState(CoreProbeState state) {
+    static ActivationState activationState(TradingCoreRuntime state) {
         return new ActivationState(state.activated(),
-                ((TradingCoreRuntime) get(state, "runtime")).activated(),
+                state.activated(),
                 ((com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter)
                         get(state, "matchingAdapter")).activated(),
                 ((com.surprising.aeron.service.state.RuntimeCommitJournal)

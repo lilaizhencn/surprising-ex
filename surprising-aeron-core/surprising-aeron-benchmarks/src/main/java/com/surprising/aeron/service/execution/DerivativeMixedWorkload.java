@@ -343,7 +343,7 @@ final class DerivativeMixedWorkload {
                         orderIds.stream().map(CancelOrderCommand::new).toList())), orderIds.size()));
     }
 
-    private static long[] completedLaneOperations(CoreProbeState state) {
+    private static long[] completedLaneOperations(TradingCoreRuntime state) {
         long[] total = new long[CoreLaneMetrics.OPERATION_TYPE_COUNT];
         long[] completed = state.laneMetrics().accountLaneCompletedOperations();
         for (int index = 0; index < completed.length; index++) {

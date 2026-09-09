@@ -1,6 +1,6 @@
 package com.surprising.aeron.tools.replay;
 
-import com.surprising.aeron.service.execution.CoreProbeState;
+import com.surprising.aeron.service.execution.TradingCoreRuntime;
 import com.surprising.product.api.ProductLine;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -15,7 +15,7 @@ public final class SnapshotInspectMain {
             throw new IllegalArgumentException("usage: SnapshotInspectMain <PRODUCT_LINE> <snapshot-file>");
         }
         ProductLine productLine = ProductLine.requireExternalCode(args[0]);
-        var manifest = CoreProbeState.inspectSnapshot(productLine, Files.readAllBytes(Path.of(args[1])));
+        var manifest = TradingCoreRuntime.inspectSnapshot(productLine, Files.readAllBytes(Path.of(args[1])));
         System.out.printf("productLine=%s schemaVersion=%d appliedCommandCount=%d businessStateHash=%016x "
                         + "exportAck=%d exportNext=%d exportPending=%d checksum=%08x%n",
                 manifest.productLine(), manifest.schemaVersion(), manifest.appliedCommandCount(),

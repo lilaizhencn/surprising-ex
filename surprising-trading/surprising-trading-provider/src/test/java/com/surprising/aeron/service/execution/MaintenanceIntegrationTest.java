@@ -7,7 +7,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import com.surprising.aeron.client.CoreCommandOutcome;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.execution.CoreProbeState;
+import com.surprising.aeron.service.execution.TradingCoreRuntime;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.order.config.TradingOrderProperties;
@@ -29,7 +29,7 @@ import tools.jackson.databind.ObjectMapper;
 @EnabledIfEnvironmentVariable(named="MAINTENANCE_TEST_JDBC_URL",matches=".+")
 class MaintenanceIntegrationTest {
     private long sequence;
-    private CoreProbeState state;
+    private TradingCoreRuntime state;
     private ProductLine line;
     private final AtomicBoolean dropSettlementReply = new AtomicBoolean();
     private final AtomicBoolean dropGateReply = new AtomicBoolean();
@@ -248,7 +248,7 @@ class MaintenanceIntegrationTest {
     }
 
     private Fixture fixture(ProductLine product) throws Exception {
-        line=product; sequence=0; state=new CoreProbeState(line);
+        line=product; sequence=0; state=new TradingCoreRuntime(line);
         var type=ContractType.valueOf(line.contractTypeCode()); String asset=type.isInverse()?"BTC":"USDT";
         submit(1,CoreMessageType.UPSERT_INSTRUMENT,TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand("BTC-USDT",1,type.ordinal(),"BTC","USDT",asset,1,1,type.isInverse()?1000:1,100_000,50_000,0,0,type.isDelivery()||type.isOption()?2_000_000_000_000L:0,type.isOption()?0:-1,type.isOption()?100:0)));
         submit(1,CoreMessageType.APPLY_MARK_PRICE,TradingCommandCodec.encodeApplyMarkPrice(type.isOption()?new ApplyMarkPriceCommand("BTC-USDT",1,100,100,100,1,1_700_000_000_000L):new ApplyMarkPriceCommand("BTC-USDT",1,100,1,1_700_000_000_000L)));
@@ -290,14 +290,14 @@ class MaintenanceIntegrationTest {
         MaintenanceService newService() { return new MaintenanceService(properties,repository,gateway,new ObjectMapper(),new DataSourceTransactionManager(source)); }
         @Override public void close() { state.close(); }
     }
-    private void restartCore() { byte[] snapshot=state.snapshot(900); state.close(); state=CoreProbeState.fromSnapshot(line,snapshot); }
+    private void restartCore() { byte[] snapshot=state.snapshot(900); state.close(); state=TradingCoreRuntime.fromSnapshot(line,snapshot); }
     private void run(MaintenanceService service,long id) { int steps=0; while(service.get(id).status().equals("RUNNING")) { assertThat(++steps).isLessThan(150); service.tick(); } }
     private CoreResponse submit(long user,CoreMessageType type,byte[] bytes) { var response=apply(type,UUID.randomUUID(),user,bytes); assertThat(response.commandStatus()).as("%s",response.resultCode()).isEqualTo(ResponseStatus.APPLIED); return response; }
     private CoreResponse apply(CoreMessageType type,UUID id,long user,byte[] bytes) {
         long seq=++sequence; var message=new CoreMessage(CoreMessageHeader.command(type,id,line,CommandSource.OPERATIONS,998,seq,user,1_700_000_000_000L+seq,seq),bytes);
         var response=state.apply(message);
-        if(response.resultCode()==CoreResultCode.MATCHING_PENDING) response=state.completeMatchingSynchronously(state.matchingSequence(id),message.header().submittedAtEpochMillis(),seq);
-        while(state.firstPendingMatchingSequence()!=0) state.completeMatchingSynchronously(state.firstPendingMatchingSequence(),message.header().submittedAtEpochMillis(),seq);
+        if(response.resultCode()==CoreResultCode.MATCHING_PENDING) response=state.commits.completeMatchingSynchronously(state.matchingSequence(id),message.header().submittedAtEpochMillis(),seq);
+        while(state.firstPendingMatchingSequence()!=0) state.commits.completeMatchingSynchronously(state.firstPendingMatchingSequence(),message.header().submittedAtEpochMillis(),seq);
         return response;
     }
     private CoreResponse query(long user,CoreMessageType type,byte[] bytes) {

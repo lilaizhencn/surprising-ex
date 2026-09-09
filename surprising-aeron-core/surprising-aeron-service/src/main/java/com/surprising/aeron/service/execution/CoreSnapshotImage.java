@@ -28,8 +28,8 @@ record CoreSnapshotImage(
         long clusterPosition,
         MatcherSnapshot matcherSnapshot,
         TradingCoreState tradingState,
-        Map<CoreProbeState.SourceKey, Long> sourceSequences,
-        Map<UUID, CoreProbeState.StoredResult> commandResults,
+        Map<TradingCoreRuntime.SourceKey, Long> sourceSequences,
+        Map<UUID, CommandResultLedger.StoredResult> commandResults,
         CoreExportState.Snapshot exportState,
         Map<Long, CoreFeePolicyState> feePolicies,
         Map<Long, TransferRuntime> pendingTransfers,
@@ -54,7 +54,7 @@ record CoreSnapshotImage(
 
     void verifyFullState() {
         verifyMatcherState(matcherSnapshot, tradingState, appliedCommandCount, businessStateHash);
-        if (CoreProbeState.canonicalBusinessStateHash(
+        if (TradingCoreRuntime.canonicalBusinessStateHash(
                 tradingState.businessStateHash(), feePolicies, pendingTransfers) != businessStateHash
                 || com.surprising.aeron.service.state.RollingFundsStateHash.compute(tradingState)
                 != fundsStateHash) {

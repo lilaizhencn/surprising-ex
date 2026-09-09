@@ -18,7 +18,7 @@ class CoreCommandFingerprintTest {
 
     @Test
     void changedPayloadWithSameCommandIdConflictsBeforeAnyMutation() {
-        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT);
         UUID commandId = UUID.randomUUID();
 
         CoreMessage first = probe(commandId, 1, 7, 1_000, 11);
@@ -32,20 +32,20 @@ class CoreCommandFingerprintTest {
         assertThat(state.appliedCommandCount()).isOne();
         assertThat(state.exportState().nextSequence()).isEqualTo(1);
         assertThat(state.lastSourceSequences())
-                .containsEntry(new CoreProbeState.SourceKey(CommandSource.GATEWAY, 7), 1L);
+                .containsEntry(new TradingCoreRuntime.SourceKey(CommandSource.GATEWAY, 7), 1L);
     }
 
     @Test
     void sameFingerprintReplaysOriginalAfterSourceEpochAndSnapshotRestore() {
-        CoreProbeState state = new CoreProbeState(ProductLine.SPOT);
+        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT);
         UUID commandId = UUID.randomUUID();
         CoreResponse original = state.apply(probe(commandId, 1, 7, 1_000, 11));
         byte[] snapshot = state.snapshot();
-        CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, snapshot);
+        TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, snapshot);
         long stateHash = restored.stateHash();
         long appliedCommandCount = restored.appliedCommandCount();
         long exportSequence = restored.exportState().nextSequence();
-        Map<CoreProbeState.SourceKey, Long> sourceSequences = restored.lastSourceSequences();
+        Map<TradingCoreRuntime.SourceKey, Long> sourceSequences = restored.lastSourceSequences();
 
         CoreResponse replay = restored.apply(new CoreMessage(
                 CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT, commandId, ProductLine.SPOT,

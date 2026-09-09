@@ -9,7 +9,7 @@ final class RealtimeBenchmarkFixture {
         try {
             Field stateField = SurprisingClusteredService.class.getDeclaredField("state");
             stateField.setAccessible(true);
-            CoreProbeState state = (CoreProbeState) stateField.get(service);
+            TradingCoreRuntime state = (TradingCoreRuntime) stateField.get(service);
             Field outboxField = SurprisingClusteredService.class.getDeclaredField("realtimeOutbox");
             outboxField.setAccessible(true);
             outboxField.set(service, outbox);

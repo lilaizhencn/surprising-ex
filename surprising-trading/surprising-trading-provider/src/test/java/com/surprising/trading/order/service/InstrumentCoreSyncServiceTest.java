@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.execution.CoreProbeState;
+import com.surprising.aeron.service.execution.TradingCoreRuntime;
 import com.surprising.instrument.api.cache.InstrumentSnapshotCache;
 import com.surprising.instrument.api.model.*;
 import com.surprising.product.api.ProductLine;
@@ -21,7 +21,7 @@ class InstrumentCoreSyncServiceTest {
     void commitsConfigurationThenPauseAndConfirmsActualAppliedResponse(ProductLine line) {
         var cache=new InstrumentSnapshotCache(); var properties=new TradingOrderProperties(); properties.getKafka().setProductLine(line);
         var gateway=mock(MaintenanceAeronGateway.class); var sequence=new AtomicLong();
-        try(var state=new CoreProbeState(line)) {
+        try(var state=new TradingCoreRuntime(line)) {
             when(gateway.command(any(),any(),anyLong(),any())).thenAnswer(call->{
                 long seq=sequence.incrementAndGet();
                 return state.apply(new CoreMessage(CoreMessageHeader.command(call.getArgument(0),call.getArgument(1),line,

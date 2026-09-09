@@ -8,17 +8,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-final class CoreProbeStateRestoreTestSupport {
+final class TradingCoreRuntimeRestoreTestSupport {
 
-    private CoreProbeStateRestoreTestSupport() {
+    private TradingCoreRuntimeRestoreTestSupport() {
     }
 
-    static CoreProbeState restore(
+    static TradingCoreRuntime restore(
             ProductLine productLine,
             long appliedCommandCount,
             long probeValue,
-            Map<UUID, CoreProbeState.StoredResult> commandResults,
-            Map<CoreProbeState.SourceKey, Long> lastSourceSequences,
+            Map<UUID, CommandResultLedger.StoredResult> commandResults,
+            Map<TradingCoreRuntime.SourceKey, Long> lastSourceSequences,
             TradingCoreState snapshotState,
             CoreExportState exportState) {
         if (!snapshotState.orders().isEmpty()) {
@@ -33,16 +33,16 @@ final class CoreProbeStateRestoreTestSupport {
                 snapshotState, exportState, matcherSnapshot);
     }
 
-    static CoreProbeState restore(
+    static TradingCoreRuntime restore(
             ProductLine productLine,
             long appliedCommandCount,
             long probeValue,
-            Map<UUID, CoreProbeState.StoredResult> commandResults,
-            Map<CoreProbeState.SourceKey, Long> lastSourceSequences,
+            Map<UUID, CommandResultLedger.StoredResult> commandResults,
+            Map<TradingCoreRuntime.SourceKey, Long> lastSourceSequences,
             TradingCoreState snapshotState,
             CoreExportState exportState,
             MatcherSnapshot matcherSnapshot) {
-        CoreProbeState candidate = CoreProbeState.prepareRestore(productLine, appliedCommandCount, probeValue,
+        TradingCoreRuntime candidate = TradingCoreRuntime.prepareRestore(productLine, appliedCommandCount, probeValue,
                 commandResults, lastSourceSequences, snapshotState, exportState, new TerminalStateRetention(),
                 matcherSnapshot, appliedCommandCount, Map.of(), Map.of(), 0, 0);
         try {

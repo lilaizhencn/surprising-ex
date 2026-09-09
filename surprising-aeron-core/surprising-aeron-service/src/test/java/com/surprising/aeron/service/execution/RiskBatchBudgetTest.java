@@ -16,7 +16,7 @@ class RiskBatchBudgetTest {
     @EnumSource(value=ProductLine.class, names={"LINEAR_PERPETUAL","INVERSE_PERPETUAL",
             "LINEAR_DELIVERY","INVERSE_DELIVERY","OPTION"})
     void heavySymbolCannotConsumeEverySliceOfSharedBudget(ProductLine line) {
-        try (var state = new CoreProbeState(line)) {
+        try (var state = new TradingCoreRuntime(line)) {
             var type = ContractType.valueOf(line.contractTypeCode());
             String asset=type.isInverse()?"BTC":"USDT";
             for (int i=0;i<2;i++) {
@@ -41,7 +41,7 @@ class RiskBatchBudgetTest {
             applied(state,batch(line,work(state,line),16));
             assertThat(state.tradingState().riskState().scans().get("SYM0-USDT").riskComplete()).isFalse();
             assertThat(state.tradingState().riskState().scans().get("SYM1-USDT").lastScheduledRevision()).isPositive();
-            try(var restored=CoreProbeState.fromSnapshot(line,state.snapshot(500))) {
+            try(var restored=TradingCoreRuntime.fromSnapshot(line,state.snapshot(500))) {
                 for(int i=0;i<30 && work(state,line).riskScanPending();i++) {
                     var next=batch(line,work(state,line),64);
                     applied(state,next);applied(restored,next);
@@ -57,7 +57,7 @@ class RiskBatchBudgetTest {
     @EnumSource(value=ProductLine.class, names={"LINEAR_PERPETUAL","INVERSE_PERPETUAL",
             "LINEAR_DELIVERY","INVERSE_DELIVERY","OPTION"})
     void budgetSpansSymbolsIsBoundedAndRejectsStaleTokensAcrossRecovery(ProductLine line) {
-        try (var state = new CoreProbeState(line)) {
+        try (var state = new TradingCoreRuntime(line)) {
             var type = ContractType.valueOf(line.contractTypeCode());
             for (int i=0;i<5;i++) {
                 String symbol="SYM"+i+"-USDT";
@@ -86,7 +86,7 @@ class RiskBatchBudgetTest {
             applied(state,mark(line,first.riskScanContinuation().symbol(),2));
             var next=work(state,line);
             assertThat(next.riskScanContinuation().symbol()).isNotEqualTo(first.riskScanContinuation().symbol());
-            try(var restored=CoreProbeState.fromSnapshot(line,state.snapshot(500))) {
+            try(var restored=TradingCoreRuntime.fromSnapshot(line,state.snapshot(500))) {
                 assertThat(work(restored,line).riskScanContinuation()).isEqualTo(next.riskScanContinuation());
                 var finish=batch(line,next,64);
                 applied(state,finish);applied(restored,finish);
@@ -97,7 +97,7 @@ class RiskBatchBudgetTest {
         }
     }
 
-    private CoreLiquidationWorkView work(CoreProbeState state,ProductLine line) {
+    private CoreLiquidationWorkView work(TradingCoreRuntime state,ProductLine line) {
         var response=apply(state,command(line,CoreMessageType.LIQUIDATION_WORK_QUERY,
                 CoreLiquidationWorkCodec.encodeQuery(line,CoreLiquidationWorkView.Purpose.EXECUTION,0,1000,1_048_576)));
         assertThat(response.status()).isEqualTo(ResponseStatus.OK);
@@ -122,14 +122,14 @@ class RiskBatchBudgetTest {
                 ? CoreMessageHeader.query(type,id,line,CommandSource.OPERATIONS,982,seq,user,TIME+seq,seq)
                 : CoreMessageHeader.command(type,id,line,CommandSource.OPERATIONS,982,seq,user,TIME+seq,seq),payload);
     }
-    private static CoreResponse apply(CoreProbeState state,CoreMessage message) {
+    private static CoreResponse apply(TradingCoreRuntime state,CoreMessage message) {
         var response=state.apply(message);
         if(response.resultCode()==CoreResultCode.MATCHING_PENDING)
-            response=state.completeMatchingSynchronously(state.matchingSequence(message.header().commandId()),
+            response=state.commits.completeMatchingSynchronously(state.matchingSequence(message.header().commandId()),
                     message.header().submittedAtEpochMillis(),message.header().sourceSequence());
         return response;
     }
-    private static void applied(CoreProbeState state,CoreMessage message) {
+    private static void applied(TradingCoreRuntime state,CoreMessage message) {
         var response=apply(state,message);
         assertThat(response.commandStatus()).as("%s %s",message.header().messageType(),response.resultCode())
                 .isEqualTo(ResponseStatus.APPLIED);

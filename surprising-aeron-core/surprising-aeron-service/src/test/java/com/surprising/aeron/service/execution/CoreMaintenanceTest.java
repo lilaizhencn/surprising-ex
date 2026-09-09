@@ -29,7 +29,7 @@ class CoreMaintenanceTest {
             // A new calculation reference remains forbidden while an order or position uses the instrument.
             var edit=apply(state,command(line,0,CoreMessageType.UPSERT_INSTRUMENT,TradingCommandCodec.encodeUpsertInstrument(config(instrument,3,3,2))));
             assertThat(edit.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
-            try (var restored=CoreProbeState.fromSnapshot(line,state.snapshot(501))) {
+            try (var restored=TradingCoreRuntime.fromSnapshot(line,state.snapshot(501))) {
                 var recovered=restored.tradingState().instruments().get("BTC-USDT");
                 assertThat(recovered.status()).isEqualTo(com.surprising.instrument.api.model.InstrumentStatus.HALT);
                 assertThat(recovered.lastChangeId()).isEqualTo(2);
@@ -64,7 +64,7 @@ class CoreMaintenanceTest {
             var denied = apply(state,command(line,22,CoreMessageType.PLACE_ORDER,TradingCommandCodec.encodePlaceOrder(order(200,false,CoreOrderSide.BUY))));
             assertThat(denied.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(com.surprising.aeron.service.state.RollingFundsStateHash.compute(state.tradingState())).isEqualTo(funds);
-            try (var restored = CoreProbeState.fromSnapshot(line,state.snapshot(500))) {
+            try (var restored = TradingCoreRuntime.fromSnapshot(line,state.snapshot(500))) {
                 assertThat(restored.tradingState().instruments().get("BTC-USDT").maintenance()).isEqualTo(new CoreInstrumentMaintenance(701,mode,0));
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
                 var wrongTask = apply(restored,gate(line,702,CoreInstrumentMaintenance.TRADING));
@@ -103,7 +103,7 @@ class CoreMaintenanceTest {
             var first = applied(state,command(line,1,CoreMessageType.SETTLE_INSTRUMENT,
                     TradingCommandCodec.encodeSettleInstrument(new SettleInstrumentCommand(801,"BTC-USDT",1,120,0,0,1,0,1))));
             var progress = CoreSettlementProgressCodec.decode(first.data());
-            try (var restored = CoreProbeState.fromSnapshot(line,state.snapshot(700))) {
+            try (var restored = TradingCoreRuntime.fromSnapshot(line,state.snapshot(700))) {
                 int steps = 0;
                 while (!progress.complete()) {
                     assertThat(++steps).isLessThan(20);
@@ -124,8 +124,8 @@ class CoreMaintenanceTest {
         }
     }
 
-    private CoreProbeState fixture(ProductLine line) {
-        var state = new CoreProbeState(line);
+    private TradingCoreRuntime fixture(ProductLine line) {
+        var state = new TradingCoreRuntime(line);
         var type = ContractType.valueOf(line.contractTypeCode());
         String asset = type.isInverse() ? "BTC" : "USDT";
         applied(state,command(line,1,CoreMessageType.UPSERT_INSTRUMENT,TradingCommandCodec.encodeUpsertInstrument(
@@ -138,7 +138,7 @@ class CoreMaintenanceTest {
         applied(state,command(line,22,CoreMessageType.ADJUST_BALANCE,TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset,20_000))));
         return state;
     }
-    private static long total(CoreProbeState state, ProductLine line) {
+    private static long total(TradingCoreRuntime state, ProductLine line) {
         String asset = ContractType.valueOf(line.contractTypeCode()).isInverse()?"BTC":"USDT";
         var t = state.tradingState().treasuryState();
         return state.tradingState().users().values().stream().mapToLong(u -> u.totalUnits(asset)).sum()
@@ -156,15 +156,15 @@ class CoreMaintenanceTest {
     private static PlaceOrderCommand order(long id,boolean reduce,CoreOrderSide side) {
         return new PlaceOrderCommand(id,"BTC-USDT",1,side,100,4,reduce,CoreMarginMode.CROSS,CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"maint-test-"+id);
     }
-    private static CoreResponse applied(CoreProbeState state,CoreMessage message) {
+    private static CoreResponse applied(TradingCoreRuntime state,CoreMessage message) {
         var response = apply(state,message);
         assertThat(response.commandStatus()).as("%s: %s",message.header().messageType(),response.resultCode()).isEqualTo(ResponseStatus.APPLIED);
         return response;
     }
-    private static CoreResponse apply(CoreProbeState state,CoreMessage message) {
+    private static CoreResponse apply(TradingCoreRuntime state,CoreMessage message) {
         var response = state.apply(message);
-        if (response.resultCode()==CoreResultCode.MATCHING_PENDING) response = state.completeMatchingSynchronously(state.matchingSequence(message.header().commandId()),message.header().submittedAtEpochMillis(),message.header().sourceSequence());
-        while(state.firstPendingMatchingSequence()!=0) state.completeMatchingSynchronously(state.firstPendingMatchingSequence(),message.header().submittedAtEpochMillis(),message.header().sourceSequence());
+        if (response.resultCode()==CoreResultCode.MATCHING_PENDING) response = state.commits.completeMatchingSynchronously(state.matchingSequence(message.header().commandId()),message.header().submittedAtEpochMillis(),message.header().sourceSequence());
+        while(state.firstPendingMatchingSequence()!=0) state.commits.completeMatchingSynchronously(state.firstPendingMatchingSequence(),message.header().submittedAtEpochMillis(),message.header().sourceSequence());
         return response;
     }
 }

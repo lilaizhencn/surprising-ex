@@ -11,9 +11,10 @@ class OwnerIndexChurnTest {
     void ownerIndexesKeepTheirStorageAcrossBoundedInsertDeleteChurn() throws Exception {
         try (var state = new TradingRuntimeState()) {
             for (String name : new String[]{"pendingReservationUsers", "orderLaneIds", "reservationLaneIds", "positionLaneIds"}) {
-                var field = TradingRuntimeState.class.getDeclaredField(name);
+                Object target = name.equals("pendingReservationUsers") ? state.pendingReservations : state;
+                var field = target.getClass().getDeclaredField(name);
                 field.setAccessible(true);
-                var map = (Long2LongHashMap) field.get(state);
+                var map = (Long2LongHashMap) field.get(target);
                 var storage = Long2LongHashMap.class.getDeclaredField("entries");
                 storage.setAccessible(true);
                 Object before = storage.get(map);
@@ -28,9 +29,10 @@ class OwnerIndexChurnTest {
                 assertThat(storage.get(map)).as(name + " backing storage").isSameAs(before);
             }
             for (String name : new String[]{"publishedOrders", "publishedReservations"}) {
-                var field = TradingRuntimeState.class.getDeclaredField(name);
+                Object target = name.equals("pendingReservationUsers") ? state.pendingReservations : state;
+                var field = target.getClass().getDeclaredField(name);
                 field.setAccessible(true);
-                @SuppressWarnings("unchecked") var map = (Long2ObjectHashMap<Object>) field.get(state);
+                @SuppressWarnings("unchecked") var map = (Long2ObjectHashMap<Object>) field.get(target);
                 var storage = Long2ObjectHashMap.class.getDeclaredField("values");
                 storage.setAccessible(true);
                 Object before = storage.get(map), value = new Object();

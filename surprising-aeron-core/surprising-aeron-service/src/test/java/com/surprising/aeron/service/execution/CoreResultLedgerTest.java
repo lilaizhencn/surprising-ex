@@ -26,11 +26,11 @@ class CoreResultLedgerTest {
     @Test
     void retentionMetadataReusesOwnedResponseBytesWithoutExposingThem() {
         byte[] source = new byte[]{1, 2, 3};
-        CoreProbeState.StoredResult created = stored(
+        CommandResultLedger.StoredResult created = stored(
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 7, source, 0);
         source[0] = 9;
 
-        CoreProbeState.StoredResult retained = created.withRetentionSequence(11);
+        CommandResultLedger.StoredResult retained = created.withRetentionSequence(11);
         byte[] exposed = retained.responseData();
         exposed[1] = 9;
 
@@ -42,7 +42,7 @@ class CoreResultLedgerTest {
     @Test
     void retainedResultCachesItsCommandBoundDigestWithoutChangingLedgerSemantics() {
         UUID commandId = UUID.randomUUID();
-        CoreProbeState.StoredResult retained = stored(
+        CommandResultLedger.StoredResult retained = stored(
                 ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 7, new byte[]{1, 2, 3}, 11);
 
         long first = retained.entryDigest(commandId);
@@ -56,10 +56,10 @@ class CoreResultLedgerTest {
 
     @Test
     void evictedCommandResultIsExplicitlyOutsideRetention() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             UUID firstCommandId = UUID.randomUUID();
             state.apply(probe(firstCommandId, 1, 1));
-            for (int sequence = 2; sequence <= CoreProbeState.MAX_IDEMPOTENCY_RESULTS + 1; sequence++) {
+            for (int sequence = 2; sequence <= TradingCoreRuntime.MAX_IDEMPOTENCY_RESULTS + 1; sequence++) {
                 assertThat(state.apply(probe(UUID.randomUUID(), sequence, 1)).status())
                         .isEqualTo(ResponseStatus.APPLIED);
             }
@@ -74,7 +74,7 @@ class CoreResultLedgerTest {
 
     @Test
     void restoredLedgerRejectsResponseBytesOverTheBound() {
-        Map<UUID, CoreProbeState.StoredResult> results = new LinkedHashMap<>();
+        Map<UUID, CommandResultLedger.StoredResult> results = new LinkedHashMap<>();
         byte[] response = new byte[512_000];
         Arrays.fill(response, (byte) 7);
         for (int index = 0; index < 70; index++) {
@@ -82,7 +82,7 @@ class CoreResultLedgerTest {
                     index + 1L, index + 10L, response, index + 1L));
         }
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> CoreProbeStateRestoreTestSupport.restore(
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> TradingCoreRuntimeRestoreTestSupport.restore(
                         ProductLine.SPOT, 70, 0, results, Map.of(),
                         com.surprising.aeron.service.state.TradingCoreState.empty(ProductLine.SPOT),
                         new CoreExportState()))
@@ -92,25 +92,25 @@ class CoreResultLedgerTest {
 
     @Test
     void evictsOldestResultWhenResponseBytesExceedTheBound() throws Exception {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
-            Method storeResult = CoreProbeState.class.getDeclaredMethod(
-                    "storeResult", UUID.class, CoreProbeState.StoredResult.class);
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+            Method storeResult = CommandResultLedger.class.getDeclaredMethod(
+                    "storeResult", UUID.class, CommandResultLedger.StoredResult.class);
             storeResult.setAccessible(true);
             byte[] response = new byte[12 * 1024 * 1024];
             UUID first = UUID.randomUUID();
             UUID second = UUID.randomUUID();
             UUID third = UUID.randomUUID();
 
-            storeResult.invoke(state, first,
+            storeResult.invoke(state.resultLedger, first,
                     stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 1, response, 0));
-            storeResult.invoke(state, second,
+            storeResult.invoke(state.resultLedger, second,
                     stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 2, 2, response, 0));
-            storeResult.invoke(state, third,
+            storeResult.invoke(state.resultLedger, third,
                     stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 3, 3, response, 0));
 
             assertThat(state.commandResults()).doesNotContainKey(first);
             assertThat(state.commandResults()).containsKeys(second, third);
-            try (CoreProbeState restored = CoreProbeStateRestoreTestSupport.restore(
+            try (TradingCoreRuntime restored = TradingCoreRuntimeRestoreTestSupport.restore(
                     ProductLine.SPOT, state.appliedCommandCount(),
                     state.probeValue(), state.commandResults(), state.lastSourceSequences(), state.tradingState(),
                     state.exportState())) {
@@ -121,9 +121,9 @@ class CoreResultLedgerTest {
 
     @Test
     void replacementEvictsOldestOtherResultsAndKeepsTheReplacedKeyBounded() throws Exception {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
-            Method storeResult = CoreProbeState.class.getDeclaredMethod(
-                    "storeResult", UUID.class, CoreProbeState.StoredResult.class);
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+            Method storeResult = CommandResultLedger.class.getDeclaredMethod(
+                    "storeResult", UUID.class, CommandResultLedger.StoredResult.class);
             storeResult.setAccessible(true);
             UUID oldest = UUID.randomUUID();
             UUID pending = UUID.randomUUID();
@@ -132,15 +132,15 @@ class CoreResultLedgerTest {
             byte[] oneMiB = new byte[1024 * 1024];
             byte[] fourMiB = new byte[4 * 1024 * 1024];
 
-            storeResult.invoke(state, oldest,
+            storeResult.invoke(state.resultLedger, oldest,
                     stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 1, fourteenMiB, 0));
-            storeResult.invoke(state, pending,
+            storeResult.invoke(state.resultLedger, pending,
                     stored(ResponseStatus.OK, CoreResultCode.MATCHING_PENDING, 2, 2, oneMiB, 0));
             long pendingRetention = state.commandResults().get(pending).retentionSequence();
-            storeResult.invoke(state, newest,
+            storeResult.invoke(state.resultLedger, newest,
                     stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 3, 3, fourteenMiB, 0));
 
-            storeResult.invoke(state, pending,
+            storeResult.invoke(state.resultLedger, pending,
                     stored(ResponseStatus.APPLIED, CoreResultCode.NONE, 4, 4, fourMiB, 0));
 
             assertThat(state.commandResults()).doesNotContainKey(oldest);
@@ -148,7 +148,7 @@ class CoreResultLedgerTest {
             assertThat(state.commandResults().get(pending).status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(state.commandResults().get(pending).responseData()).hasSize(fourMiB.length);
             assertThat(state.commandResults().get(pending).retentionSequence()).isEqualTo(pendingRetention);
-            try (CoreProbeState restored = CoreProbeStateRestoreTestSupport.restore(
+            try (TradingCoreRuntime restored = TradingCoreRuntimeRestoreTestSupport.restore(
                     ProductLine.SPOT, state.appliedCommandCount(),
                     state.probeValue(), state.commandResults(), state.lastSourceSequences(), state.tradingState(),
                     state.exportState())) {
@@ -159,7 +159,7 @@ class CoreResultLedgerTest {
 
     @Test
     void rejectedExportAckDoesNotAdvanceCommandProgress() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             state.apply(probe(UUID.randomUUID(), 1, 1));
             CoreMessage ack = new CoreMessage(CoreMessageHeader.command(CoreMessageType.ACK_EXPORT,
                     UUID.randomUUID(), ProductLine.SPOT, CommandSource.OPERATIONS, 9, 1, 0,
@@ -186,7 +186,7 @@ class CoreResultLedgerTest {
                 1_000 + sourceSequence, sourceSequence), CoreProtocol.probePayload(delta));
     }
 
-    private static CoreProbeState.StoredResult stored(
+    private static CommandResultLedger.StoredResult stored(
             ResponseStatus status,
             CoreResultCode resultCode,
             long appliedCommandCount,
@@ -195,7 +195,7 @@ class CoreResultLedgerTest {
             long retentionSequence) {
         long sourceSequence = Math.max(1, appliedCommandCount);
         CoreMessage command = probe(new UUID(appliedCommandCount, requiredExportSequence), sourceSequence, 1);
-        return new CoreProbeState.StoredResult(
+        return new CommandResultLedger.StoredResult(
                 com.surprising.aeron.protocol.CommandFingerprint.of(command), status, resultCode,
                 appliedCommandCount, requiredExportSequence, 0, response, retentionSequence);
     }

@@ -36,7 +36,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     private boolean pipelineTimerArmed;
 
     private final ProductLine productLine;
-    private CoreProbeState state;
+    private TradingCoreRuntime state;
     private com.surprising.aeron.client.RealtimeOutbox realtimeOutbox;
     private com.surprising.aeron.client.AeronRealtimeSender realtimeSender;
     private com.surprising.aeron.client.AeronRealtimeReceiver realtimeControl;
@@ -56,7 +56,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     // Synchronous barrier commands use these slots; ordinary orders use commandWindow.
     private long responseSequence;
     private CoreResponse matchingResponse;
-    private final CoreProbeState.MatchingCommitHandler matchingCommitHandler = this::completeMatching;
+    private final TradingCoreRuntime.MatchingCommitHandler matchingCommitHandler = this::completeMatching;
     private long snapshotFenceNotReadyCount;
     private long snapshotFenceTimeoutCount;
 
@@ -70,7 +70,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     @Override
     public void onStart(Cluster cluster, Image snapshotImage) {
         this.cluster = cluster;
-        if (state == null) state = new CoreProbeState(productLine);
+        if (state == null) state = new TradingCoreRuntime(productLine);
         responseSequence = 0;
         matchingResponse = null;
         processingLogCallback = false;
@@ -200,7 +200,7 @@ public final class SurprisingClusteredService implements ClusteredService {
             long before = state.matchingProgressSequence();
             int completed = 0;
             if (checkMatching || state.hasMatchingNotifications())
-                completed = state.commitReadyMatching(MATCHING_COMPLETION_BATCH_SIZE,
+                completed = state.commits.commitReadyMatching(MATCHING_COMPLETION_BATCH_SIZE,
                         last.timestamp, last.position, false, throughSequence, matchingCommitHandler);
             int work = completed != 0 || state.matchingProgressSequence() != before ? 1 : 0;
             checkMatching = work != 0;
@@ -257,7 +257,7 @@ public final class SurprisingClusteredService implements ClusteredService {
             long progressBefore = state.matchingProgressSequence();
             int completed = 0;
             if (checkMatching || state.hasMatchingNotifications()) {
-                completed = state.commitReadyMatching(MATCHING_COMPLETION_BATCH_SIZE,
+                completed = state.commits.commitReadyMatching(MATCHING_COMPLETION_BATCH_SIZE,
                         timestamp, clusterPosition, false, matchingCommitHandler);
             }
             // A dispatched stage is useful work even when no command is terminal yet.
@@ -359,10 +359,10 @@ public final class SurprisingClusteredService implements ClusteredService {
                 if (snapshot != null) return snapshot;
                 idleStrategy.idle();
             }
-        } catch (CoreProbeState.SnapshotNotReadyException notReady) {
+        } catch (TradingCoreRuntime.SnapshotNotReadyException notReady) {
             snapshotFenceNotReadyCount++;
             throw notReady;
-        } catch (CoreProbeState.SnapshotFenceTimeoutException timeout) {
+        } catch (TradingCoreRuntime.SnapshotFenceTimeoutException timeout) {
             snapshotFenceTimeoutCount++;
             throw timeout;
         } finally {
@@ -451,7 +451,7 @@ public final class SurprisingClusteredService implements ClusteredService {
         }
     }
 
-    CoreProbeState state() {
+    TradingCoreRuntime state() {
         if (state == null) throw new IllegalStateException("clustered service is not started");
         return state;
     }
@@ -479,10 +479,10 @@ public final class SurprisingClusteredService implements ClusteredService {
     }
 
     void restoreSnapshot(byte[] snapshot) {
-        replaceState(CoreProbeState.fromSnapshot(productLine, snapshot));
+        replaceState(TradingCoreRuntime.fromSnapshot(productLine, snapshot));
     }
 
-    private void replaceState(CoreProbeState restored) {
+    private void replaceState(TradingCoreRuntime restored) {
         state.close();
         state = restored;
         if (realtimeOutbox != null) realtimeCapture = state.attachRealtime(realtimeOutbox);

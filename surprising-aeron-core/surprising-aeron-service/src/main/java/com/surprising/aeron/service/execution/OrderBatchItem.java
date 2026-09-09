@@ -1,0 +1,45 @@
+package com.surprising.aeron.service.execution;
+
+import com.surprising.aeron.service.matching.CoreMatchingResult;
+import com.surprising.aeron.protocol.CoreOrderStateView;
+import com.surprising.aeron.protocol.CoreResultCode;
+import com.surprising.aeron.protocol.ResponseStatus;
+import exchange.core2.core.common.MatcherResult.MatcherEvent;
+import java.util.List;
+
+/** Owner-confined batch execution state; reused only after terminal commit. */
+final class OrderBatchItem {
+    /** 当前业务项的订单 ID。 */
+    final long orderId;
+    /** 改单前订单 ID；非改单时按协议使用零值。 */
+    final long originalOrderId;
+    /** 改单后订单 ID；非改单时按协议使用零值。 */
+    final long replacementOrderId;
+    /** 本项不可变输入命令，完成前由批量上下文持有。 */
+    final Object command;
+    /** 该命令或业务项的执行状态。 */
+    ResponseStatus status;
+    /** 该命令或业务项的确定性结果码。 */
+    CoreResultCode resultCode;
+    /** 本项撮合事件；完成交接后只读，终态时释放引用。 */
+    List<MatcherEvent> executionEvents = List.of();
+    /** 本项需要编码的成交数量。 */
+    int executionCount;
+    /** 成交编码所需的主动方用户 ID。 */
+    long executionTakerUserId;
+    /** 本项终态返回的订单视图。 */
+    com.surprising.aeron.protocol.CoreOrderStateView resultOrder;
+    /** 本项发给 matcher 的准备结果。 */
+    java.util.function.Supplier<CoreMatchingResult> matchingSubmission;
+
+    OrderBatchItem(long orderId, long originalOrderId, long replacementOrderId, Object command) {
+        this.orderId = orderId;
+        this.originalOrderId = originalOrderId;
+        this.replacementOrderId = replacementOrderId;
+        this.command = command;
+    }
+
+    long orderId() { return orderId; }
+    long originalOrderId() { return originalOrderId; }
+    long replacementOrderId() { return replacementOrderId; }
+}

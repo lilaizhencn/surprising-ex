@@ -32,14 +32,14 @@ class ClusterCommandPipelineTest {
             long timestamp = command.header().submittedAtEpochMillis();
             state.applyClusterCommand(command, timestamp, 0);
             long sequence = state.matchingSequence(command.header().commandId());
-            var contextField = CoreProbeState.class.getDeclaredField("laneCommandContexts");
+            var contextField = TradingCoreRuntime.class.getDeclaredField("laneCommandContexts");
             contextField.setAccessible(true);
             var contexts = (LaneCommandContextRing) contextField.get(state);
             var context = contexts.required(sequence);
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
             while (!context.hasMatchingCompletion() && System.nanoTime() < deadline) state.drainMatchingCompletions();
             assertThat(context.hasMatchingCompletion()).isTrue();
-            var runtimeField = CoreProbeState.class.getDeclaredField("runtimePlaceOrderState");
+            var runtimeField = TradingCoreRuntime.class.getDeclaredField("runtimeState");
             runtimeField.setAccessible(true);
             Object runtime = runtimeField.get(state);
             var workersField = runtime.getClass().getDeclaredField("laneWorkers");
@@ -59,22 +59,22 @@ class ClusterCommandPipelineTest {
                         }));
                 assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
                 assertThat(state.completeMatching(sequence, context.takeMatchingCompletion(), timestamp, 0)).isNull();
-                var batchesField = CoreProbeState.class.getDeclaredField("pendingOrderBatches");
+                var batchesField = OrderBatchExecutor.class.getDeclaredField("pendingOrderBatches");
                 batchesField.setAccessible(true);
-                var batch = ((java.util.Map<?, ?>) batchesField.get(state)).get(sequence);
+                var batch = ((java.util.Map<?, ?>) batchesField.get(state.batches)).get(sequence);
                 var eventsField = batch.getClass().getDeclaredField("settlementEvents");
                 eventsField.setAccessible(true);
                 Object dispatched = eventsField.get(batch);
                 assertThat(dispatched).isNotNull();
-                var dispatch = CoreProbeState.class.getDeclaredMethod("dispatchReadyPlaceSettlements", long.class, long.class, long.class);
+                var dispatch = OrderedCommitCoordinator.class.getDeclaredMethod("dispatchReadyPlaceSettlements", long.class, long.class, long.class);
                 dispatch.setAccessible(true);
-                dispatch.invoke(state, timestamp, 0L, sequence);
+                dispatch.invoke(state.commits, timestamp, 0L, sequence);
                 assertThat(eventsField.get(batch)).as("one Lane settlement event per batch sequence").isSameAs(dispatched);
             } finally { release.countDown(); }
-            assertThat(state.completeMatchingSynchronously(sequence, timestamp, 0).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(state.commits.completeMatchingSynchronously(sequence, timestamp, 0).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             serial.apply(command);
             assertThat(live.hash()).isEqualTo(serial.hash());
-            try (var restored = CoreProbeState.fromSnapshot(product, state.snapshot())) {
+            try (var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
         }
@@ -127,7 +127,7 @@ class ClusterCommandPipelineTest {
             state.applyClusterCommand(command, TIME, 1000, decoded);
             var pending = state.pendingMatching(state.matchingSequence(command.header().commandId()));
             assertThat(pending.decodedCommand()).isSameAs(decoded);
-            var completed = state.completeMatchingSynchronously(pending.sequence(), TIME, 1000);
+            var completed = state.commits.completeMatchingSynchronously(pending.sequence(), TIME, 1000);
             assertThat(completed.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(TradingOrderBatchCodec.decodeResult(completed.data()).items()).hasSize(20);
         }
@@ -147,7 +147,7 @@ class ClusterCommandPipelineTest {
             while (!pending.isMatchingSubmitted() && System.nanoTime() < deadline)
                 live.service.state().drainMatchingCompletions();
             assertThat(pending.isMatchingSubmitted()).isTrue();
-            var field = CoreProbeState.class.getDeclaredField("matcherPipeline"); field.setAccessible(true);
+            var field = TradingCoreRuntime.class.getDeclaredField("matcherPipeline"); field.setAccessible(true);
             var matcher = (MatcherPipelineGroup) field.get(live.service.state());
             var entered = new CountDownLatch(1);
             var release = new CountDownLatch(1);
@@ -216,7 +216,7 @@ class ClusterCommandPipelineTest {
             assertThat(live.responses).hasSize(3).allSatisfy(r -> assertThat(r.status()).isEqualTo(ResponseStatus.APPLIED));
             assertThat(live.hash()).isEqualTo(serial.hash()).isEqualTo(replay.hash());
             assertThat(live.service.state().tradingState().users()).isEqualTo(serial.service.state().tradingState().users());
-            try (CoreProbeState restored = CoreProbeState.fromSnapshot(product, live.service.captureSnapshot(880))) {
+            try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(880))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
         }
@@ -271,9 +271,11 @@ class ClusterCommandPipelineTest {
             f.send(f.placeBatch(11, "BTC-USDT", 2000));
             assertThat(f.service.commandWindowSize()).isOne();
             assertThat(requests.isEmpty()).as("continuous input must not starve a read at the preceding commit boundary").isTrue();
-            var pendingField = CoreProbeState.class.getDeclaredField("pendingRealtimeSnapshot");
+            var readsField = TradingCoreRuntime.class.getDeclaredField("realtimeReads");
+            readsField.setAccessible(true);
+            var pendingField = RealtimeReadCoordinator.class.getDeclaredField("pendingRealtimeSnapshot");
             pendingField.setAccessible(true);
-            var snapshot = (java.util.concurrent.CompletableFuture<?>) pendingField.get(f.service.state());
+            var snapshot = (java.util.concurrent.CompletableFuture<?>) pendingField.get(readsField.get(f.service.state()));
             assertThat(snapshot).isNotNull();
             snapshot.get(2, TimeUnit.SECONDS);
             f.send(f.cancelBatch(11, 1000));
@@ -311,7 +313,7 @@ class ClusterCommandPipelineTest {
             var a = live.placeBatch(11, "BTC-USDT", 1000);
             var b = live.placeBatch(other, disjointSymbol("BTC-USDT"), 2000);
             CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
-            var field = CoreProbeState.class.getDeclaredField("matcherPipeline"); field.setAccessible(true);
+            var field = TradingCoreRuntime.class.getDeclaredField("matcherPipeline"); field.setAccessible(true);
             var matcher = (MatcherPipelineGroup) field.get(live.service.state());
             var blocked = matcher.readAtSubmissionFence(0, () -> {
                 entered.countDown();
@@ -347,7 +349,7 @@ class ClusterCommandPipelineTest {
                 assertThat(TradingOrderBatchCodec.decodeResult(response.data()).items())
                         .hasSize(20).allSatisfy(item -> assertThat(item.status()).isEqualTo(ResponseStatus.APPLIED));
             });
-            try (CoreProbeState restored = CoreProbeState.fromSnapshot(product, live.service.captureSnapshot(800))) {
+            try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(800))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
         }
@@ -365,7 +367,7 @@ class ClusterCommandPipelineTest {
             CoreMessage first = live.place(userA, "BTC-USDT", 101, 80, 1, CoreOrderSide.BUY);
             CoreMessage second = live.place(userB, symbolB, disjointOrder(101), 80, 1, CoreOrderSide.BUY);
             CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
-            var field = CoreProbeState.class.getDeclaredField("matcherPipeline"); field.setAccessible(true);
+            var field = TradingCoreRuntime.class.getDeclaredField("matcherPipeline"); field.setAccessible(true);
             var matcher = (MatcherPipelineGroup) field.get(live.service.state());
             var blocked = matcher.readAtSubmissionFence(0, () -> {
                 entered.countDown();
@@ -399,7 +401,7 @@ class ClusterCommandPipelineTest {
             byte[] snapshot = live.service.captureSnapshot(100);
             serial.send(cancelA); serial.tick(); serial.send(cancelB); serial.tick();
             assertThat(live.hash()).isEqualTo(serial.hash());
-            try (CoreProbeState restored = CoreProbeState.fromSnapshot(product, snapshot)) {
+            try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(product, snapshot)) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
             assertThat(live.service.commandWindowSize()).isZero();
@@ -463,7 +465,7 @@ class ClusterCommandPipelineTest {
             f.apply(resting); serial.apply(resting);
             CoreMessage place = f.place(11, "BTC-USDT", 101, 80, 1, CoreOrderSide.BUY);
             CoreMessage cancel = f.cancel(other, restingId);
-            var runtimeField = CoreProbeState.class.getDeclaredField("runtimePlaceOrderState");
+            var runtimeField = TradingCoreRuntime.class.getDeclaredField("runtimeState");
             runtimeField.setAccessible(true);
             Object runtime = runtimeField.get(f.service.state());
             var workersField = runtime.getClass().getDeclaredField("laneWorkers");
@@ -499,7 +501,7 @@ class ClusterCommandPipelineTest {
             f.tick(); serial.apply(place); serial.apply(cancel);
             assertThat(f.hash()).isEqualTo(serial.hash());
             assertThat(f.responses).allSatisfy(r -> assertThat(r.status()).isEqualTo(ResponseStatus.APPLIED));
-            try (CoreProbeState restored = CoreProbeState.fromSnapshot(product, f.service.captureSnapshot(700))) {
+            try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(product, f.service.captureSnapshot(700))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(f.hash());
             }
         }
@@ -605,7 +607,7 @@ class ClusterCommandPipelineTest {
             assertThat(live.hash()).isEqualTo(serial.hash());
             assertThat(live.service.state().tradingState().order(201).executedQuantitySteps()).isEqualTo(batch ? 20 : 2);
             assertThat(live.service.state().tradingState().order(202).executedQuantitySteps()).isEqualTo(batch ? 20 : 2);
-            try (CoreProbeState restored = CoreProbeState.fromSnapshot(product, live.service.captureSnapshot(100))) {
+            try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
         }

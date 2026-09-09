@@ -19,7 +19,7 @@ public final class CoreFaultAgent {
             @Override
             public byte[] transform(ClassLoader loader, String name, Class<?> type,
                                     ProtectionDomain domain, byte[] bytes) {
-                boolean core = name.equals("com/surprising/aeron/service/execution/CoreProbeState");
+                boolean core = name.equals("com/surprising/aeron/service/execution/OrderBatchExecutor");
                 boolean snapshot = name.startsWith("com/surprising/aeron/service/execution/SectionedCoreSnapshotParser$");
                 if (!core && !snapshot) return null;
                 ClassDesc hooks = ClassDesc.of("com.surprising.aeron.service.execution.CoreFaults");

@@ -38,9 +38,9 @@ class CoreMatchingStateTest {
 
     @Test
     void emptyNotificationProbeStillDetectsAFailedLaneWithoutACompletion() throws Exception {
-        try (var state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+        try (var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
-            var runtimeField = CoreProbeState.class.getDeclaredField("runtimePlaceOrderState");
+            var runtimeField = TradingCoreRuntime.class.getDeclaredField("runtimeState");
             runtimeField.setAccessible(true);
             Object runtime = runtimeField.get(state);
             var workersField = runtime.getClass().getDeclaredField("laneWorkers");
@@ -62,7 +62,7 @@ class CoreMatchingStateTest {
 
     @Test
     void inFlightSynchronousRejectionIsPublishedAsReadyAndDoesNotBlockThePendingHead() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
@@ -79,11 +79,11 @@ class CoreMatchingStateTest {
                     ReservationKind.DERIVATIVE_MARGIN, "USDT", 100));
             assertThat(state.apply(stale).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
 
-            CoreResponse firstCompleted = state.completeMatchingSynchronously(
+            CoreResponse firstCompleted = state.commits.completeMatchingSynchronously(
                     state.matchingSequence(first.header().commandId()), 6_001, 4);
             assertThat(firstCompleted).isNotNull();
             CoreResponse[] rejected = new CoreResponse[1];
-            int completed = state.commitReadyMatching(1, 6_001, 4, true,
+            int completed = state.commits.commitReadyMatching(1, 6_001, 4, true,
                     (sequence, response) -> rejected[0] = response);
 
             assertThat(completed).isOne();
@@ -95,7 +95,7 @@ class CoreMatchingStateTest {
 
     @Test
     void inFlightIdempotencyUsesPendingIndexWithoutPollutingTerminalResultLedger() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applyInstrument(state);
             apply(state, 1, 7, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 500)));
@@ -126,7 +126,7 @@ class CoreMatchingStateTest {
 
     @Test
     void crossLaneIocPartialFillCommitsBothOwnersAndReleasesUnusedFunds() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applyInstrument(state);
             apply(state, 1, 7, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 2)));
@@ -171,7 +171,7 @@ class CoreMatchingStateTest {
 
     @Test
     void postOnlyRejectionLeavesNoOrderOrReservedFunds() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 2)));
@@ -199,7 +199,7 @@ class CoreMatchingStateTest {
 
     @Test
     void finalMatcherFactCarriesTheRestingOrderWithoutExportingPendingState() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applyInstrument(state);
             apply(state, 1, 22, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 500)));
@@ -223,7 +223,7 @@ class CoreMatchingStateTest {
 
     @Test
     void marketOrderUsesProtectionPriceAndNeverRestsOnBook() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 1)));
@@ -246,7 +246,7 @@ class CoreMatchingStateTest {
 
     @Test
     void spotMatchUpdatesBothUsersFundsOrdersAndNativeMatcherAtomically() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 10)));
@@ -273,7 +273,7 @@ class CoreMatchingStateTest {
             int matchedBookHash = awaitMatchingHash(state);
             assertThat(matchedBookHash).isNotEqualTo(restingBookHash).isNotZero();
 
-            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+            try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState()).isEqualTo(state.tradingState());
                 assertThat(awaitMatchingHash(restored)).isEqualTo(matchedBookHash);
                 apply(restored, 5, 22, CoreMessageType.PLACE_ORDER,
@@ -289,7 +289,7 @@ class CoreMatchingStateTest {
     @ParameterizedTest
     @MethodSource("allProductLines")
     void sameUserCrossCancelsTheRestingOrderBeforeSubmittingTheTaker(ProductLine productLine) {
-        try (CoreProbeState state = new CoreProbeState(productLine)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(productLine)) {
             applyInstrument(state);
             ReservationKind reservationKind = productLine == ProductLine.SPOT
                     ? ReservationKind.SPOT_ASSET : ReservationKind.DERIVATIVE_MARGIN;
@@ -334,7 +334,7 @@ class CoreMatchingStateTest {
     @ParameterizedTest
     @MethodSource("derivativeLines")
     void nonOptionDerivativeLinesCreatePositionMarginFromMatchedReservations(ProductLine productLine) {
-        try (CoreProbeState state = new CoreProbeState(productLine)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(productLine)) {
             applyInstrument(state);
             String settleAsset = settleAsset(productLine);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
@@ -361,7 +361,7 @@ class CoreMatchingStateTest {
 
     @Test
     void multiMakerPerpetualSettlementPublishesOnlyAfterTheUnifiedLaneBarrier() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
             long sequence = 1;
             for (long makerId = 11; makerId < 19; makerId++) {
@@ -403,7 +403,7 @@ class CoreMatchingStateTest {
 
     @Test
     void optionFillTransfersPremiumAndCreatesBuyerSellerPositions() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.OPTION)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.OPTION)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1_000)));
@@ -427,7 +427,7 @@ class CoreMatchingStateTest {
 
     @Test
     void derivativeCloseReverseAndReduceOnlyCapacityAreAuthoritative() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
@@ -464,7 +464,7 @@ class CoreMatchingStateTest {
 
     @Test
     void coreDerivesTheFullDerivativeCloseReservation() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
@@ -491,7 +491,7 @@ class CoreMatchingStateTest {
 
     @Test
     void normalCloseCancelsNewestConflictingReduceOnlyOrderBeforeMatcherSubmission() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
@@ -536,7 +536,7 @@ class CoreMatchingStateTest {
 
     @Test
     void selfTradeScanCancelsOnlyCrossingOwnOrdersAndRestoresWithoutTradingWithSelf() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
             for (long user : new long[]{11, 22}) {
                 apply(state, user == 11 ? 1 : 2, user, CoreMessageType.ADJUST_BALANCE,
@@ -559,7 +559,7 @@ class CoreMatchingStateTest {
                 assertThat(state.tradingState().user(user).balances().get("USDT").totalUnits()).isEqualTo(2_000);
                 assertThat(state.tradingState().user(user).positions()).isEmpty();
             }
-            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.LINEAR_PERPETUAL, state.snapshot())) {
+            try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, state.snapshot())) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
             }
         }
@@ -567,7 +567,7 @@ class CoreMatchingStateTest {
 
     @Test
     void linearPerpetualMatchConservesFundsWithMakerTakerFees() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state, -50_000, 100_000);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
@@ -599,7 +599,7 @@ class CoreMatchingStateTest {
 
     @Test
     void linearPerpetualActiveCloseAcceptsBetterFillThanSellMarketProtectionPrice() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
@@ -639,7 +639,7 @@ class CoreMatchingStateTest {
     @ParameterizedTest
     @MethodSource("allProductLines")
     void everyProductLineMatchConservesSettlementFundsWithNonzeroFees(ProductLine productLine) {
-        try (CoreProbeState state = new CoreProbeState(productLine)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(productLine)) {
             applyInstrument(state, 100_000, 200_000);
             String settlementAsset = settleAsset(productLine);
             boolean spot = productLine == ProductLine.SPOT;
@@ -679,7 +679,7 @@ class CoreMatchingStateTest {
 
     @Test
     void spotMatchCommitsTheChangedTreasuryBalance() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applyInstrument(state, 100_000, 200_000);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 2)));
@@ -709,7 +709,7 @@ class CoreMatchingStateTest {
 
     @Test
     void linearPerpetualPostOnlyRejectionPreservesFundsAndReservations() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 2_000)));
@@ -736,7 +736,7 @@ class CoreMatchingStateTest {
 
     @Test
     void replaceLosesPriorityCanMatchAndRestoresToSameExchangeCoreHash() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applyInstrument(state);
             apply(state, 1, 11, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 10)));
@@ -758,7 +758,7 @@ class CoreMatchingStateTest {
             assertThat(state.terminalRetention().containsOrder(101, 11, "")).isTrue();
             assertThat(state.terminalRetention().containsOrder(202, 22, "")).isTrue();
             assertThat(state.terminalRetention().containsOrder(203, 22, "")).isTrue();
-            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+            try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.tradingState().orders()).isEmpty();
             }
         }
@@ -767,7 +767,7 @@ class CoreMatchingStateTest {
     @ParameterizedTest
     @MethodSource("allProductLines")
     void preservesFifoAcrossNativeSnapshotWithoutCoreBookState(ProductLine productLine) {
-        try (CoreProbeState state = new CoreProbeState(productLine)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(productLine)) {
             applyInstrument(state);
             ReservationKind reservationKind = productLine == ProductLine.SPOT
                     ? ReservationKind.SPOT_ASSET : ReservationKind.DERIVATIVE_MARGIN;
@@ -789,7 +789,7 @@ class CoreMatchingStateTest {
                     place(201, CoreOrderSide.BUY, 100, 1, reservationKind, buyerAsset, 100));
 
             byte[] snapshot = state.snapshot();
-            try (CoreProbeState restored = CoreProbeState.fromSnapshot(productLine, snapshot)) {
+            try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(productLine, snapshot)) {
                 assertThat(restored.tradingState()).isEqualTo(state.tradingState());
                 assertThat(awaitMatchingHash(restored)).isEqualTo(awaitMatchingHash(state));
                 CoreResponse receipt7 = apply(restored, 7, 22, CoreMessageType.PLACE_ORDER,
@@ -807,7 +807,7 @@ class CoreMatchingStateTest {
 
     @Test
     void amendPatchReadsOriginalInsideCoreAndReturnsReplacement() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applyInstrument(state);
             apply(state, 1, 22, CoreMessageType.ADJUST_BALANCE,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1_000)));
@@ -889,11 +889,11 @@ class CoreMatchingStateTest {
         return TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(orderId, "BTC-USDT", 1, side, priceTicks, quantitySteps, reduceOnly, com.surprising.aeron.protocol.CoreMarginMode.CROSS, com.surprising.aeron.protocol.CorePositionSide.NET, com.surprising.aeron.protocol.CoreOrderType.LIMIT, com.surprising.aeron.protocol.CoreTimeInForce.GTC, false, ""));
     }
 
-    private static void applyInstrument(CoreProbeState state) {
+    private static void applyInstrument(TradingCoreRuntime state) {
         applyInstrument(state, 0, 0);
     }
 
-    private static void applyInstrument(CoreProbeState state, long makerFeeRatePpm, long takerFeeRatePpm) {
+    private static void applyInstrument(TradingCoreRuntime state, long makerFeeRatePpm, long takerFeeRatePpm) {
         ProductLine productLine = state.productLine();
         ContractType type = ContractType.valueOf(productLine.contractTypeCode());
         long expiry = type.isDelivery() || type.isOption() ? 2_000_000_000_000L : 0;
@@ -926,7 +926,7 @@ class CoreMatchingStateTest {
     }
 
     private static CoreResponse apply(
-            CoreProbeState state,
+            TradingCoreRuntime state,
             long sequence,
             long userId,
             CoreMessageType messageType,
@@ -939,10 +939,10 @@ class CoreMatchingStateTest {
         return response;
     }
 
-    private static CoreResponse drainMatching(CoreProbeState state, CoreResponse response, CoreMessage message) {
+    private static CoreResponse drainMatching(TradingCoreRuntime state, CoreResponse response, CoreMessage message) {
         if (response.resultCode() != CoreResultCode.MATCHING_PENDING) return response;
         long sequence = state.matchingSequence(message.header().commandId());
-        CoreResponse completed = state.completeMatchingSynchronously(sequence,
+        CoreResponse completed = state.commits.completeMatchingSynchronously(sequence,
                 message.header().submittedAtEpochMillis(), message.header().sourceSequence());
         assertThat(completed).isNotNull();
         assertThat(completed.status()).isIn(ResponseStatus.APPLIED, ResponseStatus.REJECTED);
@@ -950,7 +950,7 @@ class CoreMatchingStateTest {
     }
 
     private static CoreResponse completeUntilTerminalOrFailure(
-            CoreProbeState state, long sequence,
+            TradingCoreRuntime state, long sequence,
             com.surprising.aeron.service.matching.CoreMatchingResult result,
             long clusterTimestamp, long clusterPosition) {
         CoreResponse completed = null;
@@ -963,7 +963,7 @@ class CoreMatchingStateTest {
         return completed;
     }
 
-    private static int awaitMatchingHash(CoreProbeState state) {
+    private static int awaitMatchingHash(TradingCoreRuntime state) {
         CompletableFuture<Integer> future = state.matchingStateHashAsync();
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (!future.isDone() && System.nanoTime() < deadline) Thread.onSpinWait();
@@ -971,7 +971,7 @@ class CoreMatchingStateTest {
         return future.getNow(0);
     }
 
-    private static CoreMessage message(CoreProbeState state, long sequence, long userId,
+    private static CoreMessage message(TradingCoreRuntime state, long sequence, long userId,
                                        CoreMessageType messageType, byte[] payload) {
         return new CoreMessage(CoreMessageHeader.command(messageType, UUID.randomUUID(),
                 state.productLine(), CommandSource.GATEWAY, 77, sequence, userId, 1_000, sequence), payload);
@@ -987,7 +987,7 @@ class CoreMatchingStateTest {
         return Stream.of(ProductLine.values());
     }
 
-    private static long total(CoreProbeState state, String asset) {
+    private static long total(TradingCoreRuntime state, String asset) {
         long users = state.tradingState().users().values().stream()
                 .mapToLong(user -> user.totalUnits(asset)).sum();
         var treasury = state.tradingState().treasuryState();

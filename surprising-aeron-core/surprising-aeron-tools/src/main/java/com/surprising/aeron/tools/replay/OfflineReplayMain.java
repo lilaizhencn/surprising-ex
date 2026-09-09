@@ -5,7 +5,7 @@ import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
-import com.surprising.aeron.service.execution.CoreProbeState;
+import com.surprising.aeron.service.execution.TradingCoreRuntime;
 import com.surprising.product.api.ProductLine;
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
@@ -25,7 +25,7 @@ public final class OfflineReplayMain {
             throw new IllegalArgumentException("usage: OfflineReplayMain <PRODUCT_LINE> <length-prefixed-log>");
         }
         ProductLine productLine = ProductLine.requireExternalCode(args[0]);
-        CoreProbeState state = new CoreProbeState(productLine);
+        TradingCoreRuntime state = new TradingCoreRuntime(productLine);
         long messages = 0;
         try (DataInputStream input = new DataInputStream(new BufferedInputStream(
                 Files.newInputStream(Path.of(args[1]))))) {
@@ -65,7 +65,7 @@ public final class OfflineReplayMain {
                 productLine, messages, state.appliedCommandCount(), state.stateHash());
     }
 
-    private static void drainMatching(CoreProbeState state, int pendingBefore, CoreMessage message) {
+    private static void drainMatching(TradingCoreRuntime state, int pendingBefore, CoreMessage message) {
         while (state.pendingMatchingCount() > pendingBefore) {
             long sequence = state.firstPendingMatchingSequence();
             CoreMatchingResult matching = null;
@@ -85,7 +85,7 @@ public final class OfflineReplayMain {
         }
     }
 
-    private static void drainQuery(CoreProbeState state, long queryId) {
+    private static void drainQuery(TradingCoreRuntime state, long queryId) {
         CoreResponse result = null;
         long deadline = System.nanoTime() + 30_000_000_000L;
         while (result == null && System.nanoTime() < deadline) {

@@ -561,7 +561,7 @@ final class LinearPerpetualSaturationWorkload {
         };
     }
 
-    private static long[] completedLaneOperations(CoreProbeState state) {
+    private static long[] completedLaneOperations(TradingCoreRuntime state) {
         long[] total = new long[CoreLaneMetrics.OPERATION_TYPE_COUNT];
         long[] completed = state.laneMetrics().accountLaneCompletedOperations();
         for (int index = 0; index < completed.length; index++) {
@@ -571,7 +571,7 @@ final class LinearPerpetualSaturationWorkload {
         return total;
     }
 
-    private static int activeOrderCount(CoreProbeState state) {
+    private static int activeOrderCount(TradingCoreRuntime state) {
         return (int) state.tradingState().orders().values().stream()
                 .filter(order -> order.status() == CoreOrderStatus.OPEN)
                 .count();

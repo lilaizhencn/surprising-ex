@@ -18,7 +18,6 @@ import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
-import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.IntHashSet;
@@ -42,144 +41,244 @@ import java.util.TreeSet;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * 权威交易状态：可变账户归属各 Lane，owner 仅消费已发布状态。
+ * 结算派发和待完成预留由专门组件维护；资金、订单和持仓不会被复制为第二套可写模型。
+ */
 public final class TradingRuntimeState implements AutoCloseable {
+    /** 撮合后结算派发与完成收集；沿用现货和衍生品结算处理器，保持 Lane 序号。 */
+    final MatcherSettlementDispatcher settlements = new MatcherSettlementDispatcher(this);
 
+    /** 尚未完成的订单预留索引；owner 维护序号和用户计数，在 Lane 完成后释放。 */
+    final PendingReservationTracker pendingReservations = new PendingReservationTracker(this);
+
+    /** 尚未完成的资金转账容量上限。 */
     public static final int MAX_PENDING_TRANSFERS = 131_072;
-    private static final long ORDER_BATCH_SETTLEMENT_TIMEOUT_NANOS =
+    /** 批量结算完成等待的超时时间，单位为纳秒。 */
+    static final long ORDER_BATCH_SETTLEMENT_TIMEOUT_NANOS =
             java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
-    private static final int CHANGE_KEY_COMPACTION_THRESHOLD = 512;
-    private static final int PARALLEL_SETTLEMENT_MIN_LANE_OPERATIONS = Math.max(2,
+    /** 变更键缓冲触发压缩的数量阈值。 */
+    static final int CHANGE_KEY_COMPACTION_THRESHOLD = 512;
+    /** 启用并行结算派发所需的最少 Lane 操作数。 */
+    static final int PARALLEL_SETTLEMENT_MIN_LANE_OPERATIONS = Math.max(2,
             Integer.getInteger("surprising.aeron.parallel-settlement-min-lane-operations", 2));
-    private static final int LANE_COMPLETION_SPINS = Math.max(0,
+    /** 等待 Lane 完成时的自旋次数配置。 */
+    static final int LANE_COMPLETION_SPINS = Math.max(0,
             Integer.getInteger("surprising.aeron.lane-completion-spins", 1_024));
 
-    private ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
-    private long revision;
-    private final LaneTopology topology;
-    private final AccountLaneState[] accountLanes;
-    private final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] laneUserScratch;
-    private final SettlementLaneWorker[] laneWorkers;
-    private final LaneSequenceQueue[] placeAdmissionReadyQueues;
-    private final LaneSequenceQueue[] matcherSettlementReadyQueues;
-    private final LaneMutationTask[] laneMutationTasks;
-    private final long[] laneMutationStartedNanosScratch;
-    private final Object[] laneMutationResultsScratch;
-    private long laneMutationResultsMask;
-    private final RuntimeTreasuryDelta aggregateTreasuryDeltaScratch =
-            new RuntimeTreasuryDelta(RuntimeTreasuryDelta.ORDER_BATCH_CAPACITY);
-    private final int[] accountLaneQueueHighWaterMarks;
-    private final long[][] accountLaneCompletedOperations;
-    private final long[][] accountLaneLatencySamples;
-    private final long[][] accountLaneTotalLatencyNanos;
-    private final long[][] accountLaneMaxLatencyNanos;
-    private final long[] publishedLaneStateHashes;
-    private final long[] publishedLaneFundsHashes;
-    private final long[] publishedLaneCommittedSequences;
-    private final long[] dispatchedLaneCommitSequences;
-    private final java.util.ArrayDeque<LaneCommitEvent> laneCommitEventPool = new java.util.ArrayDeque<>();
-    private final java.util.ArrayDeque<MatcherSettlementEvent> matcherSettlementEventPool =
-            new java.util.ArrayDeque<>();
-    private final java.util.ArrayDeque<PlaceAdmissionEvent> placeAdmissionEventPool =
-            new java.util.ArrayDeque<>();
-    private final java.util.ArrayDeque<PlaceBatchAdmissionEvent> placeBatchAdmissionEventPool =
-            new java.util.ArrayDeque<>();
-    private boolean accountLanesStarted;
+    /** 所属产品线；所有命令、账户与币对均在此边界隔离。 */
+    ProductLine productLine = ProductLine.LINEAR_PERPETUAL;
+    /** 运行时变更版本，仅用于内部提交与回滚边界。 */
+    long revision;
+    /** 固定的 matcher 与账户 Lane 拓扑，快照恢复时必须一致。 */
+    final LaneTopology topology;
+    /** 各账户 Lane 的权威可变状态；启动后只能由所属 Lane 修改。 */
+    final AccountLaneState[] accountLanes;
+    /** 当前执行范围复用的 laneUser 临时缓冲，不保存第二份业务状态。 */
+    final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] laneUserScratch;
+    /** 账户 Lane 工作线程与队列；owner 只负责派发和收集。 */
+    final SettlementLaneWorker[] laneWorkers;
+    /** 各 Lane 到 owner 的准入完成通知队列。 */
+    final LaneSequenceQueue[] placeAdmissionReadyQueues;
+    /** 各 Lane 到 owner 的结算完成通知队列。 */
+    final LaneSequenceQueue[] matcherSettlementReadyQueues;
+    /** 按 Lane 固定复用的变更任务，完成收集后才能重新派发。 */
+    final LaneMutationTask[] laneMutationTasks;
+    /** 当前执行范围复用的 laneMutationStartedNanos 临时缓冲，不保存第二份业务状态。 */
+    final long[] laneMutationStartedNanosScratch;
+    /** 当前执行范围复用的 laneMutationResults 临时缓冲，不保存第二份业务状态。 */
+    final Object[] laneMutationResultsScratch;
+    /** 本次已写入结果的 Lane 位图。 */
+    long laneMutationResultsMask;
 
-    private final IntObjectHashMap<MarkPriceRuntime> markPrices = new IntObjectHashMap<>();
-    private final IntObjectHashMap<RiskScanRuntime> riskScans = new IntObjectHashMap<>();
-    private final TreasuryRuntime treasury = new TreasuryRuntime();
-    private final Map<String, CoreInstrumentState> instruments = new HashMap<>();
-    private final Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers = new HashMap<>();
-    private final Map<Long, CoreFeePolicyState> feePolicies = new HashMap<>();
-    private final Map<Long, TransferRuntime> pendingTransfers = new HashMap<>();
-    private final PendingReservationSequenceIndex pendingReservationsBySequence =
-            new PendingReservationSequenceIndex(4_096);
-    private final Long2LongHashMap pendingReservationUsers = new Long2LongHashMap(4_096, 0.65f, 0);
-    private final LongIntHashMap pendingReservationCountsByUser = new LongIntHashMap(4_096);
-    private final Long2LongHashMap orderLaneIds = new Long2LongHashMap(4_096, 0.65f, 0);
-    private final Long2LongHashMap reservationLaneIds = new Long2LongHashMap(4_096, 0.65f, 0);
-    private final Long2LongHashMap positionLaneIds = new Long2LongHashMap(4_096, 0.65f, 0);
-    private final LongLongHashMap matcherSettlementRemainingScratch = new LongLongHashMap();
-    private final LongHashSet matcherSettlementOrderScratch = new LongHashSet();
-    private final LongObjectHashMap<UserRuntime> publishedUsers = new LongObjectHashMap<>(4_096);
-    private final Long2ObjectHashMap<OrderRuntime> publishedOrders = new Long2ObjectHashMap<>(4_096, 0.65f);
-    private final Long2ObjectHashMap<ReservationRuntime> publishedReservations = new Long2ObjectHashMap<>(4_096, 0.65f);
-    private final LongObjectHashMap<PositionRuntime> publishedPositions = new LongObjectHashMap<>(4_096);
-    private final LongObjectHashMap<LiquidationRuntime> publishedLiquidations = new LongObjectHashMap<>(4_096);
-    // Owner view of immutable Lane results; no mutable Lane map is read by the owner.
-    private final LongObjectHashMap<CoreTriggerOrderState> publishedTriggerOrders = new LongObjectHashMap<>();
-    private final LongObjectHashMap<RiskSnapshotRuntime> publishedRiskSnapshots = new LongObjectHashMap<>(4_096);
-    private final LongObjectHashMap<IntLongHashMap> publishedAvailableBalances = new LongObjectHashMap<>(4_096);
-    private final PublishedLaneChanges[] publishedLaneChanges;
-    private int totalPendingReservations;
-    private long nextLiquidationId = 1;
-    private CoreRiskScanControlView riskScanControl = CoreRiskState.defaultScanControl();
-    private final LongHashSet changedUsers = new LongHashSet();
-    private final LongObjectHashMap<IntHashSet> changedBalances = new LongObjectHashMap<>();
-    private final PublishedLaneChanges.ChangeBuffer<OrderRuntime> changedOrders =
-            new PublishedLaneChanges.ChangeBuffer<>();
-    private final PublishedLaneChanges.ChangeBuffer<CoreOrderState> changedActiveOrderValues =
-            new PublishedLaneChanges.ChangeBuffer<>();
-    private final LongHashSet changedReservations = new LongHashSet();
-    private final PublishedLaneChanges.ChangeBuffer<PositionRuntime> changedPositions =
-            new PublishedLaneChanges.ChangeBuffer<>();
-    private final PublishedLaneChanges.ChangeBuffer<RuntimePositionIndexValue> changedPositionIndexValues =
-            new PublishedLaneChanges.ChangeBuffer<>();
-    private final PublishedLaneChanges.ChangeBuffer<LiquidationRuntime> changedLiquidations =
-            new PublishedLaneChanges.ChangeBuffer<>();
-    private final IntHashSet changedMarkPrices = new IntHashSet();
-    private final PublishedLaneChanges.ChangeBuffer<RiskSnapshotRuntime> changedRiskSnapshots =
-            new PublishedLaneChanges.ChangeBuffer<>();
-    private final IntHashSet changedRiskScans = new IntHashSet();
-    private final HashSet<String> changedInstruments = new HashSet<>();
-    private final HashSet<CoreLeverageKey> changedLeverages = new HashSet<>();
-    private final LongHashSet changedAlgoOrders = new LongHashSet();
-    private final HashSet<CoreCancelAllAfterKey> changedCancelAllAfterTimers = new HashSet<>();
-    private final PublishedLaneChanges.ChangeBuffer<CoreTriggerOrderState> changedTriggerOrders =
-            new PublishedLaneChanges.ChangeBuffer<>();
-    private final LongHashSet changedFeePolicies = new LongHashSet();
-    private final LaneLongCaptures<UserRuntime>[] patchUsersBeforeByLane;
-    private final LaneBalancePatches[] patchBalancesBeforeByLane;
-    private final LaneLongCaptures<PatchReservationBefore>[] patchReservationsBeforeByLane;
-    private final LaneLongCaptures<PatchOrderBefore>[] patchOrdersBeforeByLane;
-    private final LaneLongCaptures<PositionRuntime>[] patchPositionsBeforeByLane;
-    private final LaneClientOrderCaptures[] patchClientOrdersBeforeByLane;
-    private boolean orderBatchMutationScope;
-    private ConcurrentHashMap<Long, PatchBefore<LiquidationRuntime>> patchLiquidationsBefore =
-            new ConcurrentHashMap<>();
-    private ConcurrentHashMap<Long, PatchBefore<RiskSnapshotRuntime>> patchRiskSnapshotsBefore =
-            new ConcurrentHashMap<>();
-    private ConcurrentHashMap<CoreLeverageKey, PatchBefore<Long>> patchLeveragesBefore =
-            new ConcurrentHashMap<>();
-    private ConcurrentHashMap<Long, PatchBefore<CoreAlgoOrderState>> patchAlgoOrdersBefore =
-            new ConcurrentHashMap<>();
-    private ConcurrentHashMap<Long, PatchBefore<CoreTriggerOrderState>> patchTriggerOrdersBefore =
-            new ConcurrentHashMap<>();
-    private ConcurrentHashMap<CoreCancelAllAfterKey, PatchBefore<CoreCancelAllAfterState>> patchTimersBefore =
-            new ConcurrentHashMap<>();
-    private ConcurrentHashMap<Integer, PatchBefore<MarkPriceRuntime>> patchMarkPricesBefore =
-            new ConcurrentHashMap<>();
-    private ConcurrentHashMap<Integer, PatchBefore<RiskScanRuntime>> patchRiskScansBefore =
-            new ConcurrentHashMap<>();
-    private ConcurrentHashMap<String, PatchBefore<CoreInstrumentState>> patchInstrumentsBefore =
-            new ConcurrentHashMap<>();
-    private ConcurrentHashMap<Long, PatchBefore<TransferRuntime>> patchPendingTransfersBefore =
-            new ConcurrentHashMap<>();
-    private ConcurrentHashMap<Long, PatchBefore<CoreFeePolicyState>> patchFeePoliciesBefore =
-            new ConcurrentHashMap<>();
-    private long patchNextLiquidationIdBefore;
-    private boolean patchNextLiquidationIdChanged;
-    private CoreRiskScanControlView patchRiskScanControlBefore;
-    private boolean patchRiskScanControlChanged;
-    private final ThreadLocal<AccountLaneState> laneCommandScope = new ThreadLocal<>();
-    private final ThreadLocal<MatcherSettlementChanges> matcherSettlementChangesScope = new ThreadLocal<>();
-    private final java.util.ArrayDeque<MatcherSettlementChanges> matcherSettlementChangesPool =
+    /** 各 Lane 派发队列长度峰值，仅用于运行观测。 */
+    final int[] accountLaneQueueHighWaterMarks;
+    /** 各 Lane 按业务类型累计的完成数量。 */
+    final long[][] accountLaneCompletedOperations;
+    /** 各 Lane 按业务类型累计的延迟样本数。 */
+    final long[][] accountLaneLatencySamples;
+    /** 各 Lane 按业务类型累计的延迟纳秒数。 */
+    final long[][] accountLaneTotalLatencyNanos;
+    /** 各 Lane 按业务类型观察到的最大延迟。 */
+    final long[][] accountLaneMaxLatencyNanos;
+    /** owner 已收集的各 Lane 业务状态摘要。 */
+    final long[] publishedLaneStateHashes;
+    /** owner 已收集的各 Lane 资金状态摘要。 */
+    final long[] publishedLaneFundsHashes;
+    /** owner 可见的各 Lane 已提交序号。 */
+    final long[] publishedLaneCommittedSequences;
+    /** 已派发到各 Lane 的提交序号，防止重复派发。 */
+    final long[] dispatchedLaneCommitSequences;
+    /** 可复用的 laneCommitEvent 对象池；仅在消费者完成后回收。 */
+    final java.util.ArrayDeque<LaneCommitEvent> laneCommitEventPool = new java.util.ArrayDeque<>();
+
+    /** 可复用的 placeAdmissionEvent 对象池；仅在消费者完成后回收。 */
+    final java.util.ArrayDeque<PlaceAdmissionEvent> placeAdmissionEventPool =
             new java.util.ArrayDeque<>();
-    private final java.util.ArrayDeque<LaneCancelEvent> laneCancelEventPool = new java.util.ArrayDeque<>();
-    private final java.util.ArrayDeque<LaneReplaceEvent> laneReplaceEventPool = new java.util.ArrayDeque<>();
-    private final MatcherSettlementPlan.BatchValidationScratch matcherBatchValidationScratch =
-            new MatcherSettlementPlan.BatchValidationScratch();
-    private Thread owner;
+    /** 可复用的 placeBatchAdmissionEvent 对象池；仅在消费者完成后回收。 */
+    final java.util.ArrayDeque<PlaceBatchAdmissionEvent> placeBatchAdmissionEventPool =
+            new java.util.ArrayDeque<>();
+    /** 账户 Lane 是否已启动，区分恢复阶段和运行阶段。 */
+    boolean accountLanesStarted;
+
+    /** 各币对当前标记价，由所属产品运行时独立维护。 */
+    final IntObjectHashMap<MarkPriceRuntime> markPrices = new IntObjectHashMap<>();
+    /** 各币对的风险扫描续作状态。 */
+    final IntObjectHashMap<RiskScanRuntime> riskScans = new IntObjectHashMap<>();
+    /** 手续费、保险、清算等全局资金状态，按提交边界合并。 */
+    final TreasuryRuntime treasury = new TreasuryRuntime();
+    /** 当前产品线的币对配置，以运行时生效状态为准。 */
+    final Map<String, CoreInstrumentState> instruments = new HashMap<>();
+    /** 用户自动撤单定时器状态。 */
+    final Map<CoreCancelAllAfterKey, CoreCancelAllAfterState> cancelAllAfterTimers = new HashMap<>();
+    /** 用户手续费策略状态，参与持久化与恢复。 */
+    final Map<Long, CoreFeePolicyState> feePolicies = new HashMap<>();
+    /** 尚未结束的跨账户资金转账，完成后移除。 */
+    final Map<Long, TransferRuntime> pendingTransfers = new HashMap<>();
+
+    /** 订单 ID 到所属 Lane 的路由索引；Lane ID 加一保存。 */
+    final Long2LongHashMap orderLaneIds = new Long2LongHashMap(4_096, 0.65f, 0);
+    /** 预留 ID 到所属 Lane 的路由索引；Lane ID 加一保存。 */
+    final Long2LongHashMap reservationLaneIds = new Long2LongHashMap(4_096, 0.65f, 0);
+    /** 持仓 ID 到所属 Lane 的路由索引；Lane ID 加一保存。 */
+    final Long2LongHashMap positionLaneIds = new Long2LongHashMap(4_096, 0.65f, 0);
+    /** 当前执行范围复用的 matcherSettlementRemaining 临时缓冲，不保存第二份业务状态。 */
+    final LongLongHashMap matcherSettlementRemainingScratch = new LongLongHashMap();
+    /** 当前执行范围复用的 matcherSettlementOrder 临时缓冲，不保存第二份业务状态。 */
+    final LongHashSet matcherSettlementOrderScratch = new LongHashSet();
+    /** owner 可见的已发布用户；与提交/回滚边界同步维护。 */
+    final LongObjectHashMap<UserRuntime> publishedUsers = new LongObjectHashMap<>(4_096);
+    /** owner 可见的已发布订单；与提交/回滚边界同步维护。 */
+    final Long2ObjectHashMap<OrderRuntime> publishedOrders = new Long2ObjectHashMap<>(4_096, 0.65f);
+    /** owner 可见的已发布预留；与提交/回滚边界同步维护。 */
+    final Long2ObjectHashMap<ReservationRuntime> publishedReservations = new Long2ObjectHashMap<>(4_096, 0.65f);
+    /** owner 可见的已发布持仓；与提交/回滚边界同步维护。 */
+    final LongObjectHashMap<PositionRuntime> publishedPositions = new LongObjectHashMap<>(4_096);
+    /** owner 可见的已发布清算；与提交/回滚边界同步维护。 */
+    final LongObjectHashMap<LiquidationRuntime> publishedLiquidations = new LongObjectHashMap<>(4_096);
+    // Owner view of immutable Lane results; no mutable Lane map is read by the owner.
+    final LongObjectHashMap<CoreTriggerOrderState> publishedTriggerOrders = new LongObjectHashMap<>();
+    /** owner 可见的已发布风险快照；与提交/回滚边界同步维护。 */
+    final LongObjectHashMap<RiskSnapshotRuntime> publishedRiskSnapshots = new LongObjectHashMap<>(4_096);
+    /** owner 可见的已发布可用余额；与提交/回滚边界同步维护。 */
+    final LongObjectHashMap<IntLongHashMap> publishedAvailableBalances = new LongObjectHashMap<>(4_096);
+    /** 各 Lane 输出给 owner 的变化缓冲，在完成交接后消费。 */
+    final PublishedLaneChanges[] publishedLaneChanges;
+
+    /** 下一条清算状态的 ID，需随快照保存。 */
+    long nextLiquidationId = 1;
+    /** 风险扫描开关和预算；各产品线独立保存。 */
+    CoreRiskScanControlView riskScanControl = CoreRiskState.defaultScanControl();
+    /** 当前提交范围内变化的用户；与提交/回滚边界同步维护。 */
+    final LongHashSet changedUsers = new LongHashSet();
+    /** 当前提交范围内变化的余额；与提交/回滚边界同步维护。 */
+    final LongObjectHashMap<IntHashSet> changedBalances = new LongObjectHashMap<>();
+    /** 当前提交范围内变化的订单；与提交/回滚边界同步维护。 */
+    final RuntimeChangeBuffer<OrderRuntime> changedOrders =
+            new RuntimeChangeBuffer<>();
+    /** 当前提交范围内变化的活跃订单索引值；与提交/回滚边界同步维护。 */
+    final RuntimeChangeBuffer<CoreOrderState> changedActiveOrderValues =
+            new RuntimeChangeBuffer<>();
+    /** 当前提交范围内变化的预留；与提交/回滚边界同步维护。 */
+    final LongHashSet changedReservations = new LongHashSet();
+    /** 当前提交范围内变化的持仓；与提交/回滚边界同步维护。 */
+    final RuntimeChangeBuffer<PositionRuntime> changedPositions =
+            new RuntimeChangeBuffer<>();
+    /** 当前提交范围内变化的持仓索引值；与提交/回滚边界同步维护。 */
+    final RuntimeChangeBuffer<RuntimePositionIndexValue> changedPositionIndexValues =
+            new RuntimeChangeBuffer<>();
+    /** 当前提交范围内变化的清算；与提交/回滚边界同步维护。 */
+    final RuntimeChangeBuffer<LiquidationRuntime> changedLiquidations =
+            new RuntimeChangeBuffer<>();
+    /** 当前提交范围内变化的标记价；与提交/回滚边界同步维护。 */
+    final IntHashSet changedMarkPrices = new IntHashSet();
+    /** 当前提交范围内变化的风险快照；与提交/回滚边界同步维护。 */
+    final RuntimeChangeBuffer<RiskSnapshotRuntime> changedRiskSnapshots =
+            new RuntimeChangeBuffer<>();
+    /** 当前提交范围内变化的风险扫描；与提交/回滚边界同步维护。 */
+    final IntHashSet changedRiskScans = new IntHashSet();
+    /** 当前提交范围内变化的币对；与提交/回滚边界同步维护。 */
+    final HashSet<String> changedInstruments = new HashSet<>();
+    /** 当前提交范围内变化的杠杆；与提交/回滚边界同步维护。 */
+    final HashSet<CoreLeverageKey> changedLeverages = new HashSet<>();
+    /** 当前提交范围内变化的算法单；与提交/回滚边界同步维护。 */
+    final LongHashSet changedAlgoOrders = new LongHashSet();
+    /** 当前提交范围内变化的自动撤单定时器；与提交/回滚边界同步维护。 */
+    final HashSet<CoreCancelAllAfterKey> changedCancelAllAfterTimers = new HashSet<>();
+    /** 当前提交范围内变化的触发单；与提交/回滚边界同步维护。 */
+    final RuntimeChangeBuffer<CoreTriggerOrderState> changedTriggerOrders =
+            new RuntimeChangeBuffer<>();
+    /** 当前提交范围内变化的手续费策略；与提交/回滚边界同步维护。 */
+    final LongHashSet changedFeePolicies = new LongHashSet();
+    /** 回滚需要的变更前用户；按 Lane 隔离保存，完成后清理。 */
+    final LaneLongCaptures<UserRuntime>[] patchUsersBeforeByLane;
+    /** 回滚需要的变更前余额；按 Lane 隔离保存，完成后清理。 */
+    final LaneBalancePatches[] patchBalancesBeforeByLane;
+    /** 回滚需要的变更前预留；按 Lane 隔离保存，完成后清理。 */
+    final LaneLongCaptures<PatchReservationBefore>[] patchReservationsBeforeByLane;
+    /** 回滚需要的变更前订单；按 Lane 隔离保存，完成后清理。 */
+    final LaneLongCaptures<PatchOrderBefore>[] patchOrdersBeforeByLane;
+    /** 回滚需要的变更前持仓；按 Lane 隔离保存，完成后清理。 */
+    final LaneLongCaptures<PositionRuntime>[] patchPositionsBeforeByLane;
+    /** 回滚需要的变更前客户单号；按 Lane 隔离保存，完成后清理。 */
+    final LaneClientOrderCaptures[] patchClientOrdersBeforeByLane;
+    /** 是否处于批量变更范围，限制不支持的交叉全局修改。 */
+    boolean orderBatchMutationScope;
+    /** 回滚需要的变更前清算；与提交/回滚边界同步维护。 */
+    ConcurrentHashMap<Long, PatchBefore<LiquidationRuntime>> patchLiquidationsBefore =
+            new ConcurrentHashMap<>();
+    /** 回滚需要的变更前风险快照；与提交/回滚边界同步维护。 */
+    ConcurrentHashMap<Long, PatchBefore<RiskSnapshotRuntime>> patchRiskSnapshotsBefore =
+            new ConcurrentHashMap<>();
+    /** 回滚需要的变更前杠杆；与提交/回滚边界同步维护。 */
+    ConcurrentHashMap<CoreLeverageKey, PatchBefore<Long>> patchLeveragesBefore =
+            new ConcurrentHashMap<>();
+    /** 回滚需要的变更前算法单；与提交/回滚边界同步维护。 */
+    ConcurrentHashMap<Long, PatchBefore<CoreAlgoOrderState>> patchAlgoOrdersBefore =
+            new ConcurrentHashMap<>();
+    /** 回滚需要的变更前触发单；与提交/回滚边界同步维护。 */
+    ConcurrentHashMap<Long, PatchBefore<CoreTriggerOrderState>> patchTriggerOrdersBefore =
+            new ConcurrentHashMap<>();
+    /** 回滚需要的变更前定时器；与提交/回滚边界同步维护。 */
+    ConcurrentHashMap<CoreCancelAllAfterKey, PatchBefore<CoreCancelAllAfterState>> patchTimersBefore =
+            new ConcurrentHashMap<>();
+    /** 回滚需要的变更前标记价；与提交/回滚边界同步维护。 */
+    ConcurrentHashMap<Integer, PatchBefore<MarkPriceRuntime>> patchMarkPricesBefore =
+            new ConcurrentHashMap<>();
+    /** 回滚需要的变更前风险扫描；与提交/回滚边界同步维护。 */
+    ConcurrentHashMap<Integer, PatchBefore<RiskScanRuntime>> patchRiskScansBefore =
+            new ConcurrentHashMap<>();
+    /** 回滚需要的变更前币对；与提交/回滚边界同步维护。 */
+    ConcurrentHashMap<String, PatchBefore<CoreInstrumentState>> patchInstrumentsBefore =
+            new ConcurrentHashMap<>();
+    /** 回滚需要的变更前待完成转账；与提交/回滚边界同步维护。 */
+    ConcurrentHashMap<Long, PatchBefore<TransferRuntime>> patchPendingTransfersBefore =
+            new ConcurrentHashMap<>();
+    /** 回滚需要的变更前手续费策略；与提交/回滚边界同步维护。 */
+    ConcurrentHashMap<Long, PatchBefore<CoreFeePolicyState>> patchFeePoliciesBefore =
+            new ConcurrentHashMap<>();
+    /** 本次修改前的清算 ID 分配器值，用于回滚。 */
+    long patchNextLiquidationIdBefore;
+    /** 清算 ID 分配器是否已记录修改前值。 */
+    boolean patchNextLiquidationIdChanged;
+    /** 本次修改前的风险扫描控制状态。 */
+    CoreRiskScanControlView patchRiskScanControlBefore;
+    /** 风险扫描控制是否已记录修改前值。 */
+    boolean patchRiskScanControlChanged;
+    /** 当前 Lane 的线程局部上下文，防止越界读取可变状态。 */
+    final ThreadLocal<AccountLaneState> laneCommandScope = new ThreadLocal<>();
+    /** 当前结算事件的线程局部变更收集器。 */
+    final ThreadLocal<MatcherSettlementChanges> matcherSettlementChangesScope = new ThreadLocal<>();
+    /** 可复用的 matcherSettlementChanges 对象池；仅在消费者完成后回收。 */
+    final java.util.ArrayDeque<MatcherSettlementChanges> matcherSettlementChangesPool =
+            new java.util.ArrayDeque<>();
+    /** 可复用的 laneCancelEvent 对象池；仅在消费者完成后回收。 */
+    final java.util.ArrayDeque<LaneCancelEvent> laneCancelEventPool = new java.util.ArrayDeque<>();
+    /** 可复用的 laneReplaceEvent 对象池；仅在消费者完成后回收。 */
+    final java.util.ArrayDeque<LaneReplaceEvent> laneReplaceEventPool = new java.util.ArrayDeque<>();
+
+    /** 拥有当前执行上下文的唯一 owner；不得在其他线程直接修改其状态。 */
+    Thread owner;
 
     public TradingRuntimeState() {
         this(LaneTopology.configured(Boolean.getBoolean("surprising.aeron.p10-characterization")));
@@ -371,7 +470,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    private static AccountLaneView laneView(int laneId, AccountLaneState lane) {
+    static AccountLaneView laneView(int laneId, AccountLaneState lane) {
         String ownerThreadName = Thread.currentThread().getName();
         if (ownerThreadName.isBlank()) ownerThreadName = "product-core-owner";
         return new AccountLaneView(laneId, lane.revision(), lane.appliedSequence(), lane.committedSequence(),
@@ -379,11 +478,11 @@ public final class TradingRuntimeState implements AutoCloseable {
                 0, lane.queueCapacity(), 0, ownerThreadName);
     }
 
-    private <T> T onLane(long userId, LaneOperation<T> operation) {
+    <T> T onLane(long userId, LaneOperation<T> operation) {
         return onLane(topology.accountLaneId(userId), operation);
     }
 
-    private <T> T onLane(int laneId, LaneOperation<T> operation) {
+    <T> T onLane(int laneId, LaneOperation<T> operation) {
         AccountLaneState scoped = laneCommandScope.get();
         if (scoped != null) {
             if (scoped.laneId() != laneId) {
@@ -525,7 +624,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         return executeLaneMutations(selectedLaneMask, workItems, true, operation);
     }
 
-    private Object[] executeLaneMutations(long selectedLaneMask, int workItems, boolean allowParallel,
+    Object[] executeLaneMutations(long selectedLaneMask, int workItems, boolean allowParallel,
                                           java.util.function.IntFunction<Object> operation) {
         assertOwner();
         long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;
@@ -582,7 +681,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         return results;
     }
 
-    private void completeLaneMutations(long laneMask, Object[] results, long[] startedNanos) {
+    void completeLaneMutations(long laneMask, Object[] results, long[] startedNanos) {
         RuntimeException failure = null;
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             if ((laneMask & 1L << laneId) == 0) continue;
@@ -633,13 +732,13 @@ public final class TradingRuntimeState implements AutoCloseable {
         publishedLaneCommittedSequences[laneId] = lane.committedSequence();
     }
 
-    private static BalanceRuntime copyBalance(IntObjectHashMap<BalanceRuntime> balances, int assetId) {
+    static BalanceRuntime copyBalance(IntObjectHashMap<BalanceRuntime> balances, int assetId) {
         BalanceRuntime balance = balances == null ? null : balances.get(assetId);
         return balance == null ? null : new BalanceRuntime(balance.userId(), balance.assetId(),
                 balance.availableUnits(), balance.lockedUnits());
     }
 
-    private static IntObjectHashMap<BalanceRuntime> copyBalances(IntObjectHashMap<BalanceRuntime> balances) {
+    static IntObjectHashMap<BalanceRuntime> copyBalances(IntObjectHashMap<BalanceRuntime> balances) {
         if (balances == null) return null;
         IntObjectHashMap<BalanceRuntime> copy = new IntObjectHashMap<>(balances.size());
         balances.forEachKeyValue((assetId, balance) -> copy.put(assetId,
@@ -648,57 +747,57 @@ public final class TradingRuntimeState implements AutoCloseable {
         return copy;
     }
 
-    private static LongObjectHashMap<IntObjectHashMap<BalanceRuntime>> copyAllBalances(
+    static LongObjectHashMap<IntObjectHashMap<BalanceRuntime>> copyAllBalances(
             LongObjectHashMap<IntObjectHashMap<BalanceRuntime>> balances) {
         LongObjectHashMap<IntObjectHashMap<BalanceRuntime>> copy = new LongObjectHashMap<>(balances.size());
         balances.forEachKeyValue((userId, userBalances) -> copy.put(userId, copyBalances(userBalances)));
         return copy;
     }
 
-    private static LongObjectHashMap<LongLongHashMap> copyClientOrderIndex(
+    static LongObjectHashMap<LongLongHashMap> copyClientOrderIndex(
             LongObjectHashMap<LongLongHashMap> index) {
         LongObjectHashMap<LongLongHashMap> copy = new LongObjectHashMap<>(index.size());
         index.forEachKeyValue((userId, values) -> copy.put(userId, new LongLongHashMap(values)));
         return copy;
     }
 
-    private void publishUser(long userId, UserRuntime value) {
+    void publishUser(long userId, UserRuntime value) {
         AccountLaneState scoped = laneCommandScope.get();
         if (scoped == null) putOrRemove(publishedUsers, userId, value);
         else lanePublishedChanges(scoped.laneId()).putUser(userId, value);
     }
 
-    private void publishOrder(long orderId, OrderRuntime value) {
+    void publishOrder(long orderId, OrderRuntime value) {
         AccountLaneState scoped = laneCommandScope.get();
         if (scoped == null) putOrRemove(publishedOrders, orderId, value);
         else lanePublishedChanges(scoped.laneId()).putOrder(orderId, value);
     }
 
-    private void publishReservation(long orderId, ReservationRuntime value) {
+    void publishReservation(long orderId, ReservationRuntime value) {
         AccountLaneState scoped = laneCommandScope.get();
         if (scoped == null) putOrRemove(publishedReservations, orderId, value);
         else lanePublishedChanges(scoped.laneId()).putReservation(orderId, value);
     }
 
-    private void publishPosition(long positionKey, PositionRuntime value) {
+    void publishPosition(long positionKey, PositionRuntime value) {
         AccountLaneState scoped = laneCommandScope.get();
         if (scoped == null) putOrRemove(publishedPositions, positionKey, value);
         else lanePublishedChanges(scoped.laneId()).putPosition(positionKey, value);
     }
 
-    private void publishLiquidation(long liquidationId, LiquidationRuntime value) {
+    void publishLiquidation(long liquidationId, LiquidationRuntime value) {
         AccountLaneState scoped = laneCommandScope.get();
         if (scoped == null) putOrRemove(publishedLiquidations, liquidationId, value);
         else lanePublishedChanges(scoped.laneId()).putLiquidation(liquidationId, value);
     }
 
-    private void publishRiskSnapshot(long positionKey, RiskSnapshotRuntime value) {
+    void publishRiskSnapshot(long positionKey, RiskSnapshotRuntime value) {
         AccountLaneState scoped = laneCommandScope.get();
         if (scoped == null) putOrRemove(publishedRiskSnapshots, positionKey, value);
         else lanePublishedChanges(scoped.laneId()).putRiskSnapshot(positionKey, value);
     }
 
-    private void publishTriggerOrder(long id, CoreTriggerOrderState value) {
+    void publishTriggerOrder(long id, CoreTriggerOrderState value) {
         AccountLaneState scoped = laneCommandScope.get();
         if (scoped == null) {
             putOrRemove(publishedTriggerOrders, id, value);
@@ -708,12 +807,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    private PublishedLaneChanges lanePublishedChanges(int laneId) {
+    PublishedLaneChanges lanePublishedChanges(int laneId) {
         MatcherSettlementChanges changes = matcherSettlementChangesScope.get();
         return changes == null ? publishedLaneChanges[laneId] : changes.publishedLaneChanges[laneId];
     }
 
-    private void flushPublishedChanges(int laneId) {
+    void flushPublishedChanges(int laneId) {
         PublishedLaneChanges changes = publishedLaneChanges[laneId];
         changes.recordRiskChanges(this);
         changes.publishTriggersToOwner(this);
@@ -729,18 +828,22 @@ public final class TradingRuntimeState implements AutoCloseable {
         return changes == null ? new MatcherSettlementChanges(accountLanes.length) : changes;
     }
 
-    private void releaseMatcherSettlementChanges(MatcherSettlementChanges changes) {
+    void releaseMatcherSettlementChanges(MatcherSettlementChanges changes) {
         changes.clear();
         matcherSettlementChangesPool.addFirst(changes);
     }
 
     static final class MatcherSettlementChanges {
-        private final PublishedLaneChanges[] publishedLaneChanges;
-        private final LaneBalancePatches[] balancePatches;
-        private final RuntimeFundsAccumulator[] laneFundsDeltas;
-        private final RuntimeFundsAccumulator aggregateFundsDelta = new RuntimeFundsAccumulator(32);
+        /** 各 Lane 输出给 owner 的变化缓冲，在完成交接后消费。 */
+        final PublishedLaneChanges[] publishedLaneChanges;
+        /** 按 Lane 保存的余额前后值，用于资金增量核对。 */
+        final LaneBalancePatches[] balancePatches;
+        /** 各 Lane 收集的资金增量，完成后由 owner 合并。 */
+        final RuntimeFundsAccumulator[] laneFundsDeltas;
+        /** 汇总各 Lane 资金增量的复用累加器。 */
+        final RuntimeFundsAccumulator aggregateFundsDelta = new RuntimeFundsAccumulator(32);
 
-        private MatcherSettlementChanges(int laneCount) {
+        MatcherSettlementChanges(int laneCount) {
             publishedLaneChanges = new PublishedLaneChanges[laneCount];
             balancePatches = new LaneBalancePatches[laneCount];
             laneFundsDeltas = new RuntimeFundsAccumulator[laneCount];
@@ -809,7 +912,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
         }
 
-        private void clear() {
+        void clear() {
             for (PublishedLaneChanges changes : publishedLaneChanges) changes.clear();
             for (LaneBalancePatches patches : balancePatches) patches.clear();
             for (RuntimeFundsAccumulator delta : laneFundsDeltas) delta.clear();
@@ -817,35 +920,47 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    private static <V> void putOrRemove(Long2ObjectHashMap<V> values, long key, V value) {
+    static <V> void putOrRemove(Long2ObjectHashMap<V> values, long key, V value) {
         if (value == null) values.remove(key); else values.put(key, value);
     }
 
-    private static <V> void putOrRemove(LongObjectHashMap<V> values, long key, V value) {
+    static <V> void putOrRemove(LongObjectHashMap<V> values, long key, V value) {
         if (value == null) values.remove(key); else values.put(key, value);
     }
 
-    private static final class PublishedLaneChanges {
-        private ChangeBuffer<CoreTriggerOrderState> triggers;
-        private final ChangeBuffer<UserRuntime> users = new ChangeBuffer<>();
-        private final ChangeBuffer<OrderRuntime> orders = new ChangeBuffer<>();
-        private final ChangeBuffer<ReservationRuntime> reservations = new ChangeBuffer<>();
-        private final ChangeBuffer<PositionRuntime> positions = new ChangeBuffer<>();
-        private final ChangeBuffer<LiquidationRuntime> liquidations = new ChangeBuffer<>();
-        private final ChangeBuffer<RiskSnapshotRuntime> riskSnapshots = new ChangeBuffer<>();
-        private final ChangeBuffer<CoreOrderState> activeOrderValues = new ChangeBuffer<>();
-        private final ChangeBuffer<RuntimePositionIndexValue> positionIndexValues = new ChangeBuffer<>();
-        private final LongHashSet removedOrderRoutes = new LongHashSet();
-        private final LongHashSet removedReservationRoutes = new LongHashSet();
-        private final ClientIdentityReleaseBuffer retiredClientIdentities = new ClientIdentityReleaseBuffer();
+    static final class PublishedLaneChanges {
+        /** 本次需要发布的触发单变化。 */
+        RuntimeChangeBuffer<CoreTriggerOrderState> triggers;
+        /** 本次需要发布的用户变化。 */
+        final RuntimeChangeBuffer<UserRuntime> users = new RuntimeChangeBuffer<>();
+        /** 本次需要发布的订单变化。 */
+        final RuntimeChangeBuffer<OrderRuntime> orders = new RuntimeChangeBuffer<>();
+        /** 本次需要发布的预留变化。 */
+        final RuntimeChangeBuffer<ReservationRuntime> reservations = new RuntimeChangeBuffer<>();
+        /** 本次需要发布的持仓变化。 */
+        final RuntimeChangeBuffer<PositionRuntime> positions = new RuntimeChangeBuffer<>();
+        /** 本次需要发布的清算变化。 */
+        final RuntimeChangeBuffer<LiquidationRuntime> liquidations = new RuntimeChangeBuffer<>();
+        /** 本次需要发布的风险快照变化。 */
+        final RuntimeChangeBuffer<RiskSnapshotRuntime> riskSnapshots = new RuntimeChangeBuffer<>();
+        /** 当前变更对应的活跃订单索引值。 */
+        final RuntimeChangeBuffer<CoreOrderState> activeOrderValues = new RuntimeChangeBuffer<>();
+        /** 当前变更对应的持仓索引值。 */
+        final RuntimeChangeBuffer<RuntimePositionIndexValue> positionIndexValues = new RuntimeChangeBuffer<>();
+        /** 待移除的订单路由 ID。 */
+        final LongHashSet removedOrderRoutes = new LongHashSet();
+        /** 待移除的预留路由 ID。 */
+        final LongHashSet removedReservationRoutes = new LongHashSet();
+        /** 终态后可释放的客户单号，完成交接后由 owner 回收。 */
+        final ClientIdentityReleaseBuffer retiredClientIdentities = new ClientIdentityReleaseBuffer();
 
-        private void ensureAdmissionCapacity(int expectedOrders) {
+        void ensureAdmissionCapacity(int expectedOrders) {
             users.ensureCapacity(1);
             orders.ensureCapacity(expectedOrders);
             reservations.ensureCapacity(expectedOrders);
         }
 
-        private void ensureOrderCapacity(int expectedOrders) {
+        void ensureOrderCapacity(int expectedOrders) {
             users.ensureCapacity(expectedOrders * 2);
             orders.ensureCapacity(expectedOrders);
             reservations.ensureCapacity(expectedOrders);
@@ -854,41 +969,41 @@ public final class TradingRuntimeState implements AutoCloseable {
             positionIndexValues.ensureCapacity(expectedOrders * 2);
         }
 
-        private void putUser(long key, UserRuntime value) {
+        void putUser(long key, UserRuntime value) {
             users.put(key, value);
         }
 
-        private void putOrder(long key, OrderRuntime value) {
+        void putOrder(long key, OrderRuntime value) {
             orders.put(key, value);
         }
 
-        private void putReservation(long key, ReservationRuntime value) {
+        void putReservation(long key, ReservationRuntime value) {
             reservations.put(key, value);
         }
 
-        private void putPosition(long key, PositionRuntime value) {
+        void putPosition(long key, PositionRuntime value) {
             positions.put(key, value);
         }
 
-        private void putLiquidation(long key, LiquidationRuntime value) {
+        void putLiquidation(long key, LiquidationRuntime value) {
             liquidations.put(key, value);
         }
 
-        private void putRiskSnapshot(long key, RiskSnapshotRuntime value) {
+        void putRiskSnapshot(long key, RiskSnapshotRuntime value) {
             riskSnapshots.put(key, value);
         }
 
-        private void removeOrderRoute(long orderId) { removedOrderRoutes.add(orderId); }
-        private void removeReservationRoute(long orderId) { removedReservationRoutes.add(orderId); }
-        private void retireClientIdentity(long userId, long clientKey) {
+        void removeOrderRoute(long orderId) { removedOrderRoutes.add(orderId); }
+        void removeReservationRoute(long orderId) { removedReservationRoutes.add(orderId); }
+        void retireClientIdentity(long userId, long clientKey) {
             retiredClientIdentities.add(userId, clientKey);
         }
 
-        private void releaseRetiredClientIdentities(RuntimeIdentityRegistry identities) {
+        void releaseRetiredClientIdentities(RuntimeIdentityRegistry identities) {
             retiredClientIdentities.release(identities);
         }
 
-        private void drainTo(int laneId,
+        void drainTo(int laneId,
                              LongObjectHashMap<UserRuntime> targetUsers,
                              Long2ObjectHashMap<OrderRuntime> targetOrders,
                              Long2ObjectHashMap<ReservationRuntime> targetReservations,
@@ -916,7 +1031,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             removedReservationRoutes.clear();
         }
 
-        private void commitTerminalToOwner(TradingRuntimeState state, int laneId,
+        void commitTerminalToOwner(TradingRuntimeState state, int laneId,
                                            TerminalOrderSink terminalOrderSink, long coreSequence) {
             publishTriggersToOwner(state);
             users.forEach((userId, user) -> {
@@ -978,12 +1093,12 @@ public final class TradingRuntimeState implements AutoCloseable {
             removedReservationRoutes.clear();
         }
 
-        private void putTrigger(long id, CoreTriggerOrderState value) {
-            if (triggers == null) triggers = new ChangeBuffer<>();
+        void putTrigger(long id, CoreTriggerOrderState value) {
+            if (triggers == null) triggers = new RuntimeChangeBuffer<>();
             triggers.put(id, value);
         }
 
-        private void publishTriggersToOwner(TradingRuntimeState state) {
+        void publishTriggersToOwner(TradingRuntimeState state) {
             if (triggers == null || triggers.isEmpty()) return;
             triggers.forEach((id, value) -> {
                 putOrRemove(state.publishedTriggerOrders, id, value);
@@ -992,12 +1107,12 @@ public final class TradingRuntimeState implements AutoCloseable {
             triggers.clear();
         }
 
-        private void recordRiskChanges(TradingRuntimeState state) {
+        void recordRiskChanges(TradingRuntimeState state) {
             liquidations.forEach(state.changedLiquidations::put);
             riskSnapshots.forEach(state.changedRiskSnapshots::put);
         }
 
-        private void clear() {
+        void clear() {
             if (triggers != null) triggers.clear();
             users.clear();
             orders.clear();
@@ -1012,12 +1127,15 @@ public final class TradingRuntimeState implements AutoCloseable {
             retiredClientIdentities.clear();
         }
 
-        private static final class ClientIdentityReleaseBuffer {
-            private long[] userIds = new long[4];
-            private long[] clientKeys = new long[4];
-            private int size;
+        static final class ClientIdentityReleaseBuffer {
+            /** 当前缓冲各项对应的用户 ID。 */
+            long[] userIds = new long[4];
+            /** 当前缓冲各项对应的内部客户单号键。 */
+            long[] clientKeys = new long[4];
+            /** 当前有效元素数量。 */
+            int size;
 
-            private void add(long userId, long clientKey) {
+            void add(long userId, long clientKey) {
                 if (userId <= 0 || clientKey <= 0) {
                     throw new IllegalArgumentException("invalid retired client identity");
                 }
@@ -1031,7 +1149,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 size++;
             }
 
-            private void release(RuntimeIdentityRegistry identities) {
+            void release(RuntimeIdentityRegistry identities) {
                 if (identities == null) return;
                 for (int index = 0; index < size; index++) {
                     identities.releaseClientKey(userIds[index], clientKeys[index]);
@@ -1039,194 +1157,11 @@ public final class TradingRuntimeState implements AutoCloseable {
                 clear();
             }
 
-            private void clear() {
+            void clear() {
                 size = 0;
             }
         }
 
-        private static final class ChangeBuffer<V> {
-            private long[] keys = new long[8];
-            private Object[] values = new Object[8];
-            private long[] indexKeys = new long[16];
-            private int[] indexSlots = new int[16];
-            private int[] indexGenerations = new int[16];
-            private int indexGeneration = 1;
-            private int size;
-
-            private void ensureCapacity(int expectedSize) {
-                if (expectedSize <= 0) return;
-                int valueCapacity = keys.length;
-                while (valueCapacity < expectedSize) valueCapacity = Math.multiplyExact(valueCapacity, 2);
-                if (valueCapacity != keys.length) {
-                    keys = java.util.Arrays.copyOf(keys, valueCapacity);
-                    values = java.util.Arrays.copyOf(values, valueCapacity);
-                }
-                int indexCapacity = indexSlots.length;
-                while (indexCapacity < expectedSize * 2) indexCapacity = Math.multiplyExact(indexCapacity, 2);
-                if (indexCapacity == indexSlots.length) return;
-                indexKeys = new long[indexCapacity];
-                indexSlots = new int[indexCapacity];
-                indexGenerations = new int[indexCapacity];
-                indexGeneration = 1;
-                for (int index = 0; index < size; index++) {
-                    int position = emptyIndexPosition(keys[index]);
-                    indexKeys[position] = keys[index];
-                    indexSlots[position] = index;
-                    indexGenerations[position] = indexGeneration;
-                }
-            }
-
-            private void put(long key, V value) {
-                int slot = indexOf(key);
-                if (slot >= 0) {
-                    values[slot] = value;
-                    return;
-                }
-                ensureIndexCapacity(size + 1);
-                if (size == keys.length) {
-                    int capacity = Math.multiplyExact(size, 2);
-                    keys = java.util.Arrays.copyOf(keys, capacity);
-                    values = java.util.Arrays.copyOf(values, capacity);
-                }
-                int indexPosition = emptyIndexPosition(key);
-                keys[size] = key;
-                values[size] = value;
-                indexKeys[indexPosition] = key;
-                indexSlots[indexPosition] = size;
-                indexGenerations[indexPosition] = indexGeneration;
-                size++;
-            }
-
-            private void drain(LongObjectHashMap<V> target, Long2LongHashMap targetLanes, int laneId) {
-                for (int index = 0; index < size; index++) {
-                    long key = keys[index];
-                    @SuppressWarnings("unchecked") V value = (V) values[index];
-                    values[index] = null;
-                    if (value == null) {
-                        target.removeKey(key);
-                        if (targetLanes != null) targetLanes.remove(key);
-                    } else {
-                        target.put(key, value);
-                        if (targetLanes != null) targetLanes.put(key, laneId + 1L);
-                    }
-                }
-                clear();
-            }
-
-            private void drain(Long2ObjectHashMap<V> target, Long2LongHashMap targetLanes, int laneId) {
-                for (int index = 0; index < size; index++) {
-                    long key = keys[index];
-                    @SuppressWarnings("unchecked") V value = (V) values[index];
-                    values[index] = null;
-                    if (value == null) {
-                        target.remove(key);
-                        if (targetLanes != null) targetLanes.remove(key);
-                    } else {
-                        target.put(key, value);
-                        if (targetLanes != null) targetLanes.put(key, laneId + 1L);
-                    }
-                }
-                clear();
-            }
-
-            private boolean isEmpty() {
-                return size == 0;
-            }
-
-            private int size() { return size; }
-
-            private long keyAt(int index) {
-                if (index < 0 || index >= size) throw new IndexOutOfBoundsException(index);
-                return keys[index];
-            }
-
-            @SuppressWarnings("unchecked")
-            private V valueAt(int index) {
-                if (index < 0 || index >= size) throw new IndexOutOfBoundsException(index);
-                return (V) values[index];
-            }
-
-            @SuppressWarnings("unchecked")
-            private V get(long key) {
-                int slot = indexOf(key);
-                return slot < 0 ? null : (V) values[slot];
-            }
-
-            private boolean containsKey(long key) {
-                return indexOf(key) >= 0;
-            }
-
-            private void forEach(org.eclipse.collections.api.block.procedure.primitive.LongObjectProcedure<V> consumer) {
-                for (int index = 0; index < size; index++) {
-                    @SuppressWarnings("unchecked") V value = (V) values[index];
-                    consumer.value(keys[index], value);
-                }
-            }
-
-            private org.eclipse.collections.api.iterator.LongIterator longIterator() {
-                return new org.eclipse.collections.api.iterator.LongIterator() {
-                    private int cursor;
-
-                    @Override
-                    public long next() {
-                        if (!hasNext()) throw new java.util.NoSuchElementException();
-                        return keys[cursor++];
-                    }
-
-                    @Override
-                    public boolean hasNext() {
-                        return cursor < size;
-                    }
-                };
-            }
-
-            private long[] toArray() {
-                return java.util.Arrays.copyOf(keys, size);
-            }
-
-            private void clear() {
-                for (int index = 0; index < size; index++) values[index] = null;
-                size = 0;
-                if (++indexGeneration == 0) {
-                    java.util.Arrays.fill(indexGenerations, 0);
-                    indexGeneration = 1;
-                }
-            }
-
-            private int indexOf(long key) {
-                int mask = indexSlots.length - 1;
-                int position = LaneLongCaptures.longHash(key) & mask;
-                while (indexGenerations[position] == indexGeneration) {
-                    if (indexKeys[position] == key) return indexSlots[position];
-                    position = (position + 1) & mask;
-                }
-                return -1;
-            }
-
-            private int emptyIndexPosition(long key) {
-                int mask = indexSlots.length - 1;
-                int position = LaneLongCaptures.longHash(key) & mask;
-                while (indexGenerations[position] == indexGeneration) {
-                    position = (position + 1) & mask;
-                }
-                return position;
-            }
-
-            private void ensureIndexCapacity(int requiredSize) {
-                if (requiredSize <= indexSlots.length / 2) return;
-                int capacity = Math.multiplyExact(indexSlots.length, 2);
-                indexKeys = new long[capacity];
-                indexSlots = new int[capacity];
-                indexGenerations = new int[capacity];
-                indexGeneration = 1;
-                for (int index = 0; index < size; index++) {
-                    int position = emptyIndexPosition(keys[index]);
-                    indexKeys[position] = keys[index];
-                    indexSlots[position] = index;
-                    indexGenerations[position] = indexGeneration;
-                }
-            }
-        }
     }
 
     @Override
@@ -1237,23 +1172,31 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    private final class LaneMutationTask implements SettlementLaneWorker.Command {
-        private final int laneId;
-        private final LaneOperation<Object> indexedScopedOperation;
-        private LaneOperation<Object> operation;
-        private java.util.function.IntFunction<Object> indexedOperation;
-        private Object result;
-        private Throwable failure;
-        private volatile boolean completed = true;
-        private volatile Thread waiter;
+    final class LaneMutationTask implements SettlementLaneWorker.Command {
+        /** 该任务唯一归属的账户 Lane ID。 */
+        final int laneId;
+        /** 固定的 Lane 作用域调用，避免每次派发新建闭包。 */
+        final LaneOperation<Object> indexedScopedOperation;
+        /** 本次派发的业务操作，在对应执行完成之前保留。 */
+        LaneOperation<Object> operation;
+        /** 本次按 Lane ID 执行的业务操作。 */
+        java.util.function.IntFunction<Object> indexedOperation;
+        /** 当前派发任务的完成结果，在完成通知之后读取。 */
+        Object result;
+        /** 当前派发任务报告的失败，收集阶段传播给 owner。 */
+        Throwable failure;
+        /** 该任务是否已发布完成通知，建立结果可见性边界。 */
+        volatile boolean completed = true;
+        /** 等待任务完成的线程，只用于唤醒而不执行业务。 */
+        volatile Thread waiter;
 
-        private LaneMutationTask(int laneId) {
+        LaneMutationTask(int laneId) {
             this.laneId = laneId;
             indexedScopedOperation = ignored -> indexedOperation.apply(this.laneId);
         }
 
         @SuppressWarnings("unchecked")
-        private void prepare(LaneOperation<?> operation) {
+        void prepare(LaneOperation<?> operation) {
             if (!completed) throw new IllegalStateException("account lane task is still active");
             this.operation = (LaneOperation<Object>) operation;
             indexedOperation = null;
@@ -1262,7 +1205,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             completed = false;
         }
 
-        private void prepareIndexed(java.util.function.IntFunction<Object> operation) {
+        void prepareIndexed(java.util.function.IntFunction<Object> operation) {
             if (!completed) throw new IllegalStateException("account lane task is still active");
             this.operation = null;
             indexedOperation = operation;
@@ -1286,7 +1229,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
         }
 
-        private Object await() {
+        Object await() {
             boolean interrupted = false;
             Thread current = Thread.currentThread();
             waiter = current;
@@ -1309,7 +1252,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    private static long[][] laneMetricValues(int laneCount) {
+    static long[][] laneMetricValues(int laneCount) {
         long[][] values = new long[laneCount][];
         for (int laneId = 0; laneId < laneCount; laneId++) {
             values[laneId] = new long[AccountLaneOperationType.values().length];
@@ -1317,7 +1260,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         return values;
     }
 
-    private void recordLaneOperation(int laneId, AccountLaneOperationType operation, long latencyNanos) {
+    void recordLaneOperation(int laneId, AccountLaneOperationType operation, long latencyNanos) {
         int operationIndex = operation.ordinal();
         accountLaneCompletedOperations[laneId][operationIndex]++;
         accountLaneLatencySamples[laneId][operationIndex]++;
@@ -1339,212 +1282,17 @@ public final class TradingRuntimeState implements AutoCloseable {
         recordLaneOperation(laneId, AccountLaneOperationType.SETTLEMENT, latencyNanos);
     }
 
-    private record PendingReservationCompletion(ReservationRuntime reservation) {}
-
-    private record PendingReservationRef(long orderId, long userId) {
+    record TerminalRelease(long units, int assetId) {
     }
 
-    private record PendingReservationBatchCompletion(
-            long orderId, long userId, ReservationRuntime reservation) {
-        private PendingReservationBatchCompletion {
-            if (orderId <= 0 || userId <= 0) {
-                throw new IllegalArgumentException("invalid pending reservation completion");
-            }
-        }
+    record CanceledOrder(OrderRuntime order, ReservationRuntime reservation) {
     }
 
-    private record TerminalRelease(long units, int assetId) {
+    record TerminalOrderPrune(long orderId, long userId, long clientKey) {
     }
 
-    private record CanceledOrder(OrderRuntime order, ReservationRuntime reservation) {
-    }
-
-    private record TerminalOrderPrune(long orderId, long userId, long clientKey) {
-    }
-
-    private record TerminalOrderPruned(
+    record TerminalOrderPruned(
             long orderId, long userId, int reservationAssetId, boolean reservationRemoved) {
-    }
-
-    public void markPendingReservation(long userId, long orderId, long coreSequence) {
-        assertOwner();
-        captureReservationBefore(orderId);
-        if (pendingReservationUsers.containsKey(orderId)) {
-            throw new IllegalStateException("reservation is already indexed as pending");
-        }
-        int nextTotalPendingReservations = Math.addExact(totalPendingReservations, 1);
-        onLane(userId, lane -> {
-            ReservationRuntime reservation = lane.reservations.get(orderId);
-            if (reservation == null || reservation.userId() != userId) {
-                throw new IllegalStateException("pending reservation is missing");
-            }
-            captureBalanceBefore(userId, reservation.assetId());
-            lane.markPendingReservation(orderId, coreSequence);
-            captureBalanceAfter(lane, userId, reservation.assetId());
-            return null;
-        });
-        indexPendingReservation(userId, orderId, coreSequence, nextTotalPendingReservations);
-    }
-
-    private void indexPendingReservation(long userId, long orderId, long coreSequence,
-                                         int nextTotalPendingReservations) {
-        pendingReservationsBySequence.add(coreSequence, orderId);
-        pendingReservationUsers.put(orderId, userId);
-        pendingReservationCountsByUser.addToValue(userId, 1);
-        totalPendingReservations = nextTotalPendingReservations;
-    }
-
-    public void completePendingReservation(long userId, long orderId, long coreSequence) {
-        assertOwner();
-        captureUserBefore(userId);
-        captureOrderBefore(orderId);
-        captureReservationBefore(orderId);
-        int nextTotalPendingReservations = Math.subtractExact(totalPendingReservations, 1);
-        if (nextTotalPendingReservations < 0) {
-            throw new IllegalStateException("pending reservation counters are inconsistent");
-        }
-        requirePendingReservationIndex(orderId, coreSequence, userId);
-        PendingReservationCompletion completion = onLane(userId, accountLane -> {
-            ReservationRuntime reservation = accountLane.reservations.get(orderId);
-            if (reservation != null) captureBalanceBefore(userId, reservation.assetId());
-            accountLane.clientKeysByOrderId.forEach(orderId, clientKey -> captureClientOrderBefore(userId, clientKey));
-            accountLane.completePendingReservation(orderId, coreSequence);
-            if (reservation != null) captureBalanceAfter(accountLane, userId, reservation.assetId());
-            return new PendingReservationCompletion(reservation);
-        });
-        changedOrder(orderId);
-        changedReservations.add(orderId);
-        changedUsers.add(userId);
-        if (completion.reservation() != null) changedBalance(userId, completion.reservation().assetId());
-        unindexPendingReservation(orderId, coreSequence, userId, nextTotalPendingReservations);
-    }
-
-    public void completePendingReservations(long coreSequence) {
-        assertOwner();
-        if (coreSequence <= 0) throw new IllegalArgumentException("coreSequence must be positive");
-        long[] pending = pendingReservationsBySequence.orderIds(coreSequence);
-        if (pending.length == 0) return;
-        List<PendingReservationRef> refs = new ArrayList<>(pending.length);
-        for (long orderId : pending) {
-            long userId = pendingReservationUsers.getOrDefault(orderId, 0);
-            if (userId == 0) throw new IllegalStateException("pending reservation owner is missing");
-            refs.add(new PendingReservationRef(orderId, userId));
-        }
-        List<PendingReservationBatchCompletion> completions = preflightPendingReservationCompletions(
-                coreSequence, refs);
-        executeOwnerSettlements(completions, PendingReservationBatchCompletion::userId, laneId -> {
-            AccountLaneState lane = laneCommandScope.get();
-            for (PendingReservationBatchCompletion completion : completions) {
-                if (topology.accountLaneId(completion.userId()) != laneId) continue;
-                lane.completePendingReservation(completion.orderId(), coreSequence);
-                captureBalanceAfter(lane, completion.userId(), completion.reservation().assetId());
-            }
-            return null;
-        });
-        for (PendingReservationBatchCompletion completion : completions) {
-            changedOrder(completion.orderId());
-            changedReservations.add(completion.orderId());
-            changedUsers.add(completion.userId());
-            changedBalance(completion.userId(), completion.reservation().assetId());
-            int nextTotalPendingReservations = Math.subtractExact(totalPendingReservations, 1);
-            unindexPendingReservation(completion.orderId(), coreSequence, completion.userId(),
-                    nextTotalPendingReservations);
-        }
-    }
-
-    private List<PendingReservationBatchCompletion> preflightPendingReservationCompletions(
-            long coreSequence, List<PendingReservationRef> refs) {
-        int remainingPendingReservations = totalPendingReservations;
-        List<PendingReservationBatchCompletion> completions = new ArrayList<>(refs.size());
-        for (PendingReservationRef ref : refs) {
-            captureUserBefore(ref.userId());
-            captureOrderBefore(ref.orderId());
-            captureReservationBefore(ref.orderId());
-            requirePendingReservationIndex(ref.orderId(), coreSequence, ref.userId());
-            PendingReservationBatchCompletion completion = onLane(ref.userId(), lane -> {
-                ReservationRuntime reservation = lane.reservations.get(ref.orderId());
-                if (reservation != null) captureBalanceBefore(ref.userId(), reservation.assetId());
-                lane.clientKeysByOrderId.forEach(ref.orderId(),
-                        clientKey -> captureClientOrderBefore(ref.userId(), clientKey));
-                lane.requirePendingReservationCompletion(ref.orderId(), coreSequence);
-                return new PendingReservationBatchCompletion(ref.orderId(), ref.userId(), reservation);
-            });
-            remainingPendingReservations = Math.subtractExact(remainingPendingReservations, 1);
-            if (remainingPendingReservations < 0) {
-                throw new IllegalStateException("pending reservation counters are inconsistent");
-            }
-            completions.add(completion);
-        }
-        return List.copyOf(completions);
-    }
-
-    private void requirePendingReservationIndex(long orderId, long coreSequence, long userId) {
-        long indexedUserId = pendingReservationUsers.getOrDefault(orderId, 0);
-        if (indexedUserId != userId || !pendingReservationsBySequence.contains(coreSequence, orderId)) {
-            throw new IllegalStateException("pending reservation index differs from account lane state");
-        }
-    }
-
-    private void unindexPendingReservation(long orderId, long coreSequence, long userId,
-                                           int nextTotalPendingReservations) {
-        requirePendingReservationIndex(orderId, coreSequence, userId);
-        pendingReservationsBySequence.remove(coreSequence, orderId);
-        pendingReservationUsers.remove(orderId);
-        int nextUserCount = Math.subtractExact(pendingReservationCountsByUser.get(userId), 1);
-        if (nextUserCount == 0) pendingReservationCountsByUser.removeKey(userId);
-        else pendingReservationCountsByUser.put(userId, nextUserCount);
-        totalPendingReservations = nextTotalPendingReservations;
-    }
-
-    boolean pendingReservation(long orderId, long userId) {
-        assertOwner();
-        AccountLaneState scoped = laneCommandScope.get();
-        if (scoped != null) {
-            if (scoped.laneId() != topology.accountLaneId(userId)) {
-                throw new IllegalStateException("pending reservation query crossed its owner lane");
-            }
-            return scoped.pendingReservation(orderId);
-        }
-        return pendingReservationUsers.getOrDefault(orderId, 0) == userId;
-    }
-
-    long pendingReservedUnits(long userId, int assetId) {
-        assertOwner();
-        return onLane(userId, lane -> lane.pendingReservedUnits(userId, assetId));
-    }
-
-    int pendingReservationCount(long userId) {
-        assertOwner();
-        AccountLaneState scoped = laneCommandScope.get();
-        if (scoped != null) {
-            if (scoped.laneId() != topology.accountLaneId(userId)) {
-                throw new IllegalStateException("pending reservation count crossed its owner lane");
-            }
-            return scoped.pendingReservationCount(userId);
-        }
-        return pendingReservationCountsByUser.get(userId);
-    }
-
-    int pendingReservationCount() {
-        assertOwner();
-        return totalPendingReservations;
-    }
-
-    public boolean hasPendingReservations() {
-        assertOwner();
-        return totalPendingReservations != 0;
-    }
-
-    private void assertPendingReservationCounts() {
-        int lanePendingReservations = 0;
-        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            int currentLaneId = laneId;
-            lanePendingReservations = Math.addExact(lanePendingReservations,
-                    onLane(currentLaneId, AccountLaneState::pendingReservationCount));
-        }
-        if (lanePendingReservations != totalPendingReservations) {
-            throw new IllegalStateException("pending reservation counters differ from account lanes");
-        }
     }
 
     public long stageLaneMutation(long coreSequence, Iterable<Long> userIds) {
@@ -1584,18 +1332,18 @@ public final class TradingRuntimeState implements AutoCloseable {
         return dispatchLaneMutationFromScratch(coreSequence);
     }
 
-    private void clearLaneUserScratch() {
+    void clearLaneUserScratch() {
         for (org.eclipse.collections.impl.list.mutable.primitive.LongArrayList users : laneUserScratch) {
             users.clear();
         }
     }
 
-    private void addLaneUser(long userId) {
+    void addLaneUser(long userId) {
         int laneId = topology.accountLaneId(userId);
         laneUserScratch[laneId].add(userId);
     }
 
-    private long stageLaneMutationFromScratch(long coreSequence) {
+    long stageLaneMutationFromScratch(long coreSequence) {
         LaneCommitEvent event = dispatchLaneMutationFromScratch(coreSequence);
         if (event == null) return 0;
         int idle = 0;
@@ -1609,7 +1357,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         return laneMask;
     }
 
-    private LaneCommitEvent dispatchLaneMutationFromScratch(long coreSequence) {
+    LaneCommitEvent dispatchLaneMutationFromScratch(long coreSequence) {
         long laneMask = 0;
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             org.eclipse.collections.impl.list.mutable.primitive.LongArrayList users = laneUserScratch[laneId];
@@ -1673,64 +1421,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (event == null) throw new IllegalArgumentException("Account Lane commit event is required");
         event.clear();
         laneCommitEventPool.addFirst(event);
-    }
-
-    public MatcherSettlementEvent dispatchMatcherSettlement(
-            long coreSequence, long expectedLaneMask, long commitSequence,
-            long commitTimestamp, long commitClusterPosition,
-            MatcherSettlementPlan plan, CoreMatchingResult matchingResult,
-            RuntimeIdentityRegistry identities) {
-        return dispatchMatcherSettlement(coreSequence, expectedLaneMask, commitSequence,
-                commitTimestamp, commitClusterPosition, plan, matchingResult, identities, false);
-    }
-
-    private MatcherSettlementEvent dispatchMatcherSettlement(
-            long coreSequence, long expectedLaneMask, long commitSequence,
-            long commitTimestamp, long commitClusterPosition,
-            MatcherSettlementPlan plan, CoreMatchingResult matchingResult,
-            RuntimeIdentityRegistry identities, boolean captureIsolatedChanges) {
-        assertOwner();
-        long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;
-        if (coreSequence <= 0 || commitSequence < 0 || expectedLaneMask == 0
-                || (expectedLaneMask & ~validMask) != 0
-                || matchingResult == null || matchingResult.nativeCommand().coreSequence() != coreSequence
-                || plan == null || plan.coreSequence() != coreSequence
-                || plan.requiredLaneMask() != expectedLaneMask || identities == null) {
-            throw new IllegalArgumentException("invalid matcher settlement lane command");
-        }
-        long takerOrderId = plan.takerOrderId();
-        OrderRuntime taker = order(takerOrderId);
-        if (taker == null) throw new IllegalStateException("taker order is missing");
-        CoreInstrumentState instrument = instrument(identities.symbol(taker.symbolId()));
-        if (instrument == null) throw new IllegalStateException("match instrument is missing");
-        int baseAssetId = identities.assetId(instrument.baseAsset());
-        int quoteAssetId = identities.assetId(instrument.quoteAsset());
-        int settleAssetId = identities.assetId(instrument.settleAsset());
-        MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();
-        if (event == null) event = new MatcherSettlementEvent();
-        event.prepare(
-                commitSequence, expectedLaneMask, commitTimestamp, commitClusterPosition,
-                plan, this, identities, instrument,
-                baseAssetId, quoteAssetId, settleAssetId, accountLanes.length,
-                captureIsolatedChanges);
-        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            if ((expectedLaneMask & 1L << laneId) == 0) continue;
-            if (!accountLanesStarted) {
-                event.execute(accountLanes[laneId]);
-            } else {
-                accountLaneQueueHighWaterMarks[laneId] = Math.max(
-                        accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
-            laneWorkers[laneId].submit(event);
-            }
-        }
-        return event;
-    }
-
-    public void releaseMatcherSettlement(MatcherSettlementEvent event) {
-        assertOwner();
-        if (event == null) return;
-        event.clear();
-        matcherSettlementEventPool.addFirst(event);
     }
 
     public PlaceAdmissionEvent dispatchPlaceAdmission(
@@ -1800,12 +1490,12 @@ public final class TradingRuntimeState implements AutoCloseable {
         long userId = event.userId();
         int laneId = topology.accountLaneId(userId);
         publishedUsers.put(userId, event.admittedUser());
-        int nextTotal = totalPendingReservations;
+        int nextTotal = pendingReservations.totalPendingReservations;
         for (int index = 0; index < event.itemCount(); index++) {
             OrderRuntime order = event.admittedOrder(index);
             ReservationRuntime reservation = event.admittedReservation(index);
             long orderId = order.orderId();
-            if (pendingReservationUsers.containsKey(orderId)) {
+            if (pendingReservations.pendingReservationUsers.containsKey(orderId)) {
                 throw new IllegalStateException("place batch admission was collected twice");
             }
             publishedOrders.put(orderId, order);
@@ -1813,7 +1503,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             orderLaneIds.put(orderId, laneId + 1L);
             reservationLaneIds.put(orderId, laneId + 1L);
             nextTotal = Math.incrementExact(nextTotal);
-            indexPendingReservation(userId, orderId, event.coreSequence(), nextTotal);
+            pendingReservations.indexPendingReservation(userId, orderId, event.coreSequence(), nextTotal);
         }
         revision = Math.addExact(revision, event.itemCount());
     }
@@ -1921,7 +1611,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         return matcherSettlementReadyQueues[laneId].poll();
     }
 
-    private static long readyLaneMask(LaneSequenceQueue[] queues) {
+    static long readyLaneMask(LaneSequenceQueue[] queues) {
         long mask = 0;
         for (int laneId = 0; laneId < queues.length; laneId++) {
             if (queues[laneId].hasPending()) mask |= 1L << laneId;
@@ -1935,7 +1625,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (event.rejection() != null) return null;
         long orderId = event.orderId();
         long userId = event.userId();
-        if (pendingReservationUsers.containsKey(orderId)) {
+        if (pendingReservations.pendingReservationUsers.containsKey(orderId)) {
             throw new IllegalStateException("place admission was collected twice");
         }
         int laneId = topology.accountLaneId(userId);
@@ -1944,8 +1634,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         publishedReservations.put(orderId, event.admittedReservation());
         orderLaneIds.put(orderId, laneId + 1L);
         reservationLaneIds.put(orderId, laneId + 1L);
-        indexPendingReservation(userId, orderId, event.coreSequence(),
-                Math.incrementExact(totalPendingReservations));
+        pendingReservations.indexPendingReservation(userId, orderId, event.coreSequence(),
+                Math.incrementExact(pendingReservations.totalPendingReservations));
         revision = Math.incrementExact(revision);
         return event.matchingOrder();
     }
@@ -2125,8 +1815,8 @@ public final class TradingRuntimeState implements AutoCloseable {
                 changedUsers.add(balances.userId(index));
                 changedBalance(balances.userId(index), balances.assetId(index));
             }
-            indexPendingReservation(event.userId(), event.replacementOrderId(), event.coreSequence(),
-                    Math.incrementExact(totalPendingReservations));
+            pendingReservations.indexPendingReservation(event.userId(), event.replacementOrderId(), event.coreSequence(),
+                    Math.incrementExact(pendingReservations.totalPendingReservations));
             if (fundsAccumulator != null) changes.appendFundsDelta(event.requiredLaneMask(), fundsAccumulator);
         } finally {
             releaseMatcherSettlementChanges(changes);
@@ -2206,361 +1896,16 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    private void unindexMatcherPendingReservations(MatcherSettlementPlan plan) {
-        if (!pendingReservationsBySequence.containsKey(plan.coreSequence())) return;
+    void unindexMatcherPendingReservations(MatcherSettlementPlan plan) {
+        if (!pendingReservations.pendingReservationsBySequence.containsKey(plan.coreSequence())) return;
         for (int index = 0; index < plan.orderCount(); index++) {
             long orderId = plan.orderId(index);
-            if (!pendingReservationsBySequence.contains(plan.coreSequence(), orderId)) continue;
-            long userId = pendingReservationUsers.getOrDefault(orderId, 0);
+            if (!pendingReservations.pendingReservationsBySequence.contains(plan.coreSequence(), orderId)) continue;
+            long userId = pendingReservations.pendingReservationUsers.getOrDefault(orderId, 0);
             if (userId == 0) throw new IllegalStateException("matcher pending reservation owner is missing");
-            unindexPendingReservation(orderId, plan.coreSequence(), userId,
-                    Math.subtractExact(totalPendingReservations, 1));
+            pendingReservations.unindexPendingReservation(orderId, plan.coreSequence(), userId,
+                    Math.subtractExact(pendingReservations.totalPendingReservations, 1));
         }
-    }
-
-    public RuntimeTreasuryDelta applyOrderBatchMatcherSettlement(
-            long coreSequence, long expectedLaneMask, long takerOrderId,
-            CoreMatchingResult matchingResult, RuntimeIdentityRegistry identities,
-            TerminalOrderSink terminalOrderSink) {
-        if (!orderBatchMutationScope) {
-            throw new IllegalStateException("blocking matcher settlement is restricted to one order batch");
-        }
-        OrderRuntime taker = order(takerOrderId);
-        if (taker == null) throw new IllegalStateException("taker order is missing");
-        MatcherSettlementPlan plan = MatcherSettlementPlan.build(coreSequence, takerOrderId, taker.userId(),
-                new long[]{takerOrderId}, matchingResult, this, identities);
-        if (plan.requiredLaneMask() != expectedLaneMask) {
-            throw new IllegalStateException("matcher settlement lane mask mismatch");
-        }
-        MatcherSettlementEvent event = dispatchMatcherSettlement(coreSequence, expectedLaneMask,
-                0, -1, -1, plan, matchingResult, identities, true);
-        awaitOrderBatchMatcherSettlement(event, System.nanoTime() + ORDER_BATCH_SETTLEMENT_TIMEOUT_NANOS);
-        // Sequential batch items share one funds boundary. Carry Lane-computed endpoints into
-        // that boundary; appending an item delta separately would count the same mutation twice.
-        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-            if ((expectedLaneMask & (1L << laneId)) != 0) {
-                patchBalancesBeforeByLane[laneId].mergeSequential(event.changes().balancePatches[laneId]);
-            }
-        }
-        RuntimeTreasuryDelta result = collectMatcherSettlement(event, null, terminalOrderSink);
-        releaseMatcherSettlement(event);
-        return result;
-    }
-
-    void awaitOrderBatchMatcherSettlement(MatcherSettlementEvent event, long deadlineNanos) {
-        // This is still a completion fence: no collection/recycling or next batch item on failure.
-        // Check operational failure periodically without a clock read on every spin.
-        int spins = 0;
-        while (!event.complete()) {
-            if ((spins++ & 1_023) == 0) {
-                assertAccountLanesHealthy();
-                if (Thread.currentThread().isInterrupted() || System.nanoTime() - deadlineNanos >= 0) {
-                    throw new IllegalStateException("order batch matcher settlement interrupted or timed out");
-                }
-            }
-            Thread.onSpinWait();
-        }
-        assertAccountLanesHealthy();
-    }
-
-    public RuntimeTreasuryDelta applyNoTradeMatcherSettlements(
-            long coreSequence, long userId, java.util.List<Long> takerOrderIds,
-            java.util.List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities) {
-        assertOwner();
-        if (coreSequence <= 0 || userId <= 0 || takerOrderIds == null || matchingResults == null
-                || takerOrderIds.isEmpty() || takerOrderIds.size() != matchingResults.size()
-                || identities == null) {
-            throw new IllegalArgumentException("invalid no-trade matcher settlement batch");
-        }
-        MatcherSettlementPlan[] plans = new MatcherSettlementPlan[takerOrderIds.size()];
-        long expectedLaneMask = topology.accountLaneMask(userId);
-        for (int index = 0; index < takerOrderIds.size(); index++) {
-            long takerOrderId = takerOrderIds.get(index);
-            CoreMatchingResult matchingResult = matchingResults.get(index);
-            if (matchingResult == null || matchingResult.nativeCommand().coreSequence() != coreSequence
-                    || matchingResult.matcherEvents().stream()
-                    .anyMatch(event -> event.eventType() == exchange.core2.core.common.MatcherEventType.TRADE)) {
-                throw new IllegalArgumentException("invalid no-trade matcher settlement result");
-            }
-            OrderRuntime taker = order(takerOrderId);
-            if (taker == null || taker.userId() != userId) {
-                throw new IllegalStateException("no-trade taker order is missing");
-            }
-            CoreInstrumentState instrument = instrument(identities.symbol(taker.symbolId()));
-            if (instrument == null) throw new IllegalStateException("match instrument is missing");
-            if (productLine.isDerivative()) {
-                RuntimeDerivativeMatchProcessor.validateAndPrepare(
-                        takerOrderId, matchingResult.matcherEvents(), this, identities);
-            } else {
-                RuntimeSpotMatchProcessor.validate(takerOrderId, matchingResult.matcherEvents(), this);
-            }
-            MatcherSettlementPlan plan = MatcherSettlementPlan.build(coreSequence, takerOrderId, userId,
-                    new long[]{takerOrderId}, matchingResult, this, identities);
-            if (plan.requiredLaneMask() != expectedLaneMask) {
-                throw new IllegalStateException("no-trade matcher settlement lane mask mismatch");
-            }
-            plans[index] = plan;
-        }
-        MatcherSettlementEvent[] events = new MatcherSettlementEvent[plans.length];
-        for (int index = 0; index < plans.length; index++) {
-            events[index] = dispatchMatcherSettlement(coreSequence, expectedLaneMask, 0,
-                    -1, -1, plans[index], matchingResults.get(index), identities);
-        }
-        awaitMatcherSettlementBatch(events);
-        aggregateTreasuryDeltaScratch.clear();
-        for (MatcherSettlementEvent event : events) {
-            aggregateTreasuryDeltaScratch.merge(collectMatcherSettlement(event));
-            releaseMatcherSettlement(event);
-        }
-        return aggregateTreasuryDeltaScratch;
-    }
-
-    public MatcherSettlementEvent[] dispatchNoTradeMatcherSettlements(
-            long coreSequence, long userId, java.util.List<Long> takerOrderIds,
-            java.util.List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities) {
-        assertOwner();
-        if (coreSequence <= 0 || userId <= 0 || takerOrderIds == null || matchingResults == null
-                || takerOrderIds.isEmpty() || takerOrderIds.size() != matchingResults.size()
-                || identities == null) {
-            throw new IllegalArgumentException("invalid no-trade matcher settlement batch");
-        }
-        MatcherSettlementPlan[] plans = new MatcherSettlementPlan[takerOrderIds.size()];
-        long expectedLaneMask = topology.accountLaneMask(userId);
-        for (int index = 0; index < takerOrderIds.size(); index++) {
-            long takerOrderId = takerOrderIds.get(index);
-            CoreMatchingResult matchingResult = matchingResults.get(index);
-            if (matchingResult == null || matchingResult.nativeCommand().coreSequence() != coreSequence
-                    || hasTrade(matchingResult)) {
-                throw new IllegalArgumentException("invalid no-trade matcher settlement result");
-            }
-            OrderRuntime taker = order(takerOrderId);
-            if (taker == null || taker.userId() != userId) {
-                throw new IllegalStateException("no-trade taker order is missing");
-            }
-            CoreInstrumentState instrument = instrument(identities.symbol(taker.symbolId()));
-            if (instrument == null) throw new IllegalStateException("match instrument is missing");
-            if (productLine.isDerivative()) {
-                RuntimeDerivativeMatchProcessor.validateAndPrepare(
-                        takerOrderId, matchingResult.matcherEvents(), this, identities);
-            } else {
-                RuntimeSpotMatchProcessor.validate(takerOrderId, matchingResult.matcherEvents(), this);
-            }
-            MatcherSettlementPlan plan = MatcherSettlementPlan.build(coreSequence, takerOrderId, userId,
-                    new long[]{takerOrderId}, matchingResult, this, identities);
-            if (plan.requiredLaneMask() != expectedLaneMask) {
-                throw new IllegalStateException("no-trade matcher settlement lane mask mismatch");
-            }
-            plans[index] = plan;
-        }
-        MatcherSettlementEvent[] events = new MatcherSettlementEvent[plans.length];
-        for (int index = 0; index < plans.length; index++) {
-            events[index] = dispatchMatcherSettlement(coreSequence, expectedLaneMask, 0,
-                    -1, -1, plans[index], matchingResults.get(index), identities);
-        }
-        return events;
-    }
-
-    public RuntimeTreasuryDelta applyPerpetualMatcherSettlements(
-            long coreSequence, List<Long> takerOrderIds, List<Long> expectedLaneMasks,
-            List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities) {
-        assertOwner();
-        if (!productLine.isDerivative() || coreSequence <= 0 || takerOrderIds == null
-                || expectedLaneMasks == null || matchingResults == null || takerOrderIds.isEmpty()
-                || takerOrderIds.size() != expectedLaneMasks.size()
-                || takerOrderIds.size() != matchingResults.size() || identities == null) {
-            throw new IllegalArgumentException("invalid perpetual matcher settlement batch");
-        }
-        long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;
-        List<PerpetualMatcherSettlement> settlements = new ArrayList<>(takerOrderIds.size());
-        for (int index = 0; index < takerOrderIds.size(); index++) {
-            long takerOrderId = takerOrderIds.get(index);
-            long expectedLaneMask = expectedLaneMasks.get(index);
-            CoreMatchingResult matchingResult = matchingResults.get(index);
-            if (takerOrderId <= 0 || expectedLaneMask == 0 || (expectedLaneMask & ~validMask) != 0
-                    || matchingResult == null || matchingResult.nativeCommand().coreSequence() != coreSequence) {
-                throw new IllegalArgumentException("invalid perpetual matcher settlement item");
-            }
-            OrderRuntime taker = order(takerOrderId);
-            if (taker == null) throw new IllegalStateException("taker order is missing");
-            CoreInstrumentState instrument = instrument(identities.symbol(taker.symbolId()));
-            if (instrument == null) throw new IllegalStateException("match instrument is missing");
-            MatcherSettlementPlan plan = MatcherSettlementPlan.build(coreSequence, takerOrderId, taker.userId(),
-                    new long[]{takerOrderId}, matchingResult, this, identities);
-            if (plan.requiredLaneMask() != expectedLaneMask) {
-                throw new IllegalStateException("perpetual matcher settlement lane mask mismatch");
-            }
-            settlements.add(new PerpetualMatcherSettlement(expectedLaneMask, matchingResult, plan));
-        }
-        long[] primitiveTakerOrderIds = new long[takerOrderIds.size()];
-        for (int index = 0; index < primitiveTakerOrderIds.length; index++) {
-            primitiveTakerOrderIds[index] = takerOrderIds.get(index);
-        }
-        MatcherSettlementPlan.validateAndPrepareBatch(
-                primitiveTakerOrderIds, matchingResults, this, identities, matcherBatchValidationScratch);
-
-        MatcherSettlementEvent[] events = new MatcherSettlementEvent[settlements.size()];
-        for (int index = 0; index < settlements.size(); index++) {
-            PerpetualMatcherSettlement settlement = settlements.get(index);
-            events[index] = dispatchMatcherSettlement(coreSequence, settlement.expectedLaneMask(), 0,
-                    -1, -1, settlement.plan(), settlement.matchingResult(), identities);
-        }
-        awaitMatcherSettlementBatch(events);
-        aggregateTreasuryDeltaScratch.clear();
-        for (MatcherSettlementEvent event : events) {
-            aggregateTreasuryDeltaScratch.merge(collectMatcherSettlement(event));
-            releaseMatcherSettlement(event);
-        }
-        return aggregateTreasuryDeltaScratch;
-    }
-
-    public MatcherSettlementEvent[] dispatchMatcherSettlementBatch(
-            long coreSequence, long[] takerOrderIds, long[] expectedLaneMasks,
-            List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities,
-            long commitTimestamp, long commitClusterPosition) {
-        assertOwner();
-        if (coreSequence <= 0 || takerOrderIds == null
-                || expectedLaneMasks == null || matchingResults == null || takerOrderIds.length == 0
-                || takerOrderIds.length != expectedLaneMasks.length
-                || takerOrderIds.length != matchingResults.size() || identities == null
-                || commitTimestamp < 0 || commitClusterPosition < 0) {
-            throw new IllegalArgumentException("invalid matcher settlement batch");
-        }
-        long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;
-        MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();
-        if (event == null) event = new MatcherSettlementEvent();
-        MatcherSettlementEvent.BatchStorage storage = event.batchStorage(takerOrderIds.length);
-        MatcherSettlementPlan[] plans = storage.plans;
-        CoreInstrumentState[] instruments = storage.instruments;
-        int[] baseAssetIds = storage.baseAssetIds;
-        int[] quoteAssetIds = storage.quoteAssetIds;
-        int[] settleAssetIds = storage.settleAssetIds;
-        boolean prepared = false;
-        try {
-            long batchLaneMask = 0;
-            for (int index = 0; index < takerOrderIds.length; index++) {
-                long takerOrderId = takerOrderIds[index];
-                long expectedLaneMask = expectedLaneMasks[index];
-                CoreMatchingResult matchingResult = matchingResults.get(index);
-                if (takerOrderId <= 0 || expectedLaneMask == 0 || (expectedLaneMask & ~validMask) != 0
-                        || matchingResult == null || matchingResult.nativeCommand().coreSequence() != coreSequence) {
-                    throw new IllegalArgumentException("invalid matcher settlement item");
-                }
-                OrderRuntime taker = order(takerOrderId);
-                if (taker == null) throw new IllegalStateException("taker order is missing");
-                MatcherSettlementPlan plan = MatcherSettlementPlan.build(coreSequence, takerOrderId, taker.userId(),
-                        new long[]{takerOrderId}, matchingResult, this, identities);
-                if (plan.requiredLaneMask() != expectedLaneMask) {
-                    throw new IllegalStateException("matcher settlement lane mask mismatch");
-                }
-                plans[index] = plan;
-                CoreInstrumentState instrument = instrument(identities.symbol(taker.symbolId()));
-                if (instrument == null) throw new IllegalStateException("match instrument is missing");
-                instruments[index] = instrument;
-                baseAssetIds[index] = identities.assetId(instrument.baseAsset());
-                quoteAssetIds[index] = identities.assetId(instrument.quoteAsset());
-                settleAssetIds[index] = identities.assetId(instrument.settleAsset());
-                batchLaneMask |= expectedLaneMask;
-            }
-            MatcherSettlementPlan.validateAndPrepareBatch(
-                    takerOrderIds, matchingResults, this, identities, matcherBatchValidationScratch);
-            prepared = true; // Once preparation starts, failures are fatal; never recycle a partially prepared event.
-            event.prepareBatch(coreSequence, batchLaneMask, commitTimestamp, commitClusterPosition,
-                    plans, this, identities, instruments,
-                    baseAssetIds, quoteAssetIds, settleAssetIds, accountLanes.length);
-            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-                if ((batchLaneMask & 1L << laneId) == 0) continue;
-                if (!accountLanesStarted) event.execute(accountLanes[laneId]);
-                else {
-                    accountLaneQueueHighWaterMarks[laneId] = Math.max(
-                            accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
-                    laneWorkers[laneId].submit(event);
-                }
-            }
-            return new MatcherSettlementEvent[]{event};
-        } finally {
-            if (!prepared) {
-                event.discardBatchStorage();
-                matcherSettlementEventPool.addFirst(event);
-            }
-        }
-    }
-
-    public MatcherSettlementEvent[] dispatchSpotMatcherSettlements(
-            long coreSequence, List<Long> takerOrderIds, List<Long> expectedLaneMasks,
-            List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities) {
-        assertOwner();
-        if (productLine.isDerivative() || coreSequence <= 0 || takerOrderIds == null
-                || expectedLaneMasks == null || matchingResults == null || takerOrderIds.isEmpty()
-                || takerOrderIds.size() != expectedLaneMasks.size()
-                || takerOrderIds.size() != matchingResults.size() || identities == null) {
-            throw new IllegalArgumentException("invalid spot matcher settlement batch");
-        }
-        long validMask = accountLanes.length == Long.SIZE ? -1L : (1L << accountLanes.length) - 1L;
-        MatcherSettlementPlan[] plans = new MatcherSettlementPlan[takerOrderIds.size()];
-        for (int index = 0; index < takerOrderIds.size(); index++) {
-            long takerOrderId = takerOrderIds.get(index);
-            long expectedLaneMask = expectedLaneMasks.get(index);
-            CoreMatchingResult matchingResult = matchingResults.get(index);
-            if (takerOrderId <= 0 || expectedLaneMask == 0 || (expectedLaneMask & ~validMask) != 0
-                    || matchingResult == null || matchingResult.nativeCommand().coreSequence() != coreSequence) {
-                throw new IllegalArgumentException("invalid spot matcher settlement item");
-            }
-            OrderRuntime taker = order(takerOrderId);
-            if (taker == null) throw new IllegalStateException("spot taker order is missing");
-            RuntimeSpotMatchProcessor.validate(takerOrderId, matchingResult.matcherEvents(), this);
-            MatcherSettlementPlan plan = MatcherSettlementPlan.build(coreSequence, takerOrderId, taker.userId(),
-                    new long[]{takerOrderId}, matchingResult, this, identities);
-            if (plan.requiredLaneMask() != expectedLaneMask) {
-                throw new IllegalStateException("spot matcher settlement lane mask mismatch");
-            }
-            plans[index] = plan;
-        }
-        MatcherSettlementEvent[] events = new MatcherSettlementEvent[plans.length];
-        for (int index = 0; index < plans.length; index++) {
-            events[index] = dispatchMatcherSettlement(coreSequence, expectedLaneMasks.get(index), 0,
-                    -1, -1, plans[index], matchingResults.get(index), identities);
-        }
-        return events;
-    }
-
-    public RuntimeTreasuryDelta collectMatcherSettlements(MatcherSettlementEvent[] events) {
-        return collectMatcherSettlements(events, null, null);
-    }
-
-    public RuntimeTreasuryDelta collectMatcherSettlements(
-            MatcherSettlementEvent[] events, RuntimeFundsAccumulator fundsAccumulator,
-            TerminalOrderSink terminalOrderSink) {
-        assertOwner();
-        if (events == null || events.length == 0) return null;
-        aggregateTreasuryDeltaScratch.clear();
-        for (MatcherSettlementEvent event : events) {
-            if (event == null || !event.complete()) return null;
-        }
-        for (MatcherSettlementEvent event : events) {
-            aggregateTreasuryDeltaScratch.merge(
-                    collectMatcherSettlement(event, fundsAccumulator, terminalOrderSink));
-            releaseMatcherSettlement(event);
-        }
-        return aggregateTreasuryDeltaScratch;
-    }
-
-    private static boolean hasTrade(CoreMatchingResult result) {
-        for (var event : result.matcherEvents()) {
-            if (event.eventType() == exchange.core2.core.common.MatcherEventType.TRADE) return true;
-        }
-        return false;
-    }
-
-    private static void awaitMatcherSettlementBatch(MatcherSettlementEvent[] events) {
-        for (MatcherSettlementEvent event : events) {
-            while (!event.complete()) Thread.onSpinWait();
-        }
-    }
-
-    private record PerpetualMatcherSettlement(
-            long expectedLaneMask,
-            CoreMatchingResult matchingResult,
-            MatcherSettlementPlan plan) {
     }
 
     void recordUserSettlementChanges(long userId, int assetId, long positionKey) {
@@ -2599,7 +1944,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (globalState == null || globalState.productLine() != productLine) {
             throw new IllegalArgumentException("global snapshot state is required");
         }
-        assertPendingReservationCounts();
+        pendingReservations.assertPendingReservationCounts();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             onLane(laneId, lane -> {
                 lane.requireSnapshot(fenceSequence);
@@ -2626,14 +1971,14 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void requireSnapshotFenceReady() {
         assertOwner();
-        assertPendingReservationCounts();
-        if (totalPendingReservations != 0 || !pendingReservationsBySequence.isEmpty()
-                || !pendingReservationUsers.isEmpty() || snapshotProjectionStateDirty()) {
+        pendingReservations.assertPendingReservationCounts();
+        if (pendingReservations.totalPendingReservations != 0 || !pendingReservations.pendingReservationsBySequence.isEmpty()
+                || !pendingReservations.pendingReservationUsers.isEmpty() || snapshotProjectionStateDirty()) {
             throw new IllegalStateException("runtime contains unfinished reservation or patch work");
         }
     }
 
-    private boolean snapshotProjectionStateDirty() {
+    boolean snapshotProjectionStateDirty() {
         return !changedUsers.isEmpty() || !changedBalances.isEmpty() || !changedOrders.isEmpty()
                 || !changedReservations.isEmpty() || !changedPositions.isEmpty()
                 || !changedLiquidations.isEmpty() || !changedMarkPrices.isEmpty()
@@ -2652,26 +1997,26 @@ public final class TradingRuntimeState implements AutoCloseable {
                 || patchNextLiquidationIdChanged || patchRiskScanControlChanged;
     }
 
-    private boolean hasCapturedUsers() {
+    boolean hasCapturedUsers() {
         for (LaneLongCaptures<UserRuntime> captured : patchUsersBeforeByLane) {
             if (!captured.isEmpty()) return true;
         }
         return false;
     }
 
-    private static boolean hasCaptured(LaneLongCaptures<?>[] capturedByLane) {
+    static boolean hasCaptured(LaneLongCaptures<?>[] capturedByLane) {
         for (LaneLongCaptures<?> captured : capturedByLane) if (!captured.isEmpty()) return true;
         return false;
     }
 
-    private boolean hasCapturedBalances() {
+    boolean hasCapturedBalances() {
         for (LaneBalancePatches captured : patchBalancesBeforeByLane) {
             if (captured.size() != 0) return true;
         }
         return false;
     }
 
-    private boolean hasCapturedClientOrders() {
+    boolean hasCapturedClientOrders() {
         for (LaneClientOrderCaptures captured : patchClientOrdersBeforeByLane) {
             if (captured.size() != 0) return true;
         }
@@ -2708,11 +2053,11 @@ public final class TradingRuntimeState implements AutoCloseable {
                 return null;
             });
         }
-        pendingReservationsBySequence.clear();
-        pendingReservationUsers.clear();
-        pendingReservationCountsByUser.clear();
-        totalPendingReservations = 0;
-        assertPendingReservationCounts();
+        pendingReservations.pendingReservationsBySequence.clear();
+        pendingReservations.pendingReservationUsers.clear();
+        pendingReservations.pendingReservationCountsByUser.clear();
+        pendingReservations.totalPendingReservations = 0;
+        pendingReservations.assertPendingReservationCounts();
     }
 
     public static void validateAccountLaneSnapshotManifest(
@@ -2812,7 +2157,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         orderBatchMutationScope = false;
     }
 
-    private void rejectUnsupportedOrderBatchMutation(String domain) {
+    void rejectUnsupportedOrderBatchMutation(String domain) {
         if (orderBatchMutationScope) {
             throw new IllegalStateException("order batch cannot mutate " + domain);
         }
@@ -2826,8 +2171,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (revisionCheckpoint < 0 || coreSequence <= 0) {
             throw new IllegalArgumentException("invalid runtime command rollback checkpoint");
         }
-        if (pendingReservationsBySequence.containsKey(coreSequence)) {
-            completePendingReservations(coreSequence);
+        if (pendingReservations.pendingReservationsBySequence.containsKey(coreSequence)) {
+            pendingReservations.completePendingReservations(coreSequence);
         }
         for (LaneClientOrderCaptures captured : patchClientOrdersBeforeByLane) {
             for (int index = 0; index < captured.size(); index++) {
@@ -2876,7 +2221,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         clearChangedKeys();
     }
 
-    private void rollbackCommandGlobals() {
+    void rollbackCommandGlobals() {
         patchLiquidationsBefore.forEach((id, before) -> {
             LiquidationRuntime current = liquidation(id);
             if (current != null) onLane(current.userId(), lane -> {
@@ -2951,11 +2296,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (patchRiskScanControlChanged) riskScanControl = patchRiskScanControlBefore;
     }
 
-    private static <K, V> void putOrRemove(Map<K, V> values, K key, V value) {
+    static <K, V> void putOrRemove(Map<K, V> values, K key, V value) {
         if (value == null) values.remove(key); else values.put(key, value);
     }
 
-    private static <V> void putOrRemove(IntObjectHashMap<V> values, int key, V value) {
+    static <V> void putOrRemove(IntObjectHashMap<V> values, int key, V value) {
         if (value == null) values.remove(key); else values.put(key, value);
     }
 
@@ -3054,7 +2399,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         return selected;
     }
 
-    private AccountLaneState riskCursorLane(long userId) {
+    AccountLaneState riskCursorLane(long userId) {
         assertOwner();
         AccountLaneState lane = laneCommandScope.get();
         if (lane == null && !accountLanesStarted) {
@@ -3122,7 +2467,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         return publishedReservations.get(orderId);
     }
 
-    private static int indexedLane(Long2LongHashMap laneIds, long entityId) {
+    static int indexedLane(Long2LongHashMap laneIds, long entityId) {
         long encodedLaneId = laneIds.getOrDefault(entityId, 0);
         return encodedLaneId == 0 ? -1 : Math.toIntExact(encodedLaneId - 1);
     }
@@ -3169,7 +2514,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         return hasLiquidationConflict(0,symbolId,0,true);
     }
 
-    private boolean hasLiquidationConflict(long userId, int symbolId, long excludedLiquidationId, boolean includeDebt) {
+    boolean hasLiquidationConflict(long userId, int symbolId, long excludedLiquidationId, boolean includeDebt) {
         assertOwner();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             if (userId != 0 && laneId != topology.accountLaneId(userId)) continue;
@@ -3237,7 +2582,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         return selected[0];
     }
 
-    private static int compareRiskProgress(RiskScanRuntime left, RiskScanRuntime right) {
+    static int compareRiskProgress(RiskScanRuntime left, RiskScanRuntime right) {
         int scheduled = Long.compare(left.lastScheduledRevision(), right.lastScheduledRevision());
         return scheduled != 0 ? scheduled : Integer.compare(left.symbolId(), right.symbolId());
     }
@@ -4062,7 +3407,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         cancelOrder(orderId, userId, releaseUnits, -1, -1);
     }
 
-    private void cancelOrder(long orderId, long userId, long releaseUnits,
+    void cancelOrder(long orderId, long userId, long releaseUnits,
                              long commitTimestamp, long commitPosition) {
         assertOwner();
         captureUserBefore(userId);
@@ -4293,7 +3638,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         return future;
     }
 
-    private RealtimeStateCapture realtimeCapture;
+    /** 实时事件编码出口；只能读取已提交或有快照屏障保护的值。 */
+    RealtimeStateCapture realtimeCapture;
 
     public void realtimeCapture(RealtimeStateCapture capture) { assertOwner(); realtimeCapture = capture; }
 
@@ -4340,19 +3686,19 @@ public final class TradingRuntimeState implements AutoCloseable {
         changedUsers.add(userId);
     }
 
-    private void changedOrder(long orderId) {
+    void changedOrder(long orderId) {
         changedOrders.put(orderId, order(orderId));
     }
 
-    private void changedOrder(long orderId, OrderRuntime order) {
+    void changedOrder(long orderId, OrderRuntime order) {
         changedOrders.put(orderId, order);
     }
 
-    private void changedPosition(long positionKey) {
+    void changedPosition(long positionKey) {
         changedPositions.put(positionKey, position(positionKey));
     }
 
-    private void changedPosition(long positionKey, PositionRuntime position) {
+    void changedPosition(long positionKey, PositionRuntime position) {
         changedPositions.put(positionKey, position);
     }
 
@@ -4427,7 +3773,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 releaseRetiredPositionIdentity(identities, positionKey));
     }
 
-    private void releaseRetiredPositionIdentity(RuntimeIdentityRegistry identities, long positionKey) {
+    void releaseRetiredPositionIdentity(RuntimeIdentityRegistry identities, long positionKey) {
         if (publishedPositions.get(positionKey) == null && publishedRiskSnapshots.get(positionKey) == null) {
             identities.releasePositionKey(positionKey);
         }
@@ -4435,7 +3781,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public long committedRevision() {
         assertOwner();
-        return Math.subtractExact(revision, totalPendingReservations);
+        return Math.subtractExact(revision, pendingReservations.totalPendingReservations);
     }
 
     public void appendFundsDelta(RuntimeFundsAccumulator accumulator) {
@@ -4470,7 +3816,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         });
     }
 
-    private static void prepareBalanceFundsDelta(LaneBalancePatches patches,
+    static void prepareBalanceFundsDelta(LaneBalancePatches patches,
                                                  RuntimeFundsAccumulator accumulator) {
         accumulator.clear();
         for (int index = 0; index < patches.size(); index++) {
@@ -4487,7 +3833,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    private static void appendBalanceFundsDelta(LaneBalancePatches balances,
+    static void appendBalanceFundsDelta(LaneBalancePatches balances,
                                                 RuntimeFundsAccumulator accumulator) {
         for (int index = 0; index < balances.size(); index++) {
             long userId = balances.userId(index);
@@ -4503,39 +3849,39 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    private static long available(RuntimeFactFrame.UserBalance value) {
+    static long available(RuntimeFactFrame.UserBalance value) {
         return value == null ? 0 : value.availableUnits();
     }
 
-    private static long locked(RuntimeFactFrame.UserBalance value) {
+    static long locked(RuntimeFactFrame.UserBalance value) {
         return value == null ? 0 : value.lockedUnits();
     }
 
-    private static long fee(RuntimeFactFrame.TreasuryAssetValue value) {
+    static long fee(RuntimeFactFrame.TreasuryAssetValue value) {
         return value == null ? 0 : value.fee();
     }
 
-    private static long insurance(RuntimeFactFrame.TreasuryAssetValue value) {
+    static long insurance(RuntimeFactFrame.TreasuryAssetValue value) {
         return value == null ? 0 : value.insurance();
     }
 
-    private static long deficit(RuntimeFactFrame.TreasuryAssetValue value) {
+    static long deficit(RuntimeFactFrame.TreasuryAssetValue value) {
         return value == null ? 0 : value.deficit();
     }
 
-    private static long liquidationFee(RuntimeFactFrame.TreasuryAssetValue value) {
+    static long liquidationFee(RuntimeFactFrame.TreasuryAssetValue value) {
         return value == null ? 0 : value.liquidationFee();
     }
 
-    private static long fundingResidual(RuntimeFactFrame.TreasuryAssetValue value) {
+    static long fundingResidual(RuntimeFactFrame.TreasuryAssetValue value) {
         return value == null ? 0 : value.fundingResidual();
     }
 
-    private static long roundingResidual(RuntimeFactFrame.TreasuryAssetValue value) {
+    static long roundingResidual(RuntimeFactFrame.TreasuryAssetValue value) {
         return value == null ? 0 : value.roundingResidual();
     }
 
-    private static long clearingPnl(RuntimeFactFrame.TreasuryAssetValue value) {
+    static long clearingPnl(RuntimeFactFrame.TreasuryAssetValue value) {
         return value == null ? 0 : value.clearingPnl();
     }
 
@@ -4561,7 +3907,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         return captured == null ? order(orderId) : captured.value();
     }
 
-    private RuntimeFactFrame.TreasuryAssetValue treasuryAssetValue(int assetId) {
+    RuntimeFactFrame.TreasuryAssetValue treasuryAssetValue(int assetId) {
         long fee = treasury.fee(assetId);
         long insurance = treasury.insurance(assetId);
         long deficit = treasury.insuranceDeficit(assetId);
@@ -4622,19 +3968,19 @@ public final class TradingRuntimeState implements AutoCloseable {
         patchRiskScanControlChanged = false;
     }
 
-    private static void clearChanged(LongHashSet values) {
+    static void clearChanged(LongHashSet values) {
         boolean compact = values.size() >= CHANGE_KEY_COMPACTION_THRESHOLD;
         values.clear();
         if (compact) values.compact();
     }
 
-    private static void clearChanged(IntHashSet values) {
+    static void clearChanged(IntHashSet values) {
         boolean compact = values.size() >= CHANGE_KEY_COMPACTION_THRESHOLD;
         values.clear();
         if (compact) values.compact();
     }
 
-    private static <T> void removeChangedMapEntries(LongObjectHashMap<T> values, LongHashSet changedKeys) {
+    static <T> void removeChangedMapEntries(LongObjectHashMap<T> values, LongHashSet changedKeys) {
         changedKeys.forEach(values::removeKey);
         if (!values.isEmpty()) {
             throw new IllegalStateException("changed map contains an untracked key");
@@ -4748,7 +4094,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         reserveOrder(order, reservation, clientKey, reservation.reservedUnits());
     }
 
-    private void reserveOrder(OrderRuntime order, ReservationRuntime reservation,
+    void reserveOrder(OrderRuntime order, ReservationRuntime reservation,
                               long clientKey, long reservedUnits) {
         assertOwner();
         long orderId = order.orderId();
@@ -4862,7 +4208,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    private static void indexPosition(AccountLaneState lane, long positionKey, PositionRuntime position) {
+    static void indexPosition(AccountLaneState lane, long positionKey, PositionRuntime position) {
         addUserEntity(lane.positionKeysByUser, position.userId(), positionKey);
         if (position.signedQuantitySteps() == 0) return;
         LongObjectHashMap<LongHashSet> byUser = lane.positionKeysBySymbolAndUser.get(position.symbolId());
@@ -4878,7 +4224,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         keys.add(positionKey);
     }
 
-    private static void unindexPosition(AccountLaneState lane, long positionKey, PositionRuntime position) {
+    static void unindexPosition(AccountLaneState lane, long positionKey, PositionRuntime position) {
         removeUserEntity(lane.positionKeysByUser, position.userId(), positionKey);
         LongObjectHashMap<LongHashSet> byUser = lane.positionKeysBySymbolAndUser.get(position.symbolId());
         LongHashSet keys = byUser == null ? null : byUser.get(position.userId());
@@ -4887,7 +4233,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (byUser.isEmpty()) lane.positionKeysBySymbolAndUser.remove(position.symbolId());
     }
 
-    private void changedBalance(long userId, int assetId) {
+    void changedBalance(long userId, int assetId) {
         IntHashSet assets = changedBalances.get(userId);
         if (assets == null) {
             assets = new IntHashSet();
@@ -4896,20 +4242,20 @@ public final class TradingRuntimeState implements AutoCloseable {
         assets.add(assetId);
     }
 
-    private static TreeSet<Long> toSortedSet(LongHashSet values) {
+    static TreeSet<Long> toSortedSet(LongHashSet values) {
         TreeSet<Long> sorted = new TreeSet<>();
         values.forEach(sorted::add);
         return sorted;
     }
 
-    private void captureUserBefore(long userId) {
+    void captureUserBefore(long userId) {
         if (matcherSettlementChangesScope.get() != null) return;
         LaneLongCaptures<UserRuntime> captured =
                 patchUsersBeforeByLane[topology.accountLaneId(userId)];
         if (!captured.containsKey(userId)) captured.put(userId, user(userId));
     }
 
-    private void rollbackUser(long userId, UserRuntime before) {
+    void rollbackUser(long userId, UserRuntime before) {
         onLane(userId, lane -> {
             if (before == null) {
                 lane.users.remove(userId);
@@ -4923,7 +4269,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         publishUser(userId, before);
     }
 
-    private void rollbackBalance(long userId, int assetId, RuntimeFactFrame.UserBalance before) {
+    void rollbackBalance(long userId, int assetId, RuntimeFactFrame.UserBalance before) {
         onLane(userId, lane -> {
             IntObjectHashMap<BalanceRuntime> balances = lane.balances.get(userId);
             if (before == null) {
@@ -4943,7 +4289,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         });
     }
 
-    private void rollbackOrder(long orderId, OrderRuntime before) {
+    void rollbackOrder(long orderId, OrderRuntime before) {
         OrderRuntime current = order(orderId);
         if (current != null) onLane(current.userId(), lane -> { lane.removeOrder(orderId); return null; });
         if (before == null) {
@@ -4956,7 +4302,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    private void rollbackReservation(long orderId, ReservationRuntime before) {
+    void rollbackReservation(long orderId, ReservationRuntime before) {
         ReservationRuntime current = reservation(orderId);
         if (current != null) onLane(current.userId(), lane -> {
             lane.reservations.remove(orderId);
@@ -4977,7 +4323,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    private void rollbackPosition(long positionKey) {
+    void rollbackPosition(long positionKey) {
         PositionRuntime current = position(positionKey);
         int laneId = current == null ? -1 : topology.accountLaneId(current.userId());
         PositionRuntime before = laneId >= 0 && patchPositionsBeforeByLane[laneId].containsKey(positionKey)
@@ -5010,7 +4356,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    private void captureBalanceBefore(long userId, int assetId) {
+    void captureBalanceBefore(long userId, int assetId) {
         MatcherSettlementChanges changes = matcherSettlementChangesScope.get();
         LaneBalancePatches captured = changes == null
                 ? patchBalancesBeforeByLane[topology.accountLaneId(userId)]
@@ -5027,14 +4373,14 @@ public final class TradingRuntimeState implements AutoCloseable {
         });
     }
 
-    private static void captureBalanceBefore(AccountLaneState lane, LaneBalancePatches captured,
+    static void captureBalanceBefore(AccountLaneState lane, LaneBalancePatches captured,
                                              long userId, int assetId) {
         IntObjectHashMap<BalanceRuntime> balances = lane.balances.get(userId);
         BalanceRuntime balance = balances == null ? null : balances.get(assetId);
         captured.add(userId, assetId, balance, lane.pendingReservedUnits(userId, assetId));
     }
 
-    private void captureBalanceAfter(AccountLaneState lane, long userId, int assetId) {
+    void captureBalanceAfter(AccountLaneState lane, long userId, int assetId) {
         MatcherSettlementChanges changes = matcherSettlementChangesScope.get();
         LaneBalancePatches captured = changes == null
                 ? patchBalancesBeforeByLane[lane.laneId()]
@@ -5044,7 +4390,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         captured.after(userId, assetId, balance, lane.pendingReservedUnits(userId, assetId));
     }
 
-    private void captureOrderBefore(long orderId) {
+    void captureOrderBefore(long orderId) {
         if (matcherSettlementChangesScope.get() != null) return;
         if (capturedOrderBefore(orderId) != null) return;
         OrderRuntime value = order(orderId);
@@ -5052,11 +4398,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         LaneLongCaptures<PatchOrderBefore> captured = patchOrdersBeforeByLane[laneId];
         if (!captured.containsKey(orderId)) {
             captured.put(orderId, new PatchOrderBefore(value,
-                    value != null && pendingReservation(orderId, value.userId())));
+                    value != null && pendingReservations.pendingReservation(orderId, value.userId())));
         }
     }
 
-    private void captureReservationBefore(long orderId) {
+    void captureReservationBefore(long orderId) {
         if (matcherSettlementChangesScope.get() != null) return;
         if (capturedReservationBefore(orderId) != null) return;
         ReservationRuntime value = reservation(orderId);
@@ -5064,16 +4410,16 @@ public final class TradingRuntimeState implements AutoCloseable {
         LaneLongCaptures<PatchReservationBefore> captured = patchReservationsBeforeByLane[laneId];
         if (!captured.containsKey(orderId)) {
             captured.put(orderId, new PatchReservationBefore(value,
-                    value != null && pendingReservation(orderId, value.userId())));
+                    value != null && pendingReservations.pendingReservation(orderId, value.userId())));
         }
     }
 
-    private boolean reservationPendingBefore(long orderId) {
+    boolean reservationPendingBefore(long orderId) {
         PatchReservationBefore before = capturedReservationBefore(orderId);
         return before != null && before.pending();
     }
 
-    private int captureLane(long entityId, long userId, Long2LongHashMap laneIds) {
+    int captureLane(long entityId, long userId, Long2LongHashMap laneIds) {
         AccountLaneState scoped = laneCommandScope.get();
         if (scoped != null) return scoped.laneId();
         if (userId > 0) return topology.accountLaneId(userId);
@@ -5081,7 +4427,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         return indexed >= 0 ? indexed : Math.floorMod(Long.hashCode(entityId), accountLanes.length);
     }
 
-    private PatchOrderBefore capturedOrderBefore(long orderId) {
+    PatchOrderBefore capturedOrderBefore(long orderId) {
         for (LaneLongCaptures<PatchOrderBefore> captured : patchOrdersBeforeByLane) {
             PatchOrderBefore value = captured.get(orderId);
             if (value != null || captured.containsKey(orderId)) return value;
@@ -5089,7 +4435,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         return null;
     }
 
-    private PatchReservationBefore capturedReservationBefore(long orderId) {
+    PatchReservationBefore capturedReservationBefore(long orderId) {
         for (LaneLongCaptures<PatchReservationBefore> captured : patchReservationsBeforeByLane) {
             PatchReservationBefore value = captured.get(orderId);
             if (value != null || captured.containsKey(orderId)) return value;
@@ -5097,22 +4443,22 @@ public final class TradingRuntimeState implements AutoCloseable {
         return null;
     }
 
-    private boolean reservationPendingAfter(long orderId) {
+    boolean reservationPendingAfter(long orderId) {
         ReservationRuntime current = reservation(orderId);
-        return current != null && pendingReservation(orderId, current.userId());
+        return current != null && pendingReservations.pendingReservation(orderId, current.userId());
     }
 
-    private Long visibleClientOrder(Long orderId, boolean before) {
+    Long visibleClientOrder(Long orderId, boolean before) {
         if (orderId == null) return null;
         boolean pending = before ? reservationPendingBefore(orderId) : reservationPendingAfter(orderId);
         return pending ? null : orderId;
     }
 
-    private void capturePositionBefore(long positionKey) {
+    void capturePositionBefore(long positionKey) {
         capturePositionBefore(positionKey, 0);
     }
 
-    private void capturePositionBefore(long positionKey, long fallbackUserId) {
+    void capturePositionBefore(long positionKey, long fallbackUserId) {
         if (matcherSettlementChangesScope.get() != null) return;
         PositionRuntime before = position(positionKey);
         long userId = before == null ? fallbackUserId : before.userId();
@@ -5123,27 +4469,27 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    private void captureLiquidationBefore(long liquidationId) {
+    void captureLiquidationBefore(long liquidationId) {
         rejectUnsupportedOrderBatchMutation("liquidation state");
         patchLiquidationsBefore.computeIfAbsent(liquidationId, id -> new PatchBefore<>(liquidation(id)));
     }
 
-    private void captureRiskSnapshotBefore(long positionKey) {
+    void captureRiskSnapshotBefore(long positionKey) {
         rejectUnsupportedOrderBatchMutation("risk snapshot state");
         patchRiskSnapshotsBefore.computeIfAbsent(positionKey, key -> new PatchBefore<>(riskSnapshot(key)));
     }
 
-    private void captureMarkPriceBefore(int symbolId) {
+    void captureMarkPriceBefore(int symbolId) {
         rejectUnsupportedOrderBatchMutation("mark-price state");
         patchMarkPricesBefore.computeIfAbsent(symbolId, id -> new PatchBefore<>(markPrices.get(id)));
     }
 
-    private void captureRiskScanBefore(int symbolId) {
+    void captureRiskScanBefore(int symbolId) {
         rejectUnsupportedOrderBatchMutation("risk-scan state");
         patchRiskScansBefore.computeIfAbsent(symbolId, id -> new PatchBefore<>(riskScans.get(id)));
     }
 
-    private void captureClientOrderBefore(long userId, long clientKey) {
+    void captureClientOrderBefore(long userId, long clientKey) {
         if (matcherSettlementChangesScope.get() != null) return;
         LaneClientOrderCaptures captured = patchClientOrdersBeforeByLane[topology.accountLaneId(userId)];
         if (!captured.contains(userId, clientKey)) {
@@ -5151,7 +4497,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
-    private static void addUserEntity(LongObjectHashMap<LongHashSet> index, long userId, long entityId) {
+    static void addUserEntity(LongObjectHashMap<LongHashSet> index, long userId, long entityId) {
         LongHashSet entities = index.get(userId);
         if (entities == null) {
             entities = new LongHashSet(2);
@@ -5160,14 +4506,14 @@ public final class TradingRuntimeState implements AutoCloseable {
         entities.add(entityId);
     }
 
-    private static void removeUserEntity(LongObjectHashMap<LongHashSet> index, long userId, long entityId) {
+    static void removeUserEntity(LongObjectHashMap<LongHashSet> index, long userId, long entityId) {
         LongHashSet entities = index.get(userId);
         if (entities == null) return;
         entities.remove(entityId);
         if (entities.isEmpty()) index.remove(userId);
     }
 
-    private static void putClientOrderIndex(AccountLaneState lane, long userId, long clientKey, long orderId) {
+    static void putClientOrderIndex(AccountLaneState lane, long userId, long clientKey, long orderId) {
         LongLongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
         if (userClientOrders == null) {
             userClientOrders = new LongLongHashMap(2);
@@ -5182,7 +4528,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         lane.clientKeysByOrderId.add(orderId, clientKey);
     }
 
-    private static Long removeClientOrderIndex(AccountLaneState lane, long userId, long clientKey) {
+    static Long removeClientOrderIndex(AccountLaneState lane, long userId, long clientKey) {
         LongLongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
         if (userClientOrders == null || !userClientOrders.containsKey(clientKey)) return null;
         long orderId = userClientOrders.get(clientKey);
@@ -5192,11 +4538,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         return orderId;
     }
 
-    private static void removeClientOrderReverse(AccountLaneState lane, long orderId, long clientKey) {
+    static void removeClientOrderReverse(AccountLaneState lane, long orderId, long clientKey) {
         lane.clientKeysByOrderId.remove(orderId, clientKey);
     }
 
-    private static void removeClientOrdersForOrder(AccountLaneState lane, long userId, long orderId) {
+    static void removeClientOrdersForOrder(AccountLaneState lane, long userId, long orderId) {
         LongLongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
         if (userClientOrders != null) {
             lane.clientKeysByOrderId.forEach(orderId, userClientOrders::removeKey);
@@ -5205,7 +4551,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         lane.clientKeysByOrderId.remove(orderId);
     }
 
-    private static void indexActiveLiquidation(AccountLaneState lane, LiquidationRuntime liquidation) {
+    static void indexActiveLiquidation(AccountLaneState lane, LiquidationRuntime liquidation) {
         if (!active(liquidation)) return;
         IntObjectHashMap<LongObjectHashMap<Long>> bySymbol = lane.activeLiquidationIndex.get(liquidation.userId());
         if (bySymbol == null) {
@@ -5224,7 +4570,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         bySide.put(liquidation.positionSide().ordinal(), liquidation.liquidationId());
     }
 
-    private static void removeActiveLiquidation(AccountLaneState lane, LiquidationRuntime liquidation) {
+    static void removeActiveLiquidation(AccountLaneState lane, LiquidationRuntime liquidation) {
         if (!active(liquidation)) return;
         IntObjectHashMap<LongObjectHashMap<Long>> bySymbol = lane.activeLiquidationIndex.get(liquidation.userId());
         LongObjectHashMap<Long> bySide = bySymbol == null ? null : bySymbol.get(liquidation.symbolId());
@@ -5234,33 +4580,38 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (bySymbol.isEmpty()) lane.activeLiquidationIndex.remove(liquidation.userId());
     }
 
-    private static boolean active(LiquidationRuntime liquidation) {
+    static boolean active(LiquidationRuntime liquidation) {
         return liquidation.status() != CoreLiquidationState.Status.COMPLETED
                 && liquidation.status() != CoreLiquidationState.Status.CANCELED;
     }
 
-    private static final class LaneClientOrderCaptures {
-        private long[] userIds = new long[4];
-        private long[] clientKeys = new long[4];
-        private long[] beforeOrderIds = new long[4];
-        private boolean[] presentBefore = new boolean[4];
-        private int size;
+    static final class LaneClientOrderCaptures {
+        /** 当前缓冲各项对应的用户 ID。 */
+        long[] userIds = new long[4];
+        /** 当前缓冲各项对应的内部客户单号键。 */
+        long[] clientKeys = new long[4];
+        /** 变更前客户单号指向的订单 ID。 */
+        long[] beforeOrderIds = new long[4];
+        /** 该实体在变更前是否存在，区分不存在和零值。 */
+        boolean[] presentBefore = new boolean[4];
+        /** 当前有效元素数量。 */
+        int size;
 
-        private int size() { return size; }
-        private long userId(int index) { return userIds[index]; }
-        private long clientKey(int index) { return clientKeys[index]; }
-        private Long beforeOrderId(int index) {
+        int size() { return size; }
+        long userId(int index) { return userIds[index]; }
+        long clientKey(int index) { return clientKeys[index]; }
+        Long beforeOrderId(int index) {
             return presentBefore[index] ? beforeOrderIds[index] : null;
         }
 
-        private boolean contains(long userId, long clientKey) {
+        boolean contains(long userId, long clientKey) {
             for (int index = 0; index < size; index++) {
                 if (userIds[index] == userId && clientKeys[index] == clientKey) return true;
             }
             return false;
         }
 
-        private void add(long userId, long clientKey, Long beforeOrderId) {
+        void add(long userId, long clientKey, Long beforeOrderId) {
             if (userId <= 0 || clientKey <= 0) {
                 throw new IllegalArgumentException("invalid client-order capture");
             }
@@ -5278,15 +4629,15 @@ public final class TradingRuntimeState implements AutoCloseable {
             size++;
         }
 
-        private void clear() {
+        void clear() {
             for (int index = 0; index < size; index++) presentBefore[index] = false;
             size = 0;
         }
 
     }
 
-    private static final class LaneBalancePatches {
-        private void mergeSequential(LaneBalancePatches source) {
+    static final class LaneBalancePatches {
+        void mergeSequential(LaneBalancePatches source) {
             for (int sourceIndex = 0; sourceIndex < source.size; sourceIndex++) {
                 long userId = source.userIds[sourceIndex];
                 int assetId = source.assetIds[sourceIndex];
@@ -5307,33 +4658,50 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
         }
 
-        private long[] userIds = new long[8];
-        private int[] assetIds = new int[8];
-        private long[] availableBefore = new long[8];
-        private long[] lockedBefore = new long[8];
-        private long[] pendingBefore = new long[8];
-        private boolean[] presentBefore = new boolean[8];
-        private long[] availableAfter = new long[8];
-        private long[] lockedAfter = new long[8];
-        private long[] pendingAfter = new long[8];
-        private boolean[] presentAfter = new boolean[8];
-        private boolean[] capturedAfter = new boolean[8];
-        private long[] indexUserIds = new long[16];
-        private int[] indexAssetIds = new int[16];
-        private int[] indexSlots = new int[16];
-        private int[] indexGenerations = new int[16];
-        private int indexGeneration = 1;
-        private int size;
+        /** 当前缓冲各项对应的用户 ID。 */
+        long[] userIds = new long[8];
+        /** 余额缓冲各项对应的资产内部 ID。 */
+        int[] assetIds = new int[8];
+        /** 变更前可用余额。 */
+        long[] availableBefore = new long[8];
+        /** 变更前冻结余额。 */
+        long[] lockedBefore = new long[8];
+        /** 变更前尚未完成的预留金额。 */
+        long[] pendingBefore = new long[8];
+        /** 该实体在变更前是否存在，区分不存在和零值。 */
+        boolean[] presentBefore = new boolean[8];
+        /** 变更后可用余额。 */
+        long[] availableAfter = new long[8];
+        /** 变更后冻结余额。 */
+        long[] lockedAfter = new long[8];
+        /** 变更后尚未完成的预留金额。 */
+        long[] pendingAfter = new long[8];
+        /** 该实体在变更后是否存在。 */
+        boolean[] presentAfter = new boolean[8];
+        /** 该实体是否已捕获变更后值。 */
+        boolean[] capturedAfter = new boolean[8];
+        /** 余额索引槽对应的用户 ID。 */
+        long[] indexUserIds = new long[16];
+        /** 余额索引槽对应的资产 ID。 */
+        int[] indexAssetIds = new int[16];
+        /** 索引槽对应的连续存储下标。 */
+        int[] indexSlots = new int[16];
+        /** 每个索引槽所属的清空代次，避免每次清零整张索引。 */
+        int[] indexGenerations = new int[16];
+        /** 当前有效代次；溢出时清空代次数组。 */
+        int indexGeneration = 1;
+        /** 当前有效元素数量。 */
+        int size;
 
-        private int size() { return size; }
-        private long userId(int index) { return userIds[index]; }
-        private int assetId(int index) { return assetIds[index]; }
-        private RuntimeFactFrame.UserBalance before(int index) {
+        int size() { return size; }
+        long userId(int index) { return userIds[index]; }
+        int assetId(int index) { return assetIds[index]; }
+        RuntimeFactFrame.UserBalance before(int index) {
             return !presentBefore[index] ? null : new RuntimeFactFrame.UserBalance(
                     availableBefore[index], lockedBefore[index], pendingBefore[index]);
         }
 
-        private RuntimeFactFrame.UserBalance after(int index) {
+        RuntimeFactFrame.UserBalance after(int index) {
             if (!capturedAfter[index]) {
                 throw new IllegalStateException("balance mutation did not publish its lane after-state");
             }
@@ -5341,11 +4709,11 @@ public final class TradingRuntimeState implements AutoCloseable {
                     availableAfter[index], lockedAfter[index], pendingAfter[index]);
         }
 
-        private boolean contains(long userId, int assetId) {
+        boolean contains(long userId, int assetId) {
             return indexOf(userId, assetId) >= 0;
         }
 
-        private void add(long userId, int assetId, BalanceRuntime value, long pendingReservedUnits) {
+        void add(long userId, int assetId, BalanceRuntime value, long pendingReservedUnits) {
             if (indexOf(userId, assetId) >= 0) {
                 throw new IllegalStateException("balance capture key already exists");
             }
@@ -5382,7 +4750,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             size++;
         }
 
-        private void after(long userId, int assetId, BalanceRuntime value, long pendingReservedUnits) {
+        void after(long userId, int assetId, BalanceRuntime value, long pendingReservedUnits) {
             int index = indexOf(userId, assetId);
             if (index < 0) {
                 throw new IllegalStateException("balance after-state is missing its before-state");
@@ -5396,7 +4764,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
         }
 
-        private void clear() {
+        void clear() {
             size = 0;
             if (++indexGeneration == 0) {
                 java.util.Arrays.fill(indexGenerations, 0);
@@ -5404,7 +4772,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
         }
 
-        private void publishAvailableAt(TradingRuntimeState state, int index) {
+        void publishAvailableAt(TradingRuntimeState state, int index) {
             if (index < 0 || index >= size || !capturedAfter[index]) {
                 throw new IllegalStateException("balance mutation did not publish its lane after-state");
             }
@@ -5428,7 +4796,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             balances.put(assetId, availableAfter[index]);
         }
 
-        private int indexOf(long userId, int assetId) {
+        int indexOf(long userId, int assetId) {
             int mask = indexSlots.length - 1;
             int position = pairHash(userId, assetId) & mask;
             while (indexGenerations[position] == indexGeneration) {
@@ -5440,14 +4808,14 @@ public final class TradingRuntimeState implements AutoCloseable {
             return -1;
         }
 
-        private int emptyIndexPosition(long userId, int assetId) {
+        int emptyIndexPosition(long userId, int assetId) {
             int mask = indexSlots.length - 1;
             int position = pairHash(userId, assetId) & mask;
             while (indexGenerations[position] == indexGeneration) position = (position + 1) & mask;
             return position;
         }
 
-        private void ensureIndexCapacity(int requiredSize) {
+        void ensureIndexCapacity(int requiredSize) {
             if (requiredSize <= indexSlots.length / 2) return;
             int capacity = Math.multiplyExact(indexSlots.length, 2);
             indexUserIds = new long[capacity];
@@ -5464,7 +4832,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
         }
 
-        private static int pairHash(long userId, int assetId) {
+        static int pairHash(long userId, int assetId) {
             long value = userId ^ Integer.toUnsignedLong(assetId) * 0x9e3779b97f4a7c15L;
             value ^= value >>> 33;
             value *= 0xff51afd7ed558ccdL;
@@ -5478,192 +4846,47 @@ public final class TradingRuntimeState implements AutoCloseable {
      * command are visited; unlike an open-addressed map, historical capacity never becomes scan
      * work on the owner hot path.
      */
-    private static final class LaneLongCaptures<V> {
-        private long[] keys = new long[8];
-        private Object[] values = new Object[8];
-        private long[] indexKeys = new long[16];
-        private int[] indexSlots = new int[16];
-        private int[] indexGenerations = new int[16];
-        private int indexGeneration = 1;
-        private int size;
 
-        private int size() { return size; }
-        private boolean isEmpty() { return size == 0; }
+    record PatchBefore<T>(T value) {}
+    record PatchOrderBefore(OrderRuntime value, boolean pending) {}
+    record PatchReservationBefore(ReservationRuntime value, boolean pending) {}
 
-        private boolean containsKey(long key) { return indexOf(key) >= 0; }
-
-        private V get(long key) {
-            int index = indexOf(key);
-            return index < 0 ? null : value(index);
-        }
-
-        private void put(long key, V value) {
-            if (indexOf(key) >= 0) throw new IllegalStateException("capture key already exists");
-            ensureIndexCapacity(size + 1);
-            if (size == keys.length) {
-                int capacity = Math.multiplyExact(size, 2);
-                keys = java.util.Arrays.copyOf(keys, capacity);
-                values = java.util.Arrays.copyOf(values, capacity);
-            }
-            int indexPosition = emptyIndexPosition(key);
-            keys[size] = key;
-            values[size] = value;
-            indexKeys[indexPosition] = key;
-            indexSlots[indexPosition] = size;
-            indexGenerations[indexPosition] = indexGeneration;
-            size++;
-        }
-
-        private long key(int index) {
-            if (index < 0 || index >= size) throw new IndexOutOfBoundsException(index);
-            return keys[index];
-        }
-
-        @SuppressWarnings("unchecked")
-        private V value(int index) {
-            if (index < 0 || index >= size) throw new IndexOutOfBoundsException(index);
-            return (V) values[index];
-        }
-
-        private int indexOf(long key) {
-            int mask = indexSlots.length - 1;
-            int position = longHash(key) & mask;
-            while (indexGenerations[position] == indexGeneration) {
-                if (indexKeys[position] == key) return indexSlots[position];
-                position = (position + 1) & mask;
-            }
-            return -1;
-        }
-
-        private int emptyIndexPosition(long key) {
-            int mask = indexSlots.length - 1;
-            int position = longHash(key) & mask;
-            while (indexGenerations[position] == indexGeneration) position = (position + 1) & mask;
-            return position;
-        }
-
-        private void ensureIndexCapacity(int requiredSize) {
-            if (requiredSize <= indexSlots.length / 2) return;
-            int capacity = Math.multiplyExact(indexSlots.length, 2);
-            indexKeys = new long[capacity];
-            indexSlots = new int[capacity];
-            indexGenerations = new int[capacity];
-            indexGeneration = 1;
-            for (int index = 0; index < size; index++) {
-                int position = emptyIndexPosition(keys[index]);
-                indexKeys[position] = keys[index];
-                indexSlots[position] = index;
-                indexGenerations[position] = indexGeneration;
-            }
-        }
-
-        private static int longHash(long key) {
-            key ^= key >>> 33;
-            key *= 0xff51afd7ed558ccdL;
-            key ^= key >>> 33;
-            return (int) key;
-        }
-
-        private void clear() {
-            for (int index = 0; index < size; index++) values[index] = null;
-            size = 0;
-            if (++indexGeneration == 0) {
-                java.util.Arrays.fill(indexGenerations, 0);
-                indexGeneration = 1;
-            }
-        }
-    }
-
-    static final class PendingReservationSequenceIndex {
-        private static final long[] EMPTY_ORDER_IDS = new long[0];
-
-        private final LongLongHashMap firstOrderBySequence;
-        private final LongObjectHashMap<LongHashSet> additionalOrdersBySequence;
-
-        PendingReservationSequenceIndex(int initialCapacity) {
-            firstOrderBySequence = new LongLongHashMap(initialCapacity);
-            additionalOrdersBySequence = new LongObjectHashMap<>();
-        }
-
-        void add(long coreSequence, long orderId) {
-            long firstOrderId = firstOrderBySequence.getIfAbsent(coreSequence, 0);
-            if (firstOrderId == 0) {
-                firstOrderBySequence.put(coreSequence, orderId);
-                return;
-            }
-            if (firstOrderId == orderId) {
-                throw new IllegalStateException("reservation is already indexed for sequence");
-            }
-            LongHashSet additionalOrderIds = additionalOrdersBySequence.get(coreSequence);
-            if (additionalOrderIds == null) {
-                additionalOrderIds = new LongHashSet();
-                additionalOrdersBySequence.put(coreSequence, additionalOrderIds);
-            }
-            if (!additionalOrderIds.add(orderId)) {
-                throw new IllegalStateException("reservation is already indexed for sequence");
-            }
-        }
-
-        boolean containsKey(long coreSequence) {
-            return firstOrderBySequence.containsKey(coreSequence);
-        }
-
-        boolean contains(long coreSequence, long orderId) {
-            long firstOrderId = firstOrderBySequence.getIfAbsent(coreSequence, 0);
-            if (firstOrderId == orderId) return orderId != 0;
-            LongHashSet additionalOrderIds = additionalOrdersBySequence.get(coreSequence);
-            return additionalOrderIds != null && additionalOrderIds.contains(orderId);
-        }
-
-        long[] orderIds(long coreSequence) {
-            long firstOrderId = firstOrderBySequence.getIfAbsent(coreSequence, 0);
-            if (firstOrderId == 0) return EMPTY_ORDER_IDS;
-            LongHashSet additionalOrderIds = additionalOrdersBySequence.get(coreSequence);
-            if (additionalOrderIds == null || additionalOrderIds.isEmpty()) {
-                return new long[]{firstOrderId};
-            }
-            long[] additional = additionalOrderIds.toArray();
-            long[] orderIds = new long[additional.length + 1];
-            orderIds[0] = firstOrderId;
-            System.arraycopy(additional, 0, orderIds, 1, additional.length);
-            return orderIds;
-        }
-
-        void remove(long coreSequence, long orderId) {
-            long firstOrderId = firstOrderBySequence.getIfAbsent(coreSequence, 0);
-            if (firstOrderId == 0) {
-                throw new IllegalStateException("pending reservation sequence is missing");
-            }
-            LongHashSet additionalOrderIds = additionalOrdersBySequence.get(coreSequence);
-            if (firstOrderId != orderId) {
-                if (additionalOrderIds == null || !additionalOrderIds.remove(orderId)) {
-                    throw new IllegalStateException("pending reservation is missing from sequence");
-                }
-                if (additionalOrderIds.isEmpty()) additionalOrdersBySequence.removeKey(coreSequence);
-                return;
-            }
-            if (additionalOrderIds == null || additionalOrderIds.isEmpty()) {
-                firstOrderBySequence.removeKey(coreSequence);
-                return;
-            }
-            long promotedOrderId = additionalOrderIds.toArray()[0];
-            additionalOrderIds.remove(promotedOrderId);
-            firstOrderBySequence.put(coreSequence, promotedOrderId);
-            if (additionalOrderIds.isEmpty()) additionalOrdersBySequence.removeKey(coreSequence);
-        }
-
-        boolean isEmpty() {
-            return firstOrderBySequence.isEmpty();
-        }
-
-        void clear() {
-            firstOrderBySequence.clear();
-            additionalOrdersBySequence.clear();
-        }
-    }
-
-    private record PatchBefore<T>(T value) {}
-    private record PatchOrderBefore(OrderRuntime value, boolean pending) {}
-    private record PatchReservationBefore(ReservationRuntime value, boolean pending) {}
-
+    public void markPendingReservation(long userId, long orderId, long coreSequence) { pendingReservations.markPendingReservation(userId, orderId, coreSequence); }
+    public void completePendingReservation(long userId, long orderId, long coreSequence) { pendingReservations.completePendingReservation(userId, orderId, coreSequence); }
+    public void completePendingReservations(long coreSequence) { pendingReservations.completePendingReservations(coreSequence); }
+    public boolean hasPendingReservations() { return pendingReservations.hasPendingReservations(); }
+    public MatcherSettlementEvent dispatchMatcherSettlement(
+            long coreSequence, long expectedLaneMask, long commitSequence,
+            long commitTimestamp, long commitClusterPosition,
+            MatcherSettlementPlan plan, CoreMatchingResult matchingResult,
+            RuntimeIdentityRegistry identities) { return settlements.dispatchMatcherSettlement(coreSequence, expectedLaneMask, commitSequence, commitTimestamp, commitClusterPosition, plan, matchingResult, identities); }
+    public void releaseMatcherSettlement(MatcherSettlementEvent event) { settlements.releaseMatcherSettlement(event); }
+    public RuntimeTreasuryDelta applyOrderBatchMatcherSettlement(
+            long coreSequence, long expectedLaneMask, long takerOrderId,
+            CoreMatchingResult matchingResult, RuntimeIdentityRegistry identities,
+            TerminalOrderSink terminalOrderSink) { return settlements.applyOrderBatchMatcherSettlement(coreSequence, expectedLaneMask, takerOrderId, matchingResult, identities, terminalOrderSink); }
+    public RuntimeTreasuryDelta applyNoTradeMatcherSettlements(
+            long coreSequence, long userId, java.util.List<Long> takerOrderIds,
+            java.util.List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities) { return settlements.applyNoTradeMatcherSettlements(coreSequence, userId, takerOrderIds, matchingResults, identities); }
+    public MatcherSettlementEvent[] dispatchNoTradeMatcherSettlements(
+            long coreSequence, long userId, java.util.List<Long> takerOrderIds,
+            java.util.List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities) { return settlements.dispatchNoTradeMatcherSettlements(coreSequence, userId, takerOrderIds, matchingResults, identities); }
+    public RuntimeTreasuryDelta applyPerpetualMatcherSettlements(
+            long coreSequence, List<Long> takerOrderIds, List<Long> expectedLaneMasks,
+            List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities) { return settlements.applyPerpetualMatcherSettlements(coreSequence, takerOrderIds, expectedLaneMasks, matchingResults, identities); }
+    public MatcherSettlementEvent[] dispatchMatcherSettlementBatch(
+            long coreSequence, long[] takerOrderIds, long[] expectedLaneMasks,
+            List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities,
+            long commitTimestamp, long commitClusterPosition) { return settlements.dispatchMatcherSettlementBatch(coreSequence, takerOrderIds, expectedLaneMasks, matchingResults, identities, commitTimestamp, commitClusterPosition); }
+    public MatcherSettlementEvent[] dispatchSpotMatcherSettlements(
+            long coreSequence, List<Long> takerOrderIds, List<Long> expectedLaneMasks,
+            List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities) { return settlements.dispatchSpotMatcherSettlements(coreSequence, takerOrderIds, expectedLaneMasks, matchingResults, identities); }
+    public RuntimeTreasuryDelta collectMatcherSettlements(MatcherSettlementEvent[] events) { return settlements.collectMatcherSettlements(events); }
+    public RuntimeTreasuryDelta collectMatcherSettlements(
+            MatcherSettlementEvent[] events, RuntimeFundsAccumulator fundsAccumulator,
+            TerminalOrderSink terminalOrderSink) { return settlements.collectMatcherSettlements(events, fundsAccumulator, terminalOrderSink); }
+    boolean pendingReservation(long orderId, long userId) { return pendingReservations.pendingReservation(orderId, userId); }
+    long pendingReservedUnits(long userId, int assetId) { return pendingReservations.pendingReservedUnits(userId, assetId); }
+    int pendingReservationCount(long userId) { return pendingReservations.pendingReservationCount(userId); }
+    int pendingReservationCount() { return pendingReservations.pendingReservationCount(); }
 }

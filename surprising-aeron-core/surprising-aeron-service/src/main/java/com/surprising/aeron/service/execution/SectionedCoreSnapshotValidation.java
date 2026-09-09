@@ -96,7 +96,7 @@ final class SectionedCoreSnapshotValidation {
 
     static void validatePairing(
             HeaderManifest manifest,
-            Map<CoreProbeState.SourceKey, Long> sourceSequences,
+            Map<TradingCoreRuntime.SourceKey, Long> sourceSequences,
             CoreExportState exportState,
             MatcherSnapshot matcherSnapshot,
             TradingCoreState tradingState,
@@ -112,7 +112,7 @@ final class SectionedCoreSnapshotValidation {
         requireMatch(manifest.coreSequence() == matcherSnapshot.coreSequence(), "core sequence");
         requireMatch(manifest.appliedCommandCount() == manifest.coreSequence(), "applied sequence");
         requireMatch(manifest.matcherSequence() == matcherSnapshot.matcherSequence(), "matcher sequence");
-        requireMatch(manifest.businessStateHash() == CoreProbeState.canonicalBusinessStateHash(
+        requireMatch(manifest.businessStateHash() == TradingCoreRuntime.canonicalBusinessStateHash(
                         tradingState.businessStateHash(), feePolicies, pendingTransfers)
                 && manifest.businessStateHash() == matcherSnapshot.coreBusinessStateHash(), "business state hash");
         requireMatch(manifest.globalFundsHash()
@@ -126,7 +126,7 @@ final class SectionedCoreSnapshotValidation {
                 "instrument registry hash");
         requireMatch(manifest.activeOrderHash() == matcherSnapshot.activeOrderHash()
                 && manifest.activeOrderHash() == MatcherSnapshot.activeOrderHash(tradingState), "active order hash");
-        requireMatch(manifest.sourceSequenceDigest() == CoreProbeState.sourceSequenceDigest(sourceSequences),
+        requireMatch(manifest.sourceSequenceDigest() == TradingCoreRuntime.sourceSequenceDigest(sourceSequences),
                 "source sequence digest");
         if (exportState.enabled()) {
             requireMatch(manifest.outboxAcknowledgedSequence() == exportState.acknowledgedSequence(),

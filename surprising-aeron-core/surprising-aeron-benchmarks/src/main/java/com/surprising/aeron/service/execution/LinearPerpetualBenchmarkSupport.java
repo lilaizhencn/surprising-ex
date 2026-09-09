@@ -335,7 +335,7 @@ final class LinearPerpetualBenchmarkSupport {
                 }
                 SnapshotTemplate completed = harness.snapshotTemplate(
                         harness.state().laneTopology().accountLaneCount());
-                try (CoreProbeState restored = CoreProbeState.fromSnapshot(
+                try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(
                         completed.productLine(), completed.bytes())) {
                     if (restored.tradingState().businessStateHash() != completed.businessStateHash()) {
                         throw new IllegalStateException("order continuation snapshot recovery mismatch");
@@ -598,7 +598,7 @@ final class LinearPerpetualBenchmarkSupport {
 
     private static void verifySnapshot(Harness harness) {
         SnapshotTemplate snapshot = harness.snapshotTemplate(harness.state.laneTopology().accountLaneCount());
-        try (CoreProbeState restored = CoreProbeState.fromSnapshot(snapshot.productLine(), snapshot.bytes())) {
+        try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(snapshot.productLine(), snapshot.bytes())) {
             if (restored.tradingState().businessStateHash() != snapshot.businessStateHash()) {
                 throw new IllegalStateException("liquidation benchmark snapshot recovery mismatch");
             }
@@ -625,11 +625,11 @@ final class LinearPerpetualBenchmarkSupport {
 
     static Scenario snapshotRecovery(SnapshotTemplate template) {
         return new Scenario() {
-            private CoreProbeState restored;
+            private TradingCoreRuntime restored;
 
             @Override
             public long run() {
-                restored = CoreProbeState.fromSnapshot(ProductLine.LINEAR_PERPETUAL, template.bytes());
+                restored = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, template.bytes());
                 long actualHash = restored.tradingState().businessStateHash();
                 if (actualHash != template.businessStateHash()
                         || restored.laneTopology().accountLaneCount() != template.accountLanes()) {
@@ -764,7 +764,7 @@ final class LinearPerpetualBenchmarkSupport {
 
     private static Harness base(int accountLanes) {
         configureAccountLanes(accountLanes);
-        Harness harness = new Harness(new CoreProbeState(ProductLine.LINEAR_PERPETUAL), new Sequences());
+        Harness harness = new Harness(new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL), new Sequences());
         if (harness.state.laneTopology().accountLaneCount() != accountLanes) {
             harness.close();
             throw new IllegalStateException("Core did not start with requested account lane count");
@@ -809,7 +809,7 @@ final class LinearPerpetualBenchmarkSupport {
     }
 
     static final class Harness implements AutoCloseable {
-        private final CoreProbeState state;
+        private final TradingCoreRuntime state;
         private final Sequences sequences;
         private long executedMessages;
         private long acceptedMessages;
@@ -825,7 +825,7 @@ final class LinearPerpetualBenchmarkSupport {
         private OpenLoopBusinessLatencyRecorder businessLatencies;
         private Runnable admissionBackpressureDrain;
 
-        private Harness(CoreProbeState state, Sequences sequences) {
+        private Harness(TradingCoreRuntime state, Sequences sequences) {
             this.state = state;
             this.sequences = sequences;
         }
@@ -836,7 +836,7 @@ final class LinearPerpetualBenchmarkSupport {
 
         static Harness create(int accountLanes, ProductLine productLine) {
             configureAccountLanes(accountLanes);
-            Harness harness = new Harness(new CoreProbeState(productLine), new Sequences());
+            Harness harness = new Harness(new TradingCoreRuntime(productLine), new Sequences());
             if (harness.state.laneTopology().accountLaneCount() != accountLanes) {
                 harness.close();
                 throw new IllegalStateException("Core did not start with requested account lane count");
@@ -850,7 +850,7 @@ final class LinearPerpetualBenchmarkSupport {
 
         static Harness restore(SnapshotTemplate template, boolean deferBatchResponseValidation) {
             configureAccountLanes(template.accountLanes());
-            CoreProbeState restored = CoreProbeState.fromSnapshot(template.productLine(), template.bytes());
+            TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(template.productLine(), template.bytes());
             Harness harness = new Harness(restored, Sequences.after(
                     restored.appliedCommandCount(), template.nextClusterPosition()));
             harness.deferBatchResponseValidation = deferBatchResponseValidation;
@@ -1090,7 +1090,7 @@ final class LinearPerpetualBenchmarkSupport {
 
         private int commitReadyMatching(int maxCompletions, boolean awaitFirst,
                                         MatchingCompletionConsumer completionConsumer) {
-            int completed = state.commitReadyMatching(maxCompletions, benchmarkTimestamp(sequences.clusterPosition),
+            int completed = state.commits.commitReadyMatching(maxCompletions, benchmarkTimestamp(sequences.clusterPosition),
                     sequences.clusterPosition, awaitFirst, (sequence, response) -> {
                         PendingCommand pending = submittedMatching.peekFirst();
                         if (pending == null || pending.sequence != sequence) {
@@ -1209,7 +1209,7 @@ final class LinearPerpetualBenchmarkSupport {
             return state.productLine();
         }
 
-        CoreProbeState state() {
+        TradingCoreRuntime state() {
             return state;
         }
 

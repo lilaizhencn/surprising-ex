@@ -43,13 +43,13 @@ final class SectionedCoreSnapshotCodec {
         return buffer.getInt() == MAGIC && Short.toUnsignedInt(buffer.getShort()) == VERSION;
     }
 
-    static SectionedSnapshot encode(CoreProbeState state, MatcherSnapshot matcherSnapshot) {
+    static SectionedSnapshot encode(TradingCoreRuntime state, MatcherSnapshot matcherSnapshot) {
         return SectionedCoreSnapshotWriter.encode(
                 state, matcherSnapshot, matcherSnapshot.snapshotId(), matcherSnapshot.coreSequence(), 0, 0);
     }
 
     static SectionedSnapshot encode(
-            CoreProbeState state,
+            TradingCoreRuntime state,
             MatcherSnapshot matcherSnapshot,
             long snapshotId,
             long coreSequence,
@@ -60,7 +60,7 @@ final class SectionedCoreSnapshotCodec {
     }
 
     static CoreSnapshotImage capture(
-            CoreProbeState state,
+            TradingCoreRuntime state,
             MatcherSnapshot matcherSnapshot,
             long snapshotId,
             long coreSequence,
@@ -74,7 +74,7 @@ final class SectionedCoreSnapshotCodec {
         return SectionedCoreSnapshotWriter.encode(image);
     }
 
-    static CoreProbeState decode(byte[] snapshot, ProductLine expectedProductLine) {
+    static TradingCoreRuntime decode(byte[] snapshot, ProductLine expectedProductLine) {
         return recovery(snapshot).decode(expectedProductLine);
     }
 
@@ -96,7 +96,7 @@ final class SectionedCoreSnapshotCodec {
             delegate.accept(source, offset, length);
         }
 
-        CoreProbeState decode(ProductLine expectedProductLine) {
+        TradingCoreRuntime decode(ProductLine expectedProductLine) {
             return delegate.decode(expectedProductLine);
         }
 

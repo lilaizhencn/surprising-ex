@@ -14,7 +14,7 @@ class RealtimeTerminalEmissionTest {
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.EnumSource(ProductLine.class)
     void committedOrdersEmitOncePerEntity(ProductLine line) {
-            try(var state=new CoreProbeState(line)) {
+            try(var state=new TradingCoreRuntime(line)) {
                 var type=ContractType.valueOf(line.contractTypeCode());
                 String asset=type.isInverse()?"BTC":"USDT";
                 send(state,line,CoreMessageType.UPSERT_INSTRUMENT,0,
@@ -50,13 +50,13 @@ class RealtimeTerminalEmissionTest {
                 if(outbox.droppedBatches()!=0)throw new IllegalStateException("dropped audit frames");
             }
     }
-    private static void place(CoreProbeState state,ProductLine line,long user,long id,CoreOrderSide side,
+    private static void place(TradingCoreRuntime state,ProductLine line,long user,long id,CoreOrderSide side,
                               RealtimeStateCapture capture,RealtimeOutbox outbox,String label) {
         send(state,line,CoreMessageType.PLACE_ORDER,user,TradingCommandCodec.encodePlaceOrder(
                 new PlaceOrderCommand(id,"BTC-USDT",1,side,100,2,false,CoreMarginMode.CROSS,
                         CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"audit-"+id)),capture,outbox,label);
     }
-    private static void send(CoreProbeState state,ProductLine line,CoreMessageType type,long user,byte[] payload,
+    private static void send(TradingCoreRuntime state,ProductLine line,CoreMessageType type,long user,byte[] payload,
                              RealtimeStateCapture capture,RealtimeOutbox outbox,String label) {
         long seq=++sequence;
         var message=new CoreMessage(CoreMessageHeader.command(type,new UUID(55,seq),line,
@@ -64,7 +64,7 @@ class RealtimeTerminalEmissionTest {
         if(capture!=null)capture.begin(seq,TIME+seq,0,state.realtimeExportSequence());
         var response=state.apply(message);
         if(response.resultCode()==CoreResultCode.MATCHING_PENDING)
-            response=state.completeMatchingSynchronously(state.matchingSequence(message.header().commandId()),TIME+seq,seq);
+            response=state.commits.completeMatchingSynchronously(state.matchingSequence(message.header().commandId()),TIME+seq,seq);
         if(response.commandStatus()!=ResponseStatus.APPLIED)throw new IllegalStateException(label+" "+response.resultCode());
         if(capture==null)return;
         capture.commit(state.realtimeExportSequence());

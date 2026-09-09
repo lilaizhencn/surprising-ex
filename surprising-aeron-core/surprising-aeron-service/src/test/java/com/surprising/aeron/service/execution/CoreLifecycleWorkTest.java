@@ -35,8 +35,8 @@ class CoreLifecycleWorkTest {
 
     @Test
     void resumesAllWorkKindsFromSnapshotWithinBounds() {
-        CoreProbeState restored = stateWithLifecycleWork();
-        restored = CoreProbeState.fromSnapshot(ProductLine.LINEAR_PERPETUAL, restored.snapshot());
+        TradingCoreRuntime restored = stateWithLifecycleWork();
+        restored = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, restored.snapshot());
 
         var funding = restored.apply(query(CoreMessageType.FUNDING_PROGRESS_QUERY,
                 CoreStateQueryCodec.encodeFundingProgressQuery("BTC-USDT")));
@@ -52,7 +52,7 @@ class CoreLifecycleWorkTest {
 
     @Test
     void rejectsCrossLineWorkQueryBeforeSelection() {
-        CoreProbeState state = stateWithLifecycleWork();
+        TradingCoreRuntime state = stateWithLifecycleWork();
         byte[] payload = CoreLiquidationWorkCodec.encodeQuery(ProductLine.INVERSE_PERPETUAL,
                 CoreLiquidationWorkView.Purpose.INSURANCE, 0, 1, 1_024);
 
@@ -62,7 +62,7 @@ class CoreLifecycleWorkTest {
         assertThat(response.resultCode()).isEqualTo(CoreResultCode.PRODUCT_LINE_MISMATCH);
     }
 
-    private static void assertBoundedExactlyOnce(CoreProbeState state,
+    private static void assertBoundedExactlyOnce(TradingCoreRuntime state,
                                                   CoreLiquidationWorkView.Purpose purpose,
                                                   long expectedLiquidationId) {
         var firstResponse = state.apply(query(CoreMessageType.LIQUIDATION_WORK_QUERY,
@@ -87,7 +87,7 @@ class CoreLifecycleWorkTest {
         assertThat(resumed.complete()).isTrue();
     }
 
-    private static CoreProbeState stateWithLifecycleWork() {
+    private static TradingCoreRuntime stateWithLifecycleWork() {
         CoreInstrumentState instrument = new CoreInstrumentState("BTC-USDT", 1,
                 ContractType.LINEAR_PERPETUAL, "BTC", "USDT", "USDT", 1, 1, 1,
                 100_000, 50_000, 0, 0, 0, null, 0, 10_000_000, 1_000_000,
@@ -107,7 +107,7 @@ class CoreLifecycleWorkTest {
                         UUID.fromString("00000000-0000-0000-0000-000000000012"))));
         TradingCoreState trading = new TradingCoreState(ProductLine.LINEAR_PERPETUAL, 1,
                 Map.of(), Map.of(), Map.of("BTC-USDT", instrument), risk, treasury);
-        return CoreProbeStateRestoreTestSupport.restore(ProductLine.LINEAR_PERPETUAL, 0, 0,
+        return TradingCoreRuntimeRestoreTestSupport.restore(ProductLine.LINEAR_PERPETUAL, 0, 0,
                 Map.of(), Map.of(), trading, new CoreExportState());
     }
 

@@ -16,12 +16,12 @@ public class InstrumentPauseAdmissionBenchmark {
         @Param({"SPOT","LINEAR_PERPETUAL","INVERSE_PERPETUAL","LINEAR_DELIVERY","INVERSE_DELIVERY","OPTION"})
         public ProductLine productLine;
         private byte[] snapshot;
-        private CoreProbeState core;
+        private TradingCoreRuntime core;
         private CoreMessage order;
         private long funds;
         @Setup(Level.Trial) public void initialize() {
             var type=ContractType.valueOf(productLine.contractTypeCode());
-            try(var state=new CoreProbeState(productLine)) {
+            try(var state=new TradingCoreRuntime(productLine)) {
                 var config=new UpsertInstrumentCommand("BTC-USDT",1,type.ordinal(),"BTC","USDT",type.isInverse()?"BTC":"USDT",
                         1,1,type.isInverse()?1000:1,100_000,50_000,0,0,type.isDelivery()||type.isOption()?2_000_000_000_000L:0,
                         type.isOption()?0:-1,type.isOption()?100:0);
@@ -40,7 +40,7 @@ public class InstrumentPauseAdmissionBenchmark {
                             CorePositionSide.NET,CoreOrderType.LIMIT,CoreTimeInForce.GTC,false,"pause-benchmark")));
         }
         @Setup(Level.Invocation) public void restore() {
-            core=CoreProbeState.fromSnapshot(productLine,snapshot);
+            core=TradingCoreRuntime.fromSnapshot(productLine,snapshot);
             if(core.tradingState().instruments().get("BTC-USDT").status()!=com.surprising.instrument.api.model.InstrumentStatus.HALT)
                 throw new IllegalStateException("pause lost on recovery");
             funds=com.surprising.aeron.service.state.RollingFundsStateHash.compute(core.tradingState());

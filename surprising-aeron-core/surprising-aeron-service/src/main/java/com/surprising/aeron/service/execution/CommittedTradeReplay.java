@@ -9,15 +9,15 @@ import java.util.concurrent.TimeUnit;
 
 /** Separate-process deterministic replay. Never used by the trading service's live callback. */
 public final class CommittedTradeReplay implements AutoCloseable {
-    private final CoreProbeState state;
+    private final TradingCoreRuntime state;
     private final RealtimeOutbox outbox = new RealtimeOutbox(65536, 32 * 1024 * 1024);
     private final com.surprising.aeron.service.state.realtime.RealtimeStateCapture capture;
 
     public CommittedTradeReplay(ProductLine product, byte[] snapshot) {
         state =
                 snapshot == null
-                        ? new CoreProbeState(product)
-                        : CoreProbeState.fromSnapshot(product, snapshot);
+                        ? new TradingCoreRuntime(product)
+                        : TradingCoreRuntime.fromSnapshot(product, snapshot);
         state.assertClusterCallbackComplete();
         capture = state.attachRealtime(outbox);
         capture.tradesOnly(true);
@@ -35,7 +35,7 @@ public final class CommittedTradeReplay implements AutoCloseable {
             state.apply(command, timestamp, logPosition);
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
             while (state.firstPendingMatchingSequence() != 0) {
-                if (state.commitReadyMatching(
+                if (state.commits.commitReadyMatching(
                                 64, timestamp, logPosition, false, (sequence, response) -> {})
                         == 0) Thread.onSpinWait();
                 if (System.nanoTime() > deadline)

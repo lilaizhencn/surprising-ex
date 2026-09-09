@@ -15,7 +15,7 @@ class ProductRecoveryLifecycleTest {
     void nonemptySnapshotAndLogRecoverOrdersBatchesTriggersAndContinueTrading(ProductLine product) {
         ContractType type = ContractType.valueOf(product.contractTypeCode());
         String asset = type.isInverse() ? "BTC" : "USDT";
-        try (CoreProbeState live = new CoreProbeState(product)) {
+        try (TradingCoreRuntime live = new TradingCoreRuntime(product)) {
             apply(live, command(product, 1, 1, CoreMessageType.UPSERT_INSTRUMENT,
                     TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand(
                             "BTC-USDT", 1, type.ordinal(), "BTC", "USDT", asset, 1, 1,
@@ -47,7 +47,7 @@ class ProductRecoveryLifecycleTest {
             apply(live, command(product, 6, 22, CoreMessageType.PLACE_TRIGGER_ORDER,
                     CoreTriggerOrderCodec.encodeState(trigger)));
             byte[] checkpoint = live.snapshot(100);
-            try (CoreProbeState recovered = CoreProbeState.fromSnapshot(product, checkpoint)) {
+            try (TradingCoreRuntime recovered = TradingCoreRuntime.fromSnapshot(product, checkpoint)) {
                 parity(live, recovered);
                 assertThat(apply(recovered, partial).data()).isEqualTo(partialResult.data());
                 parity(live, recovered);
@@ -74,7 +74,7 @@ class ProductRecoveryLifecycleTest {
                     }
                     assertThat(apply(recovered, message).data()).isEqualTo(actual.data());
                     parity(live, recovered);
-                    try (CoreProbeState boundary = CoreProbeState.fromSnapshot(product, recovered.snapshot(200 + message.header().sourceSequence()))) {
+                    try (TradingCoreRuntime boundary = TradingCoreRuntime.fromSnapshot(product, recovered.snapshot(200 + message.header().sourceSequence()))) {
                         parity(recovered, boundary);
                     }
                 }
@@ -99,7 +99,7 @@ class ProductRecoveryLifecycleTest {
                         CoreTriggerOrderCodec.encodeState(takeProfit));
                 apply(live, placeTrigger);
                 apply(recovered, placeTrigger);
-                try (CoreProbeState afterPendingTrigger = CoreProbeState.fromSnapshot(product, recovered.snapshot(300))) {
+                try (TradingCoreRuntime afterPendingTrigger = TradingCoreRuntime.fromSnapshot(product, recovered.snapshot(300))) {
                     CoreMessage price = command(product, 13, 1, CoreMessageType.APPLY_MARK_PRICE,
                             TradingCommandCodec.encodeApplyMarkPrice(type.isOption()
                                     ? new ApplyMarkPriceCommand("BTC-USDT", 1, 120, 120, 120, 2, 1_700_000_000_013L)
@@ -116,7 +116,7 @@ class ProductRecoveryLifecycleTest {
                     assertThat(afterPendingTrigger.tradingState().orders()).hasSize(1);
                     apply(afterPendingTrigger, price);
                     assertThat(afterPendingTrigger.tradingState().orders()).hasSize(1);
-                    try (CoreProbeState afterTriggered = CoreProbeState.fromSnapshot(product, afterPendingTrigger.snapshot(301))) {
+                    try (TradingCoreRuntime afterTriggered = TradingCoreRuntime.fromSnapshot(product, afterPendingTrigger.snapshot(301))) {
                         parity(live, afterTriggered);
                         CoreMessage close = command(product, 15, 11, CoreMessageType.PLACE_ORDER,
                                 TradingCommandCodec.encodePlaceOrder(order(104, CoreOrderSide.BUY, 120, 2)));
@@ -132,7 +132,7 @@ class ProductRecoveryLifecycleTest {
         }
     }
 
-    private static void parity(CoreProbeState expected, CoreProbeState actual) {
+    private static void parity(TradingCoreRuntime expected, TradingCoreRuntime actual) {
         assertThat(actual.tradingState().businessStateHash()).isEqualTo(expected.tradingState().businessStateHash());
         assertThat(actual.matchingStateHashAsync().join()).isEqualTo(expected.matchingStateHashAsync().join());
         assertThat(actual.committedCoreSequence()).isEqualTo(expected.committedCoreSequence());
@@ -148,14 +148,14 @@ class ProductRecoveryLifecycleTest {
                 991, sequence, user, 1_700_000_000_000L + sequence, sequence), payload);
     }
 
-    private static CoreResponse apply(CoreProbeState state, CoreMessage message) {
+    private static CoreResponse apply(TradingCoreRuntime state, CoreMessage message) {
         CoreResponse result = state.apply(message);
         if (result.resultCode() == CoreResultCode.MATCHING_PENDING) {
-            result = state.completeMatchingSynchronously(state.matchingSequence(message.header().commandId()),
+            result = state.commits.completeMatchingSynchronously(state.matchingSequence(message.header().commandId()),
                     message.header().submittedAtEpochMillis(), message.header().sourceSequence());
         }
         while (state.firstPendingMatchingSequence() != 0) {
-            state.completeMatchingSynchronously(state.firstPendingMatchingSequence(),
+            state.commits.completeMatchingSynchronously(state.firstPendingMatchingSequence(),
                     message.header().submittedAtEpochMillis(), message.header().sourceSequence());
         }
         assertThat(result.commandStatus()).as("%s: %s", message.header().messageType(), result.resultCode())

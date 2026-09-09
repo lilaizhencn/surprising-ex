@@ -18,7 +18,7 @@ class CoreRuntimeBalanceSurfaceTest {
 
     @Test
     void appliesBalanceCommandThroughAuthoritativeRuntimeAndMaterializesQueryState() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             CoreMessage command = new CoreMessage(CoreMessageHeader.command(
                     CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), ProductLine.SPOT,
                     CommandSource.OPERATIONS, 9, 1, 1001, 1_000, 1),
@@ -32,7 +32,7 @@ class CoreRuntimeBalanceSurfaceTest {
 
     @Test
     void handsProjectedRuntimeFromConstructionThreadToFirstCoreCommandThread() throws InterruptedException {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             CoreMessage command = new CoreMessage(CoreMessageHeader.command(
                     CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(), ProductLine.SPOT,
                     CommandSource.OPERATIONS, 9, 1, 1001, 1_000, 1),

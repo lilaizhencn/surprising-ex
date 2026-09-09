@@ -54,10 +54,10 @@ class SurprisingClusteredServiceTest {
         var service = service();
         service.onStart(cluster(), null);
         var state = service.state();
-        var field = CoreProbeState.class.getDeclaredField("snapshotAuditFailure");
+        var field = CoreSnapshotLifecycle.class.getDeclaredField("snapshotAuditFailure");
         field.setAccessible(true);
         @SuppressWarnings("unchecked")
-        var failureSlot = (AtomicReference<RuntimeException>) field.get(state);
+        var failureSlot = (AtomicReference<RuntimeException>) field.get(state.snapshots);
         try {
             state.apply(timerInstrument());
             long now = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
@@ -114,7 +114,7 @@ class SurprisingClusteredServiceTest {
             service.state().apply(timerInstrument());
             service.state().apply(command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))));
-            var field = CoreProbeState.class.getDeclaredField("matcherPipeline");
+            var field = TradingCoreRuntime.class.getDeclaredField("matcherPipeline");
             field.setAccessible(true);
             var pipeline = (MatcherPipelineGroup) field.get(service.state());
             var blocked = pipeline.readAtSubmissionFence(0, () -> {
@@ -162,7 +162,7 @@ class SurprisingClusteredServiceTest {
                 var user = com.surprising.aeron.protocol.CoreStateQueryCodec.decodeUserState(frame.payload());
                 assertThat(user.balances().getFirst().lockedUnits()).isEqualTo(2_000);
             });
-            try (var restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, service.state().snapshot())) {
+            try (var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, service.state().snapshot())) {
                 assertThat(restored.tradingState().businessStateHash())
                         .isEqualTo(service.state().tradingState().businessStateHash());
             }
@@ -269,7 +269,7 @@ class SurprisingClusteredServiceTest {
                 long hash = service.state().tradingState().businessStateHash();
                 if (role == Cluster.Role.LEADER) expectedHash = hash;
                 else assertThat(hash).isEqualTo(expectedHash);
-                try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, service.captureSnapshot(1000))) {
+                try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, service.captureSnapshot(1000))) {
                     assertThat(restored.tradingState().businessStateHash()).isEqualTo(hash);
                 }
                 assertThat(service.doBackgroundWork(Long.MAX_VALUE)).isZero();
@@ -355,7 +355,7 @@ class SurprisingClusteredServiceTest {
         List<byte[]> responses = new CopyOnWriteArrayList<>();
         service.onStart(cluster(), null);
         try {
-            CoreProbeState state = service.state();
+            TradingCoreRuntime state = service.state();
             assertThat(state.apply(timerInstrument()).status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(state.apply(command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))
@@ -444,7 +444,7 @@ class SurprisingClusteredServiceTest {
         List<byte[]> responses = new CopyOnWriteArrayList<>();
         service.onStart(cluster(), null);
         try {
-            CoreProbeState state = service.state();
+            TradingCoreRuntime state = service.state();
             assertThat(state.apply(timerInstrument()).status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(state.apply(command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
                     TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000)),
@@ -509,7 +509,7 @@ class SurprisingClusteredServiceTest {
         SurprisingClusteredService service = service();
         try {
             service.onStart(cluster(), null);
-            CoreProbeState before = service.state();
+            TradingCoreRuntime before = service.state();
             assertThatThrownBy(() -> service.loadSnapshot((handler, limit) -> 0, () -> true))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("incomplete");
             assertThat(service.state()).isSameAs(before);
@@ -544,7 +544,7 @@ class SurprisingClusteredServiceTest {
         SurprisingClusteredService service = service();
         try {
             service.onStart(cluster(), null);
-            CoreProbeState before = service.state();
+            TradingCoreRuntime before = service.state();
             byte[] snapshot = before.snapshot();
             snapshot[snapshot.length / 2] ^= 1;
 
@@ -562,7 +562,7 @@ class SurprisingClusteredServiceTest {
         SurprisingClusteredService service = service();
         try {
             service.onStart(cluster(), null);
-            CoreProbeState before = service.state();
+            TradingCoreRuntime before = service.state();
             assertThat(before.apply(command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
                     CoreProtocol.probePayload(9))).status()).isEqualTo(ResponseStatus.APPLIED);
             long beforeHash = before.stateHash();
@@ -592,7 +592,7 @@ class SurprisingClusteredServiceTest {
         SurprisingClusteredService service = service();
         service.onStart(cluster(), null);
         try {
-            CoreProbeState state = service.state();
+            TradingCoreRuntime state = service.state();
             long sequence = preparePendingPlace(state, 901);
             var matcherFailure = new com.surprising.aeron.service.matching.CoreMatchingResult(
                     false, "EXCHANGE_CORE_FAILURE");
@@ -661,7 +661,7 @@ class SurprisingClusteredServiceTest {
         service.onStart(cluster(), null);
         try {
             assertThatThrownBy(() -> service.captureSnapshot(9, System.nanoTime()))
-                    .isInstanceOf(CoreProbeState.SnapshotFenceTimeoutException.class)
+                    .isInstanceOf(TradingCoreRuntime.SnapshotFenceTimeoutException.class)
                     .hasMessage("snapshot fence timed out");
             assertThat(service.snapshotFenceTimeoutCount()).isEqualTo(1);
             assertThat(service.snapshotFenceNotReadyCount()).isZero();
@@ -704,7 +704,7 @@ class SurprisingClusteredServiceTest {
         SurprisingClusteredService service = service();
         try {
             service.onStart(cluster(), null);
-            CoreProbeState before = service.state();
+            TradingCoreRuntime before = service.state();
             assertThat(before.apply(command(CoreMessageType.PROBE_INCREMENT, 1, 1001,
                     CoreProtocol.probePayload(7))).status()).isEqualTo(ResponseStatus.APPLIED);
             byte[] snapshot = before.snapshot(11);
@@ -721,7 +721,7 @@ class SurprisingClusteredServiceTest {
         }
     }
 
-    private static long preparePendingPlace(CoreProbeState state, long orderId) {
+    private static long preparePendingPlace(TradingCoreRuntime state, long orderId) {
         assertThat(state.apply(instrument()).status()).isEqualTo(ResponseStatus.APPLIED);
         assertThat(state.apply(command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))))
@@ -824,7 +824,7 @@ class SurprisingClusteredServiceTest {
     }
 
     private static com.surprising.aeron.service.matching.CoreMatchingResult awaitMatching(
-            CoreProbeState state, long sequence) {
+            TradingCoreRuntime state, long sequence) {
         com.surprising.aeron.service.matching.CoreMatchingResult result = null;
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (result == null && System.nanoTime() < deadline) {

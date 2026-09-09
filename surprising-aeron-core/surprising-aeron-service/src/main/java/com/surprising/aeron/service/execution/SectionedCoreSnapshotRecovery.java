@@ -63,7 +63,7 @@ final class SectionedCoreSnapshotRecovery {
         }
     }
 
-    CoreProbeState decode(ProductLine expectedProductLine) {
+    TradingCoreRuntime decode(ProductLine expectedProductLine) {
         return components(expectedProductLine).restore(expectedProductLine);
     }
 

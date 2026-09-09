@@ -41,8 +41,8 @@ class TradingRuntimeStateTest {
 
     @Test
     void pendingReservationSequenceIndexKeepsSingleOrderOnPrimitivePath() {
-        TradingRuntimeState.PendingReservationSequenceIndex index =
-                new TradingRuntimeState.PendingReservationSequenceIndex(4);
+        PendingReservationTracker.PendingReservationSequenceIndex index =
+                new PendingReservationTracker.PendingReservationSequenceIndex(4);
 
         index.add(101, 1_001);
 
@@ -58,8 +58,8 @@ class TradingRuntimeStateTest {
 
     @Test
     void pendingReservationSequenceIndexPromotesBatchOrdersWhenFirstCompletes() {
-        TradingRuntimeState.PendingReservationSequenceIndex index =
-                new TradingRuntimeState.PendingReservationSequenceIndex(4);
+        PendingReservationTracker.PendingReservationSequenceIndex index =
+                new PendingReservationTracker.PendingReservationSequenceIndex(4);
         index.add(101, 1_001);
         index.add(101, 1_002);
         index.add(101, 1_003);
@@ -1141,16 +1141,16 @@ class TradingRuntimeStateTest {
     }
 
     private static long[] pendingReservationOrderIds(TradingRuntimeState state, long coreSequence) throws Exception {
-        Field field = TradingRuntimeState.class.getDeclaredField("pendingReservationsBySequence");
+        Field field = PendingReservationTracker.class.getDeclaredField("pendingReservationsBySequence");
         field.setAccessible(true);
-        var pending = (TradingRuntimeState.PendingReservationSequenceIndex) field.get(state);
+        var pending = (PendingReservationTracker.PendingReservationSequenceIndex) field.get(state.pendingReservations);
         return pending.orderIds(coreSequence);
     }
 
     private static long pendingReservationOwner(TradingRuntimeState state, long orderId) throws Exception {
-        Field field = TradingRuntimeState.class.getDeclaredField("pendingReservationUsers");
+        Field field = PendingReservationTracker.class.getDeclaredField("pendingReservationUsers");
         field.setAccessible(true);
-        var owners = (org.agrona.collections.Long2LongHashMap) field.get(state);
+        var owners = (org.agrona.collections.Long2LongHashMap) field.get(state.pendingReservations);
         return owners.get(orderId);
     }
 

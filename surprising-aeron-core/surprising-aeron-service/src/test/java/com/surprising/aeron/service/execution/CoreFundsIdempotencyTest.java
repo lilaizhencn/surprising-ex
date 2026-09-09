@@ -20,20 +20,20 @@ class CoreFundsIdempotencyTest {
 
     @Test
     void balanceAdjustmentRemainsIdempotentAfterItsCommandResultIsEvicted() {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             UUID adjustmentId = UUID.randomUUID();
             byte[] payload = TradingCommandCodec.encodeBalanceAdjustment(
                     new BalanceAdjustmentCommand("USDT", 5_000));
             assertThat(state.apply(command(CoreMessageType.ADJUST_BALANCE, adjustmentId, 1, payload)).status())
                     .isEqualTo(ResponseStatus.APPLIED);
-            for (long sequence = 2; sequence <= CoreProbeState.MAX_IDEMPOTENCY_RESULTS + 2L; sequence++) {
+            for (long sequence = 2; sequence <= TradingCoreRuntime.MAX_IDEMPOTENCY_RESULTS + 2L; sequence++) {
                 assertThat(state.apply(command(CoreMessageType.PROBE_INCREMENT, UUID.randomUUID(), sequence,
                         CoreProtocol.probePayload(1))).status()).isEqualTo(ResponseStatus.APPLIED);
             }
 
             CoreMessage retry = command(CoreMessageType.ADJUST_BALANCE, adjustmentId,
-                    CoreProbeState.MAX_IDEMPOTENCY_RESULTS + 3L, payload);
-            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+                    TradingCoreRuntime.MAX_IDEMPOTENCY_RESULTS + 3L, payload);
+            try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
                 assertThat(restored.apply(retry).status()).isEqualTo(ResponseStatus.DUPLICATE);
                 assertThat(restored.tradingState().user(1001).totalUnits("USDT")).isEqualTo(5_000);
             }
@@ -49,7 +49,7 @@ class CoreFundsIdempotencyTest {
                 "FUNDING", "USDT_PERPETUAL", "USDT", 250L, "transfer-7001", "allocation");
         byte[] transferPayload = TradingCommandCodec.encodeTransferFunds(transfer);
         UUID outId = UUID.randomUUID();
-        try (CoreProbeState source = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime source = new TradingCoreRuntime(ProductLine.SPOT)) {
             source.apply(command(ProductLine.SPOT, CoreMessageType.ADJUST_BALANCE, UUID.randomUUID(),
                     1, TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 5_000))));
             CoreMessage out = command(ProductLine.SPOT, CoreMessageType.TRANSFER_OUT, outId, 2, transferPayload);
@@ -59,7 +59,7 @@ class CoreFundsIdempotencyTest {
             assertThat(source.tradingState().user(1001).totalUnits("USDT")).isEqualTo(4_750L);
             assertThat(source.pendingTransfers()).hasSize(1);
 
-            try (CoreProbeState restored = CoreProbeState.fromSnapshot(ProductLine.SPOT, source.snapshot())) {
+            try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, source.snapshot())) {
                 assertThat(restored.pendingTransfers()).hasSize(1);
                 CoreMessage complete = command(ProductLine.SPOT, CoreMessageType.COMPLETE_TRANSFER,
                         UUID.randomUUID(), 3, TradingCommandCodec.encodeCompleteTransfer(
@@ -71,7 +71,7 @@ class CoreFundsIdempotencyTest {
         }
 
         UUID inId = UUID.randomUUID();
-        try (CoreProbeState target = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+        try (TradingCoreRuntime target = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             CoreMessage in = command(ProductLine.LINEAR_PERPETUAL, CoreMessageType.TRANSFER_IN,
                     inId, 1, transferPayload);
             assertThat(target.apply(in).status()).isEqualTo(ResponseStatus.APPLIED);

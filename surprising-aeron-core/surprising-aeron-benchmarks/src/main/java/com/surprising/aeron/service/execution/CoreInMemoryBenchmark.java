@@ -46,7 +46,7 @@ public final class CoreInMemoryBenchmark {
     }
 
     private static Result run(int orderCount, boolean measured) {
-        try (CoreProbeState state = new CoreProbeState(ProductLine.SPOT)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             long gatewaySequence = 1;
             long operationsSequence = 1;
             applied(state, CoreMessageType.UPSERT_INSTRUMENT, CommandSource.OPERATIONS, operationsSequence++, 1,
@@ -86,7 +86,7 @@ public final class CoreInMemoryBenchmark {
                 1, 1, 1, 100_000, 50_000, 0, 0, 0, -1, 0);
     }
 
-    private static void applied(CoreProbeState state, CoreMessageType type, CommandSource source,
+    private static void applied(TradingCoreRuntime state, CoreMessageType type, CommandSource source,
                                 long sourceSequence, long correlationId, byte[] payload) {
         CoreMessage message = new CoreMessage(CoreMessageHeader.command(type, UUID.randomUUID(), ProductLine.SPOT,
                 source, source == CommandSource.OPERATIONS ? 9 : 7, sourceSequence, type == CoreMessageType.ACK_EXPORT

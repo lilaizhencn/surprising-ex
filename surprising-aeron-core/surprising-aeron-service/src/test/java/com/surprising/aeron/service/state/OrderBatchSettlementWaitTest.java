@@ -9,7 +9,7 @@ class OrderBatchSettlementWaitTest {
     void incompleteSettlementExpiresWithoutPublishingCompletionOrRecycling() throws Exception {
         try (var runtime = new TradingRuntimeState()) {
             var event = incompleteEvent();
-            assertThatThrownBy(() -> runtime.awaitOrderBatchMatcherSettlement(event, System.nanoTime() - 1))
+            assertThatThrownBy(() -> runtime.settlements.awaitOrderBatchMatcherSettlement(event, System.nanoTime() - 1))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("timed out");
             assertThat(event.complete()).isFalse();
             assertThatThrownBy(() -> runtime.releaseMatcherSettlement(event))
@@ -23,7 +23,7 @@ class OrderBatchSettlementWaitTest {
             var event = incompleteEvent();
             Thread.currentThread().interrupt();
             try {
-                assertThatThrownBy(() -> runtime.awaitOrderBatchMatcherSettlement(
+                assertThatThrownBy(() -> runtime.settlements.awaitOrderBatchMatcherSettlement(
                         event, System.nanoTime() + 30_000_000_000L))
                         .isInstanceOf(IllegalStateException.class).hasMessageContaining("interrupted");
                 assertThat(Thread.currentThread().isInterrupted()).isTrue();

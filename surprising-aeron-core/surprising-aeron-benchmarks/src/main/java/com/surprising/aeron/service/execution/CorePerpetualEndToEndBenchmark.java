@@ -68,7 +68,7 @@ public final class CorePerpetualEndToEndBenchmark {
         if (makerDepth <= 0 || makerDepth > MAX_MAKER_DEPTH) {
             throw new IllegalArgumentException("maker depth must be in [1, " + MAX_MAKER_DEPTH + "]");
         }
-        try (CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             Sequences sequences = new Sequences();
             setup(state, sequences);
             run(state, sequences, warmupCycles, makerDepth, false);
@@ -79,7 +79,7 @@ public final class CorePerpetualEndToEndBenchmark {
         }
     }
 
-    private static void setup(CoreProbeState state, Sequences sequences) {
+    private static void setup(TradingCoreRuntime state, Sequences sequences) {
         apply(state, sequences, CoreMessageType.UPSERT_INSTRUMENT, CommandSource.OPERATIONS, 0,
                 TradingCommandCodec.encodeUpsertInstrument(instrument()));
         apply(state, sequences, CoreMessageType.APPLY_MARK_PRICE, CommandSource.KAFKA_INPUT_BRIDGE, 0,
@@ -90,18 +90,18 @@ public final class CorePerpetualEndToEndBenchmark {
         adjust(state, sequences, TAKER_USER_ID);
     }
 
-    private static void importFeePolicy(CoreProbeState state, Sequences sequences, long policyId, long userId) {
+    private static void importFeePolicy(TradingCoreRuntime state, Sequences sequences, long policyId, long userId) {
         apply(state, sequences, CoreMessageType.UPSERT_FEE_POLICY, CommandSource.OPERATIONS, userId,
                 TradingCommandCodec.encodeUpsertFeePolicy(new UpsertFeePolicyCommand(
                         policyId, 1, userId, SYMBOL, -10, 20, 4, true, 1, 0)));
     }
 
-    private static void adjust(CoreProbeState state, Sequences sequences, long userId) {
+    private static void adjust(TradingCoreRuntime state, Sequences sequences, long userId) {
         apply(state, sequences, CoreMessageType.ADJUST_BALANCE, CommandSource.GATEWAY, userId,
                 TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", BALANCE_UNITS)));
     }
 
-    private static Result run(CoreProbeState state, Sequences sequences, int cycles, int makerDepth,
+    private static Result run(TradingCoreRuntime state, Sequences sequences, int cycles, int makerDepth,
                               boolean measured) {
         long[] latencies = measured ? new long[Math.multiplyExact(cycles, makerDepth + 1)] : new long[0];
         long started = System.nanoTime();
@@ -132,7 +132,7 @@ public final class CorePerpetualEndToEndBenchmark {
         return new Result(cycles, makerDepth, System.nanoTime() - started, latencies, matchedQuantity);
     }
 
-    private static Completion placeAndComplete(CoreProbeState state, Sequences sequences, long userId,
+    private static Completion placeAndComplete(TradingCoreRuntime state, Sequences sequences, long userId,
                                                CoreOrderSide side, CoreTimeInForce timeInForce, long quantity) {
         long orderId = sequences.orderId++;
         CoreResponse accepted = apply(state, sequences, CoreMessageType.PLACE_ORDER, CommandSource.GATEWAY, userId,
@@ -159,7 +159,7 @@ public final class CorePerpetualEndToEndBenchmark {
         return new Completion(completed.requiredExportSequence(), matchedQuantity);
     }
 
-    private static CoreResponse apply(CoreProbeState state, Sequences sequences, CoreMessageType type,
+    private static CoreResponse apply(TradingCoreRuntime state, Sequences sequences, CoreMessageType type,
                                       CommandSource source, long userId, byte[] payload) {
         long sourceSequence = switch (source) {
             case OPERATIONS -> sequences.operationsSequence++;

@@ -70,11 +70,11 @@ class RuntimeCommitRecoveryTest {
         TransferRuntime transfer = new TransferRuntime(1001, new TransferFundsCommand(
                 701, ProductLine.LINEAR_PERPETUAL, ProductLine.SPOT,
                 "USDT_PERPETUAL", "SPOT", "USDT", 125, "recovery-701", "snapshot parity"));
-        try (CoreProbeState original = new CoreProbeState(ProductLine.LINEAR_PERPETUAL)) {
+        try (TradingCoreRuntime original = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
             original.restoreFeePolicies(Map.of(feePolicy.policyId(), feePolicy));
             original.restorePendingTransfers(Map.of(transfer.transferId(), transfer));
             long originalStateHash = original.stateHash();
-            try (CoreProbeState restored = CoreProbeState.fromSnapshot(
+            try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(
                     ProductLine.LINEAR_PERPETUAL, original.snapshot(700))) {
                 assertThat(restored.feePolicies()).containsExactlyEntriesOf(original.feePolicies());
                 assertThat(restored.pendingTransfers()).containsExactlyEntriesOf(original.pendingTransfers());
@@ -90,7 +90,7 @@ class RuntimeCommitRecoveryTest {
                 assertThat(restored.tradingState().user(1001).totalUnits("USDT")).isEqualTo(500);
                 assertThat(restored.feePolicies()).containsEntry(feePolicy.policyId(), feePolicy);
                 assertThat(restored.pendingTransfers()).containsEntry(transfer.transferId(), transfer);
-                try (CoreProbeState recoveredAgain = CoreProbeState.fromSnapshot(
+                try (TradingCoreRuntime recoveredAgain = TradingCoreRuntime.fromSnapshot(
                         ProductLine.LINEAR_PERPETUAL, restored.snapshot(704))) {
                     assertThat(recoveredAgain.stateHash()).isEqualTo(restored.stateHash());
                     assertThat(recoveredAgain.tradingState().user(1001).totalUnits("USDT")).isEqualTo(500);
@@ -119,9 +119,9 @@ class RuntimeCommitRecoveryTest {
                 command(9, 11, CoreMessageType.PLACE_ORDER, place(401, CoreOrderSide.BUY, 100, 10, false)),
                 command(10, 22, CoreMessageType.PLACE_ORDER, place(402, CoreOrderSide.SELL, 100, 4, true)),
                 command(11, 33, CoreMessageType.PLACE_ORDER, place(403, CoreOrderSide.SELL, 100, 6, true)));
-        try (CoreProbeState uninterrupted = seededLinearPerpetual()) {
+        try (TradingCoreRuntime uninterrupted = seededLinearPerpetual()) {
             byte[] snapshot = uninterrupted.snapshot(701);
-            try (CoreProbeState firstRestore = CoreProbeState.fromSnapshot(ProductLine.LINEAR_PERPETUAL, snapshot)) {
+            try (TradingCoreRuntime firstRestore = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, snapshot)) {
                 long fenceProjectionSequence = uninterrupted.snapshotProjectionSequence();
                 assertThat(firstRestore.snapshotProjectionSequence()).isEqualTo(fenceProjectionSequence);
                 ReplayResult uninterruptedPartial = replay(uninterrupted, partialFill);
@@ -150,7 +150,7 @@ class RuntimeCommitRecoveryTest {
                 assertThat(economicUsdt(uninterrupted.tradingState())).isEqualTo(6_000);
 
                 byte[] secondSnapshot = uninterrupted.snapshot(702);
-                try (CoreProbeState secondRestore = CoreProbeState.fromSnapshot(
+                try (TradingCoreRuntime secondRestore = TradingCoreRuntime.fromSnapshot(
                         ProductLine.LINEAR_PERPETUAL, secondSnapshot)) {
                     ReplayResult uninterruptedTail = replay(uninterrupted, tail);
                     ReplayResult firstRestoreTail = replay(firstRestore, tail);
@@ -205,12 +205,12 @@ class RuntimeCommitRecoveryTest {
 
     @Test
     void rejectsCorruptLaneAndHashSnapshotAtomically() {
-        try (CoreProbeState original = seededLinearPerpetual()) {
+        try (TradingCoreRuntime original = seededLinearPerpetual()) {
             byte[] snapshot = original.snapshot(703);
             long stateHash = original.stateHash();
             long projectionSequence = original.snapshotProjectionSequence();
             long projectorThreads = projectorThreadCount();
-            AtomicReference<CoreProbeState> published = new AtomicReference<>(original);
+            AtomicReference<TradingCoreRuntime> published = new AtomicReference<>(original);
             byte[] corruptLaneManifest = mutateLaneUserPreservingDigest(snapshot, original.laneTopology());
             byte[] corruptChecksum = snapshot.clone();
             corruptChecksum[SectionedCoreSnapshotCodec.ENVELOPE_LENGTH
@@ -254,7 +254,7 @@ class RuntimeCommitRecoveryTest {
                         batchPlace(82_001, "fatal-batch-first", CoreOrderSide.BUY, 100, 1),
                         batchPlace(82_002, "fatal-batch-second", CoreOrderSide.BUY, 100, 1)))));
         byte[] pairedSnapshot;
-        try (CoreProbeState seed = seededPerpetualBatchState()) {
+        try (TradingCoreRuntime seed = seededPerpetualBatchState()) {
             pairedSnapshot = seed.snapshot(705);
         }
 
@@ -478,8 +478,8 @@ class RuntimeCommitRecoveryTest {
         }
     }
 
-    private static CoreProbeState seededLinearPerpetual() {
-        CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL);
+    private static TradingCoreRuntime seededLinearPerpetual() {
+        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL);
         apply(state, operationsCommand(1, CoreMessageType.UPSERT_INSTRUMENT,
                 TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand(
                         "BTC-USDT", 1, ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
@@ -494,8 +494,8 @@ class RuntimeCommitRecoveryTest {
         return state;
     }
 
-    private static CoreProbeState seededPerpetualBatchState() {
-        CoreProbeState state = new CoreProbeState(ProductLine.LINEAR_PERPETUAL);
+    private static TradingCoreRuntime seededPerpetualBatchState() {
+        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL);
         apply(state, operationsCommand(1, CoreMessageType.UPSERT_INSTRUMENT,
                 TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand(
                         "BTC-USDT", 1, ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT",
@@ -573,7 +573,7 @@ class RuntimeCommitRecoveryTest {
                 source, sourceId, sourceSequence, userId, 1_000 + sourceSequence, sourceSequence), payload);
     }
 
-    private static List<String> encodedV10OutboxFacts(CoreProbeState state) {
+    private static List<String> encodedV10OutboxFacts(TradingCoreRuntime state) {
         return state.exportState().snapshot().pendingEvents().stream()
                 .map(CoreMessageCodec::encode).map(HexFormat.of()::formatHex).toList();
     }
@@ -584,7 +584,7 @@ class RuntimeCommitRecoveryTest {
                 HexFormat.of().formatHex(response.data()));
     }
 
-    private static CoreResponse apply(CoreProbeState state, CoreMessage command) {
+    private static CoreResponse apply(TradingCoreRuntime state, CoreMessage command) {
         CoreResponse response = state.apply(command);
         if (response.resultCode() != CoreResultCode.MATCHING_PENDING) {
             assertThat(response.status()).as(response.resultCode().name())
@@ -611,7 +611,7 @@ class RuntimeCommitRecoveryTest {
         return completed;
     }
 
-    private static ReplayResult liquidate(CoreProbeState state) {
+    private static ReplayResult liquidate(TradingCoreRuntime state) {
         ArrayList<ResponseView> responses = new ArrayList<>();
         List<CoreMessage> setup = List.of(
                 command(12, 44, CoreMessageType.ADJUST_BALANCE, balance(180)),
@@ -644,7 +644,7 @@ class RuntimeCommitRecoveryTest {
         return new ReplayResult(List.copyOf(responses));
     }
 
-    private static CoreLiquidationWorkView liquidationWork(CoreProbeState state) {
+    private static CoreLiquidationWorkView liquidationWork(TradingCoreRuntime state) {
         CoreMessage query = new CoreMessage(CoreMessageHeader.query(CoreMessageType.LIQUIDATION_WORK_QUERY,
                 UUID.nameUUIDFromBytes("recovery-liquidation-work".getBytes(java.nio.charset.StandardCharsets.UTF_8)),
                 ProductLine.LINEAR_PERPETUAL, CommandSource.GATEWAY, 77, 0, 0, 3_000, 0),
@@ -655,7 +655,7 @@ class RuntimeCommitRecoveryTest {
         return CoreLiquidationWorkCodec.decodeWork(response.data());
     }
 
-    private static void assertParity(CoreProbeState actualState, CoreProbeState expectedState,
+    private static void assertParity(TradingCoreRuntime actualState, TradingCoreRuntime expectedState,
                                      ReplayResult actual, ReplayResult expected) {
         assertThat(actual.responses()).isEqualTo(expected.responses());
         assertThat(actualState.exportState().enabled()).isFalse();
@@ -681,7 +681,7 @@ class RuntimeCommitRecoveryTest {
     }
 
     private static BatchReplay completeBatch(SurprisingClusteredService service, CoreMessage batch) {
-        CoreProbeState state = service.state();
+        TradingCoreRuntime state = service.state();
         ClusterReplay replay = replayClusterCommand(service, batch);
         assertThat(replay.responses()).hasSize(1);
         assertThat(state.matchingSequence(batch.header().commandId())).isZero();
@@ -692,7 +692,7 @@ class RuntimeCommitRecoveryTest {
     }
 
     private static com.surprising.aeron.service.matching.CoreMatchingResult awaitMatching(
-            CoreProbeState state, long sequence) {
+            TradingCoreRuntime state, long sequence) {
         com.surprising.aeron.service.matching.CoreMatchingResult matching = null;
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (matching == null && System.nanoTime() < deadline) {
@@ -766,16 +766,16 @@ class RuntimeCommitRecoveryTest {
         return new ReplayResult(List.copyOf(responses));
     }
 
-    private static CoreLiquidationState liquidation(CoreProbeState state, long liquidationId) {
+    private static CoreLiquidationState liquidation(TradingCoreRuntime state, long liquidationId) {
         return java.util.Objects.requireNonNull(
                 state.tradingState().riskState().liquidations().get(liquidationId), "liquidation");
     }
 
-    private static long deficit(CoreProbeState state) {
+    private static long deficit(TradingCoreRuntime state) {
         return state.tradingState().treasuryState().insuranceDeficits().getOrDefault("USDT", 0L);
     }
 
-    private static long economicEquityUsdt(CoreProbeState state) {
+    private static long economicEquityUsdt(TradingCoreRuntime state) {
         var core = state.tradingState();
         long total = economicUsdt(core);
         long unrealized = 0;
@@ -863,7 +863,7 @@ class RuntimeCommitRecoveryTest {
                 treasury.fee(assetId), treasuryUnits, economicUnits);
     }
 
-    private static void assertBatchRecoveryParity(CoreProbeState recovered, CoreProbeState reference)
+    private static void assertBatchRecoveryParity(TradingCoreRuntime recovered, TradingCoreRuntime reference)
             throws Exception {
         assertThat(recovered.tradingState()).isEqualTo(reference.tradingState());
         assertThat(recovered.tradingState().users()).isEqualTo(reference.tradingState().users());
@@ -871,9 +871,9 @@ class RuntimeCommitRecoveryTest {
         assertThat(recovered.tradingState().clientOrderIndex())
                 .isEqualTo(reference.tradingState().clientOrderIndex());
         var recoveredIdentities = (com.surprising.aeron.service.state.RuntimeIdentityRegistry)
-                field(recovered, "runtimePlaceOrderIdentities");
+                field(recovered, "identities");
         var referenceIdentities = (com.surprising.aeron.service.state.RuntimeIdentityRegistry)
-                field(reference, "runtimePlaceOrderIdentities");
+                field(reference, "identities");
         assertThat(recoveredIdentities.snapshot()).isEqualTo(referenceIdentities.snapshot());
         assertThat(recovered.tradingState().riskState()).isEqualTo(reference.tradingState().riskState());
         assertThat(recovered.tradingState().treasuryState()).isEqualTo(reference.tradingState().treasuryState());
@@ -896,13 +896,13 @@ class RuntimeCommitRecoveryTest {
         assertThat(allIndexSnapshots(recovered)).isEqualTo(allIndexSnapshots(reference));
         assertIndexesEqualCanonicalRebuild(recovered);
         assertIndexesEqualCanonicalRebuild(reference);
-        assertThat((long[]) field(recovered, "appliedMatcherSequences"))
-                .containsExactly((long[]) field(reference, "appliedMatcherSequences"));
-        assertThat((long[]) field(recovered, "appliedMatcherPrefixDigests"))
-                .containsExactly((long[]) field(reference, "appliedMatcherPrefixDigests"));
+        assertThat((long[]) field(recovered.commits, "appliedMatcherSequences"))
+                .containsExactly((long[]) field(reference.commits, "appliedMatcherSequences"));
+        assertThat((long[]) field(recovered.commits, "appliedMatcherPrefixDigests"))
+                .containsExactly((long[]) field(reference.commits, "appliedMatcherPrefixDigests"));
     }
 
-    private static void assertNoTransientCommitReservations(CoreProbeState state) throws Exception {
+    private static void assertNoTransientCommitReservations(TradingCoreRuntime state) throws Exception {
         assertThat(field(state, "currentAdmission")).isNull();
         var journal = (com.surprising.aeron.service.state.RuntimeCommitJournal)
                 field(state, "runtimeProjectionJournal");
@@ -918,7 +918,7 @@ class RuntimeCommitRecoveryTest {
         return field.get(target);
     }
 
-    private static Map<String, Map<String, Object>> allIndexSnapshots(CoreProbeState state) throws Exception {
+    private static Map<String, Map<String, Object>> allIndexSnapshots(TradingCoreRuntime state) throws Exception {
         return Map.ofEntries(
                 Map.entry("position-user", indexSnapshot(field(state, "positionUserIndex"))),
                 Map.entry("open-interest", indexSnapshot(field(state, "openInterestIndex"))),
@@ -930,10 +930,10 @@ class RuntimeCommitRecoveryTest {
                 Map.entry("adl-position", indexSnapshot(field(state, "adlPositionIndex"))));
     }
 
-    private static void assertIndexesEqualCanonicalRebuild(CoreProbeState state) throws Exception {
+    private static void assertIndexesEqualCanonicalRebuild(TradingCoreRuntime state) throws Exception {
         var core = state.tradingState();
         var identities = (com.surprising.aeron.service.state.RuntimeIdentityRegistry)
-                field(state, "runtimePlaceOrderIdentities");
+                field(state, "identities");
         Map<String, Map<String, Object>> rebuilt = Map.ofEntries(
                 Map.entry("position-user", indexSnapshot(
                         new com.surprising.aeron.service.state.PositionUserIndex(core, identities))),
@@ -1028,7 +1028,7 @@ class RuntimeCommitRecoveryTest {
         collectPriceParticipants(right.get(node), entries);
     }
 
-    private static ReplayResult replay(CoreProbeState state, List<CoreMessage> commands) {
+    private static ReplayResult replay(TradingCoreRuntime state, List<CoreMessage> commands) {
         List<ResponseView> responses = commands.stream().map(command -> response(apply(state, command))).toList();
         return new ReplayResult(responses);
     }
