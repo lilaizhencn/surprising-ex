@@ -24,6 +24,44 @@ import org.junit.jupiter.params.provider.EnumSource;
 class ClusterCommandPipelineTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
+    void triggerChildSurvivesLaneHandoffAndOrderIdCollision(ProductLine product) {
+        for (int matchedQuantity : new int[]{0, 1, 10}) {
+            boolean fill = matchedQuantity != 0;
+            try (Fixture live = new Fixture(product)) {
+                live.setup();
+                long maker = 11, user = disjointUser(maker);
+                if (product == ProductLine.SPOT) live.apply(live.message(CoreMessageType.ADJUST_BALANCE, maker,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 100))));
+                live.apply(live.place(maker, "BTC-USDT", 101, 100, 10, CoreOrderSide.SELL));
+                live.apply(live.place(user, "BTC-USDT", 102, 100, 10, CoreOrderSide.BUY));
+                // 子订单编号冲突时必须沿用准入阶段选定的编号，不能重新推导或回查 Lane。
+                live.apply(live.place(user, "BTC-USDT", 18003, 80, 1, CoreOrderSide.BUY));
+                if (fill) live.apply(live.place(maker, "BTC-USDT", 103, 100, matchedQuantity, CoreOrderSide.BUY));
+                var trigger = new CoreTriggerOrderStateView(9001, product, user, "trigger-9001", "", "BTC-USDT",
+                        CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
+                        100, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, fill ? 100 : 110, Math.max(1, matchedQuantity),
+                        CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
+                        0, 0, 0, "", "test", 0, 0, 0, 0, 1, 1, 0, 0);
+                live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(trigger)));
+                live.responses.clear();
+                live.apply(live.message(CoreMessageType.EXECUTE_TRIGGER_ORDER, 0,
+                        CoreTriggerOrderCodec.encodeExecute(9001, 1, 100, TIME)));
+                assertThat(live.responses).isNotEmpty().allSatisfy(r ->
+                        assertThat(r.commandStatus()).isEqualTo(ResponseStatus.APPLIED));
+                var terminal = live.service.state().runtimeState.triggerOrder(9001);
+                assertThat(terminal.status()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
+                assertThat(terminal.placedOrderId()).isEqualTo(18005);
+                try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+                    assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+                }
+                live.apply(live.cancel(user, 18003));
+                assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
     void independentIngressContinuesWhileEarlierCommitPrefixWaitsForLanes(ProductLine product) throws Exception {
         try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
             serial.applyAll(live.setup());

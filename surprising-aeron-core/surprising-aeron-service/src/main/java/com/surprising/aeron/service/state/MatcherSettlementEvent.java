@@ -264,6 +264,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
                     runtime, valueInstrument, valueBaseAssetId, valueQuoteAssetId, delta, commitTimestamp, commitClusterPosition);
         }
         runtime.completeMatcherPendingReservations(lane, value);
+        var trigger = value.completedTrigger();
+        if (trigger != null && runtime.currentLaneOwns(trigger.userId())) runtime.putTriggerOrder(trigger);
     }
 
     private void prepareTreasuryDeltas(int laneCount, boolean trades) {

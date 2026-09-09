@@ -43,7 +43,10 @@ final class MatchingCommandAdmission {
     LinkedHashMap<Long, DeferredMatching> deferredMatching;
 
     /** 由触发等业务产生、等待正式登记的撮合命令。 */
-    final List<CoreMessage> queuedMatching = new ArrayList<>();
+    final List<QueuedTriggerMatching> queuedMatching = new ArrayList<>();
+
+    /** 在释放 Lane 访问权前绑定已冻结的子订单；仅存活到登记 PendingMatching，不建立第二份订单索引。 */
+    record QueuedTriggerMatching(CoreMessage command, CoreMatchingOrder order) { }
 
     void appendQueuedMatching() {
         if (queuedMatching.isEmpty()) return;
@@ -51,10 +54,12 @@ final class MatchingCommandAdmission {
             throw new IllegalStateException("queued matching admission reservation is missing");
         }
         owner.currentAdmission.retainHolders(queuedMatching.size());
-        for (CoreMessage command : queuedMatching) {
+        for (QueuedTriggerMatching queued : queuedMatching) {
+            CoreMessage command = queued.command();
             long sequence = Math.incrementExact(owner.appliedCommandCount);
             PendingMatching pending = newPendingMatching(sequence, PendingMatching.Operation.TRIGGER, command)
                     .withCapacityReservation(owner.currentAdmission);
+            pending.triggerAdmission(queued.order());
             owner.putPendingMatching(pending);
             registerPendingLifecycle(pending);
             owner.appliedCommandCount = sequence;

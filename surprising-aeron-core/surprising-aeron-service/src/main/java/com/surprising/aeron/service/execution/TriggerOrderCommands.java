@@ -236,7 +236,7 @@ final class TriggerOrderCommands {
         }
         owner.resultBuilder.markUserChanged(trigger.userId());
         owner.resultBuilder.markOrderChanged(childOrderId);
-        owner.queueTriggerMatching(trigger, triggerSequence, triggeredPriceTicks, triggeredAtEpochMillis, commandId);
+        owner.queueTriggerMatching(trigger, triggerSequence, triggeredPriceTicks, triggeredAtEpochMillis, commandId, childOrderId);
         owner.resultBuilder.commandOrderViews = TradingCoreRuntime.appendDistinct(owner.resultBuilder.commandOrderViews, List.of(owner.runtimeOrderView(childOrderId)));
     }
 

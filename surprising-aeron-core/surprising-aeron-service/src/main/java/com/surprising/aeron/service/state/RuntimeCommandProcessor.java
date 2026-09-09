@@ -790,7 +790,24 @@ public final class RuntimeCommandProcessor {
     private static void updateTrigger(TradingRuntimeState runtime, CoreTriggerOrderState current,
                                       CoreTriggerOrderStatus status, long placedOrderId, long triggerSequence,
                                       long triggeredPriceTicks, String rejectReason, long updatedAt) {
-        runtime.putTriggerOrder(new CoreTriggerOrderState(current.triggerOrderId(), current.productLine(),
+        runtime.putTriggerOrder(triggerUpdate(current, status, placedOrderId, triggerSequence,
+                triggeredPriceTicks, rejectReason, updatedAt));
+        incrementRevision(runtime);
+    }
+
+    /** owner 只构造终态，实际写入随成交结算交给该账户 Lane。 */
+    public static CoreTriggerOrderState prepareMatchedTriggerCompletion(
+            CoreTriggerOrderState current, long placedOrderId, long updatedAt) {
+        if (current == null || current.status() != CoreTriggerOrderStatus.TRIGGERING || placedOrderId <= 0)
+            throw new IllegalStateException("invalid matched trigger completion");
+        return triggerUpdate(current, CoreTriggerOrderStatus.TRIGGERED, placedOrderId,
+                current.triggerSequence(), current.triggeredPriceTicks(), "", updatedAt);
+    }
+
+    private static CoreTriggerOrderState triggerUpdate(CoreTriggerOrderState current,
+                                      CoreTriggerOrderStatus status, long placedOrderId, long triggerSequence,
+                                      long triggeredPriceTicks, String rejectReason, long updatedAt) {
+        return new CoreTriggerOrderState(current.triggerOrderId(), current.productLine(),
                 current.userId(), current.clientTriggerOrderId(), current.ocoGroupId(), current.symbol(), current.side(),
                 current.triggerType(), current.triggerCondition(), current.triggerPriceTicks(),
                 current.activationPriceTicks(), current.callbackRatePpm(), current.highestPriceTicks(),
@@ -800,8 +817,7 @@ public final class RuntimeCommandProcessor {
                 current.expiresAtEpochMillis(), status == CoreTriggerOrderStatus.TRIGGERED
                         || status == CoreTriggerOrderStatus.TRIGGER_FAILED ? updatedAt : current.triggeredAtEpochMillis(),
                 current.createdAtEpochMillis(), updatedAt, Math.incrementExact(current.revision()),
-                current.instrumentChangeId(), current.makerFeeRatePpm(), current.takerFeeRatePpm()));
-        incrementRevision(runtime);
+                current.instrumentChangeId(), current.makerFeeRatePpm(), current.takerFeeRatePpm());
     }
 
     private static CoreTriggerOrderState requireTrigger(TradingRuntimeState runtime, long triggerOrderId) {

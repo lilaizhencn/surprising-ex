@@ -1691,9 +1691,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
                                 new com.surprising.aeron.service.matching.CoreMatchingResult(
                                         false, "TRIGGER_ORDER_NOT_FOUND"));
                     }
-                    PlaceOrderCommand placement = triggerPlacement(trigger, execute[2]);
-                    var order = matchingOrder(placement.orderId());
-                    yield new MatchingSubmission(placement.orderId(), placement.instrumentChangeId(),
+                    var order = java.util.Objects.requireNonNull(pending.admittedMatchingOrder(), "trigger admission is missing");
+                    yield new MatchingSubmission(order.orderId(), trigger.instrumentChangeId(),
                             () -> matchingAdapter.place(trigger.userId(), order));
                 }
                 case LIQUIDATION -> {
@@ -2766,14 +2765,16 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     void queueTriggerMatching(com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger,
                                       long triggerSequence, long triggeredPriceTicks,
-                                      long triggeredAtEpochMillis, UUID parentCommandId) {
+                                      long triggeredAtEpochMillis, UUID parentCommandId, long childOrderId) {
         UUID commandId = UUID.nameUUIDFromBytes((parentCommandId + ":trigger:" + trigger.triggerOrderId())
                 .getBytes(java.nio.charset.StandardCharsets.UTF_8));
         CoreMessageHeader header = CoreMessageHeader.command(CoreMessageType.EXECUTE_TRIGGER_ORDER, commandId,
                 productLine, com.surprising.aeron.protocol.CommandSource.OPERATIONS, trigger.userId(), 0,
                 trigger.userId(), triggeredAtEpochMillis, 0);
-        admissions.queuedMatching.add(new CoreMessage(header, com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeExecute(
-                trigger.triggerOrderId(), triggerSequence, triggeredPriceTicks, triggeredAtEpochMillis)));
+        admissions.queuedMatching.add(new MatchingCommandAdmission.QueuedTriggerMatching(
+                new CoreMessage(header, com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeExecute(
+                        trigger.triggerOrderId(), triggerSequence, triggeredPriceTicks, triggeredAtEpochMillis)),
+                matchingOrder(childOrderId)));
     }
 
     void addChangedUsers(com.surprising.aeron.service.state.MatcherSettlementPlan plan) {

@@ -9,7 +9,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 
-/** 本机三 JVM 少量命令复现入口；不计算吞吐，不修改生产执行路径。 */
+/** 独立 benchmarks 模块中的三 JVM 少量命令验证入口；与 JMH 共用场景，不进入交易服务包。 */
 public final class SmallControlReproMain {
     private static final ProductLine PRODUCT = ProductLine.LINEAR_PERPETUAL;
     private static final List<String> HOSTS = List.of("127.0.0.1", "127.0.0.1", "127.0.0.1");
@@ -19,8 +19,8 @@ public final class SmallControlReproMain {
     private SmallControlReproMain(SurprisingAeronClient client) { this.client = client; }
 
     public static void main(String[] args) {
-        if (args.length != 1 || !List.of("pool", "ready", "orders", "verify-orders", "trigger").contains(args[0]))
-            throw new IllegalArgumentException("expected pool|ready|orders|verify-orders|trigger");
+        if (args.length != 1 || !List.of("pool", "ready", "orders", "verify-orders", "trigger", "verify-trigger").contains(args[0]))
+            throw new IllegalArgumentException("expected pool|ready|orders|verify-orders|trigger|verify-trigger");
         if (args[0].equals("pool")) {
             try (var pool = new AeronClientPool("small-control-repro", PRODUCT, HOSTS,
                     "127.0.0.1", Duration.ofSeconds(10), 2)) {
@@ -49,7 +49,10 @@ public final class SmallControlReproMain {
                 run.verifyOrders();
                 return;
             }
-            for (int i = 0; i < 2; i++) run.trigger(i);
+            for (int i = 0; i < 2; i++) {
+                if (args[0].equals("verify-trigger")) run.verifyTrigger(i);
+                else run.trigger(i);
+            }
             System.out.println("smallTrigger=PASS");
         }
     }
@@ -109,6 +112,12 @@ public final class SmallControlReproMain {
         command(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(trigger));
         command(CoreMessageType.EXECUTE_TRIGGER_ORDER, 0,
                 CoreTriggerOrderCodec.encodeExecute(triggerId, 1, 100, System.currentTimeMillis()));
+        verifyTrigger(index);
+    }
+
+    private void verifyTrigger(int index) {
+        String symbol = "REPRO-TRIGGER-" + index;
+        long maker = 1001 + index * 2L, user = maker + 1, triggerId = 9001 + index;
         var state = CoreStateQueryCodec.decodeUserState(query(CoreMessageType.USER_STATE_QUERY, user, new byte[0]).data());
         long quantity = state.positions().stream().filter(p -> p.symbol().equals(symbol))
                 .mapToLong(CorePositionView::signedQuantitySteps).sum();
@@ -117,7 +126,21 @@ public final class SmallControlReproMain {
                 CoreTriggerOrderCodec.encodeQuery(new CoreTriggerOrderQuery(triggerId, symbol, 0, 1))).data());
         if (terminals.size() != 1 || terminals.getFirst().status() != CoreTriggerOrderStatus.TRIGGERED)
             throw new IllegalStateException("trigger terminal mismatch: " + terminals);
-        System.out.println("triggerCase=" + index + " PASS quantity=" + quantity);
+        if (terminals.getFirst().placedOrderId() != triggerId * 2 + 1)
+            throw new IllegalStateException("trigger child identity mismatch");
+        long funds = 0;
+        for (long account : new long[]{maker, user}) {
+            var accountState = CoreStateQueryCodec.decodeUserState(query(CoreMessageType.USER_STATE_QUERY, account, new byte[0]).data());
+            long signed = accountState.positions().stream().mapToLong(CorePositionView::signedQuantitySteps).sum();
+            if (signed != (account == user ? quantity : -quantity)) throw new IllegalStateException("counterparty position mismatch");
+            for (var balance : accountState.balances()) {
+                if (balance.lockedUnits() != quantity * 10 || balance.availableUnits() != 10_000 - quantity * 10)
+                    throw new IllegalStateException("trigger margin/reservation mismatch");
+                funds = Math.addExact(funds, Math.addExact(balance.availableUnits(), balance.lockedUnits()));
+            }
+        }
+        if (funds != 20_000) throw new IllegalStateException("trigger funds mismatch");
+        System.out.println("triggerCase=" + index + " PASS quantity=" + quantity + " fundsDiff=0 margin=true");
     }
 
     private void order(long user, String symbol, long id, CoreOrderSide side, long quantity) {

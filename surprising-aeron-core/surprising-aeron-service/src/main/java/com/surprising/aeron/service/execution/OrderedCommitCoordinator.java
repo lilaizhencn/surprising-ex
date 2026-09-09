@@ -255,8 +255,7 @@ final class OrderedCommitCoordinator {
                     var trigger = owner.runtimeState.triggerOrder(execute[0]);
                     if (trigger == null) throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND",
                             "trigger order not found");
-                    var command = owner.triggerPlacement(trigger, execute[2],
-                            owner.responseOrder(settlementPlan.takerOrderId()));
+                    long childOrderId = settlementPlan.takerOrderId();
                     owner.addChangedUsers(settlementPlan);
                     owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(settlementPlan);
                     if (matchingResult.accepted()) {
@@ -265,11 +264,11 @@ final class OrderedCommitCoordinator {
                         if (settlementTreasuryDelta == null) return null;
                     } else {
                         applyPreMatchingCancellations(pending, matchingResult);
-                        owner.rejectPlaceOrderRuntime(trigger.userId(), command.orderId(), sequence);
+                        owner.rejectPlaceOrderRuntime(trigger.userId(), childOrderId, sequence);
                     }
-                    owner.triggers.completeTriggerOrderRuntime(trigger.triggerOrderId(), matchingResult.accepted(),
-                            matchingResult.accepted() ? command.orderId() : 0,
-                            matchingResult.accepted() ? "" : matchingResult.resultCode(), execute[3]);
+                    if (matchingResult.accepted()) requestCommitPublication();
+                    else owner.triggers.completeTriggerOrderRuntime(trigger.triggerOrderId(), false,
+                            0, matchingResult.resultCode(), execute[3]);
                     owner.resultBuilder.commandTradeCount = TradingCoreRuntime.tradeCount(settlementPlan);
                     owner.resultBuilder.commandOrderViews = owner.resultBuilder.commandChangedOrderIds.stream().map(owner::runtimeOrder)
                             .filter(java.util.Objects::nonNull).map(owner::orderView).toList();
@@ -423,9 +422,7 @@ final class OrderedCommitCoordinator {
                     if (trigger == null) {
                         throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND", "trigger order not found");
                     }
-                    var command = owner.triggerPlacement(trigger, execute[2],
-                            owner.responseOrder(pending.settlementPlan().takerOrderId()));
-                    owner.triggers.completeTriggerOrderRuntime(trigger.triggerOrderId(), true, command.orderId(), "", execute[3]);
+                    requestCommitPublication();
                     owner.resultBuilder.commandTradeCount = TradingCoreRuntime.tradeCount(pending.settlementPlan());
                     owner.resultBuilder.commandOrderViews = owner.resultBuilder.commandChangedOrderIds.stream().map(owner::runtimeOrder)
                             .filter(java.util.Objects::nonNull).map(owner::orderView).toList();
@@ -657,11 +654,16 @@ final class OrderedCommitCoordinator {
                 long[] execute = pending.decodedCommand().trigger();
                 var trigger = owner.runtimeState.triggerOrder(execute[0]);
                 if (trigger == null) yield null;
-                long orderId = owner.triggerPlacement(trigger, execute[2]).orderId();
-                yield com.surprising.aeron.service.state.MatcherSettlementPlan.build(
+                long orderId = java.util.Objects.requireNonNull(pending.admittedMatchingOrder(),
+                        "trigger admission is missing").orderId();
+                var plan = com.surprising.aeron.service.state.MatcherSettlementPlan.build(
                         pending.sequence(), orderId, trigger.userId(), new long[]{orderId}, result,
                         owner.runtimeState, owner.identities)
                         .preCancellations(acceptedPreMatchingCancellationIds(pending, result));
+                if (result.accepted()) plan.completeTrigger(
+                        com.surprising.aeron.service.state.RuntimeCommandProcessor.prepareMatchedTriggerCompletion(
+                                trigger, orderId, execute[3]));
+                yield plan;
             }
             default -> null;
         };

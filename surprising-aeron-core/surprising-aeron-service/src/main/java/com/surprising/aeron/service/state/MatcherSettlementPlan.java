@@ -22,6 +22,16 @@ public final class MatcherSettlementPlan {
     private int[] makerLaneHeads;
     private int[] makerLaneNext;
     private int takerLaneId;
+    /** 仅触发子订单携带；owner 派发前构造，taker Lane 在同一结算事件中写入。 */
+    private com.surprising.aeron.service.state.model.CoreTriggerOrderState completedTrigger;
+
+    public MatcherSettlementPlan completeTrigger(com.surprising.aeron.service.state.model.CoreTriggerOrderState value) {
+        if (value == null || value.userId() != activeUserId || value.placedOrderId() != takerOrderId || completedTrigger != null)
+            throw new IllegalArgumentException("invalid settlement trigger completion");
+        completedTrigger = value;
+        return this;
+    }
+    com.surprising.aeron.service.state.model.CoreTriggerOrderState completedTrigger() { return completedTrigger; }
 
     private MatcherSettlementPlan(long coreSequence, long takerOrderId, long activeUserId,
                                   long requiredLaneMask, long[] orderIds, int orderCount,
@@ -247,6 +257,7 @@ public final class MatcherSettlementPlan {
         copy.makerLaneHeads = makerLaneHeads;
         copy.makerLaneNext = makerLaneNext;
         copy.takerLaneId = takerLaneId;
+        copy.completedTrigger = completedTrigger;
         return copy;
     }
     public int preCancellationCount() { return preCancellationOrderIds.length; }

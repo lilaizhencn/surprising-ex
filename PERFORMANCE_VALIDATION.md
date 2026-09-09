@@ -5102,3 +5102,18 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 前一轮临时数据已清理，后续重新构造独立场景：先停止一个从节点，两名用户完成16笔下单/8笔成交，共20条业务命令；从节点离线至少12秒后使用其原数据目录重启。只读核对 PASS，持仓-8/+8、账户总余额20000、fundsDiff=0。三个节点的完整快照首次读取均成功，businessHash 均为2111639170114541499（coreSequence20）；未出现 backlog capacity exhausted 或节点故障。此结论只覆盖小样本追赶，不证明任意积压下均无问题。
 - 复现入口已用 HotSpot25 javac 编译并实际执行，模式为 ready/pool/trigger/orders/verify-orders；classpath 为编译后的 test-classes 加 product-core-benchmarks.jar，节点入口为 SurprisingClusterNode。trigger 在当前生产代码上预期复现失败；不要把这项失败记录改成通过。
 - 按用户要求，保存本摘要及复现源码后，停止全部本轮进程并删除 /tmp/ex-small-repro-20260909、/tmp/ex-small-catchup-20260909、/tmp/ex-recovery-check 下临时集群数据、JFR、日志和编译产物；不保留或引用可访问的原始 artifact。没有修改 README。
+
+## 2026-09-09 触发 Lane 边界修复验证（执行前定义）
+- 基于 master 0b6a17c6 的本轮修改；对照不适用。HotSpot GraalVM25.0.1，macOS x86_64/16 logical CPU/16GiB。只在本机三独立 JVM、真实 UDP/复制日志执行少量功能样本；不上云、不进行持续吞吐压测。
+- 三节点 Xms64m/Xmx512m、ZGC、SHARED_NETWORK、服务 YIELDING、4 Account Lanes/1 matcher；JFR default+JavaExceptionThrow、maxsize32m，NMT summary。客户端 JMH ClusterTriggerBoundaryBenchmark：SingleShotTime、fork1/thread1/warmup0/measurement1、-prof gc；仅一次完整连接/建仓/两次触发/查询，无预热、不修正 coordinated omission，不作为稳态吞吐/尾延迟/每笔交易分配验收。
+- 固定4账户、2币对、每账户10000初始余额、零手续费；第一组 IOC 无成交，第二组成交减仓1单位。串行少量命令，故不采用历史256在途饱和档位；JMH 1次 invocation 不等于1笔 business operation。
+- 通过要求：两次触发 APPLIED/TRIGGERED、子订单编号正确、双边持仓10/-10与9/-9、保证金及余额核对、各组资金差额0；三个副本快照哈希一致，保留数据重启后再次查询验证一致；无 Lane ownership 或 EXCHANGE_CORE_FAILURE。失败必须原样记录，不设置性能数字通过阈值。
+- 临时目录 /tmp/ex-trigger-fix；每次子进程调用前检查可用磁盘低于10GiB则停止；分析完成只保留本摘要和源码，清理全部本轮日志、JFR、临时集群及测试报告。
+- 修复结果：在冻结仍有合法访问权时绑定 CoreMatchingOrder，经临时 QueuedTriggerMatching 交给复用 PendingMatching.admittedMatchingOrder；异步撮合/结算计划不再查 Lane 的 clientOrderIndex，也不重新推导可能冲突的子订单号。触发成功终态随已有 MatcherSettlementEvent 在所属账户 Lane 写入，owner 收齐后合并全局版本及发布；未增加全局接管、同步等待或额外 Lane 任务。删除两处收尾重复构造 PlaceOrderCommand。
+- 中间失败保留摘要：第一步只修子订单读取后，新增六产品回归全部暴露 completeTriggerOrderRuntime 的第二处越界（114项中6错误）；将成功终态写入并入 Lane 结算后通过。没有删除/弱化所有权检查。
+- HotSpot25 `mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am verify`：1046项，1045通过、0失败/错误、1项缺少 INSTRUMENT_SEED_TEST_JDBC_URL 跳过。新增回归覆盖6产品的编号冲突、IOC无成交/部分平仓及快照；随后扩展全部平仓，共18种组合，重跑 ClusterCommandPipelineTest 114项全通过。最终 main 场景补充保证金/余额及 verify-trigger 查询后重新 package 成功；未修改生产代码后再采样。
+- 本机3 JVM JMH一次执行通过：17条外部业务命令，两次触发 APPLIED/TRIGGERED；子订单编号正确，两组持仓±10/±9、每组资金20000、对应锁定保证金100/90，fundsDiff=0。snapshot三个节点 businessHash 均为6038520190708482732；停止全部节点并保留原数据重启后 verify-trigger 通过。所有只读就绪、快照读取均首轮成功，无 Lane ownership、EXCHANGE_CORE_FAILURE、backlog 耗尽或节点故障。
+- JMH SingleShot整场景1268.370ms/invocation，客户端 gc.alloc.rate=10.334MB/s，gc.alloc.rate.norm=13886912B/invocation，gc.count≈0；包含连接/类加载/建仓/查询，不能解释为单笔触发或服务端每笔分配，不推导吞吐上限、稳态尾延迟或优化比例。没有旧版对照。
+- 三节点 JFR各24秒，文件842134/866863/857807字节，DataLoss均0；每节点3次GC。owner执行样本15/15/10，matcher1/4/3，Lane1/0/2，样本少且含启动；分配样本以byte[]、String、数组等初始化对象为主，不作热点占比或零分配结论。NMT committed为257133/254072/246421KB（reserved约10GB为JVM虚拟预留）；未做长稳，无泄漏结论。异常事件中未再出现上述所有权/撮合致命错误。
+- 被测 service.jar SHA256=05d9189593e2af7993ae4f7ca31e2b7f3b9676ff8f0bf44f1826272cca60e737；benchmarks.jar SHA256=50a0a2380a270b2c680ddda324a520c9e9661878f9e1862d45bb3389ed37fc3e。复现/JMH共享驱动放在独立 benchmarks 模块 main 中，不进入业务服务包；测试用例保留在 service/src/test。生产触发缺陷功能验证完成，整体性能验收仍非本轮范围。
+- 收尾清理：全部本轮节点和客户端已退出；分析后删除 /tmp/ex-trigger-fix 及本轮 surefire/failsafe 报告、迁移前残留 SmallControlReproMain.class。只保留源码、本摘要和可复用构建包，原始 artifact 已清理，不再提供失效路径为证据。

@@ -1775,6 +1775,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         RuntimeTreasuryDelta aggregate = event.collectTreasuryDelta();
         for (int index = 0; index < event.planCount(); index++) {
             unindexMatcherPendingReservations(event.plan(index));
+            // Lane 不修改全局版本；全部结算成功后由 owner 合并一次触发终态变更。
+            if (event.plan(index).completedTrigger() != null) revision = Math.incrementExact(revision);
         }
         long laneMask = event.requiredLaneMask();
         MatcherSettlementChanges changes = event.commitSequence() != 0 || event.hasIsolatedChanges()

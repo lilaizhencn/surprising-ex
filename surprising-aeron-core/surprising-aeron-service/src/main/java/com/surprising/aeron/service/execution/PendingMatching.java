@@ -290,6 +290,12 @@ final class PendingMatching {
         admittedMatchingOrder = matchingOrder;
     }
     CoreMatchingOrder admittedMatchingOrder() { return admittedMatchingOrder; }
+    /** 沿用已完成冻结的不可变订单，触发续步不得再回读 Lane 的客户端订单索引。 */
+    void triggerAdmission(CoreMatchingOrder order) {
+        if (operation != Operation.TRIGGER || order == null || admittedMatchingOrder != null)
+            throw new IllegalStateException("invalid trigger admission");
+        admittedMatchingOrder = order;
+    }
     boolean isMatchingSubmitted() { return matchingSubmitted; }
     void matchingSubmitted() {
         if (matchingSubmitted) throw new IllegalStateException("matching command was submitted twice");
