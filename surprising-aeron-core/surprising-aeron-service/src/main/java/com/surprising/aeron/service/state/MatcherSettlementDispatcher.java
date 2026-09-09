@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.service.matching.CoreMatchingResult;
-import java.util.ArrayList;
 import java.util.List;
 
 import static com.surprising.aeron.service.state.TradingRuntimeState.*;
@@ -126,156 +125,6 @@ final class MatcherSettlementDispatcher {
             Thread.onSpinWait();
         }
         owner.assertAccountLanesHealthy();
-    }
-
-    public RuntimeTreasuryDelta applyNoTradeMatcherSettlements(
-            long coreSequence, long userId, java.util.List<Long> takerOrderIds,
-            java.util.List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities) {
-        owner.assertOwner();
-        if (coreSequence <= 0 || userId <= 0 || takerOrderIds == null || matchingResults == null
-                || takerOrderIds.isEmpty() || takerOrderIds.size() != matchingResults.size()
-                || identities == null) {
-            throw new IllegalArgumentException("invalid no-trade matcher settlement batch");
-        }
-        MatcherSettlementPlan[] plans = new MatcherSettlementPlan[takerOrderIds.size()];
-        long expectedLaneMask = owner.topology.accountLaneMask(userId);
-        for (int index = 0; index < takerOrderIds.size(); index++) {
-            long takerOrderId = takerOrderIds.get(index);
-            CoreMatchingResult matchingResult = matchingResults.get(index);
-            if (matchingResult == null || matchingResult.nativeCommand().coreSequence() != coreSequence
-                    || matchingResult.matcherEvents().stream()
-                    .anyMatch(event -> event.eventType() == exchange.core2.core.common.MatcherEventType.TRADE)) {
-                throw new IllegalArgumentException("invalid no-trade matcher settlement result");
-            }
-            OrderRuntime taker = owner.order(takerOrderId);
-            if (taker == null || taker.userId() != userId) {
-                throw new IllegalStateException("no-trade taker order is missing");
-            }
-            CoreInstrumentState instrument = owner.instrument(identities.symbol(taker.symbolId()));
-            if (instrument == null) throw new IllegalStateException("match instrument is missing");
-            if (owner.productLine.isDerivative()) {
-                RuntimeDerivativeMatchProcessor.validateAndPrepare(
-                        takerOrderId, matchingResult.matcherEvents(), owner, identities);
-            } else {
-                RuntimeSpotMatchProcessor.validate(takerOrderId, matchingResult.matcherEvents(), owner);
-            }
-            MatcherSettlementPlan plan = MatcherSettlementPlan.build(coreSequence, takerOrderId, userId,
-                    new long[]{takerOrderId}, matchingResult, owner, identities);
-            if (plan.requiredLaneMask() != expectedLaneMask) {
-                throw new IllegalStateException("no-trade matcher settlement lane mask mismatch");
-            }
-            plans[index] = plan;
-        }
-        MatcherSettlementEvent[] events = new MatcherSettlementEvent[plans.length];
-        for (int index = 0; index < plans.length; index++) {
-            events[index] = dispatchMatcherSettlement(coreSequence, expectedLaneMask, 0,
-                    -1, -1, plans[index], matchingResults.get(index), identities);
-        }
-        awaitMatcherSettlementBatch(events);
-        aggregateTreasuryDeltaScratch.clear();
-        for (MatcherSettlementEvent event : events) {
-            aggregateTreasuryDeltaScratch.merge(owner.collectMatcherSettlement(event));
-            releaseMatcherSettlement(event);
-        }
-        return aggregateTreasuryDeltaScratch;
-    }
-
-    public MatcherSettlementEvent[] dispatchNoTradeMatcherSettlements(
-            long coreSequence, long userId, java.util.List<Long> takerOrderIds,
-            java.util.List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities) {
-        owner.assertOwner();
-        if (coreSequence <= 0 || userId <= 0 || takerOrderIds == null || matchingResults == null
-                || takerOrderIds.isEmpty() || takerOrderIds.size() != matchingResults.size()
-                || identities == null) {
-            throw new IllegalArgumentException("invalid no-trade matcher settlement batch");
-        }
-        MatcherSettlementPlan[] plans = new MatcherSettlementPlan[takerOrderIds.size()];
-        long expectedLaneMask = owner.topology.accountLaneMask(userId);
-        for (int index = 0; index < takerOrderIds.size(); index++) {
-            long takerOrderId = takerOrderIds.get(index);
-            CoreMatchingResult matchingResult = matchingResults.get(index);
-            if (matchingResult == null || matchingResult.nativeCommand().coreSequence() != coreSequence
-                    || hasTrade(matchingResult)) {
-                throw new IllegalArgumentException("invalid no-trade matcher settlement result");
-            }
-            OrderRuntime taker = owner.order(takerOrderId);
-            if (taker == null || taker.userId() != userId) {
-                throw new IllegalStateException("no-trade taker order is missing");
-            }
-            CoreInstrumentState instrument = owner.instrument(identities.symbol(taker.symbolId()));
-            if (instrument == null) throw new IllegalStateException("match instrument is missing");
-            if (owner.productLine.isDerivative()) {
-                RuntimeDerivativeMatchProcessor.validateAndPrepare(
-                        takerOrderId, matchingResult.matcherEvents(), owner, identities);
-            } else {
-                RuntimeSpotMatchProcessor.validate(takerOrderId, matchingResult.matcherEvents(), owner);
-            }
-            MatcherSettlementPlan plan = MatcherSettlementPlan.build(coreSequence, takerOrderId, userId,
-                    new long[]{takerOrderId}, matchingResult, owner, identities);
-            if (plan.requiredLaneMask() != expectedLaneMask) {
-                throw new IllegalStateException("no-trade matcher settlement lane mask mismatch");
-            }
-            plans[index] = plan;
-        }
-        MatcherSettlementEvent[] events = new MatcherSettlementEvent[plans.length];
-        for (int index = 0; index < plans.length; index++) {
-            events[index] = dispatchMatcherSettlement(coreSequence, expectedLaneMask, 0,
-                    -1, -1, plans[index], matchingResults.get(index), identities);
-        }
-        return events;
-    }
-
-    public RuntimeTreasuryDelta applyPerpetualMatcherSettlements(
-            long coreSequence, List<Long> takerOrderIds, List<Long> expectedLaneMasks,
-            List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities) {
-        owner.assertOwner();
-        if (!owner.productLine.isDerivative() || coreSequence <= 0 || takerOrderIds == null
-                || expectedLaneMasks == null || matchingResults == null || takerOrderIds.isEmpty()
-                || takerOrderIds.size() != expectedLaneMasks.size()
-                || takerOrderIds.size() != matchingResults.size() || identities == null) {
-            throw new IllegalArgumentException("invalid perpetual matcher settlement batch");
-        }
-        long validMask = owner.accountLanes.length == Long.SIZE ? -1L : (1L << owner.accountLanes.length) - 1L;
-        List<PerpetualMatcherSettlement> settlements = new ArrayList<>(takerOrderIds.size());
-        for (int index = 0; index < takerOrderIds.size(); index++) {
-            long takerOrderId = takerOrderIds.get(index);
-            long expectedLaneMask = expectedLaneMasks.get(index);
-            CoreMatchingResult matchingResult = matchingResults.get(index);
-            if (takerOrderId <= 0 || expectedLaneMask == 0 || (expectedLaneMask & ~validMask) != 0
-                    || matchingResult == null || matchingResult.nativeCommand().coreSequence() != coreSequence) {
-                throw new IllegalArgumentException("invalid perpetual matcher settlement item");
-            }
-            OrderRuntime taker = owner.order(takerOrderId);
-            if (taker == null) throw new IllegalStateException("taker order is missing");
-            CoreInstrumentState instrument = owner.instrument(identities.symbol(taker.symbolId()));
-            if (instrument == null) throw new IllegalStateException("match instrument is missing");
-            MatcherSettlementPlan plan = MatcherSettlementPlan.build(coreSequence, takerOrderId, taker.userId(),
-                    new long[]{takerOrderId}, matchingResult, owner, identities);
-            if (plan.requiredLaneMask() != expectedLaneMask) {
-                throw new IllegalStateException("perpetual matcher settlement lane mask mismatch");
-            }
-            settlements.add(new PerpetualMatcherSettlement(expectedLaneMask, matchingResult, plan));
-        }
-        long[] primitiveTakerOrderIds = new long[takerOrderIds.size()];
-        for (int index = 0; index < primitiveTakerOrderIds.length; index++) {
-            primitiveTakerOrderIds[index] = takerOrderIds.get(index);
-        }
-        MatcherSettlementPlan.validateAndPrepareBatch(
-                primitiveTakerOrderIds, matchingResults, owner, identities, matcherBatchValidationScratch);
-
-        MatcherSettlementEvent[] events = new MatcherSettlementEvent[settlements.size()];
-        for (int index = 0; index < settlements.size(); index++) {
-            PerpetualMatcherSettlement settlement = settlements.get(index);
-            events[index] = dispatchMatcherSettlement(coreSequence, settlement.expectedLaneMask(), 0,
-                    -1, -1, settlement.plan(), settlement.matchingResult(), identities);
-        }
-        awaitMatcherSettlementBatch(events);
-        aggregateTreasuryDeltaScratch.clear();
-        for (MatcherSettlementEvent event : events) {
-            aggregateTreasuryDeltaScratch.merge(owner.collectMatcherSettlement(event));
-            releaseMatcherSettlement(event);
-        }
-        return aggregateTreasuryDeltaScratch;
     }
 
     public MatcherSettlementEvent[] dispatchMatcherSettlementBatch(
@@ -409,22 +258,4 @@ final class MatcherSettlementDispatcher {
         return aggregateTreasuryDeltaScratch;
     }
 
-    static boolean hasTrade(CoreMatchingResult result) {
-        for (var event : result.matcherEvents()) {
-            if (event.eventType() == exchange.core2.core.common.MatcherEventType.TRADE) return true;
-        }
-        return false;
-    }
-
-    static void awaitMatcherSettlementBatch(MatcherSettlementEvent[] events) {
-        for (MatcherSettlementEvent event : events) {
-            while (!event.complete()) Thread.onSpinWait();
-        }
-    }
-
-    record PerpetualMatcherSettlement(
-            long expectedLaneMask,
-            CoreMatchingResult matchingResult,
-            MatcherSettlementPlan plan) {
-    }
 }

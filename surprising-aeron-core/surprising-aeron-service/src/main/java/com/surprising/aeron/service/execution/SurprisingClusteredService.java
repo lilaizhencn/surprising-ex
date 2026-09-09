@@ -145,9 +145,12 @@ public final class SurprisingClusteredService implements ClusteredService {
             // A preceding command may have changed maker accounts or removed the target order.
             eligible = state.prepareClusterPipelineScope(request, commandWindow);
         }
-        while (eligible && commandWindow.conflicts()) {
+        while (eligible) {
+            // Resolve the dependency prefix once; exact counterparty checks may visit resting orders.
+            int conflictingPrefix = commandWindow.conflictingPrefixSize();
+            if (conflictingPrefix == 0) break;
             dependencyFences++;
-            drainCommandPrefix(commandWindow.conflictingPrefixSize());
+            drainCommandPrefix(conflictingPrefix);
             // Re-evaluate against committed makers; the independent suffix remains in flight.
             eligible = state.prepareClusterPipelineScope(request, commandWindow);
         }

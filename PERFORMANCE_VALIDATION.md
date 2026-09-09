@@ -4998,3 +4998,16 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - `/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-runtime-owner/local-functional/benchmarks.jar`: SHA-256 `1ad1308df8da9b2c3d6c99f2c22223e8f52f37f2c3931a7a04337e73a6c6efa9`。
 - `surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar`: SHA-256 `4d734a9586da1c0521d51018588d84f84c9977f1d9273d50530ef80d559bf1f5`。
 - `surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar`: SHA-256 `8ccf56eb3fd1033ea993d8e3b7ef184a3d51aeeeeed756820659241aebb364a6`。
+
+
+## 2026-09-09 拆分后等待点审查与局部修复
+
+- 基于 master `a269d217` 的本次工作树；按用户要求仅本地正确性验证，不启动云服务器、不运行压测或 JMH/JFR。CodeGraph 工具未暴露，本轮使用本地源码调用引用和现有测试核对。
+- 关键定位：`ClusterCommandWindow.conflictingPrefixSize` 对同币对命令设置前缀提交屏障，独立用户、同方向不交叉订单也受此限制；`SurprisingClusteredService.processIngress` 在回调内同步排此前缀。该规则保护基于已提交 maker/账户索引的准入，不能单独删除。此为源码确认的流水并行限制，不是新测得的吞吐归因比例。
+- 实际同步路径：`TradingRuntimeState.onLane -> LaneMutationTask.await` 提交任务后等待/park，含控制、风险和强一致读取；内部等待完成后才允许读取结果和刷新变化，因此不能直接改为立即返回。`stageLaneMutationFromScratch` 等待的是提交水位确认。普通订单的异步准入/结算路径不能与这些路径混称为全异步。
+- 出口：`SurprisingClusteredService.offerResponse` 在 owner 上重试，截止为 1 秒；慢客户端可能阻塞后续交易。直接 Core 查询会先完成命令窗口，部分查询还同步经过 Lane。实时快照读取为独立异步路径；本轮没有修改响应送达策略或 Valkey。
+- 修复：前缀依赖范围只计算一次，避免 conflicts() 和 conflictingPrefixSize() 连续重复遍历；删除无生产/测试调用者的 applyNoTradeMatcherSettlements、dispatchNoTradeMatcherSettlements、applyPerpetualMatcherSettlements 及专属辅助类型/无界等待。旧无界等待不在现行生产调用链，不能据此解释历史吞吐。
+- 修复实际可达的 Lane 提交无限等待：增加 30 秒截止和中断检查，保留健康检查、原等待策略和完成屏障；超时抛运行故障，不伪造成功、不发布未完成提交、不回收事件。增加超时及中断两条回归，校验未完成序号/事件保留和中断标志。
+- HotSpot JDK 25.0.1（Oracle GraalVM）、Maven 3.9.16，运行前已检查版本。执行 `mvn -pl surprising-aeron-core/surprising-aeron-tools,surprising-aeron-core/surprising-aeron-benchmarks -am verify`：BUILD SUCCESS，996 项中 995 通过、1 项外部数据库条件跳过，0 失败/错误；service 601 项全部通过。包括六产品线资金、订单、批量、依赖前缀及恢复回归；benchmarks 模块仅 JUnit 功能测试，未执行压力工作负载。
+- 日志：`/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-wait-audit/verify.log`；此前仅清理旧接口与重复扫描的服务回归亦通过，见同目录 service-tests.log。未重跑三进程恢复、外部数据库集成或性能采样：本次未改变复制协议/快照编码/数据库契约，局部影响通过核心与工具模块回归覆盖。README 未修改。
+- 结论：等待点审查和上述局部修复完成；同币对依赖模型、同步 Lane 业务调用、响应背压仍待分项调整，不宣称吞吐问题已解决。后续应先明确未提交订单参与准入的确定性规则，再调整同币对流水；Lane 变更则必须保持任务完成、失败终止和结果发布边界。

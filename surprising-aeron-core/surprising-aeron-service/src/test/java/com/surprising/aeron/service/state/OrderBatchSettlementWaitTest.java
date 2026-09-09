@@ -34,6 +34,42 @@ class OrderBatchSettlementWaitTest {
         }
     }
 
+    @Test
+    void laneCommitTimeoutPreservesUnfinishedSequenceAndCannotRecycle() {
+        try (var runtime = new TradingRuntimeState()) {
+            var event = incompleteLaneCommit(runtime);
+            assertThatThrownBy(() -> runtime.awaitLaneCommit(event, System.nanoTime() - 1))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("timed out");
+            assertThat(event.coreSequence()).isEqualTo(1);
+            assertThat(event.completedLaneMask()).isZero();
+            assertThatThrownBy(() -> runtime.releaseLaneCommit(event))
+                    .hasMessageContaining("incomplete Account Lane commit");
+        }
+    }
+
+    @Test
+    void laneCommitInterruptionDoesNotClearInterruptOrClaimCompletion() {
+        try (var runtime = new TradingRuntimeState()) {
+            var event = incompleteLaneCommit(runtime);
+            Thread.currentThread().interrupt();
+            try {
+                assertThatThrownBy(() -> runtime.awaitLaneCommit(event, System.nanoTime() + 30_000_000_000L))
+                        .isInstanceOf(IllegalStateException.class).hasMessageContaining("interrupted");
+                assertThat(Thread.currentThread().isInterrupted()).isTrue();
+                assertThat(event.complete()).isFalse();
+            } finally {
+                Thread.interrupted();
+            }
+        }
+    }
+
+    private static LaneCommitEvent incompleteLaneCommit(TradingRuntimeState runtime) {
+        return new LaneCommitEvent(1).prepare(1, 1,
+                new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] {
+                    new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList()
+                }, runtime);
+    }
+
     private static MatcherSettlementEvent incompleteEvent() throws Exception {
         var event = new MatcherSettlementEvent();
         var mask = MatcherSettlementEvent.class.getDeclaredField("requiredLaneMask");

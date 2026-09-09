@@ -57,6 +57,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 批量结算完成等待的超时时间，单位为纳秒。 */
     static final long ORDER_BATCH_SETTLEMENT_TIMEOUT_NANOS =
             java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+    /** 控制命令等同步提交边界等待 Lane 的最长时间，单位为纳秒。 */
+    static final long LANE_COMMIT_TIMEOUT_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
     /** 变更键缓冲触发压缩的数量阈值。 */
     static final int CHANGE_KEY_COMPACTION_THRESHOLD = 512;
     /** 启用并行结算派发所需的最少 Lane 操作数。 */
@@ -1346,15 +1348,26 @@ public final class TradingRuntimeState implements AutoCloseable {
     long stageLaneMutationFromScratch(long coreSequence) {
         LaneCommitEvent event = dispatchLaneMutationFromScratch(coreSequence);
         if (event == null) return 0;
-        int idle = 0;
-        while (!event.complete()) {
-            if ((idle++ & 1_023) == 0) assertAccountLanesHealthy();
-            if (idle <= LANE_COMPLETION_SPINS) Thread.onSpinWait();
-            else Thread.yield();
-        }
+        awaitLaneCommit(event, System.nanoTime() + LANE_COMMIT_TIMEOUT_NANOS);
         long laneMask = event.requiredLaneMask();
         releaseLaneCommit(event);
         return laneMask;
+    }
+
+    void awaitLaneCommit(LaneCommitEvent event, long deadlineNanos) {
+        int idle = 0;
+        while (!event.complete()) {
+            if ((idle++ & 1_023) == 0) {
+                assertAccountLanesHealthy();
+                if (Thread.currentThread().isInterrupted() || System.nanoTime() - deadlineNanos >= 0) {
+                    // Operational failure: never recycle the event or publish an unfinished commit.
+                    throw new IllegalStateException("Account Lane commit interrupted or timed out");
+                }
+            }
+            if (idle <= LANE_COMPLETION_SPINS) Thread.onSpinWait();
+            else Thread.yield();
+        }
+        assertAccountLanesHealthy();
     }
 
     LaneCommitEvent dispatchLaneMutationFromScratch(long coreSequence) {
@@ -4865,15 +4878,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             long coreSequence, long expectedLaneMask, long takerOrderId,
             CoreMatchingResult matchingResult, RuntimeIdentityRegistry identities,
             TerminalOrderSink terminalOrderSink) { return settlements.applyOrderBatchMatcherSettlement(coreSequence, expectedLaneMask, takerOrderId, matchingResult, identities, terminalOrderSink); }
-    public RuntimeTreasuryDelta applyNoTradeMatcherSettlements(
-            long coreSequence, long userId, java.util.List<Long> takerOrderIds,
-            java.util.List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities) { return settlements.applyNoTradeMatcherSettlements(coreSequence, userId, takerOrderIds, matchingResults, identities); }
-    public MatcherSettlementEvent[] dispatchNoTradeMatcherSettlements(
-            long coreSequence, long userId, java.util.List<Long> takerOrderIds,
-            java.util.List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities) { return settlements.dispatchNoTradeMatcherSettlements(coreSequence, userId, takerOrderIds, matchingResults, identities); }
-    public RuntimeTreasuryDelta applyPerpetualMatcherSettlements(
-            long coreSequence, List<Long> takerOrderIds, List<Long> expectedLaneMasks,
-            List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities) { return settlements.applyPerpetualMatcherSettlements(coreSequence, takerOrderIds, expectedLaneMasks, matchingResults, identities); }
+
     public MatcherSettlementEvent[] dispatchMatcherSettlementBatch(
             long coreSequence, long[] takerOrderIds, long[] expectedLaneMasks,
             List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities,
