@@ -157,8 +157,20 @@ public final class SurprisingClusteredService implements ClusteredService {
     private long drainingSequence, progressDeadline;
 
     private void processIngress(ClientSession session, CoreMessage request, long timestamp, long position) {
+        awaitIngressCapacity(request);
         pendingIngress.add(session, request, timestamp, position);
         progressCommands(false);
+    }
+
+    /** 队列满时暂停日志消费，在原日志上下文内推进已复制命令；不改变业务顺序或拒绝结果。 */
+    private void awaitIngressCapacity(CoreMessage request) {
+        if (pendingIngress.hasCapacity(request)) return;
+        long deadline = System.nanoTime() + COMMAND_TIMEOUT_NANOS;
+        do {
+            progressCommands(false);
+            if (pendingIngress.hasCapacity(request)) return;
+            idleCommand(0, deadline);
+        } while (true);
     }
 
     private void progressCommands(boolean flushWindow) {
@@ -511,6 +523,7 @@ public final class SurprisingClusteredService implements ClusteredService {
     private void drainFromLogEvent() {
         processingLogCallback = true;
         try {
+            awaitIngressCapacity(null);
             pendingIngress.add(null, null, 0, 0);
             progressCommands(false);
         } catch (RuntimeException failure) {

@@ -24,6 +24,69 @@ import org.junit.jupiter.params.provider.EnumSource;
 class ClusterCommandPipelineTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
+    void followerReplayBackpressuresLoggedTimersUntilLaneProgresses(ProductLine product) throws Exception {
+        for (boolean nextIsCommand : new boolean[]{false, true}) verifyFollowerReplayBackpressure(product, nextIsCommand);
+    }
+
+    private void verifyFollowerReplayBackpressure(ProductLine product, boolean nextIsCommand) throws Exception {
+        try (Fixture live = new Fixture(product, Cluster.Role.FOLLOWER); Fixture serial = new Fixture(product)) {
+            serial.applyAll(live.setup());
+            var commands = new ArrayList<CoreMessage>();
+            String asset = ContractType.valueOf(product.contractTypeCode()).isInverse() ? "BTC" : "USDT";
+            for (int i = 0; i < ClusterCommandWindow.CAPACITY; i++) {
+                var funds = live.message(CoreMessageType.ADJUST_BALANCE, 10000 + i,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 20000)));
+                live.apply(funds); serial.apply(funds);
+            }
+            for (int i = 0; i < ClusterCommandWindow.CAPACITY; i++) {
+                commands.add(live.place(10000 + i, "BTC-USDT", 1000 + i, 80, 1, CoreOrderSide.BUY));
+            }
+            var field = TradingCoreRuntime.class.getDeclaredField("matcherPipeline");
+            field.setAccessible(true);
+            var matcher = (MatcherPipelineGroup) field.get(live.service.state());
+            var entered = new CountDownLatch(1);
+            var release = new CountDownLatch(1);
+            var blocked = matcher.readAtSubmissionFence(0, () -> {
+                entered.countDown();
+                try { if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("matcher release timeout"); }
+                catch (InterruptedException e) { throw new AssertionError(e); }
+                return 1;
+            });
+            assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+            try {
+                commands.forEach(live::send);
+                assertThat(live.service.commandWindowSize()).isEqualTo(ClusterCommandWindow.CAPACITY);
+                // 重放已经记录的 1ms 定时器；快速追赶不应被本机消费速度变成节点故障。
+                for (int i = 0; i < 8192; i++)
+                    live.service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, TIME + i + 1);
+                var releaser = new Thread(() -> {
+                    try { Thread.sleep(30); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                    release.countDown();
+                });
+                releaser.start();
+                try {
+                    if (nextIsCommand) {
+                        var next = live.place(11, disjointSymbol("BTC-USDT"), 8000, 80, 1, CoreOrderSide.BUY);
+                        commands.add(next);
+                        live.send(next);
+                    } else {
+                        live.service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, TIME + 8193);
+                    }
+                } finally { releaser.join(2000); }
+            } finally { release.countDown(); }
+            live.tick(); serial.applyAll(commands);
+            assertThat(blocked.join()).isOne();
+            assertThat(live.service.pendingCommandCount()).isZero();
+            assertThat(live.hash()).isEqualTo(serial.hash());
+            assertThat(live.service.state().tradingState().users()).isEqualTo(serial.service.state().tradingState().users());
+            try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.state().snapshot())) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
     void newAdmissionCanResumeRejectedBatchWithSuspendedCommit(ProductLine product) {
         try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
             serial.applyAll(live.setup());

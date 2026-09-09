@@ -5202,3 +5202,36 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 回答11万口径：今天记录的112252.369 business ops/s来自本机LinearPerpetualScaleSoakMain Runtime直驱mixed，687620 Core消息/60.896秒=11291.717消息/s，批量展开6835716业务操作；没有真实三节点网络和日志复制，不能与本轮失败场景计算性能回退比例，更不能把两者差额全部归于Aeron开销。
 - leader JFR212秒，DataLoss0、ExecutionSample1421、NativeMethodSample6161、ObjectAllocationSample31535、GarbageCollection8；SHA256 b3e16df8ef582efcb8abb2eba25900ae058c19d86243263cc6b8e8e5335114f3。两个从节点fatal退出的JFR主文件为空，不能据此推断其热点。磁盘最小可用core0/1/2约41.13/41.69/41.38GB，最后VmSwap均0；未做完整分配归因/NMT差分/长期泄漏判断。额外线程dump请求到达时节点已停，未取得有效dump，不据此作栈结论。
 - 已收集并删除各VM本轮目录；22:57:53本地时间gcloud确认四VM全部TERMINATED。分析后清理本地/tmp/ex-gcp-d1a1da96（日志、JFR、解析JSON、临时编排脚本、云元数据），只保留此摘要及源码；不改README。结果：真实三节点压测失败，下一步应处理从节点异步推进与积压背压，当前没有测到Core计算上限。
+
+## 2026-09-09 本机入口背压复现及短测（采集前锁定）
+- 用户明确要求释放云端服务器/存储/IP并允许本机小规模压测。已删除surprising-ae591的surprising-core-0/1/2、surprising-load及四块80GiB磁盘，复查instances/disks/addresses/snapshots列表均为空；没有保留的静态IP需要额外删除。后续不启动云资源。
+- 纠正前轮推断：Aeron 1.53.0源码ClusteredService.doBackgroundWork明确禁止直接或间接修改服务状态，背景不提交交易是正确边界。已用64笔独立订单、快速重放已记录的1ms定时器复现入口队列耗尽；修复前六产品全部同异常失败。修复在合法日志回调中对容量不足进行背压，推进已有命令后再接收新记录，不扩大队列、不丢日志、不在后台修改交易状态。临时容量背压仍有30秒运行故障保护，并非删除所有等待。
+- 首轮138项流水线测试通过；覆盖队列满后普通命令与定时器两种入口、原时间/顺序、六产品账户和串行hash/快照一致性。另补replicatedIngressBackpressure JMH场景，64笔下单+64笔撤单及8193个重放timer，测试专用2ms matcher gate强制触发背压；人工延迟计入场景成本，不作为交易容量结果。
+- 本机HotSpot Oracle GraalVM25.0.1/Maven3.9.16/macOS26.7/i9-9880H8C16T/16GiB，可用磁盘约534GiB。只测当前master工作树修复，无旧版本性能对照。先benchmarks -am verify，再JMH六产品、4Lane/1matcher、batchSize1、maxInFlight256、realtime=false/interleavedMetrics=false/spin0，1fork/1thread、warmup1×1秒/measurement1×2秒、G1/Xms512m/Xmx768m/NMTsummary、-prof gc/JFR profile maxsize32m；保留资金/冻结/终态/快照断言，短轮不作长期泄漏或精确稳态容量结论。
+- 随后本机三个独立JVM+一个网络负载JVM，loopback127.0.0.1、真实Aeron日志复制，LINEAR_PERPETUAL/1769用户/256symbol/batch20/4Lane/1matcher/global=session256、trading-stream=true/operational=false、seed112001。Core每进程G1/Xms512m/Xmx768m/NMTsummary/SHARED_NETWORK/YIELDING/spin0/JFR profile maxsize32m；loadG1/Xms128m/Xmx512m/SHARED，预热10秒、测量30秒。配置沿用现有负载器，缩短时长控制规模，测量边界排空和最终金融核对不变。
+- 通过条件：完整运行、offered=terminal/unfinished0、最终fundsDiff0及业务终态PASS，无backlog capacity exhausted/节点退出/结果未知；短测仅定位，无绝对吞吐门槛，不与云端吞吐计算回退比例。同机调度、JIT及采样影响单独说明；原始产物限制在/tmp/ex-local-backpressure，磁盘少于10GiB或节点失败停止本轮，分析后清理生成目录、录制/JFR/日志/测试报告，只保留摘要和源码。
+
+## 2026-09-09 真实Command字节三节点复制隔离诊断（采集前锁定）
+- 用户追加要求：构造业务Command，用相同消息体单独压测Cluster。只使用benchmarks中的独立启动器和确认服务，生产Core不添加测试模式。沿用生产拓扑、Archive CRC32C、SHARED_NETWORK驱动、SHARED Archive及默认Consensus配置。
+- 当前master工作树；JDK/主机同上；三个本机独立JVM各G1/512–768MiB，负载128–512MiB，单连接/256在途/持续异步、不限到达率，预热10秒+测量30秒，末尾排空纳入时间。两种生产编码消息：LINEAR_PERPETUAL普通下单与20笔批量下单；固定BTC-USDT、用户1000，预编码重用订单正文，仅更新Command标识/序号。不是业务运行，不设账户/Lane/matcher，不验证金融终态或快照；禁止把representedItems/s称为terminal业务吞吐。
+- 每种消息分别YIELDING与BUSY_SPIN，只切换服务idle策略；发压线程均spin并持续poll。每条已提交消息返回8字节序号ACK，三个服务均验证连续序号，结束记录各自序号/字节数。报告消息字节、ACK messages/s、representedItems/s、payload MiB/s、p50/p99/max、发送与确认差、offer重试。无JFR，采集进程CPU/RSS；短测不证明云端物理网络容量或无泄漏。通过条件发送=确认、三节点序号/字节一致、无节点错误，未设容量通过门槛。
+- 全部产物限定/tmp/ex-replication-*；运行中磁盘低于10GiB、节点异常或240秒超时停止。原始日志/录制在摘要后清理。历史OS65的116048.574业务ops/s确属GCP三节点，使用YIELDING；当时operational=true由旁路更新价格，本轮先前真实Core负载operational=false含交易FIFO内7154条价格消息，口径与环境不同，不能仅凭两个数字认定代码回退幅度。
+
+### 当次执行结果（23:20–23:46）
+- 入口背压修复：benchmarks -am verify共1088项，1087通过/0失败/0错误，1项InstrumentSeedCoreContractTest因无数据库跳过。六产品replicatedIngressBackpressure JMH/JFR全部通过，含资金/冻结/订单终态/快照一致性。SPOT/LINEAR_PERPETUAL/INVERSE_PERPETUAL/LINEAR_DELIVERY/INVERSE_DELIVERY/OPTION分别3.553/3.003/3.565/3.681/3.687/3.570诊断循环/s；gc.alloc.rate.norm分别6179501/6792791/6202313/6190461/5612306/6184528 B/循环，测量GC均0。该循环含人工gate和8193次timer，严禁当作交易ops/s或生产每单分配。六份JFR约1.05–1.12MB，DataLoss均0。
+- 真实Core本机网络短测：30.649秒，offered=terminal=523250业务操作、56306Core消息，17072.511业务ops/s、1837.142消息/s、4009.307fills/s；unfinished0、peak256、fundsDiff0，资金/持仓/冻结/清算不变量PASS。普通下单/撤单/价格/批量下单/批量撤单数量分别12288/12288/7154/18432批(368640项)/6144批(122880项)，计数与公式相符，非业务计数单位算错。三节点最终pending0，无容量耗尽或节点错误。
+- 该轮Leader owner采样894，其中533在Thread.yield0；matcher28、四Lane78；样本比例不是精确CPU占比。31194个提交前缀覆盖67644条命令，平均约2.17条/前缀，仍有推进/协调粒度问题。测量窗口采样分配权重约1.914GB、59.56MiB/s、3658B/业务操作（抽样估计，不是精确对象计数），主要long[]、byte[]、OrderRuntime、NativeCommand、ReservationRuntime；owner权重865MB、matcher378MB。6次GC pause10.10–12.31ms，NMT committed738.7–742.3MB；三节点JFR均DataLoss0。未做长稳、精确对象/TLAB/堆外余额/safepoint全指标验收，不能宣称零分配或无泄漏。
+- 复制诊断新增2项协议/序号测试通过，最终package成功。首次编写测试误引入本模块不存在的Mockito，改用JDK接口代理后通过，没有新增依赖。23:40首轮普通单与Maven编译重叠，且停止时一个Follower未追平，仅作为功能诊断，不进入以下对照；随后补会话关闭日志追平核对，等待所有编译结束再运行。
+
+|服务idle|消息|字节/消息|测量秒|发送=确认|ACK消息/s|展开items/s（非业务终态）|payload MiB/s|p50/p99/max µs|offer重试|
+|---|---|---:|---:|---:|---:|---:|---:|---|---:|
+|YIELDING|普通单|159|30.002739|1387002|46229.180|46229.180|7.010|6291.455 / 8253.439 / 28622.847|19|
+|BUSY_SPIN|普通单|159|30.003929|1622970|54091.916|54091.916|8.202|3117.055 / 21381.119 / 252837.887|21|
+|YIELDING|20笔批量单|1914|30.030816|191983|6392.867|127857.333|11.669|39878.655 / 60489.727 / 86048.767|23|
+|BUSY_SPIN|20笔批量单|1914|30.051619|195467|6504.375|130087.501|11.873|31965.183 / 68616.191 / 379846.655|23|
+
+- 四轮均peak256/unfinished0，客户端退出0、无节点异常；含预热的三副本最终sequence分别1832693/2001222/253992/264227，bytes分别291398187/318194298/486140688/505730478，每轮三个节点完全相同。ACK衡量多数派提交后的Leader服务确认；Follower最终追平另核对，不把追平后的结果说成每时刻三副本均同步。
+- 进程ps每2秒采样，四轮单进程峰值RSS约1.53/1.91/1.43/1.79GB，四JVM共享8物理核，不能把进程CPU或busy-spin当业务有效CPU。最后批量busy轮有约3秒既有JFR JSON离线读取，另有正常系统后台活动；四轮均为短时定位数据，非隔离硬件稳态容量/显著性结论。
+- 命令：HotSpot25 Maven `-pl surprising-aeron-core/surprising-aeron-benchmarks -am package -Dtest=CommandReplicationTest -Dsurefire.failIfNoSpecifiedTests=false`。节点以benchmarks jar启动 `com.surprising.aeron.service.cluster.CommandReplicationNode`，配置前三节点拓扑、各自独立data/aeron目录及 `surprising.aeron.service.idle-strategy=YIELDING|BUSY_SPIN`；负载入口 `com.surprising.aeron.benchmarks.transport.CommandReplicationLoad`，`replication.batch=1|20`。生产启动器未添加测试开关，也未修改其idle默认值。
+- 初步结论：独立复制已建立可运行基线；批量展开后的13万items/s不是13万消息/s。单独切换service busy-spin没有让批量消息吞吐显著跃升，且尾延迟更差。真实Core路径还包含生产客户端/解码/撮合/账户/提交/响应，和此预编码最小ACK服务不同，不能把差额全归到owner。历史GCP成绩真实存在，环境/GC/并行资源/价格注入与代码均变化，现有证据不足以认定“今天代码无回退”或确定回退幅度；异步回调推进和提交粒度仍需进一步隔离。
+- 原始目录：/tmp/ex-local-backpressure、/tmp/ex-replication-yield-1及四个/tmp/ex-replication-clean-*，另/tmp/ex-replay-*.log和构建日志；分析完成后按用户要求全部清理，路径仅为历史来源，不能继续访问。四份正式load.log SHA256按表顺序：1a8b2772da38593a2db249c7f03b207a4110650ece86f4975d4788fff1e89d71 / dabadad182fb32ec9b85587ca6871d71a6807bb9e8fa2f9d6d1ef0843c16157f / 0d8487aeb921071eba41193f17043cb607b3863e8e8bda9688c73ba6eaca070f / 9d7e0720f01de09c8d4bfda0e3075b9f59d744387f2a6d1e8457963f0ebf3124。所有测试JVM已停止，云资源仍保持释放状态。

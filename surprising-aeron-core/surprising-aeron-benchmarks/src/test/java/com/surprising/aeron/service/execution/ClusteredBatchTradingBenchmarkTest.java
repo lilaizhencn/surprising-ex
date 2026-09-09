@@ -7,6 +7,22 @@ import com.surprising.product.api.ProductLine;
 class ClusteredBatchTradingBenchmarkTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
+    void replayBackpressureRetainsOrdersFundsAndSnapshot(ProductLine productLine) throws Exception {
+        var workload = new ClusteredBatchTradingBenchmark.Workload();
+        workload.productLine = productLine;
+        workload.accountLanes = 4;
+        workload.batchSize = 1;
+        workload.maxInFlight = 256;
+        try (workload) {
+            workload.setup();
+            var counters = new ClusteredBatchTradingBenchmark.Counters();
+            new ClusteredBatchTradingBenchmark().replicatedIngressBackpressure(workload, counters);
+            org.junit.jupiter.api.Assertions.assertEquals(128, counters.terminalBusinessOperations);
+            org.junit.jupiter.api.Assertions.assertEquals(counters.acceptedCoreMessages, counters.terminalCoreMessages);
+        }
+    }
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
     void sequentialBatchHandoffPreservesTerminalFundsAndSnapshot(ProductLine productLine) {
         var workload = new ClusteredBatchTradingBenchmark.Workload();
         workload.accountLanes = 4;

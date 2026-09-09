@@ -24,6 +24,16 @@ import org.openjdk.jmh.annotations.*;
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"})
 @Threads(1)
 public class ClusteredBatchTradingBenchmark {
+    /** 64笔订单及已记录定时器的快速重放，强制覆盖入口背压；用于诊断，不代表容量吞吐。 */
+    @Benchmark
+    public long replicatedIngressBackpressure(Workload workload, Counters counters) throws Exception {
+        workload.runReplicatedIngressBackpressure();
+        counters.acceptedBusinessOperations += 128;
+        counters.terminalBusinessOperations += 128;
+        counters.acceptedCoreMessages += 128;
+        counters.terminalCoreMessages += 128;
+        return workload.terminal;
+    }
     /** 单项批量命令走顺序撮合续接，覆盖等待期间的 owner 上下文交接；使用 batchSize=1。 */
     @Benchmark
     public long sequentialBatchContextHandoff(Workload workload, Counters counters) {
@@ -481,6 +491,46 @@ public class ClusteredBatchTradingBenchmark {
             } finally {
                 expectBatchTrades = singleResponses = false;
             }
+        }
+
+        public void runReplicatedIngressBackpressure() throws Exception {
+            var entered = new java.util.concurrent.CountDownLatch(1);
+            var release = new java.util.concurrent.CountDownLatch(1);
+            var blocked = service.state().matcherPipeline.readAtSubmissionFence(0, () -> {
+                entered.countDown();
+                try { if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("matcher release timeout"); }
+                catch (InterruptedException e) { throw new IllegalStateException(e); }
+                return 1;
+            });
+            long before = terminal;
+            singleResponses = true;
+            try {
+                if (!entered.await(2, TimeUnit.SECONDS)) throw new IllegalStateException("matcher gate timeout");
+                for (int user = 0; user < 64; user++) {
+                    long id = orderId++;
+                    firstOrders[user] = id;
+                    send(command(CoreMessageType.PLACE_ORDER, 1000 + user,
+                            TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(id, "JMH-PIPE-A-USDT", 1,
+                                    CoreOrderSide.BUY, 90, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                                    CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "replay-" + id))));
+                }
+                if (service.commandWindowSize() != 64) throw new IllegalStateException("replay window not full");
+                for (int tick = 0; tick < 8192; tick++)
+                    service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, 1_700_000_000_001L + tick);
+                var releaser = new Thread(() -> {
+                    try { Thread.sleep(2); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                    release.countDown();
+                }, "replay-benchmark-release");
+                releaser.start();
+                try { service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, 1_700_000_008_193L); }
+                finally { releaser.join(2000); }
+                drain();
+                if (blocked.join() != 1) throw new IllegalStateException("matcher gate failed");
+                for (int user = 0; user < 64; user++) send(command(CoreMessageType.CANCEL_ORDER, 1000 + user,
+                        TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(firstOrders[user]))));
+                drain();
+                if (terminal - before != 128) throw new IllegalStateException("replay lost terminal results");
+            } finally { release.countDown(); singleResponses = false; }
         }
 
         public void runIndependentCommandWindows() {
