@@ -22,6 +22,26 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class ClusterCommandPipelineTest {
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void scopeRefreshAndAdmissionShareOneDecodedBatch(ProductLine product) throws Exception {
+        try (var fixture = new Fixture(product)) {
+            fixture.setup();
+            var window = new ClusterCommandWindow();
+            var command = fixture.placeBatch(11, "BTC-USDT", 5000);
+            var state = fixture.service.state();
+            assertThat(state.prepareClusterPipelineScope(command, window)).isTrue();
+            var decoded = window.decoded(command);
+            assertThat(state.prepareClusterPipelineScope(command, window)).isTrue();
+            assertThat(window.decoded(command)).isSameAs(decoded);
+            state.applyClusterCommand(command, TIME, 1000, decoded);
+            var pending = state.pendingMatching(state.matchingSequence(command.header().commandId()));
+            assertThat(pending.decodedCommand()).isSameAs(decoded);
+            var completed = state.completeMatchingSynchronously(pending.sequence(), TIME, 1000);
+            assertThat(completed.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(TradingOrderBatchCodec.decodeResult(completed.data()).items()).hasSize(20);
+        }
+    }
 
     @ParameterizedTest
     @EnumSource(ProductLine.class)
@@ -433,6 +453,16 @@ class ClusterCommandPipelineTest {
     }
 
     private void independentFills(ProductLine product, boolean batch) {
+        independentFills(product, batch, false);
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void collidingMakerMasksStillAllowIndependentBatchFillsAndRecovery(ProductLine product) {
+        independentFills(product, true, true);
+    }
+
+    private void independentFills(ProductLine product, boolean batch, boolean collidingMakers) {
         try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
             var setup = live.setup(); serial.applyAll(setup);
             long buyers = TradingDependencyMask.account(11) | TradingDependencyMask.account(disjointUser(11));
@@ -440,7 +470,11 @@ class ClusterCommandPipelineTest {
             while ((TradingDependencyMask.account(makerA) & buyers) != 0) makerA++;
             long occupied = buyers | TradingDependencyMask.account(makerA);
             long makerB = makerA + 1;
-            while ((TradingDependencyMask.account(makerB) & occupied) != 0) makerB++;
+            if (collidingMakers) {
+                while (TradingDependencyMask.account(makerB) != TradingDependencyMask.account(makerA)) makerB++;
+            } else {
+                while ((TradingDependencyMask.account(makerB) & occupied) != 0) makerB++;
+            }
             String asset = product == ProductLine.SPOT || ContractType.valueOf(product.contractTypeCode()).isInverse()
                     ? "BTC" : "USDT";
             String secondSymbol = disjointSymbol("BTC-USDT");

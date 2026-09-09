@@ -18,7 +18,10 @@ public class ClusterOperationalBenchmark {
     @Setup(Level.Trial)
     public void prepare() {
         workload = new ClusterMixedCapacityMain();
-        try { workload.prepareMeasuredRun(); }
+        try {
+            workload.verifyDependencyCollisionCoverage();
+            workload.prepareMeasuredRun();
+        }
         catch (RuntimeException | Error failure) { workload.close(); throw failure; }
     }
 

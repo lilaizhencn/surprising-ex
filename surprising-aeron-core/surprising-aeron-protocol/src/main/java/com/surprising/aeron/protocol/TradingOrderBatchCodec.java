@@ -143,9 +143,10 @@ public final class TradingOrderBatchCodec {
                     .putLong(source.originalOrderId(index)).putLong(source.replacementOrderId(index))
                     .putInt(source.status(index).wireCode()).putInt(source.resultCode(index).wireCode());
             CoreOrderStateView order = source.order(index);
-            int orderLength = order == null ? 0 : CoreStateQueryCodec.encodedOrderStateLength(order);
-            output.putInt(orderLength);
+            int orderLengthOffset = output.position();
+            output.putInt(0);
             if (order != null) CoreStateQueryCodec.writeOrderState(output, order);
+            output.putInt(orderLengthOffset, output.position() - orderLengthOffset - Integer.BYTES);
             int count = source.executionCount(index);
             output.putInt(count);
             int bytes = Math.multiplyExact(count, RESULT_EXECUTION_LENGTH);

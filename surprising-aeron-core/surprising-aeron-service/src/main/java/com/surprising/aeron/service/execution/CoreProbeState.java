@@ -104,7 +104,6 @@ public final class CoreProbeState implements AutoCloseable {
         realtimeCapture = new com.surprising.aeron.service.state.realtime.RealtimeStateCapture(
                 outbox, productLine, runtimePlaceOrderIdentities);
         runtimePlaceOrderState.realtimeCapture(realtimeCapture);
-        terminalRetention.realtimeOrderObserver(realtimeCapture::order);
         return realtimeCapture;
     }
 
@@ -427,11 +426,37 @@ public final class CoreProbeState implements AutoCloseable {
     }
 
     private boolean clusterPipelineAdmission;
+    private CoreMessage decodedIngressMessage;
+    private DecodedMatchingCommand decodedIngressCommand;
 
     CoreResponse applyClusterCommand(CoreMessage message, long timestamp, long position) {
-        clusterPipelineAdmission = true;
+        return applyClusterCommand(message, timestamp, position, null);
+    }
+
+    CoreResponse applyClusterCommand(CoreMessage message, long timestamp, long position,
+                                     DecodedMatchingCommand decoded) {
+        return applyDecodedCommand(message, timestamp, position, decoded, true);
+    }
+
+    CoreResponse applyDecodedCommand(CoreMessage message, long timestamp, long position,
+                                     DecodedMatchingCommand decoded, boolean independent) {
+        boolean previousAdmission = clusterPipelineAdmission;
+        CoreMessage previousMessage = decodedIngressMessage;
+        DecodedMatchingCommand previousCommand = decodedIngressCommand;
+        clusterPipelineAdmission = independent;
+        decodedIngressMessage = message;
+        decodedIngressCommand = decoded;
         try { return apply(message, timestamp, position); }
-        finally { clusterPipelineAdmission = false; }
+        finally {
+            clusterPipelineAdmission = previousAdmission;
+            decodedIngressMessage = previousMessage;
+            decodedIngressCommand = previousCommand;
+        }
+    }
+
+    private DecodedMatchingCommand decodeMatchingCommand(CoreMessage message) {
+        return message == decodedIngressMessage && decodedIngressCommand != null
+                ? decodedIngressCommand : DecodedMatchingCommand.decode(message);
     }
 
     /** Scopes include all batch items and resting counterparties, using owner indexes only. */
@@ -440,16 +465,17 @@ public final class CoreProbeState implements AutoCloseable {
         runtime.assertOwner();
         long user = message.header().userId();
         if (message.header().productLine() != productLine || user <= 0) return false;
-        window.resetCandidate(com.surprising.aeron.service.state.TradingDependencyMask.account(user));
+        window.resetCandidate(user);
+        window.participants(activeOrderIndex);
         try {
             switch (message.header().messageType()) {
                 case PLACE_ORDER -> { return addPlaceScope(
-                        TradingCommandCodec.decodePlaceOrder(message.payloadUnsafe()), window); }
+                        window.decoded(message).placeOrder(), window); }
                 case CANCEL_ORDER -> { return addCancelScope(user,
-                        TradingCommandCodec.decodeCancelOrder(message.payloadUnsafe()).orderId(), window); }
+                        window.decoded(message).cancelOrder().orderId(), window); }
                 case PLACE_ORDER_BATCH -> {
                     int shard = -1;
-                    for (var order : TradingOrderBatchCodec.decodePlaceOrderBatch(message.payloadUnsafe()).orders()) {
+                    for (var order : window.decoded(message).placeOrderBatch().orders()) {
                         if (!addPlaceScope(order, window)) return false;
                         int current = matchingAdapter.matcherShardId(order.symbol());
                         if (shard >= 0 && current != shard) return false;
@@ -459,7 +485,7 @@ public final class CoreProbeState implements AutoCloseable {
                 }
                 case CANCEL_ORDER_BATCH -> {
                     int shard = -1;
-                    for (var order : TradingOrderBatchCodec.decodeCancelOrderBatch(message.payloadUnsafe()).orders()) {
+                    for (var order : window.decoded(message).cancelOrderBatch().orders()) {
                         if (!addCancelScope(user, order.orderId(), window)) return false;
                         int current = matchingAdapter.matcherShardId(activeOrderIndex.activeOrder(order.orderId()).symbol());
                         if (shard >= 0 && current != shard) return false;
@@ -480,20 +506,15 @@ public final class CoreProbeState implements AutoCloseable {
         if (instrument == null || command.reduceOnly()) return false;
         window.candidateAccounts |= activeOrderIndex.counterpartyMask(
                 instrument.symbol(), command.side(), command.limitPriceTicks());
-        addClusterScope(instrument.symbol(), command.orderId(), window);
+        window.candidateOrder(command.orderId(), instrument.symbol(), command.side(), command.limitPriceTicks());
         return true;
     }
 
     private boolean addCancelScope(long user, long orderId, ClusterCommandWindow window) {
         var order = activeOrderIndex.activeOrder(orderId);
         if (order == null || order.userId() != user) return false;
-        addClusterScope(order.symbol(), orderId, window);
+        window.candidateOrder(orderId, order.symbol(), null, 0);
         return true;
-    }
-
-    private void addClusterScope(String symbol, long orderId, ClusterCommandWindow window) {
-        window.candidateSymbols |= com.surprising.aeron.service.state.TradingDependencyMask.account(symbol.hashCode());
-        window.candidateOrder(orderId);
     }
 
     public CoreResponse apply(CoreMessage message, long clusterTimestamp, long clusterPosition) {
@@ -1073,7 +1094,7 @@ public final class CoreProbeState implements AutoCloseable {
         OrderBatchPending batch = null;
         DecodedMatchingCommand decodedCommand;
         try {
-            decodedCommand = DecodedMatchingCommand.decode(message);
+            decodedCommand = decodeMatchingCommand(message);
             batch = decodeOrderBatch(message, decodedCommand, clusterTimestamp, clusterPosition);
             validateOrderBatchIdentity(batch, message.header().userId());
         } catch (CoreStateRejectedException exception) {
@@ -1970,7 +1991,6 @@ public final class CoreProbeState implements AutoCloseable {
             throw failOrderBatch(batch, pending, "order batch final validation failed", validationFailure);
         }
         completeSnapshotProjectionBatch(committedLaneMask);
-        materializeChangeAccumulators();
         long tradeCount = 0;
         for (OrderBatchItem item : batch.items) {
             OrderRuntime order = runtimeOrder(item.orderId());
@@ -2053,7 +2073,7 @@ public final class CoreProbeState implements AutoCloseable {
         return pendingMatching.acquire(sequence, operation, command, fingerprint, List.of(),
                 currentProjectionPoint, currentBusinessStateHash(), auditFundsStateHash,
                 com.surprising.aeron.service.state.RuntimeFundsDelta.empty(),
-                DecodedMatchingCommand.decode(command), null);
+                decodeMatchingCommand(command), null);
     }
 
     private PendingMatching newPendingMatching(long sequence, PendingMatching.Operation operation,
@@ -2069,7 +2089,7 @@ public final class CoreProbeState implements AutoCloseable {
         return pendingMatching.acquire(sequence, operation, command, CommandFingerprint.of(command),
                 preMatchingCancellations, currentProjectionPoint, currentBusinessStateHash(), auditFundsStateHash,
                 com.surprising.aeron.service.state.RuntimeFundsDelta.empty(),
-                DecodedMatchingCommand.decode(command), null);
+                decodeMatchingCommand(command), null);
     }
 
     private PendingMatching newPendingMatching(long sequence, PendingMatching.Operation operation,
@@ -2213,7 +2233,7 @@ public final class CoreProbeState implements AutoCloseable {
         CoreAdmissionReservation capacityReservation;
         try {
             decodedCommand = deferredPending == null
-                    ? DecodedMatchingCommand.decode(message) : deferredPending.decodedCommand();
+                    ? decodeMatchingCommand(message) : deferredPending.decodedCommand();
             capacityReservation = deferredPending == null
                     ? reserveAdmission(CoreAdmissionReservation.AdmissionDemand.matching(
                             message, matchingOrderBound(message, decodedCommand), decodedCommand))
@@ -2367,7 +2387,7 @@ public final class CoreProbeState implements AutoCloseable {
         DecodedMatchingCommand decodedCommand;
         CoreAdmissionReservation reservation;
         try {
-            decodedCommand = DecodedMatchingCommand.decode(message);
+            decodedCommand = decodeMatchingCommand(message);
             reservation = reserveAdmission(
                     CoreAdmissionReservation.AdmissionDemand.matching(message, matchingOrderBound(message, decodedCommand),
                             decodedCommand));

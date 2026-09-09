@@ -7,16 +7,39 @@ import org.junit.jupiter.api.Test;
 
 class ClusterCommandWindowTest {
     @Test
+    void accountAndSymbolMaskCollisionsDoNotFenceUnrelatedCommands() {
+        var window = new ClusterCommandWindow();
+        long first = 1, collision = 2;
+        while (TradingDependencyMask.account(first) != TradingDependencyMask.account(collision)) collision++;
+        String symbol = "SYM0-USDT", other = null;
+        for (int i = 1; other == null; i++) {
+            String candidate = "SYM" + i + "-USDT";
+            if (TradingDependencyMask.account(symbol.hashCode()) == TradingDependencyMask.account(candidate.hashCode()))
+                other = candidate;
+        }
+        window.resetCandidate(first);
+        window.candidateOrder(100, symbol, null, 0);
+        window.add(null, null, 0, 0);
+        window.resetCandidate(collision);
+        window.candidateOrder(200, other, null, 0);
+        assertThat(window.conflicts()).isFalse();
+        window.resetCandidate(first);
+        assertThat(window.conflicts()).isTrue();
+        window.resetCandidate(collision);
+        window.candidateOrder(300, symbol, null, 0);
+        assertThat(window.conflicts()).isTrue();
+    }
+    @Test
     void reusedRingKeepsSuffixIdentityAndReleasesOnlyCommittedDependencies() {
         var window = new ClusterCommandWindow();
         for (int round = 0; round < 3; round++) {
             for (int i = 0; i < 64; i++) {
-                window.resetCandidate(1L << i);
+                window.resetCandidate(i + 1);
                 window.candidateOrder(round * 100L + i + 1);
                 window.add(null, null, i, i).sequence = i + 1;
             }
             var suffix = window.get(63);
-            window.resetCandidate(1L << 17);
+            window.resetCandidate(18);
             assertThat(window.conflictingPrefixSize()).isEqualTo(18);
             window.removePrefix(18);
             assertThat(window.conflictingPrefixSize()).isZero();

@@ -111,6 +111,24 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     }
 
     private long retail(int i) { return users.get(i+1); }
+    // Setup-only coverage gate: this real-Cluster JMH run must exercise exact dependency
+    // checks, twenty-item decode/encode, terminal index churn and realtime terminal emission.
+    void verifyDependencyCollisionCoverage() {
+        long accounts = 0, symbols = 0;
+        int accountCollisions = 0, symbolCollisions = 0;
+        for (int i = 0; i < SYMBOLS; i++) {
+            long account = com.surprising.aeron.service.state.TradingDependencyMask.account(maker(i));
+            long symbol = com.surprising.aeron.service.state.TradingDependencyMask.account(symbol(i).hashCode());
+            if ((accounts & account) != 0) accountCollisions++;
+            if ((symbols & symbol) != 0) symbolCollisions++;
+            accounts |= account;
+            symbols |= symbol;
+        }
+        if (accountCollisions == 0 || symbolCollisions == 0 || BATCH != 20)
+            throw new IllegalStateException("owner optimization workload coverage missing");
+        System.out.printf("ownerPathCoverage=PASS makerMaskCollisions=%d symbolMaskCollisions=%d batchSize=%d%n",
+                accountCollisions, symbolCollisions, BATCH);
+    }
     private long positionMaker(int i) { return users.get(USERS+1+i); }
     private long maker(int i) { return users.get(USERS+1+SYMBOLS+i); }
     private long taker(int i) { return users.get(USERS+1+2*SYMBOLS+(i+1)%SYMBOLS); }

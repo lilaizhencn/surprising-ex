@@ -415,21 +415,6 @@ public final class RealtimeStateCapture {
                         .putLong(matcherSequence)
                         .put((byte) taker.side().ordinal())
                         .array();
-        emit(
-                RealtimeFrame.Kind.TRADE,
-                0,
-                identities.symbol(taker.symbolId()),
-                product
-                        + ":"
-                        + sequence
-                        + ":"
-                        + matcherSequence
-                        + ":"
-                        + taker.orderId()
-                        + ":"
-                        + fillIndex,
-                data);
-        if (tradesOnly) return;
         String id =
                 product
                         + ":"
@@ -440,6 +425,8 @@ public final class RealtimeStateCapture {
                         + taker.orderId()
                         + ":"
                         + fillIndex;
+        emit(RealtimeFrame.Kind.TRADE, 0, identities.symbol(taker.symbolId()), id, data);
+        if (tradesOnly) return;
         execution(
                 taker.userId(),
                 taker.orderId(),

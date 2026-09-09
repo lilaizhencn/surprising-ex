@@ -53,6 +53,12 @@ class ActiveOrderIndexTest {
                             expected |= TradingDependencyMask.account(order.userId());
                     }
                     assertThat(index.counterpartyMask("BTC-USDT", side, price)).isEqualTo(expected);
+                    for (long user : new long[]{1, 11, 23, 77, 150, 200}) {
+                        boolean present = orders.values().stream().anyMatch(order -> order.userId() == user
+                                && order.side() != side && (price == 0 || (side == CoreOrderSide.BUY
+                                ? order.matchingPriceTicks() <= price : order.matchingPriceTicks() >= price)));
+                        assertThat(index.hasCounterparty("BTC-USDT", side, price, user)).isEqualTo(present);
+                    }
                 }
             }
         }
@@ -71,6 +77,8 @@ class ActiveOrderIndexTest {
         var b = new CoreOrderState(2, ProductLine.SPOT, colliding, "BTC-USDT", 1,
                 CoreOrderSide.SELL, 100, 2, 0, 2, false, CoreOrderStatus.OPEN, 1);
         index.applySnapshot(1, a); index.applySnapshot(2, b);
+        assertThat(index.hasCounterparty("BTC-USDT", CoreOrderSide.BUY, 100, first)).isFalse();
+        assertThat(index.hasCounterparty("BTC-USDT", CoreOrderSide.BUY, 100, colliding)).isTrue();
         long mask = TradingDependencyMask.account(first);
         assertThat(participantMask(index)).isEqualTo(mask);
         index.applySnapshot(1, a.fill(1));
@@ -88,6 +96,26 @@ class ActiveOrderIndexTest {
     private static long participantMask(ActiveOrderIndex index) {
         return index.counterpartyMask("BTC-USDT", CoreOrderSide.BUY, 0)
                 | index.counterpartyMask("BTC-USDT", CoreOrderSide.SELL, 0);
+    }
+
+    @Test
+    void exactCounterpartyOverlapTracksCollisionsPricesAndReferenceCounts() {
+        long first = 1, collision = 2;
+        while (TradingDependencyMask.account(first) != TradingDependencyMask.account(collision)) collision++;
+        var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT));
+        index.applySnapshot(1, new CoreOrderState(1, ProductLine.SPOT, first, "BTC-USDT", 1,
+                CoreOrderSide.SELL, 100, 2, 0, 2, false, CoreOrderStatus.OPEN, 1));
+        index.applySnapshot(2, new CoreOrderState(2, ProductLine.SPOT, collision, "ETH-USDT", 1,
+                CoreOrderSide.SELL, 100, 2, 0, 2, false, CoreOrderStatus.OPEN, 1));
+        assertThat(index.counterpartiesOverlap("BTC-USDT", CoreOrderSide.BUY, 0, "ETH-USDT", CoreOrderSide.BUY, 0)).isFalse();
+        for (long id : new long[]{3, 4}) index.applySnapshot(id, new CoreOrderState(id, ProductLine.SPOT, first,
+                "ETH-USDT", 1, CoreOrderSide.SELL, 101, 2, 0, 2, false, CoreOrderStatus.OPEN, 1));
+        assertThat(index.counterpartiesOverlap("BTC-USDT", CoreOrderSide.BUY, 100, "ETH-USDT", CoreOrderSide.BUY, 100)).isFalse();
+        assertThat(index.counterpartiesOverlap("BTC-USDT", CoreOrderSide.BUY, 100, "ETH-USDT", CoreOrderSide.BUY, 101)).isTrue();
+        index.applySnapshot(3, null);
+        assertThat(index.counterpartiesOverlap("BTC-USDT", CoreOrderSide.BUY, 0, "ETH-USDT", CoreOrderSide.BUY, 0)).isTrue();
+        index.applySnapshot(4, null);
+        assertThat(index.counterpartiesOverlap("BTC-USDT", CoreOrderSide.BUY, 0, "ETH-USDT", CoreOrderSide.BUY, 0)).isFalse();
     }
 
     @Test

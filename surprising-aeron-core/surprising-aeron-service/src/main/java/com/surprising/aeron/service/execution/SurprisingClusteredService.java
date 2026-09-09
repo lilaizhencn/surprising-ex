@@ -130,6 +130,7 @@ public final class SurprisingClusteredService implements ClusteredService {
             // AgentRunner otherwise logs ordinary exceptions and may consume the next message.
             throw new org.agrona.concurrent.AgentTerminationException(failure);
         } finally {
+            commandWindow.releaseDecoded();
             processingLogCallback = false;
         }
     }
@@ -167,7 +168,7 @@ public final class SurprisingClusteredService implements ClusteredService {
             }
         }
         var entry = commandWindow.add(session, request, timestamp, position);
-        CoreResponse result = state.applyClusterCommand(request, timestamp, position);
+        CoreResponse result = state.applyClusterCommand(request, timestamp, position, commandWindow.decoded(request));
         entry.sequence = state.matchingSequence(request.header().commandId());
         if (entry.sequence != 0) state.pendingMatching(entry.sequence).establishCommitFence(timestamp, position);
         entry.response = entry.sequence == 0 ? result : null;
@@ -245,7 +246,8 @@ public final class SurprisingClusteredService implements ClusteredService {
     private void processCommittedRequest(ClientSession session, CoreMessage request, long timestamp, long clusterPosition) {
         state.assertClusterCallbackComplete();
         long deadline = System.nanoTime() + COMMAND_TIMEOUT_NANOS;
-        CoreResponse result = state.apply(request, timestamp, clusterPosition);
+        CoreResponse result = state.applyDecodedCommand(request, timestamp, clusterPosition,
+                commandWindow.decodedIfPresent(request), false);
         responseSequence = state.matchingSequence(request.header().commandId());
         matchingResponse = null;
         idleStrategy.reset();

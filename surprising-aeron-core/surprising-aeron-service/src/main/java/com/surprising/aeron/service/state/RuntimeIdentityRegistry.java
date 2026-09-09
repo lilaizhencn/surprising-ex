@@ -11,6 +11,26 @@ import java.util.concurrent.ConcurrentHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 
 public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityView {
+    // Lookup-only keys never enter a map. Lanes and owner each borrow their own probe.
+    private static final ThreadLocal<PositionLookup> POSITION_LOOKUP = ThreadLocal.withInitial(PositionLookup::new);
+
+    private Long findPositionIdentity(long userId, String key) {
+        PositionLookup lookup = POSITION_LOOKUP.get();
+        lookup.userId = userId;
+        lookup.key = key;
+        try { return positionKeys.get(lookup); }
+        finally { lookup.key = null; }
+    }
+
+    private static final class PositionLookup {
+        long userId;
+        String key;
+        @Override public int hashCode() { return 31 * Long.hashCode(userId) + key.hashCode(); }
+        @Override public boolean equals(Object other) {
+            return other instanceof PositionIdentity identity
+                    && userId == identity.userId() && key.equals(identity.positionKey());
+        }
+    }
 
     // Asset/symbol forward and allocation indexes are owner-only. Monotonic asset/symbol
     // dictionaries use volatile array publication; releasable client/position
@@ -194,9 +214,9 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
         if (userId <= 0 || positionKey == null || positionKey.isBlank()) {
             throw new IllegalArgumentException("invalid position identity");
         }
-        PositionIdentity identity = new PositionIdentity(userId, positionKey);
-        Long existing = positionKeys.get(identity);
+        Long existing = findPositionIdentity(userId, positionKey);
         if (existing != null) return existing;
+        PositionIdentity identity = new PositionIdentity(userId, positionKey);
         long key = deterministicPositionKey(identity);
         PositionIdentity collision = positions.putIfAbsent(key, identity);
         if (collision != null && !collision.equals(identity)) {
@@ -211,7 +231,7 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
     public Long findPositionKey(long userId, String positionKey) {
         assertOwner();
         if (userId <= 0 || positionKey == null || positionKey.isBlank()) return null;
-        return positionKeys.get(new PositionIdentity(userId, positionKey));
+        return findPositionIdentity(userId, positionKey);
     }
 
     public long positionCheckpoint() {
@@ -252,7 +272,7 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
     }
 
     long preparedPositionKey(long userId, String positionKey) {
-        Long key = positionKeys.get(new PositionIdentity(userId, positionKey));
+        Long key = findPositionIdentity(userId, positionKey);
         if (key == null) throw new IllegalStateException("position identity was not prepared by the Sequencer");
         return key;
     }

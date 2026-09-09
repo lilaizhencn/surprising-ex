@@ -1150,8 +1150,8 @@ class TradingRuntimeStateTest {
     private static long pendingReservationOwner(TradingRuntimeState state, long orderId) throws Exception {
         Field field = TradingRuntimeState.class.getDeclaredField("pendingReservationUsers");
         field.setAccessible(true);
-        var owners = (org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap) field.get(state);
-        return owners.getIfAbsent(orderId, 0);
+        var owners = (org.agrona.collections.Long2LongHashMap) field.get(state);
+        return owners.get(orderId);
     }
 
     private static String methodSource(String source, String startMarker, String endMarker) {

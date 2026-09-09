@@ -90,6 +90,20 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
         return participants == null ? 0 : participants.counterparties(side, limitPrice);
     }
 
+    public boolean hasCounterparty(String symbol, com.surprising.aeron.protocol.CoreOrderSide side,
+                                   long price, long userId) {
+        OrderParticipantIndex index = participantsBySymbol.get(symbol);
+        return index != null && index.contains(side, price, userId);
+    }
+
+    public boolean counterpartiesOverlap(String firstSymbol, com.surprising.aeron.protocol.CoreOrderSide firstSide,
+                                         long firstPrice, String secondSymbol,
+                                         com.surprising.aeron.protocol.CoreOrderSide secondSide, long secondPrice) {
+        OrderParticipantIndex first = participantsBySymbol.get(firstSymbol);
+        OrderParticipantIndex second = participantsBySymbol.get(secondSymbol);
+        return first != null && second != null && first.overlaps(firstSide, firstPrice, second, secondSide, secondPrice);
+    }
+
     public CoreOrderState activeOrder(long orderId) {
         return ordersById.get(orderId);
     }

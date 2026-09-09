@@ -5,6 +5,24 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 
 class RuntimeIdentityRegistryTest {
+    @Test
+    void positionLookupSeparatesEqualHashesAndSurvivesRestoreAndRelease() {
+        var identities = new RuntimeIdentityRegistry();
+        assertThat("Aa".hashCode()).isEqualTo("BB".hashCode());
+        long first = identities.positionKey(7, "Aa");
+        long second = identities.positionKey(7, "BB");
+        long third = identities.positionKey(8, "Aa");
+        long unicode = identities.positionKey(7, "客户😀:NET");
+        for (var registry : new RuntimeIdentityRegistry[]{identities, RuntimeIdentityRegistry.restore(identities.snapshot())}) {
+            assertThat(registry.positionKey(7, new String("Aa"))).isEqualTo(first);
+            assertThat(registry.preparedPositionKey(7, "BB")).isEqualTo(second).isNotEqualTo(first);
+            assertThat(registry.preparedPositionKey(8, "Aa")).isEqualTo(third).isNotEqualTo(first);
+            assertThat(registry.findPositionKey(7, "客户😀:NET")).isEqualTo(unicode);
+            registry.releasePositionKey(first);
+            assertThat(registry.findPositionKey(7, "Aa")).isNull();
+            assertThat(registry.findPositionKey(7, "BB")).isEqualTo(second);
+        }
+    }
 
     @Test
     void exactIdentityHitsPreserveNormalizationAndRejectInvalidMisses() {

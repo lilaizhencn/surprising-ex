@@ -4925,3 +4925,14 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 过度保守依赖：ClusterCommandWindow对账户/币对的64位掩码相交直接判冲突，没有像orderId一样精确复核。少量功能观测：user1与user23、SYM0-USDT与SYM102-USDT分别产生无关实体碰撞；是额外串行化，但本次未测云端误冲突频率或性能影响。真实资金/同币对依赖仍必须保持，不得直接删除drain循环。
 - 已排除误判：projectSnapshotNow热路径只推进变更索引/提交点，不逐命令做全量快照；资金守恒使用增量accumulator，不遍历全部账户；SHA-256保持同commandId不同payload冲突保护，约6%owner执行样本，不能删除。ImmutableLongArrayList底层为long[]，不能称为每个ID都装箱。当前等待栈约2.4%执行样本，不能换算精确墙钟；实际还存在owner egress offer失败最多重试1s的同步等待，当前egress栈仅0.77–1.04%，不是已证实主瓶颈，慢接入需独立验证。所选窗口未见达到记录阈值的owner锁/文件/socket事件，不等于完全无阻塞。
 - 建议优先级：去掉重复终态推送、复用命令解码、处理索引rehash分配；随后精简身份/长度等重复转换，并评估将不可变提交数据的出口编码移到有界出口线程。OrderRuntime/PositionRuntime是record而BalanceRuntime可变，异步化必须冻结所需值并保证身份字典与缓冲区生命周期，不能跨线程直接读取可变余额。当前审计没有新增性能收益结论。
+
+
+### 2026-09-09 owner五项修复：OS54–OS57采集前预锁
+
+- 仅当前master，对照commit不适用。修复终态ORDER重复出口、scope/执行重复解码、高频删除owner索引换表、长度/身份/迭代器等临时转换，以及账户/币对掩码误冲突。保留SHA-256幂等、资金校验、同币对与实际共享对手方依赖。参与者索引按price/userId计数，只有掩码命中才精确查询；不新增订单簿副本。更新真实Cluster JMH入口，采集前验证做市账户/币对碰撞及20项批量路径覆盖。
+- 本机仅HotSpot25 clean verify和六产品三独立JVM交易/SIGKILL日志恢复/快照恢复，全部通过后才开机。云端GCP asia-southeast1-b三个n2-custom-8-16384 Core及一个同规格load，8vCPU/16GiB（4物理核SMT）；HotSpot25、Core4GiB/load2GiB、ZGC/NMT、1matcher/4Lane、SHARED_NETWORK、service YIELDING、Lane spin0、不绑核。部署生产Core类，无测试agent。
+- 场景延续OS50参数：U本位永续1773用户258symbol；batch20连续异步MATCH_STREAM买卖GTC各半，单交易session窗口等于全局窗口，另有价格窗口16/串行控制及Valkey1000查询/s。包含触发、风控、强平、资金费、ADL、保险及结算；资金初态/场景比例以保存的负载参数和mixedSetup结果为准，30s风险超时及25ms控制节拍/64预算/8项切片不变。纯交易与后台composite分开计数，不伪装成恒定到达率open-loop。
+- OS54 seed99801窗口256、OS55 seed99802窗口512，各30s业务预热+60s测量，边界排空冷却；若OS55通过且速率高于OS54至少5%，才执行OS56 seed99803窗口1024同配置。OS57 seed99804取本次有效最快窗口，30s预热+120s无profiler持续轮，之后原日志重启核对hash/资金。失败即停后续档位，保留artifact。
+- 诊断轮JMH SingleShotTime单线程单独JVM，-f0 -wi0 -i1 -prof gc，主计数来自业务终态，不能把一整轮JMH B/op解释为Core逐笔分配。四JFR：Core phases.jfc、load profile；稳定窗口裁首尾各5s，报告owner/matcher/Lane等CPU、分配、GC、NMT、线程锁/等待、JIT、安全点和I/O。CPU95%目标只用于定位有效业务饱和，不作为忙等通过证明。
+- 硬门槛：三Core存活、offered=terminal（消息及业务）、unfinished0、资金差0、业务覆盖PASS、单命令p99<1s、JFR DataLoss0、原日志与快照恢复一致。吞吐按实测报告，不以旧版本比较验收。查询READY比例、全部延迟三阶段和长期泄漏/完整native余额仍单列缺口，不能宣称整套生产容量验收。
+- artifact=/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-owner-five-fixes；执行python3 cloud.py，保存source commit/JAR SHA、命令/JMH JSON/JFR/监控/恢复。finally停止四VM并核实TERMINATED。README不改。

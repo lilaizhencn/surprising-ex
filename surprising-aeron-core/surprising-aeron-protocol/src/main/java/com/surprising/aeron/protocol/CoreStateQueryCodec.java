@@ -337,7 +337,7 @@ public final class CoreStateQueryCodec {
         return Math.addExact(Integer.BYTES, bytes);
     }
 
-    static int utf8Length(String value) {
+    public static int utf8Length(String value) {
         int length = 0;
         for (int index = 0; index < value.length(); index++) {
             char current = value.charAt(index);

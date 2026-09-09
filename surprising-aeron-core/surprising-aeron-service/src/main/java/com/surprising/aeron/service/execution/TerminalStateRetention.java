@@ -116,12 +116,8 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
         forEachSorted(orderIds, id -> observeOrder(state.orders().get(id), acknowledgedSequence));
     }
 
-    private java.util.function.Consumer<OrderRuntime> realtimeOrderObserver;
-    void realtimeOrderObserver(java.util.function.Consumer<OrderRuntime> observer) { realtimeOrderObserver=observer; }
-
     @Override
     public void accept(OrderRuntime order, long coreSequence) {
-        if (realtimeOrderObserver != null) realtimeOrderObserver.accept(order);
         retainPrunedOrder(order, coreSequence);
     }
 
@@ -198,9 +194,11 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
     }
 
     private void trimTombstones() {
+        if (tombstones.size() <= MAX_TOMBSTONES) return;
+        var iterator = tombstones.values().iterator();
         while (tombstones.size() > MAX_TOMBSTONES) {
-            EntityKey key = tombstones.keySet().iterator().next();
-            RetainedEntity removed = tombstones.remove(key);
+            RetainedEntity removed = iterator.next();
+            iterator.remove();
             if (removed != null && !removed.clientId().isEmpty()) {
                 tombstonesByClient.remove(new ClientIdentity(removed.key().type(), removed.userId(),
                         removed.clientId()));
@@ -471,7 +469,7 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
 
     private static String normalizeClientId(String clientId) {
         String normalized = clientId == null ? "" : clientId;
-        if (normalized.getBytes(StandardCharsets.UTF_8).length > MAX_CLIENT_ID_BYTES) {
+        if (com.surprising.aeron.protocol.CoreStateQueryCodec.utf8Length(normalized) > MAX_CLIENT_ID_BYTES) {
             throw new IllegalArgumentException("terminal client id is too long");
         }
         return normalized;

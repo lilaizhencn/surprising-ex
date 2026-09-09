@@ -9,6 +9,30 @@ import org.junit.jupiter.api.Test;
 
 class TerminalStateRetentionTest {
     @Test
+    void utf8ClientLimitIsUnchangedWithoutEncodingATemporaryArray() {
+        var retention = new TerminalStateRetention();
+        for (String client : new String[]{"x".repeat(256), "😀".repeat(64), "中".repeat(85), "\ud800".repeat(256)}) {
+            assertThat(retention.containsOrder(1, 7, client)).isFalse();
+        }
+        for (String client : new String[]{"x".repeat(257), "😀".repeat(65), "中".repeat(86)}) {
+            assertThatThrownBy(() -> retention.containsOrder(1, 7, client)).isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
+    void oneSequenceEvictsEveryExcessTombstoneAndKeepsTheNewestAfterRestore() {
+        var retention = new TerminalStateRetention();
+        for (long id = 1; id <= TerminalStateRetention.MAX_TOMBSTONES + 40; id++)
+            retention.accept(new com.surprising.aeron.service.state.OrderRuntime(id, 7, 0, 1, true), 1);
+        retention.completeSequence();
+        assertThat(retention.tombstoneCount()).isEqualTo(TerminalStateRetention.MAX_TOMBSTONES);
+        for (var state : new TerminalStateRetention[]{retention, TerminalStateRetention.decode(retention.encode())}) {
+            assertThat(state.containsOrder(40, 7, "")).isFalse();
+            assertThat(state.containsOrder(41, 7, "")).isTrue();
+            assertThat(state.containsOrder(TerminalStateRetention.MAX_TOMBSTONES + 40, 7, "")).isTrue();
+        }
+    }
+    @Test
     void removingAuditDigestsPreservesFundsIdempotencyAndSnapshotBytes() {
         TerminalStateRetention retention = new TerminalStateRetention();
         UUID command = UUID.randomUUID();

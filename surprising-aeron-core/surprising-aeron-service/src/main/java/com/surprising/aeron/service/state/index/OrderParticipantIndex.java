@@ -29,21 +29,50 @@ final class OrderParticipantIndex {
     void add(CoreOrderState order) { change(order, 1); }
     void remove(CoreOrderState order) { change(order, -1); }
 
-    private void change(CoreOrderState order, int delta) {
-        int partition = TradingDependencyMask.partition(order.userId());
-        if (order.side() == CoreOrderSide.BUY) bids = change(bids, order.matchingPriceTicks(), partition, delta);
-        else asks = change(asks, order.matchingPriceTicks(), partition, delta);
+    boolean contains(CoreOrderSide side, long price, long userId) {
+        return userId > 0 && contains(side == CoreOrderSide.BUY ? asks : bids, side, price, userId);
     }
 
-    private static Node change(Node node, long price, int partition, int delta) {
+    private static boolean contains(Node node, CoreOrderSide side, long price, long userId) {
+        if (node == null || (node.mask & TradingDependencyMask.account(userId)) == 0) return false;
+        if (price != 0 && (side == CoreOrderSide.BUY ? node.price > price : node.price < price))
+            return contains(side == CoreOrderSide.BUY ? node.left : node.right, side, price, userId);
+        return node.userId == userId || contains(node.left, side, price, userId)
+                || contains(node.right, side, price, userId);
+    }
+
+    boolean overlaps(CoreOrderSide side, long price, OrderParticipantIndex other,
+                     CoreOrderSide otherSide, long otherPrice) {
+        long common = counterparties(side, price) & other.counterparties(otherSide, otherPrice);
+        return common != 0 && overlaps(side == CoreOrderSide.BUY ? asks : bids, side, price,
+                other, otherSide, otherPrice, common);
+    }
+
+    private static boolean overlaps(Node node, CoreOrderSide side, long price, OrderParticipantIndex other,
+                                    CoreOrderSide otherSide, long otherPrice, long common) {
+        if (node == null || (node.mask & common) == 0) return false;
+        if (price != 0 && (side == CoreOrderSide.BUY ? node.price > price : node.price < price))
+            return overlaps(side == CoreOrderSide.BUY ? node.left : node.right, side, price,
+                    other, otherSide, otherPrice, common);
+        return ((TradingDependencyMask.account(node.userId) & common) != 0 && other.contains(otherSide, otherPrice, node.userId))
+                || overlaps(node.left, side, price, other, otherSide, otherPrice, common)
+                || overlaps(node.right, side, price, other, otherSide, otherPrice, common);
+    }
+
+    private void change(CoreOrderState order, int delta) {
+        if (order.side() == CoreOrderSide.BUY) bids = change(bids, order.matchingPriceTicks(), order.userId(), delta);
+        else asks = change(asks, order.matchingPriceTicks(), order.userId(), delta);
+    }
+
+    private static Node change(Node node, long price, long userId, int delta) {
         if (node == null) {
             if (delta < 0) throw new IllegalStateException("active order participant count underflow");
-            return new Node(price, partition);
+            return new Node(price, userId);
         }
         int compared = Long.compare(price, node.price);
-        if (compared == 0) compared = Integer.compare(partition, node.partition);
-        if (compared < 0) node.left = change(node.left, price, partition, delta);
-        else if (compared > 0) node.right = change(node.right, price, partition, delta);
+        if (compared == 0) compared = Long.compare(userId, node.userId);
+        if (compared < 0) node.left = change(node.left, price, userId, delta);
+        else if (compared > 0) node.right = change(node.right, price, userId, delta);
         else {
             node.count = Math.addExact(node.count, delta);
             if (node.count == 0) {
@@ -53,6 +82,7 @@ final class OrderParticipantIndex {
                 while (successor.left != null) successor = successor.left;
                 node.price = successor.price;
                 node.partition = successor.partition;
+                node.userId = successor.userId;
                 node.count = successor.count;
                 node.right = removeFirst(node.right);
             }
@@ -105,12 +135,13 @@ final class OrderParticipantIndex {
     private static long mask(Node node) { return node == null ? 0 : node.mask; }
 
     private static final class Node {
-        long price, mask;
+        long price, mask, userId;
         int partition, count = 1, height = 1;
         Node left, right;
-        Node(long price, int partition) {
+        Node(long price, long userId) {
             this.price = price;
-            this.partition = partition;
+            this.userId = userId;
+            this.partition = TradingDependencyMask.partition(userId);
             mask = 1L << partition;
         }
     }
