@@ -7,6 +7,39 @@ import org.junit.jupiter.api.Test;
 
 class ClusterCommandWindowTest {
     @Test
+    void earlierFillKeepsTheOpenInterestAdmissionDependencyAcrossDifferentUsers() {
+        var window = new ClusterCommandWindow();
+        window.resetCandidate(0);
+        window.candidateOrder(1, "BTC-USDT", com.surprising.aeron.protocol.CoreOrderSide.BUY, 100, true);
+        window.add(null, null, 0, 0);
+        window.resetCandidate(0);
+        window.candidateOrder(2, "BTC-USDT", com.surprising.aeron.protocol.CoreOrderSide.BUY, 90);
+        assertThat(window.conflictingPrefixSize()).isOne();
+        window.removePrefix(1);
+        assertThat(window.conflictingPrefixSize()).isZero();
+    }
+
+    @Test
+    void sameSymbolProvisionalLiquidityOnlyFencesCrossingOrCancellationScopes() {
+        var window = new ClusterCommandWindow();
+        window.resetCandidate(0);
+        window.candidateOrder(1, "BTC-USDT", com.surprising.aeron.protocol.CoreOrderSide.BUY, 100);
+        window.add(null, null, 0, 0);
+        window.resetCandidate(0);
+        window.candidateOrder(2, "BTC-USDT", com.surprising.aeron.protocol.CoreOrderSide.SELL, 101);
+        assertThat(window.conflictingPrefixSize()).isZero();
+        window.resetCandidate(0);
+        window.candidateOrder(3, "BTC-USDT", com.surprising.aeron.protocol.CoreOrderSide.SELL, 100);
+        assertThat(window.conflictingPrefixSize()).isOne();
+        window.resetCandidate(0);
+        window.candidateOrder(4, "BTC-USDT", com.surprising.aeron.protocol.CoreOrderSide.SELL, 0);
+        assertThat(window.conflictingPrefixSize()).isOne();
+        window.resetCandidate(0);
+        window.candidateOrder(5, "BTC-USDT", null, 0);
+        assertThat(window.conflictingPrefixSize()).isOne();
+    }
+
+    @Test
     void identicalRangesAreVisitedOnceButEveryOrderIdentityStillConflicts() {
         var window = new ClusterCommandWindow();
         window.resetCandidate(7);

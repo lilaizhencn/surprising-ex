@@ -16,6 +16,8 @@ final class ClusterCommandWindow {
     private final String[] candidateOrderSymbols = new String[20];
     private final CoreOrderSide[] candidateSides = new CoreOrderSide[20];
     private final long[] candidatePrices = new long[20];
+    /** 对应范围的成交可能改变全币对持仓量，后续衍生品准入须读取完成后的值。 */
+    private final boolean[] candidateOpenInterestChanges = new boolean[20];
     private long candidateUser;
     private ActiveOrderIndex participants;
     private CoreMessage decodedSource;
@@ -54,6 +56,10 @@ final class ClusterCommandWindow {
     void releaseDecoded() { decodedSource = null; decoded = null; }
 
     void candidateOrder(long orderId, String symbol, CoreOrderSide side, long price) {
+        candidateOrder(orderId, symbol, side, price, false);
+    }
+
+    void candidateOrder(long orderId, String symbol, CoreOrderSide side, long price, boolean changesOpenInterest) {
         candidateOrders[candidateOrderCount++] = orderId;
         candidateOrderMask |= TradingDependencyMask.account(orderId);
         if (symbol == null) return;
@@ -63,6 +69,7 @@ final class ClusterCommandWindow {
                     && symbol.equals(candidateOrderSymbols[i])) return;
         candidateOrderSymbols[candidateScopeCount] = symbol;
         candidateSides[candidateScopeCount] = side;
+        candidateOpenInterestChanges[candidateScopeCount] = changesOpenInterest;
         candidatePrices[candidateScopeCount++] = price;
         candidateSymbols |= TradingDependencyMask.account(symbol.hashCode());
     }
@@ -82,7 +89,9 @@ final class ClusterCommandWindow {
                 for (int a = 0; a < candidateScopeCount; a++)
                     for (int b = 0; b < entry.scopeCount; b++)
                         if (candidateOrderSymbols[a] != null
-                                && candidateOrderSymbols[a].equals(entry.orderSymbols[b])) return i + 1;
+                                && candidateOrderSymbols[a].equals(entry.orderSymbols[b])
+                                && (entry.openInterestChanges[b] || matchingRangesConflict(candidateSides[a], candidatePrices[a],
+                                        entry.sides[b], entry.prices[b]))) return i + 1;
             }
             if ((entry.accounts & candidateAccounts) != 0 && accountsConflict(entry)) return i + 1;
             if ((entry.orderMask & candidateOrderMask) == 0) continue;
@@ -98,10 +107,21 @@ final class ClusterCommandWindow {
         return 0;
     }
 
+    private static boolean matchingRangesConflict(CoreOrderSide incomingSide, long incomingPrice,
+                                                  CoreOrderSide pendingSide, long pendingPrice) {
+        // Cancel scopes do not describe their removed liquidity; keep their symbol fence.
+        if (incomingSide == null || pendingSide == null) return true;
+        if (incomingSide == pendingSide) return false;
+        // A market order has no limiting price and can consume the preceding provisional order.
+        if (incomingPrice <= 0 || pendingPrice <= 0) return true;
+        return incomingSide == CoreOrderSide.BUY
+                ? incomingPrice >= pendingPrice : pendingPrice >= incomingPrice;
+    }
+
     private boolean accountsConflict(Entry entry) {
         if (candidateUser != 0 && candidateUser == entry.userId) return true;
-        // Same-symbol commands already fence above. Until a prefix commits, its resting
-        // counterparties remain in the owner index; no order-book copy is needed here.
+        // Pending orders that can match each other fence above. Resting counterparties
+        // remain in the owner index until commit, including for independent same-symbol orders.
         for (int a = 0; a < candidateScopeCount; a++) {
             if (candidateSides[a] == null) continue;
             if (participants.hasCounterparty(candidateOrderSymbols[a], candidateSides[a], candidatePrices[a], entry.userId))
@@ -139,6 +159,7 @@ final class ClusterCommandWindow {
         System.arraycopy(candidateOrderSymbols, 0, entry.orderSymbols, 0, candidateScopeCount);
         System.arraycopy(candidateSides, 0, entry.sides, 0, candidateScopeCount);
         System.arraycopy(candidatePrices, 0, entry.prices, 0, candidateScopeCount);
+        System.arraycopy(candidateOpenInterestChanges, 0, entry.openInterestChanges, 0, candidateScopeCount);
         return entry;
     }
 
@@ -190,6 +211,8 @@ final class ClusterCommandWindow {
         final String[] orderSymbols = new String[20];
         final CoreOrderSide[] sides = new CoreOrderSide[20];
         final long[] prices = new long[20];
+        /** 每个在途范围是否可能改变后续准入所依赖的币对持仓量。 */
+        final boolean[] openInterestChanges = new boolean[20];
         long userId;
         int scopeCount;
         long accounts, symbols, orderMask;

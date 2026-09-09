@@ -24,6 +24,66 @@ import org.junit.jupiter.params.provider.EnumSource;
 class ClusterCommandPipelineTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
+    void sameSymbolSharedMakerStillSettlesBeforeNextTakerAdmission(ProductLine product) {
+        try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
+            serial.applyAll(live.setup());
+            var type = ContractType.valueOf(product.contractTypeCode());
+            String asset = product == ProductLine.SPOT || type.isInverse() ? "BTC" : "USDT";
+            var funds = live.message(CoreMessageType.ADJUST_BALANCE, 999,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 20_000)));
+            var maker = live.place(999, "BTC-USDT", 90, 80, 3, CoreOrderSide.SELL);
+            live.apply(funds); live.apply(maker); serial.apply(funds); serial.apply(maker);
+            live.responses.clear();
+            var first = live.place(11, "BTC-USDT", 100, 80, 1, CoreOrderSide.BUY);
+            var second = live.place(disjointUser(11), "BTC-USDT", 200, 80, 1, CoreOrderSide.BUY);
+            live.send(first); live.send(second);
+            assertThat(live.responses).hasSize(1);
+            assertThat(live.service.commandWindowSize()).isOne();
+            live.tick(); serial.apply(first); serial.apply(second);
+            assertThat(live.hash()).isEqualTo(serial.hash());
+            assertThat(live.service.state().tradingState().order(90).executedQuantitySteps()).isEqualTo(2);
+            try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void sameSymbolIndependentOrdersRemainInFlightAndRecoverLikeSerialExecution(ProductLine product) {
+        sameSymbolIndependentOrders(product, false);
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void sameSymbolIndependentBatchesRemainInFlightAndRecoverLikeSerialExecution(ProductLine product) {
+        sameSymbolIndependentOrders(product, true);
+    }
+
+    private void sameSymbolIndependentOrders(ProductLine product, boolean batch) {
+        try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product);
+             Fixture replay = new Fixture(product, Cluster.Role.FOLLOWER)) {
+            var setup = live.setup(); serial.applyAll(setup); replay.applyAll(setup);
+            var first = batch ? live.placeBatch(11, "BTC-USDT", 100)
+                    : live.place(11, "BTC-USDT", 100, 80, 1, CoreOrderSide.BUY);
+            var second = batch ? live.placeBatch(disjointUser(11), "BTC-USDT", 200)
+                    : live.place(disjointUser(11), "BTC-USDT", 200, 81, 1, CoreOrderSide.BUY);
+            live.send(first); live.send(second);
+            assertThat(live.service.commandWindowSize()).isEqualTo(2);
+            assertThat(live.responses).isEmpty();
+            live.tick(); serial.apply(first); serial.apply(second);
+            replay.send(first); replay.send(second); replay.tick();
+            assertThat(live.responses).hasSize(2).allSatisfy(r ->
+                    assertThat(r.commandStatus()).isEqualTo(ResponseStatus.APPLIED));
+            assertThat(live.hash()).isEqualTo(serial.hash()).isEqualTo(replay.hash());
+            try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
     void ordinaryCommitAndSpeculativeDispatchCannotSubmitTheSameBatchTwice(ProductLine product) throws Exception {
         try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
             serial.applyAll(live.setup());
@@ -633,13 +693,13 @@ class ClusterCommandPipelineTest {
     }
 
     @Test
-    void normalizedSymbolsConflictAndTimerSchedulingIsCoalescedAcrossWaves() {
+    void normalizedSymbolsShareIndependentWindowAndTimerSchedulingIsCoalescedAcrossWaves() {
         try (Fixture f = new Fixture(ProductLine.SPOT)) {
             f.setup();
             f.send(f.place(11, "BTC-USDT", 101, 80, 1, CoreOrderSide.BUY));
             f.send(f.place(disjointUser(11), "btc-usdt", disjointOrder(101), 80, 1, CoreOrderSide.BUY));
-            assertThat(f.service.commandWindowSize()).isOne();
-            assertThat(f.responses).hasSize(1);
+            assertThat(f.service.commandWindowSize()).isEqualTo(2);
+            assertThat(f.responses).isEmpty();
             assertThat(f.scheduledTimers).isOne();
             f.tick();
             f.send(f.cancel(11, 101));

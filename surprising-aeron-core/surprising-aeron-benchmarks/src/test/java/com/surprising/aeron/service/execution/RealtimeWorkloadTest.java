@@ -49,7 +49,9 @@ class RealtimeWorkloadTest {
             org.assertj.core.api.Assertions.assertThat(trades).isEqualTo(512);
             org.assertj.core.api.Assertions.assertThat(ids).hasSize(512);
             org.assertj.core.api.Assertions.assertThat(executions).isEqualTo(1024);
-            org.assertj.core.api.Assertions.assertThat(begins).isEqualTo(1024).isEqualTo(ends);
+            // Independent commands can publish one committed prefix together. Envelope count
+            // follows commit grouping, while every trade/execution above must still be present.
+            org.assertj.core.api.Assertions.assertThat(begins).isPositive().isLessThanOrEqualTo(1024).isEqualTo(ends);
             org.assertj.core.api.Assertions.assertThat(outbox.droppedBatches()).isZero();
         } finally {
             workload.close();

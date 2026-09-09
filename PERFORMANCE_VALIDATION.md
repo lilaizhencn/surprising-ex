@@ -5011,3 +5011,14 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - HotSpot JDK 25.0.1（Oracle GraalVM）、Maven 3.9.16，运行前已检查版本。执行 `mvn -pl surprising-aeron-core/surprising-aeron-tools,surprising-aeron-core/surprising-aeron-benchmarks -am verify`：BUILD SUCCESS，996 项中 995 通过、1 项外部数据库条件跳过，0 失败/错误；service 601 项全部通过。包括六产品线资金、订单、批量、依赖前缀及恢复回归；benchmarks 模块仅 JUnit 功能测试，未执行压力工作负载。
 - 日志：`/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-wait-audit/verify.log`；此前仅清理旧接口与重复扫描的服务回归亦通过，见同目录 service-tests.log。未重跑三进程恢复、外部数据库集成或性能采样：本次未改变复制协议/快照编码/数据库契约，局部影响通过核心与工具模块回归覆盖。README 未修改。
 - 结论：等待点审查和上述局部修复完成；同币对依赖模型、同步 Lane 业务调用、响应背压仍待分项调整，不宣称吞吐问题已解决。后续应先明确未提交订单参与准入的确定性规则，再调整同币对流水；Lane 变更则必须保持任务完成、失败终止和结果发布边界。
+
+
+## 2026-09-09 同币对独立命令流水准入（异步改造的已验证部分）
+
+- 基于 master `552da269` 工作树。用户要求消除同步等待，随后澄清 command 应端到端异步；本条只记录已经实现并验证的同币对独立准入，不代表同步 Lane、响应发送或控制命令已全部完成异步化。
+- `ClusterCommandWindow` 将同币对一律冲突收窄为真实依赖：相同账户/订单、共同已提交成交对手、可能互相成交的在途买卖范围，以及撤单的不完整流动性范围仍设屏障。衍生品在途成交可能改变后续准入使用的币对持仓量，该依赖也必须保留；不会改变此值的独立挂单可以同时在途。新增固定范围标志随原有 scope 数组存储，不复制订单簿。
+- 批量币对索引改为登记该币对最新在途批次，按全局有序终态退出。入口已证明独立的同币对批次可以并存，避免旧“唯一批次”断言；直接运行时路径原有依赖校验保留。
+- 新增六产品线普通单/批量单同时在途并与串行、Follower 重放、快照恢复一致的测试；新增共享 maker 消费顺序、交叉价格/市价/撤单范围和衍生品持仓量依赖测试。实时测试仍严格检查 512 成交、1024 私有执行、零丢弃；提交 envelope 数允许因多个独立命令合并发布而减少，要求 begin/end 配对。
+- HotSpot JDK 25.0.1、Maven 3.9.16；`mvn -pl surprising-aeron-core/surprising-aeron-tools,surprising-aeron-core/surprising-aeron-benchmarks -am verify`：nonblocking3-verify.log BUILD SUCCESS，1016 项中 1015 通过、1 项数据库条件跳过，0 失败/错误；service 621 项通过。未执行云端/压测/JMH/JFR或新的三进程验证，本轮为本地功能回归。
+- 中间测试发现旧批量索引拒绝同币对并行，已修复；新增共享 maker 用例最初错误地读取已移除的全成交订单，改为保留一份余量核对部分成交；旧实时用例把 envelope 数等同命令数，已改成检查分组配对，业务事件数量断言未放宽。日志同目录 same-symbol-tests.log、same-symbol2-tests.log、nonblocking-verify.log、nonblocking2-verify.log 保留失败记录。
+- artifact：`/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-wait-audit/`。README 未改。尚未完成：同步 Lane 调用的分阶段续办、响应出口异步化、控制与直接查询的非阻塞完成调度；不宣称所有等待已消除或吞吐已改善。

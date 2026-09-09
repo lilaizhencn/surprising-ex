@@ -117,7 +117,7 @@ final class OrderBatchExecutor {
         batch.admissionOrderIndex.reset(pending.command().header().userId());
         batch.started = true;
         if (preparePipelinedPlaceBatch(batch, pending)) {
-            registerPipelinedBatchSymbols(batch);
+            registerPipelinedBatchSymbols(batch, pending);
             dispatchPipelinedPlaceBatchAdmission(pending, batch);
             owner.clearFactContext();
             return null;
@@ -151,16 +151,18 @@ final class OrderBatchExecutor {
             batch.started = false;
             return false;
         }
-        registerPipelinedBatchSymbols(batch);
+        registerPipelinedBatchSymbols(batch, pending);
         dispatchPipelinedPlaceBatchAdmission(pending, batch);
         return true;
     }
 
-    void registerPipelinedBatchSymbols(OrderBatchPending batch) {
+    void registerPipelinedBatchSymbols(OrderBatchPending batch, PendingMatching pending) {
         if (batch.pipelineRegistered) return;
         for (String symbol : batch.preparedSymbols) {
-            OrderBatchPending previous = pipelinedBatchBySymbol.putIfAbsent(symbol, batch);
-            if (previous != null && previous != batch) {
+            // Retain the newest batch: ordered completion removes all predecessors first.
+            // The cluster window has already checked exact account and matching dependencies.
+            OrderBatchPending previous = pipelinedBatchBySymbol.put(symbol, batch);
+            if (previous != null && previous != batch && !pending.clusterIndependent) {
                 throw new IllegalStateException("pipelined symbol ownership conflict");
             }
         }
