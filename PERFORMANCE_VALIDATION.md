@@ -5117,3 +5117,16 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 三节点 JFR各24秒，文件842134/866863/857807字节，DataLoss均0；每节点3次GC。owner执行样本15/15/10，matcher1/4/3，Lane1/0/2，样本少且含启动；分配样本以byte[]、String、数组等初始化对象为主，不作热点占比或零分配结论。NMT committed为257133/254072/246421KB（reserved约10GB为JVM虚拟预留）；未做长稳，无泄漏结论。异常事件中未再出现上述所有权/撮合致命错误。
 - 被测 service.jar SHA256=05d9189593e2af7993ae4f7ca31e2b7f3b9676ff8f0bf44f1826272cca60e737；benchmarks.jar SHA256=50a0a2380a270b2c680ddda324a520c9e9661878f9e1862d45bb3389ed37fc3e。复现/JMH共享驱动放在独立 benchmarks 模块 main 中，不进入业务服务包；测试用例保留在 service/src/test。生产触发缺陷功能验证完成，整体性能验收仍非本轮范围。
 - 收尾清理：全部本轮节点和客户端已退出；分析后删除 /tmp/ex-trigger-fix 及本轮 surefire/failsafe 报告、迁移前残留 SmallControlReproMain.class。只保留源码、本摘要和可复用构建包，原始 artifact 已清理，不再提供失效路径为证据。
+
+## 2026-09-09 修复后 Core 连续10分钟（采集前锁定）
+- 用户明确要求使用之前 Core 脚本本机10分钟；本轮覆盖历史本机性能限制，只运行当前 master da5b068e，不进行云端操作或旧版本对照。HotSpot GraalVM25.0.1/Maven3.9.16，macOS26.7/i9-9880H/8C16T/16GiB，可用磁盘540GiB。
+- ClusteredBatchTradingBenchmark.decodedBatchAdmissionAndSettlement，LINEAR_PERPETUAL/4Lane/1matcher/256窗口/batch2/realtime=false/settlementSpinLimit256，257账户/1模拟session/1symbol，闭环最大速率。每cycle3584业务项、2048业务Core消息、1024fills、1536batches/3072items、512查询；各账户初始10亿、zero fees、mark100，maker持续存在，开平仓/改单成交/批量挂撤按原脚本。非真实三节点网络，不修正coordinated omission。
+- JMH f1/t1、warmup3×20s、measurement1×600s，G1/Xms768m/Xmx768m/NMTsummary，JFR profile maxsize128m，-prof gc；只在iteration边界重建状态，连续600秒不重建。使用已验证构建包 SHA256 50a0a2380a270b2c680ddda324a520c9e9661878f9e1862d45bb3389ed37fc3e。本轮无业务改动。
+- 通过条件：脚本无异常，accepted=terminal、unfinished/endBacklog0，资金/持仓/冻结/订单清理和snapshot恢复校验通过；任何异常记录原样保留摘要。无吞吐数值门槛，单measurement无置信区间，无业务分段尾延迟，不作为生产容量验收。记录GC/热点/线程与系统干扰；磁盘低于10GiB停止。临时目录/tmp/ex-core-10min，完成分析后停止进程并清理原始产物。
+- 首轮失败：遗漏JMH -to，默认600秒iteration timeout与600秒测量相等，日志明确benchmark timed out/interrupted 2 times；TearDown snapshot的Lane等待收到中断并抛account lane mutation was interrupted，退出1，无有效JMH结果。预热三轮金融检查通过，连续测量约600秒后在终检中断；不能当交易功能失败或正式吞吐结果。
+- 第二轮执行前：仅将JMH timeout改为-to 15m，测量仍600秒、预热3×20秒及所有场景/JVM/profiler参数不变，新产物目录/tmp/ex-core-10min/retry。保留首轮失败摘要，不改变业务代码或负载，不延长交易30秒deadline。
+- 用户随后要求不要重跑，立即TERM第二轮JVM并确认JMH退出；第二轮属于用户主动取消，无吞吐结果，不继续测试。
+- 首轮只保留诊断：三段预热1.367/1.490/1.483 cycle/s，按3584业务项/cycle约4900/5340/5315 ops/s；600秒measurement没有正常生成分数，不能拿预热或未核对计数替代正式吞吐。最终日志pending0，但快照终检被JMH中断，不能宣称长轮金融/恢复验收通过。
+- 首轮两次线程累计CPU差分（覆盖测量中约516秒，百分比按单核）：Owner/JMH线程25.54%、matcher8.52%、Lane0/1/2/3为4.03/3.72/6.51/3.73%，未饱和。Thread.print捕获Owner停于测试夹具Workload.drain:635的parkNanos(100000)，matcher及Lane等待；脚本推进等待是需要进一步检查的因素，没有量化其独立影响或修改生产逻辑。
+- 首轮JFR664秒/约8.5MiB、DataLoss0、GC86次（83young/3old）、allocation samples72818，profile未开启New/OutsideTLAB，未取得有效-prof gc分数，故无精确每业务项分配/正式尾延迟结论。系统swap1396→1236.5MiB，采样未见CPU降频，磁盘约540GiB可用。启动存在JMH Unsafe废弃、native-access和Chronicle兼容提示，与本轮终检中断原因不同；未据此修改业务。
+- 收尾：本轮两次JVM及监控退出后清理/tmp/ex-core-10min（含retry、JFR、JSON、日志和线程采样）；只保留本摘要，不提供已删除原始产物为证据。本次无生产代码改动，无有效10分钟吞吐验收结果。
