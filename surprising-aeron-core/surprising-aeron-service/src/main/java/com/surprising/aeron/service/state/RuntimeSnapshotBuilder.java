@@ -120,7 +120,7 @@ final class RuntimeSnapshotBuilder {
                         progress.accountLaneId(), progress.nextCursorOrderId(),
                         progress.nextCursorUserId(), progress.commandId(), progress.requiredInsuranceUnits())));
         return new TradingRuntimeSnapshot(revision, users, balances, orders, reservations, clientOrderIndex,
-                positions, liquidations, markPrices, riskSnapshots, riskScans, state.nextLiquidationId(),
+                positions, liquidations, markPrices, riskSnapshots, riskScans, state.nextLiquidationId(), state.marketRevision(),
                 new TreeMap<>(state.instrumentsForRuntime()), new TreeMap<>(state.leveragesForRuntime()),
                 new TreeMap<>(state.algoOrdersForRuntime()), new TreeMap<>(state.cancelAllAfterTimersForRuntime()),
                 new TreeMap<>(state.triggerOrdersForRuntime()), treasury, fundingSettlements, fundingProgress,

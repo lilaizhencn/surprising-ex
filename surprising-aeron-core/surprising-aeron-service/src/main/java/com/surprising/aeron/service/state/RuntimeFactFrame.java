@@ -524,7 +524,14 @@ public final class RuntimeFactFrame implements RuntimeFactView {
             List<TreasuryFundingChange> treasuryFunding,
             List<TreasuryLifecycleChange> treasuryLifecycle,
             NextLiquidationIdChange nextLiquidationId,
-            RiskScanControlChange riskScanControl) {
+            RiskScanControlChange riskScanControl, MarketRevisionChange marketRevision) {
+        public GlobalOwnerGroup(List<MarkPriceChange> markPrices, List<RiskScanChange> riskScans,
+                List<InstrumentChange> instruments, List<TreasuryAssetChange> treasuryAssets,
+                List<TreasuryFundingChange> treasuryFunding, List<TreasuryLifecycleChange> treasuryLifecycle,
+                NextLiquidationIdChange nextLiquidationId, RiskScanControlChange riskScanControl) {
+            this(markPrices, riskScans, instruments, treasuryAssets, treasuryFunding, treasuryLifecycle,
+                    nextLiquidationId, riskScanControl, null);
+        }
         public GlobalOwnerGroup {
             markPrices = List.copyOf(markPrices);
             riskScans = List.copyOf(riskScans);
@@ -659,6 +666,13 @@ public final class RuntimeFactFrame implements RuntimeFactView {
                                           TreasuryLifecycleValue after) {
         public TreasuryLifecycleChange { requireChange(symbolId >= 0, before, after, "treasury lifecycle"); }
     }
+    /** 行情输入游标属于恢复边界，和账户 Lane 的估值游标一并保存。 */
+    public record MarketRevisionChange(long before, long after) {
+        public MarketRevisionChange {
+            if (before < 0 || after < 0) throw new IllegalArgumentException("invalid market revision change");
+        }
+    }
+
     public record NextLiquidationIdChange(long before, long after) {
         public NextLiquidationIdChange {
             if (before <= 0 || after <= 0 || before == after) {
@@ -1183,6 +1197,10 @@ public final class RuntimeFactFrame implements RuntimeFactView {
                                                TreasuryLifecycleValue after) {
             requireOpen(); global.treasuryLifecycle.record(symbolId, before, after); return this;
         }
+        public Builder recordMarketRevision(long before, long after) {
+            requireOpen(); global.marketRevision.record(UnitKey.VALUE, before, after); return this;
+        }
+
         public Builder recordNextLiquidationId(long before, long after) {
             requireOpen(); global.nextLiquidationId.record(UnitKey.VALUE, before, after); return this;
         }
@@ -1477,6 +1495,7 @@ public final class RuntimeFactFrame implements RuntimeFactView {
         private final IntChanges<TreasuryAssetValue> treasuryAssets = new IntChanges<>();
         private final IntChanges<TreasuryFundingValue> treasuryFunding = new IntChanges<>();
         private final IntChanges<TreasuryLifecycleValue> treasuryLifecycle = new IntChanges<>();
+        private final Changes<UnitKey, Long> marketRevision = new Changes<>();
         private final Changes<UnitKey, Long> nextLiquidationId = new Changes<>();
         private final Changes<UnitKey, CoreRiskScanControlView> riskScanControl = new Changes<>();
 
@@ -1488,6 +1507,7 @@ public final class RuntimeFactFrame implements RuntimeFactView {
             treasuryFunding.reset();
             treasuryLifecycle.reset();
             nextLiquidationId.reset();
+            marketRevision.reset();
             riskScanControl.reset();
         }
 
@@ -1500,7 +1520,7 @@ public final class RuntimeFactFrame implements RuntimeFactView {
                     treasuryFunding.seal(TreasuryFundingChange::new),
                     treasuryLifecycle.seal(TreasuryLifecycleChange::new),
                     nextLiquidationId.single(NextLiquidationIdChange::new),
-                    riskScanControl.single(RiskScanControlChange::new));
+                    riskScanControl.single(RiskScanControlChange::new), marketRevision.single(MarketRevisionChange::new));
         }
     }
 

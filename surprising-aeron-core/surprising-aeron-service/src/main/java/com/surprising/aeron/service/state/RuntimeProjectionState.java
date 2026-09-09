@@ -56,6 +56,8 @@ public final class RuntimeProjectionState {
     private long businessStateHash;
     private long fundsStateHash;
     private long nextLiquidationId;
+    /** 已提交的行情输入序号，与风险游标一起参与投影及恢复一致性检查。 */
+    private long marketRevision;
     private CoreRiskScanControlView riskScanControl;
     private TradingCoreState cachedFreeze;
     private long cachedFreezeSequence;
@@ -84,6 +86,7 @@ public final class RuntimeProjectionState {
         liquidations = new HashMap<>(initial.riskState().liquidations());
         riskScans = new HashMap<>(initial.riskState().scans());
         nextLiquidationId = initial.riskState().nextLiquidationId();
+        marketRevision = initial.riskState().marketRevision();
         riskScanControl = initial.riskState().scanControl();
         CoreTreasuryState treasury = initial.treasuryState();
         fees = new HashMap<>(treasury.feeBalances());
@@ -182,7 +185,7 @@ public final class RuntimeProjectionState {
         TreeMap<Long, CoreUserState> frozenUsers = new TreeMap<>();
         users.forEach((id, user) -> frozenUsers.put(id, user.freeze(productLine, id)));
         CoreRiskState risk = new CoreRiskState(marks, riskSnapshots, liquidations, riskScans,
-                nextLiquidationId, riskScanControl);
+                nextLiquidationId, riskScanControl, marketRevision);
         CoreTreasuryState treasury = new CoreTreasuryState(fees, insurance, deficits, liquidationFees,
                 fundingResiduals, roundingResiduals, clearingPnl, fundingSettlements, lifecycleSettlements,
                 fundingProgress, lifecycleProgress);
@@ -364,6 +367,7 @@ public final class RuntimeProjectionState {
                     ? null : RuntimeStateMaterializer.riskScan(change.after(), identities));
         }
         global.instruments().forEach(change -> inverse.putOrRemove(instruments, change.symbol(), change.after()));
+        if (global.marketRevision() != null) inverse.setMarketRevision(global.marketRevision().after());
         if (global.nextLiquidationId() != null) {
             inverse.setNextLiquidationId(global.nextLiquidationId().after());
         }
@@ -419,6 +423,7 @@ public final class RuntimeProjectionState {
         private static final byte USER_POSITION_MODE = 7;
         private static final byte NEXT_LIQUIDATION_ID = 8;
         private static final byte RISK_SCAN_CONTROL = 9;
+        private static final byte MARKET_REVISION = 10;
 
         private byte[] types = new byte[32];
         private Object[] targets = new Object[32];
@@ -494,6 +499,12 @@ public final class RuntimeProjectionState {
             user.positionMode = value;
         }
 
+        private void setMarketRevision(long value) {
+            int index = append(MARKET_REVISION);
+            previousLongs[index] = marketRevision;
+            marketRevision = value;
+        }
+
         private void setNextLiquidationId(long value) {
             int index = append(NEXT_LIQUIDATION_ID);
             previousLongs[index] = nextLiquidationId;
@@ -534,6 +545,7 @@ public final class RuntimeProjectionState {
                     case USER_POSITION_MODE -> ((MutableUser) targets[index]).positionMode =
                             (CorePositionMode) previousValues[index];
                     case NEXT_LIQUIDATION_ID -> nextLiquidationId = previousLongs[index];
+                    case MARKET_REVISION -> marketRevision = previousLongs[index];
                     case RISK_SCAN_CONTROL -> riskScanControl = (CoreRiskScanControlView) previousValues[index];
                     default -> throw new IllegalStateException("unknown projection rollback operation");
                 }

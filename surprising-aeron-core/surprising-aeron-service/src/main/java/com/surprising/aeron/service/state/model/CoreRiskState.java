@@ -13,11 +13,18 @@ public record CoreRiskState(
         Map<Long, CoreLiquidationState> liquidations,
         Map<String, RiskScan> scans,
         long nextLiquidationId,
-        CoreRiskScanControlView scanControl) {
+        CoreRiskScanControlView scanControl,
+        /** 最近一次标记价格变更的状态序号，用于使跨币对累计估值失效。 */ long marketRevision) {
+
+    public CoreRiskState(Map<String, CoreMarkPriceState> markPrices, Map<String, CoreRiskSnapshot> snapshots,
+                         Map<Long, CoreLiquidationState> liquidations, Map<String, RiskScan> scans,
+                         long nextLiquidationId, CoreRiskScanControlView scanControl) {
+        this(markPrices, snapshots, liquidations, scans, nextLiquidationId, scanControl, 0);
+    }
 
     public CoreRiskState {
         if (markPrices == null || snapshots == null || liquidations == null || scans == null
-                || nextLiquidationId <= 0 || scanControl == null) {
+                || marketRevision < 0 || nextLiquidationId <= 0 || scanControl == null) {
             throw new IllegalArgumentException("invalid risk state");
         }
         markPrices = immutableSorted(markPrices);

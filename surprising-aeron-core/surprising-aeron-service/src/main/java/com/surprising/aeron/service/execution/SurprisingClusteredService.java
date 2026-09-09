@@ -80,7 +80,7 @@ public final class SurprisingClusteredService implements ClusteredService {
         pendingIngress.clear();
         activeControl = null;
         controlResponse = null;
-        drainingSize = 0;
+        drainingSize = requestedDrainSize = 0;
         pendingResponses.clear();
         commandWindowHighWaterMark = 0;
         drainedWindows = drainedCommands = dependencyFences = controlFences = 0;
@@ -152,6 +152,8 @@ public final class SurprisingClusteredService implements ClusteredService {
     private CoreResponse controlResponse;
     /** 正在提交的确定性窗口前缀；不因下一次轮询的线程速度改变边界。 */
     private int drainingSize;
+    /** 日志定时器已经要求提交的窗口前缀；与正在完成的前缀分开，避免阻断无依赖准入。 */
+    private int requestedDrainSize;
     private long drainingSequence, progressDeadline;
 
     private void processIngress(ClientSession session, CoreMessage request, long timestamp, long position) {
@@ -168,28 +170,33 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     private void progressCommandsInScope(boolean flushWindow) {
         for (int work = 0; work < MATCHING_COMPLETION_BATCH_SIZE; work++) {
-            if (drainingSize != 0 && !pollCommandPrefix()) return;
+            // 已确定的提交前缀不变；未完成时仍可准入与在途命令无依赖的后续订单。
+            if (drainingSize != 0) pollCommandPrefix();
+            if (drainingSize == 0 && requestedDrainSize != 0) beginCommandPrefix(requestedDrainSize);
+            if (commandWindow.size() == ClusterCommandWindow.CAPACITY) return;
             if (activeControl != null) {
                 if (!pollControl()) return;
                 continue;
             }
             var next = pendingIngress.first();
             if (next == null) {
-                if (flushWindow && commandWindow.size() != 0) {
+                if (flushWindow && commandWindow.size() != 0 && drainingSize == 0) {
                     beginCommandPrefix(commandWindow.size());
                     continue;
                 }
                 return;
             }
             if (next.command == null) {
-                if (commandWindow.size() != 0) { beginCommandPrefix(commandWindow.size()); continue; }
+                requestedDrainSize = commandWindow.size();
                 pendingIngress.remove();
+                if (drainingSize == 0 && requestedDrainSize != 0) beginCommandPrefix(requestedDrainSize);
                 continue;
             }
             boolean eligible = state.prepareClusterPipelineScope(next.command, commandWindow);
             int prefix = !eligible || state.matchingSequence(next.command.header().commandId()) != 0
                     ? commandWindow.size() : commandWindow.conflictingPrefixSize();
             if (prefix != 0) {
+                if (drainingSize != 0) return;
                 if (eligible) dependencyFences++; else controlFences++;
                 beginCommandPrefix(prefix);
                 continue;
@@ -216,7 +223,7 @@ public final class SurprisingClusteredService implements ClusteredService {
             entry.response = entry.sequence == 0 ? result : null;
             pendingIngress.remove();
             commandWindowHighWaterMark = Math.max(commandWindowHighWaterMark, commandWindow.size());
-            if (commandWindow.size() == ClusterCommandWindow.CAPACITY) beginCommandPrefix(1);
+            if (commandWindow.size() == ClusterCommandWindow.CAPACITY && drainingSize == 0) beginCommandPrefix(1);
         }
     }
 
@@ -257,6 +264,7 @@ public final class SurprisingClusteredService implements ClusteredService {
                     entry.request.header().response(responseType(entry.request.header())), entry.response);
         }
         commandWindow.removePrefix(drainingSize);
+        requestedDrainSize = Math.max(0, requestedDrainSize - drainingSize);
         drainingSize = 0;
         drainingSequence = 0;
         state.runtimeState.releaseCompletedSequentialLaneStage();
@@ -440,7 +448,7 @@ public final class SurprisingClusteredService implements ClusteredService {
         pendingIngress.clear();
         activeControl = null;
         controlResponse = null;
-        drainingSize = 0;
+        drainingSize = requestedDrainSize = 0;
         pendingResponses.clear();
         responseSequence = 0;
         matchingResponse = null;

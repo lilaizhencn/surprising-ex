@@ -477,11 +477,13 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /** 当前信封不可变解码结果；作用域重算不会再次解码。 */
     DecodedMatchingCommand decodedIngressCommand;
 
-    /** 资金费和风险任务只读取 owner 元数据即可派发，无需先停驻全部账户 Lane。 */
+    /** 全局元数据更新及 Lane 控制任务派发，不要求事先停驻所有账户。 */
     boolean requiresOwnerLaneAccessForPreparation(CoreMessage message) {
-        return message.header().messageType() != CoreMessageType.APPLY_FUNDING
-                && (message.header().messageType() != CoreMessageType.CONTINUE_RISK_SCAN
-                    || runtimeState.firstRiskIncompleteScan() == null);
+        return switch (message.header().messageType()) {
+            case APPLY_FUNDING, APPLY_MARK_PRICE, UPDATE_RISK_SCAN_CONTROL, ADJUST_INSURANCE_FUND -> false;
+            case CONTINUE_RISK_SCAN -> runtimeState.firstRiskIncompleteScan() == null;
+            default -> true;
+        };
     }
 
     CoreResponse applyClusterCommand(CoreMessage message, long timestamp, long position) {
@@ -1066,60 +1068,71 @@ public final class TradingCoreRuntime implements AutoCloseable {
             CoreAdmissionReservation.AdmissionDemand commandDemand, RuntimeProjectionPoint beforeProjection,
             long beforeRuntimeRevision, long runtimeCommandCheckpoint, long positionIdentityCheckpoint,
             ResponseStatus status, CoreResultCode resultCode) {
-        if (status != ResponseStatus.APPLIED
-                && (commits.commitPublicationDirty || runtimeState.revision() != beforeRuntimeRevision
-                    || runtimeState.hasUncommittedCommandChanges())) {
-            rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
-                    Math.incrementExact(appliedCommandCount));
-        }
-        if (status == null) {
-            commits.abortCommitPublicationBatch();
-            return releaseAdmission(commandAdmission, rejected(CoreResultCode.INVALID_MESSAGE));
-        }
-        if (status == ResponseStatus.APPLIED) {
-            triggers.cancelTriggersForClosedPositions();
-            int reservedChildPatches = commandDemand == null ? 0 : commandDemand.patchCount() - 1;
-            if (admissions.queuedMatching.size() > reservedChildPatches
-                    || pendingMatching.size() + admissions.queuedMatching.size() > pendingMatching.capacity()) {
-                rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
-                        Math.incrementExact(appliedCommandCount));
-                admissions.queuedMatching.clear();
-                return releaseAdmission(commandAdmission, rejected(CoreResultCode.MATCHING_BACKPRESSURE));
-            }
-        }
-        if (status == ResponseStatus.APPLIED) {
-            List<Long> changedOrderIds = resultBuilder.commandChangedOrderIds == null ? List.of() : resultBuilder.commandChangedOrderIds;
-            try {
-                stampOrderChangesRuntime(clusterTimestamp, clusterPosition, changedOrderIds);
-            } catch (IllegalStateException exception) {
-                rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
-                        Math.incrementExact(appliedCommandCount));
-                return releaseAdmission(commandAdmission, rejected(CoreResultCode.INVALID_COMMAND));
-            }
-        }
         long nextAppliedCommandCount = Math.incrementExact(appliedCommandCount);
-        LaneCommandContextRing.Context commandLaneContext = null;
         long committedLaneMask = 0;
-        resultBuilder.materializeChangeAccumulators();
-            if (status == ResponseStatus.APPLIED && !resultBuilder.commandChangedUserIds.isEmpty()) {
-                long expectedLaneMask = 0;
-                for (Long userId : resultBuilder.commandChangedUserIds) {
-                    if (userId != null && userId > 0) {
-                        expectedLaneMask |= matchingAdapter.topology().accountLaneMask(userId);
-                    }
-                }
-                commandLaneContext = laneCommandContexts.claim(nextAppliedCommandCount);
-                commandLaneContext.result(new com.surprising.aeron.service.matching.CoreMatchingResult(
-                                true, "NO_NATIVE_COMMAND").withCoreSequence(nextAppliedCommandCount),
-                        expectedLaneMask, commits.validAccountLaneMask());
-                committedLaneMask = stageLaneMutation(
-                        nextAppliedCommandCount, resultBuilder.commandChangedUserIds, commandLaneContext);
-                if (commandLaneContext.completedLaneMask() != expectedLaneMask) {
-                    throw new IllegalStateException("single command account lane mask mismatch");
-                }
-                commits.requireCompleteAccountLanes(commandLaneContext);
+        if (!directFinalizationPrepared) {
+            if (status != ResponseStatus.APPLIED
+                    && (commits.commitPublicationDirty || runtimeState.revision() != beforeRuntimeRevision
+                        || runtimeState.hasUncommittedCommandChanges())) {
+                rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
+                        Math.incrementExact(appliedCommandCount));
             }
-            commits.completeCommitPublicationBatch(committedLaneMask);
+            if (status == null) {
+                commits.abortCommitPublicationBatch();
+                return releaseAdmission(commandAdmission, rejected(CoreResultCode.INVALID_MESSAGE));
+            }
+            if (status == ResponseStatus.APPLIED) {
+                triggers.cancelTriggersForClosedPositions();
+                int reservedChildPatches = commandDemand == null ? 0 : commandDemand.patchCount() - 1;
+                if (admissions.queuedMatching.size() > reservedChildPatches
+                        || pendingMatching.size() + admissions.queuedMatching.size() > pendingMatching.capacity()) {
+                    rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
+                            Math.incrementExact(appliedCommandCount));
+                    admissions.queuedMatching.clear();
+                    return releaseAdmission(commandAdmission, rejected(CoreResultCode.MATCHING_BACKPRESSURE));
+                }
+            }
+            if (status == ResponseStatus.APPLIED) {
+                List<Long> changedOrderIds = resultBuilder.commandChangedOrderIds == null ? List.of() : resultBuilder.commandChangedOrderIds;
+                try {
+                    stampOrderChangesRuntime(clusterTimestamp, clusterPosition, changedOrderIds);
+                } catch (IllegalStateException exception) {
+                    rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
+                            Math.incrementExact(appliedCommandCount));
+                    return releaseAdmission(commandAdmission, rejected(CoreResultCode.INVALID_COMMAND));
+                }
+            }
+            resultBuilder.materializeChangeAccumulators();
+            if (status == ResponseStatus.APPLIED && !resultBuilder.commandChangedUserIds.isEmpty()) {
+                // 业务任务已经结束。把发布序号交给实际参与 Lane，不接管全部账户。
+                if (runtimeState.asynchronousCommands()) {
+                    runtimeState.releaseCompletedSequentialLaneStage();
+                    directCommitEvent = runtimeState.dispatchLaneMutation(
+                            nextAppliedCommandCount, resultBuilder.commandChangedUserIds);
+                } else {
+                    committedLaneMask = runtimeState.stageLaneMutation(
+                            nextAppliedCommandCount, resultBuilder.commandChangedUserIds);
+                }
+            }
+            directFinalizationPrepared = true;
+        }
+        if (directCommitEvent != null) {
+            if (!runtimeState.laneCommitComplete(directCommitEvent)) {
+                if (pendingDirectCommand == null) {
+                    pendingDirectCommand = new PendingDirectCommand(message, clusterTimestamp, clusterPosition,
+                            sourceKey, fingerprint, commandAdmission, commandDemand, beforeProjection,
+                            beforeRuntimeRevision, runtimeCommandCheckpoint, positionIdentityCheckpoint);
+                    controlCompletionStatus = status;
+                    controlCompletionCode = resultCode;
+                }
+                return null;
+            }
+            committedLaneMask = directCommitEvent.requiredLaneMask();
+            runtimeState.releaseLaneCommit(directCommitEvent);
+            directCommitEvent = null;
+        }
+        directFinalizationPrepared = false;
+        commits.completeCommitPublicationBatch(committedLaneMask);
         if (status == ResponseStatus.APPLIED) {
             validateFundsConservation(message);
         }
@@ -1128,9 +1141,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         long businessStateHash = tradingStateChanged ? currentBusinessStateHash() : cachedBusinessStateHash;
         appliedCommandCount = nextAppliedCommandCount;
         refreshCommittedCoreSequence();
-        if (commandLaneContext != null) {
-            laneCommandContexts.release(nextAppliedCommandCount);
-        }
         long requiredExportSequence = 0;
         cachedBusinessStateHash = businessStateHash;
         admissions.appendQueuedMatching();
@@ -1153,6 +1163,10 @@ public final class TradingCoreRuntime implements AutoCloseable {
     private java.util.function.BooleanSupplier controlContinuation;
     /** 保留原始命令、资金检查点及准入额度，异步完成前禁止提前提交。 */
     private PendingDirectCommand pendingDirectCommand;
+    /** 直接命令唯一的完成事件；全部参与 Lane 完成后才能回收和发布。 */
+    private com.surprising.aeron.service.state.LaneCommitEvent directCommitEvent;
+    /** 跨回调只执行一次收尾准备，防止重复撤触发单、盖订单时间戳或派发。 */
+    private boolean directFinalizationPrepared;
     /** 业务阶段完成后保留结果，等待提交/回滚交接时禁止再次调用业务续步。 */
     private ResponseStatus controlCompletionStatus;
     private CoreResultCode controlCompletionCode;
@@ -1184,16 +1198,20 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 controlCompletionCode = CoreResultCode.INVALID_COMMAND;
             }
         }
-        if (!runtimeState.tryAcquireOwnerLaneAccess()) return null;
-        ResponseStatus status = controlCompletionStatus;
-        CoreResultCode code = controlCompletionCode;
+        // 回滚仍必须独占受影响状态；成功的资金费/风险任务已经在 Lane 完成业务修改。
+        if (controlCompletionStatus != ResponseStatus.APPLIED
+                && runtimeState.hasUncommittedCommandChanges()
+                && !runtimeState.tryAcquireOwnerLaneAccess()) return null;
+        CoreResponse result = finishDirectCommand(pending.message, pending.timestamp, pending.position, pending.sourceKey,
+                pending.fingerprint, pending.admission, pending.demand, pending.beforeProjection,
+                pending.beforeRevision, pending.checkpoint, pending.identityCheckpoint,
+                controlCompletionStatus, controlCompletionCode);
+        if (result == null) return null;
         controlCompletionStatus = null;
         controlCompletionCode = null;
         controlContinuation = null;
         pendingDirectCommand = null;
-        return finishDirectCommand(pending.message, pending.timestamp, pending.position, pending.sourceKey,
-                pending.fingerprint, pending.admission, pending.demand, pending.beforeProjection,
-                pending.beforeRevision, pending.checkpoint, pending.identityCheckpoint, status, code);
+        return result;
     }
 
     /** 仅异步控制命令需要跨日志回调保留的提交上下文。 */

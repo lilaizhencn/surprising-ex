@@ -55,6 +55,8 @@ public final class RollingBusinessStateHash {
     private final int productLine;
     private long revision;
     private long nextLiquidationId;
+    /** 已提交的行情输入序号，与风险游标一起参与投影及恢复一致性检查。 */
+    private long marketRevision;
     private long riskScanControlHash;
     private long lastCoreSequence = Long.MIN_VALUE;
     private long cachedValue;
@@ -69,6 +71,7 @@ public final class RollingBusinessStateHash {
         productLine = state.productLine().ordinal();
         revision = state.revision();
         nextLiquidationId = state.riskState().nextLiquidationId();
+        marketRevision = state.riskState().marketRevision();
         riskScanControlHash = stable(state.riskState().scanControl());
         this.identities = identities == null ? new RuntimeIdentityRegistry() : identities;
         rebuild(state);
@@ -283,6 +286,8 @@ public final class RollingBusinessStateHash {
                     this::stableLifecycleProgress, ignored -> true);
             updateTreasuryLifecycle(change);
         }
+        if (global.marketRevision() != null && global.marketRevision().before() != marketRevision)
+            throw new IllegalArgumentException("business market revision before-value mismatch");
         if (global.nextLiquidationId() != null
                 && global.nextLiquidationId().before() != nextLiquidationId) {
             throw new IllegalArgumentException("business next-liquidation-id before-value mismatch");
@@ -291,6 +296,7 @@ public final class RollingBusinessStateHash {
                 && stable(global.riskScanControl().before()) != riskScanControlHash) {
             throw new IllegalArgumentException("business risk-scan-control before-value mismatch");
         }
+        if (global.marketRevision() != null) marketRevision = global.marketRevision().after();
         if (global.nextLiquidationId() != null) {
             nextLiquidationId = global.nextLiquidationId().after();
         }
@@ -345,6 +351,7 @@ public final class RollingBusinessStateHash {
         long nextGeneration = Math.incrementExact(ownerGeneration);
         revision = state.revision();
         nextLiquidationId = state.riskState().nextLiquidationId();
+        marketRevision = state.riskState().marketRevision();
         riskScanControlHash = stable(state.riskState().scanControl());
         rebuild(state);
         ownerGeneration = nextGeneration;
@@ -373,6 +380,7 @@ public final class RollingBusinessStateHash {
         hash = mixAggregate(hash, "liquidations", liquidations);
         hash = mixAggregate(hash, "riskScans", riskScans);
         hash = CoreStateHash.mix(hash, nextLiquidationId);
+        hash = CoreStateHash.mix(hash, marketRevision);
         hash = CoreStateHash.mix(hash, riskScanControlHash);
         hash = mixAggregate(hash, "feeBalances", feeBalances);
         hash = mixAggregate(hash, "insuranceBalances", insuranceBalances);
@@ -827,7 +835,8 @@ public final class RollingBusinessStateHash {
         for (var lane : lanes) hash.number(lane.lastUserId()).flag(lane.complete()).number(lane.userId())
                 .number(lane.phase()).text(lane.positionCursor()).number(lane.reservationCursor())
                 .number(lane.unrealizedPnlUnits()).number(lane.maintenanceMarginUnits())
-                .number(lane.isolatedMarginUnits()).number(lane.isolatedReservationUnits());
+                .number(lane.isolatedMarginUnits()).number(lane.isolatedReservationUnits())
+                .number(lane.userRevision()).number(lane.marketRevision());
         return hash.value();
     }
 

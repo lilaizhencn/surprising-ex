@@ -116,6 +116,96 @@ class ParallelRiskScanTest {
     }
 
     @Test
+    void closingAProfitablePositionBetweenPagesMustNotCountItsProfitTwice() {
+        var reducer = new TradingCoreReducer(TOPOLOGY);
+        var source = reducer.upsertInstrument(source(CoreMarginMode.CROSS, 1),
+                new UpsertInstrumentCommand("ETH-USDT", 1, ContractType.LINEAR_PERPETUAL.ordinal(),
+                        "ETH", "USDT", "USDT", 1, 1, 1, 100_000, 100_000, 0, 0, 0, -1, 0));
+        var users = new TreeMap<>(source.users());
+        for (var user : source.users().values()) {
+            var positions = new TreeMap<>(user.positions());
+            positions.put("ETH-USDT", new CorePositionState("ETH-USDT", "USDT", CoreMarginMode.CROSS,
+                    CorePositionSide.NET, 1, 1, 100, 100, 0, 0));
+            users.put(user.userId(), new CoreUserState(source.productLine(), user.userId(), user.revision() + 1,
+                    user.balances(), user.reservations(), positions));
+        }
+        source = new TradingCoreState(source.productLine(), source.revision() + 1, users, source.orders(),
+                source.instruments(), source.riskState(), source.treasuryState());
+        var ids = new RuntimeIdentityRegistry();
+        try (var runtime = RuntimeStateProjector.project(source, ids, TOPOLOGY)) {
+            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand("ETH-USDT", 1,
+                    100, 1, 1_700_000_000_000L), runtime, ids);
+            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(1, 120), runtime, ids);
+            runtime.startAccountLanes();
+            run(runtime, ids, new PositionUserIndex(source, ids, TOPOLOGY), TOPOLOGY.accountLaneCount());
+            long userId = source.users().keySet().iterator().next();
+            var scan = runtime.riskScan(ids.symbolId(SYMBOL));
+            assertThat(scan.laneProgress().get(TOPOLOGY.accountLaneId(userId)).unrealizedPnlUnits()).isEqualTo(200);
+            // 按平仓结算后的实际形态更新账户：200 盈利进入钱包，BTC 持仓消失，ETH 仍在。
+            runtime.replaceBalance(new BalanceRuntime(userId, ids.assetId("USDT"), 300, 0));
+            runtime.removePosition(ids.preparedPositionKey(userId, SYMBOL), userId);
+            runtime.advanceUserRevision(userId);
+            var changed = RuntimeStateMaterializer.materialize(runtime, ids);
+            var index = new PositionUserIndex(changed, ids, TOPOLOGY);
+            RuntimeDerivativeRiskProcessor.applyContinuationRuntime(2 * TOPOLOGY.accountLaneCount(),
+                    ids.symbolId(SYMBOL), index, runtime, ids);
+            var state = RuntimeStateMaterializer.materialize(runtime, ids);
+            assertThat(state.riskState().snapshots().get(userId + ":ETH-USDT").equityUnits()).isEqualTo(300);
+        }
+    }
+
+    @Test
+    void anotherSymbolsPriceChangeInvalidatesPartialPortfolioEvenAfterSnapshot() {
+        var reducer = new TradingCoreReducer(TOPOLOGY);
+        var source = reducer.upsertInstrument(source(CoreMarginMode.CROSS, 1),
+                new UpsertInstrumentCommand("ETH-USDT", 1, ContractType.LINEAR_PERPETUAL.ordinal(),
+                        "ETH", "USDT", "USDT", 1, 1, 1, 100_000, 100_000, 0, 0, 0, -1, 0));
+        var users = new TreeMap<>(source.users());
+        for (var user : source.users().values()) {
+            var positions = new TreeMap<>(user.positions());
+            positions.put("ETH-USDT", new CorePositionState("ETH-USDT", "USDT", CoreMarginMode.CROSS,
+                    CorePositionSide.NET, 1, 1, 100, 100, 0, 0));
+            users.put(user.userId(), new CoreUserState(source.productLine(), user.userId(), user.revision() + 1,
+                    user.balances(), user.reservations(), positions));
+        }
+        source = new TradingCoreState(source.productLine(), source.revision() + 1, users, source.orders(),
+                source.instruments(), source.riskState(), source.treasuryState());
+        var ids = new RuntimeIdentityRegistry();
+        try (var runtime = RuntimeStateProjector.project(source, ids, TOPOLOGY)) {
+            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(1, 100), runtime, ids);
+            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(new ApplyMarkPriceCommand("ETH-USDT", 1,
+                    100, 1, 1_700_000_000_001L), runtime, ids);
+            var index = new PositionUserIndex(source, ids, TOPOLOGY);
+            RuntimeDerivativeRiskProcessor.applyContinuationRuntime(2 * TOPOLOGY.accountLaneCount(),
+                    ids.symbolId("ETH-USDT"), index, runtime, ids);
+            assertThat(runtime.riskScan(ids.symbolId("ETH-USDT")).laneProgress())
+                    .allMatch(cursor -> cursor.userId() > 0 && cursor.unrealizedPnlUnits() == 0);
+            // ETH 扫描已经累计完两个持仓，此时 BTC 新价格只更新 BTC 扫描入口。
+            RuntimeDerivativeRiskProcessor.applyMarkPriceRuntime(mark(2, 120), runtime, ids);
+            var checkpoint = RuntimeStateMaterializer.materialize(runtime, ids);
+            var restoredState = TradingStateSnapshotCodec.decode(TradingStateSnapshotCodec.encode(checkpoint),
+                    ProductLine.LINEAR_PERPETUAL);
+            var restoredIds = new RuntimeIdentityRegistry();
+            try (var restored = RuntimeStateProjector.project(restoredState, restoredIds, TOPOLOGY)) {
+                var restoredIndex = new PositionUserIndex(restoredState, restoredIds, TOPOLOGY);
+                for (int page = 0; page < 8 && !runtime.riskScan(ids.symbolId("ETH-USDT")).riskComplete(); page++) {
+                    RuntimeDerivativeRiskProcessor.applyContinuationRuntime(TOPOLOGY.accountLaneCount(),
+                            ids.symbolId("ETH-USDT"), index, runtime, ids);
+                    RuntimeDerivativeRiskProcessor.applyContinuationRuntime(TOPOLOGY.accountLaneCount(),
+                            restoredIds.symbolId("ETH-USDT"), restoredIndex, restored, restoredIds);
+                    assertThat(RuntimeStateMaterializer.materialize(restored, restoredIds))
+                            .isEqualTo(RuntimeStateMaterializer.materialize(runtime, ids));
+                }
+                var complete = RuntimeStateMaterializer.materialize(runtime, ids);
+                assertThat(runtime.riskScan(ids.symbolId("ETH-USDT")).riskComplete()).isTrue();
+                assertThat(complete.riskState().snapshots().values()).hasSize(2 * TOPOLOGY.accountLaneCount())
+                        .allMatch(snapshot -> snapshot.equityUnits() == 300);
+                assertThat(complete.riskState().liquidations()).isEmpty();
+            }
+        }
+    }
+
+    @Test
     void idOverflowCannotPartiallyPublishNewLiquidations() {
         var source = source(CoreMarginMode.ISOLATED, 1);
         var ids = new RuntimeIdentityRegistry();

@@ -64,6 +64,7 @@ public final class RuntimeDerivativeRiskProcessor {
                             0, 0, "-", 0, 0, 0, 0, 0));
             nextScan = nextScan.withLaneProgress(progress);
         }
+        runtime.setMarketRevision(Math.incrementExact(runtime.revision()));
         runtime.putRiskScan(nextScan);
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
     }

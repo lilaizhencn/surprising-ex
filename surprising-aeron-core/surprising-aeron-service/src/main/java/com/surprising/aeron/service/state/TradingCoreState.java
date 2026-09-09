@@ -414,6 +414,7 @@ public record TradingCoreState(
             hash = CoreStateHash.mix(hash, scan.lastScheduledRevision());
         }
         hash = CoreStateHash.mix(hash, riskState.nextLiquidationId());
+        hash = CoreStateHash.mix(hash, riskState.marketRevision());
         var scanControl = riskState.scanControl();
         hash = CoreStateHash.mix(hash, scanControl.version());
         hash = CoreStateHash.mix(hash, scanControl.ruleName());

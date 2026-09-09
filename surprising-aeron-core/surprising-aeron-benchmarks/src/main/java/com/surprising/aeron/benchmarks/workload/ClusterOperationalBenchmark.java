@@ -13,8 +13,8 @@ import org.openjdk.jmh.annotations.*;
 @Fork(1)
 @Threads(1)
 public class ClusterOperationalBenchmark {
-    /** 外部三节点控制任务页大小；0 保持现有口径，1/4/64 覆盖单 Lane 续页、预算跨 Lane 分配及清算编号收集。 */
-    @Param({"0", "1", "4", "64"})
+    /** 外部三节点控制任务页大小；0 保持现有口径；小页覆盖行情/账户变化后的估值续页和异步完成，大页覆盖跨 Lane 汇总。 */
+    @Param({"0", "1", "2", "4", "8", "64"})
     public int controlPageSize;
     private ClusterMixedCapacityMain workload;
 

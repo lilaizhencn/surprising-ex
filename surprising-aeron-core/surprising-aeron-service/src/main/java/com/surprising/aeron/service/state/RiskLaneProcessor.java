@@ -16,22 +16,26 @@ final class RiskLaneProcessor {
                                         PositionUserIndex positionUsers, Iterable<Long> indexedUserIds,
                                         CoreInstrumentState changedInstrument, MarkPriceRuntime changedMark,
                                         int settleAssetId, int changedSymbolId, int maxWork,
-                                        RuntimeIdentityRegistry identities) {
+                                        RuntimeIdentityRegistry identities, long expectedUserRevision, long expectedMarketRevision) {
         RiskLiquidationBatch creations = new RiskLiquidationBatch(maxWork);
         RiskScanRuntime progress = initial;
         int remaining = maxWork;
+        long userRevision = expectedUserRevision;
         while (remaining > 0) {
             UserRuntime user = progress.riskUserId() == 0
                     ? nextUser(runtime, positionUsers, indexedUserIds, changedInstrument.symbol(),
                     progress.accountLaneId(), progress.lastUserId())
                     : runtime.user(progress.riskUserId());
             if (user == null) {
-                return new Page(progress, maxWork - remaining, true, creations);
+                return new Page(progress, maxWork - remaining, true, creations, userRevision);
             }
-            if (progress.riskUserId() == 0) {
+            if (progress.riskUserId() == 0 || user.revision() != userRevision
+                    || expectedMarketRevision != runtime.marketRevision()) {
                 progress = progress.withRiskProgress(false, user.userId(), 0, "-", 0,
                         0, 0, 0, 0, progress.lastUserId());
             }
+            userRevision = user.revision();
+            expectedMarketRevision = runtime.marketRevision();
             UserPage page = processUser(runtime, progress, user, changedInstrument, changedMark,
                     settleAssetId, changedSymbolId, remaining, creations, identities);
             progress = page.scan();
@@ -45,7 +49,7 @@ final class RiskLaneProcessor {
         boolean complete = progress.riskUserId() == 0
                 && nextUser(runtime, positionUsers, indexedUserIds, changedInstrument.symbol(),
                 progress.accountLaneId(), progress.lastUserId()) == null;
-        return new Page(progress, maxWork - remaining, complete, creations);
+        return new Page(progress, maxWork - remaining, complete, creations, userRevision);
     }
 
     private static UserPage processUser(TradingRuntimeState runtime,
@@ -270,6 +274,6 @@ final class RiskLaneProcessor {
 
 
     /** 单次有界扫描结果；owner 收集后提交游标并为新增清算分配编号。 */
-    record Page(RiskScanRuntime scan, int workUnits, boolean complete, RiskLiquidationBatch creations) { }
+    record Page(RiskScanRuntime scan, int workUnits, boolean complete, RiskLiquidationBatch creations, long userRevision) { }
     private record UserPage(RiskScanRuntime scan, int workUnits, boolean complete) { }
 }

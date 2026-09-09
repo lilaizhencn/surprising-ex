@@ -39,7 +39,7 @@ import java.util.UUID;
 
 public final class TradingStateSnapshotCodec {
 
-    private static final int VERSION = 31;
+    private static final int VERSION = 32;
     private static final int MAX_TEXT_BYTES = 64;
     private static final int MAX_AUDIT_TEXT_BYTES = 2_048;
 
@@ -234,9 +234,12 @@ public final class TradingStateSnapshotCodec {
                 writer.longValue(lane.maintenanceMarginUnits());
                 writer.longValue(lane.isolatedMarginUnits());
                 writer.longValue(lane.isolatedReservationUnits());
+                writer.longValue(lane.userRevision());
+                writer.longValue(lane.marketRevision());
             }
         });
         writer.longValue(state.riskState().nextLiquidationId());
+        writer.longValue(state.riskState().marketRevision());
         CoreRiskScanControlView scanControl = state.riskState().scanControl();
         writer.longValue(scanControl.version());
         writer.auditText(scanControl.ruleName());
@@ -555,12 +558,13 @@ public final class TradingStateSnapshotCodec {
             putUnique(scans, scanSymbol, scan);
         }
         long nextLiquidationId = reader.positiveLong("next liquidation id");
+        long marketRevision = reader.nonNegativeLong("market revision");
         CoreRiskScanControlView scanControl = new CoreRiskScanControlView(
                 reader.positiveLong("risk scan control version"), reader.auditText(), reader.booleanValue(),
                 reader.nonNegativeLong("risk scan delay"), reader.intValue(), reader.auditText(), reader.auditText(),
                 reader.nonNegativeLong("risk scan control updated time"));
         CoreRiskState riskState = new CoreRiskState(marks, risks, liquidations, scans,
-                nextLiquidationId, scanControl);
+                nextLiquidationId, scanControl, marketRevision);
         Map<String, Long> feeBalances = readUnits(reader, "fee balances");
         Map<String, Long> insuranceBalances = readUnits(reader, "insurance balances");
         Map<String, Long> insuranceDeficits = readUnits(reader, "insurance deficits");
@@ -741,7 +745,8 @@ public final class TradingStateSnapshotCodec {
                 reader.nonNegativeLong("Lane active user"), reader.intValue(), reader.text(),
                 reader.nonNegativeLong("Lane reservation cursor"), reader.longValue(),
                 reader.nonNegativeLong("Lane maintenance margin"), reader.nonNegativeLong("Lane isolated margin"),
-                reader.nonNegativeLong("Lane isolated reservation")));
+                reader.nonNegativeLong("Lane isolated reservation"),
+                reader.nonNegativeLong("Lane account revision"), reader.nonNegativeLong("Lane market revision")));
         return lanes;
     }
 

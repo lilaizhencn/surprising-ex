@@ -102,6 +102,7 @@ public final class RuntimeStateProjector {
                 scan.triggerMarkPriceTicks(), scan.triggerGeneratedAtEpochMillis(), scan.triggerOcoOrderId(),
                 scan.triggerOcoCursor(), scan.lastScheduledRevision(), scan.laneProgress())));
         runtime.setNextLiquidationId(source.riskState().nextLiquidationId());
+        runtime.setMarketRevision(source.riskState().marketRevision());
         source.orders().forEach((orderId, order) -> {
             runtime.putOrder(toRuntimeOrder(order, identities));
             if (source.productLine().supportsUserPositionMarginFlow()) {

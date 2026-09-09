@@ -33,6 +33,7 @@ public record TradingRuntimeSnapshot(
         Map<PositionKey, RiskSnapshot> riskSnapshots,
         Map<Integer, RiskScanSnapshot> riskScans,
         long nextLiquidationId,
+        /** 最近行情输入序号，与分片估值游标对应。 */ long marketRevision,
         Map<String, CoreInstrumentState> instruments,
         Map<CoreLeverageKey, Long> leverages,
         Map<Long, CoreAlgoOrderState> algoOrders,
@@ -45,7 +46,7 @@ public record TradingRuntimeSnapshot(
         Map<Integer, LifecycleProgressSnapshot> lifecycleProgress) {
 
     public TradingRuntimeSnapshot {
-        if (revision < 0 || users == null || balances == null || orders == null
+        if (marketRevision < 0 || revision < 0 || users == null || balances == null || orders == null
                 || reservations == null || clientOrderIndex == null || positions == null || liquidations == null
                 || markPrices == null || riskSnapshots == null || riskScans == null || nextLiquidationId <= 0
                 || instruments == null || leverages == null || algoOrders == null

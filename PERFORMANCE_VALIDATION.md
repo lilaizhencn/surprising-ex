@@ -5061,3 +5061,13 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 本地三独立 JVM：六产品线分别执行功能样本、SIGKILL 后日志恢复、快照后 SIGKILL 恢复，共 18/18 PASS。仅少量功能样本，无压测。节点使用 ZGC、Xms64m/Xmx512m、SHARED_NETWORK，按产品线依次启动并关闭。
 - 原始记录：`/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-parallel-risk/`，包含 `verify.log`、`parallel-tests.log`、`rejection-tests.log`、`local-functional.log`、各节点启动参数和日志、`local-functional/results.json`。首轮失败记录保留：旧同步入口仍按单游标顺序扫描，且空币对被按 Lane 多扣预算；修正调度与空 Lane 排除后原有风险断言通过，未放宽金融断言。
 - 源文件清单 SHA-256：`571659363add3974393f81ce2295b9ca513290b0b407b409f299943e9de845e4`；service.jar：`6b0e17ba95525d65924df7ab95ef17c294700cf13e88252d0f13daa551cb792f`；benchmarks.jar：`c0823cc26958d29512e19a4bb6c59d7791ad7d2759430d2a36899d932dc36168`。未修改 README。
+
+
+## 2026-09-09 提交等待缩小与风险续页一致性（仅本地功能验证）
+
+- 基于 master `1f43b34d`；提交号见证据目录 `tested-commit.txt`。无依赖订单可在旧提交前缀等待 Lane 时继续准入；直接命令成功收尾只向变化账户 Lane 派发完成事件，删除模拟 matcher 结果/上下文和空订单时间戳任务。标记价、风险配置、保险基金更新不再预先接管全部 Lane。
+- 风险游标保存账户/行情输入序号，平仓、余额或其他币对价格变更后重新累计当前用户，修复权益应为 300 却计为 500 的复现；保留已完成用户和有界预算。快照、投影、回滚、业务哈希同步处理；快照格式 31→32，不兼容旧格式。
+- 范围限制：`activeControl` 与后续交易的全局顺序屏障仍保留；尚未实现控制命令与后续交易的提交/回滚上下文隔离及全面交错执行，不能宣称所有等待已消除。失败回滚、同账户依赖、两侧结算确认和快照完成边界保留。
+- HotSpot JDK 25.0.1、Maven 3.9.16、macOS 本机。`mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am verify`：1040 项，1039 通过，0 失败/错误，1 项缺少 INSTRUMENT_SEED_TEST_JDBC_URL 跳过；service 645 项通过。随后仅移除无调用的方法/补注释并重新 package。JMH 增加控制页 2/8 参数，只编译；不上云、不压测、不运行 JMH/JFR，无吞吐、分配或延迟验收结论。
+- 最终构建本地三独立 JVM：六产品线执行/日志恢复/快照恢复首次 17/18 通过；期权最后一次客户端连接超时，节点存在复制告警。保留原数据重启复核通过，未发现状态不一致；不把首轮失败抹去或视为恢复耗时稳定的证据。测试进程全部退出。此前构建的恢复轮次因去掉临时对象后重新打包而主动中止，日志保留。
+- 证据：`/Users/atomex/Desktop/surprising/gcp-validation/2026-09-09-control-progress/`，包含复现/中间失败日志、`verify-final-2.log`、`package-final.log`、`local-functional-final.log`、`recheck-option.log`、`validation-summary.json`、`source-manifest.sha256` 和逐节点参数/日志。未改 README。service.jar SHA-256 `ccba9ba8b895548b3766ac54fee2b9d7f8795f9b633660836b390e9319640a21`；benchmarks.jar `e408265b4478bda3238d46254c0578dc729103b9c2a351360a6b439f67ddbef4`。

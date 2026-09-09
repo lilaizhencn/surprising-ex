@@ -11,9 +11,18 @@ public record RiskLaneProgress(
         /** 已累计的未实现权益变化。 */ long unrealizedPnlUnits,
         /** 已累计的维持保证金。 */ long maintenanceMarginUnits,
         /** 已累计的逐仓持仓保证金。 */ long isolatedMarginUnits,
-        /** 已累计的逐仓委托冻结资金。 */ long isolatedReservationUnits) {
+        /** 已累计的逐仓委托冻结资金。 */ long isolatedReservationUnits,
+        /** 当前累计值对应的账户修订号。 */ long userRevision,
+        /** 当前累计值对应的全局行情修订号。 */ long marketRevision) {
+    public RiskLaneProgress(long lastUserId, boolean complete, long userId, int phase, String positionCursor,
+                            long reservationCursor, long unrealizedPnlUnits, long maintenanceMarginUnits,
+                            long isolatedMarginUnits, long isolatedReservationUnits) {
+        this(lastUserId, complete, userId, phase, positionCursor, reservationCursor, unrealizedPnlUnits,
+                maintenanceMarginUnits, isolatedMarginUnits, isolatedReservationUnits, 0, 0);
+    }
+
     public RiskLaneProgress {
-        if (lastUserId < 0 || userId < 0 || phase < 0 || phase > 2 || reservationCursor < 0
+        if (userRevision < 0 || marketRevision < 0 || lastUserId < 0 || userId < 0 || phase < 0 || phase > 2 || reservationCursor < 0
                 || maintenanceMarginUnits < 0 || isolatedMarginUnits < 0 || isolatedReservationUnits < 0
                 || complete && userId != 0) throw new IllegalArgumentException("invalid risk Lane progress");
         positionCursor = positionCursor == null || positionCursor.isBlank() ? "-" : positionCursor;

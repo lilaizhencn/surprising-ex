@@ -22,6 +22,46 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class ClusterCommandPipelineTest {
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void independentIngressContinuesWhileEarlierCommitPrefixWaitsForLanes(ProductLine product) throws Exception {
+        try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
+            serial.applyAll(live.setup());
+            var first = live.place(11, "BTC-USDT", 101, 80, 1, CoreOrderSide.BUY);
+            var second = live.place(disjointUser(11), "BTC-USDT", disjointOrder(101), 81, 1, CoreOrderSide.BUY);
+            var runtime = live.service.state().runtimeState;
+            var field = runtime.getClass().getDeclaredField("laneWorkers");
+            field.setAccessible(true);
+            Object[] workers = (Object[]) field.get(runtime);
+            var entered = new CountDownLatch(workers.length);
+            var release = new CountDownLatch(1);
+            Class<?> task = Class.forName("com.surprising.aeron.service.state.SettlementLaneWorker$Command");
+            var submit = workers[0].getClass().getDeclaredMethod("submit", task);
+            submit.setAccessible(true);
+            try {
+                for (Object worker : workers) submit.invoke(worker, Proxy.newProxyInstance(task.getClassLoader(),
+                        new Class<?>[]{task}, (proxy, method, args) -> {
+                            entered.countDown();
+                            if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("Lane release timeout");
+                            return null;
+                        }));
+                assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+                live.send(first);
+                live.service.onTimerEvent(SurprisingClusteredService.PIPELINE_TIMER_ID, TIME + 1);
+                live.send(second);
+                assertThat(live.service.commandWindowSize()).isEqualTo(2);
+                assertThat(live.responses).isEmpty();
+            } finally { release.countDown(); }
+            live.tick(); serial.apply(first); serial.apply(second);
+            assertThat(live.responses).hasSize(2).allSatisfy(response ->
+                    assertThat(response.commandStatus()).isEqualTo(ResponseStatus.APPLIED));
+            assertThat(live.hash()).isEqualTo(serial.hash());
+            try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+            }
+        }
+    }
+
     @Test
     void deferredSequentialBatchUsesOriginalLogTimeEvenWhenLaterIngressIsAfterExpiry() {
         try (Fixture live = new Fixture(ProductLine.LINEAR_DELIVERY);

@@ -177,6 +177,11 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     /** 下一条清算状态的 ID，需随快照保存。 */
     long nextLiquidationId = 1;
+    /** owner 写入，Lane 在控制任务发布后读取；只随成功的行情输入推进。 */
+    long marketRevision;
+    /** 命令回滚所需的行情输入序号原值。 */
+    long patchMarketRevisionBefore;
+    boolean patchMarketRevisionChanged;
     /** 风险扫描开关和预算；各产品线独立保存。 */
     CoreRiskScanControlView riskScanControl = CoreRiskState.defaultScanControl();
     /** 当前提交范围内变化的用户；与提交/回滚边界同步维护。 */
@@ -1423,6 +1428,15 @@ public final class TradingRuntimeState implements AutoCloseable {
         return dispatchLaneMutationFromScratch(coreSequence);
     }
 
+    /** 直接控制命令使用已有结果集合派发，只触及发生变化的账户 Lane。 */
+    public LaneCommitEvent dispatchLaneMutation(long coreSequence, Iterable<Long> userIds) {
+        assertOwner();
+        if (coreSequence <= 0 || userIds == null) throw new IllegalArgumentException("invalid lane apply");
+        clearLaneUserScratch();
+        for (Long userId : userIds) if (userId != null && userId > 0) addLaneUser(userId);
+        return dispatchLaneMutationFromScratch(coreSequence);
+    }
+
     void clearLaneUserScratch() {
         for (org.eclipse.collections.impl.list.mutable.primitive.LongArrayList users : laneUserScratch) {
             users.clear();
@@ -2113,7 +2127,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 || !patchTimersBefore.isEmpty() || !patchMarkPricesBefore.isEmpty()
                 || !patchRiskScansBefore.isEmpty() || !patchInstrumentsBefore.isEmpty()
                 || !patchPendingTransfersBefore.isEmpty() || !patchFeePoliciesBefore.isEmpty()
-                || patchNextLiquidationIdChanged || patchRiskScanControlChanged;
+                || patchMarketRevisionChanged || patchNextLiquidationIdChanged || patchRiskScanControlChanged;
     }
 
     boolean hasCapturedUsers() {
@@ -2412,6 +2426,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         patchPendingTransfersBefore.forEach((id, before) -> putOrRemove(pendingTransfers, id, before.value()));
         patchFeePoliciesBefore.forEach((id, before) -> putOrRemove(feePolicies, id, before.value()));
         if (patchNextLiquidationIdChanged) nextLiquidationId = patchNextLiquidationIdBefore;
+        if (patchMarketRevisionChanged) marketRevision = patchMarketRevisionBefore;
         if (patchRiskScanControlChanged) riskScanControl = patchRiskScanControlBefore;
     }
 
@@ -3413,6 +3428,18 @@ public final class TradingRuntimeState implements AutoCloseable {
         changedRiskScans.add(scan.symbolId());
     }
 
+    public long marketRevision() { return marketRevision; }
+
+    public void setMarketRevision(long value) {
+        assertOwner();
+        if (value < 0) throw new IllegalArgumentException("invalid market revision");
+        if (!patchMarketRevisionChanged) {
+            patchMarketRevisionBefore = marketRevision;
+            patchMarketRevisionChanged = true;
+        }
+        marketRevision = value;
+    }
+
     public void setNextLiquidationId(long nextLiquidationId) {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("liquidation sequence");
@@ -4084,6 +4111,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         patchPendingTransfersBefore = clearCapturedChanges(patchPendingTransfersBefore);
         patchFeePoliciesBefore = clearCapturedChanges(patchFeePoliciesBefore);
         patchNextLiquidationIdChanged = false;
+        patchMarketRevisionChanged = false;
         patchRiskScanControlChanged = false;
     }
 

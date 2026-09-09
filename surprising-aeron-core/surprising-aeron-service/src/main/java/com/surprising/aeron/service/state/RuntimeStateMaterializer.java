@@ -125,7 +125,7 @@ public final class RuntimeStateMaterializer {
                     scan.triggerOcoCursor(), scan.lastScheduledRevision(), scan.laneProgress()));
         });
         CoreRiskState risk = new CoreRiskState(marks, riskSnapshots, liquidations, scans,
-                runtime.nextLiquidationId(), runtime.riskScanControl());
+                runtime.nextLiquidationId(), runtime.riskScanControl(), runtime.marketRevision());
 
         Map<String, Long> fees = new TreeMap<>();
         runtime.treasury().feeBalances().forEachKeyValue((id, units) -> fees.put(identities.asset(id), units));

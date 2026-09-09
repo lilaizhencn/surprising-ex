@@ -400,6 +400,7 @@ public final class RuntimeCommandProcessor {
                 previousOrders.put(orderId, RuntimeStateProjector.toRuntimeOrder(previous, identities));
             }
         }
+        if (candidates.isEmpty()) return false;
         Object[] results = runtime.executeOwnerSettlements(changedUserIds, ignored -> {
             boolean changed = false;
             for (long orderId : candidates) {
@@ -425,10 +426,12 @@ public final class RuntimeCommandProcessor {
             throw new IllegalArgumentException("invalid lane-batched runtime order commit metadata");
         }
         runtime.assertOwner();
+        if (changedOrderIds instanceof java.util.Collection<?> orders && orders.isEmpty()) return false;
         ArrayList<Long> candidates = new ArrayList<>();
         for (Long orderId : changedOrderIds) {
             if (orderId != null) candidates.add(orderId);
         }
+        if (candidates.isEmpty()) return false;
         Object[] results = runtime.executeOwnerSettlements(changedUserIds, ignored -> {
             boolean changed = false;
             for (long orderId : candidates) {

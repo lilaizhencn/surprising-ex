@@ -155,8 +155,11 @@ public final class RiskScanCoordinator {
     }
 
     private RiskLaneProcessor.Page scanLane(int lane) {
+        RiskLaneProgress previous = initial.laneProgress().isEmpty()
+                ? initialCursor(initial, lane) : initial.laneProgress().get(lane);
         return RiskLaneProcessor.scan(runtime, inputs[lane], positionUsers, indexedUserIds,
-                instrument, mark, settleAssetId, initial.symbolId(), allocations[lane], identities);
+                instrument, mark, settleAssetId, initial.symbolId(), allocations[lane], identities,
+                previous.userRevision(), previous.marketRevision());
     }
 
     private Object applyLiquidations(int lane) {
@@ -185,7 +188,10 @@ public final class RiskScanCoordinator {
             RiskLaneProcessor.Page page = results[lane];
             RiskScanRuntime scan = page == null ? inputs[lane] : page.scan();
             boolean done = page == null ? scan.riskComplete() : page.complete();
-            cursors.add(cursor(scan, done));
+            RiskLaneProgress previous = initial.laneProgress().isEmpty()
+                    ? initialCursor(initial, lane) : initial.laneProgress().get(lane);
+            cursors.add(cursor(scan, done, page == null ? previous.userRevision() : page.userRevision(),
+                    page == null ? previous.marketRevision() : runtime.marketRevision()));
             complete &= done;
         }
         if (nextLiquidationId != runtime.nextLiquidationId()) runtime.setNextLiquidationId(nextLiquidationId);
@@ -215,9 +221,15 @@ public final class RiskScanCoordinator {
     }
 
     private static RiskLaneProgress cursor(RiskScanRuntime scan, boolean complete) {
+        return cursor(scan, complete, 0, 0);
+    }
+
+    private static RiskLaneProgress cursor(RiskScanRuntime scan, boolean complete,
+            long userRevision, long marketRevision) {
         return new RiskLaneProgress(scan.lastUserId(), complete, scan.riskUserId(), scan.riskPhase(),
                 scan.riskPositionCursor(), scan.riskReservationCursor(), scan.riskUnrealizedPnlUnits(),
-                scan.riskMaintenanceMarginUnits(), scan.riskIsolatedMarginUnits(), scan.riskIsolatedReservationUnits());
+                scan.riskMaintenanceMarginUnits(), scan.riskIsolatedMarginUnits(), scan.riskIsolatedReservationUnits(),
+                scan.riskUserId() == 0 ? 0 : userRevision, scan.riskUserId() == 0 ? 0 : marketRevision);
     }
 
     private static RiskScanRuntime laneInput(RiskScanRuntime scan, int lane, RiskLaneProgress cursor) {
