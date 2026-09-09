@@ -5092,3 +5092,13 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 用户反馈刚才磁盘满，要求以后每轮分析结束清理测试产物。本次复核磁盘可用约547 GiB，但整个 gcp-validation 目录已不存在，无法回查失败时的 ENOSPC/写入失败日志；以上原始 artifact 路径现在不可访问，仅保留历史摘要。
 - EXCHANGE_CORE_FAILURE 是通用错误码，TradingCoreRuntime 的 RuntimeException 捕获路径未保留原始异常原因。磁盘满可能导致存储/通信相关失败，但现有证据不足以确认其与本次触发错误的因果关系；此前异常记录不是已证明的生产业务缺陷，根因仍待复现确认。
 - 清理剩余五个 Aeron 模块 target/surefire-reports（约3.54 MiB）；保留源码、构建包和既有验证摘要。项目 AGENTS.md 已加入分析后清理及磁盘检查要求。本轮未重新启动测试或云服务器。
+
+## 2026-09-09 磁盘清理后的小样本复现
+- 被测生产代码为 master ea02d4bd；本次仅新增 benchmarks/src/test 下 SmallControlReproMain，不修改生产逻辑。HotSpot GraalVM25.0.1/Maven3.9.16；macOS 本机三个独立 JVM、loopback UDP 和真实日志复制，Xms64m/Xmx512m、ZGC、SHARED_NETWORK、服务 YIELDING、4 Account Lanes/1 matcher。仅功能诊断，不计吞吐、不运行 JMH、不操作云服务器。
+- 触发复现：先只读确认可用，再用2个命令连接的 AeronClientPool（10秒超时）执行首条命令与查询，均 PASS。随后两个账户各充值10000，100价格成交10单位，建立 SELL LIMIT IOC 110 的止盈触发单（当前标记价100满足触发条件）。第8条命令 EXECUTE_TRIGGER_ORDER 导致 coreSequence=10 的 TRIGGER EXCHANGE_CORE_FAILURE，客户端 ResultUnknown；节点0/2记录致命失败。本轮最小剩余磁盘584573448192字节，排除了本轮磁盘满作为原因。第二个有成交触发场景未执行，不能报告通过。
+- JFR 使用 default.jfc 加 jdk.JavaExceptionThrow enabled/stackTrace，maxsize32m；节点0/2异常退出留下空文件，节点1的有效记录捕获完整原始异常：`asynchronous command requires Lane execution ownership`，线程 clustered-service-101-0。调用链：TradingRuntimeState.onLane:587 ← orderIdByClient:3103 ← TradingCoreRuntime.triggerPlacement:1853 ← prepareMatchingCommand:1694 ← submitMatching:1449 ← MatchingCommandAdmission.appendQueuedMatching:62 ← TradingCoreRuntime.finishDirectCommand:1146 ← pollDirectCommand:1205。随后 matcher 记录 fatal matcher result: EXCHANGE_CORE_FAILURE。
+- 根因结合源码确认：finishDirectCommand:1109 释放顺序阶段的 Lane 访问权并异步完成发布后，appendQueuedMatching 又通过 triggerPlacement 读取 Lane 的客户端订单索引；仍处于异步 owner 作用域，违反 Lane 执行权约束。prepareMatchingCommand:1740 将异常转换为通用错误码。它是低负载也能触发的功能性错误，尚未修复，不能归为 owner 算力饱和。
+- 首次追赶试验：暂停一个从节点12秒，另外两个节点完成16笔下单/8笔成交、资金差额0。恢复暂停后触发默认10秒 MediaDriver keepalive 超时（age12665ms），属于故障注入预期的节点退出；该节点快照缺失，该轮三副本核对失败，不作为新的生产缺陷。
+- 前一轮临时数据已清理，后续重新构造独立场景：先停止一个从节点，两名用户完成16笔下单/8笔成交，共20条业务命令；从节点离线至少12秒后使用其原数据目录重启。只读核对 PASS，持仓-8/+8、账户总余额20000、fundsDiff=0。三个节点的完整快照首次读取均成功，businessHash 均为2111639170114541499（coreSequence20）；未出现 backlog capacity exhausted 或节点故障。此结论只覆盖小样本追赶，不证明任意积压下均无问题。
+- 复现入口已用 HotSpot25 javac 编译并实际执行，模式为 ready/pool/trigger/orders/verify-orders；classpath 为编译后的 test-classes 加 product-core-benchmarks.jar，节点入口为 SurprisingClusterNode。trigger 在当前生产代码上预期复现失败；不要把这项失败记录改成通过。
+- 按用户要求，保存本摘要及复现源码后，停止全部本轮进程并删除 /tmp/ex-small-repro-20260909、/tmp/ex-small-catchup-20260909、/tmp/ex-recovery-check 下临时集群数据、JFR、日志和编译产物；不保留或引用可访问的原始 artifact。没有修改 README。
