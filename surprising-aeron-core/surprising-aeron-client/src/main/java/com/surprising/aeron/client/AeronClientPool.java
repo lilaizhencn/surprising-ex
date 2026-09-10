@@ -153,10 +153,7 @@ public final class AeronClientPool implements AutoCloseable {
         }
         this.clientName = clientName.trim();
         this.productLine = Objects.requireNonNull(productLine, "productLine");
-        if (hostnames == null || hostnames.size() != 3
-                || hostnames.stream().anyMatch(value -> value == null || value.isBlank())) {
-            throw new IllegalArgumentException("hostnames must contain three non-blank members");
-        }
+        com.surprising.aeron.protocol.ProductLineClusterLayout.requireHostnames(hostnames);
         this.hostnames = List.copyOf(hostnames);
         if (egressHostname == null || egressHostname.isBlank()) {
             throw new IllegalArgumentException("egressHostname is required");

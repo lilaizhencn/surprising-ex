@@ -25,6 +25,8 @@ final class ClusterCommandWindow {
     private int candidateOrderCount, candidateScopeCount;
     private long candidateOrderMask;
     long candidateAccounts, candidateSymbols;
+    /** 所有潜在成交账户的物理分区，用于异分片结算派发而非改变资金归属。 */
+    long candidateLanes;
 
     void resetCandidate(long userId) {
         java.util.Arrays.fill(candidateOrderSymbols, 0, candidateScopeCount, null);
@@ -32,6 +34,7 @@ final class ClusterCommandWindow {
         candidateUser = userId;
         candidateAccounts = userId == 0 ? 0 : TradingDependencyMask.account(userId);
         candidateSymbols = 0;
+        candidateLanes = 0;
         candidateOrderCount = 0;
         candidateScopeCount = 0;
         candidateOrderMask = 0;

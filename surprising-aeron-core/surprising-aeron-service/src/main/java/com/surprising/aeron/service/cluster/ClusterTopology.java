@@ -20,12 +20,9 @@ public final class ClusterTopology {
 
     public ClusterTopology(ProductLine productLine, int nodeId, List<String> hostnames, Path dataDirectory) {
         this.productLine = Objects.requireNonNull(productLine, "productLine");
-        if (nodeId < 0 || nodeId >= ProductLineClusterLayout.MEMBER_COUNT) {
-            throw new IllegalArgumentException("nodeId must be between 0 and 2");
-        }
-        if (hostnames == null || hostnames.size() != ProductLineClusterLayout.MEMBER_COUNT
-                || hostnames.stream().anyMatch(String::isBlank)) {
-            throw new IllegalArgumentException("exactly three non-blank hostnames are required");
+        ProductLineClusterLayout.requireHostnames(hostnames);
+        if (nodeId < 0 || nodeId >= hostnames.size()) {
+            throw new IllegalArgumentException("nodeId must identify a configured cluster member");
         }
         this.nodeId = nodeId;
         this.hostnames = List.copyOf(hostnames);

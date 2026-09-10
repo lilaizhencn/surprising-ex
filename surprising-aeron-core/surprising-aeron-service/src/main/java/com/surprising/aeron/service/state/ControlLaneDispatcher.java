@@ -54,7 +54,7 @@ final class ControlLaneDispatcher {
         boolean failed = false;
         for (int id = 0; id < owner.accountLanes.length; id++)
             if ((pendingControlLaneMask & (1L << id)) != 0 && owner.laneMutationTasks[id].failure != null) failed = true;
-        if (failed && !owner.tryAcquireOwnerLaneAccess()) return false;
+        if (failed && owner.hasUncommittedCommandChanges() && !owner.tryAcquireOwnerLaneAccess()) return false;
         long mask = pendingControlLaneMask;
         pendingControlLaneMask = 0;
         completedLaneMask = mask;

@@ -27,7 +27,8 @@ class ActiveOrderIndexTest {
     void crossingParticipantMasksMatchOrdersThroughPriceChangesRemovalsAndRebuild() {
         var random = new java.util.Random(8191);
         var orders = new HashMap<Long, CoreOrderState>();
-        var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT));
+        var topology = com.surprising.aeron.service.state.LaneTopology.productionDefault();
+        var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), null, topology);
         for (int step = 0; step < 2_000; step++) {
             long id = 1 + random.nextInt(150);
             if (random.nextInt(4) == 0) {
@@ -46,13 +47,17 @@ class ActiveOrderIndexTest {
             }
             for (var side : CoreOrderSide.values()) {
                 for (long price : new long[]{0, 1, 50, 100, Long.MAX_VALUE}) {
-                    long expected = 0;
+                    long expected = 0, expectedLanes = 0;
                     for (var order : orders.values()) {
                         if (order.side() != side && (price == 0 || (side == CoreOrderSide.BUY
                                 ? order.matchingPriceTicks() <= price : order.matchingPriceTicks() >= price)))
+                        {
                             expected |= TradingDependencyMask.account(order.userId());
+                            expectedLanes |= topology.accountLaneMask(order.userId());
+                        }
                     }
                     assertThat(index.counterpartyMask("BTC-USDT", side, price)).isEqualTo(expected);
+                    assertThat(index.counterpartyLaneMask("BTC-USDT", side, price)).isEqualTo(expectedLanes);
                     for (long user : new long[]{1, 11, 23, 77, 150, 200}) {
                         boolean present = orders.values().stream().anyMatch(order -> order.userId() == user
                                 && order.side() != side && (price == 0 || (side == CoreOrderSide.BUY

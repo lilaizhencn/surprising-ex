@@ -8,6 +8,10 @@ import com.surprising.aeron.service.state.model.CoreOrderState;
  * Subtree masks allow a crossing-price range query without walking orders or price levels. */
 final class OrderParticipantIndex {
     private Node bids, asks;
+    /** 与账户状态相同的恢复后路由，用于保护物理 Lane 内的有序执行。 */
+    private final com.surprising.aeron.service.state.LaneTopology topology;
+
+    OrderParticipantIndex(com.surprising.aeron.service.state.LaneTopology topology) { this.topology = topology; }
 
     long mask() { return mask(bids) | mask(asks); }
 
@@ -20,6 +24,20 @@ final class OrderParticipantIndex {
             if (crosses) {
                 result |= 1L << node.partition;
                 result |= mask(incomingSide == CoreOrderSide.BUY ? node.left : node.right);
+                node = incomingSide == CoreOrderSide.BUY ? node.right : node.left;
+            } else node = incomingSide == CoreOrderSide.BUY ? node.left : node.right;
+        }
+        return result;
+    }
+
+    long counterpartyLanes(CoreOrderSide incomingSide, long limitPrice) {
+        Node node = incomingSide == CoreOrderSide.BUY ? asks : bids;
+        if (limitPrice == 0) return laneMask(node);
+        long result = 0;
+        while (node != null) {
+            boolean crosses = incomingSide == CoreOrderSide.BUY ? node.price <= limitPrice : node.price >= limitPrice;
+            if (crosses) {
+                result |= node.ownLaneMask | laneMask(incomingSide == CoreOrderSide.BUY ? node.left : node.right);
                 node = incomingSide == CoreOrderSide.BUY ? node.right : node.left;
             } else node = incomingSide == CoreOrderSide.BUY ? node.left : node.right;
         }
@@ -64,10 +82,10 @@ final class OrderParticipantIndex {
         else asks = change(asks, order.matchingPriceTicks(), order.userId(), delta);
     }
 
-    private static Node change(Node node, long price, long userId, int delta) {
+    private Node change(Node node, long price, long userId, int delta) {
         if (node == null) {
             if (delta < 0) throw new IllegalStateException("active order participant count underflow");
-            return new Node(price, userId);
+            return new Node(price, userId, topology.accountLaneMask(userId));
         }
         int compared = Long.compare(price, node.price);
         if (compared == 0) compared = Long.compare(userId, node.userId);
@@ -83,6 +101,7 @@ final class OrderParticipantIndex {
                 node.price = successor.price;
                 node.partition = successor.partition;
                 node.userId = successor.userId;
+                node.ownLaneMask = successor.ownLaneMask;
                 node.count = successor.count;
                 node.right = removeFirst(node.right);
             }
@@ -129,16 +148,22 @@ final class OrderParticipantIndex {
     private static void refresh(Node node) {
         node.height = 1 + Math.max(height(node.left), height(node.right));
         node.mask = (1L << node.partition) | mask(node.left) | mask(node.right);
+        node.laneMask = node.ownLaneMask | laneMask(node.left) | laneMask(node.right);
     }
+
+    private static long laneMask(Node node) { return node == null ? 0 : node.laneMask; }
 
     private static int height(Node node) { return node == null ? 0 : node.height; }
     private static long mask(Node node) { return node == null ? 0 : node.mask; }
 
     private static final class Node {
         long price, mask, userId;
+        /** 本参与者与整个子树涉及的账户分区；不增加订单副本。 */
+        long ownLaneMask, laneMask;
         int partition, count = 1, height = 1;
         Node left, right;
-        Node(long price, long userId) {
+        Node(long price, long userId, long ownLaneMask) {
+            this.ownLaneMask = this.laneMask = ownLaneMask;
             this.price = price;
             this.userId = userId;
             this.partition = TradingDependencyMask.partition(userId);

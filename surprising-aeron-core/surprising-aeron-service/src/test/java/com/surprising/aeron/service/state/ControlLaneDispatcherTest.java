@@ -48,26 +48,36 @@ class ControlLaneDispatcherTest {
         }
     }
 
-    @Test
-    void failureWaitsForAllLaneResultsBeforeOwnerCanRollBack() throws Exception {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void failureCollectsAllLanesAndOnlyBorrowsForActualRollback(boolean changed) throws Exception {
         var runtime = new TradingRuntimeState(LaneTopology.productionDefault());
         var entered = new CountDownLatch(2);
         var release = new CountDownLatch(1);
         runtime.startAccountLanes();
+        long candidate = 1;
+        while (runtime.topology().accountLaneId(candidate) != 1) candidate++;
+        long userId = candidate;
         try {
             acquire(runtime);
             runtime.dispatchControlLanes(3, lane -> {
                 entered.countDown();
                 if (lane == 0) throw new CoreStateRejectedException("INVALID_COMMAND", "rejected on Lane");
                 await(release);
+                if (changed) runtime.putUser(new UserRuntime(com.surprising.product.api.ProductLine.SPOT,
+                        userId, 1, com.surprising.aeron.protocol.CorePositionMode.ONE_WAY));
                 return 7;
             });
             assertThat(entered.await(3, TimeUnit.SECONDS)).isTrue();
             assertThat(runtime.pollControlLanes()).isFalse();
             release.countDown();
             assertThatThrownBy(() -> collect(runtime)).isInstanceOf(CoreStateRejectedException.class);
-            assertThat(runtime.ownerLaneAccess).isTrue();
+            assertThat(runtime.ownerLaneAccess).isEqualTo(changed);
             assertThat(runtime.controlLaneResult(1)).isEqualTo(7);
+            if (changed) {
+                runtime.rollbackActiveCommand(0, 1);
+                assertThat(runtime.user(userId)).isNull();
+            }
         } finally {
             release.countDown();
             runtime.releaseOwnerLaneAccess();

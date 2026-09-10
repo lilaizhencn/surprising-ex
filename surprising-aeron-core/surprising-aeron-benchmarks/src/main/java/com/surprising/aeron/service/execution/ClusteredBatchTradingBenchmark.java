@@ -55,9 +55,20 @@ public class ClusteredBatchTradingBenchmark {
         counters.terminalCoreMessages += 516;
         return workload.terminal;
     }
+    /** 多订单簿分区的独立批量下撤单，覆盖分区派发游标与最终资金/快照核对。 */
     @Benchmark
     public long independentBatchWindows(Workload workload, Counters counters) {
         workload.runIndependentBatchWindows();
+        counters.acceptedBusinessOperations += 512L * workload.batchSize;
+        counters.terminalBusinessOperations += 512L * workload.batchSize;
+        counters.acceptedCoreMessages += 512;
+        counters.terminalCoreMessages += 512;
+        return workload.terminal;
+    }
+    /** 同一账户跨两个撮合分区下单，共享资金保持串行依赖，其余账户继续并行。 */
+    @Benchmark
+    public long sharedAccountPartitionWindows(Workload workload, Counters counters) {
+        workload.runIndependentBatchWindows(true);
         counters.acceptedBusinessOperations += 512L * workload.batchSize;
         counters.terminalBusinessOperations += 512L * workload.batchSize;
         counters.acceptedCoreMessages += 512;
@@ -192,6 +203,9 @@ public class ClusteredBatchTradingBenchmark {
     public static class Workload implements AutoCloseable {
         @Param({"LINEAR_PERPETUAL", "SPOT"}) public ProductLine productLine;
         @Param("4") public int accountLanes;
+        /** 订单簿分区数；账户路由和资金共享规则独立于该参数。 */
+        @Param({"1", "2", "4"}) public int matchingEngines = 1;
+        private String previousMatchingEngines;
         @Param("20") public int batchSize;
         @Param("256") public int maxInFlight;
         @Param("false") public boolean realtime;
@@ -231,6 +245,8 @@ public class ClusteredBatchTradingBenchmark {
         @Setup(Level.Iteration)
         public void setup() {
             if (maxInFlight != 256 || batchSize <= 0) throw new IllegalArgumentException("requires 256 in-flight");
+            previousMatchingEngines = System.getProperty("surprising.aeron.matching-engines");
+            System.setProperty("surprising.aeron.matching-engines", Integer.toString(matchingEngines));
             previousSpinLimit = System.getProperty("surprising.aeron.settlement-spin-limit");
             System.setProperty("surprising.aeron.settlement-spin-limit", Integer.toString(settlementSpinLimit));
             LinearPerpetualBenchmarkSupport.configureAccountLanes(accountLanes);
@@ -547,14 +563,16 @@ public class ClusteredBatchTradingBenchmark {
             } finally { singleResponses = false; }
         }
 
-        public void runIndependentBatchWindows() {
+        public void runIndependentBatchWindows() { runIndependentBatchWindows(false); }
+
+        public void runIndependentBatchWindows(boolean sharedAccounts) {
             long before = terminal;
             if (realtime && snapshotRequests.isEmpty() && !service.state().realtimeSnapshotPending())
                 snapshotRequests.offer(new RealtimeFrame(productLine, RealtimeFrame.Kind.SNAPSHOT_REQUEST,
                         1_000, 0, 0, 1_700_000_000_000L, sequence + 1, "", "", new byte[0]));
             for (int user = 0; user < 256; user++) {
                 firstOrders[user] = orderId;
-                String symbol = (user & 1) == 0 ? "JMH-PIPE-A-USDT" : pipelineSymbolB;
+                String symbol = (sharedAccounts ? user < 128 : (user & 1) == 0) ? "JMH-PIPE-A-USDT" : pipelineSymbolB;
                 var orders = new ArrayList<PlaceOrderCommand>(batchSize);
                 for (int item = 0; item < batchSize; item++) {
                     long id = orderId++;
@@ -562,14 +580,14 @@ public class ClusteredBatchTradingBenchmark {
                             false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
                             CoreTimeInForce.GTC, false, "batch-window-" + id));
                 }
-                send(command(CoreMessageType.PLACE_ORDER_BATCH, 1_000 + user,
+                send(command(CoreMessageType.PLACE_ORDER_BATCH, 1_000 + (sharedAccounts ? user & 127 : user),
                         TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders))));
             }
             drain();
             for (int user = 0; user < 256; user++) {
                 var orders = new ArrayList<CancelOrderCommand>(batchSize);
                 for (int item = 0; item < batchSize; item++) orders.add(new CancelOrderCommand(firstOrders[user] + item));
-                send(command(CoreMessageType.CANCEL_ORDER_BATCH, 1_000 + user,
+                send(command(CoreMessageType.CANCEL_ORDER_BATCH, 1_000 + (sharedAccounts ? user & 127 : user),
                         TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(orders))));
             }
             drain();
@@ -756,6 +774,8 @@ public class ClusteredBatchTradingBenchmark {
                 if(realtimeConsumer!=null){try{realtimeConsumer.join(5000);}catch(InterruptedException e){Thread.currentThread().interrupt();}}
                 if(realtimeOutbox!=null)System.out.println("realtimeDroppedBatches="+realtimeOutbox.droppedBatches());
                 service = null;
+                if (previousMatchingEngines == null) System.clearProperty("surprising.aeron.matching-engines");
+                else System.setProperty("surprising.aeron.matching-engines", previousMatchingEngines);
                 if (previousSpinLimit == null) System.clearProperty("surprising.aeron.settlement-spin-limit");
                 else System.setProperty("surprising.aeron.settlement-spin-limit", previousSpinLimit);
             }

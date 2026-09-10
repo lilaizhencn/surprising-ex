@@ -250,7 +250,11 @@ public final class SurprisingClusteredService implements ClusteredService {
             CoreResponse result = state.applyDecodedCommand(next.command, next.timestamp, next.position,
                     commandWindow.decoded(next.command), true, next.fingerprint);
             entry.sequence = state.matchingSequence(next.command.header().commandId());
-            if (entry.sequence != 0) state.pendingMatching(entry.sequence).establishCommitFence(next.timestamp, next.position);
+            if (entry.sequence != 0) {
+                var pending = state.pendingMatching(entry.sequence);
+                pending.establishCommitFence(next.timestamp, next.position);
+                pending.partitionLaneMask = commandWindow.candidateLanes;
+            }
             entry.response = entry.sequence == 0 ? result : null;
             pendingIngress.remove();
             commandWindowHighWaterMark = Math.max(commandWindowHighWaterMark, commandWindow.size());

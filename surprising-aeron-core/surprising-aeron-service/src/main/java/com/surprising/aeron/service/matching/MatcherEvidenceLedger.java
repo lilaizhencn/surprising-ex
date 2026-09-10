@@ -63,12 +63,12 @@ final class MatcherEvidenceLedger {
             long instrumentChangeId,
             long aeronTimestamp,
             long sequence,
-            int matcherShardId,
+            int matcherShardId, int nativeMatcherShardId,
             CoreMatchingResult result) {
         int index = index(matcherShardId);
         long nativeSequence = result.nativeCommand().nativeSequence();
-        if (nativeSequence > 0) advanceStrictly(shardNativeSequences, index, nativeSequence,
-                "matcher shard native sequence is not strictly increasing shard=" + matcherShardId);
+        if (nativeSequence > 0) advanceStrictly(shardNativeSequences, index(nativeMatcherShardId), nativeSequence,
+                "matcher shard native sequence is not strictly increasing shard=" + nativeMatcherShardId);
         advanceStrictly(shardSequences, index, sequence,
                 "matcher shard sequence is not strictly increasing");
         CoreMatchingResult.NativeCommand nativeCommand = new CoreMatchingResult.NativeCommand(

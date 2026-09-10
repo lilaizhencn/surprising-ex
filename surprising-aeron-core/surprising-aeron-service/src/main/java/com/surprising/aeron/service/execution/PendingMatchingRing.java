@@ -13,6 +13,10 @@ final class PendingMatchingRing {
     private final int[] nextSlots;
     private final int[] previousSlots;
     private final int[] submissionShards;
+    /** 已准入命令的稳定撮合分区；提交队列出队后仍保留至全局终态。 */
+    private final int[] settlementShards;
+    /** 分区已经派发结算的槽位，防止全局提交前重复执行。 */
+    private final boolean[] settlementDispatched;
     private final int[] nextSubmissionSlots;
     private final int[] previousSubmissionSlots;
     private final int[] submissionHeads;
@@ -36,6 +40,9 @@ final class PendingMatchingRing {
         nextSlots = new int[capacity];
         previousSlots = new int[capacity];
         submissionShards = new int[capacity];
+        settlementShards = new int[capacity];
+        settlementDispatched = new boolean[capacity];
+        java.util.Arrays.fill(settlementShards, -1);
         nextSubmissionSlots = new int[capacity];
         previousSubmissionSlots = new int[capacity];
         submissionHeads = new int[matcherShardCount];
@@ -133,6 +140,9 @@ final class PendingMatchingRing {
         previousSlots[entryIndex] = -1;
         nextSlots[entryIndex] = -1;
         removeFromSubmissionOrder(entryIndex);
+        settlementShards[entryIndex] = -1;
+        settlementDispatched[entryIndex] = false;
+        advanceDispatchedHead();
         removeIndexes(removed);
         size--;
         if (contexts.claimed(sequence)) {
@@ -180,7 +190,41 @@ final class PendingMatchingRing {
         if (index < 0 || dispatchHead != index) {
             throw new IllegalStateException("matcher settlement dispatch is out of order");
         }
-        dispatchHead = nextSlots[dispatchHead];
+        settlementDispatched[index] = true;
+        advanceDispatchedHead();
+    }
+
+    private void advanceDispatchedHead() {
+        while (dispatchHead >= 0 && settlementDispatched[dispatchHead]) {
+            dispatchHead = nextSlots[dispatchHead];
+        }
+    }
+
+    /**
+     * 只跨越通过账户/订单簿依赖检查的命令。资金共享账户不可能经此绕过其前序命令。
+     * 检查范围限于有界在途窗口，不访问或扫描账户/订单状态。
+     */
+    PendingMatching partitionDispatchHead(int shard) {
+        long earlierLanes = 0;
+        for (int index = dispatchHead; index >= 0; index = nextSlots[index]) {
+            if (settlementDispatched[index]) continue;
+            PendingMatching pending = pendingAt(index);
+            if (index != dispatchHead && (!pending.clusterIndependent || pending.partitionLaneMask == 0)) return null;
+            if (settlementShards[index] == shard)
+                return (pending.partitionLaneMask & earlierLanes) == 0 ? pending : null;
+            if (!pending.clusterIndependent || settlementShards[index] < 0 || pending.partitionLaneMask == 0) return null;
+            earlierLanes |= pending.partitionLaneMask;
+        }
+        return null;
+    }
+
+    void completePartitionDispatch(long sequence, int shard) {
+        PendingMatching first = partitionDispatchHead(shard);
+        if (first == null || first.sequence() != sequence) {
+            throw new IllegalStateException("partition settlement dispatch is out of order");
+        }
+        settlementDispatched[indexOf(sequence)] = true;
+        advanceDispatchedHead();
     }
 
     void registerSubmission(long sequence, int matcherShard) {
@@ -194,6 +238,7 @@ final class PendingMatchingRing {
         if (registeredShard >= 0) throw new IllegalStateException("matching submission shard changed");
         int tailSlot = submissionTails[matcherShard];
         submissionShards[index] = matcherShard;
+        settlementShards[index] = matcherShard;
         previousSubmissionSlots[index] = tailSlot;
         nextSubmissionSlots[index] = -1;
         if (tailSlot < 0) submissionHeads[matcherShard] = index;

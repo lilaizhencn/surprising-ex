@@ -141,7 +141,8 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 }
                 symbols.put(symbol, symbolId);
             });
-            registeredSymbols.addAll(snapshot.symbols().values());
+            // 路由表也含尚未创建订单簿的 symbol，不能作为 native 注册完成的证据。
+            // 恢复后的首次使用仍经 ensureSymbol；native 对已有订单簿的注册是幂等操作。
             users.addAll(snapshot.users());
             List<CoreOrderState> restoredOrders = new ArrayList<>();
             activeOrders.forEach(restoredOrders::add);
@@ -315,7 +316,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long aeronTimestamp,
             Supplier<CoreMatchingResult> command) {
         return executeWithEvidenceSync(coreSequence, commandId, orderId, instrumentChangeId,
-                aeronTimestamp, false, command);
+                aeronTimestamp, -2, command);
     }
 
     public CoreMatchingResult executeControlWithEvidenceSync(
@@ -326,7 +327,17 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long aeronTimestamp,
             Supplier<CoreMatchingResult> command) {
         return executeWithEvidenceSync(coreSequence, commandId, orderId, instrumentChangeId,
-                aeronTimestamp, true, command);
+                aeronTimestamp, -1, command);
+    }
+
+    /** 普通交易的证据由实际订单簿分片单写，拒绝结果也保留其原始路由。 */
+    public CoreMatchingResult executeShardWithEvidenceSync(
+            int shardId, long coreSequence, java.util.UUID commandId, long orderId,
+            long instrumentChangeId, long aeronTimestamp, Supplier<CoreMatchingResult> command) {
+        if (shardId < 0 || shardId >= topology.matchingEngineCount())
+            throw new IllegalArgumentException("invalid matcher evidence shard");
+        return executeWithEvidenceSync(coreSequence, commandId, orderId, instrumentChangeId,
+                aeronTimestamp, shardId, command);
     }
 
     private CoreMatchingResult executeWithEvidenceSync(
@@ -335,7 +346,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             long orderId,
             long instrumentChangeId,
             long aeronTimestamp,
-            boolean controlShard,
+            int evidenceShard,
             Supplier<CoreMatchingResult> command) {
         if (coreSequence <= 0 || commandId == null || orderId < 0 || instrumentChangeId < 0
                 || aeronTimestamp < 0 || command == null) {
@@ -353,7 +364,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
             scope.active = true;
             scope.aeronTimestamp = aeronTimestamp;
             CoreMatchingResult result = command.get();
-            int matcherShardId = controlShard ? -1 : matcherShardId(result);
+            int matcherShardId = evidenceShard == -2 ? matcherShardId(result) : evidenceShard;
             long sequence = matcherEvidence.nextSequence(matcherShardId);
             return bindMatcherEvidence(coreSequence, commandId, orderId, instrumentChangeId,
                     aeronTimestamp, sequence, matcherShardId, result);
@@ -456,9 +467,13 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         if (matcherPoison != null) {
             throw new IllegalStateException("matcher completion discarded after fatal divergence", matcherPoison);
         }
+        int nativeShard = matcherShardId(result);
+        if (matcherShardId >= 0 && nativeShard >= 0 && nativeShard != matcherShardId)
+            throw new IllegalStateException("native matcher result crossed its evidence partition");
+        // 控制证据可串联不同订单簿，native sequence 仍必须在原生引擎自己的序列内严格递增。
         CoreMatchingResult bound = matcherEvidence.bind(coreSequence, commandId, orderId,
                 instrumentChangeId, aeronTimestamp, sequence,
-                matcherShardId, result);
+                matcherShardId, nativeShard, result);
         if (bound.outcome() == CoreMatchingResult.Outcome.FATAL_DIVERGENCE) {
             matcherFailure.compareAndSet(null,
                     new IllegalStateException("fatal matcher result: " + bound.resultCode()));

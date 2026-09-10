@@ -3,6 +3,12 @@ package com.surprising.aeron.service.state;
 import java.util.Map;
 import java.util.TreeMap;
 
+/**
+ * 产品 Core 内的执行路由。撮合按订单簿划分，账户按用户整体划分。
+ * 同一产品账户的全部资产、全仓/逐仓持仓、冻结及风险状态必须留在同一 Lane；
+ * matcher 数量和币对路由不得改变保证金共享范围。六产品账户间仍通过显式划转连接。
+ * 路由和种子随快照保存，恢复时不能重新按当前配置分配已有账户。
+ */
 public record LaneTopology(
         int routeVersion,
         int matchingEngineCount,
@@ -60,6 +66,7 @@ public record LaneTopology(
         return stableSymbolId & matcherShardMask;
     }
 
+    /** 账户资金的唯一写入方；禁止把 symbol、marginMode 或 matcherShard 加入账户路由。 */
     public int accountLaneId(long userId) {
         if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
         return (int) (mix64(userId ^ accountLaneSeed) & (accountLaneCount - 1L));

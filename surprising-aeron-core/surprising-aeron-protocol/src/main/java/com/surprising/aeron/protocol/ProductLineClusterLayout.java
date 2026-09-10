@@ -33,7 +33,7 @@ public final class ProductLineClusterLayout {
     public static String clusterMembers(ProductLine productLine, List<String> hostnames) {
         requireHostnames(hostnames);
         StringBuilder members = new StringBuilder();
-        for (int memberId = 0; memberId < MEMBER_COUNT; memberId++) {
+        for (int memberId = 0; memberId < hostnames.size(); memberId++) {
             String host = hostnames.get(memberId);
             members.append(memberId)
                     .append(',').append(host).append(':').append(port(productLine, memberId, CLIENT_FACING_OFFSET))
@@ -49,7 +49,7 @@ public final class ProductLineClusterLayout {
     public static String ingressEndpoints(ProductLine productLine, List<String> hostnames) {
         requireHostnames(hostnames);
         StringBuilder endpoints = new StringBuilder();
-        for (int memberId = 0; memberId < MEMBER_COUNT; memberId++) {
+        for (int memberId = 0; memberId < hostnames.size(); memberId++) {
             if (!endpoints.isEmpty()) {
                 endpoints.append(',');
             }
@@ -59,9 +59,11 @@ public final class ProductLineClusterLayout {
         return endpoints.toString();
     }
 
-    private static void requireHostnames(List<String> hostnames) {
-        if (hostnames == null || hostnames.size() != MEMBER_COUNT || hostnames.stream().anyMatch(String::isBlank)) {
-            throw new IllegalArgumentException("exactly three non-blank hostnames are required");
+    /** 显式单成员部署用于本地开发；三成员部署保留原有地址与端口规则。 */
+    public static void requireHostnames(List<String> hostnames) {
+        if (hostnames == null || (hostnames.size() != 1 && hostnames.size() != MEMBER_COUNT)
+                || hostnames.stream().anyMatch(host -> host == null || host.isBlank())) {
+            throw new IllegalArgumentException("one or three non-blank hostnames are required");
         }
     }
 }

@@ -25,7 +25,7 @@ class AeronClientPoolTest {
     @Test
     void rejectsInvalidConfigurationBeforeOpeningConnections() {
         assertThatIllegalArgumentException().isThrownBy(() -> new AeronClientPool("order", ProductLine.SPOT,
-                List.of("localhost"), "localhost", Duration.ofSeconds(1), 1));
+                List.of("localhost", "localhost"), "localhost", Duration.ofSeconds(1), 1));
         assertThatIllegalArgumentException().isThrownBy(() -> new AeronClientPool("order", ProductLine.SPOT,
                 List.of("localhost", "localhost", "localhost"), "localhost", Duration.ZERO, 1));
         assertThatIllegalArgumentException().isThrownBy(() -> new AeronClientPool("order", ProductLine.SPOT,

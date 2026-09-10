@@ -379,7 +379,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         this.identities = new RuntimeIdentityRegistry();
         this.runtimeState = com.surprising.aeron.service.state.RuntimeStateProjector.project(
                 snapshotState, identities, topology);
-        this.activeOrderIndex = new ActiveOrderIndex(snapshotState, identities);
+        this.activeOrderIndex = new ActiveOrderIndex(snapshotState, identities, topology);
         this.matchingAdapter = matcherSnapshot == null
                 ? new DeterministicExchangeCoreAdapter(false)
                 : new DeterministicExchangeCoreAdapter(snapshotState, activeOrderIndex.orders(),
@@ -480,7 +480,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /** 全局元数据更新及 Lane 控制任务派发，不要求事先停驻所有账户。 */
     boolean requiresOwnerLaneAccessForPreparation(CoreMessage message) {
         return switch (message.header().messageType()) {
-            case APPLY_FUNDING, APPLY_MARK_PRICE, UPDATE_RISK_SCAN_CONTROL, ADJUST_INSURANCE_FUND -> false;
+            case ADJUST_BALANCE, TRANSFER_IN, TRANSFER_OUT, COMPLETE_TRANSFER, UPDATE_LEVERAGE, UPDATE_POSITION_MODE, ADJUST_POSITION_MARGIN, APPLY_FUNDING, APPLY_MARK_PRICE,
+                    UPDATE_RISK_SCAN_CONTROL, ADJUST_INSURANCE_FUND, UPSERT_INSTRUMENT,
+                    UPDATE_INSTRUMENT_MAINTENANCE, UPSERT_FEE_POLICY -> false;
             case CONTINUE_RISK_SCAN -> runtimeState.firstRiskIncompleteScan() == null;
             default -> true;
         };
@@ -535,6 +537,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         long user = message.header().userId();
         if (message.header().productLine() != productLine || user <= 0) return false;
         window.resetCandidate(user);
+        window.candidateLanes = runtimeState.topology().accountLaneMask(user);
         window.participants(activeOrderIndex);
         try {
             switch (message.header().messageType()) {
@@ -572,6 +575,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
     boolean addPlaceScope(PlaceOrderCommand command, ClusterCommandWindow window) {
         var instrument = runtimeState.instrument(command.symbol());
         if (instrument == null || command.reduceOnly()) return false;
+        window.candidateLanes |= activeOrderIndex.counterpartyLaneMask(
+                instrument.symbol(), command.side(), command.limitPriceTicks());
         long counterparties = activeOrderIndex.counterpartyMask(
                 instrument.symbol(), command.side(), command.limitPriceTicks());
         window.candidateAccounts |= counterparties;
@@ -1755,9 +1760,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     boolean matchingControlCommand(PendingMatching pending) {
-        return batches.pendingOrderBatches.containsKey(pending.sequenceKey())
-                || !pending.preMatchingCancellationOrderIds().isEmpty()
-                || pending.operation() == PendingMatching.Operation.LIQUIDATION
+        return pending.operation() == PendingMatching.Operation.LIQUIDATION
                 || pending.operation() == PendingMatching.Operation.LIQUIDATION_BATCH
                 || pending.operation() == PendingMatching.Operation.SETTLEMENT;
     }
@@ -1769,11 +1772,12 @@ public final class TradingCoreRuntime implements AutoCloseable {
         long coreSequence = pending.sequence();
         UUID commandId = pending.command().header().commandId();
         long aeronTimestamp = pending.command().header().submittedAtEpochMillis();
+        int shard = control ? -1 : matcherShard(pending);
         return control
                 ? () -> matchingAdapter.executeControlWithEvidenceSync(
                         coreSequence, commandId, orderId, instrumentChangeId, aeronTimestamp, command)
-                : () -> matchingAdapter.executeWithEvidenceSync(
-                        coreSequence, commandId, orderId, instrumentChangeId, aeronTimestamp, command);
+                : () -> matchingAdapter.executeShardWithEvidenceSync(
+                        shard, coreSequence, commandId, orderId, instrumentChangeId, aeronTimestamp, command);
     }
 
     List<DeterministicExchangeCoreAdapter.CancellationOrder> preMatchingCancellationOrders(
@@ -2429,14 +2433,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 cachedFeePolicyHash = computeFeePolicyHash(runtimeState.feePoliciesSnapshot());
                 commits.requestCommitPublication();
             }
-            case UPDATE_POSITION_MODE -> {
-                resultBuilder.commandChangedUserIds = List.of(message.header().userId());
-                if (DerivativeAccountCommandProcessor.updatePositionMode(runtimeState,
-                        message.header().userId(),
-                        TradingCommandCodec.decodeUpdatePositionMode(message.payloadUnsafe()))) {
-                    commits.requestCommitPublication();
-                }
-            }
+            case UPDATE_POSITION_MODE -> derivativeAccounts.executeUpdatePositionMode(message, clusterTimestamp);
             case ADJUST_POSITION_MARGIN -> derivativeAccounts.executeAdjustPositionMargin(message, clusterTimestamp);
             case ADJUST_INSURANCE_FUND -> derivativeRisk.executeAdjustInsuranceFund(message, clusterTimestamp);
             case UPDATE_LEVERAGE -> derivativeAccounts.executeUpdateLeverage(message, clusterTimestamp);

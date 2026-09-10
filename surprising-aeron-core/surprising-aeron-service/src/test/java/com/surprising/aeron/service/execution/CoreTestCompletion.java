@@ -6,6 +6,12 @@ import com.surprising.aeron.protocol.CoreResponse;
 final class CoreTestCompletion {
     static CoreResponse applyAsynchronously(TradingCoreRuntime owner,
             com.surprising.aeron.protocol.CoreMessage message) {
+        return applyAsynchronously(owner, message, message.header().submittedAtEpochMillis(),
+                message.header().sourceSequence());
+    }
+
+    static CoreResponse applyAsynchronously(TradingCoreRuntime owner,
+            com.surprising.aeron.protocol.CoreMessage message, long timestamp, long position) {
         owner.activate();
         long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
         var window = new ClusterCommandWindow();
@@ -17,8 +23,6 @@ final class CoreTestCompletion {
         }
         owner.runtimeState.enterAsynchronousCommandScope();
         try {
-            long timestamp = message.header().submittedAtEpochMillis();
-            long position = message.header().sourceSequence();
             CoreResponse response = owner.applyDecodedCommand(message, timestamp, position, window.decodedIfPresent(message), independent);
             while (owner.hasPendingDirectCommand()) {
                 response = owner.pollDirectCommand();

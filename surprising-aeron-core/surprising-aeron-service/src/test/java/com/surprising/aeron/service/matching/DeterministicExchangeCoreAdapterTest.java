@@ -32,6 +32,38 @@ import org.junit.jupiter.api.Test;
 class DeterministicExchangeCoreAdapterTest {
 
     @Test
+    @org.junit.jupiter.api.parallel.ResourceLock(org.junit.jupiter.api.parallel.Resources.SYSTEM_PROPERTIES)
+    void controlEvidenceChecksNativeSequenceWithinItsActualOrderBookPartition() {
+        String previous = System.getProperty("surprising.aeron.matching-engines");
+        System.setProperty("surprising.aeron.matching-engines", "2");
+        try (var adapter = new DeterministicExchangeCoreAdapter()) {
+            String first = "BOOK-A", candidate = "BOOK-B";
+            for (int attempt = 0; adapter.matcherShardId(first) == adapter.matcherShardId(candidate); attempt++) {
+                if (attempt == 128) throw new AssertionError("could not select a second partition");
+                candidate = "BOOK-" + attempt;
+            }
+            String second = candidate;
+            CoreMatchingResult previousResult = null;
+            for (long id = 1; id <= 16; id++) {
+                long orderId = id;
+                previousResult = adapter.executeControlWithEvidenceSync(id, new java.util.UUID(7, id), id, 1, 1000,
+                        () -> adapter.place(7, new CoreMatchingOrder(orderId, first, CoreOrderSide.BUY,
+                                CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1)));
+            }
+            var result = adapter.executeControlWithEvidenceSync(17, new java.util.UUID(7, 17), 17, 1, 1000,
+                    () -> adapter.place(8, new CoreMatchingOrder(17, second, CoreOrderSide.BUY,
+                            CoreOrderType.LIMIT, CoreTimeInForce.GTC, 90, 1)));
+            assertThat(result.accepted()).isTrue();
+            assertThat(result.nativeCommand().nativeSequence()).isLessThan(previousResult.nativeCommand().nativeSequence());
+            assertThat(result.nativeCommand().matcherSequence()).isGreaterThan(previousResult.nativeCommand().matcherSequence());
+            assertThat(result.matcherPrefix().before()).isEqualTo(previousResult.matcherPrefix().after());
+        } finally {
+            if (previous == null) System.clearProperty("surprising.aeron.matching-engines");
+            else System.setProperty("surprising.aeron.matching-engines", previous);
+        }
+    }
+
+    @Test
     void reusedCommandScopeDoesNotLeakTimestampIntoTheNextCommand() {
         try (DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter()) {
             var first = adapter.executeWithEvidenceSync(1, new java.util.UUID(0, 1), 901, 1, 1234,

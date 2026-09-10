@@ -149,8 +149,6 @@ final class OrderBatchPending implements TradingOrderBatchCodec.ResultSource {
     boolean laneContextInitialized;
     /** 本批实际涉及的账户 Lane，用于和预期范围核对。 */
     long actualLaneMask;
-    /** 本批的撮合前后序号和摘要，验证连续且确定的转换。 */
-    com.surprising.aeron.protocol.CoreMatcherTransition matcherTransition;
     /** 当前批最近完成的撮合结果，用于延续序号证据。 */
     com.surprising.aeron.service.matching.CoreMatchingResult lastMatchingResult;
     /** 本批准入订单增量索引，供后续批量项检查前面项目产生的订单依赖。 */
@@ -259,29 +257,12 @@ final class OrderBatchPending implements TradingOrderBatchCodec.ResultSource {
         finishing = false;
         laneContextInitialized = false;
         actualLaneMask = 0;
-        matcherTransition = null;
         lastMatchingResult = null;
         if (admissionOrderIndex != null) admissionOrderIndex.clear();
         kind = null;
         clusterTimestamp = 0;
         clusterPosition = 0;
         operation = null;
-    }
-
-    void advanceMatcher(
-            com.surprising.aeron.service.matching.CoreMatchingResult result) {
-        long nextSequence = result.nativeCommand().matcherSequence();
-        long nextPrefix = result.matcherPrefix().after();
-        if (matcherTransition == null
-                || result.nativeCommand().matcherShardId() != matcherTransition.matcherShardId()
-                || nextSequence <= matcherTransition.sequenceAfter()
-                || result.matcherPrefix().before() != matcherTransition.prefixAfter()) {
-            throw new IllegalArgumentException("order batch matcher transition is not contiguous");
-        }
-        matcherTransition = new com.surprising.aeron.protocol.CoreMatcherTransition(
-                matcherTransition.routeVersion(), matcherTransition.matcherShardId(),
-                matcherTransition.sequenceBefore(), nextSequence,
-                matcherTransition.prefixBefore(), nextPrefix);
     }
 
     void retainMatchingResult(

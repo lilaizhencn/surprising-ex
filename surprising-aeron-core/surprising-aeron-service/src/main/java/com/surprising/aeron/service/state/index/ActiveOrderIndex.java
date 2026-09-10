@@ -40,14 +40,22 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     private final LongObjectHashMap<CoreOrderState> ordersById = new LongObjectHashMap<>();
     // Owner-only bounded query scratch; never sized to total book depth.
     private long[] pageScratch;
+    /** 账户路由由持久化拓扑决定，不能使用与恢复状态不同的启动参数。 */
+    private final com.surprising.aeron.service.state.LaneTopology topology;
     private final RuntimeOrderAdmission.AdmissionSummary admissionSummary =
             new RuntimeOrderAdmission.AdmissionSummary();
 
     public ActiveOrderIndex(TradingCoreState state) {
-        rebuild(state);
+        this(state, null, com.surprising.aeron.service.state.LaneTopology.productionDefault());
     }
 
     public ActiveOrderIndex(TradingCoreState state, RuntimeIdentityRegistry identities) {
+        this(state, identities, com.surprising.aeron.service.state.LaneTopology.productionDefault());
+    }
+
+    public ActiveOrderIndex(TradingCoreState state, RuntimeIdentityRegistry identities,
+                            com.surprising.aeron.service.state.LaneTopology topology) {
+        this.topology = java.util.Objects.requireNonNull(topology);
         rebuild(state);
     }
 
@@ -88,6 +96,11 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     public long counterpartyMask(String symbol, com.surprising.aeron.protocol.CoreOrderSide side, long limitPrice) {
         OrderParticipantIndex participants = participantsBySymbol.get(symbol);
         return participants == null ? 0 : participants.counterparties(side, limitPrice);
+    }
+
+    public long counterpartyLaneMask(String symbol, com.surprising.aeron.protocol.CoreOrderSide side, long limitPrice) {
+        OrderParticipantIndex participants = participantsBySymbol.get(symbol);
+        return participants == null ? 0 : participants.counterpartyLanes(side, limitPrice);
     }
 
     public boolean hasCounterparty(String symbol, com.surprising.aeron.protocol.CoreOrderSide side,
@@ -441,7 +454,7 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     }
 
     private void addParticipant(CoreOrderState order) {
-        participantsBySymbol.computeIfAbsent(order.symbol(), ignored -> new OrderParticipantIndex()).add(order);
+        participantsBySymbol.computeIfAbsent(order.symbol(), ignored -> new OrderParticipantIndex(topology)).add(order);
     }
 
     private void removeParticipant(CoreOrderState order) {
