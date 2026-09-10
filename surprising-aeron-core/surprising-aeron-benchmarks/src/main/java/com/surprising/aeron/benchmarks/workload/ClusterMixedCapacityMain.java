@@ -28,6 +28,8 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     /** 仅压测编排参数；0 保持原页大小，不改变生产服务配置。 */
     private final int controlPageSize;
     private ClusterOperationalSideLoad sideLoad;
+    /** 连续交易使用独立行情源，不能让模拟传播延迟暂停发单。 */
+    private GeneratedMarkPriceSource priceSource;
     private final ArrayDeque<Pending> pending = new ArrayDeque<>();
     private final long seed = Long.getLong("surprising.aeron.capacity-seed", 92001);
     private final long[] markSequence = new long[SYMBOLS], markTime = new long[SYMBOLS], mark = new long[SYMBOLS];
@@ -91,6 +93,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
             sideLoad = new ClusterOperationalSideLoad(seed, users, mark, markSequence, controlPageSize);
             sideLoad.start();
         }
+        if (tradingStream && !operational) priceSource = new GeneratedMarkPriceSource(mark);
         runFor(Integer.getInteger("surprising.aeron.capacity-warmup-seconds", 30), false);
     }
 
@@ -228,10 +231,19 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         drain();
     }
 
-    private void refresh(int i) { if(sideLoad==null && System.currentTimeMillis()-markTime[i]>=1000)price(i,mark[i]); }
+    private void refresh(int i) {
+        if (sideLoad != null || System.currentTimeMillis()-markTime[i]<1000) return;
+        if (priceSource == null) { price(i, mark[i]); return; }
+        space();
+        var quote = priceSource.quote(i);
+        publishPrice(i, quote.priceTicks(), quote.generatedAtEpochMillis());
+    }
     private void price(int i,long value) {
         space();
-        mark[i]=value;markTime[i]=GeneratedPriceClock.timestamp();
+        publishPrice(i, value, GeneratedPriceClock.timestamp());
+    }
+    private void publishPrice(int i, long value, long generatedAt) {
+        mark[i]=value;markTime[i]=generatedAt;
         send(CoreMessageType.APPLY_MARK_PRICE,0,TradingCommandCodec.encodeApplyMarkPrice(
                 new ApplyMarkPriceCommand(symbol(i),1,value,++markSequence[i],markTime[i])),1,null);
     }
@@ -453,5 +465,8 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         long items;final Histogram latency=new Histogram(TimeUnit.MINUTES.toNanos(1),3);
         void record(int weight,long ns){items+=weight;latency.recordValue(Math.max(1,ns));}
     }
-    @Override public void close(){try { if(sideLoad!=null)sideLoad.close(); } finally { client.close(); }}
+    @Override public void close(){
+        try { if(priceSource!=null)priceSource.close(); }
+        finally { try { if(sideLoad!=null)sideLoad.close(); } finally { client.close(); } }
+    }
 }

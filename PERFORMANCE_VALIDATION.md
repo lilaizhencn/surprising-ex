@@ -5273,3 +5273,42 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 
 - 上表12场景均通过金融和快照断言；连续循环512业务操作，批量循环10240业务操作/512消息。每场景仅1秒预热/2秒测量，连续GC6次、批量GC4次；分配包含代理及测试构造，不当生产单笔分配或三节点容量。真实网络短测同样是带JFR的定位对照，未覆盖完整运营后台侧载、WS/Valkey、云端隔离硬件和长稳，当前仍未测到有效算力饱和上限。
 - 原始来源/tmp/ex-throughput-before、after-egress、final、pinned、replay、snapshot-*、jmh及jmh-pinned；分析后按用户要求清理本轮日志/JFR/录制/临时脚本及测试报告，仅保留摘要、源码和构建包，以上路径不再作为可访问附件。基线load.log SHA256为269a9faa25105d9fea7c4dab1047424992e4003822fc4abd67c4a7b964545729，最终为37e290fdb7e41cadc5f17bbb9e3f156c2c95451bf22e7788afc2d425fc95422a。全部测试JVM已停止，未启动云资源，未修改README。
+
+## 2026-09-10 持续Owner饱和与延迟归因（采集前锁定）
+- 当前master e599c7d9，对照commit不适用，仅诊断，不改生产逻辑、不启动云资源。本机真实三JVM Cluster及负载器，HotSpot GraalVM25.0.1/Maven3.9.16/macOS26.7/i9-9880H8C16T/16GiB/G1；Core512–768MiB、load128–512MiB、NMTsummary。磁盘526GiB，低于10GiB或300秒deadline停止，JFR各64MiB上限。
+- 沿用上轮连续交易：LINEAR_PERPETUAL、1769用户/256symbol/1matcher/4Lane、256全局及session在途、单命令+保留查询session、batch20、seed112001、operational=false/trading-stream=true；初始化持仓/挂单和一次清算核对沿用原脚本，交易内价格刷新保持，10秒预热/30秒测量/最终排空计时。service YIELDING、Lane spin0、Owner有在途持续推进，负载为窗口约束的尽力异步提交，未修正CO。
+- JFR profile增加ThreadCPULoad/CPULoad每1秒、ThreadDump每5秒、park/monitor阈值1ms，四JVM均采集，ps每2秒；与上轮配置不同，不作严格性能回退或改进验收。先验证offered=terminal/unfinished0及金融核对，无节点错误和DataLoss后，用测量窗口线程CPU、完整调用栈和既有队列高水位归因。无预设ops/s门槛，不以空转CPU认定95%有效饱和；不新增全量JMH，因为本轮仅观测既有生产版本。
+- 仅本轮/tmp/ex-saturation-*目录和脚本作为临时产物，摘要后清理；不做长期泄漏/云端容量/完整运营侧载或WS验证。必要的后续变参诊断另立采集记录。
+- 首次临时启动脚本漏配java.base/java.util.zip开放参数，Archive CRC初始化失败，未发压；补齐参数后以全新目录运行。该失败属于临时启动配置，不是交易故障。有效轮Leader node1：30.286秒，996608业务/101632消息offered=terminal、unfinished0，32906.046业务ops/s、3355.690消息/s、7776.410 fills/s；55总周期金融核对PASS，hash4ed347f71621f73。Owner平均56.19%单核CPU/峰值65.24%，matcher15.37%，四Lane各6.38–6.53%；ThreadDump累计CPU差分核对Owner55.91%、matcher15.42%，与ThreadCPULoad换算一致。均未饱和。
+- JFR揭示GeneratedPriceClock.timestamp每条行情阻塞发压主线程2ms，测量7424次park累计16.7675秒，约55.4%墙钟；执行采样难以看到park耗时，此前仅用execution samples不足以归因。Lane各有17.17–17.20秒的>=1ms park；Owner没有>=1ms park/monitor竞争。Leader媒体线程80.53%，机器CPU约78.2%，Graal编译线程测量期仍较活跃，10秒预热未达到纯稳态。生产的单命令提交前缀还限制dispatchReadyPlaceSettlements的throughSequence，属于下一层可改进的协调边界，不能直接删除有序提交要求。
+
+### 独立行情源诊断复测（采集前锁定）
+- 用户明确要求发单不受模拟行情延迟限制；仅修改benchmarks的连续交易编排：行情源持有初始化后的固定报价，在独立线程经历原2ms生成/传播延迟，发布真实生成时间，发压线程非阻塞读取，仍把价格及订单送入同一FIFO。不倒填时间、不关闭价格新鲜度验证、不改交易Core；初始化及非连续控制场景沿用旧生成方式。先运行GeneratedMarkPriceSourceTest、GeneratedPriceClockTest、ClusterMixedCapacityTest。
+- 复测保持本节所有节点/JVM/JFR/并发/种子/业务/10秒预热+30秒测量参数，仅以上发压编排变化，目录/tmp/ex-saturation-source。通过条件金融核对PASS、offered=terminal、unfinished0、无节点故障及JFR DataLoss；发压主线程不再出现GeneratedPriceClock的park。报告吞吐、线程CPU及队列/提交热点，不预承诺达到95%或1ms尾延迟。生产链路未变，因此不额外运行六产品JMH。
+- 构建及上述11项定向测试全部通过；生产源码与fork依赖未变。独立行情源复测30.090秒，1813598业务操作/179294消息offered=terminal、unfinished0、peak256；60273.203业务ops/s、5958.665消息/s、430080成交/14293.299 fills/s，84测量周期/99总周期，金融核对PASS、hash9fef1eb4e7da72b1。三个10秒窗口62038/59488/59293业务ops/s，在途均256。吞吐较本轮修正前提高83.17%，消息吞吐提高77.57%；这是发压编排修正收益，不能宣称交易Core计算速度提升83%。行情刷新数7424变7262是原1秒按需刷新随运行节奏的自然变化，价格值、刷新阈值及FIFO未改。
+
+|Leader线程/指标|发压修正前 node1|发压修正后 node0|
+|---|---:|---:|
+|Owner平均/最高单核CPU|56.19% / 65.24%|93.07% / 96.35%|
+|Matcher平均单核CPU|15.37%|23.25%|
+|四Lane各自平均单核CPU|6.38–6.53%|12.50–12.79%|
+|服务线程平均单核CPU|51.48%|19.17%|
+|发压主线程平均单核CPU|42.76%|93.65%|
+|整机平均CPU|78.2%|99.4%|
+
+- 修正后Owner累计CPU差分独立核对93.13%；30个1秒采样仅3个达到95%，其余副本Owner平均87.43%/85.08%。发压主线程没有>=1ms的ThreadPark事件，阻塞移至独立benchmark-mark-price-source，源线程CPU约1.42%。Leader Owner无>=1ms park/monitor竞争；不能把所有CPU都视作有效结算，单核接近忙碌且整机已接近满载，不代表各阶段均饱和或云端容量上限。
+- Leader Owner 2218执行样本中，finishOrderBatch调用路径479、pumpMatchingCommitCompletions523、健康检查135、依赖检查115、CommandFingerprint84、批量解码34；这些是包含调用路径的重叠样本，不能相加当百分比。进一步代码证据：pollCommands每次finally清除decoded缓存，未准入的同一批量入口可能在后续轮询重复解码和构建依赖范围；提交前缀固定1条同时限制结算预派发throughSequence。后续应分别处理重复准备与派发/提交边界，保留资金依赖、幂等指纹和有序终态；本轮未修改这些生产逻辑，未验证其具体收益。
+
+|业务延迟µs，依次p50/p90/p95/p99/p99.9/max|修正前|修正后|
+|---|---|---|
+|普通下单|17317/40992/49053/62816/78184/84410|17661/41484/45350/53084/81264/104398|
+|普通撤单|19890/64389/72679/91488/111673/119930|20627/70057/78446/94765/156237/159383|
+|标记价格|2801/4427/6479/35979/56688/69730|22462/54853/64978/102301/151650/159383|
+|批量下单|53018/76218/83361/100663/114687/121044|61636/81657/89718/116523/190185/195297|
+|批量撤单|48365/70582/75366/82247/87162/88211|51707/62685/71041/107085/137363/143523|
+
+- 吞吐提升未解决尾延迟，部分尾延迟反而随连续排队升高。两轮单笔下单/撤单样本各23552→43008、批量下单35328→64512批、批量撤单11776→21504批，每批20项。端到端统计包含客户端排队、复制、准入、撮合、结算和响应，不能与独立撮合10–20µs直接对比，也不能承诺满负载1ms。
+- Leader分配采样115.02→215.95MiB/s，GC12→23次、暂停10.49–12.29ms→10.73–14.00ms；暂停总132.61→274.51ms，最高采样heap used414.17→454.36MB，NMT committed735.91–740.83MB→739.58–742.23MB。约GC周期级别的10ms停顿本身也影响1ms尾延迟目标。未做精确分配对象计数、长期泄漏、完整I/O/safepoint归因或每阶段独立延迟，因此是部分性能诊断，不是完整验收。
+- 两轮共8份JFR DataLoss均0，节点记录76秒→72秒、负载器72秒→70秒，原始JFR合计约27.54MB→25.25MB；jfr summary及流式RecordingFile汇总已检查，离线JSON曾扩张到2.1GB，后改用512MiB堆上限的流式解析，未与正式测量重叠。两轮三个节点退出均pending0、highWaterMark64，修正后windows=commands211004。没有出现资金错误、未知结果或节点失败。
+- 执行入口为生产SurprisingClusterNode×3及ClusterMixedCapacityMain，参数见本节锁定；临时编排/tmp/ex-saturation-run.py，CPU/栈及GC/NMT汇总/tmp/ex-saturation-analysis.java、ex-saturation-memory.java。两轮load日志SHA256分别16253440aa08cad40703eccdbc5123f5da5c736f94c8f0c939fa38e9eeaef930、89d32f5b4d64eab6cea850eff4f75d3cbbf8b5651faf782dc1c875f68bc3b28c；Leader JFR分别1aa534e9a8686e5735f663d12d47d7639a2a64696dcdce5b74e691c58732e9bc、d8e6c95a0c8594f3c31b00cdbac9d8cc49cbc7fc2fd1050b43a6aba2a4bfdaa0。
+- 全部测试JVM和行情源线程已停止；记录完成后清理本轮/tmp/ex-saturation-*及本轮benchmarks测试报告，保留源码和构建包。原始路径随后不可访问；未开启云资源、未修改README，未重做快照恢复（生产实现未变，上一轮真实恢复证据仍适用）。
