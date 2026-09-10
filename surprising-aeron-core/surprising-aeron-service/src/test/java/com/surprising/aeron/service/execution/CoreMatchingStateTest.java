@@ -36,6 +36,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 class CoreMatchingStateTest {
 
+    @org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
     @Test
     void emptyNotificationProbeStillDetectsAFailedLaneWithoutACompletion() throws Exception {
         try (var state = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {

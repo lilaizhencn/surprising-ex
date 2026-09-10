@@ -11,6 +11,17 @@ import org.junit.jupiter.api.Test;
 class ProductLineClusterLayoutTest {
 
     @Test
+    void explicitSingleMemberLayoutHasNoPhantomPeers() {
+        assertThat(ProductLineClusterLayout.clusterMembers(ProductLine.SPOT, List.of("127.0.0.1")))
+                .isEqualTo("0,127.0.0.1:20002,127.0.0.1:20003,127.0.0.1:20004,127.0.0.1:20005,127.0.0.1:20001|");
+        assertThat(ProductLineClusterLayout.ingressEndpoints(ProductLine.SPOT, List.of("127.0.0.1")))
+                .isEqualTo("0=127.0.0.1:20002");
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                ProductLineClusterLayout.clusterMembers(ProductLine.SPOT, List.of("a", "b")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void givesEveryProductLineAnIsolatedClusterAndPortRange() {
         Set<Integer> clusterIds = new HashSet<>();
         Set<Integer> clientPorts = new HashSet<>();

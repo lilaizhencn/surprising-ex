@@ -670,8 +670,8 @@ final class LinearPerpetualBenchmarkSupport {
                 for (int highWaterMark : metrics.accountLaneQueueHighWaterMarks()) {
                     if (highWaterMark > 0) parallelLanes++;
                 }
-                if (parallelLanes < 2) {
-                    throw new IllegalStateException("cross-lane fill did not exercise parallel settlement");
+                if (TradingExecutionMode.configured() == TradingExecutionMode.FUSED ? parallelLanes != 0 : parallelLanes < 2) {
+                    throw new IllegalStateException("cross-account fill used the wrong execution mode");
                 }
                 for (int depth : metrics.accountLaneQueueDepths()) {
                     if (depth != 0) throw new IllegalStateException("Account Lane queue did not drain");

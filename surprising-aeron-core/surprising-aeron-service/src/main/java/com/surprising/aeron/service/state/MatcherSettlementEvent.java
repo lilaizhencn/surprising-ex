@@ -256,7 +256,10 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
                 runtime.cancelOrderInLane(order.userId(), orderId);
             }
         }
-        if (runtime.productLine().isDerivative()) {
+        if (value.rejectedTaker()) {
+            if (runtime.currentLaneOwns(value.activeUserId()))
+                runtime.rejectOrderInLane(value.activeUserId(), value.takerOrderId(), commitTimestamp, commitClusterPosition);
+        } else if (runtime.productLine().isDerivative()) {
             RuntimeDerivativeMatchProcessor.applyLane(value.takerOrderId(), value, laneId,
                     runtime, identities, valueInstrument, valueSettleAssetId, delta, commitTimestamp, commitClusterPosition);
         } else {

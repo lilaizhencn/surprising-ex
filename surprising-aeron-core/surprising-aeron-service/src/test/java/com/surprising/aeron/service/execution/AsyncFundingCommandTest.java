@@ -8,6 +8,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 import java.util.UUID;
 import static org.assertj.core.api.Assertions.*;
 
+@org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
 class AsyncFundingCommandTest {
     private long sequence;
     private static final long TIME = 1_700_000_000_000L;

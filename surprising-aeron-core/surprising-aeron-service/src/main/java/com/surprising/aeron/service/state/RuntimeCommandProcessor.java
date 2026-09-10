@@ -40,61 +40,74 @@ public final class RuntimeCommandProcessor {
         runtime.assertOwner();
         String asset = AssetBalance.normalizeAsset(command.asset());
         int assetId = identities.assetId(asset);
+        long nextRevision = Math.incrementExact(runtime.revision());
+        adjustAccountBalance(runtime, userId, assetId, command.deltaUnits());
+        runtime.setMetadata(runtime.productLine(), nextRevision);
+    }
+
+    /** 只修改所属账户；产品 revision 和发布边界由调用方在任务完成后提交。 */
+    static void adjustAccountBalance(TradingRuntimeState runtime, long userId, int assetId, long deltaUnits) {
         BalanceRuntime current = runtime.balance(userId, assetId);
         long currentAvailable = current == null ? 0 : current.availableUnits();
-        long nextAvailable = Math.addExact(currentAvailable, command.deltaUnits());
-        if (nextAvailable < 0) {
-            throw new IllegalArgumentException("available balance cannot be negative");
-        }
-
+        long nextAvailable = Math.addExact(currentAvailable, deltaUnits);
+        if (nextAvailable < 0) throw new IllegalArgumentException("available balance cannot be negative");
         UserRuntime user = runtime.user(userId);
-        if (user == null) {
-            runtime.putUser(new UserRuntime(runtime.productLine(), userId, 1,
-                    com.surprising.aeron.protocol.CorePositionMode.ONE_WAY));
-        } else {
-            runtime.advanceUserRevision(userId);
-        }
-        if (current == null) {
-            runtime.putBalance(new BalanceRuntime(userId, assetId, nextAvailable, 0));
-        } else {
-            runtime.replaceBalance(new BalanceRuntime(userId, assetId, nextAvailable, current.lockedUnits()));
-        }
-        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+        // 所有可能的算术拒绝都在首个账户写入前完成，避免部分修改后才能发现溢出。
+        UserRuntime nextUser = new UserRuntime(runtime.productLine(), userId,
+                user == null ? 1 : Math.incrementExact(user.revision()),
+                user == null ? com.surprising.aeron.protocol.CorePositionMode.ONE_WAY : user.positionMode());
+        BalanceRuntime nextBalance = new BalanceRuntime(userId, assetId, nextAvailable,
+                current == null ? 0 : current.lockedUnits());
+        runtime.putUser(nextUser);
+        if (current == null) runtime.putBalance(nextBalance);
+        else runtime.replaceBalance(nextBalance);
     }
 
     public static boolean transferOut(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                       long userId, com.surprising.aeron.protocol.TransferFundsCommand command) {
-        if (runtime == null || identities == null || command == null || userId <= 0) {
+        if (identities == null) throw new IllegalArgumentException("transfer identities are required");
+        TransferRuntime transfer = prepareTransferOut(runtime, userId, command);
+        if (transfer == null) return false;
+        int assetId = identities.assetId(command.asset());
+        long nextRevision = Math.incrementExact(runtime.revision());
+        debitTransferAccount(runtime, userId, assetId, command.amountUnits());
+        runtime.putPendingTransfer(transfer);
+        runtime.setMetadata(runtime.productLine(), nextRevision);
+        return true;
+    }
+
+    /** Owner 校验跨产品划转身份与幂等记录；不访问可变账户余额。 */
+    static TransferRuntime prepareTransferOut(TradingRuntimeState runtime, long userId,
+                                               com.surprising.aeron.protocol.TransferFundsCommand command) {
+        if (runtime == null || command == null || userId <= 0)
             throw new IllegalArgumentException("invalid runtime transfer out");
-        }
         runtime.assertOwner();
-        if (runtime.productLine() != command.sourceProductLine()) {
+        if (runtime.productLine() != command.sourceProductLine())
             throw new CoreStateRejectedException("PRODUCT_LINE_MISMATCH", "transfer source product line mismatch");
-        }
         TransferRuntime transfer = new TransferRuntime(userId, command);
         TransferRuntime existing = runtime.pendingTransfer(command.transferId());
         if (existing != null) {
-            if (!existing.equals(transfer)) {
+            if (!existing.equals(transfer))
                 throw new CoreStateRejectedException("IDEMPOTENCY_CONFLICT", "transfer identity contains different data");
-            }
-            return false;
+            return null;
         }
-        if (!runtime.hasPendingTransferCapacity()) {
-            throw new CoreStateRejectedException("PENDING_TRANSFER_CAPACITY_FULL",
-                    "pending transfer runtime capacity is full");
-        }
-        int assetId = identities.assetId(command.asset());
+        if (!runtime.hasPendingTransferCapacity())
+            throw new CoreStateRejectedException("PENDING_TRANSFER_CAPACITY_FULL", "pending transfer runtime capacity is full");
+        return transfer;
+    }
+
+    /** 资金账户单写任务；冻结及其他产品余额不可用于本次转出。 */
+    static void debitTransferAccount(TradingRuntimeState runtime, long userId, int assetId, long amountUnits) {
         BalanceRuntime balance = runtime.balance(userId, assetId);
-        if (balance == null || balance.availableUnits() < command.amountUnits()) {
-            throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
-                    "transfer available balance is insufficient");
-        }
-        runtime.replaceBalance(new BalanceRuntime(userId, assetId,
-                Math.subtractExact(balance.availableUnits(), command.amountUnits()), balance.lockedUnits()));
-        runtime.putPendingTransfer(transfer);
-        runtime.advanceUserRevision(userId);
-        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
-        return true;
+        if (balance == null || balance.availableUnits() < amountUnits)
+            throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE", "transfer available balance is insufficient");
+        UserRuntime user = runtime.requireUser(userId);
+        UserRuntime advanced = new UserRuntime(runtime.productLine(), userId,
+                Math.incrementExact(user.revision()), user.positionMode());
+        BalanceRuntime debited = new BalanceRuntime(userId, assetId,
+                Math.subtractExact(balance.availableUnits(), amountUnits), balance.lockedUnits());
+        runtime.putUser(advanced);
+        runtime.replaceBalance(debited);
     }
 
     public static void transferIn(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
@@ -170,14 +183,7 @@ public final class RuntimeCommandProcessor {
         identities.assetId(instrument.baseAsset());
         identities.assetId(instrument.quoteAsset());
         identities.assetId(instrument.settleAsset());
-        boolean[] openState = {false};
-        runtime.ordersForSnapshot().forEachValue(order -> {
-            if (order.symbolId() == symbolId && order.status() == CoreOrderStatus.OPEN) openState[0] = true;
-        });
-        runtime.positionsForSnapshot().forEachValue(position -> {
-            if (position.symbolId() == symbolId && position.signedQuantitySteps() != 0) openState[0] = true;
-        });
-        if (current != null && openState[0]) {
+        if (current != null && runtime.hasPublishedInstrumentExposure(symbolId)) {
             throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_IN_USE",
                     "cannot replace instrument version with open state");
         }

@@ -1227,8 +1227,6 @@ final class OrderedCommitCoordinator {
                     }
                     validateMatchingEvidence(pending, matching);
                     applyMatcherProgress(matching);
-                    batch.matcherTransition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(
-                            matching.nativeCommand().matcherSequence() - 1, matching.matcherPrefix().before());
                     owner.batches.applyPipelinedPlaceBatchResults(batch, pending, matching);
                     owner.batches.initializeOrderBatchLaneContext(batch, pending);
                 }

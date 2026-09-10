@@ -21,6 +21,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
+/** 专门验证多阶段工作线程和在途窗口的协调；融合业务契约由共享产品/资金/恢复测试覆盖。 */
+@org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
 class ClusterCommandPipelineTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)

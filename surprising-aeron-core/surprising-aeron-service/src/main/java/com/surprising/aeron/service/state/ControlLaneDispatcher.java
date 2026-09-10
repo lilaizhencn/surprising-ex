@@ -21,7 +21,6 @@ final class ControlLaneDispatcher {
 
     void dispatch(long laneMask, AccountLaneOperationType type, java.util.function.IntFunction<Object> operation) {
         owner.assertOwner();
-        if (!owner.accountLanesStarted) throw new IllegalStateException("control work requires running Account Lanes");
         long validMask = owner.accountLanes.length == 64 ? -1L : (1L << owner.accountLanes.length) - 1;
         if (controlLaneWorkPending || laneMask == 0 || (laneMask & ~validMask) != 0 || operation == null || type == null)
             throw new IllegalStateException("invalid control Lane dispatch");
@@ -37,9 +36,13 @@ final class ControlLaneDispatcher {
             if (task == null) owner.laneMutationTasks[id] = task = owner.new LaneMutationTask(id);
             task.prepareIndexed(operation);
             owner.laneMutationStartedNanosScratch[id] = System.nanoTime();
-            owner.accountLaneQueueHighWaterMarks[id] = Math.max(owner.accountLaneQueueHighWaterMarks[id],
-                    owner.laneWorkers[id].depth() + 1);
-            owner.laneWorkers[id].submit(task);
+            if (!owner.accountLanesStarted) {
+                task.execute(owner.accountLanes[id]);
+            } else {
+                owner.accountLaneQueueHighWaterMarks[id] = Math.max(owner.accountLaneQueueHighWaterMarks[id],
+                        owner.laneWorkers[id].depth() + 1);
+                owner.laneWorkers[id].submit(task);
+            }
         }
     }
 

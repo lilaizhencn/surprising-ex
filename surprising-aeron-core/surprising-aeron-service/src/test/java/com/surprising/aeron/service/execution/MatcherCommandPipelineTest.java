@@ -12,6 +12,49 @@ import org.junit.jupiter.api.Test;
 class MatcherCommandPipelineTest {
 
     @Test
+    void fusedExecutionOwnsActivationCommandsReadsAndShutdownOnOneThread() throws Exception {
+        var owner = Thread.currentThread();
+        var value = new java.util.concurrent.atomic.AtomicInteger();
+        try (var pipeline = new MatcherCommandPipeline(2, false)) {
+            pipeline.startInline(() -> assertThat(Thread.currentThread()).isSameAs(owner));
+            pipeline.submit(1, () -> {
+                assertThat(Thread.currentThread()).isSameAs(owner);
+                value.set(1);
+                return new CoreMatchingResult(true, "ONE");
+            });
+            var read = pipeline.readAtSubmissionFence(value::get);
+            pipeline.submit(2, () -> { value.set(2); return new CoreMatchingResult(true, "TWO"); });
+            assertThat(read.get()).isEqualTo(1);
+            assertThat(pipeline.submissionDepth()).isZero();
+            assertThat(pipeline.completionDepth()).isEqualTo(2);
+            assertThat(pipeline.poll(2)).isNull();
+            assertThat(pipeline.poll(1).resultCode()).isEqualTo("ONE");
+            assertThat(pipeline.poll(2).resultCode()).isEqualTo("TWO");
+            pipeline.close(() -> assertThat(Thread.currentThread()).isSameAs(owner));
+        }
+    }
+
+    @Test
+    void fusedMatcherRejectsForeignWritersAndConsumesFailuresInOrder() throws Exception {
+        try (var pipeline = new MatcherCommandPipeline(2, false)) {
+            pipeline.startInline(null);
+            var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+            Thread thread = Thread.ofPlatform().start(() -> {
+                try { pipeline.submit(1, () -> new CoreMatchingResult(true, "BAD")); }
+                catch (Throwable caught) { failure.set(caught); }
+            });
+            thread.join(5_000);
+            assertThat(thread.isAlive()).isFalse();
+            assertThat(failure.get()).isInstanceOf(IllegalStateException.class);
+            pipeline.submit(1, () -> { throw new IllegalArgumentException("invalid order"); });
+            pipeline.submit(2, () -> new CoreMatchingResult(true, "TWO"));
+            assertThatThrownBy(() -> pipeline.poll(1)).isInstanceOf(IllegalArgumentException.class);
+            assertThat(pipeline.poll(2).resultCode()).isEqualTo("TWO");
+            assertThat(pipeline.inFlight()).isZero();
+        }
+    }
+
+    @Test
     void backgroundReadObservesItsSubmissionFenceAndFailureDoesNotPoisonTrading() throws Exception {
         var entered=new CountDownLatch(1);var release=new CountDownLatch(1);
         var value=new java.util.concurrent.atomic.AtomicInteger();

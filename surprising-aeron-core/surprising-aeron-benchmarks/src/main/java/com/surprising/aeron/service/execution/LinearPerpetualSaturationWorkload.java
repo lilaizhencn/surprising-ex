@@ -514,7 +514,8 @@ final class LinearPerpetualSaturationWorkload {
                         || laneOperations != Math.addExact(laneOperationsByType[0], laneOperationsByType[1])
                         || laneOperations <= Math.multiplyExact(operationsPerRun, 2L)
                         || laneOperations > Math.multiplyExact(operationsPerRun, 3L)
-                        || parallelSettlementLanes < 2
+                        || (TradingExecutionMode.configured() == TradingExecutionMode.FUSED
+                            ? parallelSettlementLanes != 0 : parallelSettlementLanes < 2)
                         || maxInFlight > 1 && settlementInFlightHighWaterMark < 2
                         || rejectedLaneSubmissions != 0
                         || queuedLaneOperations != 0

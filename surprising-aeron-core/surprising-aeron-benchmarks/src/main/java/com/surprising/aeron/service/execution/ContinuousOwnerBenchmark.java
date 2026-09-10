@@ -26,6 +26,10 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
     /** 分别覆盖阻塞唤醒合并及忙轮询所有权交接；每个fork固定一种策略。 */
     @Param({"BLOCKING", "BUSY_SPIN"})
     public String laneWaitStrategy = "BLOCKING";
+    /** 固定真实业务执行策略，避免只比较启动参数而未覆盖融合路径。 */
+    @Param({"FUSED", "PIPELINED"})
+    public String executionMode = "FUSED";
+    private String previousExecutionMode;
     private String previousLaneWaitStrategy;
     private static final long TIME = 1_700_000_000_000L;
     /** 单一负载线程持有发送计数和响应计数；实际Owner运行于生产服务创建的线程。 */
@@ -46,6 +50,8 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
     public void setup() {
         previousLaneWaitStrategy = System.getProperty("surprising.aeron.settlement-wait-strategy");
         System.setProperty("surprising.aeron.settlement-wait-strategy", laneWaitStrategy);
+        previousExecutionMode = System.getProperty("surprising.aeron.execution-mode");
+        System.setProperty("surprising.aeron.execution-mode", executionMode);
         transportThread = Thread.currentThread();
         ContractType type = ContractType.valueOf(productLine.contractTypeCode());
         asset = type.isInverse() ? "BTC" : "USDT";
@@ -233,7 +239,9 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
         } finally {
             try { service.onTerminate(null); }
             finally {
-                if (previousLaneWaitStrategy == null) System.clearProperty("surprising.aeron.settlement-wait-strategy");
+                if (previousExecutionMode == null) System.clearProperty("surprising.aeron.execution-mode");
+        else System.setProperty("surprising.aeron.execution-mode", previousExecutionMode);
+        if (previousLaneWaitStrategy == null) System.clearProperty("surprising.aeron.settlement-wait-strategy");
                 else System.setProperty("surprising.aeron.settlement-wait-strategy", previousLaneWaitStrategy);
             }
         }

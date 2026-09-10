@@ -253,16 +253,16 @@ final class OrderBatchExecutor {
 
     void submitPipelinedPlaceBatch(PendingMatching pending, OrderBatchPending batch) {
         long userId = pending.command().header().userId();
-        owner.matcherPipeline.submit(owner.matchingAdapter.matcherShardId(batch.preparedSymbols.getFirst()),
-                pending.sequence(), () -> {
+        int shard = owner.matchingAdapter.matcherShardId(batch.preparedSymbols.getFirst());
+        owner.matcherPipeline.submit(shard, pending.sequence(), () -> {
             owner.matchingAdapter.prepareOrderRoutes(userId, batch.preparedSymbols);
-            return submitPreparedPipelinedPlaceBatch(pending, batch, userId);
+            return submitPreparedPipelinedPlaceBatch(pending, batch, userId, shard);
         });
     }
 
     com.surprising.aeron.service.matching.CoreMatchingResult
             submitPreparedPipelinedPlaceBatch(
-                    PendingMatching pending, OrderBatchPending batch, long userId) {
+                    PendingMatching pending, OrderBatchPending batch, long userId, int shard) {
         List<com.surprising.aeron.service.matching.CoreMatchingResult> results =
                 batch.pipelinedMatchingResults;
         results.clear();
@@ -272,8 +272,8 @@ final class OrderBatchExecutor {
                 PlaceOrderCommand command = (PlaceOrderCommand) item.command;
                 com.surprising.aeron.service.matching.CoreMatchingOrder matchingOrder =
                         batch.preparedMatchingOrders[index];
-                results.add(owner.matchingAdapter.executeControlWithEvidenceSync(
-                        pending.sequence(), pending.command().header().commandId(),
+                results.add(owner.matchingAdapter.executeShardWithEvidenceSync(
+                        shard, pending.sequence(), pending.command().header().commandId(),
                         command.orderId(), command.instrumentChangeId(),
                         pending.command().header().submittedAtEpochMillis(),
                         () -> owner.matchingAdapter.place(userId, matchingOrder)));
@@ -288,7 +288,7 @@ final class OrderBatchExecutor {
     CoreResponse startOrderBatchItem(OrderBatchPending batch, PendingMatching pending,
                                              long clusterTimestamp, long clusterPosition,
                                              boolean deferCompletion) {
-        if (!owner.runtimeState.tryEnterSequentialLaneStage()) {
+        if (batch.kind != OrderBatchKind.CANCEL && !owner.runtimeState.tryEnterSequentialLaneStage()) {
             batch.sequentialAdmission = true;
             batch.started = false;
             owner.suspendMatchingCommitContext(pending);
@@ -487,11 +487,6 @@ final class OrderBatchExecutor {
                                               CoreMatchingResult matchingResult) {
         batch.lastMatchingResult = matchingResult;
         batch.retainMatchingResult(matchingResult);
-        try {
-            batch.advanceMatcher(matchingResult);
-        } catch (IllegalArgumentException exception) {
-            throw failOrderBatch(batch, pending, "order batch matcher transition is not contiguous", exception);
-        }
         OrderBatchItem item = batch.items.get(batch.nextIndex);
         ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
         CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
@@ -545,12 +540,6 @@ final class OrderBatchExecutor {
             }
             batch.lastMatchingResult = matchingResult;
             batch.retainMatchingResult(matchingResult);
-            try {
-                batch.advanceMatcher(matchingResult);
-            } catch (IllegalArgumentException exception) {
-                throw failOrderBatch(batch, pending,
-                        "order batch matcher transition is not contiguous", exception);
-            }
             OrderBatchItem item = batch.items.get(batch.nextIndex);
             ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
             CoreResultCode resultCode = matchingResult.accepted()
@@ -902,8 +891,6 @@ final class OrderBatchExecutor {
         batch.beforeProjection = owner.currentProjectionPoint;
         batch.runtimeCheckpoint = owner.runtimeState.commandRevisionCheckpoint();
         batch.positionIdentityCheckpoint = owner.identities.positionCheckpoint();
-        batch.matcherTransition = com.surprising.aeron.protocol.CoreMatcherTransition.unchanged(
-                owner.commits.matcherSequence(-1), owner.commits.matcherPrefixDigest(-1));
         batch.beginCommit();
         owner.commits.beginCommitPublicationBatch();
     }
@@ -1089,6 +1076,9 @@ final class OrderBatchExecutor {
                         false, "EXCHANGE_CORE_FAILURE");
             }
         };
-        return owner.matchingEvidenceCommand(pending, orderId, instrumentChangeId, true, guarded);
+        int shard = orderBatchMatcherShard(batch);
+        return () -> owner.matchingAdapter.executeShardWithEvidenceSync(shard, pending.sequence(),
+                pending.command().header().commandId(), orderId, instrumentChangeId,
+                pending.command().header().submittedAtEpochMillis(), guarded);
     }
 }

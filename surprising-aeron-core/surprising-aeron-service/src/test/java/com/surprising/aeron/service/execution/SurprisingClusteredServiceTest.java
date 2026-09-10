@@ -48,6 +48,7 @@ import org.agrona.concurrent.UnsafeBuffer;
 import org.junit.jupiter.api.Test;
 
 class SurprisingClusteredServiceTest {
+    @org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
     @Test
     void bookQueryDoesNotWaitForBlockedMatcherAndCompletesOnLaterLoggedCallback() throws Exception {
         var service = service();
@@ -116,6 +117,7 @@ class SurprisingClusteredServiceTest {
         }
     }
 
+    @org.junit.jupiter.api.extension.ExtendWith(PipelinedExecutionExtension.class)
     @Test
     void stageProgressAndReentrantBackgroundDeferSnapshotUntilSettlementCompletes() throws Exception {
         var service = service();

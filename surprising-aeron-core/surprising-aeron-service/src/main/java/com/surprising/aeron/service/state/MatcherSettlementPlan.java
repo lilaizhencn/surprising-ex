@@ -10,6 +10,15 @@ import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 
 public final class MatcherSettlementPlan {
+    /** 撮合明确拒绝时，由账户 Lane 释放准入冻结并产生拒单终态。 */
+    private boolean rejectedTaker;
+    public MatcherSettlementPlan rejectTaker(boolean rejected) {
+        if (rejected && tradeCount != 0) throw new IllegalArgumentException("rejected taker cannot contain trades");
+        rejectedTaker = rejected;
+        return this;
+    }
+    boolean rejectedTaker() { return rejectedTaker; }
+
     private final long coreSequence;
     private final long takerOrderId;
     private final long activeUserId;
@@ -258,6 +267,7 @@ public final class MatcherSettlementPlan {
         copy.makerLaneNext = makerLaneNext;
         copy.takerLaneId = takerLaneId;
         copy.completedTrigger = completedTrigger;
+        copy.rejectedTaker = rejectedTaker;
         return copy;
     }
     public int preCancellationCount() { return preCancellationOrderIds.length; }

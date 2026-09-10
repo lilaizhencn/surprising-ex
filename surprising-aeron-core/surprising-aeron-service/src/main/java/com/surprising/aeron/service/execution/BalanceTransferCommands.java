@@ -14,24 +14,54 @@ final class BalanceTransferCommands {
 
     void executeAdjustBalance(CoreMessage message, long clusterTimestamp) {
         owner.resultBuilder.commandChangedUserIds = List.of(message.header().userId());
-        RuntimeCommandProcessor.adjustBalance(owner.runtimeState, owner.identities,
-                message.header().userId(), TradingCommandCodec.decodeBalanceAdjustment(message.payloadUnsafe()));
-        owner.commits.requestCommitPublication();
+        adjustBalance(message.header().userId(), TradingCommandCodec.decodeBalanceAdjustment(message.payloadUnsafe()));
+    }
+
+    private void adjustBalance(long userId, com.surprising.aeron.protocol.BalanceAdjustmentCommand command) {
+        if (owner.runtimeState.asynchronousCommands()) {
+            var work = new com.surprising.aeron.service.state.AccountBalanceAdjustment(
+                    owner.runtimeState, owner.identities, userId, command);
+            owner.deferControl(() -> {
+                if (!work.poll()) return false;
+                owner.commits.requestCommitPublication();
+                return true;
+            });
+        } else {
+            RuntimeCommandProcessor.adjustBalance(owner.runtimeState, owner.identities, userId, command);
+            owner.commits.requestCommitPublication();
+        }
     }
 
     void executeTransferOut(CoreMessage message, long clusterTimestamp) {
         owner.resultBuilder.commandChangedUserIds = List.of(message.header().userId());
-        RuntimeCommandProcessor.transferOut(owner.runtimeState, owner.identities,
-                message.header().userId(), TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe()));
+        var command = TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe());
+        if (owner.runtimeState.asynchronousCommands()) {
+            var work = new com.surprising.aeron.service.state.AccountTransferOut(
+                    owner.runtimeState, owner.identities, message.header().userId(), command);
+            owner.deferControl(() -> {
+                if (!work.poll()) return false;
+                completeTransferPublication();
+                return true;
+            });
+        } else {
+            RuntimeCommandProcessor.transferOut(owner.runtimeState, owner.identities, message.header().userId(), command);
+            completeTransferPublication();
+        }
+    }
+
+    private void completeTransferPublication() {
         owner.cachedTransferHash = TradingCoreRuntime.computeTransferHash(owner.runtimeState.pendingTransfersSnapshot());
         owner.commits.requestCommitPublication();
     }
 
     void executeTransferIn(CoreMessage message, long clusterTimestamp) {
         owner.resultBuilder.commandChangedUserIds = List.of(message.header().userId());
-        RuntimeCommandProcessor.transferIn(owner.runtimeState, owner.identities,
-                message.header().userId(), TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe()));
-        owner.commits.requestCommitPublication();
+        var command = TradingCommandCodec.decodeTransferFunds(message.payloadUnsafe());
+        if (owner.productLine != command.targetProductLine())
+            throw new com.surprising.aeron.service.state.CoreStateRejectedException(
+                    "PRODUCT_LINE_MISMATCH", "transfer target product line mismatch");
+        adjustBalance(message.header().userId(), new com.surprising.aeron.protocol.BalanceAdjustmentCommand(
+                command.asset(), command.amountUnits()));
     }
 
     void executeCompleteTransfer(CoreMessage message, long clusterTimestamp) {

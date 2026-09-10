@@ -522,7 +522,8 @@ public class ClusteredBatchTradingBenchmark {
                 for (int user = 0; user < 256; user++) send(command(CoreMessageType.CANCEL_ORDER, 1_000 + user,
                         TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(firstOrders[user]))));
                 drain();
-                if (terminal - before != 512 || service.commandWindowHighWaterMark() < 2)
+                if (terminal - before != 512 || (TradingExecutionMode.configured() == TradingExecutionMode.PIPELINED
+                        && service.commandWindowHighWaterMark() < 2))
                     throw new IllegalStateException("independent commands did not pipeline and complete");
             } finally { singleResponses = false; }
         }
@@ -573,7 +574,8 @@ public class ClusteredBatchTradingBenchmark {
                         TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(orders))));
             }
             drain();
-            if (terminal - before != 512 || service.commandWindowHighWaterMark() < 2)
+            if (terminal - before != 512 || (TradingExecutionMode.configured() == TradingExecutionMode.PIPELINED
+                        && service.commandWindowHighWaterMark() < 2))
                 throw new IllegalStateException("independent batches did not pipeline and complete");
         }
 

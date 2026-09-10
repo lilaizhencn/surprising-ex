@@ -19,6 +19,8 @@ final class MatcherCommandPipeline implements AutoCloseable {
     private final Slot[] slots;
     private final int mask;
     private volatile Thread worker;
+    /** 融合模式下唯一的撮合写入线程；不启动队列消费者线程。 */
+    private Thread inlineOwner;
     private Runnable startupAction;
     private final PaddedSequence submittedPosition = new PaddedSequence();
     private final PaddedSequence consumedPosition = new PaddedSequence();
@@ -37,6 +39,13 @@ final class MatcherCommandPipeline implements AutoCloseable {
     <T> java.util.concurrent.CompletableFuture<T> readAtSubmissionFence(Supplier<T> read) {
         if (!accepting || backgroundRead != null) return java.util.concurrent.CompletableFuture.failedFuture(
                 new RejectedExecutionException("matcher read mailbox unavailable"));
+        if (inlineOwner != null) {
+            assertInlineOwner();
+            try { return java.util.concurrent.CompletableFuture.completedFuture(read.get()); }
+            catch (RuntimeException failure) {
+                return java.util.concurrent.CompletableFuture.failedFuture(failure);
+            }
+        }
         var future=new java.util.concurrent.CompletableFuture<T>();
         backgroundRead=new BackgroundRead<>(submittedPosition.value,read,future);
         LockSupport.unpark(worker);return future;
@@ -63,6 +72,23 @@ final class MatcherCommandPipeline implements AutoCloseable {
         for (int index = 0; index < requestedCapacity; index++) slots[index] = new Slot();
         mask = requestedCapacity - 1;
         if (startImmediately) start(null);
+    }
+
+    /** 在交易线程激活撮合；完成槽只保留本线程内的有序消费边界。 */
+    synchronized void startInline(Runnable action) {
+        if (worker != null || started || inlineOwner != null) {
+            throw new IllegalStateException("matcher pipeline is already started");
+        }
+        inlineOwner = Thread.currentThread();
+        started = true;
+        if (action != null) action.run();
+        accepting = true;
+    }
+
+    private void assertInlineOwner() {
+        if (inlineOwner != Thread.currentThread()) {
+            throw new IllegalStateException("fused matcher is bound to another thread");
+        }
     }
 
     synchronized void start(Runnable action) {
@@ -111,6 +137,7 @@ final class MatcherCommandPipeline implements AutoCloseable {
     private void submitInternal(long token, Supplier<?> command) {
         if (token == 0 || command == null) throw new IllegalArgumentException("matcher command is invalid");
         if (!accepting) throw new RejectedExecutionException("matcher pipeline is closed");
+        if (inlineOwner != null) assertInlineOwner();
         long position = submittedPosition.value;
         if (position - consumedPosition.value >= slots.length) {
             throw new RejectedExecutionException("matcher pipeline is full");
@@ -124,7 +151,13 @@ final class MatcherCommandPipeline implements AutoCloseable {
         submittedPosition.value = position + 1;
         int depth = Math.toIntExact(position + 1 - consumedPosition.value);
         submissionHighWaterMark = Math.max(submissionHighWaterMark, depth);
-        if (position == workerPosition.value) LockSupport.unpark(worker);
+        if (inlineOwner != null) {
+            try { slot.result = command.get(); }
+            catch (Throwable failure) { slot.failure = failure; }
+            workerPosition.value = position + 1;
+            completedPosition.value = position + 1;
+            completionHighWaterMark = Math.max(completionHighWaterMark, depth);
+        } else if (position == workerPosition.value) LockSupport.unpark(worker);
     }
 
     CoreMatchingResult poll(long expectedCoreSequence) {
@@ -149,6 +182,7 @@ final class MatcherCommandPipeline implements AutoCloseable {
 
     private Object pollResult(long expectedToken) {
         if (expectedToken == 0) throw new IllegalArgumentException("matcher token must be non-zero");
+        if (inlineOwner != null) assertInlineOwner();
         long position = consumedPosition.value;
         if (position >= completedPosition.value) return null;
         Slot slot = slots[(int) position & mask];
@@ -297,6 +331,7 @@ final class MatcherCommandPipeline implements AutoCloseable {
     }
 
     void close(Runnable action) {
+        if (inlineOwner != null) assertInlineOwner();
         Thread activeWorker = worker;
         if (activeWorker == null) {
             accepting = false;
