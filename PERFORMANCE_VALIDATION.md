@@ -5874,3 +5874,59 @@ JMH 原始 JFR、JSON 与日志已分析并清理。
 执行入口：HotSpot25 `mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am verify`；服务SurprisingClusterNode；负载ClusterMixedCapacityMain；JMH ClusterOperationalBenchmark.continuousOperations -f1 -wi0 -i1 -p controlPageSize=0 -prof gc；控制JMH ClusterAccountControlBenchmark.accountControls -f1 -wi1 -i2 -p productLine=<对应产品> -prof gc；恢复ClusterProductLineGateMain及真实RecordingLog快照。详细部署/负载参数见预锁记录。
 
 本轮临时根目录 /tmp/architecture-single-final-v1 与 /tmp/architecture-lanes-single-gates-v4 的原始 Archive、JFR、日志和 JSON，以及两实验工作区的测试报告，分析记录后清理；不再把这些目录当作可访问证据。分支保留编译产物用于后续工作，不触碰主工作区或云端资源。
+
+
+## 2026-09-10 方案二 Owner 批量收尾精简：采集前锁定
+
+- 被测分支 experiment/lane-owned-state，基于 0ad3e1a8 的本轮工作区；仅测方案二，不启动方案一或云端。历史同口径方案二 151273.405 terminal business ops/s 仅供趋势比较。
+- 修改：借用订单字段编码批量结果；复用批量资金增量并删除中间合并；单结算事件直接持有、缓存 Owner 已观察到的 Lane 完成位；订单/持仓状态与预计算索引共用键表、提交时一次遍历。保留资金依赖、失败检查及有序提交。
+- 环境固定：macOS 26.7，i9-9880H 8C16T / 16 GiB，HotSpot 兼容 GraalVM JDK 25.0.1、G1、Maven 3.9.16。单个真实 Aeron Cluster 成员，网络+Archive+业务 Core，PIPELINED，4 Account Lane、2 matcher（扩展性诊断，非单 matcher/三节点容量验收），Account BUSY_SPIN/spin-limit=0，服务 YIELDING，SHARED_NETWORK，客户端 SHARED。
+- JVM：节点 Xms512m/Xmx1536m，客户端128m/512m，NMT summary；开放 jdk.internal.misc/java.util.zip，native access。脚本保留精确命令与 jar SHA256。
+- 场景：LINEAR_PERPETUAL 连续异步交易流，256 symbols、1769 users、1 command session+1 query session；全局/会话在途256，batch20，生成行情；mixed-trading-stream=true、mixed-operational=false。沿用已有初始化资金/持仓及买卖挂单、IOC成交、批量撤单轮转；无逐笔等待，无固定到达率，窗口闭环，未修正 coordinated omission。六产品线分别做业务、故障重放、快照恢复功能核验，不同时启动。
+- 无 profiler 主测两轮，seed131001/131002，预热30秒、测量60秒；每轮独立新集群，结束排空核账并停止进程。JMH ClusterOperationalBenchmark.continuousOperations，fork1/thread1/SingleShotTime、JMH warmup0/measurement1，内部预热30秒测量45秒，-prof gc；节点 JFR profile/maxsize128m。新增批量每项订单身份与数量一致性检查，覆盖复用编码游标；JMH分数为整轮秒数，GC规范化单位为客户端每轮，不当作每业务操作。
+- 通过条件：功能回归无失败；accepted/terminal业务数与消息数相等、unfinished=0、超时/错误0、资金差额0、批量订单身份正确；重放/快照恢复业务hash一致。吞吐目标维持历史151273.405的95%以上（143709.735 ops/s），两轮合并；低于目标必须如实定位。profile用于归因，不混入主分数；无JFR DataLoss/低磁盘环境异常。样本不代表长稳泄漏、云端三节点或全部控制任务并发容量。
+- 运行脚本 /tmp/lanes-owner-trim/run_load.py、run_gates.py；产物 /tmp/lanes-owner-trim-load-v1 与 /tmp/lanes-owner-trim-gates-v1。分析后记入本文件并清理本轮日志、录制、JFR、测试报告；不保留新MD。
+
+- 采集前补充：共享状态索引影响六产品线，因此依次执行真实单成员 ClusterAccountControlBenchmark.accountControls，逐产品线 fork1/warmup1/measurement2/thread1/-prof gc，节点同样 JFR profile；每 invocation 100 次同账户控制循环及初始交易，核验资金与hash。这组是功能路径性能诊断，不混入连续交易主吞吐。
+
+### 方案二 Owner 精简：结果（2026-09-10 13:35–13:48，本机单成员）
+
+- 实测代码提交 `8b5e7cfe`；构建时为相同源码工作区，服务 jar SHA256 `b185484ff10928eb601e2234e2812fabe321c243ea6f0cb2bfe56e40178d91ca`。未测试/修改方案一或主工作区。
+- 执行：上述 JDK25 环境下 `mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am verify`；首次暴露测试对旧 `settlementEvents`、旧缓冲字段布局的反射依赖，已适配并保留原断言。随后新增压测响应断言错误地禁止已退役订单视图为空，被原测试拦住；修正为视图非空时验证订单身份/数量，补串单拒绝测试。最终定向重跑及 `package` 成功，受影响 XML 合计1193项、失败0、错误0、跳过1（未配置 INSTRUMENT_SEED_TEST_JDBC_URL）。没有将这些测试结构错误归因于资金业务。
+- 两轮主测分别166705.438、167313.208 terminal business ops/s；按实际测量时间合并167009.421 ops/s，16133.068 terminal Core messages/s、39704.303 fills/s；相比历史方案二151273.405约+10.40%，超过预锁143709.735下限。仅两轮短测，无跨天环境归因/三节点容量结论。
+- 每轮 offered与terminal业务数/消息数严格相等、unfinished=0、最终排空、峰值在途256；资金差额0，用户/做市持仓、冻结、亏损/清算/保险/ADL初始场景核验通过。主测 queries=0、triggerExecutions=0、mixed-operational=false，不宣称实时风控/触发/查询混合饱和。本场景无拒绝/命令错误/超时退出，但未额外采集独立 accepted 阶段直方图。
+
+```text
+lanes-main-LINEAR_PERPETUAL-0
+mixedCapacity=PASS elapsedSeconds=60.073 terminalBusinessOperations=10014464 offeredBusinessOperations=10014464 terminalCoreMessages=967424 offeredCoreMessages=967424 businessOpsPerSec=166705.438 coreMessagesPerSec=16104.191 fills=2380800 fillsPerSec=39631.907 queries=0 unfinished=0 peakInFlight=256 measuredCycles=465 totalCycles=689 triggerExecutions=0
+business=PLACE_ORDER items=238080 requests=238080 p50us=6639 p90us=18431 p95us=20414 p99us=25722 p999us=45973 maxus=61079
+business=CANCEL_ORDER items=238080 requests=238080 p50us=6664 p90us=23674 p95us=26345 p99us=33144 p999us=54951 maxus=69337
+business=APPLY_MARK_PRICE items=15104 requests=15104 p50us=12681 p90us=25247 p95us=27115 p99us=33210 p999us=42106 maxus=45645
+business=PLACE_ORDER_BATCH items=7142400 requests=357120 p50us=21676 p90us=27836 p95us=30818 p99us=38895 p999us=65437 maxus=69337
+business=CANCEL_ORDER_BATCH items=2380800 requests=119040 p50us=23265 p90us=27033 p95us=31342 p99us=48463 p999us=63012 maxus=65896
+lanes-main-LINEAR_PERPETUAL-1
+mixedCapacity=PASS elapsedSeconds=60.112 terminalBusinessOperations=10057472 offeredBusinessOperations=10057472 terminalCoreMessages=971520 offeredCoreMessages=971520 businessOpsPerSec=167313.208 coreMessagesPerSec=16161.927 fills=2391040 fillsPerSec=39776.653 queries=0 unfinished=0 peakInFlight=256 measuredCycles=467 totalCycles=675 triggerExecutions=0
+business=PLACE_ORDER items=239104 requests=239104 p50us=6635 p90us=18481 p95us=20332 p99us=25608 p999us=46170 maxus=61505
+business=CANCEL_ORDER items=239104 requests=239104 p50us=6676 p90us=23543 p95us=25886 p99us=33947 p999us=55934 maxus=73072
+business=APPLY_MARK_PRICE items=15104 requests=15104 p50us=12132 p90us=26427 p95us=30228 p99us=39288 p999us=56918 maxus=58195
+business=PLACE_ORDER_BATCH items=7173120 requests=358656 p50us=21659 p90us=27148 p95us=31047 p99us=39780 p999us=62783 maxus=79101
+business=CANCEL_ORDER_BATCH items=2391040 requests=119552 p50us=22937 p90us=26804 p95us=32260 p99us=53379 p999us=74186 maxus=75628
+```
+
+- 延迟为客户端发送到终态响应，单位us，未修正coordinated omission；p50/p90/p95/p99/p99.9/max及样本数见上表。批量20项，PLACE_BATCH约5948/5966 batches/s（118966/119329 items/s），CANCEL_BATCH约1982/1989 batches/s；不将fills混为业务操作。普通下单p99为25.722/25.608ms，仍不是低于1ms。
+- JMH真实外部Cluster连续轮：45.141053642秒/整轮，内部终态165078.503 business ops/s、15949.613 Core messages/s、39244.445 fills/s、7451752业务动作/719976消息均终态，unfinished0；客户端gc.alloc.rate=126.667MiB/s、gc.alloc.rate.norm=14753509552 B/整轮、gc.count190/gc.time185ms。SingleShot单样本无置信区间，不把客户端B/整轮误报成Core B/业务操作。
+- JFR节点profile文件5,917,833字节，SHA256 `5a19c9bf01c9c6d7b55c04c2ccc1d249c2cfd31f4c11b113dd79023246349913`；分析仅measurementStart/End窗口45.141秒。Owner CPU97.290%单核；matcher23.390/23.299%；四Lane97.35–97.37%，大量自旋。机器CPU81.94%、节点JVM59.07%（整机口径）。Owner3311执行样本，finishOrderBatch929=28.06%，preparePipelinedPlaceBatch512=15.46%，collectMatcherSettlement398=12.02%，commitTerminalToOwner302=9.12%，visitChangedIndexes133=4.02%；inclusive调用树互相包含，不能相加。Lane14957样本中结算execute844、准入execute524，不能把近满核视为业务饱和。
+- 节点ObjectAllocationSample权重估计541.695MiB/s、3440.862B/业务操作；历史3539.043B/操作，约下降2.77%，绝对分配率随吞吐提高，仍非零分配。热点包括Owner byte[]/long[]/OrderBatchItem/ResolvedPlaceOrder、Lane long[]/OrderRuntime。profile没有精确TLAB/非TLAB逐对象计数，不能宣称精确对象数/最大实际对象。
+- GCPhasePause116次/982.536ms，约测量时间2.18%，p99=11.262ms/max15.712ms；GarbageCollection事件96 G1New+10 G1Old（G1Old不是10次Full GC），累计事件duration1367.015ms含并发部分；heap最大447.28MiB，测量内AfterGC采样约100–210MiB，无本轮疏散失败证据。停顿对25ms级p99有影响，未证明每条尾延迟的因果归属。
+- NMT启动后/最终reserved3144228→3151459KiB、committed691712→725939KiB（+34227KiB），主要Code committed15986→40129、GC71182→71980、Thread1895→2678；Heap526336→524288KiB、Other9409→9411KiB。测量DirectBuffer count8/memory9575136字节保持不变。未完整统计mmap/Aeron池逐分配释放余额，短轮无法证明无泄漏。
+- 测量SafepointBegin118次，总到达时间8.725ms/max0.533ms；VM operation120次/总986.149ms/max15.740ms。Compilation4次/836.483ms/max257.275ms、Deoptimization17次，仍有编译活动；线程峰值23。主轮和六控制轮JFR DataLoss均0，Owner采样同步文件/网络I/O事件0；profile事件阈值不能证明绝对无任何等待。未采集OS换页增量/调度节流/长稳泄漏及全产品完整阶段延迟，因此这是本轮优化的功能+性能诊断通过，不是全部生产容量指标验收。
+- 六产品线真实单成员业务→SIGKILL→日志重放→快照恢复全部PASS，fundsDiff0；快照位置SPOT3616，两永续9568，两交割及OPTION5184。连续压测profile的全量日志重放及快照恢复也PASS，同一businessHash `1b18fe4bbef90ab9`，snapshotPosition1166851008。
+- 恢复时Aeron1.53.0出现一次已有quorum position warning（leaderCommitPosition1166165024/quorumPosition0），随后正常LEADER且两次hash/资金核对通过；沿用此前已定位的上游恢复期quorum计算提示，不修改/屏蔽它。另有JDK25 Unsafe、SLF4J/JMH依赖提示，未出现交易EXCHANGE_CORE_FAILURE。
+- 六产品线控制JMH（每invocation100循环；fork1/warmup1/measurement2，不是主吞吐；均accountControlVerify=PASS），对应节点JFR均有执行/分配样本且无DataLoss：
+  - lanes-control-INVERSE_DELIVERY-0: 3135.623 ms/100循环，客户端 0.977 MiB/s、3258756 B/100循环、GC0。
+  - lanes-control-INVERSE_PERPETUAL-0: 3050.973 ms/100循环，客户端 0.994 MiB/s、3216368 B/100循环、GC0。
+  - lanes-control-LINEAR_DELIVERY-0: 3054.509 ms/100循环，客户端 1.176 MiB/s、3815220 B/100循环、GC0。
+  - lanes-control-LINEAR_PERPETUAL-0: 3033.752 ms/100循环，客户端 0.768 MiB/s、2473500 B/100循环、GC0。
+  - lanes-control-OPTION-0: 2315.876 ms/100循环，客户端 1.035 MiB/s、2548264 B/100循环、GC0。
+  - lanes-control-SPOT-0: 793.161 ms/100循环，客户端 1.566 MiB/s、1375068 B/100循环、GC0。
+- 执行脚本：`python3 /tmp/lanes-owner-trim/run_gates.py`、`run_load.py`、`recover.py`；所有节点及客户端结束。原始路径为本段采集前列出的两个临时目录，分析摘要已写入本文件；随后删除本轮Archive、JFR、日志、测试报告和临时分析文件。已删除路径只作历史来源，不再作为可访问证据。
