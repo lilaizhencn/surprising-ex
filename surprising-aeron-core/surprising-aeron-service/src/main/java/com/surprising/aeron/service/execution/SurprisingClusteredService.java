@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.execution;
 
 import com.surprising.aeron.protocol.CoreMessage;
+import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageType;
@@ -138,10 +139,16 @@ public final class SurprisingClusteredService implements ClusteredService {
     }
 
     void acceptCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position) {
+        acceptCommittedCommand(session, request, timestamp, position, null);
+    }
+
+    /** 指纹来自服务内部解码后的日志记录，不能接受客户端提供的摘要。 */
+    void acceptCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position,
+                                CommandFingerprint fingerprint) {
         try {
             processingLogCallback = true;
             pendingResponses.poll(System.nanoTime(), MATCHING_COMPLETION_BATCH_SIZE);
-            processIngress(session, request, timestamp, position);
+            processIngress(session, request, timestamp, position, fingerprint);
         } catch (org.agrona.concurrent.AgentTerminationException failure) {
             throw failure;
         } catch (RuntimeException failure) {
@@ -174,9 +181,10 @@ public final class SurprisingClusteredService implements ClusteredService {
         }
     }
 
-    private void processIngress(ClientSession session, CoreMessage request, long timestamp, long position) {
+    private void processIngress(ClientSession session, CoreMessage request, long timestamp, long position,
+                                CommandFingerprint fingerprint) {
         awaitIngressCapacity(request);
-        pendingIngress.add(session, request, timestamp, position);
+        pendingIngress.add(session, request, timestamp, position, fingerprint);
         progressCommands(false);
     }
 
@@ -232,15 +240,15 @@ public final class SurprisingClusteredService implements ClusteredService {
                 beginCapture(next.position, next.timestamp);
                 progressDeadline = System.nanoTime() + COMMAND_TIMEOUT_NANOS;
                 controlResponse = state.applyDecodedCommand(next.command, next.timestamp, next.position,
-                        commandWindow.decodedIfPresent(next.command), false);
+                        commandWindow.decodedIfPresent(next.command), false, next.fingerprint);
                 responseSequence = state.matchingSequence(next.command.header().commandId());
                 matchingResponse = null;
                 continue;
             }
             if (commandWindow.size() == 0) state.assertClusterCallbackComplete();
             var entry = commandWindow.add(next.session, next.command, next.timestamp, next.position);
-            CoreResponse result = state.applyClusterCommand(next.command, next.timestamp, next.position,
-                    commandWindow.decoded(next.command));
+            CoreResponse result = state.applyDecodedCommand(next.command, next.timestamp, next.position,
+                    commandWindow.decoded(next.command), true, next.fingerprint);
             entry.sequence = state.matchingSequence(next.command.header().commandId());
             if (entry.sequence != 0) state.pendingMatching(entry.sequence).establishCommitFence(next.timestamp, next.position);
             entry.response = entry.sequence == 0 ? result : null;

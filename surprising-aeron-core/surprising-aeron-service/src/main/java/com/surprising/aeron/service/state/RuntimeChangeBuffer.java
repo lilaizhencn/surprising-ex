@@ -132,6 +132,16 @@ final class RuntimeChangeBuffer<V> {
         }
     }
 
+    /** 发布到另一所有者的提交视图时同遍释放引用；回调不得修改或读取本缓冲。失败后由日志恢复。 */
+    void drainTo(org.eclipse.collections.api.block.procedure.primitive.LongObjectProcedure<V> consumer) {
+        for (int index = 0; index < size; index++) {
+            @SuppressWarnings("unchecked") V value = (V) values[index];
+            consumer.value(keys[index], value);
+            values[index] = null;
+        }
+        resetIndex();
+    }
+
     org.eclipse.collections.api.iterator.LongIterator longIterator() {
         return new org.eclipse.collections.api.iterator.LongIterator() {
             /** 当前只读迭代器位置，不改变底层变更缓冲。 */
@@ -156,6 +166,10 @@ final class RuntimeChangeBuffer<V> {
 
     void clear() {
         for (int index = 0; index < size; index++) values[index] = null;
+        resetIndex();
+    }
+
+    private void resetIndex() {
         size = 0;
         if (++indexGeneration == 0) {
             java.util.Arrays.fill(indexGenerations, 0);

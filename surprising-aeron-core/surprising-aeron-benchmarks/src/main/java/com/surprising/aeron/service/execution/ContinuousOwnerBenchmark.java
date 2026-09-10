@@ -23,6 +23,10 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
     /** 20项批量响应覆盖不可变payload跨线程交接及复用编码缓冲区。 */
     @Param({"1", "20"})
     public int batchSize = 1;
+    /** 分别覆盖阻塞唤醒合并及忙轮询所有权交接；每个fork固定一种策略。 */
+    @Param({"BLOCKING", "BUSY_SPIN"})
+    public String laneWaitStrategy = "BLOCKING";
+    private String previousLaneWaitStrategy;
     private static final long TIME = 1_700_000_000_000L;
     /** 单一负载线程持有发送计数和响应计数；实际Owner运行于生产服务创建的线程。 */
     private ContinuousTradingClusterService service;
@@ -40,6 +44,8 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
 
     @Setup(Level.Trial)
     public void setup() {
+        previousLaneWaitStrategy = System.getProperty("surprising.aeron.settlement-wait-strategy");
+        System.setProperty("surprising.aeron.settlement-wait-strategy", laneWaitStrategy);
         transportThread = Thread.currentThread();
         ContractType type = ContractType.valueOf(productLine.contractTypeCode());
         asset = type.isInverse() ? "BTC" : "USDT";
@@ -224,7 +230,13 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
             }
             if (timerCalls != 0 || apiCalls == 0 || terminal != sequence)
                 throw new IllegalStateException("invalid transport/timer/terminal counters");
-        } finally { service.onTerminate(null); }
+        } finally {
+            try { service.onTerminate(null); }
+            finally {
+                if (previousLaneWaitStrategy == null) System.clearProperty("surprising.aeron.settlement-wait-strategy");
+                else System.setProperty("surprising.aeron.settlement-wait-strategy", previousLaneWaitStrategy);
+            }
+        }
     }
 
     private static Object zero(Class<?> type) {

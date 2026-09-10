@@ -1,6 +1,8 @@
 package com.surprising.aeron.service.state;
 
 import java.util.Locale;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
@@ -25,7 +27,13 @@ final class SettlementLaneWorker implements AutoCloseable {
     private volatile boolean started;
     private volatile boolean running = true;
     private volatile Throwable failure;
+    /** Lane先声明休眠再重读工作/恢复序号；生产者CAS认领一次唤醒，合并同轮后续通知。 */
     private volatile boolean parkRequested;
+    private static final VarHandle PARK_REQUESTED;
+    static {
+        try { PARK_REQUESTED = MethodHandles.lookup().findVarHandle(SettlementLaneWorker.class, "parkRequested", boolean.class); }
+        catch (ReflectiveOperationException failure) { throw new ExceptionInInitializerError(failure); }
+    }
 
     SettlementLaneWorker(String role, AccountLaneState lane, int requestedCapacity) {
         if (role == null || role.isBlank() || lane == null || requestedCapacity <= 0) {
@@ -66,7 +74,7 @@ final class SettlementLaneWorker implements AutoCloseable {
     boolean handoffReady(long epoch) { return completedHandoff == epoch; }
     void resumeHandoff(long epoch) {
         resumedHandoff = epoch;
-        LockSupport.unpark(thread);
+        signalWork();
     }
 
     long submit(Command command) {
@@ -83,8 +91,14 @@ final class SettlementLaneWorker implements AutoCloseable {
         // The consumer announces parking BEFORE rechecking producerSequence. These volatile
         // accesses ensure either it sees this publication or we observe its wake-up request.
         // Do not replace this handshake with an empty-queue check on consumerSequence.
-        if (waitStrategy == WaitStrategy.BLOCKING && parkRequested) LockSupport.unpark(thread);
+        signalWork();
         return next + 1;
+    }
+
+    /** 同一次休眠只唤醒一次；CAS失败说明已通知或Lane已恢复，不能省略消费者的重读。 */
+    private void signalWork() {
+        if (waitStrategy == WaitStrategy.BLOCKING && parkRequested
+                && PARK_REQUESTED.compareAndSet(this, true, false)) LockSupport.unpark(thread);
     }
 
     int depth() {
@@ -114,7 +128,16 @@ final class SettlementLaneWorker implements AutoCloseable {
                 if (completedHandoff > reboundHandoff) {
                     if (resumedHandoff < completedHandoff) {
                         if (!running) break;
-                        LockSupport.parkNanos(this, 1_000_000L);
+                        switch (waitStrategy) {
+                            case BUSY_SPIN -> Thread.onSpinWait();
+                            case YIELDING -> Thread.yield();
+                            case BLOCKING -> {
+                                parkRequested = true;
+                                try {
+                                    if (running && resumedHandoff < completedHandoff) LockSupport.park(this);
+                                } finally { parkRequested = false; }
+                            }
+                        }
                         continue;
                     }
                     lane.bindOwner();

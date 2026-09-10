@@ -65,6 +65,33 @@ class CoreCommandFingerprintTest {
         assertThat(restored.lastSourceSequences()).isEqualTo(sourceSequences);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.EnumSource(ProductLine.class)
+    void preparedFingerprintIsRetainedAndConflictsSurviveSnapshot(ProductLine product) {
+        UUID id = UUID.randomUUID();
+        CoreMessage message = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
+                id, product, CommandSource.GATEWAY, 7, 1, 1001, 1000, 11), CoreProtocol.probePayload(7));
+        var fingerprint = com.surprising.aeron.protocol.CommandFingerprint.of(message);
+        try (var state = new TradingCoreRuntime(product)) {
+            var response = state.applyDecodedCommand(message, 1000, 1, null, false, fingerprint);
+            assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(state.resultLedger.get(id).fingerprint()).isSameAs(fingerprint);
+            try (var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
+                assertThat(restored.apply(message).status()).isEqualTo(ResponseStatus.DUPLICATE);
+                var changed = new CoreMessage(message.header(), CoreProtocol.probePayload(99));
+                assertThat(restored.applyDecodedCommand(changed, 1000, 2, null, false,
+                        com.surprising.aeron.protocol.CommandFingerprint.of(changed)).resultCode().name())
+                        .isEqualTo("IDEMPOTENCY_CONFLICT");
+                assertThat(restored.probeValue()).isEqualTo(7);
+            }
+            var next = new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT,
+                    UUID.randomUUID(), product, CommandSource.GATEWAY, 7, 2, 1001, 1001, 12),
+                    CoreProtocol.probePayload(3));
+            assertThat(state.apply(next).status()).isEqualTo(ResponseStatus.APPLIED);
+            assertThat(state.probeValue()).isEqualTo(10);
+        }
+    }
+
     private static CoreMessage probe(UUID commandId, long sourceSequence, long delta,
                                      long submittedAt, long correlationId) {
         return new CoreMessage(CoreMessageHeader.command(CoreMessageType.PROBE_INCREMENT, commandId,

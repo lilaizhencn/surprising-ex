@@ -5512,3 +5512,104 @@ com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource=395
 - 建议顺序：①收敛提交时变更发布和索引更新的重复查表/遍历，保留提交可见性，逐项证明每份索引消费者后再删容器；②减少Lane任务及handoff的通知频率，保留防丢唤醒协议，以同样wall口径验证；③同一批次复用不变instrument/资产解析，逐项资金/订单身份仍检查，命令SHA可评估在不可变输入交接时预计算并复用。健康检查和响应编码不列首要。收益未做A/B验证，不承诺提升比例；下一轮实现需六产品资金/回放/快照、JMH及三节点重测。
 - /tmp/owner-diag-wall/async.jfr SHA256 29750f8b1d355afd0511cc5c8207bc0718b74a66813b268959f654134e8d7fd5，大小3141280字节。
 - 执行入口为SurprisingClusterNode×3、ClusterMixedCapacityMain，临时runner /tmp/owner-diag-run.py及owner-diag-wall.py；JFR流式分类owner-diag-analyze.java、jfrconv墙钟折叠汇总。未改生产源码，未重建或跑新业务回归；CodeGraph工具本会话不可用，使用源码只读检查。原始产物分析后全部清理，目录将不可访问；保留本记录，不写README，不开启云资源。
+
+## 2026-09-10 Owner串行工作精简与Lane等待策略（采集前锁定）
+- 用户授权一次完成：移除无消费者统计、将SHA移出Owner、精简提交发布、合并唤醒，再独立对比等待策略。基于master 3c4b65fb工作树，未检出历史版本；对照commit不适用，仅最终工作树BLOCKING/BUSY_SPIN对比。本地HotSpot GraalVM25.0.1/Maven3.9.16/macOS26.7/i9-9880H8C16T/16GiB/G1，空闲磁盘526GiB，低于10GiB或单轮300秒停止。
+- 代码边界：输入线程对解码后独占payload计算SHA，随原输入/FIFO槽位传递，Owner按同一命令作用域使用；无外部指纹信任。Lane变更发布与引用清理合成一次遍历；prepared索引同一键由两次查询减为一次。Lane休眠先声明再重读，生产者CAS认领一次通知；handoff按BLOCKING/YIELDING/BUSY_SPIN遵循同样策略，保留唯一写入权及关闭唤醒。不删除资金/索引/幂等/有序提交。
+- 正确性门槛：相关reactor verify，六产品线指纹冲突/恢复、原冻结成交撤单/风控控制/实时提交顺序/索引/快照测试；缓冲null删除与扩容复用、Lane队列满/有序执行及三等待策略handoff。真实三节点负载金融核对PASS、offered=terminal/unfinished0、无节点业务错误/DataLoss；BLOCKING一轮日志重放及快照重启验证。
+- 网络采样两轮：3真实JVM Cluster+1load，LINEAR_PERPETUAL、1769用户/256symbol/1matcher/4Lane、全局及session256在途/batch20/单命令和保留查询session、seed112001、trading-stream=true/operational=false。原初始化资金/持仓及清算核对、持续做市/下撤单/成交/标记价不变；30秒预热+30秒测量+最终排空计时，Core512–768MiB/load128–512MiB，SHARED_NETWORK、service YIELDING、Lane spin0；只改变settlement-wait-strategy=BLOCKING/BUSY_SPIN。不额外改Owner空闲策略，不做云端容量推断，不修正CO。
+- 四JVM JFR profile64MiB、ExecutionSample2ms、CPU1秒、ThreadDump5秒、park/monitor1ms/NMTsummary。对比业务ops/s、消息/s、fills/s及分类延迟、CPU/Owner SHA热点、GC/分配。期望Owner SHA样本显著减少；无预设吞吐提升承诺。忙轮询整机过载时不默认启用，不将空转当有效饱和。
+- 六产品JMH/JFR：ContinuousOwnerBenchmark.placeCancelWithoutTimers batch20 × BLOCKING/BUSY_SPIN共12项（本轮更新）；ClusteredBatchTradingBenchmark.decodedBatchAdmissionAndSettlement batch20/maxInFlight256/accountLanes4/realtime=false/interleavedMetrics=false/settlementSpinLimit0共6项覆盖实际成交。各1fork/1thread、warmup1×1秒/measurement1×2秒，G1/512–768MiB/-prof gc/profile32MiB，退出验证资金/冻结/终态和快照。单进程定位不作为三节点容量。
+- 仅/tmp/owner-work-*产物，分析后停止进程和清理；不改README，不开云资源。未做长稳泄漏、完整运营侧载或前端/WS网络验收。
+
+### 实现与验证结果
+- 删除RuntimeFactIndexes未消费的ApplyStats/逐类访问计数及OwnerCommitPublisher无效参数。输入线程在CoreMessageFlyweightDecoder取得独占payload后计算指纹，随现有Input及PendingClusterIngress槽位传递；作用域退出恢复原指纹，嵌套不同命令不能复用外层摘要，直接runtime调用仍自行计算。没有改协议，也没有新增状态Map或额外payload副本。
+- RuntimeChangeBuffer新增drainTo：发布用户/订单/预留/持仓/清算/风险/预处理索引变更时同遍释放引用，删除原第二遍clear；prepared订单索引以一个slot查询区分缺失与显式null删除，替代get+containsKey两次查表。所有原状态、路由、资金、终态和索引更新保留。
+- Lane保持先声明park再重读序号的握手，用VarHandle CAS认领一次通知，避免同轮多次unpark；handoff的BLOCKING等待改为同样握手，BUSY_SPIN/YIELDING不再进入handoff的1ms定时park。必要所有权交接任务未删除；close仍有唤醒以保证退出。默认仍BLOCKING，未因本机满CPU启用忙轮询。
+- 定向测试BUILD SUCCESS；完整HotSpot25 `mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am verify`：161测试类/1132项，0失败0错误1环境跳过（InstrumentSeedCoreContractTest缺INSTRUMENT_SEED_TEST_JDBC_URL）。新增六产品预计算指纹的对象复用/幂等冲突/快照恢复/后续命令不串摘要；新增变更缓冲64轮扩容覆盖、null删除和引用释放；三等待策略所有权交接与现有park/活跃生产竞争、队列满、关闭排空全部通过。Chronicle模块开放警告出现在测试环境，未造成失败，网络运行包含java.util.zip开放参数。
+
+blocking Leader node1：
+```text
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=194 businessHash=384ec32278a234f
+mixedCapacity=PASS elapsedSeconds=30.184 terminalBusinessOperations=2458880 offeredBusinessOperations=2458880 terminalCoreMessages=240896 offeredCoreMessages=240896 businessOpsPerSec=81462.701 coreMessagesPerSec=7980.885 fills=583680 fillsPerSec=19337.320 queries=0 unfinished=0 peakInFlight=256 measuredCycles=114 totalCycles=194 triggerExecutions=0
+business=PLACE_ORDER items=58368 requests=58368 p50us=14286 p90us=34013 p95us=37814 p99us=50855 p999us=72286 maxus=78970
+business=CANCEL_ORDER items=58368 requests=58368 p50us=17580 p90us=43679 p95us=47841 p99us=58720 p999us=115212 maxus=121307
+business=APPLY_MARK_PRICE items=7424 requests=7424 p50us=29048 p90us=51216 p95us=52789 p99us=66322 p999us=78184 maxus=78839
+business=PLACE_ORDER_BATCH items=1751040 requests=87552 p50us=41648 p90us=56950 p95us=66977 p99us=106823 p999us=187826 maxus=210632
+business=CANCEL_ORDER_BATCH items=583680 requests=29184 p50us=38862 p90us=67502 p95us=83034 p99us=107479 p999us=129236 maxus=146407
+duration=30.183 ownerSamples=9074 machine=98.25 allocMiBs=272.24 gc=33 gcMaxMs=12.737 gcTotalMs=370.962 DataLoss=0 blockNs={jdk.ThreadPark=19994540} SHA={clustered-service-101-0=207}
+CPU trading-owner--1 mean=90.88 max=95.61
+CPU /tmp/owner-work-blocking/node1/media-surprising-linear_perpetual-1 [sender,receiver] mean=90.84 max=94.58
+CPU archive-conductor mean=30.12 max=37.64
+CPU core-matcher-0 mean=27.16 max=31.50
+CPU driver-conductor mean=27.01 max=37.78
+CPU clustered-service-101-0 mean=26.44 max=41.80
+CPU consensus-module-101-1 mean=24.77 max=33.41
+CPU core-account-lane-1 mean=16.58 max=17.97
+CPU core-account-lane-0 mean=16.50 max=17.83
+CPU core-account-lane-2 mean=16.40 max=17.71
+CPU core-account-lane-3 mean=16.16 max=17.43
+CPU JVMCI-native CompilerThread0 mean=5.20 max=17.33
+CPU aeron-md-nra mean=2.03 max=3.65
+CPU C1 CompilerThread0 mean=0.41 max=1.05
+CPU JFR Periodic Tasks mean=0.32 max=0.88
+```
+- /tmp/owner-work-blocking/load/stdout.log SHA256 1e261d8495b729f3d279d6f2d635022c2de4f31da91f14e7b9f18e21a28beb84。
+- /tmp/owner-work-blocking/node1/profile.jfr SHA256 06ba48ef9c699019c8cf9f4791582904d3d82afe0d5f1151b0eab228467a6afe。
+
+busy_spin Leader node2：
+```text
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=143 businessHash=9a7ebc760bde1bba
+mixedCapacity=PASS elapsedSeconds=30.049 terminalBusinessOperations=1856768 offeredBusinessOperations=1856768 terminalCoreMessages=183552 offeredCoreMessages=183552 businessOpsPerSec=61791.039 coreMessagesPerSec=6108.393 fills=440320 fillsPerSec=14653.328 queries=0 unfinished=0 peakInFlight=256 measuredCycles=86 totalCycles=143 triggerExecutions=0
+business=PLACE_ORDER items=44032 requests=44032 p50us=22167 p90us=60915 p95us=72613 p99us=105054 p999us=300679 maxus=371458
+business=CANCEL_ORDER items=44032 requests=44032 p50us=25559 p90us=45547 p95us=53215 p99us=72548 p999us=112852 maxus=142082
+business=APPLY_MARK_PRICE items=7424 requests=7424 p50us=43155 p90us=71499 p95us=89391 p99us=142606 p999us=275251 maxus=297271
+business=PLACE_ORDER_BATCH items=1320960 requests=66048 p50us=47218 p90us=69468 p95us=77594 p99us=103415 p999us=160563 maxus=170655
+business=CANCEL_ORDER_BATCH items=440320 requests=22016 p50us=58392 p90us=85000 p95us=96468 p99us=189661 p999us=331087 maxus=371720
+duration=30.050 ownerSamples=3528 machine=99.52 allocMiBs=220.84 gc=29 gcMaxMs=11.538 gcTotalMs=283.940 DataLoss=0 blockNs={jdk.ThreadPark=6890018} SHA={clustered-service-101-0=53}
+CPU core-account-lane-1 mean=77.68 max=79.18
+CPU core-account-lane-0 mean=77.62 max=79.70
+CPU core-account-lane-2 mean=77.47 max=80.60
+CPU core-account-lane-3 mean=77.27 max=80.01
+CPU trading-owner--1 mean=76.21 max=79.28
+CPU /tmp/owner-work-busy_spin/node2/media-surprising-linear_perpetual-2 [sender,receiver] mean=42.41 max=47.02
+CPU core-matcher-0 mean=14.03 max=15.56
+CPU clustered-service-101-0 mean=4.06 max=4.74
+CPU JVMCI-native CompilerThread0 mean=2.84 max=10.18
+CPU archive-conductor mean=2.78 max=3.31
+CPU driver-conductor mean=1.86 max=3.14
+CPU consensus-module-101-2 mean=1.85 max=2.45
+CPU aeron-md-nra mean=1.42 max=2.37
+CPU C1 CompilerThread0 mean=0.42 max=1.00
+CPU JFR Periodic Tasks mean=0.27 max=0.64
+```
+- /tmp/owner-work-busy_spin/load/stdout.log SHA256 217411ea4bb3834a21327bab812bfbe8fd4bf748863f648b500a32668e000d9c。
+- /tmp/owner-work-busy_spin/node2/profile.jfr SHA256 68e7de595ae10cf969a959682c396c526b282a6946c158da2d9044a38871cbc0。
+- 同一最终代码在本机：BLOCKING 81462.701业务ops/s、BUSY_SPIN 61791.039，忙轮询低24.15%；普通下单p99 50.855ms→105.054ms，四Lane各16.16–16.58%→77.27–77.68%单核CPU，Owner90.88%→76.21%，机器98.25%→99.52%。这是单机承载3副本的CPU资源竞争，不可推断独立物理机的BUSY_SPIN收益，也不能把Lane空转占用算作有效业务饱和。保留BLOCKING默认策略。
+- SHA在两轮Owner执行样本9074/3528中均0，在Leader clustered-service输入线程分别207/53；达成输入前移目的，其他直接调用/内部新命令仍有计算路径，不能宣称全Core没有SHA。提交发布与索引简化保持功能，但本轮没有旧版本同参数A/B，不能宣称带来确定百分比的总吞吐提升。Owner仍有状态发布/准入/派发热点，1ms尾延迟和零分配目标未达成。
+
+|六产品JMH，业务ops/s|Continuous BLOCKING|Continuous BUSY_SPIN|成交/改单/批量撤单 BLOCKING|
+|---|---:|---:|---:|
+|SPOT|213891|186786|40582|
+|LINEAR_PERPETUAL|197091|166312|44410|
+|INVERSE_PERPETUAL|197116|167729|53147|
+|LINEAR_DELIVERY|188354|157704|51199|
+|INVERSE_DELIVERY|188501|151044|51821|
+|OPTION|183660|124602|44560|
+- JMH每循环Continuous为10240业务项/512命令；成交组合为31232业务项/2048命令/10240trades，均按实际benchmark代码计数。18份结果accepted=terminal，均完成退出金融/快照检查；分别实测gc profiler及JFR，短预热/短测量只作定位，不作为容量或稳定性验收。
+
+|JMH分配B/业务op|Continuous BLOCKING|Continuous BUSY_SPIN|成交组合 BLOCKING|
+|---|---:|---:|---:|
+|SPOT|4141.81|4247.49|7893.68|
+|LINEAR_PERPETUAL|4201.89|4319.82|7892.59|
+|INVERSE_PERPETUAL|4196.44|4357.03|7696.87|
+|LINEAR_DELIVERY|4221.25|4353.21|7627.36|
+|INVERSE_DELIVERY|4183.45|4439.99|7552.35|
+|OPTION|4246.56|4638.44|7874.13|
+- 18份JMH结果按文件名字典序串接名字和内容的SHA256=8db0be581915734879e3e41cfc0c4ee81bfd617d8c1658299efbb190aebf0b47。
+
+- 真实三节点日志重放PASS：194周期，businessHash=384ec32278a234f，与BLOCKING负载结束一致；fundsDiff0，population/hftPositions/reservations/loss全通过。三个节点服务快照均position=410016544；停止后由快照重启再次同hash和同金融核对PASS，退出时三个command-window均pending0。
+- /tmp/owner-work-replay/load/stdout.log SHA256 517f913606714a0bb9bc762baba5104edf7689446666be6146e4256bea70ef76。
+- /tmp/owner-work-snapshot-restart/load/stdout.log SHA256 03e8da7da86ef7d53a56946ee0058423595bef1f2e980455cd1c766368f76ab5。
+- 网络8份JFR及JMH18份JFR均DataLoss0；18份JMH JSON完整且acceptedBusinessOperations=terminalBusinessOperations、acceptedCoreMessages=terminalCoreMessages。原始目录/tmp/owner-work-blocking、owner-work-busy_spin、owner-work-jmh、owner-work-replay、owner-work-snapshot-restart及同前缀脚本/日志在记录后清理，不再可访问。仅删除本轮生成产物和本轮测试报告，保留构建包及用户文件，未修改README或使用云资源。
+- 结论：本轮四项精简及独立等待策略对比完成，保持BLOCKING默认。移除统计、SHA线程归属、变更一次遍历和通知认领可由代码/测试/JFR核对；没有同配置旧版本A/B，不声称总体吞吐提升百分比，尚未实现1ms尾延迟/零分配或全部线程有效业务饱和。必要Lane交接和所有业务索引仍保留，未实施响应业务payload异步编码或微服务扩拆。

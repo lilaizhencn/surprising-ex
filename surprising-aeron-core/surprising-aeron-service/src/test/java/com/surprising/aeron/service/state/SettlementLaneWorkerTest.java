@@ -8,8 +8,12 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class SettlementLaneWorkerTest {
-    @org.junit.jupiter.api.Test
-    void controlOwnershipHandoffIsPolledAndQueuedWorkResumesOnlyAfterRelease() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {"BLOCKING", "BUSY_SPIN", "YIELDING"})
+    void controlOwnershipHandoffIsPolledAndQueuedWorkResumesOnlyAfterRelease(String strategy) throws Exception {
+        String key = "surprising.aeron.settlement-wait-strategy";
+        String previous = System.getProperty(key);
+        System.setProperty(key, strategy);
         var lane = new AccountLaneState(0, 8);
         try (var worker = new SettlementLaneWorker("handoff", lane, 8)) {
             for (long epoch = 1; epoch <= 8; epoch++) {
@@ -37,6 +41,8 @@ class SettlementLaneWorkerTest {
                 assertThat(resumed.await(2, TimeUnit.SECONDS)).isTrue();
                 worker.assertHealthy();
             }
+        } finally {
+            if (previous == null) System.clearProperty(key); else System.setProperty(key, previous);
         }
     }
 

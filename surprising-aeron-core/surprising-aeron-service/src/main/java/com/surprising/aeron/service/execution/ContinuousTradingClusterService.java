@@ -1,6 +1,8 @@
 package com.surprising.aeron.service.execution;
 
 import com.surprising.aeron.protocol.CoreMessage;
+import com.surprising.aeron.protocol.CommandFingerprint;
+import com.surprising.aeron.protocol.WireMessageKind;
 import com.surprising.aeron.protocol.CoreMessageHeader;
 import com.surprising.aeron.protocol.CoreMessageCodec;
 import com.surprising.aeron.protocol.CoreResponse;
@@ -97,7 +99,8 @@ public final class ContinuousTradingClusterService implements ClusteredService {
         try { command = CoreMessageFlyweightDecoder.decode(buffer, offset, length); }
         catch (IllegalArgumentException invalid) { return; }
         enqueue(new Input(command, session == null ? null : transportSession(session),
-                timestamp, header.position(), null));
+                timestamp, header.position(), null, command.header().kind() == WireMessageKind.COMMAND
+                        ? CommandFingerprint.of(command) : null));
         drainResponses();
     }
 
@@ -201,7 +204,7 @@ public final class ContinuousTradingClusterService implements ClusteredService {
                     else {
                         logContext.timestamp = next.timestamp;
                         logContext.position = next.position;
-                        processor.acceptCommittedCommand(next.session, next.command, next.timestamp, next.position);
+                        processor.acceptCommittedCommand(next.session, next.command, next.timestamp, next.position, next.fingerprint);
                         inputConsumed += next.command.payloadLength();
                     }
                     work++;
@@ -235,7 +238,7 @@ public final class ContinuousTradingClusterService implements ClusteredService {
                 completion.completeExceptionally(fatal);
                 throw fatal;
             }
-        }));
+        }, null));
         long deadline = System.nanoTime() + DEADLINE_NS;
         while (!completion.isDone()) awaitProgress(deadline);
         return completion.join();
@@ -348,7 +351,8 @@ public final class ContinuousTradingClusterService implements ClusteredService {
     }
 
     /** 输入信封有唯一Owner消费者；action只用于低频生命周期边界。 */
-    private record Input(CoreMessage command, ClientSession session, long timestamp, long position, Runnable action) {}
+    private record Input(CoreMessage command, ClientSession session, long timestamp, long position, Runnable action,
+                         CommandFingerprint fingerprint) {}
     /** 终态payload只读共享；提交水位在Owner上固定，不能编码时读取较新的业务状态。 */
     private record Output(ClientSession session, CoreMessageHeader header, CoreResponse response,
                           long committedSequence, int length, long epoch) {}

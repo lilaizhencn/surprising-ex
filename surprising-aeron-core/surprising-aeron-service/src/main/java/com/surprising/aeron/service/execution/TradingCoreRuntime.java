@@ -495,8 +495,19 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return applyDecodedCommand(message, timestamp, position, decoded, true);
     }
 
+    /** 仅当前apply范围持有的预计算摘要，嵌套命令不能误用外层摘要。 */
+    private CommandFingerprint preparedIngressFingerprint;
+
     CoreResponse applyDecodedCommand(CoreMessage message, long timestamp, long position,
                                      DecodedMatchingCommand decoded, boolean independent) {
+        return applyDecodedCommand(message, timestamp, position, decoded, independent, null);
+    }
+
+    CoreResponse applyDecodedCommand(CoreMessage message, long timestamp, long position,
+                                     DecodedMatchingCommand decoded, boolean independent,
+                                     CommandFingerprint fingerprint) {
+        CommandFingerprint previousFingerprint = preparedIngressFingerprint;
+        preparedIngressFingerprint = fingerprint;
         boolean previousAdmission = clusterPipelineAdmission;
         CoreMessage previousMessage = decodedIngressMessage;
         DecodedMatchingCommand previousCommand = decodedIngressCommand;
@@ -505,6 +516,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         decodedIngressCommand = decoded;
         try { return apply(message, timestamp, position); }
         finally {
+            preparedIngressFingerprint = previousFingerprint;
             clusterPipelineAdmission = previousAdmission;
             decodedIngressMessage = previousMessage;
             decodedIngressCommand = previousCommand;
@@ -941,7 +953,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (message.header().kind() != WireMessageKind.COMMAND) {
             return rejected(CoreResultCode.INVALID_MESSAGE);
         }
-        CommandFingerprint fingerprint = CommandFingerprint.of(message);
+        CommandFingerprint fingerprint = message == decodedIngressMessage && preparedIngressFingerprint != null
+                ? preparedIngressFingerprint : CommandFingerprint.of(message);
         StoredResult duplicate = resultLedger.get(message.header().commandId());
         if (duplicate != null) {
             if (!duplicate.fingerprint().equals(fingerprint)) {

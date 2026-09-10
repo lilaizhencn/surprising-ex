@@ -1307,14 +1307,14 @@ final class OrderedCommitCoordinator {
     }
 
     void publishCommittedChanges(long committedLaneMask) {
-        ownerCommitPublisher.execute(committedLaneMask);
+        ownerCommitPublisher.execute();
     }
 
     final class OwnerCommitPublisher {
         /** 发布方法重入保护，只在执行期间置为 true。 */
         boolean active;
 
-        void execute(long committedLaneMask) {
+        void execute() {
             if (active) throw new IllegalStateException("owner commit publisher is already active");
             active = true;
             try {

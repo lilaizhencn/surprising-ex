@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.execution;
 
 import com.surprising.aeron.protocol.CoreMessage;
+import com.surprising.aeron.protocol.CommandFingerprint;
 import io.aeron.cluster.service.ClientSession;
 
 /** 已复制但尚未进入业务阶段的命令 FIFO；保留原日志时间和位置，重试不重新执行命令。 */
@@ -22,11 +23,15 @@ final class PendingClusterIngress {
         return size < CAPACITY && length <= MAX_BYTES - bytes;
     }
     void add(ClientSession session, CoreMessage command, long timestamp, long position) {
+        add(session, command, timestamp, position, null);
+    }
+    void add(ClientSession session, CoreMessage command, long timestamp, long position,
+             CommandFingerprint fingerprint) {
         int length = command == null ? 0 : command.payloadUnsafe().length;
         if (length > MAX_BYTES - bytes || size == CAPACITY) throw new IllegalStateException("replicated command backlog capacity exhausted");
         bytes += length;
         Entry entry = entries[(head + size++) & (CAPACITY - 1)];
-        entry.session = session; entry.command = command; entry.timestamp = timestamp; entry.position = position;
+        entry.session = session; entry.command = command; entry.timestamp = timestamp; entry.position = position; entry.fingerprint = fingerprint;
     }
     Entry first() { return size == 0 ? null : entries[head]; }
     int size() { return size; }
@@ -34,7 +39,7 @@ final class PendingClusterIngress {
         if (size == 0) throw new IllegalStateException("empty replicated command backlog");
         Entry entry = entries[head];
         if (entry.command != null) bytes -= entry.command.payloadUnsafe().length;
-        entry.session = null; entry.command = null;
+        entry.session = null; entry.command = null; entry.fingerprint = null;
         entry.timestamp = entry.position = 0;
         head = (head + 1) & (CAPACITY - 1); size--;
     }
@@ -45,6 +50,8 @@ final class PendingClusterIngress {
         ClientSession session;
         /** 已拥有 payload 的不可变命令。 */
         CoreMessage command;
+        /** 输入线程对当前不可变日志命令计算的指纹，随槽位一起释放。 */
+        CommandFingerprint fingerprint;
         /** 业务必须沿用的日志时间和位置，不使用重试时刻替代。 */
         long timestamp, position;
     }

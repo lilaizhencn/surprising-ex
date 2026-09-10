@@ -1129,11 +1129,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         void commitTerminalToOwner(TradingRuntimeState state, int laneId,
                                            TerminalOrderSink terminalOrderSink, long coreSequence) {
             publishTriggersToOwner(state);
-            users.forEach((userId, user) -> {
+            users.drainTo((userId, user) -> {
                 state.changedUsers.add(userId);
                 putOrRemove(state.publishedUsers, userId, user);
             });
-            orders.forEach((orderId, order) -> {
+            orders.drainTo((orderId, order) -> {
                 state.changedOrders.put(orderId, order);
                 if (terminalOrderSink != null && order != null && order.status().terminal()) {
                     terminalOrderSink.accept(order, coreSequence);
@@ -1142,13 +1142,13 @@ public final class TradingRuntimeState implements AutoCloseable {
                 if (order == null) state.orderLaneIds.remove(orderId);
                 else state.orderLaneIds.put(orderId, laneId + 1L);
             });
-            reservations.forEach((orderId, reservation) -> {
+            reservations.drainTo((orderId, reservation) -> {
                 state.changedReservations.add(orderId);
                 putOrRemove(state.publishedReservations, orderId, reservation);
                 if (reservation == null) state.reservationLaneIds.remove(orderId);
                 else state.reservationLaneIds.put(orderId, laneId + 1L);
             });
-            positions.forEach((positionKey, position) -> {
+            positions.drainTo((positionKey, position) -> {
                 state.changedPositions.put(positionKey, position);
                 if (position == null && state.realtimeCapture != null) {
                     try { state.realtimeCapture.removedPosition(state.publishedPositions.get(positionKey)); }
@@ -1158,16 +1158,16 @@ public final class TradingRuntimeState implements AutoCloseable {
                 if (position == null) state.positionLaneIds.remove(positionKey);
                 else state.positionLaneIds.put(positionKey, laneId + 1L);
             });
-            liquidations.forEach((id, value) -> {
+            liquidations.drainTo((id, value) -> {
                 state.changedLiquidations.put(id, value);
                 putOrRemove(state.publishedLiquidations, id, value);
             });
-            riskSnapshots.forEach((key, value) -> {
+            riskSnapshots.drainTo((key, value) -> {
                 state.changedRiskSnapshots.put(key, value);
                 putOrRemove(state.publishedRiskSnapshots, key, value);
             });
-            activeOrderValues.forEach(state.changedActiveOrderValues::put);
-            positionIndexValues.forEach(state.changedPositionIndexValues::put);
+            activeOrderValues.drainTo(state.changedActiveOrderValues::put);
+            positionIndexValues.drainTo(state.changedPositionIndexValues::put);
             removedOrderRoutes.forEach(orderId -> {
                 state.publishedOrders.remove(orderId);
                 state.orderLaneIds.remove(orderId);
@@ -1176,14 +1176,6 @@ public final class TradingRuntimeState implements AutoCloseable {
                 state.publishedReservations.remove(orderId);
                 state.reservationLaneIds.remove(orderId);
             });
-            users.clear();
-            orders.clear();
-            reservations.clear();
-            positions.clear();
-            liquidations.clear();
-            riskSnapshots.clear();
-            activeOrderValues.clear();
-            positionIndexValues.clear();
             removedOrderRoutes.clear();
             removedReservationRoutes.clear();
         }
@@ -3903,10 +3895,10 @@ public final class TradingRuntimeState implements AutoCloseable {
     void visitPreparedMatcherIndexes(RuntimeFactIndexes indexes) {
         assertOwner();
         changedActiveOrderValues.forEach((orderId, prepared) -> {
-            OrderRuntime current = changedOrders.get(orderId);
+            int slot = changedOrders.indexOf(orderId);
+            OrderRuntime current = slot < 0 ? null : changedOrders.valueAt(slot);
             indexes.preparedOrder(orderId,
-                    changedOrders.containsKey(orderId)
-                            && (current == null || current.status() != CoreOrderStatus.OPEN)
+                    slot >= 0 && (current == null || current.status() != CoreOrderStatus.OPEN)
                             ? null : prepared);
         });
         changedPositionIndexValues.forEach(indexes::preparedPosition);
