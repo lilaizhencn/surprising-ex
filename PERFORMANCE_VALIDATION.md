@@ -6271,3 +6271,145 @@ NMT节点reserved/committed由3146306/691798 KiB变为3150036/725160 KiB，commi
 ```
 
 清理完成：本轮进程均已退出，/tmp/owner-four下Archive/JFR/日志/临时分析器全部删除，已清理9个本轮Maven报告目录与本轮生成的SnapshotControl.class；构建JAR和业务源码保留。
+
+
+## 2026-09-10 Owner/matcher/Lane 工作量差异定位（采集前锁定）
+
+当前代码91b24d5d/a62cf077，只诊断方案二，不改生产逻辑。复用上一条单成员真实网络+Archive场景：HotSpot GraalVM25.0.1、G1/NMT、Intel8C16T16GiB，4 Lane/2 matcher、PIPELINED、BUSY_SPIN/spin0、SHARED_NETWORK、service YIELDING，节点512m/1536m，客户端128m/512m/SHARED，256全局与session在途、1命令session+1查询session、256symbols/1769users/batch20、seed131001、mixed-trading-stream=true/mixed-operational=false；JMH continuousOperations fork1/wi0/i1/controlPageSize0/-prof gc，内部预热30s测量45s，节点JFR profile/maxsize128m。逐组统计互斥Owner阶段、叶子方法、等待/空转和分配调用栈，禁止把inclusive百分比相加。资金/终态不变量必须PASS；CPU限速时只解释栈结构，不比较绝对容量。脚本/tmp/owner-deepdiag/run.py，完整命令存case commands.json。无生产改动不重复六产品回归及恢复，沿用同一代码上一轮已通过的证据；没有独立队列驻留计数，不能从低CPU单独推出队列空。测试结束记录后清理本轮产物。
+
+### 定位结果
+本轮HotSpot25单成员JMH/JFR复核完成；CPU_Speed_Limit 68～100，仅诊断，不作吞吐收益/上限结论。生产代码未修改。
+```text
+lanes profile 0 mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=643 businessHash=f3a86d45235df011
+lanes profile 0 mixedCapacity=PASS elapsedSeconds=45.076 terminalBusinessOperations=8591543 offeredBusinessOperations=8591543 terminalCoreMessages=828599 offeredCoreMessages=828599 businessOpsPerSec=190600.931 coreMessagesPerSec=18382.232 fills=2042880 fillsPerSec=45320.710 queries=0 unfinished=0 peakInFlight=256 measuredCycles=399 totalCycles=643 triggerExecutions=0
+lanes profile 0 business=PLACE_ORDER items=204288 requests=204288 p50us=7344 p90us=20086 p95us=21987 p99us=29982 p999us=48431 maxus=72744
+lanes profile 0 business=CANCEL_ORDER items=204288 requests=204288 p50us=6955 p90us=17809 p95us=20086 p99us=29687 p999us=45744 maxus=65404
+lanes profile 0 business=APPLY_MARK_PRICE items=11447 requests=11447 p50us=11747 p90us=21528 p95us=26869 p99us=42500 p999us=69599 maxus=70975
+lanes profile 0 business=PLACE_ORDER_BATCH items=6128640 requests=306432 p50us=16580 p90us=22413 p95us=27656 p99us=37584 p999us=57475 maxus=65896
+lanes profile 0 business=CANCEL_ORDER_BATCH items=2042880 requests=102144 p50us=20512 p90us=26591 p95us=31686 p99us=41582 p999us=53641 maxus=72417
+finished lanes-profile-LINEAR_PERPETUAL-0
+```
+Owner3248个样本按最内层识别阶段互斥归类（每个样本仅一次，不是精确计时；other含未细分协调/轮询）：
+- other: 719 / 3248 = 22.14%
+- lane-result-collection: 459 / 3248 = 14.13%
+- admission-other: 413 / 3248 = 12.72%
+- dependency-window: 348 / 3248 = 10.71%
+- batch-place-preparation: 232 / 3248 = 7.14%
+- settlement-plan-dispatch: 209 / 3248 = 6.43%
+- settlement-dispatch-other: 171 / 3248 = 5.26%
+- global-index-publication: 164 / 3248 = 5.05%
+- batch-finish-other: 155 / 3248 = 4.77%
+- command-decoding: 116 / 3248 = 3.57%
+- publication-other: 111 / 3248 = 3.42%
+- response-encoding: 103 / 3248 = 3.17%
+- result-ledger: 34 / 3248 = 1.05%
+- wait-idle: 9 / 3248 = 0.28%
+- funds-check: 5 / 3248 = 0.15%
+
+线程CPU：Owner96.10%单核，matcher24.41/24.32%，Lane各约96.35%；Lane14848样本，12627(85.04%)叶子为worker.run，12419定位于SettlementLaneWorker.java:146的队列轮询，未出现大规模handoff等待分支热点。matcher的BUSY_SPIN并未随Lane配置启用：固定64次自旋后parkNanos100000ns，仅队列已消费完时执行；低CPU与Lane高CPU不可直接作为有效工作量比较。park记录matcher约0.88/0.90s为事件阈值下界，不能据此推导总等待比例或队列驻留时间。
+正常pollCommandPrefix/pollControl调用commitReadyMatching均awaitFirst=false，不能将源码里awaitAnyMatchingCommitReady存在误判为在线同步等待。Owner已识别wait-idle仅9样本/0.28%，但未细分协调22.14%，不能把全部其余CPU宣布为纯业务计算。
+具体证据：ClusterCommandWindow.conflictingPrefixSize反向扫描窗口、symbol/账户匹配和订单索引，156个叶子样本(4.80%)，inclusive164；同一个未获准candidate可由progressCommandsInScope继续检查，不能删除依赖校验。RuntimeState.assertAccountLanesHealthy82个叶子样本(2.52%)，从commitReadyMatching、TradingCoreRuntime.apply多入口逐次遍历所有Lane读取failure，适合共享首次故障发布+保留fail-closed语义，不能直接取消检测。TerminalStateRetention.containsOrder90、retainPrunedOrder58、trimTombstones68 inclusive样本来自准入/结果收集，不能叠加到互斥表；保留终态去重必要，但EntityKey/ClientIdentity/RetainedEntity/LinkedHashMap.Entry逐订单创建与淘汰可以用固定容量primitive结构压缩。
+Owner准入preparePipelinedPlaceBatch仍逐项做终态身份查询、持仓/平仓容量前置检查、决策参数解析和CoreMatchingOrder构造。结果收集后仍有全局有序索引发布、终态去重保留、response编码；批量输入按20items展开，上游和下游Owner工作多于matcher单次订单簿处理。建议下一轮优先依赖扫描与重复健康检查，再终态身份容器及账户准入前置重复读取；后续更大改造是Lane产出提交结果、将纯编码移到响应出口，必须保留账户依赖、全局索引和去重可见性。当前证据不支持通过单纯让matcher空转到95%解决吞吐。未获取队列深度时间序列、恒定到达率/CO修正，不宣称已精确测出每阶段吞吐容量。
+叶子热点与Owner分配站点（allocation为JFR加权估计，站点受JIT内联影响）：
+```text
+leaf	156	dependency-window @ com.surprising.aeron.service.execution.ClusterCommandWindow.conflictingPrefixSize
+leaf	82	other @ com.surprising.aeron.service.state.TradingRuntimeState.assertAccountLanesHealthy
+leaf	74	command-decoding @ java.util.ArrayList.add
+leaf	71	other @ com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommandsInScope
+leaf	67	admission-other @ java.util.concurrent.ConcurrentHashMap.get
+leaf	43	batch-place-preparation @ java.util.HashMap.getNode
+leaf	41	settlement-dispatch-other @ com.surprising.aeron.service.execution.PendingMatchingRing.partitionDispatchHead
+leaf	41	batch-place-preparation @ java.util.HashMap.hash
+leaf	41	lane-result-collection @ org.eclipse.collections.impl.set.mutable.primitive.LongHashSet.each
+leaf	40	settlement-plan-dispatch @ com.surprising.aeron.service.state.MatcherSettlementPlan.build
+leaf	38	other @ com.surprising.aeron.service.execution.OrderedCommitCoordinator.commitReadyMatching
+leaf	37	publication-other @ java.util.Arrays.fill
+leaf	37	batch-place-preparation @ com.surprising.aeron.service.execution.OrderBatchExecutor.preparePipelinedPlaceBatch
+leaf	34	lane-result-collection @ java.util.concurrent.ConcurrentHashMap.get
+leaf	34	other @ com.surprising.aeron.service.state.TradingRuntimeState.readyLaneMask
+leaf	34	admission-other @ com.surprising.aeron.service.state.LanePublishedMap.visible
+leaf	32	lane-result-collection @ java.lang.invoke.DirectMethodHandle$Holder.invokeStatic
+leaf	31	admission-other @ java.lang.ThreadLocal.get
+leaf	29	lane-result-collection @ java.util.Arrays.fill
+leaf	28	settlement-plan-dispatch @ java.util.concurrent.ConcurrentHashMap.get
+leaf	27	dependency-window @ java.util.HashMap.getNode
+leaf	26	lane-result-collection @ com.surprising.aeron.service.state.RuntimeIndexedChangeBuffer.forEachIndexed
+leaf	26	command-decoding @ com.surprising.aeron.protocol.TradingOrderBatchCodec.decodeCommand
+leaf	25	response-encoding @ com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+leaf	25	lane-result-collection @ java.util.concurrent.ConcurrentHashMap.replaceNode
+leaf	22	batch-finish-other @ java.util.Arrays.fill
+leaf	21	other @ java.util.HashMap.hash
+leaf	21	lane-result-collection @ com.surprising.aeron.service.state.TradingRuntimeState.collectMatcherSettlement
+leaf	21	dependency-window @ com.surprising.aeron.service.execution.ClusterCommandWindow.add
+leaf	20	other @ com.surprising.aeron.service.execution.MatcherPipelineGroup.drainMatchingCompletions
+leaf	19	response-encoding @ java.nio.HeapByteBuffer.put
+leaf	19	lane-result-collection @ java.util.HashMap.putVal
+leaf	19	global-index-publication @ org.eclipse.collections.impl.set.mutable.primitive.LongHashSet.add
+leaf	19	lane-result-collection @ com.surprising.aeron.service.state.RuntimeChangeBuffer.resetIndex
+leaf	19	other @ com.surprising.aeron.service.execution.OrderedCommitCoordinator.pumpMatchingCommitCompletions
+leaf	18	lane-result-collection @ com.surprising.aeron.service.state.RuntimeIdentityRegistry.releaseClientKey
+leaf	18	settlement-plan-dispatch @ org.eclipse.collections.impl.set.mutable.primitive.LongHashSet.add
+leaf	18	admission-other @ com.surprising.aeron.service.execution.MatchingCommandAdmission.prepareMatching
+leaf	17	other @ com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommandPrefix
+leaf	17	batch-place-preparation @ com.surprising.aeron.service.state.CoreOrderDecisionResolver.resolve
+leaf	17	response-encoding @ jdk.internal.misc.Unsafe.putIntUnaligned
+leaf	17	settlement-dispatch-other @ com.surprising.aeron.service.execution.OrderedCommitCoordinator.dispatchPartitionSettlements
+leaf	16	other @ com.surprising.aeron.service.execution.OrderedCommitCoordinator.dispatchReadyPlaceSettlements
+leaf	16	other @ java.util.HashMap.getNode
+leaf	16	publication-other @ com.surprising.aeron.service.state.TradingRuntimeState.clearCapturedChanges
+leaf	15	settlement-dispatch-other @ java.util.ArrayList.add
+leaf	15	dependency-window @ com.surprising.aeron.service.execution.TradingCoreRuntime.addPlaceScope
+leaf	14	other @ com.surprising.aeron.service.execution.MatcherCommandPipeline.completedMatchingSequence
+leaf	14	other @ com.surprising.aeron.service.execution.TradingCoreRuntime.bindOwner
+leaf	14	batch-finish-other @ java.util.concurrent.ConcurrentHashMap.get
+leaf	14	admission-other @ com.surprising.aeron.service.execution.OrderBatchExecutor.decodeOrderBatch
+leaf	14	lane-result-collection @ java.util.LinkedHashMap$LinkedHashIterator.remove
+leaf	13	result-ledger @ java.util.HashMap.getNode
+leaf	13	batch-place-preparation @ com.surprising.aeron.service.state.model.AssetBalance.validAsset
+leaf	13	other @ java.util.Arrays.fill
+leaf	13	batch-place-preparation @ java.util.HashMap.containsKey
+leaf	13	response-encoding @ com.surprising.aeron.protocol.CoreStateQueryCodec.utf8Length
+leaf	13	admission-other @ java.util.HashMap.putVal
+leaf	13	dependency-window @ java.util.concurrent.ConcurrentHashMap.get
+leaf	13	global-index-publication @ org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.probeThree
+leaf	13	batch-place-preparation @ com.surprising.aeron.protocol.CoreStateQueryCodec.utf8Length
+leaf	13	global-index-publication @ org.eclipse.collections.impl.set.mutable.primitive.LongHashSet.remove
+leaf	13	admission-other @ java.util.HashMap.getNode
+leaf	13	settlement-plan-dispatch @ com.surprising.aeron.service.state.MatcherSettlementDispatcher.dispatchMatcherSettlementBatch
+leaf	12	lane-result-collection @ com.surprising.aeron.service.execution.TerminalStateRetention.trimTombstones
+ownerAllocation	982919056	[B @ com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+ownerAllocation	724054776	com.surprising.aeron.service.execution.OrderBatchItem @ com.surprising.aeron.service.execution.OrderBatchExecutor.decodeOrderBatch
+ownerAllocation	569589896	com.surprising.aeron.service.state.ResolvedPlaceOrder @ com.surprising.aeron.service.state.model.AssetBalance.validAsset
+ownerAllocation	528842664	com.surprising.aeron.service.state.MatcherSettlementPlan @ com.surprising.aeron.service.state.MatcherSettlementPlan.build
+ownerAllocation	498908568	com.surprising.aeron.protocol.PlaceOrderCommand @ com.surprising.aeron.protocol.TradingOrderBatchCodec.decodeCommand
+ownerAllocation	497711720	[B @ com.surprising.aeron.protocol.TradingOrderBatchCodec.decodeCommand
+ownerAllocation	371347576	java.lang.Long @ com.surprising.aeron.service.state.RuntimeIdentityRegistry.releaseClientKey
+ownerAllocation	339096712	com.surprising.aeron.service.execution.TerminalStateRetention$RetainedEntity @ com.surprising.aeron.service.execution.TerminalStateRetention.retainPrunedOrder
+ownerAllocation	275680680	java.util.LinkedHashMap$Entry @ com.surprising.aeron.service.execution.TerminalStateRetention.retainPrunedOrder
+ownerAllocation	269482256	com.surprising.aeron.service.matching.CoreMatchingOrder @ com.surprising.aeron.service.execution.OrderBatchExecutor.preparePipelinedPlaceBatch
+ownerAllocation	263080504	[J @ com.surprising.aeron.service.state.index.ActiveOrderIndex.add
+ownerAllocation	249670688	java.lang.String @ com.surprising.aeron.protocol.TradingOrderBatchCodec.decodeCommand
+ownerAllocation	234268272	[J @ com.surprising.aeron.service.state.MatcherSettlementPlan.build
+ownerAllocation	221069568	java.util.HashMap$Node @ com.surprising.aeron.service.execution.TerminalStateRetention.indexTombstone
+ownerAllocation	192857856	com.surprising.aeron.service.execution.TerminalStateRetention$ClientIdentity @ com.surprising.aeron.protocol.CoreStateQueryCodec.utf8Length
+ownerAllocation	148840536	[B @ com.surprising.aeron.protocol.CoreCommandResultCodec.encode
+ownerAllocation	145631712	com.surprising.aeron.service.state.PositionCloseCapacity @ com.surprising.aeron.service.state.PositionCloseCapacity.inspectRuntime
+ownerAllocation	136428392	com.surprising.aeron.service.execution.TerminalStateRetention$EntityKey @ com.surprising.aeron.service.execution.OrderBatchExecutor.preparePipelinedPlaceBatch
+ownerAllocation	123171440	com.surprising.aeron.service.execution.TerminalStateRetention$EntityKey @ com.surprising.aeron.service.execution.TerminalStateRetention.retainPrunedOrder
+ownerAllocation	121810792	com.surprising.aeron.service.execution.TerminalStateRetention$ClientIdentity @ com.surprising.aeron.service.execution.TerminalStateRetention.indexTombstone
+ownerAllocation	111120136	com.surprising.aeron.protocol.CoreOrderStateView @ com.surprising.aeron.service.state.RuntimeIdentityRegistry.preparedSymbol
+ownerAllocation	105852624	com.surprising.aeron.protocol.CancelOrderCommand @ com.surprising.aeron.protocol.TradingOrderBatchCodec.decodeCommand
+ownerAllocation	98152160	[I @ com.surprising.aeron.service.state.TradingRuntimeState.appendFundsDelta
+ownerAllocation	91753040	com.surprising.aeron.protocol.CoreMessageHeader @ com.surprising.aeron.protocol.CoreMessageHeader.response
+ownerAllocation	68992856	[Ljava.lang.Object; @ com.surprising.aeron.protocol.PlaceOrderBatchCommand.<init>
+cpu core-account-lane-0 96.35530114173889
+cpu core-account-lane-1 96.32548838853836
+cpu core-account-lane-2 96.37057483196259
+cpu core-account-lane-3 96.34715169668198
+cpu core-matcher-0 24.406088888645172
+cpu core-matcher-1 24.322157725691795
+cpu trading-owner--1 96.09595239162445
+```
+本轮资金差额0，accepted/terminal business及Core消息均相等，unfinished0，峰值在途256，DataLoss0。代码未变化，不重复前一轮已通过的六产品及重放快照测试。采样脚本SHA256 c62999d20e65695cc0b45cee610696fd299e3cfb7637b5cc8bdd7b99486506dd；节点JFR 6585486 bytes SHA256 523fa45be4457057abd9443e023a2c780a862086a068eaacfbb2b482490e8c3c；OwnerStages.java SHA256 26f6983ded15d603ff25cf382b4e052a907e64e849d9681603f95ca16d7281f4。原产物/tmp/owner-deepdiag在记录后清理，不再可访问。
+
+本轮诊断进程均已退出，/tmp/owner-deepdiag及其Archive、JFR、日志、临时分析器已清理；未改生产代码及构建JAR。
