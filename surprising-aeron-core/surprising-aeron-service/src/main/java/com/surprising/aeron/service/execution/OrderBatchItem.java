@@ -29,6 +29,8 @@ final class OrderBatchItem {
     long executionTakerUserId;
     /** 本项终态返回的订单视图。 */
     com.surprising.aeron.protocol.CoreOrderStateView resultOrder;
+    /** 成交推送的不可变主动单身份；结算可提前，推送只能在本批提交时消费。 */
+    com.surprising.aeron.service.state.OrderRuntime realtimeTakerOrder;
     /** 本项发给 matcher 的准备结果。 */
     java.util.function.Supplier<CoreMatchingResult> matchingSubmission;
 

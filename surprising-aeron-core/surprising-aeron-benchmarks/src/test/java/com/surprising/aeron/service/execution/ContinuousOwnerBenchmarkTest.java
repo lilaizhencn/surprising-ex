@@ -8,6 +8,16 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class ContinuousOwnerBenchmarkTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
+    void immutableBatchResponsesSurviveDeferredTransportAndSnapshot(ProductLine product) {
+        try (var workload = new ContinuousOwnerBenchmark()) {
+            workload.productLine = product;
+            workload.batchSize = 20;
+            workload.setup();
+            workload.verifyDeferredResponseHandoff();
+        }
+    }
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
     void snapshotIncludesOutstandingOrdersAndRoleChangeKeepsOwnerOwnership(ProductLine product) {
         try (var workload = new ContinuousOwnerBenchmark()) {
             workload.productLine = product;

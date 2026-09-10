@@ -2682,7 +2682,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
             long applyStartNanos) {
         com.surprising.aeron.service.state.MatcherSettlementEvent event = pending.settlementEvent();
         if (event == null) {
-            captureRealtimeTrades(settlementPlan);
+            if (realtimeCapture != null && realtimeCapture.active())
+                pending.realtimeTakerOrder = runtimeOrder(settlementPlan.takerOrderId());
             event = runtimeState.dispatchMatcherSettlement(
                     coreSequence, laneContext.expectedLaneMask(), coreSequence,
                     pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), settlementPlan,
@@ -2691,6 +2692,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         }
         if (pending.isDispatchOnly()) return null;
         if (!event.complete()) return null;
+        captureRealtimeTrades(pending);
         com.surprising.aeron.service.state.RuntimeTreasuryDelta delta =
                 runtimeState.collectMatcherSettlement(
                         event, commandFundsAccumulator, terminalRetention);
@@ -2915,10 +2917,12 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 CoreStateQueryCodec.encodeUserState(query.view()));
     }
 
-    void captureRealtimeTrades(com.surprising.aeron.service.state.MatcherSettlementPlan plan) {
+    void captureRealtimeTrades(PendingMatching pending) {
+        var plan = pending.settlementPlan();
+        OrderRuntime taker = pending.realtimeTakerOrder;
+        pending.realtimeTakerOrder = null;
         if (realtimeCapture == null || !realtimeCapture.active()) return;
         try {
-            OrderRuntime taker = runtimeOrder(plan.takerOrderId());
             for (int index = 0; index < plan.matcherEventCount(); index++) {
                 MatcherEvent match = plan.matcherEvent(index);
                 if (match.eventType() == MatcherEventType.TRADE)

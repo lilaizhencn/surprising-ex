@@ -41,6 +41,8 @@ final class PendingMatching {
     /** 跨分片清算撤单已进入异步协调队列，防止重复派发。 */
     boolean crossShardCancellationStarted;
     boolean clusterIndependent;
+    /** 派发前的不可变订单身份；仅实时推送启用时保留，提交后释放。 */
+    com.surprising.aeron.service.state.OrderRuntime realtimeTakerOrder;
     private boolean settlementReady;
     private boolean dispatchOnly;
     private boolean pipelinedSettlementCounted;
@@ -152,6 +154,7 @@ final class PendingMatching {
         matchingSubmitted = false;
         crossShardCancellationStarted = false;
         clusterIndependent = false;
+        realtimeTakerOrder = null;
         settlementReady = false;
         dispatchOnly = false;
         pipelinedSettlementCounted = false;
@@ -190,6 +193,7 @@ final class PendingMatching {
         cancelEvent = source.cancelEvent;
         replaceEvent = source.replaceEvent;
         settlementPlan = source.settlementPlan;
+        realtimeTakerOrder = source.realtimeTakerOrder;
         settlementApplyStartNanos = source.settlementApplyStartNanos;
         placeAdmission = source.placeAdmission;
         admittedMatchingOrder = source.admittedMatchingOrder;

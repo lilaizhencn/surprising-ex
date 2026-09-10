@@ -407,6 +407,7 @@ final class OrderedCommitCoordinator {
             LaneCommandContextRing.Context laneContext) {
         com.surprising.aeron.service.state.MatcherSettlementEvent event = pending.settlementEvent();
         if (event == null || !event.complete()) return null;
+        owner.captureRealtimeTrades(pending);
         com.surprising.aeron.service.state.RuntimeTreasuryDelta settlementTreasuryDelta;
         try {
             settlementTreasuryDelta = owner.runtimeState.collectMatcherSettlement(
@@ -1120,6 +1121,14 @@ final class OrderedCommitCoordinator {
 
     int commitReadyMatching(int maxCompletions, long clusterTimestamp, long clusterPosition,
                             boolean awaitFirst, long throughSequence, TradingCoreRuntime.MatchingCommitHandler handler) {
+        return commitReadyMatching(maxCompletions, clusterTimestamp, clusterPosition, awaitFirst,
+                throughSequence, throughSequence, handler);
+    }
+
+    /** 派发上限只覆盖已准入的独立命令；最终提交上限与每命令的日志时间不变。 */
+    int commitReadyMatching(int maxCompletions, long clusterTimestamp, long clusterPosition,
+                            boolean awaitFirst, long throughSequence, long dispatchThroughSequence,
+                            TradingCoreRuntime.MatchingCommitHandler handler) {
         owner.assertOwner();
         owner.assertHealthy();
         if (maxCompletions <= 0 || handler == null) {
@@ -1127,7 +1136,7 @@ final class OrderedCommitCoordinator {
         }
         owner.beginDownstreamPublicationBatch();
         try {
-            pumpMatchingCommitCompletions(clusterTimestamp, clusterPosition, throughSequence);
+            pumpMatchingCommitCompletions(clusterTimestamp, clusterPosition, dispatchThroughSequence);
             int completed = 0;
             int attempts = 0;
             while (attempts < maxCompletions) {
@@ -1156,7 +1165,7 @@ final class OrderedCommitCoordinator {
                         long deadline = System.nanoTime() + TradingCoreRuntime.MATCHING_AWAIT_TIMEOUT_NANOS;
                         int idle = 0;
                         while (response == null && System.nanoTime() < deadline) {
-                            pumpMatchingCommitCompletions(clusterTimestamp, clusterPosition, throughSequence);
+                            pumpMatchingCommitCompletions(clusterTimestamp, clusterPosition, dispatchThroughSequence);
                             if (!matchingCommitReady(pending)) {
                                 if (idle++ < 1_024) Thread.onSpinWait();
                                 else java.util.concurrent.locks.LockSupport.parkNanos(owner, 1_000L);
@@ -1177,7 +1186,7 @@ final class OrderedCommitCoordinator {
                 attempts++;
                 owner.matchingProgressSequence++;
                 if (response == null) {
-                    pumpMatchingCommitCompletions(clusterTimestamp, clusterPosition, throughSequence);
+                    pumpMatchingCommitCompletions(clusterTimestamp, clusterPosition, dispatchThroughSequence);
                     continue;
                 }
                 handler.onCommitted(sequence, response);

@@ -33,10 +33,12 @@ public final class SurprisingClusteredService implements ClusteredService {
     /** 已提交结果的异步出口，网络背压不占用交易回调的执行时间。 */
     private final DeferredSessionResponses pendingResponses = new DeferredSessionResponses();
 
-    /** 已编码终态跨线程出口；为空时由当前线程直接使用会话。 */
+    /** 不可变终态跨线程出口；为空时由当前线程直接编码并使用会话。 */
     private final ResponseSink responseSink;
     @FunctionalInterface
-    interface ResponseSink { void offer(ClientSession session, DirectBuffer buffer, int length); }
+    interface ResponseSink {
+        void offer(ClientSession session, CoreMessageHeader header, CoreResponse response, long committedSequence);
+    }
 
     private final ProductLine productLine;
     private TradingCoreRuntime state;
@@ -82,6 +84,7 @@ public final class SurprisingClusteredService implements ClusteredService {
         processingLogCallback = false;
         commandWindow.clear();
         pendingIngress.clear();
+        blockedIngress = blockedWindowHead = null;
         activeControl = null;
         controlResponse = null;
         drainingSize = 0;
@@ -145,7 +148,7 @@ public final class SurprisingClusteredService implements ClusteredService {
             // AgentRunner otherwise logs ordinary exceptions and may consume the next message.
             throw new org.agrona.concurrent.AgentTerminationException(failure);
         } finally {
-            commandWindow.releaseDecoded();
+            retainPendingPreparation();
             processingLogCallback = false;
         }
     }
@@ -159,6 +162,17 @@ public final class SurprisingClusteredService implements ClusteredService {
     /** 正在提交的确定性窗口前缀；不因下一次轮询的线程速度改变边界。 */
     private int drainingSize;
     private long drainingSequence, progressDeadline;
+    /** 已判定必须等待的入口及当时窗口队首；队首提交前不重复准备同一依赖范围。 */
+    private CoreMessage blockedIngress, blockedWindowHead;
+
+    private void retainPendingPreparation() {
+        var next = pendingIngress.first();
+        CoreMessage pending = next == null ? null : next.command;
+        commandWindow.retainDecoded(pending);
+        if (pending != blockedIngress || pending == null) {
+            blockedIngress = blockedWindowHead = null;
+        }
+    }
 
     private void processIngress(ClientSession session, CoreMessage request, long timestamp, long position) {
         awaitIngressCapacity(request);
@@ -196,10 +210,15 @@ public final class SurprisingClusteredService implements ClusteredService {
             }
             var next = pendingIngress.first();
             if (next == null) return;
+            if (next.command == blockedIngress && commandWindow.size() != 0
+                    && commandWindow.get(0).request == blockedWindowHead) return;
+            blockedIngress = blockedWindowHead = null;
             boolean eligible = state.prepareClusterPipelineScope(next.command, commandWindow);
             int prefix = !eligible || state.matchingSequence(next.command.header().commandId()) != 0
                     ? commandWindow.size() : commandWindow.conflictingPrefixSize();
             if (prefix != 0) {
+                blockedIngress = next.command;
+                blockedWindowHead = commandWindow.get(0).request;
                 if (drainingSize != 0) return;
                 if (eligible) dependencyFences++; else controlFences++;
                 beginCommandPrefix();
@@ -253,7 +272,8 @@ public final class SurprisingClusteredService implements ClusteredService {
     private boolean pollCommandPrefix() {
         var last = commandWindow.get(drainingSize - 1);
         state.commits.commitReadyMatching(MATCHING_COMPLETION_BATCH_SIZE,
-                last.timestamp, last.position, false, drainingSequence, matchingCommitHandler);
+                last.timestamp, last.position, false, drainingSequence,
+                Math.max(drainingSequence, commandWindow.lastMatchingSequence()), matchingCommitHandler);
         if (state.firstPendingMatchingSequence() != 0 && state.firstPendingMatchingSequence() <= drainingSequence) {
             checkProgressDeadline();
             return false;
@@ -446,6 +466,7 @@ public final class SurprisingClusteredService implements ClusteredService {
                 drainedCommands, dependencyFences, controlFences);
         commandWindow.clear();
         pendingIngress.clear();
+        blockedIngress = blockedWindowHead = null;
         activeControl = null;
         controlResponse = null;
         drainingSize = 0;
@@ -500,7 +521,7 @@ public final class SurprisingClusteredService implements ClusteredService {
         } catch (RuntimeException failure) {
             throw new org.agrona.concurrent.AgentTerminationException(failure);
         } finally {
-            commandWindow.releaseDecoded();
+            retainPendingPreparation();
             processingLogCallback = false;
         }
     }
@@ -551,6 +572,10 @@ public final class SurprisingClusteredService implements ClusteredService {
     }
 
     private void offerResponse(ClientSession session, CoreMessageHeader header, CoreResponse response) {
+        if (responseSink != null) {
+            responseSink.offer(session, header, response, state.committedCoreSequence());
+            return;
+        }
         if (responseSink == null && session.isClosing()) return;
         int length = CoreMessageCodec.encodedResponseLength(response);
         if (responseScratch.length < length) {
@@ -558,8 +583,7 @@ public final class SurprisingClusteredService implements ClusteredService {
             responseBuffer.wrap(responseScratch);
         }
         CoreMessageCodec.encodeResponse(header, response, state.committedCoreSequence(), responseScratch);
-        if (responseSink != null) responseSink.offer(session, responseBuffer, length);
-        else pendingResponses.offer(session, responseBuffer, length, System.nanoTime());
+        pendingResponses.offer(session, responseBuffer, length, System.nanoTime());
     }
 
     private static boolean retryableOffer(long result) {

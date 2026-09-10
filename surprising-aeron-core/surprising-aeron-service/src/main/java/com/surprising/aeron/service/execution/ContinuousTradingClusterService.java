@@ -1,6 +1,9 @@
 package com.surprising.aeron.service.execution;
 
 import com.surprising.aeron.protocol.CoreMessage;
+import com.surprising.aeron.protocol.CoreMessageHeader;
+import com.surprising.aeron.protocol.CoreMessageCodec;
+import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.product.api.ProductLine;
 import io.aeron.ExclusivePublication;
 import io.aeron.Image;
@@ -25,11 +28,13 @@ public final class ContinuousTradingClusterService implements ClusteredService {
     private static final long OUTPUT_BYTES = 16L * 1024 * 1024;
     /** 单生产者Cluster线程、单消费者Owner；生命周期控制项同样进入FIFO。 */
     private final OneToOneConcurrentArrayQueue<Input> input = new OneToOneConcurrentArrayQueue<>(8192);
-    /** 单生产者Owner、单消费者Cluster线程；只携带已编码终态，不携带可变账户。 */
+    /** 单生产者Owner、单消费者Cluster线程；只携带不可变终态，不携带可变账户。 */
     private final OneToOneConcurrentArrayQueue<Output> output = new OneToOneConcurrentArrayQueue<>(8192);
     /** Cluster线程独占的慢会话重试队列与发送包装器。 */
     private final DeferredSessionResponses deferred = new DeferredSessionResponses();
     private final UnsafeBuffer sendBuffer = new UnsafeBuffer(new byte[0]);
+    /** Cluster线程独占的编码空间；正常发送复用，只有网络重试队列需要保留字节副本。 */
+    private byte[] sendScratch = EMPTY;
     /** 只在Aeron线程访问的传输会话；背景出口只标记关闭，日志回调才发布关闭请求。 */
     private final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<TransportSession>
             sessions = new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
@@ -236,14 +241,14 @@ public final class ContinuousTradingClusterService implements ClusteredService {
         return completion.join();
     }
 
-    private void publishResponse(ClientSession session, DirectBuffer source, int length) {
+    private void publishResponse(ClientSession session, CoreMessageHeader header, CoreResponse response,
+                                 long committedSequence) {
+        int length = CoreMessageCodec.encodedResponseLength(response);
         if (length > OUTPUT_BYTES - (outputProduced - outputConsumed) || output.remainingCapacity() == 0) {
             outputOverflow = true;
             return;
         }
-        byte[] bytes = new byte[length];
-        source.getBytes(0, bytes);
-        if (!output.offer(new Output(session, bytes, ownerEpoch))) {
+        if (!output.offer(new Output(session, header, response, committedSequence, length, ownerEpoch))) {
             outputOverflow = true;
             return;
         }
@@ -261,11 +266,14 @@ public final class ContinuousTradingClusterService implements ClusteredService {
         for (; work < 256; work++) {
             Output next = output.poll();
             if (next == null) break;
-            outputConsumed += next.bytes.length;
+            outputConsumed += next.length;
             if (next.epoch != epoch || cluster.role() != Cluster.Role.LEADER) continue;
-            sendBuffer.wrap(next.bytes);
-            try { deferred.offer(next.session, sendBuffer, next.bytes.length, System.nanoTime()); }
-            finally { sendBuffer.wrap(EMPTY); }
+            if (sendScratch.length < next.length) {
+                sendScratch = new byte[next.length];
+                sendBuffer.wrap(sendScratch);
+            }
+            CoreMessageCodec.encodeResponse(next.header, next.response, next.committedSequence, sendScratch);
+            deferred.offer(next.session, sendBuffer, next.length, System.nanoTime());
         }
         return work + deferred.poll(System.nanoTime(), 256);
     }
@@ -341,6 +349,7 @@ public final class ContinuousTradingClusterService implements ClusteredService {
 
     /** 输入信封有唯一Owner消费者；action只用于低频生命周期边界。 */
     private record Input(CoreMessage command, ClientSession session, long timestamp, long position, Runnable action) {}
-    /** 跨线程结果在发布后不可变，消费后释放编码字节。 */
-    private record Output(ClientSession session, byte[] bytes, long epoch) {}
+    /** 终态payload只读共享；提交水位在Owner上固定，不能编码时读取较新的业务状态。 */
+    private record Output(ClientSession session, CoreMessageHeader header, CoreResponse response,
+                          long committedSequence, int length, long epoch) {}
 }

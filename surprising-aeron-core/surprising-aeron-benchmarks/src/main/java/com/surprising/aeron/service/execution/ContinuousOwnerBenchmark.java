@@ -20,6 +20,9 @@ import org.openjdk.jmh.annotations.*;
 public class ContinuousOwnerBenchmark implements AutoCloseable {
     @Param({"SPOT", "LINEAR_PERPETUAL", "INVERSE_PERPETUAL", "LINEAR_DELIVERY", "INVERSE_DELIVERY", "OPTION"})
     public ProductLine productLine;
+    /** 20项批量响应覆盖不可变payload跨线程交接及复用编码缓冲区。 */
+    @Param({"1", "20"})
+    public int batchSize = 1;
     private static final long TIME = 1_700_000_000_000L;
     /** 单一负载线程持有发送计数和响应计数；实际Owner运行于生产服务创建的线程。 */
     private ContinuousTradingClusterService service;
@@ -30,6 +33,9 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
     private Thread transportThread;
     private int apiCalls, timerCalls;
     private boolean closed;
+    private boolean holdEgress;
+    private boolean validateBatchResponses;
+    private long lastCommitted;
     private Cluster.Role role = Cluster.Role.LEADER;
 
     @Setup(Level.Trial)
@@ -57,12 +63,23 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
                 new Class<?>[]{ClientSession.class}, (proxy, method, args) -> {
                     assertTransportThread();
                     if (method.getName().equals("offer")) {
+                        if (holdEgress) return io.aeron.Publication.BACK_PRESSURED;
                         int length = (int) args[2];
                         byte[] bytes = new byte[length];
                         ((org.agrona.DirectBuffer) args[0]).getBytes((int) args[1], bytes);
-                        CoreResponse response = CoreProtocol.decodeResponse(CoreMessageCodec.decode(bytes).payloadUnsafe());
+                        var message = CoreMessageCodec.decode(bytes);
+                        CoreResponse response = CoreProtocol.decodeResponse(message.payloadUnsafe());
                         if (response.commandStatus() != ResponseStatus.APPLIED)
                             throw new IllegalStateException("unexpected response " + response);
+                        if (response.committedCoreSequence() < lastCommitted
+                                || response.committedCoreSequence() > response.appliedCommandCount())
+                            throw new IllegalStateException("response commit cursor changed after Owner handoff");
+                        lastCommitted = response.committedCoreSequence();
+                        if (validateBatchResponses && batchSize > 1) {
+                            var items = TradingOrderBatchCodec.decodeResult(response.data()).items();
+                            if (items.size() != batchSize || items.stream().anyMatch(item -> item.status() != ResponseStatus.APPLIED))
+                                throw new IllegalStateException("batch response was overwritten");
+                        }
                         terminal++;
                         return 1L;
                     }
@@ -96,25 +113,44 @@ public class ContinuousOwnerBenchmark implements AutoCloseable {
 
     @Benchmark
     public long placeCancelWithoutTimers(Counters counters) {
+        validateBatchResponses = true;
         long before = terminal;
         for (int i = 0; i < 256; i++) {
-            orders[i] = orderId++;
-            send(CoreMessageType.PLACE_ORDER, 1000 + i, TradingCommandCodec.encodePlaceOrder(
-                    new PlaceOrderCommand(orders[i], "BTC-USDT", 1, CoreOrderSide.BUY, 80, 1, false,
-                            CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
-                            CoreTimeInForce.GTC, false, "")));
+            orders[i] = orderId;
+            var items = new java.util.ArrayList<PlaceOrderCommand>(batchSize);
+            for (int item = 0; item < batchSize; item++) items.add(new PlaceOrderCommand(orderId++,
+                    "BTC-USDT", 1, CoreOrderSide.BUY, 80, 1, false, CoreMarginMode.CROSS,
+                    CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, ""));
+            send(batchSize == 1 ? CoreMessageType.PLACE_ORDER : CoreMessageType.PLACE_ORDER_BATCH, 1000 + i,
+                    batchSize == 1 ? TradingCommandCodec.encodePlaceOrder(items.getFirst())
+                            : TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(items)));
+        }
+        if (holdEgress) {
+            service.captureSnapshot();
+            holdEgress = false;
         }
         drain();
-        for (int i = 0; i < 256; i++)
-            send(CoreMessageType.CANCEL_ORDER, 1000 + i,
-                    TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(orders[i])));
+        for (int i = 0; i < 256; i++) {
+            var items = new java.util.ArrayList<CancelOrderCommand>(batchSize);
+            for (int item = 0; item < batchSize; item++) items.add(new CancelOrderCommand(orders[i] + item));
+            send(batchSize == 1 ? CoreMessageType.CANCEL_ORDER : CoreMessageType.CANCEL_ORDER_BATCH, 1000 + i,
+                    batchSize == 1 ? TradingCommandCodec.encodeCancelOrder(items.getFirst())
+                            : TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(items)));
+        }
         drain();
         if (terminal - before != 512) throw new IllegalStateException("missing terminal response");
-        counters.acceptedBusinessOperations += 512;
-        counters.terminalBusinessOperations += 512;
+        counters.acceptedBusinessOperations += 512L * batchSize;
+        counters.terminalBusinessOperations += 512L * batchSize;
         counters.acceptedCoreMessages += 512;
         counters.terminalCoreMessages += 512;
+        validateBatchResponses = false;
         return terminal;
+    }
+
+    /** 只用于功能回归：模拟慢出口后恢复，核对队列内旧响应未被下一条编码覆盖。 */
+    public void verifyDeferredResponseHandoff() {
+        holdEgress = true;
+        placeCancelWithoutTimers(new Counters());
     }
 
     /** 功能场景：快照请求进入尚有在途订单的FIFO，随后核对恢复结果和角色切换。 */

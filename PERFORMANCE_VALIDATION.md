@@ -5312,3 +5312,77 @@ TRIGGER_ORDER/entryTerminal n=146944 p0.500<=0.131072 p0.900<=0.262144 p0.950<=0
 - 两轮共8份JFR DataLoss均0，节点记录76秒→72秒、负载器72秒→70秒，原始JFR合计约27.54MB→25.25MB；jfr summary及流式RecordingFile汇总已检查，离线JSON曾扩张到2.1GB，后改用512MiB堆上限的流式解析，未与正式测量重叠。两轮三个节点退出均pending0、highWaterMark64，修正后windows=commands211004。没有出现资金错误、未知结果或节点失败。
 - 执行入口为生产SurprisingClusterNode×3及ClusterMixedCapacityMain，参数见本节锁定；临时编排/tmp/ex-saturation-run.py，CPU/栈及GC/NMT汇总/tmp/ex-saturation-analysis.java、ex-saturation-memory.java。两轮load日志SHA256分别16253440aa08cad40703eccdbc5123f5da5c736f94c8f0c939fa38e9eeaef930、89d32f5b4d64eab6cea850eff4f75d3cbbf8b5651faf782dc1c875f68bc3b28c；Leader JFR分别1aa534e9a8686e5735f663d12d47d7639a2a64696dcdce5b74e691c58732e9bc、d8e6c95a0c8594f3c31b00cdbac9d8cc49cbc7fc2fd1050b43a6aba2a4bfdaa0。
 - 全部测试JVM和行情源线程已停止；记录完成后清理本轮/tmp/ex-saturation-*及本轮benchmarks测试报告，保留源码和构建包。原始路径随后不可访问；未开启云资源、未修改README，未重做快照恢复（生产实现未变，上一轮真实恢复证据仍适用）。
+
+## 2026-09-10 重复准备、结算派发与分配优化（采集前锁定）
+- 用户授权一次完成三项，当前master d32e8cca开始，仅本地。先以现有构建包建立当轮基线，不检出历史版本；修改后同参数验证。HotSpot GraalVM25.0.1/Maven3.9.16/macOS26.7/i9-9880H8C16T/16GiB/G1；3真实JVM Cluster+1load，Core512–768MiB、load128–512MiB、NMTsummary、service YIELDING、Lane spin0。磁盘低于10GiB或单轮300秒超时停止。
+- LINEAR_PERPETUAL/1769用户/256币对/1matcher/4Lane/256全局及session在途/batch20/单命令及保留查询session，seed112001、trading-stream=true/operational=false、独立模拟行情源保留，原金融初态及清算校验不变。本轮预热增至30秒、测量30秒+最终排空计时，避免沿用10秒预热；不与上节数值直接计算回退。JFR profile各64MiB，ThreadCPULoad/CPULoad1秒、ThreadPark/Monitor1ms、ThreadDump5秒，ps每2秒，未修正CO。比较吞吐和分类延迟、分配/GC/Owner热点，期望重复准备分配降低，性能收益以实测为准。
+- 改动须覆盖六产品依赖阻塞重试、独立账户预派发、共享Lane及真实成交、逐命令实时出口、序列/资金/快照恢复；同构流水线共享改动执行相关模块verify及六产品JMH/JFR，batchSize20/maxInFlight256/accountLanes4/realtime=false/interleavedMetrics=false/settlementSpinLimit0，1fork/1thread、预热1×1秒/测量1×2秒、G1/512–768MiB/-prof gc。JMH是定位场景，不能替代真实三节点结果；全部需金融核对、accepted=terminal/unfinished0、无故障/DataLoss。不承诺1ms或零分配；长稳、云端隔离硬件、完整运营侧载和WS未测。本轮临时产物/tmp/owner-opt-*分析后清理。
+
+- 六产品JMH执行范围补充锁定：ClusteredBatchTradingBenchmark.independentBatchWindows及本轮新增batchSize20的ContinuousOwnerBenchmark.placeCancelWithoutTimers，共12项；后者走真实Owner线程和transport复用编码缓冲区，含批量响应逐项校验与快照/余额/解冻核对。各1fork、1thread、1秒预热/2秒测量，G1/512–768MiB、gc profiler、每fork JFR profile32MiB。单进程诊断，不作为网络容量。依赖阻塞缓存由六产品受控matcher门闩测试证明重试不重新解码。
+
+### 实现及当轮结果
+- Owner仅保留当前待准入队首的不可变解码结果，并在阻塞窗口队首未变化时跳过重复依赖准备；没有缓存可变资金检查结论。结算派发扩大到已准入独立窗口，最终提交仍限定原前缀。跨线程响应改传不可变CoreResponse及固定提交水位，由Cluster线程复用编码缓冲，网络背压仍保留独立重试副本。fork依赖仍为51c592625c16e53ffc9e2190e53c35dcfc72354f。
+- 回归实际发现提前结算会把后续批次的成交推送混入前一命令范围，已将普通单和批量单成交捕获移回各自有序提交点，保留原始不可变taker引用。六产品首个响应时检查实时事件币对，避免以最终总量掩盖串批；阻塞解码复用、两批提前派发、余额/冻结/终态/serial与follower hash/快照和输出背压均覆盖。第一、第二轮定向测试分别7、8个失败（时序断言及真实实时串批），修正后第三轮及最终verify通过。
+- 执行HotSpot25 `mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am verify`，160测试类共1123项，0失败/0错误/1跳过；跳过InstrumentSeedCoreContractTest（环境开关控制的种子契约测试），并非本轮改动路径。JDK/Maven参数沿用采集锁定。
+
+|三节点指标，均Leader node2|修改前|修改后|
+|---|---:|---:|
+|terminal business ops/s|65570.679|86226.069|
+|terminal Core messages/s|6466.739|8433.964|
+|fills/s|15553.668|20471.607|
+|Owner平均/最高单核CPU|94.74%/97.35%|89.29%/95.18%|
+|matcher单核CPU|23.15%|25.78%|
+|四Lane各自单核CPU|13.16–13.49%|15.70–16.13%|
+|整机CPU|98.99%|97.84%|
+|Leader采样分配MiB/s|227.20|289.57|
+|估算分配bytes/business op|3633|3521|
+|GC次数/最大暂停ms/累计暂停ms|26/15.470/299.423|37/23.128/413.912|
+- 同参数吞吐提高31.50%，消息提高30.42%。每操作采样分配仅约下降3.1%，绝对每秒分配和GC暂停反而随吞吐增加；没有达到零分配或解决尾延迟。基线Owner响应字节副本分配栈采样242598056字节，修改后该路径已移除；仍存在OrderRuntime、long[]、matcher结果、批量结果payload等必要或可进一步诊断的分配。短测量/Graal编译/本机全局CPU竞争使结果不能视为云端上限或统计显著性结论。
+
+修改前原始指标摘要：
+```text
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=150 businessHash=70e0c92ae18ec6d5
+mixedCapacity=PASS elapsedSeconds=30.285 terminalBusinessOperations=1985796 offeredBusinessOperations=1985796 terminalCoreMessages=195844 offeredCoreMessages=195844 businessOpsPerSec=65570.679 coreMessagesPerSec=6466.739 fills=471040 fillsPerSec=15553.668 queries=0 unfinished=0 peakInFlight=256 measuredCycles=92 totalCycles=150 triggerExecutions=0
+business=PLACE_ORDER items=47104 requests=47104 p50us=17154 p90us=39714 p95us=43483 p99us=49971 p999us=87293 maxus=101449
+business=CANCEL_ORDER items=47104 requests=47104 p50us=19726 p90us=64716 p95us=72286 p99us=84017 p999us=144703 maxus=171966
+business=APPLY_MARK_PRICE items=7428 requests=7428 p50us=28491 p90us=55705 p95us=62160 p99us=84869 p999us=134742 maxus=135659
+business=PLACE_ORDER_BATCH items=1413120 requests=70656 p50us=55476 p90us=74776 p95us=79822 p99us=109182 p999us=150077 maxus=172883
+business=CANCEL_ORDER_BATCH items=471040 requests=23552 p50us=48562 p90us=55803 p95us=62029 p99us=80150 p999us=116064 maxus=118161
+```
+
+修改后原始指标摘要：
+```text
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=191 businessHash=6033776333b47981
+mixedCapacity=PASS elapsedSeconds=30.262 terminalBusinessOperations=2609408 offeredBusinessOperations=2609408 terminalCoreMessages=255232 offeredCoreMessages=255232 businessOpsPerSec=86226.069 coreMessagesPerSec=8433.964 fills=619520 fillsPerSec=20471.607 queries=0 unfinished=0 peakInFlight=256 measuredCycles=121 totalCycles=191 triggerExecutions=0
+business=PLACE_ORDER items=61952 requests=61952 p50us=13721 p90us=33685 p95us=38109 p99us=51511 p999us=66224 maxus=80216
+business=CANCEL_ORDER items=61952 requests=61952 p50us=16293 p90us=39911 p95us=43941 p99us=55246 p999us=119930 maxus=145358
+business=APPLY_MARK_PRICE items=7424 requests=7424 p50us=22249 p90us=44269 p95us=48365 p99us=57343 p999us=117112 maxus=119209
+business=PLACE_ORDER_BATCH items=1858560 requests=92928 p50us=38895 p90us=54362 p95us=72482 p99us=102694 p999us=230555 maxus=239075
+business=CANCEL_ORDER_BATCH items=619520 requests=30976 p50us=38174 p90us=62029 p95us=79822 p99us=97124 p999us=104136 maxus=106692
+```
+
+- 连续三节点负载无发单定时器，测量期间仅窗口256背压，行情源独立工作。最终offered=terminal、unfinished0，均通过资金守恒/持仓/冻结核对；30秒窗口约92807/89020/76706 ops/s说明并非严格稳态。未补采样来挑选更高结果。生产交易热路径保持异步推进，生命周期快照屏障不属于普通命令同步等待。
+
+|JMH产品|独立批量 business ops/s|分配B/业务op|连续Owner批量 business ops/s|分配B/业务op|
+|---|---:|---:|---:|---:|
+|SPOT|141593|4405.09|175905|4281.71|
+|LINEAR_PERPETUAL|137473|4409.91|161528|4304.4|
+|INVERSE_PERPETUAL|126195|4476.51|162239|4293.38|
+|LINEAR_DELIVERY|125917|4468.93|148039|4323.54|
+|INVERSE_DELIVERY|119499|4499.77|166559|4313.51|
+|OPTION|121177|4453.84|178211|4275.31|
+- JMH每循环10240业务项/512命令，1秒预热+2秒测量仅用于短程诊断，含负载构建成本；单进程mock Session、真实Owner和Lane，并非三节点端到端吞吐，不与上表混为同一容量。各fork退出均核对资金、订单终态、冻结、快照恢复；12份JSON完整，GC次数独立批量均4、连续Owner6–7；累计暂停各43–49ms。执行入口`org.openjdk.jmh.Main`与参数见本节锁定，`-prof gc -rf json`并为每个product独立JFR。
+- 临时编排`/tmp/owner-opt-run.py`、JFR流式分析`/tmp/owner-opt-profile.java`、JMH编排`/tmp/owner-opt-jmh.py`。Owner采样按线程名前缀trading-owner过滤，避免临时路径带owner误纳入媒体线程。
+- /tmp/owner-opt-before/load/stdout.log SHA256 fa20a55bdd45a0f4f06fbd5f9a9a4e9b8a0a2ab1137d6b8e64bbdba822fbbcf4。
+- /tmp/owner-opt-before/node2/profile.jfr SHA256 6a6f86f792481d5cdcdcefd53226ea8665b2a99d4ae207aec6a3c0630ad8a71c。
+- /tmp/owner-opt-after/load/stdout.log SHA256 a4be2deb6d08a5e944f65f421ee7070dc2d1316203990709ab1719eda49882ad。
+- /tmp/owner-opt-after/node2/profile.jfr SHA256 010ae42476daf6d86624a99c163666363c58b608c72e48e6970c675b041b0e0c。
+- 恢复首轮脚本仅等待节点启动即发查询，日志重放尚未选主，客户端NOT_CONNECTED超时；节点无业务错误。下一轮改为选主完成后查询，未改变生产超时。该轮不能计为恢复通过。
+
+- 日志重放恢复PASS：191总周期、fundsDiff0、population/hftPositions/reservations/loss全通过，businessHash=6033776333b47981，与压测结束一致。随后通过ClusterControl SNAPSHOT控制，三个RecordingLog服务快照均position=403876000；停止全部三节点再启动，快照恢复再次同hash/同金融核对PASS。不是只做内存encode/decode恢复。
+- /tmp/owner-opt-replay2/load/stdout.log SHA256 89a4797572156e0bc6d43199e5edb2c76b321646798e6eed2846322e4e028c3a。
+- /tmp/owner-opt-snapshot-restart/load/stdout.log SHA256 f48978eccdbec7f111a50686f925de8cd3186d4ce3be3001bf7f5be4aa1290fd。
+- 三节点前后8份JFR及12份JMH JFR均DataLoss=0，JMH每份包含1193–1481条allocation samples；无节点业务失败。测试警告为无SLF4J provider及JNR依赖调用JDK25废弃Unsafe方法，没有忽略EXCHANGE_CORE_FAILURE。快照重启节点命令窗口仅处理恢复后查询，不重新执行全部交易。
+- 12份JMH JSON按文件名字典序串接文件名和内容的SHA256=15a66a800f3cad74a4bc2229dd051cf8e96ada9cfe66fdf03a31113a5a26c672。
+- 本轮源码及验证包均为d32e8cca工作树加上述修改，未检出历史提交。仅本机，未启动云资源；没有覆盖完整前端/WS网络、Valkey或Kafka部署、长时间内存稳定性和完整运营侧载。因此已完成本轮三项改动及局部正确性/性能验证，未达到1ms延迟或全线程有效饱和目标。
+- 分析记录完成，停止本轮进程并清理/tmp/owner-opt-*临时目录、Archive录制、JFR、日志和本轮Maven测试报告；以下清理执行后原始路径不再可访问，以上保留摘要及校验信息，构建包和用户文件保留。

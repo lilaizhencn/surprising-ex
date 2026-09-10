@@ -534,22 +534,23 @@ class ClusterCommandPipelineTest {
             var b = live.placeBatch(disjointUser(11), disjointSymbol("BTC-USDT"), 2000);
             var c = live.place(11, "BTC-USDT", 3000, 79, 1, CoreOrderSide.BUY);
             serial.apply(a); serial.apply(b); serial.apply(c);
-            live.send(a); live.send(b); live.send(c);
-            live.progressUntil(() -> live.responses.size() == 1);
-            assertThat(live.responses).as("only the conflicting prefix has committed").hasSize(1);
-            assertThat(live.service.commandWindowSize()).as("independent suffix and new command remain").isEqualTo(2);
-            assertThat(live.service.state().matchingSequence(b.header().commandId())).isPositive();
-            int prefixTrades = 0;
-            byte[] bytes;
-            while ((bytes = outbox.poll()) != null) {
-                var frame = RealtimeFrameCodec.decode(bytes);
-                if (frame.kind() == RealtimeFrame.Kind.TRADE) {
-                    assertThat(frame.symbol()).isEqualTo("BTC-USDT");
-                    prefixTrades++;
+            // Faster polling may finish multiple prefixes per callback. Observe the actual first
+            // response boundary instead of requiring a scheduling-dependent intermediate size.
+            int[] prefixTrades = {0};
+            live.firstResponse = () -> {
+                byte[] bytes;
+                while ((bytes = outbox.poll()) != null) {
+                    var frame = RealtimeFrameCodec.decode(bytes);
+                    if (frame.kind() == RealtimeFrame.Kind.TRADE) {
+                        assertThat(frame.symbol()).isEqualTo("BTC-USDT");
+                        prefixTrades[0]++;
+                    }
                 }
-            }
-            assertThat(prefixTrades).isEqualTo(20);
+                assertThat(prefixTrades[0]).isEqualTo(20);
+            };
+            live.send(a); live.send(b); live.send(c);
             live.tick();
+            assertThat(prefixTrades[0]).isEqualTo(20);
             replay.send(a); replay.send(b); replay.send(c); replay.tick();
             assertThat(live.responses).hasSize(3).allSatisfy(r -> assertThat(r.status()).isEqualTo(ResponseStatus.APPLIED));
             assertThat(live.hash()).isEqualTo(serial.hash()).isEqualTo(replay.hash());
@@ -681,7 +682,7 @@ class ClusterCommandPipelineTest {
             var ca = live.cancelBatch(11, 1000);
             var cb = live.cancelBatch(other, 2000);
             live.send(ca); live.send(cb);
-            assertThat(live.service.commandWindowSize()).isEqualTo(2);
+            assertThat(live.service.commandWindowSize() + live.responses.size()).isEqualTo(4);
             live.tick(); serial.apply(ca); serial.apply(cb);
             assertThat(live.hash()).isEqualTo(serial.hash());
             assertThat(live.responses).hasSize(4).allSatisfy(response -> {
@@ -782,7 +783,7 @@ class ClusterCommandPipelineTest {
             var rejected = live.placeBatch(11, "BTC-USDT", 1000);
             var valid = live.place(disjointUser(11), disjointSymbol("BTC-USDT"), 2000, 80, 1, CoreOrderSide.BUY);
             live.send(rejected); live.send(valid);
-            assertThat(live.service.commandWindowSize()).isEqualTo(2);
+            assertThat(live.service.commandWindowSize() + live.responses.size()).isEqualTo(2);
             live.tick(); serial.apply(rejected); serial.apply(valid);
             assertThat(live.hash()).isEqualTo(serial.hash());
             assertThat(live.responses).hasSize(2);
@@ -1006,6 +1007,106 @@ class ClusterCommandPipelineTest {
         }
     }
 
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void blockedBatchRetainsDecodeUntilItsDependencyCommits(ProductLine product) throws Exception {
+        try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
+            serial.applyAll(live.setup());
+            var entered = new CountDownLatch(1);
+            var release = new CountDownLatch(1);
+            var state = live.service.state();
+            var gate = state.matcherPipeline.readAtSubmissionFence(0, () -> {
+                entered.countDown();
+                try { if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("matcher gate timeout"); }
+                catch (InterruptedException error) { throw new IllegalStateException(error); }
+                return 1;
+            });
+            var first = live.place(11, "BTC-USDT", 50000, 80, 1, CoreOrderSide.BUY);
+            var second = live.placeBatch(11, "BTC-USDT", 51000);
+            var windowField = SurprisingClusteredService.class.getDeclaredField("commandWindow");
+            windowField.setAccessible(true);
+            var window = (ClusterCommandWindow) windowField.get(live.service);
+            var decodedField = ClusterCommandWindow.class.getDeclaredField("decoded");
+            decodedField.setAccessible(true);
+            try {
+                assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+                live.send(first); live.send(second);
+                Object decoded = decodedField.get(window);
+                assertThat(decoded).isNotNull();
+                for (int i = 0; i < 100; i++) {
+                    live.service.pollCommands();
+                    assertThat(decodedField.get(window)).isSameAs(decoded);
+                }
+                assertThat(live.responses).isEmpty();
+                assertThat(live.service.commandWindowSize()).isOne();
+            } finally { release.countDown(); }
+            live.tick(); serial.apply(first); serial.apply(second);
+            assertThat(gate.join()).isOne();
+            assertThat(decodedField.get(window)).isNull();
+            assertThat(live.responses).hasSize(2);
+            assertThat(live.hash()).isEqualTo(serial.hash());
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void independentSettlementsDispatchAheadWithoutPublishingTheSuffix(ProductLine product) throws Exception {
+        try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
+            serial.applyAll(live.setup());
+            var state = live.service.state();
+            var matcherEntered = new CountDownLatch(1);
+            var releaseMatcher = new CountDownLatch(1);
+            var releaseLanes = new CountDownLatch(1);
+            var matcherGate = state.matcherPipeline.readAtSubmissionFence(0, () -> {
+                matcherEntered.countDown();
+                try { if (!releaseMatcher.await(5, TimeUnit.SECONDS)) throw new AssertionError("matcher gate timeout"); }
+                catch (InterruptedException error) { throw new IllegalStateException(error); }
+                return 1;
+            });
+            var first = live.placeBatch(11, "BTC-USDT", 60000);
+            var second = live.placeBatch(disjointUser(11), disjointSymbol("BTC-USDT"), 61000);
+            try {
+                assertThat(matcherEntered.await(2, TimeUnit.SECONDS)).isTrue();
+                live.send(first); live.send(second);
+                long firstSequence = state.matchingSequence(first.header().commandId());
+                long secondSequence = state.matchingSequence(second.header().commandId());
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+                while ((!state.pendingMatching(firstSequence).isMatchingSubmitted()
+                        || !state.pendingMatching(secondSequence).isMatchingSubmitted()) && System.nanoTime() < deadline)
+                    live.service.pollCommands();
+                assertThat(state.pendingMatching(secondSequence).isMatchingSubmitted()).isTrue();
+                var field = state.runtimeState.getClass().getDeclaredField("laneWorkers");
+                field.setAccessible(true);
+                Object[] workers = (Object[]) field.get(state.runtimeState);
+                var entered = new CountDownLatch(workers.length);
+                Class<?> task = Class.forName("com.surprising.aeron.service.state.SettlementLaneWorker$Command");
+                var submit = workers[0].getClass().getDeclaredMethod("submit", task);
+                submit.setAccessible(true);
+                for (Object worker : workers) submit.invoke(worker, Proxy.newProxyInstance(task.getClassLoader(),
+                        new Class<?>[]{task}, (p, method, args) -> {
+                            entered.countDown();
+                            if (!releaseLanes.await(5, TimeUnit.SECONDS)) throw new AssertionError("Lane gate timeout");
+                            return null;
+                        }));
+                assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+                releaseMatcher.countDown();
+                deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+                while (state.commits.dispatchedSettlementInFlight < 2 && System.nanoTime() < deadline)
+                    live.service.pollCommands();
+                assertThat(state.commits.dispatchedSettlementInFlight).isEqualTo(2);
+                assertThat(live.responses).isEmpty();
+                assertThat(state.firstPendingMatchingSequence()).isEqualTo(firstSequence);
+            } finally { releaseMatcher.countDown(); releaseLanes.countDown(); }
+            live.tick(); serial.apply(first); serial.apply(second);
+            assertThat(matcherGate.join()).isOne();
+            assertThat(live.responses).hasSize(2).allSatisfy(r -> assertThat(r.commandStatus()).isEqualTo(ResponseStatus.APPLIED));
+            assertThat(live.hash()).isEqualTo(serial.hash());
+            try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+            }
+        }
+    }
+
     private static final class Fixture implements AutoCloseable {
         final SurprisingClusteredService service;
         final ProductLine product;
@@ -1014,6 +1115,7 @@ class ClusterCommandPipelineTest {
         final Cluster.Role role;
         long sequence;
         int scheduledTimers;
+        Runnable firstResponse;
         Fixture(ProductLine product) { this(product, Cluster.Role.LEADER); }
         Fixture(ProductLine product, Cluster.Role role) {
             this.product = product; this.role = role;
@@ -1024,6 +1126,7 @@ class ClusterCommandPipelineTest {
                             byte[] bytes = new byte[(int) args[2]];
                             ((org.agrona.DirectBuffer) args[0]).getBytes((int) args[1], bytes);
                             responses.add(CoreProtocol.decodeResponse(CoreMessageCodec.decode(bytes).payloadUnsafe()));
+                            if (responses.size() == 1 && firstResponse != null) firstResponse.run();
                             return 1L;
                         }
                         return zero(method.getReturnType());

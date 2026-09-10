@@ -55,6 +55,20 @@ final class ClusterCommandWindow {
 
     void releaseDecoded() { decodedSource = null; decoded = null; }
 
+    /** 只保留仍在入口队首等待的不可变命令解码结果，出队即释放。 */
+    void retainDecoded(CoreMessage pendingHead) {
+        if (pendingHead == null || decodedSource != pendingHead) releaseDecoded();
+    }
+
+    /** 已通过账户及撮合依赖检查的最大序号；结算可提前派发，提交仍逐条进行。 */
+    long lastMatchingSequence() {
+        for (int i = size - 1; i >= 0; i--) {
+            long sequence = get(i).sequence;
+            if (sequence != 0) return sequence;
+        }
+        return 0;
+    }
+
     void candidateOrder(long orderId, String symbol, CoreOrderSide side, long price) {
         candidateOrder(orderId, symbol, side, price, false);
     }

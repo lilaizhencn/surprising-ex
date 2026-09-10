@@ -638,14 +638,7 @@ final class OrderBatchExecutor {
             OrderBatchPending batch, OrderBatchItem item, PendingMatching pending,
             com.surprising.aeron.service.matching.CoreMatchingResult matchingResult) {
         if (owner.realtimeCapture != null && owner.realtimeCapture.active() && matchingResult.accepted()) {
-            try {
-                long takerId = item.orderId();
-                int fill = 0;
-                for (MatcherEvent event : matchingResult.matcherEvents()) {
-                    if (event.eventType() == MatcherEventType.TRADE)
-                        owner.realtimeCapture.trade(owner.runtimeOrder(takerId), pending.sequence(), fill++, event.price(), event.size(),event.matchedOrderId(),event.matchedOrderUid());
-                }
-            } catch (RuntimeException failure) { owner.realtimeCapture.failed(); }
+            item.realtimeTakerOrder = owner.runtimeOrder(item.orderId());
         }
 
         if (batch.kind != OrderBatchKind.CANCEL) {
@@ -816,6 +809,7 @@ final class OrderBatchExecutor {
         } catch (RuntimeException validationFailure) {
             throw failOrderBatch(batch, pending, "order batch final validation failed", validationFailure);
         }
+        captureCommittedBatchTrades(batch);
         owner.commits.completeCommitPublicationBatch(committedLaneMask);
         long tradeCount = 0;
         for (OrderBatchItem item : batch.items) {
@@ -950,6 +944,24 @@ final class OrderBatchExecutor {
             if (pipelinedBatchBySymbol.containsKey(((PlaceOrderCommand) item.command).symbol())) return true;
         }
         return false;
+    }
+
+    /** 每批仅在有序提交点发布成交，不能写入前一条命令的实时捕获范围。 */
+    private void captureCommittedBatchTrades(OrderBatchPending batch) {
+        if (owner.realtimeCapture == null) return;
+        for (OrderBatchItem item : batch.items) {
+            var taker = item.realtimeTakerOrder;
+            item.realtimeTakerOrder = null;
+            if (taker == null || owner.realtimeCapture == null || !owner.realtimeCapture.active()) continue;
+            try {
+                int fill = 0;
+                for (MatcherEvent event : item.executionEvents) {
+                    if (event.eventType() == MatcherEventType.TRADE)
+                        owner.realtimeCapture.trade(taker, batch.sequence, fill++, event.price(), event.size(),
+                                event.matchedOrderId(), event.matchedOrderUid());
+                }
+            } catch (RuntimeException failure) { owner.realtimeCapture.failed(); }
+        }
     }
 
     OrderBatchPending decodeOrderBatch(CoreMessage message, DecodedMatchingCommand decodedCommand,
