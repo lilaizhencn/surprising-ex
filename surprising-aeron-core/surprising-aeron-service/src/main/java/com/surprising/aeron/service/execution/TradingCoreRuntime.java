@@ -1999,6 +1999,15 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return matchingProgressSequence;
     }
 
+    /** 尚未消费的本地准入/队首结果必须继续推进，不能只等待新的跨线程通知。 */
+    boolean hasLocalMatchingWork() {
+        if (placeAdmissionReadyShardMask != 0 || pendingMatching.hasReadyHead()) return true;
+        PendingMatching head = pendingMatching.get(pendingMatching.firstSequence());
+        OrderBatchPending batch = head == null ? null : batches.pendingOrderBatches.get(head.sequenceKey());
+        // 顺序批量准入等待 Lane 所有权交接，该边界没有 matcher/settlement 通知。
+        return batch != null && !batch.started;
+    }
+
     /** Only external completion cursors; the caller must first exhaust owner-local progress. */
     boolean hasMatchingNotifications() {
         return hasMatchingNotifications(System.nanoTime());

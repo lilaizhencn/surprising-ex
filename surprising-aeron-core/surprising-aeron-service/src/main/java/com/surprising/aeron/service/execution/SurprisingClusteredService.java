@@ -51,6 +51,10 @@ public final class SurprisingClusteredService implements ClusteredService {
             snapshotRequests = new org.agrona.concurrent.ManyToOneConcurrentArrayQueue<>(256);
     private boolean realtimeLeader;
     private long lastCommittedPosition;
+    /** 仅 Owner 写入：上一轮已耗尽本地推进时的命令前缀、派发上限和进度。 */
+    private long waitingPrefixSequence, waitingDispatchSequence, waitingMatchingProgress;
+    /** 没有本地进展时只探测完成通知，仍持续接收入站命令，不使用定时器。 */
+    private boolean waitingMatchingNotification;
     private long nextRealtimeSnapshotNs;
     // Aeron's cluster idle strategy can reenter doBackgroundWork on this same thread.
     private boolean processingLogCallback;
@@ -296,10 +300,23 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     private boolean pollCommandPrefix() {
         var last = commandWindow.get(drainingSize - 1);
+        long dispatchThrough = Math.max(drainingSequence, commandWindow.lastMatchingSequence());
+        long progressBefore = state.matchingProgressSequence();
+        if (waitingMatchingNotification && waitingPrefixSequence == drainingSequence
+                && waitingDispatchSequence == dispatchThrough && waitingMatchingProgress == progressBefore
+                && !state.hasMatchingNotifications()) {
+            checkProgressDeadline();
+            return false;
+        }
+        waitingMatchingNotification = false;
         state.commits.commitReadyMatching(MATCHING_COMPLETION_BATCH_SIZE,
                 last.timestamp, last.position, false, drainingSequence,
-                Math.max(drainingSequence, commandWindow.lastMatchingSequence()), matchingCommitHandler);
+                dispatchThrough, matchingCommitHandler);
         if (state.firstPendingMatchingSequence() != 0 && state.firstPendingMatchingSequence() <= drainingSequence) {
+            waitingMatchingProgress = state.matchingProgressSequence();
+            waitingPrefixSequence = drainingSequence;
+            waitingDispatchSequence = dispatchThrough;
+            waitingMatchingNotification = waitingMatchingProgress == progressBefore && !state.hasLocalMatchingWork();
             checkProgressDeadline();
             return false;
         }

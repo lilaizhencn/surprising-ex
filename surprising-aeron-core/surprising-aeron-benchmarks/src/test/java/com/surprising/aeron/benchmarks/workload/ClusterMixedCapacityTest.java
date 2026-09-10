@@ -14,6 +14,16 @@ class ClusterMixedCapacityTest {
         assertThatThrownBy(() -> ClusterMixedCapacityMain.validateBatch(response(item),new long[]{10},9,"BTC-USDT"))
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("account mismatch");
     }
+    @Test void cancelResponseMustNotResurrectAnOrderRetiredByTheLane() {
+        var order = new CoreOrderStateView(10, com.surprising.product.api.ProductLine.SPOT, 7,
+                "BTC-USDT", 1, CoreOrderSide.BUY, 100, 1, 0, 1, false, "OPEN", 1);
+        var stale = new CoreOrderBatchResult.Item(0,10,0,0,ResponseStatus.APPLIED,CoreResultCode.NONE,order,List.of());
+        assertThatThrownBy(() -> ClusterMixedCapacityMain.validateBatch(response(stale),new long[]{10},7,null,true))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("removed order");
+        var retired = new CoreOrderBatchResult.Item(0,10,0,0,ResponseStatus.APPLIED,CoreResultCode.NONE,null,List.of());
+        assertThat(ClusterMixedCapacityMain.validateBatch(response(retired),new long[]{10},7,null,true)).isZero();
+    }
+
     @Test void diagnosticCapacityMakesTheActualSessionLimitExplicit() {
         var capacity=ClusterMixedCapacityMain.commandCapacity(2048,2048);
         assertThat(capacity.commandSessions()).isEqualTo(1);

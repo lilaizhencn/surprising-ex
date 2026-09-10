@@ -35,6 +35,16 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         item.resultOrderSymbol = symbol;
         item.laneResultPrepared = true;
     }
+    /** 所属用户 Lane 编码的不可变响应；事件完成回执发布后才允许 Owner 读取。 */
+    byte[] preparedResponse;
+
+    @Override public void prepareResponse() {
+        // 部分拒单、顺序改单可能没有本次 Lane 结果，仍需提交点补齐其查询语义。
+        for (OrderBatchItem item : items) if (!item.laneResultPrepared) return;
+        preparedResponse = TradingOrderBatchCodec.encodeResultSource(this);
+        responseItem = null;
+    }
+
     public int settlementCount() { return deferredSettlementOrderIds.size(); }
     public long settlementOrderId(int index) { return deferredSettlementOrderIds.get(index); }
     public long settlementLaneMask(int index) { return deferredSettlementExpectedLaneMasks.get(index); }
@@ -299,6 +309,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         nextIndex = 0;
         tradeCount = 0;
         responseItem = null;
+        preparedResponse = null;
         cancellationChunkEnd = 0;
         sequence = 0;
         currentPreMatchingCancellationOrderIds = List.of();

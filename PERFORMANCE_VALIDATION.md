@@ -9898,3 +9898,1190 @@ surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks
 异常/提示：JMH的sun.misc.Unsafe过时API及SLF4J缺少provider提示属于测试工具/日志绑定，未出现EXCHANGE_CORE_FAILURE。adminActionRetries来自Aeron Publication.ADMIN_ACTION offer暂缓，非后台业务失败；结果已单独保留。辅助记录命令一次因工作目录少写前导斜杠未启动，纠正后执行，无业务影响。所有原始产物下条清理后不可访问，保留本记录与构建JAR，README未改。
 
 最终清理确认：本轮节点/客户端均已退出，恢复编排完整退出；已删除剩余/tmp/owner-master-opt（10468873618字节），以及本轮生成的338个测试报告文件，9个空报告目录。前两轮另已清理13581884940和13850504700字节。原始JFR、Archive、临时日志/源码/类/报告不可访问；本记录、构建JAR和用户原有未跟踪文件保留。
+
+### 2026-09-10 Owner 收尾与未完成轮询诊断（采集前锁定）
+
+- 被测 master：86e07b9997856047ff1f60c855658f40fc373254，业务代码 2a60fed1；对照 commit：不适用（只测当前 master）。本轮先定位，不修改资金、索引或提交边界。
+- 本机 Intel i9-9880H 8C16T/16GiB，HotSpot Oracle GraalVM 25.0.1，Maven 3.9.16，G1；节点 512m/1536m，客户端 128m/512m，NMT summary。仅一个真实 Aeron Cluster 成员，保留网络和 Archive，PIPELINED，4 Account Lane BUSY_SPIN、2 matcher，SHARED_NETWORK，service YIELDING。两 matcher 仅用于瓶颈诊断，不作正式容量结论。
+- 场景：LINEAR_PERPETUAL，持续异步 mixed-trading-stream=true，mixed-operational=false，1769 用户、256 symbol、batch 20、in-flight/session-in-flight 256，单命令连接及保留查询连接；seed 131001，沿用现有负载初始化资金/持仓、做市买卖单。测量期间不并发执行完整风险/清算/查询业务。30s 预热、60s 测量、最终排空和资金/终态核对，结束即停止进程。
+- JMH ClusterOperationalBenchmark.continuousOperations，fork1/thread1/wi0/i1/controlPageSize0，-prof gc。节点 profile.jfc 衍生 JFR，ExecutionSample 2ms、ThreadCPU 1s、park/monitor threshold 1ms、maxsize192MiB。
+- 额外诊断 agent 仅位于 /tmp/owner-followup，不改生产类源码；在 Owner 方法入口累计次数，每1024次记录一次耗时及累计返回结果到 surprising.OwnerWork。false/null 只代表该方法未完成提交，不代表其内部没有派发或收集工作。按测量时间过滤累计计数，相邻事件差统计存在首尾最多约1024次误差；抽样墙钟耗时包含调度与嵌套调用，不能与 CPU 样本相加。agent 会影响 JIT/耗时，吞吐只能作诊断，不能作优化提升结论。
+- 数据条件：accepted=terminal、unfinished=0、fundsDiff=0、业务状态检查 PASS、Owner 无失败/JFR无DataLoss；记录 thermal throttling，出现明显降频不作性能验收。磁盘初始506GiB可用，低于10GiB停止。原始路径 /tmp/owner-followup/runs；分析完成后记录摘要、校验并清理。
+
+- 首次诊断启动中止：节点 fat jar 自带旧 ASM 遮蔽 agent 的 ASM 9.9.1，导致 `Unsupported class file major version 69`，转换器未生效。不是业务异常；不使用该轮数据。已停止客户端及 fork，runner 收尾停止节点。重启诊断轮保持上述场景不变，仅将 agent.jar 放在节点 classpath 前，确认全部目标成功插桩后才接受计数。
+- 第二次诊断仅启动阶段失败：agent 在条件 return 中新建局部变量产生非法 StackMap，离线 Class.forName 复现为 VerifyError；改用返回栈 DUP 保留原值，七个目标类离线验证全部通过。未开始业务测量，不归因于 Core。第三轮仍按锁定场景，路径 runs3；另记录 readyLaneMask 非零返回比例。
+
+#### 诊断结果及本轮修改
+
+- 诊断业务核对 PASS：8552263 business ops、828231 Core messages、2032640 fills，60.165s，142147.390 business ops/s，仅探针诊断数据。Owner 96.819%，matcher 25.189/25.152%，CPU_Speed_Limit 68，不能作容量验收。
+- 关键计数（首尾最多约1024调用误差）：pollCommandPrefix 23037952，完成798087（3.464%）；pumpMatchingCommitCompletions 23351296；readyLaneMask 46903296，非零1076650（2.295%）；finishOrderBatch 505856，完成404740（80.011%）。未完成前缀不等于内部完全没有业务推进；系统性每1024次墙钟采样受调度/周期混叠影响，外推总时间超过窗口，不采用其估算 CPU 比例。
+- 修改：完整批量响应由用户 Lane 在 final commit event 完成回执前编码，Owner 接收不可变 byte[]；部分未捕获结果仍按原提交点补齐。Owner 前缀轮询仅在已无本地工作、进度/派发上限/前缀未变且无通知时跳过全套推进；保持入站轮询、超时/健康检测与按序提交。跳过已由 Lane 准备发布时的两个无效删除遍历。
+- 首轮业务回归发现7个顺序批量用例不推进：原因是 Lane 所有权交接没有普通完成通知。已将未 started 的队首批量视为本地工作，不能进入仅通知等待；修正后282个受影响服务测试通过，包含六产品线并行/阻塞恢复、资金共享、部分拒单、原始日志时间、快照及响应字节一致性。
+
+WorkReport.txt
+```text
+id=0 calls=22264832 success=22264832 successPct=100.000 timingSamples=22095 avgNs=3461.2 successAvgNs=3461.2 incompleteAvgNs=0.0 sampledInclusiveWallSeconds=78.311
+id=1 calls=23037952 success=798087 successPct=3.464 timingSamples=22862 avgNs=1944.7 successAvgNs=38301.6 incompleteAvgNs=513.3 sampledInclusiveWallSeconds=45.527
+id=2 calls=505856 success=404740 successPct=80.011 timingSamples=495 avgNs=29482.1 successAvgNs=36943.8 incompleteAvgNs=2098.9 sampledInclusiveWallSeconds=14.944
+id=3 calls=23351296 success=23351296 successPct=100.000 timingSamples=23174 avgNs=692.0 successAvgNs=692.0 incompleteAvgNs=0.0 sampledInclusiveWallSeconds=16.420
+id=4 calls=497664 success=497664 successPct=100.000 timingSamples=495 avgNs=12010.8 successAvgNs=12010.8 incompleteAvgNs=0.0 sampledInclusiveWallSeconds=6.088
+id=5 calls=299008 success=299008 successPct=100.000 timingSamples=297 avgNs=8520.4 successAvgNs=8520.4 incompleteAvgNs=0.0 sampledInclusiveWallSeconds=2.591
+id=6 calls=46903296 success=1076650 successPct=2.295 timingSamples=46547 avgNs=118.4 successAvgNs=242.2 incompleteAvgNs=114.5 sampledInclusiveWallSeconds=5.644
+id=7 calls=848896 success=798200 successPct=94.028 timingSamples=843 avgNs=3922.1 successAvgNs=4175.1 incompleteAvgNs=150.7 sampledInclusiveWallSeconds=3.386
+id=8 calls=813056 success=813056 successPct=100.000 timingSamples=808 avgNs=3451.2 successAvgNs=3451.2 incompleteAvgNs=0.0 sampledInclusiveWallSeconds=2.855
+id=9 calls=398336 success=398336 successPct=100.000 timingSamples=396 avgNs=3291.0 successAvgNs=3291.0 incompleteAvgNs=0.0 sampledInclusiveWallSeconds=1.335
+```
+
+AnalyzeJfr.txt
+```text
+totals allocationMiBps=429.481 allocationBytes=27095336128 machineCPU=91.77 jvmCPU=57.44 heapMaxMiB=392.89 dataLoss=0 ownerIOEvents=0
+threadCPU	97.572	core-account-lane-3
+threadCPU	97.535	core-account-lane-2
+threadCPU	97.529	core-account-lane-0
+threadCPU	97.525	core-account-lane-1
+threadCPU	96.819	trading-owner--1
+threadCPU	96.444	/tmp/owner-followup/runs3/lanes-profile-LINEAR_PERPETUAL-0/media-surprising-linear_perpetual-0 [sender,receiver]
+threadCPU	69.554	clustered-service-101-0
+threadCPU	68.146	driver-conductor
+threadCPU	63.348	archive-conductor
+threadCPU	61.492	consensus-module-101-0
+threadCPU	25.189	core-matcher-1
+threadCPU	25.152	core-matcher-0
+threadCPU	2.713	JVMCI-native CompilerThread0
+threadCPU	1.870	aeron-md-nra
+threadCPU	0.390	JFR Periodic Tasks
+threadCPU	0.248	JFR Recorder Thread
+threadCPU	0.229	C1 CompilerThread0
+threadCPU	0.215	aeron-client
+threadCPU	0.102	Monitor Deflation Thread
+gc count=90 totalMs=603.640 p99Ms=11.975 maxMs=11.975
+samples	22227	core-account-lane-0
+samples	21964	core-account-lane-1
+samples	21563	core-account-lane-2
+samples	21014	core-account-lane-3
+samples	19060	trading-owner--1
+samples	1716	driver-conductor
+samples	1000	consensus-module-101-0
+samples	967	clustered-service-101-0
+samples	920	archive-conductor
+samples	354	/tmp/owner-followup/runs3/lanes-profile-LINEAR_PERPETUAL-0/media-surprising-linear_perpetual-0 [sender,receiver]
+samples	219	core-matcher-0
+samples	177	core-matcher-1
+ownerInclusive	19060	java.lang.Thread.run
+ownerInclusive	19060	com.surprising.aeron.service.execution.ContinuousTradingClusterService$$Lambda.0x000000012e130d98.run
+ownerInclusive	19060	java.lang.Thread.runWith
+ownerInclusive	19060	com.surprising.aeron.service.execution.ContinuousTradingClusterService.runOwner
+ownerInclusive	18791	com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommands
+ownerInclusive	18742	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommands
+ownerInclusive	18682	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommandsInScope
+ownerInclusive	13340	com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommandPrefix
+ownerInclusive	12708	com.surprising.aeron.service.execution.OrderedCommitCoordinator.commitReadyMatching
+ownerInclusive	7841	com.surprising.aeron.service.execution.OrderedCommitCoordinator.completeMatching
+ownerInclusive	5344	com.surprising.aeron.service.execution.OrderBatchExecutor.finishOrderBatch
+ownerInclusive	4475	com.surprising.aeron.service.execution.OrderedCommitCoordinator.pumpMatchingCommitCompletions
+allocation	1501978168	trading-owner--1 [B
+allocation	834888240	core-account-lane-1 com.surprising.aeron.service.state.OrderRuntime
+allocation	821351256	core-account-lane-3 com.surprising.aeron.service.state.OrderRuntime
+allocation	746021952	core-account-lane-3 [J
+allocation	736979936	clustered-service-101-0 [B
+allocation	719006544	core-account-lane-0 com.surprising.aeron.service.state.OrderRuntime
+allocation	713465640	core-account-lane-1 [J
+allocation	707903104	core-account-lane-2 com.surprising.aeron.service.state.OrderRuntime
+allocation	671660616	core-account-lane-0 [J
+allocation	650173064	core-matcher-1 com.surprising.aeron.service.matching.CoreMatchingResult$NativeCommand
+allocation	641592056	core-account-lane-2 [J
+allocation	627466680	trading-owner--1 com.surprising.aeron.protocol.PlaceOrderCommand
+allocationSite	2931359344	java.util.concurrent.ConcurrentHashMap.putVal
+allocationSite	1509087944	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.addKeyValueAtIndex
+allocationSite	1506296184	com.surprising.aeron.protocol.TradingOrderBatchCodec.decodeCommand
+allocationSite	1256148168	org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap.rehashAndGrow
+allocationSite	1072016840	org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap.get
+allocationSite	980947688	com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.bindMatcherEvidence
+allocationSite	949357192	java.util.List.copyOf
+allocationSite	891764472	java.nio.ByteBuffer.allocate
+allocationSite	812627024	com.surprising.aeron.service.matching.CoreMatchingResult.classify
+allocationSite	736268768	com.surprising.aeron.service.state.RuntimeDerivativeFillCalculator$FillCursor.order
+allocationSite	732899544	java.lang.invoke.VarHandleLongs$Array.setRelease
+allocationSite	701489904	org.eclipse.collections.impl.set.mutable.primitive.LongHashSet.rehashAndGrow
+parkOrMonitorNs	60105181077	Common-Cleaner
+parkOrMonitorNs	59641433818	aeron-md-nra
+parkOrMonitorNs	795165985	archive-conductor
+parkOrMonitorNs	777375463	consensus-module-101-0
+parkOrMonitorNs	593203368	core-matcher-0
+parkOrMonitorNs	589083670	driver-conductor
+parkOrMonitorNs	549842402	core-matcher-1
+parkOrMonitorNs	422617887	/tmp/owner-followup/runs3/lanes-profile-LINEAR_PERPETUAL-0/media-surprising-linear_perpetual-0 [sender,receiver]
+eventCounts	118012	surprising.OwnerWork
+eventCounts	111184	jdk.ExecutionSample
+eventCounts	56504	jdk.ThreadPark
+eventCounts	50690	jdk.GCPhaseParallel
+eventCounts	17474	jdk.ObjectAllocationSample
+eventCounts	7454	jdk.PromoteObjectInNewPLAB
+eventCounts	3642	jdk.ThreadSleep
+eventCounts	2882	jdk.NativeMethodSample
+eventCounts	1593	jdk.NativeMemoryUsage
+eventCounts	1350	jdk.TenuringDistribution
+eventCounts	1048	jdk.NativeLibrary
+eventCounts	919	jdk.ThreadCPULoad
+```
+
+诊断 node.jfr SHA256=dc25ddc5314507342da1fc98819bbf2094d2e8804f3b97d6885c981f367744e3；原始文件将在本轮全部分析后删除。
+
+#### 修改后采集标准（采集前锁定）
+
+- 被测 master 工作树基于86e07b99，最终源码及JAR SHA256另附；对照不适用。仅本机单成员，其他JDK/机器/JVM/4Lane2matcher/网络/Archive参数同上。
+- U本位持续负载：无探针无profiler主测30s预热/60s测量；JMH+JFR无探针30s预热/90s测量；额外agent诊断30s预热/60s测量用于调用比例，不作吞吐比较。JMH fork1/thread1/wi0/i1/-prof gc/controlPageSize0。in-flight256，1769用户，256币对，batch20，所有资金/终态/响应字段检查必须PASS。新增撤单响应验证：不允许返回已淘汰活动订单。
+- 六产品线顺序运行新增 ClusterBatchResponseBenchmark.lanePreparedResponses：外部真实单成员，32账户、1币对、每项1单位、20项/批、每轮32批下单+32批撤单（先连续发送，再收集响应），每次JMH调用8轮，共10240业务动作；fork1/thread1/wi1/i2，-prof gc，节点JFR。限额256但该回归实际单轮最多64请求，不作饱和吞吐结论；用户初始1000000结算资产、无持仓，下单80/标记100，验证逐项身份、未成交下单视图、撤单空视图、余额回原值/冻结及订单预留归零。另逐产品执行原有功能→kill→日志恢复→快照→重启核对。
+- 通过阈值：所有已接收业务终态、无积压/资金差/业务失败；现有及新增功能测试通过；JFR无DataLoss/Owner同步I/O。归因目标为最终agent的pump调用数低于prefix调用数的25%，且完整批量编码可在Lane采样观察到；若未达到须如实报告。降频或探针开销下不宣称容量验收或加速比。
+- 仅新响应byte[]从Owner移到Lane分配，无新增长期缓存；连续负载覆盖多次槽复用，快照/重启验证状态，短采样不宣称无泄漏。数据目录/JFR192MiB上限、磁盘低于10GiB停止；结束清理。
+
+- 最终编译：服务282测试及基准验证器9测试均PASS。新增外部JMH首次编译误用了用户视图的orders方法，已改为独立USER_OPEN_ORDERS_QUERY并重新构建成功。业务代码后续未修改。六产品线batchResponseVerify均PASS，每产品30720业务动作（含预热），实际最大单轮64请求。
+
+六产品线 JMH 主分数单位为 ms/整次10240操作调用，不能直接当作连续业务吞吐：
+- lanes-control-INVERSE_DELIVERY-0: 322.142541 ms/invocation；GC客户端 B/invocation=17010408；编码线程证据如下（全trial含预热，短采样不作容量结论）。
+```text
+6	core-account-lane-0 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+2	core-account-lane-1 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+7	core-account-lane-2 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+6	core-account-lane-3 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+49	trading-owner--1 com.surprising.aeron.service.execution.OrderBatchExecutor.finishOrderBatch
+1	trading-owner--1 com.surprising.aeron.service.execution.TradingCoreRuntime.hasLocalMatchingWork
+48	trading-owner--1 com.surprising.aeron.service.execution.TradingCoreRuntime.hasMatchingNotifications
+13	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.collectCancel
+3	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.collectMatcherSettlement
+39	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.hasMatchingNotifications
+39	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.readyLaneMask
+```
+- lanes-control-INVERSE_PERPETUAL-0: 220.145314 ms/invocation；GC客户端 B/invocation=15773308；编码线程证据如下（全trial含预热，短采样不作容量结论）。
+```text
+8	core-account-lane-0 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+7	core-account-lane-1 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+9	core-account-lane-2 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+7	core-account-lane-3 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+40	trading-owner--1 com.surprising.aeron.service.execution.OrderBatchExecutor.finishOrderBatch
+1	trading-owner--1 com.surprising.aeron.service.execution.TradingCoreRuntime.hasLocalMatchingWork
+49	trading-owner--1 com.surprising.aeron.service.execution.TradingCoreRuntime.hasMatchingNotifications
+8	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.collectCancel
+2	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.collectMatcherSettlement
+42	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.hasMatchingNotifications
+41	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.readyLaneMask
+```
+- lanes-control-LINEAR_DELIVERY-0: 300.136147 ms/invocation；GC客户端 B/invocation=13406008；编码线程证据如下（全trial含预热，短采样不作容量结论）。
+```text
+9	core-account-lane-0 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+4	core-account-lane-1 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+7	core-account-lane-2 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+5	core-account-lane-3 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+61	trading-owner--1 com.surprising.aeron.service.execution.OrderBatchExecutor.finishOrderBatch
+1	trading-owner--1 com.surprising.aeron.service.execution.TradingCoreRuntime.hasLocalMatchingWork
+40	trading-owner--1 com.surprising.aeron.service.execution.TradingCoreRuntime.hasMatchingNotifications
+15	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.collectCancel
+3	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.collectMatcherSettlement
+34	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.hasMatchingNotifications
+33	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.readyLaneMask
+```
+- lanes-control-LINEAR_PERPETUAL-0: 217.455128 ms/invocation；GC客户端 B/invocation=13725220；编码线程证据如下（全trial含预热，短采样不作容量结论）。
+```text
+11	core-account-lane-0 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+4	core-account-lane-1 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+2	core-account-lane-2 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+1	core-account-lane-3 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+40	trading-owner--1 com.surprising.aeron.service.execution.OrderBatchExecutor.finishOrderBatch
+2	trading-owner--1 com.surprising.aeron.service.execution.TradingCoreRuntime.hasLocalMatchingWork
+49	trading-owner--1 com.surprising.aeron.service.execution.TradingCoreRuntime.hasMatchingNotifications
+9	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.collectCancel
+4	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.collectMatcherSettlement
+31	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.hasMatchingNotifications
+29	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.readyLaneMask
+```
+- lanes-control-OPTION-0: 248.532191 ms/invocation；GC客户端 B/invocation=13637208；编码线程证据如下（全trial含预热，短采样不作容量结论）。
+```text
+6	core-account-lane-0 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+5	core-account-lane-1 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+7	core-account-lane-2 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+10	core-account-lane-3 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+41	trading-owner--1 com.surprising.aeron.service.execution.OrderBatchExecutor.finishOrderBatch
+49	trading-owner--1 com.surprising.aeron.service.execution.TradingCoreRuntime.hasMatchingNotifications
+15	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.collectCancel
+2	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.collectMatcherSettlement
+41	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.hasMatchingNotifications
+41	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.readyLaneMask
+```
+- lanes-control-SPOT-0: 224.008386 ms/invocation；GC客户端 B/invocation=15798028；编码线程证据如下（全trial含预热，短采样不作容量结论）。
+```text
+9	core-account-lane-0 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+6	core-account-lane-1 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+7	core-account-lane-2 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+2	core-account-lane-3 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+43	trading-owner--1 com.surprising.aeron.service.execution.OrderBatchExecutor.finishOrderBatch
+2	trading-owner--1 com.surprising.aeron.service.execution.TradingCoreRuntime.hasLocalMatchingWork
+52	trading-owner--1 com.surprising.aeron.service.execution.TradingCoreRuntime.hasMatchingNotifications
+6	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.collectCancel
+4	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.collectMatcherSettlement
+45	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.hasMatchingNotifications
+44	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.readyLaneMask
+```
+
+main 结果
+```text
+measurementStartEpochMillis=1789055453741
+measurementEndEpochMillis=1789055513860
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=713 businessHash=6f171e74ee070bb0
+adminActionRetries=58
+mixedCapacity=PASS elapsedSeconds=60.119 terminalBusinessOperations=10079051 offeredBusinessOperations=10079051 terminalCoreMessages=973643 offeredCoreMessages=973643 businessOpsPerSec=167650.476 coreMessagesPerSec=16195.147 fills=2396160 fillsPerSec=39856.666 queries=0 unfinished=0 peakInFlight=256 measuredCycles=468 totalCycles=713 triggerExecutions=0
+business=PLACE_ORDER items=239616 requests=239616 p50us=9076 p90us=23166 p95us=25034 p99us=29376 p999us=54198 maxus=73007
+business=CANCEL_ORDER items=239616 requests=239616 p50us=8232 p90us=18219 p95us=20103 p99us=27820 p999us=65339 maxus=88014
+business=APPLY_MARK_PRICE items=15179 requests=15179 p50us=13074 p90us=22675 p95us=24592 p99us=47939 p999us=64913 maxus=74055
+business=PLACE_ORDER_BATCH items=7188480 requests=359424 p50us=19480 p90us=23199 p95us=26099 p99us=44531 p999us=68943 maxus=95223
+business=CANCEL_ORDER_BATCH items=2396160 requests=119808 p50us=21037 p90us=25296 p95us=26902 p99us=40304 p999us=61898 maxus=80150
+```
+
+profile 结果
+```text
+measurementStartEpochMillis=1789055601367
+measurementEndEpochMillis=1789055691517
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=844 businessHash=967e6816a230d702
+adminActionRetries=79
+mixedCapacity=PASS elapsedSeconds=90.149 terminalBusinessOperations=13806848 offeredBusinessOperations=13806848 terminalCoreMessages=1335552 offeredCoreMessages=1335552 businessOpsPerSec=153155.811 coreMessagesPerSec=14814.935 fills=3281920 fillsPerSec=36405.494 queries=0 unfinished=0 peakInFlight=256 measuredCycles=641 totalCycles=844 triggerExecutions=0
+business=PLACE_ORDER items=328192 requests=328192 p50us=10182 p90us=25264 p95us=27475 p99us=31047 p999us=58195 maxus=74121
+business=CANCEL_ORDER items=328192 requests=328192 p50us=9453 p90us=20004 p95us=22020 p99us=28704 p999us=48037 maxus=73007
+business=APPLY_MARK_PRICE items=22784 requests=22784 p50us=15335 p90us=24608 p95us=26738 p99us=33882 p999us=50561 maxus=56819
+business=PLACE_ORDER_BATCH items=9845760 requests=492288 p50us=20938 p90us=25657 p95us=28655 p99us=44367 p999us=60784 maxus=81133
+business=CANCEL_ORDER_BATCH items=3281920 requests=164096 p50us=23265 p90us=28327 p95us=30097 p99us=44269 p999us=62062 maxus=73007
+```
+
+- 无探针JFR：Owner96.681%，matcher26.103/25.910%；encodeResultSource在四Lane分别69/151/201/224个样本，Owner0样本。DataLoss0，Owner同步I/O0。全节点分配44607939056B/13806848≈3230.9B/business op，非零分配。readyLaneMask仍有3230个Owner样本：只是把无效整套推进改为通知探测，未消除busy-spin或全部轮询。CPU降频，不声称吞吐提升。
+
+AnalyzeJfr.txt
+```text
+totals allocationMiBps=471.896 allocationBytes=44607939056 machineCPU=91.02 jvmCPU=58.40 heapMaxMiB=393.63 dataLoss=0 ownerIOEvents=0
+threadCPU	97.607	core-account-lane-3
+threadCPU	97.589	core-account-lane-0
+threadCPU	97.572	core-account-lane-2
+threadCPU	97.567	core-account-lane-1
+threadCPU	96.681	trading-owner--1
+threadCPU	96.613	/tmp/owner-followup/final/lanes-profile-LINEAR_PERPETUAL-0/media-surprising-linear_perpetual-0 [sender,receiver]
+threadCPU	77.295	clustered-service-101-0
+threadCPU	69.408	driver-conductor
+threadCPU	65.340	archive-conductor
+threadCPU	63.072	consensus-module-101-0
+threadCPU	26.103	core-matcher-1
+threadCPU	25.910	core-matcher-0
+threadCPU	3.390	JVMCI-native CompilerThread0
+threadCPU	1.847	aeron-md-nra
+threadCPU	0.362	JFR Periodic Tasks
+threadCPU	0.322	C1 CompilerThread0
+threadCPU	0.219	JFR Recorder Thread
+threadCPU	0.214	aeron-client
+threadCPU	0.100	Monitor Deflation Thread
+threadCPU	0.100	Service Thread
+gc count=149 totalMs=979.634 p99Ms=11.271 maxMs=11.705
+samples	32751	core-account-lane-0
+samples	32311	core-account-lane-1
+samples	31771	core-account-lane-2
+samples	31090	core-account-lane-3
+samples	28224	trading-owner--1
+samples	4441	clustered-service-101-0
+samples	2822	driver-conductor
+samples	1366	consensus-module-101-0
+samples	1359	archive-conductor
+samples	455	/tmp/owner-followup/final/lanes-profile-LINEAR_PERPETUAL-0/media-surprising-linear_perpetual-0 [sender,receiver]
+samples	412	core-matcher-1
+samples	410	core-matcher-0
+ownerInclusive	28224	com.surprising.aeron.service.execution.ContinuousTradingClusterService$$Lambda.0x000000012f12f708.run
+ownerInclusive	28224	java.lang.Thread.run
+ownerInclusive	28224	java.lang.Thread.runWith
+ownerInclusive	28224	com.surprising.aeron.service.execution.ContinuousTradingClusterService.runOwner
+ownerInclusive	27665	com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommands
+ownerInclusive	27579	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommands
+ownerInclusive	27439	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommandsInScope
+ownerInclusive	18976	com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommandPrefix
+ownerInclusive	14899	com.surprising.aeron.service.execution.OrderedCommitCoordinator.commitReadyMatching
+ownerInclusive	10798	com.surprising.aeron.service.execution.OrderedCommitCoordinator.completeMatching
+ownerInclusive	7060	com.surprising.aeron.service.execution.OrderBatchExecutor.finishOrderBatch
+ownerInclusive	6442	com.surprising.aeron.service.execution.TradingCoreRuntime.hasMatchingNotifications
+allocation	1341172568	core-account-lane-2 com.surprising.aeron.service.state.OrderRuntime
+allocation	1326107232	core-account-lane-0 com.surprising.aeron.service.state.OrderRuntime
+allocation	1312064600	core-account-lane-3 com.surprising.aeron.service.state.OrderRuntime
+allocation	1231250592	core-account-lane-1 [J
+allocation	1210698696	core-account-lane-0 [J
+allocation	1190890992	core-account-lane-1 com.surprising.aeron.service.state.OrderRuntime
+allocation	1183930032	core-account-lane-2 [J
+allocation	1168537528	clustered-service-101-0 [B
+allocation	1150467712	core-matcher-1 com.surprising.aeron.service.matching.CoreMatchingResult$NativeCommand
+allocation	1109117544	core-matcher-0 com.surprising.aeron.service.matching.CoreMatchingResult$NativeCommand
+allocation	1106055056	core-account-lane-3 [J
+allocation	877453528	trading-owner--1 [B
+allocationSite	4909040424	java.util.concurrent.ConcurrentHashMap.putVal
+allocationSite	3192990240	java.lang.invoke.VarHandleLongs$Array.setRelease
+allocationSite	2477014056	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.addKeyValueAtIndex
+allocationSite	2045582456	org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap.rehashAndGrow
+allocationSite	2007195512	org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap.get
+allocationSite	1855797656	com.surprising.aeron.protocol.TradingCommandCodec.decodePlaceOrder
+allocationSite	1397892488	java.util.ArrayList.add
+allocationSite	1386783976	org.eclipse.collections.impl.set.mutable.primitive.LongHashSet.rehashAndGrow
+allocationSite	1313426440	java.util.List.copyOf
+allocationSite	1258942976	java.nio.ByteBuffer.allocate
+allocationSite	1191462056	com.surprising.aeron.service.state.RuntimeDerivativeFillCalculator$FillCursor.order
+allocationSite	1120924640	com.surprising.aeron.service.state.BalanceRuntime.release
+parkOrMonitorNs	89362330532	aeron-md-nra
+parkOrMonitorNs	60104839165	Common-Cleaner
+parkOrMonitorNs	1417165242	consensus-module-101-0
+parkOrMonitorNs	1286709801	archive-conductor
+parkOrMonitorNs	1068691222	driver-conductor
+parkOrMonitorNs	876073507	core-matcher-1
+parkOrMonitorNs	827383958	core-matcher-0
+parkOrMonitorNs	776348806	/tmp/owner-followup/final/lanes-profile-LINEAR_PERPETUAL-0/media-surprising-linear_perpetual-0 [sender,receiver]
+eventCounts	167419	jdk.ExecutionSample
+eventCounts	85452	jdk.ThreadPark
+eventCounts	84664	jdk.GCPhaseParallel
+eventCounts	26086	jdk.ObjectAllocationSample
+eventCounts	12561	jdk.PromoteObjectInNewPLAB
+eventCounts	5450	jdk.ThreadSleep
+eventCounts	4285	jdk.NativeMethodSample
+eventCounts	2403	jdk.NativeMemoryUsage
+eventCounts	2235	jdk.TenuringDistribution
+eventCounts	1382	jdk.ThreadCPULoad
+eventCounts	1044	jdk.NativeLibrary
+eventCounts	857	jdk.ModuleExport
+```
+
+EncodingReport.txt
+```text
+69	core-account-lane-0 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+151	core-account-lane-1 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+201	core-account-lane-2 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+224	core-account-lane-3 com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+7060	trading-owner--1 com.surprising.aeron.service.execution.OrderBatchExecutor.finishOrderBatch
+11	trading-owner--1 com.surprising.aeron.service.execution.TradingCoreRuntime.hasLocalMatchingWork
+3221	trading-owner--1 com.surprising.aeron.service.execution.TradingCoreRuntime.hasMatchingNotifications
+1212	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.collectCancel
+2915	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.collectMatcherSettlement
+3094	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.hasMatchingNotifications
+3230	trading-owner--1 com.surprising.aeron.service.state.TradingRuntimeState.readyLaneMask
+```
+
+#### 最终诊断计数校正与边界
+
+- JFR RecordingFile 不保证按事件时间排序，初版读取器误用文件遇到的首尾事件作为累计计数边界，约低估1–2%；现改为测量窗口内累计计数的min/max配对。上文初版计数仅保留审计，以本节为准，无须重跑。1024次采样首尾截断误差仍存在。
+
+改动前诊断
+```text
+id=0 calls=22624256 success=22624256 successPct=100.000 timingSamples=22095 avgNs=3461.2 successAvgNs=3461.2 incompleteAvgNs=0.0 sampledInclusiveWallSeconds=78.311
+id=1 calls=23409664 success=811852 successPct=3.468 timingSamples=22862 avgNs=1944.7 successAvgNs=38301.6 incompleteAvgNs=513.3 sampledInclusiveWallSeconds=45.527
+id=2 calls=505856 success=404740 successPct=80.011 timingSamples=495 avgNs=29482.1 successAvgNs=36943.8 incompleteAvgNs=2098.9 sampledInclusiveWallSeconds=14.944
+id=3 calls=23729152 success=23729152 successPct=100.000 timingSamples=23174 avgNs=692.0 successAvgNs=692.0 incompleteAvgNs=0.0 sampledInclusiveWallSeconds=16.420
+id=4 calls=505856 success=505856 successPct=100.000 timingSamples=495 avgNs=12010.8 successAvgNs=12010.8 incompleteAvgNs=0.0 sampledInclusiveWallSeconds=6.088
+id=5 calls=303104 success=303104 successPct=100.000 timingSamples=297 avgNs=8520.4 successAvgNs=8520.4 incompleteAvgNs=0.0 sampledInclusiveWallSeconds=2.591
+id=6 calls=47663104 success=1095153 successPct=2.298 timingSamples=46547 avgNs=118.4 successAvgNs=242.2 incompleteAvgNs=114.5 sampledInclusiveWallSeconds=5.644
+id=7 calls=862208 success=810605 successPct=94.015 timingSamples=843 avgNs=3922.1 successAvgNs=4175.1 incompleteAvgNs=150.7 sampledInclusiveWallSeconds=3.386
+id=8 calls=826368 success=826368 successPct=100.000 timingSamples=808 avgNs=3451.2 successAvgNs=3451.2 incompleteAvgNs=0.0 sampledInclusiveWallSeconds=2.855
+id=9 calls=404480 success=404480 successPct=100.000 timingSamples=396 avgNs=3291.0 successAvgNs=3291.0 incompleteAvgNs=0.0 sampledInclusiveWallSeconds=1.335
+```
+
+最终诊断
+```text
+id=0 calls=35383296 success=35383296 successPct=100.000 timingSamples=34555 avgNs=2205.2 successAvgNs=2205.2 incompleteAvgNs=0.0 sampledInclusiveWallSeconds=78.028
+id=1 calls=36401152 success=1027993 successPct=2.824 timingSamples=35549 avgNs=1264.4 successAvgNs=28073.4 incompleteAvgNs=339.2 sampledInclusiveWallSeconds=46.028
+id=2 calls=641024 success=512896 successPct=80.012 timingSamples=627 avgNs=21520.1 successAvgNs=26467.8 incompleteAvgNs=1450.1 sampledInclusiveWallSeconds=13.817
+id=3 calls=2593792 success=2593792 successPct=100.000 timingSamples=2534 avgNs=4538.0 successAvgNs=4538.0 incompleteAvgNs=0.0 sampledInclusiveWallSeconds=11.775
+id=4 calls=641024 success=641024 successPct=100.000 timingSamples=627 avgNs=8819.0 successAvgNs=8819.0 incompleteAvgNs=0.0 sampledInclusiveWallSeconds=5.662
+id=5 calls=385024 success=385024 successPct=100.000 timingSamples=377 avgNs=6932.1 successAvgNs=6932.1 incompleteAvgNs=0.0 sampledInclusiveWallSeconds=2.676
+id=6 calls=74959872 success=1738154 successPct=2.319 timingSamples=73204 avgNs=101.3 successAvgNs=213.8 incompleteAvgNs=98.4 sampledInclusiveWallSeconds=7.597
+id=7 calls=1120256 success=1027261 successPct=91.699 timingSamples=1095 avgNs=3645.0 successAvgNs=3950.3 incompleteAvgNs=152.3 sampledInclusiveWallSeconds=4.087
+id=8 calls=1042432 success=1042432 successPct=100.000 timingSamples=1019 avgNs=3063.4 successAvgNs=3063.4 incompleteAvgNs=0.0 sampledInclusiveWallSeconds=3.196
+id=9 calls=0 success=0 successPct=0.000 timingSamples=0 avgNs=0.0 successAvgNs=0.0 incompleteAvgNs=0.0 sampledInclusiveWallSeconds=0.000
+```
+
+- id映射：0 pollCommands；1 pollCommandPrefix；2 finishOrderBatch；3 pumpMatchingCommitCompletions；4 collectMatcherSettlement；5 collectCancel；6 readyLaneMask；7 prepareClusterPipelineScope；8 RuntimeFactIndexes.applyCurrent；9 encodeResultSource。计数只统计Owner线程；void/int返回的success列不代表业务进展，不应解读。id9没有Owner事件，仅能说明未达到1024次事件阈值，配合无探针JFR的Owner0/Lane645编码样本验证下沉，不能把0事件声称为数学意义零调用。
+- 最终prefix36401152次，pump2593792次，pump/prefix=7.126%，达到预锁定小于25%的目标；prefix完成1027993次，约每个完成前缀2.52次pump。readyLaneMask74959872次，非零1738154（2.319%），说明便宜通知探测仍大量存在；Owner96.681%不是有效业务利用率，不能说已全部移除串行工作。
+- 长负载日志重放业务哈希967e6816a230d702一致；首次快照工具因SnapshotControl.class已清理导致ClassNotFoundException，已重新编译到本轮临时目录，再执行快照验证。无交易代码异常。重放选举期间记录一次`quorum position went backwards` WARN，随后选主并通过全量业务状态核对；不把WARN隐藏成完全无告警。
+
+#### 2026-09-11 最终功能、恢复与审计
+
+- 服务282项+顺序批量/结算交接/发布表32项+基准验证器9项，共323项测试全部通过。六产品线真实节点 execute→SIGKILL→replay→snapshot→restart 全通过；长负载 replay 与 snapshot 重启 businessHash=967e6816a230d702，snapshotPosition=1760679040。
+- 六产品线恢复明细：
+```text
+SPOT execute productLineGate=PASS mode=execute productLine=SPOT fundsDiff=0 bookLevels=0 seed=9701
+SPOT replay productLineGate=PASS mode=verify productLine=SPOT fundsDiff=0 bookLevels=0 seed=9701
+SPOT snapshotPosition=3616
+SPOT snapshot productLineGate=PASS mode=verify productLine=SPOT fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_PERPETUAL execute productLineGate=PASS mode=execute productLine=LINEAR_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_PERPETUAL replay productLineGate=PASS mode=verify productLine=LINEAR_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_PERPETUAL snapshotPosition=9568
+LINEAR_PERPETUAL snapshot productLineGate=PASS mode=verify productLine=LINEAR_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_PERPETUAL execute productLineGate=PASS mode=execute productLine=INVERSE_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_PERPETUAL replay productLineGate=PASS mode=verify productLine=INVERSE_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_PERPETUAL snapshotPosition=9568
+INVERSE_PERPETUAL snapshot productLineGate=PASS mode=verify productLine=INVERSE_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_DELIVERY execute productLineGate=PASS mode=execute productLine=LINEAR_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_DELIVERY replay productLineGate=PASS mode=verify productLine=LINEAR_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_DELIVERY snapshotPosition=5184
+LINEAR_DELIVERY snapshot productLineGate=PASS mode=verify productLine=LINEAR_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_DELIVERY execute productLineGate=PASS mode=execute productLine=INVERSE_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_DELIVERY replay productLineGate=PASS mode=verify productLine=INVERSE_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_DELIVERY snapshotPosition=5184
+INVERSE_DELIVERY snapshot productLineGate=PASS mode=verify productLine=INVERSE_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+OPTION execute productLineGate=PASS mode=execute productLine=OPTION fundsDiff=0 bookLevels=0 seed=9701
+OPTION replay productLineGate=PASS mode=verify productLine=OPTION fundsDiff=0 bookLevels=0 seed=9701
+OPTION snapshotPosition=5184
+OPTION snapshot productLineGate=PASS mode=verify productLine=OPTION fundsDiff=0 bookLevels=0 seed=9701
+```
+
+- 长负载恢复：
+```text
+lanes replay PASS businessHash=967e6816a230d702
+lanes snapshotPosition=1760679040
+lanes snapshot PASS businessHash=967e6816a230d702
+```
+
+- JVM审计（仅测量窗口）：
+```text
+jdk.Compilation count=2 totalMs=286.700986 maxMs=153.7986
+jdk.Deoptimization count=6 totalMs=0.0 maxMs=0.0
+jdk.ExecuteVMOperation count=158 totalMs=986.940762 maxMs=11.740641
+jdk.SafepointBegin count=156 totalMs=12.793773 maxMs=0.26177
+owner jdk.Deoptimization count=2 totalMs=0.0 maxMs=0.0
+afterGC 30sBucket=0 count=48 avgMiB=104.12034130096436 minMiB=101.55311584472656 maxMiB=108.84136962890625
+afterGC 30sBucket=1 count=51 avgMiB=105.08250427246094 minMiB=102.39507293701172 maxMiB=109.94570922851562
+afterGC 30sBucket=2 count=50 avgMiB=106.0282154083252 minMiB=103.49980926513672 maxMiB=109.98350524902344
+```
+
+- 90s after-GC平均占用按30s桶约104.12→105.08→106.03MiB；未做长稳full-GC/live-set回归，不能宣称无泄漏。新增提前编码只改变既有响应byte[]的分配线程与时机，仍按有界命令窗口持有并在批量上下文回收时清引用。
+- CPU_Speed_Limit主测58–100、JFR56–100、agent62–100，明显降频；容量性能验收未通过环境有效性要求。未验证云端三节点容量、普通单1ms、完整并发风险/清算/查询/推送；本轮只对Owner改动做功能和归因验证。
+
+NMT before（边界值，不是native峰值）
+```text
+18268:
+
+Native Memory Tracking:
+
+(Omitting categories weighting less than 1KB)
+
+Total: reserved=3146412KB, committed=692136KB
+       malloc: 72876KB #95824, peak=71192KB #95826
+       mmap:   reserved=3073536KB, committed=619260KB
+
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+                            (mmap: reserved=1572864KB, committed=526336KB, at peak)
+
+-                     Class (reserved=1048910KB, committed=1742KB)
+                            (classes #3929)
+                            (  instance classes #3549, array classes #380)
+                            (malloc=334KB tag=Class #7437) (at peak)
+                            (mmap: reserved=1048576KB, committed=1408KB, at peak)
+                            (  Metadata:   )
+                            (    reserved=65536KB, committed=18624KB)
+                            (    used=18404KB)
+                            (    waste=220KB =1.18%)
+                            (  Class space:)
+                            (    reserved=1048576KB, committed=1408KB)
+                            (    used=1221KB)
+                            (    waste=187KB =13.28%)
+
+-                    Thread (reserved=58505KB, committed=1993KB)
+                            (threads #48)
+                            (stack: reserved=58368KB, committed=1856KB, peak=1856KB)
+                            (malloc=91KB tag=Thread #275) (peak=100KB #279)
+                            (arena=46KB #78) (peak=748KB #76)
+
+-                      Code (reserved=250334KB, committed=16002KB)
+                            (malloc=2645KB tag=Code #15113) (at peak)
+                            (mmap: reserved=247688KB, committed=13356KB, at peak)
+                            (arena=1KB #1) (peak=134KB #6)
+
+-                        GC (reserved=91619KB, committed=71179KB)
+                            (malloc=27539KB tag=GC #4424) (peak=27584KB #4943)
+                            (mmap: reserved=64080KB, committed=43640KB, at peak)
+                            (arena=0KB #0) (peak=12KB #13)
+
+-                 GCCardSet (reserved=2KB, committed=2KB)
+                            (malloc=2KB tag=GCCardSet #9) (peak=2KB #10)
+
+-                  Compiler (reserved=253KB, committed=253KB)
+                            (malloc=114KB tag=Compiler #171) (peak=129KB #172)
+                            (arena=139KB #19) (peak=7696KB #22)
+
+-                     JVMCI (reserved=54KB, committed=54KB)
+                            (malloc=54KB tag=JVMCI #146) (peak=56KB #145)
+                            (arena=0KB #0) (peak=67KB #3)
+
+-                  Internal (reserved=1455KB, committed=1455KB)
+                            (malloc=1423KB tag=Internal #5096) (at peak)
+                            (mmap: reserved=32KB, committed=32KB, at peak)
+
+-                     Other (reserved=9409KB, committed=9409KB)
+                            (malloc=9409KB tag=Other #28) (at peak)
+
+-                    Symbol (reserved=4338KB, committed=4338KB)
+                            (malloc=3723KB tag=Symbol #42810) (at peak)
+                            (arena=616KB #1) (at peak)
+
+-    Native Memory Tracking (reserved=1713KB, committed=1713KB)
+                            (malloc=29KB tag=Native Memory Tracking #479) (at peak)
+                            (tracking overhead=1684KB)
+
+-        Shared class space (reserved=16384KB, committed=14000KB, readonly=0KB)
+                            (mmap: reserved=16384KB, committed=14000KB, peak=14208KB)
+
+-               Arena Chunk (reserved=7407KB, committed=7407KB)
+                            (malloc=7407KB tag=Arena Chunk #357) (peak=8688KB #361)
+
+-                   Tracing (reserved=16596KB, committed=16596KB)
+                            (malloc=16596KB tag=Tracing #4307) (at peak)
+
+-                   Logging (reserved=0KB, committed=0KB)
+                            (malloc=0KB tag=Logging #2) (peak=6KB #4)
+
+-                Statistics (reserved=0KB, committed=0KB)
+                            (malloc=0KB tag=Statistics #2) (peak=2KB #6)
+
+-                    Module (reserved=291KB, committed=291KB)
+                            (malloc=291KB tag=Module #3301) (at peak)
+
+-                 Safepoint (reserved=8KB, committed=8KB)
+                            (mmap: reserved=8KB, committed=8KB, at peak)
+
+-           Synchronization (reserved=625KB, committed=625KB)
+                            (malloc=625KB tag=Synchronization #11763) (at peak)
+
+-            Serviceability (reserved=17KB, committed=17KB)
+                            (malloc=17KB tag=Serviceability #18) (peak=20KB #22)
+
+-                 Metaspace (reserved=65623KB, committed=18711KB)
+                            (malloc=87KB tag=Metaspace #55) (at peak)
+                            (mmap: reserved=65536KB, committed=18624KB, at peak)
+
+-      String Deduplication (reserved=1KB, committed=1KB)
+                            (malloc=1KB tag=String Deduplication #8) (at peak)
+
+-           Object Monitors (reserved=3KB, committed=3KB)
+                            (malloc=3KB tag=Object Monitors #17) (at peak)
+
+```
+
+NMT after（边界值，不是native峰值）
+```text
+18268:
+
+Native Memory Tracking:
+
+(Omitting categories weighting less than 1KB)
+
+Total: reserved=3173956KB, committed=737636KB
+       malloc: 90180KB #182069, peak=90505KB #177044
+       mmap:   reserved=3083776KB, committed=647456KB
+
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+                            (mmap: reserved=1572864KB, committed=524288KB, peak=526336KB)
+
+-                     Class (reserved=1049216KB, committed=2624KB)
+                            (classes #4936)
+                            (  instance classes #4483, array classes #453)
+                            (malloc=640KB tag=Class #15348) (at peak)
+                            (mmap: reserved=1048576KB, committed=1984KB, at peak)
+                            (  Metadata:   )
+                            (    reserved=65536KB, committed=25344KB)
+                            (    used=24988KB)
+                            (    waste=356KB =1.40%)
+                            (  Class space:)
+                            (    reserved=1048576KB, committed=1984KB)
+                            (    used=1764KB)
+                            (    waste=220KB =11.11%)
+
+-                    Thread (reserved=68774KB, committed=2750KB)
+                            (threads #57)
+                            (stack: reserved=68608KB, committed=2584KB, peak=2584KB)
+                            (malloc=110KB tag=Thread #328) (peak=124KB #342)
+                            (arena=55KB #94) (peak=1303KB #94)
+
+-                      Code (reserved=261916KB, committed=49836KB)
+                            (malloc=14227KB tag=Code #42469) (at peak)
+                            (mmap: reserved=247688KB, committed=35608KB, at peak)
+                            (arena=1KB #1) (peak=134KB #6)
+
+-                        GC (reserved=92339KB, committed=71867KB)
+                            (malloc=28259KB tag=GC #13125) (peak=28327KB #18715)
+                            (mmap: reserved=64080KB, committed=43608KB, peak=43640KB)
+                            (arena=0KB #0) (peak=44KB #13)
+
+-                 GCCardSet (reserved=18KB, committed=18KB)
+                            (malloc=18KB tag=GCCardSet #104) (peak=18KB #60)
+
+-                  Compiler (reserved=438KB, committed=438KB)
+                            (malloc=298KB tag=Compiler #933) (peak=322KB #870)
+                            (arena=141KB #21) (peak=15136KB #27)
+
+-                     JVMCI (reserved=140KB, committed=140KB)
+                            (malloc=140KB tag=JVMCI #379) (at peak)
+                            (arena=0KB #0) (peak=99KB #3)
+
+-                  Internal (reserved=1595KB, committed=1595KB)
+                            (malloc=1563KB tag=Internal #9879) (at peak)
+                            (mmap: reserved=32KB, committed=32KB, at peak)
+
+-                     Other (reserved=9413KB, committed=9413KB)
+                            (malloc=9413KB tag=Other #37) (at peak)
+
+-                    Symbol (reserved=4878KB, committed=4878KB)
+                            (malloc=4230KB tag=Symbol #51690) (at peak)
+                            (arena=648KB #1) (at peak)
+
+-    Native Memory Tracking (reserved=3258KB, committed=3258KB)
+                            (malloc=57KB tag=Native Memory Tracking #997) (at peak)
+                            (tracking overhead=3200KB)
+
+-        Shared class space (reserved=16384KB, committed=14000KB, readonly=0KB)
+                            (mmap: reserved=16384KB, committed=14000KB, peak=14208KB)
+
+-               Arena Chunk (reserved=6313KB, committed=6313KB)
+                            (malloc=6313KB tag=Arena Chunk #335) (peak=15985KB #605)
+
+-                   Tracing (reserved=19113KB, committed=19113KB)
+                            (malloc=19113KB tag=Tracing #18734) (peak=22745KB #41677)
+
+-                   Logging (reserved=0KB, committed=0KB)
+                            (malloc=0KB tag=Logging #2) (peak=6KB #4)
+
+-                Statistics (reserved=0KB, committed=0KB)
+                            (malloc=0KB tag=Statistics #2) (peak=2KB #6)
+
+-                    Module (reserved=293KB, committed=293KB)
+                            (malloc=293KB tag=Module #3345) (at peak)
+
+-                 Safepoint (reserved=8KB, committed=8KB)
+                            (mmap: reserved=8KB, committed=8KB, at peak)
+
+-           Synchronization (reserved=1272KB, committed=1272KB)
+                            (malloc=1272KB tag=Synchronization #24170) (at peak)
+
+-            Serviceability (reserved=17KB, committed=17KB)
+                            (malloc=17KB tag=Serviceability #18) (peak=20KB #22)
+
+-                 Metaspace (reserved=65705KB, committed=25513KB)
+                            (malloc=169KB tag=Metaspace #157) (at peak)
+                            (mmap: reserved=65536KB, committed=25344KB, at peak)
+
+-      String Deduplication (reserved=1KB, committed=1KB)
+                            (malloc=1KB tag=String Deduplication #8) (at peak)
+
+-           Object Monitors (reserved=1KB, committed=1KB)
+                            (malloc=1KB tag=Object Monitors #3) (peak=24KB #121)
+
+```
+
+JFR summary
+```text
+
+ Version: 2.1
+ Chunks: 2
+ Start: 2026-09-10 15:52:28 (UTC)
+ Duration: 161 s
+
+ Event Type                              Count  Size (bytes)
+=============================================================
+ jdk.ExecutionSample                    287475       3431179
+ jdk.ThreadPark                         226958       6545128
+ jdk.GCPhaseParallel                    113152       3142586
+ jdk.ObjectAllocationSample              35402        572084
+ jdk.PromoteObjectInNewPLAB              17821        330841
+ jdk.ThreadSleep                          9729        193742
+ jdk.NativeMethodSample                   7242         86394
+ jdk.NativeMemoryUsage                    4320         65149
+ jdk.TenuringDistribution                 3000         35055
+ jdk.ThreadCPULoad                        2675         45192
+ jdk.NativeLibrary                        2087        190877
+ jdk.ModuleExport                         1714         20262
+ jdk.SystemProcess                        1560        157458
+ jdk.PromoteObjectOutsidePLAB             1283         21601
+ jdk.BooleanFlag                           992         30934
+ jdk.Checkpoint                            815       2633337
+ jdk.GCReferenceStatistics                 804          9127
+ jdk.MetaspaceChunkFreeListSummary         804         15556
+ jdk.ActiveSetting                         752         19768
+ jdk.GCPhasePauseLevel1                    609         25603
+ jdk.Deoptimization                        533         12771
+ jdk.FileWrite                             409         11022
+ jdk.G1HeapSummary                         402         11382
+ jdk.GCHeapSummary                         402         16418
+ jdk.MetaspaceSummary                      402         20240
+ jdk.ModuleRequire                         382          4202
+ jdk.LongFlag                              284          9230
+ jdk.JavaExceptionThrow                    254          9232
+ jdk.ExecuteVMOperation                    227          4133
+ jdk.SafepointBegin                        213          3275
+ jdk.G1MMU                                 202          2897
+ jdk.GCCPUTime                             202          3654
+ jdk.GCPhasePause                          202          4925
+ jdk.GarbageCollection                     201          4894
+ jdk.EvacuationInformation                 200          6250
+ jdk.G1AdaptiveIHOP                        200          8664
+ jdk.G1BasicIHOP                           200          8137
+ jdk.G1EvacuationOldStatistics             200          7074
+ jdk.G1EvacuationYoungStatistics           200          8995
+ jdk.G1GarbageCollection                   200          2871
+ jdk.YoungGarbageCollection                200          2871
+ jdk.UnsignedLongFlag                      186          6381
+ jdk.ClassLoadingStatistics                160          1746
+ jdk.CompilerStatistics                    160          4940
+ jdk.ExceptionStatistics                   160          1743
+ jdk.JavaThreadStatistics                  160          1906
+ jdk.NativeMemoryUsageTotal                160          2866
+ jdk.ResidentSetSize                       160          2866
+ jdk.CPULoad                               159          3167
+ jdk.InitialEnvironmentVariable            120          9860
+ jdk.JavaErrorThrow                        118          1801
+ jdk.OldObjectSample                       110          3790
+ jdk.ThreadAllocationStatistics            107          1225
+ jdk.UnsignedIntFlag                       100          3378
+ jdk.NetworkUtilization                     93          1417
+ jdk.InitialSecurityProperty                88          4388
+ jdk.IntFlag                                88          3170
+ jdk.Compilation                            85          2521
+ jdk.StringFlag                             74          2655
+ jdk.CompilerQueueUtilization               64          1330
+ jdk.InitialSystemProperty                  58          4026
+ jdk.ThreadStart                            55           653
+ jdk.ThreadEnd                              42           402
+ jdk.DoubleFlag                             34          1409
+ jdk.DirectBufferStatistics                 32           734
+ jdk.StringTableStatistics                  16           591
+ jdk.SymbolTableStatistics                  16           623
+ jdk.ThreadContextSwitchRate                15           180
+ jdk.ClassLoaderStatistics                  12           353
+ jdk.CodeCacheStatistics                    12           357
+ jdk.GCHeapMemoryPoolUsage                  12           463
+ jdk.GCPhasePauseLevel2                     11           377
+ jdk.GCPhaseConcurrent                       6           275
+ jdk.GCConfiguration                         4           103
+ jdk.GCHeapMemoryUsage                       4            89
+ jdk.GCPhaseConcurrentLevel1                 4           148
+ jdk.JavaMonitorStatistics                   4            35
+ jdk.PhysicalMemory                          4            71
+ jdk.SwapSpace                               4            71
+ jdk.ActiveRecording                         2           241
+ jdk.CPUInformation                          2          3489
+ jdk.CPUTimeStampCounter                     2            39
+ jdk.CodeCacheConfiguration                  2            85
+ jdk.CompilerConfiguration                   2            23
+ jdk.DeprecatedInvocation                    2            42
+ jdk.GCHeapConfiguration                     2            55
+ jdk.GCSurvivorConfiguration                 2            21
+ jdk.GCTLABConfiguration                     2            25
+ jdk.JVMInformation                          2          3175
+ jdk.Metadata                                2        221057
+ jdk.MetaspaceGCThreshold                    2            32
+ jdk.OSInformation                           2           295
+ jdk.ThreadDump                              2         41079
+ jdk.VirtualizationInformation               2            71
+ jdk.YoungGenerationConfiguration            2            35
+ jdk.FileForce                               1           120
+ jdk.JavaMonitorEnter                        1            23
+ jdk.JavaMonitorWait                         1            31
+ jdk.MetaspaceAllocationFailure              1            14
+ jdk.NativeLibraryLoad                       1           115
+ jdk.OldGarbageCollection                    1            12
+ jdk.Shutdown                                1            42
+ jdk.AllocationRequiringGC                   0             0
+ jdk.BooleanFlagChanged                      0             0
+ jdk.CPUTimeSample                           0             0
+ jdk.CPUTimeSamplesLost                      0             0
+ jdk.ClassDefine                             0             0
+ jdk.ClassLoad                               0             0
+ jdk.ClassRedefinition                       0             0
+ jdk.ClassUnload                             0             0
+ jdk.CodeCacheFull                           0             0
+ jdk.CompilationFailure                      0             0
+ jdk.CompilerInlining                        0             0
+ jdk.CompilerPhase                           0             0
+ jdk.ConcurrentModeFailure                   0             0
+ jdk.ContainerCPUThrottling                  0             0
+ jdk.ContainerCPUUsage                       0             0
+ jdk.ContainerConfiguration                  0             0
+ jdk.ContainerIOUsage                        0             0
+ jdk.ContainerMemoryUsage                    0             0
+ jdk.ContinuationFreeze                      0             0
+ jdk.ContinuationFreezeFast                  0             0
+ jdk.ContinuationFreezeSlow                  0             0
+ jdk.ContinuationThaw                        0             0
+ jdk.ContinuationThawFast                    0             0
+ jdk.ContinuationThawSlow                    0             0
+ jdk.DataLoss                                0             0
+ jdk.Deserialization                         0             0
+ jdk.DoubleFlagChanged                       0             0
+ jdk.DumpReason                              0             0
+ jdk.EvacuationFailed                        0             0
+ jdk.FileRead                                0             0
+ jdk.FinalizerStatistics                     0             0
+ jdk.Flush                                   0             0
+ jdk.G1HeapRegionInformation                 0             0
+ jdk.G1HeapRegionTypeChange                  0             0
+ jdk.GCPhaseConcurrentLevel2                 0             0
+ jdk.GCPhasePauseLevel3                      0             0
+ jdk.GCPhasePauseLevel4                      0             0
+ jdk.HeapDump                                0             0
+ jdk.IntFlagChanged                          0             0
+ jdk.JITRestart                              0             0
+ jdk.JavaAgent                               0             0
+ jdk.JavaMonitorDeflate                      0             0
+ jdk.JavaMonitorInflate                      0             0
+ jdk.JavaMonitorNotify                       0             0
+ jdk.LongFlagChanged                         0             0
+ jdk.MetaspaceOOM                            0             0
+ jdk.MethodTiming                            0             0
+ jdk.MethodTrace                             0             0
+ jdk.NativeAgent                             0             0
+ jdk.NativeLibraryUnload                     0             0
+ jdk.ObjectAllocationInNewTLAB               0             0
+ jdk.ObjectAllocationOutsideTLAB             0             0
+ jdk.ObjectCount                             0             0
+ jdk.ObjectCountAfterGC                      0             0
+ jdk.PSHeapSummary                           0             0
+ jdk.ParallelOldGarbageCollection            0             0
+ jdk.ProcessStart                            0             0
+ jdk.PromotionFailed                         0             0
+ jdk.RedefineClasses                         0             0
+ jdk.ReservedStackActivation                 0             0
+ jdk.RetransformClasses                      0             0
+ jdk.SafepointEnd                            0             0
+ jdk.SafepointLatency                        0             0
+ jdk.SafepointStateSynchronization           0             0
+ jdk.SecurityPropertyModification            0             0
+ jdk.SecurityProviderService                 0             0
+ jdk.SerializationMisdeclaration             0             0
+ jdk.ShenandoahEvacuationInformation         0             0
+ jdk.ShenandoahHeapRegionInformation         0             0
+ jdk.ShenandoahHeapRegionStateChange         0             0
+ jdk.SocketRead                              0             0
+ jdk.SocketWrite                             0             0
+ jdk.StringFlagChanged                       0             0
+ jdk.SyncOnValueBasedClass                   0             0
+ jdk.SystemGC                                0             0
+ jdk.TLSHandshake                            0             0
+ jdk.UnsignedIntFlagChanged                  0             0
+ jdk.UnsignedLongFlagChanged                 0             0
+ jdk.VirtualThreadEnd                        0             0
+ jdk.VirtualThreadPinned                     0             0
+ jdk.VirtualThreadStart                      0             0
+ jdk.VirtualThreadSubmitFailed               0             0
+ jdk.X509Certificate                         0             0
+ jdk.X509Validation                          0             0
+ jdk.ZAllocationStall                        0             0
+ jdk.ZOldGarbageCollection                   0             0
+ jdk.ZPageAllocation                         0             0
+ jdk.ZRelocationSet                          0             0
+ jdk.ZRelocationSetGroup                     0             0
+ jdk.ZStatisticsCounter                      0             0
+ jdk.ZStatisticsSampler                      0             0
+ jdk.ZThreadPhase                            0             0
+ jdk.ZUncommit                               0             0
+ jdk.ZYoungGarbageCollection                 0             0
+```
+
+实际JMH/节点命令（其他场景按预锁定产品、kind及测量时长替换）：
+```json
+[
+  [
+    "/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java",
+    "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+    "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+    "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
+    "--enable-native-access=ALL-UNNAMED",
+    "-XX:+UseG1GC",
+    "-XX:NativeMemoryTracking=summary",
+    "-Dsurprising.aeron.hostnames=127.0.0.1",
+    "-Dsurprising.aeron.egress-hostname=127.0.0.1",
+    "-Dsurprising.aeron.node-id=0",
+    "-Dsurprising.aeron.account-lanes=4",
+    "-Dsurprising.aeron.matching-engines=2",
+    "-Dsurprising.aeron.settlement-spin-limit=0",
+    "-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN",
+    "-Dsurprising.aeron.product-line=LINEAR_PERPETUAL",
+    "-Dsurprising.aeron.execution-mode=PIPELINED",
+    "-Xms512m",
+    "-Xmx1536m",
+    "-Djava.io.tmpdir=/tmp/owner-followup/final/lanes-profile-LINEAR_PERPETUAL-0/tmp",
+    "-Daeron.dir=/tmp/owner-followup/final/lanes-profile-LINEAR_PERPETUAL-0/media",
+    "-Dsurprising.aeron.data-dir=/tmp/owner-followup/final/lanes-profile-LINEAR_PERPETUAL-0/data",
+    "-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK",
+    "-Dsurprising.aeron.service.idle-strategy=YIELDING",
+    "-XX:StartFlightRecording=settings=/tmp/owner-followup/owner.jfc,maxsize=192m,dumponexit=true,filename=/tmp/owner-followup/final/lanes-profile-LINEAR_PERPETUAL-0/node.jfr",
+    "-cp",
+    "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar",
+    "com.surprising.aeron.service.cluster.SurprisingClusterNode"
+  ],
+  [
+    "/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java",
+    "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+    "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+    "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
+    "--enable-native-access=ALL-UNNAMED",
+    "-XX:+UseG1GC",
+    "-XX:NativeMemoryTracking=summary",
+    "-Dsurprising.aeron.hostnames=127.0.0.1",
+    "-Dsurprising.aeron.egress-hostname=127.0.0.1",
+    "-Dsurprising.aeron.node-id=0",
+    "-Dsurprising.aeron.account-lanes=4",
+    "-Dsurprising.aeron.matching-engines=2",
+    "-Dsurprising.aeron.settlement-spin-limit=0",
+    "-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN",
+    "-Dsurprising.aeron.product-line=LINEAR_PERPETUAL",
+    "-Dsurprising.aeron.execution-mode=PIPELINED",
+    "-Xms128m",
+    "-Xmx512m",
+    "-Djava.io.tmpdir=/tmp/owner-followup/final/lanes-profile-LINEAR_PERPETUAL-0/tmp",
+    "-Daeron.dir=/tmp/owner-followup/final/lanes-profile-LINEAR_PERPETUAL-0/clientmedia",
+    "-Dsurprising.aeron.client.threading-mode=SHARED",
+    "-Dsurprising.aeron.capacity-async-in-flight=256",
+    "-Dsurprising.aeron.capacity-session-in-flight=256",
+    "-Dsurprising.aeron.capacity-warmup-seconds=30",
+    "-Dsurprising.aeron.capacity-duration-seconds=90",
+    "-Dsurprising.aeron.capacity-seed=131001",
+    "-Dsurprising.aeron.mixed-trading-stream=true",
+    "-Dsurprising.aeron.mixed-operational=false",
+    "-cp",
+    "/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar",
+    "org.openjdk.jmh.Main",
+    "ClusterOperationalBenchmark.continuousOperations",
+    "-f",
+    "1",
+    "-wi",
+    "0",
+    "-i",
+    "1",
+    "-p",
+    "controlPageSize=0",
+    "-prof",
+    "gc",
+    "-rf",
+    "json",
+    "-rff",
+    "/tmp/owner-followup/final/lanes-profile-LINEAR_PERPETUAL-0/jmh.json"
+  ]
+]
+```
+
+最终JMH结果（SingleShotTime分数是整轮时长，业务吞吐以上文terminal计数为准；gc profiler度量客户端fork）：
+```json
+[
+    {
+        "jmhVersion" : "1.37",
+        "benchmark" : "com.surprising.aeron.benchmarks.workload.ClusterOperationalBenchmark.continuousOperations",
+        "mode" : "ss",
+        "threads" : 1,
+        "forks" : 1,
+        "jvm" : "/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java",
+        "jvmArgs" : [
+            "-XX:ThreadPriorityPolicy=1",
+            "-XX:+UnlockExperimentalVMOptions",
+            "-XX:+EnableJVMCIProduct",
+            "-XX:+EnableJVMCI",
+            "-XX:-UnlockExperimentalVMOptions",
+            "--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED",
+            "--add-opens=java.base/java.util.zip=ALL-UNNAMED",
+            "--enable-native-access=ALL-UNNAMED",
+            "-XX:+UseG1GC",
+            "-XX:NativeMemoryTracking=summary",
+            "-Dsurprising.aeron.hostnames=127.0.0.1",
+            "-Dsurprising.aeron.egress-hostname=127.0.0.1",
+            "-Dsurprising.aeron.node-id=0",
+            "-Dsurprising.aeron.account-lanes=4",
+            "-Dsurprising.aeron.matching-engines=2",
+            "-Dsurprising.aeron.settlement-spin-limit=0",
+            "-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN",
+            "-Dsurprising.aeron.product-line=LINEAR_PERPETUAL",
+            "-Dsurprising.aeron.execution-mode=PIPELINED",
+            "-Xms128m",
+            "-Xmx512m",
+            "-Djava.io.tmpdir=/tmp/owner-followup/final/lanes-profile-LINEAR_PERPETUAL-0/tmp",
+            "-Daeron.dir=/tmp/owner-followup/final/lanes-profile-LINEAR_PERPETUAL-0/clientmedia",
+            "-Dsurprising.aeron.client.threading-mode=SHARED",
+            "-Dsurprising.aeron.capacity-async-in-flight=256",
+            "-Dsurprising.aeron.capacity-session-in-flight=256",
+            "-Dsurprising.aeron.capacity-warmup-seconds=30",
+            "-Dsurprising.aeron.capacity-duration-seconds=90",
+            "-Dsurprising.aeron.capacity-seed=131001",
+            "-Dsurprising.aeron.mixed-trading-stream=true",
+            "-Dsurprising.aeron.mixed-operational=false"
+        ],
+        "jdkVersion" : "25.0.1",
+        "vmName" : "Java HotSpot(TM) 64-Bit Server VM",
+        "vmVersion" : "25.0.1+8-LTS-jvmci-b01",
+        "warmupIterations" : 0,
+        "warmupTime" : "single-shot",
+        "warmupBatchSize" : 1,
+        "measurementIterations" : 1,
+        "measurementTime" : "single-shot",
+        "measurementBatchSize" : 1,
+        "params" : {
+            "controlPageSize" : "0"
+        },
+        "primaryMetric" : {
+            "score" : 90.149471097,
+            "scoreError" : "NaN",
+            "scoreConfidence" : [
+                "NaN",
+                "NaN"
+            ],
+            "scorePercentiles" : {
+                "0.0" : 90.149471097,
+                "50.0" : 90.149471097,
+                "90.0" : 90.149471097,
+                "95.0" : 90.149471097,
+                "99.0" : 90.149471097,
+                "99.9" : 90.149471097,
+                "99.99" : 90.149471097,
+                "99.999" : 90.149471097,
+                "99.9999" : 90.149471097,
+                "100.0" : 90.149471097
+            },
+            "scoreUnit" : "s/op",
+            "rawData" : [
+                [
+                    90.149471097
+                ]
+            ]
+        },
+        "secondaryMetrics" : {
+            "gc.alloc.rate" : {
+                "score" : 135.04114983239677,
+                "scoreError" : "NaN",
+                "scoreConfidence" : [
+                    "NaN",
+                    "NaN"
+                ],
+                "scorePercentiles" : {
+                    "0.0" : 135.04114983239677,
+                    "50.0" : 135.04114983239677,
+                    "90.0" : 135.04114983239677,
+                    "95.0" : 135.04114983239677,
+                    "99.0" : 135.04114983239677,
+                    "99.9" : 135.04114983239677,
+                    "99.99" : 135.04114983239677,
+                    "99.999" : 135.04114983239677,
+                    "99.9999" : 135.04114983239677,
+                    "100.0" : 135.04114983239677
+                },
+                "scoreUnit" : "MB/sec",
+                "rawData" : [
+                    [
+                        135.04114983239677
+                    ]
+                ]
+            },
+            "gc.alloc.rate.norm" : {
+                "score" : 2.2420121752E10,
+                "scoreError" : "NaN",
+                "scoreConfidence" : [
+                    "NaN",
+                    "NaN"
+                ],
+                "scorePercentiles" : {
+                    "0.0" : 2.2420121752E10,
+                    "50.0" : 2.2420121752E10,
+                    "90.0" : 2.2420121752E10,
+                    "95.0" : 2.2420121752E10,
+                    "99.0" : 2.2420121752E10,
+                    "99.9" : 2.2420121752E10,
+                    "99.99" : 2.2420121752E10,
+                    "99.999" : 2.2420121752E10,
+                    "99.9999" : 2.2420121752E10,
+                    "100.0" : 2.2420121752E10
+                },
+                "scoreUnit" : "B/op",
+                "rawData" : [
+                    [
+                        2.2420121752E10
+                    ]
+                ]
+            },
+            "gc.count" : {
+                "score" : 288.0,
+                "scoreError" : "NaN",
+                "scoreConfidence" : [
+                    288.0,
+                    288.0
+                ],
+                "scorePercentiles" : {
+                    "0.0" : 288.0,
+                    "50.0" : 288.0,
+                    "90.0" : 288.0,
+                    "95.0" : 288.0,
+                    "99.0" : 288.0,
+                    "99.9" : 288.0,
+                    "99.99" : 288.0,
+                    "99.999" : 288.0,
+                    "99.9999" : 288.0,
+                    "100.0" : 288.0
+                },
+                "scoreUnit" : "counts",
+                "rawData" : [
+                    [
+                        288.0
+                    ]
+                ]
+            },
+            "gc.time" : {
+                "score" : 312.0,
+                "scoreError" : "NaN",
+                "scoreConfidence" : [
+                    312.0,
+                    312.0
+                ],
+                "scorePercentiles" : {
+                    "0.0" : 312.0,
+                    "50.0" : 312.0,
+                    "90.0" : 312.0,
+                    "95.0" : 312.0,
+                    "99.0" : 312.0,
+                    "99.9" : 312.0,
+                    "99.99" : 312.0,
+                    "99.999" : 312.0,
+                    "99.9999" : 312.0,
+                    "100.0" : 312.0
+                },
+                "scoreUnit" : "ms",
+                "rawData" : [
+                    [
+                        312.0
+                    ]
+                ]
+            }
+        }
+    }
+]
+
+
+
+```
+
+校验清单（以下原始产物将在归档摘要后清理，不作为可访问链接）：
+- final/lanes-agent-LINEAR_PERPETUAL-0/node.jfr 21691303 bytes SHA256=52d232912f93b45590e15978dab458398d6227515e50cfeb4e80a8e664931245
+- final/lanes-control-INVERSE_DELIVERY-0/node.jfr 1431789 bytes SHA256=47c7b41090a3896242492a58440a680dd12f24c508aa3bc48846fa5b4841e975
+- final/lanes-control-INVERSE_PERPETUAL-0/node.jfr 1406610 bytes SHA256=b521d6c993e9937045a02e770a1d25074bdf0fc609fce643aa117ecaf380c68b
+- final/lanes-control-LINEAR_DELIVERY-0/node.jfr 1464218 bytes SHA256=feafed7278bd14cb51e0821a548fed7480f6a706a2eec93baeb3f6147e0ac742
+- final/lanes-control-LINEAR_PERPETUAL-0/node.jfr 1414002 bytes SHA256=0118941eda8033217b1caf292fd26e08e958897de288b15929807cacc69a9178
+- final/lanes-control-OPTION-0/node.jfr 1495199 bytes SHA256=5f3f372e914621650ae201cafa0a5379d46c36e47bfa924a9df96d86bbddfe47
+- final/lanes-control-SPOT-0/node.jfr 1405237 bytes SHA256=f64ebc15a7cf6e627dd0ca04b0a3534849d905dd2fd9a3a677666f2e7a5ae11a
+- final/lanes-profile-LINEAR_PERPETUAL-0/node.jfr 18077377 bytes SHA256=2bdcef9d467325a4a0590aa52f3906a4c6e451cae6ead8b20a40ef7bf8c9b830
+- runs/lanes-profile-LINEAR_PERPETUAL-0/node.jfr 4802609 bytes SHA256=54c7e82571ddd139b4336f420cf7a36f7930cbe724013d5c90b19f8afe9234e7
+- runs2/lanes-profile-LINEAR_PERPETUAL-0/node.jfr 0 bytes SHA256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+- runs2/lanes-profile-LINEAR_PERPETUAL-0/tmp/2026_09_10_23_32_45_12203/2026_09_10_23_32_45.jfr 951847 bytes SHA256=885ec395a7e4c6785311e166220d67f0fdf26addef303f407950ec0abfe9f357
+- runs3/lanes-profile-LINEAR_PERPETUAL-0/node.jfr 19880855 bytes SHA256=dc25ddc5314507342da1fc98819bbf2094d2e8804f3b97d6885c981f367744e3
+- 构建JAR保留：surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar SHA256=49054427431f9ace680bd388c37abfa9ef14d14baa150fb7b520199a27e6cee1
+- 构建JAR保留：surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar SHA256=2440a9927d654cf910d9e655776bf6e28a780813f48b0fa7053dcbc243cdd538
+- 源码 surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterBatchResponseBenchmark.java SHA256=199b585d68688b33b53ac7aed8e1b84a2d48f2763c09e14b829c0c4eb2cb589a
+- 源码 surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/benchmarks/workload/ClusterMixedCapacityMain.java SHA256=9987403b9cf11c8c1e7bc27103c40766eef92e07a3dd8a88e9f85489b5400288
+- 源码 surprising-aeron-core/surprising-aeron-benchmarks/src/test/java/com/surprising/aeron/benchmarks/workload/ClusterMixedCapacityTest.java SHA256=a0611c07c65766b26dde4be62016b3f8c9c07df6efc091aac8f75d4db3e9d512
+- 源码 surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/execution/OrderBatchExecutor.java SHA256=066d943a68e17b17f2bbcb74539509aecb7a57ab11a3ad25164f18bea76647d0
+- 源码 surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/execution/OrderBatchPending.java SHA256=0f97affc013e735032d35c84119087317e3c85dd80c53febeaa9ca51a2f65bfa
+- 源码 surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/execution/PendingMatchingRing.java SHA256=01a2ca982dd1a6f0e75ff21a53667ab385bc4fb1b98d2ac8585db4b40622ae3d
+- 源码 surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/execution/SurprisingClusteredService.java SHA256=e78a84da1e94d3cbb5254e71b362160bfd144340d4bd4b53a81ecdcb0e532edc
+- 源码 surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/execution/TradingCoreRuntime.java SHA256=afbdcefbc7c7247d629559206734b791c5c4e72c6a541f5c354e84f3a0af2bc1
+- 源码 surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/LaneOrderResultTarget.java SHA256=7f1d99bc6f0001bb7f5017032c0ee6423d76795e6fa68cbce622185818a091f6
+- 源码 surprising-aeron-core/surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/TradingRuntimeState.java SHA256=16aa2d1895961426ef6460e2fcfa92b8a1ecd2c6945325ab3156191d8510c14d
+- 源码 surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/execution/ClusterCommandPipelineTest.java SHA256=9c5fac881d72615d76cdb00e8630a46becd05c0c20117cb2cbff6a1a749562f5
+- 源码 surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/execution/OrderBatchSlotReuseTest.java SHA256=8cc64593e4e484732e999b2d538e0f5fcc51de4bec45617eaeaae331bd4a5e35
+
+- 清理审计：所有本轮Java节点/客户端均已停止；删除本轮临时根目录 /tmp/owner-followup（14077939113 bytes逻辑文件大小，含Archive/JFR/诊断agent/日志），删除已确认本轮产生的24个测试报告（401257 bytes）。只保留构建JAR及本文摘要，既有用户未跟踪文件不动。以上临时artifact路径已失效。

@@ -7,6 +7,9 @@ public interface LaneOrderResultTarget {
     long resultOriginalOrderId(int index);
     void resultOrder(int index, OrderRuntime order, String symbol);
 
+    /** 最终账户 Lane 已捕获结果后准备响应；在完成回执发布之前调用。 */
+    void prepareResponse();
+
     /** 直接消费本次 Lane 变更中的不可变 OrderRuntime，不查询全局发布表。 */
     static void capture(LaneOrderResultTarget target, TradingRuntimeState.PublishedLaneChanges changes,
                         RuntimeIdentityRegistry identities, AccountLaneState lane) {
@@ -19,5 +22,6 @@ public interface LaneOrderResultTarget {
             if (order == null && original > 0) order = lane.orders.get(original);
             target.resultOrder(i, order, order == null ? null : identities.symbol(order.symbolId()));
         }
+        target.prepareResponse();
     }
 }

@@ -126,7 +126,11 @@ class ClusterCommandPipelineTest {
                     var completedBatch = state.batches.pendingOrderBatches.get(secondSequence);
                     assertThat(completedBatch.admissionOrderIndex).isNull();
                     assertThat(completedBatch.items).allSatisfy(item -> assertThat(item.laneResultPrepared).isTrue());
+                    assertThat(completedBatch.preparedResponse).isNotNull()
+                            .isEqualTo(TradingOrderBatchCodec.encodeResultSource(completedBatch));
                 }
+                // 外部通知耗尽后反复轮询仍不提前提交；解除前序阻塞后必须自行恢复推进。
+                for (int spin = 0; spin < 1024; spin++) live.service.pollCommands();
                 assertThat(gate.isDone()).isFalse();
                 assertThat(state.firstPendingMatchingSequence()).isEqualTo(firstSequence);
                 assertThat(live.responses).isEmpty();

@@ -270,13 +270,17 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     private void cancelBatch(long user,long[] ids) {
         var commands=Arrays.stream(ids).mapToObj(CancelOrderCommand::new).toList();
         send(CoreMessageType.CANCEL_ORDER_BATCH,user,TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(commands)),ids.length,
-                r -> validateBatch(r,ids,user,null));
+                r -> validateBatch(r,ids,user,null,true));
     }
     static long validateBatch(CoreResponse response,long[] ids) {
         return validateBatch(response, ids, 0, null);
     }
     /** 核对 Lane 结果交接后的账户和币对，防止事件池复用串入其他账户结果。 */
     static long validateBatch(CoreResponse response,long[] ids,long expectedUser,String expectedSymbol) {
+        return validateBatch(response, ids, expectedUser, expectedSymbol, false);
+    }
+    /** JMH 连续撤单覆盖 Lane 提前编码：终态被删除后不得编码为旧的活动订单。 */
+    static long validateBatch(CoreResponse response,long[] ids,long expectedUser,String expectedSymbol,boolean terminalRemoved) {
         var items=TradingOrderBatchCodec.decodeResult(response.data()).items();
         if(items.size()!=ids.length)throw new IllegalStateException("mixed batch response count mismatch");
         long fills=0;
@@ -284,6 +288,8 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
             var item=items.get(i);
             if(item.index()!=i || item.orderId()!=ids[i] || item.status()!=ResponseStatus.APPLIED)
                 throw new IllegalStateException("mixed batch item rejected/identity mismatch: "+item);
+            if (terminalRemoved && item.order() != null)
+                throw new IllegalStateException("mixed cancel batch retained a removed order");
             // Exercise the borrowed order cursor: every encoded item must retain its own identity.
             if (item.order() != null && (item.order().orderId() != ids[i]
                     || !expectedClientOrderId(ids[i]).equals(item.order().clientOrderId())

@@ -1180,12 +1180,10 @@ public final class TradingRuntimeState implements AutoCloseable {
                 state.changedRiskSnapshots.put(key, value);
                 putOrRemove(state.publishedRiskSnapshots, key, value);
             });
-            removedOrderRoutes.forEach(orderId -> {
-                if (publication == null) state.publishedOrders.remove(orderId);
-            });
-            removedReservationRoutes.forEach(orderId -> {
-                if (publication == null) state.publishedReservations.remove(orderId);
-            });
+            if (publication == null) {
+                removedOrderRoutes.forEach(orderId -> state.publishedOrders.remove(orderId));
+                removedReservationRoutes.forEach(orderId -> state.publishedReservations.remove(orderId));
+            }
             removedOrderRoutes.clear();
             removedReservationRoutes.clear();
             state.changedOrders.adopt(laneId, orders);

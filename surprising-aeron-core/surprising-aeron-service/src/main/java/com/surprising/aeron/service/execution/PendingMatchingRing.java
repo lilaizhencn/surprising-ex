@@ -171,6 +171,11 @@ final class PendingMatchingRing {
         contexts.required(sequence).markPendingReady();
     }
 
+    /** Owner 已收集的队首完成标记；不得因外部通知队列为空而遗漏。 */
+    boolean hasReadyHead() {
+        return head >= 0 && contexts.required(pendingAt(head).sequence()).pendingReady();
+    }
+
     PendingMatching pollReadyHead() {
         if (head < 0) return null;
         int index = head;

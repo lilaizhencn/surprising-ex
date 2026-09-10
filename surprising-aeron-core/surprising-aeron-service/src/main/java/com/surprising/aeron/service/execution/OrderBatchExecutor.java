@@ -778,14 +778,15 @@ final class OrderBatchExecutor {
         }
         captureCommittedBatchTrades(batch);
         owner.commits.completeCommitPublicationBatch();
-        for (OrderBatchItem item : batch.items) {
+        if (batch.preparedResponse == null) for (OrderBatchItem item : batch.items) {
             if (item.laneResultPrepared) continue;
             OrderRuntime order = owner.runtimeOrder(item.orderId());
             if (order == null && item.originalOrderId() > 0) order = owner.runtimeOrder(item.originalOrderId());
             item.resultOrder = order;
             item.resultOrderSymbol = order == null ? null : owner.runtimeOrderSymbol(order);
         }
-        byte[] responseData = TradingOrderBatchCodec.encodeResultSource(batch);
+        byte[] responseData = batch.preparedResponse != null
+                ? batch.preparedResponse : TradingOrderBatchCodec.encodeResultSource(batch);
         owner.terminalTradeCount = Math.addExact(owner.terminalTradeCount, batch.tradeCount);
         owner.validateFundsConservation(pending.command());
         owner.commitMatchingSequence(batch.sequence);
