@@ -5963,3 +5963,29 @@ business=CANCEL_ORDER_BATCH items=2391040 requests=119552 p50us=22937 p90us=2680
 - Lane14966样本中worker-loop-self13471=90.01%，结算815、准入485、撤单144、其他51；busy-spin约97%CPU不代表业务饱和。Owner无ThreadPark/JavaMonitorEnter/Wait记录、无同步I/O事件，profile阈值限制仍存在。不能据此证明每次Lane空闲都由Owner造成，精确队列空闲原因/调用空转率仍需进一步事件计数；现有证据已确认Owner被实体级串行准备和发布工作占满。
 - 节点分配采样566.506MiB/s、heap最大446.70MiB、GCPhasePause128次/984.930ms/p99=14.974ms/max15.213ms；DataLoss0。其余参数、NMT与采样指标限制沿用采集前定义和上一轮验收范围，不宣称长稳/三节点容量已验证。
 - JFR SHA256 7fa0b2772aa4efa48e2b51dc763a66880d46afd2f5ed11bfe25d9f5b88bb09ed，大小6091907字节；临时分析器Pinpoint按每个完整Owner调用栈互斥分类，并额外统计每方法inclusive、叶子行号及Lane循环。原始目录/tmp/owner-pinpoint-cluster和/tmp/owner-pinpoint分析完清理；无业务代码修改、无重复功能测试或恢复测试。
+
+
+## 2026-09-10 方案二小热点修复：采集前锁定
+- 仅方案二429ca02a工作区，修改已注册symbol查询免监视器、新symbol保留同步双重检查；预留提升用detectIfNone取首个元素；身份键流式UTF8哈希保持旧键。主架构调整仅给方案，不在本轮修改账户/提交所有权。
+- JDK25/G1、单成员真实Cluster、4Lane/2matcher/256在途、其余全部沿用上一轮profile参数与资金初始化，预热30秒测量45秒，JMH fork1/thread1/SingleShot/-prof gc，节点JFR profile/NMT。新增mixed-unicode-client-ids=true，每16单一个中文+emoji客户ID，以覆盖真实UTF8路径；输入变化，本轮不直接与旧ASCII吞吐比较或承诺提升百分比。六产品线控制JMH及真实业务/重放/快照按上一轮相同参数顺序执行。无主测额外轮次。
+- 有效条件：测试通过、身份哈希匹配Java原始UTF8算法（全部单UTF16码元/配对及不合法代理项/随机串）、已注册查询持注册锁时可并发完成、新币对并发一致、预留逐项提升次序不变；真实负载offered=terminal/unfinished0/fundsDiff0/DataLoss0、六产品线恢复核对通过。磁盘>10GiB；原始/tmp/lane-small-hotspots-load、-gates和/tmp/lane-small-hotspots分析完成后清理。
+
+- 追加采集前定义：Unicode诊断轮约15万级，输入改变不能判断回归；因此在其所有控制轮结束后，顺序补一次当前代码ASCII原始输入profile（mixed-unicode-client-ids默认false），其余45秒参数完全相同，输出/tmp/lane-small-hotspots-ascii。只确认原场景是否出现明显退化，不重跑旧代码、不将profile与无profiler主分数混算；资金和DataLoss等有效条件相同。
+
+### 小热点修复结果
+- 代码提交0fac657e，HotSpot25定向构建`mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am -Dtest=RuntimeIdentityRegistryTest,TradingRuntimeStateTest,DeterministicExchangeCoreAdapterTest,ClusterCommandPipelineTest,ClusterMixedCapacityTest -Dsurefire.failIfNoSpecifiedTests=false package`成功；268项测试0失败0错误0跳过。共享身份键/预留/路由已覆盖六产品线pipeline测试；未改其余产品业务，不重跑未受影响全仓测试。
+- 身份哈希穷举65536个单UTF16码元及显式非法代理项/emoji/1000随机串，与Java UTF8 getBytes原算法完全一致；持有adapter注册监视器期间，已注册symbol跨线程查询完成；32个并发新币对查询结果一致；100预留按旧set数组首元素顺序逐项提升并删除，顺序一致。新symbol冲突检查和资金依赖均保留。
+- 六产品线真实单成员业务、SIGKILL后日志重放、快照恢复全部PASS、fundsDiff0，快照位置SPOT3616、两永续9568、两交割与OPTION5184。没有重复启动三个节点。
+- Unicode诊断profile：156950.648 business ops/s、15173.688 Core messages/s、37309.726 fills/s，7086094业务动作/685070消息均终态、unfinished0/峰值在途256、fundsDiff0，hash d41f2c2bffdacc70。约每16单一个中文emoji客户ID，输入与旧纯ASCII不同，不据此计算性能提升/回退百分比。
+- ASCII补测标记为无效性能对照：测量时外部Java8进程PID82566占237%CPU，SASE GPU约77.6%、WindowServer34.4%、Terminal27.7%；本轮节点/客户端分别约762.7%/194.5%。JFR整机CPU97.45%、节点34.98%，因此78007.266 business ops/s不作为代码性能结论。未终止外部进程，允许本轮完成核账后停止、不再重跑；3516246业务动作/344918消息均终态、unfinished0/fundsDiff0，仍可作为功能运行证据。原场景同环境性能收益尚未确认。
+- Unicode节点JFR：45.149秒测量、DataLoss0/Owner同步IO事件0；Owner96.013%单核、matcher21.332/21.290%、Lane97.19–97.24%，保持自旋与有效工作区分。分配采样506.319MiB/s、约3383B/业务操作；heap最大446.75MiB；GCPhasePause92次/965.830ms/max16.323ms。此轮短采样不能证明无泄漏、全部等待消失或生产三节点容量。
+- 两轮及六控制轮JMH/JFR摘要、哈希如下（gc规范化B/op为客户端一次完整benchmark调用，不是每个business operation；控制每调用100循环，所有控制accountControlVerify=PASS）：
+  - lane-small-hotspots-load/lanes-control-INVERSE_DELIVERY-0: 3181.208 ms/op; gc.alloc.rate=1.150, gc.alloc.rate.norm=3888940.000, gc.count=0.000; JFR 839102 bytes SHA256 16ee69f78f5c28da36b29e705d70ed0fba25f3b6babebb0dcd4c0e40c0639ecf.
+  - lane-small-hotspots-load/lanes-control-INVERSE_PERPETUAL-0: 3089.211 ms/op; gc.alloc.rate=1.166, gc.alloc.rate.norm=3814876.000, gc.count=0.000; JFR 834766 bytes SHA256 6f41beca155e3b9a136733c642b694f2426e3f7aafb15ff0b41b27f6e62eea32.
+  - lane-small-hotspots-load/lanes-control-LINEAR_DELIVERY-0: 3076.017 ms/op; gc.alloc.rate=1.188, gc.alloc.rate.norm=3873008.000, gc.count=0.000; JFR 830960 bytes SHA256 54e38892493141768ed0b2c27ac382df5a6f12c2715cfac6d03a59dfdb1ae5a6.
+  - lane-small-hotspots-load/lanes-control-LINEAR_PERPETUAL-0: 3142.150 ms/op; gc.alloc.rate=0.995, gc.alloc.rate.norm=3322556.000, gc.count=0.000; JFR 832121 bytes SHA256 49b2a0080b188e23011f4cd227301ab404a1b10979a3e15eecdec413f53c2269.
+  - lane-small-hotspots-load/lanes-control-OPTION-0: 2374.851 ms/op; gc.alloc.rate=0.987, gc.alloc.rate.norm=2508356.000, gc.count=0.000; JFR 814609 bytes SHA256 068bc242fd8f9da878d0e24730794ec9f9f4a6061ed7515c1eb69851650d3aa9.
+  - lane-small-hotspots-load/lanes-control-SPOT-0: 796.945 ms/op; gc.alloc.rate=1.400, gc.alloc.rate.norm=1238364.000, gc.count=0.000; JFR 722806 bytes SHA256 a9dc12c677da2ea2b611b96c5d271f39224d998b9253251ffcd52bf2d02ed33f.
+  - lane-small-hotspots-load/lanes-profile-LINEAR_PERPETUAL-0: 45.149 s/op; gc.alloc.rate=111.287, gc.alloc.rate.norm=13073748448.000, gc.count=168.000, gc.time=183.000; JFR 5563848 bytes SHA256 c25d802f2b39b806298acb10d68e790957fe0de7259aaa12b37a0e90b657a5c8.
+  - lane-small-hotspots-ascii/lanes-profile-LINEAR_PERPETUAL-0: 45.077 s/op; gc.alloc.rate=64.853, gc.alloc.rate.norm=7378732752.000, gc.count=96.000, gc.time=146.000; JFR 4318543 bytes SHA256 46b5f988b2a57c7311a82cb3fb8988bded7fd8ba2e557805cd9d199705a8d3e7.
+- 原始路径/tmp/lane-small-hotspots-load、-ascii、-gates及/tmp/lane-small-hotspots分析记录后清理，测试报告清理，集群及客户端均已停止。只提交源码和本记录，README未修改。主Owner改造仍为建议方案：批内复用稳定上下文、账户准入及身份索引归属Lane，再减少Owner逐实体发布；需联合查询/恢复/依赖边界验证，不在本轮擅自改变资金归属或已提交可见性。
