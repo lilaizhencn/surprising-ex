@@ -19,6 +19,24 @@ class TerminalTombstoneStoreTest {
         assertThat(store.size()).isEqualTo(1280);
     }
 
+    @Test void overwritingAnEntityKeepsItsFifoPositionAndReplacesItsClientIndex() {
+        var store = new TerminalTombstoneStore();
+        store.put(0, 7, 11, "old", 1);
+        store.put(0, 8, 11, "next", 2);
+        store.put(0, 7, 11, "replacement", 3);
+        assertThat(store.size()).isEqualTo(2);
+        assertThat(store.containsClient(0, 11, "old")).isFalse();
+        assertThat(store.containsClient(0, 11, "replacement")).isTrue();
+        store.trim(1);
+        assertThat(store.contains(0, 7)).isFalse();
+        assertThat(store.contains(0, 8)).isTrue();
+        assertThat(store.containsClient(0, 11, "replacement")).isFalse();
+        store.trim(0);
+        store.put(3, 7, 12, "reused", 4);
+        assertThat(store.contains(3, 7)).isTrue();
+        assertThat(store.contains(0, 7)).isFalse();
+    }
+
     record Key(int type, long id) {}
     record Value(long user, String client, long sequence) {}
     record Client(int type, long user, String client) {}
