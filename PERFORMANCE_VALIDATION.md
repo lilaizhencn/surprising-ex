@@ -5386,3 +5386,129 @@ business=CANCEL_ORDER_BATCH items=619520 requests=30976 p50us=38174 p90us=62029 
 - 12份JMH JSON按文件名字典序串接文件名和内容的SHA256=15a66a800f3cad74a4bc2229dd051cf8e96ada9cfe66fdf03a31113a5a26c672。
 - 本轮源码及验证包均为d32e8cca工作树加上述修改，未检出历史提交。仅本机，未启动云资源；没有覆盖完整前端/WS网络、Valkey或Kafka部署、长时间内存稳定性和完整运营侧载。因此已完成本轮三项改动及局部正确性/性能验证，未达到1ms延迟或全线程有效饱和目标。
 - 分析记录完成，停止本轮进程并清理/tmp/owner-opt-*临时目录、Archive录制、JFR、日志和本轮Maven测试报告；以下清理执行后原始路径不再可访问，以上保留摘要及校验信息，构建包和用户文件保留。
+
+## 2026-09-10 Owner瓶颈定位（采集前锁定）
+- 用户要求先定位再给方案，本轮不改生产或压测业务代码。仅当前master 8a317241现有构建包；对照commit不适用。HotSpot GraalVM25.0.1/Maven3.9.16/macOS26.7/i9-9880H8C16T/16GiB；磁盘527GiB，低于10GiB或单轮300秒则停止。
+- 本机真实三JVM Cluster+1负载，LINEAR_PERPETUAL、1769用户/256symbol/1matcher/4Lane/global及session256在途/batch20/单命令与保留查询session、seed112001、trading-stream=true/operational=false；持续做市/普通下单撤单/批量成交撤单与标记价，初始化资金持仓和强平核对沿用ClusterMixedCapacityMain。30秒预热、60秒测量及最终排空计时；G1、Core512–768MiB/load128–512MiB、NMTsummary、SHARED_NETWORK、service YIELDING/Lane spin0；无恒定到达率及CO修正。
+- 四JVM JFR profile64MiB，ExecutionSample2ms、ThreadCPULoad/CPULoad1秒、ThreadDump5秒、park/monitor1ms。测量开始后对Leader额外async-profiler4.5 CPU5ms+wall10ms、stack128、memlimit64MiB；采样开销独立披露，不和上一轮做吞吐收益比较。如CPU事件不支持，记录错误并仅使用JFR，不无声换参。测量窗口独立筛选，Owner执行样本互斥分组，另列inclusive热点避免重叠相加；关注准入、指纹、协调、批量收尾、结果编码、健康检查/轮询、GC及线程饱和度。没有逐轮进展计数时不得将所有协调样本称为空轮询。
+- 通过条件金融核对PASS、offered=terminal/unfinished0、无节点业务异常/DataLoss。本轮仅定位，不改共享业务所以不重复六产品JMH及恢复（8a317241已通过日志重放/快照恢复）；长稳、云端容量、完整侧载、前端WS不测。临时/tmp/owner-diag-*分析后清理，记录参数与摘要。不承诺精确逐笔阶段耗时或未采集的空轮询比例。
+- 第一轮async-profiler报Cannot start wall clock with the selected event，没有启动；本轮CPU来源仅四JVM JFR。金融核对PASS，记录为JFR诊断数据。补充第二轮墙钟定位（采集前锁定）：业务及JVM/JFR参数完全相同，30秒预热/60秒测量，async-profiler改为仅wall事件10ms、stack128/64MiB，测量开始后启动，单独解释采样开销，不作前后性能改善比较；原始目录/tmp/owner-diag-wall。
+
+### 定位结果（未修改业务代码）
+
+run，Leader node2：
+```text
+secs=60.232 ownerSamples=17510 machine=96.38 allocMiBs=274.72 gc=67 pauseMax=15.199 pauseTotal=728.940 dataLoss=0 ownerBlockingNs={jdk.ThreadPark=149875681}
+CPU trading-owner--1 mean=85.83 max=95.32
+CPU /tmp/owner-diag-run/node2/media-surprising-linear_perpetual-2 [sender,receiver] mean=85.53 max=94.60
+CPU archive-conductor mean=25.42 max=33.58
+CPU core-matcher-0 mean=25.21 max=29.95
+CPU clustered-service-101-0 mean=24.71 max=31.83
+CPU driver-conductor mean=24.00 max=34.58
+CPU consensus-module-101-2 mean=22.28 max=31.02
+CPU Attach Listener mean=16.62 max=23.79
+CPU core-account-lane-0 mean=14.93 max=17.34
+CPU core-account-lane-1 mean=14.86 max=17.36
+CPU core-account-lane-2 mean=14.79 max=17.26
+CPU core-account-lane-3 mean=14.63 max=17.13
+CPU JVMCI-native CompilerThread0 mean=6.28 max=46.93
+CPU aeron-md-nra mean=2.03 max=3.62
+CPU C1 CompilerThread0 mean=0.43 max=2.33
+PHASES
+batch-finalization-other=4984
+command-admission-other=3435
+settlement-dispatch-other=1872
+ordered-commit-other=1642
+completion-coordination-other=1526
+dependency-preparation=1147
+fingerprint=1092
+pipeline-loop-other=930
+batch-result-materialization=366
+health-check=351
+other=165
+```
+```text
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=297 businessHash=74c1574e9d0a8c4e
+mixedCapacity=PASS elapsedSeconds=60.136 terminalBusinessOperations=4810240 offeredBusinessOperations=4810240 terminalCoreMessages=471552 offeredCoreMessages=471552 businessOpsPerSec=79988.921 coreMessagesPerSec=7841.383 fills=1141760 fillsPerSec=18986.194 queries=0 unfinished=0 peakInFlight=256 measuredCycles=223 totalCycles=297 triggerExecutions=0
+business=PLACE_ORDER items=114176 requests=114176 p50us=14147 p90us=34406 p95us=38961 p99us=52264 p999us=82116 maxus=113967
+business=CANCEL_ORDER items=114176 requests=114176 p50us=17055 p90us=41844 p95us=46006 p99us=57245 p999us=92733 maxus=122486
+business=APPLY_MARK_PRICE items=14848 requests=14848 p50us=21315 p90us=45187 p95us=50626 p99us=83034 p999us=105709 maxus=113704
+business=PLACE_ORDER_BATCH items=3425280 requests=171264 p50us=40009 p90us=67174 p95us=84148 p99us=108789 p999us=289406 maxus=325844
+business=CANCEL_ORDER_BATCH items=1141760 requests=57088 p50us=40927 p90us=80609 p95us=91357 p99us=111869 p999us=304087 maxus=311951
+```
+- inclusive热点（不能相加）：
+```text
+com.surprising.aeron.service.execution.OrderBatchExecutor.finishOrderBatch=5341
+com.surprising.aeron.service.execution.OrderBatchExecutor.preparePipelinedPlaceBatch=2141
+com.surprising.aeron.service.state.TradingRuntimeState$PublishedLaneChanges.commitTerminalToOwner=1670
+com.surprising.aeron.protocol.CommandFingerprint.of=1092
+com.surprising.aeron.service.state.RuntimeFactIndexes.applyCurrent=681
+com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource=356
+com.surprising.aeron.service.state.TradingRuntimeState.assertAccountLanesHealthy=337
+```
+- /tmp/owner-diag-run/load/stdout.log SHA256 c71ef03bc078c04ca2a9870b41f6a3b3c2767e6d3cca917b8a546ebb5e946ab9。
+- /tmp/owner-diag-run/node2/profile.jfr SHA256 f0cc2a18a7c157c5b6d3b57f0825913dbbe0353d2470ad057e1ec57e975bae71。
+
+wall，Leader node0：
+```text
+secs=60.239 ownerSamples=20575 machine=98.17 allocMiBs=260.40 gc=62 pauseMax=14.698 pauseTotal=695.435 dataLoss=0 ownerBlockingNs={jdk.ThreadPark=74001858}
+CPU trading-owner--1 mean=88.94 max=93.98
+CPU /tmp/owner-diag-wall/node0/media-surprising-linear_perpetual-0 [sender,receiver] mean=87.73 max=93.39
+CPU Attach Listener mean=46.84 max=86.55
+CPU core-matcher-0 mean=25.65 max=27.58
+CPU archive-conductor mean=24.78 max=32.36
+CPU driver-conductor mean=22.33 max=30.43
+CPU consensus-module-101-0 mean=20.98 max=28.26
+CPU clustered-service-101-0 mean=19.68 max=31.97
+CPU core-account-lane-0 mean=15.60 max=16.95
+CPU core-account-lane-1 mean=15.58 max=16.94
+CPU core-account-lane-2 mean=15.44 max=16.80
+CPU core-account-lane-3 mean=15.17 max=16.44
+CPU aeron-md-nra mean=2.48 max=4.98
+CPU JVMCI-native CompilerThread0 mean=2.46 max=20.73
+CPU main mean=0.86 max=1.24
+PHASES
+batch-finalization-other=5710
+command-admission-other=4042
+settlement-dispatch-other=2318
+ordered-commit-other=1990
+completion-coordination-other=1812
+dependency-preparation=1346
+fingerprint=1238
+pipeline-loop-other=1036
+health-check=503
+batch-result-materialization=404
+other=176
+```
+```text
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=273 businessHash=581de03ebd7d95a9
+mixedCapacity=PASS elapsedSeconds=60.240 terminalBusinessOperations=4552330 offeredBusinessOperations=4552330 terminalCoreMessages=447114 offeredCoreMessages=447114 businessOpsPerSec=75569.603 coreMessagesPerSec=7422.183 fills=1080320 fillsPerSec=17933.532 queries=0 unfinished=0 peakInFlight=256 measuredCycles=211 totalCycles=273 triggerExecutions=0
+business=PLACE_ORDER items=108032 requests=108032 p50us=15884 p90us=38993 p95us=44400 p99us=57311 p999us=95551 maxus=119406
+business=CANCEL_ORDER items=108032 requests=108032 p50us=19365 p90us=47087 p95us=52756 p99us=67174 p999us=131071 maxus=173670
+business=APPLY_MARK_PRICE items=14986 requests=14986 p50us=26329 p90us=54329 p95us=66027 p99us=97517 p999us=159776 maxus=161218
+business=PLACE_ORDER_BATCH items=3240960 requests=162048 p50us=44072 p90us=62324 p95us=72941 p99us=99024 p999us=173277 maxus=228196
+business=CANCEL_ORDER_BATCH items=1080320 requests=54016 p50us=44498 p90us=63799 p95us=71696 p99us=94502 p999us=272367 maxus=280756
+```
+- inclusive热点（不能相加）：
+```text
+com.surprising.aeron.service.execution.OrderBatchExecutor.finishOrderBatch=6107
+com.surprising.aeron.service.execution.OrderBatchExecutor.preparePipelinedPlaceBatch=2517
+com.surprising.aeron.service.state.TradingRuntimeState$PublishedLaneChanges.commitTerminalToOwner=1832
+com.surprising.aeron.protocol.CommandFingerprint.of=1238
+com.surprising.aeron.service.state.RuntimeFactIndexes.applyCurrent=839
+com.surprising.aeron.service.state.TradingRuntimeState.assertAccountLanesHealthy=489
+com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource=395
+```
+- /tmp/owner-diag-wall/load/stdout.log SHA256 43a5de4c77f031687b4cbd8cdd1ad3406f78bb6d1fb89d1be87ed3cbe5dd15b8。
+- /tmp/owner-diag-wall/node0/profile.jfr SHA256 0fa21ce344f1a44c983fdd42b49a45cb20cdca87b853f6fe30cdbfd7c1a06ead。
+
+- 两轮Owner样本17510/20575。互斥分组按调用栈优先匹配fingerprint→health→batch result→finishOrderBatch→dependency→admission→dispatch→completion→other commit→loop→other。finish收尾连同结果物化合计30.55%/29.72%，准入19.62%/19.65%，结算派发10.69%/11.27%，其余有序提交/完成协调/循环合计23.40%/23.51%，依赖准备6.55%/6.54%，指纹6.24%/6.02%，健康检查2.00%/2.44%。这是执行样本分布，不是逐笔耗时或调用次数。
+- finishOrderBatch最大具体路径是collectMatcherSettlements/collectCancel→PublishedLaneChanges.commitTerminalToOwner：逐变更写changed与published状态及路由、终态保留和身份释放；其后OwnerCommitPublisher→RuntimeFactIndexes.applyCurrent更新活动订单/持仓索引并清空变更。单独commitTerminalToOwner占9.54%/8.90%，fact索引占3.89%/4.08%，encodeResultSource仅2.03%/1.92%；后三者是inclusive路径，不能和父路径相加。不能把全部状态发布称为重复或无用：有序可见性、后续准入、快照及回放依赖此边界。
+- 准入preparePipelinedPlaceBatch占12.23%/12.23% inclusive，逐订单进行身份/终态检查、instrument/仓位身份查找、费率和预留准备；随后stagePlaceBatchAdmission再次按项更新published订单、预留及pending索引。指纹SHA仅依赖不可变命令字节，约6%，没有理由直接删除幂等校验。
+- 独立wall轮async-profiler成功，原始147186 WallClockSample事件；jfrconv --wall --threads --from 1789005189346 --to 1789005249585过滤测量窗口得到Owner加权样本5254，包含原生栈。Unsafe_Unpark552/10.51%，其中批量结算派发85、批量准入77、resumeHandoff67、requestHandoff60、普通准入40、普通结算35、其余188；idle park195/3.71%，fingerprint221/4.21%，batch finish1200/22.84%。后面几项按park→unpark→SHA→finish→prepare分类，互斥；wall与CPU分母不同，不能相加。约7秒attach启动延迟导致wall仅覆盖测量后段；Attach Listener的采样均值不能当全窗口持续占用。
+- unpark来自SettlementLaneWorker.submit的parkRequested握手及resumeHandoff、顺序stage的requestHandoff。现有submit已经只在BLOCKING且parkRequested时唤醒，不能误报为每次无条件unpark；请求/恢复handoff涉及确切线程所有权，不能直接删。证据支持优先减少任务提交/交接频率或合并同Lane一轮通知，不支持取消握手。
+- Owner JFR≥1ms park首轮总149.876ms、次轮74.002ms，首轮栈来自BackoffIdleStrategy空闲退避；未采到Owner≥阈值monitor及同步file/socket I/O。wall的短park可能未达到JFR阈值，不能宣称无等待。没有逐轮进展计数，无法给出空轮询占比，pump包含真实结果收集和派发，禁止把约19% inclusive pump样本全部当空转。
+- 两轮CPU热点顺序一致，matcher约25%，各Lane约15%，机器96.38%/98.17%；本机CPU资源竞争与Owner串行开销并存，尚不能断言Owner是唯一容量限制。首轮79,988.921与墙钟轮75,569.603业务ops/s受采样配置及机器负载影响，不作回退结论。两轮资金守恒、持仓、冻结、终态核对PASS，unfinished0，八份JFR DataLoss0，wall profiler无丢失错误。Leader分配274.72/260.40MiB/s，GC最大15.199/14.698ms；不是零分配，未采长期泄漏或完整系统调度因果。
+- 建议顺序：①收敛提交时变更发布和索引更新的重复查表/遍历，保留提交可见性，逐项证明每份索引消费者后再删容器；②减少Lane任务及handoff的通知频率，保留防丢唤醒协议，以同样wall口径验证；③同一批次复用不变instrument/资产解析，逐项资金/订单身份仍检查，命令SHA可评估在不可变输入交接时预计算并复用。健康检查和响应编码不列首要。收益未做A/B验证，不承诺提升比例；下一轮实现需六产品资金/回放/快照、JMH及三节点重测。
+- /tmp/owner-diag-wall/async.jfr SHA256 29750f8b1d355afd0511cc5c8207bc0718b74a66813b268959f654134e8d7fd5，大小3141280字节。
+- 执行入口为SurprisingClusterNode×3、ClusterMixedCapacityMain，临时runner /tmp/owner-diag-run.py及owner-diag-wall.py；JFR流式分类owner-diag-analyze.java、jfrconv墙钟折叠汇总。未改生产源码，未重建或跑新业务回归；CodeGraph工具本会话不可用，使用源码只读检查。原始产物分析后全部清理，目录将不可访问；保留本记录，不写README，不开启云资源。
