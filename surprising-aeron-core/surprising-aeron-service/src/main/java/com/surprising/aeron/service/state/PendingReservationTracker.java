@@ -301,7 +301,7 @@ final class PendingReservationTracker {
                 firstOrderBySequence.removeKey(coreSequence);
                 return;
             }
-            long promotedOrderId = additionalOrderIds.toArray()[0];
+            long promotedOrderId = additionalOrderIds.detectIfNone(value -> true, 0);
             additionalOrderIds.remove(promotedOrderId);
             firstOrderBySequence.put(coreSequence, promotedOrderId);
             if (additionalOrderIds.isEmpty()) additionalOrdersBySequence.removeKey(coreSequence);

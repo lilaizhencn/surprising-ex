@@ -1216,7 +1216,13 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         return symbolId == 0 ? 1 : symbolId;
     }
 
-    private synchronized int reserveSymbolId(String symbol) {
+    private int reserveSymbolId(String symbol) {
+        // 已注册币对走并发字典只读路径；新币对仍串行检查稳定 ID 冲突。
+        Integer existing = symbols.get(symbol);
+        return existing != null ? existing : registerSymbolId(symbol);
+    }
+
+    private synchronized int registerSymbolId(String symbol) {
         Integer existing = symbols.get(symbol);
         if (existing != null) return existing;
         int symbolId = stableSymbolId(symbol);

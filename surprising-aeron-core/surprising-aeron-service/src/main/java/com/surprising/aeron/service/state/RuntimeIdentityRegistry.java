@@ -2,7 +2,6 @@ package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.service.state.model.AssetBalance;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -259,16 +258,7 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
     }
 
     private static long deterministicPositionKey(PositionIdentity identity) {
-        long hash = 0xcbf29ce484222325L;
-        long userId = identity.userId();
-        for (int shift = 0; shift < Long.SIZE; shift += Byte.SIZE) {
-            hash = (hash ^ (userId >>> shift & 0xffL)) * 0x100000001b3L;
-        }
-        for (byte value : identity.positionKey().getBytes(StandardCharsets.UTF_8)) {
-            hash = (hash ^ (value & 0xffL)) * 0x100000001b3L;
-        }
-        long key = hash & Long.MAX_VALUE;
-        return key == 0 ? 1 : key;
+        return deterministicKey(identity.userId(), identity.positionKey());
     }
 
     long preparedPositionKey(long userId, String positionKey) {
@@ -327,11 +317,33 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
         for (int shift = 0; shift < Long.SIZE; shift += Byte.SIZE) {
             hash = (hash ^ (userId >>> shift & 0xffL)) * 0x100000001b3L;
         }
-        for (byte character : value.getBytes(StandardCharsets.UTF_8)) {
-            hash = (hash ^ (character & 0xffL)) * 0x100000001b3L;
+        // 按 Java UTF-8 编码逐字节计算，避免为每次身份查询创建 byte[]。
+        // 非法代理项与 String.getBytes(UTF_8) 一致，编码为 '?'，保持历史身份键不变。
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c < 0x80) hash = hashByte(hash, c);
+            else if (c < 0x800) {
+                hash = hashByte(hash, 0xc0 | (c >>> 6));
+                hash = hashByte(hash, 0x80 | (c & 0x3f));
+            } else if (!Character.isSurrogate(c)) {
+                hash = hashByte(hash, 0xe0 | (c >>> 12));
+                hash = hashByte(hash, 0x80 | ((c >>> 6) & 0x3f));
+                hash = hashByte(hash, 0x80 | (c & 0x3f));
+            } else if (Character.isHighSurrogate(c) && i + 1 < value.length()
+                    && Character.isLowSurrogate(value.charAt(i + 1))) {
+                int point = Character.toCodePoint(c, value.charAt(++i));
+                hash = hashByte(hash, 0xf0 | (point >>> 18));
+                hash = hashByte(hash, 0x80 | ((point >>> 12) & 0x3f));
+                hash = hashByte(hash, 0x80 | ((point >>> 6) & 0x3f));
+                hash = hashByte(hash, 0x80 | (point & 0x3f));
+            } else hash = hashByte(hash, '?');
         }
         long key = hash & Long.MAX_VALUE;
         return key == 0 ? 1 : key;
+    }
+
+    private static long hashByte(long hash, int value) {
+        return (hash ^ value) * 0x100000001b3L;
     }
 
     private static String[] storeIdentity(String[] values, int id, String value) {

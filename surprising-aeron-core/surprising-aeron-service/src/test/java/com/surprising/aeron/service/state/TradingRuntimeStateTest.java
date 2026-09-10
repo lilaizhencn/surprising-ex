@@ -17,6 +17,20 @@ import org.junit.jupiter.api.Test;
 class TradingRuntimeStateTest {
 
     @Test
+    void promotionPreservesSetOrderWithoutArrayMaterializationAcrossEveryRemoval() {
+        var index = new PendingReservationTracker.PendingReservationSequenceIndex(4);
+        for (long order = 1; order <= 100; order++) index.add(19, order);
+        while (index.containsKey(19)) {
+            long first = index.firstOrderBySequence.get(19);
+            var additional = index.additionalOrdersBySequence.get(19);
+            long expected = additional == null || additional.isEmpty() ? 0 : additional.toArray()[0];
+            index.remove(19, first);
+            assertThat(index.firstOrderBySequence.getIfAbsent(19, 0)).isEqualTo(expected);
+        }
+        assertThat(index.additionalOrdersBySequence.isEmpty()).isTrue();
+    }
+
+    @Test
     void admissionOnlyPreallocatesWrittenBuffersInItsOwnerLane() throws Exception {
         var constructor = TradingRuntimeState.MatcherSettlementChanges.class.getDeclaredConstructor(int.class);
         constructor.setAccessible(true);

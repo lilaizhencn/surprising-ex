@@ -6,6 +6,31 @@ import org.junit.jupiter.api.Test;
 
 class RuntimeIdentityRegistryTest {
     @Test
+    void streamedIdentityHashExactlyMatchesJavaUtf8IncludingMalformedSurrogates() throws Exception {
+        var method = RuntimeIdentityRegistry.class.getDeclaredMethod("deterministicKey", long.class, String.class);
+        method.setAccessible(true);
+        var values = new java.util.ArrayList<String>();
+        values.addAll(java.util.List.of("", "client-123", "客户😀", "\ud800", "\udc00", "\ud800x\udc00", "\ud800\ud800\udc00"));
+        for (int c = 0; c <= Character.MAX_VALUE; c++) values.add(String.valueOf((char)c));
+        var random = new java.util.Random(91);
+        for (int i = 0; i < 1_000; i++) {
+            char[] chars = new char[16];
+            for (int j = 0; j < chars.length; j++) chars[j] = (char)random.nextInt(65536);
+            values.add(new String(chars));
+        }
+        for (String value : values) {
+            long userId = random.nextLong() & Long.MAX_VALUE;
+            long expected = 0xcbf29ce484222325L;
+            for (int shift = 0; shift < 64; shift += 8)
+                expected = (expected ^ (userId >>> shift & 255)) * 0x100000001b3L;
+            for (byte b : value.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                expected = (expected ^ (b & 255)) * 0x100000001b3L;
+            expected &= Long.MAX_VALUE;
+            assertThat((long)method.invoke(null, userId, value)).isEqualTo(expected == 0 ? 1 : expected);
+        }
+    }
+
+    @Test
     void positionLookupSeparatesEqualHashesAndSurvivesRestoreAndRelease() {
         var identities = new RuntimeIdentityRegistry();
         assertThat("Aa".hashCode()).isEqualTo("BB".hashCode());

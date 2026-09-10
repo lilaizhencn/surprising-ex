@@ -32,6 +32,21 @@ import org.junit.jupiter.api.Test;
 class DeterministicExchangeCoreAdapterTest {
 
     @Test
+    void registeredSymbolLookupDoesNotAcquireRegistrationMonitor() throws Exception {
+        try (var adapter = new DeterministicExchangeCoreAdapter()) {
+            int expected = adapter.matcherShardId("REGISTERED-USDT");
+            synchronized (adapter) {
+                var result = CompletableFuture.supplyAsync(() -> adapter.matcherShardId("REGISTERED-USDT"));
+                assertThat(result.get(2, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(expected);
+            }
+            var calls = new ArrayList<CompletableFuture<Integer>>();
+            for (int i = 0; i < 32; i++) calls.add(CompletableFuture.supplyAsync(() -> adapter.matcherShardId("NEW-USDT")));
+            for (var result : calls) assertThat(result.get(2, java.util.concurrent.TimeUnit.SECONDS))
+                    .isEqualTo(adapter.matcherShardId("NEW-USDT"));
+        }
+    }
+
+    @Test
     @org.junit.jupiter.api.parallel.ResourceLock(org.junit.jupiter.api.parallel.Resources.SYSTEM_PROPERTIES)
     void controlEvidenceChecksNativeSequenceWithinItsActualOrderBookPartition() {
         String previous = System.getProperty("surprising.aeron.matching-engines");

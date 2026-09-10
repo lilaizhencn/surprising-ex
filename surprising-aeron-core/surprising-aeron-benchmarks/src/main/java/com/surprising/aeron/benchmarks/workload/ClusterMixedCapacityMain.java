@@ -147,9 +147,12 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     private long nextOrder() { return ++orderId; }
     private UUID nextRequest() { return new UUID(seed, ++requestId); }
 
+    /** 诊断身份键的UTF-8路径；只影响压测输入，生产默认命令不变。 */
+    private static final boolean UNICODE_CLIENT_IDS = Boolean.getBoolean("surprising.aeron.mixed-unicode-client-ids");
+
     static PlaceOrderCommand order(long id,String symbol,CoreOrderSide side,long price,long quantity,CoreTimeInForce tif) {
         return new PlaceOrderCommand(id,symbol,1,side,price,quantity,false,CoreMarginMode.CROSS,
-                CorePositionSide.NET,CoreOrderType.LIMIT,tif,false,"mixed-"+id);
+                CorePositionSide.NET,CoreOrderType.LIMIT,tif,false,(UNICODE_CLIENT_IDS && (id & 15) == 0 ? "客户😀-" : "mixed-")+id);
     }
 
     private void setup() {
