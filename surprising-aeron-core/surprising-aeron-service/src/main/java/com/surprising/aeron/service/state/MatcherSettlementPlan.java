@@ -78,22 +78,18 @@ public final class MatcherSettlementPlan {
     static final class BatchValidationScratch {
         private final LongLongHashMap remainingByOrderId = new LongLongHashMap();
         private final LongHashSet terminalOrderIds = new LongHashSet();
-        /** 一次Owner构造期间的权威不可变订单引用，避免同maker多笔成交反复跨发布表查找。 */
-        private final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<OrderRuntime> orders =
-                new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
-        private final LongHashSet preparedPositionOrders = new LongHashSet();
+        /** 本批相邻成交重复maker的只读引用；不额外建立逐订单缓存表。 */
+        private OrderRuntime lastMaker;
 
-        OrderRuntime order(TradingRuntimeState runtime, long id) {
-            OrderRuntime order = orders.get(id);
-            if (order == null) { order = requireOpen(runtime, id); orders.put(id, order); }
-            return order;
+        OrderRuntime maker(TradingRuntimeState runtime, long id) {
+            if (lastMaker == null || lastMaker.orderId() != id) lastMaker = requireOpen(runtime, id);
+            return lastMaker;
         }
 
         void clear() {
             remainingByOrderId.clear();
             terminalOrderIds.clear();
-            orders.clear();
-            preparedPositionOrders.clear();
+            lastMaker = null;
         }
     }
 
@@ -147,12 +143,13 @@ public final class MatcherSettlementPlan {
             if (orderId > 0) orderCount = addUnique(uniqueOrders, orders, orderCount, orderId);
         }
         long laneMask = runtime.topology().accountLaneMask(activeUserId);
-        if (batch == null || batch.preparedPositionOrders.add(takerOrderId))
-            preparePositionIdentity(runtime, identities, instrument, taker);
         LongLongHashMap remainingByOrderId = batch == null
                 ? runtime.matcherSettlementRemainingScratch() : batch.remainingByOrderId;
         if (batch == null) remainingByOrderId.clear();
-        if (!remainingByOrderId.containsKey(takerOrderId)) remainingByOrderId.put(takerOrderId, taker.remainingQuantitySteps());
+        if (!remainingByOrderId.containsKey(takerOrderId)) {
+            preparePositionIdentity(runtime, identities, instrument, taker);
+            remainingByOrderId.put(takerOrderId, taker.remainingQuantitySteps());
+        }
         int tradeCount = 0;
         try {
             for (MatcherEvent event : result.matcherEvents()) {
@@ -162,15 +159,15 @@ public final class MatcherSettlementPlan {
                     throw new IllegalArgumentException("invalid runtime match price or quantity");
                 }
                 OrderRuntime maker = batch == null ? requireOpen(runtime, event.matchedOrderId())
-                        : batch.order(runtime, event.matchedOrderId());
+                        : batch.maker(runtime, event.matchedOrderId());
                 if (batch != null && batch.terminalOrderIds.contains(maker.orderId())
                         || maker.userId() != event.matchedOrderUid() || maker.symbolId() != taker.symbolId()
                         || maker.side() == taker.side() || maker.userId() == taker.userId()) {
                     throw new IllegalStateException("runtime match does not match authoritative orders");
                 }
                 long takerRemaining = Math.subtractExact(remainingByOrderId.get(takerOrderId), event.size());
-                long makerBefore = remainingByOrderId.containsKey(maker.orderId())
-                        ? remainingByOrderId.get(maker.orderId()) : maker.remainingQuantitySteps();
+                boolean knownMaker = remainingByOrderId.containsKey(maker.orderId());
+                long makerBefore = knownMaker ? remainingByOrderId.get(maker.orderId()) : maker.remainingQuantitySteps();
                 long makerRemaining = Math.subtractExact(makerBefore, event.size());
                 if (takerRemaining < 0 || makerRemaining < 0) {
                     throw new IllegalStateException("fill exceeds runtime order remaining quantity");
@@ -178,7 +175,7 @@ public final class MatcherSettlementPlan {
                 remainingByOrderId.put(takerOrderId, takerRemaining);
                 remainingByOrderId.put(maker.orderId(), makerRemaining);
                 if (batch != null && makerRemaining == 0) batch.terminalOrderIds.add(maker.orderId());
-                if (batch == null || batch.preparedPositionOrders.add(maker.orderId()))
+                if (!knownMaker)
                     preparePositionIdentity(runtime, identities, instrument, maker);
                 orderCount = addUnique(uniqueOrders, orders, orderCount, maker.orderId());
                 int makerLane = runtime.topology().accountLaneId(maker.userId());

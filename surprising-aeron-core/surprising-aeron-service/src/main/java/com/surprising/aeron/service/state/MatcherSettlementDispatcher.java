@@ -170,7 +170,8 @@ final class MatcherSettlementDispatcher {
                         || matchingResult == null || matchingResult.nativeCommand().coreSequence() != coreSequence) {
                     throw new IllegalArgumentException("invalid matcher settlement item");
                 }
-                OrderRuntime taker = matcherBatchValidationScratch.order(owner, takerOrderId);
+                OrderRuntime taker = owner.order(takerOrderId);
+                if (taker == null) throw new IllegalStateException("taker order is missing");
                 int slot = storage.metadataSlots.getIfAbsent(taker.symbolId(), -1);
                 if (slot < 0) {
                     CoreInstrumentState instrument = owner.instrument(identities.symbol(taker.symbolId()));

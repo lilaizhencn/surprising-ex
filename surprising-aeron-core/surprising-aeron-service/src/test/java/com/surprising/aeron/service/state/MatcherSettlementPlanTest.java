@@ -50,6 +50,34 @@ class MatcherSettlementPlanTest {
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("exceeds");
         }
     }
+    @Test
+    void pooledPlanSwitchesFromDeepMakerLaneIndexBackToOneFillWithoutStaleLinks() {
+        var topology = new LaneTopology(LaneTopology.ROUTE_VERSION,1,0,0,4,
+                LaneTopology.DEFAULT_ACCOUNT_LANE_SEED,16,16,16);
+        try (var runtime = new TradingRuntimeState(topology)) {
+            var identities = new RuntimeIdentityRegistry(); int symbol = identities.symbolId("BTC-USDT");
+            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL,0); runtime.putInstrument(instrument());
+            long takerUser = 21;
+            while (topology.accountLaneId(takerUser) == topology.accountLaneId(20)) takerUser++;
+            runtime.putOrder(order(10,20,symbol,CoreOrderSide.SELL,20));
+            var taker = order(11,takerUser,symbol,CoreOrderSide.BUY,20); runtime.putOrder(taker);
+            var events = new java.util.ArrayList<exchange.core2.core.common.MatcherResult.MatcherEvent>();
+            for (int i = 0; i < 9; i++) events.add(MatcherEventFixtures.trade(10,20,100,1,false,false));
+            var deep = new CoreMatchingResult(true,"SUCCESS",List.of(),0,true,
+                    new CoreMatchingResult.NativeCommand(0,0,0,0,0,0,0,0,-1),new CoreMatchingResult.MatcherPrefix(0,0),null,
+                    events,new MatcherResult.MarketData(List.of(),List.of(),0,0)).withCoreSequence(1);
+            var scratch = new MatcherSettlementPlan.BatchValidationScratch(); var slot = new MatcherSettlementPlan();
+            MatcherSettlementPlan.buildBatchItem(1,taker,instrument(),deep,runtime,identities,scratch,slot);
+            int makerLane = topology.accountLaneId(20), count = 0;
+            for (int event = slot.firstMatcherEvent(makerLane); event >= 0; event = slot.nextMatcherEvent(event,makerLane)) count++;
+            assertThat(count).isEqualTo(9);
+            slot.clearBatchReferences(); scratch.clear();
+            MatcherSettlementPlan.buildBatchItem(1,taker,instrument(),fill(1),runtime,identities,scratch,slot);
+            assertThat(slot.firstMatcherEvent(makerLane)).isZero();
+            assertThat(slot.nextMatcherEvent(0,makerLane)).isEqualTo(-1);
+            assertThat(slot.tradeCount()).isOne();
+        }
+    }
     private static OrderRuntime order(long id,long user,int symbol,CoreOrderSide side,long qty) {
         return new OrderRuntime(id,user,symbol,1,side,100,false,CoreMarginMode.CROSS,CorePositionSide.NET,
                 CoreOrderType.LIMIT,CoreTimeInForce.GTC,0,0,qty,0,qty,false);
