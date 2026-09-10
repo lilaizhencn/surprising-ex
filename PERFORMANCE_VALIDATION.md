@@ -8069,3 +8069,1832 @@ Total: reserved=3148287KB, committed=723551KB
 异常：首次独立容器复现启动因同目录解出的LongLongHashMap.java干扰source launcher编译而失败；移为txt后成功，不是交易失败。节点仅出现SLF4J无provider的NOP日志提示。进程已由runner停止；分析摘要记录后将删除本轮/tmp/owner-master-diagnosis原始产物，下一条确认清理状态。未修改README或生产/测试Java源码。
 
 清理确认：本轮节点/客户端PID [81936, 81953]均已退出；已删除本轮临时目录（1277755899字节，约1.19GiB），含Archive、JFR、临时源码/编译文件、日志和报告。上列原始路径已不可访问，保留构建JAR及本记录；用户未跟踪文件未动。
+
+## 2026-09-10 master Owner 优化：采集前定义
+
+- 被测代码080758da；对照commit不适用（仅当前master）。变更：Agrona primitive索引删除整理替换EC sentinel重建；批上下文复用OrderBatchItem且提交后清引用；解码直接构建不可变列表；命令内最后币对路由复用；线程私有客户键查询探针；跳过无需发布/释放的存活持仓遍历；连续Owner按入口收取批统一推进，同一次推进未完成时不重复收集。
+- 验证：HotSpot Oracle GraalVM25.0.1、Maven3.9.16。完整 `mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am verify` 成功，最后补充测试后 package 成功；当前surefire汇总1223项、1222通过、0失败/错误、1数据库条件skip。回归包含六产品延后入口与串行执行/快照等价、依赖流水、终态索引持续淘汰、不同批大小槽回收、客户身份并发读取/恢复/引用释放。当前没有生产测试开关。
+- 压测前依次完成六产品真实单成员execute→SIGKILL→replay→snapshot重启，验证fundsDiff0/bookLevels0。使用既有ClusterProductLineGateMain和SnapshotControl，root改为master工作区；本机不启动三节点，不启云端/wallet。
+- 性能只测试当前master，一个真实Aeron Cluster成员保留网络/Archive/Core，LINEAR_PERPETUAL、PIPELINED、4 Account Lane、2 matcher（归因配置，不当单matcher正式容量），Lane BUSY_SPIN，服务YIELDING，SHARED_NETWORK；HotSpot25/G1，节点Xms512m/Xmx1536m，客户端128m/512m，NMT summary。机器Intel i9-9880H 8C16T/16GiB，macOS；磁盘可用约510GiB，低于10GiB停止。
+- 当前ClusterMixedCapacityMain：1769用户、256币对、batch20，global/session in-flight256，1命令会话+1查询保留会话，seed131001，trading-stream=true，operational=false，setup每账户BALANCE1000000000，含初始化清算/保险/ADL校验，maker/taker由编排持续产生；主测下单/撤单/批量下单撤单/标记价，运行中不启全套控制旁路。测量门禁要求measuredCycles本身跨两次65536终态保留窗口，不能仅靠预热。
+- 先一次无profiler主测（预热30s、测量60s）；再一次实际网络JMH continuousOperations（fork1/线程1/wi0/i1，业务预热30s、测量300s，gc profiler，controlPageSize0），节点JFR profile衍生ExecutionSample2ms/CPU1s/park与monitor1ms，192MiB上限，覆盖持续复用/淘汰；测量结束排空/验证，客户端总超时600s。再六产品各一次accountControls JMH（fork1/线程1/wi1/i2、gc/JFR），之后对长测录制日志重放、生成实际快照并重启验证同一businessHash。
+- 通过门槛：资金、净持仓、冻结、订单终态PASS，offered=terminal，unfinished=0，无非预期失败或timeout；JFR DataLoss0，Owner无同步IO，slot/索引分配热点下降为观察目标而非预设收益。硬件明显降频/调度干扰时只作诊断，不能认定吞吐优化已验收。主测与带profiler分开报告；不重跑历史分支，不将5min测试宣称生产长期无泄漏，不宣称三节点容量或完整CO修正三段尾延迟。
+- 临时目录/tmp/owner-master-opt，保存构建/验证/命令/JFR/NMT/温控/恢复结果摘要与sha256后清理。原始产物不长期保留，README不改。无生产语义或协议版本改变；公开订单DTO仍不可变，不强称零分配。
+
+### 080758da 第一轮结果与后续修正原因
+
+- 六产品执行/强杀重放/快照重启均PASS；长测录制日志重放与实际snapshot重启businessHash均b2cce7f5c89a82d0、snapshotPosition5106394048。6产品accountControls JMH均有PASS（下列保存结果）；不把控制场景SingleShot耗时当持续交易吞吐。
+- 无profiler主测159651.521 business ops/s，60.033s；JMH+JFR长测166090.689 business ops/s，300.053s；两者不能混合成优化对照。资金/持仓/冻结/终态核对PASS，offered=terminal、unfinished0，峰值in-flight256。
+- 测量阶段Owner样本98220：readyLaneMask871=0.887%（前定位3.47%）、matcherShardId643=0.655%（前2.68%）、批量decodeCommand2725=2.774%（前3.35%），不同持续时长与JIT/硬件条件，仅归因参考，不能当严格耗时收益。Owner allocation sample中OrderBatchItem为0，窗口/终态索引重建与客户身份释放路径分配抽样0；节点加权分配约3191.8B/business op，前定位约3429.5，约7%下降，非精确逐对象计数。
+- 发现新取舍：终态管理10059/98220=10.24%（前定位634/13871=4.57%），Agrona地图查找/删除成为显著Owner叶子；分配下降不能当CPU优化成功。继续将TerminalTombstoneStore四个实体Map替换为FIFO槽位直接链索引，淘汰已知槽位O(1)解链，不复制ID、不产生sentinel或搬探测链。其余已验证改动不变，最终代码需重新验证和采样，本轮不是最终交付性能。
+- Owner97.608%单核、matcher24.537/24.472%，Lane约97.6%且大量空转；未达全部有效业务饱和。Owner无park/monitor>=1ms或同步IO事件，JFRDataLoss0；JVMCI compiler在测量中仍有CPU活动，未满足充分稳定JIT的强容量验收条件。
+- GC后heap每分钟均值104.134/106.074/108.001/110.219/112.841MiB有缓慢上升；仅young-GC后占用不能等同真正live-set，当前未定位为业务泄漏，不能宣称长期无泄漏。新代码的持仓路径核对：移除时publishPosition和changedPosition均null；存活非null才跳过重复查表，没有把已删除持仓误保留的证据。后续最终长测增加测量结束的显式GC/heap统计，区分待回收旧对象与保留对象，但单次GC也不足证明无泄漏。
+
+master-main-LINEAR_PERPETUAL-0 CPU_Speed_Limit=60–100，明显限速，不作有效容量验收。
+```text
+measurementStartEpochMillis=1789050212901
+measurementEndEpochMillis=1789050272934
+ownerChurnVerify=PASS completedOrderLifecycles=6835200 terminalIndexEmpty=true reservationsEmpty=true
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=647 businessHash=f08276e160689883
+mixedCapacity=PASS elapsedSeconds=60.033 terminalBusinessOperations=9584384 offeredBusinessOperations=9584384 terminalCoreMessages=926464 offeredCoreMessages=926464 businessOpsPerSec=159651.521 coreMessagesPerSec=15432.540 fills=2278400 fillsPerSec=37952.363 queries=0 unfinished=0 peakInFlight=256 measuredCycles=445 totalCycles=647 triggerExecutions=0
+business=PLACE_ORDER items=227840 requests=227840 p50us=9347 p90us=22888 p95us=25182 p99us=34603 p999us=62685 maxus=71172
+business=CANCEL_ORDER items=227840 requests=227840 p50us=8421 p90us=19726 p95us=22265 p99us=32407 p999us=76349 maxus=144048
+business=APPLY_MARK_PRICE items=15104 requests=15104 p50us=14745 p90us=24297 p95us=29016 p99us=50692 p999us=80871 maxus=82968
+business=PLACE_ORDER_BATCH items=6835200 requests=341760 p50us=20529 p90us=25640 p95us=28737 p99us=48005 p999us=90505 maxus=196476
+business=CANCEL_ORDER_BATCH items=2278400 requests=113920 p50us=22216 p90us=27066 p95us=30359 p99us=53313 p999us=81264 maxus=183369
+```
+
+master-profile-LINEAR_PERPETUAL-0 CPU_Speed_Limit=60–77，明显限速，不作有效容量验收。
+```text
+measurementStartEpochMillis=1789050344456
+measurementEndEpochMillis=1789050644511
+ownerChurnVerify=PASS completedOrderLifecycles=35543040 terminalIndexEmpty=true reservationsEmpty=true
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=2454 businessHash=b2cce7f5c89a82d0
+mixedCapacity=PASS elapsedSeconds=300.053 terminalBusinessOperations=49836045 offeredBusinessOperations=49836045 terminalCoreMessages=4814861 offeredCoreMessages=4814861 businessOpsPerSec=166090.689 coreMessagesPerSec=16046.690 fills=11847680 fillsPerSec=39485.263 queries=0 unfinished=0 peakInFlight=256 measuredCycles=2314 totalCycles=2454 triggerExecutions=0
+business=PLACE_ORDER items=1184768 requests=1184768 p50us=8568 p90us=22265 p95us=24281 p99us=27541 p999us=55640 maxus=163708
+business=CANCEL_ORDER items=1184768 requests=1184768 p50us=8228 p90us=18677 p95us=20594 p99us=24805 p999us=47972 maxus=183894
+business=APPLY_MARK_PRICE items=75789 requests=75789 p50us=13557 p90us=22085 p95us=24608 p99us=38371 p999us=60948 maxus=214040
+business=PLACE_ORDER_BATCH items=35543040 requests=1777152 p50us=20201 p90us=24051 p95us=26361 p99us=40370 p999us=56524 maxus=215351
+business=CANCEL_ORDER_BATCH items=11847680 requests=592384 p50us=22118 p90us=25903 p95us=27328 p99us=46170 p999us=62226 maxus=69271
+```
+
+profile-summary.txt
+```text
+totals allocationMiBps=505.572 allocationBytes=159068350760 machineCPU=87.44 jvmCPU=58.54 heapMaxMiB=400.87 dataLoss=0 ownerIOEvents=0
+threadCPU	97.653	core-account-lane-3
+threadCPU	97.645	core-account-lane-2
+threadCPU	97.640	core-account-lane-0
+threadCPU	97.622	core-account-lane-1
+threadCPU	97.608	trading-owner--1
+threadCPU	97.307	/tmp/owner-master-opt/perf/master-profile-LINEAR_PERPETUAL-0/media-surprising-linear_perpetual-0 [sender,receiver]
+threadCPU	75.546	clustered-service-101-0
+threadCPU	73.732	driver-conductor
+threadCPU	66.342	archive-conductor
+threadCPU	64.593	consensus-module-101-0
+threadCPU	25.737	JVMCI-native CompilerThread1
+threadCPU	24.537	core-matcher-0
+threadCPU	24.472	core-matcher-1
+threadCPU	3.807	JVMCI-native CompilerThread0
+threadCPU	1.648	aeron-md-nra
+threadCPU	0.338	JFR Periodic Tasks
+threadCPU	0.279	C1 CompilerThread0
+threadCPU	0.245	C1 CompilerThread1
+threadCPU	0.183	aeron-client
+threadCPU	0.176	JFR Recorder Thread
+gc count=533 totalMs=3196.377 p99Ms=8.910 maxMs=16.712
+samples	112789	core-account-lane-0
+samples	111445	core-account-lane-1
+samples	109416	core-account-lane-2
+samples	106829	core-account-lane-3
+samples	98220	trading-owner--1
+samples	11152	driver-conductor
+samples	5772	clustered-service-101-0
+samples	4981	consensus-module-101-0
+samples	4780	archive-conductor
+samples	1320	/tmp/owner-master-opt/perf/master-profile-LINEAR_PERPETUAL-0/media-surprising-linear_perpetual-0 [sender,receiver]
+samples	1163	core-matcher-1
+samples	1160	core-matcher-0
+ownerInclusive	98220	com.surprising.aeron.service.execution.ContinuousTradingClusterService$$Lambda.0x000000012912f708.run
+ownerInclusive	98220	java.lang.Thread.run
+ownerInclusive	98220	java.lang.Thread.runWith
+ownerInclusive	98220	com.surprising.aeron.service.execution.ContinuousTradingClusterService.runOwner
+ownerInclusive	97422	com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommands
+ownerInclusive	93844	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommands
+ownerInclusive	93388	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommandsInScope
+ownerInclusive	65079	com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommandPrefix
+ownerInclusive	61705	com.surprising.aeron.service.execution.OrderedCommitCoordinator.commitReadyMatching
+ownerInclusive	41619	com.surprising.aeron.service.execution.OrderedCommitCoordinator.completeMatching
+ownerInclusive	29467	com.surprising.aeron.service.execution.OrderBatchExecutor.finishOrderBatch
+ownerInclusive	17698	com.surprising.aeron.service.execution.OrderedCommitCoordinator.pumpMatchingCommitCompletions
+allocation	8390744720	trading-owner--1 [B
+allocation	4429400072	core-account-lane-2 com.surprising.aeron.service.state.OrderRuntime
+allocation	4399533112	core-account-lane-3 com.surprising.aeron.service.state.OrderRuntime
+allocation	4346012200	core-account-lane-0 com.surprising.aeron.service.state.OrderRuntime
+allocation	4327835808	core-account-lane-1 com.surprising.aeron.service.state.OrderRuntime
+allocation	4238442016	core-account-lane-1 [J
+allocation	4224592200	clustered-service-101-0 [B
+allocation	4100254784	core-account-lane-2 [J
+allocation	4073348464	core-account-lane-0 [J
+allocation	3957456904	core-account-lane-3 [J
+allocation	3843564680	core-matcher-1 com.surprising.aeron.service.matching.CoreMatchingResult$NativeCommand
+allocation	3770236000	core-matcher-0 com.surprising.aeron.service.matching.CoreMatchingResult$NativeCommand
+allocationSite	17837521600	java.util.concurrent.ConcurrentHashMap.putVal
+allocationSite	8503132952	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.addKeyValueAtIndex
+allocationSite	7786772128	com.surprising.aeron.protocol.TradingOrderBatchCodec.decodeCommand
+allocationSite	7339155248	org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap.rehashAndGrow
+allocationSite	6605509824	org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap.get
+allocationSite	6519364968	com.surprising.aeron.service.matching.CoreMatchingResult.classify
+allocationSite	5823540512	com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.bindMatcherEvidence
+allocationSite	4933762120	java.nio.ByteBuffer.allocate
+allocationSite	4468327936	java.util.List.copyOf
+allocationSite	4281826984	com.surprising.aeron.service.state.model.AssetBalance.validAsset
+allocationSite	4238118168	org.eclipse.collections.impl.set.mutable.primitive.LongHashSet.rehashAndGrow
+allocationSite	4194251872	java.lang.invoke.VarHandleLongs$Array.setRelease
+parkOrMonitorNs	300524626978	Common-Cleaner
+parkOrMonitorNs	297702661018	aeron-md-nra
+parkOrMonitorNs	4829171129	archive-conductor
+parkOrMonitorNs	3481059980	core-matcher-1
+parkOrMonitorNs	3377125108	core-matcher-0
+parkOrMonitorNs	3126715904	consensus-module-101-0
+parkOrMonitorNs	1356182323	driver-conductor
+parkOrMonitorNs	370282348	/tmp/owner-master-opt/perf/master-profile-LINEAR_PERPETUAL-0/media-surprising-linear_perpetual-0 [sender,receiver]
+eventCounts	569035	jdk.ExecutionSample
+eventCounts	299601	jdk.GCPhaseParallel
+eventCounts	279875	jdk.ThreadPark
+eventCounts	87010	jdk.ObjectAllocationSample
+eventCounts	45758	jdk.PromoteObjectInNewPLAB
+eventCounts	18108	jdk.ThreadSleep
+eventCounts	14353	jdk.NativeMethodSample
+eventCounts	8073	jdk.NativeMemoryUsage
+eventCounts	7995	jdk.TenuringDistribution
+eventCounts	4561	jdk.ThreadCPULoad
+eventCounts	2750	jdk.PromoteObjectOutsidePLAB
+eventCounts	2132	jdk.MetaspaceChunkFreeListSummary
+
+```
+
+profile-owner.txt
+```text
+ownerSamples=98220
+focusedSamples
+11210	TradingRuntimeState.collectMatcherSettlement
+10059	TerminalStateRetention.
+8636	TerminalTombstoneStore.
+6482	TradingCoreRuntime.prepareClusterPipelineScope
+5085	TradingRuntimeState.collectCancel
+5027	OrderBatchExecutor.preparePipelinedPlaceBatch
+3895	MatcherSettlementPlan.build
+3893	ActiveOrderIndex.applySnapshot
+2998	RuntimeIdentityRegistry.releaseClientKey
+2725	TradingOrderBatchCodec.decodeCommand
+2620	TradingRuntimeState.clearChangedKeys
+1310	TerminalTombstoneStore.put
+1127	ClusterCommandWindow.add
+871	TradingRuntimeState.readyLaneMask
+643	DeterministicExchangeCoreAdapter.matcherShardId
+455	OrderBatchExecutor.decodeOrderBatch
+exactOrderBatchItemAllocation=0
+ownerInclusive
+98220	com.surprising.aeron.service.execution.ContinuousTradingClusterService$$Lambda.0x000000012912f708.run
+98220	java.lang.Thread.run
+98220	java.lang.Thread.runWith
+98220	com.surprising.aeron.service.execution.ContinuousTradingClusterService.runOwner
+97422	com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommands
+93844	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommands
+93388	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommandsInScope
+65079	com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommandPrefix
+61685	com.surprising.aeron.service.execution.OrderedCommitCoordinator.commitReadyMatching
+41619	com.surprising.aeron.service.execution.OrderedCommitCoordinator.completeMatching
+29467	com.surprising.aeron.service.execution.OrderBatchExecutor.finishOrderBatch
+17698	com.surprising.aeron.service.execution.OrderedCommitCoordinator.pumpMatchingCommitCompletions
+14187	com.surprising.aeron.service.execution.TradingCoreRuntime.applyDecodedCommand
+14057	com.surprising.aeron.service.execution.TradingCoreRuntime.apply
+12464	com.surprising.aeron.service.execution.OrderedCommitCoordinator.dispatchReadyPlaceSettlements
+12153	com.surprising.aeron.service.execution.OrderedCommitCoordinator.dispatchPartitionSettlements
+11210	com.surprising.aeron.service.state.TradingRuntimeState.collectMatcherSettlement
+9136	com.surprising.aeron.service.state.RuntimeIndexedChangeBuffer.forEachIndexed
+8872	com.surprising.aeron.service.execution.OrderBatchExecutor.beginOrderBatchMatching
+8337	com.surprising.aeron.service.execution.OrderedCommitCoordinator.completeCommitPublicationBatch
+8331	com.surprising.aeron.service.execution.OrderedCommitCoordinator.publishCommittedChanges
+8315	com.surprising.aeron.service.execution.OrderedCommitCoordinator$OwnerCommitPublisher.execute
+8034	com.surprising.aeron.service.state.TradingRuntimeState$PublishedLaneChanges.commitTerminalToOwner
+6523	com.surprising.aeron.service.execution.OrderBatchExecutor.tryActivatePipelinedOrderBatch
+6482	com.surprising.aeron.service.execution.TradingCoreRuntime.prepareClusterPipelineScope
+6414	com.surprising.aeron.service.execution.OrderBatchExecutor.dispatchOrderBatchLaneWork
+6214	com.surprising.aeron.service.state.TradingRuntimeState.dispatchMatcherSettlementBatch
+6208	com.surprising.aeron.service.state.MatcherSettlementDispatcher.dispatchMatcherSettlementBatch
+5159	org.agrona.collections.Long2LongHashMap.get
+5104	com.surprising.aeron.service.state.RuntimeFactIndexes.applyCurrent
+5085	com.surprising.aeron.service.state.TradingRuntimeState.collectCancel
+5027	com.surprising.aeron.service.execution.OrderBatchExecutor.preparePipelinedPlaceBatch
+5003	com.surprising.aeron.service.state.TradingRuntimeState.visitChangedIndexes
+4708	com.surprising.aeron.service.state.OwnerIndexedChanges.forEachIndexed
+4353	com.surprising.aeron.service.execution.MatchingCommandAdmission.beginMatching
+4321	com.surprising.aeron.service.execution.MatchingCommandAdmission.prepareMatching
+4052	com.surprising.aeron.service.execution.TradingCoreRuntime.drainMatchingCompletions
+3972	com.surprising.aeron.service.state.TradingRuntimeState.lambda$visitChangedIndexes$0
+3972	com.surprising.aeron.service.state.RuntimeFactIndexes.preparedOrder
+3972	com.surprising.aeron.service.state.TradingRuntimeState$$Lambda.0x0000000129194000.accept
+3893	com.surprising.aeron.service.state.index.ActiveOrderIndex.applySnapshot
+3738	com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+3672	com.surprising.aeron.service.execution.OrderedCommitCoordinator.completeDispatchedMatcherSettlement
+3670	com.surprising.aeron.service.state.MatcherSettlementPlan.build
+3600	com.surprising.aeron.service.execution.OrderedCommitCoordinator.completeDispatchedCancel
+3566	com.surprising.aeron.service.state.MatcherSettlementPlan.buildBatchItem
+3478	org.agrona.collections.Long2LongHashMap.remove
+3456	com.surprising.aeron.service.execution.TradingCoreRuntime.requireOrderIdentityAvailable
+3456	com.surprising.aeron.service.execution.TerminalStateRetention.containsOrder
+3455	com.surprising.aeron.service.execution.TerminalStateRetention.contains
+3356	org.agrona.collections.Long2LongHashMap.containsKey
+3332	com.surprising.aeron.service.execution.TerminalStateRetention.completeSequence
+3322	com.surprising.aeron.service.execution.TerminalStateRetention.trimTombstones
+3311	com.surprising.aeron.service.execution.TerminalTombstoneStore.contains
+3271	com.surprising.aeron.service.state.TradingRuntimeState$PublishedLaneChanges$$Lambda.0x00000001291b9180.accept
+3271	com.surprising.aeron.service.state.TradingRuntimeState$PublishedLaneChanges.lambda$commitTerminalToOwner$0
+3271	com.surprising.aeron.service.execution.TerminalStateRetention.accept
+3258	com.surprising.aeron.service.execution.DeferredSessionResponses.poll
+3231	com.surprising.aeron.service.execution.TerminalTombstoneStore.trim
+3212	java.util.concurrent.ConcurrentHashMap.get
+3170	com.surprising.aeron.service.state.TradingRuntimeState$PublishedLaneChanges$ClientIdentityReleaseBuffer.release
+3170	com.surprising.aeron.service.state.TradingRuntimeState$PublishedLaneChanges.releaseRetiredClientIdentities
+3164	com.surprising.aeron.service.execution.ClusterCommandWindow.decoded
+3152	com.surprising.aeron.service.execution.TerminalStateRetention.retainPrunedOrder
+3031	com.surprising.aeron.service.execution.DecodedMatchingCommand.decode
+ownerLeaf
+4300	org.agrona.collections.Long2LongHashMap.get:208
+3664	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommandsInScope:226
+3111	com.surprising.aeron.service.execution.DeferredSessionResponses.poll:85
+2428	com.surprising.aeron.protocol.TradingOrderBatchCodec.decodeCommand:294
+2262	java.util.concurrent.ConcurrentHashMap.get:949
+1626	org.eclipse.collections.impl.set.mutable.primitive.LongHashSet.each:571
+1435	org.agrona.collections.Long2LongHashMap.remove:760
+1323	com.surprising.aeron.protocol.CoreStateQueryCodec.utf8Length:342
+1302	jdk.internal.misc.Unsafe.putIntUnaligned:3715
+1177	org.agrona.collections.Long2LongHashMap.compactChain:878
+988	java.util.HashMap.hash:338
+978	com.surprising.aeron.service.execution.PendingMatchingRing.partitionDispatchHead:209
+968	com.surprising.aeron.service.state.RuntimeIndexedChangeBuffer.forEachIndexed:56
+956	java.nio.HeapByteBuffer.put:221
+950	com.surprising.aeron.service.state.RuntimeIdentityRegistry.releaseClientKey:256
+870	com.surprising.aeron.service.execution.OrderedCommitCoordinator.commitReadyMatching:1140
+767	java.util.Arrays.fill:3143
+761	com.surprising.aeron.service.state.RuntimeCommitJournal.beginPublicationBatch:196
+706	java.util.concurrent.ConcurrentHashMap.get:957
+699	org.agrona.collections.Long2LongHashMap.get:218
+592	com.surprising.aeron.service.execution.OrderedCommitCoordinator.dispatchPartitionSettlements:1209
+590	com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommandPrefix:298
+584	java.lang.ThreadLocal.get:171
+577	com.surprising.aeron.service.execution.ClusterCommandWindow.complete:200
+554	com.surprising.aeron.service.execution.TerminalTombstoneStore.unlinkClient:67
+552	com.surprising.aeron.service.execution.OrderedCommitCoordinator.pumpMatchingCommitCompletions:1040
+545	com.surprising.aeron.service.state.TradingRuntimeState.readyLaneMask:1769
+536	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.get:2340
+524	org.eclipse.collections.impl.set.mutable.primitive.LongHashSet.add:216
+520	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.getIfAbsent:2362
+511	org.agrona.collections.Long2LongHashMap.compactChain:882
+510	java.util.HashMap.getNode:585
+493	com.surprising.aeron.service.execution.PendingMatchingRing.findFirst:161
+492	com.surprising.aeron.service.state.TradingRuntimeState.assertAccountLanesHealthy:503
+489	com.surprising.aeron.service.state.RuntimeIndexedChangeBuffer.forEachIndexed:54
+ownerAllocationClass
+8390744720	[B
+3182181784	com.surprising.aeron.protocol.PlaceOrderCommand
+2150658240	[J
+1731892360	java.lang.String
+842359624	[I
+798280672	com.surprising.aeron.service.execution.CommandResultLedger$StoredResult
+782612224	[Ljava.lang.Object;
+770366872	java.lang.Long
+756272408	com.surprising.aeron.service.execution.OrderBatchExecutor$$Lambda.0x00000001291ee0c0
+663345896	com.surprising.aeron.protocol.CoreResponse
+379323928	com.surprising.aeron.protocol.CoreOrderStateView
+356081728	com.surprising.aeron.service.execution.OrderBatchExecutor$$Lambda.0x00000001291edc60
+351955288	com.surprising.aeron.service.execution.OrderBatchExecutor$$Lambda.0x00000001291ede90
+312432176	com.surprising.aeron.protocol.CoreMessageHeader
+310500608	com.surprising.aeron.service.state.ResolvedPlaceOrder
+308947168	java.util.HashMap$Node
+292192208	java.nio.HeapByteBuffer
+289461648	java.util.LinkedHashMap$Entry
+288635232	com.surprising.aeron.protocol.CancelOrderCommand
+286078328	java.util.ImmutableCollections$ListItr
+271552208	com.surprising.aeron.service.state.CoreOrderDecisionResolver$Context
+252126384	com.surprising.aeron.service.execution.ImmutableLongArrayList
+245081112	org.eclipse.collections.impl.set.mutable.primitive.IntHashSet
+239603496	java.util.ArrayList$Itr
+231174792	com.surprising.aeron.service.execution.ContinuousTradingClusterService$Output
+ownerAllocationPaths
+8449912968	TradingCoreRuntime.prepareClusterPipelineScope
+8041554344	TradingOrderBatchCodec.decodeCommand
+1800319472	ActiveOrderIndex.applySnapshot
+579297888	TradingRuntimeState.collectMatcherSettlement
+396597928	OrderBatchExecutor.preparePipelinedPlaceBatch
+228417352	TradingRuntimeState.collectCancel
+171288504	MatcherSettlementPlan.build
+laneLeaf
+363031	com.surprising.aeron.service.state.SettlementLaneWorker.run:154
+6727	java.lang.ThreadLocal.get:171
+4823	com.surprising.aeron.service.state.SettlementLaneWorker.run:136
+4395	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.getIfAbsent:2362
+2868	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.probeThree:3090
+2487	java.lang.ThreadLocal.get:184
+2284	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.get:2340
+1412	java.util.concurrent.ConcurrentHashMap.get:949
+1190	java.util.ImmutableCollections$ListItr.next:397
+1089	com.surprising.aeron.service.state.OrderRuntime.<init>:47
+1083	com.surprising.aeron.service.state.SettlementLaneWorker.run:137
+830	org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap.probeThree:1242
+ownerParkMonitorNs
+afterGCminute=0 count=104 minMiB=100.747 averageMiB=104.134 maxMiB=107.121
+afterGCminute=1 count=106 minMiB=102.882 averageMiB=106.074 maxMiB=109.260
+afterGCminute=2 count=103 minMiB=104.498 averageMiB=108.001 maxMiB=111.972
+afterGCminute=3 count=110 minMiB=106.855 averageMiB=110.219 maxMiB=114.886
+afterGCminute=4 count=110 minMiB=109.762 averageMiB=112.841 maxMiB=116.614
+
+```
+
+gates.log
+```text
+SPOT execute productLineGate=PASS mode=execute productLine=SPOT fundsDiff=0 bookLevels=0 seed=9701
+SPOT replay productLineGate=PASS mode=verify productLine=SPOT fundsDiff=0 bookLevels=0 seed=9701
+SPOT snapshotPosition=3616
+SPOT snapshot productLineGate=PASS mode=verify productLine=SPOT fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_PERPETUAL execute productLineGate=PASS mode=execute productLine=LINEAR_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_PERPETUAL replay productLineGate=PASS mode=verify productLine=LINEAR_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_PERPETUAL snapshotPosition=9568
+LINEAR_PERPETUAL snapshot productLineGate=PASS mode=verify productLine=LINEAR_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_PERPETUAL execute productLineGate=PASS mode=execute productLine=INVERSE_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_PERPETUAL replay productLineGate=PASS mode=verify productLine=INVERSE_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_PERPETUAL snapshotPosition=9568
+INVERSE_PERPETUAL snapshot productLineGate=PASS mode=verify productLine=INVERSE_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_DELIVERY execute productLineGate=PASS mode=execute productLine=LINEAR_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_DELIVERY replay productLineGate=PASS mode=verify productLine=LINEAR_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_DELIVERY snapshotPosition=5184
+LINEAR_DELIVERY snapshot productLineGate=PASS mode=verify productLine=LINEAR_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_DELIVERY execute productLineGate=PASS mode=execute productLine=INVERSE_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_DELIVERY replay productLineGate=PASS mode=verify productLine=INVERSE_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_DELIVERY snapshotPosition=5184
+INVERSE_DELIVERY snapshot productLineGate=PASS mode=verify productLine=INVERSE_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+OPTION execute productLineGate=PASS mode=execute productLine=OPTION fundsDiff=0 bookLevels=0 seed=9701
+OPTION replay productLineGate=PASS mode=verify productLine=OPTION fundsDiff=0 bookLevels=0 seed=9701
+OPTION snapshotPosition=5184
+OPTION snapshot productLineGate=PASS mode=verify productLine=OPTION fundsDiff=0 bookLevels=0 seed=9701
+
+```
+
+recovery.log
+```text
+master replay PASS businessHash=b2cce7f5c89a82d0
+master snapshotPosition=5106394048
+master snapshot PASS businessHash=b2cce7f5c89a82d0
+
+```
+
+master-control-INVERSE_DELIVERY-0
+```text
+Iteration   2: accountControlVerify=PASS product=INVERSE_DELIVERY terminalBusinessOperations=2400 unfinished=0 fundsDiff=0 netPosition=0
+ClusterAccountControlBenchmark.accountControls                     INVERSE_DELIVERY    ss    2     3089.138           ms/op
+ClusterAccountControlBenchmark.accountControls:gc.alloc.rate       INVERSE_DELIVERY    ss    2        0.988          MB/sec
+ClusterAccountControlBenchmark.accountControls:gc.alloc.rate.norm  INVERSE_DELIVERY    ss    2  3243904.000            B/op
+ClusterAccountControlBenchmark.accountControls:gc.count            INVERSE_DELIVERY    ss    2          ≈ 0          counts
+```
+
+master-control-INVERSE_PERPETUAL-0
+```text
+Iteration   2: accountControlVerify=PASS product=INVERSE_PERPETUAL terminalBusinessOperations=2400 unfinished=0 fundsDiff=0 netPosition=0
+ClusterAccountControlBenchmark.accountControls                     INVERSE_PERPETUAL    ss    2     3075.371           ms/op
+ClusterAccountControlBenchmark.accountControls:gc.alloc.rate       INVERSE_PERPETUAL    ss    2        1.207          MB/sec
+ClusterAccountControlBenchmark.accountControls:gc.alloc.rate.norm  INVERSE_PERPETUAL    ss    2  3936768.000            B/op
+ClusterAccountControlBenchmark.accountControls:gc.count            INVERSE_PERPETUAL    ss    2          ≈ 0          counts
+```
+
+master-control-LINEAR_DELIVERY-0
+```text
+Iteration   2: accountControlVerify=PASS product=LINEAR_DELIVERY terminalBusinessOperations=2400 unfinished=0 fundsDiff=0 netPosition=0
+ClusterAccountControlBenchmark.accountControls                     LINEAR_DELIVERY    ss    2     3028.005           ms/op
+ClusterAccountControlBenchmark.accountControls:gc.alloc.rate       LINEAR_DELIVERY    ss    2        1.211          MB/sec
+ClusterAccountControlBenchmark.accountControls:gc.alloc.rate.norm  LINEAR_DELIVERY    ss    2  3896040.000            B/op
+ClusterAccountControlBenchmark.accountControls:gc.count            LINEAR_DELIVERY    ss    2          ≈ 0          counts
+```
+
+master-control-LINEAR_PERPETUAL-0
+```text
+Iteration   2: accountControlVerify=PASS product=LINEAR_PERPETUAL terminalBusinessOperations=2400 unfinished=0 fundsDiff=0 netPosition=0
+ClusterAccountControlBenchmark.accountControls                     LINEAR_PERPETUAL    ss    2     3125.722           ms/op
+ClusterAccountControlBenchmark.accountControls:gc.alloc.rate       LINEAR_PERPETUAL    ss    2        1.041          MB/sec
+ClusterAccountControlBenchmark.accountControls:gc.alloc.rate.norm  LINEAR_PERPETUAL    ss    2  3465008.000            B/op
+ClusterAccountControlBenchmark.accountControls:gc.count            LINEAR_PERPETUAL    ss    2          ≈ 0          counts
+```
+
+master-control-OPTION-0
+```text
+Iteration   2: accountControlVerify=PASS product=OPTION terminalBusinessOperations=1800 unfinished=0 fundsDiff=0 netPosition=0
+ClusterAccountControlBenchmark.accountControls                            OPTION    ss    2     2299.593           ms/op
+ClusterAccountControlBenchmark.accountControls:gc.alloc.rate              OPTION    ss    2        1.217          MB/sec
+ClusterAccountControlBenchmark.accountControls:gc.alloc.rate.norm         OPTION    ss    2  2989496.000            B/op
+ClusterAccountControlBenchmark.accountControls:gc.count                   OPTION    ss    2          ≈ 0          counts
+```
+
+master-control-SPOT-0
+```text
+Iteration   2: accountControlVerify=PASS product=SPOT terminalBusinessOperations=600 unfinished=0 fundsDiff=0 netPosition=0
+ClusterAccountControlBenchmark.accountControls                              SPOT    ss    2      819.381           ms/op
+ClusterAccountControlBenchmark.accountControls:gc.alloc.rate                SPOT    ss    2        1.401          MB/sec
+ClusterAccountControlBenchmark.accountControls:gc.alloc.rate.norm           SPOT    ss    2  1270736.000            B/op
+ClusterAccountControlBenchmark.accountControls:gc.count                     SPOT    ss    2          ≈ 0          counts
+```
+
+第一轮原始校验信息（结束后统一清理）
+```text
+/tmp/owner-master-opt/perf.py bytes=5651 sha256=87986fa17c2cc275c89a77dc82f9adbe3cd2ac42be8a441641267c70475ad3d4
+/tmp/owner-master-opt/owner.jfc bytes=39826 sha256=dca13cdc2a8f9d4a88f6dc954dd26cf8d2f85da5e4f922cac4b71f6c86c671d3
+/tmp/owner-master-opt/gates.py bytes=5026 sha256=24ab47dbca207380c725a54b4b69ae2ea4248d90e731e2b25faf75e73b76e6fb
+/tmp/owner-master-opt/recovery.py bytes=3367 sha256=40aff5a0e6eeb36f1f6330569ca0c31538ff10ab386cf255f52eab7fae126874
+/tmp/owner-master-opt/perf/master-profile-LINEAR_PERPETUAL-0/node.jfr bytes=40967391 sha256=20c56d2dd5b78446d088b2632ba32b9723c4d43f425343edf8aa1daaf825400d
+serviceJarSha256=9dddc6c3c4a39d297716088fa3cb2ee69fb97272e8cbf6ddf9e4831d6e689a66
+```
+
+### 最终索引修正版：重新采集前定义
+
+- 最终代码987ff387；完整verify成功，当前surefire汇总[1224, 0, 0, 1]（tests/failures/errors/skipped）。上一版初次编译因遗留entities.length引用失败，改为协议实体类别数量常量后全部通过；不是交易运行失败。实体FIFO覆写保留插入顺序、客户索引替换/淘汰、槽复用与类型隔离已补回归。
+- 本轮保持前述锁定参数、seed、业务、CPU/JVM、256在途、单成员/4Lane/2matcher配置不变；重新执行六产品execute/强杀replay/snapshot门禁；无profiler60s主测、30s预热+300s JMH/JFR长测，随后六产品accountControls JMH/JFR与长日志replay/snapshot。不重跑080758da或其他旧分支作对照。
+- 产物目录/tmp/owner-master-opt/gates-final与perf-final；测量后校验结束，再执行一次GC.run、GC.heap_info、GC.class_histogram -all，均在测量窗口之外，不把它们混入吞吐或延迟。记录GC前后堆占用，用于解释young-GC后趋势，仍不作为长期无泄漏证明。其他通过标准与局限不变；若最终热点不能改善如实记录，不以零分配代替CPU/吞吐收益。
+
+第一轮补充记录与产物清理
+
+master-control-INVERSE_DELIVERY-0
+```text
+nmt-before.txt
+Total: reserved=3148565KB, committed=692149KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=60555KB, committed=1967KB)
+-                      Code (reserved=250322KB, committed=15926KB)
+-                        GC (reserved=91619KB, committed=71179KB)
+-                     Other (reserved=9409KB, committed=9409KB)
+nmt-after.txt
+Total: reserved=3138342KB, committed=696994KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=52371KB, committed=2583KB)
+-                      Code (reserved=252477KB, committed=22917KB)
+-                        GC (reserved=91791KB, committed=71311KB)
+-                     Other (reserved=9411KB, committed=9411KB)
+JFR bytes=2266698 sha256=c47c28348aa92e9d8fe01c19c06d933f0f71352ccdbcc4051d177ef00326ee4e
+JMH [{"jmhVersion":"1.37","benchmark":"com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls","mode":"ss","threads":1,"forks":1,"jvm":"/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","jvmArgs":["-XX:ThreadPriorityPolicy=1","-XX:+UnlockExperimentalVMOptions","-XX:+EnableJVMCIProduct","-XX:+EnableJVMCI","-XX:-UnlockExperimentalVMOptions","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=INVERSE_DELIVERY","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf/master-control-INVERSE_DELIVERY-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf/master-control-INVERSE_DELIVERY-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true"],"jdkVersion":"25.0.1","vmName":"Java HotSpot(TM) 64-Bit Server VM","vmVersion":"25.0.1+8-LTS-jvmci-b01","warmupIterations":1,"warmupTime":"single-shot","warmupBatchSize":1,"measurementIterations":2,"measurementTime":"single-shot","measurementBatchSize":1,"params":{"productLine":"INVERSE_DELIVERY"},"primaryMetric":{"score":3089.138256,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":3084.044618,"50.0":3089.138256,"90.0":3094.231894,"95.0":3094.231894,"99.0":3094.231894,"99.9":3094.231894,"99.99":3094.231894,"99.999":3094.231894,"99.9999":3094.231894,"100.0":3094.231894},"scoreUnit":"ms/op","rawData":[[3094.231894,3084.044618]]},"secondaryMetrics":{"gc.alloc.rate":{"score":0.9880015423463451,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":0.8405212840433199,"50.0":0.9880015423463451,"90.0":1.1354818006493703,"95.0":1.1354818006493703,"99.0":1.1354818006493703,"99.9":1.1354818006493703,"99.99":1.1354818006493703,"99.999":1.1354818006493703,"99.9999":1.1354818006493703,"100.0":1.1354818006493703},"scoreUnit":"MB/sec","rawData":[[0.8405212840433199,1.1354818006493703]]},"gc.alloc.rate.norm":{"score":3243904.0,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":2727432.0,"50.0":3243904.0,"90.0":3760376.0,"95.0":3760376.0,"99.0":3760376.0,"99.9":3760376.0,"99.99":3760376.0,"99.999":3760376.0,"99.9999":3760376.0,"100.0":3760376.0},"scoreUnit":"B/op","rawData":[[2727432.0,3760376.0]]},"gc.count":{"score":0.0,"scoreError":"NaN","scoreConfidence":[0.0,0.0],"scorePercentiles":{"0.0":0.0,"50.0":0.0,"90.0":0.0,"95.0":0.0,"99.0":0.0,"99.9":0.0,"99.99":0.0,"99.999":0.0,"99.9999":0.0,"100.0":0.0},"scoreUnit":"counts","rawData":[[0.0,0.0]]}}}]
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=INVERSE_DELIVERY","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf/master-control-INVERSE_DELIVERY-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf/master-control-INVERSE_DELIVERY-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf/master-control-INVERSE_DELIVERY-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-XX:StartFlightRecording=settings=/tmp/owner-master-opt/owner.jfc,maxsize=192m,dumponexit=true,filename=/tmp/owner-master-opt/perf/master-control-INVERSE_DELIVERY-0/node.jfr","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=INVERSE_DELIVERY","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf/master-control-INVERSE_DELIVERY-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf/master-control-INVERSE_DELIVERY-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","org.openjdk.jmh.Main","ClusterAccountControlBenchmark.accountControls","-f","1","-wi","1","-i","2","-p","productLine=INVERSE_DELIVERY","-prof","gc","-rf","json","-rff","/tmp/owner-master-opt/perf/master-control-INVERSE_DELIVERY-0/jmh.json"]]
+```
+
+master-control-INVERSE_PERPETUAL-0
+```text
+nmt-before.txt
+Total: reserved=3144490KB, committed=692154KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=56455KB, committed=1883KB)
+-                      Code (reserved=250348KB, committed=16016KB)
+-                        GC (reserved=91621KB, committed=71181KB)
+-                     Other (reserved=9409KB, committed=9409KB)
+nmt-after.txt
+Total: reserved=3138367KB, committed=696563KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=52371KB, committed=2579KB)
+-                      Code (reserved=252515KB, committed=22567KB)
+-                        GC (reserved=91775KB, committed=71295KB)
+-                     Other (reserved=9411KB, committed=9411KB)
+JFR bytes=2277686 sha256=b7c3a2e79bf9273a48deab12332fa1a67bc605c4fdb95283ecd3512b3201c0ff
+JMH [{"jmhVersion":"1.37","benchmark":"com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls","mode":"ss","threads":1,"forks":1,"jvm":"/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","jvmArgs":["-XX:ThreadPriorityPolicy=1","-XX:+UnlockExperimentalVMOptions","-XX:+EnableJVMCIProduct","-XX:+EnableJVMCI","-XX:-UnlockExperimentalVMOptions","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=INVERSE_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf/master-control-INVERSE_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf/master-control-INVERSE_PERPETUAL-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true"],"jdkVersion":"25.0.1","vmName":"Java HotSpot(TM) 64-Bit Server VM","vmVersion":"25.0.1+8-LTS-jvmci-b01","warmupIterations":1,"warmupTime":"single-shot","warmupBatchSize":1,"measurementIterations":2,"measurementTime":"single-shot","measurementBatchSize":1,"params":{"productLine":"INVERSE_PERPETUAL"},"primaryMetric":{"score":3075.371246,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":3035.486631,"50.0":3075.371246,"90.0":3115.255861,"95.0":3115.255861,"99.0":3115.255861,"99.9":3115.255861,"99.99":3115.255861,"99.999":3115.255861,"99.9999":3115.255861,"100.0":3115.255861},"scoreUnit":"ms/op","rawData":[[3115.255861,3035.486631]]},"secondaryMetrics":{"gc.alloc.rate":{"score":1.2072081431773771,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":1.0329410731726085,"50.0":1.2072081431773771,"90.0":1.381475213182146,"95.0":1.381475213182146,"99.0":1.381475213182146,"99.9":1.381475213182146,"99.99":1.381475213182146,"99.999":1.381475213182146,"99.9999":1.381475213182146,"100.0":1.381475213182146},"scoreUnit":"MB/sec","rawData":[[1.0329410731726085,1.381475213182146]]},"gc.alloc.rate.norm":{"score":3936768.0,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":3374488.0,"50.0":3936768.0,"90.0":4499048.0,"95.0":4499048.0,"99.0":4499048.0,"99.9":4499048.0,"99.99":4499048.0,"99.999":4499048.0,"99.9999":4499048.0,"100.0":4499048.0},"scoreUnit":"B/op","rawData":[[3374488.0,4499048.0]]},"gc.count":{"score":0.0,"scoreError":"NaN","scoreConfidence":[0.0,0.0],"scorePercentiles":{"0.0":0.0,"50.0":0.0,"90.0":0.0,"95.0":0.0,"99.0":0.0,"99.9":0.0,"99.99":0.0,"99.999":0.0,"99.9999":0.0,"100.0":0.0},"scoreUnit":"counts","rawData":[[0.0,0.0]]}}}]
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=INVERSE_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf/master-control-INVERSE_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf/master-control-INVERSE_PERPETUAL-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf/master-control-INVERSE_PERPETUAL-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-XX:StartFlightRecording=settings=/tmp/owner-master-opt/owner.jfc,maxsize=192m,dumponexit=true,filename=/tmp/owner-master-opt/perf/master-control-INVERSE_PERPETUAL-0/node.jfr","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=INVERSE_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf/master-control-INVERSE_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf/master-control-INVERSE_PERPETUAL-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","org.openjdk.jmh.Main","ClusterAccountControlBenchmark.accountControls","-f","1","-wi","1","-i","2","-p","productLine=INVERSE_PERPETUAL","-prof","gc","-rf","json","-rff","/tmp/owner-master-opt/perf/master-control-INVERSE_PERPETUAL-0/jmh.json"]]
+```
+
+master-control-LINEAR_DELIVERY-0
+```text
+nmt-before.txt
+Total: reserved=3146378KB, committed=692038KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=58505KB, committed=1929KB)
+-                      Code (reserved=250357KB, committed=16025KB)
+-                        GC (reserved=91615KB, committed=71175KB)
+-                     Other (reserved=9409KB, committed=9409KB)
+nmt-after.txt
+Total: reserved=3138303KB, committed=696699KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=52371KB, committed=2519KB)
+-                      Code (reserved=252479KB, committed=22791KB)
+-                        GC (reserved=91800KB, committed=71320KB)
+-                     Other (reserved=9411KB, committed=9411KB)
+JFR bytes=2271412 sha256=7059e5116dae1ac086f98f5089304d3cb185430632b766fdf8c134e232604bda
+JMH [{"jmhVersion":"1.37","benchmark":"com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls","mode":"ss","threads":1,"forks":1,"jvm":"/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","jvmArgs":["-XX:ThreadPriorityPolicy=1","-XX:+UnlockExperimentalVMOptions","-XX:+EnableJVMCIProduct","-XX:+EnableJVMCI","-XX:-UnlockExperimentalVMOptions","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_DELIVERY","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf/master-control-LINEAR_DELIVERY-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf/master-control-LINEAR_DELIVERY-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true"],"jdkVersion":"25.0.1","vmName":"Java HotSpot(TM) 64-Bit Server VM","vmVersion":"25.0.1+8-LTS-jvmci-b01","warmupIterations":1,"warmupTime":"single-shot","warmupBatchSize":1,"measurementIterations":2,"measurementTime":"single-shot","measurementBatchSize":1,"params":{"productLine":"LINEAR_DELIVERY"},"primaryMetric":{"score":3028.0046380000003,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":2994.026812,"50.0":3028.0046380000003,"90.0":3061.982464,"95.0":3061.982464,"99.0":3061.982464,"99.9":3061.982464,"99.99":3061.982464,"99.999":3061.982464,"99.9999":3061.982464,"100.0":3061.982464},"scoreUnit":"ms/op","rawData":[[3061.982464,2994.026812]]},"secondaryMetrics":{"gc.alloc.rate":{"score":1.2110009117238374,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":1.0382370187154537,"50.0":1.2110009117238374,"90.0":1.383764804732221,"95.0":1.383764804732221,"99.0":1.383764804732221,"99.9":1.383764804732221,"99.99":1.383764804732221,"99.999":1.383764804732221,"99.9999":1.383764804732221,"100.0":1.383764804732221},"scoreUnit":"MB/sec","rawData":[[1.0382370187154537,1.383764804732221]]},"gc.alloc.rate.norm":{"score":3896040.0,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":3333840.0,"50.0":3896040.0,"90.0":4458240.0,"95.0":4458240.0,"99.0":4458240.0,"99.9":4458240.0,"99.99":4458240.0,"99.999":4458240.0,"99.9999":4458240.0,"100.0":4458240.0},"scoreUnit":"B/op","rawData":[[3333840.0,4458240.0]]},"gc.count":{"score":0.0,"scoreError":"NaN","scoreConfidence":[0.0,0.0],"scorePercentiles":{"0.0":0.0,"50.0":0.0,"90.0":0.0,"95.0":0.0,"99.0":0.0,"99.9":0.0,"99.99":0.0,"99.999":0.0,"99.9999":0.0,"100.0":0.0},"scoreUnit":"counts","rawData":[[0.0,0.0]]}}}]
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_DELIVERY","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf/master-control-LINEAR_DELIVERY-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf/master-control-LINEAR_DELIVERY-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf/master-control-LINEAR_DELIVERY-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-XX:StartFlightRecording=settings=/tmp/owner-master-opt/owner.jfc,maxsize=192m,dumponexit=true,filename=/tmp/owner-master-opt/perf/master-control-LINEAR_DELIVERY-0/node.jfr","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_DELIVERY","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf/master-control-LINEAR_DELIVERY-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf/master-control-LINEAR_DELIVERY-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","org.openjdk.jmh.Main","ClusterAccountControlBenchmark.accountControls","-f","1","-wi","1","-i","2","-p","productLine=LINEAR_DELIVERY","-prof","gc","-rf","json","-rff","/tmp/owner-master-opt/perf/master-control-LINEAR_DELIVERY-0/jmh.json"]]
+```
+
+master-control-LINEAR_PERPETUAL-0
+```text
+nmt-before.txt
+Total: reserved=3144339KB, committed=692083KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=56455KB, committed=1963KB)
+-                      Code (reserved=250291KB, committed=15959KB)
+-                        GC (reserved=91616KB, committed=71176KB)
+-                     Other (reserved=9409KB, committed=9409KB)
+nmt-after.txt
+Total: reserved=3138231KB, committed=696779KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=52371KB, committed=2607KB)
+-                      Code (reserved=252399KB, committed=22711KB)
+-                        GC (reserved=91806KB, committed=71326KB)
+-                     Other (reserved=9411KB, committed=9411KB)
+JFR bytes=2273270 sha256=e839b1089f2ef0c28e028a465738cb1fef0bf4d97914bfdb7363f3bd9a204cd9
+JMH [{"jmhVersion":"1.37","benchmark":"com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls","mode":"ss","threads":1,"forks":1,"jvm":"/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","jvmArgs":["-XX:ThreadPriorityPolicy=1","-XX:+UnlockExperimentalVMOptions","-XX:+EnableJVMCIProduct","-XX:+EnableJVMCI","-XX:-UnlockExperimentalVMOptions","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf/master-control-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf/master-control-LINEAR_PERPETUAL-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true"],"jdkVersion":"25.0.1","vmName":"Java HotSpot(TM) 64-Bit Server VM","vmVersion":"25.0.1+8-LTS-jvmci-b01","warmupIterations":1,"warmupTime":"single-shot","warmupBatchSize":1,"measurementIterations":2,"measurementTime":"single-shot","measurementBatchSize":1,"params":{"productLine":"LINEAR_PERPETUAL"},"primaryMetric":{"score":3125.7224785,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":3124.176648,"50.0":3125.7224785,"90.0":3127.268309,"95.0":3127.268309,"99.0":3127.268309,"99.9":3127.268309,"99.99":3127.268309,"99.999":3127.268309,"99.9999":3127.268309,"100.0":3127.268309},"scoreUnit":"ms/op","rawData":[[3124.176648,3127.268309]]},"secondaryMetrics":{"gc.alloc.rate":{"score":1.0409644194114438,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":0.7565717636868786,"50.0":1.0409644194114438,"90.0":1.3253570751360089,"95.0":1.3253570751360089,"99.0":1.3253570751360089,"99.9":1.3253570751360089,"99.99":1.3253570751360089,"99.999":1.3253570751360089,"99.9999":1.3253570751360089,"100.0":1.3253570751360089},"scoreUnit":"MB/sec","rawData":[[0.7565717636868786,1.3253570751360089]]},"gc.alloc.rate.norm":{"score":3465008.0,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":2478688.0,"50.0":3465008.0,"90.0":4451328.0,"95.0":4451328.0,"99.0":4451328.0,"99.9":4451328.0,"99.99":4451328.0,"99.999":4451328.0,"99.9999":4451328.0,"100.0":4451328.0},"scoreUnit":"B/op","rawData":[[2478688.0,4451328.0]]},"gc.count":{"score":0.0,"scoreError":"NaN","scoreConfidence":[0.0,0.0],"scorePercentiles":{"0.0":0.0,"50.0":0.0,"90.0":0.0,"95.0":0.0,"99.0":0.0,"99.9":0.0,"99.99":0.0,"99.999":0.0,"99.9999":0.0,"100.0":0.0},"scoreUnit":"counts","rawData":[[0.0,0.0]]}}}]
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf/master-control-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf/master-control-LINEAR_PERPETUAL-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf/master-control-LINEAR_PERPETUAL-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-XX:StartFlightRecording=settings=/tmp/owner-master-opt/owner.jfc,maxsize=192m,dumponexit=true,filename=/tmp/owner-master-opt/perf/master-control-LINEAR_PERPETUAL-0/node.jfr","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf/master-control-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf/master-control-LINEAR_PERPETUAL-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","org.openjdk.jmh.Main","ClusterAccountControlBenchmark.accountControls","-f","1","-wi","1","-i","2","-p","productLine=LINEAR_PERPETUAL","-prof","gc","-rf","json","-rff","/tmp/owner-master-opt/perf/master-control-LINEAR_PERPETUAL-0/jmh.json"]]
+```
+
+master-control-OPTION-0
+```text
+nmt-before.txt
+Total: reserved=3148337KB, committed=691969KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=60555KB, committed=1951KB)
+-                      Code (reserved=250311KB, committed=15979KB)
+-                        GC (reserved=91622KB, committed=71182KB)
+-                     Other (reserved=9409KB, committed=9409KB)
+nmt-after.txt
+Total: reserved=3137979KB, committed=695855KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=52371KB, committed=2515KB)
+-                      Code (reserved=252320KB, committed=22116KB)
+-                        GC (reserved=91787KB, committed=71307KB)
+-                     Other (reserved=9411KB, committed=9411KB)
+JFR bytes=2048835 sha256=5f3354862d909ee95c44ed97432eeb26005d57a0026cf5972f481fee736b71b1
+JMH [{"jmhVersion":"1.37","benchmark":"com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls","mode":"ss","threads":1,"forks":1,"jvm":"/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","jvmArgs":["-XX:ThreadPriorityPolicy=1","-XX:+UnlockExperimentalVMOptions","-XX:+EnableJVMCIProduct","-XX:+EnableJVMCI","-XX:-UnlockExperimentalVMOptions","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=OPTION","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf/master-control-OPTION-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf/master-control-OPTION-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true"],"jdkVersion":"25.0.1","vmName":"Java HotSpot(TM) 64-Bit Server VM","vmVersion":"25.0.1+8-LTS-jvmci-b01","warmupIterations":1,"warmupTime":"single-shot","warmupBatchSize":1,"measurementIterations":2,"measurementTime":"single-shot","measurementBatchSize":1,"params":{"productLine":"OPTION"},"primaryMetric":{"score":2299.593095,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":2277.445828,"50.0":2299.593095,"90.0":2321.740362,"95.0":2321.740362,"99.0":2321.740362,"99.9":2321.740362,"99.99":2321.740362,"99.999":2321.740362,"99.9999":2321.740362,"100.0":2321.740362},"scoreUnit":"ms/op","rawData":[[2321.740362,2277.445828]]},"secondaryMetrics":{"gc.alloc.rate":{"score":1.2172745432534602,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":1.01887599625656,"50.0":1.2172745432534602,"90.0":1.4156730902503603,"95.0":1.4156730902503603,"99.0":1.4156730902503603,"99.9":1.4156730902503603,"99.99":1.4156730902503603,"99.999":1.4156730902503603,"99.9999":1.4156730902503603,"100.0":1.4156730902503603},"scoreUnit":"MB/sec","rawData":[[1.01887599625656,1.4156730902503603]]},"gc.alloc.rate.norm":{"score":2989496.0,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":2480832.0,"50.0":2989496.0,"90.0":3498160.0,"95.0":3498160.0,"99.0":3498160.0,"99.9":3498160.0,"99.99":3498160.0,"99.999":3498160.0,"99.9999":3498160.0,"100.0":3498160.0},"scoreUnit":"B/op","rawData":[[2480832.0,3498160.0]]},"gc.count":{"score":0.0,"scoreError":"NaN","scoreConfidence":[0.0,0.0],"scorePercentiles":{"0.0":0.0,"50.0":0.0,"90.0":0.0,"95.0":0.0,"99.0":0.0,"99.9":0.0,"99.99":0.0,"99.999":0.0,"99.9999":0.0,"100.0":0.0},"scoreUnit":"counts","rawData":[[0.0,0.0]]}}}]
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=OPTION","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf/master-control-OPTION-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf/master-control-OPTION-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf/master-control-OPTION-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-XX:StartFlightRecording=settings=/tmp/owner-master-opt/owner.jfc,maxsize=192m,dumponexit=true,filename=/tmp/owner-master-opt/perf/master-control-OPTION-0/node.jfr","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=OPTION","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf/master-control-OPTION-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf/master-control-OPTION-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","org.openjdk.jmh.Main","ClusterAccountControlBenchmark.accountControls","-f","1","-wi","1","-i","2","-p","productLine=OPTION","-prof","gc","-rf","json","-rff","/tmp/owner-master-opt/perf/master-control-OPTION-0/jmh.json"]]
+```
+
+master-control-SPOT-0
+```text
+nmt-before.txt
+Total: reserved=3142406KB, committed=692098KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=54404KB, committed=1860KB)
+-                      Code (reserved=250348KB, committed=16016KB)
+-                        GC (reserved=91626KB, committed=71186KB)
+-                     Other (reserved=9409KB, committed=9409KB)
+nmt-after.txt
+Total: reserved=3137311KB, committed=693403KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=52371KB, committed=2467KB)
+-                      Code (reserved=252054KB, committed=21138KB)
+-                        GC (reserved=91803KB, committed=71323KB)
+-                     Other (reserved=9411KB, committed=9411KB)
+JFR bytes=1624558 sha256=4849cbd33d796eaa604a0d2bf67a088ef65dd814a37fbf1bd9c1e75db0cd65ca
+JMH [{"jmhVersion":"1.37","benchmark":"com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls","mode":"ss","threads":1,"forks":1,"jvm":"/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","jvmArgs":["-XX:ThreadPriorityPolicy=1","-XX:+UnlockExperimentalVMOptions","-XX:+EnableJVMCIProduct","-XX:+EnableJVMCI","-XX:-UnlockExperimentalVMOptions","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=SPOT","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf/master-control-SPOT-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf/master-control-SPOT-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true"],"jdkVersion":"25.0.1","vmName":"Java HotSpot(TM) 64-Bit Server VM","vmVersion":"25.0.1+8-LTS-jvmci-b01","warmupIterations":1,"warmupTime":"single-shot","warmupBatchSize":1,"measurementIterations":2,"measurementTime":"single-shot","measurementBatchSize":1,"params":{"productLine":"SPOT"},"primaryMetric":{"score":819.3810785000001,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":791.17611,"50.0":819.3810785000001,"90.0":847.586047,"95.0":847.586047,"99.0":847.586047,"99.9":847.586047,"99.99":847.586047,"99.999":847.586047,"99.9999":847.586047,"100.0":847.586047},"scoreUnit":"ms/op","rawData":[[847.586047,791.17611]]},"secondaryMetrics":{"gc.alloc.rate":{"score":1.4013060992239277,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":0.9015324381600077,"50.0":1.4013060992239277,"90.0":1.9010797602878478,"95.0":1.9010797602878478,"99.0":1.9010797602878478,"99.9":1.9010797602878478,"99.99":1.9010797602878478,"99.999":1.9010797602878478,"99.9999":1.9010797602878478,"100.0":1.9010797602878478},"scoreUnit":"MB/sec","rawData":[[0.9015324381600077,1.9010797602878478]]},"gc.alloc.rate.norm":{"score":1270736.0,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":801488.0,"50.0":1270736.0,"90.0":1739984.0,"95.0":1739984.0,"99.0":1739984.0,"99.9":1739984.0,"99.99":1739984.0,"99.999":1739984.0,"99.9999":1739984.0,"100.0":1739984.0},"scoreUnit":"B/op","rawData":[[801488.0,1739984.0]]},"gc.count":{"score":0.0,"scoreError":"NaN","scoreConfidence":[0.0,0.0],"scorePercentiles":{"0.0":0.0,"50.0":0.0,"90.0":0.0,"95.0":0.0,"99.0":0.0,"99.9":0.0,"99.99":0.0,"99.999":0.0,"99.9999":0.0,"100.0":0.0},"scoreUnit":"counts","rawData":[[0.0,0.0]]}}}]
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=SPOT","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf/master-control-SPOT-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf/master-control-SPOT-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf/master-control-SPOT-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-XX:StartFlightRecording=settings=/tmp/owner-master-opt/owner.jfc,maxsize=192m,dumponexit=true,filename=/tmp/owner-master-opt/perf/master-control-SPOT-0/node.jfr","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=SPOT","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf/master-control-SPOT-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf/master-control-SPOT-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","org.openjdk.jmh.Main","ClusterAccountControlBenchmark.accountControls","-f","1","-wi","1","-i","2","-p","productLine=SPOT","-prof","gc","-rf","json","-rff","/tmp/owner-master-opt/perf/master-control-SPOT-0/jmh.json"]]
+```
+
+master-main-LINEAR_PERPETUAL-0
+```text
+nmt-before.txt
+Total: reserved=3120506KB, committed=667318KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=51323KB, committed=1743KB)
+-                      Code (reserved=249344KB, committed=12432KB)
+-                        GC (reserved=91611KB, committed=71171KB)
+-                     Other (reserved=9385KB, committed=9385KB)
+nmt-after.txt
+Total: reserved=3128109KB, committed=704217KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=49290KB, committed=2118KB)
+-                      Code (reserved=261784KB, committed=46352KB)
+-                        GC (reserved=92496KB, committed=72024KB)
+-                     Other (reserved=9387KB, committed=9387KB)
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf/master-main-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf/master-main-LINEAR_PERPETUAL-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf/master-main-LINEAR_PERPETUAL-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf/master-main-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf/master-main-LINEAR_PERPETUAL-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=60","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","com.surprising.aeron.benchmarks.workload.ClusterMixedCapacityMain"]]
+```
+
+master-profile-LINEAR_PERPETUAL-0
+```text
+nmt-before.txt
+Total: reserved=3140267KB, committed=690799KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=52354KB, committed=1874KB)
+-                      Code (reserved=250248KB, committed=14756KB)
+-                        GC (reserved=91615KB, committed=71175KB)
+-                     Other (reserved=9409KB, committed=9409KB)
+nmt-after.txt
+Total: reserved=3168479KB, committed=736259KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=64673KB, committed=2813KB)
+-                      Code (reserved=262492KB, committed=50348KB)
+-                        GC (reserved=92400KB, committed=71928KB)
+-                     Other (reserved=9413KB, committed=9413KB)
+JFR bytes=40967391 sha256=20c56d2dd5b78446d088b2632ba32b9723c4d43f425343edf8aa1daaf825400d
+JMH [{"jmhVersion":"1.37","benchmark":"com.surprising.aeron.benchmarks.workload.ClusterOperationalBenchmark.continuousOperations","mode":"ss","threads":1,"forks":1,"jvm":"/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","jvmArgs":["-XX:ThreadPriorityPolicy=1","-XX:+UnlockExperimentalVMOptions","-XX:+EnableJVMCIProduct","-XX:+EnableJVMCI","-XX:-UnlockExperimentalVMOptions","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf/master-profile-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf/master-profile-LINEAR_PERPETUAL-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true"],"jdkVersion":"25.0.1","vmName":"Java HotSpot(TM) 64-Bit Server VM","vmVersion":"25.0.1+8-LTS-jvmci-b01","warmupIterations":0,"warmupTime":"single-shot","warmupBatchSize":1,"measurementIterations":1,"measurementTime":"single-shot","measurementBatchSize":1,"params":{"controlPageSize":"0"},"primaryMetric":{"score":300.053717812,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":300.053717812,"50.0":300.053717812,"90.0":300.053717812,"95.0":300.053717812,"99.0":300.053717812,"99.9":300.053717812,"99.99":300.053717812,"99.999":300.053717812,"99.9999":300.053717812,"100.0":300.053717812},"scoreUnit":"s/op","rawData":[[300.053717812]]},"secondaryMetrics":{"gc.alloc.rate":{"score":168.28002737626585,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":168.28002737626585,"50.0":168.28002737626585,"90.0":168.28002737626585,"95.0":168.28002737626585,"99.0":168.28002737626585,"99.9":168.28002737626585,"99.99":168.28002737626585,"99.999":168.28002737626585,"99.9999":168.28002737626585,"100.0":168.28002737626585},"scoreUnit":"MB/sec","rawData":[[168.28002737626585]]},"gc.alloc.rate.norm":{"score":65004661176.0,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":65004661176.0,"50.0":65004661176.0,"90.0":65004661176.0,"95.0":65004661176.0,"99.0":65004661176.0,"99.9":65004661176.0,"99.99":65004661176.0,"99.999":65004661176.0,"99.9999":65004661176.0,"100.0":65004661176.0},"scoreUnit":"B/op","rawData":[[65004661176.0]]},"gc.count":{"score":833.0,"scoreError":"NaN","scoreConfidence":[833.0,833.0],"scorePercentiles":{"0.0":833.0,"50.0":833.0,"90.0":833.0,"95.0":833.0,"99.0":833.0,"99.9":833.0,"99.99":833.0,"99.999":833.0,"99.9999":833.0,"100.0":833.0},"scoreUnit":"counts","rawData":[[833.0]]},"gc.time":{"score":701.0,"scoreError":"NaN","scoreConfidence":[701.0,701.0],"scorePercentiles":{"0.0":701.0,"50.0":701.0,"90.0":701.0,"95.0":701.0,"99.0":701.0,"99.9":701.0,"99.99":701.0,"99.999":701.0,"99.9999":701.0,"100.0":701.0},"scoreUnit":"ms","rawData":[[701.0]]}}}]
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf/master-profile-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf/master-profile-LINEAR_PERPETUAL-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf/master-profile-LINEAR_PERPETUAL-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-XX:StartFlightRecording=settings=/tmp/owner-master-opt/owner.jfc,maxsize=192m,dumponexit=true,filename=/tmp/owner-master-opt/perf/master-profile-LINEAR_PERPETUAL-0/node.jfr","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf/master-profile-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf/master-profile-LINEAR_PERPETUAL-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","org.openjdk.jmh.Main","ClusterOperationalBenchmark.continuousOperations","-f","1","-wi","0","-i","1","-p","controlPageSize=0","-prof","gc","-rf","json","-rff","/tmp/owner-master-opt/perf/master-profile-LINEAR_PERPETUAL-0/jmh.json"]]
+```
+
+第一轮已停止进程并清理perf/gates目录，共13581884940字节。第一轮原始JFR/Archive/日志路径不可再访问；最终修正版的gates-final/perf-final继续运行，未删除其产物。
+
+### 987ff387 索引解链版结果与最终小修
+
+- 六产品execute/强杀replay/snapshot与六产品accountControls JMH/JFR均PASS；长测重放和snapshot重启hash a9d128a7f70e70cc、snapshotPosition5296936992。无profiler主测194554.083 business ops/s；5min JMH/JFR171555.851 business ops/s，资金/持仓/冻结/终态PASS、unfinished0。降频不一致，不能给受控加速比。
+- Owner样本98474，终态管理8179=8.306%，比上一版10.24%下降但仍高于最初4.57%；entitySlot叶子3641=3.697%。继续增加每类一个long保守ID上界：仅id大于所有已插入ID上界才省去确定不命中的查询；乱序和旧ID仍精确查表，淘汰不降低上界，恢复从当前FIFO重建。没有假设客户端顺序发号或删除去重。
+- readyLaneMask3672=3.729%，上一版0.887%的占比下降未维持，不能宣称轮询热点彻底消失；matcherShardId587=0.596%，decodeCommand2838=2.882%。OrderBatchItem分配采样0，窗口/终态索引与client-key释放路径分配采样0。节点约3193.9B/business op，仍非零分配。Owner97.217%，matcher24.165/24.444%，Lane约97.4%但大量队列轮询，未全部有效饱和。
+- GC后heap分钟均值106.876/108.282/109.746/111.404/113.327MiB；结束校验后used335128KiB，显式GC后83929KiB（81.96MiB）。存在可回收部分，不能把young-GC后趋势当作泄漏，也不能证明长期heap/native无泄漏。
+- 最后一小修仅增加固定4个long界，不改引用生命周期/协议/快照；重跑受影响回归、六产品恢复、主测60s与JMH/JFR90s、六产品控制及日志恢复。5min证据归属于987ff387，不能冒称最后小修也运行5min。
+
+final-summary.txt
+```text
+totals allocationMiBps=522.545 allocationBytes=164390947008 machineCPU=88.34 jvmCPU=57.72 heapMaxMiB=401.36 dataLoss=0 ownerIOEvents=0
+threadCPU	97.432	core-account-lane-3
+threadCPU	97.432	core-account-lane-2
+threadCPU	97.407	core-account-lane-1
+threadCPU	97.391	core-account-lane-0
+threadCPU	97.217	trading-owner--1
+threadCPU	96.174	/tmp/owner-master-opt/perf-final/master-profile-LINEAR_PERPETUAL-0/media-surprising-linear_perpetual-0 [sender,receiver]
+threadCPU	72.698	clustered-service-101-0
+threadCPU	71.370	driver-conductor
+threadCPU	63.728	archive-conductor
+threadCPU	62.237	consensus-module-101-0
+threadCPU	24.444	core-matcher-1
+threadCPU	24.165	core-matcher-0
+threadCPU	2.065	JVMCI-native CompilerThread0
+threadCPU	1.579	aeron-md-nra
+threadCPU	1.559	C1 CompilerThread1
+threadCPU	0.332	JFR Periodic Tasks
+threadCPU	0.244	C1 CompilerThread0
+threadCPU	0.183	aeron-client
+threadCPU	0.180	JFR Recorder Thread
+threadCPU	0.102	Monitor Deflation Thread
+gc count=551 totalMs=3313.011 p99Ms=10.165 maxMs=14.058
+samples	113384	core-account-lane-0
+samples	112012	core-account-lane-1
+samples	110018	core-account-lane-2
+samples	107479	core-account-lane-3
+samples	98474	trading-owner--1
+samples	11146	driver-conductor
+samples	5863	clustered-service-101-0
+samples	4279	consensus-module-101-0
+samples	4040	archive-conductor
+samples	1490	/tmp/owner-master-opt/perf-final/master-profile-LINEAR_PERPETUAL-0/media-surprising-linear_perpetual-0 [sender,receiver]
+samples	1200	core-matcher-1
+samples	1139	core-matcher-0
+ownerInclusive	98474	com.surprising.aeron.service.execution.ContinuousTradingClusterService$$Lambda.0x000000012912f708.run
+ownerInclusive	98474	java.lang.Thread.run
+ownerInclusive	98474	java.lang.Thread.runWith
+ownerInclusive	98474	com.surprising.aeron.service.execution.ContinuousTradingClusterService.runOwner
+ownerInclusive	97619	com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommands
+ownerInclusive	97024	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommands
+ownerInclusive	96017	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommandsInScope
+ownerInclusive	68338	com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommandPrefix
+ownerInclusive	64940	com.surprising.aeron.service.execution.OrderedCommitCoordinator.commitReadyMatching
+ownerInclusive	41502	com.surprising.aeron.service.execution.OrderedCommitCoordinator.completeMatching
+ownerInclusive	28826	com.surprising.aeron.service.execution.OrderBatchExecutor.finishOrderBatch
+ownerInclusive	21668	com.surprising.aeron.service.execution.OrderedCommitCoordinator.pumpMatchingCommitCompletions
+allocation	8704988320	trading-owner--1 [B
+allocation	4723335776	core-account-lane-0 com.surprising.aeron.service.state.OrderRuntime
+allocation	4512273920	core-account-lane-3 [J
+allocation	4443351576	core-account-lane-2 [J
+allocation	4431316344	core-account-lane-1 [J
+allocation	4422985936	core-account-lane-0 [J
+allocation	4419957352	clustered-service-101-0 [B
+allocation	4340954224	core-account-lane-2 com.surprising.aeron.service.state.OrderRuntime
+allocation	4282550512	core-account-lane-1 com.surprising.aeron.service.state.OrderRuntime
+allocation	4260589904	core-matcher-0 com.surprising.aeron.service.matching.CoreMatchingResult$NativeCommand
+allocation	4126675160	core-account-lane-3 com.surprising.aeron.service.state.OrderRuntime
+allocation	3991686432	core-matcher-1 com.surprising.aeron.service.matching.CoreMatchingResult$NativeCommand
+allocationSite	18803848160	java.util.concurrent.ConcurrentHashMap.putVal
+allocationSite	10075444632	com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.bindMatcherEvidence
+allocationSite	9138441016	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.addKeyValueAtIndex
+allocationSite	8276393136	com.surprising.aeron.protocol.TradingOrderBatchCodec.decodeCommand
+allocationSite	7692044360	org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap.rehashAndGrow
+allocationSite	6223508688	org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap.get
+allocationSite	5033122080	java.nio.ByteBuffer.allocate
+allocationSite	4601586896	org.eclipse.collections.impl.set.mutable.primitive.LongHashSet.rehashAndGrow
+allocationSite	4595727128	com.surprising.aeron.service.matching.CoreMatchingResult.classify
+allocationSite	4329202792	java.lang.invoke.VarHandleLongs$Array.setRelease
+allocationSite	4178369328	com.surprising.aeron.service.execution.CoreMessageFlyweightDecoder.decode
+allocationSite	4160949488	com.surprising.aeron.service.state.model.AssetBalance.validAsset
+parkOrMonitorNs	300524994181	Common-Cleaner
+parkOrMonitorNs	297785382577	aeron-md-nra
+parkOrMonitorNs	3721027363	archive-conductor
+parkOrMonitorNs	3668795961	core-matcher-0
+parkOrMonitorNs	3566544834	core-matcher-1
+parkOrMonitorNs	2462139791	consensus-module-101-0
+parkOrMonitorNs	1261161557	driver-conductor
+parkOrMonitorNs	541783271	/tmp/owner-master-opt/perf-final/master-profile-LINEAR_PERPETUAL-0/media-surprising-linear_perpetual-0 [sender,receiver]
+eventCounts	570541	jdk.ExecutionSample
+eventCounts	309954	jdk.GCPhaseParallel
+eventCounts	278701	jdk.ThreadPark
+eventCounts	85994	jdk.ObjectAllocationSample
+eventCounts	46051	jdk.PromoteObjectInNewPLAB
+eventCounts	18113	jdk.ThreadSleep
+eventCounts	14444	jdk.NativeMethodSample
+eventCounts	8265	jdk.TenuringDistribution
+eventCounts	8073	jdk.NativeMemoryUsage
+eventCounts	4540	jdk.ThreadCPULoad
+eventCounts	2629	jdk.PromoteObjectOutsidePLAB
+eventCounts	2204	jdk.MetaspaceChunkFreeListSummary
+
+```
+
+final-owner.txt
+```text
+ownerSamples=98474
+focusedSamples
+10952	TradingRuntimeState.collectMatcherSettlement
+8179	TerminalStateRetention.
+7466	TerminalTombstoneStore.
+6445	TradingCoreRuntime.prepareClusterPipelineScope
+4698	TradingRuntimeState.collectCancel
+4595	OrderBatchExecutor.preparePipelinedPlaceBatch
+4027	ActiveOrderIndex.applySnapshot
+3837	MatcherSettlementPlan.build
+3672	TradingRuntimeState.readyLaneMask
+3230	RuntimeIdentityRegistry.releaseClientKey
+2838	TradingOrderBatchCodec.decodeCommand
+2729	TradingRuntimeState.clearChangedKeys
+1237	TerminalTombstoneStore.put
+1135	ClusterCommandWindow.add
+587	DeterministicExchangeCoreAdapter.matcherShardId
+445	OrderBatchExecutor.decodeOrderBatch
+exactOrderBatchItemAllocation=0
+ownerInclusive
+98474	com.surprising.aeron.service.execution.ContinuousTradingClusterService$$Lambda.0x000000012912f708.run
+98474	java.lang.Thread.run
+98474	java.lang.Thread.runWith
+98474	com.surprising.aeron.service.execution.ContinuousTradingClusterService.runOwner
+97619	com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommands
+97024	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommands
+96017	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommandsInScope
+68338	com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommandPrefix
+64916	com.surprising.aeron.service.execution.OrderedCommitCoordinator.commitReadyMatching
+41502	com.surprising.aeron.service.execution.OrderedCommitCoordinator.completeMatching
+28826	com.surprising.aeron.service.execution.OrderBatchExecutor.finishOrderBatch
+21668	com.surprising.aeron.service.execution.OrderedCommitCoordinator.pumpMatchingCommitCompletions
+13723	com.surprising.aeron.service.execution.TradingCoreRuntime.applyDecodedCommand
+13591	com.surprising.aeron.service.execution.TradingCoreRuntime.apply
+12889	com.surprising.aeron.service.execution.OrderedCommitCoordinator.dispatchReadyPlaceSettlements
+11953	com.surprising.aeron.service.execution.OrderedCommitCoordinator.dispatchPartitionSettlements
+10952	com.surprising.aeron.service.state.TradingRuntimeState.collectMatcherSettlement
+9609	com.surprising.aeron.service.state.RuntimeIndexedChangeBuffer.forEachIndexed
+8655	com.surprising.aeron.service.execution.OrderedCommitCoordinator.completeCommitPublicationBatch
+8649	com.surprising.aeron.service.execution.OrderedCommitCoordinator.publishCommittedChanges
+8640	com.surprising.aeron.service.execution.OrderedCommitCoordinator$OwnerCommitPublisher.execute
+8575	com.surprising.aeron.service.state.TradingRuntimeState$PublishedLaneChanges.commitTerminalToOwner
+8492	com.surprising.aeron.service.execution.OrderBatchExecutor.beginOrderBatchMatching
+6823	com.surprising.aeron.service.execution.TradingCoreRuntime.drainMatchingCompletions
+6445	com.surprising.aeron.service.execution.TradingCoreRuntime.prepareClusterPipelineScope
+6344	com.surprising.aeron.service.execution.OrderBatchExecutor.dispatchOrderBatchLaneWork
+6154	com.surprising.aeron.service.execution.OrderBatchExecutor.tryActivatePipelinedOrderBatch
+6125	com.surprising.aeron.service.state.TradingRuntimeState.dispatchMatcherSettlementBatch
+6117	com.surprising.aeron.service.state.MatcherSettlementDispatcher.dispatchMatcherSettlementBatch
+5312	com.surprising.aeron.service.state.RuntimeFactIndexes.applyCurrent
+5212	com.surprising.aeron.service.state.TradingRuntimeState.visitChangedIndexes
+4856	com.surprising.aeron.service.state.OwnerIndexedChanges.forEachIndexed
+4771	com.surprising.aeron.service.execution.TradingCoreRuntime.progressPlaceAdmissions
+4698	com.surprising.aeron.service.state.TradingRuntimeState.collectCancel
+4595	com.surprising.aeron.service.execution.OrderBatchExecutor.preparePipelinedPlaceBatch
+4489	java.util.concurrent.ConcurrentHashMap.get
+4086	com.surprising.aeron.service.state.TradingRuntimeState.lambda$visitChangedIndexes$0
+4086	com.surprising.aeron.service.state.RuntimeFactIndexes.preparedOrder
+4086	com.surprising.aeron.service.state.TradingRuntimeState$$Lambda.0x0000000129194000.accept
+4082	com.surprising.aeron.service.execution.MatchingCommandAdmission.beginMatching
+4053	com.surprising.aeron.service.execution.MatchingCommandAdmission.prepareMatching
+4027	com.surprising.aeron.service.state.index.ActiveOrderIndex.applySnapshot
+3979	com.surprising.aeron.service.execution.TerminalTombstoneStore.entitySlot
+3874	com.surprising.aeron.service.execution.OrderedCommitCoordinator.completeDispatchedMatcherSettlement
+3793	com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+3745	com.surprising.aeron.service.execution.TerminalTombstoneStore.contains
+3696	java.util.HashMap.getNode
+3672	com.surprising.aeron.service.state.TradingRuntimeState.readyLaneMask
+3630	com.surprising.aeron.service.execution.OrderedCommitCoordinator.completeDispatchedCancel
+3597	com.surprising.aeron.service.state.MatcherSettlementPlan.build
+3562	java.util.HashMap.get
+3554	com.surprising.aeron.service.state.MatcherSettlementPlan.buildBatchItem
+3462	com.surprising.aeron.service.state.TradingRuntimeState$PublishedLaneChanges$$Lambda.0x00000001291b93b0.accept
+3462	com.surprising.aeron.service.state.TradingRuntimeState$PublishedLaneChanges.lambda$commitTerminalToOwner$0
+3439	com.surprising.aeron.service.execution.TradingCoreRuntime.drainLaneReadyNotifications
+3431	com.surprising.aeron.service.execution.TerminalStateRetention.accept
+3364	com.surprising.aeron.service.state.TradingRuntimeState$PublishedLaneChanges$ClientIdentityReleaseBuffer.release
+3364	com.surprising.aeron.service.state.TradingRuntimeState$PublishedLaneChanges.releaseRetiredClientIdentities
+3354	com.surprising.aeron.service.execution.TerminalStateRetention.retainPrunedOrder
+3230	com.surprising.aeron.service.state.RuntimeIdentityRegistry.releaseClientKey
+3227	com.surprising.aeron.service.execution.ClusterCommandWindow.decoded
+3133	com.surprising.aeron.service.execution.DecodedMatchingCommand.decode
+3070	com.surprising.aeron.service.execution.TradingCoreRuntime.requireOrderIdentityAvailable
+3070	com.surprising.aeron.service.execution.TerminalStateRetention.containsOrder
+3068	com.surprising.aeron.service.execution.TerminalStateRetention.contains
+ownerLeaf
+3641	com.surprising.aeron.service.execution.TerminalTombstoneStore.entitySlot:57
+3527	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommandsInScope:226
+3061	java.util.concurrent.ConcurrentHashMap.get:949
+2190	com.surprising.aeron.protocol.TradingOrderBatchCodec.decodeCommand:294
+2165	com.surprising.aeron.service.state.TradingRuntimeState.readyLaneMask:1773
+1679	org.eclipse.collections.impl.set.mutable.primitive.LongHashSet.each:571
+1468	java.util.HashMap.getNode:577
+1304	jdk.internal.misc.Unsafe.putIntUnaligned:3715
+1250	org.agrona.collections.Long2LongHashMap.get:208
+1105	com.surprising.aeron.service.state.RuntimeIndexedChangeBuffer.forEachIndexed:56
+1031	java.util.HashMap.hash:338
+1026	com.surprising.aeron.service.execution.OrderedCommitCoordinator.pumpMatchingCommitCompletions:1036
+1020	java.nio.HeapByteBuffer.put:221
+1003	com.surprising.aeron.service.execution.PendingMatchingRing.partitionDispatchHead:209
+953	com.surprising.aeron.service.state.LaneSequenceQueue.hasPending:45
+856	com.surprising.aeron.protocol.CoreStateQueryCodec.utf8Length:342
+749	org.agrona.collections.Long2LongHashMap.compactChain:878
+721	com.surprising.aeron.service.execution.TerminalTombstoneStore.unlinkEntity:80
+720	java.util.Arrays.fill:3143
+712	java.util.concurrent.ConcurrentHashMap.get:957
+670	com.surprising.aeron.service.execution.TerminalTombstoneStore.unlinkClient:97
+649	java.lang.ThreadLocal.get:171
+640	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.get:2340
+611	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.getIfAbsent:2362
+608	com.surprising.aeron.service.execution.TradingCoreRuntime.bindOwner:2478
+587	com.surprising.aeron.service.execution.OrderedCommitCoordinator.pumpMatchingCommitCompletions:1040
+584	org.eclipse.collections.impl.set.mutable.primitive.LongHashSet.add:216
+554	com.surprising.aeron.service.state.TradingRuntimeState.readyLaneMask:1769
+544	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.probeThree:3090
+534	com.surprising.aeron.service.execution.ClusterCommandWindow.complete:200
+504	com.surprising.aeron.service.execution.PendingMatchingRing.findFirst:161
+500	com.surprising.aeron.service.execution.TerminalTombstoneStore.clientSlot:92
+497	java.util.HashMap.getNode:585
+494	com.surprising.aeron.service.state.LanePublishedMap.visible:71
+486	com.surprising.aeron.service.state.RuntimeChangeBuffer.drainTo:156
+ownerAllocationClass
+8704988320	[B
+3199208328	com.surprising.aeron.protocol.PlaceOrderCommand
+2434030584	[J
+1836875424	java.lang.String
+914400568	java.lang.Long
+894648200	[Ljava.lang.Object;
+870190184	[I
+672191640	com.surprising.aeron.service.execution.CommandResultLedger$StoredResult
+579086296	com.surprising.aeron.protocol.CoreResponse
+573261840	com.surprising.aeron.service.execution.OrderBatchExecutor$$Lambda.0x00000001291ee0c0
+374332768	com.surprising.aeron.protocol.CoreMessageHeader
+360294800	com.surprising.aeron.protocol.CoreOrderStateView
+357507544	com.surprising.aeron.service.execution.OrderBatchExecutor$$Lambda.0x00000001291edc60
+326975488	java.util.LinkedHashMap$Entry
+314363544	java.util.HashMap$Node
+304054464	org.eclipse.collections.impl.set.mutable.primitive.IntHashSet
+301657424	com.surprising.aeron.service.execution.ImmutableLongArrayList
+301635176	com.surprising.aeron.protocol.CancelOrderCommand
+295811256	com.surprising.aeron.service.state.ResolvedPlaceOrder
+290815496	java.nio.HeapByteBuffer
+277012400	java.util.ArrayList$Itr
+270735640	com.surprising.aeron.service.execution.ContinuousTradingClusterService$Output
+224610296	com.surprising.aeron.service.execution.OrderBatchExecutor$$Lambda.0x00000001291ede90
+202592816	com.surprising.aeron.service.state.CoreOrderDecisionResolver$Context
+193108840	java.util.HashMap$KeyIterator
+ownerAllocationPaths
+9046936912	TradingCoreRuntime.prepareClusterPipelineScope
+8592308768	TradingOrderBatchCodec.decodeCommand
+1963010288	ActiveOrderIndex.applySnapshot
+614042536	TradingRuntimeState.collectMatcherSettlement
+334429904	OrderBatchExecutor.preparePipelinedPlaceBatch
+225800472	TradingRuntimeState.collectCancel
+190768840	MatcherSettlementPlan.build
+laneLeaf
+365257	com.surprising.aeron.service.state.SettlementLaneWorker.run:154
+6356	java.lang.ThreadLocal.get:171
+5060	com.surprising.aeron.service.state.SettlementLaneWorker.run:136
+4621	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.getIfAbsent:2362
+2905	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.probeThree:3090
+2344	java.lang.ThreadLocal.get:184
+2167	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.get:2340
+1980	java.util.concurrent.ConcurrentHashMap.get:949
+1200	java.util.ImmutableCollections$ListItr.next:397
+1166	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.probe:3057
+1064	com.surprising.aeron.service.state.OrderRuntime.<init>:47
+917	org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap.containsKey:978
+ownerParkMonitorNs
+afterGCminute=0 count=110 minMiB=103.337 averageMiB=106.876 maxMiB=109.828
+afterGCminute=1 count=102 minMiB=105.623 averageMiB=108.282 maxMiB=111.409
+afterGCminute=2 count=108 minMiB=107.063 averageMiB=109.746 maxMiB=113.299
+afterGCminute=3 count=115 minMiB=108.797 averageMiB=111.404 maxMiB=114.211
+afterGCminute=4 count=116 minMiB=110.226 averageMiB=113.327 maxMiB=116.489
+
+```
+
+gates-final.log
+```text
+SPOT execute productLineGate=PASS mode=execute productLine=SPOT fundsDiff=0 bookLevels=0 seed=9701
+SPOT replay productLineGate=PASS mode=verify productLine=SPOT fundsDiff=0 bookLevels=0 seed=9701
+SPOT snapshotPosition=3616
+SPOT snapshot productLineGate=PASS mode=verify productLine=SPOT fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_PERPETUAL execute productLineGate=PASS mode=execute productLine=LINEAR_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_PERPETUAL replay productLineGate=PASS mode=verify productLine=LINEAR_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_PERPETUAL snapshotPosition=9568
+LINEAR_PERPETUAL snapshot productLineGate=PASS mode=verify productLine=LINEAR_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_PERPETUAL execute productLineGate=PASS mode=execute productLine=INVERSE_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_PERPETUAL replay productLineGate=PASS mode=verify productLine=INVERSE_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_PERPETUAL snapshotPosition=9568
+INVERSE_PERPETUAL snapshot productLineGate=PASS mode=verify productLine=INVERSE_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_DELIVERY execute productLineGate=PASS mode=execute productLine=LINEAR_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_DELIVERY replay productLineGate=PASS mode=verify productLine=LINEAR_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_DELIVERY snapshotPosition=5184
+LINEAR_DELIVERY snapshot productLineGate=PASS mode=verify productLine=LINEAR_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_DELIVERY execute productLineGate=PASS mode=execute productLine=INVERSE_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_DELIVERY replay productLineGate=PASS mode=verify productLine=INVERSE_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_DELIVERY snapshotPosition=5184
+INVERSE_DELIVERY snapshot productLineGate=PASS mode=verify productLine=INVERSE_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+OPTION execute productLineGate=PASS mode=execute productLine=OPTION fundsDiff=0 bookLevels=0 seed=9701
+OPTION replay productLineGate=PASS mode=verify productLine=OPTION fundsDiff=0 bookLevels=0 seed=9701
+OPTION snapshotPosition=5184
+OPTION snapshot productLineGate=PASS mode=verify productLine=OPTION fundsDiff=0 bookLevels=0 seed=9701
+
+```
+
+recovery-final.log
+```text
+master replay PASS businessHash=a9d128a7f70e70cc
+master snapshotPosition=5296936992
+master snapshot PASS businessHash=a9d128a7f70e70cc
+
+```
+
+master-control-INVERSE_DELIVERY-0
+```text
+Iteration   2: accountControlVerify=PASS product=INVERSE_DELIVERY terminalBusinessOperations=2400 unfinished=0 fundsDiff=0 netPosition=0
+CPU_Speed_Limit=75–77
+nmt-before.txt
+Total: reserved=3146450KB, committed=692114KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=58505KB, committed=1933KB)
+-                      Code (reserved=250325KB, committed=15993KB)
+-                        GC (reserved=91630KB, committed=71190KB)
+-                     Other (reserved=9409KB, committed=9409KB)
+nmt-after.txt
+Total: reserved=3138172KB, committed=696720KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=52371KB, committed=2607KB)
+-                      Code (reserved=252417KB, committed=22793KB)
+-                        GC (reserved=91808KB, committed=71328KB)
+-                     Other (reserved=9411KB, committed=9411KB)
+JFR bytes=2271614 sha256=12ec7e3a38209489e19c34423c77e15d80348cbb259290affeffd3dce0ce521f
+JMH [{"jmhVersion":"1.37","benchmark":"com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls","mode":"ss","threads":1,"forks":1,"jvm":"/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","jvmArgs":["-XX:ThreadPriorityPolicy=1","-XX:+UnlockExperimentalVMOptions","-XX:+EnableJVMCIProduct","-XX:+EnableJVMCI","-XX:-UnlockExperimentalVMOptions","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=INVERSE_DELIVERY","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-final/master-control-INVERSE_DELIVERY-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-final/master-control-INVERSE_DELIVERY-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true"],"jdkVersion":"25.0.1","vmName":"Java HotSpot(TM) 64-Bit Server VM","vmVersion":"25.0.1+8-LTS-jvmci-b01","warmupIterations":1,"warmupTime":"single-shot","warmupBatchSize":1,"measurementIterations":2,"measurementTime":"single-shot","measurementBatchSize":1,"params":{"productLine":"INVERSE_DELIVERY"},"primaryMetric":{"score":3075.9786885,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":3025.743266,"50.0":3075.9786885,"90.0":3126.214111,"95.0":3126.214111,"99.0":3126.214111,"99.9":3126.214111,"99.99":3126.214111,"99.999":3126.214111,"99.9999":3126.214111,"100.0":3126.214111},"scoreUnit":"ms/op","rawData":[[3126.214111,3025.743266]]},"secondaryMetrics":{"gc.alloc.rate":{"score":1.1416583051536224,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":0.9344738059489444,"50.0":1.1416583051536224,"90.0":1.3488428043583005,"95.0":1.3488428043583005,"99.0":1.3488428043583005,"99.9":1.3488428043583005,"99.99":1.3488428043583005,"99.999":1.3488428043583005,"99.9999":1.3488428043583005,"100.0":1.3488428043583005},"scoreUnit":"MB/sec","rawData":[[0.9344738059489444,1.3488428043583005]]},"gc.alloc.rate.norm":{"score":3715828.0,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":3063568.0,"50.0":3715828.0,"90.0":4368088.0,"95.0":4368088.0,"99.0":4368088.0,"99.9":4368088.0,"99.99":4368088.0,"99.999":4368088.0,"99.9999":4368088.0,"100.0":4368088.0},"scoreUnit":"B/op","rawData":[[3063568.0,4368088.0]]},"gc.count":{"score":0.0,"scoreError":"NaN","scoreConfidence":[0.0,0.0],"scorePercentiles":{"0.0":0.0,"50.0":0.0,"90.0":0.0,"95.0":0.0,"99.0":0.0,"99.9":0.0,"99.99":0.0,"99.999":0.0,"99.9999":0.0,"100.0":0.0},"scoreUnit":"counts","rawData":[[0.0,0.0]]}}}]
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=INVERSE_DELIVERY","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-final/master-control-INVERSE_DELIVERY-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-final/master-control-INVERSE_DELIVERY-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf-final/master-control-INVERSE_DELIVERY-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-XX:StartFlightRecording=settings=/tmp/owner-master-opt/owner.jfc,maxsize=192m,dumponexit=true,filename=/tmp/owner-master-opt/perf-final/master-control-INVERSE_DELIVERY-0/node.jfr","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=INVERSE_DELIVERY","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-final/master-control-INVERSE_DELIVERY-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-final/master-control-INVERSE_DELIVERY-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","org.openjdk.jmh.Main","ClusterAccountControlBenchmark.accountControls","-f","1","-wi","1","-i","2","-p","productLine=INVERSE_DELIVERY","-prof","gc","-rf","json","-rff","/tmp/owner-master-opt/perf-final/master-control-INVERSE_DELIVERY-0/jmh.json"]]
+```
+
+master-control-INVERSE_PERPETUAL-0
+```text
+Iteration   2: accountControlVerify=PASS product=INVERSE_PERPETUAL terminalBusinessOperations=2400 unfinished=0 fundsDiff=0 netPosition=0
+CPU_Speed_Limit=79–79
+nmt-before.txt
+Total: reserved=3140341KB, committed=692065KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=52354KB, committed=1842KB)
+-                      Code (reserved=250320KB, committed=15988KB)
+-                        GC (reserved=91630KB, committed=71190KB)
+-                     Other (reserved=9409KB, committed=9409KB)
+nmt-after.txt
+Total: reserved=3142355KB, committed=696827KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=56472KB, committed=2568KB)
+-                      Code (reserved=252478KB, committed=22854KB)
+-                        GC (reserved=91797KB, committed=71317KB)
+-                     Other (reserved=9411KB, committed=9411KB)
+JFR bytes=2294208 sha256=67af0d171fdab2bf7c45a2439cef69aef338c47b8e911c29a3586b85e3394017
+JMH [{"jmhVersion":"1.37","benchmark":"com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls","mode":"ss","threads":1,"forks":1,"jvm":"/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","jvmArgs":["-XX:ThreadPriorityPolicy=1","-XX:+UnlockExperimentalVMOptions","-XX:+EnableJVMCIProduct","-XX:+EnableJVMCI","-XX:-UnlockExperimentalVMOptions","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=INVERSE_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-final/master-control-INVERSE_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-final/master-control-INVERSE_PERPETUAL-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true"],"jdkVersion":"25.0.1","vmName":"Java HotSpot(TM) 64-Bit Server VM","vmVersion":"25.0.1+8-LTS-jvmci-b01","warmupIterations":1,"warmupTime":"single-shot","warmupBatchSize":1,"measurementIterations":2,"measurementTime":"single-shot","measurementBatchSize":1,"params":{"productLine":"INVERSE_PERPETUAL"},"primaryMetric":{"score":3077.6745469999996,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":3037.252893,"50.0":3077.6745469999996,"90.0":3118.096201,"95.0":3118.096201,"99.0":3118.096201,"99.9":3118.096201,"99.99":3118.096201,"99.999":3118.096201,"99.9999":3118.096201,"100.0":3118.096201},"scoreUnit":"ms/op","rawData":[[3118.096201,3037.252893]]},"secondaryMetrics":{"gc.alloc.rate":{"score":1.197172934866551,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":1.0237529944390948,"50.0":1.197172934866551,"90.0":1.370592875294007,"95.0":1.370592875294007,"99.0":1.370592875294007,"99.9":1.370592875294007,"99.99":1.370592875294007,"99.999":1.370592875294007,"99.9999":1.370592875294007,"100.0":1.370592875294007},"scoreUnit":"MB/sec","rawData":[[1.0237529944390948,1.370592875294007]]},"gc.alloc.rate.norm":{"score":3917328.0,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":3347528.0,"50.0":3917328.0,"90.0":4487128.0,"95.0":4487128.0,"99.0":4487128.0,"99.9":4487128.0,"99.99":4487128.0,"99.999":4487128.0,"99.9999":4487128.0,"100.0":4487128.0},"scoreUnit":"B/op","rawData":[[3347528.0,4487128.0]]},"gc.count":{"score":0.0,"scoreError":"NaN","scoreConfidence":[0.0,0.0],"scorePercentiles":{"0.0":0.0,"50.0":0.0,"90.0":0.0,"95.0":0.0,"99.0":0.0,"99.9":0.0,"99.99":0.0,"99.999":0.0,"99.9999":0.0,"100.0":0.0},"scoreUnit":"counts","rawData":[[0.0,0.0]]}}}]
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=INVERSE_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-final/master-control-INVERSE_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-final/master-control-INVERSE_PERPETUAL-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf-final/master-control-INVERSE_PERPETUAL-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-XX:StartFlightRecording=settings=/tmp/owner-master-opt/owner.jfc,maxsize=192m,dumponexit=true,filename=/tmp/owner-master-opt/perf-final/master-control-INVERSE_PERPETUAL-0/node.jfr","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=INVERSE_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-final/master-control-INVERSE_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-final/master-control-INVERSE_PERPETUAL-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","org.openjdk.jmh.Main","ClusterAccountControlBenchmark.accountControls","-f","1","-wi","1","-i","2","-p","productLine=INVERSE_PERPETUAL","-prof","gc","-rf","json","-rff","/tmp/owner-master-opt/perf-final/master-control-INVERSE_PERPETUAL-0/jmh.json"]]
+```
+
+master-control-LINEAR_DELIVERY-0
+```text
+Iteration   2: accountControlVerify=PASS product=LINEAR_DELIVERY terminalBusinessOperations=2400 unfinished=0 fundsDiff=0 netPosition=0
+CPU_Speed_Limit=77–79
+nmt-before.txt
+Total: reserved=3146555KB, committed=692255KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=58505KB, committed=1969KB)
+-                      Code (reserved=250366KB, committed=16034KB)
+-                        GC (reserved=91617KB, committed=71177KB)
+-                     Other (reserved=9409KB, committed=9409KB)
+nmt-after.txt
+Total: reserved=3138298KB, committed=696910KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=52371KB, committed=2543KB)
+-                      Code (reserved=252497KB, committed=22937KB)
+-                        GC (reserved=91806KB, committed=71326KB)
+-                     Other (reserved=9411KB, committed=9411KB)
+JFR bytes=2284200 sha256=5a3943703bc9e729159f41fadcb40b6114e2381e115120b43d564266b156af9a
+JMH [{"jmhVersion":"1.37","benchmark":"com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls","mode":"ss","threads":1,"forks":1,"jvm":"/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","jvmArgs":["-XX:ThreadPriorityPolicy=1","-XX:+UnlockExperimentalVMOptions","-XX:+EnableJVMCIProduct","-XX:+EnableJVMCI","-XX:-UnlockExperimentalVMOptions","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_DELIVERY","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-final/master-control-LINEAR_DELIVERY-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-final/master-control-LINEAR_DELIVERY-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true"],"jdkVersion":"25.0.1","vmName":"Java HotSpot(TM) 64-Bit Server VM","vmVersion":"25.0.1+8-LTS-jvmci-b01","warmupIterations":1,"warmupTime":"single-shot","warmupBatchSize":1,"measurementIterations":2,"measurementTime":"single-shot","measurementBatchSize":1,"params":{"productLine":"LINEAR_DELIVERY"},"primaryMetric":{"score":3109.175388,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":3097.032877,"50.0":3109.175388,"90.0":3121.317899,"95.0":3121.317899,"99.0":3121.317899,"99.9":3121.317899,"99.99":3121.317899,"99.999":3121.317899,"99.9999":3121.317899,"100.0":3121.317899},"scoreUnit":"ms/op","rawData":[[3121.317899,3097.032877]]},"secondaryMetrics":{"gc.alloc.rate":{"score":1.1831279021232741,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":1.0355895756305329,"50.0":1.1831279021232741,"90.0":1.3306662286160154,"95.0":1.3306662286160154,"99.0":1.3306662286160154,"99.9":1.3306662286160154,"99.99":1.3306662286160154,"99.999":1.3306662286160154,"99.9999":1.3306662286160154,"100.0":1.3306662286160154},"scoreUnit":"MB/sec","rawData":[[1.0355895756305329,1.3306662286160154]]},"gc.alloc.rate.norm":{"score":3914860.0,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":3389728.0,"50.0":3914860.0,"90.0":4439992.0,"95.0":4439992.0,"99.0":4439992.0,"99.9":4439992.0,"99.99":4439992.0,"99.999":4439992.0,"99.9999":4439992.0,"100.0":4439992.0},"scoreUnit":"B/op","rawData":[[3389728.0,4439992.0]]},"gc.count":{"score":0.0,"scoreError":"NaN","scoreConfidence":[0.0,0.0],"scorePercentiles":{"0.0":0.0,"50.0":0.0,"90.0":0.0,"95.0":0.0,"99.0":0.0,"99.9":0.0,"99.99":0.0,"99.999":0.0,"99.9999":0.0,"100.0":0.0},"scoreUnit":"counts","rawData":[[0.0,0.0]]}}}]
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_DELIVERY","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-final/master-control-LINEAR_DELIVERY-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-final/master-control-LINEAR_DELIVERY-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf-final/master-control-LINEAR_DELIVERY-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-XX:StartFlightRecording=settings=/tmp/owner-master-opt/owner.jfc,maxsize=192m,dumponexit=true,filename=/tmp/owner-master-opt/perf-final/master-control-LINEAR_DELIVERY-0/node.jfr","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_DELIVERY","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-final/master-control-LINEAR_DELIVERY-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-final/master-control-LINEAR_DELIVERY-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","org.openjdk.jmh.Main","ClusterAccountControlBenchmark.accountControls","-f","1","-wi","1","-i","2","-p","productLine=LINEAR_DELIVERY","-prof","gc","-rf","json","-rff","/tmp/owner-master-opt/perf-final/master-control-LINEAR_DELIVERY-0/jmh.json"]]
+```
+
+master-control-LINEAR_PERPETUAL-0
+```text
+Iteration   2: accountControlVerify=PASS product=LINEAR_PERPETUAL terminalBusinessOperations=2400 unfinished=0 fundsDiff=0 netPosition=0
+CPU_Speed_Limit=79–79
+nmt-before.txt
+Total: reserved=3142348KB, committed=692052KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=54404KB, committed=1872KB)
+-                      Code (reserved=250346KB, committed=16014KB)
+-                        GC (reserved=91627KB, committed=71187KB)
+-                     Other (reserved=9409KB, committed=9409KB)
+nmt-after.txt
+Total: reserved=3138138KB, committed=696786KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=52371KB, committed=2579KB)
+-                      Code (reserved=252419KB, committed=22859KB)
+-                        GC (reserved=91812KB, committed=71332KB)
+-                     Other (reserved=9411KB, committed=9411KB)
+JFR bytes=2284735 sha256=cd69e0bb699473add93f28021de2e6043cc4dea57dd92912a128706aaedec7eb
+JMH [{"jmhVersion":"1.37","benchmark":"com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls","mode":"ss","threads":1,"forks":1,"jvm":"/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","jvmArgs":["-XX:ThreadPriorityPolicy=1","-XX:+UnlockExperimentalVMOptions","-XX:+EnableJVMCIProduct","-XX:+EnableJVMCI","-XX:-UnlockExperimentalVMOptions","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-final/master-control-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-final/master-control-LINEAR_PERPETUAL-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true"],"jdkVersion":"25.0.1","vmName":"Java HotSpot(TM) 64-Bit Server VM","vmVersion":"25.0.1+8-LTS-jvmci-b01","warmupIterations":1,"warmupTime":"single-shot","warmupBatchSize":1,"measurementIterations":2,"measurementTime":"single-shot","measurementBatchSize":1,"params":{"productLine":"LINEAR_PERPETUAL"},"primaryMetric":{"score":3056.6253125,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":3050.992011,"50.0":3056.6253125,"90.0":3062.258614,"95.0":3062.258614,"99.0":3062.258614,"99.9":3062.258614,"99.99":3062.258614,"99.999":3062.258614,"99.9999":3062.258614,"100.0":3062.258614},"scoreUnit":"ms/op","rawData":[[3062.258614,3050.992011]]},"secondaryMetrics":{"gc.alloc.rate":{"score":1.1939364434994937,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":1.044227531607748,"50.0":1.1939364434994937,"90.0":1.3436453553912393,"95.0":1.3436453553912393,"99.0":1.3436453553912393,"99.9":1.3436453553912393,"99.99":1.3436453553912393,"99.999":1.3436453553912393,"99.9999":1.3436453553912393,"100.0":1.3436453553912393},"scoreUnit":"MB/sec","rawData":[[1.044227531607748,1.3436453553912393]]},"gc.alloc.rate.norm":{"score":3878372.0,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":3353392.0,"50.0":3878372.0,"90.0":4403352.0,"95.0":4403352.0,"99.0":4403352.0,"99.9":4403352.0,"99.99":4403352.0,"99.999":4403352.0,"99.9999":4403352.0,"100.0":4403352.0},"scoreUnit":"B/op","rawData":[[3353392.0,4403352.0]]},"gc.count":{"score":0.0,"scoreError":"NaN","scoreConfidence":[0.0,0.0],"scorePercentiles":{"0.0":0.0,"50.0":0.0,"90.0":0.0,"95.0":0.0,"99.0":0.0,"99.9":0.0,"99.99":0.0,"99.999":0.0,"99.9999":0.0,"100.0":0.0},"scoreUnit":"counts","rawData":[[0.0,0.0]]}}}]
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-final/master-control-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-final/master-control-LINEAR_PERPETUAL-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf-final/master-control-LINEAR_PERPETUAL-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-XX:StartFlightRecording=settings=/tmp/owner-master-opt/owner.jfc,maxsize=192m,dumponexit=true,filename=/tmp/owner-master-opt/perf-final/master-control-LINEAR_PERPETUAL-0/node.jfr","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-final/master-control-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-final/master-control-LINEAR_PERPETUAL-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","org.openjdk.jmh.Main","ClusterAccountControlBenchmark.accountControls","-f","1","-wi","1","-i","2","-p","productLine=LINEAR_PERPETUAL","-prof","gc","-rf","json","-rff","/tmp/owner-master-opt/perf-final/master-control-LINEAR_PERPETUAL-0/jmh.json"]]
+```
+
+master-control-OPTION-0
+```text
+Iteration   2: accountControlVerify=PASS product=OPTION terminalBusinessOperations=1800 unfinished=0 fundsDiff=0 netPosition=0
+CPU_Speed_Limit=75–75
+nmt-before.txt
+Total: reserved=3142347KB, committed=692051KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=54404KB, committed=1872KB)
+-                      Code (reserved=250306KB, committed=15974KB)
+-                        GC (reserved=91619KB, committed=71179KB)
+-                     Other (reserved=9409KB, committed=9409KB)
+nmt-after.txt
+Total: reserved=3140065KB, committed=696329KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=54422KB, committed=2566KB)
+-                      Code (reserved=252339KB, committed=22523KB)
+-                        GC (reserved=91781KB, committed=71301KB)
+-                     Other (reserved=9411KB, committed=9411KB)
+JFR bytes=2058352 sha256=4cb13efce401152a0cd09febbac239055daa65cce583d386b5a6a82972320a22
+JMH [{"jmhVersion":"1.37","benchmark":"com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls","mode":"ss","threads":1,"forks":1,"jvm":"/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","jvmArgs":["-XX:ThreadPriorityPolicy=1","-XX:+UnlockExperimentalVMOptions","-XX:+EnableJVMCIProduct","-XX:+EnableJVMCI","-XX:-UnlockExperimentalVMOptions","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=OPTION","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-final/master-control-OPTION-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-final/master-control-OPTION-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true"],"jdkVersion":"25.0.1","vmName":"Java HotSpot(TM) 64-Bit Server VM","vmVersion":"25.0.1+8-LTS-jvmci-b01","warmupIterations":1,"warmupTime":"single-shot","warmupBatchSize":1,"measurementIterations":2,"measurementTime":"single-shot","measurementBatchSize":1,"params":{"productLine":"OPTION"},"primaryMetric":{"score":2317.268875,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":2275.954712,"50.0":2317.268875,"90.0":2358.583038,"95.0":2358.583038,"99.0":2358.583038,"99.9":2358.583038,"99.99":2358.583038,"99.999":2358.583038,"99.9999":2358.583038,"100.0":2358.583038},"scoreUnit":"ms/op","rawData":[[2358.583038,2275.954712]]},"secondaryMetrics":{"gc.alloc.rate":{"score":0.7542551484411626,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":0.5438736317741244,"50.0":0.7542551484411626,"90.0":0.9646366651082007,"95.0":0.9646366651082007,"99.0":0.9646366651082007,"99.9":0.9646366651082007,"99.99":0.9646366651082007,"99.999":0.9646366651082007,"99.9999":0.9646366651082007,"100.0":0.9646366651082007},"scoreUnit":"MB/sec","rawData":[[0.5438736317741244,0.9646366651082007]]},"gc.alloc.rate.norm":{"score":1866416.0,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":1345224.0,"50.0":1866416.0,"90.0":2387608.0,"95.0":2387608.0,"99.0":2387608.0,"99.9":2387608.0,"99.99":2387608.0,"99.999":2387608.0,"99.9999":2387608.0,"100.0":2387608.0},"scoreUnit":"B/op","rawData":[[1345224.0,2387608.0]]},"gc.count":{"score":0.0,"scoreError":"NaN","scoreConfidence":[0.0,0.0],"scorePercentiles":{"0.0":0.0,"50.0":0.0,"90.0":0.0,"95.0":0.0,"99.0":0.0,"99.9":0.0,"99.99":0.0,"99.999":0.0,"99.9999":0.0,"100.0":0.0},"scoreUnit":"counts","rawData":[[0.0,0.0]]}}}]
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=OPTION","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-final/master-control-OPTION-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-final/master-control-OPTION-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf-final/master-control-OPTION-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-XX:StartFlightRecording=settings=/tmp/owner-master-opt/owner.jfc,maxsize=192m,dumponexit=true,filename=/tmp/owner-master-opt/perf-final/master-control-OPTION-0/node.jfr","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=OPTION","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-final/master-control-OPTION-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-final/master-control-OPTION-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","org.openjdk.jmh.Main","ClusterAccountControlBenchmark.accountControls","-f","1","-wi","1","-i","2","-p","productLine=OPTION","-prof","gc","-rf","json","-rff","/tmp/owner-master-opt/perf-final/master-control-OPTION-0/jmh.json"]]
+```
+
+master-control-SPOT-0
+```text
+Iteration   2: accountControlVerify=PASS product=SPOT terminalBusinessOperations=600 unfinished=0 fundsDiff=0 netPosition=0
+CPU_Speed_Limit=79–79
+nmt-before.txt
+Total: reserved=3148641KB, committed=692325KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=60555KB, committed=2003KB)
+-                      Code (reserved=250375KB, committed=16043KB)
+-                        GC (reserved=91628KB, committed=71188KB)
+-                     Other (reserved=9409KB, committed=9409KB)
+nmt-after.txt
+Total: reserved=3137266KB, committed=693294KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=52371KB, committed=2467KB)
+-                      Code (reserved=251963KB, committed=20983KB)
+-                        GC (reserved=91783KB, committed=71303KB)
+-                     Other (reserved=9411KB, committed=9411KB)
+JFR bytes=1619994 sha256=8c0caf04ea323ae5fd72ab89b874d6f418a85a038d39cff5e784c50503c51c20
+JMH [{"jmhVersion":"1.37","benchmark":"com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls","mode":"ss","threads":1,"forks":1,"jvm":"/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","jvmArgs":["-XX:ThreadPriorityPolicy=1","-XX:+UnlockExperimentalVMOptions","-XX:+EnableJVMCIProduct","-XX:+EnableJVMCI","-XX:-UnlockExperimentalVMOptions","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=SPOT","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-final/master-control-SPOT-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-final/master-control-SPOT-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true"],"jdkVersion":"25.0.1","vmName":"Java HotSpot(TM) 64-Bit Server VM","vmVersion":"25.0.1+8-LTS-jvmci-b01","warmupIterations":1,"warmupTime":"single-shot","warmupBatchSize":1,"measurementIterations":2,"measurementTime":"single-shot","measurementBatchSize":1,"params":{"productLine":"SPOT"},"primaryMetric":{"score":852.1031035000001,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":823.64787,"50.0":852.1031035000001,"90.0":880.558337,"95.0":880.558337,"99.0":880.558337,"99.9":880.558337,"99.99":880.558337,"99.999":880.558337,"99.9999":880.558337,"100.0":880.558337},"scoreUnit":"ms/op","rawData":[[880.558337,823.64787]]},"secondaryMetrics":{"gc.alloc.rate":{"score":1.4492007501927526,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":0.9302775605276508,"50.0":1.4492007501927526,"90.0":1.9681239398578545,"95.0":1.9681239398578545,"99.0":1.9681239398578545,"99.9":1.9681239398578545,"99.99":1.9681239398578545,"99.999":1.9681239398578545,"99.9999":1.9681239398578545,"100.0":1.9681239398578545},"scoreUnit":"MB/sec","rawData":[[0.9302775605276508,1.9681239398578545]]},"gc.alloc.rate.norm":{"score":1366076.0,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":859192.0,"50.0":1366076.0,"90.0":1872960.0,"95.0":1872960.0,"99.0":1872960.0,"99.9":1872960.0,"99.99":1872960.0,"99.999":1872960.0,"99.9999":1872960.0,"100.0":1872960.0},"scoreUnit":"B/op","rawData":[[859192.0,1872960.0]]},"gc.count":{"score":0.0,"scoreError":"NaN","scoreConfidence":[0.0,0.0],"scorePercentiles":{"0.0":0.0,"50.0":0.0,"90.0":0.0,"95.0":0.0,"99.0":0.0,"99.9":0.0,"99.99":0.0,"99.999":0.0,"99.9999":0.0,"100.0":0.0},"scoreUnit":"counts","rawData":[[0.0,0.0]]}}}]
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=SPOT","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-final/master-control-SPOT-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-final/master-control-SPOT-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf-final/master-control-SPOT-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-XX:StartFlightRecording=settings=/tmp/owner-master-opt/owner.jfc,maxsize=192m,dumponexit=true,filename=/tmp/owner-master-opt/perf-final/master-control-SPOT-0/node.jfr","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=SPOT","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-final/master-control-SPOT-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-final/master-control-SPOT-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","org.openjdk.jmh.Main","ClusterAccountControlBenchmark.accountControls","-f","1","-wi","1","-i","2","-p","productLine=SPOT","-prof","gc","-rf","json","-rff","/tmp/owner-master-opt/perf-final/master-control-SPOT-0/jmh.json"]]
+```
+
+master-main-LINEAR_PERPETUAL-0
+```text
+measurementStartEpochMillis=1789051580364
+measurementEndEpochMillis=1789051640460
+ownerChurnVerify=PASS completedOrderLifecycles=8340480 terminalIndexEmpty=true reservationsEmpty=true
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=758 businessHash=a5ae8f998c9925d7
+mixedCapacity=PASS elapsedSeconds=60.095 terminalBusinessOperations=11691779 offeredBusinessOperations=11691779 terminalCoreMessages=1127171 offeredCoreMessages=1127171 businessOpsPerSec=194554.083 coreMessagesPerSec=18756.403 fills=2780160 fillsPerSec=46262.547 queries=0 unfinished=0 peakInFlight=256 measuredCycles=543 totalCycles=758 triggerExecutions=0
+business=PLACE_ORDER items=278016 requests=278016 p50us=7622 p90us=18710 p95us=21004 p99us=27197 p999us=49053 maxus=59015
+business=CANCEL_ORDER items=278016 requests=278016 p50us=6836 p90us=15785 p95us=17858 p99us=23789 p999us=43319 maxus=150601
+business=APPLY_MARK_PRICE items=15107 requests=15107 p50us=9936 p90us=21086 p95us=26198 p99us=35225 p999us=55443 maxus=174194
+business=PLACE_ORDER_BATCH items=8340480 requests=417024 p50us=16695 p90us=21495 p95us=23969 p99us=39682 p999us=156631 maxus=334757
+business=CANCEL_ORDER_BATCH items=2780160 requests=139008 p50us=18235 p90us=22970 p95us=25624 p99us=40370 p999us=79233 maxus=348651
+CPU_Speed_Limit=64–100
+nmt-before.txt
+Total: reserved=3118384KB, committed=666568KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=49273KB, committed=1709KB)
+-                      Code (reserved=249296KB, committed=11740KB)
+-                        GC (reserved=91615KB, committed=71175KB)
+-                     Other (reserved=9385KB, committed=9385KB)
+nmt-after.txt
+Total: reserved=3128182KB, committed=703874KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=49290KB, committed=2154KB)
+-                      Code (reserved=261910KB, committed=45962KB)
+-                        GC (reserved=92357KB, committed=71885KB)
+-                     Other (reserved=9387KB, committed=9387KB)
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-final/master-main-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-final/master-main-LINEAR_PERPETUAL-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf-final/master-main-LINEAR_PERPETUAL-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-final/master-main-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-final/master-main-LINEAR_PERPETUAL-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=60","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","com.surprising.aeron.benchmarks.workload.ClusterMixedCapacityMain"]]
+```
+
+master-profile-LINEAR_PERPETUAL-0
+```text
+measurementStartEpochMillis=1789051711637
+measurementEndEpochMillis=1789052011660
+ownerChurnVerify=PASS completedOrderLifecycles=36710400 terminalIndexEmpty=true reservationsEmpty=true
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=2546 businessHash=a9d128a7f70e70cc
+mixedCapacity=PASS elapsedSeconds=300.021 terminalBusinessOperations=51470365 offeredBusinessOperations=51470365 terminalCoreMessages=4970525 offeredCoreMessages=4970525 businessOpsPerSec=171555.851 coreMessagesPerSec=16567.255 fills=12236800 fillsPerSec=40786.473 queries=0 unfinished=0 peakInFlight=256 measuredCycles=2390 totalCycles=2546 triggerExecutions=0
+business=PLACE_ORDER items=1223680 requests=1223680 p50us=8347 p90us=21741 p95us=23822 p99us=27770 p999us=52690 maxus=69468
+business=CANCEL_ORDER items=1223680 requests=1223680 p50us=7991 p90us=17743 p95us=19578 p99us=24117 p999us=45744 maxus=109772
+business=APPLY_MARK_PRICE items=75805 requests=75805 p50us=13000 p90us=21463 p95us=24035 p99us=40534 p999us=72548 maxus=78053
+business=PLACE_ORDER_BATCH items=36710400 requests=1835520 p50us=19382 p90us=23216 p95us=25985 p99us=38371 p999us=60686 maxus=113049
+business=CANCEL_ORDER_BATCH items=12236800 requests=611840 p50us=21495 p90us=25411 p95us=26984 p99us=45776 p999us=61571 maxus=77987
+CPU_Speed_Limit=64–79
+nmt-before.txt
+Total: reserved=3144354KB, committed=691986KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=56519KB, committed=1979KB)
+-                      Code (reserved=250302KB, committed=15970KB)
+-                        GC (reserved=91619KB, committed=71179KB)
+-                     Other (reserved=9409KB, committed=9409KB)
+nmt-after.txt
+Total: reserved=3155103KB, committed=734331KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=52371KB, committed=2099KB)
+-                      Code (reserved=261458KB, committed=49118KB)
+-                        GC (reserved=92522KB, committed=72042KB)
+-                     Other (reserved=9413KB, committed=9413KB)
+JFR bytes=40910934 sha256=8c0ebe69069ba4ce448a9ea6d84e379db698d146b2834cfc58b995d3bbb551b3
+JMH [{"jmhVersion":"1.37","benchmark":"com.surprising.aeron.benchmarks.workload.ClusterOperationalBenchmark.continuousOperations","mode":"ss","threads":1,"forks":1,"jvm":"/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","jvmArgs":["-XX:ThreadPriorityPolicy=1","-XX:+UnlockExperimentalVMOptions","-XX:+EnableJVMCIProduct","-XX:+EnableJVMCI","-XX:-UnlockExperimentalVMOptions","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-final/master-profile-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-final/master-profile-LINEAR_PERPETUAL-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true"],"jdkVersion":"25.0.1","vmName":"Java HotSpot(TM) 64-Bit Server VM","vmVersion":"25.0.1+8-LTS-jvmci-b01","warmupIterations":0,"warmupTime":"single-shot","warmupBatchSize":1,"measurementIterations":1,"measurementTime":"single-shot","measurementBatchSize":1,"params":{"controlPageSize":"0"},"primaryMetric":{"score":300.021634487,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":300.021634487,"50.0":300.021634487,"90.0":300.021634487,"95.0":300.021634487,"99.0":300.021634487,"99.9":300.021634487,"99.99":300.021634487,"99.999":300.021634487,"99.9999":300.021634487,"100.0":300.021634487},"scoreUnit":"s/op","rawData":[[300.021634487]]},"secondaryMetrics":{"gc.alloc.rate":{"score":174.89453707152256,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":174.89453707152256,"50.0":174.89453707152256,"90.0":174.89453707152256,"95.0":174.89453707152256,"99.0":174.89453707152256,"99.9":174.89453707152256,"99.99":174.89453707152256,"99.999":174.89453707152256,"99.9999":174.89453707152256,"100.0":174.89453707152256},"scoreUnit":"MB/sec","rawData":[[174.89453707152256]]},"gc.alloc.rate.norm":{"score":67460267144.0,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":67460267144.0,"50.0":67460267144.0,"90.0":67460267144.0,"95.0":67460267144.0,"99.0":67460267144.0,"99.9":67460267144.0,"99.99":67460267144.0,"99.999":67460267144.0,"99.9999":67460267144.0,"100.0":67460267144.0},"scoreUnit":"B/op","rawData":[[67460267144.0]]},"gc.count":{"score":865.0,"scoreError":"NaN","scoreConfidence":[865.0,865.0],"scorePercentiles":{"0.0":865.0,"50.0":865.0,"90.0":865.0,"95.0":865.0,"99.0":865.0,"99.9":865.0,"99.99":865.0,"99.999":865.0,"99.9999":865.0,"100.0":865.0},"scoreUnit":"counts","rawData":[[865.0]]},"gc.time":{"score":725.0,"scoreError":"NaN","scoreConfidence":[725.0,725.0],"scorePercentiles":{"0.0":725.0,"50.0":725.0,"90.0":725.0,"95.0":725.0,"99.0":725.0,"99.9":725.0,"99.99":725.0,"99.999":725.0,"99.9999":725.0,"100.0":725.0},"scoreUnit":"ms","rawData":[[725.0]]}}}]
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-final/master-profile-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-final/master-profile-LINEAR_PERPETUAL-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf-final/master-profile-LINEAR_PERPETUAL-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-XX:StartFlightRecording=settings=/tmp/owner-master-opt/owner.jfc,maxsize=192m,dumponexit=true,filename=/tmp/owner-master-opt/perf-final/master-profile-LINEAR_PERPETUAL-0/node.jfr","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-final/master-profile-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-final/master-profile-LINEAR_PERPETUAL-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=300","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","org.openjdk.jmh.Main","ClusterOperationalBenchmark.continuousOperations","-f","1","-wi","0","-i","1","-p","controlPageSize=0","-prof","gc","-rf","json","-rff","/tmp/owner-master-opt/perf-final/master-profile-LINEAR_PERPETUAL-0/jmh.json"]]
+```
+
+服务JAR sha256=c31981b0dbbcad3bb886dddf95ea91ff0ea81b189c8af6f3370a84747f900df6
+
+显式GC后类直方图
+```text
+97619:
+ num     #instances         #bytes  class name (module)
+-------------------------------------------------------
+   1:         39108       16873328  [J (java.base@25.0.1)
+   2:        153379       12986360  [B (java.base@25.0.1)
+   3:         18343       12250992  [Ljava.lang.Object; (java.base@25.0.1)
+   4:         20055        9644664  [I (java.base@25.0.1)
+   5:        132087        3170088  java.lang.String (java.base@25.0.1)
+   6:           385        2775944  [Ljdk.internal.vm.FillerElement; (java.base@25.0.1)
+   7:         30229        2418320  com.surprising.aeron.protocol.PlaceOrderCommand
+   8:         40318        1290176  java.util.concurrent.ConcurrentHashMap$Node (java.base@25.0.1)
+   9:         10115         890120  exchange.core2.core.orderbook.OrderBookDirectImpl$DirectOrder
+  10:          4995         879120  com.surprising.aeron.service.state.OrderRuntime
+  11:          4995         879120  com.surprising.aeron.service.state.model.CoreOrderState
+  12:            95         673520  [Ljava.util.concurrent.ConcurrentHashMap$Node; (java.base@25.0.1)
+  13:          5092         660528  java.lang.Class (java.base@25.0.1)
+  14:          4096         622592  com.surprising.aeron.service.execution.PendingMatching
+  15:         15528         621120  com.surprising.aeron.service.state.LanePublishedMap$Version
+  16:          1136         575080  [Ljava.lang.String; (java.base@25.0.1)
+  17:         14017         448544  com.surprising.aeron.service.state.LanePublication
+  18:         18470         443280  java.lang.Long (java.base@25.0.1)
+  19:          4995         399600  com.surprising.aeron.service.state.ReservationRuntime
+  20:          9563         382520  org.eclipse.collections.impl.set.mutable.primitive.LongHashSet
+  21:         15533         372792  com.surprising.aeron.service.state.LanePublishedMap$Key
+  22:          4995         359640  com.surprising.aeron.service.state.index.OrderParticipantIndex$Node
+  23:         10860         347520  java.util.UUID (java.base@25.0.1)
+  24:          3769         331672  com.surprising.aeron.service.state.PositionRuntime
+  25:          4096         327680  com.surprising.aeron.protocol.CoreMessageHeader
+  26:          4096         327680  com.surprising.aeron.service.execution.LaneCommandContextRing$Context
+  27:          8192         327680  com.surprising.aeron.service.execution.PendingClusterIngress$Entry
+  28:         11297         271128  com.surprising.aeron.protocol.CancelOrderCommand
+  29:          8391         268512  java.util.HashMap$Node (java.base@25.0.1)
+  30:          8192         262144  com.surprising.aeron.service.execution.MatcherCommandPipeline$Slot
+  31:          2365         245960  com.surprising.aeron.service.state.AccountLaneState$AdmissionAggregate
+  32:          2194         241512  [Ljava.util.HashMap$Node; (java.base@25.0.1)
+  33:          3257         234504  com.surprising.aeron.service.state.RiskSnapshotRuntime
+  34:          2667         213560  [Z (java.base@25.0.1)
+  35:          2349         206712  com.surprising.aeron.service.state.MatcherSettlementPlan
+  36:          4737         189480  com.surprising.aeron.service.state.RuntimeFundsAccumulator
+  37:          4476         179040  java.util.LinkedHashMap$Entry (java.base@25.0.1)
+```
+
+987ff387轮进程均结束，已清理perf-final/gates-final原始产物13850504700字节；原始路径不可访问。小修使用独立perf-upper/gates-upper目录。
+
+### 2a60fed1 最后小修采集前锁定
+
+- 定向回归（TerminalTombstoneStoreTest、TerminalStateRetentionTest、六产品ClusterCommandPipelineTest、TradingStateSnapshotCodecTest、OwnerIndexedChangesTest）及reactor package通过；结合上一轮完整verify，当前报告汇总[1225, 0, 0, 1]。没有因小修重复无关集成模块。
+- 当前master代码2a60fed1，其余参数/正确性门槛同987ff387锁定；gates-upper执行六产品真实单成员恢复；perf-upper无profiler主测60s、预热30s+90s JMH/JFR，6产品控制，recovery-upper执行本轮日志与snapshot恢复。性能数据仅当前master，不重跑旧版。
+- 上界优化只对超过已知上界的ID省去索引查询；压测订单ID递增，乱序正确性由新增测试验证，不将此快路收益外推到任意ID分布。固定4个long不改变引用或池生命周期；5min内存证据仍注明上一提交，最终小修90s不作长期无泄漏验收。
+
+### 最终交付：2a60fed1
+
+- 最后小修在当前master完成定向回归及package；结合987ff387完整verify，报告累计1225项、1224通过、0失败/错误、1数据库条件跳过；不是冒称最后小修重跑全套。六产品真实单成员execute/强杀replay/snapshot与六产品accountControls JMH/JFR全部PASS。最终90s录制重放及snapshot重启businessHash 302d26290618b164，snapshotPosition1973235296。
+- 最终无profiler：60.056s，12100352终态业务操作、1166080Core消息、2877440fills；201483.078 business ops/s、19416.409 Core messages/s、47912.281 fills/s。最终JMH/JFR：90.133s，16000263业务操作、1544455Core消息、3804160fills；177517.466 business ops/s、17135.202 Core messages/s、42205.859 fills/s。两者分开报告，均offered=terminal、unfinished0、峰值in-flight256、资金/持仓/冻结/终态PASS。非全生产控制混合流，非三节点容量；持续查询计数0，不能当查询并发验收。
+- Owner29611样本，终态管理1828=6.174%，相较中间两版10.24%/8.306%下降，但仍高于最初定位4.57%；不同JIT/时长/限速条件，仅归因参考，不作严格加速比。最终readyLaneMask1185=4.002%，未证实总通知轮询占比下降；批量入口统一推进与轮内避免重复收集并不意味着所有轮询可删除。
+- 最终路由196=0.662%（最初2.68%）、批量准入879=2.969%；decodeCommand942=3.181%，整体解码CPU下降不大。客户身份release1029=3.475%，CPU占比没有明显改善，但分配抽样已移除。结算收集3255=10.992%、撤单收集1389=4.691%、ActiveOrderIndex1279=4.319%，仍是Owner串行工作；这些inclusive不能随意相加。
+- OrderBatchItem分配抽样0；指定窗口/终态索引重建及client-key释放路径分配采样0，不是宣称所有对象零分配。节点50686695656B/16000263≈3167.9B/business op（最初约3429.5B/op），约7.6%较低，为JFR抽样估计。Owner97.042%单核，matcher24.493/24.464%，Lane约97.2%但大量自旋，未实现所有线程有效饱和，未达到普通单全链路1ms目标。
+- JFR DataLoss0、Owner无同步IO或>=1ms park/monitor事件；短等待/缓存争用和真实系统调度不能据此全部排除。最后90s GC后分钟均值104.900/106.328MiB；测量外显式GC后used84315KiB≈82.34MiB。前一提交同池/索引生命周期的5min趋势及显式GC已记录；最终小修固定4long不改变引用生命周期，但不能将前一提交的5min冒称当前提交长测，更不能声称长期heap/native无泄漏。
+- 修复范围：索引churn、逐项包装、重复路由/装箱、无需处理的存活持仓重复查表，以及入口逐条重复推进。保留确定性日志提交、资金/订单依赖、结果可见性和fail-closed，不为CPU占用删除正确性检查。部分热点仍在，不能宣称全部性能问题已根除。
+
+upper-summary.txt
+```text
+totals allocationMiBps=536.303 allocationBytes=50686695656 machineCPU=86.54 jvmCPU=58.07 heapMaxMiB=393.31 dataLoss=0 ownerIOEvents=0
+threadCPU	97.219	core-account-lane-3
+threadCPU	97.187	core-account-lane-2
+threadCPU	97.184	core-account-lane-0
+threadCPU	97.174	core-account-lane-1
+threadCPU	97.042	trading-owner--1
+threadCPU	96.366	/tmp/owner-master-opt/perf-upper/master-profile-LINEAR_PERPETUAL-0/media-surprising-linear_perpetual-0 [sender,receiver]
+threadCPU	74.115	clustered-service-101-0
+threadCPU	72.433	driver-conductor
+threadCPU	65.031	archive-conductor
+threadCPU	63.280	consensus-module-101-0
+threadCPU	24.493	core-matcher-0
+threadCPU	24.464	core-matcher-1
+threadCPU	3.855	JVMCI-native CompilerThread0
+threadCPU	1.576	aeron-md-nra
+threadCPU	0.331	C1 CompilerThread0
+threadCPU	0.320	JFR Periodic Tasks
+threadCPU	0.219	JFR Recorder Thread
+threadCPU	0.212	aeron-client
+threadCPU	0.102	Monitor Deflation Thread
+threadCPU	0.100	Service Thread
+gc count=170 totalMs=1026.864 p99Ms=9.684 maxMs=10.835
+samples	33988	core-account-lane-0
+samples	33586	core-account-lane-1
+samples	32998	core-account-lane-2
+samples	32233	core-account-lane-3
+samples	29611	trading-owner--1
+samples	3212	driver-conductor
+samples	1673	clustered-service-101-0
+samples	1523	consensus-module-101-0
+samples	1425	archive-conductor
+samples	488	/tmp/owner-master-opt/perf-upper/master-profile-LINEAR_PERPETUAL-0/media-surprising-linear_perpetual-0 [sender,receiver]
+samples	347	core-matcher-1
+samples	339	core-matcher-0
+ownerInclusive	29611	com.surprising.aeron.service.execution.ContinuousTradingClusterService$$Lambda.0x000000012f12f708.run
+ownerInclusive	29611	java.lang.Thread.run
+ownerInclusive	29611	java.lang.Thread.runWith
+ownerInclusive	29611	com.surprising.aeron.service.execution.ContinuousTradingClusterService.runOwner
+ownerInclusive	29354	com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommands
+ownerInclusive	29123	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommands
+ownerInclusive	28827	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommandsInScope
+ownerInclusive	20722	com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommandPrefix
+ownerInclusive	19662	com.surprising.aeron.service.execution.OrderedCommitCoordinator.commitReadyMatching
+ownerInclusive	12494	com.surprising.aeron.service.execution.OrderedCommitCoordinator.completeMatching
+ownerInclusive	8667	com.surprising.aeron.service.execution.OrderBatchExecutor.finishOrderBatch
+ownerInclusive	6621	com.surprising.aeron.service.execution.OrderedCommitCoordinator.pumpMatchingCommitCompletions
+allocation	2916014120	trading-owner--1 [B
+allocation	1521886920	core-account-lane-1 [J
+allocation	1410427968	clustered-service-101-0 [B
+allocation	1388359872	core-matcher-0 com.surprising.aeron.service.matching.CoreMatchingResult$NativeCommand
+allocation	1360891048	core-account-lane-0 com.surprising.aeron.service.state.OrderRuntime
+allocation	1346296104	core-account-lane-3 com.surprising.aeron.service.state.OrderRuntime
+allocation	1341257200	core-account-lane-0 [J
+allocation	1333447968	core-account-lane-2 [J
+allocation	1329644936	core-account-lane-2 com.surprising.aeron.service.state.OrderRuntime
+allocation	1267267432	core-account-lane-1 com.surprising.aeron.service.state.OrderRuntime
+allocation	1222980608	core-matcher-1 com.surprising.aeron.service.matching.CoreMatchingResult$NativeCommand
+allocation	1218190176	core-account-lane-3 [J
+allocationSite	5871937496	java.util.concurrent.ConcurrentHashMap.putVal
+allocationSite	2711756848	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.addKeyValueAtIndex
+allocationSite	2489123568	org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap.rehashAndGrow
+allocationSite	2480362096	com.surprising.aeron.protocol.TradingCommandCodec.decodePlaceOrder
+allocationSite	2177875456	com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.bindMatcherEvidence
+allocationSite	2028877760	org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap.get
+allocationSite	1760783128	java.nio.ByteBuffer.allocate
+allocationSite	1390583400	java.lang.invoke.VarHandleLongs$Array.setRelease
+allocationSite	1372445792	exchange.core2.core.common.cmd.OrderCommand.processMatcherEvents
+allocationSite	1348193808	java.util.List.copyOf
+allocationSite	1327342280	com.surprising.aeron.service.execution.CoreMessageFlyweightDecoder.decode
+allocationSite	1203897296	com.surprising.aeron.service.state.RuntimeDerivativeFillCalculator$FillCursor.order
+parkOrMonitorNs	89449226073	aeron-md-nra
+parkOrMonitorNs	60104816383	Common-Cleaner
+parkOrMonitorNs	1458681746	core-matcher-1
+parkOrMonitorNs	1426214263	core-matcher-0
+parkOrMonitorNs	1090081861	archive-conductor
+parkOrMonitorNs	760265295	consensus-module-101-0
+parkOrMonitorNs	364564600	driver-conductor
+parkOrMonitorNs	173502646	/tmp/owner-master-opt/perf-upper/master-profile-LINEAR_PERPETUAL-0/media-surprising-linear_perpetual-0 [sender,receiver]
+eventCounts	171429	jdk.ExecutionSample
+eventCounts	96366	jdk.GCPhaseParallel
+eventCounts	83586	jdk.ThreadPark
+eventCounts	25984	jdk.ObjectAllocationSample
+eventCounts	14300	jdk.PromoteObjectInNewPLAB
+eventCounts	5432	jdk.ThreadSleep
+eventCounts	4298	jdk.NativeMethodSample
+eventCounts	2550	jdk.TenuringDistribution
+eventCounts	2430	jdk.NativeMemoryUsage
+eventCounts	1394	jdk.ThreadCPULoad
+eventCounts	1044	jdk.NativeLibrary
+eventCounts	857	jdk.ModuleExport
+
+```
+
+upper-owner.txt
+```text
+ownerSamples=29611
+focusedSamples
+3255	TradingRuntimeState.collectMatcherSettlement
+2069	TradingCoreRuntime.prepareClusterPipelineScope
+1828	TerminalStateRetention.
+1512	TerminalTombstoneStore.
+1389	TradingRuntimeState.collectCancel
+1279	ActiveOrderIndex.applySnapshot
+1185	TradingRuntimeState.readyLaneMask
+1161	MatcherSettlementPlan.build
+1029	RuntimeIdentityRegistry.releaseClientKey
+942	TradingOrderBatchCodec.decodeCommand
+879	OrderBatchExecutor.preparePipelinedPlaceBatch
+791	TradingRuntimeState.clearChangedKeys
+704	TerminalTombstoneStore.put
+356	ClusterCommandWindow.add
+196	DeterministicExchangeCoreAdapter.matcherShardId
+159	OrderBatchExecutor.decodeOrderBatch
+exactOrderBatchItemAllocation=0
+ownerInclusive
+29611	com.surprising.aeron.service.execution.ContinuousTradingClusterService$$Lambda.0x000000012f12f708.run
+29611	java.lang.Thread.run
+29611	java.lang.Thread.runWith
+29611	com.surprising.aeron.service.execution.ContinuousTradingClusterService.runOwner
+29354	com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommands
+29123	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommands
+28827	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommandsInScope
+20722	com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommandPrefix
+19656	com.surprising.aeron.service.execution.OrderedCommitCoordinator.commitReadyMatching
+12494	com.surprising.aeron.service.execution.OrderedCommitCoordinator.completeMatching
+8667	com.surprising.aeron.service.execution.OrderBatchExecutor.finishOrderBatch
+6621	com.surprising.aeron.service.execution.OrderedCommitCoordinator.pumpMatchingCommitCompletions
+3904	com.surprising.aeron.service.execution.OrderedCommitCoordinator.dispatchReadyPlaceSettlements
+3679	com.surprising.aeron.service.execution.TradingCoreRuntime.applyDecodedCommand
+3630	com.surprising.aeron.service.execution.TradingCoreRuntime.apply
+3627	com.surprising.aeron.service.execution.OrderedCommitCoordinator.dispatchPartitionSettlements
+3255	com.surprising.aeron.service.state.TradingRuntimeState.collectMatcherSettlement
+2811	com.surprising.aeron.service.state.RuntimeIndexedChangeBuffer.forEachIndexed
+2656	com.surprising.aeron.service.execution.OrderedCommitCoordinator.completeCommitPublicationBatch
+2654	com.surprising.aeron.service.execution.OrderedCommitCoordinator.publishCommittedChanges
+2650	com.surprising.aeron.service.execution.OrderedCommitCoordinator$OwnerCommitPublisher.execute
+2353	com.surprising.aeron.service.state.TradingRuntimeState$PublishedLaneChanges.commitTerminalToOwner
+2172	com.surprising.aeron.service.execution.TradingCoreRuntime.drainMatchingCompletions
+2146	com.surprising.aeron.service.execution.OrderBatchExecutor.beginOrderBatchMatching
+2069	com.surprising.aeron.service.execution.TradingCoreRuntime.prepareClusterPipelineScope
+1924	com.surprising.aeron.service.execution.OrderBatchExecutor.dispatchOrderBatchLaneWork
+1870	com.surprising.aeron.service.state.TradingRuntimeState.dispatchMatcherSettlementBatch
+1866	com.surprising.aeron.service.state.MatcherSettlementDispatcher.dispatchMatcherSettlementBatch
+1664	com.surprising.aeron.service.state.RuntimeFactIndexes.applyCurrent
+1651	com.surprising.aeron.service.state.TradingRuntimeState.visitChangedIndexes
+1561	com.surprising.aeron.service.state.OwnerIndexedChanges.forEachIndexed
+1540	com.surprising.aeron.service.execution.TradingCoreRuntime.progressPlaceAdmissions
+1389	com.surprising.aeron.service.state.TradingRuntimeState.collectCancel
+1347	com.surprising.aeron.service.execution.OrderBatchExecutor.tryActivatePipelinedOrderBatch
+1303	com.surprising.aeron.service.state.TradingRuntimeState.lambda$visitChangedIndexes$0
+1303	com.surprising.aeron.service.state.TradingRuntimeState$$Lambda.0x000000012f194000.accept
+1303	com.surprising.aeron.service.state.RuntimeFactIndexes.preparedOrder
+1279	com.surprising.aeron.service.state.index.ActiveOrderIndex.applySnapshot
+1205	com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource
+1203	com.surprising.aeron.service.execution.MatchingCommandAdmission.beginMatching
+1196	com.surprising.aeron.service.execution.MatchingCommandAdmission.prepareMatching
+1193	java.util.HashMap.getNode
+1185	com.surprising.aeron.service.state.TradingRuntimeState.readyLaneMask
+1157	com.surprising.aeron.service.execution.OrderedCommitCoordinator.completeDispatchedMatcherSettlement
+1148	com.surprising.aeron.service.execution.TradingCoreRuntime.drainLaneReadyNotifications
+1144	com.surprising.aeron.service.execution.OrderedCommitCoordinator.completeDispatchedCancel
+1094	com.surprising.aeron.service.state.MatcherSettlementPlan.build
+1089	com.surprising.aeron.service.execution.ClusterCommandWindow.decoded
+1084	com.surprising.aeron.service.state.TradingRuntimeState$PublishedLaneChanges$ClientIdentityReleaseBuffer.release
+1084	com.surprising.aeron.service.state.TradingRuntimeState$PublishedLaneChanges.releaseRetiredClientIdentities
+1060	com.surprising.aeron.service.execution.DecodedMatchingCommand.decode
+1057	com.surprising.aeron.service.state.MatcherSettlementPlan.buildBatchItem
+1045	java.util.concurrent.ConcurrentHashMap.get
+1029	com.surprising.aeron.service.state.RuntimeIdentityRegistry.releaseClientKey
+1015	java.util.HashMap.get
+1005	com.surprising.aeron.service.state.TradingRuntimeState.takePlaceAdmissionReadyLaneMask
+942	com.surprising.aeron.protocol.TradingOrderBatchCodec.decodeCommand
+921	com.surprising.aeron.protocol.TradingOrderBatchCodec.decodePlaceOrderBatch
+896	com.surprising.aeron.service.state.TradingRuntimeState$PublishedLaneChanges$$Lambda.0x000000012f1bc000.accept
+896	com.surprising.aeron.service.state.TradingRuntimeState$PublishedLaneChanges.lambda$commitTerminalToOwner$0
+896	com.surprising.aeron.service.execution.TerminalStateRetention.accept
+879	com.surprising.aeron.service.execution.OrderBatchExecutor.preparePipelinedPlaceBatch
+871	com.surprising.aeron.service.execution.TerminalStateRetention.retainPrunedOrder
+863	java.util.Arrays.fill
+831	com.surprising.aeron.protocol.TradingOrderBatchCodec$$Lambda.0x000000012f1e4218.decode
+ownerLeaf
+1127	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommandsInScope:226
+743	java.util.concurrent.ConcurrentHashMap.get:949
+731	com.surprising.aeron.protocol.TradingCommandCodec.decodePlaceOrder:251
+727	com.surprising.aeron.service.state.TradingRuntimeState.readyLaneMask:1773
+499	org.eclipse.collections.impl.set.mutable.primitive.LongHashSet.each:571
+488	com.surprising.aeron.service.execution.TerminalTombstoneStore.indexEntity:77
+465	java.util.HashMap.getNode:577
+410	jdk.internal.misc.Unsafe.putIntUnaligned:3715
+396	org.agrona.collections.Long2LongHashMap.get:208
+340	java.nio.HeapByteBuffer.put:221
+297	com.surprising.aeron.service.state.LaneSequenceQueue.hasPending:45
+283	com.surprising.aeron.service.state.RuntimeIndexedChangeBuffer.forEachIndexed:56
+280	com.surprising.aeron.protocol.CoreStateQueryCodec.utf8Length:342
+253	com.surprising.aeron.service.execution.TerminalTombstoneStore.unlinkEntity:86
+250	com.surprising.aeron.service.state.RuntimeIdentityRegistry.releaseClientKey:256
+233	java.util.HashMap.hash:338
+226	com.surprising.aeron.service.execution.OrderedCommitCoordinator.pumpMatchingCommitCompletions:1036
+221	java.util.Arrays.fill:3451
+215	java.util.concurrent.ConcurrentHashMap.get:957
+215	org.agrona.collections.Long2LongHashMap.compactChain:878
+215	java.util.Arrays.fill:3143
+212	com.surprising.aeron.service.execution.TradingCoreRuntime.bindOwner:2478
+209	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.getIfAbsent:2362
+204	java.lang.ThreadLocal.get:171
+204	org.eclipse.collections.impl.set.mutable.primitive.LongHashSet.probe:1043
+197	com.surprising.aeron.service.execution.TerminalTombstoneStore.unlinkClient:103
+190	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.get:2340
+182	com.surprising.aeron.service.state.RuntimeIndexedChangeBuffer.forEachIndexed:54
+180	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.probeThree:3090
+179	com.surprising.aeron.service.execution.ClusterCommandWindow.complete:200
+177	com.surprising.aeron.service.execution.TerminalTombstoneStore.clientSlot:98
+176	com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommands:542
+173	org.eclipse.collections.impl.set.mutable.primitive.LongHashSet.add:216
+173	java.util.HashMap.getNode:579
+161	com.surprising.aeron.service.state.TradingRuntimeState.readyLaneMask:1769
+ownerAllocationClass
+2916014120	[B
+965686896	com.surprising.aeron.protocol.PlaceOrderCommand
+719606096	[J
+610396808	java.lang.String
+275082648	java.lang.Long
+238815848	[Ljava.lang.Object;
+224406920	[I
+209062608	com.surprising.aeron.service.execution.OrderBatchExecutor$$Lambda.0x000000012f1ec230
+198750208	com.surprising.aeron.protocol.CoreResponse
+158668288	com.surprising.aeron.service.execution.CommandResultLedger$StoredResult
+132991936	com.surprising.aeron.service.execution.OrderBatchExecutor$$Lambda.0x000000012f1e3c60
+130448720	com.surprising.aeron.protocol.CoreMessageHeader
+111748008	java.nio.HeapByteBuffer
+110406328	com.surprising.aeron.service.execution.OrderBatchExecutor$$Lambda.0x000000012f1ec000
+108601464	java.util.HashMap$Node
+87127344	com.surprising.aeron.service.execution.ContinuousTradingClusterService$Output
+84878104	com.surprising.aeron.protocol.CoreOrderStateView
+84538728	com.surprising.aeron.protocol.CancelOrderCommand
+84031856	com.surprising.aeron.service.execution.ImmutableLongArrayList
+80961360	java.util.HashMap$KeyIterator
+80376736	com.surprising.aeron.service.state.ResolvedPlaceOrder
+76697584	java.util.ArrayList$Itr
+74973224	org.eclipse.collections.impl.set.mutable.primitive.IntHashSet
+74869160	com.surprising.aeron.service.state.RuntimeProjectionPoint
+65003376	java.util.LinkedHashMap$Entry
+ownerAllocationPaths
+2772272296	TradingCoreRuntime.prepareClusterPipelineScope
+2626934304	TradingOrderBatchCodec.decodeCommand
+518611000	ActiveOrderIndex.applySnapshot
+131897776	TradingRuntimeState.collectMatcherSettlement
+73340200	TradingRuntimeState.collectCancel
+68787864	OrderBatchExecutor.preparePipelinedPlaceBatch
+34303736	MatcherSettlementPlan.build
+laneLeaf
+108269	com.surprising.aeron.service.state.SettlementLaneWorker.run:154
+2066	java.lang.ThreadLocal.get:171
+1474	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.getIfAbsent:2362
+1463	com.surprising.aeron.service.state.SettlementLaneWorker.run:136
+912	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.probeThree:3090
+877	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.get:2340
+731	java.lang.ThreadLocal.get:184
+517	java.util.concurrent.ConcurrentHashMap.get:949
+383	com.surprising.aeron.service.state.OrderRuntime.<init>:47
+361	java.util.ImmutableCollections$ListItr.next:397
+275	java.lang.ThreadLocal.get:193
+269	com.surprising.aeron.service.state.LanePublishedMap$Version.reclaim:49
+ownerParkMonitorNs
+afterGCminute=0 count=112 minMiB=101.757 averageMiB=104.900 maxMiB=109.628
+afterGCminute=1 count=58 minMiB=103.655 averageMiB=106.328 maxMiB=110.263
+
+```
+
+gates-upper.log
+```text
+SPOT execute productLineGate=PASS mode=execute productLine=SPOT fundsDiff=0 bookLevels=0 seed=9701
+SPOT replay productLineGate=PASS mode=verify productLine=SPOT fundsDiff=0 bookLevels=0 seed=9701
+SPOT snapshotPosition=3616
+SPOT snapshot productLineGate=PASS mode=verify productLine=SPOT fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_PERPETUAL execute productLineGate=PASS mode=execute productLine=LINEAR_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_PERPETUAL replay productLineGate=PASS mode=verify productLine=LINEAR_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_PERPETUAL snapshotPosition=9568
+LINEAR_PERPETUAL snapshot productLineGate=PASS mode=verify productLine=LINEAR_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_PERPETUAL execute productLineGate=PASS mode=execute productLine=INVERSE_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_PERPETUAL replay productLineGate=PASS mode=verify productLine=INVERSE_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_PERPETUAL snapshotPosition=9568
+INVERSE_PERPETUAL snapshot productLineGate=PASS mode=verify productLine=INVERSE_PERPETUAL fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_DELIVERY execute productLineGate=PASS mode=execute productLine=LINEAR_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_DELIVERY replay productLineGate=PASS mode=verify productLine=LINEAR_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+LINEAR_DELIVERY snapshotPosition=5184
+LINEAR_DELIVERY snapshot productLineGate=PASS mode=verify productLine=LINEAR_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_DELIVERY execute productLineGate=PASS mode=execute productLine=INVERSE_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_DELIVERY replay productLineGate=PASS mode=verify productLine=INVERSE_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+INVERSE_DELIVERY snapshotPosition=5184
+INVERSE_DELIVERY snapshot productLineGate=PASS mode=verify productLine=INVERSE_DELIVERY fundsDiff=0 bookLevels=0 seed=9701
+OPTION execute productLineGate=PASS mode=execute productLine=OPTION fundsDiff=0 bookLevels=0 seed=9701
+OPTION replay productLineGate=PASS mode=verify productLine=OPTION fundsDiff=0 bookLevels=0 seed=9701
+OPTION snapshotPosition=5184
+OPTION snapshot productLineGate=PASS mode=verify productLine=OPTION fundsDiff=0 bookLevels=0 seed=9701
+
+```
+
+recovery-upper.log
+```text
+master replay PASS businessHash=302d26290618b164
+master snapshotPosition=1973235296
+master snapshot PASS businessHash=302d26290618b164
+
+```
+
+master-control-INVERSE_DELIVERY-0
+```text
+Iteration   2: accountControlVerify=PASS product=INVERSE_DELIVERY terminalBusinessOperations=2400 unfinished=0 fundsDiff=0 netPosition=0
+CPU_Speed_Limit=97–97（明显限速，性能验收无效，仅诊断）
+nmt-before.txt
+Total: reserved=3148584KB, committed=692212KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=60555KB, committed=1947KB)
+-                      Code (reserved=250358KB, committed=16026KB)
+-                        GC (reserved=91623KB, committed=71183KB)
+-                     Other (reserved=9409KB, committed=9409KB)
+nmt-after.txt
+Total: reserved=3138233KB, committed=696757KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=52372KB, committed=2584KB)
+-                      Code (reserved=252426KB, committed=22802KB)
+-                        GC (reserved=91806KB, committed=71326KB)
+-                     Other (reserved=9411KB, committed=9411KB)
+JFR bytes=2269032 sha256=8c90320f4ce8467636d04cf14bfec22b721f3e897b87d2ce16a88ead50f4f3eb
+ Duration: 14 s
+ jdk.ThreadPark                          42963       1203251
+ jdk.ExecutionSample                     18655        205176
+ jdk.ObjectAllocationSample                198          2930
+ jdk.GCPhasePauseLevel1                     15           595
+ jdk.GCPhasePauseLevel2                     10           348
+ jdk.GCPhasePause                            4           100
+ jdk.JavaMonitorEnter                        1            23
+ jdk.DataLoss                                0             0
+ jdk.GCPhasePauseLevel3                      0             0
+ jdk.GCPhasePauseLevel4                      0             0
+JMH [{"jmhVersion":"1.37","benchmark":"com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls","mode":"ss","threads":1,"forks":1,"jvm":"/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","jvmArgs":["-XX:ThreadPriorityPolicy=1","-XX:+UnlockExperimentalVMOptions","-XX:+EnableJVMCIProduct","-XX:+EnableJVMCI","-XX:-UnlockExperimentalVMOptions","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=INVERSE_DELIVERY","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-upper/master-control-INVERSE_DELIVERY-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-upper/master-control-INVERSE_DELIVERY-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=90","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true"],"jdkVersion":"25.0.1","vmName":"Java HotSpot(TM) 64-Bit Server VM","vmVersion":"25.0.1+8-LTS-jvmci-b01","warmupIterations":1,"warmupTime":"single-shot","warmupBatchSize":1,"measurementIterations":2,"measurementTime":"single-shot","measurementBatchSize":1,"params":{"productLine":"INVERSE_DELIVERY"},"primaryMetric":{"score":3114.275092,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":3062.450018,"50.0":3114.275092,"90.0":3166.100166,"95.0":3166.100166,"99.0":3166.100166,"99.9":3166.100166,"99.99":3166.100166,"99.999":3166.100166,"99.9999":3166.100166,"100.0":3166.100166},"scoreUnit":"ms/op","rawData":[[3062.450018,3166.100166]]},"secondaryMetrics":{"gc.alloc.rate":{"score":0.7456773947671981,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":0.7226884448968361,"50.0":0.7456773947671981,"90.0":0.76866634463756,"95.0":0.76866634463756,"99.0":0.76866634463756,"99.9":0.76866634463756,"99.99":0.76866634463756,"99.999":0.76866634463756,"99.9999":0.76866634463756,"100.0":0.76866634463756},"scoreUnit":"MB/sec","rawData":[[0.7226884448968361,0.76866634463756]]},"gc.alloc.rate.norm":{"score":2469268.0,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":2320920.0,"50.0":2469268.0,"90.0":2617616.0,"95.0":2617616.0,"99.0":2617616.0,"99.9":2617616.0,"99.99":2617616.0,"99.999":2617616.0,"99.9999":2617616.0,"100.0":2617616.0},"scoreUnit":"B/op","rawData":[[2320920.0,2617616.0]]},"gc.count":{"score":0.0,"scoreError":"NaN","scoreConfidence":[0.0,0.0],"scorePercentiles":{"0.0":0.0,"50.0":0.0,"90.0":0.0,"95.0":0.0,"99.0":0.0,"99.9":0.0,"99.99":0.0,"99.999":0.0,"99.9999":0.0,"100.0":0.0},"scoreUnit":"counts","rawData":[[0.0,0.0]]}}}]
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=INVERSE_DELIVERY","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-upper/master-control-INVERSE_DELIVERY-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-upper/master-control-INVERSE_DELIVERY-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf-upper/master-control-INVERSE_DELIVERY-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-XX:StartFlightRecording=settings=/tmp/owner-master-opt/owner.jfc,maxsize=192m,dumponexit=true,filename=/tmp/owner-master-opt/perf-upper/master-control-INVERSE_DELIVERY-0/node.jfr","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=INVERSE_DELIVERY","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-upper/master-control-INVERSE_DELIVERY-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-upper/master-control-INVERSE_DELIVERY-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=90","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","org.openjdk.jmh.Main","ClusterAccountControlBenchmark.accountControls","-f","1","-wi","1","-i","2","-p","productLine=INVERSE_DELIVERY","-prof","gc","-rf","json","-rff","/tmp/owner-master-opt/perf-upper/master-control-INVERSE_DELIVERY-0/jmh.json"]]
+```
+
+master-control-INVERSE_PERPETUAL-0
+```text
+Iteration   2: accountControlVerify=PASS product=INVERSE_PERPETUAL terminalBusinessOperations=2400 unfinished=0 fundsDiff=0 netPosition=0
+CPU_Speed_Limit=93–97（明显限速，性能验收无效，仅诊断）
+nmt-before.txt
+Total: reserved=3142336KB, committed=692084KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=54404KB, committed=1916KB)
+-                      Code (reserved=250329KB, committed=15997KB)
+-                        GC (reserved=91616KB, committed=71176KB)
+-                     Other (reserved=9409KB, committed=9409KB)
+nmt-after.txt
+Total: reserved=3138170KB, committed=696826KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=52371KB, committed=2587KB)
+-                      Code (reserved=252419KB, committed=22859KB)
+-                        GC (reserved=91803KB, committed=71323KB)
+-                     Other (reserved=9411KB, committed=9411KB)
+JFR bytes=2260311 sha256=926eaf7c8b1eaac881e458d6b7090059cc658585087576180c3a15f80d0799fc
+ Duration: 14 s
+ jdk.ThreadPark                          42970       1203172
+ jdk.ExecutionSample                     18600        204572
+ jdk.ObjectAllocationSample                163          2413
+ jdk.GCPhasePauseLevel1                     15           595
+ jdk.GCPhasePauseLevel2                     10           348
+ jdk.GCPhasePause                            4           100
+ jdk.JavaMonitorEnter                        1            23
+ jdk.DataLoss                                0             0
+ jdk.GCPhasePauseLevel3                      0             0
+ jdk.GCPhasePauseLevel4                      0             0
+JMH [{"jmhVersion":"1.37","benchmark":"com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls","mode":"ss","threads":1,"forks":1,"jvm":"/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","jvmArgs":["-XX:ThreadPriorityPolicy=1","-XX:+UnlockExperimentalVMOptions","-XX:+EnableJVMCIProduct","-XX:+EnableJVMCI","-XX:-UnlockExperimentalVMOptions","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=INVERSE_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-upper/master-control-INVERSE_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-upper/master-control-INVERSE_PERPETUAL-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=90","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true"],"jdkVersion":"25.0.1","vmName":"Java HotSpot(TM) 64-Bit Server VM","vmVersion":"25.0.1+8-LTS-jvmci-b01","warmupIterations":1,"warmupTime":"single-shot","warmupBatchSize":1,"measurementIterations":2,"measurementTime":"single-shot","measurementBatchSize":1,"params":{"productLine":"INVERSE_PERPETUAL"},"primaryMetric":{"score":3055.6487129999996,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":3045.353859,"50.0":3055.6487129999996,"90.0":3065.943567,"95.0":3065.943567,"99.0":3065.943567,"99.9":3065.943567,"99.99":3065.943567,"99.999":3065.943567,"99.9999":3065.943567,"100.0":3065.943567},"scoreUnit":"ms/op","rawData":[[3065.943567,3045.353859]]},"secondaryMetrics":{"gc.alloc.rate":{"score":0.8753512412875928,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":0.6065236438415315,"50.0":0.8753512412875928,"90.0":1.144178838733654,"95.0":1.144178838733654,"99.0":1.144178838733654,"99.9":1.144178838733654,"99.99":1.144178838733654,"99.999":1.144178838733654,"99.9999":1.144178838733654,"100.0":1.144178838733654},"scoreUnit":"MB/sec","rawData":[[0.6065236438415315,1.144178838733654]]},"gc.alloc.rate.norm":{"score":2845036.0,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":1950096.0,"50.0":2845036.0,"90.0":3739976.0,"95.0":3739976.0,"99.0":3739976.0,"99.9":3739976.0,"99.99":3739976.0,"99.999":3739976.0,"99.9999":3739976.0,"100.0":3739976.0},"scoreUnit":"B/op","rawData":[[1950096.0,3739976.0]]},"gc.count":{"score":0.0,"scoreError":"NaN","scoreConfidence":[0.0,0.0],"scorePercentiles":{"0.0":0.0,"50.0":0.0,"90.0":0.0,"95.0":0.0,"99.0":0.0,"99.9":0.0,"99.99":0.0,"99.999":0.0,"99.9999":0.0,"100.0":0.0},"scoreUnit":"counts","rawData":[[0.0,0.0]]}}}]
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=INVERSE_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-upper/master-control-INVERSE_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-upper/master-control-INVERSE_PERPETUAL-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf-upper/master-control-INVERSE_PERPETUAL-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-XX:StartFlightRecording=settings=/tmp/owner-master-opt/owner.jfc,maxsize=192m,dumponexit=true,filename=/tmp/owner-master-opt/perf-upper/master-control-INVERSE_PERPETUAL-0/node.jfr","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=INVERSE_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-upper/master-control-INVERSE_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-upper/master-control-INVERSE_PERPETUAL-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=90","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","org.openjdk.jmh.Main","ClusterAccountControlBenchmark.accountControls","-f","1","-wi","1","-i","2","-p","productLine=INVERSE_PERPETUAL","-prof","gc","-rf","json","-rff","/tmp/owner-master-opt/perf-upper/master-control-INVERSE_PERPETUAL-0/jmh.json"]]
+```
+
+master-control-LINEAR_DELIVERY-0
+```text
+Iteration   2: accountControlVerify=PASS product=LINEAR_DELIVERY terminalBusinessOperations=2400 unfinished=0 fundsDiff=0 netPosition=0
+CPU_Speed_Limit=97–100（明显限速，性能验收无效，仅诊断）
+nmt-before.txt
+Total: reserved=3142274KB, committed=691970KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=54404KB, committed=1864KB)
+-                      Code (reserved=250348KB, committed=16016KB)
+-                        GC (reserved=91615KB, committed=71175KB)
+-                     Other (reserved=9409KB, committed=9409KB)
+nmt-after.txt
+Total: reserved=3140286KB, committed=696842KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=54422KB, committed=2602KB)
+-                      Code (reserved=252430KB, committed=22870KB)
+-                        GC (reserved=91804KB, committed=71324KB)
+-                     Other (reserved=9411KB, committed=9411KB)
+JFR bytes=2267686 sha256=507a7df4014b66cf3e68ba89e41c6355a12f9b53fed3e35b1d7d0c9282d9e18a
+ Duration: 14 s
+ jdk.ThreadPark                          42912       1201500
+ jdk.ExecutionSample                     18458        203002
+ jdk.ObjectAllocationSample                166          2453
+ jdk.GCPhasePauseLevel1                     15           595
+ jdk.GCPhasePauseLevel2                     10           348
+ jdk.GCPhasePause                            4           100
+ jdk.JavaMonitorEnter                        1            23
+ jdk.DataLoss                                0             0
+ jdk.GCPhasePauseLevel3                      0             0
+ jdk.GCPhasePauseLevel4                      0             0
+JMH [{"jmhVersion":"1.37","benchmark":"com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls","mode":"ss","threads":1,"forks":1,"jvm":"/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","jvmArgs":["-XX:ThreadPriorityPolicy=1","-XX:+UnlockExperimentalVMOptions","-XX:+EnableJVMCIProduct","-XX:+EnableJVMCI","-XX:-UnlockExperimentalVMOptions","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_DELIVERY","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-upper/master-control-LINEAR_DELIVERY-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-upper/master-control-LINEAR_DELIVERY-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=90","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true"],"jdkVersion":"25.0.1","vmName":"Java HotSpot(TM) 64-Bit Server VM","vmVersion":"25.0.1+8-LTS-jvmci-b01","warmupIterations":1,"warmupTime":"single-shot","warmupBatchSize":1,"measurementIterations":2,"measurementTime":"single-shot","measurementBatchSize":1,"params":{"productLine":"LINEAR_DELIVERY"},"primaryMetric":{"score":3105.5732335,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":3063.967124,"50.0":3105.5732335,"90.0":3147.179343,"95.0":3147.179343,"99.0":3147.179343,"99.9":3147.179343,"99.99":3147.179343,"99.999":3147.179343,"99.9999":3147.179343,"100.0":3147.179343},"scoreUnit":"ms/op","rawData":[[3147.179343,3063.967124]]},"secondaryMetrics":{"gc.alloc.rate":{"score":1.2111073898944045,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":1.084522738958506,"50.0":1.2111073898944045,"90.0":1.3376920408303028,"95.0":1.3376920408303028,"99.0":1.3376920408303028,"99.9":1.3376920408303028,"99.99":1.3376920408303028,"99.999":1.3376920408303028,"99.9999":1.3376920408303028,"100.0":1.3376920408303028},"scoreUnit":"MB/sec","rawData":[[1.084522738958506,1.3376920408303028]]},"gc.alloc.rate.norm":{"score":3994860.0,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":3579328.0,"50.0":3994860.0,"90.0":4410392.0,"95.0":4410392.0,"99.0":4410392.0,"99.9":4410392.0,"99.99":4410392.0,"99.999":4410392.0,"99.9999":4410392.0,"100.0":4410392.0},"scoreUnit":"B/op","rawData":[[3579328.0,4410392.0]]},"gc.count":{"score":0.0,"scoreError":"NaN","scoreConfidence":[0.0,0.0],"scorePercentiles":{"0.0":0.0,"50.0":0.0,"90.0":0.0,"95.0":0.0,"99.0":0.0,"99.9":0.0,"99.99":0.0,"99.999":0.0,"99.9999":0.0,"100.0":0.0},"scoreUnit":"counts","rawData":[[0.0,0.0]]}}}]
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_DELIVERY","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-upper/master-control-LINEAR_DELIVERY-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-upper/master-control-LINEAR_DELIVERY-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf-upper/master-control-LINEAR_DELIVERY-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-XX:StartFlightRecording=settings=/tmp/owner-master-opt/owner.jfc,maxsize=192m,dumponexit=true,filename=/tmp/owner-master-opt/perf-upper/master-control-LINEAR_DELIVERY-0/node.jfr","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_DELIVERY","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-upper/master-control-LINEAR_DELIVERY-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-upper/master-control-LINEAR_DELIVERY-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=90","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","org.openjdk.jmh.Main","ClusterAccountControlBenchmark.accountControls","-f","1","-wi","1","-i","2","-p","productLine=LINEAR_DELIVERY","-prof","gc","-rf","json","-rff","/tmp/owner-master-opt/perf-upper/master-control-LINEAR_DELIVERY-0/jmh.json"]]
+```
+
+master-control-LINEAR_PERPETUAL-0
+```text
+Iteration   2: accountControlVerify=PASS product=LINEAR_PERPETUAL terminalBusinessOperations=2400 unfinished=0 fundsDiff=0 netPosition=0
+CPU_Speed_Limit=89–91（明显限速，性能验收无效，仅诊断）
+nmt-before.txt
+Total: reserved=3144541KB, committed=692221KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=56455KB, committed=1899KB)
+-                      Code (reserved=250335KB, committed=16003KB)
+-                        GC (reserved=91627KB, committed=71187KB)
+-                     Other (reserved=9409KB, committed=9409KB)
+nmt-after.txt
+Total: reserved=3138186KB, committed=696770KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=52372KB, committed=2516KB)
+-                      Code (reserved=252428KB, committed=22868KB)
+-                        GC (reserved=91790KB, committed=71310KB)
+-                     Other (reserved=9411KB, committed=9411KB)
+JFR bytes=2271813 sha256=8c3199a27ee69ebb92437d95485efb53f397d74da693c7cff6db3a83491c21de
+ Duration: 14 s
+ jdk.ThreadPark                          43062       1206032
+ jdk.ExecutionSample                     18675        205392
+ jdk.ObjectAllocationSample                172          2542
+ jdk.GCPhasePauseLevel1                     15           595
+ jdk.GCPhasePauseLevel2                     10           348
+ jdk.GCPhasePause                            4           100
+ jdk.JavaMonitorEnter                        1            23
+ jdk.DataLoss                                0             0
+ jdk.GCPhasePauseLevel3                      0             0
+ jdk.GCPhasePauseLevel4                      0             0
+JMH [{"jmhVersion":"1.37","benchmark":"com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls","mode":"ss","threads":1,"forks":1,"jvm":"/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","jvmArgs":["-XX:ThreadPriorityPolicy=1","-XX:+UnlockExperimentalVMOptions","-XX:+EnableJVMCIProduct","-XX:+EnableJVMCI","-XX:-UnlockExperimentalVMOptions","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-upper/master-control-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-upper/master-control-LINEAR_PERPETUAL-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=90","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true"],"jdkVersion":"25.0.1","vmName":"Java HotSpot(TM) 64-Bit Server VM","vmVersion":"25.0.1+8-LTS-jvmci-b01","warmupIterations":1,"warmupTime":"single-shot","warmupBatchSize":1,"measurementIterations":2,"measurementTime":"single-shot","measurementBatchSize":1,"params":{"productLine":"LINEAR_PERPETUAL"},"primaryMetric":{"score":3087.313232,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":3053.10797,"50.0":3087.313232,"90.0":3121.518494,"95.0":3121.518494,"99.0":3121.518494,"99.9":3121.518494,"99.99":3121.518494,"99.999":3121.518494,"99.9999":3121.518494,"100.0":3121.518494},"scoreUnit":"ms/op","rawData":[[3053.10797,3121.518494]]},"secondaryMetrics":{"gc.alloc.rate":{"score":1.0011952755164253,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":0.855144581097114,"50.0":1.0011952755164253,"90.0":1.1472459699357365,"95.0":1.1472459699357365,"99.0":1.1472459699357365,"99.9":1.1472459699357365,"99.99":1.1472459699357365,"99.999":1.1472459699357365,"99.9999":1.1472459699357365,"100.0":1.1472459699357365},"scoreUnit":"MB/sec","rawData":[[0.855144581097114,1.1472459699357365]]},"gc.alloc.rate.norm":{"score":3285224.0,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":2737944.0,"50.0":3285224.0,"90.0":3832504.0,"95.0":3832504.0,"99.0":3832504.0,"99.9":3832504.0,"99.99":3832504.0,"99.999":3832504.0,"99.9999":3832504.0,"100.0":3832504.0},"scoreUnit":"B/op","rawData":[[2737944.0,3832504.0]]},"gc.count":{"score":0.0,"scoreError":"NaN","scoreConfidence":[0.0,0.0],"scorePercentiles":{"0.0":0.0,"50.0":0.0,"90.0":0.0,"95.0":0.0,"99.0":0.0,"99.9":0.0,"99.99":0.0,"99.999":0.0,"99.9999":0.0,"100.0":0.0},"scoreUnit":"counts","rawData":[[0.0,0.0]]}}}]
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-upper/master-control-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-upper/master-control-LINEAR_PERPETUAL-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf-upper/master-control-LINEAR_PERPETUAL-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-XX:StartFlightRecording=settings=/tmp/owner-master-opt/owner.jfc,maxsize=192m,dumponexit=true,filename=/tmp/owner-master-opt/perf-upper/master-control-LINEAR_PERPETUAL-0/node.jfr","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-upper/master-control-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-upper/master-control-LINEAR_PERPETUAL-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=90","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","org.openjdk.jmh.Main","ClusterAccountControlBenchmark.accountControls","-f","1","-wi","1","-i","2","-p","productLine=LINEAR_PERPETUAL","-prof","gc","-rf","json","-rff","/tmp/owner-master-opt/perf-upper/master-control-LINEAR_PERPETUAL-0/jmh.json"]]
+```
+
+master-control-OPTION-0
+```text
+Iteration   2: accountControlVerify=PASS product=OPTION terminalBusinessOperations=1800 unfinished=0 fundsDiff=0 netPosition=0
+CPU_Speed_Limit=97–100（明显限速，性能验收无效，仅诊断）
+nmt-before.txt
+Total: reserved=3142414KB, committed=692094KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=54404KB, committed=1848KB)
+-                      Code (reserved=250343KB, committed=16011KB)
+-                        GC (reserved=91618KB, committed=71178KB)
+-                     Other (reserved=9409KB, committed=9409KB)
+nmt-after.txt
+Total: reserved=3140181KB, committed=696169KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=54422KB, committed=2606KB)
+-                      Code (reserved=252408KB, committed=22268KB)
+-                        GC (reserved=91811KB, committed=71339KB)
+-                     Other (reserved=9411KB, committed=9411KB)
+JFR bytes=2064154 sha256=315d198389453985665c10eeacf8b861da6731fbb53a0e539d88ef28787b679f
+ Duration: 12 s
+ jdk.ThreadPark                          37876       1060502
+ jdk.ExecutionSample                     15132        166419
+ jdk.ObjectAllocationSample                168          2479
+ jdk.GCPhasePauseLevel1                     15           595
+ jdk.GCPhasePauseLevel2                     10           348
+ jdk.GCPhasePause                            4           100
+ jdk.JavaMonitorEnter                        1            23
+ jdk.DataLoss                                0             0
+ jdk.GCPhasePauseLevel3                      0             0
+ jdk.GCPhasePauseLevel4                      0             0
+JMH [{"jmhVersion":"1.37","benchmark":"com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls","mode":"ss","threads":1,"forks":1,"jvm":"/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","jvmArgs":["-XX:ThreadPriorityPolicy=1","-XX:+UnlockExperimentalVMOptions","-XX:+EnableJVMCIProduct","-XX:+EnableJVMCI","-XX:-UnlockExperimentalVMOptions","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=OPTION","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-upper/master-control-OPTION-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-upper/master-control-OPTION-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=90","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true"],"jdkVersion":"25.0.1","vmName":"Java HotSpot(TM) 64-Bit Server VM","vmVersion":"25.0.1+8-LTS-jvmci-b01","warmupIterations":1,"warmupTime":"single-shot","warmupBatchSize":1,"measurementIterations":2,"measurementTime":"single-shot","measurementBatchSize":1,"params":{"productLine":"OPTION"},"primaryMetric":{"score":2324.8788335,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":2293.524667,"50.0":2324.8788335,"90.0":2356.233,"95.0":2356.233,"99.0":2356.233,"99.9":2356.233,"99.99":2356.233,"99.999":2356.233,"99.9999":2356.233,"100.0":2356.233},"scoreUnit":"ms/op","rawData":[[2356.233,2293.524667]]},"secondaryMetrics":{"gc.alloc.rate":{"score":1.0405914347104994,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":0.8352149562262927,"50.0":1.0405914347104994,"90.0":1.2459679131947061,"95.0":1.2459679131947061,"99.0":1.2459679131947061,"99.9":1.2459679131947061,"99.99":1.2459679131947061,"99.999":1.2459679131947061,"99.9999":1.2459679131947061,"100.0":1.2459679131947061},"scoreUnit":"MB/sec","rawData":[[0.8352149562262927,1.2459679131947061]]},"gc.alloc.rate.norm":{"score":2579164.0,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":2063856.0,"50.0":2579164.0,"90.0":3094472.0,"95.0":3094472.0,"99.0":3094472.0,"99.9":3094472.0,"99.99":3094472.0,"99.999":3094472.0,"99.9999":3094472.0,"100.0":3094472.0},"scoreUnit":"B/op","rawData":[[2063856.0,3094472.0]]},"gc.count":{"score":0.0,"scoreError":"NaN","scoreConfidence":[0.0,0.0],"scorePercentiles":{"0.0":0.0,"50.0":0.0,"90.0":0.0,"95.0":0.0,"99.0":0.0,"99.9":0.0,"99.99":0.0,"99.999":0.0,"99.9999":0.0,"100.0":0.0},"scoreUnit":"counts","rawData":[[0.0,0.0]]}}}]
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=OPTION","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-upper/master-control-OPTION-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-upper/master-control-OPTION-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf-upper/master-control-OPTION-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-XX:StartFlightRecording=settings=/tmp/owner-master-opt/owner.jfc,maxsize=192m,dumponexit=true,filename=/tmp/owner-master-opt/perf-upper/master-control-OPTION-0/node.jfr","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=OPTION","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-upper/master-control-OPTION-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-upper/master-control-OPTION-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=90","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","org.openjdk.jmh.Main","ClusterAccountControlBenchmark.accountControls","-f","1","-wi","1","-i","2","-p","productLine=OPTION","-prof","gc","-rf","json","-rff","/tmp/owner-master-opt/perf-upper/master-control-OPTION-0/jmh.json"]]
+```
+
+master-control-SPOT-0
+```text
+Iteration   2: accountControlVerify=PASS product=SPOT terminalBusinessOperations=600 unfinished=0 fundsDiff=0 netPosition=0
+CPU_Speed_Limit=85–87（明显限速，性能验收无效，仅诊断）
+nmt-before.txt
+Total: reserved=3146462KB, committed=692106KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=58505KB, committed=1913KB)
+-                      Code (reserved=250332KB, committed=16000KB)
+-                        GC (reserved=91620KB, committed=71180KB)
+-                     Other (reserved=9409KB, committed=9409KB)
+nmt-after.txt
+Total: reserved=3139131KB, committed=693519KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=54422KB, committed=2490KB)
+-                      Code (reserved=251853KB, committed=21261KB)
+-                        GC (reserved=91760KB, committed=71280KB)
+-                     Other (reserved=9411KB, committed=9411KB)
+JFR bytes=1341072 sha256=375ad4c31d8f8f20d5bb2ccc9cf360aed80de0e31605bb58a7b4bd34bff9df5a
+ Duration: 6 s
+ jdk.ThreadPark                          18885        528750
+ jdk.ExecutionSample                      5319         58478
+ jdk.ObjectAllocationSample                186          2748
+ jdk.GCPhasePauseLevel1                     15           595
+ jdk.GCPhasePauseLevel2                     10           348
+ jdk.GCPhasePause                            4           100
+ jdk.JavaMonitorEnter                        1            23
+ jdk.DataLoss                                0             0
+ jdk.GCPhasePauseLevel3                      0             0
+ jdk.GCPhasePauseLevel4                      0             0
+JMH [{"jmhVersion":"1.37","benchmark":"com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls","mode":"ss","threads":1,"forks":1,"jvm":"/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","jvmArgs":["-XX:ThreadPriorityPolicy=1","-XX:+UnlockExperimentalVMOptions","-XX:+EnableJVMCIProduct","-XX:+EnableJVMCI","-XX:-UnlockExperimentalVMOptions","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=SPOT","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-upper/master-control-SPOT-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-upper/master-control-SPOT-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=90","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true"],"jdkVersion":"25.0.1","vmName":"Java HotSpot(TM) 64-Bit Server VM","vmVersion":"25.0.1+8-LTS-jvmci-b01","warmupIterations":1,"warmupTime":"single-shot","warmupBatchSize":1,"measurementIterations":2,"measurementTime":"single-shot","measurementBatchSize":1,"params":{"productLine":"SPOT"},"primaryMetric":{"score":810.2058045,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":795.129565,"50.0":810.2058045,"90.0":825.282044,"95.0":825.282044,"99.0":825.282044,"99.9":825.282044,"99.99":825.282044,"99.999":825.282044,"99.9999":825.282044,"100.0":825.282044},"scoreUnit":"ms/op","rawData":[[825.282044,795.129565]]},"secondaryMetrics":{"gc.alloc.rate":{"score":1.2943141938368932,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":0.8208618011670447,"50.0":1.2943141938368932,"90.0":1.7677665865067418,"95.0":1.7677665865067418,"99.0":1.7677665865067418,"99.9":1.7677665865067418,"99.99":1.7677665865067418,"99.999":1.7677665865067418,"99.9999":1.7677665865067418,"100.0":1.7677665865067418},"scoreUnit":"MB/sec","rawData":[[0.8208618011670447,1.7677665865067418]]},"gc.alloc.rate.norm":{"score":1151748.0,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":710544.0,"50.0":1151748.0,"90.0":1592952.0,"95.0":1592952.0,"99.0":1592952.0,"99.9":1592952.0,"99.99":1592952.0,"99.999":1592952.0,"99.9999":1592952.0,"100.0":1592952.0},"scoreUnit":"B/op","rawData":[[710544.0,1592952.0]]},"gc.count":{"score":0.0,"scoreError":"NaN","scoreConfidence":[0.0,0.0],"scorePercentiles":{"0.0":0.0,"50.0":0.0,"90.0":0.0,"95.0":0.0,"99.0":0.0,"99.9":0.0,"99.99":0.0,"99.999":0.0,"99.9999":0.0,"100.0":0.0},"scoreUnit":"counts","rawData":[[0.0,0.0]]}}}]
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=SPOT","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-upper/master-control-SPOT-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-upper/master-control-SPOT-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf-upper/master-control-SPOT-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-XX:StartFlightRecording=settings=/tmp/owner-master-opt/owner.jfc,maxsize=192m,dumponexit=true,filename=/tmp/owner-master-opt/perf-upper/master-control-SPOT-0/node.jfr","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=SPOT","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-upper/master-control-SPOT-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-upper/master-control-SPOT-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=90","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","org.openjdk.jmh.Main","ClusterAccountControlBenchmark.accountControls","-f","1","-wi","1","-i","2","-p","productLine=SPOT","-prof","gc","-rf","json","-rff","/tmp/owner-master-opt/perf-upper/master-control-SPOT-0/jmh.json"]]
+```
+
+master-main-LINEAR_PERPETUAL-0
+```text
+measurementStartEpochMillis=1789052823736
+measurementEndEpochMillis=1789052883792
+ownerChurnVerify=PASS completedOrderLifecycles=8632320 terminalIndexEmpty=true reservationsEmpty=true
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=759 businessHash=ad5b4645664a3f98
+adminActionRetries=70
+mixedCapacity=PASS elapsedSeconds=60.056 terminalBusinessOperations=12100352 offeredBusinessOperations=12100352 terminalCoreMessages=1166080 offeredCoreMessages=1166080 businessOpsPerSec=201483.078 coreMessagesPerSec=19416.409 fills=2877440 fillsPerSec=47912.281 queries=0 unfinished=0 peakInFlight=256 measuredCycles=562 totalCycles=759 triggerExecutions=0
+business=PLACE_ORDER items=287744 requests=287744 p50us=7385 p90us=18628 p95us=20479 p99us=24690 p999us=49905 maxus=62554
+business=CANCEL_ORDER items=287744 requests=287744 p50us=6709 p90us=15261 p95us=17022 p99us=21954 p999us=44204 maxus=58359
+business=APPLY_MARK_PRICE items=15104 requests=15104 p50us=11804 p90us=19644 p95us=21954 p99us=35487 p999us=51740 maxus=53411
+business=PLACE_ORDER_BATCH items=8632320 requests=431616 p50us=16498 p90us=19726 p95us=21790 p99us=34209 p999us=53280 maxus=61538
+business=CANCEL_ORDER_BATCH items=2877440 requests=143872 p50us=18169 p90us=21577 p95us=23101 p99us=32292 p999us=58327 maxus=62619
+CPU_Speed_Limit=64–100（明显限速，性能验收无效，仅诊断）
+nmt-before.txt
+Total: reserved=3118415KB, committed=666683KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=49273KB, committed=1729KB)
+-                      Code (reserved=249329KB, committed=11837KB)
+-                        GC (reserved=91608KB, committed=71168KB)
+-                     Other (reserved=9385KB, committed=9385KB)
+nmt-after.txt
+Total: reserved=3130903KB, committed=706659KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=49290KB, committed=2478KB)
+-                      Code (reserved=261863KB, committed=45719KB)
+-                        GC (reserved=92460KB, committed=71988KB)
+-                     Other (reserved=9387KB, committed=9387KB)
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-upper/master-main-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-upper/master-main-LINEAR_PERPETUAL-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf-upper/master-main-LINEAR_PERPETUAL-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-upper/master-main-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-upper/master-main-LINEAR_PERPETUAL-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=60","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","com.surprising.aeron.benchmarks.workload.ClusterMixedCapacityMain"]]
+```
+
+master-profile-LINEAR_PERPETUAL-0
+```text
+measurementStartEpochMillis=1789052956937
+measurementEndEpochMillis=1789053047070
+ownerChurnVerify=PASS completedOrderLifecycles=11412480 terminalIndexEmpty=true reservationsEmpty=true
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=947 businessHash=302d26290618b164
+adminActionRetries=92
+mixedCapacity=PASS elapsedSeconds=90.133 terminalBusinessOperations=16000263 offeredBusinessOperations=16000263 terminalCoreMessages=1544455 offeredCoreMessages=1544455 businessOpsPerSec=177517.466 coreMessagesPerSec=17135.202 fills=3804160 fillsPerSec=42205.859 queries=0 unfinished=0 peakInFlight=256 measuredCycles=743 totalCycles=947 triggerExecutions=0
+business=PLACE_ORDER items=380416 requests=380416 p50us=8323 p90us=21397 p95us=23429 p99us=27934 p999us=51019 maxus=63012
+business=CANCEL_ORDER items=380416 requests=380416 p50us=7835 p90us=17055 p95us=18939 p99us=25001 p999us=46759 maxus=63340
+business=APPLY_MARK_PRICE items=22791 requests=22791 p50us=13049 p90us=21004 p95us=23871 p99us=42434 p999us=60391 maxus=63864
+business=PLACE_ORDER_BATCH items=11412480 requests=570624 p50us=18431 p90us=22200 p95us=25116 p99us=39124 p999us=53739 maxus=66420
+business=CANCEL_ORDER_BATCH items=3804160 requests=190208 p50us=20905 p90us=25001 p95us=27328 p99us=42631 p999us=58228 maxus=62914
+CPU_Speed_Limit=64–85（明显限速，性能验收无效，仅诊断）
+nmt-before.txt
+Total: reserved=3142157KB, committed=691273KB
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+-                    Thread (reserved=54404KB, committed=1864KB)
+-                      Code (reserved=250287KB, committed=15375KB)
+-                        GC (reserved=91616KB, committed=71176KB)
+-                     Other (reserved=9409KB, committed=9409KB)
+nmt-after.txt
+Total: reserved=3156810KB, committed=736030KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                    Thread (reserved=52371KB, committed=2603KB)
+-                      Code (reserved=261002KB, committed=48278KB)
+-                        GC (reserved=92332KB, committed=71852KB)
+-                     Other (reserved=9413KB, committed=9413KB)
+JFR bytes=19088620 sha256=625c8d5ef5a5744ae1f2dfde5e22b684ac86d030b22862f08c8a9934bd124fb0
+ Duration: 164 s
+ jdk.ExecutionSample                    296087       3538400
+ jdk.ThreadPark                         235145       6783616
+ jdk.ObjectAllocationSample              35642        576832
+ jdk.GCPhasePauseLevel1                    674         28359
+ jdk.GCPhasePause                          223          5450
+ jdk.GCPhasePauseLevel2                     18           694
+ jdk.JavaMonitorEnter                        1            23
+ jdk.DataLoss                                0             0
+ jdk.GCPhasePauseLevel3                      0             0
+ jdk.GCPhasePauseLevel4                      0             0
+JMH [{"jmhVersion":"1.37","benchmark":"com.surprising.aeron.benchmarks.workload.ClusterOperationalBenchmark.continuousOperations","mode":"ss","threads":1,"forks":1,"jvm":"/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","jvmArgs":["-XX:ThreadPriorityPolicy=1","-XX:+UnlockExperimentalVMOptions","-XX:+EnableJVMCIProduct","-XX:+EnableJVMCI","-XX:-UnlockExperimentalVMOptions","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-upper/master-profile-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-upper/master-profile-LINEAR_PERPETUAL-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=90","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true"],"jdkVersion":"25.0.1","vmName":"Java HotSpot(TM) 64-Bit Server VM","vmVersion":"25.0.1+8-LTS-jvmci-b01","warmupIterations":0,"warmupTime":"single-shot","warmupBatchSize":1,"measurementIterations":1,"measurementTime":"single-shot","measurementBatchSize":1,"params":{"controlPageSize":"0"},"primaryMetric":{"score":90.133993075,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":90.133993075,"50.0":90.133993075,"90.0":90.133993075,"95.0":90.133993075,"99.0":90.133993075,"99.9":90.133993075,"99.99":90.133993075,"99.999":90.133993075,"99.9999":90.133993075,"100.0":90.133993075},"scoreUnit":"s/op","rawData":[[90.133993075]]},"secondaryMetrics":{"gc.alloc.rate":{"score":150.99037582514833,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":150.99037582514833,"50.0":150.99037582514833,"90.0":150.99037582514833,"95.0":150.99037582514833,"99.0":150.99037582514833,"99.9":150.99037582514833,"99.99":150.99037582514833,"99.999":150.99037582514833,"99.9999":150.99037582514833,"100.0":150.99037582514833},"scoreUnit":"MB/sec","rawData":[[150.99037582514833]]},"gc.alloc.rate.norm":{"score":25141963424.0,"scoreError":"NaN","scoreConfidence":["NaN","NaN"],"scorePercentiles":{"0.0":25141963424.0,"50.0":25141963424.0,"90.0":25141963424.0,"95.0":25141963424.0,"99.0":25141963424.0,"99.9":25141963424.0,"99.99":25141963424.0,"99.999":25141963424.0,"99.9999":25141963424.0,"100.0":25141963424.0},"scoreUnit":"B/op","rawData":[[25141963424.0]]},"gc.count":{"score":323.0,"scoreError":"NaN","scoreConfidence":[323.0,323.0],"scorePercentiles":{"0.0":323.0,"50.0":323.0,"90.0":323.0,"95.0":323.0,"99.0":323.0,"99.9":323.0,"99.99":323.0,"99.999":323.0,"99.9999":323.0,"100.0":323.0},"scoreUnit":"counts","rawData":[[323.0]]},"gc.time":{"score":304.0,"scoreError":"NaN","scoreConfidence":[304.0,304.0],"scorePercentiles":{"0.0":304.0,"50.0":304.0,"90.0":304.0,"95.0":304.0,"99.0":304.0,"99.9":304.0,"99.99":304.0,"99.999":304.0,"99.9999":304.0,"100.0":304.0},"scoreUnit":"ms","rawData":[[304.0]]}}}]
+commands [["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms512m","-Xmx1536m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-upper/master-profile-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-upper/master-profile-LINEAR_PERPETUAL-0/media","-Dsurprising.aeron.data-dir=/tmp/owner-master-opt/perf-upper/master-profile-LINEAR_PERPETUAL-0/data","-Dsurprising.aeron.core.threading-mode=SHARED_NETWORK","-Dsurprising.aeron.service.idle-strategy=YIELDING","-XX:StartFlightRecording=settings=/tmp/owner-master-opt/owner.jfc,maxsize=192m,dumponexit=true,filename=/tmp/owner-master-opt/perf-upper/master-profile-LINEAR_PERPETUAL-0/node.jfr","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar","com.surprising.aeron.service.cluster.SurprisingClusterNode"],["/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java","--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED","--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED","--add-opens=java.base/java.util.zip=ALL-UNNAMED","--enable-native-access=ALL-UNNAMED","-XX:+UseG1GC","-XX:NativeMemoryTracking=summary","-Dsurprising.aeron.hostnames=127.0.0.1","-Dsurprising.aeron.egress-hostname=127.0.0.1","-Dsurprising.aeron.node-id=0","-Dsurprising.aeron.account-lanes=4","-Dsurprising.aeron.matching-engines=2","-Dsurprising.aeron.settlement-spin-limit=0","-Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN","-Dsurprising.aeron.product-line=LINEAR_PERPETUAL","-Dsurprising.aeron.execution-mode=PIPELINED","-Xms128m","-Xmx512m","-Djava.io.tmpdir=/tmp/owner-master-opt/perf-upper/master-profile-LINEAR_PERPETUAL-0/tmp","-Daeron.dir=/tmp/owner-master-opt/perf-upper/master-profile-LINEAR_PERPETUAL-0/clientmedia","-Dsurprising.aeron.client.threading-mode=SHARED","-Dsurprising.aeron.capacity-async-in-flight=256","-Dsurprising.aeron.capacity-session-in-flight=256","-Dsurprising.aeron.capacity-warmup-seconds=30","-Dsurprising.aeron.capacity-duration-seconds=90","-Dsurprising.aeron.capacity-seed=131001","-Dsurprising.aeron.mixed-trading-stream=true","-Dsurprising.aeron.mixed-operational=false","-Dsurprising.aeron.owner-churn-validation=true","-cp","/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar","org.openjdk.jmh.Main","ClusterOperationalBenchmark.continuousOperations","-f","1","-wi","0","-i","1","-p","controlPageSize=0","-prof","gc","-rf","json","-rff","/tmp/owner-master-opt/perf-upper/master-profile-LINEAR_PERPETUAL-0/jmh.json"]]
+```
+
+校验信息
+```text
+/tmp/owner-master-opt/perf-upper.py bytes=6034 sha256=eb4ba323997d13c205f44d86dacd1a73241396fd74dd6cc420d8f9963d3598b0
+/tmp/owner-master-opt/gates-upper.py bytes=5032 sha256=59545b8c56cfa66e25cb984ba36e6b9e0d397b13729dd38aac98acb05dd2ff44
+/tmp/owner-master-opt/recovery-upper.py bytes=3373 sha256=dbdccc655a11c6503494e167e5b39e0e46ddfbc135f7994251e61d9d3ad1c76d
+/tmp/owner-master-opt/owner.jfc bytes=39826 sha256=dca13cdc2a8f9d4a88f6dc954dd26cf8d2f85da5e4f922cac4b71f6c86c671d3
+/tmp/owner-master-opt/OwnerProfile.java bytes=3905 sha256=39c6ab01dee521d451642468486e5489d68f492423dfa94c00778326d8c6c8c2
+surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar bytes=60908837 sha256=40739bcc0b84c12ac18f87eec4292e79bf60b76e2bd6db960d2aab1f6ddf4c4c
+surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar bytes=81420865 sha256=241fa3a3eac792ac0a6453c34a815daf5bc5530d99108c2aa7423f0eab8b5862
+
+```
+
+显式GC后类直方图（前35项）
+```text
+4883:
+ num     #instances         #bytes  class name (module)
+-------------------------------------------------------
+   1:         39068       16866496  [J (java.base@25.0.1)
+   2:        154874       13188352  [B (java.base@25.0.1)
+   3:         18429       12259744  [Ljava.lang.Object; (java.base@25.0.1)
+   4:         20056        9645656  [I (java.base@25.0.1)
+   5:        133586        3206064  java.lang.String (java.base@25.0.1)
+   6:           809        2844800  [Ljdk.internal.vm.FillerElement; (java.base@25.0.1)
+   7:         31744        2539520  com.surprising.aeron.protocol.PlaceOrderCommand
+   8:         40279        1288928  java.util.concurrent.ConcurrentHashMap$Node (java.base@25.0.1)
+   9:         10115         890120  exchange.core2.core.orderbook.OrderBookDirectImpl$DirectOrder
+  10:          4995         879120  com.surprising.aeron.service.state.OrderRuntime
+  11:          4995         879120  com.surprising.aeron.service.state.model.CoreOrderState
+  12:          5085         659616  java.lang.Class (java.base@25.0.1)
+  13:            95         640752  [Ljava.util.concurrent.ConcurrentHashMap$Node; (java.base@25.0.1)
+  14:          4096         622592  com.surprising.aeron.service.execution.PendingMatching
+  15:         15528         621120  com.surprising.aeron.service.state.LanePublishedMap$Version
+  16:          1136         575080  [Ljava.lang.String; (java.base@25.0.1)
+  17:         14017         448544  com.surprising.aeron.service.state.LanePublication
+  18:         18446         442704  java.lang.Long (java.base@25.0.1)
+  19:          4995         399600  com.surprising.aeron.service.state.ReservationRuntime
+  20:          9563         382520  org.eclipse.collections.impl.set.mutable.primitive.LongHashSet
+  21:         15533         372792  com.surprising.aeron.service.state.LanePublishedMap$Key
+  22:          4995         359640  com.surprising.aeron.service.state.index.OrderParticipantIndex$Node
+  23:         10860         347520  java.util.UUID (java.base@25.0.1)
+  24:          3769         331672  com.surprising.aeron.service.state.PositionRuntime
+  25:          4096         327680  com.surprising.aeron.protocol.CoreMessageHeader
+  26:          4096         327680  com.surprising.aeron.service.execution.LaneCommandContextRing$Context
+  27:          8192         327680  com.surprising.aeron.service.execution.PendingClusterIngress$Entry
+  28:         11264         270336  com.surprising.aeron.protocol.CancelOrderCommand
+  29:          8383         268256  java.util.HashMap$Node (java.base@25.0.1)
+  30:          8192         262144  com.surprising.aeron.service.execution.MatcherCommandPipeline$Slot
+  31:          2365         245960  com.surprising.aeron.service.state.AccountLaneState$AdmissionAggregate
+  32:          2193         241432  [Ljava.util.HashMap$Node; (java.base@25.0.1)
+  33:          3257         234504  com.surprising.aeron.service.state.RiskSnapshotRuntime
+  34:          2667         213560  [Z (java.base@25.0.1)
+  35:          2304         202752  com.surprising.aeron.service.state.MatcherSettlementPlan
+  36:          4737         189480  com.surprising.aeron.service.state.RuntimeFundsAccumulator
+  37:          4476         179040  java.util.LinkedHashMap$Entry (java.base@25.0.1)
+```
+
+异常/提示：JMH的sun.misc.Unsafe过时API及SLF4J缺少provider提示属于测试工具/日志绑定，未出现EXCHANGE_CORE_FAILURE。adminActionRetries来自Aeron Publication.ADMIN_ACTION offer暂缓，非后台业务失败；结果已单独保留。辅助记录命令一次因工作目录少写前导斜杠未启动，纠正后执行，无业务影响。所有原始产物下条清理后不可访问，保留本记录与构建JAR，README未改。
+
+最终清理确认：本轮节点/客户端均已退出，恢复编排完整退出；已删除剩余/tmp/owner-master-opt（10468873618字节），以及本轮生成的338个测试报告文件，9个空报告目录。前两轮另已清理13581884940和13850504700字节。原始JFR、Archive、临时日志/源码/类/报告不可访问；本记录、构建JAR和用户原有未跟踪文件保留。
