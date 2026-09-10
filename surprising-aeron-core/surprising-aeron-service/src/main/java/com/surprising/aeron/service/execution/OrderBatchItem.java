@@ -28,7 +28,9 @@ final class OrderBatchItem {
     /** 成交编码所需的主动方用户 ID。 */
     long executionTakerUserId;
     /** 本项终态返回的订单视图。 */
-    com.surprising.aeron.protocol.CoreOrderStateView resultOrder;
+    com.surprising.aeron.service.state.OrderRuntime resultOrder;
+    /** 提交时已解析的币对名称，编码不再物化订单 DTO。 */
+    String resultOrderSymbol;
     /** 成交推送的不可变主动单身份；结算可提前，推送只能在本批提交时消费。 */
     com.surprising.aeron.service.state.OrderRuntime realtimeTakerOrder;
     /** 本项发给 matcher 的准备结果。 */

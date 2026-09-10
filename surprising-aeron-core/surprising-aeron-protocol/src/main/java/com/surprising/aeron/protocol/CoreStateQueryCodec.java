@@ -250,7 +250,7 @@ public final class CoreStateQueryCodec {
         return output.array();
     }
 
-    public static int encodedOrderStateLength(CoreOrderStateView state) {
+    public static int encodedOrderStateLength(CoreOrderStateSource state) {
         if (state == null) throw new IllegalArgumentException("order state is required");
         long length = Integer.BYTES + Long.BYTES + Integer.BYTES + Long.BYTES;
         length = Math.addExact(length, textLength(state.symbol()));
@@ -263,7 +263,7 @@ public final class CoreStateQueryCodec {
         return Math.toIntExact(length);
     }
 
-    static void writeOrderState(java.nio.ByteBuffer output, CoreOrderStateView state) {
+    static void writeOrderState(java.nio.ByteBuffer output, CoreOrderStateSource state) {
         output.putInt(VERSION).putLong(state.orderId())
                 .putInt(ProductLineWireCode.encode(state.productLine())).putLong(state.userId());
         putText(output, state.symbol(), false);

@@ -1150,7 +1150,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
             directCommitEvent = null;
         }
         directFinalizationPrepared = false;
-        commits.completeCommitPublicationBatch(committedLaneMask);
+        commits.completeCommitPublicationBatch();
         if (status == ResponseStatus.APPLIED) {
             validateFundsConservation(message);
         }

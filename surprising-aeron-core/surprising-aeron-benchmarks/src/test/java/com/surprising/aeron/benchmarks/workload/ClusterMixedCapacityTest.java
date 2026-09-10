@@ -36,6 +36,15 @@ class ClusterMixedCapacityTest {
         assertThatThrownBy(()->ClusterMixedCapacityMain.validateBatch(response(applied),new long[]{11})).isInstanceOf(IllegalStateException.class);
     }
 
+    @Test void batchOrderCursorMustNotReuseAnotherItemsIdentity() {
+        var order = new CoreOrderStateView(11, com.surprising.product.api.ProductLine.SPOT, 1,
+                "BTC-USDT", 1, CoreOrderSide.BUY, 100, 1, 0, 1, false, "OPEN", 1);
+        var item = new CoreOrderBatchResult.Item(0, 10, 0, 0, ResponseStatus.APPLIED,
+                CoreResultCode.NONE, order, List.of());
+        assertThatThrownBy(() -> ClusterMixedCapacityMain.validateBatch(response(item), new long[]{10}))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("order state mismatch");
+    }
+
     @Test void originalPopulationCoversFourLanesAndHftPairsCrossLanes() {
         var users=ClusterMixedCapacityMain.users();var topology=LaneTopology.configured(false);
         assertThat(users).hasSize(1769).doesNotHaveDuplicates();

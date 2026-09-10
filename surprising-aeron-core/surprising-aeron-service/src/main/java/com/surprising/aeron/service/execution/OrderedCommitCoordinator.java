@@ -365,7 +365,7 @@ final class OrderedCommitCoordinator {
             if (!owner.resultBuilder.commandChangedOrderIds.isEmpty()) {
                 owner.resultBuilder.materializeCommandOrderViews(pending);
             }
-            completeCommitPublicationBatch(committedLaneMask);
+            completeCommitPublicationBatch();
         owner.validateFundsConservation(pending.command());
         if (TradingCoreRuntime.MATCHING_PHASE_METRICS_ENABLED) {
             owner.matchingPhaseMetrics.recordApply(System.nanoTime() - applyStartNanos);
@@ -449,7 +449,7 @@ final class OrderedCommitCoordinator {
             }
             requireCompleteAccountLanes(laneContext);
             if (!owner.resultBuilder.commandChangedOrderIds.isEmpty()) owner.resultBuilder.materializeCommandOrderViews(pending);
-            completeCommitPublicationBatch(committedLaneMask);
+            completeCommitPublicationBatch();
             owner.validateFundsConservation(pending.command());
         } catch (CoreStateRejectedException exception) {
             throw owner.failMatching(pending, "Core rejected an accepted matcher result", exception);
@@ -516,7 +516,7 @@ final class OrderedCommitCoordinator {
             }
             requireCompleteAccountLanes(laneContext);
             if (!owner.resultBuilder.commandChangedOrderIds.isEmpty()) owner.resultBuilder.materializeCommandOrderViews(pending);
-            completeCommitPublicationBatch(event.requiredLaneMask());
+            completeCommitPublicationBatch();
             owner.validateFundsConservation(pending.command());
         } catch (CoreStateRejectedException exception) {
             throw owner.failMatching(pending, "Core rejected an accepted cancel result", exception);
@@ -1287,17 +1287,13 @@ final class OrderedCommitCoordinator {
     }
 
     void completeCommitPublicationBatch() {
-        completeCommitPublicationBatch(0);
-    }
-
-    void completeCommitPublicationBatch(long committedLaneMask) {
         boolean dirty = commitPublicationDirty;
         boolean provisionalOnly = commitPublicationProvisionalOnly;
         commitPublicationDeferred = false;
         commitPublicationDirty = false;
         commitPublicationProvisionalOnly = false;
         if (dirty && provisionalOnly) owner.runtimeState.clearChangedKeys();
-        else if (dirty) publishCommittedChanges(committedLaneMask);
+        else if (dirty) publishCommittedChanges();
     }
 
     void abortCommitPublicationBatch() {
@@ -1307,10 +1303,6 @@ final class OrderedCommitCoordinator {
     }
 
     void publishCommittedChanges() {
-        publishCommittedChanges(0);
-    }
-
-    void publishCommittedChanges(long committedLaneMask) {
         ownerCommitPublisher.execute();
     }
 

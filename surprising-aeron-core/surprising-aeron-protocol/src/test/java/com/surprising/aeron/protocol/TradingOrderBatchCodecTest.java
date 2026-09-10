@@ -14,6 +14,38 @@ import org.junit.jupiter.api.Test;
 class TradingOrderBatchCodecTest {
 
     @Test
+    void reusedOrderCursorPreservesEveryItemAndOwnsEncodedBytes() {
+        var first = new CoreOrderStateView(701, ProductLine.SPOT, 7,
+                "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 2, 0, 2, false, "OPEN", 3);
+        var second = new CoreOrderStateView(702, ProductLine.SPOT, 8,
+                "ETH-USDT", 2, CoreOrderSide.SELL, 99, 3, 3, 0, false, "FILLED", 4);
+        var orders = new CoreOrderStateView[]{first, null, second};
+        var current = new CoreOrderStateView[1];
+        var cursor = (CoreOrderStateSource) java.lang.reflect.Proxy.newProxyInstance(
+                CoreOrderStateSource.class.getClassLoader(), new Class<?>[]{CoreOrderStateSource.class},
+                (proxy, method, args) -> method.invoke(current[0], args));
+        var source = new TradingOrderBatchCodec.ResultSource() {
+            public int size() { return 3; }
+            public long orderId(int i) { return i == 0 ? 701 : i == 1 ? 999 : 702; }
+            public long originalOrderId(int i) { return 0; }
+            public long replacementOrderId(int i) { return 0; }
+            public ResponseStatus status(int i) { return i == 1 ? ResponseStatus.REJECTED : ResponseStatus.APPLIED; }
+            public CoreResultCode resultCode(int i) { return i == 1 ? CoreResultCode.ORDER_NOT_FOUND : CoreResultCode.NONE; }
+            public CoreOrderStateSource order(int i) { current[0] = orders[i]; return current[0] == null ? null : cursor; }
+            public int executionCount(int i) { return 0; }
+            public void writeExecutions(int i, ByteBuffer output) { }
+        };
+        var expected = new CoreOrderBatchResult(java.util.stream.IntStream.range(0, 3)
+                .mapToObj(i -> new CoreOrderBatchResult.Item(i, source.orderId(i), 0, 0,
+                        source.status(i), source.resultCode(i), orders[i], List.of())).toList());
+        byte[] encoded = TradingOrderBatchCodec.encodeResultSource(source);
+        current[0] = null;
+        Arrays.fill(orders, null);
+        assertThat(encoded).isEqualTo(TradingOrderBatchCodec.encodeResult(expected));
+        assertThat(TradingOrderBatchCodec.decodeResult(encoded)).isEqualTo(expected);
+    }
+
+    @Test
     void rawExecutionSourcePreservesWireFormatAndEnforcesFrameBounds() {
         var order = new CoreOrderStateView(701, ProductLine.LINEAR_PERPETUAL, 7,
                 "BTC-USDT", 1, CoreOrderSide.BUY, 1_000, 2, 0, 2, false, "FILLED", 3);

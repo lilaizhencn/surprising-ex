@@ -43,7 +43,6 @@ public final class RuntimeFactIndexes implements RuntimeFactFrame.ChangeConsumer
         }
         activeIdentities = identities;
         try {
-            runtime.visitPreparedMatcherIndexes(this);
             runtime.visitChangedIndexes(this);
         } finally {
             activeIdentities = null;

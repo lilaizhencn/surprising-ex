@@ -26,12 +26,11 @@ class TradingRuntimeStateTest {
         published.setAccessible(true);
         Object[] lanes = (Object[]) published.get(changes);
         for (int lane = 0; lane < lanes.length; lane++) {
-            for (String name : new String[]{"users", "orders", "reservations", "positions",
-                    "activeOrderValues", "positionIndexValues"}) {
+            for (String name : new String[]{"users", "orders", "reservations", "positions"}) {
                 Field bufferField = lanes[lane].getClass().getDeclaredField(name);
                 bufferField.setAccessible(true);
                 Object buffer = bufferField.get(lanes[lane]);
-                Field keys = buffer.getClass().getDeclaredField("keys");
+                Field keys = RuntimeChangeBuffer.class.getDeclaredField("keys");
                 keys.setAccessible(true);
                 assertThat(((long[]) keys.get(buffer)).length).as("lane %s %s", lane, name)
                         .isEqualTo(lane == 2 && (name.equals("orders") || name.equals("reservations")) ? 32 : 8);

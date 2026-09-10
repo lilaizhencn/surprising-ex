@@ -111,7 +111,7 @@ public final class TradingOrderBatchCodec {
         long replacementOrderId(int index);
         ResponseStatus status(int index);
         CoreResultCode resultCode(int index);
-        CoreOrderStateView order(int index);
+        CoreOrderStateSource order(int index);
         int executionCount(int index);
         /** Write exactly executionCount(index) records of six little-endian longs. */
         void writeExecutions(int index, ByteBuffer output);
@@ -142,7 +142,7 @@ public final class TradingOrderBatchCodec {
             output.putInt(0).putInt(index).putLong(source.orderId(index))
                     .putLong(source.originalOrderId(index)).putLong(source.replacementOrderId(index))
                     .putInt(source.status(index).wireCode()).putInt(source.resultCode(index).wireCode());
-            CoreOrderStateView order = source.order(index);
+            CoreOrderStateSource order = source.order(index);
             int orderLengthOffset = output.position();
             output.putInt(0);
             if (order != null) CoreStateQueryCodec.writeOrderState(output, order);

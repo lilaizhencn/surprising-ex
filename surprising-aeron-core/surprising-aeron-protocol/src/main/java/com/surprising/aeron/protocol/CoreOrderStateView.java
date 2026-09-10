@@ -29,7 +29,7 @@ public record CoreOrderStateView(
         long updatedAtEpochMillis,
         long clusterPosition,
         String status,
-        long revision) {
+        long revision) implements CoreOrderStateSource {
 
     public CoreOrderStateView(long orderId, ProductLine productLine, long userId, String symbol,
                               long instrumentChangeId, CoreOrderSide side, long priceTicks, long quantitySteps,

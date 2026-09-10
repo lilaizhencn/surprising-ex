@@ -189,19 +189,13 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 当前提交范围内变化的余额；与提交/回滚边界同步维护。 */
     final LongObjectHashMap<IntHashSet> changedBalances = new LongObjectHashMap<>();
     /** 当前提交范围内变化的订单；与提交/回滚边界同步维护。 */
-    final RuntimeChangeBuffer<OrderRuntime> changedOrders =
-            new RuntimeChangeBuffer<>();
-    /** 当前提交范围内变化的活跃订单索引值；与提交/回滚边界同步维护。 */
-    final RuntimeChangeBuffer<CoreOrderState> changedActiveOrderValues =
-            new RuntimeChangeBuffer<>();
+    final RuntimeIndexedChangeBuffer<OrderRuntime, CoreOrderState> changedOrders =
+            new RuntimeIndexedChangeBuffer<>();
     /** 当前提交范围内变化的预留；与提交/回滚边界同步维护。 */
     final LongHashSet changedReservations = new LongHashSet();
     /** 当前提交范围内变化的持仓；与提交/回滚边界同步维护。 */
-    final RuntimeChangeBuffer<PositionRuntime> changedPositions =
-            new RuntimeChangeBuffer<>();
-    /** 当前提交范围内变化的持仓索引值；与提交/回滚边界同步维护。 */
-    final RuntimeChangeBuffer<RuntimePositionIndexValue> changedPositionIndexValues =
-            new RuntimeChangeBuffer<>();
+    final RuntimeIndexedChangeBuffer<PositionRuntime, RuntimePositionIndexValue> changedPositions =
+            new RuntimeIndexedChangeBuffer<>();
     /** 当前提交范围内变化的清算；与提交/回滚边界同步维护。 */
     final RuntimeChangeBuffer<LiquidationRuntime> changedLiquidations =
             new RuntimeChangeBuffer<>();
@@ -966,7 +960,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         void prepareLaneTerminal(int laneId, RuntimeIdentityRegistry identities, AccountLaneState lane) {
             PublishedLaneChanges changes = publishedLaneChanges[laneId];
             changes.orders.forEach((orderId, order) -> {
-                changes.activeOrderValues.put(orderId,
+                changes.orders.putPrepared(orderId,
                         order != null && order.status() == CoreOrderStatus.OPEN
                                 ? RuntimeStateMaterializer.orderSnapshot(order, identities) : null);
                 if (order == null || !order.status().terminal()) return;
@@ -985,7 +979,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                         clientKey -> changes.retireClientIdentity(order.userId(), clientKey));
                 removeClientOrdersForOrder(lane, order.userId(), orderId);
             });
-            changes.positions.forEach((positionKey, position) -> changes.positionIndexValues.put(positionKey,
+            changes.positions.forEach((positionKey, position) -> changes.positions.putPrepared(positionKey,
                     position == null ? null : RuntimePositionIndexValue.from(position, identities)));
             prepareBalanceFundsDelta(balancePatches[laneId], laneFundsDeltas[laneId]);
         }
@@ -1031,19 +1025,15 @@ public final class TradingRuntimeState implements AutoCloseable {
         /** 本次需要发布的用户变化。 */
         final RuntimeChangeBuffer<UserRuntime> users = new RuntimeChangeBuffer<>();
         /** 本次需要发布的订单变化。 */
-        final RuntimeChangeBuffer<OrderRuntime> orders = new RuntimeChangeBuffer<>();
+        final RuntimeIndexedChangeBuffer<OrderRuntime, CoreOrderState> orders = new RuntimeIndexedChangeBuffer<>();
         /** 本次需要发布的预留变化。 */
         final RuntimeChangeBuffer<ReservationRuntime> reservations = new RuntimeChangeBuffer<>();
         /** 本次需要发布的持仓变化。 */
-        final RuntimeChangeBuffer<PositionRuntime> positions = new RuntimeChangeBuffer<>();
+        final RuntimeIndexedChangeBuffer<PositionRuntime, RuntimePositionIndexValue> positions = new RuntimeIndexedChangeBuffer<>();
         /** 本次需要发布的清算变化。 */
         final RuntimeChangeBuffer<LiquidationRuntime> liquidations = new RuntimeChangeBuffer<>();
         /** 本次需要发布的风险快照变化。 */
         final RuntimeChangeBuffer<RiskSnapshotRuntime> riskSnapshots = new RuntimeChangeBuffer<>();
-        /** 当前变更对应的活跃订单索引值。 */
-        final RuntimeChangeBuffer<CoreOrderState> activeOrderValues = new RuntimeChangeBuffer<>();
-        /** 当前变更对应的持仓索引值。 */
-        final RuntimeChangeBuffer<RuntimePositionIndexValue> positionIndexValues = new RuntimeChangeBuffer<>();
         /** 待移除的订单路由 ID。 */
         final LongHashSet removedOrderRoutes = new LongHashSet();
         /** 待移除的预留路由 ID。 */
@@ -1062,8 +1052,6 @@ public final class TradingRuntimeState implements AutoCloseable {
             orders.ensureCapacity(expectedOrders);
             reservations.ensureCapacity(expectedOrders);
             positions.ensureCapacity(expectedOrders * 2);
-            activeOrderValues.ensureCapacity(expectedOrders);
-            positionIndexValues.ensureCapacity(expectedOrders * 2);
         }
 
         void putUser(long key, UserRuntime value) {
@@ -1135,8 +1123,8 @@ public final class TradingRuntimeState implements AutoCloseable {
                 state.changedUsers.add(userId);
                 putOrRemove(state.publishedUsers, userId, user);
             });
-            orders.drainTo((orderId, order) -> {
-                state.changedOrders.put(orderId, order);
+            orders.drainIndexedTo((orderId, order, hasPrepared, prepared) -> {
+                state.changedOrders.putIndexed(orderId, order, hasPrepared, prepared);
                 if (terminalOrderSink != null && order != null && order.status().terminal()) {
                     terminalOrderSink.accept(order, coreSequence);
                 }
@@ -1150,8 +1138,8 @@ public final class TradingRuntimeState implements AutoCloseable {
                 if (reservation == null) state.reservationLaneIds.remove(orderId);
                 else state.reservationLaneIds.put(orderId, laneId + 1L);
             });
-            positions.drainTo((positionKey, position) -> {
-                state.changedPositions.put(positionKey, position);
+            positions.drainIndexedTo((positionKey, position, hasPrepared, prepared) -> {
+                state.changedPositions.putIndexed(positionKey, position, hasPrepared, prepared);
                 if (position == null && state.realtimeCapture != null) {
                     try { state.realtimeCapture.removedPosition(state.publishedPositions.get(positionKey)); }
                     catch (RuntimeException failure) { state.realtimeCapture.failed(); }
@@ -1168,8 +1156,6 @@ public final class TradingRuntimeState implements AutoCloseable {
                 state.changedRiskSnapshots.put(key, value);
                 putOrRemove(state.publishedRiskSnapshots, key, value);
             });
-            activeOrderValues.drainTo(state.changedActiveOrderValues::put);
-            positionIndexValues.drainTo(state.changedPositionIndexValues::put);
             removedOrderRoutes.forEach(orderId -> {
                 state.publishedOrders.remove(orderId);
                 state.orderLaneIds.remove(orderId);
@@ -1209,8 +1195,6 @@ public final class TradingRuntimeState implements AutoCloseable {
             positions.clear();
             liquidations.clear();
             riskSnapshots.clear();
-            activeOrderValues.clear();
-            positionIndexValues.clear();
             removedOrderRoutes.clear();
             removedReservationRoutes.clear();
             retiredClientIdentities.clear();
@@ -3983,11 +3967,15 @@ public final class TradingRuntimeState implements AutoCloseable {
     void visitChangedIndexes(RuntimeFactFrame.ChangeConsumer consumer) {
         assertOwner();
         if (consumer == null) throw new IllegalArgumentException("changed-index consumer is required");
-        changedOrders.forEach((orderId, value) -> {
-            if (!changedActiveOrderValues.containsKey(orderId)) consumer.order(orderId, null, value);
+        RuntimeFactIndexes preparedConsumer = consumer instanceof RuntimeFactIndexes indexes ? indexes : null;
+        changedOrders.forEachIndexed((orderId, value, hasPrepared, prepared) -> {
+            if (hasPrepared && preparedConsumer != null) preparedConsumer.preparedOrder(orderId,
+                    value == null || value.status() != CoreOrderStatus.OPEN ? null : prepared);
+            else consumer.order(orderId, null, value);
         });
-        changedPositions.forEach((positionKey, value) -> {
-            if (!changedPositionIndexValues.containsKey(positionKey)) consumer.position(positionKey, null, value);
+        changedPositions.forEachIndexed((positionKey, value, hasPrepared, prepared) -> {
+            if (hasPrepared && preparedConsumer != null) preparedConsumer.preparedPosition(positionKey, prepared);
+            else consumer.position(positionKey, null, value);
         });
         changedLiquidations.forEach((liquidationId, value) ->
                 consumer.liquidation(liquidationId, null, value));
@@ -3999,18 +3987,6 @@ public final class TradingRuntimeState implements AutoCloseable {
             consumer.triggerOrder(triggerOrderId, null, value);
         });
         changedCancelAllAfterTimers.forEach(key -> consumer.timer(key, null, cancelAllAfterTimer(key)));
-    }
-
-    void visitPreparedMatcherIndexes(RuntimeFactIndexes indexes) {
-        assertOwner();
-        changedActiveOrderValues.forEach((orderId, prepared) -> {
-            int slot = changedOrders.indexOf(orderId);
-            OrderRuntime current = slot < 0 ? null : changedOrders.valueAt(slot);
-            indexes.preparedOrder(orderId,
-                    slot >= 0 && (current == null || current.status() != CoreOrderStatus.OPEN)
-                            ? null : prepared);
-        });
-        changedPositionIndexValues.forEach(indexes::preparedPosition);
     }
 
     public void releaseRetiredPositionIdentities(RuntimeIdentityRegistry identities) {
@@ -4181,10 +4157,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         for (LaneClientOrderCaptures captured : patchClientOrdersBeforeByLane) captured.clear();
         clearChanged(changedUsers);
         changedOrders.clear();
-        changedActiveOrderValues.clear();
         clearChanged(changedReservations);
         changedPositions.clear();
-        changedPositionIndexValues.clear();
         changedLiquidations.clear();
         clearChanged(changedMarkPrices);
         changedRiskSnapshots.clear();
@@ -5116,17 +5090,11 @@ public final class TradingRuntimeState implements AutoCloseable {
             CoreMatchingResult matchingResult, RuntimeIdentityRegistry identities,
             TerminalOrderSink terminalOrderSink) { return settlements.applyOrderBatchMatcherSettlement(coreSequence, expectedLaneMask, takerOrderId, matchingResult, identities, terminalOrderSink); }
 
-    public MatcherSettlementEvent[] dispatchMatcherSettlementBatch(
+    public MatcherSettlementEvent dispatchMatcherSettlementBatch(
             long coreSequence, long[] takerOrderIds, long[] expectedLaneMasks,
             List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities,
             long commitTimestamp, long commitClusterPosition) { return settlements.dispatchMatcherSettlementBatch(coreSequence, takerOrderIds, expectedLaneMasks, matchingResults, identities, commitTimestamp, commitClusterPosition); }
-    public MatcherSettlementEvent[] dispatchSpotMatcherSettlements(
-            long coreSequence, List<Long> takerOrderIds, List<Long> expectedLaneMasks,
-            List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities) { return settlements.dispatchSpotMatcherSettlements(coreSequence, takerOrderIds, expectedLaneMasks, matchingResults, identities); }
-    public RuntimeTreasuryDelta collectMatcherSettlements(MatcherSettlementEvent[] events) { return settlements.collectMatcherSettlements(events); }
-    public RuntimeTreasuryDelta collectMatcherSettlements(
-            MatcherSettlementEvent[] events, RuntimeFundsAccumulator fundsAccumulator,
-            TerminalOrderSink terminalOrderSink) { return settlements.collectMatcherSettlements(events, fundsAccumulator, terminalOrderSink); }
+
     boolean pendingReservation(long orderId, long userId) { return pendingReservations.pendingReservation(orderId, userId); }
     long pendingReservedUnits(long userId, int assetId) { return pendingReservations.pendingReservedUnits(userId, assetId); }
     int pendingReservationCount(long userId) { return pendingReservations.pendingReservationCount(userId); }

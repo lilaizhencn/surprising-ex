@@ -63,6 +63,30 @@ class OrderBatchSettlementWaitTest {
         }
     }
 
+    @Test
+    void completionCacheWaitsForEveryLaneAndResetsBeforeReuse() throws Exception {
+        var event = incompleteEvent();
+        var mask = MatcherSettlementEvent.class.getDeclaredField("requiredLaneMask"); mask.setAccessible(true);
+        mask.setLong(event, 3);
+        var slotsField = MatcherSettlementEvent.class.getDeclaredField("completedLanes"); slotsField.setAccessible(true);
+        var reset = MatcherSettlementEvent.class.getDeclaredMethod("resetCompletions", int.class); reset.setAccessible(true);
+        reset.invoke(event, 2);
+        long[] slots = (long[]) slotsField.get(event);
+        var longs = java.lang.invoke.MethodHandles.arrayElementVarHandle(long[].class);
+        longs.setRelease(slots, 0, 1L);
+        assertThat(event.completedLaneMask()).isEqualTo(1);
+        assertThat(event.complete()).isFalse();
+        longs.setRelease(slots, 16, 1L);
+        assertThat(event.complete()).isTrue();
+        reset.invoke(event, 2);
+        assertThat(event.completedLaneMask()).isZero();
+        assertThat(event.complete()).isFalse();
+        longs.setRelease(slots, 16, 1L);
+        assertThat(event.complete()).isFalse();
+        longs.setRelease(slots, 0, 1L);
+        assertThat(event.complete()).isTrue();
+    }
+
     private static LaneCommitEvent incompleteLaneCommit(TradingRuntimeState runtime) {
         return new LaneCommitEvent(1).prepare(1, 1,
                 new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList[] {

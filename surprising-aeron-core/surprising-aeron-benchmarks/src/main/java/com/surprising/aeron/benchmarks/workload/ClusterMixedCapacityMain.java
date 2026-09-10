@@ -273,6 +273,10 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
             var item=items.get(i);
             if(item.index()!=i || item.orderId()!=ids[i] || item.status()!=ResponseStatus.APPLIED)
                 throw new IllegalStateException("mixed batch item rejected/identity mismatch: "+item);
+            // Exercise the borrowed order cursor: every encoded item must retain its own identity.
+            if (item.order() != null && (item.order().orderId() != ids[i]
+                    || item.order().executedQuantitySteps() + item.order().remainingQuantitySteps() != item.order().quantitySteps()))
+                throw new IllegalStateException("mixed batch order state mismatch: " + item);
             for(var execution:item.executions()) {
                 if(execution.takerOrderId()!=ids[i])throw new IllegalStateException("mixed execution identity mismatch");
                 fills++;

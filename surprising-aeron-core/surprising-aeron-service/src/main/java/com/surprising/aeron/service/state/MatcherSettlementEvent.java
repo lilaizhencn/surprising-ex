@@ -37,6 +37,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     private RuntimeFundsDelta collectedFundsDelta = RuntimeFundsDelta.empty();
     private long[] completedLanes;
     private boolean collected;
+    /** Owner 已以 acquire 观察到的完成位；本代事件不会倒退，复用时清零。 */
+    private long observedCompletedLaneMask;
 
     // Storage belongs to this pooled event, never to a shared owner scratch buffer.
     private BatchStorage batchStorage;
@@ -296,14 +298,17 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     public long commitSequence() { return commitSequence; }
     public long requiredLaneMask() { return requiredLaneMask; }
     public long completedLaneMask() {
-        long mask = 0;
-        for (int laneId = 0; laneId < completedLanes.length / CACHE_LINE_LONGS; laneId++) {
-            if ((long) LONGS.getAcquire(completedLanes, laneId * CACHE_LINE_LONGS) != 0) {
-                mask |= 1L << laneId;
-            }
+        long remaining = requiredLaneMask & ~observedCompletedLaneMask;
+        while (remaining != 0) {
+            int laneId = Long.numberOfTrailingZeros(remaining);
+            long bit = 1L << laneId;
+            remaining &= ~bit;
+            if ((long) LONGS.getAcquire(completedLanes, laneId * CACHE_LINE_LONGS) != 0)
+                observedCompletedLaneMask |= bit;
         }
-        return mask;
+        return observedCompletedLaneMask;
     }
+
     public boolean complete() { return completedLaneMask() == requiredLaneMask; }
     MatcherSettlementPlan plan() { return plan; }
     int planCount() { return batchPlans == null ? 1 : batchPlans.length; }
@@ -351,6 +356,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     }
 
     private void resetCompletions(int laneCount) {
+        observedCompletedLaneMask = 0;
         int length = Math.multiplyExact(laneCount, CACHE_LINE_LONGS);
         if (completedLanes == null || completedLanes.length != length) completedLanes = new long[length];
         else for (int laneId = 0; laneId < laneCount; laneId++) {

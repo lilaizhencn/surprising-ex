@@ -12,10 +12,6 @@ final class MatcherSettlementDispatcher {
 
     MatcherSettlementDispatcher(TradingRuntimeState owner) { this.owner = owner; }
 
-    /** 当前执行范围复用的 aggregateTreasuryDelta 临时缓冲，不保存第二份业务状态。 */
-    final RuntimeTreasuryDelta aggregateTreasuryDeltaScratch =
-            new RuntimeTreasuryDelta(RuntimeTreasuryDelta.ORDER_BATCH_CAPACITY);
-
     /** 可复用的 matcherSettlementEvent 对象池；仅在消费者完成后回收。 */
     final java.util.ArrayDeque<MatcherSettlementEvent> matcherSettlementEventPool =
             new java.util.ArrayDeque<>();
@@ -127,7 +123,7 @@ final class MatcherSettlementDispatcher {
         owner.assertAccountLanesHealthy();
     }
 
-    public MatcherSettlementEvent[] dispatchMatcherSettlementBatch(
+    public MatcherSettlementEvent dispatchMatcherSettlementBatch(
             long coreSequence, long[] takerOrderIds, long[] expectedLaneMasks,
             List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities,
             long commitTimestamp, long commitClusterPosition) {
@@ -190,72 +186,13 @@ final class MatcherSettlementDispatcher {
                     owner.laneWorkers[laneId].submit(event);
                 }
             }
-            return new MatcherSettlementEvent[]{event};
+            return event;
         } finally {
             if (!prepared) {
                 event.discardBatchStorage();
                 matcherSettlementEventPool.addFirst(event);
             }
         }
-    }
-
-    public MatcherSettlementEvent[] dispatchSpotMatcherSettlements(
-            long coreSequence, List<Long> takerOrderIds, List<Long> expectedLaneMasks,
-            List<CoreMatchingResult> matchingResults, RuntimeIdentityRegistry identities) {
-        owner.assertOwner();
-        if (owner.productLine.isDerivative() || coreSequence <= 0 || takerOrderIds == null
-                || expectedLaneMasks == null || matchingResults == null || takerOrderIds.isEmpty()
-                || takerOrderIds.size() != expectedLaneMasks.size()
-                || takerOrderIds.size() != matchingResults.size() || identities == null) {
-            throw new IllegalArgumentException("invalid spot matcher settlement batch");
-        }
-        long validMask = owner.accountLanes.length == Long.SIZE ? -1L : (1L << owner.accountLanes.length) - 1L;
-        MatcherSettlementPlan[] plans = new MatcherSettlementPlan[takerOrderIds.size()];
-        for (int index = 0; index < takerOrderIds.size(); index++) {
-            long takerOrderId = takerOrderIds.get(index);
-            long expectedLaneMask = expectedLaneMasks.get(index);
-            CoreMatchingResult matchingResult = matchingResults.get(index);
-            if (takerOrderId <= 0 || expectedLaneMask == 0 || (expectedLaneMask & ~validMask) != 0
-                    || matchingResult == null || matchingResult.nativeCommand().coreSequence() != coreSequence) {
-                throw new IllegalArgumentException("invalid spot matcher settlement item");
-            }
-            OrderRuntime taker = owner.order(takerOrderId);
-            if (taker == null) throw new IllegalStateException("spot taker order is missing");
-            RuntimeSpotMatchProcessor.validate(takerOrderId, matchingResult.matcherEvents(), owner);
-            MatcherSettlementPlan plan = MatcherSettlementPlan.build(coreSequence, takerOrderId, taker.userId(),
-                    new long[]{takerOrderId}, matchingResult, owner, identities);
-            if (plan.requiredLaneMask() != expectedLaneMask) {
-                throw new IllegalStateException("spot matcher settlement lane mask mismatch");
-            }
-            plans[index] = plan;
-        }
-        MatcherSettlementEvent[] events = new MatcherSettlementEvent[plans.length];
-        for (int index = 0; index < plans.length; index++) {
-            events[index] = dispatchMatcherSettlement(coreSequence, expectedLaneMasks.get(index), 0,
-                    -1, -1, plans[index], matchingResults.get(index), identities);
-        }
-        return events;
-    }
-
-    public RuntimeTreasuryDelta collectMatcherSettlements(MatcherSettlementEvent[] events) {
-        return collectMatcherSettlements(events, null, null);
-    }
-
-    public RuntimeTreasuryDelta collectMatcherSettlements(
-            MatcherSettlementEvent[] events, RuntimeFundsAccumulator fundsAccumulator,
-            TradingRuntimeState.TerminalOrderSink terminalOrderSink) {
-        owner.assertOwner();
-        if (events == null || events.length == 0) return null;
-        aggregateTreasuryDeltaScratch.clear();
-        for (MatcherSettlementEvent event : events) {
-            if (event == null || !event.complete()) return null;
-        }
-        for (MatcherSettlementEvent event : events) {
-            aggregateTreasuryDeltaScratch.merge(
-                    owner.collectMatcherSettlement(event, fundsAccumulator, terminalOrderSink));
-            releaseMatcherSettlement(event);
-        }
-        return aggregateTreasuryDeltaScratch;
     }
 
 }

@@ -20,14 +20,46 @@ import java.util.HashSet;
 import java.util.List;
 
 /** 批量命令上下文；owner 准备，matcher/Lane 按完成边界交接，终态回收后复用。 */
-final class OrderBatchPending implements TradingOrderBatchCodec.ResultSource {
+final class OrderBatchPending implements TradingOrderBatchCodec.ResultSource, com.surprising.aeron.protocol.CoreOrderStateSource {
     public int size() { return items.size(); }
     public long orderId(int index) { return items.get(index).orderId; }
     public long originalOrderId(int index) { return items.get(index).originalOrderId; }
     public long replacementOrderId(int index) { return items.get(index).replacementOrderId; }
     public ResponseStatus status(int index) { return items.get(index).status; }
     public CoreResultCode resultCode(int index) { return items.get(index).resultCode; }
-    public com.surprising.aeron.protocol.CoreOrderStateView order(int index) { return items.get(index).resultOrder; }
+    /** 仅编码器当前调用持有的复用游标，不跨线程或逃逸到响应缓存。 */
+    private OrderBatchItem responseItem;
+    public com.surprising.aeron.protocol.CoreOrderStateSource order(int index) {
+        responseItem = items.get(index);
+        return responseItem.resultOrder == null ? null : this;
+    }
+    public long orderId() { return responseItem.resultOrder.orderId(); }
+    public com.surprising.product.api.ProductLine productLine() { return responseItem.resultOrder.productLine(); }
+    public long userId() { return responseItem.resultOrder.userId(); }
+    public String symbol() { return responseItem.resultOrderSymbol; }
+    public long instrumentChangeId() { return responseItem.resultOrder.instrumentChangeId(); }
+    public com.surprising.aeron.protocol.CoreOrderSide side() { return responseItem.resultOrder.side(); }
+    public long priceTicks() { return responseItem.resultOrder.priceTicks(); }
+    public long quantitySteps() { return responseItem.resultOrder.quantitySteps(); }
+    public long executedQuantitySteps() { return responseItem.resultOrder.executedQuantitySteps(); }
+    public long remainingQuantitySteps() { return responseItem.resultOrder.remainingQuantitySteps(); }
+    public boolean reduceOnly() { return responseItem.resultOrder.reduceOnly(); }
+    public com.surprising.aeron.protocol.CoreMarginMode marginMode() { return responseItem.resultOrder.marginMode(); }
+    public com.surprising.aeron.protocol.CorePositionSide positionSide() { return responseItem.resultOrder.positionSide(); }
+    public com.surprising.aeron.protocol.CoreOrderType orderType() { return responseItem.resultOrder.orderType(); }
+    public com.surprising.aeron.protocol.CoreTimeInForce timeInForce() { return responseItem.resultOrder.timeInForce(); }
+    public boolean postOnly() { return responseItem.resultOrder.postOnly(); }
+    public String clientOrderId() { return responseItem.resultOrder.clientOrderId(); }
+    public java.util.UUID commandId() { return responseItem.resultOrder.commandId(); }
+    public long makerFeeRatePpm() { return responseItem.resultOrder.makerFeeRatePpm(); }
+    public long takerFeeRatePpm() { return responseItem.resultOrder.takerFeeRatePpm(); }
+    public long cumulativeFeeUnits() { return responseItem.resultOrder.cumulativeFeeUnits(); }
+    public long createdAtEpochMillis() { return responseItem.resultOrder.createdAtEpochMillis(); }
+    public long updatedAtEpochMillis() { return responseItem.resultOrder.updatedAtEpochMillis(); }
+    public long clusterPosition() { return responseItem.resultOrder.clusterPosition(); }
+    public String status() { return responseItem.resultOrder.status().name(); }
+    public long revision() { return responseItem.resultOrder.revision(); }
+
     public int executionCount(int index) { return items.get(index).executionCount; }
     public void writeExecutions(int index, java.nio.ByteBuffer output) {
         OrderBatchItem item = items.get(index);
@@ -83,6 +115,8 @@ final class OrderBatchPending implements TradingOrderBatchCodec.ResultSource {
     com.surprising.aeron.service.state.RuntimeTreasuryDelta treasuryDelta;
     /** 下一项待处理批量命令的位置，随批内执行前进，复用时归零。 */
     int nextIndex;
+    /** 撮合结果接收时累计，终态编码不重复汇总。 */
+    long tradeCount;
     /** 当前跨分片撤单切片的结束位置。 */
     int cancellationChunkEnd;
     /** 本批关联的全局命令序号。 */
@@ -110,7 +144,7 @@ final class OrderBatchPending implements TradingOrderBatchCodec.ResultSource {
     /** matcher 报告的批量失败，随完成通知交给 owner。 */
     Throwable pipelinedMatchingFailure;
     /** 本批派发到各 Lane 的结算事件；收集完成前不得复用。 */
-    com.surprising.aeron.service.state.MatcherSettlementEvent[] settlementEvents;
+    com.surprising.aeron.service.state.MatcherSettlementEvent settlementEvent;
     /** 本批撤单事件，完成通知后才能收集并回收。 */
     com.surprising.aeron.service.state.LaneCancelEvent cancelEvent;
     /** 本批准入事件；Lane 完成后由 owner 收集。 */
@@ -226,8 +260,10 @@ final class OrderBatchPending implements TradingOrderBatchCodec.ResultSource {
         deferredSettlementMatchingResults.clear();
         preparedClientKeys.clear();
         if (treasuryDelta != null) treasuryDelta.clear();
-        treasuryDelta = null;
+
         nextIndex = 0;
+        tradeCount = 0;
+        responseItem = null;
         cancellationChunkEnd = 0;
         sequence = 0;
         currentPreMatchingCancellationOrderIds = List.of();
@@ -241,7 +277,7 @@ final class OrderBatchPending implements TradingOrderBatchCodec.ResultSource {
         sequentialAdmission = false;
         pipelinedMatchingResults.clear();
         pipelinedMatchingFailure = null;
-        settlementEvents = null;
+        settlementEvent = null;
         cancelEvent = null;
         placeBatchAdmissionEvent = null;
         java.util.Arrays.fill(preparedOrders, null);
@@ -303,16 +339,12 @@ final class OrderBatchPending implements TradingOrderBatchCodec.ResultSource {
 
     boolean hasPendingLaneWork() {
         return cancelEvent != null && !cancellationsCollected
-                || settlementEvents != null && !settlementsCollected;
+                || settlementEvent != null && !settlementsCollected;
     }
 
     boolean laneWorkComplete() {
         if (cancelEvent != null && !cancellationsCollected && !cancelEvent.complete()) return false;
-        if (settlementEvents != null && !settlementsCollected) {
-            for (var event : settlementEvents) {
-                if (event == null || !event.complete()) return false;
-            }
-        }
+        if (settlementEvent != null && !settlementsCollected && !settlementEvent.complete()) return false;
         return true;
     }
 

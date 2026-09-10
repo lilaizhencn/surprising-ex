@@ -634,7 +634,10 @@ final class OrderBatchExecutor {
             item.executionEvents = matchingResult.matcherEvents();
             item.executionTakerUserId = pending.command().header().userId();
             for (MatcherEvent event : item.executionEvents) {
-                if (event.eventType() == MatcherEventType.TRADE) item.executionCount++;
+                if (event.eventType() == MatcherEventType.TRADE) {
+                    item.executionCount++;
+                    batch.tradeCount = Math.incrementExact(batch.tradeCount);
+                }
             }
         }
         switch (batch.kind) {
@@ -708,8 +711,8 @@ final class OrderBatchExecutor {
                     batch.deferredCancellationOrderIds.toPrimitiveArray(), timestamp, position,
                     owner.identities, batch.kind == OrderBatchKind.CANCEL);
         }
-        if (batch.settlementEvents != null || batch.deferredSettlementOrderIds.isEmpty()) return false;
-        batch.settlementEvents = owner.runtimeState.dispatchMatcherSettlementBatch(
+        if (batch.settlementEvent != null || batch.deferredSettlementOrderIds.isEmpty()) return false;
+        batch.settlementEvent = owner.runtimeState.dispatchMatcherSettlementBatch(
                 batch.sequence, batch.deferredSettlementOrderIds.toArray(),
                 batch.deferredSettlementExpectedLaneMasks.toArray(), batch.deferredSettlementMatchingResults,
                 owner.identities, timestamp, position);
@@ -748,16 +751,17 @@ final class OrderBatchExecutor {
             batch.cancellationsCollected = true;
             owner.commits.requestCommitPublication();
         }
-        if (batch.settlementEvents != null && !batch.settlementsCollected) {
-            long settlementLaneMask = batch.settlementEvents[0].requiredLaneMask();
-            boolean finalLaneCommit = batch.settlementEvents[0].commitSequence() != 0;
-            RuntimeTreasuryDelta delta = owner.runtimeState.collectMatcherSettlements(
-                    batch.settlementEvents, owner.commandFundsAccumulator, owner.terminalRetention);
+        if (batch.settlementEvent != null && !batch.settlementsCollected) {
+            long settlementLaneMask = batch.settlementEvent.requiredLaneMask();
+            boolean finalLaneCommit = batch.settlementEvent.commitSequence() != 0;
+            RuntimeTreasuryDelta delta = owner.runtimeState.collectMatcherSettlement(
+                    batch.settlementEvent, owner.commandFundsAccumulator, owner.terminalRetention);
             if (delta == null) {
                 owner.suspendMatchingCommitContext(pending);
                 return null;
             }
             batch.mergeTreasuryDelta(delta);
+            owner.runtimeState.releaseMatcherSettlement(batch.settlementEvent);
             batch.settlementsCollected = true;
             if (finalLaneCommit) {
                 laneContext.completeLanes(settlementLaneMask);
@@ -782,10 +786,7 @@ final class OrderBatchExecutor {
         }
         long committedLaneMask;
         try {
-            RuntimeTreasuryDelta expectedTreasuryDelta = owner.mergedLaneTreasuryDelta;
-            expectedTreasuryDelta.clear();
-            if (batch.treasuryDelta != null) expectedTreasuryDelta.merge(batch.treasuryDelta);
-            expectedTreasuryDelta.apply(owner.runtimeState.treasury());
+            if (batch.treasuryDelta != null) batch.treasuryDelta.apply(owner.runtimeState.treasury());
             owner.runtimeState.setMetadata(owner.productLine,
                     Math.incrementExact(owner.runtimeState.revision()));
             committedLaneMask = batch.laneCommitCompleted
@@ -799,16 +800,15 @@ final class OrderBatchExecutor {
             throw failOrderBatch(batch, pending, "order batch final validation failed", validationFailure);
         }
         captureCommittedBatchTrades(batch);
-        owner.commits.completeCommitPublicationBatch(committedLaneMask);
-        long tradeCount = 0;
+        owner.commits.completeCommitPublicationBatch();
         for (OrderBatchItem item : batch.items) {
             OrderRuntime order = owner.runtimeOrder(item.orderId());
             if (order == null && item.originalOrderId() > 0) order = owner.runtimeOrder(item.originalOrderId());
-            item.resultOrder = order == null ? null : owner.orderView(order);
-            tradeCount = Math.addExact(tradeCount, item.executionCount);
+            item.resultOrder = order;
+            item.resultOrderSymbol = order == null ? null : owner.runtimeOrderSymbol(order);
         }
         byte[] responseData = TradingOrderBatchCodec.encodeResultSource(batch);
-        owner.terminalTradeCount = Math.addExact(owner.terminalTradeCount, tradeCount);
+        owner.terminalTradeCount = Math.addExact(owner.terminalTradeCount, batch.tradeCount);
         owner.validateFundsConservation(pending.command());
         owner.commitMatchingSequence(batch.sequence);
         long businessStateHash = owner.currentProjectionPoint == batch.beforeProjection

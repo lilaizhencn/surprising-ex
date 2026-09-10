@@ -6,7 +6,7 @@ import org.agrona.collections.Long2LongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 
 /** primitive 变更缓冲；每个实例仅由所属 owner 或 Lane 使用，清空时保留容量。 */
-final class RuntimeChangeBuffer<V> {
+class RuntimeChangeBuffer<V> {
     /** 连续存放的 primitive 实体键；仅 [0,size) 有效。 */
     private long[] keys = new long[8];
     /** 与键对应的值；清空时释放引用并保留数组容量。 */
@@ -45,11 +45,11 @@ final class RuntimeChangeBuffer<V> {
         }
     }
 
-    void put(long key, V value) {
+    int put(long key, V value) {
         int slot = indexOf(key);
         if (slot >= 0) {
             values[slot] = value;
-            return;
+            return slot;
         }
         ensureIndexCapacity(size + 1);
         if (size == keys.length) {
@@ -63,7 +63,7 @@ final class RuntimeChangeBuffer<V> {
         indexKeys[indexPosition] = key;
         indexSlots[indexPosition] = size;
         indexGenerations[indexPosition] = indexGeneration;
-        size++;
+        return size++;
     }
 
     void drain(LongObjectHashMap<V> target, Long2LongHashMap targetLanes, int laneId) {

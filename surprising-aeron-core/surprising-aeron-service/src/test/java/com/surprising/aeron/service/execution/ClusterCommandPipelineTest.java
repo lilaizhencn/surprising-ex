@@ -759,7 +759,7 @@ class ClusterCommandPipelineTest {
                 var batchesField = OrderBatchExecutor.class.getDeclaredField("pendingOrderBatches");
                 batchesField.setAccessible(true);
                 var batch = ((java.util.Map<?, ?>) batchesField.get(state.batches)).get(sequence);
-                var eventsField = batch.getClass().getDeclaredField("settlementEvents");
+                var eventsField = batch.getClass().getDeclaredField("settlementEvent");
                 eventsField.setAccessible(true);
                 Object dispatched = eventsField.get(batch);
                 assertThat(dispatched).isNotNull();
