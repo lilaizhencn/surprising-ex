@@ -6066,3 +6066,208 @@ business=CANCEL_ORDER_BATCH items=2391040 requests=119552 p50us=22937 p90us=2680
   - lanes-profile-LINEAR_PERPETUAL-0: 45.078 s/op; gc.alloc.rate=137.562, gc.alloc.rate.norm=16001630032.0, gc.count=206.0, gc.time=200.0; JFR 6460641B SHA256 4f04380f49e7ce8274e7b77883ad21824603ad398f4edac225d73fa5e3ae9416.
 
 - 最终执行：run-final.py main/profile/controls、gates-final.py、recover-final.py，全部位于/tmp/lane-owner-redesign；参数与真实命令由同目录commands.json保留到分析完成，本记录承接其必要摘要。主业务代码69e7c99c，未修改方案一、原项目、README或任何云端资源。首阶段临时perf/gates已清理，最终采集亦在记录完成后停止本轮所有进程并清理Archive/JFR/临时日志/测试报告；上述临时路径随后不可访问，只是历史来源，不作为仍存在的证据链接。
+
+
+## 2026-09-10 方案二四项 Owner 串行成本消减：采集前锁定
+
+- 被测源：experiment/lane-owned-state，基于 ddf29bba 的本次工作区；仅方案二，不运行方案一或云端。变更为快速批量准入索引按需构建、累计成交一次校验、批输入零数组复制及币对元数据复用、Lane 订单/持仓变更缓冲所有权交接。
+- HotSpot Oracle GraalVM 25.0.1、Maven 3.9.16、macOS Intel i9-9880H 8C16T/16GiB；G1，NMT summary。单个真实 Aeron Cluster 成员，网络及 Archive 保留，4 Account Lane、2 matcher、PIPELINED、BUSY_SPIN/spin0、SHARED_NETWORK、service YIELDING；客户端 SHARED。全局和 session in-flight 均256。
+- 节点堆512m/1536m，客户端128m/512m；连续流 ClusterMixedCapacityMain，mixed-trading-stream=true、mixed-operational=false，种子131001/131002。采用既有 workload 的用户/symbol/做市资金初始化与业务比例，不改变发单限制。30秒预热、60秒测量，两轮无 profiler；随后相同场景 JMH ClusterOperationalBenchmark.continuousOperations，controlPageSize=0，fork1/wi0/i1，30秒预热45秒测量，-prof gc；节点 JFR profile/maxsize128m。各轮串行，清理上一轮进程后运行下一轮；本轮不额外强制冷却，记录 CPU 限速，受限结果仅用于诊断。
+- 六产品线顺序运行 ClusterAccountControlBenchmark.accountControls，fork1/wi1/i2、-prof gc、节点JFR；另顺序执行六产品真实单成员业务、SIGKILL 后日志重放、实际 snapshot 后重启的资金及状态哈希核对。连续流 profile Archive 同样重放与 snapshot 核对。功能门禁 BLOCKING，不以其吞吐作性能结果。
+- 必须：所有受影响 Maven 测试通过（数据库 seed 条件跳过单列）；accepted/terminal business 与 Core message 相等、unfinished=0、fundsDiff=0、订单/持仓/冻结正确、全局未完成订单索引无终态残留、重放及快照哈希一致。任何资金/状态失败终止性能结论。性能无预设保证增长，历史197846/188656 ops/s仅背景；CPU限速、swap或DataLoss则不作容量验收。
+- 脚本：/tmp/owner-four/{perf,gates,recovery}.py；逐进程完整命令写各case commands.json。运行期间检查磁盘>10GiB、pmset及vm_stat。无独立恒定到达率/CO修正和长稳泄漏门禁，缺失的三段延迟、native池余额不得宣称已验证；本机数据不代表三节点生产上限。
+- 产物暂存 /tmp/owner-four；分析后记录汇总与校验值，再清理本轮 Archive/JFR/日志/测试报告。
+
+### 本轮结果（2026-09-10，代码提交 91b24d5d）
+四项实现完成，最终 affected reactor `mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am verify`：1204 tests，1203通过，0失败/错误，1数据库种子条件跳过。第一次编译暴露新增委托字段名称错误；按需准入索引的随后回归暴露拒绝后转逐笔路径空指针，已修复，最终全受影响 reactor 重新验证通过。未掩盖或删除失败测试。
+场景实际初始化1769用户（1000 retail）、256 symbol、batch20，1命令session+1保留查询session，初始资金1768000000125。本轮没有更改负载组合；普通下单/撤单各占每cycle512，批量下单15360 items、批量撤单5120 items，每cycle5120 fills，另有持续标记价格。新增测量结束后的 maker/taker 未完成订单索引查询，确保不存在终态残留。
+
+**lanes-main-LINEAR_PERPETUAL-0**
+```text
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=812 businessHash=e53df0ddc316cfcf
+mixedCapacity=PASS elapsedSeconds=60.138 terminalBusinessOperations=12057547 offeredBusinessOperations=12057547 terminalCoreMessages=1162187 offeredCoreMessages=1162187 businessOpsPerSec=200498.347 coreMessagesPerSec=19325.371 fills=2867200 fillsPerSec=47677.099 queries=0 unfinished=0 peakInFlight=256 measuredCycles=560 totalCycles=812 triggerExecutions=0
+business=PLACE_ORDER items=286720 requests=286720 p50us=6754 p90us=19398 p95us=21315 p99us=27705 p999us=47284 maxus=58753
+business=CANCEL_ORDER items=286720 requests=286720 p50us=6709 p90us=17039 p95us=18956 p99us=27574 p999us=39223 maxus=57442
+business=APPLY_MARK_PRICE items=15307 requests=15307 p50us=11362 p90us=19972 p95us=22003 p99us=37814 p999us=50331 maxus=56590
+business=PLACE_ORDER_BATCH items=8601600 requests=430080 p50us=15974 p90us=20512 p95us=25165 p99us=31686 p999us=49905 maxus=65273
+business=CANCEL_ORDER_BATCH items=2867200 requests=143360 p50us=19759 p90us=23756 p95us=28901 p99us=38633 p999us=64159 maxus=67829
+```
+CPU_Speed_Limit 66～100；系统换页计数增量 {'Swapins': 2768, 'Swapouts': 0}。accepted/terminal相等，unfinished=0，最大在途256，测量边界排空；端到端尾延迟为未做CO修正的闭环观测，未拆accepted阶段，不能当作严格容量验收。
+
+**lanes-main-LINEAR_PERPETUAL-1**
+```text
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=706 businessHash=fd8c137f1002a5ae
+mixedCapacity=PASS elapsedSeconds=60.023 terminalBusinessOperations=10939136 offeredBusinessOperations=10939136 terminalCoreMessages=1055488 offeredCoreMessages=1055488 businessOpsPerSec=182247.727 coreMessagesPerSec=17584.596 fills=2600960 fillsPerSec=43332.403 queries=0 unfinished=0 peakInFlight=256 measuredCycles=508 totalCycles=706 triggerExecutions=0
+business=PLACE_ORDER items=260096 requests=260096 p50us=7614 p90us=21528 p95us=23773 p99us=31932 p999us=52756 maxus=64552
+business=CANCEL_ORDER items=260096 requests=260096 p50us=7290 p90us=18513 p95us=20709 p99us=29392 p999us=42369 maxus=53346
+business=APPLY_MARK_PRICE items=15104 requests=15104 p50us=11534 p90us=22396 p95us=24920 p99us=44007 p999us=54525 maxus=64552
+business=PLACE_ORDER_BATCH items=7802880 requests=390144 p50us=17317 p90us=23330 p95us=28311 p99us=41058 p999us=64749 maxus=101646
+business=CANCEL_ORDER_BATCH items=2600960 requests=130048 p50us=21561 p90us=26968 p95us=31703 p99us=44859 p999us=86769 maxus=99090
+```
+CPU_Speed_Limit 64～100；系统换页计数增量 {'Swapins': 3444, 'Swapouts': 0}。accepted/terminal相等，unfinished=0，最大在途256，测量边界排空；端到端尾延迟为未做CO修正的闭环观测，未拆accepted阶段，不能当作严格容量验收。
+
+**lanes-profile-LINEAR_PERPETUAL-0**
+```text
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=569 businessHash=319cc756e662260b
+mixedCapacity=PASS elapsedSeconds=45.107 terminalBusinessOperations=7817272 offeredBusinessOperations=7817272 terminalCoreMessages=754744 offeredCoreMessages=754744 businessOpsPerSec=173303.224 coreMessagesPerSec=16732.124 fills=1858560 fillsPerSec=41202.921 queries=0 unfinished=0 peakInFlight=256 measuredCycles=363 totalCycles=569 triggerExecutions=0
+business=PLACE_ORDER items=185856 requests=185856 p50us=8052 p90us=22249 p95us=24756 p99us=31031 p999us=45842 maxus=58884
+business=CANCEL_ORDER items=185856 requests=185856 p50us=7729 p90us=19677 p95us=21970 p99us=30294 p999us=42795 maxus=55050
+business=APPLY_MARK_PRICE items=11320 requests=11320 p50us=12140 p90us=23674 p95us=25870 p99us=46891 p999us=85000 maxus=88604
+business=PLACE_ORDER_BATCH items=5575680 requests=278784 p50us=18317 p90us=25034 p95us=29605 p99us=38207 p999us=55967 maxus=90963
+business=CANCEL_ORDER_BATCH items=1858560 requests=92928 p50us=22577 p90us=28524 p95us=33030 p99us=40435 p999us=55836 maxus=58425
+```
+CPU_Speed_Limit 64～93；系统换页计数增量 {'Swapins': 960, 'Swapouts': 0}。accepted/terminal相等，unfinished=0，最大在途256，测量边界排空；端到端尾延迟为未做CO修正的闭环观测，未拆accepted阶段，不能当作严格容量验收。
+
+JFR测量窗口1789027482456～1789027527563（45.107秒）。Owner3288样本，dispatchPartitionSettlements415(12.62%)、preparePipelinedPlaceBatch394(11.98%)、collectMatcherSettlement267(8.12%)、collectCancel141(4.29%)、publishCommittedChanges314(9.55%)（含factIndexes175/5.32%）、commitTerminalToOwner176(5.35%)。BatchAdmissionOrderIndex.update仅2个样本，正常PLACE不分配索引的六产品测试通过；顺序准入仍保留必需索引。Lane15062样本中循环自身12787（84.90%），不能视为有效业务饱和。
+```text
+totals allocationMiBps=592.761 allocationBytes=28036481776 machineCPU=89.79 jvmCPU=57.55 heapMaxMiB=445.36 dataLoss=0 ownerIOEvents=0
+threadCPU	96.340	core-account-lane-1
+threadCPU	96.327	core-account-lane-2
+threadCPU	96.315	core-account-lane-3
+threadCPU	96.300	core-account-lane-0
+threadCPU	96.044	trading-owner--1
+threadCPU	94.692	/tmp/owner-four/perf/lanes-profile-LINEAR_PERPETUAL-0/media-surprising-linear_perpetual-0 [sender,receiver]
+threadCPU	67.034	clustered-service-101-0
+threadCPU	66.254	driver-conductor
+threadCPU	60.840	archive-conductor
+threadCPU	58.302	consensus-module-101-0
+threadCPU	24.126	core-matcher-0
+threadCPU	24.077	core-matcher-1
+threadCPU	1.650	JVMCI-native CompilerThread0
+threadCPU	1.022	aeron-md-nra
+threadCPU	0.249	aeron-client
+threadCPU	0.091	JFR Periodic Tasks
+threadCPU	0.084	JFR Recorder Thread
+threadCPU	0.058	C1 CompilerThread0
+threadCPU	0.014	Monitor Deflation Thread
+gc count=143 totalMs=1149.473 p99Ms=17.451 maxMs=18.875
+samples	3847	core-account-lane-0
+samples	3807	core-account-lane-1
+samples	3763	core-account-lane-2
+samples	3645	core-account-lane-3
+samples	3288	trading-owner--1
+samples	246	driver-conductor
+samples	174	clustered-service-101-0
+samples	123	consensus-module-101-0
+samples	116	archive-conductor
+samples	46	/tmp/owner-four/perf/lanes-profile-LINEAR_PERPETUAL-0/media-surprising-linear_perpetual-0 [sender,receiver]
+samples	27	core-matcher-1
+samples	24	core-matcher-0
+ownerInclusive	3288	java.lang.Thread.run
+ownerInclusive	3288	com.surprising.aeron.service.execution.ContinuousTradingClusterService$$Lambda.0x0000000122129a58.run
+ownerInclusive	3288	java.lang.Thread.runWith
+ownerInclusive	3288	com.surprising.aeron.service.execution.ContinuousTradingClusterService.runOwner
+ownerInclusive	3266	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommands
+ownerInclusive	3246	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommandsInScope
+ownerInclusive	2463	com.surprising.aeron.service.execution.SurprisingClusteredService.acceptCommittedCommand
+ownerInclusive	2461	com.surprising.aeron.service.execution.SurprisingClusteredService.processIngress
+ownerInclusive	1989	com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommandPrefix
+ownerInclusive	1965	com.surprising.aeron.service.execution.OrderedCommitCoordinator.commitReadyMatching
+ownerInclusive	1258	com.surprising.aeron.service.execution.OrderedCommitCoordinator.completeMatching
+ownerInclusive	844	com.surprising.aeron.service.execution.OrderBatchExecutor.finishOrderBatch
+allocation	1233119760	trading-owner--1 [B
+allocation	780511904	trading-owner--1 com.surprising.aeron.service.execution.OrderBatchItem
+allocation	771082752	core-account-lane-1 com.surprising.aeron.service.state.OrderRuntime
+allocation	723539008	core-account-lane-0 com.surprising.aeron.service.state.OrderRuntime
+allocation	700187280	core-account-lane-2 [J
+allocation	676696888	core-account-lane-2 com.surprising.aeron.service.state.OrderRuntime
+allocation	672222760	clustered-service-101-0 [B
+allocation	668602048	trading-owner--1 [J
+allocation	641622800	core-account-lane-3 com.surprising.aeron.service.state.OrderRuntime
+allocation	605363720	core-matcher-1 com.surprising.aeron.service.matching.CoreMatchingResult$NativeCommand
+allocation	589804856	core-account-lane-3 [J
+allocation	577575824	trading-owner--1 com.surprising.aeron.service.state.ResolvedPlaceOrder
+allocationSite	2952641688	java.util.concurrent.ConcurrentHashMap.putVal
+allocationSite	1442049288	com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.bindMatcherEvidence
+allocationSite	1395071864	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.addKeyValueAtIndex
+allocationSite	1138210744	com.surprising.aeron.protocol.TradingOrderBatchCodec.decodeCommand
+allocationSite	1081928656	java.util.ArrayList.add
+allocationSite	995442848	org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap.rehashAndGrow
+allocationSite	976070904	java.util.HashMap.putVal
+allocationSite	942317296	org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap.get
+allocationSite	887484896	com.surprising.aeron.service.state.MatcherSettlementPlan.build
+allocationSite	716439744	com.surprising.aeron.service.state.RuntimeDerivativeFillCalculator$FillCursor.order
+allocationSite	715741864	java.nio.ByteBuffer.allocate
+allocationSite	698773784	com.surprising.aeron.service.matching.CoreMatchingResult.classify
+parkOrMonitorNs	1196092124	aeron-md-nra
+parkOrMonitorNs	985227810	core-matcher-1
+parkOrMonitorNs	970362422	core-matcher-0
+parkOrMonitorNs	344257602	archive-conductor
+parkOrMonitorNs	230040735	consensus-module-101-0
+parkOrMonitorNs	119528928	driver-conductor
+eventCounts	56871	jdk.GCPhaseParallel
+eventCounts	19108	jdk.ExecutionSample
+eventCounts	15145	jdk.PromoteObjectInNewPLAB
+eventCounts	12951	jdk.ObjectAllocationSample
+eventCounts	2706	jdk.ThreadSleep
+eventCounts	2100	jdk.NativeMethodSample
+eventCounts	1515	jdk.TenuringDistribution
+eventCounts	1215	jdk.NativeMemoryUsage
+eventCounts	492	jdk.GCPhasePauseLevel1
+eventCounts	488	jdk.MetaspaceChunkFreeListSummary
+eventCounts	488	jdk.GCReferenceStatistics
+eventCounts	330	jdk.ThreadPark
+
+```
+```text
+laneSamples=15062 laneLoopSelf=12787
+jdk.Deoptimization count=6 totalMs=0.0 maxMs=0.0
+jdk.DirectBufferStatistics count=9 totalMs=0.0 maxMs=0.0
+jdk.ExecuteVMOperation count=147 totalMs=1154.222283 maxMs=18.928909
+jdk.FileWrite count=74 totalMs=642.58089 maxMs=22.141846
+jdk.GCHeapSummary count=244 totalMs=0.0 maxMs=0.0
+jdk.GarbageCollection count=122 totalMs=2094.809677 maxMs=57.29108
+jdk.NativeMemoryUsageTotal count=45 totalMs=0.0 maxMs=0.0
+jdk.SafepointBegin count=145 totalMs=51.113855 maxMs=2.150418
+jdk.DirectBufferStatistics {
+  startTime = 16:05:25.005 (2026-09-10)
+  maxCapacity = 1.5 GB
+  count = 8
+  totalCapacity = 9.1 MB
+  memoryUsed = 9.1 MB
+}
+
+
+jdk.NativeMemoryUsageTotal {
+  startTime = 16:05:27.012 (2026-09-10)
+  reserved = 3.0 GB
+  committed = 704.6 MB
+}
+
+
+
+```
+分配为ObjectAllocationSample加权估算：28036481776/7817272=约3586.48 bytes/business op；非精确对象计数。profile未启用逐次TLAB事件，不推断对象数/op、最大对象或零分配。JMH -prof gc测量的是独立客户端fork，不是Core节点：该轮gc.alloc.rate=128.465MiB/s、gc.alloc.rate.norm=15201357576B/JMH调用、gc.count196/gc.time214ms；一次JMH调用包含整段场景，不能将B/JMH调用当B/交易。单fork单iteration无可靠置信区间。
+NMT节点reserved/committed由3146306/691798 KiB变为3150036/725160 KiB，committed增33362KiB；堆committed由526336降524288KiB。末尾DirectBuffer8个、capacity/memoryUsed约9.1MB。没有Aeron全部映射/文件描述符/池余额与长期斜率，因此不宣称无泄漏；短采样未见Owner文件/网络IO和DataLoss。GC最大暂停18.875ms，影响尾延迟；VM operation最长18.929ms。未收集逐类长期live-set、完整墙钟状态及native峰值，不作完整性能验收。
+
+六产品账户控制JMH（单次调用100 cycles，以下ms/op指整个调用）均accountControlVerify=PASS；fork1/wi1/i2、-prof gc，节点均JFR。
+- lanes-control-INVERSE_DELIVERY-0: 3059.775 ms/op; client allocation 1.106 MiB/s，gc.count=0.0.
+- lanes-control-INVERSE_PERPETUAL-0: 3125.103 ms/op; client allocation 0.986 MiB/s，gc.count=0.0.
+- lanes-control-LINEAR_DELIVERY-0: 3146.376 ms/op; client allocation 0.988 MiB/s，gc.count=0.0.
+- lanes-control-LINEAR_PERPETUAL-0: 3107.790 ms/op; client allocation 1.177 MiB/s，gc.count=0.0.
+- lanes-control-OPTION-0: 2355.180 ms/op; client allocation 1.029 MiB/s，gc.count=0.0.
+- lanes-control-SPOT-0: 830.707 ms/op; client allocation 1.301 MiB/s，gc.count=0.0.
+
+六产品单成员 execute→SIGKILL→日志重放→snapshot重启全部通过，fundsDiff0、bookLevels0；snapshot位置SPOT3616、永续9568、交割及期权5184。连续profile总569cycles，重放/快照恢复businessHash均319cc756e662260b，snapshotPosition1187753632。恢复出现既有Aeron WARN `quorum position went backwards: leaderCommitPosition=1186969344 quorumPosition=0`，未抑制；恢复终态与资金哈希一致。另有JDK25 Unsafe弃用、SLF4J无provider等依赖警告，未出现EXCHANGE_CORE_FAILURE。
+
+结论：四项目标的生产代码已落实并通过正确性/恢复门禁；本机两轮200498/182248 terminal business ops/s，受64～100 CPU限速及同机干扰影响，只作诊断。Owner仍96.0%单核、matcher约24%，没有实现全线程有效工作饱和。历史dispatch约15.70%对本次12.62%、历史约3620B/op对本次3586B/op仅归因背景，不构成受控收益结论。剩余主要串行开销仍包括批量完成、准入准备、全局有序索引发布和响应构造；本任务没有删除正确性要求或以延迟索引发布换吞吐。未运行方案A、三节点或云端，未做长稳泄漏/HTTP/WebSocket验收。
+
+产物校验（以下原始文件在记录后清理，不再作为可访问链接）：
+- perf/lanes-control-INVERSE_DELIVERY-0/node.jfr: 836873 bytes, SHA256 a5a4378ccfe12d9e63d13b1c7afb610877243952920b93a7c96516812edf62cc
+- perf/lanes-control-INVERSE_PERPETUAL-0/node.jfr: 845956 bytes, SHA256 9564b1c64eae2aa1f6668c7555c3ae5d3f0605f33728890273a1a9061f682366
+- perf/lanes-control-LINEAR_DELIVERY-0/node.jfr: 844085 bytes, SHA256 49b1323ba49a74e4a6327ded942aff0b390bab6a4eb39c0e52183769d9ca36fb
+- perf/lanes-control-LINEAR_PERPETUAL-0/node.jfr: 834728 bytes, SHA256 58faa6d34b31ed7f9eeed207a721e8701c89c6fc089df262ea838158c26b1162
+- perf/lanes-control-OPTION-0/node.jfr: 814024 bytes, SHA256 a90bac4731f71dc4a3076d23fa588404c19d8901561b97d7db877c445e7d2698
+- perf/lanes-control-SPOT-0/node.jfr: 721533 bytes, SHA256 328d91ff411c04767dca59867f121c6dfa9cc2e877f03fc2e08091c898d8e452
+- perf/lanes-profile-LINEAR_PERPETUAL-0/node.jfr: 6191970 bytes, SHA256 ad9435b6d5c1e655e9dae57fd25e013c84390eb005877713d57576b1ff3a5941
+- verify-fixed.log: SHA256 7ac7b5953141cae2e4c53a1475b2d8e26cf39912a0f37f85a88dc22adde02e58
+- perf.py: SHA256 01f3a63825bcdbf72c0f77db5f436d3e3b246d571b857e16c91ffb962f511318
+- gates.py: SHA256 6229037b4eee826e5bb58faf44f61df51fd038917f0ffcc00feadadac3933a70
+- recovery.py: SHA256 1f1fed1d7e0ea620567d09ef752ef55de7829844f3c0c8003e8223b66505d96e
+```text
+325279af3bd8ab801970553539b543a70f451c22ad8e9f3585d9b69ff3822864 surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar
+98a995e34e27ae515fe65ee6fe5c78b757e626c420527eda95125d3083470ae9 surprising-aeron-core/surprising-aeron-benchmarks/target/original-product-core-benchmarks.jar
+9f811e8ca26928cb080b294c0c95ddef1a32065cf36a331d20e8fdf6bf53c52d surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar
+```
+
+清理完成：本轮进程均已退出，/tmp/owner-four下Archive/JFR/日志/临时分析器全部删除，已清理9个本轮Maven报告目录与本轮生成的SnapshotControl.class；构建JAR和业务源码保留。
