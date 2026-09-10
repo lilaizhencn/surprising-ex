@@ -64,70 +64,11 @@ public final class MatcherSettlementPlan {
         this.preCancellationOrderIds = preCancellationOrderIds;
     }
 
-    static void validateAndPrepareBatch(long[] takerOrderIds, List<CoreMatchingResult> matchingResults,
-                                        TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                                        BatchValidationScratch scratch) {
-        if (takerOrderIds == null || matchingResults == null || takerOrderIds.length == 0
-                || takerOrderIds.length != matchingResults.size() || scratch == null) {
-            throw new IllegalArgumentException("invalid matcher settlement batch");
-        }
-        LongLongHashMap remainingByOrderId = scratch.remainingByOrderId;
-        LongHashSet terminalOrderIds = scratch.terminalOrderIds;
-        scratch.clear();
-        try {
-            for (int index = 0; index < takerOrderIds.length; index++) {
-                long takerOrderId = takerOrderIds[index];
-                List<MatcherEvent> matches = matchingResults.get(index).matcherEvents();
-                OrderRuntime taker = requireOpen(runtime, takerOrderId);
-                if (terminalOrderIds.contains(takerOrderId)) {
-                    throw new IllegalStateException("runtime matched order is not open: " + takerOrderId);
-                }
-                CoreInstrumentState instrument = runtime.instrument(identities.symbol(taker.symbolId()));
-                if (instrument == null || instrument.changeId() != taker.instrumentChangeId()) {
-                    throw new IllegalStateException("runtime match instrument is missing");
-                }
-                preparePositionIdentity(runtime, identities, instrument, taker);
-                long takerRemaining = remainingByOrderId.containsKey(takerOrderId)
-                        ? remainingByOrderId.get(takerOrderId) : taker.remainingQuantitySteps();
-                for (MatcherEvent match : matches) {
-                    if (match == null) throw new IllegalArgumentException("runtime match is required");
-                    if (match.eventType() != MatcherEventType.TRADE) continue;
-                    OrderRuntime maker = requireOpen(runtime, match.matchedOrderId());
-                    if (terminalOrderIds.contains(maker.orderId())
-                            || maker.userId() != match.matchedOrderUid() || maker.symbolId() != taker.symbolId()
-                            || maker.side() == taker.side() || maker.userId() == taker.userId()) {
-                        throw new IllegalStateException("runtime match does not match authoritative orders");
-                    }
-                    if (match.price() <= 0 || match.size() <= 0) {
-                        throw new IllegalArgumentException("invalid runtime match price or quantity");
-                    }
-                    takerRemaining = Math.subtractExact(takerRemaining, match.size());
-                    long makerRemaining = remainingByOrderId.containsKey(maker.orderId())
-                            ? remainingByOrderId.get(maker.orderId()) : maker.remainingQuantitySteps();
-                    makerRemaining = Math.subtractExact(makerRemaining, match.size());
-                    if (takerRemaining < 0 || makerRemaining < 0) {
-                        throw new IllegalStateException("fill exceeds runtime order remaining quantity");
-                    }
-                    remainingByOrderId.put(maker.orderId(), makerRemaining);
-                    if (makerRemaining == 0) terminalOrderIds.add(maker.orderId());
-                    preparePositionIdentity(runtime, identities, instrument, maker);
-                }
-                remainingByOrderId.put(takerOrderId, takerRemaining);
-                if (takerRemaining == 0 || taker.timeInForce().immediate()
-                        || taker.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET) {
-                    terminalOrderIds.add(takerOrderId);
-                }
-            }
-        } finally {
-            scratch.clear();
-        }
-    }
-
     static final class BatchValidationScratch {
         private final LongLongHashMap remainingByOrderId = new LongLongHashMap();
         private final LongHashSet terminalOrderIds = new LongHashSet();
 
-        private void clear() {
+        void clear() {
             remainingByOrderId.clear();
             terminalOrderIds.clear();
         }
@@ -136,40 +77,52 @@ public final class MatcherSettlementPlan {
     public static MatcherSettlementPlan build(long coreSequence, long takerOrderId, long activeUserId,
                                                long[] initialOrderIds, CoreMatchingResult result,
                                                TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
-        if (coreSequence <= 0 || takerOrderId <= 0 || activeUserId <= 0 || initialOrderIds == null
+        if (initialOrderIds == null) throw new IllegalArgumentException("initial orders are required");
+        return build(coreSequence, takerOrderId, activeUserId, initialOrderIds, result, runtime, identities,
+                null, null, null);
+    }
+
+    /** 批量构建与累计数量校验共用一次成交遍历；scratch 只在本批 Owner 调用期间使用。 */
+    static MatcherSettlementPlan buildBatchItem(long sequence, OrderRuntime taker, CoreInstrumentState instrument,
+                                                CoreMatchingResult result, TradingRuntimeState runtime,
+                                                RuntimeIdentityRegistry identities, BatchValidationScratch scratch) {
+        return build(sequence, taker.orderId(), taker.userId(), null, result, runtime, identities,
+                taker, instrument, scratch);
+    }
+
+    private static MatcherSettlementPlan build(long coreSequence, long takerOrderId, long activeUserId,
+                                               long[] initialOrderIds, CoreMatchingResult result,
+                                               TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                                               OrderRuntime preparedTaker, CoreInstrumentState preparedInstrument,
+                                               BatchValidationScratch batch) {
+        if (coreSequence <= 0 || takerOrderId <= 0 || activeUserId <= 0 || (initialOrderIds == null && batch == null)
                 || result == null || runtime == null || identities == null
                 || result.nativeCommand().coreSequence() != coreSequence) {
             throw new IllegalArgumentException("invalid matcher settlement plan input");
         }
-        OrderRuntime taker = requireOpen(runtime, takerOrderId);
-        CoreInstrumentState instrument = runtime.instrument(identities.symbol(taker.symbolId()));
+        OrderRuntime taker = preparedTaker == null ? requireOpen(runtime, takerOrderId) : preparedTaker;
+        if (taker.status() != CoreOrderStatus.OPEN || batch != null && batch.terminalOrderIds.contains(takerOrderId))
+            throw new IllegalStateException("runtime matched order is not open: " + takerOrderId);
+        CoreInstrumentState instrument = preparedInstrument == null
+                ? runtime.instrument(identities.symbol(taker.symbolId())) : preparedInstrument;
         if (instrument == null || instrument.changeId() != taker.instrumentChangeId()) {
             throw new IllegalStateException("runtime match instrument is missing");
         }
         int expectedChanges = Math.max(2, result.matcherEvents().size() + result.cancellations().size()
-                + initialOrderIds.length + 1);
+                + (initialOrderIds == null ? 1 : initialOrderIds.length) + 1);
         long[] orders = new long[expectedChanges];
         int orderCount = 0;
         LongHashSet uniqueOrders = runtime.matcherSettlementOrderScratch();
-        for (long orderId : initialOrderIds) {
+        if (initialOrderIds == null) orderCount = addUnique(uniqueOrders, orders, orderCount, takerOrderId);
+        else for (long orderId : initialOrderIds) {
             if (orderId > 0) orderCount = addUnique(uniqueOrders, orders, orderCount, orderId);
         }
         long laneMask = runtime.topology().accountLaneMask(activeUserId);
         preparePositionIdentity(runtime, identities, instrument, taker);
-        if (result.matcherEvents().isEmpty()) {
-            for (var cancellation : result.cancellations()) {
-                OrderRuntime order = runtime.order(cancellation.orderId());
-                if (order != null) {
-                    orderCount = addUnique(uniqueOrders, orders, orderCount, order.orderId());
-                    laneMask |= runtime.topology().accountLaneMask(order.userId());
-                }
-            }
-            return new MatcherSettlementPlan(coreSequence, takerOrderId, activeUserId, laneMask,
-                    orders, orderCount, result.matcherEvents(), 0);
-        }
-        LongLongHashMap remainingByOrderId = runtime.matcherSettlementRemainingScratch();
-        remainingByOrderId.clear();
-        remainingByOrderId.put(takerOrderId, taker.remainingQuantitySteps());
+        LongLongHashMap remainingByOrderId = batch == null
+                ? runtime.matcherSettlementRemainingScratch() : batch.remainingByOrderId;
+        if (batch == null) remainingByOrderId.clear();
+        if (!remainingByOrderId.containsKey(takerOrderId)) remainingByOrderId.put(takerOrderId, taker.remainingQuantitySteps());
         int tradeCount = 0;
         try {
             for (MatcherEvent event : result.matcherEvents()) {
@@ -179,7 +132,8 @@ public final class MatcherSettlementPlan {
                     throw new IllegalArgumentException("invalid runtime match price or quantity");
                 }
                 OrderRuntime maker = requireOpen(runtime, event.matchedOrderId());
-                if (maker.userId() != event.matchedOrderUid() || maker.symbolId() != taker.symbolId()
+                if (batch != null && batch.terminalOrderIds.contains(maker.orderId())
+                        || maker.userId() != event.matchedOrderUid() || maker.symbolId() != taker.symbolId()
                         || maker.side() == taker.side() || maker.userId() == taker.userId()) {
                     throw new IllegalStateException("runtime match does not match authoritative orders");
                 }
@@ -192,14 +146,18 @@ public final class MatcherSettlementPlan {
                 }
                 remainingByOrderId.put(takerOrderId, takerRemaining);
                 remainingByOrderId.put(maker.orderId(), makerRemaining);
+                if (batch != null && makerRemaining == 0) batch.terminalOrderIds.add(maker.orderId());
                 preparePositionIdentity(runtime, identities, instrument, maker);
                 orderCount = addUnique(uniqueOrders, orders, orderCount, maker.orderId());
                 int makerLane = runtime.topology().accountLaneId(maker.userId());
                 tradeCount++;
                 laneMask |= 1L << makerLane;
             }
+            if (batch != null && (remainingByOrderId.get(takerOrderId) == 0 || taker.timeInForce().immediate()
+                    || taker.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET))
+                batch.terminalOrderIds.add(takerOrderId);
         } finally {
-            remainingByOrderId.clear();
+            if (batch == null) remainingByOrderId.clear();
         }
         for (var cancellation : result.cancellations()) {
             OrderRuntime order = runtime.order(cancellation.orderId());

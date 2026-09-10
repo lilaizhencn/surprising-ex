@@ -22,6 +22,17 @@ class RuntimeChangeBuffer<V> {
     /** 当前有效元素数量。 */
     int size;
 
+    /** 完成交接后交换整组存储；调用方保证原写入 Lane 已完成且目标缓冲为空。 */
+    void swapStorage(RuntimeChangeBuffer<V> other) {
+        long[] k = keys; keys = other.keys; other.keys = k;
+        Object[] v = values; values = other.values; other.values = v;
+        long[] ik = indexKeys; indexKeys = other.indexKeys; other.indexKeys = ik;
+        int[] slots = indexSlots; indexSlots = other.indexSlots; other.indexSlots = slots;
+        int[] gens = indexGenerations; indexGenerations = other.indexGenerations; other.indexGenerations = gens;
+        int gen = indexGeneration; indexGeneration = other.indexGeneration; other.indexGeneration = gen;
+        int count = size; size = other.size; other.size = count;
+    }
+
     void ensureCapacity(int expectedSize) {
         if (expectedSize <= 0) return;
         int valueCapacity = keys.length;

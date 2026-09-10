@@ -116,10 +116,7 @@ final class OrderBatchExecutor {
             owner.restoreMatchingCommitContext(pending);
         else owner.activateFactContext(owner.sequenceAdmission(pending.sequence()),
                 pending.command(), pending.fingerprint());
-        if (batch.admissionOrderIndex == null) {
-            batch.admissionOrderIndex = new BatchAdmissionOrderIndex(owner.activeOrderIndex, owner.identities, batch.items.size());
-        }
-        if (firstActivation) batch.admissionOrderIndex.reset(pending.command().header().userId());
+        if (firstActivation && batch.admissionOrderIndex != null) batch.admissionOrderIndex.reset(pending.command().header().userId());
         batch.started = true;
         if (preparePipelinedPlaceBatch(batch, pending)) {
             registerPipelinedBatchSymbols(batch, pending);
@@ -147,10 +144,7 @@ final class OrderBatchExecutor {
                 || !pending.clusterIndependent && conflictsWithEarlierPipelinedBatch(batch)) {
             return false;
         }
-        if (batch.admissionOrderIndex == null) {
-            batch.admissionOrderIndex = new BatchAdmissionOrderIndex(owner.activeOrderIndex, owner.identities, batch.items.size());
-        }
-        batch.admissionOrderIndex.reset(pending.command().header().userId());
+        if (batch.admissionOrderIndex != null) batch.admissionOrderIndex.reset(pending.command().header().userId());
         batch.started = true;
         if (!preparePipelinedPlaceBatch(batch, pending)) {
             batch.started = false;
@@ -232,7 +226,7 @@ final class OrderBatchExecutor {
         } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException
                  | TradingCoreRuntime.PipelinedBatchNotApplicable exception) {
             batch.rollbackPreparedClientKeys(owner.identities);
-            batch.admissionOrderIndex.reset(pending.command().header().userId());
+            if (batch.admissionOrderIndex != null) batch.admissionOrderIndex.reset(pending.command().header().userId());
             batch.currentPreMatchingCancellationOrderIds = List.of();
             batch.preparedSymbols.clear();
             batch.preparedContexts.clear();
@@ -332,6 +326,10 @@ final class OrderBatchExecutor {
 
     void prepareOrderBatchItem(OrderBatchPending batch, OrderBatchItem item, long userId,
                                        UUID commandId) {
+        if (batch.admissionOrderIndex == null) {
+            batch.admissionOrderIndex = new BatchAdmissionOrderIndex(owner.activeOrderIndex, owner.identities, batch.items.size());
+            batch.admissionOrderIndex.reset(userId);
+        }
         long previousTimestamp = owner.currentClusterTimestamp;
         long previousPosition = owner.currentClusterPosition;
         owner.currentClusterTimestamp = batch.clusterTimestamp;
@@ -548,16 +546,6 @@ final class OrderBatchExecutor {
                 TradingCoreRuntime.addMatchingUserIds(batch.changedUserIds,
                         pending.command().header().userId(), matchingResult.matcherEvents());
                 batch.collectChangedOrderIds(item, matchingResult);
-                for (int changedIndex = 0;
-                     changedIndex < batch.itemChangedOrderIds.size(); changedIndex++) {
-                    long orderId = batch.itemChangedOrderIds.valueAt(changedIndex);
-                    batch.admissionOrderIndex.update(owner.runtimeState.currentPatchOrderBefore(orderId),
-                            owner.runtimeOrder(orderId));
-                    if (batch.deferredCancellationOrderIds.contains(orderId)) {
-                        batch.admissionOrderIndex.update(owner.runtimeState.currentPatchOrderBefore(orderId),
-                                null);
-                    }
-                }
                 appendOrderBatchResult(batch, item, status, resultCode);
                 batch.nextIndex++;
             } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException exception) {
@@ -712,8 +700,7 @@ final class OrderBatchExecutor {
         }
         if (batch.settlementEvent != null || batch.deferredSettlementOrderIds.isEmpty()) return false;
         batch.settlementEvent = owner.runtimeState.dispatchMatcherSettlementBatch(
-                batch.sequence, batch.deferredSettlementOrderIds.toArray(),
-                batch.deferredSettlementExpectedLaneMasks.toArray(), batch.deferredSettlementMatchingResults,
+                batch.sequence, batch,
                 owner.identities, timestamp, position);
         return true;
     }

@@ -183,13 +183,13 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 当前提交范围内变化的余额；与提交/回滚边界同步维护。 */
     final LongObjectHashMap<IntHashSet> changedBalances = new LongObjectHashMap<>();
     /** 当前提交范围内变化的订单；与提交/回滚边界同步维护。 */
-    final RuntimeIndexedChangeBuffer<OrderRuntime, CoreOrderState> changedOrders =
-            new RuntimeIndexedChangeBuffer<>();
+    final OwnerIndexedChanges<OrderRuntime, CoreOrderState> changedOrders =
+            new OwnerIndexedChanges<>();
     /** 当前提交范围内变化的预留；与提交/回滚边界同步维护。 */
     final LongHashSet changedReservations = new LongHashSet();
     /** 当前提交范围内变化的持仓；与提交/回滚边界同步维护。 */
-    final RuntimeIndexedChangeBuffer<PositionRuntime, RuntimePositionIndexValue> changedPositions =
-            new RuntimeIndexedChangeBuffer<>();
+    final OwnerIndexedChanges<PositionRuntime, RuntimePositionIndexValue> changedPositions =
+            new OwnerIndexedChanges<>();
     /** 当前提交范围内变化的清算；与提交/回滚边界同步维护。 */
     final RuntimeChangeBuffer<LiquidationRuntime> changedLiquidations =
             new RuntimeChangeBuffer<>();
@@ -1143,8 +1143,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 state.changedUsers.add(userId);
                 if (publication == null) putOrRemove(state.publishedUsers, userId, user);
             });
-            orders.drainIndexedTo((orderId, order, hasPrepared, prepared) -> {
-                state.changedOrders.putIndexed(orderId, order, hasPrepared, prepared);
+            orders.forEachIndexed((orderId, order, hasPrepared, prepared) -> {
                 if (terminalOrderSink != null && order != null && order.status().terminal()) {
                     terminalOrderSink.accept(order, coreSequence);
                 }
@@ -1154,8 +1153,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 state.changedReservations.add(orderId);
                 if (publication == null) putOrRemove(state.publishedReservations, orderId, reservation);
             });
-            positions.drainIndexedTo((positionKey, position, hasPrepared, prepared) -> {
-                state.changedPositions.putIndexed(positionKey, position, hasPrepared, prepared);
+            positions.forEachIndexed((positionKey, position, hasPrepared, prepared) -> {
                 if (position == null && state.realtimeCapture != null) {
                     try { state.realtimeCapture.removedPosition(state.publishedPositions.get(positionKey)); }
                     catch (RuntimeException failure) { state.realtimeCapture.failed(); }
@@ -1178,6 +1176,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             });
             removedOrderRoutes.clear();
             removedReservationRoutes.clear();
+            state.changedOrders.adopt(laneId, orders);
+            state.changedPositions.adopt(laneId, positions);
             state.publishLaneReceipt(publication, laneId);
         }
 
@@ -5066,6 +5066,11 @@ public final class TradingRuntimeState implements AutoCloseable {
             long coreSequence, long expectedLaneMask, long takerOrderId,
             CoreMatchingResult matchingResult, RuntimeIdentityRegistry identities,
             TerminalOrderSink terminalOrderSink) { return settlements.applyOrderBatchMatcherSettlement(coreSequence, expectedLaneMask, takerOrderId, matchingResult, identities, terminalOrderSink); }
+
+    public MatcherSettlementEvent dispatchMatcherSettlementBatch(long sequence, SettlementBatchInput batch,
+            RuntimeIdentityRegistry identities, long timestamp, long position) {
+        return settlements.dispatchMatcherSettlementBatch(sequence, batch, identities, timestamp, position);
+    }
 
     public MatcherSettlementEvent dispatchMatcherSettlementBatch(
             long coreSequence, long[] takerOrderIds, long[] expectedLaneMasks,

@@ -15,6 +15,19 @@ final class RuntimeIndexedChangeBuffer<V, I> extends RuntimeChangeBuffer<V> {
         void accept(long key, V value, boolean hasPrepared, I indexValue);
     }
 
+    /** 将 Lane 的实体和预计算索引一起交给 Owner，交还空缓冲以供事件池复用。 */
+    void swapWith(RuntimeIndexedChangeBuffer<V, I> other) {
+        swapStorage(other);
+        Object[] values = prepared; prepared = other.prepared; other.prepared = values;
+        boolean[] flags = present; present = other.present; other.present = flags;
+    }
+
+    @Override int put(long key, V value) {
+        int slot = super.put(key, value);
+        if (slot < present.length) { present[slot] = false; prepared[slot] = null; }
+        return slot;
+    }
+
     void putPrepared(long key, I value) {
         int slot = indexOf(key);
         if (slot < 0) throw new IllegalStateException("prepared index has no state change");

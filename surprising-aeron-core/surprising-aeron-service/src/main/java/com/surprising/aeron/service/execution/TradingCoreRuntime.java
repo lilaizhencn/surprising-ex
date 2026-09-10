@@ -1527,7 +1527,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
                         orderBatch.rollbackPreparedClientKeys(identities);
                         orderBatch.pipelined = false;
                         orderBatch.sequentialAdmission = true;
-                        orderBatch.admissionOrderIndex.reset(pending.command().header().userId());
+                        if (orderBatch.admissionOrderIndex != null)
+                            orderBatch.admissionOrderIndex.reset(pending.command().header().userId());
                         placeAdmissionReadyShardMask &= ~shardBit;
                         if (orderBatch.commitStarted()) {
                             restoreMatchingCommitContext(pending);

@@ -438,6 +438,9 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         if(total!=expected||!lossCompleted)throw new IllegalStateException("mixed funds/lifecycle mismatch actual="+total+" expected="+expected);
         for(int i=0;i<SYMBOLS;i++)for(long id:new long[]{maker(i),taker(i)}) {
             String instrument=symbol(i);
+            var openOrders = CoreStateQueryCodec.decodeOpenOrders(query(CoreMessageType.USER_OPEN_ORDERS_QUERY,id,
+                    CoreStateQueryCodec.encodeOpenOrdersQuery(new CoreOpenOrdersQuery(instrument,0,1))).data());
+            if (!openOrders.orders().isEmpty()) throw new IllegalStateException("HFT committed order index retained terminal orders user="+id);
             var s=user(id);long expectedPosition=(id==maker(i)?-1:1)*totalCycles*BATCH;
             long actual=s.positions().stream().filter(p->p.symbol().equals(instrument)).mapToLong(CorePositionView::signedQuantitySteps).sum();
             if(actual!=expectedPosition||!s.reservations().isEmpty())throw new IllegalStateException("HFT position/reservation mismatch user="+id+" expected="+expectedPosition+" actual="+actual);

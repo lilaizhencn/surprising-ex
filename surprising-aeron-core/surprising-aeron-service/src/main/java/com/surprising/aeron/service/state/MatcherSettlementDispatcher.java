@@ -135,44 +135,65 @@ final class MatcherSettlementDispatcher {
                 || commitTimestamp < 0 || commitClusterPosition < 0) {
             throw new IllegalArgumentException("invalid matcher settlement batch");
         }
+        return dispatchMatcherSettlementBatch(coreSequence, new SettlementBatchInput() {
+            public int settlementCount() { return takerOrderIds.length; }
+            public long settlementOrderId(int index) { return takerOrderIds[index]; }
+            public long settlementLaneMask(int index) { return expectedLaneMasks[index]; }
+            public CoreMatchingResult settlementResult(int index) { return matchingResults.get(index); }
+        }, identities, commitTimestamp, commitClusterPosition);
+    }
+
+    MatcherSettlementEvent dispatchMatcherSettlementBatch(long coreSequence, SettlementBatchInput batch,
+            RuntimeIdentityRegistry identities, long commitTimestamp, long commitClusterPosition) {
+        owner.assertOwner();
+        if (coreSequence <= 0 || batch == null || batch.settlementCount() <= 0 || identities == null
+                || commitTimestamp < 0 || commitClusterPosition < 0)
+            throw new IllegalArgumentException("invalid matcher settlement batch");
         long validMask = owner.accountLanes.length == Long.SIZE ? -1L : (1L << owner.accountLanes.length) - 1L;
         MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();
         if (event == null) event = new MatcherSettlementEvent();
-        MatcherSettlementEvent.BatchStorage storage = event.batchStorage(takerOrderIds.length);
+        MatcherSettlementEvent.BatchStorage storage = event.batchStorage(batch.settlementCount());
         MatcherSettlementPlan[] plans = storage.plans;
         CoreInstrumentState[] instruments = storage.instruments;
         int[] baseAssetIds = storage.baseAssetIds;
         int[] quoteAssetIds = storage.quoteAssetIds;
         int[] settleAssetIds = storage.settleAssetIds;
+        matcherBatchValidationScratch.clear();
         boolean prepared = false;
         try {
             long batchLaneMask = 0;
-            for (int index = 0; index < takerOrderIds.length; index++) {
-                long takerOrderId = takerOrderIds[index];
-                long expectedLaneMask = expectedLaneMasks[index];
-                CoreMatchingResult matchingResult = matchingResults.get(index);
+            for (int index = 0; index < batch.settlementCount(); index++) {
+                long takerOrderId = batch.settlementOrderId(index);
+                long expectedLaneMask = batch.settlementLaneMask(index);
+                CoreMatchingResult matchingResult = batch.settlementResult(index);
                 if (takerOrderId <= 0 || expectedLaneMask == 0 || (expectedLaneMask & ~validMask) != 0
                         || matchingResult == null || matchingResult.nativeCommand().coreSequence() != coreSequence) {
                     throw new IllegalArgumentException("invalid matcher settlement item");
                 }
                 OrderRuntime taker = owner.order(takerOrderId);
                 if (taker == null) throw new IllegalStateException("taker order is missing");
-                MatcherSettlementPlan plan = MatcherSettlementPlan.build(coreSequence, takerOrderId, taker.userId(),
-                        new long[]{takerOrderId}, matchingResult, owner, identities);
-                if (plan.requiredLaneMask() != expectedLaneMask) {
-                    throw new IllegalStateException("matcher settlement lane mask mismatch");
+                int slot = storage.metadataSlots.getIfAbsent(taker.symbolId(), -1);
+                if (slot < 0) {
+                    CoreInstrumentState instrument = owner.instrument(identities.symbol(taker.symbolId()));
+                    if (instrument == null) throw new IllegalStateException("match instrument is missing");
+                    instruments[index] = instrument;
+                    baseAssetIds[index] = identities.assetId(instrument.baseAsset());
+                    quoteAssetIds[index] = identities.assetId(instrument.quoteAsset());
+                    settleAssetIds[index] = identities.assetId(instrument.settleAsset());
+                    storage.metadataSlots.put(taker.symbolId(), index);
+                } else {
+                    instruments[index] = instruments[slot];
+                    baseAssetIds[index] = baseAssetIds[slot];
+                    quoteAssetIds[index] = quoteAssetIds[slot];
+                    settleAssetIds[index] = settleAssetIds[slot];
                 }
+                MatcherSettlementPlan plan = MatcherSettlementPlan.buildBatchItem(coreSequence, taker,
+                        instruments[index], matchingResult, owner, identities, matcherBatchValidationScratch);
+                if (plan.requiredLaneMask() != expectedLaneMask)
+                    throw new IllegalStateException("matcher settlement lane mask mismatch");
                 plans[index] = plan;
-                CoreInstrumentState instrument = owner.instrument(identities.symbol(taker.symbolId()));
-                if (instrument == null) throw new IllegalStateException("match instrument is missing");
-                instruments[index] = instrument;
-                baseAssetIds[index] = identities.assetId(instrument.baseAsset());
-                quoteAssetIds[index] = identities.assetId(instrument.quoteAsset());
-                settleAssetIds[index] = identities.assetId(instrument.settleAsset());
                 batchLaneMask |= expectedLaneMask;
             }
-            MatcherSettlementPlan.validateAndPrepareBatch(
-                    takerOrderIds, matchingResults, owner, identities, matcherBatchValidationScratch);
             prepared = true; // Once preparation starts, failures are fatal; never recycle a partially prepared event.
             event.prepareBatch(coreSequence, batchLaneMask, commitTimestamp, commitClusterPosition,
                     plans, owner, identities, instruments,
@@ -188,6 +209,7 @@ final class MatcherSettlementDispatcher {
             }
             return event;
         } finally {
+            matcherBatchValidationScratch.clear();
             if (!prepared) {
                 event.discardBatchStorage();
                 matcherSettlementEventPool.addFirst(event);

@@ -19,7 +19,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** 批量命令上下文；owner 准备，matcher/Lane 按完成边界交接，终态回收后复用。 */
-final class OrderBatchPending implements TradingOrderBatchCodec.ResultSource, com.surprising.aeron.protocol.CoreOrderStateSource {
+final class OrderBatchPending implements com.surprising.aeron.service.state.SettlementBatchInput, TradingOrderBatchCodec.ResultSource, com.surprising.aeron.protocol.CoreOrderStateSource {
+    public int settlementCount() { return deferredSettlementOrderIds.size(); }
+    public long settlementOrderId(int index) { return deferredSettlementOrderIds.get(index); }
+    public long settlementLaneMask(int index) { return deferredSettlementExpectedLaneMasks.get(index); }
+    public CoreMatchingResult settlementResult(int index) { return deferredSettlementMatchingResults.get(index); }
     public int size() { return items.size(); }
     public long orderId(int index) { return items.get(index).orderId; }
     public long originalOrderId(int index) { return items.get(index).originalOrderId; }

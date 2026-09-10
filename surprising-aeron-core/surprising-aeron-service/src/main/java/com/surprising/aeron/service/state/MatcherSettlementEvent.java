@@ -43,6 +43,9 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     // Storage belongs to this pooled event, never to a shared owner scratch buffer.
     private BatchStorage batchStorage;
     static final class BatchStorage {
+        /** 本批币对ID到首个元数据槽；只在Owner构建阶段写入，事件回收时清空。 */
+        final org.eclipse.collections.impl.map.mutable.primitive.IntIntHashMap metadataSlots =
+                new org.eclipse.collections.impl.map.mutable.primitive.IntIntHashMap();
         final MatcherSettlementPlan[] plans;
         final CoreInstrumentState[] instruments;
         final int[] baseAssetIds, quoteAssetIds, settleAssetIds;
@@ -52,6 +55,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             baseAssetIds = new int[size]; quoteAssetIds = new int[size]; settleAssetIds = new int[size];
         }
         void clear() {
+            metadataSlots.clear();
             java.util.Arrays.fill(plans, null);
             java.util.Arrays.fill(instruments, null);
         }
