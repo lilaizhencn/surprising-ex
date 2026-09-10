@@ -610,7 +610,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     void enterMatcherSettlementScope(AccountLaneState lane, MatcherSettlementChanges changes) {
-        if (changes == null || matcherSettlementChangesScope.get() != null) {
+        if (changes == null || matcherSettlementChangesScope.get() != null
+                || (changes.activeLaneMask & (1L << lane.laneId())) == 0) {
             throw new IllegalStateException("invalid matcher settlement scope");
         }
         enterLaneCommandScope(lane);
@@ -905,10 +906,12 @@ public final class TradingRuntimeState implements AutoCloseable {
                 publishedLiquidations, publishedRiskSnapshots);
     }
 
-    MatcherSettlementChanges acquireMatcherSettlementChanges() {
+    MatcherSettlementChanges acquireMatcherSettlementChanges(long laneMask) {
         assertOwner();
         MatcherSettlementChanges changes = matcherSettlementChangesPool.pollFirst();
-        return changes == null ? new MatcherSettlementChanges(accountLanes.length) : changes;
+        if (changes == null) changes = new MatcherSettlementChanges(accountLanes.length);
+        changes.activeLaneMask = laneMask;
+        return changes;
     }
 
     void releaseMatcherSettlementChanges(MatcherSettlementChanges changes) {
@@ -917,6 +920,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     static final class MatcherSettlementChanges {
+        /** Owner派发前固定的参与Lane；事件完成后仅回收这些Lane的缓冲。 */
+        private long activeLaneMask;
         /** 各 Lane 输出给 owner 的变化缓冲，在完成交接后消费。 */
         final PublishedLaneChanges[] publishedLaneChanges;
         /** 按 Lane 保存的余额前后值，用于资金增量核对。 */
@@ -1002,10 +1007,15 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
 
         void clear() {
-            java.util.Arrays.fill(completedPending, 0);
-            for (PublishedLaneChanges changes : publishedLaneChanges) changes.clear();
-            for (LaneBalancePatches patches : balancePatches) patches.clear();
-            for (RuntimeFundsAccumulator delta : laneFundsDeltas) delta.clear();
+            long lanes = activeLaneMask;
+            while (lanes != 0) {
+                int lane = Long.numberOfTrailingZeros(lanes); lanes &= lanes - 1;
+                completedPending[lane] = 0;
+                publishedLaneChanges[lane].clear();
+                balancePatches[lane].clear();
+                laneFundsDeltas[lane].clear();
+            }
+            activeLaneMask = 0;
             aggregateFundsDelta.clear();
         }
     }
@@ -1588,7 +1598,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new IllegalStateException("asynchronous place batch admission requires Account Lane workers");
         }
         int laneId = topology.accountLaneId(userId);
-        MatcherSettlementChanges changes = acquireMatcherSettlementChanges();
+        MatcherSettlementChanges changes = acquireMatcherSettlementChanges(1L << laneId);
         changes.ensureAdmissionCapacity(laneId, itemCount);
         PlaceBatchAdmissionEvent event = placeBatchAdmissionEventPool.pollFirst();
         if (event == null) event = new PlaceBatchAdmissionEvent();
@@ -1680,23 +1690,48 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (userBefore != null) lane.users.put(userId, userBefore);
     }
 
+    /** Owner登记的待收通知范围；Lane只写自己的SPSC队列，不竞争共享位图。 */
+    private long expectedAdmissionLanes, expectedSettlementLanes;
+    private final int[] expectedAdmissions = new int[64], expectedSettlements = new int[64];
+
+    void expectPlaceAdmission(int laneId) {
+        assertOwner();
+        expectedAdmissions[laneId]++;
+        expectedAdmissionLanes |= 1L << laneId;
+    }
+    void releaseAdmissionExpectation(int laneId) {
+        assertOwner();
+        if (expectedAdmissions[laneId] <= 0) throw new IllegalStateException("unexpected admission completion");
+        if (--expectedAdmissions[laneId] == 0) expectedAdmissionLanes &= ~(1L << laneId);
+    }
+    void releaseSettlementExpectation(int laneId) {
+        assertOwner();
+        if (expectedSettlements[laneId] <= 0) throw new IllegalStateException("unexpected settlement completion");
+        if (--expectedSettlements[laneId] == 0) expectedSettlementLanes &= ~(1L << laneId);
+    }
+    void expectMatcherSettlement(long lanes) {
+        assertOwner();
+        expectedSettlementLanes |= lanes;
+        while (lanes != 0) {
+            int lane = Long.numberOfTrailingZeros(lanes); lanes &= lanes - 1;
+            expectedSettlements[lane]++;
+        }
+    }
+
     void publishPlaceAdmissionReady(int laneId, long coreSequence) {
         placeAdmissionReadyQueues[laneId].publish(coreSequence);
     }
 
     public long takePlaceAdmissionReadyLaneMask() {
         assertOwner();
-        return readyLaneMask(placeAdmissionReadyQueues);
+        return readyLaneMask(placeAdmissionReadyQueues, expectedAdmissionLanes);
     }
 
     /** Read-only SPSC cursor probe. A later publication is observed on the next owner poll. */
     public boolean hasMatchingNotifications() {
         assertOwner();
-        for (int lane = 0; lane < accountLanes.length; lane++) {
-            if (placeAdmissionReadyQueues[lane].hasPending()
-                    || matcherSettlementReadyQueues[lane].hasPending()) return true;
-        }
-        return false;
+        return readyLaneMask(placeAdmissionReadyQueues, expectedAdmissionLanes) != 0
+                || readyLaneMask(matcherSettlementReadyQueues, expectedSettlementLanes) != 0;
     }
 
     public long pollPlaceAdmissionReady(int laneId) {
@@ -1704,7 +1739,9 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (laneId < 0 || laneId >= placeAdmissionReadyQueues.length) {
             throw new IllegalArgumentException("invalid Account Lane id");
         }
-        return placeAdmissionReadyQueues[laneId].poll();
+        long sequence = placeAdmissionReadyQueues[laneId].poll();
+        if (sequence != 0) releaseAdmissionExpectation(laneId);
+        return sequence;
     }
 
     void publishMatcherSettlementReady(int laneId, long coreSequence) {
@@ -1713,7 +1750,7 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public long takeMatcherSettlementReadyLaneMask() {
         assertOwner();
-        return readyLaneMask(matcherSettlementReadyQueues);
+        return readyLaneMask(matcherSettlementReadyQueues, expectedSettlementLanes);
     }
 
     public long pollMatcherSettlementReady(int laneId) {
@@ -1721,12 +1758,15 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (laneId < 0 || laneId >= matcherSettlementReadyQueues.length) {
             throw new IllegalArgumentException("invalid Account Lane id");
         }
-        return matcherSettlementReadyQueues[laneId].poll();
+        long sequence = matcherSettlementReadyQueues[laneId].poll();
+        if (sequence != 0) releaseSettlementExpectation(laneId);
+        return sequence;
     }
 
-    static long readyLaneMask(LaneSequenceQueue[] queues) {
+    static long readyLaneMask(LaneSequenceQueue[] queues, long expected) {
         long mask = 0;
-        for (int laneId = 0; laneId < queues.length; laneId++) {
+        while (expected != 0) {
+            int laneId = Long.numberOfTrailingZeros(expected); expected &= expected - 1;
             if (queues[laneId].hasPending()) mask |= 1L << laneId;
         }
         return mask;
@@ -1816,7 +1856,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         if (!accountLanesStarted) throw new IllegalStateException("asynchronous cancel requires Account Lanes");
         int laneId = topology.accountLaneId(userId);
-        MatcherSettlementChanges changes = acquireMatcherSettlementChanges();
+        MatcherSettlementChanges changes = acquireMatcherSettlementChanges(1L << laneId);
         LaneCancelEvent event = laneCancelEventPool.pollFirst();
         if (event == null) event = new LaneCancelEvent();
         event.prepare(coreSequence, userId, orderId, commitTimestamp, commitClusterPosition,
@@ -1860,7 +1900,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new IllegalStateException("asynchronous cancel batch requires Account Lanes and orders");
         }
         int laneId = topology.accountLaneId(userId);
-        MatcherSettlementChanges changes = acquireMatcherSettlementChanges();
+        MatcherSettlementChanges changes = acquireMatcherSettlementChanges(1L << laneId);
         LaneCancelEvent event = laneCancelEventPool.pollFirst();
         if (event == null) event = new LaneCancelEvent();
         event.prepare(coreSequence, userId, orderIds, orderIds.length,
@@ -1918,7 +1958,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         if (!accountLanesStarted) throw new IllegalStateException("asynchronous replace requires Account Lanes");
         int laneId = topology.accountLaneId(userId);
-        MatcherSettlementChanges changes = acquireMatcherSettlementChanges();
+        MatcherSettlementChanges changes = acquireMatcherSettlementChanges(1L << laneId);
         LaneReplaceEvent event = laneReplaceEventPool.pollFirst();
         if (event == null) event = new LaneReplaceEvent();
         event.prepare(coreSequence, userId, originalOrderId, preCancelOrderIds, replacement, commandId,
@@ -4208,12 +4248,14 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     static void clearChanged(LongHashSet values) {
+        if (values.isEmpty()) return;
         boolean compact = values.size() >= CHANGE_KEY_COMPACTION_THRESHOLD;
         values.clear();
         if (compact) values.compact();
     }
 
     static void clearChanged(IntHashSet values) {
+        if (values.isEmpty()) return;
         boolean compact = values.size() >= CHANGE_KEY_COMPACTION_THRESHOLD;
         values.clear();
         if (compact) values.compact();
@@ -4227,6 +4269,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     static <K, V> ConcurrentHashMap<K, V> clearCapturedChanges(ConcurrentHashMap<K, V> values) {
+        if (values.isEmpty()) return values;
         if (values.size() >= CHANGE_KEY_COMPACTION_THRESHOLD) return new ConcurrentHashMap<>();
         values.clear();
         return values;

@@ -88,6 +88,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         publication = null;
         rejection = null;
         COMPLETED.set(this, false);
+        runtime.expectPlaceAdmission(laneId);
         return this;
     }
 
@@ -220,6 +221,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         return value;
     }
     TradingRuntimeState.MatcherSettlementChanges discardChanges() {
+        if (!complete()) runtime.releaseAdmissionExpectation(laneId);
         TradingRuntimeState.MatcherSettlementChanges value = changes;
         changes = null;
         COMPLETED.setRelease(this, true);

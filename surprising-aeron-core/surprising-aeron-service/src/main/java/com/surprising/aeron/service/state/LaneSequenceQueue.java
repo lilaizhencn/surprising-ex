@@ -4,6 +4,8 @@ package com.surprising.aeron.service.state;
 final class LaneSequenceQueue {
     private final long[] sequences;
     private final int indexMask;
+    /** 消费者独占游标及已观察到的生产者上界；非空时不重复跨核读取。 */
+    private long consumerCursor, observedProducer;
     private final PaddedSequence producerSequence = new PaddedSequence();
     private final PaddedSequence consumerSequence = new PaddedSequence();
 
@@ -26,18 +28,21 @@ final class LaneSequenceQueue {
     }
 
     long poll() {
-        long next = consumerSequence.value;
-        if (next >= producerSequence.value) return 0;
+        long next = consumerCursor;
+        if (!hasPending()) return 0;
         int index = (int) next & indexMask;
         long coreSequence = sequences[index];
         if (coreSequence <= 0) throw new IllegalStateException("lane sequence publication gap");
         sequences[index] = 0;
-        consumerSequence.value = next + 1;
+        consumerCursor = next + 1;
+        consumerSequence.value = consumerCursor;
         return coreSequence;
     }
 
     boolean hasPending() {
-        return consumerSequence.value < producerSequence.value;
+        if (consumerCursor < observedProducer) return true;
+        observedProducer = producerSequence.value;
+        return consumerCursor < observedProducer;
     }
 
     /** Producer and consumer write different cache lines on the hot SPSC path. */

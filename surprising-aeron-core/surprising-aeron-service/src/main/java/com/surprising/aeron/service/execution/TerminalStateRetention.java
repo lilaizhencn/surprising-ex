@@ -20,7 +20,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,27 +36,21 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
     private static final int VERSION = 2;
     private static final int MAX_CLIENT_ID_BYTES = 256;
     private final LinkedHashMap<EntityKey, RetainedEntity> candidates;
-    private final LinkedHashMap<EntityKey, RetainedEntity> tombstones;
-    private final Map<ClientIdentity, EntityKey> tombstonesByClient;
+    private final TerminalTombstoneStore tombstones;
     private final LinkedHashMap<UUID, CommandFingerprint> fundsCommands;
-    /** Owner 专用查询键，绝不插入容器；插入时创建独立稳定键。 */
-    private final EntityKey entityQuery = new EntityKey(EntityType.ORDER, 1);
-    private final ClientIdentity clientQuery = new ClientIdentity(EntityType.ORDER, 1, "");
     private long visitingExportSequence;
     private final ArrayList<Long> sortedScratch = new ArrayList<>();
 
     TerminalStateRetention() {
-        this(new LinkedHashMap<>(), new LinkedHashMap<>(), new LinkedHashMap<>());
+        this(new LinkedHashMap<>(), new TerminalTombstoneStore(), new LinkedHashMap<>());
     }
 
     private TerminalStateRetention(LinkedHashMap<EntityKey, RetainedEntity> candidates,
-                                   LinkedHashMap<EntityKey, RetainedEntity> tombstones,
+                                   TerminalTombstoneStore tombstones,
                                    LinkedHashMap<UUID, CommandFingerprint> fundsCommands) {
         this.candidates = candidates;
         this.tombstones = tombstones;
         this.fundsCommands = fundsCommands;
-        this.tombstonesByClient = new HashMap<>();
-        tombstones.values().forEach(this::indexTombstone);
     }
 
     void observe(TradingCoreState after, long exportSequence,
@@ -130,12 +123,9 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
     }
 
     private void retainPrunedOrder(OrderRuntime order, long coreSequence) {
-        EntityKey key = new EntityKey(EntityType.ORDER, order.orderId());
-        if (tombstones.containsKey(key)) return;
-        RetainedEntity retained = new RetainedEntity(key, order.userId(),
+        if (tombstones.contains(EntityType.ORDER.ordinal(), order.orderId())) return;
+        tombstones.put(EntityType.ORDER.ordinal(), order.orderId(), order.userId(),
                 normalizeClientId(order.clientOrderId()), coreSequence);
-        tombstones.put(key, retained);
-        indexTombstone(retained);
     }
 
     TerminalPruneBatch eligible(TradingCoreState state, long acknowledgedSequence, int limit) {
@@ -197,16 +187,7 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
     }
 
     private void trimTombstones() {
-        if (tombstones.size() <= MAX_TOMBSTONES) return;
-        var iterator = tombstones.values().iterator();
-        while (tombstones.size() > MAX_TOMBSTONES) {
-            RetainedEntity removed = iterator.next();
-            iterator.remove();
-            if (removed != null && !removed.clientId().isEmpty()) {
-                tombstonesByClient.remove(clientQuery.reset(removed.key().type(), removed.userId(),
-                        removed.clientId()));
-            }
-        }
+        tombstones.trim(MAX_TOMBSTONES);
     }
 
     boolean containsOrder(long orderId, long userId, String clientOrderId) {
@@ -253,7 +234,7 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
             DataOutputStream output = new DataOutputStream(bytes);
             output.writeInt(VERSION);
             write(output, candidates);
-            write(output, tombstones);
+            tombstones.write(output);
             output.writeInt(fundsCommands.size());
             for (Map.Entry<UUID, CommandFingerprint> entry : fundsCommands.entrySet()) {
                 output.writeLong(entry.getKey().getMostSignificantBits());
@@ -268,7 +249,7 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
     }
 
     TerminalStateRetention copy() {
-        return new TerminalStateRetention(new LinkedHashMap<>(candidates), new LinkedHashMap<>(tombstones),
+        return new TerminalStateRetention(new LinkedHashMap<>(candidates), tombstones.copy(),
                 new LinkedHashMap<>(fundsCommands));
     }
 
@@ -278,7 +259,10 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
             DataInputStream input = new DataInputStream(new ByteArrayInputStream(encoded));
             if (input.readInt() != VERSION) throw new IllegalArgumentException("unsupported terminal retention version");
             LinkedHashMap<EntityKey, RetainedEntity> candidates = read(input, Integer.MAX_VALUE);
-            LinkedHashMap<EntityKey, RetainedEntity> tombstones = read(input, MAX_TOMBSTONES);
+            var decodedTombstones = read(input, MAX_TOMBSTONES);
+            TerminalTombstoneStore tombstones = new TerminalTombstoneStore();
+            for (var value : decodedTombstones.values()) tombstones.put(value.key().type().ordinal(),
+                    value.key().id(), value.userId(), value.clientId(), value.exportSequence());
             int fundsCommandCount = input.readInt();
             if (fundsCommandCount < 0 || fundsCommandCount > MAX_FUNDS_COMMANDS) {
                 throw new IllegalArgumentException("invalid funds command retention count");
@@ -347,7 +331,7 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
     }
 
     private void retain(EntityKey key, long userId, String clientId, long exportSequence) {
-        if (tombstones.containsKey(key)) return;
+        if (tombstones.contains(key.type().ordinal(), key.id())) return;
         RetainedEntity retained = new RetainedEntity(key, userId, normalizeClientId(clientId), exportSequence);
         candidates.put(key, retained);
     }
@@ -412,16 +396,16 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
             if (candidate == null || candidate.exportSequence() > acknowledgedSequence) {
                 throw new IllegalStateException("terminal entity was not eligible for pruning: " + key);
             }
-            tombstones.put(key, candidate);
-            indexTombstone(candidate);
+            tombstones.put(type.ordinal(), id, candidate.userId(), candidate.clientId(), candidate.exportSequence());
         }
     }
 
     private boolean contains(EntityType type, long id, long userId, String clientId) {
-        if (tombstones.containsKey(entityQuery.reset(type, id))) return true;
+        if (id <= 0) throw new IllegalArgumentException("invalid terminal entity key");
+        if (tombstones.contains(type.ordinal(), id)) return true;
         String normalized = normalizeClientId(clientId);
         if (normalized.isEmpty()) return false;
-        return tombstonesByClient.containsKey(clientQuery.reset(type, userId, normalized));
+        return tombstones.containsClient(type.ordinal(), userId, normalized);
     }
 
     private void forEachSorted(Iterable<Long> values, java.util.function.LongConsumer consumer) {
@@ -478,16 +462,9 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
         return normalized;
     }
 
-    private void indexTombstone(RetainedEntity value) {
-        if (!value.clientId().isEmpty()) {
-            tombstonesByClient.put(new ClientIdentity(value.key().type(), value.userId(), value.clientId()),
-                    value.key());
-        }
-    }
-
     private enum EntityType { ORDER, ALGO, TRIGGER, LIQUIDATION }
 
-    /** 存储键构建后不再修改；仅上方的专用查询实例调用 reset。 */
+    /** 导出候选的稳定实体键；不用于高频终态FIFO。 */
     private static final class EntityKey {
         private EntityType type;
         private long id;
@@ -500,21 +477,6 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
         long id() { return id; }
         @Override public int hashCode() { return 31 * type.hashCode() + Long.hashCode(id); }
         @Override public boolean equals(Object other) { return other instanceof EntityKey key && type == key.type && id == key.id; }
-    }
-
-    /** 客户订单号索引的稳定存储键，以及一个从不入表的 Owner 查询实例。 */
-    private static final class ClientIdentity {
-        private EntityType type;
-        private long userId;
-        private String clientId;
-        private ClientIdentity(EntityType type, long userId, String clientId) { reset(type, userId, clientId); }
-        private ClientIdentity reset(EntityType type, long userId, String clientId) {
-            this.type = type; this.userId = userId; this.clientId = clientId; return this;
-        }
-        @Override public int hashCode() { return 31 * (31 * type.hashCode() + Long.hashCode(userId)) + clientId.hashCode(); }
-        @Override public boolean equals(Object other) {
-            return other instanceof ClientIdentity key && type == key.type && userId == key.userId && clientId.equals(key.clientId);
-        }
     }
 
     private record RetainedEntity(EntityKey key, long userId, String clientId, long exportSequence) {

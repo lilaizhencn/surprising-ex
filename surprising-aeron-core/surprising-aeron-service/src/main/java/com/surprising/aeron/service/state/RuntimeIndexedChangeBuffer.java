@@ -64,6 +64,7 @@ final class RuntimeIndexedChangeBuffer<V, I> extends RuntimeChangeBuffer<V> {
     }
 
     @Override void clear() {
+        if (size == 0) return;
         int length = Math.min(size, prepared.length);
         java.util.Arrays.fill(prepared, 0, length, null);
         java.util.Arrays.fill(present, 0, length, false);

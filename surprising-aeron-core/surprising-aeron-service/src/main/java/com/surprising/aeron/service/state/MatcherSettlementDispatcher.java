@@ -170,8 +170,7 @@ final class MatcherSettlementDispatcher {
                         || matchingResult == null || matchingResult.nativeCommand().coreSequence() != coreSequence) {
                     throw new IllegalArgumentException("invalid matcher settlement item");
                 }
-                OrderRuntime taker = owner.order(takerOrderId);
-                if (taker == null) throw new IllegalStateException("taker order is missing");
+                OrderRuntime taker = matcherBatchValidationScratch.order(owner, takerOrderId);
                 int slot = storage.metadataSlots.getIfAbsent(taker.symbolId(), -1);
                 if (slot < 0) {
                     CoreInstrumentState instrument = owner.instrument(identities.symbol(taker.symbolId()));
@@ -188,7 +187,7 @@ final class MatcherSettlementDispatcher {
                     settleAssetIds[index] = settleAssetIds[slot];
                 }
                 MatcherSettlementPlan plan = MatcherSettlementPlan.buildBatchItem(coreSequence, taker,
-                        instruments[index], matchingResult, owner, identities, matcherBatchValidationScratch);
+                        instruments[index], matchingResult, owner, identities, matcherBatchValidationScratch, plans[index]);
                 if (plan.requiredLaneMask() != expectedLaneMask)
                     throw new IllegalStateException("matcher settlement lane mask mismatch");
                 plans[index] = plan;

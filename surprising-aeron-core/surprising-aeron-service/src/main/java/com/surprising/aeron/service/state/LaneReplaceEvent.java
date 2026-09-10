@@ -67,6 +67,7 @@ public final class LaneReplaceEvent implements SettlementLaneWorker.Command {
         runtime = owner;
         identities = identityRegistry;
         changes = commandChanges;
+        runtime.expectMatcherSettlement(1L << laneId);
         return this;
     }
 

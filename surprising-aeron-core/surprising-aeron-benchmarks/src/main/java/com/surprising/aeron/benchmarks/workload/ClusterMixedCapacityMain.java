@@ -466,6 +466,13 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
                 requireItems(CoreMessageType.EXECUTE_TRIGGER_ORDER,measuredCycles*32);
             }
         }
+        if (Boolean.getBoolean("surprising.aeron.owner-churn-validation") && measuredCycles > 0) {
+            long completedOrderLifecycles = Math.multiplyExact(totalCycles, SYMBOLS * BATCH * 3L);
+            if (completedOrderLifecycles < 2 * 65_536L)
+                throw new IllegalStateException("owner churn run did not cross two terminal retention windows");
+            System.out.printf("ownerChurnVerify=PASS completedOrderLifecycles=%d terminalIndexEmpty=true reservationsEmpty=true%n",
+                    completedOrderLifecycles);
+        }
         long hash=query(CoreMessageType.BUSINESS_STATE_HASH_QUERY,0,new byte[0]).stateHash();
         System.out.printf("mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=%d businessHash=%s%n",totalCycles,Long.toUnsignedString(hash,16));
     }

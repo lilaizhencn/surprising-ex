@@ -7,6 +7,20 @@ import org.junit.jupiter.api.Test;
 
 class ClusterCommandWindowTest {
     @Test
+    void duplicateOrderAcrossSlotsRetainsNewestDependencyUntilBothAreRemoved() {
+        var w = new ClusterCommandWindow();
+        for (int i = 0; i < 3; i++) {
+            w.resetCandidate(0); w.candidateOrder(i == 1 ? 9 : 7); w.add(null, null, 0, 0);
+        }
+        w.resetCandidate(0); w.candidateOrder(7);
+        assertThat(w.conflictingPrefixSize()).isEqualTo(3);
+        w.removePrefix(2);
+        assertThat(w.conflictingPrefixSize()).isOne();
+        w.removePrefix(1);
+        assertThat(w.conflictingPrefixSize()).isZero();
+    }
+
+    @Test
     void indexedDependencySlotsKeepNewestPrefixAcrossRepeatedRingWraps() {
         var window = new ClusterCommandWindow();
         long next = 1;
@@ -103,7 +117,7 @@ class ClusterCommandWindowTest {
             assertThat(window.conflicts()).isEqualTo(i < 20);
         }
         window.removePrefix(1);
-        assertThat(java.util.Arrays.stream(entry.orders).allMatch(id -> id == 0)).isTrue();
+        assertThat(entry.orderCount).isZero();
         assertThat(window.conflicts()).isFalse();
     }
     @Test

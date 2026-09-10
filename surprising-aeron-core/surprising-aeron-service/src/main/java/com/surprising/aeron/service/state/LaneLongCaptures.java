@@ -95,6 +95,7 @@ final class LaneLongCaptures<V> {
     }
 
     void clear() {
+        if (size == 0) return;
         for (int index = 0; index < size; index++) values[index] = null;
         size = 0;
         if (++indexGeneration == 0) {

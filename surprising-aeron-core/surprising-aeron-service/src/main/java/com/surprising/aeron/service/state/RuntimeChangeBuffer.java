@@ -184,6 +184,7 @@ class RuntimeChangeBuffer<V> {
     }
 
     void clear() {
+        if (size == 0) return;
         for (int index = 0; index < size; index++) values[index] = null;
         resetIndex();
     }

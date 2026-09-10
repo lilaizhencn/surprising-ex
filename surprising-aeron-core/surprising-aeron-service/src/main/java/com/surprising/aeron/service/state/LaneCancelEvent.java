@@ -75,6 +75,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
         runtime = owner;
         identities = identityRegistry;
         changes = commandChanges;
+        runtime.expectMatcherSettlement(1L << laneId);
         return this;
     }
 
@@ -153,6 +154,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
 
     void discard() {
         if (complete()) throw new IllegalStateException("completed cancel event must be collected");
+        runtime.releaseSettlementExpectation(laneId);
         changes = null;
         resultTarget = null;
         runtime = null;

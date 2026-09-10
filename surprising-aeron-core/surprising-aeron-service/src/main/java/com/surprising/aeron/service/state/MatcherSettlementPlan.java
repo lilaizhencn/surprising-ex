@@ -19,18 +19,29 @@ public final class MatcherSettlementPlan {
     }
     boolean rejectedTaker() { return rejectedTaker; }
 
-    private final long coreSequence;
-    private final long takerOrderId;
-    private final long activeUserId;
-    private final long requiredLaneMask;
-    private final long[] orderIds;
-    private final int orderCount;
-    private final List<MatcherEvent> matcherEvents;
-    private final int tradeCount;
-    private final long[] preCancellationOrderIds;
+    private long coreSequence;
+    private long takerOrderId;
+    private long activeUserId;
+    private long requiredLaneMask;
+    private long[] orderIds;
+    private int orderCount;
+    private List<MatcherEvent> matcherEvents;
+    private int tradeCount;
+    private long[] preCancellationOrderIds;
     private int[] makerLaneHeads;
     private int[] makerLaneNext;
     private int takerLaneId;
+    /** 索引数组归事件所有并复用；只有本代深度成交启用时读取。 */
+    private boolean laneEventsIndexed;
+    private static final long[] NO_ORDERS = new long[0];
+
+    /** 仅事件池持有的批量槽可复用；Owner准备后只读，所有Lane完成后才能清理。 */
+    MatcherSettlementPlan() { orderIds = new long[8]; preCancellationOrderIds = NO_ORDERS; matcherEvents = List.of(); }
+
+    void clearBatchReferences() {
+        matcherEvents = List.of(); completedTrigger = null; preCancellationOrderIds = NO_ORDERS;
+        rejectedTaker = false; laneEventsIndexed = false; orderCount = tradeCount = 0;
+    }
     /** 仅触发子订单携带；owner 派发前构造，taker Lane 在同一结算事件中写入。 */
     private com.surprising.aeron.service.state.model.CoreTriggerOrderState completedTrigger;
 
@@ -46,7 +57,7 @@ public final class MatcherSettlementPlan {
                                   long requiredLaneMask, long[] orderIds, int orderCount,
                                   List<MatcherEvent> matcherEvents, int tradeCount) {
         this(coreSequence, takerOrderId, activeUserId, requiredLaneMask, orderIds, orderCount,
-                matcherEvents, tradeCount, new long[0]);
+                matcherEvents, tradeCount, NO_ORDERS);
     }
 
     private MatcherSettlementPlan(long coreSequence, long takerOrderId, long activeUserId,
@@ -67,10 +78,22 @@ public final class MatcherSettlementPlan {
     static final class BatchValidationScratch {
         private final LongLongHashMap remainingByOrderId = new LongLongHashMap();
         private final LongHashSet terminalOrderIds = new LongHashSet();
+        /** 一次Owner构造期间的权威不可变订单引用，避免同maker多笔成交反复跨发布表查找。 */
+        private final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<OrderRuntime> orders =
+                new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
+        private final LongHashSet preparedPositionOrders = new LongHashSet();
+
+        OrderRuntime order(TradingRuntimeState runtime, long id) {
+            OrderRuntime order = orders.get(id);
+            if (order == null) { order = requireOpen(runtime, id); orders.put(id, order); }
+            return order;
+        }
 
         void clear() {
             remainingByOrderId.clear();
             terminalOrderIds.clear();
+            orders.clear();
+            preparedPositionOrders.clear();
         }
     }
 
@@ -79,22 +102,22 @@ public final class MatcherSettlementPlan {
                                                TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
         if (initialOrderIds == null) throw new IllegalArgumentException("initial orders are required");
         return build(coreSequence, takerOrderId, activeUserId, initialOrderIds, result, runtime, identities,
-                null, null, null);
+                null, null, null, null);
     }
 
     /** 批量构建与累计数量校验共用一次成交遍历；scratch 只在本批 Owner 调用期间使用。 */
     static MatcherSettlementPlan buildBatchItem(long sequence, OrderRuntime taker, CoreInstrumentState instrument,
                                                 CoreMatchingResult result, TradingRuntimeState runtime,
-                                                RuntimeIdentityRegistry identities, BatchValidationScratch scratch) {
+                                                RuntimeIdentityRegistry identities, BatchValidationScratch scratch, MatcherSettlementPlan target) {
         return build(sequence, taker.orderId(), taker.userId(), null, result, runtime, identities,
-                taker, instrument, scratch);
+                taker, instrument, scratch, target);
     }
 
     private static MatcherSettlementPlan build(long coreSequence, long takerOrderId, long activeUserId,
                                                long[] initialOrderIds, CoreMatchingResult result,
                                                TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                                OrderRuntime preparedTaker, CoreInstrumentState preparedInstrument,
-                                               BatchValidationScratch batch) {
+                                               BatchValidationScratch batch, MatcherSettlementPlan target) {
         if (coreSequence <= 0 || takerOrderId <= 0 || activeUserId <= 0 || (initialOrderIds == null && batch == null)
                 || result == null || runtime == null || identities == null
                 || result.nativeCommand().coreSequence() != coreSequence) {
@@ -110,7 +133,13 @@ public final class MatcherSettlementPlan {
         }
         int expectedChanges = Math.max(2, result.matcherEvents().size() + result.cancellations().size()
                 + (initialOrderIds == null ? 1 : initialOrderIds.length) + 1);
-        long[] orders = new long[expectedChanges];
+        long[] orders;
+        if (target == null) orders = new long[expectedChanges];
+        else {
+            if (target.orderIds.length < expectedChanges)
+                target.orderIds = new long[Math.max(expectedChanges, target.orderIds.length * 2)];
+            orders = target.orderIds;
+        }
         int orderCount = 0;
         LongHashSet uniqueOrders = runtime.matcherSettlementOrderScratch();
         if (initialOrderIds == null) orderCount = addUnique(uniqueOrders, orders, orderCount, takerOrderId);
@@ -118,7 +147,8 @@ public final class MatcherSettlementPlan {
             if (orderId > 0) orderCount = addUnique(uniqueOrders, orders, orderCount, orderId);
         }
         long laneMask = runtime.topology().accountLaneMask(activeUserId);
-        preparePositionIdentity(runtime, identities, instrument, taker);
+        if (batch == null || batch.preparedPositionOrders.add(takerOrderId))
+            preparePositionIdentity(runtime, identities, instrument, taker);
         LongLongHashMap remainingByOrderId = batch == null
                 ? runtime.matcherSettlementRemainingScratch() : batch.remainingByOrderId;
         if (batch == null) remainingByOrderId.clear();
@@ -131,7 +161,8 @@ public final class MatcherSettlementPlan {
                 if (event.price() <= 0 || event.size() <= 0) {
                     throw new IllegalArgumentException("invalid runtime match price or quantity");
                 }
-                OrderRuntime maker = requireOpen(runtime, event.matchedOrderId());
+                OrderRuntime maker = batch == null ? requireOpen(runtime, event.matchedOrderId())
+                        : batch.order(runtime, event.matchedOrderId());
                 if (batch != null && batch.terminalOrderIds.contains(maker.orderId())
                         || maker.userId() != event.matchedOrderUid() || maker.symbolId() != taker.symbolId()
                         || maker.side() == taker.side() || maker.userId() == taker.userId()) {
@@ -147,7 +178,8 @@ public final class MatcherSettlementPlan {
                 remainingByOrderId.put(takerOrderId, takerRemaining);
                 remainingByOrderId.put(maker.orderId(), makerRemaining);
                 if (batch != null && makerRemaining == 0) batch.terminalOrderIds.add(maker.orderId());
-                preparePositionIdentity(runtime, identities, instrument, maker);
+                if (batch == null || batch.preparedPositionOrders.add(maker.orderId()))
+                    preparePositionIdentity(runtime, identities, instrument, maker);
                 orderCount = addUnique(uniqueOrders, orders, orderCount, maker.orderId());
                 int makerLane = runtime.topology().accountLaneId(maker.userId());
                 tradeCount++;
@@ -166,8 +198,15 @@ public final class MatcherSettlementPlan {
                 laneMask |= runtime.topology().accountLaneMask(order.userId());
             }
         }
-        return new MatcherSettlementPlan(coreSequence, takerOrderId, activeUserId, laneMask,
-                orders, orderCount, result.matcherEvents(), tradeCount).indexLaneEvents(runtime);
+        MatcherSettlementPlan plan = target == null
+                ? new MatcherSettlementPlan(coreSequence, takerOrderId, activeUserId, laneMask, orders, orderCount, result.matcherEvents(), tradeCount)
+                : target;
+        plan.coreSequence = coreSequence; plan.takerOrderId = takerOrderId; plan.activeUserId = activeUserId;
+        plan.requiredLaneMask = laneMask; plan.orderIds = orders; plan.orderCount = orderCount;
+        plan.matcherEvents = result.matcherEvents(); plan.tradeCount = tradeCount;
+        plan.preCancellationOrderIds = NO_ORDERS; plan.completedTrigger = null; plan.rejectedTaker = false;
+        plan.laneEventsIndexed = false;
+        return plan.indexLaneEvents(runtime);
     }
 
     public static MatcherSettlementPlan empty(long coreSequence, long activeUserId, long[] orderIds,
@@ -224,6 +263,7 @@ public final class MatcherSettlementPlan {
         copy.makerLaneHeads = makerLaneHeads;
         copy.makerLaneNext = makerLaneNext;
         copy.takerLaneId = takerLaneId;
+        copy.laneEventsIndexed = laneEventsIndexed;
         copy.completedTrigger = completedTrigger;
         copy.rejectedTaker = rejectedTaker;
         return copy;
@@ -235,8 +275,11 @@ public final class MatcherSettlementPlan {
         // the taker lane still consumes the original order, without copying any fill.
         if (matcherEvents.size() < 8 || Long.bitCount(requiredLaneMask) < 2) return this;
         takerLaneId = runtime.topology().accountLaneId(activeUserId);
-        makerLaneHeads = new int[runtime.topology().accountLaneCount()];
-        makerLaneNext = new int[matcherEvents.size()];
+        laneEventsIndexed = true;
+        if (makerLaneHeads == null || makerLaneHeads.length != runtime.topology().accountLaneCount())
+            makerLaneHeads = new int[runtime.topology().accountLaneCount()];
+        if (makerLaneNext == null || makerLaneNext.length < matcherEvents.size())
+            makerLaneNext = new int[matcherEvents.size()];
         java.util.Arrays.fill(makerLaneHeads, -1);
         for (int index = matcherEvents.size() - 1; index >= 0; index--) {
             MatcherEvent event = matcherEvents.get(index);
@@ -249,12 +292,12 @@ public final class MatcherSettlementPlan {
     }
 
     int firstMatcherEvent(int laneId) {
-        if (makerLaneHeads != null && laneId != takerLaneId) return makerLaneHeads[laneId];
+        if (laneEventsIndexed && laneId != takerLaneId) return makerLaneHeads[laneId];
         return matcherEvents.isEmpty() ? -1 : 0;
     }
 
     int nextMatcherEvent(int index, int laneId) {
-        if (makerLaneHeads != null && laneId != takerLaneId) return makerLaneNext[index];
+        if (laneEventsIndexed && laneId != takerLaneId) return makerLaneNext[index];
         return index + 1 < matcherEvents.size() ? index + 1 : -1;
     }
 

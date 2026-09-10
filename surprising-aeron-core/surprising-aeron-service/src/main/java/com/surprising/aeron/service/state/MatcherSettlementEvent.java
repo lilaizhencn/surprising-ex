@@ -53,12 +53,13 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         final int[] baseAssetIds, quoteAssetIds, settleAssetIds;
         BatchStorage(int size) {
             plans = new MatcherSettlementPlan[size];
+            for (int i = 0; i < size; i++) plans[i] = new MatcherSettlementPlan();
             instruments = new CoreInstrumentState[size];
             baseAssetIds = new int[size]; quoteAssetIds = new int[size]; settleAssetIds = new int[size];
         }
         void clear() {
             metadataSlots.clear();
-            java.util.Arrays.fill(plans, null);
+            for (MatcherSettlementPlan plan : plans) plan.clearBatchReferences();
             java.util.Arrays.fill(instruments, null);
         }
     }
@@ -102,7 +103,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         this.isolatedChanges = captureIsolatedChanges;
         this.treasuryTrades = plan.tradeCount() != 0;
         this.changes = commitSequence != 0 || captureIsolatedChanges
-                ? runtime.acquireMatcherSettlementChanges() : null;
+                ? runtime.acquireMatcherSettlementChanges(requiredLaneMask) : null;
         if (changes != null) {
             changes.ensureOrderCapacity(Math.addExact(plan.orderCount(), plan.preCancellationCount()),
                     requiredLaneMask);
@@ -124,6 +125,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         collectedFundsDelta = RuntimeFundsDelta.empty();
         collected = false;
         resetCompletions(laneCount);
+        runtime.expectMatcherSettlement(requiredLaneMask);
         return this;
     }
 
@@ -168,13 +170,14 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         this.batchQuoteAssetIds = quoteAssetIds;
         this.batchSettleAssetIds = settleAssetIds;
         this.isolatedChanges = true;
-        this.changes = runtime.acquireMatcherSettlementChanges();
+        this.changes = runtime.acquireMatcherSettlementChanges(requiredLaneMask);
         changes.ensureOrderCapacity(expectedOrders, requiredLaneMask);
         treasuryTrades = hasTrade(plans);
         prepareTreasuryDeltas(laneCount, treasuryTrades);
         collectedFundsDelta = RuntimeFundsDelta.empty();
         collected = false;
         resetCompletions(laneCount);
+        runtime.expectMatcherSettlement(requiredLaneMask);
         return this;
     }
 

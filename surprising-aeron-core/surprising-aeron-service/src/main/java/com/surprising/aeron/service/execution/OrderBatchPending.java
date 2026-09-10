@@ -264,6 +264,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     }
 
     void clear() {
+        int preparedCount = items.size();
         items.clear();
         beforeProjection = null;
         runtimeCheckpoint = 0;
@@ -299,13 +300,13 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         settlementEvent = null;
         cancelEvent = null;
         placeBatchAdmissionEvent = null;
-        java.util.Arrays.fill(preparedOrders, null);
-        java.util.Arrays.fill(preparedDecisions, null);
-        java.util.Arrays.fill(preparedAdmissionIdentities, null);
-        java.util.Arrays.fill(preparedClientKeyValues, null);
-        java.util.Arrays.fill(preparedMatchingOrders, null);
-        java.util.Arrays.fill(preparedAdmittedOrders, null);
-        java.util.Arrays.fill(preparedAdmittedReservations, null);
+        java.util.Arrays.fill(preparedOrders, 0, preparedCount, null);
+        java.util.Arrays.fill(preparedDecisions, 0, preparedCount, null);
+        java.util.Arrays.fill(preparedAdmissionIdentities, 0, preparedCount, null);
+        java.util.Arrays.fill(preparedClientKeyValues, 0, preparedCount, null);
+        java.util.Arrays.fill(preparedMatchingOrders, 0, preparedCount, null);
+        java.util.Arrays.fill(preparedAdmittedOrders, 0, preparedCount, null);
+        java.util.Arrays.fill(preparedAdmittedReservations, 0, preparedCount, null);
         preparedSymbols.clear();
         preparedContexts.clear();
         settlementsCollected = false;

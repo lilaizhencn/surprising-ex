@@ -13,7 +13,10 @@ final class ClusterCommandWindow {
     private final Entry[] entries = new Entry[CAPACITY];
     private int head, size;
     /** 掩码每一位对应哪些物理窗口槽；仅跳过不相交项，精确依赖规则不变。 */
-    private final long[] accountSlots = new long[64], symbolSlots = new long[64], orderSlots = new long[64];
+    private final long[] accountSlots = new long[64], symbolSlots = new long[64];
+    /** 精确订单ID到物理窗口槽位；仅Owner写入，移出窗口立即删除，不保存业务状态。 */
+    private final org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap orderSlots =
+            new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap();
 
     private static long intersectingSlots(long[] slots, long mask) {
         long result = 0;
@@ -37,7 +40,6 @@ final class ClusterCommandWindow {
     private CoreMessage decodedSource;
     private DecodedMatchingCommand decoded;
     private int candidateOrderCount, candidateScopeCount;
-    private long candidateOrderMask;
     long candidateAccounts, candidateSymbols;
     /** 所有潜在成交账户的物理分区，用于异分片结算派发而非改变资金归属。 */
     long candidateLanes;
@@ -51,7 +53,6 @@ final class ClusterCommandWindow {
         candidateLanes = 0;
         candidateOrderCount = 0;
         candidateScopeCount = 0;
-        candidateOrderMask = 0;
     }
 
     void candidateOrder(long orderId) {
@@ -92,7 +93,6 @@ final class ClusterCommandWindow {
 
     void candidateOrder(long orderId, String symbol, CoreOrderSide side, long price, boolean changesOpenInterest) {
         candidateOrders[candidateOrderCount++] = orderId;
-        candidateOrderMask |= TradingDependencyMask.account(orderId);
         if (symbol == null) return;
         // Keep every order identity, but visit an identical matching range only once.
         for (int i = 0; i < candidateScopeCount; i++)
@@ -114,9 +114,11 @@ final class ClusterCommandWindow {
     }
 
     int conflictingPrefixSize() {
-        long candidates = intersectingSlots(accountSlots, candidateAccounts)
-                | intersectingSlots(symbolSlots, candidateSymbols) | intersectingSlots(orderSlots, candidateOrderMask);
-        candidates = Long.rotateRight(candidates, head);
+        long exactOrders = 0;
+        for (int a = 0; a < candidateOrderCount; a++) exactOrders |= orderSlots.get(candidateOrders[a]);
+        long candidates = Long.rotateRight(intersectingSlots(accountSlots, candidateAccounts)
+                | intersectingSlots(symbolSlots, candidateSymbols) | exactOrders, head);
+        exactOrders = Long.rotateRight(exactOrders, head);
         while (candidates != 0) {
             int i = 63 - Long.numberOfLeadingZeros(candidates);
             candidates &= ~(1L << i);
@@ -130,15 +132,7 @@ final class ClusterCommandWindow {
                                         entry.sides[b], entry.prices[b]))) return i + 1;
             }
             if ((entry.accounts & candidateAccounts) != 0 && accountsConflict(entry)) return i + 1;
-            if ((entry.orderMask & candidateOrderMask) == 0) continue;
-            for (int a = 0; a < candidateOrderCount; a++) {
-                long orderId = candidateOrders[a];
-                int slot = TradingDependencyMask.partition(orderId);
-                while (entry.orders[slot] != 0) {
-                    if (entry.orders[slot] == orderId) return i + 1;
-                    slot = (slot + 1) & 63;
-                }
-            }
+            if ((exactOrders & (1L << i)) != 0) return i + 1;
         }
         return 0;
     }
@@ -185,16 +179,14 @@ final class ClusterCommandWindow {
         entry.userId = candidateUser;
         entry.symbols = candidateSymbols;
         entry.scopeCount = candidateScopeCount;
-        entry.orderMask = candidateOrderMask;
         long windowSlot = 1L << ((head + size - 1) & 63);
         indexSlots(accountSlots, entry.accounts, windowSlot, true);
         indexSlots(symbolSlots, entry.symbols, windowSlot, true);
-        indexSlots(orderSlots, entry.orderMask, windowSlot, true);
+        entry.orderCount = candidateOrderCount;
         for (int i = 0; i < candidateOrderCount; i++) {
             long orderId = candidateOrders[i];
-            int slot = TradingDependencyMask.partition(orderId);
-            while (entry.orders[slot] != 0 && entry.orders[slot] != orderId) slot = (slot + 1) & 63;
-            entry.orders[slot] = orderId;
+            entry.orders[i] = orderId;
+            orderSlots.put(orderId, orderSlots.get(orderId) | windowSlot);
         }
         System.arraycopy(candidateOrderSymbols, 0, entry.orderSymbols, 0, candidateScopeCount);
         System.arraycopy(candidateSides, 0, entry.sides, 0, candidateScopeCount);
@@ -232,14 +224,18 @@ final class ClusterCommandWindow {
             long slot = 1L << ((head + i) & 63);
             indexSlots(accountSlots, entry.accounts, slot, false);
             indexSlots(symbolSlots, entry.symbols, slot, false);
-            indexSlots(orderSlots, entry.orderMask, slot, false);
+            for (int k = 0; k < entry.orderCount; k++) {
+                long id = entry.orders[k];
+                long remaining = orderSlots.get(id) & ~slot;
+                if (remaining == 0) orderSlots.removeKey(id); else orderSlots.put(id, remaining);
+            }
+            entry.orderCount = 0;
             entry.session = null;
             entry.request = null;
             entry.response = null;
             entry.sequence = entry.timestamp = entry.position = 0;
-            entry.accounts = entry.symbols = entry.orderMask = 0;
+            entry.accounts = entry.symbols = 0;
             entry.userId = 0;
-            java.util.Arrays.fill(entry.orders, 0);
             java.util.Arrays.fill(entry.orderSymbols, 0, entry.scopeCount, null);
             java.util.Arrays.fill(entry.sides, 0, entry.scopeCount, null);
             entry.scopeCount = 0;
@@ -249,9 +245,9 @@ final class ClusterCommandWindow {
     }
 
     static final class Entry {
-        // Protocol order IDs are positive. A 64-slot table holds at most 20 identities;
-        // zero is empty, and the entire owner-owned table is reused with its window entry.
-        final long[] orders = new long[64];
+        /** 本槽最多20个订单ID，只用于退窗时移除精确索引；[0,orderCount)有效。 */
+        final long[] orders = new long[20];
+        int orderCount;
         final String[] orderSymbols = new String[20];
         final CoreOrderSide[] sides = new CoreOrderSide[20];
         final long[] prices = new long[20];
@@ -259,7 +255,7 @@ final class ClusterCommandWindow {
         final boolean[] openInterestChanges = new boolean[20];
         long userId;
         int scopeCount;
-        long accounts, symbols, orderMask;
+        long accounts, symbols;
         ClientSession session;
         CoreMessage request;
         CoreResponse response;

@@ -24,15 +24,30 @@ class MatcherSettlementPlanTest {
             var second = order(12, 22, symbol, CoreOrderSide.BUY, 3);
             runtime.putOrder(maker); runtime.putOrder(first); runtime.putOrder(second);
             var scratch = new MatcherSettlementPlan.BatchValidationScratch();
-            assertThat(MatcherSettlementPlan.buildBatchItem(1, first, instrument, fill(3), runtime, identities, scratch).tradeCount()).isEqualTo(1);
-            assertThatThrownBy(() -> MatcherSettlementPlan.buildBatchItem(1, second, instrument, fill(3), runtime, identities, scratch))
+            assertThat(MatcherSettlementPlan.buildBatchItem(1, first, instrument, fill(3), runtime, identities, scratch, new MatcherSettlementPlan()).tradeCount()).isEqualTo(1);
+            assertThatThrownBy(() -> MatcherSettlementPlan.buildBatchItem(1, second, instrument, fill(3), runtime, identities, scratch, new MatcherSettlementPlan()))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("exceeds");
             assertThat(runtime.order(10).remainingQuantitySteps()).isEqualTo(5);
             scratch.clear();
-            MatcherSettlementPlan.buildBatchItem(1, first, instrument, fill(3), runtime, identities, scratch);
-            assertThat(MatcherSettlementPlan.buildBatchItem(1, second, instrument, fill(2), runtime, identities, scratch).tradeCount()).isEqualTo(1);
-            assertThatThrownBy(() -> MatcherSettlementPlan.buildBatchItem(1, first, instrument, fill(1), runtime, identities, scratch))
+            MatcherSettlementPlan.buildBatchItem(1, first, instrument, fill(3), runtime, identities, scratch, new MatcherSettlementPlan());
+            assertThat(MatcherSettlementPlan.buildBatchItem(1, second, instrument, fill(2), runtime, identities, scratch, new MatcherSettlementPlan()).tradeCount()).isEqualTo(1);
+            assertThatThrownBy(() -> MatcherSettlementPlan.buildBatchItem(1, first, instrument, fill(1), runtime, identities, scratch, new MatcherSettlementPlan()))
                     .isInstanceOf(IllegalStateException.class);
+        }
+    }
+    @Test
+    void reusedPlanAndScratchDoNotRetainPriorMakerOrTriggerState() {
+        try (var runtime = new TradingRuntimeState()) {
+            var identities = new RuntimeIdentityRegistry(); int symbol = identities.symbolId("BTC-USDT");
+            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0); runtime.putInstrument(instrument());
+            runtime.putOrder(order(10,20,symbol,CoreOrderSide.SELL,5));
+            var taker = order(11,21,symbol,CoreOrderSide.BUY,3); runtime.putOrder(taker);
+            var scratch = new MatcherSettlementPlan.BatchValidationScratch(); var slot = new MatcherSettlementPlan();
+            assertThat(MatcherSettlementPlan.buildBatchItem(1,taker,instrument(),fill(3),runtime,identities,scratch,slot)).isSameAs(slot);
+            slot.clearBatchReferences(); scratch.clear();
+            runtime.putOrder(order(10,20,symbol,CoreOrderSide.SELL,1));
+            assertThatThrownBy(() -> MatcherSettlementPlan.buildBatchItem(1,taker,instrument(),fill(3),runtime,identities,scratch,slot))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("exceeds");
         }
     }
     private static OrderRuntime order(long id,long user,int symbol,CoreOrderSide side,long qty) {

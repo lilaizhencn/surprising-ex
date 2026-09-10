@@ -70,6 +70,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         admittedReservation = null;
         rejection = null;
         COMPLETED.set(this, false);
+        runtime.expectPlaceAdmission(laneId);
         return this;
     }
 
