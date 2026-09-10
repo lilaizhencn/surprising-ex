@@ -98,6 +98,14 @@ class RuntimeChangeBuffer<V> {
         clear();
     }
 
+    void drain(LanePublishedMap<V> target, org.agrona.collections.Long2LongHashMap unused, int laneId) {
+        for (int i = 0; i < size; i++) {
+            V value = valueAt(i);
+            if (value == null) target.remove(keyAt(i)); else target.put(keyAt(i), value);
+        }
+        clear();
+    }
+
     boolean isEmpty() {
         return size == 0;
     }

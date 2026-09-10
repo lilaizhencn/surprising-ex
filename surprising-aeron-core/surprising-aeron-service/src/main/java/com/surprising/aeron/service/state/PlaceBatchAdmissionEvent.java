@@ -35,7 +35,10 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     private int laneId;
     private TradingRuntimeState runtime;
     private TradingRuntimeState.MatcherSettlementChanges changes;
+    private RuntimeIdentityRegistry identities;
+    private long identityAllocations;
     private UserRuntime admittedUser;
+    private LanePublication publication;
     private RuntimeException rejection;
     @SuppressWarnings("FieldMayBeFinal")
     private boolean completed;
@@ -47,7 +50,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
             int[] symbolIds, int[] assetIds,
             CoreMatchingOrder[] matchingOrders, OrderRuntime[] admittedOrders,
             ReservationRuntime[] admittedReservations, int itemCount, int laneId,
-            TradingRuntimeState runtime, TradingRuntimeState.MatcherSettlementChanges changes) {
+            TradingRuntimeState runtime, TradingRuntimeState.MatcherSettlementChanges changes, RuntimeIdentityRegistry identities) {
         if (coreSequence <= 0 || userId <= 0 || commandId == null || orders == null
                 || openInterestSteps == null || admissionIdentities == null || clientKeys == null || symbolIds == null
                 || assetIds == null || matchingOrders == null || admittedOrders == null
@@ -75,8 +78,11 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         this.laneId = laneId;
         this.runtime = runtime;
         this.changes = changes;
+        this.identities = identities;
+        identityAllocations = 0;
         admittedCount = 0;
         admittedUser = null;
+        publication = null;
         rejection = null;
         COMPLETED.set(this, false);
         return this;
@@ -89,14 +95,19 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
             throw new IllegalStateException("place batch admission reached the wrong Account Lane");
         }
         UserRuntime userBefore = lane.users.get(userId);
+        long allocationsBefore = lane.clientIdentityAllocations;
         try {
             runtime.enterMatcherSettlementScope(lane, changes);
             try {
                 for (int index = 0; index < itemCount; index++) {
                     ResolvedPlaceOrder order = orders[index];
+                    var key = identities.prepareClientKeyInLane(lane, userId, order.clientOrderId());
+                    clientKeys[index] = key;
+                    var flags = admissionIdentities[index];
+                    var identity = RuntimeOrderAdmission.identityInLane(lane, identities, userId, order, key, flags);
                     long requiredReservation = RuntimeOrderAdmission.requiredReservationPrepared(
                             runtime, userId, order, openInterestSteps[index],
-                            lane.admissionOrderIndex(symbolIds[index]), admissionIdentities[index]);
+                            lane.admissionOrderIndex(symbolIds[index]), identity);
                     RuntimeCommandProcessor.placeOrderPreparedInLane(runtime, lane, userId, order, commandId,
                             requiredReservation, clientKeys[index].key(), symbolIds[index], assetIds[index],
                             coreSequence);
@@ -105,16 +116,28 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                     admittedCount++;
                 }
                 admittedUser = lane.users.get(userId);
-                changes.prepareAdmissionLane(laneId);
+                changes.prepareAdmissionLane(laneId, runtime);
+                publication = new LanePublication();
+                publication.admissionSequence = coreSequence;
+                runtime.publishedUsers.stage(publication, userId, admittedUser);
+                for (int i = 0; i < itemCount; i++) {
+                    runtime.publishedOrders.stage(publication, admittedOrders[i].orderId(), admittedOrders[i]);
+                    runtime.publishedReservations.stage(publication, admittedReservations[i].orderId(), admittedReservations[i]);
+                }
             } finally {
                 runtime.exitMatcherSettlementScope(lane, changes);
             }
         } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {
             runtime.rollbackPlaceBatchAdmissionInLane(lane, userId, coreSequence, orders, clientKeys,
                     admittedReservations, admittedCount, userBefore);
+            for (int i = 0; i < itemCount; i++) {
+                identities.rollbackClientKeyInLane(lane, userId, orders[i].clientOrderId(), clientKeys[i]);
+                clientKeys[i] = null;
+            }
             admittedCount = 0;
             rejection = failure;
         }
+        identityAllocations = lane.clientIdentityAllocations - allocationsBefore;
         TradingRuntimeState completionRuntime = runtime;
         int completionLaneId = laneId;
         long completionSequence = coreSequence;
@@ -137,19 +160,24 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         admittedOrders = null;
         admittedReservations = null;
         runtime = null;
+        identities = null;
         admittedUser = null;
+        publication = null;
         rejection = null;
         itemCount = 0;
         admittedCount = 0;
     }
 
+    public long takeIdentityAllocations() { long count = identityAllocations; identityAllocations = 0; return count; }
     public boolean complete() { return (boolean) COMPLETED.getAcquire(this); }
     public RuntimeException rejection() {
         if (!complete()) throw new IllegalStateException("place batch admission is incomplete");
         return rejection;
     }
+    LanePublication publication() { return publication; }
     long coreSequence() { return coreSequence; }
     long userId() { return userId; }
+    OrderRuntime[] admittedOrders() { return admittedOrders; }
     int itemCount() { return itemCount; }
     UserRuntime admittedUser() { return admittedUser; }
     OrderRuntime admittedOrder(int index) { return admittedOrders[index]; }

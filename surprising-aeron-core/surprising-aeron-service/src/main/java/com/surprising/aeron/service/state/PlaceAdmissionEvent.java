@@ -28,6 +28,9 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     private int assetId;
     private int laneId;
     private TradingRuntimeState runtime;
+    private RuntimeIdentityRegistry identities;
+    private LanePublication publication;
+    private long identityAllocations;
     private CoreMatchingOrder matchingOrder;
     private UserRuntime admittedUser;
     private OrderRuntime admittedOrder;
@@ -41,10 +44,9 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
 
     PlaceAdmissionEvent prepare(long coreSequence, long userId, ResolvedPlaceOrder order, UUID commandId,
                                 long openInterestSteps, RuntimeOrderAdmission.AdmissionIdentity identity,
-                                RuntimeIdentityRegistry.PreparedClientKey preparedClientKey,
-                                int symbolId, int assetId, int laneId, TradingRuntimeState runtime) {
+                                int symbolId, int assetId, int laneId, TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
         if (coreSequence <= 0 || userId <= 0 || order == null || commandId == null || openInterestSteps < 0
-                || identity == null || preparedClientKey == null || symbolId < 0 || assetId < 0
+                || identity == null || symbolId < 0 || assetId < 0
                 || laneId < 0 || runtime == null) {
             throw new IllegalArgumentException("invalid place admission event");
         }
@@ -54,7 +56,10 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         this.commandId = commandId;
         this.openInterestSteps = openInterestSteps;
         this.identity = identity;
-        this.preparedClientKey = preparedClientKey;
+        this.preparedClientKey = null;
+        this.identities = identities;
+        publication = null;
+        identityAllocations = 0;
         this.symbolId = symbolId;
         this.assetId = assetId;
         this.laneId = laneId;
@@ -75,6 +80,8 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         identity = null;
         preparedClientKey = null;
         runtime = null;
+        identities = null;
+        publication = null;
         matchingOrder = null;
         admittedUser = null;
         admittedOrder = null;
@@ -88,9 +95,12 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         if (lane.laneId() != runtime.topology().accountLaneId(userId)) {
             throw new IllegalStateException("place admission reached the wrong Account Lane");
         }
+        long allocationsBefore = lane.clientIdentityAllocations;
         try {
             runtime.enterLaneCommandScope(lane);
             try {
+                preparedClientKey = identities.prepareClientKeyInLane(lane, userId, order.clientOrderId());
+                identity = RuntimeOrderAdmission.identityInLane(lane, identities, userId, order, preparedClientKey, identity);
                 long requiredReservation = RuntimeOrderAdmission.requiredReservationPrepared(
                         runtime, userId, order, openInterestSteps,
                         lane.admissionOrderIndex(symbolId), identity);
@@ -101,12 +111,20 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
                 admittedReservation = lane.reservations.get(order.orderId());
                 matchingOrder = new CoreMatchingOrder(order.orderId(), order.symbol(), order.side(),
                         order.orderType(), order.timeInForce(), order.matchingPriceTicks(), order.quantitySteps());
+                publication = new LanePublication();
+                publication.admissionSequence = coreSequence;
+                runtime.publishedUsers.stage(publication, userId, admittedUser);
+                runtime.publishedOrders.stage(publication, order.orderId(), admittedOrder);
+                runtime.publishedReservations.stage(publication, order.orderId(), admittedReservation);
             } finally {
                 runtime.exitLaneCommandScope(lane);
             }
         } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {
+            identities.rollbackClientKeyInLane(lane, userId, order.clientOrderId(), preparedClientKey);
+            preparedClientKey = null;
             rejection = failure;
         }
+        identityAllocations = lane.clientIdentityAllocations - allocationsBefore;
         // Capture every publication dependency before completed becomes visible to the owner,
         // which is then allowed to clear and recycle this event immediately.
         TradingRuntimeState completionRuntime = runtime;
@@ -122,12 +140,14 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     }
 
 
+    LanePublication publication() { return publication; }
+    public long takeIdentityAllocations() { long result = identityAllocations; identityAllocations = 0; return result; }
     public long coreSequence() { return coreSequence; }
     public long userId() { return userId; }
     public long orderId() { return order.orderId(); }
     public int assetId() { return assetId; }
     public long clientKey() { return preparedClientKey.key(); }
-    public boolean allocatedClientKey() { return preparedClientKey.allocated(); }
+    public boolean allocatedClientKey() { return preparedClientKey != null && preparedClientKey.allocated(); }
     public String clientOrderId() { return order.clientOrderId(); }
     public CoreMatchingOrder matchingOrder() {
         if (!complete() || matchingOrder == null) throw new IllegalStateException("place admission is not accepted");

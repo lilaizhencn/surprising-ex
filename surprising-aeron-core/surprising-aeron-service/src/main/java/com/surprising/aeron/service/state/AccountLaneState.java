@@ -82,6 +82,8 @@ public final class AccountLaneState {
     private final LongIntHashMap pendingReservationCountsByUser = new LongIntHashMap();
     private final LongObjectHashMap<IntLongHashMap> pendingReservedUnitsByUser = new LongObjectHashMap<>();
     private int totalPendingReservations;
+    /** 该Lane新建客户订单身份的累计数量；完成收据由Owner汇入字典版本。 */
+    long clientIdentityAllocations;
     private long revision;
     private long appliedSequence;
     private long committedSequence;

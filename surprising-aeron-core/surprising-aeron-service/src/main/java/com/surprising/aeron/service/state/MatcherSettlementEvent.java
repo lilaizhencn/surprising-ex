@@ -224,7 +224,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
                 }
             }
             if (changes != null) {
-                changes.prepareLaneTerminal(laneId, identities, lane);
+                changes.prepareLaneTerminal(laneId, identities, lane, runtime);
             }
             if (commitSequence != 0) {
                 lane.applied(commitSequence);

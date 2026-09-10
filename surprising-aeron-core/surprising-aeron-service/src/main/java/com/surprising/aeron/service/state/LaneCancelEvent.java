@@ -100,7 +100,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
                 }
                 runtime.stampOrderInLane(lane, orderId, commitTimestamp, commitClusterPosition);
             }
-            changes.prepareLaneTerminal(laneId, identities, lane);
+            changes.prepareLaneTerminal(laneId, identities, lane, runtime);
             if (commitLane) {
                 lane.applied(coreSequence);
                 lane.committed(coreSequence);

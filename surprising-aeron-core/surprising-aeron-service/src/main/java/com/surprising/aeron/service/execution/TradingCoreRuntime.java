@@ -1517,6 +1517,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                         placeAdmissionReadyShardMask &= ~shardBit;
                         break;
                     }
+                    identities.recordLaneClientAllocations(batchAdmission.takeIdentityAllocations());
                     RuntimeException rejection = batchAdmission.rejection();
                     if (rejection != null) {
                         runtimeState.discardPlaceBatchAdmission(batchAdmission);
@@ -1557,6 +1558,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                     placeAdmissionReadyShardMask &= ~shardBit;
                     break;
                 }
+                identities.recordLaneClientAllocations(admission.takeIdentityAllocations());
                 RuntimeException rejection = admission.rejection();
                 if (rejection != null) {
                     if (admission.allocatedClientKey()) {
@@ -2492,16 +2494,12 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     com.surprising.aeron.service.state.PlaceAdmissionEvent dispatchPlaceAdmission(
             long userId, PlaceOrderCommand command, UUID commandId, long coreSequence) {
-        ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(runtimeState,
-                identities, userId, command, currentClusterTimestamp);
-        var identity = com.surprising.aeron.service.state.RuntimeOrderAdmission.admissionIdentity(
-                runtimeState, identities, userId, resolved);
-        var preparedClientKey = identities.prepareClientKey(
-                userId, resolved.clientOrderId());
+        var context = CoreOrderDecisionResolver.context(runtimeState, identities, userId, command.symbol(), currentClusterTimestamp);
+        ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(context, command);
         int assetId = identities.assetId(resolved.reservationAsset());
         return runtimeState.dispatchPlaceAdmission(coreSequence, userId, resolved, commandId,
-                openInterestIndex.openInterestSteps(resolved.symbol()), identity,
-                preparedClientKey, resolved.symbolId(), assetId);
+                openInterestIndex.openInterestSteps(resolved.symbol()), context.admissionFlags(),
+                resolved.symbolId(), assetId, identities);
     }
 
     void reservePlaceOrderRuntime(long userId, PlaceOrderCommand command, UUID commandId,

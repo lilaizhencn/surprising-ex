@@ -84,7 +84,7 @@ public final class LaneReplaceEvent implements SettlementLaneWorker.Command {
                 runtime.stampOrderInLane(lane, orderId, commitTimestamp, commitClusterPosition);
             }
             runtime.stampOrderInLane(lane, replacement.orderId(), commitTimestamp, commitClusterPosition);
-            changes.prepareLaneTerminal(laneId, identities, lane);
+            changes.prepareLaneTerminal(laneId, identities, lane, runtime);
         } finally {
             runtime.exitMatcherSettlementScope(lane, changes);
         }

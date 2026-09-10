@@ -172,7 +172,7 @@ final class OrderBatchPending implements TradingOrderBatchCodec.ResultSource, co
     /** 本批预备的 Symbols 缓冲；派发后必须等待完成交接才能清空或复用。 */
     final ArrayList<String> preparedSymbols;
     /** 本批预备的 SymbolSet 缓冲；派发后必须等待完成交接才能清空或复用。 */
-    final HashSet<String> preparedSymbolSet;
+    final java.util.HashMap<String, com.surprising.aeron.service.state.CoreOrderDecisionResolver.Context> preparedContexts;
     /** 本批结算事件是否已收集，防止重复应用结果。 */
     boolean settlementsCollected;
     /** 本批撤单事件是否已收集，防止重复释放预留。 */
@@ -228,7 +228,7 @@ final class OrderBatchPending implements TradingOrderBatchCodec.ResultSource, co
         preparedAdmittedReservations =
                 new com.surprising.aeron.service.state.ReservationRuntime[capacity];
         preparedSymbols = new ArrayList<>(capacity);
-        preparedSymbolSet = new HashSet<>(capacity);
+        preparedContexts = new java.util.HashMap<>(capacity);
     }
 
     OrderBatchPending initialize(OrderBatchKind kind, long clusterTimestamp,
@@ -287,7 +287,7 @@ final class OrderBatchPending implements TradingOrderBatchCodec.ResultSource, co
         java.util.Arrays.fill(preparedAdmittedOrders, null);
         java.util.Arrays.fill(preparedAdmittedReservations, null);
         preparedSymbols.clear();
-        preparedSymbolSet.clear();
+        preparedContexts.clear();
         settlementsCollected = false;
         cancellationsCollected = false;
         finishing = false;

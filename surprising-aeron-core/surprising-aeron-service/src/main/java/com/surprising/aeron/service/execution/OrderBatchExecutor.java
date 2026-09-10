@@ -195,7 +195,7 @@ final class OrderBatchExecutor {
         try {
             int batchMatcherShard = -1;
             batch.preparedSymbols.clear();
-            batch.preparedSymbolSet.clear();
+            batch.preparedContexts.clear();
             for (int index = 0; index < batch.items.size(); index++) {
                 OrderBatchItem item = batch.items.get(index);
                 PlaceOrderCommand command = (PlaceOrderCommand) item.command;
@@ -207,15 +207,18 @@ final class OrderBatchExecutor {
                 if (!owner.admissions.preMatchingCloseCapacityCancellations(userId, command, command.orderId()).isEmpty()) {
                     throw new TradingCoreRuntime.PipelinedBatchNotApplicable();
                 }
-                ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(owner.runtimeState,
-                        owner.identities, userId, command, owner.currentClusterTimestamp);
-                var admissionIdentity = com.surprising.aeron.service.state.RuntimeOrderAdmission.admissionIdentity(
-                        owner.runtimeState, owner.identities, userId, resolved);
-                var preparedClientKey = owner.identities.prepareClientKey(
-                        userId, resolved.clientOrderId());
+                var context = batch.preparedContexts.get(command.symbol());
+                if (context == null) {
+                    context = CoreOrderDecisionResolver.context(owner.runtimeState, owner.identities,
+                            userId, command.symbol(), owner.currentClusterTimestamp);
+                    batch.preparedContexts.put(command.symbol(), context);
+                    batch.preparedSymbols.add(command.symbol());
+                }
+                ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(context, command);
+                var admissionIdentity = context.admissionFlags();
                 int assetId = owner.identities.assetId(resolved.reservationAsset());
                 batch.preparedOrders[index] = resolved;
-                batch.preparedClientKeyValues[index] = preparedClientKey;
+                batch.preparedClientKeyValues[index] = null;
                 batch.preparedOpenInterestSteps[index] = batchOpenInterestSteps(batch, command.symbol());
                 batch.preparedAdmissionIdentities[index] = admissionIdentity;
                 batch.preparedSymbolIds[index] = resolved.symbolId();
@@ -223,10 +226,6 @@ final class OrderBatchExecutor {
                 batch.preparedMatchingOrders[index] = new CoreMatchingOrder(
                         resolved.orderId(), resolved.symbol(), resolved.side(), resolved.orderType(),
                         resolved.timeInForce(), resolved.matchingPriceTicks(), resolved.quantitySteps());
-                if (batch.preparedSymbolSet.add(command.symbol())) {
-                    batch.preparedSymbols.add(command.symbol());
-                }
-                batch.retainPreparedClientKey(userId, resolved.clientOrderId(), preparedClientKey);
             }
             batch.pipelined = true;
             return true;
@@ -236,7 +235,7 @@ final class OrderBatchExecutor {
             batch.admissionOrderIndex.reset(pending.command().header().userId());
             batch.currentPreMatchingCancellationOrderIds = List.of();
             batch.preparedSymbols.clear();
-            batch.preparedSymbolSet.clear();
+            batch.preparedContexts.clear();
             return false;
         }
     }
@@ -248,7 +247,7 @@ final class OrderBatchExecutor {
                 batch.preparedOrders, batch.preparedOpenInterestSteps, batch.preparedAdmissionIdentities,
                 batch.preparedClientKeyValues, batch.preparedSymbolIds, batch.preparedAssetIds,
                 batch.preparedMatchingOrders, batch.preparedAdmittedOrders,
-                batch.preparedAdmittedReservations, batch.items.size());
+                batch.preparedAdmittedReservations, batch.items.size(), owner.identities);
     }
 
     void submitPipelinedPlaceBatch(PendingMatching pending, OrderBatchPending batch) {

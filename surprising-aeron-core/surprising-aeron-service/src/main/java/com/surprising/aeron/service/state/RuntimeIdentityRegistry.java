@@ -38,7 +38,15 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
     private volatile String[] assets = new String[16];
     private final Map<String, Integer> symbolIds = new HashMap<>();
     private volatile String[] symbols = new String[16];
+    /** 客户身份由所属账户Lane写入；共用字典保留跨Lane的全局哈希碰撞检查与只读解析。 */
+    private final LaneTopology clientTopology = LaneTopology.configured(false);
     private final Map<Long, ClientIdentityEntry> clients = new ConcurrentHashMap<>();
+
+    public void recordLaneClientAllocations(long count) {
+        assertOwner();
+        dictionaryVersion = Math.addExact(dictionaryVersion, count);
+    }
+
     // Settlement Lanes read prepared keys while the owner prepares later sequences.
     private final Map<PositionIdentity, Long> positionKeys = new ConcurrentHashMap<>();
     private final Map<Long, PositionIdentity> positions = new ConcurrentHashMap<>();
@@ -140,6 +148,16 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
 
     public PreparedClientKey prepareClientKey(long userId, String clientOrderId) {
         assertOwner();
+        return prepareClientKey(userId, clientOrderId, null);
+    }
+
+    PreparedClientKey prepareClientKeyInLane(AccountLaneState lane, long userId, String clientOrderId) {
+        lane.assertOwner();
+        if (lane.laneId() != clientTopology.accountLaneId(userId)) throw new IllegalStateException("client identity crossed account Lane");
+        return prepareClientKey(userId, clientOrderId, lane);
+    }
+
+    private PreparedClientKey prepareClientKey(long userId, String clientOrderId, AccountLaneState lane) {
         if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
         if (clientOrderId == null || clientOrderId.isBlank()) return new PreparedClientKey(0, false);
         ClientIdentity identity = new ClientIdentity(userId, clientOrderId);
@@ -160,7 +178,8 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
             collision.references = Math.incrementExact(collision.references);
             return new PreparedClientKey(key, true);
         }
-        dictionaryVersion = Math.incrementExact(dictionaryVersion);
+        if (lane == null) dictionaryVersion = Math.incrementExact(dictionaryVersion);
+        else lane.clientIdentityAllocations = Math.incrementExact(lane.clientIdentityAllocations);
         return new PreparedClientKey(key, true);
     }
 
@@ -180,6 +199,18 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
             throw new IllegalArgumentException("invalid prepared client key rollback");
         }
         releaseClientKeyReference(userId, clientOrderId, prepared.key());
+    }
+
+    void rollbackClientKeyInLane(AccountLaneState lane, long userId, String clientOrderId, PreparedClientKey prepared) {
+        lane.assertOwner();
+        if (lane.laneId() != clientTopology.accountLaneId(userId)) throw new IllegalStateException("client identity crossed account Lane");
+        if (prepared != null && prepared.allocated()) releaseClientKeyReference(userId, clientOrderId, prepared.key());
+    }
+
+    Long findPositionKeyInLane(AccountLaneState lane, long userId, String key) {
+        lane.assertOwner();
+        if (lane.laneId() != clientTopology.accountLaneId(userId)) throw new IllegalStateException("position identity crossed account Lane");
+        return findPositionIdentity(userId, key);
     }
 
     public Long findClientKey(long userId, String clientOrderId) {
@@ -306,7 +337,7 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
 
     public Snapshot snapshot() {
         assertOwner();
-        Map<ClientIdentity, Long> clientKeys = new HashMap<>(clients.size());
+        Map<ClientIdentity, Long> clientKeys = new HashMap<>(clientIdentityCount());
         clients.forEach((key, entry) -> clientKeys.put(entry.identity, key));
         return new Snapshot(assetIds, symbolIds, clientKeys, positionKeys,
                 nextAssetId, nextSymbolId, clientKeys.size() + 1L, positionKeys.size() + 1L);

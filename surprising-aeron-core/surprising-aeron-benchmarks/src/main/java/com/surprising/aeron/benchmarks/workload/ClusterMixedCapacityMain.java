@@ -150,9 +150,13 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     /** 诊断身份键的UTF-8路径；只影响压测输入，生产默认命令不变。 */
     private static final boolean UNICODE_CLIENT_IDS = Boolean.getBoolean("surprising.aeron.mixed-unicode-client-ids");
 
+    private static String expectedClientOrderId(long id) {
+        return (UNICODE_CLIENT_IDS && (id & 15) == 0 ? "客户😀-" : "mixed-") + id;
+    }
+
     static PlaceOrderCommand order(long id,String symbol,CoreOrderSide side,long price,long quantity,CoreTimeInForce tif) {
         return new PlaceOrderCommand(id,symbol,1,side,price,quantity,false,CoreMarginMode.CROSS,
-                CorePositionSide.NET,CoreOrderType.LIMIT,tif,false,(UNICODE_CLIENT_IDS && (id & 15) == 0 ? "客户😀-" : "mixed-")+id);
+                CorePositionSide.NET,CoreOrderType.LIMIT,tif,false,expectedClientOrderId(id));
     }
 
     private void setup() {
@@ -278,6 +282,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
                 throw new IllegalStateException("mixed batch item rejected/identity mismatch: "+item);
             // Exercise the borrowed order cursor: every encoded item must retain its own identity.
             if (item.order() != null && (item.order().orderId() != ids[i]
+                    || !expectedClientOrderId(ids[i]).equals(item.order().clientOrderId())
                     || item.order().executedQuantitySteps() + item.order().remainingQuantitySteps() != item.order().quantitySteps()))
                 throw new IllegalStateException("mixed batch order state mismatch: " + item);
             for(var execution:item.executions()) {

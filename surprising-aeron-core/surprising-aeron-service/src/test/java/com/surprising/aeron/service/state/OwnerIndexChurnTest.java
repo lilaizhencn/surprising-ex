@@ -3,14 +3,13 @@ package com.surprising.aeron.service.state;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.agrona.collections.Long2LongHashMap;
-import org.agrona.collections.Long2ObjectHashMap;
 import org.junit.jupiter.api.Test;
 
 class OwnerIndexChurnTest {
     @Test
     void ownerIndexesKeepTheirStorageAcrossBoundedInsertDeleteChurn() throws Exception {
         try (var state = new TradingRuntimeState()) {
-            for (String name : new String[]{"pendingReservationUsers", "orderLaneIds", "reservationLaneIds", "positionLaneIds"}) {
+            for (String name : new String[]{"pendingReservationUsers"}) {
                 Object target = name.equals("pendingReservationUsers") ? state.pendingReservations : state;
                 var field = target.getClass().getDeclaredField(name);
                 field.setAccessible(true);
@@ -32,16 +31,25 @@ class OwnerIndexChurnTest {
                 Object target = name.equals("pendingReservationUsers") ? state.pendingReservations : state;
                 var field = target.getClass().getDeclaredField(name);
                 field.setAccessible(true);
-                @SuppressWarnings("unchecked") var map = (Long2ObjectHashMap<Object>) field.get(target);
-                var storage = Long2ObjectHashMap.class.getDeclaredField("values");
+                @SuppressWarnings("unchecked") var map = (LanePublishedMap<Object>) field.get(target);
+                var storage = LanePublishedMap.class.getDeclaredField("values");
                 storage.setAccessible(true);
                 Object before = storage.get(map), value = new Object();
+                var lane = new AccountLaneState(0, 16);
                 for (long base = 1; base < 8192; base += 32) {
-                    for (long key = base; key < base + 32; key++) map.put(key, value);
-                    for (long key = base; key < base + 32; key++) assertThat(map.remove(key)).isSameAs(value);
+                    var admission = new LanePublication();
+                    for (long key = base; key < base + 32; key++) map.stage(admission, key, value);
+                    assertThat(map.size()).isZero();
+                    admission.visible = true;
+                    admission.execute(lane);
+                    assertThat(map.size()).isEqualTo(32);
+                    var terminal = new LanePublication();
+                    for (long key = base; key < base + 32; key++) map.stage(terminal, key, null);
+                    terminal.visible = true;
+                    terminal.execute(lane);
+                    assertThat((java.util.Map<?, ?>) storage.get(map)).isEmpty();
                 }
-                assertThat(map.isEmpty()).isTrue();
-                assertThat(storage.get(map)).as(name + " backing storage").isSameAs(before);
+                assertThat(storage.get(map)).as(name + " storage identity").isSameAs(before);
             }
         }
     }

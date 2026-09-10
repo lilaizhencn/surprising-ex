@@ -6,6 +6,27 @@ import org.junit.jupiter.api.Test;
 
 class RuntimeIdentityRegistryTest {
     @Test
+    void laneOwnsPreparationAndDuplicateRollbackPreservesLiveIdentity() {
+        var identities = new RuntimeIdentityRegistry();
+        long userId = 17;
+        var topology = LaneTopology.configured(false);
+        var lane = new AccountLaneState(topology.accountLaneId(userId), 16);
+        var first = identities.prepareClientKeyInLane(lane, userId, "客户😀");
+        var duplicate = identities.prepareClientKeyInLane(lane, userId, "客户😀");
+        assertThat(duplicate.key()).isEqualTo(first.key());
+        assertThat(lane.clientIdentityAllocations).isEqualTo(1);
+        identities.rollbackClientKeyInLane(lane, userId, "客户😀", duplicate);
+        assertThat(identities.clientIdentityCount()).isEqualTo(1);
+        identities.rollbackClientKeyInLane(lane, userId, "客户😀", first);
+        assertThat(identities.clientIdentityCount()).isZero();
+        var wrongLane = new AccountLaneState(lane.laneId() + 1, 16);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                identities.prepareClientKeyInLane(wrongLane, userId, "wrong"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("crossed account Lane");
+        assertThat(identities.clientIdentityCount()).isZero();
+    }
+
+    @Test
     void streamedIdentityHashExactlyMatchesJavaUtf8IncludingMalformedSurrogates() throws Exception {
         var method = RuntimeIdentityRegistry.class.getDeclaredMethod("deterministicKey", long.class, String.class);
         method.setAccessible(true);

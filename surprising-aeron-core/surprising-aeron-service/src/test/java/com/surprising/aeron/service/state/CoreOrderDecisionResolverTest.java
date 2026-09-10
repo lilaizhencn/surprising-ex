@@ -21,6 +21,32 @@ import org.junit.jupiter.api.Test;
 class CoreOrderDecisionResolverTest {
 
     @Test
+    void batchContextKeepsItsMarkButStillChecksEachOrderVersionAndSide() {
+        var identities = new RuntimeIdentityRegistry();
+        try (var runtime = runtime(linearInstrument())) {
+            int symbolId = identities.symbolId("BTC-USDT");
+            runtime.putMarkPrice(new MarkPriceRuntime(symbolId, 1, 60_000, 9, 1_000));
+            var context = CoreOrderDecisionResolver.context(runtime, identities, 1001, "BTC-USDT", 1_500);
+            runtime.putMarkPrice(new MarkPriceRuntime(symbolId, 1, 80_000, 10, 1_500));
+            var buy = new PlaceOrderCommand(91, "BTC-USDT", 1, CoreOrderSide.BUY, 0, 2,
+                    false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.MARKET,
+                    CoreTimeInForce.IOC, false, "buy");
+            var sell = new PlaceOrderCommand(92, "BTC-USDT", 1, CoreOrderSide.SELL, 0, 2,
+                    false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.MARKET,
+                    CoreTimeInForce.IOC, false, "sell");
+            assertThat(CoreOrderDecisionResolver.resolve(context, buy).matchingPriceTicks()).isEqualTo(60_600);
+            assertThat(CoreOrderDecisionResolver.resolve(context, sell).matchingPriceTicks()).isEqualTo(59_400);
+            assertThat(CoreOrderDecisionResolver.resolve(runtime, identities, 1001, buy, 1_500).markPriceTicks())
+                    .isEqualTo(80_000);
+            var stale = new PlaceOrderCommand(93, "BTC-USDT", 2, CoreOrderSide.BUY, 100, 2,
+                    false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+                    CoreTimeInForce.GTC, false, "stale");
+            assertThatThrownBy(() -> CoreOrderDecisionResolver.resolve(context, stale))
+                    .isInstanceOf(CoreStateRejectedException.class).hasMessageContaining("version differs");
+        }
+    }
+
+    @Test
     void resolvesProtectionReservationAndFeeInsideCore() {
         RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
         TradingRuntimeState runtime = runtime(linearInstrument());

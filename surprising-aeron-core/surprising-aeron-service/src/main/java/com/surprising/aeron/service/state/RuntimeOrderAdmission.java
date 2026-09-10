@@ -59,6 +59,15 @@ public final class RuntimeOrderAdmission {
                 symbolId >= 0 && runtime.treasury().fundingProgress(symbolId) != null);
     }
 
+    static AdmissionIdentity identityInLane(AccountLaneState lane, RuntimeIdentityRegistry identities,
+                                            long userId, ResolvedPlaceOrder order,
+                                            RuntimeIdentityRegistry.PreparedClientKey key, AdmissionIdentity flags) {
+        String position = order.positionSide() == CorePositionSide.NET
+                ? order.symbol() : order.symbol() + ':' + order.positionSide().name();
+        return new AdmissionIdentity(key.key() == 0 ? null : key.key(), flags.symbolId(),
+                identities.findPositionKeyInLane(lane, userId, position), flags.lifecycleSettled(), flags.fundingInProgress());
+    }
+
     public static long requiredReservationPrepared(
             TradingRuntimeState runtime, long userId, ResolvedPlaceOrder order,
             long openInterestSteps, AdmissionOrderIndex activeOrders, AdmissionIdentity identity) {

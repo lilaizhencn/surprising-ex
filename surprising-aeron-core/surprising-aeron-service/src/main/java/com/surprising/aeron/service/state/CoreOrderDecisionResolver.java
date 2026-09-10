@@ -23,30 +23,43 @@ public final class CoreOrderDecisionResolver {
             throw new IllegalArgumentException("invalid order decision input");
         }
         runtime.assertOwner();
-        CoreInstrumentState instrument = runtime.instrument(intent.symbol());
-        if (instrument == null) {
-            throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
-        }
-        if (instrument.changeId() != intent.instrumentChangeId()) {
+        return resolve(context(runtime, identities, userId, intent.symbol(), clusterTimestamp), intent);
+    }
+
+    /** 同一批、同一用户和币对的只读决策上下文；不跨命令复用。 */
+    public record Context(CoreInstrumentState instrument, int symbolId, MarkPriceRuntime mark,
+                          CoreFeeRate fee, long clusterTimestamp, boolean lifecycleSettled,
+                          RuntimeOrderAdmission.AdmissionIdentity admissionFlags) { }
+
+    public static Context context(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                                  long userId, String symbol, long clusterTimestamp) {
+        runtime.assertOwner();
+        CoreInstrumentState instrument = runtime.instrument(symbol);
+        if (instrument == null) throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument state is missing");
+        Integer symbolId = identities.findSymbolId(instrument.symbol());
+        if (symbolId == null) throw new IllegalStateException("instrument symbol identity is missing");
+        return new Context(instrument, symbolId, runtime.markPrice(symbolId),
+                runtime.resolveFee(userId, symbol, clusterTimestamp, instrument), clusterTimestamp,
+                runtime.treasury().lifecycleSettlement(symbolId) != 0,
+                new RuntimeOrderAdmission.AdmissionIdentity(null, symbolId, null,
+                        runtime.treasury().lifecycleSettlement(symbolId) != 0,
+                        runtime.treasury().fundingProgress(symbolId) != null));
+    }
+
+    public static ResolvedPlaceOrder resolve(Context context, PlaceOrderCommand intent) {
+        CoreInstrumentState instrument = context.instrument();
+        if (!instrument.symbol().equals(intent.symbol())) throw new IllegalArgumentException("decision context symbol mismatch");
+        if (instrument.changeId() != intent.instrumentChangeId())
             throw new CoreStateRejectedException("INSTRUMENT_CHANGE_ID_CONFLICT", "instrument version differs");
-        }
         instrument.requireTrading(intent.reduceOnly());
-
-        if (instrument.expiryEpochMillis() > 0 && clusterTimestamp >= instrument.expiryEpochMillis()) {
-            Integer symbolId = identities.findSymbolId(instrument.symbol());
-            boolean settled = symbolId != null && runtime.treasury().lifecycleSettlement(symbolId) != 0;
-            throw new CoreStateRejectedException(settled ? "INSTRUMENT_SETTLED" : "INVALID_COMMAND",
-                    "expired instrument cannot accept new orders");
-        }
-
+        if (instrument.expiryEpochMillis() > 0 && context.clusterTimestamp() >= instrument.expiryEpochMillis())
+            throw new CoreStateRejectedException(context.lifecycleSettled() ? "INSTRUMENT_SETTLED" : "INVALID_COMMAND", "expired instrument cannot accept new orders");
         boolean spotLimit = instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT
                 && intent.orderType() == CoreOrderType.LIMIT;
-        Integer preparedSymbolId = identities.findSymbolId(instrument.symbol());
-        if (preparedSymbolId == null) {
-            throw new IllegalStateException("instrument symbol identity is missing");
-        }
-        MarkPriceRuntime mark = spotLimit ? null : runtime.markPrice(preparedSymbolId);
-        if (!spotLimit) requireFreshMark(mark, instrument, clusterTimestamp);
+        int preparedSymbolId = context.symbolId();
+        MarkPriceRuntime mark = context.mark();
+        CoreFeeRate fee = context.fee();
+        if (!spotLimit) requireFreshMark(mark, instrument, context.clusterTimestamp());
         long markPriceTicks = spotLimit ? intent.limitPriceTicks() : mark.markPriceTicks();
         long indexPriceTicks = spotLimit ? 0 : mark.indexPriceTicks();
         long forwardPriceTicks = spotLimit ? 0 : mark.forwardPriceTicks();
@@ -60,7 +73,6 @@ public final class CoreOrderDecisionResolver {
         String reservationAsset = reservationKind == ReservationKind.DERIVATIVE_MARGIN
                 ? instrument.settleAsset()
                 : intent.side() == CoreOrderSide.BUY ? instrument.quoteAsset() : instrument.baseAsset();
-        CoreFeeRate fee = runtime.resolveFee(userId, instrument.symbol(), clusterTimestamp, instrument);
         return new ResolvedPlaceOrder(intent, instrument, preparedSymbolId, matchingPriceTicks, reservationPriceTicks,
                 markPriceTicks, indexPriceTicks, forwardPriceTicks, markPriceSequence, reservationKind, reservationAsset,
                 fee.makerFeeRatePpm(), fee.takerFeeRatePpm(), fee.policyVersion());

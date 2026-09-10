@@ -31,6 +31,61 @@ final class PendingReservationTracker {
     /** 全部用户待完成订单预留总数。 */
     int totalPendingReservations;
 
+    /** 批量准入按命令保存一次收据，逐订单预留索引仅由 Account Lane 维护。 */
+    final LongObjectHashMap<PendingBatch> batches = new LongObjectHashMap<>();
+
+    static final class PendingBatch {
+        final long userId;
+        final OrderRuntime[] orders;
+        final int count;
+        int remaining;
+        PendingBatch(long userId, OrderRuntime[] orders, int count) {
+            this.userId = userId; this.orders = orders; this.count = count; this.remaining = count;
+        }
+    }
+
+    void registerBatch(long sequence, long userId, OrderRuntime[] orders, int count) {
+        if (batches.containsKey(sequence) || pendingReservationsBySequence.containsKey(sequence))
+            throw new IllegalStateException("batch reservation was registered twice");
+        batches.put(sequence, new PendingBatch(userId, orders, count));
+        pendingReservationCountsByUser.addToValue(userId, count);
+        totalPendingReservations = Math.addExact(totalPendingReservations, count);
+    }
+
+    void completedBatchItems(long sequence, int count) {
+        PendingBatch batch = batches.get(sequence);
+        if (batch == null || count == 0) return;
+        if (count > batch.remaining) throw new IllegalStateException("batch reservation completion overflow");
+        batch.remaining -= count;
+        totalPendingReservations = Math.subtractExact(totalPendingReservations, count);
+        int remaining = pendingReservationCountsByUser.addToValue(batch.userId, -count);
+        if (remaining == 0) pendingReservationCountsByUser.removeKey(batch.userId);
+        if (batch.remaining == 0) batches.removeKey(sequence);
+    }
+
+    /** 部分拒绝等路径仍须结束未进入结算计划的预留；正常批量结算在收据计数归零后直接返回。 */
+    private void completeBatchRemainder(long sequence, PendingBatch batch) {
+        int completed = owner.onLane(batch.userId, lane -> {
+            int count = 0;
+            for (int i = 0; i < batch.count; i++) {
+                OrderRuntime order = batch.orders[i];
+                if (order == null || lane.pendingReservationSequences.getIfAbsent(order.orderId(), 0) != sequence) continue;
+                ReservationRuntime reservation = lane.reservations.get(order.orderId());
+                owner.captureBalanceBefore(batch.userId, reservation.assetId());
+                lane.completePendingReservation(order.orderId(), sequence);
+                owner.captureBalanceAfter(lane, batch.userId, reservation.assetId());
+                owner.changedOrder(order.orderId());
+                owner.changedReservations.add(order.orderId());
+                owner.changedUsers.add(batch.userId);
+                owner.changedBalance(batch.userId, reservation.assetId());
+                count++;
+            }
+            return count;
+        });
+        if (completed != batch.remaining) throw new IllegalStateException("batch Lane reservation count mismatch");
+        completedBatchItems(sequence, completed);
+    }
+
     record PendingReservationCompletion(ReservationRuntime reservation) {}
 
     record PendingReservationRef(long orderId, long userId) {
@@ -101,6 +156,8 @@ final class PendingReservationTracker {
     public void completePendingReservations(long coreSequence) {
         owner.assertOwner();
         if (coreSequence <= 0) throw new IllegalArgumentException("coreSequence must be positive");
+        PendingBatch batch = batches.get(coreSequence);
+        if (batch != null) { completeBatchRemainder(coreSequence, batch); return; }
         long[] pending = pendingReservationsBySequence.orderIds(coreSequence);
         if (pending.length == 0) return;
         List<PendingReservationRef> refs = new ArrayList<>(pending.length);
@@ -184,7 +241,10 @@ final class PendingReservationTracker {
             }
             return scoped.pendingReservation(orderId);
         }
-        return pendingReservationUsers.getOrDefault(orderId, 0) == userId;
+        if (pendingReservationUsers.getOrDefault(orderId, 0) == userId) return true;
+        long sequence = owner.publishedOrders.admissionSequence(orderId);
+        PendingBatch batch = batches.get(sequence);
+        return batch != null && batch.userId == userId;
     }
 
     long pendingReservedUnits(long userId, int assetId) {
