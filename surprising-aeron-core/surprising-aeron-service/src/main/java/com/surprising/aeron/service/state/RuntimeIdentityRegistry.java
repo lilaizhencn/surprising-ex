@@ -43,6 +43,22 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
     /** Lane 准备身份，Owner 在提交完成后回收；账户依赖边界防止引用计数并发修改。
      * 共用字典保留跨 Lane 的全局哈希碰撞检查及异步只读解析。 */
     private final Map<Long, ClientIdentityEntry> clients = new ConcurrentHashMap<>();
+    /** 只用于查找，永不插入字典；每个 Owner/Lane/读取线程独享探针。 */
+    private static final ThreadLocal<ClientLookup> CLIENT_LOOKUP = ThreadLocal.withInitial(ClientLookup::new);
+
+    private static final class ClientLookup {
+        /** 当前查找的原始身份键，哈希与字典中的 Long 一致。 */
+        long value;
+        @Override public int hashCode() { return Long.hashCode(value); }
+        @Override public boolean equals(Object other) { return other instanceof Long key && key.longValue() == value; }
+    }
+
+    private static ClientLookup clientLookup(long key) {
+        ClientLookup lookup = CLIENT_LOOKUP.get();
+        lookup.value = key;
+        return lookup;
+    }
+
 
     /** Owner 按准入回执汇总身份分配次数，Lane 不争用全局版本写入。 */
     public void recordLaneClientAllocations(long count) {
@@ -165,7 +181,7 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
         if (clientOrderId == null || clientOrderId.isBlank()) return new PreparedClientKey(0, false);
         ClientIdentity identity = new ClientIdentity(userId, clientOrderId);
         long key = deterministicKey(userId, clientOrderId);
-        ClientIdentityEntry existing = clients.get(key);
+        ClientIdentityEntry existing = clients.get(clientLookup(key));
         if (existing != null) {
             if (!existing.identity.equals(identity)) {
                 throw new IllegalStateException("deterministic client identity collision");
@@ -187,12 +203,12 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
     }
 
     private void releaseClientKeyReference(long userId, String clientOrderId, long clientKey) {
-        ClientIdentityEntry existing = clients.get(clientKey);
+        ClientIdentityEntry existing = clients.get(clientLookup(clientKey));
         if (existing == null || existing.identity.userId() != userId
                 || !existing.identity.clientOrderId().equals(clientOrderId)) {
             throw new IllegalStateException("deterministic client identity collision");
         }
-        if (--existing.references == 0) clients.remove(clientKey, existing);
+        if (--existing.references == 0) clients.remove(clientLookup(clientKey), existing);
     }
 
     public void rollbackPreparedClientKey(
@@ -221,14 +237,14 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
         if (userId <= 0) throw new IllegalArgumentException("userId must be positive");
         if (clientOrderId == null || clientOrderId.isBlank()) return null;
         long key = deterministicKey(userId, clientOrderId);
-        ClientIdentityEntry existing = clients.get(key);
+        ClientIdentityEntry existing = clients.get(clientLookup(key));
         return existing != null && existing.identity.userId() == userId
                 && existing.identity.clientOrderId().equals(clientOrderId) ? key : null;
     }
 
     public String clientOrderId(long userId, long clientKey) {
         if (clientKey == 0) return "";
-        ClientIdentityEntry entry = clients.get(clientKey);
+        ClientIdentityEntry entry = clients.get(clientLookup(clientKey));
         if (entry == null || entry.identity.userId() != userId) {
             throw new IllegalArgumentException("unknown runtime client key: " + userId + '/' + clientKey);
         }
@@ -237,9 +253,9 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
 
     public void releaseClientKey(long userId, long clientKey) {
         assertOwner();
-        ClientIdentityEntry entry = clients.get(clientKey);
+        ClientIdentityEntry entry = clients.get(clientLookup(clientKey));
         if (entry == null || entry.identity.userId() != userId) return;
-        if (--entry.references == 0) clients.remove(clientKey, entry);
+        if (--entry.references == 0) clients.remove(clientLookup(clientKey), entry);
     }
 
     public long positionKey(long userId, String positionKey) {

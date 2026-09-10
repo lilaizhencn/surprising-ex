@@ -24,6 +24,29 @@ import org.junit.jupiter.params.provider.EnumSource;
 class ClusterCommandPipelineTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
+    void deferredIngressPreservesDependentBatchOrderAndSnapshot(ProductLine product) {
+        try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
+            serial.applyAll(live.setup());
+            var commands = List.of(live.placeBatch(11, "BTC-USDT", 71000),
+                    live.cancelBatch(11, 71000));
+            for (var command : commands) {
+                live.service.enqueueCommittedCommand(live.session, command,
+                        command.header().submittedAtEpochMillis(), 0, null);
+                serial.apply(command);
+            }
+            assertThat(live.responses).isEmpty();
+            live.tick();
+            assertThat(live.responses).hasSize(2);
+            assertThat(live.hash()).isEqualTo(serial.hash());
+            assertThat(live.service.state().tradingState().users()).isEqualTo(serial.service.state().tradingState().users());
+            try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(881))) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
     @org.junit.jupiter.api.parallel.ResourceLock(org.junit.jupiter.api.parallel.Resources.SYSTEM_PROPERTIES)
     void independentPartitionSettlesRealFillWhileEarlierMatcherIsBlocked(ProductLine product) throws Exception {
         independentPartitionFill(product, false);

@@ -467,7 +467,8 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
             }
         }
         if (Boolean.getBoolean("surprising.aeron.owner-churn-validation") && measuredCycles > 0) {
-            long completedOrderLifecycles = Math.multiplyExact(totalCycles, SYMBOLS * BATCH * 3L);
+            // 测量阶段自身必须跨越淘汰窗口，不能只靠预热覆盖索引/批量槽复用。
+            long completedOrderLifecycles = Math.multiplyExact(measuredCycles, SYMBOLS * BATCH * 3L);
             if (completedOrderLifecycles < 2 * 65_536L)
                 throw new IllegalStateException("owner churn run did not cross two terminal retention windows");
             System.out.printf("ownerChurnVerify=PASS completedOrderLifecycles=%d terminalIndexEmpty=true reservationsEmpty=true%n",

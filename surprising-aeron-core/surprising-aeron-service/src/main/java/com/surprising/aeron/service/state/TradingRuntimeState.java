@@ -1164,7 +1164,8 @@ public final class TradingRuntimeState implements AutoCloseable {
                 state.changedReservations.add(orderId);
                 if (publication == null) putOrRemove(state.publishedReservations, orderId, reservation);
             });
-            positions.forEachIndexed((positionKey, position, hasPrepared, prepared) -> {
+            // 已由 Lane 准备发布版本且没有删除推送时，无需逐持仓再访问一次缓冲。
+            if (publication == null || state.realtimeCapture != null) positions.forEachIndexed((positionKey, position, hasPrepared, prepared) -> {
                 if (position == null && state.realtimeCapture != null) {
                     try { state.realtimeCapture.removedPosition(state.publishedPositions.get(positionKey)); }
                     catch (RuntimeException failure) { state.realtimeCapture.failed(); }
@@ -4047,10 +4048,12 @@ public final class TradingRuntimeState implements AutoCloseable {
     public void releaseRetiredPositionIdentities(RuntimeIdentityRegistry identities) {
         assertOwner();
         if (identities == null) throw new IllegalArgumentException("runtime identities are required");
-        changedPositions.forEach((positionKey, ignored) ->
-                releaseRetiredPositionIdentity(identities, positionKey));
-        changedRiskSnapshots.forEach((positionKey, ignored) ->
-                releaseRetiredPositionIdentity(identities, positionKey));
+        changedPositions.forEach((positionKey, value) -> {
+            if (value == null) releaseRetiredPositionIdentity(identities, positionKey);
+        });
+        changedRiskSnapshots.forEach((positionKey, value) -> {
+            if (value == null) releaseRetiredPositionIdentity(identities, positionKey);
+        });
     }
 
     void releaseRetiredPositionIdentity(RuntimeIdentityRegistry identities, long positionKey) {

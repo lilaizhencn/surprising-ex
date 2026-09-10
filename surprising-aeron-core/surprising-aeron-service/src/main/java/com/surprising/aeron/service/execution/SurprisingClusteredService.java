@@ -145,10 +145,21 @@ public final class SurprisingClusteredService implements ClusteredService {
     /** 指纹来自服务内部解码后的日志记录，不能接受客户端提供的摘要。 */
     void acceptCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position,
                                 CommandFingerprint fingerprint) {
+        acceptCommittedCommand(session, request, timestamp, position, fingerprint, true);
+    }
+
+    /** 独立 Owner 连续收取入口后统一推进；容量不足仍立即推进，日志上下文逐条保留。 */
+    void enqueueCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position,
+                                 CommandFingerprint fingerprint) {
+        acceptCommittedCommand(session, request, timestamp, position, fingerprint, false);
+    }
+
+    private void acceptCommittedCommand(ClientSession session, CoreMessage request, long timestamp, long position,
+                                        CommandFingerprint fingerprint, boolean advance) {
         try {
             processingLogCallback = true;
             pendingResponses.poll(System.nanoTime(), MATCHING_COMPLETION_BATCH_SIZE);
-            processIngress(session, request, timestamp, position, fingerprint);
+            processIngress(session, request, timestamp, position, fingerprint, advance);
         } catch (org.agrona.concurrent.AgentTerminationException failure) {
             throw failure;
         } catch (RuntimeException failure) {
@@ -182,10 +193,10 @@ public final class SurprisingClusteredService implements ClusteredService {
     }
 
     private void processIngress(ClientSession session, CoreMessage request, long timestamp, long position,
-                                CommandFingerprint fingerprint) {
+                                CommandFingerprint fingerprint, boolean advance) {
         awaitIngressCapacity(request);
         pendingIngress.add(session, request, timestamp, position, fingerprint);
-        progressCommands(false);
+        if (advance) progressCommands(false);
     }
 
     /** 队列满时暂停日志消费，在原日志上下文内推进已复制命令；不改变业务顺序或拒绝结果。 */
@@ -207,10 +218,12 @@ public final class SurprisingClusteredService implements ClusteredService {
     }
 
     private void progressCommandsInScope(boolean flushWindow) {
+        boolean awaitingCompletion = false;
         for (int work = 0; work < MATCHING_COMPLETION_BATCH_SIZE; work++) {
             // 已确定的提交前缀不变；未完成时仍可准入与在途命令无依赖的后续订单。
             if (drainingSize == 0 && commandWindow.size() != 0) beginCommandPrefix();
-            if (drainingSize != 0) pollCommandPrefix();
+            // 本轮未收到完成时仍准入独立命令；不为每个新准入项重跑整套完成收集。
+            if (drainingSize != 0 && !awaitingCompletion) awaitingCompletion = !pollCommandPrefix();
             if (commandWindow.size() == ClusterCommandWindow.CAPACITY) return;
             if (activeControl != null) {
                 if (!pollControl()) return;

@@ -193,7 +193,9 @@ final class OrderBatchExecutor {
             for (int index = 0; index < batch.items.size(); index++) {
                 OrderBatchItem item = batch.items.get(index);
                 PlaceOrderCommand command = (PlaceOrderCommand) item.command;
-                int itemMatcherShard = owner.matchingAdapter.matcherShardId(command.symbol());
+                int itemMatcherShard = batch.decodedCommand == null
+                        ? owner.matchingAdapter.matcherShardId(command.symbol())
+                        : batch.decodedCommand.matcherShard(owner.matchingAdapter, command.symbol());
                 if (batchMatcherShard == -1) batchMatcherShard = itemMatcherShard;
                 else if (batchMatcherShard != itemMatcherShard) throw new TradingCoreRuntime.PipelinedBatchNotApplicable();
                 if (command.reduceOnly()) throw new TradingCoreRuntime.PipelinedBatchNotApplicable();
@@ -846,7 +848,9 @@ final class OrderBatchExecutor {
                 yield order == null ? "" : owner.identities.symbol(order.symbolId());
             }
         };
-        return symbol.isBlank() ? 0 : owner.matchingAdapter.matcherShardId(symbol);
+        return symbol.isBlank() ? 0 : batch.decodedCommand == null
+                ? owner.matchingAdapter.matcherShardId(symbol)
+                : batch.decodedCommand.matcherShard(owner.matchingAdapter, symbol);
     }
 
     void beginOrderBatchCommitContext(OrderBatchPending batch, PendingMatching pending) {
@@ -934,8 +938,9 @@ final class OrderBatchExecutor {
             PlaceOrderBatchCommand command = decodedCommand.placeOrderBatch();
             OrderBatchPending batch = acquireOrderBatchPending(OrderBatchKind.PLACE, command.orders().size(),
                     clusterTimestamp, clusterPosition, PendingMatching.Operation.PLACE);
+            batch.decodedCommand = decodedCommand;
             for (PlaceOrderCommand value : command.orders()) {
-                batch.items.add(new OrderBatchItem(value.orderId(), 0, 0, value));
+                batch.addItem(value.orderId(), 0, 0, value);
             }
             return batch;
         }
@@ -943,8 +948,9 @@ final class OrderBatchExecutor {
             CancelOrderBatchCommand command = decodedCommand.cancelOrderBatch();
             OrderBatchPending batch = acquireOrderBatchPending(OrderBatchKind.CANCEL, command.orders().size(),
                     clusterTimestamp, clusterPosition, PendingMatching.Operation.CANCEL);
+            batch.decodedCommand = decodedCommand;
             for (CancelOrderCommand value : command.orders()) {
-                batch.items.add(new OrderBatchItem(value.orderId(), 0, 0, value));
+                batch.addItem(value.orderId(), 0, 0, value);
             }
             return batch;
         }
@@ -952,9 +958,10 @@ final class OrderBatchExecutor {
             AmendOrderBatchCommand command = decodedCommand.amendOrderBatch();
             OrderBatchPending batch = acquireOrderBatchPending(OrderBatchKind.AMEND, command.orders().size(),
                     clusterTimestamp, clusterPosition, PendingMatching.Operation.AMEND);
+            batch.decodedCommand = decodedCommand;
             for (AmendOrderCommand value : command.orders()) {
-                batch.items.add(new OrderBatchItem(value.replacementOrderId(), value.originalOrderId(),
-                        value.replacementOrderId(), value));
+                batch.addItem(value.replacementOrderId(), value.originalOrderId(),
+                        value.replacementOrderId(), value);
             }
             return batch;
         }

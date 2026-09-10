@@ -3,13 +3,13 @@ package com.surprising.aeron.service.execution;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
+import org.agrona.collections.Long2LongHashMap;
 
 /** Owner独占的终态FIFO；实体及客户号索引直接引用槽位，稳定负载插入/淘汰不创建键或节点。 */
 final class TerminalTombstoneStore {
     /** 按实体类型隔离ID空间，值为FIFO物理槽位加一。 */
-    private final LongIntHashMap[] entities = {new LongIntHashMap(), new LongIntHashMap(),
-            new LongIntHashMap(), new LongIntHashMap()};
+    private final Long2LongHashMap[] entities = {new Long2LongHashMap(0), new Long2LongHashMap(0),
+            new Long2LongHashMap(0), new Long2LongHashMap(0)};
     /** FIFO有效区间；容量不足仅在高水位增长，完成序号后由调用方裁剪保留窗口。 */
     private int head, size;
     private long[] ids = new long[128], users = new long[128], sequences = new long[128];
@@ -28,7 +28,7 @@ final class TerminalTombstoneStore {
     void put(int type, long id, long user, String client, long sequence) {
         if (type < 0 || type >= entities.length || id <= 0 || user <= 0 || sequence <= 0 || client == null)
             throw new IllegalArgumentException("invalid retained terminal entity");
-        int existing = entities[type].get(id) - 1;
+        int existing = (int) entities[type].get(id) - 1;
         if (existing < 0 && size == ids.length) grow();
         int slot = existing >= 0 ? existing : (head + size++) & (ids.length - 1);
         if (existing >= 0) unlinkClient(types[slot], users[slot], clients[slot]);
@@ -39,7 +39,7 @@ final class TerminalTombstoneStore {
 
     void trim(int maximum) {
         while (size > maximum) {
-            entities[types[head]].removeKey(ids[head]);
+            entities[types[head]].remove(ids[head]);
             unlinkClient(types[head], users[head], clients[head]);
             clients[head] = null;
             indexed[head] = false;

@@ -15,8 +15,8 @@ final class ClusterCommandWindow {
     /** 掩码每一位对应哪些物理窗口槽；仅跳过不相交项，精确依赖规则不变。 */
     private final long[] accountSlots = new long[64], symbolSlots = new long[64];
     /** 精确订单ID到物理窗口槽位；仅Owner写入，移出窗口立即删除，不保存业务状态。 */
-    private final org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap orderSlots =
-            new org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap();
+    private final org.agrona.collections.Long2LongHashMap orderSlots =
+            new org.agrona.collections.Long2LongHashMap(0);
 
     private static long intersectingSlots(long[] slots, long mask) {
         long result = 0;
@@ -227,7 +227,7 @@ final class ClusterCommandWindow {
             for (int k = 0; k < entry.orderCount; k++) {
                 long id = entry.orders[k];
                 long remaining = orderSlots.get(id) & ~slot;
-                if (remaining == 0) orderSlots.removeKey(id); else orderSlots.put(id, remaining);
+                if (remaining == 0) orderSlots.remove(id); else orderSlots.put(id, remaining);
             }
             entry.orderCount = 0;
             entry.session = null;

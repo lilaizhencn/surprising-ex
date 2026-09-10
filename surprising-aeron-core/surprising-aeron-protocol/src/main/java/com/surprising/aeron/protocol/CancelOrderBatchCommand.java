@@ -9,10 +9,10 @@ public record CancelOrderBatchCommand(List<CancelOrderCommand> orders) {
     public static final int MAX_ITEMS = MAX_ORDERS;
 
     public CancelOrderBatchCommand {
-        if (orders == null || orders.isEmpty() || orders.size() > MAX_ORDERS
-                || orders.stream().anyMatch(order -> order == null)) {
+        if (orders == null || orders.isEmpty() || orders.size() > MAX_ORDERS) {
             throw new IllegalArgumentException("invalid cancel order batch");
         }
+        for (var order : orders) if (order == null) throw new IllegalArgumentException("invalid cancel order batch");
         orders = List.copyOf(orders);
     }
 

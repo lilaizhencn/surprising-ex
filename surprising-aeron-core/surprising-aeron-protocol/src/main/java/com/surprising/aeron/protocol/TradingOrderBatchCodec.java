@@ -267,6 +267,7 @@ public final class TradingOrderBatchCodec {
         T decode(byte[] bytes, int offset, int length);
     }
 
+    @SuppressWarnings("unchecked")
     private static <T> List<T> decodeCommand(byte[] encoded, int maxItems, FrameDecoder<T> decoder) {
         if (encoded == null || encoded.length > MAX_BATCH_PAYLOAD_BYTES
                 || encoded.length < Integer.BYTES * 2) {
@@ -278,7 +279,7 @@ public final class TradingOrderBatchCodec {
             throw new ProtocolException("unsupported order batch version: " + version);
         }
         int count = readCount(buffer, maxItems, "command");
-        List<T> items = new ArrayList<>(count);
+        T[] items = (T[]) new Object[count];
         for (int index = 0; index < count; index++) {
             int itemIndex = readInt(buffer, "command item index");
             if (itemIndex != index) {
@@ -289,14 +290,14 @@ public final class TradingOrderBatchCodec {
                 throw new ProtocolException("invalid command item length: " + length);
             }
             try {
-                items.add(decoder.decode(encoded, buffer.position(), length));
+                items[index] = decoder.decode(encoded, buffer.position(), length);
                 buffer.position(buffer.position() + length);
             } catch (IllegalArgumentException exception) {
                 throw new ProtocolException("invalid order batch item: " + exception.getMessage());
             }
         }
         requireConsumed(buffer, "order batch");
-        return items;
+        return List.of(items);
     }
 
     private static int encodedResultFrameLength(CoreOrderBatchResult.Item item) {

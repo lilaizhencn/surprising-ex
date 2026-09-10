@@ -9,10 +9,10 @@ public record PlaceOrderBatchCommand(List<PlaceOrderCommand> orders) {
     public static final int MAX_ITEMS = MAX_ORDERS;
 
     public PlaceOrderBatchCommand {
-        if (orders == null || orders.isEmpty() || orders.size() > MAX_ORDERS
-                || orders.stream().anyMatch(order -> order == null)) {
+        if (orders == null || orders.isEmpty() || orders.size() > MAX_ORDERS) {
             throw new IllegalArgumentException("invalid place order batch");
         }
+        for (var order : orders) if (order == null) throw new IllegalArgumentException("invalid place order batch");
         orders = List.copyOf(orders);
     }
 

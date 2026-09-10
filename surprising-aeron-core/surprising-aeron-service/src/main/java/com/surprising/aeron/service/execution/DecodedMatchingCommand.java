@@ -17,6 +17,18 @@ import com.surprising.aeron.protocol.TradingOrderBatchCodec;
 final class DecodedMatchingCommand {
 
     private final Object value;
+    /** 命令作用域内最后一个币对的稳定路由，避免同币对批量逐阶段查询并发字典。 */
+    private String routedSymbol;
+    private int routedShard;
+
+    int matcherShard(com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter adapter, String symbol) {
+        if (!symbol.equals(routedSymbol)) {
+            routedShard = adapter.matcherShardId(symbol);
+            routedSymbol = symbol;
+        }
+        return routedShard;
+    }
+
 
     private DecodedMatchingCommand(Object value) {
         this.value = value;

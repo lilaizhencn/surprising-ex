@@ -204,7 +204,7 @@ public final class ContinuousTradingClusterService implements ClusteredService {
                     else {
                         logContext.timestamp = next.timestamp;
                         logContext.position = next.position;
-                        processor.acceptCommittedCommand(next.session, next.command, next.timestamp, next.position, next.fingerprint);
+                        processor.enqueueCommittedCommand(next.session, next.command, next.timestamp, next.position, next.fingerprint);
                         inputConsumed += next.command.payloadLength();
                     }
                     work++;

@@ -6,6 +6,29 @@ import org.junit.jupiter.api.Test;
 
 class RuntimeIdentityRegistryTest {
     @Test
+    void clientLookupIsThreadLocalAndReleasePreservesOtherKeysAfterRestore() throws Exception {
+        var original = new RuntimeIdentityRegistry();
+        long first = original.clientKey(7, "客户-A");
+        long second = original.clientKey(8, "客户-B");
+        for (var registry : new RuntimeIdentityRegistry[]{original, RuntimeIdentityRegistry.restore(original.snapshot())}) {
+            var executor = java.util.concurrent.Executors.newFixedThreadPool(2);
+            try {
+                var a = executor.submit(() -> { for (int i = 0; i < 10000; i++) assertThat(registry.clientOrderId(7, first)).isEqualTo("客户-A"); });
+                var b = executor.submit(() -> { for (int i = 0; i < 10000; i++) assertThat(registry.clientOrderId(8, second)).isEqualTo("客户-B"); });
+                a.get(5, java.util.concurrent.TimeUnit.SECONDS);
+                b.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            } finally { executor.shutdownNow(); }
+            registry.releaseClientKey(8, first);
+            assertThat(registry.findClientKey(7, "客户-A")).isEqualTo(first);
+            registry.releaseClientKey(7, first);
+            assertThat(registry.findClientKey(7, "客户-A")).isNull();
+            assertThat(registry.clientOrderId(8, second)).isEqualTo("客户-B");
+            registry.releaseClientKey(8, second);
+            assertThat(registry.clientIdentityCount()).isZero();
+        }
+    }
+
+    @Test
     void laneOwnsPreparationAndDuplicateRollbackPreservesLiveIdentity() {
         var identities = new RuntimeIdentityRegistry();
         long userId = 17;

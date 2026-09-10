@@ -10,13 +10,13 @@ import java.util.List;
 /** Owner 管理批流程；账户 Lane 仅写结果槽，经完成回执交接后读取，终态提交后释放。 */
 final class OrderBatchItem {
     /** 当前业务项的订单 ID。 */
-    final long orderId;
+    long orderId;
     /** 改单前订单 ID；非改单时按协议使用零值。 */
-    final long originalOrderId;
+    long originalOrderId;
     /** 改单后订单 ID；非改单时按协议使用零值。 */
-    final long replacementOrderId;
+    long replacementOrderId;
     /** 本项不可变输入命令，完成前由批量上下文持有。 */
-    final Object command;
+    Object command;
     /** 该命令或业务项的执行状态。 */
     ResponseStatus status;
     /** 该命令或业务项的确定性结果码。 */
@@ -39,10 +39,31 @@ final class OrderBatchItem {
     java.util.function.Supplier<CoreMatchingResult> matchingSubmission;
 
     OrderBatchItem(long orderId, long originalOrderId, long replacementOrderId, Object command) {
+        initialize(orderId, originalOrderId, replacementOrderId, command);
+    }
+
+    /** 仅在上一批所有 Lane 回执收齐且提交完成后复用。 */
+    void initialize(long orderId, long originalOrderId, long replacementOrderId, Object command) {
         this.orderId = orderId;
         this.originalOrderId = originalOrderId;
         this.replacementOrderId = replacementOrderId;
         this.command = command;
+    }
+
+    /** 清除本批输入和结果引用，避免池持有已完成订单。 */
+    void clear() {
+        orderId = originalOrderId = replacementOrderId = 0;
+        command = null;
+        status = null;
+        resultCode = null;
+        executionEvents = List.of();
+        executionCount = 0;
+        executionTakerUserId = 0;
+        resultOrder = null;
+        resultOrderSymbol = null;
+        laneResultPrepared = false;
+        realtimeTakerOrder = null;
+        matchingSubmission = null;
     }
 
     long orderId() { return orderId; }

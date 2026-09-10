@@ -549,7 +549,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                     int shard = -1;
                     for (var order : window.decoded(message).placeOrderBatch().orders()) {
                         if (!addPlaceScope(order, window)) return false;
-                        int current = matchingAdapter.matcherShardId(order.symbol());
+                        int current = window.decoded(message).matcherShard(matchingAdapter, order.symbol());
                         if (shard >= 0 && current != shard) return false;
                         shard = current;
                     }
@@ -559,7 +559,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                     int shard = -1;
                     for (var order : window.decoded(message).cancelOrderBatch().orders()) {
                         if (!addCancelScope(user, order.orderId(), window)) return false;
-                        int current = matchingAdapter.matcherShardId(activeOrderIndex.activeOrder(order.orderId()).symbol());
+                        int current = window.decoded(message).matcherShard(matchingAdapter, activeOrderIndex.activeOrder(order.orderId()).symbol());
                         if (shard >= 0 && current != shard) return false;
                         shard = current;
                     }

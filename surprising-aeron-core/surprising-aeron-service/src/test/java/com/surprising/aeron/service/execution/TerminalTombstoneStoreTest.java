@@ -7,6 +7,18 @@ import java.util.*;
 import org.junit.jupiter.api.Test;
 
 class TerminalTombstoneStoreTest {
+    @Test void boundedEvictionRetainsOnlyLatestIdsAcrossManyProbeChainCompactions() {
+        var store = new TerminalTombstoneStore();
+        for (int i = 1; i <= 100000; i++) {
+            store.put(i % 4, i, 7, "client-" + i, i);
+            store.trim(1280);
+            if (i > 1280) assertThat(store.contains((i - 1280) % 4, i - 1280)).isFalse();
+            assertThat(store.contains(i % 4, i)).isTrue();
+        }
+        for (long i = 98721; i <= 100000; i++) assertThat(store.contains((int)(i % 4), i)).isTrue();
+        assertThat(store.size()).isEqualTo(1280);
+    }
+
     record Key(int type, long id) {}
     record Value(long user, String client, long sequence) {}
     record Client(int type, long user, String client) {}

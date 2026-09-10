@@ -91,8 +91,12 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
 
     /** 本批动作类型：下单、撤单或改单。 */
     OrderBatchKind kind;
+    /** 已解码输入及命令内稳定路由，提交后释放。 */
+    DecodedMatchingCommand decodedCommand;
     /** 本批逐项命令及结果，终态完成后统一清空。 */
     final ArrayList<OrderBatchItem> items;
+    /** 随批上下文复用的结果槽，生命周期覆盖所有 matcher/Lane 引用。 */
+    private final OrderBatchItem[] itemSlots;
     /** 本批开始前的完整提交点，用于失败恢复判断。 */
     RuntimeProjectionPoint beforeProjection;
     /** 本批开始前的状态 revision，限定回滚范围。 */
@@ -224,6 +228,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     OrderBatchPending(int requestedCapacity) {
         int capacity = Math.max(1, requestedCapacity);
         items = new ArrayList<>(capacity);
+        itemSlots = new OrderBatchItem[capacity];
         changedUserIds = new PrimitiveLongChangeSet(capacity * 2);
         changedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
         runtimeChangedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
@@ -263,9 +268,19 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         return preparedOrders.length;
     }
 
+    void addItem(long orderId, long originalOrderId, long replacementOrderId, Object command) {
+        int index = items.size();
+        OrderBatchItem item = itemSlots[index];
+        if (item == null) itemSlots[index] = item = new OrderBatchItem(orderId, originalOrderId, replacementOrderId, command);
+        else item.initialize(orderId, originalOrderId, replacementOrderId, command);
+        items.add(item);
+    }
+
     void clear() {
         int preparedCount = items.size();
+        for (OrderBatchItem item : items) item.clear();
         items.clear();
+        decodedCommand = null;
         beforeProjection = null;
         runtimeCheckpoint = 0;
         positionIdentityCheckpoint = 0;
