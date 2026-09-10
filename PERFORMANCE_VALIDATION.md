@@ -5930,3 +5930,36 @@ business=CANCEL_ORDER_BATCH items=2391040 requests=119552 p50us=22937 p90us=2680
   - lanes-control-OPTION-0: 2315.876 ms/100循环，客户端 1.035 MiB/s、2548264 B/100循环、GC0。
   - lanes-control-SPOT-0: 793.161 ms/100循环，客户端 1.566 MiB/s、1375068 B/100循环、GC0。
 - 执行脚本：`python3 /tmp/lanes-owner-trim/run_gates.py`、`run_load.py`、`recover.py`；所有节点及客户端结束。原始路径为本段采集前列出的两个临时目录，分析摘要已写入本文件；随后删除本轮Archive、JFR、日志、测试报告和临时分析文件。已删除路径只作历史来源，不再作为可访问证据。
+
+
+## 2026-09-10 Owner瓶颈深入定位：采集前锁定
+仅采样方案二8b5e7cfe/08b4abc2现有jar，不改业务，不测方案一。复用上一轮全部profile参数（单成员真实Cluster，4Lane/2matcher、256在途、1769用户/256symbol/batch20，LINEAR_PERPETUAL连续交易，30秒预热45秒测量，JDK25/G1/NMT/profile.jfc，JMH SingleShot fork1/thread1/-prof gc）。本轮目的为Owner栈的互斥阶段、自耗时叶子、等待栈与Lane有效业务占比定位，不作为新的主吞吐比较。有效条件为终态数量相等、unfinished0、fundsDiff0、DataLoss0、磁盘>10GiB；沿用上一轮已通过的六产品线及重放/快照证据，本轮无代码改动不重复恢复。原始产物/tmp/owner-pinpoint-cluster，分析后记录并清理；不以方法inclusive占比之和充当耗时分解。
+
+### Owner深入定位结果（现有代码未改）
+- 采样轮171057.769 business ops/s、16520.039 Core messages/s、40667.824 fills/s；7709831业务动作与744583消息offered/terminal均相等、unfinished0、fundsDiff0；业务hash dc694083d4f77ebf。仅诊断采样，不替代上轮无profiler主吞吐。Owner CPU96.637%单核，matcher22.803/22.804%，四Lane97.29–97.31%。
+- 测量窗口1789019668613–1789019713685，Owner3252个执行样本；下表每个样本只归入一个阶段，合计100%，是CPU执行样本而非端到端耗时/精确调用次数。
+  - admission.prepareBatch: 497/3252 = 15.28%。
+  - finish.collectSettlement: 367/3252 = 11.29%。
+  - completeMatching.other: 336/3252 = 10.33%。
+  - admission.other: 276/3252 = 8.49%。
+  - ingress.dependencies: 228/3252 = 7.01%。
+  - other: 222/3252 = 6.83%。
+  - dispatch.buildSettlement: 212/3252 = 6.52%。
+  - admission.collectAndSubmit: 211/3252 = 6.49%。
+  - finish.publish: 187/3252 = 5.75%。
+  - finish.other: 151/3252 = 4.64%。
+  - dispatch.applyMatcherResults: 149/3252 = 4.58%。
+  - finish.collectCancel: 140/3252 = 4.31%。
+  - coordination.other: 127/3252 = 3.91%。
+  - finish.encodeResponse: 89/3252 = 2.74%。
+  - dispatch.other: 40/3252 = 1.23%。
+  - prefix.other: 17/3252 = 0.52%。
+  - egress: 3/3252 = 0.09%。
+- 批量收尾内部：结算/撤单收集507样本15.59%，发布187/5.75%，响应编码89/2.74%，其余151/4.64%。准入prepare497/15.28%与collectAndSubmit211/6.49%独立；“协调剩余”127/3.91%不能等价为全是空轮询，含健康检查等。单笔completeMatching.other336/10.33%也含实际业务工作。
+- 方法inclusive证据（嵌套不可相加）：commitTerminalToOwner308/9.47%，stagePlaceBatchAdmission136/4.18%，reserveSymbolId103/3.17%，admissionIdentity93/2.86%，conflictingPrefixSize90/2.77%，clearChangedKeys88/2.71%，resolve75/2.31%，prepareClientKey70/2.15%，decodeCommand67/2.06%，deterministicKey45/1.38%，assertAccountLanesHealthy43/1.32%，PendingReservationSequenceIndex.remove38/1.17%，MatcherSettlementEvent.complete仅8/0.25%。
+- 具体源码链：OrderBatchExecutor.preparePipelinedPlaceBatch逐20项做币对/行情/费率/身份解析，RuntimeIdentityRegistry.deterministicKey还调用UTF8 getBytes；Lane准入完成后TradingRuntimeState.stagePlaceBatchAdmission逐项更新publishedOrders/publishedReservations/orderLaneIds/reservationLaneIds及pending索引；结算完成collectMatcherSettlement→commitTerminalToOwner再次逐实体搬运提交视图/路由，再OwnerCommitPublisher维护索引、清理变化键。这些是实际串行工作，非一个等待通知。
+- 另两处可直接定位的小开销：DeterministicExchangeCoreAdapter.reserveSymbolId整个方法synchronized，已知symbol查询也进锁；PendingReservationSequenceIndex.remove为选一个提升元素执行additionalOrderIds.toArray()[0]，产生不必要数组/遍历（是否多次提升取决于删除顺序，不能笼统说每批O(n²)）。当前无长时间锁竞争证据，不把3.17%全部称作锁等待。
+- 热路径SurprisingClusteredService.pollCommandPrefix明确awaitFirst=false，不进入awaitAnyMatchingCommitReady；每条命令仍drainingSize=1并触发pump，事务/日志边界有需求，不能直接合并最终提交或删除依赖。优先削减实体级准入和提交搬运，其次才是健康检查/轮询摊销；保持共享保证金在账户Lane的正确性和确定性边界。
+- Lane14966样本中worker-loop-self13471=90.01%，结算815、准入485、撤单144、其他51；busy-spin约97%CPU不代表业务饱和。Owner无ThreadPark/JavaMonitorEnter/Wait记录、无同步I/O事件，profile阈值限制仍存在。不能据此证明每次Lane空闲都由Owner造成，精确队列空闲原因/调用空转率仍需进一步事件计数；现有证据已确认Owner被实体级串行准备和发布工作占满。
+- 节点分配采样566.506MiB/s、heap最大446.70MiB、GCPhasePause128次/984.930ms/p99=14.974ms/max15.213ms；DataLoss0。其余参数、NMT与采样指标限制沿用采集前定义和上一轮验收范围，不宣称长稳/三节点容量已验证。
+- JFR SHA256 7fa0b2772aa4efa48e2b51dc763a66880d46afd2f5ed11bfe25d9f5b88bb09ed，大小6091907字节；临时分析器Pinpoint按每个完整Owner调用栈互斥分类，并额外统计每方法inclusive、叶子行号及Lane循环。原始目录/tmp/owner-pinpoint-cluster和/tmp/owner-pinpoint分析完清理；无业务代码修改、无重复功能测试或恢复测试。
