@@ -37,6 +37,24 @@ class TerminalTombstoneStoreTest {
         assertThat(store.contains(0, 7)).isFalse();
     }
 
+    @Test void upperBoundNeverHidesOutOfOrderIdsOrDuplicatesAfterEvictionAndCopy() {
+        var store = new TerminalTombstoneStore();
+        store.put(0, Long.MAX_VALUE, 1, "highest", 1);
+        store.put(0, 7, 1, "late", 2);
+        store.put(3, 7, 1, "other-type", 3);
+        store.trim(2);
+        for (var current : new TerminalTombstoneStore[]{store, store.copy()}) {
+            assertThat(current.contains(0, Long.MAX_VALUE)).isFalse();
+            assertThat(current.contains(0, 7)).isTrue();
+            assertThat(current.contains(3, 7)).isTrue();
+            current.put(0, 7, 1, "overwritten", 4);
+            assertThat(current.size()).isEqualTo(2);
+            current.put(0, 8, 1, "new", 5);
+            assertThat(current.contains(0, 8)).isTrue();
+            assertThat(current.contains(1, 8)).isFalse();
+        }
+    }
+
     record Key(int type, long id) {}
     record Value(long user, String client, long sequence) {}
     record Client(int type, long user, String client) {}

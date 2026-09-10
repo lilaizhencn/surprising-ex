@@ -8,6 +8,8 @@ import java.nio.charset.StandardCharsets;
 final class TerminalTombstoneStore {
     /** 快照协议中的四类终态实体，编号与原独立索引一致。 */
     private static final int ENTITY_TYPE_COUNT = 4;
+    /** 每类已插入 ID 的保守上界：大于它一定不存在；乱序 ID 仍走精确索引，淘汰不降低上界。 */
+    private final long[] maximumIndexedIds = new long[ENTITY_TYPE_COUNT];
     /** 实体索引直接链接 FIFO 槽，避免复制订单 ID 或删除时移动哈希探测链。 */
     private int[] entityBuckets = new int[256], entityNext = new int[128], entityPrevious = new int[128];
     /** FIFO有效区间；容量不足仅在高水位增长，完成序号后由调用方裁剪保留窗口。 */
@@ -33,7 +35,10 @@ final class TerminalTombstoneStore {
         int slot = existing >= 0 ? existing : (head + size++) & (ids.length - 1);
         if (existing >= 0) unlinkClient(types[slot], users[slot], clients[slot]);
         ids[slot] = id; users[slot] = user; sequences[slot] = sequence; types[slot] = type; clients[slot] = client;
-        if (existing < 0) indexEntity(slot);
+        if (existing < 0) {
+            maximumIndexedIds[type] = Math.max(maximumIndexedIds[type], id);
+            indexEntity(slot);
+        }
         indexClient(slot);
     }
 
@@ -54,6 +59,7 @@ final class TerminalTombstoneStore {
     }
 
     private int entitySlot(int type, long id) {
+        if (id > maximumIndexedIds[type]) return -1;
         for (int link = entityBuckets[entityBucket(type, id)]; link != 0; link = entityNext[link - 1]) {
             int slot = link - 1;
             if (types[slot] == type && ids[slot] == id) return slot;
