@@ -6827,3 +6827,992 @@ JMH结果：
 ```
 
 本轮节点和客户端已退出，已清理/tmp/owner-focus全部原始产物（约1.56 GiB）；以上原始路径不可再访问，未删除源码/构建JAR。
+
+## 2026-09-10 Owner四项优化（采集前锁定）
+基于3eddf2a4方案二；精确订单窗口索引、连续FIFO终态存储、参与Lane清理/空缓冲快速返回、事件所有的复用结算计划与单批权威订单引用、Owner登记在途完成Lane并复用SPSC已观察游标。保留资金依赖、同maker累计量校验、终态保留数量及snapshot VERSION2格式。
+沿用前轮机器Intel i9-9880H8C16T/16GiB、HotSpot GraalVM25.0.1、Maven3.9.16、G1/NMT；真实单成员网络/Archive/Core，4 Lane2matcher、PIPELINED、BUSY_SPIN、SHARED_NETWORK/serviceYIELDING；节点512m/1536m，客户端128m/512m/SHARED。256全局/session在途、1命令+1查询session，256symbol1769users，batch20，seed131001/131002，初始资金1768000000125；continuous trading=true operational=false。动作比例沿用现有循环：普通下/撤各512，批量下15360项、撤5120项，每cycle5120fills。
+先受影响reactor verify和六产品真实节点execute/SIGKILL/replay/snapshot，再main两轮warm30s/measure60s；JMH continuous fork1/wi0/i1/gc内部warm30s/measure300s，JFR profile/stackdepth128/max128m，用5分钟持续轮次检查多次FIFO回绕和GC后趋势。六产品accountControls fork1/wi1/i2/gc/JFR，最后持续轮次全日志重放及快照重启校验。全部串行，本机不启三节点/云端。无额外冷却，每5s采pmset/vm_stat，磁盘低于10GiB停止。
+阈值：测试无失败，accepted=terminal business/Core，unfinished0，fundsDiff0，订单/仓位/冻结校验一致，重放snapshot哈希一致；DataLoss/CPU限速/swap出现不得作容量验收。本轮新churn guard要求终态订单生命周期至少跨两次65536保留窗口。持续轮JFR归因不替代主吞吐；5分钟仅初步内存趋势，未完成长周期生产泄漏、完整三段延迟/CO修正、全native池余额，不宣称完全性能验收。脚本/tmp/owner-four/{gates,perf,recovery}.py及各case commands.json。
+
+被测代码提交64204608。最终verify-final2（HotSpot25）1213 tests：1212通过、0失败/错误、1数据库条件跳过。首轮verify1的2失败来自旧内部结构断言（已移除槽的primitive数组要求清零；测试直接发布通知却未模拟Owner派发登记），更新后保留精确依赖/无丢通知校验。新增FIFO对照原LinkedHashMap字节/哈希冲突/回绕/复制隔离、同maker跨项累计量、复用缓存失效、稀疏Lane缓冲回收、同订单多窗口槽依赖及晚到通知测试。verify2成功；期间较晚启动的一次重叠构建已终止，其结果未采用，最终verify-final2独立完成后才启动真实节点验证。六产品execute/SIGKILL replay/snapshot全部PASS，资金差额0，位置SPOT3616/永续9568/交割期权5184。
+
+### 结算缓存精简后的最终采集锁定
+64204608五分钟轮正确性通过；初步Owner依赖186/21545=0.86%、清理三处1005/21545=4.66%，终态1157/21545=5.37%，计划构造1074/21545=4.98%未下降。复查发现整批订单Map和独立位置准备Set在maker不重复时增加维护成本，因此最终删除两容器，只保留相邻maker只读引用，位置是否已准备直接利用已有累计数量表。计划与数组池、FIFO、依赖与轮询改动保留。追加深度成交到单fill的复用路由测试。
+等待旧轮recovery结束后单独final verify，再六产品gates-final、一次main30/60、profile JMH30/45和六产品controls，最后final profile日志/快照恢复。其余机器/窗口/业务/通过阈值与本轮原锁定完全一致；最终短profile不替代64204608五分钟稳定趋势，也不声称最终版本已做完整长期泄漏验收。目录/tmp/owner-four/{gates-final,perf-final}，脚本同名.py及recovery-final.py。CPU限速仍只作诊断。
+
+### 最终代码137c40c5与采样结果
+最终完整verify-final3：1214 tests，1213通过、0失败/错误、1数据库条件跳过。深度maker索引到单fill复用、累计maker数量、精确订单依赖/多槽回绕、FIFO字节/复制隔离、延迟通知及跨Lane缓冲回收均通过。无生产测试开关。
+
+64204608 lanes-control-INVERSE_DELIVERY-0
+```text
+
+```
+CPU_Speed_Limit=64～64；Swapins系统页计数增量=0；Swapouts系统页计数增量=0；
+JMH com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls primary=3023.6899015 ms/op；client GC {'gc.alloc.rate': 1.1788600966183187, 'gc.alloc.rate.norm': 3789264.0, 'gc.count': 0.0}。每次调用为整段场景，gc.norm不是每笔交易。
+/tmp/owner-four/perf/lanes-control-INVERSE_DELIVERY-0/node.jfr size=848509 SHA256=04b702bfb4ae0701e985b658c75773e8b4cf2b1019da9cfb19823e92769f5b33（记录后清理）。
+
+64204608 lanes-control-INVERSE_PERPETUAL-0
+```text
+
+```
+CPU_Speed_Limit=68～68；Swapins系统页计数增量=0；Swapouts系统页计数增量=0；
+JMH com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls primary=3107.6316260000003 ms/op；client GC {'gc.alloc.rate': 0.9839127983441567, 'gc.alloc.rate.norm': 3247736.0, 'gc.count': 0.0}。每次调用为整段场景，gc.norm不是每笔交易。
+/tmp/owner-four/perf/lanes-control-INVERSE_PERPETUAL-0/node.jfr size=853371 SHA256=8d270d524043221a1e123dc4a5a363b5e4378df980a7fc644baa73a8c9fc4fdf（记录后清理）。
+
+64204608 lanes-control-LINEAR_DELIVERY-0
+```text
+
+```
+CPU_Speed_Limit=64～68；Swapins系统页计数增量=121；Swapouts系统页计数增量=0；
+JMH com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls primary=2993.9195025 ms/op；client GC {'gc.alloc.rate': 0.7761686796106534, 'gc.alloc.rate.norm': 2475948.0, 'gc.count': 0.0}。每次调用为整段场景，gc.norm不是每笔交易。
+/tmp/owner-four/perf/lanes-control-LINEAR_DELIVERY-0/node.jfr size=856695 SHA256=53e2a063ceceba75fe47932374f197f484d601a0f3b3253ea91ed9eada87d64b（记录后清理）。
+
+64204608 lanes-control-LINEAR_PERPETUAL-0
+```text
+
+```
+CPU_Speed_Limit=66～66；Swapins系统页计数增量=0；Swapouts系统页计数增量=0；
+JMH com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls primary=3025.9076855000003 ms/op；client GC {'gc.alloc.rate': 0.9975228502101369, 'gc.alloc.rate.norm': 3216588.0, 'gc.count': 0.0}。每次调用为整段场景，gc.norm不是每笔交易。
+/tmp/owner-four/perf/lanes-control-LINEAR_PERPETUAL-0/node.jfr size=847646 SHA256=7ab3074a6dd9cfb099fdd1ba4048860512c8d751372223d79420c4fde47f2bbe（记录后清理）。
+
+64204608 lanes-control-OPTION-0
+```text
+
+```
+CPU_Speed_Limit=68～68；Swapins系统页计数增量=0；Swapouts系统页计数增量=0；
+JMH com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls primary=2320.705865 ms/op；client GC {'gc.alloc.rate': 1.0331044489101884, 'gc.alloc.rate.norm': 2557324.0, 'gc.count': 0.0}。每次调用为整段场景，gc.norm不是每笔交易。
+/tmp/owner-four/perf/lanes-control-OPTION-0/node.jfr size=841067 SHA256=b468ead4bdbe497d12266d2a04aeeafa97678ee81bc52f0a4db836554109a2e2（记录后清理）。
+
+64204608 lanes-control-SPOT-0
+```text
+
+```
+CPU_Speed_Limit=64～64；Swapins系统页计数增量=0；Swapouts系统页计数增量=0；
+JMH com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls primary=807.250875 ms/op；client GC {'gc.alloc.rate': 1.5307305456576683, 'gc.alloc.rate.norm': 1366532.0, 'gc.count': 0.0}。每次调用为整段场景，gc.norm不是每笔交易。
+/tmp/owner-four/perf/lanes-control-SPOT-0/node.jfr size=693313 SHA256=1403fd759b10a001475e240003291d0651762342bb6974cc3aa49b6ad14c696d（记录后清理）。
+
+64204608 lanes-main-LINEAR_PERPETUAL-0
+```text
+ownerChurnVerify=PASS completedOrderLifecycles=12410880 terminalIndexEmpty=true reservationsEmpty=true
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=808 businessHash=c504a1215546c11b
+mixedCapacity=PASS elapsedSeconds=60.066 terminalBusinessOperations=12487523 offeredBusinessOperations=12487523 terminalCoreMessages=1203043 offeredCoreMessages=1203043 businessOpsPerSec=207897.262 coreMessagesPerSec=20028.740 fills=2969600 fillsPerSec=49439.085 queries=0 unfinished=0 peakInFlight=256 measuredCycles=580 totalCycles=808 triggerExecutions=0
+business=PLACE_ORDER items=296960 requests=296960 p50us=7262 p90us=19496 p95us=21463 p99us=27770 p999us=48234 maxus=63864
+business=CANCEL_ORDER items=296960 requests=296960 p50us=6811 p90us=16138 p95us=18104 p99us=25542 p999us=56131 maxus=89784
+business=APPLY_MARK_PRICE items=15203 requests=15203 p50us=11263 p90us=19382 p95us=21528 p99us=35815 p999us=52396 maxus=86441
+business=PLACE_ORDER_BATCH items=8908800 requests=445440 p50us=14573 p90us=19038 p95us=21954 p99us=34668 p999us=69926 maxus=96993
+business=CANCEL_ORDER_BATCH items=2969600 requests=148480 p50us=19152 p90us=24461 p95us=27492 p99us=39288 p999us=55541 maxus=84475
+```
+CPU_Speed_Limit=62～100；Swapins系统页计数增量=552；Swapouts系统页计数增量=0；
+
+64204608 lanes-main-LINEAR_PERPETUAL-1
+```text
+ownerChurnVerify=PASS completedOrderLifecycles=12334080 terminalIndexEmpty=true reservationsEmpty=true
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=803 businessHash=76870daec331646f
+mixedCapacity=PASS elapsedSeconds=60.067 terminalBusinessOperations=11455272 offeredBusinessOperations=11455272 terminalCoreMessages=1104680 offeredCoreMessages=1104680 businessOpsPerSec=190709.001 coreMessagesPerSec=18390.870 fills=2723840 fillsPerSec=45346.876 queries=0 unfinished=0 peakInFlight=256 measuredCycles=532 totalCycles=803 triggerExecutions=0
+business=PLACE_ORDER items=272384 requests=272384 p50us=8003 p90us=21348 p95us=23674 p99us=30752 p999us=54001 maxus=66584
+business=CANCEL_ORDER items=272384 requests=272384 p50us=7540 p90us=17481 p95us=19431 p99us=26017 p999us=41680 maxus=91947
+business=APPLY_MARK_PRICE items=15144 requests=15144 p50us=11116 p90us=23674 p95us=28409 p99us=42860 p999us=56295 maxus=73400
+business=PLACE_ORDER_BATCH items=8171520 requests=408576 p50us=15949 p90us=21217 p95us=24018 p99us=35520 p999us=61603 maxus=96862
+business=CANCEL_ORDER_BATCH items=2723840 requests=136192 p50us=20905 p90us=26492 p95us=29196 p99us=45547 p999us=67371 maxus=93650
+```
+CPU_Speed_Limit=58～85；Swapins系统页计数增量=383；Swapouts系统页计数增量=0；
+
+64204608 lanes-profile-LINEAR_PERPETUAL-0
+```text
+ownerChurnVerify=PASS completedOrderLifecycles=38400000 terminalIndexEmpty=true reservationsEmpty=true
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=2500 businessHash=4644dd54c63d77b4
+mixedCapacity=PASS elapsedSeconds=300.041 terminalBusinessOperations=50287659 offeredBusinessOperations=50287659 terminalCoreMessages=4857899 offeredCoreMessages=4857899 businessOpsPerSec=167602.582 coreMessagesPerSec=16190.780 fills=11955200 fillsPerSec=39845.211 queries=0 unfinished=0 peakInFlight=256 measuredCycles=2335 totalCycles=2500 triggerExecutions=0
+business=PLACE_ORDER items=1195520 requests=1195520 p50us=8953 p90us=23724 p95us=26279 p99us=33538 p999us=53772 maxus=75169
+business=CANCEL_ORDER items=1195520 requests=1195520 p50us=8888 p90us=19791 p95us=22200 p99us=31064 p999us=46399 maxus=78249
+business=APPLY_MARK_PRICE items=75819 requests=75819 p50us=14319 p90us=23642 p95us=26951 p99us=42795 p999us=68485 maxus=113508
+business=PLACE_ORDER_BATCH items=35865600 requests=1793280 p50us=18153 p90us=24248 p95us=27607 p99us=40730 p999us=61767 maxus=113639
+business=CANCEL_ORDER_BATCH items=11955200 requests=597760 p50us=23298 p90us=29016 p95us=32489 p99us=45776 p999us=63799 maxus=93126
+```
+CPU_Speed_Limit=54～75；Swapins系统页计数增量=2038；Swapouts系统页计数增量=0；
+JMH com.surprising.aeron.benchmarks.workload.ClusterOperationalBenchmark.continuousOperations primary=300.041733299 s/op；client GC {'gc.alloc.rate': 172.45877359567658, 'gc.alloc.rate.norm': 66332480448.0, 'gc.count': 851.0, 'gc.time': 792.0}。每次调用为整段场景，gc.norm不是每笔交易。
+```text
+totals allocationMiBps=549.115 allocationBytes=172773549272 machineCPU=90.75 jvmCPU=57.88 heapMaxMiB=462.37 dataLoss=0 ownerIOEvents=0
+threadCPU	96.789	core-account-lane-3
+threadCPU	96.787	core-account-lane-1
+threadCPU	96.770	core-account-lane-0
+threadCPU	96.764	core-account-lane-2
+threadCPU	95.981	trading-owner--1
+threadCPU	94.695	/tmp/owner-four/perf/lanes-profile-LINEAR_PERPETUAL-0/media-surprising-linear_perpetual-0 [sender,receiver]
+threadCPU	66.722	clustered-service-101-0
+threadCPU	65.728	driver-conductor
+threadCPU	62.344	archive-conductor
+threadCPU	58.815	consensus-module-101-0
+threadCPU	27.237	core-matcher-1
+threadCPU	27.175	core-matcher-0
+threadCPU	1.222	aeron-md-nra
+threadCPU	1.042	JVMCI-native CompilerThread0
+threadCPU	0.225	aeron-client
+threadCPU	0.155	C1 CompilerThread1
+threadCPU	0.101	JFR Recorder Thread
+threadCPU	0.097	JFR Periodic Tasks
+threadCPU	0.058	C1 CompilerThread0
+threadCPU	0.012	Monitor Deflation Thread
+gc count=1595 totalMs=5787.464 p99Ms=8.979 maxMs=11.951
+samples	25630	core-account-lane-0
+samples	25315	core-account-lane-1
+samples	24838	core-account-lane-2
+samples	24127	core-account-lane-3
+samples	21545	trading-owner--1
+samples	1843	driver-conductor
+samples	1250	clustered-service-101-0
+samples	903	consensus-module-101-0
+samples	901	archive-conductor
+samples	388	/tmp/owner-four/perf/lanes-profile-LINEAR_PERPETUAL-0/media-surprising-linear_perpetual-0 [sender,receiver]
+samples	175	core-matcher-1
+samples	169	core-matcher-0
+ownerInclusive	21545	java.lang.Thread.run
+ownerInclusive	21545	java.lang.Thread.runWith
+ownerInclusive	21545	com.surprising.aeron.service.execution.ContinuousTradingClusterService.runOwner
+ownerInclusive	21545	com.surprising.aeron.service.execution.ContinuousTradingClusterService$$Lambda.0x000000012a12a730.run
+ownerInclusive	21238	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommands
+ownerInclusive	21060	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommandsInScope
+ownerInclusive	14440	com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommandPrefix
+ownerInclusive	13981	com.surprising.aeron.service.execution.OrderedCommitCoordinator.commitReadyMatching
+ownerInclusive	13793	com.surprising.aeron.service.execution.SurprisingClusteredService.acceptCommittedCommand
+ownerInclusive	13756	com.surprising.aeron.service.execution.SurprisingClusteredService.processIngress
+ownerInclusive	8384	com.surprising.aeron.service.execution.OrderedCommitCoordinator.completeMatching
+ownerInclusive	7544	com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommands
+allocation	8624529536	trading-owner--1 [B
+allocation	6842534208	trading-owner--1 [J
+allocation	4630528600	trading-owner--1 com.surprising.aeron.service.execution.OrderBatchItem
+allocation	4449944376	core-account-lane-0 [J
+allocation	4379734600	core-account-lane-2 [J
+allocation	4302982552	core-account-lane-1 [J
+allocation	4297815816	core-account-lane-3 [J
+allocation	4279431608	core-account-lane-3 com.surprising.aeron.service.state.OrderRuntime
+allocation	4273162368	clustered-service-101-0 [B
+allocation	4210644904	core-account-lane-1 com.surprising.aeron.service.state.OrderRuntime
+allocation	4199182368	core-account-lane-2 com.surprising.aeron.service.state.OrderRuntime
+allocation	4152151392	core-account-lane-0 com.surprising.aeron.service.state.OrderRuntime
+allocationSite	17768220136	java.util.concurrent.ConcurrentHashMap.putVal
+allocationSite	10304208184	org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap.rehashAndGrow
+allocationSite	9762359648	com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.bindMatcherEvidence
+allocationSite	8978622840	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.addKeyValueAtIndex
+allocationSite	7179286480	com.surprising.aeron.protocol.TradingOrderBatchCodec.decodeCommand
+allocationSite	6845300296	java.util.ArrayList.add
+allocationSite	6205188720	org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap.get
+allocationSite	5224055160	java.nio.ByteBuffer.allocate
+allocationSite	4536010064	org.eclipse.collections.impl.set.mutable.primitive.LongHashSet.rehashAndGrow
+allocationSite	4289753088	com.surprising.aeron.service.state.model.AssetBalance.validAsset
+allocationSite	4264763240	com.surprising.aeron.service.matching.CoreMatchingResult.classify
+allocationSite	4141265888	java.lang.StringConcatHelper.stringSize
+parkOrMonitorNs	300524166918	Common-Cleaner
+parkOrMonitorNs	169681837	aeron-md-nra
+parkOrMonitorNs	122296450	core-matcher-1
+parkOrMonitorNs	88922312	core-matcher-0
+parkOrMonitorNs	33355850	archive-conductor
+parkOrMonitorNs	11019824	driver-conductor
+parkOrMonitorNs	10918439	consensus-module-101-0
+eventCounts	410855	jdk.GCPhaseParallel
+eventCounts	127099	jdk.ExecutionSample
+eventCounts	110604	jdk.PromoteObjectInNewPLAB
+eventCounts	86619	jdk.ObjectAllocationSample
+eventCounts	19057	jdk.PromoteObjectOutsidePLAB
+eventCounts	18133	jdk.ThreadSleep
+eventCounts	14034	jdk.NativeMethodSample
+eventCounts	13125	jdk.TenuringDistribution
+eventCounts	8073	jdk.NativeMemoryUsage
+eventCounts	5862	jdk.GCPhasePauseLevel1
+eventCounts	4944	jdk.MetaspaceChunkFreeListSummary
+eventCounts	4940	jdk.GCReferenceStatistics
+
+```
+节点加权分配约3435.7 B/business op（JFR抽样估算）。
+```text
+crosscut
+1157	TerminalStateRetention.
+1074	MatcherSettlementPlan.build
+974	TerminalTombstoneStore.
+843	ActiveOrderIndex.applySnapshot
+651	readyLaneMask
+637	RuntimeIdentityRegistry.releaseClientKey
+548	clearChangedKeys
+313	releaseOrderBatchPending
+144	releaseMatcherSettlementChanges
+```
+```text
+exclusiveStage
+11525	other
+2809	lane_collect
+1830	lane_dispatch
+1815	global_publish
+1064	batch_finish_other
+937	batch_admission
+789	response_encode
+590	matcher_results_prepare
+186	dependency
+```
+```text
+ownerAllocationClass
+8624529536	[B
+6842534208	[J
+4630528600	com.surprising.aeron.service.execution.OrderBatchItem
+2774208352	com.surprising.aeron.protocol.PlaceOrderCommand
+2376973160	java.lang.Long
+1550584784	java.lang.String
+1416197072	[I
+1064002512	[Ljava.lang.Object;
+794653568	com.surprising.aeron.protocol.CoreResponse
+622954704	com.surprising.aeron.service.execution.CommandResultLedger$StoredResult
+601012560	com.surprising.aeron.service.execution.OrderBatchExecutor$$Lambda.0x000000012a1e8230
+453092328	com.surprising.aeron.protocol.CancelOrderCommand
+436735280	com.surprising.aeron.service.execution.OrderBatchExecutor$$Lambda.0x000000012a1e3c88
+436453408	java.util.ImmutableCollections$ListItr
+419287512	com.surprising.aeron.service.execution.ImmutableLongArrayList
+391302048	com.surprising.aeron.protocol.CoreOrderStateView
+388727520	com.surprising.aeron.protocol.CoreMessageHeader
+359473096	java.util.HashMap$Node
+352856288	com.surprising.aeron.service.execution.OrderBatchExecutor$$Lambda.0x000000012a1e8000
+304576184	com.surprising.aeron.service.state.CoreOrderDecisionResolver$Context
+271491184	java.util.LinkedHashMap$Entry
+267808736	com.surprising.aeron.service.state.ResolvedPlaceOrder
+```
+```text
+ownerLeaf
+877	java.util.concurrent.ConcurrentHashMap.get:949
+646	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommandsInScope:213
+542	java.util.ArrayList.add:486
+376	com.surprising.aeron.service.state.TradingRuntimeState.readyLaneMask:1772
+367	java.util.HashMap.getNode:577
+350	org.eclipse.collections.impl.set.mutable.primitive.LongHashSet.each:571
+231	java.util.HashMap.hash:338
+224	jdk.internal.misc.Unsafe.putIntUnaligned:3715
+212	com.surprising.aeron.service.execution.OrderedCommitCoordinator.pumpMatchingCommitCompletions:1036
+211	java.util.concurrent.ConcurrentHashMap.get:957
+203	java.nio.HeapByteBuffer.put:221
+196	com.surprising.aeron.protocol.CoreStateQueryCodec.utf8Length:342
+194	java.lang.ThreadLocal.get:171
+185	com.surprising.aeron.service.execution.PendingMatchingRing.partitionDispatchHead:209
+173	java.util.Arrays.fill:3143
+171	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.getIfAbsent:2362
+163	org.eclipse.collections.impl.set.mutable.primitive.LongHashSet.add:216
+148	org.eclipse.collections.impl.set.mutable.primitive.LongHashSet.probe:1043
+148	java.util.HashMap.getNode:585
+135	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.get:2340
+135	com.surprising.aeron.service.execution.TerminalTombstoneStore.clientSlot:62
+131	com.surprising.aeron.service.execution.TradingCoreRuntime.bindOwner:2478
+```
+afterGCminute=0 samples=254 minMiB=89.466 avgMiB=111.891 maxMiB=247.311
+afterGCminute=1 samples=224 minMiB=87.797 avgMiB=104.190 maxMiB=125.207
+afterGCminute=2 samples=260 minMiB=90.187 avgMiB=102.697 maxMiB=129.000
+afterGCminute=3 samples=233 minMiB=91.210 avgMiB=104.026 maxMiB=126.389
+afterGCminute=4 samples=265 minMiB=89.535 avgMiB=102.521 maxMiB=133.254
+nmt-before.txt
+```text
+53804:
+
+Native Memory Tracking:
+
+(Omitting categories weighting less than 1KB)
+
+Total: reserved=3146072KB, committed=691552KB
+       malloc: 72536KB #94649, peak=70873KB #94651
+       mmap:   reserved=3073536KB, committed=619016KB
+
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+                            (mmap: reserved=1572864KB, committed=526336KB, at peak)
+
+-                     Class (reserved=1048910KB, committed=1678KB)
+                            (classes #3934)
+                            (  instance classes #3544, array classes #390)
+                            (malloc=334KB tag=Class #7416) (at peak)
+                            (mmap: reserved=1048576KB, committed=1344KB, at peak)
+                            (  Metadata:   )
+                            (    reserved=65536KB, committed=18496KB)
+                            (    used=18353KB)
+                            (    waste=143KB =0.78%)
+                            (  Class space:)
+                            (    reserved=1048576KB, committed=1344KB)
+                            (    used=1220KB)
+                            (    waste=124KB =9.26%)
+
+-                    Thread (reserved=58505KB, committed=1941KB)
+                            (threads #48)
+                            (stack: reserved=58368KB, committed=1804KB, peak=1804KB)
+                            (malloc=91KB tag=Thread #275) (peak=102KB #283)
+                            (arena=46KB #78) (peak=428KB #76)
+
+-                      Code (reserved=250307KB, committed=15975KB)
+                            (malloc=2619KB tag=Code #15023) (peak=2619KB #15024)
+                            (mmap: reserved=247688KB, committed=13356KB, at peak)
+                            (arena=1KB #1) (peak=133KB #5)
+
+-                        GC (reserved=91619KB, committed=71179KB)
+                            (malloc=27539KB tag=GC #4380) (peak=27592KB #4906)
+                            (mmap: reserved=64080KB, committed=43640KB, at peak)
+                            (arena=0KB #0) (peak=12KB #13)
+
+-                 GCCardSet (reserved=2KB, committed=2KB)
+                            (malloc=2KB tag=GCCardSet #9) (peak=2KB #10)
+
+-                  Compiler (reserved=271KB, committed=271KB)
+                            (malloc=131KB tag=Compiler #185) (peak=147KB #191)
+                            (arena=139KB #19) (peak=7667KB #24)
+
+-                     JVMCI (reserved=58KB, committed=58KB)
+                            (malloc=58KB tag=JVMCI #158) (at peak)
+                            (arena=0KB #0) (peak=66KB #2)
+
+-                  Internal (reserved=1458KB, committed=1458KB)
+                            (malloc=1426KB tag=Internal #5078) (at peak)
+                            (mmap: reserved=32KB, committed=32KB, at peak)
+
+-                     Other (reserved=9409KB, committed=9409KB)
+                            (malloc=9409KB tag=Other #28) (at peak)
+
+-                    Symbol (reserved=4337KB, committed=4337KB)
+                            (malloc=3721KB tag=Symbol #42771) (at peak)
+                            (arena=616KB #1) (at peak)
+
+-    Native Memory Tracking (reserved=1692KB, committed=1692KB)
+                            (malloc=29KB tag=Native Memory Tracking #478) (peak=29KB #479)
+                            (tracking overhead=1664KB)
+
+-        Shared class space (reserved=16384KB, committed=14000KB, readonly=0KB)
+                            (mmap: reserved=16384KB, committed=14000KB, peak=14208KB)
+
+-               Arena Chunk (reserved=7341KB, committed=7341KB)
+                            (malloc=7341KB tag=Arena Chunk #354) (peak=8636KB #366)
+
+-                   Tracing (reserved=16353KB, committed=16353KB)
+                            (malloc=16353KB tag=Tracing #3410) (at peak)
+
+-                   Logging (reserved=0KB, committed=0KB)
+                            (malloc=0KB tag=Logging #2) (peak=6KB #4)
+
+-                Statistics (reserved=0KB, committed=0KB)
+                            (malloc=0KB tag=Statistics #2) (peak=2KB #6)
+
+-                    Module (reserved=291KB, committed=291KB)
+                            (malloc=291KB tag=Module #3301) (at peak)
+
+-                 Safepoint (reserved=8KB, committed=8KB)
+                            (mmap: reserved=8KB, committed=8KB, at peak)
+
+-           Synchronization (reserved=621KB, committed=621KB)
+                            (malloc=621KB tag=Synchronization #11682) (at peak)
+
+-            Serviceability (reserved=17KB, committed=17KB)
+                            (malloc=17KB tag=Serviceability #18) (peak=20KB #22)
+
+-                 Metaspace (reserved=65620KB, committed=18580KB)
+                            (malloc=84KB tag=Metaspace #47) (at peak)
+                            (mmap: reserved=65536KB, committed=18496KB, at peak)
+
+-      String Deduplication (reserved=1KB, committed=1KB)
+                            (malloc=1KB tag=String Deduplication #8) (at peak)
+
+-           Object Monitors (reserved=4KB, committed=4KB)
+                            (malloc=4KB tag=Object Monitors #18) (at peak)
+
+
+```
+nmt-after.txt
+```text
+53804:
+
+Native Memory Tracking:
+
+(Omitting categories weighting less than 1KB)
+
+Total: reserved=3148877KB, committed=725925KB
+       malloc: 81485KB #170931, peak=80757KB #185180
+       mmap:   reserved=3067392KB, committed=644440KB
+
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+                            (mmap: reserved=1572864KB, committed=524288KB, peak=526336KB)
+
+-                     Class (reserved=1049144KB, committed=2552KB)
+                            (classes #4924)
+                            (  instance classes #4462, array classes #462)
+                            (malloc=568KB tag=Class #12692) (peak=586KB #14625)
+                            (mmap: reserved=1048576KB, committed=1984KB, at peak)
+                            (  Metadata:   )
+                            (    reserved=65536KB, committed=25280KB)
+                            (    used=24945KB)
+                            (    waste=335KB =1.33%)
+                            (  Class space:)
+                            (    reserved=1048576KB, committed=1984KB)
+                            (    used=1760KB)
+                            (    waste=224KB =11.31%)
+
+-                    Thread (reserved=52371KB, committed=2299KB)
+                            (threads #49)
+                            (stack: reserved=52224KB, committed=2152KB, peak=2152KB)
+                            (malloc=92KB tag=Thread #296) (peak=114KB #324)
+                            (arena=55KB #94) (peak=727KB #94)
+
+-                      Code (reserved=255636KB, committed=41044KB)
+                            (malloc=7947KB tag=Code #31499) (peak=13573KB #41905)
+                            (mmap: reserved=247688KB, committed=33096KB, at peak)
+                            (arena=1KB #1) (peak=133KB #5)
+
+-                        GC (reserved=92695KB, committed=72215KB)
+                            (malloc=28615KB tag=GC #9507) (peak=28877KB #13660)
+                            (mmap: reserved=64080KB, committed=43600KB, peak=43640KB)
+                            (arena=0KB #0) (peak=12KB #13)
+
+-                 GCCardSet (reserved=39KB, committed=39KB)
+                            (malloc=39KB tag=GCCardSet #91) (peak=54KB #123)
+
+-                  Compiler (reserved=424KB, committed=424KB)
+                            (malloc=292KB tag=Compiler #820) (peak=310KB #592)
+                            (arena=131KB #5) (peak=9396KB #6)
+
+-                     JVMCI (reserved=89KB, committed=89KB)
+                            (malloc=89KB tag=JVMCI #250) (at peak)
+                            (arena=0KB #0) (peak=99KB #3)
+
+-                  Internal (reserved=1589KB, committed=1589KB)
+                            (malloc=1557KB tag=Internal #9964) (at peak)
+                            (mmap: reserved=32KB, committed=32KB, at peak)
+
+-                     Other (reserved=9413KB, committed=9413KB)
+                            (malloc=9413KB tag=Other #37) (at peak)
+
+-                    Symbol (reserved=4861KB, committed=4861KB)
+                            (malloc=4213KB tag=Symbol #51374) (at peak)
+                            (arena=648KB #1) (at peak)
+
+-    Native Memory Tracking (reserved=3058KB, committed=3058KB)
+                            (malloc=54KB tag=Native Memory Tracking #933) (at peak)
+                            (tracking overhead=3005KB)
+
+-        Shared class space (reserved=16384KB, committed=14000KB, readonly=0KB)
+                            (mmap: reserved=16384KB, committed=14000KB, peak=14208KB)
+
+-               Arena Chunk (reserved=2883KB, committed=2883KB)
+                            (malloc=2883KB tag=Arena Chunk #205) (peak=10142KB #401)
+
+-                   Tracing (reserved=20125KB, committed=20125KB)
+                            (malloc=20125KB tag=Tracing #25320) (peak=22906KB #41756)
+
+-                   Logging (reserved=0KB, committed=0KB)
+                            (malloc=0KB tag=Logging #2) (peak=6KB #4)
+
+-                Statistics (reserved=0KB, committed=0KB)
+                            (malloc=0KB tag=Statistics #2) (peak=2KB #6)
+
+-                    Module (reserved=293KB, committed=293KB)
+                            (malloc=293KB tag=Module #3343) (peak=293KB #3345)
+
+-                 Safepoint (reserved=8KB, committed=8KB)
+                            (mmap: reserved=8KB, committed=8KB, at peak)
+
+-           Synchronization (reserved=1285KB, committed=1285KB)
+                            (malloc=1285KB tag=Synchronization #24423) (at peak)
+
+-            Serviceability (reserved=17KB, committed=17KB)
+                            (malloc=17KB tag=Serviceability #18) (peak=20KB #22)
+
+-                 Metaspace (reserved=65699KB, committed=25443KB)
+                            (malloc=163KB tag=Metaspace #138) (at peak)
+                            (mmap: reserved=65536KB, committed=25280KB, at peak)
+
+-      String Deduplication (reserved=1KB, committed=1KB)
+                            (malloc=1KB tag=String Deduplication #8) (at peak)
+
+-           Object Monitors (reserved=1KB, committed=1KB)
+                            (malloc=1KB tag=Object Monitors #3) (peak=22KB #114)
+
+
+```
+/tmp/owner-four/perf/lanes-profile-LINEAR_PERPETUAL-0/node.jfr size=24487101 SHA256=99d927892966170b0907646e38518a0cf72e302e09d30ad9f7fee3bed1c6bed1（记录后清理）。
+
+137c40c5 lanes-control-INVERSE_DELIVERY-0
+```text
+
+```
+CPU_Speed_Limit=70～70；Swapins系统页计数增量=0；Swapouts系统页计数增量=0；
+JMH com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls primary=3056.737279 ms/op；client GC {'gc.alloc.rate': 1.0045845081695293, 'gc.alloc.rate.norm': 3251644.0, 'gc.count': 0.0}。每次调用为整段场景，gc.norm不是每笔交易。
+/tmp/owner-four/perf-final/lanes-control-INVERSE_DELIVERY-0/node.jfr size=869331 SHA256=047d69dbe8c6d4a9b1cb34125db5c9c1c36c1d591b9369d06df68d7024eafc7c（记录后清理）。
+
+137c40c5 lanes-control-INVERSE_PERPETUAL-0
+```text
+
+```
+CPU_Speed_Limit=68～70；Swapins系统页计数增量=0；Swapouts系统页计数增量=0；
+JMH com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls primary=3039.136187 ms/op；client GC {'gc.alloc.rate': 1.1861071483564984, 'gc.alloc.rate.norm': 3829420.0, 'gc.count': 0.0}。每次调用为整段场景，gc.norm不是每笔交易。
+/tmp/owner-four/perf-final/lanes-control-INVERSE_PERPETUAL-0/node.jfr size=839791 SHA256=d8aaa47665df443a892ff50a4ff778d6139780c3f74d15380c91da1f4512566e（记录后清理）。
+
+137c40c5 lanes-control-LINEAR_DELIVERY-0
+```text
+
+```
+CPU_Speed_Limit=68～68；Swapins系统页计数增量=0；Swapouts系统页计数增量=0；
+JMH com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls primary=3013.7878825 ms/op；client GC {'gc.alloc.rate': 1.2171817665004014, 'gc.alloc.rate.norm': 3905508.0, 'gc.count': 0.0}。每次调用为整段场景，gc.norm不是每笔交易。
+/tmp/owner-four/perf-final/lanes-control-LINEAR_DELIVERY-0/node.jfr size=856838 SHA256=f73a4e230db638fa069e93ea645d1e320b822f1dd3a9893ee936c0a023d5ef3e（记录后清理）。
+
+137c40c5 lanes-control-LINEAR_PERPETUAL-0
+```text
+
+```
+CPU_Speed_Limit=70～70；Swapins系统页计数增量=0；Swapouts系统页计数增量=0；
+JMH com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls primary=3052.46988 ms/op；client GC {'gc.alloc.rate': 1.0309365578705656, 'gc.alloc.rate.norm': 3349672.0, 'gc.count': 0.0}。每次调用为整段场景，gc.norm不是每笔交易。
+/tmp/owner-four/perf-final/lanes-control-LINEAR_PERPETUAL-0/node.jfr size=850719 SHA256=13c161755705787f8c67ef35b3fa07345a9a1d98f39ad26e79ac7c89c91c9c87（记录后清理）。
+
+137c40c5 lanes-control-OPTION-0
+```text
+
+```
+CPU_Speed_Limit=68～70；Swapins系统页计数增量=0；Swapouts系统页计数增量=0；
+JMH com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls primary=2289.3788155 ms/op；client GC {'gc.alloc.rate': 1.042310409464882, 'gc.alloc.rate.norm': 2548204.0, 'gc.count': 0.0}。每次调用为整段场景，gc.norm不是每笔交易。
+/tmp/owner-four/perf-final/lanes-control-OPTION-0/node.jfr size=802765 SHA256=37c2a6185cf69cfb24aed21e594863c89b0378f67a96405a19b6c676b7793d8d（记录后清理）。
+
+137c40c5 lanes-control-SPOT-0
+```text
+
+```
+CPU_Speed_Limit=70～70；Swapins系统页计数增量=0；Swapouts系统页计数增量=0；
+JMH com.surprising.aeron.benchmarks.workload.ClusterAccountControlBenchmark.accountControls primary=803.2415745000001 ms/op；client GC {'gc.alloc.rate': 1.424254492226582, 'gc.alloc.rate.norm': 1268112.0, 'gc.count': 0.0}。每次调用为整段场景，gc.norm不是每笔交易。
+/tmp/owner-four/perf-final/lanes-control-SPOT-0/node.jfr size=712568 SHA256=facd4110cfedb2454833eab45d86d188ff3d4fc83fe2325d4fccab8be2615757（记录后清理）。
+
+137c40c5 lanes-main-LINEAR_PERPETUAL-0
+```text
+ownerChurnVerify=PASS completedOrderLifecycles=10045440 terminalIndexEmpty=true reservationsEmpty=true
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=654 businessHash=d9f4301489b1119
+mixedCapacity=PASS elapsedSeconds=60.068 terminalBusinessOperations=10164992 offeredBusinessOperations=10164992 terminalCoreMessages=981760 offeredCoreMessages=981760 businessOpsPerSec=169223.773 coreMessagesPerSec=16344.049 fills=2416640 fillsPerSec=40231.506 queries=0 unfinished=0 peakInFlight=256 measuredCycles=472 totalCycles=654 triggerExecutions=0
+business=PLACE_ORDER items=241664 requests=241664 p50us=8888 p90us=23707 p95us=25821 p99us=30982 p999us=52625 maxus=66912
+business=CANCEL_ORDER items=241664 requests=241664 p50us=8683 p90us=19415 p95us=21053 p99us=26296 p999us=45842 maxus=68026
+business=APPLY_MARK_PRICE items=15104 requests=15104 p50us=13574 p90us=23281 p95us=26001 p99us=41779 p999us=59932 maxus=62390
+business=PLACE_ORDER_BATCH items=7249920 requests=362496 p50us=18284 p90us=23003 p95us=25575 p99us=39976 p999us=59211 maxus=75497
+business=CANCEL_ORDER_BATCH items=2416640 requests=120832 p50us=23232 p90us=28426 p95us=31293 p99us=50102 p999us=58916 maxus=66027
+```
+CPU_Speed_Limit=54～100；Swapins系统页计数增量=192；Swapouts系统页计数增量=0；
+
+137c40c5 lanes-profile-LINEAR_PERPETUAL-0
+```text
+ownerChurnVerify=PASS completedOrderLifecycles=7818240 terminalIndexEmpty=true reservationsEmpty=true
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=509 businessHash=79ae078780d18fbb
+mixedCapacity=PASS elapsedSeconds=45.123 terminalBusinessOperations=7774220 offeredBusinessOperations=7774220 terminalCoreMessages=750604 offeredCoreMessages=750604 businessOpsPerSec=172289.970 coreMessagesPerSec=16634.664 fills=1848320 fillsPerSec=40961.923 queries=0 unfinished=0 peakInFlight=256 measuredCycles=361 totalCycles=509 triggerExecutions=0
+business=PLACE_ORDER items=184832 requests=184832 p50us=8675 p90us=22806 p95us=24903 p99us=32309 p999us=60325 maxus=93716
+business=CANCEL_ORDER items=184832 requests=184832 p50us=8634 p90us=19054 p95us=21004 p99us=28966 p999us=46825 maxus=54951
+business=APPLY_MARK_PRICE items=11276 requests=11276 p50us=14680 p90us=23134 p95us=26066 p99us=40304 p999us=56360 maxus=62816
+business=PLACE_ORDER_BATCH items=5544960 requests=277248 p50us=17907 p90us=22921 p95us=25919 p99us=43384 p999us=62685 maxus=80347
+business=CANCEL_ORDER_BATCH items=1848320 requests=92416 p50us=22462 p90us=27295 p95us=30015 p99us=51347 p999us=80805 maxus=91947
+```
+CPU_Speed_Limit=54～70；Swapins系统页计数增量=2198；Swapouts系统页计数增量=0；
+JMH com.surprising.aeron.benchmarks.workload.ClusterOperationalBenchmark.continuousOperations primary=45.123332337 s/op；client GC {'gc.alloc.rate': 114.71069707633416, 'gc.alloc.rate.norm': 13571369328.0, 'gc.count': 175.0, 'gc.time': 243.0}。每次调用为整段场景，gc.norm不是每笔交易。
+```text
+totals allocationMiBps=563.286 allocationBytes=26637031120 machineCPU=89.44 jvmCPU=59.24 heapMaxMiB=463.22 dataLoss=0 ownerIOEvents=0
+threadCPU	97.428	core-account-lane-3
+threadCPU	97.415	core-account-lane-1
+threadCPU	97.413	core-account-lane-2
+threadCPU	97.406	core-account-lane-0
+threadCPU	97.113	trading-owner--1
+threadCPU	96.544	/tmp/owner-four/perf-final/lanes-profile-LINEAR_PERPETUAL-0/media-surprising-linear_perpetual-0 [sender,receiver]
+threadCPU	70.828	clustered-service-101-0
+threadCPU	70.402	driver-conductor
+threadCPU	67.910	archive-conductor
+threadCPU	63.982	consensus-module-101-0
+threadCPU	28.569	core-matcher-0
+threadCPU	28.416	core-matcher-1
+threadCPU	4.048	JVMCI-native CompilerThread0
+threadCPU	1.253	aeron-md-nra
+threadCPU	0.254	aeron-client
+threadCPU	0.128	C1 CompilerThread0
+threadCPU	0.100	JFR Recorder Thread
+threadCPU	0.092	JFR Periodic Tasks
+threadCPU	0.013	Monitor Deflation Thread
+gc count=181 totalMs=746.782 p99Ms=11.386 maxMs=11.820
+samples	3848	core-account-lane-0
+samples	3797	core-account-lane-1
+samples	3739	core-account-lane-2
+samples	3638	core-account-lane-3
+samples	3215	trading-owner--1
+samples	316	driver-conductor
+samples	175	clustered-service-101-0
+samples	172	consensus-module-101-0
+samples	148	archive-conductor
+samples	58	/tmp/owner-four/perf-final/lanes-profile-LINEAR_PERPETUAL-0/media-surprising-linear_perpetual-0 [sender,receiver]
+samples	33	core-matcher-0
+samples	33	core-matcher-1
+ownerInclusive	3215	java.lang.Thread.run
+ownerInclusive	3215	com.surprising.aeron.service.execution.ContinuousTradingClusterService$$Lambda.0x000000012812a730.run
+ownerInclusive	3215	java.lang.Thread.runWith
+ownerInclusive	3215	com.surprising.aeron.service.execution.ContinuousTradingClusterService.runOwner
+ownerInclusive	3167	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommands
+ownerInclusive	3153	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommandsInScope
+ownerInclusive	2134	com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommandPrefix
+ownerInclusive	2105	com.surprising.aeron.service.execution.SurprisingClusteredService.acceptCommittedCommand
+ownerInclusive	2102	com.surprising.aeron.service.execution.SurprisingClusteredService.processIngress
+ownerInclusive	2071	com.surprising.aeron.service.execution.OrderedCommitCoordinator.commitReadyMatching
+ownerInclusive	1288	com.surprising.aeron.service.execution.OrderedCommitCoordinator.completeMatching
+ownerInclusive	1079	com.surprising.aeron.service.execution.SurprisingClusteredService.pollCommands
+allocation	1474205072	trading-owner--1 [B
+allocation	1183359176	trading-owner--1 [J
+allocation	764208896	core-account-lane-2 com.surprising.aeron.service.state.OrderRuntime
+allocation	762742608	core-account-lane-2 [J
+allocation	696079920	core-account-lane-3 [J
+allocation	683762608	core-account-lane-0 com.surprising.aeron.service.state.OrderRuntime
+allocation	644278216	core-account-lane-3 com.surprising.aeron.service.state.OrderRuntime
+allocation	642894688	clustered-service-101-0 [B
+allocation	634782440	core-matcher-1 com.surprising.aeron.service.matching.CoreMatchingResult$NativeCommand
+allocation	625703912	core-matcher-0 com.surprising.aeron.service.matching.CoreMatchingResult$NativeCommand
+allocation	622906568	core-account-lane-1 com.surprising.aeron.service.state.OrderRuntime
+allocation	608974336	core-account-lane-1 [J
+allocationSite	2842372640	java.util.concurrent.ConcurrentHashMap.putVal
+allocationSite	1750862104	org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap.rehashAndGrow
+allocationSite	1482347352	com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.bindMatcherEvidence
+allocationSite	1371321392	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.addKeyValueAtIndex
+allocationSite	1025216192	com.surprising.aeron.protocol.TradingOrderBatchCodec.decodeCommand
+allocationSite	1004292384	org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap.get
+allocationSite	941312128	java.nio.ByteBuffer.allocate
+allocationSite	859890104	com.surprising.aeron.service.matching.CoreMatchingResult.classify
+allocationSite	772859520	org.eclipse.collections.impl.set.mutable.primitive.LongHashSet.rehashAndGrow
+allocationSite	711890208	java.util.ArrayList.add
+allocationSite	673678456	java.lang.invoke.VarHandleLongs$Array.setRelease
+allocationSite	663561424	com.surprising.aeron.service.state.model.AssetBalance.validAsset
+parkOrMonitorNs	48851125	aeron-md-nra
+parkOrMonitorNs	45721941	core-matcher-1
+parkOrMonitorNs	35103084	core-matcher-0
+eventCounts	57210	jdk.GCPhaseParallel
+eventCounts	19173	jdk.ExecutionSample
+eventCounts	16561	jdk.PromoteObjectInNewPLAB
+eventCounts	13190	jdk.ObjectAllocationSample
+eventCounts	4138	jdk.PromoteObjectOutsidePLAB
+eventCounts	2727	jdk.ThreadSleep
+eventCounts	2127	jdk.NativeMethodSample
+eventCounts	1755	jdk.TenuringDistribution
+eventCounts	1188	jdk.NativeMemoryUsage
+eventCounts	639	jdk.GCPhasePauseLevel1
+eventCounts	596	jdk.MetaspaceChunkFreeListSummary
+eventCounts	596	jdk.GCReferenceStatistics
+
+```
+节点加权分配约3426.33 B/business op（JFR抽样估算）。
+```text
+crosscut
+173	TerminalStateRetention.
+159	MatcherSettlementPlan.build
+150	TerminalTombstoneStore.
+116	ActiveOrderIndex.applySnapshot
+98	clearChangedKeys
+95	readyLaneMask
+87	RuntimeIdentityRegistry.releaseClientKey
+45	releaseOrderBatchPending
+18	releaseMatcherSettlementChanges
+```
+```text
+exclusiveStage
+1712	other
+434	lane_collect
+286	global_publish
+231	lane_dispatch
+143	response_encode
+142	batch_finish_other
+129	batch_admission
+109	matcher_results_prepare
+29	dependency
+```
+```text
+ownerAllocationClass
+1474205072	[B
+1183359176	[J
+607661312	com.surprising.aeron.service.execution.OrderBatchItem
+517249776	java.lang.Long
+446171632	com.surprising.aeron.protocol.PlaceOrderCommand
+240731352	java.lang.String
+202779224	[I
+173195872	com.surprising.aeron.service.execution.CommandResultLedger$StoredResult
+167203616	[Ljava.lang.Object;
+92037704	com.surprising.aeron.protocol.CoreOrderStateView
+84552448	com.surprising.aeron.protocol.CoreResponse
+67848456	com.surprising.aeron.protocol.CoreMessageHeader
+53320728	com.surprising.aeron.service.execution.OrderBatchExecutor$$Lambda.0x00000001281e78a8
+45248592	com.surprising.aeron.service.execution.OrderBatchExecutor$$Lambda.0x00000001281e7678
+39822552	com.surprising.aeron.service.state.RuntimeProjectionPoint
+36619592	java.util.LinkedHashMap$Entry
+35770160	com.surprising.aeron.service.execution.OrderBatchExecutor$$Lambda.0x00000001281e7448
+33092984	com.surprising.aeron.service.state.ResolvedPlaceOrder
+31998760	org.eclipse.collections.impl.set.mutable.primitive.IntHashSet
+31962856	com.surprising.aeron.protocol.CancelOrderCommand
+31008456	java.util.HashMap$Node
+29518616	com.surprising.aeron.service.execution.ImmutableLongArrayList
+```
+```text
+ownerLeaf
+112	java.util.ArrayList.add:486
+109	java.util.concurrent.ConcurrentHashMap.get:949
+91	com.surprising.aeron.service.execution.SurprisingClusteredService.progressCommandsInScope:213
+57	org.eclipse.collections.impl.set.mutable.primitive.LongHashSet.each:571
+46	com.surprising.aeron.service.state.TradingRuntimeState.readyLaneMask:1772
+37	jdk.internal.misc.Unsafe.putIntUnaligned:3715
+36	com.surprising.aeron.service.execution.OrderedCommitCoordinator.pumpMatchingCommitCompletions:1036
+36	java.nio.HeapByteBuffer.put:221
+34	java.util.HashMap.hash:338
+32	java.util.HashMap.get:565
+32	java.util.concurrent.ConcurrentHashMap.get:957
+30	com.surprising.aeron.protocol.CoreStateQueryCodec.utf8Length:342
+28	com.surprising.aeron.service.execution.PendingMatchingRing.partitionDispatchHead:209
+28	com.surprising.aeron.service.state.LaneSequenceQueue.hasPending:45
+27	com.surprising.aeron.service.matching.DeterministicExchangeCoreAdapter.matcherShardId:1141
+26	java.util.Arrays.fill:3451
+24	java.lang.ThreadLocal.get:171
+24	java.util.HashMap.getNode:585
+23	org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap.removeKeyAtIndex:750
+23	java.util.concurrent.ConcurrentHashMap.get:960
+22	java.util.Arrays.fill:3143
+21	org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.getIfAbsent:2362
+```
+afterGCminute=0 samples=149 minMiB=92.518 avgMiB=120.712 maxMiB=246.990
+nmt-before.txt
+```text
+59799:
+
+Native Memory Tracking:
+
+(Omitting categories weighting less than 1KB)
+
+Total: reserved=3142029KB, committed=691617KB
+       malloc: 72589KB #94525, peak=70928KB #94527
+       mmap:   reserved=3069440KB, committed=619028KB
+
+-                 Java Heap (reserved=1572864KB, committed=526336KB)
+                            (mmap: reserved=1572864KB, committed=526336KB, at peak)
+
+-                     Class (reserved=1048908KB, committed=1676KB)
+                            (classes #3932)
+                            (  instance classes #3542, array classes #390)
+                            (malloc=332KB tag=Class #7400) (at peak)
+                            (mmap: reserved=1048576KB, committed=1344KB, at peak)
+                            (  Metadata:   )
+                            (    reserved=65536KB, committed=18560KB)
+                            (    used=18348KB)
+                            (    waste=212KB =1.14%)
+                            (  Class space:)
+                            (    reserved=1048576KB, committed=1344KB)
+                            (    used=1219KB)
+                            (    waste=125KB =9.27%)
+
+-                    Thread (reserved=54404KB, committed=1884KB)
+                            (threads #46)
+                            (stack: reserved=54272KB, committed=1752KB, peak=1752KB)
+                            (malloc=87KB tag=Thread #267) (peak=100KB #277)
+                            (arena=46KB #78) (peak=428KB #76)
+
+-                      Code (reserved=250284KB, committed=15952KB)
+                            (malloc=2595KB tag=Code #14934) (at peak)
+                            (mmap: reserved=247688KB, committed=13356KB, at peak)
+                            (arena=1KB #1) (peak=68KB #4)
+
+-                        GC (reserved=91619KB, committed=71179KB)
+                            (malloc=27539KB tag=GC #4409) (peak=27581KB #4908)
+                            (mmap: reserved=64080KB, committed=43640KB, at peak)
+                            (arena=0KB #0) (peak=12KB #13)
+
+-                 GCCardSet (reserved=2KB, committed=2KB)
+                            (malloc=2KB tag=GCCardSet #9) (peak=2KB #10)
+
+-                  Compiler (reserved=274KB, committed=274KB)
+                            (malloc=137KB tag=Compiler #209) (peak=152KB #218)
+                            (arena=137KB #15) (peak=7754KB #12)
+
+-                     JVMCI (reserved=54KB, committed=54KB)
+                            (malloc=54KB tag=JVMCI #147) (at peak)
+                            (arena=0KB #0) (peak=66KB #2)
+
+-                  Internal (reserved=1453KB, committed=1453KB)
+                            (malloc=1421KB tag=Internal #5066) (at peak)
+                            (mmap: reserved=32KB, committed=32KB, at peak)
+
+-                     Other (reserved=9409KB, committed=9409KB)
+                            (malloc=9409KB tag=Other #28) (at peak)
+
+-                    Symbol (reserved=4337KB, committed=4337KB)
+                            (malloc=3722KB tag=Symbol #42781) (at peak)
+                            (arena=616KB #1) (at peak)
+
+-    Native Memory Tracking (reserved=1690KB, committed=1690KB)
+                            (malloc=28KB tag=Native Memory Tracking #474) (at peak)
+                            (tracking overhead=1662KB)
+
+-        Shared class space (reserved=16384KB, committed=14000KB, readonly=0KB)
+                            (mmap: reserved=16384KB, committed=14000KB, peak=14208KB)
+
+-               Arena Chunk (reserved=7439KB, committed=7439KB)
+                            (malloc=7439KB tag=Arena Chunk #356) (peak=8732KB #368)
+
+-                   Tracing (reserved=16343KB, committed=16343KB)
+                            (malloc=16343KB tag=Tracing #3334) (at peak)
+
+-                   Logging (reserved=0KB, committed=0KB)
+                            (malloc=0KB tag=Logging #2) (peak=6KB #4)
+
+-                Statistics (reserved=0KB, committed=0KB)
+                            (malloc=0KB tag=Statistics #2) (peak=2KB #6)
+
+-                    Module (reserved=291KB, committed=291KB)
+                            (malloc=291KB tag=Module #3301) (at peak)
+
+-                 Safepoint (reserved=8KB, committed=8KB)
+                            (mmap: reserved=8KB, committed=8KB, at peak)
+
+-           Synchronization (reserved=622KB, committed=622KB)
+                            (malloc=622KB tag=Synchronization #11707) (at peak)
+
+-            Serviceability (reserved=17KB, committed=17KB)
+                            (malloc=17KB tag=Serviceability #18) (peak=20KB #22)
+
+-                 Metaspace (reserved=65621KB, committed=18645KB)
+                            (malloc=85KB tag=Metaspace #50) (at peak)
+                            (mmap: reserved=65536KB, committed=18560KB, at peak)
+
+-      String Deduplication (reserved=1KB, committed=1KB)
+                            (malloc=1KB tag=String Deduplication #8) (at peak)
+
+-           Object Monitors (reserved=3KB, committed=3KB)
+                            (malloc=3KB tag=Object Monitors #17) (at peak)
+
+
+```
+nmt-after.txt
+```text
+59799:
+
+Native Memory Tracking:
+
+(Omitting categories weighting less than 1KB)
+
+Total: reserved=3150553KB, committed=727205KB
+       malloc: 83161KB #179947, peak=80684KB #186712
+       mmap:   reserved=3067392KB, committed=644044KB
+
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+                            (mmap: reserved=1572864KB, committed=524288KB, peak=526336KB)
+
+-                     Class (reserved=1049140KB, committed=2548KB)
+                            (classes #4917)
+                            (  instance classes #4455, array classes #462)
+                            (malloc=564KB tag=Class #12686) (peak=577KB #14463)
+                            (mmap: reserved=1048576KB, committed=1984KB, at peak)
+                            (  Metadata:   )
+                            (    reserved=65536KB, committed=25152KB)
+                            (    used=24833KB)
+                            (    waste=319KB =1.27%)
+                            (  Class space:)
+                            (    reserved=1048576KB, committed=1984KB)
+                            (    used=1753KB)
+                            (    waste=231KB =11.63%)
+
+-                    Thread (reserved=52371KB, committed=2603KB)
+                            (threads #49)
+                            (stack: reserved=52224KB, committed=2456KB, peak=2456KB)
+                            (malloc=92KB tag=Thread #296) (peak=112KB #320)
+                            (arena=55KB #94) (peak=428KB #76)
+
+-                      Code (reserved=255654KB, committed=40482KB)
+                            (malloc=7965KB tag=Code #30981) (peak=13432KB #41850)
+                            (mmap: reserved=247688KB, committed=32516KB, at peak)
+                            (arena=1KB #1) (peak=101KB #5)
+
+-                        GC (reserved=92535KB, committed=72063KB)
+                            (malloc=28455KB tag=GC #9418) (peak=28654KB #13684)
+                            (mmap: reserved=64080KB, committed=43608KB, peak=43640KB)
+                            (arena=0KB #0) (peak=12KB #13)
+
+-                 GCCardSet (reserved=27KB, committed=27KB)
+                            (malloc=27KB tag=GCCardSet #106) (peak=55KB #124)
+
+-                  Compiler (reserved=411KB, committed=411KB)
+                            (malloc=280KB tag=Compiler #800) (peak=321KB #606)
+                            (arena=131KB #5) (peak=10066KB #19)
+
+-                     JVMCI (reserved=87KB, committed=87KB)
+                            (malloc=87KB tag=JVMCI #248) (at peak)
+                            (arena=0KB #0) (peak=66KB #2)
+
+-                  Internal (reserved=1587KB, committed=1587KB)
+                            (malloc=1555KB tag=Internal #9802) (at peak)
+                            (mmap: reserved=32KB, committed=32KB, at peak)
+
+-                     Other (reserved=9411KB, committed=9411KB)
+                            (malloc=9411KB tag=Other #33) (peak=9411KB #36)
+
+-                    Symbol (reserved=4859KB, committed=4859KB)
+                            (malloc=4212KB tag=Symbol #51349) (at peak)
+                            (arena=648KB #1) (at peak)
+
+-    Native Memory Tracking (reserved=3216KB, committed=3216KB)
+                            (malloc=53KB tag=Native Memory Tracking #919) (at peak)
+                            (tracking overhead=3163KB)
+
+-        Shared class space (reserved=16384KB, committed=14000KB, readonly=0KB)
+                            (mmap: reserved=16384KB, committed=14000KB, peak=14208KB)
+
+-               Arena Chunk (reserved=2884KB, committed=2884KB)
+                            (malloc=2884KB tag=Arena Chunk #206) (peak=10884KB #444)
+
+-                   Tracing (reserved=21838KB, committed=21838KB)
+                            (malloc=21838KB tag=Tracing #35610) (at peak)
+
+-                   Logging (reserved=0KB, committed=0KB)
+                            (malloc=0KB tag=Logging #2) (peak=6KB #4)
+
+-                Statistics (reserved=0KB, committed=0KB)
+                            (malloc=0KB tag=Statistics #2) (peak=2KB #6)
+
+-                    Module (reserved=293KB, committed=293KB)
+                            (malloc=293KB tag=Module #3343) (peak=293KB #3345)
+
+-                 Safepoint (reserved=8KB, committed=8KB)
+                            (mmap: reserved=8KB, committed=8KB, at peak)
+
+-           Synchronization (reserved=1260KB, committed=1260KB)
+                            (malloc=1260KB tag=Synchronization #23952) (at peak)
+
+-            Serviceability (reserved=17KB, committed=17KB)
+                            (malloc=17KB tag=Serviceability #18) (peak=20KB #22)
+
+-                 Metaspace (reserved=65705KB, committed=25321KB)
+                            (malloc=169KB tag=Metaspace #159) (at peak)
+                            (mmap: reserved=65536KB, committed=25152KB, at peak)
+
+-      String Deduplication (reserved=1KB, committed=1KB)
+                            (malloc=1KB tag=String Deduplication #8) (at peak)
+
+-           Object Monitors (reserved=1KB, committed=1KB)
+                            (malloc=1KB tag=Object Monitors #3) (peak=21KB #108)
+
+
+```
+/tmp/owner-four/perf-final/lanes-profile-LINEAR_PERPETUAL-0/node.jfr size=6046082 SHA256=8eec870f49d357223d1e384afd4b40460c869e07e0e1f2c6012bf99f4a64d2aa（记录后清理）。
+
+解释：最终Owner3215样本。依赖29/3215=0.90%（前定位151/3257=4.64%）；三处清理98+45+18=161/3215=5.01%（原258/3257=7.92%）；终态管理173/3215=5.38%（原229/3257=7.03%）。这些仅执行样本占比，inclusive父子不可相加；不是同机受控耗时收益。结算计划159/3215=4.95%、派发231/3215=7.19%、readyLaneMask95/3215=2.95%，CPU占比未见明显下降，不能声称这几处热点消失。批量计划变为事件拥有的稳定槽，普通单仍分配Plan；最终Plan分配抽样约7892416B/7774220ops≈1.02B/op，对照前定位659015088/9215232≈71.51B/op，抽样估计不能当精确对象计数。终态FIFO热路径不再创建RetainedEntity/EntityKey/ClientIdentity，快照/导出候选边界仍使用不可变对象。
+最终无profiler169223.773 business ops/s，未证实总体吞吐提高，不能把限速环境下低于历史的数字单独归因为代码回退或全部归因为硬件；后续需稳定硬件环境验证。Owner97.113%单核、matcher28.569%/28.416%，Lane仍有大量空转。代码范围完成但没有达到所有线程有效业务饱和。记录保留两版全部结果，没有挑选最高值替代最终版。
+64204608五分钟50,287,659终态业务操作资金差额0，GC后逐分钟平均111.891/104.190/102.697/104.026/102.521MiB，未观察到持续增长；最终137c40c5为45s诊断，未证明最终版本长期无泄漏。最终无Owner同步File/Socket事件、DataLoss0；未覆盖完整三段延迟/CO修正、所有native池余额/长期文件描述符趋势，仍属部分性能验证。全共享正确性由reactor、六产品控制及真实重放/快照验证，不声称云端三节点容量。
+最终JAR：
+```text
+2a268edd15a2b9abe17d2aafede6ada294d1720db5f74b3d5c56a9c7e61d0ac4 surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar
+2b3696decacc1e7c012e8739b9a180c2974c12413dc613d14f0f9c5693b9486a surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar
+
+```
+verify-final3.log SHA256=b2d95ea100e55194f8c0327a9b0c809f163f66bb44317b79d70234a6ff60cc46
+gates-final.py SHA256=539f93e189c4bc12a3a2da9d21a52830a4017254d8d0c54fd11a784432337c90
+perf-final.py SHA256=b218c3fbde995f7d26861233f46ae8eadd9b3ac6f8339f92819cc60285e9b8d0
+recovery-final.py SHA256=2310ab57fc78ec0aa58b9d7baf54d341b1bd1fafd97470e8204e515bb4346655
+OwnerFourAnalysis.java SHA256=711d61939cb0478c247b9de75b292521d030c6a7527342034d19edb9ac7ff90f
+AnalyzeJfr.java SHA256=c3d0493742987250289a85f5e53a275dba1fc5d7eafc564e254ca49578e26f59
+
+最终137c40c5六产品gates-final及accountControls均PASS；连续交易重放/快照恢复结果：
+```text
+lanes replay PASS businessHash=79ae078780d18fbb
+lanes snapshotPosition=1063471744
+lanes snapshot PASS businessHash=79ae078780d18fbb
+
+```
+64204608五分钟恢复结果：
+```text
+lanes replay PASS businessHash=4644dd54c63d77b4
+lanes snapshotPosition=5201683328
+lanes snapshot PASS businessHash=4644dd54c63d77b4
+
+```
+节点异常/WARN摘要（未抑制既有quorum回退警告）：{'io.aeron.cluster.client.ClusterEvent: WARN - quorum position went backwards: leaderCommitPosition=5200899040 quorumPosition=0': 1, 'io.aeron.cluster.client.ClusterEvent: WARN - quorum position went backwards: leaderCommitPosition=1062687456 quorumPosition=0': 1}。未发现EXCHANGE_CORE_FAILURE。
+
+清理完成：本轮所有节点/客户端/分析进程已结束，已删除/tmp/owner-four全部临时集群Archive、JFR、日志和分析器（约23.29GiB）、9个本轮测试报告目录及本轮生成SnapshotControl.class；保留源码与构建JAR。以上临时产物路径现已不可访问。未运行云端/三本机节点，未改README。
