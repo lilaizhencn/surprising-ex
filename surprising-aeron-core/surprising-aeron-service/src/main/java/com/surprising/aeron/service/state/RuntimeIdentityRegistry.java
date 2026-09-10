@@ -38,10 +38,13 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
     private volatile String[] assets = new String[16];
     private final Map<String, Integer> symbolIds = new HashMap<>();
     private volatile String[] symbols = new String[16];
-    /** 客户身份由所属账户Lane写入；共用字典保留跨Lane的全局哈希碰撞检查与只读解析。 */
+    /** 校验异步身份准备确实在所属账户 Lane 执行。 */
     private final LaneTopology clientTopology = LaneTopology.configured(false);
+    /** Lane 准备身份，Owner 在提交完成后回收；账户依赖边界防止引用计数并发修改。
+     * 共用字典保留跨 Lane 的全局哈希碰撞检查及异步只读解析。 */
     private final Map<Long, ClientIdentityEntry> clients = new ConcurrentHashMap<>();
 
+    /** Owner 按准入回执汇总身份分配次数，Lane 不争用全局版本写入。 */
     public void recordLaneClientAllocations(long count) {
         assertOwner();
         dictionaryVersion = Math.addExact(dictionaryVersion, count);

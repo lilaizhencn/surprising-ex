@@ -16,7 +16,6 @@ import exchange.core2.core.common.MatcherResult.MatcherEvent;
 import com.surprising.aeron.service.matching.CoreCancellationResult;
 import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 
 /** 批量命令上下文；owner 准备，matcher/Lane 按完成边界交接，终态回收后复用。 */
@@ -171,7 +170,7 @@ final class OrderBatchPending implements TradingOrderBatchCodec.ResultSource, co
     final com.surprising.aeron.service.state.ReservationRuntime[] preparedAdmittedReservations;
     /** 本批预备的 Symbols 缓冲；派发后必须等待完成交接才能清空或复用。 */
     final ArrayList<String> preparedSymbols;
-    /** 本批预备的 SymbolSet 缓冲；派发后必须等待完成交接才能清空或复用。 */
+    /** Owner 按币对共享本批的行情、费率及准入上下文；只在本批准备阶段使用，不跨命令复用。 */
     final java.util.HashMap<String, com.surprising.aeron.service.state.CoreOrderDecisionResolver.Context> preparedContexts;
     /** 本批结算事件是否已收集，防止重复应用结果。 */
     boolean settlementsCollected;

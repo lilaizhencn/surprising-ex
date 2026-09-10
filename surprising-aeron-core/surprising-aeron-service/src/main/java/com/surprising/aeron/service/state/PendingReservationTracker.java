@@ -36,8 +36,10 @@ final class PendingReservationTracker {
 
     static final class PendingBatch {
         final long userId;
+        /** 借用批量命令数组；本收据必须在命令归还对象池前移除。 */
         final OrderRuntime[] orders;
         final int count;
+        /** 尚未由 Lane 完成的预留数，仅 Owner 根据回执递减。 */
         int remaining;
         PendingBatch(long userId, OrderRuntime[] orders, int count) {
             this.userId = userId; this.orders = orders; this.count = count; this.remaining = count;
