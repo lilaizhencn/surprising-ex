@@ -28,6 +28,8 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
     private long commitClusterPosition;
     private int laneId;
     private boolean commitLane;
+    /** 对应账户 Lane 的最终结果接收槽，事件完成后由 Owner 消费。 */
+    LaneOrderResultTarget resultTarget;
     @SuppressWarnings("unused")
     private volatile boolean completed;
 
@@ -102,6 +104,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
             }
             changes.prepareLaneTerminal(laneId, identities, lane, runtime);
             if (commitLane) {
+                if (resultTarget != null) LaneOrderResultTarget.capture(resultTarget, changes.publishedLaneChanges[laneId], identities, lane);
                 lane.applied(coreSequence);
                 lane.committed(coreSequence);
                 runtime.publishLaneHashes(lane);
@@ -135,6 +138,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
 
     void clear() {
         if (!complete() || changes != null) throw new IllegalStateException("cancel event was not collected");
+        resultTarget = null;
         runtime = null;
         identities = null;
         coreSequence = 0;
@@ -150,6 +154,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
     void discard() {
         if (complete()) throw new IllegalStateException("completed cancel event must be collected");
         changes = null;
+        resultTarget = null;
         runtime = null;
         identities = null;
         coreSequence = 0;

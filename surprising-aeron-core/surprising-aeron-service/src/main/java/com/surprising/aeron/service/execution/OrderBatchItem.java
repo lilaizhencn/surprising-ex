@@ -7,7 +7,7 @@ import com.surprising.aeron.protocol.ResponseStatus;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
 import java.util.List;
 
-/** Owner-confined batch execution state; reused only after terminal commit. */
+/** Owner 管理批流程；账户 Lane 仅写结果槽，经完成回执交接后读取，终态提交后释放。 */
 final class OrderBatchItem {
     /** 当前业务项的订单 ID。 */
     final long orderId;
@@ -31,6 +31,8 @@ final class OrderBatchItem {
     com.surprising.aeron.service.state.OrderRuntime resultOrder;
     /** 提交时已解析的币对名称，编码不再物化订单 DTO。 */
     String resultOrderSymbol;
+    /** Lane 在最终元数据盖章后提供结果，Owner 不再逐笔查发布表。 */
+    boolean laneResultPrepared;
     /** 成交推送的不可变主动单身份；结算可提前，推送只能在本批提交时消费。 */
     com.surprising.aeron.service.state.OrderRuntime realtimeTakerOrder;
     /** 本项发给 matcher 的准备结果。 */

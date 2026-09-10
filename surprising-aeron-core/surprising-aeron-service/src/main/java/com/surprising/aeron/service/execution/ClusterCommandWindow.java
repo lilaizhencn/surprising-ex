@@ -12,6 +12,20 @@ final class ClusterCommandWindow {
     static final int CAPACITY = 64;
     private final Entry[] entries = new Entry[CAPACITY];
     private int head, size;
+    /** 掩码每一位对应哪些物理窗口槽；仅跳过不相交项，精确依赖规则不变。 */
+    private final long[] accountSlots = new long[64], symbolSlots = new long[64], orderSlots = new long[64];
+
+    private static long intersectingSlots(long[] slots, long mask) {
+        long result = 0;
+        while (mask != 0) { int bit = Long.numberOfTrailingZeros(mask); mask &= mask - 1; result |= slots[bit]; }
+        return result;
+    }
+    private static void indexSlots(long[] slots, long mask, long slot, boolean add) {
+        while (mask != 0) {
+            int bit = Long.numberOfTrailingZeros(mask); mask &= mask - 1;
+            if (add) slots[bit] |= slot; else slots[bit] &= ~slot;
+        }
+    }
     private final long[] candidateOrders = new long[20];
     private final String[] candidateOrderSymbols = new String[20];
     private final CoreOrderSide[] candidateSides = new CoreOrderSide[20];
@@ -100,7 +114,12 @@ final class ClusterCommandWindow {
     }
 
     int conflictingPrefixSize() {
-        for (int i = size - 1; i >= 0; i--) {
+        long candidates = intersectingSlots(accountSlots, candidateAccounts)
+                | intersectingSlots(symbolSlots, candidateSymbols) | intersectingSlots(orderSlots, candidateOrderMask);
+        candidates = Long.rotateRight(candidates, head);
+        while (candidates != 0) {
+            int i = 63 - Long.numberOfLeadingZeros(candidates);
+            candidates &= ~(1L << i);
             Entry entry = get(i);
             if ((entry.symbols & candidateSymbols) != 0) {
                 for (int a = 0; a < candidateScopeCount; a++)
@@ -167,6 +186,10 @@ final class ClusterCommandWindow {
         entry.symbols = candidateSymbols;
         entry.scopeCount = candidateScopeCount;
         entry.orderMask = candidateOrderMask;
+        long windowSlot = 1L << ((head + size - 1) & 63);
+        indexSlots(accountSlots, entry.accounts, windowSlot, true);
+        indexSlots(symbolSlots, entry.symbols, windowSlot, true);
+        indexSlots(orderSlots, entry.orderMask, windowSlot, true);
         for (int i = 0; i < candidateOrderCount; i++) {
             long orderId = candidateOrders[i];
             int slot = TradingDependencyMask.partition(orderId);
@@ -206,6 +229,10 @@ final class ClusterCommandWindow {
         if (count < 0 || count > size) throw new IllegalArgumentException("invalid window prefix");
         for (int i = 0; i < count; i++) {
             Entry entry = get(i);
+            long slot = 1L << ((head + i) & 63);
+            indexSlots(accountSlots, entry.accounts, slot, false);
+            indexSlots(symbolSlots, entry.symbols, slot, false);
+            indexSlots(orderSlots, entry.orderMask, slot, false);
             entry.session = null;
             entry.request = null;
             entry.response = null;

@@ -198,6 +198,7 @@ final class MatcherSettlementDispatcher {
             event.prepareBatch(coreSequence, batchLaneMask, commitTimestamp, commitClusterPosition,
                     plans, owner, identities, instruments,
                     baseAssetIds, quoteAssetIds, settleAssetIds, owner.accountLanes.length);
+            event.resultTarget = batch instanceof LaneOrderResultTarget target ? target : null;
             for (int laneId = 0; laneId < owner.accountLanes.length; laneId++) {
                 if ((batchLaneMask & 1L << laneId) == 0) continue;
                 if (!owner.accountLanesStarted || owner.ownerLaneAccess) event.execute(owner.accountLanes[laneId]);

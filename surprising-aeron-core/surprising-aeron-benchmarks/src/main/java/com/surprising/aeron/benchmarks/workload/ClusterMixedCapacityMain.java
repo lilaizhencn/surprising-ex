@@ -263,16 +263,20 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         refresh(i);var commands=new ArrayList<PlaceOrderCommand>(BATCH);long[] ids=new long[BATCH];
         for(int n=0;n<BATCH;n++) { ids[n]=nextOrder();commands.add(order(ids[n],symbol(i),side,price,quantity,tif)); }
         send(CoreMessageType.PLACE_ORDER_BATCH,user,TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(commands)),BATCH,
-                r -> { long count=validateBatch(r,ids);if(measured)fills+=count; });
+                r -> { long count=validateBatch(r,ids,user,symbol(i));if(measured)fills+=count; });
         return ids;
     }
     private void cancel(long user,long id) { send(CoreMessageType.CANCEL_ORDER,user,TradingCommandCodec.encodeCancelOrder(new CancelOrderCommand(id)),1,null); }
     private void cancelBatch(long user,long[] ids) {
         var commands=Arrays.stream(ids).mapToObj(CancelOrderCommand::new).toList();
         send(CoreMessageType.CANCEL_ORDER_BATCH,user,TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(commands)),ids.length,
-                r -> validateBatch(r,ids));
+                r -> validateBatch(r,ids,user,null));
     }
     static long validateBatch(CoreResponse response,long[] ids) {
+        return validateBatch(response, ids, 0, null);
+    }
+    /** 核对 Lane 结果交接后的账户和币对，防止事件池复用串入其他账户结果。 */
+    static long validateBatch(CoreResponse response,long[] ids,long expectedUser,String expectedSymbol) {
         var items=TradingOrderBatchCodec.decodeResult(response.data()).items();
         if(items.size()!=ids.length)throw new IllegalStateException("mixed batch response count mismatch");
         long fills=0;
@@ -285,7 +289,12 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
                     || !expectedClientOrderId(ids[i]).equals(item.order().clientOrderId())
                     || item.order().executedQuantitySteps() + item.order().remainingQuantitySteps() != item.order().quantitySteps()))
                 throw new IllegalStateException("mixed batch order state mismatch: " + item);
+            if (item.order() != null && (expectedUser != 0 && item.order().userId() != expectedUser
+                    || expectedSymbol != null && !expectedSymbol.equals(item.order().symbol())))
+                throw new IllegalStateException("mixed batch Lane result account/symbol mismatch");
             for(var execution:item.executions()) {
+                if (expectedUser != 0 && execution.takerUserId() != expectedUser)
+                    throw new IllegalStateException("mixed batch execution account mismatch");
                 if(execution.takerOrderId()!=ids[i])throw new IllegalStateException("mixed execution identity mismatch");
                 fills++;
             }

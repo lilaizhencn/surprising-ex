@@ -43,19 +43,18 @@ class CoreMatchingStateTest {
             var runtimeField = TradingCoreRuntime.class.getDeclaredField("runtimeState");
             runtimeField.setAccessible(true);
             Object runtime = runtimeField.get(state);
-            var workersField = runtime.getClass().getDeclaredField("laneWorkers");
-            workersField.setAccessible(true);
-            Object worker = ((Object[]) workersField.get(runtime))[0];
-            var failureField = worker.getClass().getDeclaredField("failure");
+            var failureField = runtime.getClass().getDeclaredField("accountLaneFailure");
             failureField.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            var signal = (java.util.concurrent.atomic.AtomicReference<Throwable>) failureField.get(runtime);
             var failure = new IllegalStateException("injected lane failure before completion publication");
             long now = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(1);
             assertThat(state.hasMatchingNotifications(now)).isFalse();
-            failureField.set(worker, failure);
+            signal.compareAndSet(null, failure);
             try {
                 assertThatThrownBy(() -> state.hasMatchingNotifications(now + 1_000_000)).isSameAs(failure);
             } finally {
-                failureField.set(worker, null);
+                signal.set(null);
             }
         }
     }

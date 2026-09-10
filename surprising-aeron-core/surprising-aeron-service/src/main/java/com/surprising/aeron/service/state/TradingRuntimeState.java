@@ -431,7 +431,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             AccountLaneState lane = accountLanes[laneId];
             lane.releaseOwnerForHandoff();
             laneWorkers[laneId] = new SettlementLaneWorker(
-                    "account", lane, topology.accountLaneQueueCapacity());
+                    "account", lane, topology.accountLaneQueueCapacity(),
+                    failure -> accountLaneFailure.compareAndSet(null, failure));
         }
         accountLanesStarted = true;
     }
@@ -494,15 +495,15 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
     }
 
+    /** 各 Lane 只在失败时发布一次；Owner 常态只读一个故障引用。 */
+    private final java.util.concurrent.atomic.AtomicReference<Throwable> accountLaneFailure = new java.util.concurrent.atomic.AtomicReference<>();
+
     public void assertAccountLanesHealthy() {
         assertOwner();
-        if (!accountLanesStarted) return;
-        for (SettlementLaneWorker worker : laneWorkers) {
-            Throwable failure = worker.failure();
-            if (failure instanceof RuntimeException runtimeFailure) throw runtimeFailure;
-            if (failure instanceof Error error) throw error;
-            if (failure != null) throw new IllegalStateException("account lane failed", failure);
-        }
+        Throwable failure = accountLaneFailure.get();
+        if (failure instanceof RuntimeException runtimeFailure) throw runtimeFailure;
+        if (failure instanceof Error error) throw error;
+        if (failure != null) throw new IllegalStateException("account lane failed", failure);
     }
 
     /** 集群控制阶段采用非阻塞派发；独立调用沿用调用方的同步完成契约。 */
@@ -1570,6 +1571,18 @@ public final class TradingRuntimeState implements AutoCloseable {
             RuntimeIdentityRegistry.PreparedClientKey[] clientKeys, int[] symbolIds, int[] assetIds,
             CoreMatchingOrder[] matchingOrders,
             OrderRuntime[] admittedOrders, ReservationRuntime[] admittedReservations, int itemCount, RuntimeIdentityRegistry identities) {
+        return dispatchPlaceBatchAdmission(coreSequence, userId, commandId, orders, openInterestSteps,
+                admissionIdentities, clientKeys, symbolIds, assetIds, matchingOrders, admittedOrders,
+                admittedReservations, itemCount, identities, null);
+    }
+
+    public PlaceBatchAdmissionEvent dispatchPlaceBatchAdmission(
+            long coreSequence, long userId, java.util.UUID commandId,
+            ResolvedPlaceOrder[] orders, long[] openInterestSteps,
+            RuntimeOrderAdmission.AdmissionIdentity[] admissionIdentities,
+            RuntimeIdentityRegistry.PreparedClientKey[] clientKeys, int[] symbolIds, int[] assetIds,
+            CoreMatchingOrder[] matchingOrders,
+            OrderRuntime[] admittedOrders, ReservationRuntime[] admittedReservations, int itemCount, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source) {
         assertOwner();
         if (!accountLanesStarted) {
             throw new IllegalStateException("asynchronous place batch admission requires Account Lane workers");
@@ -1581,7 +1594,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (event == null) event = new PlaceBatchAdmissionEvent();
         event.prepare(coreSequence, userId, commandId, orders, openInterestSteps, admissionIdentities,
                 clientKeys, symbolIds, assetIds, matchingOrders, admittedOrders,
-                admittedReservations, itemCount, laneId, this, changes, identities);
+                admittedReservations, itemCount, laneId, this, changes, identities, source);
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
                 accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
         try {
@@ -1747,8 +1760,9 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         if (event == null || !event.complete()) return null;
         RuntimeTreasuryDelta aggregate = event.collectTreasuryDelta();
+        boolean ownerPending = pendingReservations.pendingReservationsBySequence.containsKey(event.plan().coreSequence());
         for (int index = 0; index < event.planCount(); index++) {
-            unindexMatcherPendingReservations(event.plan(index));
+            if (ownerPending) unindexMatcherPendingReservations(event.plan(index));
             // Lane 不修改全局版本；全部结算成功后由 owner 合并一次触发终态变更。
             if (event.plan(index).completedTrigger() != null) revision = Math.incrementExact(revision);
         }
@@ -1756,26 +1770,31 @@ public final class TradingRuntimeState implements AutoCloseable {
         MatcherSettlementChanges changes = event.commitSequence() != 0 || event.hasIsolatedChanges()
                 ? event.takeChanges() : null;
         try {
-            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-                if ((laneMask & 1L << laneId) != 0) {
-                    if (changes == null) flushPublishedChanges(laneId);
-                    else {
-                        changes.publishedLaneChanges[laneId].commitTerminalToOwner(
-                                this, laneId, terminalOrderSink, event.plan().coreSequence());
-                        changes.publishedLaneChanges[laneId].releaseRetiredClientIdentities(event.identities());
-                        LaneBalancePatches balances = changes.balancePatches[laneId];
-                        for (int index = 0; index < balances.size(); index++) {
-                            balances.publishAvailableAt(this, index);
-                            changedUsers.add(balances.userId(index));
-                            changedBalance(balances.userId(index), balances.assetId(index));
-                        }
+            long remainingLanes = laneMask;
+            while (remainingLanes != 0) {
+                int laneId = Long.numberOfTrailingZeros(remainingLanes);
+                remainingLanes &= remainingLanes - 1;
+                if (changes == null) flushPublishedChanges(laneId);
+                else {
+                    changes.publishedLaneChanges[laneId].commitTerminalToOwner(
+                            this, laneId, terminalOrderSink, event.plan().coreSequence());
+                    changes.publishedLaneChanges[laneId].releaseRetiredClientIdentities(event.identities());
+                    LaneBalancePatches balances = changes.balancePatches[laneId];
+                    for (int index = 0; index < balances.size(); index++) {
+                        balances.publishAvailableAt(this, index);
+                        changedUsers.add(balances.userId(index));
+                        changedBalance(balances.userId(index), balances.assetId(index));
                     }
                 }
             }
             if (terminalOrderSink != null) terminalOrderSink.completeSequence();
             if (changes != null) {
                 int completed = 0;
-                for (int laneId = 0; laneId < accountLanes.length; laneId++) completed += changes.completedPending[laneId];
+                long pendingLanes = laneMask;
+                while (pendingLanes != 0) {
+                    int laneId = Long.numberOfTrailingZeros(pendingLanes); pendingLanes &= pendingLanes - 1;
+                    completed += changes.completedPending[laneId];
+                }
                 pendingReservations.completedBatchItems(event.plan().coreSequence(), completed);
                 if (fundsAccumulator == null) event.collectedFundsDelta(changes.collectFundsDelta(laneMask));
                 else changes.appendFundsDelta(laneMask, fundsAccumulator);
@@ -1828,6 +1847,14 @@ public final class TradingRuntimeState implements AutoCloseable {
             long coreSequence, long userId, long[] orderIds,
             long commitTimestamp, long commitClusterPosition,
             RuntimeIdentityRegistry identities, boolean commitLane) {
+        return dispatchCancelBatch(coreSequence, userId, orderIds, commitTimestamp, commitClusterPosition,
+                identities, commitLane, null);
+    }
+
+    public LaneCancelEvent dispatchCancelBatch(
+            long coreSequence, long userId, long[] orderIds,
+            long commitTimestamp, long commitClusterPosition,
+            RuntimeIdentityRegistry identities, boolean commitLane, LaneOrderResultTarget resultTarget) {
         assertOwner();
         if (!accountLanesStarted || orderIds == null || orderIds.length == 0) {
             throw new IllegalStateException("asynchronous cancel batch requires Account Lanes and orders");
@@ -1838,6 +1865,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (event == null) event = new LaneCancelEvent();
         event.prepare(coreSequence, userId, orderIds, orderIds.length,
                 commitTimestamp, commitClusterPosition, laneId, commitLane, this, identities, changes);
+        event.resultTarget = resultTarget;
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
                 accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
         try {

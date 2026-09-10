@@ -16,6 +16,8 @@ final class SettlementLaneWorker implements AutoCloseable {
         void execute(AccountLaneState lane);
     }
 
+    /** 首次失败发布到所属 runtime；正常任务不触碰共享故障状态。 */
+    private final java.util.function.Consumer<Throwable> failurePublisher;
     private final Command[] commands;
     private final int indexMask;
     private final WaitStrategy waitStrategy;
@@ -36,6 +38,12 @@ final class SettlementLaneWorker implements AutoCloseable {
     }
 
     SettlementLaneWorker(String role, AccountLaneState lane, int requestedCapacity) {
+        this(role, lane, requestedCapacity, ignored -> { });
+    }
+
+    SettlementLaneWorker(String role, AccountLaneState lane, int requestedCapacity,
+                         java.util.function.Consumer<Throwable> failurePublisher) {
+        this.failurePublisher = java.util.Objects.requireNonNull(failurePublisher);
         if (role == null || role.isBlank() || lane == null || requestedCapacity <= 0) {
             throw new IllegalArgumentException("invalid settlement lane worker");
         }
@@ -177,6 +185,7 @@ final class SettlementLaneWorker implements AutoCloseable {
                 }
             }
         } catch (Throwable laneFailure) {
+            failurePublisher.accept(laneFailure);
             failure = laneFailure;
             running = false;
             started = true;

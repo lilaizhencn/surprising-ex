@@ -7,6 +7,29 @@ import org.junit.jupiter.api.Test;
 
 class ClusterCommandWindowTest {
     @Test
+    void indexedDependencySlotsKeepNewestPrefixAcrossRepeatedRingWraps() {
+        var window = new ClusterCommandWindow();
+        long next = 1;
+        for (int round = 0; round < 5; round++) {
+            long first = next;
+            for (int i = 0; i < 64; i++) {
+                window.resetCandidate(0); window.candidateOrder(next++);
+                window.add(null, null, 0, 0);
+            }
+            for (int i = 0; i < 64; i++) {
+                window.resetCandidate(0); window.candidateOrder(first + i);
+                assertThat(window.conflictingPrefixSize()).isEqualTo(i + 1);
+            }
+            window.removePrefix(31);
+            window.resetCandidate(0); window.candidateOrder(first + 30);
+            assertThat(window.conflictingPrefixSize()).isZero();
+            window.resetCandidate(0); window.candidateOrder(first + 63);
+            assertThat(window.conflictingPrefixSize()).isEqualTo(33);
+            window.clear();
+        }
+    }
+
+    @Test
     void earlierFillKeepsTheOpenInterestAdmissionDependencyAcrossDifferentUsers() {
         var window = new ClusterCommandWindow();
         window.resetCandidate(0);

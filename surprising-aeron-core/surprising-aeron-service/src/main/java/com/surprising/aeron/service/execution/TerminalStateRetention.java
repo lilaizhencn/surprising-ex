@@ -40,6 +40,9 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
     private final LinkedHashMap<EntityKey, RetainedEntity> tombstones;
     private final Map<ClientIdentity, EntityKey> tombstonesByClient;
     private final LinkedHashMap<UUID, CommandFingerprint> fundsCommands;
+    /** Owner 专用查询键，绝不插入容器；插入时创建独立稳定键。 */
+    private final EntityKey entityQuery = new EntityKey(EntityType.ORDER, 1);
+    private final ClientIdentity clientQuery = new ClientIdentity(EntityType.ORDER, 1, "");
     private long visitingExportSequence;
     private final ArrayList<Long> sortedScratch = new ArrayList<>();
 
@@ -200,7 +203,7 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
             RetainedEntity removed = iterator.next();
             iterator.remove();
             if (removed != null && !removed.clientId().isEmpty()) {
-                tombstonesByClient.remove(new ClientIdentity(removed.key().type(), removed.userId(),
+                tombstonesByClient.remove(clientQuery.reset(removed.key().type(), removed.userId(),
                         removed.clientId()));
             }
         }
@@ -415,10 +418,10 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
     }
 
     private boolean contains(EntityType type, long id, long userId, String clientId) {
-        if (tombstones.containsKey(new EntityKey(type, id))) return true;
+        if (tombstones.containsKey(entityQuery.reset(type, id))) return true;
         String normalized = normalizeClientId(clientId);
         if (normalized.isEmpty()) return false;
-        return tombstonesByClient.containsKey(new ClientIdentity(type, userId, normalized));
+        return tombstonesByClient.containsKey(clientQuery.reset(type, userId, normalized));
     }
 
     private void forEachSorted(Iterable<Long> values, java.util.function.LongConsumer consumer) {
@@ -484,13 +487,34 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
 
     private enum EntityType { ORDER, ALGO, TRIGGER, LIQUIDATION }
 
-    private record EntityKey(EntityType type, long id) {
-        private EntityKey {
+    /** 存储键构建后不再修改；仅上方的专用查询实例调用 reset。 */
+    private static final class EntityKey {
+        private EntityType type;
+        private long id;
+        private EntityKey(EntityType type, long id) { reset(type, id); }
+        private EntityKey reset(EntityType type, long id) {
             if (type == null || id <= 0) throw new IllegalArgumentException("invalid terminal entity key");
+            this.type = type; this.id = id; return this;
         }
+        EntityType type() { return type; }
+        long id() { return id; }
+        @Override public int hashCode() { return 31 * type.hashCode() + Long.hashCode(id); }
+        @Override public boolean equals(Object other) { return other instanceof EntityKey key && type == key.type && id == key.id; }
     }
 
-    private record ClientIdentity(EntityType type, long userId, String clientId) {
+    /** 客户订单号索引的稳定存储键，以及一个从不入表的 Owner 查询实例。 */
+    private static final class ClientIdentity {
+        private EntityType type;
+        private long userId;
+        private String clientId;
+        private ClientIdentity(EntityType type, long userId, String clientId) { reset(type, userId, clientId); }
+        private ClientIdentity reset(EntityType type, long userId, String clientId) {
+            this.type = type; this.userId = userId; this.clientId = clientId; return this;
+        }
+        @Override public int hashCode() { return 31 * (31 * type.hashCode() + Long.hashCode(userId)) + clientId.hashCode(); }
+        @Override public boolean equals(Object other) {
+            return other instanceof ClientIdentity key && type == key.type && userId == key.userId && clientId.equals(key.clientId);
+        }
     }
 
     private record RetainedEntity(EntityKey key, long userId, String clientId, long exportSequence) {

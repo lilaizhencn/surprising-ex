@@ -19,7 +19,22 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** 批量命令上下文；owner 准备，matcher/Lane 按完成边界交接，终态回收后复用。 */
-final class OrderBatchPending implements com.surprising.aeron.service.state.SettlementBatchInput, TradingOrderBatchCodec.ResultSource, com.surprising.aeron.protocol.CoreOrderStateSource {
+final class OrderBatchPending implements com.surprising.aeron.service.state.LaneOrderResultTarget, com.surprising.aeron.service.state.PlaceBatchIntentSource, com.surprising.aeron.service.state.SettlementBatchInput, TradingOrderBatchCodec.ResultSource, com.surprising.aeron.protocol.CoreOrderStateSource {
+    public com.surprising.aeron.protocol.PlaceOrderCommand intent(int index) {
+        return (com.surprising.aeron.protocol.PlaceOrderCommand) items.get(index).command;
+    }
+    public com.surprising.aeron.service.state.PlaceBatchIntentSource.Decision decision(int index) { return preparedDecisions[index]; }
+    /** 每项只引用本批按币对共享的上下文，Lane 接管后填充准入输出。 */
+    final com.surprising.aeron.service.state.PlaceBatchIntentSource.Decision[] preparedDecisions;
+    public int resultCount() { return items.size(); }
+    public long resultOrderId(int index) { return items.get(index).orderId(); }
+    public long resultOriginalOrderId(int index) { return items.get(index).originalOrderId(); }
+    public void resultOrder(int index, OrderRuntime order, String symbol) {
+        var item = items.get(index);
+        item.resultOrder = order;
+        item.resultOrderSymbol = symbol;
+        item.laneResultPrepared = true;
+    }
     public int settlementCount() { return deferredSettlementOrderIds.size(); }
     public long settlementOrderId(int index) { return deferredSettlementOrderIds.get(index); }
     public long settlementLaneMask(int index) { return deferredSettlementExpectedLaneMasks.get(index); }
@@ -175,7 +190,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Sett
     /** 本批预备的 Symbols 缓冲；派发后必须等待完成交接才能清空或复用。 */
     final ArrayList<String> preparedSymbols;
     /** Owner 按币对共享本批的行情、费率及准入上下文；只在本批准备阶段使用，不跨命令复用。 */
-    final java.util.HashMap<String, com.surprising.aeron.service.state.CoreOrderDecisionResolver.Context> preparedContexts;
+    final java.util.HashMap<String, com.surprising.aeron.service.state.PlaceBatchIntentSource.Decision> preparedContexts;
     /** 本批结算事件是否已收集，防止重复应用结果。 */
     boolean settlementsCollected;
     /** 本批撤单事件是否已收集，防止重复释放预留。 */
@@ -219,6 +234,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Sett
         pipelinedMatchingResults = new ArrayList<>(capacity);
         preparedClientKeys = new ArrayList<>(capacity);
         preparedOrders = new ResolvedPlaceOrder[capacity];
+        preparedDecisions = new com.surprising.aeron.service.state.PlaceBatchIntentSource.Decision[capacity];
         preparedClientKeyValues =
                 new com.surprising.aeron.service.state.RuntimeIdentityRegistry.PreparedClientKey[capacity];
         preparedOpenInterestSteps = new long[capacity];
@@ -284,6 +300,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Sett
         cancelEvent = null;
         placeBatchAdmissionEvent = null;
         java.util.Arrays.fill(preparedOrders, null);
+        java.util.Arrays.fill(preparedDecisions, null);
         java.util.Arrays.fill(preparedAdmissionIdentities, null);
         java.util.Arrays.fill(preparedClientKeyValues, null);
         java.util.Arrays.fill(preparedMatchingOrders, null);

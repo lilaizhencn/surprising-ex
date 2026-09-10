@@ -21,6 +21,8 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     private long coreSequence;
     private long userId;
     private UUID commandId;
+    /** 有值时由 Lane 解析意图；直接状态调用可传入已解析订单。 */
+    private PlaceBatchIntentSource source;
     private ResolvedPlaceOrder[] orders;
     private long[] openInterestSteps;
     private RuntimeOrderAdmission.AdmissionIdentity[] admissionIdentities;
@@ -50,7 +52,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
             int[] symbolIds, int[] assetIds,
             CoreMatchingOrder[] matchingOrders, OrderRuntime[] admittedOrders,
             ReservationRuntime[] admittedReservations, int itemCount, int laneId,
-            TradingRuntimeState runtime, TradingRuntimeState.MatcherSettlementChanges changes, RuntimeIdentityRegistry identities) {
+            TradingRuntimeState runtime, TradingRuntimeState.MatcherSettlementChanges changes, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source) {
         if (coreSequence <= 0 || userId <= 0 || commandId == null || orders == null
                 || openInterestSteps == null || admissionIdentities == null || clientKeys == null || symbolIds == null
                 || assetIds == null || matchingOrders == null || admittedOrders == null
@@ -66,6 +68,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         this.userId = userId;
         this.commandId = commandId;
         this.orders = orders;
+        this.source = source;
         this.openInterestSteps = openInterestSteps;
         this.admissionIdentities = admissionIdentities;
         this.clientKeys = clientKeys;
@@ -100,11 +103,35 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
             runtime.enterMatcherSettlementScope(lane, changes);
             try {
                 for (int index = 0; index < itemCount; index++) {
+                    if (source != null) {
+                        var decision = source.decision(index);
+                        var resolved = CoreOrderDecisionResolver.resolve(decision.context(), source.intent(index));
+                        orders[index] = resolved;
+                        symbolIds[index] = resolved.symbolId();
+                        assetIds[index] = runtime.productLine().isDerivative() ? decision.settleAssetId()
+                                : resolved.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY
+                                ? decision.quoteAssetId() : decision.baseAssetId();
+                        admissionIdentities[index] = decision.context().admissionFlags();
+                        openInterestSteps[index] = decision.openInterestSteps();
+                        matchingOrders[index] = new CoreMatchingOrder(resolved.orderId(), resolved.symbol(), resolved.side(),
+                                resolved.orderType(), resolved.timeInForce(), resolved.matchingPriceTicks(), resolved.quantitySteps());
+                    }
                     ResolvedPlaceOrder order = orders[index];
                     var key = identities.prepareClientKeyInLane(lane, userId, order.clientOrderId());
                     clientKeys[index] = key;
                     var flags = admissionIdentities[index];
                     var identity = RuntimeOrderAdmission.identityInLane(lane, identities, userId, order, key, flags);
+                    if (source != null && runtime.productLine().isDerivative() && identity.positionKey() != null) {
+                        var position = lane.positions.get(identity.positionKey());
+                        if (position != null && position.signedQuantitySteps() != 0
+                                && (position.signedQuantitySteps() > 0) != (order.side() == com.surprising.aeron.protocol.CoreOrderSide.BUY)) {
+                            var summary = lane.admissionOrderIndex(symbolIds[index]).inspect(userId, order.symbol(),
+                                    order.positionSide(), order.side(), order.marginMode());
+                            if (summary.reduceOnlyQuantity() > 0 && Math.addExact(Math.addExact(summary.pendingQuantity(), summary.reduceOnlyQuantity()), order.quantitySteps())
+                                    > Math.absExact(position.signedQuantitySteps()))
+                                throw new CoreStateRejectedException("CLOSE_CAPACITY_REQUIRES_ORDERED_ADMISSION", "close commitments require ordered cancellation");
+                        }
+                    }
                     long requiredReservation = RuntimeOrderAdmission.requiredReservationPrepared(
                             runtime, userId, order, openInterestSteps[index],
                             lane.admissionOrderIndex(symbolIds[index]), identity);
@@ -131,7 +158,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
             runtime.rollbackPlaceBatchAdmissionInLane(lane, userId, coreSequence, orders, clientKeys,
                     admittedReservations, admittedCount, userBefore);
             for (int i = 0; i < itemCount; i++) {
-                identities.rollbackClientKeyInLane(lane, userId, orders[i].clientOrderId(), clientKeys[i]);
+                if (orders[i] != null) identities.rollbackClientKeyInLane(lane, userId, orders[i].clientOrderId(), clientKeys[i]);
                 clientKeys[i] = null;
             }
             admittedCount = 0;
@@ -150,6 +177,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         if (!complete() || changes != null) {
             throw new IllegalStateException("cannot recycle an incomplete place batch admission");
         }
+        source = null;
         orders = null;
         openInterestSteps = null;
         admissionIdentities = null;

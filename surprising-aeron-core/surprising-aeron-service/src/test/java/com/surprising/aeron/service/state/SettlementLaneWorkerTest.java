@@ -8,6 +8,22 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class SettlementLaneWorkerTest {
+    @org.junit.jupiter.api.Test
+    void realLaneFailurePublishesTheOriginalExceptionBeforeOwnerChecks() throws Exception {
+        var signal = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var announced = new CountDownLatch(1);
+        var failure = new IllegalStateException("lane task failed");
+        var worker = new SettlementLaneWorker("failure", new AccountLaneState(0, 8), 8,
+                value -> { signal.compareAndSet(null, value); announced.countDown(); });
+        try {
+            worker.submit(lane -> { throw failure; });
+            assertThat(announced.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(signal.get()).isSameAs(failure);
+        } finally {
+            assertThatThrownBy(worker::close).isSameAs(failure);
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"BLOCKING", "BUSY_SPIN", "YIELDING"})
     void controlOwnershipHandoffIsPolledAndQueuedWorkResumesOnlyAfterRelease(String strategy) throws Exception {

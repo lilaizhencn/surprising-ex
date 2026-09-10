@@ -42,6 +42,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
 
     // Storage belongs to this pooled event, never to a shared owner scratch buffer.
     private BatchStorage batchStorage;
+    /** 完成前由命令持有，不归还结果容器；事件回收时释放引用。 */
+    LaneOrderResultTarget resultTarget;
     static final class BatchStorage {
         /** 本批币对ID到首个元数据槽；只在Owner构建阶段写入，事件回收时清空。 */
         final org.eclipse.collections.impl.map.mutable.primitive.IntIntHashMap metadataSlots =
@@ -180,6 +182,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         if (!complete() || changes != null) {
             throw new IllegalStateException("cannot recycle an incomplete matcher settlement");
         }
+        resultTarget = null;
         plan = null;
         if (batchStorage != null) batchStorage.clear();
         batchPlans = null;
@@ -231,6 +234,9 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
                 changes.prepareLaneTerminal(laneId, identities, lane, runtime);
             }
             if (commitSequence != 0) {
+                if (resultTarget != null && changes != null
+                        && laneId == runtime.topology().accountLaneId(plan.activeUserId()))
+                    LaneOrderResultTarget.capture(resultTarget, changes.publishedLaneChanges[laneId], identities, lane);
                 lane.applied(commitSequence);
                 lane.committed(commitSequence);
                 runtime.publishLaneHashes(lane);

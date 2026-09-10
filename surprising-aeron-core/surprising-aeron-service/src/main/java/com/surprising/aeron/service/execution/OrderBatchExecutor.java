@@ -198,28 +198,19 @@ final class OrderBatchExecutor {
                 else if (batchMatcherShard != itemMatcherShard) throw new TradingCoreRuntime.PipelinedBatchNotApplicable();
                 if (command.reduceOnly()) throw new TradingCoreRuntime.PipelinedBatchNotApplicable();
                 owner.requireOrderIdentityAvailable(userId, command);
-                if (!owner.admissions.preMatchingCloseCapacityCancellations(userId, command, command.orderId()).isEmpty()) {
-                    throw new TradingCoreRuntime.PipelinedBatchNotApplicable();
-                }
-                var context = batch.preparedContexts.get(command.symbol());
-                if (context == null) {
-                    context = CoreOrderDecisionResolver.context(owner.runtimeState, owner.identities,
+                var decision = batch.preparedContexts.get(command.symbol());
+                if (decision == null) {
+                    var context = CoreOrderDecisionResolver.context(owner.runtimeState, owner.identities,
                             userId, command.symbol(), owner.currentClusterTimestamp);
-                    batch.preparedContexts.put(command.symbol(), context);
+                    var instrument = context.instrument();
+                    decision = new com.surprising.aeron.service.state.PlaceBatchIntentSource.Decision(context,
+                            batchOpenInterestSteps(batch, command.symbol()),
+                            owner.identities.assetId(instrument.baseAsset()), owner.identities.assetId(instrument.quoteAsset()),
+                            owner.identities.assetId(instrument.settleAsset()));
+                    batch.preparedContexts.put(command.symbol(), decision);
                     batch.preparedSymbols.add(command.symbol());
                 }
-                ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(context, command);
-                var admissionIdentity = context.admissionFlags();
-                int assetId = owner.identities.assetId(resolved.reservationAsset());
-                batch.preparedOrders[index] = resolved;
-                batch.preparedClientKeyValues[index] = null;
-                batch.preparedOpenInterestSteps[index] = batchOpenInterestSteps(batch, command.symbol());
-                batch.preparedAdmissionIdentities[index] = admissionIdentity;
-                batch.preparedSymbolIds[index] = resolved.symbolId();
-                batch.preparedAssetIds[index] = assetId;
-                batch.preparedMatchingOrders[index] = new CoreMatchingOrder(
-                        resolved.orderId(), resolved.symbol(), resolved.side(), resolved.orderType(),
-                        resolved.timeInForce(), resolved.matchingPriceTicks(), resolved.quantitySteps());
+                batch.preparedDecisions[index] = decision;
             }
             batch.pipelined = true;
             return true;
@@ -241,7 +232,7 @@ final class OrderBatchExecutor {
                 batch.preparedOrders, batch.preparedOpenInterestSteps, batch.preparedAdmissionIdentities,
                 batch.preparedClientKeyValues, batch.preparedSymbolIds, batch.preparedAssetIds,
                 batch.preparedMatchingOrders, batch.preparedAdmittedOrders,
-                batch.preparedAdmittedReservations, batch.items.size(), owner.identities);
+                batch.preparedAdmittedReservations, batch.items.size(), owner.identities, batch);
     }
 
     void submitPipelinedPlaceBatch(PendingMatching pending, OrderBatchPending batch) {
@@ -696,7 +687,7 @@ final class OrderBatchExecutor {
             batch.cancelEvent = owner.runtimeState.dispatchCancelBatch(
                     batch.sequence, pending.command().header().userId(),
                     batch.deferredCancellationOrderIds.toPrimitiveArray(), timestamp, position,
-                    owner.identities, batch.kind == OrderBatchKind.CANCEL);
+                    owner.identities, batch.kind == OrderBatchKind.CANCEL, batch);
         }
         if (batch.settlementEvent != null || batch.deferredSettlementOrderIds.isEmpty()) return false;
         batch.settlementEvent = owner.runtimeState.dispatchMatcherSettlementBatch(
@@ -762,9 +753,7 @@ final class OrderBatchExecutor {
                 owner.commits.requestCommitPublication();
             }
         }
-        // Keep IDs primitive until materializeChangeAccumulators at the final boundary.
-        owner.resultBuilder.changedUserIds.addAll(batch.changedUserIds);
-        owner.resultBuilder.changedOrderIds.addAll(batch.changedOrderIds);
+        // 批量响应直接消费 batch；全局发布消费 runtime 变更，不能再复制到普通单结果容器。
         owner.resultBuilder.commandChangedUserIds = List.of();
         owner.resultBuilder.commandChangedOrderIds = List.of();
         if (laneContext.expectedLaneMask() != batch.actualLaneMask) {
@@ -788,6 +777,7 @@ final class OrderBatchExecutor {
         captureCommittedBatchTrades(batch);
         owner.commits.completeCommitPublicationBatch();
         for (OrderBatchItem item : batch.items) {
+            if (item.laneResultPrepared) continue;
             OrderRuntime order = owner.runtimeOrder(item.orderId());
             if (order == null && item.originalOrderId() > 0) order = owner.runtimeOrder(item.originalOrderId());
             item.resultOrder = order;

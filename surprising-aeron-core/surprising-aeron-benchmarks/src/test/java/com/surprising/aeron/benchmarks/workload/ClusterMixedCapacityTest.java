@@ -7,6 +7,13 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
 class ClusterMixedCapacityTest {
+    @Test void laneResultCannotCarryAnotherAccountsExecution() {
+        var item = new CoreOrderBatchResult.Item(0,10,0,0,ResponseStatus.APPLIED,CoreResultCode.NONE,null,
+                List.of(new CoreExecutionView(10,11,7,8,101,1)));
+        assertThat(ClusterMixedCapacityMain.validateBatch(response(item),new long[]{10},7,"BTC-USDT")).isOne();
+        assertThatThrownBy(() -> ClusterMixedCapacityMain.validateBatch(response(item),new long[]{10},9,"BTC-USDT"))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("account mismatch");
+    }
     @Test void diagnosticCapacityMakesTheActualSessionLimitExplicit() {
         var capacity=ClusterMixedCapacityMain.commandCapacity(2048,2048);
         assertThat(capacity.commandSessions()).isEqualTo(1);

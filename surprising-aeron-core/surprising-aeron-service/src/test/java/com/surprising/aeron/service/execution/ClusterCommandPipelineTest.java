@@ -99,7 +99,11 @@ class ClusterCommandPipelineTest {
                     }
                     return pending != null && pending.settlementEvent() != null && pending.settlementEvent().complete();
                 });
-                if (batch) assertThat(state.batches.pendingOrderBatches.get(secondSequence).admissionOrderIndex).isNull();
+                if (batch) {
+                    var completedBatch = state.batches.pendingOrderBatches.get(secondSequence);
+                    assertThat(completedBatch.admissionOrderIndex).isNull();
+                    assertThat(completedBatch.items).allSatisfy(item -> assertThat(item.laneResultPrepared).isTrue());
+                }
                 assertThat(gate.isDone()).isFalse();
                 assertThat(state.firstPendingMatchingSequence()).isEqualTo(firstSequence);
                 assertThat(live.responses).isEmpty();
