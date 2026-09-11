@@ -29,6 +29,12 @@ final class PendingMatchingRing {
     private int tail = -1;
     private int dispatchHead = -1;
     private int size;
+    /** Owner 派发顺序的失效标记：队列、分区或已派发前缀改变后必须重新检查依赖。 */
+    private long dispatchRevision;
+
+    long dispatchRevision() { return dispatchRevision; }
+
+    void partitionDependenciesChanged() { dispatchRevision++; }
 
     PendingMatchingRing(int requestedCapacity, int matcherShardCount, int laneCount) {
         if (requestedCapacity <= 0 || requestedCapacity > 1 << 30) {
@@ -72,6 +78,7 @@ final class PendingMatchingRing {
             removeIndexes(existing);
             contexts.required(pending.sequence()).pending(pending);
             addIndexes(pending);
+            dispatchRevision++;
             return;
         }
         if (size == contexts.capacity()) {
@@ -89,6 +96,7 @@ final class PendingMatchingRing {
         if (dispatchHead == -1) dispatchHead = index;
         addIndexes(pending);
         size++;
+        dispatchRevision++;
     }
 
     PendingMatching acquire(long sequence, PendingMatching.Operation operation, CoreMessage command,
@@ -145,6 +153,7 @@ final class PendingMatchingRing {
         advanceDispatchedHead();
         removeIndexes(removed);
         size--;
+        dispatchRevision++;
         if (contexts.claimed(sequence)) {
             LaneCommandContextRing.Context context = contexts.required(sequence);
             if (context.complete()) contexts.release(sequence);
@@ -197,6 +206,7 @@ final class PendingMatchingRing {
         }
         settlementDispatched[index] = true;
         advanceDispatchedHead();
+        dispatchRevision++;
     }
 
     private void advanceDispatchedHead() {
@@ -230,6 +240,7 @@ final class PendingMatchingRing {
         }
         settlementDispatched[indexOf(sequence)] = true;
         advanceDispatchedHead();
+        dispatchRevision++;
     }
 
     void registerSubmission(long sequence, int matcherShard) {
@@ -249,6 +260,7 @@ final class PendingMatchingRing {
         if (tailSlot < 0) submissionHeads[matcherShard] = index;
         else nextSubmissionSlots[tailSlot] = index;
         submissionTails[matcherShard] = index;
+        dispatchRevision++;
     }
 
     boolean isSubmissionHead(long sequence, int matcherShard) {

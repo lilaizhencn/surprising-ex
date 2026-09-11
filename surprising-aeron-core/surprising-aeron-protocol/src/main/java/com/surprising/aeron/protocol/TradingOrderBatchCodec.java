@@ -113,7 +113,7 @@ public final class TradingOrderBatchCodec {
         CoreResultCode resultCode(int index);
         CoreOrderStateSource order(int index);
         int executionCount(int index);
-        /** Write exactly executionCount(index) records of six little-endian longs. */
+        /** 从 output 当前位置写 executionCount(index) 条记录；不得修改 limit 或已写区域。 */
         void writeExecutions(int index, ByteBuffer output);
     }
 
@@ -128,8 +128,8 @@ public final class TradingOrderBatchCodec {
                     || source.resultCode(index) == null || source.executionCount(index) < 0) {
                 throw new IllegalArgumentException("invalid order batch result item");
             }
-            int orderLength = source.order(index) == null ? 0
-                    : CoreStateQueryCodec.encodedOrderStateLength(source.order(index));
+            CoreOrderStateSource order = source.order(index);
+            int orderLength = order == null ? 0 : CoreStateQueryCodec.encodedOrderStateLength(order);
             int frameLength = Math.addExact(Integer.BYTES * 5 + Long.BYTES * 3,
                     Math.addExact(orderLength, Math.multiplyExact(source.executionCount(index), RESULT_EXECUTION_LENGTH)));
             length = Math.addExact(length, Math.addExact(FRAME_LENGTH_BYTES, frameLength));
@@ -150,10 +150,13 @@ public final class TradingOrderBatchCodec {
             int count = source.executionCount(index);
             output.putInt(count);
             int bytes = Math.multiplyExact(count, RESULT_EXECUTION_LENGTH);
-            ByteBuffer executions = output.slice(output.position(), bytes).order(ByteOrder.LITTLE_ENDIAN);
-            source.writeExecutions(index, executions);
-            if (executions.position() != bytes) throw new IllegalArgumentException("execution count differs from encoded data");
-            output.position(output.position() + bytes);
+            int executionStart = output.position();
+            int limit = output.limit();
+            output.limit(Math.addExact(executionStart, bytes));
+            source.writeExecutions(index, output);
+            if (output.position() != executionStart + bytes || output.limit() != executionStart + bytes)
+                throw new IllegalArgumentException("execution count differs from encoded data");
+            output.limit(limit);
             output.putInt(frameOffset, output.position() - frameOffset - FRAME_LENGTH_BYTES);
         }
         if (output.hasRemaining()) throw new IllegalArgumentException("batch result size changed during encoding");
@@ -297,7 +300,21 @@ public final class TradingOrderBatchCodec {
             }
         }
         requireConsumed(buffer, "order batch");
-        return List.of(items);
+        return new DecodedItems<>(items);
+    }
+
+    /** 解码器独占数组不再复制；外部传入的集合仍必须防御性复制。 */
+    static <T> List<T> immutableItems(List<T> items) {
+        return items instanceof DecodedItems<?> ? items : List.copyOf(items);
+    }
+
+    /** 仅持有本次解码产生、从不向外暴露的数组。 */
+    private static final class DecodedItems<T> extends java.util.AbstractList<T>
+            implements java.util.RandomAccess {
+        private final T[] items;
+        private DecodedItems(T[] items) { this.items = items; }
+        @Override public T get(int index) { return items[java.util.Objects.checkIndex(index, items.length)]; }
+        @Override public int size() { return items.length; }
     }
 
     private static int encodedResultFrameLength(CoreOrderBatchResult.Item item) {

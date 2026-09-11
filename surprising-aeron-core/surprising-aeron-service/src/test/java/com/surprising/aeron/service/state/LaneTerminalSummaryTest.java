@@ -6,6 +6,30 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class LaneTerminalSummaryTest {
+    @Test void mixedBatchRetainsOnlyTerminalsAfterSummaryGrowthAndReuse() {
+        var state = new TradingRuntimeState();
+        var changes = new TradingRuntimeState.PublishedLaneChanges();
+        var expected = new ArrayList<Long>();
+        for (long id = 1; id <= 40; id++) {
+            var order = new OrderRuntime(id, 7, 5, 10);
+            if ((id & 1) == 0) {
+                order = order.withStatus(CoreOrderStatus.CANCELED, 2);
+                expected.add(id);
+            }
+            changes.putOrder(id, order);
+        }
+        changes.preparePublication(state);
+        var actual = new ArrayList<Long>();
+        changes.commitTerminalToOwner(state, 0, (order, sequence) -> actual.add(order.orderId()), 9);
+        assertThat(actual).containsExactlyElementsOf(expected);
+        state.clearChangedKeys();
+        changes.clear();
+        changes.putOrder(41, new OrderRuntime(41, 7, 5, 10));
+        changes.preparePublication(state);
+        actual.clear();
+        changes.commitTerminalToOwner(state, 0, (order, sequence) -> actual.add(order.orderId()), 10);
+        assertThat(actual).isEmpty();
+    }
     @Test void publishedOpenTerminalAndRemovedOrdersRemainCorrectAcrossReuse() {
         var state = new TradingRuntimeState();
         var changes = new TradingRuntimeState.PublishedLaneChanges();
@@ -16,7 +40,6 @@ class LaneTerminalSummaryTest {
                 CoreOrderStatus.OPEN, CoreOrderStatus.CANCELED, CoreOrderStatus.REJECTED}) {
             changes.putOrder(11, open.withStatus(status, 2));
             changes.preparePublication(state);
-            assertThat(changes.hasTerminalOrders).isEqualTo(status.terminal());
             retained.clear();
             changes.commitTerminalToOwner(state, 0, sink, 9);
             if (status.terminal()) assertThat(retained).containsExactly(11L);
@@ -24,11 +47,9 @@ class LaneTerminalSummaryTest {
             assertThat(state.publishedOrders.get(11).status()).isEqualTo(status);
             state.clearChangedKeys();
             changes.clear();
-            assertThat(changes.hasTerminalOrders).isFalse();
         }
         changes.putOrder(11, null);
         changes.preparePublication(state);
-        assertThat(changes.hasTerminalOrders).isFalse();
         retained.clear();
         changes.commitTerminalToOwner(state, 0, sink, 10);
         assertThat(retained).isEmpty();

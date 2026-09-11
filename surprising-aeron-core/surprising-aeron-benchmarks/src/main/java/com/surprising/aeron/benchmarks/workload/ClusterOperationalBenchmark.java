@@ -17,7 +17,7 @@ public class ClusterOperationalBenchmark {
     @Param({"0", "1", "2", "4", "8", "64"})
     public int controlPageSize;
     /** 客户端实际在途档位；外部节点须以对应owner-command-window启动，不能由客户端冒充服务端配置。 */
-    @Param({"256"})
+    @Param({"128"})
     public int inFlightWindow;
     private ClusterMixedCapacityMain workload;
 

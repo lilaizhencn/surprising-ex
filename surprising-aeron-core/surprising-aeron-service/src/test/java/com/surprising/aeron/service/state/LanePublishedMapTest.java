@@ -4,6 +4,21 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 
 class LanePublishedMapTest {
+    @Test void replacingAnExistingPublicationRetainsItsStoredKey() throws Exception {
+        var map = new LanePublishedMap<String>();
+        map.put(7, "before");
+        var field = LanePublishedMap.class.getDeclaredField("values");
+        field.setAccessible(true);
+        var values = (java.util.Map<?, ?>) field.get(map);
+        Object key = values.keySet().iterator().next();
+        var receipt = new LanePublication();
+        map.stage(receipt, 7, "after");
+        assertThat(values.keySet().iterator().next()).isSameAs(key);
+        assertThat(map.get(7)).isEqualTo("before");
+        receipt.visible = true;
+        receipt.execute(new AccountLaneState(0, 16));
+        assertThat(map.get(7)).isEqualTo("after");
+    }
     @Test void reusedLookupNeverMutatesStoredKeysIncludingHashCollisions() {
         var map = new LanePublishedMap<String>();
         long first = 1, collision = 1L << 32;

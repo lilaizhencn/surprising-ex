@@ -1913,7 +1913,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         LaneCommandContextRing.Context context = laneCommandContexts.required(sequence);
         if (context.hasMatchingCompletion() || context.matchingResult() != null) return;
         com.surprising.aeron.service.matching.CoreMatchingResult result = matcherPipeline.poll(sequence);
-        if (result != null) context.publishMatchingCompletion(result.withCoreSequence(sequence));
+        if (result != null) publishMatchingCompletion(sequence, result);
     }
 
     boolean establishMatchingCommitFence(long sequence, long clusterTimestamp, long clusterPosition) {
@@ -1990,9 +1990,11 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     void drainMatchingCompletions() {
         crossShardCancellations.poll();
-        progressPlaceAdmissions();
+        // 本地准入续跑不能依赖新的 Lane 通知；其他阶段不再触发整套准入扫描。
+        if (placeAdmissionReadyShardMask != 0 || runtimeState.hasPlaceAdmissionNotifications())
+            progressPlaceAdmissions();
         matcherPipeline.drainMatchingCompletions(this::publishMatchingCompletion);
-        commits.drainMatcherSettlementCompletions();
+        if (runtimeState.hasSettlementNotifications()) commits.drainMatcherSettlementCompletions();
     }
 
     long matchingProgressSequence() {

@@ -1043,16 +1043,21 @@ public final class TradingRuntimeState implements AutoCloseable {
     static final class PublishedLaneChanges {
         /** 本 Lane 的不可变实体发布收据；Owner 不再逐实体重写发布表。 */
         LanePublication publication;
-        /** Lane 在原有发布准备遍历中记录；没有终态时 Owner 不再逐单检查。 */
-        boolean hasTerminalOrders;
+        /** Lane 准备的终态引用，Owner 只访问终态项；随结算缓冲复用，不复制订单。 */
+        private OrderRuntime[] terminalOrders = new OrderRuntime[4];
+        private int terminalOrderCount;
 
         void preparePublication(TradingRuntimeState state) {
             if (publication != null) throw new IllegalStateException("Lane publication already prepared");
             publication = new LanePublication();
             users.forEach((id, value) -> state.publishedUsers.stage(publication, id, value));
-            hasTerminalOrders = false;
+            terminalOrderCount = 0;
             orders.forEach((id, value) -> {
-                if (value != null && value.status().terminal()) hasTerminalOrders = true;
+                if (value != null && value.status().terminal()) {
+                    if (terminalOrderCount == terminalOrders.length)
+                        terminalOrders = java.util.Arrays.copyOf(terminalOrders, terminalOrderCount * 2);
+                    terminalOrders[terminalOrderCount++] = value;
+                }
                 state.publishedOrders.stage(publication, id, removedOrderRoutes.contains(id) ? null : value);
             });
             reservations.forEach((id, value) -> state.publishedReservations.stage(publication, id,
@@ -1160,12 +1165,16 @@ public final class TradingRuntimeState implements AutoCloseable {
                 state.changedUsers.add(userId);
                 if (publication == null) putOrRemove(state.publishedUsers, userId, user);
             });
-            if (publication == null || terminalOrderSink != null && hasTerminalOrders) orders.forEach((orderId, order) -> {
+            if (publication == null) orders.forEach((orderId, order) -> {
                 if (terminalOrderSink != null && order != null && order.status().terminal()) {
                     terminalOrderSink.accept(order, coreSequence);
                 }
                 if (publication == null) putOrRemove(state.publishedOrders, orderId, order);
             });
+            else if (terminalOrderSink != null) {
+                for (int index = 0; index < terminalOrderCount; index++)
+                    terminalOrderSink.accept(terminalOrders[index], coreSequence);
+            }
             reservations.drainTo((orderId, reservation) -> {
                 state.changedReservations.add(orderId);
                 if (publication == null) putOrRemove(state.publishedReservations, orderId, reservation);
@@ -1219,7 +1228,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         void clear() {
             if (triggers != null) triggers.clear();
             publication = null;
-            hasTerminalOrders = false;
+            java.util.Arrays.fill(terminalOrders, 0, terminalOrderCount, null);
+            terminalOrderCount = 0;
             users.clear();
             orders.clear();
             reservations.clear();
@@ -1742,8 +1752,16 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 仅读两个就绪字，不消费序号；滞后的置位最多造成一次无效收集，不会丢通知。 */
     public boolean hasMatchingNotifications() {
         assertOwner();
-        return (admissionReadyLanes.get() & expectedAdmissionLanes) != 0
-                || (settlementReadyLanes.get() & expectedSettlementLanes) != 0;
+        return hasPlaceAdmissionNotifications() || hasSettlementNotifications();
+    }
+
+    /** Owner 只探测本阶段就绪标记；队列仍是实际结果的唯一来源。 */
+    public boolean hasPlaceAdmissionNotifications() {
+        return (admissionReadyLanes.get() & expectedAdmissionLanes) != 0;
+    }
+
+    public boolean hasSettlementNotifications() {
+        return (settlementReadyLanes.get() & expectedSettlementLanes) != 0;
     }
 
     public long pollPlaceAdmissionReady(int laneId) {
@@ -1837,11 +1855,14 @@ public final class TradingRuntimeState implements AutoCloseable {
                 ? event.takeChanges() : null;
         try {
             long remainingLanes = laneMask;
+            int completed = 0;
             while (remainingLanes != 0) {
                 int laneId = Long.numberOfTrailingZeros(remainingLanes);
                 remainingLanes &= remainingLanes - 1;
                 if (changes == null) flushPublishedChanges(laneId);
                 else {
+                    completed += changes.completedPending[laneId];
+                    if (fundsAccumulator != null) fundsAccumulator.add(changes.laneFundsDeltas[laneId]);
                     changes.publishedLaneChanges[laneId].commitTerminalToOwner(
                             this, laneId, terminalOrderSink, event.plan().coreSequence());
                     changes.publishedLaneChanges[laneId].releaseRetiredClientIdentities(event.identities());
@@ -1855,15 +1876,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
             if (terminalOrderSink != null) terminalOrderSink.completeSequence();
             if (changes != null) {
-                int completed = 0;
-                long pendingLanes = laneMask;
-                while (pendingLanes != 0) {
-                    int laneId = Long.numberOfTrailingZeros(pendingLanes); pendingLanes &= pendingLanes - 1;
-                    completed += changes.completedPending[laneId];
-                }
                 pendingReservations.completedBatchItems(event.plan().coreSequence(), completed);
                 if (fundsAccumulator == null) event.collectedFundsDelta(changes.collectFundsDelta(laneMask));
-                else changes.appendFundsDelta(laneMask, fundsAccumulator);
             }
             return aggregate;
         } finally {
@@ -3710,13 +3724,22 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 在账户所有者线程完成冻结释放和终态修改，不由全局 Owner 借用账户。 */
     private void releaseOrderToTerminal(long orderId, long userId, long releaseUnits,
                              long commitTimestamp, long commitPosition, CoreOrderStatus terminalStatus) {
+        releaseOrderToTerminal(orderId, userId, releaseUnits, commitTimestamp, commitPosition, terminalStatus,
+                null, null);
+    }
+
+    /** 已在同一 Lane 校验的实体直接沿用；Owner 控制入口仍在取得 Lane 后查询。 */
+    private void releaseOrderToTerminal(long orderId, long userId, long releaseUnits,
+                             long commitTimestamp, long commitPosition, CoreOrderStatus terminalStatus,
+                             OrderRuntime preparedOrder, ReservationRuntime preparedReservation) {
         assertOwner();
         captureUserBefore(userId);
         captureOrderBefore(orderId);
         captureReservationBefore(orderId);
         CanceledOrder canceled = onLane(userId, lane -> {
-            OrderRuntime order = lane.orders.get(orderId);
-            ReservationRuntime reservation = lane.reservations.get(orderId);
+            OrderRuntime order = preparedOrder == null ? lane.orders.get(orderId) : preparedOrder;
+            ReservationRuntime reservation = preparedReservation == null
+                    ? lane.reservations.get(orderId) : preparedReservation;
             if (order == null || reservation == null || order.userId() != userId || order.canceled()) {
                 throw new IllegalArgumentException("runtime order is not cancelable: " + orderId);
             }
@@ -3765,7 +3788,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (order == null || reservation == null || order.userId() != userId || order.status().terminal()) {
             throw new IllegalArgumentException("runtime order is not cancelable: " + orderId);
         }
-        cancelOrder(orderId, userId, reservation.reservedUnits(), commitTimestamp, commitPosition);
+        releaseOrderToTerminal(orderId, userId, reservation.reservedUnits(), commitTimestamp, commitPosition,
+                CoreOrderStatus.CANCELED, order, reservation);
     }
 
     void rejectOrderInLane(long userId, long orderId, long commitTimestamp, long commitPosition) {

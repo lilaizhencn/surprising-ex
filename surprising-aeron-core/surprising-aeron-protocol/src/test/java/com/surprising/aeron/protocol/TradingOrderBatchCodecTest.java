@@ -13,6 +13,22 @@ import org.junit.jupiter.api.Test;
 
 class TradingOrderBatchCodecTest {
 
+    @Test void decodedBatchOwnsItsArrayAndExternalListsRemainDefensivelyCopied() {
+        var external = new ArrayList<>(List.of(new CancelOrderCommand(17), new CancelOrderCommand(18)));
+        var command = new CancelOrderBatchCommand(external);
+        external.clear();
+        byte[] bytes = TradingOrderBatchCodec.encode(command);
+        var decoded = TradingOrderBatchCodec.decodeCancelOrderBatch(bytes);
+        Arrays.fill(bytes, (byte) 0);
+        assertThat(decoded).isEqualTo(command);
+        assertThatThrownBy(() -> decoded.orders().set(0, new CancelOrderCommand(19)))
+                .isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> decoded.orders().remove(0)).isInstanceOf(UnsupportedOperationException.class);
+        Object[] copy = decoded.orders().toArray();
+        copy[0] = null;
+        assertThat(decoded.orders().getFirst().orderId()).isEqualTo(17);
+    }
+
     @Test
     void reusedOrderCursorPreservesEveryItemAndOwnsEncodedBytes() {
         var first = new CoreOrderStateView(701, ProductLine.SPOT, 7,

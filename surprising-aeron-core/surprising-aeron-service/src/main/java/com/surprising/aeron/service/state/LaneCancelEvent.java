@@ -101,7 +101,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
                 } else {
                     runtime.cancelOrderInLane(userId, orderId, commitTimestamp, commitClusterPosition);
                 }
-                runtime.stampOrderInLane(lane, orderId, commitTimestamp, commitClusterPosition);
+                // 两条分支均已在构造终态时写入本次提交元数据，无需再查订单补写。
             }
             changes.prepareLaneTerminal(laneId, identities, lane, runtime);
             if (commitLane) {

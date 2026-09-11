@@ -579,8 +579,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         combinedCancellations.addAll(result.cancellations());
         List<exchange.core2.core.common.MatcherResult.MatcherEvent> events =
                 CoreMatchingResult.concatenateEvents(cancellations.matcherEvents(), result.matcherEvents());
-        long nativeSequence = Math.max(cancellations.nativeCommand().nativeSequence(),
-                result.nativeCommand().nativeSequence());
+        long nativeSequence = Math.max(cancellations.nativeSequence(), result.nativeSequence());
         return new CoreMatchingResult(result.accepted(), result.resultCode(), combinedCancellations,
                 Math.addExact(cancellations.successfulPrefixCount(), result.successfulPrefixCount()),
                 cancellations.matcherStateChanged() || result.matcherStateChanged()
@@ -626,7 +625,7 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         List<exchange.core2.core.common.MatcherResult.MatcherEvent> events =
                 CoreMatchingResult.concatenateEvents(outcome.results());
         long nativeSequence = outcome.results().stream()
-                .mapToLong(result -> result.nativeCommand().nativeSequence()).max().orElse(0);
+                .mapToLong(CoreMatchingResult::nativeSequence).max().orElse(0);
         CoreMatchingResult failure = outcome.failedResult();
         boolean accepted = outcome.exception() == null && failure == null;
         String resultCode = outcome.exception() != null ? "EXCHANGE_CORE_FAILURE"

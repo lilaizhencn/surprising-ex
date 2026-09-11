@@ -13,7 +13,7 @@ public record PlaceOrderBatchCommand(List<PlaceOrderCommand> orders) {
             throw new IllegalArgumentException("invalid place order batch");
         }
         for (var order : orders) if (order == null) throw new IllegalArgumentException("invalid place order batch");
-        orders = List.copyOf(orders);
+        orders = TradingOrderBatchCodec.immutableItems(orders);
     }
 
     public List<PlaceOrderCommand> items() {

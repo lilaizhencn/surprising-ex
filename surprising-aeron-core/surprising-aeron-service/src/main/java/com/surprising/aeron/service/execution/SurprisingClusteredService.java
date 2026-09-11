@@ -271,6 +271,7 @@ public final class SurprisingClusteredService implements ClusteredService {
                 var pending = state.pendingMatching(entry.sequence);
                 pending.establishCommitFence(next.timestamp, next.position);
                 pending.partitionLaneMask = commandWindow.candidateLanes;
+                state.pendingMatching.partitionDependenciesChanged();
             }
             entry.response = entry.sequence == 0 ? result : null;
             pendingIngress.remove();

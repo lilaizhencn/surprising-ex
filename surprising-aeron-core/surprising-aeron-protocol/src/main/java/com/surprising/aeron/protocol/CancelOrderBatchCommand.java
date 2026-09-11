@@ -13,7 +13,7 @@ public record CancelOrderBatchCommand(List<CancelOrderCommand> orders) {
             throw new IllegalArgumentException("invalid cancel order batch");
         }
         for (var order : orders) if (order == null) throw new IllegalArgumentException("invalid cancel order batch");
-        orders = List.copyOf(orders);
+        orders = TradingOrderBatchCodec.immutableItems(orders);
     }
 
     public List<CancelOrderCommand> items() {

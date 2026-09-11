@@ -78,7 +78,8 @@ final class LanePublishedMap<V> {
 
     void stage(LanePublication publication, long key, V value) {
         Version<V> version = new Version<>(key, value, publication, this, values.get(lookupKey(key)));
-        values.put(new Key(key), version);
+        // 同实体由所属 Lane 单写；已存在的键不必再次分配。查询键绝不进入表。
+        if (values.replace(lookupKey(key), version) == null) values.put(new Key(key), version);
         publication.add(version);
     }
 

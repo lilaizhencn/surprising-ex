@@ -486,6 +486,21 @@ class DeterministicExchangeCoreAdapterTest {
         return CoreMatchingResult.fromNative(result);
     }
 
+    @org.junit.jupiter.api.Test
+    void bindingNativeEvidencePreservesTheUnboundResultAndItsSequence() {
+        CoreMatchingResult raw = nativeResult(1, 19);
+        var command = new CoreMatchingResult.NativeCommand(7, 1, 2, 19, 1, 19, 8, 1000, 0);
+        var bound = raw.withEvidence(command, new CoreMatchingResult.MatcherPrefix(11, 12));
+        org.assertj.core.api.Assertions.assertThat(raw.nativeSequence()).isEqualTo(19);
+        org.assertj.core.api.Assertions.assertThat(raw.nativeCommand().coreSequence()).isZero();
+        org.assertj.core.api.Assertions.assertThat(raw.nativeCommand().nativeSequence()).isEqualTo(19);
+        org.assertj.core.api.Assertions.assertThat(bound.nativeCommand()).isEqualTo(command);
+        org.assertj.core.api.Assertions.assertThat(bound.nativeMatcherResult()).isSameAs(raw.nativeMatcherResult());
+        org.assertj.core.api.Assertions.assertThat(bound.matcherEvents()).isSameAs(raw.matcherEvents());
+        org.assertj.core.api.Assertions.assertThat(bound.outcome()).isEqualTo(raw.outcome());
+        org.assertj.core.api.Assertions.assertThat(raw.withCoreSequence(5).nativeCommand().nativeSequence()).isEqualTo(19);
+    }
+
     private static List<MatcherShardProgress> matcherProgress(
             DeterministicExchangeCoreAdapter adapter) throws Exception {
         var field = DeterministicExchangeCoreAdapter.class.getDeclaredField("matcherEvidence");

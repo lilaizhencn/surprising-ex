@@ -12,6 +12,9 @@ public final class CoreMatchingResult {
 
     private static final MatcherResult.MarketData EMPTY_MARKET_DATA =
             new MatcherResult.MarketData(List.of(), List.of(), 0, 0);
+    /** 尚未绑定恢复证据时共享的不可变空值，不为每次拒单创建占位对象。 */
+    private static final NativeCommand EMPTY_COMMAND = new NativeCommand(0, 0, 0, 0, 0, 0, 0, 0, -1);
+    private static final MatcherPrefix EMPTY_PREFIX = new MatcherPrefix(0, 0);
 
     private final boolean accepted;
     private final String resultCode;
@@ -38,7 +41,7 @@ public final class CoreMatchingResult {
                               List<CoreCancellationResult> cancellations, int successfulPrefixCount,
                               boolean matcherStateChanged) {
         this(accepted, resultCode, cancellations, successfulPrefixCount, matcherStateChanged,
-                new NativeCommand(0, 0, 0, 0, 0, 0, 0, 0, -1), new MatcherPrefix(0, 0), null,
+                EMPTY_COMMAND, EMPTY_PREFIX, null,
                 List.of(), EMPTY_MARKET_DATA);
     }
 
@@ -71,17 +74,32 @@ public final class CoreMatchingResult {
         boolean accepted = result.resultCode() == CommandResultCode.SUCCESS
                 || result.resultCode() == CommandResultCode.ACCEPTED;
         return new CoreMatchingResult(accepted, result.resultCode().name(), List.of(), 0, false,
-                new NativeCommand(0, 0, 0, 0, 0, result.sequence(), 0, 0, -1),
-                new MatcherPrefix(0, 0), result, result.events(), result.marketData());
+                EMPTY_COMMAND,
+                EMPTY_PREFIX, result, result.events(), result.marketData());
     }
 
     CoreMatchingResult withEvidence(NativeCommand command, MatcherPrefix prefix) {
-        return new CoreMatchingResult(accepted, resultCode, cancellations, successfulPrefixCount,
-                matcherStateChanged, command, prefix, nativeMatcherResult, matcherEvents, marketData);
+        return new CoreMatchingResult(this, command, prefix);
+    }
+
+    /** 只替换证据；业务结果已校验，复用其不可变集合和分类，不重新遍历/分类。 */
+    private CoreMatchingResult(CoreMatchingResult source, NativeCommand command, MatcherPrefix prefix) {
+        accepted = source.accepted;
+        resultCode = source.resultCode;
+        cancellations = source.cancellations;
+        successfulPrefixCount = source.successfulPrefixCount;
+        matcherStateChanged = source.matcherStateChanged;
+        outcome = source.outcome;
+        nativeCommand = Objects.requireNonNull(command, "native command");
+        matcherPrefix = Objects.requireNonNull(prefix, "matcher prefix");
+        nativeMatcherResult = source.nativeMatcherResult;
+        matcherEvents = source.matcherEvents;
+        marketData = source.marketData;
     }
 
     public CoreMatchingResult withCoreSequence(long coreSequence) {
         if (coreSequence <= 0) throw new IllegalArgumentException("coreSequence must be positive");
+        NativeCommand nativeCommand = nativeCommand();
         if (nativeCommand.coreSequence() == coreSequence) return this;
         if (nativeCommand.coreSequence() != 0) throw new IllegalStateException("matching result sequence mismatch");
         NativeCommand command = new NativeCommand(coreSequence,
@@ -89,8 +107,7 @@ public final class CoreMatchingResult {
                 nativeCommand.orderId(),
                 nativeCommand.instrumentChangeId(), nativeCommand.nativeSequence(), nativeCommand.matcherSequence(),
                 nativeCommand.aeronTimestamp(), nativeCommand.matcherShardId());
-        return new CoreMatchingResult(accepted, resultCode, cancellations, successfulPrefixCount,
-                matcherStateChanged, command, matcherPrefix, nativeMatcherResult, matcherEvents, marketData);
+        return new CoreMatchingResult(this, command, matcherPrefix);
     }
 
     static List<MatcherResult.MatcherEvent> concatenateEvents(
@@ -132,7 +149,16 @@ public final class CoreMatchingResult {
     public int successfulPrefixCount() { return successfulPrefixCount; }
     public boolean matcherStateChanged() { return matcherStateChanged; }
     public Outcome outcome() { return outcome; }
-    public NativeCommand nativeCommand() { return nativeCommand; }
+    public NativeCommand nativeCommand() {
+        if (nativeCommand == EMPTY_COMMAND && nativeMatcherResult != null)
+            return new NativeCommand(0, 0, 0, 0, 0, nativeMatcherResult.sequence(), 0, 0, -1);
+        return nativeCommand;
+    }
+    /** 原生结果绑定证据前只需序号，直接读取而不物化占位身份。 */
+    long nativeSequence() {
+        return nativeCommand == EMPTY_COMMAND && nativeMatcherResult != null
+                ? nativeMatcherResult.sequence() : nativeCommand.nativeSequence();
+    }
     public MatcherPrefix matcherPrefix() { return matcherPrefix; }
     public MatcherResult nativeMatcherResult() { return nativeMatcherResult; }
     public List<MatcherResult.MatcherEvent> matcherEvents() { return matcherEvents; }

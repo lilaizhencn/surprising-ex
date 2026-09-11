@@ -13,7 +13,7 @@ public record AmendOrderBatchCommand(List<AmendOrderCommand> orders) {
             throw new IllegalArgumentException("invalid amend order batch");
         }
         for (var order : orders) if (order == null) throw new IllegalArgumentException("invalid amend order batch");
-        orders = List.copyOf(orders);
+        orders = TradingOrderBatchCodec.immutableItems(orders);
     }
 
     public List<AmendOrderCommand> items() {

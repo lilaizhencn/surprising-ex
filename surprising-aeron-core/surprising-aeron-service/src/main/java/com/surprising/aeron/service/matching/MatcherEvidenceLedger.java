@@ -66,9 +66,9 @@ final class MatcherEvidenceLedger {
             int matcherShardId, int nativeMatcherShardId,
             CoreMatchingResult result) {
         int index = index(matcherShardId);
-        long nativeSequence = result.nativeCommand().nativeSequence();
+        long nativeSequence = result.nativeSequence();
         if (nativeSequence > 0) advanceStrictly(shardNativeSequences, index(nativeMatcherShardId), nativeSequence,
-                "matcher shard native sequence is not strictly increasing shard=" + nativeMatcherShardId);
+                "matcher shard native sequence is not strictly increasing");
         advanceStrictly(shardSequences, index, sequence,
                 "matcher shard sequence is not strictly increasing");
         CoreMatchingResult.NativeCommand nativeCommand = new CoreMatchingResult.NativeCommand(
@@ -104,7 +104,8 @@ final class MatcherEvidenceLedger {
         int offset = offset(index);
         long previous = (long) LONGS.getAcquire(values, offset);
         if (next <= previous) {
-            throw new IllegalStateException(message + " previous=" + previous + " next=" + next);
+            throw new IllegalStateException(message + " shard=" + (index - 1)
+                    + " previous=" + previous + " next=" + next);
         }
         // A matching shard has one owner thread. Release publication is sufficient for the
         // snapshot fence and avoids a locked compare-and-set on every matched command.

@@ -37,6 +37,11 @@ final class OrderedCommitCoordinator {
     /** 唯一 owner；仅在其线程访问共享交易状态和提交边界。 */
     final TradingCoreRuntime owner;
 
+    /** 上次派发检查的输入水位；只有外部完成、本地推进或依赖顺序变化才重扫。 */
+    private long checkedDispatchProgress = Long.MIN_VALUE;
+    private long checkedDispatchRevision = Long.MIN_VALUE;
+    private long checkedDispatchThrough = Long.MIN_VALUE;
+
     OrderedCommitCoordinator(TradingCoreRuntime owner) { this.owner = owner; }
 
     /** 各撮合分片已核验的序号；提交时逐分片验证连续性。 */
@@ -1197,6 +1202,14 @@ final class OrderedCommitCoordinator {
     }
 
     void dispatchReadyPlaceSettlements(long clusterTimestamp, long clusterPosition, long throughSequence) {
+        long progress = owner.matchingProgressSequence();
+        long revision = owner.pendingMatching.dispatchRevision();
+        if (checkedDispatchProgress == progress && checkedDispatchRevision == revision
+                && checkedDispatchThrough == throughSequence) return;
+        // 保存检查前的输入；本次派发若释放了跨分区依赖，下次仍会继续推进。
+        checkedDispatchProgress = progress;
+        checkedDispatchRevision = revision;
+        checkedDispatchThrough = throughSequence;
         // 每个订单簿分区独立推进；一个 matcher 暂无结果不会阻挡另一分区的账户结算。
         for (int shard = 0; shard < owner.matchingAdapter.topology().matchingEngineCount(); shard++) {
             dispatchPartitionSettlements(shard, clusterTimestamp, clusterPosition, throughSequence);
