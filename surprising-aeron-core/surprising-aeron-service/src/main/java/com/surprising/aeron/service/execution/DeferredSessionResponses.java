@@ -58,14 +58,14 @@ final class DeferredSessionResponses {
     int poll(long nowNs, int budget) {
         int work = 0;
         int attempts = Math.min(budget, sessions.size());
-        while (work < attempts && cursor != null) {
+        for (int attempt = 0; attempt < attempts && cursor != null; attempt++) {
             SessionQueue queue = cursor;
             cursor = queue.next;
             Response response = queue.responses.peekFirst();
-            work++;
             if (queue.session.isClosing() || nowNs - response.deadlineNs >= 0) {
                 if (!queue.session.isClosing()) queue.session.close();
                 remove(queue.session.id());
+                work++;
                 continue;
             }
             buffer.wrap(response.encoded);
@@ -73,11 +73,13 @@ final class DeferredSessionResponses {
             try { result = queue.session.offer(buffer, 0, response.encoded.length); }
             finally { buffer.wrap(EMPTY); }
             if (result >= 0) {
+                work++;
                 queue.responses.removeFirst();
                 bytes -= response.encoded.length;
                 size--;
                 if (queue.responses.isEmpty()) remove(queue.session.id());
             } else if (!retryable(result)) {
+                work++;
                 queue.session.close();
                 remove(queue.session.id());
             }

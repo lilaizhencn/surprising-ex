@@ -102,6 +102,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         long allocationsBefore = lane.clientIdentityAllocations;
         try {
             runtime.enterMatcherSettlementScope(lane, changes);
+            lane.admissionIndexCapacity = Math.max(2, itemCount);
             try {
                 for (int index = 0; index < itemCount; index++) {
                     if (source != null) {
@@ -153,6 +154,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                     runtime.publishedReservations.stage(publication, admittedReservations[i].orderId(), admittedReservations[i]);
                 }
             } finally {
+                lane.admissionIndexCapacity = 2;
                 runtime.exitMatcherSettlementScope(lane, changes);
             }
         } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException failure) {

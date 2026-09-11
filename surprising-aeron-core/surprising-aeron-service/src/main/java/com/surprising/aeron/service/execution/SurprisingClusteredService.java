@@ -31,6 +31,8 @@ public final class SurprisingClusteredService implements ClusteredService {
     private final ClusterCommandWindow commandWindow = new ClusterCommandWindow();
     private int commandWindowHighWaterMark;
     private long drainedWindows, drainedCommands, dependencyFences, controlFences;
+    /** Owner 独占：只有准入、控制执行或提交推进时递增，等待中的命令不算工作。 */
+    private long commandProgress;
     /** 已提交结果的异步出口，网络背压不占用交易回调的执行时间。 */
     private final DeferredSessionResponses pendingResponses = new DeferredSessionResponses();
 
@@ -258,6 +260,7 @@ public final class SurprisingClusteredService implements ClusteredService {
                 progressDeadline = System.nanoTime() + COMMAND_TIMEOUT_NANOS;
                 controlResponse = state.applyDecodedCommand(next.command, next.timestamp, next.position,
                         commandWindow.decodedIfPresent(next.command), false, next.fingerprint);
+                commandProgress++;
                 responseSequence = state.matchingSequence(next.command.header().commandId());
                 matchingResponse = null;
                 continue;
@@ -275,6 +278,7 @@ public final class SurprisingClusteredService implements ClusteredService {
             }
             entry.response = entry.sequence == 0 ? result : null;
             pendingIngress.remove();
+            commandProgress++;
             commandWindowHighWaterMark = Math.max(commandWindowHighWaterMark, commandWindow.size());
         }
     }
@@ -331,6 +335,7 @@ public final class SurprisingClusteredService implements ClusteredService {
                     entry.request.header().response(responseType(entry.request.header())), entry.response);
         }
         commandWindow.removePrefix(drainingSize);
+        commandProgress++;
         drainingSize = 0;
         drainingSequence = 0;
         state.runtimeState.releaseCompletedSequentialLaneStage();
@@ -367,6 +372,7 @@ public final class SurprisingClusteredService implements ClusteredService {
         controlResponse = matchingResponse = null;
         responseSequence = 0;
         pendingIngress.remove();
+        commandProgress++;
         return true;
     }
 
@@ -551,14 +557,27 @@ public final class SurprisingClusteredService implements ClusteredService {
     private void drainFromLogEvent() { pollCommands(); }
 
     /** 只能由持有交易状态的Owner线程调用；不属于Aeron的背景回调。 */
+    void ownerCompletionSignal(Runnable signal) {
+        state.runtimeState.ownerCompletionSignal(signal);
+        state.matcherPipeline.completionSignal(signal);
+    }
+
+    /** 启动尚未收到首条日志时journal未激活；休眠探测只能读完成队列，不能执行运行期健康门禁。 */
+    boolean ownerCompletionAvailable() {
+        return state != null && (state.runtimeState.hasMatchingNotifications()
+                || state.matcherPipeline.hasMatchingCompletions());
+    }
+
     int pollCommands() {
-        int before = pendingCommandCount();
+        long before = commandProgress;
+        long matchingBefore = state.matchingProgressSequence();
         processingLogCallback = true;
         try {
-            pendingResponses.poll(System.nanoTime(), MATCHING_COMPLETION_BATCH_SIZE);
+            int responseWork = pendingResponses.poll(System.nanoTime(), MATCHING_COMPLETION_BATCH_SIZE);
             progressCommands(false);
             int realtimeWork = pendingCommandCount() == 0 ? progressRealtimeReads(System.nanoTime()) : 0;
-            return (before != 0 || pendingCommandCount() != 0 ? 1 : 0) + realtimeWork;
+            return (before != commandProgress || matchingBefore != state.matchingProgressSequence() ? 1 : 0)
+                    + responseWork + realtimeWork;
         } catch (org.agrona.concurrent.AgentTerminationException fatal) {
             throw fatal;
         } catch (RuntimeException failure) {

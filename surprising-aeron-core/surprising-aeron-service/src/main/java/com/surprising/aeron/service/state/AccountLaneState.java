@@ -23,6 +23,8 @@ public final class AccountLaneState {
             Integer.getInteger("surprising.aeron.lane-initial-entities", 1_024));
     private final int laneId;
     private final int queueCapacity;
+    /** 仅当前批量准入的 Lane 写入；新建用户订单索引一次按已知批量大小分配，离开作用域恢复。 */
+    int admissionIndexCapacity = 2;
     private final LongHashSet userIds = new LongHashSet(INITIAL_ENTITY_CAPACITY);
     final LongObjectHashMap<UserRuntime> users = new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
     final LongObjectHashMap<IntObjectHashMap<BalanceRuntime>> balances =
@@ -356,7 +358,7 @@ public final class AccountLaneState {
     private void addActiveOrder(long userId, long orderId) {
         LongHashSet orderIds = activeOrderIdsByUser.get(userId);
         if (orderIds == null) {
-            orderIds = new LongHashSet(2);
+            orderIds = new LongHashSet(admissionIndexCapacity);
             activeOrderIdsByUser.put(userId, orderIds);
         }
         orderIds.add(orderId);

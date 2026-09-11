@@ -25,6 +25,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     private final int sessionWindow = Integer.getInteger("surprising.aeron.capacity-session-in-flight", 64);
     private final boolean operational = Boolean.getBoolean("surprising.aeron.mixed-operational");
     private final boolean tradingStream = operational || Boolean.getBoolean("surprising.aeron.mixed-trading-stream");
+    private final boolean fillHeavy = Boolean.getBoolean("surprising.aeron.mixed-fill-heavy");
     /** 仅压测编排参数；0 保持原页大小，不改变生产服务配置。 */
     private final int controlPageSize;
     private ClusterOperationalSideLoad sideLoad;
@@ -48,6 +49,8 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         if (controlPageSize < 0 || controlPageSize > 64)
             throw new IllegalArgumentException("control page size must be in [0,64]");
         this.controlPageSize = controlPageSize;
+        if (fillHeavy && (!tradingStream || operational))
+            throw new IllegalArgumentException("fill-heavy requires the continuous trading-only workload");
         var capacity = commandCapacity(window, sessionWindow);
         orderId = 200_000_000_000L + seed * 1_000_000;
         // A single FIFO command session preserves dependent place/cancel/IOC ordering without
@@ -59,6 +62,8 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         System.out.printf("mixedConfig globalWindow=%d sessionWindow=%d commandSessions=1 reservedQuerySessions=1 batchSize=%d tradingStream=%s%n",
                 window, sessionWindow, BATCH, tradingStream);
         System.out.printf("mixedControlPageSize=%d%n", controlPageSize);
+        System.out.printf("mixedTradingProfile=%s expectedFillsPerCycle=%d%n",
+                fillHeavy ? "FILL_HEAVY" : "MIXED", SYMBOLS * BATCH * (fillHeavy ? 2 : 1));
         for (int i=0;i<SYMBOLS;i++) { mark[i]=100; fundingId[i]=10_000+i; }
     }
 
@@ -189,6 +194,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
 
     private void runFor(int seconds,boolean measure) {
         drain();
+        CoreLaneMetricsView lanesBefore = measure ? laneMetrics() : null;
         measured=measure;
         if(measure) { offered=terminal=coreOffered=coreTerminal=fills=queries=peak=0;stats.clear();adminRetriesBefore=client.adminActionRetries(); }
         started=lastReport=System.nanoTime(); reportTerminal=0;
@@ -203,8 +209,33 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         if (sideLoad != null && measure) sideLoad.endMeasurement(System.nanoTime());
         if (measure) System.out.println("measurementEndEpochMillis=" + System.currentTimeMillis());
         measured=false;
+        if (measure) printLaneWork(lanesBefore, laneMetrics());
     }
     private long elapsed;
+
+    /** 查询包含 Lane fence，只能放在测量边界之外，不能污染业务尾延迟。 */
+    private CoreLaneMetricsView laneMetrics() {
+        return CoreLaneMetricsCodec.decode(query(CoreMessageType.LANE_METRICS_QUERY, 0, new byte[0]).data());
+    }
+
+    private void printLaneWork(CoreLaneMetricsView before, CoreLaneMetricsView after) {
+        long[] operationsBefore = before.accountLaneCompletedOperations();
+        long[] operationsAfter = after.accountLaneCompletedOperations();
+        long[] nanosBefore = before.accountLaneTotalLatencyNanos();
+        long[] nanosAfter = after.accountLaneTotalLatencyNanos();
+        for (int lane = 0; lane < after.accountLaneCount(); lane++) {
+            for (int operation = 0; operation < CoreLaneMetricsView.OPERATION_TYPE_COUNT; operation++) {
+                int index = lane * CoreLaneMetricsView.OPERATION_TYPE_COUNT + operation;
+                System.out.printf(Locale.ROOT,
+                        "laneWork lane=%d operation=%d completed=%d executionNanos=%d measuredNanos=%d%n",
+                        lane, operation, Math.subtractExact(operationsAfter[index], operationsBefore[index]),
+                        Math.subtractExact(nanosAfter[index], nanosBefore[index]), elapsed);
+            }
+        }
+        System.out.printf("pipelineHighWater matcher=%d completion=%d context=%d lanes=%s%n",
+                after.matcherDispatchHighWaterMark(), after.matchingCompletionHighWaterMark(),
+                after.commandContextHighWaterMark(), Arrays.toString(after.accountLaneQueueHighWaterMarks()));
+    }
 
     private void cycle() {
         // Complete any funding cut before trading the affected symbol; response-dependent pages
@@ -218,9 +249,12 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         for(int i=0;i<SYMBOLS;i++)batch(i,taker(i),CoreOrderSide.BUY,101,1,CoreTimeInForce.IOC);
         for(int i=0;i<SYMBOLS;i++)cancel(maker(i),liquidity[i]);
         for(int i=0;i<SYMBOLS;i++)liquidity[i]=place(i,maker(i),CoreOrderSide.BUY,99,40,CoreTimeInForce.GTC);
+        if (fillHeavy)
+            for(int i=0;i<SYMBOLS;i++)batch(i,taker(i),CoreOrderSide.SELL,99,1,CoreTimeInForce.IOC);
         for(int i=0;i<SYMBOLS;i++)cancel(maker(i),liquidity[i]);
         // Preserve original mixed workload: bid cancellation precedes the sell IOC batch.
-        for(int i=0;i<SYMBOLS;i++)batch(i,taker(i),CoreOrderSide.SELL,99,1,CoreTimeInForce.IOC);
+        if (!fillHeavy)
+            for(int i=0;i<SYMBOLS;i++)batch(i,taker(i),CoreOrderSide.SELL,99,1,CoreTimeInForce.IOC);
         if (tradingStream) return; // FIFO order also spans cycles; no cycle drain in this mode.
         drain();
         for(int n=0;n<32;n++)trigger((lifecycleCursor+n)%SYMBOLS);
@@ -456,13 +490,13 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
             var openOrders = CoreStateQueryCodec.decodeOpenOrders(query(CoreMessageType.USER_OPEN_ORDERS_QUERY,id,
                     CoreStateQueryCodec.encodeOpenOrdersQuery(new CoreOpenOrdersQuery(instrument,0,1))).data());
             if (!openOrders.orders().isEmpty()) throw new IllegalStateException("HFT committed order index retained terminal orders user="+id);
-            var s=user(id);long expectedPosition=(id==maker(i)?-1:1)*totalCycles*BATCH;
+            var s=user(id);long expectedPosition=fillHeavy ? 0 : (id==maker(i)?-1:1)*totalCycles*BATCH;
             long actual=s.positions().stream().filter(p->p.symbol().equals(instrument)).mapToLong(CorePositionView::signedQuantitySteps).sum();
             if(actual!=expectedPosition||!s.reservations().isEmpty())throw new IllegalStateException("HFT position/reservation mismatch user="+id+" expected="+expectedPosition+" actual="+actual);
         }
         if(offered!=terminal||coreOffered!=coreTerminal||peak>window)throw new IllegalStateException("mixed terminal counters disagree");
         if(measuredCycles>0) {
-            if(fills!=measuredCycles*SYMBOLS*BATCH)throw new IllegalStateException("mixed actual fill count mismatch: "+fills);
+            if(fills!=measuredCycles*SYMBOLS*BATCH*(fillHeavy ? 2 : 1))throw new IllegalStateException("mixed actual fill count mismatch: "+fills);
             requireItems(CoreMessageType.PLACE_ORDER_BATCH,measuredCycles*SYMBOLS*BATCH*3);
             requireItems(CoreMessageType.CANCEL_ORDER_BATCH,measuredCycles*SYMBOLS*BATCH);
             requireItems(CoreMessageType.PLACE_ORDER,measuredCycles*SYMBOLS*2);

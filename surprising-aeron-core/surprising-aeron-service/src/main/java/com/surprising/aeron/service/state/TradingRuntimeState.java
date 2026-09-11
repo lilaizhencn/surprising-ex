@@ -1742,6 +1742,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     void publishPlaceAdmissionReady(int laneId, long coreSequence) {
         placeAdmissionReadyQueues[laneId].publish(coreSequence);
         admissionReadyLanes.getAndAccumulate(1L << laneId, SET_READY_BITS);
+        signalOwnerCompletion();
     }
 
     public long takePlaceAdmissionReadyLaneMask() {
@@ -1753,6 +1754,14 @@ public final class TradingRuntimeState implements AutoCloseable {
     public boolean hasMatchingNotifications() {
         assertOwner();
         return hasPlaceAdmissionNotifications() || hasSettlementNotifications();
+    }
+
+    /** 仅唤醒已经声明休眠的 Owner；在发布队列/就绪位后调用，不替代完成队列。 */
+    private volatile Runnable ownerCompletionSignal;
+    public void ownerCompletionSignal(Runnable signal) { assertOwner(); ownerCompletionSignal = signal; }
+    private void signalOwnerCompletion() {
+        Runnable signal = ownerCompletionSignal;
+        if (signal != null) signal.run();
     }
 
     /** Owner 只探测本阶段就绪标记；队列仍是实际结果的唯一来源。 */
@@ -1777,6 +1786,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     void publishMatcherSettlementReady(int laneId, long coreSequence) {
         matcherSettlementReadyQueues[laneId].publish(coreSequence);
         settlementReadyLanes.getAndAccumulate(1L << laneId, SET_READY_BITS);
+        signalOwnerCompletion();
     }
 
     public long takeMatcherSettlementReadyLaneMask() {
@@ -4496,7 +4506,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         balance.reserve(requiredReservation);
         lane.putOrder(order);
         lane.reservations.put(reservation.orderId(), reservation);
-        addUserEntity(lane.reservationIdsByUser, userId, order.orderId());
+        addUserEntity(lane.reservationIdsByUser, userId, order.orderId(), lane.admissionIndexCapacity);
         if (clientKey != 0) putClientOrderIndex(lane, userId, clientKey, order.orderId());
         lane.users.put(userId, advanced);
         lane.markPendingReservation(order.orderId(), coreSequence);
@@ -4801,9 +4811,13 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     static void addUserEntity(LongObjectHashMap<LongHashSet> index, long userId, long entityId) {
+        addUserEntity(index, userId, entityId, 2);
+    }
+
+    private static void addUserEntity(LongObjectHashMap<LongHashSet> index, long userId, long entityId, int capacity) {
         LongHashSet entities = index.get(userId);
         if (entities == null) {
-            entities = new LongHashSet(2);
+            entities = new LongHashSet(capacity);
             index.put(userId, entities);
         }
         entities.add(entityId);
@@ -4819,7 +4833,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     static void putClientOrderIndex(AccountLaneState lane, long userId, long clientKey, long orderId) {
         LongLongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
         if (userClientOrders == null) {
-            userClientOrders = new LongLongHashMap(2);
+            userClientOrders = new LongLongHashMap(lane.admissionIndexCapacity);
             lane.clientOrderIndex.put(userId, userClientOrders);
         }
         boolean hadPrevious = userClientOrders.containsKey(clientKey);

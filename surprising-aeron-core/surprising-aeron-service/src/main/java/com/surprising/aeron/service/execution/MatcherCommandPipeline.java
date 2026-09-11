@@ -34,6 +34,17 @@ final class MatcherCommandPipeline implements AutoCloseable {
     private volatile Throwable shutdownFailure;
     private final int workerId;
     private volatile BackgroundRead<?> backgroundRead;
+    private volatile Runnable completionSignal;
+    void completionSignal(Runnable signal) { completionSignal = signal; }
+    /** 先声明休眠再重读队列，避免发布与休眠交错后只能等待定时唤醒。 */
+    private volatile boolean parkRequested;
+    private static final java.lang.invoke.VarHandle PARK_REQUESTED;
+    static {
+        try {
+            PARK_REQUESTED = java.lang.invoke.MethodHandles.lookup().findVarHandle(
+                    MatcherCommandPipeline.class, "parkRequested", boolean.class);
+        } catch (ReflectiveOperationException failure) { throw new ExceptionInInitializerError(failure); }
+    }
     <T> java.util.concurrent.CompletableFuture<T> readAtSubmissionFence(Supplier<T> read) {
         if (!accepting || backgroundRead != null) return java.util.concurrent.CompletableFuture.failedFuture(
                 new RejectedExecutionException("matcher read mailbox unavailable"));
@@ -124,7 +135,7 @@ final class MatcherCommandPipeline implements AutoCloseable {
         submittedPosition.value = position + 1;
         int depth = Math.toIntExact(position + 1 - consumedPosition.value);
         submissionHighWaterMark = Math.max(submissionHighWaterMark, depth);
-        if (position == workerPosition.value) LockSupport.unpark(worker);
+        if (parkRequested && PARK_REQUESTED.compareAndSet(this, true, false)) LockSupport.unpark(worker);
     }
 
     CoreMatchingResult poll(long expectedCoreSequence) {
@@ -240,7 +251,13 @@ final class MatcherCommandPipeline implements AutoCloseable {
             }
             if (position >= submitted) {
                 if (idle++ < WORKER_IDLE_SPINS) Thread.onSpinWait();
-                else LockSupport.parkNanos(this, WORKER_IDLE_PARK_NANOS);
+                else {
+                    parkRequested = true;
+                    try {
+                        if (accepting && position >= submittedPosition.value && backgroundRead == null)
+                            LockSupport.parkNanos(this, WORKER_IDLE_PARK_NANOS);
+                    } finally { parkRequested = false; }
+                }
                 continue;
             }
             idle = 0;
@@ -258,6 +275,8 @@ final class MatcherCommandPipeline implements AutoCloseable {
             position++;
             workerPosition.value = position;
             completedPosition.value = position;
+            Runnable signal = completionSignal;
+            if (signal != null) signal.run();
             completionHighWaterMark = Math.max(completionHighWaterMark,
                     Math.toIntExact(position - consumedPosition.value));
         }

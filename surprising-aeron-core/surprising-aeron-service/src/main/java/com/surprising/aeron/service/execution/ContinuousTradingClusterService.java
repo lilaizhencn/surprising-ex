@@ -56,6 +56,7 @@ public final class ContinuousTradingClusterService implements ClusteredService {
     private Cluster cluster;
     private OwnerLogContext logContext;
     private final SurprisingClusteredService processor;
+    private final OwnerIdleStrategy ownerIdle = new OwnerIdleStrategy(this::ownerWorkAvailable);
     /** 可替换的会话传输实现，隔离集群业务回调与只读终态出口。 */
     private final EgressFactory egressFactory;
     @FunctionalInterface
@@ -88,6 +89,7 @@ public final class ContinuousTradingClusterService implements ClusteredService {
         boundary(() -> {
             processor.onStart(logContext, null);
             if (restored != null) processor.restoreSnapshot(restored);
+            processor.ownerCompletionSignal(ownerIdle::signal);
             return null;
         }, false);
     }
@@ -192,7 +194,7 @@ public final class ContinuousTradingClusterService implements ClusteredService {
     }
 
     private void runOwner() {
-        var idle = new BackoffIdleStrategy(100, 10, 1_000, 100_000);
+        ownerIdle.bindOwner();
         boolean initialized = false;
         try {
             while (!stopping) {
@@ -210,7 +212,7 @@ public final class ContinuousTradingClusterService implements ClusteredService {
                     work++;
                 }
                 if (initialized && !stopping) work += processor.pollCommands();
-                idle.idle(work);
+                ownerIdle.idle(work, processor.pendingCommandCount() != 0);
             }
         } catch (Throwable fatal) { failure = fatal; }
         finally {
@@ -226,6 +228,11 @@ public final class ContinuousTradingClusterService implements ClusteredService {
         while (bytes > INPUT_BYTES - (inputProduced - inputConsumed) || !input.offer(event))
             awaitProgress(deadline);
         inputProduced += bytes;
+        ownerIdle.signal();
+    }
+
+    private boolean ownerWorkAvailable() {
+        return !input.isEmpty() || processor.ownerCompletionAvailable();
     }
 
     private <T> T boundary(Supplier<T> action, boolean finish) {

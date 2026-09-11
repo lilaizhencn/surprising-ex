@@ -19,6 +19,10 @@ final class MatcherPipelineGroup implements AutoCloseable {
     private final MatcherCommandPipeline[] shards;
     private final LongIntHashMap shardByToken;
 
+    void completionSignal(Runnable signal) {
+        for (MatcherCommandPipeline shard : shards) shard.completionSignal(signal);
+    }
+
     MatcherPipelineGroup(int shardCount, int capacityPerShard, boolean startImmediately) {
         if (shardCount <= 0 || (shardCount & (shardCount - 1)) != 0) {
             throw new IllegalArgumentException("matcher shard count must be a power of two");

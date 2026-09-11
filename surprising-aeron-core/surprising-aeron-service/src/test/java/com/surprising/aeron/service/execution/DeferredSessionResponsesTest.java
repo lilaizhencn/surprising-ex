@@ -36,12 +36,13 @@ class DeferredSessionResponsesTest {
             queue.offer(session.handle, new UnsafeBuffer(new byte[]{1}), 1, 0);
         }
         sessions.getLast().result = 1;
-        assertThat(queue.poll(1, 64)).isEqualTo(64);
-        assertThat(queue.poll(2, 64)).isEqualTo(64);
+        assertThat(queue.poll(1, 64)).isZero();
+        assertThat(queue.poll(2, 64)).isZero();
         assertThat(sessions.getLast().received).isEmpty();
-        assertThat(queue.poll(3, 64)).isEqualTo(64);
+        assertThat(queue.poll(3, 64)).isOne();
         assertThat(sessions.getLast().received).containsExactly(1);
         assertThat(queue.size()).isEqualTo(129);
+        assertThat(sessions.stream().mapToInt(s -> s.offers).sum()).isEqualTo(130 + 3 * 64);
     }
 
     @Test void expiryOnlyClosesSlowSessionAndReleasesItsCapacity() {

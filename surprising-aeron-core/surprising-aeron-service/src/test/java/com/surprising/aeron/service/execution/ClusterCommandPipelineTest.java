@@ -24,6 +24,17 @@ import org.junit.jupiter.params.provider.EnumSource;
 class ClusterCommandPipelineTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
+    void idleProbeBeforeTheFirstLogDoesNotRequireAnActivatedCommitJournal(ProductLine product) {
+        try (Fixture live = new Fixture(product)) {
+            live.service.ownerCompletionSignal(() -> {});
+            assertThat(live.service.ownerCompletionAvailable()).isFalse();
+            assertThat(live.service.pollCommands()).isZero();
+            assertThat(live.service.ownerCompletionAvailable()).isFalse();
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
     void deferredIngressPreservesDependentBatchOrderAndSnapshot(ProductLine product) {
         try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
             serial.applyAll(live.setup());
@@ -131,6 +142,9 @@ class ClusterCommandPipelineTest {
                 }
                 // 外部通知耗尽后反复轮询仍不提前提交；解除前序阻塞后必须自行恢复推进。
                 for (int spin = 0; spin < 1024; spin++) live.service.pollCommands();
+                assertThat(live.service.pollCommands())
+                        .as("waiting for a blocked matcher must allow the Owner idle strategy to back off")
+                        .isZero();
                 assertThat(gate.isDone()).isFalse();
                 assertThat(state.firstPendingMatchingSequence()).isEqualTo(firstSequence);
                 assertThat(live.responses).isEmpty();

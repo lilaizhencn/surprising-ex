@@ -150,3 +150,12 @@ multi-match、missing 与 fresh exact FQCN/简单类名成功场景，不会启�
 ## 现货批量改单结算与故障等待回归
 
 `ClusteredBatchTradingBenchmark.batchAmendRoundTripTrades` 固定256请求波次，使用真实服务日志回调、matcher和Account Lane完成双向批量改单成交；`batchSize=2`时每cycle2560业务操作、1536 Core消息、1024批次/2048条目及1024成交。SPOT用户卖出全部持有资产后改单，必须复用原单冻结；六产品线teardown均校验用户/maker资金、冻结、持仓、终态回收和快照恢复。采样参数、结果和未测范围统一见根目录 `PERFORMANCE_VALIDATION.md`，本地闭环fixture不能代表生产API/WS尾延迟或无内存泄漏。
+# 连续单节点性能诊断补充
+
+`ClusterOperationalBenchmark.continuousOperations` 的 `inFlightWindow=64/128` 必须与节点的 `surprising.aeron.owner-command-window` 一致。`tradingProfile=MIXED` 保持原混合交易组成；`FILL_HEAVY` 将卖出 IOC 提前到买方做市单撤销前，同样的请求数产生双倍成交，检查周期末做市与吃单账户持仓归零。后者要求 `surprising.aeron.mixed-trading-stream=true`、`surprising.aeron.mixed-operational=false`。两个场景分别统计，不能混为一种吞吐结果。
+
+压测器在测量前后通过真实 Cluster 查询 Lane 计数，输出 `laneWork` 中各 Lane、各操作类型的执行次数和累计执行纳秒差，以及 `pipelineHighWater`。这些查询含有控制边界，位于计时之外；累计执行时间包含线程调度和停顿，需结合线程 CPU/JFR 判断业务饱和，不能直接当成 CPU 利用率。Owner 的待完成命令和响应背压不再使无进展轮询报告有效工作。Matcher 使用声明休眠后重查队列的通知握手。
+
+Owner 的入口和 Matcher/Lane 完成通知采用声明休眠后重查的合并唤醒；共享通知标记与 Owner 每轮修改的退避计数隔开。有效工作计数只表达实际进展，高负载下 Owner CPU 仍可能接近一核，不能据此认定全部时间都在处理业务。
+
+在途命令的连续轮询与有效工作计数分开：`pollCommands()` 无实际进展时返回0，但 Owner 在仍有在途命令时继续推进，只有完全空闲才退避。等待路径不在每次流水线重查之间额外插入 `onSpinWait`、yield 或 park；降低等待CPU不能以损失吞吐和尾延迟为代价。

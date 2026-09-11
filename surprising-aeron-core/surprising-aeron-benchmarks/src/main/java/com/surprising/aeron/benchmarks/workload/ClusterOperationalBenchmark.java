@@ -17,8 +17,11 @@ public class ClusterOperationalBenchmark {
     @Param({"0", "1", "2", "4", "8", "64"})
     public int controlPageSize;
     /** 客户端实际在途档位；外部节点须以对应owner-command-window启动，不能由客户端冒充服务端配置。 */
-    @Param({"128"})
+    @Param({"64", "128"})
     public int inFlightWindow;
+    /** 同一真实链路分别覆盖原混合负载、双向成交结算负载；不能混合统计。 */
+    @Param({"MIXED"})
+    public String tradingProfile;
     private ClusterMixedCapacityMain workload;
 
     @Setup(Level.Trial)
@@ -26,6 +29,9 @@ public class ClusterOperationalBenchmark {
         ClusterMixedCapacityMain.commandCapacity(inFlightWindow, inFlightWindow);
         System.setProperty("surprising.aeron.capacity-async-in-flight", Integer.toString(inFlightWindow));
         System.setProperty("surprising.aeron.capacity-session-in-flight", Integer.toString(inFlightWindow));
+        if (!"MIXED".equals(tradingProfile) && !"FILL_HEAVY".equals(tradingProfile))
+            throw new IllegalArgumentException("unknown trading profile: " + tradingProfile);
+        System.setProperty("surprising.aeron.mixed-fill-heavy", Boolean.toString("FILL_HEAVY".equals(tradingProfile)));
         workload = new ClusterMixedCapacityMain(controlPageSize);
         try {
             workload.verifyDependencyCollisionCoverage();

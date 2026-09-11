@@ -482,9 +482,7 @@ final class OrderBatchExecutor {
         CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
         try {
             applyOrderBatchMatcherResult(batch, item, pending, matchingResult);
-            TradingCoreRuntime.addMatchingUserIds(batch.changedUserIds, pending.command().header().userId(),
-                    matchingResult.matcherEvents());
-            batch.collectChangedOrderIds(item, matchingResult);
+            batch.collectChangedOrderIds(item, pending.command().header().userId(), matchingResult);
             for (int index = 0; index < batch.itemChangedOrderIds.size(); index++) {
                 long orderId = batch.itemChangedOrderIds.valueAt(index);
                 batch.admissionOrderIndex.update(owner.runtimeState.currentPatchOrderBefore(orderId),
@@ -536,9 +534,7 @@ final class OrderBatchExecutor {
                     ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
             try {
                 applyOrderBatchMatcherResult(batch, item, pending, matchingResult);
-                TradingCoreRuntime.addMatchingUserIds(batch.changedUserIds,
-                        pending.command().header().userId(), matchingResult.matcherEvents());
-                batch.collectChangedOrderIds(item, matchingResult);
+                batch.collectChangedOrderIds(item, pending.command().header().userId(), matchingResult);
                 appendOrderBatchResult(batch, item, status, resultCode);
                 batch.nextIndex++;
             } catch (CoreStateRejectedException | ArithmeticException | IllegalArgumentException exception) {
