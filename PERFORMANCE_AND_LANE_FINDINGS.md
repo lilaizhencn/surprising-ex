@@ -316,7 +316,7 @@ Owner 需要按顺序提交和恢复，但目前同时维护了较多业务计�
 
 验证：`mvn -pl surprising-aeron-core/surprising-aeron-service -am test`，820 tests，0 failures/errors。此次未重新执行 GCP 16c32g 64/128 的吞吐压测，因此 CPU、吞吐和 p99 的收益仍需下一轮短测确认；Matcher→Lane 绕过 Owner 的直接路径（第 1 项）仍受 sequence、回滚和权威状态约束，详见下一节。
 
-## 5. 本轮顺序修复
+## 6. 本轮顺序修复
 
 - **Matcher completion 热路径**：`MatcherCommandPipeline` 在 Matcher worker 发布槽位时绑定 `coreSequence`。Owner 的 `publishMatchingCompletion` 只校验并转交不可变结果，不再在 `drainMatchingCompletions` 中调用 `withCoreSequence` 创建第二个 `CoreMatchingResult`。控制命令仍保持原返回类型。
 - **Lane 冷状态边界**：新增 `LaneColdState`，将清算、风险快照、杠杆、算法单和触发单及其反向索引从 `AccountLaneState` 热对象移出；仍由原 Lane 单线程拥有，快照、回滚、查询和状态哈希沿原路径访问。订单、余额、预留、持仓及其成交索引保持热路径布局。
