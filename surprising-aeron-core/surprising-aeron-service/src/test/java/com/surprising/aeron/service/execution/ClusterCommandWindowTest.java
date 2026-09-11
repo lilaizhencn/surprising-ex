@@ -6,6 +6,69 @@ import com.surprising.aeron.service.state.TradingDependencyMask;
 import org.junit.jupiter.api.Test;
 
 class ClusterCommandWindowTest {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {64, 128, 256, 512, 1024})
+    void segmentedSlotsMatchSerialDependenciesAcrossRandomWraps(int capacity) {
+        var window = new ClusterCommandWindow(capacity);
+        var accounts = new java.util.ArrayList<Long>();
+        var orders = new java.util.ArrayList<Long>();
+        var random = new java.util.Random(9191);
+        for (int step = 0; step < capacity * 12; step++) {
+            if (accounts.size() == capacity || !accounts.isEmpty() && random.nextInt(5) == 0) {
+                int remove = 1 + random.nextInt(Math.min(83, accounts.size()));
+                window.removePrefix(remove);
+                accounts.subList(0, remove).clear(); orders.subList(0, remove).clear();
+            }
+            long account = 1 + random.nextInt(capacity * 2), order = 1 + random.nextInt(capacity * 2);
+            window.resetCandidate(account); window.candidateOrder(order);
+            int expected = 0;
+            for (int i = 0; i < accounts.size(); i++)
+                if (accounts.get(i) == account || orders.get(i) == order) expected = i + 1;
+            assertThat(window.conflictingPrefixSize()).as("capacity=%s step=%s", capacity, step).isEqualTo(expected);
+            window.add(null, null, step, step);
+            accounts.add(account); orders.add(order);
+        }
+        window.clear();
+        for (long order : orders) {
+            window.resetCandidate(0); window.candidateOrder(order);
+            assertThat(window.conflicts()).isFalse();
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {64, 256, 512, 1024})
+    void fullWrappedWindowKeepsSymbolAndOrderDependenciesInDifferentWords(int capacity) {
+        var window = new ClusterCommandWindow(capacity);
+        for (int i = 0; i < capacity - 17; i++) {
+            window.resetCandidate(0); window.add(null, null, 0, 0); window.removePrefix(1);
+        }
+        for (int i = 0; i < capacity; i++) {
+            window.resetCandidate(0);
+            window.candidateOrder(i % 65 + 1, "SYMBOL-" + i, null, 0);
+            window.add(null, null, 0, 0).sequence = 1000 + i;
+        }
+        assertThat(window.capacity()).isEqualTo(capacity);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> window.add(null, null, 0, 0))
+                .isInstanceOf(IllegalStateException.class);
+        for (int i = 0; i < capacity; i++) {
+            window.resetCandidate(0); window.candidateOrder(99999, "SYMBOL-" + i, null, 0);
+            assertThat(window.conflictingPrefixSize()).isEqualTo(i + 1);
+        }
+        window.removePrefix(capacity - 1);
+        window.resetCandidate(0); window.candidateOrder((capacity - 1) % 65 + 1);
+        assertThat(window.conflictingPrefixSize()).isOne();
+        assertThat(window.get(0).sequence).isEqualTo(1000 + capacity - 1);
+        window.clear();
+        assertThat(window.conflicts()).isFalse();
+    }
+
+    @Test
+    void rejectsCapacitiesThatAliasOrExceedBoundedWindow() {
+        for (int value : new int[]{0, 32, 65, 192, 2048})
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> new ClusterCommandWindow(value))
+                    .isInstanceOf(IllegalArgumentException.class);
+    }
+
     @Test
     void duplicateOrderAcrossSlotsRetainsNewestDependencyUntilBothAreRemoved() {
         var w = new ClusterCommandWindow();

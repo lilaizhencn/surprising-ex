@@ -228,7 +228,7 @@ public final class SurprisingClusteredService implements ClusteredService {
             if (drainingSize == 0 && commandWindow.size() != 0) beginCommandPrefix();
             // 本轮未收到完成时仍准入独立命令；不为每个新准入项重跑整套完成收集。
             if (drainingSize != 0 && !awaitingCompletion) awaitingCompletion = !pollCommandPrefix();
-            if (commandWindow.size() == ClusterCommandWindow.CAPACITY) return;
+            if (commandWindow.size() == commandWindow.capacity()) return;
             if (activeControl != null) {
                 if (!pollControl()) return;
                 continue;

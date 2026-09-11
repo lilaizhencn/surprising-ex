@@ -421,14 +421,14 @@ class ClusterCommandPipelineTest {
         try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
             serial.applyAll(live.setup());
             String asset = ContractType.valueOf(product.contractTypeCode()).isInverse() ? "BTC" : "USDT";
-            for (int i = 0; i < ClusterCommandWindow.CAPACITY; i++) {
+            for (int i = 0; i < ClusterCommandWindow.DEFAULT_CAPACITY; i++) {
                 var funds = live.message(CoreMessageType.ADJUST_BALANCE, 10000 + i,
                         TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 20000)));
                 live.apply(funds);
                 serial.apply(funds);
             }
             var orders = new ArrayList<CoreMessage>();
-            for (int i = 0; i < ClusterCommandWindow.CAPACITY; i++)
+            for (int i = 0; i < ClusterCommandWindow.DEFAULT_CAPACITY; i++)
                 orders.add(live.place(10000 + i, "BTC-USDT", 1000 + i, 80, 1, CoreOrderSide.BUY));
             orders.forEach(live::send);
             // 满窗口本身就是确定性提交边界；后续日志回调只轮询，不再注入额外timer栅栏。

@@ -9,24 +9,26 @@ import io.aeron.cluster.service.ClientSession;
 
 /** Owner-only bounded in-flight response contexts. Dependency ownership lasts until a log-driven drain. */
 final class ClusterCommandWindow {
-    static final int CAPACITY = 64;
-    private final Entry[] entries = new Entry[CAPACITY];
+    static final int DEFAULT_CAPACITY = 256;
+    /** 固定容量、Owner独占；容量必须为64的整数倍且为二次幂。 */
+    private final Entry[] entries;
+    private final int indexMask;
     private int head, size;
     /** 掩码每一位对应哪些物理窗口槽；仅跳过不相交项，精确依赖规则不变。 */
-    private final long[] accountSlots = new long[64], symbolSlots = new long[64];
-    /** 精确订单ID到物理窗口槽位；仅Owner写入，移出窗口立即删除，不保存业务状态。 */
+    private final long[] accountSlots, symbolSlots;
+    /** 订单ID到最新物理槽位+1。只按FIFO移除，旧槽退窗不能删除较新槽的依赖。 */
     private final org.agrona.collections.Long2LongHashMap orderSlots =
             new org.agrona.collections.Long2LongHashMap(0);
 
-    private static long intersectingSlots(long[] slots, long mask) {
+    private static long intersectingSlots(long[] slots, long mask, int word) {
         long result = 0;
-        while (mask != 0) { int bit = Long.numberOfTrailingZeros(mask); mask &= mask - 1; result |= slots[bit]; }
+        while (mask != 0) { int bit = Long.numberOfTrailingZeros(mask); mask &= mask - 1; result |= slots[word * 64 + bit]; }
         return result;
     }
-    private static void indexSlots(long[] slots, long mask, long slot, boolean add) {
+    private static void indexSlots(long[] slots, long mask, int word, long slot, boolean add) {
         while (mask != 0) {
             int bit = Long.numberOfTrailingZeros(mask); mask &= mask - 1;
-            if (add) slots[bit] |= slot; else slots[bit] &= ~slot;
+            if (add) slots[word * 64 + bit] |= slot; else slots[word * 64 + bit] &= ~slot;
         }
     }
     private final long[] candidateOrders = new long[20];
@@ -106,6 +108,17 @@ final class ClusterCommandWindow {
     }
 
     ClusterCommandWindow() {
+        this(Integer.parseInt(System.getProperty("surprising.aeron.owner-command-window",
+                Integer.toString(DEFAULT_CAPACITY))));
+    }
+
+    ClusterCommandWindow(int capacity) {
+        if (capacity < 64 || capacity > 1024 || Integer.bitCount(capacity) != 1)
+            throw new IllegalArgumentException("owner command window must be a power of two in [64,1024]");
+        entries = new Entry[capacity];
+        indexMask = capacity - 1;
+        accountSlots = new long[capacity];
+        symbolSlots = new long[capacity];
         for (int i = 0; i < entries.length; i++) entries[i] = new Entry();
     }
 
@@ -114,14 +127,34 @@ final class ClusterCommandWindow {
     }
 
     int conflictingPrefixSize() {
-        long exactOrders = 0;
-        for (int a = 0; a < candidateOrderCount; a++) exactOrders |= orderSlots.get(candidateOrders[a]);
-        long candidates = Long.rotateRight(intersectingSlots(accountSlots, candidateAccounts)
-                | intersectingSlots(symbolSlots, candidateSymbols) | exactOrders, head);
-        exactOrders = Long.rotateRight(exactOrders, head);
+        int exactPrefix = 0;
+        for (int a = 0; a < candidateOrderCount; a++) {
+            long slot = orderSlots.get(candidateOrders[a]);
+            if (slot != 0) exactPrefix = Math.max(exactPrefix, (((int) slot - 1 - head) & indexMask) + 1);
+        }
+        // 按逻辑新到旧遍历64槽分段；头尾可在同一物理字内，必须裁剪到有效区间。
+        int remaining = size;
+        int physical = (head + size - 1) & indexMask;
+        while (remaining > exactPrefix) {
+            int word = physical >>> 6;
+            int highBit = physical & 63;
+            int count = Math.min(remaining - exactPrefix, highBit + 1);
+            long active = (-1L >>> (63 - highBit)) & (-1L << (highBit + 1 - count));
+            int conflict = conflictingWord(word, active);
+            if (conflict != 0) return conflict;
+            remaining -= count;
+            physical = (physical - count) & indexMask;
+        }
+        return exactPrefix;
+    }
+
+    private int conflictingWord(int word, long active) {
+        long candidates = (intersectingSlots(accountSlots, candidateAccounts, word)
+                | intersectingSlots(symbolSlots, candidateSymbols, word)) & active;
         while (candidates != 0) {
-            int i = 63 - Long.numberOfLeadingZeros(candidates);
-            candidates &= ~(1L << i);
+            int bit = 63 - Long.numberOfLeadingZeros(candidates);
+            candidates &= ~(1L << bit);
+            int i = ((word * 64 + bit) - head) & indexMask;
             Entry entry = get(i);
             if ((entry.symbols & candidateSymbols) != 0) {
                 for (int a = 0; a < candidateScopeCount; a++)
@@ -132,7 +165,6 @@ final class ClusterCommandWindow {
                                         entry.sides[b], entry.prices[b]))) return i + 1;
             }
             if ((entry.accounts & candidateAccounts) != 0 && accountsConflict(entry)) return i + 1;
-            if ((exactOrders & (1L << i)) != 0) return i + 1;
         }
         return 0;
     }
@@ -169,7 +201,7 @@ final class ClusterCommandWindow {
     }
 
     Entry add(ClientSession session, CoreMessage request, long timestamp, long position) {
-        if (size == CAPACITY) throw new IllegalStateException("cluster command window is full");
+        if (size == entries.length) throw new IllegalStateException("cluster command window is full");
         Entry entry = get(size++);
         entry.session = session;
         entry.request = request;
@@ -179,14 +211,16 @@ final class ClusterCommandWindow {
         entry.userId = candidateUser;
         entry.symbols = candidateSymbols;
         entry.scopeCount = candidateScopeCount;
-        long windowSlot = 1L << ((head + size - 1) & 63);
-        indexSlots(accountSlots, entry.accounts, windowSlot, true);
-        indexSlots(symbolSlots, entry.symbols, windowSlot, true);
+        int physical = (head + size - 1) & indexMask;
+        int word = physical >>> 6;
+        long windowSlot = 1L << (physical & 63);
+        indexSlots(accountSlots, entry.accounts, word, windowSlot, true);
+        indexSlots(symbolSlots, entry.symbols, word, windowSlot, true);
         entry.orderCount = candidateOrderCount;
         for (int i = 0; i < candidateOrderCount; i++) {
             long orderId = candidateOrders[i];
             entry.orders[i] = orderId;
-            orderSlots.put(orderId, orderSlots.get(orderId) | windowSlot);
+            orderSlots.put(orderId, physical + 1L);
         }
         System.arraycopy(candidateOrderSymbols, 0, entry.orderSymbols, 0, candidateScopeCount);
         System.arraycopy(candidateSides, 0, entry.sides, 0, candidateScopeCount);
@@ -209,7 +243,8 @@ final class ClusterCommandWindow {
     }
 
     int size() { return size; }
-    Entry get(int index) { return entries[(head + index) & (CAPACITY - 1)]; }
+    int capacity() { return entries.length; }
+    Entry get(int index) { return entries[(head + index) & indexMask]; }
 
     void clear() {
         removePrefix(size);
@@ -221,13 +256,14 @@ final class ClusterCommandWindow {
         if (count < 0 || count > size) throw new IllegalArgumentException("invalid window prefix");
         for (int i = 0; i < count; i++) {
             Entry entry = get(i);
-            long slot = 1L << ((head + i) & 63);
-            indexSlots(accountSlots, entry.accounts, slot, false);
-            indexSlots(symbolSlots, entry.symbols, slot, false);
+            int physical = (head + i) & indexMask;
+            int word = physical >>> 6;
+            long slot = 1L << (physical & 63);
+            indexSlots(accountSlots, entry.accounts, word, slot, false);
+            indexSlots(symbolSlots, entry.symbols, word, slot, false);
             for (int k = 0; k < entry.orderCount; k++) {
                 long id = entry.orders[k];
-                long remaining = orderSlots.get(id) & ~slot;
-                if (remaining == 0) orderSlots.remove(id); else orderSlots.put(id, remaining);
+                if (orderSlots.get(id) == physical + 1L) orderSlots.remove(id);
             }
             entry.orderCount = 0;
             entry.session = null;
@@ -240,7 +276,7 @@ final class ClusterCommandWindow {
             java.util.Arrays.fill(entry.sides, 0, entry.scopeCount, null);
             entry.scopeCount = 0;
         }
-        head = (head + count) & (CAPACITY - 1);
+        head = (head + count) & indexMask;
         size -= count;
     }
 
