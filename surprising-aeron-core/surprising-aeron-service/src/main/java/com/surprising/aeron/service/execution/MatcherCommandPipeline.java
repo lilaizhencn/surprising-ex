@@ -267,7 +267,13 @@ final class MatcherCommandPipeline implements AutoCloseable {
                 slot.failure = new IllegalStateException("matcher command publication gap");
             } else {
                 try {
-                    slot.result = command.get();
+                    Object result = command.get();
+                    // Bind the Core sequence on the matcher worker while the completion is
+                    // already in its slot.  The owner only publishes the immutable result
+                    // into its sequence context; it no longer allocates a second
+                    // CoreMatchingResult on the hot drain path.
+                    slot.result = slot.token > 0 && result instanceof CoreMatchingResult matchingResult
+                            ? matchingResult.withCoreSequence(slot.token) : result;
                 } catch (Throwable failure) {
                     slot.failure = failure;
                 }

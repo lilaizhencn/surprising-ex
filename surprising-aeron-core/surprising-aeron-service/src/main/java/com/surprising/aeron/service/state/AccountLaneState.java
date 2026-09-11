@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.state;
 
-import com.surprising.aeron.service.state.model.CoreAlgoOrderState;
 import com.surprising.aeron.service.state.model.CoreLeverageKey;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 
@@ -15,8 +14,6 @@ import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 import java.util.Map;
-import java.util.HashMap;
-import java.util.HashSet;
 
 public final class AccountLaneState {
     private static final int INITIAL_ENTITY_CAPACITY = Math.max(16,
@@ -41,44 +38,30 @@ public final class AccountLaneState {
             new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
     final IntObjectHashMap<LongObjectHashMap<LongHashSet>> positionKeysBySymbolAndUser
             = new IntObjectHashMap<>();
-    final LongObjectHashMap<LiquidationRuntime> liquidations = new LongObjectHashMap<>();
-    final LongObjectHashMap<IntObjectHashMap<LongObjectHashMap<Long>>> activeLiquidationIndex
-            = new LongObjectHashMap<>();
-    final LongObjectHashMap<RiskSnapshotRuntime> riskSnapshots = new LongObjectHashMap<>();
     final LongObjectHashMap<LongLongHashMap> clientOrderIndex =
             new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
     final OrderClientKeyIndex clientKeysByOrderId = new OrderClientKeyIndex();
-    final Map<CoreLeverageKey, Long> leverages = new HashMap<>();
-    final LongObjectHashMap<HashSet<CoreLeverageKey>> leverageKeysByUser = new LongObjectHashMap<>();
-    /**
-     * Lane-owned numeric indexes stay primitive all the way through the settlement path.  These
-     * used to be boxed {@code HashMap<Long, ...>} instances even though their keys are already
-     * monotonic primitive ids; that created a Long object for every insert/update and made the
-     * lane state inconsistent with the other primitive indexes.
-     */
-    final LongObjectHashMap<CoreAlgoOrderState> algoOrders = new LongObjectHashMap<>();
-    final LongObjectHashMap<CoreTriggerOrderState> triggerOrders = new LongObjectHashMap<>();
-    // Lane-owned lookup for placement checks; rebuilt from authoritative triggers on restore.
-    final LongObjectHashMap<LongHashSet> triggerIdsByUser = new LongObjectHashMap<>();
+    /** 风险、清算、杠杆、算法单和触发单等低频结构与热状态分离。 */
+    final LaneColdState cold = new LaneColdState();
 
     CoreTriggerOrderState putTrigger(CoreTriggerOrderState value) {
-        CoreTriggerOrderState previous = triggerOrders.put(value.triggerOrderId(), value);
+        CoreTriggerOrderState previous = cold.triggerOrders.put(value.triggerOrderId(), value);
         if (previous != null && previous.userId() != value.userId()) unindexTrigger(previous);
-        triggerIdsByUser.getIfAbsentPut(value.userId(), LongHashSet::new).add(value.triggerOrderId());
+        cold.triggerIdsByUser.getIfAbsentPut(value.userId(), LongHashSet::new).add(value.triggerOrderId());
         return previous;
     }
 
     CoreTriggerOrderState removeTrigger(long id) {
-        CoreTriggerOrderState previous = triggerOrders.remove(id);
+        CoreTriggerOrderState previous = cold.triggerOrders.remove(id);
         if (previous != null) unindexTrigger(previous);
         return previous;
     }
 
     private void unindexTrigger(CoreTriggerOrderState value) {
-        LongHashSet ids = triggerIdsByUser.get(value.userId());
+        LongHashSet ids = cold.triggerIdsByUser.get(value.userId());
         if (ids == null) throw new IllegalStateException("trigger user index is missing");
         ids.remove(value.triggerOrderId());
-        if (ids.isEmpty()) triggerIdsByUser.remove(value.userId());
+        if (ids.isEmpty()) cold.triggerIdsByUser.remove(value.userId());
     }
     final LongLongHashMap pendingReservationSequences = new LongLongHashMap();
     private final LongIntHashMap pendingReservationCountsByUser = new LongIntHashMap();
@@ -640,14 +623,14 @@ public final class AccountLaneState {
         hash = mixMap(hash, orders);
         hash = mixMap(hash, reservations);
         hash = mixMap(hash, positions);
-        hash = mixMap(hash, liquidations);
-        hash = mixMap(hash, riskSnapshots);
-        for (Map.Entry<CoreLeverageKey, Long> entry : leverages.entrySet()) {
+        hash = mixMap(hash, cold.liquidations);
+        hash = mixMap(hash, cold.riskSnapshots);
+        for (Map.Entry<CoreLeverageKey, Long> entry : cold.leverages.entrySet()) {
             hash = mixText(hash, entry.getKey());
             hash = mix(hash, entry.getValue());
         }
-        hash = mixPrimitiveMap(hash, algoOrders);
-        hash = mixPrimitiveMap(hash, triggerOrders);
+        hash = mixPrimitiveMap(hash, cold.algoOrders);
+        hash = mixPrimitiveMap(hash, cold.triggerOrders);
         return hash == 0 ? 1 : hash;
     }
 

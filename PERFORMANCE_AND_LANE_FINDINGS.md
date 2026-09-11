@@ -52,8 +52,8 @@
 
 **解决方案**
 
-- 将 Matcher completion 转换为按 Lane 分片的 LaneDelta，直接写入 Lane 的单写者输入队列。
-- Owner 只处理顺序确认、跨 Lane 聚合和外部可见结果，不再逐 completion 重建 Lane 状态。
+- Matcher completion 在 worker 槽位绑定 sequence；Owner 完成一次 plan 校验后，按 Lane 派发不可变 `MatcherSettlementEvent`，事件只进入对应 Lane 的单写者输入队列。
+- Owner 只处理顺序确认、跨 Lane 聚合和外部可见结果，不再为 completion 重新复制 `CoreMatchingResult`；Lane 负责状态应用和 `LaneDelta` 生成。
 - 保留 sequence、终态和失败回滚语义，不能让 Matcher 直接修改 Owner 可读的共享 Map。
 - 在改造前增加 match -> lane apply -> prepare -> publish -> owner commit 分阶段计时，验证收益来自路径缩短，而不是改变测试条件。
 
@@ -314,4 +314,14 @@ Owner 需要按顺序提交和恢复，但目前同时维护了较多业务计�
 - **第 4 项：pending reservation 与批处理阶段状态**：Matcher settlement 的 pending reservation 取消按用户合并计数后一次更新 Owner 镜像；`OrderBatchPending` 的 8 个独立布尔阶段压为一个生命周期位图，保留原有阶段语义和重试顺序。
 - **第 6 项：Owner 终态提交链**：Lane delta 先收集终态订单，再一次批量提交 tombstone/result retention；成功路径不再逐订单调用终态 sink，保留旧 sink 的兼容默认实现。
 
-验证：`mvn -pl surprising-aeron-core/surprising-aeron-service -am test`，820 tests，0 failures/errors。此次未重新执行 GCP 16c32g 64/128 的吞吐压测，因此 CPU、吞吐和 p99 的收益仍需下一轮短测确认；Matcher→Lane 绕过 Owner 的直接路径（第 1 项）及 AccountLaneState 冷热拆分（第 5 项）未在本次范围内改动。
+验证：`mvn -pl surprising-aeron-core/surprising-aeron-service -am test`，820 tests，0 failures/errors。此次未重新执行 GCP 16c32g 64/128 的吞吐压测，因此 CPU、吞吐和 p99 的收益仍需下一轮短测确认；Matcher→Lane 绕过 Owner 的直接路径（第 1 项）仍受 sequence、回滚和权威状态约束，详见下一节。
+
+## 5. 本轮顺序修复
+
+- **Matcher completion 热路径**：`MatcherCommandPipeline` 在 Matcher worker 发布槽位时绑定 `coreSequence`。Owner 的 `publishMatchingCompletion` 只校验并转交不可变结果，不再在 `drainMatchingCompletions` 中调用 `withCoreSequence` 创建第二个 `CoreMatchingResult`。控制命令仍保持原返回类型。
+- **Lane 冷状态边界**：新增 `LaneColdState`，将清算、风险快照、杠杆、算法单和触发单及其反向索引从 `AccountLaneState` 热对象移出；仍由原 Lane 单线程拥有，快照、回滚、查询和状态哈希沿原路径访问。订单、余额、预留、持仓及其成交索引保持热路径布局。
+- **成交级合并**：Spot 和 Derivative 的 settlement accumulator 已在前一轮完成，maker/taker 同一结算内只发布一次最终订单、余额、预留和仓位状态；本轮未重复引入第二套 accumulator。
+
+当前仍明确保留的边界：Matcher 线程不能直接修改 Lane。Matcher 只有撮合结果，没有可用于校验、回滚和重放的 Lane 权威状态；让它跨线程写 Lane 会破坏 sequence、失败回滚和 snapshot fence。因此当前安全路径是 Owner 完成一次 plan 校验后，把一个不可变 `MatcherSettlementEvent` 按 Lane 投递，Lane 完成状态应用，Owner 只做有序收据和终态索引提交。`LanePublishedMap.Version` 仍保持不可变 previous 链，未采用未经 epoch/hazard 保护的对象复用；此前尝试复用旧版本会在并发可见性测试中出现 `matcher settlement lane mask mismatch`，已撤回。
+
+本轮验证：`mvn -pl surprising-aeron-core/surprising-aeron-service -am test`，820 tests，0 failures/errors；Matcher 定向路径 206 tests 也通过。尚未重新执行 GCP 16c32g 的 64/128 ZGC 压测，所以 Owner CPU、吞吐、p99 和分配速率的实际收益不能提前宣称。

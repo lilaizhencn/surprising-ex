@@ -1662,8 +1662,10 @@ public final class TradingCoreRuntime implements AutoCloseable {
     void publishMatchingCompletion(
             long sequence,
             com.surprising.aeron.service.matching.CoreMatchingResult result) {
-        if (result == null) throw new IllegalStateException("synchronous matcher returned no result");
-        laneCommandContexts.required(sequence).publishMatchingCompletion(result.withCoreSequence(sequence));
+        if (result == null || result.nativeCommand().coreSequence() != sequence) {
+            throw new IllegalStateException("synchronous matcher returned an invalid result");
+        }
+        laneCommandContexts.required(sequence).publishMatchingCompletion(result);
         matchingProgressSequence++;
         commits.signalPendingMatchingReady(sequence);
     }
