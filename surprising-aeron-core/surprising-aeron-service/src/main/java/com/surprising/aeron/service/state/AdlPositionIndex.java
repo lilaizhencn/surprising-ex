@@ -42,15 +42,19 @@ public final class AdlPositionIndex {
     }
 
     void apply(long positionKey, RuntimePositionIndexValue previous, RuntimePositionIndexValue current) {
-        RuntimePositionIndexValue indexedPrevious = positions.remove(positionKey);
+        RuntimePositionIndexValue indexedPrevious = positions.get(positionKey);
         if (indexedPrevious != previous) {
             throw new IllegalStateException("ADL position index differs from shared position index");
         }
-        if (previous != null) remove(previous, positionKey);
-        if (current != null) {
-            positions.put(positionKey, current);
-            add(current, positionKey);
-        }
+        if (current == null) positions.remove(positionKey);
+        else positions.put(positionKey, current);
+        // 非零持仓的资产成员关系不随数量或方向变化；仍须保存最新持仓值。
+        boolean previousActive = previous != null && previous.signedQuantitySteps() != 0;
+        boolean currentActive = current != null && current.signedQuantitySteps() != 0;
+        if (previousActive == currentActive
+                && (!previousActive || previous.asset().equals(current.asset()))) return;
+        if (previousActive) remove(previous, positionKey);
+        if (currentActive) add(current, positionKey);
     }
 
     public void rebuild(TradingCoreState state, RuntimeIdentityRegistry identities) {

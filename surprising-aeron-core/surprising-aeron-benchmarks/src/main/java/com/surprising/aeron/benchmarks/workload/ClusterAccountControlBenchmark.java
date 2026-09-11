@@ -93,7 +93,13 @@ public class ClusterAccountControlBenchmark {
                 if (response.status() != ResponseStatus.OK) throw new IllegalStateException("account query failed");
                 var view = CoreStateQueryCodec.decodeUserState(response.data());
                 for (var balance : view.balances()) total += balance.availableUnits() + balance.lockedUnits();
-                for (var position : view.positions()) quantity += position.signedQuantitySteps();
+                long userQuantity = 0;
+                for (var position : view.positions()) userQuantity += position.signedQuantitySteps();
+                long expectedQuantity = !product.isDerivative() || user == USER ? 0
+                        : user == MAKER ? -10 : 10;
+                if (userQuantity != expectedQuantity)
+                    throw new IllegalStateException("control user position mismatch: " + user);
+                quantity += userQuantity;
                 if (!view.reservations().isEmpty()) throw new IllegalStateException("unfinished control fixture order");
             }
             if (total != 3 * FUNDS || quantity != 0) throw new IllegalStateException("control funds/position mismatch");

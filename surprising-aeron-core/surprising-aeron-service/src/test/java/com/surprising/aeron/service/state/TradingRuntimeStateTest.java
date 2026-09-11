@@ -163,7 +163,7 @@ class TradingRuntimeStateTest {
         assertThat(state.reservation(11).reservedUnits()).isEqualTo(200);
         assertThat(state.orderIdByClient(7, 91)).isEqualTo(11);
         assertThat(state.changedUsers().contains(7L)).isTrue();
-        assertThat(state.hasChangedBalance(7, 3)).isTrue();
+        assertThat(state.snapshotProjectionStateDirty()).isTrue();
         assertThat(state.changedOrders().contains(11L)).isTrue();
         assertThat(state.changedReservations().contains(11L)).isTrue();
     }
@@ -624,8 +624,16 @@ class TradingRuntimeStateTest {
         state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
         state.putBalance(new BalanceRuntime(7, 4, 2_000, 0));
 
-        assertThat(state.changedBalances(7).contains(3)).isTrue();
-        assertThat(state.changedBalances(7).contains(4)).isTrue();
+        assertThat(state.snapshotProjectionStateDirty()).isTrue();
+        state.clearChangedKeys();
+        assertThat(state.publishedAvailableBalances.get(7).get(3)).isEqualTo(1_000);
+        assertThat(state.publishedAvailableBalances.get(7).get(4)).isEqualTo(2_000);
+        assertThat(state.snapshotProjectionStateDirty()).isFalse();
+        state.markBalancesChanged();
+        assertThat(state.snapshotProjectionStateDirty()).isTrue();
+        state.clearChangedKeys();
+        assertThat(state.snapshotProjectionStateDirty()).isFalse();
+        state.close();
     }
 
     @Test

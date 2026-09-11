@@ -79,7 +79,7 @@ final class PendingReservationTracker {
                 owner.changedOrder(order.orderId());
                 owner.changedReservations.add(order.orderId());
                 owner.changedUsers.add(batch.userId);
-                owner.changedBalance(batch.userId, reservation.assetId());
+                owner.markBalancesChanged();
                 count++;
             }
             return count;
@@ -151,7 +151,7 @@ final class PendingReservationTracker {
         owner.changedOrder(orderId);
         owner.changedReservations.add(orderId);
         owner.changedUsers.add(userId);
-        if (completion.reservation() != null) owner.changedBalance(userId, completion.reservation().assetId());
+        if (completion.reservation() != null) owner.markBalancesChanged();
         unindexPendingReservation(orderId, coreSequence, userId, nextTotalPendingReservations);
     }
 
@@ -183,7 +183,7 @@ final class PendingReservationTracker {
             owner.changedOrder(completion.orderId());
             owner.changedReservations.add(completion.orderId());
             owner.changedUsers.add(completion.userId());
-            owner.changedBalance(completion.userId(), completion.reservation().assetId());
+            owner.markBalancesChanged();
             int nextTotalPendingReservations = Math.subtractExact(totalPendingReservations, 1);
             unindexPendingReservation(completion.orderId(), coreSequence, completion.userId(),
                     nextTotalPendingReservations);

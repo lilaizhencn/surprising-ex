@@ -180,8 +180,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     CoreRiskScanControlView riskScanControl = CoreRiskState.defaultScanControl();
     /** 当前提交范围内变化的用户；与提交/回滚边界同步维护。 */
     final LongHashSet changedUsers = new LongHashSet();
-    /** 当前提交范围内变化的余额；与提交/回滚边界同步维护。 */
-    final LongObjectHashMap<IntHashSet> changedBalances = new LongObjectHashMap<>();
+    /** Owner 本次提交是否包含余额变化；明细由 LaneBalancePatches 保持。 */
+    private boolean balancesChanged;
     /** 当前提交范围内变化的订单；与提交/回滚边界同步维护。 */
     final OwnerIndexedChanges<OrderRuntime, CoreOrderState> changedOrders =
             new OwnerIndexedChanges<>();
@@ -1656,7 +1656,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             for (int index = 0; index < balances.size(); index++) {
                 balances.publishAvailableAt(this, index);
                 changedUsers.add(balances.userId(index));
-                changedBalance(balances.userId(index), balances.assetId(index));
+                markBalancesChanged();
             }
             if (fundsAccumulator != null) changes.appendFundsDelta(1L << laneId, fundsAccumulator);
         } finally {
@@ -1870,7 +1870,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                     for (int index = 0; index < balances.size(); index++) {
                         balances.publishAvailableAt(this, index);
                         changedUsers.add(balances.userId(index));
-                        changedBalance(balances.userId(index), balances.assetId(index));
+                        markBalancesChanged();
                     }
                 }
             }
@@ -1974,7 +1974,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             for (int index = 0; index < balances.size(); index++) {
                 balances.publishAvailableAt(this, index);
                 changedUsers.add(balances.userId(index));
-                changedBalance(balances.userId(index), balances.assetId(index));
+                markBalancesChanged();
             }
             if (terminalOrderSink != null) terminalOrderSink.completeSequence();
             if (fundsAccumulator != null) changes.appendFundsDelta(event.requiredLaneMask(), fundsAccumulator);
@@ -2025,7 +2025,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             for (int index = 0; index < balances.size(); index++) {
                 balances.publishAvailableAt(this, index);
                 changedUsers.add(balances.userId(index));
-                changedBalance(balances.userId(index), balances.assetId(index));
+                markBalancesChanged();
             }
             pendingReservations.indexPendingReservation(event.userId(), event.replacementOrderId(), event.coreSequence(),
                     Math.incrementExact(pendingReservations.totalPendingReservations));
@@ -2128,7 +2128,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new IllegalArgumentException("invalid user settlement changes");
         }
         changedUsers.add(userId);
-        changedBalance(userId, assetId);
+        markBalancesChanged();
         changedPosition(positionKey);
     }
 
@@ -2201,7 +2201,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     boolean snapshotProjectionStateDirty() {
-        return !changedUsers.isEmpty() || !changedBalances.isEmpty() || !changedOrders.isEmpty()
+        return !changedUsers.isEmpty() || balancesChanged || !changedOrders.isEmpty()
                 || !changedReservations.isEmpty() || !changedPositions.isEmpty()
                 || !changedLiquidations.isEmpty() || !changedMarkPrices.isEmpty()
                 || !changedRiskSnapshots.isEmpty() || !changedRiskScans.isEmpty()
@@ -3347,7 +3347,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             return null;
         });
         if (laneCommandScope.get() == null) {
-            changedBalance(userId, assetId);
+            markBalancesChanged();
             changedUsers.add(userId);
         }
     }
@@ -3503,7 +3503,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             return null;
         });
         if (laneCommandScope.get() == null) {
-            changedBalance(userId, assetId);
+            markBalancesChanged();
             changedUsers.add(userId);
         }
     }
@@ -3520,7 +3520,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             captureBalanceAfter(lane, userId, assetId);
             return null;
         });
-        changedBalance(userId, assetId);
+        markBalancesChanged();
         changedUsers.add(userId);
     }
 
@@ -3768,7 +3768,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             changedOrder(orderId, canceled.order());
             changedReservations.add(orderId);
             changedUsers.add(userId);
-            changedBalance(userId, canceled.reservation().assetId());
+            markBalancesChanged();
         }
         advanceUserRevision(userId);
     }
@@ -3854,7 +3854,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (laneCommandScope.get() == null) {
             changedReservations.add(orderId);
             changedUsers.add(order.userId());
-            changedBalance(order.userId(), release.assetId());
+            markBalancesChanged();
         }
     }
 
@@ -3951,7 +3951,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 if (terminal.reservationRemoved()) {
                     publishReservation(terminal.orderId(), null);
                     changedReservations.add(terminal.orderId());
-                    changedBalance(terminal.userId(), terminal.reservationAssetId());
+                    markBalancesChanged();
                 }
             }
         }
@@ -4006,21 +4006,9 @@ public final class TradingRuntimeState implements AutoCloseable {
         changedUsers.forEach(consumer::accept);
     }
 
-    public IntHashSet changedBalances(long userId) {
-        assertOwner();
-        IntHashSet assets = changedBalances.get(userId);
-        return assets == null ? new IntHashSet() : new IntHashSet(assets);
-    }
-
-    public boolean hasChangedBalance(long userId, int assetId) {
-        assertOwner();
-        IntHashSet assets = changedBalances.get(userId);
-        return assets != null && assets.contains(assetId);
-    }
-
     void markBalanceChanged(long userId, int assetId) {
         assertOwner();
-        changedBalance(userId, assetId);
+        markBalancesChanged();
         changedUsers.add(userId);
     }
 
@@ -4256,12 +4244,15 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void clearChangedKeys() {
         assertOwner();
-        removeChangedMapEntries(changedBalances, changedUsers);
-        for (LaneLongCaptures<?> captured : patchUsersBeforeByLane) captured.clear();
-        for (LaneLongCaptures<?> captured : patchReservationsBeforeByLane) captured.clear();
-        for (LaneLongCaptures<?> captured : patchOrdersBeforeByLane) captured.clear();
-        for (LaneLongCaptures<?> captured : patchPositionsBeforeByLane) captured.clear();
-        for (LaneClientOrderCaptures captured : patchClientOrdersBeforeByLane) captured.clear();
+        balancesChanged = false;
+        // 同一次遍历释放各 Lane 捕获的引用；空缓冲自行跳过，余额仍在原发布边界清理。
+        for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            patchUsersBeforeByLane[laneId].clear();
+            patchReservationsBeforeByLane[laneId].clear();
+            patchOrdersBeforeByLane[laneId].clear();
+            patchPositionsBeforeByLane[laneId].clear();
+            patchClientOrdersBeforeByLane[laneId].clear();
+        }
         clearChanged(changedUsers);
         changedOrders.clear();
         clearChanged(changedReservations);
@@ -4311,13 +4302,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         boolean compact = values.size() >= CHANGE_KEY_COMPACTION_THRESHOLD;
         values.clear();
         if (compact) values.compact();
-    }
-
-    static <T> void removeChangedMapEntries(LongObjectHashMap<T> values, LongHashSet changedKeys) {
-        changedKeys.forEach(values::removeKey);
-        if (!values.isEmpty()) {
-            throw new IllegalStateException("changed map contains an untracked key");
-        }
     }
 
     static <K, V> ConcurrentHashMap<K, V> clearCapturedChanges(ConcurrentHashMap<K, V> values) {
@@ -4467,7 +4451,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         changedOrder(orderId, order);
         changedReservations.add(orderId);
         changedUsers.add(userId);
-        changedBalance(userId, assetId);
+        markBalancesChanged();
     }
 
     /**
@@ -4564,13 +4548,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (byUser.isEmpty()) lane.positionKeysBySymbolAndUser.remove(position.symbolId());
     }
 
-    void changedBalance(long userId, int assetId) {
-        IntHashSet assets = changedBalances.get(userId);
-        if (assets == null) {
-            assets = new IntHashSet();
-            changedBalances.put(userId, assets);
-        }
-        assets.add(assetId);
+    void markBalancesChanged() {
+        balancesChanged = true;
     }
 
     static TreeSet<Long> toSortedSet(LongHashSet values) {
@@ -4954,7 +4933,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
 
         void clear() {
-            for (int index = 0; index < size; index++) presentBefore[index] = false;
+            // 全部是 primitive 槽位，add 会覆盖存在性和值，无需逐项清零。
             size = 0;
         }
 
@@ -5089,6 +5068,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
 
         void clear() {
+            if (size == 0) return;
             size = 0;
             if (++indexGeneration == 0) {
                 java.util.Arrays.fill(indexGenerations, 0);
