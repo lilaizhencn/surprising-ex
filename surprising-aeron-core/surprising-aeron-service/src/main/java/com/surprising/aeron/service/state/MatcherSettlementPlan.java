@@ -299,6 +299,10 @@ public final class MatcherSettlementPlan {
     }
 
     public boolean matcherEventTouchesLane(int index, int laneId, TradingRuntimeState runtime) {
+        // For an indexed deep-fill plan, non-taker Lane traversal is already built from the
+        // maker Lane chain. Recomputing both topology lookups here only burns CPU in the hot
+        // settlement loop and cannot change the answer.
+        if (laneEventsIndexed && laneId != takerLaneId) return true;
         MatcherEvent event = matcherEvents.get(index);
         return runtime.topology().accountLaneId(activeUserId) == laneId
                 || runtime.topology().accountLaneId(event.matchedOrderUid()) == laneId;

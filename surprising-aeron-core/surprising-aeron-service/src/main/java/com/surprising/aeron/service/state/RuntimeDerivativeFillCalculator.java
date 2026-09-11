@@ -140,11 +140,15 @@ public final class RuntimeDerivativeFillCalculator {
             calculateInto(this, price, size, taker, leverage, timestamp, position);
         }
         void applyNext(long price, long size, RuntimeTreasuryDelta treasury) {
-            step(price, size, true, leveragePpm, timestamp, clusterPosition);
+            applyNext(price, size, true, treasury);
+        }
+        void applyNext(long price, long size, boolean taker, RuntimeTreasuryDelta treasury) {
+            step(price, size, taker, leveragePpm, timestamp, clusterPosition);
             // Preserve the exact per-fill interleaving with maker treasury deltas.
             treasury.addFee(settleAssetId, feeTreasuryUnits);
             treasury.addClearing(settleAssetId, clearingTreasuryUnits);
         }
+        long positionKey() { return positionKey; }
         OrderRuntime order() {
             OrderRuntime o = originalOrder;
             return new OrderRuntime(o.orderId(), o.productLine(), o.userId(), o.symbolId(), o.instrumentChangeId(),
@@ -169,7 +173,7 @@ public final class RuntimeDerivativeFillCalculator {
         void publish(TradingRuntimeState runtime, long positionKey, RuntimeTreasuryDelta treasury) {
             if (fills == 0) return;
             runtime.replaceReservation(reservation());
-            runtime.replaceBalance(new BalanceRuntime(originalOrder.userId(), settleAssetId, available, locked));
+            runtime.replaceBalance(originalOrder.userId(), settleAssetId, available, locked);
             if (treasury != null) {
                 treasury.addFee(settleAssetId, feeTreasuryUnits);
                 treasury.addClearing(settleAssetId, clearingTreasuryUnits);
@@ -191,19 +195,36 @@ public final class RuntimeDerivativeFillCalculator {
         FillCursor cursor = TAKER.get();
         if (cursor.originalOrder != null) throw new IllegalStateException("nested taker fill cursor");
         try {
-            BalanceRuntime balance = runtime.balance(order.userId(), assetId);
-            if (balance == null || order.symbolId() < 0 || leverage <= 0
-                    || instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT) {
-                throw new IllegalArgumentException("invalid taker fill cursor");
-            }
-            MarkPriceRuntime mark = runtime.markPrice(order.symbolId());
-            if (instrument.contractType().isOption()) OptionFillCalculator.requireRiskMark(mark);
-            cursor.reset(instrument, order, runtime.reservation(order.orderId()), runtime.position(positionKey),
-                    balance.availableUnits(), balance.lockedUnits(), assetId, mark);
-            cursor.positionKey = positionKey; cursor.leveragePpm = leverage;
-            cursor.timestamp = timestamp; cursor.clusterPosition = position;
+            begin(cursor, runtime, instrument, order, positionKey, leverage, assetId, timestamp, position);
             return cursor;
         } catch (RuntimeException | Error failure) { cursor.clear(); throw failure; }
+    }
+
+    /** Initializes a caller-owned cursor for a settlement-level order accumulator. */
+    static void begin(FillCursor cursor, TradingRuntimeState runtime, CoreInstrumentState instrument,
+                      OrderRuntime order, long positionKey, long leverage, int assetId,
+                      long timestamp, long position) {
+        if (cursor == null || runtime == null || instrument == null || order == null
+                || order.symbolId() < 0 || leverage <= 0 || assetId < 0
+                || instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT
+                || timestamp < -1 || position < -1 || timestamp >= 0 && position < 0) {
+            throw new IllegalArgumentException("invalid perpetual fill cursor");
+        }
+        if (cursor.originalOrder != null) throw new IllegalStateException("perpetual fill cursor is still active");
+        BalanceRuntime balance = runtime.balance(order.userId(), assetId);
+        ReservationRuntime reservation = runtime.reservation(order.orderId());
+        if (balance == null || reservation == null || reservation.userId() != order.userId()
+                || reservation.assetId() != assetId) {
+            throw new IllegalStateException("runtime fill entities are missing: " + order.orderId());
+        }
+        MarkPriceRuntime mark = runtime.markPrice(order.symbolId());
+        if (instrument.contractType().isOption()) OptionFillCalculator.requireRiskMark(mark);
+        cursor.reset(instrument, order, reservation, runtime.position(positionKey),
+                balance.availableUnits(), balance.lockedUnits(), assetId, mark);
+        cursor.positionKey = positionKey;
+        cursor.leveragePpm = leverage;
+        cursor.timestamp = timestamp;
+        cursor.clusterPosition = position;
     }
 
     private static void calculateInto(FillCursor state, long fillPriceTicks, long fillQuantitySteps,

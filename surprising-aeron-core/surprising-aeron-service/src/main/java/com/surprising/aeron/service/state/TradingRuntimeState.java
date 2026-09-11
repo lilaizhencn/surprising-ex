@@ -928,6 +928,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         final LaneBalancePatches[] balancePatches;
         /** 各 Lane 收集的资金增量，完成后由 owner 合并。 */
         final RuntimeFundsAccumulator[] laneFundsDeltas;
+        /** 每个 settlement 内按用户合并的 revision 增量，避免每个 fill 创建 UserRuntime。 */
+        final LongLongHashMap[] userRevisionDeltas;
         /** 汇总各 Lane 资金增量的复用累加器。 */
         final RuntimeFundsAccumulator aggregateFundsDelta = new RuntimeFundsAccumulator(32);
 
@@ -935,15 +937,38 @@ public final class TradingRuntimeState implements AutoCloseable {
             publishedLaneChanges = new PublishedLaneChanges[laneCount];
             balancePatches = new LaneBalancePatches[laneCount];
             laneFundsDeltas = new RuntimeFundsAccumulator[laneCount];
+            userRevisionDeltas = new LongLongHashMap[laneCount];
             for (int laneId = 0; laneId < laneCount; laneId++) {
                 publishedLaneChanges[laneId] = new PublishedLaneChanges();
                 balancePatches[laneId] = new LaneBalancePatches();
                 laneFundsDeltas[laneId] = new RuntimeFundsAccumulator();
+                userRevisionDeltas[laneId] = new LongLongHashMap();
             }
         }
 
         /** 每个Lane完成的当前命令预留数量，只在该Lane写入，Owner在事件完成后汇总。 */
         final int[] completedPending = new int[Long.SIZE];
+
+        void addUserRevision(int laneId, long userId, long count) {
+            userRevisionDeltas[laneId].addToValue(userId, count);
+        }
+
+        void applyUserRevisions(int laneId, AccountLaneState lane) {
+            LongLongHashMap deltas = userRevisionDeltas[laneId];
+            if (deltas.isEmpty()) return;
+            PublishedLaneChanges changes = publishedLaneChanges[laneId];
+            deltas.forEachKeyValue((userId, count) -> {
+                UserRuntime current = lane.users.get(userId);
+                if (current == null) {
+                    throw new IllegalStateException("runtime user disappeared during matcher settlement: " + userId);
+                }
+                UserRuntime advanced = new UserRuntime(current.productLine(), userId,
+                        Math.addExact(current.revision(), count), current.positionMode());
+                lane.users.put(userId, advanced);
+                changes.putUser(userId, advanced);
+            });
+            deltas.clear();
+        }
 
         void ensureAdmissionCapacity(int laneId, int expectedOrders) {
             if (expectedOrders <= 0) return;
@@ -960,6 +985,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
 
         void prepareLaneTerminal(int laneId, RuntimeIdentityRegistry identities, AccountLaneState lane, TradingRuntimeState runtime) {
+            applyUserRevisions(laneId, lane);
             PublishedLaneChanges changes = publishedLaneChanges[laneId];
             changes.orders.forEach((orderId, order) -> {
                 changes.orders.putPrepared(orderId,
@@ -1012,6 +1038,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             while (lanes != 0) {
                 int lane = Long.numberOfTrailingZeros(lanes); lanes &= lanes - 1;
                 completedPending[lane] = 0;
+                userRevisionDeltas[lane].clear();
                 publishedLaneChanges[lane].clear();
                 balancePatches[lane].clear();
                 laneFundsDeltas[lane].clear();
@@ -3307,6 +3334,20 @@ public final class TradingRuntimeState implements AutoCloseable {
     void advanceUserRevision(long userId, long count) {
         if (count <= 0) throw new IllegalArgumentException("revision advance must be positive");
         assertOwner();
+        MatcherSettlementChanges settlementChanges = matcherSettlementChangesScope.get();
+        if (settlementChanges != null) {
+            AccountLaneState lane = laneCommandScope.get();
+            if (lane == null || topology.accountLaneId(userId) != lane.laneId()) {
+                throw new IllegalStateException("user revision crossed its owner lane");
+            }
+            if (lane.users.get(userId) == null) {
+                throw new IllegalArgumentException("runtime user is not registered: " + userId);
+            }
+            // Matching can advance one user several times in a settlement. Coalesce the delta
+            // and publish one immutable UserRuntime when the Lane finalizes the settlement.
+            settlementChanges.addUserRevision(lane.laneId(), userId, count);
+            return;
+        }
         captureUserBefore(userId);
         UserRuntime current = requireUser(userId);
         UserRuntime advanced = new UserRuntime(current.productLine(), userId,
@@ -3498,10 +3539,12 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public void replaceBalance(BalanceRuntime balance) {
         assertOwner();
-        long userId = balance.userId();
-        int assetId = balance.assetId();
-        long availableUnits = balance.availableUnits();
-        long lockedUnits = balance.lockedUnits();
+        replaceBalance(balance.userId(), balance.assetId(), balance.availableUnits(), balance.lockedUnits());
+    }
+
+    /** Matching settlement fast path: update a Lane-owned balance without creating a replacement object. */
+    void replaceBalance(long userId, int assetId, long availableUnits, long lockedUnits) {
+        assertOwner();
         captureUserBefore(userId);
         captureBalanceBefore(userId, assetId);
         onLane(userId, lane -> {
