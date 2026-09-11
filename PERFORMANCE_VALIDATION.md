@@ -11220,3 +11220,18 @@ JFR summary
 
 - 最终benchmark JAR SHA256=6e32067b7f8c305ebbedf10cff7ae98cb6bf43005eeb8257d14ba6cf600ebfef
 - 清理完成：两轮节点/客户端已停止；已删除/tmp/owner-notify-retire及/tmp/owner-notify-retire-v2中的Archive、JFR、日志、诊断程序和22个本轮测试报告。以上原始路径失效；保留构建JAR和本文摘要，README及用户文件未改动。
+
+## 2026-09-11 恢复满速后的持续压测：采集前锁定
+
+- 仅测当前master e5619569，无代码改动/旧版本对照。HotSpot GraalVM25.0.1/Maven3.9.16，i9-9880H8C16T/16GiB，开始CPU_Speed_Limit100、可用磁盘497GiB。复用上一轮已验证JAR，执行前核对service SHA256=36749e6f0e4d0c6adb1e27ca2159b7310b62a07953aa3aefb2dfbe0a5e72e122、benchmark SHA256=6e32067b7f8c305ebbedf10cff7ae98cb6bf43005eeb8257d14ba6cf600ebfef。
+- 单个真实Aeron Cluster成员，网络/Archive/Core，U本位永续；PIPELINED，4Lane BUSY_SPIN、2matcher诊断（非单matcher/三节点容量验收）、SHARED_NETWORK、service YIELDING。node Xms512m/Xmx1536m，client128m/512m，G1/NMT summary，opens/native参数沿用前述命令。
+- ClusterMixedCapacityMain连续异步闭环，warmup30s/measurement60s，seed131001、in-flight256（全局及session）、1command+1reserved-query连接、1769用户、256币对、batch20、trading-stream=true/operational=false；固定混合交易循环和内嵌maker，初始资金1768000000125、持仓及初始化强平/保险/ADL核对同前。无独立做市进程/恒定到达率/coordinated omission修正，测量窗不含持续风控、WS或查询负载。
+- 本轮无profiler，不重跑同代码JMH/JFR/六产品恢复（引用前轮同JAR证据）；不能据此报告当前OwnerCPU/分配热点。通过条件offered=terminal、unfinished0、fundsDiff0、余额/持仓/冻结/订单核对通过。每2s采温控，出现降频保留实际受限吞吐，不称为算力上限或改善；不为了降温反复重跑。收尾校验后立即停止节点并清理/tmp/owner-fullspeed-check，记录尾延迟和环境限制。
+
+### 实测结果
+
+- 命令：`java <上述JVM及-D参数> -cp surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar com.surprising.aeron.benchmarks.workload.ClusterMixedCapacityMain`，独立SurprisingClusterNode，执行参数记录于本轮临时commands.json。60.079s测量，10831706 offered=terminal business ops、1045338 offered=terminal Core messages；**180292.177 business ops/s、17399.500 messages/s、42866.494 fills/s**（2575360fills）。peakInFlight256/unfinished0/fundsDiff0；population/hftPositions/reservations/loss均PASS，777总循环/503测量循环、hash734ad4d461f283ec。窗内queries0/triggerExecutions0。
+- 两个10s区间约202096/202103 business ops/s，非持续上限；CPU_Speed_Limit62–100，正式测量开始已降频，不能称满速容量验收、也不与历史版本作提升比较。
+- 入口→终态延迟us（p50/p90/p95/p99/p99.9/max，未拆accepted阶段）：PLACE 8781/21823/24854/30687/48398/63995（257536样本）；CANCEL 7958/16826/19169/24575/35291/53247（257536）；MARK 14516/21594/24920/36569/47087/50692（15194）；PLACE_BATCH 17498/23150/25444/33947/46071/54755（386304requests/7726080items）；CANCEL_BATCH 19660/26165/28344/41123/62128/65437（128768requests/2575360items）。两类batch均20items。
+- NMT reserved3124835→3126870KB、committed667787→703402KB；未采线程CPU、GC暂停或分配率，不能给出本轮Owner有效饱和程度或长期泄漏结论。代码未改动，无新增测试报告。client.log SHA256=de8e6370e9942f4cc425521233def9df1f17d3ed509c4c4a159aa15a1471eec6；通过但属于本机受限负载表现，不是云端三节点容量结论。
+- 节点/客户端已停止；清理/tmp/owner-fullspeed-check全部1799421539B产物（Archive/日志/脚本/NMT等），原始路径已失效。用户文件、构建JAR和README不变。
