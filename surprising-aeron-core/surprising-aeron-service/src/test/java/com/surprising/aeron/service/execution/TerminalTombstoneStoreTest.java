@@ -10,7 +10,8 @@ class TerminalTombstoneStoreTest {
     @Test void boundedEvictionRetainsOnlyLatestIdsAcrossManyProbeChainCompactions() {
         var store = new TerminalTombstoneStore();
         for (int i = 1; i <= 100000; i++) {
-            store.put(i % 4, i, 7, "client-" + i, i);
+            assertThat(store.contains(i % 4, i)).isFalse();
+            store.putKnownAbsent(i % 4, i, 7, "client-" + i, i);
             store.trim(1280);
             if (i > 1280) assertThat(store.contains((i - 1280) % 4, i - 1280)).isFalse();
             assertThat(store.contains(i % 4, i)).isTrue();

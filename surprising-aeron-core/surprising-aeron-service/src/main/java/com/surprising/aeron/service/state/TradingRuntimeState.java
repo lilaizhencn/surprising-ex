@@ -978,7 +978,8 @@ public final class TradingRuntimeState implements AutoCloseable {
                 lane.removeOrder(orderId);
                 changes.removeOrderRoute(orderId);
                 lane.clientKeysByOrderId.forEach(orderId,
-                        clientKey -> changes.retireClientIdentity(order.userId(), clientKey));
+                        clientKey -> changes.retireClientIdentity(
+                                identities.prepareClientRelease(lane, order.userId(), clientKey)));
                 removeClientOrdersForOrder(lane, order.userId(), orderId);
             });
             changes.positions.forEach((positionKey, position) -> changes.positions.putPrepared(positionKey,
@@ -1119,8 +1120,8 @@ public final class TradingRuntimeState implements AutoCloseable {
 
         void removeOrderRoute(long orderId) { removedOrderRoutes.add(orderId); }
         void removeReservationRoute(long orderId) { removedReservationRoutes.add(orderId); }
-        void retireClientIdentity(long userId, long clientKey) {
-            retiredClientIdentities.add(userId, clientKey);
+        void retireClientIdentity(RuntimeIdentityRegistry.ClientIdentityEntry entry) {
+            retiredClientIdentities.add(entry);
         }
 
         void releaseRetiredClientIdentities(RuntimeIdentityRegistry identities) {
@@ -1231,36 +1232,30 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
 
         static final class ClientIdentityReleaseBuffer {
-            /** 当前缓冲各项对应的用户 ID。 */
-            long[] userIds = new long[4];
-            /** 当前缓冲各项对应的内部客户单号键。 */
-            long[] clientKeys = new long[4];
+            /** Lane 准备、Owner 消费的既有字典实体引用；替代用户/客户键两套数组。 */
+            RuntimeIdentityRegistry.ClientIdentityEntry[] entries = new RuntimeIdentityRegistry.ClientIdentityEntry[4];
             /** 当前有效元素数量。 */
             int size;
 
-            void add(long userId, long clientKey) {
-                if (userId <= 0 || clientKey <= 0) {
-                    throw new IllegalArgumentException("invalid retired client identity");
-                }
-                if (size == userIds.length) {
+            void add(RuntimeIdentityRegistry.ClientIdentityEntry entry) {
+                if (entry == null) return;
+                if (size == entries.length) {
                     int capacity = Math.multiplyExact(size, 2);
-                    userIds = java.util.Arrays.copyOf(userIds, capacity);
-                    clientKeys = java.util.Arrays.copyOf(clientKeys, capacity);
+                    entries = java.util.Arrays.copyOf(entries, capacity);
                 }
-                userIds[size] = userId;
-                clientKeys[size] = clientKey;
-                size++;
+                entries[size++] = entry;
             }
 
             void release(RuntimeIdentityRegistry identities) {
                 if (identities == null) return;
                 for (int index = 0; index < size; index++) {
-                    identities.releaseClientKey(userIds[index], clientKeys[index]);
+                    identities.releasePreparedClientKey(entries[index]);
                 }
                 clear();
             }
 
             void clear() {
+                java.util.Arrays.fill(entries, 0, size, null);
                 size = 0;
             }
         }
@@ -1695,8 +1690,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (userBefore != null) lane.users.put(userId, userBefore);
     }
 
-    /** Owner登记的待收通知范围；Lane只写自己的SPSC队列，不竞争共享位图。 */
+    /** Owner登记的待收通知范围；序号仍由各 Lane 的 SPSC 队列承载。 */
     private long expectedAdmissionLanes, expectedSettlementLanes;
+    /** Lane 入队后原子置位；Owner 仅在非空时清位，不再轮询每条空队列。 */
+    private final java.util.concurrent.atomic.AtomicLong admissionReadyLanes = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong settlementReadyLanes = new java.util.concurrent.atomic.AtomicLong();
     private final int[] expectedAdmissions = new int[64], expectedSettlements = new int[64];
 
     void expectPlaceAdmission(int laneId) {
@@ -1707,12 +1705,20 @@ public final class TradingRuntimeState implements AutoCloseable {
     void releaseAdmissionExpectation(int laneId) {
         assertOwner();
         if (expectedAdmissions[laneId] <= 0) throw new IllegalStateException("unexpected admission completion");
-        if (--expectedAdmissions[laneId] == 0) expectedAdmissionLanes &= ~(1L << laneId);
+        if (--expectedAdmissions[laneId] == 0) {
+            long bit = 1L << laneId;
+            expectedAdmissionLanes &= ~bit;
+            if ((admissionReadyLanes.get() & bit) != 0) admissionReadyLanes.getAndAccumulate(~bit, CLEAR_READY_BITS);
+        }
     }
     void releaseSettlementExpectation(int laneId) {
         assertOwner();
         if (expectedSettlements[laneId] <= 0) throw new IllegalStateException("unexpected settlement completion");
-        if (--expectedSettlements[laneId] == 0) expectedSettlementLanes &= ~(1L << laneId);
+        if (--expectedSettlements[laneId] == 0) {
+            long bit = 1L << laneId;
+            expectedSettlementLanes &= ~bit;
+            if ((settlementReadyLanes.get() & bit) != 0) settlementReadyLanes.getAndAccumulate(~bit, CLEAR_READY_BITS);
+        }
     }
     void expectMatcherSettlement(long lanes) {
         assertOwner();
@@ -1725,18 +1731,19 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     void publishPlaceAdmissionReady(int laneId, long coreSequence) {
         placeAdmissionReadyQueues[laneId].publish(coreSequence);
+        admissionReadyLanes.getAndAccumulate(1L << laneId, SET_READY_BITS);
     }
 
     public long takePlaceAdmissionReadyLaneMask() {
         assertOwner();
-        return readyLaneMask(placeAdmissionReadyQueues, expectedAdmissionLanes);
+        return takeReadyLaneMask(admissionReadyLanes, placeAdmissionReadyQueues, expectedAdmissionLanes);
     }
 
-    /** Read-only SPSC cursor probe. A later publication is observed on the next owner poll. */
+    /** 仅读两个就绪字，不消费序号；滞后的置位最多造成一次无效收集，不会丢通知。 */
     public boolean hasMatchingNotifications() {
         assertOwner();
-        return readyLaneMask(placeAdmissionReadyQueues, expectedAdmissionLanes) != 0
-                || readyLaneMask(matcherSettlementReadyQueues, expectedSettlementLanes) != 0;
+        return (admissionReadyLanes.get() & expectedAdmissionLanes) != 0
+                || (settlementReadyLanes.get() & expectedSettlementLanes) != 0;
     }
 
     public long pollPlaceAdmissionReady(int laneId) {
@@ -1751,11 +1758,12 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     void publishMatcherSettlementReady(int laneId, long coreSequence) {
         matcherSettlementReadyQueues[laneId].publish(coreSequence);
+        settlementReadyLanes.getAndAccumulate(1L << laneId, SET_READY_BITS);
     }
 
     public long takeMatcherSettlementReadyLaneMask() {
         assertOwner();
-        return readyLaneMask(matcherSettlementReadyQueues, expectedSettlementLanes);
+        return takeReadyLaneMask(settlementReadyLanes, matcherSettlementReadyQueues, expectedSettlementLanes);
     }
 
     public long pollMatcherSettlementReady(int laneId) {
@@ -1766,6 +1774,19 @@ public final class TradingRuntimeState implements AutoCloseable {
         long sequence = matcherSettlementReadyQueues[laneId].poll();
         if (sequence != 0) releaseSettlementExpectation(laneId);
         return sequence;
+    }
+
+    /** 无捕获的共享运算器，通知发布不创建 lambda/消息对象。 */
+    private static final java.util.function.LongBinaryOperator SET_READY_BITS = (left, right) -> left | right;
+    private static final java.util.function.LongBinaryOperator CLEAR_READY_BITS = (left, right) -> left & right;
+
+    private static long takeReadyLaneMask(java.util.concurrent.atomic.AtomicLong ready,
+                                         LaneSequenceQueue[] queues, long expected) {
+        long signalled = ready.get() & expected;
+        if (signalled == 0) return 0;
+        // 先清位再消费。清位之后的发布留下新位；之前的发布已经可从队列读取。
+        ready.getAndAccumulate(~signalled, CLEAR_READY_BITS);
+        return readyLaneMask(queues, signalled);
     }
 
     static long readyLaneMask(LaneSequenceQueue[] queues, long expected) {

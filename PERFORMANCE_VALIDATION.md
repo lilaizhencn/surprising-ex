@@ -11151,3 +11151,72 @@ JFR summary
 - JMH45.122036203s/调用，单测量无有效CI；客户端gc profiler133.0318489MiB/s、15580887256B/整次调用（含内部预热）、201GC/218ms，不能当Core每单分配。节点JFR13204331B/SHA256=50595bd211c025af129ac9e436f83d16864b2953e2c23e7dfeb87d6d141ea840；行级报告Lines.txt103358B/SHA256=49b48976bfbcf6e10274ad8dd2bb85203bf6698de99110ed1f34bd8cf544a104。代码/业务不变，仅新增记录。
 - 结论：瓶颈分布在Owner的通知扫描、终态/客户号维护、准入与结算计划准备、全局索引维护；没有定位到一个占绝大多数的资金计算或同步阻塞。优先减少重复通知探测，其次压缩逐终态索引和客户号释放，再拆分查询视图与准入参与者状态；收益需要后续独立改动验证，不能把样本占比当吞吐提升幅度。
 - 本轮节点/客户端已停止；清理/tmp/owner-line-diagnosis全部1410154204B产物，上述原始路径已失效。未新增Maven测试报告；用户文件、既有构建JAR及README未改动。
+
+## 2026-09-11 通知与终态交接优化：采集前锁定
+
+- 被测master基于b5e58def工作区，仅当前版本，无旧版本对照。修改：Owner正向就绪缓存及合并两类通知遍历；Lane交接既有客户号实体，Owner不再get；终态已确认缺失后不重复查实体桶，客户号插入复用桶哈希。全局索引、资金校验和提交边界不变。退休缓冲由两套long数组替换为实体引用数组，clear释放引用；字典实体增加原始key字段8B，无逐退休项新对象。
+- 环境/参数沿用上一功能轮：HotSpot GraalVM25.0.1/Maven3.9.16，i9-9880H8C16T/16GiB；每次仅一个真实Aeron成员（网络/Archive/Core），4Lane BUSY_SPIN、2matcher诊断、PIPELINED、SHARED_NETWORK、service YIELDING；node512m/1536m、client128m/512m、G1/NMT summary，opens/native参数同前。JFR profile、ExecutionSample2ms、stackdepth128、CPU1s、Park/Monitor1ms、maxsize192m。
+- 六产品ClusterBatchResponseBenchmark.lanePreparedResponses分别batchSize1/20、全新节点数据，客户号改为多字节；1thread/1fork/wi1/i2 SingleShotTime、gc profiler，每次512/10240业务操作；32用户、1币对、mark100/buy80后撤单、初始每用户1000000、持仓0，配置in-flight256（此回归实际最多64），无独立做市。核对回复客户号、终态、冻结释放和资金。
+- U本位连续流：ClusterMixedCapacityMain预热30s/测量60s无profiler；ClusterOperationalBenchmark.continuousOperations预热30s/测量45s、wi0/i1/f1/thread1、controlPageSize0/gc profiler及节点JFR。1769用户、256币对、1command及1reserved-query连接、in-flight256、batch20、seed131001、trading-stream=true/operational=false，初态与固定循环同前（初始资金1768000000125），内嵌maker，持续闭环、无恒定到达率、不修正coordinated omission。结束校验后停机，不等待温控反复重跑。
+- 通过条件：offered=terminal、unfinished0、资金差额0；身份引用计数、恢复/旧引用不能删除新实体、缓存队列后到通知、终态FIFO测试通过。六产品execute→kill→replay→snapshot restart（恢复功能档BLOCKING/256m-768m，不用于性能）。热节流/swap/DataLoss不作容量结论；无预设提升幅度，按当前JFR定位剩余热点。临时/tmp/owner-notify-retire分析后清理；不测云端三节点、HTTP/WS、长稳泄漏，结果为局部正确性和性能诊断。
+
+### 第一轮结果及继续调整原因
+
+- 326测试通过；六产品batch1/20共12场JMH、六产品execute/replay/snapshot共18阶段PASS。无profiler60.028s：10186496业务操作/983808Core消息、169697.126ops/s、16389.285messages/s、40344.169fills/s；未完成0、资金差额0。JFR45.035s：7365637操作/711685消息、163554.168ops/s，资金差额0、hash544f30d68aecbf7f。当前主节点JAR仅用于此轮，不与最终JAR混淆。
+- 关键反证：13592 Owner样本，readyLaneMask只有41，但新的TradingRuntimeState.hasMatchingNotifications有1429（10.51%），说明空探测成本主要迁移了方法名，没有被解决；不据此宣称扫描消除。客户号准备189样本在Lane，Owner releasePreparedClientKey330样本；旧releaseClientKey不在Owner样本中。Owner97.727%、matcher25.954/26.104%、Lane97.758–97.799%；最终方案继续调整通知实现，保留客户号/终态改动。
+- JFR DataLoss0/Owner同步IO0；节点加权分配23630530632B/500.418MiB/s，79GC/458.345ms/max6.512ms、heapUsed峰389.47MiB；15s桶GC后100.994→101.109→101.155MiB，不作泄漏证明。JMH45.035308105s/调用，客户端108.355549MiB/s、12855081064B/含预热整调用、166GC/210ms。profile CPU_Speed_Limit56–70，容量无效。第一轮完整指标/参数按末尾归档汇总，原始产物最后统一清理。
+
+### 第二轮最终实现：采集前锁定
+
+- 当前工作区继续优化，不运行旧版本对照。用两个AtomicLong就绪字替换Owner探测缓存；Lane先写原SPSC序号队列再原子置位，Owner非空时先清位后消费，只过滤被通知队列。空闲探测仅两个就绪字读取，不遍历预期Lane。存在一次发布/清位竞态时，队列是权威，允许一次滞后空通知，不允许丢序号。新增两Lane并发发布/Owner消费8000条通知测试；共享置位可能增加Lane争用，必须观察JFR而不预设收益。
+- 环境、node/client JVM、六产品、in-flight256、2matcher/4Lane、JFR配置及资金/恢复门槛同本节第一轮；本轮六产品JMH只测batch20（覆盖每Lane批量终态释放），wi1/i2/f1/thread1，每调用10240操作，客户号多字节；单条/混合通知由单测和连续流覆盖。连续无profiler仍30s预热/60s测量，JMH内部30s/45s；同seed/用户/币对/资金/到达模型。六产品恢复重跑最终JAR。输出/tmp/owner-notify-retire-v2；热节流仍仅作诊断，不承诺吞吐/CPU占用下降，结束清理两轮产物。
+
+### 最终验证与热点结论
+
+- 最终构建：`mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am -Dtest=MatchingNotificationProbeTest,RuntimeIdentityRegistryTest,TerminalTombstoneStoreTest,TerminalStateRetentionTest,ClusterCommandPipelineTest,SurprisingClusteredServiceTest,CoreOrderedOrderBatchTest,CoreMatchingStateTest,OrderBatchSettlementWaitTest,TradingStateSnapshotCodecTest,ClusterMixedCapacityTest -Dsurefire.failIfNoSpecifiedTests=false package`，HotSpot25、327 tests/0 failure/error/skipped，BUILD SUCCESS；两Lane并发发布/清位/消费8000序号通过。代码复核：先入原SPSC队列再原子置位；先清通知位再消费；后到通知保持下一轮可见，重复滞后位最多一次空收集；未改资金和业务提交顺序。
+- 六产品最终batch20 JMH全PASS；六产品execute→kill→replay→snapshot restart共18阶段PASS/fundsDiff0。snapshot position：SPOT3616、U/币永续9568、U/币交割/OPTION5184。身份引用在Owner提交时减少，清理数组不保留对象；旧退休引用不能删除重建同键实体、快照重建键、终态FIFO/碰撞/覆盖/淘汰均通过。
+- 无profiler60.102s：10164992 offered=terminal业务操作、981760 offered=terminal Core消息，169127.921 business ops/s、16334.792 messages/s、40208.718 fills/s（2416640fills）。peak256/unfinished0/fundsDiff0，hash2baefb60de422680，634总循环/472测量循环，窗内query/trigger0。JMH/JFR45.106s：6441055业务操作/623711Core消息，142799.239 ops/s、13827.774 messages/s、33939.859 fills/s；unfinished0/fundsDiff0、hashcc24b179424e1866。两者均有热节流，不作吞吐提升或容量结论，不能比较不同profiler/温控状态。
+- 无profiler入口→终态延迟us（p50/p90/p95/p99/p99.9/max）：PLACE 9314/23347/25362/29982/58130/69271（241664样本）；CANCEL 8413/17661/19513/24608/44335/57507（241664）；MARK 15106/21872/24674/39976/53510/66519（15104）；PLACE_BATCH 19103/22953/25395/40108/56295/63275（362496批/7249920items）；CANCEL_BATCH 20987/25919/28000/42270/64159/69009（120832批/2416640items）。batch均20，无accepted阶段拆分或coordinated omission修正，未作尾延迟验收。
+- 最终Owner13911执行样本：readyLaneMask20/0.14%、TradingRuntimeState.hasMatchingNotifications15/0.11%；不再遍历所有空队列。**0.25%只指这两个方法，不代表全部通知成本归零**：takeReadyLaneMask273/1.96%（含原子领取和候选队列过滤）、全Owner AtomicLong.getAndAccumulate253/1.82%（与领取存在重叠）、TradingCoreRuntime.hasMatchingNotifications379/2.72%（含matcher/健康检查）。Lane62863样本中原子置位getAndAccumulate17，未形成主要采样热点；没有CAS重试/硬件计数器，不能宣称无竞争。
+- 客户号prepareClientRelease184样本在Lane，Owner releasePreparedClientKey381/2.74%，仍含引用计数和条件remove；没有把释放提前到Lane。Owner仍96.800%，matcher26.389/26.418%，4Lane97.193–97.287%含busy-spin；剩余inclusive热点finishOrderBatch3305、pumpMatchingCommitCompletions3199、collectMatcherSettlement1287、OwnerCommitPublisher1272、RuntimeFactIndexes796。不同嵌套层不可相加，不声称Owner瓶颈彻底消失。全局参与者索引还影响准入，本轮没有异步化。
+- 节点JFR117s，分析只45.106s测量窗；DataLoss0、观察到Owner同步File/Socket IO0；machineCPU92.15%、JVM57.20%。加权分配20682877104B/437.297MiB/s，GC70次455.708ms/max及p9913.738ms，heapUsed峰393.06MiB；15s桶GC后104.709→105.403→105.272MiB，末桶不足1s为103.859MiB，不证明无泄漏。NMT reserved3142425→3162158KB、committed692197→740818KB；无全native pool峰值/长稳证明。新增每Runtime两个AtomicLong对象，非逐命令分配；生产未增加测试计数器或代理。
+- 两轮采集记录如下补充；历史中间方案仅作本次诊断审计，不作为最终源码或性能对照。置信区间、精确对象数/op、TLAB大小、全native峰值、长期泄漏以及云端/HTTP/WS均未验收，保持局部正确性与性能诊断结论。
+
+|轮次/产品/批大小|JMH ms/调用|客户端MiB/s|B/调用|GC次/ms|温控Speed范围|
+|---|---:|---:|---:|---:|---|
+|中间/INVERSE_DELIVERY-1|123.367|9.550|2425064|0/0|64–64|
+|中间/INVERSE_DELIVERY-20|334.741|30.404|15157964|1/6|64–64|
+|中间/INVERSE_PERPETUAL-1|137.146|8.965|2500968|0/0|91–100|
+|中间/INVERSE_PERPETUAL-20|201.802|46.696|15480224|1/5|79–79|
+|中间/LINEAR_DELIVERY-1|123.527|9.391|2485956|0/0|52–66|
+|中间/LINEAR_DELIVERY-20|239.753|39.584|15195208|1/5|66–66|
+|中间/LINEAR_PERPETUAL-1|111.564|11.042|2486324|0/0|100–100|
+|中间/LINEAR_PERPETUAL-20|203.849|47.558|15442500|1/5|100–100|
+|中间/OPTION-1|151.286|14.254|3965316|0/0|62–62|
+|中间/OPTION-20|325.827|30.938|15491264|1/6|62–62|
+|中间/SPOT-1|119.627|9.707|2438444|0/0|100–100|
+|中间/SPOT-20|211.074|44.350|15217812|1/4|100–100|
+
+- 中间main CPU_Speed_Limit=54–70；service JAR SHA256=39bc7bcdc5ff3af579d53f3bb8263bfe5e1e388c9c60319cc54f5589a2396621
+
+- 中间profile CPU_Speed_Limit=56–70；service JAR SHA256=39bc7bcdc5ff3af579d53f3bb8263bfe5e1e388c9c60319cc54f5589a2396621
+- 中间 JFR=12974801B，SHA256=623582738f46fd38d322992355fa479a83c8d75421fe0e85b60a8539c1f6cd3a。
+- 中间连续JMH=45.035308105s/调用；客户端gc profiler={'gc.alloc.rate': 108.35554891666027, 'gc.alloc.rate.norm': 12855081064.0, 'gc.count': 166.0, 'gc.time': 210.0}
+
+|轮次/产品/批大小|JMH ms/调用|客户端MiB/s|B/调用|GC次/ms|温控Speed范围|
+|---|---:|---:|---:|---:|---|
+|最终/INVERSE_DELIVERY-20|206.687|50.247|16916072|1/5|70–89|
+|最终/INVERSE_PERPETUAL-20|243.711|45.455|17384916|1/5|100–100|
+|最终/LINEAR_DELIVERY-20|316.637|36.214|17281812|1/7|64–89|
+|最终/LINEAR_PERPETUAL-20|253.730|37.485|15061780|1/5|100–100|
+|最终/OPTION-20|239.951|43.943|16849212|1/5|47–97|
+|最终/SPOT-20|228.228|42.455|15185008|1/5|100–100|
+
+- 最终main CPU_Speed_Limit=43–100；service JAR SHA256=36749e6f0e4d0c6adb1e27ca2159b7310b62a07953aa3aefb2dfbe0a5e72e122
+
+- 最终profile CPU_Speed_Limit=50–68；service JAR SHA256=36749e6f0e4d0c6adb1e27ca2159b7310b62a07953aa3aefb2dfbe0a5e72e122
+- 最终 JFR=12991125B，SHA256=27ef5cbff9e600b5bbbccad2bc3fe475e3f7b8a2dbf0ff4406761ecff6e7b4f0。
+- 最终连续JMH=45.106234396s/调用；客户端gc profiler={'gc.alloc.rate': 92.5864539563557, 'gc.alloc.rate.norm': 10986576160.0, 'gc.count': 142.0, 'gc.time': 214.0}
+
+- 最终benchmark JAR SHA256=6e32067b7f8c305ebbedf10cff7ae98cb6bf43005eeb8257d14ba6cf600ebfef
+- 清理完成：两轮节点/客户端已停止；已删除/tmp/owner-notify-retire及/tmp/owner-notify-retire-v2中的Archive、JFR、日志、诊断程序和22个本轮测试报告。以上原始路径失效；保留构建JAR和本文摘要，README及用户文件未改动。

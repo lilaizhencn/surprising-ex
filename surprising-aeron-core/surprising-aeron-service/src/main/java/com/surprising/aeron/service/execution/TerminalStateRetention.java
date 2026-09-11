@@ -124,7 +124,7 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
 
     private void retainPrunedOrder(OrderRuntime order, long coreSequence) {
         if (tombstones.contains(EntityType.ORDER.ordinal(), order.orderId())) return;
-        tombstones.put(EntityType.ORDER.ordinal(), order.orderId(), order.userId(),
+        tombstones.putKnownAbsent(EntityType.ORDER.ordinal(), order.orderId(), order.userId(),
                 normalizeClientId(order.clientOrderId()), coreSequence);
     }
 

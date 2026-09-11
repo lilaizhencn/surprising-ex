@@ -157,7 +157,7 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
         if (clientOrderId == null || clientOrderId.isBlank()) return 0;
         ClientIdentity identity = new ClientIdentity(userId, clientOrderId);
         long key = deterministicKey(userId, clientOrderId);
-        ClientIdentityEntry collision = clients.putIfAbsent(key, new ClientIdentityEntry(identity));
+        ClientIdentityEntry collision = clients.putIfAbsent(key, new ClientIdentityEntry(key, identity));
         if (collision != null && !collision.identity.equals(identity)) {
             throw new IllegalStateException("deterministic client identity collision");
         }
@@ -189,7 +189,7 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
             existing.references = Math.incrementExact(existing.references);
             return new PreparedClientKey(key, true);
         }
-        ClientIdentityEntry collision = clients.putIfAbsent(key, new ClientIdentityEntry(identity));
+        ClientIdentityEntry collision = clients.putIfAbsent(key, new ClientIdentityEntry(key, identity));
         if (collision != null) {
             if (!collision.identity.equals(identity)) {
                 throw new IllegalStateException("deterministic client identity collision");
@@ -256,6 +256,22 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
         ClientIdentityEntry entry = clients.get(clientLookup(clientKey));
         if (entry == null || entry.identity.userId() != userId) return;
         if (--entry.references == 0) clients.remove(clientLookup(clientKey), entry);
+    }
+
+    /** 所属 Lane 只准备既有引用，不提前递减；提交后由 Owner 释放。 */
+    ClientIdentityEntry prepareClientRelease(AccountLaneState lane, long userId, long clientKey) {
+        lane.assertOwner();
+        if (lane.laneId() != clientTopology.accountLaneId(userId))
+            throw new IllegalStateException("client identity crossed account Lane");
+        ClientIdentityEntry entry = clients.get(clientLookup(clientKey));
+        return entry != null && entry.identity.userId() == userId ? entry : null;
+    }
+
+    /** 直接消费 Lane 交接的引用，省去 Owner 上的二次 get；条件删除不会移除后来重建的同键实体。 */
+    void releasePreparedClientKey(ClientIdentityEntry entry) {
+        assertOwner();
+        if (entry == null || entry.references == 0) return;
+        if (--entry.references == 0) clients.remove(clientLookup(entry.key), entry);
     }
 
     public long positionKey(long userId, String positionKey) {
@@ -437,7 +453,7 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
             registry.symbols = storeIdentity(registry.symbols, id, name);
         });
         snapshot.clientKeys().forEach((identity, key) -> {
-            registry.clients.put(key, new ClientIdentityEntry(identity));
+            registry.clients.put(key, new ClientIdentityEntry(key, identity));
         });
         snapshot.positionKeys().forEach((identity, key) -> {
             registry.positionKeys.put(identity, key);
@@ -483,11 +499,15 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
         }
     }
 
-    private static final class ClientIdentityEntry {
+    /** 身份字典中已有的实体；退休缓冲只引用它，不创建逐订单释放对象。 */
+    static final class ClientIdentityEntry {
+        /** 建表时确定的全局身份键，释放时无需重新计算。 */
+        private final long key;
         private final ClientIdentity identity;
         private long references = 1;
 
-        private ClientIdentityEntry(ClientIdentity identity) {
+        private ClientIdentityEntry(long key, ClientIdentity identity) {
+            this.key = key;
             this.identity = identity;
         }
     }

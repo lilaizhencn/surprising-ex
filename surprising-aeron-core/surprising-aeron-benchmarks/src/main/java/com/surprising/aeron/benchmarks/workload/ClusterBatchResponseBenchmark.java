@@ -53,6 +53,8 @@ public class ClusterBatchResponseBenchmark {
     }
 
     private static long user(int i) { return 910_000_000L + i; }
+    /** 多字节客户号覆盖 Lane 准备退休引用、Owner 保留终态与跨批次释放复用。 */
+    private static String clientId(long id) { return "batch-客户-" + id; }
     private CompletableFuture<CoreResponse> send(CoreMessageType type, long user, byte[] payload) {
         return client.commandAsync(type, new UUID(90611, ++sequence), user, payload);
     }
@@ -75,7 +77,7 @@ public class ClusterBatchResponseBenchmark {
                     ids[n] = ++orderId;
                     orders.add(new PlaceOrderCommand(ids[n], SYMBOL, 1, CoreOrderSide.BUY, 80, 1, false,
                             CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
-                            CoreTimeInForce.GTC, false, "batch-" + ids[n]));
+                            CoreTimeInForce.GTC, false, clientId(ids[n])));
                 }
                 identities.add(ids);
                 replies.add(send(CoreMessageType.PLACE_ORDER_BATCH, user(i),
@@ -97,7 +99,7 @@ public class ClusterBatchResponseBenchmark {
                     if (item.index() != n || item.orderId() != ids[n] || item.status() != ResponseStatus.APPLIED)
                         throw new IllegalStateException("batch response item differs");
                     if (i >= USERS ? item.order() != null : item.order() == null
-                            || item.order().userId() != user(i) || !item.order().clientOrderId().equals("batch-" + ids[n]))
+                            || item.order().userId() != user(i) || !item.order().clientOrderId().equals(clientId(ids[n])))
                         throw new IllegalStateException("Lane response state differs");
                     terminal++;
                 }

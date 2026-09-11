@@ -28,9 +28,19 @@ final class TerminalTombstoneStore {
     boolean containsClient(int type, long user, String client) { return clientSlot(type, user, client) >= 0; }
 
     void put(int type, long id, long user, String client, long sequence) {
+        if (type < 0 || type >= ENTITY_TYPE_COUNT)
+            throw new IllegalArgumentException("invalid retained terminal entity");
+        putAt(entitySlot(type, id), type, id, user, client, sequence);
+    }
+
+    /** 仅在同一 Owner 已确认 contains=false 后调用；复用查找结果，不重复探测实体桶。 */
+    void putKnownAbsent(int type, long id, long user, String client, long sequence) {
+        putAt(-1, type, id, user, client, sequence);
+    }
+
+    private void putAt(int existing, int type, long id, long user, String client, long sequence) {
         if (type < 0 || type >= ENTITY_TYPE_COUNT || id <= 0 || user <= 0 || sequence <= 0 || client == null)
             throw new IllegalArgumentException("invalid retained terminal entity");
-        int existing = entitySlot(type, id);
         if (existing < 0 && size == ids.length) grow();
         int slot = existing >= 0 ? existing : (head + size++) & (ids.length - 1);
         if (existing >= 0) unlinkClient(types[slot], users[slot], clients[slot]);
@@ -99,7 +109,10 @@ final class TerminalTombstoneStore {
     }
     private void unlinkClient(int type, long user, String client) {
         if (client == null || client.isEmpty()) return;
-        int bucket = bucket(type, user, client), previous = 0;
+        unlinkClient(type, user, client, bucket(type, user, client));
+    }
+    private void unlinkClient(int type, long user, String client, int bucket) {
+        int previous = 0;
         for (int link = buckets[bucket]; link != 0; link = next[link - 1]) {
             int slot = link - 1;
             if (types[slot] == type && users[slot] == user && clients[slot].equals(client)) {
@@ -112,8 +125,8 @@ final class TerminalTombstoneStore {
     }
     private void indexClient(int slot) {
         if (clients[slot].isEmpty()) return;
-        unlinkClient(types[slot], users[slot], clients[slot]);
         int bucket = bucket(types[slot], users[slot], clients[slot]);
+        unlinkClient(types[slot], users[slot], clients[slot], bucket);
         next[slot] = buckets[bucket]; buckets[bucket] = slot + 1; indexed[slot] = true;
     }
     private void grow() {
