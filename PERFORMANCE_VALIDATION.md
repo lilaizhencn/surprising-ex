@@ -11235,3 +11235,28 @@ JFR summary
 - 入口→终态延迟us（p50/p90/p95/p99/p99.9/max，未拆accepted阶段）：PLACE 8781/21823/24854/30687/48398/63995（257536样本）；CANCEL 7958/16826/19169/24575/35291/53247（257536）；MARK 14516/21594/24920/36569/47087/50692（15194）；PLACE_BATCH 17498/23150/25444/33947/46071/54755（386304requests/7726080items）；CANCEL_BATCH 19660/26165/28344/41123/62128/65437（128768requests/2575360items）。两类batch均20items。
 - NMT reserved3124835→3126870KB、committed667787→703402KB；未采线程CPU、GC暂停或分配率，不能给出本轮Owner有效饱和程度或长期泄漏结论。代码未改动，无新增测试报告。client.log SHA256=de8e6370e9942f4cc425521233def9df1f17d3ed509c4c4a159aa15a1471eec6；通过但属于本机受限负载表现，不是云端三节点容量结论。
 - 节点/客户端已停止；清理/tmp/owner-fullspeed-check全部1799421539B产物（Archive/日志/脚本/NMT等），原始路径已失效。用户文件、构建JAR和README不变。
+
+## 2026-09-11 Owner 协调计数诊断：采集前锁定
+
+- 当前master f31576ab（生产代码e5619569），对照不适用，不运行旧版本。沿用HotSpot GraalVM25.0.1、Intel i9-9880H8C16T/16GiB、G1/NMT summary；单个真实Aeron成员/网络/Archive/Core，4Lane BUSY_SPIN、2matcher、PIPELINED、SHARED_NETWORK/service YIELDING；node512m/1536m，client128m/512m/SHARED。
+- U永续连续交易，1769用户/256币对、batch20、seed131001、全局/session在途256、1命令session+1保留查询session；mixed-trading-stream=true、mixed-operational=false，普通下/撤各512、批下15360项/批撤5120项、每cycle5120fills，初始资金1768000000125。JMH continuousOperations f1/wi0/i1/controlPageSize0/gc，内部预热30s/测量45s，无额外冷却。只诊断当前路径，不作完整生产查询/控制并发验收。
+- 外部临时Java agent使用JDK ASM对当前JAR加载时插桩，生产源码/JAR不变：Owner单线程计数prefix调用/未完成返回、pump、通知消费/忽略/缺失pending、有效signal、ready探测/空返回、finishBatch和发布。每65536次计数生成一次JFR累计事件，使用测量窗内首末事件差及其覆盖时间，不能用整个warmup累计数除测量业务量。计数和profile有开销，不能拿本轮吞吐做回退/提升结论；没有硬件CAS重试指标。
+- node JFR profile/max128MiB，记录计数事件、CPU/GC/分配/NMT；每2s监测温控与磁盘>10GiB，client最长300s。通过要求资金/状态校验PASS、offered=terminal business/Core、unfinished0、无DataLoss；限速/swap即仅诊断。无生产改动，不重复六产品恢复门禁；恢复沿用e5619569已通过18阶段，不冒称本轮重新验证。原始产物/tmp/owner-coordination-audit，提取摘要后停止清理。
+
+### 第一轮及补充计数锁定
+
+- 工具准备：HotSpot25不再暴露内部ASM，改用本机Maven缓存ASM9.9.1。首次启动服务fat JAR的旧ASM遮蔽agent依赖，未成功插桩，主动终止；第二次插桩栈映射校验失败，节点未启动，改为ASM9/COMPUTE_FRAMES并加启动插桩检查。两次均非业务失败、未形成有效测量，不采纳其性能数据；生产源码/JAR未改。
+- 第一轮有效45.028s，7236649业务操作/699433Core消息、160716.060业务ops/s、15533.449消息/s、1720320fills/38205.950每秒；offered=terminal、unfinished0、fundsDiff0、hash4cc8598f65bb61e1。Owner97.360%、matcher26.046/25.933%、Lane97.576–97.747%含自旋；DataLoss0/Owner IO0。分配495.211MiB/s（加权23381527064B），GC78/489.217ms/max11.329ms，heap峰389.02MiB；thermal58–100，本轮不作容量结论。
+- 计数事件1129个，均trading-owner--1；测量内首末覆盖44.975s：ingress698601、prefix31094370/未完成30406958、pump1767464、准入通知429568/忽略0、结算通知773428/缺失pending445/继续signal772983、readyProbe3706960/空2801806、finishBatch429285、commitPublish1042740。每Core入口prefix44.51/pump2.53；缺失pending仅0.0575%，不能把全部结算通知归类迟到冗余。prefixIncomplete不等于无进展。
+- 补充轮仍当前master/相同JAR/场景/30s预热45s测量/JMH/JFR/所有门槛；新添两个Owner计数：明确走prefix快速等待返回分支、pump前后matchingProgressSequence不变。后者仅表示准入/撮合/结算通知等进度序号未变化，不等同证明没有任何派发/检查工作。不更改第一轮定义；新采集前移走第一轮输出，完整保留至摘要提取后统一清理。
+
+### 补充轮结果与结论
+
+- 45.029s，offered=terminal：8333568业务操作/804096Core消息；185071.627业务ops/s、17857.340消息/s、1981440fills/44003.760每秒。unfinished0/peak256/fundsDiff0，资金/持仓/冻结/损失场景PASS，hash529b6c6220a6328；query/trigger计数0，非全运营负载。CPU_Speed_Limit60–100，插桩和JFR开销存在，不作容量或历史回退因果结论。
+- 1681个累计事件均由trading-owner--1发布，测量内首末44.983s：ingress802023；prefix32515176/未完成31724450/快速门禁返回30814219；pump2008900/前后matchingProgressSequence不变892132；准入通知494107/忽略0；结算通知889541/缺失pending451/继续signal889090；readyProbe4215459/空3163144；finishBatch494474；commitPublish1197314。每Core入口prefix40.54、pump2.50；94.77%prefix被门禁挡住；44.41%pump进度序号不变；缺失pending仅0.0507%。正常双Lane结果、批量项通知仍有必要，不能把未缺失pending的通知一概判冗余；未完成返回不等于零工作。
+- Owner3306执行样本，互斥分类：collection439(13.28%)、publication310(9.38%)、finishOther191(5.78%)、pumpOther802(24.26%)、commitOther263(7.96%)、prefixOutsideCommit204(6.17%)、instrumentation9(0.27%)、other1088(32.91%)。pumpOther包含真实准入/撮合收集/结算派发，不是24%空转；prefixOutsideCommit也包含完成前缀处理，不是纯门禁耗时。inclusive finishOrderBatch796(24.08%)、takeReadyLaneMask64(1.94%)、AtomicLong.getAndAccumulate60(1.81%)、RuntimeFactIndexes.applyCurrent193(5.84%)；不可相加。没有共享原子更新占主导的证据，不能据sample小就排除缓存竞争。
+- Owner97.995%、matcher26.865/26.810%、四Lane98.132–98.152%含busy-spin。machine88.76%、JVM58.94%；DataLoss0/Owner同步IO0。加权分配26644619576B/564.309MiB/s，约3197B/业务操作（抽样非精确对象数）；GC89次/524.171ms/p99=max10.197ms，heapUsed峰389.43MiB；NMT reserved3144610→3165456KB、committed696946→734556KB。无长稳、全native池余额、硬件CAS/缓存计数和精确空pump耗时，未记录本轮swap增量，不作泄漏或完整环境验收。
+- 第二轮入口→终态us，按p50/p90/p95/p99/p99.9/max：PLACE8249/21315/23576/26951/43843/59539（198144）；CANCEL7622/16228/18186/21839/39026/46202（198144）；MARK12607/20578/22626/31768/36929/38764（11520）；PLACE_BATCH17711/22085/24150/32718/48103/56066（297216批/5944320项）；CANCEL_BATCH19251/24231/25673/29999/55574/59113（99072批/1981440项）。batch均20，缺accepted阶段拆分/CO修正，不作尾延迟验收。首轮普通PLACE p50/p99/max9584/33882/85524us，后续轮不是相同环境的加速对照。
+- JMH首轮45.028227525s/invocation，client125.955798MiB/s、14879709176B/invocation、192GC/225ms；补充45.029403907s/invocation，151.220894MiB/s、17816474144B/invocation、229GC/227ms。client归一分配包含内部预热，不是每业务操作；单iteration无有效置信区间。首轮NMT reserved3145277→3170295KB/committed697541→740755KB。两轮JFR均profile/stack128、已生成summary及测量窗口分组分析；首轮5525522B/SHA256=5335ef8f5633ea96bf68c0fb8a06ffaad674cf89097769c2f88901faceaf2e1e，补充6005909B/SHA256=396ed5f3fb979b4c827b4dc8f2b555cb44781da618f0fdcea74292ddb0c21114。
+- 本次确认：迟到且pending缺失不是主负担；前缀门禁已拦截多数空检查，仍有每Core约1.11次进度序号不变的完整pump值得逐路径精简；Owner的实际结果收集、终态/索引/发布和准入派发仍是大项。没有证明上述任一项造成昨天到今天的13%差额，也不据此删除资金依赖、健康检查或确定性提交。生产代码/JAR未改，无新增生产诊断变量，无需重跑功能套件；仅记录诊断结果。
+- 清理完成：全部记录的节点/客户端已退出；/tmp/owner-coordination-audit共3852720281B（含无效启动、两轮Archive/JFR/日志/临时agent与分析器）已删除，原始路径不可访问。补充agent源码SHA256=ff60851e4b927e0069b39d3ee365abf35c75ac01701c004b0fefa7d69480bce2。保留现有构建JAR、用户文件及README；本次git diff --check作为记录变更检查。
