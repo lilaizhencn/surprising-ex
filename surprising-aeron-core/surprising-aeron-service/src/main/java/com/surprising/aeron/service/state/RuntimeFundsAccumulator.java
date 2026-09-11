@@ -104,6 +104,24 @@ public final class RuntimeFundsAccumulator {
         size = 0;
     }
 
+    /**
+     * 将已汇总的资金缓冲交给空目标，源接回空缓冲；两者必须由同一执行线程独占。
+     * 用于命令挂起/恢复，不重新合并 posting，也不改变 posting 顺序及溢出校验结果。
+     */
+    public void transferToEmpty(RuntimeFundsAccumulator target) {
+        if (target == null || target == this || target.size != 0) {
+            throw new IllegalArgumentException("funds transfer requires a distinct empty target");
+        }
+        if (size == 0) return;
+        int[] assets = target.assetIds; target.assetIds = assetIds; assetIds = assets;
+        byte[] owners = target.ownerKinds; target.ownerKinds = ownerKinds; ownerKinds = owners;
+        long[] ids = target.ownerIds; target.ownerIds = ownerIds; ownerIds = ids;
+        byte[] ledgers = target.subledgers; target.subledgers = subledgers; subledgers = ledgers;
+        long[] amounts = target.units; target.units = units; units = amounts;
+        target.size = size;
+        size = 0;
+    }
+
     private void removeAt(int index) {
         int last = --size;
         if (index == last) return;

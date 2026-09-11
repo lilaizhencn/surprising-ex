@@ -2754,7 +2754,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         resultBuilder.changedUserIds.addAll(resultBuilder.commandChangedUserIds);
         resultBuilder.changedOrderIds.clear();
         resultBuilder.changedOrderIds.addAll(resultBuilder.commandChangedOrderIds);
-        context.copyCommitFundsTo(commandFundsAccumulator);
+        context.takeCommitFundsTo(commandFundsAccumulator);
         context.clearCommitContext();
         commandExternalAdjustment = false;
         resultBuilder.commandTradeCount = 0;

@@ -17,6 +17,32 @@ import org.junit.jupiter.api.Test;
 class LaneCommandContextRingTest {
 
     @Test
+    void suspendedSequencesTransferFundsWithoutSharingTheActiveBuffer() {
+        var ring = new LaneCommandContextRing(4, 4);
+        var first = ring.claim(1);
+        var second = ring.claim(2);
+        var active = new RuntimeFundsAccumulator();
+        active.add(7, com.surprising.aeron.service.state.FundsPosting.OwnerKind.USER, 11,
+                com.surprising.aeron.service.state.FundsPosting.Subledger.AVAILABLE, -100);
+        var firstExpected = active.toDelta();
+        first.suspendCommitContext(List.of(11L), List.of(1L), active, true, false);
+        assertThat(active.toDelta()).isSameAs(RuntimeFundsDelta.empty());
+        active.add(8, com.surprising.aeron.service.state.FundsPosting.OwnerKind.USER, 22,
+                com.surprising.aeron.service.state.FundsPosting.Subledger.LOCKED, 50);
+        var secondExpected = active.toDelta();
+        second.suspendCommitContext(List.of(22L), List.of(2L), active, false, false);
+        first.takeCommitFundsTo(active);
+        first.clearCommitContext();
+        assertThat(active.toDelta()).usingRecursiveComparison().isEqualTo(firstExpected);
+        second.takeCommitFundsTo(active);
+        second.clearCommitContext();
+        assertThat(active.toDelta()).usingRecursiveComparison().isEqualTo(secondExpected);
+        ring.discard(1);
+        ring.discard(2);
+        assertThat(active.toDelta()).usingRecursiveComparison().isEqualTo(secondExpected);
+    }
+
+    @Test
     void synchronousControlLanesCannotEraseMatcherParticipantsOrWeakenAckValidation() {
         var ring=new LaneCommandContextRing(4,4);
         var context=ring.claim(1);
@@ -123,7 +149,7 @@ class LaneCommandContextRingTest {
             assertThat(context.hasCommitContext()).isTrue();
             assertThat(context.commitChangedUserIds()).containsExactly(7L);
             assertThat(context.commitChangedOrderIds()).containsExactly(11L);
-            context.copyCommitFundsTo(restoredFunds);
+            context.takeCommitFundsTo(restoredFunds);
             assertThat(restoredFunds.toDelta()).isSameAs(RuntimeFundsDelta.empty());
             assertThat(context.commitSnapshotDirty()).isTrue();
             assertThat(context.commitSnapshotProvisionalOnly()).isFalse();

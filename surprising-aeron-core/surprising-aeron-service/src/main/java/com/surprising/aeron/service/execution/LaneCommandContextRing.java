@@ -114,17 +114,18 @@ final class LaneCommandContextRing {
             commitChangedUserIds = changedUserIds;
             commitChangedOrderIds = changedOrderIds;
             commitFundsAccumulator.clear();
-            commitFundsAccumulator.add(fundsAccumulator);
+            fundsAccumulator.transferToEmpty(commitFundsAccumulator);
             commitSnapshotDirty = snapshotDirty;
             commitSnapshotProvisionalOnly = snapshotProvisionalOnly;
         }
 
         java.util.List<Long> commitChangedUserIds() { return requiredCommit(commitChangedUserIds); }
         java.util.List<Long> commitChangedOrderIds() { return requiredCommit(commitChangedOrderIds); }
-        void copyCommitFundsTo(com.surprising.aeron.service.state.RuntimeFundsAccumulator target) {
+        /** 恢复本序号时交还原资金缓冲，不把已汇总的逐账户 posting 再合并一次。 */
+        void takeCommitFundsTo(com.surprising.aeron.service.state.RuntimeFundsAccumulator target) {
             requireCommit();
             target.clear();
-            target.add(commitFundsAccumulator);
+            commitFundsAccumulator.transferToEmpty(target);
         }
         boolean commitSnapshotDirty() { requireCommit(); return commitSnapshotDirty; }
         boolean commitSnapshotProvisionalOnly() { requireCommit(); return commitSnapshotProvisionalOnly; }

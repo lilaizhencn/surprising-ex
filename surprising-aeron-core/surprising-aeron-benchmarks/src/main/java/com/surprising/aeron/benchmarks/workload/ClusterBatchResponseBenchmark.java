@@ -21,7 +21,10 @@ import org.openjdk.jmh.annotations.*;
 public class ClusterBatchResponseBenchmark {
     @Param({"SPOT", "LINEAR_PERPETUAL", "INVERSE_PERPETUAL", "LINEAR_DELIVERY", "INVERSE_DELIVERY", "OPTION"})
     public String productLine;
-    private static final int USERS = 32, ITEMS = 20, ROUNDS = 8;
+    /** 单项批量覆盖顺序准入的资金上下文交接；20项覆盖并行批量的开放/终态切换。 */
+    @Param({"1", "20"})
+    public int batchSize;
+    private static final int USERS = 32, ROUNDS = 8;
     private static final long FUNDS = 1_000_000;
     private static final String SYMBOL = "BATCH-USDT";
     /** 发压线程独占客户端、请求序号及订单序号；Owner 和 Lane 使用真实节点实例。 */
@@ -66,9 +69,9 @@ public class ClusterBatchResponseBenchmark {
             var identities = new ArrayList<long[]>(USERS);
             // 同一 FIFO 先发下单再发撤单；发送阶段不逐笔 join，也不等下单响应才发撤单。
             for (int i = 0; i < USERS; i++) {
-                var orders = new ArrayList<PlaceOrderCommand>(ITEMS);
-                long[] ids = new long[ITEMS];
-                for (int n = 0; n < ITEMS; n++) {
+                var orders = new ArrayList<PlaceOrderCommand>(batchSize);
+                long[] ids = new long[batchSize];
+                for (int n = 0; n < batchSize; n++) {
                     ids[n] = ++orderId;
                     orders.add(new PlaceOrderCommand(ids[n], SYMBOL, 1, CoreOrderSide.BUY, 80, 1, false,
                             CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
@@ -88,8 +91,8 @@ public class ClusterBatchResponseBenchmark {
                 applied(response);
                 var items = TradingOrderBatchCodec.decodeResult(response.data()).items();
                 long[] ids = identities.get(i % USERS);
-                if (items.size() != ITEMS) throw new IllegalStateException("batch response size differs");
-                for (int n = 0; n < ITEMS; n++) {
+                if (items.size() != batchSize) throw new IllegalStateException("batch response size differs");
+                for (int n = 0; n < batchSize; n++) {
                     var item = items.get(n);
                     if (item.index() != n || item.orderId() != ids[n] || item.status() != ResponseStatus.APPLIED)
                         throw new IllegalStateException("batch response item differs");

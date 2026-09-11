@@ -11085,3 +11085,46 @@ JFR summary
 - 源码 surprising-aeron-core/surprising-aeron-service/src/test/java/com/surprising/aeron/service/execution/OrderBatchSlotReuseTest.java SHA256=8cc64593e4e484732e999b2d538e0f5fcc51de4bec45617eaeaae331bd4a5e35
 
 - 清理审计：所有本轮Java节点/客户端均已停止；删除本轮临时根目录 /tmp/owner-followup（14077939113 bytes逻辑文件大小，含Archive/JFR/诊断agent/日志），删除已确认本轮产生的24个测试报告（401257 bytes）。只保留构建JAR及本文摘要，既有用户未跟踪文件不动。以上临时artifact路径已失效。
+
+## 2026-09-11 Owner 资金缓冲交接及非终态扫描：采集前锁定
+
+- 被测：master 基于 a8f8ff38 的本轮工作区；对照不适用（仅当前 master）。改动是挂起/恢复时交接已汇总资金数组，Lane 原遍历记录终态标志，使 Owner 跳过全部开放订单的终态扫描。守恒校验、提交顺序和终态保留规则不变。
+- 环境：本机 Intel i9-9880H 8C16T/16GiB；HotSpot Oracle GraalVM 25.0.1、Maven 3.9.16、G1。每次一个真实 Aeron 成员，网络+Archive+Core；4 Account Lane，2 matcher（诊断档，不作为单 matcher 或云端容量验收），PIPELINED、BUSY_SPIN、SHARED_NETWORK、service YIELDING。
+- JVM：node Xms512m/Xmx1536m，client Xms128m/Xmx512m，NMT summary；jdk.internal.misc opens/exports、java.util.zip opens、native-access ALL-UNNAMED。JFR profile 基础，ExecutionSample 2ms、ThreadCPULoad 1s、Park/MonitorEnter 1ms，maxsize192m，退出写盘。gc profiler 仅客户端；分配归因以节点 JFR 为准。
+- 六产品 JMH：ClusterBatchResponseBenchmark.lanePreparedResponses，batchSize=1/20 分别全新节点数据；32用户、1连接、1币对，初始资金每用户1000000、持仓0、标记价100，buy80不成交后撤单（各50%），8轮/调用，每轮持续发32下单批量+32撤单批量后核对；配置上限256 in-flight，实际此场景至多64。无独立做市进程。1线程/1fork/1预热/2测量（SingleShotTime），每次调用512或10240 business ops。每产品分别采节点JFR。
+- 连续诊断：ClusterMixedCapacityMain 无 profiler 预热30s/测量60s；ClusterOperationalBenchmark.continuousOperations JMH 1线程/1fork/wi0/i1，业务内部预热30s/测量45s，controlPageSize=0、gc profiler及节点JFR。U本位永续，1769用户、256币对、1连接、in-flight256，seed131001、mixed-trading-stream=true、mixed-operational=false，沿用当前固定循环交易组合与内嵌maker订单；初态及动作计数由客户端输出并守恒核对。持续异步闭环、无目标到达率、不修正 coordinated omission；不据此承诺开放到达尾延迟。
+- 冷却：每场终态/查询校验后停止节点；不通过等待温控反复重跑。热节流、swap、DataLoss 导致容量数字无效，只保留诊断；不把 busy-spin CPU 当有效工作占比。通过条件：命令无失败/超时、accepted=terminal、unfinished=0、fundsDiff=0，缓冲复用及订单生命周期测试通过，六产品日志重放及快照重启状态一致。没有预设吞吐提升承诺。
+- 恢复：六产品 ClusterProductLineGateMain execute→kill→replay→snapshot restart；恢复 gate 用 BLOCKING 以减少功能验证空转，不用于性能数据。当前轮原始目录 /tmp/owner-funds-handoff，分析后清理并记录摘要。不验证云端三节点、HTTP/WS、长期泄漏；最终只能给局部优化和诊断结论。
+
+### 本轮结果（2026-09-11 09:46–09:55 +08:00）
+
+- `JAVA_HOME=/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home`，PATH 优先该 JDK；`mvn -pl surprising-aeron-core/surprising-aeron-benchmarks -am -Dtest=RuntimeFundsAccumulatorTest,LaneCommandContextRingTest,LaneTerminalSummaryTest,ClusterCommandPipelineTest,CoreOrderedOrderBatchTest,OrderBatchSettlementWaitTest,TerminalStateRetentionTest,TradingStateSnapshotCodecTest,CoreMatchingStateTest,ClusterMixedCapacityTest -Dsurefire.failIfNoSpecifiedTests=false package`：296 tests、0 failure/error/skipped，BUILD SUCCESS。首次新增测试跨包读取 package-private postings 编译失败，改用递归值比较；未放宽生产 API。
+- 真实 JMH 命令主体：`java <锁定参数> -cp product-core-benchmarks.jar org.openjdk.jmh.Main ClusterBatchResponseBenchmark.lanePreparedResponses -f 1 -wi 1 -i 2 -p productLine=<产品> -p batchSize=<1或20> -prof gc -rf json -rff <case>/jmh.json`。每个组合全新节点，12/12 PASS；每场含预热终态条目1536/30720，均无未完成、fundsDiff=0、活动订单和冻结清零。下表单位为整次512/10240操作调用，非单订单延迟；仅2测量样本，无有效置信区间。
+
+| 产品/批大小 | ms/调用 | 客户端分配MiB/s | B/调用 | 客户端GC次/ms |
+|---|---:|---:|---:|---:|
+| SPOT/1 |147.784|7.881|2417676|0/0|
+| SPOT/20 |190.796|44.509|13757196|1/4|
+| LINEAR_PERPETUAL/1 |145.649|14.385|4022944|0/0|
+| LINEAR_PERPETUAL/20 |247.445|36.036|13777216|1/5|
+| INVERSE_PERPETUAL/1 |106.816|9.900|2202500|0/0|
+| INVERSE_PERPETUAL/20 |199.615|41.925|13691916|1/5|
+| LINEAR_DELIVERY/1 |134.504|8.479|2364940|0/0|
+| LINEAR_DELIVERY/20 |219.976|43.359|15525500|1/6|
+| INVERSE_DELIVERY/1 |110.473|10.708|2390504|0/0|
+| INVERSE_DELIVERY/20 |256.919|34.265|13713968|1/5|
+| OPTION/1 |111.886|9.618|2283120|0/0|
+| OPTION/20 |266.715|33.055|13663024|1/5|
+
+- 无 profiler 连续60.113s：offered=terminal business ops **10100480**、Core messages **975616**；**168023.753 business ops/s、16229.591 Core messages/s、39945.832 fills/s**，fills2401280。peakInFlight256、期末unfinished0、fundsDiff0；620总循环、469测量循环、businessHash=4e3ab487f3e718a。业务计数：普通下单240128、普通撤单240128、标记价15104、批量下单7203840 items/360192 requests、批量撤单2401280 items/120064 requests（batch均20）。持续窗内查询/触发执行0，初始化强平/保险/ADL检查PASS。CPU_Speed_Limit **58–85**，容量数据无效，只保留诊断。
+- 上述入口→终态延迟us（p50/p90/p95/p99/p99.9/max）：PLACE 9003/22544/24674/33390/81592/111345；CANCEL 8335/17711/19660/28704/56623/77594；MARK 13008/22134/25919/48398/84213/84869；PLACE_BATCH 18956/24051/27836/49020/76808/110690；CANCEL_BATCH 20496/25722/28688/45907/99614/111869。样本数为前述各类requests；未拆分accepted阶段，未修正coordinated omission，不作尾延迟验收。
+- JMH连续命令主体：`java <锁定参数> -cp product-core-benchmarks.jar org.openjdk.jmh.Main ClusterOperationalBenchmark.continuousOperations -f 1 -wi 0 -i 1 -p controlPageSize=0 -prof gc -rf json -rff <case>/jmh.json`。45.100207112s/调用；offered=terminal business ops7688448、Core messages742656；170476.601 business ops/s、16466.974 messages/s、40528.849 fills/s（1827840 fills），peak256、unfinished0、fundsDiff0，businessHash9742c90bc80f9780。客户端gc profiler：125.003MiB/s、14755490208B/调用、190GC/216ms；这是整次含内部预热的客户端分配，不能作Core分配。CPU_Speed_Limit **60–75**，亦不作容量或版本提升结论。
+- 节点JFR：`jfr configure --input profile.jfc --output owner.jfc jdk.ExecutionSample#period=2ms jdk.ThreadCPULoad#period=1s jdk.ThreadPark#threshold=1ms jdk.JavaMonitorEnter#threshold=1ms`；连续场采集116s，分析仅measurementStart/End时间窗45.1s。DataLoss0；machineCPU90.53%、JVM58.29%（整机口径）；单核口径Owner97.304%、matcher25.949/25.898%、4Lane97.462–97.482%。Lane含大量忙轮询；不能当成同等业务饱和。
+- Owner14371 execution samples；inclusive（不可相加）：finishOrderBatch3697（25.73%）、collectMatcherSettlement1527（10.63%）、collectCancel674（4.69%）、readyLaneMask1546（10.76%）、commitTerminalToOwner1075（7.48%）、RuntimeFactIndexes.applyCurrent886（6.17%）。剩余串行批量完成、Lane结果收集和全局索引发布仍明显；此次只去除两次资金重合并和全开放订单终态遍历，未证明整体加速，CPU仍高。
+- 分配：节点ObjectAllocationSample加权24502277696B，518.143MiB/s、3186.9B/business op；不是精确对象计数。热点含matcher NativeCommand、Lane OrderRuntime/long[]、Owner byte[]；site含ConcurrentHashMap.putVal、LongObjectHashMap.addKeyValueAtIndex、批量decodeCommand。NewTLAB/OutsideTLAB未启用，不能把0事件说成零分配；最大对象与对象数/op未测。
+- GC/heap：83次youngGC，总507.753ms（约1.13%），最大及p99 pause12.434ms；无fullGC或evacuation failure事件；heapUsed峰386.66MiB，按30s桶GC后均值98.856→98.850MiB。短窗不能证明无泄漏。NMT reserved3144359→3148241KB、committed692095→726701KB；heap committed526336→524288KB、Code15991→48151KB、GC71181→71835KB、Thread1955→2555KB、Class1742→2620KB。DirectBuffer采样峰/末9575136B、8个；未测所有mapped/native pool峰值、FD和长期存活趋势。
+- Owner同步File/Socket I/O事件0、MonitorEnter0；2个ThreadPark合计5.946ms，栈均为ContinuousTradingClusterService.runOwner→BackoffIdleStrategy.idle→parkNanos（要求100us，实际4.15/1.80ms），不是业务Future/锁等待。全JVM41725 parks、2723 sleeps不可归到Owner。85 SafepointBegin累计到达9.554ms；87 VM操作累计511.131ms主要随GC；2 compilation累计360.131ms/max188.757ms，13 deoptimization。JFR异常逐次事件未启用，不能报告精确异常数；业务结果未见失败/超时。
+- 六产品JFR为各自短批量窗口，覆盖受影响业务执行，但不足以构成逐产品容量/长稳证明。未作新旧版本对比、长稳泄漏验收、云三成员、HTTP/WS及持续风险重业务压测。结论为正确性回归和局部诊断，非吞吐达标。
+- 主节点JAR SHA256=3acee16fa59061c7c051bc421cd86479fe3e9711a49861c22f18d8fd33b24936；连续节点JFR13562089B/SHA256=ad5c9576f9cb5c0191ddd499731340f668056e81a56773aea845233c79e59b80。原始路径均在/tmp/owner-funds-handoff（runs各场commands.json、client/node.log、JMH JSON、node.jfr、NMT，根部AnalyzeJfr/PartitionJfr/Details汇总）；清理后路径失效。
+- 最终恢复：6/6产品各execute、kill后replay、snapshot restart全部PASS，18次fundsDiff=0；snapshot position：SPOT3616，U/币永续9568，U/币交割及OPTION5184。benchmark JAR SHA256=bd552f077a7ba6a03854c5f27a8da52644b24fd7eb3979267c7648e604811c64。无需改动协议或快照格式。
+- 清理完成：本轮节点/客户端已全部停止；删除/tmp/owner-funds-handoff约10.17GB逻辑文件（含Archive、JFR、日志、临时分析程序）及20个本轮测试报告356299B。以上临时路径已失效；保留构建JAR及本记录，用户未跟踪文件未改动。

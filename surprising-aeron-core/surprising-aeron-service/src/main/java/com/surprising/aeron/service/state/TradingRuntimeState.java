@@ -1042,13 +1042,18 @@ public final class TradingRuntimeState implements AutoCloseable {
     static final class PublishedLaneChanges {
         /** 本 Lane 的不可变实体发布收据；Owner 不再逐实体重写发布表。 */
         LanePublication publication;
+        /** Lane 在原有发布准备遍历中记录；没有终态时 Owner 不再逐单检查。 */
+        boolean hasTerminalOrders;
 
         void preparePublication(TradingRuntimeState state) {
             if (publication != null) throw new IllegalStateException("Lane publication already prepared");
             publication = new LanePublication();
             users.forEach((id, value) -> state.publishedUsers.stage(publication, id, value));
-            orders.forEach((id, value) -> state.publishedOrders.stage(publication, id,
-                    removedOrderRoutes.contains(id) ? null : value));
+            hasTerminalOrders = false;
+            orders.forEach((id, value) -> {
+                if (value != null && value.status().terminal()) hasTerminalOrders = true;
+                state.publishedOrders.stage(publication, id, removedOrderRoutes.contains(id) ? null : value);
+            });
             reservations.forEach((id, value) -> state.publishedReservations.stage(publication, id,
                     removedReservationRoutes.contains(id) ? null : value));
             positions.forEach((id, value) -> state.publishedPositions.stage(publication, id, value));
@@ -1154,7 +1159,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 state.changedUsers.add(userId);
                 if (publication == null) putOrRemove(state.publishedUsers, userId, user);
             });
-            orders.forEachIndexed((orderId, order, hasPrepared, prepared) -> {
+            if (publication == null || terminalOrderSink != null && hasTerminalOrders) orders.forEach((orderId, order) -> {
                 if (terminalOrderSink != null && order != null && order.status().terminal()) {
                     terminalOrderSink.accept(order, coreSequence);
                 }
@@ -1213,6 +1218,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         void clear() {
             if (triggers != null) triggers.clear();
             publication = null;
+            hasTerminalOrders = false;
             users.clear();
             orders.clear();
             reservations.clear();
