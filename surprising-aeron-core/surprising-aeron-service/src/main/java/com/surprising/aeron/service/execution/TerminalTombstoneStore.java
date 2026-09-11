@@ -38,6 +38,20 @@ final class TerminalTombstoneStore {
         putAt(-1, type, id, user, client, sequence);
     }
 
+    /**
+     * 单次实体探测并插入；调用方不再先 contains 再 put，避免终态提交对同一 ID 做两次桶遍历。
+     *
+     * @return true when a new tombstone was inserted, false when the ID was already retained
+     */
+    boolean putIfAbsent(int type, long id, long user, String client, long sequence) {
+        if (type < 0 || type >= ENTITY_TYPE_COUNT)
+            throw new IllegalArgumentException("invalid retained terminal entity");
+        int existing = entitySlot(type, id);
+        if (existing >= 0) return false;
+        putAt(-1, type, id, user, client, sequence);
+        return true;
+    }
+
     private void putAt(int existing, int type, long id, long user, String client, long sequence) {
         if (type < 0 || type >= ENTITY_TYPE_COUNT || id <= 0 || user <= 0 || sequence <= 0 || client == null)
             throw new IllegalArgumentException("invalid retained terminal entity");

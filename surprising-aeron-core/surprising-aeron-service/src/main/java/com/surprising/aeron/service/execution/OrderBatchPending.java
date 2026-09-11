@@ -159,14 +159,16 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     boolean started;
     /** 批量提交的唯一阶段：等待、预派发或有序提交，禁止重复取得派发权。 */
     CommitStage commitStage = CommitStage.WAITING;
-    /** Lane 准入结果是否已经收集完成。 */
-    boolean admissionCollected;
-    /** 本批撮合结果是否已核验并转成待结算变化。 */
-    boolean matchingApplied;
-    /** 本批币对是否已登记到在途依赖索引。 */
-    boolean pipelineRegistered;
-    /** 本批需要的最终 Lane 提交是否已完成。 */
-    boolean laneCommitCompleted;
+    /** 批处理生命周期位图；用一个 primitive 状态取代多个相互独立的布尔字段。 */
+    int lifecycleFlags;
+    private static final int ADMISSION_COLLECTED = 1;
+    private static final int MATCHING_APPLIED = 1 << 1;
+    private static final int PIPELINE_REGISTERED = 1 << 2;
+    private static final int LANE_COMMIT_COMPLETED = 1 << 3;
+    private static final int SETTLEMENTS_COLLECTED = 1 << 4;
+    private static final int CANCELLATIONS_COLLECTED = 1 << 5;
+    private static final int FINISHING = 1 << 6;
+    private static final int LANE_CONTEXT_INITIALIZED = 1 << 7;
     /** 本批是否满足并采用批量并行准入路径。 */
     boolean pipelined;
     /** 本批是否必须逐项准入，以保持批内资金或订单依赖。 */
@@ -205,14 +207,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     final ArrayList<String> preparedSymbols;
     /** Owner 按币对共享本批的行情、费率及准入上下文；只在本批准备阶段使用，不跨命令复用。 */
     final java.util.HashMap<String, com.surprising.aeron.service.state.PlaceBatchIntentSource.Decision> preparedContexts;
-    /** 本批结算事件是否已收集，防止重复应用结果。 */
-    boolean settlementsCollected;
-    /** 本批撤单事件是否已收集，防止重复释放预留。 */
-    boolean cancellationsCollected;
-    /** 是否已进入终态收集范围，保证只激活一次资金上下文。 */
-    boolean finishing;
-    /** 该批的 Lane 完成要求是否已经登记。 */
-    boolean laneContextInitialized;
+
     /** 本批实际涉及的账户 Lane，用于和预期范围核对。 */
     long actualLaneMask;
     /** 当前批最近完成的撮合结果，用于延续序号证据。 */
@@ -234,6 +229,27 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         if (commitStarted()) throw new IllegalStateException("batch commit already started");
         commitStage = CommitStage.COMMITTING;
     }
+
+    private boolean has(int bit) { return (lifecycleFlags & bit) != 0; }
+    private void set(int bit, boolean value) {
+        if (value) lifecycleFlags |= bit; else lifecycleFlags &= ~bit;
+    }
+    boolean admissionCollected() { return has(ADMISSION_COLLECTED); }
+    void admissionCollected(boolean value) { set(ADMISSION_COLLECTED, value); }
+    boolean matchingApplied() { return has(MATCHING_APPLIED); }
+    void matchingApplied(boolean value) { set(MATCHING_APPLIED, value); }
+    boolean pipelineRegistered() { return has(PIPELINE_REGISTERED); }
+    void pipelineRegistered(boolean value) { set(PIPELINE_REGISTERED, value); }
+    boolean laneCommitCompleted() { return has(LANE_COMMIT_COMPLETED); }
+    void laneCommitCompleted(boolean value) { set(LANE_COMMIT_COMPLETED, value); }
+    boolean settlementsCollected() { return has(SETTLEMENTS_COLLECTED); }
+    void settlementsCollected(boolean value) { set(SETTLEMENTS_COLLECTED, value); }
+    boolean cancellationsCollected() { return has(CANCELLATIONS_COLLECTED); }
+    void cancellationsCollected(boolean value) { set(CANCELLATIONS_COLLECTED, value); }
+    boolean finishing() { return has(FINISHING); }
+    void finishing(boolean value) { set(FINISHING, value); }
+    boolean laneContextInitialized() { return has(LANE_CONTEXT_INITIALIZED); }
+    void laneContextInitialized(boolean value) { set(LANE_CONTEXT_INITIALIZED, value); }
 
     OrderBatchPending(int requestedCapacity) {
         int capacity = Math.max(1, requestedCapacity);
@@ -315,10 +331,6 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         currentPreMatchingCancellationOrderIds = List.of();
         started = false;
         commitStage = CommitStage.WAITING;
-        admissionCollected = false;
-        matchingApplied = false;
-        pipelineRegistered = false;
-        laneCommitCompleted = false;
         pipelined = false;
         sequentialAdmission = false;
         pipelinedMatchingResults.clear();
@@ -335,10 +347,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         java.util.Arrays.fill(preparedAdmittedReservations, 0, preparedCount, null);
         preparedSymbols.clear();
         preparedContexts.clear();
-        settlementsCollected = false;
-        cancellationsCollected = false;
-        finishing = false;
-        laneContextInitialized = false;
+        lifecycleFlags = 0;
         actualLaneMask = 0;
         lastMatchingResult = null;
         if (admissionOrderIndex != null) admissionOrderIndex.clear();
@@ -385,13 +394,13 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     }
 
     boolean hasPendingLaneWork() {
-        return cancelEvent != null && !cancellationsCollected
-                || settlementEvent != null && !settlementsCollected;
+        return cancelEvent != null && !cancellationsCollected()
+                || settlementEvent != null && !settlementsCollected();
     }
 
     boolean laneWorkComplete() {
-        if (cancelEvent != null && !cancellationsCollected && !cancelEvent.complete()) return false;
-        if (settlementEvent != null && !settlementsCollected && !settlementEvent.complete()) return false;
+        if (cancelEvent != null && !cancellationsCollected() && !cancelEvent.complete()) return false;
+        if (settlementEvent != null && !settlementsCollected() && !settlementEvent.complete()) return false;
         return true;
     }
 

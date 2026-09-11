@@ -306,3 +306,12 @@ Owner 需要按顺序提交和恢复，但目前同时维护了较多业务计�
 当前优先级结论：
 
 > 第一优先级不是继续调 GC，而是减少每个 fill 的状态复制和 Lane→Owner 的重复提交；第二优先级是实现 Matcher→Lane 的直接 delta 路径；第三优先级才是整理二级索引、冷状态和阶段状态。
+
+## 4. 本次修复（第 2、3、4、6 项）
+
+- **第 2 项：Lane→Owner 变更模型**：将 Lane 交接缓冲统一命名并收敛为 `LaneDelta`；订单、预留、持仓、用户及终态发布收据由同一个 Lane delta 交接，旧 `PublishedLaneChanges` 仅保留兼容别名，不再产生第二份状态。
+- **第 3 项：发布版本和终态索引开销**：`LanePublishedMap.stage` 的正常写入从“get + 失败 replace + put”改为一次定位后的 replace/putIfAbsent；终态订单改为批量 sink，tombstone 使用一次实体探测的 `putIfAbsent`，避免同一终态 ID 先 contains 再 put。
+- **第 4 项：pending reservation 与批处理阶段状态**：Matcher settlement 的 pending reservation 取消按用户合并计数后一次更新 Owner 镜像；`OrderBatchPending` 的 8 个独立布尔阶段压为一个生命周期位图，保留原有阶段语义和重试顺序。
+- **第 6 项：Owner 终态提交链**：Lane delta 先收集终态订单，再一次批量提交 tombstone/result retention；成功路径不再逐订单调用终态 sink，保留旧 sink 的兼容默认实现。
+
+验证：`mvn -pl surprising-aeron-core/surprising-aeron-service -am test`，820 tests，0 failures/errors。此次未重新执行 GCP 16c32g 64/128 的吞吐压测，因此 CPU、吞吐和 p99 的收益仍需下一轮短测确认；Matcher→Lane 绕过 Owner 的直接路径（第 1 项）及 AccountLaneState 冷热拆分（第 5 项）未在本次范围内改动。

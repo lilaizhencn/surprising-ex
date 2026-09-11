@@ -239,7 +239,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             if (commitSequence != 0) {
                 if (resultTarget != null && changes != null
                         && laneId == runtime.topology().accountLaneId(plan.activeUserId()))
-                    LaneOrderResultTarget.capture(resultTarget, changes.publishedLaneChanges[laneId], identities, lane);
+                    LaneOrderResultTarget.capture(resultTarget, changes.laneDeltas[laneId], identities, lane);
                 lane.applied(commitSequence);
                 lane.committed(commitSequence);
                 runtime.publishLaneHashes(lane);

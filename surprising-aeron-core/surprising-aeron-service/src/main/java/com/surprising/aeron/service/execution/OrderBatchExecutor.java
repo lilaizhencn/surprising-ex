@@ -156,7 +156,7 @@ final class OrderBatchExecutor {
     }
 
     void registerPipelinedBatchSymbols(OrderBatchPending batch, PendingMatching pending) {
-        if (batch.pipelineRegistered) return;
+        if (batch.pipelineRegistered()) return;
         for (String symbol : batch.preparedSymbols) {
             // Retain the newest batch: ordered completion removes all predecessors first.
             // The cluster window has already checked exact account and matching dependencies.
@@ -165,16 +165,16 @@ final class OrderBatchExecutor {
                 throw new IllegalStateException("pipelined symbol ownership conflict");
             }
         }
-        batch.pipelineRegistered = true;
+        batch.pipelineRegistered(true);
         activePipelinedOrderBatches++;
     }
 
     void unregisterPipelinedBatchSymbols(OrderBatchPending batch) {
-        if (!batch.pipelineRegistered) return;
+        if (!batch.pipelineRegistered()) return;
         for (String symbol : batch.preparedSymbols) {
             pipelinedBatchBySymbol.remove(symbol, batch);
         }
-        batch.pipelineRegistered = false;
+        batch.pipelineRegistered(false);
         activePipelinedOrderBatches--;
         if (activePipelinedOrderBatches < 0) {
             throw new IllegalStateException("active pipelined order batch count underflow");
@@ -308,7 +308,7 @@ final class OrderBatchExecutor {
         if (deferCompletion) {
             // Background activation has no response consumer. Even a batch with no native
             // command must remain pending until the ordered completion pump publishes it.
-            batch.matchingApplied = true;
+            batch.matchingApplied(true);
             initializeOrderBatchLaneContext(batch, pending);
             owner.commits.signalPendingMatchingReady(batch.sequence);
             owner.suspendMatchingCommitContext(pending);
@@ -541,7 +541,7 @@ final class OrderBatchExecutor {
                 throw failOrderBatch(batch, pending, "Core and matcher state diverged", exception);
             }
         }
-        batch.matchingApplied = true;
+        batch.matchingApplied(true);
     }
 
     long batchOpenInterestSteps(OrderBatchPending batch, String symbol) {
@@ -700,10 +700,10 @@ final class OrderBatchExecutor {
         if (capacityReservation == null) {
             throw new IllegalStateException("order batch admission reservation is missing");
         }
-        if (!batch.finishing) {
+        if (!batch.finishing()) {
             owner.activateFactContext(capacityReservation, pending.command(), pending.fingerprint());
             owner.setCommandFundsDelta(pending.fundsDelta());
-            batch.finishing = true;
+            batch.finishing(true);
         }
         LaneCommandContextRing.Context laneContext = owner.laneCommandContexts.required(batch.sequence);
         initializeOrderBatchLaneContext(batch, pending);
@@ -711,7 +711,7 @@ final class OrderBatchExecutor {
             owner.suspendMatchingCommitContext(pending);
             return null;
         }
-        if (batch.cancelEvent != null && !batch.cancellationsCollected) {
+        if (batch.cancelEvent != null && !batch.cancellationsCollected()) {
             if (!batch.cancelEvent.complete()) {
                 owner.suspendMatchingCommitContext(pending);
                 return null;
@@ -720,13 +720,13 @@ final class OrderBatchExecutor {
                     batch.cancelEvent, owner.commandFundsAccumulator, owner.terminalRetention);
             if (batch.cancelEvent.commitsLane()) {
                 laneContext.completeLanes(batch.cancelEvent.requiredLaneMask());
-                batch.laneCommitCompleted = true;
+                batch.laneCommitCompleted(true);
             }
             owner.runtimeState.releaseCancel(batch.cancelEvent);
-            batch.cancellationsCollected = true;
+            batch.cancellationsCollected(true);
             owner.commits.requestCommitPublication();
         }
-        if (batch.settlementEvent != null && !batch.settlementsCollected) {
+        if (batch.settlementEvent != null && !batch.settlementsCollected()) {
             long settlementLaneMask = batch.settlementEvent.requiredLaneMask();
             boolean finalLaneCommit = batch.settlementEvent.commitSequence() != 0;
             RuntimeTreasuryDelta delta = owner.runtimeState.collectMatcherSettlement(
@@ -737,15 +737,15 @@ final class OrderBatchExecutor {
             }
             batch.mergeTreasuryDelta(delta);
             owner.runtimeState.releaseMatcherSettlement(batch.settlementEvent);
-            batch.settlementsCollected = true;
+            batch.settlementsCollected(true);
             if (finalLaneCommit) {
                 laneContext.completeLanes(settlementLaneMask);
-                batch.laneCommitCompleted = true;
+                batch.laneCommitCompleted(true);
             }
             owner.commits.requestCommitPublication();
         }
         owner.runtimeState.completePendingReservations(batch.sequence);
-        if (!batch.laneCommitCompleted && !batch.runtimeChangedOrderIds.isEmpty()) {
+        if (!batch.laneCommitCompleted() && !batch.runtimeChangedOrderIds.isEmpty()) {
             if (RuntimeCommandProcessor.stampChangedOrdersByLane(owner.runtimeState,
                     clusterTimestamp, clusterPosition, batch.runtimeChangedOrderIds, batch.changedUserIds)) {
                 owner.commits.requestCommitPublication();
@@ -762,7 +762,7 @@ final class OrderBatchExecutor {
             if (batch.treasuryDelta != null) batch.treasuryDelta.apply(owner.runtimeState.treasury());
             owner.runtimeState.setMetadata(owner.productLine,
                     Math.incrementExact(owner.runtimeState.revision()));
-            committedLaneMask = batch.laneCommitCompleted
+            committedLaneMask = batch.laneCommitCompleted()
                     ? batch.actualLaneMask
                     : owner.stageLaneMutation(batch.sequence, batch.changedUserIds, laneContext);
             if (laneContext.completedLaneMask() != laneContext.expectedLaneMask()) {
@@ -813,7 +813,7 @@ final class OrderBatchExecutor {
     }
 
     void initializeOrderBatchLaneContext(OrderBatchPending batch, PendingMatching pending) {
-        if (batch.laneContextInitialized) return;
+        if (batch.laneContextInitialized()) return;
         long expectedLaneMask = 0;
         for (int index = 0; index < batch.changedUserIds.size(); index++) {
             expectedLaneMask |= owner.matchingAdapter.topology().accountLaneMask(
@@ -826,7 +826,7 @@ final class OrderBatchExecutor {
                 : batch.lastMatchingResult;
         owner.laneCommandContexts.required(pending.sequence()).result(
                 finalMatchingResult, expectedLaneMask, owner.commits.validAccountLaneMask());
-        batch.laneContextInitialized = true;
+        batch.laneContextInitialized(true);
     }
 
     int orderBatchMatcherShard(OrderBatchPending batch) {
@@ -875,7 +875,7 @@ final class OrderBatchExecutor {
     void beginPipelinedOrderBatchCommit(OrderBatchPending batch, PendingMatching pending) {
         PlaceBatchAdmissionEvent admission = batch.placeBatchAdmissionEvent;
         boolean preparedCancel = pending.clusterIndependent && batch.kind == OrderBatchKind.CANCEL;
-        if (!preparedCancel && (!batch.admissionCollected || admission == null || !admission.complete()
+        if (!preparedCancel && (!batch.admissionCollected() || admission == null || !admission.complete()
                 || admission.rejection() != null)) {
             throw new IllegalStateException("pipelined order batch admission is not ready to commit");
         }

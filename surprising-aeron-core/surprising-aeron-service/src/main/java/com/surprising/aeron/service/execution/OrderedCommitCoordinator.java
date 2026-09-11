@@ -135,7 +135,7 @@ final class OrderedCommitCoordinator {
             if (laneContext.hasCommitContext()) owner.restoreMatchingCommitContext(pending);
             return owner.batches.finishOrderBatch(waitingBatch, pending, clusterTimestamp, clusterPosition);
         }
-        if (waitingBatch != null && waitingBatch.matchingApplied) {
+        if (waitingBatch != null && waitingBatch.matchingApplied()) {
             if (!waitingBatch.commitStarted()) owner.batches.beginPipelinedOrderBatchCommit(waitingBatch, pending);
             return owner.batches.finishOrderBatch(waitingBatch, pending, clusterTimestamp, clusterPosition);
         }
@@ -1229,8 +1229,8 @@ final class OrderedCommitCoordinator {
                 // The ordinary commit loop can reach this batch after completing a cancel
                 // without another dispatch pass. Once it owns the commit, it also owns Lane
                 // dispatch; pumping while its event is pending must not submit it a second time.
-                if (!batch.pipelined || !batch.admissionCollected || !batch.canPredispatch()) return;
-                if (!batch.matchingApplied) {
+                if (!batch.pipelined || !batch.admissionCollected() || !batch.canPredispatch()) return;
+                if (!batch.matchingApplied()) {
                     LaneCommandContextRing.Context context = owner.laneCommandContexts.required(pending.sequence());
                     com.surprising.aeron.service.matching.CoreMatchingResult matching = context.matchingCompletion();
                     if (matching == null) return;

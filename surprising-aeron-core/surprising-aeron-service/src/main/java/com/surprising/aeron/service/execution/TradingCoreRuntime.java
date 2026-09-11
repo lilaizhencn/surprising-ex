@@ -1544,9 +1544,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
                         }
                         break;
                     }
-                    if (!orderBatch.admissionCollected) {
+                    if (!orderBatch.admissionCollected()) {
                         runtimeState.stagePlaceBatchAdmission(batchAdmission);
-                        orderBatch.admissionCollected = true;
+                        orderBatch.admissionCollected(true);
                     }
                     if (!pending.isMatchingSubmitted()) {
                         batches.submitPipelinedPlaceBatch(pending, orderBatch);
@@ -1599,7 +1599,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 PendingMatching pending = pendingMatching.get(sequence);
                 OrderBatchPending batch = pending == null ? null : batches.pendingOrderBatches.get(sequence);
                 if (pending == null || pending.isMatchingSubmitted()
-                        || batch != null && (batch.finishing || batch.nextIndex >= batch.items.size())
+                        || batch != null && (batch.finishing() || batch.nextIndex >= batch.items.size())
                         || pending.placeAdmission() == null
                         && (batch == null || batch.placeBatchAdmissionEvent == null)) {
                     continue;

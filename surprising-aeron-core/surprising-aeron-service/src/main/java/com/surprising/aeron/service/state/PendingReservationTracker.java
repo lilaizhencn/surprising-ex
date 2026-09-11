@@ -28,6 +28,9 @@ final class PendingReservationTracker {
     /** 每个用户尚未完成的订单预留计数。 */
     final LongIntHashMap pendingReservationCountsByUser = new LongIntHashMap(4_096);
 
+    /** matcher sequence 批量撤销时复用的用户计数缓冲。 */
+    private final LongIntHashMap matcherRemovedByUserScratch = new LongIntHashMap(64);
+
     /** 全部用户待完成订单预留总数。 */
     int totalPendingReservations;
 
@@ -232,6 +235,40 @@ final class PendingReservationTracker {
         if (nextUserCount == 0) pendingReservationCountsByUser.removeKey(userId);
         else pendingReservationCountsByUser.put(userId, nextUserCount);
         totalPendingReservations = nextTotalPendingReservations;
+    }
+
+    /**
+     * 撮合计划一次性撤销同一 sequence 的镜像预留。按用户合并计数更新，避免每个成交都
+     * 对 pendingReservationCountsByUser 做 get/put，并避免重复维护 totalPendingReservations。
+     */
+    void unindexMatcherPendingReservations(MatcherSettlementPlan plan) {
+        if (plan == null || !pendingReservationsBySequence.containsKey(plan.coreSequence())) return;
+        LongIntHashMap removedByUser = matcherRemovedByUserScratch;
+        removedByUser.clear();
+        int removed = 0;
+        for (int index = 0; index < plan.orderCount(); index++) {
+            long orderId = plan.orderId(index);
+            if (!pendingReservationsBySequence.contains(plan.coreSequence(), orderId)) continue;
+            long userId = pendingReservationUsers.getOrDefault(orderId, 0);
+            if (userId == 0) throw new IllegalStateException("matcher pending reservation owner is missing");
+            removedByUser.addToValue(userId, 1);
+            removed++;
+        }
+        if (removed == 0) return;
+        for (int index = 0; index < plan.orderCount(); index++) {
+            long orderId = plan.orderId(index);
+            if (!pendingReservationsBySequence.contains(plan.coreSequence(), orderId)) continue;
+            pendingReservationsBySequence.remove(plan.coreSequence(), orderId);
+            pendingReservationUsers.remove(orderId);
+        }
+        removedByUser.forEachKeyValue((userId, count) -> {
+            int next = Math.subtractExact(pendingReservationCountsByUser.get(userId), count);
+            if (next == 0) pendingReservationCountsByUser.removeKey(userId);
+            else if (next > 0) pendingReservationCountsByUser.put(userId, next);
+            else throw new IllegalStateException("pending reservation counters are inconsistent");
+        });
+        totalPendingReservations = Math.subtractExact(totalPendingReservations, removed);
+        removedByUser.clear();
     }
 
     boolean pendingReservation(long orderId, long userId) {

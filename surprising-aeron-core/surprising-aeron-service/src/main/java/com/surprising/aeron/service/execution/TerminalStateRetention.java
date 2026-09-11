@@ -118,13 +118,20 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
     }
 
     @Override
+    public void acceptBatch(OrderRuntime[] orders, int count, long coreSequence) {
+        if (orders == null || count < 0 || count > orders.length) {
+            throw new IllegalArgumentException("invalid terminal order batch");
+        }
+        for (int index = 0; index < count; index++) retainPrunedOrder(orders[index], coreSequence);
+    }
+
+    @Override
     public void completeSequence() {
         trimTombstones();
     }
 
     private void retainPrunedOrder(OrderRuntime order, long coreSequence) {
-        if (tombstones.contains(EntityType.ORDER.ordinal(), order.orderId())) return;
-        tombstones.putKnownAbsent(EntityType.ORDER.ordinal(), order.orderId(), order.userId(),
+        tombstones.putIfAbsent(EntityType.ORDER.ordinal(), order.orderId(), order.userId(),
                 normalizeClientId(order.clientOrderId()), coreSequence);
     }
 

@@ -77,9 +77,20 @@ final class LanePublishedMap<V> {
     }
 
     void stage(LanePublication publication, long key, V value) {
-        Version<V> version = new Version<>(key, value, publication, this, values.get(lookupKey(key)));
-        // 同实体由所属 Lane 单写；已存在的键不必再次分配。查询键绝不进入表。
-        if (values.replace(lookupKey(key), version) == null) values.put(new Key(key), version);
+        // 正常路径只做一次定位 + 一次更新；旧实现先 replace 再 put，空键要多做一次 CHM 探测。
+        Key lookup = lookupKey(key);
+        Version<V> previous = values.get(lookup);
+        Version<V> version = new Version<>(key, value, publication, this, previous);
+        if (previous == null) {
+            Version<V> raced = values.putIfAbsent(new Key(key), version);
+            if (raced != null) {
+                // Owner 交接写入受屏障保护；此分支只防御恢复/控制路径的并发写。
+                version.previous = raced;
+                values.replace(lookup, version);
+            }
+        } else {
+            values.replace(lookup, version);
+        }
         publication.add(version);
     }
 
