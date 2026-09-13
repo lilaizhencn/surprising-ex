@@ -50750,3 +50750,15 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 
 - `qualify-linear-perpetual-scale.sh owner-commit` 原先仍引用已删除的 `OwnerFactFrameBenchmark`，且 profile 用 `-f 0` 使 `-jvmArgsAppend`/JFR 参数无法进入 fork；已改为当前 `LinearPerpetualCoreBenchmark.scaleMixedWorkload`，校验 128 symbols、4 Lane、UNIFORM 及 accepted=terminal，并统一 profile/saturation 使用 fork 子进程承载 JFR。
 - `bash -n` 和 `git diff --check` 通过；未重新跑完整资格矩阵，600 秒 soak 及 GCP 仍按用户要求不执行。
+
+### 2026-09-14 衍生品直达结算分配修复回归
+
+- 修改范围：直达成交杠杆查询使用不入 map 的线程局部探针；持仓身份使用确定性键直接探测，首次创建之外不重复生成 `symbol:LONG/SHORT` 字符串。
+- 定向回归全部通过；最终 service 全量 `mvn -q -pl surprising-aeron-core/surprising-aeron-service -am test` 汇总 **929 tests, 0 failures, 0 errors, 0 skipped**。期间出现的独立窗口 Aeron 时序抖动单测重跑通过，最终全量结果为零失败。
+- 本次没有启动 GCP、没有执行 600 秒 soak，也没有新增 JMH/JFR 结果；因此不把局部分配修复解释为整体吞吐、稳态分配率或 p99≤5ms 已达标。
+
+### 2026-09-14 Matcher 槽位回收时序回归
+
+- 满窗口独立提交用例此前可在 direct settlement 已完成、Matcher 槽位尚未被 Owner drain 时触发 `incomplete lane command context`。有序收尾现在先做幂等 Matcher 槽位消费，再释放 settlement 和序号上下文。
+- 修复后定向 `fullIndependentWindowCompletesWithoutAnotherTimer` 六产品线通过；最终 service 全量 **929 tests, 0 failures, 0 errors, 0 skipped**，`git diff --check` 通过。
+- 仍未启动 GCP 或新增吞吐/JFR 轮次；稳定分配率、普通单 p99≤5ms 和 30 万+/s 仍不能从功能回归推断。

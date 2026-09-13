@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.state;
 
-import com.surprising.aeron.service.state.model.CoreLeverageKey;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 
 import exchange.core2.core.common.MatcherEventType;
@@ -262,13 +261,11 @@ public final class RuntimeDerivativeMatchProcessor {
                 if (leverageByUser.containsKey(order.userId())) {
                     leverage = leverageByUser.get(order.userId());
                 } else {
-                    Long configured = runtime.leverage(
-                            new CoreLeverageKey(order.userId(), instrument.symbol(), order.marginMode()));
+                    Long configured = runtime.leverage(order.userId(), instrument.symbol(), order.marginMode());
                     leverage = configured == null ? instrument.maxLeveragePpm() : configured;
                     leverageByUser.put(order.userId(), leverage);
                 }
-                long key = identities.preparedPositionKey(order.userId(),
-                        positionKey(instrument.symbol(), order.positionSide()));
+                long key = identities.preparedPositionKey(order.userId(), instrument.symbol(), order.positionSide());
                 cursor = free.pollFirst();
                 if (cursor == null) cursor = new RuntimeDerivativeFillCalculator.FillCursor();
                 RuntimeDerivativeFillCalculator.begin(cursor, runtime, instrument, order, key,
@@ -363,11 +360,10 @@ public final class RuntimeDerivativeMatchProcessor {
                                   OrderRuntime order, long priceTicks, long quantitySteps,
                                   boolean taker, int settleAssetId, RuntimeTreasuryDelta treasuryDelta,
                                        long commitTimestamp, long commitPosition) {
-        Long configuredLeverage = runtime.leverage(
-                new CoreLeverageKey(order.userId(), instrument.symbol(), order.marginMode()));
+        Long configuredLeverage = runtime.leverage(order.userId(), instrument.symbol(), order.marginMode());
         long leverage = configuredLeverage == null ? instrument.maxLeveragePpm() : configuredLeverage;
         RuntimeDerivativeFillCalculator.apply(runtime, identities, instrument, order,
-                identities.preparedPositionKey(order.userId(), positionKey(instrument.symbol(), order.positionSide())),
+                identities.preparedPositionKey(order.userId(), instrument.symbol(), order.positionSide()),
                 priceTicks, quantitySteps, taker, leverage, settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
     }
 

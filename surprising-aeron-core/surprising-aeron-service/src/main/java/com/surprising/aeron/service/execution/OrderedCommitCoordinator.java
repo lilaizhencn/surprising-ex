@@ -598,6 +598,13 @@ final class OrderedCommitCoordinator {
                 throw new IllegalStateException("matcher settlement in-flight count underflow");
             }
         }
+        // A direct settlement can become Lane-complete before the owner's
+        // normal completion drain observes the matcher queue head.  Consume
+        // that already-published slot once here so the sequence context is
+        // never retired while its SPSC matcher token is still held.  When the
+        // drain already consumed it this is a no-op, and direct results remain
+        // single-sourced by the settlement event.
+        owner.transferMatchingCompletion(pending.sequence());
         owner.runtimeState.releaseMatcherSettlement(pending.takeSettlementEvent());
         owner.removePendingMatching(applied);
         if (!owner.admissions.deferredMatching.isEmpty() || owner.batches.hasPendingBatches()) owner.submitDeferredMatchingAfterBatch();

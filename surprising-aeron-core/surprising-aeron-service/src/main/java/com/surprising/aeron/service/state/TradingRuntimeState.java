@@ -47,6 +47,49 @@ import java.util.concurrent.ConcurrentHashMap;
  * 结算派发和待完成预留由专门组件维护；资金、订单和持仓不会被复制为第二套可写模型。
  */
 public final class TradingRuntimeState implements AutoCloseable {
+    /**
+     * Probe used by the settlement hot path.  Leverage state is retained in the
+     * durable {@code CoreLeverageKey} map, but constructing that record for
+     * every derivative fill is pure lookup overhead.  HashMap/CHM lookup calls
+     * the probe's equals method, so the mutable key never enters the map and is
+     * safe to reuse on the owning thread.
+     */
+    private static final ThreadLocal<LeverageLookup> LEVERAGE_LOOKUP =
+            ThreadLocal.withInitial(LeverageLookup::new);
+
+    private static final class LeverageLookup {
+        long userId;
+        String symbol;
+        CoreMarginMode marginMode;
+
+        void set(long userId, String symbol, CoreMarginMode marginMode) {
+            this.userId = userId;
+            this.symbol = symbol;
+            this.marginMode = marginMode;
+        }
+
+        void clear() {
+            symbol = null;
+            marginMode = null;
+        }
+
+        @Override
+        public int hashCode() {
+            // Matches the record hash generated for CoreLeverageKey, without
+            // allocating the varargs array used by Objects.hash.
+            int hash = 31 * Long.hashCode(userId) + symbol.hashCode();
+            return 31 * hash + marginMode.hashCode();
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof CoreLeverageKey key
+                    && userId == key.userId()
+                    && symbol.equals(key.symbol())
+                    && marginMode == key.marginMode();
+        }
+    }
+
     /** 撮合后结算派发与完成收集；沿用现货和衍生品结算处理器，保持 Lane 序号。 */
     final MatcherSettlementDispatcher settlements = new MatcherSettlementDispatcher(this);
 
@@ -3079,6 +3122,25 @@ public final class TradingRuntimeState implements AutoCloseable {
         return accountLanes[topology.accountLaneId(key.userId())].cold.leverages.get(key);
     }
 
+    /**
+     * Lookup the configured leverage without allocating a CoreLeverageKey.
+     * Callers must pass the already canonical instrument symbol held by the
+     * runtime identity dictionary; normalization belongs at the command edge.
+     */
+    Long leverage(long userId, String canonicalSymbol, CoreMarginMode marginMode) {
+        assertOwner();
+        if (userId <= 0 || canonicalSymbol == null || marginMode == null) {
+            throw new IllegalArgumentException("invalid runtime leverage lookup");
+        }
+        LeverageLookup lookup = LEVERAGE_LOOKUP.get();
+        lookup.set(userId, canonicalSymbol, marginMode);
+        try {
+            return accountLanes[topology.accountLaneId(userId)].cold.leverages.get(lookup);
+        } finally {
+            lookup.clear();
+        }
+    }
+
     void putLeverage(CoreLeverageKey key, long leveragePpm) {
         assertOwner();
         rejectUnsupportedOrderBatchMutation("leverage state");
@@ -4261,12 +4323,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         MatcherSettlementChanges changes = matcherSettlementChangesScope.get();
         if (changes == null || !changes.directPositionIdentities || laneCommandScope.get() != lane)
             throw new IllegalStateException("direct position identity requires its settlement Lane");
-        String name = order.positionSide() == com.surprising.aeron.protocol.CorePositionSide.NET
-                ? instrument.symbol() : instrument.symbol() + ':' + order.positionSide().name();
-        long key = RuntimeIdentityRegistry.positionIdentityKey(order.userId(), name);
+        long key = RuntimeIdentityRegistry.positionIdentityKey(order.userId(), instrument.symbol(), order.positionSide());
         var output = changes.laneDeltas[lane.laneId()].positions;
         if (output.indexOf(key) >= 0) return;
-        long retained = identities.retainPositionInLane(lane, order.userId(), name);
+        long retained = identities.retainPositionInLane(lane, order.userId(), instrument.symbol(), order.positionSide());
         if (retained != key) throw new IllegalStateException("position identity changed during retention");
         output.put(key, lane.positions.get(key));
     }

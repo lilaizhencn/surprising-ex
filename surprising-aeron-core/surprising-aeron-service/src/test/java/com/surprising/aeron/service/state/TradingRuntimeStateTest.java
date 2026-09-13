@@ -2,6 +2,8 @@ package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
+import com.surprising.aeron.service.state.model.CoreLeverageKey;
+import com.surprising.aeron.protocol.CoreMarginMode;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -15,6 +17,18 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class TradingRuntimeStateTest {
+
+    @Test
+    void leverageProbeReadsConfiguredValueWithoutChangingTheStoredKeyMap() {
+        try (var state = new TradingRuntimeState()) {
+            state.putLeverage(new CoreLeverageKey(7, "BTC-USDT", CoreMarginMode.CROSS), 5_000_000L);
+
+            assertThat(state.leverage(7, "BTC-USDT", CoreMarginMode.CROSS)).isEqualTo(5_000_000L);
+            assertThat(state.leverage(7, "BTC-USDT", CoreMarginMode.ISOLATED)).isNull();
+            assertThat(state.leverage(new CoreLeverageKey(7, "BTC-USDT", CoreMarginMode.CROSS)))
+                    .isEqualTo(5_000_000L);
+        }
+    }
 
     @Test
     void commitEventStampsOnLanesPublishesOnOwnerAndClearsReusedMetadata() {

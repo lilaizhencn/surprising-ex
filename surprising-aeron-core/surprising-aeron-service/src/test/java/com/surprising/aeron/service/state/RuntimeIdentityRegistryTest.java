@@ -2,9 +2,28 @@ package com.surprising.aeron.service.state;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.surprising.aeron.protocol.CorePositionSide;
 import org.junit.jupiter.api.Test;
 
 class RuntimeIdentityRegistryTest {
+    @Test
+    void preparedDerivativePositionProbeMatchesStringIdentityWithoutRebuildingItsName() throws Exception {
+        var registry = new RuntimeIdentityRegistry();
+        long user = 17;
+        var topology = LaneTopology.configured(false);
+        var lane = new AccountLaneState(topology.accountLaneId(user), 16);
+        long expected = registry.positionKey(user, "BTC-USDT:LONG");
+        try (var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+            long actual = executor.submit(() -> registry.retainPositionInLane(
+                    lane, user, "BTC-USDT", CorePositionSide.LONG)).get();
+            assertThat(actual).isEqualTo(expected);
+            assertThat(registry.preparedPositionKey(user, "BTC-USDT", CorePositionSide.LONG))
+                    .isEqualTo(expected);
+            registry.releasePublishedPosition(actual);
+            registry.releasePositionKey(actual);
+        }
+    }
+
     @Test
     void lanePositionIdentitySurvivesEarlierCommitRetirementUntilItsOutputIsPublished() throws Exception {
         var registry = new RuntimeIdentityRegistry();

@@ -807,3 +807,15 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - `PendingMatching` 接收内部不可变 primitive 订单号列表时直接保留其底层数组视图，避免衍生品自成交/容量冲突路径每笔再次创建装箱 `Object[]`；外部可变列表仍防御性复制。
 - 批量结算、核心流水线和 service 全量回归均通过（全量 927 项无失败）；并行产品线定向测试偶发 Aeron heartbeat/agent 时序失败后单独重跑通过。
 - 这两项只减少中间状态和短命容器，Owner 有序证据校验、资金守恒、终态提交及结果账本仍保留。没有新一轮 Linux/GCP 64/128 ZGC 运行，因此不把它们当作吞吐、p99 或分配率达标证据。
+
+### 2026-09-14 衍生品直达结算身份查询收敛
+
+- 直达成交的杠杆读取改用线程局部可变探针查询现有 `CoreLeverageKey` map；不改变持久键、更新、快照或回滚语义，也不把探针对象插入容器。
+- Lane 侧持仓身份按 `(userId, symbol, positionSide)` 的既有确定性键直接探测。`LONG/SHORT` 名称只在身份首次创建时生成，后续成交不再重复拼接 `symbol:side` 字符串；同时仍逐字符校验身份，保留碰撞检测。
+- `RuntimeIdentityRegistryTest`、`TradingRuntimeStateTest`、`RuntimeDerivativeMatchProcessorTest`、`MatcherSettlementPlanTest` 及 service 全量回归通过。该项是热路径分配削减，未进行新的吞吐/JFR 采集，不据此宣称 30 万+/s 或 p99≤5ms。
+
+### 2026-09-14 Matcher 槽位与序号上下文收尾时序修复
+
+- 发现 direct settlement 的 Lane 完成通知可能先于 Owner 的 matcher completion drain；Owner 已拿到事件结果却在回收序号上下文时仍持有 `submittedMatcherShard`，导致满窗口独立提交偶发 `incomplete lane command context`。
+- 有序结算收尾前增加幂等 `transferMatchingCompletion`：只消费尚未释放的 Matcher SPSC 槽位，不把 direct result 再复制进 Owner 上下文；已由常规 drain 消费的路径保持空操作。
+- 该修复保留 Owner 的证据、资金和终态提交职责，修复了槽位生命周期而没有放宽上下文回收校验。

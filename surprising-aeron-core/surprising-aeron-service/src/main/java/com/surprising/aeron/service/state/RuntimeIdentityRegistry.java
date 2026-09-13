@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.service.state.model.AssetBalance;
+import com.surprising.aeron.protocol.CorePositionSide;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -348,6 +349,40 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
         }
     }
 
+    /**
+     * Retain a prepared derivative position without rebuilding the hedge-mode
+     * name on every fill.  The name is materialized only if this is the first
+     * publication of the identity; existing entries are checked directly from
+     * their deterministic key and stored immutable name.
+     */
+    long retainPositionInLane(AccountLaneState lane, long userId, String symbol,
+                              CorePositionSide side) {
+        lane.assertOwner();
+        if (clientTopology.accountLaneId(userId) != lane.laneId()
+                || symbol == null || symbol.isBlank() || side == null) {
+            throw new IllegalArgumentException("position identity belongs to another Lane");
+        }
+        long key = positionIdentityKey(userId, symbol, side);
+        while (true) {
+            PositionEntry entry = positions.get(key);
+            if (entry == null) {
+                String name = side == CorePositionSide.NET ? symbol : symbol + ':' + side.name();
+                PositionEntry created = new PositionEntry(new PositionIdentity(userId, name), false);
+                entry = positions.putIfAbsent(key, created);
+                if (entry == null) entry = created;
+            }
+            if (entry.identity.userId() != userId
+                    || !positionNameEquals(entry.identity.positionKey(), symbol, side)) {
+                throw new IllegalStateException("deterministic position identity collision");
+            }
+            int uses = entry.get();
+            if (uses < 0) { Thread.onSpinWait(); continue; }
+            if (!entry.compareAndSet(uses, Math.incrementExact(uses))) continue;
+            positionKeys.putIfAbsent(entry.identity, key);
+            return key;
+        }
+    }
+
     void releasePublishedPosition(long key) {
         assertOwner();
         PositionEntry entry = positions.get(key);
@@ -404,10 +439,43 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
 
     static long positionIdentityKey(long userId, String name) { return deterministicKey(userId, name); }
 
+    static long positionIdentityKey(long userId, String symbol, CorePositionSide side) {
+        if (side == CorePositionSide.NET) return deterministicKey(userId, symbol);
+        long hash = 0xcbf29ce484222325L;
+        for (int shift = 0; shift < Long.SIZE; shift += Byte.SIZE)
+            hash = hashByte(hash, (int) (userId >>> shift & 0xffL));
+        hash = hashUtf8(hash, symbol);
+        hash = hashByte(hash, ':');
+        String sideName = side.name();
+        for (int i = 0; i < sideName.length(); i++) hash = hashByte(hash, sideName.charAt(i));
+        hash &= Long.MAX_VALUE;
+        return hash == 0 ? 1 : hash;
+    }
+
     long preparedPositionKey(long userId, String positionKey) {
         Long key = findPositionIdentity(userId, positionKey);
         if (key == null) throw new IllegalStateException("position identity was not prepared by the Sequencer");
         return key;
+    }
+
+    long preparedPositionKey(long userId, String symbol, CorePositionSide side) {
+        long key = positionIdentityKey(userId, symbol, side);
+        PositionEntry entry = positions.get(key);
+        if (entry == null || entry.identity.userId() != userId
+                || !positionNameEquals(entry.identity.positionKey(), symbol, side)) {
+            throw new IllegalStateException("position identity was not prepared by the Sequencer");
+        }
+        return key;
+    }
+
+    private static boolean positionNameEquals(String actual, String symbol, CorePositionSide side) {
+        if (side == CorePositionSide.NET) return actual.equals(symbol);
+        String sideName = side.name();
+        int prefixLength = symbol.length();
+        if (actual.length() != prefixLength + 1 + sideName.length()
+                || actual.charAt(prefixLength) != ':') return false;
+        if (!actual.regionMatches(0, symbol, 0, prefixLength)) return false;
+        return actual.regionMatches(prefixLength + 1, sideName, 0, sideName.length());
     }
 
     public String positionKey(long userId, long positionKey) {
@@ -464,6 +532,12 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
         for (int shift = 0; shift < Long.SIZE; shift += Byte.SIZE) {
             hash = (hash ^ (userId >>> shift & 0xffL)) * 0x100000001b3L;
         }
+        hash = hashUtf8(hash, value);
+        long key = hash & Long.MAX_VALUE;
+        return key == 0 ? 1 : key;
+    }
+
+    private static long hashUtf8(long hash, String value) {
         // 按 Java UTF-8 编码逐字节计算，避免为每次身份查询创建 byte[]。
         // 非法代理项与 String.getBytes(UTF_8) 一致，编码为 '?'，保持历史身份键不变。
         for (int i = 0; i < value.length(); i++) {
@@ -485,8 +559,7 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
                 hash = hashByte(hash, 0x80 | (point & 0x3f));
             } else hash = hashByte(hash, '?');
         }
-        long key = hash & Long.MAX_VALUE;
-        return key == 0 ? 1 : key;
+        return hash;
     }
 
     private static long hashByte(long hash, int value) {
