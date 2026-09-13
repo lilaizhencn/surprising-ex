@@ -213,7 +213,7 @@ public final class MatcherSettlementPlan {
             long sequence, long takerOrderId, long userId,
             CoreMatchingResult result, TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
         if (target == null) throw new IllegalArgumentException("settlement target is required");
-        if (target.initialOrderScratch == null || target.initialOrderScratch.length != 1)
+        if (target.initialOrderScratch == null || target.initialOrderScratch.length < 1)
             target.initialOrderScratch = new long[1];
         target.initialOrderScratch[0] = takerOrderId;
         return build(sequence, takerOrderId, userId, target.initialOrderScratch, result, runtime, identities,
