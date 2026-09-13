@@ -50674,3 +50674,4 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 ### 后续局部分配修复
 
 - `CommandResultBuilder` 复用批量订单响应的去重集合/视图缓冲，并为 REPLACE/AMEND 增加双订单无-varargs路径；direct PLACE 的 taker `OrderRuntime` 也只构造一次。编译及 `TradingCoreRuntimeTest`、`ClusterCommandPipelineTest` 通过；该轮未重新压测，因此不宣称吞吐或稳态分配率改善。
+- 随后执行服务模块全量回归：`mvn -pl surprising-aeron-core/surprising-aeron-service -am test`，927 项通过，Failures 0、Errors 0、BUILD SUCCESS。测试日志已在记录后删除。
