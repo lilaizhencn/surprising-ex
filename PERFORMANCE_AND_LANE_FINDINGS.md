@@ -854,3 +854,10 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - `TradingCoreRuntime.boxedOrderIds(MatcherSettlementPlan)` 原来每次把 plan 的 primitive `long[]` 复制成新的数组和不可变列表；现在返回由 plan 自有数组驱动的只读 `RandomAccess` 视图。
 - 视图只在 plan 仍挂在 pending sequence/context 期间有效；`LaneCommandContextRing.Context` 回收时才清空 plan，因此异步 Lane 等待和 Owner 恢复提交上下文不会看到提前释放或跨命令数据。批量结算仍使用事件自有槽位，不引用该视图。
 - 该改动删除普通撮合完成路径的一次 `long[]` 和列表对象分配，不改变订单顺序、去重、终态索引、结果账本或提交边界。服务全量 929 项回归通过。
+
+
+### 2026-09-14 多订单响应 source 化
+
+- REPLACE/AMEND 等双订单响应原先在 Owner 完成边界创建两个 `CoreOrderStateView`；协议编码器现在接受 `List<? extends CoreOrderStateSource>`，`CommandResultBuilder` 由 Owner 独占的 source 槽位直接读取 `OrderRuntime`。
+- source 槽位只在容量首次增长时创建，命令结束清除引用；编码器只在当前 Owner 调用期间读取，不把 source 暴露给结果账本或下游。单订单、TRIGGER、批量响应和稳定响应视图路径保持原协议边界。
+- 编码协议字节保持一致，新增多 source 列表等价测试；该改动删除改单热路径的 `CoreOrderStateView` 中间对象和临时多订单列表。

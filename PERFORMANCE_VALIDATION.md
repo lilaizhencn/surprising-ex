@@ -50808,3 +50808,14 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - service 全量：**929 tests，Failures 0，Errors 0，Skipped 0**。
 - 短 JMH：终态业务 **23,551.432/s**，终态核心消息 **10,113.468/s**，Lane **17,409.862/s**，Lane settlement **11,810.711/s**，成交 **4,479.321/s**；error/reject/timeout/unfinished 均为 0。
 - 本轮没有同机对照、稳态 JFR/NMT 或 GCP 复测；数字只证明当前版本在固定短轮下可运行，不能归因出确定性吞吐收益，也不能宣称 30 万+/s、普通单 p99≤5ms 或长期分配率已达标。
+
+
+### 2026-09-14 多订单响应 source 化验证
+
+- 变更：`CoreCommandResultCodec.encode` 改为接收 `CoreOrderStateSource` 列表；Owner 双订单响应复用 `OrderRuntimeSource` 槽位，删除每次 REPLACE/AMEND 物化两个 `CoreOrderStateView`。
+- 固定场景：当前 master、HotSpot JDK 25.0.1、ZGC、4 Account Lane、1 Matcher、128 listed/active symbols、10,000 users、256 in-flight、UNIFORM、maxPositions=1、maxOpenOrders=3、hftRounds=1、hftBatchSize=4、lifecycleSymbols=32；JMH 1×1s warmup、2×2s measurement、1 fork。
+- 编译与回归：service/协议 package 通过；协议 source/view 字节等价测试通过；服务全量 **930 tests，0 failures，0 errors，0 skipped**。首轮独立窗口测试出现既有 Aeron 时序抖动，自动重试后的最终 XML 为零失败。
+- 无 profiler JMH：终态业务 **25,290.165/s**，终态 Core messages **10,860.116/s**，Lane **18,695.182/s**，Lane settlement **12,682.661/s**，trades **4,810.017/s**；accepted=terminal，unfinished/error/reject/timeout 均为 0。
+- 同口径 JFR fork：15 秒、DataLoss 未见；终态业务 **29,976.073/s**，终态 Core messages **12,872.341/s**，Lane **22,159.133/s**，Lane settlement **15,032.577/s**，trades **5,701.244/s**。JFR allocation sample 仍以 `long[]`、`byte[]`、`Object[]`、`TreeMap.Entry`、`CoreOrderState`、`OrderRuntime` 为主；CPU 热点仍为 `LaneMutationTask.await`、`OrderedCommitCoordinator.pumpMatchingCommitCompletions`、TreeMap/状态哈希，说明本次只关闭多订单响应物化分配，未消除 Owner 有序提交瓶颈。
+- JFR 原始文件 `/tmp/jfr-multi-source.jfr`，2,249,624 bytes，SHA256 `3ecc1ebda0470c59bed73c1910eea5f55e8bb74b2bc36cc4d2e9df3bb3b1b13e`；JMH JSON `/tmp/jmh-multi-source.json` SHA256 `418e66f786a31e16b85e393e5a9b21e0ae461e7589513609c400662185fa2b06`，JFR JMH JSON `/tmp/jmh-multi-source-jfr.json` SHA256 `9cd4e365fabad56a6db002ec55d04510af604bd91169e663b64dbe28b52cd963`。摘要写入后清理本轮文件。
+- 本轮仍是本机单节点 closed-loop 诊断，不是 GCP 容量验收；没有证明 30 万+/s、普通下单 p99≤5ms、开放到达率或长期泄漏。

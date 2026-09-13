@@ -26,7 +26,7 @@ public final class CoreCommandResultCodec {
 
     public static byte[] encode(long coreSequence, UUID commandId, long orderId, long instrumentChangeId,
                                 long matcherSequence, long matcherPrefixBefore, long matcherPrefixAfter,
-                                List<CoreOrderStateView> orders, List<CoreExecutionView> executions) {
+                                List<? extends CoreOrderStateSource> orders, List<CoreExecutionView> executions) {
         if (commandId == null || orders == null || executions == null) {
             throw new IllegalArgumentException("command result fields are required");
         }
@@ -34,7 +34,7 @@ public final class CoreCommandResultCodec {
             throw new IllegalArgumentException("command result is too large");
         }
         int ordersLength = Integer.BYTES * 2;
-        for (CoreOrderStateView order : orders) {
+        for (CoreOrderStateSource order : orders) {
             ordersLength = Math.addExact(ordersLength, CoreStateQueryCodec.encodedOrderStateLength(order));
         }
         int length = Math.addExact(Math.addExact(Integer.BYTES + IDENTITY_LENGTH, Integer.BYTES), ordersLength);

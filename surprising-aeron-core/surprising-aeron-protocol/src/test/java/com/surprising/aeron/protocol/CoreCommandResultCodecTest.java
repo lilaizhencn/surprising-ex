@@ -56,4 +56,23 @@ class CoreCommandResultCodecTest {
         assertThat(singleEncoded).containsExactly(listEncoded);
         assertThat(CoreCommandResultCodec.decode(singleEncoded).orders()).containsExactly(order);
     }
+
+    @Test
+    void sourceListEncodingMatchesViewListEncoding() {
+        UUID commandId = UUID.fromString("00112233-4455-6677-8899-aabbccddeeff");
+        CoreOrderStateView first = new CoreOrderStateView(71, com.surprising.product.api.ProductLine.SPOT,
+                7, "BTC-USDT", 9, CoreOrderSide.BUY, 100, 3, 0, 3, false,
+                "OPEN", 1);
+        CoreOrderStateView second = new CoreOrderStateView(72, com.surprising.product.api.ProductLine.SPOT,
+                8, "BTC-USDT", 9, CoreOrderSide.SELL, 101, 2, 1, 1, false,
+                "OPEN", 2);
+
+        byte[] viewEncoded = CoreCommandResultCodec.encode(41, commandId, 71, 9, 83, 17, 19,
+                List.of(first, second), List.of());
+        byte[] sourceEncoded = CoreCommandResultCodec.encode(41, commandId, 71, 9, 83, 17, 19,
+                List.<CoreOrderStateSource>of(first, second), List.of());
+
+        assertThat(sourceEncoded).containsExactly(viewEncoded);
+        assertThat(CoreCommandResultCodec.decode(sourceEncoded).orders()).containsExactly(first, second);
+    }
 }

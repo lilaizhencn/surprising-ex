@@ -25,7 +25,9 @@ import com.surprising.aeron.protocol.CorePositionSide;
 import com.surprising.aeron.protocol.CoreTimeInForce;
 import java.util.UUID;
 import java.util.ArrayList;
+import java.util.AbstractList;
 import java.util.List;
+import java.util.RandomAccess;
 
 /** 当前命令的结果与变更 ID；owner 串行复用，在命令完成边界编码。 */
 final class CommandResultBuilder {
@@ -42,10 +44,13 @@ final class CommandResultBuilder {
     /** 单订单结果直接借用当前 OrderRuntime，避免每笔响应先物化 CoreOrderStateView。 */
     private OrderRuntime commandSingleOrder;
     private final OrderRuntimeSource commandSingleOrderSource = new OrderRuntimeSource();
+    /** Owner-confined source slots for multi-order responses; adapters grow only at a new high-water mark. */
+    private final OrderSourceList commandOrderSources = new OrderSourceList(2);
 
     void clearOrderViews() {
         commandSingleOrder = null;
         commandOrderViews = List.of();
+        commandOrderSources.clear();
     }
 
     /** 当前命令返回的用户 ID 集合；完成边界生成。 */
@@ -161,8 +166,18 @@ final class CommandResultBuilder {
     }
 
     void materializeResponseOrders(long... orderIds) {
+        commandOrderSources.clear();
         if (orderIds.length == 1) {
             materializeResponseOrder(orderIds[0]);
+            return;
+        }
+        if (orderIds.length > 1) {
+            commandSingleOrder = null;
+            commandOrderViews = List.of();
+            for (long orderId : orderIds) {
+                OrderRuntime order = owner.responseOrder(orderId);
+                if (order != null) commandOrderSources.add(order, owner.runtimeOrderSymbol(order));
+            }
             return;
         }
         java.util.ArrayList<CoreOrderStateView> views = new java.util.ArrayList<>(orderIds.length);
@@ -176,6 +191,7 @@ final class CommandResultBuilder {
 
     /** 双订单改单响应的无-varargs快路径，避免为两个 ID 创建临时 long[]。 */
     void materializeResponseOrders(long firstOrderId, long secondOrderId) {
+        commandOrderSources.clear();
         OrderRuntime first = owner.responseOrder(firstOrderId);
         OrderRuntime second = owner.responseOrder(secondOrderId);
         if (first == null) {
@@ -191,11 +207,14 @@ final class CommandResultBuilder {
             commandOrderViews = List.of();
         } else {
             commandSingleOrder = null;
-            commandOrderViews = List.of(owner.orderView(first), owner.orderView(second));
+            commandOrderViews = List.of();
+            commandOrderSources.add(first, owner.runtimeOrderSymbol(first));
+            commandOrderSources.add(second, owner.runtimeOrderSymbol(second));
         }
     }
 
     void materializeResponseOrder(long orderId) {
+        commandOrderSources.clear();
         OrderRuntime order = owner.responseOrder(orderId);
         commandSingleOrder = order;
         commandOrderViews = List.of();
@@ -226,7 +245,7 @@ final class CommandResultBuilder {
         if (commandTriggerOrderView != null) {
             return com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeList(List.of(commandTriggerOrderView));
         }
-        if (commandSingleOrder == null && commandOrderViews.isEmpty()) {
+        if (commandSingleOrder == null && commandOrderViews.isEmpty() && commandOrderSources.isEmpty()) {
             return EMPTY_RESULT;
         }
         if (pending == null || matchingResult == null) {
@@ -254,6 +273,12 @@ final class CommandResultBuilder {
                         nativeCommand.orderId(), nativeCommand.instrumentChangeId(), nativeCommand.matcherSequence(),
                         matcherPrefix.before(), matcherPrefix.after(), commandOrderViews.get(0));
             }
+            if (!commandOrderSources.isEmpty()) {
+                return CoreCommandResultCodec.encode(
+                        pending.sequence(), pending.command().header().commandId(),
+                        nativeCommand.orderId(), nativeCommand.instrumentChangeId(), nativeCommand.matcherSequence(),
+                        matcherPrefix.before(), matcherPrefix.after(), commandOrderSources, List.of());
+            }
             return CoreCommandResultCodec.encode(
                     pending.sequence(), pending.command().header().commandId(),
                     nativeCommand.orderId(), nativeCommand.instrumentChangeId(), nativeCommand.matcherSequence(),
@@ -261,6 +286,36 @@ final class CommandResultBuilder {
         } catch (IllegalArgumentException exception) {
             return EMPTY_RESULT;
         }
+    }
+
+    /** Fixed-size owner list backed by reusable OrderRuntime source adapters. */
+    private static final class OrderSourceList extends AbstractList<CoreOrderStateSource> implements RandomAccess {
+        private OrderRuntimeSource[] values;
+        private int size;
+
+        private OrderSourceList(int initialCapacity) { values = new OrderRuntimeSource[initialCapacity]; }
+
+        private void add(OrderRuntime order, String symbol) {
+            if (size == values.length) {
+                values = java.util.Arrays.copyOf(values, Math.multiplyExact(values.length, 2));
+            }
+            OrderRuntimeSource source = values[size];
+            if (source == null) values[size] = source = new OrderRuntimeSource();
+            source.set(order, symbol);
+            size++;
+        }
+
+        @Override public void clear() {
+            for (int index = 0; index < size; index++) values[index].clear();
+            size = 0;
+        }
+
+        @Override public CoreOrderStateSource get(int index) {
+            if (index < 0 || index >= size) throw new IndexOutOfBoundsException(index);
+            return values[index];
+        }
+
+        @Override public int size() { return size; }
     }
 
     /** Reusable source adapter; the protocol encoder never retains it. */
@@ -271,6 +326,11 @@ final class CommandResultBuilder {
         void set(OrderRuntime order, String symbol) {
             this.order = order;
             this.symbol = symbol;
+        }
+
+        void clear() {
+            order = null;
+            symbol = null;
         }
 
         public long orderId() { return order.orderId(); }
