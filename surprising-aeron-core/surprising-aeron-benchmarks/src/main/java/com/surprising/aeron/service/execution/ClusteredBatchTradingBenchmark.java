@@ -24,6 +24,32 @@ import org.openjdk.jmh.annotations.*;
         "--add-exports=java.base/jdk.internal.misc=ALL-UNNAMED"})
 @Threads(1)
 public class ClusteredBatchTradingBenchmark {
+    /** 风险评估在实际开仓和平仓之间完成，包括扫描结束后的空续扫。 */
+    @Benchmark
+    public long riskScanBetweenOpenAndClose(Workload workload, Counters counters) {
+        long riskCommands = workload.runRoundTripTrades(true);
+        long operations = 1024 + riskCommands;
+        counters.acceptedBusinessOperations += operations;
+        counters.terminalBusinessOperations += operations;
+        counters.acceptedCoreMessages += operations;
+        counters.terminalCoreMessages += operations;
+        counters.terminalTrades += 512;
+        return workload.terminal;
+    }
+
+    /** 批量命令携带风险续扫，覆盖其异步 Lane 终态提交。 */
+    @Benchmark
+    public long batchRiskScanBetweenOpenAndClose(Workload workload, Counters counters) {
+        long riskCommands = workload.runRoundTripTrades(true, true);
+        long operations = 1024 + riskCommands;
+        counters.acceptedBusinessOperations += operations;
+        counters.terminalBusinessOperations += operations;
+        counters.acceptedCoreMessages += operations;
+        counters.terminalCoreMessages += operations;
+        counters.terminalTrades += 512;
+        return workload.terminal;
+    }
+
     /** 满64条独立命令的提交边界必须覆盖整个窗口，不依赖额外timer补交剩余命令。 */
     @Benchmark
     public long fullWindowCommit(Workload workload, Counters counters) {
@@ -75,7 +101,9 @@ public class ClusteredBatchTradingBenchmark {
         counters.terminalCoreMessages += 512;
         return workload.terminal;
     }
-    /** Cross-callback independent orders, replicated timer drain, then independent cancellations. */
+    /** Cross-callback independent orders and cancellations. Cancellation scopes use the removed
+     * order's side/price, exercising range dependency checks without a whole-symbol drain.
+     * Repeated rounds also exercise bounded publication-index turnover and receipt removal. */
     @Benchmark
     public long independentCommandWindows(Workload workload, Counters counters) {
         workload.runIndependentCommandWindows();
@@ -125,15 +153,157 @@ public class ClusteredBatchTradingBenchmark {
         return workload.terminal;
     }
 
-    /** Trigger publication/removal plus successful batch place/cancel completion. */
+    /** 普通准入及结算发布缓冲反复复用；保留实际成交、排空与资金/恢复核对。 */
     @Benchmark
-    public long ownerTriggerAndBatchCompletion(Workload workload, Counters counters) {
+    public long singleOrderSettlementReuse(Workload workload, Counters counters) {
+        for (int round = 0; round < 2; round++) {
+            workload.runRoundTripTrades();
+            if (workload.service.state().runtimeState.hasPendingReservations())
+                throw new IllegalStateException("reservation turnover retained pending users");
+            counters.acceptedBusinessOperations += 1024;
+            counters.terminalBusinessOperations += 1024;
+            counters.acceptedCoreMessages += 1024;
+            counters.terminalCoreMessages += 1024;
+            counters.terminalTrades += 512;
+        }
+        return workload.terminal;
+    }
+
+    /** 重复普通成交并排空预留：覆盖按资产复用计数表、删除完成用户和下一轮重新准入。 */
+    @Benchmark
+    // Also exercises metadata/remaining-quantity updates without rebuilding the Lane admission aggregate.
+    public long reservationCompletionLifecycle(Workload workload, Counters counters) {
+        return singleOrderSettlementReuse(workload, counters);
+    }
+
+    /** 账户成交与 Owner 定时器控制交替，检验控制边界不转移账户所有权。 */
+    @Benchmark
+    public long ownerTimerAndTrading(Workload workload, Counters counters) {
+        workload.runOwnerTimerUpdates();
+        workload.runRoundTripTrades();
+        counters.acceptedBusinessOperations += 1152;
+        counters.terminalBusinessOperations += 1152;
+        counters.acceptedCoreMessages += 1152;
+        counters.terminalCoreMessages += 1152;
+        counters.terminalTrades += 512;
+        return workload.terminal;
+    }
+
+    /** 固定算法单反复更新并穿插真实账户成交，避免用无限增长状态测试更新路径。 */
+    @Benchmark
+    public long algoLaneAndTrading(Workload workload, Counters counters) {
+        workload.runAlgoLaneUpdates();
+        workload.runRoundTripTrades();
+        counters.acceptedBusinessOperations += 1088;
+        counters.terminalBusinessOperations += 1088;
+        counters.acceptedCoreMessages += 1088;
+        counters.terminalCoreMessages += 1088;
+        counters.terminalTrades += 512;
+        return workload.terminal;
+    }
+
+    /** 故障诊断：Lane 已写入后注入全局版本溢出，覆盖账户异步回滚后继续成交；非容量场景。 */
+    @Benchmark
+    public long algoLaneRollbackAndTrading(Workload workload, Counters counters) {
+        workload.runAlgoLaneUpdates();
+        workload.runAlgoRollbackFailure();
+        workload.runRoundTripTrades();
+        counters.acceptedBusinessOperations += 1089;
+        counters.terminalBusinessOperations += 1089;
+        counters.acceptedCoreMessages += 1089;
+        counters.terminalCoreMessages += 1089;
+        counters.rejectedBusinessOperations++;
+        counters.terminalTrades += 512;
+        return workload.terminal;
+    }
+
+    /** Core故障诊断：账户已修改后终态容量校验失败；非真实Cluster容量场景。 */
+    @Benchmark
+    public long finalizationFailureAndTrading(Workload workload, Counters counters) throws Exception {
+        workload.runFinalizationFailure();
+        workload.runRoundTripTrades();
+        counters.acceptedBusinessOperations += 1025;
+        counters.terminalBusinessOperations += 1025;
+        counters.acceptedCoreMessages += 1025;
+        counters.terminalCoreMessages += 1025;
+        counters.rejectedBusinessOperations++;
+        counters.terminalTrades += 512;
+        return workload.terminal;
+    }
+
+    /** Keep protective triggers through actual fills that close derivative positions. */
+    @Benchmark
+    public long closePositionWithPendingTriggers(Workload workload, Counters counters) {
+        workload.runTriggerRoundTrip(true);
+        counters.acceptedBusinessOperations += 1280;
+        counters.terminalBusinessOperations += 1280;
+        counters.acceptedCoreMessages += 1280;
+        counters.terminalCoreMessages += 1280;
+        counters.terminalTrades += 512;
+        return workload.terminal;
+    }
+
+    @Benchmark
+    public long partialThenFullCloseWithTriggers(Workload workload, Counters counters) {
+        workload.runTriggerRoundTrip(true, true);
+        counters.acceptedBusinessOperations += 1792;
+        counters.terminalBusinessOperations += 1792;
+        counters.acceptedCoreMessages += 1792;
+        counters.terminalCoreMessages += 1792;
+        counters.terminalTrades += 768;
+        return workload.terminal;
+    }
+
+    @Benchmark
+    public long batchCloseWithPendingTriggers(Workload workload, Counters counters) {
+        workload.runTriggerRoundTrip(true, false, true);
+        long business = 1024 + 256L * workload.batchSize;
+        counters.acceptedBusinessOperations += business;
+        counters.terminalBusinessOperations += business;
+        counters.acceptedCoreMessages += 1280;
+        counters.terminalCoreMessages += 1280;
+        counters.terminalTrades += 256L * (workload.batchSize + 1);
+        counters.terminalBatches += 256;
+        counters.terminalItems += 256L * workload.batchSize;
+        return workload.terminal;
+    }
+
+    /** 大/小批次交替复用相同结算池，覆盖尾槽隔离、资金和终态响应。 */
+    @Benchmark
+    public long variableBatchSettlementReuse(Workload workload, Counters counters) {
+        int originalSize = workload.batchSize;
+        try {
+            for (int phase = 0; phase < 4; phase++) {
+                workload.batchSize = switch (phase) {
+                    case 1 -> 1;
+                    case 2 -> Math.max(1, originalSize / 2);
+                    default -> originalSize;
+                };
+                multiFillSettlementAndEncoding(workload, counters);
+            }
+            return workload.terminal;
+        } finally {
+            workload.batchSize = originalSize;
+            workload.responseBatchSize = originalSize;
+        }
+    }
+
+    /** 触发单所属 Lane 控制派发、撮合和终态提交的完整往返。 */
+    @Benchmark
+    public long triggerLaneControlRoundTrip(Workload workload, Counters counters) {
         workload.runTriggerRoundTrip();
         counters.acceptedBusinessOperations += 1536;
         counters.terminalBusinessOperations += 1536;
         counters.acceptedCoreMessages += 1536;
         counters.terminalCoreMessages += 1536;
         counters.terminalTrades += 512;
+        return workload.terminal;
+    }
+
+    /** Trigger publication/removal plus successful batch place/cancel completion. */
+    @Benchmark
+    public long ownerTriggerAndBatchCompletion(Workload workload, Counters counters) {
+        triggerLaneControlRoundTrip(workload, counters);
         return batchPlaceCancelWithMetrics(workload, counters);
     }
 
@@ -183,6 +353,13 @@ public class ClusteredBatchTradingBenchmark {
         counters.acceptedBusinessOperations+=1024;counters.terminalBusinessOperations+=1024;
         counters.acceptedCoreMessages+=1024;counters.terminalCoreMessages+=1024;counters.terminalTrades+=512;
         return workload.terminal;
+    }
+
+    /** 连续两轮批量改单，覆盖命令变更集合在账户提交与输出之间的重复消费。 */
+    @Benchmark
+    public long repeatedAmendMetadata(Workload workload, Counters counters) {
+        batchAmendRoundTripTrades(workload, counters);
+        return batchAmendRoundTripTrades(workload, counters);
     }
 
     @Benchmark
@@ -235,6 +412,7 @@ public class ClusteredBatchTradingBenchmark {
         private long queryResults;
         private long maxBacklog;
         private boolean expectMissingCancels;
+        private boolean expectSingleRejection;
         private long rejectedItems;
         private boolean expectBatchTrades;
         private long batchTrades;
@@ -304,6 +482,11 @@ public class ClusteredBatchTradingBenchmark {
                             CoreResponse response = CoreProtocol.decodeResponse(message.payloadUnsafe());
                             if (response.status() == ResponseStatus.OK) queryResults++;
                             else {
+                                if (expectSingleRejection && response.status() == ResponseStatus.REJECTED
+                                        && singleRequestIds.remove(message.header().correlationId())) {
+                                    terminal++;
+                                    yield 1L;
+                                }
                                 if (response.status() != ResponseStatus.APPLIED) {
                                     throw new IllegalStateException("batch rejected: " + response.resultCode());
                                 }
@@ -401,7 +584,13 @@ public class ClusteredBatchTradingBenchmark {
             } finally { expectBatchTrades = false; responseBatchSize = batchSize; }
         }
 
-        public void runRoundTripTrades() {
+        public void runRoundTripTrades() { runRoundTripTrades(false); }
+
+        long runRoundTripTrades(boolean scanRisk) { return runRoundTripTrades(scanRisk, false); }
+
+        long runRoundTripTrades(boolean scanRisk, boolean batchRisk) {
+            if (scanRisk && !productLine.isDerivative()) throw new IllegalArgumentException("requires derivatives");
+            long riskCommands = 0;
             long before=terminal;singleResponses=true;
             try {
                 CoreMessage[] wave=new CoreMessage[maxInFlight];
@@ -414,9 +603,13 @@ public class ClusteredBatchTradingBenchmark {
                     }
                     // Exactly 256 requests are ready at the entry boundary in every closed-loop wave.
                     for(CoreMessage request:wave)send(request);
+                    if (scanRisk && phase == 1) {
+                        drain();
+                        riskCommands = runRiskContinuations(batchRisk);
+                    }
                 }
                 drain();
-                if(terminal-before!=1024)throw new IllegalStateException("realtime trade terminal mismatch");
+                if(terminal-before!=1024 + riskCommands)throw new IllegalStateException("realtime trade terminal mismatch");
                 if(realtime) {
                     service.state().captureRealtimeSnapshot(1000,Math.max(1,sequence),sequence,1_700_000_000_000L);
                     service.state().captureRealtimeBook("JMH-BTC-USDT",sequence,1_700_000_000_000L);
@@ -426,14 +619,163 @@ public class ClusteredBatchTradingBenchmark {
                         if(System.nanoTime()>deadline)throw new IllegalStateException("realtime snapshot timed out");
                     }
                 }
+                return riskCommands;
             } finally {singleResponses=false;}
         }
 
-        public void runTriggerRoundTrip() {
+        private long runRiskContinuations(boolean batchRisk) {
+            long before = terminal;
+            long priceSequence = sequence + 1;
+            send(command(CoreMessageType.APPLY_MARK_PRICE, 0,
+                    TradingCommandCodec.encodeApplyMarkPrice(productLine == ProductLine.OPTION
+                            ? new ApplyMarkPriceCommand("JMH-BTC-USDT", 1, 100, 100, 100,
+                                    priceSequence, 1_700_000_000_000L)
+                            : new ApplyMarkPriceCommand("JMH-BTC-USDT", 1, 100,
+                                    priceSequence, 1_700_000_000_000L))));
+            drain();
+            int rounds = 0;
+            do {
+                if (++rounds > 1024) throw new IllegalStateException("risk continuation did not finish");
+                var scan = service.state().runtimeState.firstRiskIncompleteScan();
+                if (batchRisk && scan != null) {
+                    var continuation = new CoreRiskScanContinuation(
+                            service.state().identities.symbol(scan.symbolId()), scan.priceSequence(), scan.lastUserId());
+                    send(command(CoreMessageType.EXECUTE_LIQUIDATION_BATCH, 0,
+                            TradingCommandCodec.encodeExecuteLiquidationBatch(new ExecuteLiquidationBatchCommand(
+                                    java.util.List.of(), 64, 0, continuation, 64))));
+                } else {
+                    send(command(CoreMessageType.CONTINUE_RISK_SCAN, 0,
+                            TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64))));
+                }
+                drain();
+            } while (service.state().runtimeState.firstIncompleteRiskScan() != null);
+            // Empty continuation must not pause otherwise idle account workers either.
+            send(command(CoreMessageType.CONTINUE_RISK_SCAN, 0,
+                    TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64))));
+            drain();
+            return terminal - before;
+        }
+
+        public void runFinalizationFailure() throws Exception {
+            var owner = service.state();
+            var runtime = owner.runtimeState;
+            int assetId = owner.identities.assetId("USDT");
+            var before = runtime.balance(1000, assetId);
+            long available = before == null ? 0 : before.availableUnits();
+            long locked = before == null ? 0 : before.lockedUnits();
+            var request = command(CoreMessageType.ADJUST_BALANCE, 1000,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 1)));
+            CoreResponse result;
+            runtime.enterAsynchronousCommandScope();
+            try {
+                if (owner.applyDecodedCommand(request, 1_700_000_000_000L, sequence, null, false) != null)
+                    throw new IllegalStateException("fault command did not enter continuation");
+                var field = TradingCoreRuntime.class.getDeclaredField("controlContinuation");
+                field.setAccessible(true);
+                var business = (java.util.function.BooleanSupplier) field.get(owner);
+                field.set(owner, (java.util.function.BooleanSupplier) () -> {
+                    if (!business.getAsBoolean()) return false;
+                    // Deliberate capacity fault: this sentinel must be cleared before dispatch.
+                    owner.admissions.queuedMatching.add(null);
+                    return true;
+                });
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                do {
+                    result = owner.pollDirectCommand();
+                    if (System.nanoTime() > deadline) throw new IllegalStateException("fault rollback timeout");
+                } while (result == null);
+            } finally { runtime.exitAsynchronousCommandScope(); }
+            if (result.status() != ResponseStatus.REJECTED || result.resultCode() != CoreResultCode.MATCHING_BACKPRESSURE)
+                throw new IllegalStateException("terminal capacity failure was not rejected");
+            var after = runtime.balance(1000, assetId);
+            if ((after == null ? 0 : after.availableUnits()) != available
+                    || (after == null ? 0 : after.lockedUnits()) != locked)
+                throw new IllegalStateException("terminal failure changed account funds");
+            terminal++;
+        }
+
+        public void runAlgoRollbackFailure() {
+            var runtime = service.state().runtimeState;
+            var before = runtime.algoOrder(9_000_000);
+            long runtimeRevision = runtime.revision();
+            long revision = before.revision() + 1;
+            var next = new com.surprising.aeron.protocol.CoreAlgoOrderView(9_000_000, 1000,
+                    "algo-lane-0", "JMH-BTC-USDT", 0, CoreOrderSide.BUY, 0, 100, 10, 1, 10,
+                    CoreMarginMode.CROSS, CorePositionSide.NET, false, false, CoreTimeInForce.IOC,
+                    0, 0, "", "trace", 1, 1, 0, 1, revision, revision, java.util.List.of(), 0, 0, 0);
+            long terminalBefore = terminal;
+            singleResponses = true;
+            expectSingleRejection = true;
+            runtime.setMetadata(productLine, Long.MAX_VALUE);
+            try {
+                send(command(CoreMessageType.UPSERT_ALGO_ORDER, 1000,
+                        com.surprising.aeron.protocol.CoreAlgoOrderCodec.encode(next)));
+                drain();
+                if (terminal != terminalBefore + 1 || !before.equals(runtime.algoOrder(9_000_000)))
+                    throw new IllegalStateException("failed algo update was not restored");
+            } finally {
+                runtime.setMetadata(productLine, runtimeRevision);
+                expectSingleRejection = false;
+                singleResponses = false;
+            }
+        }
+
+        public void runAlgoLaneUpdates() {
             long before = terminal;
             singleResponses = true;
             try {
-                for (int phase = 0; phase < 6; phase++) {
+                for (int i = 0; i < 64; i++) {
+                    long id = 9_000_000L + i;
+                    var current = service.state().runtimeState.algoOrder(id);
+                    long revision = current == null ? 1 : current.revision() + 1;
+                    var algo = new com.surprising.aeron.protocol.CoreAlgoOrderView(id, 1000 + i,
+                            "algo-lane-" + i, "JMH-BTC-USDT", 0, CoreOrderSide.BUY, 0, 100, 10, 1, 10,
+                            CoreMarginMode.CROSS, CorePositionSide.NET, false, false, CoreTimeInForce.IOC,
+                            0, 0, "", "trace", 1, 1, 0, 1, revision, revision, java.util.List.of(), 0, 0, 0);
+                    send(command(CoreMessageType.UPSERT_ALGO_ORDER, 1000 + i,
+                            com.surprising.aeron.protocol.CoreAlgoOrderCodec.encode(algo)));
+                }
+                drain();
+                if (terminal - before != 64) throw new IllegalStateException("algo updates unfinished");
+            } finally { singleResponses = false; }
+        }
+
+        public void runOwnerTimerUpdates() {
+            long before = terminal;
+            singleResponses = true;
+            try {
+                for (int i = 0; i < 128; i++) {
+                    var timer = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(
+                            com.surprising.aeron.protocol.CoreCancelAllAfterAction.SET,
+                            1000 + i, "JMH-BTC-USDT", 1000, 2000, 0, 0, 0, 1000);
+                    send(command(CoreMessageType.UPDATE_CANCEL_ALL_AFTER, 1000 + i,
+                            com.surprising.aeron.protocol.CoreCancelAllAfterCodec.encodeCommand(timer)));
+                }
+                drain();
+                if (terminal - before != 128) throw new IllegalStateException("timer controls unfinished");
+            } finally { singleResponses = false; }
+        }
+
+        public void runTriggerRoundTrip() { runTriggerRoundTrip(false); }
+
+        public void runTriggerRoundTrip(boolean automaticClose) { runTriggerRoundTrip(automaticClose, false); }
+
+        public void runTriggerRoundTrip(boolean automaticClose, boolean partialFirst) {
+            runTriggerRoundTrip(automaticClose, partialFirst, false);
+        }
+
+        public void runTriggerRoundTrip(boolean automaticClose, boolean partialFirst, boolean batchClosing) {
+            if (automaticClose && !productLine.isDerivative())
+                throw new IllegalArgumentException("position-close triggers require derivatives");
+            long before = terminal;
+            boolean previousBatchTrades = expectBatchTrades;
+            int previousResponseSize = responseBatchSize;
+            singleResponses = true;
+            if (batchClosing) { expectBatchTrades = true; responseBatchSize = batchSize; }
+            try {
+                for (int phase = 0; phase < (partialFirst ? 8 : 6); phase++) {
+                    if (automaticClose && phase == 3) continue;
+                    singleResponses = !(batchClosing && phase == 5);
                     CoreMessage[] wave = new CoreMessage[maxInFlight];
                     for (int user = 0; user < maxInFlight; user++) {
                         if (phase == 2) {
@@ -450,18 +792,46 @@ public class ClusteredBatchTradingBenchmark {
                         } else if (phase == 3) {
                             wave[user] = command(CoreMessageType.CANCEL_TRIGGER_ORDER, 1_000 + user,
                                     CoreTriggerOrderCodec.encodeId(firstOrders[user]));
+                        } else if (batchClosing && phase == 5) {
+                            var orders = new ArrayList<PlaceOrderCommand>(batchSize);
+                            for (int item = 0; item < batchSize; item++)
+                                orders.add(order(orderId++, CoreOrderSide.SELL, 100));
+                            wave[user] = command(CoreMessageType.PLACE_ORDER_BATCH, 1000 + user,
+                                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)));
                         } else {
-                            long account = phase == 0 || phase == 5 ? 1256 : 1000 + user;
-                            CoreOrderSide side = phase == 0 || phase == 4 ? CoreOrderSide.SELL : CoreOrderSide.BUY;
+                            long account = phase == 0 || phase == 5 || phase == 7 ? 1256 : 1000 + user;
+                            CoreOrderSide side = phase == 0 || phase == 4 || phase == 6 ? CoreOrderSide.SELL : CoreOrderSide.BUY;
+                            if (batchClosing && phase == 4) { account = 1256; side = CoreOrderSide.BUY; }
+                            long quantity = batchClosing && (phase < 2 || phase == 4) ? batchSize
+                                    : partialFirst && phase < 2 ? 2 : 1;
                             wave[user] = command(CoreMessageType.PLACE_ORDER, account,
-                                    TradingCommandCodec.encodePlaceOrder(order(orderId++, side, 100)));
+                                    TradingCommandCodec.encodePlaceOrder(order(orderId++, side, 100, quantity)));
                         }
                     }
                     for (CoreMessage message : wave) send(message);
                     drain();
+                    if (partialFirst && phase == 5) for (int user = 0; user < maxInFlight; user++) {
+                        var trigger = service.state().runtimeState.triggerOrder(firstOrders[user]);
+                        if (trigger == null || trigger.status() != CoreTriggerOrderStatus.PENDING)
+                            throw new IllegalStateException("partial close canceled protective trigger");
+                    }
                 }
-                if (terminal - before != 1536) throw new IllegalStateException("trigger terminal mismatch");
-            } finally { singleResponses = false; }
+                if (terminal - before != (partialFirst ? 1792 : automaticClose ? 1280 : 1536))
+                    throw new IllegalStateException("trigger terminal mismatch");
+                if (automaticClose) for (int user = 0; user < maxInFlight; user++) {
+                    long id = firstOrders[user];
+                    var trigger = service.state().runtimeState.triggerOrder(id);
+                    if (trigger != null && trigger.status() != CoreTriggerOrderStatus.CANCELED)
+                        throw new IllegalStateException("closed position retains trigger " + id + ": " + trigger.status());
+                    if (trigger == null && !service.state().terminalRetention.containsTrigger(
+                            id, 1000 + user, "trigger-" + id))
+                        throw new IllegalStateException("closed trigger lost terminal identity");
+                }
+            } finally {
+                singleResponses = false;
+                expectBatchTrades = previousBatchTrades;
+                responseBatchSize = previousResponseSize;
+            }
         }
 
         public void runAmendRoundTripTrades() {

@@ -124,6 +124,7 @@ public final class LaneCancelEvent implements SettlementLaneWorker.Command {
     public boolean commitsLane() { return commitLane; }
     public long coreSequence() { return coreSequence; }
     public long userId() { return userId; }
+    public int orderCount() { return orderCount; }
     public long orderId() { return orderIds[0]; }
     public int laneId() { return laneId; }
     public long requiredLaneMask() { return 1L << laneId; }

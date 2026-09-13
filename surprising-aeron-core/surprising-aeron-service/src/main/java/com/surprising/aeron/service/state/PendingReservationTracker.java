@@ -125,6 +125,30 @@ final class PendingReservationTracker {
         indexPendingReservation(userId, orderId, coreSequence, nextTotalPendingReservations);
     }
 
+    /** Control task writes its account only; Owner registers the receipt after publication. */
+    void markInCurrentLane(long userId, long orderId, long coreSequence) {
+        AccountLaneState lane = owner.laneCommandScope.get();
+        if (lane == null || lane.laneId() != owner.topology.accountLaneId(userId))
+            throw new IllegalStateException("pending reservation requires its Account Lane");
+        ReservationRuntime reservation = lane.reservations.get(orderId);
+        if (reservation == null || reservation.userId() != userId)
+            throw new IllegalStateException("pending reservation is missing");
+        owner.captureReservationBefore(orderId);
+        owner.captureBalanceBefore(userId, reservation.assetId());
+        lane.markPendingReservation(orderId, coreSequence);
+        owner.captureBalanceAfter(lane, userId, reservation.assetId());
+    }
+
+    void collectControlReservation(long userId, long orderId, long coreSequence) {
+        owner.assertOwner();
+        if (owner.laneCommandScope.get() != null || pendingReservationUsers.containsKey(orderId))
+            throw new IllegalStateException("control reservation must be collected once by Owner");
+        ReservationRuntime reservation = owner.publishedReservations.get(orderId);
+        if (coreSequence <= 0 || reservation == null || reservation.userId() != userId)
+            throw new IllegalStateException("control reservation has not been published");
+        indexPendingReservation(userId, orderId, coreSequence, Math.incrementExact(totalPendingReservations));
+    }
+
     void indexPendingReservation(long userId, long orderId, long coreSequence,
                                          int nextTotalPendingReservations) {
         pendingReservationsBySequence.add(coreSequence, orderId);

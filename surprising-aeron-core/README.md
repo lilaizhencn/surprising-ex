@@ -658,3 +658,53 @@ Core 内统一按 `用户可用余额 + 用户冻结余额 + 手续费余额 + �
 
 `TradingRuntimeState` 沿用 `PublishedLaneChanges` 发布不可变 `CoreTriggerOrderState` 引用；owner 的 `publishedTriggerOrders` 只在 Lane 完成后合并更新，Lane 内查询仍访问自己拥有的状态。触发单变更缓冲携带最终值（删除为 null），`visitChangedIndexes` 不再逐 ID 跨 Lane 回查。取消/删除定位已有状态的 userId 对应 Lane；回滚及辅助快照替换同步更新 owner 视图。发布缓冲按首次触发单写入懒分配，普通撮合事件不会新增触发单数组。它是与现有 publishedOrders 一致的完成边界索引，不复制状态对象或对外暴露可变 Lane Map。
 批量 `finishOrderBatch` 将 ID 合并到已有 primitive 累加器，Lane 提交直接遍历批次 ID 集合，最后由 `materializeChangeAccumulators` 一次生成不可变列表；保留先前去重顺序、maker/运行时追加变更及完成屏障。新基准 `ownerTriggerAndBatchCompletion` 覆盖六产品开仓→挂止损→撤止损→平仓与批量下撤单，并核对资金/持仓/冻结/终态和快照恢复。
+
+交易Owner延期推进使用现有batch与deferred登记表的Core序号队首，已删除在途表全量搜索。普通准入在没有平仓冲突时直接消费已排序自成交撤单ID，空结果不建立临时合并集合。此处只简化调度与分配，账户交接的剩余路径及整体验收状态见根目录PERFORMANCE_AND_LANE_FINDINGS.md。
+
+Lane预留替换保留同一账户/订单的索引成员，持仓索引按成员变化更新；金额、数量、元数据变更不再删除再添加成员。资产切换仍同步更新pending统计，持仓归零/重开与最终移除仍维护原有查询/恢复索引。
+
+
+普通下单（无前置撤单）及流水线下单批次由 `DeterministicExchangeCoreAdapter.placeWithEvidence` 一次生成最终撮合结果和恢复证据，避免先创建无证据结果再复制。复合撤单/改单仍保留部分成功结果与最终证据绑定；已发布结果不可变，账户状态仍由所属 Lane 写入。此项仅减少结果包装，不代表 Owner 收集/提交及完整状态发布已完成精简；验证结果见根目录 `PERFORMANCE_VALIDATION.md`。
+
+
+活跃订单索引 `ActiveOrderIndex` 复用 Lane 已发布的不可变 `OrderRuntime`。每个活跃订单只保留一个 Owner 写入的索引条目（订单引用、symbol身份），部分成交或改价更新引用；完整 `CoreOrderState` 仅在查询及快照边界生成。`prepareLaneTerminal` 不再预先复制完整订单快照，订单交接缓冲也不分配持仓专用的预计算列。撤单依赖范围读取运行态字段，账户实体仍由所属 Lane 写入；其它 Owner/Lane 状态往返与写入权交接问题仍按根目录问题清单推进。
+
+显式 ADL 与保险结案的在线命令通过已有控制 Lane 队列执行账户变更：目标账户 Lane 完成仓位/余额计算，强平账户 Lane 完成结案；Owner 仅校验全局顺序并在 Lane 完成后提交 TreasuryDelta。跨 Lane 拒绝沿用整命令回滚，不向 Owner 返回完整账户状态。`RuntimeCommitRecoveryTest` 覆盖拒绝回滚、快照重试与保险/ADL切点；该迁移不代表其余账户交接已全部清除。
+
+Owner 的 ActiveOrderIndex 使用 Agrona primitive map/set，删除时压缩探测链，避免有界订单周转触发删除标记清理重建；保留独立迭代器和查询边界排序。索引条目仍共享 Lane 发布的不可变 OrderRuntime，未增加账户状态副本。
+
+触发子单的原生拒绝也复用 MatcherSettlementEvent：所属 Lane 释放冻结并写入子单 REJECTED、触发单 TRIGGER_FAILED；Owner 仅收集顺序完成。外层触发命令 APPLIED 表示执行动作已处理，不表示子单成交或成功挂单。
+
+AMEND/REPLACE 的新订单ID接口采用撤旧下新语义：撮合已成功撤掉原单后，新单若被拒绝，响应为 REJECTED，原单保持 CANCELED，所属 Lane 释放原单及已执行前置撤单的冻结；不承诺拒绝时保留原单。响应订单视图仍只含原单/新单。仅准确对应准入原单及预期前置撤单、且无成交的已知执行前缀可以提交；未知撤单、成交或缺失准入证据仍走恢复保护。不能将此视作支持更换ID/TIF的原子改单。
+
+- 撤单、批量撤单和替换订单的异步派发始终交给所属Account Lane；上游借用的临时账户权限在派发时归还，Owner不再以内联执行代替这三类Lane任务。
+
+- 普通/批量Place准入及在线账户提交同样只由所属Lane执行；撮合控制命令的最终Lane提交采用原控制续程异步完成，Owner不再调用同步stageLaneMutation等待。等待期间仅保留必要的最终响应字节，不复制账户状态。
+
+- 普通下单、撤单、替换、改单、批量撤单准备只读Owner发布的索引并派发Lane任务，不再为该阶段暂停全部Lane/借用账户写入权。依赖屏障、资金校验和终态顺序保持原约束。
+
+- 已接受的撮合命令在PendingMatching生命周期内保留原信封与指纹；删除未使用的部分撮合结果改写命令续跑路径。强平/结算出现不可协调的部分结果仍进入快照/日志恢复。
+
+- 强平执行的余额/持仓读取、损益/费用计算及状态写入在同一次 Lane 操作内完成；Owner 仅应用返回的 RuntimeTreasuryDelta 并推进全局 revision。当前撤单与强平之间仍有同步等待，批量强平异步编排尚未完成。
+
+- 线程归属限制：上述改动合并了账户计算与写入作用域，尚未消除 Owner 借用 Lane 执行。直接释放访问权会被异步命令的 onLane 防护拒绝（恢复测试两项失败），已撤销该尝试；必须连同强平 completion/批量 continuation 迁移到 dispatchControlLanes，不能仅删除访问权保护。
+
+- 2026-09-13 强平异步迁移：真实 Cluster 的 EXECUTE_LIQUIDATION / EXECUTE_LIQUIDATION_BATCH 已使用 dispatchControlLanes；同一账户的分页撤单与强平计算/写入合并为一项 Lane 工作，Owner 在完成后应用 TreasuryDelta。批量命令沿既有单控制续步逐项推进并共享取消预算，变更 ID 使用已有 primitive 累积器，不保留额外完整账户状态列表。准备阶段读取已提交活跃强平索引，取消账户所有权交接。同步直调入口和其他控制命令不据此宣称全部迁移。
+
+- 2026-09-13 强平模块进一步收敛：执行、分页推进、保险结案和ADL的同步/异步入口共用账户操作。运行中的同步入口先释放Owner借用权，再提交所属Lane；异步入口使用同一操作与现有控制回调。仅启动前的隔离状态构造在Lane作用域内直接初始化。删除旧独立撤单与重复账户更新分支，空撤单不再分配空ID数组。
+
+- Matcher提交路由复用LaneCommandContextRing的现有序号槽，MatcherPipelineGroup不再持有独立shardByToken哈希表。路由在提交时占用、消费结果时释放；队列拒绝会回退占用，未消费的路由禁止序号槽正常回收，重复提交及跨分片释放继续失败。该调整不改变Owner/Lane队列的单生产者和顺序提交约束；Matcher→Lane直接结果路径见下方最新说明。
+
+- 批量下单准入的发布缓冲区随既有事件复用；Owner回收时清空状态引用，Lane只复用容量。128币对真实单成员资金/恢复验证通过；当前吞吐受本机降频影响，整体Owner与状态分配优化仍未完成，详见根目录性能记录。
+
+- Lane订单、预留及客户单号反向索引采用回移删除表，避免稳定活跃量下墓碑引起的整表重建；快照直接收集最终汇总表。资金和真实单成员恢复已验证，剩余pending reservation索引及Owner路径见根目录问题清单。
+
+
+### Matcher→Lane 直接成交结果（2026-09-13）
+
+- 真实异步 Cluster 的普通 PLACE 与可流水线化的 PLACE_BATCH：Owner 复用 `MatcherSettlementEvent` 预留事件，在原 `PendingMatchingRing.partitionDispatchHead` 依赖门槛入 Lane 队列；Matcher 构建结果路由、批量响应元数据并直接发布给 Lane，Lane 无需等待 Owner drain。没有额外结果队列，Lane 入队仍为 Owner 单生产者。
+- `SettlementLaneWorker` 等待队首事件发布，Matcher 通过原唤醒协议通知；不同依赖分区保持可并行。同一账户的顺序不会被后来的结果越过。保守预留范围内没有实际成交的 Lane 只消费顺序标记，事件须等全部接收 Lane 完成后才能复用。
+- `MatcherSettlementPlan` 在 Matcher 验证不可变事实；当前订单与账户变更由所属 Lane 校验/应用。持仓身份在 Lane 输出到 Owner 有序收集期间保持引用，复用既有持仓变化索引去重；未成交订单不再预建空持仓身份，恢复也不额外制造这类身份。
+- Owner 保留撮合证据链首尾校验、全局提交顺序、Treasury/资金汇总、终态与结果索引、事实发布。批量逐项结果处理从 Owner 移至 Matcher，批次游标仍由 Owner 独占。撤单、替换、触发与风险控制的必要业务续程不因此被取消。
+- `ClusterCommandPipelineTest.matcherPublishesOrdinaryAndBatchFillsToLanesWithoutOwnerDrainingResults` 在六产品线上暂停 Owner drain，证明真实成交可由 Matcher/Lane 独立完成，之后核对串行状态和快照。`MatcherSettlementPlanTest` 验证保守路由标记、失败发布与事件复用；`RuntimeIdentityRegistryTest` 覆盖跨在途输出的身份退休。
+- 性能使用 `ClusterOperationalBenchmark` 的128币对混合/双向成交，以及 `ClusterDirectSettlementBenchmark` 的六产品线开平仓循环；均连接外部真实单成员，完整记录见根目录 `PERFORMANCE_VALIDATION.md`。直接路径不等于 Owner 全部瓶颈已经消除，也不预先承诺30万/s。

@@ -24,6 +24,28 @@ import org.junit.jupiter.api.Test;
 class CoreResultLedgerTest {
 
     @Test
+    void ownedInsertionPreservesSequenceAndPriorResultWhenReplacing() {
+        var ledger = new CommandResultLedger(new LinkedHashMap<>());
+        UUID first = UUID.randomUUID(), second = UUID.randomUUID();
+        var fingerprint = com.surprising.aeron.protocol.CommandFingerprint.of(probe(first, 1, 1));
+        byte[] originalBytes = {1, 2};
+        ledger.storeOwnedResult(first, fingerprint, ResponseStatus.APPLIED, CoreResultCode.NONE,
+                1, 0, 7, originalBytes);
+        var original = ledger.get(first);
+        ledger.storeOwnedResult(second, fingerprint, ResponseStatus.APPLIED, CoreResultCode.NONE,
+                2, 0, 8, new byte[]{3});
+        byte[] replacementBytes = {4};
+        ledger.storeOwnedResult(first, fingerprint, ResponseStatus.APPLIED, CoreResultCode.NONE,
+                3, 0, 9, replacementBytes);
+        assertThat(original.responseDataUnsafe()).isSameAs(originalBytes);
+        assertThat(original.responseData()).containsExactly(1, 2);
+        assertThat(ledger.get(first).responseDataUnsafe()).isSameAs(replacementBytes);
+        assertThat(ledger.get(first).retentionSequence()).isEqualTo(original.retentionSequence());
+        assertThat(ledger.entries().keySet()).containsExactly(first, second);
+        CommandResultLedger.validateResultLedger(ledger.entries());
+    }
+
+    @Test
     void retentionMetadataReusesOwnedResponseBytesWithoutExposingThem() {
         byte[] source = new byte[]{1, 2, 3};
         CommandResultLedger.StoredResult created = stored(

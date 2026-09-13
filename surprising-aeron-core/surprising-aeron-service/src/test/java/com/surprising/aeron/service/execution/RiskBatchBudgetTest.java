@@ -15,7 +15,7 @@ class RiskBatchBudgetTest {
     @ParameterizedTest
     @EnumSource(value=ProductLine.class, names={"LINEAR_PERPETUAL","INVERSE_PERPETUAL",
             "LINEAR_DELIVERY","INVERSE_DELIVERY","OPTION"})
-    void heavySymbolCannotConsumeEverySliceOfSharedBudget(ProductLine line) {
+    void heavySymbolCannotConsumeEverySliceOfSharedBudget(ProductLine line) throws Exception {
         try (var state = new TradingCoreRuntime(line)) {
             var type = ContractType.valueOf(line.contractTypeCode());
             String asset=type.isInverse()?"BTC":"USDT";
@@ -45,7 +45,18 @@ class RiskBatchBudgetTest {
                     expected = CoreTestCompletion.completeMatchingSynchronously(reference,
                             reference.matchingSequence(firstBatch.header().commandId()), TIME,
                             firstBatch.header().sourceSequence());
+                // Batch execution still has an initial legacy preparation handoff. Its asynchronous
+                // risk continuation must finish on the Lane without acquiring ownership a second time.
+                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                while (!state.runtimeState.tryAcquireOwnerLaneAccess()) {
+                    if (System.nanoTime() > deadline) throw new AssertionError("preparation handoff timeout");
+                    Thread.onSpinWait();
+                }
+                var epoch = state.runtimeState.getClass().getDeclaredField("laneHandoffEpoch");
+                epoch.setAccessible(true);
+                long handoffBefore = epoch.getLong(state.runtimeState);
                 var actual = apply(state, firstBatch);
+                assertThat(epoch.getLong(state.runtimeState)).isEqualTo(handoffBefore);
                 assertThat(actual.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
                 assertThat(actual.data()).isEqualTo(expected.data());
                 assertThat(state.tradingState().businessStateHash())
@@ -153,6 +164,100 @@ class RiskBatchBudgetTest {
                 assertThat(state.tradingState().users()).isEqualTo(before.users());
             }
         }
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void liquidationBatchResumesAcrossAccountsAndSnapshotWithinCancellationBudget(boolean asynchronous) {
+        ProductLine line = ProductLine.LINEAR_PERPETUAL;
+        try (var state = new TradingCoreRuntime(line)) {
+            applied(state, command(line, CoreMessageType.UPSERT_INSTRUMENT,
+                    TradingCommandCodec.encodeUpsertInstrument(new UpsertInstrumentCommand("BTC-USDT", 1,
+                            ContractType.LINEAR_PERPETUAL.ordinal(), "BTC", "USDT", "USDT", 1, 1, 1,
+                            100_000, 50_000, 0, 0, 0, -1, 0))));
+            applied(state, mark(line, "BTC-USDT", 1));
+            for (long user : new long[]{1, 2, 3}) applied(state, command(line, CoreMessageType.ADJUST_BALANCE, user,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", user == 2 ? 10000 : 110))));
+            applied(state, command(line, CoreMessageType.PLACE_ORDER, 2,
+                    TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100, "BTC-USDT", 1,
+                            CoreOrderSide.SELL, 100, 20, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                            CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "maker"))));
+            for (long user : new long[]{1, 3}) {
+                applied(state, command(line, CoreMessageType.PLACE_ORDER, user,
+                        TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(100 + user, "BTC-USDT", 1,
+                                CoreOrderSide.BUY, 100, 10, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                                CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "taker-" + user))));
+                for (int n = 0; n < 2; n++) applied(state, command(line, CoreMessageType.PLACE_ORDER, user,
+                        TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(200 + user * 10 + n, "BTC-USDT", 1,
+                                CoreOrderSide.SELL, 110, 1, true, CoreMarginMode.CROSS, CorePositionSide.NET,
+                                CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "cancel-" + user + "-" + n))));
+            }
+            applied(state, command(line, CoreMessageType.APPLY_MARK_PRICE, TradingCommandCodec.encodeApplyMarkPrice(
+                    new ApplyMarkPriceCommand("BTC-USDT", 1, 1, 2, TIME))));
+            while (work(state, line).riskScanPending()) applied(state, command(line, CoreMessageType.CONTINUE_RISK_SCAN,
+                    TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(64))));
+            assertThat(work(state, line).actions()).hasSize(2);
+            long funds = liquidationFunds(state);
+            var firstWork = ExecuteLiquidationBatchCommand.fromWork(work(state, line), 0, 0);
+            var first = command(line, CoreMessageType.EXECUTE_LIQUIDATION_BATCH,
+                    TradingCommandCodec.encodeExecuteLiquidationBatch(new ExecuteLiquidationBatchCommand(
+                            firstWork.actions(), 1, 0, null, 0)));
+            var firstResult = CoreLiquidationBatchResultCodec.decode(executeLiquidation(state, first, asynchronous).data());
+            assertThat(firstResult.processedOrders()).isEqualTo(1);
+            assertThat(firstResult.pendingActions()).isEqualTo(2);
+            try (var restored = TradingCoreRuntime.fromSnapshot(line, state.snapshot(600))) {
+                int pages = 1;
+                while (!work(state, line).actions().isEmpty()) {
+                    assertThat(++pages).isLessThanOrEqualTo(4);
+                    var nextWork = ExecuteLiquidationBatchCommand.fromWork(work(state, line), 0, 0);
+                    var next = command(line, CoreMessageType.EXECUTE_LIQUIDATION_BATCH,
+                            TradingCommandCodec.encodeExecuteLiquidationBatch(new ExecuteLiquidationBatchCommand(
+                                    nextWork.actions(), 1, 0, null, 0)));
+                    var actual = executeLiquidation(state, next, asynchronous);
+                    var recovered = apply(restored, next);
+                    assertThat(actual.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+                    assertThat(actual.data()).isEqualTo(recovered.data());
+                    assertThat(CoreLiquidationBatchResultCodec.decode(actual.data()).processedOrders()).isEqualTo(1);
+                }
+                assertThat(pages).isEqualTo(4);
+                assertThat(state.tradingState().businessStateHash()).isEqualTo(restored.tradingState().businessStateHash());
+                assertThat(liquidationFunds(state)).isEqualTo(funds);
+            }
+        }
+    }
+
+    private static CoreResponse executeLiquidation(TradingCoreRuntime state, CoreMessage command, boolean asynchronous) {
+        if (asynchronous) return apply(state, command);
+        state.activate();
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+        while (!state.runtimeState.tryAcquireOwnerLaneAccess()) {
+            if (System.nanoTime() > deadline) throw new AssertionError("borrowed ownership timeout");
+            Thread.onSpinWait();
+        }
+        CoreResponse response = state.apply(command);
+        if (response.resultCode() == CoreResultCode.MATCHING_PENDING)
+            response = CoreTestCompletion.completeMatchingSynchronously(state,
+                    state.matchingSequence(command.header().commandId()), command.header().submittedAtEpochMillis(),
+                    command.header().sourceSequence());
+        try {
+            var field = state.runtimeState.getClass().getDeclaredField("ownerLaneAccess");
+            field.setAccessible(true);
+            assertThat(field.getBoolean(state.runtimeState)).isFalse();
+        } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+        return response;
+    }
+
+    private static long liquidationFunds(TradingCoreRuntime state) {
+        var core = state.tradingState();
+        long total = 0;
+        for (var user : core.users().values()) {
+            var balance = user.balances().get("USDT");
+            total = Math.addExact(total, Math.addExact(balance.availableUnits(), balance.lockedUnits()));
+
+        }
+        total = Math.addExact(total, core.treasuryState().insuranceBalances().getOrDefault("USDT", 0L));
+        total = Math.addExact(total, core.treasuryState().clearingPnlBalances().getOrDefault("USDT", 0L));
+        return Math.subtractExact(total, core.treasuryState().insuranceDeficits().getOrDefault("USDT", 0L));
     }
 
     private CoreLiquidationWorkView work(TradingCoreRuntime state,ProductLine line) {

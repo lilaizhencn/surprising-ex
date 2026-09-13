@@ -9,7 +9,6 @@ import com.surprising.aeron.service.state.index.TriggerOrderIndex;
 import com.surprising.aeron.service.state.model.CoreAlgoOrderState;
 import com.surprising.aeron.service.state.model.CoreCancelAllAfterKey;
 import com.surprising.aeron.service.state.model.CoreCancelAllAfterState;
-import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 
 public final class RuntimeFactIndexes implements RuntimeFactFrame.ChangeConsumer {
@@ -47,10 +46,6 @@ public final class RuntimeFactIndexes implements RuntimeFactFrame.ChangeConsumer
         } finally {
             activeIdentities = null;
         }
-    }
-
-    void preparedOrder(long orderId, CoreOrderState current) {
-        activeOrders.applySnapshot(orderId, current);
     }
 
     void preparedPosition(long positionKey, RuntimePositionIndexValue current) {

@@ -37,17 +37,34 @@ final class DerivativeRiskCommands {
     void executeExecuteAdl(CoreMessage message, long clusterTimestamp) {
         var command = TradingCommandCodec.decodeExecuteAdl(message.payloadUnsafe());
         owner.resultBuilder.commandChangedUserIds = List.of(command.targetUserId());
-        RuntimeDerivativeLiquidationProcessor.applyAdlRuntime(
-                command, owner.runtimeState, owner.identities);
-        owner.commits.requestCommitPublication();
+        if (owner.runtimeState.asynchronousCommands()) {
+            var work = RuntimeDerivativeLiquidationProcessor.beginAdl(command, owner.runtimeState, owner.identities);
+            owner.deferControl(() -> {
+                if (!work.getAsBoolean()) return false;
+                owner.commits.requestCommitPublication();
+                return true;
+            });
+        } else {
+            RuntimeDerivativeLiquidationProcessor.applyAdlRuntime(command, owner.runtimeState, owner.identities);
+            owner.commits.requestCommitPublication();
+        }
     }
 
     void executeResolveLiquidation(CoreMessage message, long clusterTimestamp) {
         var command = TradingCommandCodec.decodeResolveLiquidation(message.payloadUnsafe());
-        RuntimeDerivativeLiquidationProcessor.applyResolutionRuntime(
-                command, owner.runtimeState, owner.identities,
-                owner.liquidationIndex.activeIds());
-        owner.commits.requestCommitPublication();
+        if (owner.runtimeState.asynchronousCommands()) {
+            var work = RuntimeDerivativeLiquidationProcessor.beginResolution(command, owner.runtimeState,
+                    owner.identities, owner.liquidationIndex.activeIds());
+            owner.deferControl(() -> {
+                if (!work.getAsBoolean()) return false;
+                owner.commits.requestCommitPublication();
+                return true;
+            });
+        } else {
+            RuntimeDerivativeLiquidationProcessor.applyResolutionRuntime(command, owner.runtimeState, owner.identities,
+                    owner.liquidationIndex.activeIds());
+            owner.commits.requestCommitPublication();
+        }
     }
 
     void executeContinueRiskScan(CoreMessage message, long clusterTimestamp) {
@@ -65,19 +82,24 @@ final class DerivativeRiskCommands {
         int pendingBefore = owner.pendingRiskScanCount();
         long startedAt = System.nanoTime();
         long beforeRevision = owner.runtimeState.revision();
-        if (owner.runtimeState.asynchronousCommands() && !activeScan.riskComplete()) {
-            var work = new RiskScanCoordinator(command.maxUsers(),
+        if (owner.runtimeState.asynchronousCommands()) {
+            var risk = activeScan.riskComplete() ? null : new RiskScanCoordinator(command.maxUsers(),
                     owner.positionUserIndex, owner.runtimeState, owner.identities);
-            owner.deferControl(() -> {
-                if (!work.poll()) return false;
-                if (owner.runtimeState.revision() != beforeRevision) owner.commits.requestCommitPublication();
-                int remaining = command.maxUsers() - work.completedWork();
-                if (remaining > 0 && owner.runtimeState.riskScan(activeScan.symbolId()).riskComplete()) {
-                    if (!owner.runtimeState.tryAcquireOwnerLaneAccess()) return false;
-                    owner.triggers.evaluatePendingTriggerScan(symbol, remaining);
+            owner.deferControl(new java.util.function.BooleanSupplier() {
+                private java.util.function.BooleanSupplier triggers;
+                @Override public boolean getAsBoolean() {
+                    if (triggers == null) {
+                        if (risk != null && !risk.poll()) return false;
+                        if (owner.runtimeState.revision() != beforeRevision) owner.commits.requestCommitPublication();
+                        int remaining = command.maxUsers() - (risk == null ? 0 : risk.completedWork());
+                        var completedScan = owner.runtimeState.riskScan(activeScan.symbolId());
+                        triggers = remaining > 0 && completedScan.riskComplete() && !completedScan.triggerComplete()
+                                ? owner.triggers.pendingTriggerScan(symbol, remaining) : () -> true;
+                    }
+                    if (!triggers.getAsBoolean()) return false;
+                    owner.logRiskScan("continuation", symbol, command.maxUsers(), pendingBefore, startedAt);
+                    return true;
                 }
-                owner.logRiskScan("continuation", symbol, command.maxUsers(), pendingBefore, startedAt);
-                return true;
             });
             return;
         }

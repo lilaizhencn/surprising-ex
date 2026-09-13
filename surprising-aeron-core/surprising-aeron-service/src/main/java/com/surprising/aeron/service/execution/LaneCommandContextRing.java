@@ -37,7 +37,8 @@ final class LaneCommandContextRing {
 
     void release(long coreSequence) {
         Context context = required(coreSequence);
-        if (!context.complete()) throw new IllegalStateException("incomplete lane command context");
+        if (!context.complete() || context.submittedMatcherShard != -1)
+            throw new IllegalStateException("incomplete lane command context");
         context.clear();
         inFlight--;
     }
@@ -64,6 +65,23 @@ final class LaneCommandContextRing {
         private long completedLaneMask;
         private CoreMatchingResult matchingResult;
         private CoreMatchingResult completedMatchingResult;
+        /** Owner-only route for the current matcher submission, owned by this existing sequence slot. */
+        private int submittedMatcherShard = -1;
+
+        int submittedMatcherShard() { return submittedMatcherShard; }
+
+        void claimMatcherSubmission(int shardId) {
+            if (coreSequence == 0 || shardId < 0 || submittedMatcherShard != -1)
+                throw new IllegalStateException("matcher command token is already routed or inactive");
+            submittedMatcherShard = shardId;
+        }
+
+        void releaseMatcherSubmission(int shardId) {
+            if (submittedMatcherShard != shardId)
+                throw new IllegalStateException("matcher completion belongs to another shard");
+            submittedMatcherShard = -1;
+        }
+
         private CoreAdmissionReservation admission;
         private java.util.List<Long> commitChangedUserIds;
         private java.util.List<Long> commitChangedOrderIds;
@@ -74,6 +92,14 @@ final class LaneCommandContextRing {
         private CoreResultCode matchingRejection;
         private boolean pendingReady;
         private PendingMatching pending;
+        /** 结算计划由序号槽独占；终态结果消费后清理引用并保留容量。 */
+        private com.surprising.aeron.service.state.MatcherSettlementPlan reusableSettlementPlan;
+        com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlanBuffer() {
+            if (coreSequence == 0) throw new IllegalStateException("unclaimed settlement slot");
+            if (reusableSettlementPlan == null)
+                reusableSettlementPlan = new com.surprising.aeron.service.state.MatcherSettlementPlan();
+            return reusableSettlementPlan;
+        }
         private final PendingMatching reusablePending = new PendingMatching();
         private Context(int laneCount) {
             if (laneCount <= 0 || laneCount > Long.SIZE) {
@@ -232,11 +258,13 @@ final class LaneCommandContextRing {
         }
 
         private void clear() {
+            if (reusableSettlementPlan != null) reusableSettlementPlan.clearReferences();
             coreSequence = 0;
             expectedLaneMask = 0;
             completedLaneMask = 0;
             matchingResult = null;
             completedMatchingResult = null;
+            submittedMatcherShard = -1;
             admission = null;
             commitChangedUserIds = null;
             commitChangedOrderIds = null;

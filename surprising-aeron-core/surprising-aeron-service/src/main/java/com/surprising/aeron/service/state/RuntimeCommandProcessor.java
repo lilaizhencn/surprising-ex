@@ -129,7 +129,7 @@ public final class RuntimeCommandProcessor {
         }
         runtime.assertOwner();
         if (!runtime.removePendingTransfer(transferId, userId)) return false;
-        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+        runtime.incrementCommandRevision();
         return true;
     }
 
@@ -148,7 +148,7 @@ public final class RuntimeCommandProcessor {
                 Math.incrementExact(current.version()), command.ruleName(), command.enabled(),
                 command.scanDelayMs(), command.scanBatchSize(), command.adminUserId(), command.reason(),
                 Math.max(0, updatedAtEpochMillis)));
-        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+        runtime.incrementCommandRevision();
     }
 
     public static void upsertInstrument(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
@@ -169,7 +169,7 @@ public final class RuntimeCommandProcessor {
                 throw new CoreStateRejectedException("INVALID_COMMAND", "calculation changes require a new audit reference");
             }
             runtime.putInstrument(statusUpdate);
-            runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+            runtime.incrementCommandRevision();
             return;
         }
         if (current != null && instrument.changeId() < current.changeId()) {
@@ -188,7 +188,7 @@ public final class RuntimeCommandProcessor {
                     "cannot replace instrument version with open state");
         }
         runtime.putInstrument(current == null ? instrument : instrument.withMaintenance(current.maintenance()));
-        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+        runtime.incrementCommandRevision();
     }
 
     public static void updateInstrumentMaintenance(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
@@ -232,7 +232,7 @@ public final class RuntimeCommandProcessor {
             throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS", "finish the active lifecycle operation first");
         }
         runtime.putInstrument(instrument.withMaintenance(after));
-        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+        runtime.incrementCommandRevision();
     }
 
     public static void adjustInsuranceFund(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
@@ -248,7 +248,7 @@ public final class RuntimeCommandProcessor {
                     "insurance fund balance is insufficient");
         }
         runtime.treasury().adjustInsurance(assetId, command.deltaUnits());
-        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+        runtime.incrementCommandRevision();
     }
 
     public static void placeOrder(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
@@ -299,6 +299,31 @@ public final class RuntimeCommandProcessor {
         runtime.putUser(new UserRuntime(runtime.productLine(), userId,
                 Math.incrementExact(user.revision()), user.positionMode()));
         incrementRevision(runtime);
+    }
+
+    /** Trigger claim, OCO cancellations and this reservation share one control Lane task. */
+    public static void placeTriggerChildInLane(TradingRuntimeState runtime, long userId,
+            ResolvedPlaceOrder command, UUID commandId, long coreSequence, long openInterestSteps,
+            RuntimeOrderAdmission.AdmissionIdentity identity, long clientKey, int assetId) {
+        AccountLaneState lane = runtime.laneCommandScope.get();
+        if (lane == null || lane.laneId() != runtime.topology().accountLaneId(userId))
+            throw new IllegalStateException("trigger child requires its Account Lane");
+        long required = RuntimeOrderAdmission.requiredReservationPrepared(runtime, userId, command,
+                openInterestSteps, lane.admissionOrderIndex(command.symbolId()), identity);
+        placeOrderPrepared(runtime, userId, command, commandId, required, clientKey, command.symbolId(), assetId);
+        runtime.pendingReservations.markInCurrentLane(userId, command.orderId(), coreSequence);
+    }
+
+    /** One account task writes the admitted order and its local pending marker. */
+    public static void reserveBatchOrderInLane(TradingRuntimeState runtime, long userId,
+            ResolvedPlaceOrder command, UUID commandId, long requiredReservation,
+            long clientKey, int assetId, long coreSequence) {
+        AccountLaneState lane = runtime.laneCommandScope.get();
+        if (lane == null || lane.laneId() != runtime.topology().accountLaneId(userId))
+            throw new IllegalStateException("batch reservation requires its Account Lane");
+        placeOrderPrepared(runtime, userId, command, commandId, requiredReservation,
+                clientKey, command.symbolId(), assetId);
+        runtime.pendingReservations.markInCurrentLane(userId, command.orderId(), coreSequence);
     }
 
     static void placeOrderPreparedInLane(
@@ -424,6 +449,13 @@ public final class RuntimeCommandProcessor {
         return false;
     }
 
+    public static void validateOrderStampInputs(long timestamp, long position, Iterable<Long> orderIds) {
+        if (timestamp < 0 || position < 0 || orderIds == null)
+            throw new IllegalArgumentException("invalid order commit metadata");
+        // Preserve the preparation boundary before any account task can start.
+        for (Long ignored : orderIds) { }
+    }
+
     public static boolean stampChangedOrdersByLane(
             TradingRuntimeState runtime, long timestamp, long clusterPosition,
             Iterable<Long> changedOrderIds, Iterable<Long> changedUserIds) {
@@ -433,14 +465,15 @@ public final class RuntimeCommandProcessor {
         }
         runtime.assertOwner();
         if (changedOrderIds instanceof java.util.Collection<?> orders && orders.isEmpty()) return false;
-        ArrayList<Long> candidates = new ArrayList<>();
-        for (Long orderId : changedOrderIds) {
-            if (orderId != null) candidates.add(orderId);
-        }
-        if (candidates.isEmpty()) return false;
+        // Callers retain this command-local collection until the synchronous Lane stage completes.
+        // Do not copy every order ID into a second boxed list just to iterate it again.
+        boolean hasCandidates = false;
+        for (Long orderId : changedOrderIds) hasCandidates |= orderId != null;
+        if (!hasCandidates) return false;
         Object[] results = runtime.executeOwnerSettlements(changedUserIds, ignored -> {
             boolean changed = false;
-            for (long orderId : candidates) {
+            for (Long orderId : changedOrderIds) {
+                if (orderId == null) continue;
                 OrderRuntime order = runtime.order(orderId);
                 if (order == null || order.updatedAtEpochMillis() == timestamp
                         && order.clusterPosition() == clusterPosition) continue;
@@ -581,6 +614,13 @@ public final class RuntimeCommandProcessor {
         if (runtime == null || identities == null || view == null || userId <= 0) {
             throw new IllegalArgumentException("invalid runtime algo order update");
         }
+        upsertAlgoOrder(runtime, userId, view, identities.symbolId(view.symbol()));
+    }
+
+    public static void upsertAlgoOrder(TradingRuntimeState runtime, long userId,
+                                       CoreAlgoOrderView view, int symbolId) {
+        if (runtime == null || view == null || userId <= 0 || symbolId < 0)
+            throw new IllegalArgumentException("invalid prepared algo update");
         runtime.assertOwner();
         if (view.userId() != userId) {
             throw new CoreStateRejectedException("ALGO_ORDER_OWNER_MISMATCH", "algo order belongs to another user");
@@ -591,9 +631,7 @@ public final class RuntimeCommandProcessor {
         CoreAlgoOrderState next = CoreAlgoOrderState.from(view);
         CoreAlgoOrderState current = runtime.algoOrder(next.algoOrderId());
         if (current == null) {
-            boolean duplicateClient = runtime.algoOrdersForRuntime().values().stream()
-                    .anyMatch(value -> value.userId() == userId
-                            && value.clientAlgoOrderId().equals(next.clientAlgoOrderId()));
+            boolean duplicateClient = runtime.hasAlgoClient(userId, next.clientAlgoOrderId());
             if (duplicateClient) {
                 throw new CoreStateRejectedException("DUPLICATE_CLIENT_ALGO_ORDER_ID",
                         "clientAlgoOrderId already exists");
@@ -616,7 +654,7 @@ public final class RuntimeCommandProcessor {
             if (next.childOrderIds().size() > current.childOrderIds().size()) {
                 OrderRuntime child = runtime.order(next.childOrderIds().getLast());
                 if (child == null || child.userId() != userId
-                        || child.symbolId() != identities.symbolId(next.symbol())) {
+                        || child.symbolId() != symbolId) {
                     throw new CoreStateRejectedException("INVALID_ALGO_CHILD",
                             "algo child order is not authoritative");
                 }
@@ -688,6 +726,21 @@ public final class RuntimeCommandProcessor {
         updateTrigger(runtime, current, CoreTriggerOrderStatus.CANCELED, 0, current.triggerSequence(),
                 current.triggeredPriceTicks(), current.rejectReason(), current.updatedAtEpochMillis());
         return true;
+    }
+
+    /** Commit event owns version publication; this helper mutates only its scoped account Lane. */
+    static boolean cancelPendingTriggerForCommit(TradingRuntimeState runtime, long triggerId) {
+        CoreTriggerOrderState current = requireTrigger(runtime, triggerId);
+        if (current.status() != CoreTriggerOrderStatus.PENDING) return false;
+        runtime.putTriggerOrder(preparePendingTriggerCancellation(current));
+        return true;
+    }
+
+    static CoreTriggerOrderState preparePendingTriggerCancellation(CoreTriggerOrderState current) {
+        if (current == null || current.status() != CoreTriggerOrderStatus.PENDING)
+            throw new IllegalStateException("closing trigger must be pending");
+        return triggerUpdate(current, CoreTriggerOrderStatus.CANCELED, 0, current.triggerSequence(),
+                current.triggeredPriceTicks(), current.rejectReason(), current.updatedAtEpochMillis());
     }
 
     public static boolean claimTriggerOrder(TradingRuntimeState runtime, long triggerOrderId, long triggerSequence,
@@ -810,6 +863,14 @@ public final class RuntimeCommandProcessor {
                 current.triggerSequence(), current.triggeredPriceTicks(), "", updatedAt);
     }
 
+    public static CoreTriggerOrderState prepareRejectedTriggerCompletion(
+            CoreTriggerOrderState current, String reason, long updatedAt) {
+        if (current == null || current.status() != CoreTriggerOrderStatus.TRIGGERING)
+            throw new IllegalStateException("invalid rejected trigger completion");
+        return triggerUpdate(current, CoreTriggerOrderStatus.TRIGGER_FAILED, 0,
+                current.triggerSequence(), current.triggeredPriceTicks(), reason, updatedAt);
+    }
+
     private static CoreTriggerOrderState triggerUpdate(CoreTriggerOrderState current,
                                       CoreTriggerOrderStatus status, long placedOrderId, long triggerSequence,
                                       long triggeredPriceTicks, String rejectReason, long updatedAt) {
@@ -867,7 +928,7 @@ public final class RuntimeCommandProcessor {
     }
 
     private static void incrementRevision(TradingRuntimeState runtime) {
-        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+        runtime.incrementCommandRevision();
     }
 
 }

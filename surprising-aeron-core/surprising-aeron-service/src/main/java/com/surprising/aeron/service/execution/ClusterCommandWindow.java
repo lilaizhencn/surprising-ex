@@ -10,6 +10,10 @@ import io.aeron.cluster.service.ClientSession;
 /** Owner-only bounded in-flight response contexts. Dependency ownership lasts until a log-driven drain. */
 final class ClusterCommandWindow {
     static final int DEFAULT_CAPACITY = 256;
+    /** Reason for the latest dependency decision, not an additional command lifecycle state. */
+    enum Conflict { NONE, ORDER, MATCHING_RANGE, OPEN_INTEREST, ACCOUNT }
+    private Conflict conflict = Conflict.NONE;
+    Conflict conflict() { return conflict; }
     /** 固定容量、Owner独占；容量必须为64的整数倍且为二次幂。 */
     private final Entry[] entries;
     private final int indexMask;
@@ -19,6 +23,11 @@ final class ClusterCommandWindow {
     /** 订单ID到最新物理槽位+1。只按FIFO移除，旧槽退窗不能删除较新槽的依赖。 */
     private final org.agrona.collections.Long2LongHashMap orderSlots =
             new org.agrona.collections.Long2LongHashMap(0);
+    /** 已分配 Core sequence 到物理槽位+1；Owner 完成回调直接命中窗口项。 */
+    private final org.agrona.collections.Long2LongHashMap completionSlots;
+    /** 窗口中最后一个已进入撮合流水的序号，避免每轮从尾部反向扫描。 */
+    private long lastMatchingSequence;
+    private int lastMatchingPhysical = -1;
 
     private static long intersectingSlots(long[] slots, long mask, int word) {
         long result = 0;
@@ -82,11 +91,7 @@ final class ClusterCommandWindow {
 
     /** 已通过账户及撮合依赖检查的最大序号；结算可提前派发，提交仍逐条进行。 */
     long lastMatchingSequence() {
-        for (int i = size - 1; i >= 0; i--) {
-            long sequence = get(i).sequence;
-            if (sequence != 0) return sequence;
-        }
-        return 0;
+        return lastMatchingSequence;
     }
 
     void candidateOrder(long orderId, String symbol, CoreOrderSide side, long price) {
@@ -117,6 +122,7 @@ final class ClusterCommandWindow {
             throw new IllegalArgumentException("owner command window must be a power of two in [64,1024]");
         entries = new Entry[capacity];
         indexMask = capacity - 1;
+        completionSlots = new org.agrona.collections.Long2LongHashMap(capacity);
         accountSlots = new long[capacity];
         symbolSlots = new long[capacity];
         for (int i = 0; i < entries.length; i++) entries[i] = new Entry();
@@ -127,6 +133,7 @@ final class ClusterCommandWindow {
     }
 
     int conflictingPrefixSize() {
+        conflict = Conflict.NONE;
         int exactPrefix = 0;
         for (int a = 0; a < candidateOrderCount; a++) {
             long slot = orderSlots.get(candidateOrders[a]);
@@ -145,6 +152,7 @@ final class ClusterCommandWindow {
             remaining -= count;
             physical = (physical - count) & indexMask;
         }
+        if (exactPrefix != 0) conflict = Conflict.ORDER;
         return exactPrefix;
     }
 
@@ -162,9 +170,15 @@ final class ClusterCommandWindow {
                         if (candidateOrderSymbols[a] != null
                                 && candidateOrderSymbols[a].equals(entry.orderSymbols[b])
                                 && (entry.openInterestChanges[b] || matchingRangesConflict(candidateSides[a], candidatePrices[a],
-                                        entry.sides[b], entry.prices[b]))) return i + 1;
+                                        entry.sides[b], entry.prices[b]))) {
+                            conflict = entry.openInterestChanges[b] ? Conflict.OPEN_INTEREST : Conflict.MATCHING_RANGE;
+                            return i + 1;
+                        }
             }
-            if ((entry.accounts & candidateAccounts) != 0 && accountsConflict(entry)) return i + 1;
+            if ((entry.accounts & candidateAccounts) != 0 && accountsConflict(entry)) {
+                conflict = Conflict.ACCOUNT;
+                return i + 1;
+            }
         }
         return 0;
     }
@@ -226,20 +240,53 @@ final class ClusterCommandWindow {
         System.arraycopy(candidateSides, 0, entry.sides, 0, candidateScopeCount);
         System.arraycopy(candidatePrices, 0, entry.prices, 0, candidateScopeCount);
         System.arraycopy(candidateOpenInterestChanges, 0, entry.openInterestChanges, 0, candidateScopeCount);
+        entry.physicalSlot = physical;
         return entry;
     }
 
+    /** 绑定撮合序号并建立完成结果的直接索引；sequence=0 表示同步完成项。 */
+    void bindSequence(Entry entry, long sequence) {
+        if (entry == null || entry.physicalSlot < 0 || sequence < 0) {
+            throw new IllegalArgumentException("invalid command window sequence binding");
+        }
+        if (entry.sequence != 0) completionSlots.remove(entry.sequence);
+        entry.sequence = sequence;
+        if (sequence == 0) return;
+        long slot = entry.physicalSlot + 1L;
+        long existing = completionSlots.get(sequence);
+        // A replicated retry can share the in-flight sequence with the original
+        // command. Keep the earliest slot, matching the old FIFO completion scan;
+        // the retry is drained after the original has produced the terminal result.
+        if (existing == 0) completionSlots.put(sequence, slot);
+        lastMatchingSequence = sequence;
+        lastMatchingPhysical = entry.physicalSlot;
+    }
+
     void complete(long sequence, CoreResponse response) {
-        boolean found = false;
-        for (int i = 0; i < size; i++) {
-            Entry entry = get(i);
-            if (entry.sequence == sequence) {
+        long slot = completionSlots.get(sequence);
+        if (slot != 0) {
+            Entry entry = entries[(int) slot - 1];
+            if (entry.physicalSlot == (int) slot - 1 && entry.sequence == sequence) {
                 if (entry.response != null) throw new IllegalStateException("duplicate pipeline completion");
                 entry.response = response;
-                found = true;
+                return;
             }
+            // A retry may have shared a sequence with a slot that has already left
+            // the ring. Repair the index and use the bounded FIFO fallback below.
+            completionSlots.remove(sequence);
         }
-        if (!found) throw new IllegalStateException("pipeline completion has no request context");
+        // Tests/recovery may populate Entry.sequence directly, and replicated retries
+        // can leave more than one entry for one in-flight sequence. The bounded scan
+        // preserves the previous FIFO completion semantics for those rare paths.
+        for (int i = 0; i < size; i++) {
+            Entry entry = get(i);
+            if (entry.sequence != sequence) continue;
+            if (completionSlots.get(sequence) == 0) completionSlots.put(sequence, entry.physicalSlot + 1L);
+            if (entry.response != null) throw new IllegalStateException("duplicate pipeline completion");
+            entry.response = response;
+            return;
+        }
+        throw new IllegalStateException("pipeline completion has no request context");
     }
 
     int size() { return size; }
@@ -254,6 +301,7 @@ final class ClusterCommandWindow {
 
     void removePrefix(int count) {
         if (count < 0 || count > size) throw new IllegalArgumentException("invalid window prefix");
+        boolean removedLastMatching = false;
         for (int i = 0; i < count; i++) {
             Entry entry = get(i);
             int physical = (head + i) & indexMask;
@@ -265,6 +313,10 @@ final class ClusterCommandWindow {
                 long id = entry.orders[k];
                 if (orderSlots.get(id) == physical + 1L) orderSlots.remove(id);
             }
+            if (entry.sequence != 0) {
+                if (completionSlots.get(entry.sequence) == physical + 1L) completionSlots.remove(entry.sequence);
+                removedLastMatching |= physical == lastMatchingPhysical;
+            }
             entry.orderCount = 0;
             entry.session = null;
             entry.request = null;
@@ -275,9 +327,23 @@ final class ClusterCommandWindow {
             java.util.Arrays.fill(entry.orderSymbols, 0, entry.scopeCount, null);
             java.util.Arrays.fill(entry.sides, 0, entry.scopeCount, null);
             entry.scopeCount = 0;
+            entry.physicalSlot = -1;
         }
         head = (head + count) & indexMask;
         size -= count;
+        if (removedLastMatching) recomputeLastMatching();
+    }
+
+    private void recomputeLastMatching() {
+        lastMatchingSequence = 0;
+        lastMatchingPhysical = -1;
+        for (int i = size - 1; i >= 0; i--) {
+            Entry entry = get(i);
+            if (entry.sequence == 0) continue;
+            lastMatchingSequence = entry.sequence;
+            lastMatchingPhysical = entry.physicalSlot;
+            return;
+        }
     }
 
     static final class Entry {
@@ -296,5 +362,6 @@ final class ClusterCommandWindow {
         CoreMessage request;
         CoreResponse response;
         long sequence, timestamp, position;
+        int physicalSlot = -1;
     }
 }

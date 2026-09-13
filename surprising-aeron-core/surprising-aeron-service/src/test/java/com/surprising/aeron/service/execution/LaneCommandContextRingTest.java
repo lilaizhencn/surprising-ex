@@ -17,6 +17,37 @@ import org.junit.jupiter.api.Test;
 class LaneCommandContextRingTest {
 
     @Test
+    void matcherRouteMustBeConsumedBeforeTheSequenceSlotCanBeReused() {
+        var ring = new LaneCommandContextRing(2, 1);
+        var context = ring.claim(1);
+        context.claimMatcherSubmission(0);
+        context.result(new CoreMatchingResult(true, "ACCEPTED").withCoreSequence(1), 1, 1);
+        context.completeLanes(1);
+        assertThatThrownBy(() -> ring.release(1)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> context.releaseMatcherSubmission(1)).isInstanceOf(IllegalStateException.class);
+        context.releaseMatcherSubmission(0);
+        ring.release(1);
+        assertThat(ring.claim(3).submittedMatcherShard()).isEqualTo(-1);
+    }
+
+    @Test
+    void settlementBufferBelongsToOneSlotAndIsReusedOnlyAfterRelease() {
+        var ring = new LaneCommandContextRing(2, 1);
+        var first = ring.claim(1);
+        var buffer = first.settlementPlanBuffer();
+        var other = ring.claim(2).settlementPlanBuffer();
+        assertThat(other).isNotSameAs(buffer);
+        buffer.preCancellations(new long[]{7});
+        first.result(new CoreMatchingResult(true, "ACCEPTED").withCoreSequence(1), 1, 1);
+        assertThatThrownBy(() -> ring.release(1)).isInstanceOf(IllegalStateException.class);
+        assertThat(buffer.preCancellationCount()).isOne();
+        first.completeLanes(1);
+        ring.release(1);
+        assertThat(buffer.preCancellationCount()).isZero();
+        assertThat(ring.claim(3).settlementPlanBuffer()).isSameAs(buffer);
+    }
+
+    @Test
     void suspendedSequencesTransferFundsWithoutSharingTheActiveBuffer() {
         var ring = new LaneCommandContextRing(4, 4);
         var first = ring.claim(1);

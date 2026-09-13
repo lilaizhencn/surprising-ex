@@ -50,7 +50,7 @@ class ControlLaneDispatcherTest {
 
     @org.junit.jupiter.params.ParameterizedTest
     @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
-    void failureCollectsAllLanesAndOnlyBorrowsForActualRollback(boolean changed) throws Exception {
+    void failureCollectsAllLanesAndRestoresWithoutBorrowingAccounts(boolean changed) throws Exception {
         var runtime = new TradingRuntimeState(LaneTopology.productionDefault());
         var entered = new CountDownLatch(2);
         var release = new CountDownLatch(1);
@@ -60,6 +60,7 @@ class ControlLaneDispatcherTest {
         long userId = candidate;
         try {
             acquire(runtime);
+            runtime.enterAsynchronousCommandScope();
             runtime.dispatchControlLanes(3, lane -> {
                 entered.countDown();
                 if (lane == 0) throw new CoreStateRejectedException("INVALID_COMMAND", "rejected on Lane");
@@ -72,14 +73,21 @@ class ControlLaneDispatcherTest {
             assertThat(runtime.pollControlLanes()).isFalse();
             release.countDown();
             assertThatThrownBy(() -> collect(runtime)).isInstanceOf(CoreStateRejectedException.class);
-            assertThat(runtime.ownerLaneAccess).isEqualTo(changed);
+            assertThat(runtime.ownerLaneAccess).isFalse();
             assertThat(runtime.controlLaneResult(1)).isEqualTo(7);
             if (changed) {
-                runtime.rollbackActiveCommand(0, 1);
+                var rollback = runtime.beginCommandRollback(0, 1);
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+                while (!rollback.getAsBoolean()) {
+                    if (System.nanoTime() >= deadline) throw new AssertionError("rollback timed out");
+                    Thread.onSpinWait();
+                }
+                assertThat(runtime.ownerLaneAccess).isFalse();
                 assertThat(runtime.user(userId)).isNull();
             }
         } finally {
             release.countDown();
+            runtime.exitAsynchronousCommandScope();
             runtime.releaseOwnerLaneAccess();
             runtime.close();
         }

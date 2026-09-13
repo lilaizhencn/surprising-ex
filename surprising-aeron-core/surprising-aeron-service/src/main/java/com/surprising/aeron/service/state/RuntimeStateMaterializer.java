@@ -215,8 +215,14 @@ public final class RuntimeStateMaterializer {
 
     public static CoreOrderState orderSnapshot(OrderRuntime value, RuntimeFactFrame.IdentityView identities) {
         if (value == null || identities == null) throw new IllegalArgumentException("runtime order is required");
+        return orderSnapshot(value, identities.symbol(value.symbolId()));
+    }
+
+    /** Query/export boundary for an already resolved immutable symbol identity. */
+    public static CoreOrderState orderSnapshot(OrderRuntime value, String symbol) {
+        if (value == null || symbol == null) throw new IllegalArgumentException("runtime order is required");
         return new CoreOrderState(value.orderId(), value.productLine(), value.userId(),
-                identities.symbol(value.symbolId()), value.instrumentChangeId(), value.side(), value.priceTicks(),
+                symbol, value.instrumentChangeId(), value.side(), value.priceTicks(),
                 value.matchingPriceTicks(), value.quantitySteps(), value.executedQuantitySteps(),
                 value.remainingQuantitySteps(), value.reduceOnly(), value.marginMode(), value.positionSide(),
                 value.orderType(), value.timeInForce(), value.postOnly(), value.clientOrderId(), value.commandId(),

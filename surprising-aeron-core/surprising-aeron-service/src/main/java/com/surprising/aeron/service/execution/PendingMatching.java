@@ -13,8 +13,8 @@ import java.util.Objects;
 
 final class PendingMatching {
     private long sequence;
-    // Owner-only key for the insertion-ordered batch map; reused across polling attempts.
-    private Long sequenceKey;
+    /** Optional batch context owned by this pending command, detached before command-slot reuse. */
+    OrderBatchPending orderBatch;
     private Operation operation;
     private CoreMessage command;
     private CommandFingerprint fingerprint;
@@ -130,7 +130,7 @@ final class PendingMatching {
         }
         Objects.requireNonNull(command.header().commandId(), "commandId");
         this.sequence = sequence;
-        sequenceKey = null;
+        orderBatch = null;
         this.operation = operation;
         this.command = command;
         this.fingerprint = fingerprint;
@@ -164,50 +164,6 @@ final class PendingMatching {
         return this;
     }
 
-    PendingMatching withCommand(CoreMessage nextCommand) {
-        Objects.requireNonNull(nextCommand, "nextCommand");
-        if (!nextCommand.header().equals(command.header())) {
-            return new PendingMatching(this, nextCommand);
-        }
-        command = nextCommand;
-        decodedCommand = DecodedMatchingCommand.decode(nextCommand);
-        return this;
-    }
-
-    private PendingMatching(PendingMatching source, CoreMessage nextCommand) {
-        sequence = source.sequence;
-        sequenceKey = source.sequenceKey;
-        operation = source.operation;
-        command = nextCommand;
-        fingerprint = source.fingerprint;
-        preMatchingCancellationOrderIds = source.preMatchingCancellationOrderIds;
-        beforeProjection = source.beforeProjection;
-        beforeBusinessStateHash = source.beforeBusinessStateHash;
-        beforeFundsStateHash = source.beforeFundsStateHash;
-        fundsDelta = source.fundsDelta;
-        decodedCommand = DecodedMatchingCommand.decode(nextCommand);
-        admission = source.admission;
-        capacityReservation = source.capacityReservation;
-        pendingStateHash = source.pendingStateHash;
-        commitFenceTimestamp = source.commitFenceTimestamp;
-        commitFenceClusterPosition = source.commitFenceClusterPosition;
-        commitFenceEstablished = source.commitFenceEstablished;
-        settlementEvent = source.settlementEvent;
-        cancelEvent = source.cancelEvent;
-        replaceEvent = source.replaceEvent;
-        settlementPlan = source.settlementPlan;
-        realtimeTakerOrder = source.realtimeTakerOrder;
-        settlementApplyStartNanos = source.settlementApplyStartNanos;
-        placeAdmission = source.placeAdmission;
-        admittedMatchingOrder = source.admittedMatchingOrder;
-        matchingSubmitted = source.matchingSubmitted;
-        crossShardCancellationStarted = source.crossShardCancellationStarted;
-        settlementReady = source.settlementReady;
-        dispatchOnly = source.dispatchOnly;
-        pipelinedSettlementCounted = source.pipelinedSettlementCounted;
-        partitionLaneMask = source.partitionLaneMask;
-    }
-
     PendingMatching withPreMatchingCancellations(List<Long> orderIds) {
         preMatchingCancellationOrderIds = List.copyOf(orderIds);
         return this;
@@ -239,10 +195,6 @@ final class PendingMatching {
     }
 
     long sequence() { return sequence; }
-    Long sequenceKey() {
-        if (sequenceKey == null) sequenceKey = Long.valueOf(sequence);
-        return sequenceKey;
-    }
     Operation operation() { return operation; }
     CoreMessage command() { return command; }
     CommandFingerprint fingerprint() { return fingerprint; }
@@ -325,7 +277,8 @@ final class PendingMatching {
         settlementApplyStartNanos = applyStartNanos;
     }
     void cancel(LaneCancelEvent event, long applyStartNanos) {
-        if (event == null || cancelEvent != null || settlementEvent != null || operation != Operation.CANCEL) {
+        if (event == null || cancelEvent != null || settlementEvent != null || replaceEvent != null
+                || operation != Operation.CANCEL && operation != Operation.REPLACE && operation != Operation.AMEND) {
             throw new IllegalStateException("invalid cancel continuation");
         }
         cancelEvent = event;

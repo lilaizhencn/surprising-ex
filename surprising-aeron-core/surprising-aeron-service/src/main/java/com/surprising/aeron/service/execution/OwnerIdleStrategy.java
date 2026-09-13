@@ -29,9 +29,9 @@ final class OwnerIdleStrategy {
     }
 
     void idle(int work, boolean pendingCommands) {
-        // 在途命令保持原有连续推进速度；不能把真实 work=0 自动解释为应该节流。
-        // 这里既不虚报业务进展，也不在每次流水线重查之间插入额外 pause/yield/park。
-        if (work > 0 || pendingCommands) {
+        // 在途数量不是进展。先短暂自旋，再用完成通知唤醒；有界超时同时覆盖
+        // 控制阶段和失败检查，不以无限轮询掩盖通知缺失。
+        if (work > 0) {
             if (idleCount != 0) { idleCount = 0; parkNanos = 1_000; }
             return;
         }
@@ -40,7 +40,8 @@ final class OwnerIdleStrategy {
         wakeup.requested = 1;
         try {
             // 发布先于这次重读时直接看到工作；发布晚于重读时生产者留下 unpark permit。
-            if (!workAvailable.getAsBoolean()) LockSupport.parkNanos(this, parkNanos);
+            if (!workAvailable.getAsBoolean()) LockSupport.parkNanos(this,
+                    pendingCommands ? Math.min(parkNanos, 10_000) : parkNanos);
         } finally { wakeup.requested = 0; }
         parkNanos = Math.min(100_000, parkNanos * 2);
     }

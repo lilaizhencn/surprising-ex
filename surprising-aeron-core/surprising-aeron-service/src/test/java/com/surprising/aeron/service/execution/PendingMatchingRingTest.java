@@ -62,7 +62,7 @@ class PendingMatchingRingTest {
     void keepsTheLowWatermarkWhileAllowingIndependentPartitionCompletion() {
         PendingMatchingRing ring = new PendingMatchingRing(3, 1, 4);
         PendingMatching first = pending(7, UUID.randomUUID(), 1001);
-        PendingMatching replacement = first.withCommand(command(first.command().header().commandId(), 1002));
+        PendingMatching replacement = pending(7, first.command().header().commandId(), 1002);
         PendingMatching second = pending(8, UUID.randomUUID(), 1003);
         PendingMatching third = pending(9, UUID.randomUUID(), 1004);
         PendingMatching fourth = pending(10, UUID.randomUUID(), 1005);

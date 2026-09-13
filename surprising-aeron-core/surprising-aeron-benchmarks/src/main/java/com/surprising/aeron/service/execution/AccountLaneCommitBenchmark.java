@@ -38,6 +38,13 @@ public class AccountLaneCommitBenchmark {
         return state.commitBatch();
     }
 
+    /** Diagnostic of metadata fused into the existing Lane commit task, not Cluster capacity. */
+    @Benchmark
+    @OperationsPerInvocation(256)
+    public long metadataAndSequenceFanout(CommitState state) {
+        return state.commitBatch(true);
+    }
+
     @State(Scope.Thread)
     public static class CommitState {
         @Param("4")
@@ -48,12 +55,16 @@ public class AccountLaneCommitBenchmark {
 
         private TradingRuntimeState runtime;
         private long[] users;
+        private java.util.List<Long> metadataUsers;
+        private java.util.List<Long> metadataOrders;
         private LaneCommitEvent[] commits;
         private long sequence;
+        private String previousAccountLanes;
 
         @Setup(Level.Trial)
         public void setUp() {
             if (maxInFlight != 256) throw new IllegalArgumentException("maxInFlight must be 256");
+            previousAccountLanes = System.getProperty("surprising.aeron.account-lanes");
             System.setProperty("surprising.aeron.account-lanes", Integer.toString(accountLanes));
             LaneTopology topology = LaneTopology.configured(false);
             runtime = new TradingRuntimeState(topology);
@@ -63,12 +74,29 @@ public class AccountLaneCommitBenchmark {
                 users[laneId] = userForLane(topology, laneId);
                 runtime.putUser(new UserRuntime(users[laneId]));
             }
+            var userList = new java.util.ArrayList<Long>(accountLanes);
+            var orderList = new java.util.ArrayList<Long>(accountLanes);
+            for (int laneId = 0; laneId < accountLanes; laneId++) {
+                long user = users[laneId];
+                runtime.putBalance(new com.surprising.aeron.service.state.BalanceRuntime(user, 3, 1000, 0));
+                runtime.reserveOrder(10000 + laneId, user, 20000 + laneId, 5, 1, 3, 100);
+                userList.add(user);
+                orderList.add(10000L + laneId);
+            }
+            metadataUsers = java.util.List.copyOf(userList);
+            metadataOrders = java.util.List.copyOf(orderList);
+            runtime.clearChangedKeys();
             runtime.startAccountLanes();
         }
 
-        long commitBatch() {
+        long commitBatch() { return commitBatch(false); }
+
+        long commitBatch(boolean metadata) {
             for (int index = 0; index < commits.length; index++) {
-                commits[index] = runtime.dispatchLaneMutation(++sequence, users);
+                long next = ++sequence;
+                commits[index] = metadata
+                        ? runtime.dispatchLaneMutation(next, metadataUsers, metadataOrders, next, next)
+                        : runtime.dispatchLaneMutation(next, users);
             }
             for (int index = 0; index < commits.length; index++) {
                 LaneCommitEvent commit = commits[index];
@@ -76,12 +104,27 @@ public class AccountLaneCommitBenchmark {
                 runtime.releaseLaneCommit(commit);
                 commits[index] = null;
             }
+            if (metadata) for (long id : metadataOrders)
+                if (runtime.order(id).clusterPosition() != sequence)
+                    throw new IllegalStateException("Lane metadata publication is not at the last sequence");
             return sequence;
         }
 
         @TearDown(Level.Trial)
         public void tearDown() {
-            runtime.close();
+            try {
+                for (long user : users) {
+                    var balance = runtime.balance(user, 3);
+                    if (balance.availableUnits() != 900 || balance.lockedUnits() != 100)
+                        throw new IllegalStateException("metadata commit changed account funds");
+                }
+            } finally {
+                try { runtime.close(); }
+                finally {
+                    if (previousAccountLanes == null) System.clearProperty("surprising.aeron.account-lanes");
+                    else System.setProperty("surprising.aeron.account-lanes", previousAccountLanes);
+                }
+            }
         }
 
         private static long userForLane(LaneTopology topology, int laneId) {

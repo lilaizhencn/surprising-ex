@@ -2,7 +2,6 @@ package com.surprising.aeron.service.state.index;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.service.state.TradingDependencyMask;
-import com.surprising.aeron.service.state.model.CoreOrderState;
 
 /** Owner-only price/participant reference counts, rebuilt from active orders after recovery.
  * Subtree masks allow a crossing-price range query without walking orders or price levels. */
@@ -44,8 +43,8 @@ final class OrderParticipantIndex {
         return result;
     }
 
-    void add(CoreOrderState order) { change(order, 1); }
-    void remove(CoreOrderState order) { change(order, -1); }
+    void add(CoreOrderSide side, long price, long userId) { change(side, price, userId, 1); }
+    void remove(CoreOrderSide side, long price, long userId) { change(side, price, userId, -1); }
 
     boolean contains(CoreOrderSide side, long price, long userId) {
         return userId > 0 && contains(side == CoreOrderSide.BUY ? asks : bids, side, price, userId);
@@ -77,9 +76,9 @@ final class OrderParticipantIndex {
                 || overlaps(node.right, side, price, other, otherSide, otherPrice, common);
     }
 
-    private void change(CoreOrderState order, int delta) {
-        if (order.side() == CoreOrderSide.BUY) bids = change(bids, order.matchingPriceTicks(), order.userId(), delta);
-        else asks = change(asks, order.matchingPriceTicks(), order.userId(), delta);
+    private void change(CoreOrderSide side, long price, long userId, int delta) {
+        if (side == CoreOrderSide.BUY) bids = change(bids, price, userId, delta);
+        else asks = change(asks, price, userId, delta);
     }
 
     private Node change(Node node, long price, long userId, int delta) {

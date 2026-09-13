@@ -1,14 +1,16 @@
 package com.surprising.aeron.service.state;
 
 /**
- * 订单/持仓变更与其预计算索引共用一个实体键索引。
- * Lane 完成后一次交接两列，Owner 在有序提交点消费；不再为索引值另建键表。
+ * Lane 变更与可选的持仓预计算索引共用实体键索引。
+ * 订单只交接运行态引用，不分配 prepared 列；持仓按需分配第二列。
  */
 final class RuntimeIndexedChangeBuffer<V, I> extends RuntimeChangeBuffer<V> {
     /** 与基础变更槽对齐的索引值；null 可以表示删除。 */
-    private Object[] prepared = new Object[8];
+    private static final Object[] NO_PREPARED = new Object[0];
+    private static final boolean[] NO_PRESENT = new boolean[0];
+    private Object[] prepared = NO_PREPARED;
     /** 区分未预计算与预计算出的删除，生命周期与对应变更槽相同。 */
-    private boolean[] present = new boolean[8];
+    private boolean[] present = NO_PRESENT;
 
     @FunctionalInterface
     interface Consumer<V, I> {
@@ -41,7 +43,7 @@ final class RuntimeIndexedChangeBuffer<V, I> extends RuntimeChangeBuffer<V> {
 
     private void setPrepared(int slot, I value) {
         if (slot >= prepared.length) {
-            int length = prepared.length;
+            int length = Math.max(8, prepared.length);
             while (length <= slot) length = Math.multiplyExact(length, 2);
             prepared = java.util.Arrays.copyOf(prepared, length);
             present = java.util.Arrays.copyOf(present, length);

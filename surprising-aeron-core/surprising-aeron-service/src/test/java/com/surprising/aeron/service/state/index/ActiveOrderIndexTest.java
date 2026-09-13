@@ -24,6 +24,96 @@ import org.junit.jupiter.api.Test;
 class ActiveOrderIndexTest {
 
     @Test
+    void boundedTurnoverKeepsStorageAndIndependentQueryCursors() throws Exception {
+        var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
+        var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
+        var mapField = ActiveOrderIndex.class.getDeclaredField("ordersById");
+        mapField.setAccessible(true);
+        var entries = (org.agrona.collections.Long2ObjectHashMap<?>) mapField.get(index);
+        var valuesField = org.agrona.collections.Long2ObjectHashMap.class.getDeclaredField("values");
+        valuesField.setAccessible(true);
+        for (long id = 1; id <= 32; id++) {
+            var order = new CoreOrderState(id, ProductLine.SPOT, 7, "BTC-USDT", 1,
+                    CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
+            index.apply(id, com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(order, identities), identities);
+        }
+        Object storage = valuesField.get(entries);
+        for (long id = 33; id <= 4096; id++) {
+            index.apply(id - 32, null, identities);
+            var order = new CoreOrderState(id, ProductLine.SPOT, 7, "BTC-USDT", 1,
+                    CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
+            index.apply(id, com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(order, identities), identities);
+        }
+        assertThat(valuesField.get(entries)).isSameAs(storage);
+        var cursor = index.matchingIds(7, "BTC-USDT");
+        var actual = new java.util.HashSet<Long>();
+        while (cursor.hasNext()) {
+            actual.add(cursor.next());
+            assertThat(index.sortedIds(7, "BTC-USDT")).hasSize(32);
+            assertThat(index.page(0, null, 0, 16).orderIds()).hasSize(16);
+        }
+        assertThat(actual).hasSize(32).allMatch(id -> id > 4064 && id <= 4096);
+        assertThat(index.pendingQuantity(7, "BTC-USDT", CorePositionSide.NET, CoreOrderSide.BUY)).isEqualTo(320);
+        for (long id = 4065; id <= 4096; id++) index.apply(id, null, identities);
+        assertThat(index.count()).isZero();
+        assertThat(index.ids(7)).isEmpty();
+        assertThat(index.ids("BTC-USDT")).isEmpty();
+    }
+
+    @Test
+    void runtimeUpdatesShareThePublishedOrderAndKeepQuerySnapshotsImmutable() throws Exception {
+        var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
+        var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
+        var initial = new CoreOrderState(1, ProductLine.SPOT, 7, "BTC-USDT", 1,
+                CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
+        var order = com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(initial, identities);
+        index.apply(1, order, identities);
+        assertThat(index.activeOrderRuntime(1)).isSameAs(order);
+        var oldQuery = index.activeOrder(1);
+        assertThat(oldQuery).isEqualTo(initial);
+        var field = ActiveOrderIndex.class.getDeclaredField("ordersById");
+        field.setAccessible(true);
+        var entries = (org.agrona.collections.Long2ObjectHashMap<?>) field.get(index);
+        Object entry = entries.get(1);
+        var partiallyFilled = order.withFill(4, 6, 3, CoreOrderStatus.OPEN, 2);
+        index.apply(1, partiallyFilled, identities);
+        assertThat(entries.get(1)).isSameAs(entry);
+        assertThat(index.activeOrderRuntime(1)).isSameAs(partiallyFilled);
+        assertThat(index.pendingQuantity(7, "BTC-USDT", CorePositionSide.NET, CoreOrderSide.BUY)).isEqualTo(6);
+        assertThat(index.activeOrder(1).cumulativeFeeUnits()).isEqualTo(3);
+        assertThat(oldQuery.remainingQuantitySteps()).isEqualTo(10);
+        assertThat(oldQuery.cumulativeFeeUnits()).isZero();
+        assertThat(index.orders()).containsExactly(index.activeOrder(1));
+        index.apply(1, partiallyFilled.withStatus(CoreOrderStatus.CANCELED, 3), identities);
+        assertThat(index.activeOrderRuntime(1)).isNull();
+        assertThat(index.activeOrderSymbol(1)).isNull();
+        assertThat(index.ids(7)).isEmpty();
+        assertThat(index.counterpartyMask("BTC-USDT", CoreOrderSide.SELL, 0)).isZero();
+    }
+
+    @Test
+    void runtimeScopeChangesReplaceMembershipWithoutRetainingThePreviousParticipant() {
+        var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
+        var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
+        var first = new CoreOrderState(1, ProductLine.SPOT, 7, "BTC-USDT", 1,
+                CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
+        var second = new CoreOrderState(1, ProductLine.SPOT, 8, "ETH-USDT", 1,
+                CoreOrderSide.SELL, 110, 10, 0, 10, false, CoreOrderStatus.OPEN, 2);
+        index.apply(1, com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(first, identities), identities);
+        var replacement = com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(second, identities);
+        index.apply(1, replacement, identities);
+        assertThat(index.activeOrderRuntime(1)).isSameAs(replacement);
+        assertThat(index.activeOrderSymbol(1)).isEqualTo("ETH-USDT");
+        assertThat(index.ids(7)).isEmpty();
+        assertThat(index.ids("BTC-USDT")).isEmpty();
+        assertThat(index.ids(8)).containsExactly(1L);
+        assertThat(index.counterpartyMask("BTC-USDT", CoreOrderSide.SELL, 0)).isZero();
+        assertThat(index.counterpartyMask("ETH-USDT", CoreOrderSide.BUY, 110))
+                .isEqualTo(TradingDependencyMask.account(8));
+        assertThat(index.activeOrder(1)).isEqualTo(second);
+    }
+
+    @Test
     void crossingParticipantMasksMatchOrdersThroughPriceChangesRemovalsAndRebuild() {
         var random = new java.util.Random(8191);
         var orders = new HashMap<Long, CoreOrderState>();

@@ -613,23 +613,6 @@ public class LinearPerpetualCoreBenchmark {
         public void setUpTrial() {
             LinearPerpetualBenchmarkSupport.configureAccountLanes(accountLanes);
             template = LinearPerpetualMixedWorkload.template(accountLanes, activeUsers, symbols);
-            scenario = createScenario();
-        }
-
-        @Override
-        @Setup(Level.Invocation)
-        public void setUpInvocation() {
-        }
-
-        @Override
-        @TearDown(Level.Invocation)
-        public void tearDownInvocation() {
-        }
-
-        @TearDown(Level.Trial)
-        public void tearDownTrial() {
-            scenario.verify();
-            scenario.close();
         }
 
         @Override
@@ -695,10 +678,10 @@ public class LinearPerpetualCoreBenchmark {
         @Param("10000")
         public int activeUsers;
 
-        @Param("512")
+        @Param("128")
         public int listedSymbols;
 
-        @Param("512")
+        @Param("128")
         public int activeSymbols;
 
         @Param("5")

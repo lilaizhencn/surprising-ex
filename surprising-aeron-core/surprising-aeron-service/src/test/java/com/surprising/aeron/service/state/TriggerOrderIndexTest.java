@@ -24,6 +24,49 @@ import org.junit.jupiter.api.Test;
 class TriggerOrderIndexTest {
 
     @Test
+    void closeTriggerCommitPublishesOnlyAfterLanesAndDoesNotRepeatOnReuse() {
+        try (var runtime = new TradingRuntimeState(LaneTopology.productionDefault())) {
+            long second = 8;
+            while (runtime.topology().accountLaneId(second) == runtime.topology().accountLaneId(7)) second++;
+            runtime.putUser(new UserRuntime(7));
+            runtime.putUser(new UserRuntime(second));
+            runtime.putTriggerOrder(trigger(901, 7, 100));
+            runtime.putTriggerOrder(trigger(902, second, 100));
+            runtime.setMetadata(ProductLine.SPOT, 10);
+            runtime.clearChangedKeys();
+            runtime.startAccountLanes();
+            runtime.enterAsynchronousCommandScope();
+            try {
+                var event = runtime.dispatchLaneMutation(1, java.util.List.of(7L, second),
+                        java.util.List.of(), java.util.List.of(901L, 902L), 100, 200);
+                awaitCommit(runtime, event);
+                assertThat(runtime.revision()).isEqualTo(10);
+                assertThat(runtime.triggerOrder(901).status()).isEqualTo(CoreTriggerOrderStatus.PENDING);
+                assertThat(runtime.triggerOrder(902).status()).isEqualTo(CoreTriggerOrderStatus.PENDING);
+                assertThat(runtime.ownerLaneAccess).isFalse();
+                runtime.releaseLaneCommit(event);
+                assertThat(runtime.revision()).isEqualTo(12);
+                assertThat(runtime.triggerOrder(901).status()).isEqualTo(CoreTriggerOrderStatus.CANCELED);
+                assertThat(runtime.triggerOrder(902).revision()).isEqualTo(2);
+                var plain = runtime.dispatchLaneMutation(2, java.util.List.of(7L, second));
+                assertThat(plain).isSameAs(event);
+                awaitCommit(runtime, plain);
+                runtime.releaseLaneCommit(plain);
+                assertThat(runtime.revision()).isEqualTo(12);
+                assertThat(runtime.triggerOrder(901).revision()).isEqualTo(2);
+            } finally { runtime.exitAsynchronousCommandScope(); }
+        }
+    }
+
+    private static void awaitCommit(TradingRuntimeState runtime, LaneCommitEvent event) {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+        while (!runtime.laneCommitComplete(event)) {
+            if (System.nanoTime() > deadline) throw new AssertionError("trigger commit timed out");
+            Thread.onSpinWait();
+        }
+    }
+
+    @Test
     void ownerReadsPublishedTriggersAndRemovalWithoutSubmittingLaneTasks() throws Exception {
         try (var runtime = new TradingRuntimeState(LaneTopology.productionDefault())) {
             long user = 1;

@@ -12,6 +12,64 @@ final class MatcherSettlementDispatcher {
 
     MatcherSettlementDispatcher(TradingRuntimeState owner) { this.owner = owner; }
 
+    MatcherSettlementEvent prepareDirect(long sequence, long laneMask, OrderRuntime single,
+            OrderRuntime[] orders, int count, java.util.UUID commandId, int shard,
+            RuntimeIdentityRegistry identities, long timestamp, long position,
+            List<Long> cancellations, LaneOrderResultTarget target) {
+        owner.assertOwner();
+        if (count <= 0 || single == null && (orders == null || count > orders.length))
+            throw new IllegalArgumentException("direct settlement admission is missing");
+        owner.ensureMatcherSettlementDispatchCapacity(laneMask);
+        MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();
+        if (event == null) event = new MatcherSettlementEvent();
+        MatcherSettlementEvent.BatchStorage storage = event.batchStorage(count);
+        for (int index = 0; index < count; index++) {
+            OrderRuntime order = single == null ? orders[index] : single;
+            if (order == null) throw new IllegalStateException("direct settlement order was not admitted");
+            storage.admittedOrders[index] = order;
+            int prior = storage.metadataSlots.getIfAbsent(order.symbolId(), -1);
+            if (prior < 0) {
+                CoreInstrumentState instrument = owner.instrument(identities.symbol(order.symbolId()));
+                if (instrument == null || instrument.changeId() != order.instrumentChangeId())
+                    throw new IllegalStateException("direct settlement instrument changed");
+                storage.instruments[index] = instrument;
+                storage.baseAssetIds[index] = identities.assetId(instrument.baseAsset());
+                storage.quoteAssetIds[index] = identities.assetId(instrument.quoteAsset());
+                storage.settleAssetIds[index] = identities.assetId(instrument.settleAsset());
+                storage.metadataSlots.put(order.symbolId(), index);
+            } else {
+                storage.instruments[index] = storage.instruments[prior];
+                storage.baseAssetIds[index] = storage.baseAssetIds[prior];
+                storage.quoteAssetIds[index] = storage.quoteAssetIds[prior];
+                storage.settleAssetIds[index] = storage.settleAssetIds[prior];
+            }
+        }
+        event.prepareDirect(sequence, laneMask, timestamp, position, commandId, shard,
+                owner, identities, count, cancellations, target);
+        return event;
+    }
+
+    void dispatchDirect(MatcherSettlementEvent event) {
+        owner.assertOwner();
+        if (event == null || event.runtime() != owner || !event.direct() || event.dispatched())
+            throw new IllegalStateException("invalid direct Lane ordering slot");
+        long mask = event.routedLaneMask();
+        owner.ensureLaneWorkerCapacity(mask);
+        owner.releaseOwnerLaneAccess();
+        if (!owner.accountLanesStarted && !event.ready())
+            throw new IllegalStateException("asynchronous matcher requires running account Lanes");
+        event.markDispatched();
+        for (int laneId = 0; laneId < owner.accountLanes.length; laneId++) {
+            if ((mask & 1L << laneId) == 0) continue;
+            if (!owner.accountLanesStarted) event.execute(owner.accountLanes[laneId]);
+            else {
+                owner.accountLaneQueueHighWaterMarks[laneId] = Math.max(
+                        owner.accountLaneQueueHighWaterMarks[laneId], owner.laneWorkers[laneId].depth() + 1);
+                owner.laneWorkers[laneId].submit(event);
+            }
+        }
+    }
+
     /** 可复用的 matcherSettlementEvent 对象池；仅在消费者完成后回收。 */
     final java.util.ArrayDeque<MatcherSettlementEvent> matcherSettlementEventPool =
             new java.util.ArrayDeque<>();
@@ -48,6 +106,7 @@ final class MatcherSettlementDispatcher {
         if (taker == null) throw new IllegalStateException("taker order is missing");
         CoreInstrumentState instrument = owner.instrument(identities.symbol(taker.symbolId()));
         if (instrument == null) throw new IllegalStateException("match instrument is missing");
+        owner.ensureMatcherSettlementDispatchCapacity(expectedLaneMask);
         int baseAssetId = identities.assetId(instrument.baseAsset());
         int quoteAssetId = identities.assetId(instrument.quoteAsset());
         int settleAssetId = identities.assetId(instrument.settleAsset());
@@ -78,49 +137,38 @@ final class MatcherSettlementDispatcher {
         matcherSettlementEventPool.addFirst(event);
     }
 
-    public RuntimeTreasuryDelta applyOrderBatchMatcherSettlement(
+    public MatcherSettlementEvent dispatchOrderBatchMatcherSettlement(
             long coreSequence, long expectedLaneMask, long takerOrderId,
-            CoreMatchingResult matchingResult, RuntimeIdentityRegistry identities,
-            TradingRuntimeState.TerminalOrderSink terminalOrderSink) {
+            CoreMatchingResult matchingResult, RuntimeIdentityRegistry identities) {
+        owner.assertOwner();
         if (!owner.orderBatchMutationScope) {
-            throw new IllegalStateException("blocking matcher settlement is restricted to one order batch");
+            throw new IllegalStateException("item settlement requires an order batch");
         }
         OrderRuntime taker = owner.order(takerOrderId);
         if (taker == null) throw new IllegalStateException("taker order is missing");
         MatcherSettlementPlan plan = MatcherSettlementPlan.build(coreSequence, takerOrderId, taker.userId(),
-                new long[]{takerOrderId}, matchingResult, owner, identities);
+                new long[]{takerOrderId}, matchingResult, owner, identities).rejectTaker(!matchingResult.accepted());
         if (plan.requiredLaneMask() != expectedLaneMask) {
             throw new IllegalStateException("matcher settlement lane mask mismatch");
         }
-        MatcherSettlementEvent event = dispatchMatcherSettlement(coreSequence, expectedLaneMask,
+        owner.releaseOwnerLaneAccess();
+        return dispatchMatcherSettlement(coreSequence, expectedLaneMask,
                 0, -1, -1, plan, matchingResult, identities, true);
-        awaitOrderBatchMatcherSettlement(event, System.nanoTime() + TradingRuntimeState.ORDER_BATCH_SETTLEMENT_TIMEOUT_NANOS);
-        // Sequential batch items share one funds boundary. Carry Lane-computed endpoints into
-        // that boundary; appending an item delta separately would count the same mutation twice.
+    }
+
+    public RuntimeTreasuryDelta collectOrderBatchMatcherSettlement(
+            MatcherSettlementEvent event, TradingRuntimeState.TerminalOrderSink terminalOrderSink) {
+        owner.assertOwner();
+        if (!owner.orderBatchMutationScope || !event.complete())
+            throw new IllegalStateException("batch item settlement is not ready to collect");
+        owner.assertAccountLanesHealthy();
+        // Sequential items share a funds boundary: merge endpoints before collecting the item.
         for (int laneId = 0; laneId < owner.accountLanes.length; laneId++) {
-            if ((expectedLaneMask & (1L << laneId)) != 0) {
+            if ((event.requiredLaneMask() & (1L << laneId)) != 0) {
                 owner.patchBalancesBeforeByLane[laneId].mergeSequential(event.changes().balancePatches[laneId]);
             }
         }
-        RuntimeTreasuryDelta result = owner.collectMatcherSettlement(event, null, terminalOrderSink);
-        releaseMatcherSettlement(event);
-        return result;
-    }
-
-    void awaitOrderBatchMatcherSettlement(MatcherSettlementEvent event, long deadlineNanos) {
-        // This is still a completion fence: no collection/recycling or next batch item on failure.
-        // Check operational failure periodically without a clock read on every spin.
-        int spins = 0;
-        while (!event.complete()) {
-            if ((spins++ & 1_023) == 0) {
-                owner.assertAccountLanesHealthy();
-                if (Thread.currentThread().isInterrupted() || System.nanoTime() - deadlineNanos >= 0) {
-                    throw new IllegalStateException("order batch matcher settlement interrupted or timed out");
-                }
-            }
-            Thread.onSpinWait();
-        }
-        owner.assertAccountLanesHealthy();
+        return owner.collectMatcherSettlement(event, null, terminalOrderSink);
     }
 
     public MatcherSettlementEvent dispatchMatcherSettlementBatch(
@@ -188,15 +236,17 @@ final class MatcherSettlementDispatcher {
                     settleAssetIds[index] = settleAssetIds[slot];
                 }
                 MatcherSettlementPlan plan = MatcherSettlementPlan.buildBatchItem(coreSequence, taker,
-                        instruments[index], matchingResult, owner, identities, matcherBatchValidationScratch, plans[index]);
+                        instruments[index], matchingResult, owner, identities, matcherBatchValidationScratch, plans[index])
+                        .rejectTaker(!matchingResult.accepted());
                 if (plan.requiredLaneMask() != expectedLaneMask)
                     throw new IllegalStateException("matcher settlement lane mask mismatch");
                 plans[index] = plan;
                 batchLaneMask |= expectedLaneMask;
             }
+            owner.ensureMatcherSettlementDispatchCapacity(batchLaneMask);
             prepared = true; // Once preparation starts, failures are fatal; never recycle a partially prepared event.
             event.prepareBatch(coreSequence, batchLaneMask, commitTimestamp, commitClusterPosition,
-                    plans, owner, identities, instruments,
+                    plans, batch.settlementCount(), owner, identities, instruments,
                     baseAssetIds, quoteAssetIds, settleAssetIds, owner.accountLanes.length);
             event.resultTarget = batch instanceof LaneOrderResultTarget target ? target : null;
             for (int laneId = 0; laneId < owner.accountLanes.length; laneId++) {

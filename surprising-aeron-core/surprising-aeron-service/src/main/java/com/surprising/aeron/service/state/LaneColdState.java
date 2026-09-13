@@ -22,7 +22,8 @@ final class LaneColdState {
     final LongObjectHashMap<IntObjectHashMap<LongObjectHashMap<Long>>> activeLiquidationIndex =
             new LongObjectHashMap<>();
     final LongObjectHashMap<RiskSnapshotRuntime> riskSnapshots = new LongObjectHashMap<>();
-    final Map<CoreLeverageKey, Long> leverages = new HashMap<>();
+    // Lane remains the sole writer; admission reads one immutable scalar from Owner.
+    final Map<CoreLeverageKey, Long> leverages = new java.util.concurrent.ConcurrentHashMap<>();
     final LongObjectHashMap<HashSet<CoreLeverageKey>> leverageKeysByUser = new LongObjectHashMap<>();
     final LongObjectHashMap<CoreAlgoOrderState> algoOrders = new LongObjectHashMap<>();
     final LongObjectHashMap<CoreTriggerOrderState> triggerOrders = new LongObjectHashMap<>();

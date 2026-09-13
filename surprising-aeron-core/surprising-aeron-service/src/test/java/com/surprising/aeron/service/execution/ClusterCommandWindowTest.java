@@ -63,6 +63,25 @@ class ClusterCommandWindowTest {
     }
 
     @Test
+    void dependencyReasonTracksTheBlockingPrefixAndClearsAfterDrain() {
+        var window = new ClusterCommandWindow();
+        window.resetCandidate(7);
+        window.candidateOrder(1);
+        window.add(null, null, 0, 0);
+        window.resetCandidate(8);
+        window.candidateOrder(1);
+        assertThat(window.conflictingPrefixSize()).isOne();
+        assertThat(window.conflict()).isEqualTo(ClusterCommandWindow.Conflict.ORDER);
+        window.resetCandidate(7);
+        window.candidateOrder(2);
+        assertThat(window.conflictingPrefixSize()).isOne();
+        assertThat(window.conflict()).isEqualTo(ClusterCommandWindow.Conflict.ACCOUNT);
+        window.removePrefix(1);
+        assertThat(window.conflictingPrefixSize()).isZero();
+        assertThat(window.conflict()).isEqualTo(ClusterCommandWindow.Conflict.NONE);
+    }
+
+    @Test
     void rejectsCapacitiesThatAliasOrExceedBoundedWindow() {
         for (int value : new int[]{0, 32, 65, 192, 2048})
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> new ClusterCommandWindow(value))
@@ -115,8 +134,10 @@ class ClusterCommandWindowTest {
         window.resetCandidate(0);
         window.candidateOrder(2, "BTC-USDT", com.surprising.aeron.protocol.CoreOrderSide.BUY, 90);
         assertThat(window.conflictingPrefixSize()).isOne();
+        assertThat(window.conflict()).isEqualTo(ClusterCommandWindow.Conflict.OPEN_INTEREST);
         window.removePrefix(1);
         assertThat(window.conflictingPrefixSize()).isZero();
+        assertThat(window.conflict()).isEqualTo(ClusterCommandWindow.Conflict.NONE);
     }
 
     @Test
@@ -131,6 +152,7 @@ class ClusterCommandWindowTest {
         window.resetCandidate(0);
         window.candidateOrder(3, "BTC-USDT", com.surprising.aeron.protocol.CoreOrderSide.SELL, 100);
         assertThat(window.conflictingPrefixSize()).isOne();
+        assertThat(window.conflict()).isEqualTo(ClusterCommandWindow.Conflict.MATCHING_RANGE);
         window.resetCandidate(0);
         window.candidateOrder(4, "BTC-USDT", com.surprising.aeron.protocol.CoreOrderSide.SELL, 0);
         assertThat(window.conflictingPrefixSize()).isOne();

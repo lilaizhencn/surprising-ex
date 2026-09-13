@@ -123,7 +123,7 @@ final class MatchingCommandAdmission {
     CoreResponse beginMatching(CoreMessage message, long clusterTimestamp, long clusterPosition,
                                        TradingCoreRuntime.SourceKey sourceKey, CommandFingerprint fingerprint) {
         PendingMatching.Operation operation = matchingOperation(message.header().messageType());
-        if (!owner.batches.pendingOrderBatches.isEmpty() && !owner.clusterPipelineAdmission) {
+        if (owner.batches.hasPendingBatches() && !owner.clusterPipelineAdmission) {
             return deferMatching(message, clusterTimestamp, clusterPosition, sourceKey, operation, fingerprint);
         }
         return prepareMatching(message, clusterTimestamp, clusterPosition, sourceKey, operation, fingerprint, null);
@@ -132,7 +132,7 @@ final class MatchingCommandAdmission {
     int matchingOrderBound(CoreMessage message, DecodedMatchingCommand decodedCommand) {
         if (decodedCommand == null) throw new IllegalArgumentException("decoded matching command is required");
         int inFlightOrders = owner.pendingMatching.size();
-        if (!owner.batches.pendingOrderBatches.isEmpty()) {
+        if (owner.batches.hasPendingBatches()) {
             inFlightOrders = Math.addExact(inFlightOrders, PlaceOrderBatchCommand.MAX_ORDERS);
         }
         return switch (message.header().messageType()) {
@@ -358,9 +358,9 @@ final class MatchingCommandAdmission {
         long requiredExportSequence = 0;
         long stateHash = owner.stateHash(owner.cachedBusinessStateHash, pending.command().header().commandId(),
                 ResponseStatus.REJECTED, resultCode, pending.sequence());
-        owner.resultLedger.storeResult(pending.command().header().commandId(), new StoredResult(pending.fingerprint(),
+        owner.resultLedger.storeOwnedResult(pending.command().header().commandId(), pending.fingerprint(),
                 ResponseStatus.REJECTED, resultCode, pending.sequence(), requiredExportSequence, stateHash,
-                new byte[0], 0));
+                TradingCoreRuntime.EMPTY_RESPONSE_DATA);
         deferredMatching.remove(pending.sequence());
         owner.removePendingMatching(pending.sequence());
         return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, resultCode,
@@ -458,16 +458,19 @@ final class MatchingCommandAdmission {
                 return List.of();
             }
         }
-        org.eclipse.collections.impl.set.mutable.primitive.LongHashSet cancellations =
-                new org.eclipse.collections.impl.set.mutable.primitive.LongHashSet();
         List<Long> closeCapacity = preMatchingCloseCapacityCancellations(
                 message.header().userId(), placement, excludedOrderId);
+        long[] selfTrade = preMatchingSelfTradeCancellations(
+                message.header().userId(), placement, excludedOrderId);
+        // Self-trade IDs are already unique and sorted. Usually both sources are empty;
+        // no merge set or replacement array is needed for that command.
+        if (closeCapacity.isEmpty()) return ImmutableLongArrayList.takeOwnership(selfTrade);
+        org.eclipse.collections.impl.set.mutable.primitive.LongHashSet cancellations =
+                new org.eclipse.collections.impl.set.mutable.primitive.LongHashSet();
         for (int index = 0; index < closeCapacity.size(); index++) {
             cancellations.add(closeCapacity instanceof ImmutableLongArrayList primitive
                     ? primitive.valueAt(index) : closeCapacity.get(index));
         }
-        long[] selfTrade = preMatchingSelfTradeCancellations(
-                message.header().userId(), placement, excludedOrderId);
         for (long orderId : selfTrade) cancellations.add(orderId);
         long[] ordered = cancellations.toArray();
         java.util.Arrays.sort(ordered);
@@ -681,7 +684,7 @@ final class MatchingCommandAdmission {
         }
         if (candidate.lifecycle()) {
             boolean liquidationActive = candidateSymbolId != null
-                    && owner.runtimeState.hasActiveLiquidationConflict(
+                    && hasCommittedLiquidationConflict(
                     candidate.settlement() ? 0 : candidate.userId(), candidateSymbolId, candidate.lifecycleId());
             boolean settlementContinuation = settlementProgress && candidate.settlement()
                     && owner.runtimeState.treasury().lifecycleProgress(candidateSymbolId).settlementId()
@@ -692,6 +695,20 @@ final class MatchingCommandAdmission {
             }
         }
     }
+
+    /** Control admission runs behind its fence and reads the existing committed active index. */
+    private boolean hasCommittedLiquidationConflict(long userId, int symbolId, long excludedId) {
+        for (long id : owner.liquidationIndex.activeIds()) {
+            if (id == excludedId) continue;
+            var liquidation = owner.runtimeState.liquidation(id);
+            if (liquidation != null && (userId == 0 || liquidation.userId() == userId)
+                    && liquidation.symbolId() == symbolId
+                    && (liquidation.status() == CoreLiquidationState.Status.PLANNED
+                    || liquidation.status() == CoreLiquidationState.Status.ORDERED)) return true;
+        }
+        return false;
+    }
+
 
     boolean pendingLifecycleConflicts(LifecycleScope candidate, PendingMatching pending) {
         if (pending.operation() != PendingMatching.Operation.LIQUIDATION_BATCH) {

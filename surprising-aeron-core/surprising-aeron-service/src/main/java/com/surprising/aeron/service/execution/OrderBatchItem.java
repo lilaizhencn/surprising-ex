@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.execution;
 
-import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.protocol.CoreOrderStateView;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
@@ -35,8 +34,9 @@ final class OrderBatchItem {
     boolean laneResultPrepared;
     /** 成交推送的不可变主动单身份；结算可提前，推送只能在本批提交时消费。 */
     com.surprising.aeron.service.state.OrderRuntime realtimeTakerOrder;
-    /** 本项发给 matcher 的准备结果。 */
-    java.util.function.Supplier<CoreMatchingResult> matchingSubmission;
+    /** Owner 一次解析的撤单身份；同分片批次任务读取，完成后清空。 */
+    String cancelSymbol;
+    long cancelInstrumentChangeId;
 
     OrderBatchItem(long orderId, long originalOrderId, long replacementOrderId, Object command) {
         initialize(orderId, originalOrderId, replacementOrderId, command);
@@ -63,7 +63,8 @@ final class OrderBatchItem {
         resultOrderSymbol = null;
         laneResultPrepared = false;
         realtimeTakerOrder = null;
-        matchingSubmission = null;
+        cancelSymbol = null;
+        cancelInstrumentChangeId = 0;
     }
 
     long orderId() { return orderId; }

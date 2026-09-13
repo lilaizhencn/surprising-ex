@@ -19,6 +19,21 @@ final class TriggerOrderCommands {
     /** 唯一 owner；仅在其线程访问共享交易状态和提交边界。 */
     final TradingCoreRuntime owner;
 
+    /** Owner selection scratch, copied into the existing commit event before the next command. */
+    private final PrimitiveLongChangeSet closingTriggerIds = new PrimitiveLongChangeSet();
+
+    PrimitiveLongChangeSet closingTriggerIds() { return closingTriggerIds; }
+
+    PrimitiveLongChangeSet collectClosingTriggerIds() {
+        closingTriggerIds.clear();
+        selectClosingTriggers(id -> {
+            Math.incrementExact(owner.runtimeState.triggerOrder(id).revision());
+            closingTriggerIds.add(id);
+        });
+        Math.addExact(owner.runtimeState.revision(), closingTriggerIds.size());
+        return closingTriggerIds;
+    }
+
     TriggerOrderCommands(TradingCoreRuntime owner) { this.owner = owner; }
 
     void initializeTriggerScan(com.surprising.aeron.protocol.ApplyMarkPriceCommand command) {
@@ -32,101 +47,168 @@ final class TriggerOrderCommands {
                 command.generatedAtEpochMillis()).withTriggerOcoProgress(0, 0));
     }
 
-    void evaluatePendingTriggerScan(String symbol, int maxWork) {
+    /** One bounded page cursor; account mutations use the same permanent Lane tasks as explicit triggers. */
+    java.util.function.BooleanSupplier pendingTriggerScan(String symbol, int maxWork) {
         Integer symbolId = owner.identities.findSymbolId(symbol);
         RiskScanRuntime scan = symbolId == null ? null : owner.runtimeState.riskScan(symbolId);
-        if (scan == null || scan.triggerComplete()) return;
-        long markPriceTicks = scan.triggerMarkPriceTicks();
-        long triggeredAt = scan.triggerGeneratedAtEpochMillis();
-        UUID commandId = UUID.nameUUIDFromBytes((owner.productLine.name() + ":MARK_PRICE:" + symbol + ":"
-                + scan.priceSequence()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        int remaining = Math.min(maxWork, TradingCoreRuntime.DEFAULT_TRIGGER_SCAN_BATCH_SIZE);
-        if (scan.triggerOcoOrderId() != 0) {
-            var pendingTrigger = owner.runtimeState.triggerOrder(scan.triggerOcoOrderId());
-            if (pendingTrigger == null
-                    || pendingTrigger.status() != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) {
-                scan = scan.withTriggerOcoProgress(0, 0);
-                replaceRiskScan(scan);
-            } else {
-                TradingCoreRuntime.OcoCancellationPage oco = cancelOcoSiblings(pendingTrigger,
-                        scan.triggerOcoCursor() == 0 ? Long.MAX_VALUE : scan.triggerOcoCursor(), remaining);
-                remaining -= oco.workUnits();
-                if (!oco.complete()) {
-                    replaceRiskScan(scan.withTriggerOcoProgress(pendingTrigger.triggerOrderId(), oco.nextCursor()));
-                    return;
+        if (scan == null || scan.triggerComplete()) return () -> true;
+        return new PendingTriggerScan(symbol, scan, Math.min(maxWork, DEFAULT_TRIGGER_SCAN_BATCH_SIZE));
+    }
+
+    void evaluatePendingTriggerScan(String symbol, int maxWork) {
+        var work = pendingTriggerScan(symbol, maxWork);
+        if (!work.getAsBoolean()) throw new IllegalStateException("asynchronous trigger scan requires continuation");
+    }
+
+    private final class PendingTriggerScan implements java.util.function.BooleanSupplier {
+        private final String symbol;
+        private final UUID commandId;
+        private RiskScanRuntime scan;
+        private int remaining;
+        private TriggerOrderIndex.TriggerCandidatePage page;
+        private int candidate;
+        private boolean ocoComplete, finished;
+        private java.util.function.BooleanSupplier pending;
+
+        PendingTriggerScan(String symbol, RiskScanRuntime scan, int remaining) {
+            this.symbol = symbol;
+            this.scan = scan;
+            this.remaining = remaining;
+            commandId = UUID.nameUUIDFromBytes((owner.productLine.name() + ":MARK_PRICE:" + symbol + ":"
+                    + scan.priceSequence()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+
+        @Override public boolean getAsBoolean() {
+            for (;;) {
+                if (pending != null) {
+                    if (!pending.getAsBoolean()) return false;
+                    pending = null;
                 }
-                scan = scan.withTriggerOcoProgress(0, 0);
-                replaceRiskScan(scan);
-            }
-        }
-        if (remaining <= 0) return;
-        var page = owner.triggerOrderIndex.candidatesPage(symbol, markPriceTicks, scan.triggerPhase(),
-                scan.triggerPriceCursor(), scan.triggerOrderCursor(), scan.triggerUpperId(), remaining);
-        if (page.ids().isEmpty() && page.complete()) {
-            replaceRiskScan(scan.withTriggerProgress(true, page.nextPhase(), page.nextPriceCursor(),
-                    page.nextOrderCursor(), scan.triggerUpperId(), markPriceTicks, triggeredAt));
-            return;
-        }
-        for (long triggerOrderId : page.ids()) {
-            var trigger = owner.runtimeState.triggerOrder(triggerOrderId);
-            if (trigger == null || trigger.status() != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) {
-                continue;
-            }
-            if (trigger.expiresAtEpochMillis() > 0 && triggeredAt > 0
-                    && trigger.expiresAtEpochMillis() <= triggeredAt) {
-                expireTriggerOrderRuntime(triggerOrderId, triggeredAt);
-                continue;
-            }
-            boolean triggered;
-            if (trigger.triggerType() == com.surprising.aeron.protocol.CoreTriggerOrderType.TRAILING_STOP) {
-                boolean sell = trigger.side() == com.surprising.aeron.protocol.CoreOrderSide.SELL;
-                if (trigger.activationPriceTicks() > 0
-                        && ((sell && markPriceTicks < trigger.activationPriceTicks())
-                        || (!sell && markPriceTicks > trigger.activationPriceTicks()))) {
+                if (finished) return true;
+                if (page == null) {
+                    if (scan.triggerOcoOrderId() != 0) {
+                        var trigger = owner.runtimeState.triggerOrder(scan.triggerOcoOrderId());
+                        if (trigger != null && trigger.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) {
+                            cancelSiblings(trigger, scan.triggerOcoCursor() == 0 ? Long.MAX_VALUE : scan.triggerOcoCursor(), true);
+                            continue;
+                        }
+                        scan = scan.withTriggerOcoProgress(0, 0);
+                        replaceRiskScan(scan);
+                    }
+                    if (remaining <= 0) return true;
+                    page = owner.triggerOrderIndex.candidatesPage(symbol, scan.triggerMarkPriceTicks(), scan.triggerPhase(),
+                            scan.triggerPriceCursor(), scan.triggerOrderCursor(), scan.triggerUpperId(), remaining);
+                }
+                if (candidate == page.ids().size()) {
+                    replaceRiskScan(scan.withTriggerProgress(page.complete(), page.nextPhase(), page.nextPriceCursor(),
+                            page.nextOrderCursor(), scan.triggerUpperId(), scan.triggerMarkPriceTicks(),
+                            scan.triggerGeneratedAtEpochMillis()).withTriggerOcoProgress(0, 0));
+                    finished = true;
+                    return true;
+                }
+                long id = page.ids().get(candidate);
+                var trigger = owner.runtimeState.triggerOrder(id);
+                if (trigger == null || trigger.status() != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) {
+                    candidate++;
                     continue;
                 }
-                long highest = sell
-                        ? Math.max(trigger.highestPriceTicks(), markPriceTicks)
-                        : trigger.highestPriceTicks();
-                long lowest = sell
-                        ? trigger.lowestPriceTicks()
-                        : trigger.lowestPriceTicks() == 0
-                        ? markPriceTicks
-                        : Math.min(trigger.lowestPriceTicks(), markPriceTicks);
-                long activatedAt = trigger.activatedAtEpochMillis() == 0 ? triggeredAt
-                        : trigger.activatedAtEpochMillis();
-                if (highest != trigger.highestPriceTicks() || lowest != trigger.lowestPriceTicks()
-                        || activatedAt != trigger.activatedAtEpochMillis()) {
-                    updateTriggerTrailingRuntime(triggerOrderId, highest, lowest, activatedAt);
-                    trigger = owner.runtimeState.triggerOrder(triggerOrderId);
+                long price = scan.triggerMarkPriceTicks(), at = scan.triggerGeneratedAtEpochMillis();
+                if (trigger.expiresAtEpochMillis() > 0 && at > 0 && trigger.expiresAtEpochMillis() <= at) {
+                    candidate++;
+                    mutate(trigger.userId(), () -> RuntimeCommandProcessor.expireTriggerOrder(owner.runtimeState, id, at), null);
+                    continue;
                 }
-                long base = sell ? trigger.highestPriceTicks() : trigger.lowestPriceTicks();
-                long delta = trailingDelta(base, trigger.callbackRatePpm());
-                long threshold = sell ? Math.subtractExact(base, delta) : Math.addExact(base, delta);
-                triggered = trigger.activatedAtEpochMillis() > 0
-                        && (sell ? markPriceTicks <= threshold : markPriceTicks >= threshold);
-            } else {
-                triggered = trigger.triggerCondition()
-                        == com.surprising.aeron.protocol.CoreTriggerCondition.GREATER_OR_EQUAL
-                        ? markPriceTicks >= trigger.triggerPriceTicks()
-                        : markPriceTicks <= trigger.triggerPriceTicks();
+                if (trigger.triggerType() == com.surprising.aeron.protocol.CoreTriggerOrderType.TRAILING_STOP) {
+                    boolean sell = trigger.side() == CoreOrderSide.SELL;
+                    if (trigger.activationPriceTicks() > 0 && ((sell && price < trigger.activationPriceTicks())
+                            || (!sell && price > trigger.activationPriceTicks()))) {
+                        candidate++;
+                        continue;
+                    }
+                    long highest = sell ? Math.max(trigger.highestPriceTicks(), price) : trigger.highestPriceTicks();
+                    long lowest = sell ? trigger.lowestPriceTicks()
+                            : trigger.lowestPriceTicks() == 0 ? price : Math.min(trigger.lowestPriceTicks(), price);
+                    long activated = trigger.activatedAtEpochMillis() == 0 ? at : trigger.activatedAtEpochMillis();
+                    if (highest != trigger.highestPriceTicks() || lowest != trigger.lowestPriceTicks()
+                            || activated != trigger.activatedAtEpochMillis()) {
+                        mutate(trigger.userId(), () -> RuntimeCommandProcessor.updateTriggerTrailing(
+                                owner.runtimeState, id, highest, lowest, activated), null);
+                        continue;
+                    }
+                }
+                if (!isTriggerConditionSatisfied(trigger, price)) {
+                    candidate++;
+                    continue;
+                }
+                if (!ocoComplete) {
+                    if (remaining <= 0) {
+                        replaceRiskScan(scan.withTriggerOcoProgress(id, Long.MAX_VALUE));
+                        finished = true;
+                        return true;
+                    }
+                    cancelSiblings(trigger, Long.MAX_VALUE, false);
+                    continue;
+                }
+                ocoComplete = false;
+                candidate++;
+                if (owner.runtimeState.asynchronousCommands()) {
+                    pending = beginTriggerExecution(id, scan.priceSequence(), price, at, commandId, false);
+                } else {
+                    executeTriggerOrder(id, scan.priceSequence(), price, at, commandId, false);
+                }
             }
-            if (!triggered) continue;
-            if (remaining <= 0) {
-                replaceRiskScan(scan.withTriggerOcoProgress(triggerOrderId, Long.MAX_VALUE));
-                return;
-            }
-            TradingCoreRuntime.OcoCancellationPage oco = cancelOcoSiblings(trigger, Long.MAX_VALUE, remaining);
-            remaining -= oco.workUnits();
-            if (!oco.complete()) {
-                replaceRiskScan(scan.withTriggerOcoProgress(triggerOrderId, oco.nextCursor()));
-                return;
-            }
-            executeTriggerOrder(triggerOrderId, scan.priceSequence(), markPriceTicks, triggeredAt, commandId, false);
         }
-        replaceRiskScan(scan.withTriggerProgress(page.complete(), page.nextPhase(), page.nextPriceCursor(),
-                page.nextOrderCursor(), scan.triggerUpperId(), markPriceTicks, triggeredAt)
-                .withTriggerOcoProgress(0, 0));
+
+        private void cancelSiblings(com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger,
+                                    long cursor, boolean resumed) {
+            // The control fence keeps the Owner index stable until Lane publication is collected.
+            // Pass the bounded ID range, not a copied list of sibling identities.
+            var siblings = owner.triggerOrderIndex.ocoSiblings(trigger).descendingSet();
+            int count = 0;
+            long last = cursor;
+            boolean more = false;
+            for (long id : siblings) {
+                if (id == trigger.triggerOrderId() || id >= cursor) continue;
+                if (count == remaining) { more = true; break; }
+                count++;
+                last = id;
+            }
+            boolean complete = !more;
+            int work = count;
+            long next = last;
+            Runnable collect = () -> {
+                remaining -= work;
+                if (!complete) {
+                    scan = scan.withTriggerOcoProgress(trigger.triggerOrderId(), next);
+                    replaceRiskScan(scan);
+                    finished = true;
+                } else if (resumed) {
+                    scan = scan.withTriggerOcoProgress(0, 0);
+                    replaceRiskScan(scan);
+                } else ocoComplete = true;
+            };
+            if (work == 0) { collect.run(); return; }
+            mutate(trigger.userId(), () -> {
+                boolean changed = false;
+                for (long id : siblings) {
+                    if (id == trigger.triggerOrderId() || id >= cursor) continue;
+                    if (id < next) break;
+                    var sibling = owner.runtimeState.triggerOrder(id);
+                    if (sibling != null && sibling.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING)
+                        changed |= RuntimeCommandProcessor.cancelTriggerOrder(owner.runtimeState, trigger.userId(), id);
+                }
+                return changed;
+            }, collect);
+        }
+
+        private void mutate(long userId, java.util.function.BooleanSupplier mutation, Runnable collect) {
+            if (owner.runtimeState.asynchronousCommands()) pending = beginTriggerMutation(userId, mutation, collect);
+            else {
+                if (owner.runtimeState.executeUserSettlement(userId, mutation::getAsBoolean))
+                    owner.commits.requestCommitPublication();
+                if (collect != null) collect.run();
+            }
+        }
     }
 
     void replaceRiskScan(RiskScanRuntime scan) {
@@ -191,20 +273,8 @@ final class TriggerOrderCommands {
 
     void executeTriggerOrder(long triggerOrderId, long triggerSequence, long triggeredPriceTicks,
                                      long triggeredAtEpochMillis, UUID commandId, boolean cancelOco) {
-        var trigger = owner.runtimeState.triggerOrder(triggerOrderId);
-        if (trigger == null) {
-            throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND", "trigger order not found");
-        }
-        if (trigger.status() != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) {
-            return;
-        }
-        Integer triggerSymbolId = owner.identities.findSymbolId(trigger.symbol());
-        var mark = triggerSymbolId == null ? null : owner.runtimeState.markPrice(triggerSymbolId);
-        if (mark != null && (mark.priceSequence() != triggerSequence
-                || mark.markPriceTicks() != triggeredPriceTicks
-                || !isTriggerConditionSatisfied(trigger, triggeredPriceTicks))) {
-            throw new CoreStateRejectedException("TRIGGER_CONDITION_NOT_MET", "trigger price is not executable");
-        }
+        var trigger = executableTrigger(triggerOrderId, triggerSequence, triggeredPriceTicks);
+        if (trigger == null) return;
         if (cancelOco) owner.cancelAllOcoSiblings(trigger);
         if (RuntimeCommandProcessor.claimTriggerOrder(owner.runtimeState, triggerOrderId, triggerSequence,
                 triggeredPriceTicks, triggeredAtEpochMillis)) {
@@ -218,14 +288,8 @@ final class TriggerOrderCommands {
                     triggeredAtEpochMillis);
             return;
         }
-        long childOrderId = triggerChildOrderId(triggerOrderId, owner.runtimeState);
-        boolean spot = instrument.contractType() == com.surprising.instrument.api.model.ContractType.SPOT;
-        long limitPriceTicks = trigger.orderType() == com.surprising.aeron.protocol.CoreOrderType.LIMIT
-                ? (trigger.priceTicks() > 0 ? trigger.priceTicks() : triggeredPriceTicks) : 0;
-        var place = new com.surprising.aeron.protocol.PlaceOrderCommand(
-                childOrderId, trigger.symbol(), trigger.instrumentChangeId(), trigger.side(), limitPriceTicks,
-                trigger.quantitySteps(), !spot, trigger.marginMode(), trigger.positionSide(),
-                trigger.orderType(), trigger.timeInForce(), false, "TRIGGER:" + triggerOrderId);
+        var place = childOrder(trigger, triggeredPriceTicks, instrument);
+        long childOrderId = place.orderId();
         owner.requireOrderIdentityAvailable(trigger.userId(), place);
         try {
             long childCoreSequence = Math.addExact(Math.addExact(owner.appliedCommandCount, 2), owner.admissions.queuedMatching.size());
@@ -238,6 +302,30 @@ final class TriggerOrderCommands {
         owner.resultBuilder.markOrderChanged(childOrderId);
         owner.queueTriggerMatching(trigger, triggerSequence, triggeredPriceTicks, triggeredAtEpochMillis, commandId, childOrderId);
         owner.resultBuilder.commandOrderViews = TradingCoreRuntime.appendDistinct(owner.resultBuilder.commandOrderViews, List.of(owner.runtimeOrderView(childOrderId)));
+    }
+
+    private com.surprising.aeron.service.state.model.CoreTriggerOrderState executableTrigger(
+            long triggerId, long sequence, long price) {
+        var trigger = owner.runtimeState.triggerOrder(triggerId);
+        if (trigger == null) throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND", "trigger order not found");
+        if (trigger.status() != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) return null;
+        Integer symbolId = owner.identities.findSymbolId(trigger.symbol());
+        var mark = symbolId == null ? null : owner.runtimeState.markPrice(symbolId);
+        if (mark != null && (mark.priceSequence() != sequence || mark.markPriceTicks() != price
+                || !isTriggerConditionSatisfied(trigger, price)))
+            throw new CoreStateRejectedException("TRIGGER_CONDITION_NOT_MET", "trigger price is not executable");
+        return trigger;
+    }
+
+    private PlaceOrderCommand childOrder(com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger,
+            long price, com.surprising.aeron.service.state.CoreInstrumentState instrument) {
+        long limit = trigger.orderType() == com.surprising.aeron.protocol.CoreOrderType.LIMIT
+                ? (trigger.priceTicks() > 0 ? trigger.priceTicks() : price) : 0;
+        return new PlaceOrderCommand(triggerChildOrderId(trigger.triggerOrderId(), owner.runtimeState),
+                trigger.symbol(), trigger.instrumentChangeId(), trigger.side(), limit, trigger.quantitySteps(),
+                instrument.contractType() != com.surprising.instrument.api.model.ContractType.SPOT,
+                trigger.marginMode(), trigger.positionSide(), trigger.orderType(), trigger.timeInForce(), false,
+                "TRIGGER:" + trigger.triggerOrderId());
     }
 
     void cancelTriggerOrderRuntime(long userId, long triggerOrderId) {
@@ -320,6 +408,25 @@ final class TriggerOrderCommands {
             throw new CoreStateRejectedException("DUPLICATE_CLIENT_ALGO_ORDER_ID",
                     "terminal algo order identity is retained");
         }
+        if (owner.runtimeState.asynchronousCommands()) {
+            var current = owner.runtimeState.algoOrder(algo.algoOrderId());
+            if (current != null && current.userId() != message.header().userId())
+                throw new CoreStateRejectedException("ALGO_ORDER_OWNER_MISMATCH", "algo order belongs to another user");
+            int symbolId = owner.identities.symbolId(algo.symbol());
+            int lane = owner.runtimeState.topology().accountLaneId(message.header().userId());
+            owner.runtimeState.dispatchControlLanes(1L << lane, ignored -> {
+                RuntimeCommandProcessor.upsertAlgoOrder(owner.runtimeState, message.header().userId(), algo, symbolId);
+                return owner.runtimeState.algoOrder(algo.algoOrderId());
+            });
+            owner.deferControl(() -> {
+                if (!owner.runtimeState.pollControlLanes()) return false;
+                owner.runtimeState.publishAlgoOrder((com.surprising.aeron.service.state.model.CoreAlgoOrderState)
+                        owner.runtimeState.controlLaneResult(lane));
+                owner.commits.requestCommitPublication();
+                return true;
+            });
+            return;
+        }
         RuntimeCommandProcessor.upsertAlgoOrder(owner.runtimeState, owner.identities,
                 message.header().userId(), algo);
         owner.commits.requestCommitPublication();
@@ -329,6 +436,24 @@ final class TriggerOrderCommands {
         RuntimeCommandProcessor.updateCancelAllAfter(owner.runtimeState, message.header().userId(),
                 com.surprising.aeron.protocol.CoreCancelAllAfterCodec.decodeCommand(message.payloadUnsafe()));
         owner.commits.requestCommitPublication();
+    }
+
+    private void deferTriggerMutation(long userId, java.util.function.BooleanSupplier mutation,
+                                      Runnable collect) {
+        owner.deferControl(beginTriggerMutation(userId, mutation, collect));
+    }
+
+    private java.util.function.BooleanSupplier beginTriggerMutation(long userId,
+            java.util.function.BooleanSupplier mutation, Runnable collect) {
+        int lane = owner.runtimeState.topology().accountLaneId(userId);
+        owner.runtimeState.dispatchControlLanes(1L << lane, ignored -> mutation.getAsBoolean());
+        return () -> {
+            if (!owner.runtimeState.pollControlLanes()) return false;
+            if (Boolean.TRUE.equals(owner.runtimeState.controlLaneResult(lane)))
+                owner.commits.requestCommitPublication();
+            if (collect != null) collect.run();
+            return true;
+        };
     }
 
     void executePlaceTriggerOrder(CoreMessage message, long clusterTimestamp) {
@@ -345,6 +470,15 @@ final class TriggerOrderCommands {
         int symbolId = owner.identities.symbolId(trigger.symbol());
         long positionKey = preparedTriggerPositionKey(message.header().userId(), trigger);
         boolean instrumentSettled = owner.runtimeState.treasury().lifecycleSettlement(symbolId) != 0;
+        if (owner.runtimeState.asynchronousCommands()) {
+            deferTriggerMutation(message.header().userId(), () -> {
+                RuntimeCommandProcessor.upsertTriggerOrder(owner.runtimeState,
+                        message.header().userId(), trigger, symbolId, positionKey, instrumentSettled);
+                return true;
+            }, () -> owner.resultBuilder.commandTriggerOrderView =
+                    owner.runtimeState.triggerOrder(trigger.triggerOrderId()).view());
+            return;
+        }
         owner.runtimeState.executeUserSettlement(message.header().userId(), () -> {
             RuntimeCommandProcessor.upsertTriggerOrder(owner.runtimeState,
                     message.header().userId(), trigger, symbolId, positionKey, instrumentSettled);
@@ -356,39 +490,160 @@ final class TriggerOrderCommands {
 
     void executeCancelTriggerOrder(CoreMessage message, long clusterTimestamp) {
         long triggerOrderId = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeId(message.payloadUnsafe());
+        if (owner.runtimeState.asynchronousCommands()) {
+            deferTriggerMutation(message.header().userId(), () ->
+                    RuntimeCommandProcessor.cancelTriggerOrder(owner.runtimeState, message.header().userId(), triggerOrderId), null);
+            return;
+        }
         cancelTriggerOrderRuntime(message.header().userId(), triggerOrderId);
     }
 
     void executeClaimTriggerOrder(CoreMessage message, long clusterTimestamp) {
         long[] claim = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeClaim(message.payloadUnsafe());
+        if (owner.runtimeState.asynchronousCommands()) {
+            deferTriggerMutation(requireTriggerOwner(claim[0]), () ->
+                    RuntimeCommandProcessor.claimTriggerOrder(owner.runtimeState, claim[0], claim[1], claim[2], claim[3]), null);
+            return;
+        }
         claimTriggerOrderRuntime(claim[0], claim[1], claim[2], claim[3]);
     }
 
     void executeCompleteTriggerOrder(CoreMessage message, long clusterTimestamp) {
         long[] complete = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeComplete(message.payloadUnsafe());
+        if (owner.runtimeState.asynchronousCommands()) {
+            deferTriggerMutation(requireTriggerOwner(complete[0]), () ->
+                    RuntimeCommandProcessor.completeTriggerOrder(owner.runtimeState, complete[0], complete[1] == 1, complete[2], "", complete[3]), null);
+            return;
+        }
         completeTriggerOrderRuntime(complete[0], complete[1] == 1, complete[2], "", complete[3]);
     }
 
     void executeUpdateTriggerTrailing(CoreMessage message, long clusterTimestamp) {
         long[] trailing = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeTrailing(message.payloadUnsafe());
+        if (owner.runtimeState.asynchronousCommands()) {
+            deferTriggerMutation(requireTriggerOwner(trailing[0]), () ->
+                    RuntimeCommandProcessor.updateTriggerTrailing(owner.runtimeState, trailing[0], trailing[1], trailing[2], trailing[3]), null);
+            return;
+        }
         updateTriggerTrailingRuntime(trailing[0], trailing[1], trailing[2], trailing[3]);
     }
 
     void executeExpireTriggerOrder(CoreMessage message, long clusterTimestamp) {
         long[] lifecycle = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeLifecycle(message.payloadUnsafe());
+        if (owner.runtimeState.asynchronousCommands()) {
+            deferTriggerMutation(requireTriggerOwner(lifecycle[0]), () ->
+                    RuntimeCommandProcessor.expireTriggerOrder(owner.runtimeState, lifecycle[0], lifecycle[1]), null);
+            return;
+        }
         expireTriggerOrderRuntime(lifecycle[0], lifecycle[1]);
     }
 
     void executeRetryTriggerOrder(CoreMessage message, long clusterTimestamp) {
         long[] lifecycle = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeLifecycle(message.payloadUnsafe());
+        if (owner.runtimeState.asynchronousCommands()) {
+            deferTriggerMutation(requireTriggerOwner(lifecycle[0]), () ->
+                    RuntimeCommandProcessor.retryTriggerOrder(owner.runtimeState, lifecycle[0], lifecycle[1], message.header().submittedAtEpochMillis()), null);
+            return;
+        }
         retryTriggerOrderRuntime(lifecycle[0], lifecycle[1], message.header().submittedAtEpochMillis());
     }
 
     void executeExecuteTriggerOrder(CoreMessage message, long clusterTimestamp) {
-executeTriggerOrder(message);
+        if (!owner.runtimeState.asynchronousCommands()) {
+            executeTriggerOrder(message);
+            return;
+        }
+        long[] execute = com.surprising.aeron.protocol.CoreTriggerOrderCodec.decodeExecute(message.payloadUnsafe());
+        long triggerId = execute[0], triggerSequence = execute[1], price = execute[2], triggeredAt = execute[3];
+        owner.deferControl(beginTriggerExecution(triggerId, triggerSequence, price, triggeredAt,
+                message.header().commandId(), true));
+    }
+
+    private java.util.function.BooleanSupplier beginTriggerExecution(long triggerId, long triggerSequence,
+            long price, long triggeredAt, UUID commandId, boolean cancelOco) {
+        var trigger = executableTrigger(triggerId, triggerSequence, price);
+        if (trigger == null) return () -> true;
+        var instrument = owner.runtimeState.instrument(trigger.symbol());
+        com.surprising.aeron.service.state.ResolvedPlaceOrder resolved = null;
+        String failureReason = "";
+        if (instrument == null || instrument.changeId() <= 0 || trigger.instrumentChangeId() <= 0
+                || instrument.changeId() != trigger.instrumentChangeId()) {
+            failureReason = instrument == null ? "INSTRUMENT_NOT_FOUND" : "STALE_INSTRUMENT_CHANGE_ID";
+        } else {
+            var place = childOrder(trigger, price, instrument);
+            owner.requireOrderIdentityAvailable(trigger.userId(), place);
+            try {
+                resolved = com.surprising.aeron.service.state.CoreOrderDecisionResolver.resolve(
+                        owner.runtimeState, owner.identities, trigger.userId(), place, owner.currentClusterTimestamp);
+            } catch (CoreStateRejectedException rejected) { failureReason = rejected.code(); }
+        }
+        var order = resolved;
+        String preparedFailure = failureReason;
+        var identity = order == null ? null : com.surprising.aeron.service.state.RuntimeOrderAdmission.admissionIdentity(
+                owner.runtimeState, owner.identities, trigger.userId(), order);
+        int assetId = order == null ? 0 : owner.identities.assetId(order.reservationAsset());
+        long openInterest = owner.openInterestIndex.openInterestSteps(trigger.symbol());
+        long childSequence = Math.addExact(Math.addExact(owner.appliedCommandCount, 2), owner.admissions.queuedMatching.size());
+        // The control fence keeps this Owner index unchanged until the Lane finishes. No ID copy
+        // or global index mutation is needed on the Lane; publication follows task completion.
+        var siblings = cancelOco ? owner.triggerOrderIndex.ocoSiblings(trigger).descendingSet() : java.util.Collections.<Long>emptySet();
+        int laneId = owner.runtimeState.topology().accountLaneId(trigger.userId());
+        var clientKey = order == null ? null : owner.identities.prepareClientKey(trigger.userId(), order.clientOrderId());
+        try {
+            owner.runtimeState.dispatchControlLanes(1L << laneId, ignored -> {
+                for (long siblingId : siblings) {
+                    if (siblingId == triggerId) continue;
+                    var sibling = owner.runtimeState.triggerOrder(siblingId);
+                    if (sibling != null && sibling.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING)
+                        RuntimeCommandProcessor.cancelTriggerOrder(owner.runtimeState, trigger.userId(), siblingId);
+                }
+                RuntimeCommandProcessor.claimTriggerOrder(owner.runtimeState, triggerId, triggerSequence, price, triggeredAt);
+                if (!preparedFailure.isEmpty()) {
+                    RuntimeCommandProcessor.completeTriggerOrder(owner.runtimeState, triggerId, false, 0, preparedFailure, triggeredAt);
+                    return false;
+                }
+                try {
+                    RuntimeCommandProcessor.placeTriggerChildInLane(owner.runtimeState, trigger.userId(), order,
+                            commandId, childSequence, openInterest, identity, clientKey.key(), assetId);
+                    return true;
+                } catch (CoreStateRejectedException rejected) {
+                    RuntimeCommandProcessor.completeTriggerOrder(owner.runtimeState, triggerId, false, 0, rejected.code(), triggeredAt);
+                    return false;
+                }
+            });
+        } catch (RuntimeException | Error failure) {
+            if (clientKey != null && clientKey.allocated())
+                owner.identities.rollbackPreparedClientKey(trigger.userId(), order.clientOrderId(), clientKey);
+            throw failure;
+        }
+        return () -> {
+            try {
+                if (!owner.runtimeState.pollControlLanes()) return false;
+            } catch (RuntimeException | Error failure) {
+                if (clientKey != null && clientKey.allocated())
+                    owner.identities.rollbackPreparedClientKey(trigger.userId(), order.clientOrderId(), clientKey);
+                throw failure;
+            }
+            owner.commits.requestCommitPublication();
+            if (Boolean.TRUE.equals(owner.runtimeState.controlLaneResult(laneId))) {
+                owner.runtimeState.collectControlReservation(trigger.userId(), order.orderId(), childSequence);
+                owner.resultBuilder.markUserChanged(trigger.userId());
+                owner.resultBuilder.markOrderChanged(order.orderId());
+                owner.queueTriggerMatching(trigger, triggerSequence, price, triggeredAt, commandId, order.orderId());
+                owner.resultBuilder.commandOrderViews = TradingCoreRuntime.appendDistinct(owner.resultBuilder.commandOrderViews,
+                        List.of(owner.runtimeOrderView(order.orderId())));
+            } else if (clientKey != null && clientKey.allocated()) {
+                owner.identities.rollbackPreparedClientKey(trigger.userId(), order.clientOrderId(), clientKey);
+            }
+            return true;
+        };
     }
 
     void cancelTriggersForClosedPositions() {
+        selectClosingTriggers(id -> cancelTriggerOrderRuntime(requireTriggerOwner(id), id));
+    }
+
+    private void selectClosingTriggers(java.util.function.LongConsumer selected) {
         owner.seedChangeAccumulators();
         if (!owner.runtimeState.hasChangedPositions()) return;
         org.eclipse.collections.api.iterator.LongIterator changedPositions =
@@ -399,18 +654,15 @@ executeTriggerOrder(message);
             if (previous == null || previous.signedQuantitySteps() == 0) continue;
             var current = owner.runtimeState.position(positionKey);
             if (current != null && current.signedQuantitySteps() != 0) continue;
-            var identity = owner.identities.positionIdentity(positionKey);
+            String symbol = owner.identities.symbol(previous.symbolId());
             var previousMarginMode = previous.marginMode();
-            for (long triggerOrderId : owner.triggerOrderIndex.ids(identity.userId())) {
+            for (long triggerOrderId : owner.triggerOrderIndex.ids(previous.userId())) {
                 var trigger = owner.runtimeState.triggerOrder(triggerOrderId);
                 if (trigger == null || trigger.status()
                         != com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING) continue;
-                String triggerPositionIdentity = trigger.positionSide()
-                        == com.surprising.aeron.protocol.CorePositionSide.NET
-                        ? trigger.symbol() : trigger.symbol() + ':' + trigger.positionSide().name();
-                if (!identity.positionKey().equals(triggerPositionIdentity)
+                if (!symbol.equals(trigger.symbol()) || trigger.positionSide() != previous.positionSide()
                         || trigger.marginMode() != previousMarginMode) continue;
-                cancelTriggerOrderRuntime(identity.userId(), triggerOrderId);
+                selected.accept(triggerOrderId);
             }
         }
     }

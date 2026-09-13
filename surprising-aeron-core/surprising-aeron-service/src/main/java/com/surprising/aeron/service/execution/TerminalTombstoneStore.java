@@ -140,7 +140,9 @@ final class TerminalTombstoneStore {
     private void indexClient(int slot) {
         if (clients[slot].isEmpty()) return;
         int bucket = bucket(types[slot], users[slot], clients[slot]);
-        unlinkClient(types[slot], users[slot], clients[slot], bucket);
+        // A newly allocated FIFO slot cannot already be present in the client chain. The
+        // existing-slot path unlinks before reaching here; avoid a second bucket traversal
+        // for every newly retained terminal order.
         next[slot] = buckets[bucket]; buckets[bucket] = slot + 1; indexed[slot] = true;
     }
     private void grow() {

@@ -37,6 +37,8 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     }
     /** 所属用户 Lane 编码的不可变响应；事件完成回执发布后才允许 Owner 读取。 */
     byte[] preparedResponse;
+    /** Owner-only ordering links; never read by Matcher/Lane and detached before pool reuse. */
+    OrderBatchPending previousBatch, nextBatch;
 
     @Override public void prepareResponse() {
         // 部分拒单、顺序改单可能没有本次 Lane 结果，仍需提交点补齐其查询语义。
@@ -211,6 +213,11 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     /** 本批实际涉及的账户 Lane，用于和预期范围核对。 */
     long actualLaneMask;
     /** 当前批最近完成的撮合结果，用于延续序号证据。 */
+    // At most one sequential item is awaiting account publication; no copied item state.
+    com.surprising.aeron.service.state.MatcherSettlementEvent itemSettlementEvent;
+    java.util.function.BooleanSupplier itemAdmission;
+    long itemAdmissionRevision;
+    com.surprising.aeron.service.state.LaneCommitEvent laneCommitEvent;
     com.surprising.aeron.service.matching.CoreMatchingResult lastMatchingResult;
     /** 本批准入订单增量索引，供后续批量项检查前面项目产生的订单依赖。 */
     BatchAdmissionOrderIndex admissionOrderIndex;
@@ -350,6 +357,10 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         lifecycleFlags = 0;
         actualLaneMask = 0;
         lastMatchingResult = null;
+        itemSettlementEvent = null;
+        itemAdmission = null;
+        itemAdmissionRevision = 0;
+        laneCommitEvent = null;
         if (admissionOrderIndex != null) admissionOrderIndex.clear();
         kind = null;
         clusterTimestamp = 0;
@@ -394,11 +405,13 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     }
 
     boolean hasPendingLaneWork() {
-        return cancelEvent != null && !cancellationsCollected()
+        return laneCommitEvent != null || cancelEvent != null && !cancellationsCollected()
                 || settlementEvent != null && !settlementsCollected();
     }
 
     boolean laneWorkComplete() {
+        if (itemSettlementEvent != null && !itemSettlementEvent.complete()) return false;
+        if (laneCommitEvent != null && !laneCommitEvent.complete()) return false;
         if (cancelEvent != null && !cancellationsCollected() && !cancelEvent.complete()) return false;
         if (settlementEvent != null && !settlementsCollected() && !settlementEvent.complete()) return false;
         return true;

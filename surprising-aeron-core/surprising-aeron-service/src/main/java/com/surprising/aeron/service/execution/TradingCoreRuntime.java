@@ -365,7 +365,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         this.resultLedger = new CommandResultLedger(commandResults);
         this.lastSourceSequences = lastSourceSequences;
         admissions.pendingLifecycleScopes = new LinkedHashMap<>();
-        batches.pendingOrderBatches = new LinkedHashMap<>();
         admissions.deferredMatching = new LinkedHashMap<>();
         snapshots.lastSnapshotId = matcherSnapshot == null ? 0 : matcherSnapshot.snapshotId();
         this.exportState = exportState;
@@ -395,7 +394,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         this.matcherPipeline = new MatcherPipelineGroup(
                 matchingAdapter.topology().matchingEngineCount(),
                 Math.min(matchingAdapter.topology().matcherWindowSize(),
-                        matchingAdapter.topology().matchingCompletionCapacity()), false);
+                        matchingAdapter.topology().matchingCompletionCapacity()), false, laneCommandContexts);
         snapshots.matcherSnapshotCapture = matcherSnapshotCapture == null
                 ? snapshots::captureMatcherSnapshot : matcherSnapshotCapture;
         if (snapshotEncoder == null) {
@@ -480,10 +479,17 @@ public final class TradingCoreRuntime implements AutoCloseable {
     /** 全局元数据更新及 Lane 控制任务派发，不要求事先停驻所有账户。 */
     boolean requiresOwnerLaneAccessForPreparation(CoreMessage message) {
         return switch (message.header().messageType()) {
-            case ADJUST_BALANCE, TRANSFER_IN, TRANSFER_OUT, COMPLETE_TRANSFER, UPDATE_LEVERAGE, UPDATE_POSITION_MODE, ADJUST_POSITION_MARGIN, APPLY_FUNDING, APPLY_MARK_PRICE,
+            // These commands only modify Owner metadata, never account state.
+            case PROBE_INCREMENT, VERIFY_STATE_HASH, UPDATE_CANCEL_ALL_AFTER -> false;
+            case UPSERT_ALGO_ORDER, EXECUTE_TRIGGER_ORDER -> false;
+            case PLACE_TRIGGER_ORDER, CANCEL_TRIGGER_ORDER, CLAIM_TRIGGER_ORDER, COMPLETE_TRIGGER_ORDER,
+                    UPDATE_TRIGGER_TRAILING, EXPIRE_TRIGGER_ORDER, RETRY_TRIGGER_ORDER,
+                    ADJUST_BALANCE, TRANSFER_IN, TRANSFER_OUT, COMPLETE_TRANSFER, UPDATE_LEVERAGE, UPDATE_POSITION_MODE, ADJUST_POSITION_MARGIN, APPLY_FUNDING, APPLY_MARK_PRICE,
                     UPDATE_RISK_SCAN_CONTROL, ADJUST_INSURANCE_FUND, UPSERT_INSTRUMENT,
                     UPDATE_INSTRUMENT_MAINTENANCE, UPSERT_FEE_POLICY -> false;
-            case CONTINUE_RISK_SCAN -> runtimeState.firstRiskIncompleteScan() == null;
+            case PLACE_ORDER, CANCEL_ORDER, REPLACE_ORDER, AMEND_ORDER, CANCEL_ORDER_BATCH -> false;
+            case CONTINUE_RISK_SCAN, AMEND_ORDER_BATCH, PLACE_ORDER_BATCH, EXECUTE_ADL, RESOLVE_LIQUIDATION,
+                    EXECUTE_LIQUIDATION, EXECUTE_LIQUIDATION_BATCH -> false;
             default -> true;
         };
     }
@@ -559,7 +565,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                     int shard = -1;
                     for (var order : window.decoded(message).cancelOrderBatch().orders()) {
                         if (!addCancelScope(user, order.orderId(), window)) return false;
-                        int current = window.decoded(message).matcherShard(matchingAdapter, activeOrderIndex.activeOrder(order.orderId()).symbol());
+                        int current = window.decoded(message).matcherShard(matchingAdapter, activeOrderIndex.activeOrderSymbol(order.orderId()));
                         if (shard >= 0 && current != shard) return false;
                         shard = current;
                     }
@@ -586,9 +592,11 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     boolean addCancelScope(long user, long orderId, ClusterCommandWindow window) {
-        var order = activeOrderIndex.activeOrder(orderId);
+        var order = activeOrderIndex.activeOrderRuntime(orderId);
         if (order == null || order.userId() != user) return false;
-        window.candidateOrder(orderId, order.symbol(), null, 0);
+        // Cancellation only removes this order's liquidity. Its identity/account stay fenced;
+        // unrelated same-side or non-crossing orders need not drain the entire symbol.
+        window.candidateOrder(orderId, activeOrderIndex.activeOrderSymbol(orderId), order.side(), order.matchingPriceTicks());
         return true;
     }
 
@@ -1064,9 +1072,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
             resultCode = CoreResultCode.INVALID_COMMAND;
         }
         if (controlContinuation == null && runtimeState.asynchronousCommands()
-                && (message.header().messageType() == CoreMessageType.APPLY_FUNDING
-                    || message.header().messageType() == CoreMessageType.CONTINUE_RISK_SCAN)) {
-            // 校验失败或空任务也要在账户交接完成后进入统一提交/回滚路径。
+                && !clusterPipelineAdmission) {
+            // 控制命令统一通过续步提交；失败时账户回滚也在所属 Lane 执行。
             controlCompletionStatus = status;
             controlCompletionCode = resultCode;
         }
@@ -1100,21 +1107,33 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 return releaseAdmission(commandAdmission, rejected(CoreResultCode.INVALID_MESSAGE));
             }
             if (status == ResponseStatus.APPLIED) {
-                triggers.cancelTriggersForClosedPositions();
+                if (runtimeState.asynchronousCommands()) {
+                    try {
+                        if (!triggers.collectClosingTriggerIds().isEmpty()) commits.requestCommitPublication();
+                    }
+                    catch (ArithmeticException failure) {
+                        deferFinalizationRejection(CoreResultCode.ARITHMETIC_OVERFLOW);
+                        return null;
+                    }
+                } else triggers.cancelTriggersForClosedPositions();
                 int reservedChildPatches = commandDemand == null ? 0 : commandDemand.patchCount() - 1;
                 if (admissions.queuedMatching.size() > reservedChildPatches
                         || pendingMatching.size() + admissions.queuedMatching.size() > pendingMatching.capacity()) {
+                    admissions.queuedMatching.clear();
+                    if (deferFinalizationRejection(CoreResultCode.MATCHING_BACKPRESSURE)) return null;
                     rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
                             Math.incrementExact(appliedCommandCount));
-                    admissions.queuedMatching.clear();
                     return releaseAdmission(commandAdmission, rejected(CoreResultCode.MATCHING_BACKPRESSURE));
                 }
             }
             if (status == ResponseStatus.APPLIED) {
                 List<Long> changedOrderIds = resultBuilder.commandChangedOrderIds == null ? List.of() : resultBuilder.commandChangedOrderIds;
                 try {
-                    stampOrderChangesRuntime(clusterTimestamp, clusterPosition, changedOrderIds);
+                    if (runtimeState.asynchronousCommands())
+                        RuntimeCommandProcessor.validateOrderStampInputs(clusterTimestamp, clusterPosition, changedOrderIds);
+                    else stampOrderChangesRuntime(clusterTimestamp, clusterPosition, changedOrderIds);
                 } catch (IllegalStateException exception) {
+                    if (deferFinalizationRejection(CoreResultCode.INVALID_COMMAND)) return null;
                     rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
                             Math.incrementExact(appliedCommandCount));
                     return releaseAdmission(commandAdmission, rejected(CoreResultCode.INVALID_COMMAND));
@@ -1126,7 +1145,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 if (runtimeState.asynchronousCommands()) {
                     runtimeState.releaseCompletedSequentialLaneStage();
                     directCommitEvent = runtimeState.dispatchLaneMutation(
-                            nextAppliedCommandCount, resultBuilder.commandChangedUserIds);
+                            nextAppliedCommandCount, resultBuilder.commandChangedUserIds,
+                            resultBuilder.commandChangedOrderIds, triggers.closingTriggerIds(),
+                            clusterTimestamp, clusterPosition);
                 } else {
                     committedLaneMask = runtimeState.stageLaneMutation(
                             nextAppliedCommandCount, resultBuilder.commandChangedUserIds);
@@ -1170,11 +1191,21 @@ public final class TradingCoreRuntime implements AutoCloseable {
         long stateHash = stateHash(businessStateHash, message.header().commandId(), status, resultCode,
                 appliedCommandCount);
         byte[] responseData = resultBuilder.commandResultData();
-        resultLedger.storeResult(message.header().commandId(), StoredResult.owned(fingerprint, status, resultCode,
-                appliedCommandCount, requiredExportSequence, stateHash, responseData));
+        resultLedger.storeOwnedResult(message.header().commandId(), fingerprint, status, resultCode,
+                appliedCommandCount, requiredExportSequence, stateHash, responseData);
         CoreResponse response = CoreResponse.owned(status, status, resultCode, appliedCommandCount,
                 requiredExportSequence, stateHash, responseData);
         return releaseAdmission(commandAdmission, response);
+    }
+
+    /** Reuse the direct command continuation for failures discovered during terminal preparation. */
+    private boolean deferFinalizationRejection(CoreResultCode code) {
+        if (!runtimeState.asynchronousCommands()) return false;
+        if (pendingDirectCommand == null)
+            throw new IllegalStateException("asynchronous finalization has no command context");
+        controlCompletionStatus = ResponseStatus.REJECTED;
+        controlCompletionCode = code;
+        return true;
     }
 
     /** 当前直接命令的业务续步，只由日志回调中的 owner 推进。 */
@@ -1215,11 +1246,20 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 controlCompletionStatus = ResponseStatus.REJECTED;
                 controlCompletionCode = CoreResultCode.INVALID_COMMAND;
             }
+            controlContinuation = null;
         }
-        // 回滚仍必须独占受影响状态；成功的资金费/风险任务已经在 Lane 完成业务修改。
         if (controlCompletionStatus != ResponseStatus.APPLIED
-                && runtimeState.hasUncommittedCommandChanges()
-                && !runtimeState.tryAcquireOwnerLaneAccess()) return null;
+                && (commits.commitPublicationDirty || runtimeState.revision() != pending.beforeRevision
+                    || runtimeState.hasUncommittedCommandChanges())) {
+            if (controlContinuation == null) {
+                commits.abortCommitPublicationBatch();
+                controlContinuation = runtimeState.beginCommandRollback(pending.checkpoint,
+                        Math.incrementExact(appliedCommandCount));
+            }
+            if (!controlContinuation.getAsBoolean()) return null;
+            identities.rollbackPositionKeys(pending.identityCheckpoint);
+            controlContinuation = null;
+        }
         CoreResponse result = finishDirectCommand(pending.message, pending.timestamp, pending.position, pending.sourceKey,
                 pending.fingerprint, pending.admission, pending.demand, pending.beforeProjection,
                 pending.beforeRevision, pending.checkpoint, pending.identityCheckpoint,
@@ -1337,9 +1377,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
         lastSourceSequences.put(sourceKey, message.header().sourceSequence());
         long stateHash = stateHash(cachedBusinessStateHash, message.header().commandId(),
                 ResponseStatus.REJECTED, resultCode, appliedCommandCount);
-        resultLedger.storeResult(message.header().commandId(), new StoredResult(fingerprint,
+        resultLedger.storeOwnedResult(message.header().commandId(), fingerprint,
                 ResponseStatus.REJECTED, resultCode, appliedCommandCount, requiredExportSequence, stateHash,
-                new byte[0], 0));
+                TradingCoreRuntime.EMPTY_RESPONSE_DATA);
         return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, resultCode,
                 appliedCommandCount, requiredExportSequence, stateHash, new byte[0]);
     }
@@ -1445,7 +1485,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     void submitMatching(PendingMatching pending) {
         if (pending.crossShardCancellationStarted || matchingSubmissionDeferred(pending.sequence())) return;
-        if (batches.pendingOrderBatches.containsKey(pending.sequenceKey())) {
+        if (pending.orderBatch != null) {
             batches.submitOrderBatchMatching(pending);
             if (pending.isMatchingSubmitted()) matchingSubmissionCompleted(pending);
             return;
@@ -1464,7 +1504,19 @@ public final class TradingCoreRuntime implements AutoCloseable {
             matchingSubmissionCompleted(pending);
             return;
         }
-        matcherPipeline.submit(matcherShard(pending), pending.sequence(), prepareMatchingCommand(pending));
+        var command = prepareMatchingCommand(pending);
+        com.surprising.aeron.service.state.MatcherSettlementEvent direct = null;
+        if (pending.operation() == PendingMatching.Operation.PLACE && runtimeState.asynchronousCommands()) {
+            direct = runtimeState.prepareDirectMatcherSettlement(pending.sequence(),
+                    pending.partitionLaneMask == 0 ? commits.validAccountLaneMask() : pending.partitionLaneMask,
+                    runtimeOrder(pending.decodedCommand().placeOrder().orderId()), null, 1,
+                    pending.command().header().commandId(), matcherShard(pending), identities,
+                    0, 0, pending.preMatchingCancellationOrderIds(), null);
+            pending.settlement(direct, direct.plan(), System.nanoTime());
+            if (realtimeCapture != null)
+                pending.realtimeTakerOrder = runtimeOrder(pending.decodedCommand().placeOrder().orderId());
+        }
+        matcherPipeline.submit(matcherShard(pending), pending.sequence(), command, direct);
         pending.matchingSubmitted();
         matchingSubmissionCompleted(pending);
     }
@@ -1493,7 +1545,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                     break;
                 }
                 var admission = pending.placeAdmission();
-                OrderBatchPending orderBatch = batches.pendingOrderBatches.get(pending.sequenceKey());
+                OrderBatchPending orderBatch = pending.orderBatch;
                 PlaceBatchAdmissionEvent batchAdmission = orderBatch == null
                         ? null : orderBatch.placeBatchAdmissionEvent;
                 if (admission == null && batchAdmission == null) {
@@ -1527,6 +1579,20 @@ public final class TradingCoreRuntime implements AutoCloseable {
                         orderBatch.rollbackPreparedClientKeys(identities);
                         orderBatch.pipelined = false;
                         orderBatch.sequentialAdmission = true;
+                        // The Lane already checked and rolled back the only item. There is no
+                        // partial batch to re-evaluate, so retain its rejection at ordered commit.
+                        if (orderBatch.items.size() == 1
+                                && (rejection instanceof CoreStateRejectedException
+                                || rejection instanceof ArithmeticException
+                                || rejection instanceof IllegalArgumentException)) {
+                            CoreResultCode code = rejection instanceof CoreStateRejectedException stateRejection
+                                    ? CoreResultCode.fromRejectionCode(stateRejection.code())
+                                    : rejection instanceof ArithmeticException
+                                    ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND;
+                            batches.appendOrderBatchResult(orderBatch, orderBatch.items.getFirst(),
+                                    ResponseStatus.REJECTED, code);
+                            orderBatch.nextIndex = 1;
+                        }
                         if (orderBatch.admissionOrderIndex != null)
                             orderBatch.admissionOrderIndex.reset(pending.command().header().userId());
                         placeAdmissionReadyShardMask &= ~shardBit;
@@ -1597,7 +1663,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
             while ((sequence = runtimeState.pollPlaceAdmissionReady(laneId)) != 0) {
                 matchingProgressSequence++;
                 PendingMatching pending = pendingMatching.get(sequence);
-                OrderBatchPending batch = pending == null ? null : batches.pendingOrderBatches.get(sequence);
+                OrderBatchPending batch = pending == null ? null : batches.batch(sequence);
                 if (pending == null || pending.isMatchingSubmitted()
                         || batch != null && (batch.finishing() || batch.nextIndex >= batch.items.size())
                         || pending.placeAdmission() == null
@@ -1615,8 +1681,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
             int shardId = pendingSubmissionShard(pending);
             if (!pendingMatching.isSubmissionHead(sequence, shardId)) return true;
         }
-        if (pending != null && pending.clusterIndependent || batches.pendingOrderBatches.isEmpty()) return false;
-        return sequence > batches.pendingOrderBatches.keySet().iterator().next();
+        if (pending != null && pending.clusterIndependent || !batches.hasPendingBatches()) return false;
+        return sequence > batches.firstBatch().sequence;
     }
 
     void matchingSubmissionCompleted(PendingMatching pending) {
@@ -1627,21 +1693,25 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     int pendingSubmissionShard(PendingMatching pending) {
-        OrderBatchPending batch = batches.pendingOrderBatches.get(pending.sequenceKey());
+        OrderBatchPending batch = pending.orderBatch;
         return batch == null ? matcherShard(pending) : batches.orderBatchMatcherShard(batch);
     }
 
     void submitDeferredMatchingAfterBatch() {
         while (!pendingMatching.isEmpty()) {
-            long throughSequence = batches.pendingOrderBatches.isEmpty()
-                    ? Long.MAX_VALUE : batches.pendingOrderBatches.keySet().iterator().next();
-            PendingMatching pending = pendingMatching.findFirst(value -> {
-                        if (value.sequence() > throughSequence) return false;
-                        OrderBatchPending batch = batches.pendingOrderBatches.get(value.sequenceKey());
-                        return batch == null ? admissions.deferredMatching.containsKey(value.sequence()) : !batch.started;
-                    });
-            if (pending == null) return;
-            OrderBatchPending batch = batches.pendingOrderBatches.get(pending.sequenceKey());
+            // Both orderings append increasing Core sequences. Only their heads can advance.
+            OrderBatchPending batch = batches.firstBatch();
+            Long deferredSequence = admissions.deferredMatching.isEmpty()
+                    ? null : admissions.deferredMatching.keySet().iterator().next();
+            PendingMatching pending;
+            if (deferredSequence != null && (batch == null || deferredSequence < batch.sequence)) {
+                pending = pendingMatching.get(deferredSequence);
+                batch = null;
+            } else if (batch != null && !batch.started) {
+                pending = pendingMatching.get(batch.sequence);
+            } else {
+                return;
+            }
             if (batch != null && !batch.started) {
                 if (batches.tryActivatePipelinedOrderBatch(batch, pending)) continue;
                 batches.activateOrderBatch(batch, pending, true);
@@ -1680,6 +1750,27 @@ public final class TradingCoreRuntime implements AutoCloseable {
             List<DeterministicExchangeCoreAdapter.CancellationOrder> preMatchingCancellations =
                     preMatchingCancellationOrders(pending);
             long userId = pending.command().header().userId();
+            if (pending.operation() == PendingMatching.Operation.PLACE && preMatchingCancellations.isEmpty()) {
+                var command = pending.decodedCommand().placeOrder();
+                var admittedOrder = pending.admittedMatchingOrder();
+                var order = admittedOrder == null ? matchingOrder(command.orderId()) : admittedOrder;
+                int shard = matcherShard(pending);
+                return () -> matchingAdapter.placeWithEvidence(shard, pending.sequence(),
+                        pending.command().header().commandId(), command.instrumentChangeId(),
+                        pending.command().header().submittedAtEpochMillis(), userId, order);
+            }
+            if (pending.operation() == PendingMatching.Operation.CANCEL && preMatchingCancellations.isEmpty()) {
+                var command = pending.decodedCommand().cancelOrder();
+                var order = runtimeState.order(command.orderId());
+                if (order != null) {
+                    String symbol = identities.symbol(order.symbolId());
+                    long instrumentChangeId = order.instrumentChangeId();
+                    int shard = matcherShard(pending);
+                    return () -> matchingAdapter.cancelWithEvidence(shard, pending.sequence(),
+                            pending.command().header().commandId(), command.orderId(), instrumentChangeId,
+                            pending.command().header().submittedAtEpochMillis(), userId, symbol);
+                }
+            }
             MatchingSubmission matching = switch (pending.operation()) {
                 case PLACE -> {
                     var command = pending.decodedCommand().placeOrder();
@@ -1927,7 +2018,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     boolean placeAdmissionOutstanding(PendingMatching pending) {
         if (pending.placeAdmission() != null && !pending.isMatchingSubmitted()) return true;
-        OrderBatchPending batch = batches.pendingOrderBatches.get(pending.sequenceKey());
+        OrderBatchPending batch = pending.orderBatch;
         return batch != null && batch.placeBatchAdmissionEvent != null && !pending.isMatchingSubmitted();
     }
 
@@ -2007,9 +2098,10 @@ public final class TradingCoreRuntime implements AutoCloseable {
     boolean hasLocalMatchingWork() {
         if (placeAdmissionReadyShardMask != 0 || pendingMatching.hasReadyHead()) return true;
         PendingMatching head = pendingMatching.get(pendingMatching.firstSequence());
-        OrderBatchPending batch = head == null ? null : batches.pendingOrderBatches.get(head.sequenceKey());
-        // 顺序批量准入等待 Lane 所有权交接，该边界没有 matcher/settlement 通知。
-        return batch != null && !batch.started;
+        OrderBatchPending batch = head == null ? null : head.orderBatch;
+        // Handoff and the final metadata commit have no matcher-settlement cursor.
+        // Keep polling these bounded Owner continuations even after consuming the last notification.
+        return batch != null && (!batch.started || batch.laneCommitEvent != null || batch.itemAdmission != null);
     }
 
     /** Only external completion cursors; the caller must first exhaust owner-local progress. */
@@ -2517,86 +2609,20 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     void reservePlaceOrderRuntime(long userId, PlaceOrderCommand command, UUID commandId,
-                                          long pendingCoreSequence) {
-        reservePlaceOrderRuntime(userId, command, commandId, pendingCoreSequence,
-                openInterestIndex.openInterestSteps(command.symbol()), activeOrderIndex);
-    }
-
-    void reservePlaceOrderRuntime(
-            long userId, PlaceOrderCommand command, UUID commandId, long pendingCoreSequence,
-            long openInterestSteps,
-            com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionOrderIndex admissionOrderIndex) {
-        reservePlaceOrderRuntime(userId, command, commandId, pendingCoreSequence, openInterestSteps,
-                admissionOrderIndex, null);
-    }
-
-    void reservePlaceOrderRuntime(
-            long userId, PlaceOrderCommand command, UUID commandId, long pendingCoreSequence,
-            long openInterestSteps,
-            com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionOrderIndex admissionOrderIndex,
-            OrderBatchPending batch) {
+                                  long pendingCoreSequence) {
         ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(runtimeState,
                 identities, userId, command, currentClusterTimestamp);
-        var admissionIdentity =
-                com.surprising.aeron.service.state.RuntimeOrderAdmission.admissionIdentity(
-                        runtimeState, identities, userId, resolved);
-        reservePlaceOrderRuntime(userId, resolved, commandId, pendingCoreSequence,
-                openInterestSteps, admissionOrderIndex, admissionIdentity, batch);
-    }
-
-    void reservePlaceOrderRuntime(ResolvedMatchingAdmission admission, UUID commandId,
-                                          long pendingCoreSequence) {
-        reservePlaceOrderRuntime(admission.userId(), admission.resolved(), commandId, pendingCoreSequence,
-                admission.requiredReservationUnits());
-    }
-
-    void reservePlaceOrderRuntime(long userId, ResolvedPlaceOrder resolved, UUID commandId,
-                                          long pendingCoreSequence, long requiredReservation) {
-        reservePlaceOrderRuntime(userId, resolved, commandId, pendingCoreSequence, requiredReservation, null);
-    }
-
-    void reservePlaceOrderRuntime(long userId, ResolvedPlaceOrder resolved, UUID commandId,
-                                          long pendingCoreSequence, long requiredReservation,
-                                          OrderBatchPending batch) {
-        reservePlaceOrderRuntime(userId, resolved, commandId, pendingCoreSequence,
-                0, null, null, requiredReservation, batch);
-    }
-
-    void reservePlaceOrderRuntime(
-            long userId, ResolvedPlaceOrder resolved, UUID commandId, long pendingCoreSequence,
-            long openInterestSteps,
-            com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionOrderIndex admissionOrderIndex,
-            com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionIdentity admissionIdentity,
-            OrderBatchPending batch) {
-        reservePlaceOrderRuntime(userId, resolved, commandId, pendingCoreSequence,
-                openInterestSteps, admissionOrderIndex, admissionIdentity, 0, batch);
-    }
-
-    void reservePlaceOrderRuntime(
-            long userId, ResolvedPlaceOrder resolved, UUID commandId, long pendingCoreSequence,
-            long openInterestSteps,
-            com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionOrderIndex admissionOrderIndex,
-            com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionIdentity admissionIdentity,
-            long preparedRequiredReservation, OrderBatchPending batch) {
+        var admissionIdentity = com.surprising.aeron.service.state.RuntimeOrderAdmission.admissionIdentity(
+                runtimeState, identities, userId, resolved);
+        long openInterestSteps = openInterestIndex.openInterestSteps(command.symbol());
         var preparedClientKey = identities.prepareClientKey(
                 userId, resolved.clientOrderId());
         int symbolId = resolved.symbolId();
         int assetId = identities.assetId(resolved.reservationAsset());
-        long spotAmendOriginal = batch != null && batch.kind == OrderBatchKind.AMEND
-                && productLine == ProductLine.SPOT
-                ? ((AmendOrderCommand) batch.items.get(batch.nextIndex).command).originalOrderId() : 0;
         try {
             runtimeState.executeUserSettlement(userId, () -> {
-                // Reuse the existing reservation task and batch funds boundary. The matcher has
-                // replaced the old order, so its locked funds must be available to the replacement.
-                if (spotAmendOriginal != 0) {
-                    RuntimeCommandProcessor.cancelOrder(runtimeState, userId, spotAmendOriginal);
-                }
-                long requiredReservation = admissionIdentity == null
-                        ? preparedRequiredReservation
-                        : com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservationPrepared(
-                                runtimeState, userId, resolved, openInterestSteps,
-                                admissionOrderIndex, admissionIdentity);
+                long requiredReservation = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservationPrepared(
+                        runtimeState, userId, resolved, openInterestSteps, activeOrderIndex, admissionIdentity);
                 RuntimeCommandProcessor.placeOrderPrepared(runtimeState, userId, resolved,
                         commandId, requiredReservation, preparedClientKey.key(), symbolId, assetId);
                 runtimeState.markPendingReservation(userId, resolved.orderId(), pendingCoreSequence);
@@ -2609,10 +2635,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
             }
             throw failure;
         }
-        if (batch != null) {
-            batch.retainPreparedClientKey(userId, resolved.clientOrderId(), preparedClientKey);
-        }
-        if (batches.pendingOrderBatches.isEmpty()) deferProvisionalSnapshotProjection();
+        if (!batches.hasPendingBatches()) deferProvisionalSnapshotProjection();
         else commits.requestCommitPublication();
     }
 
@@ -2671,21 +2694,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 resolved.timeInForce(), resolved.matchingPriceTicks(), resolved.quantitySteps());
     }
 
-    void cancelOrderRuntime(long userId, long orderId) {
-        if (runtimeState.executeUserSettlement(userId,
-                () -> RuntimeCommandProcessor.cancelOrder(runtimeState, userId, orderId))) {
-            commits.requestCommitPublication();
-        }
-    }
-
-    void rejectPlaceOrderRuntime(long userId, long orderId, long coreSequence) {
-        runtimeState.executeUserSettlement(userId, () -> {
-            RuntimeCommandProcessor.rejectPlaceOrder(runtimeState, userId, orderId, coreSequence);
-            return null;
-        });
-        commits.requestCommitPublication();
-    }
-
     void stampOrderChangesRuntime(long timestamp, long clusterPosition,
                                           Iterable<Long> changedOrderIds) {
         if (RuntimeCommandProcessor.stampChangedOrdersByLane(
@@ -2726,7 +2734,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (!commits.commitPublicationDeferred || pending == null
                 || pending.settlementEvent() == null && pending.cancelEvent() == null
                 && pending.replaceEvent() == null
-                && !batches.pendingOrderBatches.containsKey(pending.sequence())
+                && pending.orderBatch == null
                 && !commits.controlPending(pending.sequence())) {
             throw new IllegalStateException("matching commit context cannot be suspended");
         }
@@ -2819,26 +2827,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
         commandFundsAccumulator.requireConserved(externalAdjustment);
     }
 
-    long stageLaneMutation(
-            long sequence, Iterable<Long> userIds, LaneCommandContextRing.Context context) {
-        if (context == null || sequence <= 0) {
-            throw new IllegalStateException("account lane commit context is missing");
-        }
-        long laneMask = runtimeState.stageLaneMutation(sequence, userIds);
-        context.completeLanes(laneMask);
-        return laneMask;
-    }
-
-    long stageLaneMutation(
-            long sequence, long[] userIds, LaneCommandContextRing.Context context) {
-        if (context == null || sequence <= 0) {
-            throw new IllegalStateException("account lane commit context is missing");
-        }
-        long laneMask = runtimeState.stageLaneMutation(sequence, userIds);
-        context.completeLanes(laneMask);
-        return laneMask;
-    }
-
     void seedChangeAccumulators() {
         if (resultBuilder.commandChangedUserIds != null) resultBuilder.changedUserIds.addAll(resultBuilder.commandChangedUserIds);
         if (resultBuilder.commandChangedOrderIds != null) resultBuilder.changedOrderIds.addAll(resultBuilder.commandChangedOrderIds);
@@ -2914,10 +2902,10 @@ public final class TradingCoreRuntime implements AutoCloseable {
         pendingMatching.forEach(pending -> {
             sequenceAdmission(pending.sequence()).releaseUnused();
         });
+        batches.clearPendingBatches();
         pendingMatching.clear();
         crossShardCancellations.clear();
         admissions.pendingLifecycleScopes.clear();
-        batches.pendingOrderBatches.clear();
         admissions.deferredMatching.clear();
         exportState.close();
         runtimeProjectionJournal.close();

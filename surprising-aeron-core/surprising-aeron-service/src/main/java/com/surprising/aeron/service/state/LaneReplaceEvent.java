@@ -114,6 +114,29 @@ public final class LaneReplaceEvent implements SettlementLaneWorker.Command {
         return result;
     }
 
+    /** Abort a prepared event that was never submitted to a Lane. */
+    void discard() {
+        if (complete()) throw new IllegalStateException("completed replace event must be collected");
+        if (runtime != null) runtime.releaseSettlementExpectation(laneId);
+        runtime = null;
+        identities = null;
+        replacement = null;
+        commandId = null;
+        changes = null;
+        coreSequence = 0;
+        userId = 0;
+        originalOrderId = 0;
+        preCancelOrderIds = null;
+        requiredReservation = 0;
+        clientKey = 0;
+        commitTimestamp = 0;
+        commitClusterPosition = 0;
+        symbolId = 0;
+        assetId = 0;
+        laneId = 0;
+        COMPLETED.setRelease(this, false);
+    }
+
     void clear() {
         if (!complete() || changes != null) throw new IllegalStateException("replace event was not collected");
         runtime = null;

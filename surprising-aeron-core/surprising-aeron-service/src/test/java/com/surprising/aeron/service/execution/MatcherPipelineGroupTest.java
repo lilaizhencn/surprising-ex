@@ -21,7 +21,7 @@ class MatcherPipelineGroupTest {
     void emptyProbeDoesNotLoseALaterMatcherPublication() throws Exception {
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
-        try (var pipelines = new MatcherPipelineGroup(2, 4, true)) {
+        try (var pipelines = pipelines(2, 4, true, 42)) {
             try {
                 pipelines.submit(1, 42, () -> {
                     entered.countDown();
@@ -46,7 +46,7 @@ class MatcherPipelineGroupTest {
 
     @Test
     void drainsCompletedShardHeadsWithoutProbingPendingSequences() {
-        MatcherPipelineGroup pipelines = new MatcherPipelineGroup(2, 4, true);
+        MatcherPipelineGroup pipelines = pipelines(2, 4, true, 11, 12);
         try {
             pipelines.submit(0, 11, () -> new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ONE"));
             pipelines.submit(1, 12, () -> new com.surprising.aeron.service.matching.CoreMatchingResult(true, "TWO"));
@@ -69,7 +69,7 @@ class MatcherPipelineGroupTest {
         String previous = System.getProperty("surprising.aeron.matching-engines");
         System.setProperty("surprising.aeron.matching-engines", "4");
         DeterministicExchangeCoreAdapter adapter = new DeterministicExchangeCoreAdapter(false);
-        MatcherPipelineGroup pipelines = new MatcherPipelineGroup(4, 16, false);
+        MatcherPipelineGroup pipelines = pipelines(4, 16, false, 1, 2);
         try {
             pipelines.start(adapter::activateShard);
             String firstSymbol = "SYMBOL-0";
@@ -110,6 +110,38 @@ class MatcherPipelineGroupTest {
             if (previous == null) System.clearProperty("surprising.aeron.matching-engines");
             else System.setProperty("surprising.aeron.matching-engines", previous);
         }
+    }
+
+    @Test
+    void sequenceSlotRejectsDuplicateRoutesAndRecoversAfterQueueRejection() {
+        var contexts = new LaneCommandContextRing(4, 1);
+        var first = contexts.claim(1);
+        var second = contexts.claim(2);
+        try (var pipelines = new MatcherPipelineGroup(2, 1, true, contexts)) {
+            pipelines.submit(0, 1, () -> new com.surprising.aeron.service.matching.CoreMatchingResult(true, "ONE"));
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> pipelines.submit(1, 1,
+                    () -> new com.surprising.aeron.service.matching.CoreMatchingResult(true, "DUPLICATE")))
+                    .isInstanceOf(IllegalStateException.class);
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> pipelines.submit(0, 2,
+                    () -> new com.surprising.aeron.service.matching.CoreMatchingResult(true, "FULL")))
+                    .isInstanceOf(java.util.concurrent.RejectedExecutionException.class);
+            assertThat(second.submittedMatcherShard()).isEqualTo(-1);
+            assertThat(await(pipelines, 1, TimeUnit.SECONDS.toNanos(5))).isNotNull();
+            assertThat(first.submittedMatcherShard()).isEqualTo(-1);
+            pipelines.submit(1, 1, () -> new com.surprising.aeron.service.matching.CoreMatchingResult(true, "CONTINUATION"));
+            assertThat(await(pipelines, 1, TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("CONTINUATION");
+            contexts.discard(1);
+            var reused = contexts.claim(5);
+            assertThat(reused.submittedMatcherShard()).isEqualTo(-1);
+            pipelines.submit(0, 5, () -> new com.surprising.aeron.service.matching.CoreMatchingResult(true, "REUSED"));
+            assertThat(await(pipelines, 5, TimeUnit.SECONDS.toNanos(5)).nativeCommand().coreSequence()).isEqualTo(5);
+        }
+    }
+
+    private static MatcherPipelineGroup pipelines(int shards, int capacity, boolean start, long... sequences) {
+        var contexts = new LaneCommandContextRing(shards * capacity, 1);
+        for (long sequence : sequences) contexts.claim(sequence);
+        return new MatcherPipelineGroup(shards, capacity, start, contexts);
     }
 
     private static CoreMatchingOrder order(long orderId, String symbol) {

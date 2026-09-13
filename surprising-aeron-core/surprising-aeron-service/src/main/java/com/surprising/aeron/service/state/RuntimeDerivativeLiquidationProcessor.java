@@ -11,9 +11,8 @@ import com.surprising.aeron.protocol.ResolveLiquidationCommand;
 import com.surprising.aeron.protocol.ExecuteAdlCommand;
 
 import java.util.Collection;
-import java.util.List;
 
-/** Runs perpetual liquidation settlement and insurance resolution on discardable Runtime projections. */
+/** Account mutations run on their Lane; Owner applies the treasury delta after account completion. */
 public final class RuntimeDerivativeLiquidationProcessor {
 
     private RuntimeDerivativeLiquidationProcessor() {
@@ -37,36 +36,112 @@ public final class RuntimeDerivativeLiquidationProcessor {
                                                             Collection<CoreOrderState> canceledOrders,
                                                             TradingRuntimeState runtime,
                                                             RuntimeIdentityRegistry identities) {
-        if (command == null || runtime == null || identities == null || !runtime.productLine().isDerivative()) {
-            throw new IllegalArgumentException("invalid perpetual liquidation apply");
+        execute(command, canceledOrders, 0, runtime, identities, false);
+        return runtime;
+    }
+
+    /** One account stage owns cancellation and liquidation; only treasury changes return to Owner. */
+    public static java.util.function.BooleanSupplier beginExecution(ExecuteLiquidationCommand command,
+            Collection<CoreOrderState> canceledOrders, long nextCursorOrderId,
+            TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+        return execute(command, canceledOrders, nextCursorOrderId, runtime, identities, true);
+    }
+
+    private static java.util.function.BooleanSupplier execute(ExecuteLiquidationCommand command,
+            Collection<CoreOrderState> canceledOrders, long nextCursorOrderId,
+            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, boolean asynchronous) {
+        if (command == null || runtime == null || identities == null || nextCursorOrderId < 0
+                || !runtime.productLine().isDerivative()) {
+            throw new IllegalArgumentException("invalid liquidation account stage");
         }
         runtime.assertOwner();
         LiquidationRuntime liquidation = runtime.liquidation(command.liquidationId());
-        if (liquidation == null) {
+        if (liquidation == null)
             throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
+        boolean advance = nextCursorOrderId != 0;
+        if (advance) {
+            if (liquidation.status() == CoreLiquidationState.Status.ORDERED
+                    && liquidation.nextCancelOrderId() != command.cursorOrderId())
+                throw new CoreStateRejectedException("LIQUIDATION_CURSOR_CONFLICT",
+                        "liquidation cancellation cursor does not match state");
+        } else {
+            if (liquidation.status() != CoreLiquidationState.Status.PLANNED
+                    && liquidation.status() != CoreLiquidationState.Status.ORDERED)
+                throw new CoreStateRejectedException("LIQUIDATION_STATE_CONFLICT", "liquidation is not planned");
+            validatePrice(runtime, liquidation, command);
         }
-        if (liquidation.status() != CoreLiquidationState.Status.PLANNED
-                && liquidation.status() != CoreLiquidationState.Status.ORDERED) {
-            throw new CoreStateRejectedException("LIQUIDATION_STATE_CONFLICT", "liquidation is not planned");
+        boolean obsolete = !advance && !executable(runtime, liquidation, identities);
+        int count = obsolete || canceledOrders == null ? 0 : canceledOrders.size();
+        long[] orderIds = count == 0 ? null : new long[count];
+        if (count != 0) {
+            int index = 0;
+            for (CoreOrderState order : canceledOrders) {
+                if (order == null || order.userId() != liquidation.userId())
+                    throw new IllegalArgumentException("liquidation cancellation must belong to its account");
+                orderIds[index++] = order.orderId();
+            }
         }
-        validatePrice(runtime, liquidation, command);
-        if (!executable(runtime, liquidation, identities)) {
-            runtime.executeUserSettlement(liquidation.userId(), () -> {
-                runtime.replaceLiquidation(copy(liquidation, 0, 0, 0,
-                        CoreLiquidationState.Status.CANCELED, 0));
-                runtime.advanceUserRevision(liquidation.userId());
-                return null;
-            });
-            runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
-            return runtime;
-        }
-        cancelOrders(runtime, canceledOrders == null ? List.of() : canceledOrders);
-
-        CoreInstrumentState instrument = requireInstrument(runtime, identities.symbol(liquidation.symbolId()),
-                liquidation.instrumentChangeId());
-        int settleAssetId = identities.assetId(instrument.settleAsset());
-        long positionKey = identities.positionKey(liquidation.userId(),
+        CoreInstrumentState instrument = advance || obsolete ? null : requireInstrument(runtime,
+                identities.symbol(liquidation.symbolId()), liquidation.instrumentChangeId());
+        int assetId = instrument == null ? 0 : identities.assetId(instrument.settleAsset());
+        long positionKey = instrument == null ? 0 : identities.positionKey(liquidation.userId(),
                 positionKey(identities.symbol(liquidation.symbolId()), liquidation.positionSide()));
+        int laneId = runtime.topology().accountLaneId(liquidation.userId());
+        java.util.function.IntFunction<Object> accountWork = ignored -> {
+            for (int index = 0; index < count; index++) {
+                long orderId = orderIds[index];
+                OrderRuntime order = runtime.order(orderId);
+                if (order == null || order.userId() != liquidation.userId() || order.canceled()
+                        || order.remainingQuantitySteps() == 0)
+                    throw new IllegalArgumentException("runtime liquidation cancellation requires open orders");
+                ReservationRuntime reservation = runtime.reservation(orderId);
+                if (reservation == null)
+                    throw new IllegalStateException("runtime liquidation reservation is missing: " + orderId);
+                runtime.cancelOrder(orderId, liquidation.userId(), reservation.reservedUnits());
+            }
+            if (obsolete) {
+                runtime.replaceLiquidation(copy(liquidation, 0, 0, 0, CoreLiquidationState.Status.CANCELED, 0));
+                runtime.advanceUserRevision(liquidation.userId());
+            } else if (advance) {
+                runtime.replaceLiquidation(new LiquidationRuntime(liquidation.liquidationId(), liquidation.userId(),
+                        liquidation.symbolId(), liquidation.marginMode(), liquidation.positionSide(),
+                        liquidation.instrumentChangeId(), liquidation.triggerPriceSequence(),
+                        liquidation.signedQuantitySteps(), liquidation.closeQuantitySteps(), liquidation.deficitUnits(),
+                        liquidation.executionPriceTicks(), liquidation.liquidationFeeRatePpm(),
+                        liquidation.liquidationFeeUnits(), CoreLiquidationState.Status.ORDERED, nextCursorOrderId));
+            } else {
+                return executeAccountLiquidation(command, runtime, liquidation, instrument, assetId, positionKey);
+            }
+            return null;
+        };
+        if (asynchronous) {
+            runtime.dispatchControlLanes(1L << laneId, accountWork);
+            return () -> {
+                if (!runtime.pollControlLanes()) return false;
+                finishExecution(runtime, liquidation.userId(), assetId, positionKey,
+                        (RuntimeTreasuryDelta) runtime.controlLaneResult(laneId), count);
+                return true;
+            };
+        }
+        runtime.releaseOwnerLaneAccess();
+        Object[] results = runtime.executeLaneMutations(1L << laneId, 1, false, accountWork);
+        finishExecution(runtime, liquidation.userId(), assetId, positionKey,
+                (RuntimeTreasuryDelta) results[laneId], count);
+        return null;
+    }
+
+    private static void finishExecution(TradingRuntimeState runtime, long userId, int assetId,
+            long positionKey, RuntimeTreasuryDelta treasuryDelta, int canceledCount) {
+        if (treasuryDelta != null) {
+            runtime.recordUserSettlementChanges(userId, assetId, positionKey);
+            treasuryDelta.apply(runtime.treasury());
+        }
+        runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(), canceledCount == 0 ? 1 : 2));
+    }
+
+    private static RuntimeTreasuryDelta executeAccountLiquidation(ExecuteLiquidationCommand command,
+            TradingRuntimeState runtime, LiquidationRuntime liquidation, CoreInstrumentState instrument,
+            int settleAssetId, long positionKey) {
         PositionRuntime position = runtime.position(positionKey);
         BalanceRuntime balance = runtime.balance(liquidation.userId(), settleAssetId);
         if (position == null || balance == null) {
@@ -104,24 +179,17 @@ public final class RuntimeDerivativeLiquidationProcessor {
         CoreLiquidationState.Status nextStatus = uncovered > 0
                 ? CoreLiquidationState.Status.INSURANCE_REQUIRED : CoreLiquidationState.Status.COMPLETED;
 
-        runtime.executeUserSettlement(liquidation.userId(), () -> {
-            runtime.replaceBalance(cash.balance());
-            runtime.replacePosition(positionKey, nextPosition);
-            runtime.replaceLiquidation(copy(liquidation, uncovered, command.executionPriceTicks(),
-                    command.liquidationFeeRatePpm(), nextStatus, cash.collectedFee()));
-            runtime.advanceUserRevision(liquidation.userId());
-            return null;
-        });
-        runtime.recordUserSettlementChanges(liquidation.userId(), settleAssetId, positionKey);
+        runtime.replaceBalance(cash.balance());
+        runtime.replacePosition(positionKey, nextPosition);
+        runtime.replaceLiquidation(copy(liquidation, uncovered, command.executionPriceTicks(),
+                command.liquidationFeeRatePpm(), nextStatus, cash.collectedFee()));
+        runtime.advanceUserRevision(liquidation.userId());
         RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
         treasuryDelta.addInsurance(settleAssetId, insuranceDelta);
         treasuryDelta.addDeficit(settleAssetId, uncovered);
         treasuryDelta.addClearing(settleAssetId, uncovered);
-        treasuryDelta.apply(runtime.treasury());
-        runtime.setMetadata(runtime.productLine(), revisionAfterCancellation(runtime.revision(), canceledOrders));
-        return runtime;
+        return treasuryDelta;
     }
-
 
     public static TradingRuntimeState applyCancellationAdvance(TradingCoreState before,
                                                                ExecuteLiquidationCommand command,
@@ -141,35 +209,10 @@ public final class RuntimeDerivativeLiquidationProcessor {
                                                                       long nextCursorOrderId,
                                                                       TradingRuntimeState runtime,
                                                                       RuntimeIdentityRegistry identities) {
-        if (command == null || runtime == null || identities == null || nextCursorOrderId <= 0
-                || !runtime.productLine().isDerivative()) {
-            throw new IllegalArgumentException("invalid liquidation cancellation apply");
-        }
-        runtime.assertOwner();
-        LiquidationRuntime liquidation = runtime.liquidation(command.liquidationId());
-        if (liquidation == null) {
-            throw new CoreStateRejectedException("LIQUIDATION_NOT_FOUND", "liquidation plan does not exist");
-        }
-        if (liquidation.status() == CoreLiquidationState.Status.ORDERED
-                && liquidation.nextCancelOrderId() != command.cursorOrderId()) {
-            throw new CoreStateRejectedException("LIQUIDATION_CURSOR_CONFLICT",
-                    "liquidation cancellation cursor does not match state");
-        }
-        cancelOrders(runtime, canceledOrders == null ? List.of() : canceledOrders);
-        LiquidationRuntime current = runtime.liquidation(command.liquidationId());
-        LiquidationRuntime next = new LiquidationRuntime(current.liquidationId(), current.userId(),
-                current.symbolId(), current.marginMode(), current.positionSide(), current.instrumentChangeId(),
-                current.triggerPriceSequence(), current.signedQuantitySteps(), current.closeQuantitySteps(),
-                current.deficitUnits(), current.executionPriceTicks(), current.liquidationFeeRatePpm(),
-                current.liquidationFeeUnits(), CoreLiquidationState.Status.ORDERED, nextCursorOrderId);
-        runtime.executeUserSettlement(current.userId(), () -> {
-            runtime.replaceLiquidation(next);
-            return null;
-        });
-        runtime.setMetadata(runtime.productLine(), revisionAfterCancellation(runtime.revision(), canceledOrders));
+        if (nextCursorOrderId <= 0) throw new IllegalArgumentException("invalid liquidation cancellation cursor");
+        execute(command, canceledOrders, nextCursorOrderId, runtime, identities, false);
         return runtime;
     }
-
 
     public static TradingRuntimeState applyResolution(TradingCoreState before,
                                                       ResolveLiquidationCommand command,
@@ -186,6 +229,18 @@ public final class RuntimeDerivativeLiquidationProcessor {
                                                              TradingRuntimeState runtime,
                                                              RuntimeIdentityRegistry identities,
                                                              Iterable<Long> candidateIds) {
+        resolve(command, runtime, identities, candidateIds, false);
+        return runtime;
+    }
+
+    public static java.util.function.BooleanSupplier beginResolution(ResolveLiquidationCommand command,
+            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, Iterable<Long> candidateIds) {
+        return resolve(command, runtime, identities, candidateIds, true);
+    }
+
+    private static java.util.function.BooleanSupplier resolve(ResolveLiquidationCommand command,
+            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, Iterable<Long> candidateIds,
+            boolean asynchronous) {
         if (command == null || runtime == null || identities == null || !runtime.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid liquidation resolution apply");
         }
@@ -199,8 +254,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
         LiquidationRuntime current = liquidation;
         CoreLiquidationState.Status nextStatus;
         long nextDeficit = liquidation.deficitUnits();
-        BalanceRuntime nextBalance = null;
-        int changedAssetId;
         RuntimeTreasuryDelta treasuryDelta = new RuntimeTreasuryDelta();
         switch (command.resolution()) {
             case INSURANCE -> {
@@ -228,7 +281,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
                     throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
                             "insurance fund balance is insufficient");
                 }
-                changedAssetId = assetId;
                 if (command.coveredUnits() != 0) {
                     treasuryDelta.addInsurance(assetId, Math.negateExact(command.coveredUnits()));
                     treasuryDelta.addDeficit(assetId, Math.negateExact(command.coveredUnits()));
@@ -247,7 +299,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
                     throw new CoreStateRejectedException("LIQUIDATION_DEFICIT_REMAINS",
                             "liquidation deficit must be fully covered before completion");
                 }
-                changedAssetId = -1;
                 nextStatus = CoreLiquidationState.Status.COMPLETED;
             }
             default -> throw new IllegalStateException("unknown liquidation resolution");
@@ -257,22 +308,27 @@ public final class RuntimeDerivativeLiquidationProcessor {
                 current.triggerPriceSequence(), current.signedQuantitySteps(), current.closeQuantitySteps(),
                 nextDeficit, current.executionPriceTicks(), current.liquidationFeeRatePpm(),
                 current.liquidationFeeUnits(), nextStatus, 0);
-        BalanceRuntime preparedBalance = nextBalance;
-        runtime.executeUserSettlement(current.userId(), () -> {
-            if (preparedBalance != null) {
-                runtime.replaceBalance(preparedBalance);
-                runtime.advanceUserRevision(current.userId());
-            }
+        java.util.function.IntFunction<Object> accountWork = ignored -> {
             runtime.replaceLiquidation(nextLiquidation);
             return null;
-        });
-        if (preparedBalance != null) {
-            runtime.markBalanceChanged(current.userId(), changedAssetId);
+        };
+        long laneMask = runtime.topology().accountLaneMask(current.userId());
+        if (asynchronous) {
+            runtime.dispatchControlLanes(laneMask, accountWork);
+            return () -> {
+                if (!runtime.pollControlLanes()) return false;
+                treasuryDelta.apply(runtime.treasury());
+                runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+                return true;
+            };
         }
+        runtime.releaseOwnerLaneAccess();
+        runtime.executeLaneMutations(laneMask, 1, false, accountWork);
         treasuryDelta.apply(runtime.treasury());
         runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
-        return runtime;
+        return null;
     }
+
 
 
     public static TradingRuntimeState applyAdl(TradingCoreState before, ExecuteAdlCommand command,
@@ -287,6 +343,17 @@ public final class RuntimeDerivativeLiquidationProcessor {
 
     public static TradingRuntimeState applyAdlRuntime(ExecuteAdlCommand command, TradingRuntimeState runtime,
                                                       RuntimeIdentityRegistry identities) {
+        adl(command, runtime, identities, false);
+        return runtime;
+    }
+
+    public static java.util.function.BooleanSupplier beginAdl(ExecuteAdlCommand command,
+            TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+        return adl(command, runtime, identities, true);
+    }
+
+    private static java.util.function.BooleanSupplier adl(ExecuteAdlCommand command,
+            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, boolean asynchronous) {
         if (command == null || runtime == null || identities == null || !runtime.productLine().isDerivative()) {
             throw new IllegalArgumentException("invalid ADL apply");
         }
@@ -315,6 +382,37 @@ public final class RuntimeDerivativeLiquidationProcessor {
 
         long positionKey = identities.positionKey(command.targetUserId(),
                 positionKey(command.symbol(), command.positionSide()));
+        int settleAssetId = identities.assetId(instrument.settleAsset());
+        int targetLane = runtime.topology().accountLaneId(command.targetUserId());
+        long mask = (1L << targetLane) | runtime.topology().accountLaneMask(liquidation.userId());
+        java.util.function.IntFunction<Object> accountWork = lane -> {
+            RuntimeTreasuryDelta delta = null;
+            if (runtime.currentLaneOwns(command.targetUserId()))
+                delta = applyAdlTarget(command, runtime, liquidation, instrument, mark, positionKey, settleAssetId);
+            if (runtime.currentLaneOwns(liquidation.userId())) completeAdlLiquidation(command, runtime);
+            return delta;
+        };
+        if (asynchronous) {
+            runtime.dispatchControlLanes(mask, accountWork);
+            return () -> {
+                if (!runtime.pollControlLanes()) return false;
+                runtime.recordUserSettlementChanges(command.targetUserId(), settleAssetId, positionKey);
+                ((RuntimeTreasuryDelta) runtime.controlLaneResult(targetLane)).apply(runtime.treasury());
+                runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+                return true;
+            };
+        }
+        runtime.releaseOwnerLaneAccess();
+        Object[] results = runtime.executeLaneMutations(mask, Long.bitCount(mask), false, accountWork);
+        runtime.recordUserSettlementChanges(command.targetUserId(), settleAssetId, positionKey);
+        ((RuntimeTreasuryDelta) results[targetLane]).apply(runtime.treasury());
+        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+        return null;
+    }
+
+    private static RuntimeTreasuryDelta applyAdlTarget(ExecuteAdlCommand command, TradingRuntimeState runtime,
+            LiquidationRuntime liquidation, CoreInstrumentState instrument, MarkPriceRuntime mark,
+            long positionKey, int settleAssetId) {
         PositionRuntime position = runtime.position(positionKey);
         if (position == null || position.marginMode() != command.marginMode()
                 || position.signedQuantitySteps() != command.expectedSignedQuantitySteps()
@@ -334,7 +432,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
         long nextQuantity = remainingAbs == 0 ? 0
                 : position.signedQuantitySteps() > 0 ? remainingAbs : Math.negateExact(remainingAbs);
         long releasedMargin = proportional(position.positionMarginUnits(), command.closeQuantitySteps(), currentAbs);
-        int settleAssetId = identities.assetId(instrument.settleAsset());
         BalanceRuntime balance = runtime.balance(command.targetUserId(), settleAssetId);
         if (balance == null) {
             throw new CoreStateRejectedException("BALANCE_NOT_FOUND", "required balance is missing");
@@ -360,6 +457,13 @@ public final class RuntimeDerivativeLiquidationProcessor {
                 Math.addExact(position.realizedPnlUnits(),
                         instrument.contractType().isOption() ? 0 : coverCapacity),
                 Math.subtractExact(position.positionMarginUnits(), releasedMargin));
+        runtime.replaceBalance(nextBalance);
+        runtime.replacePosition(positionKey, nextPosition);
+        runtime.advanceUserRevision(command.targetUserId());
+        return treasuryDelta;
+    }
+
+    private static void completeAdlLiquidation(ExecuteAdlCommand command, TradingRuntimeState runtime) {
         LiquidationRuntime current = runtime.liquidation(command.liquidationId());
         long nextDeficit = Math.subtractExact(current.deficitUnits(), command.coveredUnits());
         CoreLiquidationState.Status nextStatus = nextDeficit == 0
@@ -370,19 +474,7 @@ public final class RuntimeDerivativeLiquidationProcessor {
                 current.triggerPriceSequence(), current.signedQuantitySteps(), current.closeQuantitySteps(),
                 nextDeficit, current.executionPriceTicks(), current.liquidationFeeRatePpm(),
                 current.liquidationFeeUnits(), nextStatus, 0);
-        runtime.executeOwnerSettlements(List.of(command.targetUserId(), current.userId()), ignored -> {
-            if (runtime.currentLaneOwns(command.targetUserId())) {
-                runtime.replaceBalance(nextBalance);
-                runtime.replacePosition(positionKey, nextPosition);
-                runtime.advanceUserRevision(command.targetUserId());
-            }
-            if (runtime.currentLaneOwns(current.userId())) runtime.replaceLiquidation(nextLiquidation);
-            return null;
-        });
-        runtime.recordUserSettlementChanges(command.targetUserId(), settleAssetId, positionKey);
-        treasuryDelta.apply(runtime.treasury());
-        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
-        return runtime;
+        runtime.replaceLiquidation(nextLiquidation);
     }
 
     private static LiquidationCash applyCash(BalanceRuntime balance, CoreMarginMode marginMode,
@@ -424,26 +516,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
                 appliedPnl, collectedFee);
     }
 
-    private static void cancelOrders(TradingRuntimeState runtime, Collection<CoreOrderState> orders) {
-        if (orders == null || orders.isEmpty()) return;
-        runtime.executeOwnerSettlements(orders, CoreOrderState::userId, ignored -> {
-            for (CoreOrderState order : orders) {
-                if (order == null || !runtime.currentLaneOwns(order.userId())) continue;
-                OrderRuntime current = runtime.order(order.orderId());
-                if (current == null || current.canceled() || current.remainingQuantitySteps() == 0
-                        || current.userId() != order.userId()) {
-                    throw new IllegalArgumentException("runtime liquidation cancellation requires open orders");
-                }
-                ReservationRuntime reservation = runtime.reservation(order.orderId());
-                if (reservation == null) {
-                    throw new IllegalStateException("runtime liquidation reservation is missing: " + order.orderId());
-                }
-                runtime.cancelOrder(order.orderId(), order.userId(), reservation.reservedUnits());
-            }
-            return null;
-        });
-    }
-
     private static boolean executable(TradingRuntimeState runtime, LiquidationRuntime liquidation,
                                       RuntimeIdentityRegistry identities) {
         String symbol = identities.symbol(liquidation.symbolId());
@@ -459,11 +531,6 @@ public final class RuntimeDerivativeLiquidationProcessor {
                 && position.signedQuantitySteps() == liquidation.signedQuantitySteps()
                 && risk != null && risk.priceSequence() == liquidation.triggerPriceSequence()
                 && risk.status() == CoreRiskStatus.LIQUIDATION;
-    }
-
-    private static long revisionAfterCancellation(long revision,
-                                                  Collection<CoreOrderState> canceledOrders) {
-        return Math.addExact(revision, canceledOrders == null || canceledOrders.isEmpty() ? 1 : 2);
     }
 
     private static void validatePrice(TradingRuntimeState runtime, LiquidationRuntime liquidation,

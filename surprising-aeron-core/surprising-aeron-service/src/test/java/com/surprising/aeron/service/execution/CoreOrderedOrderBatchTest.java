@@ -80,8 +80,9 @@ class CoreOrderedOrderBatchTest {
         }
     }
 
-    @Test
-    void spotAmendReusesLockedFundsAndRejectsUnaffordableIncreaseBeforeMatching() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void spotAmendReusesLockedFundsAndRejectsUnaffordableIncreaseBeforeMatching(boolean asynchronous) throws Exception {
         try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, 1_000, 1);
@@ -93,10 +94,13 @@ class CoreOrderedOrderBatchTest {
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
                             place(85_001, "funds-original", 1_000))))));
 
-            CoreResponse rejected = drainBatch(state, command(CoreMessageType.AMEND_ORDER_BATCH, UUID.randomUUID(), 5,
+            long handoffBefore = (long) field(state.runtimeState, "laneHandoffEpoch");
+            CoreMessage rejectedCommand = command(CoreMessageType.AMEND_ORDER_BATCH, UUID.randomUUID(), 5,
                     TradingOrderBatchCodec.encodeAmendOrderBatch(new AmendOrderBatchCommand(List.of(
                             new AmendOrderCommand(85_001, 85_002, "unaffordable", 1_100L, 1L,
-                                    CoreTimeInForce.GTC, false))))));
+                                    CoreTimeInForce.GTC, false)))));
+            CoreResponse rejected = asynchronous ? CoreTestCompletion.applyAsynchronously(state, rejectedCommand)
+                    : drainBatch(state, rejectedCommand);
             var item = TradingOrderBatchCodec.decodeResult(rejected.data()).items().getFirst();
             assertThat(item.status()).isEqualTo(ResponseStatus.REJECTED);
             assertThat(item.resultCode()).isEqualTo(CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
@@ -105,10 +109,14 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.tradingState().order(85_000)).isNotNull();
             assertThat(state.tradingState().order(85_002)).isNull();
 
-            CoreResponse applied = drainBatch(state, command(CoreMessageType.AMEND_ORDER_BATCH, UUID.randomUUID(), 6,
+            CoreMessage appliedCommand = command(CoreMessageType.AMEND_ORDER_BATCH, UUID.randomUUID(), 6,
                     TradingOrderBatchCodec.encodeAmendOrderBatch(new AmendOrderBatchCommand(List.of(
                             new AmendOrderCommand(85_001, 85_003, "affordable", 900L, 1L,
-                                    CoreTimeInForce.GTC, false))))));
+                                    CoreTimeInForce.GTC, false)))));
+            CoreResponse applied = asynchronous ? CoreTestCompletion.applyAsynchronously(state, appliedCommand)
+                    : drainBatch(state, appliedCommand);
+            if (asynchronous) assertThat((long) field(state.runtimeState, "laneHandoffEpoch"))
+                    .as("amend preflight and reservation stay on the permanent Lane").isEqualTo(handoffBefore);
             assertThat(TradingOrderBatchCodec.firstNonAppliedItem(applied, 1)).isEqualTo(-1);
             assertThat(state.tradingState().order(85_001)).isNull();
             var balance = state.tradingState().user(1001).balances().get("USDT");
@@ -160,7 +168,7 @@ class CoreOrderedOrderBatchTest {
                     1001, identities.assetId("BTC"), Long.MAX_VALUE, 0));
 
             Throwable failure = org.assertj.core.api.Assertions.catchThrowable(() ->
-                    state.completeMatching(sequence, matching, 2_000, 6));
+                    completeEventually(state, sequence, matching, 2_000, 6));
             assertThat(failure).isInstanceOf(
                     com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class)
                     .hasRootCauseInstanceOf(ArithmeticException.class);
@@ -223,8 +231,7 @@ class CoreOrderedOrderBatchTest {
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(orders)));
             assertThat(state.apply(message).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             long sequence = state.matchingSequence(message.header().commandId());
-            Map<Long, Object> batches = field(state.batches, "pendingOrderBatches");
-            assertThat((boolean) field(batches.get(sequence), "pipelined")).isTrue();
+            assertThat(state.pendingMatching.get(sequence).orderBatch.pipelined).isTrue();
             CoreResponse response = drainBatchAfterFirst(state, message, sequence);
             assertThat(TradingOrderBatchCodec.firstNonAppliedItem(response, 4)).isEqualTo(-1);
             var trading = state.tradingState();
@@ -246,8 +253,9 @@ class CoreOrderedOrderBatchTest {
         }
     }
 
-    @Test
-    void spotBatchPreservesEarlierFillProceedsForLaterItemAdmission() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void spotBatchPreservesEarlierFillProceedsForLaterItemAdmission(boolean asynchronous) throws Exception {
         try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
             applySpotInstrument(state);
             applyBalance(state, 1001, "BTC", 1, 1);
@@ -257,9 +265,14 @@ class CoreOrderedOrderBatchTest {
                             place(83_000, "proceeds-maker", 1_000)))), 1002));
             var sell = linearOrder(83_001, "sell-first", CoreOrderSide.SELL, 1_000, 1);
             var buy = place(83_002, "buy-with-proceeds", 1_000);
-            CoreResponse response = drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH,
+            CoreMessage batch = command(CoreMessageType.PLACE_ORDER_BATCH,
                     UUID.randomUUID(), 4, TradingOrderBatchCodec.encodePlaceOrderBatch(
-                            new PlaceOrderBatchCommand(List.of(sell, buy)))));
+                            new PlaceOrderBatchCommand(List.of(sell, buy))));
+            long handoffBefore = (long) field(state.runtimeState, "laneHandoffEpoch");
+            CoreResponse response = asynchronous ? CoreTestCompletion.applyAsynchronously(state, batch)
+                    : drainBatch(state, batch);
+            if (asynchronous) assertThat((long) field(state.runtimeState, "laneHandoffEpoch"))
+                    .as("sequential admission must not borrow Lane ownership").isEqualTo(handoffBefore);
             assertThat(TradingOrderBatchCodec.firstNonAppliedItem(response, 2)).isEqualTo(-1);
             var trading = state.tradingState();
             assertThat(trading.order(83_000)).isNull();
@@ -317,6 +330,51 @@ class CoreOrderedOrderBatchTest {
                 assertThat(trading.user(1001).balances().get("USDT").lockedUnits()).isEqualTo(900);
                 assertThat(trading.user(1002).balances().get("USDT").availableUnits()).isEqualTo(1_000);
                 assertThat(trading.user(1001).balances().get("BTC").availableUnits()).isOne();
+            }
+        }
+    }
+
+    @Test
+    void deferredCommandsAndRejectedBatchAdvanceBySequenceAcrossBothQueueHeads() {
+        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, 100_000);
+            var commands = List.of(
+                    command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 2,
+                            TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                                    place(82_001, "head-first-a", 1_000), place(82_002, "head-first-b", 1_000))))),
+                    command(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 3,
+                            TradingCommandCodec.encodePlaceOrder(place(82_003, "head-deferred-a", 1_000))),
+                    command(CoreMessageType.CANCEL_ORDER_BATCH, UUID.randomUUID(), 4,
+                            TradingOrderBatchCodec.encodeCancelOrderBatch(new CancelOrderBatchCommand(List.of(
+                                    new CancelOrderCommand(99_901), new CancelOrderCommand(99_902))))),
+                    command(CoreMessageType.PLACE_ORDER, UUID.randomUUID(), 5,
+                            TradingCommandCodec.encodePlaceOrder(place(82_004, "head-deferred-b", 1_000))),
+                    command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 6,
+                            TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                                    place(82_005, "head-last", 1_000))))));
+            var expected = new ArrayList<Long>();
+            for (var message : commands) {
+                assertThat(state.apply(message).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+                expected.add(state.matchingSequence(message.header().commandId()));
+            }
+            assertThat(state.admissions.deferredMatching).hasSize(2);
+            var completed = new ArrayList<Long>();
+            long deadline = System.nanoTime() + 5_000_000_000L;
+            while (state.pendingMatchingCount() != 0 && System.nanoTime() < deadline) {
+                state.commits.commitReadyMatching(256, 2_000, 6, false,
+                        (sequence, response) -> completed.add(sequence));
+            }
+            assertThat(completed).containsExactlyElementsOf(expected);
+            assertThat(state.admissions.deferredMatching).isEmpty();
+            assertThat(state.batches.hasPendingBatches()).isFalse();
+            assertThat(state.pendingMatchingCount()).isZero();
+            assertThat(TradingOrderBatchCodec.decodeResult(
+                    state.commandResults().get(commands.get(2).header().commandId()).responseData()).items())
+                    .allSatisfy(item -> assertThat(item.status()).isEqualTo(ResponseStatus.REJECTED));
+            for (long id = 82_001; id <= 82_005; id++) assertThat(state.runtimeState.order(id)).isNotNull();
+            try (var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
             }
         }
     }
@@ -747,6 +805,7 @@ class CoreOrderedOrderBatchTest {
             long fatalSequence = state.matchingSequence(fatalId);
             var acceptedFirst = awaitMatching(state, fatalSequence);
             assertThat(state.completeMatching(fatalSequence, acceptedFirst, 2_900, 4)).isNull();
+            finishCurrentItemSettlement(state, fatalSequence, 2_900, 4);
             assertThat(runtime.order(11_004)).isNotNull();
             LaneCommandContextRing contexts = field(state, "laneCommandContexts");
             LaneCommandContextRing.Context claimedContext = contexts.required(fatalSequence);
@@ -1016,6 +1075,9 @@ class CoreOrderedOrderBatchTest {
                     TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
                             place(15_101, "guard-first", 1_000)))));
             assertThat(state.apply(batch).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            // Lane admission precedes the Owner batch commit scope, including for one item.
+            long sequence = state.matchingSequence(batch.header().commandId());
+            assertThat(state.completeMatching(sequence, awaitMatching(state, sequence), 2_000, 3)).isNull();
 
             assertThatThrownBy(() -> runtime.putMarkPrice(new MarkPriceRuntime(
                     symbolId, 1, 50_000, 2, 2)))
@@ -1050,7 +1112,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.apply(batch).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             CoreFaults.laneMask(state, 0);
             long sequence = state.matchingSequence(commandId);
-            Throwable failure = org.assertj.core.api.Assertions.catchThrowable(() -> state.completeMatching(
+            Throwable failure = org.assertj.core.api.Assertions.catchThrowable(() -> completeEventually(state,
                     sequence, awaitMatching(state, sequence), 2_000, 3));
 
             assertThat(failure).isInstanceOf(
@@ -1154,6 +1216,7 @@ class CoreOrderedOrderBatchTest {
         assertThat(state.apply(batch).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
         long sequence = state.matchingSequence(commandId);
         assertThat(state.completeMatching(sequence, awaitMatching(state, sequence), 2_000, 3)).isNull();
+        finishCurrentItemSettlement(state, sequence, 2_000, 3);
         long[] matcherSequences = ((long[]) field(state.commits, "appliedMatcherSequences")).clone();
         long[] matcherPrefixes = ((long[]) field(state.commits, "appliedMatcherPrefixDigests")).clone();
         Throwable divergence = org.assertj.core.api.Assertions.catchThrowable(() -> state.completeMatching(
@@ -1201,6 +1264,52 @@ class CoreOrderedOrderBatchTest {
         }
     }
 
+    @Test
+    void sequentialNativeAndAdmissionRejectionsReleaseFundsWithoutLaneHandoff() throws Exception {
+        try (var state = new TradingCoreRuntime(ProductLine.SPOT)) {
+            applySpotInstrument(state);
+            applyBalance(state, 1001, "BTC", 1, 1);
+            applyBalance(state, 1002, 2000, 2);
+            drainBatch(state, command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 3,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            place(97_000, "reject-maker", 1000)))), 1002));
+            var postOnly = new PlaceOrderCommand(97_001, "BTC-USDT", 1, CoreOrderSide.SELL, 1000, 1, false,
+                    CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTX,
+                    true, "reject-post-only");
+            var message = command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 4,
+                    TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(
+                            postOnly, place(97_002, "reject-funds", 1000)))));
+            long handoff = (long) field(state.runtimeState, "laneHandoffEpoch");
+            var result = CoreTestCompletion.applyAsynchronously(state, message);
+            var items = TradingOrderBatchCodec.decodeResult(result.data()).items();
+            assertThat(items).extracting(CoreOrderBatchResult.Item::status)
+                    .containsExactly(ResponseStatus.REJECTED, ResponseStatus.REJECTED);
+            assertThat(items).extracting(CoreOrderBatchResult.Item::resultCode)
+                    .containsExactly(CoreResultCode.MATCHING_REJECTED, CoreResultCode.INSUFFICIENT_AVAILABLE_BALANCE);
+            assertThat((long) field(state.runtimeState, "laneHandoffEpoch")).isEqualTo(handoff);
+            var user = state.tradingState().user(1001);
+            assertThat(user.reservations()).isEmpty();
+            assertThat(user.balances().get("BTC").availableUnits()).isOne();
+            assertThat(user.balances().get("BTC").lockedUnits()).isZero();
+            assertThat(state.tradingState().order(97_000)).isNotNull();
+            try (var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, state.snapshot())) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(state.tradingState().businessStateHash());
+            }
+        }
+    }
+
+    private static void finishCurrentItemSettlement(TradingCoreRuntime state, long sequence,
+                                                     long timestamp, long position) {
+        long deadline = System.nanoTime() + 5_000_000_000L;
+        OrderBatchPending batch = state.batches.batch(sequence);
+        while (batch.itemSettlementEvent != null || batch.itemAdmission != null) {
+            assertThat(System.nanoTime()).isLessThan(deadline);
+            if (!batch.started) state.batches.activateOrderBatch(batch, state.pendingMatching.get(sequence), true);
+            else state.completeMatching(sequence, batch.lastMatchingResult, timestamp, position);
+            Thread.onSpinWait();
+        }
+    }
+
     private static CoreResponse drainBatch(TradingCoreRuntime state, CoreMessage batch) {
         CoreResponse initial = state.apply(batch);
         if (initial.resultCode() != CoreResultCode.MATCHING_PENDING) return initial;
@@ -1240,6 +1349,10 @@ class CoreOrderedOrderBatchTest {
         com.surprising.aeron.service.matching.CoreMatchingResult matching = null;
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (matching == null && System.nanoTime() < deadline) {
+            PendingMatching head = state.pendingMatching.get(state.pendingMatching.firstSequence());
+            if (head != null && head.orderBatch != null && !head.orderBatch.started)
+                state.batches.activateOrderBatch(head.orderBatch, head, true);
+            state.drainMatchingCompletions();
             matching = state.takeMatchingResult(sequence);
             if (matching == null) Thread.onSpinWait();
         }

@@ -8,6 +8,9 @@ final class ControlLaneDispatcher {
     ControlLaneDispatcher(TradingRuntimeState owner) { this.owner = owner; }
 
     boolean pending() { return controlLaneWorkPending; }
+    boolean targetsLane(int laneId) {
+        return controlLaneWorkPending && (pendingControlLaneMask & (1L << laneId)) != 0;
+    }
 
     /** 当前控制阶段唯一在途的 Lane 任务，复用每条 Lane 的任务及结果槽。 */
     private long pendingControlLaneMask;
@@ -25,6 +28,7 @@ final class ControlLaneDispatcher {
         long validMask = owner.accountLanes.length == 64 ? -1L : (1L << owner.accountLanes.length) - 1;
         if (controlLaneWorkPending || laneMask == 0 || (laneMask & ~validMask) != 0 || operation == null || type == null)
             throw new IllegalStateException("invalid control Lane dispatch");
+        owner.ensureLaneWorkerCapacity(laneMask);
         // 后续账户操作在原有永久 Lane 线程执行；owner 只保留全局状态写入权。
         owner.releaseOwnerLaneAccess();
         operationType = type;
@@ -43,7 +47,7 @@ final class ControlLaneDispatcher {
         }
     }
 
-    /** 未就绪立即返回；全部任务完成后再交接，保证失败回滚不会与账户写入并发。 */
+    /** 未就绪立即返回；全部任务完成后收集，失败由命令续步派发 Lane 回滚。 */
     boolean poll() {
         owner.assertOwner();
         if (!controlLaneWorkPending) throw new IllegalStateException("no control Lane work");
@@ -51,18 +55,17 @@ final class ControlLaneDispatcher {
         for (int id = 0; id < owner.accountLanes.length; id++) {
             if ((pendingControlLaneMask & (1L << id)) != 0 && !owner.laneMutationTasks[id].completed) return false;
         }
-        boolean failed = false;
-        for (int id = 0; id < owner.accountLanes.length; id++)
-            if ((pendingControlLaneMask & (1L << id)) != 0 && owner.laneMutationTasks[id].failure != null) failed = true;
-        if (failed && owner.hasUncommittedCommandChanges() && !owner.tryAcquireOwnerLaneAccess()) return false;
         long mask = pendingControlLaneMask;
         pendingControlLaneMask = 0;
         completedLaneMask = mask;
         controlLaneWorkPending = false;
         Throwable failure = null;
+        long revisionDelta = 0;
         for (int id = 0; id < owner.accountLanes.length; id++) {
             if ((mask & (1L << id)) == 0) continue;
             TradingRuntimeState.LaneMutationTask task = owner.laneMutationTasks[id];
+            revisionDelta = Math.addExact(revisionDelta, task.revisionDelta);
+            task.revisionDelta = 0;
             task.operation = null;
             task.indexedOperation = null;
             owner.flushPublishedChanges(id);
@@ -76,6 +79,8 @@ final class ControlLaneDispatcher {
         if (failure instanceof RuntimeException exception) throw exception;
         if (failure instanceof Error error) throw error;
         if (failure != null) throw new IllegalStateException("control Lane failed", failure);
+        if (revisionDelta != 0) owner.setMetadata(owner.productLine(),
+                Math.addExact(owner.revision(), revisionDelta));
         return true;
     }
 

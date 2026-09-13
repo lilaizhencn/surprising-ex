@@ -68,7 +68,16 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
 
     // Settlement Lanes read prepared keys while the owner prepares later sequences.
     private final Map<PositionIdentity, Long> positionKeys = new ConcurrentHashMap<>();
-    private final Map<Long, PositionIdentity> positions = new ConcurrentHashMap<>();
+    private final Map<Long, PositionEntry> positions = new ConcurrentHashMap<>();
+    /** A Lane output retains its identity until ordered publication consumes that output. */
+    private static final class PositionEntry extends java.util.concurrent.atomic.AtomicInteger {
+        final PositionIdentity identity;
+        boolean allocationRecorded; // Owner only; restored identities have already been recorded.
+        PositionEntry(PositionIdentity identity, boolean recorded) {
+            this.identity = identity;
+            this.allocationRecorded = recorded;
+        }
+    }
     private final LongLongHashMap positionAllocationKeys = new LongLongHashMap();
     private final LongLongHashMap positionKeyAllocations = new LongLongHashMap();
     private int nextAssetId;
@@ -283,14 +292,53 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
         if (existing != null) return existing;
         PositionIdentity identity = new PositionIdentity(userId, positionKey);
         long key = deterministicPositionKey(identity);
-        PositionIdentity collision = positions.putIfAbsent(key, identity);
-        if (collision != null && !collision.equals(identity)) {
+        PositionEntry entry = new PositionEntry(identity, false);
+        PositionEntry collision = positions.putIfAbsent(key, entry);
+        if (collision != null && !collision.identity.equals(identity)) {
             throw new IllegalStateException("deterministic position identity collision");
         }
         positionKeys.put(identity, key);
+        recordPositionAllocation(key, collision == null ? entry : collision);
+        return key;
+    }
+
+    /** Called once per position in a Lane's existing settlement delta, never per fill. */
+    long retainPositionInLane(AccountLaneState lane, long userId, String name) {
+        lane.assertOwner();
+        if (clientTopology.accountLaneId(userId) != lane.laneId() || name == null || name.isBlank())
+            throw new IllegalArgumentException("position identity belongs to another Lane");
+        long key = deterministicKey(userId, name);
+        while (true) {
+            PositionEntry entry = positions.get(key);
+            if (entry == null) {
+                PositionEntry created = new PositionEntry(new PositionIdentity(userId, name), false);
+                entry = positions.putIfAbsent(key, created);
+                if (entry == null) entry = created;
+            }
+            if (entry.identity.userId() != userId || !entry.identity.positionKey().equals(name))
+                throw new IllegalStateException("deterministic position identity collision");
+            int uses = entry.get();
+            if (uses < 0) { Thread.onSpinWait(); continue; }
+            if (!entry.compareAndSet(uses, Math.incrementExact(uses))) continue;
+            positionKeys.putIfAbsent(entry.identity, key);
+            return key;
+        }
+    }
+
+    void releasePublishedPosition(long key) {
+        assertOwner();
+        PositionEntry entry = positions.get(key);
+        if (entry == null || entry.get() <= 0)
+            throw new IllegalStateException("position publication has no retained identity");
+        recordPositionAllocation(key, entry);
+        if (entry.decrementAndGet() < 0) throw new IllegalStateException("position identity released twice");
+    }
+
+    private void recordPositionAllocation(long key, PositionEntry entry) {
+        if (entry.allocationRecorded) return;
         trackAllocation(positionAllocationKeys, positionKeyAllocations, nextPositionKey++, key);
         dictionaryVersion = Math.incrementExact(dictionaryVersion);
-        return key;
+        entry.allocationRecorded = true;
     }
 
     public Long findPositionKey(long userId, String positionKey) {
@@ -316,16 +364,22 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
             if (positionKeyAllocations.removeKeyIfAbsent(key, allocation) != allocation) {
                 throw new IllegalStateException("position identity allocation index is inconsistent");
             }
-            PositionIdentity identity = positions.remove(key);
+            PositionEntry entry = positions.get(key);
+            if (entry != null && !entry.compareAndSet(0, -1))
+                throw new IllegalStateException("cannot roll back a Lane-owned position identity");
+            PositionIdentity identity = entry == null ? null : entry.identity;
             if (identity == null || !Long.valueOf(key).equals(positionKeys.remove(identity))) {
                 throw new IllegalStateException("position identity checkpoint is inconsistent");
             }
+            positions.remove(key, entry);
         }
     }
 
     private static long deterministicPositionKey(PositionIdentity identity) {
         return deterministicKey(identity.userId(), identity.positionKey());
     }
+
+    static long positionIdentityKey(long userId, String name) { return deterministicKey(userId, name); }
 
     long preparedPositionKey(long userId, String positionKey) {
         Long key = findPositionIdentity(userId, positionKey);
@@ -334,7 +388,8 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
     }
 
     public String positionKey(long userId, long positionKey) {
-        PositionIdentity identity = positions.get(positionKey);
+        PositionEntry entry = positions.get(positionKey);
+        PositionIdentity identity = entry == null ? null : entry.identity;
         if (identity == null || identity.userId() != userId) {
             throw new IllegalArgumentException("unknown runtime position key: " + userId + '/' + positionKey);
         }
@@ -342,7 +397,8 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
     }
 
     public PositionIdentity positionIdentity(long positionKey) {
-        PositionIdentity identity = positions.get(positionKey);
+        PositionEntry entry = positions.get(positionKey);
+        PositionIdentity identity = entry == null ? null : entry.identity;
         if (identity == null) {
             throw new IllegalArgumentException("unknown runtime position key: " + positionKey);
         }
@@ -364,9 +420,11 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
 
     public void releasePositionKey(long positionKey) {
         assertOwner();
-        PositionIdentity identity = positions.remove(positionKey);
-        if (identity == null) return;
-        positionKeys.remove(identity, positionKey);
+        PositionEntry entry = positions.get(positionKey);
+        if (entry == null || !entry.compareAndSet(0, -1)) return;
+        // Remove the forward entry before permitting another generation to acquire this key.
+        positionKeys.remove(entry.identity, positionKey);
+        positions.remove(positionKey, entry);
         removeAllocation(positionAllocationKeys, positionKeyAllocations, positionKey);
     }
 
@@ -457,7 +515,7 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
         });
         snapshot.positionKeys().forEach((identity, key) -> {
             registry.positionKeys.put(identity, key);
-            registry.positions.put(key, identity);
+            registry.positions.put(key, new PositionEntry(identity, true));
         });
         registry.nextAssetId = snapshot.nextAssetId();
         registry.nextSymbolId = snapshot.nextSymbolId();

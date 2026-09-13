@@ -211,7 +211,12 @@ public final class ContinuousTradingClusterService implements ClusteredService {
                     }
                     work++;
                 }
-                if (initialized && !stopping) work += processor.pollCommands();
+                // Avoid rebuilding the full command scope on an empty Owner turn.  In-flight
+                // commands and matcher/Lane completion notifications remain eligible; a truly
+                // empty turn goes straight to OwnerIdleStrategy's bounded backoff.
+                if (initialized && !stopping && processor.ownerWorkAvailable()) {
+                    work += processor.pollCommands();
+                }
                 ownerIdle.idle(work, processor.pendingCommandCount() != 0);
             }
         } catch (Throwable fatal) { failure = fatal; }

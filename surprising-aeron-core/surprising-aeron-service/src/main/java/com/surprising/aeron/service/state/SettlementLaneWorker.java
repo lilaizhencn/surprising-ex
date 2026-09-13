@@ -64,7 +64,7 @@ final class SettlementLaneWorker implements AutoCloseable {
     }
 
     /** owner 请求的交接代次；同一代次只派发一次预分配任务。 */
-    private long requestedHandoff;
+    private volatile long requestedHandoff;
     /** Lane 完成此前所有任务并释放所有权后发布的代次。 */
     private volatile long completedHandoff;
     /** owner 释放临时所有权后发布的恢复代次。 */
@@ -104,7 +104,7 @@ final class SettlementLaneWorker implements AutoCloseable {
     }
 
     /** 同一次休眠只唤醒一次；CAS失败说明已通知或Lane已恢复，不能省略消费者的重读。 */
-    private void signalWork() {
+    void signalWork() {
         if (waitStrategy == WaitStrategy.BLOCKING && parkRequested
                 && PARK_REQUESTED.compareAndSet(this, true, false)) LockSupport.unpark(thread);
     }
@@ -114,7 +114,7 @@ final class SettlementLaneWorker implements AutoCloseable {
     }
 
     boolean hasCapacity() {
-        return producerSequence.value - consumerSequence.value < commands.length;
+        return running && failure == null && producerSequence.value - consumerSequence.value < commands.length;
     }
 
     Throwable failure() {
@@ -155,16 +155,19 @@ final class SettlementLaneWorker implements AutoCloseable {
                     int index = (int) next & indexMask;
                     Command command = commands[index];
                     if (command == null) throw new IllegalStateException("settlement lane publication gap");
-                    // The command reference is now local, so the ring slot can be released before
-                    // execution publishes its terminal notification. This makes queue depth and
-                    // capacity describe queued work only; observing terminal completion can no
-                    // longer race the worker's trailing cursor bookkeeping.
-                    commands[index] = null;
-                    next++;
-                    consumerSequence.value = next;
-                    command.execute(lane);
-                    idleSpins = 0;
-                    continue;
+                    if (ready(command)) {
+                        // The command reference is now local, so the ring slot can be released before
+                        // execution publishes its terminal notification. This makes queue depth and
+                        // capacity describe queued work only; observing terminal completion can no
+                        // longer race the worker's trailing cursor bookkeeping.
+                        commands[index] = null;
+                        next++;
+                        consumerSequence.value = next;
+                        command.execute(lane);
+                        idleSpins = 0;
+                        continue;
+                    }
+                    if (!running) throw new IllegalStateException("Lane stopped before its matcher payload arrived");
                 }
                 switch (waitStrategy) {
                     case BUSY_SPIN -> Thread.onSpinWait();
@@ -176,7 +179,8 @@ final class SettlementLaneWorker implements AutoCloseable {
                         } else {
                             parkRequested = true;
                             try {
-                                if (running && next >= producerSequence.value) LockSupport.park(this);
+                                if (running && (next >= producerSequence.value
+                                        || !ready(commands[(int) next & indexMask]))) LockSupport.park(this);
                             } finally {
                                 parkRequested = false;
                             }
@@ -199,6 +203,10 @@ final class SettlementLaneWorker implements AutoCloseable {
         if (laneFailure instanceof RuntimeException runtimeFailure) throw runtimeFailure;
         if (laneFailure instanceof Error error) throw error;
         if (laneFailure != null) throw new IllegalStateException("account lane failed", laneFailure);
+    }
+
+    private static boolean ready(Command command) {
+        return !(command instanceof MatcherSettlementEvent event) || event.ready();
     }
 
     @Override

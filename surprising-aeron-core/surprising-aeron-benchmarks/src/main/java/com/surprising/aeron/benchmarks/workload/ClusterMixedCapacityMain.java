@@ -17,7 +17,8 @@ import org.HdrHistogram.Histogram;
  * All state changes and reads go through the actual cluster; no local Core is instantiated.
  */
 public final class ClusterMixedCapacityMain implements AutoCloseable {
-    static final int USERS = 1000, SYMBOLS = 256, BATCH = 20, WINDOW = 256;
+    static final int USERS = 1000, SYMBOLS = 128, WINDOW = 256;
+    private final int batchSize;
     static final long BALANCE = 1_000_000_000L;
     private final List<Long> users = users();
     private final AeronClientPool client;
@@ -41,11 +42,19 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     private long totalCycles, measuredCycles, lastReport, reportTerminal, started, triggerExecutions;
     private int lifecycleCursor;
     private boolean measured, lossCompleted;
+    private boolean liquidationCancellationBoundary;
     private long adminRetriesBefore;
 
     public ClusterMixedCapacityMain() { this(0); }
 
     ClusterMixedCapacityMain(int controlPageSize) {
+        this(controlPageSize, Integer.getInteger("surprising.aeron.capacity-batch-size", 20));
+    }
+
+    ClusterMixedCapacityMain(int controlPageSize, int batchSize) {
+        if (batchSize != 1 && batchSize != 20)
+            throw new IllegalArgumentException("batch size must be 1 or 20");
+        this.batchSize = batchSize;
         if (controlPageSize < 0 || controlPageSize > 64)
             throw new IllegalArgumentException("control page size must be in [0,64]");
         this.controlPageSize = controlPageSize;
@@ -60,10 +69,10 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
                 System.getProperty("surprising.aeron.egress-hostname"), Duration.ofSeconds(30),
                 "mixed-" + seed, UUID.randomUUID().toString(), capacity);
         System.out.printf("mixedConfig globalWindow=%d sessionWindow=%d commandSessions=1 reservedQuerySessions=1 batchSize=%d tradingStream=%s%n",
-                window, sessionWindow, BATCH, tradingStream);
+                window, sessionWindow, batchSize, tradingStream);
         System.out.printf("mixedControlPageSize=%d%n", controlPageSize);
         System.out.printf("mixedTradingProfile=%s expectedFillsPerCycle=%d%n",
-                fillHeavy ? "FILL_HEAVY" : "MIXED", SYMBOLS * BATCH * (fillHeavy ? 2 : 1));
+                fillHeavy ? "FILL_HEAVY" : "MIXED", SYMBOLS * batchSize * (fillHeavy ? 2 : 1));
         for (int i=0;i<SYMBOLS;i++) { mark[i]=100; fundingId[i]=10_000+i; }
     }
 
@@ -90,6 +99,14 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
             run.measureRun();
             run.finishMeasuredRun();
         }
+    }
+
+    /** Finite control lifecycle: includes the real insurance/ADL path and its complete account audit. */
+    void verifyLossBoundary() {
+        liquidationCancellationBoundary = true;
+        setup();
+        if (!lossCompleted) lossLifecycle();
+        verify();
     }
 
     void prepareMeasuredRun() {
@@ -128,7 +145,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
 
     private long retail(int i) { return users.get(i+1); }
     // Setup-only coverage gate: this real-Cluster JMH run must exercise exact dependency
-    // checks, twenty-item decode/encode, terminal index churn and realtime terminal emission.
+    // checks, configured batch decode/encode, terminal index churn and realtime terminal emission.
     void verifyDependencyCollisionCoverage() {
         long accounts = 0, symbols = 0;
         int accountCollisions = 0, symbolCollisions = 0;
@@ -140,10 +157,10 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
             accounts |= account;
             symbols |= symbol;
         }
-        if (accountCollisions == 0 || symbolCollisions == 0 || BATCH != 20)
+        if (accountCollisions == 0 || symbolCollisions == 0)
             throw new IllegalStateException("owner optimization workload coverage missing");
         System.out.printf("ownerPathCoverage=PASS makerMaskCollisions=%d symbolMaskCollisions=%d batchSize=%d%n",
-                accountCollisions, symbolCollisions, BATCH);
+                accountCollisions, symbolCollisions, batchSize);
     }
     private long positionMaker(int i) { return users.get(USERS+1+i); }
     private long maker(int i) { return users.get(USERS+1+SYMBOLS+i); }
@@ -172,7 +189,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
             price(i,100);
         }
         for(long user:users) send(CoreMessageType.ADJUST_BALANCE,user,
-                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",user==users.getFirst()?100:BALANCE)),1,null);
+                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT",user==users.getFirst()?Long.getLong("surprising.aeron.mixed-loss-balance", 100L):BALANCE)),1,null);
         send(CoreMessageType.ADJUST_INSURANCE_FUND,0,TradingCommandCodec.encodeAdjustInsuranceFund(
                 new AdjustInsuranceFundCommand("USDT",25)),1,null);
         long[] quantities=new long[SYMBOLS];
@@ -181,6 +198,15 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         for(int i=0;i<SYMBOLS;i++) place(i,positionMaker(i),CoreOrderSide.SELL,100,quantities[i],CoreTimeInForce.GTC);
         for(int u=0;u<USERS;u++)for(int p=0;p<1+u%5;p++)place((u+p)%SYMBOLS,retail(u),CoreOrderSide.BUY,100,1+((u+p)&3),CoreTimeInForce.IOC);
         place(SYMBOLS-1,users.getFirst(),CoreOrderSide.BUY,100,10,CoreTimeInForce.IOC);
+        if (liquidationCancellationBoundary) {
+            for (int n = 0; n < 3; n++) {
+                long id = nextOrder();
+                send(CoreMessageType.PLACE_ORDER, users.getFirst(), TradingCommandCodec.encodePlaceOrder(
+                        new PlaceOrderCommand(id, symbol(SYMBOLS-1), 1, CoreOrderSide.SELL, 110, 1, true,
+                                CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+                                CoreTimeInForce.GTC, false, expectedClientOrderId(id))), 1, null);
+            }
+        }
         for(int u=0;u<USERS;u++)for(int o=0;o<u%11;o++)place((u+o%(1+u%5))%SYMBOLS,retail(u),CoreOrderSide.BUY,90-o%10,1,CoreTimeInForce.GTC);
         price(SYMBOLS-1,1);
         drain();
@@ -294,9 +320,9 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         return id;
     }
     private long[] batch(int i,long user,CoreOrderSide side,long price,long quantity,CoreTimeInForce tif) {
-        refresh(i);var commands=new ArrayList<PlaceOrderCommand>(BATCH);long[] ids=new long[BATCH];
-        for(int n=0;n<BATCH;n++) { ids[n]=nextOrder();commands.add(order(ids[n],symbol(i),side,price,quantity,tif)); }
-        send(CoreMessageType.PLACE_ORDER_BATCH,user,TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(commands)),BATCH,
+        refresh(i);var commands=new ArrayList<PlaceOrderCommand>(batchSize);long[] ids=new long[batchSize];
+        for(int n=0;n<batchSize;n++) { ids[n]=nextOrder();commands.add(order(ids[n],symbol(i),side,price,quantity,tif)); }
+        send(CoreMessageType.PLACE_ORDER_BATCH,user,TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(commands)),batchSize,
                 r -> { long count=validateBatch(r,ids,user,symbol(i));if(measured)fills+=count; });
         return ids;
     }
@@ -366,9 +392,26 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
                 CoreLiquidationWorkCodec.encodeQuery(ProductLine.LINEAR_PERPETUAL,purpose,0,1000,1_048_576)).data());
     }
     private void drainRisk() {
+        int batchPages = 0, continuationPages = 0;
         for(int pages=0;pages<10000;pages++) {
-            if(!work(CoreLiquidationWorkView.Purpose.EXECUTION).riskScanPending())return;
-            execute(CoreMessageType.CONTINUE_RISK_SCAN,0,TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(controlPageSize == 0 ? 64 : controlPageSize)));
+            var pending = work(CoreLiquidationWorkView.Purpose.EXECUTION);
+            if(!pending.riskScanPending()) {
+                System.out.println("mixedRiskDrain=PASS batchPages=" + batchPages + " continuationPages=" + continuationPages);
+                return;
+            }
+            int budget = controlPageSize == 0 ? 64 : controlPageSize;
+            if ((pages & 1) == 0) {
+                // Exercise final Lane participant collection after risk pages cross accounts/symbols.
+                execute(CoreMessageType.EXECUTE_LIQUIDATION_BATCH, 0,
+                        TradingCommandCodec.encodeExecuteLiquidationBatch(
+                                new ExecuteLiquidationBatchCommand(List.of(), ExecuteLiquidationBatchCommand.MAX_CANCEL_ORDERS,
+                                        0, pending.riskScanContinuation(), budget)));
+                batchPages++;
+            } else {
+                execute(CoreMessageType.CONTINUE_RISK_SCAN,0,
+                        TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(budget)));
+                continuationPages++;
+            }
         }
         throw new IllegalStateException("risk scan failed to drain");
     }
@@ -379,10 +422,22 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         var actions=work(CoreLiquidationWorkView.Purpose.EXECUTION).actions();
         if(actions.size()!=1 || actions.getFirst().userId()!=users.getFirst())throw new IllegalStateException("expected dedicated liquidation: "+actions);
         var a=actions.getFirst();
-        execute(CoreMessageType.EXECUTE_LIQUIDATION_BATCH,0,TradingCommandCodec.encodeExecuteLiquidationBatch(
-                new ExecuteLiquidationBatchCommand(List.of(new ExecuteLiquidationBatchAction(a.liquidationId(),a.userId(),a.symbol(),
-                        a.instrumentChangeId(),a.triggerPriceSequence(),a.markPriceTicks(),a.cursorOrderId())),
-                        ExecuteLiquidationBatchCommand.MAX_CANCEL_ORDERS,0,null,0)));
+        int cancellationPages = 0;
+        while (true) {
+            execute(CoreMessageType.EXECUTE_LIQUIDATION_BATCH,0,TradingCommandCodec.encodeExecuteLiquidationBatch(
+                    new ExecuteLiquidationBatchCommand(List.of(new ExecuteLiquidationBatchAction(a.liquidationId(),a.userId(),a.symbol(),
+                            a.instrumentChangeId(),a.triggerPriceSequence(),a.markPriceTicks(),a.cursorOrderId())),
+                            liquidationCancellationBoundary ? 1 : ExecuteLiquidationBatchCommand.MAX_CANCEL_ORDERS,0,null,0)));
+            cancellationPages++;
+            var remaining = work(CoreLiquidationWorkView.Purpose.EXECUTION).actions();
+            if (remaining.isEmpty()) break;
+            if (!liquidationCancellationBoundary || cancellationPages >= 3 || remaining.size() != 1)
+                throw new IllegalStateException("liquidation cancellation failed to progress");
+            a = remaining.getFirst();
+        }
+        if (liquidationCancellationBoundary && cancellationPages != 3)
+            throw new IllegalStateException("liquidation cancellation boundary not exercised");
+        System.out.println("mixedLiquidationCancellation=PASS pages=" + cancellationPages);
         var insurance=work(CoreLiquidationWorkView.Purpose.INSURANCE).resolutions();
         if(insurance.size()!=1)throw new IllegalStateException("insurance work missing: "+insurance);
         long available=treasury().stream().filter(x->x.asset().equals("USDT")).findFirst().orElseThrow().insuranceBalanceUnits();
@@ -454,7 +509,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     }
     private CoreUserStateView user(long id) { return CoreStateQueryCodec.decodeUserState(query(CoreMessageType.USER_STATE_QUERY,id,new byte[0]).data()); }
     private List<CoreTreasuryAssetView> treasury() { return CoreStateQueryCodec.decodeTreasuryState(query(CoreMessageType.TREASURY_STATE_QUERY,0,new byte[0]).data()); }
-    static long expectedFunds() { return (USERS+3L*SYMBOLS)*BALANCE+100+25; }
+    static long expectedFunds() { return (USERS+3L*SYMBOLS)*BALANCE+Long.getLong("surprising.aeron.mixed-loss-balance", 100L)+25; }
     static long treasuryFunds(CoreTreasuryAssetView t) {
         long sum=Math.addExact(t.feeBalanceUnits(),t.insuranceBalanceUnits());
         sum=Math.addExact(sum,t.liquidationFeeBalanceUnits());sum=Math.addExact(sum,t.fundingResidualBalanceUnits());
@@ -490,15 +545,15 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
             var openOrders = CoreStateQueryCodec.decodeOpenOrders(query(CoreMessageType.USER_OPEN_ORDERS_QUERY,id,
                     CoreStateQueryCodec.encodeOpenOrdersQuery(new CoreOpenOrdersQuery(instrument,0,1))).data());
             if (!openOrders.orders().isEmpty()) throw new IllegalStateException("HFT committed order index retained terminal orders user="+id);
-            var s=user(id);long expectedPosition=fillHeavy ? 0 : (id==maker(i)?-1:1)*totalCycles*BATCH;
+            var s=user(id);long expectedPosition=fillHeavy ? 0 : (id==maker(i)?-1:1)*totalCycles*batchSize;
             long actual=s.positions().stream().filter(p->p.symbol().equals(instrument)).mapToLong(CorePositionView::signedQuantitySteps).sum();
             if(actual!=expectedPosition||!s.reservations().isEmpty())throw new IllegalStateException("HFT position/reservation mismatch user="+id+" expected="+expectedPosition+" actual="+actual);
         }
         if(offered!=terminal||coreOffered!=coreTerminal||peak>window)throw new IllegalStateException("mixed terminal counters disagree");
         if(measuredCycles>0) {
-            if(fills!=measuredCycles*SYMBOLS*BATCH*(fillHeavy ? 2 : 1))throw new IllegalStateException("mixed actual fill count mismatch: "+fills);
-            requireItems(CoreMessageType.PLACE_ORDER_BATCH,measuredCycles*SYMBOLS*BATCH*3);
-            requireItems(CoreMessageType.CANCEL_ORDER_BATCH,measuredCycles*SYMBOLS*BATCH);
+            if(fills!=measuredCycles*SYMBOLS*batchSize*(fillHeavy ? 2 : 1))throw new IllegalStateException("mixed actual fill count mismatch: "+fills);
+            requireItems(CoreMessageType.PLACE_ORDER_BATCH,measuredCycles*SYMBOLS*batchSize*3);
+            requireItems(CoreMessageType.CANCEL_ORDER_BATCH,measuredCycles*SYMBOLS*batchSize);
             requireItems(CoreMessageType.PLACE_ORDER,measuredCycles*SYMBOLS*2);
             requireItems(CoreMessageType.CANCEL_ORDER,measuredCycles*SYMBOLS*2);
             if (!tradingStream) {
@@ -508,7 +563,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         }
         if (Boolean.getBoolean("surprising.aeron.owner-churn-validation") && measuredCycles > 0) {
             // 测量阶段自身必须跨越淘汰窗口，不能只靠预热覆盖索引/批量槽复用。
-            long completedOrderLifecycles = Math.multiplyExact(measuredCycles, SYMBOLS * BATCH * 3L);
+            long completedOrderLifecycles = Math.multiplyExact(measuredCycles, SYMBOLS * batchSize * 3L);
             if (completedOrderLifecycles < 2 * 65_536L)
                 throw new IllegalStateException("owner churn run did not cross two terminal retention windows");
             System.out.printf("ownerChurnVerify=PASS completedOrderLifecycles=%d terminalIndexEmpty=true reservationsEmpty=true%n",

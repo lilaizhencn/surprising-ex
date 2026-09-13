@@ -8,7 +8,6 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
-import org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
@@ -26,11 +25,13 @@ public final class AccountLaneState {
     final LongObjectHashMap<UserRuntime> users = new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
     final LongObjectHashMap<IntObjectHashMap<BalanceRuntime>> balances =
             new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
-    final LongObjectHashMap<OrderRuntime> orders = new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
+    // Back-shift deletion avoids tombstone-triggered whole-table allocation under order churn.
+    final Long2ObjectHashMap<OrderRuntime> orders =
+            new Long2ObjectHashMap<>(INITIAL_ENTITY_CAPACITY, 0.65f, false);
     final LongObjectHashMap<LongHashSet> activeOrderIdsByUser =
             new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
-    final LongObjectHashMap<ReservationRuntime> reservations =
-            new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
+    final Long2ObjectHashMap<ReservationRuntime> reservations =
+            new Long2ObjectHashMap<>(INITIAL_ENTITY_CAPACITY, 0.65f, false);
     final LongObjectHashMap<LongHashSet> reservationIdsByUser =
             new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
     final LongObjectHashMap<PositionRuntime> positions = new LongObjectHashMap<>(INITIAL_ENTITY_CAPACITY);
@@ -65,7 +66,8 @@ public final class AccountLaneState {
     }
     final LongLongHashMap pendingReservationSequences = new LongLongHashMap();
     private final LongIntHashMap pendingReservationCountsByUser = new LongIntHashMap();
-    private final LongObjectHashMap<IntLongHashMap> pendingReservedUnitsByUser = new LongObjectHashMap<>();
+    /** One reusable table per asset; completed users are removed, capacity survives ordinary churn. */
+    private final IntObjectHashMap<LongLongHashMap> pendingReservedUnitsByAsset = new IntObjectHashMap<>();
     private int totalPendingReservations;
     /** 该Lane新建客户订单身份的累计数量；完成收据由Owner汇入字典版本。 */
     long clientIdentityAllocations;
@@ -150,43 +152,25 @@ public final class AccountLaneState {
         if (reservation == null) throw new IllegalStateException("pending reservation is missing");
         int nextUserCount = Math.addExact(pendingReservationCountsByUser.get(reservation.userId()), 1);
         int nextTotal = Math.addExact(totalPendingReservations, 1);
-        IntLongHashMap unitsByAsset = pendingReservedUnitsByUser.get(reservation.userId());
-        long previousUnits = unitsByAsset == null ? 0 : unitsByAsset.get(reservation.assetId());
+        long previousUnits = pendingReservedUnits(reservation.userId(), reservation.assetId());
         long nextUnits = Math.addExact(previousUnits, reservation.reservedUnits());
         pendingReservationSequences.put(orderId, coreSequence);
-        if (unitsByAsset == null && nextUnits != 0) {
-            unitsByAsset = new IntLongHashMap(2);
-            pendingReservedUnitsByUser.put(reservation.userId(), unitsByAsset);
-        }
         pendingReservationCountsByUser.put(reservation.userId(), nextUserCount);
-        if (nextUnits != 0) unitsByAsset.put(reservation.assetId(), nextUnits);
+        setPendingReservedUnits(reservation.userId(), reservation.assetId(), nextUnits);
         totalPendingReservations = nextTotal;
     }
 
     void completePendingReservation(long orderId, long coreSequence) {
-        assertOwner();
-        PendingReservationCompletion completion = pendingReservationCompletion(orderId, coreSequence);
-        ReservationRuntime reservation = completion.reservation();
-        pendingReservationSequences.removeKey(orderId);
-        if (completion.nextUserCount() == 0) pendingReservationCountsByUser.removeKey(reservation.userId());
-        else pendingReservationCountsByUser.put(reservation.userId(), completion.nextUserCount());
-        if (completion.nextUnits() == 0) {
-            if (completion.unitsByAsset() != null) {
-                completion.unitsByAsset().removeKey(reservation.assetId());
-                if (completion.unitsByAsset().isEmpty()) pendingReservedUnitsByUser.removeKey(reservation.userId());
-            }
-        } else {
-            completion.unitsByAsset().put(reservation.assetId(), completion.nextUnits());
-        }
-        totalPendingReservations = completion.nextTotal();
+        pendingReservationCompletion(orderId, coreSequence, true);
     }
 
     void requirePendingReservationCompletion(long orderId, long coreSequence) {
-        assertOwner();
-        pendingReservationCompletion(orderId, coreSequence);
+        pendingReservationCompletion(orderId, coreSequence, false);
     }
 
-    private PendingReservationCompletion pendingReservationCompletion(long orderId, long coreSequence) {
+    /** Validate all counters before writing; validation and application share no temporary state object. */
+    private void pendingReservationCompletion(long orderId, long coreSequence, boolean apply) {
+        assertOwner();
         long pendingSequence = pendingReservationSequences.getIfAbsent(orderId, 0);
         if (pendingSequence != coreSequence) {
             throw new IllegalStateException("pending reservation sequence mismatch");
@@ -196,16 +180,17 @@ public final class AccountLaneState {
         int userCount = pendingReservationCountsByUser.get(reservation.userId());
         int nextUserCount = Math.subtractExact(userCount, 1);
         int nextTotal = Math.subtractExact(totalPendingReservations, 1);
-        IntLongHashMap unitsByAsset = pendingReservedUnitsByUser.get(reservation.userId());
-        long previousUnits = unitsByAsset == null ? 0 : unitsByAsset.get(reservation.assetId());
+        long previousUnits = pendingReservedUnits(reservation.userId(), reservation.assetId());
         long nextUnits = Math.subtractExact(previousUnits, reservation.reservedUnits());
         if (nextUserCount < 0 || nextTotal < 0 || nextUnits < 0) {
             throw new IllegalStateException("pending reservation counters are inconsistent");
         }
-        if (nextUnits != 0 && unitsByAsset == null) {
-            throw new IllegalStateException("pending reservation counters are inconsistent");
-        }
-        return new PendingReservationCompletion(reservation, nextUserCount, nextTotal, unitsByAsset, nextUnits);
+        if (!apply) return;
+        pendingReservationSequences.removeKey(orderId);
+        if (nextUserCount == 0) pendingReservationCountsByUser.removeKey(reservation.userId());
+        else pendingReservationCountsByUser.put(reservation.userId(), nextUserCount);
+        setPendingReservedUnits(reservation.userId(), reservation.assetId(), nextUnits);
+        totalPendingReservations = nextTotal;
     }
 
     void replacePendingReservation(ReservationRuntime previous, ReservationRuntime replacement) {
@@ -214,40 +199,19 @@ public final class AccountLaneState {
         if (previous.orderId() != replacement.orderId() || previous.userId() != replacement.userId()) {
             throw new IllegalStateException("pending reservation owner cannot change");
         }
-        IntLongHashMap unitsByAsset = pendingReservedUnitsByUser.get(previous.userId());
-        long currentUnits = unitsByAsset == null ? 0 : unitsByAsset.get(previous.assetId());
+        long currentUnits = pendingReservedUnits(previous.userId(), previous.assetId());
         long remainingUnits = Math.subtractExact(currentUnits, previous.reservedUnits());
         if (remainingUnits < 0) throw new IllegalStateException("pending reservation counters are inconsistent");
         if (previous.assetId() == replacement.assetId()) {
             long nextUnits = Math.addExact(remainingUnits, replacement.reservedUnits());
-            if (nextUnits == 0) {
-                if (unitsByAsset != null) {
-                    unitsByAsset.removeKey(previous.assetId());
-                    if (unitsByAsset.isEmpty()) pendingReservedUnitsByUser.removeKey(previous.userId());
-                }
-                return;
-            }
-            if (unitsByAsset == null) {
-                unitsByAsset = new IntLongHashMap(2);
-                pendingReservedUnitsByUser.put(previous.userId(), unitsByAsset);
-            }
-            unitsByAsset.put(previous.assetId(), nextUnits);
+            setPendingReservedUnits(previous.userId(), previous.assetId(), nextUnits);
         } else {
-            long existingReplacementUnits = unitsByAsset == null ? 0 : unitsByAsset.get(replacement.assetId());
-            long replacementUnits = Math.addExact(existingReplacementUnits,
-                    replacement.reservedUnits());
-            if (unitsByAsset == null && replacementUnits != 0) {
-                unitsByAsset = new IntLongHashMap(2);
-                pendingReservedUnitsByUser.put(previous.userId(), unitsByAsset);
-            }
-            if (unitsByAsset != null) {
-                if (remainingUnits == 0) unitsByAsset.removeKey(previous.assetId());
-                else unitsByAsset.put(previous.assetId(), remainingUnits);
-                if (replacementUnits == 0) unitsByAsset.removeKey(replacement.assetId());
-                else unitsByAsset.put(replacement.assetId(), replacementUnits);
-            }
+            long replacementUnits = Math.addExact(
+                    pendingReservedUnits(previous.userId(), replacement.assetId()), replacement.reservedUnits());
+            // Validate both assets before changing either side, including rollback replacements.
+            setPendingReservedUnits(previous.userId(), previous.assetId(), remainingUnits);
+            setPendingReservedUnits(previous.userId(), replacement.assetId(), replacementUnits);
         }
-        if (unitsByAsset != null && unitsByAsset.isEmpty()) pendingReservedUnitsByUser.removeKey(previous.userId());
     }
 
     boolean pendingReservation(long orderId) {
@@ -257,8 +221,21 @@ public final class AccountLaneState {
 
     long pendingReservedUnits(long userId, int assetId) {
         assertOwner();
-        IntLongHashMap unitsByAsset = pendingReservedUnitsByUser.get(userId);
-        return unitsByAsset == null ? 0 : unitsByAsset.get(assetId);
+        LongLongHashMap unitsByUser = pendingReservedUnitsByAsset.get(assetId);
+        return unitsByUser == null ? 0 : unitsByUser.get(userId);
+    }
+
+    private void setPendingReservedUnits(long userId, int assetId, long units) {
+        LongLongHashMap users = pendingReservedUnitsByAsset.get(assetId);
+        if (units == 0) {
+            if (users != null) users.removeKey(userId);
+        } else {
+            if (users == null) {
+                users = new LongLongHashMap();
+                pendingReservedUnitsByAsset.put(assetId, users);
+            }
+            users.put(userId, units);
+        }
     }
 
     int pendingReservationCount(long userId) {
@@ -378,6 +355,16 @@ public final class AccountLaneState {
         }
 
         private void replace(OrderRuntime previous, OrderRuntime replacement) {
+            if (active(previous) && active(replacement)
+                    && previous.userId() == replacement.userId() && previous.symbolId() == replacement.symbolId()
+                    && previous.side() == replacement.side() && previous.positionSide() == replacement.positionSide()
+                    && previous.marginMode() == replacement.marginMode() && previous.reduceOnly() == replacement.reduceOnly()) {
+                var bySymbol = summariesByUser.get(previous.userId());
+                var aggregate = bySymbol == null ? null : bySymbol.get(previous.symbolId());
+                if (aggregate == null) throw new IllegalStateException("admission order index is missing");
+                aggregate.replaceQuantity(previous, replacement);
+                return;
+            }
             if (active(previous)) update(previous, -1);
             if (active(replacement)) update(replacement, 1);
         }
@@ -419,6 +406,16 @@ public final class AccountLaneState {
         private int shortCross;
         private int shortIsolated;
         private int orders;
+
+        void replaceQuantity(OrderRuntime previous, OrderRuntime replacement) {
+            long current = previous.reduceOnly() ? reduceOnly(previous.side())
+                    : pending(previous.positionSide(), previous.side());
+            long remaining = Math.subtractExact(current, previous.remainingQuantitySteps());
+            if (remaining < 0) throw new IllegalStateException("admission order index underflow");
+            long next = Math.addExact(remaining, replacement.remainingQuantitySteps());
+            if (previous.reduceOnly()) assignReduceOnly(previous.side(), next);
+            else assignPending(previous.positionSide(), previous.side(), next);
+        }
 
         void update(OrderRuntime order, int direction) {
             long quantityDelta = direction > 0 ? order.remainingQuantitySteps()
@@ -547,7 +544,7 @@ public final class AccountLaneState {
         userIds.addAll(restoredUsers);
         pendingReservationSequences.clear();
         pendingReservationCountsByUser.clear();
-        pendingReservedUnitsByUser.clear();
+        pendingReservedUnitsByAsset.clear();
         totalPendingReservations = 0;
     }
 
@@ -589,11 +586,6 @@ public final class AccountLaneState {
                 snapshot.localStateHash(), snapshot.localFundsHash(), restoredUsers);
     }
 
-    private record PendingReservationCompletion(
-            ReservationRuntime reservation, int nextUserCount, int nextTotal,
-            IntLongHashMap unitsByAsset, long nextUnits) {
-    }
-
     record MatcherSettlementMetrics(long operations, long totalLatencyNanos, long maxLatencyNanos) {
     }
 
@@ -604,12 +596,6 @@ public final class AccountLaneState {
             mixed *= 0x100000001b3L;
         }
         return mixed;
-    }
-
-    private static long transitionHash(long current, long coreSequence, long contribution) {
-        long hash = mix(current, coreSequence);
-        hash = mix(hash, contribution);
-        return hash == 0 ? 1 : hash;
     }
 
     private long computeStateHash() {
@@ -669,6 +655,19 @@ public final class AccountLaneState {
         assertOwner();
         localStateHash = computeStateHash();
         localFundsHash = computeFundsHash();
+    }
+
+    private static long mixMap(long hash, Long2ObjectHashMap<?> values) {
+        long[] keys = new long[values.size()];
+        var iterator = values.keySet().iterator();
+        for (int i = 0; iterator.hasNext(); i++) keys[i] = iterator.nextLong();
+        java.util.Arrays.sort(keys);
+        long mixed = hash;
+        for (long key : keys) {
+            mixed = mix(mixed, key);
+            mixed = mixText(mixed, values.get(key));
+        }
+        return mixed;
     }
 
     private static <T> long mixMap(long hash, LongObjectHashMap<T> values) {

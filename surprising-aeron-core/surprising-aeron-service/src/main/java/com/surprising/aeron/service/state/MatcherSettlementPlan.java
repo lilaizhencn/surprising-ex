@@ -33,20 +33,99 @@ public final class MatcherSettlementPlan {
     private int takerLaneId;
     /** 索引数组归事件所有并复用；只有本代深度成交启用时读取。 */
     private boolean laneEventsIndexed;
+    /** 单命令初始身份，仅所属在途槽复用，构建完成后不对外发布。 */
+    private long[] initialOrderScratch;
     private static final long[] NO_ORDERS = new long[0];
+    private OrderRuntime directTaker;
+    private static final ThreadLocal<LongHashSet> DIRECT_ORDER_KEYS = ThreadLocal.withInitial(LongHashSet::new);
 
-    /** 仅事件池持有的批量槽可复用；Owner准备后只读，所有Lane完成后才能清理。 */
-    MatcherSettlementPlan() { orderIds = new long[8]; preCancellationOrderIds = NO_ORDERS; matcherEvents = List.of(); }
+    /** 事件池或在途序号槽独占并复用；Owner准备后只读，所有Lane完成后才能清理。 */
+    public MatcherSettlementPlan() { orderIds = new long[8]; preCancellationOrderIds = NO_ORDERS; matcherEvents = List.of(); }
 
-    void clearBatchReferences() {
+    public void clearReferences() {
         matcherEvents = List.of(); completedTrigger = null; preCancellationOrderIds = NO_ORDERS;
         rejectedTaker = false; laneEventsIndexed = false; orderCount = tradeCount = 0;
+        directTaker = null;
+    }
+
+    /** Matcher builds routing from its immutable fact; it never reads another thread's account tables. */
+    void buildDirect(long sequence, OrderRuntime taker, CoreInstrumentState instrument,
+                     CoreMatchingResult result, TradingRuntimeState runtime) {
+        if (taker == null || instrument == null || result == null
+                || result.nativeCommand().coreSequence() != sequence
+                || result.nativeCommand().orderId() != taker.orderId()
+                || instrument.changeId() != taker.instrumentChangeId())
+            throw new IllegalArgumentException("invalid direct matcher fact");
+        clearReferences();
+        coreSequence = sequence; directTaker = taker;
+        takerOrderId = taker.orderId(); activeUserId = taker.userId();
+        requiredLaneMask = runtime.topology().accountLaneMask(activeUserId);
+        matcherEvents = result.matcherEvents();
+        int capacity = Math.addExact(matcherEvents.size(), Math.addExact(result.cancellations().size(), 1));
+        if (orderIds.length < capacity) orderIds = new long[Math.max(capacity, orderIds.length * 2)];
+        LongHashSet keys = DIRECT_ORDER_KEYS.get();
+        keys.clear();
+        try {
+            orderCount = addUnique(keys, orderIds, 0, takerOrderId);
+            long remaining = taker.remainingQuantitySteps();
+            for (MatcherEvent event : matcherEvents) {
+                if (event == null) throw new IllegalArgumentException("missing matcher event");
+                if (event.eventType() != MatcherEventType.TRADE) continue;
+                if (event.price() <= 0 || event.size() <= 0 || event.matchedOrderId() <= 0
+                        || event.matchedOrderUid() <= 0 || event.matchedOrderUid() == activeUserId)
+                    throw new IllegalStateException("invalid direct fill identity or quantity");
+                remaining = Math.subtractExact(remaining, event.size());
+                if (remaining < 0) throw new IllegalStateException("fill exceeds admitted taker quantity");
+                orderCount = addUnique(keys, orderIds, orderCount, event.matchedOrderId());
+                requiredLaneMask |= runtime.topology().accountLaneMask(event.matchedOrderUid());
+                tradeCount++;
+            }
+            // Pre-matching cancellations belong to the submitting account and were authorized at admission.
+            for (var cancellation : result.cancellations()) if (cancellation.accepted())
+                orderCount = addUnique(keys, orderIds, orderCount, cancellation.orderId());
+            rejectTaker(!result.accepted());
+            indexLaneEvents(runtime);
+        } finally { keys.clear(); }
+    }
+
+    /** The single account writer checks the current order, including earlier fills in this batch. */
+    void validateDirectLane(AccountLaneState lane, TradingRuntimeState runtime,
+                            RuntimeIdentityRegistry identities, CoreInstrumentState instrument) {
+        if (directTaker == null) return;
+        if (runtime.topology().accountLaneId(activeUserId) == lane.laneId()) {
+            OrderRuntime taker = lane.orders.get(takerOrderId);
+            requireDirectOrder(taker, activeUserId, directTaker.side());
+            if (tradeCount != 0) runtime.retainDirectPositionIdentity(lane, identities, instrument, taker);
+        }
+        for (MatcherEvent event : matcherEvents) {
+            if (event.eventType() != MatcherEventType.TRADE
+                    || runtime.topology().accountLaneId(event.matchedOrderUid()) != lane.laneId()) continue;
+            OrderRuntime maker = lane.orders.get(event.matchedOrderId());
+            requireDirectOrder(maker, event.matchedOrderUid(), directTaker.side()
+                    == com.surprising.aeron.protocol.CoreOrderSide.BUY
+                    ? com.surprising.aeron.protocol.CoreOrderSide.SELL
+                    : com.surprising.aeron.protocol.CoreOrderSide.BUY);
+            if (maker.remainingQuantitySteps() < event.size())
+                throw new IllegalStateException("fill exceeds Lane maker remaining quantity");
+            runtime.retainDirectPositionIdentity(lane, identities, instrument, maker);
+        }
+    }
+
+    private void requireDirectOrder(OrderRuntime order, long userId,
+                                    com.surprising.aeron.protocol.CoreOrderSide side) {
+        if (order == null || order.status() != CoreOrderStatus.OPEN || order.userId() != userId
+                || order.symbolId() != directTaker.symbolId() || order.side() != side
+                || order.instrumentChangeId() != directTaker.instrumentChangeId())
+            throw new IllegalStateException("matcher fact does not match Lane-owned order");
     }
     /** 仅触发子订单携带；owner 派发前构造，taker Lane 在同一结算事件中写入。 */
     private com.surprising.aeron.service.state.model.CoreTriggerOrderState completedTrigger;
 
     public MatcherSettlementPlan completeTrigger(com.surprising.aeron.service.state.model.CoreTriggerOrderState value) {
-        if (value == null || value.userId() != activeUserId || value.placedOrderId() != takerOrderId || completedTrigger != null)
+        if (value == null || value.userId() != activeUserId || (rejectedTaker
+                ? value.status() != com.surprising.aeron.protocol.CoreTriggerOrderStatus.TRIGGER_FAILED
+                        || value.placedOrderId() != 0
+                : value.placedOrderId() != takerOrderId) || completedTrigger != null)
             throw new IllegalArgumentException("invalid settlement trigger completion");
         completedTrigger = value;
         return this;
@@ -101,6 +180,33 @@ public final class MatcherSettlementPlan {
                 null, null, null, null);
     }
 
+    /** 调用方独占 target，全部 Lane 完成并消费结果之前不得再次构建或清理。 */
+    public static MatcherSettlementPlan buildInto(MatcherSettlementPlan target,
+            long sequence, long takerOrderId, long userId, long firstOrderId, long secondOrderId,
+            CoreMatchingResult result, TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+        if (target == null) throw new IllegalArgumentException("settlement target is required");
+        if (target.initialOrderScratch == null) target.initialOrderScratch = new long[2];
+        target.initialOrderScratch[0] = firstOrderId;
+        target.initialOrderScratch[1] = secondOrderId;
+        return build(sequence, takerOrderId, userId, target.initialOrderScratch, result, runtime, identities,
+                null, null, null, target);
+    }
+
+    public static MatcherSettlementPlan emptyInto(MatcherSettlementPlan target, long sequence,
+            long userId, long firstOrderId, long secondOrderId, TradingRuntimeState runtime) {
+        if (target == null || sequence <= 0 || userId <= 0 || firstOrderId <= 0 || secondOrderId <= 0
+                || runtime == null) throw new IllegalArgumentException("invalid empty settlement target");
+        target.clearReferences();
+        target.coreSequence = sequence;
+        target.activeUserId = userId;
+        target.takerOrderId = secondOrderId;
+        target.requiredLaneMask = runtime.topology().accountLaneMask(userId);
+        target.orderIds[0] = firstOrderId;
+        target.orderIds[1] = secondOrderId;
+        target.orderCount = 2;
+        return target;
+    }
+
     /** 批量构建与累计数量校验共用一次成交遍历；scratch 只在本批 Owner 调用期间使用。 */
     static MatcherSettlementPlan buildBatchItem(long sequence, OrderRuntime taker, CoreInstrumentState instrument,
                                                 CoreMatchingResult result, TradingRuntimeState runtime,
@@ -143,18 +249,20 @@ public final class MatcherSettlementPlan {
             if (orderId > 0) orderCount = addUnique(uniqueOrders, orders, orderCount, orderId);
         }
         long laneMask = runtime.topology().accountLaneMask(activeUserId);
-        LongLongHashMap remainingByOrderId = batch == null
+        // A single native event cannot revisit a maker; no remaining-quantity table is needed.
+        boolean cumulativeValidation = batch != null || result.matcherEvents().size() > 1;
+        LongLongHashMap remainingByOrderId = !cumulativeValidation ? null : batch == null
                 ? runtime.matcherSettlementRemainingScratch() : batch.remainingByOrderId;
-        if (batch == null) remainingByOrderId.clear();
-        if (!remainingByOrderId.containsKey(takerOrderId)) {
-            preparePositionIdentity(runtime, identities, instrument, taker);
-            remainingByOrderId.put(takerOrderId, taker.remainingQuantitySteps());
+        if (batch == null && remainingByOrderId != null) remainingByOrderId.clear();
+        if (remainingByOrderId == null || !remainingByOrderId.containsKey(takerOrderId)) {
+            if (remainingByOrderId != null) remainingByOrderId.put(takerOrderId, taker.remainingQuantitySteps());
         }
         int tradeCount = 0;
         try {
             for (MatcherEvent event : result.matcherEvents()) {
                 if (event == null) throw new IllegalArgumentException("runtime match is required");
                 if (event.eventType() != MatcherEventType.TRADE) continue;
+                if (tradeCount == 0) preparePositionIdentity(runtime, identities, instrument, taker);
                 if (event.price() <= 0 || event.size() <= 0) {
                     throw new IllegalArgumentException("invalid runtime match price or quantity");
                 }
@@ -165,15 +273,18 @@ public final class MatcherSettlementPlan {
                         || maker.side() == taker.side() || maker.userId() == taker.userId()) {
                     throw new IllegalStateException("runtime match does not match authoritative orders");
                 }
-                long takerRemaining = Math.subtractExact(remainingByOrderId.get(takerOrderId), event.size());
-                boolean knownMaker = remainingByOrderId.containsKey(maker.orderId());
+                long takerRemaining = Math.subtractExact(remainingByOrderId == null
+                        ? taker.remainingQuantitySteps() : remainingByOrderId.get(takerOrderId), event.size());
+                boolean knownMaker = remainingByOrderId != null && remainingByOrderId.containsKey(maker.orderId());
                 long makerBefore = knownMaker ? remainingByOrderId.get(maker.orderId()) : maker.remainingQuantitySteps();
                 long makerRemaining = Math.subtractExact(makerBefore, event.size());
                 if (takerRemaining < 0 || makerRemaining < 0) {
                     throw new IllegalStateException("fill exceeds runtime order remaining quantity");
                 }
-                remainingByOrderId.put(takerOrderId, takerRemaining);
-                remainingByOrderId.put(maker.orderId(), makerRemaining);
+                if (remainingByOrderId != null) {
+                    remainingByOrderId.put(takerOrderId, takerRemaining);
+                    remainingByOrderId.put(maker.orderId(), makerRemaining);
+                }
                 if (batch != null && makerRemaining == 0) batch.terminalOrderIds.add(maker.orderId());
                 if (!knownMaker)
                     preparePositionIdentity(runtime, identities, instrument, maker);
@@ -186,7 +297,7 @@ public final class MatcherSettlementPlan {
                     || taker.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET))
                 batch.terminalOrderIds.add(takerOrderId);
         } finally {
-            if (batch == null) remainingByOrderId.clear();
+            if (batch == null && remainingByOrderId != null) remainingByOrderId.clear();
         }
         for (var cancellation : result.cancellations()) {
             OrderRuntime order = runtime.order(cancellation.orderId());
@@ -254,16 +365,9 @@ public final class MatcherSettlementPlan {
     public int tradeCount() { return tradeCount; }
     public MatcherSettlementPlan preCancellations(long[] orderIds) {
         if (orderIds == null) throw new IllegalArgumentException("pre-cancellation ids are required");
-        if (orderIds.length == 0) return this;
-        MatcherSettlementPlan copy = new MatcherSettlementPlan(coreSequence, takerOrderId, activeUserId,
-                requiredLaneMask, this.orderIds, orderCount, matcherEvents, tradeCount, orderIds.clone());
-        copy.makerLaneHeads = makerLaneHeads;
-        copy.makerLaneNext = makerLaneNext;
-        copy.takerLaneId = takerLaneId;
-        copy.laneEventsIndexed = laneEventsIndexed;
-        copy.completedTrigger = completedTrigger;
-        copy.rejectedTaker = rejectedTaker;
-        return copy;
+        // 所有调用方都在派发前准备；只保留必要的不可变数组副本，不再复制整份计划。
+        preCancellationOrderIds = orderIds.length == 0 ? NO_ORDERS : orderIds.clone();
+        return this;
     }
     public int preCancellationCount() { return preCancellationOrderIds.length; }
     long preCancellationOrderId(int index) { return preCancellationOrderIds[index]; }

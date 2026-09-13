@@ -4,6 +4,23 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.*;
 
 class RuntimeIndexedChangeBufferTest {
+    @Test void orderHandoffsDoNotAllocateUnusedPreparedColumns() throws Exception {
+        var lane = new RuntimeIndexedChangeBuffer<String, Void>();
+        var owner = new OwnerIndexedChanges<String, Void>();
+        var prepared = RuntimeIndexedChangeBuffer.class.getDeclaredField("prepared");
+        var present = RuntimeIndexedChangeBuffer.class.getDeclaredField("present");
+        prepared.setAccessible(true); present.setAccessible(true);
+        for (int round = 0; round < 3; round++) {
+            for (int i = 0; i < 100; i++) lane.put(i, "value");
+            owner.adopt(0, lane);
+            assertThat(lane.isEmpty()).isTrue();
+            assertThat((Object[]) prepared.get(lane)).isEmpty();
+            assertThat((boolean[]) present.get(lane)).isEmpty();
+            for (int i = 0; i < 100; i++) assertThat(owner.get(i)).isEqualTo("value");
+            owner.clear();
+        }
+    }
+
     @Test void coalescesStateAndPreparedIndexWithoutLosingDeletionOrFallback() {
         var source = new RuntimeIndexedChangeBuffer<String, String>();
         var target = new RuntimeIndexedChangeBuffer<String, String>();
@@ -32,7 +49,7 @@ class RuntimeIndexedChangeBufferTest {
             assertThat(present).isFalse(); assertThat(prepared).isNull();
         });
         assertThatThrownBy(() -> buffer.putPrepared(-1, "orphan")).isInstanceOf(IllegalStateException.class);
-        buffer.drain(new org.agrona.collections.Long2ObjectHashMap<>(), null, 0);
+        buffer.drainToAgronaMap(new org.agrona.collections.Long2ObjectHashMap<>());
         assertThat(buffer.isEmpty()).isTrue();
         assertThat((Object[]) field.get(buffer)).containsOnlyNulls();
     }

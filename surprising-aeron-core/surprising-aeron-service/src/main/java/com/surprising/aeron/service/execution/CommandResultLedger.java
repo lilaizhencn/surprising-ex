@@ -86,23 +86,31 @@ final class CommandResultLedger {
     }
 
     void storeResult(UUID commandId, StoredResult result) {
-        long resultBytes = resultEntryBytes(result);
+        storeOwnedResult(commandId, result.fingerprint, result.status, result.resultCode,
+                result.appliedCommandCount, result.requiredExportSequence, result.stateHash, result.responseData);
+    }
+
+    /** 在保留序号确定之后只构造一次不可变结果；调用方转移响应字节所有权。 */
+    void storeOwnedResult(UUID commandId, CommandFingerprint fingerprint, ResponseStatus status,
+                          CoreResultCode resultCode, long appliedCommandCount, long requiredExportSequence,
+                          long stateHash, byte[] responseData) {
+        java.util.Objects.requireNonNull(commandId, "command id");
+        long resultBytes = Math.addExact(CoreStateSnapshotCodec.RESULT_FIXED_LENGTH,
+                responseData == null ? 0 : responseData.length);
         if (resultBytes > MAX_RESULT_LEDGER_BYTES) {
             throw new IllegalArgumentException("result ledger entry exceeds byte bound");
         }
         StoredResult previous = commandResults.get(commandId);
-        if (previous != null) {
-            StoredResult retained = result.withRetentionSequence(previous.retentionSequence());
-            commandResults.put(commandId, retained);
-            commandResultBytes = Math.addExact(Math.subtractExact(commandResultBytes, resultEntryBytes(previous)),
-                    resultBytes);
-        } else {
-            long retentionSequence = nextResultRetentionSequence;
-            StoredResult retained = result.withRetentionSequence(retentionSequence);
-            nextResultRetentionSequence = Math.incrementExact(nextResultRetentionSequence);
-            commandResults.put(commandId, retained);
-            commandResultBytes = Math.addExact(commandResultBytes, resultBytes);
-        }
+        long retentionSequence = previous == null ? nextResultRetentionSequence : previous.retentionSequence();
+        StoredResult retained = new StoredResult(fingerprint, status, resultCode, appliedCommandCount,
+                requiredExportSequence, stateHash, responseData, retentionSequence, true);
+        long nextSequence = previous == null ? Math.incrementExact(nextResultRetentionSequence)
+                : nextResultRetentionSequence;
+        long nextBytes = Math.addExact(commandResultBytes - (previous == null ? 0 : resultEntryBytes(previous)),
+                resultBytes);
+        commandResults.put(commandId, retained);
+        nextResultRetentionSequence = nextSequence;
+        commandResultBytes = nextBytes;
         while (commandResults.size() > MAX_IDEMPOTENCY_RESULTS
                 || commandResultBytes > MAX_RESULT_LEDGER_BYTES) {
             Iterator<Map.Entry<UUID, StoredResult>> iterator = commandResults.entrySet().iterator();

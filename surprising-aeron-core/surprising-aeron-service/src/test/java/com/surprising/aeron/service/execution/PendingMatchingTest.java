@@ -26,25 +26,57 @@ import org.junit.jupiter.api.Test;
 class PendingMatchingTest {
 
     @Test
-    void reusesBoxedKeyButNeverCarriesItIntoTheNextRingGeneration() {
+    void batchContextSurvivesCommandRewriteAndIsClearedForNextSlotGeneration() {
         CoreMessage command = command(1000);
-        var state = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
-        var projection = new RuntimeProjectionPoint(0, state);
+        var projection = new RuntimeProjectionPoint(0, TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL));
         var pending = new PendingMatching(1000, PendingMatching.Operation.PLACE, command,
                 projection, 0, 0, RuntimeFundsDelta.empty());
-        Long key = pending.sequenceKey();
-        assertThat(pending.sequenceKey()).isSameAs(key);
-        assertThat(pending.withCommand(command(1001)).sequenceKey()).isSameAs(key);
-        var batchOrder = new java.util.LinkedHashMap<Long, String>();
-        batchOrder.put(key, "first");
+        var batch = new OrderBatchPending(1);
+        pending.orderBatch = batch;
         pending.initialize(2000, PendingMatching.Operation.PLACE, command,
                 CommandFingerprint.of(command), List.of(), projection, 0, 0,
                 RuntimeFundsDelta.empty(), DecodedMatchingCommand.decode(command), null);
-        assertThat(pending.sequenceKey()).isEqualTo(2000L).isNotSameAs(key);
-        batchOrder.put(pending.sequenceKey(), "second");
-        assertThat(batchOrder.keySet()).containsExactly(1000L, 2000L);
-        assertThat(batchOrder.get(key)).isEqualTo("first");
-        assertThat(batchOrder.remove(pending.sequenceKey())).isEqualTo("second");
+        assertThat(pending.orderBatch).isNull();
+    }
+
+    @Test
+    void batchOrderingDetachesMiddleHeadAndTailAcrossRingReuse() {
+        try (var owner = new TradingCoreRuntime(ProductLine.LINEAR_PERPETUAL)) {
+            var projection = new RuntimeProjectionPoint(0, TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL));
+            for (int generation = 0; generation < 3; generation++) {
+                long first = 1000L + (long) generation * owner.pendingMatching.capacity();
+                var pending = new PendingMatching[3];
+                var batches = new OrderBatchPending[3];
+                for (int i = 0; i < 3; i++) {
+                    pending[i] = new PendingMatching(first + i, PendingMatching.Operation.PLACE, command(first + i),
+                            projection, 0, 0, RuntimeFundsDelta.empty());
+                    owner.pendingMatching.put(pending[i]);
+                    batches[i] = new OrderBatchPending(1);
+                    batches[i].sequence = first + i;
+                    owner.batches.registerBatch(pending[i], batches[i]);
+                    assertThat(owner.batches.batch(first + i)).isSameAs(pending[i].orderBatch).isSameAs(batches[i]);
+                }
+                assertThat(owner.batches.pendingBatchCount()).isEqualTo(3);
+                assertThat(owner.batches.firstBatch()).isSameAs(batches[0]);
+                org.assertj.core.api.Assertions.assertThatThrownBy(() -> owner.batches.registerBatch(pending[0], batches[0]))
+                        .isInstanceOf(IllegalStateException.class);
+                owner.batches.unregisterBatch(pending[1], batches[1]);
+                assertThat(batches[0].nextBatch).isSameAs(batches[2]);
+                assertThat(batches[2].previousBatch).isSameAs(batches[0]);
+                assertThat(pending[1].orderBatch).isNull();
+                owner.batches.unregisterBatch(pending[0], batches[0]);
+                assertThat(owner.batches.firstBatch()).isSameAs(batches[2]);
+                owner.batches.clearPendingBatches();
+                assertThat(owner.batches.hasPendingBatches()).isFalse();
+                assertThat(owner.batches.pendingBatchCount()).isZero();
+                for (int i = 0; i < 3; i++) {
+                    assertThat(pending[i].orderBatch).isNull();
+                    assertThat(batches[i].previousBatch).isNull();
+                    assertThat(batches[i].nextBatch).isNull();
+                    owner.pendingMatching.remove(first + i);
+                }
+            }
+        }
     }
 
     @Test
@@ -78,15 +110,16 @@ class PendingMatchingTest {
         PendingMatching pending = new PendingMatching(7, PendingMatching.Operation.PLACE, command, fingerprint,
                 List.of(17L), beforeProjection, 101L, 202L, fundsDelta);
 
-        PendingMatching updatedCommand = pending.withCommand(command(12));
-        PendingMatching updatedCancellations = updatedCommand.withPreMatchingCancellations(List.of(18L, 19L));
+        var decoded = pending.decodedCommand();
+        PendingMatching updatedCancellations = pending.withPreMatchingCancellations(List.of(18L, 19L));
 
         assertThat(updatedCancellations.beforeBusinessStateHash()).isEqualTo(101L);
         assertThat(updatedCancellations.beforeFundsStateHash()).isEqualTo(202L);
         assertThat(updatedCancellations.beforeProjection()).isSameAs(beforeProjection);
         assertThat(updatedCancellations.fundsDelta()).isSameAs(fundsDelta);
         assertThat(updatedCancellations.preMatchingCancellationOrderIds()).containsExactly(18L, 19L);
-        assertThat(updatedCancellations.decodedCommand()).isSameAs(updatedCommand.decodedCommand());
+        assertThat(updatedCancellations.command()).isSameAs(command);
+        assertThat(updatedCancellations.decodedCommand()).isSameAs(decoded);
         assertThat(updatedCancellations.fingerprint()).isSameAs(fingerprint);
     }
 

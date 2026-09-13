@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.state;
 
 import org.agrona.collections.Long2ObjectHashMap;
-import org.agrona.collections.Long2LongHashMap;
 
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 
@@ -22,7 +21,7 @@ class RuntimeChangeBuffer<V> {
     /** 当前有效元素数量。 */
     int size;
 
-    /** 完成交接后交换整组存储；调用方保证原写入 Lane 已完成且目标缓冲为空。 */
+    /** Indexed change buffers exchange their storage after a Lane handoff. */
     void swapStorage(RuntimeChangeBuffer<V> other) {
         long[] k = keys; keys = other.keys; other.keys = k;
         Object[] v = values; values = other.values; other.values = v;
@@ -77,39 +76,35 @@ class RuntimeChangeBuffer<V> {
         return size++;
     }
 
-    void drain(LongObjectHashMap<V> target, Long2LongHashMap targetLanes, int laneId) {
+    void drainToEclipseMap(LongObjectHashMap<V> target) {
         for (int index = 0; index < size; index++) {
             long key = keys[index];
             @SuppressWarnings("unchecked") V value = (V) values[index];
             values[index] = null;
             if (value == null) {
                 target.removeKey(key);
-                if (targetLanes != null) targetLanes.remove(key);
             } else {
                 target.put(key, value);
-                if (targetLanes != null) targetLanes.put(key, laneId + 1L);
             }
         }
         clear();
     }
 
-    void drain(Long2ObjectHashMap<V> target, Long2LongHashMap targetLanes, int laneId) {
+    void drainToAgronaMap(Long2ObjectHashMap<V> target) {
         for (int index = 0; index < size; index++) {
             long key = keys[index];
             @SuppressWarnings("unchecked") V value = (V) values[index];
             values[index] = null;
             if (value == null) {
                 target.remove(key);
-                if (targetLanes != null) targetLanes.remove(key);
             } else {
                 target.put(key, value);
-                if (targetLanes != null) targetLanes.put(key, laneId + 1L);
             }
         }
         clear();
     }
 
-    void drain(LanePublishedMap<V> target, org.agrona.collections.Long2LongHashMap unused, int laneId) {
+    void drainToPublishedMap(LanePublishedMap<V> target) {
         for (int i = 0; i < size; i++) {
             V value = valueAt(i);
             if (value == null) target.remove(keyAt(i)); else target.put(keyAt(i), value);

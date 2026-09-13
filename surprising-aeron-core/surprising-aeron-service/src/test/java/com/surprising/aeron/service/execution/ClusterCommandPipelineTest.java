@@ -24,6 +24,70 @@ import org.junit.jupiter.params.provider.EnumSource;
 class ClusterCommandPipelineTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
+    void matcherPublishesOrdinaryAndBatchFillsToLanesWithoutOwnerDrainingResults(ProductLine product) throws Exception {
+        for (boolean batch : new boolean[]{false, true}) {
+            var release = new CountDownLatch(1);
+            try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
+                serial.applyAll(live.setup());
+                long maker = disjointUser(11);
+                if (product == ProductLine.SPOT) {
+                    var deposit = live.message(CoreMessageType.ADJUST_BALANCE, maker,
+                            TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 100)));
+                    live.apply(deposit); serial.apply(deposit);
+                }
+                var resting = live.place(maker, "BTC-USDT", 900, 80, 20, CoreOrderSide.SELL);
+                live.apply(resting); serial.apply(resting);
+                live.responses.clear();
+                var state = live.service.state();
+                var entered = new CountDownLatch(1);
+                var gate = state.matcherPipeline.readAtSubmissionFence(state.matchingAdapter.matcherShardId("BTC-USDT"), () -> {
+                    entered.countDown();
+                    try {
+                        if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("matcher gate timeout");
+                    } catch (InterruptedException failure) { throw new IllegalStateException(failure); }
+                    return true;
+                });
+                assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+                var command = batch ? live.placeBatch(11, "BTC-USDT", 1000)
+                        : live.place(11, "BTC-USDT", 1000, 80, 1, CoreOrderSide.BUY);
+                live.send(command);
+                long sequence = state.matchingSequence(command.header().commandId());
+                live.progressUntil(() -> {
+                    var pending = state.pendingMatching(sequence);
+                    var event = batch ? pending.orderBatch.settlementEvent : pending.settlementEvent();
+                    return event != null && event.dispatched();
+                });
+                var pending = state.pendingMatching(sequence);
+                var event = batch ? pending.orderBatch.settlementEvent : pending.settlementEvent();
+                assertThat(event.direct()).isTrue();
+                assertThat(event.ready()).isFalse();
+                release.countDown();
+                // Do not call Owner progress/drain here: the Matcher and Lanes must finish on their own.
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+                while (!event.complete() && System.nanoTime() < deadline) Thread.onSpinWait();
+                assertThat(event.complete()).isTrue();
+                if (batch) {
+                    assertThat(pending.orderBatch.nextIndex).as("submission cursor belongs to Owner").isZero();
+                    assertThat(state.batches.orderBatchMatcherShard(pending.orderBatch))
+                            .isEqualTo(state.matchingAdapter.matcherShardId("BTC-USDT"));
+                }
+                assertThat(state.laneCommandContexts.required(sequence).hasMatchingCompletion()).isFalse();
+                assertThat(live.responses).isEmpty();
+                assertThat(event.plan().tradeCount()).isPositive();
+                live.tick(); serial.apply(command);
+                assertThat(gate.join()).isTrue();
+                assertThat(live.responses).hasSize(1);
+                assertThat(live.hash()).isEqualTo(serial.hash());
+                assertThat(state.tradingState().users()).isEqualTo(serial.service.state().tradingState().users());
+                try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(101))) {
+                    assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+                }
+            } finally { release.countDown(); }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
     void idleProbeBeforeTheFirstLogDoesNotRequireAnActivatedCommitJournal(ProductLine product) {
         try (Fixture live = new Fixture(product)) {
             live.service.ownerCompletionSignal(() -> {});
@@ -128,13 +192,13 @@ class ClusterCommandPipelineTest {
                 live.progressUntil(() -> {
                     var pending = state.pendingMatching(secondSequence);
                     if (batch) {
-                        var work = state.batches.pendingOrderBatches.get(secondSequence);
+                        var work = state.batches.batch(secondSequence);
                         return work != null && work.hasPendingLaneWork() && work.laneWorkComplete();
                     }
                     return pending != null && pending.settlementEvent() != null && pending.settlementEvent().complete();
                 });
                 if (batch) {
-                    var completedBatch = state.batches.pendingOrderBatches.get(secondSequence);
+                    var completedBatch = state.batches.batch(secondSequence);
                     assertThat(completedBatch.admissionOrderIndex).isNull();
                     assertThat(completedBatch.items).allSatisfy(item -> assertThat(item.laneResultPrepared).isTrue());
                     assertThat(completedBatch.preparedResponse).isNotNull()
@@ -471,7 +535,7 @@ class ClusterCommandPipelineTest {
             live.send(first);
             var state = live.service.state();
             long sequence = state.matchingSequence(first.header().commandId());
-            var batch = state.batches.pendingOrderBatches.get(sequence);
+            var batch = state.batches.batch(sequence);
             var pending = state.pendingMatching.get(sequence);
             // 模拟延迟激活已开始提交、但 Lane 批量准入尚未被 owner 收集的边界。
             state.batches.beginOrderBatchCommitContext(batch, pending);
@@ -525,6 +589,107 @@ class ClusterCommandPipelineTest {
                         .stream().filter(item -> item.status() == ResponseStatus.REJECTED).count())
                         .isEqualTo(partialRejection ? 1 : 0);
                 serial.apply(first); serial.apply(next);
+                assertThat(state.tradingState().users()).isEqualTo(serial.service.state().tradingState().users());
+                assertThat(live.hash()).isEqualTo(serial.hash());
+                try (var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
+                    assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+                }
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void ordinaryOrderLifecycleDoesNotAcquireLaneOwnership(ProductLine product) throws Exception {
+        try (Fixture live = new Fixture(product)) {
+            live.setup();
+            var state = live.service.state();
+            var beforeBalances = state.tradingState().user(11).balances();
+            var epoch = state.runtimeState.getClass().getDeclaredField("laneHandoffEpoch");
+            epoch.setAccessible(true);
+            long before = epoch.getLong(state.runtimeState);
+            live.apply(live.place(11, "BTC-USDT", 101, 80, 1, CoreOrderSide.BUY));
+            live.apply(live.message(CoreMessageType.AMEND_ORDER, 11, TradingCommandCodec.encodeAmendOrder(
+                    new AmendOrderCommand(101, 102, "amend-102", 90L, 1L, CoreTimeInForce.GTC, false))));
+            assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            live.apply(live.message(CoreMessageType.REPLACE_ORDER, 11, TradingCommandCodec.encodeReplaceOrder(
+                    new ReplaceOrderCommand(102, new PlaceOrderCommand(103, "BTC-USDT", 1,
+                            CoreOrderSide.BUY, 80, 1, false, CoreMarginMode.CROSS, CorePositionSide.NET,
+                            CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "replace-103")))));
+            assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            live.apply(live.cancel(11, 103));
+            assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            live.apply(live.placeBatch(11, "BTC-USDT", 201));
+            live.apply(live.cancelBatch(11, 201));
+            assertThat(TradingOrderBatchCodec.firstNonAppliedItem(live.responses.getLast(), 20)).isEqualTo(-1);
+            live.apply(live.cancel(11, 999_999));
+            assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(epoch.getLong(state.runtimeState)).isEqualTo(before);
+            assertThat(state.tradingState().user(11).balances()).isEqualTo(beforeBalances);
+            try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void rejectedAmendCommitsKnownCancellationPrefix(ProductLine product) throws Exception {
+        try (Fixture live = new Fixture(product)) {
+            live.setup();
+            long user = 11, maker = disjointUser(user);
+            if (product == ProductLine.SPOT) for (long account : new long[]{user, maker})
+                live.apply(live.message(CoreMessageType.ADJUST_BALANCE, account,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 100))));
+            live.apply(live.place(user, "BTC-USDT", 101, 100, 1, CoreOrderSide.SELL));
+            live.apply(live.place(user, "BTC-USDT", 102, 80, 1, CoreOrderSide.BUY));
+            live.apply(live.place(maker, "BTC-USDT", 103, 100, 1, CoreOrderSide.SELL));
+            var epoch = live.service.state().runtimeState.getClass().getDeclaredField("laneHandoffEpoch");
+            epoch.setAccessible(true);
+            long handoffBefore = epoch.getLong(live.service.state().runtimeState);
+            live.responses.clear();
+            live.apply(live.message(CoreMessageType.AMEND_ORDER, user, TradingCommandCodec.encodeAmendOrder(
+                    new AmendOrderCommand(102, 104, "reject-104", 100L, 1L, CoreTimeInForce.GTX, true))));
+            assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(epoch.getLong(live.service.state().runtimeState)).isEqualTo(handoffBefore);
+            var result = CoreCommandResultCodec.decode(live.responses.getLast().data());
+            assertThat(result.orders()).filteredOn(order -> order.orderId() == 102)
+                    .hasSize(1).allSatisfy(order -> assertThat(order.status()).isEqualTo("CANCELED"));
+            var runtime = live.service.state().runtimeState;
+            assertThat(runtime.order(101)).isNull();
+            assertThat(runtime.reservation(101)).isNull();
+            assertThat(runtime.order(102)).isNull();
+            assertThat(runtime.order(104)).isNull();
+            assertThat(runtime.reservation(102)).isNull();
+            try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void placeAdmissionReturnsBorrowedOwnershipBeforeLaneWork(ProductLine product) throws Exception {
+        for (boolean batch : new boolean[]{false, true}) {
+            try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
+                serial.applyAll(live.setup());
+                var state = live.service.state();
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+                while (!state.runtimeState.tryAcquireOwnerLaneAccess()) {
+                    if (System.nanoTime() >= deadline) throw new AssertionError("ownership timeout");
+                    Thread.yield();
+                }
+                var command = batch ? live.placeBatch(11, "BTC-USDT", 101)
+                        : live.place(11, "BTC-USDT", 101, 80, 1, CoreOrderSide.BUY);
+                long timestamp = command.header().submittedAtEpochMillis();
+                state.applyClusterCommand(command, timestamp, 0);
+                var access = state.runtimeState.getClass().getDeclaredField("ownerLaneAccess");
+                access.setAccessible(true);
+                assertThat(access.getBoolean(state.runtimeState)).as("batch=%s", batch).isFalse();
+                long sequence = state.matchingSequence(command.header().commandId());
+                assertThat(CoreTestCompletion.completeMatchingSynchronously(state, sequence, timestamp, 0).commandStatus())
+                        .isEqualTo(ResponseStatus.APPLIED);
+                serial.apply(command);
                 assertThat(state.tradingState().users()).isEqualTo(serial.service.state().tradingState().users());
                 assertThat(live.hash()).isEqualTo(serial.hash());
                 try (var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
@@ -605,7 +770,9 @@ class ClusterCommandPipelineTest {
     }
     @ParameterizedTest
     @EnumSource(ProductLine.class)
-    void triggerChildSurvivesLaneHandoffAndOrderIdCollision(ProductLine product) {
+    void triggerChildUsesOwningLaneAndPreservesOrderIdCollision(ProductLine product) throws Exception {
+        for (boolean internalScan : new boolean[]{false, true}) {
+        if (internalScan && product == ProductLine.SPOT) continue; // Spot has no mark-price risk scan.
         for (int matchedQuantity : new int[]{0, 1, 10}) {
             boolean fill = matchedQuantity != 0;
             try (Fixture live = new Fixture(product)) {
@@ -618,25 +785,141 @@ class ClusterCommandPipelineTest {
                 // 子订单编号冲突时必须沿用准入阶段选定的编号，不能重新推导或回查 Lane。
                 live.apply(live.place(user, "BTC-USDT", 18003, 80, 1, CoreOrderSide.BUY));
                 if (fill) live.apply(live.place(maker, "BTC-USDT", 103, 100, matchedQuantity, CoreOrderSide.BUY));
-                var trigger = new CoreTriggerOrderStateView(9001, product, user, "trigger-9001", "", "BTC-USDT",
+                var trigger = new CoreTriggerOrderStateView(9001, product, user, "trigger-9001", "oco-9001", "BTC-USDT",
                         CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
                         100, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, fill ? 100 : 110, Math.max(1, matchedQuantity),
                         CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
                         0, 0, 0, "", "test", 0, 0, 0, 0, 1, 1, 0, 0);
                 live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(trigger)));
+                var sibling = new CoreTriggerOrderStateView(9002, product, user, "trigger-9002", "oco-9001", "BTC-USDT",
+                        CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
+                        200, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 200, 1,
+                        CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
+                        0, 0, 0, "", "test", 0, 0, 0, 0, 1, 1, 0, 0);
+                live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(sibling)));
                 live.responses.clear();
-                live.apply(live.message(CoreMessageType.EXECUTE_TRIGGER_ORDER, 0,
+                var handoff = com.surprising.aeron.service.state.TradingRuntimeState.class.getDeclaredField("laneHandoffEpoch");
+                handoff.setAccessible(true);
+                long beforeHandoff = handoff.getLong(live.service.state().runtimeState);
+                if (internalScan) scanTriggers(live, 1);
+                else live.apply(live.message(CoreMessageType.EXECUTE_TRIGGER_ORDER, 0,
                         CoreTriggerOrderCodec.encodeExecute(9001, 1, 100, TIME)));
+                assertThat(handoff.getLong(live.service.state().runtimeState))
+                        .as("trigger claim/reserve/settle stays on permanent Account Lane")
+                        .isEqualTo(beforeHandoff);
                 assertThat(live.responses).isNotEmpty().allSatisfy(r ->
                         assertThat(r.commandStatus()).isEqualTo(ResponseStatus.APPLIED));
                 var terminal = live.service.state().runtimeState.triggerOrder(9001);
                 assertThat(terminal.status()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
                 assertThat(terminal.placedOrderId()).isEqualTo(18005);
+                assertThat(live.service.state().runtimeState.triggerOrder(9002).status())
+                        .isEqualTo(CoreTriggerOrderStatus.CANCELED);
                 try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
                     assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
                 }
                 live.apply(live.cancel(user, 18003));
                 assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            }
+        }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void nativeTriggerRejectionReleasesReservationAndCompletesOnItsLane(ProductLine product) throws Exception {
+        for (boolean internalScan : new boolean[]{false}) {
+        if (internalScan && product == ProductLine.SPOT) continue; // Spot has no mark-price risk scan.
+        for (int matchedQuantity : new int[]{1}) {
+            boolean fill = matchedQuantity != 0;
+            try (Fixture live = new Fixture(product)) {
+                live.setup();
+                long maker = 11, user = disjointUser(maker);
+                if (product == ProductLine.SPOT) live.apply(live.message(CoreMessageType.ADJUST_BALANCE, maker,
+                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 100))));
+                live.apply(live.place(maker, "BTC-USDT", 101, 100, 10, CoreOrderSide.SELL));
+                live.apply(live.place(user, "BTC-USDT", 102, 100, 10, CoreOrderSide.BUY));
+                // 子订单编号冲突时必须沿用准入阶段选定的编号，不能重新推导或回查 Lane。
+                live.apply(live.place(user, "BTC-USDT", 18003, 80, 1, CoreOrderSide.BUY));
+                if (fill) live.apply(live.place(maker, "BTC-USDT", 103, 100, matchedQuantity, CoreOrderSide.BUY));
+                var trigger = new CoreTriggerOrderStateView(9001, product, user, "trigger-9001", "oco-9001", "BTC-USDT",
+                        CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
+                        100, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.GTX, fill ? 100 : 110, Math.max(1, matchedQuantity),
+                        CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
+                        0, 0, 0, "", "test", 0, 0, 0, 0, 1, 1, 0, 0);
+                live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(trigger)));
+                var sibling = new CoreTriggerOrderStateView(9002, product, user, "trigger-9002", "oco-9001", "BTC-USDT",
+                        CoreOrderSide.SELL, CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
+                        200, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 200, 1,
+                        CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
+                        0, 0, 0, "", "test", 0, 0, 0, 0, 1, 1, 0, 0);
+                live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(sibling)));
+                live.responses.clear();
+                var handoff = com.surprising.aeron.service.state.TradingRuntimeState.class.getDeclaredField("laneHandoffEpoch");
+                handoff.setAccessible(true);
+                long beforeHandoff = handoff.getLong(live.service.state().runtimeState);
+                if (internalScan) scanTriggers(live, 1);
+                else live.apply(live.message(CoreMessageType.EXECUTE_TRIGGER_ORDER, 0,
+                        CoreTriggerOrderCodec.encodeExecute(9001, 1, 100, TIME)));
+                assertThat(handoff.getLong(live.service.state().runtimeState))
+                        .as("trigger claim/reserve/settle stays on permanent Account Lane")
+                        .isEqualTo(beforeHandoff);
+                assertThat(live.responses).isNotEmpty().allSatisfy(r ->
+                        assertThat(r.commandStatus()).isEqualTo(ResponseStatus.APPLIED));
+                assertThat(live.service.state().runtimeState.reservation(18005)).isNull();
+                assertThat(live.service.state().runtimeState.order(18005).status())
+                        .isEqualTo(com.surprising.aeron.service.state.model.CoreOrderStatus.REJECTED);
+                var terminal = live.service.state().runtimeState.triggerOrder(9001);
+                assertThat(terminal.status()).isEqualTo(CoreTriggerOrderStatus.TRIGGER_FAILED);
+                assertThat(terminal.placedOrderId()).isZero();
+                assertThat(live.service.state().runtimeState.triggerOrder(9002).status())
+                        .isEqualTo(CoreTriggerOrderStatus.CANCELED);
+                try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+                    assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+                }
+                live.apply(live.cancel(user, 18003));
+                assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            }
+        }
+        }
+    }
+
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void triggerChildFailureClosesOrRollsBackOcoOnItsLane(boolean overflow) throws Exception {
+        try (Fixture live = new Fixture(ProductLine.SPOT)) {
+            live.setup();
+            long user = 11;
+            for (long id : new long[]{9101, 9102}) {
+                var trigger = new CoreTriggerOrderStateView(id, ProductLine.SPOT, user, "failure-" + id,
+                        "failure-oco", "BTC-USDT", overflow ? CoreOrderSide.BUY : CoreOrderSide.SELL,
+                        CoreTriggerOrderType.TAKE_PROFIT, CoreTriggerCondition.GREATER_OR_EQUAL,
+                        100, 0, 0, 0, 0, 0, CoreOrderType.LIMIT, CoreTimeInForce.IOC, 100,
+                        overflow && id == 9101 ? Long.MAX_VALUE : 1,
+                        CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
+                        0, 0, 0, "", "test", 0, 0, 0, 0, 1, 1, 0, 0);
+                live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(trigger)));
+                assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            }
+            var runtime = live.service.state().runtimeState;
+            var epoch = runtime.getClass().getDeclaredField("laneHandoffEpoch");
+            epoch.setAccessible(true);
+            long before = epoch.getLong(runtime);
+            var accountsBefore = live.service.state().tradingState().users();
+            live.responses.clear();
+            live.apply(live.message(CoreMessageType.EXECUTE_TRIGGER_ORDER, user,
+                    CoreTriggerOrderCodec.encodeExecute(9101, 1, 100, TIME)));
+            assertThat(epoch.getLong(runtime)).isEqualTo(before);
+            assertThat(live.responses.getLast().commandStatus())
+                    .isEqualTo(overflow ? ResponseStatus.REJECTED : ResponseStatus.APPLIED);
+            assertThat(runtime.triggerOrder(9101).status())
+                    .isEqualTo(overflow ? CoreTriggerOrderStatus.PENDING : CoreTriggerOrderStatus.TRIGGER_FAILED);
+            assertThat(runtime.triggerOrder(9102).status())
+                    .isEqualTo(overflow ? CoreTriggerOrderStatus.PENDING : CoreTriggerOrderStatus.CANCELED);
+            assertThat(runtime.order(18203)).isNull();
+            assertThat(live.service.state().identities.findClientKey(user, "TRIGGER:9101")).isNull();
+            assertThat(live.service.state().tradingState().users()).isEqualTo(accountsBefore);
+            try (var restored = TradingCoreRuntime.fromSnapshot(ProductLine.SPOT, live.service.captureSnapshot(101))) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
         }
     }
@@ -677,6 +960,48 @@ class ClusterCommandPipelineTest {
             assertThat(live.hash()).isEqualTo(serial.hash());
             try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void singleItemPlaceBatchKeepsAccountOwnershipOnLane(ProductLine product) throws Exception {
+        for (int scenario = 0; scenario < 3; scenario++) {
+            try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
+                serial.applyAll(live.setup());
+                long maker = disjointUser(11);
+                if (scenario == 1) {
+                    if (product == ProductLine.SPOT) {
+                        var funds = live.message(CoreMessageType.ADJUST_BALANCE, maker,
+                                TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 20_000)));
+                        live.apply(funds); serial.apply(funds);
+                    }
+                    var liquidity = live.place(maker, "BTC-USDT", 7900, 80, 1, CoreOrderSide.SELL);
+                    live.apply(liquidity); serial.apply(liquidity);
+                }
+                var item = new PlaceOrderCommand(8000, "BTC-USDT", 1, CoreOrderSide.BUY, 80,
+                        scenario == 2 ? Long.MAX_VALUE : 1, false, CoreMarginMode.CROSS,
+                        CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "single-batch");
+                var batch = live.message(CoreMessageType.PLACE_ORDER_BATCH, 11,
+                        TradingOrderBatchCodec.encodePlaceOrderBatch(new PlaceOrderBatchCommand(List.of(item))));
+                var runtime = live.service.state().runtimeState;
+                var epoch = runtime.getClass().getDeclaredField("laneHandoffEpoch");
+                epoch.setAccessible(true);
+                long before = epoch.getLong(runtime);
+                live.responses.clear();
+                live.apply(batch); serial.apply(batch);
+                assertThat(epoch.getLong(runtime)).as("single-item admission/settlement never takes Lane ownership")
+                        .isEqualTo(before);
+                var result = TradingOrderBatchCodec.decodeResult(live.responses.getFirst().data()).items();
+                assertThat(result).hasSize(1);
+                assertThat(result.getFirst().status()).isEqualTo(
+                        scenario == 2 ? ResponseStatus.REJECTED : ResponseStatus.APPLIED);
+                assertThat(result.getFirst().executions()).hasSize(scenario == 1 ? 1 : 0);
+                assertThat(live.hash()).isEqualTo(serial.hash());
+                try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
+                    assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+                }
             }
         }
     }
@@ -802,9 +1127,7 @@ class ClusterCommandPipelineTest {
                         }));
                 assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
                 assertThat(state.completeMatching(sequence, context.takeMatchingCompletion(), timestamp, 0)).isNull();
-                var batchesField = OrderBatchExecutor.class.getDeclaredField("pendingOrderBatches");
-                batchesField.setAccessible(true);
-                var batch = ((java.util.Map<?, ?>) batchesField.get(state.batches)).get(sequence);
+                var batch = state.pendingMatching.get(sequence).orderBatch;
                 var eventsField = batch.getClass().getDeclaredField("settlementEvent");
                 eventsField.setAccessible(true);
                 Object dispatched = eventsField.get(batch);
@@ -855,6 +1178,45 @@ class ClusterCommandPipelineTest {
             assertThat(live.hash()).isEqualTo(serial.hash());
         }
     }
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
+    void cancellationFencesRemovedLiquidityWithoutBlockingTheWholeSymbol(ProductLine product) {
+        try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
+            serial.applyAll(live.setup());
+            var resting = live.place(11, "BTC-USDT", 4100, 80, 1, CoreOrderSide.BUY);
+            live.apply(resting); serial.apply(resting);
+            var cancel = live.cancel(11, 4100);
+            long other = disjointUser(11);
+            var independent = live.place(other, "BTC-USDT", 4200, 80, 1, CoreOrderSide.BUY);
+            var window = new ClusterCommandWindow();
+            var state = live.service.state();
+            assertThat(state.prepareClusterPipelineScope(cancel, window)).isTrue();
+            window.add(null, cancel, TIME, 1);
+            assertThat(state.prepareClusterPipelineScope(independent, window)).isTrue();
+            assertThat(window.conflicts()).as("same-side different-account order").isFalse();
+            assertThat(state.prepareClusterPipelineScope(
+                    live.place(other, "BTC-USDT", 4201, 81, 1, CoreOrderSide.SELL), window)).isTrue();
+            assertThat(window.conflicts()).as("sell cannot consume the removed buy").isFalse();
+            assertThat(state.prepareClusterPipelineScope(
+                    live.place(other, "BTC-USDT", 4202, 80, 1, CoreOrderSide.SELL), window)).isTrue();
+            assertThat(window.conflicts()).as("crossing sell must observe cancellation").isTrue();
+            assertThat(state.prepareClusterPipelineScope(
+                    live.place(11, "BTC-USDT", 4203, 79, 1, CoreOrderSide.BUY), window)).isTrue();
+            assertThat(window.conflicts()).as("same account must observe released funds").isTrue();
+            assertThat(state.prepareClusterPipelineScope(cancel, window)).isTrue();
+            assertThat(window.conflicts()).as("same order identity remains fenced").isTrue();
+            live.responses.clear();
+            live.send(cancel); live.send(independent); live.tick();
+            serial.apply(cancel); serial.apply(independent);
+            assertThat(live.responses).hasSize(2)
+                    .allSatisfy(result -> assertThat(result.commandStatus()).isEqualTo(ResponseStatus.APPLIED));
+            assertThat(live.hash()).isEqualTo(serial.hash());
+            try (var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
+                assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+            }
+        }
+    }
+
     @ParameterizedTest
     @EnumSource(ProductLine.class)
     void scopeRefreshAndAdmissionShareOneDecodedBatch(ProductLine product) throws Exception {
@@ -1167,9 +1529,10 @@ class ClusterCommandPipelineTest {
             f.responses.clear();
             f.send(f.place(11, "BTC-USDT", 101, 80, 1, CoreOrderSide.BUY));
             f.send(f.place(11, disjointSymbol("BTC-USDT"), disjointOrder(101), 80, 1, CoreOrderSide.BUY));
-            f.progressUntil(() -> f.responses.size() == 1);
-            assertThat(f.responses).hasSize(1);
+            // One owner poll may publish both the first terminal and the following rejection.
+            f.progressUntil(() -> !f.responses.isEmpty());
             f.tick();
+            assertThat(f.responses).hasSize(2);
             assertThat(f.responses.get(0).status()).isEqualTo(ResponseStatus.APPLIED);
             assertThat(f.responses.get(1).commandStatus()).isEqualTo(ResponseStatus.REJECTED);
             var balance = f.service.state().tradingState().user(11).balances().get("USDT");
@@ -1482,21 +1845,8 @@ class ClusterCommandPipelineTest {
                         || !state.pendingMatching(secondSequence).isMatchingSubmitted()) && System.nanoTime() < deadline)
                     live.service.pollCommands();
                 assertThat(state.pendingMatching(secondSequence).isMatchingSubmitted()).isTrue();
-                var field = state.runtimeState.getClass().getDeclaredField("laneWorkers");
-                field.setAccessible(true);
-                Object[] workers = (Object[]) field.get(state.runtimeState);
-                var entered = new CountDownLatch(workers.length);
-                Class<?> task = Class.forName("com.surprising.aeron.service.state.SettlementLaneWorker$Command");
-                var submit = workers[0].getClass().getDeclaredMethod("submit", task);
-                submit.setAccessible(true);
-                for (Object worker : workers) submit.invoke(worker, Proxy.newProxyInstance(task.getClassLoader(),
-                        new Class<?>[]{task}, (p, method, args) -> {
-                            entered.countDown();
-                            if (!releaseLanes.await(5, TimeUnit.SECONDS)) throw new AssertionError("Lane gate timeout");
-                            return null;
-                        }));
-                assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
-                releaseMatcher.countDown();
+                // Sequenced direct mailboxes are already queued while Matcher is blocked.
+                // A later Lane blocker would sit behind those mailboxes and cannot run yet.
                 deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
                 while (state.commits.dispatchedSettlementInFlight < 2 && System.nanoTime() < deadline)
                     live.service.pollCommands();
@@ -1512,6 +1862,83 @@ class ClusterCommandPipelineTest {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
             }
         }
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = ProductLine.class, names = {"LINEAR_PERPETUAL", "INVERSE_PERPETUAL",
+            "LINEAR_DELIVERY", "INVERSE_DELIVERY", "OPTION"})
+    void internalTriggerPagesExpireTrailAndRecoverWithoutAccountHandoff(ProductLine product) throws Exception {
+        try (Fixture live = new Fixture(product)) {
+            live.setup();
+            long maker = 11, user = disjointUser(maker);
+            live.apply(live.place(maker, "BTC-USDT", 501, 100, 10, CoreOrderSide.SELL));
+            live.apply(live.place(user, "BTC-USDT", 502, 100, 10, CoreOrderSide.BUY));
+            for (long id : new long[]{8990, 9001, 9002, 9003, 9004, 9005, 9010}) {
+                boolean expired = id == 8990, trailing = id == 9010;
+                var trigger = new CoreTriggerOrderStateView(id, product, user, "scan-" + id,
+                        expired || trailing ? "" : "scan-oco", "BTC-USDT", CoreOrderSide.SELL,
+                        trailing ? CoreTriggerOrderType.TRAILING_STOP : CoreTriggerOrderType.TAKE_PROFIT,
+                        CoreTriggerCondition.GREATER_OR_EQUAL, expired ? 90 : id == 9001 ? 100 : 200,
+                        0, trailing ? 100_000 : 0, trailing ? 120 : 0, 0, 0,
+                        CoreOrderType.LIMIT, CoreTimeInForce.IOC, 110, 1,
+                        CoreMarginMode.CROSS, CorePositionSide.NET, CoreTriggerOrderStatus.PENDING,
+                        0, 0, 0, "", "scan", expired ? TIME + 500 : 0, 0, 0, 0, 1, 1, 0, 0);
+                live.apply(live.message(CoreMessageType.PLACE_TRIGGER_ORDER, user, CoreTriggerOrderCodec.encodeState(trigger)));
+                assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+            }
+            var runtime = live.service.state().runtimeState;
+            var epoch = runtime.getClass().getDeclaredField("laneHandoffEpoch");
+            epoch.setAccessible(true);
+            long before = epoch.getLong(runtime);
+            long funds = com.surprising.aeron.service.state.RollingFundsStateHash.compute(live.service.state().tradingState());
+            live.sequence += 1000; // Commands occur after the expired order and the new mark timestamp.
+            live.apply(live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
+                    TradingCommandCodec.encodeApplyMarkPrice(product == ProductLine.OPTION
+                            ? new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 100, 100, 2, TIME + 1000)
+                            : new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 2, TIME + 1000))));
+            boolean resumed = false;
+            for (int n = 0; n < 100 && runtime.firstIncompleteRiskScan() != null; n++) {
+                var command = live.message(CoreMessageType.CONTINUE_RISK_SCAN, 0,
+                        TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(1)));
+                // The same snapshot must resume an incomplete OCO page in standalone replay as in live Lane execution.
+                var scan = runtime.riskScan(live.service.state().identities.findSymbolId("BTC-USDT"));
+                if (!resumed && scan.triggerOcoOrderId() != 0) {
+                    try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(501))) {
+                        live.apply(command);
+                        assertThat(restored.apply(command).commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+                        assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+                    }
+                    resumed = true;
+                } else live.apply(command);
+                assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+                assertThat(epoch.getLong(runtime)).isEqualTo(before);
+            }
+            assertThat(resumed).as("cross-command OCO continuation exercised").isTrue();
+            assertThat(runtime.firstIncompleteRiskScan()).isNull();
+            assertThat(runtime.triggerOrder(8990).status()).isEqualTo(CoreTriggerOrderStatus.EXPIRED);
+            assertThat(runtime.triggerOrder(9001).status()).as("%s", runtime.triggerOrder(9001)).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
+            for (long id = 9002; id <= 9005; id++)
+                assertThat(runtime.triggerOrder(id).status()).isEqualTo(CoreTriggerOrderStatus.CANCELED);
+            assertThat(runtime.triggerOrder(9010).status()).isEqualTo(CoreTriggerOrderStatus.TRIGGERED);
+            assertThat(runtime.triggerOrder(9010).highestPriceTicks()).isEqualTo(120);
+            assertThat(runtime.triggerOrder(9010).activatedAtEpochMillis()).isEqualTo(TIME + 1000);
+            assertThat(com.surprising.aeron.service.state.RollingFundsStateHash.compute(live.service.state().tradingState()))
+                    .isEqualTo(funds);
+        }
+    }
+
+    private static void scanTriggers(Fixture live, int budget) {
+        boolean option = live.product == ProductLine.OPTION;
+        live.apply(live.message(CoreMessageType.APPLY_MARK_PRICE, 0,
+                TradingCommandCodec.encodeApplyMarkPrice(option
+                        ? new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 100, 100, 2, TIME)
+                        : new ApplyMarkPriceCommand("BTC-USDT", 1, 100, 2, TIME))));
+        for (int i = 0; i < 100 && live.service.state().runtimeState.firstIncompleteRiskScan() != null; i++) {
+            live.apply(live.message(CoreMessageType.CONTINUE_RISK_SCAN, 0,
+                    TradingCommandCodec.encodeContinueRiskScan(new ContinueRiskScanCommand(budget))));
+            assertThat(live.responses.getLast().commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+        }
+        assertThat(live.service.state().runtimeState.firstIncompleteRiskScan()).isNull();
     }
 
     private static final class Fixture implements AutoCloseable {

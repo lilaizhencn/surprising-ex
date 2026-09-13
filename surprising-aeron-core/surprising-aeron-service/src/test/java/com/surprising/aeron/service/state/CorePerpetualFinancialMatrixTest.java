@@ -183,9 +183,9 @@ class CorePerpetualFinancialMatrixTest {
         }
     }
 
-    @Test
-    void crossLaneAdlMutatesOnlyTheTargetAndLiquidationOwners() {
-        Variant variant = VARIANTS.getFirst();
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.MethodSource("adlVariants")
+    void crossLaneAdlMutatesOnlyTheTargetAndLiquidationOwners(Variant variant) {
         TradingCoreState opening = adlSetup(variant);
         TradingCoreState marked = mark(opening, variant, 1, 1);
         TradingCoreState liquidated = reducer.executeLiquidation(marked,
@@ -207,7 +207,12 @@ class CorePerpetualFinancialMatrixTest {
         TradingRuntimeState runtime = RuntimeStateProjector.project(beforeAdl, identities);
         runtime.startAccountLanes();
         try {
-            RuntimeDerivativeLiquidationProcessor.applyAdlRuntime(command, runtime, identities);
+            var work = RuntimeDerivativeLiquidationProcessor.beginAdl(command, runtime, identities);
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            while (!work.getAsBoolean()) {
+                assertThat(System.nanoTime()).isLessThan(deadline);
+                Thread.onSpinWait();
+            }
 
             RuntimeStateParityChecker.assertMatches(expected, identities, runtime);
             assertThat(runtime.accountLane(USER_ID).queueDepth()).isZero();
@@ -216,6 +221,8 @@ class CorePerpetualFinancialMatrixTest {
             runtime.close();
         }
     }
+
+    static java.util.stream.Stream<Variant> adlVariants() { return VARIANTS.stream(); }
 
     @Test
     void failingFirstCompletenessManifestReportsEveryMissingRow() {

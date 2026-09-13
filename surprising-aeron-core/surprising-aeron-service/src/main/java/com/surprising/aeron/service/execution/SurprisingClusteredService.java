@@ -31,6 +31,9 @@ public final class SurprisingClusteredService implements ClusteredService {
     private final ClusterCommandWindow commandWindow = new ClusterCommandWindow();
     private int commandWindowHighWaterMark;
     private long drainedWindows, drainedCommands, dependencyFences, controlFences;
+    /** Owner-only counts of blocking decisions; cached retries do not increment them. */
+    private final long[] dependencyFenceReasons = new long[ClusterCommandWindow.Conflict.values().length];
+    private long retryFences;
     /** Owner 独占：只有准入、控制执行或提交推进时递增，等待中的命令不算工作。 */
     private long commandProgress;
     /** 已提交结果的异步出口，网络背压不占用交易回调的执行时间。 */
@@ -97,7 +100,8 @@ public final class SurprisingClusteredService implements ClusteredService {
         drainingSize = 0;
         pendingResponses.clear();
         commandWindowHighWaterMark = 0;
-        drainedWindows = drainedCommands = dependencyFences = controlFences = 0;
+        drainedWindows = drainedCommands = dependencyFences = controlFences = retryFences = 0;
+        java.util.Arrays.fill(dependencyFenceReasons, 0);
         snapshotFenceNotReadyCount = 0;
         snapshotFenceTimeoutCount = 0;
         idleStrategy = cluster.idleStrategy();
@@ -241,13 +245,20 @@ public final class SurprisingClusteredService implements ClusteredService {
                     && commandWindow.get(0).request == blockedWindowHead) return;
             blockedIngress = blockedWindowHead = null;
             boolean eligible = state.prepareClusterPipelineScope(next.command, commandWindow);
-            int prefix = !eligible || state.matchingSequence(next.command.header().commandId()) != 0
-                    ? commandWindow.size() : commandWindow.conflictingPrefixSize();
+            boolean retry = eligible && state.matchingSequence(next.command.header().commandId()) != 0;
+            int prefix = !eligible || retry ? commandWindow.size() : commandWindow.conflictingPrefixSize();
             if (prefix != 0) {
                 blockedIngress = next.command;
                 blockedWindowHead = commandWindow.get(0).request;
+                // A prefix is normally already draining. Count the decision before returning,
+                // otherwise the busiest dependency waits disappear from the diagnostics.
+                if (!eligible) controlFences++;
+                else {
+                    dependencyFences++;
+                    if (retry) retryFences++;
+                    else dependencyFenceReasons[commandWindow.conflict().ordinal()]++;
+                }
                 if (drainingSize != 0) return;
-                if (eligible) dependencyFences++; else controlFences++;
                 beginCommandPrefix();
                 continue;
             }
@@ -269,7 +280,7 @@ public final class SurprisingClusteredService implements ClusteredService {
             var entry = commandWindow.add(next.session, next.command, next.timestamp, next.position);
             CoreResponse result = state.applyDecodedCommand(next.command, next.timestamp, next.position,
                     commandWindow.decoded(next.command), true, next.fingerprint);
-            entry.sequence = state.matchingSequence(next.command.header().commandId());
+            commandWindow.bindSequence(entry, state.matchingSequence(next.command.header().commandId()));
             if (entry.sequence != 0) {
                 var pending = state.pendingMatching(entry.sequence);
                 pending.establishCommitFence(next.timestamp, next.position);
@@ -392,6 +403,17 @@ public final class SurprisingClusteredService implements ClusteredService {
     /** 已复制但尚未返回终态的命令及日志推进边界数量，用于运行积压观测。 */
     public int pendingCommandCount() { return pendingIngress.size() + commandWindow.size(); }
 
+    /**
+     * Owner 在调用完整推进器前的廉价门禁。
+     *
+     * <p>没有入站命令、在途窗口或跨线程完成时，重复执行
+     * {@link #pollCommands()} 只会重建异步命令作用域并扫描空队列；让持续 Owner
+     * 直接进入退避，保留完成通知作为唯一的跨线程唤醒来源。</p>
+     */
+    boolean ownerWorkAvailable() {
+        return pendingCommandCount() != 0 || ownerCompletionAvailable();
+    }
+
     int commandWindowSize() { return commandWindow.size(); }
     int commandWindowHighWaterMark() { return commandWindowHighWaterMark; }
 
@@ -510,9 +532,13 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     @Override
     public void onTerminate(Cluster cluster) {
-        System.out.printf("Aeron core command-window productLine=%s highWaterMark=%d pending=%d windows=%d commands=%d dependencyFences=%d controlFences=%d%n",
+        System.out.printf("Aeron core command-window productLine=%s highWaterMark=%d pending=%d windows=%d commands=%d dependencyFences=%d controlFences=%d orderFences=%d matchingRangeFences=%d openInterestFences=%d accountFences=%d retryFences=%d%n",
                 productLine, commandWindowHighWaterMark, commandWindow.size(), drainedWindows,
-                drainedCommands, dependencyFences, controlFences);
+                drainedCommands, dependencyFences, controlFences,
+                dependencyFenceReasons[ClusterCommandWindow.Conflict.ORDER.ordinal()],
+                dependencyFenceReasons[ClusterCommandWindow.Conflict.MATCHING_RANGE.ordinal()],
+                dependencyFenceReasons[ClusterCommandWindow.Conflict.OPEN_INTEREST.ordinal()],
+                dependencyFenceReasons[ClusterCommandWindow.Conflict.ACCOUNT.ordinal()], retryFences);
         commandWindow.clear();
         pendingIngress.clear();
         blockedIngress = blockedWindowHead = null;

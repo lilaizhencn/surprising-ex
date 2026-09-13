@@ -6,7 +6,6 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
-import java.util.function.Predicate;
 import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
 
 final class PendingMatchingRing {
@@ -164,14 +163,6 @@ final class PendingMatchingRing {
 
     long firstSequence() {
         return head == -1 ? 0 : pendingAt(head).sequence();
-    }
-
-    PendingMatching findFirst(Predicate<PendingMatching> predicate) {
-        for (int slot = head; slot != -1; slot = nextSlots[slot]) {
-            PendingMatching pending = pendingAt(slot);
-            if (pending != null && predicate.test(pending)) return pending;
-        }
-        return null;
     }
 
     void markReady(long sequence) {

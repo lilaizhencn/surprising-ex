@@ -70,12 +70,31 @@ public final class CoreMatchingResult {
     }
 
     static CoreMatchingResult fromNative(MatcherResult result) {
-        Objects.requireNonNull(result, "matcher result");
-        boolean accepted = result.resultCode() == CommandResultCode.SUCCESS
+        return new CoreMatchingResult(result, EMPTY_COMMAND, 0);
+    }
+
+    static CoreMatchingResult fromNativeWithEvidence(
+            MatcherResult result, NativeCommand command, long previousPrefix) {
+        if (previousPrefix == 0) throw new IllegalArgumentException("matcher prefix is required");
+        return new CoreMatchingResult(result, command, previousPrefix);
+    }
+
+    /** Native events are already immutable; build the result and its evidence once. */
+    private CoreMatchingResult(MatcherResult result, NativeCommand command, long previousPrefix) {
+        nativeMatcherResult = Objects.requireNonNull(result, "matcher result");
+        accepted = result.resultCode() == CommandResultCode.SUCCESS
                 || result.resultCode() == CommandResultCode.ACCEPTED;
-        return new CoreMatchingResult(accepted, result.resultCode().name(), List.of(), 0, false,
-                EMPTY_COMMAND,
-                EMPTY_PREFIX, result, result.events(), result.marketData());
+        resultCode = result.resultCode().name();
+        cancellations = List.of();
+        successfulPrefixCount = 0;
+        matcherStateChanged = false;
+        outcome = classify(accepted, resultCode, false);
+        nativeCommand = Objects.requireNonNull(command, "native command");
+        matcherEvents = Objects.requireNonNull(result.events(), "matcher events");
+        marketData = Objects.requireNonNull(result.marketData(), "matcher market data");
+        // The digest reads only the business fields initialized above; it never retains this.
+        matcherPrefix = previousPrefix == 0 ? EMPTY_PREFIX
+                : new MatcherPrefix(previousPrefix, MatcherPrefixDigest.next(previousPrefix, command, this));
     }
 
     CoreMatchingResult withEvidence(NativeCommand command, MatcherPrefix prefix) {

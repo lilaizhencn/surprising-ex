@@ -4,7 +4,6 @@ import com.surprising.aeron.service.matching.CoreMatchingResult;
 import java.util.function.IntConsumer;
 import java.util.function.IntFunction;
 import java.util.function.Supplier;
-import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
 
 /**
  * Partition-local synchronous matcher workers. A stable symbol route selects exactly one SPSC queue;
@@ -17,21 +16,21 @@ final class MatcherPipelineGroup implements AutoCloseable {
     }
 
     private final MatcherCommandPipeline[] shards;
-    private final LongIntHashMap shardByToken;
+    private final LaneCommandContextRing contexts;
 
     void completionSignal(Runnable signal) {
         for (MatcherCommandPipeline shard : shards) shard.completionSignal(signal);
     }
 
-    MatcherPipelineGroup(int shardCount, int capacityPerShard, boolean startImmediately) {
+    MatcherPipelineGroup(int shardCount, int capacityPerShard, boolean startImmediately, LaneCommandContextRing contexts) {
         if (shardCount <= 0 || (shardCount & (shardCount - 1)) != 0) {
             throw new IllegalArgumentException("matcher shard count must be a power of two");
         }
+        this.contexts = java.util.Objects.requireNonNull(contexts, "matching sequence contexts");
         shards = new MatcherCommandPipeline[shardCount];
         for (int shard = 0; shard < shardCount; shard++) {
             shards[shard] = new MatcherCommandPipeline(shard, capacityPerShard, false);
         }
-        shardByToken = new LongIntHashMap(Math.multiplyExact(shardCount, capacityPerShard));
         if (startImmediately) start((IntConsumer) null);
     }
 
@@ -44,19 +43,30 @@ final class MatcherPipelineGroup implements AutoCloseable {
     }
 
     void submit(int shardId, long coreSequence, Supplier<CoreMatchingResult> command) {
+        submit(shardId, coreSequence, command, null);
+    }
+
+    void submit(int shardId, long coreSequence, Supplier<CoreMatchingResult> command,
+                com.surprising.aeron.service.state.MatcherSettlementEvent settlement) {
+        if (coreSequence <= 0 || command == null) throw new IllegalArgumentException("invalid matcher submission");
         MatcherCommandPipeline shard = shard(shardId);
-        if (shardByToken.containsKey(coreSequence)) {
-            throw new IllegalStateException("matcher command token is already routed");
+        LaneCommandContextRing.Context context = contexts.required(coreSequence);
+        context.claimMatcherSubmission(shardId);
+        try {
+            shard.submit(coreSequence, command, settlement);
+        } catch (RuntimeException failure) {
+            context.releaseMatcherSubmission(shardId);
+            throw failure;
         }
-        shard.submit(coreSequence, command);
-        shardByToken.put(coreSequence, shardId + 1);
     }
 
     CoreMatchingResult poll(long coreSequence) {
-        int encodedShard = shardByToken.get(coreSequence);
-        if (encodedShard == 0) return null;
-        CoreMatchingResult result = shards[encodedShard - 1].poll(coreSequence);
-        if (result != null) shardByToken.removeKey(coreSequence);
+        if (coreSequence <= 0 || !contexts.claimed(coreSequence)) return null;
+        LaneCommandContextRing.Context context = contexts.required(coreSequence);
+        int shardId = context.submittedMatcherShard();
+        if (shardId == -1) return null;
+        CoreMatchingResult result = shards[shardId].poll(coreSequence);
+        if (result != null) context.releaseMatcherSubmission(shardId);
         return result;
     }
 
@@ -76,13 +86,10 @@ final class MatcherPipelineGroup implements AutoCloseable {
             while (true) {
                 long coreSequence = shard.completedMatchingSequence();
                 if (coreSequence == 0) break;
-                int encodedShard = shardByToken.get(coreSequence);
-                if (encodedShard != shardId + 1) {
-                    throw new IllegalStateException("completed matcher token is not routed to its shard");
-                }
                 CoreMatchingResult result = shard.poll(coreSequence);
                 if (result == null) break;
-                shardByToken.removeKey(coreSequence);
+                // The existing sequence slot owns the route; no second token index is maintained.
+                contexts.required(coreSequence).releaseMatcherSubmission(shardId);
                 consumer.accept(coreSequence, result);
             }
         }

@@ -88,10 +88,15 @@ final class MatcherCommandPipeline implements AutoCloseable {
     }
 
     void submit(long coreSequence, Supplier<CoreMatchingResult> command) {
+        submit(coreSequence, command, null);
+    }
+
+    void submit(long coreSequence, Supplier<CoreMatchingResult> command,
+                com.surprising.aeron.service.state.MatcherSettlementEvent settlement) {
         if (coreSequence <= 0 || command == null) {
             throw new IllegalArgumentException("matcher pipeline command is invalid");
         }
-        submitInternal(coreSequence, command);
+        submitInternal(coreSequence, command, settlement);
     }
 
     <T> T call(Supplier<T> command, long timeoutNanos) {
@@ -120,6 +125,11 @@ final class MatcherCommandPipeline implements AutoCloseable {
     }
 
     private void submitInternal(long token, Supplier<?> command) {
+        submitInternal(token, command, null);
+    }
+
+    private void submitInternal(long token, Supplier<?> command,
+                                com.surprising.aeron.service.state.MatcherSettlementEvent settlement) {
         if (token == 0 || command == null) throw new IllegalArgumentException("matcher command is invalid");
         if (!accepting) throw new RejectedExecutionException("matcher pipeline is closed");
         long position = submittedPosition.value;
@@ -132,6 +142,7 @@ final class MatcherCommandPipeline implements AutoCloseable {
         }
         slot.token = token;
         slot.command = command;
+        slot.settlement = settlement;
         submittedPosition.value = position + 1;
         int depth = Math.toIntExact(position + 1 - consumedPosition.value);
         submissionHighWaterMark = Math.max(submissionHighWaterMark, depth);
@@ -274,7 +285,10 @@ final class MatcherCommandPipeline implements AutoCloseable {
                     // CoreMatchingResult on the hot drain path.
                     slot.result = slot.token > 0 && result instanceof CoreMatchingResult matchingResult
                             ? matchingResult.withCoreSequence(slot.token) : result;
+                    if (slot.settlement != null && !slot.settlement.ready())
+                        slot.settlement.publishDirectResult((CoreMatchingResult) slot.result);
                 } catch (Throwable failure) {
+                    if (slot.settlement != null) slot.settlement.failDirect(failure);
                     slot.failure = failure;
                 }
             }
@@ -367,12 +381,14 @@ final class MatcherCommandPipeline implements AutoCloseable {
         private Supplier<?> command;
         private Object result;
         private Throwable failure;
+        private com.surprising.aeron.service.state.MatcherSettlementEvent settlement;
 
         private void clear() {
             token = 0;
             command = null;
             result = null;
             failure = null;
+            settlement = null;
         }
     }
 

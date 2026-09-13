@@ -30,6 +30,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     private TradingRuntimeState runtime;
     private RuntimeIdentityRegistry identities;
     private LanePublication publication;
+    private LanePublication publicationBuffer;
     private long identityAllocations;
     private CoreMatchingOrder matchingOrder;
     private UserRuntime admittedUser;
@@ -58,6 +59,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         this.identity = identity;
         this.preparedClientKey = null;
         this.identities = identities;
+        if (publication != null) publication.clear();
         publication = null;
         identityAllocations = 0;
         this.symbolId = symbolId;
@@ -82,6 +84,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         preparedClientKey = null;
         runtime = null;
         identities = null;
+        if (publication != null) publication.clear();
         publication = null;
         matchingOrder = null;
         admittedUser = null;
@@ -112,7 +115,8 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
                 admittedReservation = lane.reservations.get(order.orderId());
                 matchingOrder = new CoreMatchingOrder(order.orderId(), order.symbol(), order.side(),
                         order.orderType(), order.timeInForce(), order.matchingPriceTicks(), order.quantitySteps());
-                publication = new LanePublication();
+                if (publicationBuffer == null) publicationBuffer = new LanePublication();
+                publication = publicationBuffer;
                 publication.admissionSequence = coreSequence;
                 runtime.publishedUsers.stage(publication, userId, admittedUser);
                 runtime.publishedOrders.stage(publication, order.orderId(), admittedOrder);
@@ -138,6 +142,30 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
 
     public boolean complete() {
         return (boolean) COMPLETED.getAcquire(this);
+    }
+
+    /** Abort a prepared event that was never submitted to a Lane. */
+    void discard() {
+        if (complete()) throw new IllegalStateException("completed place admission must be collected");
+        if (runtime != null) runtime.releaseAdmissionExpectation(laneId);
+        order = null;
+        commandId = null;
+        identity = null;
+        preparedClientKey = null;
+        runtime = null;
+        identities = null;
+        if (publication != null) publication.clear();
+        publication = null;
+        matchingOrder = null;
+        admittedUser = null;
+        admittedOrder = null;
+        admittedReservation = null;
+        rejection = null;
+        identityAllocations = 0;
+        coreSequence = 0;
+        userId = 0;
+        laneId = 0;
+        COMPLETED.setRelease(this, false);
     }
 
 

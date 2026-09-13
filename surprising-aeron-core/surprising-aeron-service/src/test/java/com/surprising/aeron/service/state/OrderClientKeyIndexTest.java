@@ -6,6 +6,24 @@ import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 import org.junit.jupiter.api.Test;
 
 class OrderClientKeyIndexTest {
+    @Test void churnDoesNotRebuildTheSingleAliasTableOrLoseZeroAliases() throws Exception {
+        var index = new OrderClientKeyIndex();
+        index.add(1, 0);
+        var field = OrderClientKeyIndex.class.getDeclaredField("single");
+        field.setAccessible(true);
+        var map = (org.agrona.collections.Long2LongHashMap) field.get(index);
+        var entries = map.getClass().getDeclaredField("entries");
+        entries.setAccessible(true);
+        Object storage = entries.get(map);
+        for (long id = 2; id < 20_000; id++) {
+            index.add(id, id);
+            index.remove(id, id);
+        }
+        assertThat(entries.get(map)).isSameAs(storage);
+        assertThat(map.size()).isOne();
+        assertThat(keys(index, 1)).containsExactly(0);
+    }
+
     @Test
     void handlesSingleAliasPromotionDemotionAndCompleteRetirement() {
         OrderClientKeyIndex index = new OrderClientKeyIndex();

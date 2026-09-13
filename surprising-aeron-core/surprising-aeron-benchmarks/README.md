@@ -1,3 +1,5 @@
+> 2026-09-13 用户约定：后续真实单节点 Aeron Cluster 压测统一使用 128 个活跃币对。普通容量入口默认 `surprising.aeron.capacity-symbol-count=128`，mixed 场景固定 128；启动参数不得覆盖为旧规模。初始化和校验随币对数计算，历史结果不改写。
+
 # Product Core 性能验证
 
 本模块的 `OwnerFactFrameBenchmark` 独立测量撮合完成后的 raw fact-frame owner commit 路径：fact frame
@@ -20,7 +22,7 @@ SURPRISING_JAVA_HOME=/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.j
 ```
 
 脚本同时检查并保存 `java -version` 和 `mvn -version`，拒绝 OpenJ9、非 JDK 25 或非
-HotSpot-compatible VM，默认使用 ZGC，并固定 10,000 活跃用户、512 个活跃 symbol、4 个
+HotSpot-compatible VM，默认使用 ZGC，并固定 10,000 活跃用户、128 个活跃 symbol、4 个
 Account Lane、每用户 5 个持仓和 10 个未成交单、固定 256 max in-flight、16,384 operations per
 invocation。owner 场景使用 100,000 ops/s 的 open-loop constant-arrival 计划时间，入口延迟从
 计划到达时刻计算，因此包含排队并修正 coordinated omission。每个 benchmark/business type
@@ -97,7 +99,7 @@ OldObject sample，不支持时只允许 recording metadata 支撑且带原因�
 不含 OldObject 事件。OldObject/path-to-roots 会显著增加采样、dump 和 root-path 分析开销，只用于
 斜率异常后的升级诊断，不能与基础吞吐轮直接比较。
 
-10k users/512 symbols/固定 256 in-flight 的 sustained saturation 使用 100k/s constant-arrival 调度时间戳，
+10k users/128 symbols/固定 256 in-flight 的 sustained saturation 使用 100k/s constant-arrival 调度时间戳，
 在 Harness 的真实 `state.apply` 入口和 owner terminal 返回边界分别打点。期末 matcher command/completion backlog
 必须为零；Core 内部 SPSC pipeline 和驱动端共同执行真实的 256 in-flight 上限，owner 每轮最多收割 64 个连续完成结果。
 scale mixed workload
@@ -159,3 +161,31 @@ multi-match、missing 与 fresh exact FQCN/简单类名成功场景，不会启�
 Owner 的入口和 Matcher/Lane 完成通知采用声明休眠后重查的合并唤醒；共享通知标记与 Owner 每轮修改的退避计数隔开。有效工作计数只表达实际进展，高负载下 Owner CPU 仍可能接近一核，不能据此认定全部时间都在处理业务。
 
 在途命令的连续轮询与有效工作计数分开：`pollCommands()` 无实际进展时返回0，但 Owner 在仍有在途命令时继续推进，只有完全空闲才退避。等待路径不在每次流水线重查之间额外插入 `onSpinWait`、yield 或 park；降低等待CPU不能以损失吞吐和尾延迟为代价。
+
+`ClusterTriggerBoundaryBenchmark.triggerOnOwningLane` 连接真实单成员，128币对交替执行IOC无成交/成交减仓及OCO取消，检查余额、保证金、持仓和触发终态；`SmallControlReproMain verify-trigger` 可在同数据重放/快照重启后复核。JMH值包含连接、建仓及查询，不能作为稳态吞吐或纯触发延迟。
+
+`ClusterOperationalBenchmark.continuousOperations` 的 `batchSize=1/20` 分别覆盖单项与多项批量下单；真实场景固定128币对，批次/展开业务项/Core消息/成交分别计数。`ClusterMixedCapacityMain` 直接入口及恢复核对可通过 `surprising.aeron.capacity-batch-size=1` 选择单项（默认20），恢复必须与原轮一致。
+
+`ClusterTriggerBoundaryBenchmark.scannedTriggerOnOwningLane` 使用相同128币对金融场景，通过标记价更新及预算1风险续页触发订单，覆盖内部扫描到所属Lane的实际路径；复用 `verify-trigger` 在快照重启后核对。该SingleShotTime包含初始化、风险扫描及查询，不是持续吞吐测试。
+
+
+`ClusterSequentialBatchBenchmark.proceedsAndAmendOnLane` 连接全新真实单成员 SPOT Cluster，验证128币对顺序批项资金依赖、GTX原生拒绝/余额不足拒绝、改单冻结复用及撤单解冻。SingleShotTime包含初始化与查询，不是持续吞吐；恢复后可用同类`main verify`重新校验全部账户。完整执行参数及JFR结果追加到根目录`PERFORMANCE_VALIDATION.md`。
+
+`ClusterAdlBoundaryBenchmark.insuranceAndAdlOnOwningLanes` 复用 mixed 初始化，真实单节点执行亏损强平、部分保险与显式 ADL，并核对全体账户。标准128币对、窗口256；专用亏损账户在末币对执行一次保险/ADL，其余币对核对隔离。SingleShot 包含初始化与查询，不能作为持续吞吐或纯ADL延迟；配合节点JFR、有效snapshot及重启后 `ClusterMixedCapacityMain` verify-only 核对。统一记录见根目录 PERFORMANCE_VALIDATION.md。
+
+`ClusterTriggerBoundaryBenchmark.rejectedTriggerOnOwningLane` 在128币对建立持仓和maker买单，再执行GTX跨价触发拒单；核对触发失败、placedOrderId=0、解冻、原持仓、maker挂单保证金及OCO取消。快照重启后使用 `SmallControlReproMain verify-trigger-reject` 重查。该SingleShot包含初始化和查询，不作纯拒单延迟或持续吞吐指标。
+
+`ClusterTriggerBoundaryBenchmark.rejectedAmendOnOwningLane` 覆盖128币对的撤旧下新拒绝：用户自成交前置单与原单取消，新GTX买单拒绝；核对原单CANCELED响应、用户无预留且资金全释放、对手卖单预占11、无成交持仓。重启用 `SmallControlReproMain verify-amend-reject`；含初始化/查询的SingleShot不是稳态吞吐指标。
+
+- `ClusterTriggerBoundaryBenchmark.amendCancelCycleOnOwningLane`：真实单成员128币对，依次核对GTX改单拒绝的已知撤单前缀、GTC改单成功、普通撤单和批量撤单；最终账户资金恢复初值、冻结及持仓清零。`SmallControlReproMain verify-amend-cycle`用于同Archive快照重启后的账户核对。SingleShot包含初始化/查询，不代表持续吞吐。
+
+- `amendCancelCycleOnOwningLane`现同时覆盖两笔批量Place准入，最终批量撤销新改单和两笔准入订单；每币对双方余额恢复10000、冻结0、持仓0。控制提交异步化另以`ClusterAdlBoundaryBenchmark`覆盖强平/保险/ADL及快照恢复。
+
+- `amendCancelCycleOnOwningLane`继续覆盖成功REPLACE（旧单CANCELED、新单OPEN）和不存在订单撤单（REJECTED/ORDER_NOT_FOUND），用于普通订单准备去除全Lane借权后的网络验证；两笔准入及三笔批量撤单逐项校验APPLIED。
+
+- ClusterAdlBoundaryBenchmark 的有限生命周期验证增加专用亏损账户的三笔 reduce-only 挂单，以每次 maxCancelOrders=1 完成三页撤单/强平，随后核对保险、ADL、全部账户资金和快照恢复。此专用场景变更不修改常规连续吞吐场景；其 SingleShot 耗时包含初始化和查询，不作为稳态吞吐。
+
+- 上述三页强平诊断在 JMH 客户端及恢复验证客户端均设置 `-Dsurprising.aeron.mixed-loss-balance=110`，给新增挂单预留冻结资金；全体初始资金为 1384000000135。常规场景默认亏损账户仍为100，原资金口径不变。
+
+
+`ClusterDirectSettlementBenchmark.matcherToLaneLifecycle` 专门覆盖 Matcher→Lane 直接结果：连接外部真实单成员，六产品线分别在128币对、256账户上交替普通单与20项批量，双方开仓后反向平仓。每组交易前更新有效行情；交易命令在64窗口内异步提交。每次调用包含86016订单业务项和2048行情业务项，另报告10240Core消息、43008fills。逐用户逐资产核对余额、冻结、净持仓、预留和活跃订单；其 `main <ProductLine>` 用于Archive快照重启后的同一状态核对。JMH生命周期耗时和带profile分配用于路径诊断，容量使用 `ClusterOperationalBenchmark` 的持续流口径。所有参数、失败轮次、JFR与恢复结论集中记录于根目录 `PERFORMANCE_VALIDATION.md`。

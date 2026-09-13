@@ -17,6 +17,129 @@ import org.junit.jupiter.api.Test;
 class TradingRuntimeStateTest {
 
     @Test
+    void commitEventStampsOnLanesPublishesOnOwnerAndClearsReusedMetadata() {
+        var topology = new LaneTopology(LaneTopology.ROUTE_VERSION, 1, 0, 0, 2,
+                LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
+        try (var state = new TradingRuntimeState(topology)) {
+            long second = 8;
+            while (topology.accountLaneId(second) == topology.accountLaneId(7)) second++;
+            for (long user : new long[]{7, second}) {
+                state.putUser(new UserRuntime(user));
+                state.putBalance(new BalanceRuntime(user, 3, 1000, 0));
+            }
+            state.reserveOrder(11, 7, 91, 5, 2, 3, 200);
+            state.reserveOrder(12, second, 92, 5, 2, 3, 200);
+            var original = state.order(11);
+            state.clearChangedKeys();
+            state.startAccountLanes();
+            state.enterAsynchronousCommandScope();
+            try {
+                var first = state.dispatchLaneMutation(1, java.util.List.of(7L, second),
+                        java.util.List.of(11L, 12L), 100, 200);
+                awaitMetadataCommit(state, first);
+                assertThat(state.order(11)).isSameAs(original);
+                assertThat(state.ownerLaneAccess).isFalse();
+                state.releaseLaneCommit(first);
+                assertThat(state.order(11).updatedAtEpochMillis()).isEqualTo(100);
+                assertThat(state.order(12).clusterPosition()).isEqualTo(200);
+                var next = state.dispatchLaneMutation(2, java.util.List.of(7L),
+                        java.util.List.of(11L), 101, 201);
+                assertThat(next).isSameAs(first);
+                awaitMetadataCommit(state, next);
+                state.releaseLaneCommit(next);
+                assertThat(state.order(11).clusterPosition()).isEqualTo(201);
+                assertThat(state.order(12).clusterPosition()).isEqualTo(200);
+                var plain = state.dispatchLaneMutation(3, java.util.List.of(7L, second));
+                awaitMetadataCommit(state, plain);
+                state.releaseLaneCommit(plain);
+                assertThat(state.order(11).clusterPosition()).isEqualTo(201);
+                assertThat(state.order(12).clusterPosition()).isEqualTo(200);
+            } finally { state.exitAsynchronousCommandScope(); }
+        }
+    }
+
+    private static void awaitMetadataCommit(TradingRuntimeState state, LaneCommitEvent event) {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+        while (!state.laneCommitComplete(event)) {
+            if (System.nanoTime() > deadline) throw new AssertionError("metadata commit timed out");
+            Thread.onSpinWait();
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void asynchronousRollbackRestoresReservedFundsAndBothReservationIndexes(boolean batch) {
+        try (var state = new TradingRuntimeState()) {
+            state.putUser(new UserRuntime(7));
+            state.putBalance(new BalanceRuntime(7, 3, 1000, 0));
+            state.clearChangedKeys();
+            state.startAccountLanes();
+            for (int index = 0; index < 2; index++)
+                state.reserveOrder(11 + index, 7, 91 + index, 5, 2, 3, 200);
+            if (batch) {
+                state.onLane(7L, lane -> {
+                    lane.markPendingReservation(11, 4);
+                    lane.markPendingReservation(12, 4);
+                    return null;
+                });
+                state.pendingReservations.registerBatch(4, 7,
+                        new OrderRuntime[]{state.order(11), state.order(12)}, 2);
+            } else {
+                state.markPendingReservation(7, 11, 4);
+                state.markPendingReservation(7, 12, 4);
+            }
+            state.enterAsynchronousCommandScope();
+            try {
+                var rollback = state.beginCommandRollback(0, 4);
+                long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+                while (!rollback.getAsBoolean()) {
+                    if (System.nanoTime() > deadline) throw new AssertionError("account rollback timed out");
+                    Thread.onSpinWait();
+                }
+                assertThat(state.ownerLaneAccess).isFalse();
+            } finally { state.exitAsynchronousCommandScope(); }
+            assertThat(state.balance(7, 3).availableUnits()).isEqualTo(1000);
+            assertThat(state.balance(7, 3).lockedUnits()).isZero();
+            assertThat(state.order(11)).isNull();
+            assertThat(state.order(12)).isNull();
+            assertThat(state.reservation(11)).isNull();
+            assertThat(state.orderIdByClient(7, 91)).isNull();
+            assertThat(state.pendingReservationCount()).isZero();
+            assertThat(state.pendingReservationCount(7)).isZero();
+            assertThat(state.pendingReservedUnits(7, 3)).isZero();
+        }
+    }
+
+    @Test
+    void controlLanesPublishRevisionDeltasOnlyWhenOwnerCollects() throws Exception {
+        var topology = new LaneTopology(LaneTopology.ROUTE_VERSION, 1, 0, 0, 2,
+                LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
+        try (var state = new TradingRuntimeState(topology)) {
+            state.setMetadata(com.surprising.product.api.ProductLine.SPOT, 10);
+            state.startAccountLanes();
+            var executed = new java.util.concurrent.CountDownLatch(2);
+            state.dispatchControlLanes(3, id -> {
+                state.accountLanes[id].assertOwner();
+                state.incrementCommandRevision();
+                state.incrementCommandRevision();
+                executed.countDown();
+                return true;
+            });
+            assertThat(executed.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            assertThat(state.revision()).isEqualTo(10);
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            while (!state.pollControlLanes()) {
+                if (System.nanoTime() > deadline) throw new AssertionError("control completion timed out");
+                Thread.onSpinWait();
+            }
+            assertThat(state.revision()).isEqualTo(14);
+            assertThat(state.ownerLaneAccess).isFalse();
+            assertThat(state.controlLaneResult(0)).isEqualTo(true);
+            assertThat(state.controlLaneResult(1)).isEqualTo(true);
+        }
+    }
+
+    @Test
     void promotionPreservesSetOrderWithoutArrayMaterializationAcrossEveryRemoval() {
         var index = new PendingReservationTracker.PendingReservationSequenceIndex(4);
         for (long order = 1; order <= 100; order++) index.add(19, order);
@@ -36,9 +159,7 @@ class TradingRuntimeStateTest {
         constructor.setAccessible(true);
         var changes = constructor.newInstance(4);
         changes.ensureAdmissionCapacity(2, 20);
-        Field published = changes.getClass().getDeclaredField("publishedLaneChanges");
-        published.setAccessible(true);
-        Object[] lanes = (Object[]) published.get(changes);
+        Object[] lanes = changes.laneDeltas;
         for (int lane = 0; lane < lanes.length; lane++) {
             for (String name : new String[]{"users", "orders", "reservations", "positions"}) {
                 Field bufferField = lanes[lane].getClass().getDeclaredField(name);
@@ -289,6 +410,23 @@ class TradingRuntimeStateTest {
         assertThat(state.balance(7, 3).lockedUnits()).isEqualTo(200);
         assertThat(state.order(11).quantitySteps()).isEqualTo(2);
         assertThat(state.orderIdByClient(7, 91)).isEqualTo(11);
+    }
+
+    @Test
+    void rejectedReservationCompletionPreservesCountersAndCanCompleteLater() {
+        TradingRuntimeState state = new TradingRuntimeState();
+        state.putUser(new UserRuntime(7));
+        state.putReservation(new ReservationRuntime(11, 7, 3, 200));
+        state.markPendingReservation(7, 11, 4);
+
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                () -> state.completePendingReservation(7, 11, 5));
+        assertThat(state.pendingReservationCount(7)).isEqualTo(1);
+        assertThat(state.pendingReservedUnits(7, 3)).isEqualTo(200);
+
+        state.completePendingReservation(7, 11, 4);
+        assertThat(state.pendingReservationCount(7)).isZero();
+        assertThat(state.pendingReservedUnits(7, 3)).isZero();
     }
 
     @Test
@@ -887,6 +1025,59 @@ class TradingRuntimeStateTest {
                 assertThat(state.accountLaneById(laneId).committedSequence()).isEqualTo(256);
             }
         } finally {
+            state.close();
+        }
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void cancellationReturnsBorrowedOwnershipAndRunsOnTheLane(boolean batch) throws Exception {
+        TradingRuntimeState state = new TradingRuntimeState(LaneTopology.productionDefault());
+        RuntimeIdentityRegistry identities = new RuntimeIdentityRegistry();
+        long userId = 1, orderId = 10_000;
+        state.putUser(new UserRuntime(userId));
+        state.putBalance(new BalanceRuntime(userId, 3, 2, 0));
+        state.reserveOrder(orderId, userId, identities.clientKey(userId, "cancel"), 5, 1, 3, 1);
+        state.clearChangedKeys();
+        state.startAccountLanes();
+        var release = new java.util.concurrent.CountDownLatch(1);
+        try {
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+            while (!state.tryAcquireOwnerLaneAccess()) {
+                if (System.nanoTime() >= deadline) throw new AssertionError("ownership timeout");
+                Thread.yield();
+            }
+            int laneId = state.topology().accountLaneId(userId);
+            var entered = new java.util.concurrent.CountDownLatch(1);
+            state.laneWorkers[laneId].submit(lane -> {
+                entered.countDown();
+                try {
+                    if (!release.await(2, java.util.concurrent.TimeUnit.SECONDS))
+                        throw new AssertionError("Lane release timeout");
+                } catch (InterruptedException failure) { throw new AssertionError(failure); }
+            });
+            LaneCancelEvent event = batch
+                    ? state.dispatchCancelBatch(1, userId, new long[]{orderId}, 1, 1, identities)
+                    : state.dispatchCancel(1, userId, orderId, 1, 1, identities);
+            assertThat(entered.await(2, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            // A borrowed Owner must not bypass the Lane queue and mutate the account inline.
+            assertThat(event.complete()).isFalse();
+            release.countDown();
+            deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+            while (!event.complete()) {
+                state.assertAccountLanesHealthy();
+                if (System.nanoTime() >= deadline) throw new AssertionError("cancel timeout");
+                Thread.yield();
+            }
+            state.collectCancel(event, null, null);
+            state.releaseCancel(event);
+            assertThat(state.balance(userId, 3).availableUnits()).isEqualTo(2);
+            assertThat(state.balance(userId, 3).lockedUnits()).isZero();
+            assertThat(state.order(orderId)).isNull();
+            assertThat(state.reservation(orderId)).isNull();
+        } finally {
+            release.countDown();
+            state.releaseOwnerLaneAccess();
             state.close();
         }
     }

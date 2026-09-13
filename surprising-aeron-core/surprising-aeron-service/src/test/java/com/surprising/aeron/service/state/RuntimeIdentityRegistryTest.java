@@ -6,11 +6,38 @@ import org.junit.jupiter.api.Test;
 
 class RuntimeIdentityRegistryTest {
     @Test
+    void lanePositionIdentitySurvivesEarlierCommitRetirementUntilItsOutputIsPublished() throws Exception {
+        var registry = new RuntimeIdentityRegistry();
+        registry.assertOwner();
+        long user = 17;
+        var lane = new AccountLaneState(LaneTopology.configured(false).accountLaneId(user), 16);
+        try (var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+            long key = executor.submit(() -> registry.retainPositionInLane(lane, user, "BTC-USDT:LONG")).get();
+            registry.releasePositionKey(key);
+            assertThat(registry.positionKey(user, key)).isEqualTo("BTC-USDT:LONG");
+            executor.submit(() -> registry.retainPositionInLane(lane, user, "BTC-USDT:LONG")).get();
+            registry.releasePublishedPosition(key);
+            registry.releasePositionKey(key);
+            assertThat(registry.findPositionKey(user, "BTC-USDT:LONG")).isEqualTo(key);
+            registry.releasePublishedPosition(key);
+            var restored = RuntimeIdentityRegistry.restore(registry.snapshot());
+            assertThat(restored.positionKey(user, key)).isEqualTo("BTC-USDT:LONG");
+            registry.releasePositionKey(key);
+            assertThat(registry.findPositionKey(user, "BTC-USDT:LONG")).isNull();
+            long recreated = executor.submit(() -> registry.retainPositionInLane(lane, user, "BTC-USDT:LONG")).get();
+            assertThat(recreated).isEqualTo(key);
+            registry.releasePublishedPosition(key);
+            registry.releasePositionKey(key);
+            assertThat(registry.snapshot().positionKeys()).isEmpty();
+        }
+    }
+
+    @Test
     void preparedReleasePreservesReferencesAndCannotRemoveRecreatedIdentity() throws Exception {
         var registry = new RuntimeIdentityRegistry();
         long user = 17;
         var lane = new AccountLaneState(LaneTopology.configured(false).accountLaneId(user), 16);
-        var buffer = new TradingRuntimeState.PublishedLaneChanges.ClientIdentityReleaseBuffer();
+        var buffer = new TradingRuntimeState.LaneDelta.ClientIdentityReleaseBuffer();
         var first = registry.prepareClientKeyInLane(lane, user, "客户-retired");
         registry.prepareClientKeyInLane(lane, user, "客户-retired");
         var entry = registry.prepareClientRelease(lane, user, first.key());

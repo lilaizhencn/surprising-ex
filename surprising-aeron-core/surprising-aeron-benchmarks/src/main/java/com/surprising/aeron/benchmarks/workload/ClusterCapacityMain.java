@@ -136,7 +136,7 @@ public final class ClusterCapacityMain implements AutoCloseable {
         String egress = System.getProperty("surprising.aeron.egress-hostname", "localhost");
         String symbolPrefix = System.getProperty("surprising.aeron.symbol", "P9-CAPACITY-BTC-USDT")
                 .trim().toUpperCase();
-        int symbolCount = positiveInt("surprising.aeron.capacity-symbol-count", 1);
+        int symbolCount = positiveInt("surprising.aeron.capacity-symbol-count", 128);
         List<String> symbols = java.util.stream.IntStream.range(0, symbolCount)
                 .mapToObj(index -> symbolCount == 1 ? symbolPrefix : symbolPrefix + '-' + (index + 1))
                 .toList();

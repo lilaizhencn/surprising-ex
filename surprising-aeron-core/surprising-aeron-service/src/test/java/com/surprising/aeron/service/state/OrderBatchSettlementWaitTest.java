@@ -6,31 +6,16 @@ import org.junit.jupiter.api.Test;
 
 class OrderBatchSettlementWaitTest {
     @Test
-    void incompleteSettlementExpiresWithoutPublishingCompletionOrRecycling() throws Exception {
+    void incompleteItemCannotBeCollectedOrRecycled() throws Exception {
         try (var runtime = new TradingRuntimeState()) {
+            runtime.beginOrderBatchMutationScope();
             var event = incompleteEvent();
-            assertThatThrownBy(() -> runtime.settlements.awaitOrderBatchMatcherSettlement(event, System.nanoTime() - 1))
-                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("timed out");
+            assertThatThrownBy(() -> runtime.collectOrderBatchMatcherSettlement(event, null))
+                    .isInstanceOf(IllegalStateException.class).hasMessageContaining("not ready");
             assertThat(event.complete()).isFalse();
             assertThatThrownBy(() -> runtime.releaseMatcherSettlement(event))
                     .hasMessageContaining("cannot recycle an incomplete");
-        }
-    }
-
-    @Test
-    void interruptionPreservesTheInterruptAndIncompleteFence() throws Exception {
-        try (var runtime = new TradingRuntimeState()) {
-            var event = incompleteEvent();
-            Thread.currentThread().interrupt();
-            try {
-                assertThatThrownBy(() -> runtime.settlements.awaitOrderBatchMatcherSettlement(
-                        event, System.nanoTime() + 30_000_000_000L))
-                        .isInstanceOf(IllegalStateException.class).hasMessageContaining("interrupted");
-                assertThat(Thread.currentThread().isInterrupted()).isTrue();
-                assertThat(event.complete()).isFalse();
-            } finally {
-                Thread.interrupted();
-            }
+            runtime.endOrderBatchMutationScope();
         }
     }
 

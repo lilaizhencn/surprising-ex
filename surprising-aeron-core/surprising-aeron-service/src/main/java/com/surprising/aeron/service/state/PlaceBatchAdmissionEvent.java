@@ -40,6 +40,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     private RuntimeIdentityRegistry identities;
     private long identityAllocations;
     private UserRuntime admittedUser;
+    /** Retained with this pooled event; cleared by Owner before reuse by the Lane. */
     private LanePublication publication;
     private RuntimeException rejection;
     @SuppressWarnings("FieldMayBeFinal")
@@ -85,7 +86,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         identityAllocations = 0;
         admittedCount = 0;
         admittedUser = null;
-        publication = null;
+        if (publication != null) publication.clear();
         rejection = null;
         COMPLETED.set(this, false);
         runtime.expectPlaceAdmission(laneId);
@@ -146,7 +147,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                 }
                 admittedUser = lane.users.get(userId);
                 changes.prepareAdmissionLane(laneId, runtime);
-                publication = new LanePublication();
+                if (publication == null) publication = new LanePublication();
                 publication.admissionSequence = coreSequence;
                 runtime.publishedUsers.stage(publication, userId, admittedUser);
                 for (int i = 0; i < itemCount; i++) {
@@ -193,7 +194,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         runtime = null;
         identities = null;
         admittedUser = null;
-        publication = null;
+        if (publication != null) publication.clear();
         rejection = null;
         itemCount = 0;
         admittedCount = 0;

@@ -72,8 +72,12 @@ final class CoreTestCompletion {
                 } else {
                     PendingMatching pending = owner.pendingMatching.get(sequence);
                     com.surprising.aeron.service.matching.CoreMatchingResult matching =
-                            pending != null && (pending.settlementEvent() != null || pending.cancelEvent() != null
-                                    || pending.replaceEvent() != null)
+                            pending != null && pending.orderBatch != null && (pending.orderBatch.itemSettlementEvent != null
+                                    || pending.orderBatch.itemAdmission != null && pending.orderBatch.started)
+                                    ? pending.orderBatch.lastMatchingResult
+                                    : pending != null && (pending.settlementEvent() != null || pending.cancelEvent() != null
+                                    || pending.replaceEvent() != null
+                                    || pending.orderBatch != null && pending.orderBatch.laneCommitEvent != null)
                                     ? owner.laneCommandContexts.required(sequence).matchingResult()
                                     : awaitMatchingResult(owner, sequence);
                     if (matching == null && owner.hasPendingMatchingRejection(sequence)) {
@@ -120,6 +124,9 @@ final class CoreTestCompletion {
         if (state.hasPendingMatchingRejection(sequence)) return null;
         int idle = 0;
         while (state.pendingMatching.contains(sequence) && System.nanoTime() < deadline) {
+            PendingMatching head = state.pendingMatching.get(state.pendingMatching.firstSequence());
+            if (head != null && head.orderBatch != null && !head.orderBatch.started)
+                state.batches.activateOrderBatch(head.orderBatch, head, true);
             state.drainMatchingCompletions();
             if (state.hasPendingMatchingRejection(sequence)) return null;
             LaneCommandContextRing.Context context = state.laneCommandContexts.required(sequence);

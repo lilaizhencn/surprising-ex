@@ -34,13 +34,15 @@ class OrderBatchSlotReuseTest {
         first.laneResultPrepared = true;
         first.executionCount = 3;
         first.resultOrderSymbol = "BTC-USDT";
-        first.matchingSubmission = () -> null;
+        first.cancelSymbol = "BTC-USDT";
+        first.cancelInstrumentChangeId = 123;
         for (int i = 2; i <= 20; i++) batch.addItem(i, 0, 0, command);
         var last = batch.items.getLast();
         batch.clear();
         assertThat(first.command).isNull();
         assertThat(last.command).isNull();
-        assertThat(first.matchingSubmission).isNull();
+        assertThat(first.cancelSymbol).isNull();
+        assertThat(first.cancelInstrumentChangeId).isZero();
         assertThat(first.resultOrderSymbol).isNull();
         batch.addItem(22, 21, 22, "amend");
         assertThat(batch.items.getFirst()).isSameAs(first);

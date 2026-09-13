@@ -310,8 +310,19 @@ class RuntimeCommitRecoveryTest {
 
     }
 
-    @Test
-    void replaysInsuranceResolutionAndAdlAcrossPairedClusteredSnapshotCuts() throws Exception {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.CsvSource({"1,false", "4,false", "1,true", "4,true"})
+    void replaysInsuranceResolutionAndAdlAcrossPairedClusteredSnapshotCuts(int lanes, boolean batch) throws Exception {
+        String previous = System.getProperty("surprising.aeron.account-lanes");
+        System.setProperty("surprising.aeron.account-lanes", Integer.toString(lanes));
+        try { insuranceAndAdlSnapshotCuts(batch); }
+        finally {
+            if (previous == null) System.clearProperty("surprising.aeron.account-lanes");
+            else System.setProperty("surprising.aeron.account-lanes", previous);
+        }
+    }
+
+    private void insuranceAndAdlSnapshotCuts(boolean batch) throws Exception {
         SurprisingClusteredService uninterrupted = new SurprisingClusteredService(ProductLine.LINEAR_PERPETUAL);
         uninterrupted.onStart(cluster(), null);
         try {
@@ -333,6 +344,12 @@ class RuntimeCommitRecoveryTest {
                             place(91_002, CoreOrderSide.BUY, 100, 10, false)),
                     command(6, 3, CoreMessageType.PLACE_ORDER,
                             place(91_003, CoreOrderSide.BUY, 1, 10, false)),
+                    command(7, 1, CoreMessageType.PLACE_ORDER,
+                            place(91_004, CoreOrderSide.SELL, 110, 1, true)),
+                    command(8, 1, CoreMessageType.PLACE_ORDER,
+                            place(91_005, CoreOrderSide.SELL, 110, 1, true)),
+                    command(9, 1, CoreMessageType.PLACE_ORDER,
+                            place(91_006, CoreOrderSide.SELL, 110, 1, true)),
                     operationsCommand(2, CoreMessageType.APPLY_FUNDING,
                             TradingCommandCodec.encodeApplyFunding(
                                     new ApplyFundingCommand(901, "BTC-USDT", 1, 1_000))),
@@ -350,14 +367,35 @@ class RuntimeCommitRecoveryTest {
             }
             CoreLiquidationState planned = uninterrupted.state().tradingState().riskState().liquidations()
                     .values().stream().filter(value -> value.userId() == 1).findFirst().orElseThrow();
-            CoreMessage executeLiquidation = operationsCommand(
-                    operationsSequence++, CoreMessageType.EXECUTE_LIQUIDATION,
-                    TradingCommandCodec.encodeExecuteLiquidation(new ExecuteLiquidationCommand(
-                            planned.liquidationId(), planned.triggerPriceSequence(), 1, 0)));
+            int liquidationPages = 0;
+            CoreLiquidationState current = planned;
+            while (current.status() == CoreLiquidationState.Status.PLANNED
+                    || current.status() == CoreLiquidationState.Status.ORDERED) {
+                assertThat(++liquidationPages).isLessThanOrEqualTo(3);
+                CoreMessage executeLiquidation;
+                if (batch) {
+                    var action = new com.surprising.aeron.protocol.ExecuteLiquidationBatchAction(
+                            current.liquidationId(), current.userId(), current.symbol(), current.instrumentChangeId(),
+                            current.triggerPriceSequence(), 1, current.nextCancelOrderId());
+                    executeLiquidation = operationsCommand(operationsSequence++, CoreMessageType.EXECUTE_LIQUIDATION_BATCH,
+                            TradingCommandCodec.encodeExecuteLiquidationBatch(
+                                    new com.surprising.aeron.protocol.ExecuteLiquidationBatchCommand(List.of(action), 1, 0, null, 0)));
+                } else {
+                    executeLiquidation = operationsCommand(operationsSequence++, CoreMessageType.EXECUTE_LIQUIDATION,
+                            TradingCommandCodec.encodeExecuteLiquidation(new ExecuteLiquidationCommand(
+                                    current.liquidationId(), current.triggerPriceSequence(), 1, 0,
+                                    current.nextCancelOrderId(), 1)));
+                }
+                long handoffBefore = (long) field(uninterrupted.state().runtimeState, "laneHandoffEpoch");
+                replayClustered(uninterrupted, List.of(executeLiquidation));
+                assertThat((long) field(uninterrupted.state().runtimeState, "laneHandoffEpoch")).isEqualTo(handoffBefore);
+                assertThat((boolean) field(uninterrupted.state().runtimeState, "ownerLaneAccess")).isFalse();
+                current = liquidation(uninterrupted.state(), planned.liquidationId());
+            }
+            assertThat(liquidationPages).isEqualTo(3);
             long insuranceAdjustSequence = operationsSequence++;
             long insuranceResolveSequence = operationsSequence++;
             long adlSequence = operationsSequence;
-            ReplayResult liquidation = replayClustered(uninterrupted, List.of(executeLiquidation));
             CoreLiquidationState insuranceRequired = liquidation(uninterrupted.state(), planned.liquidationId());
             long deficit = insuranceRequired.deficitUnits();
             assertThat(deficit).isGreaterThan(25);
@@ -384,7 +422,10 @@ class RuntimeCommitRecoveryTest {
                         uninterrupted.state().tradingState(), planned.liquidationId())).isTrue();
                 assertThat(com.surprising.aeron.service.state.InsuranceAllocationPolicy.expectedCoverage(
                         uninterrupted.state().tradingState(), planned.liquidationId())).isEqualTo(25);
+                long insuranceHandoff = (long) field(uninterrupted.state().runtimeState, "laneHandoffEpoch");
                 ReplayResult partialReference = replayClustered(uninterrupted, List.of(partialInsurance.getLast()));
+                assertThat((long) field(uninterrupted.state().runtimeState, "laneHandoffEpoch"))
+                        .as("insurance resolution must not take Lane ownership").isEqualTo(insuranceHandoff);
                 ReplayResult partialRecovered = replayClustered(restoredBeforeInsurance, List.of(partialInsurance.getLast()));
                 assertThat(partialRecovered).isEqualTo(partialReference);
                 assertBatchRecoveryParity(restoredBeforeInsurance.state(), uninterrupted.state());
@@ -409,8 +450,34 @@ class RuntimeCommitRecoveryTest {
                             TradingCommandCodec.encodeExecuteAdl(new ExecuteAdlCommand(
                                     planned.liquidationId(), 2, "BTC-USDT", CoreMarginMode.CROSS,
                                     CorePositionSide.NET, -10, 100, 2, 10, residual)));
+                    try (var rejectedState = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, afterInsurance)) {
+                        var beforeRejected = rejectedState.tradingState();
+                        long handoff = (long) field(rejectedState.runtimeState, "laneHandoffEpoch");
+                        var invalid = operationsCommand(adlSequence, CoreMessageType.EXECUTE_ADL,
+                                TradingCommandCodec.encodeExecuteAdl(new ExecuteAdlCommand(planned.liquidationId(),
+                                        2, "BTC-USDT", CoreMarginMode.CROSS, CorePositionSide.NET, -10, 101, 2, 10, residual)));
+                        var rejected = CoreTestCompletion.applyAsynchronously(rejectedState, invalid);
+                        assertThat(rejected.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+                        assertThat(rejected.resultCode()).isEqualTo(CoreResultCode.ADL_POSITION_CONFLICT);
+                        assertThat(rejectedState.tradingState()).as("all participating Lanes roll back on target rejection")
+                                .isEqualTo(beforeRejected);
+                        assertThat((long) field(rejectedState.runtimeState, "laneHandoffEpoch")).isEqualTo(handoff);
+                        try (var again = TradingCoreRuntime.fromSnapshot(ProductLine.LINEAR_PERPETUAL, rejectedState.snapshot())) {
+                            assertThat(again.tradingState()).isEqualTo(beforeRejected);
+                            var resumed = CoreTestCompletion.applyAsynchronously(again,
+                                    operationsCommand(adlSequence + 1, CoreMessageType.EXECUTE_ADL, adl.payloadUnsafe()));
+                            assertThat(resumed.commandStatus()).isEqualTo(ResponseStatus.APPLIED);
+                            assertThat(liquidation(again, planned.liquidationId()).status())
+                                    .isEqualTo(CoreLiquidationState.Status.COMPLETED);
+                            assertThat(deficit(again)).isZero();
+                            assertThat(economicEquityUsdt(again)).isEqualTo(economicEquityUsdt(rejectedState));
+                        }
+                    }
                     long beforeAdlEconomic = economicEquityUsdt(uninterrupted.state());
+                    long adlHandoff = (long) field(uninterrupted.state().runtimeState, "laneHandoffEpoch");
                     ReplayResult adlReference = replayClustered(uninterrupted, List.of(adl));
+                    assertThat((long) field(uninterrupted.state().runtimeState, "laneHandoffEpoch"))
+                            .as("ADL target and liquidation remain on their own Lanes").isEqualTo(adlHandoff);
                     ReplayResult adlFromBeforeCut = replayClustered(restoredBeforeInsurance, List.of(adl));
                     ReplayResult adlFromAfterCut = replayClustered(restoredAfterInsurance, List.of(adl));
                     assertThat(adlFromBeforeCut).isEqualTo(adlReference);
@@ -964,7 +1031,9 @@ class RuntimeCommitRecoveryTest {
         java.util.TreeMap<String, Object> snapshot = new java.util.TreeMap<>();
         for (var value : index.getClass().getDeclaredFields()) {
             if (Modifier.isStatic(value.getModifiers()) || value.getName().equals("identities")
-                    || value.getName().equals("admissionSummary")) continue; // reusable query scratch, not index state
+                    || value.getName().equals("admissionSummary")
+                    || index instanceof com.surprising.aeron.service.state.index.ActiveOrderIndex
+                    && value.getName().equals("pageScratch")) continue; // reusable query scratch, not index state
             value.setAccessible(true);
             snapshot.put(value.getName(), canonicalIndexValue(value.get(index)));
         }
@@ -972,6 +1041,8 @@ class RuntimeCommitRecoveryTest {
     }
 
     private static Object canonicalIndexValue(Object value) {
+        if (value instanceof com.surprising.aeron.service.state.RuntimeIdentityRegistry identities)
+            return identities.snapshot(); // Compare dictionary content across restored JVM objects.
         if (value == null) return "<null>";
         if (value.getClass().getName().equals("com.surprising.aeron.service.state.index.OrderParticipantIndex")) {
             try {

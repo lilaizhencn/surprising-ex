@@ -105,9 +105,6 @@ public final class RuntimeStateProjector {
         runtime.setMarketRevision(source.riskState().marketRevision());
         source.orders().forEach((orderId, order) -> {
             runtime.putOrder(toRuntimeOrder(order, identities));
-            if (source.productLine().supportsUserPositionMarginFlow()) {
-                identities.positionKey(order.userId(), positionKey(order.symbol(), order.positionSide()));
-            }
             if (!order.clientOrderId().isEmpty()) {
                 runtime.putClientOrder(order.userId(), identities.clientKey(order.userId(), order.clientOrderId()), orderId);
             }
@@ -132,7 +129,7 @@ public final class RuntimeStateProjector {
         }
     }
 
-    static OrderRuntime toRuntimeOrder(CoreOrderState order, RuntimeIdentityRegistry identities) {
+    public static OrderRuntime toRuntimeOrder(CoreOrderState order, RuntimeIdentityRegistry identities) {
         return new OrderRuntime(order.orderId(), order.productLine(), order.userId(),
                 identities.symbolId(order.symbol()), order.instrumentChangeId(), order.side(), order.priceTicks(),
                 order.matchingPriceTicks(),

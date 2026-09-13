@@ -45,6 +45,8 @@ final class LaneSequenceQueue {
         return consumerCursor < observedProducer;
     }
 
+    int capacity() { return sequences.length; }
+
     /** Producer and consumer write different cache lines on the hot SPSC path. */
     private static final class PaddedSequence {
         @SuppressWarnings("unused")

@@ -34,22 +34,38 @@ class OwnerIndexChurnTest {
                 @SuppressWarnings("unchecked") var map = (LanePublishedMap<Object>) field.get(target);
                 var storage = LanePublishedMap.class.getDeclaredField("values");
                 storage.setAccessible(true);
-                Object before = storage.get(map), value = new Object();
-                var lane = new AccountLaneState(0, 16);
+                Object value = new Object();
+                // Warm to the fixed live population, then check actual arrays, not merely
+                // the map object's identity (which also survives allocating rehashes).
+                for (long key = 1; key <= 32; key++) map.applyPublished(key, value, key);
+                for (long key = 1; key <= 32; key++) map.remove(key);
+                Object table = storage.get(map);
+                var keyStorage = table.getClass().getDeclaredField("keys");
+                var valueStorage = table.getClass().getDeclaredField("values");
+                keyStorage.setAccessible(true); valueStorage.setAccessible(true);
+                Object keysBefore = keyStorage.get(table), valuesBefore = valueStorage.get(table);
+                var sequenceField = LanePublishedMap.class.getDeclaredField("admissionSequences");
+                sequenceField.setAccessible(true);
+                var sequences = (Long2LongHashMap) sequenceField.get(map);
+                var sequenceStorage = Long2LongHashMap.class.getDeclaredField("entries");
+                sequenceStorage.setAccessible(true);
+                Object sequenceBefore = sequenceStorage.get(sequences);
                 for (long base = 1; base < 8192; base += 32) {
                     var admission = new LanePublication();
+                    admission.admissionSequence = base;
                     for (long key = base; key < base + 32; key++) map.stage(admission, key, value);
                     assertThat(map.size()).isZero();
-                    admission.visible = true;
-                    admission.execute(lane);
+                    admission.publish();
                     assertThat(map.size()).isEqualTo(32);
                     var terminal = new LanePublication();
                     for (long key = base; key < base + 32; key++) map.stage(terminal, key, null);
-                    terminal.visible = true;
-                    terminal.execute(lane);
-                    assertThat((java.util.Map<?, ?>) storage.get(map)).isEmpty();
+                    terminal.publish();
+                    assertThat(map.size()).isZero();
                 }
-                assertThat(storage.get(map)).as(name + " storage identity").isSameAs(before);
+                assertThat(keyStorage.get(table)).as(name + " key array").isSameAs(keysBefore);
+                assertThat(valueStorage.get(table)).as(name + " value array").isSameAs(valuesBefore);
+                assertThat(sequenceStorage.get(sequences)).as(name + " sequence array").isSameAs(sequenceBefore);
+                assertThat(sequences.isEmpty()).isTrue();
             }
         }
     }

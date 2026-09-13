@@ -61,16 +61,16 @@ class OwnerIdleStrategyTest {
         assertThat(probes.get()).isOne();
     }
 
-    @Test void pendingCommandsResetBackoffWithoutClaimingCompletedWork() {
+    @Test void pendingCommandsWithoutProgressReachTheCompletionProbe() {
         var probes = new java.util.concurrent.atomic.AtomicInteger();
         var idle = new OwnerIdleStrategy(() -> { probes.incrementAndGet(); return true; });
         idle.bindOwner();
-        for (int round = 0; round < 20; round++) {
-            for (int i = 0; i < 110; i++) idle.idle(0, false);
-            idle.idle(0, true);
-        }
+        for (int i = 0; i < 110; i++) idle.idle(0, true);
         assertThat(probes.get()).isZero();
-        for (int i = 0; i < 111; i++) idle.idle(0, false);
+        idle.idle(0, true);
+        assertThat(probes.get()).isOne();
+        idle.idle(1, true);
+        for (int i = 0; i < 110; i++) idle.idle(0, true);
         assertThat(probes.get()).isOne();
     }
 }

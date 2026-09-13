@@ -48,6 +48,146 @@ import org.agrona.concurrent.UnsafeBuffer;
 import org.junit.jupiter.api.Test;
 
 class SurprisingClusteredServiceTest {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void terminalPreparationFailureRollsBackOnLaneAndRetainsRejection(boolean capacityFailure) throws Exception {
+        var service = service();
+        service.onStart(cluster(), null);
+        var owner = service.state();
+        var runtime = owner.runtimeState;
+        try {
+            owner.apply(command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10000))));
+            int assetId = owner.identities.assetId("USDT");
+            var epoch = runtime.getClass().getDeclaredField("laneHandoffEpoch");
+            epoch.setAccessible(true);
+            long before = epoch.getLong(runtime);
+            var request = command(CoreMessageType.ADJUST_BALANCE, 2, 1001,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 500)));
+            CoreResponse result;
+            runtime.enterAsynchronousCommandScope();
+            try {
+                assertThat(owner.applyDecodedCommand(request, 2000, 2000, null, false)).isNull();
+                var continuation = TradingCoreRuntime.class.getDeclaredField("controlContinuation");
+                continuation.setAccessible(true);
+                var business = (java.util.function.BooleanSupplier) continuation.get(owner);
+                continuation.set(owner, (java.util.function.BooleanSupplier) () -> {
+                    if (!business.getAsBoolean()) return false;
+                    if (capacityFailure) {
+                        // Overflow only: entries must be rejected and cleared before they can be dispatched.
+                        owner.admissions.queuedMatching.add(null);
+                    } else {
+                        owner.resultBuilder.commandChangedOrderIds = new java.util.AbstractList<Long>() {
+                            public int size() { return 1; }
+                            public Long get(int index) {
+                                if (StackWalker.getInstance().walk(frames -> frames.anyMatch(
+                                        frame -> (frame.getMethodName().equals("stampChangedOrdersByLane")
+                                                || frame.getMethodName().equals("validateOrderStampInputs")))))
+                                    throw new IllegalStateException("injected terminal metadata failure");
+                                return Long.MAX_VALUE;
+                            }
+                        };
+                    }
+                    return true;
+                });
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                do {
+                    result = owner.pollDirectCommand();
+                    if (System.nanoTime() > deadline) throw new AssertionError("finalization rollback timed out");
+                } while (result == null);
+            } finally { runtime.exitAsynchronousCommandScope(); }
+            assertThat(result.status()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(result.resultCode()).isEqualTo(capacityFailure
+                    ? CoreResultCode.MATCHING_BACKPRESSURE : CoreResultCode.INVALID_COMMAND);
+            assertThat(runtime.balance(1001, assetId).availableUnits()).isEqualTo(10000);
+            assertThat(runtime.balance(1001, assetId).lockedUnits()).isZero();
+            assertThat(epoch.getLong(runtime)).isEqualTo(before);
+            assertThat(owner.admissions.queuedMatching).isEmpty();
+            var duplicate = owner.apply(request);
+            assertThat(duplicate.status()).isEqualTo(ResponseStatus.DUPLICATE);
+            assertThat(duplicate.commandStatus()).isEqualTo(ResponseStatus.REJECTED);
+            assertThat(duplicate.resultCode()).isEqualTo(result.resultCode());
+        } finally { service.onTerminate(null); }
+    }
+
+    @Test
+    void algoUpdatesStayOnAccountLaneAndPublishRevisions() throws Exception {
+        var service = service();
+        var responses = new CopyOnWriteArrayList<byte[]>();
+        service.onStart(cluster(), null);
+        try {
+            var runtime = service.state().runtimeState;
+            var epoch = runtime.getClass().getDeclaredField("laneHandoffEpoch");
+            epoch.setAccessible(true);
+            long before = epoch.getLong(runtime);
+            for (int revision = 1; revision <= 3; revision++) {
+                var algo = new com.surprising.aeron.protocol.CoreAlgoOrderView(501, 1001, "algo-client", "BTC-USDT", 0,
+                        CoreOrderSide.BUY, 0, 100, 10, 1, 10, CoreMarginMode.CROSS, CorePositionSide.NET,
+                        false, false, CoreTimeInForce.IOC, 0, 0, "", "trace",
+                        1, 1, 0, 1, revision, revision, List.of(), 0, 0, 0);
+                onSessionMessage(service, responses, command(CoreMessageType.UPSERT_ALGO_ORDER,
+                        revision, 1001, com.surprising.aeron.protocol.CoreAlgoOrderCodec.encode(algo)));
+                finishCommands(service);
+                assertThat(runtime.algoOrder(501).revision()).isEqualTo(revision);
+                assertThat(runtime.algoOrder(501).userId()).isEqualTo(1001);
+            }
+            assertThat(epoch.getLong(runtime)).isEqualTo(before);
+            long revisionBeforeFailure = runtime.revision();
+            runtime.setMetadata(ProductLine.SPOT, Long.MAX_VALUE);
+            var next = new com.surprising.aeron.protocol.CoreAlgoOrderView(501, 1001, "algo-client", "BTC-USDT", 0,
+                    CoreOrderSide.BUY, 0, 100, 10, 1, 10, CoreMarginMode.CROSS, CorePositionSide.NET,
+                    false, false, CoreTimeInForce.IOC, 0, 0, "", "trace",
+                    1, 1, 0, 1, 4, 4, List.of(), 0, 0, 0);
+            byte[] payload = com.surprising.aeron.protocol.CoreAlgoOrderCodec.encode(next);
+            onSessionMessage(service, responses, command(CoreMessageType.UPSERT_ALGO_ORDER, 4, 1001, payload));
+            finishCommands(service);
+            assertThat(CoreProtocol.decodeResponse(CoreMessageCodec.decode(responses.getLast()).payloadUnsafe()).status())
+                    .isEqualTo(ResponseStatus.REJECTED);
+            assertThat(runtime.algoOrder(501).revision()).isEqualTo(3);
+            assertThat(runtime.revision()).isEqualTo(Long.MAX_VALUE);
+            runtime.setMetadata(ProductLine.SPOT, revisionBeforeFailure);
+            onSessionMessage(service, responses, command(CoreMessageType.UPSERT_ALGO_ORDER, 5, 1001, payload));
+            finishCommands(service);
+            assertThat(CoreProtocol.decodeResponse(CoreMessageCodec.decode(responses.getLast()).payloadUnsafe()).status())
+                    .isEqualTo(ResponseStatus.APPLIED);
+            assertThat(runtime.algoOrder(501).revision()).isEqualTo(4);
+            assertThat(epoch.getLong(runtime)).isEqualTo(before);
+
+        } finally { service.onTerminate(null); }
+    }
+
+    @Test
+    void ownerMetadataCommandsDoNotHandoffAccountLanes() throws Exception {
+        var service = service();
+        var responses = new CopyOnWriteArrayList<byte[]>();
+        service.onStart(cluster(), null);
+        try {
+            var runtime = service.state().runtimeState;
+            var epoch = runtime.getClass().getDeclaredField("laneHandoffEpoch");
+            epoch.setAccessible(true);
+            long before = epoch.getLong(runtime);
+            onSessionMessage(service, responses,
+                    command(CoreMessageType.PROBE_INCREMENT, 1, 1001, CoreProtocol.probePayload(3)));
+            finishCommands(service);
+            onSessionMessage(service, responses,
+                    command(CoreMessageType.VERIFY_STATE_HASH, 2, 1001, new byte[0]));
+            finishCommands(service);
+            var timer = new com.surprising.aeron.protocol.CoreCancelAllAfterCommand(
+                    com.surprising.aeron.protocol.CoreCancelAllAfterAction.SET, 1001, "BTC-USDT",
+                    1000, 2000, 0, 0, 0, 1000);
+            onSessionMessage(service, responses, command(CoreMessageType.UPDATE_CANCEL_ALL_AFTER, 3, 1001,
+                    com.surprising.aeron.protocol.CoreCancelAllAfterCodec.encodeCommand(timer)));
+            finishCommands(service);
+            assertThat(epoch.getLong(runtime)).isEqualTo(before);
+            assertThat(service.state().probeValue()).isEqualTo(3);
+            assertThat(runtime.cancelAllAfterTimer(new com.surprising.aeron.service.state.model.CoreCancelAllAfterKey(
+                    1001, "BTC-USDT")).revision()).isEqualTo(1);
+            assertThat(service.state().appliedCommandCount()).isEqualTo(3);
+        } finally {
+            service.onTerminate(null);
+        }
+    }
+
     @Test
     void bookQueryDoesNotWaitForBlockedMatcherAndCompletesOnLaterLoggedCallback() throws Exception {
         var service = service();
@@ -112,6 +252,56 @@ class SurprisingClusteredServiceTest {
             assertThatThrownBy(() -> state.hasMatchingNotifications(now + 1_000_000)).isSameAs(failure);
         } finally {
             failureSlot.set(null);
+            service.onTerminate(null);
+        }
+    }
+
+    @Test
+    void dependencyDiagnosticsCountAnAlreadyDrainingPrefixOnlyOncePerDecision() throws Exception {
+        var service = service();
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        service.onStart(cluster(), null);
+        try {
+            service.state().apply(timerInstrument());
+            service.state().apply(command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))));
+            service.state().apply(command(CoreMessageType.ADJUST_BALANCE, 2, 1002,
+                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 10))));
+            var matcherField = TradingCoreRuntime.class.getDeclaredField("matcherPipeline");
+            matcherField.setAccessible(true);
+            var matcher = (MatcherPipelineGroup) matcherField.get(service.state());
+            var blocked = matcher.readAtSubmissionFence(0, () -> {
+                entered.countDown();
+                try {
+                    if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("test matcher timeout");
+                } catch (InterruptedException failure) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(failure);
+                }
+                return 1;
+            });
+            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
+            for (int i = 0; i < 2; i++) {
+                var order = command(CoreMessageType.PLACE_ORDER, 3 + i, 1001 + i,
+                        TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(1904 + i, "BTC-USDT", 1,
+                                i == 0 ? CoreOrderSide.BUY : CoreOrderSide.SELL, 1_000, 2, false,
+                                CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+                                CoreTimeInForce.GTC, false, "fence-" + i)));
+                service.acceptCommittedCommand(null, order, 1_000 + i, 1_000 + i);
+            }
+            var countField = SurprisingClusteredService.class.getDeclaredField("dependencyFenceReasons");
+            countField.setAccessible(true);
+            long[] counts = (long[]) countField.get(service);
+            assertThat(counts[ClusterCommandWindow.Conflict.MATCHING_RANGE.ordinal()]).isOne();
+            for (int i = 0; i < 10; i++) service.pollCommands();
+            assertThat(counts[ClusterCommandWindow.Conflict.MATCHING_RANGE.ordinal()]).isOne();
+            release.countDown();
+            finishCommands(service);
+            assertThat(blocked.join()).isOne();
+            assertThat(service.pendingCommandCount()).isZero();
+        } finally {
+            release.countDown();
             service.onTerminate(null);
         }
     }
