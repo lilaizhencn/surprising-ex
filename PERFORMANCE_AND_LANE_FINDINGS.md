@@ -730,3 +730,10 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - TRIGGER 结算路径原先在 `completeMatching`/`completeDispatchedMatcherSettlement` 中先把变化订单通过 Stream 物化成 `CoreOrderStateView`，随后统一收尾又调用 `materializeCommandOrderViews` 再物化一次；已删除前一份必然被覆盖的中间列表。终态响应仍在有序提交完成后按原规则生成。
 - pending reservation 序号索引提升首订单时原先使用恒真谓词适配器选择元素；已改为直接使用 primitive iterator，不创建谓词/适配对象，也不改变提升顺序或 `orderIds` 的外部顺序约束。
 - 定向回归：`TradingRuntimeStateTest` 57 项、`ClusterCommandPipelineTest` 250 项通过；服务模块编译通过。该修复属于确定性的重复分配/遍历削减，尚未据此宣称吞吐、p99 或整体分配率达标，仍需与固定 128 币对的 JMH/JFR 基线复测。
+
+### 2026-09-14 Matcher→Lane 直接结果路径与候选 Lane 时序修复
+
+- 普通 PLACE 及可流水化 PLACE_BATCH 在 Owner 完成 Matcher 提交后立即把已预留的 `MatcherSettlementEvent` 投递到目标 Lane；Matcher 线程只写入成交计划并发布 ready 位，Owner 仍负责按 Core 序号做证据校验、资金/终态提交、结果索引和事件回收。
+- 修复了候选 Lane 掩码晚于 `apply()` 创建 pending 的时序缺陷：候选范围现在在 pending 入环前固化，直接事件不会因看到临时 `0` 掩码而错误广播到全部 Lane。后续分区派发仍通过 `PendingMatchingRing` 的依赖链，保持跨账户/跨订单簿有序提交。
+- 已保留重复派发保护；事件已经预投递时，Owner 收尾只收集完成结果，不再次提交 SPSC Lane 队列。未就绪事件仍由 Lane 的 ready 门禁等待，Matcher 不直接写账户状态。
+- Owner→Lane 直接提交已实现；Owner 的必要职责仍不可删除：Matcher 结果证明、跨 Lane 完成屏障、资金守恒、终态账本/客户标识墓碑和有序响应发布。这些步骤决定恢复、重放和快照一致性。

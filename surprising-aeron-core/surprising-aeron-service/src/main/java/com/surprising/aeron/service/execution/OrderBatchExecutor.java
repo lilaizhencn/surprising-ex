@@ -286,12 +286,21 @@ final class OrderBatchExecutor {
             batch.settlementEvent = owner.runtimeState.prepareDirectMatcherSettlement(pending.sequence(),
                     pending.partitionLaneMask == 0 ? owner.commits.validAccountLaneMask() : pending.partitionLaneMask,
                     null, batch.preparedAdmittedOrders, batch.items.size(), pending.command().header().commandId(),
-                    shard, owner.identities, 0, 0, pending.preMatchingCancellationOrderIds(), batch);
+                    shard, owner.identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                    pending.preMatchingCancellationOrderIds(), batch);
         }
         owner.matcherPipeline.submit(shard, pending.sequence(), () -> {
             owner.matchingAdapter.prepareOrderRoutes(userId, batch.preparedSymbols);
             return submitPreparedPipelinedPlaceBatch(pending, batch, userId, shard);
         }, batch.settlementEvent);
+        if (batch.settlementEvent != null && batch.settlementEvent.direct()) {
+            // Queue the pooled event before the matcher result arrives.  The Lane worker
+            // blocks on event.ready(), so the matcher can publish the result directly without
+            // making the owner drain and redispatch the completion first.
+            if (owner.predispatchDirectSettlement(pending, batch.settlementEvent)) {
+                batch.markPredispatched();
+            }
+        }
     }
 
     com.surprising.aeron.service.matching.CoreMatchingResult

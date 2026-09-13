@@ -505,6 +505,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     /** 仅当前apply范围持有的预计算摘要，嵌套命令不能误用外层摘要。 */
     private CommandFingerprint preparedIngressFingerprint;
+    /** Candidate Lane scope is captured before apply() creates the pending matcher. */
+    private long preparedPipelineLaneMask;
 
     CoreResponse applyDecodedCommand(CoreMessage message, long timestamp, long position,
                                      DecodedMatchingCommand decoded, boolean independent) {
@@ -541,41 +543,49 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (!activated) activate();
         assertOwner();
         long user = message.header().userId();
-        if (message.header().productLine() != productLine || user <= 0) return false;
+        if (message.header().productLine() != productLine || user <= 0) {
+            preparedPipelineLaneMask = 0;
+            return false;
+        }
         window.resetCandidate(user);
         window.candidateLanes = runtimeState.topology().accountLaneMask(user);
         window.participants(activeOrderIndex);
         try {
             switch (message.header().messageType()) {
-                case PLACE_ORDER -> { return addPlaceScope(
-                        window.decoded(message).placeOrder(), window); }
-                case CANCEL_ORDER -> { return addCancelScope(user,
-                        window.decoded(message).cancelOrder().orderId(), window); }
+                case PLACE_ORDER -> { return rememberPipelineLaneMask(window,
+                        addPlaceScope(window.decoded(message).placeOrder(), window)); }
+                case CANCEL_ORDER -> { return rememberPipelineLaneMask(window,
+                        addCancelScope(user, window.decoded(message).cancelOrder().orderId(), window)); }
                 case PLACE_ORDER_BATCH -> {
                     int shard = -1;
                     for (var order : window.decoded(message).placeOrderBatch().orders()) {
-                        if (!addPlaceScope(order, window)) return false;
+                        if (!addPlaceScope(order, window)) return rememberPipelineLaneMask(window, false);
                         int current = window.decoded(message).matcherShard(matchingAdapter, order.symbol());
-                        if (shard >= 0 && current != shard) return false;
+                        if (shard >= 0 && current != shard) return rememberPipelineLaneMask(window, false);
                         shard = current;
                     }
-                    return true;
+                    return rememberPipelineLaneMask(window, true);
                 }
                 case CANCEL_ORDER_BATCH -> {
                     int shard = -1;
                     for (var order : window.decoded(message).cancelOrderBatch().orders()) {
-                        if (!addCancelScope(user, order.orderId(), window)) return false;
+                        if (!addCancelScope(user, order.orderId(), window)) return rememberPipelineLaneMask(window, false);
                         int current = window.decoded(message).matcherShard(matchingAdapter, activeOrderIndex.activeOrderSymbol(order.orderId()));
-                        if (shard >= 0 && current != shard) return false;
+                        if (shard >= 0 && current != shard) return rememberPipelineLaneMask(window, false);
                         shard = current;
                     }
-                    return true;
+                    return rememberPipelineLaneMask(window, true);
                 }
-                default -> { return false; }
+                default -> { return rememberPipelineLaneMask(window, false); }
             }
         } catch (IllegalArgumentException | java.nio.BufferUnderflowException invalid) {
-            return false;
+            return rememberPipelineLaneMask(window, false);
         }
+    }
+
+    private boolean rememberPipelineLaneMask(ClusterCommandWindow window, boolean eligible) {
+        preparedPipelineLaneMask = eligible ? window.candidateLanes : 0;
+        return eligible;
     }
 
     boolean addPlaceScope(PlaceOrderCommand command, ClusterCommandWindow window) {
@@ -1417,6 +1427,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         CoreAdmissionReservation admission = pending.takeCapacityReservation();
         if (admission == null) throw new IllegalStateException("matching sequence admission is missing");
         try {
+            pending.partitionLaneMask = clusterPipelineAdmission ? preparedPipelineLaneMask : 0;
             pendingMatching.put(pending);
             laneCommandContexts.required(pending.sequence()).admission(admission);
             CoreMessageType type = pending.command().header().messageType();
@@ -1511,7 +1522,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
                     pending.partitionLaneMask == 0 ? commits.validAccountLaneMask() : pending.partitionLaneMask,
                     runtimeOrder(pending.decodedCommand().placeOrder().orderId()), null, 1,
                     pending.command().header().commandId(), matcherShard(pending), identities,
-                    0, 0, pending.preMatchingCancellationOrderIds(), null);
+                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                    pending.preMatchingCancellationOrderIds(), null);
             pending.settlement(direct, direct.plan(), System.nanoTime());
             if (realtimeCapture != null)
                 pending.realtimeTakerOrder = runtimeOrder(pending.decodedCommand().placeOrder().orderId());
@@ -1519,6 +1531,38 @@ public final class TradingCoreRuntime implements AutoCloseable {
         matcherPipeline.submit(matcherShard(pending), pending.sequence(), command, direct);
         pending.matchingSubmitted();
         matchingSubmissionCompleted(pending);
+        // The event is already safe to queue: its commit fence is known and the Lane worker
+        // will hold it until the matcher publishes the immutable result.  This removes the
+        // owner completion drain from the matcher->Lane handoff; the owner still collects the
+        // completed event later for ordered funds/index/result commit.
+        if (direct != null) predispatchDirectSettlement(pending, direct);
+    }
+
+    /**
+     * Enqueue a direct matcher settlement as soon as its partition dependency allows it.
+     * The SPSC producer remains the owner; the matcher only publishes the payload readiness
+     * bit.  If an earlier partition dependency is still outstanding, the ordered dispatcher
+     * retries the same event without requiring another matcher result copy.
+     */
+    boolean predispatchDirectSettlement(PendingMatching pending,
+                                     com.surprising.aeron.service.state.MatcherSettlementEvent event) {
+        if (pending == null || event == null || !event.direct() || event.dispatched()) return false;
+        // A direct event prepared outside a cluster callback must wait for the real
+        // publication fence; never freeze a placeholder fence into the Lane command.
+        if (!pending.commitFenceEstablished()) return false;
+        int shard = pendingSubmissionShard(pending);
+        if (pendingMatching.partitionDispatchHead(shard) != pending) {
+            return false;
+        }
+        pending.establishCommitFence(pending.commitFenceTimestamp(), pending.commitFenceClusterPosition());
+        runtimeState.dispatchDirectMatcherSettlement(event);
+        pendingMatching.completePartitionDispatch(pending.sequence(), shard);
+        matchingProgressSequence++;
+        pending.countPipelinedSettlement();
+        commits.dispatchedSettlementInFlight++;
+        commits.dispatchedSettlementHighWaterMark = Math.max(
+                commits.dispatchedSettlementHighWaterMark, commits.dispatchedSettlementInFlight);
+        return true;
     }
 
     int singleMatcherShard(List<CoreOrderState> orders) {

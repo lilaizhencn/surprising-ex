@@ -50639,3 +50639,11 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 
 - JMH 2 forks × 2 measurements（其余参数同上，128 symbols、1000 users、256 在途、ZGC）：终态业务平均 51,668.771/s，区间 34,787.163–68,984.173/s；Lane 40,037.540/s；Lane settlement 27,753.731/s；成交 9,827.047/s；错误/拒绝/超时/未完成均为 0。
 - 单轮方差较大（JMH 主指标 19.193 ± 6.994 ops/s），因此与历史 51,321.484/s 基线一致时只能判断“无可见回归”，不能把该短跑结果作为稳定吞吐承诺。
+
+### 2026-09-14 Matcher→Lane 预投递修复验证
+
+- 代码验证：`mvn -pl surprising-aeron-core/surprising-aeron-service -am -DskipTests compile` 通过；定向 `MatcherCommandPipelineTest`、`CoreOrderedOrderBatchTest`、`ClusterCommandPipelineTest`、`TradingRuntimeStateTest` 共 340 项通过（Cluster 测试单独运行 250 项通过）。
+- 覆盖普通/批量直接结算、Matcher 未就绪时 Lane 仍不提前执行、两个 Matcher 分区前序阻塞时独立分区继续推进、资金/状态哈希/快照恢复及终态客户标识回收。候选 Lane 掩码在 pending 入环前固化，避免全 Lane 广播造成独立分区假阻塞。
+- 本次未启动 GCP，也未重新进行吞吐、p99 或稳态分配率验收；现有短 JMH/JFR 结果保持原结论，30万+/s、普通单 p99≤5ms 和稳定分配率仍需固定 128 币对、256 在途、ZGC 的同口径长稳态轮验证。
+- 追加短 JMH 诊断（1×1s warmup、1×2s measurement、1 fork，固定 128 币对、10,000 users、4 Lane/1 Matcher、ZGC）：UNIFORM 终态业务 30,589.9/s（density 28,216.8/s、full-sweep 22,393.5/s），PARETO 18,882.0/s，MARK_PRICE_STORM 5,519.1/s；各场景错误、拒绝、超时、未完成均为 0。该轮短、单 fork，不能替代稳定吞吐或 p99 验收，也未宣称达到 30万+/s。
+- 新增 fence 守卫后的服务模块完整回归：926 项通过，Failures 0、Errors 0，Maven BUILD SUCCESS。

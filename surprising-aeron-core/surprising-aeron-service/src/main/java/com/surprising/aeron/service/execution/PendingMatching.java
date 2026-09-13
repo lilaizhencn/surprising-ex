@@ -308,6 +308,9 @@ final class PendingMatching {
         pipelinedSettlementCounted = false;
         return value;
     }
+    boolean commitFenceEstablished() {
+        return commitFenceEstablished;
+    }
     long commitFenceTimestamp() {
         if (!commitFenceEstablished) throw new IllegalStateException("matching commit fence is not established");
         return commitFenceTimestamp;

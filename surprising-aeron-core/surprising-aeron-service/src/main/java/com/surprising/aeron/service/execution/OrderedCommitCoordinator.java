@@ -1251,7 +1251,8 @@ final class OrderedCommitCoordinator {
             }
             OrderBatchPending batch = pending.orderBatch;
             if (batch != null) {
-                if (batch.settlementEvent != null && batch.settlementEvent.direct()) {
+                if (batch.settlementEvent != null && batch.settlementEvent.direct()
+                        && !batch.settlementEvent.dispatched()) {
                     if (!batch.admissionCollected() || !batch.canPredispatch()) return;
                     pending.establishCommitFence(clusterTimestamp, clusterPosition);
                     batch.settlementEvent.commitFence(pending.commitFenceTimestamp(), pending.commitFenceClusterPosition());
