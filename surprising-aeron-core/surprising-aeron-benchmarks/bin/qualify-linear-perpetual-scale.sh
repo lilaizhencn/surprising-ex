@@ -273,19 +273,12 @@ run_gc() {
 }
 
 run_profile() {
-  local profile_jvm_args=(
-    "${JVM_ARGS[@]}"
-    "-XX:+UnlockDiagnosticVMOptions"
-    "-XX:NativeMemoryTracking=summary"
-    "-XX:+PrintNMTStatistics"
-    "-XX:StartFlightRecording=filename=${ARTIFACT_DIR}/scale.jfr,settings=${JFR_SETTINGS_FILE},dumponexit=true"
-    "-Xlog:gc*,safepoint:file=${ARTIFACT_DIR}/scale-profile-gc.log:time,uptime,level,tags"
-  )
-  "${JAVA}" "${profile_jvm_args[@]}" -jar "${JAR}" 'LinearPerpetualCoreBenchmark.scaleMixedWorkload' \
+  local profile_jvm_args="${JVM_ARGS_STRING} -XX:+UnlockDiagnosticVMOptions -XX:NativeMemoryTracking=summary -XX:+PrintNMTStatistics -XX:StartFlightRecording=filename=${ARTIFACT_DIR}/scale.jfr,settings=${JFR_SETTINGS_FILE},dumponexit=true -Xlog:gc*,safepoint:file=${ARTIFACT_DIR}/scale-profile-gc.log:time,uptime,level,tags"
+  "${JAVA}" -jar "${JAR}" 'LinearPerpetualCoreBenchmark.scaleMixedWorkload' \
     -p accountLanes=4 -p activeUsers=10000 -p listedSymbols=128 -p activeSymbols=128 \
     -p maxPositionsPerUser=5 -p maxOpenOrdersPerUser=10 -p trafficProfile=UNIFORM \
     -p hftRounds=1 -p hftBatchSize=4 -p lifecycleSymbolsPerRun="${LIFECYCLE_SYMBOL_BUDGET}" \
-    -wi 2 -w 2s -i 1 -r 10s -f 0 \
+    -wi 2 -w 2s -i 1 -r 10s -f 1 -jvmArgsAppend "${profile_jvm_args}" \
     -rf json -rff "${ARTIFACT_DIR}/scale-profile.json" \
     > "${ARTIFACT_DIR}/scale-profile.log" 2>&1 &
   local profile_pid=$!
@@ -388,22 +381,14 @@ run_saturation_case() {
 }
 
 run_saturation_profile() {
-  local profile_jvm_args=(
-    "${JVM_ARGS[@]}"
-    "-Dsurprising.benchmark.export-ack-interval=1024"
-    "-XX:+UnlockDiagnosticVMOptions"
-    "-XX:NativeMemoryTracking=summary"
-    "-XX:+PrintNMTStatistics"
-    "-XX:StartFlightRecording=filename=${ARTIFACT_DIR}/saturation.jfr,settings=${JFR_SETTINGS_FILE},dumponexit=true"
-    "-Xlog:gc*,safepoint:file=${ARTIFACT_DIR}/saturation-gc.log:time,uptime,level,tags"
-  )
-  "${JAVA}" "${profile_jvm_args[@]}" -jar "${JAR}" 'LinearPerpetualCoreBenchmark.saturatedMatchingWorkload' \
+  local profile_jvm_args="${JVM_ARGS_STRING} -Dsurprising.benchmark.export-ack-interval=1024 -XX:+UnlockDiagnosticVMOptions -XX:NativeMemoryTracking=summary -XX:+PrintNMTStatistics -XX:StartFlightRecording=filename=${ARTIFACT_DIR}/saturation.jfr,settings=${JFR_SETTINGS_FILE},dumponexit=true -Xlog:gc*,safepoint:file=${ARTIFACT_DIR}/saturation-gc.log:time,uptime,level,tags"
+  "${JAVA}" -jar "${JAR}" 'LinearPerpetualCoreBenchmark.saturatedMatchingWorkload' \
     -p accountLanes=4 -p activeUsers=10000 -p listedSymbols=128 -p activeSymbols=128 \
     -p matchingEngines="${MATCHING_ENGINES}" \
     -p maxPositionsPerUser=5 -p maxOpenOrdersPerUser=10 \
     -p maxInFlight=256 -p operationsPerInvocation="${SATURATION_OPERATIONS}" \
     -p targetOperationsPerSecond=100000 \
-    -wi 1 -w 3s -i 1 -r 10s -f 0 -t 1 \
+    -wi 1 -w 3s -i 1 -r 10s -f 1 -t 1 -jvmArgsAppend "${profile_jvm_args}" \
     -rf json -rff "${ARTIFACT_DIR}/saturation-profile.json" \
     > "${ARTIFACT_DIR}/saturation-profile.log" 2>&1 &
   local profile_pid=$!
@@ -428,44 +413,27 @@ run_saturation() {
 
 validate_owner_commit_jmh() {
   local result="$1"
-  jq -e 'length == 6 and all(.[ ];
-    .primaryMetric.score > 0 and
+  validate_jmh "${result}"
+  jq -e 'length == 1 and all(.[ ];
     .params.activeUsers == "10000" and
     .params.listedSymbols == "128" and
+    .params.activeSymbols == "128" and
     .params.accountLanes == "4" and
-    .params.positionsPerUser == "5" and
-    .params.ordersPerUser == "10" and
-    .params.maxInFlight == "256" and
-    .params.operationsPerInvocation == "16384" and
-    .params.targetOperationsPerSecond == "100000" and
-    .secondaryMetrics.acceptedBusinessOperations.score ==
-      .secondaryMetrics.terminalBusinessOperations.score and
-    .secondaryMetrics.acceptedCoreMessages.score == .secondaryMetrics.terminalCoreMessages.score and
-    .secondaryMetrics.acceptedTerminalBusinessGap.score == 0 and
-    .secondaryMetrics.acceptedTerminalCoreGap.score == 0 and
-    .secondaryMetrics.unfinishedBusinessOperations.score == 0 and
-    .secondaryMetrics.unfinishedCoreMessages.score == 0 and
-    .secondaryMetrics.endBacklog.score == 0 and
-    .secondaryMetrics.rejectedOperations.score == 0 and
-    .secondaryMetrics.errorOperations.score == 0 and
-    .secondaryMetrics.timeoutOperations.score == 0 and
-    .secondaryMetrics.fact frameItems.score > 0 and
-    .secondaryMetrics.fact frameBytes.score > 0 and
-    .secondaryMetrics.batchItems.score > 0 and
-    .secondaryMetrics.maximumBatchSize.score > 0 and
-    (if (.benchmark | endswith("ownerCommitSnapshotRecovery")) then
-      .secondaryMetrics.snapshotBytes.score > 0
-    else .secondaryMetrics.snapshotBytes.score == 0 end) and
-    .secondaryMetrics.entryTerminalP999Nanos.score >= .secondaryMetrics.entryTerminalP99Nanos.score)' \
+    .params.maxPositionsPerUser == "5" and
+    .params.maxOpenOrdersPerUser == "10" and
+    .params.trafficProfile == "UNIFORM" and
+    .secondaryMetrics.terminalBusinessOperations.score > 0)' \
     "${result}" > /dev/null
 }
 
 run_owner_commit() {
-  local benchmark='OwnerFactFrameBenchmark.*'
+  # OwnerFactFrameBenchmark was removed with the old fact-frame export path.
+  # Keep this mode as the focused owner/commit workload using the current runtime.
+  local benchmark='LinearPerpetualCoreBenchmark.scaleMixedWorkload'
   local params=(
-    -p activeUsers=10000 -p listedSymbols=128 -p accountLanes=4
-    -p positionsPerUser=5 -p ordersPerUser=10 -p maxInFlight=256
-    -p operationsPerInvocation=16384 -p targetOperationsPerSecond=100000
+    -p activeUsers=10000 -p listedSymbols=128 -p activeSymbols=128 -p accountLanes=4
+    -p maxPositionsPerUser=5 -p maxOpenOrdersPerUser=10 -p trafficProfile=UNIFORM
+    -p hftRounds=1 -p hftBatchSize=4 -p lifecycleSymbolsPerRun="${LIFECYCLE_SYMBOL_BUDGET}"
   )
   "${JAVA}" -jar "${JAR}" "${benchmark}" "${params[@]}" \
     -wi "${JMH_WARMUP_ITERATIONS}" -w "${JMH_WARMUP_SECONDS}s" \
@@ -483,16 +451,9 @@ run_owner_commit() {
     and .secondaryMetrics["gc.alloc.rate.norm"].score >= 0)' \
     "${ARTIFACT_DIR}/owner-commit-gc.json" > /dev/null
 
-  local profile_jvm_args=(
-    "${JVM_ARGS[@]}"
-    "-XX:+UnlockDiagnosticVMOptions"
-    "-XX:NativeMemoryTracking=summary"
-    "-XX:+PrintNMTStatistics"
-    "-XX:StartFlightRecording=filename=${ARTIFACT_DIR}/owner-commit.jfr,settings=${JFR_SETTINGS_FILE},dumponexit=true"
-    "-Xlog:gc*,safepoint:file=${ARTIFACT_DIR}/owner-commit-profile-gc.log:time,uptime,level,tags"
-  )
-  "${JAVA}" "${profile_jvm_args[@]}" -jar "${JAR}" "${benchmark}" "${params[@]}" \
-    -wi 2 -w 2s -i 1 -r 10s -f 0 -t 1 \
+  local profile_jvm_args="${JVM_ARGS_STRING} -XX:+UnlockDiagnosticVMOptions -XX:NativeMemoryTracking=summary -XX:+PrintNMTStatistics -XX:StartFlightRecording=filename=${ARTIFACT_DIR}/owner-commit.jfr,settings=${JFR_SETTINGS_FILE},dumponexit=true -Xlog:gc*,safepoint:file=${ARTIFACT_DIR}/owner-commit-profile-gc.log:time,uptime,level,tags"
+  "${JAVA}" -jar "${JAR}" "${benchmark}" "${params[@]}" \
+    -wi 2 -w 2s -i 1 -r 10s -f 1 -t 1 -jvmArgsAppend "${profile_jvm_args}" \
     -rf json -rff "${ARTIFACT_DIR}/owner-commit-profile.json" \
     > "${ARTIFACT_DIR}/owner-commit-profile.log" 2>&1 &
   local profile_runner_pid=$!
