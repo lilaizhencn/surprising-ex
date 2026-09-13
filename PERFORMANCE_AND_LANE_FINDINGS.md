@@ -659,7 +659,7 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 ### 2026-09-13 剩余热点清单与待预留表扩容修复
 
 - 已修复：`AccountLaneState.pendingReservationSequences` 和按用户计数表改用既有 `INITIAL_ENTITY_CAPACITY` 初始化，避免持续订单进出时从默认小表反复扩容；不新增状态、不改变预留计数语义。编译及 `AccountLaneStateTest`、`PendingReservationTrackerTest`、`TradingCoreRuntimeTest` 定向回归通过。
-- 仍需解决：Owner 仍承担撮合完成轮询、证据/计划校验、终态提交和结果索引；其中 `TerminalTombstoneStore.indexClient`、批量解码和提交发布仍是 JFR 热点。Matcher→Lane 还未做到由 Matcher 直接构造并按 Lane 顺序交付不可变成交事实，当前实现仍由 Owner 建计划并维护提交屏障。
+- 仍需解决：Owner 仍承担撮合完成槽位回收、最终证据校验、终态提交和结果索引；其中 `TerminalTombstoneStore.indexClient`、批量解码和提交发布仍是 JFR 热点。Matcher 已在预留结算事件内构造不可变成交计划，Lane 按 Owner 预留的序号顺序校验并应用；Owner 仍保留有序提交屏障，避免跨线程修改权威状态。
 - 仍需解决：强平/到期等低频控制的全部准备和通用 `onLane` 借权边界尚未完全收敛；批量强平虽已异步化，仍需继续消除同步直调和 Owner 编排续程。
 - 仍需解决：`OrderRuntime`、成交/发布缓冲、PendingReservation 之外的中间对象分配仍高（最近稳定轮约 2.53KB/业务项）；需要按事件生命周期复用并以 JFR allocation 栈逐项验证，不能只靠扩大堆。
 - 验收未完成：本机热降频下约 25.38万业务项/s、普通单 p99 5.865ms，尚未证明 30万+/s 和 p99≤5ms；仍缺少无热限制的 GCP 单节点复测、开放到达率/三段延迟、Linux 调度及长期泄漏证据。上述未完成项不能用一次 closed-loop 结果关闭。
