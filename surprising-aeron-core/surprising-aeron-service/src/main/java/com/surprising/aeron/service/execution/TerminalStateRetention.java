@@ -258,7 +258,10 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
     }
 
     TerminalStateRetention copy() {
-        return new TerminalStateRetention(new LinkedHashMap<>(candidates), tombstones.copy(),
+        LinkedHashMap<EntityKey, RetainedEntity> copiedCandidates = new LinkedHashMap<>();
+        candidates.forEach((key, value) -> copiedCandidates.put(key,
+                new RetainedEntity(key, value.userId(), value.clientId(), value.exportSequence())));
+        return new TerminalStateRetention(copiedCandidates, tombstones.copy(),
                 new LinkedHashMap<>(fundsCommands));
     }
 
@@ -343,8 +346,14 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
                 && existing.clientId().equals(normalized)) return;
         // Reuse the stable key already held by the map. This removes one short-lived
         // EntityKey allocation from every terminal observation while preserving map identity.
-        EntityKey stableKey = existing == null ? new EntityKey(type, id) : existing.key();
-        candidates.put(stableKey, new RetainedEntity(stableKey, userId, normalized, exportSequence));
+        if (existing == null) {
+            EntityKey stableKey = new EntityKey(type, id);
+            candidates.put(stableKey, new RetainedEntity(stableKey, userId, normalized, exportSequence));
+        } else {
+            // Candidates are Owner-confined. Reuse the value on every terminal
+            // observation instead of allocating a replacement record.
+            existing.update(userId, normalized, exportSequence);
+        }
     }
 
     private void removeCandidate(EntityType type, long id) {
@@ -491,11 +500,34 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
         @Override public boolean equals(Object other) { return other instanceof EntityKey key && type == key.type && id == key.id; }
     }
 
-    private record RetainedEntity(EntityKey key, long userId, String clientId, long exportSequence) {
-        private RetainedEntity {
+    private static final class RetainedEntity {
+        private final EntityKey key;
+        private long userId;
+        private String clientId;
+        private long exportSequence;
+
+        private RetainedEntity(EntityKey key, long userId, String clientId, long exportSequence) {
             if (key == null || userId <= 0 || clientId == null || exportSequence <= 0) {
                 throw new IllegalArgumentException("invalid retained terminal entity");
             }
+            this.key = key;
+            this.userId = userId;
+            this.clientId = clientId;
+            this.exportSequence = exportSequence;
         }
+
+        private void update(long userId, String clientId, long exportSequence) {
+            if (userId <= 0 || clientId == null || exportSequence <= 0) {
+                throw new IllegalArgumentException("invalid retained terminal entity");
+            }
+            this.userId = userId;
+            this.clientId = clientId;
+            this.exportSequence = exportSequence;
+        }
+
+        EntityKey key() { return key; }
+        long userId() { return userId; }
+        String clientId() { return clientId; }
+        long exportSequence() { return exportSequence; }
     }
 }
