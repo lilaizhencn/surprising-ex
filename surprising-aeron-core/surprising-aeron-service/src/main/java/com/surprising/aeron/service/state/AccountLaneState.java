@@ -702,8 +702,9 @@ public final class AccountLaneState {
             mixed *= 0x100000001b3L;
         }
         if (ascii) return mixed;
-        mixed = mix(hash, text.length());
-        for (byte item : text.getBytes(java.nio.charset.StandardCharsets.UTF_8)) {
+        byte[] bytes = text.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        mixed = mix(hash, bytes.length);
+        for (byte item : bytes) {
             mixed ^= Byte.toUnsignedInt(item);
             mixed *= 0x100000001b3L;
         }
