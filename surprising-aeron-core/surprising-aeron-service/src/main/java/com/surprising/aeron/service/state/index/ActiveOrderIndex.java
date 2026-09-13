@@ -51,18 +51,9 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     private final Map<String, OrderParticipantIndex> participantsBySymbol = new HashMap<>(INITIAL_INDEX_CAPACITY);
     private final Long2ObjectHashMap<IndexedOrder> ordersById =
             new Long2ObjectHashMap<>(INITIAL_INDEX_CAPACITY, 0.65f, false);
-    /**
-     * Owner-only memo for the two masks required by one PLACE admission.  The
-     * command window asks for account and Lane masks separately; computing the
-     * crossing-price tree twice was pure duplicate work.  Any participant
-     * mutation invalidates the memo before the next admission query.
-     */
-    private String lastCounterpartySymbol;
-    private com.surprising.aeron.protocol.CoreOrderSide lastCounterpartySide;
-    private long lastCounterpartyPrice;
-    private long lastCounterpartyMask;
-    private long lastCounterpartyLaneMask;
-    private boolean counterpartyMemoValid;
+    /** Query-only holder reused by the Owner thread; it is never part of index state. */
+    private static final ThreadLocal<CounterpartyMasks> COUNTERPARTY_SCRATCH =
+            ThreadLocal.withInitial(CounterpartyMasks::new);
     private RuntimeIdentityRegistry recoveryIdentities;
 
     /** One Owner-owned index entry per active order; updates reuse the Lane's immutable value. */
@@ -138,34 +129,35 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     }
 
     public long counterpartyMask(String symbol, com.surprising.aeron.protocol.CoreOrderSide side, long limitPrice) {
-        ensureCounterpartyMemo(symbol, side, limitPrice);
-        return lastCounterpartyMask;
+        OrderParticipantIndex participants = participantsBySymbol.get(symbol);
+        return participants == null ? 0 : participants.counterparties(side, limitPrice);
     }
 
     public long counterpartyLaneMask(String symbol, com.surprising.aeron.protocol.CoreOrderSide side, long limitPrice) {
-        ensureCounterpartyMemo(symbol, side, limitPrice);
-        return lastCounterpartyLaneMask;
+        OrderParticipantIndex participants = participantsBySymbol.get(symbol);
+        return participants == null ? 0 : participants.counterpartyLanes(side, limitPrice);
     }
 
-    private void ensureCounterpartyMemo(String symbol,
+    /** Computes both admission masks in one crossing-price tree walk. */
+    CounterpartyMasks counterpartyMasks(String symbol,
                                         com.surprising.aeron.protocol.CoreOrderSide side,
                                         long limitPrice) {
-        if (counterpartyMemoValid && lastCounterpartyPrice == limitPrice
-                && lastCounterpartySide == side
-                && java.util.Objects.equals(lastCounterpartySymbol, symbol)) return;
+        CounterpartyMasks result = COUNTERPARTY_SCRATCH.get();
         OrderParticipantIndex participants = participantsBySymbol.get(symbol);
         if (participants == null) {
-            lastCounterpartyMask = 0;
-            lastCounterpartyLaneMask = 0;
+            result.accountMask = 0;
+            result.laneMask = 0;
         } else {
             participants.computeCounterpartyMasks(side, limitPrice);
-            lastCounterpartyMask = participants.computedCounterpartyMask();
-            lastCounterpartyLaneMask = participants.computedCounterpartyLaneMask();
+            result.accountMask = participants.computedCounterpartyMask();
+            result.laneMask = participants.computedCounterpartyLaneMask();
         }
-        lastCounterpartySymbol = symbol;
-        lastCounterpartySide = side;
-        lastCounterpartyPrice = limitPrice;
-        counterpartyMemoValid = true;
+        return result;
+    }
+
+    static final class CounterpartyMasks {
+        long accountMask;
+        long laneMask;
     }
 
     public boolean hasCounterparty(String symbol, com.surprising.aeron.protocol.CoreOrderSide side,
@@ -499,7 +491,6 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     }
 
     public void rebuild(TradingCoreState state) {
-        counterpartyMemoValid = false;
         idsByUser.clear();
         idsBySymbol.clear();
         participantsBySymbol.clear();
@@ -542,12 +533,10 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     }
 
     private void addParticipant(IndexedOrder order) {
-        counterpartyMemoValid = false;
         participantsBySymbol.computeIfAbsent(order.symbol(), ignored -> new OrderParticipantIndex(topology)).add(order.side(), order.matchingPriceTicks(), order.userId());
     }
 
     private void removeParticipant(IndexedOrder order) {
-        counterpartyMemoValid = false;
         OrderParticipantIndex participants = participantsBySymbol.get(order.symbol());
         if (participants == null)
             throw new IllegalStateException("active order participant count underflow");

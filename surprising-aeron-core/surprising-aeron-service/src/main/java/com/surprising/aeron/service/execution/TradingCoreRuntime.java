@@ -591,13 +591,13 @@ public final class TradingCoreRuntime implements AutoCloseable {
     boolean addPlaceScope(PlaceOrderCommand command, ClusterCommandWindow window) {
         var instrument = runtimeState.instrument(command.symbol());
         if (instrument == null || command.reduceOnly()) return false;
-        window.candidateLanes |= activeOrderIndex.counterpartyLaneMask(
+        var counterparties = activeOrderIndex.counterpartyMasks(
                 instrument.symbol(), command.side(), command.limitPriceTicks());
-        long counterparties = activeOrderIndex.counterpartyMask(
-                instrument.symbol(), command.side(), command.limitPriceTicks());
-        window.candidateAccounts |= counterparties;
+        window.candidateLanes |= counterparties.laneMask;
+        long counterpartyAccounts = counterparties.accountMask;
+        window.candidateAccounts |= counterpartyAccounts;
         window.candidateOrder(command.orderId(), instrument.symbol(), command.side(), command.limitPriceTicks(),
-                productLine.isDerivative() && counterparties != 0);
+                productLine.isDerivative() && counterpartyAccounts != 0);
         return true;
     }
 
