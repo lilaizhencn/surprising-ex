@@ -22,6 +22,8 @@ final class OrderBatchItem {
     CoreResultCode resultCode;
     /** 本项撮合事件；完成交接后只读，终态时释放引用。 */
     List<MatcherEvent> executionEvents = List.of();
+    /** 本项结果由批次项唯一持有，结算输入通过索引引用，避免第二个结果列表。 */
+    com.surprising.aeron.service.matching.CoreMatchingResult matchingResult;
     /** 本项需要编码的成交数量。 */
     int executionCount;
     /** 成交编码所需的主动方用户 ID。 */
@@ -57,6 +59,7 @@ final class OrderBatchItem {
         status = null;
         resultCode = null;
         executionEvents = List.of();
+        matchingResult = null;
         executionCount = 0;
         executionTakerUserId = 0;
         resultOrder = null;

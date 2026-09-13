@@ -616,7 +616,7 @@ final class OrderBatchExecutor {
             if (owner.productLine.isDerivative()) {
                 batch.deferredSettlementOrderIds.add(orderId);
                 batch.deferredSettlementExpectedLaneMasks.add(owner.commits.expectedLaneMask(pending, batch.lastMatchingResult));
-                batch.deferredSettlementMatchingResults.add(batch.lastMatchingResult);
+                batch.deferredSettlementItemIndexes.add(batch.nextIndex);
                 finishOrderBatchItem(batch, pending, batch.lastMatchingResult);
                 return startOrderBatchItem(batch, pending, timestamp, position, false);
             }
@@ -783,6 +783,7 @@ final class OrderBatchExecutor {
     void applyOrderBatchMatcherResult(
             OrderBatchPending batch, OrderBatchItem item, PendingMatching pending,
             com.surprising.aeron.service.matching.CoreMatchingResult matchingResult) {
+        item.matchingResult = matchingResult;
         if (owner.realtimeCapture != null && owner.realtimeCapture.active() && matchingResult.accepted()) {
             item.realtimeTakerOrder = owner.runtimeOrder(item.orderId());
         }
@@ -804,7 +805,7 @@ final class OrderBatchExecutor {
                 if (batch.pipelined || matchingResult.accepted() && owner.productLine.isDerivative()) {
                     batch.deferredSettlementOrderIds.add(command.orderId());
                     batch.deferredSettlementExpectedLaneMasks.add(owner.commits.expectedLaneMask(pending, matchingResult));
-                    batch.deferredSettlementMatchingResults.add(matchingResult);
+                    batch.deferredSettlementItemIndexes.add(batch.nextIndex);
                 } else {
                     batch.itemSettlementEvent = owner.runtimeState.dispatchOrderBatchMatcherSettlement(
                             pending.sequence(), owner.commits.expectedLaneMask(pending, matchingResult), command.orderId(),

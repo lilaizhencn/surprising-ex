@@ -50,7 +50,9 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     public int settlementCount() { return deferredSettlementOrderIds.size(); }
     public long settlementOrderId(int index) { return deferredSettlementOrderIds.get(index); }
     public long settlementLaneMask(int index) { return deferredSettlementExpectedLaneMasks.get(index); }
-    public CoreMatchingResult settlementResult(int index) { return deferredSettlementMatchingResults.get(index); }
+    public CoreMatchingResult settlementResult(int index) {
+        return items.get(deferredSettlementItemIndexes.get(index)).matchingResult;
+    }
     public int size() { return items.size(); }
     public long orderId(int index) { return items.get(index).orderId; }
     public long originalOrderId(int index) { return items.get(index).originalOrderId; }
@@ -138,9 +140,10 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList
             deferredSettlementExpectedLaneMasks =
             new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList();
-    /** 与待结算订单一一对应的不可变撮合结果。 */
-    final List<com.surprising.aeron.service.matching.CoreMatchingResult>
-            deferredSettlementMatchingResults;
+    /** 待结算项在 items 中的索引；结果本体只保留在对应 OrderBatchItem。 */
+    final org.eclipse.collections.impl.list.mutable.primitive.IntArrayList
+            deferredSettlementItemIndexes =
+            new org.eclipse.collections.impl.list.mutable.primitive.IntArrayList();
     /** 本批准入分配的客户单号，失败时按逆序回滚。 */
     final List<PreparedClientAllocation> preparedClientKeys;
     /** 本批已收集的国库变化，随最终提交合并。 */
@@ -265,7 +268,6 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         runtimeChangedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
         itemChangedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
         deferredCancellationOrderIds = new PrimitiveLongChangeSet(capacity);
-        deferredSettlementMatchingResults = new ArrayList<>(capacity);
         pipelinedMatchingResults = new ArrayList<>(capacity);
         preparedClientKeys = new ArrayList<>(capacity);
         preparedOrders = new ResolvedPlaceOrder[capacity];
@@ -321,7 +323,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         deferredCancellationOrderIds.clear();
         deferredSettlementOrderIds.clear();
         deferredSettlementExpectedLaneMasks.clear();
-        deferredSettlementMatchingResults.clear();
+        deferredSettlementItemIndexes.clear();
         preparedClientKeys.clear();
         if (treasuryDelta != null) treasuryDelta.clear();
 
