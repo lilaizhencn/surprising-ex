@@ -50762,3 +50762,10 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - 满窗口独立提交用例此前可在 direct settlement 已完成、Matcher 槽位尚未被 Owner drain 时触发 `incomplete lane command context`。有序收尾现在先做幂等 Matcher 槽位消费，再释放 settlement 和序号上下文。
 - 修复后定向 `fullIndependentWindowCompletesWithoutAnotherTimer` 六产品线通过；最终 service 全量 **929 tests, 0 failures, 0 errors, 0 skipped**，`git diff --check` 通过。
 - 仍未启动 GCP 或新增吞吐/JFR 轮次；稳定分配率、普通单 p99≤5ms 和 30 万+/s 仍不能从功能回归推断。
+
+
+### 2026-09-14 无载荷响应分配修复回归
+
+- 修改范围：`TradingCoreRuntime`、`OrderedCommitCoordinator`、`MatchingCommandAdmission`、`CommandResultBuilder`、`CommandResultLedger`、`RealtimeReadCoordinator`。
+- `mvn -q -pl surprising-aeron-core/surprising-aeron-service -am -DskipTests package` 通过；随后 service 全量 **929 tests，0 failures，0 errors，0 skipped**。
+- 本次没有执行新的吞吐/JFR/GCP轮次；不能把空响应单例修复解释为整体分配率、30万+/s或普通单 p99≤5ms 已达标。

@@ -90,7 +90,7 @@ final class OrderedCommitCoordinator {
                 TradingCoreRuntime.EMPTY_RESPONSE_DATA);
         owner.removePendingMatching(sequence);
         CoreResponse response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, resultCode,
-                sequence, requiredExportSequence, stateHash, new byte[0]);
+                sequence, requiredExportSequence, stateHash, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
         return owner.releaseAdmission(capacityReservation, response);
     }
 

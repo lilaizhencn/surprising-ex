@@ -47,7 +47,7 @@ final class RealtimeReadCoordinator {
             realtimeCapture.failed();
             realtimeCapture.begin(realtimeSnapshotPosition,realtimeSnapshotTimestamp,realtimeSnapshotId);
             realtimeCapture.emit(com.surprising.aeron.protocol.RealtimeFrame.Kind.SNAPSHOT_UNAVAILABLE,
-                    realtimeSnapshotUser,"","",new byte[0]);
+                    realtimeSnapshotUser,"","",TradingCoreRuntime.EMPTY_RESPONSE_DATA);
             realtimeCapture.commit();
         }
         return 1;

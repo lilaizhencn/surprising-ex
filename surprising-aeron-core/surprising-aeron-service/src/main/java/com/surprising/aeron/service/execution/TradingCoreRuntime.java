@@ -694,7 +694,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 if (result == null) {
                     return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                             CoreResultCode.RESULT_UNKNOWN_OUTSIDE_RETENTION, appliedCommandCount,
-                            0, cachedBusinessStateHash, new byte[0]);
+                            0, cachedBusinessStateHash, EMPTY_RESPONSE_DATA);
                 }
                 return new CoreResponse(ResponseStatus.OK, result.status(), result.resultCode(),
                         result.appliedCommandCount(), result.requiredExportSequence(), result.stateHash(),
@@ -982,7 +982,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (duplicate != null) {
             if (!duplicate.fingerprint().equals(fingerprint)) {
                 return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
-                        CoreResultCode.IDEMPOTENCY_CONFLICT, appliedCommandCount, 0, stateHash(), new byte[0]);
+                        CoreResultCode.IDEMPOTENCY_CONFLICT, appliedCommandCount, 0, stateHash(), EMPTY_RESPONSE_DATA);
             }
             return new CoreResponse(ResponseStatus.DUPLICATE,
                     duplicate.status(),
@@ -1005,10 +1005,10 @@ public final class TradingCoreRuntime implements AutoCloseable {
             if (retained != null) {
                 if (!retained.equals(fingerprint)) {
                     return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
-                            CoreResultCode.IDEMPOTENCY_CONFLICT, appliedCommandCount, 0, stateHash(), new byte[0]);
+                            CoreResultCode.IDEMPOTENCY_CONFLICT, appliedCommandCount, 0, stateHash(), EMPTY_RESPONSE_DATA);
                 }
                 return new CoreResponse(ResponseStatus.DUPLICATE, ResponseStatus.APPLIED,
-                        CoreResultCode.NONE, appliedCommandCount, 0, stateHash(), new byte[0]);
+                        CoreResultCode.NONE, appliedCommandCount, 0, stateHash(), EMPTY_RESPONSE_DATA);
             }
             if (!terminalRetention.hasFundsCommandCapacity(message.header().commandId())) {
                 return rejected(CoreResultCode.FUNDS_IDEMPOTENCY_RETENTION_FULL);
@@ -1391,7 +1391,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 ResponseStatus.REJECTED, resultCode, appliedCommandCount, requiredExportSequence, stateHash,
                 TradingCoreRuntime.EMPTY_RESPONSE_DATA);
         return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, resultCode,
-                appliedCommandCount, requiredExportSequence, stateHash, new byte[0]);
+                appliedCommandCount, requiredExportSequence, stateHash, EMPTY_RESPONSE_DATA);
     }
 
     PendingMatching removePendingMatching(long sequence) {

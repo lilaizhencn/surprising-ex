@@ -819,3 +819,10 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - 发现 direct settlement 的 Lane 完成通知可能先于 Owner 的 matcher completion drain；Owner 已拿到事件结果却在回收序号上下文时仍持有 `submittedMatcherShard`，导致满窗口独立提交偶发 `incomplete lane command context`。
 - 有序结算收尾前增加幂等 `transferMatchingCompletion`：只消费尚未释放的 Matcher SPSC 槽位，不把 direct result 再复制进 Owner 上下文；已由常规 drain 消费的路径保持空操作。
 - 该修复保留 Owner 的证据、资金和终态提交职责，修复了槽位生命周期而没有放宽上下文回收校验。
+
+
+### 2026-09-14 无载荷响应单例收敛
+
+- Owner 拒绝、幂等冲突、Matcher 拒绝、结果未知、响应构建失败和实时快照不可用等无载荷分支统一复用 `TradingCoreRuntime.EMPTY_RESPONSE_DATA`，结果账本对该不可变数组跳过防御性复制。
+- 不改变非空响应的所有权：正常编码结果仍由账本按既有 owned/clone 规则保存；只消除空 `byte[]` 的短命分配。
+- 该项不触碰有序提交、Lane 写入或撮合证据边界；服务全量回归作为本次变更门禁。

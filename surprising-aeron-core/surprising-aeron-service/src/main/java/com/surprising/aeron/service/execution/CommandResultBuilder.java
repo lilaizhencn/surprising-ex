@@ -21,6 +21,8 @@ import java.util.List;
 
 /** 当前命令的结果与变更 ID；owner 串行复用，在命令完成边界编码。 */
 final class CommandResultBuilder {
+    /** Empty response payload is immutable and shared by all no-body results. */
+    private static final byte[] EMPTY_RESULT = TradingCoreRuntime.EMPTY_RESPONSE_DATA;
     /** 唯一 owner；仅在其线程访问共享交易状态和提交边界。 */
     final TradingCoreRuntime owner;
 
@@ -193,10 +195,10 @@ final class CommandResultBuilder {
             return com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeList(List.of(commandTriggerOrderView));
         }
         if (commandOrderViews.isEmpty()) {
-            return new byte[0];
+            return EMPTY_RESULT;
         }
         if (pending == null || matchingResult == null) {
-            return new byte[0];
+            return EMPTY_RESULT;
         }
         var nativeCommand = matchingResult.nativeCommand();
         var matcherPrefix = matchingResult.matcherPrefix();
@@ -204,7 +206,7 @@ final class CommandResultBuilder {
                 || !nativeCommand.matches(pending.command().header().commandId())
                 || nativeCommand.orderId() <= 0 || nativeCommand.instrumentChangeId() <= 0
                 || nativeCommand.matcherSequence() <= 0 || !matcherPrefix.bound()) {
-            return new byte[0];
+            return EMPTY_RESULT;
         }
         try {
             return CoreCommandResultCodec.encode(
@@ -212,7 +214,7 @@ final class CommandResultBuilder {
                     nativeCommand.orderId(), nativeCommand.instrumentChangeId(), nativeCommand.matcherSequence(),
                     matcherPrefix.before(), matcherPrefix.after(), commandOrderViews, List.of());
         } catch (IllegalArgumentException exception) {
-            return new byte[0];
+            return EMPTY_RESULT;
         }
     }
 }

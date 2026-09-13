@@ -172,8 +172,10 @@ final class CommandResultLedger {
             this.appliedCommandCount = appliedCommandCount;
             this.requiredExportSequence = requiredExportSequence;
             this.stateHash = stateHash;
-            byte[] normalized = responseData == null ? new byte[0] : responseData;
-            this.responseData = ownedResponseData ? normalized : normalized.clone();
+            byte[] normalized = responseData == null ? TradingCoreRuntime.EMPTY_RESPONSE_DATA : responseData;
+            // The shared empty payload is immutable, so it does not need a defensive clone.
+            this.responseData = ownedResponseData || normalized == TradingCoreRuntime.EMPTY_RESPONSE_DATA
+                    ? normalized : normalized.clone();
             this.retentionSequence = retentionSequence;
         }
 

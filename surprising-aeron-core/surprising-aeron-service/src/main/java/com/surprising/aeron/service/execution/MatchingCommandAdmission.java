@@ -370,7 +370,7 @@ final class MatchingCommandAdmission {
         deferredMatching.remove(pending.sequence());
         owner.removePendingMatching(pending.sequence());
         return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, resultCode,
-                pending.sequence(), requiredExportSequence, stateHash, new byte[0]);
+                pending.sequence(), requiredExportSequence, stateHash, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
     }
 
     void validatePendingCancel(CoreMessage message, DecodedMatchingCommand decodedCommand) {
