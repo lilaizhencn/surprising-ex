@@ -50606,3 +50606,8 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - JFR 同口径短轮：`terminalBusinessOperations=36182.127/s`，`laneOperations=28037.116/s`，`laneSettlementOperations=19435.125/s`。分析器通过，`DataLoss=0`、ZGC allocation stall=0、失败/退化信号=0；ZGC 9 次回收，测得暂停总计约 0.486ms，最大约 0.032ms。结果和分析目录：`/tmp/surprising-qual-20260914-0037/scale-jfr-fork.json`、`/tmp/surprising-qual-20260914-0037/analysis/`。
 - JFR 采样热点：Owner 侧仍可见 `OrderedCommitCoordinator.pumpMatchingCommitCompletions`、`MatcherPipelineGroup.drainMatchingCompletions`、`TradingRuntimeState$LaneMutationTask.await`；分配采样主要是 `long[]`、`byte[]`、`Object[]`，以及 `TreeMap`/`OrderRuntime`/`CoreOrderState`。短轮包含初始化和快照恢复，不能把采样字节数直接换算为稳态每业务项分配率；需要长于初始化窗口的独立稳态轮才能关闭该项。
 - 这轮确认异步 `SETTLE_INSTRUMENT` 已进入 Lane 续程且功能回归完整，但没有证明 30万+/s、p99≤5ms 或整体分配率已经达标；GCP 资源未启动。
+
+### 2026-09-14 终态候选复用后短 JMH 复测
+
+- 重新构建 `product-core-benchmarks.jar` 后，同样使用 HotSpot JDK 25.0.1、ZGC、4 Lane/1 matcher、128 币对、1000 users、UNIFORM、1s warmup、2×2s measurement；`scaleMixedWorkload` 得到 `19.076 ops/s`，`terminalBusinessOperations=51353.889/s`、`laneOperations=39793.541/s`、`laneSettlementOperations=27584.593/s`，拒绝/超时/未完成均为 0。结果：`/tmp/surprising-qual-20260914-0047/scale-jmh.json`。
+- 该结果与前一轮 1×3s 短轮的测量长度和热身不同，不能计算收益百分比；只确认改动可运行且没有功能计数回归。容量、p99 和稳态分配率仍需锁定同一长测量协议后再比较。
