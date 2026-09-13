@@ -50843,3 +50843,9 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - 修改后短 JMH：终态业务 **25,525/s**，终态 Core messages **10,961/s**，Lane **18,869/s**，Lane settlement **12,800/s**，trades **4,855/s**；accepted=terminal，error/reject/timeout/unfinished 均为 0。
 - 同口径 `-prof gc`：终态业务 **24,947/s**，分配 **522.163 MB/s**，JMH invocation 归一化 **423,825,029 B/op**，ZGC 6 次、总 GC 时间 **155ms**。该 B/op 含初始化/恢复和 JMH invocation，不能作为稳态单业务分配率。
 - 与上一轮 24,889/s 的短轮结果处于同一波动范围；该改动的确定性收益是复用哈希排序数组并减少数组分配，不能据此宣称 30 万+/s、普通下单 p99≤5ms 或 GCP 容量已达标。
+### 2026-09-14 原 24 万口径最新代码复现
+
+- 完全复现历史 `productionMixedWorkload` 条件：4 币对、1,000 users、4 Account Lane、1 Matcher、ZGC、`hftRounds=16`、`hftBatchSize=20`、JMH 2×5s warmup、3×5s measurement、1 fork。
+- 当前最新代码：终态业务 **262,493/s**（三样本 256,972–265,617/s），终态 Core messages **26,405/s**，Lane **46,354/s**，Lane settlement **30,822/s**，成交 **62,128/s**；accepted=terminal，错误/拒绝/超时/未完成均为 0。
+- 因此近期 2.5 万级结果来自 `scaleMixedWorkload` 的另一种口径（128 币对、10,000 users、`hftRounds=1`、`hftBatchSize=4`），不是同条件吞吐突然下降。两种结果不可直接比较；历史 24 万轮与本轮 26.2 万轮在同一短轮波动范围内。
+- 该复现仍是本机 closed-loop JMH，不代表 128 币对生产容量、开放到达率、p99≤5ms 或 GCP 验收。
