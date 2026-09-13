@@ -50727,3 +50727,9 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - JMH `-prof gc`：accepted/terminal **24,574/s**；allocation **619.6 MB/s**、**440,313,644 B/op**（JMH invocation 口径，含初始化和恢复，不能直接视为单业务分配）；ZGC 22 collections、1,652 ms concurrent time；无错误、超时或未完成。
 - 有效 JFR 来自 JMH fork 子进程的 21s 记录（JFR dump 33 MB，DataLoss=0，终态业务 59,224）。Owner/业务线程热点为 `LaneMutationTask.await`、`OrderedCommitCoordinator.pumpMatchingCommitCompletions`、`TreeMap.successor/put`、`CoreStateHash.mix`、`AccountLaneState.mixText`；Matcher/Lane 仍有状态物化和哈希工作。采样分配约 **10.48 GB/s、176,977 B/终态业务操作**，主要为 byte[]、long[]、Object[]、TreeMap.Entry、OrderRuntime、CoreOrderState、String；ZGC 18 次，停顿总计约 **1.03 ms**，P99/max **60.7 μs**，无 allocation stall、GC failure 或 degeneration；Owner 同步 IO 为 0。
 - JFR 终态 p99：PLACE_ORDER **8.39 ms**、CANCEL_ORDER **16.78 ms**、ORDER_BATCH **67.11 ms**、TRIGGER_ORDER **0.52 ms**。该短轮仍未证明 p99≤5ms，也未证明 30 万+/s；未执行 GCP 复测。JFR 记录仅用于定位剩余热点，不作为容量承诺。
+
+
+### 2026-09-14 Lane 等待/哈希轻量收敛（短轮复测）
+
+- 在 `0eb7376a` 之后增加 Lane mutation 已完成 fast path，并避免 ASCII 状态哈希的 UTF-8 临时数组；不改变恢复、重放或业务哈希字节语义。
+- 定向回归通过；固定 128 symbols、256 in-flight、ZGC workload 的 1×1s warmup、2×2s measurement、1 fork JMH accepted/terminal **24,166/s**，lane **17,864/s**，settlement **12,119/s**，error/reject/timeout/unfinished **0**。这是短轮单 fork 结果，不能与前一轮作容量结论，也未测 GCP。

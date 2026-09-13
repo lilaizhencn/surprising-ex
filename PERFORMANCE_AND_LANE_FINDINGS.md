@@ -784,3 +784,10 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - PLACE 准入原来对同一价格树分别计算 counterparty account mask 和 Lane mask；现在由一次遍历同时产出两个掩码，结果写入调用线程的 scratch，不增加 `ActiveOrderIndex` 实例状态。
 - 该改动消除了 Owner 的重复树遍历，保持索引所有权、恢复格式、反射快照和公开兼容 API 不变；恢复一致性和 927 项 service 回归均通过。
 - JFR 仍显示整体瓶颈在 Lane mutation await、有序 matching commit、TreeMap/哈希状态物化及大量数组/订单状态分配；因此这项改动只关闭一个明确的重复查询热点，不能单独宣称达到 30 万+/s 或 p99≤5ms。
+
+
+### 2026-09-14 Lane 等待与状态哈希分配收敛
+
+- `LaneMutationTask.await` 增加已完成 fast path，并把失败/结果读取收拢到单一完成出口；已完成任务不再设置 waiter 或进入自旋路径。
+- Account Lane 的状态哈希对 ASCII 文本改为直接按字符混合，只有非 ASCII 文本才编码 UTF-8，去除常见哈希路径的临时 `byte[]`；哈希字节语义保持不变。
+- 定向 `TradingRuntimeStateTest`、`RuntimeCommitRecoveryTest`、`ClusterCommandPipelineTest` 通过；同一固定 workload 的新短轮 accepted/terminal **24,166/s**，错误、拒绝、超时和未完成均为 0。该短轮不能单独证明总体吞吐或 p99 达标。

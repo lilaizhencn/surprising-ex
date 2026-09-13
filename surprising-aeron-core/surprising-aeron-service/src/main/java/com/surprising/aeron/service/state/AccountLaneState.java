@@ -689,9 +689,21 @@ public final class AccountLaneState {
     }
 
     private static long mixText(long hash, Object value) {
-        byte[] bytes = String.valueOf(value).getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        long mixed = mix(hash, bytes.length);
-        for (byte item : bytes) {
+        String text = String.valueOf(value);
+        long mixed = mix(hash, text.length());
+        boolean ascii = true;
+        for (int index = 0; index < text.length(); index++) {
+            char character = text.charAt(index);
+            if (character > 0x7f) {
+                ascii = false;
+                break;
+            }
+            mixed ^= character;
+            mixed *= 0x100000001b3L;
+        }
+        if (ascii) return mixed;
+        mixed = mix(hash, text.length());
+        for (byte item : text.getBytes(java.nio.charset.StandardCharsets.UTF_8)) {
             mixed ^= Byte.toUnsignedInt(item);
             mixed *= 0x100000001b3L;
         }
