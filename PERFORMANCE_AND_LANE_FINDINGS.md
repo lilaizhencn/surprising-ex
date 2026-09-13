@@ -791,3 +791,11 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - Account Lane 的状态哈希对 ASCII 文本改为直接按字符混合，只有非 ASCII 文本才编码 UTF-8，去除常见哈希路径的临时 `byte[]`；哈希字节语义保持不变。
 - `TradingRuntimeStateTest`、`RuntimeCommitRecoveryTest`、`ClusterCommandPipelineTest` 的定向回归及随后 service 全量 **927 项**回归均通过；Lane mutation await 的 fast path 因并发可见性竞态已撤回，不作为可用方案。
 - 该项只减少哈希分配，不能单独证明总体吞吐或 p99 达标。
+
+## 2026-09-14：Settlement Delta 发布路径收敛
+
+- `LaneDelta.preparePublication()` 不再把 users/orders/reservations/positions 再复制到 `LanePublication.maps/keys/values`；结算 publication 只借用已填充的 Delta 缓冲，独立 PLACE 准入仍保留原 publication 协议。
+- Owner 提交边界在同一次 Delta 遍历中应用 published maps 并登记 `changedUsers/changedReservations`；随后直接清空这两类缓冲。orders/positions 继续通过 `OwnerIndexedChanges.adopt()` 交换所有权，避免逐实体复制。
+- 删除持仓在 publication 替换 Owner 视图前完成 realtime capture，终态订单批量 sink、route tombstone 和 admission sequence 语义保持不变。
+- HotSpot JDK 25 下 `mvn -q -pl surprising-aeron-core/surprising-aeron-service -am -DskipTests package` 通过；service 全量回归 `927 tests, 0 failures, 0 errors, 0 skipped`，settlement/publication/独立窗口定向回归通过。
+- 本次只验证了正确性和重复遍历削减，尚未重跑 GCP 16c32g 的 64/128 窗口 ZGC 吞吐、Owner/Lane/Matcher CPU、分配率及 p99；因此不能据此宣称 30 万+/s 或 p99≤5ms 已达成。服务全量测试中的 Aeron heartbeat/独立窗口时序需继续作为稳定性门禁观察。
