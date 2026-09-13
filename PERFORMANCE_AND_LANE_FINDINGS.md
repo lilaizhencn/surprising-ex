@@ -789,5 +789,5 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 ### 2026-09-14 状态哈希分配收敛
 
 - Account Lane 的状态哈希对 ASCII 文本改为直接按字符混合，只有非 ASCII 文本才编码 UTF-8，去除常见哈希路径的临时 `byte[]`；哈希字节语义保持不变。
-- `TradingRuntimeStateTest`、`RuntimeCommitRecoveryTest`、`ClusterCommandPipelineTest` 的定向回归在该哈希改动上通过；Lane mutation await 的 fast path 因并发可见性竞态已撤回，不作为可用方案。
+- `TradingRuntimeStateTest`、`RuntimeCommitRecoveryTest`、`ClusterCommandPipelineTest` 的定向回归及随后 service 全量 **927 项**回归均通过；Lane mutation await 的 fast path 因并发可见性竞态已撤回，不作为可用方案。
 - 该项只减少哈希分配，不能单独证明总体吞吐或 p99 达标。
