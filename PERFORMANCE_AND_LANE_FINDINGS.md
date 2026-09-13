@@ -675,3 +675,9 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - `MatcherSettlementDispatcher` 的普通及批量结算在异步命令作用域始终提交永久 Lane；即使 Owner 仍持有准备阶段借权，也不会内联执行账户写入。
 - 同步离线/初始化路径保留原有内联语义，避免把恢复和测试夹具改成隐式异步；SPSC 生产者、序号和失败回滚协议不变。
 - `TradingRuntimeStateTest`、`RiskBatchBudgetTest`、`CoreOrderedOrderBatchTest`、`ClusterCommandPipelineTest` 共 348 项通过；未重新执行云端吞吐，不宣称性能提升。
+
+### 2026-09-14 终态候选索引分配收敛
+
+- `TerminalStateRetention` 原先每次观察终态实体都创建临时 `EntityKey` 并重复查找候选；固定 Owner 线程增加可复用查找键，并在候选内容未变化时直接跳过替换，保留 Map 中稳定键和终态去重语义。
+- 该改动只减少终态观察路径的短命对象，不改变终态 FIFO、客户号墓碑或快照格式。`TerminalStateRetentionTest` 4 项、`ClusterCommandPipelineTest` 250 项通过；完整服务回归仍为 925 项通过。
+- 这不是整体分配率已达标的证据。`OrderRuntime`、发布缓冲及 Owner 有序提交仍需 JFR 稳态栈验证；30万+/s 和普通单 p99≤5ms 仍不能宣称完成。

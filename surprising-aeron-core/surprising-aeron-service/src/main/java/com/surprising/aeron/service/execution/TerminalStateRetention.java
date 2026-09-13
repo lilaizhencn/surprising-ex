@@ -38,6 +38,8 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
     private final LinkedHashMap<EntityKey, RetainedEntity> candidates;
     private final TerminalTombstoneStore tombstones;
     private final LinkedHashMap<UUID, CommandFingerprint> fundsCommands;
+    /** Owner-confined lookup key; candidate keys themselves remain stable Map keys. */
+    private final EntityKey candidateLookupKey = new EntityKey(EntityType.ORDER, 1);
     private long visitingExportSequence;
     private final ArrayList<Long> sortedScratch = new ArrayList<>();
 
@@ -339,12 +341,21 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
 
     private void retain(EntityKey key, long userId, String clientId, long exportSequence) {
         if (tombstones.contains(key.type().ordinal(), key.id())) return;
-        RetainedEntity retained = new RetainedEntity(key, userId, normalizeClientId(clientId), exportSequence);
-        candidates.put(key, retained);
+        String normalized = normalizeClientId(clientId);
+        candidateLookupKey.reset(key.type(), key.id());
+        RetainedEntity existing = candidates.get(candidateLookupKey);
+        if (existing != null && existing.userId() == userId
+                && existing.exportSequence() == exportSequence
+                && existing.clientId().equals(normalized)) return;
+        // Reuse the stable key already held by the map. This removes one short-lived
+        // EntityKey allocation from every terminal observation while preserving map identity.
+        EntityKey stableKey = existing == null ? key : existing.key();
+        candidates.put(stableKey, new RetainedEntity(stableKey, userId, normalized, exportSequence));
     }
 
     private void removeCandidate(EntityKey key) {
-        candidates.remove(key);
+        candidateLookupKey.reset(key.type(), key.id());
+        candidates.remove(candidateLookupKey);
     }
 
     private boolean isStillPrunable(TradingCoreState state, RetainedEntity candidate) {
