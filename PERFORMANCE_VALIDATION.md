@@ -50709,3 +50709,11 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - Owner 不再把同一个 direct result 再复制到 `LaneCommandContext.completedMatchingResult`；普通非直达撮合仍保持原有上下文完成语义，批量 direct 结果继续从批次 event 读取。
 - 有序提交的首次读取和等待重试均增加 event 结果回退，避免 direct event 已完成但 Owner 上下文为空时丢失提交；Matcher 队列仍完整轮询以释放 SPSC 槽位和 matcher submission token。
 - 定向回归（Matcher pipeline、settlement plan、runtime、cluster pipeline）通过；随后 service 全量回归 **927 项通过，Failures 0、Errors 0、Skipped 0**。该改动减少 Owner 结果保留和一次重复引用，未用短跑结果宣称整体吞吐或 p99 达标。
+
+### 2026-09-14 ActiveOrderIndex 双掩码遍历合并（采集前锁定）
+
+- 被测 commit：`46b4b247`；对照 commit：不适用，仅验证当前 master。
+- 修改点：同一 PLACE 准入的 account counterparty mask 与 Lane mask 由一次价格树遍历同时计算，并在 Owner-only 查询间短暂复用；订单/参与者发生变化立即失效，不改变索引所有权、路由或恢复格式。
+- 固定标准：HotSpot JDK 25.0.1、Oracle GraalVM HotSpot、ZGC、4 Account Lane、1 Matcher、128 listed/active symbols、10,000 users、256 in-flight、UNIFORM、maxPositions=1、maxOpenOrders=3、hftRounds=1、batch=4、lifecycleSymbols=32；accepted=terminal，unfinished/error/timeout=0，资金守恒和快照恢复通过。短跑只作局部回归诊断，不宣称 30 万+/s 或 p99≤5ms。
+- JMH 计划：`LinearPerpetualCoreBenchmark.scaleMixedWorkload`，1×1s warmup、2×2s measurement、1 fork，主吞吐与 `-prof gc` 各一轮；JFR 计划：同 workload、ZGC、2×2s warmup、1×10s measurement、1 fork，采集 Owner/Matcher/Lane CPU、allocation、GC、NMT、等待和热点。
+- 采集目录：`/tmp/active-index-memo-20260914`；采集完成后只保留摘要并清理 JFR、GC、NMT、JMH 和临时日志。
