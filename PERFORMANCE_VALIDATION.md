@@ -50784,3 +50784,10 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - HotSpot JDK 25 下编译、协议测试、`ClusterCommandPipelineTest`、`TradingCoreRuntimeTest` 和独立满窗口六产品线回归通过。
 - 完整 service 回归最终结果：**929 tests，0 failures，0 errors，0 skipped**。期间一次完整轮命中既有 Aeron 独立窗口时序抖动，重跑后通过；该抖动堆栈未指向本次编码改动。
 - 本次没有新增 JMH/JFR/GCP 数据，不能把 singleton List 消除解释为整体吞吐或 p99 达标。
+
+
+### 2026-09-14 单订单编码短 JMH 回归
+
+- 固定 HotSpot JDK 25.0.1、ZGC、4 Account Lane、1 Matcher、128 listed/active symbols、10,000 users、256 在途、UNIFORM、1×1s warmup、2×2s measurement、1 fork。
+- 终态业务吞吐 **30,486.832/s**，终态核心消息 **13,091.671/s**，Lane **22,536.700/s**，Lane settlement **15,288.716/s**；accepted=terminal，error/reject/timeout/unfinished 均为 0。
+- 该轮只有两个测量样本，且没有对照 commit；只能证明新编码路径可运行且没有明显回退，不能归因出确定收益，也不能证明 30 万+/s、稳态分配率或 p99≤5ms。
