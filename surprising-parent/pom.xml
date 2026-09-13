@@ -37,7 +37,7 @@
         <exchange-core.git-sha>51c592625c16e53ffc9e2190e53c35dcfc72354f</exchange-core.git-sha>
         <exchange-core.build-jdk>25</exchange-core.build-jdk>
         <exchange-core.sha256>33e4a1d0bce14050ca74ea5332c57ff9de82b9a3d74f4aa30673bbcf0470beb5</exchange-core.sha256>
-        <aeron.version>1.53.0</aeron.version>
+        <aeron.version>1.53.1</aeron.version>
         <hdrhistogram.version>2.2.2</hdrhistogram.version>
         <chronicle.bom.version>2026.18</chronicle.bom.version>
         <dependency-check.version>12.1.0</dependency-check.version>

@@ -64,8 +64,15 @@ public final class AccountLaneState {
         ids.remove(value.triggerOrderId());
         if (ids.isEmpty()) cold.triggerIdsByUser.remove(value.userId());
     }
-    final LongLongHashMap pendingReservationSequences = new LongLongHashMap();
-    private final LongIntHashMap pendingReservationCountsByUser = new LongIntHashMap();
+    /**
+     * Pending reservations are short lived but can reach the same in-flight
+     * cardinality as the lane's active entities.  The default primitive-map
+     * capacity is too small for the closed-loop benchmark and repeatedly
+     * reallocates while orders churn.  Reuse the lane baseline so normal
+     * admission/settlement cycles stay within one backing table.
+     */
+    final LongLongHashMap pendingReservationSequences = new LongLongHashMap(INITIAL_ENTITY_CAPACITY);
+    private final LongIntHashMap pendingReservationCountsByUser = new LongIntHashMap(INITIAL_ENTITY_CAPACITY);
     /** One reusable table per asset; completed users are removed, capacity survives ordinary churn. */
     private final IntObjectHashMap<LongLongHashMap> pendingReservedUnitsByAsset = new IntObjectHashMap<>();
     private int totalPendingReservations;
