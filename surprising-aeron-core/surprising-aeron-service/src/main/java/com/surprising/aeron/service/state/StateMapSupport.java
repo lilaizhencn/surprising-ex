@@ -21,12 +21,19 @@ import java.util.function.Function;
 @SuppressWarnings("unchecked")
 public final class StateMapSupport {
 
+    /** Immutable empty ordered map shared by all state snapshots. */
+    private static final NavigableMap<?, ?> EMPTY_SORTED =
+            new FrozenMap<>(new TreeMap<>());
+
     private StateMapSupport() {
     }
 
     public static <K, V> NavigableMap<K, V> freezeSorted(Map<K, V> values) {
         if (values instanceof FrozenMap<?, ?>) {
             return (NavigableMap<K, V>) values;
+        }
+        if (values.isEmpty()) {
+            return (NavigableMap<K, V>) EMPTY_SORTED;
         }
         NavigableMap<K, V> sorted = values instanceof NavigableMap<?, ?> navigable
                 ? (NavigableMap<K, V>) navigable : new TreeMap<>(values);

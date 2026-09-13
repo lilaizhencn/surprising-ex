@@ -2055,7 +2055,11 @@ public final class TradingCoreRuntime implements AutoCloseable {
     void transferMatchingCompletion(long sequence) {
         if (!pendingMatching.contains(sequence)) return;
         LaneCommandContextRing.Context context = laneCommandContexts.required(sequence);
-        if (context.hasMatchingCompletion() || context.matchingResult() != null) return;
+        // A matchingResult in the context proves the fact was accepted by the Owner,
+        // not that the Matcher SPSC slot has been consumed.  Direct settlement keeps the
+        // fact in MatcherSettlementEvent and therefore deliberately leaves matchingResult
+        // populated while the queue token still needs to be released.
+        if (context.submittedMatcherShard() == -1) return;
         com.surprising.aeron.service.matching.CoreMatchingResult result = matcherPipeline.poll(sequence);
         if (result != null) publishMatchingCompletion(sequence, result);
     }

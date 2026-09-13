@@ -868,3 +868,10 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - `LaneMutationTask.await()` 现在先读取 `completed`；任务已在 Owner 到达等待点前完成时，直接通过同一 volatile acquire 读取结果/异常，跳过 waiter 写入、spin 和 park 协议。
 - 任务未完成时仍使用原有 waiter、有限自旋、`LockSupport.park` 和中断/异常传播；没有放宽 Lane 单写和结果可见性边界，也没有复用此前撤回的无 fence fast path。
 - 该项只削减同步控制/低频 Owner→Lane 操作的等待协议开销；异步 Matcher→Lane 结算路径、Owner 有序提交和 TreeMap/状态物化热点仍按原职责保留。
+
+
+### 2026-09-14 Direct Matcher 槽位回收与空状态物化收敛
+
+- 复现并修复一个真实时序缺陷：direct settlement 已把结果事实写入 `LaneCommandContext` 时，`transferMatchingCompletion` 误把 `matchingResult != null` 当作 Matcher SPSC 槽位已消费，满窗口收尾会以 `incomplete lane command context` 终止。现在只以 `submittedMatcherShard == -1` 判断槽位是否已释放；Owner 仍保留结果事实并只消费 Matcher 队列 token。
+- 快照物化对无余额、无预留、无持仓用户直接使用不可变空 Map；`StateMapSupport` 共享一个空有序冻结 Map，避免每个用户重复创建空 `TreeMap`/冻结包装。非空 Map、排序、快照格式和增量 lineage 不变。
+- 六产品线 `ClusterCommandPipelineTest.fullIndependentWindowCompletesWithoutAnotherTimer`（256 满窗口）通过；service 全量 **930 tests，0 failures，0 errors，0 skipped**。

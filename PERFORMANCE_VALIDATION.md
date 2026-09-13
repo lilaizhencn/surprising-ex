@@ -50829,3 +50829,11 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - 该轮只验证快速返回改动没有破坏生命周期和计数；没有同机对照、稳态 JFR 或 GCP 证据，不能据此宣称吞吐、分配率或普通下单 p99≤5ms 达标。JMH JSON 已在摘要记录后清理。
 
 - 验证门禁：HotSpot JDK 25 下 service 全量最终 XML 汇总 **930 tests，0 failures，0 errors，0 skipped**；`ClusterCommandPipelineTest.fullIndependentWindowCompletesWithoutAnotherTimer` 六产品线单独重跑退出码 0。全量日志中出现的 Aeron heartbeat/独立窗口抖动由 Surefire 重试消除，报告标记为既有 flake。
+
+
+### 2026-09-14 Direct Matcher 槽位回收修复与空状态物化短轮
+
+- 固定环境：HotSpot/GraalVM JDK 25.0.1、ZGC、4 Account Lane、1 Matcher、128 listed/active symbols、10,000 users、256 在途、UNIFORM、maxPositions=1、maxOpenOrders=3、hftRounds=1、batch=4、lifecycleSymbols=32；无 600 秒 soak。
+- 修复后独立满窗口六产品线回归通过；service 全量 **930 tests，0 failures，0 errors，0 skipped**。
+- 短 JMH `LinearPerpetualCoreBenchmark.scaleMixedWorkload`（1×1s warmup、2×2s measurement、1 fork）：终态业务 **24,740.620/s**，终态核心消息 **10,624.129/s**，Lane **18,288.942/s**，Lane settlement **12,407.071/s**，成交 **4,705.497/s**；error/reject/timeout/unfinished 均为 0。
+- 同口径 `-prof gc`：终态业务 **26,169.066/s**，分配约 **558.245 MB/s**，JMH invocation 归一化 **419,844,568 B/op**，ZGC 22 次、总 GC 时间约 1,585ms。该 B/op 含场景初始化/恢复和 JMH invocation，不能当作稳态单业务分配率；本轮也没有 GCP、独立 Linux CPU 或 p99≤5ms 证据。

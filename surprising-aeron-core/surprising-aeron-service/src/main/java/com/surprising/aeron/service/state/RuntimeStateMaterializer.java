@@ -59,18 +59,23 @@ public final class RuntimeStateMaterializer {
 
         Map<Long, CoreUserState> users = new TreeMap<>();
         runtimeUsers.forEachKeyValue((userId, user) -> {
-            Map<String, AssetBalance> balances = new TreeMap<>();
             var userBalances = runtimeBalances.get(userId);
-            if (userBalances != null) userBalances.forEachKeyValue((assetId, balance) -> {
-                String asset = identities.asset(assetId);
-                long pending = runtime.pendingReservedUnits(userId, assetId);
-                balances.put(asset, new AssetBalance(asset, Math.addExact(balance.availableUnits(), pending),
-                        Math.subtractExact(balance.lockedUnits(), pending)));
-            });
-            Map<Long, OrderReservation> reservations = new TreeMap<>(
-                    reservationsByUser.getOrDefault(userId, Map.of()));
-            Map<String, CorePositionState> positions = new TreeMap<>(
-                    positionsByUser.getOrDefault(userId, Map.of()));
+            Map<String, AssetBalance> balances;
+            if (userBalances == null || userBalances.isEmpty()) {
+                balances = Map.of();
+            } else {
+                balances = new TreeMap<>();
+                userBalances.forEachKeyValue((assetId, balance) -> {
+                    String asset = identities.asset(assetId);
+                    long pending = runtime.pendingReservedUnits(userId, assetId);
+                    balances.put(asset, new AssetBalance(asset, Math.addExact(balance.availableUnits(), pending),
+                            Math.subtractExact(balance.lockedUnits(), pending)));
+                });
+            }
+            Map<Long, OrderReservation> reservationValues = reservationsByUser.get(userId);
+            Map<Long, OrderReservation> reservations = reservationValues == null ? Map.of() : reservationValues;
+            Map<String, CorePositionState> positionValues = positionsByUser.get(userId);
+            Map<String, CorePositionState> positions = positionValues == null ? Map.of() : positionValues;
             users.put(userId, new CoreUserState(user.productLine(), userId,
                     Math.subtractExact(user.revision(), runtime.pendingReservationCount(userId)), balances,
                     reservations, positions, user.positionMode()));
