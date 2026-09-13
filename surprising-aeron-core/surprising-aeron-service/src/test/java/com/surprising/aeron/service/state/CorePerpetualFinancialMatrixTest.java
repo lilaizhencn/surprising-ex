@@ -289,10 +289,11 @@ class CorePerpetualFinancialMatrixTest {
 
         TradingCoreState canceledState = reducer.cancelLifecycleOrders(ordered, canceled);
         TradingCoreState executionExpected = reducer.executeLiquidationAfterCancellation(canceledState, command);
-        TradingRuntimeState executionRuntime = RuntimeStateProjector.project(ordered, identities);
+        RuntimeIdentityRegistry executionIdentities = new RuntimeIdentityRegistry();
+        TradingRuntimeState executionRuntime = RuntimeStateProjector.project(ordered, executionIdentities);
         assertThat(RuntimeDerivativeLiquidationProcessor.applyExecution(
-                ordered, command, canceled, executionRuntime, identities)).isSameAs(executionRuntime);
-        RuntimeStateParityChecker.assertMatches(executionExpected, identities, executionRuntime);
+                ordered, command, canceled, executionRuntime, executionIdentities)).isSameAs(executionRuntime);
+        RuntimeStateParityChecker.assertMatches(executionExpected, executionIdentities, executionRuntime);
     }
 
     @Test

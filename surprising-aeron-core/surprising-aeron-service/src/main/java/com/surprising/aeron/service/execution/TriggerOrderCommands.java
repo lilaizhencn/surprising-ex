@@ -588,52 +588,45 @@ final class TriggerOrderCommands {
         // or global index mutation is needed on the Lane; publication follows task completion.
         var siblings = cancelOco ? owner.triggerOrderIndex.ocoSiblings(trigger).descendingSet() : java.util.Collections.<Long>emptySet();
         int laneId = owner.runtimeState.topology().accountLaneId(trigger.userId());
-        var clientKey = order == null ? null : owner.identities.prepareClientKey(trigger.userId(), order.clientOrderId());
-        try {
-            owner.runtimeState.dispatchControlLanes(1L << laneId, ignored -> {
-                for (long siblingId : siblings) {
-                    if (siblingId == triggerId) continue;
-                    var sibling = owner.runtimeState.triggerOrder(siblingId);
-                    if (sibling != null && sibling.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING)
-                        RuntimeCommandProcessor.cancelTriggerOrder(owner.runtimeState, trigger.userId(), siblingId);
-                }
-                RuntimeCommandProcessor.claimTriggerOrder(owner.runtimeState, triggerId, triggerSequence, price, triggeredAt);
-                if (!preparedFailure.isEmpty()) {
-                    RuntimeCommandProcessor.completeTriggerOrder(owner.runtimeState, triggerId, false, 0, preparedFailure, triggeredAt);
-                    return false;
-                }
-                try {
-                    RuntimeCommandProcessor.placeTriggerChildInLane(owner.runtimeState, trigger.userId(), order,
-                            commandId, childSequence, openInterest, identity, clientKey.key(), assetId);
-                    return true;
-                } catch (CoreStateRejectedException rejected) {
-                    RuntimeCommandProcessor.completeTriggerOrder(owner.runtimeState, triggerId, false, 0, rejected.code(), triggeredAt);
-                    return false;
-                }
-            });
-        } catch (RuntimeException | Error failure) {
-            if (clientKey != null && clientKey.allocated())
-                owner.identities.rollbackPreparedClientKey(trigger.userId(), order.clientOrderId(), clientKey);
-            throw failure;
-        }
-        return () -> {
+        owner.runtimeState.dispatchControlLanes(1L << laneId, ignored -> {
+            for (long siblingId : siblings) {
+                if (siblingId == triggerId) continue;
+                var sibling = owner.runtimeState.triggerOrder(siblingId);
+                if (sibling != null && sibling.status() == com.surprising.aeron.protocol.CoreTriggerOrderStatus.PENDING)
+                    RuntimeCommandProcessor.cancelTriggerOrder(owner.runtimeState, trigger.userId(), siblingId);
+            }
+            RuntimeCommandProcessor.claimTriggerOrder(owner.runtimeState, triggerId, triggerSequence, price, triggeredAt);
+            if (!preparedFailure.isEmpty()) {
+                RuntimeCommandProcessor.completeTriggerOrder(owner.runtimeState, triggerId, false, 0, preparedFailure, triggeredAt);
+                return null;
+            }
+            var key = owner.identities.prepareClientKeyInCurrentLane(trigger.userId(), order.clientOrderId());
             try {
-                if (!owner.runtimeState.pollControlLanes()) return false;
+                RuntimeCommandProcessor.placeTriggerChildInLane(owner.runtimeState, trigger.userId(), order,
+                        commandId, childSequence, openInterest, identity, key.key(), assetId);
+                return key;
+            } catch (CoreStateRejectedException rejected) {
+                if (key.allocated()) owner.identities.rollbackClientKeyInCurrentLane(trigger.userId(), order.clientOrderId(), key);
+                RuntimeCommandProcessor.completeTriggerOrder(owner.runtimeState, triggerId, false, 0, rejected.code(), triggeredAt);
+                return null;
             } catch (RuntimeException | Error failure) {
-                if (clientKey != null && clientKey.allocated())
-                    owner.identities.rollbackPreparedClientKey(trigger.userId(), order.clientOrderId(), clientKey);
+                if (key.allocated()) owner.identities.rollbackClientKeyInCurrentLane(trigger.userId(), order.clientOrderId(), key);
                 throw failure;
             }
+        });
+        return () -> {
+            if (!owner.runtimeState.pollControlLanes()) return false;
+            var clientKey = (com.surprising.aeron.service.state.RuntimeIdentityRegistry.PreparedClientKey)
+                    owner.runtimeState.controlLaneResult(laneId);
+            if (clientKey != null) owner.identities.recordLaneClientAllocations(clientKey.newIdentity() ? 1 : 0);
             owner.commits.requestCommitPublication();
-            if (Boolean.TRUE.equals(owner.runtimeState.controlLaneResult(laneId))) {
+            if (clientKey != null) {
                 owner.runtimeState.collectControlReservation(trigger.userId(), order.orderId(), childSequence);
                 owner.resultBuilder.markUserChanged(trigger.userId());
                 owner.resultBuilder.markOrderChanged(order.orderId());
                 owner.queueTriggerMatching(trigger, triggerSequence, price, triggeredAt, commandId, order.orderId());
                 owner.resultBuilder.commandOrderViews = TradingCoreRuntime.appendDistinct(owner.resultBuilder.commandOrderViews,
                         List.of(owner.runtimeOrderView(order.orderId())));
-            } else if (clientKey != null && clientKey.allocated()) {
-                owner.identities.rollbackPreparedClientKey(trigger.userId(), order.clientOrderId(), clientKey);
             }
             return true;
         };

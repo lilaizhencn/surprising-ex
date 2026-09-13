@@ -176,8 +176,6 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     public long orderId() { return order.orderId(); }
     public int assetId() { return assetId; }
     public long clientKey() { return preparedClientKey.key(); }
-    public boolean allocatedClientKey() { return preparedClientKey != null && preparedClientKey.allocated(); }
-    public String clientOrderId() { return order.clientOrderId(); }
     public CoreMatchingOrder matchingOrder() {
         if (!complete() || matchingOrder == null) throw new IllegalStateException("place admission is not accepted");
         return matchingOrder;

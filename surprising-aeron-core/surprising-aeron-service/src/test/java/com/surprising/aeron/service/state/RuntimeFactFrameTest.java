@@ -21,6 +21,29 @@ import org.junit.jupiter.api.Test;
 class RuntimeFactFrameTest {
 
     @Test
+    void clientIdentityInAnAdmissionFactSurvivesLaneRetirementAndAsyncConsumption() throws Exception {
+        var identities = new RuntimeIdentityRegistry();
+        long userId = 7;
+        long key = identities.clientKey(userId, "immutable-client-客户");
+        var builder = RuntimeFactFrame.builder(ProductLine.SPOT, 0, 1)
+                .matcherTransition(CoreMatcherTransition.unchanged(0, 0));
+        builder.recordClientOrder(0, new RuntimeFactFrame.ClientOrderKey(userId, key), null, 99L);
+        builder.laneMask(1);
+        UUID id = UUID.randomUUID();
+        var metadata = new RuntimeFactFrame.CoreFactMetadata(id, fingerprint(id, userId, 1),
+                com.surprising.aeron.protocol.CoreMessageType.PROBE_INCREMENT.wireCode(), userId,
+                ResponseStatus.APPLIED, CoreResultCode.NONE, 1, 1, true);
+        var prepared = builder.prepare(new RuntimeFactFrame.PrepareMetadata(0, 1, 0, 0, 1, metadata, true), identities);
+        var fact = builder.seal(prepared, 1, 0);
+        identities.releaseClientKey(userId, key);
+        assertThat(identities.clientIdentityCount()).isZero();
+        try (var executor = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+            assertThat(executor.submit(() -> fact.identities().clientOrderId(userId, key)).get())
+                    .isEqualTo("immutable-client-客户");
+        }
+    }
+
+    @Test
     void preservesDeterministicFirstTouchOrderWithoutSorting() {
         RuntimeFactFrame first = populatedBuilder(false).seal(metadata());
         RuntimeFactFrame reversed = populatedBuilder(true).seal(metadata());

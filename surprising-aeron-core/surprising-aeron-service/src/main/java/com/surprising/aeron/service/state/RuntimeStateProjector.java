@@ -19,6 +19,7 @@ public final class RuntimeStateProjector {
             TradingCoreState source, RuntimeIdentityRegistry identities, LaneTopology topology) {
         if (source == null || identities == null) throw new IllegalArgumentException("source and identities are required");
         TradingRuntimeState runtime = new TradingRuntimeState(topology);
+        identities.bindClientLanes(runtime);
         runtime.replaceAuxiliaryState(source);
         source.instruments().values().forEach(instrument -> {
             identities.symbolId(instrument.symbol());

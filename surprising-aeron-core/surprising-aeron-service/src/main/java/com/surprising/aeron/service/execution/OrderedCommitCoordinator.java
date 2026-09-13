@@ -303,15 +303,13 @@ final class OrderedCommitCoordinator {
                     var command = admission.command();
                     long originalOrderId = admission.originalOrderId();
                     if (matchingResult.accepted()) {
-                        var preparedClientKey = owner.identities.prepareClientKey(
-                                admission.userId(), admission.resolved().clientOrderId());
                         int symbolId = admission.resolved().symbolId();
                         int assetId = owner.identities.assetId(admission.resolved().reservationAsset());
                         var replaceEvent = owner.runtimeState.dispatchReplace(
                                 sequence, admission.userId(), originalOrderId,
                                 acceptedPreMatchingCancellationIds(pending, matchingResult),
                                 admission.resolved(), pending.command().header().commandId(),
-                                admission.requiredReservationUnits(), preparedClientKey.key(), symbolId, assetId,
+                                admission.requiredReservationUnits(), symbolId, assetId,
                                 clusterTimestamp, clusterPosition, owner.identities);
                         pending.replace(replaceEvent, applyStartNanos);
                         owner.suspendMatchingCommitContext(pending);

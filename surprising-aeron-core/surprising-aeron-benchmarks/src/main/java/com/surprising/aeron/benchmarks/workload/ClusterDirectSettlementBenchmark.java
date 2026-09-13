@@ -10,7 +10,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.*;
 
-/** External single-member Cluster; ordinary/batch fills open and close positions on 128 symbols. */
+/** External single-member Cluster; ordinary/batch fills churn client identities on 128 symbols.
+ * Client-ID queries verify the runtime index is empty after Lane-owned identity retirement.
+ */
 @State(Scope.Benchmark)
 @BenchmarkMode(Mode.SingleShotTime)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
@@ -27,6 +29,7 @@ public class ClusterDirectSettlementBenchmark {
     private ProductLine product;
     private long sequence, orderId, accepted, terminal, messages, marks;
     private long markSequence = 1;
+    private final long[] lastOrderIds = new long[SYMBOLS * 2];
     private static String symbol(int index) { return "DIRECT" + index + "-USDT"; }
     private static long user(int index, int side) { return 820_000_000L + index * 2L + side; }
 
@@ -73,6 +76,7 @@ public class ClusterDirectSettlementBenchmark {
         var orders = new ArrayList<PlaceOrderCommand>(count);
         for (int item = 0; item < count; item++) {
             long id = ++orderId;
+            lastOrderIds[index * 2 + who] = id;
             orders.add(new PlaceOrderCommand(id, symbol(index), 1, side, 100, 1, false,
                     CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC,
                     false, "direct-" + id));
@@ -132,6 +136,13 @@ public class ClusterDirectSettlementBenchmark {
         String settle = ContractType.valueOf(product.contractTypeCode()).isInverse() ? "BTC" : "USDT";
         for (int index = 0; index < SYMBOLS; index++) for (int side = 0; side < 2; side++) {
             long id = user(index, side);
+            long lastOrderId = lastOrderIds[index * 2 + side];
+            if (lastOrderId != 0) {
+                var terminalOrder = client.query(CoreMessageType.CLIENT_ORDER_STATE_QUERY, UUID.randomUUID(), id,
+                        CoreStateQueryCodec.encodeClientOrderStateQuery("direct-" + lastOrderId));
+                if (terminalOrder.resultCode() != CoreResultCode.ENTITY_NOT_FOUND || terminalOrder.data().length != 0)
+                    throw new IllegalStateException("terminal client identity remains in the runtime index");
+            }
             var response = client.query(CoreMessageType.USER_STATE_QUERY, UUID.randomUUID(), id, new byte[0]);
             var view = CoreStateQueryCodec.decodeUserState(response.data());
             long expectedAssets = product == ProductLine.SPOT ? 2 : 1;
@@ -156,8 +167,17 @@ public class ClusterDirectSettlementBenchmark {
         finally { if (client != null) client.close(); }
     }
     public static void main(String[] args) {
-        if (args.length != 1) throw new IllegalArgumentException("expected product line for snapshot verification");
-        var work = new ClusterDirectSettlementBenchmark(); work.productLine = args[0]; work.connect();
+        if (args.length < 1 || args.length > 2) throw new IllegalArgumentException("expected product line and optional last order ID");
+        var work = new ClusterDirectSettlementBenchmark(); work.productLine = args[0];
+        if (args.length == 2) {
+            long base = Long.parseLong(args[1]) - SYMBOLS * 4L * 20;
+            if (base < 0) throw new IllegalArgumentException("invalid lifecycle last order ID");
+            for (int index = 0; index < SYMBOLS; index++) {
+                work.lastOrderIds[index * 2] = base + (index + 1) * 80L;
+                work.lastOrderIds[index * 2 + 1] = base + index * 80L + 60;
+            }
+        }
+        work.connect();
         work.verifyAndClose();
     }
 }

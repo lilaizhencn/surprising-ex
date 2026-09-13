@@ -1030,8 +1030,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                 lane.removeOrder(orderId);
                 changes.removeOrderRoute(orderId);
                 lane.clientKeysByOrderId.forEach(orderId,
-                        clientKey -> changes.retireClientIdentity(
-                                identities.prepareClientRelease(lane, order.userId(), clientKey)));
+                        clientKey -> identities.releaseClientKeyInLane(lane, order.userId(), clientKey));
                 removeClientOrdersForOrder(lane, order.userId(), orderId);
             });
             changes.positions.forEach((positionKey, position) -> {
@@ -1163,8 +1162,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         final LongHashSet removedOrderRoutes = new LongHashSet();
         /** 待移除的预留路由 ID。 */
         final LongHashSet removedReservationRoutes = new LongHashSet();
-        /** 终态后可释放的客户单号，完成交接后由 owner 回收。 */
-        final ClientIdentityReleaseBuffer retiredClientIdentities = new ClientIdentityReleaseBuffer();
 
         void ensureAdmissionCapacity(int expectedOrders) {
             users.ensureCapacity(1);
@@ -1205,14 +1202,6 @@ public final class TradingRuntimeState implements AutoCloseable {
 
         void removeOrderRoute(long orderId) { removedOrderRoutes.add(orderId); }
         void removeReservationRoute(long orderId) { removedReservationRoutes.add(orderId); }
-        void retireClientIdentity(RuntimeIdentityRegistry.ClientIdentityEntry entry) {
-            retiredClientIdentities.add(entry);
-        }
-
-        void releaseRetiredClientIdentities(RuntimeIdentityRegistry identities) {
-            retiredClientIdentities.release(identities);
-        }
-
         void drainTo(int laneId,
                              LanePublishedMap<UserRuntime> targetUsers,
                              LanePublishedMap<OrderRuntime> targetOrders,
@@ -1325,36 +1314,6 @@ public final class TradingRuntimeState implements AutoCloseable {
             riskSnapshots.clear();
             removedOrderRoutes.clear();
             removedReservationRoutes.clear();
-            retiredClientIdentities.clear();
-        }
-
-        static final class ClientIdentityReleaseBuffer {
-            /** Lane 准备、Owner 消费的既有字典实体引用；替代用户/客户键两套数组。 */
-            RuntimeIdentityRegistry.ClientIdentityEntry[] entries = new RuntimeIdentityRegistry.ClientIdentityEntry[4];
-            /** 当前有效元素数量。 */
-            int size;
-
-            void add(RuntimeIdentityRegistry.ClientIdentityEntry entry) {
-                if (entry == null) return;
-                if (size == entries.length) {
-                    int capacity = Math.multiplyExact(size, 2);
-                    entries = java.util.Arrays.copyOf(entries, capacity);
-                }
-                entries[size++] = entry;
-            }
-
-            void release(RuntimeIdentityRegistry identities) {
-                if (identities == null) return;
-                for (int index = 0; index < size; index++) {
-                    identities.releasePreparedClientKey(entries[index]);
-                }
-                clear();
-            }
-
-            void clear() {
-                java.util.Arrays.fill(entries, 0, size, null);
-                size = 0;
-            }
         }
 
     }
@@ -2005,7 +1964,6 @@ public final class TradingRuntimeState implements AutoCloseable {
                     }
                     changes.laneDeltas[laneId].commitTerminalToOwner(
                             this, laneId, terminalOrderSink, event.plan().coreSequence());
-                    changes.laneDeltas[laneId].releaseRetiredClientIdentities(event.identities());
                     LaneBalancePatches balances = changes.balancePatches[laneId];
                     for (int index = 0; index < balances.size(); index++) {
                         balances.publishAvailableAt(this, index);
@@ -2112,7 +2070,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         try {
             changes.laneDeltas[laneId].commitTerminalToOwner(
                     this, laneId, terminalOrderSink, event.coreSequence());
-            changes.laneDeltas[laneId].releaseRetiredClientIdentities(event.identities());
             LaneBalancePatches balances = changes.balancePatches[laneId];
             for (int index = 0; index < balances.size(); index++) {
                 balances.publishAvailableAt(this, index);
@@ -2136,7 +2093,7 @@ public final class TradingRuntimeState implements AutoCloseable {
     public LaneReplaceEvent dispatchReplace(
             long coreSequence, long userId, long originalOrderId, long[] preCancelOrderIds,
             ResolvedPlaceOrder replacement,
-            java.util.UUID commandId, long requiredReservation, long clientKey, int symbolId, int assetId,
+            java.util.UUID commandId, long requiredReservation, int symbolId, int assetId,
             long commitTimestamp, long commitClusterPosition, RuntimeIdentityRegistry identities) {
         assertOwner();
         if (!accountLanesStarted) throw new IllegalStateException("asynchronous replace requires Account Lanes");
@@ -2148,7 +2105,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         LaneReplaceEvent event = laneReplaceEventPool.pollFirst();
         if (event == null) event = new LaneReplaceEvent();
         event.prepare(coreSequence, userId, originalOrderId, preCancelOrderIds, replacement, commandId,
-                requiredReservation, clientKey, symbolId, assetId, commitTimestamp, commitClusterPosition,
+                requiredReservation, symbolId, assetId, commitTimestamp, commitClusterPosition,
                 laneId, this, identities, changes);
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
                 accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
@@ -2169,10 +2126,10 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (event == null || !event.complete()) throw new IllegalStateException("replace event is incomplete");
         int laneId = event.laneId();
         MatcherSettlementChanges changes = event.takeChanges();
+        event.identities().recordLaneClientAllocations(event.identityAllocations());
         try {
             changes.laneDeltas[laneId].commitTerminalToOwner(
                     this, laneId, terminalOrderSink, event.coreSequence());
-            changes.laneDeltas[laneId].releaseRetiredClientIdentities(event.identities());
             LaneBalancePatches balances = changes.balancePatches[laneId];
             for (int index = 0; index < balances.size(); index++) {
                 balances.publishAvailableAt(this, index);

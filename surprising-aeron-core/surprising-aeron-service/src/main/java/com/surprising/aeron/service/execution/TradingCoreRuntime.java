@@ -1628,11 +1628,6 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 identities.recordLaneClientAllocations(admission.takeIdentityAllocations());
                 RuntimeException rejection = admission.rejection();
                 if (rejection != null) {
-                    if (admission.allocatedClientKey()) {
-                        identities.rollbackPreparedClientKey(
-                                admission.userId(), admission.clientOrderId(),
-                                new RuntimeIdentityRegistry.PreparedClientKey(admission.clientKey(), true));
-                    }
                     CoreResultCode resultCode = rejection instanceof CoreStateRejectedException rejected
                             ? CoreResultCode.fromRejectionCode(rejected.code())
                             : rejection instanceof ArithmeticException

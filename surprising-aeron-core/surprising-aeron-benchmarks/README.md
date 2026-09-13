@@ -189,3 +189,6 @@ Owner 的入口和 Matcher/Lane 完成通知采用声明休眠后重查的合并
 
 
 `ClusterDirectSettlementBenchmark.matcherToLaneLifecycle` 专门覆盖 Matcher→Lane 直接结果：连接外部真实单成员，六产品线分别在128币对、256账户上交替普通单与20项批量，双方开仓后反向平仓。每组交易前更新有效行情；交易命令在64窗口内异步提交。每次调用包含86016订单业务项和2048行情业务项，另报告10240Core消息、43008fills。逐用户逐资产核对余额、冻结、净持仓、预留和活跃订单；其 `main <ProductLine>` 用于Archive快照重启后的同一状态核对。JMH生命周期耗时和带profile分配用于路径诊断，容量使用 `ClusterOperationalBenchmark` 的持续流口径。所有参数、失败轮次、JFR与恢复结论集中记录于根目录 `PERFORMANCE_VALIDATION.md`。
+
+
+`ClusterDirectSettlementBenchmark` 同时验证客户端标识的 Lane 回收：六产品线、128 币对的普通/批量成交后，逐账户按最后一个 clientOrderId 查询运行态索引，核对终态已移除并返回 ENTITY_NOT_FOUND。核对不计入交易业务项。快照重启验证入口可传第二个参数（最后一个订单 ID），按相同生命周期重建待查询标识；标准 wi1/i2 共三次调用为 `258048`。该核对避免只验证余额而遗漏终态标识丢失。

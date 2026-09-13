@@ -402,27 +402,26 @@ final class OrderBatchExecutor {
         long required = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservation(
                 owner.runtimeState, owner.identities, userId, resolved,
                 batchOpenInterestSteps(batch, command.symbol()), batch.admissionOrderIndex, original);
-        var key = owner.identities.prepareClientKey(userId, resolved.clientOrderId());
         int assetId = owner.identities.assetId(resolved.reservationAsset());
         long sequence = batch.sequence;
-        try {
-            owner.runtimeState.dispatchControlLanes(owner.matchingAdapter.topology().accountLaneMask(userId), lane -> {
+        int laneId = owner.runtimeState.topology().accountLaneId(userId);
+        owner.runtimeState.dispatchControlLanes(1L << laneId, ignored -> {
+            var key = owner.identities.prepareClientKeyInCurrentLane(userId, resolved.clientOrderId());
+            try {
                 if (original != 0) RuntimeCommandProcessor.cancelOrder(owner.runtimeState, userId, original);
                 RuntimeCommandProcessor.reserveBatchOrderInLane(owner.runtimeState, userId, resolved,
                         commandId, required, key.key(), assetId, sequence);
-                return null;
-            });
-        } catch (RuntimeException | Error failure) {
-            if (key.allocated()) owner.identities.rollbackPreparedClientKey(userId, resolved.clientOrderId(), key);
-            throw failure;
-        }
-        return () -> {
-            try {
-                if (!owner.runtimeState.pollControlLanes()) return false;
+                return key;
             } catch (RuntimeException | Error failure) {
-                if (key.allocated()) owner.identities.rollbackPreparedClientKey(userId, resolved.clientOrderId(), key);
+                if (key.allocated()) owner.identities.rollbackClientKeyInCurrentLane(userId, resolved.clientOrderId(), key);
                 throw failure;
             }
+        });
+        return () -> {
+            if (!owner.runtimeState.pollControlLanes()) return false;
+            var key = (com.surprising.aeron.service.state.RuntimeIdentityRegistry.PreparedClientKey)
+                    owner.runtimeState.controlLaneResult(laneId);
+            owner.identities.recordLaneClientAllocations(key.newIdentity() ? 1 : 0);
             owner.runtimeState.collectControlReservation(userId, resolved.orderId(), sequence);
             batch.retainPreparedClientKey(userId, resolved.clientOrderId(), key);
             owner.commits.requestCommitPublication();

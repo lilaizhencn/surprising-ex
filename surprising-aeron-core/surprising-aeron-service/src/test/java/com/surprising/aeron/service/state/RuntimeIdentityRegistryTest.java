@@ -33,46 +33,37 @@ class RuntimeIdentityRegistryTest {
     }
 
     @Test
-    void preparedReleasePreservesReferencesAndCannotRemoveRecreatedIdentity() throws Exception {
+    void laneReleaseCompletesWithoutAnOwnerHandoffAndRestoresLiveKeys() {
         var registry = new RuntimeIdentityRegistry();
         long user = 17;
         var lane = new AccountLaneState(LaneTopology.configured(false).accountLaneId(user), 16);
-        var buffer = new TradingRuntimeState.LaneDelta.ClientIdentityReleaseBuffer();
         var first = registry.prepareClientKeyInLane(lane, user, "客户-retired");
         registry.prepareClientKeyInLane(lane, user, "客户-retired");
-        var entry = registry.prepareClientRelease(lane, user, first.key());
-        buffer.add(entry);
-        assertThat(registry.clientIdentityCount()).isEqualTo(1);
-        buffer.release(registry);
+        registry.releaseClientKeyInLane(lane, user, first.key());
         assertThat(registry.findClientKey(user, "客户-retired")).isEqualTo(first.key());
-        assertThat(buffer.entries).containsOnlyNulls();
-        registry.releasePreparedClientKey(entry);
+        registry.releaseClientKeyInLane(lane, user, first.key());
         assertThat(registry.clientIdentityCount()).isZero();
         var recreated = registry.prepareClientKeyInLane(lane, user, "客户-retired");
-        registry.releasePreparedClientKey(entry);
-        assertThat(registry.findClientKey(user, "客户-retired")).isEqualTo(recreated.key());
         var restored = RuntimeIdentityRegistry.restore(registry.snapshot());
-        var restoredEntry = restored.prepareClientRelease(lane, user, recreated.key());
-        restored.releasePreparedClientKey(restoredEntry);
+        restored.releaseClientKeyInLane(lane, user, recreated.key());
         assertThat(restored.clientIdentityCount()).isZero();
         assertThat(registry.clientIdentityCount()).isEqualTo(1);
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> registry.prepareClientRelease(
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> registry.releaseClientKeyInLane(
                 new AccountLaneState(lane.laneId() + 1, 16), user, recreated.key()))
                 .isInstanceOf(IllegalStateException.class);
     }
 
     @Test
-    void clientLookupIsThreadLocalAndReleasePreservesOtherKeysAfterRestore() throws Exception {
+    void clientReadOnlyLookupAndLaneReleasePreserveOtherKeysAfterRestore() throws Exception {
         var original = new RuntimeIdentityRegistry();
         long first = original.clientKey(7, "客户-A");
         long second = original.clientKey(8, "客户-B");
         for (var registry : new RuntimeIdentityRegistry[]{original, RuntimeIdentityRegistry.restore(original.snapshot())}) {
-            var executor = java.util.concurrent.Executors.newFixedThreadPool(2);
+            assertThat(registry.clientOrderId(7, first)).isEqualTo("客户-A");
+            assertThat(registry.clientOrderId(8, second)).isEqualTo("客户-B");
+            var executor = java.util.concurrent.Executors.newSingleThreadExecutor();
             try {
-                var a = executor.submit(() -> { for (int i = 0; i < 10000; i++) assertThat(registry.clientOrderId(7, first)).isEqualTo("客户-A"); });
-                var b = executor.submit(() -> { for (int i = 0; i < 10000; i++) assertThat(registry.clientOrderId(8, second)).isEqualTo("客户-B"); });
-                a.get(5, java.util.concurrent.TimeUnit.SECONDS);
-                b.get(5, java.util.concurrent.TimeUnit.SECONDS);
+                assertThat(executor.submit(() -> registry.clientOrderId(7, first)).get()).isEqualTo("客户-A");
             } finally { executor.shutdownNow(); }
             registry.releaseClientKey(8, first);
             assertThat(registry.findClientKey(7, "客户-A")).isEqualTo(first);

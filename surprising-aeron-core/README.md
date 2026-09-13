@@ -708,3 +708,12 @@ AMEND/REPLACE 的新订单ID接口采用撤旧下新语义：撮合已成功撤�
 - Owner 保留撮合证据链首尾校验、全局提交顺序、Treasury/资金汇总、终态与结果索引、事实发布。批量逐项结果处理从 Owner 移至 Matcher，批次游标仍由 Owner 独占。撤单、替换、触发与风险控制的必要业务续程不因此被取消。
 - `ClusterCommandPipelineTest.matcherPublishesOrdinaryAndBatchFillsToLanesWithoutOwnerDrainingResults` 在六产品线上暂停 Owner drain，证明真实成交可由 Matcher/Lane 独立完成，之后核对串行状态和快照。`MatcherSettlementPlanTest` 验证保守路由标记、失败发布与事件复用；`RuntimeIdentityRegistryTest` 覆盖跨在途输出的身份退休。
 - 性能使用 `ClusterOperationalBenchmark` 的128币对混合/双向成交，以及 `ClusterDirectSettlementBenchmark` 的六产品线开平仓循环；均连接外部真实单成员，完整记录见根目录 `PERFORMANCE_VALIDATION.md`。直接路径不等于 Owner 全部瓶颈已经消除，也不预先承诺30万/s。
+
+
+### 客户端订单标识由账户 Lane 管理（2026-09-13）
+
+`RuntimeIdentityRegistry` 的客户端标识由所属账户 Lane 创建、增加/回滚引用和终态回收；`MatcherSettlementChanges.prepareLaneTerminal` 在已有结算任务内删除终态标识。已删除 `LaneDelta.ClientIdentityReleaseBuffer`、待回收实体交接和 Owner 逐订单回收循环。`LaneReplaceEvent`、批量控制准入及触发子单也在原有 Lane 任务内准备标识，失败在该任务内回滚，不为标识管理增加异步阶段。
+
+Owner 保留撮合前校验及查询所需的只读访问，因此现有 `ConcurrentHashMap` 仍作为并发读取边界；没有增加第二份标识索引，也没有把这些读取同步转发到 Lane。在线写入及引用计数修改归 Lane，独立恢复/同步 API 通过既有 Lane 所有权入口执行。每个字典实体直接保存 userId、字符串引用和引用数，删除重复的 long key 和逐订单 `ClientIdentity` 包装；`ClientIdentity` 仅在快照边界物化。
+
+终态订单携带不可变 `clientOrderId`，Owner 的有序提交和去重墓碑无需依赖已回收的字典实体；运行态终态查询继续返回 ENTITY_NOT_FOUND，Core 不新增历史详情索引。含客户端索引变化的 `RuntimeFactFrame` 在封装时固定字符串引用，新增与删除均保留，异步消费禁止回查活字典。生命周期、资金、快照及性能验证结果只追加根目录 `PERFORMANCE_VALIDATION.md`。

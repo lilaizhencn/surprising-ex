@@ -74,9 +74,17 @@ class ClusterCommandPipelineTest {
                 assertThat(state.laneCommandContexts.required(sequence).hasMatchingCompletion()).isFalse();
                 assertThat(live.responses).isEmpty();
                 assertThat(event.plan().tradeCount()).isPositive();
+                for (int item = 0; item < (batch ? 20 : 1); item++) {
+                    assertThat(state.identities.findClientKey(11, (batch ? "batch-" : "order-") + (1000 + item)))
+                            .as("Lane retires terminal client identity before Owner drains or publishes")
+                            .isNull();
+                }
                 live.tick(); serial.apply(command);
                 assertThat(gate.join()).isTrue();
                 assertThat(live.responses).hasSize(1);
+                assertThat(state.terminalRetention.containsOrder(999_999, 11, (batch ? "batch-" : "order-") + 1000))
+                        .as("ordered publication retains the client ID tombstone after Lane freed the identity")
+                        .isTrue();
                 assertThat(live.hash()).isEqualTo(serial.hash());
                 assertThat(state.tradingState().users()).isEqualTo(serial.service.state().tradingState().users());
                 try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(101))) {

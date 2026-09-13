@@ -26,7 +26,7 @@ public final class LaneReplaceEvent implements SettlementLaneWorker.Command {
     private long originalOrderId;
     private long[] preCancelOrderIds;
     private long requiredReservation;
-    private long clientKey;
+    private long identityAllocations;
     private long commitTimestamp;
     private long commitClusterPosition;
     private int symbolId;
@@ -38,14 +38,14 @@ public final class LaneReplaceEvent implements SettlementLaneWorker.Command {
     LaneReplaceEvent prepare(long sequence, long ownerUserId, long targetOrderId,
                              long[] capacityCancelOrderIds, ResolvedPlaceOrder replacementOrder,
                              UUID replacementCommandId,
-                             long reservationUnits, long replacementClientKey,
+                             long reservationUnits,
                              int replacementSymbolId, int replacementAssetId,
                              long timestamp, long clusterPosition, int ownerLaneId,
                              TradingRuntimeState owner, RuntimeIdentityRegistry identityRegistry,
                              TradingRuntimeState.MatcherSettlementChanges commandChanges) {
         if (sequence <= 0 || ownerUserId <= 0 || targetOrderId <= 0 || capacityCancelOrderIds == null
                 || replacementOrder == null
-                || replacementCommandId == null || reservationUnits <= 0 || replacementClientKey < 0
+                || replacementCommandId == null || reservationUnits <= 0
                 || replacementSymbolId < 0 || replacementAssetId < 0 || timestamp < 0 || clusterPosition < 0
                 || ownerLaneId < 0 || owner == null || identityRegistry == null || commandChanges == null
                 || coreSequence != 0 || completed) {
@@ -58,7 +58,7 @@ public final class LaneReplaceEvent implements SettlementLaneWorker.Command {
         replacement = replacementOrder;
         commandId = replacementCommandId;
         requiredReservation = reservationUnits;
-        clientKey = replacementClientKey;
+        identityAllocations = 0;
         symbolId = replacementSymbolId;
         assetId = replacementAssetId;
         commitTimestamp = timestamp;
@@ -77,6 +77,9 @@ public final class LaneReplaceEvent implements SettlementLaneWorker.Command {
         long startedNanos = System.nanoTime();
         runtime.enterMatcherSettlementScope(lane, changes);
         try {
+            long allocationsBefore = lane.clientIdentityAllocations;
+            long clientKey = identities.prepareClientKeyInLane(lane, userId, replacement.clientOrderId()).key();
+            identityAllocations = lane.clientIdentityAllocations - allocationsBefore;
             for (long orderId : preCancelOrderIds) runtime.cancelOrderInLane(userId, orderId);
             runtime.replaceOrderInLane(lane, userId, originalOrderId, replacement, commandId,
                     requiredReservation, clientKey, symbolId, assetId, coreSequence);
@@ -105,6 +108,8 @@ public final class LaneReplaceEvent implements SettlementLaneWorker.Command {
     public int laneId() { return laneId; }
     public long requiredLaneMask() { return 1L << laneId; }
     public boolean complete() { return (boolean) COMPLETED.getAcquire(this); }
+    long identityAllocations() { return identityAllocations; }
+
     RuntimeIdentityRegistry identities() { return identities; }
 
     TradingRuntimeState.MatcherSettlementChanges takeChanges() {
@@ -128,7 +133,7 @@ public final class LaneReplaceEvent implements SettlementLaneWorker.Command {
         originalOrderId = 0;
         preCancelOrderIds = null;
         requiredReservation = 0;
-        clientKey = 0;
+        identityAllocations = 0;
         commitTimestamp = 0;
         commitClusterPosition = 0;
         symbolId = 0;
@@ -148,7 +153,7 @@ public final class LaneReplaceEvent implements SettlementLaneWorker.Command {
         originalOrderId = 0;
         preCancelOrderIds = null;
         requiredReservation = 0;
-        clientKey = 0;
+        identityAllocations = 0;
         commitTimestamp = 0;
         commitClusterPosition = 0;
         symbolId = 0;

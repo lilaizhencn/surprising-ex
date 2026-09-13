@@ -376,7 +376,7 @@ public final class RuntimeFactFrame implements RuntimeFactView {
             for (ClientIdentityValue value : clients) {
                 if (value.key() == clientKey && value.userId() == userId) return value.clientOrderId();
             }
-            return requireDictionary().clientOrderId(userId, clientKey);
+            throw new IllegalArgumentException("client identity is absent from immutable fact: " + userId + "/" + clientKey);
         }
         @Override public RuntimeIdentityRegistry.PositionIdentity positionIdentity(long positionKey) {
             for (PositionIdentityValue value : positions) if (value.key() == positionKey) return value.identity();
@@ -439,7 +439,8 @@ public final class RuntimeFactFrame implements RuntimeFactView {
                     }
                 }
                 for (ClientOrderChange change : group.clientOrders()) {
-                    if (change.afterOrderId() == null) {
+                    {
+                        // Facts outlive the Lane's client identity; capture additions as well as removals.
                         if (clients == null) clients = new ArrayList<>();
                         ClientOrderKey key = change.key();
                         clients.add(new ClientIdentityValue(key.clientKey(), key.userId(),
