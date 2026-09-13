@@ -50677,3 +50677,8 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - 随后执行服务模块全量回归：`mvn -pl surprising-aeron-core/surprising-aeron-service -am test`，927 项通过，Failures 0、Errors 0、BUILD SUCCESS。测试日志已在记录后删除。
 - 批量清算准入 scratch 化后，`RiskBatchBudgetTest` 与 `ClusterCommandPipelineTest` 定向回归通过；未重新压测，不能据此宣称吞吐或分配率改善。
 - 该改动随后重新执行服务模块全量回归：927 项通过，Failures 0、Errors 0、BUILD SUCCESS；日志已清理。
+
+### 追加证据校验分配收敛
+
+- `MatcherSettlementEvent` 与 `OrderedCommitCoordinator` 的撮合证据检查改用有界循环，删除 Stream/lambda 临时对象；编译及 `MatcherSettlementPlanTest`、`TradingCoreRuntimeTest`、`ClusterCommandPipelineTest` 定向回归通过。
+- 该轮未重新进行吞吐或 JFR 稳态采样，不能把局部分配减少解释为整体性能达标。

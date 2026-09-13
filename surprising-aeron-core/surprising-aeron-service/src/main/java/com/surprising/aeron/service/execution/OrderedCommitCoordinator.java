@@ -935,10 +935,23 @@ final class OrderedCommitCoordinator {
                     && (pending.operation() == PendingMatching.Operation.REPLACE
                     || pending.operation() == PendingMatching.Operation.AMEND)
                     ? pending.admission().originalOrderId() : 0;
-            boolean knownPrefix = (!expected.isEmpty() || replacedOrderId != 0) && result.matcherEvents().stream()
-                    .noneMatch(event -> event.eventType() == MatcherEventType.TRADE)
-                    && result.cancellations().stream().filter(CoreCancellationResult::accepted)
-                    .allMatch(cancel -> expected.contains(cancel.orderId()) || cancel.orderId() == replacedOrderId);
+            boolean containsTrade = false;
+            for (MatcherEvent event : result.matcherEvents()) {
+                if (event.eventType() == MatcherEventType.TRADE) {
+                    containsTrade = true;
+                    break;
+                }
+            }
+            boolean cancellationsValid = true;
+            for (CoreCancellationResult cancellation : result.cancellations()) {
+                long orderId = cancellation.orderId();
+                if (cancellation.accepted() && !expected.contains(orderId) && orderId != replacedOrderId) {
+                    cancellationsValid = false;
+                    break;
+                }
+            }
+            boolean knownPrefix = (!expected.isEmpty() || replacedOrderId != 0)
+                    && !containsTrade && cancellationsValid;
             if (!knownPrefix) return true;
         }
         if (pending.operation() == PendingMatching.Operation.LIQUIDATION

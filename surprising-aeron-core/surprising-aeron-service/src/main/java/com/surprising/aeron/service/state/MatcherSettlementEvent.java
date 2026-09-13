@@ -173,10 +173,17 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
                 || nativeCommand.matcherSequence() <= previous.nativeCommand().matcherSequence())
                 || result.outcome() == com.surprising.aeron.service.matching.CoreMatchingResult.Outcome.FATAL_DIVERGENCE)
             throw new IllegalStateException("direct matcher result proof is inconsistent");
-        if (result.outcome() == com.surprising.aeron.service.matching.CoreMatchingResult.Outcome.KNOWN_PREFIX_APPLIED
-                && (authorizedCancellations.isEmpty() || result.matcherEvents().stream()
-                .anyMatch(value -> value.eventType() == exchange.core2.core.common.MatcherEventType.TRADE)))
-            throw new IllegalStateException("direct matcher returned an unreconciled partial outcome");
+        if (result.outcome() == com.surprising.aeron.service.matching.CoreMatchingResult.Outcome.KNOWN_PREFIX_APPLIED) {
+            boolean containsTrade = false;
+            for (var event : result.matcherEvents()) {
+                if (event.eventType() == exchange.core2.core.common.MatcherEventType.TRADE) {
+                    containsTrade = true;
+                    break;
+                }
+            }
+            if (authorizedCancellations.isEmpty() || containsTrade)
+                throw new IllegalStateException("direct matcher returned an unreconciled partial outcome");
+        }
         batchPlans[index].buildDirect(commitSequence, batchStorage.admittedOrders[index],
                 batchInstruments[index], result, runtime);
         batchPlans[index].preCancellationsFromResult(result.cancellations(), authorizedCancellations);

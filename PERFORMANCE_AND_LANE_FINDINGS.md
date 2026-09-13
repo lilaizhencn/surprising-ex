@@ -766,3 +766,8 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 
 - `validatePendingLiquidationBatch` 删除每个 action 的 scope 字符串拼接、`HashSet<String>` 和装箱变更列表，改为 Owner 独占的用户/symbol scratch 与 primitive 变更集合。
 - user+symbol 冲突仍做精确比较，action 顺序、生命周期门禁和响应结果保持不变；容量只在超过历史峰值时增长，不增加新的业务状态。
+
+### 2026-09-14 撮合证据校验去除 Stream 临时对象
+
+- direct settlement 与 `KNOWN_PREFIX_APPLIED` 证据校验改用有界循环，去掉 `matcherEvents`/取消结果上的 Stream、lambda 和中间迭代器。
+- 校验条件完全保留：成交事件禁止、已接受撤单必须属于预授权集合或改单原单；仅减少 Owner/Matcher 交界处的短命对象。
