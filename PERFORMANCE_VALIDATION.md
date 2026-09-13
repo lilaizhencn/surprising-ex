@@ -50682,3 +50682,8 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 
 - `MatcherSettlementEvent` 与 `OrderedCommitCoordinator` 的撮合证据检查改用有界循环，删除 Stream/lambda 临时对象；编译及 `MatcherSettlementPlanTest`、`TradingCoreRuntimeTest`、`ClusterCommandPipelineTest` 定向回归通过。
 - 该轮未重新进行吞吐或 JFR 稳态采样，不能把局部分配减少解释为整体性能达标。
+
+### 追加短 JMH 回归（58d0fd7d/0ea13d60 后）
+
+- 固定 128 币对、256 在途、4 Lane、1 Matcher、ZGC、UNIFORM、10000 users，1×1s warmup、2×2s measurement、1 fork：终态业务 **20,703.853/s**，终态核心消息 **10,365.388/s**，Lane **17,264.429/s**，Lane settlement **12,956.735/s**，成交 **3,446.155/s**；accepted=terminal，unfinished/error/timeout=0。
+- 该轮只用于正确性和回归观察，测量长度短且单 fork，不能与历史不同口径结果计算收益，也不能证明 30 万+/s 或 p99≤5ms。原始产物记录后已清理。
