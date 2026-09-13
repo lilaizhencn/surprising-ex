@@ -334,7 +334,6 @@ final class OrderBatchExecutor {
                     item.status = result.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
                     item.resultCode = result.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
                     batch.collectChangedOrderIds(item, userId, result);
-                    batch.retainMatchingResult(result);
                 }
                 batch.lastMatchingResult = results.getLast();
                 batch.settlementEvent.publishDirectResults(results);
@@ -648,7 +647,6 @@ final class OrderBatchExecutor {
     void applyCompletedOrderBatchItem(OrderBatchPending batch, PendingMatching pending,
                                               CoreMatchingResult matchingResult) {
         batch.lastMatchingResult = matchingResult;
-        batch.retainMatchingResult(matchingResult);
         OrderBatchItem item = batch.items.get(batch.nextIndex);
         try {
             applyOrderBatchMatcherResult(batch, item, pending, matchingResult);
@@ -711,8 +709,7 @@ final class OrderBatchExecutor {
                 owner.commits.applyMatcherProgress(matchingResult);
             }
             batch.lastMatchingResult = matchingResult;
-            batch.retainMatchingResult(matchingResult);
-            OrderBatchItem item = batch.items.get(batch.nextIndex);
+                OrderBatchItem item = batch.items.get(batch.nextIndex);
             ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
             CoreResultCode resultCode = matchingResult.accepted()
                     ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;

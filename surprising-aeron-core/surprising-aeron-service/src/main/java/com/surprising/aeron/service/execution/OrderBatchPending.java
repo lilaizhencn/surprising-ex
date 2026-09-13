@@ -131,8 +131,6 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     final PrimitiveLongChangeSet itemChangedOrderIds;
     /** 需要在安全结算阶段撤销的订单 ID。 */
     final PrimitiveLongChangeSet deferredCancellationOrderIds;
-    /** 本批保留的撮合结果，终态清理时释放。 */
-    final List<com.surprising.aeron.service.matching.CoreMatchingResult> matchingResults;
     /** 等待统一派发结算的订单 ID，按批量项顺序排列。 */
     final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList
             deferredSettlementOrderIds = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList();
@@ -267,7 +265,6 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         runtimeChangedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
         itemChangedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
         deferredCancellationOrderIds = new PrimitiveLongChangeSet(capacity);
-        matchingResults = new ArrayList<>(capacity);
         deferredSettlementMatchingResults = new ArrayList<>(capacity);
         pipelinedMatchingResults = new ArrayList<>(capacity);
         preparedClientKeys = new ArrayList<>(capacity);
@@ -322,7 +319,6 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         runtimeChangedOrderIds.clear();
         itemChangedOrderIds.clear();
         deferredCancellationOrderIds.clear();
-        matchingResults.clear();
         deferredSettlementOrderIds.clear();
         deferredSettlementExpectedLaneMasks.clear();
         deferredSettlementMatchingResults.clear();
@@ -366,14 +362,6 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         clusterTimestamp = 0;
         clusterPosition = 0;
         operation = null;
-    }
-
-    void retainMatchingResult(
-            com.surprising.aeron.service.matching.CoreMatchingResult result) {
-        if (result == null || result.nativeCommand().coreSequence() != sequence) {
-            throw new IllegalArgumentException("invalid order batch matcher result");
-        }
-        matchingResults.add(result);
     }
 
     void mergeTreasuryDelta(
