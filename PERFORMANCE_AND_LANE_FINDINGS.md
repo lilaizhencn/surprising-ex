@@ -761,3 +761,8 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - `CommandResultBuilder` 的批量订单响应现在复用 Owner 独占的 primitive 去重集合和视图缓冲；稳定响应仍在边界用 `List.copyOf` 固化，不把可变缓冲暴露给下游。
 - REPLACE/AMEND 的双订单响应增加无-varargs入口，避免每次为两个订单 ID 创建临时 `long[]`。
 - 该修改不改变响应顺序、重复订单去重、快照或重放语义；编译及 `TradingCoreRuntimeTest`、`ClusterCommandPipelineTest` 通过。
+
+### 2026-09-14 批量清算准入 scratch 化
+
+- `validatePendingLiquidationBatch` 删除每个 action 的 scope 字符串拼接、`HashSet<String>` 和装箱变更列表，改为 Owner 独占的用户/symbol scratch 与 primitive 变更集合。
+- user+symbol 冲突仍做精确比较，action 顺序、生命周期门禁和响应结果保持不变；容量只在超过历史峰值时增长，不增加新的业务状态。

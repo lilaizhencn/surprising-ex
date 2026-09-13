@@ -25,7 +25,6 @@ import com.surprising.aeron.service.state.model.CoreLiquidationState;
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 
@@ -44,6 +43,13 @@ final class MatchingCommandAdmission {
 
     /** 由触发等业务产生、等待正式登记的撮合命令。 */
     final List<QueuedTriggerMatching> queuedMatching = new ArrayList<>();
+
+    /** 批量清算校验的复用 scope scratch；Owner 独占，避免每项拼接字符串和 HashSet 节点。 */
+    private long[] batchScopeUsers = new long[8];
+    private String[] batchScopeSymbols = new String[8];
+    private int batchScopeCount;
+    private final PrimitiveLongChangeSet batchChangedUsers = new PrimitiveLongChangeSet();
+    private final PrimitiveLongChangeSet batchChangedOrders = new PrimitiveLongChangeSet();
 
     /** 在释放 Lane 访问权前绑定已冻结的子订单；仅存活到登记 PendingMatching，不建立第二份订单索引。 */
     record QueuedTriggerMatching(CoreMessage command, CoreMatchingOrder order) { }
@@ -567,9 +573,9 @@ final class MatchingCommandAdmission {
                 throw new CoreStateRejectedException("INVALID_COMMAND", "risk scan cursor does not match state");
             }
         }
-        java.util.HashSet<String> scopes = new java.util.HashSet<>();
-        List<Long> changedUsers = new ArrayList<>();
-        List<Long> changedOrders = new ArrayList<>();
+        batchScopeCount = 0;
+        batchChangedUsers.clear();
+        batchChangedOrders.clear();
         int remaining = command.maxCancelOrders();
         for (var action : command.actions()) {
             var liquidation = owner.runtimeState.liquidation(action.liquidationId());
@@ -590,23 +596,34 @@ final class MatchingCommandAdmission {
                 throw new CoreStateRejectedException("LIQUIDATION_CURSOR_CONFLICT",
                         "liquidation batch cursor does not match state");
             }
-            if (!scopes.add(liquidation.userId() + "\u0000" + owner.runtimeLiquidationSymbol(liquidation))) {
-                throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS",
-                        "liquidation batch contains overlapping scopes");
+            String liquidationSymbol = owner.runtimeLiquidationSymbol(liquidation);
+            for (int scopeIndex = 0; scopeIndex < batchScopeCount; scopeIndex++) {
+                if (batchScopeUsers[scopeIndex] == liquidation.userId()
+                        && batchScopeSymbols[scopeIndex].equals(liquidationSymbol)) {
+                    throw new CoreStateRejectedException("LIFECYCLE_IN_PROGRESS",
+                            "liquidation batch contains overlapping scopes");
+                }
             }
+            if (batchScopeCount == batchScopeUsers.length) {
+                int capacity = Math.multiplyExact(batchScopeUsers.length, 2);
+                batchScopeUsers = java.util.Arrays.copyOf(batchScopeUsers, capacity);
+                batchScopeSymbols = java.util.Arrays.copyOf(batchScopeSymbols, capacity);
+            }
+            batchScopeUsers[batchScopeCount] = liquidation.userId();
+            batchScopeSymbols[batchScopeCount++] = liquidationSymbol;
             ensureLifecycleScopeAvailable(new LifecycleScope(false, liquidation.userId(),
-                    owner.runtimeLiquidationSymbol(liquidation),
+                    liquidationSymbol,
                     liquidation.liquidationId(), true, false));
-            changedUsers.add(liquidation.userId());
+            batchChangedUsers.add(liquidation.userId());
             if (remaining > 0) {
-                TradingCoreRuntime.LifecycleOrderChunk chunk = owner.lifecycleOrders(liquidation.userId(), owner.runtimeLiquidationSymbol(liquidation),
+                TradingCoreRuntime.LifecycleOrderChunk chunk = owner.lifecycleOrders(liquidation.userId(), liquidationSymbol,
                         action.cursorOrderId(), remaining);
-                changedOrders.addAll(chunk.orders().stream().mapToLong(CoreOrderState::orderId).boxed().toList());
+                for (CoreOrderState order : chunk.orders()) batchChangedOrders.add(order.orderId());
                 remaining -= chunk.orders().size();
             }
         }
-        owner.resultBuilder.commandChangedUserIds = changedUsers.stream().distinct().toList();
-        owner.resultBuilder.commandChangedOrderIds = changedOrders.stream().distinct().toList();
+        owner.resultBuilder.commandChangedUserIds = batchChangedUsers.toImmutableList();
+        owner.resultBuilder.commandChangedOrderIds = batchChangedOrders.toImmutableList();
     }
 
     void validatePendingSettlement(DecodedMatchingCommand decodedCommand) {
