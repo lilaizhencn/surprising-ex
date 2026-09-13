@@ -50769,3 +50769,10 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - 修改范围：`TradingCoreRuntime`、`OrderedCommitCoordinator`、`MatchingCommandAdmission`、`CommandResultBuilder`、`CommandResultLedger`、`RealtimeReadCoordinator`。
 - `mvn -q -pl surprising-aeron-core/surprising-aeron-service -am -DskipTests package` 通过；随后 service 全量 **929 tests，0 failures，0 errors，0 skipped**。
 - 本次没有执行新的吞吐/JFR/GCP轮次；不能把空响应单例修复解释为整体分配率、30万+/s或普通单 p99≤5ms 已达标。
+
+
+### 2026-09-14 订单变更集合实验回归
+
+- 订单 ID primitive 直写实验在完整回归中触发独立窗口 Lane context 错误，已撤回；撤回后 service 全量 **929 tests，0 failures，0 errors，0 skipped**。
+- 独立满窗口用例单独重跑六产品线通过；此前完整回归中的相同错误不再出现。
+- 该实验没有进入提交，也没有产生可用于吞吐/分配率结论的性能数据。

@@ -826,3 +826,10 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - Owner 拒绝、幂等冲突、Matcher 拒绝、结果未知、响应构建失败和实时快照不可用等无载荷分支统一复用 `TradingCoreRuntime.EMPTY_RESPONSE_DATA`，结果账本对该不可变数组跳过防御性复制。
 - 不改变非空响应的所有权：正常编码结果仍由账本按既有 owned/clone 规则保存；只消除空 `byte[]` 的短命分配。
 - 该项不触碰有序提交、Lane 写入或撮合证据边界；服务全量回归作为本次变更门禁。
+
+
+### 2026-09-14 订单变更 primitive 直写方案保留边界
+
+- 尝试让 PLACE/TRIGGER 直接把 settlement plan 订单 ID 写入 Owner primitive 集合，删除 `long[] + ImmutableLongArrayList` 中间结果；完整 929 项回归在独立满窗口场景复现 `incomplete lane command context`。
+- 原因是该集合同时参与挂起/恢复的提交上下文生命周期，不能只按“最终列表等价”判断；该改动已完整撤回，保留原有 `commandChangedOrderIds` 交接协议。
+- 结论：订单变更列表的下一步优化必须先把上下文所有权和 plan 生命周期显式拆开，再做零拷贝；当前版本以正确性优先。
