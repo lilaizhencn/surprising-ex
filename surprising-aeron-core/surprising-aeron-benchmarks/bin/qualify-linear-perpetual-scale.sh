@@ -190,18 +190,18 @@ run_probe_case() {
 
 run_probe_matrix() {
   : > "${ARTIFACT_DIR}/scale-matrix.jsonl"
-  run_probe_case symbols-u10000-s512 \
-    10000 512 512 1 3 UNIFORM 1 4 "${LIFECYCLE_SYMBOL_BUDGET}"
-  run_probe_case density-u10000-s512-p5-o10 \
-    10000 512 512 5 10 UNIFORM 1 4 "${LIFECYCLE_SYMBOL_BUDGET}"
-  run_probe_case traffic-u10000-s512-pareto \
-    10000 512 512 1 3 PARETO_80_20 5 4 "${LIFECYCLE_SYMBOL_BUDGET}"
-  run_probe_case traffic-u10000-s512-hot \
-    10000 512 512 1 3 SINGLE_HOT 1 4 "${LIFECYCLE_SYMBOL_BUDGET}"
-  run_probe_case traffic-u10000-s512-storm \
-    10000 512 512 1 3 MARK_PRICE_STORM 1 4 "${LIFECYCLE_SYMBOL_BUDGET}"
-  run_probe_case full-sweep-u10000-s512 \
-    10000 512 512 1 3 UNIFORM 1 4 512
+  run_probe_case symbols-u10000-s128 \
+    10000 128 128 1 3 UNIFORM 1 4 "${LIFECYCLE_SYMBOL_BUDGET}"
+  run_probe_case density-u10000-s128-p5-o10 \
+    10000 128 128 5 10 UNIFORM 1 4 "${LIFECYCLE_SYMBOL_BUDGET}"
+  run_probe_case traffic-u10000-s128-pareto \
+    10000 128 128 1 3 PARETO_80_20 5 4 "${LIFECYCLE_SYMBOL_BUDGET}"
+  run_probe_case traffic-u10000-s128-hot \
+    10000 128 128 1 3 SINGLE_HOT 1 4 "${LIFECYCLE_SYMBOL_BUDGET}"
+  run_probe_case traffic-u10000-s128-storm \
+    10000 128 128 1 3 MARK_PRICE_STORM 1 4 "${LIFECYCLE_SYMBOL_BUDGET}"
+  run_probe_case full-sweep-u10000-s128 \
+    10000 128 128 1 3 UNIFORM 1 4 128
   jq -s '.' "${ARTIFACT_DIR}/scale-matrix.jsonl" > "${ARTIFACT_DIR}/scale-matrix.json"
 }
 
@@ -223,7 +223,7 @@ validate_saturation_jmh() {
   local result="$1"
   validate_jmh "${result}"
   jq -e 'length == 1 and all(.[ ];
-    .params.activeUsers == "10000" and .params.activeSymbols == "512" and
+    .params.activeUsers == "10000" and .params.activeSymbols == "128" and
     .params.maxInFlight == "256" and .params.operationsPerInvocation == "16384" and
     .params.targetOperationsPerSecond == "100000" and
     .secondaryMetrics.matchingWindowSamples.score > 0 and
@@ -251,17 +251,17 @@ run_jmh_case() {
 }
 
 run_jmh_matrix() {
-  run_jmh_case uniform-512 10000 512 512 1 3 UNIFORM 1
-  run_jmh_case pareto-512 10000 512 512 1 3 PARETO_80_20 5
-  run_jmh_case storm-512 10000 512 512 1 3 MARK_PRICE_STORM 1
-  run_jmh_case density-512 10000 512 512 5 10 UNIFORM 1
-  run_jmh_case full-sweep-512 10000 512 512 1 3 UNIFORM 1 512
+  run_jmh_case uniform-128 10000 128 128 1 3 UNIFORM 1
+  run_jmh_case pareto-128 10000 128 128 1 3 PARETO_80_20 5
+  run_jmh_case storm-128 10000 128 128 1 3 MARK_PRICE_STORM 1
+  run_jmh_case density-128 10000 128 128 5 10 UNIFORM 1
+  run_jmh_case full-sweep-128 10000 128 128 1 3 UNIFORM 1 128
   jq -s 'add' "${ARTIFACT_DIR}"/jmh-*.json > "${ARTIFACT_DIR}/scale-jmh.json"
 }
 
 run_gc() {
   "${JAVA}" -jar "${JAR}" 'LinearPerpetualCoreBenchmark.scaleMixedWorkload' \
-    -p accountLanes=4 -p activeUsers=10000 -p listedSymbols=512 -p activeSymbols=512 \
+    -p accountLanes=4 -p activeUsers=10000 -p listedSymbols=128 -p activeSymbols=128 \
     -p maxPositionsPerUser=5 -p maxOpenOrdersPerUser=10 -p trafficProfile=UNIFORM \
     -p hftRounds=1 -p hftBatchSize=4 -p lifecycleSymbolsPerRun="${LIFECYCLE_SYMBOL_BUDGET}" \
     -wi 2 -w 2s -i 3 -r 3s -f 1 -prof gc \
@@ -282,7 +282,7 @@ run_profile() {
     "-Xlog:gc*,safepoint:file=${ARTIFACT_DIR}/scale-profile-gc.log:time,uptime,level,tags"
   )
   "${JAVA}" "${profile_jvm_args[@]}" -jar "${JAR}" 'LinearPerpetualCoreBenchmark.scaleMixedWorkload' \
-    -p accountLanes=4 -p activeUsers=10000 -p listedSymbols=512 -p activeSymbols=512 \
+    -p accountLanes=4 -p activeUsers=10000 -p listedSymbols=128 -p activeSymbols=128 \
     -p maxPositionsPerUser=5 -p maxOpenOrdersPerUser=10 -p trafficProfile=UNIFORM \
     -p hftRounds=1 -p hftBatchSize=4 -p lifecycleSymbolsPerRun="${LIFECYCLE_SYMBOL_BUDGET}" \
     -wi 2 -w 2s -i 1 -r 10s -f 0 \
@@ -318,7 +318,7 @@ run_soak() {
   )
   "${JAVA}" "${soak_jvm_args[@]}" -cp "${JAR}" \
     com.surprising.aeron.service.execution.LinearPerpetualScaleSoakMain \
-    10000 512 512 5 10 UNIFORM 1 4 "${LIFECYCLE_SYMBOL_BUDGET}" \
+    10000 128 128 5 10 UNIFORM 1 4 "${LIFECYCLE_SYMBOL_BUDGET}" \
     "${SOAK_SECONDS}" "${SOAK_SAMPLE_SECONDS}" \
     > "${ARTIFACT_DIR}/scale-soak.jsonl" 2> "${ARTIFACT_DIR}/scale-soak.stderr.log" &
   local soak_pid=$!
@@ -341,7 +341,7 @@ run_soak() {
   sed -n '1,240p' "${ARTIFACT_DIR}/scale-soak.jsonl"
   tail -n 1 "${ARTIFACT_DIR}/scale-soak.jsonl" | jq -e \
     '.type == "summary" and .status == "PASS" and .fundsInvariant == true
-      and .terminalBusinessOperations > 0 and .listedSymbols == 512
+      and .terminalBusinessOperations > 0 and .listedSymbols == 128
       and .postGcSamples >= 3
       and .postGcLiveSetSlopeBytesPerSec <= .leakThresholds.liveSetBytesPerSec
       and .postGcOldGenerationSlopeBytesPerSec <= .leakThresholds.liveSetBytesPerSec
@@ -363,9 +363,9 @@ run_soak() {
 
 run_capacity() {
   : > "${ARTIFACT_DIR}/scale-matrix.jsonl"
-  run_probe_case density-extreme-u10000-s512-p20-o100 \
-    10000 512 512 20 100 UNIFORM 1 4 "${LIFECYCLE_SYMBOL_BUDGET}"
-  run_jmh_case density-extreme-512 10000 512 512 20 100 UNIFORM 1
+  run_probe_case density-extreme-u10000-s128-p20-o100 \
+    10000 128 128 20 100 UNIFORM 1 4 "${LIFECYCLE_SYMBOL_BUDGET}"
+  run_jmh_case density-extreme-128 10000 128 128 20 100 UNIFORM 1
 }
 
 run_saturation_case() {
@@ -374,7 +374,7 @@ run_saturation_case() {
   local result="${ARTIFACT_DIR}/saturation-${case_id}.json"
   local saturation_args="${JVM_ARGS_STRING} -Dsurprising.benchmark.export-ack-interval=1024"
   "${JAVA}" -jar "${JAR}" 'LinearPerpetualCoreBenchmark.saturatedMatchingWorkload' \
-    -p accountLanes=4 -p activeUsers=10000 -p listedSymbols=512 -p activeSymbols=512 \
+    -p accountLanes=4 -p activeUsers=10000 -p listedSymbols=128 -p activeSymbols=128 \
     -p matchingEngines="${MATCHING_ENGINES}" \
     -p maxPositionsPerUser=5 -p maxOpenOrdersPerUser=10 \
     -p maxInFlight="${in_flight}" -p operationsPerInvocation="${SATURATION_OPERATIONS}" \
@@ -398,7 +398,7 @@ run_saturation_profile() {
     "-Xlog:gc*,safepoint:file=${ARTIFACT_DIR}/saturation-gc.log:time,uptime,level,tags"
   )
   "${JAVA}" "${profile_jvm_args[@]}" -jar "${JAR}" 'LinearPerpetualCoreBenchmark.saturatedMatchingWorkload' \
-    -p accountLanes=4 -p activeUsers=10000 -p listedSymbols=512 -p activeSymbols=512 \
+    -p accountLanes=4 -p activeUsers=10000 -p listedSymbols=128 -p activeSymbols=128 \
     -p matchingEngines="${MATCHING_ENGINES}" \
     -p maxPositionsPerUser=5 -p maxOpenOrdersPerUser=10 \
     -p maxInFlight=256 -p operationsPerInvocation="${SATURATION_OPERATIONS}" \
@@ -431,7 +431,7 @@ validate_owner_commit_jmh() {
   jq -e 'length == 6 and all(.[ ];
     .primaryMetric.score > 0 and
     .params.activeUsers == "10000" and
-    .params.listedSymbols == "512" and
+    .params.listedSymbols == "128" and
     .params.accountLanes == "4" and
     .params.positionsPerUser == "5" and
     .params.ordersPerUser == "10" and
@@ -463,7 +463,7 @@ validate_owner_commit_jmh() {
 run_owner_commit() {
   local benchmark='OwnerFactFrameBenchmark.*'
   local params=(
-    -p activeUsers=10000 -p listedSymbols=512 -p accountLanes=4
+    -p activeUsers=10000 -p listedSymbols=128 -p accountLanes=4
     -p positionsPerUser=5 -p ordersPerUser=10 -p maxInFlight=256
     -p operationsPerInvocation=16384 -p targetOperationsPerSecond=100000
   )

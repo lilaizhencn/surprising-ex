@@ -683,3 +683,8 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - 这不是整体分配率已达标的证据。`OrderRuntime`、发布缓冲及 Owner 有序提交仍需 JFR 稳态栈验证；30万+/s 和普通单 p99≤5ms 仍不能宣称完成。
 
 - 进一步将候选观察的临时键改为仅在首次插入时创建；终态状态未变化时不再替换候选记录。定向回归扩大为 254 项（含依赖模块）通过。
+
+### 2026-09-14 压测脚本口径统一
+
+- 发现 `qualify-linear-perpetual-scale.sh` 仍默认使用 512 个 listed/active symbols，和后续固定 128 币对的验收约定冲突；已统一 probe、JMH、GC、JFR、soak、capacity、saturation、owner commit 及 JSON 校验为 128。
+- `maxInFlight=256`、操作批次、JFR/NMT、ZGC 和校验门禁未改变；脚本语法检查通过。此前历史结果不改写，后续新轮次才使用该口径。
