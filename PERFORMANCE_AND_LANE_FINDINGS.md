@@ -833,3 +833,10 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - 尝试让 PLACE/TRIGGER 直接把 settlement plan 订单 ID 写入 Owner primitive 集合，删除 `long[] + ImmutableLongArrayList` 中间结果；完整 929 项回归在独立满窗口场景复现 `incomplete lane command context`。
 - 原因是该集合同时参与挂起/恢复的提交上下文生命周期，不能只按“最终列表等价”判断；该改动已完整撤回，保留原有 `commandChangedOrderIds` 交接协议。
 - 结论：订单变更列表的下一步优化必须先把上下文所有权和 plan 生命周期显式拆开，再做零拷贝；当前版本以正确性优先。
+
+
+### 2026-09-14 单订单结果编码与 Matcher 回调复用
+
+- 普通成交响应只有一个订单视图时，协议层新增 `encodeSingleOrder`，直接写入既有 wire 字段；避免临时 singleton `List`，多订单和带扩展执行结果仍走通用编码器。
+- Owner 的 Matcher completion consumer 改为运行时实例级复用，不在每轮 drain 重新构造 method-reference 适配器。
+- 单订单优化不改变结果账本、Lane context 或响应字节格式；协议等价测试逐字节校验。

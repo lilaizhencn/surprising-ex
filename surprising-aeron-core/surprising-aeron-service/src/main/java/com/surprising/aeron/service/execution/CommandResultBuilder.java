@@ -209,6 +209,12 @@ final class CommandResultBuilder {
             return EMPTY_RESULT;
         }
         try {
+            if (commandOrderViews.size() == 1) {
+                return CoreCommandResultCodec.encodeSingleOrder(
+                        pending.sequence(), pending.command().header().commandId(),
+                        nativeCommand.orderId(), nativeCommand.instrumentChangeId(), nativeCommand.matcherSequence(),
+                        matcherPrefix.before(), matcherPrefix.after(), commandOrderViews.get(0));
+            }
             return CoreCommandResultCodec.encode(
                     pending.sequence(), pending.command().header().commandId(),
                     nativeCommand.orderId(), nativeCommand.instrumentChangeId(), nativeCommand.matcherSequence(),

@@ -226,6 +226,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
     final LaneCommandContextRing laneCommandContexts;
     /** 撮合派发和完成通知通道；只在完成边界交接数据。 */
     final MatcherPipelineGroup matcherPipeline;
+    /** Reused Owner callback for matcher drains; avoids rebuilding a method-reference adapter per poll. */
+    private final MatcherPipelineGroup.MatchingCompletionConsumer matchingCompletionConsumer =
+            this::publishMatchingCompletion;
 
     /** 真实撮合器适配器；命令经 matcher 队列推进。 */
     final DeterministicExchangeCoreAdapter matchingAdapter;
@@ -2135,7 +2138,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (placeAdmissionReadyShardMask != 0 || runtimeState.hasPlaceAdmissionNotifications())
             progressPlaceAdmissions();
         if (matcherPipeline.hasMatchingCompletions())
-            matcherPipeline.drainMatchingCompletions(this::publishMatchingCompletion);
+            matcherPipeline.drainMatchingCompletions(matchingCompletionConsumer);
         if (runtimeState.hasSettlementNotifications()) commits.drainMatcherSettlementCompletions();
     }
 

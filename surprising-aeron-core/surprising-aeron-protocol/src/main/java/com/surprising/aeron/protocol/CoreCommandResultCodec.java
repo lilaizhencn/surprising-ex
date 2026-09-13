@@ -65,6 +65,39 @@ public final class CoreCommandResultCodec {
         return buffer.array();
     }
 
+    /**
+     * Hot path for the usual single-order response. It keeps the response
+     * format identical to the list overload without allocating a singleton List.
+     */
+    public static byte[] encodeSingleOrder(long coreSequence, UUID commandId, long orderId,
+                                           long instrumentChangeId, long matcherSequence,
+                                           long matcherPrefixBefore, long matcherPrefixAfter,
+                                           CoreOrderStateView order) {
+        if (commandId == null || order == null) {
+            throw new IllegalArgumentException("command result fields are required");
+        }
+        int orderStateLength = CoreStateQueryCodec.encodedOrderStateLength(order);
+        int ordersLength = Math.addExact(Integer.BYTES * 2, orderStateLength);
+        int length = Math.addExact(Math.addExact(Integer.BYTES + IDENTITY_LENGTH, Integer.BYTES), ordersLength);
+        length = Math.addExact(length, Integer.BYTES);
+        ByteBuffer buffer = ByteBuffer.allocate(length).order(ByteOrder.LITTLE_ENDIAN);
+        buffer.putInt(VERSION);
+        buffer.putLong(coreSequence);
+        buffer.putLong(commandId.getMostSignificantBits());
+        buffer.putLong(commandId.getLeastSignificantBits());
+        buffer.putLong(orderId);
+        buffer.putLong(instrumentChangeId);
+        buffer.putLong(matcherSequence);
+        buffer.putLong(matcherPrefixBefore);
+        buffer.putLong(matcherPrefixAfter);
+        buffer.putInt(ordersLength);
+        buffer.putInt(1);
+        buffer.putInt(1);
+        CoreStateQueryCodec.writeOrderState(buffer, order);
+        buffer.putInt(0);
+        return buffer.array();
+    }
+
     public static CoreCommandResultView decode(byte[] encoded) {
         if (encoded == null) {
             throw new ProtocolException("command result is required");

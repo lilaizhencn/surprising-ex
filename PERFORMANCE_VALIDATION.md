@@ -50776,3 +50776,11 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - 订单 ID primitive 直写实验在完整回归中触发独立窗口 Lane context 错误，已撤回；撤回后 service 全量 **929 tests，0 failures，0 errors，0 skipped**。
 - 独立满窗口用例单独重跑六产品线通过；此前完整回归中的相同错误不再出现。
 - 该实验没有进入提交，也没有产生可用于吞吐/分配率结论的性能数据。
+
+
+### 2026-09-14 单订单结果编码回归
+
+- 新增 `CoreCommandResultCodecTest.singleOrderEncodingMatchesListEncoding`，专用编码与通用列表编码逐字节一致，并成功解码。
+- HotSpot JDK 25 下编译、协议测试、`ClusterCommandPipelineTest`、`TradingCoreRuntimeTest` 和独立满窗口六产品线回归通过。
+- 完整 service 回归最终结果：**929 tests，0 failures，0 errors，0 skipped**。期间一次完整轮命中既有 Aeron 独立窗口时序抖动，重跑后通过；该抖动堆栈未指向本次编码改动。
+- 本次没有新增 JMH/JFR/GCP 数据，不能把 singleton List 消除解释为整体吞吐或 p99 达标。
