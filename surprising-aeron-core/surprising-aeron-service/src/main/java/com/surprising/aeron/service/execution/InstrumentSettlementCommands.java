@@ -18,7 +18,7 @@ final class InstrumentSettlementCommands {
         var progress = owner.runtimeLifecycleProgress(command.symbol());
         TradingCoreRuntime.LifecycleOrderChunk chunk = owner.lifecycleOrders(0, command.symbol(), command.cursorOrderId(), command.maxOrders());
         if (progress == null || !progress.ordersComplete()) {
-            owner.resultBuilder.commandChangedOrderIds = chunk.orders().stream().mapToLong(CoreOrderState::orderId).boxed().toList();
+            owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(chunk.orders());
             owner.resultBuilder.commandChangedUserIds = chunk.orders().stream().map(CoreOrderState::userId).distinct().toList();
             if (!chunk.more()) {
                 owner.resultBuilder.commandChangedUserIds = TradingCoreRuntime.appendDistinct(owner.resultBuilder.commandChangedUserIds,

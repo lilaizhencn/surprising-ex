@@ -349,7 +349,7 @@ final class OrderedCommitCoordinator {
                             : owner.lifecycleOrders(liquidation.userId(), owner.runtimeLiquidationSymbol(liquidation),
                             command.cursorOrderId(),
                             command.maxOrders());
-                    owner.resultBuilder.commandChangedOrderIds = chunk.orders().stream().mapToLong(CoreOrderState::orderId).boxed().toList();
+                    owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(chunk.orders());
                     owner.resultBuilder.commandChangedUserIds = liquidation == null ? List.of() : List.of(liquidation.userId());
                     if (matchingResult.accepted() && liquidation != null) {
                         boolean executable = com.surprising.aeron.service.state.RuntimeLiquidationQueryService

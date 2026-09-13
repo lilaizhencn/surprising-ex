@@ -2913,8 +2913,17 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     static List<Long> boxedOrderIds(
             com.surprising.aeron.service.state.MatcherSettlementPlan plan) {
+        if (plan == null || plan.orderCount() == 0) return List.of();
         long[] values = new long[plan.orderCount()];
         for (int index = 0; index < values.length; index++) values[index] = plan.orderId(index);
+        return ImmutableLongArrayList.takeOwnership(values);
+    }
+
+    /** Collect lifecycle order identities without creating boxed Long elements. */
+    static List<Long> boxedOrderIds(List<? extends CoreOrderState> orders) {
+        if (orders == null || orders.isEmpty()) return List.of();
+        long[] values = new long[orders.size()];
+        for (int index = 0; index < values.length; index++) values[index] = orders.get(index).orderId();
         return ImmutableLongArrayList.takeOwnership(values);
     }
 

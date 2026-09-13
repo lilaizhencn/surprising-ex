@@ -553,7 +553,7 @@ final class MatchingCommandAdmission {
         owner.resultBuilder.commandChangedUserIds = List.of(liquidation.userId());
         TradingCoreRuntime.LifecycleOrderChunk chunk = owner.lifecycleOrders(liquidation.userId(), owner.runtimeLiquidationSymbol(liquidation),
                 command.cursorOrderId(), command.maxOrders());
-        owner.resultBuilder.commandChangedOrderIds = chunk.orders().stream().mapToLong(CoreOrderState::orderId).boxed().toList();
+        owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(chunk.orders());
     }
 
     void validatePendingLiquidationBatch(DecodedMatchingCommand decodedCommand) {
@@ -651,12 +651,12 @@ final class MatchingCommandAdmission {
         TradingCoreRuntime.LifecycleOrderChunk orderChunk = owner.lifecycleOrders(0, command.symbol(), command.cursorOrderId(), command.maxOrders());
         boolean orderPhase = progress == null || !progress.ordersComplete();
         if (orderPhase && !orderChunk.more()) {
-            owner.resultBuilder.commandChangedOrderIds = orderChunk.orders().stream().mapToLong(CoreOrderState::orderId).boxed().toList();
+            owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(orderChunk.orders());
             owner.resultBuilder.commandChangedUserIds = orderChunk.orders().stream().map(CoreOrderState::userId).distinct().toList();
             owner.resultBuilder.commandChangedUserIds = TradingCoreRuntime.appendDistinct(owner.resultBuilder.commandChangedUserIds,
                     owner.instrumentSettlement.settlementUsers(command.symbol(), command.cursorUserId(), command.maxUsers()));
         } else if (orderPhase) {
-            owner.resultBuilder.commandChangedOrderIds = orderChunk.orders().stream().mapToLong(CoreOrderState::orderId).boxed().toList();
+            owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(orderChunk.orders());
             owner.resultBuilder.commandChangedUserIds = orderChunk.orders().stream().map(CoreOrderState::userId).distinct().toList();
         } else {
             owner.resultBuilder.commandChangedOrderIds = List.of();
