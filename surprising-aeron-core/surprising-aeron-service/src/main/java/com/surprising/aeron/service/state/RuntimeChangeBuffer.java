@@ -193,6 +193,9 @@ class RuntimeChangeBuffer<V> {
     }
 
     int indexOf(long key) {
+        // Empty buffers are the common first-write state. Avoid hashing and probing
+        // the retained index before there can be a matching key.
+        if (size == 0) return -1;
         int mask = indexSlots.length - 1;
         int position = LaneLongCaptures.longHash(key) & mask;
         while (indexGenerations[position] == indexGeneration) {

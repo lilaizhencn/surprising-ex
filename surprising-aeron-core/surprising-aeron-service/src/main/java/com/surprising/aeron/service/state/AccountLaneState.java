@@ -83,6 +83,9 @@ public final class AccountLaneState {
     private long committedSequence;
     private long localStateHash = 0xcbf29ce484222325L;
     private long localFundsHash = 0xcbf29ce484222325L;
+    /** Hashes are rebuilt on the lane owner; retain sort buffers across commits. */
+    private long[] hashLongScratch = new long[16];
+    private int[] hashIntScratch = new int[16];
     private long matcherSettlementOperations;
     private long matcherSettlementLatencyNanos;
     private long matcherSettlementMaxLatencyNanos;
@@ -607,9 +610,13 @@ public final class AccountLaneState {
 
     private long computeStateHash() {
         long hash = mix(0xcbf29ce484222325L, laneId);
-        long[] userKeys = userIds.toArray();
-        java.util.Arrays.sort(userKeys);
-        for (long userId : userKeys) {
+        long[] userKeys = copyLongKeys(userIds.size());
+        int userIndex = 0;
+        var userIterator = userIds.longIterator();
+        while (userIterator.hasNext()) userKeys[userIndex++] = userIterator.next();
+        java.util.Arrays.sort(userKeys, 0, userIndex);
+        for (int index = 0; index < userIndex; index++) {
+            long userId = userKeys[index];
             hash = mix(hash, userId);
             hash = mixText(hash, users.get(userId));
         }
@@ -627,11 +634,15 @@ public final class AccountLaneState {
         return hash == 0 ? 1 : hash;
     }
 
-    private static long mixPrimitiveMap(long hash, LongObjectHashMap<?> values) {
-        long[] keys = values.keySet().toArray();
-        java.util.Arrays.sort(keys);
+    private long mixPrimitiveMap(long hash, LongObjectHashMap<?> values) {
+        long[] keys = copyLongKeys(values.size());
+        int keyIndex = 0;
+        var iterator = values.keySet().longIterator();
+        while (iterator.hasNext()) keys[keyIndex++] = iterator.next();
+        java.util.Arrays.sort(keys, 0, keyIndex);
         long mixed = hash;
-        for (long key : keys) {
+        for (int index = 0; index < keyIndex; index++) {
+            long key = keys[index];
             mixed = mix(mixed, key);
             Object value = values.get(key);
             mixed = mixText(mixed, value);
@@ -641,14 +652,22 @@ public final class AccountLaneState {
 
     private long computeFundsHash() {
         long hash = mix(0xcbf29ce484222325L, laneId);
-        long[] userKeys = balances.keySet().toArray();
-        java.util.Arrays.sort(userKeys);
-        for (long userId : userKeys) {
+        long[] userKeys = copyLongKeys(balances.size());
+        int userIndex = 0;
+        var userIterator = balances.keySet().longIterator();
+        while (userIterator.hasNext()) userKeys[userIndex++] = userIterator.next();
+        java.util.Arrays.sort(userKeys, 0, userIndex);
+        for (int index = 0; index < userIndex; index++) {
+            long userId = userKeys[index];
             hash = mix(hash, userId);
             IntObjectHashMap<BalanceRuntime> userBalances = balances.get(userId);
-            int[] assetIds = userBalances.keySet().toArray();
-            java.util.Arrays.sort(assetIds);
-            for (int assetId : assetIds) {
+            int[] assetIds = copyIntKeys(userBalances.size());
+            int assetIndex = 0;
+            var assetIterator = userBalances.keySet().intIterator();
+            while (assetIterator.hasNext()) assetIds[assetIndex++] = assetIterator.next();
+            java.util.Arrays.sort(assetIds, 0, assetIndex);
+            for (int asset = 0; asset < assetIndex; asset++) {
+                int assetId = assetIds[asset];
                 BalanceRuntime balance = userBalances.get(assetId);
                 hash = mix(hash, assetId);
                 hash = mix(hash, balance.availableUnits());
@@ -664,28 +683,52 @@ public final class AccountLaneState {
         localFundsHash = computeFundsHash();
     }
 
-    private static long mixMap(long hash, Long2ObjectHashMap<?> values) {
-        long[] keys = new long[values.size()];
+    private long mixMap(long hash, Long2ObjectHashMap<?> values) {
+        long[] keys = copyLongKeys(values.size());
         var iterator = values.keySet().iterator();
-        for (int i = 0; iterator.hasNext(); i++) keys[i] = iterator.nextLong();
-        java.util.Arrays.sort(keys);
+        int keyIndex = 0;
+        while (iterator.hasNext()) keys[keyIndex++] = iterator.nextLong();
+        java.util.Arrays.sort(keys, 0, keyIndex);
         long mixed = hash;
-        for (long key : keys) {
+        for (int index = 0; index < keyIndex; index++) {
+            long key = keys[index];
             mixed = mix(mixed, key);
             mixed = mixText(mixed, values.get(key));
         }
         return mixed;
     }
 
-    private static <T> long mixMap(long hash, LongObjectHashMap<T> values) {
-        long[] keys = values.keySet().toArray();
-        java.util.Arrays.sort(keys);
+    private <T> long mixMap(long hash, LongObjectHashMap<T> values) {
+        long[] keys = copyLongKeys(values.size());
+        int keyIndex = 0;
+        var iterator = values.keySet().longIterator();
+        while (iterator.hasNext()) keys[keyIndex++] = iterator.next();
+        java.util.Arrays.sort(keys, 0, keyIndex);
         long mixed = hash;
-        for (long key : keys) {
+        for (int index = 0; index < keyIndex; index++) {
+            long key = keys[index];
             mixed = mix(mixed, key);
             mixed = mixText(mixed, values.get(key));
         }
         return mixed;
+    }
+
+    private long[] copyLongKeys(int size) {
+        if (hashLongScratch.length < size) {
+            int capacity = hashLongScratch.length;
+            while (capacity < size) capacity = Math.multiplyExact(capacity, 2);
+            hashLongScratch = java.util.Arrays.copyOf(hashLongScratch, capacity);
+        }
+        return hashLongScratch;
+    }
+
+    private int[] copyIntKeys(int size) {
+        if (hashIntScratch.length < size) {
+            int capacity = hashIntScratch.length;
+            while (capacity < size) capacity = Math.multiplyExact(capacity, 2);
+            hashIntScratch = java.util.Arrays.copyOf(hashIntScratch, capacity);
+        }
+        return hashIntScratch;
     }
 
     private static long mixText(long hash, Object value) {

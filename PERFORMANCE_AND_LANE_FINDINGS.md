@@ -875,3 +875,8 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - 复现并修复一个真实时序缺陷：direct settlement 已把结果事实写入 `LaneCommandContext` 时，`transferMatchingCompletion` 误把 `matchingResult != null` 当作 Matcher SPSC 槽位已消费，满窗口收尾会以 `incomplete lane command context` 终止。现在只以 `submittedMatcherShard == -1` 判断槽位是否已释放；Owner 仍保留结果事实并只消费 Matcher 队列 token。
 - 快照物化对无余额、无预留、无持仓用户直接使用不可变空 Map；`StateMapSupport` 共享一个空有序冻结 Map，避免每个用户重复创建空 `TreeMap`/冻结包装。非空 Map、排序、快照格式和增量 lineage 不变。
 - 六产品线 `ClusterCommandPipelineTest.fullIndependentWindowCompletesWithoutAnotherTimer`（256 满窗口）通过；service 全量 **930 tests，0 failures，0 errors，0 skipped**。
+### 2026-09-14 哈希排序缓冲复用
+
+- `AccountLaneState` 的本地状态哈希与资金哈希原先每次重建都为用户、订单、持仓、余额等 primitive key 集合创建新的 `long[]`/`int[]`；现在改为 Lane 所属线程复用并按有效长度排序的 scratch 数组。哈希字段、排序规则和恢复语义未改变。
+- 该改动只削减哈希重建产生的短命数组，不能消除 Owner 有序提交、跨 Lane await、`TreeMap` 状态物化或订单运行态对象本身的成本；这些仍是 JFR 中的主要结构性热点。
+- service 全量回归最终 **930 tests，0 failures，0 errors，0 skipped**。

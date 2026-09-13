@@ -50837,3 +50837,9 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - 修复后独立满窗口六产品线回归通过；service 全量 **930 tests，0 failures，0 errors，0 skipped**。
 - 短 JMH `LinearPerpetualCoreBenchmark.scaleMixedWorkload`（1×1s warmup、2×2s measurement、1 fork）：终态业务 **24,740.620/s**，终态核心消息 **10,624.129/s**，Lane **18,288.942/s**，Lane settlement **12,407.071/s**，成交 **4,705.497/s**；error/reject/timeout/unfinished 均为 0。
 - 同口径 `-prof gc`：终态业务 **26,169.066/s**，分配约 **558.245 MB/s**，JMH invocation 归一化 **419,844,568 B/op**，ZGC 22 次、总 GC 时间约 1,585ms。该 B/op 含场景初始化/恢复和 JMH invocation，不能当作稳态单业务分配率；本轮也没有 GCP、独立 Linux CPU 或 p99≤5ms 证据。
+### 2026-09-14 哈希排序缓冲复用短轮
+
+- 固定 HotSpot JDK 25.0.1、ZGC、4 Account Lane、1 Matcher、128 listed/active symbols、10,000 users、256 在途、UNIFORM、maxPositions=1、maxOpenOrders=3、hftRounds=1、hftBatchSize=4、lifecycleSymbols=32；JMH 1×1s warmup、2×2s measurement、1 fork。
+- 修改后短 JMH：终态业务 **25,525/s**，终态 Core messages **10,961/s**，Lane **18,869/s**，Lane settlement **12,800/s**，trades **4,855/s**；accepted=terminal，error/reject/timeout/unfinished 均为 0。
+- 同口径 `-prof gc`：终态业务 **24,947/s**，分配 **522.163 MB/s**，JMH invocation 归一化 **423,825,029 B/op**，ZGC 6 次、总 GC 时间 **155ms**。该 B/op 含初始化/恢复和 JMH invocation，不能作为稳态单业务分配率。
+- 与上一轮 24,889/s 的短轮结果处于同一波动范围；该改动的确定性收益是复用哈希排序数组并减少数组分配，不能据此宣称 30 万+/s、普通下单 p99≤5ms 或 GCP 容量已达标。
