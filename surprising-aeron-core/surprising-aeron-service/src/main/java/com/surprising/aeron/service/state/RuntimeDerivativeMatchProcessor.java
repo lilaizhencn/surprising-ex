@@ -225,6 +225,9 @@ public final class RuntimeDerivativeMatchProcessor {
         private final LongObjectHashMap<RuntimeDerivativeFillCalculator.FillCursor> cursors =
                 new LongObjectHashMap<>();
         private final LongLongHashMap activeOrderByUser = new LongLongHashMap();
+        // A settlement uses one instrument; cache the two margin-mode leverage lookups by user.
+        private final LongLongHashMap crossLeverageByUser = new LongLongHashMap();
+        private final LongLongHashMap isolatedLeverageByUser = new LongLongHashMap();
         private final java.util.ArrayDeque<RuntimeDerivativeFillCalculator.FillCursor> free =
                 new java.util.ArrayDeque<>();
         private TradingRuntimeState runtime;
@@ -252,9 +255,18 @@ public final class RuntimeDerivativeMatchProcessor {
                 OrderRuntime order = requireOpen(runtime, orderId);
                 long activeOrder = activeOrderByUser.get(order.userId());
                 if (activeOrder != 0 && activeOrder != orderId) flush(activeOrder);
-                Long configured = runtime.leverage(
-                        new CoreLeverageKey(order.userId(), instrument.symbol(), order.marginMode()));
-                long leverage = configured == null ? instrument.maxLeveragePpm() : configured;
+                LongLongHashMap leverageByUser = order.marginMode()
+                        == com.surprising.aeron.protocol.CoreMarginMode.CROSS
+                        ? crossLeverageByUser : isolatedLeverageByUser;
+                long leverage;
+                if (leverageByUser.containsKey(order.userId())) {
+                    leverage = leverageByUser.get(order.userId());
+                } else {
+                    Long configured = runtime.leverage(
+                            new CoreLeverageKey(order.userId(), instrument.symbol(), order.marginMode()));
+                    leverage = configured == null ? instrument.maxLeveragePpm() : configured;
+                    leverageByUser.put(order.userId(), leverage);
+                }
                 long key = identities.preparedPositionKey(order.userId(),
                         positionKey(instrument.symbol(), order.positionSide()));
                 cursor = free.pollFirst();
@@ -278,6 +290,8 @@ public final class RuntimeDerivativeMatchProcessor {
             });
             cursors.clear();
             activeOrderByUser.clear();
+            crossLeverageByUser.clear();
+            isolatedLeverageByUser.clear();
             runtime = null;
             identities = null;
             instrument = null;
