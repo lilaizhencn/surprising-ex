@@ -861,3 +861,10 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - REPLACE/AMEND 等双订单响应原先在 Owner 完成边界创建两个 `CoreOrderStateView`；协议编码器现在接受 `List<? extends CoreOrderStateSource>`，`CommandResultBuilder` 由 Owner 独占的 source 槽位直接读取 `OrderRuntime`。
 - source 槽位只在容量首次增长时创建，命令结束清除引用；编码器只在当前 Owner 调用期间读取，不把 source 暴露给结果账本或下游。单订单、TRIGGER、批量响应和稳定响应视图路径保持原协议边界。
 - 编码协议字节保持一致，新增多 source 列表等价测试；该改动删除改单热路径的 `CoreOrderStateView` 中间对象和临时多订单列表。
+
+
+### 2026-09-14 LaneMutationTask 已完成快速返回
+
+- `LaneMutationTask.await()` 现在先读取 `completed`；任务已在 Owner 到达等待点前完成时，直接通过同一 volatile acquire 读取结果/异常，跳过 waiter 写入、spin 和 park 协议。
+- 任务未完成时仍使用原有 waiter、有限自旋、`LockSupport.park` 和中断/异常传播；没有放宽 Lane 单写和结果可见性边界，也没有复用此前撤回的无 fence fast path。
+- 该项只削减同步控制/低频 Owner→Lane 操作的等待协议开销；异步 Matcher→Lane 结算路径、Owner 有序提交和 TreeMap/状态物化热点仍按原职责保留。

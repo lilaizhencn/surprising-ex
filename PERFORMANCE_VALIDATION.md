@@ -50819,3 +50819,11 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - 同口径 JFR fork：15 秒、DataLoss 未见；终态业务 **29,976.073/s**，终态 Core messages **12,872.341/s**，Lane **22,159.133/s**，Lane settlement **15,032.577/s**，trades **5,701.244/s**。JFR allocation sample 仍以 `long[]`、`byte[]`、`Object[]`、`TreeMap.Entry`、`CoreOrderState`、`OrderRuntime` 为主；CPU 热点仍为 `LaneMutationTask.await`、`OrderedCommitCoordinator.pumpMatchingCommitCompletions`、TreeMap/状态哈希，说明本次只关闭多订单响应物化分配，未消除 Owner 有序提交瓶颈。
 - JFR 原始文件 `/tmp/jfr-multi-source.jfr`，2,249,624 bytes，SHA256 `3ecc1ebda0470c59bed73c1910eea5f55e8bb74b2bc36cc4d2e9df3bb3b1b13e`；JMH JSON `/tmp/jmh-multi-source.json` SHA256 `418e66f786a31e16b85e393e5a9b21e0ae461e7589513609c400662185fa2b06`，JFR JMH JSON `/tmp/jmh-multi-source-jfr.json` SHA256 `9cd4e365fabad56a6db002ec55d04510af604bd91169e663b64dbe28b52cd963`。摘要写入后清理本轮文件。
 - 本轮仍是本机单节点 closed-loop 诊断，不是 GCP 容量验收；没有证明 30 万+/s、普通下单 p99≤5ms、开放到达率或长期泄漏。
+
+
+### 2026-09-14 LaneMutationTask 完成快速返回回归
+
+- 代码改动：`TradingRuntimeState.LaneMutationTask.await()` 增加完成后直接返回分支；仍通过 volatile `completed` 建立结果/异常 acquire 语义，未改变未完成任务的 waiter/park 协议。
+- HotSpot JDK 25.0.1、ZGC、4 Account Lane、1 Matcher、128 listed/active symbols、10,000 users、256 in-flight、UNIFORM、`maxPositionsPerUser=1`、`maxOpenOrdersPerUser=3`、`hftRounds=1`、`hftBatchSize=4`、`lifecycleSymbolsPerRun=32`；JMH 1×1s warmup、2×2s measurement、1 fork。
+- 短 JMH：终态业务 **23,425.136/s**，终态 Core messages **10,059.234/s**，Lane **17,316.501/s**，Lane settlement **11,747.375/s**，trades **4,455.301/s**；unfinished/error/reject/timeout 均为 0。
+- 该轮只验证快速返回改动没有破坏生命周期和计数；没有同机对照、稳态 JFR 或 GCP 证据，不能据此宣称吞吐、分配率或普通下单 p99≤5ms 达标。JMH JSON 已在摘要记录后清理。

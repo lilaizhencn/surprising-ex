@@ -1452,6 +1452,10 @@ public final class TradingRuntimeState implements AutoCloseable {
 
         Object await() {
             boolean interrupted = false;
+            // The Lane may finish between submit() and the owner reaching await().
+            // A volatile read is an acquire fence for result/failure; skip the waiter
+            // handshake entirely in that common short-task case.
+            if (completed) return completedResult();
             Thread current = Thread.currentThread();
             waiter = current;
             try {
@@ -1465,6 +1469,14 @@ public final class TradingRuntimeState implements AutoCloseable {
                 if (waiter == current) waiter = null;
                 if (interrupted) Thread.currentThread().interrupt();
             }
+            return completedResult(interrupted);
+        }
+
+        Object completedResult() {
+            return completedResult(false);
+        }
+
+        Object completedResult(boolean interrupted) {
             if (interrupted) throw new IllegalStateException("account lane mutation was interrupted");
             if (failure instanceof RuntimeException runtimeFailure) throw runtimeFailure;
             if (failure instanceof Error error) throw error;
