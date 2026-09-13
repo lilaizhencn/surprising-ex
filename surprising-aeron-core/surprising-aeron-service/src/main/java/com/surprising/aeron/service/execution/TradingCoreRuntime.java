@@ -1518,15 +1518,16 @@ public final class TradingCoreRuntime implements AutoCloseable {
         var command = prepareMatchingCommand(pending);
         com.surprising.aeron.service.state.MatcherSettlementEvent direct = null;
         if (pending.operation() == PendingMatching.Operation.PLACE && runtimeState.asynchronousCommands()) {
+            OrderRuntime directTaker = runtimeOrder(pending.decodedCommand().placeOrder().orderId());
             direct = runtimeState.prepareDirectMatcherSettlement(pending.sequence(),
                     pending.partitionLaneMask == 0 ? commits.validAccountLaneMask() : pending.partitionLaneMask,
-                    runtimeOrder(pending.decodedCommand().placeOrder().orderId()), null, 1,
+                    directTaker, null, 1,
                     pending.command().header().commandId(), matcherShard(pending), identities,
                     pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
                     pending.preMatchingCancellationOrderIds(), null);
             pending.settlement(direct, direct.plan(), System.nanoTime());
             if (realtimeCapture != null)
-                pending.realtimeTakerOrder = runtimeOrder(pending.decodedCommand().placeOrder().orderId());
+                pending.realtimeTakerOrder = directTaker;
         }
         matcherPipeline.submit(matcherShard(pending), pending.sequence(), command, direct);
         pending.matchingSubmitted();
