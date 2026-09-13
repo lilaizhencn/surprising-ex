@@ -1244,10 +1244,15 @@ public final class TradingRuntimeState implements AutoCloseable {
             // Apply the borrowed LaneDelta while its buffers are still intact. The later
             // changed-* handoff swaps/reclaims those same buffers without a second copy.
             state.applyLanePublication(publication);
-            users.drainTo((userId, user) -> {
-                state.changedUsers.add(userId);
-                if (publication == null) putOrRemove(state.publishedUsers, userId, user);
-            });
+            if (publication == null) {
+                users.drainTo((userId, user) -> {
+                    state.changedUsers.add(userId);
+                    putOrRemove(state.publishedUsers, userId, user);
+                });
+            } else {
+                // Settlement publication already applied and indexed each user in one pass.
+                users.clear();
+            }
             if (publication == null) {
                 terminalOrderCount = 0;
                 orders.forEach((orderId, order) -> {
@@ -1259,10 +1264,15 @@ public final class TradingRuntimeState implements AutoCloseable {
             } else if (terminalOrderSink != null && terminalOrderCount != 0) {
                 terminalOrderSink.acceptBatch(terminalOrders, terminalOrderCount, coreSequence);
             }
-            reservations.drainTo((orderId, reservation) -> {
-                state.changedReservations.add(orderId);
-                if (publication == null) putOrRemove(state.publishedReservations, orderId, reservation);
-            });
+            if (publication == null) {
+                reservations.drainTo((orderId, reservation) -> {
+                    state.changedReservations.add(orderId);
+                    putOrRemove(state.publishedReservations, orderId, reservation);
+                });
+            } else {
+                // The same publication pass also recorded changed reservation IDs.
+                reservations.clear();
+            }
             // 已由 Lane 准备发布版本时，publication 已经完成持仓发布。
             if (publication == null) positions.forEachIndexed((positionKey, position, hasPrepared, prepared) -> {
                 if (position == null && state.realtimeCapture != null) {

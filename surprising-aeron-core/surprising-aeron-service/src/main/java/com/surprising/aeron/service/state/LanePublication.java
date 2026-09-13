@@ -39,11 +39,17 @@ final class LanePublication {
         if (delta != null) {
             TradingRuntimeState.LaneDelta changes = delta;
             TradingRuntimeState owner = runtime;
-            changes.users.forEach((id, value) -> owner.publishedUsers.applyPublished(id, value, admissionSequence));
+            changes.users.forEach((id, value) -> {
+                owner.publishedUsers.applyPublished(id, value, admissionSequence);
+                owner.changedUsers.add(id);
+            });
             changes.orders.forEach((id, value) -> owner.publishedOrders.applyPublished(
                     id, changes.removedOrderRoutes.contains(id) ? null : value, admissionSequence));
-            changes.reservations.forEach((id, value) -> owner.publishedReservations.applyPublished(
-                    id, changes.removedReservationRoutes.contains(id) ? null : value, admissionSequence));
+            changes.reservations.forEach((id, value) -> {
+                owner.publishedReservations.applyPublished(
+                        id, changes.removedReservationRoutes.contains(id) ? null : value, admissionSequence);
+                owner.changedReservations.add(id);
+            });
             changes.positions.forEach((id, value) -> owner.publishedPositions.applyPublished(id, value, admissionSequence));
             delta = null;
             runtime = null;
