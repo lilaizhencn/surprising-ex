@@ -139,9 +139,9 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     }
 
     /** Computes both admission masks in one crossing-price tree walk. */
-    CounterpartyMasks counterpartyMasks(String symbol,
-                                        com.surprising.aeron.protocol.CoreOrderSide side,
-                                        long limitPrice) {
+    public CounterpartyMasks counterpartyMasks(String symbol,
+                                               com.surprising.aeron.protocol.CoreOrderSide side,
+                                               long limitPrice) {
         CounterpartyMasks result = COUNTERPARTY_SCRATCH.get();
         OrderParticipantIndex participants = participantsBySymbol.get(symbol);
         if (participants == null) {
@@ -155,9 +155,12 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
         return result;
     }
 
-    static final class CounterpartyMasks {
+    public static final class CounterpartyMasks {
         long accountMask;
         long laneMask;
+
+        public long accountMask() { return accountMask; }
+        public long laneMask() { return laneMask; }
     }
 
     public boolean hasCounterparty(String symbol, com.surprising.aeron.protocol.CoreOrderSide side,

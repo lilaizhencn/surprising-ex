@@ -593,8 +593,8 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (instrument == null || command.reduceOnly()) return false;
         var counterparties = activeOrderIndex.counterpartyMasks(
                 instrument.symbol(), command.side(), command.limitPriceTicks());
-        window.candidateLanes |= counterparties.laneMask;
-        long counterpartyAccounts = counterparties.accountMask;
+        window.candidateLanes |= counterparties.laneMask();
+        long counterpartyAccounts = counterparties.accountMask();
         window.candidateAccounts |= counterpartyAccounts;
         window.candidateOrder(command.orderId(), instrument.symbol(), command.side(), command.limitPriceTicks(),
                 productLine.isDerivative() && counterpartyAccounts != 0);
