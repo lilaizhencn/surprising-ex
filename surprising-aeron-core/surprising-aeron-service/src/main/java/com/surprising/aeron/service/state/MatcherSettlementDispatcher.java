@@ -119,7 +119,10 @@ final class MatcherSettlementDispatcher {
                 captureIsolatedChanges);
         for (int laneId = 0; laneId < owner.accountLanes.length; laneId++) {
             if ((expectedLaneMask & 1L << laneId) == 0) continue;
-            if (!owner.accountLanesStarted || owner.ownerLaneAccess) {
+            // In asynchronous command scope the permanent Lane is the only account
+            // writer.  ownerLaneAccess may still be held by an earlier preparation
+            // step, but it must never turn this settlement into an inline write.
+            if (!owner.accountLanesStarted || !owner.asynchronousCommands() && owner.ownerLaneAccess) {
                 event.execute(owner.accountLanes[laneId]);
             } else {
                 owner.accountLaneQueueHighWaterMarks[laneId] = Math.max(
@@ -251,7 +254,10 @@ final class MatcherSettlementDispatcher {
             event.resultTarget = batch instanceof LaneOrderResultTarget target ? target : null;
             for (int laneId = 0; laneId < owner.accountLanes.length; laneId++) {
                 if ((batchLaneMask & 1L << laneId) == 0) continue;
-                if (!owner.accountLanesStarted || owner.ownerLaneAccess) event.execute(owner.accountLanes[laneId]);
+                if (!owner.accountLanesStarted
+                        || !owner.asynchronousCommands() && owner.ownerLaneAccess) {
+                    event.execute(owner.accountLanes[laneId]);
+                }
                 else {
                     owner.accountLaneQueueHighWaterMarks[laneId] = Math.max(
                             owner.accountLaneQueueHighWaterMarks[laneId], owner.laneWorkers[laneId].depth() + 1);

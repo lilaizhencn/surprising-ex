@@ -669,3 +669,9 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - `ActiveOrderIndex` 的 Owner primitive 主表及币对索引按固定 128 币对、256 在途基线预留容量；用户临时集合仍保持小容量并在为空时释放，避免短生命周期用户把大数组带入每次下单。
 - 该改动只消除热身阶段的重复 rehash/copy，不改变索引语义或状态所有权。`ActiveOrderIndexTest` 11 项及 `ClusterCommandPipelineTest` 250 项通过。
 - 未重新执行 GCP 64/128 轮次，因此不宣称吞吐、p99 或稳态分配率已经改善；仍需用同一 ZGC/绑核条件复测。
+
+### 2026-09-14 异步撮合结算禁止 Owner 借权写入
+
+- `MatcherSettlementDispatcher` 的普通及批量结算在异步命令作用域始终提交永久 Lane；即使 Owner 仍持有准备阶段借权，也不会内联执行账户写入。
+- 同步离线/初始化路径保留原有内联语义，避免把恢复和测试夹具改成隐式异步；SPSC 生产者、序号和失败回滚协议不变。
+- `TradingRuntimeStateTest`、`RiskBatchBudgetTest`、`CoreOrderedOrderBatchTest`、`ClusterCommandPipelineTest` 共 348 项通过；未重新执行云端吞吐，不宣称性能提升。
