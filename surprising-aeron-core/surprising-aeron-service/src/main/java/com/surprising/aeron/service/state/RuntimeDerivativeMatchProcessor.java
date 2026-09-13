@@ -292,9 +292,8 @@ public final class RuntimeDerivativeMatchProcessor {
         }
 
         private void publishCursor(RuntimeDerivativeFillCalculator.FillCursor cursor) {
-            OrderRuntime order = cursor.order();
-            cursor.publish(runtime, cursor.positionKey(), null);
-            if (order.canceled()) {
+            OrderRuntime order = cursor.publish(runtime, cursor.positionKey(), null);
+            if (order != null && order.canceled()) {
                 long releaseUnits = runtime.reservation(order.orderId()).reservedUnits();
                 runtime.releaseTerminalReservation(order.orderId());
                 if (releaseUnits > 0) runtime.advanceUserRevision(order.userId());

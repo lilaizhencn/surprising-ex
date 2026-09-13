@@ -170,8 +170,11 @@ public final class RuntimeDerivativeFillCalculator {
             return new PositionRuntime(o.userId(), o.symbolId(), settleAssetId, o.marginMode(), o.positionSide(),
                     quantity == 0 ? 0 : o.instrumentChangeId(), quantity, entryPrice, entryValue, realizedPnl, margin);
         }
-        void publish(TradingRuntimeState runtime, long positionKey, RuntimeTreasuryDelta treasury) {
-            if (fills == 0) return;
+        OrderRuntime publish(TradingRuntimeState runtime, long positionKey, RuntimeTreasuryDelta treasury) {
+            if (fills == 0) return null;
+            // Build the immutable order value once. The caller may need its terminal status
+            // immediately after publication; rebuilding it doubled allocation per fill.
+            OrderRuntime nextOrder = order();
             runtime.replaceReservation(reservation());
             runtime.replaceBalance(originalOrder.userId(), settleAssetId, available, locked);
             if (treasury != null) {
@@ -179,10 +182,11 @@ public final class RuntimeDerivativeFillCalculator {
                 treasury.addClearing(settleAssetId, clearingTreasuryUnits);
             }
             runtime.replacePosition(positionKey, position());
-            runtime.replaceOrder(order());
+            runtime.replaceOrder(nextOrder);
             runtime.advanceUserRevision(originalOrder.userId(), fills);
+            return nextOrder;
         }
-        void publish(TradingRuntimeState runtime) { publish(runtime, positionKey, null); }
+        OrderRuntime publish(TradingRuntimeState runtime) { return publish(runtime, positionKey, null); }
         void clear() {
             instrument = null; originalOrder = null; originalReservation = null; riskMark = null;
             fills = 0; positionKey = 0; leveragePpm = 0;

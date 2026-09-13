@@ -50647,3 +50647,4 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - 本次未启动 GCP，也未重新进行吞吐、p99 或稳态分配率验收；现有短 JMH/JFR 结果保持原结论，30万+/s、普通单 p99≤5ms 和稳定分配率仍需固定 128 币对、256 在途、ZGC 的同口径长稳态轮验证。
 - 追加短 JMH 诊断（1×1s warmup、1×2s measurement、1 fork，固定 128 币对、10,000 users、4 Lane/1 Matcher、ZGC）：UNIFORM 终态业务 30,589.9/s（density 28,216.8/s、full-sweep 22,393.5/s），PARETO 18,882.0/s，MARK_PRICE_STORM 5,519.1/s；各场景错误、拒绝、超时、未完成均为 0。该轮短、单 fork，不能替代稳定吞吐或 p99 验收，也未宣称达到 30万+/s。
 - 新增 fence 守卫后的服务模块完整回归：926 项通过，Failures 0、Errors 0，Maven BUILD SUCCESS。
+- 追加衍生品成交/预留快路径后，`RuntimeDerivativeFillCalculatorTest` 8 项、`RuntimeDerivativeMatchProcessorTest` 8 项、`TradingRuntimeStateTest` 57 项及 `ClusterCommandPipelineTest` 250 项均通过；本次未将单次局部优化误报为整体吞吐或分配率收益。

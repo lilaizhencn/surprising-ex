@@ -187,6 +187,16 @@ final class PendingReservationTracker {
         if (coreSequence <= 0) throw new IllegalArgumentException("coreSequence must be positive");
         PendingBatch batch = batches.get(coreSequence);
         if (batch != null) { completeBatchRemainder(coreSequence, batch); return; }
+        long firstOrderId = pendingReservationsBySequence.firstOrderId(coreSequence);
+        if (firstOrderId == 0) return;
+        // A normal single-order command is the hot case. Complete it through the existing
+        // scalar path instead of materialising a one-element long[] and two temporary lists.
+        if (!pendingReservationsBySequence.hasAdditional(coreSequence)) {
+            long userId = pendingReservationUsers.getOrDefault(firstOrderId, 0);
+            if (userId == 0) throw new IllegalStateException("pending reservation owner is missing");
+            completePendingReservation(userId, firstOrderId, coreSequence);
+            return;
+        }
         long[] pending = pendingReservationsBySequence.orderIds(coreSequence);
         if (pending.length == 0) return;
         List<PendingReservationRef> refs = new ArrayList<>(pending.length);
@@ -361,6 +371,15 @@ final class PendingReservationTracker {
         PendingReservationSequenceIndex(int initialCapacity) {
             firstOrderBySequence = new LongLongHashMap(initialCapacity);
             additionalOrdersBySequence = new LongObjectHashMap<>();
+        }
+
+        long firstOrderId(long coreSequence) {
+            return firstOrderBySequence.getIfAbsent(coreSequence, 0);
+        }
+
+        boolean hasAdditional(long coreSequence) {
+            LongHashSet additional = additionalOrdersBySequence.get(coreSequence);
+            return additional != null && !additional.isEmpty();
         }
 
         void add(long coreSequence, long orderId) {
