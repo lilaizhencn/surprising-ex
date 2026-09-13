@@ -9,6 +9,9 @@ package com.surprising.aeron.service.state;
 final class LanePublication {
     /** 准入命令序号，用于定位账户 Lane 的批量预留收据；普通发布为0。 */
     long admissionSequence;
+    /** Settlement publication borrows the already-populated LaneDelta buffers. */
+    private TradingRuntimeState.LaneDelta delta;
+    private TradingRuntimeState runtime;
     private LanePublishedMap<?>[] maps = new LanePublishedMap<?>[8];
     private long[] keys = new long[8];
     private Object[] values = new Object[8];
@@ -23,8 +26,29 @@ final class LanePublication {
         size++;
     }
 
+    void bind(TradingRuntimeState runtime, TradingRuntimeState.LaneDelta delta) {
+        if (runtime == null || delta == null || size != 0 || this.delta != null) {
+            throw new IllegalStateException("invalid Lane settlement publication");
+        }
+        this.runtime = runtime;
+        this.delta = delta;
+    }
+
     /** Owner 线程调用；重复调用不会再次应用同一批数据。 */
     void publish() {
+        if (delta != null) {
+            TradingRuntimeState.LaneDelta changes = delta;
+            TradingRuntimeState owner = runtime;
+            changes.users.forEach((id, value) -> owner.publishedUsers.applyPublished(id, value, admissionSequence));
+            changes.orders.forEach((id, value) -> owner.publishedOrders.applyPublished(
+                    id, changes.removedOrderRoutes.contains(id) ? null : value, admissionSequence));
+            changes.reservations.forEach((id, value) -> owner.publishedReservations.applyPublished(
+                    id, changes.removedReservationRoutes.contains(id) ? null : value, admissionSequence));
+            changes.positions.forEach((id, value) -> owner.publishedPositions.applyPublished(id, value, admissionSequence));
+            delta = null;
+            runtime = null;
+            return;
+        }
         if (size == 0) return;
         for (int index = 0; index < size; index++) {
             maps[index].applyPublished(keys[index], values[index], admissionSequence);
@@ -43,6 +67,8 @@ final class LanePublication {
 
     /** Discard staged references on failed/recycled events, retaining only buffer capacity. */
     void clear() {
+        delta = null;
+        runtime = null;
         java.util.Arrays.fill(maps, 0, size, null);
         java.util.Arrays.fill(values, 0, size, null);
         size = 0;

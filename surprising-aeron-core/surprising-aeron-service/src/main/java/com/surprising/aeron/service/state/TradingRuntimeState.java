@@ -1132,15 +1132,13 @@ public final class TradingRuntimeState implements AutoCloseable {
             if (publication != null) throw new IllegalStateException("Lane publication already prepared");
             if (publicationBuffer == null) publicationBuffer = new LanePublication();
             publication = publicationBuffer;
-            users.forEach((id, value) -> state.publishedUsers.stage(publication, id, value));
             terminalOrderCount = 0;
             orders.forEach((id, value) -> {
                 if (value != null && value.status().terminal()) recordTerminalOrder(value);
-                state.publishedOrders.stage(publication, id, removedOrderRoutes.contains(id) ? null : value);
             });
-            reservations.forEach((id, value) -> state.publishedReservations.stage(publication, id,
-                    removedReservationRoutes.contains(id) ? null : value));
-            positions.forEach((id, value) -> state.publishedPositions.stage(publication, id, value));
+            // The publication borrows these already populated change buffers instead of
+            // copying every entity into a second maps/keys/values array.
+            publication.bind(state, this);
         }
 
         /** 本次需要发布的触发单变化。 */
@@ -1234,6 +1232,18 @@ public final class TradingRuntimeState implements AutoCloseable {
                 state.revision = Math.addExact(state.revision, closedTriggerCount);
                 closedTriggerCount = 0;
             }
+            // Capture removed positions before the publication replaces the Owner view.
+            if (publication != null && state.realtimeCapture != null) {
+                positions.forEachIndexed((positionKey, position, hasPrepared, prepared) -> {
+                    if (position == null) {
+                        try { state.realtimeCapture.removedPosition(state.publishedPositions.get(positionKey)); }
+                        catch (RuntimeException failure) { state.realtimeCapture.failed(); }
+                    }
+                });
+            }
+            // Apply the borrowed LaneDelta while its buffers are still intact. The later
+            // changed-* handoff swaps/reclaims those same buffers without a second copy.
+            state.applyLanePublication(publication);
             users.drainTo((userId, user) -> {
                 state.changedUsers.add(userId);
                 if (publication == null) putOrRemove(state.publishedUsers, userId, user);
@@ -1253,8 +1263,8 @@ public final class TradingRuntimeState implements AutoCloseable {
                 state.changedReservations.add(orderId);
                 if (publication == null) putOrRemove(state.publishedReservations, orderId, reservation);
             });
-            // 已由 Lane 准备发布版本且没有删除推送时，无需逐持仓再访问一次缓冲。
-            if (publication == null || state.realtimeCapture != null) positions.forEachIndexed((positionKey, position, hasPrepared, prepared) -> {
+            // 已由 Lane 准备发布版本时，publication 已经完成持仓发布。
+            if (publication == null) positions.forEachIndexed((positionKey, position, hasPrepared, prepared) -> {
                 if (position == null && state.realtimeCapture != null) {
                     try { state.realtimeCapture.removedPosition(state.publishedPositions.get(positionKey)); }
                     catch (RuntimeException failure) { state.realtimeCapture.failed(); }
@@ -1277,7 +1287,6 @@ public final class TradingRuntimeState implements AutoCloseable {
             removedReservationRoutes.clear();
             state.changedOrders.adopt(laneId, orders);
             state.changedPositions.adopt(laneId, positions);
-            state.applyLanePublication(publication);
         }
 
         void putTrigger(long id, CoreTriggerOrderState value) {
