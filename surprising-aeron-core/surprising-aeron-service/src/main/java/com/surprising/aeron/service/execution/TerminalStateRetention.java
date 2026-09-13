@@ -294,67 +294,61 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
 
     private void observeOrder(CoreOrderState order, long exportSequence) {
         if (order == null) return;
-        EntityKey key = new EntityKey(EntityType.ORDER, order.orderId());
-        if (order.status().terminal()) retain(key, order.userId(), order.clientOrderId(), exportSequence);
-        else removeCandidate(key);
+        if (order.status().terminal()) retain(EntityType.ORDER, order.orderId(), order.userId(), order.clientOrderId(), exportSequence);
+        else removeCandidate(EntityType.ORDER, order.orderId());
     }
 
     private void observeOrder(OrderRuntime order, long exportSequence) {
         if (order == null) return;
-        EntityKey key = new EntityKey(EntityType.ORDER, order.orderId());
-        if (order.status().terminal()) retain(key, order.userId(), order.clientOrderId(), exportSequence);
-        else removeCandidate(key);
+        if (order.status().terminal()) retain(EntityType.ORDER, order.orderId(), order.userId(), order.clientOrderId(), exportSequence);
+        else removeCandidate(EntityType.ORDER, order.orderId());
     }
 
     private void observeAlgo(CoreAlgoOrderState algo, long exportSequence) {
         if (algo == null) return;
-        EntityKey key = new EntityKey(EntityType.ALGO, algo.algoOrderId());
-        if (algo.terminal()) retain(key, algo.userId(), algo.clientAlgoOrderId(), exportSequence);
-        else removeCandidate(key);
+        if (algo.terminal()) retain(EntityType.ALGO, algo.algoOrderId(), algo.userId(), algo.clientAlgoOrderId(), exportSequence);
+        else removeCandidate(EntityType.ALGO, algo.algoOrderId());
     }
 
     private void observeTrigger(CoreTriggerOrderState trigger, long exportSequence) {
         if (trigger == null) return;
-        EntityKey key = new EntityKey(EntityType.TRIGGER, trigger.triggerOrderId());
-        if (!trigger.status().open()) retain(key, trigger.userId(), trigger.clientTriggerOrderId(), exportSequence);
-        else removeCandidate(key);
+        if (!trigger.status().open()) retain(EntityType.TRIGGER, trigger.triggerOrderId(), trigger.userId(), trigger.clientTriggerOrderId(), exportSequence);
+        else removeCandidate(EntityType.TRIGGER, trigger.triggerOrderId());
     }
 
     private void observeLiquidation(CoreLiquidationState liquidation, long exportSequence) {
         if (liquidation == null) return;
-        EntityKey key = new EntityKey(EntityType.LIQUIDATION, liquidation.liquidationId());
-        if (liquidation.terminal()) retain(key, liquidation.userId(), "", exportSequence);
-        else removeCandidate(key);
+        if (liquidation.terminal()) retain(EntityType.LIQUIDATION, liquidation.liquidationId(), liquidation.userId(), "", exportSequence);
+        else removeCandidate(EntityType.LIQUIDATION, liquidation.liquidationId());
     }
 
     private void observeLiquidation(LiquidationRuntime liquidation, long exportSequence) {
         if (liquidation == null) return;
-        EntityKey key = new EntityKey(EntityType.LIQUIDATION, liquidation.liquidationId());
         if (liquidation.status() == CoreLiquidationState.Status.CANCELED
                 || liquidation.status() == CoreLiquidationState.Status.COMPLETED
                 && liquidation.deficitUnits() == 0) {
-            retain(key, liquidation.userId(), "", exportSequence);
+            retain(EntityType.LIQUIDATION, liquidation.liquidationId(), liquidation.userId(), "", exportSequence);
         } else {
-            removeCandidate(key);
+            removeCandidate(EntityType.LIQUIDATION, liquidation.liquidationId());
         }
     }
 
-    private void retain(EntityKey key, long userId, String clientId, long exportSequence) {
-        if (tombstones.contains(key.type().ordinal(), key.id())) return;
+    private void retain(EntityType type, long id, long userId, String clientId, long exportSequence) {
+        if (tombstones.contains(type.ordinal(), id)) return;
         String normalized = normalizeClientId(clientId);
-        candidateLookupKey.reset(key.type(), key.id());
+        candidateLookupKey.reset(type, id);
         RetainedEntity existing = candidates.get(candidateLookupKey);
         if (existing != null && existing.userId() == userId
                 && existing.exportSequence() == exportSequence
                 && existing.clientId().equals(normalized)) return;
         // Reuse the stable key already held by the map. This removes one short-lived
         // EntityKey allocation from every terminal observation while preserving map identity.
-        EntityKey stableKey = existing == null ? key : existing.key();
+        EntityKey stableKey = existing == null ? new EntityKey(type, id) : existing.key();
         candidates.put(stableKey, new RetainedEntity(stableKey, userId, normalized, exportSequence));
     }
 
-    private void removeCandidate(EntityKey key) {
-        candidateLookupKey.reset(key.type(), key.id());
+    private void removeCandidate(EntityType type, long id) {
+        candidateLookupKey.reset(type, id);
         candidates.remove(candidateLookupKey);
     }
 
