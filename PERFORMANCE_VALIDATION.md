@@ -50634,3 +50634,8 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - JFR 录制有效业务区间约 1 秒，分配采样估算 10.53 GB/s、约 434.6 KB/终态业务项，包含启动/恢复和 JFR/NMT 开销，不能作为稳态分配率。主要分配栈仍为 `TreeMap.put`（快照/恢复物化）、字符串拼接/编码、`RuntimeStateProjector.toRuntimeOrder`、`LongObjectHashMap`/`LongLongHashMap` 扩容及 `OrderRuntime`/快照对象。
 - CPU 采样仍显示 `TradingRuntimeState$LaneMutationTask.await`、`OrderedCommitCoordinator.pumpMatchingCommitCompletions`、Owner 的 `TreeMap`/状态哈希与 Lane 客户订单捕获；ZGC 21 次回收，暂停 P99 约 66µs，Allocation Stall=0，失败/退化=0。
 - 结论：本次改动确认了两处确定性的重复分配/遍历已移除，未改变主瓶颈结构。Owner 有序完成提交、终态索引/结果持久化和 Lane handoff 仍需保留并继续按稳态 JFR 栈优化；不得把短 profile 的采样估算当作生产分配率或延迟验收。
+
+### 同口径复测（重复工作清理后）
+
+- JMH 2 forks × 2 measurements（其余参数同上，128 symbols、1000 users、256 在途、ZGC）：终态业务平均 51,668.771/s，区间 34,787.163–68,984.173/s；Lane 40,037.540/s；Lane settlement 27,753.731/s；成交 9,827.047/s；错误/拒绝/超时/未完成均为 0。
+- 单轮方差较大（JMH 主指标 19.193 ± 6.994 ops/s），因此与历史 51,321.484/s 基线一致时只能判断“无可见回归”，不能把该短跑结果作为稳定吞吐承诺。
