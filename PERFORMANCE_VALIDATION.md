@@ -50791,3 +50791,11 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - 固定 HotSpot JDK 25.0.1、ZGC、4 Account Lane、1 Matcher、128 listed/active symbols、10,000 users、256 在途、UNIFORM、1×1s warmup、2×2s measurement、1 fork。
 - 终态业务吞吐 **30,486.832/s**，终态核心消息 **13,091.671/s**，Lane **22,536.700/s**，Lane settlement **15,288.716/s**；accepted=terminal，error/reject/timeout/unfinished 均为 0。
 - 该轮只有两个测量样本，且没有对照 commit；只能证明新编码路径可运行且没有明显回退，不能归因出确定收益，也不能证明 30 万+/s、稳态分配率或 p99≤5ms。
+
+
+### 2026-09-14 单订单响应直接 source 回归
+
+- 修改：`CoreCommandResultCodec.encodeSingleOrder` 接受 `CoreOrderStateSource`；`CommandResultBuilder` 对普通单订单响应复用 Owner 线程 source 游标，删除每笔响应的临时 `CoreOrderStateView`。多订单和触发单边界保持原列表路径。
+- HotSpot JDK 25.0.1、ZGC、4 Account Lane、1 Matcher、128 listed/active symbols、10,000 users、256 在途、UNIFORM、maxPositions=1、maxOpenOrders=3、hftRounds=1、batch=4、lifecycleSymbols=32，1×1s warmup、2×2s measurement、1 fork：终态业务 **23,286.393/s**，终态核心消息 **9,999.655/s**，Lane **17,213.939/s**，Lane settlement **11,677.798/s**，成交 **4,428.913/s**；accepted=terminal，error/reject/timeout/unfinished 均为 0。
+- 该轮只有两个测量样本，且没有同一进程对照；数值低于此前部分短轮，不能把波动归因于 source 优化，也不能宣称 30 万+/s、普通单 p99≤5ms 或稳态分配率达标。
+- 验证：协议编码等价测试、`TradingCoreRuntimeTest`、`ClusterCommandPipelineTest` 定向回归通过；service 聚合最终报告 **929 tests，0 failures，0 errors，0 skipped**。期间完整回归曾出现既有独立窗口 `incomplete lane command context` 时序抖动，自动重试后零失败；该堆栈不在编码 source 路径。

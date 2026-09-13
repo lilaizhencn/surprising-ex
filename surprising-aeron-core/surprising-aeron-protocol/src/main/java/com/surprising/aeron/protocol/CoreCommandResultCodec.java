@@ -72,7 +72,7 @@ public final class CoreCommandResultCodec {
     public static byte[] encodeSingleOrder(long coreSequence, UUID commandId, long orderId,
                                            long instrumentChangeId, long matcherSequence,
                                            long matcherPrefixBefore, long matcherPrefixAfter,
-                                           CoreOrderStateView order) {
+                                           CoreOrderStateSource order) {
         if (commandId == null || order == null) {
             throw new IllegalArgumentException("command result fields are required");
         }

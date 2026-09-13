@@ -1028,7 +1028,7 @@ final class OrderBatchExecutor {
         CoreAdmissionReservation reservation = owner.sequenceAdmission(pending.sequence());
         if (reservation == null) throw new IllegalStateException("order batch admission reservation is missing");
         owner.activateFactContext(reservation, pending.command(), pending.fingerprint());
-        owner.resultBuilder.commandOrderViews = List.of();
+        owner.resultBuilder.clearOrderViews();
         owner.resultBuilder.commandChangedUserIds = List.of();
         owner.resultBuilder.commandChangedOrderIds = List.of();
         owner.resultBuilder.commandTradeCount = 0;

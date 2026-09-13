@@ -203,7 +203,7 @@ final class OrderedCommitCoordinator {
                 validateMatchingEvidence(pending, matchingResult);
                 applyMatcherProgress(matchingResult);
                 laneContext.result(matchingResult, pending.settlementEvent().requiredLaneMask(), validAccountLaneMask());
-                owner.resultBuilder.commandOrderViews = List.of();
+                owner.resultBuilder.clearOrderViews();
                 owner.resultBuilder.commandChangedUserIds = List.of();
                 owner.resultBuilder.commandChangedOrderIds = List.of();
                 owner.resultBuilder.commandTradeCount = 0;
@@ -252,7 +252,7 @@ final class OrderedCommitCoordinator {
         } else {
             laneContext.result(matchingResult, expectedLaneMask(pending, matchingResult), validAccountLaneMask());
         }
-        owner.resultBuilder.commandOrderViews = List.of();
+        owner.resultBuilder.clearOrderViews();
         owner.resultBuilder.commandChangedUserIds = List.of();
         owner.resultBuilder.commandChangedOrderIds = List.of();
         owner.resultBuilder.commandTradeCount = 0;

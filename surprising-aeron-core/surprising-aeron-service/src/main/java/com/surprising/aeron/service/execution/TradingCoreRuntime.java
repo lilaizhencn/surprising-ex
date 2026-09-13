@@ -1056,7 +1056,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
         long beforeRuntimeRevision = runtimeState.revision();
         long runtimeCommandCheckpoint = runtimeState.commandRevisionCheckpoint();
         long positionIdentityCheckpoint = identities.positionCheckpoint();
-        resultBuilder.commandOrderViews = List.of();
+        resultBuilder.clearOrderViews();
         resultBuilder.commandChangedUserIds = List.of();
         resultBuilder.commandChangedOrderIds = List.of();
         resultBuilder.commandTradeCount = 0;

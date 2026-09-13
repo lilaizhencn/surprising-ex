@@ -223,7 +223,7 @@ final class MatchingCommandAdmission {
         List<Long> preMatchingCancellations = List.of();
         ResolvedMatchingAdmission admission = null;
         com.surprising.aeron.service.state.PlaceAdmissionEvent placeAdmission = null;
-        owner.resultBuilder.commandOrderViews = List.of();
+        owner.resultBuilder.clearOrderViews();
         owner.resultBuilder.commandChangedUserIds = List.of();
         owner.resultBuilder.commandChangedOrderIds = List.of();
         owner.resultBuilder.commandTradeCount = 0;
