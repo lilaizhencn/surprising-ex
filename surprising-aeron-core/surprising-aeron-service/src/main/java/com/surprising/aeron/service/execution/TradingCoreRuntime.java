@@ -480,7 +480,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     boolean requiresOwnerLaneAccessForPreparation(CoreMessage message) {
         return switch (message.header().messageType()) {
             // These commands only modify Owner metadata, never account state.
-            case PROBE_INCREMENT, VERIFY_STATE_HASH, UPDATE_CANCEL_ALL_AFTER -> false;
+            case PROBE_INCREMENT, VERIFY_STATE_HASH, UPDATE_CANCEL_ALL_AFTER, ACK_EXPORT -> false;
             case UPSERT_ALGO_ORDER, EXECUTE_TRIGGER_ORDER -> false;
             case PLACE_TRIGGER_ORDER, CANCEL_TRIGGER_ORDER, CLAIM_TRIGGER_ORDER, COMPLETE_TRIGGER_ORDER,
                     UPDATE_TRIGGER_TRAILING, EXPIRE_TRIGGER_ORDER, RETRY_TRIGGER_ORDER,
@@ -489,7 +489,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
                     UPDATE_INSTRUMENT_MAINTENANCE, UPSERT_FEE_POLICY -> false;
             case PLACE_ORDER, CANCEL_ORDER, REPLACE_ORDER, AMEND_ORDER, CANCEL_ORDER_BATCH -> false;
             case CONTINUE_RISK_SCAN, AMEND_ORDER_BATCH, PLACE_ORDER_BATCH, EXECUTE_ADL, RESOLVE_LIQUIDATION,
-                    EXECUTE_LIQUIDATION, EXECUTE_LIQUIDATION_BATCH -> false;
+                    EXECUTE_LIQUIDATION, EXECUTE_LIQUIDATION_BATCH, SETTLE_INSTRUMENT -> false;
             default -> true;
         };
     }

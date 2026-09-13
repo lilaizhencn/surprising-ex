@@ -177,19 +177,9 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
                 && (authorizedCancellations.isEmpty() || result.matcherEvents().stream()
                 .anyMatch(value -> value.eventType() == exchange.core2.core.common.MatcherEventType.TRADE)))
             throw new IllegalStateException("direct matcher returned an unreconciled partial outcome");
-        int canceled = 0;
-        for (var value : result.cancellations()) if (value.accepted()) {
-            if (!authorizedCancellations.contains(value.orderId()))
-                throw new IllegalStateException("direct matcher cancelled an unauthorized order");
-            canceled++;
-        }
         batchPlans[index].buildDirect(commitSequence, batchStorage.admittedOrders[index],
                 batchInstruments[index], result, runtime);
-        if (canceled != 0) {
-            long[] ids = new long[canceled]; int at = 0;
-            for (var value : result.cancellations()) if (value.accepted()) ids[at++] = value.orderId();
-            batchPlans[index].preCancellations(ids);
-        }
+        batchPlans[index].preCancellationsFromResult(result.cancellations(), authorizedCancellations);
     }
 
     private void finishDirectPublication() {

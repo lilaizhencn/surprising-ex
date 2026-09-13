@@ -3,6 +3,7 @@ package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 
 import com.surprising.aeron.service.matching.CoreMatchingResult;
+import com.surprising.aeron.service.matching.CoreCancellationResult;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
 import java.util.List;
@@ -28,6 +29,13 @@ public final class MatcherSettlementPlan {
     private List<MatcherEvent> matcherEvents;
     private int tradeCount;
     private long[] preCancellationOrderIds;
+    /**
+     * Reusable storage for event-owned cancellation identities.  The public
+     * setter still copies caller-owned arrays, while direct matcher events can
+     * fill this plan-owned buffer without creating a temporary array and then
+     * copying it a second time.
+     */
+    private long[] preCancellationStorage;
     private int[] makerLaneHeads;
     private int[] makerLaneNext;
     private int takerLaneId;
@@ -365,9 +373,47 @@ public final class MatcherSettlementPlan {
     public int tradeCount() { return tradeCount; }
     public MatcherSettlementPlan preCancellations(long[] orderIds) {
         if (orderIds == null) throw new IllegalArgumentException("pre-cancellation ids are required");
-        // 所有调用方都在派发前准备；只保留必要的不可变数组副本，不再复制整份计划。
-        preCancellationOrderIds = orderIds.length == 0 ? NO_ORDERS : orderIds.clone();
+        if (orderIds.length == 0) {
+            preCancellationOrderIds = NO_ORDERS;
+            return this;
+        }
+        ensurePreCancellationCapacity(orderIds.length);
+        System.arraycopy(orderIds, 0, preCancellationStorage, 0, orderIds.length);
+        preCancellationOrderIds = preCancellationStorage;
         return this;
+    }
+
+    /**
+     * Populate accepted pre-matching cancellations directly from a matcher
+     * result.  The plan owns the resulting storage until the pooled event is
+     * collected, so no intermediate array or defensive second copy is needed.
+     */
+    void preCancellationsFromResult(List<CoreCancellationResult> cancellations,
+                                     List<Long> authorizedOrderIds) {
+        if (cancellations == null || authorizedOrderIds == null) {
+            throw new IllegalArgumentException("cancellation inputs are required");
+        }
+        int count = 0;
+        for (CoreCancellationResult cancellation : cancellations) {
+            if (!cancellation.accepted()) continue;
+            long orderId = cancellation.orderId();
+            if (!authorizedOrderIds.contains(orderId)) {
+                throw new IllegalStateException("direct matcher cancelled an unauthorized order");
+            }
+            ensurePreCancellationCapacity(count + 1);
+            preCancellationStorage[count++] = orderId;
+        }
+        preCancellationOrderIds = count == 0 ? NO_ORDERS : preCancellationStorage;
+    }
+
+    private void ensurePreCancellationCapacity(int required) {
+        if (required <= 0) return;
+        if (preCancellationStorage == null) {
+            preCancellationStorage = new long[Math.max(4, required)];
+        } else if (preCancellationStorage.length < required) {
+            preCancellationStorage = java.util.Arrays.copyOf(preCancellationStorage,
+                    Math.max(required, preCancellationStorage.length * 2));
+        }
     }
     public int preCancellationCount() { return preCancellationOrderIds.length; }
     long preCancellationOrderId(int index) { return preCancellationOrderIds[index]; }

@@ -711,3 +711,16 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 
 - `RuntimeCommandProcessor.stampOrderChanges(...)` 也没有生产调用方；它会在缺少候选时物化完整订单快照，并在每个订单上重新投影 `OrderRuntime`。实际主链路使用唯一的 `stampChangedOrdersByLane(...)`。已删除该旧入口及不再需要的导入，进一步收敛为单一提交语义。
 - 受影响服务编译和 `RuntimeCommandProcessorTest` 8 项通过；不改变生产调用图和协议。
+
+### 2026-09-14 直接结算前置撤单数组复用
+
+- 直接 Matcher 结果包含前置撤单时，原路径先在 `MatcherSettlementEvent` 创建临时 `long[]`，再由 `MatcherSettlementPlan.preCancellations` 防御性复制；一次事件产生两份相同的短命数组。
+- 计划槽现在保留自己的可增长撤单缓冲。直接结果按已授权撤单逐项写入该缓冲，普通外部调用仍复制调用方数组，避免改变所有权和快照语义。
+- 没有新增队列、Map 或阶段；事件收集前缓冲仍由单一计划独占，清理只重置有效长度。`MatcherSettlementPlanTest`、`TradingRuntimeStateTest`、`ClusterCommandPipelineTest` 共 314 项通过。
+- 该项只消除直接结算中存在前置撤单时的双重数组分配；`OrderRuntime`、Lane 发布缓冲、Owner 有序证据/终态提交及其余控制路径仍是待用 JFR 稳态栈验证的开放项，不能据此宣称总体分配率或吞吐达标。
+
+### 2026-09-14 结算/导出准备阶段去除无必要全 Lane 借权
+
+- `SETTLE_INSTRUMENT` 已经具备异步交割续程，`ACK_EXPORT` 本身也不会修改账户状态；但准备门禁的默认分支仍会先请求 Owner 对全部 Lane 的写入权，造成一次全 Lane 停驻/恢复。
+- 两类消息现在明确标记为无需 Owner 借权。交割的账户变更继续由已有 `SettlementWork`/Control Lane 执行，导出确认仍按原拒绝协议处理；未知未来消息仍保留保守默认值。
+- `CoreMaintenanceTest`、`CoreResultLedgerTest`、`RiskBatchBudgetTest` 共 38 项通过。该项主要减少低频控制命令的 handoff 等待，不改变撮合主路径；Owner 终态提交、证据校验和其它控制入口仍需按 JFR 结果继续审查。
