@@ -50687,3 +50687,11 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 
 - 固定 128 币对、256 在途、4 Lane、1 Matcher、ZGC、UNIFORM、10000 users，1×1s warmup、2×2s measurement、1 fork：终态业务 **20,703.853/s**，终态核心消息 **10,365.388/s**，Lane **17,264.429/s**，Lane settlement **12,956.735/s**，成交 **3,446.155/s**；accepted=terminal，unfinished/error/timeout=0。
 - 该轮只用于正确性和回归观察，测量长度短且单 fork，不能与历史不同口径结果计算收益，也不能证明 30 万+/s 或 p99≤5ms。原始产物记录后已清理。
+
+### 2026-09-14 饱和路径复验与 JFR 角色归类修复
+
+- 固定 128 币对、256 在途、4 Account Lane、1 Matcher、ZGC、10000 users、`saturatedMatchingWorkload`；1×1 秒预热、2×2 秒测量、1 fork。终态业务 **53,855/s**，终态核心消息 **53,855/s**，Lane **134,639/s**，Lane settlement **80,783/s**，成交 **26,928/s**；accepted=terminal，拒绝/错误/超时/未完成均为 0。
+- 饱和 JFR 采样显示 Matcher 约 100% RUNNABLE，四个 Lane 合计约 99.99% RUNNABLE；Lane 确实持续饱和。Owner 在嵌入式 JMH 中由驱动线程承载，热点仍集中在 `OrderedCommitCoordinator.pumpMatchingCommitCompletions`、`LaneMutationTask.await`、`collectMatcherSettlement`、`RuntimeChangeBuffer.indexOf` 和结果编码/状态索引。
+- 修复 `analyze-owner-commit-jfr.sh` 的归类优先级：明确命名的 `core-account-lane-*`、`core-matcher-*`、Owner 线程以线程名为准；只有 JMH 合成驱动线程才使用调用栈归类，避免 Lane 因调用 `MatcherSettlement` 被误报为 Matcher。`bash -n`、业务延迟静态校验及修复后 JFR 重算通过。
+- JFR 采样分配约 **8.26 GB/s、10.5 KB/终态业务项**，主要为 `CoreCommandResultCodec.encode`、命令编解码、`OrderRuntime`、`byte[]`、`long[]`、`CoreOrderStateView` 和 `TreeMap`；该区间仍包含启动/JFR/快照活动，不能作为生产稳态分配率。ZGC 最大暂停约 **49µs**，Allocation Stall=0，失败/退化=0。
+- 这轮只证明饱和状态和计数正确，未证明 30 万+/s 或普通下单 p99≤5ms；原始 JFR、GC、NMT 和临时目录已在记录后清理。脚本修复提交后仍需重新生成正式长稳态 Linux 证据，不能用嵌入式 JMH 驱动线程代替独立 Owner CPU 结论。

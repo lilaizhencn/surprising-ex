@@ -241,10 +241,19 @@ jq -n \
   def eventRole:
     (role(thread(.))) as $threadRole |
     (role(stackText)) as $stackRole |
-    if (["matcher", "risk", "snapshot", "projection", "core-fact/exporter", "Kafka", "lane"] |
-        index($stackRole)) != null then $stackRole
-    elif $threadRole != "unclassified" then $threadRole
-    else $stackRole end;
+    # A named runtime thread is authoritative. Its stack often contains a
+    # downstream method (for example Lane -> MatcherSettlement), which must
+    # not change the thread ownership. Use the stack only for generic
+    # launcher/worker threads that have no semantic name.
+    # JMH embeds the Owner in its benchmark driver thread. That synthetic
+    # thread has no runtime ownership in its name, so retain stack inference
+    # for it while still protecting explicitly named runtime threads.
+    if (($threadRole == "peripheral") and
+        (thread(.) | test("jmh-worker|linearperpetualcorebenchmark"; "i"))) then
+      if ($stackRole != "unclassified") then $stackRole else $threadRole end
+    elif ($threadRole != "unclassified") then $threadRole
+    elif ($stackRole != "unclassified") then $stackRole
+    else "unclassified" end;
   def top($items; keyFilter):
     [$items[] | {key: keyFilter}] | group_by(.key) |
     map({name: .[0].key, samples: length}) | sort_by(-.samples) | .[0:25];
