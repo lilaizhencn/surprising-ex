@@ -2130,11 +2130,12 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     void drainMatchingCompletions() {
-        crossShardCancellations.poll();
+        if (crossShardCancellations.hasPending()) crossShardCancellations.poll();
         // 本地准入续跑不能依赖新的 Lane 通知；其他阶段不再触发整套准入扫描。
         if (placeAdmissionReadyShardMask != 0 || runtimeState.hasPlaceAdmissionNotifications())
             progressPlaceAdmissions();
-        matcherPipeline.drainMatchingCompletions(this::publishMatchingCompletion);
+        if (matcherPipeline.hasMatchingCompletions())
+            matcherPipeline.drainMatchingCompletions(this::publishMatchingCompletion);
         if (runtimeState.hasSettlementNotifications()) commits.drainMatcherSettlementCompletions();
     }
 

@@ -60,6 +60,8 @@ final class CrossShardCancellationCoordinator {
 
     void clear() { pending.clear(); }
 
+    boolean hasPending() { return !pending.isEmpty(); }
+
     /** 单条清算命令的跨分片进度；matcher 只执行当前订单，owner 收集不可变结果。 */
     private static final class Progress {
         /** 原始待提交命令及确定性撤单次序。 */
