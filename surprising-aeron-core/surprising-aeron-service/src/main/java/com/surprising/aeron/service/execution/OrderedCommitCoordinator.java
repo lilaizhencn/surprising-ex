@@ -341,8 +341,6 @@ final class OrderedCommitCoordinator {
                     if (settlementTreasuryDelta == null) return null;
                     requestCommitPublication();
                     owner.resultBuilder.commandTradeCount = TradingCoreRuntime.tradeCount(settlementPlan);
-                    owner.resultBuilder.commandOrderViews = owner.resultBuilder.commandChangedOrderIds.stream().map(owner::runtimeOrder)
-                            .filter(java.util.Objects::nonNull).map(owner::orderView).toList();
                 }
                 case LIQUIDATION -> {
                     var command = pending.decodedCommand().liquidation();
@@ -537,8 +535,6 @@ final class OrderedCommitCoordinator {
                     }
                     requestCommitPublication();
                     owner.resultBuilder.commandTradeCount = TradingCoreRuntime.tradeCount(pending.settlementPlan());
-                    owner.resultBuilder.commandOrderViews = owner.resultBuilder.commandChangedOrderIds.stream().map(owner::runtimeOrder)
-                            .filter(java.util.Objects::nonNull).map(owner::orderView).toList();
                 }
                 default -> throw new IllegalStateException(
                         "operation cannot own an asynchronous matcher settlement: " + pending.operation());

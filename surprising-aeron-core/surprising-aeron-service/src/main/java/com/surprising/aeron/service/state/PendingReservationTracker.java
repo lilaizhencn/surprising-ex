@@ -424,7 +424,9 @@ final class PendingReservationTracker {
                 firstOrderBySequence.removeKey(coreSequence);
                 return;
             }
-            long promotedOrderId = additionalOrderIds.detectIfNone(value -> true, 0);
+            // The set is known to be non-empty.  Use its primitive iterator directly so
+            // promoting a replacement reservation does not create a predicate/adapter.
+            long promotedOrderId = additionalOrderIds.longIterator().next();
             additionalOrderIds.remove(promotedOrderId);
             firstOrderBySequence.put(coreSequence, promotedOrderId);
             if (additionalOrderIds.isEmpty()) additionalOrdersBySequence.removeKey(coreSequence);

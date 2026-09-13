@@ -724,3 +724,9 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - `SETTLE_INSTRUMENT` 已经具备异步交割续程，`ACK_EXPORT` 本身也不会修改账户状态；但准备门禁的默认分支仍会先请求 Owner 对全部 Lane 的写入权，造成一次全 Lane 停驻/恢复。
 - 两类消息现在明确标记为无需 Owner 借权。交割的账户变更继续由已有 `SettlementWork`/Control Lane 执行，导出确认仍按原拒绝协议处理；未知未来消息仍保留保守默认值。
 - `CoreMaintenanceTest`、`CoreResultLedgerTest`、`RiskBatchBudgetTest` 共 38 项通过。该项主要减少低频控制命令的 handoff 等待，不改变撮合主路径；Owner 终态提交、证据校验和其它控制入口仍需按 JFR 结果继续审查。
+
+## 2026-09-14 结算收尾重复工作清理
+
+- TRIGGER 结算路径原先在 `completeMatching`/`completeDispatchedMatcherSettlement` 中先把变化订单通过 Stream 物化成 `CoreOrderStateView`，随后统一收尾又调用 `materializeCommandOrderViews` 再物化一次；已删除前一份必然被覆盖的中间列表。终态响应仍在有序提交完成后按原规则生成。
+- pending reservation 序号索引提升首订单时原先使用恒真谓词适配器选择元素；已改为直接使用 primitive iterator，不创建谓词/适配对象，也不改变提升顺序或 `orderIds` 的外部顺序约束。
+- 定向回归：`TradingRuntimeStateTest` 57 项、`ClusterCommandPipelineTest` 250 项通过；服务模块编译通过。该修复属于确定性的重复分配/遍历削减，尚未据此宣称吞吐、p99 或整体分配率达标，仍需与固定 128 币对的 JMH/JFR 基线复测。

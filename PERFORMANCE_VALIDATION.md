@@ -50624,3 +50624,13 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - JFR 分析：采样估算分配 `11,508,661,936 B/s`、`427,513 B/终态业务项`；主要类型为 `[B`、`[J`、`Object[]`、`TreeMap$Entry`、`CoreOrderState`、`OrderRuntime`、`Long`、`String`，主要站点为 `TreeMap.put`、字符串拼接/编码、`HashMap.putVal`、`LongObjectHashMap.allocateTable`、快照 Reader。该估算包含 JMH fork 的初始化/恢复期，不能直接作为稳态业务分配率。
 - CPU 采样仍显示 `LaneMutationTask.await`、`OrderedCommitCoordinator.pumpMatchingCommitCompletions`、`TreeMap.put/getEntry`、`LaneClientOrderCaptures.contains`、`CoreStateHash.mix`；Matcher 与四个 Lane 均有样本。锁/等待事件总时长约 54.1ms，ZGC 20 次回收、总停顿约 1.066ms、最大约 0.071ms，`ZAllocationStall=0`，失败/退化信号为 0。
 - profile 端到端 closed-loop 直方图的 p99（纳秒桶）为 PLACE 8.39ms、CANCEL 16.78ms、ORDER_BATCH 67.11ms、TRIGGER 2.10ms、RISK_SCAN 0.26ms、LIQUIDATION 16.78ms、FUNDING 2.10ms、ADL 4.19ms；包含初始化且未修正协调遗漏，不能作为普通下单 p99≤5ms 验收。记录与分析目录：`/tmp/surprising-profile-final/scale-profile.json`、`/tmp/surprising-profile-final/scale-jfr-analysis/`。
+
+## 2026-09-14 结算收尾重复工作清理后复测
+
+- 代码版本：删除 TRIGGER 结算中必然被覆盖的第一次订单视图物化；pending reservation 首单提升改用 primitive iterator；Aeron 1.53.1；HotSpot JDK 25.0.1；ZGC；4 lanes；1 matcher；固定 128 listed/active symbols。
+- 短 JMH（`scaleMixedWorkload`，1000 users，256 在途，UNIFORM，1 warmup/2s measurement，1 fork）：13.237 ops/s；终态业务 35,633.848/s；终态核心消息 15,301.905/s；Lane 27,612.261/s；Lane settlement 19,140.618/s；成交 6,777.314/s；错误/拒绝/超时/未完成均为 0。
+- 同一轮的上一条基线为 19.064 ops/s、终态业务 51,321.484/s；短跑单轮方差明显，不能把本次小改动解释为吞吐下降或提升，也不能据此宣称 30万+/s。
+- JFR/NMT（`scaleMixedWorkload`，10000 users，2g heap，128 symbols，2 warmup×2s + 10s measurement，非 fork profile）：终态业务 23,626.396/s；终态核心消息 10,145.659/s；Lane 19,150.370/s；Lane settlement 13,533.396/s；成交 4,493.579/s；错误/拒绝/超时/未完成均为 0。
+- JFR 录制有效业务区间约 1 秒，分配采样估算 10.53 GB/s、约 434.6 KB/终态业务项，包含启动/恢复和 JFR/NMT 开销，不能作为稳态分配率。主要分配栈仍为 `TreeMap.put`（快照/恢复物化）、字符串拼接/编码、`RuntimeStateProjector.toRuntimeOrder`、`LongObjectHashMap`/`LongLongHashMap` 扩容及 `OrderRuntime`/快照对象。
+- CPU 采样仍显示 `TradingRuntimeState$LaneMutationTask.await`、`OrderedCommitCoordinator.pumpMatchingCommitCompletions`、Owner 的 `TreeMap`/状态哈希与 Lane 客户订单捕获；ZGC 21 次回收，暂停 P99 约 66µs，Allocation Stall=0，失败/退化=0。
+- 结论：本次改动确认了两处确定性的重复分配/遍历已移除，未改变主瓶颈结构。Owner 有序完成提交、终态索引/结果持久化和 Lane handoff 仍需保留并继续按稳态 JFR 栈优化；不得把短 profile 的采样估算当作生产分配率或延迟验收。
