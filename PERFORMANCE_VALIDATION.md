@@ -50649,3 +50649,4 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - 新增 fence 守卫后的服务模块完整回归：926 项通过，Failures 0、Errors 0，Maven BUILD SUCCESS。
 - 追加衍生品成交/预留快路径后，`RuntimeDerivativeFillCalculatorTest` 8 项、`RuntimeDerivativeMatchProcessorTest` 8 项、`TradingRuntimeStateTest` 57 项及 `ClusterCommandPipelineTest` 250 项均通过；本次未将单次局部优化误报为整体吞吐或分配率收益。
 - 追加单项批量结算初始身份 scratch 复用后，`MatcherSettlementPlanTest` 9 项通过；服务模块编译通过。该修复仅移除每个批量项的一次性 taker ID 数组，不改变吞吐、p99 或稳态分配率结论。
+- 上述改动后的服务模块全量回归：`mvn -pl surprising-aeron-core/surprising-aeron-service -am test`，927 项通过，Failures 0、Errors 0，Maven BUILD SUCCESS。
