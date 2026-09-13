@@ -27,6 +27,14 @@ import org.agrona.collections.LongHashSet;
 public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOrderIndex {
 
     public static final int MAX_PAGE_SIZE = 1_024;
+    /**
+     * The production window keeps at most a few hundred active orders per process
+     * in the hot turnover path.  Starting the primitive maps at this bound avoids
+     * repeated rehash/copy cycles when a fixed 128-symbol workload warms up.
+     * Maps still grow normally for larger deployments.
+     */
+    private static final int INITIAL_INDEX_CAPACITY = 256;
+    private static final int INITIAL_USER_INDEX_CAPACITY = 64;
     private static final NavigableSet<Long> EMPTY_IDS = Collections.emptyNavigableSet();
     private static final LongIterator EMPTY_ITERATOR = new LongIterator() {
         public boolean hasNext() { return false; }
@@ -35,12 +43,14 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
 
     // Back-shift deletion avoids tombstone rehashes during bounded order turnover.
     // Independent iterators preserve nested admission/query cursors.
-    private final Long2ObjectHashMap<LongHashSet> idsByUser = new Long2ObjectHashMap<>(8, 0.65f, false);
-    private final Map<String, LongHashSet> idsBySymbol = new HashMap<>();
+    private final Long2ObjectHashMap<LongHashSet> idsByUser =
+            new Long2ObjectHashMap<>(INITIAL_USER_INDEX_CAPACITY, 0.65f, false);
+    private final Map<String, LongHashSet> idsBySymbol = new HashMap<>(INITIAL_INDEX_CAPACITY);
     // Owner-maintained participant counts: admission must include potential maker accounts
     // without scanning the order book on every incoming command. Removed with the last order.
-    private final Map<String, OrderParticipantIndex> participantsBySymbol = new HashMap<>();
-    private final Long2ObjectHashMap<IndexedOrder> ordersById = new Long2ObjectHashMap<>(8, 0.65f, false);
+    private final Map<String, OrderParticipantIndex> participantsBySymbol = new HashMap<>(INITIAL_INDEX_CAPACITY);
+    private final Long2ObjectHashMap<IndexedOrder> ordersById =
+            new Long2ObjectHashMap<>(INITIAL_INDEX_CAPACITY, 0.65f, false);
     private RuntimeIdentityRegistry recoveryIdentities;
 
     /** One Owner-owned index entry per active order; updates reuse the Lane's immutable value. */
@@ -479,11 +489,15 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
         ordersById.put(order.orderId(), order);
         LongHashSet userIds = idsByUser.get(order.userId());
         if (userIds == null) {
+            // User buckets are removed when the last order leaves.  Keep their
+            // per-user allocation small so short-lived users do not pay the
+            // process-wide active-order capacity.
             userIds = new LongHashSet(8, 0.65f, false);
             idsByUser.put(order.userId(), userIds);
         }
         userIds.add(order.orderId());
-        idsBySymbol.computeIfAbsent(order.symbol(), ignored -> new LongHashSet(8, 0.65f, false)).add(order.orderId());
+        idsBySymbol.computeIfAbsent(order.symbol(), ignored ->
+                new LongHashSet(INITIAL_INDEX_CAPACITY, 0.65f, false)).add(order.orderId());
     }
 
     private void remove(IndexedOrder order) {
