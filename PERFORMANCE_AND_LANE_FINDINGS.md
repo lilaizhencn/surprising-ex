@@ -799,3 +799,11 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - 删除持仓在 publication 替换 Owner 视图前完成 realtime capture，终态订单批量 sink、route tombstone 和 admission sequence 语义保持不变。
 - HotSpot JDK 25 下 `mvn -q -pl surprising-aeron-core/surprising-aeron-service -am -DskipTests package` 通过；service 全量回归 `927 tests, 0 failures, 0 errors, 0 skipped`，settlement/publication/独立窗口定向回归通过。
 - 本次只验证了正确性和重复遍历削减，尚未重跑 GCP 16c32g 的 64/128 窗口 ZGC 吞吐、Owner/Lane/Matcher CPU、分配率及 p99；因此不能据此宣称 30 万+/s 或 p99≤5ms 已达成。服务全量测试中的 Aeron heartbeat/独立窗口时序需继续作为稳定性门禁观察。
+
+
+### 2026-09-14 批量结算状态与撤单标识进一步收敛
+
+- `OrderBatchPending` 的延后结算不再维护订单号、Lane mask、结果三份动态列表；每个 `OrderBatchItem` 唯一持有撮合结果和 Lane mask，批次只保留固定容量的 item index 数组。清理阶段按有效长度回收，批次容量上限仍由既有 256 在途预算约束。
+- `PendingMatching` 接收内部不可变 primitive 订单号列表时直接保留其底层数组视图，避免衍生品自成交/容量冲突路径每笔再次创建装箱 `Object[]`；外部可变列表仍防御性复制。
+- 批量结算、核心流水线和 service 全量回归均通过（全量 927 项无失败）；并行产品线定向测试偶发 Aeron heartbeat/agent 时序失败后单独重跑通过。
+- 这两项只减少中间状态和短命容器，Owner 有序证据校验、资金守恒、终态提交及结果账本仍保留。没有新一轮 Linux/GCP 64/128 ZGC 运行，因此不把它们当作吞吐、p99 或分配率达标证据。
