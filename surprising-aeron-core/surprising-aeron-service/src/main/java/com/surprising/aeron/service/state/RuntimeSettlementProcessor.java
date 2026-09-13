@@ -180,9 +180,9 @@ public final class RuntimeSettlementProcessor {
         UserPage userPage = ordersComplete || !moreOrders
                 ? selectUsers(indexedUserIds, runtime, accountLaneId, command.cursorUserId(), command.maxUsers())
                 : new UserPage(new ArrayList<>(), accountLaneId, 0, true);
-        return new SettlementWork(command, chunkCommandId, activeOrderIndex, runtime, identities,
+        return new SettlementWork(command, chunkCommandId, runtime,
                 instrument, kernel, symbolId, assetId, previousProgress, selectedOrders,
-                moreOrders, userPage, indexedUserIds);
+                moreOrders, userPage);
     }
 
     /** Bounded asynchronous settlement continuation. Instances are owner-confined. */
@@ -191,16 +191,13 @@ public final class RuntimeSettlementProcessor {
 
         private final SettleInstrumentCommand command;
         private final UUID chunkCommandId;
-        private final ActiveOrderIndex activeOrderIndex;
         private final TradingRuntimeState runtime;
-        private final RuntimeIdentityRegistry identities;
         private final CoreInstrumentState instrument;
         private final ProductTradingRules kernel;
         private final int symbolId, assetId;
         private final TreasuryRuntime.LifecycleProgressRuntime previousProgress;
         private final List<CoreOrderState> selectedOrders;
         private final boolean moreOrders;
-        private final Iterable<Long> indexedUserIds;
         private final ArrayList<Long> selectedUserIds;
         private final boolean usersComplete;
         private final long orderLaneMask;
@@ -211,17 +208,15 @@ public final class RuntimeSettlementProcessor {
         private CoreSettlementProgressView result;
 
         private SettlementWork(SettleInstrumentCommand command, UUID chunkCommandId,
-                ActiveOrderIndex activeOrderIndex, TradingRuntimeState runtime,
-                RuntimeIdentityRegistry identities, CoreInstrumentState instrument,
+                TradingRuntimeState runtime, CoreInstrumentState instrument,
                 ProductTradingRules kernel, int symbolId, int assetId,
                 TreasuryRuntime.LifecycleProgressRuntime previousProgress,
-                List<CoreOrderState> selectedOrders, boolean moreOrders, UserPage userPage,
-                Iterable<Long> indexedUserIds) {
+                List<CoreOrderState> selectedOrders, boolean moreOrders, UserPage userPage) {
             this.command = command; this.chunkCommandId = chunkCommandId;
-            this.activeOrderIndex = activeOrderIndex; this.runtime = runtime; this.identities = identities;
+            this.runtime = runtime;
             this.instrument = instrument; this.kernel = kernel; this.symbolId = symbolId; this.assetId = assetId;
             this.previousProgress = previousProgress; this.selectedOrders = selectedOrders;
-            this.moreOrders = moreOrders; this.indexedUserIds = indexedUserIds;
+            this.moreOrders = moreOrders;
             this.selectedUserIds = userPage.userIds(); this.usersComplete = userPage.complete();
             long orderMask = 0;
             for (CoreOrderState order : selectedOrders) orderMask |= runtime.topology().accountLaneMask(order.userId());
@@ -233,10 +228,10 @@ public final class RuntimeSettlementProcessor {
         }
 
         private SettlementWork(TradingRuntimeState runtime, CoreSettlementProgressView result) {
-            this.command = null; this.chunkCommandId = null; this.activeOrderIndex = null;
-            this.runtime = runtime; this.identities = null; this.instrument = null; this.kernel = null;
+            this.command = null; this.chunkCommandId = null;
+            this.runtime = runtime; this.instrument = null; this.kernel = null;
             this.symbolId = this.assetId = 0; this.previousProgress = null; this.selectedOrders = List.of();
-            this.moreOrders = false; this.indexedUserIds = List.of(); this.selectedUserIds = new ArrayList<>();
+            this.moreOrders = false; this.selectedUserIds = new ArrayList<>();
             this.usersComplete = true;
             this.orderLaneMask = this.userLaneMask = 0; this.phase = Phase.DONE; this.result = result;
         }
@@ -258,10 +253,6 @@ public final class RuntimeSettlementProcessor {
                     return false;
                 }
                 case PREPARE -> {
-                    if (selectedOrders.size() != 0 && !moreOrders && previousProgress == null
-                            && command.cursorOrderId() == 0 && selectedUserIds.isEmpty()) {
-                        // The order cancellation page completed; users were selected during construction.
-                    }
                     if (orderLaneMask != 0 && !runtime.pollControlLanes()) return false;
                     if (moreOrders) {
                         long nextCursor = selectedOrders.isEmpty() ? command.cursorOrderId()
