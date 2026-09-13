@@ -9,39 +9,49 @@ final class OrderParticipantIndex {
     private Node bids, asks;
     /** 与账户状态相同的恢复后路由，用于保护物理 Lane 内的有序执行。 */
     private final com.surprising.aeron.service.state.LaneTopology topology;
+    private long computedCounterpartyMask;
+    private long computedCounterpartyLaneMask;
 
     OrderParticipantIndex(com.surprising.aeron.service.state.LaneTopology topology) { this.topology = topology; }
 
     long mask() { return mask(bids) | mask(asks); }
 
     long counterparties(CoreOrderSide incomingSide, long limitPrice) {
-        Node node = incomingSide == CoreOrderSide.BUY ? asks : bids;
-        if (limitPrice == 0) return mask(node); // Market admission may consume any opposing level.
-        long result = 0;
-        while (node != null) {
-            boolean crosses = incomingSide == CoreOrderSide.BUY ? node.price <= limitPrice : node.price >= limitPrice;
-            if (crosses) {
-                result |= 1L << node.partition;
-                result |= mask(incomingSide == CoreOrderSide.BUY ? node.left : node.right);
-                node = incomingSide == CoreOrderSide.BUY ? node.right : node.left;
-            } else node = incomingSide == CoreOrderSide.BUY ? node.left : node.right;
-        }
-        return result;
+        computeCounterpartyMasks(incomingSide, limitPrice);
+        return computedCounterpartyMask;
     }
 
     long counterpartyLanes(CoreOrderSide incomingSide, long limitPrice) {
+        computeCounterpartyMasks(incomingSide, limitPrice);
+        return computedCounterpartyLaneMask;
+    }
+
+    void computeCounterpartyMasks(CoreOrderSide incomingSide, long limitPrice) {
         Node node = incomingSide == CoreOrderSide.BUY ? asks : bids;
-        if (limitPrice == 0) return laneMask(node);
-        long result = 0;
+        if (limitPrice == 0) {
+            // Market admission may consume any opposing level.
+            computedCounterpartyMask = mask(node);
+            computedCounterpartyLaneMask = laneMask(node);
+            return;
+        }
+        long accountMask = 0;
+        long laneMask = 0;
         while (node != null) {
             boolean crosses = incomingSide == CoreOrderSide.BUY ? node.price <= limitPrice : node.price >= limitPrice;
             if (crosses) {
-                result |= node.ownLaneMask | laneMask(incomingSide == CoreOrderSide.BUY ? node.left : node.right);
+                Node nonCrossing = incomingSide == CoreOrderSide.BUY ? node.left : node.right;
+                accountMask |= 1L << node.partition;
+                accountMask |= mask(nonCrossing);
+                laneMask |= node.ownLaneMask | laneMask(nonCrossing);
                 node = incomingSide == CoreOrderSide.BUY ? node.right : node.left;
             } else node = incomingSide == CoreOrderSide.BUY ? node.left : node.right;
         }
-        return result;
+        computedCounterpartyMask = accountMask;
+        computedCounterpartyLaneMask = laneMask;
     }
+
+    long computedCounterpartyMask() { return computedCounterpartyMask; }
+    long computedCounterpartyLaneMask() { return computedCounterpartyLaneMask; }
 
     void add(CoreOrderSide side, long price, long userId) { change(side, price, userId, 1); }
     void remove(CoreOrderSide side, long price, long userId) { change(side, price, userId, -1); }
