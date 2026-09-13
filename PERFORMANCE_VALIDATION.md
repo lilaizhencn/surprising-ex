@@ -50732,4 +50732,4 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 ### 2026-09-14 状态哈希分配收敛（短轮复测）
 
 - 在 `0eb7376a` 之后保留 ASCII 状态哈希的直接字符混合，去除常见哈希路径的 UTF-8 临时数组；Lane mutation await fast path 因并发可见性竞态已撤回。
-- 定向回归通过；固定 128 symbols、256 in-flight、ZGC workload 的短轮 accepted/terminal **24,166/s**，lane **17,864/s**，settlement **12,119/s**，error/reject/timeout/unfinished **0**。这是短轮单 fork 结果，不能与前一轮作容量结论，也未测 GCP。
+- 定向回归及随后 service 全量 927 项回归通过。曾对包含 await fast path 的临时工作树做短轮采集，但该 fast path 因并发可见性竞态已撤回，相关吞吐数字不作为最终代码证据；最终可用性能证据以上一节 `0eb7376a` 的 JMH/JFR 结果为准。
