@@ -183,6 +183,29 @@ class MatcherSettlementPlanTest {
     }
 
     @Test
+    void expectedCancellationsAreWrittenInAdmissionOrderIntoReusablePlanStorage() {
+        try (var runtime = new TradingRuntimeState()) {
+            var identities = new RuntimeIdentityRegistry();
+            int symbol = identities.symbolId("BTC-USDT");
+            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            runtime.putInstrument(instrument());
+            runtime.putOrder(order(11, 21, symbol, CoreOrderSide.BUY, 3));
+            var slot = MatcherSettlementPlan.buildInto(new MatcherSettlementPlan(), 1, 11, 21, 11, 0,
+                    new CoreMatchingResult(true, "SUCCESS", List.of(), 0, true,
+                            new CoreMatchingResult.NativeCommand(1, 1, 2, 11, 1, 1, 1, 1, 0),
+                            new CoreMatchingResult.MatcherPrefix(1, 2), null, List.of(),
+                            new MatcherResult.MarketData(List.of(), List.of(), 0, 0)), runtime, identities);
+            var cancellations = List.of(new com.surprising.aeron.service.matching.CoreCancellationResult(13, true, "CANCELLED"),
+                    new com.surprising.aeron.service.matching.CoreCancellationResult(12, false, "NOT_FOUND"),
+                    new com.surprising.aeron.service.matching.CoreCancellationResult(11, true, "CANCELLED"));
+            slot.preCancellationsFromExpected(List.of(12L, 11L, 13L), cancellations);
+            assertThat(slot.preCancellationCount()).isEqualTo(2);
+            assertThat(slot.preCancellationOrderId(0)).isEqualTo(11);
+            assertThat(slot.preCancellationOrderId(1)).isEqualTo(13);
+        }
+    }
+
+    @Test
     void singleEventAndRepeatedMakerBothRejectExcessBeforeStateMutation() {
         try (var runtime = new TradingRuntimeState()) {
             var identities = new RuntimeIdentityRegistry();

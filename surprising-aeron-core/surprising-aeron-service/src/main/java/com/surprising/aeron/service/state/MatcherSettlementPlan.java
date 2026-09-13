@@ -414,6 +414,42 @@ public final class MatcherSettlementPlan {
         preCancellationSize = count;
     }
 
+    /**
+     * Populate pre-matching cancellations in the admission order.  PLACE and
+     * TRIGGER carry the expected IDs separately from the matcher result; write
+     * the accepted subset straight into this plan-owned buffer instead of
+     * allocating an intermediate array for the coordinator to copy.
+     */
+    public void preCancellationsFromExpected(List<Long> expectedOrderIds,
+                                             List<CoreCancellationResult> cancellations) {
+        if (expectedOrderIds == null || cancellations == null) {
+            throw new IllegalArgumentException("cancellation inputs are required");
+        }
+        if (expectedOrderIds.isEmpty()) {
+            preCancellationOrderIds = NO_ORDERS;
+            preCancellationSize = 0;
+            return;
+        }
+        int count = 0;
+        for (Long expectedOrderId : expectedOrderIds) {
+            if (expectedOrderId == null) continue;
+            long orderId = expectedOrderId;
+            boolean accepted = false;
+            for (CoreCancellationResult cancellation : cancellations) {
+                if (cancellation.accepted() && cancellation.orderId() == orderId) {
+                    accepted = true;
+                    break;
+                }
+            }
+            if (accepted) {
+                ensurePreCancellationCapacity(count + 1);
+                preCancellationStorage[count++] = orderId;
+            }
+        }
+        preCancellationOrderIds = count == 0 ? NO_ORDERS : preCancellationStorage;
+        preCancellationSize = count;
+    }
+
     private void ensurePreCancellationCapacity(int required) {
         if (required <= 0) return;
         if (preCancellationStorage == null) {

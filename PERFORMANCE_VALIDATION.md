@@ -50611,3 +50611,9 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 
 - 重新构建 `product-core-benchmarks.jar` 后，同样使用 HotSpot JDK 25.0.1、ZGC、4 Lane/1 matcher、128 币对、1000 users、UNIFORM、1s warmup、2×2s measurement；`scaleMixedWorkload` 得到 `19.076 ops/s`，`terminalBusinessOperations=51353.889/s`、`laneOperations=39793.541/s`、`laneSettlementOperations=27584.593/s`，拒绝/超时/未完成均为 0。结果：`/tmp/surprising-qual-20260914-0047/scale-jmh.json`。
 - 该结果与前一轮 1×3s 短轮的测量长度和热身不同，不能计算收益百分比；只确认改动可运行且没有功能计数回归。容量、p99 和稳态分配率仍需锁定同一长测量协议后再比较。
+
+### 2026-09-14 前置撤单计划槽直写短 JMH
+
+- 代码包含 PLACE/TRIGGER 前置撤单结果直接写入 `MatcherSettlementPlan` 复用槽，省去临时 `long[]` 及二次复制；验证新增 `MatcherSettlementPlanTest.expectedCancellationsAreWrittenInAdmissionOrderIntoReusablePlanStorage`。
+- 使用 HotSpot JDK 25.0.1、ZGC、4 account Lane、1 matcher、128 listed/active symbols、1000 users、`maxPositionsPerUser=2`、`maxOpenOrdersPerUser=3`、UNIFORM、`hftRounds=1`、`hftBatchSize=4`、1s warmup、2×2s measurement，`scaleMixedWorkload`：`19.064 ops/s`；`terminalBusinessOperations=51321.484/s`、`terminalCoreMessages=22038.498/s`、`laneOperations=39768.431/s`、`laneSettlementOperations=27567.186/s`、`terminalTrades=9760.995/s`；拒绝、超时、未完成均为 0。结果：`/tmp/surprising-scale-mixed-final.json`。
+- 该轮是短 closed-loop 诊断，不能据此宣称吞吐提升、30万+/s、p99≤5ms 或稳态分配率达标；没有运行 JFR，因此不更新 Owner/Matcher/Lane 热点和分配率结论。与历史不同测量长度的结果不做百分比比较。

@@ -754,11 +754,11 @@ final class OrderedCommitCoordinator {
         return switch (pending.operation()) {
             case PLACE -> {
                 long orderId = pending.decodedCommand().placeOrder().orderId();
-                yield com.surprising.aeron.service.state.MatcherSettlementPlan.buildInto(
+                var plan = com.surprising.aeron.service.state.MatcherSettlementPlan.buildInto(
                         owner.laneCommandContexts.required(pending.sequence()).settlementPlanBuffer(), pending.sequence(), orderId, userId, orderId, 0, result,
-                        owner.runtimeState, owner.identities)
-                        .preCancellations(acceptedPreMatchingCancellationIds(pending, result))
-                        .rejectTaker(!result.accepted());
+                        owner.runtimeState, owner.identities);
+                plan.preCancellationsFromExpected(pending.preMatchingCancellationOrderIds(), result.cancellations());
+                yield plan.rejectTaker(!result.accepted());
             }
             case REPLACE, AMEND -> {
                 ResolvedMatchingAdmission admission = owner.requireMatchingAdmission(pending);
@@ -776,8 +776,8 @@ final class OrderedCommitCoordinator {
                         "trigger admission is missing").orderId();
                 var plan = com.surprising.aeron.service.state.MatcherSettlementPlan.buildInto(
                         owner.laneCommandContexts.required(pending.sequence()).settlementPlanBuffer(), pending.sequence(), orderId, trigger.userId(), orderId, 0, result,
-                        owner.runtimeState, owner.identities)
-                        .preCancellations(acceptedPreMatchingCancellationIds(pending, result));
+                        owner.runtimeState, owner.identities);
+                plan.preCancellationsFromExpected(pending.preMatchingCancellationOrderIds(), result.cancellations());
                 plan.rejectTaker(!result.accepted()).completeTrigger(result.accepted()
                         ? com.surprising.aeron.service.state.RuntimeCommandProcessor.prepareMatchedTriggerCompletion(
                                 trigger, orderId, execute[3])
