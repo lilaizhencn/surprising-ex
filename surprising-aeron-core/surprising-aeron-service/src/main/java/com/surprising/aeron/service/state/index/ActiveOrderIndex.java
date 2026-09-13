@@ -565,6 +565,12 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
         ids.add(id);
     }
 
+    /** Keep the bounded symbol bucket allocated so order turnover does not recreate a hash table. */
+    private void removeSymbolBucket(String symbol, long id) {
+        LongHashSet ids = idsBySymbol.get(symbol);
+        if (ids != null) ids.remove(id);
+    }
+
     private static <K> void remove(Map<K, LongHashSet> values, K key, long id) {
         LongHashSet ids = values.get(key);
         if (ids == null) return;
