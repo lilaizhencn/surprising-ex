@@ -614,9 +614,8 @@ final class OrderBatchExecutor {
             batch.itemAdmission = null;
             long orderId = ((AmendOrderCommand) batch.items.get(batch.nextIndex).command).replacementOrderId();
             if (owner.productLine.isDerivative()) {
-                batch.deferredSettlementOrderIds.add(orderId);
-                batch.deferredSettlementExpectedLaneMasks.add(owner.commits.expectedLaneMask(pending, batch.lastMatchingResult));
-                batch.deferredSettlementItemIndexes.add(batch.nextIndex);
+                batch.deferSettlement(batch.nextIndex,
+                        owner.commits.expectedLaneMask(pending, batch.lastMatchingResult));
                 finishOrderBatchItem(batch, pending, batch.lastMatchingResult);
                 return startOrderBatchItem(batch, pending, timestamp, position, false);
             }
@@ -803,9 +802,8 @@ final class OrderBatchExecutor {
                 PlaceOrderCommand command = (PlaceOrderCommand) item.command;
                 deferOrderBatchPreMatchingCancellations(batch, pending, matchingResult);
                 if (batch.pipelined || matchingResult.accepted() && owner.productLine.isDerivative()) {
-                    batch.deferredSettlementOrderIds.add(command.orderId());
-                    batch.deferredSettlementExpectedLaneMasks.add(owner.commits.expectedLaneMask(pending, matchingResult));
-                    batch.deferredSettlementItemIndexes.add(batch.nextIndex);
+                    batch.deferSettlement(batch.nextIndex,
+                            owner.commits.expectedLaneMask(pending, matchingResult));
                 } else {
                     batch.itemSettlementEvent = owner.runtimeState.dispatchOrderBatchMatcherSettlement(
                             pending.sequence(), owner.commits.expectedLaneMask(pending, matchingResult), command.orderId(),
@@ -853,7 +851,7 @@ final class OrderBatchExecutor {
                     batch.deferredCancellationOrderIds.toPrimitiveArray(), timestamp, position,
                     owner.identities, batch.kind == OrderBatchKind.CANCEL, batch);
         }
-        if (batch.settlementEvent != null || batch.deferredSettlementOrderIds.isEmpty()) return false;
+        if (batch.settlementEvent != null || batch.settlementCount() == 0) return false;
         batch.settlementEvent = owner.runtimeState.dispatchMatcherSettlementBatch(
                 batch.sequence, batch,
                 owner.identities, timestamp, position);

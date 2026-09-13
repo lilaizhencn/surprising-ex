@@ -24,6 +24,8 @@ final class OrderBatchItem {
     List<MatcherEvent> executionEvents = List.of();
     /** 本项结果由批次项唯一持有，结算输入通过索引引用，避免第二个结果列表。 */
     com.surprising.aeron.service.matching.CoreMatchingResult matchingResult;
+    /** 延后批量结算的 Lane 路由；零表示尚未登记。 */
+    long settlementLaneMask;
     /** 本项需要编码的成交数量。 */
     int executionCount;
     /** 成交编码所需的主动方用户 ID。 */
@@ -60,6 +62,7 @@ final class OrderBatchItem {
         resultCode = null;
         executionEvents = List.of();
         matchingResult = null;
+        settlementLaneMask = 0;
         executionCount = 0;
         executionTakerUserId = 0;
         resultOrder = null;

@@ -47,11 +47,23 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         responseItem = null;
     }
 
-    public int settlementCount() { return deferredSettlementOrderIds.size(); }
-    public long settlementOrderId(int index) { return deferredSettlementOrderIds.get(index); }
-    public long settlementLaneMask(int index) { return deferredSettlementExpectedLaneMasks.get(index); }
+    public int settlementCount() { return deferredSettlementCount; }
+    public long settlementOrderId(int index) { return items.get(deferredSettlementItemIndexes[index]).orderId; }
+    public long settlementLaneMask(int index) { return items.get(deferredSettlementItemIndexes[index]).settlementLaneMask; }
     public CoreMatchingResult settlementResult(int index) {
-        return items.get(deferredSettlementItemIndexes.get(index)).matchingResult;
+        return items.get(deferredSettlementItemIndexes[index]).matchingResult;
+    }
+
+    void deferSettlement(int itemIndex, long laneMask) {
+        if (itemIndex < 0 || itemIndex >= items.size() || laneMask == 0
+                || deferredSettlementCount == deferredSettlementItemIndexes.length) {
+            throw new IllegalStateException("invalid deferred settlement item");
+        }
+        OrderBatchItem item = items.get(itemIndex);
+        if (item.matchingResult == null || item.settlementLaneMask != 0)
+            throw new IllegalStateException("deferred settlement result is missing or duplicated");
+        item.settlementLaneMask = laneMask;
+        deferredSettlementItemIndexes[deferredSettlementCount++] = itemIndex;
     }
     public int size() { return items.size(); }
     public long orderId(int index) { return items.get(index).orderId; }
@@ -133,17 +145,9 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     final PrimitiveLongChangeSet itemChangedOrderIds;
     /** 需要在安全结算阶段撤销的订单 ID。 */
     final PrimitiveLongChangeSet deferredCancellationOrderIds;
-    /** 等待统一派发结算的订单 ID，按批量项顺序排列。 */
-    final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList
-            deferredSettlementOrderIds = new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList();
-    /** 各待结算订单必须完成的账户 Lane 位图。 */
-    final org.eclipse.collections.impl.list.mutable.primitive.LongArrayList
-            deferredSettlementExpectedLaneMasks =
-            new org.eclipse.collections.impl.list.mutable.primitive.LongArrayList();
-    /** 待结算项在 items 中的索引；结果本体只保留在对应 OrderBatchItem。 */
-    final org.eclipse.collections.impl.list.mutable.primitive.IntArrayList
-            deferredSettlementItemIndexes =
-            new org.eclipse.collections.impl.list.mutable.primitive.IntArrayList();
+    /** 待结算项在 items 中的索引；订单、Lane mask 和结果均由 OrderBatchItem 唯一持有。 */
+    final int[] deferredSettlementItemIndexes;
+    int deferredSettlementCount;
     /** 本批准入分配的客户单号，失败时按逆序回滚。 */
     final List<PreparedClientAllocation> preparedClientKeys;
     /** 本批已收集的国库变化，随最终提交合并。 */
@@ -268,6 +272,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         runtimeChangedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
         itemChangedOrderIds = new PrimitiveLongChangeSet(capacity * 2);
         deferredCancellationOrderIds = new PrimitiveLongChangeSet(capacity);
+        deferredSettlementItemIndexes = new int[capacity];
         pipelinedMatchingResults = new ArrayList<>(capacity);
         preparedClientKeys = new ArrayList<>(capacity);
         preparedOrders = new ResolvedPlaceOrder[capacity];
@@ -321,9 +326,8 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         runtimeChangedOrderIds.clear();
         itemChangedOrderIds.clear();
         deferredCancellationOrderIds.clear();
-        deferredSettlementOrderIds.clear();
-        deferredSettlementExpectedLaneMasks.clear();
-        deferredSettlementItemIndexes.clear();
+        java.util.Arrays.fill(deferredSettlementItemIndexes, 0, deferredSettlementCount, 0);
+        deferredSettlementCount = 0;
         preparedClientKeys.clear();
         if (treasuryDelta != null) treasuryDelta.clear();
 
