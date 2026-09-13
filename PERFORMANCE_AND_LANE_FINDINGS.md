@@ -777,3 +777,10 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - direct PLACE 的 Matcher 结果只由 `MatcherSettlementEvent` 保存并交给 Lane；Owner 仍轮询 Matcher 完成槽位以释放 SPSC 位置和 submission token，但不再把同一对象复制到 `LaneCommandContext.completedMatchingResult`。
 - `OrderedCommitCoordinator` 在首次提交和等待重试时都从 direct event 读取结果，再执行原有有序证据校验、资金汇总、结果账本、响应和释放流程；普通非直达命令与批量命令的既有完成语义保持不变。
 - 这解决了 Owner 对直达结果的重复保留和重复消费职责，未删除 Owner 的一致性边界，也未把终态提交下沉到 Lane。Matcher/Lane/Runtime/Cluster 回归及 service 全量 927 项均通过。
+
+
+### 2026-09-14 准入双掩码查询收口
+
+- PLACE 准入原来对同一价格树分别计算 counterparty account mask 和 Lane mask；现在由一次遍历同时产出两个掩码，结果写入调用线程的 scratch，不增加 `ActiveOrderIndex` 实例状态。
+- 该改动消除了 Owner 的重复树遍历，保持索引所有权、恢复格式、反射快照和公开兼容 API 不变；恢复一致性和 927 项 service 回归均通过。
+- JFR 仍显示整体瓶颈在 Lane mutation await、有序 matching commit、TreeMap/哈希状态物化及大量数组/订单状态分配；因此这项改动只关闭一个明确的重复查询热点，不能单独宣称达到 30 万+/s 或 p99≤5ms。

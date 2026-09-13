@@ -50712,8 +50712,18 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 
 ### 2026-09-14 ActiveOrderIndex 双掩码遍历合并（采集前锁定）
 
-- 被测 commit：`788d9f80`；对照 commit：不适用，仅验证当前 master。
+- 被测 commit：`0eb7376a`；对照 commit：不适用，仅验证当前 master。
 - 修改点：同一 PLACE 准入通过 Owner-only 线程本地 scratch 由一次价格树遍历同时计算 account counterparty mask 与 Lane mask；scratch 不进入索引实例状态，不改变索引所有权、路由、恢复格式或反射一致性快照。
 - 固定标准：HotSpot JDK 25.0.1、Oracle GraalVM HotSpot、ZGC、4 Account Lane、1 Matcher、128 listed/active symbols、10,000 users、256 in-flight、UNIFORM、maxPositions=1、maxOpenOrders=3、hftRounds=1、batch=4、lifecycleSymbols=32；accepted=terminal，unfinished/error/timeout=0，资金守恒和快照恢复通过。短跑只作局部回归诊断，不宣称 30 万+/s 或 p99≤5ms。
 - JMH 计划：`LinearPerpetualCoreBenchmark.scaleMixedWorkload`，1×1s warmup、2×2s measurement、1 fork，主吞吐与 `-prof gc` 各一轮；JFR 计划：同 workload、ZGC、2×2s warmup、1×10s measurement、1 fork，采集 Owner/Matcher/Lane CPU、allocation、GC、NMT、等待和热点。
 - 采集目录：`/tmp/active-index-memo-20260914`；采集完成后只保留摘要并清理 JFR、GC、NMT、JMH 和临时日志。
+
+
+### 2026-09-14 ActiveOrderIndex 双掩码遍历合并（最终验证）
+
+- 最终代码 commit：`0eb7376a`；HotSpot JDK 25.0.1、ZGC、4 lanes、1 matcher、128 symbols、10,000 users、256 in-flight、UNIFORM，其他参数与上节固定标准一致。
+- service 全量回归：**927 tests，Failures 0、Errors 0、Skipped 0**；索引恢复反射一致性、Matcher pipeline、cluster pipeline 均通过。
+- JMH 主轮：accepted/terminal business **22,773/s**；accepted core messages **9,779/s**；lane **16,835/s**；lane settlement **11,420/s**；trades **4,331/s**；error/reject/timeout/unfinished 均为 0。该轮为 1×1s warmup、2×2s measurement、1 fork。
+- JMH `-prof gc`：accepted/terminal **24,574/s**；allocation **619.6 MB/s**、**440,313,644 B/op**（JMH invocation 口径，含初始化和恢复，不能直接视为单业务分配）；ZGC 22 collections、1,652 ms concurrent time；无错误、超时或未完成。
+- 有效 JFR 来自 JMH fork 子进程的 21s 记录（JFR dump 33 MB，DataLoss=0，终态业务 59,224）。Owner/业务线程热点为 `LaneMutationTask.await`、`OrderedCommitCoordinator.pumpMatchingCommitCompletions`、`TreeMap.successor/put`、`CoreStateHash.mix`、`AccountLaneState.mixText`；Matcher/Lane 仍有状态物化和哈希工作。采样分配约 **10.48 GB/s、176,977 B/终态业务操作**，主要为 byte[]、long[]、Object[]、TreeMap.Entry、OrderRuntime、CoreOrderState、String；ZGC 18 次，停顿总计约 **1.03 ms**，P99/max **60.7 μs**，无 allocation stall、GC failure 或 degeneration；Owner 同步 IO 为 0。
+- JFR 终态 p99：PLACE_ORDER **8.39 ms**、CANCEL_ORDER **16.78 ms**、ORDER_BATCH **67.11 ms**、TRIGGER_ORDER **0.52 ms**。该短轮仍未证明 p99≤5ms，也未证明 30 万+/s；未执行 GCP 复测。JFR 记录仅用于定位剩余热点，不作为容量承诺。
