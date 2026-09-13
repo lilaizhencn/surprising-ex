@@ -786,8 +786,8 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - JFR 仍显示整体瓶颈在 Lane mutation await、有序 matching commit、TreeMap/哈希状态物化及大量数组/订单状态分配；因此这项改动只关闭一个明确的重复查询热点，不能单独宣称达到 30 万+/s 或 p99≤5ms。
 
 
-### 2026-09-14 Lane 等待与状态哈希分配收敛
+### 2026-09-14 状态哈希分配收敛
 
-- `LaneMutationTask.await` 增加已完成 fast path，并把失败/结果读取收拢到单一完成出口；已完成任务不再设置 waiter 或进入自旋路径。
 - Account Lane 的状态哈希对 ASCII 文本改为直接按字符混合，只有非 ASCII 文本才编码 UTF-8，去除常见哈希路径的临时 `byte[]`；哈希字节语义保持不变。
-- 定向 `TradingRuntimeStateTest`、`RuntimeCommitRecoveryTest`、`ClusterCommandPipelineTest` 通过；同一固定 workload 的新短轮 accepted/terminal **24,166/s**，错误、拒绝、超时和未完成均为 0。该短轮不能单独证明总体吞吐或 p99 达标。
+- `TradingRuntimeStateTest`、`RuntimeCommitRecoveryTest`、`ClusterCommandPipelineTest` 的定向回归在该哈希改动上通过；Lane mutation await 的 fast path 因并发可见性竞态已撤回，不作为可用方案。
+- 该项只减少哈希分配，不能单独证明总体吞吐或 p99 达标。

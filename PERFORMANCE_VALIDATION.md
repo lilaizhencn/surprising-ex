@@ -50729,7 +50729,7 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - JFR 终态 p99：PLACE_ORDER **8.39 ms**、CANCEL_ORDER **16.78 ms**、ORDER_BATCH **67.11 ms**、TRIGGER_ORDER **0.52 ms**。该短轮仍未证明 p99≤5ms，也未证明 30 万+/s；未执行 GCP 复测。JFR 记录仅用于定位剩余热点，不作为容量承诺。
 
 
-### 2026-09-14 Lane 等待/哈希轻量收敛（短轮复测）
+### 2026-09-14 状态哈希分配收敛（短轮复测）
 
-- 在 `0eb7376a` 之后增加 Lane mutation 已完成 fast path，并避免 ASCII 状态哈希的 UTF-8 临时数组；不改变恢复、重放或业务哈希字节语义。
-- 定向回归通过；固定 128 symbols、256 in-flight、ZGC workload 的 1×1s warmup、2×2s measurement、1 fork JMH accepted/terminal **24,166/s**，lane **17,864/s**，settlement **12,119/s**，error/reject/timeout/unfinished **0**。这是短轮单 fork 结果，不能与前一轮作容量结论，也未测 GCP。
+- 在 `0eb7376a` 之后保留 ASCII 状态哈希的直接字符混合，去除常见哈希路径的 UTF-8 临时数组；Lane mutation await fast path 因并发可见性竞态已撤回。
+- 定向回归通过；固定 128 symbols、256 in-flight、ZGC workload 的短轮 accepted/terminal **24,166/s**，lane **17,864/s**，settlement **12,119/s**，error/reject/timeout/unfinished **0**。这是短轮单 fork 结果，不能与前一轮作容量结论，也未测 GCP。

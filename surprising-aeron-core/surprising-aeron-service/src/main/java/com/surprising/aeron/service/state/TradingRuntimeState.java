@@ -1389,7 +1389,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         }
 
         Object await() {
-            if (completed) return completedResult();
             boolean interrupted = false;
             Thread current = Thread.currentThread();
             waiter = current;
@@ -1405,10 +1404,6 @@ public final class TradingRuntimeState implements AutoCloseable {
                 if (interrupted) Thread.currentThread().interrupt();
             }
             if (interrupted) throw new IllegalStateException("account lane mutation was interrupted");
-            return completedResult();
-        }
-
-        private Object completedResult() {
             if (failure instanceof RuntimeException runtimeFailure) throw runtimeFailure;
             if (failure instanceof Error error) throw error;
             if (failure != null) throw new IllegalStateException("account lane mutation failed", failure);
