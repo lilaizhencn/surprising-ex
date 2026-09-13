@@ -29,6 +29,8 @@ public final class MatcherSettlementPlan {
     private List<MatcherEvent> matcherEvents;
     private int tradeCount;
     private long[] preCancellationOrderIds;
+    /** Number of valid entries in the reusable cancellation storage. */
+    private int preCancellationSize;
     /**
      * Reusable storage for event-owned cancellation identities.  The public
      * setter still copies caller-owned arrays, while direct matcher events can
@@ -52,6 +54,7 @@ public final class MatcherSettlementPlan {
 
     public void clearReferences() {
         matcherEvents = List.of(); completedTrigger = null; preCancellationOrderIds = NO_ORDERS;
+        preCancellationSize = 0;
         rejectedTaker = false; laneEventsIndexed = false; orderCount = tradeCount = 0;
         directTaker = null;
     }
@@ -160,6 +163,7 @@ public final class MatcherSettlementPlan {
         this.matcherEvents = matcherEvents;
         this.tradeCount = tradeCount;
         this.preCancellationOrderIds = preCancellationOrderIds;
+        this.preCancellationSize = preCancellationOrderIds.length;
     }
 
     static final class BatchValidationScratch {
@@ -320,7 +324,8 @@ public final class MatcherSettlementPlan {
         plan.coreSequence = coreSequence; plan.takerOrderId = takerOrderId; plan.activeUserId = activeUserId;
         plan.requiredLaneMask = laneMask; plan.orderIds = orders; plan.orderCount = orderCount;
         plan.matcherEvents = result.matcherEvents(); plan.tradeCount = tradeCount;
-        plan.preCancellationOrderIds = NO_ORDERS; plan.completedTrigger = null; plan.rejectedTaker = false;
+        plan.preCancellationOrderIds = NO_ORDERS; plan.preCancellationSize = 0;
+        plan.completedTrigger = null; plan.rejectedTaker = false;
         plan.laneEventsIndexed = false;
         return plan.indexLaneEvents(runtime);
     }
@@ -375,11 +380,13 @@ public final class MatcherSettlementPlan {
         if (orderIds == null) throw new IllegalArgumentException("pre-cancellation ids are required");
         if (orderIds.length == 0) {
             preCancellationOrderIds = NO_ORDERS;
+            preCancellationSize = 0;
             return this;
         }
         ensurePreCancellationCapacity(orderIds.length);
         System.arraycopy(orderIds, 0, preCancellationStorage, 0, orderIds.length);
         preCancellationOrderIds = preCancellationStorage;
+        preCancellationSize = orderIds.length;
         return this;
     }
 
@@ -404,6 +411,7 @@ public final class MatcherSettlementPlan {
             preCancellationStorage[count++] = orderId;
         }
         preCancellationOrderIds = count == 0 ? NO_ORDERS : preCancellationStorage;
+        preCancellationSize = count;
     }
 
     private void ensurePreCancellationCapacity(int required) {
@@ -415,7 +423,7 @@ public final class MatcherSettlementPlan {
                     Math.max(required, preCancellationStorage.length * 2));
         }
     }
-    public int preCancellationCount() { return preCancellationOrderIds.length; }
+    public int preCancellationCount() { return preCancellationSize; }
     long preCancellationOrderId(int index) { return preCancellationOrderIds[index]; }
     private MatcherSettlementPlan indexLaneEvents(TradingRuntimeState runtime) {
         // Small fills need no index. For deep fills, each maker lane follows only its events;
