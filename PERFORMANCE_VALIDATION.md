@@ -50654,7 +50654,7 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 
 ## 2026-09-14 当前 master 主链路 JMH/JFR 复验（采集前锁定）
 
-- 被测 commit：`1d9586fb6404021d576ac54b9bef7ce2d3390142`；对照 commit：不适用，仅验证当前 master。
+- 被测运行时 commit：`1d9586fb6404021d576ac54b9bef7ce2d3390142`；JFR 归类修正提交：`c48cecd9`（仅分析脚本/记录，不改变运行时代码）；对照 commit：不适用，仅验证当前 master。
 - 标准：固定 128 listed/active symbols、256 in-flight、4 Account Lane、1 matcher、ZGC；accepted 与 terminal business/core counters 必须相等，unfinished/error/timeout 为 0，资金守恒和快照恢复通过。JMH 输出主吞吐、业务计数、backlog、`-prof gc` 分配率；JFR 输出 Owner/Matcher/Lane CPU、分配栈、GC/safepoint、线程等待/锁、NMT 和 I/O。
 - 场景：HotSpot JDK 25.0.1，Oracle GraalVM HotSpot，16 CPU/16 GiB；`scaleMixedWorkload`，10000 users，UNIFORM，maxPositions=5，maxOpenOrders=10，hftRounds=1，batch=4，lifecycleSymbols=32，BLOCKING，JMH 2×2s warmup、3×3s measurement、3 forks；JFR 2×2s warmup、10s measurement、1 fork。仅本机单节点真实 Aeron Cluster 开发链路，测量后排空并执行资金/状态/快照校验。
 - 产物目录锁定为 `/tmp/qual-current-20260914`；采集完成后只把参数、指标、异常和摘要写入本文件，再清理 JFR、GC、NMT、Aeron 录制及临时日志。该轮不启动 GCP。
