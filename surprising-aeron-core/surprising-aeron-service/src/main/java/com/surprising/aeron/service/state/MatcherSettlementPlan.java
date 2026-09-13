@@ -204,6 +204,22 @@ public final class MatcherSettlementPlan {
                 null, null, null, target);
     }
 
+    /**
+     * Single-item batch variant.  The previous call site created a one-element
+     * {@code long[]} solely to pass the taker identity through the generic
+     * builder.  Keep that scratch storage on the pooled target instead.
+     */
+    public static MatcherSettlementPlan buildSingleInto(MatcherSettlementPlan target,
+            long sequence, long takerOrderId, long userId,
+            CoreMatchingResult result, TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
+        if (target == null) throw new IllegalArgumentException("settlement target is required");
+        if (target.initialOrderScratch == null || target.initialOrderScratch.length != 1)
+            target.initialOrderScratch = new long[1];
+        target.initialOrderScratch[0] = takerOrderId;
+        return build(sequence, takerOrderId, userId, target.initialOrderScratch, result, runtime, identities,
+                null, null, null, target);
+    }
+
     public static MatcherSettlementPlan emptyInto(MatcherSettlementPlan target, long sequence,
             long userId, long firstOrderId, long secondOrderId, TradingRuntimeState runtime) {
         if (target == null || sequence <= 0 || userId <= 0 || firstOrderId <= 0 || secondOrderId <= 0

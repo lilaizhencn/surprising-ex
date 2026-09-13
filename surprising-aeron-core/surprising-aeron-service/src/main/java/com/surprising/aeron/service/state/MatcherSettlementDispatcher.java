@@ -149,8 +149,9 @@ final class MatcherSettlementDispatcher {
         }
         OrderRuntime taker = owner.order(takerOrderId);
         if (taker == null) throw new IllegalStateException("taker order is missing");
-        MatcherSettlementPlan plan = MatcherSettlementPlan.build(coreSequence, takerOrderId, taker.userId(),
-                new long[]{takerOrderId}, matchingResult, owner, identities).rejectTaker(!matchingResult.accepted());
+        MatcherSettlementPlan plan = MatcherSettlementPlan.buildSingleInto(
+                new MatcherSettlementPlan(), coreSequence, takerOrderId, taker.userId(),
+                matchingResult, owner, identities).rejectTaker(!matchingResult.accepted());
         if (plan.requiredLaneMask() != expectedLaneMask) {
             throw new IllegalStateException("matcher settlement lane mask mismatch");
         }

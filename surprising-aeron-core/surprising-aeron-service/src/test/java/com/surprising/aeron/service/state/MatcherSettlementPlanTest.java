@@ -183,6 +183,26 @@ class MatcherSettlementPlanTest {
     }
 
     @Test
+    void singleItemBatchBuilderUsesThePooledTargetForInitialIdentity() {
+        try (var runtime = new TradingRuntimeState()) {
+            var identities = new RuntimeIdentityRegistry();
+            int symbol = identities.symbolId("BTC-USDT");
+            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            runtime.putInstrument(instrument());
+            runtime.putOrder(order(10, 20, symbol, CoreOrderSide.SELL, 5));
+            runtime.putOrder(order(11, 21, symbol, CoreOrderSide.BUY, 3));
+            var slot = new MatcherSettlementPlan();
+            var result = fill(3);
+            assertThat(MatcherSettlementPlan.buildSingleInto(slot, 1, 11, 21,
+                    result, runtime, identities)).isSameAs(slot);
+            assertThat(slot.orderCount()).isEqualTo(2);
+            assertThat(slot.orderId(0)).isEqualTo(11);
+            assertThat(slot.orderId(1)).isEqualTo(10);
+            assertThat(slot.tradeCount()).isOne();
+        }
+    }
+
+    @Test
     void expectedCancellationsAreWrittenInAdmissionOrderIntoReusablePlanStorage() {
         try (var runtime = new TradingRuntimeState()) {
             var identities = new RuntimeIdentityRegistry();
