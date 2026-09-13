@@ -50702,3 +50702,10 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - 完整 service 回归：`mvn -pl surprising-aeron-core/surprising-aeron-service -am test`，927 项通过，Failures 0、Errors 0、Skipped 0；定向 resolver/runtime/pipeline 回归 255 项通过；`git diff --check` 通过。
 - 同口径短 JMH（128 symbols、256 在途、4 Lane、1 Matcher、ZGC、UNIFORM、10000 users、1×1s warmup、2×2s measurement、1 fork）终态业务 **24,412/s**，终态核心消息 **10,483/s**，Lane **18,046/s**，Lane settlement **12,242/s**，成交 **4,643/s**；accepted=terminal，拒绝/错误/超时/未完成均为 0。该结果与历史短跑不具备稳定统计对照，不能单独宣称整体吞吐提升。
 - 同轮 `-prof gc` 报告约 **617 MB/s**、**440 MB/op**；测量含 JMH fork 初始化、快照恢复和 ZGC/JMH 开销，不能当作稳态交易分配率。它只用于确认测试链路完整，稳态分配仍应以热身后的独立 JFR/NMT 采样为准。
+
+### 2026-09-14 Matcher→Lane 直达结果单一事实源收口
+
+- 直达 PLACE 的不可变撮合结果继续由 `MatcherSettlementEvent` 保留并交给 Lane；Owner 只消费 Matcher 完成槽位、按 core sequence 读取 event 结果并执行有序证据校验、资金汇总、终态索引、结果发布和资源释放。
+- Owner 不再把同一个 direct result 再复制到 `LaneCommandContext.completedMatchingResult`；普通非直达撮合仍保持原有上下文完成语义，批量 direct 结果继续从批次 event 读取。
+- 有序提交的首次读取和等待重试均增加 event 结果回退，避免 direct event 已完成但 Owner 上下文为空时丢失提交；Matcher 队列仍完整轮询以释放 SPSC 槽位和 matcher submission token。
+- 定向回归（Matcher pipeline、settlement plan、runtime、cluster pipeline）通过；随后 service 全量回归 **927 项通过，Failures 0、Errors 0、Skipped 0**。该改动减少 Owner 结果保留和一次重复引用，未用短跑结果宣称整体吞吐或 p99 达标。

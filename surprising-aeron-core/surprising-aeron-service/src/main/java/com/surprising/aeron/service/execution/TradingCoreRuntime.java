@@ -1775,7 +1775,15 @@ public final class TradingCoreRuntime implements AutoCloseable {
         if (result == null || result.nativeCommand().coreSequence() != sequence) {
             throw new IllegalStateException("synchronous matcher returned an invalid result");
         }
-        laneCommandContexts.required(sequence).publishMatchingCompletion(result);
+        LaneCommandContextRing.Context context = laneCommandContexts.required(sequence);
+        PendingMatching pending = pendingMatching.get(sequence);
+        // A direct settlement has already published the immutable matcher fact into
+        // its Lane event.  The matcher queue still has to be consumed to release its
+        // SPSC slot, but retaining a second copy in the Owner context only adds
+        // memory pressure and makes the Owner process the same result twice.
+        if (pending == null || pending.settlementEvent() == null || !pending.settlementEvent().direct()) {
+            context.publishMatchingCompletion(result);
+        }
         matchingProgressSequence++;
         commits.signalPendingMatchingReady(sequence);
     }

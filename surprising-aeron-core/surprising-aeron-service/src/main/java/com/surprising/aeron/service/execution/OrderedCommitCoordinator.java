@@ -1181,6 +1181,9 @@ final class OrderedCommitCoordinator {
                             pending.orderBatch != null && (pending.orderBatch.itemSettlementEvent != null
                                     || pending.orderBatch.itemAdmission != null && pending.orderBatch.started)
                                     ? pending.orderBatch.lastMatchingResult : context.matchingResult();
+                    if (matching == null && pending.settlementEvent() != null && pending.settlementEvent().direct()) {
+                        matching = pending.settlementEvent().firstDirectResult();
+                    }
                     if (matching == null && (pending.settlementEvent() == null || pending.settlementEvent().direct()) && pending.cancelEvent() == null
                             && pending.replaceEvent() == null) {
                         matching = context.takeMatchingCompletion();
@@ -1201,6 +1204,9 @@ final class OrderedCommitCoordinator {
                                     pending.orderBatch != null && (pending.orderBatch.itemSettlementEvent != null
                                     || pending.orderBatch.itemAdmission != null && pending.orderBatch.started)
                                             ? pending.orderBatch.lastMatchingResult : context.matchingResult();
+                            if (readyMatching == null && pending.settlementEvent() != null && pending.settlementEvent().direct()) {
+                                readyMatching = pending.settlementEvent().firstDirectResult();
+                            }
                             if (readyMatching == null && (pending.settlementEvent() == null || pending.settlementEvent().direct())
                                     && pending.cancelEvent() == null && pending.replaceEvent() == null) {
                                 readyMatching = context.takeMatchingCompletion();
