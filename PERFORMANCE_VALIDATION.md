@@ -50827,3 +50827,5 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - HotSpot JDK 25.0.1、ZGC、4 Account Lane、1 Matcher、128 listed/active symbols、10,000 users、256 in-flight、UNIFORM、`maxPositionsPerUser=1`、`maxOpenOrdersPerUser=3`、`hftRounds=1`、`hftBatchSize=4`、`lifecycleSymbolsPerRun=32`；JMH 1×1s warmup、2×2s measurement、1 fork。
 - 短 JMH：终态业务 **23,425.136/s**，终态 Core messages **10,059.234/s**，Lane **17,316.501/s**，Lane settlement **11,747.375/s**，trades **4,455.301/s**；unfinished/error/reject/timeout 均为 0。
 - 该轮只验证快速返回改动没有破坏生命周期和计数；没有同机对照、稳态 JFR 或 GCP 证据，不能据此宣称吞吐、分配率或普通下单 p99≤5ms 达标。JMH JSON 已在摘要记录后清理。
+
+- 验证门禁：HotSpot JDK 25 下 service 全量最终 XML 汇总 **930 tests，0 failures，0 errors，0 skipped**；`ClusterCommandPipelineTest.fullIndependentWindowCompletesWithoutAnotherTimer` 六产品线单独重跑退出码 0。全量日志中出现的 Aeron heartbeat/独立窗口抖动由 Surefire 重试消除，报告标记为既有 flake。
