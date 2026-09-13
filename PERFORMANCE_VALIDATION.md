@@ -50744,3 +50744,9 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - JFR 加权分配估算约 **198.6 KB/终态业务项**，受 JMH 初始化、快照恢复和 JFR/NMT 采样影响；类型/站点仍集中在 `[J`/`[B`/`Object[]`、`TreeMap.Entry`、`CoreOrderState`、`OrderRuntime`、`RollingBusinessStateHash.UserHash`、状态快照物化和 primitive map 扩容。ZGC 3 次回收、总暂停约 **170 µs**、P99/max **34.6 µs**，Allocation Stall=0、失败/退化=0；锁/park 约 **18.8 ms**，Owner 同步 IO=0。
 - 该轮 PLACE_ORDER 终态 p99 约 **8.39 ms**，超过 5 ms 目标；样本短且混合场景，不能作为生产 SLO 定论。JFR 原始目录在摘要写入后已清理。
 - 标准 `owner-commit` 脚本当前引用已删除的 `OwnerFactFrameBenchmark`，因此本次使用仍存在的 `LinearPerpetualCoreBenchmark.scaleMixedWorkload` 完成 JMH/JFR；脚本本身需要后续改为现有 benchmark 名称后才能作为正式门禁。
+
+
+### 2026-09-14 资格脚本与现有基准对齐
+
+- `qualify-linear-perpetual-scale.sh owner-commit` 原先仍引用已删除的 `OwnerFactFrameBenchmark`，且 profile 用 `-f 0` 使 `-jvmArgsAppend`/JFR 参数无法进入 fork；已改为当前 `LinearPerpetualCoreBenchmark.scaleMixedWorkload`，校验 128 symbols、4 Lane、UNIFORM 及 accepted=terminal，并统一 profile/saturation 使用 fork 子进程承载 JFR。
+- `bash -n` 和 `git diff --check` 通过；未重新跑完整资格矩阵，600 秒 soak 及 GCP 仍按用户要求不执行。
