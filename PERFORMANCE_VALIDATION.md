@@ -50695,3 +50695,10 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - 修复 `analyze-owner-commit-jfr.sh` 的归类优先级：明确命名的 `core-account-lane-*`、`core-matcher-*`、Owner 线程以线程名为准；只有 JMH 合成驱动线程才使用调用栈归类，避免 Lane 因调用 `MatcherSettlement` 被误报为 Matcher。`bash -n`、业务延迟静态校验及修复后 JFR 重算通过。
 - JFR 采样分配约 **8.26 GB/s、10.5 KB/终态业务项**，主要为 `CoreCommandResultCodec.encode`、命令编解码、`OrderRuntime`、`byte[]`、`long[]`、`CoreOrderStateView` 和 `TreeMap`；该区间仍包含启动/JFR/快照活动，不能作为生产稳态分配率。ZGC 最大暂停约 **49µs**，Allocation Stall=0，失败/退化=0。
 - 这轮只证明饱和状态和计数正确，未证明 30 万+/s 或普通下单 p99≤5ms；原始 JFR、GC、NMT 和临时目录已在记录后清理。脚本修复提交后仍需重新生成正式长稳态 Linux 证据，不能用嵌入式 JMH 驱动线程代替独立 Owner CPU 结论。
+
+### 2026-09-14 单项 PLACE 决策上下文分配削减
+
+- 普通异步 PLACE 不再先创建一次性 `CoreOrderDecisionResolver.Context` 再解析；现在直接读取 instrument、symbol identity、mark、fee 和生命周期字段，另外只创建异步事件所需的 `AdmissionIdentity`。批量路径继续使用 `Context`，保证同批只读决策语义不变。
+- 完整 service 回归：`mvn -pl surprising-aeron-core/surprising-aeron-service -am test`，927 项通过，Failures 0、Errors 0、Skipped 0；定向 resolver/runtime/pipeline 回归 255 项通过；`git diff --check` 通过。
+- 同口径短 JMH（128 symbols、256 在途、4 Lane、1 Matcher、ZGC、UNIFORM、10000 users、1×1s warmup、2×2s measurement、1 fork）终态业务 **24,412/s**，终态核心消息 **10,483/s**，Lane **18,046/s**，Lane settlement **12,242/s**，成交 **4,643/s**；accepted=terminal，拒绝/错误/超时/未完成均为 0。该结果与历史短跑不具备稳定统计对照，不能单独宣称整体吞吐提升。
+- 同轮 `-prof gc` 报告约 **617 MB/s**、**440 MB/op**；测量含 JMH fork 初始化、快照恢复和 ZGC/JMH 开销，不能当作稳态交易分配率。它只用于确认测试链路完整，稳态分配仍应以热身后的独立 JFR/NMT 采样为准。

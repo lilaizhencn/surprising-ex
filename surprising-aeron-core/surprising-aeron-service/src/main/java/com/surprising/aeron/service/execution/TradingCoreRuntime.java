@@ -2640,11 +2640,12 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     com.surprising.aeron.service.state.PlaceAdmissionEvent dispatchPlaceAdmission(
             long userId, PlaceOrderCommand command, UUID commandId, long coreSequence) {
-        var context = CoreOrderDecisionResolver.context(runtimeState, identities, userId, command.symbol(), currentClusterTimestamp);
-        ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(context, command);
+        ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(runtimeState, identities, userId,
+                command, currentClusterTimestamp);
+        var admissionFlags = CoreOrderDecisionResolver.admissionFlags(runtimeState, resolved.symbolId());
         int assetId = identities.assetId(resolved.reservationAsset());
         return runtimeState.dispatchPlaceAdmission(coreSequence, userId, resolved, commandId,
-                openInterestIndex.openInterestSteps(resolved.symbol()), context.admissionFlags(),
+                openInterestIndex.openInterestSteps(resolved.symbol()), admissionFlags,
                 resolved.symbolId(), assetId, identities);
     }
 
