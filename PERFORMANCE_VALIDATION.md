@@ -50670,3 +50670,7 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - 异常：JFR 记录 1,087 个启动/链接阶段反射与本地库异常，主要为 `NoSuchFieldException`(594)、`NoSuchMethodError`(396)、`UnsatisfiedLinkError`(33)、JNR SymbolNotFound(27)；业务计数仍为 accepted=terminal、错误/超时/未完成均 0。分析命令显式使用阈值 2000，不能把该轮标记成“零异常生产验收”。
 - 角色归类修正：分析脚本不再把 `com.surprising.aeron` 包名误归为 Aeron 线程，Lane 角色覆盖恢复为真实四 Lane；`jmh-worker` 归为 peripheral，避免把驱动线程误报为 Aeron。该修复只影响诊断准确性，不改变运行时路径。
 - 结论：Matcher→Lane 预投递、Lane 单写、Owner 有序证据/资金/终态提交和分配快路径已实现并通过功能回归；剩余瓶颈是 Owner/Cluster 驱动线程上的有序提交与状态索引/哈希，以及状态物化和快照/集合分配。普通单 p99≤5ms、稳态分配率和 30 万+/s 仍需要 Linux 上独立 Owner 线程、开放到达率及热身后稳态 JFR 才能关闭，不能用本轮短 closed-loop 结果替代。
+
+### 后续局部分配修复
+
+- `CommandResultBuilder` 复用批量订单响应的去重集合/视图缓冲，并为 REPLACE/AMEND 增加双订单无-varargs路径；direct PLACE 的 taker `OrderRuntime` 也只构造一次。编译及 `TradingCoreRuntimeTest`、`ClusterCommandPipelineTest` 通过；该轮未重新压测，因此不宣称吞吐或稳态分配率改善。

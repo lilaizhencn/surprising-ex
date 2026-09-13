@@ -755,3 +755,9 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - **必须保留的 Owner 工作**：按 Core 序号消费 Matcher 事实，验证 matcher prefix/native command，汇总跨 Lane Treasury delta，计算业务哈希，写结果账本和终态客户墓碑，释放事件与准入窗口。这些是重放、快照和幂等一致性的权威边界，不能继续下沉到 Matcher/Lane。
 - **仍是代码边界而非遗漏**：普通 PLACE 的跨账户/同订单簿依赖仍由 `PendingMatchingRing` 队首和 Lane mask 控制；跨账户成交必须等待所有受影响 Lane，不能为了并行而放宽顺序。低频同步离线/恢复入口保留 `onLane` 内联调用，异步 Cluster 控制路径已迁移到永久 Lane 续程。
 - **仍需外部证据才能关闭**：无热限制 Linux/GCP 的 64/128 窗口吞吐、普通下单 p99≤5ms、稳态 JFR 分配率、锁/调度和长期状态增长。现有本机短轮只能证明正确性和无明显回归，不能把 30 万+/s 宣称为已达成。
+
+### 2026-09-14 响应视图热路径复用
+
+- `CommandResultBuilder` 的批量订单响应现在复用 Owner 独占的 primitive 去重集合和视图缓冲；稳定响应仍在边界用 `List.copyOf` 固化，不把可变缓冲暴露给下游。
+- REPLACE/AMEND 的双订单响应增加无-varargs入口，避免每次为两个订单 ID 创建临时 `long[]`。
+- 该修改不改变响应顺序、重复订单去重、快照或重放语义；编译及 `TradingCoreRuntimeTest`、`ClusterCommandPipelineTest` 通过。

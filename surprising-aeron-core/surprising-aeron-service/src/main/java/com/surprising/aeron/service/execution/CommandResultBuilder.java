@@ -41,6 +41,10 @@ final class CommandResultBuilder {
     /** 当前命令变化的订单 ID，保持 primitive 收集直到返回边界。 */
     final PrimitiveLongChangeSet changedOrderIds = new PrimitiveLongChangeSet();
 
+    /** 复用批量订单响应的去重集合和临时视图缓冲；List.copyOf 在边界创建稳定结果。 */
+    private final PrimitiveLongChangeSet commandViewOrderIds = new PrimitiveLongChangeSet();
+    private final ArrayList<CoreOrderStateView> commandViewBuffer = new ArrayList<>();
+
     /** 当前命令产生的成交数。 */
     long commandTradeCount;
 
@@ -107,9 +111,12 @@ final class CommandResultBuilder {
             }
             default -> { }
         }
-        PrimitiveLongChangeSet orderIds = new PrimitiveLongChangeSet();
-        java.util.ArrayList<CoreOrderStateView> views = new java.util.ArrayList<>(
-                commandOrderViews.size() + commandChangedOrderIds.size());
+        PrimitiveLongChangeSet orderIds = commandViewOrderIds;
+        orderIds.clear();
+        java.util.ArrayList<CoreOrderStateView> views = commandViewBuffer;
+        views.clear();
+        int expectedSize = commandOrderViews.size() + commandChangedOrderIds.size();
+        views.ensureCapacity(expectedSize);
         for (CoreOrderStateView view : commandOrderViews) {
             if (orderIds.add(view.orderId())) views.add(view);
         }
@@ -140,6 +147,19 @@ final class CommandResultBuilder {
             if (order != null) views.add(owner.orderView(order));
         }
         commandOrderViews = List.copyOf(views);
+    }
+
+    /** 双订单改单响应的无-varargs快路径，避免为两个 ID 创建临时 long[]。 */
+    void materializeResponseOrders(long firstOrderId, long secondOrderId) {
+        OrderRuntime first = owner.responseOrder(firstOrderId);
+        OrderRuntime second = owner.responseOrder(secondOrderId);
+        if (first == null) {
+            commandOrderViews = second == null ? List.of() : List.of(owner.orderView(second));
+        } else if (second == null) {
+            commandOrderViews = List.of(owner.orderView(first));
+        } else {
+            commandOrderViews = List.of(owner.orderView(first), owner.orderView(second));
+        }
     }
 
     void materializeResponseOrder(long orderId) {
