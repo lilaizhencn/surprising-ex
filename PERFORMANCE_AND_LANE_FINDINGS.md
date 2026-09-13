@@ -706,3 +706,8 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 
 - `RuntimeCommandProcessor.stampOrderChangesByLane(TradingCoreState, ...)` 没有生产调用方，且会为每次调用创建 `ArrayList`、`HashMap` 及投影后的 `OrderRuntime` 副本；实际链路使用的是 `stampChangedOrdersByLane`。已删除这条重复入口，保留唯一的命令级盖章路径，减少维护分叉和误用风险。
 - 生产调用图未改变；service 编译通过，完整 925 项回归已在同一组主链路改动上通过。
+
+### 2026-09-14 删除第二条无调用订单盖章入口
+
+- `RuntimeCommandProcessor.stampOrderChanges(...)` 也没有生产调用方；它会在缺少候选时物化完整订单快照，并在每个订单上重新投影 `OrderRuntime`。实际主链路使用唯一的 `stampChangedOrdersByLane(...)`。已删除该旧入口及不再需要的导入，进一步收敛为单一提交语义。
+- 受影响服务编译和 `RuntimeCommandProcessorTest` 8 项通过；不改变生产调用图和协议。

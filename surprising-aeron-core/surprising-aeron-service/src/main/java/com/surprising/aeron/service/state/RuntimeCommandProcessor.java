@@ -5,7 +5,6 @@ import com.surprising.aeron.service.state.model.CoreAlgoOrderState;
 import com.surprising.aeron.service.state.model.CoreCancelAllAfterKey;
 import com.surprising.aeron.service.state.model.CoreCancelAllAfterState;
 import com.surprising.aeron.service.state.model.CoreLiquidationState;
-import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import com.surprising.aeron.service.state.model.CoreRiskState;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
@@ -25,7 +24,6 @@ import com.surprising.aeron.protocol.UpdateRiskScanControlCommand;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.product.api.ProductLine;
 import java.util.UUID;
-import java.util.ArrayList;
 
 public final class RuntimeCommandProcessor {
 
@@ -379,37 +377,6 @@ public final class RuntimeCommandProcessor {
         runtime.removeReservation(orderId, userId);
         runtime.advanceUserRevision(userId);
         incrementRevision(runtime);
-    }
-
-    public static boolean stampOrderChanges(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
-                                            TradingCoreState commandBefore,
-                                            long timestamp, long clusterPosition,
-                                            Iterable<Long> changedOrderIds) {
-        if (runtime == null || identities == null || commandBefore == null
-                || timestamp < 0 || clusterPosition < 0) {
-            throw new IllegalArgumentException("invalid runtime order commit metadata");
-        }
-        runtime.assertOwner();
-        Iterable<Long> candidates = changedOrderIds;
-        if (candidates == null) {
-            ArrayList<Long> all = new ArrayList<>();
-            runtime.ordersForSnapshot().forEachKey(all::add);
-            candidates = all;
-        }
-        boolean changed = false;
-        for (Long orderId : candidates) {
-            if (orderId == null) continue;
-            OrderRuntime order = runtime.order(orderId);
-            if (order == null) continue;
-            CoreOrderState previous = commandBefore.order(orderId);
-            OrderRuntime previousRuntime = previous == null
-                    ? null : RuntimeStateProjector.toRuntimeOrder(previous, identities);
-            if (!order.equals(previousRuntime)) {
-                runtime.replaceOrder(order.withCommitMetadata(timestamp, clusterPosition));
-                changed = true;
-            }
-        }
-        return changed;
     }
 
     public static void validateOrderStampInputs(long timestamp, long position, Iterable<Long> orderIds) {
