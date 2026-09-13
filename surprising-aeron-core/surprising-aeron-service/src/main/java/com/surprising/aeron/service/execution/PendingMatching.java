@@ -134,7 +134,7 @@ final class PendingMatching {
         this.operation = operation;
         this.command = command;
         this.fingerprint = fingerprint;
-        this.preMatchingCancellationOrderIds = List.copyOf(preMatchingCancellationOrderIds);
+        this.preMatchingCancellationOrderIds = retainCancellationIds(preMatchingCancellationOrderIds);
         this.beforeProjection = beforeProjection;
         this.beforeBusinessStateHash = beforeBusinessStateHash;
         this.beforeFundsStateHash = beforeFundsStateHash;
@@ -165,8 +165,18 @@ final class PendingMatching {
     }
 
     PendingMatching withPreMatchingCancellations(List<Long> orderIds) {
-        preMatchingCancellationOrderIds = List.copyOf(orderIds);
+        preMatchingCancellationOrderIds = retainCancellationIds(orderIds);
         return this;
+    }
+
+    /** Internal admission paths already hand over immutable primitive storage. Keep it instead of
+     * copying into a boxed Object[] for every derivative PLACE/REPLACE command. */
+    private static List<Long> retainCancellationIds(List<Long> orderIds) {
+        if (orderIds == null || orderIds.isEmpty()) return List.of();
+        if (orderIds instanceof ImmutableLongArrayList) {
+            return orderIds;
+        }
+        return List.copyOf(orderIds);
     }
 
     PendingMatching withAdmission(ResolvedMatchingAdmission nextAdmission) {
