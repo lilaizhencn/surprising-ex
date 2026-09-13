@@ -49,4 +49,11 @@ final class InstrumentSettlementCommands {
         if (owner.runtimeState.revision() != beforeRevision) owner.commits.requestCommitPublication();
     }
 
+    com.surprising.aeron.service.state.RuntimeSettlementProcessor.SettlementWork beginAsyncSettlement(
+            com.surprising.aeron.protocol.SettleInstrumentCommand command, UUID commandId) {
+        return RuntimeSettlementProcessor.prepareAsync(command,
+                owner.positionUserIndex.usersAfter(command.symbol(), command.cursorUserId()), commandId,
+                owner.activeOrderIndex, owner.runtimeState, owner.identities);
+    }
+
 }

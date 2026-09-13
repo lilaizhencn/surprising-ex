@@ -137,6 +137,236 @@ public final class RuntimeSettlementProcessor {
                 nextCursorUserId, selectedOrders.size(), selectedUserIds.size());
     }
 
+    /**
+     * Non-blocking lifecycle settlement state machine used by the live Cluster owner.
+     * Each poll advances at most one existing ControlLaneDispatcher phase; no owner
+     * thread waits for an account lane. The synchronous applyRuntime method above is
+     * intentionally retained for restore/offline callers with a blocking contract.
+     */
+    public static SettlementWork prepareAsync(SettleInstrumentCommand command,
+                                              Iterable<Long> indexedUserIds, UUID chunkCommandId,
+                                              ActiveOrderIndex activeOrderIndex,
+                                              TradingRuntimeState runtime,
+                                              RuntimeIdentityRegistry identities) {
+        if (command == null || indexedUserIds == null || chunkCommandId == null
+                || activeOrderIndex == null || runtime == null || identities == null) {
+            throw new IllegalArgumentException("invalid asynchronous runtime settlement");
+        }
+        CoreInstrumentState instrument = requireInstrument(runtime, command);
+        int symbolId = identities.symbolId(instrument.symbol());
+        long previousSettlement = runtime.treasury().lifecycleSettlement(symbolId);
+        if (command.settlementId() < previousSettlement) {
+            throw new CoreStateRejectedException("STALE_SETTLEMENT_ID", "settlement id must increase");
+        }
+        if (command.settlementId() == previousSettlement) {
+            return SettlementWork.completed(runtime,
+                    new CoreSettlementProgressView(command.settlementId(), true, true, 0, 0, 0, 0));
+        }
+        ProductTradingRules kernel = ProductTradingRulesRegistry.forInstrument(instrument);
+        validateSettlement(instrument, kernel, command);
+        TreasuryRuntime.LifecycleProgressRuntime previousProgress = runtime.treasury().lifecycleProgress(symbolId);
+        validateProgress(previousProgress, command, true);
+        boolean ordersComplete = previousProgress != null && previousProgress.ordersComplete();
+        int accountLaneId = previousProgress == null ? 0 : previousProgress.accountLaneId();
+        List<CoreOrderState> selectedOrders = List.of();
+        boolean moreOrders = false;
+        if (!ordersComplete) {
+            OrderPage page = selectOrders(runtime, identities, activeOrderIndex, instrument.symbol(),
+                    accountLaneId, command.cursorOrderId(), command.maxOrders());
+            selectedOrders = page.orders();
+            moreOrders = !page.complete();
+        }
+        int assetId = identities.assetId(instrument.settleAsset());
+        UserPage userPage = ordersComplete || !moreOrders
+                ? selectUsers(indexedUserIds, runtime, accountLaneId, command.cursorUserId(), command.maxUsers())
+                : new UserPage(new ArrayList<>(), accountLaneId, 0, true);
+        return new SettlementWork(command, chunkCommandId, activeOrderIndex, runtime, identities,
+                instrument, kernel, symbolId, assetId, previousProgress, selectedOrders,
+                moreOrders, userPage, indexedUserIds);
+    }
+
+    /** Bounded asynchronous settlement continuation. Instances are owner-confined. */
+    public static final class SettlementWork {
+        private enum Phase { CANCEL, PREPARE, APPLY, APPLY_WAIT, DONE }
+
+        private final SettleInstrumentCommand command;
+        private final UUID chunkCommandId;
+        private final ActiveOrderIndex activeOrderIndex;
+        private final TradingRuntimeState runtime;
+        private final RuntimeIdentityRegistry identities;
+        private final CoreInstrumentState instrument;
+        private final ProductTradingRules kernel;
+        private final int symbolId, assetId;
+        private final TreasuryRuntime.LifecycleProgressRuntime previousProgress;
+        private final List<CoreOrderState> selectedOrders;
+        private final boolean moreOrders;
+        private final Iterable<Long> indexedUserIds;
+        private final ArrayList<Long> selectedUserIds;
+        private final boolean usersComplete;
+        private final long orderLaneMask;
+        private final long userLaneMask;
+        private Phase phase;
+        private Object[] prepared;
+        private RuntimeTreasuryDelta treasuryDelta;
+        private CoreSettlementProgressView result;
+
+        private SettlementWork(SettleInstrumentCommand command, UUID chunkCommandId,
+                ActiveOrderIndex activeOrderIndex, TradingRuntimeState runtime,
+                RuntimeIdentityRegistry identities, CoreInstrumentState instrument,
+                ProductTradingRules kernel, int symbolId, int assetId,
+                TreasuryRuntime.LifecycleProgressRuntime previousProgress,
+                List<CoreOrderState> selectedOrders, boolean moreOrders, UserPage userPage,
+                Iterable<Long> indexedUserIds) {
+            this.command = command; this.chunkCommandId = chunkCommandId;
+            this.activeOrderIndex = activeOrderIndex; this.runtime = runtime; this.identities = identities;
+            this.instrument = instrument; this.kernel = kernel; this.symbolId = symbolId; this.assetId = assetId;
+            this.previousProgress = previousProgress; this.selectedOrders = selectedOrders;
+            this.moreOrders = moreOrders; this.indexedUserIds = indexedUserIds;
+            this.selectedUserIds = userPage.userIds(); this.usersComplete = userPage.complete();
+            long orderMask = 0;
+            for (CoreOrderState order : selectedOrders) orderMask |= runtime.topology().accountLaneMask(order.userId());
+            this.orderLaneMask = orderMask;
+            long userMask = 0;
+            for (long userId : selectedUserIds) userMask |= runtime.topology().accountLaneMask(userId);
+            this.userLaneMask = userMask;
+            this.phase = selectedOrders.isEmpty() ? Phase.PREPARE : Phase.CANCEL;
+        }
+
+        private SettlementWork(TradingRuntimeState runtime, CoreSettlementProgressView result) {
+            this.command = null; this.chunkCommandId = null; this.activeOrderIndex = null;
+            this.runtime = runtime; this.identities = null; this.instrument = null; this.kernel = null;
+            this.symbolId = this.assetId = 0; this.previousProgress = null; this.selectedOrders = List.of();
+            this.moreOrders = false; this.indexedUserIds = List.of(); this.selectedUserIds = new ArrayList<>();
+            this.usersComplete = true;
+            this.orderLaneMask = this.userLaneMask = 0; this.phase = Phase.DONE; this.result = result;
+        }
+
+        static SettlementWork completed(TradingRuntimeState runtime, CoreSettlementProgressView result) {
+            return new SettlementWork(runtime, result);
+        }
+
+        public boolean poll() {
+            runtime.assertOwner();
+            if (phase == Phase.DONE) return true;
+            switch (phase) {
+                case CANCEL -> {
+                    runtime.dispatchControlLanes(orderLaneMask, ignored -> {
+                        cancelOrdersOnLane(runtime, selectedOrders);
+                        return null;
+                    });
+                    phase = Phase.PREPARE;
+                    return false;
+                }
+                case PREPARE -> {
+                    if (selectedOrders.size() != 0 && !moreOrders && previousProgress == null
+                            && command.cursorOrderId() == 0 && selectedUserIds.isEmpty()) {
+                        // The order cancellation page completed; users were selected during construction.
+                    }
+                    if (orderLaneMask != 0 && !runtime.pollControlLanes()) return false;
+                    if (moreOrders) {
+                        long nextCursor = selectedOrders.isEmpty() ? command.cursorOrderId()
+                                : selectedOrders.getLast().orderId();
+                        runtime.treasury().setLifecycleProgress(symbolId,
+                                new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
+                                        command.instrumentChangeId(), command.settlementPriceTicks(),
+                                        command.optionCashUnitsPerContract(), false,
+                                        previousProgress == null ? 0 : previousProgress.accountLaneId(),
+                                        nextCursor, 0, chunkCommandId));
+                        runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(),
+                                selectedOrders.isEmpty() ? 1 : 2));
+                        result = new CoreSettlementProgressView(command.settlementId(), false, false,
+                                nextCursor, 0, selectedOrders.size(), 0);
+                        phase = Phase.DONE;
+                        return true;
+                    }
+                    if (userLaneMask == 0) {
+                        finishWithoutUsers();
+                        return true;
+                    }
+                    runtime.dispatchControlLanes(userLaneMask, lane ->
+                            prepareLane(runtime, instrument, kernel, command, selectedUserIds, symbolId, assetId));
+                    phase = Phase.APPLY;
+                    return false;
+                }
+                case APPLY -> {
+                    if (!runtime.pollControlLanes()) return false;
+                    int laneCount = runtime.topology().accountLaneCount();
+                    prepared = new Object[laneCount];
+                    long requiredInsurance = 0;
+                    for (int lane = 0; lane < laneCount; lane++) {
+                        if ((userLaneMask & (1L << lane)) == 0) continue;
+                        prepared[lane] = runtime.controlLaneResult(lane);
+                        @SuppressWarnings("unchecked") List<UserSettlement> plans = (List<UserSettlement>) prepared[lane];
+                        for (UserSettlement plan : plans) requiredInsurance = Math.addExact(requiredInsurance, plan.insurance());
+                    }
+                    if (requiredInsurance > runtime.treasury().insurance(assetId)) {
+                        long cursor = selectedUserIds.isEmpty() ? command.cursorUserId() : selectedUserIds.getLast();
+                        UUID progressId = chunkCommandId;
+                        runtime.treasury().setLifecycleProgress(symbolId,
+                                new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
+                                        command.instrumentChangeId(), command.settlementPriceTicks(),
+                                        command.optionCashUnitsPerContract(), true, 0, 0, cursor,
+                                        progressId, requiredInsurance));
+                        runtime.setMetadata(runtime.productLine(), Math.incrementExact(runtime.revision()));
+                        result = new CoreSettlementProgressView(command.settlementId(), false, true,
+                                0, cursor, selectedOrders.size(), selectedUserIds.size(), requiredInsurance);
+                        phase = Phase.DONE;
+                        return true;
+                    }
+                    if (requiredInsurance != 0) runtime.treasury().setInsurance(assetId,
+                            Math.subtractExact(runtime.treasury().insurance(assetId), requiredInsurance),
+                            runtime.treasury().insuranceDeficit(assetId));
+                    runtime.dispatchControlLanes(userLaneMask, lane -> {
+                        @SuppressWarnings("unchecked") List<UserSettlement> plans = (List<UserSettlement>) prepared[lane];
+                        return applyLane(runtime, assetId, plans);
+                    });
+                    phase = Phase.APPLY_WAIT;
+                    return false;
+                }
+                case APPLY_WAIT -> {
+                    if (!runtime.pollControlLanes()) return false;
+                    treasuryDelta = new RuntimeTreasuryDelta();
+                    int laneCount = runtime.topology().accountLaneCount();
+                    for (int lane = 0; lane < laneCount; lane++) {
+                        if ((userLaneMask & (1L << lane)) == 0) continue;
+                        treasuryDelta.merge((RuntimeTreasuryDelta) runtime.controlLaneResult(lane));
+                    }
+                    treasuryDelta.apply(runtime.treasury());
+                    boolean complete = usersComplete || selectedUserIds.isEmpty();
+                    long nextCursor = complete ? 0 : selectedUserIds.getLast();
+                    if (complete) runtime.treasury().setLifecycleSettlement(symbolId, command.settlementId());
+                    else runtime.treasury().setLifecycleProgress(symbolId,
+                            new TreasuryRuntime.LifecycleProgressRuntime(command.settlementId(),
+                                    command.instrumentChangeId(), command.settlementPriceTicks(),
+                                    command.optionCashUnitsPerContract(), true,
+                                    previousProgress == null ? 0 : previousProgress.accountLaneId(),
+                                    0, nextCursor, chunkCommandId));
+                    runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(),
+                            selectedOrders.isEmpty() ? 1 : 2));
+                    result = new CoreSettlementProgressView(command.settlementId(), complete, true,
+                            0, nextCursor, selectedOrders.size(), selectedUserIds.size());
+                    phase = Phase.DONE;
+                    return true;
+                }
+                default -> throw new IllegalStateException("invalid settlement continuation phase");
+            }
+        }
+
+        private void finishWithoutUsers() {
+            runtime.treasury().setLifecycleSettlement(symbolId, command.settlementId());
+            runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(),
+                    selectedOrders.isEmpty() ? 1 : 2));
+            result = new CoreSettlementProgressView(command.settlementId(), true, true, 0, 0,
+                    selectedOrders.size(), 0);
+            phase = Phase.DONE;
+        }
+
+        public CoreSettlementProgressView result() {
+            if (result == null) throw new IllegalStateException("settlement has not completed");
+            return result;
+        }
+    }
+
     public static void advanceCancellation(TradingCoreState before, SettleInstrumentCommand command,
                                            Collection<CoreOrderState> orders, long nextCursorOrderId,
                                            UUID chunkCommandId, TradingRuntimeState runtime,
@@ -281,14 +511,19 @@ public final class RuntimeSettlementProcessor {
     private static void cancelOrders(TradingRuntimeState runtime, Collection<CoreOrderState> orders) {
         if (orders == null || orders.isEmpty()) return;
         runtime.executeOwnerSettlements(orders, CoreOrderState::userId, ignored -> {
-            for (CoreOrderState order : orders) {
-                if (!runtime.currentLaneOwns(order.userId())) continue;
-                ReservationRuntime reservation = runtime.reservation(order.orderId());
-                if (reservation == null) throw new IllegalStateException("settlement reservation is missing");
-                runtime.cancelOrder(order.orderId(), order.userId(), reservation.reservedUnits());
-            }
+            cancelOrdersOnLane(runtime, orders);
             return null;
         });
+    }
+
+    private static void cancelOrdersOnLane(TradingRuntimeState runtime, Collection<CoreOrderState> orders) {
+        if (orders == null || orders.isEmpty()) return;
+        for (CoreOrderState order : orders) {
+            if (!runtime.currentLaneOwns(order.userId())) continue;
+            ReservationRuntime reservation = runtime.reservation(order.orderId());
+            if (reservation == null) throw new IllegalStateException("settlement reservation is missing");
+            runtime.cancelOrder(order.orderId(), order.userId(), reservation.reservedUnits());
+        }
     }
 
     private static CoreInstrumentState requireInstrument(TradingRuntimeState runtime,

@@ -385,7 +385,19 @@ final class OrderedCommitCoordinator {
                     var command = pending.decodedCommand().settlement();
                     if (matchingResult.accepted()) {
                         owner.instrumentSettlement.applySettlementChangedIds(command);
-                        owner.instrumentSettlement.settleInstrumentRuntime(command, pending.command().header().commandId());
+                        if (owner.runtimeState.asynchronousCommands()) {
+                            var work = owner.instrumentSettlement.beginAsyncSettlement(
+                                    command, pending.command().header().commandId());
+                            deferControl(() -> {
+                                if (!work.poll()) return false;
+                                owner.resultBuilder.commandSettlementProgress = work.result();
+                                requestCommitPublication();
+                                return true;
+                            });
+                        } else {
+                            owner.instrumentSettlement.settleInstrumentRuntime(command,
+                                    pending.command().header().commandId());
+                        }
                     }
                 }
             }

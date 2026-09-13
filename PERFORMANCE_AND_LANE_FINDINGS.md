@@ -688,3 +688,9 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 
 - 发现 `qualify-linear-perpetual-scale.sh` 仍默认使用 512 个 listed/active symbols，和后续固定 128 币对的验收约定冲突；已统一 probe、JMH、GC、JFR、soak、capacity、saturation、owner commit 及 JSON 校验为 128。
 - `maxInFlight=256`、操作批次、JFR/NMT、ZGC 和校验门禁未改变；脚本语法检查通过。此前历史结果不改写，后续新轮次才使用该口径。
+
+### 2026-09-14 交割结算异步续程
+
+- `SETTLE_INSTRUMENT` 原先在异步 Cluster 作用域调用 `executeLifecycleSettlements`，Owner 会同步等待账户 Lane；已增加 `RuntimeSettlementProcessor.SettlementWork`，按撤单、账户结算准备、保险检查、账户应用四个有界阶段复用 `ControlLaneDispatcher`。
+- Lane 只处理所属订单/账户和既有 `UserSettlement` 结果，Owner 只汇总 `RuntimeTreasuryDelta`、更新生命周期进度并进入原有有序提交；保险不足、分页游标、快照恢复和失败回滚语义保持不变。同步恢复/离线入口继续使用原同步实现。
+- 受影响结算、恢复、Runtime 状态回归共 103 项通过；服务全量 925 项通过。尚未重新执行吞吐/JFR，因此不能据此宣称整体吞吐或分配率改善。
