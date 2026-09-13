@@ -50617,3 +50617,10 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - 代码包含 PLACE/TRIGGER 前置撤单结果直接写入 `MatcherSettlementPlan` 复用槽，省去临时 `long[]` 及二次复制；验证新增 `MatcherSettlementPlanTest.expectedCancellationsAreWrittenInAdmissionOrderIntoReusablePlanStorage`。
 - 使用 HotSpot JDK 25.0.1、ZGC、4 account Lane、1 matcher、128 listed/active symbols、1000 users、`maxPositionsPerUser=2`、`maxOpenOrdersPerUser=3`、UNIFORM、`hftRounds=1`、`hftBatchSize=4`、1s warmup、2×2s measurement，`scaleMixedWorkload`：`19.064 ops/s`；`terminalBusinessOperations=51321.484/s`、`terminalCoreMessages=22038.498/s`、`laneOperations=39768.431/s`、`laneSettlementOperations=27567.186/s`、`terminalTrades=9760.995/s`；拒绝、超时、未完成均为 0。结果：`/tmp/surprising-scale-mixed-final.json`。
 - 该轮是短 closed-loop 诊断，不能据此宣称吞吐提升、30万+/s、p99≤5ms 或稳态分配率达标；没有运行 JFR，因此不更新 Owner/Matcher/Lane 热点和分配率结论。与历史不同测量长度的结果不做百分比比较。
+
+### 2026-09-14 前置撤单计划槽复用 JFR
+
+- 使用 `qualify-linear-perpetual-scale.sh profile`，HotSpot JDK 25.0.1、ZGC、2g 堆、4 account Lane、1 matcher、128 listed/active symbols、10,000 users、`maxPositionsPerUser=5`、`maxOpenOrdersPerUser=10`、UNIFORM，JFR profile 配置；测量工作负载终态业务项 26,920，JMH 端 `terminalBusinessOperations=24,914.308/s`、`terminalCoreMessages=10,698.715/s`、`laneOperations=20,194.287/s`、`laneSettlementOperations=14,271.123/s`，未完成/拒绝/超时为 0。
+- JFR 分析：采样估算分配 `11,508,661,936 B/s`、`427,513 B/终态业务项`；主要类型为 `[B`、`[J`、`Object[]`、`TreeMap$Entry`、`CoreOrderState`、`OrderRuntime`、`Long`、`String`，主要站点为 `TreeMap.put`、字符串拼接/编码、`HashMap.putVal`、`LongObjectHashMap.allocateTable`、快照 Reader。该估算包含 JMH fork 的初始化/恢复期，不能直接作为稳态业务分配率。
+- CPU 采样仍显示 `LaneMutationTask.await`、`OrderedCommitCoordinator.pumpMatchingCommitCompletions`、`TreeMap.put/getEntry`、`LaneClientOrderCaptures.contains`、`CoreStateHash.mix`；Matcher 与四个 Lane 均有样本。锁/等待事件总时长约 54.1ms，ZGC 20 次回收、总停顿约 1.066ms、最大约 0.071ms，`ZAllocationStall=0`，失败/退化信号为 0。
+- profile 端到端 closed-loop 直方图的 p99（纳秒桶）为 PLACE 8.39ms、CANCEL 16.78ms、ORDER_BATCH 67.11ms、TRIGGER 2.10ms、RISK_SCAN 0.26ms、LIQUIDATION 16.78ms、FUNDING 2.10ms、ADL 4.19ms；包含初始化且未修正协调遗漏，不能作为普通下单 p99≤5ms 验收。记录与分析目录：`/tmp/surprising-profile-final/scale-profile.json`、`/tmp/surprising-profile-final/scale-jfr-analysis/`。
