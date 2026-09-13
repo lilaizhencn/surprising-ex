@@ -50651,3 +50651,22 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - 追加单项批量结算初始身份 scratch 复用后，`MatcherSettlementPlanTest` 9 项通过；服务模块编译通过。该修复仅移除每个批量项的一次性 taker ID 数组，不改变吞吐、p99 或稳态分配率结论。
 - 上述改动后的服务模块全量回归：`mvn -pl surprising-aeron-core/surprising-aeron-service -am test`，927 项通过，Failures 0、Errors 0，Maven BUILD SUCCESS。
 - 最终提交（保留单元素 scratch 容量复用）再次执行同一全量回归：927 项通过，Failures 0、Errors 0，Maven BUILD SUCCESS；`git diff --check` 通过。
+
+## 2026-09-14 当前 master 主链路 JMH/JFR 复验（采集前锁定）
+
+- 被测 commit：`1d9586fb6404021d576ac54b9bef7ce2d3390142`；对照 commit：不适用，仅验证当前 master。
+- 标准：固定 128 listed/active symbols、256 in-flight、4 Account Lane、1 matcher、ZGC；accepted 与 terminal business/core counters 必须相等，unfinished/error/timeout 为 0，资金守恒和快照恢复通过。JMH 输出主吞吐、业务计数、backlog、`-prof gc` 分配率；JFR 输出 Owner/Matcher/Lane CPU、分配栈、GC/safepoint、线程等待/锁、NMT 和 I/O。
+- 场景：HotSpot JDK 25.0.1，Oracle GraalVM HotSpot，16 CPU/16 GiB；`scaleMixedWorkload`，10000 users，UNIFORM，maxPositions=5，maxOpenOrders=10，hftRounds=1，batch=4，lifecycleSymbols=32，BLOCKING，JMH 2×2s warmup、3×3s measurement、3 forks；JFR 2×2s warmup、10s measurement、1 fork。仅本机单节点真实 Aeron Cluster 开发链路，测量后排空并执行资金/状态/快照校验。
+- 产物目录锁定为 `/tmp/qual-current-20260914`；采集完成后只把参数、指标、异常和摘要写入本文件，再清理 JFR、GC、NMT、Aeron 录制及临时日志。该轮不启动 GCP。
+
+### 采集结果
+
+- 构建与回归：Aeron `1.53.1`；`mvn -pl surprising-aeron-core/surprising-aeron-service -am test`，927 项通过，Failures 0、Errors 0；脚本 `bash -n` 和 `git diff --check` 通过。
+- JMH 终态业务吞吐（3 forks，结果为 fork 合并均值；固定 128 币对、256 在途、ZGC）：UNIFORM(5/10/32) **32,612/s**，UNIFORM(1/3/128) **37,350/s**，PARETO_80_20 **42,333/s**，MARK_PRICE_STORM **10,236/s**，UNIFORM(1/3/32) **53,039/s**。各场景 accepted=terminal，unfinished/error/timeout=0；这是一轮 closed-loop 结果，不能推导开放到达率 p99，也未达到 30 万+/s。
+- JFR：`scale.jfr` 43MB；使用 `JFR_MAX_EXCEPTIONS=2000` 完成聚合（`scale-jfr-analysis5/aggregate.json`）。JFR 只用于热点诊断，未把 workload latency contract 当作通过条件，因为 `scaleMixedWorkload` 的负载模型是 `CLOSED_LOOP_FIXED_IN_FLIGHT`，且 `coordinatedOmissionCorrected=false`。
+- CPU/线程：Matcher 线程约 98.7% RUNNABLE；四个 Lane 约 99.999% RUNNABLE，Lane 不是下游空闲线程。Owner 角色在嵌入式 JMH 单节点中没有独立 JFR state event，驱动线程承载了大量 Owner/Cluster 工作，故不能用这轮记录声称 Owner 单线程已降到某个百分比。热点方法仍包括 `OrderedCommitCoordinator.pumpMatchingCommitCompletions`、`LaneMutationTask.await`、`TradingRuntimeState$LaneClientOrderCaptures.contains`、`TreeMap.put/getEntry`、`CoreStateHash.mix`。
+- 分配：有效采样区间约 1 秒，采样 **11.61 GB/s**、约 **431,446 B/终态业务项**；最大类型为 `[B`、`[J`、`Object[]`、`TreeMap$Entry`、`CoreOrderState`、`OrderRuntime`、`Long`、`String`，主要站点为 `TreeMap.put`、字符串拼接/编码、`HashMap.putVal`、快照 Reader、`LongObjectHashMap`/`LongLongHashMap` 扩容及 `RuntimeStateProjector.toRuntimeOrder`。该数值包含初始化、恢复、JFR/NMT 开销，不能作为稳态分配率；它确认剩余分配热点仍集中在状态物化/快照与集合扩容。
+- GC/等待：ZGC 11 次回收，总 GC 时间占比约 **7.49%**；暂停 P99/P999/最大约 **50.3µs**，Allocation Stall=0，失败/退化=0。锁/park 事件 74 次、总计约 **51.25ms**，主要为等待/初始化；Owner 同步 I/O 0。VM operation 265 次，其中 `HandshakeAllThreads` 总计约 **588.6ms**，最长约 **534.5ms**，属于本机 JFR/JMH 运行期干扰，不能当作交易线程锁竞争。
+- 异常：JFR 记录 1,087 个启动/链接阶段反射与本地库异常，主要为 `NoSuchFieldException`(594)、`NoSuchMethodError`(396)、`UnsatisfiedLinkError`(33)、JNR SymbolNotFound(27)；业务计数仍为 accepted=terminal、错误/超时/未完成均 0。分析命令显式使用阈值 2000，不能把该轮标记成“零异常生产验收”。
+- 角色归类修正：分析脚本不再把 `com.surprising.aeron` 包名误归为 Aeron 线程，Lane 角色覆盖恢复为真实四 Lane；`jmh-worker` 归为 peripheral，避免把驱动线程误报为 Aeron。该修复只影响诊断准确性，不改变运行时路径。
+- 结论：Matcher→Lane 预投递、Lane 单写、Owner 有序证据/资金/终态提交和分配快路径已实现并通过功能回归；剩余瓶颈是 Owner/Cluster 驱动线程上的有序提交与状态索引/哈希，以及状态物化和快照/集合分配。普通单 p99≤5ms、稳态分配率和 30 万+/s 仍需要 Linux 上独立 Owner 线程、开放到达率及热身后稳态 JFR 才能关闭，不能用本轮短 closed-loop 结果替代。

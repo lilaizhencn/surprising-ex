@@ -221,18 +221,19 @@ jq -n \
     ["owner", "matcher", "risk", "snapshot", "projection", "core-fact/exporter",
      "Aeron", "Kafka", "peripheral", "lane", "GC", "compiler"];
   def role($name):
-    if $name | test("matcher|matching|exchange-core|orderbook"; "i") then "matcher"
+    if $name | test("jmh-worker|linearperpetualcorebenchmark"; "i") then "peripheral"
+    elif $name | test("matcher|matching|exchange-core|orderbook"; "i") then "matcher"
     elif $name | test("risk|liquidat|funding|adl|insurance|margin"; "i") then "risk"
     elif $name | test("snapshot|recovery|restore|snapshotcodec"; "i") then "snapshot"
     elif $name | test("projector|projection"; "i") then "projection"
     elif $name | test("core[- ]?fact|coreexport|materializecorefact|exporter"; "i") then "core-fact/exporter"
-    elif $name | test("aeron|conductor|archive|cluster"; "i") then "Aeron"
+    elif $name | test("(^|[-_.])aeron([-_.]|$)|conductor|archive|cluster"; "i") then "Aeron"
     elif $name | test("kafka"; "i") then "Kafka"
     elif $name | test("account-lane|settlement-lane|lifecycle-lane|(^|[-_])lane([-_]|$)"; "i") then "lane"
     elif $name | test("zgc|gc thread|g1 |shenandoah"; "i") then "GC"
     elif $name | test("compilerthread|c1 compiler|c2 compiler|jit"; "i") then "compiler"
     elif $name | test("owner|ownercommit|core-command|trading-core|tradingcoreruntime"; "i") then "owner"
-    elif $name | test("commonpool|reference handler|finalizer|signal dispatcher|notification|cleaner|vm thread|service thread|jfr|attach listener|process reaper|virtualthread|carrier|http|netty|grpc|jdbc|database|scheduler|timer|watchdog|stdout|stderr|jmh|main"; "i") then "peripheral"
+    elif $name | test("commonpool|reference handler|finalizer|signal dispatcher|notification|cleaner|vm thread|service thread|jfr|attach listener|process reaper|virtualthread|carrier|http|netty|grpc|jdbc|database|scheduler|timer|watchdog|stdout|stderr|jmh|main|destroyjavavm|background~resource~releaser|^thread-[0-9]+$"; "i") then "peripheral"
     else "unclassified" end;
   def stackText:
     (.values.stackTrace.frames // [] | map(
@@ -240,7 +241,7 @@ jq -n \
   def eventRole:
     (role(thread(.))) as $threadRole |
     (role(stackText)) as $stackRole |
-    if (["matcher", "risk", "snapshot", "projection", "core-fact/exporter", "Aeron", "Kafka", "lane"] |
+    if (["matcher", "risk", "snapshot", "projection", "core-fact/exporter", "Kafka", "lane"] |
         index($stackRole)) != null then $stackRole
     elif $threadRole != "unclassified" then $threadRole
     else $stackRole end;
