@@ -35,6 +35,8 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
      */
     private static final int INITIAL_INDEX_CAPACITY = 256;
     private static final int INITIAL_USER_INDEX_CAPACITY = 64;
+    /** Symbol buckets are usually short-lived in the 128-symbol turnover workload. */
+    private static final int INITIAL_SYMBOL_INDEX_CAPACITY = 8;
     private static final NavigableSet<Long> EMPTY_IDS = Collections.emptyNavigableSet();
     private static final LongIterator EMPTY_ITERATOR = new LongIterator() {
         public boolean hasNext() { return false; }
@@ -525,7 +527,7 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
         }
         userIds.add(order.orderId());
         idsBySymbol.computeIfAbsent(order.symbol(), ignored ->
-                new LongHashSet(INITIAL_INDEX_CAPACITY, 0.65f, false)).add(order.orderId());
+                new LongHashSet(INITIAL_SYMBOL_INDEX_CAPACITY, 0.65f, false)).add(order.orderId());
     }
 
     private void remove(IndexedOrder order) {
