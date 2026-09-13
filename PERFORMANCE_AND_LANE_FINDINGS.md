@@ -771,3 +771,9 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 
 - direct settlement 与 `KNOWN_PREFIX_APPLIED` 证据校验改用有界循环，去掉 `matcherEvents`/取消结果上的 Stream、lambda 和中间迭代器。
 - 校验条件完全保留：成交事件禁止、已接受撤单必须属于预授权集合或改单原单；仅减少 Owner/Matcher 交界处的短命对象。
+
+### 2026-09-14 直达结果单一事实源收口
+
+- direct PLACE 的 Matcher 结果只由 `MatcherSettlementEvent` 保存并交给 Lane；Owner 仍轮询 Matcher 完成槽位以释放 SPSC 位置和 submission token，但不再把同一对象复制到 `LaneCommandContext.completedMatchingResult`。
+- `OrderedCommitCoordinator` 在首次提交和等待重试时都从 direct event 读取结果，再执行原有有序证据校验、资金汇总、结果账本、响应和释放流程；普通非直达命令与批量命令的既有完成语义保持不变。
+- 这解决了 Owner 对直达结果的重复保留和重复消费职责，未删除 Owner 的一致性边界，也未把终态提交下沉到 Lane。Matcher/Lane/Runtime/Cluster 回归及 service 全量 927 项均通过。
