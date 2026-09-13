@@ -50733,3 +50733,14 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 
 - 在 `0eb7376a` 之后保留 ASCII 状态哈希的直接字符混合，去除常见哈希路径的 UTF-8 临时数组；Lane mutation await fast path 因并发可见性竞态已撤回。
 - 定向回归及随后 service 全量 927 项回归通过。曾对包含 await fast path 的临时工作树做短轮采集，但该 fast path 因并发可见性竞态已撤回，相关吞吐数字不作为最终代码证据；最终可用性能证据以上一节 `0eb7376a` 的 JMH/JFR 结果为准。
+
+
+### 2026-09-14 批量结算状态压缩短轮
+
+- 代码 commit：`62e64ea7`（`9186a5fc`、`775f168b` 之前的批次/撤单状态收敛）。标准固定 128 listed/active symbols、4 Account Lane、1 Matcher、ZGC、10,000 users、UNIFORM、maxPositions=1、maxOpenOrders=3、lifecycleSymbols=32；HotSpot JDK 25.0.1；1×1s warmup、1×2s measurement、1 fork。
+- 结果：终态业务 **29,177/s**（GC 轮），终态核心消息 **12,529/s**，Lane **21,568/s**，Lane settlement **14,632/s**，成交 **5,549/s**；accepted=terminal，unfinished/error/timeout=0。该轮是 closed-loop JMH，不能推导开放到达率或 30 万+/s。
+- `-prof gc` 报告约 **501 MB/s**；其 `B/op` 是 JMH invocation 口径并包含初始化/恢复，不能当作单业务稳态分配率。
+- 有效 JFR 为 fork 子进程 14 秒记录，DataLoss=0，终态业务约 **21,536**。线程状态采样：Matcher 约 **99.3% RUNNABLE**；四个 Lane 合计约 **99.99% RUNNABLE**；Owner/驱动线程约 **100% RUNNABLE**。热点包括 `LaneMutationTask.await`、`OrderedCommitCoordinator.awaitAnyMatchingCommitReady/pumpMatchingCommitCompletions`、`CoreStateHash.mix`、`TreeMap.put/successor`、`LaneClientOrderCaptures.contains`。
+- JFR 加权分配估算约 **198.6 KB/终态业务项**，受 JMH 初始化、快照恢复和 JFR/NMT 采样影响；类型/站点仍集中在 `[J`/`[B`/`Object[]`、`TreeMap.Entry`、`CoreOrderState`、`OrderRuntime`、`RollingBusinessStateHash.UserHash`、状态快照物化和 primitive map 扩容。ZGC 3 次回收、总暂停约 **170 µs**、P99/max **34.6 µs**，Allocation Stall=0、失败/退化=0；锁/park 约 **18.8 ms**，Owner 同步 IO=0。
+- 该轮 PLACE_ORDER 终态 p99 约 **8.39 ms**，超过 5 ms 目标；样本短且混合场景，不能作为生产 SLO 定论。JFR 原始目录在摘要写入后已清理。
+- 标准 `owner-commit` 脚本当前引用已删除的 `OwnerFactFrameBenchmark`，因此本次使用仍存在的 `LinearPerpetualCoreBenchmark.scaleMixedWorkload` 完成 JMH/JFR；脚本本身需要后续改为现有 benchmark 名称后才能作为正式门禁。
