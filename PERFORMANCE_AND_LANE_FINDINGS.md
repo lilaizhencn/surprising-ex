@@ -847,3 +847,10 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - 普通 PLACE/CANCEL 结果原先在 Owner 完成边界先创建 `CoreOrderStateView`，随后马上编码；现在单订单结果保存 `OrderRuntime` 引用，由 Owner 独占的可复用 `CoreOrderStateSource` 游标在编码期间读取字段，编码器不保留游标引用。
 - 多订单 REPLACE/AMEND、批量响应和 TRIGGER 仍使用稳定视图列表；命令开始时显式清除游标，避免跨命令复用旧订单。协议字节格式、响应账本和 Lane context 生命周期不变。
 - 这是状态物化分配的确定性削减，不改变 Owner 必须保留的有序证据校验、资金汇总、终态账本和结果索引职责。整体 `OrderRuntime`、发布缓冲和有序提交分配仍需稳态 JFR 逐项验证。
+
+
+### 2026-09-14 Matcher 结算订单身份视图去复制
+
+- `TradingCoreRuntime.boxedOrderIds(MatcherSettlementPlan)` 原来每次把 plan 的 primitive `long[]` 复制成新的数组和不可变列表；现在返回由 plan 自有数组驱动的只读 `RandomAccess` 视图。
+- 视图只在 plan 仍挂在 pending sequence/context 期间有效；`LaneCommandContextRing.Context` 回收时才清空 plan，因此异步 Lane 等待和 Owner 恢复提交上下文不会看到提前释放或跨命令数据。批量结算仍使用事件自有槽位，不引用该视图。
+- 该改动删除普通撮合完成路径的一次 `long[]` 和列表对象分配，不改变订单顺序、去重、终态索引、结果账本或提交边界。服务全量 929 项回归通过。

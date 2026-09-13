@@ -6,7 +6,9 @@ import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.matching.CoreCancellationResult;
 import exchange.core2.core.common.MatcherEventType;
 import exchange.core2.core.common.MatcherResult.MatcherEvent;
+import java.util.AbstractList;
 import java.util.List;
+import java.util.RandomAccess;
 import org.eclipse.collections.impl.set.mutable.primitive.LongHashSet;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 
@@ -48,6 +50,8 @@ public final class MatcherSettlementPlan {
     private static final long[] NO_ORDERS = new long[0];
     private OrderRuntime directTaker;
     private static final ThreadLocal<LongHashSet> DIRECT_ORDER_KEYS = ThreadLocal.withInitial(LongHashSet::new);
+    /** Read-only view owned by this plan; it remains valid until the enclosing context is recycled. */
+    private final List<Long> orderIdView = new OrderIdView(this);
 
     /** 事件池或在途序号槽独占并复用；Owner准备后只读，所有Lane完成后才能清理。 */
     public MatcherSettlementPlan() { orderIds = new long[8]; preCancellationOrderIds = NO_ORDERS; matcherEvents = List.of(); }
@@ -363,6 +367,21 @@ public final class MatcherSettlementPlan {
         return size + 1;
     }
 
+    private static final class OrderIdView extends AbstractList<Long> implements RandomAccess {
+        private final MatcherSettlementPlan plan;
+
+        private OrderIdView(MatcherSettlementPlan plan) { this.plan = plan; }
+
+        @Override
+        public Long get(int index) {
+            if (index < 0 || index >= plan.orderCount) throw new IndexOutOfBoundsException(index);
+            return plan.orderIds[index];
+        }
+
+        @Override
+        public int size() { return plan.orderCount; }
+    }
+
     private static void preparePositionIdentity(TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
                                                 CoreInstrumentState instrument, OrderRuntime order) {
         if (!runtime.productLine().isDerivative()) return;
@@ -388,6 +407,12 @@ public final class MatcherSettlementPlan {
     public long activeUserId() { return activeUserId; }
     public long requiredLaneMask() { return requiredLaneMask; }
     public int orderCount() { return orderCount; }
+
+    /**
+     * Returns the plan-owned order ID view without copying a primitive array. The view is only
+     * valid while this plan remains attached to its pending sequence/context.
+     */
+    public List<Long> orderIdList() { return orderIdView; }
     public long orderId(int index) { return orderIds[index]; }
     public int matcherEventCount() { return matcherEvents.size(); }
     public MatcherEvent matcherEvent(int index) { return matcherEvents.get(index); }

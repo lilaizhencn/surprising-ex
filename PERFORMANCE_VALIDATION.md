@@ -50799,3 +50799,12 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - HotSpot JDK 25.0.1、ZGC、4 Account Lane、1 Matcher、128 listed/active symbols、10,000 users、256 在途、UNIFORM、maxPositions=1、maxOpenOrders=3、hftRounds=1、batch=4、lifecycleSymbols=32，1×1s warmup、2×2s measurement、1 fork：终态业务 **23,286.393/s**，终态核心消息 **9,999.655/s**，Lane **17,213.939/s**，Lane settlement **11,677.798/s**，成交 **4,428.913/s**；accepted=terminal，error/reject/timeout/unfinished 均为 0。
 - 该轮只有两个测量样本，且没有同一进程对照；数值低于此前部分短轮，不能把波动归因于 source 优化，也不能宣称 30 万+/s、普通单 p99≤5ms 或稳态分配率达标。
 - 验证：协议编码等价测试、`TradingCoreRuntimeTest`、`ClusterCommandPipelineTest` 定向回归通过；service 聚合最终报告 **929 tests，0 failures，0 errors，0 skipped**。期间完整回归曾出现既有独立窗口 `incomplete lane command context` 时序抖动，自动重试后零失败；该堆栈不在编码 source 路径。
+
+
+### 2026-09-14 结算订单身份视图短轮回归
+
+- 变更：Matcher settlement plan 提供 plan-owned `List<Long>` 只读视图，Owner 不再为 `commandChangedOrderIds` 复制 `long[]` 和不可变列表；视图在 pending context 回收前保持有效。
+- 固定条件：HotSpot/GraalVM JDK 25.0.1、ZGC、4 Account Lane、1 Matcher、128 listed/active symbols、10,000 users、256 in-flight、UNIFORM、maxPositions=1、maxOpenOrders=3、hftRounds=1、batch=4、lifecycleSymbols=32；1×1s warmup、2×2s measurement、1 fork。
+- service 全量：**929 tests，Failures 0，Errors 0，Skipped 0**。
+- 短 JMH：终态业务 **23,551.432/s**，终态核心消息 **10,113.468/s**，Lane **17,409.862/s**，Lane settlement **11,810.711/s**，成交 **4,479.321/s**；error/reject/timeout/unfinished 均为 0。
+- 本轮没有同机对照、稳态 JFR/NMT 或 GCP 复测；数字只证明当前版本在固定短轮下可运行，不能归因出确定性吞吐收益，也不能宣称 30 万+/s、普通单 p99≤5ms 或长期分配率已达标。

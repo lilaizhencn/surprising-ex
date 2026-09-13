@@ -203,6 +203,19 @@ class MatcherSettlementPlanTest {
     }
 
     @Test
+    void orderIdViewFollowsPlanLifetimeWithoutCopyingStorage() {
+        try (var runtime = new TradingRuntimeState()) {
+            var slot = MatcherSettlementPlan.emptyInto(new MatcherSettlementPlan(), 1, 21, 11, 10, runtime);
+            var view = slot.orderIdList();
+
+            assertThat(view).containsExactly(11L, 10L);
+            assertThat(slot.orderIdList()).isSameAs(view);
+            slot.clearReferences();
+            assertThat(view).isEmpty();
+        }
+    }
+
+    @Test
     void expectedCancellationsAreWrittenInAdmissionOrderIntoReusablePlanStorage() {
         try (var runtime = new TradingRuntimeState()) {
             var identities = new RuntimeIdentityRegistry();
