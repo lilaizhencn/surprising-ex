@@ -701,3 +701,8 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - `TerminalStateRetention` 的候选键此前已复用，但每次终态观察仍替换 `RetainedEntity`。候选表只由 Owner 线程访问，现改为原值就地更新；仅首次插入创建对象，快照 `copy()` 做深复制，避免把可变运行值带入快照。
 - FIFO 顺序、导出序号、客户号墓碑、裁剪条件和恢复编码不变；`TerminalStateRetentionTest` 4 项及 service 全量 925 项通过。
 - 该改动只消除终态观察短命对象；Owner 的有序提交、证据链和结果索引仍是一致性所需职责。整体分配率和30万+/s仍需稳态长轮验证。
+
+### 2026-09-14 删除无调用的旧订单盖章入口
+
+- `RuntimeCommandProcessor.stampOrderChangesByLane(TradingCoreState, ...)` 没有生产调用方，且会为每次调用创建 `ArrayList`、`HashMap` 及投影后的 `OrderRuntime` 副本；实际链路使用的是 `stampChangedOrdersByLane`。已删除这条重复入口，保留唯一的命令级盖章路径，减少维护分叉和误用风险。
+- 生产调用图未改变；service 编译通过，完整 925 项回归已在同一组主链路改动上通过。

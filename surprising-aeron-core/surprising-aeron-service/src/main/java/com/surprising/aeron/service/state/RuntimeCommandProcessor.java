@@ -412,43 +412,6 @@ public final class RuntimeCommandProcessor {
         return changed;
     }
 
-    public static boolean stampOrderChangesByLane(
-            TradingRuntimeState runtime, RuntimeIdentityRegistry identities, TradingCoreState commandBefore,
-            long timestamp, long clusterPosition, Iterable<Long> changedOrderIds,
-            Iterable<Long> changedUserIds) {
-        if (runtime == null || identities == null || commandBefore == null || changedOrderIds == null
-                || changedUserIds == null || timestamp < 0 || clusterPosition < 0) {
-            throw new IllegalArgumentException("invalid lane-batched runtime order commit metadata");
-        }
-        runtime.assertOwner();
-        ArrayList<Long> candidates = new ArrayList<>();
-        java.util.HashMap<Long, OrderRuntime> previousOrders = new java.util.HashMap<>();
-        for (Long orderId : changedOrderIds) {
-            if (orderId == null) continue;
-            candidates.add(orderId);
-            CoreOrderState previous = commandBefore.order(orderId);
-            if (previous != null) {
-                previousOrders.put(orderId, RuntimeStateProjector.toRuntimeOrder(previous, identities));
-            }
-        }
-        if (candidates.isEmpty()) return false;
-        Object[] results = runtime.executeOwnerSettlements(changedUserIds, ignored -> {
-            boolean changed = false;
-            for (long orderId : candidates) {
-                OrderRuntime order = runtime.order(orderId);
-                if (order != null && !order.equals(previousOrders.get(orderId))) {
-                    runtime.replaceOrder(order.withCommitMetadata(timestamp, clusterPosition));
-                    changed = true;
-                }
-            }
-            return changed;
-        });
-        for (Object result : results) {
-            if (Boolean.TRUE.equals(result)) return true;
-        }
-        return false;
-    }
-
     public static void validateOrderStampInputs(long timestamp, long position, Iterable<Long> orderIds) {
         if (timestamp < 0 || position < 0 || orderIds == null)
             throw new IllegalArgumentException("invalid order commit metadata");
