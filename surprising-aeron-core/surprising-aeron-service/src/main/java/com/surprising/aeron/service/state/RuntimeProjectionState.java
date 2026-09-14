@@ -563,26 +563,31 @@ public final class RuntimeProjectionState {
     private static final class MutableUser {
         private final ProductLine productLine;
         private long revision;
-        private final TreeMap<String, AssetBalance> balances;
-        private final TreeMap<Long, OrderReservation> reservations;
-        private final TreeMap<String, CorePositionState> positions;
+        /**
+         * Lane mutation maps are deliberately hash based. Ordering is imposed once when a
+         * projection is frozen by CoreUserState/StateMapSupport; keeping TreeMap here made every
+         * balance, reservation and position mutation pay comparator and entry costs.
+         */
+        private final Map<String, AssetBalance> balances;
+        private final Map<Long, OrderReservation> reservations;
+        private final Map<String, CorePositionState> positions;
         private CorePositionMode positionMode;
 
         private MutableUser(CoreUserState source) {
             productLine = source.productLine();
             revision = source.revision();
-            balances = new TreeMap<>(source.balances());
-            reservations = new TreeMap<>(source.reservations());
-            positions = new TreeMap<>(source.positions());
+            balances = new HashMap<>(source.balances());
+            reservations = new HashMap<>(source.reservations());
+            positions = new HashMap<>(source.positions());
             positionMode = source.positionMode();
         }
 
         private MutableUser(ProductLine productLine, CorePositionMode positionMode) {
             this.productLine = productLine;
             this.positionMode = positionMode;
-            balances = new TreeMap<>();
-            reservations = new TreeMap<>();
-            positions = new TreeMap<>();
+            balances = new HashMap<>();
+            reservations = new HashMap<>();
+            positions = new HashMap<>();
         }
 
         private CoreUserState freeze(ProductLine expectedProductLine, long userId) {

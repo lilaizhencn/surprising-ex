@@ -907,3 +907,11 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - 定向回归 320 项通过；service 全量 **930 tests，0 failures，0 errors，0 skipped**；基准模块 package 通过。原 4 币对条件 2×5s warmup + 3×5s measurement 的 terminal business 为 **256,138–260,719/s**，平均 **258,140/s**，与重构前区间重叠，错误/超时/未完成均为 0。
 
 - 128 币对重构后短轮 terminal business **26.6–31.1k/s**，无错误、超时或未完成；该规模场景仍受状态初始化和生命周期操作影响，需长轮/JFR 稳态采样才能比较分配变化。
+
+
+### 2026-09-14 P1 四项收口
+
+- 增量状态哈希：`RollingBusinessStateHash` 的贡献索引改为 Owner 线程复用探针键；已存在的贡献值原地更新，不再为每次缓存状态变更创建短命 `ContributionKey`/`OwnedContribution`。持久化 map key 保持不可变，恢复时仍清空并完整重建。
+- TreeMap/state materialization：`RuntimeProjectionState.MutableUser` 的 Lane 变更态余额、预留、持仓改为 `HashMap`。排序只在 `CoreUserState` 冻结快照边界执行，避免每次业务 patch 都支付 TreeMap comparator/entry 成本；外部快照的确定性顺序保持不变。
+- 中间分配：上述两条同时减少贡献索引和投影更新路径的 entry/key 分配；权威 `OrderRuntime`、终态提交记录和快照对象仍按生命周期创建，未用不安全对象池破坏所有权。
+- `onLane` 等待：触发子单这条仍会从 Owner 进入账户 Lane 的路径，clientOrderId 身份准备和失败回滚已移入同一个 Lane mutation scope；Owner 不再先同步借用 Lane 再回滚。普通下单 admission 原本已在 Lane 内准备身份，保持不变。查询、恢复、控制校验中的同步 fence 仍是边界语义，不属于撮合热路径，不能删除。

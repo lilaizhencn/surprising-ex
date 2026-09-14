@@ -47,6 +47,8 @@ public final class RollingBusinessStateHash {
             RuntimeFactFrame.TreasuryAssetValue> runtimeTreasury =
             new org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap<>();
     private final Map<ContributionKey, OwnedContribution> contributions = new HashMap<>();
+    /** Owner-thread lookup key; retained map keys remain immutable. */
+    private final ContributionKey contributionProbe = new ContributionKey();
     private final org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<
             RuntimeFactFrame.ReservationChange> reservationChangesScratch =
             new org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap<>();
@@ -65,7 +67,12 @@ public final class RollingBusinessStateHash {
     private RuntimeIdentityRegistry identities;
     private final UserHashUpdater userHashUpdater = new UserHashUpdater();
 
-    private record OwnedContribution(long value) {}
+    /** Mutable value avoids replacing the map entry on every changed contribution. */
+    private static final class OwnedContribution {
+        private long value;
+
+        private OwnedContribution(long value) { this.value = value; }
+    }
 
     private RollingBusinessStateHash(TradingCoreState state, RuntimeIdentityRegistry identities) {
         productLine = state.productLine().ordinal();
@@ -326,8 +333,8 @@ public final class RollingBusinessStateHash {
     private <K, V> void validateCachedBefore(String domain, K key, V before,
                                              java.util.function.ToLongFunction<V> stableValue,
                                              Predicate<V> included) {
-        OwnedContribution owned = contributions.get(contributionKey(domain, key));
-        Long actual = owned == null ? null : owned.value();
+        OwnedContribution owned = contributions.get(probeContributionKey(domain, key));
+        Long actual = owned == null ? null : owned.value;
         Long expected = before == null || !included.test(before) ? null
                 : entryHashStable(key, stableValue.applyAsLong(before));
         requireContribution(actual, expected, domain);
@@ -447,7 +454,8 @@ public final class RollingBusinessStateHash {
         values.forEach((key, value) -> {
             if (!included.test(value)) return;
             long contribution = entryHash(key, value);
-            contributions.put(contributionKey(domain, key), new OwnedContribution(contribution));
+            contributions.put(new ContributionKey(domain, contributionKeyValue(domain, key)),
+                    new OwnedContribution(contribution));
             target.add(contribution);
         });
     }
@@ -455,14 +463,22 @@ public final class RollingBusinessStateHash {
     private <K, V> void updateCachedValue(String domain, Aggregate target, K key, V current,
                                           java.util.function.ToLongFunction<V> stableValue,
                                           Predicate<V> included) {
-        OwnedContribution previous = contributions.remove(contributionKey(domain, key));
+        ContributionKey lookup = probeContributionKey(domain, key);
+        OwnedContribution previous = contributions.get(lookup);
         if (previous != null) {
-            target.remove(previous.value());
+            target.remove(previous.value);
         }
         if (current != null && included.test(current)) {
             long contribution = entryHashStable(key, stableValue.applyAsLong(current));
-            contributions.put(contributionKey(domain, key), new OwnedContribution(contribution));
+            if (previous == null) {
+                contributions.put(new ContributionKey(domain, contributionKeyValue(domain, key)),
+                        new OwnedContribution(contribution));
+            } else {
+                previous.value = contribution;
+            }
             target.add(contribution);
+        } else if (previous != null) {
+            contributions.remove(lookup);
         }
     }
 
@@ -472,7 +488,13 @@ public final class RollingBusinessStateHash {
         updateCachedValue(domain, target, key, current, stableValue, included);
     }
 
-    private static ContributionKey contributionKey(String domain, Object key) {
+    private ContributionKey probeContributionKey(String domain, Object key) {
+        contributionProbe.domain = domain;
+        contributionProbe.key = contributionKeyValue(domain, key);
+        return contributionProbe;
+    }
+
+    private static Object contributionKeyValue(String domain, Object key) {
         Object typedKey = key;
         if ("snapshots".equals(domain) && key instanceof String text) {
             int separator = text.indexOf(':');
@@ -481,10 +503,32 @@ public final class RollingBusinessStateHash {
                         text.substring(separator + 1));
             }
         }
-        return new ContributionKey(domain, typedKey);
+        return typedKey;
     }
 
-    private record ContributionKey(String domain, Object key) {}
+    private static final class ContributionKey {
+        private String domain;
+        private Object key;
+
+        private ContributionKey() {}
+
+        private ContributionKey(String domain, Object key) {
+            this.domain = domain;
+            this.key = key;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            return other instanceof ContributionKey value
+                    && java.util.Objects.equals(domain, value.domain)
+                    && java.util.Objects.equals(key, value.key);
+        }
+
+        @Override
+        public int hashCode() {
+            return 31 * java.util.Objects.hashCode(domain) + java.util.Objects.hashCode(key);
+        }
+    }
     private record PositionContributionKey(long userId, String positionKey) {}
 
     private static <K, V> void rebuildMap(Aggregate target, Map<K, V> values, Predicate<V> included) {

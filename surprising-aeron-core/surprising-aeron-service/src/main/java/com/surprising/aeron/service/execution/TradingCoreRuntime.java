@@ -2690,26 +2690,26 @@ public final class TradingCoreRuntime implements AutoCloseable {
         var admissionIdentity = com.surprising.aeron.service.state.RuntimeOrderAdmission.admissionIdentity(
                 runtimeState, identities, userId, resolved);
         long openInterestSteps = openInterestIndex.openInterestSteps(command.symbol());
-        var preparedClientKey = identities.prepareClientKey(
-                userId, resolved.clientOrderId());
         int symbolId = resolved.symbolId();
         int assetId = identities.assetId(resolved.reservationAsset());
-        try {
-            runtimeState.executeUserSettlement(userId, () -> {
+        runtimeState.executeUserSettlement(userId, () -> {
+            var preparedClientKey = identities.prepareClientKeyInCurrentLane(
+                    userId, resolved.clientOrderId());
+            try {
                 long requiredReservation = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservationPrepared(
                         runtimeState, userId, resolved, openInterestSteps, activeOrderIndex, admissionIdentity);
                 RuntimeCommandProcessor.placeOrderPrepared(runtimeState, userId, resolved,
                         commandId, requiredReservation, preparedClientKey.key(), symbolId, assetId);
                 runtimeState.markPendingReservation(userId, resolved.orderId(), pendingCoreSequence);
                 return null;
-            });
-        } catch (RuntimeException | Error failure) {
-            if (preparedClientKey.allocated()) {
-                identities.rollbackPreparedClientKey(
-                        userId, resolved.clientOrderId(), preparedClientKey);
+            } catch (RuntimeException | Error failure) {
+                if (preparedClientKey.allocated()) {
+                    identities.rollbackClientKeyInCurrentLane(
+                            userId, resolved.clientOrderId(), preparedClientKey);
+                }
+                throw failure;
             }
-            throw failure;
-        }
+        });
         if (!batches.hasPendingBatches()) deferProvisionalSnapshotProjection();
         else commits.requestCommitPublication();
     }

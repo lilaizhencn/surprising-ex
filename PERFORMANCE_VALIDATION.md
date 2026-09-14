@@ -50872,3 +50872,12 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - 同口径结果：HotSpot JDK 25.0.1、ZGC、4 Lane、1 Matcher、4 币对、1000 用户、hftRounds=16、batch=20，2×5s warmup + 3×5s measurement；terminal business **256,138 / 257,562 / 260,719/s**，平均 **258,140/s**；terminal trades **60,624–61,709/s**；errors/rejects/timeouts/unfinished=0。
 
 - 128 币对重构后短轮（1×2s warmup + 2×2s measurement）terminal business **26,586 / 31,146/s**，平均 **28,866/s**；terminal trading operations **25,282–29,619/s**；terminal trades **5,056–5,924/s**；errors/rejects/timeouts/unfinished=0。与重构前 17,782–24,861/s 的短轮结果存在明显机器/JIT 波动，不能据此宣称优化收益，但未出现功能或吞吐回退。
+
+
+### 2026-09-14 P1 四项实现后验证
+
+- 代码变更：增量哈希贡献键/值复用；`RuntimeProjectionState.MutableUser` 的余额/预留/持仓变更 map 改为 HashMap、冻结时排序；触发子单的 clientOrderId 准备与失败回滚在同一个 Lane 任务内完成。
+- 服务全量回归：`mvn -q -pl surprising-aeron-core/surprising-aeron-service -am -Dsurefire.rerunFailingTestsCount=5 test`，**930 tests / 0 failures / 0 errors / 0 skipped**。Aeron heartbeat/driver warning 只出现在测试日志，未形成失败。
+- 本机 4 币对复测：HotSpot JDK 25.0.1、ZGC、4 Lane/1 Matcher、1000 users、`productionMixedWorkload`、`hftRounds=16`、`hftBatchSize=20`、1×2s warmup + 2×3s measurement；terminal business **177,980/s**，terminal trades **42,125/s**，accepted=terminal，error/reject/timeout/unfinished=0。两测量样本为 141,810 和 214,151/s，短轮方差较大，不能宣称相对历史长轮有确定提升。
+- 同口径 `-prof gc`：terminal business **163,709/s**，分配 **720.845 MB/s**，`gc.alloc.rate.norm` **57,994,972 B/JMH invocation**；该值含初始化/恢复和 JMH invocation，只用于确认无分配异常回归，不能当作稳态单业务分配率。
+- 结论：四项代码路径已完成并通过全量语义验证；当前主要瓶颈仍应以独立长稳态 JFR/NMT 复测确认，尤其是 Owner 有序提交、结果索引和业务对象生命周期分配。
