@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.business.ProductTradingRules;
+import com.surprising.aeron.service.business.ProductTradingRulesRegistry;
+
 import com.surprising.aeron.service.state.index.ActiveOrderIndex;
 import com.surprising.aeron.service.state.index.AlgoOrderIndex;
 import com.surprising.aeron.service.state.index.LiquidationIndex;

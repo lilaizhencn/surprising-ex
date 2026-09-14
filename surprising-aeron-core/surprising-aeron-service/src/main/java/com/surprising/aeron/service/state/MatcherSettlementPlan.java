@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-
+import com.surprising.aeron.service.command.ImmutableLongArrayList;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 
 import com.surprising.aeron.service.matching.CoreMatchingResult;
@@ -442,10 +442,15 @@ public final class MatcherSettlementPlan {
             throw new IllegalArgumentException("cancellation inputs are required");
         }
         int count = 0;
+        boolean primitiveAuthorized = authorizedOrderIds instanceof com.surprising.aeron.service.command.ImmutableLongArrayList;
         for (CoreCancellationResult cancellation : cancellations) {
             if (!cancellation.accepted()) continue;
             long orderId = cancellation.orderId();
-            if (!authorizedOrderIds.contains(orderId)) {
+            boolean authorized = primitiveAuthorized
+                    ? ((com.surprising.aeron.service.command.ImmutableLongArrayList) authorizedOrderIds)
+                    .containsLong(orderId)
+                    : authorizedOrderIds.contains(orderId);
+            if (!authorized) {
                 throw new IllegalStateException("direct matcher cancelled an unauthorized order");
             }
             ensurePreCancellationCapacity(count + 1);
@@ -472,19 +477,28 @@ public final class MatcherSettlementPlan {
             return;
         }
         int count = 0;
-        for (Long expectedOrderId : expectedOrderIds) {
-            if (expectedOrderId == null) continue;
-            long orderId = expectedOrderId;
-            boolean accepted = false;
-            for (CoreCancellationResult cancellation : cancellations) {
-                if (cancellation.accepted() && cancellation.orderId() == orderId) {
-                    accepted = true;
-                    break;
+        if (expectedOrderIds instanceof com.surprising.aeron.service.command.ImmutableLongArrayList primitive) {
+            for (int expectedIndex = 0; expectedIndex < primitive.size(); expectedIndex++) {
+                long orderId = primitive.valueAt(expectedIndex);
+                for (CoreCancellationResult cancellation : cancellations) {
+                    if (cancellation.accepted() && cancellation.orderId() == orderId) {
+                        ensurePreCancellationCapacity(count + 1);
+                        preCancellationStorage[count++] = orderId;
+                        break;
+                    }
                 }
             }
-            if (accepted) {
-                ensurePreCancellationCapacity(count + 1);
-                preCancellationStorage[count++] = orderId;
+        } else {
+            for (Long expectedOrderId : expectedOrderIds) {
+                if (expectedOrderId == null) continue;
+                long orderId = expectedOrderId;
+                for (CoreCancellationResult cancellation : cancellations) {
+                    if (cancellation.accepted() && cancellation.orderId() == orderId) {
+                        ensurePreCancellationCapacity(count + 1);
+                        preCancellationStorage[count++] = orderId;
+                        break;
+                    }
+                }
             }
         }
         preCancellationOrderIds = count == 0 ? NO_ORDERS : preCancellationStorage;

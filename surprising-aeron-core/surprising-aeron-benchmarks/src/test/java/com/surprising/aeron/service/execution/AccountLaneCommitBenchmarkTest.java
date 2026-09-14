@@ -1,4 +1,4 @@
-package com.surprising.aeron.service.execution;
+package com.surprising.aeron.service.orchestration;
 
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;

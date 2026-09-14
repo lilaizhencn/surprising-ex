@@ -10,10 +10,10 @@ import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.service.state.RuntimeOrderAdmission.AdmissionSummary;
 import static com.surprising.aeron.service.state.OrderAdmissionMath.fragmentationSafeFeeDebit;
 
-final class FuturesOrderAdmission {
+public final class FuturesOrderAdmission {
     private FuturesOrderAdmission() {}
 
-    static long reservationUnits(CoreInstrumentState instrument, PositionRuntime position,
+    public static long reservationUnits(CoreInstrumentState instrument, PositionRuntime position,
                                  ResolvedPlaceOrder order, long leverage, AdmissionSummary admissionSummary) {
         long current = position == null ? 0 : position.signedQuantitySteps();
         long signedOrder = order.side() == CoreOrderSide.BUY

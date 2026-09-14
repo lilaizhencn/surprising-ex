@@ -1,4 +1,4 @@
-package com.surprising.aeron.service.execution;
+package com.surprising.aeron.service.orchestration;
 
 import com.surprising.trading.maintenance.*;
 
@@ -7,7 +7,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import com.surprising.aeron.client.CoreCommandOutcome;
 import com.surprising.aeron.protocol.*;
-import com.surprising.aeron.service.execution.TradingCoreRuntime;
+import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.instrument.api.model.ContractType;
 import com.surprising.product.api.ProductLine;
 import com.surprising.trading.order.config.TradingOrderProperties;
@@ -296,8 +296,8 @@ class MaintenanceIntegrationTest {
     private CoreResponse apply(CoreMessageType type,UUID id,long user,byte[] bytes) {
         long seq=++sequence; var message=new CoreMessage(CoreMessageHeader.command(type,id,line,CommandSource.OPERATIONS,998,seq,user,1_700_000_000_000L+seq,seq),bytes);
         var response=state.apply(message);
-        if(response.resultCode()==CoreResultCode.MATCHING_PENDING) response=state.commits.completeMatchingSynchronously(state.matchingSequence(id),message.header().submittedAtEpochMillis(),seq);
-        while(state.firstPendingMatchingSequence()!=0) state.commits.completeMatchingSynchronously(state.firstPendingMatchingSequence(),message.header().submittedAtEpochMillis(),seq);
+        if(response.resultCode()==CoreResultCode.MATCHING_PENDING) response=CoreTestCompletion.completeMatchingSynchronously(state, state.matchingSequence(id),message.header().submittedAtEpochMillis(),seq);
+        while(state.firstPendingMatchingSequence()!=0) CoreTestCompletion.completeMatchingSynchronously(state, state.firstPendingMatchingSequence(),message.header().submittedAtEpochMillis(),seq);
         return response;
     }
     private CoreResponse query(long user,CoreMessageType type,byte[] bytes) {

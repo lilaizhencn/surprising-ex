@@ -7,7 +7,7 @@ import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.instrument.api.math.PerpetualContractMath;
 import java.math.BigInteger;
 
-final class CoreContractMath {
+public final class CoreContractMath {
 
     private static final BigInteger PPM = BigInteger.valueOf(1_000_000L);
     private static final long LEVERAGE_RATE_NUMERATOR = 1_000_000_000_000L;
@@ -15,7 +15,7 @@ final class CoreContractMath {
     private CoreContractMath() {
     }
 
-    static long openingMarginUnits(
+    public static long openingMarginUnits(
             CoreInstrumentState instrument,
             CoreOrderSide side,
             long priceTicks,
@@ -37,7 +37,7 @@ final class CoreContractMath {
                 bracket == null ? 1_000_000L : bracket.optionMarginFactorPpm());
     }
 
-    static long initialMarginRateFromLeverage(long leveragePpm) {
+    public static long initialMarginRateFromLeverage(long leveragePpm) {
         if (leveragePpm <= 0) {
             throw new IllegalArgumentException("leverage must be positive");
         }
@@ -45,7 +45,7 @@ final class CoreContractMath {
         return LEVERAGE_RATE_NUMERATOR % leveragePpm == 0 ? quotient : Math.addExact(quotient, 1);
     }
 
-    static long openingMarginUnits(
+    public static long openingMarginUnits(
             CoreInstrumentState instrument,
             CoreOrderSide side,
             long priceTicks,
@@ -57,7 +57,7 @@ final class CoreContractMath {
                 indexPriceTicks, forwardPriceTicks, 1_000_000L);
     }
 
-    static long openingMarginUnits(
+    public static long openingMarginUnits(
             CoreInstrumentState instrument,
             CoreOrderSide side,
             long priceTicks,
@@ -78,7 +78,7 @@ final class CoreContractMath {
                 initialMarginRatePpm);
     }
 
-    static long maintenanceMarginUnits(
+    public static long maintenanceMarginUnits(
             CoreInstrumentState instrument,
             long signedQuantitySteps,
             long markPriceTicks,
@@ -101,7 +101,7 @@ final class CoreContractMath {
                 instrument.settleScaleUnits(), maintenanceMarginRatePpm);
     }
 
-    static CoreRiskLimitBracket riskBracket(CoreInstrumentState instrument, long notionalUnits) {
+    public static CoreRiskLimitBracket riskBracket(CoreInstrumentState instrument, long notionalUnits) {
         CoreRiskLimitBracket bracket = bracketForNotional(instrument, notionalUnits);
         if (notionalUnits > bracket.notionalCapUnits()) {
             throw new CoreStateRejectedException("RISK_BRACKET_EXCEEDED",
@@ -110,7 +110,7 @@ final class CoreContractMath {
         return bracket;
     }
 
-    static CoreRiskLimitBracket maintenanceRiskBracket(CoreInstrumentState instrument, long notionalUnits) {
+    public static CoreRiskLimitBracket maintenanceRiskBracket(CoreInstrumentState instrument, long notionalUnits) {
         return bracketForNotional(instrument, notionalUnits);
     }
 
@@ -133,7 +133,7 @@ final class CoreContractMath {
         return selected;
     }
 
-    static long pnlUnits(
+    public static long pnlUnits(
             CoreInstrumentState instrument,
             long signedQuantitySteps,
             long entryPriceTicks,
@@ -143,7 +143,7 @@ final class CoreContractMath {
                 instrument.priceTickUnits(), instrument.settleScaleUnits());
     }
 
-    static long feeDeltaUnits(
+    public static long feeDeltaUnits(
             CoreInstrumentState instrument,
             long priceTicks,
             long quantitySteps,
@@ -167,7 +167,7 @@ final class CoreContractMath {
         return feeRatePpm > 0 ? Math.negateExact(fee) : fee;
     }
 
-    static long notionalUnits(CoreInstrumentState instrument, long quantitySteps, long priceTicks) {
+    public static long notionalUnits(CoreInstrumentState instrument, long quantitySteps, long priceTicks) {
         if (quantitySteps <= 0) return 0;
         if (instrument.contractType().isOption()) {
             return OptionContractMath.optionPremiumUnits(instrument, priceTicks, quantitySteps);
@@ -176,14 +176,14 @@ final class CoreContractMath {
                 instrument.notionalMultiplierUnits(), instrument.priceTickUnits(), instrument.settleScaleUnits());
     }
 
-    static long riskNotionalUnits(CoreInstrumentState instrument, long quantitySteps, long referencePriceTicks) {
+    public static long riskNotionalUnits(CoreInstrumentState instrument, long quantitySteps, long referencePriceTicks) {
         if (quantitySteps <= 0) return 0;
         return instrument.contractType().isOption()
                 ? OptionContractMath.optionPremiumUnits(instrument, referencePriceTicks, quantitySteps)
                 : notionalUnits(instrument, quantitySteps, referencePriceTicks);
     }
 
-    static long fundingDeltaUnits(
+    public static long fundingDeltaUnits(
             CoreInstrumentState instrument,
             long signedQuantitySteps,
             long markPriceTicks,
@@ -202,7 +202,7 @@ final class CoreContractMath {
         }
     }
 
-    static long weightedEntryPrice(
+    public static long weightedEntryPrice(
             CoreInstrumentState instrument,
             long currentAbs,
             long currentPrice,

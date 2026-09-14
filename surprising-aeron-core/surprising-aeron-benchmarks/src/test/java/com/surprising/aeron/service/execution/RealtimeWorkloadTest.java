@@ -1,5 +1,5 @@
-package com.surprising.aeron.service.execution;
-
+package com.surprising.aeron.service.orchestration;
+import com.surprising.aeron.service.orchestration.SurprisingClusteredService;
 import com.surprising.product.api.ProductLine;
 
 import org.junit.jupiter.params.ParameterizedTest;

@@ -1,4 +1,4 @@
-package com.surprising.aeron.service.execution;
+package com.surprising.aeron.service.orchestration;
 
 import jdk.jfr.Category;
 import jdk.jfr.Event;

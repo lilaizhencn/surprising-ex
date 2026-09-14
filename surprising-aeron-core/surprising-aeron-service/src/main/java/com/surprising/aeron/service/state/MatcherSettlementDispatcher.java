@@ -16,6 +16,14 @@ final class MatcherSettlementDispatcher {
             OrderRuntime[] orders, int count, java.util.UUID commandId, int shard,
             RuntimeIdentityRegistry identities, long timestamp, long position,
             List<Long> cancellations, LaneOrderResultTarget target) {
+        return prepareDirect(sequence, sequence, laneMask, single, orders, count, commandId, shard,
+                identities, timestamp, position, cancellations, target);
+    }
+
+    MatcherSettlementEvent prepareDirect(long coreSequence, long commitSequence, long laneMask,
+            OrderRuntime single, OrderRuntime[] orders, int count, java.util.UUID commandId, int shard,
+            RuntimeIdentityRegistry identities, long timestamp, long position,
+            List<Long> cancellations, LaneOrderResultTarget target) {
         owner.assertOwner();
         if (count <= 0 || single == null && (orders == null || count > orders.length))
             throw new IllegalArgumentException("direct settlement admission is missing");
@@ -44,7 +52,7 @@ final class MatcherSettlementDispatcher {
                 storage.settleAssetIds[index] = storage.settleAssetIds[prior];
             }
         }
-        event.prepareDirect(sequence, laneMask, timestamp, position, commandId, shard,
+        event.prepareDirect(coreSequence, commitSequence, laneMask, timestamp, position, commandId, shard,
                 owner, identities, count, cancellations, target);
         return event;
     }

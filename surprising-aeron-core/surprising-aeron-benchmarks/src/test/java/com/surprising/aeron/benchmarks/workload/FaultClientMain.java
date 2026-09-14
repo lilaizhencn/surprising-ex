@@ -1,5 +1,5 @@
 package com.surprising.aeron.benchmarks.workload;
-
+import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.aeron.client.SurprisingAeronClient;
 import com.surprising.aeron.protocol.*;
 import com.surprising.product.api.ProductLine;
@@ -57,7 +57,7 @@ public final class FaultClientMain {
                             offset += (length + 31) & ~31;
                         }
                     }
-                    try (var state = com.surprising.aeron.service.execution.TradingCoreRuntime.fromSnapshot(PRODUCT, payload.toByteArray())) {
+                    try (var state = com.surprising.aeron.service.orchestration.TradingCoreRuntime.fromSnapshot(PRODUCT, payload.toByteArray())) {
                         emit(Map.of("logPosition", snapshot.logPosition, "businessHash", state.tradingState().businessStateHash(),
                                 "coreSequence", state.committedCoreSequence()));
                     }

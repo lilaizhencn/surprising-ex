@@ -1,5 +1,5 @@
 package com.surprising.aeron.benchmarks.workload;
-
+import com.surprising.aeron.service.orchestration.SurprisingClusteredService;
 import java.lang.classfile.ClassFile;
 import java.lang.classfile.ClassTransform;
 import java.lang.classfile.instruction.InvokeInstruction;

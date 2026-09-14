@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.cluster;
 
-import com.surprising.aeron.service.execution.ContinuousTradingClusterService;
+import com.surprising.aeron.service.orchestration.ContinuousTradingClusterService;
 
 import io.aeron.archive.Archive;
 import io.aeron.archive.ArchiveThreadingMode;

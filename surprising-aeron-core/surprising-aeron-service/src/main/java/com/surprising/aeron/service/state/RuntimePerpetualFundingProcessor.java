@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.business.ProductTradingRules;
+import com.surprising.aeron.service.business.ProductTradingRulesRegistry;
+
 import com.surprising.aeron.protocol.ApplyFundingCommand;
 import com.surprising.aeron.protocol.CoreFundingPaymentView;
 import com.surprising.aeron.protocol.CoreFundingProgressView;

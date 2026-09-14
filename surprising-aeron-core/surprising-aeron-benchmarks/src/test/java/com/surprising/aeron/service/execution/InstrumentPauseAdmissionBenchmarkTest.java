@@ -1,4 +1,4 @@
-package com.surprising.aeron.service.execution;
+package com.surprising.aeron.service.orchestration;
 
 import com.surprising.product.api.ProductLine;
 import org.junit.jupiter.params.ParameterizedTest;

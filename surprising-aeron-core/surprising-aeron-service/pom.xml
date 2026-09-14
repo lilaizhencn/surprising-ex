@@ -74,7 +74,7 @@
                                      basedir="${project.build.testOutputDirectory}"
                                      includes="**/CoreFaultAgent*.class">
                                     <manifest>
-                                        <attribute name="Premain-Class" value="com.surprising.aeron.service.execution.CoreFaultAgent"/>
+                                        <attribute name="Premain-Class" value="com.surprising.aeron.service.orchestration.CoreFaultAgent"/>
                                     </manifest>
                                 </jar>
                             </target>

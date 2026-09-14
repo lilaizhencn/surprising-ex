@@ -1,4 +1,4 @@
-package com.surprising.aeron.service.execution;
+package com.surprising.aeron.service.orchestration;
 
 record LinearPerpetualScaleConfig(
         int listedSymbols,

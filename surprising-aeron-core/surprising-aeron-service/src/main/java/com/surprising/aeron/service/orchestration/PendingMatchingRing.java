@@ -1,0 +1,404 @@
+package com.surprising.aeron.service.orchestration;
+import com.surprising.aeron.service.command.DecodedMatchingCommand;
+import com.surprising.aeron.service.command.ResolvedMatchingAdmission;
+import com.surprising.aeron.protocol.CoreMessage;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.UUID;
+import java.util.function.Consumer;
+import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
+
+final class PendingMatchingRing {
+    private final int[] nextSlots;
+    private final int[] previousSlots;
+    private final int[] submissionShards;
+    /** 已准入命令的稳定撮合分区；提交队列出队后仍保留至全局终态。 */
+    private final int[] settlementShards;
+    /** 分区已经派发结算的槽位，防止全局提交前重复执行。 */
+    private final boolean[] settlementDispatched;
+    private final int[] nextSubmissionSlots;
+    private final int[] previousSubmissionSlots;
+    private final int[] submissionHeads;
+    private final int[] submissionTails;
+    private final Map<UUID, PendingMatching> entriesByCommandId;
+    private final LongIntHashMap pendingByUser;
+    private final LaneCommandContextRing contexts;
+    private final int mask;
+    private int head = -1;
+    private int tail = -1;
+    private int dispatchHead = -1;
+    private int size;
+    /** Owner 派发顺序的失效标记：队列、分区或已派发前缀改变后必须重新检查依赖。 */
+    private long dispatchRevision;
+
+    long dispatchRevision() { return dispatchRevision; }
+
+    void partitionDependenciesChanged() { dispatchRevision++; }
+
+    /** Completion and admission notifications share the same owner-side wake-up revision. */
+    void progressChanged() { dispatchRevision++; }
+
+    PendingMatchingRing(int requestedCapacity, int matcherShardCount, int laneCount) {
+        if (requestedCapacity <= 0 || requestedCapacity > 1 << 30) {
+            throw new IllegalArgumentException("pending matching capacity must be positive");
+        }
+        if (matcherShardCount <= 0) throw new IllegalArgumentException("matcher shard count must be positive");
+        int capacity = 1;
+        while (capacity < requestedCapacity) capacity <<= 1;
+        nextSlots = new int[capacity];
+        previousSlots = new int[capacity];
+        submissionShards = new int[capacity];
+        settlementShards = new int[capacity];
+        settlementDispatched = new boolean[capacity];
+        java.util.Arrays.fill(settlementShards, -1);
+        nextSubmissionSlots = new int[capacity];
+        previousSubmissionSlots = new int[capacity];
+        submissionHeads = new int[matcherShardCount];
+        submissionTails = new int[matcherShardCount];
+        java.util.Arrays.fill(nextSlots, -1);
+        java.util.Arrays.fill(previousSlots, -1);
+        java.util.Arrays.fill(submissionShards, -1);
+        java.util.Arrays.fill(nextSubmissionSlots, -1);
+        java.util.Arrays.fill(previousSubmissionSlots, -1);
+        java.util.Arrays.fill(submissionHeads, -1);
+        java.util.Arrays.fill(submissionTails, -1);
+        mask = capacity - 1;
+        contexts = new LaneCommandContextRing(capacity, laneCount);
+        entriesByCommandId = new java.util.HashMap<>(capacity);
+        pendingByUser = new LongIntHashMap(capacity);
+    }
+
+    void put(PendingMatching pending) {
+        if (pending == null) throw new IllegalArgumentException("pending matching is required");
+        int index = slot(pending.sequence());
+        PendingMatching existing = pendingAt(index);
+        if (existing != null && linked(index)) {
+            if (existing.sequence() != pending.sequence()) {
+                throw new IllegalStateException("pending matching sequence window is full");
+            }
+            requireAvailableCommandId(pending, existing);
+            removeIndexes(existing);
+            contexts.required(pending.sequence()).pending(pending);
+            addIndexes(pending);
+            dispatchRevision++;
+            return;
+        }
+        if (size == contexts.capacity()) {
+            throw new IllegalStateException("pending matching ring is full");
+        }
+        requireAvailableCommandId(pending, null);
+        LaneCommandContextRing.Context context = contexts.claimed(pending.sequence())
+                ? contexts.required(pending.sequence()) : contexts.claim(pending.sequence());
+        context.pending(pending);
+        previousSlots[index] = tail;
+        nextSlots[index] = -1;
+        if (tail == -1) head = index;
+        else nextSlots[tail] = index;
+        tail = index;
+        if (dispatchHead == -1) dispatchHead = index;
+        addIndexes(pending);
+        size++;
+        dispatchRevision++;
+    }
+
+    PendingMatching acquire(long sequence, PendingMatching.Operation operation, CoreMessage command,
+                            com.surprising.aeron.protocol.CommandFingerprint fingerprint,
+                            java.util.List<Long> preMatchingCancellationOrderIds,
+                            com.surprising.aeron.service.state.RuntimeProjectionPoint beforeProjection,
+                            long beforeBusinessStateHash, long beforeFundsStateHash,
+                            com.surprising.aeron.service.state.RuntimeFundsDelta fundsDelta,
+                            DecodedMatchingCommand decodedCommand, ResolvedMatchingAdmission admission) {
+        LaneCommandContextRing.Context context = contexts.claim(sequence);
+        PendingMatching pending = context.initialize(sequence, operation, command, fingerprint,
+                preMatchingCancellationOrderIds, beforeProjection, beforeBusinessStateHash, beforeFundsStateHash,
+                fundsDelta, decodedCommand, admission);
+        context.pending(pending);
+        return pending;
+    }
+
+    PendingMatching get(long sequence) {
+        int index = slot(sequence);
+        if (!linked(index)) return null;
+        PendingMatching pending = pendingAt(index);
+        return pending != null && pending.sequence() == sequence ? pending : null;
+    }
+
+    void discardPrepared(long sequence) {
+        int index = slot(sequence);
+        if (linked(index)) throw new IllegalStateException("cannot discard linked pending matching");
+        if (contexts.claimed(sequence)) contexts.discard(sequence);
+    }
+
+    boolean contains(long sequence) {
+        return get(sequence) != null;
+    }
+
+    PendingMatching remove(long sequence) {
+        int entryIndex = indexOf(sequence);
+        if (entryIndex < 0) return null;
+        PendingMatching removed = pendingAt(entryIndex);
+        if (removed == null || removed.sequence() != sequence) {
+            throw new IllegalStateException("pending matching order is corrupted");
+        }
+        int previous = previousSlots[entryIndex];
+        int next = nextSlots[entryIndex];
+        if (dispatchHead == entryIndex) dispatchHead = next;
+        if (previous == -1) head = next;
+        else nextSlots[previous] = next;
+        if (next == -1) tail = previous;
+        else previousSlots[next] = previous;
+        previousSlots[entryIndex] = -1;
+        nextSlots[entryIndex] = -1;
+        removeFromSubmissionOrder(entryIndex);
+        settlementShards[entryIndex] = -1;
+        settlementDispatched[entryIndex] = false;
+        advanceDispatchedHead();
+        removeIndexes(removed);
+        size--;
+        dispatchRevision++;
+        if (contexts.claimed(sequence)) {
+            LaneCommandContextRing.Context context = contexts.required(sequence);
+            if (context.complete()) contexts.release(sequence);
+            else contexts.discard(sequence);
+        }
+        return removed;
+    }
+
+    long firstSequence() {
+        return head == -1 ? 0 : pendingAt(head).sequence();
+    }
+
+    /** 返回有序队首；完成状态由提交器直接读取 slot，不再维护第二个 ready 位。 */
+    PendingMatching head() { return head < 0 ? null : pendingAt(head); }
+
+    PendingMatching dispatchHead() {
+        return dispatchHead < 0 ? null : pendingAt(dispatchHead);
+    }
+
+    void completeDispatch(long sequence) {
+        int index = indexOf(sequence);
+        if (index < 0 || dispatchHead != index) {
+            throw new IllegalStateException("matcher settlement dispatch is out of order");
+        }
+        settlementDispatched[index] = true;
+        advanceDispatchedHead();
+        dispatchRevision++;
+    }
+
+    private void advanceDispatchedHead() {
+        while (dispatchHead >= 0 && settlementDispatched[dispatchHead]) {
+            dispatchHead = nextSlots[dispatchHead];
+        }
+    }
+
+    /**
+     * 只跨越通过账户/订单簿依赖检查的命令。资金共享账户不可能经此绕过其前序命令。
+     * 检查范围限于有界在途窗口，不访问或扫描账户/订单状态。
+     */
+    PendingMatching partitionDispatchHead(int shard) {
+        long earlierLanes = 0;
+        for (int index = dispatchHead; index >= 0; index = nextSlots[index]) {
+            if (settlementDispatched[index]) continue;
+            PendingMatching pending = pendingAt(index);
+            if (index != dispatchHead && (!pending.clusterIndependent || pending.partitionLaneMask == 0)) return null;
+            if (settlementShards[index] == shard)
+                return (pending.partitionLaneMask & earlierLanes) == 0 ? pending : null;
+            if (!pending.clusterIndependent || settlementShards[index] < 0 || pending.partitionLaneMask == 0) return null;
+            earlierLanes |= pending.partitionLaneMask;
+        }
+        return null;
+    }
+
+    /**
+     * Computes all currently dispatchable partition heads in one pass over the global
+     * dispatch prefix.  The old caller scanned that prefix once per matcher shard, which
+     * multiplied Owner work by the number of shards while the window was full.
+     *
+     * <p>The returned array is caller-owned scratch storage and is cleared before use.  A
+     * non-independent head remains the only candidate for its own partition and blocks all
+     * later partitions, matching {@link #partitionDispatchHead(int)} semantics.</p>
+     */
+    void collectPartitionDispatchHeads(long throughSequence, PendingMatching[] heads) {
+        if (heads == null || heads.length != submissionHeads.length) {
+            throw new IllegalArgumentException("partition dispatch head storage is invalid");
+        }
+        java.util.Arrays.fill(heads, null);
+        long earlierLanes = 0;
+        for (int index = dispatchHead; index >= 0; index = nextSlots[index]) {
+            if (settlementDispatched[index]) continue;
+            PendingMatching pending = pendingAt(index);
+            if (pending == null || pending.sequence() > throughSequence) break;
+            int shard = settlementShards[index];
+            long laneMask = pending.partitionLaneMask;
+            boolean first = index == dispatchHead;
+            if (first && shard >= 0 && heads[shard] == null) {
+                heads[shard] = pending;
+            } else if (pending.clusterIndependent && shard >= 0 && laneMask != 0) {
+                if (heads[shard] == null && (laneMask & earlierLanes) == 0) {
+                    heads[shard] = pending;
+                }
+            } else {
+                break;
+            }
+            if (!pending.clusterIndependent || shard < 0 || laneMask == 0) break;
+            earlierLanes |= laneMask;
+        }
+    }
+
+    void completePartitionDispatch(long sequence, int shard) {
+        PendingMatching first = partitionDispatchHead(shard);
+        if (first == null || first.sequence() != sequence) {
+            throw new IllegalStateException("partition settlement dispatch is out of order");
+        }
+        completePartitionDispatchKnown(sequence, shard);
+    }
+
+    /** Marks a head already validated by collectPartitionDispatchHeads as dispatched. */
+    void completePartitionDispatchKnown(long sequence, int shard) {
+        int index = indexOf(sequence);
+        if (index < 0 || settlementShards[index] != shard || settlementDispatched[index]) {
+            throw new IllegalStateException("matcher settlement dispatch candidate is invalid");
+        }
+        settlementDispatched[index] = true;
+        advanceDispatchedHead();
+        dispatchRevision++;
+    }
+
+    void registerSubmission(long sequence, int matcherShard) {
+        if (matcherShard < 0 || matcherShard >= submissionHeads.length) {
+            throw new IllegalArgumentException("invalid matcher shard");
+        }
+        int index = indexOf(sequence);
+        if (index < 0) throw new IllegalStateException("pending matching sequence is missing");
+        int registeredShard = submissionShards[index];
+        if (registeredShard == matcherShard) return;
+        if (registeredShard >= 0) throw new IllegalStateException("matching submission shard changed");
+        int tailSlot = submissionTails[matcherShard];
+        submissionShards[index] = matcherShard;
+        settlementShards[index] = matcherShard;
+        previousSubmissionSlots[index] = tailSlot;
+        nextSubmissionSlots[index] = -1;
+        if (tailSlot < 0) submissionHeads[matcherShard] = index;
+        else nextSubmissionSlots[tailSlot] = index;
+        submissionTails[matcherShard] = index;
+        dispatchRevision++;
+    }
+
+    boolean isSubmissionHead(long sequence, int matcherShard) {
+        int index = indexOf(sequence);
+        return index >= 0 && submissionHeads[matcherShard] == index;
+    }
+
+    int submissionShard(long sequence) {
+        int index = indexOf(sequence);
+        return index < 0 ? -1 : submissionShards[index];
+    }
+
+    PendingMatching submissionHead(int matcherShard) {
+        int index = submissionHeads[matcherShard];
+        return index < 0 ? null : pendingAt(index);
+    }
+
+    void completeSubmission(long sequence) {
+        int index = indexOf(sequence);
+        if (index >= 0) removeFromSubmissionOrder(index);
+    }
+
+    PendingMatching findByCommandId(UUID commandId) {
+        return commandId == null ? null : entriesByCommandId.get(commandId);
+    }
+
+    boolean hasUser(long userId) {
+        return userId > 0 && pendingByUser.get(userId) > 0;
+    }
+
+    boolean hasEarlierUser(long sequence, long userId) {
+        if (sequence <= 0 || userId <= 0 || pendingByUser.get(userId) <= 1) return false;
+        for (int slot = head; slot != -1; slot = nextSlots[slot]) {
+            PendingMatching pending = pendingAt(slot);
+            if (pending == null || pending.sequence() >= sequence) return false;
+            if (pending.command().header().userId() == userId) return true;
+        }
+        return false;
+    }
+
+    void forEach(Consumer<PendingMatching> consumer) {
+        for (int slot = head; slot != -1; slot = nextSlots[slot]) {
+            PendingMatching pending = pendingAt(slot);
+            if (pending != null) consumer.accept(pending);
+        }
+    }
+
+    Map<Long, PendingMatching> snapshot() {
+        LinkedHashMap<Long, PendingMatching> snapshot = new LinkedHashMap<>(size);
+        forEach(pending -> snapshot.put(pending.sequence(), pending));
+        return Collections.unmodifiableMap(snapshot);
+    }
+
+    void clear() {
+        while (size != 0) remove(firstSequence());
+    }
+
+    private void addIndexes(PendingMatching pending) {
+        UUID commandId = pending.command().header().commandId();
+        entriesByCommandId.put(commandId, pending);
+        long userId = pending.command().header().userId();
+        if (userId > 0) pendingByUser.addToValue(userId, 1);
+    }
+
+    private void removeIndexes(PendingMatching pending) {
+        entriesByCommandId.remove(pending.command().header().commandId(), pending);
+        long userId = pending.command().header().userId();
+        if (userId <= 0) return;
+        int remaining = pendingByUser.addToValue(userId, -1);
+        if (remaining == 0) pendingByUser.removeKey(userId);
+        else if (remaining < 0) throw new IllegalStateException("pending matching user count underflow");
+    }
+
+    private void removeFromSubmissionOrder(int index) {
+        int shard = submissionShards[index];
+        if (shard < 0) return;
+        int previous = previousSubmissionSlots[index];
+        int next = nextSubmissionSlots[index];
+        if (previous < 0) submissionHeads[shard] = next;
+        else nextSubmissionSlots[previous] = next;
+        if (next < 0) submissionTails[shard] = previous;
+        else previousSubmissionSlots[next] = previous;
+        submissionShards[index] = -1;
+        previousSubmissionSlots[index] = -1;
+        nextSubmissionSlots[index] = -1;
+    }
+
+    private void requireAvailableCommandId(PendingMatching pending, PendingMatching replaced) {
+        PendingMatching duplicate = entriesByCommandId.get(pending.command().header().commandId());
+        if (duplicate != null && duplicate != replaced) {
+            throw new IllegalStateException("duplicate pending matching commandId");
+        }
+    }
+
+    private int indexOf(long sequence) {
+        int index = slot(sequence);
+        if (!linked(index)) return -1;
+        PendingMatching pending = pendingAt(index);
+        return pending != null && pending.sequence() == sequence ? index : -1;
+    }
+
+    private int slot(long sequence) {
+        return (int) sequence & mask;
+    }
+
+    private boolean linked(int index) {
+        return head == index || previousSlots[index] != -1 || nextSlots[index] != -1;
+    }
+
+    private PendingMatching pendingAt(int index) {
+        LaneCommandContextRing.Context context = contexts.contextAt(index);
+        return context.coreSequence() == 0 ? null : context.pending();
+    }
+
+    int size() { return size; }
+    boolean isEmpty() { return size == 0; }
+    int capacity() { return contexts.capacity(); }
+    LaneCommandContextRing contexts() { return contexts; }
+}

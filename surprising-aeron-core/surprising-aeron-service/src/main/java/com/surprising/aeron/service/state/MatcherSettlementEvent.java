@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-
+import com.surprising.aeron.service.lane.SettlementLaneWorker;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
 
 import java.lang.invoke.MethodHandles;
@@ -45,6 +45,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     /** 本代有效项数；缓冲容量不决定业务执行范围。 */
     private int batchPlanCount;
     private boolean direct;
+    /** Matcher proof sequence for direct events; may differ from the final Lane commit sequence. */
+    private long directCoreSequence;
     private boolean dispatched; // Owner only.
     private volatile boolean directPublished;
     private Throwable directFailure;
@@ -97,11 +99,25 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
                        java.util.UUID commandId, int shard, TradingRuntimeState runtime,
                        RuntimeIdentityRegistry identities, int count, java.util.List<Long> cancellations,
                        LaneOrderResultTarget target) {
-        if (sequence <= 0 || laneMask == 0 || timestamp < 0 || position < 0 || commandId == null
+        prepareDirect(sequence, sequence, laneMask, timestamp, position, commandId, shard,
+                runtime, identities, count, cancellations, target);
+    }
+
+    /**
+     * Reserves a direct event with an explicit final Lane commit sequence.  Sequential batch
+     * items use commitSequence=0: their facts are applied and collected immediately, while the
+     * batch's terminal Lane mutation advances the account sequence once for the whole command.
+     */
+    void prepareDirect(long coreSequence, long commitSequence, long laneMask, long timestamp, long position,
+                       java.util.UUID commandId, int shard, TradingRuntimeState runtime,
+                       RuntimeIdentityRegistry identities, int count, java.util.List<Long> cancellations,
+                       LaneOrderResultTarget target) {
+        if (coreSequence <= 0 || commitSequence < 0 || laneMask == 0 || timestamp < 0 || position < 0 || commandId == null
                 || count <= 0 || batchStorage == null || count > batchStorage.plans.length)
             throw new IllegalArgumentException("invalid direct settlement reservation");
         direct = true; directPublished = false; dispatched = false; directFailure = null;
-        commitSequence = sequence; routedLaneMask = requiredLaneMask = laneMask;
+        directCoreSequence = coreSequence;
+        this.commitSequence = commitSequence; routedLaneMask = requiredLaneMask = laneMask;
         commitTimestamp = timestamp; commitClusterPosition = position;
         directCommandId = commandId; directShard = shard;
         authorizedCancellations = java.util.Objects.requireNonNull(cancellations);
@@ -167,7 +183,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         if (!direct || directPublished || result == null) throw new IllegalStateException("invalid direct publication");
         var nativeCommand = result.nativeCommand();
         var prefix = result.matcherPrefix();
-        if (nativeCommand.coreSequence() != commitSequence || !nativeCommand.matches(directCommandId)
+        if (nativeCommand.coreSequence() != directCoreSequence || !nativeCommand.matches(directCommandId)
                 || nativeCommand.matcherShardId() != directShard || !prefix.bound() || prefix.after() == prefix.before()
                 || previous != null && (prefix.before() != previous.matcherPrefix().after()
                 || nativeCommand.matcherSequence() <= previous.nativeCommand().matcherSequence())
@@ -184,7 +200,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             if (authorizedCancellations.isEmpty() || containsTrade)
                 throw new IllegalStateException("direct matcher returned an unreconciled partial outcome");
         }
-        batchPlans[index].buildDirect(commitSequence, batchStorage.admittedOrders[index],
+        batchPlans[index].buildDirect(directCoreSequence, batchStorage.admittedOrders[index],
                 batchInstruments[index], result, runtime);
         batchPlans[index].preCancellationsFromResult(result.cancellations(), authorizedCancellations);
     }
@@ -334,6 +350,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             throw new IllegalStateException("cannot recycle an incomplete matcher settlement");
         }
         direct = false; directPublished = false; directFailure = null; dispatched = false;
+        directCoreSequence = 0;
         directCommandId = null; authorizedCancellations = java.util.List.of();
         firstDirectResult = lastDirectResult = null; routedLaneMask = 0;
         resultTarget = null;

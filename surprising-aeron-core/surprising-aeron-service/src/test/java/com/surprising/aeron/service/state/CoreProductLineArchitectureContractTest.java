@@ -3,6 +3,9 @@ package com.surprising.aeron.service.state;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.surprising.aeron.service.business.ProductTradingRules;
+import com.surprising.aeron.service.business.ProductTradingRulesRegistry;
+
 import com.surprising.aeron.protocol.CoreRiskLimitBracket;
 import com.surprising.aeron.protocol.UpsertInstrumentCommand;
 import com.surprising.instrument.api.model.ContractType;

@@ -1,7 +1,7 @@
-package com.surprising.aeron.service.execution;
+package com.surprising.aeron.service.orchestration;
 
-import com.surprising.aeron.service.execution.LinearPerpetualBenchmarkSupport.Harness;
-import com.surprising.aeron.service.execution.LinearPerpetualBenchmarkSupport.SnapshotTemplate;
+import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.Harness;
+import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.SnapshotTemplate;
 import java.util.Arrays;
 import java.util.Locale;
 

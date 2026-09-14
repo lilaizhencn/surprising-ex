@@ -1,7 +1,7 @@
-package com.surprising.aeron.service.execution;
+package com.surprising.aeron.service.orchestration;
 
 import com.sun.management.GarbageCollectionNotificationInfo;
-import com.surprising.aeron.service.execution.LinearPerpetualBenchmarkSupport.Harness;
+import com.surprising.aeron.service.orchestration.LinearPerpetualBenchmarkSupport.Harness;
 import java.lang.management.BufferPoolMXBean;
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;

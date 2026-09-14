@@ -1,5 +1,5 @@
-package com.surprising.aeron.service.execution;
-
+package com.surprising.aeron.service.orchestration;
+import com.surprising.aeron.service.orchestration.TradingCoreRuntime;
 import com.surprising.aeron.protocol.ApplyMarkPriceCommand;
 import com.surprising.aeron.protocol.AmendOrderCommand;
 import com.surprising.aeron.protocol.BalanceAdjustmentCommand;
@@ -1010,12 +1010,22 @@ final class LinearPerpetualBenchmarkSupport {
         }
 
         void drainSubmitted() {
+            long deadline = System.nanoTime() + MATCH_TIMEOUT_NANOS;
+            int idle = 0;
             while (!submittedMatching.isEmpty()) {
                 int completed = commitReadyMatching(
                         Math.min(256, submittedMatching.size()), true,
                         (userId, entryNanos, acceptedNanos, terminalNanos) -> { });
                 if (completed == 0) {
-                    throw new IllegalStateException("matching completion pump made no progress");
+                    // Production Owner polling is deliberately non-blocking.  The benchmark
+                    // driver owns the wait boundary, so retry the pump while the Matcher/Lane
+                    // workers publish their independent completion facts.
+                    if (System.nanoTime() >= deadline)
+                        throw new IllegalStateException("matching completion pump made no progress");
+                    if (idle++ < 2_048) Thread.onSpinWait();
+                    else LockSupport.parkNanos(1_000L);
+                } else {
+                    idle = 0;
                 }
             }
         }

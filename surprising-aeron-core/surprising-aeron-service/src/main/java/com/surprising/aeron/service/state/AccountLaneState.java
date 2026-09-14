@@ -102,13 +102,13 @@ public final class AccountLaneState {
         this.localFundsHash = computeFundsHash();
     }
 
-    void bindOwner() {
+    public void bindOwner() {
         Thread current = Thread.currentThread();
         if (owner == null) owner = current;
         else if (owner != current) throw new IllegalStateException("account lane is bound to another thread");
     }
 
-    void releaseOwnerForHandoff() {
+    public void releaseOwnerForHandoff() {
         if (owner != null && owner != Thread.currentThread()) {
             throw new IllegalStateException("account lane owner mismatch");
         }

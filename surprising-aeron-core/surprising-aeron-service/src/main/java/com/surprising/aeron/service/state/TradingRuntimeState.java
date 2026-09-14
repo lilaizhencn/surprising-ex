@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.state;
-
+import com.surprising.aeron.service.lane.SettlementLaneWorker;
 import com.surprising.aeron.service.state.realtime.RealtimeStateCapture;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.agrona.collections.Long2LongHashMap;
@@ -5442,8 +5442,16 @@ public final class TradingRuntimeState implements AutoCloseable {
             OrderRuntime single, OrderRuntime[] orders, int count, java.util.UUID commandId, int shard,
             RuntimeIdentityRegistry identities, long timestamp, long position, List<Long> cancellations,
             LaneOrderResultTarget target) {
-        return settlements.prepareDirect(sequence, laneMask, single, orders, count, commandId, shard,
+        return settlements.prepareDirect(sequence, sequence, laneMask, single, orders, count, commandId, shard,
                 identities, timestamp, position, cancellations, target);
+    }
+
+    public MatcherSettlementEvent prepareDirectMatcherSettlement(long coreSequence, long commitSequence,
+            long laneMask, OrderRuntime single, OrderRuntime[] orders, int count, java.util.UUID commandId,
+            int shard, RuntimeIdentityRegistry identities, long timestamp, long position,
+            List<Long> cancellations, LaneOrderResultTarget target) {
+        return settlements.prepareDirect(coreSequence, commitSequence, laneMask, single, orders, count,
+                commandId, shard, identities, timestamp, position, cancellations, target);
     }
 
     public void dispatchDirectMatcherSettlement(MatcherSettlementEvent event) { settlements.dispatchDirect(event); }
