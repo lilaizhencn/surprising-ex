@@ -54,9 +54,12 @@ public final class MatcherPipelineGroup implements AutoCloseable {
         LaneCommandContextRing.Context context = contexts.required(coreSequence);
         context.claimMatcherSubmission(shardId);
         try {
+            if (settlement != null && settlement.direct()) {
+                settlement.matcherCompletionRelease(() -> context.releaseMatcherSubmission(shardId));
+            }
             shard.submit(coreSequence, command, settlement);
         } catch (RuntimeException failure) {
-            context.releaseMatcherSubmission(shardId);
+            if (context.submittedMatcherShard() == shardId) context.releaseMatcherSubmission(shardId);
             throw failure;
         }
     }
@@ -90,7 +93,8 @@ public final class MatcherPipelineGroup implements AutoCloseable {
                 CoreMatchingResult result = shard.poll(coreSequence);
                 if (result == null) break;
                 // The existing sequence slot owns the route; no second token index is maintained.
-                contexts.required(coreSequence).releaseMatcherSubmission(shardId);
+                if (contexts.required(coreSequence).submittedMatcherShard() == shardId)
+                    contexts.required(coreSequence).releaseMatcherSubmission(shardId);
                 consumer.accept(coreSequence, result);
             }
         }

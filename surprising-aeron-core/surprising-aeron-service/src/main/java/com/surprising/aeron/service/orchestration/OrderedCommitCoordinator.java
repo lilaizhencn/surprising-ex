@@ -1115,9 +1115,15 @@ final class OrderedCommitCoordinator {
         if (batch != null && (!batch.activated() || !batch.laneWorkComplete())) return false;
         if (batch != null && batch.itemAdmission != null) return true;
         if (batch != null && (batch.itemSettlementEvent != null || batch.laneCommitEvent != null)) return true;
+        if (batch != null && batch.settlementEvent != null && batch.settlementEvent.direct())
+            return batch.settlementEvent.complete();
         if (batch != null && batch.placeBatchAdmissionEvent != null
                 && (!batch.placeBatchAdmissionEvent.complete() || !pending.isMatchingSubmitted())) return false;
         if (owner.hasPendingMatchingRejection(pending.sequence())) return true;
+        // Direct Matcher->Lane events have no Owner matching-result slot.  Their Lane completion
+        // bit is the authoritative ordered-commit readiness signal.
+        if (pending.settlementEvent() != null && pending.settlementEvent().direct())
+            return pending.settlementEvent().complete();
         if (pending.hasLaneContinuation()) return pending.laneContinuationComplete();
         LaneCommandContextRing.Context context = owner.laneCommandContexts.required(pending.sequence());
         return context.hasMatchingCompletion() || context.matchingResult() != null;
@@ -1168,6 +1174,14 @@ final class OrderedCommitCoordinator {
                 ? pending.orderBatch.lastMatchingResult : context.matchingResult();
         if (matching == null && pending.settlementEvent() != null && pending.settlementEvent().direct()) {
             matching = pending.settlementEvent().firstDirectResult();
+        }
+        if (matching == null && pending.orderBatch != null && pending.orderBatch.settlementEvent != null
+                && pending.orderBatch.settlementEvent.direct()) {
+            matching = pending.orderBatch.settlementEvent.firstDirectResult();
+        }
+        if (matching == null && pending.orderBatch != null && pending.orderBatch.itemSettlementEvent != null
+                && pending.orderBatch.itemSettlementEvent.direct()) {
+            matching = pending.orderBatch.itemSettlementEvent.firstDirectResult();
         }
         if (matching == null && (pending.settlementEvent() == null || pending.settlementEvent().direct())
                 && pending.cancelEvent() == null && pending.replaceEvent() == null) {

@@ -35,6 +35,15 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     private final int workerId;
     private volatile BackgroundRead<?> backgroundRead;
     private volatile Runnable completionSignal;
+    private static final java.lang.invoke.VarHandle SEQUENCE_VALUE;
+    static {
+        try {
+            SEQUENCE_VALUE = java.lang.invoke.MethodHandles.lookup()
+                    .findVarHandle(PaddedSequence.class, "value", long.class);
+        } catch (ReflectiveOperationException failure) {
+            throw new ExceptionInInitializerError(failure);
+        }
+    }
     public void completionSignal(Runnable signal) { completionSignal = signal; }
     /** 先声明休眠再重读队列，避免发布与休眠交错后只能等待定时唤醒。 */
     private volatile boolean parkRequested;
@@ -163,6 +172,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
      * to drain completed matching work without probing every pending Core sequence.
      */
     public long completedMatchingSequence() {
+        skipReadyDirectSlots();
         long position = consumedPosition.value;
         if (position >= completedPosition.value) return 0;
         long token = slots[(int) position & mask].token;
@@ -182,14 +192,33 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         Object result = slot.result;
         Throwable failure = slot.failure;
         slot.clear();
-        consumedPosition.value = position + 1;
+        if (!SEQUENCE_VALUE.compareAndSet(consumedPosition, position, position + 1)) {
+            throw new IllegalStateException("matcher consumer cursor advanced concurrently");
+        }
         if (failure != null) {
             if (failure instanceof RuntimeException runtimeFailure) throw runtimeFailure;
             if (failure instanceof Error error) throw error;
             throw new IllegalStateException("matcher pipeline command failed", failure);
         }
         if (result == null) throw new IllegalStateException("matcher pipeline returned no result");
+        skipReadyDirectSlots();
         return result;
+    }
+
+    /**
+     * 直达事件已经在 Matcher 线程完成事实构造并释放了提交路由，Owner 不再需要读取结果
+     * 或写入 sequence context。只有前序普通结果已消费时才能安全跳过该 slot。
+     */
+    private void skipReadyDirectSlots() {
+        while (true) {
+            long position = consumedPosition.value;
+            if (position >= completedPosition.value) return;
+            Slot slot = slots[(int) position & mask];
+            var settlement = slot.settlement;
+            if (slot.token <= 0 || settlement == null || !settlement.direct() || !settlement.ready()) return;
+            if (!SEQUENCE_VALUE.compareAndSet(consumedPosition, position, position + 1)) continue;
+            slot.clear();
+        }
     }
 
     private Object awaitResult(long expectedToken, long timeoutNanos) {
@@ -287,6 +316,8 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                             ? matchingResult.withCoreSequence(slot.token) : result;
                     if (slot.settlement != null && !slot.settlement.ready())
                         slot.settlement.publishDirectResult((CoreMatchingResult) slot.result);
+                    if (slot.settlement != null && slot.settlement.direct())
+                        tryAutoConsumeDirect(position, slot);
                 } catch (Throwable failure) {
                     if (slot.settlement != null) slot.settlement.failDirect(failure);
                     slot.failure = failure;
@@ -309,6 +340,11 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                 shutdownFailure = failure;
             }
         }
+    }
+
+    private void tryAutoConsumeDirect(long position, Slot slot) {
+        if (!slot.settlement.ready() || !SEQUENCE_VALUE.compareAndSet(consumedPosition, position, position + 1)) return;
+        slot.clear();
     }
 
     private void awaitStartup() {

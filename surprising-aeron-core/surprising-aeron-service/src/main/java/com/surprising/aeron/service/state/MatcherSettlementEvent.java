@@ -55,6 +55,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     private int directShard;
     private java.util.List<Long> authorizedCancellations = java.util.List.of();
     private com.surprising.aeron.service.matching.CoreMatchingResult firstDirectResult, lastDirectResult;
+    /** Matcher 队列路由释放回调；直达结果先释放路由，再通知 Lane，避免 Owner 重复轮询。 */
+    private Runnable matcherCompletionRelease;
     /** 完成前由命令持有，不归还结果容器；事件回收时释放引用。 */
     LaneOrderResultTarget resultTarget;
     static final class BatchStorage {
@@ -217,6 +219,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         treasuryTrades = hasTrade(batchPlans, batchPlanCount);
         changes.ensureOrderCapacity(orders, actualLanes);
         directPublished = true;
+        releaseMatcherCompletionBeforeSignal();
         runtime.signalDirectSettlement(routedLaneMask);
     }
 
@@ -224,7 +227,22 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         if (!direct || directPublished) return;
         directFailure = java.util.Objects.requireNonNull(failure);
         directPublished = true;
+        releaseMatcherCompletionBeforeSignal();
         runtime.signalDirectSettlement(routedLaneMask);
+    }
+
+    /** 由 Matcher pipeline 设置；只用于直达事件，且每代最多执行一次。 */
+    public void matcherCompletionRelease(Runnable release) {
+        if (!direct || directPublished || matcherCompletionRelease != null) {
+            throw new IllegalStateException("invalid matcher completion release callback");
+        }
+        matcherCompletionRelease = java.util.Objects.requireNonNull(release);
+    }
+
+    private void releaseMatcherCompletionBeforeSignal() {
+        Runnable release = matcherCompletionRelease;
+        matcherCompletionRelease = null;
+        if (release != null) release.run();
     }
 
     public com.surprising.aeron.service.matching.CoreMatchingResult firstDirectResult() {
@@ -350,6 +368,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             throw new IllegalStateException("cannot recycle an incomplete matcher settlement");
         }
         direct = false; directPublished = false; directFailure = null; dispatched = false;
+        matcherCompletionRelease = null;
         directCoreSequence = 0;
         directCommandId = null; authorizedCancellations = java.util.List.of();
         firstDirectResult = lastDirectResult = null; routedLaneMask = 0;
