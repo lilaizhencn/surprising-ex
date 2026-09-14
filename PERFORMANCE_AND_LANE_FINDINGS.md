@@ -898,3 +898,10 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 
 - 128 币对规模轮 terminal business **17.8–24.9k/s**，无错误/超时/未完成；这是 `scaleMixedWorkload`（10,000 用户、每轮 32 个生命周期操作、hftRounds=1/batch4），不是 4 币对 `productionMixedWorkload`，因此不能解释成代码从 26 万降到 2 万。
 - 分配率 **390–475 MB/s**，每次 JMH invocation 约 **422–427 MB** 分配；规模状态初始化/恢复占比较大，后续要用固定已热身连续场景或 JFR 排除初始化后再衡量稳态分配。
+
+### 2026-09-14 OrderedCommitCoordinator 提交状态机重构
+
+- `pumpMatchingCommitCompletions` 重命名为 `advanceMatchingProgress`，职责固定为“激活批次、收集 Matcher/Lane 通知、派发可结算事件”，不直接提交业务状态。
+- `awaitAnyMatchingCommitReady` 收敛为 `awaitReadyHead`；新增 `matchingResult` 作为 direct settlement/普通上下文的唯一结果读取入口，新增 `awaitMatchingCommit` 统一处理 Lane 完成等待，删除原提交循环中的重复结果提取和等待代码。
+- Owner 的序号 fence、Matcher prefix 证据、资金/Treasury 汇总、终态提交、结果账本和事件回收均未移动或删除；仅简化控制流和重复读取。
+- 定向回归 320 项通过；service 全量 **930 tests，0 failures，0 errors，0 skipped**；基准模块 package 通过。原 4 币对条件 2×5s warmup + 3×5s measurement 的 terminal business 为 **256,138–260,719/s**，平均 **258,140/s**，与重构前区间重叠，错误/超时/未完成均为 0。

@@ -1061,7 +1061,11 @@ final class OrderedCommitCoordinator {
         return index;
     }
 
-    void pumpMatchingCommitCompletions(long clusterTimestamp, long clusterPosition, long throughSequence) {
+    /**
+     * Advances every owner-side completion source once.  This is the only method that moves
+     * matcher/Lane notifications toward the ordered commit head; it never commits business state.
+     */
+    void advanceMatchingProgress(long clusterTimestamp, long clusterPosition, long throughSequence) {
         long first = owner.pendingMatching.firstSequence();
         if (first > throughSequence) return;
         PendingMatching pending = owner.pendingMatching.get(first);
@@ -1121,12 +1125,13 @@ final class OrderedCommitCoordinator {
         return matchingCommitReady(pending) ? pending : null;
     }
 
-    PendingMatching awaitAnyMatchingCommitReady(
+    /** Waits for the ordered pending head.  The caller still performs evidence and state commit. */
+    PendingMatching awaitReadyHead(
             long timeoutNanos, long clusterTimestamp, long clusterPosition, long throughSequence) {
         long deadline = System.nanoTime() + timeoutNanos;
         int idle = 0;
         while (!owner.pendingMatching.isEmpty() && owner.pendingMatching.firstSequence() <= throughSequence) {
-            pumpMatchingCommitCompletions(clusterTimestamp, clusterPosition, throughSequence);
+            advanceMatchingProgress(clusterTimestamp, clusterPosition, throughSequence);
             PendingMatching ready = pollReadyPending();
             if (ready != null) return ready;
             long remaining = deadline - System.nanoTime();
@@ -1142,6 +1147,56 @@ final class OrderedCommitCoordinator {
             }
         }
         return null;
+    }
+
+    /**
+     * Reads the one authoritative matching result for a pending command.  Direct settlements keep
+     * the result on the settlement event; ordinary commands take it from the sequence context.
+     */
+    private com.surprising.aeron.service.matching.CoreMatchingResult matchingResult(
+            PendingMatching pending, LaneCommandContextRing.Context context) {
+        com.surprising.aeron.service.matching.CoreMatchingResult matching =
+                pending.orderBatch != null && (pending.orderBatch.itemSettlementEvent != null
+                        || pending.orderBatch.itemAdmission != null && pending.orderBatch.started)
+                        ? pending.orderBatch.lastMatchingResult : context.matchingResult();
+        if (matching == null && pending.settlementEvent() != null && pending.settlementEvent().direct()) {
+            matching = pending.settlementEvent().firstDirectResult();
+        }
+        if (matching == null && (pending.settlementEvent() == null || pending.settlementEvent().direct())
+                && pending.cancelEvent() == null && pending.replaceEvent() == null) {
+            matching = context.takeMatchingCompletion();
+        }
+        return matching;
+    }
+
+    /**
+     * Completes a command after its Matcher fact is available.  A non-null result can still wait
+     * for Lane publication; that wait uses the same progress pump as the ordered-head wait.
+     */
+    private CoreResponse awaitMatchingCommit(
+            PendingMatching pending,
+            LaneCommandContextRing.Context context,
+            com.surprising.aeron.service.matching.CoreMatchingResult matching,
+            long clusterTimestamp,
+            long clusterPosition,
+            long dispatchThroughSequence,
+            boolean awaitFirst) {
+        CoreResponse response = completeMatching(pending.sequence(), matching, clusterTimestamp, clusterPosition);
+        if (response != null || !awaitFirst) return response;
+        long deadline = System.nanoTime() + TradingCoreRuntime.MATCHING_AWAIT_TIMEOUT_NANOS;
+        int idle = 0;
+        while (response == null && System.nanoTime() < deadline) {
+            advanceMatchingProgress(clusterTimestamp, clusterPosition, dispatchThroughSequence);
+            if (!matchingCommitReady(pending)) {
+                if (idle++ < 1_024) Thread.onSpinWait();
+                else java.util.concurrent.locks.LockSupport.parkNanos(owner, 1_000L);
+                continue;
+            }
+            com.surprising.aeron.service.matching.CoreMatchingResult readyMatching = matchingResult(pending, context);
+            if (readyMatching == null) continue;
+            response = completeMatching(pending.sequence(), readyMatching, clusterTimestamp, clusterPosition);
+        }
+        return response;
     }
 
     int commitReadyMatching(int maxCompletions, long clusterTimestamp, long clusterPosition,
@@ -1166,14 +1221,14 @@ final class OrderedCommitCoordinator {
         }
         owner.beginDownstreamPublicationBatch();
         try {
-            pumpMatchingCommitCompletions(clusterTimestamp, clusterPosition, dispatchThroughSequence);
+            advanceMatchingProgress(clusterTimestamp, clusterPosition, dispatchThroughSequence);
             int completed = 0;
             int attempts = 0;
             while (attempts < maxCompletions) {
                 if (owner.pendingMatching.firstSequence() > throughSequence) break;
                 PendingMatching pending = pollReadyPending();
                 if (pending == null && attempts == 0 && awaitFirst) {
-                    pending = awaitAnyMatchingCommitReady(
+                    pending = awaitReadyHead(
                             TradingCoreRuntime.MATCHING_AWAIT_TIMEOUT_NANOS, clusterTimestamp, clusterPosition, throughSequence);
                 }
                 if (pending == null) break;
@@ -1184,50 +1239,15 @@ final class OrderedCommitCoordinator {
                     response = completeRejectedMatching(sequence);
                 } else {
                     LaneCommandContextRing.Context context = owner.laneCommandContexts.required(sequence);
-                    com.surprising.aeron.service.matching.CoreMatchingResult matching =
-                            pending.orderBatch != null && (pending.orderBatch.itemSettlementEvent != null
-                                    || pending.orderBatch.itemAdmission != null && pending.orderBatch.started)
-                                    ? pending.orderBatch.lastMatchingResult : context.matchingResult();
-                    if (matching == null && pending.settlementEvent() != null && pending.settlementEvent().direct()) {
-                        matching = pending.settlementEvent().firstDirectResult();
-                    }
-                    if (matching == null && (pending.settlementEvent() == null || pending.settlementEvent().direct()) && pending.cancelEvent() == null
-                            && pending.replaceEvent() == null) {
-                        matching = context.takeMatchingCompletion();
-                    }
+                    com.surprising.aeron.service.matching.CoreMatchingResult matching = matchingResult(pending, context);
                     if (matching == null) break;
-                    response = completeMatching(sequence, matching, clusterTimestamp, clusterPosition);
-                    if (response == null && awaitFirst) {
-                        long deadline = System.nanoTime() + TradingCoreRuntime.MATCHING_AWAIT_TIMEOUT_NANOS;
-                        int idle = 0;
-                        while (response == null && System.nanoTime() < deadline) {
-                            pumpMatchingCommitCompletions(clusterTimestamp, clusterPosition, dispatchThroughSequence);
-                            if (!matchingCommitReady(pending)) {
-                                if (idle++ < 1_024) Thread.onSpinWait();
-                                else java.util.concurrent.locks.LockSupport.parkNanos(owner, 1_000L);
-                                continue;
-                            }
-                            com.surprising.aeron.service.matching.CoreMatchingResult readyMatching =
-                                    pending.orderBatch != null && (pending.orderBatch.itemSettlementEvent != null
-                                    || pending.orderBatch.itemAdmission != null && pending.orderBatch.started)
-                                            ? pending.orderBatch.lastMatchingResult : context.matchingResult();
-                            if (readyMatching == null && pending.settlementEvent() != null && pending.settlementEvent().direct()) {
-                                readyMatching = pending.settlementEvent().firstDirectResult();
-                            }
-                            if (readyMatching == null && (pending.settlementEvent() == null || pending.settlementEvent().direct())
-                                    && pending.cancelEvent() == null && pending.replaceEvent() == null) {
-                                readyMatching = context.takeMatchingCompletion();
-                            }
-                            if (readyMatching == null) continue;
-                            matching = readyMatching;
-                            response = completeMatching(sequence, matching, clusterTimestamp, clusterPosition);
-                        }
-                    }
+                    response = awaitMatchingCommit(pending, context, matching,
+                            clusterTimestamp, clusterPosition, dispatchThroughSequence, awaitFirst);
                 }
                 attempts++;
                 owner.matchingProgressSequence++;
                 if (response == null) {
-                    pumpMatchingCommitCompletions(clusterTimestamp, clusterPosition, dispatchThroughSequence);
+                    advanceMatchingProgress(clusterTimestamp, clusterPosition, dispatchThroughSequence);
                     continue;
                 }
                 handler.onCommitted(sequence, response);

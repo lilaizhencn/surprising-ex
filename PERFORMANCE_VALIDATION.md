@@ -50865,3 +50865,8 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - 条件：HotSpot JDK 25.0.1、ZGC、4 Account Lane、1 Matcher、listed/active symbols=128、activeUsers=10,000、maxPositions=1、maxOpenOrders=3、UNIFORM、hftRounds=1、hftBatchSize=4、maxInFlight=256、lifecycleSymbolsPerRun=32、JMH 1×2s warmup + 2×2s measurement、1 fork。
 - 结果：terminal business **17,782 / 24,861/s**，平均 **21,322/s**；terminal core messages **7,636 / 10,676/s**；terminal trading operations **16,910 / 23,642/s**；terminal trades **3,382 / 4,728/s**；errors/rejects/timeouts/unfinished=0。
 - ZGC 分配 **389.579–474.637 MB/s**，`gc.alloc.rate.norm` **421,993,440–426,577,272 B/JMH invocation**。该场景包含 128 币对及每轮 32 个生命周期操作，B/op 主要受初始化/恢复和大状态集影响，不能与 4 币对生产混合 workload 直接比较。
+
+## 2026-09-14 OrderedCommitCoordinator 可读性重构复测
+
+- 重构只整理提交状态机：推进、队首等待、结果读取、Lane 等待分别封装；没有改变 Owner 的一致性职责和 direct Matcher 结果所有权。
+- 同口径结果：HotSpot JDK 25.0.1、ZGC、4 Lane、1 Matcher、4 币对、1000 用户、hftRounds=16、batch=20，2×5s warmup + 3×5s measurement；terminal business **256,138 / 257,562 / 260,719/s**，平均 **258,140/s**；terminal trades **60,624–61,709/s**；errors/rejects/timeouts/unfinished=0。
