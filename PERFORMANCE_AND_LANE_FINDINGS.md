@@ -888,3 +888,8 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - HotSpot JDK 25 下 service 全量回归结果为 **930 tests，0 failures，0 errors，0 skipped**；基准模块 package 通过。短基线（ZGC、4 Lane、1 Matcher、4 币对、1000 用户、hftRounds16/batch20、2×3s warmup + 3×3s measurement）稳态样本为 **228,483–252,736 terminal business/s**，无错误/超时/未完成；该短轮只作为门禁后行为证据，不替代历史 3×5s 基线。
 
 - 同口径长轮复测确认空转门禁没有造成吞吐回退：4 币对生产混合 workload 的 terminal business 为 **251,106–261,978/s**，与此前 **256,972–265,617/s** 的样本区间重叠；错误、超时和未完成均为 0。
+
+### 2026-09-14 分配率复核
+
+- 4 币对生产混合 workload 的 ZGC 采样为 **1,079.671 MB/s**、**57,504,772 B/JMH invocation**，terminal business 平均 **244,088/s**；按每次场景处理量粗折约 **10–11 KB/业务项**。
+- 该 B/op 包含 JMH invocation 的场景初始化/快照恢复，不能直接等同于线上稳态分配；但结合 JFR 的 `OrderRuntime`、数组、TreeMap.Entry、结果/发布缓冲热点，说明下一步应优先做事件生命周期复用和稳态/初始化分离采样，而不是继续扩大 Owner 轮询逻辑。

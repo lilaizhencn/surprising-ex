@@ -50857,3 +50857,5 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - 结果：terminal business **228,483 / 240,721 / 252,736 s⁻¹**（平均 240,647 s⁻¹），accepted=terminal，errors/rejects/timeouts/unfinished=0；terminal trades **54,079 / 56,975 / 59,819 s⁻¹**。该轮比 3×5s 短，不能单独与 262,493 s⁻¹ 的长轮作回归结论。
 
 - 同口径长轮复测（2×5s warmup + 3×5s measurement）terminal business **251,106 / 258,916 / 261,978 s⁻¹**，平均 **257,333 s⁻¹**；terminal trades **59,433 / 61,282 / 62,007 s⁻¹**；accepted=terminal，errors/rejects/timeouts/unfinished=0。与门禁前历史 256,972–265,617 s⁻¹ 重叠，未观察到回退。
+
+- 同条件 ZGC 分配采样（1×5s warmup + 2×5s measurement）：terminal business **231,045 / 257,130 s⁻¹**，平均 **244,088/s**；`gc.alloc.rate.norm` **57,504,772 B/JMH invocation**，约按每次 invocation 的业务批量折算为 **约 10–11 KB/业务项**（该值包含每轮场景初始化/恢复，不能直接当作纯稳态对象分配）；GC 35 次、累计 2.951s。该证据确认分配仍是主要待优化项，Owner 空转门禁本身不是吞吐主瓶颈。
