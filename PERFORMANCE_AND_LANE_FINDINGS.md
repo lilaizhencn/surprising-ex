@@ -893,3 +893,8 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 
 - 4 币对生产混合 workload 的 ZGC 采样为 **1,079.671 MB/s**、**57,504,772 B/JMH invocation**，terminal business 平均 **244,088/s**；按每次场景处理量粗折约 **10–11 KB/业务项**。
 - 该 B/op 包含 JMH invocation 的场景初始化/快照恢复，不能直接等同于线上稳态分配；但结合 JFR 的 `OrderRuntime`、数组、TreeMap.Entry、结果/发布缓冲热点，说明下一步应优先做事件生命周期复用和稳态/初始化分离采样，而不是继续扩大 Owner 轮询逻辑。
+
+### 2026-09-14 固定 128 币对最新代码证据
+
+- 128 币对规模轮 terminal business **17.8–24.9k/s**，无错误/超时/未完成；这是 `scaleMixedWorkload`（10,000 用户、每轮 32 个生命周期操作、hftRounds=1/batch4），不是 4 币对 `productionMixedWorkload`，因此不能解释成代码从 26 万降到 2 万。
+- 分配率 **390–475 MB/s**，每次 JMH invocation 约 **422–427 MB** 分配；规模状态初始化/恢复占比较大，后续要用固定已热身连续场景或 JFR 排除初始化后再衡量稳态分配。

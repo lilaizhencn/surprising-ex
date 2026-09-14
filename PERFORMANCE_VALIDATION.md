@@ -50859,3 +50859,9 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - 同口径长轮复测（2×5s warmup + 3×5s measurement）terminal business **251,106 / 258,916 / 261,978 s⁻¹**，平均 **257,333 s⁻¹**；terminal trades **59,433 / 61,282 / 62,007 s⁻¹**；accepted=terminal，errors/rejects/timeouts/unfinished=0。与门禁前历史 256,972–265,617 s⁻¹ 重叠，未观察到回退。
 
 - 同条件 ZGC 分配采样（1×5s warmup + 2×5s measurement）：terminal business **231,045 / 257,130 s⁻¹**，平均 **244,088/s**；`gc.alloc.rate.norm` **57,504,772 B/JMH invocation**，约按每次 invocation 的业务批量折算为 **约 10–11 KB/业务项**（该值包含每轮场景初始化/恢复，不能直接当作纯稳态对象分配）；GC 35 次、累计 2.951s。该证据确认分配仍是主要待优化项，Owner 空转门禁本身不是吞吐主瓶颈。
+
+## 2026-09-14 固定 128 币对复测
+
+- 条件：HotSpot JDK 25.0.1、ZGC、4 Account Lane、1 Matcher、listed/active symbols=128、activeUsers=10,000、maxPositions=1、maxOpenOrders=3、UNIFORM、hftRounds=1、hftBatchSize=4、maxInFlight=256、lifecycleSymbolsPerRun=32、JMH 1×2s warmup + 2×2s measurement、1 fork。
+- 结果：terminal business **17,782 / 24,861/s**，平均 **21,322/s**；terminal core messages **7,636 / 10,676/s**；terminal trading operations **16,910 / 23,642/s**；terminal trades **3,382 / 4,728/s**；errors/rejects/timeouts/unfinished=0。
+- ZGC 分配 **389.579–474.637 MB/s**，`gc.alloc.rate.norm` **421,993,440–426,577,272 B/JMH invocation**。该场景包含 128 币对及每轮 32 个生命周期操作，B/op 主要受初始化/恢复和大状态集影响，不能与 4 币对生产混合 workload 直接比较。
