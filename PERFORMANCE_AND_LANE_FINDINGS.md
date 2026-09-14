@@ -880,3 +880,9 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - `AccountLaneState` 的本地状态哈希与资金哈希原先每次重建都为用户、订单、持仓、余额等 primitive key 集合创建新的 `long[]`/`int[]`；现在改为 Lane 所属线程复用并按有效长度排序的 scratch 数组。哈希字段、排序规则和恢复语义未改变。
 - 该改动只削减哈希重建产生的短命数组，不能消除 Owner 有序提交、跨 Lane await、`TreeMap` 状态物化或订单运行态对象本身的成本；这些仍是 JFR 中的主要结构性热点。
 - service 全量回归最终 **930 tests，0 failures，0 errors，0 skipped**。
+
+### 2026-09-14 Owner 完成泵空转门禁
+
+- `OrderedCommitCoordinator.pumpMatchingCommitCompletions()` 现在先检查统一的 `hasMatchingDrainWork()`；没有 Matcher/Lane ready 位、跨分区撤单、本地准入续程或批次队列工作时，不再进入完整 drain。
+- 门禁只读取已有 SPSC 完成游标/ready 位和 Owner 本地状态，不改变 Matcher→Lane 直达事件、Owner 有序证据校验、资金汇总、终态账本或槽位回收。生产者先发布队列元素再置 ready 位，漏通知不会发生，最多在下一次 Owner pump 处理。
+- HotSpot JDK 25 下 service 全量回归结果为 **930 tests，0 failures，0 errors，0 skipped**；基准模块 package 通过。短基线（ZGC、4 Lane、1 Matcher、4 币对、1000 用户、hftRounds16/batch20、2×3s warmup + 3×3s measurement）稳态样本为 **228,483–252,736 terminal business/s**，无错误/超时/未完成；该短轮只作为门禁后行为证据，不替代历史 3×5s 基线。

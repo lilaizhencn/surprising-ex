@@ -2136,6 +2136,24 @@ public final class TradingCoreRuntime implements AutoCloseable {
         return pending == null ? 0 : pending.sequence();
     }
 
+    /**
+     * Fast owner-side gate for the completion pump.  The ordered commit loop is called for
+     * every command prefix, including prefixes that are still waiting for an external matcher or
+     * Lane notification.  In that state there is no queue to drain; checking the same producer
+     * cursors once avoids entering the full drain routine and its shard/notification probes.
+     *
+     * <p>This is only a hint for the owner thread.  Producers publish to the SPSC queues before
+     * setting their ready bits, so a false result can at worst defer work to the next pump; it
+     * cannot make a completion invisible or bypass the ordered commit fence.</p>
+     */
+    boolean hasMatchingDrainWork() {
+        return crossShardCancellations.hasPending()
+                || placeAdmissionReadyShardMask != 0
+                || runtimeState.hasMatchingNotifications()
+                || matcherPipeline.hasMatchingCompletions()
+                || hasLocalMatchingWork();
+    }
+
     void drainMatchingCompletions() {
         if (crossShardCancellations.hasPending()) crossShardCancellations.poll();
         // 本地准入续跑不能依赖新的 Lane 通知；其他阶段不再触发整套准入扫描。

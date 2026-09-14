@@ -50849,3 +50849,9 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 - 当前最新代码：终态业务 **262,493/s**（三样本 256,972–265,617/s），终态 Core messages **26,405/s**，Lane **46,354/s**，Lane settlement **30,822/s**，成交 **62,128/s**；accepted=terminal，错误/拒绝/超时/未完成均为 0。
 - 因此近期 2.5 万级结果来自 `scaleMixedWorkload` 的另一种口径（128 币对、10,000 users、`hftRounds=1`、`hftBatchSize=4`），不是同条件吞吐突然下降。两种结果不可直接比较；历史 24 万轮与本轮 26.2 万轮在同一短轮波动范围内。
 - 该复现仍是本机 closed-loop JMH，不代表 128 币对生产容量、开放到达率、p99≤5ms 或 GCP 验收。
+
+## 2026-09-14 Owner 完成泵门禁复测
+
+- 改动：`OrderedCommitCoordinator` 在调用 `drainMatchingCompletions` 前使用 Owner 侧 `hasMatchingDrainWork` 门禁，消除无通知/无本地续程时的重复空转探测。
+- 条件：HotSpot JDK 25.0.1、ZGC、4 Account Lane、1 Matcher、4 币对、1000 活跃用户、hftRounds=16、hftBatchSize=20、JMH 2×3s warmup + 3×3s measurement、1 fork。
+- 结果：terminal business **228,483 / 240,721 / 252,736 s⁻¹**（平均 240,647 s⁻¹），accepted=terminal，errors/rejects/timeouts/unfinished=0；terminal trades **54,079 / 56,975 / 59,819 s⁻¹**。该轮比 3×5s 短，不能单独与 262,493 s⁻¹ 的长轮作回归结论。

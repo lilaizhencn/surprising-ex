@@ -1070,7 +1070,7 @@ final class OrderedCommitCoordinator {
         if (head != null && !head.started) {
             owner.batches.activateOrderBatch(head, pending, true);
         }
-        owner.drainMatchingCompletions();
+        if (owner.hasMatchingDrainWork()) owner.drainMatchingCompletions();
         if (controlPending(first) || head != null && (head.laneCommitEvent != null || head.itemAdmission != null))
             signalPendingMatchingReady(first);
         dispatchReadyPlaceSettlements(clusterTimestamp, clusterPosition, throughSequence);
