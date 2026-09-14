@@ -886,3 +886,5 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - `OrderedCommitCoordinator.pumpMatchingCommitCompletions()` 现在先检查统一的 `hasMatchingDrainWork()`；没有 Matcher/Lane ready 位、跨分区撤单、本地准入续程或批次队列工作时，不再进入完整 drain。
 - 门禁只读取已有 SPSC 完成游标/ready 位和 Owner 本地状态，不改变 Matcher→Lane 直达事件、Owner 有序证据校验、资金汇总、终态账本或槽位回收。生产者先发布队列元素再置 ready 位，漏通知不会发生，最多在下一次 Owner pump 处理。
 - HotSpot JDK 25 下 service 全量回归结果为 **930 tests，0 failures，0 errors，0 skipped**；基准模块 package 通过。短基线（ZGC、4 Lane、1 Matcher、4 币对、1000 用户、hftRounds16/batch20、2×3s warmup + 3×3s measurement）稳态样本为 **228,483–252,736 terminal business/s**，无错误/超时/未完成；该短轮只作为门禁后行为证据，不替代历史 3×5s 基线。
+
+- 同口径长轮复测确认空转门禁没有造成吞吐回退：4 币对生产混合 workload 的 terminal business 为 **251,106–261,978/s**，与此前 **256,972–265,617/s** 的样本区间重叠；错误、超时和未完成均为 0。
