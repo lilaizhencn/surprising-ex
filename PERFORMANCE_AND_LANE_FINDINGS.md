@@ -905,3 +905,5 @@ A2小步实现：非批量单事件计划不再维护订单剩余量临时表；
 - `awaitAnyMatchingCommitReady` 收敛为 `awaitReadyHead`；新增 `matchingResult` 作为 direct settlement/普通上下文的唯一结果读取入口，新增 `awaitMatchingCommit` 统一处理 Lane 完成等待，删除原提交循环中的重复结果提取和等待代码。
 - Owner 的序号 fence、Matcher prefix 证据、资金/Treasury 汇总、终态提交、结果账本和事件回收均未移动或删除；仅简化控制流和重复读取。
 - 定向回归 320 项通过；service 全量 **930 tests，0 failures，0 errors，0 skipped**；基准模块 package 通过。原 4 币对条件 2×5s warmup + 3×5s measurement 的 terminal business 为 **256,138–260,719/s**，平均 **258,140/s**，与重构前区间重叠，错误/超时/未完成均为 0。
+
+- 128 币对重构后短轮 terminal business **26.6–31.1k/s**，无错误、超时或未完成；该规模场景仍受状态初始化和生命周期操作影响，需长轮/JFR 稳态采样才能比较分配变化。

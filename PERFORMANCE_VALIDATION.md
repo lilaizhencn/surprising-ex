@@ -50870,3 +50870,5 @@ vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)
 
 - 重构只整理提交状态机：推进、队首等待、结果读取、Lane 等待分别封装；没有改变 Owner 的一致性职责和 direct Matcher 结果所有权。
 - 同口径结果：HotSpot JDK 25.0.1、ZGC、4 Lane、1 Matcher、4 币对、1000 用户、hftRounds=16、batch=20，2×5s warmup + 3×5s measurement；terminal business **256,138 / 257,562 / 260,719/s**，平均 **258,140/s**；terminal trades **60,624–61,709/s**；errors/rejects/timeouts/unfinished=0。
+
+- 128 币对重构后短轮（1×2s warmup + 2×2s measurement）terminal business **26,586 / 31,146/s**，平均 **28,866/s**；terminal trading operations **25,282–29,619/s**；terminal trades **5,056–5,924/s**；errors/rejects/timeouts/unfinished=0。与重构前 17,782–24,861/s 的短轮结果存在明显机器/JIT 波动，不能据此宣称优化收益，但未出现功能或吞吐回退。
