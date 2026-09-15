@@ -214,7 +214,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
         if (laneFailure != null) throw new IllegalStateException("account lane failed", laneFailure);
     }
 
-    private static boolean ready(Command command) {
+    private static boolean ready(Object command) {
         return !(command instanceof MatcherSettlementEvent event) || event.ready();
     }
 
