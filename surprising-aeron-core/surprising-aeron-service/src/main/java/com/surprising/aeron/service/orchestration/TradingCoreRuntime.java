@@ -1896,9 +1896,14 @@ public final class TradingCoreRuntime implements AutoCloseable,
             long userId = pending.command().header().userId();
             if (pending.operation() == CommandSlot.Operation.PLACE && preMatchingCancellations.isEmpty()) {
                 var command = pending.decodedCommand().placeOrder();
-                var admittedOrder = pending.admittedMatchingOrder();
-                var order = admittedOrder == null ? matchingOrder(command.orderId()) : admittedOrder;
+                var admittedOrder = pending.admittedPlaceOrder();
                 int shard = matcherShard(pending);
+                if (admittedOrder != null) {
+                    return () -> matchingAdapter.placeWithEvidence(shard, pending.sequence(),
+                            pending.command().header().commandId(), command.instrumentChangeId(),
+                            pending.command().header().submittedAtEpochMillis(), userId, admittedOrder);
+                }
+                var order = matchingOrder(command.orderId());
                 return () -> matchingAdapter.placeWithEvidence(shard, pending.sequence(),
                         pending.command().header().commandId(), command.instrumentChangeId(),
                         pending.command().header().submittedAtEpochMillis(), userId, order);
@@ -1918,8 +1923,12 @@ public final class TradingCoreRuntime implements AutoCloseable,
             MatchingSubmission matching = switch (pending.operation()) {
                 case PLACE -> {
                     var command = pending.decodedCommand().placeOrder();
-                    var admittedOrder = pending.admittedMatchingOrder();
-                    var order = admittedOrder == null ? matchingOrder(command.orderId()) : admittedOrder;
+                    var admittedOrder = pending.admittedPlaceOrder();
+                    if (admittedOrder != null) {
+                        yield new MatchingSubmission(command.orderId(), command.instrumentChangeId(),
+                                () -> matchingAdapter.place(userId, admittedOrder));
+                    }
+                    var order = matchingOrder(command.orderId());
                     yield new MatchingSubmission(command.orderId(), command.instrumentChangeId(),
                             () -> matchingAdapter.place(userId, order));
                 }

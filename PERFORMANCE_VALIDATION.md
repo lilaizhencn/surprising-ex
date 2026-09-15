@@ -1906,3 +1906,19 @@ profile：
 
 
 清理完成：6轮本机单节点、3次分析与4组微基准进程已退出；删除本轮临时data/Archive/media/JFR/日志/脚本及受影响模块本轮生成的测试报告，共677文件、逻辑大小15176588159bytes，路径/大小/摘要清单SHA-256 `93726f58d30e75ac43be8f7c3caca50e4beb1c16ea98facf83bf92a0a15adab4`。保留构建jar/classes及上述归档；未创建GCP资源。所有/tmp/core-latency6路径仅历史定位。JMH fork PID未单独记录、系统上下文切换/FD/直接缓冲区峰值未完整采集，作为部分验证缺口保留，不补造零值。
+
+## 2026-09-15：准入客户索引原始值微优化（计划）
+
+锁定单因素：新增 `TradingRuntimeState.orderIdByClientValue(userId, clientKey)`，用 `0` 表示缺失；仅替换 `RuntimeOrderAdmission` 和 `RuntimeCommandProcessor` 的撮合准入重复客户号校验。原有 `orderIdByClient` 保留给查询、快照和兼容调用，业务状态、顺序提交、Lane 所有权和拒单语义不变。
+
+验证门槛：服务模块正确性测试必须全绿；新增/复用微基准需确认准入查询路径不再产生缺失值 `Long` 装箱；没有可重复的分配下降或出现吞吐/尾延迟回退则不保留该改动。压测仍使用固定单节点、1 matcher、4 lanes、128 symbols、window256、BUSY_SPIN、G1、MIXED batch20 口径。
+
+结果：服务模块 963 项测试通过（1 项既有跳过）。JMH `ClientIndexLookupBenchmark` 在当前 JDK 25 HotSpot 下，nullable/primitive 的命中与未命中均约 91–101M ops/s，四者分配均约 `0.0001 B/op`；C2 已标量替换临时 `Long`，没有可重复的分配或吞吐收益。因此回退该别名及临时基准，不纳入后续压测比较。
+
+## 2026-09-15：普通 PLACE 复用已解析订单（计划）
+
+锁定单因素：普通 PLACE 的 Owner→Lane 准入已经持有 `ResolvedPlaceOrder`，Lane 完成后不再创建只含 7 个撮合字段的 `CoreMatchingOrder` 副本。`PlaceAdmissionEvent` 和 `CommandSlot` 直接交接解析订单；Matcher 增加读取 `ResolvedPlaceOrder` 的重载。替换、触发、批量和恢复路径继续使用原有 `CoreMatchingOrder`，不改变撮合证据、顺序提交、Lane 所有权或拒单语义。
+
+验证门槛：服务模块正确性测试全绿；固定单节点、1 matcher、4 lanes、128 symbols、window256、BUSY_SPIN、G1、MIXED batch20 口径下做短稳态复测，观察业务 ops、普通订单 p99、G1 暂停与分配率。若没有可重复的分配/吞吐收益或出现尾延迟回退，则回退该改动。
+
+结果：服务模块 963 项测试通过（1 项既有跳过）。固定本机单节点复测 15.024 秒，业务吞吐 `394,444.610/s`，Core 消息 `37,682.076/s`，fills `93,884.877/s`，`fundsDiff=0`、`unfinished=0`、完整生命周期校验通过。JMH GC 统计分配 `140.724 MB/s`，约 `1,509 B/business op`；历史 latency6-index profile 约 `1,989.65 B/business op`，方向上减少约 24%，但两次不是同一 OS 时间片，不能把差值作为严格因果增益。普通 PLACE p99 `11.526 ms`、p999 `18.219 ms`，仍未达到普通订单 p99≤5ms 目标；本改动只删除普通 PLACE 的撮合 DTO 副本，未解决 Owner FIFO/终态提交排队。JMH 结果已写入 `/tmp/core-place-reuse2/jmh.json`，节点和客户端进程均已退出，临时目录待本轮收尾清理。

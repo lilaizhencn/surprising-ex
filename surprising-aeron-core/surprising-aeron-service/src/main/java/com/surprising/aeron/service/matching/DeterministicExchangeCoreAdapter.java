@@ -5,6 +5,7 @@ import com.surprising.aeron.protocol.CoreBookLevelView;
 import com.surprising.aeron.protocol.PlaceOrderCommand;
 import com.surprising.aeron.protocol.ReservationKind;
 import com.surprising.aeron.service.state.CoreInstrumentState;
+import com.surprising.aeron.service.state.ResolvedPlaceOrder;
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.TradingCoreState;
 import com.surprising.aeron.service.state.LaneTopology;
@@ -247,6 +248,12 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
         return CoreMatchingResult.fromNative(placeNative(userId, command));
     }
 
+    /** Resolved ordinary PLACE path; the admission DTO already contains all matcher fields. */
+    public CoreMatchingResult place(long userId, ResolvedPlaceOrder command) {
+        if (command == null) throw new IllegalArgumentException("invalid resolved matcher command");
+        return CoreMatchingResult.fromNative(placeNative(userId, command));
+    }
+
     private exchange.core2.core.common.MatcherResult placeNative(long userId, CoreMatchingOrder command) {
         int symbolId = ensureSymbol(command.symbol());
         users.add(userId);
@@ -257,12 +264,43 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
                 orderType(command), symbolId, userId);
     }
 
+    private exchange.core2.core.common.MatcherResult placeNative(long userId, ResolvedPlaceOrder command) {
+        int symbolId = ensureSymbol(command.symbol());
+        users.add(userId);
+        return engine(symbolId).place(
+                commandScope.get().aeronTimestamp, command.orderId(), 0,
+                command.matchingPriceTicks(), command.matchingPriceTicks(), command.quantitySteps(),
+                command.side() == CoreOrderSide.BUY ? OrderAction.BID : OrderAction.ASK,
+                orderType(command.orderType(), command.timeInForce()), symbolId, userId);
+    }
+
     /** A single native placement produces its immutable result and recovery evidence once. */
     public CoreMatchingResult placeWithEvidence(
             int shardId, long coreSequence, java.util.UUID commandId,
             long instrumentChangeId, long aeronTimestamp, long userId, CoreMatchingOrder command) {
         if (shardId < 0 || shardId >= topology.matchingEngineCount() || command == null)
             throw new IllegalArgumentException("invalid native matcher command");
+        validateCommandEvidence(coreSequence, commandId, command.orderId(), instrumentChangeId, aeronTimestamp);
+        MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
+        try {
+            var result = placeNative(userId, command);
+            return bindNativeMatcherEvidence(shardId, coreSequence, commandId, command.orderId(),
+                    instrumentChangeId, aeronTimestamp, result);
+        } catch (RuntimeException exception) {
+            matcherFailure.compareAndSet(null, exception);
+            throw exception;
+        } finally {
+            scope.aeronTimestamp = 0;
+            scope.active = false;
+        }
+    }
+
+    /** Ordinary Lane admission already owns the resolved order; avoid rebuilding a matcher DTO. */
+    public CoreMatchingResult placeWithEvidence(
+            int shardId, long coreSequence, java.util.UUID commandId,
+            long instrumentChangeId, long aeronTimestamp, long userId, ResolvedPlaceOrder command) {
+        if (shardId < 0 || shardId >= topology.matchingEngineCount() || command == null)
+            throw new IllegalArgumentException("invalid resolved matcher command");
         validateCommandEvidence(coreSequence, commandId, command.orderId(), instrumentChangeId, aeronTimestamp);
         MatcherCommandScope scope = beginSynchronousCommand(aeronTimestamp);
         try {
@@ -578,11 +616,16 @@ public final class DeterministicExchangeCoreAdapter implements AutoCloseable {
     }
 
     private static OrderType orderType(CoreMatchingOrder command) {
-        if (command.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET) {
-            return command.timeInForce() == com.surprising.aeron.protocol.CoreTimeInForce.FOK
+        return orderType(command.orderType(), command.timeInForce());
+    }
+
+    private static OrderType orderType(com.surprising.aeron.protocol.CoreOrderType orderType,
+                                       com.surprising.aeron.protocol.CoreTimeInForce timeInForce) {
+        if (orderType == com.surprising.aeron.protocol.CoreOrderType.MARKET) {
+            return timeInForce == com.surprising.aeron.protocol.CoreTimeInForce.FOK
                     ? OrderType.FOK : OrderType.IOC;
         }
-        return switch (command.timeInForce()) {
+        return switch (timeInForce) {
             case IOC -> OrderType.IOC;
             case FOK -> OrderType.FOK;
             case GTC -> OrderType.GTC;

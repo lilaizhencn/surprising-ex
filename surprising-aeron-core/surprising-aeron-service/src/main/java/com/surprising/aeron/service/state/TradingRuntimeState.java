@@ -1990,7 +1990,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         return mask;
     }
 
-    public CoreMatchingOrder collectPlaceAdmission(PlaceAdmissionEvent event) {
+    public ResolvedPlaceOrder collectPlaceAdmission(PlaceAdmissionEvent event) {
         assertOwner();
         if (event == null || !event.complete()) return null;
         if (event.rejection() != null) return null;
@@ -2004,7 +2004,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         pendingReservations.indexPendingReservation(userId, orderId, event.coreSequence(),
                 Math.incrementExact(pendingReservations.totalPendingReservations));
         revision = Math.incrementExact(revision);
-        return event.matchingOrder();
+        return event.resolvedOrder();
     }
 
     public RuntimeTreasuryDelta collectMatcherSettlement(MatcherSettlementEvent event) {

@@ -7,6 +7,7 @@ import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.service.state.RuntimeFundsDelta;
 import com.surprising.aeron.service.state.RuntimeProjectionPoint;
 import com.surprising.aeron.service.state.PlaceAdmissionEvent;
+import com.surprising.aeron.service.state.ResolvedPlaceOrder;
 import com.surprising.aeron.service.state.LaneCancelEvent;
 import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import java.util.List;
@@ -46,6 +47,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     private Object continuation;
     private com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan;
     private long settlementApplyStartNanos;
+    /** 普通 PLACE 已在 Owner 解析，Lane 完成后直接复用该值，避免撮合命令副本。 */
+    private ResolvedPlaceOrder admittedPlaceOrder;
     private CoreMatchingOrder admittedMatchingOrder;
     private boolean matchingSubmitted;
     /** 跨分片清算撤单已进入异步协调队列，防止重复派发。 */
@@ -214,6 +217,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         settlementPlan = null;
         settlementApplyStartNanos = 0;
         admittedMatchingOrder = null;
+        admittedPlaceOrder = null;
         matchingSubmitted = false;
         crossShardCancellationStarted = false;
         clusterIndependent = false;
@@ -321,12 +325,14 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         continuationKind = ContinuationKind.PLACE_ADMISSION;
         continuation = event;
     }
-    void admissionCompleted(CoreMatchingOrder matchingOrder) {
-        if (matchingOrder == null || placeAdmission() == null || admittedMatchingOrder != null) {
+    void admissionCompleted(ResolvedPlaceOrder resolvedOrder) {
+        if (resolvedOrder == null || placeAdmission() == null || admittedPlaceOrder != null
+                || admittedMatchingOrder != null) {
             throw new IllegalStateException("invalid completed place admission");
         }
-        admittedMatchingOrder = matchingOrder;
+        admittedPlaceOrder = resolvedOrder;
     }
+    ResolvedPlaceOrder admittedPlaceOrder() { return admittedPlaceOrder; }
     CoreMatchingOrder admittedMatchingOrder() { return admittedMatchingOrder; }
     /** 沿用已完成冻结的不可变订单，触发续步不得再回读 Lane 的客户端订单索引。 */
     void triggerAdmission(CoreMatchingOrder order) {
@@ -381,6 +387,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         continuationKind = null;
         continuation = null;
         settlementPlan = null;
+        admittedPlaceOrder = null;
         admittedMatchingOrder = null;
         realtimeTakerOrder = null;
         deferredMatching = false;

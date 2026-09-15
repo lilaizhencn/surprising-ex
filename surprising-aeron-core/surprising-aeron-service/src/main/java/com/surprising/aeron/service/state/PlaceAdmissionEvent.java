@@ -1,6 +1,5 @@
 package com.surprising.aeron.service.state;
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
-import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.util.UUID;
@@ -33,7 +32,6 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     private LanePublication publication;
     private LanePublication publicationBuffer;
     private long identityAllocations;
-    private CoreMatchingOrder matchingOrder;
     private UserRuntime admittedUser;
     private OrderRuntime admittedOrder;
     private ReservationRuntime admittedReservation;
@@ -70,7 +68,6 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         this.assetId = assetId;
         this.laneId = laneId;
         this.runtime = runtime;
-        matchingOrder = null;
         admittedUser = null;
         admittedOrder = null;
         admittedReservation = null;
@@ -90,7 +87,6 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         identities = null;
         if (publication != null) publication.clear();
         publication = null;
-        matchingOrder = null;
         admittedUser = null;
         admittedOrder = null;
         admittedReservation = null;
@@ -117,8 +113,6 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
                 admittedUser = lane.users.get(userId);
                 admittedOrder = lane.orders.get(order.orderId());
                 admittedReservation = lane.reservations.get(order.orderId());
-                matchingOrder = new CoreMatchingOrder(order.orderId(), order.symbol(), order.side(),
-                        order.orderType(), order.timeInForce(), order.matchingPriceTicks(), order.quantitySteps());
                 if (publicationBuffer == null) publicationBuffer = new LanePublication();
                 publication = publicationBuffer;
                 publication.admissionSequence = coreSequence;
@@ -160,7 +154,6 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
         identities = null;
         if (publication != null) publication.clear();
         publication = null;
-        matchingOrder = null;
         admittedUser = null;
         admittedOrder = null;
         admittedReservation = null;
@@ -180,9 +173,11 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     public long orderId() { return order.orderId(); }
     public int assetId() { return assetId; }
     public long clientKey() { return preparedClientKey.key(); }
-    public CoreMatchingOrder matchingOrder() {
-        if (!complete() || matchingOrder == null) throw new IllegalStateException("place admission is not accepted");
-        return matchingOrder;
+    public ResolvedPlaceOrder resolvedOrder() {
+        if (!complete() || order == null || rejection != null) {
+            throw new IllegalStateException("place admission is not accepted");
+        }
+        return order;
     }
     UserRuntime admittedUser() {
         if (!complete() || admittedUser == null) throw new IllegalStateException("place admission is incomplete");
