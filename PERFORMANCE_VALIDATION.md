@@ -1985,10 +1985,12 @@ JFR 显示 Owner 的终态提交仍会在 `TerminalTombstoneStore` 对客户号�
 
 固定口径短端到端复测（G1、1 Matcher、4 Lane、128 symbols、window256、BUSY_SPIN、MIXED batch20，预热5s/测量15s）完整通过：`394,128.494 business/s`、`37,655.999 core/s`，`unfinished=0`、`fundsDiff=0`、`peakInFlight=256`，最差业务 p99 `18.251 ms`。与此前同口径 `394,444.610/s` 处于单轮波动范围内，不能把桶解链优化宣称为端到端吞吐提升或回退；本轮未开启 JFR，Lane 有效执行比约 `42.2%`，不作为三类线程饱和证据。原始目录 `/tmp/core-tombstone-bucket-20260916` 保留审计，节点与客户端均已退出。
 
+验证更正：该轮运行前未重新打包服务 JAR，数字来自旧构建，不能作为桶解链改动的端到端证据；目录保留仅供审计，后续已重新打包后复测。
+
 ### 2026-09-16：避免 Lane 重复注册 PositionIdentity
 
 JFR 的分配/调用栈显示，`RuntimeIdentityRegistry.retainPositionInLane` 每次结算都会对已经存在的 `PositionIdentity` 调用并发反向索引 `putIfAbsent`，产生重复哈希、装箱和写入竞争。`PositionEntry` 现在只在首次创建或并发首次观察时注册反向索引，后续 Lane 结算只读一次注册标记；释放、回滚和恢复会同步清除或恢复标记，快照格式和身份碰撞校验不变。该改动不移除必要的身份索引，不改变 Lane 所有权或引用计数。
 
-定向 `RuntimeIdentityRegistry`、结算复用和运行时状态回归通过；端到端 JFR 轮（同口径、预热5s/测量15s）`387,087.323 business/s`、Owner `97.61%`、Matcher `56.29%`、四 Lane 各约 `98.1%`，`clientPass=true`、`unfinished=0`、`fundsDiff=0`。该轮受 JFR 和短测波动影响，不能单独宣称吞吐提升；原始目录 `/tmp/core-tombstone-profile-20260916` 保留审计，节点与客户端均已退出。
+验证更正：以下最初 JFR/无 JFR 轮运行前均未重新打包服务 JAR，不能作为本改动性能证据，仅保留原始目录审计：JFR `387,087.323/s`（`/tmp/core-tombstone-profile-20260916`），无 JFR `370,482.873/s`、`401,000.707/s`（`/tmp/core-position-registration-20260916`、`/tmp/core-position-registration-rerun-20260916`）。
 
-随后无 JFR 同口径复测两轮为 `370,482.873/s` 与 `401,000.707/s`，均完整生命周期通过；均值 `385,741.790/s`，相对历史 `392,705.617/s` 约低 `1.8%`，在既有短测波动与 `5%` 回退门槛内。普通业务 p99 仍为约 `25.5–29.1ms`，本项优化没有解决 Owner 排队和 5ms 延迟目标。原始目录 `/tmp/core-position-registration-20260916`、`/tmp/core-position-registration-rerun-20260916` 保留审计，节点与客户端均已退出。
+重新打包 benchmarks 及依赖后，固定口径无 JFR 轮为 `408,925.621 business/s`、`39,063.307 core/s`，普通最差业务 p99 `16.343ms`，`clientPass=true`、`unfinished=0`、`fundsDiff=0`、`peakInFlight=256`。独立 JFR 轮为 `373,765.896 business/s`（JFR 开销）、Owner `93.09%`、Matcher `53.37%`、四 Lane 各约 `95.3%`；`retainPositionInLane` 不在热点方法表，`Long` 分配压力 `3.44%`、`ConcurrentHashMap.putVal` 分配压力 `3.65%`。JFR 轮完整性通过但 p99 `42.795ms`，不用于吞吐比较；原始目录 `/tmp/core-position-registration-built-20260916`、`/tmp/core-position-registration-built-profile-20260916` 保留审计，节点与客户端均已退出。
