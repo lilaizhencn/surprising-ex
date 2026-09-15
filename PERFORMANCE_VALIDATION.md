@@ -248,3 +248,66 @@ Client: -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Dsurprising.aeron.host
 | `.log` | 7832 | `d8b743af3aaafcb1eaae5c4376ede4df1caf2a335842d96224959a28706b2ef2` |
 
 清理：所有本轮 Maven/Surefire 进程已退出；已删除 295 个确认属于本轮且摘要一致的临时日志、线程栈、测试 XML/文本报告及临时清单。测试自身临时目录由夹具关闭清理；未创建 GCP 资源或 JFR/堆转储。以上路径仅作历史定位，构建产物保留。`git diff --check` 和暂存差异检查通过。
+
+
+## 2026-09-15：6ba31a05 本机短时单节点验证（采集计划）
+
+- 用户要求短时本机压测；当前 master `6ba31a05`，生产代码无未提交修改。对照 commit：不适用（仅验证当前 master）。目标参考：terminal business ops/s >=300000、普通下单 accepted→terminal p99<=5ms；错误/超时=0，accepted=terminal、unfinished/backlog=0、资金及状态核对通过。单次短样本不能作长稳或容量验收。
+- 环境：i9-9880H（8C/16T）、16GiB RAM、macOS 26.7 x86_64、HotSpot GraalVM JDK25.0.1、Maven3.9.16；可用磁盘459GiB。IDEA观测约121%CPU，WindowServer约25%，不停止用户程序；同机干扰限制比较有效性。
+- 真实单成员 Aeron（网络+Archive+Core）；LINEAR_PERPETUAL、MIXED、batch20、128 symbols、1000 retail users、4 Account Lane、1 Matcher；BUSY_SPIN Matcher/Lane，Aeron SHARED_NETWORK+YIELDING。G1，Core512m/1536m、client128m/512m。沿用现有驱动初始化与做市，不改业务策略。
+- 异步发压，global/session/Owner in-flight=256，seed25620；30s内部预热+30s稳定测量+驱动排空，plain和JFR各1轮。达到256后受背压，不宣称open-loop计划到达率；JMH单fork/线程、单次长业务调用，业务主吞吐使用稳定窗口终态计数，不使用JMH调用次数/s。
+- plain提供主结果；同条件JFR单独归因，使用owner-commit-profile.jfc（ExecutionSample20ms，线程CPU/分配统计1s、TLAB/非TLAB、GC/锁/IO等），每进程256MiB上限；脚本保留NMT、线程栈、测量时间与Lane工作指标。JIT稳定性、排空、资金和完成性按输出核查；未覆盖项记缺口。短时不测长稳/泄漏，也不启动GCP。
+- 命令：`ASYNC_RUN_ID=20260915-short-plain ASYNC_ARTIFACT_DIR=/tmp/aeron-short-20260915-plain ASYNC_WINDOWS=256 ASYNC_WARMUP_SECONDS=30 ASYNC_MEASURE_SECONDS=30 ASYNC_ONLY_STAGE=end_to_end ASYNC_COLLECTOR=G1 ASYNC_ENABLE_JFR=false bash surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh`。第二轮同参数，RUN_ID/ARTIFACT_DIR后缀改为profile，`ASYNC_SKIP_BUILD=true ASYNC_ENABLE_JFR=true`。
+
+### 短时结果及归因
+
+**结论：正确性通过；未达到30万业务ops/s及下单p99<=5ms参考线。性能为部分验证，不能推断改造前后的回退幅度。** 未修改业务策略或生产代码。
+
+| 指标 | plain（主结果） | JFR（归因轮） |
+|---|---:|---:|
+| 测量时间（北京时间，驱动含排空） | 18:05:35.673–18:06:05.690 | 18:07:36.644–18:08:06.660 |
+| 稳定阶段前两个10秒区间 business ops/s | 175,995.932 / 180,521.884 | 154,681.399 / 166,767.399 |
+| 驱动汇总 business ops/s（含排空） | 179,585.522 | 164,551.131 |
+| terminal/accepted business operations | 5,390,592 / 5,390,592 | 4,939,008 / 4,939,008 |
+| terminal/accepted Core messages | 516,864 / 516,864 | 473,856 / 473,856 |
+| Core messages/s / fills/s | 17,219.128 / 42,727.999 | 15,787.288 / 39,148.380 |
+| unfinished / 期末backlog / 峰值在途 | 0 / 0 / 256 | 0 / 0 / 256 |
+| Lane实际执行时间占比（4 Lane均值） | 25.08% | 25.63% |
+
+plain业务延迟（客户端调用commandAsync前→收到终态；**不含256窗口外的等待，不是服务端accepted时间戳**；未校正coordinated omission）：
+
+| 业务 | 请求数 | 业务项数 | p50 / p99 / p99.9 / max（ms） |
+|---|---:|---:|---|
+| PLACE_ORDER | 128256 | 128256 | 13.238 / 26.296 / 45.711 / 53.805 |
+| CANCEL_ORDER | 128256 | 128256 | 12.369 / 23.396 / 41.582 / 50.036 |
+| PLACE_ORDER_BATCH | 192384 | 3847680 | 15.794 / 30.818 / 48.037 / 61.046 |
+| CANCEL_ORDER_BATCH | 64128 | 1282560 | 18.923 / 37.781 / 48.463 / 52.297 |
+| APPLY_MARK_PRICE | 3840 | 3840 | 12.509 / 46.366 / 52.527 / 53.510 |
+
+- 完成性：两轮mixedVerify=PASS、fundsDiff=0，population/hftPositions/reservations/loss核对通过，客户端退出码0；plain总用户1385（retail1000）、128 symbols。plain队列高水位Matcher128/completion128/context139、Lane=[56,56,54,55]，仅为全轮峰值，不能证明持续队列积压。
+- 稳定吞吐口径缺口：现有runFor在drain后记录elapsed与measurementEnd，排空时间未单列。因此主判断使用前两个10秒progress区间；最后30秒汇总仅作含排空结果。脚本saturationGate的end_to_end PASS只验证在途窗口，不代表Matcher/Lane饱和。排空时长、背压时间比例、分段入口→accepted延迟、逐秒队列深度未采齐，不能作为完整容量验收。
+- JFR按测量起止epoch过滤：Owner平均97.93%单核，Matcher55.62%，Lane约98.2%单核但实际执行时间仅25.3%–26%左右。Lane ExecutionSample中SettlementLaneWorker.run自耗占75%–89%，符合busy-spin空转；不能把Lane CPU高当作业务饱和。Matcher只有31个ExecutionSample，具体Matcher方法排名证据较弱。
+- Owner稳定窗口1074个ExecutionSample：CommandResultLedger.find/findInsert自耗87+48个（12.57%）；finishOrderBatch包含144个（13.41%），storeOwnedResult96个（8.94%），LanePublishedMap.applyPublished88个（8.19%）。包含栈会重叠、受栈深限制，不能相加。当前证据支持Owner的结果索引、批终态收尾和状态发布仍是主要受限路径；下一次最小验证应针对这条链路减少工作，并保持相同负载核对Owner样本和下游推进。
+- 发压端JMH业务线程98.34%单核，reap自耗1003/1219样本（82.28%）；它主要轮询尚未完成的请求，CPU高不能单独证明发压端先受限。没有提交率、服务队列时间序列来完全排除客户端约束。
+- 分配：ThreadAllocationStatistics在稳定窗口内每线程首尾累计字节差/时间后求和，Core约336.41 MB/s，折合2044 B/business op；客户端fork约201.76 MB/s，折合1226 B/op，单独统计。Core线程分配Matcher81.78、Owner51.81、每Lane46.35–46.36 MB/s。ObjectAllocationSample加权主要为OrderRuntime、byte[]、ReservationRuntime、long[]、MatcherResult、Long；不是精确对象数/op。站点包括decodePlaceOrder、CoreMatchingResult.classify、OrderRuntime构造、preparedOrder及批响应编码。
+- GC/JIT：稳定窗口Core34次GC，暂停合计209.29ms，单次GC暂停合计最大11.47ms；client78次，暂停75.49ms，最大1.57ms。Core仍有204次Compilation、client93次，30秒预热未证明所有编译稳定。JFR轮吞吐低8.37%，包含采样开销及短轮波动，不能全归因于profiler。
+- 系统：测量窗口ps样本plain Core平均933%CPU/client357%CPU/IDEA63%CPU，profile分别929%/365%/66%；用户IDE及系统线程仍在争用CPU。plain/profile Core峰值RSS约1.79/1.80GiB。vm_stat结束swapins/swapouts均0。无容器配额，未测热节流、上下文切换或精确IO阻塞归因。
+- NMT（启动后基线→结束，含初始化）：plain reserved3,131,338KB(+14,738)、committed717,142KB(+49,150)；profile reserved3,156,041KB(+8,584)、committed740,737KB(+45,492)。短轮不能证明无内存泄漏。
+- 本轮沿用此前1320项正确性/快照重放结果；真实压测仅做驱动资金与状态核对，未单独重启真实Cluster进行Archive/snapshot恢复。未做长稳、GCP或第二轮plain重复，不能给置信区间。
+
+采样证据：Core PID47508、JMH runner47522、client fork47527，plain对应46875/46890/46901。Core JFR105s、ExecutionSample18540、ObjectAllocationSample37720、NewTLAB37724、OutsideTLAB139、ThreadAllocationStatistics2694；client fork JFR101s、ExecutionSample3089、ObjectAllocationSample20835。三份录制DataLoss均0。原始JFR覆盖初始化/预热/测量/核对；上述归因只取约30秒测量窗口。已执行jfr summary、thread-cpu-load/hot-methods/allocation-by-class/site/thread/contention/gc/safepoints等view，并用jfr print --json按epoch过滤汇总。
+
+原始关键产物（清理后仅作历史定位；根目录为/tmp/aeron-short-20260915-{plain,profile}/window-256/end_to_end）：
+
+| 文件 | 字节 | SHA-256 |
+|---|---:|---|
+| plain/metrics.json | 2988 | `989fa92dd52547c0655460aa45e8e3abb417056873e9bb11c06ee06c1e70ea32` |
+| profile/node.jfr | 106694438 | `37344ebd64f4f14135f6efc4081c9e9618b8971d2ca6ace4e6948cbd41dfd515` |
+| profile/client-47522.jfr | 7351560 | `102d52487a514747f5ad66cf8df03ad5e94c41b15d7b4c5e6cbf9cc67717487a` |
+| profile/client-47527.jfr | 78596303 | `ebd1b9268b551ec5f92bcdefde8d340ac9ffc1ce5fb5235dfb0f69834e161fb6` |
+| profile/metrics.json | 3121 | `870385c26c70c00cce5f9f2cdad5f8062bfc69e08fb90793bd8aae55e1f34bf6` |
+| profile/window-analysis.json | 68219 | `57cb63178bcee184b8fd42bd339c494c2b18bec9f8a7a061611c1091d5b7061d` |
+
+38个关键产物的路径/大小/摘要清单SHA-256：`d381580da36239a5bf9ceedddb4a841b95fe857b6ad29de8bdde817c31ce7211`。
+
+清理完成：两轮Core及客户端JVM、系统采样和分析进程均已退出；删除本轮临时集群data/Archive/media、JFR、日志、汇总及分析脚本，共104个文件。未创建云资源。关键参数、结果及摘要已入档，上述临时路径不再可访问。

@@ -71,3 +71,10 @@ mvn -q -pl surprising-aeron-core/surprising-aeron-benchmarks -am -Dtest=LinearPe
 基准驱动测试仅验证业务结果，没有启动 JMH 计时或吞吐验收。未测 JFR/分配率、单节点持续饱和吞吐、长稳和 GCP；不推断性能提升。其余外围服务未受本次 Core 内部交接变更影响，未启动 wallet、Kafka 等完整业务环境。上述“尚未完成”的架构迁移不因正确性测试通过而视为完成。
 
 每轮失败及清理记录见根目录 `PERFORMANCE_VALIDATION.md` 的 2026-09-15 正确性验证条目。
+
+
+## 短时性能诊断（2026-09-15）
+
+按用户追加要求完成真实本机单成员Aeron短测：1 Matcher、4 Lane、BUSY_SPIN、G1、128 symbols、MIXED batch20、在途256，plain/JFR各预热30s+测量30s。plain前两个稳定区间约17.6/18.1万business ops/s，下单p99=26.296ms；驱动含排空汇总17.96万。完成性与资金核对通过，未达30万和5ms参考线。
+
+采样窗口Owner约98%单核、Matcher56%、Lane实际业务执行约25%；Owner仍以结果索引、批量终态及状态发布为主要受限路径。Core分配估算336MB/s、约2.0KB/business op。短轮受IDEA和JIT影响，不证明性能回退或最终容量；详见根目录PERFORMANCE_VALIDATION.md新增记录。未做长稳、GCP，前述架构剩余项不变。
