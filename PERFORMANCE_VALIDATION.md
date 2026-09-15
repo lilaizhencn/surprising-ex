@@ -1960,3 +1960,5 @@ profile：
 验证：服务及依赖模块全量正确性回归 `964` 项通过，失败/错误 `0`，既有跳过 `1`；其中 `ClusterCommandWindowTest` `20` 项、`OrderClientKeyIndexTest` `2` 项通过。该轮尚未执行端到端吞吐，避免把索引微优化误报成性能收益；下一轮继续使用固定单节点、1 Matcher、4 Lane、128 symbols、window256、BUSY_SPIN、G1、MIXED batch20 口径复测 Owner CPU、分配和 p99。
 
 结论：保留该无语义变化的探测合并。它只减少热路径哈希访问和修复完成索引哨兵配置，不能单独证明吞吐提升；端到端主要瓶颈仍需由固定窗口 JFR 与分配站点继续量化。
+
+短端到端复测（同一工作树、G1、1 Matcher、4 Lane、128 symbols、window256、BUSY_SPIN、MIXED batch20，预热5s/测量15s）两轮：`377,610.890 business/s` 与 `399,002.158 business/s`，均 `unfinished=0`、`fundsDiff=0`、`peakInFlight=256`、`mixedCapacity=PASS`；均值 `388,306.524/s`，相对已有同口径 `392,705.617/s` 约低 `1.1%`，低于 `5%` 回退门槛。短测尾延迟受调度抖动影响，普通 PLACE 两轮 p99 为 `11.952 ms`、`13.148 ms`，尚不能作为 p99≤5ms 验收结果。原始目录 `/tmp/core-index-probe-20260916`、`/tmp/core-index-probe-rerun-20260916` 保留审计；节点与客户端均已退出。
