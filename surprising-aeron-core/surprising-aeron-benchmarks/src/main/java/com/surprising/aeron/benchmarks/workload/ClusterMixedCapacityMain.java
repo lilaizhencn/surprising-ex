@@ -608,7 +608,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         System.out.printf("adminActionRetries=%d%n",client.adminActionRetries()-adminRetriesBefore);
         System.out.printf(Locale.ROOT,"mixedCapacity=PASS elapsedSeconds=%.3f terminalBusinessOperations=%d offeredBusinessOperations=%d terminalCoreMessages=%d offeredCoreMessages=%d businessOpsPerSec=%.3f coreMessagesPerSec=%.3f fills=%d fillsPerSec=%.3f queries=%d unfinished=0 peakInFlight=%d measuredCycles=%d totalCycles=%d triggerExecutions=%d%n",
                 seconds,terminal,offered,coreTerminal,coreOffered,terminal/seconds,coreTerminal/seconds,fills,fills/seconds,queries,peak,measuredCycles,totalCycles,triggerExecutions);
-        stats.forEach((type,s)->System.out.printf(Locale.ROOT,"business=%s items=%d requests=%d p50us=%d p90us=%d p95us=%d p99us=%d p999us=%d maxus=%d%n",type,s.items,s.latency.getTotalCount(),s.latency.getValueAtPercentile(50)/1000,s.latency.getValueAtPercentile(90)/1000,s.latency.getValueAtPercentile(95)/1000,s.latency.getValueAtPercentile(99)/1000,s.latency.getValueAtPercentile(99.9)/1000,s.latency.getMaxValue()/1000));
+        stats.forEach((type,s)->System.out.printf(Locale.ROOT,"business=%s items=%d requests=%d p50us=%d p90us=%d p95us=%d p99us=%d p999us=%d maxus=%d meanus=%.3f%n",type,s.items,s.latency.getTotalCount(),s.latency.getValueAtPercentile(50)/1000,s.latency.getValueAtPercentile(90)/1000,s.latency.getValueAtPercentile(95)/1000,s.latency.getValueAtPercentile(99)/1000,s.latency.getValueAtPercentile(99.9)/1000,s.latency.getMaxValue()/1000,s.latency.getMean()/1000));
     }
     private static final class Stats {
         long items;final Histogram latency=new Histogram(TimeUnit.MINUTES.toNanos(1),3);

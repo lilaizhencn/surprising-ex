@@ -232,7 +232,11 @@ public final class SurprisingClusteredService implements ClusteredService {
             // 已确定的提交前缀不变；未完成时仍可准入与在途命令无依赖的后续订单。
             if (drainingSize == 0 && commandWindow.size() != 0) beginCommandPrefix();
             // 本轮未收到完成时仍准入独立命令；不为每个新准入项重跑整套完成收集。
-            if (drainingSize != 0 && !awaitingCompletion) awaitingCompletion = !pollCommandPrefix();
+            if (drainingSize != 0 && !awaitingCompletion) {
+                // Retire ready results before adding more work; the existing turn budget bounds this drain.
+                if (pollCommandPrefix()) continue;
+                awaitingCompletion = true;
+            }
             if (commandWindow.size() == commandWindow.capacity()) return;
             if (activeControl != null) {
                 if (!pollControl()) return;

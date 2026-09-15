@@ -5,6 +5,49 @@ import java.util.concurrent.atomic.LongAdder;
 
 final class CoreMatchingPhaseMetrics {
 
+    @jdk.jfr.Name("surprising.SettlementLatency")
+    @jdk.jfr.Label("Matcher publication through ordered commit")
+    @jdk.jfr.Category("Surprising Core")
+    @jdk.jfr.StackTrace(false)
+    static final class SettlementLatency extends jdk.jfr.Event {
+        private static final jdk.jfr.EventType TYPE = jdk.jfr.EventType.getEventType(SettlementLatency.class);
+        public String commandType;
+        public long sequence;
+        public int lanes;
+        public long matcherToLastLaneStartNanos;
+        public long maxLaneExecutionNanos;
+        public long matcherToLanesCompleteNanos;
+        public long lanesCompleteToOwnerNanos;
+    }
+
+    static SettlementLatency beginSettlement(CommandSlot pending, long sequence) {
+        if (pending == null) return null;
+        var settlement = pending.orderBatch == null ? pending.settlementEvent() : pending.orderBatch.settlementEvent;
+        if (settlement == null || !settlement.complete() || settlement.matcherPublishedNanos() == 0) return null;
+        if (!SettlementLatency.TYPE.isEnabled()) return null;
+        long observed = System.nanoTime();
+        var event = new SettlementLatency();
+        event.commandType = pending.command().header().messageType().name();
+        event.sequence = sequence;
+        long mask = settlement.completedLaneMask();
+        if (mask == 0) return null;
+        event.lanes = Long.bitCount(mask);
+        long lastStart = Long.MIN_VALUE, lastFinish = Long.MIN_VALUE;
+        while (mask != 0) {
+            int lane = Long.numberOfTrailingZeros(mask);
+            mask &= mask - 1;
+            long start = settlement.laneStartedNanos(lane), finish = settlement.laneFinishedNanos(lane);
+            lastStart = Math.max(lastStart, start);
+            lastFinish = Math.max(lastFinish, finish);
+            event.maxLaneExecutionNanos = Math.max(event.maxLaneExecutionNanos, finish - start);
+        }
+        event.matcherToLastLaneStartNanos = lastStart - settlement.matcherPublishedNanos();
+        event.matcherToLanesCompleteNanos = lastFinish - settlement.matcherPublishedNanos();
+        event.lanesCompleteToOwnerNanos = observed - lastFinish;
+        event.begin();
+        return event;
+    }
+
     private final Phase prepare = new Phase();
     private final Phase exchange = new Phase();
     private final Phase apply = new Phase();

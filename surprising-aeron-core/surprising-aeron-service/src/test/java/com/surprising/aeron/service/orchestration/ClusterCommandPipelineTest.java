@@ -23,6 +23,40 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class ClusterCommandPipelineTest {
+    @Test
+    @org.junit.jupiter.api.condition.EnabledIfSystemProperty(named = "core.settlementLatencyDiagnostics", matches = "true")
+    void sampledSettlementTimesSurviveEventReuseAndCoverOrdinaryAndBatchOrders() throws Exception {
+        var path = java.nio.file.Files.createTempFile("settlement-latency-test-", ".jfr");
+        try (var recording = new jdk.jfr.Recording()) {
+            recording.enable(CoreMatchingPhaseMetrics.SettlementLatency.class);
+            recording.start();
+            for (boolean batch : new boolean[]{false, true}) {
+                try (Fixture live = new Fixture(ProductLine.LINEAR_PERPETUAL)) {
+                    live.setup();
+                    for (int i = 0; i < 256; i++) {
+                        long id = 1000 + i * 20L;
+                        live.apply(batch ? live.placeBatch(11, "BTC-USDT", id)
+                                : live.place(11, "BTC-USDT", id, 80, 1, CoreOrderSide.BUY));
+                        live.apply(batch ? live.cancelBatch(11, id) : live.cancel(11, id));
+                    }
+                }
+            }
+            recording.stop(); recording.dump(path);
+            var events = jdk.jfr.consumer.RecordingFile.readAllEvents(path).stream()
+                    .filter(e -> e.getEventType().getName().equals("surprising.SettlementLatency")).toList();
+            assertThat(events).extracting(e -> e.getString("commandType"))
+                    .contains("PLACE_ORDER", "PLACE_ORDER_BATCH");
+            for (var event : events) {
+                assertThat(event.getInt("lanes")).isPositive();
+                for (String field : List.of("matcherToLastLaneStartNanos", "maxLaneExecutionNanos",
+                        "matcherToLanesCompleteNanos", "lanesCompleteToOwnerNanos"))
+                    assertThat(event.getLong(field)).as(field).isBetween(0L, TimeUnit.SECONDS.toNanos(5));
+                assertThat(event.getLong("matcherToLanesCompleteNanos"))
+                        .isGreaterThanOrEqualTo(event.getLong("matcherToLastLaneStartNanos"));
+            }
+        } finally { java.nio.file.Files.deleteIfExists(path); }
+    }
+
     @ParameterizedTest
     @EnumSource(ProductLine.class)
     void restingOrdersKeepTheirAdmissionVersionThroughOrderedCommit(ProductLine product) throws Exception {

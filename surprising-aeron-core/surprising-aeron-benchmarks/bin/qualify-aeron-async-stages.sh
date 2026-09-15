@@ -96,7 +96,7 @@ start_node() {
     -Dsurprising.aeron.core.threading-mode=SHARED_NETWORK -Dsurprising.aeron.service.idle-strategy=YIELDING
     "-Dsurprising.aeron.data-dir=${dir}/data" "-Daeron.dir=${dir}/aeron" "-Djava.io.tmpdir=${dir}/tmp")
   if [[ "${ENABLE_JFR}" == true ]]; then
-    args+=("-XX:StartFlightRecording=settings=${PROFILE},filename=${dir}/node.jfr,maxsize=256m,dumponexit=true")
+    args+=(-Dcore.settlementLatencyDiagnostics=true "-XX:StartFlightRecording=settings=${PROFILE},filename=${dir}/node.jfr,maxsize=256m,dumponexit=true")
   fi
   args+=(-cp "${SERVICE_JAR}" com.surprising.aeron.service.cluster.SurprisingClusterNode)
   printf '%q ' "${JAVA}" "${args[@]}" > "${dir}/node.command"; printf '\n' >> "${dir}/node.command"

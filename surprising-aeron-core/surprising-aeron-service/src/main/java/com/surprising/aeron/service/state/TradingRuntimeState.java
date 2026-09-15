@@ -1266,8 +1266,8 @@ public final class TradingRuntimeState implements AutoCloseable {
                 targetReservations.remove(orderId);
 
             });
-            removedOrderRoutes.clear();
-            removedReservationRoutes.clear();
+            if (!removedOrderRoutes.isEmpty()) removedOrderRoutes.clear();
+            if (!removedReservationRoutes.isEmpty()) removedReservationRoutes.clear();
         }
 
         void commitTerminalToOwner(TradingRuntimeState state, int laneId,
@@ -1331,8 +1331,8 @@ public final class TradingRuntimeState implements AutoCloseable {
                 removedOrderRoutes.forEach(orderId -> state.publishedOrders.remove(orderId));
                 removedReservationRoutes.forEach(orderId -> state.publishedReservations.remove(orderId));
             }
-            removedOrderRoutes.clear();
-            removedReservationRoutes.clear();
+            if (!removedOrderRoutes.isEmpty()) removedOrderRoutes.clear();
+            if (!removedReservationRoutes.isEmpty()) removedReservationRoutes.clear();
             state.changedOrders.adopt(laneId, orders);
             state.changedPositions.adopt(laneId, positions);
         }
@@ -1369,8 +1369,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             positions.clear();
             liquidations.clear();
             riskSnapshots.clear();
-            removedOrderRoutes.clear();
-            removedReservationRoutes.clear();
+            if (!removedOrderRoutes.isEmpty()) removedOrderRoutes.clear();
+            if (!removedReservationRoutes.isEmpty()) removedReservationRoutes.clear();
         }
 
     }

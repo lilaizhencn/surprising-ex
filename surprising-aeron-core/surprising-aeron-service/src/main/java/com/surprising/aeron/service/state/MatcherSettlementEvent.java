@@ -10,6 +10,15 @@ import java.lang.invoke.VarHandle;
  * Mutable completion state is isolated from the fact payload and is only used by the owner coordinator.
  */
 public final class MatcherSettlementEvent implements SettlementLaneWorker.Command {
+    /** Diagnostic only: no clocks or additional objects on the default trading path. */
+    public static final boolean LATENCY_DIAGNOSTICS = Boolean.getBoolean("core.settlementLatencyDiagnostics");
+    private long matcherPublishedNanos;
+
+    public long matcherPublishedNanos() { return matcherPublishedNanos; }
+    // Read only after complete(): the Lane completion acquire protects these padding slots.
+    public long laneStartedNanos(int laneId) { return completedLanes[laneId * CACHE_LINE_LONGS + 1]; }
+    public long laneFinishedNanos(int laneId) { return completedLanes[laneId * CACHE_LINE_LONGS + 2]; }
+
     public interface MatcherCompletionRoute {
         void releaseMatcherSubmission(int matcherShard);
     }
@@ -311,6 +320,9 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         TradingRuntimeState completionRuntime = runtime;
         long completionLanes = routedLaneMask;
         releaseMatcherCompletionBeforeSignal();
+        // Deterministic ~1/64 sampling; use existing per-Lane cache-line padding for times.
+        if (LATENCY_DIAGNOSTICS && (Long.hashCode(directCoreSequence * 0x9e3779b97f4a7c15L) & 63) == 0)
+            matcherPublishedNanos = System.nanoTime();
         // 最后一次访问事件：Lane 观察到 ready 后可能立即完成，Owner 随即复用事件。
         directPublished = true;
         completionRuntime.signalDirectSettlement(completionLanes);
@@ -546,12 +558,17 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         int laneId = lane.laneId();
         TradingRuntimeState completionRuntime = runtime;
         long completionSequence = plan.coreSequence();
-        completionRuntime.recordMatcherLaneOperation(lane, System.nanoTime() - startedNanos);
+        long finishedNanos = System.nanoTime();
+        completionRuntime.recordMatcherLaneOperation(lane, finishedNanos - startedNanos);
         int completionOffset = laneId * CACHE_LINE_LONGS;
         if ((long) LONGS.getAcquire(completedLanes, completionOffset) != 0) {
             throw new IllegalStateException("account lane completed the same matcher fact twice");
         }
         boolean directCompletion = direct;
+        if (LATENCY_DIAGNOSTICS && matcherPublishedNanos != 0) {
+            completedLanes[completionOffset + 1] = startedNanos;
+            completedLanes[completionOffset + 2] = finishedNanos;
+        }
         LONGS.setRelease(completedLanes, completionOffset, 1L);
         if (directCompletion) completionRuntime.publishDirectMatcherSettlementReady(laneId);
         else completionRuntime.publishMatcherSettlementReady(laneId, completionSequence);
@@ -708,6 +725,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     }
 
     private void resetCompletions(int laneCount) {
+        matcherPublishedNanos = 0;
         observedCompletedLaneMask = 0;
         int length = Math.multiplyExact(laneCount, CACHE_LINE_LONGS);
         if (completedLanes == null || completedLanes.length != length) completedLanes = new long[length];

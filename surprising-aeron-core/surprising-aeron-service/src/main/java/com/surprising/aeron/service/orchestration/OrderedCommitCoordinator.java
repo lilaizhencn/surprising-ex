@@ -99,6 +99,17 @@ final class OrderedCommitCoordinator {
     public CoreResponse completeMatching(long sequence,
                                   com.surprising.aeron.service.matching.CoreMatchingResult matchingResult,
                                   long clusterTimestamp, long clusterPosition) {
+        if (!com.surprising.aeron.service.state.MatcherSettlementEvent.LATENCY_DIAGNOSTICS)
+            return completeMatchingCommand(sequence, matchingResult, clusterTimestamp, clusterPosition);
+        owner.assertOwner();
+        var timing = CoreMatchingPhaseMetrics.beginSettlement(owner.pendingMatching.get(sequence), sequence);
+        CoreResponse response = completeMatchingCommand(sequence, matchingResult, clusterTimestamp, clusterPosition);
+        if (timing != null && response != null) { timing.end(); timing.commit(); }
+        return response;
+    }
+
+    private CoreResponse completeMatchingCommand(long sequence, CoreMatchingResult matchingResult,
+                                                long clusterTimestamp, long clusterPosition) {
         owner.assertOwner();
         CommandSlot pending = owner.pendingMatching.get(sequence);
         if (pending == null || matchingResult == null) return null;

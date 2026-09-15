@@ -130,3 +130,13 @@ mvn -q -pl surprising-aeron-core/surprising-aeron-benchmarks -am -Dtest=LinearPe
 `CoreMessageFlyweightDecoder`从Aeron借用缓冲复制一份所属报文仍保留，因为Owner排队和后续Lane执行会超过回调生命周期；直接引用可复用的Aeron缓冲会读到被覆盖的数据。`ResolvedPlaceOrder`还承载命令当时的价格/费用决策，不能只因它是中间对象就删掉。
 
 本批1268项测试通过，含六产品线执行、资金与恢复。无采样253547业务ops/s，下单p99 18.235ms；JFR约1996B/business op，整体分配没有明显下降。该MIXED负载没有替换/改单/转账主负载，局部解码成本见验证文档JMH表。Owner解码、索引和终态发布仍是后续重点；系统swap-in及Owner类加载IO使本轮不作为正式容量验收。
+
+## p99分段定位与空表清理（2026-09-15）
+
+业务路径未新增状态机或协调：Lane修改资源→完成发布→Owner有序提交。`LaneDelta`路由删除集合和`TreasuryRuntime.clearChangedKeys`跳过空容器的整表清空；非空照常清理，保留容量，不额外引入压缩、复制或generation状态。
+
+为区分排队和执行，JFR轮开启`core.settlementLatencyDiagnostics`，默认关闭。约1/64直接结算事件记录Matcher发布时间，Lane时间复用完成标记的cache-line padding；Owner完成acquire后读取时间，复用现有指标类中的嵌套JFR事件记录提交耗时。新增一个池化事件long字段和一种仅诊断使用的JFR事件，不参与业务决策、提交顺序或恢复；关闭时不创建逐命令诊断对象。不开JFR也不会创建采样事件。
+
+采样范围仅Matcher发布→各Lane完成→Owner该次提交。未包含网络/Owner准入/Matcher前排队或响应出口，不把这些缺口归零；逐项异步批处理不作为完整批时延样本。最长Lane排队和执行可能来自不同Lane，不能相加。基准从已有直方图输出meanus，用请求数加权和Core消息速率估算在途规模，不把business ops和Core messages混用。
+
+保留`SurprisingClusteredService.progressCommandsInScope`的有界就绪提交优先：有结果先按序提交，没有结果再继续独立命令准入；既有64工作上限、控制fence和全局提交顺序不变。无采样吞吐24.59→34.41万business ops/s，普通下单p99 19.283→14.295ms；独立JFR批量等待Owner p99 7.850→1.438ms。1270项测试通过。5ms目标尚未达到，分配仍约2002B/业务操作；前置准入/传输/响应出口尚未细分，完整限制与原始证据摘要见PERFORMANCE_VALIDATION.md。

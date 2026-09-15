@@ -14,6 +14,23 @@ import org.junit.jupiter.api.Test;
 class RuntimeTreasuryDeltaTest {
 
     @Test
+    void clearingTwicePreservesFundsAndCapturesTheNextBeforeValue() {
+        var treasury = new TreasuryRuntime();
+        treasury.setFee(7, 100);
+        treasury.setFundingSettlement(8, 11);
+        treasury.setLifecycleSettlement(9, 12);
+        treasury.clearChangedKeys(); treasury.clearChangedKeys();
+        assertThat(treasury.fee(7)).isEqualTo(100);
+        assertThat(treasury.changedAssets().isEmpty()).isTrue();
+        assertThat(treasury.changedFundingSymbols().isEmpty()).isTrue();
+        assertThat(treasury.changedLifecycleSymbols().isEmpty()).isTrue();
+        assertThat(treasury.patchAssetBefore(7)).isNull();
+        treasury.setFee(7, 200);
+        assertThat(treasury.patchAssetBefore(7)).isNotNull();
+        assertThat(treasury.changedAssets().contains(7)).isTrue();
+    }
+
+    @Test
     void everyTreasurySubledgerContributesToTheBusinessStateHash() {
         CoreTreasuryState empty = CoreTreasuryState.empty();
         Set<Long> hashes = Set.of(

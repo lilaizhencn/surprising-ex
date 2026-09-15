@@ -911,3 +911,472 @@ Total: reserved=3172560KB, committed=733924KB
 | /tmp/core-decode4-bench-tests.log | 49743 | `1508e01a9d4a0ef40f48d7fe46625c811823dc55e467d2a37db2fe349387d519` |
 
 清理完成：本轮JVM、系统采样、JFR分析与微基准进程均退出；删除本轮临时集群data/Archive/media、JFR、日志、分析脚本及测试报告，共393个文件；路径/大小/摘要清单SHA-256 `030b82f66a3f33cad7348e40897b9e538c6874ff5fad6ce9fb45dc4edbd37308`。构建产物保留，未创建云资源。
+
+## 2026-09-15：p99分段定位与Owner空表清理（计划）
+
+- 当前master基础4171b028；对照commit不适用（仅验证当前master）。已有证据：约25万business ops/s实际约2.4万Core消息/s，256全局窗口，Owner约98%单核；GC/客户端safepoint可超过5ms。不能把业务ops直接用于估计单条请求排队，也不能仅凭CPU排名定位p99。
+- 业务改动：LaneDelta路由删除集合、Treasury三类变更集合/三类before表为空时不再整表clear；非空仍清理，容量和资金/发布/恢复语义不变，无新业务状态或阶段。
+- 诊断：core.settlementLatencyDiagnostics默认false；JFR轮启用。Matcher按序号混合hash约1/64采样发布时刻，Lane复用完成标记cache-line padding记录开始/完成；Owner确认完整完成后生成surprising.SettlementLatency JFR事件，记录Matcher→最后Lane开始、最长Lane执行、Matcher→全部Lane完成、全部Lane完成→Owner进入提交、Owner本次提交耗时。只覆盖直接结算普通单/整批事件，不覆盖逐项异步批处理全部生命周期、接入/准入/Matcher之前或响应出口；跨Lane最长等待与最长执行可能不是同一个Lane，不能相加。纳秒来自同一JVM单调时钟；采样对象只在诊断开启且JFR启用时创建，不作为业务状态。
+- 基准追加每种业务meanus，来源现有Histogram，无热路径新时钟/队列；用请求加权均值与Core消息速率说明排队规模，仅Little定律近似，不能把不同阶段p99相减。
+- 首次编译发现诊断访问包私有routedLaneMask，已改用完成后公开completedLaneMask，未扩大路由API。修复后精确测试通过，新增JFR普通/批量事件复用时序测试（显式开启诊断）、Treasury连续清理仍保留资金及后续变更测试。随后完整service（诊断开启）及基准驱动测试；关闭诊断路径通过单节点plain轮验证。
+- 验收参考：持续终态>=300000业务ops/s、普通下单p99<=5ms，错误/超时0，offered=terminal、unfinished0、资金差0；不足标失败/部分验证，系统swap/Owner同步IO不作严格容量通过。假设空表跳过减少Owner清理工作，尾延迟是否改善以新证据为准；不预期小改动独立消除GC与全部排队。
+- 固定环境与负载：i9-9880H8C16T/16GiB/macOS26.7、HotSpot GraalVM25.0.1/Maven3.9.16、可用磁盘456GiB；真实单成员Aeron/Archive、LINEAR_PERPETUAL、1Matcher/4Lane、128symbols、1000retail/1385总用户、MIXED batch20/seed25620、BUSY_SPIN、全局/session/Owner窗口256，G1 Core512m/1536m/client128m/512m，行情/做市/配比和宿主进程不调整。
+- plain与JFR各30s预热+30s测量，各1轮，排空单列，独立ps/vm_stat每2s；JFR owner-commit-profile.jfc/执行20ms/线程CPU与累计分配1s、每进程最大256MiB，并启用本轮稀疏分段事件；记录NMT、summary/views和按client测量epoch过滤的事件。短轮无长稳，检查JIT/GC/采样损失，不能证明无泄漏或完全预热。
+- 命令：`ASYNC_RUN_ID=20260915-latency5-plain ASYNC_ARTIFACT_DIR=/tmp/core-latency5-plain ASYNC_WINDOWS=256 ASYNC_WARMUP_SECONDS=30 ASYNC_MEASURE_SECONDS=30 ASYNC_ONLY_STAGE=end_to_end ASYNC_COLLECTOR=G1 ASYNC_ENABLE_JFR=false bash surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh`；profile换后缀并加`ASYNC_SKIP_BUILD=true ASYNC_ENABLE_JFR=true`，脚本仅JFR轮增加诊断开关。
+- JMH更新OwnerPublicationBenchmark.clearRecycledBuffers，执行真实LaneDelta.clear/Treasury.clearChangedKeys，同时复测publishUsers；1fork/1thread/3×1s预热+3×1s测量、G1 128m/512m，plain与独立-prof gc。命令：`java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar org.openjdk.jmh.Main 'OwnerPublicationBenchmark.(clearRecycledBuffers|publishUsers)' -wi 3 -w 1s -i 3 -r 1s -f 1 -t 1 -jvmArgs '-Xms128m -Xmx512m -XX:+UseG1GC' -rf json -rff /tmp/core-latency5-micro/plain.json`；gc轮换输出并加`-prof gc`。这是缓冲操作吞吐，不是业务ops。
+
+### 追加单因素验证计划：Owner优先提交已就绪前缀
+
+- 首轮分段诊断已定位：批量下单Lane执行p99约0.157ms，Lane完成→Owner最终提交入口p99约7.85ms；普通单分别约0.009ms与4.05ms。Owner最终一次提交本身约几十微秒。该证据支持优先核查就绪结果排队，而不是继续修改账户算术。
+- 当前progressCommandsInScope每提交一条就穿插新命令准入；试验改为提交成功后直接进入下一轮既有循环，优先消费后续已就绪的有序前缀。每轮64工作上限不变，遇未就绪头仍准入独立命令；不跨越提交顺序、控制fence，不扩大窗口或改变客户端发压/做市/配比。
+- 只验证当前master工作树上的这一调度差异；首轮原始diff保存于/tmp/core-latency5-source.diff。不是历史版本回跑。再次完整service及基准驱动正确性测试后，使用同一命令与配置，artifact/runId后缀改为latency5-priority-plain/profile，仍30s预热+30s测量、256窗口、1Matcher/4Lane/128symbols/G1/BUSY_SPIN。
+- 预期：减少已结算等待Owner的时长；是否降低端到端p99、是否影响吞吐必须同时判断。单次样本不足以证明因果或稳定容量；若显著恶化吞吐/尾延迟或破坏正确性，撤销此调度试验，保留原始证据与已验证的空表清理/诊断能力。
+
+
+### p99分段与Owner空表清理：结果
+
+正确性：完整service（诊断开启）通过，基准驱动125项通过；最后调整JFR enabled检查后重新执行真实录制/事件复用测试通过。覆盖六产品线资金、冻结、批量顺序及快照恢复。编译曾有包访问错误，修正后无测试失败；plain轮验证诊断关闭路径。
+
+
+**plain，测量epoch秒[1789479667.441, 1789479697.452]**
+
+`progress terminalBusinessOps=2474500 intervalBusinessOpsPerSec=247447.353 requestsInFlight=256`
+
+`progress terminalBusinessOps=4827038 intervalBusinessOpsPerSec=235253.798 requestsInFlight=256`
+
+`progress terminalBusinessOps=7377055 intervalBusinessOpsPerSec=254988.113 requestsInFlight=228`
+
+`steadyCapacity elapsedSeconds=30.000087 terminalBusinessOperations=7377030 terminalCoreMessages=706054 fills=1756160 businessOpsPerSec=245900.284 coreMessagesPerSec=23535.065 fillsPerSec=58538.496 peakInFlight=256 windowBlockedCount=242827 windowBlockedNanos=26477758099`
+
+`drain elapsedNanos=9127161 terminalBusinessOperations=2685 terminalCoreMessages=253 fills=0`
+
+`pipelineHighWater matcher=126 completion=43 context=128 lanes=[43, 38, 42, 44]`
+
+`mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=1389 businessHash=3e1cab97c08bcfad`
+
+`mixedCapacity=PASS elapsedSeconds=30.009 terminalBusinessOperations=7379715 offeredBusinessOperations=7379715 terminalCoreMessages=706307 offeredCoreMessages=706307 businessOpsPerSec=245914.967 coreMessagesPerSec=23536.337 fills=1756160 fillsPerSec=58520.692 queries=0 unfinished=0 peakInFlight=256 measuredCycles=686 totalCycles=1389 triggerExecutions=0`
+
+窗口阻塞时间占比88.26%；Lane业务执行占比（含排空）[32.94, 33.21, 32.88, 33.03]%。
+
+| 业务 | requests / items | requests/s（含排空） | mean ms | p50 / p90 / p95 / p99 / p99.9 / max ms |
+|---|---:|---:|---:|---|
+| PLACE_ORDER | 175616 / 175616 | 5852.11 | 9.238 | 8.814 / 12.623 / 13.631 / 19.283 / 29.474 / 37.453 |
+| CANCEL_ORDER | 175616 / 175616 | 5852.11 | 8.561 | 8.863 / 11.517 / 12.091 / 16.539 / 30.818 / 34.668 |
+| APPLY_MARK_PRICE | 3843 / 3843 | 128.06 | 9.000 | 7.839 / 14.786 / 16.359 / 25.231 / 40.730 / 42.369 |
+| PLACE_ORDER_BATCH | 263424 / 5268480 | 8778.17 | 11.824 | 11.034 / 16.654 / 17.678 / 22.986 / 44.072 / 60.522 |
+| CANCEL_ORDER_BATCH | 87808 / 1756160 | 2926.06 | 15.853 | 15.237 / 17.907 / 20.398 / 34.635 / 45.907 / 56.131 |
+
+请求加权平均延迟10.855ms，steady Core消息速率×平均延迟≈255.48在途请求（Little定律近似，均值含排空、时间窗略有不同，不是测得的平均队列深度）。批量平均/最大20items，items/s=对应batches/s×20。延迟为commandAsync调用前→终态，样本含排空、不含窗口等待；未校正coordinated omission。
+
+系统2s采样14点：{'205': {'cpuAvg': 20.09, 'rssMaxKiB': 84224, 'exe': '/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer'}, '90988': {'cpuAvg': 944.7, 'rssMaxKiB': 1859344, 'exe': '/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java'}, '91003': {'cpuAvg': 0.0, 'rssMaxKiB': 91352, 'exe': '/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java'}, '91006': {'cpuAvg': 368.35, 'rssMaxKiB': 495128, 'exe': '/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java'}}。
+
+测量首末swap计数：{'Swapins': 2848881, 'Swapouts': 6118036} → {'Swapins': 2848881, 'Swapouts': 6118036}。
+
+NMT基线→结束（含初始化）：Total: reserved=3148643KB +29810KB, committed=707999KB +39850KB。
+
+
+**profile，测量epoch秒[1789479772.536, 1789479802.594]**
+
+`progress terminalBusinessOps=2395432 intervalBusinessOpsPerSec=239540.216 requestsInFlight=256`
+
+`progress terminalBusinessOps=4827621 intervalBusinessOpsPerSec=243216.878 requestsInFlight=256`
+
+`progress terminalBusinessOps=7143748 intervalBusinessOpsPerSec=231612.699 requestsInFlight=256`
+
+`steadyCapacity elapsedSeconds=30.058037 terminalBusinessOperations=7151232 terminalCoreMessages=684544 fills=1702400 businessOpsPerSec=237914.137 coreMessagesPerSec=22774.075 fillsPerSec=56637.098 peakInFlight=256 windowBlockedCount=235907 windowBlockedNanos=26352173839`
+
+`drain elapsedNanos=19431563 terminalBusinessOperations=2688 terminalCoreMessages=256 fills=0`
+
+`pipelineHighWater matcher=128 completion=128 context=128 lanes=[35, 37, 38, 35]`
+
+`mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=1316 businessHash=6046040eb2b2862c`
+
+`mixedCapacity=PASS elapsedSeconds=30.077 terminalBusinessOperations=7153920 offeredBusinessOperations=7153920 terminalCoreMessages=684800 offeredCoreMessages=684800 businessOpsPerSec=237849.801 coreMessagesPerSec=22767.873 fills=1702400 fillsPerSec=56600.507 queries=0 unfinished=0 peakInFlight=256 measuredCycles=665 totalCycles=1316 triggerExecutions=0`
+
+窗口阻塞时间占比87.67%；Lane业务执行占比（含排空）[32.71, 32.74, 32.6, 32.25]%。
+
+| 业务 | requests / items | requests/s（含排空） | mean ms | p50 / p90 / p95 / p99 / p99.9 / max ms |
+|---|---:|---:|---:|---|
+| PLACE_ORDER | 170240 / 170240 | 5660.14 | 9.517 | 9.068 / 13.033 / 14.098 / 20.316 / 32.784 / 55.934 |
+| CANCEL_ORDER | 170240 / 170240 | 5660.14 | 8.834 | 9.379 / 11.927 / 12.763 / 20.021 / 32.604 / 53.641 |
+| APPLY_MARK_PRICE | 3840 / 3840 | 127.67 | 9.421 | 8.253 / 13.402 / 16.351 / 33.718 / 41.058 / 52.920 |
+| PLACE_ORDER_BATCH | 255360 / 5107200 | 8490.21 | 12.272 | 11.370 / 17.072 / 18.137 / 28.786 / 55.705 / 63.143 |
+| CANCEL_ORDER_BATCH | 85120 / 1702400 | 2830.07 | 16.302 | 15.482 / 18.169 / 20.660 / 36.765 / 57.999 / 60.522 |
+
+请求加权平均延迟11.218ms，steady Core消息速率×平均延迟≈255.47在途请求（Little定律近似，均值含排空、时间窗略有不同，不是测得的平均队列深度）。批量平均/最大20items，items/s=对应batches/s×20。延迟为commandAsync调用前→终态，样本含排空、不含窗口等待；未校正coordinated omission。
+
+系统2s采样15点：{'205': {'cpuAvg': 32.67, 'rssMaxKiB': 84304, 'exe': '/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer'}, '91586': {'cpuAvg': 937.0, 'rssMaxKiB': 1880768, 'exe': '/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java'}, '91593': {'cpuAvg': 0.41, 'rssMaxKiB': 126800, 'exe': '/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java'}, '91605': {'cpuAvg': 364.68, 'rssMaxKiB': 489284, 'exe': '/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java'}}。
+
+测量首末swap计数：{'Swapins': 2848994, 'Swapouts': 6118036} → {'Swapins': 2849122, 'Swapouts': 6118036}。
+
+NMT基线→结束（含初始化）：Total: reserved=3171632KB +26166KB, committed=733404KB +38106KB。
+
+
+JFR client-91593.jfr：测量窗分配0.00MB/s，0.00B/business op；全录制DataLoss0。事件数{'jdk.ThreadCPULoad': 45, 'jdk.ThreadAllocationStatistics': 510, 'jdk.ExecutionSample': 1, 'jdk.Compilation': 14}。GC/JIT/safepoint指标（毫秒）{'jdk.Compilation': {'count': 14, 'mean': 1.8223590714285716, 'sum': 25.513027, 'max': 20.436394, 'p50': 0.236573, 'p90': 2.389623, 'p95': 20.436394, 'p99': 20.436394, 'p99.9': 20.436394}}。
+
+线程CPU（单核百分比）{}。
+
+
+JFR node.jfr：测量窗分配476.30MB/s，2001.98B/business op；全录制DataLoss0。事件数{'jdk.ExecutionSample': 6401, 'surprising.SettlementLatency': 9290, 'jdk.ThreadCPULoad': 477, 'jdk.ThreadAllocationStatistics': 787, 'jdk.Compilation': 55, 'jdk.SafepointBegin': 49, 'jdk.GCHeapSummary': 92, 'jdk.GCPhasePause': 46, 'jdk.ObjectAllocationSample': 29651}。GC/JIT/safepoint指标（毫秒）{'jdk.Compilation': {'count': 55, 'mean': 24.14708014545455, 'sum': 1328.0894080000003, 'max': 172.20566000000002, 'p50': 14.127811000000001, 'p90': 65.292249, 'p95': 121.264182, 'p99': 172.20566000000002, 'p99.9': 172.20566000000002}, 'jdk.SafepointBegin': {'count': 49, 'mean': 0.3160314285714286, 'sum': 15.48554, 'max': 0.582112, 'p50': 0.338175, 'p90': 0.5149729999999999, 'p95': 0.5318360000000001, 'p99': 0.582112, 'p99.9': 0.582112}, 'jdk.GCPhasePause': {'count': 46, 'mean': 5.384769217391304, 'sum': 247.699384, 'max': 6.031999, 'p50': 5.340353, 'p90': 5.6849680000000005, 'p95': 5.84443, 'p99': 6.031999, 'p99.9': 6.031999}}。
+
+heapUsed最大417131976，committed最大536870912字节；GC后used范围[110762952, 114453688]。
+
+线程CPU（单核百分比）{'trading-owner--1': 97.46, 'core-matcher-0': 63.54, 'core-account-lane-0': 97.97, 'core-account-lane-1': 98.01, 'core-account-lane-2': 97.89, 'core-account-lane-3': 97.96}。
+
+线程分配MB/s{'clustered-service-101-0': 25.41, 'trading-owner--1': 72.33, 'core-matcher-0': 119.66, 'core-account-lane-0': 64.73, 'core-account-lane-1': 64.69, 'core-account-lane-2': 64.68, 'core-account-lane-3': 64.8}；执行样本{'core-account-lane-3': 1190, 'driver-conductor': 76, 'trading-owner--1': 1075, 'core-account-lane-0': 1243, 'core-account-lane-1': 1238, 'core-account-lane-2': 1217, 'consensus-module-101-0': 40, 'clustered-service-101-0': 187, '/tmp/core-latency5-profile/window-256/end_to_end/aeron-surprising-linear_perpetual-0 [sender,receiver]': 14, 'core-matcher-0': 96, 'archive-conductor': 22, 'aeron-client': 3}。
+
+分配类（采样权重字节）[['com/surprising/aeron/service/state/OrderRuntime', 2137228192], ['[B', 1893176328], ['com/surprising/aeron/service/state/ReservationRuntime', 1000159072], ['[J', 935905600], ['java/lang/Long', 658731072], ['com/surprising/aeron/service/matching/CoreMatchingResult', 630494784], ['exchange/core2/core/common/MatcherResult', 625881960], ['com/surprising/aeron/service/state/ResolvedPlaceOrder', 581926680], ['[Ljava/lang/Object;', 552648568], ['com/surprising/aeron/service/matching/CoreMatchingResult$NativeCommand', 462246792]]；顶层分配站点[['com.surprising.aeron.service.matching.CoreMatchingResult.classify', 1687127048], ['com.surprising.aeron.protocol.TradingOrderBatchCodec.decodeCommand', 1043639976], ['com.surprising.aeron.service.state.TradingRuntimeState.preparedOrder', 923595856], ['com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource', 781812408], ['java.util.ArrayList.grow', 764322464], ['java.util.concurrent.ConcurrentHashMap.putVal', 750849568], ['com.surprising.aeron.service.orchestration.CoreMessageFlyweightDecoder.decode', 580204600], ['com.surprising.aeron.service.state.RuntimeDerivativeFillCalculator$FillCursor.order', 577462960], ['org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.get', 568974120], ['com.surprising.aeron.service.state.model.AssetBalance.validAsset', 547888384], ['org.agrona.collections.Long2ObjectHashMap.put', 475078752], ['com.surprising.aeron.service.state.BalanceRuntime.release', 463151616]]。权重不是精确对象总数；JIT内联站点不可直接当构造器。
+
+Owner自耗[['org.agrona.collections.Long2ObjectHashMap.getMapped', 48], ['com.surprising.aeron.protocol.TradingOrderBatchCodec.decodeCommand', 38], ['org.agrona.collections.Long2ObjectHashMap.put', 33], ['java.util.Arrays.fill', 32], ['java.util.HashMap.getNode', 31], ['com.surprising.aeron.service.orchestration.TerminalTombstoneStore.bucket', 31], ['org.agrona.collections.Long2ObjectHashMap.remove', 27], ['com.surprising.aeron.service.state.RuntimeChangeBuffer.forEach', 26], ['com.surprising.aeron.service.state.LanePublication.publish', 23], ['org.agrona.collections.Long2LongHashMap.get', 19], ['com.surprising.aeron.service.state.MatcherSettlementDispatcher.prepareDirect', 19], ['org.agrona.collections.Long2LongHashMap.put', 19]]；包含栈[['com.surprising.aeron.service.orchestration.SurprisingClusteredService.progressCommandsInScope', 380], ['com.surprising.aeron.service.orchestration.OrderedCommitCoordinator.completeMatchingCommand', 333], ['com.surprising.aeron.service.orchestration.SurprisingClusteredService.progressCommands', 311], ['com.surprising.aeron.service.orchestration.OrderedCommitCoordinator.completeMatching', 277], ['com.surprising.aeron.service.orchestration.SurprisingClusteredService.pollCommands', 268], ['com.surprising.aeron.service.orchestration.OrderedCommitCoordinator.commitReadyMatching', 234], ['com.surprising.aeron.service.orchestration.OrderedCommitCoordinator.tryMatchingCommit', 209], ['com.surprising.aeron.service.orchestration.OrderBatchExecutor.finishOrderBatch', 207], ['com.surprising.aeron.service.orchestration.SurprisingClusteredService.pollCommandPrefix', 199], ['com.surprising.aeron.service.orchestration.ContinuousTradingClusterService.runOwner', 188], ['com.surprising.aeron.service.state.TradingRuntimeState.collectMatcherSettlement', 177], ['com.surprising.aeron.service.state.TradingRuntimeState.applyLanePublication', 153]]（最多8层，不可相加）。
+
+
+JFR client-91605.jfr：测量窗分配289.73MB/s，1217.78B/business op；全录制DataLoss0。事件数{'jdk.ExecutionSample': 1404, 'jdk.Compilation': 73, 'jdk.SafepointBegin': 113, 'jdk.GCHeapSummary': 220, 'jdk.GCPhasePause': 110, 'jdk.ThreadCPULoad': 343, 'jdk.ThreadAllocationStatistics': 631, 'jdk.ObjectAllocationSample': 16811}。GC/JIT/safepoint指标（毫秒）{'jdk.Compilation': {'count': 73, 'mean': 11.160082506849315, 'sum': 814.686023, 'max': 92.48662, 'p50': 0.608414, 'p90': 46.025989, 'p95': 62.16208, 'p99': 92.48662, 'p99.9': 92.48662}, 'jdk.SafepointBegin': {'count': 113, 'mean': 0.44405533628318583, 'sum': 50.178253, 'max': 23.8246, 'p50': 0.053193, 'p90': 0.078901, 'p95': 0.08892599999999999, 'p99': 20.485188, 'p99.9': 23.8246}, 'jdk.GCPhasePause': {'count': 110, 'mean': 0.8565628000000003, 'sum': 94.22190800000003, 'max': 1.356884, 'p50': 0.83517, 'p90': 0.942031, 'p95': 1.0118449999999999, 'p99': 1.173909, 'p99.9': 1.356884}}。
+
+heapUsed最大93163240，committed最大136314880字节；GC后used范围[13645528, 14520040]。
+
+线程CPU（单核百分比）{'com.surprising.aeron.benchmarks.workload.ClusterOperationalBenchmark.continuousOperations-jmh-worker-1': 98.06, 'mixed-egress-dispatcher': 37.81}。
+
+
+Owner测量窗IO：[('jdk.FileRead', '/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar', 'PT0.000022533S'), ('jdk.FileRead', '/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar', 'PT0.000007185S')]。
+
+
+**直接结算分段采样**：约1/64序号混合采样，按Owner本次最终提交开始落入测量窗口筛选；均为墙钟毫秒，含调度/GC。
+
+| 类型 | 阶段 | 样本 | mean / p50 / p90 / p95 / p99 / p99.9 / max ms |
+|---|---|---:|---|
+| PLACE_ORDER_BATCH | matcherToLastLaneStartMs | 3970 | 0.068495 / 0.000540 / 0.251437 / 0.371513 / 0.611495 / 1.133242 / 2.076680 |
+| PLACE_ORDER_BATCH | maxLaneExecutionMs | 3970 | 0.060595 / 0.052862 / 0.091832 / 0.098494 / 0.156573 / 0.392579 / 5.682160 |
+| PLACE_ORDER_BATCH | matcherToLanesCompleteMs | 3970 | 0.121493 / 0.053726 / 0.323967 / 0.443982 / 0.697744 / 1.692270 / 5.750558 |
+| PLACE_ORDER_BATCH | lanesCompleteToOwnerMs | 3970 | 3.308589 / 3.148179 / 5.137979 / 5.952831 / 7.849998 / 18.790211 / 48.035407 |
+| PLACE_ORDER_BATCH | ownerFinalCommitMs | 3970 | 0.030854 / 0.026437 / 0.035211 / 0.039839 / 0.061933 / 0.925849 / 6.141910 |
+| PLACE_ORDER_BATCH | publicationToCommitMs | 3970 | 3.460937 / 3.290813 / 5.310422 / 6.057539 / 8.144626 / 18.839121 / 49.035598 |
+| PLACE_ORDER | matcherToLastLaneStartMs | 2661 | 0.516798 / 0.000412 / 2.274685 / 3.056427 / 5.266939 / 8.305775 / 8.939760 |
+| PLACE_ORDER | maxLaneExecutionMs | 2661 | 0.003048 / 0.002750 / 0.003858 / 0.005144 / 0.008552 / 0.045426 / 0.049945 |
+| PLACE_ORDER | matcherToLanesCompleteMs | 2661 | 0.519847 / 0.003357 / 2.277750 / 3.062544 / 5.270829 / 8.309990 / 8.943476 |
+| PLACE_ORDER | lanesCompleteToOwnerMs | 2661 | 1.469631 / 1.400174 / 2.412332 / 2.805902 / 4.045848 / 7.363437 / 7.895862 |
+| PLACE_ORDER | ownerFinalCommitMs | 2661 | 0.009537 / 0.008837 / 0.011160 / 0.013456 / 0.029778 / 0.057126 / 0.132553 |
+| PLACE_ORDER | publicationToCommitMs | 2661 | 1.999014 / 1.638034 / 3.400972 / 4.268778 / 6.156574 / 8.559760 / 10.228024 |
+| CANCEL_ORDER | matcherToLastLaneStartMs | 2659 | 0.010905 / 0.000415 / 0.000730 / 0.002923 / 0.315672 / 0.873846 / 5.766803 |
+| CANCEL_ORDER | maxLaneExecutionMs | 2659 | 0.006214 / 0.005552 / 0.008357 / 0.010523 / 0.019784 / 0.052568 / 0.078595 |
+| CANCEL_ORDER | matcherToLanesCompleteMs | 2659 | 0.017120 / 0.006012 / 0.010594 / 0.018995 / 0.320185 / 0.878789 / 5.774291 |
+| CANCEL_ORDER | lanesCompleteToOwnerMs | 2659 | 1.909399 / 1.541514 / 3.225044 / 3.898386 / 5.240129 / 9.260474 / 48.019537 |
+| CANCEL_ORDER | ownerFinalCommitMs | 2659 | 0.010143 / 0.009317 / 0.012447 / 0.015455 / 0.030487 / 0.049426 / 0.055678 |
+| CANCEL_ORDER | publicationToCommitMs | 2659 | 1.936661 / 1.567006 / 3.249104 / 3.941366 / 5.287991 / 9.279119 / 48.040575 |
+
+注：publicationToCommitMs按每个样本的matcherToLanesComplete+lanesCompleteToOwner+ownerFinalCommit求和后统计。最长Lane排队和最长执行可能来自不同Lane，不能相加；不能用上述分位数与客户端分位数相减。ownerFinalCommit只计最终返回终态的那次调用，不包括此前多次Owner准备/轮询；未覆盖接入、准入、Matcher之前及响应出口。SafepointBegin为开始同步阶段，不是完整STW时间。
+
+
+局部JMH：每次缓冲操作，publishUsers每次20用户；不是交易ops。1fork/3×1s，plain误差99.9%CI。
+
+| 方法 | plain 次/s ±误差 | gc 次/s | B/次 | gc MiB/s | GC次数 / ms |
+|---|---:|---:|---:|---:|---:|
+| clearRecycledBuffers | 82395102.066 ± 4028200.088 | 81714248.390 | 0.000 | 0.007 | 0.0 / 未发生 |
+| publishUsers | 4080119.128 ± 1106728.990 | 4084181.582 | 0.002 | 0.007 | 0.0 / 未发生 |
+
+限制：固定256窗口已背压，无独立accepted速率/入口分段延迟、拒单分类、连续队列深度/上下文切换/节流证据。未做长稳、Direct/Mapped峰值、真实Archive重启、Kafka/WebSocket外围及GCP，短轮不证明无泄漏或生产容量；恢复依据正确性测试。线程分配为测量窗内首尾累计差/间隔，边缘约1s误差；ObjectAllocationSample仅采样权重、未启用精确TLAB对象计数。summary和CPU/分配/锁/GC/safepoint views覆盖全录制，以上指标按client epoch过滤。
+
+试验保留门槛（第二轮采集前固定，仅用于选择是否保留，不是统计显著性结论）：plain持续吞吐不低于首轮的95%（233605.27ops/s），普通下单p99至少降低5%（≤18.319ms），同时profile批量Lane完成→Owner等待p99至少降低10%（≤7.065ms）。任一未满足则撤销调度试验，不以热点移动或单项好看代替整体收益；正式30万/5ms目标不变。
+
+
+### Owner就绪提交优先试验：结果
+
+正确性：完整service（诊断开启）通过，基准驱动125项通过；最后调整JFR enabled检查后重新执行真实录制/事件复用测试通过。覆盖六产品线资金、冻结、批量顺序及快照恢复。编译曾有包访问错误，修正后无测试失败；plain轮验证诊断关闭路径。
+
+
+**plain，测量epoch秒[1789480299.906, 1789480329.935]**
+
+`progress terminalBusinessOps=3730910 intervalBusinessOpsPerSec=373086.968 requestsInFlight=256`
+
+`progress terminalBusinessOps=7001553 intervalBusinessOpsPerSec=327062.177 requestsInFlight=256`
+
+`progress terminalBusinessOps=10324541 intervalBusinessOpsPerSec=332298.799 requestsInFlight=256`
+
+`steadyCapacity elapsedSeconds=30.028315 terminalBusinessOperations=10333857 terminalCoreMessages=987681 fills=2460160 businessOpsPerSec=344137.088 coreMessagesPerSec=32891.655 fillsPerSec=81928.006 peakInFlight=256 windowBlockedCount=212940 windowBlockedNanos=25520322831`
+
+`drain elapsedNanos=6792823 terminalBusinessOperations=2685 terminalCoreMessages=253 fills=0`
+
+`pipelineHighWater matcher=128 completion=65 context=128 lanes=[47, 47, 46, 47]`
+
+`mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=1927 businessHash=64d73a3211d054d4`
+
+`mixedCapacity=PASS elapsedSeconds=30.035 terminalBusinessOperations=10336542 offeredBusinessOperations=10336542 terminalCoreMessages=987934 offeredCoreMessages=987934 businessOpsPerSec=344148.652 coreMessagesPerSec=32892.640 fills=2460160 fillsPerSec=81909.477 queries=0 unfinished=0 peakInFlight=256 measuredCycles=961 totalCycles=1927 triggerExecutions=0`
+
+窗口阻塞时间占比84.99%；Lane业务执行占比（含排空）[40.74, 40.6, 41.13, 40.77]%。
+
+| 业务 | requests / items | requests/s（含排空） | mean ms | p50 / p90 / p95 / p99 / p99.9 / max ms |
+|---|---:|---:|---:|---|
+| PLACE_ORDER | 246016 / 246016 | 8190.98 | 6.562 | 5.869 / 10.256 / 11.313 / 14.295 / 26.247 / 38.436 |
+| CANCEL_ORDER | 246016 / 246016 | 8190.98 | 5.555 | 5.591 / 7.946 / 8.732 / 12.697 / 25.559 / 32.129 |
+| APPLY_MARK_PRICE | 3870 / 3870 | 128.85 | 6.785 | 6.094 / 10.625 / 11.935 / 15.589 / 18.989 / 19.316 |
+| PLACE_ORDER_BATCH | 369024 / 7380480 | 12286.47 | 8.061 | 6.774 / 13.328 / 14.589 / 18.153 / 30.769 / 40.042 |
+| CANCEL_ORDER_BATCH | 123008 / 2460160 | 4095.49 | 13.612 | 13.271 / 15.548 / 16.990 / 27.869 / 36.306 / 40.337 |
+
+请求加权平均延迟7.750ms，steady Core消息速率×平均延迟≈254.90在途请求（Little定律近似，均值含排空、时间窗略有不同，不是测得的平均队列深度）。批量平均/最大20items，items/s=对应batches/s×20。延迟为commandAsync调用前→终态，样本含排空、不含窗口等待；未校正coordinated omission。
+
+系统2s采样14点：{'205': {'cpuAvg': 18.49, 'rssMaxKiB': 84392, 'exe': '/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer'}, '94447': {'cpuAvg': 937.31, 'rssMaxKiB': 1883892, 'exe': '/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java'}, '94466': {'cpuAvg': 0.07, 'rssMaxKiB': 91084, 'exe': '/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java'}, '94473': {'cpuAvg': 344.72, 'rssMaxKiB': 508672, 'exe': '/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java'}}。
+
+测量首末swap计数：{'Swapins': 2849441, 'Swapouts': 6118036} → {'Swapins': 2849441, 'Swapouts': 6118036}。
+
+NMT基线→结束（含初始化）：Total: reserved=3146050KB +28708KB, committed=706894KB +38168KB。
+
+
+**profile，测量epoch秒[1789480407.273, 1789480437.294]**
+
+`progress terminalBusinessOps=3182512 intervalBusinessOpsPerSec=318247.330 requestsInFlight=256`
+
+`progress terminalBusinessOps=6402532 intervalBusinessOpsPerSec=321999.456 requestsInFlight=256`
+
+`progress terminalBusinessOps=9445806 intervalBusinessOpsPerSec=304327.286 requestsInFlight=252`
+
+`steadyCapacity elapsedSeconds=30.021485 terminalBusinessOperations=9452178 terminalCoreMessages=903698 fills=2250240 businessOpsPerSec=314847.122 coreMessagesPerSec=30101.709 fillsPerSec=74954.321 peakInFlight=256 windowBlockedCount=207265 windowBlockedNanos=24983647226`
+
+`drain elapsedNanos=8827441 terminalBusinessOperations=2677 terminalCoreMessages=245 fills=0`
+
+`pipelineHighWater matcher=128 completion=128 context=128 lanes=[45, 49, 43, 44]`
+
+`mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=1753 businessHash=afd3763bc11cf`
+
+`mixedCapacity=PASS elapsedSeconds=30.030 terminalBusinessOperations=9454855 offeredBusinessOperations=9454855 terminalCoreMessages=903943 offeredCoreMessages=903943 businessOpsPerSec=314843.715 coreMessagesPerSec=30101.019 fills=2250240 fillsPerSec=74932.288 queries=0 unfinished=0 peakInFlight=256 measuredCycles=879 totalCycles=1753 triggerExecutions=0`
+
+窗口阻塞时间占比83.22%；Lane业务执行占比（含排空）[41.63, 41.73, 41.7, 41.64]%。
+
+| 业务 | requests / items | requests/s（含排空） | mean ms | p50 / p90 / p95 / p99 / p99.9 / max ms |
+|---|---:|---:|---:|---|
+| PLACE_ORDER | 225024 / 225024 | 7493.31 | 7.162 | 6.352 / 10.969 / 11.976 / 16.793 / 51.019 / 60.588 |
+| CANCEL_ORDER | 225024 / 225024 | 7493.31 | 6.123 | 6.406 / 8.634 / 9.420 / 14.827 / 47.939 / 53.051 |
+| APPLY_MARK_PRICE | 3847 / 3847 | 128.11 | 7.727 | 6.639 / 12.681 / 15.343 / 18.841 / 23.265 / 27.869 |
+| PLACE_ORDER_BATCH | 337536 / 6750720 | 11239.96 | 8.820 | 7.352 / 14.319 / 15.466 / 21.921 / 52.330 / 63.504 |
+| CANCEL_ORDER_BATCH | 112512 / 2250240 | 3746.65 | 14.676 | 14.106 / 16.326 / 18.989 / 30.654 / 60.620 / 64.028 |
+
+请求加权平均延迟8.460ms，steady Core消息速率×平均延迟≈254.66在途请求（Little定律近似，均值含排空、时间窗略有不同，不是测得的平均队列深度）。批量平均/最大20items，items/s=对应batches/s×20。延迟为commandAsync调用前→终态，样本含排空、不含窗口等待；未校正coordinated omission。
+
+系统2s采样14点：{'205': {'cpuAvg': 42.04, 'rssMaxKiB': 84108, 'exe': '/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer'}, '95120': {'cpuAvg': 935.85, 'rssMaxKiB': 1902936, 'exe': '/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java'}, '95133': {'cpuAvg': 0.39, 'rssMaxKiB': 118544, 'exe': '/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java'}, '95138': {'cpuAvg': 364.72, 'rssMaxKiB': 541420, 'exe': '/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java'}}。
+
+测量首末swap计数：{'Swapins': 2850132, 'Swapouts': 6118036} → {'Swapins': 2850260, 'Swapouts': 6118036}。
+
+NMT基线→结束（含初始化）：Total: reserved=3168916KB +19146KB, committed=732868KB +37350KB。
+
+
+JFR client-95133.jfr：测量窗分配0.00MB/s，0.00B/business op；全录制DataLoss0。事件数{'jdk.ThreadCPULoad': 45, 'jdk.ThreadAllocationStatistics': 510, 'jdk.ExecutionSample': 2, 'jdk.Compilation': 11}。GC/JIT/safepoint指标（毫秒）{'jdk.Compilation': {'count': 11, 'mean': 2.270824, 'sum': 24.979064, 'max': 19.666358, 'p50': 0.27490099999999995, 'p90': 3.120845, 'p95': 19.666358, 'p99': 19.666358, 'p99.9': 19.666358}}。
+
+线程CPU（单核百分比）{}。
+
+
+JFR node.jfr：测量窗分配630.39MB/s，2002.22B/business op；全录制DataLoss0。事件数{'jdk.ExecutionSample': 6033, 'surprising.SettlementLatency': 12319, 'jdk.SafepointBegin': 65, 'jdk.GCHeapSummary': 126, 'jdk.GCPhasePause': 63, 'jdk.Compilation': 61, 'jdk.ThreadCPULoad': 467, 'jdk.ThreadAllocationStatistics': 762, 'jdk.ObjectAllocationSample': 39532}。GC/JIT/safepoint指标（毫秒）{'jdk.SafepointBegin': {'count': 65, 'mean': 0.09009561538461543, 'sum': 5.856215000000002, 'max': 0.280306, 'p50': 0.084487, 'p90': 0.11489600000000001, 'p95': 0.125224, 'p99': 0.280306, 'p99.9': 0.280306}, 'jdk.GCPhasePause': {'count': 63, 'mean': 5.172759126984126, 'sum': 325.88382499999994, 'max': 9.209339, 'p50': 5.10062, 'p90': 5.446293, 'p95': 5.483721, 'p99': 9.209339, 'p99.9': 9.209339}, 'jdk.Compilation': {'count': 61, 'mean': 20.561981918032785, 'sum': 1254.2808969999999, 'max': 133.451363, 'p50': 9.987241, 'p90': 62.791990000000006, 'p95': 87.387306, 'p99': 133.451363, 'p99.9': 133.451363}}。
+
+heapUsed最大408513312，committed最大536870912字节；GC后used范围[101907928, 104586176]。
+
+线程CPU（单核百分比）{'trading-owner--1': 97.09, 'core-matcher-0': 54.74, 'core-account-lane-0': 97.58, 'core-account-lane-1': 97.52, 'core-account-lane-2': 97.48, 'core-account-lane-3': 97.51}。
+
+线程分配MB/s{'clustered-service-101-0': 33.36, 'trading-owner--1': 94.33, 'core-matcher-0': 157.11, 'core-account-lane-0': 86.34, 'core-account-lane-1': 86.37, 'core-account-lane-2': 86.35, 'core-account-lane-3': 86.54}；执行样本{'trading-owner--1': 1051, 'core-account-lane-0': 1095, 'core-account-lane-1': 1073, 'core-account-lane-2': 1073, 'core-account-lane-3': 1064, 'core-matcher-0': 379, 'clustered-service-101-0': 108, 'driver-conductor': 86, 'consensus-module-101-0': 56, '/tmp/core-latency5-priority-profile/window-256/end_to_end/aeron-surprising-linear_perpetual-0 [sender,receiver]': 12, 'archive-conductor': 34, 'aeron-client': 2}。
+
+分配类（采样权重字节）[['com/surprising/aeron/service/state/OrderRuntime', 2841221536], ['[B', 2503690184], ['com/surprising/aeron/service/state/ReservationRuntime', 1304384360], ['[J', 1183932480], ['exchange/core2/core/common/MatcherResult', 918654904], ['com/surprising/aeron/service/state/ResolvedPlaceOrder', 759885472], ['com/surprising/aeron/service/matching/CoreMatchingResult', 654615824], ['java/lang/Long', 638844880], ['com/surprising/aeron/service/matching/CoreMatchingResult$NativeCommand', 620282424], ['[Ljava/lang/Object;', 595301504]]；顶层分配站点[['com.surprising.aeron.protocol.TradingCommandCodec.decodePlaceOrder', 1429677936], ['com.surprising.aeron.service.state.TradingRuntimeState.preparedOrder', 1245868840], ['com.surprising.aeron.protocol.TradingOrderBatchCodec.encodeResultSource', 995342368], ['com.surprising.aeron.service.matching.CoreMatchingResult.classify', 968413600], ['java.util.List.copyOf', 918654904], ['com.surprising.aeron.service.orchestration.CoreMessageFlyweightDecoder.decode', 776651320], ['org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap.get', 775544080], ['com.surprising.aeron.service.state.RuntimeDerivativeFillCalculator$FillCursor.order', 771892504], ['com.surprising.aeron.service.state.model.AssetBalance.validAsset', 714410272], ['java.util.concurrent.ConcurrentHashMap.putVal', 705105016], ['com.surprising.aeron.service.state.OrderRuntime.withFill', 591948240], ['com.surprising.aeron.service.state.BalanceRuntime.release', 588190888]]。权重不是精确对象总数；JIT内联站点不可直接当构造器。
+
+Owner自耗[['org.agrona.collections.Long2ObjectHashMap.getMapped', 58], ['com.surprising.aeron.protocol.TradingCommandCodec.decodePlaceOrder', 45], ['com.surprising.aeron.service.orchestration.TerminalTombstoneStore.bucket', 37], ['org.agrona.collections.Long2ObjectHashMap.put', 33], ['java.util.HashMap.getNode', 25], ['java.util.Arrays.fill', 21], ['com.surprising.aeron.service.state.MatcherSettlementPlan.clearReferences', 19], ['org.agrona.collections.Long2LongHashMap.get', 18], ['org.agrona.collections.Long2LongHashMap.put', 17], ['org.agrona.collections.Long2ObjectHashMap.remove', 17], ['com.surprising.aeron.service.state.LanePublication.publish', 17], ['com.surprising.aeron.service.orchestration.OrderBatchExecutor.preparePipelinedPlaceBatch', 17]]；包含栈[['com.surprising.aeron.service.orchestration.SurprisingClusteredService.progressCommandsInScope', 392], ['com.surprising.aeron.service.orchestration.OrderedCommitCoordinator.completeMatchingCommand', 315], ['com.surprising.aeron.service.orchestration.OrderedCommitCoordinator.completeMatching', 272], ['com.surprising.aeron.service.orchestration.SurprisingClusteredService.progressCommands', 265], ['com.surprising.aeron.service.orchestration.OrderedCommitCoordinator.commitReadyMatching', 222], ['com.surprising.aeron.service.orchestration.OrderedCommitCoordinator.tryMatchingCommit', 204], ['com.surprising.aeron.service.orchestration.SurprisingClusteredService.pollCommandPrefix', 198], ['com.surprising.aeron.service.orchestration.SurprisingClusteredService.pollCommands', 195], ['com.surprising.aeron.service.state.TradingRuntimeState.collectMatcherSettlement', 166], ['com.surprising.aeron.service.orchestration.OrderBatchExecutor.finishOrderBatch', 157], ['com.surprising.aeron.service.orchestration.TradingCoreRuntime.apply', 152], ['com.surprising.aeron.service.orchestration.ContinuousTradingClusterService.runOwner', 144]]（最多8层，不可相加）。
+
+
+JFR client-95138.jfr：测量窗分配387.18MB/s，1229.74B/business op；全录制DataLoss0。事件数{'jdk.ExecutionSample': 1282, 'jdk.Compilation': 78, 'jdk.SafepointBegin': 151, 'jdk.GCHeapSummary': 296, 'jdk.GCPhasePause': 148, 'jdk.ThreadCPULoad': 353, 'jdk.ThreadAllocationStatistics': 636, 'jdk.ObjectAllocationSample': 22648}。GC/JIT/safepoint指标（毫秒）{'jdk.Compilation': {'count': 78, 'mean': 29.850989987179485, 'sum': 2328.377219, 'max': 644.9190209999999, 'p50': 0.962843, 'p90': 54.657416, 'p95': 93.288383, 'p99': 644.9190209999999, 'p99.9': 644.9190209999999}, 'jdk.SafepointBegin': {'count': 151, 'mean': 0.39030867549668874, 'sum': 58.93661, 'max': 30.056156, 'p50': 0.035326, 'p90': 0.06835, 'p95': 0.086362, 'p99': 22.38288, 'p99.9': 30.056156}, 'jdk.GCPhasePause': {'count': 148, 'mean': 0.8566282027027026, 'sum': 126.78097399999997, 'max': 2.23452, 'p50': 0.828971, 'p90': 0.9480200000000001, 'p95': 1.058184, 'p99': 1.58465, 'p99.9': 2.23452}}。
+
+heapUsed最大93529352，committed最大136314880字节；GC后used范围[14212256, 14886152]。
+
+线程CPU（单核百分比）{'com.surprising.aeron.benchmarks.workload.ClusterOperationalBenchmark.continuousOperations-jmh-worker-1': 97.75, 'mixed-egress-dispatcher': 39.84}。
+
+
+Owner测量窗IO：[('jdk.FileRead', '/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar', 'PT0.000009414S'), ('jdk.FileRead', '/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar', 'PT0.000004462S')]。
+
+
+**直接结算分段采样**：约1/64序号混合采样，按Owner本次最终提交开始落入测量窗口筛选；均为墙钟毫秒，含调度/GC。
+
+| 类型 | 阶段 | 样本 | mean / p50 / p90 / p95 / p99 / p99.9 / max ms |
+|---|---|---:|---|
+| CANCEL_ORDER | matcherToLastLaneStartMs | 3524 | 0.048072 / 0.000372 / 0.152958 / 0.340263 / 0.672381 / 1.229953 / 5.619601 |
+| CANCEL_ORDER | maxLaneExecutionMs | 3524 | 0.005052 / 0.004524 / 0.006534 / 0.008587 / 0.013092 / 0.031877 / 0.137563 |
+| CANCEL_ORDER | matcherToLanesCompleteMs | 3524 | 0.053125 / 0.005104 / 0.158118 / 0.345516 / 0.693211 / 1.235729 / 5.623898 |
+| CANCEL_ORDER | lanesCompleteToOwnerMs | 3524 | 0.371150 / 0.315288 / 0.670924 / 0.848226 / 1.139552 / 3.463633 / 6.735191 |
+| CANCEL_ORDER | ownerFinalCommitMs | 3524 | 0.007559 / 0.006972 / 0.008748 / 0.010820 / 0.024809 / 0.042180 / 0.198758 |
+| CANCEL_ORDER | publicationToCommitMs | 3524 | 0.431833 / 0.343169 / 0.852445 / 1.038448 / 1.371483 / 3.707240 / 12.094075 |
+| PLACE_ORDER | matcherToLastLaneStartMs | 3505 | 0.079771 / 0.000371 / 0.018899 / 0.650635 / 1.140729 / 1.812320 / 16.539629 |
+| PLACE_ORDER | maxLaneExecutionMs | 3505 | 0.002825 / 0.002465 / 0.003661 / 0.004863 / 0.007665 / 0.034223 / 0.096531 |
+| PLACE_ORDER | matcherToLanesCompleteMs | 3505 | 0.082596 / 0.002879 / 0.030083 / 0.652594 / 1.148334 / 1.820402 / 16.543276 |
+| PLACE_ORDER | lanesCompleteToOwnerMs | 3505 | 0.416914 / 0.401039 / 0.637609 / 0.736948 / 1.115663 / 7.711075 / 18.030492 |
+| PLACE_ORDER | ownerFinalCommitMs | 3505 | 0.007080 / 0.006442 / 0.008030 / 0.010534 / 0.023443 / 0.038565 / 0.620128 |
+| PLACE_ORDER | publicationToCommitMs | 3505 | 0.506590 / 0.439765 / 0.791829 / 1.093448 / 1.638813 / 8.094741 / 35.193896 |
+| PLACE_ORDER_BATCH | matcherToLastLaneStartMs | 5290 | 0.100541 / 0.000515 / 0.348898 / 0.491706 / 0.892260 / 1.912013 / 5.275453 |
+| PLACE_ORDER_BATCH | maxLaneExecutionMs | 5290 | 0.060388 / 0.052555 / 0.092247 / 0.098502 / 0.142522 / 0.331957 / 5.819895 |
+| PLACE_ORDER_BATCH | matcherToLanesCompleteMs | 5290 | 0.152136 / 0.053672 / 0.417969 / 0.564850 / 0.974468 / 2.243901 / 6.392086 |
+| PLACE_ORDER_BATCH | lanesCompleteToOwnerMs | 5290 | 0.339246 / 0.254988 / 0.717251 / 0.955181 / 1.437818 / 2.356587 / 6.725014 |
+| PLACE_ORDER_BATCH | ownerFinalCommitMs | 5290 | 0.022189 / 0.021043 / 0.028872 / 0.032853 / 0.053380 / 0.090535 / 0.127446 |
+| PLACE_ORDER_BATCH | publicationToCommitMs | 5290 | 0.513570 / 0.411500 / 1.002253 / 1.273693 / 1.660772 / 4.611604 / 7.527244 |
+
+注：publicationToCommitMs按每个样本的matcherToLanesComplete+lanesCompleteToOwner+ownerFinalCommit求和后统计。最长Lane排队和最长执行可能来自不同Lane，不能相加；不能用上述分位数与客户端分位数相减。ownerFinalCommit只计最终返回终态的那次调用，不包括此前多次Owner准备/轮询；未覆盖接入、准入、Matcher之前及响应出口。SafepointBegin为开始同步阶段，不是完整STW时间。
+
+
+局部JMH沿用首轮：此试验未修改缓冲代码，未重复计时；每次缓冲操作，publishUsers每次20用户；不是交易ops。1fork/3×1s，plain误差99.9%CI。
+
+| 方法 | plain 次/s ±误差 | gc 次/s | B/次 | gc MiB/s | GC次数 / ms |
+|---|---:|---:|---:|---:|---:|
+| clearRecycledBuffers | 82395102.066 ± 4028200.088 | 81714248.390 | 0.000 | 0.007 | 0.0 / 未发生 |
+| publishUsers | 4080119.128 ± 1106728.990 | 4084181.582 | 0.002 | 0.007 | 0.0 / 未发生 |
+
+限制：固定256窗口已背压，无独立accepted速率/入口分段延迟、拒单分类、连续队列深度/上下文切换/节流证据。未做长稳、Direct/Mapped峰值、真实Archive重启、Kafka/WebSocket外围及GCP，短轮不证明无泄漏或生产容量；恢复依据正确性测试。线程分配为测量窗内首尾累计差/间隔，边缘约1s误差；ObjectAllocationSample仅采样权重、未启用精确TLAB对象计数。summary和CPU/分配/锁/GC/safepoint views覆盖全录制，以上指标按client epoch过滤。
+
+
+### 最终选择与结论
+
+保留Owner就绪提交优先：三个预定保留门槛全部满足。无采样持续终态245900.284→344137.088业务ops/s（本次单因素短轮观测约+39.95%），普通下单p99 19.283→14.295ms；JFR批量Lane完成→Owner等待p99 7.850→1.438ms，普通单4.046→1.116ms。普通单Matcher发布→本次提交p99 6.157→1.639ms。调整仅是在既有64次循环内优先提交就绪前缀，未就绪时继续准入独立命令；没有新增业务状态、队列或等待锁，也没有调整负载。
+
+正确性1270项通过：service962、基准驱动125、protocol110、client49、product/instrument各12。最终基准驱动以默认关闭诊断运行，service完整测试及专门录制测试显式开启诊断。业务完成数与offered一致、unfinished0、资金差0；快照/串行一致性来自测试，未声称真实Archive重启验收。
+
+目标状态：30万吞吐门槛在当前本机配置的30s无采样段达到，独立JFR段314847.122ops/s；下单p99≤5ms未达到，整体性能验收仍不通过。没有重复轮/长稳，不把一次提升当生产容量保证。plain窗口系统swap计数不变；两轮profile均有128页swap-in、无swap-out增长，按标准对应容量证据受环境限制。Owner仍有测量期JAR类加载IO（最终两次合计13.876µs），严格无同步IO/完全预热门槛未通过。
+
+原因证据与剩余定位：
+
+| 问题 | 本轮证据 | 处理/下一步 |
+|---|---|---|
+| 已完成结果仍排队等Owner | 批量等待p99由7.850降至1.438ms，最终提交本身p99约0.053ms | 已保留有界优先提交，避免每次提交穿插新准入；仍保持全局有序提交 |
+| Lane算术不是主要耗时 | 最终普通Lane执行p99 0.008ms，批量0.143ms；业务执行占比32.6%→41.7%（含排空） | 不为微秒级账户修改增加池/协调/新状态 |
+| 接入/准入/Matcher前排队与响应出口尚未细分 | 最终普通单客户端p99 16.793ms（JFR轮），Matcher发布→提交p99 1.639ms；这些分位数不能相减 | 下一轮在跨线程接入队列、Owner准入→Matcher发布、输出队列分别做稀疏计时；CANCEL_ORDER_BATCH与控制指令本次没有完整分段样本 |
+| 满窗口与低延迟预算不匹配 | 无采样请求加权平均7.750ms，λW约254.90在途；是请求而非业务item口径 | 当前平均在途规模若把平均降至5ms，Little近似需约5.1万Core消息/s（约53万business ops/s，按当前配比），这不是容量预测；仅到30万不会自动保证p99≤5ms。本轮未调窗口/发压策略 |
+| 分配和JVM停顿仍高 | 约2002B/business op；最终profile约630MB/s，63次GC/325.884ms、最大9.209ms | 下一步继续减少高频准入/订单版本/响应编码分配；不能把尾延迟全部归因GC |
+
+GC相关性（按JFR事件开始时刻倒推发布区间，误差包含采样字段构造的微小耗时；只说明重叠，不证明因果）：首轮批量512个发布→提交≥5ms样本仅28个重叠Core GC，最长49ms没有重叠；最终批量5290个样本中仅5个≥5ms，5个均重叠GC。最终普通3505个样本仅4个≥5ms，均未重叠GC；仍有最长35ms离群值，具体调度/前序依赖未完全定位。
+
+最终全录制约105s视图：ThreadPark2416453次（含初始化/停机），FileWrite916090次/13.6s累计/最大22.6ms，MonitorBlocked156次/19.5ms累计/最大0.571ms。上述全录制等待不作为测量窗锁瓶颈结论；SafepointBegin仅开始同步阶段，不是完整STW。
+
+实际latency5/plain/node.command：
+```text
+/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.util.zip=ALL-UNNAMED --enable-native-access=ALL-UNNAMED -Xms512m -Xmx1536m -XX:+UseG1GC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:NativeMemoryTracking=summary -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Dsurprising.aeron.hostnames=127.0.0.1 -Dsurprising.aeron.egress-hostname=127.0.0.1 -Dsurprising.aeron.node-id=0 -Dsurprising.aeron.account-lanes=4 -Dsurprising.aeron.matching-engines=1 -Dsurprising.aeron.owner-command-window=256 -Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN -Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN -Dsurprising.aeron.settlement-spin-limit=0 -Dsurprising.aeron.core.threading-mode=SHARED_NETWORK -Dsurprising.aeron.service.idle-strategy=YIELDING -Dsurprising.aeron.data-dir=/tmp/core-latency5-plain/window-256/end_to_end/data -Daeron.dir=/tmp/core-latency5-plain/window-256/end_to_end/aeron -Djava.io.tmpdir=/tmp/core-latency5-plain/window-256/end_to_end/tmp -cp /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar com.surprising.aeron.service.cluster.SurprisingClusterNode
+```
+
+实际latency5/plain/client.command：
+```text
+/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/java.util.zip=ALL-UNNAMED --enable-native-access=ALL-UNNAMED -XX:+UseG1GC -Xms128m -Xmx512m -Dsurprising.aeron.hostnames=127.0.0.1 -Dsurprising.aeron.egress-hostname=127.0.0.1 -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Daeron.dir=/tmp/core-latency5-plain/window-256/end_to_end/client-aeron -Dsurprising.aeron.capacity-warmup-seconds=30 -Dsurprising.aeron.capacity-duration-seconds=30 -Dsurprising.aeron.capacity-seed=25620 -Dsurprising.aeron.mixed-trading-stream=true -Dsurprising.aeron.capacity-symbols=128 -Dsurprising.aeron.mixed-operational=false -Dsurprising.aeron.capacity-async-in-flight=256 -Dsurprising.aeron.capacity-session-in-flight=256 -jar /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar org.openjdk.jmh.Main ClusterOperationalBenchmark.continuousOperations -p controlPageSize=0 -p inFlightWindow=256 -p tradingProfile=MIXED -p batchSize=20 -wi 0 -i 1 -f 1 -t 1 -to 150s -rf json -rff /tmp/core-latency5-plain/window-256/end_to_end/jmh.json
+```
+
+实际latency5/profile/node.command：
+```text
+/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.util.zip=ALL-UNNAMED --enable-native-access=ALL-UNNAMED -Xms512m -Xmx1536m -XX:+UseG1GC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:NativeMemoryTracking=summary -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Dsurprising.aeron.hostnames=127.0.0.1 -Dsurprising.aeron.egress-hostname=127.0.0.1 -Dsurprising.aeron.node-id=0 -Dsurprising.aeron.account-lanes=4 -Dsurprising.aeron.matching-engines=1 -Dsurprising.aeron.owner-command-window=256 -Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN -Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN -Dsurprising.aeron.settlement-spin-limit=0 -Dsurprising.aeron.core.threading-mode=SHARED_NETWORK -Dsurprising.aeron.service.idle-strategy=YIELDING -Dsurprising.aeron.data-dir=/tmp/core-latency5-profile/window-256/end_to_end/data -Daeron.dir=/tmp/core-latency5-profile/window-256/end_to_end/aeron -Djava.io.tmpdir=/tmp/core-latency5-profile/window-256/end_to_end/tmp -Dcore.settlementLatencyDiagnostics=true -XX:StartFlightRecording=settings=/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/config/owner-commit-profile.jfc\,filename=/tmp/core-latency5-profile/window-256/end_to_end/node.jfr\,maxsize=256m\,dumponexit=true -cp /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar com.surprising.aeron.service.cluster.SurprisingClusterNode
+```
+
+实际latency5/profile/client.command：
+```text
+/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/java.util.zip=ALL-UNNAMED --enable-native-access=ALL-UNNAMED -XX:+UseG1GC -Xms128m -Xmx512m -Dsurprising.aeron.hostnames=127.0.0.1 -Dsurprising.aeron.egress-hostname=127.0.0.1 -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Daeron.dir=/tmp/core-latency5-profile/window-256/end_to_end/client-aeron -Dsurprising.aeron.capacity-warmup-seconds=30 -Dsurprising.aeron.capacity-duration-seconds=30 -Dsurprising.aeron.capacity-seed=25620 -Dsurprising.aeron.mixed-trading-stream=true -Dsurprising.aeron.capacity-symbols=128 -Dsurprising.aeron.mixed-operational=false -Dsurprising.aeron.capacity-async-in-flight=256 -Dsurprising.aeron.capacity-session-in-flight=256 -XX:StartFlightRecording=settings=/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/config/owner-commit-profile.jfc\,filename=/tmp/core-latency5-profile/window-256/end_to_end/client-%p.jfr\,maxsize=256m\,dumponexit=true -jar /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar org.openjdk.jmh.Main ClusterOperationalBenchmark.continuousOperations -p controlPageSize=0 -p inFlightWindow=256 -p tradingProfile=MIXED -p batchSize=20 -wi 0 -i 1 -f 1 -t 1 -to 150s -rf json -rff /tmp/core-latency5-profile/window-256/end_to_end/jmh.json
+```
+
+NMT结束reserved/committed各类（非峰值）：
+```text
+Total: reserved=3171635KB, committed=733411KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                     Class (reserved=1049241KB, committed=2713KB)
+-                    Thread (reserved=71847KB, committed=2763KB)
+-                      Code (reserved=262198KB, committed=50954KB)
+-                        GC (reserved=92306KB, committed=71834KB)
+-                 GCCardSet (reserved=16KB, committed=16KB)
+-                  Compiler (reserved=425KB, committed=425KB)
+-                     JVMCI (reserved=145KB, committed=145KB)
+-                  Internal (reserved=1605KB, committed=1605KB)
+-                     Other (reserved=9413KB, committed=9413KB)
+-                    Symbol (reserved=4923KB, committed=4923KB)
+-    Native Memory Tracking (reserved=3021KB, committed=3021KB)
+-        Shared class space (reserved=16384KB, committed=14000KB, readonly=0KB)
+-               Arena Chunk (reserved=1642KB, committed=1642KB)
+-                   Tracing (reserved=18273KB, committed=18273KB)
+-                   Logging (reserved=0KB, committed=0KB)
+-                    Module (reserved=295KB, committed=295KB)
+-                 Safepoint (reserved=8KB, committed=8KB)
+-           Synchronization (reserved=1287KB, committed=1287KB)
+-            Serviceability (reserved=17KB, committed=17KB)
+-                 Metaspace (reserved=65724KB, committed=25788KB)
+-      String Deduplication (reserved=1KB, committed=1KB)
+-           Object Monitors (reserved=1KB, committed=1KB)
+```
+
+实际latency5-priority/plain/node.command：
+```text
+/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.util.zip=ALL-UNNAMED --enable-native-access=ALL-UNNAMED -Xms512m -Xmx1536m -XX:+UseG1GC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:NativeMemoryTracking=summary -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Dsurprising.aeron.hostnames=127.0.0.1 -Dsurprising.aeron.egress-hostname=127.0.0.1 -Dsurprising.aeron.node-id=0 -Dsurprising.aeron.account-lanes=4 -Dsurprising.aeron.matching-engines=1 -Dsurprising.aeron.owner-command-window=256 -Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN -Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN -Dsurprising.aeron.settlement-spin-limit=0 -Dsurprising.aeron.core.threading-mode=SHARED_NETWORK -Dsurprising.aeron.service.idle-strategy=YIELDING -Dsurprising.aeron.data-dir=/tmp/core-latency5-priority-plain/window-256/end_to_end/data -Daeron.dir=/tmp/core-latency5-priority-plain/window-256/end_to_end/aeron -Djava.io.tmpdir=/tmp/core-latency5-priority-plain/window-256/end_to_end/tmp -cp /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar com.surprising.aeron.service.cluster.SurprisingClusterNode
+```
+
+实际latency5-priority/plain/client.command：
+```text
+/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/java.util.zip=ALL-UNNAMED --enable-native-access=ALL-UNNAMED -XX:+UseG1GC -Xms128m -Xmx512m -Dsurprising.aeron.hostnames=127.0.0.1 -Dsurprising.aeron.egress-hostname=127.0.0.1 -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Daeron.dir=/tmp/core-latency5-priority-plain/window-256/end_to_end/client-aeron -Dsurprising.aeron.capacity-warmup-seconds=30 -Dsurprising.aeron.capacity-duration-seconds=30 -Dsurprising.aeron.capacity-seed=25620 -Dsurprising.aeron.mixed-trading-stream=true -Dsurprising.aeron.capacity-symbols=128 -Dsurprising.aeron.mixed-operational=false -Dsurprising.aeron.capacity-async-in-flight=256 -Dsurprising.aeron.capacity-session-in-flight=256 -jar /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar org.openjdk.jmh.Main ClusterOperationalBenchmark.continuousOperations -p controlPageSize=0 -p inFlightWindow=256 -p tradingProfile=MIXED -p batchSize=20 -wi 0 -i 1 -f 1 -t 1 -to 150s -rf json -rff /tmp/core-latency5-priority-plain/window-256/end_to_end/jmh.json
+```
+
+实际latency5-priority/profile/node.command：
+```text
+/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.util.zip=ALL-UNNAMED --enable-native-access=ALL-UNNAMED -Xms512m -Xmx1536m -XX:+UseG1GC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:NativeMemoryTracking=summary -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Dsurprising.aeron.hostnames=127.0.0.1 -Dsurprising.aeron.egress-hostname=127.0.0.1 -Dsurprising.aeron.node-id=0 -Dsurprising.aeron.account-lanes=4 -Dsurprising.aeron.matching-engines=1 -Dsurprising.aeron.owner-command-window=256 -Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN -Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN -Dsurprising.aeron.settlement-spin-limit=0 -Dsurprising.aeron.core.threading-mode=SHARED_NETWORK -Dsurprising.aeron.service.idle-strategy=YIELDING -Dsurprising.aeron.data-dir=/tmp/core-latency5-priority-profile/window-256/end_to_end/data -Daeron.dir=/tmp/core-latency5-priority-profile/window-256/end_to_end/aeron -Djava.io.tmpdir=/tmp/core-latency5-priority-profile/window-256/end_to_end/tmp -Dcore.settlementLatencyDiagnostics=true -XX:StartFlightRecording=settings=/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/config/owner-commit-profile.jfc\,filename=/tmp/core-latency5-priority-profile/window-256/end_to_end/node.jfr\,maxsize=256m\,dumponexit=true -cp /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar com.surprising.aeron.service.cluster.SurprisingClusterNode
+```
+
+实际latency5-priority/profile/client.command：
+```text
+/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/java.util.zip=ALL-UNNAMED --enable-native-access=ALL-UNNAMED -XX:+UseG1GC -Xms128m -Xmx512m -Dsurprising.aeron.hostnames=127.0.0.1 -Dsurprising.aeron.egress-hostname=127.0.0.1 -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Daeron.dir=/tmp/core-latency5-priority-profile/window-256/end_to_end/client-aeron -Dsurprising.aeron.capacity-warmup-seconds=30 -Dsurprising.aeron.capacity-duration-seconds=30 -Dsurprising.aeron.capacity-seed=25620 -Dsurprising.aeron.mixed-trading-stream=true -Dsurprising.aeron.capacity-symbols=128 -Dsurprising.aeron.mixed-operational=false -Dsurprising.aeron.capacity-async-in-flight=256 -Dsurprising.aeron.capacity-session-in-flight=256 -XX:StartFlightRecording=settings=/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/config/owner-commit-profile.jfc\,filename=/tmp/core-latency5-priority-profile/window-256/end_to_end/client-%p.jfr\,maxsize=256m\,dumponexit=true -jar /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar org.openjdk.jmh.Main ClusterOperationalBenchmark.continuousOperations -p controlPageSize=0 -p inFlightWindow=256 -p tradingProfile=MIXED -p batchSize=20 -wi 0 -i 1 -f 1 -t 1 -to 150s -rf json -rff /tmp/core-latency5-priority-profile/window-256/end_to_end/jmh.json
+```
+
+NMT结束reserved/committed各类（非峰值）：
+```text
+Total: reserved=3168918KB, committed=732874KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB)
+-                     Class (reserved=1049243KB, committed=2715KB)
+-                    Thread (reserved=69796KB, committed=2696KB)
+-                      Code (reserved=262465KB, committed=51417KB)
+-                        GC (reserved=92285KB, committed=71813KB)
+-                 GCCardSet (reserved=16KB, committed=16KB)
+-                  Compiler (reserved=442KB, committed=442KB)
+-                     JVMCI (reserved=140KB, committed=140KB)
+-                  Internal (reserved=1603KB, committed=1603KB)
+-                     Other (reserved=9413KB, committed=9413KB)
+-                    Symbol (reserved=4923KB, committed=4923KB)
+-    Native Memory Tracking (reserved=3069KB, committed=3069KB)
+-        Shared class space (reserved=16384KB, committed=14000KB, readonly=0KB)
+-               Arena Chunk (reserved=163KB, committed=163KB)
+-                   Tracing (reserved=18777KB, committed=18777KB)
+-                   Logging (reserved=0KB, committed=0KB)
+-                    Module (reserved=295KB, committed=295KB)
+-                 Safepoint (reserved=8KB, committed=8KB)
+-           Synchronization (reserved=1287KB, committed=1287KB)
+-            Serviceability (reserved=17KB, committed=17KB)
+-                 Metaspace (reserved=65725KB, committed=25789KB)
+-      String Deduplication (reserved=1KB, committed=1KB)
+-           Object Monitors (reserved=1KB, committed=1KB)
+```
+
+关键原始证据（清理后仅历史定位）：
+
+| 文件 | 字节 | SHA-256 |
+|---|---:|---|
+| /tmp/core-latency5-source.diff | 17160 | `865574a41e7f92398bb8430bb9dc0953fff89c5010742f8274c8dab690e73395` |
+| /tmp/core-latency5-plain/window-256/end_to_end/metrics.json | 3129 | `40f339565affa05841f66e035fb16d6719d0ecab8da2260a13849a8b9d384bf5` |
+| /tmp/core-latency5-plain/window-256/end_to_end/client.log | 8276 | `720d79e3648f03fdd765a9542a86d78c0d4f13871bfbc6b9d6f3741525a355d7` |
+| /tmp/core-latency5-profile/window-256/end_to_end/metrics.json | 3279 | `d043dd7e757486d69a25f2c03554651c0e18333a20e6cf295d45351f02f97982` |
+| /tmp/core-latency5-profile/window-256/end_to_end/client.log | 8884 | `91f2903fe94eab84a372e70f930ce8990a1ed43c06fc83ab9ceab299df0006b6` |
+| /tmp/core-latency5-profile/window-256/end_to_end/client-91593.jfr | 5756919 | `bc62fc013c858c67e6e8e95832693a14102b1dc5dbaa0df2f7287dcf7aef428e` |
+| /tmp/core-latency5-profile/window-256/end_to_end/client-91605.jfr | 89344095 | `eec7fc1012f430b6825f545549494be4878cb1ec4796169fa7090c3b263eaa1b` |
+| /tmp/core-latency5-profile/window-256/end_to_end/node.jfr | 117978145 | `0ce66e4544779276bc7d5cc34c32bbf6e5487ec0e8404228c405bbc404c370fb` |
+| /tmp/core-latency5-profile/window-256/end_to_end/analysis.json | 77241 | `3d97299d82642727a48a91707585925a89ae06ab76250202250b961b94a1d6d3` |
+| /tmp/core-latency5-profile/window-256/end_to_end/phases.json | 4969 | `688938b0e991c4aec1a9e4c167354c10420d6be624a54b58a8f979c286e9aff4` |
+| /tmp/core-latency5-profile/window-256/end_to_end/settlement-correlation.json | 2263034 | `af27e3f129809f4798228e778b8b0700162f4044ba9dfecc8a9f3ecf14b32a44` |
+| /tmp/core-latency5-profile/window-256/end_to_end/owner-window-io.json | 18289 | `9ceb5875290e4df2f7426eb969750c6a5ca8e2bd9344053822008bc904be7138` |
+| /tmp/core-latency5-profile/window-256/end_to_end/jfr-summary.txt | 12220 | `a990b7712a56998c92650e0a718c5edf85a4757e4cf5f4e7d06ab0890f237a46` |
+| /tmp/core-latency5-priority-source.diff | 18725 | `9f1ddb9b35121f6c882af1ed045c33aadba5763197306784dd97d87498ba2b1e` |
+| /tmp/core-latency5-priority-plain/window-256/end_to_end/metrics.json | 3133 | `6cc01cc910b9153bc396b42be8e43a12a2c9eb069178707715447c2b07aee7de` |
+| /tmp/core-latency5-priority-plain/window-256/end_to_end/client.log | 8295 | `582103474444d037280be8c849aa66c26b055327bbf20f5580bacaa83e0e2606` |
+| /tmp/core-latency5-priority-profile/window-256/end_to_end/metrics.json | 3280 | `6d01cde7ad272568df6a020a1df3f652dcba925977315fd55fb499d9f6d96a07` |
+| /tmp/core-latency5-priority-profile/window-256/end_to_end/client.log | 8904 | `5dde9983b024b69b3bbfedc0fa5d55076d8bc131f130f9d53dbfb7fc2dfa65b0` |
+| /tmp/core-latency5-priority-profile/window-256/end_to_end/client-95133.jfr | 5913439 | `cc037c5320bde69b79f9ae898e5dc4ed662a2e2a5dad58b2127507825ae06702` |
+| /tmp/core-latency5-priority-profile/window-256/end_to_end/client-95138.jfr | 95092044 | `2d92f0b6fcc016658be939c74a4866d8e1bdb4c0c9bf41160e4f10f82961bb66` |
+| /tmp/core-latency5-priority-profile/window-256/end_to_end/node.jfr | 105576603 | `53f29b504af127eac22ede58ed563dfb679ce5faa704bfa09995d9ca32a12273` |
+| /tmp/core-latency5-priority-profile/window-256/end_to_end/analysis.json | 86363 | `105b918bde85f0b08057013f5c31a6d69fe12da02d7de855cd127cc9a678a6ef` |
+| /tmp/core-latency5-priority-profile/window-256/end_to_end/phases.json | 5024 | `e8f923748a9bc577db2a2751b7d07653e7dc7d6cde08280490f15877715dd669` |
+| /tmp/core-latency5-priority-profile/window-256/end_to_end/settlement-correlation.json | 3013572 | `cffee1d8831b8515a8375e2eef3d0b52188935b85ed7cd71d4b4490551ed4a08` |
+| /tmp/core-latency5-priority-profile/window-256/end_to_end/owner-window-io.json | 18289 | `ef4647c4d9d0dd2e2f7bfa3dcd6911a5854042bdc2b81ba2f6889ef3044e23ab` |
+| /tmp/core-latency5-priority-profile/window-256/end_to_end/jfr-summary.txt | 12219 | `5c4433f39cee675c896a36f215a457d520e90652b8c025a67dc23e8d19bcd2de` |
+| /tmp/core-latency5-micro/plain.json | 3587 | `7f3bb2ec5ffbfe70ac612d335654190b1db685217e28e76e0db3cddb19772f45` |
+| /tmp/core-latency5-micro/gc.json | 9816 | `a0aa2184c2123ce3b11b84a6bc44a26e8e3e79d6de264a39872214640cbee159` |
+| /tmp/core-latency5-test-counts.json | 216 | `e6cf9fbe8ad96576c3819da51fb3f9e3073fbc806d015d7b3fa5964e93322f8b` |
+| /tmp/core-latency5-priority-full-tests.log | 215092 | `146a783cc18439c2ce8ee9add66833ccc089e7d6e35dc79705bf5d417b9a6b84` |
+| /tmp/core-latency5-priority-bench-tests.log | 49641 | `6169c3dc7ca5d15721c7fc2709d0bc8d4fafe71c2a48c5ac7ba7d8d6dcb8dede` |
+
+分段事件校验latency5：{"laneCountHistogram": {"1": 7968, "2": 1322}, "negativeStageSamples": 0}；仅在完成标记acquire后读取Lane时刻。原始摘要文件/tmp/core-latency5-profile/window-256/end_to_end/latency-sanity.json，SHA-256 `2e1af6048ea442622dc2cb81f94a7012be1b0bdc6ae9703ac04bd1ae05731496`。
+
+分段事件校验latency5-priority：{"laneCountHistogram": {"1": 10555, "2": 1764}, "negativeStageSamples": 0}；仅在完成标记acquire后读取Lane时刻。原始摘要文件/tmp/core-latency5-priority-profile/window-256/end_to_end/latency-sanity.json，SHA-256 `0221ee587545baa1435ce485ddd37a85f6634cacb6a05b8013eae08f86fa42f5`。
+
+清理完成：本批两组单节点plain/JFR、系统采样、分析与JMH均退出；删除本轮临时data/Archive/media、JFR、日志、脚本及测试报告，共531个文件，路径/大小/摘要清单SHA-256 `77d4bcbc979444f0c3b6f64183201aabd24aeb7126a65598bdd362f81b8f679d`。构建产物保留；未创建云资源。上述临时路径仅历史定位。

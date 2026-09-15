@@ -31,6 +31,12 @@ public class OwnerPublicationBenchmark {
         for (int i = 0; i < users.length; i++) users[i] = new UserRuntime(i + 1);
     }
 
+    /** Empty recycled buffers must not rescan their retained hash-table capacity. */
+    @Benchmark public void clearRecycledBuffers() {
+        delta.clear();
+        runtime.treasury.clearChangedKeys();
+    }
+
     @Benchmark public Object publishUsers() {
         for (int i = 0; i < users.length; i++) delta.putUser(i + 1, users[i]);
         delta.preparePublication(runtime);

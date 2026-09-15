@@ -192,12 +192,12 @@ public final class TreasuryRuntime {
 
     void clearChangedKeys() {
         assertOwner();
-        changedAssets.clear();
-        changedFundingSymbols.clear();
-        changedLifecycleSymbols.clear();
-        patchAssetBefore.clear();
-        patchFundingBefore.clear();
-        patchLifecycleBefore.clear();
+        if (!changedAssets.isEmpty()) changedAssets.clear();
+        if (!changedFundingSymbols.isEmpty()) changedFundingSymbols.clear();
+        if (!changedLifecycleSymbols.isEmpty()) changedLifecycleSymbols.clear();
+        if (!patchAssetBefore.isEmpty()) patchAssetBefore.clear();
+        if (!patchFundingBefore.isEmpty()) patchFundingBefore.clear();
+        if (!patchLifecycleBefore.isEmpty()) patchLifecycleBefore.clear();
     }
 
     RuntimeFactFrame.TreasuryAssetValue patchAssetBefore(int assetId) {
