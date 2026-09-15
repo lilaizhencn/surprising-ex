@@ -78,10 +78,6 @@ trap stop_node EXIT INT TERM
 
 start_node() {
   local dir="$1"; mkdir -p "${dir}/data" "${dir}/tmp" "${dir}/aeron"
-  local -a jfr_args=()
-  if [[ "${ENABLE_JFR}" == true ]]; then
-    jfr_args=("-XX:StartFlightRecording=settings=${PROFILE},filename=${dir}/node.jfr,maxsize=256m,dumponexit=true")
-  fi
   local -a args=(
     --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED
     --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED
@@ -97,8 +93,11 @@ start_node() {
     "-Dsurprising.aeron.settlement-wait-strategy=${SETTLEMENT_WAIT_STRATEGY}"
     "-Dsurprising.aeron.settlement-spin-limit=${SETTLEMENT_SPIN_LIMIT}"
     -Dsurprising.aeron.core.threading-mode=SHARED_NETWORK -Dsurprising.aeron.service.idle-strategy=YIELDING
-    "-Dsurprising.aeron.data-dir=${dir}/data" "-Daeron.dir=${dir}/aeron" "-Djava.io.tmpdir=${dir}/tmp" "${jfr_args[@]}"
-    -cp "${SERVICE_JAR}" com.surprising.aeron.service.cluster.SurprisingClusterNode)
+    "-Dsurprising.aeron.data-dir=${dir}/data" "-Daeron.dir=${dir}/aeron" "-Djava.io.tmpdir=${dir}/tmp")
+  if [[ "${ENABLE_JFR}" == true ]]; then
+    args+=("-XX:StartFlightRecording=settings=${PROFILE},filename=${dir}/node.jfr,maxsize=256m,dumponexit=true")
+  fi
+  args+=(-cp "${SERVICE_JAR}" com.surprising.aeron.service.cluster.SurprisingClusterNode)
   printf '%q ' "${JAVA}" "${args[@]}" > "${dir}/node.command"; printf '\n' >> "${dir}/node.command"
   (cd "${dir}" && exec "${JAVA}" "${args[@]}") > "${dir}/node.log" 2>&1 & NODE_PID=$!
   for _ in {1..40}; do
@@ -126,6 +125,9 @@ run_stage() {
     "-Dsurprising.aeron.capacity-seed=$((window * 100 + batch))" -Dsurprising.aeron.mixed-trading-stream=true
     -Dsurprising.aeron.mixed-operational=false "-Dsurprising.aeron.capacity-async-in-flight=${window}"
     "-Dsurprising.aeron.capacity-session-in-flight=${window}")
+  if [[ "${ENABLE_JFR}" == true ]]; then
+    client_args+=("-XX:StartFlightRecording=settings=${PROFILE},filename=${dir}/client.jfr,maxsize=256m,dumponexit=true")
+  fi
   printf '%q ' "${JAVA}" "${client_args[@]}" -jar "${BENCHMARK_JAR}" org.openjdk.jmh.Main ClusterOperationalBenchmark.continuousOperations \
     -p controlPageSize=0 -p inFlightWindow="${window}" -p tradingProfile="${profile}" -p batchSize="${batch}" \
     -wi 0 -i 1 -f 1 -t 1 -to "$((WARMUP_SECONDS + MEASURE_SECONDS + 90))s" -rf json -rff "${dir}/jmh.json" > "${dir}/client.command"
@@ -144,6 +146,12 @@ run_stage() {
     "${JFR}" summary "${dir}/node.jfr" > "${dir}/jfr-summary.txt" 2>&1 || true
     for view in thread-cpu-load hot-methods allocation-by-class allocation-by-site allocation-by-thread contention-by-thread latencies-by-type gc safepoints; do
       "${JFR}" view --width 220 "${view}" "${dir}/node.jfr" > "${dir}/${view}.txt" 2>&1 || true
+    done
+  fi
+  if [[ -s "${dir}/client.jfr" ]]; then
+    "${JFR}" summary "${dir}/client.jfr" > "${dir}/client-jfr-summary.txt" 2>&1 || true
+    for view in thread-cpu-load hot-methods allocation-by-class allocation-by-site allocation-by-thread contention-by-thread latencies-by-type gc safepoints; do
+      "${JFR}" view --width 220 "${view}" "${dir}/client.jfr" > "${dir}/client-${view}.txt" 2>&1 || true
     done
   fi
   python3 "${SCRIPT_DIR}/summarize-aeron-async-stage.py" "${dir}" --stage "${stage}" --window "${window}" > "${dir}/metrics.pretty.json"
