@@ -191,3 +191,15 @@ Client: -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Dsurprising.aeron.host
 
 - 正确性：通过。业务/Core accepted 与 terminal 对齐，`unfinished=0`，资金守恒和状态核对通过，未复现 `unknown lane command context`。
 - 性能：未通过昨日约 280k 参考表现及 `PLACE_ORDER p99 <= 5ms` 参考线；当前结果是“正确性通过、吞吐和尾延迟部分验证且存在缺口”，不是最终容量验收。
+
+
+## 2026-09-15 13:10 历史提交 4bed7e31 单节点复测
+
+- 被测提交：`4bed7e3164fde80248cf0139eddf595f915ba27f`（2026-09-14 09:28:23 +0800），临时 detached worktree；不作为当前 master 验收基线。
+- 模式：真实 Aeron Cluster 单节点，`LINEAR_PERPETUAL`，128 symbols（该提交源码固定值）、1000 retail users、4 Account Lane、2 matcher；G1、BUSY_SPIN、PIPELINED、`SHARED_NETWORK` + `YIELDING`。
+- 负载：`ClusterMixedCapacityMain`，MIXED、batch20、global/session in-flight=256、30s warmup + 60s measurement、seed131001；无 JFR，仅采集 NMT。
+- 结果：`mixedVerify=PASS`、`fundsDiff=0`、`unfinished=0`、accepted/terminal business 与 Core messages 相等、`peakInFlight=256`、`pipelineHighWater matcher=63 completion=63 context=246 lanes=[61,61,61,60]`。
+- 吞吐：`terminalBusinessOperations=13,243,392`，`businessOpsPerSec=220,624.351`；Core messages/s=`21,127.601`；fills/s=`52,499.145`。
+- 延迟（accepted→terminal，us）：PLACE p99=`20,021`，CANCEL p99=`18,186`，PLACE_BATCH p99=`25,231`，CANCEL_BATCH p99=`29,163`。
+- NMT：结束时 `reserved=3,131,291KB (+27,728KB)`、`committed=705,167KB (+44,624KB)`；客户端退出码0，Core无错误。
+- 原始 worktree、Archive、媒体、日志和 NMT 文件已清理；本轮只有一个 plain 样本，无统计置信区间和 JFR 热点结论。
