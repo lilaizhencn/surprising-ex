@@ -13,17 +13,17 @@ import org.openjdk.jmh.annotations.*;
 @Fork(1)
 @Threads(1)
 public class ClusterOperationalBenchmark {
-    /** 外部三节点控制任务页大小；0 保持现有口径；小页覆盖行情/账户变化后的估值续页和异步完成，大页覆盖跨 Lane 汇总。 */
-    @Param({"0", "1", "2", "4", "8", "64"})
+    /** 单成员吞吐基线不注入控制分页；控制分页由独立生命周期诊断覆盖。 */
+    @Param({"0"})
     public int controlPageSize;
-    /** 客户端实际在途档位；外部节点须以对应owner-command-window启动，不能由客户端冒充服务端配置。 */
-    @Param({"64", "128"})
+    /** 客户端实际在途档位；节点 owner-command-window 必须使用同一基线值。 */
+    @Param({"64"})
     public int inFlightWindow;
-    /** 同一真实链路分别覆盖原混合负载、双向成交结算负载；不能混合统计。 */
-    @Param({"MIXED", "FILL_HEAVY"})
+    /** 昨日吞吐基线使用连续混合交易；双向成交负载另行诊断，不混入基线。 */
+    @Param({"MIXED"})
     public String tradingProfile;
-    /** 单项批量与20项批量共用真实Lane路径；结果同时报告Core消息和展开业务项。 */
-    @Param({"1", "20"})
+    /** 昨日吞吐基线固定20项批量；单项批量另行诊断，不混入基线。 */
+    @Param({"20"})
     public int batchSize;
     private ClusterMixedCapacityMain workload;
 
@@ -43,10 +43,7 @@ public class ClusterOperationalBenchmark {
         catch (RuntimeException | Error failure) { workload.close(); throw failure; }
     }
 
-    /** batchSize=1在128币对连续提交批量与普通单，覆盖每批结束后的延期队首推进及普通单空撤单集合路径；
-     * 批次上下文只挂在PendingMatching环槽；持续跨环周转覆盖有序批次链接摘除和事件池复用，不维护第二份sequence到batch的Map。
-     * batchSize=20持续部分成交，覆盖Matcher直接发布批量结果、Lane持仓身份在途保护和事件池跨环复用；
-     * FILL_HEAVY在128币对执行双向成交，覆盖直接路径开仓/平仓及Owner有序收集后的身份退休。
+    /** 256币对、20项批量持续部分成交，覆盖Matcher直接发布批量结果、Lane持仓身份在途保护和事件池跨环复用；
      * 测量后按完整生命周期核对资金、持仓、冻结及终态计数；外部驱动执行真实Archive快照重启校验。 */
     @Benchmark
     public long continuousOperations() { return workload.measureRun(); }

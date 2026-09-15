@@ -62,18 +62,18 @@ class ClusterMixedCapacityTest {
                 .isInstanceOf(IllegalStateException.class).hasMessageContaining("order state mismatch");
     }
 
-    @Test void populationFor128SymbolsCoversFourLanesAndHftPairsCrossLanes() {
+    @Test void baselinePopulationFor256SymbolsCoversFourLanesAndHftPairsCrossLanes() {
         var users=ClusterMixedCapacityMain.users();var topology=LaneTopology.configured(false);
-        assertThat(users).hasSize(1385).doesNotHaveDuplicates();
+        assertThat(users).hasSize(1769).doesNotHaveDuplicates();
         for(int i=0;i<users.size();i++)assertThat(topology.accountLaneId(users.get(i))).isEqualTo(i&3);
-        for(int i=0;i<128;i++)assertThat(topology.accountLaneId(users.get(1129+i)))
-                .isNotEqualTo(topology.accountLaneId(users.get(1257+(i+1)%128)));
+        for(int i=0;i<256;i++)assertThat(topology.accountLaneId(users.get(1257+i)))
+                .isNotEqualTo(topology.accountLaneId(users.get(1513+(i+1)%256)));
     }
 
     @Test void financialAuditIncludesEveryTreasuryLedgerAndSubtractsDeficit() {
         var t=new CoreTreasuryAssetView("USDT",2,3,5,7,11,13,17);
         assertThat(ClusterMixedCapacityMain.treasuryFunds(t)).isEqualTo(48);
-        assertThat(ClusterMixedCapacityMain.expectedFunds()).isEqualTo(1_384_000_000_125L);
+        assertThat(ClusterMixedCapacityMain.expectedFunds()).isEqualTo(1_768_000_000_125L);
     }
 
     @Test void closedPositionWithRealizedLossIsFlatButLiveExposureOrMarginIsNot() {

@@ -9,20 +9,32 @@ BENCH_MODULE="${REPO_ROOT}/surprising-aeron-core/surprising-aeron-benchmarks"
 SERVICE_JAR="${REPO_ROOT}/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar"
 BENCHMARK_JAR="${BENCH_MODULE}/target/product-core-benchmarks.jar"
 PROFILE="${BENCH_MODULE}/config/owner-commit-profile.jfc"
+BASELINE_CONFIG="${ASYNC_BASELINE_CONFIG:-${BENCH_MODULE}/config/aeron-single-node-baseline.env}"
+[[ -r "${BASELINE_CONFIG}" ]] || { echo "Baseline config is missing: ${BASELINE_CONFIG}" >&2; exit 2; }
+# shellcheck disable=SC1090
+source "${BASELINE_CONFIG}"
 RUN_ID="${ASYNC_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 ROOT="${ASYNC_ARTIFACT_DIR:-${BENCH_MODULE}/target/aeron-async-stages/${RUN_ID}}"
-WINDOWS_CSV="${ASYNC_WINDOWS:-64,128}"
-WARMUP_SECONDS="${ASYNC_WARMUP_SECONDS:-5}"
-MEASURE_SECONDS="${ASYNC_MEASURE_SECONDS:-20}"
-HEAP="${ASYNC_HEAP:-2g}"
-ACCOUNT_LANES="${ASYNC_ACCOUNT_LANES:-4}"
-MATCHING_ENGINES="${ASYNC_MATCHING_ENGINES:-1}"
+WINDOWS_CSV="${ASYNC_WINDOWS:-${AERON_BASELINE_WINDOW}}"
+WARMUP_SECONDS="${ASYNC_WARMUP_SECONDS:-${AERON_BASELINE_WARMUP_SECONDS}}"
+MEASURE_SECONDS="${ASYNC_MEASURE_SECONDS:-${AERON_BASELINE_MEASURE_SECONDS}}"
+NODE_XMS="${ASYNC_NODE_XMS:-${AERON_BASELINE_NODE_XMS}}"
+NODE_XMX="${ASYNC_NODE_XMX:-${AERON_BASELINE_NODE_XMX}}"
+CLIENT_XMS="${ASYNC_CLIENT_XMS:-${AERON_BASELINE_CLIENT_XMS}}"
+CLIENT_XMX="${ASYNC_CLIENT_XMX:-${AERON_BASELINE_CLIENT_XMX}}"
+ACCOUNT_LANES="${ASYNC_ACCOUNT_LANES:-${AERON_BASELINE_ACCOUNT_LANES}}"
+MATCHING_ENGINES="${ASYNC_MATCHING_ENGINES:-${AERON_BASELINE_MATCHING_ENGINES}}"
+TRADING_PROFILE="${ASYNC_TRADING_PROFILE:-${AERON_BASELINE_TRADING_PROFILE}}"
+BATCH_SIZE="${ASYNC_BATCH_SIZE:-${AERON_BASELINE_BATCH_SIZE}}"
+ISOLATE_STAGE="${ASYNC_ISOLATE_STAGE:-false}"
 # Throughput qualification defaults to BUSY_SPIN to match the historical
 # overall transaction-link benchmark. Override explicitly when measuring
 # blocking/park overhead.
-SETTLEMENT_WAIT_STRATEGY="${ASYNC_SETTLEMENT_WAIT_STRATEGY:-BUSY_SPIN}"
-MATCHER_WAIT_STRATEGY="${ASYNC_MATCHER_WAIT_STRATEGY:-BUSY_SPIN}"
-COLLECTOR="${ASYNC_COLLECTOR:-ZGC}"
+SETTLEMENT_WAIT_STRATEGY="${ASYNC_SETTLEMENT_WAIT_STRATEGY:-${AERON_BASELINE_SETTLEMENT_WAIT_STRATEGY}}"
+SETTLEMENT_SPIN_LIMIT="${ASYNC_SETTLEMENT_SPIN_LIMIT:-${AERON_BASELINE_SETTLEMENT_SPIN_LIMIT}}"
+MATCHER_WAIT_STRATEGY="${ASYNC_MATCHER_WAIT_STRATEGY:-${AERON_BASELINE_MATCHER_WAIT_STRATEGY}}"
+COLLECTOR="${ASYNC_COLLECTOR:-${AERON_BASELINE_GC}}"
+ENABLE_JFR="${ASYNC_ENABLE_JFR:-false}"
 LANE_STAGE_LANES="${ASYNC_LANE_STAGE_LANES:-1}"
 MATCHER_STAGE_LANES="${ASYNC_MATCHER_STAGE_LANES:-1}"
 ONLY_STAGE="${ASYNC_ONLY_STAGE:-}"
@@ -47,8 +59,8 @@ if [[ "${SKIP_BUILD}" != true ]]; then
 fi
 [[ -s "${SERVICE_JAR}" && -s "${BENCHMARK_JAR}" ]] || { echo "Build artifacts are missing" >&2; exit 2; }
 printf '%s\n' "${JAVA_VERSION}" > "${ROOT}/java-version.txt"
-printf 'windows=%s\nwarmupSeconds=%s\nmeasureSeconds=%s\nheap=%s\ncollector=%s\naccountLanes=%s\nmatchingEngines=%s\nmatcherWaitStrategy=%s\nsettlementWaitStrategy=%s\n' \
-  "${WINDOWS_CSV}" "${WARMUP_SECONDS}" "${MEASURE_SECONDS}" "${HEAP}" "${COLLECTOR}" "${ACCOUNT_LANES}" "${MATCHING_ENGINES}" "${MATCHER_WAIT_STRATEGY}" "${SETTLEMENT_WAIT_STRATEGY}" > "${ROOT}/strategy.txt"
+printf 'windows=%s\nwarmupSeconds=%s\nmeasureSeconds=%s\nnodeXms=%s\nnodeXmx=%s\nclientXms=%s\nclientXmx=%s\ncollector=%s\naccountLanes=%s\nmatchingEngines=%s\nbatchSize=%s\ntradingProfile=%s\nisolateStage=%s\nenableJfr=%s\nmatcherWaitStrategy=%s\nsettlementWaitStrategy=%s\nsettlementSpinLimit=%s\n' \
+  "${WINDOWS_CSV}" "${WARMUP_SECONDS}" "${MEASURE_SECONDS}" "${NODE_XMS}" "${NODE_XMX}" "${CLIENT_XMS}" "${CLIENT_XMX}" "${COLLECTOR}" "${ACCOUNT_LANES}" "${MATCHING_ENGINES}" "${BATCH_SIZE}" "${TRADING_PROFILE}" "${ISOLATE_STAGE}" "${ENABLE_JFR}" "${MATCHER_WAIT_STRATEGY}" "${SETTLEMENT_WAIT_STRATEGY}" "${SETTLEMENT_SPIN_LIMIT}" > "${ROOT}/strategy.txt"
 
 NODE_PID=""
 NODE_LANES="${ACCOUNT_LANES}"
@@ -66,22 +78,26 @@ trap stop_node EXIT INT TERM
 
 start_node() {
   local dir="$1"; mkdir -p "${dir}/data" "${dir}/tmp" "${dir}/aeron"
+  local -a jfr_args=()
+  if [[ "${ENABLE_JFR}" == true ]]; then
+    jfr_args=("-XX:StartFlightRecording=settings=${PROFILE},filename=${dir}/node.jfr,maxsize=256m,dumponexit=true")
+  fi
   local -a args=(
     --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED
     --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED
     --add-opens=java.base/sun.nio.ch=ALL-UNNAMED
     --add-opens=java.base/java.util.zip=ALL-UNNAMED
     --enable-native-access=ALL-UNNAMED
-    "-Xms${HEAP}" "-Xmx${HEAP}" "-XX:SoftMaxHeapSize=${HEAP}" "${GC_FLAG[@]}" -XX:+AlwaysPreTouch -XX:+DisableExplicitGC
+    "-Xms${NODE_XMS}" "-Xmx${NODE_XMX}" "${GC_FLAG[@]}" -XX:+AlwaysPreTouch -XX:+DisableExplicitGC
     -XX:NativeMemoryTracking=summary
     -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Dsurprising.aeron.hostnames=127.0.0.1
     -Dsurprising.aeron.egress-hostname=127.0.0.1 -Dsurprising.aeron.node-id=0
     "-Dsurprising.aeron.account-lanes=${NODE_LANES}" "-Dsurprising.aeron.matching-engines=${NODE_MATCHERS}"
     "-Dsurprising.aeron.owner-command-window=${window}" "-Dsurprising.aeron.matcher-wait-strategy=${MATCHER_WAIT_STRATEGY}"
     "-Dsurprising.aeron.settlement-wait-strategy=${SETTLEMENT_WAIT_STRATEGY}"
+    "-Dsurprising.aeron.settlement-spin-limit=${SETTLEMENT_SPIN_LIMIT}"
     -Dsurprising.aeron.core.threading-mode=SHARED_NETWORK -Dsurprising.aeron.service.idle-strategy=YIELDING
-    "-Dsurprising.aeron.data-dir=${dir}/data" "-Daeron.dir=${dir}/aeron" "-Djava.io.tmpdir=${dir}/tmp"
-    "-XX:StartFlightRecording=settings=${PROFILE},filename=${dir}/node.jfr,maxsize=256m,dumponexit=true"
+    "-Dsurprising.aeron.data-dir=${dir}/data" "-Daeron.dir=${dir}/aeron" "-Djava.io.tmpdir=${dir}/tmp" "${jfr_args[@]}"
     -cp "${SERVICE_JAR}" com.surprising.aeron.service.cluster.SurprisingClusterNode)
   printf '%q ' "${JAVA}" "${args[@]}" > "${dir}/node.command"; printf '\n' >> "${dir}/node.command"
   (cd "${dir}" && exec "${JAVA}" "${args[@]}") > "${dir}/node.log" 2>&1 & NODE_PID=$!
@@ -96,14 +112,14 @@ run_stage() {
   local stage="$1" profile="$2" batch="$3" window="$4"; local dir="${ROOT}/window-${window}/${stage}"
   mkdir -p "${dir}"; echo "[stage] window=${window} target=${stage} profile=${profile} batch=${batch} dir=${dir}"
   NODE_LANES="${ACCOUNT_LANES}"; NODE_MATCHERS="${MATCHING_ENGINES}"
-  if [[ "${stage}" == lane || "${stage}" == matcher ]]; then NODE_LANES="${LANE_STAGE_LANES}"; fi
-  if [[ "${stage}" == matcher ]]; then NODE_LANES="${MATCHER_STAGE_LANES}"; fi
-  printf 'target=%s\nnodeLanes=%s\nnodeMatchers=%s\nrequestedWindow=%s\n' "${stage}" "${NODE_LANES}" "${NODE_MATCHERS}" "${window}" > "${dir}/stage-config.txt"
+  if [[ "${ISOLATE_STAGE}" == true && ( "${stage}" == lane || "${stage}" == matcher ) ]]; then NODE_LANES="${LANE_STAGE_LANES}"; fi
+  if [[ "${ISOLATE_STAGE}" == true && "${stage}" == matcher ]]; then NODE_LANES="${MATCHER_STAGE_LANES}"; fi
+  printf 'target=%s\nnodeLanes=%s\nnodeMatchers=%s\nrequestedWindow=%s\ntradingProfile=%s\nbatchSize=%s\nenableJfr=%s\n' "${stage}" "${NODE_LANES}" "${NODE_MATCHERS}" "${window}" "${profile}" "${batch}" "${ENABLE_JFR}" > "${dir}/stage-config.txt"
   start_node "${dir}"
   "${JCMD}" "${NODE_PID}" VM.native_memory baseline > "${dir}/nmt-baseline.txt" 2>&1 || true
   local -a client_args=(
     --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED
-    --add-opens=java.base/java.util.zip=ALL-UNNAMED --enable-native-access=ALL-UNNAMED "${GC_FLAG[@]}" -Xms1g -Xmx1g
+    --add-opens=java.base/java.util.zip=ALL-UNNAMED --enable-native-access=ALL-UNNAMED "${GC_FLAG[@]}" "-Xms${CLIENT_XMS}" "-Xmx${CLIENT_XMX}"
     -Dsurprising.aeron.hostnames=127.0.0.1 -Dsurprising.aeron.egress-hostname=127.0.0.1
     -Dsurprising.aeron.product-line=LINEAR_PERPETUAL "-Daeron.dir=${dir}/client-aeron"
     "-Dsurprising.aeron.capacity-warmup-seconds=${WARMUP_SECONDS}" "-Dsurprising.aeron.capacity-duration-seconds=${MEASURE_SECONDS}"
@@ -137,10 +153,10 @@ run_stage() {
 IFS=',' read -r -a WINDOWS <<< "${WINDOWS_CSV}"
 for window in "${WINDOWS[@]}"; do
   [[ "${window}" =~ ^[0-9]+$ ]] || { echo "Invalid window: ${window}" >&2; exit 2; }
-  if [[ -z "${ONLY_STAGE}" || "${ONLY_STAGE}" == owner ]]; then run_stage owner MIXED 1 "${window}"; fi
-  if [[ -z "${ONLY_STAGE}" || "${ONLY_STAGE}" == matcher ]]; then run_stage matcher MIXED 20 "${window}"; fi
-  if [[ -z "${ONLY_STAGE}" || "${ONLY_STAGE}" == lane ]]; then run_stage lane FILL_HEAVY 20 "${window}"; fi
-  if [[ -z "${ONLY_STAGE}" || "${ONLY_STAGE}" == end_to_end ]]; then run_stage end_to_end MIXED 20 "${window}"; fi
+  if [[ -z "${ONLY_STAGE}" || "${ONLY_STAGE}" == owner ]]; then run_stage owner "${TRADING_PROFILE}" "${BATCH_SIZE}" "${window}"; fi
+  if [[ -z "${ONLY_STAGE}" || "${ONLY_STAGE}" == matcher ]]; then run_stage matcher "${TRADING_PROFILE}" "${BATCH_SIZE}" "${window}"; fi
+  if [[ -z "${ONLY_STAGE}" || "${ONLY_STAGE}" == lane ]]; then run_stage lane "${TRADING_PROFILE}" "${BATCH_SIZE}" "${window}"; fi
+  if [[ -z "${ONLY_STAGE}" || "${ONLY_STAGE}" == end_to_end ]]; then run_stage end_to_end "${TRADING_PROFILE}" "${BATCH_SIZE}" "${window}"; fi
 done
 python3 - "${ROOT}" <<'PY'
 import json, pathlib, sys

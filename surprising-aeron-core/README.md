@@ -738,7 +738,7 @@ AMEND/REPLACE 的新订单ID接口采用撤旧下新语义：撮合已成功撤�
 - `MatcherSettlementPlan` 在 Matcher 验证不可变事实；当前订单与账户变更由所属 Lane 校验/应用。持仓身份在 Lane 输出到 Owner 有序收集期间保持引用，复用既有持仓变化索引去重；未成交订单不再预建空持仓身份，恢复也不额外制造这类身份。
 - Owner 保留撮合证据链首尾校验、全局提交顺序、Treasury/资金汇总、终态与结果索引、事实发布。批量逐项结果处理从 Owner 移至 Matcher，批次游标仍由 Owner 独占。撤单、替换、触发与风险控制的必要业务续程不因此被取消。
 - `ClusterCommandPipelineTest.matcherPublishesOrdinaryAndBatchFillsToLanesWithoutOwnerDrainingResults` 在六产品线上暂停 Owner drain，证明真实成交可由 Matcher/Lane 独立完成，之后核对串行状态和快照。`MatcherSettlementPlanTest` 验证保守路由标记、失败发布与事件复用；`RuntimeIdentityRegistryTest` 覆盖跨在途输出的身份退休。
-- 性能使用 `ClusterOperationalBenchmark` 的128币对混合/双向成交，以及 `ClusterDirectSettlementBenchmark` 的六产品线开平仓循环；均连接外部真实单成员，完整记录见根目录 `PERFORMANCE_VALIDATION.md`。直接路径不等于 Owner 全部瓶颈已经消除，也不预先承诺30万/s。
+- 标准吞吐使用 `ClusterOperationalBenchmark` 的256币对混合成交：4个 Account Lane、1个 matching engine、64 in-flight、G1、BUSY_SPIN、batch20，连接外部真实单成员；`ClusterDirectSettlementBenchmark` 等其他产品线开平仓循环仍是独立诊断，不能与该基线混合统计。完整记录见根目录 `PERFORMANCE_VALIDATION.md`，不预先承诺30万/s。
 
 
 ### 客户端订单标识由账户 Lane 管理（2026-09-13）

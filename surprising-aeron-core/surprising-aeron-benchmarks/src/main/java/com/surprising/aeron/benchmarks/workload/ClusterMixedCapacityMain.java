@@ -17,13 +17,14 @@ import org.HdrHistogram.Histogram;
  * All state changes and reads go through the actual cluster; no local Core is instantiated.
  */
 public final class ClusterMixedCapacityMain implements AutoCloseable {
-    static final int USERS = 1000, SYMBOLS = 128, WINDOW = 256;
+    /** Default single-member throughput baseline; scripts may override explicitly for diagnostics. */
+    static final int USERS = 1000, SYMBOLS = 256, WINDOW = 64;
     private final int batchSize;
     static final long BALANCE = 1_000_000_000L;
     private final List<Long> users = users();
     private final AeronClientPool client;
     private final int window = Integer.getInteger("surprising.aeron.capacity-async-in-flight", WINDOW);
-    private final int sessionWindow = Integer.getInteger("surprising.aeron.capacity-session-in-flight", 64);
+    private final int sessionWindow = Integer.getInteger("surprising.aeron.capacity-session-in-flight", WINDOW);
     private final boolean operational = Boolean.getBoolean("surprising.aeron.mixed-operational");
     private final boolean tradingStream = operational || Boolean.getBoolean("surprising.aeron.mixed-trading-stream");
     private final boolean fillHeavy = Boolean.getBoolean("surprising.aeron.mixed-fill-heavy");
@@ -120,7 +121,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     }
 
     long measureRun() {
-        runFor(Integer.getInteger("surprising.aeron.capacity-duration-seconds", 300), true);
+        runFor(Integer.getInteger("surprising.aeron.capacity-duration-seconds", 60), true);
         return terminal;
     }
 
