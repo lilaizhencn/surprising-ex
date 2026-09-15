@@ -65,7 +65,8 @@ public final class LaneCommandContextRing {
      * pending command in one object removes the old two-object lifecycle (Context -> PendingMatching)
      * and makes slot ownership explicit: one sequence, one reusable slot.
      */
-    public static final class Context extends PendingMatching {
+    public static final class Context extends PendingMatching
+            implements com.surprising.aeron.service.state.MatcherSettlementEvent.MatcherCompletionRoute {
         private long coreSequence;
         private long expectedLaneMask;
         private long completedLaneMask;
@@ -82,6 +83,7 @@ public final class LaneCommandContextRing {
             submittedMatcherShard = shardId;
         }
 
+        @Override
         public void releaseMatcherSubmission(int shardId) {
             if (submittedMatcherShard != shardId)
                 throw new IllegalStateException("matcher completion belongs to another shard");

@@ -10,6 +10,10 @@ import java.lang.invoke.VarHandle;
  * Mutable completion state is isolated from the fact payload and is only used by the owner coordinator.
  */
 public final class MatcherSettlementEvent implements SettlementLaneWorker.Command {
+    public interface MatcherCompletionRoute {
+        void releaseMatcherSubmission(int matcherShard);
+    }
+
     private static final RuntimeTreasuryDelta EMPTY_TREASURY_DELTA = new RuntimeTreasuryDelta(1);
     private static final int CACHE_LINE_LONGS = 16;
     private static final VarHandle LONGS = MethodHandles.arrayElementVarHandle(long[].class);
@@ -55,8 +59,9 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     private int directShard;
     private java.util.List<Long> authorizedCancellations = java.util.List.of();
     private com.surprising.aeron.service.matching.CoreMatchingResult firstDirectResult, lastDirectResult;
-    /** Matcher 队列路由释放回调；直达结果先释放路由，再通知 Lane，避免 Owner 重复轮询。 */
-    private Runnable matcherCompletionRelease;
+    /** 已有序号上下文的路由；直达结果先释放路由，再通知 Lane。 */
+    private MatcherCompletionRoute matcherCompletionRoute;
+    private int matcherCompletionShard;
     /** 完成前由命令持有，不归还结果容器；事件回收时释放引用。 */
     LaneOrderResultTarget resultTarget;
     static final class BatchStorage {
@@ -231,18 +236,21 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         runtime.signalDirectSettlement(routedLaneMask);
     }
 
-    /** 由 Matcher pipeline 设置；只用于直达事件，且每代最多执行一次。 */
-    public void matcherCompletionRelease(Runnable release) {
-        if (!direct || directPublished || matcherCompletionRelease != null) {
+    /** 由 Matcher pipeline 设置；复用已有 Context，不为每笔直达命令创建回调对象。 */
+    public void matcherCompletionRoute(MatcherCompletionRoute route, int matcherShard) {
+        if (!direct || directPublished || matcherCompletionRoute != null || matcherShard < 0) {
             throw new IllegalStateException("invalid matcher completion release callback");
         }
-        matcherCompletionRelease = java.util.Objects.requireNonNull(release);
+        matcherCompletionRoute = java.util.Objects.requireNonNull(route);
+        matcherCompletionShard = matcherShard;
     }
 
     private void releaseMatcherCompletionBeforeSignal() {
-        Runnable release = matcherCompletionRelease;
-        matcherCompletionRelease = null;
-        if (release != null) release.run();
+        MatcherCompletionRoute route = matcherCompletionRoute;
+        int shard = matcherCompletionShard;
+        matcherCompletionRoute = null;
+        matcherCompletionShard = -1;
+        if (route != null) route.releaseMatcherSubmission(shard);
     }
 
     public com.surprising.aeron.service.matching.CoreMatchingResult firstDirectResult() {
@@ -368,7 +376,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             throw new IllegalStateException("cannot recycle an incomplete matcher settlement");
         }
         direct = false; directPublished = false; directFailure = null; dispatched = false;
-        matcherCompletionRelease = null;
+        matcherCompletionRoute = null;
+        matcherCompletionShard = -1;
         directCoreSequence = 0;
         directCommandId = null; authorizedCancellations = java.util.List.of();
         firstDirectResult = lastDirectResult = null; routedLaneMask = 0;

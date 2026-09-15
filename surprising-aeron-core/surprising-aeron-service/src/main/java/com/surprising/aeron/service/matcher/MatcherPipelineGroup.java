@@ -55,7 +55,7 @@ public final class MatcherPipelineGroup implements AutoCloseable {
         context.claimMatcherSubmission(shardId);
         try {
             if (settlement != null && settlement.direct()) {
-                settlement.matcherCompletionRelease(() -> context.releaseMatcherSubmission(shardId));
+                settlement.matcherCompletionRoute(context, shardId);
             }
             shard.submit(coreSequence, command, settlement);
         } catch (RuntimeException failure) {
