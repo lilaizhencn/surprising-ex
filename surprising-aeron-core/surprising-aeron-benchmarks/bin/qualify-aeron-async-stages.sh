@@ -126,7 +126,9 @@ run_stage() {
     -Dsurprising.aeron.mixed-operational=false "-Dsurprising.aeron.capacity-async-in-flight=${window}"
     "-Dsurprising.aeron.capacity-session-in-flight=${window}")
   if [[ "${ENABLE_JFR}" == true ]]; then
-    client_args+=("-XX:StartFlightRecording=settings=${PROFILE},filename=${dir}/client.jfr,maxsize=256m,dumponexit=true")
+    # JMH launches a runner and a forked benchmark JVM.  A single filename
+    # lets both JVMs write the same recording and produces an invalid JFR.
+    client_args+=("-XX:StartFlightRecording=settings=${PROFILE},filename=${dir}/client-%p.jfr,maxsize=256m,dumponexit=true")
   fi
   printf '%q ' "${JAVA}" "${client_args[@]}" -jar "${BENCHMARK_JAR}" org.openjdk.jmh.Main ClusterOperationalBenchmark.continuousOperations \
     -p controlPageSize=0 -p inFlightWindow="${window}" -p tradingProfile="${profile}" -p batchSize="${batch}" \
@@ -148,12 +150,13 @@ run_stage() {
       "${JFR}" view --width 220 "${view}" "${dir}/node.jfr" > "${dir}/${view}.txt" 2>&1 || true
     done
   fi
-  if [[ -s "${dir}/client.jfr" ]]; then
-    "${JFR}" summary "${dir}/client.jfr" > "${dir}/client-jfr-summary.txt" 2>&1 || true
+  while IFS= read -r -d '' client_jfr; do
+    client_prefix="${client_jfr%.jfr}"
+    "${JFR}" summary "${client_jfr}" > "${client_prefix}-summary.txt" 2>&1 || true
     for view in thread-cpu-load hot-methods allocation-by-class allocation-by-site allocation-by-thread contention-by-thread latencies-by-type gc safepoints; do
-      "${JFR}" view --width 220 "${view}" "${dir}/client.jfr" > "${dir}/client-${view}.txt" 2>&1 || true
+      "${JFR}" view --width 220 "${view}" "${client_jfr}" > "${client_prefix}-${view}.txt" 2>&1 || true
     done
-  fi
+  done < <(find "${dir}" -maxdepth 1 -type f -name 'client-*.jfr' -print0)
   python3 "${SCRIPT_DIR}/summarize-aeron-async-stage.py" "${dir}" --stage "${stage}" --window "${window}" > "${dir}/metrics.pretty.json"
   if (( client_status != 0 )); then echo "stage client failed: ${dir}" >&2; return "${client_status}"; fi
 }
