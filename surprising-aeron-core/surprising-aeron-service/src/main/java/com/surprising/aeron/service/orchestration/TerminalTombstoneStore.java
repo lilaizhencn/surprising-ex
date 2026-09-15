@@ -12,6 +12,8 @@ final class TerminalTombstoneStore {
     private final long[] maximumIndexedIds = new long[ENTITY_TYPE_COUNT];
     /** 实体索引直接链接 FIFO 槽，避免复制订单 ID 或删除时移动哈希探测链。 */
     private int[] entityBuckets = new int[256], entityNext = new int[128], entityPrevious = new int[128];
+    /** 已索引实体槽的桶号；FIFO退窗直接解链，避免再次计算实体哈希。 */
+    private int[] entityBucketBySlot = new int[128];
     /** FIFO有效区间；容量不足仅在高水位增长，完成序号后由调用方裁剪保留窗口。 */
     private int head, size;
     private long[] ids = new long[128], users = new long[128], sequences = new long[128];
@@ -90,6 +92,7 @@ final class TerminalTombstoneStore {
 
     private void indexEntity(int slot) {
         int bucket = entityBucket(types[slot], ids[slot]);
+        entityBucketBySlot[slot] = bucket;
         int nextSlot = entityBuckets[bucket];
         entityPrevious[slot] = 0;
         entityNext[slot] = nextSlot;
@@ -100,10 +103,11 @@ final class TerminalTombstoneStore {
     /** 淘汰已经知道 FIFO 槽位，直接解链，不再查找实体或搬动其他实体。 */
     private void unlinkEntity(int slot) {
         int previous = entityPrevious[slot], following = entityNext[slot];
-        if (previous == 0) entityBuckets[entityBucket(types[slot], ids[slot])] = following;
+        if (previous == 0) entityBuckets[entityBucketBySlot[slot]] = following;
         else entityNext[previous - 1] = following;
         if (following != 0) entityPrevious[following - 1] = previous;
         entityPrevious[slot] = entityNext[slot] = 0;
+        entityBucketBySlot[slot] = -1;
     }
 
     private int bucket(int type, long user, String client) {
@@ -170,6 +174,8 @@ final class TerminalTombstoneStore {
         entityBuckets = new int[capacity * 2];
         entityNext = new int[capacity];
         entityPrevious = new int[capacity];
+        entityBucketBySlot = new int[capacity];
+        java.util.Arrays.fill(entityBucketBySlot, -1);
         for (int i = 0; i < size; i++) {
             indexEntity(i);
             if (indexed[i]) indexClient(i);
