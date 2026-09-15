@@ -470,13 +470,19 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     }
 
     private void applyRuntime(long orderId, OrderRuntime current, String symbol) {
-        IndexedOrder previous = ordersById.get(orderId);
-        if (previous == null) {
-            if (current != null) add(new IndexedOrder(current, symbol));
+        if (current == null) {
+            // Removal already returns the old entry; do not probe the same order twice.
+            IndexedOrder previous = ordersById.remove(orderId);
+            if (previous != null) {
+                removeParticipant(previous);
+                remove(idsByUser, previous.userId(), orderId);
+                remove(idsBySymbol, previous.symbol(), orderId);
+            }
             return;
         }
-        if (current == null) {
-            remove(previous);
+        IndexedOrder previous = ordersById.get(orderId);
+        if (previous == null) {
+            add(new IndexedOrder(current, symbol));
             return;
         }
         boolean changedParticipant = previous.userId() != current.userId() || !previous.symbol.equals(symbol)
@@ -528,13 +534,6 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
         userIds.add(order.orderId());
         idsBySymbol.computeIfAbsent(order.symbol(), ignored ->
                 new LongHashSet(INITIAL_SYMBOL_INDEX_CAPACITY, 0.65f, false)).add(order.orderId());
-    }
-
-    private void remove(IndexedOrder order) {
-        removeParticipant(order);
-        ordersById.remove(order.orderId());
-        remove(idsByUser, order.userId(), order.orderId());
-        remove(idsBySymbol, order.symbol(), order.orderId());
     }
 
     private void addParticipant(IndexedOrder order) {

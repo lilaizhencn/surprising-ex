@@ -31,6 +31,7 @@ public final class PendingClusterIngress {
         if (length > MAX_BYTES - bytes || size == CAPACITY) throw new IllegalStateException("replicated command backlog capacity exhausted");
         bytes += length;
         Entry entry = entries[(head + size++) & (CAPACITY - 1)];
+        entry.queuedNanos = command == null ? 0 : CoreMatchingPhaseMetrics.sampleStart(command.header());
         entry.session = session; entry.command = command; entry.timestamp = timestamp; entry.position = position; entry.fingerprint = fingerprint;
     }
     public Entry first() { return size == 0 ? null : entries[head]; }
@@ -40,7 +41,7 @@ public final class PendingClusterIngress {
         Entry entry = entries[head];
         if (entry.command != null) bytes -= entry.command.payloadUnsafe().length;
         entry.session = null; entry.command = null; entry.fingerprint = null;
-        entry.timestamp = entry.position = 0;
+        entry.timestamp = entry.position = entry.queuedNanos = 0;
         head = (head + 1) & (CAPACITY - 1); size--;
     }
     public void clear() { while (size != 0) remove(); }
@@ -54,5 +55,7 @@ public final class PendingClusterIngress {
         public CommandFingerprint fingerprint;
         /** 业务必须沿用的日志时间和位置，不使用重试时刻替代。 */
         public long timestamp, position;
+        /** Diagnostic queue residence only, reset on every slot reuse. */
+        long queuedNanos;
     }
 }

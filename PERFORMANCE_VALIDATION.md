@@ -1380,3 +1380,529 @@ Total: reserved=3168918KB, committed=732874KB
 分段事件校验latency5-priority：{"laneCountHistogram": {"1": 10555, "2": 1764}, "negativeStageSamples": 0}；仅在完成标记acquire后读取Lane时刻。原始摘要文件/tmp/core-latency5-priority-profile/window-256/end_to_end/latency-sanity.json，SHA-256 `0221ee587545baa1435ce485ddd37a85f6634cacb6a05b8013eae08f86fa42f5`。
 
 清理完成：本批两组单节点plain/JFR、系统采样、分析与JMH均退出；删除本轮临时data/Archive/media、JFR、日志、脚本及测试报告，共531个文件，路径/大小/摘要清单SHA-256 `77d4bcbc979444f0c3b6f64183201aabd24aeb7126a65598bdd362f81b8f679d`。构建产物保留；未创建云资源。上述临时路径仅历史定位。
+
+
+## 2026-09-15 latency6：补齐 Owner 前置与响应出口耗时（采集前计划）
+
+- 当前 master `6e108584a2cc99ae951a830f34e4beedd5c1db6f`；对照 commit 不适用，仅本工作树先诊断、再单因素修改。问题：后撮合段已缩短，完整普通订单 p99 仍未达 5ms，不能相减不同分位数推断前置耗时。
+- 业务步骤：日志复制输入→Owner输入FIFO→依赖满足后的准入/冻结→既有Matcher/Lane→有序提交→输出FIFO→编码与egress。仅在现有输入信封、复用入口槽、输出信封携带采样时间；同一commandId散列1/64，新增JFR边界事件标明commandId两段long，无逐命令Map、日志、业务状态或协议修改。默认关闭；生命周期控制项不采样。输出采样截止编码前，不含慢会话重试。
+- 先 correctness：JDK25 HotSpot/GraalVM25.0.1、Maven3.9.16已核对；服务及依赖，ContinuousOwnerBenchmarkTest（含六线资金/快照/慢出口）、ClusteredBatchTradingBenchmarkTest。诊断开启验证真实跨线程事件；默认关闭回归。之后基线plain与独立JFR各30s预热+30s测量，沿用既有脚本固定全局/session/Owner256、1Matcher/4Lane、128symbols、MIXED20、seed25620、G1、BUSY_SPIN，Core512/1536m/client128/512m，单节点本机，零云资源，不改发压策略。
+- 命令：`ASYNC_RUN_ID=20260915-latency6-{plain,profile} ASYNC_ARTIFACT_DIR=/tmp/core-latency6-{plain,profile} ASYNC_WINDOWS=256 ASYNC_WARMUP_SECONDS=30 ASYNC_MEASURE_SECONDS=30 ASYNC_ONLY_STAGE=end_to_end ASYNC_COLLECTOR=G1 ASYNC_ENABLE_JFR={false,true} ASYNC_SKIP_BUILD={false,true} bash surprising-aeron-core/surprising-aeron-benchmarks/bin/qualify-aeron-async-stages.sh`。各独立节点/客户端JFR上限256m，沿用owner-commit-profile.jfc，NMT、线程、两秒ps/vm_stat/磁盘样本；按客户端epoch窗口分析分段、CPU、分配、GC与I/O。采集结束才解析大文件。
+- 此步是诊断，不预设性能提升；业务验收持续终态>=300000ops/s且普通订单p99<=5ms，零错误/超时/拒绝/unfinished、资金差0、快照正确。环境swap增长/DataLoss或主要预热未完成记录无效/缺口，不当容量结论；端到端256背压负载报告实际速率，未做coordinated-omission修正。锁定后续修改及保留门槛须在第二次采集之前追加。
+
+
+### latency6-decode：采样定位后的单因素修改计划（修改及采集前锁定）
+
+latency6同工作树基线：plain316894.539业务ops/s、普通p9916.162ms；JFR302736.963ops/s，Owner97.43%单核。普通输入FIFO均值1.280/p994.080ms、入口→准入均值3.982/p999.867ms、准入执行p990.044ms、输出FIFO p990.092ms；同commandId Core已复制输入→编码前p9913.214ms（3386样本）。批量下单入口等待p998.324ms、准入执行p990.025ms。Owner执行栈首位TradingOrderBatchCodec.decodeCommand（正式窗63叶样本），分配抽样也居首，主要位于prepareClusterPipelineScope；不是账户计算一次执行就耗费10ms。约1985.7B/business op；GC60次/313.222ms，最大7.250ms。后撮合、输入和输出队列不同分位数不可相加；端到端仍包括尚未测到的客户端/网络与延迟重试。
+
+本次仅移动四种高频订单命令（普通/批量下单、撤单）的纯协议解码到ContinuousTradingClusterService已有Aeron输入线程，Input与既有PendingClusterIngress槽携带同一个DecodedMatchingCommand；Owner既有窗口缓存接收该对象，路由缓存仍只由Owner写。无新线程、Map或第二套业务事件。非法payload在解码对象中携带原异常，到Owner原有校验/拒绝路径再抛出；不在传输线程拒单、丢弃日志或读取账户，非高频控制路径照旧。快照/角色切换仍FIFO，释放槽时清空解码引用。
+
+预锁保留门槛：正确性全通过；同配置plain持续吞吐>=301049.81（基线95%）且普通p99<=15.354ms（基线降低5%），JFR Owner解码叶样本消失/搬到服务线程、普通入口→准入p99<=8.880ms（降低10%）。若未达先记录并撤回本次业务改动，保留诊断证据；不靠调整负载/窗口/GC参数过线。业务5ms验收目标不变。先服务及依赖、跨线程/六线快照/批量测试；再latency6-decode/plain、profile同脚本同参数，同工作树source.diff哈希。JMH更新ContinuousOwnerBenchmark覆盖输入线程预解码，batch1/20，LINEAR_PERPETUAL、BUSY_SPIN、3x1s预热/3x1s测量、1fork/1thread、G1独立plain及-prof gc；微基准仅验证真实交接路径成本不作交易容量。
+
+
+采集有效性补查（latency6-decode采集前）：latency6/plain正式窗15个系统样本有128pages swap-in、0swap-out，因此按严格环境门槛该容量对照无效；profile14样本swap-in/out均0、JFR DataLoss0，阶段归因可用。上述plain数值保留为现象，不能据此宣称精确提升百分比。保留判断追加：修改后plain须无swap增长、吞吐>=300000且普通p99<=15ms，并满足原JFR准入等待降低/热点迁移条件；最终仍只能部分验证，5ms门槛不降。若希望严格百分比比较需另锁新基线，不回跑历史commit。
+
+首轮latency6-decode correctness：新增畸形命令测试6条产品线断言失败，原因是串行对照把6条setup成功响应也计入待比较列表；生产两边均返回4条INVALID_COMMAND。已在测试setup后清空响应列表，后续重跑，不将失败掩盖成已通过。
+
+
+latency6-decode/plain首次结果：355051.838ops/s、普通p9914.516ms、资金差0、offered=terminal10659140业务/1018692消息、unfinished0。但正式窗15个系统样本出现282pages swap-in，容量结论按标准无效，不能据此算提升。当前profile仍在运行；锁定一次同代码、同参数、同30+30时长plain复测`latency6-decode-repeat`（仅plain、skipBuild=true，不变负载），用于环境有效性核查。若仍有swap或预热缺口，最终性能保留部分验证，不把环境异常解释成代码性能回退。
+
+
+latency6-decode拒绝保留：profile正式窗无swap、DataLoss0，Owner解码叶样本从63变0，服务线程出现32解码叶样本；但普通入口→准入p999.504ms（原9.867ms）未达预锁<=8.880ms，仅均值3.982→3.363ms。profile327448.626ops/s、普通p9916.424ms、约1996.8B/op（没有降低分配），GC65次/336.410ms/max6.154ms。按预案撤回解码前移及其专属测试/交接字段，保留最初低比例诊断。未启动的decode-repeat取消，不以额外复测挑选有利结果。该尝试正确性最终通过，但性能保留门槛失败。
+
+### latency6-index：终态活跃订单索引去重复查找（修改及采集前锁定）
+
+Owner getMapped的完整栈集中于ActiveOrderIndex.applyRuntime→RuntimeFactIndexes.order→visitChangedIndexes，终态分支当前get(orderId)再remove(orderId)探测同一键。仅改为remove直接取得原索引项，再移除账户/币对/对手方二级索引；不存在项仍无操作，OPEN更新分支不变，删除原仅承担重复删除的private remove方法。无新增状态、字段、缓存或协议。输入解码保持本轮基线位置。
+
+验收：六线资金/依赖/快照及索引终态/重复删除/共享用户币对回归；新增JMH真实ActiveOrderIndex终态退出，普通空索引与同用户多订单存量混合，当前工作树单因素前后各3x1s/3x1s、1fork/1thread/G1，plain与-prof gc分开。局部保留要求正确性全通过、终态退出微基准无>5%回退且无新增分配；单节点plain/JFR同原固定256/1Matcher/4Lane/128symbols/MIXED20/30+30参数，主链路退化门槛profile普通准入等待p99不超过基线9.867ms的105%=10.360ms，plain>=300000ops/s。环境无效只能部分验证不计算提升；5ms业务门槛保持未达，不承诺这项小优化独自解决全部尾延迟。
+
+## 2026-09-15 latency6 最终归档：准入排队定位与终态索引清理
+结论：正确性通过；保留终态活跃订单索引直接remove取得旧项、删除重复get和private remove转发；保留默认关闭的1/64队列诊断。解码前移按预锁门槛撤回，其字段和专属测试已删除。最终索引微基准均值改善约6%～8%，区间重叠，不能据此证明Core吞吐提升。所有plain及最终index/profile出现系统swap-in，容量验收无效；原始latency6/profile无swap且DataLoss0，足以定位前置排队。普通p99≤5ms仍未满足，整体为部分验证。
+环境：本机i9-9880H 2.30GHz，8物理核/16逻辑CPU，16GiB内存，macOS26.7/25G229；非容器，未设置CPU配额，未绑核；HotSpot Oracle GraalVM25.0.1、Maven3.9.16。开始约456GiB/结束约445GiB可用。均为当前master 6e108584及本轮工作树改动；对照commit不适用，未检出旧版。无云资源。固定配置及业务初始化见上述锁定计划和最终完整命令；六次独立新建单节点，未改负载/窗口/GC/币对/Matcher数。
+业务步骤及所有权：Owner消费已复制命令→既有FIFO等待依赖/构建scope→准入调用→Matcher/Lane→Owner按序发布终态→移除活跃订单及二级索引→输出FIFO。终态删除只改变索引查找次数，无新业务状态；重复终态、未知ID无操作，共享账户/币对的其他订单保留。新增JFR类只负责实际线程/队列边界，复用既有CoreMatchingPhaseMetrics；Input/Output各多一个long，入口槽多一个long，不新增逐命令容器或业务对象。默认关闭时不创建JFR事件、不读nanoTime；现有输入/输出信封尺寸约各增8B，不能声称完全零内存成本。
+测试命令及范围：
+```text
+mvn -q -pl surprising-aeron-core/surprising-aeron-service -am -Dcore.settlementLatencyDiagnostics=true test
+mvn -q -pl surprising-aeron-core/surprising-aeron-benchmarks -am -Dtest=ClusteredBatchTradingBenchmarkTest,ContinuousOwnerBenchmarkTest -Dsurefire.failIfNoSpecifiedTests=false test
+```
+最终XML计数：`{"surprising-product-api": {"tests": 12, "failures": 0, "errors": 0, "skipped": 0}, "surprising-instrument/surprising-instrument-api": {"tests": 12, "failures": 0, "errors": 0, "skipped": 0}, "surprising-aeron-core/surprising-aeron-benchmarks": {"tests": 144, "failures": 0, "errors": 0, "skipped": 1}, "surprising-aeron-core/surprising-aeron-service": {"tests": 963, "failures": 0, "errors": 0, "skipped": 0}, "surprising-aeron-core/surprising-aeron-client": {"tests": 49, "failures": 0, "errors": 0, "skipped": 0}, "surprising-aeron-core/surprising-aeron-protocol": {"tests": 110, "failures": 0, "errors": 0, "skipped": 0}}`。共1290个用例，最终执行1289、默认关闭诊断时跳过1个；该跨线程诊断用例已在本轮初始开启诊断时通过。六线资金、订单终态、依赖、快照恢复及慢出口由服务/批量/ContinuousOwner测试覆盖。未启动wallet或外围服务，未做三节点/GCP/长稳；本次没有新增长期索引或缓存，不据短测声称无泄漏。
+吞吐均取steady终态增量/steady秒数；排空另报。业务ops按批量item展开，Core消息单列，fill不计入订单ops。MIXED每place/cancel批20项，平均约10.46业务项/Core消息；行情更新另报。吞吐是256背压闭环的已达负载，没有预设恒定到达率，没有coordinated-omission修正；延迟含测量边界后排空的请求完成，终态时刻取客户端回调，不是FIFO reap时刻。
+| 变体/模式 | steady业务ops/s | Core消息/s | fills/s | 普通p99 ms | drain ms/业务项 | 满窗等待占测量时间 | 系统swap-in/out pages |
+|---|---:|---:|---:|---:|---|---:|---|
+| latency6/plain | 316894.539 | 30296.514 | 75441.844 | 16.162 | 22.941/2684 | 85.05% | 128/0 |
+| latency6/profile | 302736.963 | 28948.145 | 72071.012 | 17.203 | 7.779/2678 | 84.81% | 0/0 |
+| latency6-decode/plain | 355051.838 | 33932.478 | 84526.418 | 14.516 | 7.324/2681 | 84.64% | 282/0 |
+| latency6-decode/profile | 327448.626 | 31302.117 | 77954.614 | 16.424 | 7.869/2682 | 84.11% | 0/0 |
+| latency6-index/plain | 350929.052 | 33538.295 | 83545.196 | 15.179 | 7.400/2679 | 85.48% | 64/0 |
+| latency6-index/profile | 321164.586 | 30703.597 | 76458.412 | 16.269 | 7.367/2679 | 83.18% | 256/0 |
+系统采样2s一次，表中为落在正式epoch窗口内14～15个样本首尾差；边缘约2s分辨率，swap-out均0不代表无swap干扰。各轮JFR都无DataLoss；基线plain128、decode/plain282、index/plain64、index/profile256pages swap-in已保留，不算作有效容量提升。
+
+latency6/plain 原始业务/完成性摘要（单位us，meanus也为us；所有类型未采独立accepted延迟，不能用terminal直方图替代）：
+```text
+measurementStartEpochMillis=1789481662357
+measurementEndEpochMillis=1789481692389
+steadyCapacity elapsedSeconds=30.031079 terminalBusinessOperations=9516685 terminalCoreMessages=909837 fills=2265600 businessOpsPerSec=316894.539 coreMessagesPerSec=30296.514 fillsPerSec=75441.844 peakInFlight=256 windowBlockedCount=216196 windowBlockedNanos=25540432343
+pipelineHighWater matcher=119 completion=89 context=136 lanes=[41, 44, 48, 44]
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=1807 businessHash=8287433a83d42acd
+mixedCapacity=PASS elapsedSeconds=30.054 terminalBusinessOperations=9519369 offeredBusinessOperations=9519369 terminalCoreMessages=910089 offeredCoreMessages=910089 businessOpsPerSec=316741.947 coreMessagesPerSec=30281.772 fills=2265600 fillsPerSec=75384.257 queries=0 unfinished=0 peakInFlight=256 measuredCycles=885 totalCycles=1807 triggerExecutions=0
+business=PLACE_ORDER items=226560 requests=226560 p50us=6393 p90us=11198 p95us=12189 p99us=16162 p999us=28868 maxus=47710 meanus=7159.038
+business=CANCEL_ORDER items=226560 requests=226560 p50us=6430 p90us=8527 p95us=9420 p99us=14540 p999us=24903 maxus=50921 meanus=6054.936
+business=APPLY_MARK_PRICE items=3849 requests=3849 p50us=6217 p90us=11886 p95us=14516 p99us=26640 p999us=42958 maxus=45252 meanus=7443.549
+business=PLACE_ORDER_BATCH items=6796800 requests=339840 p50us=7307 p90us=14401 p95us=15548 p99us=19496 p999us=35061 maxus=50921 meanus=8728.121
+business=CANCEL_ORDER_BATCH items=2265600 requests=113280 p50us=14368 p90us=16343 p95us=17432 p99us=31735 p999us=44466 maxus=49905 meanus=14772.264
+```
+Lane usefulExecutionRatio（测量+排空；busy CPU不是业务饱和）：{'0': 0.4108, '1': 0.4094, '2': 0.4127, '3': 0.409}。期末offered=terminal，unfinished=0，资金差0；失败/超时会使客户端PASS失败，本轮均PASS。普通持续单笔MATCH_STREAM未另跑，本轮仅MIXED，不混用口径。
+
+latency6/profile 原始业务/完成性摘要（单位us，meanus也为us；所有类型未采独立accepted延迟，不能用terminal直方图替代）：
+```text
+measurementStartEpochMillis=1789481767016
+measurementEndEpochMillis=1789481797031
+steadyCapacity elapsedSeconds=30.014842 terminalBusinessOperations=9086602 terminalCoreMessages=868874 fills=2163200 businessOpsPerSec=302736.963 coreMessagesPerSec=28948.145 fillsPerSec=72071.012 peakInFlight=256 windowBlockedCount=216961 windowBlockedNanos=25456282587
+pipelineHighWater matcher=128 completion=55 context=128 lanes=[40, 39, 42, 43]
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=1676 businessHash=eb149db84584d152
+mixedCapacity=PASS elapsedSeconds=30.023 terminalBusinessOperations=9089280 offeredBusinessOperations=9089280 terminalCoreMessages=869120 offeredCoreMessages=869120 businessOpsPerSec=302747.725 coreMessagesPerSec=28948.839 fills=2163200 fillsPerSec=72052.339 queries=0 unfinished=0 peakInFlight=256 measuredCycles=845 totalCycles=1676 triggerExecutions=0
+business=PLACE_ORDER items=216320 requests=216320 p50us=6655 p90us=11476 p95us=12509 p99us=17203 p999us=46497 maxus=87949 meanus=7492.658
+business=CANCEL_ORDER items=216320 requests=216320 p50us=6586 p90us=9003 p95us=9854 p99us=16039 p999us=31145 maxus=51347 meanus=6382.125
+business=APPLY_MARK_PRICE items=3840 requests=3840 p50us=6660 p90us=12238 p95us=14319 p99us=20234 p999us=28164 maxus=29179 meanus=7707.608
+business=PLACE_ORDER_BATCH items=6489600 requests=324480 p50us=7696 p90us=14942 p95us=16130 p99us=20938 p999us=38207 maxus=91684 meanus=9141.759
+business=CANCEL_ORDER_BATCH items=2163200 requests=108160 p50us=14704 p90us=16957 p95us=19054 p99us=35454 p999us=88145 maxus=91619 meanus=15328.925
+```
+Lane usefulExecutionRatio（测量+排空；busy CPU不是业务饱和）：{'0': 0.4094, '1': 0.404, '2': 0.4027, '3': 0.4022}。期末offered=terminal，unfinished=0，资金差0；失败/超时会使客户端PASS失败，本轮均PASS。普通持续单笔MATCH_STREAM未另跑，本轮仅MIXED，不混用口径。
+
+latency6-decode/plain 原始业务/完成性摘要（单位us，meanus也为us；所有类型未采独立accepted延迟，不能用terminal直方图替代）：
+```text
+measurementStartEpochMillis=1789482438920
+measurementEndEpochMillis=1789482468988
+steadyCapacity elapsedSeconds=30.013812 terminalBusinessOperations=10656459 terminalCoreMessages=1018443 fills=2536960 businessOpsPerSec=355051.838 coreMessagesPerSec=33932.478 fillsPerSec=84526.418 peakInFlight=256 windowBlockedCount=218648 windowBlockedNanos=25404744830
+pipelineHighWater matcher=116 completion=69 context=138 lanes=[40, 48, 43, 45]
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=2014 businessHash=9fdd3bead1af810e
+mixedCapacity=PASS elapsedSeconds=30.021 terminalBusinessOperations=10659140 offeredBusinessOperations=10659140 terminalCoreMessages=1018692 offeredCoreMessages=1018692 businessOpsPerSec=355054.524 coreMessagesPerSec=33932.494 fills=2536960 fillsPerSec=84505.797 queries=0 unfinished=0 peakInFlight=256 measuredCycles=991 totalCycles=2014 triggerExecutions=0
+business=PLACE_ORDER items=253696 requests=253696 p50us=5730 p90us=10182 p95us=11223 p99us=14516 p999us=23003 maxus=44367 meanus=6433.629
+business=CANCEL_ORDER items=253696 requests=253696 p50us=5390 p90us=7467 p95us=8245 p99us=11870 p999us=17760 maxus=24969 meanus=5297.835
+business=APPLY_MARK_PRICE items=3908 requests=3908 p50us=5705 p90us=10174 p95us=11829 p99us=15613 p999us=30244 maxus=30539 meanus=6532.544
+business=PLACE_ORDER_BATCH items=7610880 requests=380544 p50us=6369 p90us=12902 p95us=14049 p99us=17989 p999us=29868 maxus=53805 meanus=7716.568
+business=CANCEL_ORDER_BATCH items=2536960 requests=126848 p50us=13123 p90us=15065 p95us=17416 p99us=26656 p999us=41779 maxus=53247 meanus=13503.819
+```
+Lane usefulExecutionRatio（测量+排空；busy CPU不是业务饱和）：{'0': 0.4243, '1': 0.4273, '2': 0.4251, '3': 0.4249}。期末offered=terminal，unfinished=0，资金差0；失败/超时会使客户端PASS失败，本轮均PASS。普通持续单笔MATCH_STREAM未另跑，本轮仅MIXED，不混用口径。
+
+latency6-decode/profile 原始业务/完成性摘要（单位us，meanus也为us；所有类型未采独立accepted延迟，不能用terminal直方图替代）：
+```text
+measurementStartEpochMillis=1789482547514
+measurementEndEpochMillis=1789482577530
+steadyCapacity elapsedSeconds=30.015414 terminalBusinessOperations=9828506 terminalCoreMessages=939546 fills=2339840 businessOpsPerSec=327448.626 coreMessagesPerSec=31302.117 fillsPerSec=77954.614 peakInFlight=256 windowBlockedCount=219698 windowBlockedNanos=25245905305
+pipelineHighWater matcher=128 completion=85 context=133 lanes=[43, 42, 41, 44]
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=1821 businessHash=2ec206119dada4f5
+mixedCapacity=PASS elapsedSeconds=30.023 terminalBusinessOperations=9831188 offeredBusinessOperations=9831188 terminalCoreMessages=939796 offeredCoreMessages=939796 businessOpsPerSec=327452.130 coreMessagesPerSec=31302.240 fills=2339840 fillsPerSec=77934.182 queries=0 unfinished=0 peakInFlight=256 measuredCycles=914 totalCycles=1821 triggerExecutions=0
+business=PLACE_ORDER items=233984 requests=233984 p50us=6139 p90us=11051 p95us=12107 p99us=16424 p999us=29163 maxus=55050 meanus=6964.455
+business=CANCEL_ORDER items=233984 requests=233984 p50us=6103 p90us=7884 p95us=8699 p99us=14893 p999us=21069 maxus=46104 meanus=5698.372
+business=APPLY_MARK_PRICE items=3860 requests=3860 p50us=6344 p90us=11952 p95us=14172 p99us=31014 p999us=37650 maxus=38141 meanus=7481.423
+business=PLACE_ORDER_BATCH items=7019520 requests=350976 p50us=6758 p90us=14008 p95us=15138 p99us=20463 p999us=52101 maxus=59899 meanus=8377.094
+business=CANCEL_ORDER_BATCH items=2339840 requests=116992 p50us=14131 p90us=16113 p95us=19103 p99us=31948 p999us=55672 maxus=59506 meanus=14687.070
+```
+Lane usefulExecutionRatio（测量+排空；busy CPU不是业务饱和）：{'0': 0.4409, '1': 0.4373, '2': 0.4374, '3': 0.4313}。期末offered=terminal，unfinished=0，资金差0；失败/超时会使客户端PASS失败，本轮均PASS。普通持续单笔MATCH_STREAM未另跑，本轮仅MIXED，不混用口径。
+
+latency6-index/plain 原始业务/完成性摘要（单位us，meanus也为us；所有类型未采独立accepted延迟，不能用terminal直方图替代）：
+```text
+measurementStartEpochMillis=1789483204168
+measurementEndEpochMillis=1789483234198
+steadyCapacity elapsedSeconds=30.029255 terminalBusinessOperations=10538138 terminalCoreMessages=1007130 fills=2508800 businessOpsPerSec=350929.052 coreMessagesPerSec=33538.295 fillsPerSec=83545.196 peakInFlight=256 windowBlockedCount=213023 windowBlockedNanos=25669540437
+pipelineHighWater matcher=120 completion=71 context=128 lanes=[45, 44, 46, 43]
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=1988 businessHash=edeef2b9057769bb
+mixedCapacity=PASS elapsedSeconds=30.037 terminalBusinessOperations=10540817 offeredBusinessOperations=10540817 terminalCoreMessages=1007377 offeredCoreMessages=1007377 businessOpsPerSec=350931.786 coreMessagesPerSec=33538.255 fills=2508800 fillsPerSec=83524.613 queries=0 unfinished=0 peakInFlight=256 measuredCycles=980 totalCycles=1988 triggerExecutions=0
+business=PLACE_ORDER items=250880 requests=250880 p50us=5713 p90us=9887 p95us=10928 p99us=15179 p999us=47644 maxus=53411 meanus=6459.167
+business=CANCEL_ORDER items=250880 requests=250880 p50us=5554 p90us=7823 p95us=8511 p99us=13336 p999us=29245 maxus=49217 meanus=5518.166
+business=APPLY_MARK_PRICE items=3857 requests=3857 p50us=6025 p90us=10960 p95us=13049 p99us=46399 p999us=49283 maxus=49446 meanus=7219.783
+business=PLACE_ORDER_BATCH items=7526400 requests=376320 p50us=6619 p90us=12804 p95us=14049 p99us=18612 p999us=43057 maxus=52789 meanus=7876.152
+business=CANCEL_ORDER_BATCH items=2508800 requests=125440 p50us=12713 p90us=14966 p95us=16859 p99us=30916 p999us=50823 maxus=55279 meanus=13217.809
+```
+Lane usefulExecutionRatio（测量+排空；busy CPU不是业务饱和）：{'0': 0.4042, '1': 0.4067, '2': 0.403, '3': 0.4019}。期末offered=terminal，unfinished=0，资金差0；失败/超时会使客户端PASS失败，本轮均PASS。普通持续单笔MATCH_STREAM未另跑，本轮仅MIXED，不混用口径。
+
+latency6-index/profile 原始业务/完成性摘要（单位us，meanus也为us；所有类型未采独立accepted延迟，不能用terminal直方图替代）：
+```text
+measurementStartEpochMillis=1789483310993
+measurementEndEpochMillis=1789483341022
+steadyCapacity elapsedSeconds=30.033582 terminalBusinessOperations=9645723 terminalCoreMessages=922139 fills=2296320 businessOpsPerSec=321164.586 coreMessagesPerSec=30703.597 fillsPerSec=76458.412 peakInFlight=256 windowBlockedCount=211093 windowBlockedNanos=24982369489
+pipelineHighWater matcher=128 completion=70 context=133 lanes=[46, 44, 45, 38]
+mixedVerify=PASS fundsDiff=0 population=true hftPositions=true reservations=true loss=true totalCycles=1826 businessHash=898ced4faeeee684
+mixedCapacity=PASS elapsedSeconds=30.041 terminalBusinessOperations=9648402 offeredBusinessOperations=9648402 terminalCoreMessages=922386 offeredCoreMessages=922386 businessOpsPerSec=321175.000 coreMessagesPerSec=30704.289 fills=2296320 fillsPerSec=76439.661 queries=0 unfinished=0 peakInFlight=256 measuredCycles=897 totalCycles=1826 triggerExecutions=0
+business=PLACE_ORDER items=229632 requests=229632 p50us=6266 p90us=10895 p95us=11878 p99us=16269 p999us=32161 maxus=73596 meanus=7026.740
+business=CANCEL_ORDER items=229632 requests=229632 p50us=6213 p90us=8368 p95us=9199 p99us=13795 p999us=23035 maxus=46759 meanus=5938.483
+business=APPLY_MARK_PRICE items=3858 requests=3858 p50us=6582 p90us=11943 p95us=14065 p99us=17924 p999us=32358 maxus=37453 meanus=7459.507
+business=PLACE_ORDER_BATCH items=6888960 requests=344448 p50us=7147 p90us=14155 p95us=15278 p99us=19922 p999us=44236 maxus=77004 meanus=8614.981
+business=CANCEL_ORDER_BATCH items=2296320 requests=114816 p50us=13967 p90us=16179 p95us=18661 p99us=34013 p999us=73596 maxus=77004 meanus=14622.678
+```
+Lane usefulExecutionRatio（测量+排空；busy CPU不是业务饱和）：{'0': 0.4076, '1': 0.4118, '2': 0.4136, '3': 0.4079}。期末offered=terminal，unfinished=0，资金差0；失败/超时会使客户端PASS失败，本轮均PASS。普通持续单笔MATCH_STREAM未另跑，本轮仅MIXED，不混用口径。
+
+latency6 JFR正式窗口：
+| 边界/类型 | n | mean ms | p50 | p90 | p95 | p99 | p99.9 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| admissionExecution/CANCEL_ORDER | 3372 | 0.008 | 0.004 | 0.018 | 0.020 | 0.031 | 0.043 | 0.059 |
+| admissionExecution/CANCEL_ORDER_BATCH | 1686 | 0.008 | 0.008 | 0.009 | 0.011 | 0.022 | 0.046 | 0.122 |
+| admissionExecution/PLACE_ORDER | 3386 | 0.011 | 0.008 | 0.020 | 0.024 | 0.044 | 0.101 | 0.124 |
+| admissionExecution/PLACE_ORDER_BATCH | 5069 | 0.009 | 0.007 | 0.009 | 0.011 | 0.025 | 0.052 | 5.704 |
+| ingressToAdmission/CANCEL_ORDER | 3372 | 2.993 | 2.924 | 3.971 | 5.199 | 8.774 | 14.877 | 18.537 |
+| ingressToAdmission/CANCEL_ORDER_BATCH | 1686 | 5.443 | 5.349 | 7.553 | 8.550 | 12.259 | 16.556 | 17.881 |
+| ingressToAdmission/PLACE_ORDER | 3386 | 3.982 | 3.201 | 7.190 | 7.870 | 9.867 | 15.718 | 19.160 |
+| ingressToAdmission/PLACE_ORDER_BATCH | 5069 | 2.590 | 2.548 | 4.098 | 4.938 | 8.324 | 13.868 | 16.738 |
+| ingressToControl/APPLY_MARK_PRICE | 32 | 5.438 | 4.356 | 8.960 | 9.931 | 11.249 | 11.249 | 12.643 |
+| ownerToEgress/APPLY_MARK_PRICE | 32 | 0.011 | 0.005 | 0.025 | 0.038 | 0.038 | 0.038 | 0.057 |
+| ownerToEgress/CANCEL_ORDER | 3372 | 0.011 | 0.006 | 0.023 | 0.031 | 0.072 | 0.391 | 0.951 |
+| ownerToEgress/CANCEL_ORDER_BATCH | 1686 | 0.011 | 0.007 | 0.021 | 0.030 | 0.079 | 0.175 | 0.194 |
+| ownerToEgress/PLACE_ORDER | 3386 | 0.013 | 0.008 | 0.026 | 0.035 | 0.092 | 0.378 | 0.948 |
+| ownerToEgress/PLACE_ORDER_BATCH | 5070 | 0.016 | 0.007 | 0.025 | 0.035 | 0.105 | 0.371 | 9.113 |
+| transportToOwner/APPLY_MARK_PRICE | 32 | 0.654 | 0.420 | 1.265 | 1.552 | 1.861 | 1.861 | 2.184 |
+| transportToOwner/CANCEL_ORDER | 3372 | 1.129 | 0.601 | 2.858 | 3.285 | 3.991 | 7.718 | 9.873 |
+| transportToOwner/CANCEL_ORDER_BATCH | 1686 | 1.279 | 1.250 | 2.091 | 2.372 | 3.959 | 7.717 | 7.768 |
+| transportToOwner/PLACE_ORDER | 3388 | 1.280 | 0.942 | 2.983 | 3.403 | 4.080 | 7.927 | 11.187 |
+| transportToOwner/PLACE_ORDER_BATCH | 5068 | 0.660 | 0.488 | 1.497 | 1.748 | 2.194 | 5.651 | 7.757 |
+`ingressToAdmission`截止实际apply前，包含FIFO等待及prepareClusterPipelineScope工作；`admissionExecution`仅Owner apply/绑定，不等于Lane完成冻结；`transportToOwner`含指纹计算、Input FIFO（decode变体还含前移解码）；`ownerToEgress`截止编码前，不含网络发送重试。只有相同唯一commandId的当前负载样本可关联，重试/重放不能直接用此离线join。不要相加/相减各阶段分位数，也不要跨进程相减nanoTime。
+同commandId已复制输入→编码前（同一JVM近似边界，包含JFR事件创建的微小耗时）：`{"CANCEL_ORDER": {"n": 3372, "mean": 4.690395298180631, "p50": 4.188002348754883, "p90": 6.695348721191406, "p95": 7.738996576416016, "p99": 11.132082643310547, "p999": 18.2727785078125, "max": 20.380835002075194}, "PLACE_ORDER": {"n": 3386, "mean": 5.804632945199803, "p50": 5.302061231079102, "p90": 8.622789245483398, "p95": 9.352637604614257, "p99": 13.21415485583496, "p999": 18.26406367492676, "max": 22.842400432128905}, "PLACE_ORDER_BATCH": {"n": 5068, "mean": 4.946888224670217, "p50": 4.796626985351563, "p90": 6.365408796508789, "p95": 7.3274162506103515, "p99": 11.160999053100586, "p999": 16.651660216918945, "max": 20.816413532348633}, "CANCEL_ORDER_BATCH": {"n": 1686, "mean": 8.225312178947549, "p50": 7.994406151245117, "p90": 10.448919580688477, "p95": 11.939820245483398, "p99": 15.89168907385254, "p999": 22.412291885253907, "max": 26.162228690429686}, "APPLY_MARK_PRICE": {"n": 32, "mean": 6.131658116436005, "p50": 5.137310948364258, "p90": 10.022377838134766, "p95": 10.134971500976562, "p99": 11.29863485925293, "p999": 11.29863485925293, "max": 14.240959616943359}}`。
+Matcher发布→最终提交每样本完整区间p99/ms：`{"PLACE_ORDER_BATCH": {"matcherToLastLaneStartNanos": 0.671, "maxLaneExecutionNanos": 0.1404, "matcherToLanesCompleteNanos": 0.7341, "lanesCompleteToOwnerNanos": 1.4747, "ownerFinalCommitMs": 0.0536, "publicationToCommitMs": 1.6242}, "CANCEL_ORDER": {"matcherToLastLaneStartNanos": 0.4929, "maxLaneExecutionNanos": 0.0159, "matcherToLanesCompleteNanos": 0.4982, "lanesCompleteToOwnerNanos": 1.3418, "ownerFinalCommitMs": 0.0259, "publicationToCommitMs": 1.3925}, "PLACE_ORDER": {"matcherToLastLaneStartNanos": 1.1182, "maxLaneExecutionNanos": 0.008, "matcherToLanesCompleteNanos": 1.1231, "lanesCompleteToOwnerNanos": 1.2411, "ownerFinalCommitMs": 0.0238, "publicationToCommitMs": 1.6931}}`。Owner finalCommit只覆盖最终返回的调用；普通撤批/行情无完整Matcher分段，未填零。跨Lane最大启动与最大执行可来自不同Lane。
+CPU折算单核百分比均值：`{"JVMCI-native CompilerThread0": 6.01, "C1 CompilerThread0": 0.97, "JFR Recorder Thread": 0.51, "JFR Periodic Tasks": 0.51, "aeron-md-nra": 1.78, "driver-conductor": 68.45, "/tmp/core-latency6-profile/window-256/end_to_end/aeron-surprising-linear_perpetual-0 [sender,receiver]": 97.3, "archive-conductor": 72.37, "consensus-module-101-0": 61.7, "aeron-client": 0.24, "clustered-service-101-0": 77.17, "trading-owner--1": 97.43, "core-matcher-0": 56.21, "core-account-lane-0": 98.26, "core-account-lane-1": 98.28, "core-account-lane-2": 98.26, "core-account-lane-3": 98.28, "Monitor Deflation Thread": 0.1, "JVMCI-native CompilerThread1": 25.6}`；Owner叶热点：`[["com/surprising/aeron/protocol/TradingOrderBatchCodec.decodeCommand", 63], ["org/agrona/collections/Long2ObjectHashMap.getMapped", 44], ["org/agrona/collections/Long2ObjectHashMap.put", 42], ["java/util/HashMap.getNode", 31], ["java/util/Arrays.fill", 31], ["com/surprising/aeron/service/orchestration/TerminalTombstoneStore.bucket", 30], ["com/surprising/aeron/service/state/MatcherSettlementPlan.clearReferences", 27], ["com/surprising/aeron/service/orchestration/OrderBatchExecutor.preparePipelinedPlaceBatch", 25], ["com/surprising/aeron/service/state/LanePublication.publish", 22], ["org/agrona/collections/Long2LongHashMap.get", 19], ["com/surprising/aeron/service/state/MatcherSettlementDispatcher.prepareDirect", 17], ["org/agrona/collections/Long2ObjectHashMap.remove", 17]]`。
+分配ThreadAllocationStatistics各线程首尾斜率之和601.149MB/s，除以该profile steady吞吐为1985.713B/business op；约1s采样边缘误差。线程bytes/s：`{"clustered-service-101-0": 32180296, "trading-owner--1": 90666941, "core-matcher-0": 147976435, "core-account-lane-0": 82573678, "core-account-lane-1": 82590058, "core-account-lane-2": 82581061, "core-account-lane-3": 82577398}`。
+分配抽样权重top class（bytes，不是精确对象数）：`[["com/surprising/aeron/service/state/OrderRuntime", 2693965568], ["[B", 2377372080], ["com/surprising/aeron/service/state/ReservationRuntime", 1270007864], ["[J", 1222652192], ["exchange/core2/core/common/MatcherResult", 1023836488], ["com/surprising/aeron/service/matching/CoreMatchingResult$NativeCommand", 706467144], ["com/surprising/aeron/service/state/ResolvedPlaceOrder", 705129616], ["java/lang/Long", 609337032], ["com/surprising/aeron/protocol/PlaceOrderCommand", 537553040], ["com/surprising/aeron/service/matching/CoreMatchingResult$MatcherPrefix", 507299968], ["exchange/core2/core/common/MatcherResult$MatcherEvent", 449563280], ["com/surprising/aeron/service/matching/CoreMatchingResult", 439704768]]`；top site：`[["com/surprising/aeron/protocol/TradingOrderBatchCodec.decodeCommand", 1317943720], ["com/surprising/aeron/service/state/TradingRuntimeState.preparedOrder", 1181471208], ["com/surprising/aeron/protocol/TradingOrderBatchCodec.encodeResultSource", 963956848], ["java/util/ArrayList.add", 845145112], ["com/surprising/aeron/service/matching/CoreMatchingResult.classify", 838370872], ["java/util/List.copyOf", 782095448], ["org/eclipse/collections/impl/map/mutable/primitive/LongObjectHashMap.get", 772728608], ["com/surprising/aeron/service/orchestration/CoreMessageFlyweightDecoder.decode", 752948232], ["com/surprising/aeron/service/state/RuntimeDerivativeFillCalculator$FillCursor.order", 731059456], ["java/util/concurrent/ConcurrentHashMap.putVal", 715892944], ["com/surprising/aeron/service/state/model/AssetBalance.validAsset", 659498424], ["com/surprising/aeron/service/state/OrderRuntime.withFill", 593796080]]`。JIT内联归因不等同源码实际分配点，如classify本身返回枚举。
+GC pause ms：`{"n": 60, "mean": 5.2203678, "p50": 5.152724, "p90": 5.466124, "p95": 5.631983999999999, "p99": 6.6115829999999995, "p999": 6.6115829999999995, "max": 7.250182}`；总313.222ms/1.044%正式窗。编译耗时ms：`{"n": 61, "mean": 23.293951672131147, "p50": 5.63914, "p90": 54.463347, "p95": 88.05789299999999, "p99": 187.24104599999998, "p999": 187.24104599999998, "max": 223.992409}`；SafepointBegin仅同步开始阶段：`{"n": 62, "mean": 0.1724116935483871, "p50": 0.09043300000000001, "p90": 0.11286299999999999, "p95": 0.118009, "p99": 0.126975, "p999": 0.126975, "max": 5.237812}`，不能当完整STW。
+heap bytes：`{"committed": 536870912, "afterGcFirst": 98517296, "afterGcLast": 101196512, "afterGcMin": 98517296, "afterGcMax": 101327408, "beforeGcMax": 405428896}`；没有old/live-set长稳斜率、逐对象总数或增长归因，不推断无泄漏。
+正式窗事件汇总 `[count,totalNs,maxNs,bytes或TLAB首对象size总和,maxObjectBytes,tlabBytes]`：`{"jdk.ClassLoad": [6, 634905, 340011, 0, 0, 0], "jdk.Deoptimization": [9, 0, 0, 0, 0, 0], "jdk.ExecuteVMOperation": [64, 314289319, 7264164, 0, 0, 0], "jdk.FileRead": [2, 11096, 8268, 2581, 0, 0], "jdk.FileWrite": [466068, 7251926457, 7429564, 869523712, 0, 0], "jdk.GarbageCollection": [60, 313222097, 7250183, 0, 0, 0], "jdk.ObjectAllocationInNewTLAB": [37783, 0, 0, 21448504, 16400, 18164889488], "jdk.ObjectAllocationOutsideTLAB": [135, 0, 0, 2214000, 16400, 0], "jdk.SafepointEnd": [62, 1631298, 40840, 0, 0, 0], "jdk.SafepointStateSynchronization": [62, 10408666, 5232840, 0, 0, 0], "jdk.ThreadEnd": [1, 0, 0, 0, 0, 0], "jdk.ThreadPark": [511177, 54826913297, 11909761, 0, 0, 0], "jdk.ThreadStart": [1, 0, 0, 0, 0, 0]}`。TLAB首对象/OutsideTLAB事件是部分对象，不能推算精确objects/op；最大观测对象见maxObjectBytes，分配抽样weight不当对象size。
+Owner/GC细目（列依次为event/threadOrGcCause/count/totalNs/maxNs/bytes/maxObjectBytes/tlabBytes）：
+```text
+jdk.ClassLoad	trading-owner--1	6	634905	340011	0	0	0
+jdk.Deoptimization	trading-owner--1	2	0	0	0	0	0
+jdk.FileRead	trading-owner--1	2	11096	8268	2581	0	0
+jdk.GarbageCollection	G1New:G1 Evacuation Pause	60	313222097	7250183	0	0	0
+jdk.ObjectAllocationInNewTLAB	trading-owner--1	5679	0	0	432064	4112	2738514576
+jdk.ObjectAllocationOutsideTLAB	core-account-lane-0	24	0	0	393600	16400	0
+jdk.ObjectAllocationOutsideTLAB	core-account-lane-1	35	0	0	574000	16400	0
+jdk.ObjectAllocationOutsideTLAB	core-account-lane-2	35	0	0	574000	16400	0
+jdk.ObjectAllocationOutsideTLAB	core-account-lane-3	41	0	0	672400	16400	0
+jdk.ThreadPark	trading-owner--1	2828	241860136	226307	0	0	0
+```
+每轮Owner测量期均6次类加载、2次本地jar读取，合计约11～13us；这是预热与严格Owner同步I/O门槛缺口，耗时不足解释9ms排队。Owner park最大约0.17～0.23ms，不能归因大锁阻塞；最终profile存在7次Owner deoptimization及78次编译，预热未彻底稳定。系统上下文切换、FD/Direct/Mapped峰值、完整异常throw-site尚缺；JFR FileWrite/park全文用流式窗口汇总，未用全录制初始化事件冒充正式窗等待。
+客户端窗口：`{"file": "/tmp/core-latency6-profile/window-256/end_to_end/client-2744.jfr", "cpuMeanSingleCorePercent": {"C1 CompilerThread1": 0.315552288, "JVMCI-native CompilerThread0": 7.119449523723636, "C1 CompilerThread0": 0.4338446212, "JFR Recorder Thread": 1.5696563254518519, "JFR Periodic Tasks": 0.4831277892965517, "com.surprising.aeron.benchmarks.workload.ClusterOperationalBenchmark.continuousOperations-jmh-worker-1": 98.11592883862069, "aeron-md-nra": 1.722067256827586, "driver-conductor": 51.52360173793104, "sender": 75.03881462068965, "receiver": 85.31880548965518, "mixed-egress-dispatcher": 40.31586123034483, "aeron-client": 0.17992866361379312, "benchmark-mark-price-source": 1.0829116446896552, "JVMCI-native CompilerThread1": 3.89608146832, "JVMCI-native CompilerThread2": 11.475278099733334, "JVMCI-native CompilerThread3": 33.65545352, "JVMCI-native CompilerThread4": 3.4865228160000004, "Service Thread": 0.1008334832, "Monitor Deflation Thread": 0.09899455600000001}, "gcCount": 143, "gcTotalMs": 124.017271, "gcMaxMs": 2.1124669999999997, "dataLoss": []}`。发压线程接近单核100%包含满窗忙等，egress未满核；不能把发压busy CPU当作全部编码工作，也不能宣称Core容量上限已完全测出。
+NMT结束各类reserved/committed（不是峰值；增量基线早于初始化，不是30s稳定增长率）：
+```text
+Total: reserved=3171212KB +23510KB, committed=733052KB +37574KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB -2048KB)
+-                     Class (reserved=1049241KB +328KB, committed=2713KB +968KB)
+-                    Thread (reserved=71847KB +15392KB, committed=2771KB +840KB)
+-                      Code (reserved=262087KB +11738KB, committed=50907KB +34954KB)
+-                        GC (reserved=92283KB +660KB, committed=71803KB +620KB)
+-                 GCCardSet (reserved=16KB +14KB, committed=16KB +14KB)
+-                  Compiler (reserved=440KB +187KB, committed=440KB +187KB)
+-                     JVMCI (reserved=142KB +84KB, committed=142KB +84KB)
+-                  Internal (reserved=1599KB +155KB, committed=1599KB +155KB)
+-                     Other (reserved=9413KB +4KB, committed=9413KB +4KB)
+-                    Symbol (reserved=4924KB +553KB, committed=4924KB +553KB)
+-    Native Memory Tracking (reserved=3057KB +1096KB, committed=3057KB +1096KB)
+-        Shared class space (reserved=16384KB, committed=14000KB)
+-               Arena Chunk (reserved=1643KB -5859KB, committed=1643KB -5859KB)
+-                   Tracing (reserved=17935KB -1609KB, committed=17935KB -1609KB)
+-                    Module (reserved=295KB +2KB, committed=295KB +2KB)
+-                 Safepoint (reserved=8KB, committed=8KB)
+-           Synchronization (reserved=1290KB +669KB, committed=1290KB +669KB)
+-            Serviceability (reserved=17KB, committed=17KB)
+-                 Metaspace (reserved=65726KB +99KB, committed=25790KB +6947KB)
+-      String Deduplication (reserved=1KB, committed=1KB)
+-           Object Monitors (reserved=1KB -3KB, committed=1KB -3KB)
+```
+JFR summary（全录制，仅验证事件配置/数量，不作正式窗性能）：
+```text
+ Start: 2026-09-15 14:15:11 (UTC)
+ Duration: 103 s
+ jdk.ThreadPark                        2342399      69652258
+ jdk.FileWrite                          903964      19482875
+ jdk.ObjectAllocationInNewTLAB           76199       1319389
+ jdk.ObjectAllocationSample              76179       1217860
+ jdk.Compilation                          7583        199291
+ jdk.ClassLoad                            3188         54286
+ jdk.ObjectAllocationOutsideTLAB           431          6835
+ jdk.JavaMonitorEnter                      154          3522
+ jdk.ClassLoaderStatistics                   0             0
+ jdk.ClassLoadingStatistics                  0             0
+ jdk.CompilationFailure                      0             0
+ jdk.DataLoss                                0             0
+```
+
+latency6-decode JFR正式窗口：
+| 边界/类型 | n | mean ms | p50 | p90 | p95 | p99 | p99.9 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| admissionExecution/CANCEL_ORDER | 3646 | 0.008 | 0.004 | 0.018 | 0.020 | 0.028 | 0.050 | 0.119 |
+| admissionExecution/CANCEL_ORDER_BATCH | 1824 | 0.008 | 0.007 | 0.009 | 0.011 | 0.021 | 0.052 | 0.102 |
+| admissionExecution/PLACE_ORDER | 3630 | 0.011 | 0.007 | 0.020 | 0.024 | 0.042 | 0.097 | 0.136 |
+| admissionExecution/PLACE_ORDER_BATCH | 5467 | 0.008 | 0.007 | 0.009 | 0.011 | 0.020 | 0.034 | 0.394 |
+| ingressToAdmission/CANCEL_ORDER | 3646 | 2.525 | 2.446 | 3.523 | 4.169 | 8.494 | 13.523 | 41.975 |
+| ingressToAdmission/CANCEL_ORDER_BATCH | 1824 | 4.335 | 4.155 | 6.340 | 7.486 | 11.207 | 29.195 | 50.335 |
+| ingressToAdmission/PLACE_ORDER | 3630 | 3.363 | 2.718 | 6.096 | 6.897 | 9.504 | 14.682 | 37.437 |
+| ingressToAdmission/PLACE_ORDER_BATCH | 5467 | 1.781 | 1.552 | 3.189 | 3.733 | 6.911 | 13.549 | 26.957 |
+| ingressToControl/APPLY_MARK_PRICE | 79 | 4.413 | 3.792 | 7.727 | 8.841 | 11.659 | 11.659 | 19.980 |
+| ownerToEgress/APPLY_MARK_PRICE | 79 | 0.008 | 0.005 | 0.015 | 0.021 | 0.069 | 0.069 | 0.078 |
+| ownerToEgress/CANCEL_ORDER | 3646 | 0.012 | 0.006 | 0.023 | 0.033 | 0.096 | 0.481 | 1.500 |
+| ownerToEgress/CANCEL_ORDER_BATCH | 1824 | 0.009 | 0.005 | 0.016 | 0.024 | 0.060 | 0.264 | 1.521 |
+| ownerToEgress/PLACE_ORDER | 3630 | 0.014 | 0.008 | 0.027 | 0.037 | 0.099 | 0.550 | 0.696 |
+| ownerToEgress/PLACE_ORDER_BATCH | 5468 | 0.016 | 0.007 | 0.026 | 0.037 | 0.105 | 0.487 | 18.284 |
+| transportToOwner/APPLY_MARK_PRICE | 79 | 0.594 | 0.531 | 1.323 | 1.382 | 1.577 | 1.577 | 2.040 |
+| transportToOwner/CANCEL_ORDER | 3648 | 0.799 | 0.456 | 2.109 | 2.641 | 3.529 | 6.460 | 9.843 |
+| transportToOwner/CANCEL_ORDER_BATCH | 1824 | 1.007 | 0.948 | 1.733 | 2.057 | 2.916 | 7.474 | 8.118 |
+| transportToOwner/PLACE_ORDER | 3631 | 1.195 | 0.949 | 2.551 | 2.965 | 3.773 | 7.573 | 8.926 |
+| transportToOwner/PLACE_ORDER_BATCH | 5466 | 0.597 | 0.433 | 1.375 | 1.614 | 2.114 | 6.549 | 7.662 |
+`ingressToAdmission`截止实际apply前，包含FIFO等待及prepareClusterPipelineScope工作；`admissionExecution`仅Owner apply/绑定，不等于Lane完成冻结；`transportToOwner`含指纹计算、Input FIFO（decode变体还含前移解码）；`ownerToEgress`截止编码前，不含网络发送重试。只有相同唯一commandId的当前负载样本可关联，重试/重放不能直接用此离线join。不要相加/相减各阶段分位数，也不要跨进程相减nanoTime。
+同commandId已复制输入→编码前（同一JVM近似边界，包含JFR事件创建的微小耗时）：`{"CANCEL_ORDER_BATCH": {"n": 1824, "mean": 6.704207816615256, "p50": 6.408545854492187, "p90": 9.043284884521483, "p95": 10.6309124921875, "p99": 14.018353760131836, "p999": 30.65962668481445, "max": 53.39768470446777}, "PLACE_ORDER": {"n": 3630, "mean": 5.060073078265465, "p50": 4.490069304931641, "p90": 7.6129147247314455, "p95": 8.311001369262696, "p99": 11.949464529174804, "p999": 16.437638166870116, "max": 44.61534647814941}, "PLACE_ORDER_BATCH": {"n": 5466, "mean": 3.912596684805118, "p50": 3.7611416313476562, "p90": 5.280579516479492, "p95": 6.056851083007812, "p99": 9.964345945922851, "p999": 17.420940205566406, "max": 49.77694094128418}, "CANCEL_ORDER": {"n": 3646, "mean": 3.876909762545252, "p50": 3.6478723892822265, "p90": 5.28531931262207, "p95": 6.403525435791016, "p99": 10.098793999389649, "p999": 17.330169488037107, "max": 43.70954752038574}, "APPLY_MARK_PRICE": {"n": 79, "mean": 5.049326727783203, "p50": 4.202249621826172, "p90": 8.23434398034668, "p95": 9.281366536010742, "p99": 13.770176673217772, "p999": 13.770176673217772, "max": 20.08823791772461}}`。
+Matcher发布→最终提交每样本完整区间p99/ms：`{"PLACE_ORDER": {"matcherToLastLaneStartNanos": 1.048, "maxLaneExecutionNanos": 0.0094, "matcherToLanesCompleteNanos": 1.0505, "lanesCompleteToOwnerNanos": 1.0583, "ownerFinalCommitMs": 0.0224, "publicationToCommitMs": 1.5612}, "PLACE_ORDER_BATCH": {"matcherToLastLaneStartNanos": 0.7546, "maxLaneExecutionNanos": 0.1373, "matcherToLanesCompleteNanos": 0.8393, "lanesCompleteToOwnerNanos": 1.2415, "ownerFinalCommitMs": 0.0577, "publicationToCommitMs": 1.4304}, "CANCEL_ORDER": {"matcherToLastLaneStartNanos": 0.5376, "maxLaneExecutionNanos": 0.0151, "matcherToLanesCompleteNanos": 0.5427, "lanesCompleteToOwnerNanos": 1.1784, "ownerFinalCommitMs": 0.0241, "publicationToCommitMs": 1.2879}}`。Owner finalCommit只覆盖最终返回的调用；普通撤批/行情无完整Matcher分段，未填零。跨Lane最大启动与最大执行可来自不同Lane。
+CPU折算单核百分比均值：`{"JVMCI-native CompilerThread0": 4.99, "C1 CompilerThread0": 1.29, "JFR Recorder Thread": 0.51, "JFR Periodic Tasks": 0.48, "aeron-md-nra": 1.67, "driver-conductor": 68.27, "/tmp/core-latency6-decode-profile/window-256/end_to_end/aeron-surprising-linear_perpetual-0 [sender,receiver]": 97.41, "archive-conductor": 73.84, "consensus-module-101-0": 62.57, "aeron-client": 0.22, "clustered-service-101-0": 70.77, "trading-owner--1": 97.4, "core-matcher-0": 57.45, "core-account-lane-0": 97.74, "core-account-lane-1": 97.72, "core-account-lane-2": 97.88, "core-account-lane-3": 97.73, "JVMCI-native CompilerThread1": 16.93, "Monitor Deflation Thread": 0.1}`；Owner叶热点：`[["org/agrona/collections/Long2ObjectHashMap.getMapped", 70], ["org/agrona/collections/Long2ObjectHashMap.put", 39], ["com/surprising/aeron/service/orchestration/TerminalTombstoneStore.bucket", 35], ["java/util/HashMap.getNode", 31], ["org/agrona/collections/Long2ObjectHashMap.remove", 24], ["com/surprising/aeron/service/orchestration/OrderBatchExecutor.preparePipelinedPlaceBatch", 24], ["java/util/Arrays.fill", 22], ["com/surprising/aeron/service/orchestration/TerminalTombstoneStore.unlinkClient", 21], ["com/surprising/aeron/service/state/MatcherSettlementPlan.clearReferences", 20], ["org/agrona/collections/Long2LongHashMap.get", 18], ["com/surprising/aeron/service/state/LanePublication.publish", 17], ["org/agrona/collections/Long2ObjectHashMap.compactChain", 16]]`。
+分配ThreadAllocationStatistics各线程首尾斜率之和653.845MB/s，除以该profile steady吞吐为1996.787B/business op；约1s采样边缘误差。线程bytes/s：`{"clustered-service-101-0": 88524705, "trading-owner--1": 44136085, "core-matcher-0": 162888372, "core-account-lane-0": 89590961, "core-account-lane-1": 89578868, "core-account-lane-2": 89558380, "core-account-lane-3": 89564916}`。
+分配抽样权重top class（bytes，不是精确对象数）：`[["com/surprising/aeron/service/state/OrderRuntime", 2904835224], ["[B", 2728508424], ["com/surprising/aeron/service/state/ReservationRuntime", 1325662008], ["[J", 1244831536], ["exchange/core2/core/common/MatcherResult", 1017397288], ["java/lang/Long", 938649248], ["com/surprising/aeron/service/state/ResolvedPlaceOrder", 783645792], ["com/surprising/aeron/service/matching/CoreMatchingResult$NativeCommand", 721406072], ["com/surprising/aeron/service/matching/CoreMatchingResult", 652451232], ["[Ljava/lang/Object;", 602302448], ["com/surprising/aeron/protocol/PlaceOrderCommand", 522233224], ["exchange/core2/core/common/MatcherResult$MatcherEvent", 513098416]]`；top site：`[["com/surprising/aeron/service/matching/CoreMatchingResult.classify", 1315381696], ["com/surprising/aeron/protocol/TradingOrderBatchCodec.decodeCommand", 1311246424], ["com/surprising/aeron/service/state/TradingRuntimeState.preparedOrder", 1283613728], ["com/surprising/aeron/protocol/TradingOrderBatchCodec.encodeResultSource", 1035073872], ["exchange/core2/core/SynchronousMatchingEngine.execute", 1017397288], ["com/surprising/aeron/service/orchestration/CoreMessageFlyweightDecoder.decode", 1004392408], ["java/util/concurrent/ConcurrentHashMap.putVal", 989478944], ["org/eclipse/collections/impl/map/mutable/primitive/LongObjectHashMap.get", 792835656], ["com/surprising/aeron/service/state/RuntimeDerivativeFillCalculator$FillCursor.order", 789314848], ["com/surprising/aeron/service/state/model/AssetBalance.validAsset", 736682560], ["com/surprising/aeron/service/state/OrderRuntime.withFill", 614616856], ["com/surprising/aeron/service/state/BalanceRuntime.release", 609871264]]`。JIT内联归因不等同源码实际分配点，如classify本身返回枚举。
+GC pause ms：`{"n": 65, "mean": 5.175531861538461, "p50": 5.131126, "p90": 5.432172, "p95": 5.637858, "p99": 5.936337, "p999": 5.936337, "max": 6.154467}`；总336.410ms/1.121%正式窗。编译耗时ms：`{"n": 53, "mean": 22.42623769811321, "p50": 7.228091, "p90": 48.792156000000006, "p95": 88.800742, "p99": 144.361777, "p999": 144.361777, "max": 203.17269299999998}`；SafepointBegin仅同步开始阶段：`{"n": 67, "mean": 0.24155846268656717, "p50": 0.193076, "p90": 0.49021299999999995, "p95": 0.51691, "p99": 0.52169, "p999": 0.52169, "max": 0.5559620000000001}`，不能当完整STW。
+heap bytes：`{"committed": 536870912, "afterGcFirst": 110303504, "afterGcLast": 110074936, "afterGcMin": 107831288, "afterGcMax": 111122120, "beforeGcMax": 414464848}`；没有old/live-set长稳斜率、逐对象总数或增长归因，不推断无泄漏。
+正式窗事件汇总 `[count,totalNs,maxNs,bytes或TLAB首对象size总和,maxObjectBytes,tlabBytes]`：`{"jdk.ClassLoad": [6, 669571, 365417, 0, 0, 0], "jdk.Deoptimization": [3, 0, 0, 0, 0, 0], "jdk.ExecuteVMOperation": [69, 337764971, 6168260, 0, 0, 0], "jdk.FileRead": [2, 12764, 8416, 2581, 0, 0], "jdk.FileWrite": [503585, 7621343425, 18060932, 940329184, 0, 0], "jdk.GarbageCollection": [65, 336409596, 6154467, 0, 0, 0], "jdk.JavaMonitorEnter": [1, 22339, 22339, 0, 0, 0], "jdk.ObjectAllocationInNewTLAB": [41022, 0, 0, 21429176, 16400, 19737064688], "jdk.ObjectAllocationOutsideTLAB": [177, 0, 0, 2902800, 16400, 0], "jdk.SafepointEnd": [67, 1737283, 39009, 0, 0, 0], "jdk.SafepointStateSynchronization": [67, 15858430, 552242, 0, 0, 0], "jdk.ThreadEnd": [2, 0, 0, 0, 0, 0], "jdk.ThreadPark": [486274, 51425157818, 11401343, 0, 0, 0], "jdk.ThreadStart": [2, 0, 0, 0, 0, 0]}`。TLAB首对象/OutsideTLAB事件是部分对象，不能推算精确objects/op；最大观测对象见maxObjectBytes，分配抽样weight不当对象size。
+Owner/GC细目（列依次为event/threadOrGcCause/count/totalNs/maxNs/bytes/maxObjectBytes/tlabBytes）：
+```text
+jdk.ClassLoad	trading-owner--1	6	669571	365417	0	0	0
+jdk.Deoptimization	trading-owner--1	1	0	0	0	0	0
+jdk.FileRead	trading-owner--1	2	12764	8416	2581	0	0
+jdk.GarbageCollection	G1New:G1 Evacuation Pause	65	336409596	6154467	0	0	0
+jdk.JavaMonitorEnter	trading-owner--1	1	22339	22339	0	0	0
+jdk.ObjectAllocationInNewTLAB	trading-owner--1	3357	0	0	366576	4112	1336532312
+jdk.ObjectAllocationOutsideTLAB	core-account-lane-0	40	0	0	656000	16400	0
+jdk.ObjectAllocationOutsideTLAB	core-account-lane-1	53	0	0	869200	16400	0
+jdk.ObjectAllocationOutsideTLAB	core-account-lane-2	37	0	0	606800	16400	0
+jdk.ObjectAllocationOutsideTLAB	core-account-lane-3	47	0	0	770800	16400	0
+jdk.ThreadPark	trading-owner--1	1618	79941481	167154	0	0	0
+```
+每轮Owner测量期均6次类加载、2次本地jar读取，合计约11～13us；这是预热与严格Owner同步I/O门槛缺口，耗时不足解释9ms排队。Owner park最大约0.17～0.23ms，不能归因大锁阻塞；最终profile存在7次Owner deoptimization及78次编译，预热未彻底稳定。系统上下文切换、FD/Direct/Mapped峰值、完整异常throw-site尚缺；JFR FileWrite/park全文用流式窗口汇总，未用全录制初始化事件冒充正式窗等待。
+客户端窗口：`{"file": "/tmp/core-latency6-decode-profile/window-256/end_to_end/client-7014.jfr", "cpuMeanSingleCorePercent": {"JVMCI-native CompilerThread0": 5.399544156411428, "C1 CompilerThread0": 0.3500223610666667, "JFR Recorder Thread": 0.7184601242030769, "JFR Periodic Tasks": 0.47220031413333335, "com.surprising.aeron.benchmarks.workload.ClusterOperationalBenchmark.continuousOperations-jmh-worker-1": 98.050782336, "aeron-md-nra": 1.6378176714666668, "driver-conductor": 52.555964026666665, "sender": 75.74286810666666, "receiver": 88.56443333333333, "mixed-egress-dispatcher": 39.898631968000004, "aeron-client": 0.19647443933333333, "benchmark-mark-price-source": 1.0373097850666666, "C1 CompilerThread1": 1.549068576, "JVMCI-native CompilerThread1": 3.6947547544000003, "JVMCI-native CompilerThread2": 3.3774573604, "JVMCI-native CompilerThread3": 40.344439359999996, "Monitor Deflation Thread": 0.1001284384}, "gcCount": 154, "gcTotalMs": 130.281227, "gcMaxMs": 1.448159, "dataLoss": []}`。发压线程接近单核100%包含满窗忙等，egress未满核；不能把发压busy CPU当作全部编码工作，也不能宣称Core容量上限已完全测出。
+NMT结束各类reserved/committed（不是峰值；增量基线早于初始化，不是30s稳定增长率）：
+```text
+Total: reserved=3169004KB +21560KB, committed=732280KB +36952KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB -2048KB)
+-                     Class (reserved=1049237KB +325KB, committed=2709KB +965KB)
+-                    Thread (reserved=69796KB +13342KB, committed=2668KB +694KB)
+-                      Code (reserved=261894KB +11537KB, committed=50202KB +34177KB)
+-                        GC (reserved=92402KB +787KB, committed=71922KB +747KB)
+-                 GCCardSet (reserved=16KB +14KB, committed=16KB +14KB)
+-                  Compiler (reserved=436KB +168KB, committed=436KB +168KB)
+-                     JVMCI (reserved=124KB +70KB, committed=124KB +70KB)
+-                  Internal (reserved=1596KB +149KB, committed=1596KB +149KB)
+-                     Other (reserved=9413KB +4KB, committed=9413KB +4KB)
+-                    Symbol (reserved=4924KB +553KB, committed=4924KB +553KB)
+-    Native Memory Tracking (reserved=3080KB +1124KB, committed=3080KB +1124KB)
+-        Shared class space (reserved=16384KB, committed=14000KB)
+-               Arena Chunk (reserved=195KB -7082KB, committed=195KB -7082KB)
+-                   Tracing (reserved=19312KB -192KB, committed=19312KB -192KB)
+-                    Module (reserved=295KB +2KB, committed=295KB +2KB)
+-                 Safepoint (reserved=8KB, committed=8KB)
+-           Synchronization (reserved=1287KB +668KB, committed=1287KB +668KB)
+-            Serviceability (reserved=17KB, committed=17KB)
+-                 Metaspace (reserved=65722KB +95KB, committed=25786KB +6943KB)
+-      String Deduplication (reserved=1KB, committed=1KB)
+-           Object Monitors (reserved=1KB -3KB, committed=1KB -3KB)
+```
+JFR summary（全录制，仅验证事件配置/数量，不作正式窗性能）：
+```text
+ Start: 2026-09-15 14:28:10 (UTC)
+ Duration: 105 s
+ jdk.ThreadPark                        2322984      69062440
+ jdk.FileWrite                          986778      21393620
+ jdk.ObjectAllocationInNewTLAB           82647       1430631
+ jdk.ObjectAllocationSample              82628       1321209
+ jdk.Compilation                          7580        199154
+ jdk.ClassLoad                            3185         54259
+ jdk.ObjectAllocationOutsideTLAB           454          7189
+ jdk.JavaMonitorEnter                      148          3383
+ jdk.ClassLoaderStatistics                   0             0
+ jdk.ClassLoadingStatistics                  0             0
+ jdk.CompilationFailure                      0             0
+ jdk.DataLoss                                0             0
+```
+
+latency6-index JFR正式窗口：
+| 边界/类型 | n | mean ms | p50 | p90 | p95 | p99 | p99.9 | max |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| admissionExecution/CANCEL_ORDER | 3580 | 0.008 | 0.004 | 0.017 | 0.019 | 0.028 | 0.039 | 0.119 |
+| admissionExecution/CANCEL_ORDER_BATCH | 1790 | 0.007 | 0.007 | 0.009 | 0.011 | 0.024 | 0.044 | 0.064 |
+| admissionExecution/PLACE_ORDER | 3595 | 0.011 | 0.008 | 0.019 | 0.023 | 0.043 | 0.100 | 0.152 |
+| admissionExecution/PLACE_ORDER_BATCH | 5387 | 0.007 | 0.007 | 0.008 | 0.010 | 0.018 | 0.036 | 0.045 |
+| ingressToAdmission/CANCEL_ORDER | 3580 | 2.688 | 2.666 | 3.579 | 4.330 | 8.148 | 13.217 | 17.457 |
+| ingressToAdmission/CANCEL_ORDER_BATCH | 1790 | 5.065 | 4.945 | 6.991 | 7.777 | 11.483 | 13.924 | 64.933 |
+| ingressToAdmission/PLACE_ORDER | 3595 | 3.602 | 2.867 | 6.587 | 7.181 | 9.796 | 14.452 | 16.772 |
+| ingressToAdmission/PLACE_ORDER_BATCH | 5387 | 2.327 | 2.330 | 3.693 | 4.438 | 7.850 | 11.335 | 14.660 |
+| ingressToControl/APPLY_MARK_PRICE | 28 | 3.890 | 3.844 | 5.402 | 6.702 | 7.118 | 7.118 | 7.163 |
+| ownerToEgress/APPLY_MARK_PRICE | 28 | 0.009 | 0.005 | 0.019 | 0.022 | 0.031 | 0.031 | 0.061 |
+| ownerToEgress/CANCEL_ORDER | 3580 | 0.011 | 0.005 | 0.019 | 0.030 | 0.087 | 0.829 | 1.545 |
+| ownerToEgress/CANCEL_ORDER_BATCH | 1790 | 0.013 | 0.005 | 0.017 | 0.025 | 0.087 | 0.605 | 5.639 |
+| ownerToEgress/PLACE_ORDER | 3595 | 0.012 | 0.006 | 0.022 | 0.032 | 0.099 | 0.641 | 1.836 |
+| ownerToEgress/PLACE_ORDER_BATCH | 5386 | 0.015 | 0.006 | 0.021 | 0.031 | 0.107 | 1.021 | 8.283 |
+| transportToOwner/APPLY_MARK_PRICE | 28 | 1.341 | 0.937 | 2.368 | 3.004 | 3.461 | 3.461 | 7.943 |
+| transportToOwner/CANCEL_ORDER | 3580 | 1.046 | 0.561 | 2.623 | 3.063 | 3.880 | 7.272 | 7.700 |
+| transportToOwner/CANCEL_ORDER_BATCH | 1789 | 1.198 | 1.149 | 1.944 | 2.206 | 3.253 | 7.367 | 62.171 |
+| transportToOwner/PLACE_ORDER | 3595 | 1.225 | 0.880 | 2.846 | 3.219 | 3.854 | 7.895 | 63.829 |
+| transportToOwner/PLACE_ORDER_BATCH | 5387 | 0.626 | 0.458 | 1.409 | 1.655 | 2.106 | 5.789 | 7.258 |
+`ingressToAdmission`截止实际apply前，包含FIFO等待及prepareClusterPipelineScope工作；`admissionExecution`仅Owner apply/绑定，不等于Lane完成冻结；`transportToOwner`含指纹计算、Input FIFO（decode变体还含前移解码）；`ownerToEgress`截止编码前，不含网络发送重试。只有相同唯一commandId的当前负载样本可关联，重试/重放不能直接用此离线join。不要相加/相减各阶段分位数，也不要跨进程相减nanoTime。
+同commandId已复制输入→编码前（同一JVM近似边界，包含JFR事件创建的微小耗时）：`{"CANCEL_ORDER_BATCH": {"n": 1789, "mean": 7.617800515132215, "p50": 7.371285120605469, "p90": 9.773425165527344, "p95": 11.077562986572266, "p99": 14.314423510742188, "p999": 20.924370800048827, "max": 70.11251228845215}, "PLACE_ORDER": {"n": 3595, "mean": 5.331871088526002, "p50": 4.822461921264648, "p90": 7.860310094482422, "p95": 8.503852453491211, "p99": 11.983875059448241, "p999": 16.63287098522949, "max": 72.024516819458}, "PLACE_ORDER_BATCH": {"n": 5385, "mean": 4.551900950716985, "p50": 4.419364966064453, "p90": 5.933879485839844, "p95": 6.817364249877929, "p99": 10.398631523803711, "p999": 14.898546404785156, "max": 67.2053104576416}, "CANCEL_ORDER": {"n": 3580, "mean": 4.269462060482907, "p50": 3.886639661254883, "p90": 6.016982147583008, "p95": 6.996600392944336, "p99": 10.141713224365235, "p999": 13.951662834838867, "max": 18.630139423461912}, "APPLY_MARK_PRICE": {"n": 28, "mean": 5.265704767163958, "p50": 5.1091533286132815, "p90": 7.1779088333740235, "p95": 8.361279233154297, "p99": 9.304786505249023, "p999": 9.304786505249023, "max": 11.728638036132812}}`。
+Matcher发布→最终提交每样本完整区间p99/ms：`{"PLACE_ORDER": {"matcherToLastLaneStartNanos": 1.1135, "maxLaneExecutionNanos": 0.0077, "matcherToLanesCompleteNanos": 1.1166, "lanesCompleteToOwnerNanos": 1.1341, "ownerFinalCommitMs": 0.0218, "publicationToCommitMs": 1.6237}, "PLACE_ORDER_BATCH": {"matcherToLastLaneStartNanos": 0.6223, "maxLaneExecutionNanos": 0.1399, "matcherToLanesCompleteNanos": 0.6862, "lanesCompleteToOwnerNanos": 1.4351, "ownerFinalCommitMs": 0.0547, "publicationToCommitMs": 1.6124}, "CANCEL_ORDER": {"matcherToLastLaneStartNanos": 0.489, "maxLaneExecutionNanos": 0.0118, "matcherToLanesCompleteNanos": 0.4925, "lanesCompleteToOwnerNanos": 1.2853, "ownerFinalCommitMs": 0.0251, "publicationToCommitMs": 1.3345}}`。Owner finalCommit只覆盖最终返回的调用；普通撤批/行情无完整Matcher分段，未填零。跨Lane最大启动与最大执行可来自不同Lane。
+CPU折算单核百分比均值：`{"JVMCI-native CompilerThread0": 4.11, "C1 CompilerThread0": 0.83, "JFR Recorder Thread": 1.04, "JFR Periodic Tasks": 0.5, "aeron-md-nra": 1.67, "driver-conductor": 70.56, "/tmp/core-latency6-index-profile/window-256/end_to_end/aeron-surprising-linear_perpetual-0 [sender,receiver]": 97.26, "archive-conductor": 73.34, "consensus-module-101-0": 63.23, "aeron-client": 0.24, "clustered-service-101-0": 71.21, "trading-owner--1": 97.49, "core-matcher-0": 55.25, "core-account-lane-0": 98.12, "core-account-lane-1": 98.11, "core-account-lane-2": 98.11, "core-account-lane-3": 98.12, "JVMCI-native CompilerThread1": 6.32, "JVMCI-native CompilerThread2": 5.55, "Monitor Deflation Thread": 0.1}`；Owner叶热点：`[["com/surprising/aeron/protocol/TradingOrderBatchCodec.decodeCommand", 54], ["org/agrona/collections/Long2ObjectHashMap.remove", 40], ["org/agrona/collections/Long2ObjectHashMap.put", 36], ["org/agrona/collections/Long2ObjectHashMap.getMapped", 34], ["java/util/HashMap.getNode", 32], ["java/util/Arrays.fill", 27], ["com/surprising/aeron/service/orchestration/TerminalTombstoneStore.bucket", 27], ["com/surprising/aeron/service/orchestration/TerminalTombstoneStore.unlinkEntity", 20], ["org/agrona/collections/Long2LongHashMap.get", 20], ["com/surprising/aeron/service/state/LanePublication.publish", 17], ["org/agrona/collections/Long2LongHashMap.put", 16], ["org/agrona/collections/Long2ObjectHashMap.compactChain", 16]]`。
+分配ThreadAllocationStatistics各线程首尾斜率之和639.006MB/s，除以该profile steady吞吐为1989.654B/business op；约1s采样边缘误差。线程bytes/s：`{"clustered-service-101-0": 34207381, "trading-owner--1": 96217009, "core-matcher-0": 157252445, "core-account-lane-0": 87775441, "core-account-lane-1": 87799983, "core-account-lane-2": 87974599, "core-account-lane-3": 87776514}`。
+分配抽样权重top class（bytes，不是精确对象数）：`[["com/surprising/aeron/service/state/OrderRuntime", 2922546536], ["[B", 2600845024], ["com/surprising/aeron/service/state/ReservationRuntime", 1329092608], ["[J", 1209300424], ["exchange/core2/core/common/MatcherResult", 989566408], ["com/surprising/aeron/service/state/ResolvedPlaceOrder", 761742760], ["com/surprising/aeron/service/matching/CoreMatchingResult$NativeCommand", 753373848], ["java/lang/Long", 634575888], ["com/surprising/aeron/service/matching/CoreMatchingResult$MatcherPrefix", 593360688], ["exchange/core2/core/common/MatcherResult$MatcherEvent", 564670200], ["com/surprising/aeron/protocol/PlaceOrderCommand", 537482624], ["com/surprising/aeron/service/matching/CoreMatchingResult", 475307104]]`；top site：`[["com/surprising/aeron/protocol/TradingOrderBatchCodec.decodeCommand", 1432027360], ["com/surprising/aeron/service/state/TradingRuntimeState.preparedOrder", 1286441336], ["java/nio/ByteBuffer.allocate", 1044399856], ["java/util/List.copyOf", 989566408], ["java/util/ArrayList.add", 916124080], ["com/surprising/aeron/service/matching/CoreMatchingResult.classify", 898587280], ["com/surprising/aeron/service/orchestration/CoreMessageFlyweightDecoder.decode", 812408208], ["com/surprising/aeron/service/state/RuntimeDerivativeFillCalculator$FillCursor.order", 791465320], ["org/eclipse/collections/impl/map/mutable/primitive/LongObjectHashMap.get", 765013792], ["java/util/concurrent/ConcurrentHashMap.putVal", 743886656], ["com/surprising/aeron/service/state/model/AssetBalance.validAsset", 718006736], ["com/surprising/aeron/service/state/OrderRuntime.withFill", 615621200]]`。JIT内联归因不等同源码实际分配点，如classify本身返回枚举。
+GC pause ms：`{"n": 63, "mean": 5.05957607936508, "p50": 4.973546, "p90": 5.271917999999999, "p95": 5.440738, "p99": 6.622225, "p999": 6.622225, "max": 9.382923}`；总318.753ms/1.061%正式窗。编译耗时ms：`{"n": 78, "mean": 16.147927, "p50": 5.027159, "p90": 40.731753000000005, "p95": 73.910212, "p99": 97.25765799999999, "p999": 97.25765799999999, "max": 110.421166}`；SafepointBegin仅同步开始阶段：`{"n": 66, "mean": 0.9269047121212121, "p50": 0.085161, "p90": 0.12084700000000001, "p95": 0.129472, "p99": 0.43849299999999997, "p999": 0.43849299999999997, "max": 55.074752999999994}`，不能当完整STW。
+heap bytes：`{"committed": 536870912, "afterGcFirst": 106217912, "afterGcLast": 106949152, "afterGcMin": 105833392, "afterGcMax": 108599376, "beforeGcMax": 412684352}`；没有old/live-set长稳斜率、逐对象总数或增长归因，不推断无泄漏。
+正式窗事件汇总 `[count,totalNs,maxNs,bytes或TLAB首对象size总和,maxObjectBytes,tlabBytes]`：`{"jdk.ClassLoad": [6, 666870, 344059, 0, 0, 0], "jdk.Deoptimization": [14, 0, 0, 0, 0, 0], "jdk.ExecuteVMOperation": [68, 319970927, 9396818, 0, 0, 0], "jdk.FileRead": [2, 12077, 9330, 2581, 0, 0], "jdk.FileWrite": [491566, 7213720489, 18691799, 923364992, 0, 0], "jdk.GarbageCollection": [63, 318753318, 9382923, 0, 0, 0], "jdk.ObjectAllocationInNewTLAB": [40127, 0, 0, 22124800, 16400, 19296450080], "jdk.ObjectAllocationOutsideTLAB": [158, 0, 0, 2591200, 16400, 0], "jdk.SafepointEnd": [66, 1746063, 46185, 0, 0, 0], "jdk.SafepointStateSynchronization": [66, 60840467, 55070792, 0, 0, 0], "jdk.ThreadEnd": [3, 0, 0, 0, 0, 0], "jdk.ThreadPark": [549486, 55400910692, 61330448, 0, 0, 0], "jdk.ThreadStart": [3, 0, 0, 0, 0, 0]}`。TLAB首对象/OutsideTLAB事件是部分对象，不能推算精确objects/op；最大观测对象见maxObjectBytes，分配抽样weight不当对象size。
+Owner/GC细目（列依次为event/threadOrGcCause/count/totalNs/maxNs/bytes/maxObjectBytes/tlabBytes）：
+```text
+jdk.ClassLoad	trading-owner--1	6	666870	344059	0	0	0
+jdk.Deoptimization	trading-owner--1	7	0	0	0	0	0
+jdk.FileRead	trading-owner--1	2	12077	9330	2581	0	0
+jdk.GarbageCollection	G1New:G1 Evacuation Pause	63	318753318	9382923	0	0	0
+jdk.ObjectAllocationInNewTLAB	trading-owner--1	5981	0	0	470808	16400	2906020792
+jdk.ObjectAllocationOutsideTLAB	core-account-lane-0	45	0	0	738000	16400	0
+jdk.ObjectAllocationOutsideTLAB	core-account-lane-1	34	0	0	557600	16400	0
+jdk.ObjectAllocationOutsideTLAB	core-account-lane-2	40	0	0	656000	16400	0
+jdk.ObjectAllocationOutsideTLAB	core-account-lane-3	39	0	0	639600	16400	0
+jdk.ThreadPark	trading-owner--1	2426	183513586	169208	0	0	0
+```
+每轮Owner测量期均6次类加载、2次本地jar读取，合计约11～13us；这是预热与严格Owner同步I/O门槛缺口，耗时不足解释9ms排队。Owner park最大约0.17～0.23ms，不能归因大锁阻塞；最终profile存在7次Owner deoptimization及78次编译，预热未彻底稳定。系统上下文切换、FD/Direct/Mapped峰值、完整异常throw-site尚缺；JFR FileWrite/park全文用流式窗口汇总，未用全录制初始化事件冒充正式窗等待。
+客户端窗口：`{"file": "/tmp/core-latency6-index-profile/window-256/end_to_end/client-11161.jfr", "cpuMeanSingleCorePercent": {"JVMCI-native CompilerThread4": 13.377131679999998, "Service Thread": 0.1020313744, "JVMCI-native CompilerThread0": 7.1921256527138455, "C1 CompilerThread0": 0.32376445648, "JFR Periodic Tasks": 0.4522673363310345, "com.surprising.aeron.benchmarks.workload.ClusterOperationalBenchmark.continuousOperations-jmh-worker-1": 98.2745255613793, "aeron-md-nra": 1.5959974344827585, "driver-conductor": 51.89081776551724, "sender": 75.02104783448276, "receiver": 85.73730620689655, "mixed-egress-dispatcher": 39.6057291475862, "aeron-client": 0.1699207571310345, "benchmark-mark-price-source": 1.0252666300689655, "C1 CompilerThread1": 0.3938883008, "JVMCI-native CompilerThread1": 12.691761712000002, "JVMCI-native CompilerThread2": 11.4859924912, "JVMCI-native CompilerThread3": 24.16946112, "JFR Recorder Thread": 1.4671911741230768, "Monitor Deflation Thread": 0.10109342560000001}, "gcCount": 151, "gcTotalMs": 123.844919, "gcMaxMs": 1.4495630000000002, "dataLoss": []}`。发压线程接近单核100%包含满窗忙等，egress未满核；不能把发压busy CPU当作全部编码工作，也不能宣称Core容量上限已完全测出。
+NMT结束各类reserved/committed（不是峰值；增量基线早于初始化，不是30s稳定增长率）：
+```text
+Total: reserved=3170903KB +27505KB, committed=734263KB +39069KB
+-                 Java Heap (reserved=1572864KB, committed=524288KB -2048KB)
+-                     Class (reserved=1049239KB +327KB, committed=2711KB +967KB)
+-                    Thread (reserved=69796KB +17442KB, committed=2680KB +830KB)
+-                      Code (reserved=261911KB +11585KB, committed=50283KB +34353KB)
+-                        GC (reserved=92374KB +760KB, committed=71902KB +728KB)
+-                 GCCardSet (reserved=16KB +14KB, committed=16KB +14KB)
+-                  Compiler (reserved=433KB +167KB, committed=433KB +167KB)
+-                     JVMCI (reserved=126KB +73KB, committed=126KB +73KB)
+-                  Internal (reserved=1605KB +166KB, committed=1605KB +166KB)
+-                     Other (reserved=9413KB +4KB, committed=9413KB +4KB)
+-                    Symbol (reserved=4925KB +554KB, committed=4925KB +554KB)
+-    Native Memory Tracking (reserved=3062KB +1107KB, committed=3062KB +1107KB)
+-        Shared class space (reserved=16384KB, committed=14000KB)
+-               Arena Chunk (reserved=1612KB -5763KB, committed=1612KB -5763KB)
+-                   Tracing (reserved=19805KB +301KB, committed=19805KB +301KB)
+-                    Module (reserved=295KB +2KB, committed=295KB +2KB)
+-                 Safepoint (reserved=8KB, committed=8KB)
+-           Synchronization (reserved=1289KB +668KB, committed=1289KB +668KB)
+-            Serviceability (reserved=17KB, committed=17KB)
+-                 Metaspace (reserved=65727KB +100KB, committed=25791KB +6948KB)
+-      String Deduplication (reserved=1KB, committed=1KB)
+-           Object Monitors (reserved=1KB -3KB, committed=1KB -3KB)
+```
+JFR summary（全录制，仅验证事件配置/数量，不作正式窗性能）：
+```text
+ Start: 2026-09-15 14:40:54 (UTC)
+ Duration: 105 s
+ jdk.ThreadPark                        2468366      73074393
+ jdk.FileWrite                          979555      21222646
+ jdk.ObjectAllocationInNewTLAB           82742       1432851
+ jdk.ObjectAllocationSample              82725       1322751
+ jdk.Compilation                          7544        198200
+ jdk.ClassLoad                            3185         54229
+ jdk.ObjectAllocationOutsideTLAB           452          7170
+ jdk.JavaMonitorEnter                      141          3231
+ jdk.ClassLoaderStatistics                   0             0
+ jdk.ClassLoadingStatistics                  0             0
+ jdk.CompilationFailure                      0             0
+ jdk.DataLoss                                0             0
+```
+
+微基准同一工作树单因素前后，单位索引生命周期/s（1 lifecycle=OPEN插入+终态移除，@OperationsPerInvocation(20)，不是业务ops）：
+| users | before plain ±error | after plain ±error | 均值变化 | before/after prof gc B/lifecycle |
+|---|---:|---:|---:|---|
+| 1 | 12071462.492 ±2260090.402 | 13013448.630 ±481112.977 | 7.80% | 86.40058050340309/86.40053570442605 |
+| 20 | 7116804.556 ±1068778.101 | 7552220.965 ±941839.065 | 6.12% | 248.00097259064714/248.0009469892365 |
+JMH置信区间重叠，1fork/3次measurement不足宣称统计显著；局部无观测回退且分配不增，保留索引简化。prof gc所有副指标（bytes/s、GC次数/时间等）：
+before：`[{"users": "1", "primary": {"score": 12071042.993182527, "scoreError": 1072860.280608786, "scoreConfidence": [10998182.71257374, 13143903.273791313], "scorePercentiles": {"0.0": 12026140.648824718, "50.0": 12049379.443389747, "90.0": 12137608.887333117, "95.0": 12137608.887333117, "99.0": 12137608.887333117, "99.9": 12137608.887333117, "99.99": 12137608.887333117, "99.999": 12137608.887333117, "99.9999": 12137608.887333117, "100.0": 12137608.887333117}, "scoreUnit": "ops/s", "rawData": [[12026140.648824718, 12137608.887333117, 12049379.443389747]]}, "secondary": {"gc.alloc.rate": {"score": 994.2433073648326, "scoreError": 87.99830318473558, "scoreConfidence": [906.245004180097, 1082.2416105495681], "scorePercentiles": {"0.0": 990.6142151166637, "50.0": 992.3988557631214, "90.0": 999.7168512147127, "95.0": 999.7168512147127, "99.0": 999.7168512147127, "99.9": 999.7168512147127, "99.99": 999.7168512147127, "99.999": 999.7168512147127, "99.9999": 999.7168512147127, "100.0": 999.7168512147127}, "scoreUnit": "MB/sec", "rawData": [[990.6142151166637, 999.7168512147127, 992.3988557631214]]}, "gc.alloc.rate.norm": {"score": 86.40058050340309, "scoreError": 0.00016144359887945638, "scoreConfidence": [86.40041905980421, 86.40074194700198], "scorePercentiles": {"0.0": 86.40057347811845, "50.0": 86.40057759003707, "90.0": 86.40059044205377, "95.0": 86.40059044205377, "99.0": 86.40059044205377, "99.9": 86.40059044205377, "99.99": 86.40059044205377, "99.999": 86.40059044205377, "99.9999": 86.40059044205377, "100.0": 86.40059044205377}, "scoreUnit": "B/op", "rawData": [[86.40057759003707, 86.40057347811845, 86.40059044205377]]}, "gc.count": {"score": 39.0, "scoreError": "NaN", "scoreConfidence": [39.0, 39.0], "scorePercentiles": {"0.0": 13.0, "50.0": 13.0, "90.0": 13.0, "95.0": 13.0, "99.0": 13.0, "99.9": 13.0, "99.99": 13.0, "99.999": 13.0, "99.9999": 13.0, "100.0": 13.0}, "scoreUnit": "counts", "rawData": [[13.0, 13.0, 13.0]]}, "gc.time": {"score": 26.0, "scoreError": "NaN", "scoreConfidence": [26.0, 26.0], "scorePercentiles": {"0.0": 8.0, "50.0": 9.0, "90.0": 9.0, "95.0": 9.0, "99.0": 9.0, "99.9": 9.0, "99.99": 9.0, "99.999": 9.0, "99.9999": 9.0, "100.0": 9.0}, "scoreUnit": "ms", "rawData": [[8.0, 9.0, 9.0]]}}}, {"users": "20", "primary": {"score": 7210590.470237062, "scoreError": 949028.935932927, "scoreConfidence": [6261561.5343041355, 8159619.406169989], "scorePercentiles": {"0.0": 7151430.489443895, "50.0": 7231164.98283, "90.0": 7249175.938437293, "95.0": 7249175.938437293, "99.0": 7249175.938437293, "99.9": 7249175.938437293, "99.99": 7249175.938437293, "99.999": 7249175.938437293, "99.9999": 7249175.938437293, "100.0": 7249175.938437293}, "scoreUnit": "ops/s", "rawData": [[7151430.489443895, 7231164.98283, 7249175.938437293]]}, "secondary": {"gc.alloc.rate": {"score": 1704.9115207483164, "scoreError": 222.36853433013346, "scoreConfidence": [1482.5429864181829, 1927.28005507845], "scorePercentiles": {"0.0": 1691.0250524334479, "50.0": 1709.8696590677205, "90.0": 1713.839850743781, "95.0": 1713.839850743781, "99.0": 1713.839850743781, "99.9": 1713.839850743781, "99.99": 1713.839850743781, "99.999": 1713.839850743781, "99.9999": 1713.839850743781, "100.0": 1713.839850743781}, "scoreUnit": "MB/sec", "rawData": [[1691.0250524334479, 1709.8696590677205, 1713.839850743781]]}, "gc.alloc.rate.norm": {"score": 248.00097259064714, "scoreError": 0.0001712432616289969, "scoreConfidence": [248.0008013473855, 248.00114383390877], "scorePercentiles": {"0.0": 248.00096317108947, "50.0": 248.0009726572751, "90.0": 248.00098194357676, "95.0": 248.00098194357676, "99.0": 248.00098194357676, "99.9": 248.00098194357676, "99.99": 248.00098194357676, "99.999": 248.00098194357676, "99.9999": 248.00098194357676, "100.0": 248.00098194357676}, "scoreUnit": "B/op", "rawData": [[248.0009726572751, 248.00096317108947, 248.00098194357676]]}, "gc.count": {"score": 69.0, "scoreError": "NaN", "scoreConfidence": [69.0, 69.0], "scorePercentiles": {"0.0": 23.0, "50.0": 23.0, "90.0": 23.0, "95.0": 23.0, "99.0": 23.0, "99.9": 23.0, "99.99": 23.0, "99.999": 23.0, "99.9999": 23.0, "100.0": 23.0}, "scoreUnit": "counts", "rawData": [[23.0, 23.0, 23.0]]}, "gc.time": {"score": 46.0, "scoreError": "NaN", "scoreConfidence": [46.0, 46.0], "scorePercentiles": {"0.0": 14.0, "50.0": 16.0, "90.0": 16.0, "95.0": 16.0, "99.0": 16.0, "99.9": 16.0, "99.99": 16.0, "99.999": 16.0, "99.9999": 16.0, "100.0": 16.0}, "scoreUnit": "ms", "rawData": [[16.0, 14.0, 16.0]]}}}]`
+after：`[{"users": "1", "primary": {"score": 13004084.155150065, "scoreError": 1705988.2784547126, "scoreConfidence": [11298095.876695354, 14710072.433604777], "scorePercentiles": {"0.0": 12948305.689562403, "50.0": 12951905.45199294, "90.0": 13112041.323894856, "95.0": 13112041.323894856, "99.0": 13112041.323894856, "99.9": 13112041.323894856, "99.99": 13112041.323894856, "99.999": 13112041.323894856, "99.9999": 13112041.323894856, "100.0": 13112041.323894856}, "scoreUnit": "ops/s", "rawData": [[12948305.689562403, 12951905.45199294, 13112041.323894856]]}, "secondary": {"gc.alloc.rate": {"score": 1071.152114091855, "scoreError": 137.18809119646414, "scoreConfidence": [933.9640228953909, 1208.3402052883193], "scorePercentiles": {"0.0": 1066.6246950250797, "50.0": 1066.999174952911, "90.0": 1079.832472297575, "95.0": 1079.832472297575, "99.0": 1079.832472297575, "99.9": 1079.832472297575, "99.99": 1079.832472297575, "99.999": 1079.832472297575, "99.9999": 1079.832472297575, "100.0": 1079.832472297575}, "scoreUnit": "MB/sec", "rawData": [[1066.6246950250797, 1066.999174952911, 1079.832472297575]]}, "gc.alloc.rate.norm": {"score": 86.40053570442605, "scoreError": 6.709783892608352e-05, "scoreConfidence": [86.40046860658713, 86.40060280226497], "scorePercentiles": {"0.0": 86.40053346562792, "50.0": 86.40053369852774, "90.0": 86.4005399491225, "95.0": 86.4005399491225, "99.0": 86.4005399491225, "99.9": 86.4005399491225, "99.99": 86.4005399491225, "99.999": 86.4005399491225, "99.9999": 86.4005399491225, "100.0": 86.4005399491225}, "scoreUnit": "B/op", "rawData": [[86.40053346562792, 86.40053369852774, 86.4005399491225]]}, "gc.count": {"score": 43.0, "scoreError": "NaN", "scoreConfidence": [43.0, 43.0], "scorePercentiles": {"0.0": 14.0, "50.0": 14.0, "90.0": 15.0, "95.0": 15.0, "99.0": 15.0, "99.9": 15.0, "99.99": 15.0, "99.999": 15.0, "99.9999": 15.0, "100.0": 15.0}, "scoreUnit": "counts", "rawData": [[14.0, 14.0, 15.0]]}, "gc.time": {"score": 28.0, "scoreError": "NaN", "scoreConfidence": [28.0, 28.0], "scorePercentiles": {"0.0": 9.0, "50.0": 9.0, "90.0": 10.0, "95.0": 10.0, "99.0": 10.0, "99.9": 10.0, "99.99": 10.0, "99.999": 10.0, "99.9999": 10.0, "100.0": 10.0}, "scoreUnit": "ms", "rawData": [[10.0, 9.0, 9.0]]}}}, {"users": "20", "primary": {"score": 7372565.004786654, "scoreError": 474850.0156484408, "scoreConfidence": [6897714.989138214, 7847415.020435095], "scorePercentiles": {"0.0": 7343854.536060374, "50.0": 7379223.137277763, "90.0": 7394617.341021825, "95.0": 7394617.341021825, "99.0": 7394617.341021825, "99.9": 7394617.341021825, "99.99": 7394617.341021825, "99.999": 7394617.341021825, "99.9999": 7394617.341021825, "100.0": 7394617.341021825}, "scoreUnit": "ops/s", "rawData": [[7379223.137277763, 7394617.341021825, 7343854.536060374]]}, "secondary": {"gc.alloc.rate": {"score": 1743.0323787176076, "scoreError": 118.04508155825388, "scoreConfidence": [1624.9872971593536, 1861.0774602758615], "scorePercentiles": {"0.0": 1735.8419228317703, "50.0": 1744.8698462804118, "90.0": 1748.38536704064, "95.0": 1748.38536704064, "99.0": 1748.38536704064, "99.9": 1748.38536704064, "99.99": 1748.38536704064, "99.999": 1748.38536704064, "99.9999": 1748.38536704064, "100.0": 1748.38536704064}, "scoreUnit": "MB/sec", "rawData": [[1744.8698462804118, 1748.38536704064, 1735.8419228317703]]}, "gc.alloc.rate.norm": {"score": 248.0009469892365, "scoreError": 0.000335745899043234, "scoreConfidence": [248.00061124333746, 248.00128273513553], "scorePercentiles": {"0.0": 248.0009350484835, "50.0": 248.00093773635183, "90.0": 248.00096818287417, "95.0": 248.00096818287417, "99.0": 248.00096818287417, "99.9": 248.00096818287417, "99.99": 248.00096818287417, "99.999": 248.00096818287417, "99.9999": 248.00096818287417, "100.0": 248.00096818287417}, "scoreUnit": "B/op", "rawData": [[248.0009350484835, 248.00093773635183, 248.00096818287417]]}, "gc.count": {"score": 70.0, "scoreError": "NaN", "scoreConfidence": [70.0, 70.0], "scorePercentiles": {"0.0": 23.0, "50.0": 23.0, "90.0": 24.0, "95.0": 24.0, "99.0": 24.0, "99.9": 24.0, "99.99": 24.0, "99.999": 24.0, "99.9999": 24.0, "100.0": 24.0}, "scoreUnit": "counts", "rawData": [[23.0, 24.0, 23.0]]}, "gc.time": {"score": 43.0, "scoreError": "NaN", "scoreConfidence": [43.0, 43.0], "scorePercentiles": {"0.0": 14.0, "50.0": 14.0, "90.0": 15.0, "95.0": 15.0, "99.0": 15.0, "99.9": 15.0, "99.99": 15.0, "99.999": 15.0, "99.9999": 15.0, "100.0": 15.0}, "scoreUnit": "ms", "rawData": [[14.0, 15.0, 14.0]]}}}]`
+JMH命令：`java -jar surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar org.openjdk.jmh.Main ActiveOrderIndexBenchmark.openThenTerminal -wi 3 -w 1s -i 3 -r 1s -f 1 -t 1 -jvmArgs "-Xms128m -Xmx512m -XX:+UseG1GC" -rf json -rff /tmp/core-latency6-index-micro-{before,after}/{plain,gc}.json`；gc轮单独加`-prof gc`。
+
+最终实际完整命令（其他两组除artifact目录/代码外参数一致；运行角色PID见NMT首行及JFR文件名）：
+plain：
+```text
+/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.util.zip=ALL-UNNAMED --enable-native-access=ALL-UNNAMED -Xms512m -Xmx1536m -XX:+UseG1GC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:NativeMemoryTracking=summary -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Dsurprising.aeron.hostnames=127.0.0.1 -Dsurprising.aeron.egress-hostname=127.0.0.1 -Dsurprising.aeron.node-id=0 -Dsurprising.aeron.account-lanes=4 -Dsurprising.aeron.matching-engines=1 -Dsurprising.aeron.owner-command-window=256 -Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN -Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN -Dsurprising.aeron.settlement-spin-limit=0 -Dsurprising.aeron.core.threading-mode=SHARED_NETWORK -Dsurprising.aeron.service.idle-strategy=YIELDING -Dsurprising.aeron.data-dir=/tmp/core-latency6-index-plain/window-256/end_to_end/data -Daeron.dir=/tmp/core-latency6-index-plain/window-256/end_to_end/aeron -Djava.io.tmpdir=/tmp/core-latency6-index-plain/window-256/end_to_end/tmp -cp /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar com.surprising.aeron.service.cluster.SurprisingClusterNode
+/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/java.util.zip=ALL-UNNAMED --enable-native-access=ALL-UNNAMED -XX:+UseG1GC -Xms128m -Xmx512m -Dsurprising.aeron.hostnames=127.0.0.1 -Dsurprising.aeron.egress-hostname=127.0.0.1 -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Daeron.dir=/tmp/core-latency6-index-plain/window-256/end_to_end/client-aeron -Dsurprising.aeron.capacity-warmup-seconds=30 -Dsurprising.aeron.capacity-duration-seconds=30 -Dsurprising.aeron.capacity-seed=25620 -Dsurprising.aeron.mixed-trading-stream=true -Dsurprising.aeron.capacity-symbols=128 -Dsurprising.aeron.mixed-operational=false -Dsurprising.aeron.capacity-async-in-flight=256 -Dsurprising.aeron.capacity-session-in-flight=256 -jar /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar org.openjdk.jmh.Main ClusterOperationalBenchmark.continuousOperations -p controlPageSize=0 -p inFlightWindow=256 -p tradingProfile=MIXED -p batchSize=20 -wi 0 -i 1 -f 1 -t 1 -to 150s -rf json -rff /tmp/core-latency6-index-plain/window-256/end_to_end/jmh.json ```
+profile：
+```text
+/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.util.zip=ALL-UNNAMED --enable-native-access=ALL-UNNAMED -Xms512m -Xmx1536m -XX:+UseG1GC -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:NativeMemoryTracking=summary -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Dsurprising.aeron.hostnames=127.0.0.1 -Dsurprising.aeron.egress-hostname=127.0.0.1 -Dsurprising.aeron.node-id=0 -Dsurprising.aeron.account-lanes=4 -Dsurprising.aeron.matching-engines=1 -Dsurprising.aeron.owner-command-window=256 -Dsurprising.aeron.matcher-wait-strategy=BUSY_SPIN -Dsurprising.aeron.settlement-wait-strategy=BUSY_SPIN -Dsurprising.aeron.settlement-spin-limit=0 -Dsurprising.aeron.core.threading-mode=SHARED_NETWORK -Dsurprising.aeron.service.idle-strategy=YIELDING -Dsurprising.aeron.data-dir=/tmp/core-latency6-index-profile/window-256/end_to_end/data -Daeron.dir=/tmp/core-latency6-index-profile/window-256/end_to_end/aeron -Djava.io.tmpdir=/tmp/core-latency6-index-profile/window-256/end_to_end/tmp -Dcore.settlementLatencyDiagnostics=true -XX:StartFlightRecording=settings=/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/config/owner-commit-profile.jfc\,filename=/tmp/core-latency6-index-profile/window-256/end_to_end/node.jfr\,maxsize=256m\,dumponexit=true -cp /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-service/target/surprising-aeron-service.jar com.surprising.aeron.service.cluster.SurprisingClusterNode
+/Users/atomex/Library/Java/JavaVirtualMachines/graalvm-25.jdk/Contents/Home/bin/java --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED --add-exports=java.base/jdk.internal.misc=ALL-UNNAMED --add-opens=java.base/java.util.zip=ALL-UNNAMED --enable-native-access=ALL-UNNAMED -XX:+UseG1GC -Xms128m -Xmx512m -Dsurprising.aeron.hostnames=127.0.0.1 -Dsurprising.aeron.egress-hostname=127.0.0.1 -Dsurprising.aeron.product-line=LINEAR_PERPETUAL -Daeron.dir=/tmp/core-latency6-index-profile/window-256/end_to_end/client-aeron -Dsurprising.aeron.capacity-warmup-seconds=30 -Dsurprising.aeron.capacity-duration-seconds=30 -Dsurprising.aeron.capacity-seed=25620 -Dsurprising.aeron.mixed-trading-stream=true -Dsurprising.aeron.capacity-symbols=128 -Dsurprising.aeron.mixed-operational=false -Dsurprising.aeron.capacity-async-in-flight=256 -Dsurprising.aeron.capacity-session-in-flight=256 -XX:StartFlightRecording=settings=/Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/config/owner-commit-profile.jfc\,filename=/tmp/core-latency6-index-profile/window-256/end_to_end/client-%p.jfr\,maxsize=256m\,dumponexit=true -jar /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/target/product-core-benchmarks.jar org.openjdk.jmh.Main ClusterOperationalBenchmark.continuousOperations -p controlPageSize=0 -p inFlightWindow=256 -p tradingProfile=MIXED -p batchSize=20 -wi 0 -i 1 -f 1 -t 1 -to 150s -rf json -rff /tmp/core-latency6-index-profile/window-256/end_to_end/jmh.json ```
+
+剩余瓶颈与下一步：
+- 已确认：Owner前置FIFO/依赖scope阶段主导排队；基线有效JFR普通入口→准入p999.867ms，最终观测9.796ms；撮合发布→提交约1.6ms、Lane单次执行普通p99约8us/批量140us、出口FIFO约0.1ms。没有证据再把主要等待归给Lane账户修改或Owner锁。
+- Owner仍约97.5%单核：批量解码、订单/账户索引访问、终态客户号桶维护和批量准入仍占成本；下一项应分别量化这些单位命令成本，避免一次迁移多个职责。解码前移虽消除了Owner解码热点，却没有通过尾延迟保留线，本轮不保留。
+- 分配约2KB/business op并未解决；主要OrderRuntime、byte[]、ReservationRuntime、long[]与Matcher结果。GC最终最大9.383ms已超过5ms预算；需要从这些真实构造/版本变更路径减少冗余副本，再在无swap且预热稳定的窗口做验证，不能删除资金不变量或确定性边界。
+- 本轮固定256满窗，客户端长期背压；不能把降窗口、降低发压、改GC或改批量口径包装为代码收益。各类accepted分段、网络重试尾部、CPU调度/长稳仍缺，普通p99≤5ms尚未验收。
+
+关键文件/原始证据SHA-256（归档后清理，临时路径仅历史定位）：
+| 文件 | bytes | SHA-256 |
+|---|---:|---|
+| /tmp/core-latency6-plain/window-256/end_to_end/metrics.json | 3135 | `06ad90a3ce29507febc8f2e82b5304fd90535eae67b666c8442de29a498e82f1` |
+| /tmp/core-latency6-plain/window-256/end_to_end/client.log | 8274 | `833a8a693bc7ab52923ca9f3770f7edb855a445640d8b42d3ac5cffc4f3bbf1e` |
+| /tmp/core-latency6-plain/window-256/end_to_end/node.command | 1365 | `c88bbf02938328738891f63c73b7702f5cce6131a10ec58ab8ede23f32693df3` |
+| /tmp/core-latency6-plain/window-256/end_to_end/client.command | 1259 | `3e40b09ed60cfbf61bd22b0ec1e1c67db50523e2259746d48ef0701e1ab1f66d` |
+| /tmp/core-latency6-plain/system-summary.json | 152 | `00534d36182d091d97c84871b174d344fe72b5882673725019f022ce9b3a4fad` |
+| /tmp/core-latency6-profile/window-256/end_to_end/metrics.json | 3274 | `faf4aa65a198dd1fa02339df13da634b0d60ab6ee57b3f189d8a04ed2388e3a6` |
+| /tmp/core-latency6-profile/window-256/end_to_end/client.log | 8877 | `0325272f8e0c0cd5869407605c994409af7b34b8b252c51e737693e12cf157ed` |
+| /tmp/core-latency6-profile/window-256/end_to_end/node.command | 1674 | `e711de1bfb9fb6a12cfa3f77a0696617cad3e6d21244c50adb9d6e21a9fd9d7a` |
+| /tmp/core-latency6-profile/window-256/end_to_end/client.command | 1530 | `a86ff4187edc9394be5e831b1d51982f4b203973821ce51c540e459230a8bc90` |
+| /tmp/core-latency6-profile/system-summary.json | 150 | `d1cc35ae5ea47ef3100f8eb2d36b750d5f7141e36ab8d38ada850b59d52ad721` |
+| /tmp/core-latency6-decode-plain/window-256/end_to_end/metrics.json | 3133 | `d04ca7ed754c33b9e50532127012c2269e9c6f35de4a0e7eebcd32f5c99c037e` |
+| /tmp/core-latency6-decode-plain/window-256/end_to_end/client.log | 8294 | `c4e53f921b9cf36fbc824242fc5710f2ca1346c218270dbcf6abfa63a9cde4bb` |
+| /tmp/core-latency6-decode-plain/window-256/end_to_end/node.command | 1386 | `6f5d6c60917144cd619a804c68405807a87260bc33620fd69b02ad3f76e78729` |
+| /tmp/core-latency6-decode-plain/window-256/end_to_end/client.command | 1273 | `2c777f72c7182335539b682d9178eadef20466345957b495b5a7fe785410d2ab` |
+| /tmp/core-latency6-decode-plain/system-summary.json | 89 | `9572ed56ce4ffb695195595fe6f1a21ea2a0640e197a44567666187c45065a3e` |
+| /tmp/core-latency6-decode-profile/window-256/end_to_end/metrics.json | 3266 | `0858b70c3b3e2ac04142b668ea0333d94518d322e1118d5472015a014d2d11be` |
+| /tmp/core-latency6-decode-profile/window-256/end_to_end/client.log | 8898 | `2dd8a1b6afa448c04a10574f5bda73630717b7b0b6569654f9e4bc0452f24d83` |
+| /tmp/core-latency6-decode-profile/window-256/end_to_end/node.command | 1702 | `3c359b0064c982c34cb05a49ca0d0b6d6be99866d30025f64c694727485bf631` |
+| /tmp/core-latency6-decode-profile/window-256/end_to_end/client.command | 1551 | `b3c9b12ccfbafe4e0caa111c73b9f5267bee74e03046f28ad9f3ebf9db9b5b49` |
+| /tmp/core-latency6-decode-profile/system-summary.json | 87 | `4c604877a13ce4d49a58acf5a5c505ca7fb4a04269b9169ec596af6e79afd3fd` |
+| /tmp/core-latency6-index-plain/window-256/end_to_end/metrics.json | 3134 | `7fec0876d6e757b02e273f40ed9b1e34ca6c69501884b49da6efa6620602ee81` |
+| /tmp/core-latency6-index-plain/window-256/end_to_end/client.log | 8291 | `99249e5c842cab8e7a8e9faad5f5539740794486f239f09eea84c3c75177b4eb` |
+| /tmp/core-latency6-index-plain/window-256/end_to_end/node.command | 1383 | `2a8d97b646dbd0ae275140f28f7cfb93c494094d7f7194ade55708e2a2cef1e6` |
+| /tmp/core-latency6-index-plain/window-256/end_to_end/client.command | 1271 | `164fd1becfbc4805094d9de341f4f9d3a784e522c50295920c812c05fd59f59d` |
+| /tmp/core-latency6-index-plain/system-summary.json | 89 | `a31ffe7e123a29601f4e6a22bd4d80af693c5cd2c38c1e756ad1636a16480e16` |
+| /tmp/core-latency6-index-profile/window-256/end_to_end/metrics.json | 3278 | `52c73e4c6b69b8bfb69416658d1c0f10d623bd8c42d96f384135498a5885e264` |
+| /tmp/core-latency6-index-profile/window-256/end_to_end/client.log | 8897 | `e6c11802b722157ecc13d2294240d3c6a4afec4629e718688793dd8352bfd8e4` |
+| /tmp/core-latency6-index-profile/window-256/end_to_end/node.command | 1698 | `05d63a67453f7347ec2819899dce28978a5be2d3eb975585bbbc48e69aea368d` |
+| /tmp/core-latency6-index-profile/window-256/end_to_end/client.command | 1548 | `617ef5f89e9f111bf4f08b962ffc1e422f3a28435764c6bf7357e780943ad162` |
+| /tmp/core-latency6-index-profile/system-summary.json | 90 | `b7429bf85045e5a69c02494ab0d02ca8e7a5905a4054d22bf9dea99235d45404` |
+| /tmp/core-latency6-profile/window-256/end_to_end/node.jfr | 107250524 | `eda569138d7fdbca559906d49c730100df2450da932092677642ff0f8bcb9a06` |
+| /tmp/core-latency6-profile/window-256/end_to_end/client-2744.jfr | 90739336 | `179f215b3e66314b89629910e78b219da1e49d948e05c43515f49e2157ed873f` |
+| /tmp/core-latency6-profile/window-256/end_to_end/client-2741.jfr | 5784731 | `cdabf53bcbe7d4f5ca1b444581fc6dd9f45f804b20e311d3e60b1fbfa5d3b4d4` |
+| /tmp/core-latency6-profile/window-256/end_to_end/analysis.json | 103112 | `b02d95dcfb3db25b4791907fce241e91a1104e9be52b5fbad9c0a45b541a1c10` |
+| /tmp/core-latency6-profile/window-256/end_to_end/window-events.tsv | 2683 | `1fa41d572db757dae65bb98fb702ca1d9ded2c12537bb81b7e84b121eff09a88` |
+| /tmp/core-latency6-profile/window-256/end_to_end/client-window-summary.json | 1165 | `5dd117c91c577277eb04ee19b6a7d3b5224fd38ca33dd7722a29385a73f6bc00` |
+| /tmp/core-latency6-profile/window-256/end_to_end/jfr-summary.txt | 12280 | `f042fd3e999d6b411976b9dfed7dafd7a069c02e0c11051ccb0af0314b760e84` |
+| /tmp/core-latency6-profile/window-256/end_to_end/nmt-summary.diff.txt | 4628 | `a59b8d6e1ae6b852289c528426727c27d3158bea9736d42448f7e5044830083d` |
+| /tmp/core-latency6-decode-profile/window-256/end_to_end/node.jfr | 109386145 | `5a8e5b7dd20d1b09ad976354f28f5abb15ed94a235f8af4843def361ba253f26` |
+| /tmp/core-latency6-decode-profile/window-256/end_to_end/client-7009.jfr | 5942704 | `4f4a51191e0519313fa7577ffd5e2a06448ee806afac7c7f10bcc954ff14fd15` |
+| /tmp/core-latency6-decode-profile/window-256/end_to_end/client-7014.jfr | 93831772 | `0f450aa5114132180d05ba24e39976c55d1ec0dfe830de87a22ea206e46e86be` |
+| /tmp/core-latency6-decode-profile/window-256/end_to_end/analysis.json | 109059 | `b3027458968067c00d4d0714ace9c38d6d379b561a915543b2c487df663db5b7` |
+| /tmp/core-latency6-decode-profile/window-256/end_to_end/window-events.tsv | 2595 | `700bb27038be0ef72df8dbc0819400a714c2308b021333a499bb61681333fb25` |
+| /tmp/core-latency6-decode-profile/window-256/end_to_end/client-window-summary.json | 1074 | `d99a6752f9d0824615bca65ac45ac9fe13fdabd3a772e9998ab4261a4d82120a` |
+| /tmp/core-latency6-decode-profile/window-256/end_to_end/jfr-summary.txt | 12280 | `e9c560cd5ac0e5c623ade8a9d9a00e712de3dbd265c0bba7df6e5207a71f6784` |
+| /tmp/core-latency6-decode-profile/window-256/end_to_end/nmt-summary.diff.txt | 4622 | `5444ff1b22aab21e6820ae78dc46449cc670d3533c54d3cf03d917f43d6d336d` |
+| /tmp/core-latency6-index-profile/window-256/end_to_end/node.jfr | 113275940 | `80110c44696b994d7997e6581e9424f097e56dfd76cdc696902d2cafd99d5eb5` |
+| /tmp/core-latency6-index-profile/window-256/end_to_end/client-11150.jfr | 5872019 | `4e7cbcd51e865aba10d138e5cbe13cedd0bb33d25e9362f39068bca88c4672c6` |
+| /tmp/core-latency6-index-profile/window-256/end_to_end/client-11161.jfr | 99378650 | `4f423542bbf7a8c40e578d1851a25b36165e692a545275c3ef08e49440d60a72` |
+| /tmp/core-latency6-index-profile/window-256/end_to_end/analysis.json | 106474 | `654eb35ba5c2f28ebc17c05fd875b20063325c1638be20ee615ff3f9237e3f11` |
+| /tmp/core-latency6-index-profile/window-256/end_to_end/window-events.tsv | 2845 | `4f2812690f6b07e5d6a27e2508e035bb154baba8a1e07053146cef641eeafab8` |
+| /tmp/core-latency6-index-profile/window-256/end_to_end/client-window-summary.json | 1173 | `dbc9e578c9440f4b3839cd5cff1fc8c0110063e5694b8b9d656cf64a1c765a53` |
+| /tmp/core-latency6-index-profile/window-256/end_to_end/jfr-summary.txt | 12280 | `6769137b6dc4ff4d04ca9e2bd07660381fcad0d4d4d41a66072f63bc38ef1adb` |
+| /tmp/core-latency6-index-profile/window-256/end_to_end/nmt-summary.diff.txt | 4630 | `4e2d584fcb4c106da1c0db8212fbee5793c513c7b2e62790544ce975adc2ed49` |
+| /tmp/core-latency6-index-micro-before/plain.json | 3715 | `f10ed49d78ee17be74e3451c52d28f973ac04fc5174f0bb3fdf1c026ac5ace3e` |
+| /tmp/core-latency6-index-micro-before/gc.json | 11460 | `8607d68d99a77650dec7f3cc314e2e57c7b6e1f99cafb771c2b35f6c62fbce4e` |
+| /tmp/core-latency6-index-micro-after/plain.json | 3731 | `22cba19a03c0274fab72bd98bd04b6829208e40f4f1c577b0b5ba68d42e5baa2` |
+| /tmp/core-latency6-index-micro-after/gc.json | 11463 | `f34cdb6a2d588a614b3992fab89653dbba00560488ab6da179c5ad0141fbdeed` |
+| /tmp/core-latency6-source.diff | 13804 | `cda486aabe7dde539ba41cc899b502305c33ccd7ca4cdfa324c56910b0ae575b` |
+| /tmp/core-latency6-decode-source.diff | 29304 | `0fea14dd4cdef657db26d1bd1535d14759ec6540fb941e29130d716fc1803ddc` |
+| /tmp/core-latency6-index-source.diff | 19350 | `7416eeba2806215c37485e43966c4871917902d4c0611baea764316a28a0a0b2` |
+| /tmp/core-latency6-index-counts.json | 759 | `2ad27a31695087b465ecf9823b5e66c8feeff76be55ad57c878e8c6156c2195e` |
+| /tmp/core-latency6-index-full-tests.log | 215089 | `780548f312de2ea8daa56be90ec4db3f7c9c4f538d703c350fde851d5e17ad8a` |
+| /tmp/core-latency6-index-bench-tests.log | 57100 | `ec07addc6e65f03d2638ac37f21efb75cb6221ba5866b64d444ff8bd3f59c6c6` |
+| /tmp/core-latency6-decode-tests.log | 199046 | `8ce88d249dc4824b067b958677764f2f6cd7fdce83099e489071ecae60d904f6` |
+| /tmp/core-latency6-decode-tests-fixed.log | 249938 | `1bb67ed2c5be0f6181be93dcd70d61def93930ebb5801a4d165ce79a48d98c9a` |
+| /tmp/core-latency6-run.py | 1252 | `7ab07e3b76e29c9bd6ac0ef4b663c783a8232d5aa9c5a2976b3e6ba297eddbbd` |
+| /tmp/core-latency6-analyze.py | 5143 | `bbe2d118b0f6d8b750f9880266e72193fdd7a914f5862433b2e5afaa35a30fcb` |
+| /tmp/CoreLatency6Window.java | 1937 | `b2f82cdc9cfa47d3dc519dfb223f9cec90e3a21ce55b252ed5c5a21a034ee4b7` |
+| /Users/atomex/Desktop/surprising/surprising-ex/surprising-aeron-core/surprising-aeron-benchmarks/src/main/java/com/surprising/aeron/service/state/index/ActiveOrderIndexBenchmark.java | 2284 | `1594e7539a356d833d8f3dbbc2ab1b435b9c048a3fe62810a6fb6562f71784b5` |
+
+
+清理完成：6轮本机单节点、3次分析与4组微基准进程已退出；删除本轮临时data/Archive/media/JFR/日志/脚本及受影响模块本轮生成的测试报告，共677文件、逻辑大小15176588159bytes，路径/大小/摘要清单SHA-256 `93726f58d30e75ac43be8f7c3caca50e4beb1c16ea98facf83bf92a0a15adab4`。保留构建jar/classes及上述归档；未创建GCP资源。所有/tmp/core-latency6路径仅历史定位。JMH fork PID未单独记录、系统上下文切换/FD/直接缓冲区峰值未完整采集，作为部分验证缺口保留，不补造零值。

@@ -268,6 +268,7 @@ public final class SurprisingClusteredService implements ClusteredService {
             if (!eligible) {
                 if (state.requiresOwnerLaneAccessForPreparation(next.command)
                         && !state.runtimeState.tryAcquireOwnerLaneAccess()) return;
+                CoreMatchingPhaseMetrics.recordBoundary("ingressToControl", next.command.header(), next.queuedNanos);
                 activeControl = next;
                 state.assertClusterCallbackComplete();
                 beginCapture(next.position, next.timestamp);
@@ -280,6 +281,8 @@ public final class SurprisingClusteredService implements ClusteredService {
                 continue;
             }
             if (commandWindow.size() == 0) state.assertClusterCallbackComplete();
+            CoreMatchingPhaseMetrics.recordBoundary("ingressToAdmission", next.command.header(), next.queuedNanos);
+            long admissionStart = CoreMatchingPhaseMetrics.sampleStart(next.command.header());
             var entry = commandWindow.add(next.session, next.command, next.timestamp, next.position);
             CoreResponse result = state.applyDecodedCommand(next.command, next.timestamp, next.position,
                     commandWindow.decoded(next.command), true, next.fingerprint);
@@ -290,6 +293,7 @@ public final class SurprisingClusteredService implements ClusteredService {
                 pending.partitionLaneMask = commandWindow.candidateLanes;
                 state.pendingMatching.partitionDependenciesChanged();
             }
+            CoreMatchingPhaseMetrics.recordBoundary("admissionExecution", next.command.header(), admissionStart);
             entry.response = entry.sequence == 0 ? result : null;
             pendingIngress.remove();
             commandProgress++;

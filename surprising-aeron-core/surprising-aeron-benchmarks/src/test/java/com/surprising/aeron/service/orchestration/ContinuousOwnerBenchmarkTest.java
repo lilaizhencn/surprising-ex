@@ -6,6 +6,31 @@ import org.junit.jupiter.params.provider.EnumSource;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class ContinuousOwnerBenchmarkTest {
+    @org.junit.jupiter.api.Test
+    @org.junit.jupiter.api.condition.EnabledIfSystemProperty(named = "core.settlementLatencyDiagnostics", matches = "true")
+    void recordsQueueResidenceAcrossOwnerAndTransportWithoutChangingResponses() throws Exception {
+        var path = java.nio.file.Files.createTempFile("command-boundaries-", ".jfr");
+        try (var recording = new jdk.jfr.Recording()) {
+            recording.enable(CoreMatchingPhaseMetrics.CommandBoundaryLatency.class);
+            recording.start();
+            try (var workload = new ContinuousOwnerBenchmark()) {
+                workload.productLine = ProductLine.LINEAR_PERPETUAL;
+                workload.batchSize = 20;
+                workload.setup();
+                for (int i = 0; i < 4; i++) workload.placeCancelWithoutTimers(new ContinuousOwnerBenchmark.Counters());
+                workload.verifyDeferredResponseHandoff();
+                workload.verifyPendingSnapshotBoundary();
+            }
+            recording.stop(); recording.dump(path);
+            var events = jdk.jfr.consumer.RecordingFile.readAllEvents(path).stream()
+                    .filter(e -> e.getEventType().getName().equals("surprising.CommandBoundaryLatency")).toList();
+            org.assertj.core.api.Assertions.assertThat(events).extracting(e -> e.getString("stage"))
+                    .contains("transportToOwner", "ingressToAdmission", "admissionExecution", "ownerToEgress");
+            for (var event : events) org.assertj.core.api.Assertions.assertThat(event.getLong("elapsedNanos"))
+                    .isBetween(0L, java.util.concurrent.TimeUnit.SECONDS.toNanos(30));
+        } finally { java.nio.file.Files.deleteIfExists(path); }
+    }
+
     @ParameterizedTest
     @EnumSource(ProductLine.class)
     void immutableBatchResponsesSurviveDeferredTransportAndSnapshot(ProductLine product) {

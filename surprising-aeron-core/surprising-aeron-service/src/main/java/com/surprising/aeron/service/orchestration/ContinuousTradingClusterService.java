@@ -100,7 +100,7 @@ public final class ContinuousTradingClusterService implements ClusteredService {
         try { command = CoreMessageFlyweightDecoder.decode(buffer, offset, length); }
         catch (IllegalArgumentException invalid) { return; }
         enqueue(new Input(command, session == null ? null : transportSession(session),
-                timestamp, header.position(), null, command.header().kind() == WireMessageKind.COMMAND
+                timestamp, header.position(), null, CoreMatchingPhaseMetrics.sampleStart(command.header()), command.header().kind() == WireMessageKind.COMMAND
                         ? CommandFingerprint.of(command) : null));
         drainResponses();
     }
@@ -205,6 +205,7 @@ public final class ContinuousTradingClusterService implements ClusteredService {
                     else {
                         logContext.timestamp = next.timestamp;
                         logContext.position = next.position;
+                        CoreMatchingPhaseMetrics.recordBoundary("transportToOwner", next.command.header(), next.enqueuedNanos);
                         processor.enqueueCommittedCommand(next.session, next.command, next.timestamp, next.position, next.fingerprint);
                         inputConsumed += next.command.payloadLength();
                     }
@@ -249,7 +250,7 @@ public final class ContinuousTradingClusterService implements ClusteredService {
                 completion.completeExceptionally(fatal);
                 throw fatal;
             }
-        }, null));
+        }, 0, null));
         long deadline = System.nanoTime() + DEADLINE_NS;
         while (!completion.isDone()) awaitProgress(deadline);
         return completion.join();
@@ -262,7 +263,7 @@ public final class ContinuousTradingClusterService implements ClusteredService {
             outputOverflow = true;
             return;
         }
-        if (!output.offer(new Output(session, header, response, committedSequence, length, ownerEpoch))) {
+        if (!output.offer(new Output(session, header, response, committedSequence, length, ownerEpoch, CoreMatchingPhaseMetrics.sampleStart(header)))) {
             outputOverflow = true;
             return;
         }
@@ -286,6 +287,7 @@ public final class ContinuousTradingClusterService implements ClusteredService {
                 sendScratch = new byte[next.length];
                 sendBuffer.wrap(sendScratch);
             }
+            CoreMatchingPhaseMetrics.recordBoundary("ownerToEgress", next.header, next.publishedNanos);
             CoreMessageCodec.encodeResponse(next.header, next.response, next.committedSequence, sendScratch);
             deferred.offer(next.session, sendBuffer, next.length, System.nanoTime());
         }
@@ -362,9 +364,9 @@ public final class ContinuousTradingClusterService implements ClusteredService {
     }
 
     /** 输入信封有唯一Owner消费者；action只用于低频生命周期边界。 */
-    private record Input(CoreMessage command, ClientSession session, long timestamp, long position, Runnable action,
+    private record Input(CoreMessage command, ClientSession session, long timestamp, long position, Runnable action, long enqueuedNanos,
                          CommandFingerprint fingerprint) {}
     /** 终态payload只读共享；提交水位在Owner上固定，不能编码时读取较新的业务状态。 */
     private record Output(ClientSession session, CoreMessageHeader header, CoreResponse response,
-                          long committedSequence, int length, long epoch) {}
+                          long committedSequence, int length, long epoch, long publishedNanos) {}
 }

@@ -48,6 +48,37 @@ final class CoreMatchingPhaseMetrics {
         return event;
     }
 
+    /** Sparse wall-clock samples at existing thread/queue boundaries; never business state. */
+    @jdk.jfr.Name("surprising.CommandBoundaryLatency")
+    @jdk.jfr.Label("Command queue and admission latency")
+    @jdk.jfr.Category("Surprising Core")
+    @jdk.jfr.StackTrace(false)
+    static final class CommandBoundaryLatency extends jdk.jfr.Event {
+        private static final jdk.jfr.EventType TYPE = jdk.jfr.EventType.getEventType(CommandBoundaryLatency.class);
+        public String stage;
+        public String commandType;
+        public long commandIdHigh, commandIdLow;
+        public long elapsedNanos;
+    }
+
+    static long sampleStart(com.surprising.aeron.protocol.CoreMessageHeader header) {
+        if (!com.surprising.aeron.service.state.MatcherSettlementEvent.LATENCY_DIAGNOSTICS
+                || (header.commandId().hashCode() & 63) != 0) return 0;
+        return CommandBoundaryLatency.TYPE.isEnabled() ? System.nanoTime() : 0;
+    }
+
+    static void recordBoundary(String stage, com.surprising.aeron.protocol.CoreMessageHeader header, long start) {
+        if (start == 0) return;
+        long elapsed = System.nanoTime() - start;
+        var event = new CommandBoundaryLatency();
+        event.stage = stage;
+        event.commandType = header.messageType().name();
+        event.commandIdHigh = header.commandId().getMostSignificantBits();
+        event.commandIdLow = header.commandId().getLeastSignificantBits();
+        event.elapsedNanos = elapsed;
+        event.commit();
+    }
+
     private final Phase prepare = new Phase();
     private final Phase exchange = new Phase();
     private final Phase apply = new Phase();

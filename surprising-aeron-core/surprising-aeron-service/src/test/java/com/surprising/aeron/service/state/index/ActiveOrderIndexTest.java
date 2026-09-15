@@ -24,6 +24,43 @@ import org.junit.jupiter.api.Test;
 class ActiveOrderIndexTest {
 
     @Test
+    void terminalRemovalIsIdempotentAndPreservesOtherAccountAndSymbolOrders() {
+        for (var status : CoreOrderStatus.values()) {
+            if (!status.terminal()) continue;
+            var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
+            var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
+            var orders = new com.surprising.aeron.service.state.OrderRuntime[3];
+            for (int i = 0; i < orders.length; i++) {
+                var order = new CoreOrderState(i + 1, ProductLine.SPOT, i < 2 ? 7 : 8, "BTC-USDT", 1,
+                        CoreOrderSide.BUY, 90, 10, 0, 10, false, CoreOrderStatus.OPEN, 1);
+                orders[i] = com.surprising.aeron.service.state.RuntimeStateProjector.toRuntimeOrder(order, identities);
+                index.apply(i + 1, orders[i], identities);
+            }
+            var terminal = status == CoreOrderStatus.FILLED
+                    ? orders[0].withFill(10, 0, 0, status, 2) : orders[0].withStatus(status, 2);
+            index.apply(1, terminal, identities);
+            index.apply(1, terminal, identities);
+            index.apply(1, null, identities);
+            index.apply(999, null, identities);
+            assertThat(index.activeOrderRuntime(1)).isNull();
+            assertThat(index.ids(7)).containsExactly(2L);
+            assertThat(index.ids(8)).containsExactly(3L);
+            assertThat(index.ids("BTC-USDT")).containsExactly(3L, 2L);
+            assertThat(index.counterpartyMask("BTC-USDT", CoreOrderSide.SELL, 90))
+                    .isEqualTo(TradingDependencyMask.account(7) | TradingDependencyMask.account(8));
+            index.apply(2, null, identities);
+            assertThat(index.counterpartyMask("BTC-USDT", CoreOrderSide.SELL, 90))
+                    .isEqualTo(TradingDependencyMask.account(8));
+            index.apply(3, null, identities);
+            assertThat(index.count()).isZero();
+            assertThat(index.ids(7)).isEmpty();
+            assertThat(index.ids(8)).isEmpty();
+            assertThat(index.ids("BTC-USDT")).isEmpty();
+            assertThat(index.counterpartyMask("BTC-USDT", CoreOrderSide.SELL, 90)).isZero();
+        }
+    }
+
+    @Test
     void boundedTurnoverKeepsStorageAndIndependentQueryCursors() throws Exception {
         var identities = new com.surprising.aeron.service.state.RuntimeIdentityRegistry();
         var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), identities);
