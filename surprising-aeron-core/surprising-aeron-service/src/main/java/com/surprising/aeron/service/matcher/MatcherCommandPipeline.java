@@ -152,6 +152,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         slot.token = token;
         slot.command = command;
         slot.settlement = settlement;
+        slot.directSettlement = settlement != null && settlement.direct();
         submittedPosition.value = position + 1;
         int depth = Math.toIntExact(position + 1 - consumedPosition.value);
         submissionHighWaterMark = Math.max(submissionHighWaterMark, depth);
@@ -215,7 +216,13 @@ public final class MatcherCommandPipeline implements AutoCloseable {
             if (position >= completedPosition.value) return;
             Slot slot = slots[(int) position & mask];
             var settlement = slot.settlement;
-            if (slot.token <= 0 || settlement == null || !settlement.direct() || !settlement.ready()) return;
+            // The settlement event is owner-owned and may be recycled before this SPSC slot
+            // reaches the consumer head when an earlier ordinary matcher command is still
+            // pending.  Keep the direct classification on the slot itself; consulting the
+            // mutable event here would turn a completed direct slot into an ordinary result
+            // after event cleanup, and the owner would then probe a recycled sequence context.
+            if (slot.token <= 0 || !slot.directSettlement
+                    || settlement != null && !settlement.ready()) return;
             if (!SEQUENCE_VALUE.compareAndSet(consumedPosition, position, position + 1)) continue;
             slot.clear();
         }
@@ -418,6 +425,8 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         private Object result;
         private Throwable failure;
         private com.surprising.aeron.service.state.MatcherSettlementEvent settlement;
+        /** Stable slot metadata; the settlement event itself is recycled by the owner. */
+        private boolean directSettlement;
 
         private void clear() {
             token = 0;
@@ -425,6 +434,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
             result = null;
             failure = null;
             settlement = null;
+            directSettlement = false;
         }
     }
 

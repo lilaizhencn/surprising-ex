@@ -32,8 +32,13 @@ public final class LaneCommandContextRing {
     }
 
     public Context required(long coreSequence) {
-        Context context = contexts[(int) coreSequence & mask];
-        if (context.coreSequence != coreSequence) throw new IllegalStateException("unknown lane command context");
+        int slot = (int) coreSequence & mask;
+        Context context = contexts[slot];
+        if (context.coreSequence != coreSequence) {
+            throw new IllegalStateException("unknown lane command context sequence=" + coreSequence
+                    + " slot=" + slot + " actual=" + context.coreSequence
+                    + " inFlight=" + inFlight + " capacity=" + contexts.length);
+        }
         return context;
     }
 
