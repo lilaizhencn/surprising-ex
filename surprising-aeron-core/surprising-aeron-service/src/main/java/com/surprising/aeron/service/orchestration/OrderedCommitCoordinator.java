@@ -1,6 +1,8 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.command.ResolvedMatchingAdmission;
-import com.surprising.aeron.service.command.OrderBatchKind;
+
+
+import com.surprising.aeron.service.command.order.ResolvedMatchingAdmission;
+import com.surprising.aeron.service.command.order.OrderBatchKind;
 import com.surprising.aeron.service.command.ImmutableLongArrayList;
 import com.surprising.aeron.service.state.RiskScanCoordinator;
 
@@ -387,7 +389,7 @@ final class OrderedCommitCoordinator {
                     if (liquidation == null) owner.resultBuilder.commandChangedUserIds = List.of();
                     else owner.resultBuilder.setSingleChangedUser(liquidation.userId());
                     if (matchingResult.accepted() && liquidation != null) {
-                        boolean executable = com.surprising.aeron.service.state.RuntimeLiquidationQueryService
+                        boolean executable = com.surprising.aeron.service.state.query.RuntimeLiquidationQueryService
                                 .isExecutable(owner.runtimeState, owner.identities, command);
                         long nextCursor = executable && chunk.more() ? chunk.nextCursorOrderId() : 0;
                         var orders = executable ? chunk.orders() : List.<CoreOrderState>of();
@@ -403,9 +405,9 @@ final class OrderedCommitCoordinator {
                                 return true;
                             });
                         } else {
-                            if (nextCursor != 0) owner.derivativeRisk.advanceLiquidationCancellationRuntime(
+                            if (nextCursor != 0) owner.liquidations.advanceLiquidationCancellationRuntime(
                                     command, orders, nextCursor);
-                            else owner.derivativeRisk.executeLiquidationRuntime(command, orders);
+                            else owner.liquidations.executeLiquidationRuntime(command, orders);
                             owner.resultBuilder.commandLiquidationProgress = progress;
                         }
                     }
@@ -888,7 +890,7 @@ final class OrderedCommitCoordinator {
                             action.cursorOrderId(), remaining);
                     for (CoreOrderState order : chunk.orders()) owner.resultBuilder.markOrderChanged(order.orderId());
                     owner.resultBuilder.markUserChanged(liquidation.userId());
-                    boolean executable = com.surprising.aeron.service.state.RuntimeLiquidationQueryService
+                    boolean executable = com.surprising.aeron.service.state.query.RuntimeLiquidationQueryService
                             .isExecutable(owner.runtimeState, owner.identities, single);
                     long nextCursor = executable && chunk.more() ? chunk.nextCursorOrderId() : 0;
                     var orders = executable ? chunk.orders() : List.<CoreOrderState>of();
@@ -902,8 +904,8 @@ final class OrderedCommitCoordinator {
                                 .beginExecution(single, orders, nextCursor, owner.runtimeState, owner.identities);
                         return false;
                     }
-                    if (nextCursor != 0) owner.derivativeRisk.advanceLiquidationCancellationRuntime(single, orders, nextCursor);
-                    else owner.derivativeRisk.executeLiquidationRuntime(single, orders);
+                    if (nextCursor != 0) owner.liquidations.advanceLiquidationCancellationRuntime(single, orders, nextCursor);
+                    else owner.liquidations.executeLiquidationRuntime(single, orders);
                 }
                 int completedRiskWork = 0;
                 if (!riskStarted) {

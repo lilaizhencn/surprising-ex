@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.command.DecodedMatchingCommand;
-import com.surprising.aeron.service.command.ResolvedMatchingAdmission;
+import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
+import com.surprising.aeron.service.command.order.ResolvedMatchingAdmission;
+import com.surprising.aeron.service.command.support.PrimitiveLongChangeSet;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 

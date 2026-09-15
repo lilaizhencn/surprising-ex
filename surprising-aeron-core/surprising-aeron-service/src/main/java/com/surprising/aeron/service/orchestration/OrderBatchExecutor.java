@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.command.DecodedMatchingCommand;
-import com.surprising.aeron.service.command.OrderBatchKind;import com.surprising.aeron.service.orchestration.CommandResultLedger.StoredResult;
+import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
+import com.surprising.aeron.service.command.order.OrderBatchKind;
+import com.surprising.aeron.service.orchestration.CommandResultLedger.StoredResult;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.protocol.CoreMessageType;

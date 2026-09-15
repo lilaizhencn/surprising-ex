@@ -2,7 +2,7 @@ package com.surprising.aeron.service.state;
 
 import java.nio.charset.StandardCharsets;
 
-final class CoreStateHash {
+public final class CoreStateHash {
 
     private static final long OFFSET_BASIS = 0xcbf29ce484222325L;
     private static final long PRIME = 0x100000001b3L;
@@ -10,11 +10,11 @@ final class CoreStateHash {
     private CoreStateHash() {
     }
 
-    static long start() {
+    public static long start() {
         return OFFSET_BASIS;
     }
 
-    static long mix(long hash, long value) {
+    public static long mix(long hash, long value) {
         long result = hash;
         for (int shift = 0; shift < Long.SIZE; shift += Byte.SIZE) {
             result ^= (value >>> shift) & 0xff;
@@ -23,11 +23,11 @@ final class CoreStateHash {
         return result;
     }
 
-    static long mix(long hash, boolean value) {
+    public static long mix(long hash, boolean value) {
         return mix(hash, value ? 1 : 0);
     }
 
-    static long mix(long hash, String value) {
+    public static long mix(long hash, String value) {
         long result = mix(hash, value.length());
         boolean ascii = true;
         for (int index = 0; index < value.length(); index++) {

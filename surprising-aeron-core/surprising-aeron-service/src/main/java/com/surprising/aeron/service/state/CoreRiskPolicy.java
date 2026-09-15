@@ -6,7 +6,7 @@ import com.surprising.aeron.service.state.model.CoreRiskStatus;
  * Core-owned status policy. Margin rates and risk limits come from the versioned instrument;
  * this policy only maps the resulting margin ratio to an operational status.
  */
-final class CoreRiskPolicy {
+public final class CoreRiskPolicy {
 
     static final int VERSION = 1;
     static final long WARNING_MARGIN_RATIO_PPM = 800_000L;
@@ -16,7 +16,7 @@ final class CoreRiskPolicy {
     }
 
     /** Fully paid option longs carry no liquidation margin in the supported non-PM model. */
-    static boolean canLiquidate(com.surprising.instrument.api.model.ContractType type, long quantity) {
+    public static boolean canLiquidate(com.surprising.instrument.api.model.ContractType type, long quantity) {
         return quantity != 0 && !(type.isOption() && quantity > 0);
     }
 

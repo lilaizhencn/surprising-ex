@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.command.ResolvedMatchingAdmission;
+import com.surprising.aeron.service.command.order.ResolvedMatchingAdmission;
 import com.surprising.aeron.service.command.ImmutableLongArrayList;
+import com.surprising.aeron.service.command.support.PrimitiveLongChangeSet;
 import static com.surprising.aeron.service.orchestration.TradingCoreRuntime.*;
 
 import com.surprising.aeron.service.matching.CoreMatchingResult;

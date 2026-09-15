@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.surprising.aeron.protocol.CoreResultCode;
+import com.surprising.aeron.service.command.support.PrimitiveLongChangeSet;
 import com.surprising.aeron.service.matching.CoreMatchingResult;
 import com.surprising.aeron.service.state.RuntimeCommitJournal;
 import com.surprising.aeron.service.state.RuntimeFundsAccumulator;

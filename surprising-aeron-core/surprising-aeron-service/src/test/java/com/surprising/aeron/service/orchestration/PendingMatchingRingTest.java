@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.command.DecodedMatchingCommand;
+import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

@@ -1,12 +1,36 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.orchestration.ClusterCommandWindow;import com.surprising.aeron.service.command.DecodedMatchingCommand;
-import com.surprising.aeron.service.command.ResolvedMatchingAdmission;
-import com.surprising.aeron.service.command.OrderBatchKind;
-import com.surprising.aeron.service.command.ImmutableLongArrayList;import com.surprising.aeron.service.matcher.MatcherPipelineGroup;
+
+
+import com.surprising.aeron.service.orchestration.ClusterCommandWindow;
+import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
+import com.surprising.aeron.service.command.order.ResolvedMatchingAdmission;
+import com.surprising.aeron.service.command.order.OrderBatchKind;
+import com.surprising.aeron.service.command.ImmutableLongArrayList;
+import com.surprising.aeron.service.command.CommandResultContext;
+import com.surprising.aeron.service.command.DirectCommandDispatcher;
+import com.surprising.aeron.service.command.balance.BalanceCommandContext;
+import com.surprising.aeron.service.command.balance.BalanceTransferCommands;
+import com.surprising.aeron.service.command.position.PositionCommands;
+import com.surprising.aeron.service.command.leverage.LeverageCommands;
+import com.surprising.aeron.service.command.risk.RiskCommandContext;
+import com.surprising.aeron.service.command.risk.RiskCommands;
+import com.surprising.aeron.service.command.liquidation.LiquidationCommandContext;
+import com.surprising.aeron.service.command.liquidation.LiquidationCommands;
+import com.surprising.aeron.service.command.adl.AdlCommands;
+import com.surprising.aeron.service.command.insurance.InsuranceFundCommands;
+import com.surprising.aeron.service.command.funding.FundingCommandContext;
+import com.surprising.aeron.service.command.funding.PerpetualFundingCommands;
+import com.surprising.aeron.service.command.settlement.InstrumentSettlementCommands;
+import com.surprising.aeron.service.command.settlement.SettlementCommandContext;
+import com.surprising.aeron.service.command.fee.FeePolicyCommandContext;
+import com.surprising.aeron.service.command.fee.FeePolicyCommands;
+import com.surprising.aeron.service.command.trigger.TriggerCommandContext;
+import com.surprising.aeron.service.command.trigger.TriggerCommandDispatcher;
+import com.surprising.aeron.service.command.trigger.TriggerOrderCommands;
+import com.surprising.aeron.service.matcher.MatcherPipelineGroup;
 import com.surprising.aeron.service.matcher.MatcherCommandPipeline;
 import com.surprising.aeron.service.orchestration.CommandResultLedger.StoredResult;
 
-import com.surprising.aeron.service.state.DerivativeAccountCommandProcessor;
 import com.surprising.aeron.service.orchestration.CoreSnapshotLifecycle.SnapshotFence;
 import com.surprising.aeron.service.orchestration.OrderBookQueryService.CompletedBookQuery;
 import com.surprising.aeron.service.orchestration.OrderBookQueryService.BookBootstrapSession;
@@ -87,7 +111,10 @@ import java.util.concurrent.CompletableFuture;
  * 唯一交易执行入口，按集群日志顺序组织准入、撮合和有序提交。
  * 产品命令、批量执行、结果账本、查询及快照由所属组件管理；不持有旧探测运行时副本。
  */
-public final class TradingCoreRuntime implements AutoCloseable, com.surprising.aeron.service.command.CommandOwnerContext {
+public final class TradingCoreRuntime implements AutoCloseable,
+        CommandResultContext, BalanceCommandContext, FundingCommandContext,
+        RiskCommandContext, LiquidationCommandContext, SettlementCommandContext,
+        FeePolicyCommandContext, TriggerCommandContext {
 
 
     /** 交割与期权等币对到期结算：沿用产品结算处理器，并登记受影响账户。 */
@@ -110,14 +137,32 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
     /** 永续合约资金费命令；沿用 U 本位和币本位各自结算规则。 */
     final PerpetualFundingCommands funding = new PerpetualFundingCommands(this);
 
-    /** 衍生品标记价、风险续扫、保险及 ADL 命令。 */
-    final DerivativeRiskCommands derivativeRisk = new DerivativeRiskCommands(this);
+    /** 衍生品标记价、风险续扫和风险扫描控制命令。 */
+    final RiskCommands risk = new RiskCommands(this);
 
-    /** 衍生品保证金和杠杆命令；不处理现货资金冻结。 */
-    final DerivativeAccountCommands derivativeAccounts = new DerivativeAccountCommands(this);
+    /** 衍生品持仓模式和保证金命令；不处理杠杆变更。 */
+    final PositionCommands positions = new PositionCommands(this);
 
-    /** 触发单和算法单生命周期命令；各产品线使用所属运行时和订单规则。 */
+    /** 衍生品杠杆命令；不处理持仓模式和保证金。 */
+    final LeverageCommands leverage = new LeverageCommands(this);
+
+    /** 衍生品强平命令；负责强平撤单推进和强平结果确认。 */
+    final LiquidationCommands liquidations = new LiquidationCommands(this);
+
+    /** 自动减仓命令。 */
+    final AdlCommands adl = new AdlCommands(this);
+
+    /** 保险基金调整命令。 */
+    final InsuranceFundCommands insurance = new InsuranceFundCommands(this);
+
+    /** 触发单/算法单命令；只负责触发生命周期和触发子单。 */
     final TriggerOrderCommands triggers = new TriggerOrderCommands(this);
+
+    /** 直接业务命令路由；匹配和控制流水线由本编排器继续处理。 */
+    final DirectCommandDispatcher directCommands = new DirectCommandDispatcher(
+            balances, instruments, funding, risk, liquidations, adl, insurance,
+            positions, leverage, instrumentSettlement, new FeePolicyCommands(this),
+            new TriggerCommandDispatcher(triggers));
 
     /** 当前命令的结果与变更 ID；owner 串行复用，在命令完成边界编码。 */
     final CommandResultBuilder resultBuilder = new CommandResultBuilder(this);
@@ -342,6 +387,74 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
     @Override public TradingRuntimeState runtimeState() { return runtimeState; }
     @Override public RuntimeIdentityRegistry identities() { return identities; }
     @Override public void requestCommitPublication() { commits.requestCommitPublication(); }
+    @Override public boolean asynchronousCommands() { return runtimeState.asynchronousCommands(); }
+    @Override public void setSingleChangedUser(long userId) { resultBuilder.setSingleChangedUser(userId); }
+    @Override public void markUserChanged(long userId) { resultBuilder.markUserChanged(userId); }
+    @Override public void markOrderChanged(long orderId) { resultBuilder.markOrderChanged(orderId); }
+    @Override public void beginChangedUsers() { resultBuilder.beginChangedUsers(); }
+    @Override public void addChangedUser(long userId) { resultBuilder.addChangedUser(userId); }
+    @Override public void addChangedUsersFromOrders(Iterable<? extends CoreOrderState> orders) {
+        resultBuilder.addChangedUsersFromOrders(orders);
+    }
+    @Override public void addChangedUsersFromFundingPayments(
+            Iterable<? extends com.surprising.aeron.protocol.CoreFundingPaymentView> payments) {
+        resultBuilder.addChangedUsersFromFundingPayments(payments);
+    }
+    @Override public void setCommandChangedOrderIds(List<Long> orderIds) {
+        resultBuilder.commandChangedOrderIds = orderIds;
+    }
+    @Override public void setCommandFundingProgress(CoreFundingProgressView progress) {
+        resultBuilder.commandFundingProgress = progress;
+    }
+    @Override public void setCommandSettlementProgress(CoreSettlementProgressView progress) {
+        resultBuilder.commandSettlementProgress = progress;
+    }
+    @Override public void setCommandRiskScanControl(
+            com.surprising.aeron.protocol.CoreRiskScanControlView control) {
+        resultBuilder.commandRiskScanControl = control;
+    }
+    @Override public void setCommandTriggerOrderView(
+            com.surprising.aeron.protocol.CoreTriggerOrderStateView trigger) {
+        resultBuilder.commandTriggerOrderView = trigger;
+    }
+    @Override public void refreshTransferHash() {
+        cachedTransferHash = computeTransferHash(runtimeState.pendingTransfersSnapshot());
+    }
+    @Override public void refreshFeePolicyHash() {
+        cachedFeePolicyHash = computeFeePolicyHash(runtimeState.feePoliciesSnapshot());
+    }
+    @Override public PositionUserIndex positionUserIndex() { return positionUserIndex; }
+    @Override public OpenInterestIndex openInterestIndex() { return openInterestIndex; }
+    @Override public TriggerOrderIndex triggerOrderIndex() { return triggerOrderIndex; }
+    @Override public ActiveOrderIndex activeOrderIndex() { return activeOrderIndex; }
+    @Override public Iterable<Long> activeLiquidationIds() { return liquidationIndex.activeIds(); }
+    @Override public void initializeTriggerScan(com.surprising.aeron.protocol.ApplyMarkPriceCommand command) {
+        triggers.initializeTriggerScan(command);
+    }
+    @Override public java.util.function.BooleanSupplier pendingTriggerScan(String symbol, int maxWork) {
+        return triggers.pendingTriggerScan(symbol, maxWork);
+    }
+    @Override public void evaluatePendingTriggerScan(String symbol, int maxWork) {
+        triggers.evaluatePendingTriggerScan(symbol, maxWork);
+    }
+    @Override public int queuedMatchingCount() { return admissions.queuedMatching.size(); }
+    @Override public int defaultTriggerScanBatchSize() { return DEFAULT_TRIGGER_SCAN_BATCH_SIZE; }
+    @Override public long currentClusterTimestamp() { return currentClusterTimestamp; }
+    @Override public boolean terminalAlgoRetained(long algoOrderId, long userId, String clientAlgoOrderId) {
+        return terminalRetention.containsAlgo(algoOrderId, userId, clientAlgoOrderId);
+    }
+    @Override public boolean terminalTriggerRetained(long triggerOrderId, long userId, String clientTriggerOrderId) {
+        return terminalRetention.containsTrigger(triggerOrderId, userId, clientTriggerOrderId);
+    }
+    @Override public com.surprising.aeron.service.state.TreasuryRuntime.LifecycleProgressRuntime
+            lifecycleProgress(String symbol) {
+        return runtimeLifecycleProgress(symbol);
+    }
+    @Override public SettlementCommandContext.LifecycleOrderPage settlementLifecycleOrders(
+            long userId, String symbol, long cursorOrderId, int maxOrders) {
+        LifecycleOrderChunk page = lifecycleOrders(userId, symbol, cursorOrderId, maxOrders);
+        return new SettlementCommandContext.LifecycleOrderPage(page.orders(), page.nextCursorOrderId());
+    }
 
     public TradingCoreRuntime(ProductLine productLine) {
         this(productLine, 0, 0, new LinkedHashMap<>(), new LinkedHashMap<>(),
@@ -701,7 +814,7 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
         }
         if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.USER_STATE_HASH_QUERY) {
-            var query = com.surprising.aeron.service.state.RuntimeStateQueryService.userState(
+            var query = com.surprising.aeron.service.state.query.RuntimeStateQueryService.userState(
                     runtimeState, identities, message.header().userId());
             if (query.tooLarge()) return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
             return new CoreResponse(ResponseStatus.OK, appliedCommandCount,
@@ -727,7 +840,7 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
         if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.ORDER_STATE_HASH_QUERY) {
             try {
-                var query = com.surprising.aeron.service.state.RuntimeStateQueryService.orderState(
+                var query = com.surprising.aeron.service.state.query.RuntimeStateQueryService.orderState(
                         runtimeState, identities,
                         TradingCommandCodec.decodeOrderStateQuery(message.payloadUnsafe()));
                 return new CoreResponse(ResponseStatus.OK, appliedCommandCount,
@@ -751,7 +864,7 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
         if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.CLIENT_ORDER_STATE_QUERY) {
             try {
-                var query = com.surprising.aeron.service.state.RuntimeStateQueryService.clientOrderState(
+                var query = com.surprising.aeron.service.state.query.RuntimeStateQueryService.clientOrderState(
                         runtimeState, identities, message.header().userId(),
                         CoreStateQueryCodec.decodeClientOrderStateQuery(message.payloadUnsafe()));
                 return orderStateResponse(query);
@@ -767,10 +880,10 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
                 long requestedUserId = message.header().userId();
                 var page = activeOrderIndex.page(requestedUserId, query.symbol(), beforeOrderId, query.limit());
                 var orders = page.orderIds().stream()
-                        .map(orderId -> com.surprising.aeron.service.state.RuntimeStateQueryService.orderState(
+                        .map(orderId -> com.surprising.aeron.service.state.query.RuntimeStateQueryService.orderState(
                                 runtimeState, identities, orderId))
-                        .filter(com.surprising.aeron.service.state.RuntimeStateQueryService.OrderQueryResult::found)
-                        .map(com.surprising.aeron.service.state.RuntimeStateQueryService.OrderQueryResult::view)
+                        .filter(com.surprising.aeron.service.state.query.RuntimeStateQueryService.OrderQueryResult::found)
+                        .map(com.surprising.aeron.service.state.query.RuntimeStateQueryService.OrderQueryResult::view)
                         .toList();
                 return new CoreResponse(ResponseStatus.OK, appliedCommandCount, cachedBusinessStateHash,
                         CoreStateQueryCodec.encodeOpenOrders(
@@ -794,14 +907,14 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
                         : triggerOrderIndex.ids(message.header().userId()))
                         : (query.status() == null ? triggerOrderIndex.ids(query.symbol())
                         : triggerOrderIndex.ids(query.symbol(), query.status()));
-                var values = com.surprising.aeron.service.state.RuntimeOperationalQueryService.triggerOrders(
+                var values = com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.triggerOrders(
                         runtimeState, source, message.header().userId(), query.symbol(), query.status(),
                         query.triggerOrderId(), before,
                         message.header().messageType() == CoreMessageType.USER_OPEN_TRIGGER_ORDERS_QUERY,
                         query.limit());
                 return new CoreResponse(ResponseStatus.OK, appliedCommandCount, cachedBusinessStateHash,
                         com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeList(values));
-            } catch (com.surprising.aeron.service.state.RuntimeOperationalQueryService.QueryTooLargeException exception) {
+            } catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException exception) {
                 return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
             } catch (IllegalArgumentException exception) {
                 return rejected(CoreResultCode.INVALID_COMMAND);
@@ -826,11 +939,11 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
         if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.TREASURY_STATE_QUERY) {
             try {
-                var views = com.surprising.aeron.service.state.RuntimeOperationalQueryService.treasuryAssets(
+                var views = com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.treasuryAssets(
                         runtimeState, identities);
                 return new CoreResponse(ResponseStatus.OK, appliedCommandCount, cachedBusinessStateHash,
                         CoreStateQueryCodec.encodeTreasuryState(views));
-            } catch (com.surprising.aeron.service.state.RuntimeOperationalQueryService.QueryTooLargeException exception) {
+            } catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException exception) {
                 return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
             }
         }
@@ -838,7 +951,7 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
                 && message.header().messageType() == CoreMessageType.FUNDING_PROGRESS_QUERY) {
             try {
                 String symbol = CoreStateQueryCodec.decodeFundingProgressQuery(message.payloadUnsafe());
-                CoreFundingProgressView view = com.surprising.aeron.service.state.RuntimeOperationalQueryService
+                CoreFundingProgressView view = com.surprising.aeron.service.state.query.RuntimeOperationalQueryService
                         .fundingProgress(runtimeState, identities, symbol);
                 return new CoreResponse(ResponseStatus.OK, appliedCommandCount, cachedBusinessStateHash,
                         CoreFundingProgressCodec.encode(view));
@@ -850,7 +963,7 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
                 && message.header().messageType() == CoreMessageType.SETTLEMENT_PROGRESS_QUERY) {
             try {
                 String symbol = CoreStateQueryCodec.decodeSettlementProgressQuery(message.payloadUnsafe());
-                CoreSettlementProgressView view = com.surprising.aeron.service.state.RuntimeOperationalQueryService
+                CoreSettlementProgressView view = com.surprising.aeron.service.state.query.RuntimeOperationalQueryService
                         .settlementProgress(runtimeState, identities, symbol);
                 return new CoreResponse(ResponseStatus.OK, appliedCommandCount, cachedBusinessStateHash,
                         CoreSettlementProgressCodec.encode(view));
@@ -864,10 +977,10 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
                 var query = com.surprising.aeron.protocol.CoreAdlQueryCodec.decodeQuery(message.payloadUnsafe());
                 return new CoreResponse(ResponseStatus.OK, appliedCommandCount, cachedBusinessStateHash,
                         com.surprising.aeron.protocol.CoreAdlQueryCodec.encodeCandidates(
-                                com.surprising.aeron.service.state.RuntimeRiskQueryService.adlCandidates(
+                                com.surprising.aeron.service.state.query.RuntimeRiskQueryService.adlCandidates(
                                         runtimeState, identities, query.asset(),
                                         adlPositionIndex.positions(query.asset()), query.limit())));
-            } catch (com.surprising.aeron.service.state.RuntimeOperationalQueryService.QueryTooLargeException exception) {
+            } catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException exception) {
                 return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
             } catch (IllegalArgumentException exception) {
                 return rejected(CoreResultCode.INVALID_COMMAND);
@@ -876,11 +989,11 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
         if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.RISK_STATE_QUERY) {
             try {
-                var views = com.surprising.aeron.service.state.RuntimeRiskQueryService.snapshots(
+                var views = com.surprising.aeron.service.state.query.RuntimeRiskQueryService.snapshots(
                         runtimeState, identities, message.header().userId());
                 return new CoreResponse(ResponseStatus.OK, appliedCommandCount, cachedBusinessStateHash,
                         com.surprising.aeron.protocol.CoreRiskQueryCodec.encode(views));
-            } catch (com.surprising.aeron.service.state.RuntimeOperationalQueryService.QueryTooLargeException exception) {
+            } catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException exception) {
                 return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
             }
         }
@@ -893,7 +1006,7 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
         if (message.header().kind() == WireMessageKind.QUERY
                 && message.header().messageType() == CoreMessageType.OPEN_INTEREST_QUERY) {
             if (openInterestIndex.totals().size()
-                    > com.surprising.aeron.service.state.RuntimeOperationalQueryService.MAX_QUERY_ENTITIES) {
+                    > com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.MAX_QUERY_ENTITIES) {
                 return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
             }
             var views = openInterestIndex.totals().entrySet().stream()
@@ -911,11 +1024,11 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
                         ? List.of(query.algoOrderId())
                         : algoOrderIndex.query(query.userId(), query.symbol(), query.dueAtEpochMillis(),
                                 query.limit(), runtimeState::algoOrder);
-                var values = com.surprising.aeron.service.state.RuntimeOperationalQueryService.algoOrders(
+                var values = com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.algoOrders(
                         runtimeState, algoIds);
                 return new CoreResponse(ResponseStatus.OK, appliedCommandCount, cachedBusinessStateHash,
                         com.surprising.aeron.protocol.CoreAlgoOrderCodec.encodeList(values));
-            } catch (com.surprising.aeron.service.state.RuntimeOperationalQueryService.QueryTooLargeException exception) {
+            } catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException exception) {
                 return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
             } catch (IllegalArgumentException exception) {
                 return rejected(CoreResultCode.INVALID_COMMAND);
@@ -927,11 +1040,11 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
                 var query = com.surprising.aeron.protocol.CoreCancelAllAfterCodec.decodeQuery(message.payloadUnsafe());
                 var keys = cancelAllAfterIndex.query(query.userId(), query.symbolScope(), query.dueAtEpochMillis(),
                         query.limit(), runtimeState::cancelAllAfterTimer);
-                var values = com.surprising.aeron.service.state.RuntimeOperationalQueryService.cancelAllAfter(
+                var values = com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.cancelAllAfter(
                         runtimeState, keys);
                 return new CoreResponse(ResponseStatus.OK, appliedCommandCount, cachedBusinessStateHash,
                         com.surprising.aeron.protocol.CoreCancelAllAfterCodec.encodeList(values));
-            } catch (com.surprising.aeron.service.state.RuntimeOperationalQueryService.QueryTooLargeException exception) {
+            } catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException exception) {
                 return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
             } catch (IllegalArgumentException exception) {
                 return rejected(CoreResultCode.INVALID_COMMAND);
@@ -946,12 +1059,12 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
                 }
                 java.util.NavigableSet<Long> candidates = liquidationIndex.activeIds()
                         .tailSet(query.afterLiquidationId(), false);
-                var work = com.surprising.aeron.service.state.RuntimeLiquidationQueryService.work(
+                var work = com.surprising.aeron.service.state.query.RuntimeLiquidationQueryService.work(
                         runtimeState, identities, productLine, query, candidates,
                         liquidationIndex.activeIds());
                 return new CoreResponse(ResponseStatus.OK, appliedCommandCount, cachedBusinessStateHash,
                         com.surprising.aeron.protocol.CoreLiquidationWorkCodec.encodeWork(work));
-            } catch (com.surprising.aeron.service.state.RuntimeOperationalQueryService.QueryTooLargeException exception) {
+            } catch (com.surprising.aeron.service.state.query.RuntimeOperationalQueryService.QueryTooLargeException exception) {
                 return rejected(CoreResultCode.QUERY_RESPONSE_TOO_LARGE);
             } catch (IllegalArgumentException exception) {
                 return rejected(CoreResultCode.INVALID_COMMAND);
@@ -1253,7 +1366,7 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
     private ResponseStatus controlCompletionStatus;
     private CoreResultCode controlCompletionCode;
 
-    void deferControl(java.util.function.BooleanSupplier continuation) {
+    @Override public void deferControl(java.util.function.BooleanSupplier continuation) {
         if (controlContinuation != null || continuation == null) throw new IllegalStateException("nested control continuation");
         controlContinuation = continuation;
     }
@@ -1872,7 +1985,7 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
                 case LIQUIDATION -> {
                     var command = pending.decodedCommand().liquidation();
                     var liquidation = runtimeState.liquidation(command.liquidationId());
-                    if (liquidation == null || !com.surprising.aeron.service.state.RuntimeLiquidationQueryService
+                    if (liquidation == null || !com.surprising.aeron.service.state.query.RuntimeLiquidationQueryService
                             .isExecutable(runtimeState, identities, command)) {
                         yield new MatchingSubmission(command.liquidationId(),
                                 liquidation == null ? 0 : liquidation.instrumentChangeId(),
@@ -2624,47 +2737,16 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
     }
 
     ResponseStatus applyCommand(CoreMessage message, long clusterTimestamp) {
+        if (directCommands.dispatch(message, clusterTimestamp)) return ResponseStatus.APPLIED;
         switch (message.header().messageType()) {
             case PROBE_INCREMENT -> probeValue = Math.addExact(
                     probeValue, CoreProtocol.decodeProbeDelta(message.payloadUnsafe()));
             case VERIFY_STATE_HASH -> {
             }
-            case ADJUST_BALANCE -> balances.executeAdjustBalance(message, clusterTimestamp);
-            case TRANSFER_OUT -> balances.executeTransferOut(message, clusterTimestamp);
-            case TRANSFER_IN -> balances.executeTransferIn(message, clusterTimestamp);
-            case COMPLETE_TRANSFER -> balances.executeCompleteTransfer(message, clusterTimestamp);
             case PLACE_ORDER, CANCEL_ORDER, REPLACE_ORDER, AMEND_ORDER,
                     PLACE_ORDER_BATCH, CANCEL_ORDER_BATCH, AMEND_ORDER_BATCH,
                     EXECUTE_LIQUIDATION, SETTLE_INSTRUMENT ->
                     throw new IllegalStateException("matching command must use async continuation");
-            case UPSERT_INSTRUMENT -> instruments.executeUpsertInstrument(message, clusterTimestamp);
-            case APPLY_MARK_PRICE -> derivativeRisk.executeApplyMarkPrice(message, clusterTimestamp);
-            case APPLY_FUNDING -> funding.executeApplyFunding(message, clusterTimestamp);
-            case EXECUTE_ADL -> derivativeRisk.executeExecuteAdl(message, clusterTimestamp);
-            case RESOLVE_LIQUIDATION -> derivativeRisk.executeResolveLiquidation(message, clusterTimestamp);
-            case CONTINUE_RISK_SCAN -> derivativeRisk.executeContinueRiskScan(message, clusterTimestamp);
-            case UPDATE_RISK_SCAN_CONTROL -> derivativeRisk.executeUpdateRiskScanControl(message, clusterTimestamp);
-            case UPDATE_INSTRUMENT_MAINTENANCE -> instruments.executeUpdateInstrumentMaintenance(message, clusterTimestamp);
-            case UPSERT_FEE_POLICY -> {
-                runtimeState.upsertFeePolicy(
-                        TradingCommandCodec.decodeUpsertFeePolicy(message.payloadUnsafe()));
-                cachedFeePolicyHash = computeFeePolicyHash(runtimeState.feePoliciesSnapshot());
-                commits.requestCommitPublication();
-            }
-            case UPDATE_POSITION_MODE -> derivativeAccounts.executeUpdatePositionMode(message, clusterTimestamp);
-            case ADJUST_POSITION_MARGIN -> derivativeAccounts.executeAdjustPositionMargin(message, clusterTimestamp);
-            case ADJUST_INSURANCE_FUND -> derivativeRisk.executeAdjustInsuranceFund(message, clusterTimestamp);
-            case UPDATE_LEVERAGE -> derivativeAccounts.executeUpdateLeverage(message, clusterTimestamp);
-            case UPSERT_ALGO_ORDER -> triggers.executeUpsertAlgoOrder(message, clusterTimestamp);
-            case UPDATE_CANCEL_ALL_AFTER -> triggers.executeUpdateCancelAllAfter(message, clusterTimestamp);
-            case PLACE_TRIGGER_ORDER -> triggers.executePlaceTriggerOrder(message, clusterTimestamp);
-            case CANCEL_TRIGGER_ORDER -> triggers.executeCancelTriggerOrder(message, clusterTimestamp);
-            case CLAIM_TRIGGER_ORDER -> triggers.executeClaimTriggerOrder(message, clusterTimestamp);
-            case COMPLETE_TRIGGER_ORDER -> triggers.executeCompleteTriggerOrder(message, clusterTimestamp);
-            case UPDATE_TRIGGER_TRAILING -> triggers.executeUpdateTriggerTrailing(message, clusterTimestamp);
-            case EXPIRE_TRIGGER_ORDER -> triggers.executeExpireTriggerOrder(message, clusterTimestamp);
-            case RETRY_TRIGGER_ORDER -> triggers.executeRetryTriggerOrder(message, clusterTimestamp);
-            case EXECUTE_TRIGGER_ORDER -> triggers.executeExecuteTriggerOrder(message, clusterTimestamp);
             default -> {
                 return null;
             }
@@ -2672,17 +2754,15 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
         return ResponseStatus.APPLIED;
     }
 
-    void cancelAllOcoSiblings(com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger) {
+    @Override public void cancelAllOcoSiblings(com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger) {
         long cursor = Long.MAX_VALUE;
         while (true) {
-            OcoCancellationPage page = triggers.cancelOcoSiblings(trigger, cursor, DEFAULT_TRIGGER_SCAN_BATCH_SIZE);
+            TriggerCommandContext.OcoCancellationPage page = triggers.cancelOcoSiblings(
+                    trigger, cursor, DEFAULT_TRIGGER_SCAN_BATCH_SIZE);
             if (page.complete()) return;
             if (page.workUnits() == 0) throw new IllegalStateException("OCO cancellation made no progress");
             cursor = page.nextCursor();
         }
-    }
-
-    record OcoCancellationPage(boolean complete, long nextCursor, int workUnits) {
     }
 
     void bindOwner() {
@@ -2719,7 +2799,7 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
                 resolved.symbolId(), assetId, identities);
     }
 
-    void reservePlaceOrderRuntime(long userId, PlaceOrderCommand command, UUID commandId,
+    @Override public void reservePlaceOrderRuntime(long userId, PlaceOrderCommand command, UUID commandId,
                                   long pendingCoreSequence) {
         ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(runtimeState,
                 identities, userId, command, currentClusterTimestamp);
@@ -2888,7 +2968,7 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
         resultBuilder.commandRiskScanControl = null;
     }
 
-    void requireOrderIdentityAvailable(long userId, PlaceOrderCommand command) {
+    @Override public void requireOrderIdentityAvailable(long userId, PlaceOrderCommand command) {
         if (command == null || terminalRetention.containsOrder(command.orderId(), userId, command.clientOrderId())) {
             throw new CoreStateRejectedException("DUPLICATE_ORDER_ID", "terminal order identity is retained");
         }
@@ -2903,7 +2983,7 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
         identities.rollbackPositionKeys(positionIdentityCheckpoint);
     }
 
-    void queueTriggerMatching(com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger,
+    @Override public void queueTriggerMatching(com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger,
                                       long triggerSequence, long triggeredPriceTicks,
                                       long triggeredAtEpochMillis, UUID parentCommandId, long childOrderId) {
         UUID commandId = UUID.nameUUIDFromBytes((parentCommandId + ":trigger:" + trigger.triggerOrderId())
@@ -2940,7 +3020,7 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
         commandFundsAccumulator.requireConserved(externalAdjustment);
     }
 
-    void seedChangeAccumulators() {
+    @Override public void seedChangeAccumulators() {
         if (resultBuilder.commandChangedUserIds != null) resultBuilder.changedUserIds.addAll(resultBuilder.commandChangedUserIds);
         if (resultBuilder.commandChangedOrderIds != null) resultBuilder.changedOrderIds.addAll(resultBuilder.commandChangedOrderIds);
     }
@@ -2969,11 +3049,11 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
         return ImmutableLongArrayList.takeOwnership(values);
     }
 
-    int pendingRiskScanCount() {
+    @Override public int pendingRiskScanCount() {
         return runtimeState.incompleteRiskScanCount();
     }
 
-    void logRiskScan(String operation, String symbol, int batchSize, int pendingBefore, long startedAt) {
+    @Override public void logRiskScan(String operation, String symbol, int batchSize, int pendingBefore, long startedAt) {
         long elapsedMicros = (System.nanoTime() - startedAt) / 1_000L;
         int pendingAfter = pendingRiskScanCount();
         System.Logger.Level level = System.Logger.Level.DEBUG;
@@ -3013,7 +3093,7 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
     }
 
     CoreResponse userStateResponse(long userId) {
-        var query = com.surprising.aeron.service.state.RuntimeStateQueryService.userState(
+        var query = com.surprising.aeron.service.state.query.RuntimeStateQueryService.userState(
                 runtimeState, identities, userId);
         if (query.tooLarge()) {
             return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
@@ -3064,12 +3144,12 @@ public final class TradingCoreRuntime implements AutoCloseable, com.surprising.a
     }
 
     CoreResponse orderStateResponse(long orderId) {
-        return orderStateResponse(com.surprising.aeron.service.state.RuntimeStateQueryService.orderState(
+        return orderStateResponse(com.surprising.aeron.service.state.query.RuntimeStateQueryService.orderState(
                 runtimeState, identities, orderId));
     }
 
     CoreResponse orderStateResponse(
-            com.surprising.aeron.service.state.RuntimeStateQueryService.OrderQueryResult query) {
+            com.surprising.aeron.service.state.query.RuntimeStateQueryService.OrderQueryResult query) {
         if (!query.found()) {
             return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
                     CoreResultCode.ENTITY_NOT_FOUND, appliedCommandCount, cachedBusinessStateHash);

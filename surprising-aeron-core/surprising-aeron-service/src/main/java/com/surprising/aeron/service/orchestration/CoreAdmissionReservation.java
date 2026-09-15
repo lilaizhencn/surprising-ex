@@ -1,5 +1,5 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.command.DecodedMatchingCommand;
+import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreMessageType;
 import com.surprising.aeron.service.state.RuntimeCommitJournal;

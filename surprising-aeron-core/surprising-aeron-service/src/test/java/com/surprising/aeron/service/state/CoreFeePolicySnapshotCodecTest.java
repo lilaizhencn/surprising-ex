@@ -1,5 +1,8 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.snapshot.*;
+
+
 import com.surprising.aeron.service.state.model.CoreFeePolicyState;
 
 import static org.assertj.core.api.Assertions.assertThat;

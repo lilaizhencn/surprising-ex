@@ -1,6 +1,6 @@
 package com.surprising.aeron.service.orchestration;
-import com.surprising.aeron.service.command.DecodedMatchingCommand;
-import com.surprising.aeron.service.command.ResolvedMatchingAdmission;
+import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
+import com.surprising.aeron.service.command.order.ResolvedMatchingAdmission;
 import com.surprising.aeron.service.command.ImmutableLongArrayList;
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreMessage;

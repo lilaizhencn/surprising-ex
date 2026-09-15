@@ -42,8 +42,8 @@ CROSS 只共享该 Core 内权益，ISOLATED 绑定 position identity。只保�
 `ProductTradingRulesRegistry` 以六个固定无状态实例选择规则，`SpotTradingRules`、
 `LinearPerpetualTradingRules`、`InversePerpetualTradingRules`、`LinearDeliveryTradingRules`、
 `InverseDeliveryTradingRules`、`OptionTradingRules` 各自定义产品身份、订单预留入口及支持的
-盈亏、资金费、交割/行权现金流。实现位于 service 模块的 `com.surprising.aeron.service.state` 包，
-保留包内可见性；规则类不拥有余额、订单、持仓或线程。
+盈亏、资金费、交割/行权现金流。实现位于 service 模块的 `com.surprising.aeron.service.business.*` 包，
+规则类不拥有余额、订单、持仓或线程。
 
 - `RuntimeOrderAdmission` 保留身份、索引及校验次序；金额计算分到 `SpotOrderAdmission`、
   `FuturesOrderAdmission`、`OptionOrderAdmission`。同类的 `reservationUnitsForState` 为 Reducer
@@ -65,6 +65,38 @@ CROSS 只共享该 Core 内权益，ISOLATED 绑定 position identity。只保�
 `ProductRulesRefactorBenchmark` 覆盖六条线的生产Core准入/成交/撤单及快照恢复，具体证据和验证范围见
 根目录 `PERFORMANCE_VALIDATION.md` 的 PV-140/PV-141：定向功能与恢复检查通过，
 性能采集受系统换页/CPU限速影响，仅作为诊断，尚未通过性能环境门禁。
+
+## Service 命令职责分包
+
+`surprising-aeron-service` 的命令入口按业务职责放在 `service.command` 下：
+
+- `command.order`：下单/撤单/改单的解码值、批次类型和准入结果；`MatchingCommandAdmission`、
+  `OrderBatchExecutor`、`PendingMatching` 和 `OrderedCommitCoordinator` 仍共同拥有撮合热路径的
+  在途状态和提交顺序，不拆成额外线程或状态副本。
+- `command.position` / `command.leverage`：持仓模式、逐仓保证金与杠杆；账户 Lane 工作类仍放在
+  `service.state`，只表示 Lane 状态变更，不再混入命令编排器。
+- `command.risk` / `command.liquidation` / `command.adl` / `command.insurance`：标记价和风险扫描、
+  强平、ADL、保险基金，分别通过窄的 `*CommandContext` 访问 Owner 能力。
+- `command.funding` / `command.settlement` / `command.balance` / `command.fee` / `command.instrument`：
+  资金费、到期结算、余额转账、费率和币对维护。
+- `command.trigger`：触发单、算法单和触发扫描；`TriggerCommandDispatcher` 负责入口路由，
+  `TriggerOrderCommands` 通过 `TriggerCommandContext` 与 Owner 的状态、Lane 和撮合排队边界连接。
+
+`DirectCommandDispatcher` 只负责把直接完成的业务命令交给对应职责类；`TradingCoreRuntime` 保留
+Cluster 日志、撮合准入、Lane 完成和有序提交等 Owner 级编排，不再直接持有各业务命令类的内部实现。
+
+## State 职责分包
+
+`service.state` 只保留权威运行状态及其紧耦合的状态变更路径；已按边界拆出以下子包：
+
+- `state.model`：不可变 Core 状态值和快照模型。
+- `state.index`：活动订单、触发单、算法单、清算等查询索引。
+- `state.query`：有界只读查询和风险/清算运营查询，不写入权威状态。
+- `state.snapshot`：交易状态快照值、编解码器及快照边界逻辑，不进入普通交易热路径。
+- `state.math`：纯确定性合约、舍入和溢出安全计算，不持有账户、订单或 Lane 状态。
+
+`TradingRuntimeState`、Account Lane、Reducer、撮合结算和风险处理仍保持在 `state` 主包，
+因为它们共享包级所有权和提交顺序；后续拆分必须先收窄这些内部访问，再移动代码，不能通过复制第二套状态或增加热路径任务实现“分包”。
 
 ## Core 回归测试的当前状态契约
 
@@ -148,8 +180,7 @@ flowchart LR
 部署时仍须保证实例组 ID 唯一。私有订阅由 `SubscriptionTopic.fromCommand` 绑定已认证 userId。
 
 `ClientWebSocketHandler.subscribe` 目前仅注册订阅并 ACK；`WsClientCommand` 没有续传游标，
-`WsServerMessage.event` 没有统一的流序号和快照水位。`CoreWebSocketEventId` 虽存在，但未见接入当前
-fanout 主路径。尚无“首次一致快照 + 增量 + 漏消息检测 + 断线补齐”的完整协议。
+`WsServerMessage.event` 没有统一的流序号和快照水位。尚无“首次一致快照 + 增量 + 漏消息检测 + 断线补齐”的完整协议。
 
 ### 查询是否影响交易链路
 
@@ -229,7 +260,7 @@ coreSequence 和批次内稳定序号；涉及合约时带 symbol/instrumentChan
 源码导航：
 [CoreProbeState](surprising-aeron-service/src/main/java/com/surprising/aeron/service/CoreProbeState.java)、
 [Cluster service](surprising-aeron-service/src/main/java/com/surprising/aeron/service/SurprisingClusteredService.java)、
-[Runtime 查询](surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/RuntimeStateQueryService.java)、
+[Runtime 查询](surprising-aeron-service/src/main/java/com/surprising/aeron/service/state/query/RuntimeStateQueryService.java)、
 [订单服务](../surprising-trading/surprising-trading-provider/src/main/java/com/surprising/trading/order/service/OrderService.java)、
 [账户服务](../surprising-account/surprising-account-provider/src/main/java/com/surprising/account/provider/service/AccountService.java)、
 [触发单网关](../surprising-trading/surprising-trading-provider/src/main/java/com/surprising/trading/trigger/service/TriggerOrderAeronGateway.java)、

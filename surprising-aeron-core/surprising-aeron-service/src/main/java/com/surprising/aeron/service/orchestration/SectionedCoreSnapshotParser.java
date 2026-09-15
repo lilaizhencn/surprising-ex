@@ -1,5 +1,7 @@
 package com.surprising.aeron.service.orchestration;
 
+
+
 import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CommandSource;
 import com.surprising.aeron.protocol.CoreMessage;
@@ -11,10 +13,10 @@ import com.surprising.aeron.service.orchestration.SectionedCoreSnapshotValidatio
 import com.surprising.aeron.service.matching.MatcherSnapshot;
 import com.surprising.aeron.service.matching.MatcherSnapshotCodec;
 import com.surprising.aeron.service.state.TradingCoreState;
-import com.surprising.aeron.service.state.TradingStateSnapshotCodec;
-import com.surprising.aeron.service.state.CoreFeePolicySnapshotCodec;
+import com.surprising.aeron.service.state.snapshot.TradingStateSnapshotCodec;
+import com.surprising.aeron.service.state.snapshot.CoreFeePolicySnapshotCodec;
 import com.surprising.aeron.service.state.model.CoreFeePolicyState;
-import com.surprising.aeron.service.state.CoreTransferSnapshotCodec;
+import com.surprising.aeron.service.state.snapshot.CoreTransferSnapshotCodec;
 import com.surprising.aeron.service.state.TransferRuntime;
 import com.surprising.aeron.service.state.AccountLaneSnapshot;
 import com.surprising.product.api.ProductLine;

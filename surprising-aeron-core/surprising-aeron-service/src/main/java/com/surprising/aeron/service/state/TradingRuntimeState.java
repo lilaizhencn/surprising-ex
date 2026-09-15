@@ -1,4 +1,7 @@
 package com.surprising.aeron.service.state;
+
+import com.surprising.aeron.service.state.snapshot.TradingRuntimeSnapshot;
+
 import com.surprising.aeron.service.lane.SettlementLaneWorker;
 import com.surprising.aeron.service.state.realtime.RealtimeStateCapture;
 import org.agrona.collections.Long2ObjectHashMap;
@@ -2786,7 +2789,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         return balances == null ? Long.MIN_VALUE : balances.getIfAbsent(assetId, Long.MIN_VALUE);
     }
 
-    IntObjectHashMap<BalanceRuntime> balancesForUser(long userId) {
+    /** Read-only query access to the owning lane's balance table. */
+    public IntObjectHashMap<BalanceRuntime> balancesForUser(long userId) {
         assertOwner();
         return onLane(userId, lane -> copyBalances(lane.balances.get(userId)));
     }
@@ -2895,7 +2899,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         changedUsers.add(userId);
     }
 
-    LongHashSet reservationIdsForUser(long userId) {
+    /** Read-only query access to the owning lane's reservation ids. */
+    public LongHashSet reservationIdsForUser(long userId) {
         assertOwner();
         return onLane(userId, lane -> {
             LongHashSet orderIds = lane.reservationIdsByUser.get(userId);
@@ -2903,7 +2908,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         });
     }
 
-    int reservationCountForUser(long userId) {
+    public int reservationCountForUser(long userId) {
         assertOwner();
         return onLane(userId, lane -> {
             LongHashSet orderIds = lane.reservationIdsByUser.get(userId);
@@ -2911,7 +2916,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         });
     }
 
-    LongHashSet positionKeysForUser(long userId) {
+    /** Read-only query access to the owning lane's position keys. */
+    public LongHashSet positionKeysForUser(long userId) {
         assertOwner();
         return onLane(userId, lane -> {
             LongHashSet positionKeys = lane.positionKeysByUser.get(userId);
@@ -2919,7 +2925,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         });
     }
 
-    int positionCountForUser(long userId) {
+    public int positionCountForUser(long userId) {
         assertOwner();
         return onLane(userId, lane -> {
             LongHashSet positionKeys = lane.positionKeysByUser.get(userId);
@@ -2927,7 +2933,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         });
     }
 
-    NavigableSet<CoreLeverageKey> leverageKeysForUser(long userId) {
+    public NavigableSet<CoreLeverageKey> leverageKeysForUser(long userId) {
         assertOwner();
         return onLane(userId, lane -> {
             Set<CoreLeverageKey> keys = lane.cold.leverageKeysByUser.get(userId);
@@ -4633,7 +4639,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         return markPrices;
     }
 
-    LongObjectHashMap<RiskSnapshotRuntime> riskSnapshotsForSnapshot() {
+    public LongObjectHashMap<RiskSnapshotRuntime> riskSnapshotsForSnapshot() {
         LongObjectHashMap<RiskSnapshotRuntime> values = new LongObjectHashMap<>();
         for (int laneId = 0; laneId < accountLanes.length; laneId++) {
             values.putAll(onLane(laneId, lane -> new LongObjectHashMap<>(lane.cold.riskSnapshots)));
@@ -4641,7 +4647,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         return values;
     }
 
-    IntObjectHashMap<RiskScanRuntime> riskScansForSnapshot() {
+    public IntObjectHashMap<RiskScanRuntime> riskScansForSnapshot() {
         return riskScans;
     }
 

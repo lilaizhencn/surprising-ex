@@ -85,7 +85,7 @@ final class BatchAdmissionOrderIndex
         return deltasBySymbol.computeIfAbsent(symbol, ignored -> new SymbolAdmissionDelta());
     }
 
-    final class SymbolAdmissionDelta {
+    static final class SymbolAdmissionDelta {
         /** 按持仓方向和订单方向记录的本批待成交数量变化。 */
         final long[][] pending = new long[CorePositionSide.values().length][CoreOrderSide.values().length];
         /** 按买卖方向记录的本批只减仓数量变化。 */

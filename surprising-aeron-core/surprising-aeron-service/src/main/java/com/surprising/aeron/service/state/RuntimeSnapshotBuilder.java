@@ -1,15 +1,19 @@
 package com.surprising.aeron.service.state;
 
+import com.surprising.aeron.service.state.snapshot.TradingRuntimeSnapshot;
+
+
+
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
-final class RuntimeSnapshotBuilder {
+public final class RuntimeSnapshotBuilder {
 
     private RuntimeSnapshotBuilder() {
     }
 
-    static TradingRuntimeSnapshot capture(TradingRuntimeState state, long revision) {
+    public static TradingRuntimeSnapshot capture(TradingRuntimeState state, long revision) {
         if (revision < 0) {
             throw new IllegalArgumentException("snapshot revision must not be negative");
         }
