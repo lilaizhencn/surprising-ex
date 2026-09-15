@@ -7,9 +7,8 @@ class LanePublishedMapTest {
     @Test void recycledBatchAdmissionDiscardsUnpublishedValuesAndRetainsCapacity() throws Exception {
         var event = new PlaceBatchAdmissionEvent();
         var publication = new LanePublication();
-        var map = new LanePublishedMap<String>(true);
+        var map = new LanePublishedMap<String>();
         for (int i = 0; i < 41; i++) map.stage(publication, i, "discarded");
-        publication.admissionSequence = 17;
         var field = PlaceBatchAdmissionEvent.class.getDeclaredField("publication");
         field.setAccessible(true);
         field.set(event, publication);
@@ -23,15 +22,12 @@ class LanePublishedMapTest {
         assertThat(event.publication()).isSameAs(publication);
         assertThat(values.get(publication)).isSameAs(capacity);
         assertThat(capacity).containsOnlyNulls();
-        assertThat(publication.admissionSequence).isZero();
         publication.publish();
         assertThat(map.size()).isZero();
         map.stage(publication, 99, "next");
-        publication.admissionSequence = 18;
         publication.publish();
         assertThat(map.size()).isOne();
         assertThat(map.get(99)).isEqualTo("next");
-        assertThat(map.admissionSequence(99)).isEqualTo(18);
         event.clear();
         assertThat(map.get(99)).isEqualTo("next");
     }
@@ -64,7 +60,7 @@ class LanePublishedMapTest {
     }
 
     @Test void publicationReplacesAnExistingValueAtTheOwnerBoundary() {
-        var map = new LanePublishedMap<String>(true);
+        var map = new LanePublishedMap<String>();
         map.put(7, "before");
         var receipt = new LanePublication();
         map.stage(receipt, 7, "after");
@@ -73,7 +69,7 @@ class LanePublishedMapTest {
         assertThat(map.get(7)).isEqualTo("after");
     }
     @Test void reusedLookupNeverMutatesStoredKeysIncludingHashCollisions() {
-        var map = new LanePublishedMap<String>(true);
+        var map = new LanePublishedMap<String>();
         long first = 1, collision = 1L << 32;
         assertThat(Long.hashCode(first)).isEqualTo(Long.hashCode(collision));
         map.put(first, "first");
@@ -88,7 +84,7 @@ class LanePublishedMapTest {
     }
 
     @Test void unpublishedSuccessorsCannotLeakAndReclaimCannotEraseThem() throws Exception {
-        var map = new LanePublishedMap<String>(true);
+        var map = new LanePublishedMap<String>();
         map.put(7, "committed");
         var first = new LanePublication();
         var second = new LanePublication();
@@ -114,8 +110,8 @@ class LanePublishedMapTest {
     }
 
     @Test void oneReceiptPublishesEveryEntityWithoutCopyingTheLiveMaps() throws Exception {
-        var orders = new LanePublishedMap<String>(true);
-        var positions = new LanePublishedMap<String>(true);
+        var orders = new LanePublishedMap<String>();
+        var positions = new LanePublishedMap<String>();
         var receipt = new LanePublication();
         Thread lane = new Thread(() -> {
             for (int i = 1; i <= 1000; i++) orders.stage(receipt, i, "order" + i);
@@ -130,27 +126,19 @@ class LanePublishedMapTest {
         assertThat(orders.get(1000)).isEqualTo("order1000");
     }
 
-    @Test void terminalPublicationRemovesAdmissionMetadataWithoutRemovingTheValue() throws Exception {
-        var map = new LanePublishedMap<String>(true);
-        map.applyPublished(0, "admitted", 17);
-        assertThat(map.admissionSequence(0)).isEqualTo(17);
-        map.applyPublished(0, "committed", 0);
+    @Test void terminalPublicationRemovesValue() {
+        var map = new LanePublishedMap<String>();
+        map.applyPublished(0, "admitted");
+        map.applyPublished(0, "committed");
         assertThat(map.get(0)).isEqualTo("committed");
-        assertThat(map.admissionSequence(0)).isZero();
-        var field = LanePublishedMap.class.getDeclaredField("admissionSequences");
-        field.setAccessible(true);
-        assertThat(((org.agrona.collections.Long2LongHashMap) field.get(map)).isEmpty()).isTrue();
-        map.applyPublished(0, "readmitted", 18);
+        map.applyPublished(0, "readmitted");
         assertThat(map.remove(0)).isEqualTo("readmitted");
-        assertThat(map.admissionSequence(0)).isZero();
     }
 
-    @Test void clearRemovesValuesAndTheirAdmissionMetadata() {
-        var map = new LanePublishedMap<String>(true);
-        map.applyPublished(7, "order", 42);
-        assertThat(map.admissionSequence(7)).isEqualTo(42);
+    @Test void clearRemovesPublishedValues() {
+        var map = new LanePublishedMap<String>();
+        map.applyPublished(7, "order");
         map.clear();
         assertThat(map.get(7)).isNull();
-        assertThat(map.admissionSequence(7)).isZero();
     }
 }

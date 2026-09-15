@@ -7,8 +7,6 @@ package com.surprising.aeron.service.state;
  * 然后立即清空槽位。发布表只由 Owner 访问，不再需要二阶段 visible/commit 状态。</p>
  */
 final class LanePublication {
-    /** 准入命令序号，用于定位账户 Lane 的批量预留收据；普通发布为0。 */
-    long admissionSequence;
     /** Settlement publication borrows the already-populated LaneDelta buffers. */
     private TradingRuntimeState.LaneDelta delta;
     private TradingRuntimeState runtime;
@@ -44,29 +42,28 @@ final class LanePublication {
             TradingRuntimeState.LaneDelta changes = delta;
             TradingRuntimeState owner = runtime;
             changes.users.drainTo((id, value) -> {
-                owner.publishedUsers.applyPublished(id, value, admissionSequence);
+                owner.publishedUsers.applyPublished(id, value);
                 owner.changedUsers.add(id);
             });
             changes.orders.forEach((id, value) -> owner.publishedOrders.applyPublished(
-                    id, changes.removedOrderRoutes.contains(id) ? null : value, admissionSequence));
+                    id, changes.removedOrderRoutes.contains(id) ? null : value));
             changes.reservations.drainTo((id, value) -> {
                 owner.publishedReservations.applyPublished(
-                        id, changes.removedReservationRoutes.contains(id) ? null : value, admissionSequence);
+                        id, changes.removedReservationRoutes.contains(id) ? null : value);
                 owner.changedReservations.add(id);
             });
-            changes.positions.forEach((id, value) -> owner.publishedPositions.applyPublished(id, value, admissionSequence));
+            changes.positions.forEach((id, value) -> owner.publishedPositions.applyPublished(id, value));
             delta = null;
             runtime = null;
             return;
         }
         if (size == 0) return;
         for (int index = 0; index < size; index++) {
-            maps[index].applyPublished(keys[index], values[index], admissionSequence);
+            maps[index].applyPublished(keys[index], values[index]);
             maps[index] = null;
             values[index] = null;
         }
         size = 0;
-        admissionSequence = 0;
     }
 
     private void ensureCapacity(int required) {
@@ -85,6 +82,5 @@ final class LanePublication {
         java.util.Arrays.fill(maps, 0, size, null);
         java.util.Arrays.fill(values, 0, size, null);
         size = 0;
-        admissionSequence = 0;
     }
 }

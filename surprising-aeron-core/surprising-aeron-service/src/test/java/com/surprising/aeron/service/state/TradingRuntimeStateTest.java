@@ -1349,6 +1349,28 @@ class TradingRuntimeStateTest {
         }
     }
 
+    @Test
+    void pendingReservationBatchLookupUsesTheExistingBatchReceipt() {
+        try (var state = new TradingRuntimeState()) {
+            state.putUser(new UserRuntime(7));
+            state.putBalance(new BalanceRuntime(7, 3, 1_000, 0));
+            state.reserveOrder(11, 7, 91, 5, 2, 3, 200);
+            state.reserveOrder(12, 7, 92, 5, 2, 3, 200);
+            state.onLane(7L, lane -> {
+                lane.markPendingReservation(11, 4);
+                lane.markPendingReservation(12, 4);
+                return null;
+            });
+            state.pendingReservations.registerBatch(4, 7,
+                    new OrderRuntime[]{state.order(11), state.order(12)}, 2);
+
+            assertThat(state.pendingReservation(11, 7)).isTrue();
+            assertThat(state.pendingReservation(12, 7)).isTrue();
+            assertThat(state.pendingReservation(13, 7)).isFalse();
+            assertThat(state.pendingReservation(11, 8)).isFalse();
+        }
+    }
+
     private static long userForLane(LaneTopology topology, int laneId) {
         for (long userId = 1; userId < 10_000; userId++) {
             if (topology.accountLaneId(userId) == laneId) return userId;

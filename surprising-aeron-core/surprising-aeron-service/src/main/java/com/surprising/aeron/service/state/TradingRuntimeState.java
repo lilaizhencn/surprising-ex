@@ -195,13 +195,13 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 当前执行范围复用的 matcherSettlementOrder 临时缓冲，不保存第二份业务状态。 */
     final LongHashSet matcherSettlementOrderScratch = new LongHashSet();
     /** owner 可见的已发布用户；与提交/回滚边界同步维护。 */
-    final LanePublishedMap<UserRuntime> publishedUsers = new LanePublishedMap<>(false);
+    final LanePublishedMap<UserRuntime> publishedUsers = new LanePublishedMap<>();
     /** owner 可见的已发布订单；与提交/回滚边界同步维护。 */
-    final LanePublishedMap<OrderRuntime> publishedOrders = new LanePublishedMap<>(true);
+    final LanePublishedMap<OrderRuntime> publishedOrders = new LanePublishedMap<>();
     /** owner 可见的已发布预留；与提交/回滚边界同步维护。 */
-    final LanePublishedMap<ReservationRuntime> publishedReservations = new LanePublishedMap<>(false);
+    final LanePublishedMap<ReservationRuntime> publishedReservations = new LanePublishedMap<>();
     /** owner 可见的已发布持仓；与提交/回滚边界同步维护。 */
-    final LanePublishedMap<PositionRuntime> publishedPositions = new LanePublishedMap<>(false);
+    final LanePublishedMap<PositionRuntime> publishedPositions = new LanePublishedMap<>();
     /** owner 可见的已发布清算；与提交/回滚边界同步维护。 */
     final LongObjectHashMap<LiquidationRuntime> publishedLiquidations = new LongObjectHashMap<>(4_096);
     // Owner view of immutable Lane results; no mutable Lane map is read by the owner.

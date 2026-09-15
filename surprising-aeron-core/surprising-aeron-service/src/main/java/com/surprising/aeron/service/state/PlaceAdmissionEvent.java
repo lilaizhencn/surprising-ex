@@ -115,7 +115,6 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
                 admittedReservation = lane.reservations.get(order.orderId());
                 if (publicationBuffer == null) publicationBuffer = new LanePublication();
                 publication = publicationBuffer;
-                publication.admissionSequence = coreSequence;
                 runtime.publishedUsers.stage(publication, userId, admittedUser);
                 runtime.publishedOrders.stage(publication, order.orderId(), admittedOrder);
                 runtime.publishedReservations.stage(publication, order.orderId(), admittedReservation);

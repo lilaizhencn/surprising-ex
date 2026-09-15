@@ -1,7 +1,6 @@
 package com.surprising.aeron.service.state;
 
 import java.util.Collection;
-import org.agrona.collections.Long2LongHashMap;
 import org.agrona.collections.Long2ObjectHashMap;
 
 /**
@@ -13,34 +12,20 @@ import org.agrona.collections.Long2ObjectHashMap;
 final class LanePublishedMap<V> {
     // Back-shift deletion retains backing storage under bounded order turnover.
     private final Long2ObjectHashMap<V> values = new Long2ObjectHashMap<>();
-    private final Long2LongHashMap admissionSequences;
-
-    /** Only published orders need the batch-admission lookup used by pending reservations. */
-    LanePublishedMap(boolean trackOrderAdmission) {
-        admissionSequences = trackOrderAdmission ? new Long2LongHashMap(0) : null;
-    }
 
     /** Apply one staged value at the Owner publication boundary. */
-    void applyPublished(long key, Object value, long admissionSequence) {
+    void applyPublished(long key, Object value) {
         @SuppressWarnings("unchecked") V typed = (V) value;
         if (typed == null) {
             values.remove(key);
-            if (admissionSequences != null) admissionSequences.remove(key);
         } else {
             values.put(key, typed);
-            if (admissionSequences != null) {
-                if (admissionSequence == 0) admissionSequences.remove(key);
-                else admissionSequences.put(key, admissionSequence);
-            }
         }
     }
-
-    long admissionSequence(long key) { return admissionSequences == null ? 0 : admissionSequences.get(key); }
 
     /** Direct owner-only update used by recovery and synchronous control paths. */
     V put(long key, V value) {
         if (value == null) return remove(key);
-        if (admissionSequences != null) admissionSequences.remove(key);
         return values.put(key, value);
     }
 
@@ -48,7 +33,6 @@ final class LanePublishedMap<V> {
 
     V remove(long key) {
         V previous = values.remove(key);
-        if (admissionSequences != null) admissionSequences.remove(key);
         return previous;
     }
 
@@ -56,7 +40,6 @@ final class LanePublishedMap<V> {
 
     void clear() {
         values.clear();
-        if (admissionSequences != null) admissionSequences.clear();
     }
 
     Collection<V> values() { return values.values(); }

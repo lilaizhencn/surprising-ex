@@ -151,7 +151,6 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                 admittedUser = lane.users.get(userId);
                 changes.prepareAdmissionLane(laneId, runtime);
                 if (publication == null) publication = new LanePublication();
-                publication.admissionSequence = coreSequence;
                 runtime.publishedUsers.stage(publication, userId, admittedUser);
                 for (int i = 0; i < itemCount; i++) {
                     runtime.publishedOrders.stage(publication, admittedOrders[i].orderId(), admittedOrders[i]);

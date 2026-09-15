@@ -47,7 +47,7 @@ class RuntimeIndexedChangeBufferTest {
             assertThat(present).isFalse(); assertThat(prepared).isNull();
         });
         assertThatThrownBy(() -> buffer.putPrepared(-1, "orphan")).isInstanceOf(IllegalStateException.class);
-        buffer.drainToPublishedMap(new LanePublishedMap<>(false));
+        buffer.drainToPublishedMap(new LanePublishedMap<>());
         assertThat(buffer.isEmpty()).isTrue();
         assertThat((Object[]) field.get(buffer)).containsOnlyNulls();
     }

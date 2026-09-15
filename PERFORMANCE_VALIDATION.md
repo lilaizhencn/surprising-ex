@@ -1944,3 +1944,11 @@ profile：
 验证：服务模块 `978` 项测试通过，失败/错误 `0`，既有跳过 `1`；基准模块重新打包成功。`ActiveOrderIndexBenchmark.openThenTerminal`（G1、JDK 25、1 fork、5 次测量）分配从 `86.4005` 降至 `62.4009 B/lifecycle`（1 用户，约 `27.8%`），从 `248.0010` 降至 `224.0010 B/lifecycle`（20 用户，约 `9.7%`）；该微基准的吞吐区间重叠，不宣称吞吐提升。固定单节点端到端（1 Matcher、4 Lane、128 symbols、window256、BUSY_SPIN、MIXED batch20）完整校验通过：`379,144.119 business ops/s`、`36,228.289 core messages/s`、fills `90,283.595/s`、普通 PLACE p99 `11.567 ms`、最差业务 p99 `18.268 ms`、`unfinished=0`、`fundsDiff=0`。相对同口径 `392,705.617/s` 基线约低 `3.5%`，未超过预设 `5%` 回退门槛，单轮不能归因收益或回退。
 
 结论：保留该无语义变化的包装复用，降低 Owner 活跃索引的短命对象分配；它没有解决 Owner 的主要 CPU 瓶颈。当前端到端仍由 Owner 串行索引/终态提交和前置排队限制，Owner/Lane 业务状态未删除。原始压测目录 `/tmp/core-index-reuse-20260916`、JMH 分配结果 `/tmp/active-index-reuse-gc.json` 保留供审计；节点与客户端均已退出。
+
+### 2026-09-16：移除 Owner 发布表准入序号副索引（计划与结果）
+
+计划：删除 `LanePublishedMap` 中仅用于查询批量 pending 的 `Long2LongHashMap`，同时移除 `LanePublication.admissionSequence` 及每次发布的序号维护。`PendingReservationTracker.pendingReservation` 改为读取已有 `PendingBatch` 收据中的订单数组；普通单订单仍走 `pendingReservationUsers`，批次注册、完成、回滚和快照语义不变。
+
+验证：完整服务回归在改动后通过 `963` 项（失败/错误 `0`、既有跳过 `1`）；新增批量 pending 查询用例精确通过，单类回归 `59` 项全绿。固定单节点（1 Matcher、4 Lane、128 symbols、window256、BUSY_SPIN、G1、MIXED batch20）两轮完整生命周期均通过：第一轮 `361,726.234 business ops/s`、最差业务 p99 `30.785 ms`，第二轮 `418,283.703 business ops/s`、最差业务 p99 `17.874 ms`，均 `clientPass=true`、`peakInFlight=256`。两轮均值 `390,004.969/s`，相对既有同口径 `392,705.617/s` 约低 `0.7%`，小于 `5%` 回退门槛；短测方差较大，不能宣称吞吐提升或回退。
+
+结论：保留该改动。Owner 发布边界不再维护重复的订单→准入序号 Map，减少发布/终态提交的哈希操作和一份中间状态；批量 pending 查询从已有收据读取，查询频率低时的批次线性扫描不进入交易热路径。原始目录 `/tmp/core-published-seq-remove-20260916`、`/tmp/core-published-seq-remove-rerun-20260916` 保留审计；节点与客户端均已退出。

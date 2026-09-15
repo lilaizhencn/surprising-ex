@@ -315,9 +315,17 @@ final class PendingReservationTracker {
             return scoped.pendingReservation(orderId);
         }
         if (pendingReservationUsers.getOrDefault(orderId, 0) == userId) return true;
-        long sequence = owner.publishedOrders.admissionSequence(orderId);
-        PendingBatch batch = batches.get(sequence);
-        return batch != null && batch.userId == userId;
+        // Batch receipts already retain their admitted order array. Keeping a second
+        // orderId -> admissionSequence map in the Owner publication view only duplicated
+        // this state and forced a hash update on every Lane publication.
+        for (PendingBatch batch : batches.values()) {
+            if (batch.userId != userId) continue;
+            for (int index = 0; index < batch.count; index++) {
+                OrderRuntime order = batch.orders[index];
+                if (order != null && order.orderId() == orderId) return true;
+            }
+        }
+        return false;
     }
 
     long pendingReservedUnits(long userId, int assetId) {

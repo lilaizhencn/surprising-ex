@@ -37,23 +37,15 @@ class OwnerIndexChurnTest {
                 Object value = new Object();
                 // Warm to the fixed live population, then check actual arrays, not merely
                 // the map object's identity (which also survives allocating rehashes).
-                for (long key = 1; key <= 32; key++) map.applyPublished(key, value, key);
+                for (long key = 1; key <= 32; key++) map.applyPublished(key, value);
                 for (long key = 1; key <= 32; key++) map.remove(key);
                 Object table = storage.get(map);
                 var keyStorage = table.getClass().getDeclaredField("keys");
                 var valueStorage = table.getClass().getDeclaredField("values");
                 keyStorage.setAccessible(true); valueStorage.setAccessible(true);
                 Object keysBefore = keyStorage.get(table), valuesBefore = valueStorage.get(table);
-                var sequenceField = LanePublishedMap.class.getDeclaredField("admissionSequences");
-                sequenceField.setAccessible(true);
-                var sequences = (Long2LongHashMap) sequenceField.get(map);
-                var sequenceStorage = Long2LongHashMap.class.getDeclaredField("entries");
-                sequenceStorage.setAccessible(true);
-                Object sequenceBefore = sequences == null ? null : sequenceStorage.get(sequences);
-                assertThat(sequences != null).isEqualTo(name.equals("publishedOrders"));
                 for (long base = 1; base < 8192; base += 32) {
                     var admission = new LanePublication();
-                    admission.admissionSequence = base;
                     for (long key = base; key < base + 32; key++) map.stage(admission, key, value);
                     assertThat(map.size()).isZero();
                     admission.publish();
@@ -65,10 +57,6 @@ class OwnerIndexChurnTest {
                 }
                 assertThat(keyStorage.get(table)).as(name + " key array").isSameAs(keysBefore);
                 assertThat(valueStorage.get(table)).as(name + " value array").isSameAs(valuesBefore);
-                if (sequences != null) {
-                    assertThat(sequenceStorage.get(sequences)).as(name + " sequence array").isSameAs(sequenceBefore);
-                    assertThat(sequences.isEmpty()).isTrue();
-                }
             }
         }
     }
