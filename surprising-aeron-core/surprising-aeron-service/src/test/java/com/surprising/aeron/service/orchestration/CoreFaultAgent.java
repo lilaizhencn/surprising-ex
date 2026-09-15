@@ -42,7 +42,7 @@ public final class CoreFaultAgent {
                                     builder.with(element);
                                     if (core && element instanceof InvokeInstruction invoke
                                             && invoke.name().equalsString("result")
-                                            && invoke.owner().asInternalName().endsWith("LaneCommandContextRing$Context")) {
+                                            && invoke.owner().asInternalName().endsWith("CommandSlot")) {
                                         builder.aload(0).aload(1).invokestatic(hooks, "afterLaneContext",
                                                 MethodTypeDesc.ofDescriptor("(Ljava/lang/Object;Ljava/lang/Object;)V"));
                                     }

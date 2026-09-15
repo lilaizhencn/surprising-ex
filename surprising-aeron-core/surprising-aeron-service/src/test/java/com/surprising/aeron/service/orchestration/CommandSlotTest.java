@@ -23,17 +23,41 @@ import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
-class PendingMatchingTest {
+class CommandSlotTest {
+
+    @Test
+    void clearsControlResultAndWorkBeforeReusingTheSameSlot() {
+        CommandSlot slot = new CommandSlot();
+        CoreMessage first = command(1000);
+        var point = new RuntimeProjectionPoint(0, TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL));
+        slot.initializeDirect(first, CommandFingerprint.of(first), null, 10, 20, point, 1, 2, 3);
+        slot.deferControl(() -> true);
+        slot.status = com.surprising.aeron.protocol.ResponseStatus.REJECTED;
+        slot.resultCode = com.surprising.aeron.protocol.CoreResultCode.INVALID_COMMAND;
+        slot.finalizationPrepared = true;
+        slot.clearDirect();
+
+        CoreMessage second = command(1001);
+        slot.initializeDirect(second, CommandFingerprint.of(second), null, 30, 40, point, 4, 5, 6);
+        assertThat(slot.command()).isSameAs(second);
+        assertThat(slot.controlWork).isNull();
+        assertThat(slot.status).isNull();
+        assertThat(slot.resultCode).isNull();
+        assertThat(slot.finalizationPrepared).isFalse();
+        assertThat(slot.commitFenceTimestamp()).isEqualTo(30);
+        assertThat(slot.checkpoint).isEqualTo(5);
+        slot.clearDirect();
+    }
 
     @Test
     void batchContextSurvivesCommandRewriteAndIsClearedForNextSlotGeneration() {
         CoreMessage command = command(1000);
         var projection = new RuntimeProjectionPoint(0, TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL));
-        var pending = new PendingMatching(1000, PendingMatching.Operation.PLACE, command,
+        var pending = new CommandSlot(1000, CommandSlot.Operation.PLACE, command,
                 projection, 0, 0, RuntimeFundsDelta.empty());
         var batch = new OrderBatchPending(1);
         pending.orderBatch = batch;
-        pending.initialize(2000, PendingMatching.Operation.PLACE, command,
+        pending.initialize(2000, CommandSlot.Operation.PLACE, command,
                 CommandFingerprint.of(command), List.of(), projection, 0, 0,
                 RuntimeFundsDelta.empty(), DecodedMatchingCommand.decode(command), null);
         assertThat(pending.orderBatch).isNull();
@@ -45,11 +69,11 @@ class PendingMatchingTest {
             var projection = new RuntimeProjectionPoint(0, TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL));
             for (int generation = 0; generation < 3; generation++) {
                 long first = 1000L + (long) generation * owner.pendingMatching.capacity();
-                var pending = new PendingMatching[3];
+                var pending = new CommandSlot[3];
                 var batches = new OrderBatchPending[3];
                 for (int i = 0; i < 3; i++) {
-                    pending[i] = new PendingMatching(first + i, PendingMatching.Operation.PLACE, command(first + i),
-                            projection, 0, 0, RuntimeFundsDelta.empty());
+                    pending[i] = owner.admissions.newPendingMatching(first + i,
+                            CommandSlot.Operation.PLACE, command(first + i));
                     owner.pendingMatching.put(pending[i]);
                     batches[i] = new OrderBatchPending(1);
                     batches[i].sequence = first + i;
@@ -86,11 +110,11 @@ class PendingMatchingTest {
         TradingCoreState beforeState = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
         RuntimeProjectionPoint beforeProjection = new RuntimeProjectionPoint(0, beforeState);
         RuntimeFundsDelta fundsDelta = RuntimeFundsDelta.empty();
-        PendingMatching pending = new PendingMatching(7, PendingMatching.Operation.PLACE, command, fingerprint,
+        CommandSlot pending = new CommandSlot(7, CommandSlot.Operation.PLACE, command, fingerprint,
                 List.of(17L), beforeProjection, 101L, 202L, fundsDelta);
 
         var decoded = pending.decodedCommand();
-        PendingMatching updatedCancellations = pending.withPreMatchingCancellations(List.of(18L, 19L));
+        CommandSlot updatedCancellations = pending.withPreMatchingCancellations(List.of(18L, 19L));
 
         assertThat(updatedCancellations.beforeBusinessStateHash()).isEqualTo(101L);
         assertThat(updatedCancellations.beforeFundsStateHash()).isEqualTo(202L);

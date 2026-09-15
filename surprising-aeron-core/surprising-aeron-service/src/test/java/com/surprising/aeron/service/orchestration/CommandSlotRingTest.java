@@ -15,11 +15,11 @@ import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-class LaneCommandContextRingTest {
+class CommandSlotRingTest {
 
     @Test
     void matcherRouteMustBeConsumedBeforeTheSequenceSlotCanBeReused() {
-        var ring = new LaneCommandContextRing(2, 1);
+        var ring = new CommandSlotRing(2, 1);
         var context = ring.claim(1);
         context.claimMatcherSubmission(0);
         context.result(new CoreMatchingResult(true, "ACCEPTED").withCoreSequence(1), 1, 1);
@@ -33,7 +33,7 @@ class LaneCommandContextRingTest {
 
     @Test
     void settlementBufferBelongsToOneSlotAndIsReusedOnlyAfterRelease() {
-        var ring = new LaneCommandContextRing(2, 1);
+        var ring = new CommandSlotRing(2, 1);
         var first = ring.claim(1);
         var buffer = first.settlementPlanBuffer();
         var other = ring.claim(2).settlementPlanBuffer();
@@ -50,7 +50,7 @@ class LaneCommandContextRingTest {
 
     @Test
     void suspendedSequencesTransferFundsWithoutSharingTheActiveBuffer() {
-        var ring = new LaneCommandContextRing(4, 4);
+        var ring = new CommandSlotRing(4, 4);
         var first = ring.claim(1);
         var second = ring.claim(2);
         var active = new RuntimeFundsAccumulator();
@@ -90,7 +90,7 @@ class LaneCommandContextRingTest {
 
     @Test
     void synchronousControlLanesCannotEraseMatcherParticipantsOrWeakenAckValidation() {
-        var ring=new LaneCommandContextRing(4,4);
+        var ring=new CommandSlotRing(4,4);
         var context=ring.claim(1);
         assertThatThrownBy(()->context.includeControlLanes(2,15)).isInstanceOf(IllegalStateException.class);
         context.result(new CoreMatchingResult(true,"ACCEPTED").withCoreSequence(1),1,15);
@@ -108,14 +108,14 @@ class LaneCommandContextRingTest {
 
     @Test
     void commandContextDoesNotRetainAPerCommandMatchingFuture() {
-        assertThat(Arrays.stream(LaneCommandContextRing.Context.class.getDeclaredFields())
+        assertThat(Arrays.stream(CommandSlot.class.getDeclaredFields())
                 .anyMatch(field -> field.getType() == java.util.concurrent.CompletableFuture.class)).isFalse();
     }
 
     @Test
     void aggregatesExactlyOneAckPerExpectedLaneAndReleasesTheResultReference() {
-        LaneCommandContextRing ring = new LaneCommandContextRing(4, 4);
-        LaneCommandContextRing.Context context = ring.claim(1);
+        CommandSlotRing ring = new CommandSlotRing(4, 4);
+        CommandSlot context = ring.claim(1);
         CoreMatchingResult result = new CoreMatchingResult(true, "ACCEPTED").withCoreSequence(1);
         context.result(result, 0b101, 0b1111);
 
@@ -133,8 +133,8 @@ class LaneCommandContextRingTest {
 
     @Test
     void storesSynchronousMatchingResultAndKeepsTheFirstCompletion() {
-        LaneCommandContextRing ring = new LaneCommandContextRing(4, 4);
-        LaneCommandContextRing.Context context = ring.claim(3);
+        CommandSlotRing ring = new CommandSlotRing(4, 4);
+        CommandSlot context = ring.claim(3);
         CoreMatchingResult first = new CoreMatchingResult(true, "SUCCESS").withCoreSequence(3);
         CoreMatchingResult duplicate = new CoreMatchingResult(false, "LATE").withCoreSequence(3);
 
@@ -149,7 +149,7 @@ class LaneCommandContextRingTest {
 
     @Test
     void failsClosedForDuplicateUnexpectedOrOutOfRangeAck() {
-        LaneCommandContextRing.Context context = new LaneCommandContextRing(4, 4).claim(1);
+        CommandSlot context = new CommandSlotRing(4, 4).claim(1);
         CoreMatchingResult result = new CoreMatchingResult(true, "ACCEPTED").withCoreSequence(1);
         context.result(result, 0b11, 0b1111);
         context.completeLanes(0b01);
@@ -164,8 +164,8 @@ class LaneCommandContextRingTest {
 
     @Test
     void storesMatchingRejectionInTheSequenceSlot() {
-        LaneCommandContextRing ring = new LaneCommandContextRing(4, 4);
-        LaneCommandContextRing.Context context = ring.claim(1);
+        CommandSlotRing ring = new CommandSlotRing(4, 4);
+        CommandSlot context = ring.claim(1);
 
         context.rejectMatching(CoreResultCode.MATCHING_REJECTED);
 
@@ -181,8 +181,8 @@ class LaneCommandContextRingTest {
         TradingCoreState initial = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
         try (RuntimeCommitJournal journal = new RuntimeCommitJournal(
                 ProductLine.LINEAR_PERPETUAL, initial, initial.businessStateHash(), 0)) {
-            LaneCommandContextRing ring = new LaneCommandContextRing(4, 4);
-            LaneCommandContextRing.Context context = ring.claim(2);
+            CommandSlotRing ring = new CommandSlotRing(4, 4);
+            CommandSlot context = ring.claim(2);
             RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
             RuntimeFundsAccumulator restoredFunds = new RuntimeFundsAccumulator();
             CommandResultBuilder builder = new CommandResultBuilder(null);
@@ -206,8 +206,8 @@ class LaneCommandContextRingTest {
 
     @Test
     void restoresSuspendedPrimitiveChangeBuffersByOwnershipTransfer() {
-        LaneCommandContextRing ring = new LaneCommandContextRing(2, 1);
-        LaneCommandContextRing.Context context = ring.claim(1);
+        CommandSlotRing ring = new CommandSlotRing(2, 1);
+        CommandSlot context = ring.claim(1);
         CommandResultBuilder suspended = new CommandResultBuilder(null);
         suspended.changedUserIds.add(7L);
         suspended.changedOrderIds.add(11L);

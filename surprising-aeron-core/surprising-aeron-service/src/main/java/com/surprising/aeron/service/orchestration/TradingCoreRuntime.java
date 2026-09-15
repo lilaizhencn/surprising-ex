@@ -271,13 +271,9 @@ public final class TradingCoreRuntime implements AutoCloseable,
     long nextMatchingHealthCheckNs = System.nanoTime();
 
     /** 每个在途序号的 Lane 提交上下文，与 pendingMatching 同生命周期。 */
-    final LaneCommandContextRing laneCommandContexts;
+    final CommandSlotRing laneCommandContexts;
     /** 撮合派发和完成通知通道；只在完成边界交接数据。 */
     final MatcherPipelineGroup matcherPipeline;
-    /** Reused Owner callback for matcher drains; avoids rebuilding a method-reference adapter per poll. */
-    private final MatcherPipelineGroup.MatchingCompletionConsumer matchingCompletionConsumer =
-            this::publishMatchingCompletion;
-
     /** 真实撮合器适配器；命令经 matcher 队列推进。 */
     final DeterministicExchangeCoreAdapter matchingAdapter;
 
@@ -744,7 +740,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     public CoreResponse apply(CoreMessage message, long clusterTimestamp, long clusterPosition) {
         if (!activated) activate();
         assertOwner();
-        if (pendingDirectCommand != null) throw new IllegalStateException("asynchronous control command is still active");
+        if (directCommand.directActive) throw new IllegalStateException("asynchronous control command is still active");
         admissionPreviousClusterTimestamp = currentClusterTimestamp;
         admissionPreviousClusterPosition = currentClusterPosition;
         currentClusterTimestamp = clusterTimestamp;
@@ -1121,7 +1117,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                     duplicate.appliedCommandCount(), duplicate.requiredExportSequence(), duplicate.stateHash(),
                     duplicate.responseDataUnsafe());
         }
-        PendingMatching pendingDuplicate = pendingMatching.findByCommandId(message.header().commandId());
+        CommandSlot pendingDuplicate = pendingMatching.findByCommandId(message.header().commandId());
         if (pendingDuplicate != null) {
             if (!pendingDuplicate.fingerprint().equals(fingerprint)) {
                 return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
@@ -1173,6 +1169,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
         long beforeRuntimeRevision = runtimeState.revision();
         long runtimeCommandCheckpoint = runtimeState.commandRevisionCheckpoint();
         long positionIdentityCheckpoint = identities.positionCheckpoint();
+        directCommand.initializeDirect(message, fingerprint, sourceKey, clusterTimestamp, clusterPosition,
+                beforeProjection, beforeRuntimeRevision, runtimeCommandCheckpoint, positionIdentityCheckpoint);
         resultBuilder.clearOrderViews();
         resultBuilder.commandChangedUserIds = List.of();
         resultBuilder.commandChangedOrderIds = List.of();
@@ -1201,16 +1199,13 @@ public final class TradingCoreRuntime implements AutoCloseable,
             status = ResponseStatus.REJECTED;
             resultCode = CoreResultCode.INVALID_COMMAND;
         }
-        if (controlContinuation == null && runtimeState.asynchronousCommands()
+        if (directCommand.controlWork == null && runtimeState.asynchronousCommands()
                 && !clusterPipelineAdmission) {
             // 控制命令统一通过续步提交；失败时账户回滚也在所属 Lane 执行。
-            controlCompletionStatus = status;
-            controlCompletionCode = resultCode;
+            directCommand.status = status;
+            directCommand.resultCode = resultCode;
         }
-        if (controlContinuation != null || controlCompletionStatus != null) {
-            pendingDirectCommand = new PendingDirectCommand(message, clusterTimestamp, clusterPosition,
-                    sourceKey, fingerprint, beforeProjection,
-                    beforeRuntimeRevision, runtimeCommandCheckpoint, positionIdentityCheckpoint);
+        if (directCommand.controlWork != null || directCommand.status != null) {
             return null;
         }
         return finishDirectCommand(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint, beforeProjection, beforeRuntimeRevision, runtimeCommandCheckpoint,
@@ -1223,7 +1218,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             ResponseStatus status, CoreResultCode resultCode) {
         long nextAppliedCommandCount = Math.incrementExact(appliedCommandCount);
         long committedLaneMask = 0;
-        if (!directFinalizationPrepared) {
+        if (!directCommand.finalizationPrepared) {
             if (status != ResponseStatus.APPLIED
                     && (commits.commitPublicationDirty || runtimeState.revision() != beforeRuntimeRevision
                         || runtimeState.hasUncommittedCommandChanges())) {
@@ -1232,7 +1227,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             }
             if (status == null) {
                 commits.abortCommitPublicationBatch();
-                return finishFactContext(rejected(CoreResultCode.INVALID_MESSAGE));
+                return finishDirectContext(rejected(CoreResultCode.INVALID_MESSAGE));
             }
             if (status == ResponseStatus.APPLIED) {
                 if (runtimeState.asynchronousCommands()) {
@@ -1249,7 +1244,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                     if (deferFinalizationRejection(CoreResultCode.MATCHING_BACKPRESSURE)) return null;
                     rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
                             Math.incrementExact(appliedCommandCount));
-                    return finishFactContext(rejected(CoreResultCode.MATCHING_BACKPRESSURE));
+                    return finishDirectContext(rejected(CoreResultCode.MATCHING_BACKPRESSURE));
                 }
             }
             if (status == ResponseStatus.APPLIED) {
@@ -1262,7 +1257,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                     if (deferFinalizationRejection(CoreResultCode.INVALID_COMMAND)) return null;
                     rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
                             Math.incrementExact(appliedCommandCount));
-                    return finishFactContext(rejected(CoreResultCode.INVALID_COMMAND));
+                    return finishDirectContext(rejected(CoreResultCode.INVALID_COMMAND));
                 }
             }
             // Direct control commands finish on the Owner before another command can reuse
@@ -1273,7 +1268,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 // 业务任务已经结束。把发布序号交给实际参与 Lane，不接管全部账户。
                 if (runtimeState.asynchronousCommands()) {
                     runtimeState.releaseCompletedSequentialLaneStage();
-                    directCommitEvent = runtimeState.dispatchLaneMutation(
+                    directCommand.commitEvent = runtimeState.dispatchLaneMutation(
                             nextAppliedCommandCount, resultBuilder.commandChangedUserIds,
                             resultBuilder.commandChangedOrderIds, triggers.closingTriggerIds(),
                             clusterTimestamp, clusterPosition);
@@ -1282,24 +1277,19 @@ public final class TradingCoreRuntime implements AutoCloseable,
                             nextAppliedCommandCount, resultBuilder.commandChangedUserIds);
                 }
             }
-            directFinalizationPrepared = true;
+            directCommand.finalizationPrepared = true;
         }
-        if (directCommitEvent != null) {
-            if (!runtimeState.laneCommitComplete(directCommitEvent)) {
-                if (pendingDirectCommand == null) {
-                    pendingDirectCommand = new PendingDirectCommand(message, clusterTimestamp, clusterPosition,
-                            sourceKey, fingerprint, beforeProjection,
-                            beforeRuntimeRevision, runtimeCommandCheckpoint, positionIdentityCheckpoint);
-                    controlCompletionStatus = status;
-                    controlCompletionCode = resultCode;
-                }
+        if (directCommand.commitEvent != null) {
+            if (!runtimeState.laneCommitComplete(directCommand.commitEvent)) {
+                directCommand.status = status;
+                directCommand.resultCode = resultCode;
                 return null;
             }
-            committedLaneMask = directCommitEvent.requiredLaneMask();
-            runtimeState.releaseLaneCommit(directCommitEvent);
-            directCommitEvent = null;
+            committedLaneMask = directCommand.commitEvent.requiredLaneMask();
+            runtimeState.releaseLaneCommit(directCommand.commitEvent);
+            directCommand.commitEvent = null;
         }
-        directFinalizationPrepared = false;
+        directCommand.finalizationPrepared = false;
         commits.completeCommitPublicationBatch();
         if (status == ResponseStatus.APPLIED) {
             validateFundsConservation(message);
@@ -1311,7 +1301,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         refreshCommittedCoreSequence();
         long requiredExportSequence = 0;
         cachedBusinessStateHash = businessStateHash;
-        admissions.appendQueuedMatching();
+        admissions.appendQueuedMatching(clusterTimestamp, clusterPosition);
         lastSourceSequences.put(sourceKey, message.header().sourceSequence());
         if (isFundsIdempotencyCommand(message.header().messageType())
                 && status == ResponseStatus.APPLIED) {
@@ -1324,87 +1314,72 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 appliedCommandCount, requiredExportSequence, stateHash, responseData);
         CoreResponse response = CoreResponse.owned(status, status, resultCode, appliedCommandCount,
                 requiredExportSequence, stateHash, responseData);
+        return finishDirectContext(response);
+    }
+
+    private CoreResponse finishDirectContext(CoreResponse response) {
+        directCommand.clearDirect();
         return finishFactContext(response);
     }
 
     /** Reuse the direct command continuation for failures discovered during terminal preparation. */
     private boolean deferFinalizationRejection(CoreResultCode code) {
         if (!runtimeState.asynchronousCommands()) return false;
-        if (pendingDirectCommand == null)
+        if (!directCommand.directActive)
             throw new IllegalStateException("asynchronous finalization has no command context");
-        controlCompletionStatus = ResponseStatus.REJECTED;
-        controlCompletionCode = code;
+        directCommand.status = ResponseStatus.REJECTED;
+        directCommand.resultCode = code;
         return true;
     }
 
-    /** 当前直接命令的业务续步，只由日志回调中的 owner 推进。 */
-    private java.util.function.BooleanSupplier controlContinuation;
-    /** 保留原始命令、资金检查点及准入额度，异步完成前禁止提前提交。 */
-    private PendingDirectCommand pendingDirectCommand;
-    /** 直接命令唯一的完成事件；全部参与 Lane 完成后才能回收和发布。 */
-    private com.surprising.aeron.service.state.LaneCommitEvent directCommitEvent;
-    /** 跨回调只执行一次收尾准备，防止重复撤触发单、盖订单时间戳或派发。 */
-    private boolean directFinalizationPrepared;
-    /** 业务阶段完成后保留结果，等待提交/回滚交接时禁止再次调用业务续步。 */
-    private ResponseStatus controlCompletionStatus;
-    private CoreResultCode controlCompletionCode;
+    /** 控制命令复用同一种命令槽；跨回调的执行、结果、回滚和提交状态均归属该命令。 */
+    final CommandSlot directCommand = new CommandSlot();
 
     @Override public void deferControl(java.util.function.BooleanSupplier continuation) {
-        if (controlContinuation != null || continuation == null) throw new IllegalStateException("nested control continuation");
-        controlContinuation = continuation;
+        directCommand.deferControl(continuation);
     }
 
-    boolean hasPendingDirectCommand() { return pendingDirectCommand != null; }
+    boolean hasPendingDirectCommand() { return directCommand.directActive; }
 
     CoreResponse pollDirectCommand() {
         assertOwner();
-        var pending = pendingDirectCommand;
-        if (pending == null) throw new IllegalStateException("no pending direct command");
-        if (controlCompletionStatus == null) {
+        var pending = directCommand;
+        if (!pending.directActive) throw new IllegalStateException("no pending direct command");
+        if (directCommand.status == null) {
             try {
-                if (!controlContinuation.getAsBoolean()) return null;
-                controlCompletionStatus = ResponseStatus.APPLIED;
-                controlCompletionCode = CoreResultCode.NONE;
+                if (!directCommand.controlWork.getAsBoolean()) return null;
+                directCommand.status = ResponseStatus.APPLIED;
+                directCommand.resultCode = CoreResultCode.NONE;
             } catch (CoreStateRejectedException failure) {
-                controlCompletionStatus = ResponseStatus.REJECTED;
-                controlCompletionCode = CoreResultCode.fromRejectionCode(failure.code());
+                directCommand.status = ResponseStatus.REJECTED;
+                directCommand.resultCode = CoreResultCode.fromRejectionCode(failure.code());
             } catch (ArithmeticException failure) {
-                controlCompletionStatus = ResponseStatus.REJECTED;
-                controlCompletionCode = CoreResultCode.ARITHMETIC_OVERFLOW;
+                directCommand.status = ResponseStatus.REJECTED;
+                directCommand.resultCode = CoreResultCode.ARITHMETIC_OVERFLOW;
             } catch (IllegalArgumentException failure) {
-                controlCompletionStatus = ResponseStatus.REJECTED;
-                controlCompletionCode = CoreResultCode.INVALID_COMMAND;
+                directCommand.status = ResponseStatus.REJECTED;
+                directCommand.resultCode = CoreResultCode.INVALID_COMMAND;
             }
-            controlContinuation = null;
+            directCommand.controlWork = null;
         }
-        if (controlCompletionStatus != ResponseStatus.APPLIED
+        if (directCommand.status != ResponseStatus.APPLIED
                 && (commits.commitPublicationDirty || runtimeState.revision() != pending.beforeRevision
                     || runtimeState.hasUncommittedCommandChanges())) {
-            if (controlContinuation == null) {
+            if (directCommand.controlWork == null) {
                 commits.abortCommitPublicationBatch();
-                controlContinuation = runtimeState.beginCommandRollback(pending.checkpoint,
+                directCommand.controlWork = runtimeState.beginCommandRollback(pending.checkpoint,
                         Math.incrementExact(appliedCommandCount));
             }
-            if (!controlContinuation.getAsBoolean()) return null;
+            if (!directCommand.controlWork.getAsBoolean()) return null;
             identities.rollbackPositionKeys(pending.identityCheckpoint);
-            controlContinuation = null;
+            directCommand.controlWork = null;
         }
-        CoreResponse result = finishDirectCommand(pending.message, pending.timestamp, pending.position, pending.sourceKey,
-                pending.fingerprint, pending.beforeProjection,
+        CoreResponse result = finishDirectCommand(pending.command(), pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), pending.sourceKey,
+                pending.fingerprint(), pending.beforeProjection(),
                 pending.beforeRevision, pending.checkpoint, pending.identityCheckpoint,
-                controlCompletionStatus, controlCompletionCode);
-        if (result == null) return null;
-        controlCompletionStatus = null;
-        controlCompletionCode = null;
-        controlContinuation = null;
-        pendingDirectCommand = null;
+                directCommand.status, directCommand.resultCode);
         return result;
     }
-
-    /** 仅异步控制命令需要跨日志回调保留的提交上下文。 */
-    private record PendingDirectCommand(CoreMessage message, long timestamp, long position,
-            SourceKey sourceKey, CommandFingerprint fingerprint, RuntimeProjectionPoint beforeProjection,
-            long beforeRevision, long checkpoint, long identityCheckpoint) { }
 
     long runtimePositionQuantity(long userId, String symbol) {
         long quantity = 0;
@@ -1466,7 +1441,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     CoreResponse recordRejectedMatching(CoreMessage message, SourceKey sourceKey,
                                                 CommandFingerprint fingerprint, CoreResultCode resultCode,
-                                                PendingMatching deferredPending) {
+                                                CommandSlot deferredPending) {
         return deferredPending == null ? recordRejectedMatching(message, sourceKey, fingerprint, resultCode)
                 : admissions.recordRejectedDeferredMatching(deferredPending, resultCode);
     }
@@ -1475,7 +1450,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                                                 CommandFingerprint fingerprint, CoreResultCode resultCode) {
         if (!pendingMatching.isEmpty()) {
             long sequence = Math.incrementExact(appliedCommandCount);
-            PendingMatching pending = admissions.newPendingMatching(sequence,
+            CommandSlot pending = admissions.newPendingMatching(sequence,
                     MatchingCommandAdmission.matchingOperation(message.header().messageType()), message, fingerprint);
             putPendingMatching(pending);
             laneCommandContexts.required(sequence).rejectMatching(resultCode);
@@ -1502,11 +1477,11 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 appliedCommandCount, requiredExportSequence, stateHash, EMPTY_RESPONSE_DATA);
     }
 
-    PendingMatching removePendingMatching(long sequence) {
+    CommandSlot removePendingMatching(long sequence) {
         admissions.pendingLifecycleScopes.remove(sequence);
         int shard = pendingMatching.submissionShard(sequence);
         boolean releasesSubmissionHead = shard >= 0 && pendingMatching.isSubmissionHead(sequence, shard);
-        PendingMatching removed = pendingMatching.remove(sequence);
+        CommandSlot removed = pendingMatching.remove(sequence);
         // A wholly rejected batch can finish without submitting anything to the matcher.
         // Its successor's Lane notification may already have been consumed while blocked.
         if (releasesSubmissionHead) placeAdmissionReadyShardMask |= 1L << shard;
@@ -1527,7 +1502,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         }
     }
 
-    void putPendingMatching(PendingMatching pending) {
+    void putPendingMatching(CommandSlot pending) {
         pending.clusterIndependent = clusterPipelineAdmission;
         if (pendingMatching.size() >= pendingMatching.capacity()) {
             throw new IllegalStateException("matching pending capacity is exhausted");
@@ -1549,10 +1524,10 @@ public final class TradingCoreRuntime implements AutoCloseable,
         }
     }
 
-    int matcherShard(PendingMatching pending) {
-        String symbol = pending.operation() == PendingMatching.Operation.LIQUIDATION
-                || pending.operation() == PendingMatching.Operation.LIQUIDATION_BATCH
-                || pending.operation() == PendingMatching.Operation.SETTLEMENT
+    int matcherShard(CommandSlot pending) {
+        String symbol = pending.operation() == CommandSlot.Operation.LIQUIDATION
+                || pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH
+                || pending.operation() == CommandSlot.Operation.SETTLEMENT
                 ? admissions.pendingLifecycleSymbol(pending)
                 : admissions.matchingSymbol(pending.command(), pending.operation(), pending.decodedCommand());
         return symbol == null || symbol.isBlank() ? 0 : matchingAdapter.matcherShardId(symbol);
@@ -1569,7 +1544,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return new LifecycleOrderChunk(selected, page.nextCursorOrderId());
     }
 
-    List<CoreOrderState> batchCancellationOrders(PendingMatching pending) {
+    List<CoreOrderState> batchCancellationOrders(CommandSlot pending) {
         var command = pending.decodedCommand().liquidationBatch();
         List<CoreOrderState> orders = new ArrayList<>();
         int remaining = command.maxCancelOrders();
@@ -1592,14 +1567,14 @@ public final class TradingCoreRuntime implements AutoCloseable,
         }
     }
 
-    void submitMatching(PendingMatching pending) {
+    void submitMatching(CommandSlot pending) {
         if (pending.crossShardCancellationStarted || matchingSubmissionDeferred(pending.sequence())) return;
         if (pending.orderBatch != null) {
             batches.submitOrderBatchMatching(pending);
             if (pending.isMatchingSubmitted()) matchingSubmissionCompleted(pending);
             return;
         }
-        if (pending.operation() == PendingMatching.Operation.LIQUIDATION_BATCH
+        if (pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH
                 && matchingAdapter.topology().matchingEngineCount() > 1) {
             List<CoreOrderState> orders = batchCancellationOrders(pending);
             int shardId = singleMatcherShard(orders);
@@ -1615,7 +1590,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         }
         var command = prepareMatchingCommand(pending);
         com.surprising.aeron.service.state.MatcherSettlementEvent direct = null;
-        if (pending.operation() == PendingMatching.Operation.PLACE && runtimeState.asynchronousCommands()) {
+        if (pending.operation() == CommandSlot.Operation.PLACE && runtimeState.asynchronousCommands()) {
             OrderRuntime directTaker = runtimeOrder(pending.decodedCommand().placeOrder().orderId());
             direct = runtimeState.prepareDirectMatcherSettlement(pending.sequence(),
                     pending.partitionLaneMask == 0 ? commits.validAccountLaneMask() : pending.partitionLaneMask,
@@ -1626,6 +1601,38 @@ public final class TradingCoreRuntime implements AutoCloseable,
             pending.settlement(direct, direct.plan(), System.nanoTime());
             if (realtimeCapture != null)
                 pending.realtimeTakerOrder = directTaker;
+        }
+        if (pending.operation() == CommandSlot.Operation.REPLACE || pending.operation() == CommandSlot.Operation.AMEND) {
+            var admission = requireMatchingAdmission(pending);
+            requireUnchangedAdmissionState(admission);
+            direct = runtimeState.prepareDirectReplacement(pending.sequence(), pending.sequence(),
+                    pending.partitionLaneMask == 0 ? commits.validAccountLaneMask() : pending.partitionLaneMask,
+                    admission, pending.command().header().commandId(), matcherShard(pending), identities,
+                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                    pending.preMatchingCancellationOrderIds());
+            pending.settlement(direct, direct.plan(), System.nanoTime());
+            if (realtimeCapture != null) pending.realtimeTakerOrder = direct.admittedOrder();
+        }
+        if (pending.operation() == CommandSlot.Operation.TRIGGER && runtimeState.asynchronousCommands()) {
+            long[] execute = pending.decodedCommand().trigger();
+            var trigger = java.util.Objects.requireNonNull(runtimeState.triggerOrder(execute[0]),
+                    "admitted trigger is missing");
+            OrderRuntime triggerOrder = runtimeOrder(pending.admittedMatchingOrder().orderId());
+            direct = runtimeState.prepareDirectMatcherSettlement(pending.sequence(),
+                    pending.partitionLaneMask == 0 ? commits.validAccountLaneMask() : pending.partitionLaneMask,
+                    triggerOrder, null, 1, pending.command().header().commandId(), matcherShard(pending),
+                    identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                    pending.preMatchingCancellationOrderIds(), null);
+            direct.triggerCompletion(trigger, execute[3]);
+            pending.settlement(direct, direct.plan(), System.nanoTime());
+            if (realtimeCapture != null) pending.realtimeTakerOrder = triggerOrder;
+        }
+        if (pending.operation() == CommandSlot.Operation.CANCEL && runtimeState.asynchronousCommands()) {
+            OrderRuntime canceledOrder = runtimeOrder(pending.decodedCommand().cancelOrder().orderId());
+            direct = runtimeState.prepareDirectCancellation(pending.sequence(), canceledOrder,
+                    pending.command().header().commandId(), matcherShard(pending), identities,
+                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition());
+            pending.settlement(direct, direct.plan(), System.nanoTime());
         }
         matcherPipeline.submit(matcherShard(pending), pending.sequence(), command, direct);
         pending.matchingSubmitted();
@@ -1643,7 +1650,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
      * bit.  If an earlier partition dependency is still outstanding, the ordered dispatcher
      * retries the same event without requiring another matcher result copy.
      */
-    boolean predispatchDirectSettlement(PendingMatching pending,
+    boolean predispatchDirectSettlement(CommandSlot pending,
                                      com.surprising.aeron.service.state.MatcherSettlementEvent event) {
         if (pending == null || event == null || !event.direct() || event.dispatched()) return false;
         // A direct event prepared outside a cluster callback must wait for the real
@@ -1682,7 +1689,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             long shardBit = 1L << shard;
             readyShards &= ~shardBit;
             while ((placeAdmissionReadyShardMask & shardBit) != 0) {
-                PendingMatching pending = pendingMatching.submissionHead(shard);
+                CommandSlot pending = pendingMatching.submissionHead(shard);
                 if (pending == null) {
                     placeAdmissionReadyShardMask &= ~shardBit;
                     break;
@@ -1775,7 +1782,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                             ? CoreResultCode.fromRejectionCode(rejected.code())
                             : rejection instanceof ArithmeticException
                             ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND;
-                    laneCommandContexts.required(pending.sequence()).rejectMatching(resultCode);
+                    pending.rejectMatching(resultCode);
                     runtimeState.releasePlaceAdmission(pending.takePlaceAdmission());
                     pendingMatching.completeSubmission(pending.sequence());
                     continue;
@@ -1799,7 +1806,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             long sequence;
             while ((sequence = runtimeState.pollPlaceAdmissionReady(laneId)) != 0) {
                 pendingMatching.progressChanged();
-                PendingMatching pending = pendingMatching.get(sequence);
+                CommandSlot pending = pendingMatching.get(sequence);
                 OrderBatchPending batch = pending == null ? null : batches.batch(sequence);
                 if (pending == null || pending.isMatchingSubmitted()
                         || batch != null && (batch.finishing() || batch.nextIndex >= batch.items.size())
@@ -1813,7 +1820,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     boolean matchingSubmissionDeferred(long sequence) {
-        PendingMatching pending = pendingMatching.get(sequence);
+        CommandSlot pending = pendingMatching.get(sequence);
         if (pending != null) {
             int shardId = pendingSubmissionShard(pending);
             if (!pendingMatching.isSubmissionHead(sequence, shardId)) return true;
@@ -1822,14 +1829,14 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return sequence > batches.firstBatch().sequence;
     }
 
-    void matchingSubmissionCompleted(PendingMatching pending) {
+    void matchingSubmissionCompleted(CommandSlot pending) {
         pendingMatching.progressChanged();
         int shard = pendingSubmissionShard(pending);
         pendingMatching.completeSubmission(pending.sequence());
         placeAdmissionReadyShardMask |= 1L << shard;
     }
 
-    int pendingSubmissionShard(PendingMatching pending) {
+    int pendingSubmissionShard(CommandSlot pending) {
         OrderBatchPending batch = pending.orderBatch;
         return batch == null ? matcherShard(pending) : batches.orderBatchMatcherShard(batch);
     }
@@ -1840,7 +1847,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             OrderBatchPending batch = batches.firstBatch();
             Long deferredSequence = admissions.deferredMatching.isEmpty()
                     ? null : admissions.deferredMatching.keySet().iterator().next();
-            PendingMatching pending;
+            CommandSlot pending;
             if (deferredSequence != null && (batch == null || deferredSequence < batch.sequence)) {
                 pending = pendingMatching.get(deferredSequence);
                 batch = null;
@@ -1872,14 +1879,14 @@ public final class TradingCoreRuntime implements AutoCloseable,
         if (result == null || result.nativeCommand().coreSequence() != sequence) {
             throw new IllegalStateException("synchronous matcher returned an invalid result");
         }
-        LaneCommandContextRing.Context context = laneCommandContexts.required(sequence);
+        CommandSlot context = laneCommandContexts.required(sequence);
         context.publishMatchingCompletion(result);
         pendingMatching.progressChanged();
     }
 
     java.util.function.Supplier<com.surprising.aeron.service.matching.CoreMatchingResult>
             prepareMatchingCommand(
-            PendingMatching pending) {
+            CommandSlot pending) {
         if (MATCHING_PHASE_METRICS_ENABLED) {
             matchingSubmitNanos.put(pending.sequence(), System.nanoTime());
         }
@@ -1887,7 +1894,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             List<DeterministicExchangeCoreAdapter.CancellationOrder> preMatchingCancellations =
                     preMatchingCancellationOrders(pending);
             long userId = pending.command().header().userId();
-            if (pending.operation() == PendingMatching.Operation.PLACE && preMatchingCancellations.isEmpty()) {
+            if (pending.operation() == CommandSlot.Operation.PLACE && preMatchingCancellations.isEmpty()) {
                 var command = pending.decodedCommand().placeOrder();
                 var admittedOrder = pending.admittedMatchingOrder();
                 var order = admittedOrder == null ? matchingOrder(command.orderId()) : admittedOrder;
@@ -1896,7 +1903,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                         pending.command().header().commandId(), command.instrumentChangeId(),
                         pending.command().header().submittedAtEpochMillis(), userId, order);
             }
-            if (pending.operation() == PendingMatching.Operation.CANCEL && preMatchingCancellations.isEmpty()) {
+            if (pending.operation() == CommandSlot.Operation.CANCEL && preMatchingCancellations.isEmpty()) {
                 var command = pending.decodedCommand().cancelOrder();
                 var order = runtimeState.order(command.orderId());
                 if (order != null) {
@@ -1992,15 +1999,15 @@ public final class TradingCoreRuntime implements AutoCloseable,
         }
     }
 
-    boolean matchingControlCommand(PendingMatching pending) {
-        return pending.operation() == PendingMatching.Operation.LIQUIDATION
-                || pending.operation() == PendingMatching.Operation.LIQUIDATION_BATCH
-                || pending.operation() == PendingMatching.Operation.SETTLEMENT;
+    boolean matchingControlCommand(CommandSlot pending) {
+        return pending.operation() == CommandSlot.Operation.LIQUIDATION
+                || pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH
+                || pending.operation() == CommandSlot.Operation.SETTLEMENT;
     }
 
     java.util.function.Supplier<com.surprising.aeron.service.matching.CoreMatchingResult>
             matchingEvidenceCommand(
-                    PendingMatching pending, long orderId, long instrumentChangeId, boolean control,
+                    CommandSlot pending, long orderId, long instrumentChangeId, boolean control,
                     java.util.function.Supplier<com.surprising.aeron.service.matching.CoreMatchingResult> command) {
         long coreSequence = pending.sequence();
         UUID commandId = pending.command().header().commandId();
@@ -2014,7 +2021,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     List<DeterministicExchangeCoreAdapter.CancellationOrder> preMatchingCancellationOrders(
-            PendingMatching pending) {
+            CommandSlot pending) {
         List<Long> orderIds = pending.preMatchingCancellationOrderIds();
         if (orderIds.isEmpty()) return List.of();
         ArrayList<DeterministicExchangeCoreAdapter.CancellationOrder> orders = new ArrayList<>(orderIds.size());
@@ -2056,19 +2063,19 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     PlaceOrderCommand replacementFor(DecodedMatchingCommand decodedCommand,
-                                             PendingMatching.Operation operation,
+                                             CommandSlot.Operation operation,
                                              OrderRuntime order) {
         if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
         if (runtimeState.instrument(runtimeOrderSymbol(order)) == null) {
             throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument is missing");
         }
-        return operation == PendingMatching.Operation.REPLACE
+        return operation == CommandSlot.Operation.REPLACE
                 ? decodedCommand.replaceOrder().replacement()
                 : replacementForAmend(decodedCommand.amendOrder(), order);
     }
 
-    PlaceOrderCommand replacementFor(PendingMatching pending, OrderRuntime order) {
-        if (pending.operation() == PendingMatching.Operation.REPLACE) {
+    PlaceOrderCommand replacementFor(CommandSlot pending, OrderRuntime order) {
+        if (pending.operation() == CommandSlot.Operation.REPLACE) {
             if (order == null) throw new CoreStateRejectedException("ORDER_NOT_FOUND", "order does not exist");
             if (runtimeState.instrument(runtimeOrderSymbol(order)) == null) {
                 throw new CoreStateRejectedException("INSTRUMENT_NOT_FOUND", "instrument is missing");
@@ -2132,34 +2139,26 @@ public final class TradingCoreRuntime implements AutoCloseable,
         if (fatalFailure != null) return null;
         progressPlaceAdmissions();
         if (!pendingMatching.contains(sequence)) return null;
-        PendingMatching pending = pendingMatching.get(sequence);
+        CommandSlot pending = pendingMatching.get(sequence);
         if (pending == null) return null;
-        LaneCommandContextRing.Context context = laneCommandContexts.required(sequence);
+        CommandSlot context = laneCommandContexts.required(sequence);
         if (context.matchingResult() != null) return context.matchingResult();
-        transferMatchingCompletion(sequence);
+        var direct = pending.settlementEvent();
+        if (direct == null && pending.orderBatch != null)
+            direct = pending.orderBatch.itemSettlementEvent != null
+                    ? pending.orderBatch.itemSettlementEvent : pending.orderBatch.settlementEvent;
+        if (direct != null && direct.direct()) return direct.ready() ? direct.firstDirectResult() : null;
         return context.takeMatchingCompletion();
     }
 
-    boolean transferMatchingCompletion(long sequence) {
-        if (!pendingMatching.contains(sequence)) return false;
-        LaneCommandContextRing.Context context = laneCommandContexts.required(sequence);
-        // A matchingResult in the sequence slot is the ordinary Owner-consumed path. Direct settlement
-        // keeps its fact in MatcherSettlementEvent; the Owner still consumes the corresponding
-        // Matcher SPSC slot before retiring the sequence context.
-        if (context.submittedMatcherShard() == -1) return true;
-        com.surprising.aeron.service.matching.CoreMatchingResult result = matcherPipeline.poll(sequence);
-        if (result != null) publishMatchingCompletion(sequence, result);
-        return context.submittedMatcherShard() == -1;
-    }
-
     boolean establishMatchingCommitFence(long sequence, long clusterTimestamp, long clusterPosition) {
-        PendingMatching pending = pendingMatching.get(sequence);
+        CommandSlot pending = pendingMatching.get(sequence);
         if (pending == null) return false;
         pending.establishCommitFence(clusterTimestamp, clusterPosition);
         return true;
     }
 
-    boolean placeAdmissionOutstanding(PendingMatching pending) {
+    boolean placeAdmissionOutstanding(CommandSlot pending) {
         if (pending.placeAdmission() != null && !pending.isMatchingSubmitted()) return true;
         OrderBatchPending batch = pending.orderBatch;
         return batch != null && batch.placeBatchAdmissionEvent != null && !pending.isMatchingSubmitted();
@@ -2220,7 +2219,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     long matchingSequence(UUID commandId) {
-        PendingMatching pending = pendingMatching.findByCommandId(commandId);
+        CommandSlot pending = pendingMatching.findByCommandId(commandId);
         return pending == null ? 0 : pending.sequence();
     }
 
@@ -2247,8 +2246,10 @@ public final class TradingCoreRuntime implements AutoCloseable,
         // 本地准入续跑不能依赖新的 Lane 通知；其他阶段不再触发整套准入扫描。
         if (placeAdmissionReadyShardMask != 0 || runtimeState.hasPlaceAdmissionNotifications())
             progressPlaceAdmissions();
-        if (matcherPipeline.hasMatchingCompletions())
-            matcherPipeline.drainMatchingCompletions(matchingCompletionConsumer);
+        if (matcherPipeline.hasMatchingCompletions()) {
+            matcherPipeline.drainMatchingCompletions();
+            pendingMatching.progressChanged();
+        }
         if (runtimeState.hasSettlementNotifications()) commits.drainMatcherSettlementCompletions();
     }
 
@@ -2259,7 +2260,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     /** 尚未消费的本地准入/队首结果必须继续推进，不能只等待新的跨线程通知。 */
     boolean hasLocalMatchingWork() {
         if (placeAdmissionReadyShardMask != 0) return true;
-        PendingMatching head = pendingMatching.get(pendingMatching.firstSequence());
+        CommandSlot head = pendingMatching.get(pendingMatching.firstSequence());
         OrderBatchPending batch = head == null ? null : head.orderBatch;
         // Handoff and the final metadata commit have no matcher-settlement cursor.
         // Keep polling these bounded Owner continuations even after consuming the last notification.
@@ -2358,7 +2359,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return pendingMatching.hasUser(userId);
     }
 
-    Map<Long, PendingMatching> pendingMatching() {
+    Map<Long, CommandSlot> pendingMatching() {
         return pendingMatching.snapshot();
     }
 
@@ -2401,7 +2402,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     boolean activated() { return activated; }
 
-    PendingMatching pendingMatching(long sequence) {
+    CommandSlot pendingMatching(long sequence) {
         return pendingMatching.get(sequence);
     }
 
@@ -2469,7 +2470,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     com.surprising.aeron.service.matching.FatalMatchingDivergenceException failMatching(
-            PendingMatching pending,
+            CommandSlot pending,
             String detail,
             Throwable cause) {
         try {
@@ -2491,19 +2492,19 @@ public final class TradingCoreRuntime implements AutoCloseable,
         if (!activated) activate();
         assertOwner();
         assertHealthy();
-        if (pendingDirectCommand != null || !pendingMatching.isEmpty() || !bookQueries.queryIds.isEmpty()) {
+        if (directCommand.directActive || !pendingMatching.isEmpty() || !bookQueries.queryIds.isEmpty()) {
             throw new IllegalStateException("unfinished business work outside cluster log callback");
         }
     }
 
     void assertHealthy() {
+        if (fatalFailure != null) throw fatalFailure;
         if (commitPublicationFailure != null) throw commitPublicationFailure;
         if (runtimeState != null) runtimeState.assertAccountLanesHealthy();
         runtimeProjectionJournal.assertHealthy();
         exportState.assertHealthy();
         RuntimeException auditFailure = snapshots.snapshotAuditFailure.get();
         if (auditFailure != null) throw auditFailure;
-        if (fatalFailure != null) throw fatalFailure;
     }
 
     public static TradingCoreRuntime fromSnapshot(ProductLine productLine, byte[] snapshot) {
@@ -2646,7 +2647,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     boolean snapshotHasPendingCommands() {
-        return factContextActive || pendingDirectCommand != null || laneCommandContexts.inFlight() != 0;
+        return factContextActive || directCommand.directActive || laneCommandContexts.inFlight() != 0;
     }
 
     Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> feePolicies() {
@@ -2787,7 +2788,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         else commits.requestCommitPublication();
     }
 
-    ResolvedMatchingAdmission requireMatchingAdmission(PendingMatching pending) {
+    ResolvedMatchingAdmission requireMatchingAdmission(CommandSlot pending) {
         ResolvedMatchingAdmission admission = pending.matchingAdmission();
         if (admission == null) throw new IllegalStateException("replace admission is missing");
         return admission;
@@ -2852,11 +2853,11 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     com.surprising.aeron.service.state.RuntimeTreasuryDelta applyMatchesOnAccountLanes(
-            PendingMatching pending,
+            CommandSlot pending,
             com.surprising.aeron.service.state.MatcherSettlementPlan settlementPlan,
             long coreSequence,
             com.surprising.aeron.service.matching.CoreMatchingResult matchingResult,
-            LaneCommandContextRing.Context laneContext,
+            CommandSlot laneContext,
             long applyStartNanos) {
         com.surprising.aeron.service.state.MatcherSettlementEvent event = pending.settlementEvent();
         if (event == null) {
@@ -2878,10 +2879,9 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return delta;
     }
 
-    void suspendMatchingCommitContext(PendingMatching pending) {
+    void suspendMatchingCommitContext(CommandSlot pending) {
         if (!commits.commitPublicationDeferred || pending == null
                 || pending.settlementEvent() == null && pending.cancelEvent() == null
-                && pending.replaceEvent() == null
                 && pending.orderBatch == null
                 && !commits.controlPending(pending.sequence())) {
             throw new IllegalStateException("matching commit context cannot be suspended");
@@ -2891,7 +2891,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         // them back when the ordered commit resumes.
         seedChangeAccumulators();
         runtimeState.acceptChangedUserIds(resultBuilder.changedUserIds::add);
-        LaneCommandContextRing.Context context = laneCommandContexts.required(pending.sequence());
+        CommandSlot context = pending;
         context.suspendCommitContext(
                 resultBuilder, commandFundsAccumulator,
                 commits.commitPublicationDirty, commits.commitPublicationProvisionalOnly);
@@ -2904,11 +2904,11 @@ public final class TradingCoreRuntime implements AutoCloseable,
         clearFactContext();
     }
 
-    void restoreMatchingCommitContext(PendingMatching pending) {
+    void restoreMatchingCommitContext(CommandSlot pending) {
         if (commits.commitPublicationDeferred || factContextActive) {
             throw new IllegalStateException("another owner commit context is active");
         }
-        LaneCommandContextRing.Context context = laneCommandContexts.required(pending.sequence());
+        CommandSlot context = pending;
         activateFactContext(pending.command(), pending.fingerprint());
         commits.commitPublicationDeferred = true;
         commits.commitPublicationDirty = context.commitSnapshotDirty();
@@ -3033,6 +3033,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         bookQueries.queryIds.clear();
         runtimeState.endOrderBatchMutationScope();
         clearFactContext();
+        directCommand.clearDirect();
         batches.clearPendingBatches();
         pendingMatching.clear();
         crossShardCancellations.clear();
@@ -3058,7 +3059,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 CoreStateQueryCodec.encodeUserState(query.view()));
     }
 
-    void captureRealtimeTrades(PendingMatching pending) {
+    void captureRealtimeTrades(CommandSlot pending) {
         var plan = pending.settlementPlan();
         OrderRuntime taker = pending.realtimeTakerOrder;
         pending.realtimeTakerOrder = null;

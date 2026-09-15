@@ -55,11 +55,11 @@ final class OrderBatchExecutor {
     OrderBatchPending firstBatch() { return firstBatch; }
     int pendingBatchCount() { return batchCount; }
     OrderBatchPending batch(long sequence) {
-        PendingMatching pending = owner.pendingMatching.get(sequence);
+        CommandSlot pending = owner.pendingMatching.get(sequence);
         return pending == null ? null : pending.orderBatch;
     }
 
-    void registerBatch(PendingMatching pending, OrderBatchPending batch) {
+    void registerBatch(CommandSlot pending, OrderBatchPending batch) {
         if (pending.orderBatch != null || pending.sequence() != batch.sequence
                 || owner.pendingMatching.get(batch.sequence) != pending
                 || batch.previousBatch != null || batch.nextBatch != null
@@ -73,7 +73,7 @@ final class OrderBatchExecutor {
         batchCount++;
     }
 
-    void unregisterBatch(PendingMatching pending, OrderBatchPending batch) {
+    void unregisterBatch(CommandSlot pending, OrderBatchPending batch) {
         if (pending.orderBatch != batch || batchCount == 0
                 || batch.previousBatch == null && firstBatch != batch
                 || batch.nextBatch == null && lastBatch != batch)
@@ -121,7 +121,7 @@ final class OrderBatchExecutor {
                             ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND);
         }
         long sequence = Math.incrementExact(owner.appliedCommandCount);
-        PendingMatching pending = owner.admissions.newPendingMatching(sequence, batch.operation, message, fingerprint, decodedCommand);
+        CommandSlot pending = owner.admissions.newPendingMatching(sequence, batch.operation, message, fingerprint, decodedCommand);
         batch.sequence = sequence;
         owner.putPendingMatching(pending);
         owner.admissions.registerPendingLifecycle(pending);
@@ -142,11 +142,11 @@ final class OrderBatchExecutor {
                 owner.appliedCommandCount, 0, pendingStateHash, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
     }
 
-    CoreResponse activateOrderBatch(OrderBatchPending batch, PendingMatching pending,
+    CoreResponse activateOrderBatch(OrderBatchPending batch, CommandSlot pending,
                                              boolean deferCompletion) {
         boolean firstActivation = !batch.commitStarted();
         if (firstActivation) beginOrderBatchCommitContext(batch, pending);
-        else if (owner.laneCommandContexts.required(pending.sequence()).hasCommitContext())
+        else if (pending.hasCommitContext())
             owner.restoreMatchingCommitContext(pending);
         else owner.activateFactContext(pending.command(), pending.fingerprint());
         if (firstActivation && batch.admissionOrderIndex != null) batch.admissionOrderIndex.reset(pending.command().header().userId());
@@ -163,7 +163,7 @@ final class OrderBatchExecutor {
         return response;
     }
 
-    boolean tryActivatePipelinedOrderBatch(OrderBatchPending batch, PendingMatching pending) {
+    boolean tryActivatePipelinedOrderBatch(OrderBatchPending batch, CommandSlot pending) {
         if (pending.clusterIndependent && batch.kind == OrderBatchKind.CANCEL) {
             if (batch.admissionOrderIndex == null)
                 batch.admissionOrderIndex = new BatchAdmissionOrderIndex(owner.activeOrderIndex, owner.identities, batch.items.size());
@@ -188,7 +188,7 @@ final class OrderBatchExecutor {
         return true;
     }
 
-    void registerPipelinedBatchSymbols(OrderBatchPending batch, PendingMatching pending) {
+    void registerPipelinedBatchSymbols(OrderBatchPending batch, CommandSlot pending) {
         if (batch.pipelineRegistered()) return;
         for (String symbol : batch.preparedSymbols) {
             // Retain the newest batch: ordered completion removes all predecessors first.
@@ -214,7 +214,7 @@ final class OrderBatchExecutor {
         }
     }
 
-    boolean preparePipelinedPlaceBatch(OrderBatchPending batch, PendingMatching pending) {
+    boolean preparePipelinedPlaceBatch(OrderBatchPending batch, CommandSlot pending) {
         if (batch.sequentialAdmission || batch.kind != OrderBatchKind.PLACE) {
             return false;
         }
@@ -261,7 +261,7 @@ final class OrderBatchExecutor {
     }
 
     void dispatchPipelinedPlaceBatchAdmission(
-            PendingMatching pending, OrderBatchPending batch) {
+            CommandSlot pending, OrderBatchPending batch) {
         batch.placeBatchAdmissionEvent = owner.runtimeState.dispatchPlaceBatchAdmission(
                 pending.sequence(), pending.command().header().userId(), pending.command().header().commandId(),
                 batch.preparedOrders, batch.preparedOpenInterestSteps, batch.preparedAdmissionIdentities,
@@ -270,7 +270,7 @@ final class OrderBatchExecutor {
                 batch.preparedAdmittedReservations, batch.items.size(), owner.identities, batch);
     }
 
-    void submitPipelinedPlaceBatch(PendingMatching pending, OrderBatchPending batch) {
+    void submitPipelinedPlaceBatch(CommandSlot pending, OrderBatchPending batch) {
         long userId = pending.command().header().userId();
         int shard = owner.matchingAdapter.matcherShardId(batch.preparedSymbols.getFirst());
         if (owner.runtimeState.asynchronousCommands()) {
@@ -296,7 +296,7 @@ final class OrderBatchExecutor {
 
     com.surprising.aeron.service.matching.CoreMatchingResult
             submitPreparedPipelinedPlaceBatch(
-                    PendingMatching pending, OrderBatchPending batch, long userId, int shard) {
+                    CommandSlot pending, OrderBatchPending batch, long userId, int shard) {
         List<com.surprising.aeron.service.matching.CoreMatchingResult> results =
                 batch.pipelinedMatchingResults;
         results.clear();
@@ -336,7 +336,7 @@ final class OrderBatchExecutor {
         }
     }
 
-    CoreResponse startOrderBatchItem(OrderBatchPending batch, PendingMatching pending,
+    CoreResponse startOrderBatchItem(OrderBatchPending batch, CommandSlot pending,
                                              long clusterTimestamp, long clusterPosition,
                                              boolean deferCompletion) {
         batch.sequentialAdmission = true;
@@ -395,18 +395,15 @@ final class OrderBatchExecutor {
                                                                     PlaceOrderCommand command, UUID commandId) {
         ResolvedPlaceOrder resolved = CoreOrderDecisionResolver.resolve(owner.runtimeState,
                 owner.identities, userId, command, owner.currentClusterTimestamp);
-        long original = batch.kind == OrderBatchKind.AMEND && owner.productLine == ProductLine.SPOT
-                ? ((AmendOrderCommand) batch.items.get(batch.nextIndex).command).originalOrderId() : 0;
         long required = com.surprising.aeron.service.state.RuntimeOrderAdmission.requiredReservation(
                 owner.runtimeState, owner.identities, userId, resolved,
-                batchOpenInterestSteps(batch, command.symbol()), batch.admissionOrderIndex, original);
+                batchOpenInterestSteps(batch, command.symbol()), batch.admissionOrderIndex, 0);
         int assetId = owner.identities.assetId(resolved.reservationAsset());
         long sequence = batch.sequence;
         int laneId = owner.runtimeState.topology().accountLaneId(userId);
         owner.runtimeState.dispatchControlLanes(1L << laneId, ignored -> {
             var key = owner.identities.prepareClientKeyInCurrentLane(userId, resolved.clientOrderId());
             try {
-                if (original != 0) RuntimeCommandProcessor.cancelOrder(owner.runtimeState, userId, original);
                 RuntimeCommandProcessor.reserveBatchOrderInLane(owner.runtimeState, userId, resolved,
                         commandId, required, key.key(), assetId, sequence);
                 return key;
@@ -493,6 +490,9 @@ final class OrderBatchExecutor {
                     }
                     batch.currentPreMatchingCancellationOrderIds = owner.admissions.preMatchingCloseCapacityCancellations(
                             userId, replacement, command.originalOrderId());
+                    batch.replacementAdmission = new com.surprising.aeron.service.command.order.ResolvedMatchingAdmission(
+                            userId, command.originalOrderId(), order.revision(), owner.runtimeState.user(userId).revision(),
+                            replacement, resolved, owner.matchingOrder(userId, replacement), requiredReservation);
                 }
             }
         } finally {
@@ -501,9 +501,10 @@ final class OrderBatchExecutor {
         }
     }
 
-    void submitOrderBatchMatching(PendingMatching pending) {
+    void submitOrderBatchMatching(CommandSlot pending) {
         OrderBatchPending batch = pending.orderBatch;
         if (batch == null) return;
+        batch.lastMatchingResult = null;
         if (batch.kind == OrderBatchKind.CANCEL) {
             submitCancelBatchChunk(pending, batch);
             if (pending.clusterIndependent) pending.matchingSubmitted();
@@ -533,11 +534,24 @@ final class OrderBatchExecutor {
             // here preserves the batch's account dependency without advancing the shared head.
             owner.runtimeState.dispatchDirectMatcherSettlement(direct);
         }
+        if (batch.kind == OrderBatchKind.AMEND) {
+            pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
+            direct = owner.runtimeState.prepareDirectReplacement(pending.sequence(), 0,
+                    pending.partitionLaneMask == 0 ? owner.commits.validAccountLaneMask() : pending.partitionLaneMask,
+                    java.util.Objects.requireNonNull(batch.replacementAdmission),
+                    pending.command().header().commandId(), shard, owner.identities,
+                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
+                    pending.preMatchingCancellationOrderIds());
+            batch.itemSettlementEvent = direct;
+            if (owner.realtimeCapture != null) batch.items.get(batch.nextIndex).realtimeTakerOrder = direct.admittedOrder();
+            owner.runtimeState.dispatchDirectMatcherSettlement(direct);
+        }
         owner.matcherPipeline.submit(shard, pending.sequence(),
                 prepareOrderBatchMatchingCommand(pending, batch, batch.items.get(batch.nextIndex), shard), direct);
     }
 
-    void submitCancelBatchChunk(PendingMatching pending, OrderBatchPending batch) {
+    void submitCancelBatchChunk(CommandSlot pending, OrderBatchPending batch) {
+        batch.lastMatchingResult = null;
         int shard = orderBatchMatcherShard(batch);
         int start = batch.nextIndex;
         int end = start;
@@ -549,6 +563,7 @@ final class OrderBatchExecutor {
             if (order == null) break;
             String symbol = owner.runtimeOrderSymbol(order);
             if (owner.matchingAdapter.matcherShardId(symbol) != shard) break;
+            batch.preparedAdmittedOrders[end - start] = order;
             item.cancelSymbol = symbol;
             item.cancelInstrumentChangeId = order.instrumentChangeId();
             end++;
@@ -556,6 +571,22 @@ final class OrderBatchExecutor {
         if (end == start) throw new IllegalStateException("validated cancel chunk is empty");
         batch.cancellationChunkEnd = end;
         int chunkEnd = end;
+        // Missing suffix items cannot change funds or orders. The last actual cancellation
+        // also publishes the submitting Lane's final sequence; no second Lane task is needed.
+        boolean finalChunk = true;
+        for (int index = end; index < batch.items.size(); index++) {
+            if (owner.runtimeOrder(batch.items.get(index).orderId) != null) {
+                finalChunk = false;
+                break;
+            }
+        }
+        pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
+        var direct = owner.runtimeState.prepareDirectCancelBatch(pending.sequence(), finalChunk,
+                pending.command().header().userId(), batch.preparedAdmittedOrders, end - start,
+                pending.command().header().commandId(), shard, owner.identities,
+                pending.commitFenceTimestamp(), pending.commitFenceClusterPosition());
+        batch.itemSettlementEvent = direct;
+        owner.runtimeState.dispatchDirectMatcherSettlement(direct);
         owner.matcherPipeline.submit(shard, pending.sequence(), () -> {
             batch.pipelinedMatchingResults.clear();
             for (int index = start; index < chunkEnd; index++) {
@@ -567,14 +598,15 @@ final class OrderBatchExecutor {
                 batch.pipelinedMatchingResults.add(result);
                 if (owner.commits.matchingResultNeedsRecovery(pending, result)) break;
             }
+            direct.publishDirectResults(batch.pipelinedMatchingResults);
             return batch.pipelinedMatchingResults.getFirst();
-        });
+        }, direct);
     }
 
     CoreResponse completeOrderBatchMatching(long sequence,
                                                     com.surprising.aeron.service.matching.CoreMatchingResult matchingResult,
                                                     long clusterTimestamp, long clusterPosition) {
-        PendingMatching pending = owner.pendingMatching.get(sequence);
+        CommandSlot pending = owner.pendingMatching.get(sequence);
         OrderBatchPending batch = batch(sequence);
         if (pending == null || batch == null || matchingResult == null) return null;
         if (owner.commits.matchingResultNeedsRecovery(pending, matchingResult)) {
@@ -593,6 +625,15 @@ final class OrderBatchExecutor {
                     || batch.pipelinedMatchingResults.getFirst() != matchingResult) {
                 throw failOrderBatch(batch, pending, "cancel chunk completion identity mismatch", null);
             }
+            var event = batch.itemSettlementEvent;
+            if (event == null || !event.complete()) throw new IllegalStateException("cancel chunk Lane is incomplete");
+            batch.mergeTreasuryDelta(owner.runtimeState.collectOrderBatchMatcherSettlement(event, owner.terminalRetention));
+            owner.commits.requestCommitPublication();
+            if (event.commitSequence() != 0) {
+                batch.laneCommitCompleted(true);
+            }
+            owner.runtimeState.releaseMatcherSettlement(event);
+            batch.itemSettlementEvent = null;
             for (var result : batch.pipelinedMatchingResults) {
                 if (owner.commits.matchingResultNeedsRecovery(pending, result)) {
                     throw failOrderBatch(batch, pending, "cancel chunk matcher divergence", null);
@@ -601,7 +642,9 @@ final class OrderBatchExecutor {
                     owner.commits.validateMatchingEvidence(pending, result);
                     owner.commits.applyMatcherProgress(result);
                 }
-                applyCompletedOrderBatchItem(batch, pending, result);
+                batch.lastMatchingResult = result;
+                applyOrderBatchMatcherResult(batch, batch.items.get(batch.nextIndex), pending, result);
+                finishOrderBatchItem(batch, pending, result);
             }
             if (batch.nextIndex != batch.cancellationChunkEnd) {
                 throw failOrderBatch(batch, pending, "cancel chunk completion count mismatch", null);
@@ -627,46 +670,26 @@ final class OrderBatchExecutor {
         return startOrderBatchItem(batch, pending, clusterTimestamp, clusterPosition, false);
     }
 
-    CoreResponse completeAmendReservation(OrderBatchPending batch, PendingMatching pending,
-                                         long timestamp, long position) {
-        try {
-            if (!batch.itemAdmission.getAsBoolean()) {
-                owner.suspendMatchingCommitContext(pending);
-                return null;
-            }
-            batch.itemAdmission = null;
-            long orderId = ((AmendOrderCommand) batch.items.get(batch.nextIndex).command).replacementOrderId();
-            if (owner.productLine.isDerivative()) {
-                batch.deferSettlement(batch.nextIndex,
-                        owner.commits.expectedLaneMask(pending, batch.lastMatchingResult));
-                finishOrderBatchItem(batch, pending, batch.lastMatchingResult);
-                return startOrderBatchItem(batch, pending, timestamp, position, false);
-            }
-            batch.itemSettlementEvent = owner.runtimeState.dispatchOrderBatchMatcherSettlement(pending.sequence(),
-                    owner.commits.expectedLaneMask(pending, batch.lastMatchingResult), orderId,
-                    batch.lastMatchingResult, owner.identities);
-            owner.suspendMatchingCommitContext(pending);
-            return null;
-        } catch (RuntimeException failure) {
-            throw failOrderBatch(batch, pending, "amend reservation failed after matching", failure);
-        }
-    }
-
-    CoreResponse completeOrderBatchItemSettlement(OrderBatchPending batch, PendingMatching pending,
+    CoreResponse completeOrderBatchItemSettlement(OrderBatchPending batch, CommandSlot pending,
                                                  long timestamp, long position) {
         try {
             batch.mergeTreasuryDelta(owner.runtimeState.collectOrderBatchMatcherSettlement(
                     batch.itemSettlementEvent, owner.terminalRetention));
+            if (batch.kind == OrderBatchKind.AMEND && batch.lastMatchingResult.accepted()) {
+                // Preserve the existing reservation revision; SPOT also counted its original cancellation.
+                owner.runtimeState.setMetadata(owner.productLine, Math.addExact(owner.runtimeState.revision(),
+                        owner.productLine == ProductLine.SPOT ? 2 : 1));
+            }
             owner.runtimeState.releaseMatcherSettlement(batch.itemSettlementEvent);
             batch.itemSettlementEvent = null;
-            finishOrderBatchItem(batch, pending, batch.lastMatchingResult);
+            if (batch.kind != OrderBatchKind.CANCEL) finishOrderBatchItem(batch, pending, batch.lastMatchingResult);
             return startOrderBatchItem(batch, pending, timestamp, position, false);
         } catch (RuntimeException failure) {
             throw failOrderBatch(batch, pending, "batch item Lane settlement failed", failure);
         }
     }
 
-    void applyCompletedOrderBatchItem(OrderBatchPending batch, PendingMatching pending,
+    void applyCompletedOrderBatchItem(OrderBatchPending batch, CommandSlot pending,
                                               CoreMatchingResult matchingResult) {
         batch.lastMatchingResult = matchingResult;
         OrderBatchItem item = batch.items.get(batch.nextIndex);
@@ -679,7 +702,7 @@ final class OrderBatchExecutor {
         }
     }
 
-    private void finishOrderBatchItem(OrderBatchPending batch, PendingMatching pending,
+    private void finishOrderBatchItem(OrderBatchPending batch, CommandSlot pending,
                                      CoreMatchingResult matchingResult) {
         OrderBatchItem item = batch.items.get(batch.nextIndex);
         ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
@@ -692,6 +715,7 @@ final class OrderBatchExecutor {
                         owner.runtimeOrder(orderId));
             }
             appendOrderBatchResult(batch, item, status, resultCode);
+            batch.replacementAdmission = null;
             item.cancelSymbol = null;
             item.cancelInstrumentChangeId = 0;
             batch.nextIndex++;
@@ -703,7 +727,7 @@ final class OrderBatchExecutor {
     }
 
     CoreResponse completePipelinedPlaceBatch(
-            OrderBatchPending batch, PendingMatching pending,
+            OrderBatchPending batch, CommandSlot pending,
             com.surprising.aeron.service.matching.CoreMatchingResult firstMatchingResult,
             long clusterTimestamp, long clusterPosition) {
         applyPipelinedPlaceBatchResults(batch, pending, firstMatchingResult);
@@ -711,7 +735,7 @@ final class OrderBatchExecutor {
     }
 
     void applyPipelinedPlaceBatchResults(
-            OrderBatchPending batch, PendingMatching pending,
+            OrderBatchPending batch, CommandSlot pending,
             com.surprising.aeron.service.matching.CoreMatchingResult firstMatchingResult) {
         List<com.surprising.aeron.service.matching.CoreMatchingResult> matchingResults =
                 batch.pipelinedMatchingResults;
@@ -786,7 +810,7 @@ final class OrderBatchExecutor {
     }
 
     com.surprising.aeron.service.matching.FatalMatchingDivergenceException failOrderBatch(
-            OrderBatchPending batch, PendingMatching pending, String detail, Throwable cause) {
+            OrderBatchPending batch, CommandSlot pending, String detail, Throwable cause) {
         // Exchange-core facts are irreversible here. Preserve their observed sequence/prefix for replay evidence,
         // stop every continuation, and roll back only the unpublished Product Core runtime command.
         owner.matchingAdapter.poisonFromOwner("fatal order batch divergence sequence=" + batch.sequence
@@ -803,10 +827,11 @@ final class OrderBatchExecutor {
     }
 
     void applyOrderBatchMatcherResult(
-            OrderBatchPending batch, OrderBatchItem item, PendingMatching pending,
+            OrderBatchPending batch, OrderBatchItem item, CommandSlot pending,
             com.surprising.aeron.service.matching.CoreMatchingResult matchingResult) {
         item.matchingResult = matchingResult;
-        if (owner.realtimeCapture != null && owner.realtimeCapture.active() && matchingResult.accepted()) {
+        if (item.realtimeTakerOrder == null && owner.realtimeCapture != null
+                && owner.realtimeCapture.active() && matchingResult.accepted()) {
             item.realtimeTakerOrder = owner.runtimeOrder(item.orderId());
         }
 
@@ -838,26 +863,12 @@ final class OrderBatchExecutor {
                 }
                 return;
             }
-            case CANCEL -> {
-                CancelOrderCommand command = (CancelOrderCommand) item.command;
-                if (matchingResult.accepted()) {
-                    batch.deferredCancellationOrderIds.add(command.orderId());
-                }
-                return;
-            }
+            case CANCEL -> { return; } // Chunk Lane changes were collected before its item results.
+
             case AMEND -> {
-                AmendOrderCommand command = (AmendOrderCommand) item.command;
-                PlaceOrderCommand replacement = owner.replacementForAmend(command,
-                        owner.runtimeOrder(command.originalOrderId()));
-                deferOrderBatchPreMatchingCancellations(batch, pending, matchingResult);
-                if (matchingResult.accepted()) {
-                    // The final cancel event also stamps and retires the original terminal order.
-                    // SPOT releases its funds earlier in the replacement reservation task.
-                    batch.deferredCancellationOrderIds.add(command.originalOrderId());
-                    owner.requireOrderIdentityAvailable(pending.command().header().userId(), replacement);
-                    batch.itemAdmission = beginBatchReservation(batch, pending.command().header().userId(),
-                            replacement, pending.command().header().commandId());
-                }
+                if (batch.itemSettlementEvent == null || !batch.itemSettlementEvent.direct())
+                    throw new IllegalStateException("batch amendment requires a direct Lane event");
+                batch.collectChangedOrderIds(item, pending.command().header().userId(), matchingResult);
                 return;
             }
             default -> throw new IllegalStateException("unsupported order batch kind");
@@ -870,7 +881,7 @@ final class OrderBatchExecutor {
         item.resultCode = resultCode;
     }
 
-    boolean dispatchOrderBatchLaneWork(OrderBatchPending batch, PendingMatching pending,
+    boolean dispatchOrderBatchLaneWork(OrderBatchPending batch, CommandSlot pending,
                                                long timestamp, long position) {
         if (batch.cancelEvent == null && !batch.deferredCancellationOrderIds.isEmpty()) {
             batch.cancelEvent = owner.runtimeState.dispatchCancelBatch(
@@ -885,14 +896,14 @@ final class OrderBatchExecutor {
         return true;
     }
 
-    CoreResponse finishOrderBatch(OrderBatchPending batch, PendingMatching pending,
+    CoreResponse finishOrderBatch(OrderBatchPending batch, CommandSlot pending,
                                           long clusterTimestamp, long clusterPosition) {
         if (!batch.finishing()) {
             owner.activateFactContext(pending.command(), pending.fingerprint());
             owner.setCommandFundsDelta(pending.fundsDelta());
             batch.finishing(true);
         }
-        LaneCommandContextRing.Context laneContext = owner.laneCommandContexts.required(batch.sequence);
+        CommandSlot laneContext = owner.laneCommandContexts.required(batch.sequence);
         initializeOrderBatchLaneContext(batch, pending);
         if (dispatchOrderBatchLaneWork(batch, pending, clusterTimestamp, clusterPosition)) {
             owner.suspendMatchingCommitContext(pending);
@@ -1009,7 +1020,7 @@ final class OrderBatchExecutor {
         return owner.finishFactContext(response);
     }
 
-    void initializeOrderBatchLaneContext(OrderBatchPending batch, PendingMatching pending) {
+    void initializeOrderBatchLaneContext(OrderBatchPending batch, CommandSlot pending) {
         if (batch.laneContextInitialized()) return;
         long expectedLaneMask = 0;
         for (int index = 0; index < batch.changedUserIds.size(); index++) {
@@ -1021,8 +1032,9 @@ final class OrderBatchExecutor {
                 ? new com.surprising.aeron.service.matching.CoreMatchingResult(true, "NO_NATIVE_COMMAND")
                 .withCoreSequence(batch.sequence)
                 : batch.lastMatchingResult;
-        owner.laneCommandContexts.required(pending.sequence()).result(
+        pending.result(
                 finalMatchingResult, expectedLaneMask, owner.commits.validAccountLaneMask());
+        if (batch.laneCommitCompleted() && expectedLaneMask != 0) pending.completeLanes(expectedLaneMask);
         batch.laneContextInitialized(true);
     }
 
@@ -1047,7 +1059,7 @@ final class OrderBatchExecutor {
                 : batch.decodedCommand.matcherShard(owner.matchingAdapter, symbol);
     }
 
-    void beginOrderBatchCommitContext(OrderBatchPending batch, PendingMatching pending) {
+    void beginOrderBatchCommitContext(OrderBatchPending batch, CommandSlot pending) {
         owner.activateFactContext(pending.command(), pending.fingerprint());
         owner.resultBuilder.clearOrderViews();
         owner.resultBuilder.commandChangedUserIds = List.of();
@@ -1067,7 +1079,7 @@ final class OrderBatchExecutor {
         owner.commits.beginCommitPublicationBatch();
     }
 
-    void beginPipelinedOrderBatchCommit(OrderBatchPending batch, PendingMatching pending) {
+    void beginPipelinedOrderBatchCommit(OrderBatchPending batch, CommandSlot pending) {
         PlaceBatchAdmissionEvent admission = batch.placeBatchAdmissionEvent;
         boolean preparedCancel = pending.clusterIndependent && batch.kind == OrderBatchKind.CANCEL;
         if (!preparedCancel && (!batch.admissionCollected() || admission == null || !admission.complete()
@@ -1084,7 +1096,7 @@ final class OrderBatchExecutor {
     }
 
     void deferOrderBatchPreMatchingCancellations(
-            OrderBatchPending batch, PendingMatching pending,
+            OrderBatchPending batch, CommandSlot pending,
             com.surprising.aeron.service.matching.CoreMatchingResult result) {
         List<Long> expected = pending.preMatchingCancellationOrderIds();
         if (expected.isEmpty()) return;
@@ -1129,7 +1141,7 @@ final class OrderBatchExecutor {
         if (type == CoreMessageType.PLACE_ORDER_BATCH) {
             PlaceOrderBatchCommand command = decodedCommand.placeOrderBatch();
             OrderBatchPending batch = acquireOrderBatchPending(OrderBatchKind.PLACE, command.orders().size(),
-                    clusterTimestamp, clusterPosition, PendingMatching.Operation.PLACE);
+                    clusterTimestamp, clusterPosition, CommandSlot.Operation.PLACE);
             batch.decodedCommand = decodedCommand;
             for (PlaceOrderCommand value : command.orders()) {
                 batch.addItem(value.orderId(), 0, 0, value);
@@ -1139,7 +1151,7 @@ final class OrderBatchExecutor {
         if (type == CoreMessageType.CANCEL_ORDER_BATCH) {
             CancelOrderBatchCommand command = decodedCommand.cancelOrderBatch();
             OrderBatchPending batch = acquireOrderBatchPending(OrderBatchKind.CANCEL, command.orders().size(),
-                    clusterTimestamp, clusterPosition, PendingMatching.Operation.CANCEL);
+                    clusterTimestamp, clusterPosition, CommandSlot.Operation.CANCEL);
             batch.decodedCommand = decodedCommand;
             for (CancelOrderCommand value : command.orders()) {
                 batch.addItem(value.orderId(), 0, 0, value);
@@ -1149,7 +1161,7 @@ final class OrderBatchExecutor {
         if (type == CoreMessageType.AMEND_ORDER_BATCH) {
             AmendOrderBatchCommand command = decodedCommand.amendOrderBatch();
             OrderBatchPending batch = acquireOrderBatchPending(OrderBatchKind.AMEND, command.orders().size(),
-                    clusterTimestamp, clusterPosition, PendingMatching.Operation.AMEND);
+                    clusterTimestamp, clusterPosition, CommandSlot.Operation.AMEND);
             batch.decodedCommand = decodedCommand;
             for (AmendOrderCommand value : command.orders()) {
                 batch.addItem(value.replacementOrderId(), value.originalOrderId(),
@@ -1162,7 +1174,7 @@ final class OrderBatchExecutor {
 
     OrderBatchPending acquireOrderBatchPending(
             OrderBatchKind kind, int itemCount, long clusterTimestamp, long clusterPosition,
-            PendingMatching.Operation operation) {
+            CommandSlot.Operation operation) {
         OrderBatchPending selected = null;
         Iterator<OrderBatchPending> iterator = orderBatchPendingPool.iterator();
         while (iterator.hasNext()) {
@@ -1195,7 +1207,7 @@ final class OrderBatchExecutor {
         }
     }
 
-    void requireUnchangedRejectedBatchItem(OrderBatchPending batch, PendingMatching pending,
+    void requireUnchangedRejectedBatchItem(OrderBatchPending batch, CommandSlot pending,
                                                    long runtimeRevisionBefore,
                                                    RuntimeException exception) {
         if (owner.runtimeState.revision() != runtimeRevisionBefore) {
@@ -1206,7 +1218,7 @@ final class OrderBatchExecutor {
 
     java.util.function.Supplier<com.surprising.aeron.service.matching.CoreMatchingResult>
             prepareOrderBatchMatchingCommand(
-            PendingMatching pending, OrderBatchPending batch, OrderBatchItem item, int shard) {
+            CommandSlot pending, OrderBatchPending batch, OrderBatchItem item, int shard) {
         long orderId;
         long instrumentChangeId;
         java.util.function.Supplier<com.surprising.aeron.service.matching.CoreMatchingResult> submission;
@@ -1228,7 +1240,7 @@ final class OrderBatchExecutor {
                 orderId = replacement.orderId();
                 instrumentChangeId = replacement.instrumentChangeId();
                 String symbol = owner.runtimeOrderSymbol(order);
-                var matchingOrder = owner.matchingOrder(pending.command().header().userId(), replacement);
+                var matchingOrder = batch.replacementAdmission.matchingOrder();
                 submission = () -> owner.matchingAdapter.replaceOrder(
                         pending.command().header().userId(), command.originalOrderId(), symbol, matchingOrder);
             }

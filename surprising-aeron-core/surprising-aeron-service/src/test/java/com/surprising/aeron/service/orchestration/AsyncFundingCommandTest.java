@@ -76,7 +76,7 @@ class AsyncFundingCommandTest {
         int unrelatedLane = (state.runtimeState.topology().accountLaneId(1) + 1) % workers.length;
         var entered = new java.util.concurrent.CountDownLatch(1);
         var release = new java.util.concurrent.CountDownLatch(1);
-        Class<?> task = Class.forName("com.surprising.aeron.service.state.SettlementLaneWorker$Command");
+        Class<?> task = com.surprising.aeron.service.lane.SettlementLaneWorker.Command.class;
         var submit = workers[unrelatedLane].getClass().getDeclaredMethod("submit", task);
         submit.setAccessible(true);
         submit.invoke(workers[unrelatedLane], java.lang.reflect.Proxy.newProxyInstance(task.getClassLoader(),

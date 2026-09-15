@@ -69,14 +69,13 @@ class SurprisingClusteredServiceTest {
             runtime.enterAsynchronousCommandScope();
             try {
                 assertThat(owner.applyDecodedCommand(request, 2000, 2000, null, false)).isNull();
-                var continuation = TradingCoreRuntime.class.getDeclaredField("controlContinuation");
-                continuation.setAccessible(true);
-                var business = (java.util.function.BooleanSupplier) continuation.get(owner);
-                continuation.set(owner, (java.util.function.BooleanSupplier) () -> {
+                var business = owner.directCommand.controlWork;
+                owner.directCommand.controlWork = () -> {
                     if (!business.getAsBoolean()) return false;
                     if (capacityFailure) {
                         // Overflow only: entries must be rejected and cleared before they can be dispatched.
-                        owner.admissions.queuedMatching.add(null);
+                        owner.admissions.queuedMatching.addAll(java.util.Collections.nCopies(
+                                owner.pendingMatching.capacity() + 1, null));
                     } else {
                         owner.resultBuilder.commandChangedOrderIds = new java.util.AbstractList<Long>() {
                             public int size() { return 1; }
@@ -90,7 +89,7 @@ class SurprisingClusteredServiceTest {
                         };
                     }
                     return true;
-                });
+                };
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                 do {
                     result = owner.pollDirectCommand();

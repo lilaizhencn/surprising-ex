@@ -19,6 +19,32 @@ import org.junit.jupiter.api.parallel.Resources;
 class MatcherPipelineGroupTest {
 
     @Test
+    void matcherPublishesWithoutOwnerDrainAndTransportRetirementDoesNotTouchReusedSlot() {
+        var contexts = new CommandSlotRing(1, 1);
+        var slot = contexts.claim(1);
+        try (var pipelines = new MatcherPipelineGroup(1, 2, true, contexts)) {
+            pipelines.submit(0, 1,
+                    () -> new com.surprising.aeron.service.matching.CoreMatchingResult(true, "FIRST"));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (!slot.hasMatchingCompletion() && System.nanoTime() < deadline) Thread.onSpinWait();
+            assertThat(slot.hasMatchingCompletion()).isTrue();
+            var result = slot.takeMatchingCompletion();
+            assertThat(result.resultCode()).isEqualTo("FIRST");
+            slot.result(result, 0, 1);
+            assertThat(slot.submittedMatcherShard()).isEqualTo(-1);
+            contexts.release(1);
+            var reused = contexts.claim(2);
+            assertThat(reused).isSameAs(slot);
+            pipelines.drainMatchingCompletions();
+            assertThat(reused.coreSequence()).isEqualTo(2);
+            assertThat(reused.hasMatchingCompletion()).isFalse();
+            pipelines.submit(0, 2,
+                    () -> new com.surprising.aeron.service.matching.CoreMatchingResult(true, "SECOND"));
+            assertThat(await(pipelines, 2, TimeUnit.SECONDS.toNanos(5)).resultCode()).isEqualTo("SECOND");
+        }
+    }
+
+    @Test
     void emptyProbeDoesNotLoseALaterMatcherPublication() throws Exception {
         var entered = new CountDownLatch(1);
         var release = new CountDownLatch(1);
@@ -35,9 +61,7 @@ class MatcherPipelineGroupTest {
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                 while (!pipelines.hasMatchingCompletions() && System.nanoTime() < deadline) Thread.yield();
                 assertThat(pipelines.hasMatchingCompletions()).isTrue();
-                var completions = new ArrayList<Long>();
-                pipelines.drainMatchingCompletions((sequence, result) -> completions.add(sequence));
-                assertThat(completions).containsExactly(42L);
+                assertThat(await(pipelines, 42, TimeUnit.SECONDS.toNanos(5))).isNotNull();
                 assertThat(pipelines.hasMatchingCompletions()).isFalse();
             } finally {
                 release.countDown();
@@ -54,7 +78,9 @@ class MatcherPipelineGroupTest {
             ArrayList<Long> completed = new ArrayList<>();
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
             while (completed.size() < 2 && System.nanoTime() < deadline) {
-                pipelines.drainMatchingCompletions((sequence, result) -> completed.add(sequence));
+                for (long sequence : new long[] {11, 12}) {
+                    if (!completed.contains(sequence) && pipelines.poll(sequence) != null) completed.add(sequence);
+                }
                 Thread.onSpinWait();
             }
             assertThat(completed).containsExactlyInAnyOrder(11L, 12L);
@@ -115,7 +141,7 @@ class MatcherPipelineGroupTest {
 
     @Test
     void sequenceSlotRejectsDuplicateRoutesAndRecoversAfterQueueRejection() {
-        var contexts = new LaneCommandContextRing(4, 1);
+        var contexts = new CommandSlotRing(4, 1);
         var first = contexts.claim(1);
         var second = contexts.claim(2);
         try (var pipelines = new MatcherPipelineGroup(2, 1, true, contexts)) {
@@ -140,7 +166,7 @@ class MatcherPipelineGroupTest {
     }
 
     private static MatcherPipelineGroup pipelines(int shards, int capacity, boolean start, long... sequences) {
-        var contexts = new LaneCommandContextRing(shards * capacity, 1);
+        var contexts = new CommandSlotRing(shards * capacity, 1);
         for (long sequence : sequences) contexts.claim(sequence);
         return new MatcherPipelineGroup(shards, capacity, start, contexts);
     }

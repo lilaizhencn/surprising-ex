@@ -103,6 +103,36 @@ public final class MatcherSettlementPlan {
         } finally { keys.clear(); }
     }
 
+    /** 撤单只携带目标订单和撮合结论；不构建成交、持仓或 taker 拒单状态。 */
+    void buildDirectCancellation(long sequence, long userId, OrderRuntime order, CoreMatchingResult result,
+                                 TradingRuntimeState runtime) {
+        if (order == null || result == null || result.nativeCommand().coreSequence() != sequence
+                || result.nativeCommand().orderId() != order.orderId())
+            throw new IllegalArgumentException("invalid direct cancellation fact");
+        for (MatcherEvent event : result.matcherEvents())
+            if (event == null || event.eventType() == MatcherEventType.TRADE)
+                throw new IllegalStateException("cancel result contains a trade");
+        if (!result.cancellations().isEmpty())
+            throw new IllegalStateException("single cancel contains unrelated cancellations");
+        clearReferences();
+        if (result.accepted() && order.userId() != userId)
+            throw new IllegalStateException("matcher canceled another account order");
+        coreSequence = sequence;
+        takerOrderId = order.orderId();
+        activeUserId = userId;
+        rejectedTaker = !result.accepted();
+        requiredLaneMask = runtime.topology().accountLaneMask(activeUserId);
+        orderCount = result.accepted() ? 1 : 0;
+        if (orderCount != 0) orderIds[0] = order.orderId();
+    }
+
+    void omitUnplacedOrder() {
+        int count = 0;
+        for (int index = 0; index < orderCount; index++)
+            if (orderIds[index] != takerOrderId) orderIds[count++] = orderIds[index];
+        orderCount = count;
+    }
+
     /** The single account writer checks the current order, including earlier fills in this batch. */
     void validateDirectLane(AccountLaneState lane, TradingRuntimeState runtime,
                             RuntimeIdentityRegistry identities, CoreInstrumentState instrument) {
@@ -438,6 +468,11 @@ public final class MatcherSettlementPlan {
      */
     void preCancellationsFromResult(List<CoreCancellationResult> cancellations,
                                      List<Long> authorizedOrderIds) {
+        preCancellationsFromResult(cancellations, authorizedOrderIds, 0);
+    }
+
+    void preCancellationsFromResult(List<CoreCancellationResult> cancellations,
+                                   List<Long> authorizedOrderIds, long replacedOrderId) {
         if (cancellations == null || authorizedOrderIds == null) {
             throw new IllegalArgumentException("cancellation inputs are required");
         }
@@ -450,7 +485,7 @@ public final class MatcherSettlementPlan {
                     ? ((com.surprising.aeron.service.command.ImmutableLongArrayList) authorizedOrderIds)
                     .containsLong(orderId)
                     : authorizedOrderIds.contains(orderId);
-            if (!authorized) {
+            if (!authorized && orderId != replacedOrderId) {
                 throw new IllegalStateException("direct matcher cancelled an unauthorized order");
             }
             ensurePreCancellationCapacity(count + 1);

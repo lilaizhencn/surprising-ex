@@ -964,8 +964,8 @@ class RuntimeCommitRecoveryTest {
             assertThat(lane.appliedSequence()).isEqualTo(lane.committedSequence());
             assertThat(lane.committedSequence()).isEqualTo(fence);
         });
-        assertNoTransientCommitReservations(recovered);
-        assertNoTransientCommitReservations(reference);
+        assertNoUnfinishedCommands(recovered);
+        assertNoUnfinishedCommands(reference);
         assertThat(allIndexSnapshots(recovered)).isEqualTo(allIndexSnapshots(reference));
         assertIndexesEqualCanonicalRebuild(recovered);
         assertIndexesEqualCanonicalRebuild(reference);
@@ -975,12 +975,14 @@ class RuntimeCommitRecoveryTest {
                 .containsExactly((long[]) field(reference.commits, "appliedMatcherPrefixDigests"));
     }
 
-    private static void assertNoTransientCommitReservations(TradingCoreRuntime state) throws Exception {
-        assertThat(field(state, "currentAdmission")).isNull();
-        var journal = (com.surprising.aeron.service.state.RuntimeCommitJournal)
-                field(state, "runtimeProjectionJournal");
-        assertThat(journal.metrics().reservedEntries()).isZero();
-        assertThat(journal.metrics().reservedBytes()).isZero();
+    private static void assertNoUnfinishedCommands(TradingCoreRuntime state) throws Exception {
+        assertThat(state.factContextActive).isFalse();
+        assertThat(state.hasPendingDirectCommand()).isFalse();
+        assertThat(state.pendingMatchingCount()).isZero();
+        assertThat(state.laneCommandContexts.inFlight()).isZero();
+        state.runtimeState.requireSnapshotFenceReady();
+        assertThat(state.runtimeProjectionJournal.projectedSequence())
+                .isEqualTo(state.runtimeProjectionJournal.publishedSequence());
         assertThat(state.exportState().metrics().reservedEvents()).isZero();
         assertThat(state.exportState().metrics().reservedBytes()).isZero();
     }

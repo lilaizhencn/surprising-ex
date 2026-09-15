@@ -181,7 +181,7 @@ final class CommandResultBuilder {
         commandChangedOrderIds = directChangedOrders;
     }
 
-    void materializeCommandOrderViews(PendingMatching pending) {
+    void materializeCommandOrderViews(CommandSlot pending) {
         switch (pending.operation()) {
             case PLACE -> {
                 materializeResponseOrder(pending.decodedCommand().placeOrder().orderId());
@@ -301,7 +301,7 @@ final class CommandResultBuilder {
     }
 
     byte[] commandResultData(
-            PendingMatching pending,
+            CommandSlot pending,
             com.surprising.aeron.service.matching.CoreMatchingResult matchingResult) {
         if (commandRiskScanControl != null) {
             return CoreRiskScanControlCodec.encodeView(commandRiskScanControl);

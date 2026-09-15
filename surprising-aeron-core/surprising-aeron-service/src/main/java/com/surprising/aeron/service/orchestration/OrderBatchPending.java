@@ -136,7 +136,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     /** 命令对应的复制日志位置。 */
     long clusterPosition;
     /** 本次派发的业务操作，在对应执行完成之前保留。 */
-    PendingMatching.Operation operation;
+    CommandSlot.Operation operation;
     /** 当前命令变化的用户 ID，保持 primitive 收集直到返回边界。 */
     final PrimitiveLongChangeSet changedUserIds;
     /** 当前命令变化的订单 ID，保持 primitive 收集直到返回边界。 */
@@ -225,6 +225,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     /** 当前批最近完成的撮合结果，用于延续序号证据。 */
     // At most one sequential item is awaiting account publication; no copied item state.
     com.surprising.aeron.service.state.MatcherSettlementEvent itemSettlementEvent;
+    com.surprising.aeron.service.command.order.ResolvedMatchingAdmission replacementAdmission;
     java.util.function.BooleanSupplier itemAdmission;
     long itemAdmissionRevision;
     com.surprising.aeron.service.state.LaneCommitEvent laneCommitEvent;
@@ -302,7 +303,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     }
 
     OrderBatchPending initialize(OrderBatchKind kind, long clusterTimestamp,
-                                         long clusterPosition, PendingMatching.Operation operation) {
+                                         long clusterPosition, CommandSlot.Operation operation) {
         this.kind = java.util.Objects.requireNonNull(kind, "batch kind");
         this.clusterTimestamp = clusterTimestamp;
         this.clusterPosition = clusterPosition;
@@ -370,6 +371,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         actualLaneMask = 0;
         lastMatchingResult = null;
         itemSettlementEvent = null;
+        replacementAdmission = null;
         itemAdmission = null;
         itemAdmissionRevision = 0;
         laneCommitEvent = null;

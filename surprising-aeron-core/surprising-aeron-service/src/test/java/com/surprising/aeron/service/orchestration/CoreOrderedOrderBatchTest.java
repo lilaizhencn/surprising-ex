@@ -157,16 +157,20 @@ class CoreOrderedOrderBatchTest {
                     TradingOrderBatchCodec.encodeAmendOrderBatch(new AmendOrderBatchCommand(List.of(
                             new AmendOrderCommand(84_001, 84_002, "fault-replacement", 1_100L, 1L,
                                     CoreTimeInForce.GTC, false)))));
-            assertThat(state.apply(amend).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
-            long sequence = state.matchingSequence(amend.header().commandId());
-            var matching = awaitMatching(state, sequence);
-            assertThat(matching.matcherEvents()).isNotEmpty();
-            // Fault injection after the recoverable checkpoint: crediting this buyer's fill
-            // overflows inside the real settlement worker, before it can publish completion.
+            // Inject before submitting the batch: Matcher now publishes directly to Lane,
+            // so waiting for its result first would race an already completed settlement.
+            // Crediting this buyer's fill must overflow in the real settlement worker.
             TradingRuntimeState runtime = field(state, "runtimeState");
             RuntimeIdentityRegistry identities = field(state, "identities");
             runtime.putBalance(new com.surprising.aeron.service.state.BalanceRuntime(
                     1001, identities.assetId("BTC"), Long.MAX_VALUE, 0));
+            // Deliberate corruption, not a business adjustment. The next command starts
+            // with clean tracking and must fail on the actual checked arithmetic in Lane.
+            runtime.clearChangedKeys();
+            assertThat(state.apply(amend).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
+            long sequence = state.matchingSequence(amend.header().commandId());
+            var matching = awaitMatching(state, sequence);
+            assertThat(matching.matcherEvents()).isNotEmpty();
 
             Throwable failure = org.assertj.core.api.Assertions.catchThrowable(() ->
                     completeEventually(state, sequence, matching, 2_000, 6));
@@ -505,7 +509,7 @@ class CoreOrderedOrderBatchTest {
 
             var contextsField = TradingCoreRuntime.class.getDeclaredField("laneCommandContexts");
             contextsField.setAccessible(true);
-            LaneCommandContextRing contexts = (LaneCommandContextRing) contextsField.get(state);
+            CommandSlotRing contexts = (CommandSlotRing) contextsField.get(state);
             assertThat(contexts.required(laterSequence).hasMatchingCompletion()).isFalse();
 
             CoreResponse batchResponse = completeEventually(state, batchSequence, second, 2_001, 4);
@@ -808,8 +812,8 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.completeMatching(fatalSequence, acceptedFirst, 2_900, 4)).isNull();
             finishCurrentItemSettlement(state, fatalSequence, 2_900, 4);
             assertThat(runtime.order(11_004)).isNotNull();
-            LaneCommandContextRing contexts = field(state, "laneCommandContexts");
-            LaneCommandContextRing.Context claimedContext = contexts.required(fatalSequence);
+            CommandSlotRing contexts = field(state, "laneCommandContexts");
+            CommandSlot claimedContext = contexts.required(fatalSequence);
             long[] matcherAfterFirst = ((long[]) field(state.commits, "appliedMatcherSequences")).clone();
             long[] matcherPrefixAfterFirst = ((long[]) field(state.commits, "appliedMatcherPrefixDigests")).clone();
             assertThat(matcherAfterFirst).isNotEqualTo(matcherBeforeFatal);
@@ -946,8 +950,11 @@ class CoreOrderedOrderBatchTest {
     }
 
     @Test
-    void amendPartialMatcherFailureMustFailStickyBeforeRecordingBusinessRejection() {
-        try (TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT)) {
+    @org.junit.jupiter.api.Timeout(10)
+    void amendPartialMatcherFailureMustFailStickyBeforeRecordingBusinessRejection() throws Exception {
+        TradingCoreRuntime state = new TradingCoreRuntime(ProductLine.SPOT);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        try {
             applySpotInstrument(state);
             applyBalance(state, 1001, 100_000);
             CoreMessage place = command(CoreMessageType.PLACE_ORDER_BATCH, UUID.randomUUID(), 2,
@@ -963,25 +970,51 @@ class CoreOrderedOrderBatchTest {
                             new AmendOrderCommand(12_101, 12_103, "must-not-run", 1_200L, 1L,
                                     CoreTimeInForce.GTC, false)))));
 
+            var entered = new java.util.concurrent.CountDownLatch(1);
+            state.matcherPipeline.readAtSubmissionFence(0, () -> {
+                entered.countDown();
+                try {
+                    if (!release.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                        throw new AssertionError("matcher gate timeout");
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(exception);
+                }
+                return 1;
+            });
+            assertThat(entered.await(2, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
             assertThat(state.apply(amend).resultCode()).isEqualTo(CoreResultCode.MATCHING_PENDING);
             long sequence = state.matchingSequence(commandId);
             var partialMatcherFailure = new com.surprising.aeron.service.matching.CoreMatchingResult(
                     false, "MATCHING_INVALID_ORDER_ID", List.of(), 0, true);
 
+            // Inject at the actual Matcher -> Lane boundary. An Owner-supplied token is no
+            // longer authoritative once the command has a direct settlement event.
+            var event = state.pendingMatching(sequence).orderBatch.itemSettlementEvent;
+            assertThat(event).isNotNull();
+            assertThatThrownBy(() -> event.publishDirectResult(partialMatcherFailure))
+                    .isInstanceOf(IllegalStateException.class);
             Throwable divergence = org.assertj.core.api.Assertions.catchThrowable(
-                    () -> state.completeMatching(sequence, partialMatcherFailure, 2_000, 4));
+                    () -> completeEventually(state, sequence, partialMatcherFailure, 2_000, 4));
 
             assertThat(divergence).isInstanceOf(
                     com.surprising.aeron.service.matching.FatalMatchingDivergenceException.class);
-            assertThat(state.tradingState().order(12_101).status())
+            assertThat(state.runtimeOrder(12_101).status())
                     .isEqualTo(com.surprising.aeron.service.state.model.CoreOrderStatus.OPEN);
-            assertThat(state.tradingState().order(12_102)).isNull();
-            assertThat(state.tradingState().order(12_103)).isNull();
+            assertThat(state.runtimeOrder(12_102)).isNull();
+            assertThat(state.runtimeOrder(12_103)).isNull();
             assertThat(state.pendingMatchingCount()).isEqualTo(1);
             assertThat(state.commandResults()).doesNotContainKey(commandId);
             assertThat(state.pendingMatching(sequence)).isNotNull();
             assertThatThrownBy(() -> state.apply(probe(UUID.randomUUID(), 4)))
                     .isSameAs(divergence);
+        } finally {
+            release.countDown();
+            org.assertj.core.api.Assertions.catchThrowable(state::close);
+            for (Object worker : (Object[]) field(state.runtimeState, "laneWorkers")) {
+                if (worker instanceof AutoCloseable closeable)
+                    org.assertj.core.api.Assertions.catchThrowable(closeable::close);
+            }
         }
     }
 
@@ -1350,7 +1383,7 @@ class CoreOrderedOrderBatchTest {
         com.surprising.aeron.service.matching.CoreMatchingResult matching = null;
         long deadline = System.nanoTime() + 5_000_000_000L;
         while (matching == null && System.nanoTime() < deadline) {
-            PendingMatching head = state.pendingMatching.get(state.pendingMatching.firstSequence());
+            CommandSlot head = state.pendingMatching.get(state.pendingMatching.firstSequence());
             if (head != null && head.orderBatch != null && !head.orderBatch.activated())
                 state.batches.activateOrderBatch(head.orderBatch, head, true);
             state.drainMatchingCompletions();

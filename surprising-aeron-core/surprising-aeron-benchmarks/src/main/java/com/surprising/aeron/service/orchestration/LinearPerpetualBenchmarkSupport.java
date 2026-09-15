@@ -822,7 +822,6 @@ final class LinearPerpetualBenchmarkSupport {
         private CoreResponse deferredBatchResponse;
         private int deferredBatchOperationWeight;
         private OpenLoopBusinessLatencyRecorder businessLatencies;
-        private Runnable admissionBackpressureDrain;
 
         private Harness(TradingCoreRuntime state, Sequences sequences) {
             this.state = state;
@@ -979,10 +978,6 @@ final class LinearPerpetualBenchmarkSupport {
                 if (businessLatencies != null) businessLatencies.terminal(businessLatency);
             }
             return pending;
-        }
-
-        void admissionBackpressureDrain(Runnable drain) {
-            admissionBackpressureDrain = drain;
         }
 
         void drainSubmitted() {

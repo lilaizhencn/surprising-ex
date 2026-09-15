@@ -1,6 +1,7 @@
 package com.surprising.aeron.service.matcher;
 
 import com.surprising.aeron.service.matching.CoreMatchingResult;
+import com.surprising.aeron.service.orchestration.CommandSlot;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
@@ -29,21 +30,13 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     private volatile int completionHighWaterMark;
     private volatile boolean started;
     private volatile Throwable startupFailure;
+    private volatile Throwable publicationFailure;
     private long controlSequence;
     private Runnable shutdownAction;
     private volatile Throwable shutdownFailure;
     private final int workerId;
     private volatile BackgroundRead<?> backgroundRead;
     private volatile Runnable completionSignal;
-    private static final java.lang.invoke.VarHandle SEQUENCE_VALUE;
-    static {
-        try {
-            SEQUENCE_VALUE = java.lang.invoke.MethodHandles.lookup()
-                    .findVarHandle(PaddedSequence.class, "value", long.class);
-        } catch (ReflectiveOperationException failure) {
-            throw new ExceptionInInitializerError(failure);
-        }
-    }
     public void completionSignal(Runnable signal) { completionSignal = signal; }
     /** 先声明休眠再重读队列，避免发布与休眠交错后只能等待定时唤醒。 */
     private volatile boolean parkRequested;
@@ -108,6 +101,14 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         submitInternal(coreSequence, command, settlement);
     }
 
+    void submit(long coreSequence, Supplier<CoreMatchingResult> command,
+                com.surprising.aeron.service.state.MatcherSettlementEvent settlement,
+                CommandSlot resultTarget) {
+        if (coreSequence <= 0 || resultTarget == null || settlement != null && settlement.direct())
+            throw new IllegalArgumentException("invalid command result target");
+        submitInternal(coreSequence, command, settlement, resultTarget);
+    }
+
     public <T> T call(Supplier<T> command, long timeoutNanos) {
         if (command == null || timeoutNanos <= 0) {
             throw new IllegalArgumentException("matcher control call is invalid");
@@ -133,19 +134,22 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         return pollResult(token);
     }
 
-    /** Consume a completed slot whose Owner context was already retired by a direct path. */
-    Object discardCompleted(long expectedToken) {
-        return pollResult(expectedToken);
-    }
-
     private void submitInternal(long token, Supplier<?> command) {
         submitInternal(token, command, null);
     }
 
     private void submitInternal(long token, Supplier<?> command,
                                 com.surprising.aeron.service.state.MatcherSettlementEvent settlement) {
+        submitInternal(token, command, settlement, null);
+    }
+
+    private void submitInternal(long token, Supplier<?> command,
+                                com.surprising.aeron.service.state.MatcherSettlementEvent settlement,
+                                CommandSlot resultTarget) {
         if (token == 0 || command == null) throw new IllegalArgumentException("matcher command is invalid");
+        rethrowPublicationFailure();
         if (!accepting) throw new RejectedExecutionException("matcher pipeline is closed");
+        skipReadyDirectSlots();
         long position = submittedPosition.value;
         if (position - consumedPosition.value >= slots.length) {
             throw new RejectedExecutionException("matcher pipeline is full");
@@ -157,6 +161,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         slot.token = token;
         slot.command = command;
         slot.settlement = settlement;
+        slot.resultTarget = resultTarget;
         slot.directSettlement = settlement != null && settlement.direct();
         submittedPosition.value = position + 1;
         int depth = Math.toIntExact(position + 1 - consumedPosition.value);
@@ -178,6 +183,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
      * to drain completed matching work without probing every pending Core sequence.
      */
     public long completedMatchingSequence() {
+        rethrowPublicationFailure();
         skipReadyDirectSlots();
         long position = consumedPosition.value;
         if (position >= completedPosition.value) return 0;
@@ -186,6 +192,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     }
 
     private Object pollResult(long expectedToken) {
+        rethrowPublicationFailure();
         if (expectedToken == 0) throw new IllegalArgumentException("matcher token must be non-zero");
         long position = consumedPosition.value;
         if (position >= completedPosition.value) return null;
@@ -198,9 +205,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         Object result = slot.result;
         Throwable failure = slot.failure;
         slot.clear();
-        if (!SEQUENCE_VALUE.compareAndSet(consumedPosition, position, position + 1)) {
-            throw new IllegalStateException("matcher consumer cursor advanced concurrently");
-        }
+        consumedPosition.value = position + 1;
         if (failure != null) {
             if (failure instanceof RuntimeException runtimeFailure) throw runtimeFailure;
             if (failure instanceof Error error) throw error;
@@ -220,16 +225,15 @@ public final class MatcherCommandPipeline implements AutoCloseable {
             long position = consumedPosition.value;
             if (position >= completedPosition.value) return;
             Slot slot = slots[(int) position & mask];
-            var settlement = slot.settlement;
-            // The settlement event is owner-owned and may be recycled before this SPSC slot
-            // reaches the consumer head when an earlier ordinary matcher command is still
-            // pending.  Keep the direct classification on the slot itself; consulting the
-            // mutable event here would turn a completed direct slot into an ordinary result
-            // after event cleanup, and the owner would then probe a recycled sequence context.
-            if (slot.token <= 0 || !slot.directSettlement
-                    || settlement != null && !settlement.ready()) return;
-            if (!SEQUENCE_VALUE.compareAndSet(consumedPosition, position, position + 1)) continue;
+            // Only Owner retires transport cells, after Matcher publishes completedPosition.
+            // The event may already be recycled; completion belongs to this cell's cursor.
+            if (slot.token <= 0 || !slot.directSettlement) return;
+            if (slot.failure != null) {
+                pollResult(slot.token); // Propagate the failed command; never silently skip it.
+                return;
+            }
             slot.clear();
+            consumedPosition.value = position + 1;
         }
     }
 
@@ -323,15 +327,11 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                     if (settlement != null && settlement.direct()) settlement.beginMatcherPublication();
                     Object result = command.get();
                     // Bind the Core sequence on the matcher worker while the completion is
-                    // already in its slot.  The owner only publishes the immutable result
-                    // into its sequence context; it no longer allocates a second
-                    // CoreMatchingResult on the hot drain path.
+                    // already in its slot; publish that same result into the command slot.
                     slot.result = slot.token > 0 && result instanceof CoreMatchingResult matchingResult
                             ? matchingResult.withCoreSequenceInPlace(slot.token) : result;
-                    if (settlement != null && !settlement.ready())
+                    if (settlement != null && !settlement.resultPrepared())
                         settlement.publishDirectResult((CoreMatchingResult) slot.result);
-                    if (settlement != null && settlement.direct())
-                        tryAutoConsumeDirect(position, slot);
                 } catch (Throwable failure) {
                     if (settlement != null) settlement.failDirect(failure);
                     slot.failure = failure;
@@ -339,13 +339,26 @@ public final class MatcherCommandPipeline implements AutoCloseable {
                     if (settlement != null && settlement.direct()) settlement.completeMatcherPublication();
                 }
             }
+            // Retire transport before exposing the command result. Owner may immediately reuse
+            // its command slot after this publication; only local references are used below.
+            CommandSlot target = slot.resultTarget;
+            CoreMatchingResult routedResult = target != null && slot.failure == null
+                    ? (CoreMatchingResult) slot.result : null;
             position++;
             workerPosition.value = position;
             completedPosition.value = position;
+            if (routedResult != null) {
+                try { target.publishMatcherResult(workerId, routedResult); }
+                catch (Throwable failure) {
+                    publicationFailure = failure;
+                    accepting = false;
+                }
+            }
             Runnable signal = completionSignal;
             if (signal != null) signal.run();
             completionHighWaterMark = Math.max(completionHighWaterMark,
                     Math.toIntExact(position - consumedPosition.value));
+            if (publicationFailure != null) break;
         }
         BackgroundRead<?> unfinishedRead=backgroundRead;backgroundRead=null;
         if(unfinishedRead!=null)unfinishedRead.future().completeExceptionally(new RejectedExecutionException("matcher stopped"));
@@ -358,9 +371,11 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         }
     }
 
-    private void tryAutoConsumeDirect(long position, Slot slot) {
-        if (!slot.settlement.ready() || !SEQUENCE_VALUE.compareAndSet(consumedPosition, position, position + 1)) return;
-        slot.clear();
+    private void rethrowPublicationFailure() {
+        Throwable failure = publicationFailure;
+        if (failure instanceof RuntimeException exception) throw exception;
+        if (failure instanceof Error error) throw error;
+        if (failure != null) throw new IllegalStateException("matcher result publication failed", failure);
     }
 
     private void awaitStartup() {
@@ -431,6 +446,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
     private static final class Slot {
         private long token;
         private Supplier<?> command;
+        private CommandSlot resultTarget;
         private Object result;
         private Throwable failure;
         private com.surprising.aeron.service.state.MatcherSettlementEvent settlement;
@@ -440,6 +456,7 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         private void clear() {
             token = 0;
             command = null;
+            resultTarget = null;
             result = null;
             failure = null;
             settlement = null;

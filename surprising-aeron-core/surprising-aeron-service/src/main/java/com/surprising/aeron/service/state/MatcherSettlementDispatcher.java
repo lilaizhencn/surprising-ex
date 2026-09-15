@@ -57,6 +57,52 @@ final class MatcherSettlementDispatcher {
         return event;
     }
 
+    MatcherSettlementEvent prepareDirectReplacement(long sequence, long commitSequence, long laneMask,
+            com.surprising.aeron.service.command.order.ResolvedMatchingAdmission admission,
+            java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
+            long timestamp, long position, List<Long> cancellations) {
+        owner.assertOwner();
+        var resolved = admission.resolved();
+        OrderRuntime order = TradingRuntimeState.preparedOrder(owner.productLine(), admission.userId(),
+                resolved, commandId, resolved.symbolId());
+        MatcherSettlementEvent event = prepareDirect(sequence, commitSequence, laneMask, order, null, 1,
+                commandId, shard, identities, timestamp, position, cancellations, null);
+        event.replacement(admission, identities.assetId(resolved.reservationAsset()));
+        return event;
+    }
+
+    MatcherSettlementEvent prepareDirectCancellation(long sequence, OrderRuntime order,
+            java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
+            long timestamp, long position) {
+        owner.assertOwner();
+        if (order == null) throw new IllegalArgumentException("cancel order is missing");
+        long laneMask = owner.topology.accountLaneMask(order.userId());
+        owner.ensureMatcherSettlementDispatchCapacity(laneMask);
+        MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();
+        if (event == null) event = new MatcherSettlementEvent();
+        event.batchStorage(1).admittedOrders[0] = order;
+        // 撤单不依赖当前合约配置，也不需要为成交解析资产或构建持仓身份。
+        event.prepareDirect(sequence, laneMask, timestamp, position, commandId, shard,
+                owner, identities, 1, List.of(), null);
+        event.cancellation(order.userId());
+        return event;
+    }
+
+    MatcherSettlementEvent prepareDirectCancelBatch(long sequence, boolean finalChunk, long userId, OrderRuntime[] orders, int count,
+            java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities, long timestamp, long position) {
+        owner.assertOwner();
+        if (count <= 0 || count > orders.length) throw new IllegalArgumentException("invalid cancel chunk");
+        long mask = owner.topology.accountLaneMask(userId);
+        owner.ensureMatcherSettlementDispatchCapacity(mask);
+        MatcherSettlementEvent event = matcherSettlementEventPool.pollFirst();
+        if (event == null) event = new MatcherSettlementEvent();
+        System.arraycopy(orders, 0, event.batchStorage(count).admittedOrders, 0, count);
+        event.prepareDirect(sequence, finalChunk ? sequence : 0, mask, timestamp, position, commandId, shard,
+                owner, identities, count, List.of(), null);
+        event.cancellation(userId);
+        return event;
+    }
+
     void dispatchDirect(MatcherSettlementEvent event) {
         owner.assertOwner();
         if (event == null || event.runtime() != owner || !event.direct() || event.dispatched())

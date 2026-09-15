@@ -12,7 +12,7 @@ final class BenchmarkMatchingAwait {
         if (state.fatalFailure != null) return null;
         if (timeoutNanos <= 0) return null;
         long deadline = System.nanoTime() + timeoutNanos;
-        PendingMatching pending = state.pendingMatching.get(sequence);
+        CommandSlot pending = state.pendingMatching.get(sequence);
         while (pending != null && state.placeAdmissionOutstanding(pending)
                 && !state.hasPendingMatchingRejection(sequence) && System.nanoTime() < deadline) {
             state.progressPlaceAdmissions();
@@ -23,9 +23,7 @@ final class BenchmarkMatchingAwait {
         while (state.pendingMatching.contains(sequence) && System.nanoTime() < deadline) {
             state.drainMatchingCompletions();
             if (state.hasPendingMatchingRejection(sequence)) return null;
-            LaneCommandContextRing.Context context = state.laneCommandContexts.required(sequence);
-            com.surprising.aeron.service.matching.CoreMatchingResult result = context.matchingResult();
-            if (result == null) result = context.takeMatchingCompletion();
+            var result = state.takeMatchingResult(sequence);
             if (result != null) return result;
             long remainingNanos = deadline - System.nanoTime();
             if (remainingNanos <= 0) break;

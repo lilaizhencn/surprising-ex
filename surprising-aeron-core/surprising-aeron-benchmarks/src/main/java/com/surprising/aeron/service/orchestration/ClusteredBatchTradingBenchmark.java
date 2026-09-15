@@ -671,15 +671,14 @@ public class ClusteredBatchTradingBenchmark {
             try {
                 if (owner.applyDecodedCommand(request, 1_700_000_000_000L, sequence, null, false) != null)
                     throw new IllegalStateException("fault command did not enter continuation");
-                var field = TradingCoreRuntime.class.getDeclaredField("controlContinuation");
-                field.setAccessible(true);
-                var business = (java.util.function.BooleanSupplier) field.get(owner);
-                field.set(owner, (java.util.function.BooleanSupplier) () -> {
+                var business = owner.directCommand.controlWork;
+                owner.directCommand.controlWork = () -> {
                     if (!business.getAsBoolean()) return false;
                     // Deliberate capacity fault: this sentinel must be cleared before dispatch.
-                    owner.admissions.queuedMatching.add(null);
+                    owner.admissions.queuedMatching.addAll(java.util.Collections.nCopies(
+                                owner.pendingMatching.capacity() + 1, null));
                     return true;
-                });
+                };
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
                 do {
                     result = owner.pollDirectCommand();

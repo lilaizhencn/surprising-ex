@@ -70,16 +70,16 @@ final class CoreTestCompletion {
                 if (owner.hasPendingMatchingRejection(sequence)) {
                     response = owner.commits.completeRejectedMatching(sequence);
                 } else {
-                    PendingMatching pending = owner.pendingMatching.get(sequence);
+                    CommandSlot pending = owner.pendingMatching.get(sequence);
                     com.surprising.aeron.service.matching.CoreMatchingResult matching =
                             pending != null && pending.orderBatch != null && (pending.orderBatch.itemSettlementEvent != null
                                     || pending.orderBatch.itemAdmission != null && pending.orderBatch.activated())
                                     ? pending.orderBatch.lastMatchingResult
                                     : pending != null && (pending.settlementEvent() != null || pending.cancelEvent() != null
-                                    || pending.replaceEvent() != null
                                     || pending.orderBatch != null && pending.orderBatch.laneCommitEvent != null)
                                     ? owner.laneCommandContexts.required(sequence).matchingResult()
                                     : awaitMatchingResult(owner, sequence);
+                    if (matching == null) matching = awaitMatchingResult(owner, sequence);
                     if (matching == null && owner.hasPendingMatchingRejection(sequence)) {
                         response = owner.commits.completeRejectedMatching(sequence);
                     } else if (matching == null) {
@@ -115,7 +115,7 @@ final class CoreTestCompletion {
         if (state.fatalFailure != null) return null;
         if (timeoutNanos <= 0) return null;
         long deadline = System.nanoTime() + timeoutNanos;
-        PendingMatching pending = state.pendingMatching.get(sequence);
+        CommandSlot pending = state.pendingMatching.get(sequence);
         while (pending != null && state.placeAdmissionOutstanding(pending)
                 && !state.hasPendingMatchingRejection(sequence) && System.nanoTime() < deadline) {
             state.progressPlaceAdmissions();
@@ -124,14 +124,22 @@ final class CoreTestCompletion {
         if (state.hasPendingMatchingRejection(sequence)) return null;
         int idle = 0;
         while (state.pendingMatching.contains(sequence) && System.nanoTime() < deadline) {
-            PendingMatching head = state.pendingMatching.get(state.pendingMatching.firstSequence());
+            CommandSlot head = state.pendingMatching.get(state.pendingMatching.firstSequence());
             if (head != null && head.orderBatch != null && !head.orderBatch.activated())
                 state.batches.activateOrderBatch(head.orderBatch, head, true);
             state.drainMatchingCompletions();
             if (state.hasPendingMatchingRejection(sequence)) return null;
-            LaneCommandContextRing.Context context = state.laneCommandContexts.required(sequence);
+            CommandSlot context = state.laneCommandContexts.required(sequence);
             com.surprising.aeron.service.matching.CoreMatchingResult result = context.matchingResult();
             if (result == null) result = context.takeMatchingCompletion();
+            if (result == null) {
+                var active = state.pendingMatching.get(sequence);
+                var event = active.settlementEvent();
+                if (event == null && active.orderBatch != null)
+                    event = active.orderBatch.itemSettlementEvent != null
+                            ? active.orderBatch.itemSettlementEvent : active.orderBatch.settlementEvent;
+                if (event != null && event.direct() && event.ready()) result = event.firstDirectResult();
+            }
             if (result != null) return result;
             long remainingNanos = deadline - System.nanoTime();
             if (remainingNanos <= 0) break;

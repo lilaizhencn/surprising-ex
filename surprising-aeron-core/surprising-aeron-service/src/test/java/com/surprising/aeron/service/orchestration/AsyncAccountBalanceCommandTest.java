@@ -68,7 +68,7 @@ class AsyncAccountBalanceCommandTest {
             int unrelated = (state.runtimeState.topology().accountLaneId(user) + 1) % workers.length;
             var entered = new CountDownLatch(1);
             var release = new CountDownLatch(1);
-            Class<?> task = Class.forName("com.surprising.aeron.service.state.SettlementLaneWorker$Command");
+            Class<?> task = com.surprising.aeron.service.lane.SettlementLaneWorker.Command.class;
             var submit = workers[unrelated].getClass().getDeclaredMethod("submit", task);
             submit.setAccessible(true);
             submit.invoke(workers[unrelated], Proxy.newProxyInstance(task.getClassLoader(), new Class<?>[]{task},

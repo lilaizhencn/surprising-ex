@@ -324,7 +324,6 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 可复用的 laneCancelEvent 对象池；仅在消费者完成后回收。 */
     final java.util.ArrayDeque<LaneCancelEvent> laneCancelEventPool = new java.util.ArrayDeque<>();
     /** 可复用的 laneReplaceEvent 对象池；仅在消费者完成后回收。 */
-    final java.util.ArrayDeque<LaneReplaceEvent> laneReplaceEventPool = new java.util.ArrayDeque<>();
 
     /** 拥有当前执行上下文的唯一 owner；不得在其他线程直接修改其状态。 */
     Thread owner;
@@ -2037,6 +2036,8 @@ public final class TradingRuntimeState implements AutoCloseable {
         assertOwner();
         if (event == null || !event.complete()) return null;
         RuntimeTreasuryDelta aggregate = event.collectTreasuryDelta();
+        if (event.replacementIdentityAllocations() != 0)
+            event.identities().recordLaneClientAllocations(event.replacementIdentityAllocations());
         boolean ownerPending = pendingReservations.pendingReservationsBySequence.containsKey(event.plan().coreSequence());
         for (int index = 0; index < event.planCount(); index++) {
             if (ownerPending) unindexMatcherPendingReservations(event.plan(index));
@@ -2187,67 +2188,6 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (event == null) throw new IllegalArgumentException("cancel event is required");
         event.clear();
         laneCancelEventPool.addFirst(event);
-    }
-
-    public LaneReplaceEvent dispatchReplace(
-            long coreSequence, long userId, long originalOrderId, long[] preCancelOrderIds,
-            ResolvedPlaceOrder replacement,
-            java.util.UUID commandId, long requiredReservation, int symbolId, int assetId,
-            long commitTimestamp, long commitClusterPosition, RuntimeIdentityRegistry identities) {
-        assertOwner();
-        if (!accountLanesStarted) throw new IllegalStateException("asynchronous replace requires Account Lanes");
-        // Runtime dispatch is a Lane operation even when preparation borrowed ownership.
-        releaseOwnerLaneAccess();
-        int laneId = topology.accountLaneId(userId);
-        ensureMatcherSettlementDispatchCapacity(1L << laneId);
-        MatcherSettlementChanges changes = acquireMatcherSettlementChanges(1L << laneId);
-        LaneReplaceEvent event = laneReplaceEventPool.pollFirst();
-        if (event == null) event = new LaneReplaceEvent();
-        event.prepare(coreSequence, userId, originalOrderId, preCancelOrderIds, replacement, commandId,
-                requiredReservation, symbolId, assetId, commitTimestamp, commitClusterPosition,
-                laneId, this, identities, changes);
-        accountLaneQueueHighWaterMarks[laneId] = Math.max(
-                accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
-        try {
-            laneWorkers[laneId].submit(event);
-        } catch (RuntimeException | Error failure) {
-            event.discard();
-            releaseMatcherSettlementChanges(changes);
-            laneReplaceEventPool.addFirst(event);
-            throw failure;
-        }
-        return event;
-    }
-
-    public void collectReplace(LaneReplaceEvent event, RuntimeFundsAccumulator fundsAccumulator,
-                               TerminalOrderSink terminalOrderSink) {
-        assertOwner();
-        if (event == null || !event.complete()) throw new IllegalStateException("replace event is incomplete");
-        int laneId = event.laneId();
-        MatcherSettlementChanges changes = event.takeChanges();
-        event.identities().recordLaneClientAllocations(event.identityAllocations());
-        try {
-            changes.laneDeltas[laneId].commitTerminalToOwner(
-                    this, laneId, terminalOrderSink, event.coreSequence());
-            LaneBalancePatches balances = changes.balancePatches[laneId];
-            for (int index = 0; index < balances.size(); index++) {
-                balances.publishAvailableAt(this, index);
-                changedUsers.add(balances.userId(index));
-                markBalancesChanged();
-            }
-            pendingReservations.indexPendingReservation(event.userId(), event.replacementOrderId(), event.coreSequence(),
-                    Math.incrementExact(pendingReservations.totalPendingReservations));
-            if (fundsAccumulator != null) changes.appendFundsDelta(event.requiredLaneMask(), fundsAccumulator);
-        } finally {
-            releaseMatcherSettlementChanges(changes);
-        }
-    }
-
-    public void releaseReplace(LaneReplaceEvent event) {
-        assertOwner();
-        if (event == null) throw new IllegalArgumentException("replace event is required");
-        event.clear();
-        laneReplaceEventPool.addFirst(event);
     }
 
     public OrderRuntime changedOrderValue(long orderId) {
@@ -4068,24 +4008,6 @@ public final class TradingRuntimeState implements AutoCloseable {
                 CoreOrderStatus.REJECTED);
     }
 
-    void replaceOrderInLane(AccountLaneState lane, long userId, long originalOrderId,
-                            ResolvedPlaceOrder replacement, java.util.UUID commandId,
-                            long requiredReservation, long clientKey, int symbolId, int assetId,
-                            long coreSequence) {
-        if (lane == null || laneCommandScope.get() != lane || matcherSettlementChangesScope.get() == null
-                || lane.laneId() != topology.accountLaneId(userId)) {
-            throw new IllegalStateException("replace must execute in its owning Account Lane");
-        }
-        cancelOrderInLane(userId, originalOrderId);
-        captureBalanceBefore(userId, assetId);
-        placeOrderProvisionalInLane(lane, userId, replacement, commandId, requiredReservation,
-                clientKey, symbolId, assetId, coreSequence);
-        publishUser(userId, lane.users.get(userId));
-        publishOrder(replacement.orderId(), lane.orders.get(replacement.orderId()));
-        publishReservation(replacement.orderId(), lane.reservations.get(replacement.orderId()));
-        captureBalanceAfter(lane, userId, assetId);
-    }
-
     public void releaseTerminalReservation(long orderId) {
         assertOwner();
         captureReservationBefore(orderId);
@@ -4736,9 +4658,26 @@ public final class TradingRuntimeState implements AutoCloseable {
      * Lane-owned provisional PLACE mutation. Admission is not externally visible until the owner
      * collects the event, so it deliberately creates no checkpoint, changed-key or commit-patch state.
      */
+    static OrderRuntime preparedOrder(com.surprising.product.api.ProductLine productLine,
+            long userId, ResolvedPlaceOrder command, java.util.UUID commandId, int symbolId) {
+        return new OrderRuntime(command.orderId(), productLine, userId, symbolId,
+                command.instrumentChangeId(), command.side(), command.limitPriceTicks(), command.matchingPriceTicks(),
+                command.quantitySteps(), 0, command.quantitySteps(), command.reduceOnly(), command.marginMode(),
+                command.positionSide(), command.orderType(), command.timeInForce(), command.postOnly(),
+                command.clientOrderId(), commandId, command.makerFeeRatePpm(), command.takerFeeRatePpm(),
+                0, 0, 0, CoreOrderStatus.OPEN, 1);
+    }
+
     void placeOrderProvisionalInLane(
             AccountLaneState lane, long userId, ResolvedPlaceOrder command, java.util.UUID commandId,
             long requiredReservation, long clientKey, int symbolId, int assetId, long coreSequence) {
+        placeOrderInLane(lane, userId, command, commandId, requiredReservation, clientKey,
+                symbolId, assetId, coreSequence, null);
+    }
+
+    void placeOrderInLane(AccountLaneState lane, long userId, ResolvedPlaceOrder command,
+            java.util.UUID commandId, long requiredReservation, long clientKey,
+            int symbolId, int assetId, long coreSequence, OrderRuntime prepared) {
         if (lane == null || laneCommandScope.get() != lane
                 || lane.laneId() != topology.accountLaneId(userId)
                 || command == null || commandId == null || userId <= 0 || requiredReservation <= 0
@@ -4760,12 +4699,8 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
                     "available balance is insufficient");
         }
-        OrderRuntime order = new OrderRuntime(command.orderId(), productLine, userId, symbolId,
-                command.instrumentChangeId(), command.side(), command.limitPriceTicks(), command.matchingPriceTicks(),
-                command.quantitySteps(), 0, command.quantitySteps(), command.reduceOnly(), command.marginMode(),
-                command.positionSide(), command.orderType(), command.timeInForce(), command.postOnly(),
-                command.clientOrderId(), commandId, command.makerFeeRatePpm(), command.takerFeeRatePpm(),
-                0, 0, 0, CoreOrderStatus.OPEN, 1);
+        OrderRuntime order = prepared == null ? preparedOrder(productLine, userId, command, commandId, symbolId)
+                : prepared;
         ReservationRuntime reservation = new ReservationRuntime(command.orderId(), userId, symbolId,
                 command.instrumentChangeId(), command.reservationKind(), assetId, requiredReservation,
                 0, 0, command.quantitySteps());
@@ -4777,7 +4712,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         addUserEntity(lane.reservationIdsByUser, userId, order.orderId(), lane.admissionIndexCapacity);
         if (clientKey != 0) putClientOrderIndex(lane, userId, clientKey, order.orderId());
         lane.users.put(userId, advanced);
-        lane.markPendingReservation(order.orderId(), coreSequence);
+        if (prepared == null) lane.markPendingReservation(order.orderId(), coreSequence);
     }
 
     public void putPosition(long positionKey, PositionRuntime position) {
@@ -5480,6 +5415,28 @@ public final class TradingRuntimeState implements AutoCloseable {
             List<Long> cancellations, LaneOrderResultTarget target) {
         return settlements.prepareDirect(coreSequence, commitSequence, laneMask, single, orders, count,
                 commandId, shard, identities, timestamp, position, cancellations, target);
+    }
+
+    public MatcherSettlementEvent prepareDirectReplacement(long sequence, long commitSequence, long laneMask,
+            com.surprising.aeron.service.command.order.ResolvedMatchingAdmission admission,
+            java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
+            long timestamp, long position, List<Long> cancellations) {
+        return settlements.prepareDirectReplacement(sequence, commitSequence, laneMask, admission, commandId, shard,
+                identities, timestamp, position, cancellations);
+    }
+
+    public MatcherSettlementEvent prepareDirectCancellation(long sequence, OrderRuntime order,
+            java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
+            long timestamp, long position) {
+        return settlements.prepareDirectCancellation(sequence, order, commandId, shard,
+                identities, timestamp, position);
+    }
+
+    public MatcherSettlementEvent prepareDirectCancelBatch(long sequence, boolean finalChunk, long userId, OrderRuntime[] orders,
+            int count, java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
+            long timestamp, long position) {
+        return settlements.prepareDirectCancelBatch(sequence, finalChunk, userId, orders, count, commandId, shard,
+                identities, timestamp, position);
     }
 
     public void dispatchDirectMatcherSettlement(MatcherSettlementEvent event) { settlements.dispatchDirect(event); }

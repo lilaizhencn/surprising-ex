@@ -57,16 +57,17 @@ final class MatchingCommandAdmission {
     private final PrimitiveLongChangeSet batchChangedUsers = new PrimitiveLongChangeSet();
     private final PrimitiveLongChangeSet batchChangedOrders = new PrimitiveLongChangeSet();
 
-    /** 在释放 Lane 访问权前绑定已冻结的子订单；仅存活到登记 PendingMatching，不建立第二份订单索引。 */
+    /** 在释放 Lane 访问权前绑定已冻结的子订单；仅存活到登记 CommandSlot，不建立第二份订单索引。 */
     record QueuedTriggerMatching(CoreMessage command, CoreMatchingOrder order) { }
 
-    void appendQueuedMatching() {
+    void appendQueuedMatching(long clusterTimestamp, long clusterPosition) {
         if (queuedMatching.isEmpty()) return;
         for (QueuedTriggerMatching queued : queuedMatching) {
             CoreMessage command = queued.command();
             long sequence = Math.incrementExact(owner.appliedCommandCount);
-            PendingMatching pending = newPendingMatching(sequence, PendingMatching.Operation.TRIGGER, command);
+            CommandSlot pending = newPendingMatching(sequence, CommandSlot.Operation.TRIGGER, command);
             pending.triggerAdmission(queued.order());
+            pending.establishCommitFence(clusterTimestamp, clusterPosition);
             owner.putPendingMatching(pending);
             registerPendingLifecycle(pending);
             owner.appliedCommandCount = sequence;
@@ -76,12 +77,12 @@ final class MatchingCommandAdmission {
         queuedMatching.clear();
     }
 
-    PendingMatching newPendingMatching(long sequence, PendingMatching.Operation operation,
+    CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
                                                CoreMessage command) {
         return newPendingMatching(sequence, operation, command, CommandFingerprint.of(command));
     }
 
-    PendingMatching newPendingMatching(long sequence, PendingMatching.Operation operation,
+    CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
                                                CoreMessage command, CommandFingerprint fingerprint) {
         return owner.pendingMatching.acquire(sequence, operation, command, fingerprint, List.of(),
                 owner.currentProjectionPoint, owner.currentBusinessStateHash(), owner.auditFundsStateHash,
@@ -89,7 +90,7 @@ final class MatchingCommandAdmission {
                 owner.decodeMatchingCommand(command), null);
     }
 
-    PendingMatching newPendingMatching(long sequence, PendingMatching.Operation operation,
+    CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
                                                CoreMessage command, CommandFingerprint fingerprint,
                                                DecodedMatchingCommand decodedCommand) {
         return owner.pendingMatching.acquire(sequence, operation, command, fingerprint, List.of(),
@@ -97,7 +98,7 @@ final class MatchingCommandAdmission {
                 com.surprising.aeron.service.state.RuntimeFundsDelta.empty(), decodedCommand, null);
     }
 
-    PendingMatching newPendingMatching(long sequence, PendingMatching.Operation operation,
+    CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
                                                CoreMessage command, List<Long> preMatchingCancellations) {
         return owner.pendingMatching.acquire(sequence, operation, command, CommandFingerprint.of(command),
                 preMatchingCancellations, owner.currentProjectionPoint, owner.currentBusinessStateHash(), owner.auditFundsStateHash,
@@ -105,7 +106,7 @@ final class MatchingCommandAdmission {
                 owner.decodeMatchingCommand(command), null);
     }
 
-    PendingMatching newPendingMatching(long sequence, PendingMatching.Operation operation,
+    CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
                                                CoreMessage command, List<Long> preMatchingCancellations,
                                                RuntimeProjectionPoint beforeProjection, long beforeBusinessStateHash,
                                                long beforeFundsStateHash,
@@ -116,7 +117,7 @@ final class MatchingCommandAdmission {
                 owner.commandFundsAccumulator.toDelta(), decodedCommand, admission);
     }
 
-    PendingMatching newPendingMatching(long sequence, PendingMatching.Operation operation,
+    CommandSlot newPendingMatching(long sequence, CommandSlot.Operation operation,
                                                CoreMessage command, CommandFingerprint fingerprint,
                                                List<Long> preMatchingCancellations,
                                                RuntimeProjectionPoint beforeProjection, long beforeBusinessStateHash,
@@ -129,52 +130,29 @@ final class MatchingCommandAdmission {
 
     CoreResponse beginMatching(CoreMessage message, long clusterTimestamp, long clusterPosition,
                                        TradingCoreRuntime.SourceKey sourceKey, CommandFingerprint fingerprint) {
-        PendingMatching.Operation operation = matchingOperation(message.header().messageType());
+        CommandSlot.Operation operation = matchingOperation(message.header().messageType());
         if (owner.batches.hasPendingBatches() && !owner.clusterPipelineAdmission) {
             return deferMatching(message, clusterTimestamp, clusterPosition, sourceKey, operation, fingerprint);
         }
         return prepareMatching(message, clusterTimestamp, clusterPosition, sourceKey, operation, fingerprint, null);
     }
 
-    int matchingOrderBound(CoreMessage message, DecodedMatchingCommand decodedCommand) {
-        if (decodedCommand == null) throw new IllegalArgumentException("decoded matching command is required");
-        int inFlightOrders = owner.pendingMatching.size();
-        if (owner.batches.hasPendingBatches()) {
-            inFlightOrders = Math.addExact(inFlightOrders, PlaceOrderBatchCommand.MAX_ORDERS);
-        }
-        return switch (message.header().messageType()) {
-            case PLACE_ORDER -> {
-                PlaceOrderCommand command = decodedCommand.placeOrder();
-                yield Math.addExact(owner.activeOrderIndex.count(command.symbol()), inFlightOrders);
-            }
-            case PLACE_ORDER_BATCH -> {
-                PlaceOrderBatchCommand command = decodedCommand.placeOrderBatch();
-                int activeOrders = 0;
-                for (PlaceOrderCommand order : command.orders()) {
-                    activeOrders = Math.max(activeOrders, owner.activeOrderIndex.count(order.symbol()));
-                }
-                yield Math.addExact(Math.addExact(activeOrders, inFlightOrders), command.orders().size());
-            }
-            default -> 0;
-        };
-    }
-
-    static PendingMatching.Operation matchingOperation(CoreMessageType messageType) {
+    static CommandSlot.Operation matchingOperation(CoreMessageType messageType) {
         return switch (messageType) {
-            case PLACE_ORDER, PLACE_ORDER_BATCH -> PendingMatching.Operation.PLACE;
-            case CANCEL_ORDER, CANCEL_ORDER_BATCH -> PendingMatching.Operation.CANCEL;
-            case REPLACE_ORDER -> PendingMatching.Operation.REPLACE;
-            case AMEND_ORDER, AMEND_ORDER_BATCH -> PendingMatching.Operation.AMEND;
-            case EXECUTE_LIQUIDATION -> PendingMatching.Operation.LIQUIDATION;
-            case EXECUTE_LIQUIDATION_BATCH -> PendingMatching.Operation.LIQUIDATION_BATCH;
-            case SETTLE_INSTRUMENT -> PendingMatching.Operation.SETTLEMENT;
+            case PLACE_ORDER, PLACE_ORDER_BATCH -> CommandSlot.Operation.PLACE;
+            case CANCEL_ORDER, CANCEL_ORDER_BATCH -> CommandSlot.Operation.CANCEL;
+            case REPLACE_ORDER -> CommandSlot.Operation.REPLACE;
+            case AMEND_ORDER, AMEND_ORDER_BATCH -> CommandSlot.Operation.AMEND;
+            case EXECUTE_LIQUIDATION -> CommandSlot.Operation.LIQUIDATION;
+            case EXECUTE_LIQUIDATION_BATCH -> CommandSlot.Operation.LIQUIDATION_BATCH;
+            case SETTLE_INSTRUMENT -> CommandSlot.Operation.SETTLEMENT;
             default -> throw new IllegalArgumentException("not a matching command");
         };
     }
 
     CoreResponse prepareMatching(CoreMessage message, long clusterTimestamp, long clusterPosition,
-                                         TradingCoreRuntime.SourceKey sourceKey, PendingMatching.Operation operation,
-                                         CommandFingerprint fingerprint, PendingMatching deferredPending) {
+                                         TradingCoreRuntime.SourceKey sourceKey, CommandSlot.Operation operation,
+                                         CommandFingerprint fingerprint, CommandSlot deferredPending) {
         long matchingStartNanos = System.nanoTime();
         DecodedMatchingCommand decodedCommand;
         try {
@@ -279,13 +257,9 @@ final class MatchingCommandAdmission {
             }
         }
         owner.commits.completeCommitPublicationBatch();
-        try {
-        } catch (RuntimeException exception) {
-            throw new IllegalStateException("matching delta failed after typed state commit", exception);
-        }
         long businessStateHash = tradingStateChanged ? owner.currentBusinessStateHash() : owner.cachedBusinessStateHash;
         long requiredExportSequence = 0;
-        PendingMatching pending = deferredPending == null
+        CommandSlot pending = deferredPending == null
                 ? newPendingMatching(sequence, operation, message, effectiveFingerprint,
                         preMatchingCancellations, beforeProjection,
                         beforeBusinessStateHash, beforeFundsStateHash, decodedCommand, admission)
@@ -322,7 +296,7 @@ final class MatchingCommandAdmission {
     }
 
     CoreResponse deferMatching(CoreMessage message, long clusterTimestamp, long clusterPosition,
-                                       TradingCoreRuntime.SourceKey sourceKey, PendingMatching.Operation operation,
+                                       TradingCoreRuntime.SourceKey sourceKey, CommandSlot.Operation operation,
                                        CommandFingerprint fingerprint) {
         DecodedMatchingCommand decodedCommand;
         try {
@@ -334,7 +308,7 @@ final class MatchingCommandAdmission {
                     ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND);
         }
         long sequence = Math.incrementExact(owner.appliedCommandCount);
-        PendingMatching pending = newPendingMatching(sequence, operation, message, fingerprint, decodedCommand);
+        CommandSlot pending = newPendingMatching(sequence, operation, message, fingerprint, decodedCommand);
         owner.putPendingMatching(pending);
         pending.deferredMatching(true);
         deferredMatching.put(sequence, new DeferredMatching(clusterTimestamp, clusterPosition, sourceKey));
@@ -348,7 +322,7 @@ final class MatchingCommandAdmission {
                 sequence, 0, stateHash, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
     }
 
-    CoreResponse recordRejectedDeferredMatching(PendingMatching pending, CoreResultCode resultCode) {
+    CoreResponse recordRejectedDeferredMatching(CommandSlot pending, CoreResultCode resultCode) {
         owner.commitMatchingSequence(pending.sequence());
         long requiredExportSequence = 0;
         long stateHash = owner.stateHash(owner.cachedBusinessStateHash, pending.command().header().commandId(),
@@ -390,7 +364,7 @@ final class MatchingCommandAdmission {
             throw new CoreStateRejectedException("INVALID_COMMAND", "order is not amendable");
         }
         PlaceOrderCommand replacement = owner.replacementFor(decodedCommand,
-                amend ? PendingMatching.Operation.AMEND : PendingMatching.Operation.REPLACE, order);
+                amend ? CommandSlot.Operation.AMEND : CommandSlot.Operation.REPLACE, order);
         if (replacement.orderId() != originalOrderId) {
             owner.requireOrderIdentityAvailable(message.header().userId(), replacement);
         }
@@ -427,7 +401,7 @@ final class MatchingCommandAdmission {
     }
 
     List<Long> preMatchingCloseCapacityCancellations(
-            PendingMatching.Operation operation,
+            CommandSlot.Operation operation,
             CoreMessage message,
             DecodedMatchingCommand decodedCommand,
             ResolvedMatchingAdmission admission) {
@@ -653,7 +627,7 @@ final class MatchingCommandAdmission {
         }
     }
 
-    void rejectLifecycleOverlap(CoreMessage message, PendingMatching.Operation operation,
+    void rejectLifecycleOverlap(CoreMessage message, CommandSlot.Operation operation,
                                         DecodedMatchingCommand decodedCommand) {
         LifecycleScope candidate = lifecycleScope(message, operation, decodedCommand);
         if (candidate.symbol().isBlank()) return;
@@ -716,8 +690,8 @@ final class MatchingCommandAdmission {
     }
 
 
-    boolean pendingLifecycleConflicts(LifecycleScope candidate, PendingMatching pending) {
-        if (pending.operation() != PendingMatching.Operation.LIQUIDATION_BATCH) {
+    boolean pendingLifecycleConflicts(LifecycleScope candidate, CommandSlot pending) {
+        if (pending.operation() != CommandSlot.Operation.LIQUIDATION_BATCH) {
             return conflicts(candidate, lifecycleScope(pending));
         }
         var batch = pending.decodedCommand().liquidationBatch();
@@ -725,7 +699,7 @@ final class MatchingCommandAdmission {
                         action.liquidationId(), true, false)).anyMatch(scope -> conflicts(candidate, scope));
     }
 
-    void registerPendingLifecycle(PendingMatching pending) {
+    void registerPendingLifecycle(CommandSlot pending) {
         List<LifecycleScope> scopes = switch (pending.operation()) {
             case LIQUIDATION, SETTLEMENT -> List.of(lifecycleScope(pending));
             case LIQUIDATION_BATCH -> pending.decodedCommand().liquidationBatch()
@@ -738,7 +712,7 @@ final class MatchingCommandAdmission {
         if (!scopes.isEmpty()) pendingLifecycleScopes.put(pending.sequence(), scopes);
     }
 
-    LifecycleScope lifecycleScope(CoreMessage message, PendingMatching.Operation operation,
+    LifecycleScope lifecycleScope(CoreMessage message, CommandSlot.Operation operation,
                                           DecodedMatchingCommand decodedCommand) {
         return switch (operation) {
             case LIQUIDATION -> {
@@ -755,8 +729,8 @@ final class MatchingCommandAdmission {
         };
     }
 
-    LifecycleScope lifecycleScope(PendingMatching pending) {
-        if (pending.operation() == PendingMatching.Operation.LIQUIDATION_BATCH) {
+    LifecycleScope lifecycleScope(CommandSlot pending) {
+        if (pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH) {
             var action = pending.decodedCommand().liquidationBatch().actions().getFirst();
             return new LifecycleScope(false, action.userId(), action.symbol(), action.liquidationId(), true, false);
         }
@@ -773,7 +747,7 @@ final class MatchingCommandAdmission {
                                   boolean lifecycle, boolean orderChanging) {
     }
 
-    String matchingSymbol(CoreMessage message, PendingMatching.Operation operation,
+    String matchingSymbol(CoreMessage message, CommandSlot.Operation operation,
                                   DecodedMatchingCommand decodedCommand) {
         return switch (operation) {
             case PLACE -> decodedCommand.placeOrder().symbol();
@@ -783,7 +757,7 @@ final class MatchingCommandAdmission {
                 yield order == null ? "" : owner.identities.symbol(order.symbolId());
             }
             case REPLACE, AMEND -> {
-                long orderId = operation == PendingMatching.Operation.REPLACE
+                long orderId = operation == CommandSlot.Operation.REPLACE
                         ? decodedCommand.replaceOrder().originalOrderId()
                         : decodedCommand.amendOrder().originalOrderId();
                 var order = owner.runtimeState.order(orderId);
@@ -802,11 +776,11 @@ final class MatchingCommandAdmission {
         };
     }
 
-    String pendingLifecycleSymbol(PendingMatching pending) {
-        if (pending.operation() == PendingMatching.Operation.SETTLEMENT) {
+    String pendingLifecycleSymbol(CommandSlot pending) {
+        if (pending.operation() == CommandSlot.Operation.SETTLEMENT) {
             return pending.decodedCommand().settlement().symbol();
         }
-        if (pending.operation() == PendingMatching.Operation.LIQUIDATION_BATCH) {
+        if (pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH) {
             var batch = pending.decodedCommand().liquidationBatch();
             return batch.actions().isEmpty() ? "" : batch.actions().getFirst().symbol();
         }

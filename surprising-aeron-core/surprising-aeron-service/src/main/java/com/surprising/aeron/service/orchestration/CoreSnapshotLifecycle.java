@@ -118,12 +118,14 @@ final class CoreSnapshotLifecycle {
             owner.drainMatchingCompletions();
             while (!owner.pendingMatching.isEmpty()) {
                 long sequence = owner.firstPendingMatchingSequence();
-                PendingMatching pending = owner.pendingMatching.get(sequence);
+                CommandSlot pending = owner.pendingMatching.get(sequence);
                 com.surprising.aeron.service.matching.CoreMatchingResult result =
-                        pending != null && (pending.settlementEvent() != null || pending.cancelEvent() != null
-                                || pending.replaceEvent() != null)
+                        pending != null && (pending.settlementEvent() != null || pending.cancelEvent() != null)
                                 ? owner.laneCommandContexts.required(sequence).matchingResult()
                                 : owner.laneCommandContexts.required(sequence).takeMatchingCompletion();
+                if (result == null && pending != null && pending.settlementEvent() != null
+                        && pending.settlementEvent().direct() && pending.settlementEvent().ready())
+                    result = pending.settlementEvent().firstDirectResult();
                 if (result == null) return null;
                 if (owner.commits.completeMatching(sequence, result, clusterTimestamp, clusterPosition) == null) return null;
                 owner.drainMatchingCompletions();

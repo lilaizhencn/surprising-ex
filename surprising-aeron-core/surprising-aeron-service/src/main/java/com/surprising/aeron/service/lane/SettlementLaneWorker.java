@@ -88,12 +88,6 @@ public final class SettlementLaneWorker implements AutoCloseable {
         signalWork();
     }
 
-    /** Compatibility overload for pre-package-move reflective callers. */
-    @Deprecated
-    public long submit(com.surprising.aeron.service.state.SettlementLaneWorker.Command command) {
-        return submit((Command) command);
-    }
-
     public long submit(Command command) {
         if (command == null) throw new IllegalArgumentException("settlement command is required");
         rethrowFailure();

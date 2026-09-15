@@ -151,30 +151,26 @@ final class LinearPerpetualSaturationWorkload {
                 scheduledEntrySequence = 0;
                 prepareRun();
                 long lastProgressNanos = System.nanoTime();
-                harness.admissionBackpressureDrain(() -> completeReady(harness));
-                try {
-                    while (latencySamples < operationsPerRun) {
-                        int filled = fillWindow(harness);
-                        sampleWindow(harness);
-                        int completed = completeReady(harness);
-                        if (filled != 0 || completed != 0) {
-                            lastProgressNanos = System.nanoTime();
-                        } else {
-                            if (harness.pendingSubmissions() == 0) {
-                                throw new IllegalStateException(
-                                        "continuous feeder has no runnable or in-flight work");
-                            }
-                            if (System.nanoTime() - lastProgressNanos >= PROGRESS_TIMEOUT_NANOS) {
-                                throw new IllegalStateException(
-                                        "continuous feeder made no progress within 30 seconds");
-                            }
-                            Thread.onSpinWait();
+
+                while (latencySamples < operationsPerRun) {
+                    int filled = fillWindow(harness);
+                    sampleWindow(harness);
+                    int completed = completeReady(harness);
+                    if (filled != 0 || completed != 0) {
+                        lastProgressNanos = System.nanoTime();
+                    } else {
+                        if (harness.pendingSubmissions() == 0) {
+                            throw new IllegalStateException(
+                                    "continuous feeder has no runnable or in-flight work");
                         }
+                        if (System.nanoTime() - lastProgressNanos >= PROGRESS_TIMEOUT_NANOS) {
+                            throw new IllegalStateException(
+                                    "continuous feeder made no progress within 30 seconds");
+                        }
+                        Thread.onSpinWait();
                     }
-                    harness.drainSubmitted();
-                } finally {
-                    harness.admissionBackpressureDrain(null);
                 }
+                harness.drainSubmitted();
                 runSequence = Math.addExact(runSequence, directionCount);
                 acceptedCoreMessages = Math.subtractExact(harness.acceptedCoreMessages(), acceptedCoreBefore);
                 terminalCoreMessages = Math.subtractExact(harness.terminalCoreMessages(), terminalCoreBefore);

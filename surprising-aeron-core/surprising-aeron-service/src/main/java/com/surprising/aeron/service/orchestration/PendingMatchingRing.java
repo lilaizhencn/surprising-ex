@@ -21,9 +21,9 @@ final class PendingMatchingRing {
     private final int[] previousSubmissionSlots;
     private final int[] submissionHeads;
     private final int[] submissionTails;
-    private final Map<UUID, PendingMatching> entriesByCommandId;
+    private final Map<UUID, CommandSlot> entriesByCommandId;
     private final LongIntHashMap pendingByUser;
-    private final LaneCommandContextRing contexts;
+    private final CommandSlotRing contexts;
     private final int mask;
     private int head = -1;
     private int tail = -1;
@@ -64,22 +64,23 @@ final class PendingMatchingRing {
         java.util.Arrays.fill(submissionHeads, -1);
         java.util.Arrays.fill(submissionTails, -1);
         mask = capacity - 1;
-        contexts = new LaneCommandContextRing(capacity, laneCount);
+        contexts = new CommandSlotRing(capacity, laneCount);
         entriesByCommandId = new java.util.HashMap<>(capacity);
         pendingByUser = new LongIntHashMap(capacity);
     }
 
-    void put(PendingMatching pending) {
+    void put(CommandSlot pending) {
         if (pending == null) throw new IllegalArgumentException("pending matching is required");
         int index = slot(pending.sequence());
-        PendingMatching existing = pendingAt(index);
+        CommandSlot existing = pendingAt(index);
         if (existing != null && linked(index)) {
             if (existing.sequence() != pending.sequence()) {
                 throw new IllegalStateException("pending matching sequence window is full");
             }
             requireAvailableCommandId(pending, existing);
             removeIndexes(existing);
-            contexts.required(pending.sequence()).pending(pending);
+            if (contexts.required(pending.sequence()) != pending)
+                throw new IllegalStateException("command must use its claimed slot");
             addIndexes(pending);
             dispatchRevision++;
             return;
@@ -88,9 +89,9 @@ final class PendingMatchingRing {
             throw new IllegalStateException("pending matching ring is full");
         }
         requireAvailableCommandId(pending, null);
-        LaneCommandContextRing.Context context = contexts.claimed(pending.sequence())
+        CommandSlot context = contexts.claimed(pending.sequence())
                 ? contexts.required(pending.sequence()) : contexts.claim(pending.sequence());
-        context.pending(pending);
+        if (context != pending) throw new IllegalStateException("command must use its claimed slot");
         previousSlots[index] = tail;
         nextSlots[index] = -1;
         if (tail == -1) head = index;
@@ -102,25 +103,25 @@ final class PendingMatchingRing {
         dispatchRevision++;
     }
 
-    PendingMatching acquire(long sequence, PendingMatching.Operation operation, CoreMessage command,
+    CommandSlot acquire(long sequence, CommandSlot.Operation operation, CoreMessage command,
                             com.surprising.aeron.protocol.CommandFingerprint fingerprint,
                             java.util.List<Long> preMatchingCancellationOrderIds,
                             com.surprising.aeron.service.state.RuntimeProjectionPoint beforeProjection,
                             long beforeBusinessStateHash, long beforeFundsStateHash,
                             com.surprising.aeron.service.state.RuntimeFundsDelta fundsDelta,
                             DecodedMatchingCommand decodedCommand, ResolvedMatchingAdmission admission) {
-        LaneCommandContextRing.Context context = contexts.claim(sequence);
-        PendingMatching pending = context.initialize(sequence, operation, command, fingerprint,
+        CommandSlot context = contexts.claim(sequence);
+        CommandSlot pending = context.initialize(sequence, operation, command, fingerprint,
                 preMatchingCancellationOrderIds, beforeProjection, beforeBusinessStateHash, beforeFundsStateHash,
                 fundsDelta, decodedCommand, admission);
-        context.pending(pending);
+        if (context != pending) throw new IllegalStateException("command must use its claimed slot");
         return pending;
     }
 
-    PendingMatching get(long sequence) {
+    CommandSlot get(long sequence) {
         int index = slot(sequence);
         if (!linked(index)) return null;
-        PendingMatching pending = pendingAt(index);
+        CommandSlot pending = pendingAt(index);
         return pending != null && pending.sequence() == sequence ? pending : null;
     }
 
@@ -134,10 +135,10 @@ final class PendingMatchingRing {
         return get(sequence) != null;
     }
 
-    PendingMatching remove(long sequence) {
+    CommandSlot remove(long sequence) {
         int entryIndex = indexOf(sequence);
         if (entryIndex < 0) return null;
-        PendingMatching removed = pendingAt(entryIndex);
+        CommandSlot removed = pendingAt(entryIndex);
         if (removed == null || removed.sequence() != sequence) {
             throw new IllegalStateException("pending matching order is corrupted");
         }
@@ -158,7 +159,7 @@ final class PendingMatchingRing {
         size--;
         dispatchRevision++;
         if (contexts.claimed(sequence)) {
-            LaneCommandContextRing.Context context = contexts.required(sequence);
+            CommandSlot context = contexts.required(sequence);
             if (context.complete()) contexts.release(sequence);
             else contexts.discard(sequence);
         }
@@ -170,9 +171,9 @@ final class PendingMatchingRing {
     }
 
     /** 返回有序队首；完成状态由提交器直接读取 slot，不再维护第二个 ready 位。 */
-    PendingMatching head() { return head < 0 ? null : pendingAt(head); }
+    CommandSlot head() { return head < 0 ? null : pendingAt(head); }
 
-    PendingMatching dispatchHead() {
+    CommandSlot dispatchHead() {
         return dispatchHead < 0 ? null : pendingAt(dispatchHead);
     }
 
@@ -196,11 +197,11 @@ final class PendingMatchingRing {
      * 只跨越通过账户/订单簿依赖检查的命令。资金共享账户不可能经此绕过其前序命令。
      * 检查范围限于有界在途窗口，不访问或扫描账户/订单状态。
      */
-    PendingMatching partitionDispatchHead(int shard) {
+    CommandSlot partitionDispatchHead(int shard) {
         long earlierLanes = 0;
         for (int index = dispatchHead; index >= 0; index = nextSlots[index]) {
             if (settlementDispatched[index]) continue;
-            PendingMatching pending = pendingAt(index);
+            CommandSlot pending = pendingAt(index);
             if (index != dispatchHead && (!pending.clusterIndependent || pending.partitionLaneMask == 0)) return null;
             if (settlementShards[index] == shard)
                 return (pending.partitionLaneMask & earlierLanes) == 0 ? pending : null;
@@ -219,7 +220,7 @@ final class PendingMatchingRing {
      * non-independent head remains the only candidate for its own partition and blocks all
      * later partitions, matching {@link #partitionDispatchHead(int)} semantics.</p>
      */
-    void collectPartitionDispatchHeads(long throughSequence, PendingMatching[] heads) {
+    void collectPartitionDispatchHeads(long throughSequence, CommandSlot[] heads) {
         if (heads == null || heads.length != submissionHeads.length) {
             throw new IllegalArgumentException("partition dispatch head storage is invalid");
         }
@@ -227,7 +228,7 @@ final class PendingMatchingRing {
         long earlierLanes = 0;
         for (int index = dispatchHead; index >= 0; index = nextSlots[index]) {
             if (settlementDispatched[index]) continue;
-            PendingMatching pending = pendingAt(index);
+            CommandSlot pending = pendingAt(index);
             if (pending == null || pending.sequence() > throughSequence) break;
             int shard = settlementShards[index];
             long laneMask = pending.partitionLaneMask;
@@ -247,7 +248,7 @@ final class PendingMatchingRing {
     }
 
     void completePartitionDispatch(long sequence, int shard) {
-        PendingMatching first = partitionDispatchHead(shard);
+        CommandSlot first = partitionDispatchHead(shard);
         if (first == null || first.sequence() != sequence) {
             throw new IllegalStateException("partition settlement dispatch is out of order");
         }
@@ -295,7 +296,7 @@ final class PendingMatchingRing {
         return index < 0 ? -1 : submissionShards[index];
     }
 
-    PendingMatching submissionHead(int matcherShard) {
+    CommandSlot submissionHead(int matcherShard) {
         int index = submissionHeads[matcherShard];
         return index < 0 ? null : pendingAt(index);
     }
@@ -305,7 +306,7 @@ final class PendingMatchingRing {
         if (index >= 0) removeFromSubmissionOrder(index);
     }
 
-    PendingMatching findByCommandId(UUID commandId) {
+    CommandSlot findByCommandId(UUID commandId) {
         return commandId == null ? null : entriesByCommandId.get(commandId);
     }
 
@@ -316,22 +317,22 @@ final class PendingMatchingRing {
     boolean hasEarlierUser(long sequence, long userId) {
         if (sequence <= 0 || userId <= 0 || pendingByUser.get(userId) <= 1) return false;
         for (int slot = head; slot != -1; slot = nextSlots[slot]) {
-            PendingMatching pending = pendingAt(slot);
+            CommandSlot pending = pendingAt(slot);
             if (pending == null || pending.sequence() >= sequence) return false;
             if (pending.command().header().userId() == userId) return true;
         }
         return false;
     }
 
-    void forEach(Consumer<PendingMatching> consumer) {
+    void forEach(Consumer<CommandSlot> consumer) {
         for (int slot = head; slot != -1; slot = nextSlots[slot]) {
-            PendingMatching pending = pendingAt(slot);
+            CommandSlot pending = pendingAt(slot);
             if (pending != null) consumer.accept(pending);
         }
     }
 
-    Map<Long, PendingMatching> snapshot() {
-        LinkedHashMap<Long, PendingMatching> snapshot = new LinkedHashMap<>(size);
+    Map<Long, CommandSlot> snapshot() {
+        LinkedHashMap<Long, CommandSlot> snapshot = new LinkedHashMap<>(size);
         forEach(pending -> snapshot.put(pending.sequence(), pending));
         return Collections.unmodifiableMap(snapshot);
     }
@@ -340,14 +341,14 @@ final class PendingMatchingRing {
         while (size != 0) remove(firstSequence());
     }
 
-    private void addIndexes(PendingMatching pending) {
+    private void addIndexes(CommandSlot pending) {
         UUID commandId = pending.command().header().commandId();
         entriesByCommandId.put(commandId, pending);
         long userId = pending.command().header().userId();
         if (userId > 0) pendingByUser.addToValue(userId, 1);
     }
 
-    private void removeIndexes(PendingMatching pending) {
+    private void removeIndexes(CommandSlot pending) {
         entriesByCommandId.remove(pending.command().header().commandId(), pending);
         long userId = pending.command().header().userId();
         if (userId <= 0) return;
@@ -370,8 +371,8 @@ final class PendingMatchingRing {
         nextSubmissionSlots[index] = -1;
     }
 
-    private void requireAvailableCommandId(PendingMatching pending, PendingMatching replaced) {
-        PendingMatching duplicate = entriesByCommandId.get(pending.command().header().commandId());
+    private void requireAvailableCommandId(CommandSlot pending, CommandSlot replaced) {
+        CommandSlot duplicate = entriesByCommandId.get(pending.command().header().commandId());
         if (duplicate != null && duplicate != replaced) {
             throw new IllegalStateException("duplicate pending matching commandId");
         }
@@ -380,7 +381,7 @@ final class PendingMatchingRing {
     private int indexOf(long sequence) {
         int index = slot(sequence);
         if (!linked(index)) return -1;
-        PendingMatching pending = pendingAt(index);
+        CommandSlot pending = pendingAt(index);
         return pending != null && pending.sequence() == sequence ? index : -1;
     }
 
@@ -392,13 +393,13 @@ final class PendingMatchingRing {
         return head == index || previousSlots[index] != -1 || nextSlots[index] != -1;
     }
 
-    private PendingMatching pendingAt(int index) {
-        LaneCommandContextRing.Context context = contexts.contextAt(index);
-        return context.coreSequence() == 0 ? null : context.pending();
+    private CommandSlot pendingAt(int index) {
+        CommandSlot context = contexts.contextAt(index);
+        return context.coreSequence() == 0 || context.command() == null ? null : context;
     }
 
     int size() { return size; }
     boolean isEmpty() { return size == 0; }
     int capacity() { return contexts.capacity(); }
-    LaneCommandContextRing contexts() { return contexts; }
+    CommandSlotRing contexts() { return contexts; }
 }

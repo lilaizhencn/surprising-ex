@@ -12,6 +12,29 @@ import org.junit.jupiter.api.Test;
 
 class MatcherSettlementPlanTest {
     @Test
+    void rejectedDirectCancelLeavesOrderUnchangedWithoutInstrumentMetadata() {
+        try (var runtime = new TradingRuntimeState()) {
+            var identities = new RuntimeIdentityRegistry();
+            int symbol = identities.symbolId("BTC-USDT");
+            runtime.setMetadata(ProductLine.LINEAR_PERPETUAL, 0);
+            var original = order(11, 21, symbol, CoreOrderSide.BUY, 3);
+            runtime.putOrder(original);
+            var id = new java.util.UUID(1, 2);
+            var event = runtime.prepareDirectCancellation(1, original, id, 0, identities, 10, 20);
+            var result = new CoreMatchingResult(false, "MATCHING_UNKNOWN_ORDER_ID", List.of(), 0, false,
+                    new CoreMatchingResult.NativeCommand(1, 1, 2, 11, 1, 1, 1, 1, 0),
+                    new CoreMatchingResult.MatcherPrefix(1, 2), null, List.of(), fill(1).marketData());
+            event.publishDirectResult(result);
+            event.execute(runtime.accountLanes[runtime.topology().accountLaneId(21)]);
+            assertThat(event.complete()).isTrue();
+            assertThat(event.plan().orderCount()).isZero();
+            runtime.collectMatcherSettlement(event);
+            assertThat(runtime.order(11)).isSameAs(original);
+            runtime.releaseMatcherSettlement(event);
+        }
+    }
+
+    @Test
     void directEventCannotRecycleBeforeReservedNonTradingLanesConsumeTheirTickets() {
         var topology = new LaneTopology(LaneTopology.ROUTE_VERSION, 1, 0, 0, 4,
                 LaneTopology.DEFAULT_ACCOUNT_LANE_SEED, 16, 16, 16);
@@ -31,7 +54,16 @@ class MatcherSettlementPlanTest {
             var result = new CoreMatchingResult(true, "SUCCESS", List.of(), 0, true,
                     new CoreMatchingResult.NativeCommand(1, 1, 2, 11, 1, 1, 1, 1, 0),
                     new CoreMatchingResult.MatcherPrefix(1, 2), null, List.of(), fill(1).marketData());
+            boolean[] routeReleased = {false};
+            event.matcherCompletionRoute(shard -> routeReleased[0] = true, 0);
+            event.beginMatcherPublication();
             event.publishDirectResult(result);
+            assertThat(event.resultPrepared()).isTrue();
+            assertThat(event.ready()).isFalse();
+            assertThat(routeReleased[0]).isFalse();
+            event.completeMatcherPublication();
+            assertThat(routeReleased[0]).isTrue();
+            assertThat(event.ready()).isTrue();
             int actual = topology.accountLaneId(21);
             event.execute(runtime.accountLanes[actual]);
             assertThat(event.requiredLaneMask()).isEqualTo(1L << actual);

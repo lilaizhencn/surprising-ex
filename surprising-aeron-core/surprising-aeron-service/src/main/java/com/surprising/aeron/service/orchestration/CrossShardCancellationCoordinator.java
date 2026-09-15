@@ -15,7 +15,7 @@ final class CrossShardCancellationCoordinator {
 
     CrossShardCancellationCoordinator(TradingCoreRuntime owner) { this.owner = owner; }
 
-    void start(PendingMatching command, List<CoreOrderState> orders) {
+    void start(CommandSlot command, List<CoreOrderState> orders) {
         if (command.crossShardCancellationStarted) return;
         command.crossShardCancellationStarted = true;
         pending.addLast(new Progress(command, orders));
@@ -65,7 +65,7 @@ final class CrossShardCancellationCoordinator {
     /** 单条清算命令的跨分片进度；matcher 只执行当前订单，owner 收集不可变结果。 */
     private static final class Progress {
         /** 原始待提交命令及确定性撤单次序。 */
-        final PendingMatching command;
+        final CommandSlot command;
         final List<CoreOrderState> orders;
         /** 与订单次序一一对应的原生结果，最终交由现有聚合器生成提交证据。 */
         final ArrayList<CoreMatchingResult> results;
@@ -74,7 +74,7 @@ final class CrossShardCancellationCoordinator {
         long token;
         /** 第一个失败后只补未提交标记，不再执行后续原生撤单。 */
         boolean failed;
-        Progress(PendingMatching command, List<CoreOrderState> orders) {
+        Progress(CommandSlot command, List<CoreOrderState> orders) {
             this.command = command; this.orders = orders;
             results = new ArrayList<>(orders.size());
         }

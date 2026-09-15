@@ -19,9 +19,9 @@ class PendingMatchingRingTest {
     @Test
     void partitionDispatchPreservesBookOrderAndGlobalCommitWatermark() {
         var ring = new PendingMatchingRing(4, 2, 4);
-        var first = pending(1, UUID.randomUUID(), 1001);
-        var second = pending(2, UUID.randomUUID(), 1002);
-        var third = pending(3, UUID.randomUUID(), 1003);
+        var first = acquire(ring, 1, UUID.randomUUID(), 1001);
+        var second = acquire(ring, 2, UUID.randomUUID(), 1002);
+        var third = acquire(ring, 3, UUID.randomUUID(), 1003);
         first.clusterIndependent = second.clusterIndependent = third.clusterIndependent = true;
         first.partitionLaneMask = 1; second.partitionLaneMask = third.partitionLaneMask = 2;
         ring.put(first); ring.put(second); ring.put(third);
@@ -37,7 +37,7 @@ class PendingMatchingRingTest {
         ring.completePartitionDispatch(1, 0);
         assertThat(ring.dispatchHead()).isNull();
         ring.clear();
-        var reused = pending(5, UUID.randomUUID(), 1004);
+        var reused = acquire(ring, 5, UUID.randomUUID(), 1004);
         ring.put(reused); ring.registerSubmission(5, 1);
         assertThat(ring.partitionDispatchHead(1)).isSameAs(reused);
     }
@@ -45,8 +45,8 @@ class PendingMatchingRingTest {
     @Test
     void dependentOrUnroutedCommandCannotBeBypassedByAnotherPartition() {
         var ring = new PendingMatchingRing(4, 2, 4);
-        var first = pending(1, UUID.randomUUID(), 1001);
-        var second = pending(2, UUID.randomUUID(), 1002);
+        var first = acquire(ring, 1, UUID.randomUUID(), 1001);
+        var second = acquire(ring, 2, UUID.randomUUID(), 1002);
         second.clusterIndependent = true;
         ring.put(first); ring.put(second); ring.registerSubmission(2, 1);
         assertThat(ring.partitionDispatchHead(1)).isNull();
@@ -61,9 +61,9 @@ class PendingMatchingRingTest {
     @Test
     void collectsDispatchHeadsWithOneGlobalPrefixPass() {
         var ring = new PendingMatchingRing(4, 2, 4);
-        var first = pending(1, UUID.randomUUID(), 1001);
-        var second = pending(2, UUID.randomUUID(), 1002);
-        var third = pending(3, UUID.randomUUID(), 1003);
+        var first = acquire(ring, 1, UUID.randomUUID(), 1001);
+        var second = acquire(ring, 2, UUID.randomUUID(), 1002);
+        var third = acquire(ring, 3, UUID.randomUUID(), 1003);
         first.clusterIndependent = second.clusterIndependent = third.clusterIndependent = true;
         first.partitionLaneMask = 1;
         second.partitionLaneMask = 2;
@@ -73,7 +73,7 @@ class PendingMatchingRingTest {
         ring.registerSubmission(2, 1);
         ring.registerSubmission(3, 0);
 
-        PendingMatching[] heads = new PendingMatching[2];
+        CommandSlot[] heads = new CommandSlot[2];
         ring.collectPartitionDispatchHeads(3, heads);
         assertThat(heads[0]).isSameAs(first);
         assertThat(heads[1]).isSameAs(second);
@@ -87,11 +87,11 @@ class PendingMatchingRingTest {
     @Test
     void keepsTheLowWatermarkWhileAllowingIndependentPartitionCompletion() {
         PendingMatchingRing ring = new PendingMatchingRing(3, 1, 4);
-        PendingMatching first = pending(7, UUID.randomUUID(), 1001);
-        PendingMatching replacement = pending(7, first.command().header().commandId(), 1002);
-        PendingMatching second = pending(8, UUID.randomUUID(), 1003);
-        PendingMatching third = pending(9, UUID.randomUUID(), 1004);
-        PendingMatching fourth = pending(10, UUID.randomUUID(), 1005);
+        CommandSlot first = acquire(ring, 7, UUID.randomUUID(), 1001);
+        CommandSlot replacement = first;
+        CommandSlot second = acquire(ring, 8, UUID.randomUUID(), 1003);
+        CommandSlot third = acquire(ring, 9, UUID.randomUUID(), 1004);
+        CommandSlot fourth = acquire(ring, 10, UUID.randomUUID(), 1005);
 
         ring.put(first);
         assertThat(ring.get(7)).isSameAs(first);
@@ -109,15 +109,15 @@ class PendingMatchingRingTest {
         assertThat(ring.remove(9)).isSameAs(third);
         assertThat(ring.remove(10)).isSameAs(fourth);
         assertThat(ring.firstSequence()).isEqualTo(7);
-        assertThatThrownBy(() -> ring.put(pending(11, UUID.randomUUID(), 1006)))
+        assertThatThrownBy(() -> ring.put(acquire(ring, 11, UUID.randomUUID(), 1006)))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("sequence window");
+                .hasMessageContaining("ring is full");
         assertThat(ring.remove(7)).isSameAs(replacement);
         assertThat(ring.contexts().claimed(7)).isFalse();
-        ring.put(pending(11, UUID.randomUUID(), 1006));
-        ring.put(pending(12, UUID.randomUUID(), 1007));
-        ring.put(pending(13, UUID.randomUUID(), 1008));
-        ring.put(pending(14, UUID.randomUUID(), 1009));
+        ring.put(acquire(ring, 11, UUID.randomUUID(), 1006));
+        ring.put(acquire(ring, 12, UUID.randomUUID(), 1007));
+        ring.put(acquire(ring, 13, UUID.randomUUID(), 1008));
+        ring.put(acquire(ring, 14, UUID.randomUUID(), 1009));
         assertThat(ring.snapshot().keySet()).containsExactly(11L, 12L, 13L, 14L);
         assertThat(ring.firstSequence()).isEqualTo(11);
         ring.clear();
@@ -127,9 +127,9 @@ class PendingMatchingRingTest {
     @Test
     void advancesEachMatcherSubmissionShardWithoutScanningThePendingRing() {
         PendingMatchingRing ring = new PendingMatchingRing(4, 2, 4);
-        PendingMatching shardZeroFirst = pending(1, UUID.randomUUID(), 1001);
-        PendingMatching shardOne = pending(2, UUID.randomUUID(), 1002);
-        PendingMatching shardZeroSecond = pending(3, UUID.randomUUID(), 1003);
+        CommandSlot shardZeroFirst = acquire(ring, 1, UUID.randomUUID(), 1001);
+        CommandSlot shardOne = acquire(ring, 2, UUID.randomUUID(), 1002);
+        CommandSlot shardZeroSecond = acquire(ring, 3, UUID.randomUUID(), 1003);
         ring.put(shardZeroFirst);
         ring.put(shardOne);
         ring.put(shardZeroSecond);
@@ -150,8 +150,8 @@ class PendingMatchingRingTest {
     @Test
     void exposesOnlyTheDeterministicSubmissionHead() {
         PendingMatchingRing ring = new PendingMatchingRing(2, 1, 4);
-        PendingMatching first = pending(1, UUID.randomUUID(), 1001);
-        PendingMatching second = pending(2, UUID.randomUUID(), 1002);
+        CommandSlot first = acquire(ring, 1, UUID.randomUUID(), 1001);
+        CommandSlot second = acquire(ring, 2, UUID.randomUUID(), 1002);
         ring.put(first);
         ring.put(second);
 
@@ -165,9 +165,9 @@ class PendingMatchingRingTest {
     @Test
     void advancesSettlementDispatchIndependentlyFromTheGlobalCommitHead() {
         PendingMatchingRing ring = new PendingMatchingRing(4, 1, 4);
-        PendingMatching first = pending(1, UUID.randomUUID(), 1001);
-        PendingMatching second = pending(2, UUID.randomUUID(), 1002);
-        PendingMatching third = pending(3, UUID.randomUUID(), 1003);
+        CommandSlot first = acquire(ring, 1, UUID.randomUUID(), 1001);
+        CommandSlot second = acquire(ring, 2, UUID.randomUUID(), 1002);
+        CommandSlot third = acquire(ring, 3, UUID.randomUUID(), 1003);
         ring.put(first);
         ring.put(second);
         ring.put(third);
@@ -187,11 +187,11 @@ class PendingMatchingRingTest {
     @Test
     void reusesTheSequenceContextPendingCarrierAfterTheSlotIsReleased() {
         PendingMatchingRing ring = new PendingMatchingRing(4, 1, 4);
-        PendingMatching first = acquire(ring, 1, UUID.randomUUID(), 1001);
+        CommandSlot first = acquire(ring, 1, UUID.randomUUID(), 1001);
         ring.put(first);
         ring.remove(1);
 
-        PendingMatching reused = acquire(ring, 5, UUID.randomUUID(), 1002);
+        CommandSlot reused = acquire(ring, 5, UUID.randomUUID(), 1002);
 
         assertThat(reused).isSameAs(first);
         assertThat(reused.sequence()).isEqualTo(5);
@@ -199,16 +199,9 @@ class PendingMatchingRingTest {
         ring.discardPrepared(5);
     }
 
-    private static PendingMatching pending(long sequence, UUID commandId, long userId) {
-        return new PendingMatching(sequence, PendingMatching.Operation.PLACE,
-                command(commandId, userId), new RuntimeProjectionPoint(
-                        0, TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL)),
-                1, 1, RuntimeFundsDelta.empty());
-    }
-
-    private static PendingMatching acquire(PendingMatchingRing ring, long sequence, UUID commandId, long userId) {
+    private static CommandSlot acquire(PendingMatchingRing ring, long sequence, UUID commandId, long userId) {
         CoreMessage command = command(commandId, userId);
-        return ring.acquire(sequence, PendingMatching.Operation.PLACE, command,
+        return ring.acquire(sequence, CommandSlot.Operation.PLACE, command,
                 com.surprising.aeron.protocol.CommandFingerprint.of(command), java.util.List.of(),
                 new RuntimeProjectionPoint(0, TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL)),
                 1, 1, RuntimeFundsDelta.empty(), DecodedMatchingCommand.decode(command), null);
