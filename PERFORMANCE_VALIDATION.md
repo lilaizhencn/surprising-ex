@@ -1930,3 +1930,9 @@ profile：
 验证门槛：服务模块正确性测试全绿；固定单节点、1 matcher、4 lanes、128 symbols、window256、BUSY_SPIN、G1、MIXED batch20 口径下做带 `-prof gc` 的短稳态复测，比较业务吞吐、分配率、普通/批量 p99 和完整生命周期校验。无可重复收益或出现回退则回退该改动。
 
 结果：服务模块回归全绿，固定口径短稳态完整校验通过；批量复用轮业务吞吐 `369,230.365/s`、分配约 `1,521 B/business op`、普通 PLACE p99 `14.843 ms`，低于前一轮普通 PLACE 复用基线 `394,444.610/s`、约 `1,509 B/business op`、p99 `11.526 ms`。单轮不足以证明因果，且无分配下降，按门槛回退批量改动及其 DTO 数组删除；该实验不纳入主线结果。节点和客户端进程已退出，临时目录待本轮收尾清理。
+
+### 2026-09-15 Owner 批内准入上下文查找去 Map 化
+
+计划：`preparePipelinedPlaceBatch` 的批内唯一币对数量受批量上限约束，改用已有 `preparedSymbols` 配套的固定决策数组线性查找，移除每批 `HashMap<String, Decision>` 的节点探测与状态；不改变准入顺序、跨币对校验、Matcher/Lane 交接或响应语义。先执行服务全量正确性测试，再按固定单节点、1 matcher、4 lanes、128 symbols、window256、BUSY_SPIN、G1、MIXED batch20 口径做短稳态吞吐/分配/p99 对比；无可重复收益或发生回退则回退。
+
+结果：服务模块 963 项测试通过（1 项既有跳过），完整生命周期校验通过。相同脚本的两轮无 JFR 吞吐为 `368,287/s` 与 `392,706/s`，JFR 轮为 `399,230/s`；相对 `394,445/s` 基线处于单轮抖动范围，没有可归因的吞吐提升或回退。JFR 中 Owner `97.33%` 单核、Matcher `55.06%`、4 个 Lane 各约 `98.31%`；`HashMap.getNode` 不再出现在热点列表，批量准备热点降至 `0.30%`，但 Owner 的 `Long2ObjectHashMap` 访问、终态桶和状态索引仍是主要成本。保留该改动作为无语义变化的去节点优化，后续不把它当作吞吐收益；分配主项仍为 `OrderRuntime`、`byte[]`、`ReservationRuntime`、`long[]` 和 Matcher 结果。节点/客户端均已退出，压测临时目录保留在 `/tmp` 供审计。

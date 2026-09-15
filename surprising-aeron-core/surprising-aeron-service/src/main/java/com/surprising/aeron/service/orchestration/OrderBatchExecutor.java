@@ -222,7 +222,6 @@ final class OrderBatchExecutor {
         try {
             int batchMatcherShard = -1;
             batch.preparedSymbols.clear();
-            batch.preparedContexts.clear();
             for (int index = 0; index < batch.items.size(); index++) {
                 OrderBatchItem item = batch.items.get(index);
                 PlaceOrderCommand command = (PlaceOrderCommand) item.command;
@@ -233,7 +232,8 @@ final class OrderBatchExecutor {
                 else if (batchMatcherShard != itemMatcherShard) throw new TradingCoreRuntime.PipelinedBatchNotApplicable();
                 if (command.reduceOnly()) throw new TradingCoreRuntime.PipelinedBatchNotApplicable();
                 owner.requireOrderIdentityAvailable(userId, command);
-                var decision = batch.preparedContexts.get(command.symbol());
+                int contextIndex = batch.preparedSymbols.indexOf(command.symbol());
+                var decision = contextIndex < 0 ? null : batch.preparedContextDecisions[contextIndex];
                 if (decision == null) {
                     var context = CoreOrderDecisionResolver.context(owner.runtimeState, owner.identities,
                             userId, command.symbol(), owner.currentClusterTimestamp);
@@ -242,8 +242,9 @@ final class OrderBatchExecutor {
                             batchOpenInterestSteps(batch, command.symbol()),
                             owner.identities.assetId(instrument.baseAsset()), owner.identities.assetId(instrument.quoteAsset()),
                             owner.identities.assetId(instrument.settleAsset()));
-                    batch.preparedContexts.put(command.symbol(), decision);
+                    contextIndex = batch.preparedSymbols.size();
                     batch.preparedSymbols.add(command.symbol());
+                    batch.preparedContextDecisions[contextIndex] = decision;
                 }
                 batch.preparedDecisions[index] = decision;
             }
@@ -255,7 +256,6 @@ final class OrderBatchExecutor {
             if (batch.admissionOrderIndex != null) batch.admissionOrderIndex.reset(pending.command().header().userId());
             batch.currentPreMatchingCancellationOrderIds = List.of();
             batch.preparedSymbols.clear();
-            batch.preparedContexts.clear();
             return false;
         }
     }

@@ -217,8 +217,8 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     final com.surprising.aeron.service.state.ReservationRuntime[] preparedAdmittedReservations;
     /** 本批预备的 Symbols 缓冲；派发后必须等待完成交接才能清空或复用。 */
     final ArrayList<String> preparedSymbols;
-    /** Owner 按币对共享本批的行情、费率及准入上下文；只在本批准备阶段使用，不跨命令复用。 */
-    final java.util.HashMap<String, com.surprising.aeron.service.state.PlaceBatchIntentSource.Decision> preparedContexts;
+    /** 与 preparedSymbols 对齐的批内准入上下文；批次最多几十项，线性查找避免 Map 节点。 */
+    final com.surprising.aeron.service.state.PlaceBatchIntentSource.Decision[] preparedContextDecisions;
 
     /** 本批实际涉及的账户 Lane，用于和预期范围核对。 */
     long actualLaneMask;
@@ -299,7 +299,8 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         preparedAdmittedReservations =
                 new com.surprising.aeron.service.state.ReservationRuntime[capacity];
         preparedSymbols = new ArrayList<>(capacity);
-        preparedContexts = new java.util.HashMap<>(capacity);
+        preparedContextDecisions =
+                new com.surprising.aeron.service.state.PlaceBatchIntentSource.Decision[capacity];
     }
 
     OrderBatchPending initialize(OrderBatchKind kind, long clusterTimestamp,
@@ -365,8 +366,8 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         java.util.Arrays.fill(preparedMatchingOrders, 0, preparedCount, null);
         java.util.Arrays.fill(preparedAdmittedOrders, 0, preparedCount, null);
         java.util.Arrays.fill(preparedAdmittedReservations, 0, preparedCount, null);
+        java.util.Arrays.fill(preparedContextDecisions, 0, preparedSymbols.size(), null);
         preparedSymbols.clear();
-        preparedContexts.clear();
         lifecycleFlags = 0;
         actualLaneMask = 0;
         lastMatchingResult = null;
