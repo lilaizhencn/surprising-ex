@@ -44,11 +44,13 @@ final class OwnerIndexedChanges<V, I> {
     }
 
     V get(long key) {
-        if (direct.containsKey(key)) return direct.get(key);
+        int slot = direct.indexOf(key);
+        if (slot >= 0) return direct.valueAt(slot);
         long remaining = laneMask;
         while (remaining != 0) {
             int lane = Long.numberOfTrailingZeros(remaining); remaining &= remaining - 1;
-            if (lanes[lane].containsKey(key)) return lanes[lane].get(key);
+            slot = lanes[lane].indexOf(key);
+            if (slot >= 0) return lanes[lane].valueAt(slot);
         }
         return null;
     }

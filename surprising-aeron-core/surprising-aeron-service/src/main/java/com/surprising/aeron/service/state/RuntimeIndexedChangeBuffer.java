@@ -5,12 +5,11 @@ package com.surprising.aeron.service.state;
  * 订单只交接运行态引用，不分配 prepared 列；持仓按需分配第二列。
  */
 final class RuntimeIndexedChangeBuffer<V, I> extends RuntimeChangeBuffer<V> {
-    /** 与基础变更槽对齐的索引值；null 可以表示删除。 */
+    /** 预计算索引列按需分配，与基础变更槽对齐。 */
     private static final Object[] NO_PREPARED = new Object[0];
-    private static final boolean[] NO_PRESENT = new boolean[0];
+    /** 非null哨兵表示已预计算的删除；null槽表示尚未预计算。 */
+    private static final Object DELETED_INDEX = new Object();
     private Object[] prepared = NO_PREPARED;
-    /** 区分未预计算与预计算出的删除，生命周期与对应变更槽相同。 */
-    private boolean[] present = NO_PRESENT;
 
     @FunctionalInterface
     interface Consumer<V, I> {
@@ -21,12 +20,11 @@ final class RuntimeIndexedChangeBuffer<V, I> extends RuntimeChangeBuffer<V> {
     void swapWith(RuntimeIndexedChangeBuffer<V, I> other) {
         swapStorage(other);
         Object[] values = prepared; prepared = other.prepared; other.prepared = values;
-        boolean[] flags = present; present = other.present; other.present = flags;
     }
 
     @Override int put(long key, V value) {
         int slot = super.put(key, value);
-        if (slot < present.length) { present[slot] = false; prepared[slot] = null; }
+        if (slot < prepared.length) prepared[slot] = null;
         return slot;
     }
 
@@ -46,16 +44,15 @@ final class RuntimeIndexedChangeBuffer<V, I> extends RuntimeChangeBuffer<V> {
             int length = Math.max(8, prepared.length);
             while (length <= slot) length = Math.multiplyExact(length, 2);
             prepared = java.util.Arrays.copyOf(prepared, length);
-            present = java.util.Arrays.copyOf(present, length);
         }
-        prepared[slot] = value;
-        present[slot] = true;
+        prepared[slot] = value == null ? DELETED_INDEX : value;
     }
 
     void forEachIndexed(Consumer<V, I> consumer) {
         for (int slot = 0; slot < size; slot++) {
-            boolean hasPrepared = slot < present.length && present[slot];
-            @SuppressWarnings("unchecked") I indexValue = hasPrepared ? (I) prepared[slot] : null;
+            Object stored = slot < prepared.length ? prepared[slot] : null;
+            boolean hasPrepared = stored != null;
+            @SuppressWarnings("unchecked") I indexValue = stored == DELETED_INDEX ? null : (I) stored;
             consumer.accept(keyAt(slot), valueAt(slot), hasPrepared, indexValue);
         }
     }
@@ -69,7 +66,6 @@ final class RuntimeIndexedChangeBuffer<V, I> extends RuntimeChangeBuffer<V> {
         if (size == 0) return;
         int length = Math.min(size, prepared.length);
         java.util.Arrays.fill(prepared, 0, length, null);
-        java.util.Arrays.fill(present, 0, length, false);
         super.clear();
     }
 }

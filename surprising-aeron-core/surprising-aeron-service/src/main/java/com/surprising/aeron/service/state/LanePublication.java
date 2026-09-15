@@ -12,9 +12,13 @@ final class LanePublication {
     /** Settlement publication borrows the already-populated LaneDelta buffers. */
     private TradingRuntimeState.LaneDelta delta;
     private TradingRuntimeState runtime;
-    private LanePublishedMap<?>[] maps = new LanePublishedMap<?>[8];
-    private long[] keys = new long[8];
-    private Object[] values = new Object[8];
+    private static final LanePublishedMap<?>[] NO_MAPS = new LanePublishedMap<?>[0];
+    private static final long[] NO_KEYS = new long[0];
+    private static final Object[] NO_VALUES = new Object[0];
+    // 结算直接借用LaneDelta；只有准入发布才需要自己的槽数组。
+    private LanePublishedMap<?>[] maps = NO_MAPS;
+    private long[] keys = NO_KEYS;
+    private Object[] values = NO_VALUES;
     private int size;
 
     void add(LanePublishedMap<?> map, long key, Object value) {
@@ -39,13 +43,13 @@ final class LanePublication {
         if (delta != null) {
             TradingRuntimeState.LaneDelta changes = delta;
             TradingRuntimeState owner = runtime;
-            changes.users.forEach((id, value) -> {
+            changes.users.drainTo((id, value) -> {
                 owner.publishedUsers.applyPublished(id, value, admissionSequence);
                 owner.changedUsers.add(id);
             });
             changes.orders.forEach((id, value) -> owner.publishedOrders.applyPublished(
                     id, changes.removedOrderRoutes.contains(id) ? null : value, admissionSequence));
-            changes.reservations.forEach((id, value) -> {
+            changes.reservations.drainTo((id, value) -> {
                 owner.publishedReservations.applyPublished(
                         id, changes.removedReservationRoutes.contains(id) ? null : value, admissionSequence);
                 owner.changedReservations.add(id);
@@ -58,13 +62,16 @@ final class LanePublication {
         if (size == 0) return;
         for (int index = 0; index < size; index++) {
             maps[index].applyPublished(keys[index], values[index], admissionSequence);
+            maps[index] = null;
+            values[index] = null;
         }
-        clear();
+        size = 0;
+        admissionSequence = 0;
     }
 
     private void ensureCapacity(int required) {
         if (required <= keys.length) return;
-        int capacity = keys.length;
+        int capacity = Math.max(8, keys.length);
         while (capacity < required) capacity = Math.multiplyExact(capacity, 2);
         maps = java.util.Arrays.copyOf(maps, capacity);
         keys = java.util.Arrays.copyOf(keys, capacity);

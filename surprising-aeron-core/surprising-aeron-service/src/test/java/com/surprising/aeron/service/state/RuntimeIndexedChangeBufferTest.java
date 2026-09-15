@@ -8,14 +8,12 @@ class RuntimeIndexedChangeBufferTest {
         var lane = new RuntimeIndexedChangeBuffer<String, Void>();
         var owner = new OwnerIndexedChanges<String, Void>();
         var prepared = RuntimeIndexedChangeBuffer.class.getDeclaredField("prepared");
-        var present = RuntimeIndexedChangeBuffer.class.getDeclaredField("present");
-        prepared.setAccessible(true); present.setAccessible(true);
+        prepared.setAccessible(true);
         for (int round = 0; round < 3; round++) {
             for (int i = 0; i < 100; i++) lane.put(i, "value");
             owner.adopt(0, lane);
             assertThat(lane.isEmpty()).isTrue();
             assertThat((Object[]) prepared.get(lane)).isEmpty();
-            assertThat((boolean[]) present.get(lane)).isEmpty();
             for (int i = 0; i < 100; i++) assertThat(owner.get(i)).isEqualTo("value");
             owner.clear();
         }
@@ -40,7 +38,7 @@ class RuntimeIndexedChangeBufferTest {
 
     @Test void reuseAndGrowthDoNotRetainPreparedValues() throws Exception {
         var buffer = new RuntimeIndexedChangeBuffer<String, String>();
-        for (int i = 0; i < 100; i++) { buffer.put(i, "value"); buffer.putPrepared(i, "index"); }
+        for (int i = 0; i < 100; i++) { buffer.put(i, "value"); buffer.putPrepared(i, i % 3 == 0 ? null : "index"); }
         buffer.clear();
         var field = RuntimeIndexedChangeBuffer.class.getDeclaredField("prepared"); field.setAccessible(true);
         assertThat((Object[]) field.get(buffer)).containsOnlyNulls();
@@ -49,7 +47,7 @@ class RuntimeIndexedChangeBufferTest {
             assertThat(present).isFalse(); assertThat(prepared).isNull();
         });
         assertThatThrownBy(() -> buffer.putPrepared(-1, "orphan")).isInstanceOf(IllegalStateException.class);
-        buffer.drainToAgronaMap(new org.agrona.collections.Long2ObjectHashMap<>());
+        buffer.drainToPublishedMap(new LanePublishedMap<>(false));
         assertThat(buffer.isEmpty()).isTrue();
         assertThat((Object[]) field.get(buffer)).containsOnlyNulls();
     }

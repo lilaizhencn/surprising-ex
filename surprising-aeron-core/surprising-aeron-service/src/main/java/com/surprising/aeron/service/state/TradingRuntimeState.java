@@ -1286,17 +1286,13 @@ public final class TradingRuntimeState implements AutoCloseable {
                     }
                 });
             }
-            // Apply the borrowed LaneDelta while its buffers are still intact. The later
-            // changed-* handoff swaps/reclaims those same buffers without a second copy.
+            // 发布时同遍消费账户/冻结缓冲；订单/持仓缓冲保留到下方直接交给Owner。
             state.applyLanePublication(publication);
             if (publication == null) {
                 users.drainTo((userId, user) -> {
                     state.changedUsers.add(userId);
                     putOrRemove(state.publishedUsers, userId, user);
                 });
-            } else {
-                // Settlement publication already applied and indexed each user in one pass.
-                users.clear();
             }
             if (publication == null) {
                 terminalOrderCount = 0;
@@ -1314,9 +1310,6 @@ public final class TradingRuntimeState implements AutoCloseable {
                     state.changedReservations.add(orderId);
                     putOrRemove(state.publishedReservations, orderId, reservation);
                 });
-            } else {
-                // The same publication pass also recorded changed reservation IDs.
-                reservations.clear();
             }
             // 已由 Lane 准备发布版本时，publication 已经完成持仓发布。
             if (publication == null) positions.forEachIndexed((positionKey, position, hasPrepared, prepared) -> {
@@ -1324,7 +1317,7 @@ public final class TradingRuntimeState implements AutoCloseable {
                     try { state.realtimeCapture.removedPosition(state.publishedPositions.get(positionKey)); }
                     catch (RuntimeException failure) { state.realtimeCapture.failed(); }
                 }
-                if (publication == null) putOrRemove(state.publishedPositions, positionKey, position);
+                putOrRemove(state.publishedPositions, positionKey, position);
             });
             liquidations.drainTo((id, value) -> {
                 state.changedLiquidations.put(id, value);

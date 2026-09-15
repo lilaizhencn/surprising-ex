@@ -33,11 +33,6 @@ final class TerminalTombstoneStore {
         putAt(entitySlot(type, id), type, id, user, client, sequence);
     }
 
-    /** 仅在同一 Owner 已确认 contains=false 后调用；复用查找结果，不重复探测实体桶。 */
-    void putKnownAbsent(int type, long id, long user, String client, long sequence) {
-        putAt(-1, type, id, user, client, sequence);
-    }
-
     /**
      * 单次实体探测并插入；调用方不再先 contains 再 put，避免终态提交对同一 ID 做两次桶遍历。
      *

@@ -48,6 +48,8 @@ class LanePublishedMapTest {
         delta.preparePublication(runtime);
         org.assertj.core.api.Assertions.assertThat(delta.publication).isSameAs(buffer);
         delta.publication.publish();
+        assertThat(delta.users.isEmpty()).isTrue();
+        assertThat(delta.reservations.isEmpty()).isTrue();
         org.assertj.core.api.Assertions.assertThat(runtime.publishedUsers.get(7)).isNull();
         org.assertj.core.api.Assertions.assertThat(runtime.publishedUsers.get(8)).isNotNull();
         delta.clear();

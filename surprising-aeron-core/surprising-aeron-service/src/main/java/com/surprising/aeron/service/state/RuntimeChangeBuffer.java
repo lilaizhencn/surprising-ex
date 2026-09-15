@@ -1,7 +1,5 @@
 package com.surprising.aeron.service.state;
 
-import org.agrona.collections.Long2ObjectHashMap;
-
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
 
 /** primitive 变更缓冲；每个实例仅由所属 owner 或 Lane 使用，清空时保留容量。 */
@@ -83,20 +81,6 @@ class RuntimeChangeBuffer<V> {
             values[index] = null;
             if (value == null) {
                 target.removeKey(key);
-            } else {
-                target.put(key, value);
-            }
-        }
-        clear();
-    }
-
-    void drainToAgronaMap(Long2ObjectHashMap<V> target) {
-        for (int index = 0; index < size; index++) {
-            long key = keys[index];
-            @SuppressWarnings("unchecked") V value = (V) values[index];
-            values[index] = null;
-            if (value == null) {
-                target.remove(key);
             } else {
                 target.put(key, value);
             }

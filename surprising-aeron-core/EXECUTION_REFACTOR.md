@@ -93,3 +93,14 @@ mvn -q -pl surprising-aeron-core/surprising-aeron-benchmarks -am -Dtest=LinearPe
 仍保留：部分拒单、逐项改单等无法由一次 Lane 结果确定最终查询状态的提交点补齐；命令幂等账本；订单待结算索引；发布视图、故障停机及有序提交。它们有实际业务/恢复消费者。本批没有删除业务动作，也没有宣称 Owner 只剩 offer。
 
 新增生产类/接口/阶段为0；新增 `CommandResultLedgerBenchmark` 仅用于持续插删路径的JMH。新增随机周转测试与无Owner推进的批量撤单终态响应断言；完整service及基准驱动的最新有效结果共1258用例通过（service953、benchmark125、protocol107、client49、公共模块24）。旧反射存储测试不再访问已删除索引，仍检查保留表的数组复用。性能及证据见根目录 `PERFORMANCE_VALIDATION.md` 本轮记录。
+
+## 发布与变更缓冲继续清理（2026-09-15）
+
+主流程仍为 Lane 完成业务修改→Owner接收完成信号→发布状态并按序提交；没有新增阶段或生产类。
+
+- `LanePublication.publish`：账户和冻结记录在发布同一遍释放引用，删除 `LaneDelta.commitTerminalToOwner` 后续清空遍历；订单/持仓还要交给提交变更消费者，保留原缓冲交接。准入发布同遍清空槽位；只有准入使用时才分配 maps/keys/values，结算直接借用 LaneDelta。
+- `RuntimeIndexedChangeBuffer`：删除 present 布尔数组及增长、交换、清空代码。单个索引槽区分未预计算、有效值和已预计算删除；最后一种用类内共享哨兵，向消费者仍返回 hasPrepared=true/indexValue=null。保留删除与未计算的区别，避免恢复和控制命令错用旧索引。
+- `OwnerIndexedChanges.get`：直接定位槽后读值，删除 containsKey→get 的重复探测；null删除仍能遮盖旧值。
+- 删除生产没有调用的 `RuntimeChangeBuffer.drainToAgronaMap` 和 `TerminalTombstoneStore.putKnownAbsent`，相应测试改为实际生产入口。终态客户号索引仍由 `requireOrderIdentityAvailable` 的重复订单检查使用，未删除或改变去重规则。
+
+本轮正确性1258项全部通过：service953、基准驱动125、protocol107、client49、公共模块24；覆盖六产品线资金、批处理、故障与快照恢复。新增预计算删除清理和发布后缓冲释放断言。性能、限制和清理状态见根目录PERFORMANCE_VALIDATION.md本轮记录。
