@@ -185,6 +185,26 @@ class ClusterCommandWindowTest {
     }
 
     @Test
+    void cancellationBatchCapacityKeepsAllFiftyOrderDependencies() {
+        var window = new ClusterCommandWindow();
+        window.resetCandidate(7);
+        for (long orderId = 1; orderId <= com.surprising.aeron.protocol.CancelOrderBatchCommand.MAX_ORDERS; orderId++) {
+            window.candidateOrder(orderId, "SYM-" + orderId,
+                    com.surprising.aeron.protocol.CoreOrderSide.BUY, orderId);
+        }
+        var entry = window.add(null, null, 0, 0);
+        assertThat(entry.orderCount)
+                .isEqualTo(com.surprising.aeron.protocol.CancelOrderBatchCommand.MAX_ORDERS);
+        for (long orderId = 1; orderId <= com.surprising.aeron.protocol.CancelOrderBatchCommand.MAX_ORDERS; orderId++) {
+            window.resetCandidate(0);
+            window.candidateOrder(orderId);
+            assertThat(window.conflicts()).isTrue();
+        }
+        window.removePrefix(1);
+        assertThat(window.conflicts()).isFalse();
+    }
+
+    @Test
     void exactOrderTableHandlesCollisionsAndWraparoundWithoutRetainingRemovedEntries() {
         var window = new ClusterCommandWindow();
         long[] ids = new long[21];

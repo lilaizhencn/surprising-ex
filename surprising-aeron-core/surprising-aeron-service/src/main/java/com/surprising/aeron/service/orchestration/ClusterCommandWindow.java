@@ -3,6 +3,7 @@ import com.surprising.aeron.service.command.order.DecodedMatchingCommand;
 import com.surprising.aeron.protocol.CoreMessage;
 import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreOrderSide;
+import com.surprising.aeron.protocol.CancelOrderBatchCommand;
 import com.surprising.aeron.service.state.TradingDependencyMask;
 import com.surprising.aeron.service.state.index.ActiveOrderIndex;
 import io.aeron.cluster.service.ClientSession;
@@ -10,6 +11,8 @@ import io.aeron.cluster.service.ClientSession;
 /** Owner-only bounded in-flight response contexts. Dependency ownership lasts until a log-driven drain. */
 public final class ClusterCommandWindow {
     public static final int DEFAULT_CAPACITY = 256;
+    /** The largest matching batch whose order identities must remain fenced until commit. */
+    private static final int MAX_CANDIDATE_ORDERS = CancelOrderBatchCommand.MAX_ORDERS;
     /** Reason for the latest dependency decision, not an additional command lifecycle state. */
     public enum Conflict { NONE, ORDER, MATCHING_RANGE, OPEN_INTEREST, ACCOUNT }
     private Conflict conflict = Conflict.NONE;
@@ -40,12 +43,12 @@ public final class ClusterCommandWindow {
             if (add) slots[word * 64 + bit] |= slot; else slots[word * 64 + bit] &= ~slot;
         }
     }
-    private final long[] candidateOrders = new long[20];
-    private final String[] candidateOrderSymbols = new String[20];
-    private final CoreOrderSide[] candidateSides = new CoreOrderSide[20];
-    private final long[] candidatePrices = new long[20];
+    private final long[] candidateOrders = new long[MAX_CANDIDATE_ORDERS];
+    private final String[] candidateOrderSymbols = new String[MAX_CANDIDATE_ORDERS];
+    private final CoreOrderSide[] candidateSides = new CoreOrderSide[MAX_CANDIDATE_ORDERS];
+    private final long[] candidatePrices = new long[MAX_CANDIDATE_ORDERS];
     /** 对应范围的成交可能改变全币对持仓量，后续衍生品准入须读取完成后的值。 */
-    private final boolean[] candidateOpenInterestChanges = new boolean[20];
+    private final boolean[] candidateOpenInterestChanges = new boolean[MAX_CANDIDATE_ORDERS];
     private long candidateUser;
     private ActiveOrderIndex participants;
     private CoreMessage decodedSource;
@@ -99,6 +102,9 @@ public final class ClusterCommandWindow {
     }
 
     public void candidateOrder(long orderId, String symbol, CoreOrderSide side, long price, boolean changesOpenInterest) {
+        if (candidateOrderCount >= MAX_CANDIDATE_ORDERS) {
+            throw new IllegalArgumentException("too many candidate orders");
+        }
         candidateOrders[candidateOrderCount++] = orderId;
         if (symbol == null) return;
         // Keep every order identity, but visit an identical matching range only once.
@@ -362,14 +368,14 @@ public final class ClusterCommandWindow {
     }
 
     public static final class Entry {
-        /** 本槽最多20个订单ID，只用于退窗时移除精确索引；[0,orderCount)有效。 */
-        public final long[] orders = new long[20];
+        /** 本槽最多一个撤单批的订单ID，只用于退窗时移除精确索引；[0,orderCount)有效。 */
+        public final long[] orders = new long[MAX_CANDIDATE_ORDERS];
         public int orderCount;
-        public final String[] orderSymbols = new String[20];
-        public final CoreOrderSide[] sides = new CoreOrderSide[20];
-        public final long[] prices = new long[20];
+        public final String[] orderSymbols = new String[MAX_CANDIDATE_ORDERS];
+        public final CoreOrderSide[] sides = new CoreOrderSide[MAX_CANDIDATE_ORDERS];
+        public final long[] prices = new long[MAX_CANDIDATE_ORDERS];
         /** 每个在途范围是否可能改变后续准入所依赖的币对持仓量。 */
-        public final boolean[] openInterestChanges = new boolean[20];
+        public final boolean[] openInterestChanges = new boolean[MAX_CANDIDATE_ORDERS];
         public long userId;
         public int scopeCount;
         public long accounts, symbols;

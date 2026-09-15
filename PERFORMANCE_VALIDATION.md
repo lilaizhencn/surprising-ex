@@ -1970,3 +1970,9 @@ profile：
 验证：`SurprisingClusteredServiceTest` 与 `ClusterCommandPipelineTest` 共 `305` 项通过，失败/错误 `0`，既有跳过 `1`。该变化只消除 Owner 批量循环的重复缓存检查，未单独宣称吞吐收益；下一次固定窗口端到端结果与 JFR 再判断是否保留。
 
 固定窗口短端到端复测（G1、1 Matcher、4 Lane、128 symbols、window256、BUSY_SPIN、MIXED batch20，预热5s/测量15s）完整通过：`404,140.484 business/s`、`38,604.521 core/s`、fills `96,193.674/s`，`unfinished=0`、`fundsDiff=0`、`peakInFlight=256`、`mixedCapacity=PASS`；普通 PLACE p99 `10.780 ms`。单轮仍受调度与 JVM 预热影响，不能将该绝对值视为因果增益或 p99≤5ms 验收；原始目录 `/tmp/core-decode-reuse-20260916` 保留审计。
+
+### 2026-09-16：修正撤单批窗口依赖容量
+
+检查批量依赖登记时发现 `ClusterCommandWindow` 的订单身份、撮合范围和开仓量数组固定为 20，但协议允许 `CANCEL_ORDER_BATCH.MAX_ORDERS=50`。超过 20 项的撤单批会在 Owner 登记窗口依赖时越界，属于正确性缺陷；本次把窗口槽位统一绑定到协议最大批量 50，并在入口显式拒绝超出上限的直接调用。只增加窗口初始化的固定数组容量，不增加每笔命令分配，不改变冲突判断、FIFO 退窗或提交顺序。
+
+验证：`ClusterCommandWindowTest`、`ClusterCommandPipelineTest`、`CoreOrderedOrderBatchTest`、`SurprisingClusteredServiceTest` 共 `354` 项通过，失败/错误 `0`，既有跳过 `1`；新增 50 项撤单依赖覆盖登记、逐项冲突和退窗释放。该修复是正确性边界调整，未执行端到端吞吐对比；下一轮性能仍使用固定单节点、1 Matcher、4 Lane、128 symbols、window256、BUSY_SPIN、G1、MIXED batch20 口径。
