@@ -678,16 +678,20 @@ public final class TradingCoreRuntime implements AutoCloseable,
         window.candidateLanes = runtimeState.topology().accountLaneMask(user);
         window.participants(activeOrderIndex);
         try {
+            // Decode once for the whole command.  The window keeps the same
+            // cached object, but calling through it for every batch item still
+            // repeats the identity check on the Owner hot path.
+            DecodedMatchingCommand decoded = window.decoded(message);
             switch (message.header().messageType()) {
                 case PLACE_ORDER -> { return rememberPipelineLaneMask(window,
-                        addPlaceScope(window.decoded(message).placeOrder(), window)); }
+                        addPlaceScope(decoded.placeOrder(), window)); }
                 case CANCEL_ORDER -> { return rememberPipelineLaneMask(window,
-                        addCancelScope(user, window.decoded(message).cancelOrder().orderId(), window)); }
+                        addCancelScope(user, decoded.cancelOrder().orderId(), window)); }
                 case PLACE_ORDER_BATCH -> {
                     int shard = -1;
-                    for (var order : window.decoded(message).placeOrderBatch().orders()) {
+                    for (var order : decoded.placeOrderBatch().orders()) {
                         if (!addPlaceScope(order, window)) return rememberPipelineLaneMask(window, false);
-                        int current = window.decoded(message).matcherShard(matchingAdapter, order.symbol());
+                        int current = decoded.matcherShard(matchingAdapter, order.symbol());
                         if (shard >= 0 && current != shard) return rememberPipelineLaneMask(window, false);
                         shard = current;
                     }
@@ -695,9 +699,9 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 }
                 case CANCEL_ORDER_BATCH -> {
                     int shard = -1;
-                    for (var order : window.decoded(message).cancelOrderBatch().orders()) {
+                    for (var order : decoded.cancelOrderBatch().orders()) {
                         if (!addCancelScope(user, order.orderId(), window)) return rememberPipelineLaneMask(window, false);
-                        int current = window.decoded(message).matcherShard(matchingAdapter, activeOrderIndex.activeOrderSymbol(order.orderId()));
+                        int current = decoded.matcherShard(matchingAdapter, activeOrderIndex.activeOrderSymbol(order.orderId()));
                         if (shard >= 0 && current != shard) return rememberPipelineLaneMask(window, false);
                         shard = current;
                     }

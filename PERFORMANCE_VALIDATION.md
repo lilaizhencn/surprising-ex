@@ -1962,3 +1962,9 @@ profile：
 结论：保留该无语义变化的探测合并。它只减少热路径哈希访问和修复完成索引哨兵配置，不能单独证明吞吐提升；端到端主要瓶颈仍需由固定窗口 JFR 与分配站点继续量化。
 
 短端到端复测（同一工作树、G1、1 Matcher、4 Lane、128 symbols、window256、BUSY_SPIN、MIXED batch20，预热5s/测量15s）两轮：`377,610.890 business/s` 与 `399,002.158 business/s`，均 `unfinished=0`、`fundsDiff=0`、`peakInFlight=256`、`mixedCapacity=PASS`；均值 `388,306.524/s`，相对已有同口径 `392,705.617/s` 约低 `1.1%`，低于 `5%` 回退门槛。短测尾延迟受调度抖动影响，普通 PLACE 两轮 p99 为 `11.952 ms`、`13.148 ms`，尚不能作为 p99≤5ms 验收结果。原始目录 `/tmp/core-index-probe-20260916`、`/tmp/core-index-probe-rerun-20260916` 保留审计；节点与客户端均已退出。
+
+### 2026-09-16：Owner 批量窗口复用同一解码引用（计划与结果）
+
+计划：`prepareClusterPipelineScope` 每个命令只取得一次 `DecodedMatchingCommand`，批量 PLACE/CANCEL 循环复用该引用；此前每个批量项都会再次调用窗口缓存的身份检查。命令解码内容、准入范围、Matcher 分片校验与失败语义不变。
+
+验证：`SurprisingClusteredServiceTest` 与 `ClusterCommandPipelineTest` 共 `305` 项通过，失败/错误 `0`，既有跳过 `1`。该变化只消除 Owner 批量循环的重复缓存检查，未单独宣称吞吐收益；下一次固定窗口端到端结果与 JFR 再判断是否保留。
