@@ -64,7 +64,7 @@ final class MatcherSettlementDispatcher {
         owner.assertOwner();
         var resolved = admission.resolved();
         OrderRuntime order = TradingRuntimeState.preparedOrder(owner.productLine(), admission.userId(),
-                resolved, commandId, resolved.symbolId());
+                resolved, commandId, resolved.symbolId(), timestamp, position);
         MatcherSettlementEvent event = prepareDirect(sequence, commitSequence, laneMask, order, null, 1,
                 commandId, shard, identities, timestamp, position, cancellations, null);
         event.replacement(admission, identities.assetId(resolved.reservationAsset()));

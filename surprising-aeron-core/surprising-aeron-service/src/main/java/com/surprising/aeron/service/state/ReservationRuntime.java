@@ -28,6 +28,7 @@ public record ReservationRuntime(long orderId, long userId, int symbolId, long i
         if (remainingUnits < 0 || remainingUnits > reservedUnits()) {
             throw new IllegalArgumentException("invalid runtime reservation remainder");
         }
+        if (remainingUnits == reservedUnits()) return this;
         return new ReservationRuntime(orderId, userId, symbolId, instrumentChangeId, kind, assetId,
                 totalReservedUnits, Math.addExact(releasedUnits, reservedUnits() - remainingUnits),
                 consumedUnits, orderQuantitySteps);
@@ -35,12 +36,14 @@ public record ReservationRuntime(long orderId, long userId, int symbolId, long i
 
     public ReservationRuntime release(long units) {
         if (units < 0 || units > reservedUnits()) throw new IllegalArgumentException("invalid runtime release");
+        if (units == 0) return this;
         return new ReservationRuntime(orderId, userId, symbolId, instrumentChangeId, kind, assetId,
                 totalReservedUnits, Math.addExact(releasedUnits, units), consumedUnits, orderQuantitySteps);
     }
 
     public ReservationRuntime consume(long units) {
         if (units < 0 || units > reservedUnits()) throw new IllegalArgumentException("invalid runtime consumption");
+        if (units == 0) return this;
         return new ReservationRuntime(orderId, userId, symbolId, instrumentChangeId, kind, assetId,
                 totalReservedUnits, releasedUnits, Math.addExact(consumedUnits, units), orderQuantitySteps);
     }

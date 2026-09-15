@@ -18,6 +18,7 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
     }
 
     private long coreSequence;
+    private long timestamp, position;
     private long userId;
     private ResolvedPlaceOrder order;
     private UUID commandId;
@@ -45,13 +46,16 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
 
     PlaceAdmissionEvent prepare(long coreSequence, long userId, ResolvedPlaceOrder order, UUID commandId,
                                 long openInterestSteps, RuntimeOrderAdmission.AdmissionIdentity identity,
-                                int symbolId, int assetId, int laneId, TradingRuntimeState runtime, RuntimeIdentityRegistry identities) {
-        if (coreSequence <= 0 || userId <= 0 || order == null || commandId == null || openInterestSteps < 0
+                                int symbolId, int assetId, int laneId, TradingRuntimeState runtime, RuntimeIdentityRegistry identities,
+                                long timestamp, long position) {
+        if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0 || order == null || commandId == null || openInterestSteps < 0
                 || identity == null || symbolId < 0 || assetId < 0
                 || laneId < 0 || runtime == null) {
             throw new IllegalArgumentException("invalid place admission event");
         }
         this.coreSequence = coreSequence;
+        this.timestamp = timestamp;
+        this.position = position;
         this.userId = userId;
         this.order = order;
         this.commandId = commandId;
@@ -108,8 +112,8 @@ public final class PlaceAdmissionEvent implements SettlementLaneWorker.Command {
                 long requiredReservation = RuntimeOrderAdmission.requiredReservationPrepared(
                         runtime, userId, order, openInterestSteps,
                         lane.admissionOrderIndex(symbolId), identity);
-                RuntimeCommandProcessor.placeOrderPreparedInLane(runtime, lane, userId, order, commandId,
-                        requiredReservation, preparedClientKey.key(), symbolId, assetId, coreSequence);
+                runtime.placeOrderInLane(lane, userId, order, commandId,
+                        requiredReservation, preparedClientKey.key(), symbolId, assetId, coreSequence, null, timestamp, position);
                 admittedUser = lane.users.get(userId);
                 admittedOrder = lane.orders.get(order.orderId());
                 admittedReservation = lane.reservations.get(order.orderId());

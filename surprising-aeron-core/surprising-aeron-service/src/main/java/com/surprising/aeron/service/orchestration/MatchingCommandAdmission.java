@@ -211,7 +211,7 @@ final class MatchingCommandAdmission {
                     var command = decodedCommand.placeOrder();
                     owner.requireOrderIdentityAvailable(message.header().userId(), command);
                     placeAdmission = owner.dispatchPlaceAdmission(message.header().userId(), command,
-                            message.header().commandId(), sequence);
+                            message.header().commandId(), sequence, clusterTimestamp, clusterPosition);
                 }
                 case CANCEL -> validatePendingCancel(message, decodedCommand);
                 case REPLACE -> admission = validatePendingReplace(message, decodedCommand, false);

@@ -167,6 +167,7 @@ public final class RuntimeDerivativeFillCalculator {
         }
         ReservationRuntime reservation() {
             ReservationRuntime r = originalReservation;
+            if (consumed == r.consumedUnits()) return r;
             return new ReservationRuntime(r.orderId(), r.userId(), r.symbolId(), r.instrumentChangeId(),
                     r.kind(), r.assetId(), r.totalReservedUnits(), r.releasedUnits(), consumed, r.orderQuantitySteps());
         }

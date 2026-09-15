@@ -25,6 +25,50 @@ import org.junit.jupiter.params.provider.EnumSource;
 class ClusterCommandPipelineTest {
     @ParameterizedTest
     @EnumSource(ProductLine.class)
+    void restingOrdersKeepTheirAdmissionVersionThroughOrderedCommit(ProductLine product) throws Exception {
+        for (boolean batch : new boolean[]{false, true}) {
+            var release = new CountDownLatch(1);
+            try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
+                serial.applyAll(live.setup());
+                var state = live.service.state();
+                var entered = new CountDownLatch(1);
+                var gate = state.matcherPipeline.readAtSubmissionFence(
+                        state.matchingAdapter.matcherShardId("BTC-USDT"), () -> {
+                            entered.countDown();
+                            try { if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("matcher timeout"); }
+                            catch (InterruptedException failure) { throw new AssertionError(failure); }
+                            return true;
+                        });
+                assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
+                var command = batch ? live.placeBatch(11, "BTC-USDT", 1000)
+                        : live.place(11, "BTC-USDT", 1000, 80, 1, CoreOrderSide.BUY);
+                try {
+                    live.send(command);
+                    long sequence = state.matchingSequence(command.header().commandId());
+                    live.progressUntil(() -> {
+                        var pending = state.pendingMatching(sequence);
+                        var event = batch ? pending.orderBatch.settlementEvent : pending.settlementEvent();
+                        return event != null && event.dispatched();
+                    });
+                    var admitted = state.runtimeState.order(1000);
+                    assertThat(admitted.createdAtEpochMillis()).isEqualTo(command.header().submittedAtEpochMillis());
+                    release.countDown();
+                    live.tick();
+                    assertThat(gate.join()).isTrue();
+                    assertThat(state.runtimeState.order(1000)).isSameAs(admitted);
+                    serial.apply(command);
+                    assertThat(live.responses).hasSize(1);
+                    assertThat(live.hash()).isEqualTo(serial.hash());
+                    try (var restored = TradingCoreRuntime.fromSnapshot(product, state.snapshot())) {
+                        assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
+                    }
+                } finally { release.countDown(); }
+            }
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(ProductLine.class)
     void matcherPublishesOrdinaryAndBatchFillsToLanesWithoutOwnerDrainingResults(ProductLine product) throws Exception {
         for (boolean batch : new boolean[]{false, true}) {
             var release = new CountDownLatch(1);

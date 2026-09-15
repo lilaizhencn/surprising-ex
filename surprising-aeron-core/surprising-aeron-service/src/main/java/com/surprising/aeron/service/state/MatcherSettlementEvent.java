@@ -614,7 +614,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         runtime.captureBalanceBefore(userId, replacementAssetId);
         runtime.placeOrderInLane(lane, userId, replacement.resolved(), directCommandId,
                 replacement.requiredReservationUnits(), clientKey, prepared.symbolId(), replacementAssetId,
-                directCoreSequence, prepared);
+                directCoreSequence, prepared, commitTimestamp, commitClusterPosition);
         runtime.publishUser(userId, lane.users.get(userId));
         runtime.publishOrder(prepared.orderId(), prepared);
         runtime.publishReservation(prepared.orderId(), lane.reservations.get(prepared.orderId()));

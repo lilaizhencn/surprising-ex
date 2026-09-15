@@ -104,3 +104,21 @@ mvn -q -pl surprising-aeron-core/surprising-aeron-benchmarks -am -Dtest=LinearPe
 - 删除生产没有调用的 `RuntimeChangeBuffer.drainToAgronaMap` 和 `TerminalTombstoneStore.putKnownAbsent`，相应测试改为实际生产入口。终态客户号索引仍由 `requireOrderIdentityAvailable` 的重复订单检查使用，未删除或改变去重规则。
 
 本轮正确性1258项全部通过：service953、基准驱动125、protocol107、client49、公共模块24；覆盖六产品线资金、批处理、故障与快照恢复。新增预计算删除清理和发布后缓冲释放断言。性能、限制和清理状态见根目录PERFORMANCE_VALIDATION.md本轮记录。
+
+## 从命令生命周期减少分配（2026-09-15）
+
+2KB/business op是整个Core进程口径，包含协议、Matcher、Lane、Owner和响应，不等于一次余额更新。`BalanceRuntime`在所属Lane内原地修改；共享给Owner的订单/冻结/持仓版本仍需保持不可变，否则后续命令会修改尚未提交或正在读取的旧视图。
+
+| 阶段 | 当前分配与原因 | 本批处理/保留理由 |
+|---|---|---|
+| 解码/决策 | PlaceOrderCommand、symbol/client字符串、ResolvedPlaceOrder等 | 本批未改协议或决策结构；共享币对元数据与请求数据还需分别核对，不能直接删校验。 |
+| 准入冻结 | 初始OrderRuntime、ReservationRuntime、用户版本 | 初始订单一次填入已知日志时间/位置，删除未成交订单仅为metadata再复制整份的中间版本。普通、批量和替换单均覆盖。 |
+| Matcher结果 | MatcherResult、CoreMatchingResult、证据和成交事件 | 跨Lane只读事实/恢复消费者仍存在；`classify`返回枚举，不分配Outcome对象，不能把JIT内联归因当作独立对象来源。 |
+| Lane结算 | 真实变化的订单、冻结、持仓版本 | 实际变化版本保留；释放/消耗为0、剩余冻结不变、FillCursor消耗量未变时复用原ReservationRuntime。 |
+| Owner提交 | 变更发布、保留索引、响应编码等 | 保留有序提交和必要结果消费者。新订单未成交时显式登记发布，不能省掉复制后连业务变化一起漏掉。 |
+
+具体入口：`MatchingCommandAdmission`/`OrderBatchExecutor`传递命令已有时间和位置→`PlaceAdmissionEvent`/`PlaceBatchAdmissionEvent`→`TradingRuntimeState.placeOrderInLane/preparedOrder`一次构造；替换单由`MatcherSettlementDispatcher.prepareDirectReplacement`同样一次构造。只在已有池化事件中增加两个primitive字段用于跨线程携带已知数据，没有新阶段或生产类；删除两个纯转发方法和生产无调用的批准入重载。
+
+正确性测试增加：六产品线普通及批量未成交订单从准入到提交保持同一OrderRuntime对象，并与串行结果/快照恢复一致；无变化冻结复用原版本，真实变化不修改旧版本，非法金额仍拒绝。完整验证与分配结果见根目录PERFORMANCE_VALIDATION.md本轮记录。
+
+本批1265项正确性测试通过。短轮无采样273483业务ops/s，下单p99 16.203ms；独立JFR约1996B/business op，Owner98.44%单核。局部构造176B/次；整体分配仍高，主要剩余解码、真实订单/冻结版本和Matcher结果。测量窗有系统swap-in及Owner类加载IO，未通过严格性能验收，详情见验证记录。

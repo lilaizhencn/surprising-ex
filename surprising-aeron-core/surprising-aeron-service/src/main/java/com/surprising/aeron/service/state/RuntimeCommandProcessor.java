@@ -324,14 +324,6 @@ public final class RuntimeCommandProcessor {
         runtime.pendingReservations.markInCurrentLane(userId, command.orderId(), coreSequence);
     }
 
-    static void placeOrderPreparedInLane(
-            TradingRuntimeState runtime, AccountLaneState lane, long userId,
-            ResolvedPlaceOrder command, UUID commandId, long requiredReservation,
-            long clientKey, int symbolId, int assetId, long coreSequence) {
-        runtime.placeOrderProvisionalInLane(lane, userId, command, commandId,
-                requiredReservation, clientKey, symbolId, assetId, coreSequence);
-    }
-
     public static boolean cancelOrder(TradingRuntimeState runtime, long userId, long orderId) {
         if (runtime == null || userId <= 0 || orderId <= 0) {
             throw new IllegalArgumentException("invalid runtime cancel order");

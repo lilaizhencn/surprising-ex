@@ -19,6 +19,7 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
     }
 
     private long coreSequence;
+    private long timestamp, position;
     private long userId;
     private UUID commandId;
     /** 有值时由 Lane 解析意图；直接状态调用可传入已解析订单。 */
@@ -53,8 +54,8 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
             int[] symbolIds, int[] assetIds,
             CoreMatchingOrder[] matchingOrders, OrderRuntime[] admittedOrders,
             ReservationRuntime[] admittedReservations, int itemCount, int laneId,
-            TradingRuntimeState runtime, TradingRuntimeState.MatcherSettlementChanges changes, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source) {
-        if (coreSequence <= 0 || userId <= 0 || commandId == null || orders == null
+            TradingRuntimeState runtime, TradingRuntimeState.MatcherSettlementChanges changes, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source, long timestamp, long position) {
+        if (timestamp < 0 || position < 0 || coreSequence <= 0 || userId <= 0 || commandId == null || orders == null
                 || openInterestSteps == null || admissionIdentities == null || clientKeys == null || symbolIds == null
                 || assetIds == null || matchingOrders == null || admittedOrders == null
                 || admittedReservations == null || itemCount <= 0
@@ -66,6 +67,8 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
             throw new IllegalArgumentException("invalid place batch admission event");
         }
         this.coreSequence = coreSequence;
+        this.timestamp = timestamp;
+        this.position = position;
         this.userId = userId;
         this.commandId = commandId;
         this.orders = orders;
@@ -138,9 +141,9 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
                     long requiredReservation = RuntimeOrderAdmission.requiredReservationPrepared(
                             runtime, userId, order, openInterestSteps[index],
                             lane.admissionOrderIndex(symbolIds[index]), identity);
-                    RuntimeCommandProcessor.placeOrderPreparedInLane(runtime, lane, userId, order, commandId,
+                    runtime.placeOrderInLane(lane, userId, order, commandId,
                             requiredReservation, clientKeys[index].key(), symbolIds[index], assetIds[index],
-                            coreSequence);
+                            coreSequence, null, timestamp, position);
                     admittedOrders[index] = lane.orders.get(order.orderId());
                     admittedReservations[index] = lane.reservations.get(order.orderId());
                     admittedCount++;

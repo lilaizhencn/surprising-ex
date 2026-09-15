@@ -267,7 +267,8 @@ final class OrderBatchExecutor {
                 batch.preparedOrders, batch.preparedOpenInterestSteps, batch.preparedAdmissionIdentities,
                 batch.preparedClientKeyValues, batch.preparedSymbolIds, batch.preparedAssetIds,
                 batch.preparedMatchingOrders, batch.preparedAdmittedOrders,
-                batch.preparedAdmittedReservations, batch.items.size(), owner.identities, batch);
+                batch.preparedAdmittedReservations, batch.items.size(), owner.identities, batch,
+                batch.clusterTimestamp, batch.clusterPosition);
     }
 
     void submitPipelinedPlaceBatch(CommandSlot pending, OrderBatchPending batch) {

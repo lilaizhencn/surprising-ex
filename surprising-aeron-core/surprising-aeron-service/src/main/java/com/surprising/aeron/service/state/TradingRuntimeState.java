@@ -1704,7 +1704,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     public PlaceAdmissionEvent dispatchPlaceAdmission(
             long coreSequence, long userId, ResolvedPlaceOrder order, java.util.UUID commandId,
             long openInterestSteps, RuntimeOrderAdmission.AdmissionIdentity identity,
-            int symbolId, int assetId, RuntimeIdentityRegistry identities) {
+            int symbolId, int assetId, RuntimeIdentityRegistry identities,
+            long timestamp, long position) {
         assertOwner();
         if (!accountLanesStarted) {
             throw new IllegalStateException("asynchronous place admission requires Account Lane workers");
@@ -1716,7 +1717,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (event == null) event = new PlaceAdmissionEvent();
         event.prepare(
                 coreSequence, userId, order, commandId, openInterestSteps, identity,
-                symbolId, assetId, laneId, this, identities);
+                symbolId, assetId, laneId, this, identities, timestamp, position);
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
                 accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
         try {
@@ -1742,19 +1743,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             RuntimeOrderAdmission.AdmissionIdentity[] admissionIdentities,
             RuntimeIdentityRegistry.PreparedClientKey[] clientKeys, int[] symbolIds, int[] assetIds,
             CoreMatchingOrder[] matchingOrders,
-            OrderRuntime[] admittedOrders, ReservationRuntime[] admittedReservations, int itemCount, RuntimeIdentityRegistry identities) {
-        return dispatchPlaceBatchAdmission(coreSequence, userId, commandId, orders, openInterestSteps,
-                admissionIdentities, clientKeys, symbolIds, assetIds, matchingOrders, admittedOrders,
-                admittedReservations, itemCount, identities, null);
-    }
-
-    public PlaceBatchAdmissionEvent dispatchPlaceBatchAdmission(
-            long coreSequence, long userId, java.util.UUID commandId,
-            ResolvedPlaceOrder[] orders, long[] openInterestSteps,
-            RuntimeOrderAdmission.AdmissionIdentity[] admissionIdentities,
-            RuntimeIdentityRegistry.PreparedClientKey[] clientKeys, int[] symbolIds, int[] assetIds,
-            CoreMatchingOrder[] matchingOrders,
-            OrderRuntime[] admittedOrders, ReservationRuntime[] admittedReservations, int itemCount, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source) {
+            OrderRuntime[] admittedOrders, ReservationRuntime[] admittedReservations, int itemCount, RuntimeIdentityRegistry identities, PlaceBatchIntentSource source, long timestamp, long position) {
         assertOwner();
         if (!accountLanesStarted) {
             throw new IllegalStateException("asynchronous place batch admission requires Account Lane workers");
@@ -1768,7 +1757,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (event == null) event = new PlaceBatchAdmissionEvent();
         event.prepare(coreSequence, userId, commandId, orders, openInterestSteps, admissionIdentities,
                 clientKeys, symbolIds, assetIds, matchingOrders, admittedOrders,
-                admittedReservations, itemCount, laneId, this, changes, identities, source);
+                admittedReservations, itemCount, laneId, this, changes, identities, source, timestamp, position);
         accountLaneQueueHighWaterMarks[laneId] = Math.max(
                 accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
         try {
@@ -2229,6 +2218,13 @@ public final class TradingRuntimeState implements AutoCloseable {
             lane.completePendingReservation(orderId, plan.coreSequence());
             MatcherSettlementChanges changes = matcherSettlementChangesScope.get();
             if (changes != null) changes.completedPending[lane.laneId()]++;
+            // 新订单即使未成交也必须进入终态发布；不再靠复制一份时间戳版本触发变更。
+            OrderRuntime admitted = lane.orders.get(orderId);
+            publishOrder(orderId, admitted);
+            if (changes == null) {
+                changedOrder(orderId, admitted);
+                changedUsers.add(reservation.userId());
+            }
             captureBalanceAfter(lane, reservation.userId(), reservation.assetId());
         }
     }
@@ -4652,25 +4648,19 @@ public final class TradingRuntimeState implements AutoCloseable {
      * collects the event, so it deliberately creates no checkpoint, changed-key or commit-patch state.
      */
     static OrderRuntime preparedOrder(com.surprising.product.api.ProductLine productLine,
-            long userId, ResolvedPlaceOrder command, java.util.UUID commandId, int symbolId) {
+            long userId, ResolvedPlaceOrder command, java.util.UUID commandId, int symbolId,
+            long timestamp, long position) {
         return new OrderRuntime(command.orderId(), productLine, userId, symbolId,
                 command.instrumentChangeId(), command.side(), command.limitPriceTicks(), command.matchingPriceTicks(),
                 command.quantitySteps(), 0, command.quantitySteps(), command.reduceOnly(), command.marginMode(),
                 command.positionSide(), command.orderType(), command.timeInForce(), command.postOnly(),
                 command.clientOrderId(), commandId, command.makerFeeRatePpm(), command.takerFeeRatePpm(),
-                0, 0, 0, CoreOrderStatus.OPEN, 1);
-    }
-
-    void placeOrderProvisionalInLane(
-            AccountLaneState lane, long userId, ResolvedPlaceOrder command, java.util.UUID commandId,
-            long requiredReservation, long clientKey, int symbolId, int assetId, long coreSequence) {
-        placeOrderInLane(lane, userId, command, commandId, requiredReservation, clientKey,
-                symbolId, assetId, coreSequence, null);
+                timestamp, timestamp, position, CoreOrderStatus.OPEN, 1);
     }
 
     void placeOrderInLane(AccountLaneState lane, long userId, ResolvedPlaceOrder command,
             java.util.UUID commandId, long requiredReservation, long clientKey,
-            int symbolId, int assetId, long coreSequence, OrderRuntime prepared) {
+            int symbolId, int assetId, long coreSequence, OrderRuntime prepared, long timestamp, long position) {
         if (lane == null || laneCommandScope.get() != lane
                 || lane.laneId() != topology.accountLaneId(userId)
                 || command == null || commandId == null || userId <= 0 || requiredReservation <= 0
@@ -4692,7 +4682,7 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw new CoreStateRejectedException("INSUFFICIENT_AVAILABLE_BALANCE",
                     "available balance is insufficient");
         }
-        OrderRuntime order = prepared == null ? preparedOrder(productLine, userId, command, commandId, symbolId)
+        OrderRuntime order = prepared == null ? preparedOrder(productLine, userId, command, commandId, symbolId, timestamp, position)
                 : prepared;
         ReservationRuntime reservation = new ReservationRuntime(command.orderId(), userId, symbolId,
                 command.instrumentChangeId(), command.reservationKind(), assetId, requiredReservation,
