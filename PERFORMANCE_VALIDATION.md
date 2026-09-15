@@ -1976,3 +1976,9 @@ profile：
 检查批量依赖登记时发现 `ClusterCommandWindow` 的订单身份、撮合范围和开仓量数组固定为 20，但协议允许 `CANCEL_ORDER_BATCH.MAX_ORDERS=50`。超过 20 项的撤单批会在 Owner 登记窗口依赖时越界，属于正确性缺陷；本次把窗口槽位统一绑定到协议最大批量 50，并在入口显式拒绝超出上限的直接调用。只增加窗口初始化的固定数组容量，不增加每笔命令分配，不改变冲突判断、FIFO 退窗或提交顺序。
 
 验证：`ClusterCommandWindowTest`、`ClusterCommandPipelineTest`、`CoreOrderedOrderBatchTest`、`SurprisingClusteredServiceTest` 共 `354` 项通过，失败/错误 `0`，既有跳过 `1`；新增 50 项撤单依赖覆盖登记、逐项冲突和退窗释放。随后服务模块全量回归 `965` 项通过，失败/错误 `0`，既有跳过 `1`（故障注入用例输出的 Aeron heartbeat/driver warning 不影响通过结果）。该修复是正确性边界调整，未执行端到端吞吐对比；下一轮性能仍使用固定单节点、1 Matcher、4 Lane、128 symbols、window256、BUSY_SPIN、G1、MIXED batch20 口径。
+
+### 2026-09-16：终态客户号 tombstone 退窗解链优化
+
+JFR 显示 Owner 的终态提交仍会在 `TerminalTombstoneStore` 对客户号桶重复计算哈希并扫描链表。索引槽现在保存客户号桶和前驱，新增/覆盖仍按原顺序插入；FIFO 退窗直接按槽位解链，空客户号、重复客户号、快照复制与恢复语义不变。删除了原先按 `(type,user,client)` 再查找的退窗逻辑；这是 Owner 线程内的索引实现优化，不新增业务状态或跨线程同步。
+
+定向终态/快照/批量/服务回归通过；随后服务模块全量 `980` 项通过，失败/错误 `0`，既有跳过 `1`。本次没有重新跑端到端吞吐，不能把局部解链优化宣称为吞吐提升；下一轮固定压测继续观察 Owner 终态提交 CPU、tombstone 桶热点和分配率。

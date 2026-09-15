@@ -20,6 +20,8 @@ final class TerminalTombstoneStore {
     private String[] clients = new String[128];
     /** 客户号哈希桶及槽位链，下标加一为链接值，零为空。 */
     private int[] buckets = new int[256], next = new int[128];
+    /** 已索引槽位的客户号桶和前驱；FIFO退窗可直接解链，不再重复计算哈希和遍历桶链。 */
+    private int[] clientBucketBySlot = new int[128], clientPrevious = new int[128];
     /** 同客户号覆盖时只索引最后一项，保持原Map put/remove语义。 */
     private boolean[] indexed = new boolean[128];
 
@@ -52,7 +54,7 @@ final class TerminalTombstoneStore {
             throw new IllegalArgumentException("invalid retained terminal entity");
         if (existing < 0 && size == ids.length) grow();
         int slot = existing >= 0 ? existing : (head + size++) & (ids.length - 1);
-        if (existing >= 0) unlinkClient(types[slot], users[slot], clients[slot]);
+        if (existing >= 0) unlinkClientSlot(slot);
         ids[slot] = id; users[slot] = user; sequences[slot] = sequence; types[slot] = type; clients[slot] = client;
         if (existing < 0) {
             maximumIndexedIds[type] = Math.max(maximumIndexedIds[type], id);
@@ -64,7 +66,7 @@ final class TerminalTombstoneStore {
     void trim(int maximum) {
         while (size > maximum) {
             unlinkEntity(head);
-            unlinkClient(types[head], users[head], clients[head]);
+            unlinkClientSlot(head);
             clients[head] = null;
             indexed[head] = false;
             next[head] = 0;
@@ -116,29 +118,38 @@ final class TerminalTombstoneStore {
         }
         return -1;
     }
-    private void unlinkClient(int type, long user, String client) {
-        if (client == null || client.isEmpty()) return;
-        unlinkClient(type, user, client, bucket(type, user, client));
-    }
-    private void unlinkClient(int type, long user, String client, int bucket) {
-        int previous = 0;
-        for (int link = buckets[bucket]; link != 0; link = next[link - 1]) {
-            int slot = link - 1;
-            if (types[slot] == type && users[slot] == user && clients[slot].equals(client)) {
-                if (previous == 0) buckets[bucket] = next[slot]; else next[previous - 1] = next[slot];
-                next[slot] = 0; indexed[slot] = false;
-                return;
-            }
-            previous = link;
-        }
+    /** 解链已知FIFO槽位；索引槽保存桶和前驱，避免退窗热路径重新哈希并扫描。 */
+    private void unlinkClientSlot(int slot) {
+        if (!indexed[slot]) return;
+        int bucket = clientBucketBySlot[slot];
+        int previous = clientPrevious[slot];
+        int following = next[slot];
+        if (previous == 0) buckets[bucket] = following;
+        else next[previous - 1] = following;
+        if (following != 0) clientPrevious[following - 1] = previous;
+        next[slot] = 0;
+        clientPrevious[slot] = 0;
+        clientBucketBySlot[slot] = -1;
+        indexed[slot] = false;
     }
     private void indexClient(int slot) {
-        if (clients[slot].isEmpty()) return;
+        if (clients[slot].isEmpty()) {
+            clientBucketBySlot[slot] = -1;
+            clientPrevious[slot] = 0;
+            indexed[slot] = false;
+            return;
+        }
         int bucket = bucket(types[slot], users[slot], clients[slot]);
         // A newly allocated FIFO slot cannot already be present in the client chain. The
         // existing-slot path unlinks before reaching here; avoid a second bucket traversal
         // for every newly retained terminal order.
-        next[slot] = buckets[bucket]; buckets[bucket] = slot + 1; indexed[slot] = true;
+        int following = buckets[bucket];
+        clientBucketBySlot[slot] = bucket;
+        clientPrevious[slot] = 0;
+        next[slot] = following;
+        if (following != 0) clientPrevious[following - 1] = slot + 1;
+        buckets[bucket] = slot + 1;
+        indexed[slot] = true;
     }
     private void grow() {
         int capacity = Math.multiplyExact(ids.length, 2);
@@ -151,13 +162,17 @@ final class TerminalTombstoneStore {
             newTypes[i] = types[slot]; newClients[i] = clients[slot]; newIndexed[i] = indexed[slot];
         }
         ids = newIds; users = newUsers; sequences = newSequences; types = newTypes; clients = newClients;
-        indexed = newIndexed; next = new int[capacity]; buckets = new int[capacity * 2]; head = 0;
+        indexed = newIndexed; next = new int[capacity];
+        clientBucketBySlot = new int[capacity];
+        java.util.Arrays.fill(clientBucketBySlot, -1);
+        clientPrevious = new int[capacity];
+        buckets = new int[capacity * 2]; head = 0;
         entityBuckets = new int[capacity * 2];
         entityNext = new int[capacity];
         entityPrevious = new int[capacity];
         for (int i = 0; i < size; i++) {
             indexEntity(i);
-            if (indexed[i]) { int b = bucket(types[i], users[i], clients[i]); next[i] = buckets[b]; buckets[b] = i + 1; }
+            if (indexed[i]) indexClient(i);
         }
     }
     TerminalTombstoneStore copy() {
