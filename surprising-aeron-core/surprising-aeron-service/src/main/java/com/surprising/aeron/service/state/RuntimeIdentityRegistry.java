@@ -101,9 +101,11 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
     private static final class PositionEntry extends java.util.concurrent.atomic.AtomicInteger {
         final PositionIdentity identity;
         boolean allocationRecorded; // Owner only; restored identities have already been recorded.
+        volatile boolean identityRegistered;
         PositionEntry(PositionIdentity identity, boolean recorded) {
             this.identity = identity;
             this.allocationRecorded = recorded;
+            this.identityRegistered = recorded;
         }
     }
     private final LongLongHashMap positionAllocationKeys = new LongLongHashMap();
@@ -321,9 +323,20 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
         if (collision != null && !collision.identity.equals(identity)) {
             throw new IllegalStateException("deterministic position identity collision");
         }
-        positionKeys.put(identity, key);
-        recordPositionAllocation(key, collision == null ? entry : collision);
+        PositionEntry retained = collision == null ? entry : collision;
+        ensurePositionIdentityRegistered(retained, key);
+        recordPositionAllocation(key, retained);
         return key;
+    }
+
+    /** Register each position identity once; repeated Lane retains only observe the flag. */
+    private void ensurePositionIdentityRegistered(PositionEntry entry, long key) {
+        if (entry.identityRegistered) return;
+        synchronized (entry) {
+            if (entry.identityRegistered) return;
+            positionKeys.putIfAbsent(entry.identity, key);
+            entry.identityRegistered = true;
+        }
     }
 
     /** Called once per position in a Lane's existing settlement delta, never per fill. */
@@ -344,7 +357,7 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
             int uses = entry.get();
             if (uses < 0) { Thread.onSpinWait(); continue; }
             if (!entry.compareAndSet(uses, Math.incrementExact(uses))) continue;
-            positionKeys.putIfAbsent(entry.identity, key);
+            ensurePositionIdentityRegistered(entry, key);
             return key;
         }
     }
@@ -378,7 +391,7 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
             int uses = entry.get();
             if (uses < 0) { Thread.onSpinWait(); continue; }
             if (!entry.compareAndSet(uses, Math.incrementExact(uses))) continue;
-            positionKeys.putIfAbsent(entry.identity, key);
+            ensurePositionIdentityRegistered(entry, key);
             return key;
         }
     }
@@ -429,6 +442,7 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
             if (identity == null || !Long.valueOf(key).equals(positionKeys.remove(identity))) {
                 throw new IllegalStateException("position identity checkpoint is inconsistent");
             }
+            entry.identityRegistered = false;
             positions.remove(key, entry);
         }
     }
@@ -515,6 +529,7 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
         if (entry == null || !entry.compareAndSet(0, -1)) return;
         // Remove the forward entry before permitting another generation to acquire this key.
         positionKeys.remove(entry.identity, positionKey);
+        entry.identityRegistered = false;
         positions.remove(positionKey, entry);
         removeAllocation(positionAllocationKeys, positionKeyAllocations, positionKey);
     }
