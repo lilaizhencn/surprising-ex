@@ -1922,3 +1922,11 @@ profile：
 验证门槛：服务模块正确性测试全绿；固定单节点、1 matcher、4 lanes、128 symbols、window256、BUSY_SPIN、G1、MIXED batch20 口径下做短稳态复测，观察业务 ops、普通订单 p99、G1 暂停与分配率。若没有可重复的分配/吞吐收益或出现尾延迟回退，则回退该改动。
 
 结果：服务模块 963 项测试通过（1 项既有跳过）。固定本机单节点复测 15.024 秒，业务吞吐 `394,444.610/s`，Core 消息 `37,682.076/s`，fills `93,884.877/s`，`fundsDiff=0`、`unfinished=0`、完整生命周期校验通过。JMH GC 统计分配 `140.724 MB/s`，约 `1,509 B/business op`；历史 latency6-index profile 约 `1,989.65 B/business op`，方向上减少约 24%，但两次不是同一 OS 时间片，不能把差值作为严格因果增益。普通 PLACE p99 `11.526 ms`、p999 `18.219 ms`，仍未达到普通订单 p99≤5ms 目标；本改动只删除普通 PLACE 的撮合 DTO 副本，未解决 Owner FIFO/终态提交排队。JMH 结果已写入 `/tmp/core-place-reuse2/jmh.json`，节点和客户端进程均已退出，临时目录待本轮收尾清理。
+
+## 2026-09-15：批量 PLACE 复用已解析订单（计划）
+
+锁定单因素：批量 PLACE 的 `PlaceBatchAdmissionEvent` 不再为每项创建 `CoreMatchingOrder`，Matcher 直接读取 `OrderBatchPending.preparedOrders` 中已经完成准入的 `ResolvedPlaceOrder`；删除对应的批量 DTO 数组及清理逻辑。普通、替换、触发、清算和恢复路径保持原状，批量结果顺序、证据绑定与资金结算不变。
+
+验证门槛：服务模块正确性测试全绿；固定单节点、1 matcher、4 lanes、128 symbols、window256、BUSY_SPIN、G1、MIXED batch20 口径下做带 `-prof gc` 的短稳态复测，比较业务吞吐、分配率、普通/批量 p99 和完整生命周期校验。无可重复收益或出现回退则回退该改动。
+
+结果：服务模块回归全绿，固定口径短稳态完整校验通过；批量复用轮业务吞吐 `369,230.365/s`、分配约 `1,521 B/business op`、普通 PLACE p99 `14.843 ms`，低于前一轮普通 PLACE 复用基线 `394,444.610/s`、约 `1,509 B/business op`、p99 `11.526 ms`。单轮不足以证明因果，且无分配下降，按门槛回退批量改动及其 DTO 数组删除；该实验不纳入主线结果。节点和客户端进程已退出，临时目录待本轮收尾清理。
