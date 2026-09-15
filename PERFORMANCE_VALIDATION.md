@@ -1936,3 +1936,11 @@ profile：
 计划：`preparePipelinedPlaceBatch` 的批内唯一币对数量受批量上限约束，改用已有 `preparedSymbols` 配套的固定决策数组线性查找，移除每批 `HashMap<String, Decision>` 的节点探测与状态；不改变准入顺序、跨币对校验、Matcher/Lane 交接或响应语义。先执行服务全量正确性测试，再按固定单节点、1 matcher、4 lanes、128 symbols、window256、BUSY_SPIN、G1、MIXED batch20 口径做短稳态吞吐/分配/p99 对比；无可重复收益或发生回退则回退。
 
 结果：服务模块 963 项测试通过（1 项既有跳过），完整生命周期校验通过。相同脚本的两轮无 JFR 吞吐为 `368,287/s` 与 `392,706/s`，JFR 轮为 `399,230/s`；相对 `394,445/s` 基线处于单轮抖动范围，没有可归因的吞吐提升或回退。JFR 中 Owner `97.33%` 单核、Matcher `55.06%`、4 个 Lane 各约 `98.31%`；`HashMap.getNode` 不再出现在热点列表，批量准备热点降至 `0.30%`，但 Owner 的 `Long2ObjectHashMap` 访问、终态桶和状态索引仍是主要成本。保留该改动作为无语义变化的去节点优化，后续不把它当作吞吐收益；分配主项仍为 `OrderRuntime`、`byte[]`、`ReservationRuntime`、`long[]` 和 Matcher 结果。节点/客户端均已退出，压测临时目录保留在 `/tmp` 供审计。
+
+### 2026-09-16：Owner 活跃订单索引包装复用（计划与结果）
+
+计划：`ActiveOrderIndex` 终态移除后清空并在线程本地池中复用 `IndexedOrder` 包装，避免每次新订单重新分配包装对象。池不属于快照或业务状态，索引映射、二级索引、终态删除和恢复语义均保持不变；无跨线程共享，也不改变订单值对象的生命周期。
+
+验证：服务模块 `978` 项测试通过，失败/错误 `0`，既有跳过 `1`；基准模块重新打包成功。`ActiveOrderIndexBenchmark.openThenTerminal`（G1、JDK 25、1 fork、5 次测量）分配从 `86.4005` 降至 `62.4009 B/lifecycle`（1 用户，约 `27.8%`），从 `248.0010` 降至 `224.0010 B/lifecycle`（20 用户，约 `9.7%`）；该微基准的吞吐区间重叠，不宣称吞吐提升。固定单节点端到端（1 Matcher、4 Lane、128 symbols、window256、BUSY_SPIN、MIXED batch20）完整校验通过：`379,144.119 business ops/s`、`36,228.289 core messages/s`、fills `90,283.595/s`、普通 PLACE p99 `11.567 ms`、最差业务 p99 `18.268 ms`、`unfinished=0`、`fundsDiff=0`。相对同口径 `392,705.617/s` 基线约低 `3.5%`，未超过预设 `5%` 回退门槛，单轮不能归因收益或回退。
+
+结论：保留该无语义变化的包装复用，降低 Owner 活跃索引的短命对象分配；它没有解决 Owner 的主要 CPU 瓶颈。当前端到端仍由 Owner 串行索引/终态提交和前置排队限制，Owner/Lane 业务状态未删除。原始压测目录 `/tmp/core-index-reuse-20260916`、JMH 分配结果 `/tmp/active-index-reuse-gc.json` 保留供审计；节点与客户端均已退出。

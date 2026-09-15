@@ -15,6 +15,7 @@ import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -53,6 +54,9 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     private final Map<String, OrderParticipantIndex> participantsBySymbol = new HashMap<>(INITIAL_INDEX_CAPACITY);
     private final Long2ObjectHashMap<IndexedOrder> ordersById =
             new Long2ObjectHashMap<>(INITIAL_INDEX_CAPACITY, 0.65f, false);
+    /** Non-state wrapper pool; terminal orders cannot be observed through this holder. */
+    private static final ThreadLocal<ArrayDeque<IndexedOrder>> RECYCLED_ORDERS =
+            ThreadLocal.withInitial(() -> new ArrayDeque<>(INITIAL_INDEX_CAPACITY));
     /** Query-only holder reused by the Owner thread; it is never part of index state. */
     private static final ThreadLocal<CounterpartyMasks> COUNTERPARTY_SCRATCH =
             ThreadLocal.withInitial(CounterpartyMasks::new);
@@ -62,7 +66,9 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     private static final class IndexedOrder {
         OrderRuntime order;
         String symbol;
-        IndexedOrder(OrderRuntime order, String symbol) { this.order = order; this.symbol = symbol; }
+        IndexedOrder(OrderRuntime order, String symbol) { reset(order, symbol); }
+        void reset(OrderRuntime order, String symbol) { this.order = order; this.symbol = symbol; }
+        void clear() { order = null; symbol = null; }
         long orderId() { return order.orderId(); }
         long userId() { return order.userId(); }
         String symbol() { return symbol; }
@@ -477,12 +483,17 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
                 removeParticipant(previous);
                 remove(idsByUser, previous.userId(), orderId);
                 remove(idsBySymbol, previous.symbol(), orderId);
+                previous.clear();
+                RECYCLED_ORDERS.get().addFirst(previous);
             }
             return;
         }
         IndexedOrder previous = ordersById.get(orderId);
         if (previous == null) {
-            add(new IndexedOrder(current, symbol));
+            IndexedOrder entry = RECYCLED_ORDERS.get().pollFirst();
+            if (entry == null) entry = new IndexedOrder(current, symbol);
+            else entry.reset(current, symbol);
+            add(entry);
             return;
         }
         boolean changedParticipant = previous.userId() != current.userId() || !previous.symbol.equals(symbol)
