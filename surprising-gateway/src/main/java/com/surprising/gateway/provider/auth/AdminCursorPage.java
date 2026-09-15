@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
 
-final class AdminCursorPage {
+public final class AdminCursorPage {
 
     private AdminCursorPage() {
     }
@@ -102,6 +102,6 @@ final class AdminCursorPage {
     record Cursor(Instant timestamp, long id) {
     }
 
-    record CursorPage<T>(List<T> items, String nextCursor, boolean hasMore, String sort, int limit) {
+    public record CursorPage<T>(List<T> items, String nextCursor, boolean hasMore, String sort, int limit) {
     }
 }

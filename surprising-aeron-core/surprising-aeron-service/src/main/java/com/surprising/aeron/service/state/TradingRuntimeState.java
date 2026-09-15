@@ -1157,7 +1157,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         if (value == null) values.remove(key); else values.put(key, value);
     }
 
-    static class LaneDelta {
+    public static class LaneDelta {
         /** 本 Lane 的不可变实体发布收据；Owner 不再逐实体重写发布表。 */
         LanePublication publication;
         private LanePublication publicationBuffer;

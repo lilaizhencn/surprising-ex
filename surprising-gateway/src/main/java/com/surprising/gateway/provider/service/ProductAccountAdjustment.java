@@ -2,7 +2,7 @@ package com.surprising.gateway.provider.service;
 
 public record ProductAccountAdjustment(Status status, String errorMessage) {
 
-    enum Status {
+    public enum Status {
         APPLIED,
         REJECTED,
         UNKNOWN
