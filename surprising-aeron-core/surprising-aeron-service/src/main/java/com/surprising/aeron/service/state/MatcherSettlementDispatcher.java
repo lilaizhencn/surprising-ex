@@ -89,7 +89,8 @@ final class MatcherSettlementDispatcher {
     }
 
     MatcherSettlementEvent prepareDirectCancelBatch(long sequence, boolean finalChunk, long userId, OrderRuntime[] orders, int count,
-            java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities, long timestamp, long position) {
+            java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities, long timestamp, long position,
+            LaneOrderResultTarget resultTarget) {
         owner.assertOwner();
         if (count <= 0 || count > orders.length) throw new IllegalArgumentException("invalid cancel chunk");
         long mask = owner.topology.accountLaneMask(userId);
@@ -98,7 +99,7 @@ final class MatcherSettlementDispatcher {
         if (event == null) event = new MatcherSettlementEvent();
         System.arraycopy(orders, 0, event.batchStorage(count).admittedOrders, 0, count);
         event.prepareDirect(sequence, finalChunk ? sequence : 0, mask, timestamp, position, commandId, shard,
-                owner, identities, count, List.of(), null);
+                owner, identities, count, List.of(), resultTarget);
         event.cancellation(userId);
         return event;
     }

@@ -21,7 +21,6 @@ final class CommandResultLedger {
     private static final int RETENTION_CAPACITY = 256;
     private final long[] commandIdMost = new long[TABLE_CAPACITY];
     private final long[] commandIdLeast = new long[TABLE_CAPACITY];
-    private final byte[] slotState = new byte[TABLE_CAPACITY]; // 0 empty, 1 occupied, 2 deleted
     private final StoredResult[] results = new StoredResult[TABLE_CAPACITY];
     /** Retention order; eviction advances this queue instead of scanning the hash table. */
     private final int[] retentionSlots = new int[RETENTION_CAPACITY];
@@ -46,14 +45,13 @@ final class CommandResultLedger {
 
     StoredResult get(UUID id) {
         if (id == null) return null;
-        int slot = find(id.getMostSignificantBits(), id.getLeastSignificantBits());
-        return slot < 0 ? null : results[slot];
+        return results[locate(id.getMostSignificantBits(), id.getLeastSignificantBits())];
     }
 
     /** Snapshot-only materialization; no Map node is created on the command hot path. */
     Map<UUID, StoredResult> entries() {
         ArrayList<Integer> slots = new ArrayList<>(size);
-        for (int slot = 0; slot < TABLE_CAPACITY; slot++) if (slotState[slot] == 1) slots.add(slot);
+        for (int slot = 0; slot < TABLE_CAPACITY; slot++) if (results[slot] != null) slots.add(slot);
         slots.sort(Comparator.comparingLong(slot -> results[slot].retentionSequence()));
         LinkedHashMap<UUID, StoredResult> snapshot = new LinkedHashMap<>(Math.max(4, size * 2));
         for (int slot : slots) snapshot.put(new UUID(commandIdMost[slot], commandIdLeast[slot]), results[slot]);
@@ -131,8 +129,8 @@ final class CommandResultLedger {
         if (resultBytes > MAX_RESULT_LEDGER_BYTES) {
             throw new IllegalArgumentException("result ledger entry exceeds byte bound");
         }
-        int slot = find(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
-        StoredResult previous = slot < 0 ? null : results[slot];
+        int slot = locate(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
+        StoredResult previous = results[slot];
         long retentionSequence = previous == null ? nextResultRetentionSequence : previous.retentionSequence();
         StoredResult retained = new StoredResult(fingerprint, status, resultCode, appliedCommandCount,
                 requiredExportSequence, stateHash, responseData, retentionSequence, true);
@@ -140,14 +138,9 @@ final class CommandResultLedger {
                 : nextResultRetentionSequence;
         long nextBytes = Math.addExact(commandResultBytes - (previous == null ? 0 : resultEntryBytes(previous)),
                 resultBytes);
-        if (slot < 0) {
-            if (size == TABLE_CAPACITY) {
-                evictOldest(commandId);
-                slot = findInsert(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
-            } else slot = findInsert(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
+        if (previous == null) {
             commandIdMost[slot] = commandId.getMostSignificantBits();
             commandIdLeast[slot] = commandId.getLeastSignificantBits();
-            slotState[slot] = 1;
             enqueueRetentionSlot(slot);
             size++;
         }
@@ -164,40 +157,22 @@ final class CommandResultLedger {
     }
 
     private void put(UUID id, StoredResult value) {
-        int slot = findInsert(id.getMostSignificantBits(), id.getLeastSignificantBits());
+        int slot = locate(id.getMostSignificantBits(), id.getLeastSignificantBits());
         commandIdMost[slot] = id.getMostSignificantBits();
         commandIdLeast[slot] = id.getLeastSignificantBits();
-        slotState[slot] = 1;
         results[slot] = value;
         enqueueRetentionSlot(slot);
         size++;
     }
 
-    private int find(long most, long least) {
+    /** One probe finds either the existing result or its empty insertion slot. */
+    private int locate(long most, long least) {
         int slot = hash(most, least);
-        for (int probe = 0; probe < TABLE_CAPACITY; probe++, slot = (slot + 1) & TABLE_MASK) {
-            if (slotState[slot] == 0) return -1;
-            if (slotState[slot] == 1 && commandIdMost[slot] == most && commandIdLeast[slot] == least) return slot;
+        while (results[slot] != null) {
+            if (commandIdMost[slot] == most && commandIdLeast[slot] == least) return slot;
+            slot = (slot + 1) & TABLE_MASK;
         }
-        return -1;
-    }
-
-    private int findInsert(long most, long least) {
-        int slot = hash(most, least), deleted = -1;
-        for (int probe = 0; probe < TABLE_CAPACITY; probe++, slot = (slot + 1) & TABLE_MASK) {
-            if (slotState[slot] == 0) return slot;
-            if (slotState[slot] == 2 && deleted < 0) deleted = slot;
-            else if (slotState[slot] == 1 && commandIdMost[slot] == most && commandIdLeast[slot] == least) return slot;
-        }
-        if (deleted >= 0) return deleted;
-        throw new IllegalStateException("result ledger table is full");
-    }
-
-    private void evictOldest(UUID protectedId) {
-        int oldest = oldestSlot(protectedId);
-        if (oldest < 0) throw new IllegalStateException("result ledger protected entry exceeds bound");
-        commandResultBytes = Math.subtractExact(commandResultBytes, resultEntryBytes(results[oldest]));
-        remove(oldest);
+        return slot;
     }
 
     private int oldestSlot(UUID protectedId) {
@@ -205,7 +180,7 @@ final class CommandResultLedger {
         long protectedLeast = protectedId == null ? Long.MIN_VALUE : protectedId.getLeastSignificantBits();
         for (int offset = 0; offset < RETENTION_CAPACITY && retentionHead + offset < retentionTail; offset++) {
             int slot = retentionSlots[(retentionHead + offset) & (RETENTION_CAPACITY - 1)];
-            if (slot < 0 || slotState[slot] != 1) continue;
+            if (slot < 0 || results[slot] == null) continue;
             if (commandIdMost[slot] == protectedMost && commandIdLeast[slot] == protectedLeast) continue;
             return slot;
         }
@@ -213,14 +188,28 @@ final class CommandResultLedger {
     }
 
     private void remove(int slot) {
-        slotState[slot] = 2;
-        results[slot] = null;
-        size--;
         int position = retentionPositions[slot];
-        if (position >= 0) {
-            retentionSlots[position & (RETENTION_CAPACITY - 1)] = -1;
-            retentionPositions[slot] = -1;
+        retentionSlots[position & (RETENTION_CAPACITY - 1)] = -1;
+        retentionPositions[slot] = -1;
+        size--;
+        // Close the probe-chain hole instead of accumulating deleted markers. Retention
+        // order follows the moved result, so eviction and snapshot order stay unchanged.
+        int hole = slot;
+        for (int next = (hole + 1) & TABLE_MASK; results[next] != null;
+                next = (next + 1) & TABLE_MASK) {
+            int home = hash(commandIdMost[next], commandIdLeast[next]);
+            if (((hole - home) & TABLE_MASK) < ((next - home) & TABLE_MASK)) {
+                commandIdMost[hole] = commandIdMost[next];
+                commandIdLeast[hole] = commandIdLeast[next];
+                results[hole] = results[next];
+                int movedPosition = retentionPositions[next];
+                retentionPositions[hole] = movedPosition;
+                retentionSlots[movedPosition & (RETENTION_CAPACITY - 1)] = hole;
+                hole = next;
+            }
         }
+        results[hole] = null;
+        retentionPositions[hole] = -1;
         advanceRetentionHead();
     }
 
@@ -239,20 +228,18 @@ final class CommandResultLedger {
         }
     }
 
-    /** Rare fallback for repeated protected-key replacements; remains allocation-free. */
+    /** Compact holes left when a retained old result grows and evicts newer entries. */
     private void compactRetentionQueue() {
         int count = 0;
         int pending = retentionTail - retentionHead;
         for (int offset = 0; offset < pending; offset++) {
             int slot = retentionSlots[(retentionHead + offset) & (RETENTION_CAPACITY - 1)];
-            if (slot >= 0 && slotState[slot] == 1) retentionSlots[count++] = slot;
+            if (slot < 0) continue;
+            int position = retentionHead + count++;
+            retentionSlots[position & (RETENTION_CAPACITY - 1)] = slot;
+            retentionPositions[slot] = position;
         }
-        java.util.Arrays.fill(retentionPositions, -1);
-        for (int position = 0; position < count; position++) {
-            retentionPositions[retentionSlots[position]] = position;
-        }
-        retentionHead = 0;
-        retentionTail = count;
+        retentionTail = retentionHead + count;
     }
 
     private static int hash(long most, long least) {

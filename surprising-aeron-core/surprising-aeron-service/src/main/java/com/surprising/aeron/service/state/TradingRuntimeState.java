@@ -195,13 +195,13 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** 当前执行范围复用的 matcherSettlementOrder 临时缓冲，不保存第二份业务状态。 */
     final LongHashSet matcherSettlementOrderScratch = new LongHashSet();
     /** owner 可见的已发布用户；与提交/回滚边界同步维护。 */
-    final LanePublishedMap<UserRuntime> publishedUsers = new LanePublishedMap<>();
+    final LanePublishedMap<UserRuntime> publishedUsers = new LanePublishedMap<>(false);
     /** owner 可见的已发布订单；与提交/回滚边界同步维护。 */
-    final LanePublishedMap<OrderRuntime> publishedOrders = new LanePublishedMap<>();
+    final LanePublishedMap<OrderRuntime> publishedOrders = new LanePublishedMap<>(true);
     /** owner 可见的已发布预留；与提交/回滚边界同步维护。 */
-    final LanePublishedMap<ReservationRuntime> publishedReservations = new LanePublishedMap<>();
+    final LanePublishedMap<ReservationRuntime> publishedReservations = new LanePublishedMap<>(false);
     /** owner 可见的已发布持仓；与提交/回滚边界同步维护。 */
-    final LanePublishedMap<PositionRuntime> publishedPositions = new LanePublishedMap<>();
+    final LanePublishedMap<PositionRuntime> publishedPositions = new LanePublishedMap<>(false);
     /** owner 可见的已发布清算；与提交/回滚边界同步维护。 */
     final LongObjectHashMap<LiquidationRuntime> publishedLiquidations = new LongObjectHashMap<>(4_096);
     // Owner view of immutable Lane results; no mutable Lane map is read by the owner.
@@ -5434,9 +5434,9 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     public MatcherSettlementEvent prepareDirectCancelBatch(long sequence, boolean finalChunk, long userId, OrderRuntime[] orders,
             int count, java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
-            long timestamp, long position) {
+            long timestamp, long position, LaneOrderResultTarget resultTarget) {
         return settlements.prepareDirectCancelBatch(sequence, finalChunk, userId, orders, count, commandId, shard,
-                identities, timestamp, position);
+                identities, timestamp, position, resultTarget);
     }
 
     public void dispatchDirectMatcherSettlement(MatcherSettlementEvent event) { settlements.dispatchDirect(event); }

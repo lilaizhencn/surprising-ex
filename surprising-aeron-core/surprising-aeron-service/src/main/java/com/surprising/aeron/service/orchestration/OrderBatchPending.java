@@ -44,7 +44,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
 
     @Override public void prepareResponse() {
         // 部分拒单、顺序改单可能没有本次 Lane 结果，仍需提交点补齐其查询语义。
-        for (OrderBatchItem item : items) if (!item.laneResultPrepared) return;
+        for (OrderBatchItem item : items) if (!item.laneResultPrepared || item.status == null) return;
         preparedResponse = TradingOrderBatchCodec.encodeResultSource(this);
         responseItem = null;
     }

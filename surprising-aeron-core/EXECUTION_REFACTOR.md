@@ -78,3 +78,18 @@ mvn -q -pl surprising-aeron-core/surprising-aeron-benchmarks -am -Dtest=LinearPe
 按用户追加要求完成真实本机单成员Aeron短测：1 Matcher、4 Lane、BUSY_SPIN、G1、128 symbols、MIXED batch20、在途256，plain/JFR各预热30s+测量30s。plain前两个稳定区间约17.6/18.1万business ops/s，下单p99=26.296ms；驱动含排空汇总17.96万。完成性与资金核对通过，未达30万和5ms参考线。
 
 采样窗口Owner约98%单核、Matcher56%、Lane实际业务执行约25%；Owner仍以结果索引、批量终态及状态发布为主要受限路径。Core分配估算336MB/s、约2.0KB/business op。短轮受IDEA和JIT影响，不证明性能回退或最终容量；详见根目录PERFORMANCE_VALIDATION.md新增记录。未做长稳、GCP，前述架构剩余项不变。
+
+## Owner 冗余工作清理（2026-09-15）
+
+本批按“没有生产消费者就删除；重复计算移到数据所属阶段；资金、顺序及恢复边界保留”的标准实施。
+
+| 入口/职责 | 原因 | 本批处理 |
+|---|---|---|
+| `CommandResultLedger.storeOwnedResult/get`：最终提交后保留查询结果 | 开放寻址表淘汰只留 deleted 标记，持续插删后 miss/插入可能探测整个512槽；插入还重复查找 | 删除 slotState、find/findInsert、无效满表分支；单次查找，以移位删除闭合探测链，同时更新保留队列位置。修正队列压缩的环绕覆盖风险。保留128条/字节上限、替换原保留顺序及恢复语义。 |
+| `TradingRuntimeState` 的账户、持仓、冻结发布表 | 三份 admissionSequences 没有生产读取方，却随每次发布维护 | 这三类表不再分配或维护该索引；订单发布表保留，因为 PendingReservationTracker 依赖它定位尚未结算的批量冻结。直接 put 同时省去一次多余 get。 |
+| `OrderBatchExecutor.submitCancelBatchChunk` → Matcher → `MatcherSettlementEvent.execute` → Lane → Owner | 批量撤单直达事件没有复用已有 Lane 结果槽，最终 Owner 重新查结果并编码 | Owner 预构造事件绑定 batch；Matcher 填各项业务状态并发布；用户所属 Lane 应用撤单并捕获结果，结果完整时编码终态响应；Owner 在完成信号后有序提交。复用现有对象/接口，没有新增生产任务、状态容器或中转阶段。 |
+| `ClusterMixedCapacityMain.runFor/space`：验收统计 | 排空完成量混入持续吞吐；窗口等待没有独立指标 | 新增 steadyCapacity、drain 和 windowBlockedNanos；保留原完成性汇总。汇总脚本以 steady 为主，并修正 Lane 执行比例70%的单位错误。发压策略、窗口和业务配比未改。 |
+
+仍保留：部分拒单、逐项改单等无法由一次 Lane 结果确定最终查询状态的提交点补齐；命令幂等账本；订单待结算索引；发布视图、故障停机及有序提交。它们有实际业务/恢复消费者。本批没有删除业务动作，也没有宣称 Owner 只剩 offer。
+
+新增生产类/接口/阶段为0；新增 `CommandResultLedgerBenchmark` 仅用于持续插删路径的JMH。新增随机周转测试与无Owner推进的批量撤单终态响应断言；完整service及基准驱动的最新有效结果共1258用例通过（service953、benchmark125、protocol107、client49、公共模块24）。旧反射存储测试不再访问已删除索引，仍检查保留表的数组复用。性能及证据见根目录 `PERFORMANCE_VALIDATION.md` 本轮记录。

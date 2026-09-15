@@ -7,7 +7,7 @@ class LanePublishedMapTest {
     @Test void recycledBatchAdmissionDiscardsUnpublishedValuesAndRetainsCapacity() throws Exception {
         var event = new PlaceBatchAdmissionEvent();
         var publication = new LanePublication();
-        var map = new LanePublishedMap<String>();
+        var map = new LanePublishedMap<String>(true);
         for (int i = 0; i < 41; i++) map.stage(publication, i, "discarded");
         publication.admissionSequence = 17;
         var field = PlaceBatchAdmissionEvent.class.getDeclaredField("publication");
@@ -62,7 +62,7 @@ class LanePublishedMapTest {
     }
 
     @Test void publicationReplacesAnExistingValueAtTheOwnerBoundary() {
-        var map = new LanePublishedMap<String>();
+        var map = new LanePublishedMap<String>(true);
         map.put(7, "before");
         var receipt = new LanePublication();
         map.stage(receipt, 7, "after");
@@ -71,7 +71,7 @@ class LanePublishedMapTest {
         assertThat(map.get(7)).isEqualTo("after");
     }
     @Test void reusedLookupNeverMutatesStoredKeysIncludingHashCollisions() {
-        var map = new LanePublishedMap<String>();
+        var map = new LanePublishedMap<String>(true);
         long first = 1, collision = 1L << 32;
         assertThat(Long.hashCode(first)).isEqualTo(Long.hashCode(collision));
         map.put(first, "first");
@@ -86,7 +86,7 @@ class LanePublishedMapTest {
     }
 
     @Test void unpublishedSuccessorsCannotLeakAndReclaimCannotEraseThem() throws Exception {
-        var map = new LanePublishedMap<String>();
+        var map = new LanePublishedMap<String>(true);
         map.put(7, "committed");
         var first = new LanePublication();
         var second = new LanePublication();
@@ -112,8 +112,8 @@ class LanePublishedMapTest {
     }
 
     @Test void oneReceiptPublishesEveryEntityWithoutCopyingTheLiveMaps() throws Exception {
-        var orders = new LanePublishedMap<String>();
-        var positions = new LanePublishedMap<String>();
+        var orders = new LanePublishedMap<String>(true);
+        var positions = new LanePublishedMap<String>(true);
         var receipt = new LanePublication();
         Thread lane = new Thread(() -> {
             for (int i = 1; i <= 1000; i++) orders.stage(receipt, i, "order" + i);
@@ -129,7 +129,7 @@ class LanePublishedMapTest {
     }
 
     @Test void terminalPublicationRemovesAdmissionMetadataWithoutRemovingTheValue() throws Exception {
-        var map = new LanePublishedMap<String>();
+        var map = new LanePublishedMap<String>(true);
         map.applyPublished(0, "admitted", 17);
         assertThat(map.admissionSequence(0)).isEqualTo(17);
         map.applyPublished(0, "committed", 0);
@@ -144,7 +144,7 @@ class LanePublishedMapTest {
     }
 
     @Test void clearRemovesValuesAndTheirAdmissionMetadata() {
-        var map = new LanePublishedMap<String>();
+        var map = new LanePublishedMap<String>(true);
         map.applyPublished(7, "order", 42);
         assertThat(map.admissionSequence(7)).isEqualTo(42);
         map.clear();

@@ -1854,6 +1854,10 @@ class ClusterCommandPipelineTest {
                 while (!event.complete() && System.nanoTime() < deadline) Thread.onSpinWait();
                 assertThat(event.complete()).isTrue();
                 assertThat(pending.orderBatch.cancelEvent).isNull();
+                assertThat(pending.orderBatch.preparedResponse)
+                        .as("Lane encodes the final batch result without an Owner turn").isNotNull();
+                assertThat(TradingOrderBatchCodec.decodeResult(pending.orderBatch.preparedResponse).items())
+                        .allSatisfy(item -> assertThat(item.status()).isEqualTo(ResponseStatus.APPLIED));
                 assertThat(state.pendingMatching(pending.sequence())).isSameAs(pending);
             } finally { release.countDown(); }
             assertThat(gate.join()).isOne();

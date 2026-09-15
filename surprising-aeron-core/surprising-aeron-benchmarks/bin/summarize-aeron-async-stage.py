@@ -81,9 +81,13 @@ def main():
     p99s = [f(r"business=[^\n]*p99us=(\d+)", client)]
     p99_matches = [float(x) for x in re.findall(r"business=[^\n]*p99us=(\d+)", client)]
     high = re.search(r"pipelineHighWater matcher=(\d+) completion=(\d+) context=(\d+) lanes=\[([^]]*)\]", client)
-    mixed = re.search(r"mixedCapacity=PASS[^\n]*businessOpsPerSec=([0-9.]+)[^\n]*coreMessagesPerSec=([0-9.]+)[^\n]*peakInFlight=(\d+)", client)
+    mixed = re.search(r"steadyCapacity[^\n]*businessOpsPerSec=([0-9.]+)[^\n]*coreMessagesPerSec=([0-9.]+)[^\n]*peakInFlight=(\d+)", client)
     metric = {
         "stage": args.stage, "window": args.window,
+        "steadyMeasurementSeconds": f(r"steadyCapacity elapsedSeconds=([0-9.]+)", client, None),
+        "drainNanos": i(r"drain elapsedNanos=(\d+)", client),
+        "drainBusinessOperations": i(r"drain [^\n]*terminalBusinessOperations=(\d+)", client),
+        "windowBlockedNanos": i(r"windowBlockedNanos=(\d+)", client),
         "clientPass": "mixedCapacity=PASS" in client,
         "businessOpsPerSec": float(mixed.group(1)) if mixed else None,
         "coreMessagesPerSec": float(mixed.group(2)) if mixed else None,
@@ -117,7 +121,7 @@ def main():
     lane = lane if math.isfinite(lane) else 0.0
     useful = metric["laneUsefulExecutionRatioMin"] or 0.0
     high_matcher = metric["pipelineHighWater"]["matcher"] if metric["pipelineHighWater"] else 0
-    thresholds = {"owner": owner >= 80.0, "matcher": matcher >= 80.0, "lane": lane >= 80.0 and useful >= 70.0}
+    thresholds = {"owner": owner >= 80.0, "matcher": matcher >= 80.0, "lane": lane >= 80.0 and useful >= 0.70}
     reasons = []
     if args.stage == "owner":
         gate = thresholds["owner"] and high_matcher >= args.window * 0.8

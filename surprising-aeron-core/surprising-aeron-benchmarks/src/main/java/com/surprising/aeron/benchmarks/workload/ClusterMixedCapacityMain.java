@@ -223,7 +223,7 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         drain();
         CoreLaneMetricsView lanesBefore = measure ? laneMetrics() : null;
         measured=measure;
-        if(measure) { offered=terminal=coreOffered=coreTerminal=fills=queries=peak=0;stats.clear();adminRetriesBefore=client.adminActionRetries(); }
+        if(measure) { offered=terminal=coreOffered=coreTerminal=fills=queries=peak=0;windowBlockedNanos=windowBlockedCount=0;stats.clear();adminRetriesBefore=client.adminActionRetries(); }
         started=lastReport=System.nanoTime(); reportTerminal=0;
         if (measure) System.out.println("measurementStartEpochMillis=" + System.currentTimeMillis());
         if (sideLoad != null && measure) sideLoad.beginMeasurement(started);
@@ -231,14 +231,27 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
         while(System.nanoTime()<end) {
             cycle(); totalCycles++; if(measure)measuredCycles++;
         }
-        drain();
-        if(measure) elapsed=System.nanoTime()-started;
-        if (sideLoad != null && measure) sideLoad.endMeasurement(System.nanoTime());
+        long loadEnd = System.nanoTime();
+        long loadTerminal = terminal, loadCoreTerminal = coreTerminal, loadFills = fills;
         if (measure) System.out.println("measurementEndEpochMillis=" + System.currentTimeMillis());
+        drain();
+        if (measure) {
+            elapsed = System.nanoTime() - started;
+            double loadSeconds = (loadEnd - started) / 1e9;
+            System.out.printf(Locale.ROOT,
+                    "steadyCapacity elapsedSeconds=%.6f terminalBusinessOperations=%d terminalCoreMessages=%d fills=%d businessOpsPerSec=%.3f coreMessagesPerSec=%.3f fillsPerSec=%.3f peakInFlight=%d windowBlockedCount=%d windowBlockedNanos=%d%n",
+                    loadSeconds, loadTerminal, loadCoreTerminal, loadFills, loadTerminal / loadSeconds,
+                    loadCoreTerminal / loadSeconds, loadFills / loadSeconds, peak, windowBlockedCount, windowBlockedNanos);
+            System.out.printf(Locale.ROOT,
+                    "drain elapsedNanos=%d terminalBusinessOperations=%d terminalCoreMessages=%d fills=%d%n",
+                    elapsed - (loadEnd - started), terminal - loadTerminal, coreTerminal - loadCoreTerminal, fills - loadFills);
+        }
+        if (sideLoad != null && measure) sideLoad.endMeasurement(System.nanoTime());
         measured=false;
         if (measure) printLaneWork(lanesBefore, laneMetrics());
     }
     private long elapsed;
+    private long windowBlockedNanos, windowBlockedCount;
 
     /** 查询包含 Lane fence，只能放在测量边界之外，不能污染业务尾延迟。 */
     private CoreLaneMetricsView laneMetrics() {
@@ -483,7 +496,15 @@ public final class ClusterMixedCapacityMain implements AutoCloseable {
     private record Pending(CompletableFuture<Completed> future, Task task) {}
     private record Completed(CoreResponse response,long terminalNanos) {}
     private record Task(CoreMessageType type,int weight,long start,boolean counted,Consumer<CoreResponse> validation) {}
-    private void space() { while(pending.size()>=window){reap();report();Thread.onSpinWait();} }
+    private void space() {
+        if (pending.size() < window) return;
+        long blockedAt = System.nanoTime();
+        while (pending.size() >= window) { reap(); report(); Thread.onSpinWait(); }
+        if (measured) {
+            windowBlockedNanos += System.nanoTime() - blockedAt;
+            windowBlockedCount++;
+        }
+    }
     private void reap() {
         if (sideLoad != null) sideLoad.assertHealthy();
         // This tool has one ordered command session. Inspecting only its head avoids scanning

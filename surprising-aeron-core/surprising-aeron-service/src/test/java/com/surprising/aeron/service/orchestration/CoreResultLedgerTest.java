@@ -24,6 +24,36 @@ import org.junit.jupiter.api.Test;
 class CoreResultLedgerTest {
 
     @Test
+    void sustainedTurnoverPreservesLookupRetentionAndRestoreOrder() {
+        var ledger = new CommandResultLedger(new LinkedHashMap<>());
+        var expected = new LinkedHashMap<UUID, long[]>();
+        var random = new java.util.Random(915);
+        var ids = new UUID[1024];
+        for (int i = 0; i < ids.length; i++) ids[i] = new UUID(random.nextLong(), random.nextLong());
+        long nextRetention = 1;
+        for (int sequence = 1; sequence <= 20_000; sequence++) {
+            UUID id = ids[random.nextInt(ids.length)];
+            long retention = expected.containsKey(id) ? expected.get(id)[1] : nextRetention++;
+            expected.put(id, new long[]{sequence, retention});
+            if (expected.size() > TradingCoreRuntime.MAX_IDEMPOTENCY_RESULTS)
+                expected.remove(expected.keySet().iterator().next());
+            ledger.storeResult(id, stored(ResponseStatus.APPLIED, CoreResultCode.NONE,
+                    sequence, 0, new byte[]{(byte) sequence}, 0));
+            assertThat(ledger.get(id).appliedCommandCount()).isEqualTo(sequence);
+            if (sequence % 97 != 0) continue;
+            assertThat(ledger.entries().keySet()).containsExactlyElementsOf(expected.keySet());
+            for (var entry : expected.entrySet()) {
+                var result = ledger.get(entry.getKey());
+                assertThat(result.appliedCommandCount()).isEqualTo(entry.getValue()[0]);
+                assertThat(result.retentionSequence()).isEqualTo(entry.getValue()[1]);
+            }
+            assertThat(ledger.get(new UUID(0, -sequence))).isNull();
+            if (sequence % 970 == 0)
+                ledger = new CommandResultLedger(new LinkedHashMap<>(ledger.entries()));
+        }
+    }
+
+    @Test
     void ownedInsertionPreservesSequenceAndPriorResultWhenReplacing() {
         var ledger = new CommandResultLedger(new LinkedHashMap<>());
         UUID first = UUID.randomUUID(), second = UUID.randomUUID();

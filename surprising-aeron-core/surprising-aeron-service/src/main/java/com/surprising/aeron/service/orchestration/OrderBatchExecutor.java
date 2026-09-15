@@ -584,7 +584,7 @@ final class OrderBatchExecutor {
         var direct = owner.runtimeState.prepareDirectCancelBatch(pending.sequence(), finalChunk,
                 pending.command().header().userId(), batch.preparedAdmittedOrders, end - start,
                 pending.command().header().commandId(), shard, owner.identities,
-                pending.commitFenceTimestamp(), pending.commitFenceClusterPosition());
+                pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), batch);
         batch.itemSettlementEvent = direct;
         owner.runtimeState.dispatchDirectMatcherSettlement(direct);
         owner.matcherPipeline.submit(shard, pending.sequence(), () -> {
@@ -596,6 +596,8 @@ final class OrderBatchExecutor {
                         pending.command().header().submittedAtEpochMillis(),
                         pending.command().header().userId(), item.cancelSymbol);
                 batch.pipelinedMatchingResults.add(result);
+                item.status = result.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
+                item.resultCode = result.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
                 if (owner.commits.matchingResultNeedsRecovery(pending, result)) break;
             }
             direct.publishDirectResults(batch.pipelinedMatchingResults);
@@ -714,7 +716,7 @@ final class OrderBatchExecutor {
                 batch.admissionOrderIndex.update(owner.runtimeState.currentPatchOrderBefore(orderId),
                         owner.runtimeOrder(orderId));
             }
-            appendOrderBatchResult(batch, item, status, resultCode);
+            if (batch.kind != OrderBatchKind.CANCEL) appendOrderBatchResult(batch, item, status, resultCode);
             batch.replacementAdmission = null;
             item.cancelSymbol = null;
             item.cancelInstrumentChangeId = 0;

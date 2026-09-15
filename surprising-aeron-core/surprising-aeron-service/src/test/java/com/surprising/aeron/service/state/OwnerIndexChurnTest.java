@@ -49,7 +49,8 @@ class OwnerIndexChurnTest {
                 var sequences = (Long2LongHashMap) sequenceField.get(map);
                 var sequenceStorage = Long2LongHashMap.class.getDeclaredField("entries");
                 sequenceStorage.setAccessible(true);
-                Object sequenceBefore = sequenceStorage.get(sequences);
+                Object sequenceBefore = sequences == null ? null : sequenceStorage.get(sequences);
+                assertThat(sequences != null).isEqualTo(name.equals("publishedOrders"));
                 for (long base = 1; base < 8192; base += 32) {
                     var admission = new LanePublication();
                     admission.admissionSequence = base;
@@ -64,8 +65,10 @@ class OwnerIndexChurnTest {
                 }
                 assertThat(keyStorage.get(table)).as(name + " key array").isSameAs(keysBefore);
                 assertThat(valueStorage.get(table)).as(name + " value array").isSameAs(valuesBefore);
-                assertThat(sequenceStorage.get(sequences)).as(name + " sequence array").isSameAs(sequenceBefore);
-                assertThat(sequences.isEmpty()).isTrue();
+                if (sequences != null) {
+                    assertThat(sequenceStorage.get(sequences)).as(name + " sequence array").isSameAs(sequenceBefore);
+                    assertThat(sequences.isEmpty()).isTrue();
+                }
             }
         }
     }
