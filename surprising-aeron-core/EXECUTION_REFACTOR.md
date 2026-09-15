@@ -122,3 +122,11 @@ mvn -q -pl surprising-aeron-core/surprising-aeron-benchmarks -am -Dtest=LinearPe
 正确性测试增加：六产品线普通及批量未成交订单从准入到提交保持同一OrderRuntime对象，并与串行结果/快照恢复一致；无变化冻结复用原版本，真实变化不修改旧版本，非法金额仍拒绝。完整验证与分配结果见根目录PERFORMANCE_VALIDATION.md本轮记录。
 
 本批1265项正确性测试通过。短轮无采样273483业务ops/s，下单p99 16.203ms；独立JFR约1996B/business op，Owner98.44%单核。局部构造176B/次；整体分配仍高，主要剩余解码、真实订单/冻结版本和Matcher结果。测量窗有系统swap-in及Owner类加载IO，未通过严格性能验收，详情见验证记录。
+
+## 命令解码直接读取报文区间（2026-09-15）
+
+`TradingCommandCodec`原先部分文本走“原报文→临时byte[]→String”，替换单走“原报文→复制内嵌下单→解码”。临时数组没有其他消费者，删除后直接使用经过边界检查的offset/length构造最终命令。文本仍由String拥有，解码后复用/覆写输入不会改变命令；批内非零偏移、Unicode、空文本和截断校验保留。空clientOrderId不再创建空String。没有新生产类、状态、池或线程阶段。
+
+`CoreMessageFlyweightDecoder`从Aeron借用缓冲复制一份所属报文仍保留，因为Owner排队和后续Lane执行会超过回调生命周期；直接引用可复用的Aeron缓冲会读到被覆盖的数据。`ResolvedPlaceOrder`还承载命令当时的价格/费用决策，不能只因它是中间对象就删掉。
+
+本批1268项测试通过，含六产品线执行、资金与恢复。无采样253547业务ops/s，下单p99 18.235ms；JFR约1996B/business op，整体分配没有明显下降。该MIXED负载没有替换/改单/转账主负载，局部解码成本见验证文档JMH表。Owner解码、索引和终态发布仍是后续重点；系统swap-in及Owner类加载IO使本轮不作为正式容量验收。

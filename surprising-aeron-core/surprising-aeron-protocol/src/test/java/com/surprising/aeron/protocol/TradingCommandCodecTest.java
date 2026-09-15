@@ -11,6 +11,62 @@ import org.junit.jupiter.api.Test;
 class TradingCommandCodecTest {
 
     @Test
+    void decodedTextOwnsItsBytesAndRespectsAnEmbeddedAmendFrame() {
+        for (String clientId : new String[]{"", "client-71", "订单-é-😀"}) {
+            var command = new AmendOrderCommand(71, 72, clientId, null, null, null, null);
+            byte[] encoded = TradingCommandCodec.encodeAmendOrder(command);
+            byte[] envelope = new byte[encoded.length + 13];
+            System.arraycopy(encoded, 0, envelope, 7, encoded.length);
+            var decoded = TradingCommandCodec.decodeAmendOrder(envelope, 7, encoded.length);
+            java.util.Arrays.fill(envelope, (byte) 0);
+            assertThat(decoded).isEqualTo(command);
+            if (clientId.isEmpty()) assertThat(decoded.newClientOrderId()).isSameAs("");
+            for (int length = 0; length < encoded.length; length++) {
+                int truncated = length;
+                assertThatThrownBy(() -> TradingCommandCodec.decodeAmendOrder(encoded, 0, truncated))
+                        .isInstanceOf(ProtocolException.class);
+            }
+        }
+    }
+
+    @Test
+    void replacementDecodesWithinItsFrameAndDoesNotRetainTheInput() {
+        var order = new PlaceOrderCommand(72, "BTC-USDT", 9, CoreOrderSide.BUY, 101, 6,
+                false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
+                CoreTimeInForce.GTC, false, "订单-é-😀");
+        var command = new ReplaceOrderCommand(71, order);
+        byte[] encoded = TradingCommandCodec.encodeReplaceOrder(command);
+        assertThat(TradingCommandCodec.decodeReplaceOrder(encoded)).isEqualTo(command);
+        for (int length = 0; length < encoded.length; length++) {
+            byte[] truncated = java.util.Arrays.copyOf(encoded, length);
+            assertThatThrownBy(() -> TradingCommandCodec.decodeReplaceOrder(truncated))
+                    .isInstanceOf(ProtocolException.class);
+        }
+        byte[] trailing = java.util.Arrays.copyOf(encoded, encoded.length + 1);
+        assertThatThrownBy(() -> TradingCommandCodec.decodeReplaceOrder(trailing))
+                .isInstanceOf(ProtocolException.class);
+        var decoded = TradingCommandCodec.decodeReplaceOrder(encoded);
+        java.util.Arrays.fill(encoded, (byte) 0);
+        assertThat(decoded).isEqualTo(command);
+    }
+
+    @Test
+    void requiredAndTransferTextSurviveInputReuse() {
+        var balance = new BalanceAdjustmentCommand("USDT", 10);
+        byte[] encoded = TradingCommandCodec.encodeBalanceAdjustment(balance);
+        var restored = TradingCommandCodec.decodeBalanceAdjustment(encoded);
+        java.util.Arrays.fill(encoded, (byte) 0);
+        assertThat(restored).isEqualTo(balance);
+        var transfer = new TransferFundsCommand(91L, ProductLine.SPOT,
+                ProductLine.LINEAR_PERPETUAL, "FUNDING", "USDT_PERPETUAL", "USDT", 250L,
+                "transfer-91", "调拨-é-😀");
+        byte[] bytes = TradingCommandCodec.encodeTransferFunds(transfer);
+        var decoded = TradingCommandCodec.decodeTransferFunds(bytes);
+        java.util.Arrays.fill(bytes, (byte) 0);
+        assertThat(decoded).isEqualTo(transfer);
+    }
+
+    @Test
     void roundTripsLeanPlaceOrderIntent() {
         PlaceOrderCommand command = new PlaceOrderCommand(71, "BTC-USDT", 9, CoreOrderSide.BUY, 101, 6, false, CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT, CoreTimeInForce.GTC, false, "prices-71");
 

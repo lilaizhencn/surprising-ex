@@ -300,7 +300,8 @@ public final class TradingCommandCodec {
             throw new ProtocolException("invalid optional text length: " + clientLength);
         }
         requireRange(payload, offset, clientLength, limit);
-        String clientOrderId = new String(payload, offset, clientLength, StandardCharsets.UTF_8);
+        String clientOrderId = clientLength == 0 ? ""
+                : new String(payload, offset, clientLength, StandardCharsets.UTF_8);
         offset += clientLength;
         if (offset != limit) throw new ProtocolException("trailing bytes in trading command payload");
         return new PlaceOrderCommand(orderId, symbol, instrumentChangeId, side, limitPriceTicks,
@@ -387,10 +388,8 @@ public final class TradingCommandCodec {
         if (replacementLength <= 0 || replacementLength != buffer.remaining()) {
             throw new ProtocolException("invalid replacement payload length");
         }
-        byte[] replacement = new byte[replacementLength];
-        buffer.get(replacement);
-        requireConsumed(buffer);
-        return new ReplaceOrderCommand(originalOrderId, decodePlaceOrder(replacement));
+        return new ReplaceOrderCommand(originalOrderId,
+                decodePlaceOrder(payload, buffer.position(), replacementLength));
     }
 
     public static byte[] encodeAmendOrder(AmendOrderCommand command) {
@@ -810,9 +809,11 @@ public final class TradingCommandCodec {
             throw new ProtocolException("invalid text length: " + length);
         }
         requireRemaining(buffer, length);
-        byte[] encoded = new byte[length];
-        buffer.get(encoded);
-        return new String(encoded, StandardCharsets.UTF_8);
+        // All command readers wrap the owned heap payload; String retains no reference to it.
+        String value = length == 0 ? "" : new String(buffer.array(),
+                buffer.arrayOffset() + buffer.position(), length, StandardCharsets.UTF_8);
+        buffer.position(buffer.position() + length);
+        return value;
     }
 
     private static String readOptionalText(ByteBuffer buffer) {
@@ -822,9 +823,11 @@ public final class TradingCommandCodec {
             throw new ProtocolException("invalid optional text length: " + length);
         }
         requireRemaining(buffer, length);
-        byte[] encoded = new byte[length];
-        buffer.get(encoded);
-        return new String(encoded, StandardCharsets.UTF_8);
+        // All command readers wrap the owned heap payload; String retains no reference to it.
+        String value = length == 0 ? "" : new String(buffer.array(),
+                buffer.arrayOffset() + buffer.position(), length, StandardCharsets.UTF_8);
+        buffer.position(buffer.position() + length);
+        return value;
     }
 
     private static byte[] transferText(String value, int maximumLength, boolean optional) {
@@ -843,9 +846,11 @@ public final class TradingCommandCodec {
             throw new ProtocolException("invalid transfer text length: " + length);
         }
         requireRemaining(buffer, length);
-        byte[] encoded = new byte[length];
-        buffer.get(encoded);
-        return new String(encoded, StandardCharsets.UTF_8);
+        // All command readers wrap the owned heap payload; String retains no reference to it.
+        String value = length == 0 ? "" : new String(buffer.array(),
+                buffer.arrayOffset() + buffer.position(), length, StandardCharsets.UTF_8);
+        buffer.position(buffer.position() + length);
+        return value;
     }
 
     private static CoreTimeInForce readTimeInForce(ByteBuffer buffer) {
