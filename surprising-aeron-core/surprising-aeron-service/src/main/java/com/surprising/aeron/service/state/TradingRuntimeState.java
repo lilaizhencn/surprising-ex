@@ -5043,8 +5043,10 @@ public final class TradingRuntimeState implements AutoCloseable {
             userClientOrders = new LongLongHashMap(lane.admissionIndexCapacity);
             lane.clientOrderIndex.put(userId, userClientOrders);
         }
-        boolean hadPrevious = userClientOrders.containsKey(clientKey);
-        long previousOrderId = hadPrevious ? userClientOrders.get(clientKey) : 0;
+        // Order IDs are allocated from the positive core sequence space; zero is
+        // the primitive map's absent value, so avoid a contains+get double probe.
+        long previousOrderId = userClientOrders.get(clientKey);
+        boolean hadPrevious = previousOrderId != 0;
         userClientOrders.put(clientKey, orderId);
         if (hadPrevious && previousOrderId != orderId) {
             removeClientOrderReverse(lane, previousOrderId, clientKey);
@@ -5054,8 +5056,9 @@ public final class TradingRuntimeState implements AutoCloseable {
 
     static Long removeClientOrderIndex(AccountLaneState lane, long userId, long clientKey) {
         LongLongHashMap userClientOrders = lane.clientOrderIndex.get(userId);
-        if (userClientOrders == null || !userClientOrders.containsKey(clientKey)) return null;
+        if (userClientOrders == null) return null;
         long orderId = userClientOrders.get(clientKey);
+        if (orderId == 0) return null;
         userClientOrders.remove(clientKey);
         if (userClientOrders.isEmpty()) lane.clientOrderIndex.remove(userId);
         removeClientOrderReverse(lane, orderId, clientKey);

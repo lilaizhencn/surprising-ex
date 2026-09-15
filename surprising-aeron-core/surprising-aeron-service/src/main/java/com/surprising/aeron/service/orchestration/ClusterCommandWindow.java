@@ -122,7 +122,10 @@ public final class ClusterCommandWindow {
             throw new IllegalArgumentException("owner command window must be a power of two in [64,1024]");
         entries = new Entry[capacity];
         indexMask = capacity - 1;
-        completionSlots = new org.agrona.collections.Long2LongHashMap(capacity);
+        // Values use zero as the absent marker throughout this class.  The
+        // one-argument Agrona constructor treats its argument as missingValue,
+        // which would make a full-window slot indistinguishable from absence.
+        completionSlots = new org.agrona.collections.Long2LongHashMap(capacity, 0.65f, 0);
         accountSlots = new long[capacity];
         symbolSlots = new long[capacity];
         for (int i = 0; i < entries.length; i++) entries[i] = new Entry();
@@ -311,10 +314,22 @@ public final class ClusterCommandWindow {
             indexSlots(symbolSlots, entry.symbols, word, slot, false);
             for (int k = 0; k < entry.orderCount; k++) {
                 long id = entry.orders[k];
-                if (orderSlots.get(id) == physical + 1L) orderSlots.remove(id);
+                // remove returns the previous value, avoiding a get+remove probe
+                // for every order that leaves the FIFO window.
+                long removedSlot = orderSlots.remove(id);
+                if (removedSlot != 0 && removedSlot != physical + 1L) {
+                    // A newer retry may own this order ID; restore the index entry
+                    // when this older physical slot was not the current mapping.
+                    orderSlots.put(id, removedSlot);
+                }
             }
             if (entry.sequence != 0) {
-                if (completionSlots.get(entry.sequence) == physical + 1L) completionSlots.remove(entry.sequence);
+                long removedSlot = completionSlots.remove(entry.sequence);
+                if (removedSlot != 0 && removedSlot != physical + 1L) {
+                    // See the order index case above: only the matching physical
+                    // slot may remove a retry's completion mapping.
+                    completionSlots.put(entry.sequence, removedSlot);
+                }
                 removedLastMatching |= physical == lastMatchingPhysical;
             }
             entry.orderCount = 0;

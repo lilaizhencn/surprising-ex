@@ -1952,3 +1952,11 @@ profile：
 验证：完整服务回归在改动后通过 `963` 项（失败/错误 `0`、既有跳过 `1`）；新增批量 pending 查询用例精确通过，单类回归 `59` 项全绿。固定单节点（1 Matcher、4 Lane、128 symbols、window256、BUSY_SPIN、G1、MIXED batch20）两轮完整生命周期均通过：第一轮 `361,726.234 business ops/s`、最差业务 p99 `30.785 ms`，第二轮 `418,283.703 business ops/s`、最差业务 p99 `17.874 ms`，均 `clientPass=true`、`peakInFlight=256`。两轮均值 `390,004.969/s`，相对既有同口径 `392,705.617/s` 约低 `0.7%`，小于 `5%` 回退门槛；短测方差较大，不能宣称吞吐提升或回退。
 
 结论：保留该改动。Owner 发布边界不再维护重复的订单→准入序号 Map，减少发布/终态提交的哈希操作和一份中间状态；批量 pending 查询从已有收据读取，查询频率低时的批次线性扫描不进入交易热路径。原始目录 `/tmp/core-published-seq-remove-20260916`、`/tmp/core-published-seq-remove-rerun-20260916` 保留审计；节点与客户端均已退出。
+
+### 2026-09-16：合并 Owner/Lane 索引的重复哈希探测（计划与结果）
+
+计划：在 `OrderClientKeyIndex` 和账户客户号索引中用已有哨兵值承载“是否存在”，去掉 `containsKey` 后再次 `get` 的重复探测；Owner 的 `ClusterCommandWindow` 退窗索引改用 `remove` 返回值，正常退窗由两次探测降为一次。完成序号索引显式使用 `0` 缺失值，修正一参数 Agrona 构造器把窗口容量误当成缺失值的配置错误，避免满窗口物理槽位与缺失状态冲突。重试映射仍在旧槽退窗时恢复，业务顺序、依赖判断和恢复语义不变。
+
+验证：服务及依赖模块全量正确性回归 `964` 项通过，失败/错误 `0`，既有跳过 `1`；其中 `ClusterCommandWindowTest` `20` 项、`OrderClientKeyIndexTest` `2` 项通过。该轮尚未执行端到端吞吐，避免把索引微优化误报成性能收益；下一轮继续使用固定单节点、1 Matcher、4 Lane、128 symbols、window256、BUSY_SPIN、G1、MIXED batch20 口径复测 Owner CPU、分配和 p99。
+
+结论：保留该无语义变化的探测合并。它只减少热路径哈希访问和修复完成索引哨兵配置，不能单独证明吞吐提升；端到端主要瓶颈仍需由固定窗口 JFR 与分配站点继续量化。

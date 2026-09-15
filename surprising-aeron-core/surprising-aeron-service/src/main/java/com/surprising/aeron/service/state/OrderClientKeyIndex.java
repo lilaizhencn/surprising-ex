@@ -15,11 +15,16 @@ final class OrderClientKeyIndex {
         LongHashSet keys = multiple.get(orderId);
         if (keys != null) {
             keys.add(key);
-        } else if (!single.containsKey(orderId)) {
+            return;
+        }
+        // Client identity keys are non-negative and the single table uses -1 as
+        // its missing value, so one probe is enough for both presence and value.
+        long previous = single.get(orderId);
+        if (previous == -1) {
             single.put(orderId, key);
-        } else if (single.get(orderId) != key) {
+        } else if (previous != key) {
             keys = new LongHashSet();
-            keys.add(single.get(orderId));
+            keys.add(previous);
             single.remove(orderId);
             keys.add(key);
             multiple.put(orderId, keys);
@@ -29,7 +34,7 @@ final class OrderClientKeyIndex {
     void remove(long orderId, long key) {
         LongHashSet keys = multiple.get(orderId);
         if (keys == null) {
-            if (single.containsKey(orderId) && single.get(orderId) == key) single.remove(orderId);
+            if (single.get(orderId) == key) single.remove(orderId);
         } else if (keys.remove(key) && keys.size() == 1) {
             single.put(orderId, keys.longIterator().next());
             multiple.remove(orderId);
@@ -39,7 +44,10 @@ final class OrderClientKeyIndex {
     void forEach(long orderId, LongProcedure consumer) {
         LongHashSet keys = multiple.get(orderId);
         if (keys != null) keys.forEach(consumer);
-        else if (single.containsKey(orderId)) consumer.value(single.get(orderId));
+        else {
+            long key = single.get(orderId);
+            if (key != -1) consumer.value(key);
+        }
     }
 
     void remove(long orderId) {
