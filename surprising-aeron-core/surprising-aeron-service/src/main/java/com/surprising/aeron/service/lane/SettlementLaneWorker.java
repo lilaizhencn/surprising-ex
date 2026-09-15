@@ -246,7 +246,12 @@ public final class SettlementLaneWorker implements AutoCloseable {
         }
     }
 
-    private enum WaitStrategy { BUSY_SPIN, YIELDING, BLOCKING }
+    /**
+     * Wait policy used by the lane event loop.  Keep this type public because
+     * the worker is part of the service module API and IDE/compiler clients
+     * may resolve the worker's nested type while inspecting its bytecode.
+     */
+    public enum WaitStrategy { BUSY_SPIN, YIELDING, BLOCKING }
 
     private static final class PaddedSequence {
         @SuppressWarnings("unused")
