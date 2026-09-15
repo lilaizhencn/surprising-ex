@@ -18,9 +18,20 @@ public final class MatcherPipelineGroup implements AutoCloseable {
 
     private final MatcherCommandPipeline[] shards;
     private final LaneCommandContextRing contexts;
+    /** Matcher workers set one bit on publication; the Owner drains only signalled shards. */
+    private final java.util.concurrent.atomic.AtomicLong completedShardMask =
+            new java.util.concurrent.atomic.AtomicLong();
+    private volatile boolean completionSignalConfigured;
 
     public void completionSignal(Runnable signal) {
-        for (MatcherCommandPipeline shard : shards) shard.completionSignal(signal);
+        completionSignalConfigured = true;
+        for (int shardId = 0; shardId < shards.length; shardId++) {
+            final long bit = 1L << shardId;
+            shards[shardId].completionSignal(() -> {
+                completedShardMask.getAndAccumulate(bit, (left, right) -> left | right);
+                if (signal != null) signal.run();
+            });
+        }
     }
 
     public MatcherPipelineGroup(int shardCount, int capacityPerShard, boolean startImmediately, LaneCommandContextRing contexts) {
@@ -76,8 +87,11 @@ public final class MatcherPipelineGroup implements AutoCloseable {
 
     /** Read-only completion probe; control results belong to their caller. */
     public boolean hasMatchingCompletions() {
-        for (MatcherCommandPipeline shard : shards) {
-            if (shard.completedMatchingSequence() != 0) return true;
+        if (completedShardMask.get() != 0) return true;
+        if (!completionSignalConfigured) {
+            for (MatcherCommandPipeline shard : shards) {
+                if (shard.completedMatchingSequence() != 0) return true;
+            }
         }
         return false;
     }
@@ -85,11 +99,25 @@ public final class MatcherPipelineGroup implements AutoCloseable {
     /** Drains matching heads only; control tokens remain for their caller. */
     public void drainMatchingCompletions(MatchingCompletionConsumer consumer) {
         if (consumer == null) throw new IllegalArgumentException("matching completion consumer is required");
+        long readyMask = completedShardMask.getAndSet(0L);
+        if (!completionSignalConfigured) {
+            for (int shardId = 0; shardId < shards.length; shardId++) {
+                if (shards[shardId].completedMatchingSequence() != 0) readyMask |= 1L << shardId;
+            }
+        }
         for (int shardId = 0; shardId < shards.length; shardId++) {
+            if ((readyMask & (1L << shardId)) == 0) continue;
             MatcherCommandPipeline shard = shards[shardId];
             while (true) {
                 long coreSequence = shard.completedMatchingSequence();
                 if (coreSequence == 0) break;
+                if (!contexts.claimed(coreSequence)) {
+                    // A direct settlement may retire its context before an earlier ordinary
+                    // slot reaches this shard head. Consume the stale slot without consulting
+                    // the recycled context.
+                    shard.discardCompleted(coreSequence);
+                    continue;
+                }
                 CoreMatchingResult result = shard.poll(coreSequence);
                 if (result == null) break;
                 // The existing sequence slot owns the route; no second token index is maintained.

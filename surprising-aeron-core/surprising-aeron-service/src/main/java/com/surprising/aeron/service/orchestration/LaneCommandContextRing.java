@@ -96,7 +96,6 @@ public final class LaneCommandContextRing {
             submittedMatcherShard = -1;
         }
 
-        private CoreAdmissionReservation admission;
         /**
          * Suspended commit inputs are transferred between the owner builder and this sequence
          * slot.  The slot never materializes a boxed List; the owner swaps its reusable primitive
@@ -170,16 +169,6 @@ public final class LaneCommandContextRing {
 
         CoreMatchingResult matchingCompletion() { return completedMatchingResult; }
         boolean hasMatchingCompletion() { return completedMatchingResult != null; }
-        CoreAdmissionReservation capacityAdmission() { return admission; }
-        /** Capacity reservation is the context-owned admission resource; matching admission has a distinct name. */
-        CoreAdmissionReservation admission() { return admission; }
-        void admission(CoreAdmissionReservation value) {
-            if (value == null || admission != null) {
-                throw new IllegalStateException("invalid sequence admission");
-            }
-            admission = value;
-        }
-
         void suspendCommitContext(CommandResultBuilder resultBuilder,
                                   com.surprising.aeron.service.state.RuntimeFundsAccumulator fundsAccumulator,
                                   boolean snapshotDirty, boolean snapshotProvisionalOnly) {
@@ -308,7 +297,6 @@ public final class LaneCommandContextRing {
             completedMatchingResult = null;
             matchingResult = null;
             submittedMatcherShard = -1;
-            admission = null;
             commitChangedUserIds.clear();
             commitChangedOrderIds.clear();
             commitFundsAccumulator.clear();

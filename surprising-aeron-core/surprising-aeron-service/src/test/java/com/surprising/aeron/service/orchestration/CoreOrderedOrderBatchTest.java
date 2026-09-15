@@ -840,7 +840,7 @@ class CoreOrderedOrderBatchTest {
             assertThat(state.pendingMatching(fatalSequence).pendingStateHash()).isNotZero();
             assertThat(state.pendingMatchingCount()).isOne();
             assertThat(state.matchingSequence(fatalId)).isEqualTo(fatalSequence);
-            assertThat(state.snapshotHasOutstandingReservation()).isTrue();
+            assertThat(state.snapshotHasPendingCommands()).isTrue();
             assertThat((long[]) field(state.commits, "appliedMatcherSequences")).containsExactly(matcherAfterFirst);
             assertThat((long[]) field(state.commits, "appliedMatcherPrefixDigests"))
                     .containsExactly(matcherPrefixAfterFirst);
@@ -1048,7 +1048,7 @@ class CoreOrderedOrderBatchTest {
         long sequence = state.matchingSequence(commandId);
         assertThat(state.completeMatching(sequence, awaitMatching(state, sequence), 2_000, 3)).isNull();
         assertThat(runtime.order(15_001)).isNotNull();
-        assertThat(state.snapshotHasOutstandingReservation()).isTrue();
+        assertThat(state.snapshotHasPendingCommands()).isTrue();
 
         state.close();
 
@@ -1060,7 +1060,7 @@ class CoreOrderedOrderBatchTest {
         assertThat(runtime.accountLane(1001).ownerThreadName()).isEqualTo(Thread.currentThread().getName());
         assertThat(identities.positionCheckpoint()).isEqualTo(identityBefore);
         assertThat(identities.findClientKey(1001, "close-first")).isNotNull();
-        assertThat(state.snapshotHasOutstandingReservation()).isFalse();
+        assertThat(state.snapshotHasPendingCommands()).isFalse();
     }
 
     @Test
@@ -1229,7 +1229,7 @@ class CoreOrderedOrderBatchTest {
         state.close();
 
         assertThat(state.pendingMatchingCount()).isZero();
-        assertThat(state.snapshotHasOutstandingReservation()).isFalse();
+        assertThat(state.snapshotHasPendingCommands()).isFalse();
         assertThat(journal.metrics().reservedEntries()).isZero();
         assertThat(journal.metrics().reservedBytes()).isZero();
         assertThat(state.exportState().metrics().reservedEvents()).isZero();

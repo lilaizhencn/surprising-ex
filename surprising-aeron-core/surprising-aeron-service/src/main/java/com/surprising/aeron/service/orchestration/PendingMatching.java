@@ -27,7 +27,6 @@ class PendingMatching {
     private RuntimeFundsDelta fundsDelta;
     private DecodedMatchingCommand decodedCommand;
     private ResolvedMatchingAdmission admission;
-    private CoreAdmissionReservation capacityReservation;
     private long pendingStateHash;
     private long commitFenceTimestamp;
     private long commitFenceClusterPosition;
@@ -147,7 +146,6 @@ class PendingMatching {
         this.fundsDelta = fundsDelta;
         this.decodedCommand = decodedCommand;
         this.admission = admission;
-        capacityReservation = null;
         pendingStateHash = 0;
         commitFenceTimestamp = 0;
         commitFenceClusterPosition = 0;
@@ -188,10 +186,6 @@ class PendingMatching {
         return this;
     }
 
-    PendingMatching withCapacityReservation(CoreAdmissionReservation reservation) {
-        capacityReservation = reservation;
-        return this;
-    }
 
     PendingMatching withPendingStateHash(long stateHash) {
         pendingStateHash = stateHash;
@@ -219,11 +213,6 @@ class PendingMatching {
     RuntimeFundsDelta fundsDelta() { return fundsDelta; }
     DecodedMatchingCommand decodedCommand() { return decodedCommand; }
     ResolvedMatchingAdmission matchingAdmission() { return admission; }
-    CoreAdmissionReservation takeCapacityReservation() {
-        CoreAdmissionReservation value = capacityReservation;
-        capacityReservation = null;
-        return value;
-    }
     long pendingStateHash() { return pendingStateHash; }
     com.surprising.aeron.service.state.MatcherSettlementEvent settlementEvent() {
         return continuationKind == ContinuationKind.SETTLEMENT
@@ -349,7 +338,6 @@ class PendingMatching {
         fundsDelta = null;
         decodedCommand = null;
         admission = null;
-        capacityReservation = null;
         continuationKind = null;
         continuation = null;
         settlementPlan = null;

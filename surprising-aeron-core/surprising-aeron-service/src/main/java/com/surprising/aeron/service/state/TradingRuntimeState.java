@@ -1866,6 +1866,14 @@ public final class TradingRuntimeState implements AutoCloseable {
     /** Lane 入队后原子置位；Owner 仅在非空时清位，不再轮询每条空队列。 */
     private final java.util.concurrent.atomic.AtomicLong admissionReadyLanes = new java.util.concurrent.atomic.AtomicLong();
     private final java.util.concurrent.atomic.AtomicLong settlementReadyLanes = new java.util.concurrent.atomic.AtomicLong();
+    /**
+     * Direct Matcher->Lane settlements do not need an Owner-consumed sequence queue.  The
+     * settlement event already owns the per-Lane completion bits; this mask is only a wake-up
+     * hint so the Owner retries its ordered head.  Keeping it separate avoids allocating and
+     * draining one notification record for every Lane touched by every matching result.
+     */
+    private final java.util.concurrent.atomic.AtomicLong directSettlementReadyLanes =
+            new java.util.concurrent.atomic.AtomicLong();
     private final int[] expectedAdmissions = new int[64], expectedSettlements = new int[64];
 
     void expectPlaceAdmission(int laneId) {
@@ -1931,7 +1939,8 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     public boolean hasSettlementNotifications() {
-        return (settlementReadyLanes.get() & expectedSettlementLanes) != 0;
+        return (settlementReadyLanes.get() & expectedSettlementLanes) != 0
+                || directSettlementReadyLanes.get() != 0;
     }
 
     public long pollPlaceAdmissionReady(int laneId) {
@@ -1948,6 +1957,19 @@ public final class TradingRuntimeState implements AutoCloseable {
         matcherSettlementReadyQueues[laneId].publish(coreSequence);
         settlementReadyLanes.getAndAccumulate(1L << laneId, SET_READY_BITS);
         signalOwnerCompletion();
+    }
+
+    /**
+     * Publish only a wake-up hint for a direct settlement.  The event's padded completion array
+     * is the authoritative source, so no Owner-side queue node or expectation counter is needed.
+     */
+    void publishDirectMatcherSettlementReady(int laneId) {
+        directSettlementReadyLanes.getAndAccumulate(1L << laneId, SET_READY_BITS);
+        signalOwnerCompletion();
+    }
+
+    public long takeDirectMatcherSettlementReadyLaneMask() {
+        return directSettlementReadyLanes.getAndSet(0L);
     }
 
     public long takeMatcherSettlementReadyLaneMask() {

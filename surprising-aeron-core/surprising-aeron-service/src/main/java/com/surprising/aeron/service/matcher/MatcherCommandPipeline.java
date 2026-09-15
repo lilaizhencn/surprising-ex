@@ -133,6 +133,11 @@ public final class MatcherCommandPipeline implements AutoCloseable {
         return pollResult(token);
     }
 
+    /** Consume a completed slot whose Owner context was already retired by a direct path. */
+    Object discardCompleted(long expectedToken) {
+        return pollResult(expectedToken);
+    }
+
     private void submitInternal(long token, Supplier<?> command) {
         submitInternal(token, command, null);
     }
@@ -313,21 +318,25 @@ public final class MatcherCommandPipeline implements AutoCloseable {
             if (command == null || slot.token == 0) {
                 slot.failure = new IllegalStateException("matcher command publication gap");
             } else {
+                com.surprising.aeron.service.state.MatcherSettlementEvent settlement = slot.settlement;
                 try {
+                    if (settlement != null && settlement.direct()) settlement.beginMatcherPublication();
                     Object result = command.get();
                     // Bind the Core sequence on the matcher worker while the completion is
                     // already in its slot.  The owner only publishes the immutable result
                     // into its sequence context; it no longer allocates a second
                     // CoreMatchingResult on the hot drain path.
                     slot.result = slot.token > 0 && result instanceof CoreMatchingResult matchingResult
-                            ? matchingResult.withCoreSequence(slot.token) : result;
-                    if (slot.settlement != null && !slot.settlement.ready())
-                        slot.settlement.publishDirectResult((CoreMatchingResult) slot.result);
-                    if (slot.settlement != null && slot.settlement.direct())
+                            ? matchingResult.withCoreSequenceInPlace(slot.token) : result;
+                    if (settlement != null && !settlement.ready())
+                        settlement.publishDirectResult((CoreMatchingResult) slot.result);
+                    if (settlement != null && settlement.direct())
                         tryAutoConsumeDirect(position, slot);
                 } catch (Throwable failure) {
-                    if (slot.settlement != null) slot.settlement.failDirect(failure);
+                    if (settlement != null) settlement.failDirect(failure);
                     slot.failure = failure;
+                } finally {
+                    if (settlement != null && settlement.direct()) settlement.completeMatcherPublication();
                 }
             }
             position++;

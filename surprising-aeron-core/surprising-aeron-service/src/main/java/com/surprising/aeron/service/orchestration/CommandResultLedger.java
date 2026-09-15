@@ -6,7 +6,8 @@ import com.surprising.aeron.protocol.CommandFingerprint;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
 import java.util.Collections;
-import java.util.Iterator;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -14,20 +15,50 @@ import java.util.UUID;
 /** 命令幂等结果账本：独占保留顺序、字节上限和结果摘要；仅 owner 读写。 */
 final class CommandResultLedger {
     /** 命令结果及其保留顺序；不是第二份订单或账户状态。 */
-    private final LinkedHashMap<UUID, StoredResult> commandResults;
+    /** Keep the probe table below half load while retaining at most 128 results. */
+    private static final int TABLE_CAPACITY = 512;
+    private static final int TABLE_MASK = TABLE_CAPACITY - 1;
+    private static final int RETENTION_CAPACITY = 256;
+    private final long[] commandIdMost = new long[TABLE_CAPACITY];
+    private final long[] commandIdLeast = new long[TABLE_CAPACITY];
+    private final byte[] slotState = new byte[TABLE_CAPACITY]; // 0 empty, 1 occupied, 2 deleted
+    private final StoredResult[] results = new StoredResult[TABLE_CAPACITY];
+    /** Retention order; eviction advances this queue instead of scanning the hash table. */
+    private final int[] retentionSlots = new int[RETENTION_CAPACITY];
+    private final int[] retentionPositions = new int[TABLE_CAPACITY];
+    private int retentionHead;
+    private int retentionTail;
+    private int size;
     /** 当前保留结果的协议字节总量，用于执行内存上限。 */
     private long commandResultBytes;
     /** 下一条新结果的保留序号；更新旧结果保持原序号。 */
     private long nextResultRetentionSequence;
 
     CommandResultLedger(LinkedHashMap<UUID, StoredResult> results) {
-        commandResults = results;
+        java.util.Arrays.fill(retentionPositions, -1);
+        if (results == null || results.size() > MAX_IDEMPOTENCY_RESULTS) {
+            throw new IllegalArgumentException("invalid result ledger");
+        }
+        for (Map.Entry<UUID, StoredResult> entry : results.entrySet()) put(entry.getKey(), entry.getValue());
         commandResultBytes = resultLedgerBytes(results);
         nextResultRetentionSequence = nextRetentionSequence(results);
     }
 
-    StoredResult get(UUID id) { return commandResults.get(id); }
-    Map<UUID, StoredResult> entries() { return Collections.unmodifiableMap(commandResults); }
+    StoredResult get(UUID id) {
+        if (id == null) return null;
+        int slot = find(id.getMostSignificantBits(), id.getLeastSignificantBits());
+        return slot < 0 ? null : results[slot];
+    }
+
+    /** Snapshot-only materialization; no Map node is created on the command hot path. */
+    Map<UUID, StoredResult> entries() {
+        ArrayList<Integer> slots = new ArrayList<>(size);
+        for (int slot = 0; slot < TABLE_CAPACITY; slot++) if (slotState[slot] == 1) slots.add(slot);
+        slots.sort(Comparator.comparingLong(slot -> results[slot].retentionSequence()));
+        LinkedHashMap<UUID, StoredResult> snapshot = new LinkedHashMap<>(Math.max(4, size * 2));
+        for (int slot : slots) snapshot.put(new UUID(commandIdMost[slot], commandIdLeast[slot]), results[slot]);
+        return Collections.unmodifiableMap(snapshot);
+    }
 
     static long resultLedgerBytes(Map<UUID, StoredResult> results) {
         long bytes = 0;
@@ -100,7 +131,8 @@ final class CommandResultLedger {
         if (resultBytes > MAX_RESULT_LEDGER_BYTES) {
             throw new IllegalArgumentException("result ledger entry exceeds byte bound");
         }
-        StoredResult previous = commandResults.get(commandId);
+        int slot = find(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
+        StoredResult previous = slot < 0 ? null : results[slot];
         long retentionSequence = previous == null ? nextResultRetentionSequence : previous.retentionSequence();
         StoredResult retained = new StoredResult(fingerprint, status, resultCode, appliedCommandCount,
                 requiredExportSequence, stateHash, responseData, retentionSequence, true);
@@ -108,26 +140,126 @@ final class CommandResultLedger {
                 : nextResultRetentionSequence;
         long nextBytes = Math.addExact(commandResultBytes - (previous == null ? 0 : resultEntryBytes(previous)),
                 resultBytes);
-        commandResults.put(commandId, retained);
+        if (slot < 0) {
+            if (size == TABLE_CAPACITY) {
+                evictOldest(commandId);
+                slot = findInsert(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
+            } else slot = findInsert(commandId.getMostSignificantBits(), commandId.getLeastSignificantBits());
+            commandIdMost[slot] = commandId.getMostSignificantBits();
+            commandIdLeast[slot] = commandId.getLeastSignificantBits();
+            slotState[slot] = 1;
+            enqueueRetentionSlot(slot);
+            size++;
+        }
+        results[slot] = retained;
         nextResultRetentionSequence = nextSequence;
         commandResultBytes = nextBytes;
-        while (commandResults.size() > MAX_IDEMPOTENCY_RESULTS
+        while (size > MAX_IDEMPOTENCY_RESULTS
                 || commandResultBytes > MAX_RESULT_LEDGER_BYTES) {
-            Iterator<Map.Entry<UUID, StoredResult>> iterator = commandResults.entrySet().iterator();
-            Map.Entry<UUID, StoredResult> oldest = null;
-            while (iterator.hasNext()) {
-                Map.Entry<UUID, StoredResult> candidate = iterator.next();
-                if (!candidate.getKey().equals(commandId)) {
-                    oldest = candidate;
-                    iterator.remove();
-                    break;
-                }
-            }
-            if (oldest == null) {
-                throw new IllegalStateException("result ledger protected entry exceeds bound");
-            }
-            commandResultBytes = Math.subtractExact(commandResultBytes, resultEntryBytes(oldest.getValue()));
+            int oldest = oldestSlot(commandId);
+            if (oldest < 0) throw new IllegalStateException("result ledger protected entry exceeds bound");
+            commandResultBytes = Math.subtractExact(commandResultBytes, resultEntryBytes(results[oldest]));
+            remove(oldest);
         }
+    }
+
+    private void put(UUID id, StoredResult value) {
+        int slot = findInsert(id.getMostSignificantBits(), id.getLeastSignificantBits());
+        commandIdMost[slot] = id.getMostSignificantBits();
+        commandIdLeast[slot] = id.getLeastSignificantBits();
+        slotState[slot] = 1;
+        results[slot] = value;
+        enqueueRetentionSlot(slot);
+        size++;
+    }
+
+    private int find(long most, long least) {
+        int slot = hash(most, least);
+        for (int probe = 0; probe < TABLE_CAPACITY; probe++, slot = (slot + 1) & TABLE_MASK) {
+            if (slotState[slot] == 0) return -1;
+            if (slotState[slot] == 1 && commandIdMost[slot] == most && commandIdLeast[slot] == least) return slot;
+        }
+        return -1;
+    }
+
+    private int findInsert(long most, long least) {
+        int slot = hash(most, least), deleted = -1;
+        for (int probe = 0; probe < TABLE_CAPACITY; probe++, slot = (slot + 1) & TABLE_MASK) {
+            if (slotState[slot] == 0) return slot;
+            if (slotState[slot] == 2 && deleted < 0) deleted = slot;
+            else if (slotState[slot] == 1 && commandIdMost[slot] == most && commandIdLeast[slot] == least) return slot;
+        }
+        if (deleted >= 0) return deleted;
+        throw new IllegalStateException("result ledger table is full");
+    }
+
+    private void evictOldest(UUID protectedId) {
+        int oldest = oldestSlot(protectedId);
+        if (oldest < 0) throw new IllegalStateException("result ledger protected entry exceeds bound");
+        commandResultBytes = Math.subtractExact(commandResultBytes, resultEntryBytes(results[oldest]));
+        remove(oldest);
+    }
+
+    private int oldestSlot(UUID protectedId) {
+        long protectedMost = protectedId == null ? Long.MIN_VALUE : protectedId.getMostSignificantBits();
+        long protectedLeast = protectedId == null ? Long.MIN_VALUE : protectedId.getLeastSignificantBits();
+        for (int offset = 0; offset < RETENTION_CAPACITY && retentionHead + offset < retentionTail; offset++) {
+            int slot = retentionSlots[(retentionHead + offset) & (RETENTION_CAPACITY - 1)];
+            if (slot < 0 || slotState[slot] != 1) continue;
+            if (commandIdMost[slot] == protectedMost && commandIdLeast[slot] == protectedLeast) continue;
+            return slot;
+        }
+        return -1;
+    }
+
+    private void remove(int slot) {
+        slotState[slot] = 2;
+        results[slot] = null;
+        size--;
+        int position = retentionPositions[slot];
+        if (position >= 0) {
+            retentionSlots[position & (RETENTION_CAPACITY - 1)] = -1;
+            retentionPositions[slot] = -1;
+        }
+        advanceRetentionHead();
+    }
+
+    private void enqueueRetentionSlot(int slot) {
+        advanceRetentionHead();
+        if (retentionTail - retentionHead >= RETENTION_CAPACITY) compactRetentionQueue();
+        int position = retentionTail++;
+        retentionSlots[position & (RETENTION_CAPACITY - 1)] = slot;
+        retentionPositions[slot] = position;
+    }
+
+    private void advanceRetentionHead() {
+        while (retentionHead < retentionTail
+                && retentionSlots[retentionHead & (RETENTION_CAPACITY - 1)] < 0) {
+            retentionHead++;
+        }
+    }
+
+    /** Rare fallback for repeated protected-key replacements; remains allocation-free. */
+    private void compactRetentionQueue() {
+        int count = 0;
+        int pending = retentionTail - retentionHead;
+        for (int offset = 0; offset < pending; offset++) {
+            int slot = retentionSlots[(retentionHead + offset) & (RETENTION_CAPACITY - 1)];
+            if (slot >= 0 && slotState[slot] == 1) retentionSlots[count++] = slot;
+        }
+        java.util.Arrays.fill(retentionPositions, -1);
+        for (int position = 0; position < count; position++) {
+            retentionPositions[retentionSlots[position]] = position;
+        }
+        retentionHead = 0;
+        retentionTail = count;
+    }
+
+    private static int hash(long most, long least) {
+        long value = most * 0x9E3779B97F4A7C15L + least;
+        value ^= value >>> 33;
+        value *= 0xC2B2AE3D27D4EB4FL;
+        return (int) (value ^ (value >>> 32)) & TABLE_MASK;
     }
 
     static final class StoredResult {

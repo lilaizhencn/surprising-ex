@@ -53,6 +53,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     private long directCoreSequence;
     private boolean dispatched; // Owner only.
     private volatile boolean directPublished;
+    /** Matcher publication keeps the pooled event alive until its SPSC slot is released. */
+    private boolean matcherPublicationDeferred;
     private Throwable directFailure;
     private long routedLaneMask;
     private java.util.UUID directCommandId;
@@ -122,7 +124,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         if (coreSequence <= 0 || commitSequence < 0 || laneMask == 0 || timestamp < 0 || position < 0 || commandId == null
                 || count <= 0 || batchStorage == null || count > batchStorage.plans.length)
             throw new IllegalArgumentException("invalid direct settlement reservation");
-        direct = true; directPublished = false; dispatched = false; directFailure = null;
+        direct = true; directPublished = false; matcherPublicationDeferred = false;
+        dispatched = false; directFailure = null;
         directCoreSequence = coreSequence;
         this.commitSequence = commitSequence; routedLaneMask = requiredLaneMask = laneMask;
         commitTimestamp = timestamp; commitClusterPosition = position;
@@ -141,7 +144,9 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         collectedFundsDelta = RuntimeFundsDelta.empty();
         prepareTreasuryDeltas(runtime.topology().accountLaneCount(), true);
         resetCompletions(runtime.topology().accountLaneCount());
-        runtime.expectMatcherSettlement(laneMask);
+        // Direct events expose their completion through the event-owned padded bitset.  Do not
+        // register per-Lane Owner notification expectations; that queue is only needed by the
+        // legacy Owner-dispatched settlement path.
     }
 
     public boolean direct() { return direct; }
@@ -159,6 +164,21 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
     }
     long routedLaneMask() { return direct ? routedLaneMask : requiredLaneMask; }
     public boolean ready() { return !direct || directPublished; }
+
+    /** Defer Owner wake-up while the Matcher still owns the slot and event reference. */
+    public void beginMatcherPublication() {
+        if (!direct || directPublished || matcherPublicationDeferred) {
+            throw new IllegalStateException("invalid matcher publication start");
+        }
+        matcherPublicationDeferred = true;
+    }
+
+    /** Publish the deferred wake-up after the Matcher has released or retained its SPSC slot. */
+    public void completeMatcherPublication() {
+        if (!direct || !matcherPublicationDeferred) return;
+        matcherPublicationDeferred = false;
+        if (directPublished) notifyDirectPublication();
+    }
 
     /** Matcher publishes into the already-owned event; Owner does not build or copy its result. */
     public void publishDirectResult(com.surprising.aeron.service.matching.CoreMatchingResult result) {
@@ -224,14 +244,17 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         treasuryTrades = hasTrade(batchPlans, batchPlanCount);
         changes.ensureOrderCapacity(orders, actualLanes);
         directPublished = true;
-        releaseMatcherCompletionBeforeSignal();
-        runtime.signalDirectSettlement(routedLaneMask);
+        if (!matcherPublicationDeferred) notifyDirectPublication();
     }
 
     public void failDirect(Throwable failure) {
         if (!direct || directPublished) return;
         directFailure = java.util.Objects.requireNonNull(failure);
         directPublished = true;
+        if (!matcherPublicationDeferred) notifyDirectPublication();
+    }
+
+    private void notifyDirectPublication() {
         releaseMatcherCompletionBeforeSignal();
         runtime.signalDirectSettlement(routedLaneMask);
     }
@@ -376,6 +399,7 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             throw new IllegalStateException("cannot recycle an incomplete matcher settlement");
         }
         direct = false; directPublished = false; directFailure = null; dispatched = false;
+        matcherPublicationDeferred = false;
         matcherCompletionRoute = null;
         matcherCompletionShard = -1;
         directCoreSequence = 0;
@@ -465,7 +489,8 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
             throw new IllegalStateException("account lane completed the same matcher fact twice");
         }
         LONGS.setRelease(completedLanes, completionOffset, 1L);
-        completionRuntime.publishMatcherSettlementReady(laneId, completionSequence);
+        if (direct) completionRuntime.publishDirectMatcherSettlementReady(laneId);
+        else completionRuntime.publishMatcherSettlementReady(laneId, completionSequence);
     }
 
     private void applyPlan(AccountLaneState lane, int laneId, MatcherSettlementPlan value,

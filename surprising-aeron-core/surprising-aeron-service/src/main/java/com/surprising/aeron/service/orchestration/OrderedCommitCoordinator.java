@@ -82,11 +82,7 @@ final class OrderedCommitCoordinator {
         PendingMatching pending = owner.pendingMatching.get(sequence);
         if (pending == null || !owner.hasPendingMatchingRejection(sequence)) return null;
         CoreResultCode resultCode = owner.laneCommandContexts.required(sequence).matchingRejection();
-        CoreAdmissionReservation capacityReservation = owner.sequenceAdmission(pending.sequence());
-        if (capacityReservation == null) {
-            throw new IllegalStateException("rejected matching admission reservation is missing");
-        }
-        owner.activateFactContext(capacityReservation, pending.command(), pending.fingerprint());
+        owner.activateFactContext(pending.command(), pending.fingerprint());
         owner.commitMatchingSequence(sequence);
         long requiredExportSequence = 0;
         long stateHash = owner.stateHash(owner.cachedBusinessStateHash, pending.command().header().commandId(),
@@ -97,7 +93,7 @@ final class OrderedCommitCoordinator {
         owner.removePendingMatching(sequence);
         CoreResponse response = new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED, resultCode,
                 sequence, requiredExportSequence, stateHash, TradingCoreRuntime.EMPTY_RESPONSE_DATA);
-        return owner.releaseAdmission(capacityReservation, response);
+        return owner.finishFactContext(response);
     }
 
     public CoreResponse completeMatching(long sequence,
@@ -248,7 +244,7 @@ final class OrderedCommitCoordinator {
                 owner.resultBuilder.commandRiskScanControl = null;
                 owner.resultBuilder.resetChangeAccumulators();
                 owner.setCommandFundsDelta(pending.fundsDelta());
-                owner.activateFactContext(owner.sequenceAdmission(sequence), pending.command(), pending.fingerprint());
+                owner.activateFactContext(pending.command(), pending.fingerprint());
                 beginCommitPublicationBatch();
                 owner.addChangedUsers(pending.settlementPlan());
                 owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(pending.settlementPlan());
@@ -297,11 +293,7 @@ final class OrderedCommitCoordinator {
         owner.resultBuilder.commandRiskScanControl = null;
         owner.resultBuilder.resetChangeAccumulators();
         owner.setCommandFundsDelta(pending.fundsDelta());
-        CoreAdmissionReservation capacityReservation = owner.sequenceAdmission(pending.sequence());
-        if (capacityReservation == null) {
-            throw new IllegalStateException("matching admission reservation is missing");
-        }
-        owner.activateFactContext(capacityReservation, pending.command(), pending.fingerprint());
+        owner.activateFactContext(pending.command(), pending.fingerprint());
         beginCommitPublicationBatch();
         com.surprising.aeron.service.state.RuntimeTreasuryDelta settlementTreasuryDelta = null;
         try {
@@ -496,7 +488,6 @@ final class OrderedCommitCoordinator {
         long sequence = pending.sequence();
         long clusterTimestamp = pending.commitFenceTimestamp();
         long clusterPosition = pending.commitFenceClusterPosition();
-        CoreAdmissionReservation capacityReservation = owner.sequenceAdmission(sequence);
         ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
         CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
         RuntimeTreasuryDelta settledTreasuryDelta = settlementTreasuryDelta;
@@ -551,7 +542,7 @@ final class OrderedCommitCoordinator {
         if (!owner.admissions.deferredMatching.isEmpty() || owner.batches.hasPendingBatches()) {
             owner.submitDeferredMatchingAfterBatch();
         }
-        return owner.releaseAdmission(capacityReservation, response);
+        return owner.finishFactContext(response);
     }
 
     CoreResponse completeDispatchedMatcherSettlement(
@@ -625,7 +616,6 @@ final class OrderedCommitCoordinator {
         }
         ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
         CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
-        CoreAdmissionReservation capacityReservation = owner.sequenceAdmission(pending.sequence());
         CoreResponse response = storeTerminalResponse(
                 pending, matchingResult, status, resultCode);
         if (pending.takePipelinedSettlementCounted()) {
@@ -640,7 +630,7 @@ final class OrderedCommitCoordinator {
         owner.runtimeState.releaseMatcherSettlement(pending.takeSettlementEvent());
         owner.removePendingMatching(pending.sequence());
         if (!owner.admissions.deferredMatching.isEmpty() || owner.batches.hasPendingBatches()) owner.submitDeferredMatchingAfterBatch();
-        return owner.releaseAdmission(capacityReservation, response);
+        return owner.finishFactContext(response);
     }
 
     CoreResponse completeDispatchedCancel(
@@ -677,13 +667,12 @@ final class OrderedCommitCoordinator {
         }
         ResponseStatus status = matchingResult.accepted() ? ResponseStatus.APPLIED : ResponseStatus.REJECTED;
         CoreResultCode resultCode = matchingResult.accepted() ? CoreResultCode.NONE : CoreResultCode.MATCHING_REJECTED;
-        CoreAdmissionReservation capacityReservation = owner.sequenceAdmission(pending.sequence());
         CoreResponse response = storeTerminalResponse(
                 pending, matchingResult, status, resultCode);
         owner.runtimeState.releaseCancel(pending.takeCancelEvent());
         owner.removePendingMatching(pending.sequence());
         if (!owner.admissions.deferredMatching.isEmpty() || owner.batches.hasPendingBatches()) owner.submitDeferredMatchingAfterBatch();
-        return owner.releaseAdmission(capacityReservation, response);
+        return owner.finishFactContext(response);
     }
 
     CoreResponse completeDispatchedReplacePreparation(
@@ -1132,6 +1121,7 @@ final class OrderedCommitCoordinator {
     }
 
     void drainMatcherSettlementCompletions() {
+        boolean changed = owner.runtimeState.takeDirectMatcherSettlementReadyLaneMask() != 0;
         long readyLaneMask = owner.runtimeState.takeMatcherSettlementReadyLaneMask();
         while (readyLaneMask != 0) {
             int laneId = Long.numberOfTrailingZeros(readyLaneMask);
@@ -1140,9 +1130,12 @@ final class OrderedCommitCoordinator {
             while ((sequence = owner.runtimeState.pollMatcherSettlementReady(laneId)) != 0) {
                 // The event owns the completion bits. Owner only retires the notification cursor;
                 // ordered commit reads the event at the head and performs the business collect.
-                owner.pendingMatching.progressChanged();
+                changed = true;
             }
         }
+        // A direct event has no queue cursor to retire.  One revision bump is enough to make
+        // the ordered head retry; per-Lane notifications would only duplicate this work.
+        if (changed) owner.pendingMatching.progressChanged();
     }
 
     PendingMatching pollReadyPending() {
@@ -1431,15 +1424,17 @@ final class OrderedCommitCoordinator {
             try {
                 long sequence = Math.incrementExact(owner.runtimeProjectionJournal.publishedSequence());
                 try {
-                    if (owner.currentAdmission == null) {
-                        throw new IllegalStateException("runtime commit must be admitted before mutation");
+                    if (!owner.factContextActive) {
+                        throw new IllegalStateException("runtime commit requires an active command scope");
                     }
                     owner.runtimeState.appendFundsDelta(owner.commandFundsAccumulator);
                     if (owner.realtimeCapture != null) owner.runtimeState.captureRealtimeChanges(owner.realtimeCapture);
                     if (owner.runtimeState.committedRevision() < runtimePatchRevision)
                         throw new IllegalStateException("runtime changed-index commit is out of order");
                     owner.factIndexes.applyCurrent(owner.runtimeState, owner.identities);
-                    owner.currentAdmission.publish(sequence);
+                    owner.runtimeProjectionJournal.publish(sequence,
+                            owner.runtimeProjectionJournal.auditBusinessStateHash(),
+                            owner.runtimeProjectionJournal.auditFundsStateHash());
                     owner.currentProjectionPoint = new RuntimeProjectionPoint(sequence, null);
                     owner.currentProjectionPoint.completeSequence();
                     runtimePatchRevision = owner.runtimeState.committedRevision();

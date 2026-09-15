@@ -22,8 +22,13 @@ public final class CoreMatchingResult {
     private final int successfulPrefixCount;
     private final boolean matcherStateChanged;
     private final Outcome outcome;
-    private final NativeCommand nativeCommand;
-    private final MatcherPrefix matcherPrefix;
+    /*
+     * A result is created on the Matcher worker and is not published until its evidence is
+     * bound.  Keep these two fields mutable during that construction window so binding does not
+     * allocate a second CoreMatchingResult for every command.
+     */
+    private NativeCommand nativeCommand;
+    private MatcherPrefix matcherPrefix;
     private final MatcherResult nativeMatcherResult;
     private final List<MatcherResult.MatcherEvent> matcherEvents;
     private final MatcherResult.MarketData marketData;
@@ -58,7 +63,7 @@ public final class CoreMatchingResult {
         }
         this.accepted = accepted;
         this.resultCode = resultCode;
-        this.cancellations = List.copyOf(cancellations);
+        this.cancellations = immutable(cancellations);
         this.successfulPrefixCount = successfulPrefixCount;
         this.matcherStateChanged = matcherStateChanged;
         this.outcome = classify(accepted, resultCode, matcherStateChanged);
@@ -101,19 +106,11 @@ public final class CoreMatchingResult {
         return new CoreMatchingResult(this, command, prefix);
     }
 
-    /** 只替换证据；业务结果已校验，复用其不可变集合和分类，不重新遍历/分类。 */
-    private CoreMatchingResult(CoreMatchingResult source, NativeCommand command, MatcherPrefix prefix) {
-        accepted = source.accepted;
-        resultCode = source.resultCode;
-        cancellations = source.cancellations;
-        successfulPrefixCount = source.successfulPrefixCount;
-        matcherStateChanged = source.matcherStateChanged;
-        outcome = source.outcome;
+    /** Matcher-only binding path; called before publication into the completion ring. */
+    CoreMatchingResult bindEvidenceInPlace(NativeCommand command, MatcherPrefix prefix) {
         nativeCommand = Objects.requireNonNull(command, "native command");
         matcherPrefix = Objects.requireNonNull(prefix, "matcher prefix");
-        nativeMatcherResult = source.nativeMatcherResult;
-        matcherEvents = source.matcherEvents;
-        marketData = source.marketData;
+        return this;
     }
 
     public CoreMatchingResult withCoreSequence(long coreSequence) {
@@ -127,6 +124,33 @@ public final class CoreMatchingResult {
                 nativeCommand.instrumentChangeId(), nativeCommand.nativeSequence(), nativeCommand.matcherSequence(),
                 nativeCommand.aeronTimestamp(), nativeCommand.matcherShardId());
         return new CoreMatchingResult(this, command, matcherPrefix);
+    }
+
+    /** Matcher worker variant that avoids a second result object before publication. */
+    public CoreMatchingResult withCoreSequenceInPlace(long coreSequence) {
+        if (coreSequence <= 0) throw new IllegalArgumentException("coreSequence must be positive");
+        NativeCommand current = nativeCommand();
+        if (current.coreSequence() == coreSequence) return this;
+        if (current.coreSequence() != 0) throw new IllegalStateException("matching result sequence mismatch");
+        nativeCommand = new NativeCommand(coreSequence,
+                current.commandIdMostSignificantBits(), current.commandIdLeastSignificantBits(), current.orderId(),
+                current.instrumentChangeId(), current.nativeSequence(), current.matcherSequence(),
+                current.aeronTimestamp(), current.matcherShardId());
+        return this;
+    }
+
+    private CoreMatchingResult(CoreMatchingResult source, NativeCommand command, MatcherPrefix prefix) {
+        accepted = source.accepted;
+        resultCode = source.resultCode;
+        cancellations = source.cancellations;
+        successfulPrefixCount = source.successfulPrefixCount;
+        matcherStateChanged = source.matcherStateChanged;
+        outcome = source.outcome;
+        nativeCommand = Objects.requireNonNull(command, "native command");
+        matcherPrefix = Objects.requireNonNull(prefix, "matcher prefix");
+        nativeMatcherResult = source.nativeMatcherResult;
+        matcherEvents = source.matcherEvents;
+        marketData = source.marketData;
     }
 
     static List<MatcherResult.MatcherEvent> concatenateEvents(
@@ -189,6 +213,14 @@ public final class CoreMatchingResult {
         }
         if (accepted) return Outcome.APPLIED;
         return matcherStateChanged ? Outcome.KNOWN_PREFIX_APPLIED : Outcome.REJECTED_UNCHANGED;
+    }
+
+    /** Keep the JDK immutable lists already produced by the matcher; copy external mutable lists. */
+    private static <T> List<T> immutable(List<T> values) {
+        if (values.isEmpty() || values.getClass().getName().startsWith("java.util.ImmutableCollections$")) {
+            return values;
+        }
+        return List.copyOf(values);
     }
 
     public enum Outcome {

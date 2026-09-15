@@ -26,6 +26,7 @@ ACCOUNT_LANES="${ASYNC_ACCOUNT_LANES:-${AERON_BASELINE_ACCOUNT_LANES}}"
 MATCHING_ENGINES="${ASYNC_MATCHING_ENGINES:-${AERON_BASELINE_MATCHING_ENGINES}}"
 TRADING_PROFILE="${ASYNC_TRADING_PROFILE:-${AERON_BASELINE_TRADING_PROFILE}}"
 BATCH_SIZE="${ASYNC_BATCH_SIZE:-${AERON_BASELINE_BATCH_SIZE}}"
+SYMBOLS="${ASYNC_SYMBOLS:-${AERON_BASELINE_SYMBOLS:-128}}"
 ISOLATE_STAGE="${ASYNC_ISOLATE_STAGE:-false}"
 # Throughput qualification defaults to BUSY_SPIN to match the historical
 # overall transaction-link benchmark. Override explicitly when measuring
@@ -59,8 +60,8 @@ if [[ "${SKIP_BUILD}" != true ]]; then
 fi
 [[ -s "${SERVICE_JAR}" && -s "${BENCHMARK_JAR}" ]] || { echo "Build artifacts are missing" >&2; exit 2; }
 printf '%s\n' "${JAVA_VERSION}" > "${ROOT}/java-version.txt"
-printf 'windows=%s\nwarmupSeconds=%s\nmeasureSeconds=%s\nnodeXms=%s\nnodeXmx=%s\nclientXms=%s\nclientXmx=%s\ncollector=%s\naccountLanes=%s\nmatchingEngines=%s\nbatchSize=%s\ntradingProfile=%s\nisolateStage=%s\nenableJfr=%s\nmatcherWaitStrategy=%s\nsettlementWaitStrategy=%s\nsettlementSpinLimit=%s\n' \
-  "${WINDOWS_CSV}" "${WARMUP_SECONDS}" "${MEASURE_SECONDS}" "${NODE_XMS}" "${NODE_XMX}" "${CLIENT_XMS}" "${CLIENT_XMX}" "${COLLECTOR}" "${ACCOUNT_LANES}" "${MATCHING_ENGINES}" "${BATCH_SIZE}" "${TRADING_PROFILE}" "${ISOLATE_STAGE}" "${ENABLE_JFR}" "${MATCHER_WAIT_STRATEGY}" "${SETTLEMENT_WAIT_STRATEGY}" "${SETTLEMENT_SPIN_LIMIT}" > "${ROOT}/strategy.txt"
+printf 'windows=%s\nwarmupSeconds=%s\nmeasureSeconds=%s\nnodeXms=%s\nnodeXmx=%s\nclientXms=%s\nclientXmx=%s\ncollector=%s\naccountLanes=%s\nmatchingEngines=%s\nbatchSize=%s\nsymbols=%s\ntradingProfile=%s\nisolateStage=%s\nenableJfr=%s\nmatcherWaitStrategy=%s\nsettlementWaitStrategy=%s\nsettlementSpinLimit=%s\n' \
+  "${WINDOWS_CSV}" "${WARMUP_SECONDS}" "${MEASURE_SECONDS}" "${NODE_XMS}" "${NODE_XMX}" "${CLIENT_XMS}" "${CLIENT_XMX}" "${COLLECTOR}" "${ACCOUNT_LANES}" "${MATCHING_ENGINES}" "${BATCH_SIZE}" "${SYMBOLS}" "${TRADING_PROFILE}" "${ISOLATE_STAGE}" "${ENABLE_JFR}" "${MATCHER_WAIT_STRATEGY}" "${SETTLEMENT_WAIT_STRATEGY}" "${SETTLEMENT_SPIN_LIMIT}" > "${ROOT}/strategy.txt"
 
 NODE_PID=""
 NODE_LANES="${ACCOUNT_LANES}"
@@ -123,6 +124,7 @@ run_stage() {
     -Dsurprising.aeron.product-line=LINEAR_PERPETUAL "-Daeron.dir=${dir}/client-aeron"
     "-Dsurprising.aeron.capacity-warmup-seconds=${WARMUP_SECONDS}" "-Dsurprising.aeron.capacity-duration-seconds=${MEASURE_SECONDS}"
     "-Dsurprising.aeron.capacity-seed=$((window * 100 + batch))" -Dsurprising.aeron.mixed-trading-stream=true
+    "-Dsurprising.aeron.capacity-symbols=${SYMBOLS}"
     -Dsurprising.aeron.mixed-operational=false "-Dsurprising.aeron.capacity-async-in-flight=${window}"
     "-Dsurprising.aeron.capacity-session-in-flight=${window}")
   if [[ "${ENABLE_JFR}" == true ]]; then

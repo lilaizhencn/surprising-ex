@@ -131,10 +131,9 @@ final class CoreSnapshotLifecycle {
             if (owner.laneCommandContexts.inFlight() != 0) {
                 throw new IllegalStateException("snapshot fence contains unfinished lane or matcher work");
             }
-            if (owner.currentAdmission != null
-                    || owner.runtimeProjectionJournal.hasOutstandingReservation()
+            if (owner.snapshotHasPendingCommands()
                     || owner.commits.commitPublicationDeferred || owner.commits.commitPublicationDirty) {
-                throw new IllegalStateException("snapshot fence contains outstanding admission or patch work");
+                throw new IllegalStateException("snapshot fence contains unfinished commands or patch work");
             }
             owner.runtimeState.requireSnapshotFenceReady();
             if (fence.projectionSequence < 0) {

@@ -323,8 +323,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
     /** 当前完整提交点；只描述提交边界，不逐命令复制全量状态。 */
     RuntimeProjectionPoint currentProjectionPoint;
 
-    /** 当前命令的提交资源预留；挂起时交回对应序号上下文。 */
-    CoreAdmissionReservation currentAdmission;
+    /** Owner 当前是否持有命令的变更缓冲；挂起时交还序号槽。 */
+    boolean factContextActive;
     /** 已接收并应用的命令序号上界；可能高于已完成结算水位。 */
     long appliedCommandCount;
     /** 连续完成结算的全局命令水位；唯一 owner 推进。 */
@@ -367,9 +367,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
     /** 当前命令资金变化累加器；挂起/恢复时保持命令隔离。 */
     final com.surprising.aeron.service.state.RuntimeFundsAccumulator commandFundsAccumulator =
             new com.surprising.aeron.service.state.RuntimeFundsAccumulator(64);
-    /** 已释放的提交预留对象池；复用前必须清空原命令引用。 */
-    final java.util.ArrayDeque<CoreAdmissionReservation> admissionReservationPool =
-            new java.util.ArrayDeque<>();
 
     /** 当前激活命令在复制日志中的位置。 */
     long currentClusterPosition;
@@ -1171,20 +1168,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             }
             return admissions.beginMatching(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint);
         }
-        CoreAdmissionReservation commandAdmission = null;
-        CoreAdmissionReservation.AdmissionDemand commandDemand = null;
-        try {
-            commandDemand = CoreAdmissionReservation.AdmissionDemand.direct(message,
-                    runtimeState.riskScanControl().scanBatchSize());
-            commandAdmission = reserveAdmission(commandDemand);
-            activateFactContext(commandAdmission, message, fingerprint);
-        } catch (CoreStateRejectedException rejection) {
-            return admissionRejected(CoreResultCode.fromRejectionCode(rejection.code()));
-        } catch (ArithmeticException exception) {
-            return admissionRejected(CoreResultCode.ARITHMETIC_OVERFLOW);
-        } catch (IllegalArgumentException exception) {
-            return admissionRejected(CoreResultCode.INVALID_COMMAND);
-        }
+        activateFactContext(message, fingerprint);
         RuntimeProjectionPoint beforeProjection = currentProjectionPoint;
         long beforeRuntimeRevision = runtimeState.revision();
         long runtimeCommandCheckpoint = runtimeState.commandRevisionCheckpoint();
@@ -1225,18 +1209,16 @@ public final class TradingCoreRuntime implements AutoCloseable,
         }
         if (controlContinuation != null || controlCompletionStatus != null) {
             pendingDirectCommand = new PendingDirectCommand(message, clusterTimestamp, clusterPosition,
-                    sourceKey, fingerprint, commandAdmission, commandDemand, beforeProjection,
+                    sourceKey, fingerprint, beforeProjection,
                     beforeRuntimeRevision, runtimeCommandCheckpoint, positionIdentityCheckpoint);
             return null;
         }
-        return finishDirectCommand(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint, commandAdmission,
-                commandDemand, beforeProjection, beforeRuntimeRevision, runtimeCommandCheckpoint,
+        return finishDirectCommand(message, clusterTimestamp, clusterPosition, sourceKey, fingerprint, beforeProjection, beforeRuntimeRevision, runtimeCommandCheckpoint,
                 positionIdentityCheckpoint, status, resultCode);
     }
 
     private CoreResponse finishDirectCommand(CoreMessage message, long clusterTimestamp, long clusterPosition,
-            SourceKey sourceKey, CommandFingerprint fingerprint, CoreAdmissionReservation commandAdmission,
-            CoreAdmissionReservation.AdmissionDemand commandDemand, RuntimeProjectionPoint beforeProjection,
+            SourceKey sourceKey, CommandFingerprint fingerprint, RuntimeProjectionPoint beforeProjection,
             long beforeRuntimeRevision, long runtimeCommandCheckpoint, long positionIdentityCheckpoint,
             ResponseStatus status, CoreResultCode resultCode) {
         long nextAppliedCommandCount = Math.incrementExact(appliedCommandCount);
@@ -1250,7 +1232,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             }
             if (status == null) {
                 commits.abortCommitPublicationBatch();
-                return releaseAdmission(commandAdmission, rejected(CoreResultCode.INVALID_MESSAGE));
+                return finishFactContext(rejected(CoreResultCode.INVALID_MESSAGE));
             }
             if (status == ResponseStatus.APPLIED) {
                 if (runtimeState.asynchronousCommands()) {
@@ -1262,14 +1244,12 @@ public final class TradingCoreRuntime implements AutoCloseable,
                         return null;
                     }
                 } else triggers.cancelTriggersForClosedPositions();
-                int reservedChildPatches = commandDemand == null ? 0 : commandDemand.patchCount() - 1;
-                if (admissions.queuedMatching.size() > reservedChildPatches
-                        || pendingMatching.size() + admissions.queuedMatching.size() > pendingMatching.capacity()) {
+                if (pendingMatching.size() + admissions.queuedMatching.size() > pendingMatching.capacity()) {
                     admissions.queuedMatching.clear();
                     if (deferFinalizationRejection(CoreResultCode.MATCHING_BACKPRESSURE)) return null;
                     rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
                             Math.incrementExact(appliedCommandCount));
-                    return releaseAdmission(commandAdmission, rejected(CoreResultCode.MATCHING_BACKPRESSURE));
+                    return finishFactContext(rejected(CoreResultCode.MATCHING_BACKPRESSURE));
                 }
             }
             if (status == ResponseStatus.APPLIED) {
@@ -1282,10 +1262,13 @@ public final class TradingCoreRuntime implements AutoCloseable,
                     if (deferFinalizationRejection(CoreResultCode.INVALID_COMMAND)) return null;
                     rollbackCommandState(runtimeCommandCheckpoint, positionIdentityCheckpoint,
                             Math.incrementExact(appliedCommandCount));
-                    return releaseAdmission(commandAdmission, rejected(CoreResultCode.INVALID_COMMAND));
+                    return finishFactContext(rejected(CoreResultCode.INVALID_COMMAND));
                 }
             }
-            resultBuilder.materializeChangeAccumulators();
+            // Direct control commands finish on the Owner before another command can reuse
+            // this workspace. Keep changed IDs as reusable primitive views; matching commands
+            // still take immutable snapshots because their Lane continuation may suspend.
+            resultBuilder.materializeDirectChangeAccumulators();
             if (status == ResponseStatus.APPLIED && !resultBuilder.commandChangedUserIds.isEmpty()) {
                 // 业务任务已经结束。把发布序号交给实际参与 Lane，不接管全部账户。
                 if (runtimeState.asynchronousCommands()) {
@@ -1305,7 +1288,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             if (!runtimeState.laneCommitComplete(directCommitEvent)) {
                 if (pendingDirectCommand == null) {
                     pendingDirectCommand = new PendingDirectCommand(message, clusterTimestamp, clusterPosition,
-                            sourceKey, fingerprint, commandAdmission, commandDemand, beforeProjection,
+                            sourceKey, fingerprint, beforeProjection,
                             beforeRuntimeRevision, runtimeCommandCheckpoint, positionIdentityCheckpoint);
                     controlCompletionStatus = status;
                     controlCompletionCode = resultCode;
@@ -1341,7 +1324,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 appliedCommandCount, requiredExportSequence, stateHash, responseData);
         CoreResponse response = CoreResponse.owned(status, status, resultCode, appliedCommandCount,
                 requiredExportSequence, stateHash, responseData);
-        return releaseAdmission(commandAdmission, response);
+        return finishFactContext(response);
     }
 
     /** Reuse the direct command continuation for failures discovered during terminal preparation. */
@@ -1407,7 +1390,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             controlContinuation = null;
         }
         CoreResponse result = finishDirectCommand(pending.message, pending.timestamp, pending.position, pending.sourceKey,
-                pending.fingerprint, pending.admission, pending.demand, pending.beforeProjection,
+                pending.fingerprint, pending.beforeProjection,
                 pending.beforeRevision, pending.checkpoint, pending.identityCheckpoint,
                 controlCompletionStatus, controlCompletionCode);
         if (result == null) return null;
@@ -1420,8 +1403,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     /** 仅异步控制命令需要跨日志回调保留的提交上下文。 */
     private record PendingDirectCommand(CoreMessage message, long timestamp, long position,
-            SourceKey sourceKey, CommandFingerprint fingerprint, CoreAdmissionReservation admission,
-            CoreAdmissionReservation.AdmissionDemand demand, RuntimeProjectionPoint beforeProjection,
+            SourceKey sourceKey, CommandFingerprint fingerprint, RuntimeProjectionPoint beforeProjection,
             long beforeRevision, long checkpoint, long identityCheckpoint) { }
 
     long runtimePositionQuantity(long userId, String symbol) {
@@ -1459,28 +1441,21 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 || type == CoreMessageType.AMEND_ORDER_BATCH;
     }
 
-    CoreResponse releaseAdmission(CoreAdmissionReservation reservation, CoreResponse response) {
+    CoreResponse finishFactContext(CoreResponse response) {
         clearFactContext();
-        if (reservation != null) reservation.releaseUnused();
         return response;
     }
 
-    CoreAdmissionReservation reserveAdmission(
-            CoreAdmissionReservation.AdmissionDemand demand) {
-        return CoreAdmissionReservation.reserve(
-                runtimeProjectionJournal, exportState, demand, admissionReservationPool);
-    }
-
-    void activateFactContext(CoreAdmissionReservation reservation, CoreMessage command,
-                                     CommandFingerprint fingerprint) {
-        if (reservation == null || command == null || fingerprint == null) {
+    void activateFactContext(CoreMessage command, CommandFingerprint fingerprint) {
+        if (command == null || fingerprint == null) {
             throw new IllegalArgumentException("complete commit context is required before mutation");
         }
-        currentAdmission = reservation;
+        runtimeProjectionJournal.assertHealthy();
+        factContextActive = true;
     }
 
     void clearFactContext() {
-        currentAdmission = null;
+        factContextActive = false;
     }
 
     CoreResponse admissionRejected(CoreResultCode resultCode) {
@@ -1500,10 +1475,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
                                                 CommandFingerprint fingerprint, CoreResultCode resultCode) {
         if (!pendingMatching.isEmpty()) {
             long sequence = Math.incrementExact(appliedCommandCount);
-            currentAdmission.retainHolders(1);
             PendingMatching pending = admissions.newPendingMatching(sequence,
-                    MatchingCommandAdmission.matchingOperation(message.header().messageType()), message, fingerprint)
-                    .withCapacityReservation(currentAdmission);
+                    MatchingCommandAdmission.matchingOperation(message.header().messageType()), message, fingerprint);
             putPendingMatching(pending);
             laneCommandContexts.required(sequence).rejectMatching(resultCode);
             pendingMatching.completeSubmission(sequence);
@@ -1559,12 +1532,9 @@ public final class TradingCoreRuntime implements AutoCloseable,
         if (pendingMatching.size() >= pendingMatching.capacity()) {
             throw new IllegalStateException("matching pending capacity is exhausted");
         }
-        CoreAdmissionReservation admission = pending.takeCapacityReservation();
-        if (admission == null) throw new IllegalStateException("matching sequence admission is missing");
         try {
             pending.partitionLaneMask = clusterPipelineAdmission ? preparedPipelineLaneMask : 0;
             pendingMatching.put(pending);
-            laneCommandContexts.required(pending.sequence()).admission(admission);
             CoreMessageType type = pending.command().header().messageType();
             if (type != CoreMessageType.PLACE_ORDER_BATCH
                     && type != CoreMessageType.CANCEL_ORDER_BATCH
@@ -1575,15 +1545,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
             if (pendingMatching.remove(pending.sequence()) == null) {
                 pendingMatching.discardPrepared(pending.sequence());
             }
-            admission.releaseUnused();
             throw failure;
         }
-    }
-
-    CoreAdmissionReservation sequenceAdmission(long sequence) {
-        CoreAdmissionReservation admission = laneCommandContexts.required(sequence).capacityAdmission();
-        if (admission == null) throw new IllegalStateException("sequence admission is missing");
-        return admission;
     }
 
     int matcherShard(PendingMatching pending) {
@@ -2643,11 +2606,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return runtimeProjectionJournal.projectionFreezeCount();
     }
 
-    boolean hasProjectionAdmissionCapacity(int additionalEntries) {
-        return !runtimeProjectionJournal.activated()
-                || runtimeProjectionJournal.hasCapacityFor(additionalEntries);
-    }
-
     boolean runtimeRiskScanComplete() {
         return runtimeState.firstIncompleteRiskScan() == null;
     }
@@ -2687,9 +2645,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
         return key == null ? null : runtimeState.position(key);
     }
 
-    boolean snapshotHasOutstandingReservation() {
-        return currentAdmission != null
-                || runtimeProjectionJournal.hasOutstandingReservation();
+    boolean snapshotHasPendingCommands() {
+        return factContextActive || pendingDirectCommand != null || laneCommandContexts.inFlight() != 0;
     }
 
     Map<Long, com.surprising.aeron.service.state.model.CoreFeePolicyState> feePolicies() {
@@ -2948,11 +2905,11 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     void restoreMatchingCommitContext(PendingMatching pending) {
-        if (commits.commitPublicationDeferred || currentAdmission != null) {
+        if (commits.commitPublicationDeferred || factContextActive) {
             throw new IllegalStateException("another owner commit context is active");
         }
         LaneCommandContextRing.Context context = laneCommandContexts.required(pending.sequence());
-        activateFactContext(sequenceAdmission(pending.sequence()), pending.command(), pending.fingerprint());
+        activateFactContext(pending.command(), pending.fingerprint());
         commits.commitPublicationDeferred = true;
         commits.commitPublicationDirty = context.commitSnapshotDirty();
         commits.commitPublicationProvisionalOnly = context.commitSnapshotProvisionalOnly();
@@ -3075,13 +3032,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         bookQueries.failedQueries.clear();
         bookQueries.queryIds.clear();
         runtimeState.endOrderBatchMutationScope();
-        if (currentAdmission != null) {
-            currentAdmission.releaseUnused();
-            clearFactContext();
-        }
-        pendingMatching.forEach(pending -> {
-            sequenceAdmission(pending.sequence()).releaseUnused();
-        });
+        clearFactContext();
         batches.clearPendingBatches();
         pendingMatching.clear();
         crossShardCancellations.clear();

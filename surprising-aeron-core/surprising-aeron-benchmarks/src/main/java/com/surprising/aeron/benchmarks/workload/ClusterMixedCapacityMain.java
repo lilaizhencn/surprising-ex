@@ -18,7 +18,7 @@ import org.HdrHistogram.Histogram;
  */
 public final class ClusterMixedCapacityMain implements AutoCloseable {
     /** Default single-member throughput baseline; scripts may override explicitly for diagnostics. */
-    static final int USERS = 1000, SYMBOLS = 256, WINDOW = 64;
+    static final int USERS = 1000, SYMBOLS = Integer.getInteger("surprising.aeron.capacity-symbols", 256), WINDOW = 64;
     private final int batchSize;
     static final long BALANCE = 1_000_000_000L;
     private final List<Long> users = users();

@@ -71,6 +71,10 @@ final class CommandResultBuilder {
     /** 复用批量订单响应的去重集合和临时视图缓冲；List.copyOf 在边界创建稳定结果。 */
     private final PrimitiveLongChangeSet commandViewOrderIds = new PrimitiveLongChangeSet();
     private final ArrayList<CoreOrderStateView> commandViewBuffer = new ArrayList<>();
+    /** Direct control commands stay on the owner until their response is encoded. Reuse views
+     * over the owner workspace instead of copying both sets into a fresh long[] per command. */
+    private final MutableLongListView directChangedUsers = new MutableLongListView();
+    private final MutableLongListView directChangedOrders = new MutableLongListView();
 
     /** 当前命令产生的成交数。 */
     long commandTradeCount;
@@ -166,6 +170,15 @@ final class CommandResultBuilder {
         owner.runtimeState.acceptChangedUserIds(changedUserIds::add);
         commandChangedUserIds = changedUserIds.toImmutableList();
         commandChangedOrderIds = changedOrderIds.toImmutableList();
+    }
+
+    void materializeDirectChangeAccumulators() {
+        owner.seedChangeAccumulators();
+        owner.runtimeState.acceptChangedUserIds(changedUserIds::add);
+        directChangedUsers.bind(changedUserIds);
+        directChangedOrders.bind(changedOrderIds);
+        commandChangedUserIds = directChangedUsers;
+        commandChangedOrderIds = directChangedOrders;
     }
 
     void materializeCommandOrderViews(PendingMatching pending) {
@@ -422,5 +435,15 @@ final class CommandResultBuilder {
         public long clusterPosition() { return order.clusterPosition(); }
         public String status() { return order.status().name(); }
         public long revision() { return order.revision(); }
+    }
+
+    /** Owner-confined List facade; the direct command path never retains it after the callback. */
+    private static final class MutableLongListView extends AbstractList<Long> implements RandomAccess {
+        private PrimitiveLongChangeSet values;
+
+        void bind(PrimitiveLongChangeSet values) { this.values = values; }
+
+        @Override public Long get(int index) { return values.valueAt(index); }
+        @Override public int size() { return values == null ? 0 : values.size(); }
     }
 }

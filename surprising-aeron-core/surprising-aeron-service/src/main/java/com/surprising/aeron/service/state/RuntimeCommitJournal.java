@@ -3,25 +3,20 @@ package com.surprising.aeron.service.state;
 import com.surprising.product.api.ProductLine;
 
 /**
- * Owner-thread commit admission and sequence journal.
+ * Owner-thread commit sequence and diagnostic metadata.
  *
  * <p>The authoritative mutable state already lives on the Product Core owner. Keeping a second
  * {@link RuntimeProjectionState} current for every command duplicated all Map/hash/materialization
- * work and introduced a reverse projection fence. This journal therefore retains only bounded
- * admission, sequencing and diagnostic metadata. A read-only {@link TradingCoreState} is built
+ * work and introduced a reverse projection fence. This journal therefore retains only sequencing and diagnostic metadata. A read-only {@link TradingCoreState} is built
  * explicitly by {@link RuntimeStateMaterializer} at a query or snapshot boundary.</p>
  */
 public final class RuntimeCommitJournal implements AutoCloseable {
 
-    private static final int MIN_CAPACITY = 1_024;
-    private static final int MAX_CAPACITY = 1 << 20;
     private static final long MAX_RESERVED_PATCH_BYTES = 16L << 20;
 
-    private final int capacity;
     private final WaitStrategy waitStrategy;
     private final RuntimeProjectionPoint initialPoint;
     private long publishedSequence;
-    private long reservedEntries;
     private long batchCount;
     private long batchItems;
     private long batchBytes;
@@ -51,9 +46,6 @@ public final class RuntimeCommitJournal implements AutoCloseable {
             throw new IllegalArgumentException("invalid commit journal state");
         }
         if (initialSequence < 0) throw new IllegalArgumentException("initial commit sequence is negative");
-        capacity = normalizedCapacity(Integer.getInteger(
-                "surprising.aeron.commit-journal-capacity",
-                Integer.getInteger("surprising.aeron.projection-journal-capacity", 65_536)));
         waitStrategy = WaitStrategy.PARKING;
         initialPoint = new RuntimeProjectionPoint(initialSequence, null);
         initialPoint.completeSequence();
@@ -78,50 +70,6 @@ public final class RuntimeCommitJournal implements AutoCloseable {
 
     public boolean activated() { return activated; }
 
-    public AdmissionReservation reserveAdmission(int entriesRequired) {
-        reserveEntries(entriesRequired);
-        return new AdmissionReservation(this, entriesRequired);
-    }
-
-    /** Allocation-free reservation used by the Product Core owner hot path. */
-    public void reserveEntries(int entriesRequired) {
-        requireHealthy();
-        if (entriesRequired < 1) throw new IllegalArgumentException("journal reservation must be positive");
-        if (entriesRequired > capacity - reservedEntries) {
-            rejectionCount++;
-            throw new CoreStateRejectedException("MATCHING_BACKPRESSURE", "commit admission is full");
-        }
-        reservedEntries = Math.addExact(reservedEntries, entriesRequired);
-    }
-
-    public void releaseEntries(int entries) {
-        requireHealthy();
-        if (entries < 1 || entries > reservedEntries) {
-            throw new IllegalStateException("invalid commit admission release");
-        }
-        reservedEntries = Math.subtractExact(reservedEntries, entries);
-    }
-
-    public long publishReserved(long sequence) {
-        requireHealthy();
-        if (reservedEntries < 1) throw new IllegalStateException("commit admission is not reserved");
-        long published = publish(sequence, businessStateHash, fundsStateHash);
-        reservedEntries--;
-        return published;
-    }
-
-    public AdmissionReservation reserveAdmission(int entriesRequired, long bytesRequired) {
-        if (bytesRequired < 1) throw new IllegalArgumentException("journal reservation must be positive");
-        return reserveAdmission(entriesRequired);
-    }
-
-    public void release(AdmissionReservation reservation) {
-        validateReservation(reservation);
-        reservedEntries = Math.subtractExact(reservedEntries, reservation.remaining);
-        reservation.remaining = 0;
-        reservation.closed = true;
-    }
-
     public long publish(RuntimeFactFrame patch, long businessStateHash, long fundsStateHash) {
         requireHealthy();
         return publishCommittedPatch(patch, businessStateHash, fundsStateHash);
@@ -138,37 +86,6 @@ public final class RuntimeCommitJournal implements AutoCloseable {
         batchItems++;
         batchBytes = Math.addExact(batchBytes, 64);
         return next;
-    }
-
-    public long publish(AdmissionReservation reservation, RuntimeFactFrame patch,
-                        long businessStateHash, long fundsStateHash) {
-        validateReservation(reservation);
-        long published = publishCommittedPatch(patch, businessStateHash, fundsStateHash);
-        reservation.remaining--;
-        reservedEntries--;
-        if (reservation.remaining == 0) {
-            reservation.closed = true;
-        }
-        return published;
-    }
-
-    public long publish(AdmissionReservation reservation, long sequence,
-                        long businessStateHash, long fundsStateHash) {
-        long published = publish(reservation, sequence);
-        this.businessStateHash = businessStateHash;
-        this.fundsStateHash = fundsStateHash;
-        return published;
-    }
-
-    public long publish(AdmissionReservation reservation, long sequence) {
-        validateReservation(reservation);
-        long published = publish(sequence, businessStateHash, fundsStateHash);
-        reservation.remaining--;
-        reservedEntries--;
-        if (reservation.remaining == 0) {
-            reservation.closed = true;
-        }
-        return published;
     }
 
     private long publishCommittedPatch(RuntimeFactFrame patch,
@@ -202,41 +119,10 @@ public final class RuntimeCommitJournal implements AutoCloseable {
         publicationBatchDepth--;
     }
 
-    public PublishReservation reservePublish(long sequence) {
-        if (sequence != Math.incrementExact(publishedSequence)) {
-            throw new IllegalStateException("commit journal sequence gap");
-        }
-        return new PublishReservation(reserveAdmission(1), sequence);
-    }
-
-    public long publish(PublishReservation reservation, RuntimeFactFrame patch,
-                        long businessStateHash, long fundsStateHash) {
-        if (reservation == null || reservation.sequence != Math.incrementExact(publishedSequence)) {
-            throw new IllegalStateException("invalid commit journal reservation");
-        }
-        return publish(reservation.admission, patch, businessStateHash, fundsStateHash);
-    }
-
-    public void release(PublishReservation reservation) {
-        if (reservation == null) throw new IllegalArgumentException("reservation is required");
-        release(reservation.admission);
-    }
-
-    public void preflightPublish(RuntimeFactFrame patch) {
-        PublishReservation reservation = reservePublish(patch == null ? -1 : patch.sequence());
-        release(reservation);
-    }
-
-    public boolean hasCapacityFor(int additionalEntries) {
-        requireHealthy();
-        return additionalEntries > 0 && additionalEntries <= capacity - reservedEntries;
-    }
-
     public long publishedSequence() { return publishedSequence; }
     public long projectedSequence() { return publishedSequence; }
     public long auditBusinessStateHash() { return businessStateHash; }
     public long auditFundsStateHash() { return fundsStateHash; }
-    public boolean hasOutstandingReservation() { return reservedEntries != 0; }
     public long lag() { return 0; }
     public RuntimeProjectionPoint initialPoint() { return initialPoint; }
     public long projectionFreezeCount() { return 0; }
@@ -254,7 +140,7 @@ public final class RuntimeCommitJournal implements AutoCloseable {
     public Metrics metrics() {
         return new Metrics(0, 0, 0, batchCount, batchItems, batchBytes,
                 0, 0, waitStrategy, 0, rejectionCount, errorCount, timeoutCount,
-                reservedEntries, 0);
+                0, 0);
     }
 
     public ProjectionVersion current() {
@@ -295,13 +181,6 @@ public final class RuntimeCommitJournal implements AutoCloseable {
         }
     }
 
-    private void validateReservation(AdmissionReservation reservation) {
-        requireHealthy();
-        if (reservation == null || reservation.owner != this || reservation.closed || reservation.remaining < 1) {
-            throw new IllegalStateException("invalid or consumed commit admission reservation");
-        }
-    }
-
     private void requireHealthy() {
         if (closed) throw new IllegalStateException("runtime commit journal is closed");
         if (!activated) throw new IllegalStateException("runtime commit journal is not activated");
@@ -310,19 +189,10 @@ public final class RuntimeCommitJournal implements AutoCloseable {
     @Override
     public void close() {
         if (closed) return;
-        if (publicationBatchDepth != 0 || reservedEntries != 0) {
-            throw new IllegalStateException("runtime commit journal closed with outstanding admission");
+        if (publicationBatchDepth != 0) {
+            throw new IllegalStateException("runtime commit journal closed with an active publication batch");
         }
         closed = true;
-    }
-
-    private static int normalizedCapacity(int requested) {
-        if (requested < MIN_CAPACITY || requested > MAX_CAPACITY) {
-            throw new IllegalArgumentException("commit journal capacity is outside supported bounds");
-        }
-        int value = 1;
-        while (value < requested) value <<= 1;
-        return value;
     }
 
     private static long estimatedBytes(RuntimeFactFrame patch) {
@@ -331,29 +201,6 @@ public final class RuntimeCommitJournal implements AutoCloseable {
     }
 
     public static long maxReservedPatchBytes() { return MAX_RESERVED_PATCH_BYTES; }
-
-    public static final class AdmissionReservation {
-        private final RuntimeCommitJournal owner;
-        private int remaining;
-        private boolean closed;
-
-        private AdmissionReservation(RuntimeCommitJournal owner, int remaining) {
-            this.owner = owner;
-            this.remaining = remaining;
-        }
-
-        public int remaining() { return remaining; }
-    }
-
-    public static final class PublishReservation {
-        private final AdmissionReservation admission;
-        private final long sequence;
-
-        private PublishReservation(AdmissionReservation admission, long sequence) {
-            this.admission = admission;
-            this.sequence = sequence;
-        }
-    }
 
     public enum WaitStrategy {
         BUSY_SPIN,

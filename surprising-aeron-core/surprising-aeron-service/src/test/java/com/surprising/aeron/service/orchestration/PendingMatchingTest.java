@@ -80,27 +80,6 @@ class PendingMatchingTest {
     }
 
     @Test
-    void transfersAdmissionReservationOutOfPendingExactlyOnce() {
-        CoreMessage command = command(10);
-        TradingCoreState beforeState = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
-        try (RuntimeCommitJournal journal = new RuntimeCommitJournal(
-                ProductLine.LINEAR_PERPETUAL, beforeState, beforeState.businessStateHash(), 0)) {
-            CoreAdmissionReservation reservation = CoreAdmissionReservation.reserve(journal, null,
-                    new CoreAdmissionReservation.AdmissionDemand(1));
-            PendingMatching pending = new PendingMatching(7, PendingMatching.Operation.PLACE, command,
-                    CommandFingerprint.of(command), List.of(), new RuntimeProjectionPoint(0, beforeState),
-                    101L, 202L, RuntimeFundsDelta.empty()).withCapacityReservation(reservation);
-
-            assertThat(pending.takeCapacityReservation()).isSameAs(reservation);
-            assertThat(pending.takeCapacityReservation()).isNull();
-            assertThat(pending.withPreMatchingCancellations(List.of(18L)).takeCapacityReservation()).isNull();
-
-            reservation.releaseUnused();
-            assertThat(journal.metrics().reservedEntries()).isZero();
-        }
-    }
-
-    @Test
     void preservesCapturedPreCommandHashesAcrossDeferredMatchingUpdates() {
         CoreMessage command = command(11);
         CommandFingerprint fingerprint = CommandFingerprint.of(command);

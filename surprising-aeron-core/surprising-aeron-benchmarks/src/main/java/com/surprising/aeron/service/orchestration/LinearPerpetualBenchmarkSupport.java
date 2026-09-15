@@ -56,7 +56,6 @@ final class LinearPerpetualBenchmarkSupport {
     private static final long SAFE_BALANCE = 1_000_000_000L;
     private static final long LIQUIDATION_BALANCE = 230;
     private static final long MATCH_TIMEOUT_NANOS = 30_000_000_000L;
-    private static final int PROJECTION_ADMISSION_HEADROOM = 3;
     private static final int COMMANDS_PER_LOGICAL_MILLISECOND = 1_024;
 
     private LinearPerpetualBenchmarkSupport() {
@@ -953,7 +952,6 @@ final class LinearPerpetualBenchmarkSupport {
             int operationWeight = batchWeight == null ? 1 : batchWeight;
             OpenLoopBusinessLatencyRecorder.Token businessLatency = businessLatencies == null
                     ? null : businessLatencies.enter(command.header().messageType(), operationWeight);
-            awaitProjectionAdmissionCapacity();
             executedMessages = Math.addExact(executedMessages, operationWeight);
             acceptedMessages = Math.addExact(acceptedMessages, operationWeight);
             acceptedCoreMessages = Math.incrementExact(acceptedCoreMessages);
@@ -981,28 +979,6 @@ final class LinearPerpetualBenchmarkSupport {
                 if (businessLatencies != null) businessLatencies.terminal(businessLatency);
             }
             return pending;
-        }
-
-        private void awaitProjectionAdmissionCapacity() {
-            long deadline = System.nanoTime() + MATCH_TIMEOUT_NANOS;
-            int idle = 0;
-            while (!state.hasProjectionAdmissionCapacity(PROJECTION_ADMISSION_HEADROOM)) {
-                if (System.nanoTime() >= deadline) {
-                    throw new IllegalStateException("commit journal admission remained saturated for 30 seconds");
-                }
-                if (!submittedMatching.isEmpty()) {
-                    int pendingBefore = submittedMatching.size();
-                    if (admissionBackpressureDrain == null) drainOldestLatencyNanos();
-                    else admissionBackpressureDrain.run();
-                    if (submittedMatching.size() >= pendingBefore) {
-                        throw new IllegalStateException("commit admission drain made no matching progress");
-                    }
-                    idle = 0;
-                    continue;
-                }
-                if (idle++ < 1_024) Thread.onSpinWait();
-                else LockSupport.parkNanos(1_000L);
-            }
         }
 
         void admissionBackpressureDrain(Runnable drain) {

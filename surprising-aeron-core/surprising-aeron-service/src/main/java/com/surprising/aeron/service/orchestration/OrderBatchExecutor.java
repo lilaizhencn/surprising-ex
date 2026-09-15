@@ -120,18 +120,8 @@ final class OrderBatchExecutor {
                     exception instanceof ArithmeticException
                             ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND);
         }
-        CoreAdmissionReservation capacityReservation;
-        try {
-            capacityReservation = owner.reserveAdmission(
-                    CoreAdmissionReservation.AdmissionDemand.matching(message, owner.admissions.matchingOrderBound(message, decodedCommand),
-                            decodedCommand));
-        } catch (CoreStateRejectedException rejection) {
-            releaseOrderBatchPending(batch);
-            return owner.admissionRejected(CoreResultCode.fromRejectionCode(rejection.code()));
-        }
         long sequence = Math.incrementExact(owner.appliedCommandCount);
-        PendingMatching pending = owner.admissions.newPendingMatching(sequence, batch.operation, message, fingerprint, decodedCommand)
-                .withCapacityReservation(capacityReservation);
+        PendingMatching pending = owner.admissions.newPendingMatching(sequence, batch.operation, message, fingerprint, decodedCommand);
         batch.sequence = sequence;
         owner.putPendingMatching(pending);
         owner.admissions.registerPendingLifecycle(pending);
@@ -158,8 +148,7 @@ final class OrderBatchExecutor {
         if (firstActivation) beginOrderBatchCommitContext(batch, pending);
         else if (owner.laneCommandContexts.required(pending.sequence()).hasCommitContext())
             owner.restoreMatchingCommitContext(pending);
-        else owner.activateFactContext(owner.sequenceAdmission(pending.sequence()),
-                pending.command(), pending.fingerprint());
+        else owner.activateFactContext(pending.command(), pending.fingerprint());
         if (firstActivation && batch.admissionOrderIndex != null) batch.admissionOrderIndex.reset(pending.command().header().userId());
         batch.activated(true);
         if (preparePipelinedPlaceBatch(batch, pending)) {
@@ -898,12 +887,8 @@ final class OrderBatchExecutor {
 
     CoreResponse finishOrderBatch(OrderBatchPending batch, PendingMatching pending,
                                           long clusterTimestamp, long clusterPosition) {
-        CoreAdmissionReservation capacityReservation = owner.sequenceAdmission(pending.sequence());
-        if (capacityReservation == null) {
-            throw new IllegalStateException("order batch admission reservation is missing");
-        }
         if (!batch.finishing()) {
-            owner.activateFactContext(capacityReservation, pending.command(), pending.fingerprint());
+            owner.activateFactContext(pending.command(), pending.fingerprint());
             owner.setCommandFundsDelta(pending.fundsDelta());
             batch.finishing(true);
         }
@@ -1021,7 +1006,7 @@ final class OrderBatchExecutor {
         CoreResponse response = CoreResponse.owned(ResponseStatus.APPLIED, ResponseStatus.APPLIED,
                 CoreResultCode.NONE, batch.sequence, requiredExportSequence, stateHash, responseData);
         releaseOrderBatchPending(batch);
-        return owner.releaseAdmission(capacityReservation, response);
+        return owner.finishFactContext(response);
     }
 
     void initializeOrderBatchLaneContext(OrderBatchPending batch, PendingMatching pending) {
@@ -1063,9 +1048,7 @@ final class OrderBatchExecutor {
     }
 
     void beginOrderBatchCommitContext(OrderBatchPending batch, PendingMatching pending) {
-        CoreAdmissionReservation reservation = owner.sequenceAdmission(pending.sequence());
-        if (reservation == null) throw new IllegalStateException("order batch admission reservation is missing");
-        owner.activateFactContext(reservation, pending.command(), pending.fingerprint());
+        owner.activateFactContext(pending.command(), pending.fingerprint());
         owner.resultBuilder.clearOrderViews();
         owner.resultBuilder.commandChangedUserIds = List.of();
         owner.resultBuilder.commandChangedOrderIds = List.of();

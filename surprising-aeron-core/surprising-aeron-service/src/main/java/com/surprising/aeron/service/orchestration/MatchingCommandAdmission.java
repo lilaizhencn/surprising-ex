@@ -62,15 +62,10 @@ final class MatchingCommandAdmission {
 
     void appendQueuedMatching() {
         if (queuedMatching.isEmpty()) return;
-        if (owner.currentAdmission == null) {
-            throw new IllegalStateException("queued matching admission reservation is missing");
-        }
-        owner.currentAdmission.retainHolders(queuedMatching.size());
         for (QueuedTriggerMatching queued : queuedMatching) {
             CoreMessage command = queued.command();
             long sequence = Math.incrementExact(owner.appliedCommandCount);
-            PendingMatching pending = newPendingMatching(sequence, PendingMatching.Operation.TRIGGER, command)
-                    .withCapacityReservation(owner.currentAdmission);
+            PendingMatching pending = newPendingMatching(sequence, PendingMatching.Operation.TRIGGER, command);
             pending.triggerAdmission(queued.order());
             owner.putPendingMatching(pending);
             registerPendingLifecycle(pending);
@@ -182,17 +177,9 @@ final class MatchingCommandAdmission {
                                          CommandFingerprint fingerprint, PendingMatching deferredPending) {
         long matchingStartNanos = System.nanoTime();
         DecodedMatchingCommand decodedCommand;
-        CoreAdmissionReservation capacityReservation;
         try {
             decodedCommand = deferredPending == null
                     ? owner.decodeMatchingCommand(message) : deferredPending.decodedCommand();
-            capacityReservation = deferredPending == null
-                    ? owner.reserveAdmission(CoreAdmissionReservation.AdmissionDemand.matching(
-                            message, matchingOrderBound(message, decodedCommand), decodedCommand))
-                    : owner.sequenceAdmission(deferredPending.sequence());
-            if (capacityReservation == null) {
-                throw new IllegalStateException("deferred matching admission reservation is missing");
-            }
         } catch (CoreStateRejectedException rejection) {
             return deferredPending == null
                     ? owner.admissionRejected(CoreResultCode.fromRejectionCode(rejection.code())) : null;
@@ -203,18 +190,18 @@ final class MatchingCommandAdmission {
         }
         CommandFingerprint effectiveFingerprint = deferredPending == null
                 ? fingerprint : deferredPending.fingerprint();
-        owner.activateFactContext(capacityReservation, message, effectiveFingerprint);
+        owner.activateFactContext(message, effectiveFingerprint);
         try {
             rejectLifecycleOverlap(message, operation, decodedCommand);
         } catch (CoreStateRejectedException exception) {
             CoreResponse response = owner.recordRejectedMatching(message, sourceKey, effectiveFingerprint,
                     CoreResultCode.fromRejectionCode(exception.code()), deferredPending);
-            return owner.releaseAdmission(capacityReservation, response);
+            return owner.finishFactContext(response);
         } catch (ArithmeticException | IllegalArgumentException exception) {
             CoreResponse response = owner.recordRejectedMatching(message, sourceKey, effectiveFingerprint,
                     exception instanceof ArithmeticException
                     ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND, deferredPending);
-            return owner.releaseAdmission(capacityReservation, response);
+            return owner.finishFactContext(response);
         }
         RuntimeProjectionPoint beforeProjection = deferredPending == null
                 ? owner.currentProjectionPoint : deferredPending.beforeProjection();
@@ -268,7 +255,7 @@ final class MatchingCommandAdmission {
             else owner.commits.abortCommitPublicationBatch();
             CoreResponse response = owner.recordRejectedMatching(message, sourceKey, effectiveFingerprint,
                     CoreResultCode.fromRejectionCode(exception.code()), deferredPending);
-            return owner.releaseAdmission(capacityReservation, response);
+            return owner.finishFactContext(response);
         } catch (ArithmeticException | IllegalArgumentException exception) {
             if (owner.commits.commitPublicationDirty) {
                 if (!owner.pendingMatching.isEmpty()) {
@@ -280,7 +267,7 @@ final class MatchingCommandAdmission {
             CoreResponse response = owner.recordRejectedMatching(message, sourceKey, effectiveFingerprint,
                     exception instanceof ArithmeticException
                     ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND, deferredPending);
-            return owner.releaseAdmission(capacityReservation, response);
+            return owner.finishFactContext(response);
         }
         boolean tradingStateChanged = owner.commits.commitPublicationDirty && !owner.commits.commitPublicationProvisionalOnly;
         if (tradingStateChanged) {
@@ -302,7 +289,6 @@ final class MatchingCommandAdmission {
                 ? newPendingMatching(sequence, operation, message, effectiveFingerprint,
                         preMatchingCancellations, beforeProjection,
                         beforeBusinessStateHash, beforeFundsStateHash, decodedCommand, admission)
-                        .withCapacityReservation(capacityReservation)
                 : deferredPending.withPreMatchingCancellations(preMatchingCancellations)
                         .withAdmission(admission);
         pending.establishCommitFence(clusterTimestamp, clusterPosition);
@@ -339,12 +325,8 @@ final class MatchingCommandAdmission {
                                        TradingCoreRuntime.SourceKey sourceKey, PendingMatching.Operation operation,
                                        CommandFingerprint fingerprint) {
         DecodedMatchingCommand decodedCommand;
-        CoreAdmissionReservation reservation;
         try {
             decodedCommand = owner.decodeMatchingCommand(message);
-            reservation = owner.reserveAdmission(
-                    CoreAdmissionReservation.AdmissionDemand.matching(message, matchingOrderBound(message, decodedCommand),
-                            decodedCommand));
         } catch (CoreStateRejectedException rejection) {
             return owner.admissionRejected(CoreResultCode.fromRejectionCode(rejection.code()));
         } catch (ArithmeticException | IllegalArgumentException rejection) {
@@ -352,8 +334,7 @@ final class MatchingCommandAdmission {
                     ? CoreResultCode.ARITHMETIC_OVERFLOW : CoreResultCode.INVALID_COMMAND);
         }
         long sequence = Math.incrementExact(owner.appliedCommandCount);
-        PendingMatching pending = newPendingMatching(sequence, operation, message, fingerprint, decodedCommand)
-                .withCapacityReservation(reservation);
+        PendingMatching pending = newPendingMatching(sequence, operation, message, fingerprint, decodedCommand);
         owner.putPendingMatching(pending);
         pending.deferredMatching(true);
         deferredMatching.put(sequence, new DeferredMatching(clusterTimestamp, clusterPosition, sourceKey));

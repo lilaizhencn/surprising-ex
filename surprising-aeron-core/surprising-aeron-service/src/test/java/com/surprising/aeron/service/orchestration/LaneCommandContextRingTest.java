@@ -177,23 +177,19 @@ class LaneCommandContextRingTest {
     }
 
     @Test
-    void ownsAdmissionAndSuspendedCommitStateBySequence() {
+    void ownsSuspendedCommitStateBySequence() {
         TradingCoreState initial = TradingCoreState.empty(ProductLine.LINEAR_PERPETUAL);
         try (RuntimeCommitJournal journal = new RuntimeCommitJournal(
                 ProductLine.LINEAR_PERPETUAL, initial, initial.businessStateHash(), 0)) {
-            CoreAdmissionReservation admission = CoreAdmissionReservation.reserve(journal, null,
-                    new CoreAdmissionReservation.AdmissionDemand(1));
             LaneCommandContextRing ring = new LaneCommandContextRing(4, 4);
             LaneCommandContextRing.Context context = ring.claim(2);
             RuntimeFundsAccumulator funds = new RuntimeFundsAccumulator();
             RuntimeFundsAccumulator restoredFunds = new RuntimeFundsAccumulator();
-            context.admission(admission);
             CommandResultBuilder builder = new CommandResultBuilder(null);
             builder.changedUserIds.add(7L);
             builder.changedOrderIds.add(11L);
             context.suspendCommitContext(builder, funds, true, false);
 
-            assertThat(context.admission()).isSameAs(admission);
             assertThat(context.hasCommitContext()).isTrue();
             assertThat(context.commitChangedUserIds()).containsExactly(7L);
             assertThat(context.commitChangedOrderIds()).containsExactly(11L);
@@ -204,7 +200,6 @@ class LaneCommandContextRingTest {
             context.clearCommitContext();
             assertThat(context.hasCommitContext()).isFalse();
 
-            admission.releaseUnused();
             ring.discard(2);
         }
     }

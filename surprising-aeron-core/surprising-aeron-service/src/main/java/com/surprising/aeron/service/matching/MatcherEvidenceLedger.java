@@ -73,7 +73,7 @@ final class MatcherEvidenceLedger {
         long before = (long) LONGS.getAcquire(shardPrefixes, offset);
         long after = MatcherPrefixDigest.next(before, nativeCommand, result);
         LONGS.setRelease(shardPrefixes, offset, after);
-        return result.withEvidence(nativeCommand, new CoreMatchingResult.MatcherPrefix(before, after));
+        return result.bindEvidenceInPlace(nativeCommand, new CoreMatchingResult.MatcherPrefix(before, after));
     }
 
     CoreMatchingResult bindNative(
