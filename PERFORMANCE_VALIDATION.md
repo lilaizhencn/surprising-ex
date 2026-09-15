@@ -1990,3 +1990,5 @@ JFR 显示 Owner 的终态提交仍会在 `TerminalTombstoneStore` 对客户号�
 JFR 的分配/调用栈显示，`RuntimeIdentityRegistry.retainPositionInLane` 每次结算都会对已经存在的 `PositionIdentity` 调用并发反向索引 `putIfAbsent`，产生重复哈希、装箱和写入竞争。`PositionEntry` 现在只在首次创建或并发首次观察时注册反向索引，后续 Lane 结算只读一次注册标记；释放、回滚和恢复会同步清除或恢复标记，快照格式和身份碰撞校验不变。该改动不移除必要的身份索引，不改变 Lane 所有权或引用计数。
 
 定向 `RuntimeIdentityRegistry`、结算复用和运行时状态回归通过；端到端 JFR 轮（同口径、预热5s/测量15s）`387,087.323 business/s`、Owner `97.61%`、Matcher `56.29%`、四 Lane 各约 `98.1%`，`clientPass=true`、`unfinished=0`、`fundsDiff=0`。该轮受 JFR 和短测波动影响，不能单独宣称吞吐提升；原始目录 `/tmp/core-tombstone-profile-20260916` 保留审计，节点与客户端均已退出。
+
+随后无 JFR 同口径复测两轮为 `370,482.873/s` 与 `401,000.707/s`，均完整生命周期通过；均值 `385,741.790/s`，相对历史 `392,705.617/s` 约低 `1.8%`，在既有短测波动与 `5%` 回退门槛内。普通业务 p99 仍为约 `25.5–29.1ms`，本项优化没有解决 Owner 排队和 5ms 延迟目标。原始目录 `/tmp/core-position-registration-20260916`、`/tmp/core-position-registration-rerun-20260916` 保留审计，节点与客户端均已退出。
