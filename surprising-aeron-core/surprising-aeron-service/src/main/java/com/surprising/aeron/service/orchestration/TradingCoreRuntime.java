@@ -1529,12 +1529,16 @@ public final class TradingCoreRuntime implements AutoCloseable,
     }
 
     int matcherShard(CommandSlot pending) {
+        int cached = pending.cachedMatcherShard();
+        if (cached >= 0) return cached;
         String symbol = pending.operation() == CommandSlot.Operation.LIQUIDATION
                 || pending.operation() == CommandSlot.Operation.LIQUIDATION_BATCH
                 || pending.operation() == CommandSlot.Operation.SETTLEMENT
                 ? admissions.pendingLifecycleSymbol(pending)
                 : admissions.matchingSymbol(pending.command(), pending.operation(), pending.decodedCommand());
-        return symbol == null || symbol.isBlank() ? 0 : matchingAdapter.matcherShardId(symbol);
+        int shard = symbol == null || symbol.isBlank() ? 0 : matchingAdapter.matcherShardId(symbol);
+        pending.cachedMatcherShard(shard);
+        return shard;
     }
 
     LifecycleOrderChunk lifecycleOrders(long userId, String symbol, long cursorOrderId, int maxOrders) {

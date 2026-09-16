@@ -62,6 +62,8 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     private boolean pipelinedSettlementCounted;
     /** Fast lifecycle bit for deferred commands; avoids a boxed LinkedHashMap probe in Owner polling. */
     private boolean deferredMatching;
+    /** Cached matcher shard for a non-batch command; stable until this slot is recycled. */
+    private int cachedMatcherShard = -1;
 
     // Only the reusable control-command slot uses these fields. No per-command continuation wrapper.
     boolean directActive;
@@ -226,6 +228,7 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         dispatchOnly = false;
         pipelinedSettlementCounted = false;
         deferredMatching = false;
+        cachedMatcherShard = -1;
         return this;
     }
 
@@ -391,12 +394,20 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         admittedMatchingOrder = null;
         realtimeTakerOrder = null;
         deferredMatching = false;
+        cachedMatcherShard = -1;
     }
     void dispatchOnly() { dispatchOnly = true; }
     boolean isDispatchOnly() { return dispatchOnly; }
 
     void deferredMatching(boolean value) { deferredMatching = value; }
     boolean deferredMatching() { return deferredMatching; }
+
+    int cachedMatcherShard() { return cachedMatcherShard; }
+
+    void cachedMatcherShard(int shard) {
+        if (shard < 0) throw new IllegalArgumentException("matcher shard cannot be negative");
+        cachedMatcherShard = shard;
+    }
     boolean takeDispatchOnly() {
         boolean value = dispatchOnly;
         dispatchOnly = false;
@@ -652,5 +663,6 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         commitSnapshotProvisionalOnly = false;
         commitContextActive = false;
         matchingRejection = null;
+        cachedMatcherShard = -1;
     }
 }
