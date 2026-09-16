@@ -45,7 +45,11 @@ public final class RuntimeIdentityRegistry implements RuntimeFactFrame.IdentityV
 
     void bindClientLanes(TradingRuntimeState runtime) {
         assertOwner();
-        if (clientRuntime != null && clientRuntime != runtime)
+        // A projector may create a short-lived runtime for parity/snapshot
+        // checks before the account workers are started. Rebind in that
+        // owner-confined phase; once workers are live, sharing client identity
+        // storage would route a mutation to the wrong runtime and is rejected.
+        if (clientRuntime != null && clientRuntime != runtime && clientRuntime.accountLanesStarted)
             throw new IllegalStateException("client identities already belong to a runtime");
         clientTopology = runtime.topology();
         clientRuntime = runtime;

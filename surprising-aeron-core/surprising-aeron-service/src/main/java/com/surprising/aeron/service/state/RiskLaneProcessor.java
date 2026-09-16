@@ -68,6 +68,10 @@ final class RiskLaneProcessor {
         long isolatedMargin = scan.riskIsolatedMarginUnits();
         long isolatedReservation = scan.riskIsolatedReservationUnits();
         PositionRiskScratch positionRisk = POSITION_RISK.get();
+        // A mark-price continuation may run on the same permanent Lane thread
+        // after the previous scan was invalidated. Tie the small market cache to
+        // the runtime market revision so it cannot reuse an older mark.
+        positionRisk.scanMarketRevision = runtime.marketRevision();
         int work = 0;
         while (work < maxWork) {
             if (phase == 0) {
@@ -169,8 +173,21 @@ final class RiskLaneProcessor {
                                               RuntimeIdentityRegistry identities) {
         CoreRiskStatus status = CoreRiskPolicy.status(ratio);
         int symbolId = position.symbolId();
-        runtime.putRiskSnapshot(identities.preparedPositionKey(userId, positionKey), new RiskSnapshotRuntime(userId,
-                symbolId, position.positionSide(), priceSequence, equity, unrealized, maintenance, ratio, status));
+        long riskKey = identities.preparedPositionKey(userId, positionKey);
+        RiskSnapshotRuntime previousSnapshot = runtime.riskSnapshot(riskKey);
+        // A continuation can revisit a user after a bounded page or a new scan can
+        // recalculate an unchanged position. Keep the existing immutable snapshot in
+        // that case; this avoids both the record allocation and the change-buffer entry.
+        if (previousSnapshot == null || previousSnapshot.priceSequence() != priceSequence
+                || previousSnapshot.equityUnits() != equity
+                || previousSnapshot.unrealizedPnlUnits() != unrealized
+                || previousSnapshot.maintenanceMarginUnits() != maintenance
+                || previousSnapshot.marginRatioPpm() != ratio
+                || previousSnapshot.status() != status
+                || previousSnapshot.positionSide() != position.positionSide()) {
+            runtime.putRiskSnapshot(riskKey, new RiskSnapshotRuntime(userId, symbolId, position.positionSide(),
+                    priceSequence, equity, unrealized, maintenance, ratio, status));
+        }
         // Clearance owns the remaining positions at the approved price. Keep risk valuation,
         // but do not create competing liquidations between settlement chunks.
         if (instrument.maintenance().mode() == com.surprising.aeron.protocol.CoreInstrumentMaintenance.Mode.SETTLEMENT
@@ -190,10 +207,19 @@ final class RiskLaneProcessor {
         }
         if (active != null) {
             if (active.status() == CoreLiquidationState.Status.PLANNED) {
-                runtime.replaceLiquidation(new LiquidationRuntime(active.liquidationId(), userId, symbolId,
-                        position.marginMode(), position.positionSide(), instrument.changeId(), priceSequence,
-                        position.signedQuantitySteps(), Math.absExact(position.signedQuantitySteps()),
-                        0, 0, 0, 0, CoreLiquidationState.Status.PLANNED, 0));
+                long quantity = position.signedQuantitySteps();
+                if (active.userId() != userId || active.symbolId() != symbolId
+                        || active.marginMode() != position.marginMode()
+                        || active.positionSide() != position.positionSide()
+                        || active.instrumentChangeId() != instrument.changeId()
+                        || active.triggerPriceSequence() != priceSequence
+                        || active.signedQuantitySteps() != quantity
+                        || active.closeQuantitySteps() != Math.absExact(quantity)) {
+                    runtime.replaceLiquidation(new LiquidationRuntime(active.liquidationId(), userId, symbolId,
+                            position.marginMode(), position.positionSide(), instrument.changeId(), priceSequence,
+                            quantity, Math.absExact(quantity), 0, 0, 0, 0,
+                            CoreLiquidationState.Status.PLANNED, 0));
+                }
             }
             return;
         }
@@ -202,8 +228,21 @@ final class RiskLaneProcessor {
 
     private static boolean risk(TradingRuntimeState runtime, PositionRuntime position,
                                 RuntimeIdentityRegistry identities, PositionRiskScratch result) {
-        CoreInstrumentState instrument = runtime.instrument(identities.preparedSymbol(position.symbolId()));
-        MarkPriceRuntime mark = runtime.markPrice(position.symbolId());
+        int symbolId = position.symbolId();
+        CoreInstrumentState instrument = result.instrument;
+        MarkPriceRuntime mark = result.mark;
+        if (instrument == null || mark == null || result.symbolId != symbolId
+                || instrument.changeId() != position.instrumentChangeId()
+                || result.marketRevision != result.scanMarketRevision
+                || result.runtime != runtime) {
+            instrument = runtime.instrument(identities.preparedSymbol(symbolId));
+            mark = runtime.markPrice(symbolId);
+            result.symbolId = symbolId;
+            result.instrument = instrument;
+            result.mark = mark;
+            result.marketRevision = result.scanMarketRevision;
+            result.runtime = runtime;
+        }
         if (instrument == null || mark == null) return false;
         long unrealized = unrealized(position, instrument, mark.markPriceTicks());
         result.instrument = instrument;
@@ -267,6 +306,11 @@ final class RiskLaneProcessor {
     private static final class PositionRiskScratch {
         /** 本次计算使用的币对及价格序列。 */
         private CoreInstrumentState instrument;
+        private MarkPriceRuntime mark;
+        private int symbolId = -1;
+        private long marketRevision = Long.MIN_VALUE;
+        private long scanMarketRevision = Long.MIN_VALUE;
+        private TradingRuntimeState runtime;
         private long priceSequence;
         /** 浮动盈亏、维持保证金及权益增量，均为结算资产整数单位。 */
         private long unrealized;
