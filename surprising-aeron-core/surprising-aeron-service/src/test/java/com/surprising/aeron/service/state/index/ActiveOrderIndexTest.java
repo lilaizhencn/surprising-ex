@@ -5,7 +5,6 @@ import com.surprising.aeron.service.state.CoreUserState;
 import com.surprising.aeron.service.state.RuntimeOrderAdmission;
 import com.surprising.aeron.service.state.StateMapSupport;
 import com.surprising.aeron.service.state.TradingCoreState;
-import com.surprising.aeron.service.state.TradingDependencyMask;
 
 import com.surprising.aeron.service.state.model.CoreOrderState;
 import com.surprising.aeron.service.state.model.CoreOrderStatus;
@@ -46,17 +45,12 @@ class ActiveOrderIndexTest {
             assertThat(index.ids(7)).containsExactly(2L);
             assertThat(index.ids(8)).containsExactly(3L);
             assertThat(index.ids("BTC-USDT")).containsExactly(3L, 2L);
-            assertThat(index.counterpartyMask("BTC-USDT", CoreOrderSide.SELL, 90))
-                    .isEqualTo(TradingDependencyMask.account(7) | TradingDependencyMask.account(8));
             index.apply(2, null, identities);
-            assertThat(index.counterpartyMask("BTC-USDT", CoreOrderSide.SELL, 90))
-                    .isEqualTo(TradingDependencyMask.account(8));
             index.apply(3, null, identities);
             assertThat(index.count()).isZero();
             assertThat(index.ids(7)).isEmpty();
             assertThat(index.ids(8)).isEmpty();
             assertThat(index.ids("BTC-USDT")).isEmpty();
-            assertThat(index.counterpartyMask("BTC-USDT", CoreOrderSide.SELL, 90)).isZero();
         }
     }
 
@@ -125,7 +119,6 @@ class ActiveOrderIndexTest {
         assertThat(index.activeOrderRuntime(1)).isNull();
         assertThat(index.activeOrderSymbol(1)).isNull();
         assertThat(index.ids(7)).isEmpty();
-        assertThat(index.counterpartyMask("BTC-USDT", CoreOrderSide.SELL, 0)).isZero();
     }
 
     @Test
@@ -144,110 +137,7 @@ class ActiveOrderIndexTest {
         assertThat(index.ids(7)).isEmpty();
         assertThat(index.ids("BTC-USDT")).isEmpty();
         assertThat(index.ids(8)).containsExactly(1L);
-        assertThat(index.counterpartyMask("BTC-USDT", CoreOrderSide.SELL, 0)).isZero();
-        assertThat(index.counterpartyMask("ETH-USDT", CoreOrderSide.BUY, 110))
-                .isEqualTo(TradingDependencyMask.account(8));
         assertThat(index.activeOrder(1)).isEqualTo(second);
-    }
-
-    @Test
-    void crossingParticipantMasksMatchOrdersThroughPriceChangesRemovalsAndRebuild() {
-        var random = new java.util.Random(8191);
-        var orders = new HashMap<Long, CoreOrderState>();
-        var topology = com.surprising.aeron.service.state.LaneTopology.productionDefault();
-        var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT), null, topology);
-        for (int step = 0; step < 2_000; step++) {
-            long id = 1 + random.nextInt(150);
-            if (random.nextInt(4) == 0) {
-                orders.remove(id); index.applySnapshot(id, null);
-            } else {
-                var order = new CoreOrderState(id, ProductLine.SPOT, 1 + random.nextInt(200), "BTC-USDT", 1,
-                        random.nextBoolean() ? CoreOrderSide.BUY : CoreOrderSide.SELL,
-                        1 + random.nextInt(100), 2, 0, 2, false, CoreOrderStatus.OPEN, 1);
-                orders.put(id, order); index.applySnapshot(id, order);
-            }
-            if (step % 71 == 0) {
-                var users = new HashMap<Long, CoreUserState>();
-                orders.values().forEach(order -> users.put(order.userId(), CoreUserState.empty(ProductLine.SPOT, order.userId())));
-                index.rebuild(new TradingCoreState(ProductLine.SPOT, 1, users,
-                        orders, Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty()));
-            }
-            for (var side : CoreOrderSide.values()) {
-                for (long price : new long[]{0, 1, 50, 100, Long.MAX_VALUE}) {
-                    long expected = 0, expectedLanes = 0;
-                    for (var order : orders.values()) {
-                        if (order.side() != side && (price == 0 || (side == CoreOrderSide.BUY
-                                ? order.matchingPriceTicks() <= price : order.matchingPriceTicks() >= price)))
-                        {
-                            expected |= TradingDependencyMask.account(order.userId());
-                            expectedLanes |= topology.accountLaneMask(order.userId());
-                        }
-                    }
-                    assertThat(index.counterpartyMask("BTC-USDT", side, price)).isEqualTo(expected);
-                    assertThat(index.counterpartyLaneMask("BTC-USDT", side, price)).isEqualTo(expectedLanes);
-                    for (long user : new long[]{1, 11, 23, 77, 150, 200}) {
-                        boolean present = orders.values().stream().anyMatch(order -> order.userId() == user
-                                && order.side() != side && (price == 0 || (side == CoreOrderSide.BUY
-                                ? order.matchingPriceTicks() <= price : order.matchingPriceTicks() >= price)));
-                        assertThat(index.hasCounterparty("BTC-USDT", side, price, user)).isEqualTo(present);
-                    }
-                }
-            }
-        }
-        for (long id : orders.keySet()) index.applySnapshot(id, null);
-        assertThat(index.counterpartyMask("BTC-USDT", CoreOrderSide.BUY, 0)).isZero();
-        assertThat(index.counterpartyMask("BTC-USDT", CoreOrderSide.SELL, 0)).isZero();
-    }
-
-    @Test
-    void participantMaskRetainsCollidingAccountsUntilTheirLastOrderIsRemoved() {
-        long first = 11, colliding = first + 1;
-        while (TradingDependencyMask.account(colliding) != TradingDependencyMask.account(first)) colliding++;
-        var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT));
-        var a = new CoreOrderState(1, ProductLine.SPOT, first, "BTC-USDT", 1,
-                CoreOrderSide.BUY, 100, 2, 0, 2, false, CoreOrderStatus.OPEN, 1);
-        var b = new CoreOrderState(2, ProductLine.SPOT, colliding, "BTC-USDT", 1,
-                CoreOrderSide.SELL, 100, 2, 0, 2, false, CoreOrderStatus.OPEN, 1);
-        index.applySnapshot(1, a); index.applySnapshot(2, b);
-        assertThat(index.hasCounterparty("BTC-USDT", CoreOrderSide.BUY, 100, first)).isFalse();
-        assertThat(index.hasCounterparty("BTC-USDT", CoreOrderSide.BUY, 100, colliding)).isTrue();
-        long mask = TradingDependencyMask.account(first);
-        assertThat(participantMask(index)).isEqualTo(mask);
-        index.applySnapshot(1, a.fill(1));
-        assertThat(participantMask(index)).isEqualTo(mask);
-        index.applySnapshot(1, null);
-        assertThat(participantMask(index)).isEqualTo(mask);
-        index.applySnapshot(2, null);
-        assertThat(participantMask(index)).isZero();
-        index.rebuild(new TradingCoreState(ProductLine.SPOT, 1,
-                Map.of(first, CoreUserState.empty(ProductLine.SPOT, first)), Map.of(1L, a),
-                Map.of(), CoreRiskState.empty(), CoreTreasuryState.empty()));
-        assertThat(participantMask(index)).isEqualTo(mask);
-    }
-
-    private static long participantMask(ActiveOrderIndex index) {
-        return index.counterpartyMask("BTC-USDT", CoreOrderSide.BUY, 0)
-                | index.counterpartyMask("BTC-USDT", CoreOrderSide.SELL, 0);
-    }
-
-    @Test
-    void exactCounterpartyOverlapTracksCollisionsPricesAndReferenceCounts() {
-        long first = 1, collision = 2;
-        while (TradingDependencyMask.account(first) != TradingDependencyMask.account(collision)) collision++;
-        var index = new ActiveOrderIndex(TradingCoreState.empty(ProductLine.SPOT));
-        index.applySnapshot(1, new CoreOrderState(1, ProductLine.SPOT, first, "BTC-USDT", 1,
-                CoreOrderSide.SELL, 100, 2, 0, 2, false, CoreOrderStatus.OPEN, 1));
-        index.applySnapshot(2, new CoreOrderState(2, ProductLine.SPOT, collision, "ETH-USDT", 1,
-                CoreOrderSide.SELL, 100, 2, 0, 2, false, CoreOrderStatus.OPEN, 1));
-        assertThat(index.counterpartiesOverlap("BTC-USDT", CoreOrderSide.BUY, 0, "ETH-USDT", CoreOrderSide.BUY, 0)).isFalse();
-        for (long id : new long[]{3, 4}) index.applySnapshot(id, new CoreOrderState(id, ProductLine.SPOT, first,
-                "ETH-USDT", 1, CoreOrderSide.SELL, 101, 2, 0, 2, false, CoreOrderStatus.OPEN, 1));
-        assertThat(index.counterpartiesOverlap("BTC-USDT", CoreOrderSide.BUY, 100, "ETH-USDT", CoreOrderSide.BUY, 100)).isFalse();
-        assertThat(index.counterpartiesOverlap("BTC-USDT", CoreOrderSide.BUY, 100, "ETH-USDT", CoreOrderSide.BUY, 101)).isTrue();
-        index.applySnapshot(3, null);
-        assertThat(index.counterpartiesOverlap("BTC-USDT", CoreOrderSide.BUY, 0, "ETH-USDT", CoreOrderSide.BUY, 0)).isTrue();
-        index.applySnapshot(4, null);
-        assertThat(index.counterpartiesOverlap("BTC-USDT", CoreOrderSide.BUY, 0, "ETH-USDT", CoreOrderSide.BUY, 0)).isFalse();
     }
 
     @Test

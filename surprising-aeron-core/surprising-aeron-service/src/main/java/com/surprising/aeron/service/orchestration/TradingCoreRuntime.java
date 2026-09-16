@@ -325,8 +325,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
     long appliedCommandCount;
     /** 连续完成结算的全局命令水位；唯一 owner 推进。 */
     long committedCoreSequence;
-    /** 当前命令是否包含合法外部资金调整，用于守恒核对。 */
-    boolean commandExternalAdjustment;
     /** 确定性业务变更后发布失败；要求从快照和日志恢复。 */
     RuntimeException commitPublicationFailure;
     /** 协议探测命令的持久化值；不参与订单或资金计算。 */
@@ -505,7 +503,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         this.identities = new RuntimeIdentityRegistry();
         this.runtimeState = com.surprising.aeron.service.state.RuntimeStateProjector.project(
                 snapshotState, identities, topology);
-        this.activeOrderIndex = new ActiveOrderIndex(snapshotState, identities, topology);
+        this.activeOrderIndex = new ActiveOrderIndex(snapshotState, identities);
         this.matchingAdapter = matcherSnapshot == null
                 ? new DeterministicExchangeCoreAdapter(false)
                 : new DeterministicExchangeCoreAdapter(snapshotState, activeOrderIndex.orders(),
@@ -632,8 +630,8 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     /** 仅当前apply范围持有的预计算摘要，嵌套命令不能误用外层摘要。 */
     private CommandFingerprint preparedIngressFingerprint;
-    /** Candidate Lane scope is captured before apply() creates the pending matcher. */
-    private long preparedPipelineLaneMask;
+    /** Static ingress route captured before apply() creates the pending matcher. */
+    private IngressRoute preparedIngressRoute;
 
     CoreResponse applyDecodedCommand(CoreMessage message, long timestamp, long position,
                                      DecodedMatchingCommand decoded, boolean independent) {
@@ -665,80 +663,80 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 ? decodedIngressCommand : DecodedMatchingCommand.decode(message);
     }
 
-    /** Scopes include all batch items and resting counterparties, using owner indexes only. */
+    /**
+     * Capture only deterministic ingress routing.  Potential maker accounts are
+     * discovered by the Matcher from its order book after the command is admitted;
+     * the Owner must not scan counterparty or instrument indexes here.
+     */
     boolean prepareClusterPipelineScope(CoreMessage message, ClusterCommandWindow window) {
         if (!activated) activate();
         assertOwner();
         long user = message.header().userId();
         if (message.header().productLine() != productLine || user <= 0) {
-            preparedPipelineLaneMask = 0;
+            preparedIngressRoute = null;
             return false;
         }
         window.resetCandidate(user);
-        window.candidateLanes = runtimeState.topology().accountLaneMask(user);
-        window.participants(activeOrderIndex);
         try {
-            // Decode once for the whole command.  The window keeps the same
-            // cached object, but calling through it for every batch item still
-            // repeats the identity check on the Owner hot path.
+            // Decode once for the whole command. The window keeps the same
+            // cached object while this command remains at the ingress head.
             DecodedMatchingCommand decoded = window.decoded(message);
             switch (message.header().messageType()) {
-                case PLACE_ORDER -> { return rememberPipelineLaneMask(window,
-                        addPlaceScope(decoded.placeOrder(), window)); }
-                case CANCEL_ORDER -> { return rememberPipelineLaneMask(window,
-                        addCancelScope(user, decoded.cancelOrder().orderId(), window)); }
+                case PLACE_ORDER -> {
+                    PlaceOrderCommand command = decoded.placeOrder();
+                    int shard = decoded.matcherShard(matchingAdapter, command.symbol());
+                    window.route(shard, runtimeState.topology().accountLaneMask(user));
+                    window.candidateOrder(command.orderId());
+                    return rememberPipelineRoute(window, true);
+                }
+                case CANCEL_ORDER -> {
+                    long orderId = decoded.cancelOrder().orderId();
+                    var route = activeOrderIndex.activeOrderRoute(orderId);
+                    if (route == null || route.userId() != user || route.symbol() == null
+                            || route.symbol().isBlank()) return rememberPipelineRoute(window, false);
+                    window.candidateOrder(orderId);
+                    window.route(matchingAdapter.matcherShardId(route.symbol()),
+                            runtimeState.topology().accountLaneMask(user));
+                    return rememberPipelineRoute(window, true);
+                }
                 case PLACE_ORDER_BATCH -> {
                     int shard = -1;
                     for (var order : decoded.placeOrderBatch().orders()) {
-                        if (!addPlaceScope(order, window)) return rememberPipelineLaneMask(window, false);
                         int current = decoded.matcherShard(matchingAdapter, order.symbol());
-                        if (shard >= 0 && current != shard) return rememberPipelineLaneMask(window, false);
-                        shard = current;
+                        if (shard >= 0 && current != shard) return rememberPipelineRoute(window, false);
+                        if (shard < 0) {
+                            shard = current;
+                            window.route(shard, runtimeState.topology().accountLaneMask(user));
+                        }
+                        window.candidateOrder(order.orderId());
                     }
-                    return rememberPipelineLaneMask(window, true);
+                    if (shard < 0) return rememberPipelineRoute(window, false);
+                    return rememberPipelineRoute(window, true);
                 }
                 case CANCEL_ORDER_BATCH -> {
                     int shard = -1;
                     for (var order : decoded.cancelOrderBatch().orders()) {
-                        if (!addCancelScope(user, order.orderId(), window)) return rememberPipelineLaneMask(window, false);
-                        int current = decoded.matcherShard(matchingAdapter, activeOrderIndex.activeOrderSymbol(order.orderId()));
-                        if (shard >= 0 && current != shard) return rememberPipelineLaneMask(window, false);
+                        var route = activeOrderIndex.activeOrderRoute(order.orderId());
+                        if (route == null || route.userId() != user || route.symbol() == null
+                                || route.symbol().isBlank()) return rememberPipelineRoute(window, false);
+                        window.candidateOrder(order.orderId());
+                        int current = matchingAdapter.matcherShardId(route.symbol());
+                        if (shard >= 0 && current != shard) return rememberPipelineRoute(window, false);
                         shard = current;
                     }
-                    return rememberPipelineLaneMask(window, true);
+                    window.route(shard, runtimeState.topology().accountLaneMask(user));
+                    return rememberPipelineRoute(window, true);
                 }
-                default -> { return rememberPipelineLaneMask(window, false); }
+                default -> { return rememberPipelineRoute(window, false); }
             }
         } catch (IllegalArgumentException | java.nio.BufferUnderflowException invalid) {
-            return rememberPipelineLaneMask(window, false);
+            return rememberPipelineRoute(window, false);
         }
     }
 
-    private boolean rememberPipelineLaneMask(ClusterCommandWindow window, boolean eligible) {
-        preparedPipelineLaneMask = eligible ? window.candidateLanes : 0;
+    private boolean rememberPipelineRoute(ClusterCommandWindow window, boolean eligible) {
+        preparedIngressRoute = eligible ? window.route() : null;
         return eligible;
-    }
-
-    boolean addPlaceScope(PlaceOrderCommand command, ClusterCommandWindow window) {
-        var instrument = runtimeState.instrument(command.symbol());
-        if (instrument == null || command.reduceOnly()) return false;
-        var counterparties = activeOrderIndex.counterpartyMasks(
-                instrument.symbol(), command.side(), command.limitPriceTicks());
-        window.candidateLanes |= counterparties.laneMask();
-        long counterpartyAccounts = counterparties.accountMask();
-        window.candidateAccounts |= counterpartyAccounts;
-        window.candidateOrder(command.orderId(), instrument.symbol(), command.side(), command.limitPriceTicks(),
-                productLine.isDerivative() && counterpartyAccounts != 0);
-        return true;
-    }
-
-    boolean addCancelScope(long user, long orderId, ClusterCommandWindow window) {
-        var order = activeOrderIndex.activeOrderRuntime(orderId);
-        if (order == null || order.userId() != user) return false;
-        // Cancellation only removes this order's liquidity. Its identity/account stay fenced;
-        // unrelated same-side or non-crossing orders need not drain the entire symbol.
-        window.candidateOrder(orderId, activeOrderIndex.activeOrderSymbol(orderId), order.side(), order.matchingPriceTicks());
-        return true;
     }
 
     public CoreResponse apply(CoreMessage message, long clusterTimestamp, long clusterPosition) {
@@ -1107,19 +1105,21 @@ public final class TradingCoreRuntime implements AutoCloseable,
         if (message.header().kind() != WireMessageKind.COMMAND) {
             return rejected(CoreResultCode.INVALID_MESSAGE);
         }
+        return applyCommandIngress(message, clusterTimestamp, clusterPosition);
+    }
+
+    /**
+     * Command-only ingress path.  Query dispatch and lifecycle fences stay in
+     * {@link #apply(CoreMessage, long, long)}; this method owns the command
+     * admission boundary and hands accepted work to the existing matching or
+     * direct command processors without creating a command context object.
+     */
+    private CoreResponse applyCommandIngress(CoreMessage message, long clusterTimestamp, long clusterPosition) {
         CommandFingerprint fingerprint = message == decodedIngressMessage && preparedIngressFingerprint != null
                 ? preparedIngressFingerprint : CommandFingerprint.of(message);
-        StoredResult duplicate = resultLedger.get(message.header().commandId());
-        if (duplicate != null) {
-            if (!duplicate.fingerprint().equals(fingerprint)) {
-                return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
-                        CoreResultCode.IDEMPOTENCY_CONFLICT, appliedCommandCount, 0, stateHash(), EMPTY_RESPONSE_DATA);
-            }
-            return new CoreResponse(ResponseStatus.DUPLICATE,
-                    duplicate.status(),
-                    duplicate.resultCode(),
-                    duplicate.appliedCommandCount(), duplicate.requiredExportSequence(), duplicate.stateHash(),
-                    duplicate.responseDataUnsafe());
+        StoredResult terminalDuplicate = resultLedger.get(message.header().commandId());
+        if (terminalDuplicate != null) {
+            return resultLedger.duplicateResponse(terminalDuplicate, fingerprint, appliedCommandCount, stateHash());
         }
         CommandSlot pendingDuplicate = pendingMatching.findByCommandId(message.header().commandId());
         if (pendingDuplicate != null) {
@@ -1158,7 +1158,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
         }
         ResponseStatus status;
         CoreResultCode resultCode = CoreResultCode.NONE;
-        resultBuilder.commandTriggerOrderView = null;
         if (isMatchingCommand(message.header().messageType())) {
             if (pendingMatching.size() >= pendingMatching.capacity()) {
                 throw new IllegalStateException("matcher dispatch window is exhausted after Cluster Log append");
@@ -1175,20 +1174,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         long positionIdentityCheckpoint = identities.positionCheckpoint();
         directCommand.initializeDirect(message, fingerprint, sourceKey, clusterTimestamp, clusterPosition,
                 beforeProjection, beforeRuntimeRevision, runtimeCommandCheckpoint, positionIdentityCheckpoint);
-        resultBuilder.clearOrderViews();
-        resultBuilder.commandChangedUserIds = List.of();
-        resultBuilder.commandChangedOrderIds = List.of();
-        resultBuilder.commandTradeCount = 0;
-        resultBuilder.commandFundingProgress = null;
-        resultBuilder.commandLiquidationProgress = null;
-        resultBuilder.commandLiquidationBatchResult = null;
-        resultBuilder.commandSettlementProgress = null;
-        resultBuilder.commandRiskScanControl = null;
-        resultBuilder.resetChangeAccumulators();
-        commandExternalAdjustment = message.header().messageType() == CoreMessageType.ADJUST_BALANCE
-                || message.header().messageType() == CoreMessageType.TRANSFER_OUT
-                || message.header().messageType() == CoreMessageType.TRANSFER_IN
-                || message.header().messageType() == CoreMessageType.ADJUST_INSURANCE_FUND;
+        resultBuilder.beginCommand();
         admissions.queuedMatching.clear();
         commits.beginCommitPublicationBatch();
         try {
@@ -1221,7 +1207,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
             long beforeRuntimeRevision, long runtimeCommandCheckpoint, long positionIdentityCheckpoint,
             ResponseStatus status, CoreResultCode resultCode) {
         long nextAppliedCommandCount = Math.incrementExact(appliedCommandCount);
-        long committedLaneMask = 0;
         if (!directCommand.finalizationPrepared) {
             if (status != ResponseStatus.APPLIED
                     && (commits.commitPublicationDirty || runtimeState.revision() != beforeRuntimeRevision
@@ -1277,8 +1262,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                             resultBuilder.commandChangedOrderIds, triggers.closingTriggerIds(),
                             clusterTimestamp, clusterPosition);
                 } else {
-                    committedLaneMask = runtimeState.stageLaneMutation(
-                            nextAppliedCommandCount, resultBuilder.commandChangedUserIds);
+                    runtimeState.stageLaneMutation(nextAppliedCommandCount, resultBuilder.commandChangedUserIds);
                 }
             }
             directCommand.finalizationPrepared = true;
@@ -1289,7 +1273,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 directCommand.resultCode = resultCode;
                 return null;
             }
-            committedLaneMask = directCommand.commitEvent.requiredLaneMask();
             runtimeState.releaseLaneCommit(directCommand.commitEvent);
             directCommand.commitEvent = null;
         }
@@ -1512,7 +1495,14 @@ public final class TradingCoreRuntime implements AutoCloseable,
             throw new IllegalStateException("matching pending capacity is exhausted");
         }
         try {
-            pending.partitionLaneMask = clusterPipelineAdmission ? preparedPipelineLaneMask : 0;
+            if (clusterPipelineAdmission && preparedIngressRoute != null) {
+                pending.partitionLaneMask = preparedIngressRoute.userLaneBit();
+                // The route was already resolved at ingress. Reuse its shard instead
+                // of probing the symbol registry again while registering the ring slot.
+                pending.cachedMatcherShard(preparedIngressRoute.matcherShard());
+            } else {
+                pending.partitionLaneMask = 0;
+            }
             pendingMatching.put(pending);
             CoreMessageType type = pending.command().header().messageType();
             if (type != CoreMessageType.PLACE_ORDER_BATCH
@@ -1601,7 +1591,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
         if (pending.operation() == CommandSlot.Operation.PLACE && runtimeState.asynchronousCommands()) {
             OrderRuntime directTaker = runtimeOrder(pending.decodedCommand().placeOrder().orderId());
             direct = runtimeState.prepareDirectMatcherSettlement(pending.sequence(),
-                    pending.partitionLaneMask == 0 ? commits.validAccountLaneMask() : pending.partitionLaneMask,
+                    directSettlementLaneMask(),
                     directTaker, null, 1,
                     pending.command().header().commandId(), matcherShard(pending), identities,
                     pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
@@ -1614,7 +1604,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             var admission = requireMatchingAdmission(pending);
             requireUnchangedAdmissionState(admission);
             direct = runtimeState.prepareDirectReplacement(pending.sequence(), pending.sequence(),
-                    pending.partitionLaneMask == 0 ? commits.validAccountLaneMask() : pending.partitionLaneMask,
+                    directSettlementLaneMask(),
                     admission, pending.command().header().commandId(), matcherShard(pending), identities,
                     pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
                     pending.preMatchingCancellationOrderIds());
@@ -1627,7 +1617,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                     "admitted trigger is missing");
             OrderRuntime triggerOrder = runtimeOrder(pending.admittedMatchingOrder().orderId());
             direct = runtimeState.prepareDirectMatcherSettlement(pending.sequence(),
-                    pending.partitionLaneMask == 0 ? commits.validAccountLaneMask() : pending.partitionLaneMask,
+                    directSettlementLaneMask(),
                     triggerOrder, null, 1, pending.command().header().commandId(), matcherShard(pending),
                     identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
                     pending.preMatchingCancellationOrderIds(), null);
@@ -1650,6 +1640,17 @@ public final class TradingCoreRuntime implements AutoCloseable,
         // owner completion drain from the matcher->Lane handoff; the owner still collects the
         // completed event later for ordered funds/index/result commit.
         if (direct != null) predispatchDirectSettlement(pending, direct);
+    }
+
+    /**
+     * Until the Matcher-owned Lane mailbox is installed, direct events are
+     * pre-enqueued to every Lane. The ingress dependency itself remains the
+     * user's single Lane; the broad event route prevents a fill discovered by
+     * Matcher from escaping the preallocated event. This compatibility bridge
+     * is removed together with the Owner dispatch call in the next phase.
+     */
+    private long directSettlementLaneMask() {
+        return commits.validAccountLaneMask();
     }
 
     /**
@@ -2937,7 +2938,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
         resultBuilder.commandChangedOrderIds = List.of();
         context.takeCommitFundsTo(commandFundsAccumulator);
         context.clearCommitContext();
-        commandExternalAdjustment = false;
         resultBuilder.commandTradeCount = 0;
         resultBuilder.commandLiquidationProgress = null;
         resultBuilder.commandLiquidationBatchResult = null;

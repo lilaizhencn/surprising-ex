@@ -257,56 +257,6 @@ class SurprisingClusteredServiceTest {
     }
 
     @Test
-    void dependencyDiagnosticsCountAnAlreadyDrainingPrefixOnlyOncePerDecision() throws Exception {
-        var service = service();
-        var entered = new java.util.concurrent.CountDownLatch(1);
-        var release = new java.util.concurrent.CountDownLatch(1);
-        service.onStart(cluster(), null);
-        try {
-            service.state().apply(timerInstrument());
-            service.state().apply(command(CoreMessageType.ADJUST_BALANCE, 1, 1001,
-                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("USDT", 10_000))));
-            service.state().apply(command(CoreMessageType.ADJUST_BALANCE, 2, 1002,
-                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 10))));
-            var matcherField = TradingCoreRuntime.class.getDeclaredField("matcherPipeline");
-            matcherField.setAccessible(true);
-            var matcher = (MatcherPipelineGroup) matcherField.get(service.state());
-            var blocked = matcher.readAtSubmissionFence(0, () -> {
-                entered.countDown();
-                try {
-                    if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("test matcher timeout");
-                } catch (InterruptedException failure) {
-                    Thread.currentThread().interrupt();
-                    throw new IllegalStateException(failure);
-                }
-                return 1;
-            });
-            assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
-            for (int i = 0; i < 2; i++) {
-                var order = command(CoreMessageType.PLACE_ORDER, 3 + i, 1001 + i,
-                        TradingCommandCodec.encodePlaceOrder(new PlaceOrderCommand(1904 + i, "BTC-USDT", 1,
-                                i == 0 ? CoreOrderSide.BUY : CoreOrderSide.SELL, 1_000, 2, false,
-                                CoreMarginMode.CROSS, CorePositionSide.NET, CoreOrderType.LIMIT,
-                                CoreTimeInForce.GTC, false, "fence-" + i)));
-                service.acceptCommittedCommand(null, order, 1_000 + i, 1_000 + i);
-            }
-            var countField = SurprisingClusteredService.class.getDeclaredField("dependencyFenceReasons");
-            countField.setAccessible(true);
-            long[] counts = (long[]) countField.get(service);
-            assertThat(counts[ClusterCommandWindow.Conflict.MATCHING_RANGE.ordinal()]).isOne();
-            for (int i = 0; i < 10; i++) service.pollCommands();
-            assertThat(counts[ClusterCommandWindow.Conflict.MATCHING_RANGE.ordinal()]).isOne();
-            release.countDown();
-            finishCommands(service);
-            assertThat(blocked.join()).isOne();
-            assertThat(service.pendingCommandCount()).isZero();
-        } finally {
-            release.countDown();
-            service.onTerminate(null);
-        }
-    }
-
-    @Test
     void stageProgressAndReentrantBackgroundDeferSnapshotUntilSettlementCompletes() throws Exception {
         var service = service();
         var responses = new CopyOnWriteArrayList<byte[]>();

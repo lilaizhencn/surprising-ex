@@ -3,6 +3,7 @@ package com.surprising.aeron.service.orchestration;
 import static com.surprising.aeron.service.orchestration.TradingCoreRuntime.*;
 
 import com.surprising.aeron.protocol.CommandFingerprint;
+import com.surprising.aeron.protocol.CoreResponse;
 import com.surprising.aeron.protocol.CoreResultCode;
 import com.surprising.aeron.protocol.ResponseStatus;
 import java.util.Collections;
@@ -46,6 +47,24 @@ final class CommandResultLedger {
     StoredResult get(UUID id) {
         if (id == null) return null;
         return results[locate(id.getMostSignificantBits(), id.getLeastSignificantBits())];
+    }
+
+    /**
+     * Returns the deterministic response for a retained command, or {@code null}
+     * when this command ID has not been retained.  Keeping this decision beside
+     * the primitive ledger leaves the Owner command path free of result-record
+     * field plumbing.
+     */
+    CoreResponse duplicateResponse(StoredResult duplicate, CommandFingerprint fingerprint,
+                                   long appliedCommandCount, long stateHash) {
+        if (!duplicate.fingerprint().equals(fingerprint)) {
+            return new CoreResponse(ResponseStatus.REJECTED, ResponseStatus.REJECTED,
+                    CoreResultCode.IDEMPOTENCY_CONFLICT, appliedCommandCount, 0, stateHash,
+                    EMPTY_RESPONSE_DATA);
+        }
+        return new CoreResponse(ResponseStatus.DUPLICATE,
+                duplicate.status(), duplicate.resultCode(), duplicate.appliedCommandCount(),
+                duplicate.requiredExportSequence(), duplicate.stateHash(), duplicate.responseDataUnsafe());
     }
 
     /** Snapshot-only materialization; no Map node is created on the command hot path. */

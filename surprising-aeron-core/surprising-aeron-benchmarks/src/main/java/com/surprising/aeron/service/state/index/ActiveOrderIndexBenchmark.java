@@ -41,8 +41,7 @@ public class ActiveOrderIndexBenchmark {
     }
 
     @TearDown public void verifyEmpty() {
-        if (index.count() != 0 || !index.ids("BTC-USDT").isEmpty()
-                || index.counterpartyMask("BTC-USDT", CoreOrderSide.SELL, 0) != 0)
+        if (index.count() != 0 || !index.ids("BTC-USDT").isEmpty())
             throw new IllegalStateException("terminal orders remain in admission indexes");
         for (int user = 1; user <= users; user++) if (!index.ids(user).isEmpty())
             throw new IllegalStateException("terminal orders remain in account index");

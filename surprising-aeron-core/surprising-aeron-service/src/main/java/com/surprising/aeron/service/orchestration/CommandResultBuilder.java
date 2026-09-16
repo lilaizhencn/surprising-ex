@@ -56,6 +56,21 @@ final class CommandResultBuilder {
         commandOrderSources.clear();
     }
 
+    /** Start a command with the reusable result workspace in its empty state. */
+    void beginCommand() {
+        clearOrderViews();
+        commandChangedUserIds = List.of();
+        commandChangedOrderIds = List.of();
+        commandTradeCount = 0;
+        commandFundingProgress = null;
+        commandLiquidationProgress = null;
+        commandLiquidationBatchResult = null;
+        commandSettlementProgress = null;
+        commandRiskScanControl = null;
+        commandTriggerOrderView = null;
+        resetChangeAccumulators();
+    }
+
     /** 当前命令返回的用户 ID 集合；完成边界生成。 */
     List<Long> commandChangedUserIds;
 
@@ -160,7 +175,6 @@ final class CommandResultBuilder {
 
     void resetChangeAccumulators() {
         owner.commandFundsAccumulator.clear();
-        owner.commandExternalAdjustment = false;
         changedUserIds.clear();
         changedOrderIds.clear();
     }

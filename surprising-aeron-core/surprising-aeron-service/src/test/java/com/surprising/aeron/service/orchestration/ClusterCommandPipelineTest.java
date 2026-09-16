@@ -207,113 +207,6 @@ class ClusterCommandPipelineTest {
         }
     }
 
-    @ParameterizedTest
-    @EnumSource(ProductLine.class)
-    @org.junit.jupiter.api.parallel.ResourceLock(org.junit.jupiter.api.parallel.Resources.SYSTEM_PROPERTIES)
-    void independentPartitionSettlesRealFillWhileEarlierMatcherIsBlocked(ProductLine product) throws Exception {
-        independentPartitionFill(product, false);
-    }
-
-    @ParameterizedTest
-    @EnumSource(ProductLine.class)
-    @org.junit.jupiter.api.parallel.ResourceLock(org.junit.jupiter.api.parallel.Resources.SYSTEM_PROPERTIES)
-    void independentBatchPartitionSettlesRealFillsWhileEarlierMatcherIsBlocked(ProductLine product) throws Exception {
-        independentPartitionFill(product, true);
-    }
-
-    private void independentPartitionFill(ProductLine product, boolean batch) throws Exception {
-        String property = "surprising.aeron.matching-engines";
-        String previous = System.getProperty(property);
-        System.setProperty(property, "2");
-        var release = new CountDownLatch(1);
-        try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
-            var state = live.service.state();
-            String firstSymbol = "BTC-USDT";
-            String secondSymbol = differentMatcherSymbol(state, firstSymbol);
-            int firstShard = state.matchingAdapter.matcherShardId(firstSymbol);
-            serial.applyAll(live.setup(secondSymbol));
-            var topology = state.runtimeState.topology();
-            long secondBuyer = disjointUser(11);
-            while (topology.accountLaneId(secondBuyer) == topology.accountLaneId(11)
-                    || TradingDependencyMask.account(secondBuyer) == TradingDependencyMask.account(11)) secondBuyer++;
-            String settleAsset = ContractType.valueOf(product.contractTypeCode()).isInverse() ? "BTC" : "USDT";
-            if (secondBuyer != disjointUser(11)) {
-                var deposit = live.message(CoreMessageType.ADJUST_BALANCE, secondBuyer,
-                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(settleAsset, 20_000)));
-                live.apply(deposit); serial.apply(deposit);
-            }
-            long used = TradingDependencyMask.account(11) | TradingDependencyMask.account(secondBuyer);
-            long usedLanes = topology.accountLaneMask(11) | topology.accountLaneMask(secondBuyer);
-            int i = 0;
-            for (String symbol : List.of(firstSymbol, secondSymbol)) {
-                long seller = 100;
-                while ((TradingDependencyMask.account(seller) & used) != 0
-                        || (topology.accountLaneMask(seller) & usedLanes) != 0) seller++;
-                usedLanes |= topology.accountLaneMask(seller);
-                used |= TradingDependencyMask.account(seller);
-                String asset = product == ProductLine.SPOT || ContractType.valueOf(product.contractTypeCode()).isInverse()
-                        ? "BTC" : "USDT";
-                var funds = live.message(CoreMessageType.ADJUST_BALANCE, seller,
-                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 20_000)));
-                var ask = live.place(seller, symbol, 100 + i++, 80, batch ? 40 : 2, CoreOrderSide.SELL);
-                live.apply(funds); serial.apply(funds); live.apply(ask); serial.apply(ask);
-            }
-            live.responses.clear();
-            var first = batch ? live.placeBatch(11, firstSymbol, 1000)
-                    : live.place(11, firstSymbol, 1000, 80, 1, CoreOrderSide.BUY);
-            var second = batch ? live.placeBatch(secondBuyer, secondSymbol, 2000)
-                    : live.place(secondBuyer, secondSymbol, 2000, 80, 1, CoreOrderSide.BUY);
-            var entered = new CountDownLatch(1);
-            var gate = state.matcherPipeline.readAtSubmissionFence(firstShard, () -> {
-                entered.countDown();
-                try { if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("partition gate timeout"); }
-                catch (InterruptedException failure) { throw new IllegalStateException(failure); }
-                return true;
-            });
-            try {
-                assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
-                live.send(first); live.send(second);
-                long firstSequence = state.matchingSequence(first.header().commandId());
-                long secondSequence = state.matchingSequence(second.header().commandId());
-                assertThat(secondSequence).isGreaterThan(firstSequence);
-                live.progressUntil(() -> {
-                    var pending = state.pendingMatching(secondSequence);
-                    if (batch) {
-                        var work = state.batches.batch(secondSequence);
-                        return work != null && work.hasPendingLaneWork() && work.laneWorkComplete();
-                    }
-                    return pending != null && pending.settlementEvent() != null && pending.settlementEvent().complete();
-                });
-                if (batch) {
-                    var completedBatch = state.batches.batch(secondSequence);
-                    assertThat(completedBatch.admissionOrderIndex).isNull();
-                    assertThat(completedBatch.items).allSatisfy(item -> assertThat(item.laneResultPrepared).isTrue());
-                    assertThat(completedBatch.preparedResponse).isNotNull()
-                            .isEqualTo(TradingOrderBatchCodec.encodeResultSource(completedBatch));
-                }
-                // 外部通知耗尽后反复轮询仍不提前提交；解除前序阻塞后必须自行恢复推进。
-                for (int spin = 0; spin < 1024; spin++) live.service.pollCommands();
-                assertThat(live.service.pollCommands())
-                        .as("waiting for a blocked matcher must allow the Owner idle strategy to back off")
-                        .isZero();
-                assertThat(gate.isDone()).isFalse();
-                assertThat(state.firstPendingMatchingSequence()).isEqualTo(firstSequence);
-                assertThat(live.responses).isEmpty();
-            } finally { release.countDown(); }
-            live.tick(); serial.apply(first); serial.apply(second);
-            assertThat(gate.join()).isTrue();
-            assertThat(live.responses).hasSize(2).allSatisfy(r -> assertThat(r.commandStatus()).isEqualTo(ResponseStatus.APPLIED));
-            assertThat(live.hash()).isEqualTo(serial.hash());
-            assertThat(state.tradingState().users()).isEqualTo(serial.service.state().tradingState().users());
-            try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
-                assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
-            }
-        } finally {
-            release.countDown();
-            if (previous == null) System.clearProperty(property); else System.setProperty(property, previous);
-        }
-    }
-
     /** 两个订单簿可以独立撮合，同一用户不能重复花费同一份共享资金。 */
     @ParameterizedTest
     @EnumSource(ProductLine.class)
@@ -381,59 +274,6 @@ class ClusterCommandPipelineTest {
     }
 
     /** 两个不同吃单用户仍可能结算到同一做市账户，不能仅用请求 userId 判断独立。 */
-    @ParameterizedTest
-    @EnumSource(ProductLine.class)
-    @org.junit.jupiter.api.parallel.ResourceLock(org.junit.jupiter.api.parallel.Resources.SYSTEM_PROPERTIES)
-    void sharedMakerAccountFencesSettlementAcrossMatcherPartitions(ProductLine product) throws Exception {
-        String key = "surprising.aeron.matching-engines";
-        String previous = System.getProperty(key);
-        System.setProperty(key, "2");
-        var release = new CountDownLatch(1);
-        try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
-            String firstSymbol = "BTC-USDT";
-            String secondSymbol = differentMatcherSymbol(live.service.state(), firstSymbol);
-            serial.applyAll(live.setup(secondSymbol));
-            String asset = product == ProductLine.SPOT || ContractType.valueOf(product.contractTypeCode()).isInverse()
-                    ? "BTC" : "USDT";
-            var liquidity = List.of(live.message(CoreMessageType.ADJUST_BALANCE, 77,
-                            TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 20_000))),
-                    live.place(77, firstSymbol, 100, 100, 4, CoreOrderSide.SELL),
-                    live.place(77, secondSymbol, 200, 100, 4, CoreOrderSide.SELL));
-            live.applyAll(liquidity); serial.applyAll(liquidity);
-            var first = live.place(11, firstSymbol, 1000, 100, 2, CoreOrderSide.BUY);
-            var second = live.place(disjointUser(11), secondSymbol, 2000, 100, 2, CoreOrderSide.BUY);
-            live.responses.clear();
-            var entered = new CountDownLatch(1);
-            var gate = live.service.state().matcherPipeline.readAtSubmissionFence(
-                    live.service.state().matchingAdapter.matcherShardId(firstSymbol), () -> {
-                        entered.countDown();
-                        try { if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("matcher gate timeout"); }
-                        catch (InterruptedException failure) { throw new IllegalStateException(failure); }
-                        return true;
-                    });
-            try {
-                assertThat(entered.await(2, TimeUnit.SECONDS)).isTrue();
-                live.send(first); live.send(second);
-                for (int i = 0; i < 20; i++) live.service.pollCommands();
-                assertThat(live.responses).isEmpty();
-                assertThat(live.service.state().matchingSequence(second.header().commandId()))
-                        .as("shared counterparty funds must be settled in log order").isZero();
-            } finally { release.countDown(); }
-            live.tick(); serial.apply(first); serial.apply(second);
-            assertThat(gate.join()).isTrue();
-            assertThat(live.responses).hasSize(2).allSatisfy(r -> assertThat(r.commandStatus()).isEqualTo(ResponseStatus.APPLIED));
-            assertThat(live.service.state().tradingState().order(100).executedQuantitySteps()).isEqualTo(2);
-            assertThat(live.service.state().tradingState().order(200).executedQuantitySteps()).isEqualTo(2);
-            assertThat(live.service.state().tradingState().users()).isEqualTo(serial.service.state().tradingState().users());
-            assertThat(live.hash()).isEqualTo(serial.hash());
-            try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
-                assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
-            }
-        } finally {
-            release.countDown();
-            if (previous == null) System.clearProperty(key); else System.setProperty(key, previous);
-        }
-    }
 
     @ParameterizedTest
     @EnumSource(ProductLine.class)
@@ -1130,33 +970,6 @@ class ClusterCommandPipelineTest {
 
     @ParameterizedTest
     @EnumSource(ProductLine.class)
-    void sameSymbolSharedMakerStillSettlesBeforeNextTakerAdmission(ProductLine product) {
-        try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
-            serial.applyAll(live.setup());
-            var type = ContractType.valueOf(product.contractTypeCode());
-            String asset = product == ProductLine.SPOT || type.isInverse() ? "BTC" : "USDT";
-            var funds = live.message(CoreMessageType.ADJUST_BALANCE, 999,
-                    TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 20_000)));
-            var maker = live.place(999, "BTC-USDT", 90, 80, 3, CoreOrderSide.SELL);
-            live.apply(funds); live.apply(maker); serial.apply(funds); serial.apply(maker);
-            live.responses.clear();
-            var first = live.place(11, "BTC-USDT", 100, 80, 1, CoreOrderSide.BUY);
-            var second = live.place(disjointUser(11), "BTC-USDT", 200, 80, 1, CoreOrderSide.BUY);
-            live.send(first); live.send(second);
-            live.progressUntil(() -> live.responses.size() == 1);
-            assertThat(live.responses).hasSize(1);
-            assertThat(live.service.commandWindowSize()).isOne();
-            live.tick(); serial.apply(first); serial.apply(second);
-            assertThat(live.hash()).isEqualTo(serial.hash());
-            assertThat(live.service.state().tradingState().order(90).executedQuantitySteps()).isEqualTo(2);
-            try (var restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(100))) {
-                assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
-            }
-        }
-    }
-
-    @ParameterizedTest
-    @EnumSource(ProductLine.class)
     void sameSymbolIndependentOrdersRemainInFlightAndRecoverLikeSerialExecution(ProductLine product) {
         sameSymbolIndependentOrders(product, false);
     }
@@ -1298,7 +1111,9 @@ class ClusterCommandPipelineTest {
             assertThat(window.conflicts()).as("sell cannot consume the removed buy").isFalse();
             assertThat(state.prepareClusterPipelineScope(
                     live.place(other, "BTC-USDT", 4202, 80, 1, CoreOrderSide.SELL), window)).isTrue();
-            assertThat(window.conflicts()).as("crossing sell must observe cancellation").isTrue();
+            // Matching-range/counterparty fencing is Matcher-owned now; Owner sees only
+            // the submitting account Lane and exact order identities.
+            assertThat(window.conflicts()).as("crossing sell is not an Owner ingress dependency").isFalse();
             assertThat(state.prepareClusterPipelineScope(
                     live.place(11, "BTC-USDT", 4203, 79, 1, CoreOrderSide.BUY), window)).isTrue();
             assertThat(window.conflicts()).as("same account must observe released funds").isTrue();
@@ -1506,66 +1321,6 @@ class ClusterCommandPipelineTest {
 
     @ParameterizedTest
     @EnumSource(ProductLine.class)
-    void independentTwentyItemBatchesSubmitBeforeEarlierMatcherFinishes(ProductLine product) throws Exception {
-        try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product)) {
-            serial.applyAll(live.setup());
-            long other = disjointUser(11);
-            var topology = com.surprising.aeron.service.state.LaneTopology.productionDefault();
-            while (topology.accountLaneId(other) != topology.accountLaneId(11)
-                    || TradingDependencyMask.account(other) == TradingDependencyMask.account(11)) other++;
-            if (other != disjointUser(11)) {
-                String asset = ContractType.valueOf(product.contractTypeCode()).isInverse() ? "BTC" : "USDT";
-                var deposit = live.message(CoreMessageType.ADJUST_BALANCE, other,
-                        TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand(asset, 20_000)));
-                live.apply(deposit); serial.apply(deposit); live.responses.clear();
-            }
-            var a = live.placeBatch(11, "BTC-USDT", 1000);
-            var b = live.placeBatch(other, disjointSymbol("BTC-USDT"), 2000);
-            CountDownLatch entered = new CountDownLatch(1), release = new CountDownLatch(1);
-            var field = TradingCoreRuntime.class.getDeclaredField("matcherPipeline"); field.setAccessible(true);
-            var matcher = (MatcherPipelineGroup) field.get(live.service.state());
-            var blocked = matcher.readAtSubmissionFence(0, () -> {
-                entered.countDown();
-                try { if (!release.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("test timeout"); }
-                catch (InterruptedException e) { throw new IllegalStateException(e); }
-                return 1;
-            });
-            try {
-                assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
-                live.send(a); live.send(b);
-                assertThat(live.service.commandWindowSize()).isEqualTo(2);
-                var second = live.service.state().pendingMatching(live.service.state().matchingSequence(b.header().commandId()));
-                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-                while (!second.isMatchingSubmitted() && System.nanoTime() < deadline) {
-                    live.service.state().drainMatchingCompletions(); Thread.onSpinWait();
-                }
-                assertThat(second.isMatchingSubmitted()).as("second batch must reach matcher before first completion").isTrue();
-                assertThat(live.responses).isEmpty();
-            } finally { release.countDown(); }
-            live.tick(); assertThat(blocked.join()).isOne();
-            serial.apply(a); serial.apply(b);
-            assertThat(live.service.state().tradingState().orders()).isEqualTo(serial.service.state().tradingState().orders());
-            assertThat(live.service.state().tradingState().users()).isEqualTo(serial.service.state().tradingState().users());
-            assertThat(live.hash()).isEqualTo(serial.hash());
-            var ca = live.cancelBatch(11, 1000);
-            var cb = live.cancelBatch(other, 2000);
-            live.send(ca); live.send(cb);
-            assertThat(live.service.commandWindowSize() + live.responses.size()).isEqualTo(4);
-            live.tick(); serial.apply(ca); serial.apply(cb);
-            assertThat(live.hash()).isEqualTo(serial.hash());
-            assertThat(live.responses).hasSize(4).allSatisfy(response -> {
-                assertThat(response.status()).isEqualTo(ResponseStatus.APPLIED);
-                assertThat(TradingOrderBatchCodec.decodeResult(response.data()).items())
-                        .hasSize(20).allSatisfy(item -> assertThat(item.status()).isEqualTo(ResponseStatus.APPLIED));
-            });
-            try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(product, live.service.captureSnapshot(800))) {
-                assertThat(restored.tradingState().businessStateHash()).isEqualTo(live.hash());
-            }
-        }
-    }
-
-    @ParameterizedTest
-    @EnumSource(ProductLine.class)
     void independentCommandsEnterBeforeMatcherCompletesAndRecoverExactly(ProductLine product) throws Exception {
         try (Fixture live = new Fixture(product); Fixture serial = new Fixture(product);
              Fixture replay = new Fixture(product, Cluster.Role.FOLLOWER)) {
@@ -1715,32 +1470,6 @@ class ClusterCommandPipelineTest {
             try (TradingCoreRuntime restored = TradingCoreRuntime.fromSnapshot(product, f.service.captureSnapshot(700))) {
                 assertThat(restored.tradingState().businessStateHash()).isEqualTo(f.hash());
             }
-        }
-    }
-
-    @Test
-    void differentSymbolsSharingMakerAccountFenceBeforeFurtherAdmission() {
-        try (Fixture live = new Fixture(ProductLine.SPOT); Fixture serial = new Fixture(ProductLine.SPOT)) {
-            var setup = live.setup(); serial.applyAll(setup);
-            long maker = 77;
-            String secondSymbol = disjointSymbol("BTC-USDT");
-            List<CoreMessage> liquidity = List.of(
-                    live.message(CoreMessageType.ADJUST_BALANCE, maker,
-                            TradingCommandCodec.encodeBalanceAdjustment(new BalanceAdjustmentCommand("BTC", 20))),
-                    live.place(maker, "BTC-USDT", 201, 100, 4, CoreOrderSide.SELL),
-                    live.place(maker, secondSymbol, 202, 100, 4, CoreOrderSide.SELL));
-            live.applyAll(liquidity); serial.applyAll(liquidity);
-            CoreMessage first = live.place(11, "BTC-USDT", 301, 100, 2, CoreOrderSide.BUY);
-            CoreMessage second = live.place(disjointUser(11), secondSymbol, disjointOrder(301), 100, 2, CoreOrderSide.BUY);
-            live.responses.clear();
-            live.send(first); live.send(second);
-            live.progressUntil(() -> live.responses.size() == 1);
-            assertThat(live.service.commandWindowSize()).isOne();
-            assertThat(live.responses).hasSize(1);
-            live.tick(); serial.applyAll(List.of(first, second));
-            assertThat(live.hash()).isEqualTo(serial.hash());
-            assertThat(live.service.state().tradingState().order(201).executedQuantitySteps()).isEqualTo(2);
-            assertThat(live.service.state().tradingState().order(202).executedQuantitySteps()).isEqualTo(2);
         }
     }
 
@@ -2029,7 +1758,14 @@ class ClusterCommandPipelineTest {
         }
     }
 
-    private static long disjointUser(long user) { return disjointOrder(user); }
+    private static long disjointUser(long user) {
+        var topology = com.surprising.aeron.service.state.LaneTopology.productionDefault();
+        long lane = topology.accountLaneMask(user);
+        for (long next = user + 1;; next++) {
+            if (topology.accountLaneMask(next) != lane
+                    && TradingDependencyMask.account(next) != TradingDependencyMask.account(user)) return next;
+        }
+    }
     private static long disjointOrder(long id) {
         for (long next = id + 1;; next++) if (TradingDependencyMask.account(next) != TradingDependencyMask.account(id)) return next;
     }

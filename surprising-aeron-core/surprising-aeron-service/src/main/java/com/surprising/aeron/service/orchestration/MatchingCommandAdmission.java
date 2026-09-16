@@ -195,16 +195,7 @@ final class MatchingCommandAdmission {
         List<Long> preMatchingCancellations = List.of();
         ResolvedMatchingAdmission admission = null;
         com.surprising.aeron.service.state.PlaceAdmissionEvent placeAdmission = null;
-        owner.resultBuilder.clearOrderViews();
-        owner.resultBuilder.commandChangedUserIds = List.of();
-        owner.resultBuilder.commandChangedOrderIds = List.of();
-        owner.resultBuilder.commandTradeCount = 0;
-        owner.resultBuilder.commandFundingProgress = null;
-        owner.resultBuilder.commandLiquidationProgress = null;
-        owner.resultBuilder.commandLiquidationBatchResult = null;
-        owner.resultBuilder.commandSettlementProgress = null;
-        owner.resultBuilder.commandRiskScanControl = null;
-        owner.resultBuilder.resetChangeAccumulators();
+        owner.resultBuilder.beginCommand();
         owner.commits.beginCommitPublicationBatch();
         try {
             switch (operation) {

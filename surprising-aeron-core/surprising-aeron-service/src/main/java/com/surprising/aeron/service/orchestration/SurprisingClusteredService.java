@@ -30,8 +30,6 @@ public final class SurprisingClusteredService implements ClusteredService {
     private final ClusterCommandWindow commandWindow = new ClusterCommandWindow();
     private int commandWindowHighWaterMark;
     private long drainedWindows, drainedCommands, dependencyFences, controlFences;
-    /** Owner-only counts of blocking decisions; cached retries do not increment them. */
-    private final long[] dependencyFenceReasons = new long[ClusterCommandWindow.Conflict.values().length];
     private long retryFences;
     /** Owner 独占：只有准入、控制执行或提交推进时递增，等待中的命令不算工作。 */
     private long commandProgress;
@@ -100,7 +98,6 @@ public final class SurprisingClusteredService implements ClusteredService {
         pendingResponses.clear();
         commandWindowHighWaterMark = 0;
         drainedWindows = drainedCommands = dependencyFences = controlFences = retryFences = 0;
-        java.util.Arrays.fill(dependencyFenceReasons, 0);
         snapshotFenceNotReadyCount = 0;
         snapshotFenceTimeoutCount = 0;
         idleStrategy = cluster.idleStrategy();
@@ -259,7 +256,6 @@ public final class SurprisingClusteredService implements ClusteredService {
                 else {
                     dependencyFences++;
                     if (retry) retryFences++;
-                    else dependencyFenceReasons[commandWindow.conflict().ordinal()]++;
                 }
                 if (drainingSize != 0) return;
                 beginCommandPrefix();
@@ -290,7 +286,6 @@ public final class SurprisingClusteredService implements ClusteredService {
             if (entry.sequence != 0) {
                 var pending = state.pendingMatching(entry.sequence);
                 pending.establishCommitFence(next.timestamp, next.position);
-                pending.partitionLaneMask = commandWindow.candidateLanes;
                 state.pendingMatching.partitionDependenciesChanged();
             }
             CoreMatchingPhaseMetrics.recordBoundary("admissionExecution", next.command.header(), admissionStart);
@@ -539,13 +534,9 @@ public final class SurprisingClusteredService implements ClusteredService {
 
     @Override
     public void onTerminate(Cluster cluster) {
-        System.out.printf("Aeron core command-window productLine=%s highWaterMark=%d pending=%d windows=%d commands=%d dependencyFences=%d controlFences=%d orderFences=%d matchingRangeFences=%d openInterestFences=%d accountFences=%d retryFences=%d%n",
+        System.out.printf("Aeron core command-window productLine=%s highWaterMark=%d pending=%d windows=%d commands=%d dependencyFences=%d controlFences=%d retryFences=%d%n",
                 productLine, commandWindowHighWaterMark, commandWindow.size(), drainedWindows,
-                drainedCommands, dependencyFences, controlFences,
-                dependencyFenceReasons[ClusterCommandWindow.Conflict.ORDER.ordinal()],
-                dependencyFenceReasons[ClusterCommandWindow.Conflict.MATCHING_RANGE.ordinal()],
-                dependencyFenceReasons[ClusterCommandWindow.Conflict.OPEN_INTEREST.ordinal()],
-                dependencyFenceReasons[ClusterCommandWindow.Conflict.ACCOUNT.ordinal()], retryFences);
+                drainedCommands, dependencyFences, controlFences, retryFences);
         commandWindow.clear();
         pendingIngress.clear();
         blockedIngress = blockedWindowHead = null;

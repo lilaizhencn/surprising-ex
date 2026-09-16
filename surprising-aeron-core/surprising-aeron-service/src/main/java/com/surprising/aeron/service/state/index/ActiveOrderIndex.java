@@ -49,29 +49,29 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     private final Long2ObjectHashMap<LongHashSet> idsByUser =
             new Long2ObjectHashMap<>(INITIAL_USER_INDEX_CAPACITY, 0.65f, false);
     private final Map<String, LongHashSet> idsBySymbol = new HashMap<>(INITIAL_INDEX_CAPACITY);
-    // Owner-maintained participant counts: admission must include potential maker accounts
-    // without scanning the order book on every incoming command. Removed with the last order.
-    private final Map<String, OrderParticipantIndex> participantsBySymbol = new HashMap<>(INITIAL_INDEX_CAPACITY);
     private final Long2ObjectHashMap<IndexedOrder> ordersById =
             new Long2ObjectHashMap<>(INITIAL_INDEX_CAPACITY, 0.65f, false);
     /** Non-state wrapper pool; terminal orders cannot be observed through this holder. */
     private static final ThreadLocal<ArrayDeque<IndexedOrder>> RECYCLED_ORDERS =
             ThreadLocal.withInitial(() -> new ArrayDeque<>(INITIAL_INDEX_CAPACITY));
-    /** Query-only holder reused by the Owner thread; it is never part of index state. */
-    private static final ThreadLocal<CounterpartyMasks> COUNTERPARTY_SCRATCH =
-            ThreadLocal.withInitial(CounterpartyMasks::new);
     private RuntimeIdentityRegistry recoveryIdentities;
 
     /** One Owner-owned index entry per active order; updates reuse the Lane's immutable value. */
-    private static final class IndexedOrder {
+    /**
+     * Compact Owner routing view backed by the existing active-order entry.
+     * Returning this holder avoids allocating a route record for every cancel.
+     */
+    public static final class IndexedOrder {
         OrderRuntime order;
         String symbol;
         IndexedOrder(OrderRuntime order, String symbol) { reset(order, symbol); }
         void reset(OrderRuntime order, String symbol) { this.order = order; this.symbol = symbol; }
         void clear() { order = null; symbol = null; }
-        long orderId() { return order.orderId(); }
-        long userId() { return order.userId(); }
-        String symbol() { return symbol; }
+        public long orderId() { return order.orderId(); }
+        public long userId() { return order.userId(); }
+        public String symbol() { return symbol; }
+        /** Existing runtime value for the Owner's cancel handoff; no second map lookup. */
+        public OrderRuntime runtime() { return order; }
         com.surprising.aeron.protocol.CoreOrderSide side() { return order.side(); }
         long matchingPriceTicks() { return order.matchingPriceTicks(); }
         long remainingQuantitySteps() { return order.remainingQuantitySteps(); }
@@ -82,22 +82,14 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     }
     // Owner-only bounded query scratch; never sized to total book depth.
     private long[] pageScratch;
-    /** 账户路由由持久化拓扑决定，不能使用与恢复状态不同的启动参数。 */
-    private final com.surprising.aeron.service.state.LaneTopology topology;
     private final RuntimeOrderAdmission.AdmissionSummary admissionSummary =
             new RuntimeOrderAdmission.AdmissionSummary();
 
     public ActiveOrderIndex(TradingCoreState state) {
-        this(state, null, com.surprising.aeron.service.state.LaneTopology.productionDefault());
+        this(state, null);
     }
 
     public ActiveOrderIndex(TradingCoreState state, RuntimeIdentityRegistry identities) {
-        this(state, identities, com.surprising.aeron.service.state.LaneTopology.productionDefault());
-    }
-
-    public ActiveOrderIndex(TradingCoreState state, RuntimeIdentityRegistry identities,
-                            com.surprising.aeron.service.state.LaneTopology topology) {
-        this.topology = java.util.Objects.requireNonNull(topology);
         recoveryIdentities = identities == null ? new RuntimeIdentityRegistry() : identities;
         rebuild(state);
     }
@@ -136,55 +128,6 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
         return ordersById.size();
     }
 
-    public long counterpartyMask(String symbol, com.surprising.aeron.protocol.CoreOrderSide side, long limitPrice) {
-        OrderParticipantIndex participants = participantsBySymbol.get(symbol);
-        return participants == null ? 0 : participants.counterparties(side, limitPrice);
-    }
-
-    public long counterpartyLaneMask(String symbol, com.surprising.aeron.protocol.CoreOrderSide side, long limitPrice) {
-        OrderParticipantIndex participants = participantsBySymbol.get(symbol);
-        return participants == null ? 0 : participants.counterpartyLanes(side, limitPrice);
-    }
-
-    /** Computes both admission masks in one crossing-price tree walk. */
-    public CounterpartyMasks counterpartyMasks(String symbol,
-                                               com.surprising.aeron.protocol.CoreOrderSide side,
-                                               long limitPrice) {
-        CounterpartyMasks result = COUNTERPARTY_SCRATCH.get();
-        OrderParticipantIndex participants = participantsBySymbol.get(symbol);
-        if (participants == null) {
-            result.accountMask = 0;
-            result.laneMask = 0;
-        } else {
-            participants.computeCounterpartyMasks(side, limitPrice);
-            result.accountMask = participants.computedCounterpartyMask();
-            result.laneMask = participants.computedCounterpartyLaneMask();
-        }
-        return result;
-    }
-
-    public static final class CounterpartyMasks {
-        long accountMask;
-        long laneMask;
-
-        public long accountMask() { return accountMask; }
-        public long laneMask() { return laneMask; }
-    }
-
-    public boolean hasCounterparty(String symbol, com.surprising.aeron.protocol.CoreOrderSide side,
-                                   long price, long userId) {
-        OrderParticipantIndex index = participantsBySymbol.get(symbol);
-        return index != null && index.contains(side, price, userId);
-    }
-
-    public boolean counterpartiesOverlap(String firstSymbol, com.surprising.aeron.protocol.CoreOrderSide firstSide,
-                                         long firstPrice, String secondSymbol,
-                                         com.surprising.aeron.protocol.CoreOrderSide secondSide, long secondPrice) {
-        OrderParticipantIndex first = participantsBySymbol.get(firstSymbol);
-        OrderParticipantIndex second = participantsBySymbol.get(secondSymbol);
-        return first != null && second != null && first.overlaps(firstSide, firstPrice, second, secondSide, secondPrice);
-    }
-
     /** Full immutable query view; admission/routing uses the existing runtime reference below. */
     public CoreOrderState activeOrder(long orderId) {
         IndexedOrder entry = ordersById.get(orderId);
@@ -194,6 +137,15 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     public OrderRuntime activeOrderRuntime(long orderId) {
         IndexedOrder entry = ordersById.get(orderId);
         return entry == null ? null : entry.order;
+    }
+
+    /**
+     * Return the existing active-order holder for routing a cancel command.
+     * The holder is owned by this Owner index and must not be retained by a
+     * caller after the next index mutation.
+     */
+    public IndexedOrder activeOrderRoute(long orderId) {
+        return ordersById.get(orderId);
     }
 
     public String activeOrderSymbol(long orderId) {
@@ -480,7 +432,6 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
             // Removal already returns the old entry; do not probe the same order twice.
             IndexedOrder previous = ordersById.remove(orderId);
             if (previous != null) {
-                removeParticipant(previous);
                 remove(idsByUser, previous.userId(), orderId);
                 remove(idsBySymbol, previous.symbol(), orderId);
                 previous.clear();
@@ -496,9 +447,6 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
             add(entry);
             return;
         }
-        boolean changedParticipant = previous.userId() != current.userId() || !previous.symbol.equals(symbol)
-                || previous.side() != current.side() || previous.matchingPriceTicks() != current.matchingPriceTicks();
-        if (changedParticipant) removeParticipant(previous);
         if (previous.userId() != current.userId()) {
             remove(idsByUser, previous.userId(), orderId);
             add(idsByUser, current.userId(), orderId);
@@ -509,13 +457,11 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
         }
         previous.order = current;
         previous.symbol = symbol;
-        if (changedParticipant) addParticipant(previous);
     }
 
     public void rebuild(TradingCoreState state) {
         idsByUser.clear();
         idsBySymbol.clear();
-        participantsBySymbol.clear();
         ordersById.clear();
         state.orders().values().stream()
                 .filter(ActiveOrderIndex::isActive)
@@ -532,7 +478,6 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     }
 
     private void add(IndexedOrder order) {
-        addParticipant(order);
         ordersById.put(order.orderId(), order);
         LongHashSet userIds = idsByUser.get(order.userId());
         if (userIds == null) {
@@ -547,38 +492,11 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
                 new LongHashSet(INITIAL_SYMBOL_INDEX_CAPACITY, 0.65f, false)).add(order.orderId());
     }
 
-    private void addParticipant(IndexedOrder order) {
-        participantsBySymbol.computeIfAbsent(order.symbol(), ignored -> new OrderParticipantIndex(topology)).add(order.side(), order.matchingPriceTicks(), order.userId());
-    }
-
-    private void removeParticipant(IndexedOrder order) {
-        OrderParticipantIndex participants = participantsBySymbol.get(order.symbol());
-        if (participants == null)
-            throw new IllegalStateException("active order participant count underflow");
-        participants.remove(order.side(), order.matchingPriceTicks(), order.userId());
-        if (participants.mask() == 0) participantsBySymbol.remove(order.symbol());
-    }
-
     private static void remove(Long2ObjectHashMap<LongHashSet> values, long key, long id) {
         LongHashSet ids = values.get(key);
         if (ids == null) return;
         ids.remove(id);
         if (ids.isEmpty()) values.remove(key);
-    }
-
-    private static void add(Long2ObjectHashMap<LongHashSet> values, long key, long id) {
-        LongHashSet ids = values.get(key);
-        if (ids == null) {
-            ids = new LongHashSet(8, 0.65f, false);
-            values.put(key, ids);
-        }
-        ids.add(id);
-    }
-
-    /** Keep the bounded symbol bucket allocated so order turnover does not recreate a hash table. */
-    private void removeSymbolBucket(String symbol, long id) {
-        LongHashSet ids = idsBySymbol.get(symbol);
-        if (ids != null) ids.remove(id);
     }
 
     private static <K> void remove(Map<K, LongHashSet> values, K key, long id) {
@@ -589,6 +507,15 @@ public final class ActiveOrderIndex implements RuntimeOrderAdmission.AdmissionOr
     }
 
     private static <K> void add(Map<K, LongHashSet> values, K key, long id) {
+        LongHashSet ids = values.get(key);
+        if (ids == null) {
+            ids = new LongHashSet(8, 0.65f, false);
+            values.put(key, ids);
+        }
+        ids.add(id);
+    }
+
+    private static void add(Long2ObjectHashMap<LongHashSet> values, long key, long id) {
         LongHashSet ids = values.get(key);
         if (ids == null) {
             ids = new LongHashSet(8, 0.65f, false);

@@ -277,7 +277,7 @@ final class OrderBatchExecutor {
         int shard = owner.matchingAdapter.matcherShardId(batch.preparedSymbols.getFirst());
         if (owner.runtimeState.asynchronousCommands()) {
             batch.settlementEvent = owner.runtimeState.prepareDirectMatcherSettlement(pending.sequence(),
-                    pending.partitionLaneMask == 0 ? owner.commits.validAccountLaneMask() : pending.partitionLaneMask,
+                    owner.commits.validAccountLaneMask(),
                     null, batch.preparedAdmittedOrders, batch.items.size(), pending.command().header().commandId(),
                     shard, owner.identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
                     pending.preMatchingCancellationOrderIds(), batch);
@@ -526,7 +526,7 @@ final class OrderBatchExecutor {
             pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
             direct = owner.runtimeState.prepareDirectMatcherSettlement(
                     pending.sequence(), 0,
-                    pending.partitionLaneMask == 0 ? owner.commits.validAccountLaneMask() : pending.partitionLaneMask,
+                    owner.commits.validAccountLaneMask(),
                     admitted, null, 1, pending.command().header().commandId(), shard,
                     owner.identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
                     pending.preMatchingCancellationOrderIds(), batch);
@@ -539,7 +539,7 @@ final class OrderBatchExecutor {
         if (batch.kind == OrderBatchKind.AMEND) {
             pending.establishCommitFence(batch.clusterTimestamp, batch.clusterPosition);
             direct = owner.runtimeState.prepareDirectReplacement(pending.sequence(), 0,
-                    pending.partitionLaneMask == 0 ? owner.commits.validAccountLaneMask() : pending.partitionLaneMask,
+                    owner.commits.validAccountLaneMask(),
                     java.util.Objects.requireNonNull(batch.replacementAdmission),
                     pending.command().header().commandId(), shard, owner.identities,
                     pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
@@ -561,9 +561,13 @@ final class OrderBatchExecutor {
         // stay on the owner rejection path; cross-shard chunks keep original item order.
         while (end < batch.items.size()) {
             OrderBatchItem item = batch.items.get(end);
-            OrderRuntime order = owner.runtimeOrder(item.orderId);
-            if (order == null) break;
-            String symbol = owner.runtimeOrderSymbol(order);
+            // The ingress route already validated this exact order ID. Reuse the
+            // route holder's runtime value instead of probing the active-order map
+            // a second time while building the fixed same-shard chunk.
+            var route = owner.activeOrderIndex.activeOrderRoute(item.orderId);
+            if (route == null || route.runtime() == null) break;
+            OrderRuntime order = route.runtime();
+            String symbol = route.symbol();
             if (owner.matchingAdapter.matcherShardId(symbol) != shard) break;
             batch.preparedAdmittedOrders[end - start] = order;
             item.cancelSymbol = symbol;
@@ -971,12 +975,10 @@ final class OrderBatchExecutor {
         if (laneContext.expectedLaneMask() != batch.actualLaneMask) {
             throw failOrderBatch(batch, pending, "order batch account lane mask mismatch", null);
         }
-        long committedLaneMask;
         try {
             if (batch.treasuryDelta != null) batch.treasuryDelta.apply(owner.runtimeState.treasury());
             owner.runtimeState.setMetadata(owner.productLine,
                     Math.incrementExact(owner.runtimeState.revision()));
-            committedLaneMask = batch.actualLaneMask;
             if (laneContext.completedLaneMask() != laneContext.expectedLaneMask()) {
                 throw new IllegalStateException("order batch account lane mask mismatch");
             }
@@ -1050,12 +1052,12 @@ final class OrderBatchExecutor {
         String symbol = switch (batch.kind) {
             case PLACE -> ((PlaceOrderCommand) item.command).symbol();
             case CANCEL -> {
-                OrderRuntime order = owner.runtimeOrder(((CancelOrderCommand) item.command).orderId());
-                yield order == null ? "" : owner.identities.symbol(order.symbolId());
+                var route = owner.activeOrderIndex.activeOrderRoute(((CancelOrderCommand) item.command).orderId());
+                yield route == null ? "" : route.symbol();
             }
             case AMEND -> {
-                OrderRuntime order = owner.runtimeOrder(((AmendOrderCommand) item.command).originalOrderId());
-                yield order == null ? "" : owner.identities.symbol(order.symbolId());
+                var route = owner.activeOrderIndex.activeOrderRoute(((AmendOrderCommand) item.command).originalOrderId());
+                yield route == null ? "" : route.symbol();
             }
         };
         return symbol.isBlank() ? 0 : batch.decodedCommand == null
@@ -1065,16 +1067,7 @@ final class OrderBatchExecutor {
 
     void beginOrderBatchCommitContext(OrderBatchPending batch, CommandSlot pending) {
         owner.activateFactContext(pending.command(), pending.fingerprint());
-        owner.resultBuilder.clearOrderViews();
-        owner.resultBuilder.commandChangedUserIds = List.of();
-        owner.resultBuilder.commandChangedOrderIds = List.of();
-        owner.resultBuilder.commandTradeCount = 0;
-        owner.resultBuilder.commandFundingProgress = null;
-        owner.resultBuilder.commandLiquidationProgress = null;
-        owner.resultBuilder.commandLiquidationBatchResult = null;
-        owner.resultBuilder.commandSettlementProgress = null;
-        owner.resultBuilder.commandRiskScanControl = null;
-        owner.resultBuilder.resetChangeAccumulators();
+        owner.resultBuilder.beginCommand();
         owner.runtimeState.beginOrderBatchMutationScope();
         batch.beforeProjection = owner.currentProjectionPoint;
         batch.runtimeCheckpoint = owner.runtimeState.commandRevisionCheckpoint();
