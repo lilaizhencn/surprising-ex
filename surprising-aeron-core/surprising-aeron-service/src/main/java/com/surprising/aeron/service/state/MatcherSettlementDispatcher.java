@@ -174,8 +174,10 @@ final class MatcherSettlementDispatcher {
                 plan, owner, identities, instrument,
                 baseAssetId, quoteAssetId, settleAssetId, owner.accountLanes.length,
                 captureIsolatedChanges);
-        for (int laneId = 0; laneId < owner.accountLanes.length; laneId++) {
-            if ((expectedLaneMask & 1L << laneId) == 0) continue;
+        long lanes = expectedLaneMask;
+        while (lanes != 0) {
+            int laneId = Long.numberOfTrailingZeros(lanes);
+            lanes &= lanes - 1;
             // In asynchronous command scope the permanent Lane is the only account
             // writer.  ownerLaneAccess may still be held by an earlier preparation
             // step, but it must never turn this settlement into an inline write.
