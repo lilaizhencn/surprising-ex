@@ -321,21 +321,6 @@ public final class MatcherSettlementEvent implements SettlementLaneWorker.Comman
         } catch (Throwable failure) { failDirect(failure); throw failure; }
     }
 
-    public void publishDirectResults(java.util.List<com.surprising.aeron.service.matching.CoreMatchingResult> results) {
-        try {
-            if (results == null || results.size() != batchPlanCount)
-                throw new IllegalStateException("direct matcher batch is incomplete");
-            com.surprising.aeron.service.matching.CoreMatchingResult previous = null;
-            for (int index = 0; index < batchPlanCount; index++) {
-                var result = results.get(index);
-                buildDirectItem(index, result, previous);
-                previous = result;
-            }
-            firstDirectResult = results.getFirst(); lastDirectResult = previous;
-            finishDirectPublication();
-        } catch (Throwable failure) { failDirect(failure); throw failure; }
-    }
-
     /** Publish a fixed batch result buffer without creating a List view on the Matcher thread. */
     public void publishDirectResults(
             com.surprising.aeron.service.matching.CoreMatchingResult[] results, int count) {
