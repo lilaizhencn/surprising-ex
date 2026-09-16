@@ -16,6 +16,13 @@ final class RiskLiquidationBatch {
 
     RiskLiquidationBatch(int capacity) { this.capacity = capacity; }
     int size() { return count; }
+    int capacity() { return capacity; }
+
+    /** Reuse the lane-local result object for the next bounded scan slice. */
+    void reset() {
+        count = 0;
+        firstId = 0;
+    }
 
     void add(PositionRuntime position, long instrumentChange, long priceSequence) {
         if (positions == null) {
