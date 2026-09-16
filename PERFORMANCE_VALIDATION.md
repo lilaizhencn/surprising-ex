@@ -2000,3 +2000,9 @@ JFR 的分配/调用栈显示，`RuntimeIdentityRegistry.retainPositionInLane` �
 JFR 继续显示 `SettlementLaneWorker.run` 占 Lane 样本约 `78%`，而 Lane 实际业务执行时间约占测量窗口 `42%`。检查发现深度成交计划已经建立 `makerLaneHeads/makerLaneNext` 索引，但 `validateDirectLane` 仍让每个非 taker Lane 完整扫描同一批 matcher 事件，再过滤不属于本 Lane 的 maker。现在非 taker Lane 复用已有链，taker Lane 保持原始顺序扫描，以确保同 Lane maker 与 taker 校验语义不变；没有新增状态、分配或跨线程同步。
 
 验证：定向 `MatcherSettlementPlanTest`、`MatcherSettlementEventTest`、`RuntimeDerivativeMatchProcessorTest` 通过；服务模块全量测试通过（失败/错误 `0`）。重新打包实际 service JAR 后按固定单节点、1 Matcher、4 Lane、128 symbols、window256、BUSY_SPIN、G1、MIXED batch20 口径完成两轮无 JFR 端到端：`360,347.695 business/s` 与 `405,000.997 business/s`，均 `clientPass=true`、`peakInFlight=256`、`unfinished=0`、`fundsDiff=0`；短测方差较大，不能宣称绝对吞吐提升或回退。独立 JFR 轮为 `391,725.456 business/s`，Owner `97.97%`、Matcher `97.73%`、四 Lane 约 `98.2%`，Lane 有效执行比约 `42.20%`；分配主项仍为 `decodePlaceOrder`、`CoreMatchingResult`、`preparedOrder`、终态结果编码和 `FillCursor.order`，说明该重复扫描不是当前主要分配来源。原始目录 `/tmp/core-matcher-index-built-20260916`、`/tmp/core-matcher-index-built-rerun-20260916`、`/tmp/core-matcher-index-profile-20260916` 保留审计，节点与客户端均已退出。
+
+### 2026-09-16：终态客户号短值校验快路径（计划与结果）
+
+计划：`TerminalStateRetention.normalizeClientId` 对不超过 64 个 UTF-16 单元的标识直接通过；该长度在最坏 UTF-8 编码下仍不超过 256 字节，较长内部/恢复值继续执行原 UTF-8 字节上限校验。只减少 Owner 终态 tombstone 的重复字符扫描，不改变空值、超长拒绝、快照或去重语义。
+
+验证：`TerminalStateRetentionTest` 通过；服务模块此前完整回归 `980` 项通过（失败/错误 `0`，既有跳过 `1`）。重新打包后的固定端到端无 JFR 轮为 `291,180.185 business/s`，JFR 轮为 `254,624.565 business/s`；两轮 `clientPass=true`、`peakInFlight=256`、`unfinished=0`、`fundsDiff=0`。JFR 中 Owner `95.58%`、Matcher `50.03%`、四 Lane 约 `97.4%`，Lane 有效执行比 `38.35%`；`utf8Length` 不再出现在 Owner 热点，`TerminalTombstoneStore.bucket` 仍约 `15` 个 Owner 样本。分配主项仍为 `OrderRuntime`、`byte[]`、`ReservationRuntime`、`long[]`、`MatcherResult` 和 `NativeCommand`，没有可归因的端到端吞吐提升；短测低于上一组结果属于调度/JFR 方差，不能归因于该改动。原始目录 `/tmp/core-terminal-id-fast-20260916`、`/tmp/core-terminal-id-profile-20260916` 保留审计，节点与客户端均已退出。

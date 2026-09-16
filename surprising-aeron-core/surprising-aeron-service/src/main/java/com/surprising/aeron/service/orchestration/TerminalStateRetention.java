@@ -477,6 +477,10 @@ final class TerminalStateRetention implements RuntimeFactFrame.RetentionConsumer
 
     private static String normalizeClientId(String clientId) {
         String normalized = clientId == null ? "" : clientId;
+        // Any string up to 64 UTF-16 code units fits the 256-byte retention bound,
+        // even at four UTF-8 bytes per code point. Avoid rescanning common short IDs;
+        // retain the full byte-length validation for larger restored/internal values.
+        if (normalized.length() <= 64) return normalized;
         if (com.surprising.aeron.protocol.CoreStateQueryCodec.utf8Length(normalized) > MAX_CLIENT_ID_BYTES) {
             throw new IllegalArgumentException("terminal client id is too long");
         }
