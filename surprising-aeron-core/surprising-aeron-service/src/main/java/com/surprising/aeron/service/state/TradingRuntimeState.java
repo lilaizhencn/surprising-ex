@@ -1719,8 +1719,10 @@ public final class TradingRuntimeState implements AutoCloseable {
             throw failure;
         }
         if (!accountLanesStarted) {
-            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
-                if ((laneMask & 1L << laneId) == 0) continue;
+            long lanes = laneMask;
+            while (lanes != 0) {
+                int laneId = Long.numberOfTrailingZeros(lanes);
+                lanes &= lanes - 1;
                 event.execute(accountLanes[laneId]);
                 dispatchedLaneCommitSequences[laneId] = coreSequence;
             }
@@ -1730,9 +1732,11 @@ public final class TradingRuntimeState implements AutoCloseable {
         // leave a half-submitted commit behind.
         long submittedMask = 0;
         try {
-            for (int laneId = 0; laneId < accountLanes.length; laneId++) {
+            long lanes = laneMask;
+            while (lanes != 0) {
+                int laneId = Long.numberOfTrailingZeros(lanes);
                 long laneBit = 1L << laneId;
-                if ((laneMask & laneBit) == 0) continue;
+                lanes &= lanes - 1;
                 accountLaneQueueHighWaterMarks[laneId] = Math.max(
                         accountLaneQueueHighWaterMarks[laneId], laneWorkers[laneId].depth() + 1);
                 laneWorkers[laneId].submit(event);

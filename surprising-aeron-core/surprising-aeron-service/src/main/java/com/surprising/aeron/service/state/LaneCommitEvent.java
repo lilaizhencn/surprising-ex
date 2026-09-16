@@ -78,7 +78,10 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
             metadataOrderIds[laneId].add(orderId);
         }
         if (metadataOrderIds == null) return;
-        for (int laneId = 0; laneId < usersByLane.length; laneId++) {
+        long lanes = requiredLaneMask;
+        while (lanes != 0) {
+            int laneId = Long.numberOfTrailingZeros(lanes);
+            lanes &= lanes - 1;
             if (metadataOrderIds[laneId] == null) continue;
             int count = metadataOrderIds[laneId].size();
             if (stampedOrders[laneId] == null || stampedOrders[laneId].length < count)
@@ -110,7 +113,10 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
     private void publishMetadata() {
         if (triggerCancelIds != null) {
             int count = 0;
-            for (int laneId = 0; laneId < usersByLane.length; laneId++) {
+            long lanes = requiredLaneMask;
+            while (lanes != 0) {
+                int laneId = Long.numberOfTrailingZeros(lanes);
+                lanes &= lanes - 1;
                 if (canceledTriggers[laneId] == 0) continue;
                 runtime.flushPublishedChanges(laneId);
                 count = Math.addExact(count, canceledTriggers[laneId]);
@@ -118,7 +124,10 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
             if (count != 0) runtime.setMetadata(runtime.productLine(), Math.addExact(runtime.revision(), count));
         }
         if (metadataOrderIds == null) return;
-        for (int laneId = 0; laneId < usersByLane.length; laneId++) {
+        long lanes = requiredLaneMask;
+        while (lanes != 0) {
+            int laneId = Long.numberOfTrailingZeros(lanes);
+            lanes &= lanes - 1;
             if (metadataOrderIds[laneId] == null) continue;
             for (int index = 0; index < metadataOrderIds[laneId].size(); index++) {
                 OrderRuntime order = stampedOrders[laneId][index];
@@ -145,10 +154,13 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
         coreSequence = sequence;
         requiredLaneMask = laneMask;
         runtime = owner;
-        for (int laneId = 0; laneId < usersByLane.length; laneId++) {
+        long lanes = laneMask;
+        while (lanes != 0) {
+            int laneId = Long.numberOfTrailingZeros(lanes);
+            lanes &= lanes - 1;
             LongArrayList target = usersByLane[laneId];
             target.clear();
-            if ((laneMask & 1L << laneId) != 0) target.addAll(routedUsers[laneId]);
+            target.addAll(routedUsers[laneId]);
         }
         return this;
     }
@@ -176,7 +188,10 @@ public final class LaneCommitEvent implements SettlementLaneWorker.Command {
     public long requiredLaneMask() { return requiredLaneMask; }
     public long completedLaneMask() {
         long mask = 0;
-        for (int laneId = 0; laneId < usersByLane.length; laneId++) {
+        long lanes = requiredLaneMask;
+        while (lanes != 0) {
+            int laneId = Long.numberOfTrailingZeros(lanes);
+            lanes &= lanes - 1;
             if ((long) LONGS.getAcquire(completedLanes, laneId * CACHE_LINE_LONGS) != 0) {
                 mask |= 1L << laneId;
             }
