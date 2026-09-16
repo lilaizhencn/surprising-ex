@@ -53,6 +53,13 @@ final class LanePublication {
                 owner.changedReservations.add(id);
             });
             changes.positions.forEach((id, value) -> owner.publishedPositions.applyPublished(id, value));
+            // Terminal cleanup may intentionally omit a zero-reservation after-image.  Apply
+            // route removals independently so the Owner cannot retain a stale reservation/order
+            // merely because the Lane had no value record to drain.
+            changes.removedOrderRoutes.forEach(id -> owner.publishedOrders.remove(id));
+            changes.removedReservationRoutes.forEach(id -> owner.publishedReservations.remove(id));
+            changes.removedOrderRoutes.clear();
+            changes.removedReservationRoutes.clear();
             delta = null;
             runtime = null;
             return;

@@ -2,32 +2,90 @@ package com.surprising.aeron.service.state;
 
 import com.surprising.aeron.protocol.ReservationKind;
 
-public record ReservationRuntime(long orderId, long userId, int symbolId, long instrumentChangeId,
-                                 ReservationKind kind, int assetId, long totalReservedUnits,
-                                 long releasedUnits, long consumedUnits, long orderQuantitySteps) {
+/** Lane-owned reservation; consumption/release mutates primitive counters in place. */
+public final class ReservationRuntime {
+    private final long orderId;
+    private final long userId;
+    private final int symbolId;
+    private final long instrumentChangeId;
+    private final ReservationKind kind;
+    private final int assetId;
+    private final long totalReservedUnits;
+    private long releasedUnits;
+    private long consumedUnits;
+    private final long orderQuantitySteps;
+    private boolean mutable;
 
-    public ReservationRuntime(long orderId, long userId, int assetId, long remainingUnits) {
-        this(orderId, userId, 0, 1, ReservationKind.DERIVATIVE_MARGIN, assetId, Math.max(1, remainingUnits),
-                0, 0, 1);
-    }
-
-    public ReservationRuntime {
+    public ReservationRuntime(long orderId, long userId, int symbolId, long instrumentChangeId,
+                              ReservationKind kind, int assetId, long totalReservedUnits,
+                              long releasedUnits, long consumedUnits, long orderQuantitySteps) {
         if (orderId <= 0 || userId <= 0 || symbolId < 0 || instrumentChangeId <= 0 || kind == null
                 || assetId < 0 || totalReservedUnits <= 0 || releasedUnits < 0 || consumedUnits < 0
                 || Math.addExact(releasedUnits, consumedUnits) > totalReservedUnits || orderQuantitySteps <= 0) {
             throw new IllegalArgumentException("invalid runtime reservation");
         }
+        this.orderId = orderId; this.userId = userId; this.symbolId = symbolId;
+        this.instrumentChangeId = instrumentChangeId; this.kind = kind; this.assetId = assetId;
+        this.totalReservedUnits = totalReservedUnits; this.releasedUnits = releasedUnits;
+        this.consumedUnits = consumedUnits; this.orderQuantitySteps = orderQuantitySteps;
+        this.mutable = true;
     }
 
-    /** Compatibility accessor used by hot-path code: returns the currently locked amount. */
-    public long reservedUnits() {
-        return Math.subtractExact(totalReservedUnits, Math.addExact(releasedUnits, consumedUnits));
+    public ReservationRuntime(long orderId, long userId, int assetId, long remainingUnits) {
+        this(orderId, userId, 0, 1, ReservationKind.DERIVATIVE_MARGIN, assetId,
+                Math.max(1, remainingUnits), 0, 0, 1);
+    }
+
+    public long orderId() { return orderId; }
+    public long userId() { return userId; }
+    public int symbolId() { return symbolId; }
+    public long instrumentChangeId() { return instrumentChangeId; }
+    public ReservationKind kind() { return kind; }
+    public int assetId() { return assetId; }
+    public long totalReservedUnits() { return totalReservedUnits; }
+    public long releasedUnits() { return releasedUnits; }
+    public long consumedUnits() { return consumedUnits; }
+    public long orderQuantitySteps() { return orderQuantitySteps; }
+    public long reservedUnits() { return Math.subtractExact(totalReservedUnits, Math.addExact(releasedUnits, consumedUnits)); }
+
+    public ReservationRuntime snapshot() {
+        ReservationRuntime copy = new ReservationRuntime(orderId, userId, symbolId, instrumentChangeId, kind, assetId,
+                totalReservedUnits, releasedUnits, consumedUnits, orderQuantitySteps);
+        copy.mutable = false;
+        return copy;
+    }
+
+    ReservationRuntime laneValue() {
+        return mutable ? this : new ReservationRuntime(orderId, userId, symbolId, instrumentChangeId, kind, assetId,
+                totalReservedUnits, releasedUnits, consumedUnits, orderQuantitySteps);
+    }
+
+    ReservationRuntime copyForLane() {
+        return new ReservationRuntime(orderId, userId, symbolId, instrumentChangeId, kind, assetId,
+                totalReservedUnits, releasedUnits, consumedUnits, orderQuantitySteps);
+    }
+
+    ReservationRuntime publicationValue() { return mutable ? snapshot() : this; }
+
+    void consumeInPlace(long units) {
+        if (units < 0 || units > reservedUnits()) throw new IllegalArgumentException("invalid runtime consumption");
+        consumedUnits = Math.addExact(consumedUnits, units);
+    }
+
+    void releaseInPlace(long units) {
+        if (units < 0 || units > reservedUnits()) throw new IllegalArgumentException("invalid runtime release");
+        releasedUnits = Math.addExact(releasedUnits, units);
+    }
+
+    void setConsumedInPlace(long nextConsumed) {
+        if (nextConsumed < consumedUnits || Math.addExact(releasedUnits, nextConsumed) > totalReservedUnits)
+            throw new IllegalArgumentException("invalid runtime consumption");
+        consumedUnits = nextConsumed;
     }
 
     public ReservationRuntime withRemainingUnits(long remainingUnits) {
-        if (remainingUnits < 0 || remainingUnits > reservedUnits()) {
+        if (remainingUnits < 0 || remainingUnits > reservedUnits())
             throw new IllegalArgumentException("invalid runtime reservation remainder");
-        }
         if (remainingUnits == reservedUnits()) return this;
         return new ReservationRuntime(orderId, userId, symbolId, instrumentChangeId, kind, assetId,
                 totalReservedUnits, Math.addExact(releasedUnits, reservedUnits() - remainingUnits),
@@ -46,5 +104,29 @@ public record ReservationRuntime(long orderId, long userId, int symbolId, long i
         if (units == 0) return this;
         return new ReservationRuntime(orderId, userId, symbolId, instrumentChangeId, kind, assetId,
                 totalReservedUnits, releasedUnits, Math.addExact(consumedUnits, units), orderQuantitySteps);
+    }
+
+    @Override
+    public boolean equals(Object other) {
+        if (this == other) return true;
+        if (!(other instanceof ReservationRuntime value)) return false;
+        return orderId == value.orderId && userId == value.userId && symbolId == value.symbolId
+                && instrumentChangeId == value.instrumentChangeId && assetId == value.assetId
+                && totalReservedUnits == value.totalReservedUnits && releasedUnits == value.releasedUnits
+                && consumedUnits == value.consumedUnits && orderQuantitySteps == value.orderQuantitySteps
+                && kind == value.kind;
+    }
+
+    @Override
+    public int hashCode() {
+        return java.util.Objects.hash(orderId, userId, symbolId, instrumentChangeId, kind, assetId,
+                totalReservedUnits, releasedUnits, consumedUnits, orderQuantitySteps);
+    }
+
+    @Override
+    public String toString() {
+        return "ReservationRuntime[orderId=" + orderId + ", userId=" + userId + ", assetId=" + assetId
+                + ", totalReservedUnits=" + totalReservedUnits + ", releasedUnits=" + releasedUnits
+                + ", consumedUnits=" + consumedUnits + "]";
     }
 }

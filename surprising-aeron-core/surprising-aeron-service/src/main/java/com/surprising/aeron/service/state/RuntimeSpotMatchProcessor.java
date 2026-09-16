@@ -130,8 +130,8 @@ public final class RuntimeSpotMatchProcessor {
         if (localTaker != null) {
             if (!localTaker.canceled() && (localTaker.timeInForce().immediate()
                     || localTaker.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET)) {
-                runtime.replaceOrder(localTaker.withStatus(CoreOrderStatus.CANCELED,
-                        Math.incrementExact(localTaker.revision()), commitTimestamp, commitPosition));
+                runtime.updateOrderStatusInLane(localTaker.orderId(), CoreOrderStatus.CANCELED,
+                        Math.incrementExact(localTaker.revision()), commitTimestamp, commitPosition);
             }
             releaseTerminalReservation(runtime, takerOrderId);
         }
@@ -242,17 +242,25 @@ public final class RuntimeSpotMatchProcessor {
         if (nextBaseAvailable < 0 || nextBaseLocked < 0 || nextQuoteAvailable < 0 || nextQuoteLocked < 0) {
             throw new IllegalStateException("runtime spot fill balance would become negative");
         }
-        ReservationRuntime nextReservation = reservation.consume(reservationDebit);
-        OrderRuntime nextOrder = order.withFill(
-                Math.addExact(order.executedQuantitySteps(), fillQuantitySteps),
-                Math.subtractExact(order.remainingQuantitySteps(), fillQuantitySteps),
-                Math.negateExact(feeDelta),
-                order.remainingQuantitySteps() == fillQuantitySteps ? CoreOrderStatus.FILLED : CoreOrderStatus.OPEN,
-                Math.incrementExact(order.revision()), commitTimestamp, commitPosition);
+        long nextExecuted = Math.addExact(order.executedQuantitySteps(), fillQuantitySteps);
+        long nextRemaining = Math.subtractExact(order.remainingQuantitySteps(), fillQuantitySteps);
+        CoreOrderStatus nextStatus = nextRemaining == 0 ? CoreOrderStatus.FILLED : CoreOrderStatus.OPEN;
+        long nextRevision = Math.incrementExact(order.revision());
         replaceBalance(runtime, order.userId(), baseAssetId, base, nextBaseAvailable, nextBaseLocked);
         replaceBalance(runtime, order.userId(), quoteAssetId, quote, nextQuoteAvailable, nextQuoteLocked);
-        runtime.replaceReservation(nextReservation);
-        runtime.replaceOrder(nextOrder);
+        OrderRuntime nextOrder;
+        if (runtime.laneCommandScope.get() != null && runtime.matcherSettlementChangesScope.get() != null) {
+            runtime.updateReservationInLane(order.orderId(),
+                    Math.addExact(reservation.consumedUnits(), reservationDebit), reservation.releasedUnits(), nextRemaining != 0);
+            nextOrder = runtime.updateOrderInLane(order.orderId(), nextExecuted, nextRemaining,
+                    Math.negateExact(feeDelta), nextStatus, nextRevision, commitTimestamp, commitPosition);
+        } else {
+            ReservationRuntime nextReservation = reservation.consume(reservationDebit);
+            nextOrder = order.withFill(nextExecuted, nextRemaining, Math.negateExact(feeDelta), nextStatus,
+                    nextRevision, commitTimestamp, commitPosition);
+            runtime.replaceReservation(nextReservation);
+            runtime.replaceOrder(nextOrder);
+        }
         treasuryDelta.addFee(quoteAssetId, Math.negateExact(feeDelta));
         runtime.advanceUserRevision(order.userId());
         return nextOrder;
@@ -423,14 +431,28 @@ public final class RuntimeSpotMatchProcessor {
 
             void publish(TradingRuntimeState state) {
                 if (fills == 0) return;
+                CoreOrderStatus status = remaining == 0 ? CoreOrderStatus.FILLED : CoreOrderStatus.OPEN;
+                long feeDelta = Math.subtractExact(cumulativeFee, originalOrder.cumulativeFeeUnits());
+                if (state.laneCommandScope.get() != null && state.matcherSettlementChangesScope.get() != null) {
+                    state.updateReservationInLane(originalOrder.orderId(), consumed, originalReservation.releasedUnits(), remaining != 0);
+                    OrderRuntime nextOrder = state.updateOrderInLane(originalOrder.orderId(), executed, remaining,
+                            feeDelta, status, Math.addExact(originalOrder.revision(), fills),
+                            commitTimestamp, commitPosition);
+                    state.advanceUserRevision(originalOrder.userId(), fills);
+                    if (nextOrder.canceled()) {
+                        long releaseUnits = state.reservation(nextOrder.orderId()).reservedUnits();
+                        state.releaseTerminalReservationInLane(nextOrder.orderId());
+                        if (releaseUnits > 0) state.advanceUserRevision(nextOrder.userId());
+                    }
+                    return;
+                }
+                // Synchronous/recovery path retains value semantics outside the Lane hot path.
                 ReservationRuntime nextReservation = new ReservationRuntime(
                         originalReservation.orderId(), originalReservation.userId(), originalReservation.symbolId(),
                         originalReservation.instrumentChangeId(), originalReservation.kind(),
                         originalReservation.assetId(), originalReservation.totalReservedUnits(),
                         originalReservation.releasedUnits(), consumed, originalReservation.orderQuantitySteps());
-                CoreOrderStatus status = remaining == 0 ? CoreOrderStatus.FILLED : CoreOrderStatus.OPEN;
-                OrderRuntime nextOrder = originalOrder.withFill(executed, remaining,
-                        Math.subtractExact(cumulativeFee, originalOrder.cumulativeFeeUnits()), status,
+                OrderRuntime nextOrder = originalOrder.withFill(executed, remaining, feeDelta, status,
                         Math.addExact(originalOrder.revision(), fills), commitTimestamp, commitPosition);
                 state.replaceReservation(nextReservation);
                 state.replaceOrder(nextOrder);
@@ -462,7 +484,8 @@ public final class RuntimeSpotMatchProcessor {
         OrderRuntime order = runtime.order(orderId);
         if (order == null || !order.canceled()) return;
         long releaseUnits = runtime.reservation(orderId).reservedUnits();
-        runtime.releaseTerminalReservation(orderId);
+        if (runtime.matcherSettlementChangesScope.get() != null) runtime.releaseTerminalReservationInLane(orderId);
+        else runtime.releaseTerminalReservation(orderId);
         if (releaseUnits > 0) runtime.advanceUserRevision(order.userId());
     }
 

@@ -232,6 +232,13 @@ public final class PlaceBatchAdmissionEvent implements SettlementLaneWorker.Comm
         changes = null;
         return value;
     }
+
+    void copyBalanceBeforeTo(TradingRuntimeState.LaneBalancePatches target) {
+        if (!complete() || changes == null || target == null) {
+            throw new IllegalStateException("place batch admission changes are unavailable");
+        }
+        changes.copyBalanceBeforeTo(target);
+    }
     TradingRuntimeState.MatcherSettlementChanges discardChanges() {
         if (!complete()) runtime.releaseAdmissionExpectation(laneId);
         TradingRuntimeState.MatcherSettlementChanges value = changes;

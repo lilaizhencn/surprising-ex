@@ -6,6 +6,7 @@ import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 import com.surprising.aeron.protocol.CoreMarginMode;
 import com.surprising.aeron.protocol.CoreOrderSide;
 import com.surprising.aeron.protocol.CorePositionSide;
+import com.surprising.aeron.service.state.model.CoreOrderStatus;
 import org.agrona.collections.Long2ObjectHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.LongIntHashMap;
@@ -233,6 +234,16 @@ public final class AccountLaneState {
         return pendingReservationSequences.containsKey(orderId);
     }
 
+    void updatePendingReservationInPlace(ReservationRuntime reservation, long previousReservedUnits) {
+        assertOwner();
+        if (reservation == null || previousReservedUnits < 0) throw new IllegalArgumentException("invalid reservation update");
+        if (!pendingReservationSequences.containsKey(reservation.orderId())) return;
+        long current = pendingReservedUnits(reservation.userId(), reservation.assetId());
+        long next = Math.addExact(Math.subtractExact(current, previousReservedUnits), reservation.reservedUnits());
+        if (next < 0) throw new IllegalStateException("pending reservation counters are inconsistent");
+        setPendingReservedUnits(reservation.userId(), reservation.assetId(), next);
+    }
+
     long pendingReservedUnits(long userId, int assetId) {
         assertOwner();
         LongLongHashMap unitsByUser = pendingReservedUnitsByAsset.get(assetId);
@@ -291,6 +302,7 @@ public final class AccountLaneState {
     void putOrder(OrderRuntime order) {
         assertOwner();
         if (order == null) throw new IllegalArgumentException("order is required");
+        order = order.laneValue();
         OrderRuntime previous = orders.put(order.orderId(), order);
         replaceActiveOrder(previous, order);
         admissionOrderIndex.replace(previous, order);
@@ -301,6 +313,39 @@ public final class AccountLaneState {
         OrderRuntime previous = orders.remove(orderId);
         replaceActiveOrder(previous, null);
         admissionOrderIndex.replace(previous, null);
+    }
+
+    /**
+     * Applies execution fields without replacing the Lane-owned object.  The two compact
+     * indexes are updated from primitive before-values, so a fill allocates no intermediate
+     * OrderRuntime value.
+     */
+    OrderRuntime updateOrderInPlace(long orderId, long executed, long remaining, long feeUnits,
+                                    CoreOrderStatus nextStatus, long nextRevision,
+                                    long commitTimestamp, long commitPosition) {
+        assertOwner();
+        OrderRuntime order = orders.get(orderId);
+        if (order == null) throw new IllegalArgumentException("runtime order is not registered: " + orderId);
+        boolean previousActive = active(order);
+        long previousRemaining = order.remainingQuantitySteps();
+        order.applyFillInPlace(executed, remaining, feeUnits, nextStatus, nextRevision,
+                commitTimestamp, commitPosition);
+        if (previousActive && !active(order)) removeActiveOrder(order.userId(), order.orderId());
+        else if (!previousActive && active(order)) addActiveOrder(order.userId(), order.orderId());
+        admissionOrderIndex.updateInPlace(order, previousActive, previousRemaining);
+        return order;
+    }
+
+    OrderRuntime updateOrderStatusInPlace(long orderId, CoreOrderStatus nextStatus, long nextRevision,
+                                          long commitTimestamp, long commitPosition) {
+        OrderRuntime order = orders.get(orderId);
+        if (order == null) throw new IllegalArgumentException("runtime order is not registered: " + orderId);
+        boolean previousActive = active(order);
+        order.applyStatusInPlace(nextStatus, nextRevision, commitTimestamp, commitPosition);
+        if (previousActive && !active(order)) removeActiveOrder(order.userId(), order.orderId());
+        else if (!previousActive && active(order)) addActiveOrder(order.userId(), order.orderId());
+        admissionOrderIndex.updateInPlace(order, previousActive, order.remainingQuantitySteps());
+        return order;
     }
 
     long openReduceOnlyQuantity(long userId, int symbolId, CorePositionSide positionSide,
@@ -368,6 +413,19 @@ public final class AccountLaneState {
                     aggregate.marginMode(positionSide, conflictingMarginMode));
         }
 
+        private void updateInPlace(OrderRuntime order, boolean previousActive, long previousRemaining) {
+            boolean nextActive = active(order);
+            if (previousActive && nextActive) {
+                var bySymbol = summariesByUser.get(order.userId());
+                var aggregate = bySymbol == null ? null : bySymbol.get(order.symbolId());
+                if (aggregate == null) throw new IllegalStateException("admission order index is missing");
+                aggregate.replaceQuantity(previousRemaining, order.remainingQuantitySteps(), order);
+                return;
+            }
+            if (previousActive) update(order, -1, previousRemaining);
+            if (nextActive) update(order, 1, order.remainingQuantitySteps());
+        }
+
         private void replace(OrderRuntime previous, OrderRuntime replacement) {
             if (active(previous) && active(replacement)
                     && previous.userId() == replacement.userId() && previous.symbolId() == replacement.symbolId()
@@ -384,6 +442,10 @@ public final class AccountLaneState {
         }
 
         private void update(OrderRuntime order, int direction) {
+            update(order, direction, order.remainingQuantitySteps());
+        }
+
+        private void update(OrderRuntime order, int direction, long remainingQuantity) {
             IntObjectHashMap<AdmissionAggregate> bySymbol = summariesByUser.get(order.userId());
             AdmissionAggregate aggregate = bySymbol == null ? null : bySymbol.get(order.symbolId());
             if (aggregate == null) {
@@ -395,7 +457,7 @@ public final class AccountLaneState {
                 summariesByUser.put(order.userId(), bySymbol);
                 return;
             }
-            aggregate.update(order, direction);
+            aggregate.update(order, direction, remainingQuantity);
             if (aggregate.empty()) {
                 bySymbol.remove(order.symbolId());
                 if (bySymbol.isEmpty()) summariesByUser.remove(order.userId());
@@ -422,18 +484,30 @@ public final class AccountLaneState {
         private int orders;
 
         void replaceQuantity(OrderRuntime previous, OrderRuntime replacement) {
-            long current = previous.reduceOnly() ? reduceOnly(previous.side())
-                    : pending(previous.positionSide(), previous.side());
-            long remaining = Math.subtractExact(current, previous.remainingQuantitySteps());
+            replaceQuantity(previous.remainingQuantitySteps(), replacement.remainingQuantitySteps(), previous);
+        }
+
+        private void replaceQuantity(long previousRemaining, long nextRemaining, OrderRuntime grouping) {
+            // Grouping is unchanged for in-place execution updates. The caller supplies the
+            // current order only when the old record is still available.
+            CoreOrderSide side = grouping == null ? null : grouping.side();
+            CorePositionSide positionSide = grouping == null ? null : grouping.positionSide();
+            boolean reduce = grouping != null && grouping.reduceOnly();
+            if (grouping == null) throw new IllegalStateException("in-place admission grouping is missing");
+            long current = reduce ? reduceOnly(side) : pending(positionSide, side);
+            long remaining = Math.subtractExact(current, previousRemaining);
             if (remaining < 0) throw new IllegalStateException("admission order index underflow");
-            long next = Math.addExact(remaining, replacement.remainingQuantitySteps());
-            if (previous.reduceOnly()) assignReduceOnly(previous.side(), next);
-            else assignPending(previous.positionSide(), previous.side(), next);
+            long next = Math.addExact(remaining, nextRemaining);
+            if (reduce) assignReduceOnly(side, next);
+            else assignPending(positionSide, side, next);
         }
 
         void update(OrderRuntime order, int direction) {
-            long quantityDelta = direction > 0 ? order.remainingQuantitySteps()
-                    : Math.negateExact(order.remainingQuantitySteps());
+            update(order, direction, order.remainingQuantitySteps());
+        }
+
+        private void update(OrderRuntime order, int direction, long remainingQuantity) {
+            long quantityDelta = direction > 0 ? remainingQuantity : Math.negateExact(remainingQuantity);
             long currentQuantity = order.reduceOnly()
                     ? reduceOnly(order.side())
                     : pending(order.positionSide(), order.side());

@@ -178,8 +178,26 @@ public final class RuntimeDerivativeFillCalculator {
         }
         OrderRuntime publish(TradingRuntimeState runtime, long positionKey, RuntimeTreasuryDelta treasury) {
             if (fills == 0) return null;
-            // Build the immutable order value once. The caller may need its terminal status
-            // immediately after publication; rebuilding it doubled allocation per fill.
+            CoreOrderStatus nextStatus = remaining == 0 ? CoreOrderStatus.FILLED : originalOrder.status();
+            long feeDelta = Math.subtractExact(cumulativeFee, originalOrder.cumulativeFeeUnits());
+            if (runtime.laneCommandScope.get() != null && runtime.matcherSettlementChangesScope.get() != null) {
+                // Lane-owned settlement mutates the existing primitive state. The helper methods
+                // append one immutable after-image to LaneDelta; no replacement chain is built.
+                runtime.updateReservationInLane(originalOrder.orderId(), consumed, originalReservation.releasedUnits(), remaining != 0);
+                runtime.replaceBalance(originalOrder.userId(), settleAssetId, available, locked);
+                runtime.updatePositionInLane(positionKey, originalOrder.userId(), originalOrder.symbolId(), settleAssetId,
+                        quantity == 0 ? 0 : originalOrder.instrumentChangeId(), quantity, entryPrice, entryValue,
+                        realizedPnl, margin, originalOrder.marginMode(), originalOrder.positionSide());
+                OrderRuntime nextOrder = runtime.updateOrderInLane(originalOrder.orderId(), executed, remaining,
+                        feeDelta, nextStatus, orderRevision, timestamp, clusterPosition);
+                if (treasury != null) {
+                    treasury.addFee(settleAssetId, feeTreasuryUnits);
+                    treasury.addClearing(settleAssetId, clearingTreasuryUnits);
+                }
+                runtime.advanceUserRevision(originalOrder.userId(), fills);
+                return nextOrder;
+            }
+            // Synchronous/recovery path retains value semantics and is outside the Lane hot path.
             OrderRuntime nextOrder = order();
             runtime.replaceReservation(reservation());
             runtime.replaceBalance(originalOrder.userId(), settleAssetId, available, locked);

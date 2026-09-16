@@ -1,6 +1,6 @@
 # Owner / 交易链路低分配重构计划（待审核）
 
-状态：**阶段 4 已完成，阶段 5 待执行**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
+状态：**阶段 5 已完成，阶段 6 待执行**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
 
 本计划最初为待审核草案，现按审核意见执行。阶段 4 已完成并通过 JDK 27 正确性验收（全量 1,090 项，0 failures，0 errors，1 skipped）；没有启动吞吐压测。
 
@@ -234,6 +234,10 @@ Owner 仍负责资金变更、全局事实索引、投影发布和结果构造�
 - Owner 仍通过不可变发布视图、snapshot 和 replay 读取状态。
 
 这是预计最大的分配下降来源，重点验证 `OrderRuntime`、`ReservationRuntime`、`PositionRuntime` 是否从热点分配中消失。
+
+**状态：已完成（100%）。** `OrderRuntime`、`ReservationRuntime`、`PositionRuntime` 已改为 Lane 私有字段就地更新；Matcher 结算只在发布边界生成不可变 after-image，Owner 继续读取隔离的发布视图。终态 reservation/order route removal 独立消费，避免零 reservation 终态因跳过快照而残留旧索引。保留同步、恢复、snapshot、replay 所需的值语义和兼容构造路径。
+
+验证：JDK 27 全量服务正确性套件 931 项，0 failures，0 errors，1 skipped；批量真实成交后的故障恢复定向测试通过。尚未进行吞吐压测。
 
 ### 阶段 6：Owner 只做紧凑终态提交
 

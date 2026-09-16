@@ -153,12 +153,12 @@ public final class RuntimeDerivativeMatchProcessor {
         if (localTaker != null) {
             if (!localTaker.canceled() && (localTaker.timeInForce().immediate()
                     || localTaker.orderType() == com.surprising.aeron.protocol.CoreOrderType.MARKET)) {
-                runtime.replaceOrder(localTaker.withStatus(CoreOrderStatus.CANCELED,
-                        Math.incrementExact(localTaker.revision()), commitTimestamp, commitPosition));
+                runtime.updateOrderStatusInLane(localTaker.orderId(), CoreOrderStatus.CANCELED,
+                        Math.incrementExact(localTaker.revision()), commitTimestamp, commitPosition);
             }
             if (runtime.order(takerOrderId).canceled()) {
                 long releaseUnits = runtime.reservation(takerOrderId).reservedUnits();
-                runtime.releaseTerminalReservation(takerOrderId);
+                runtime.releaseTerminalReservationInLane(takerOrderId);
                 if (releaseUnits > 0) runtime.advanceUserRevision(localTaker.userId());
             }
         }
@@ -188,7 +188,7 @@ public final class RuntimeDerivativeMatchProcessor {
                         settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
                 if (makerTerminal) {
                     long releaseUnits = runtime.reservation(maker.orderId()).reservedUnits();
-                    runtime.releaseTerminalReservation(maker.orderId());
+                    runtime.releaseTerminalReservationInLane(maker.orderId());
                     if (releaseUnits > 0) runtime.advanceUserRevision(maker.userId());
                 }
             }
@@ -308,7 +308,7 @@ public final class RuntimeDerivativeMatchProcessor {
             OrderRuntime order = cursor.publish(runtime, cursor.positionKey(), null);
             if (order != null && order.canceled()) {
                 long releaseUnits = runtime.reservation(order.orderId()).reservedUnits();
-                runtime.releaseTerminalReservation(order.orderId());
+                runtime.releaseTerminalReservationInLane(order.orderId());
                 if (releaseUnits > 0) runtime.advanceUserRevision(order.userId());
             }
         }

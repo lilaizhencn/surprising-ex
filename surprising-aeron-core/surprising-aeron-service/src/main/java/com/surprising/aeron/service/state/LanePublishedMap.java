@@ -19,6 +19,11 @@ final class LanePublishedMap<V> {
         if (typed == null) {
             values.remove(key);
         } else {
+            // Keep the existing value when the Lane published an equal after-image.  This
+            // preserves the admission object's identity for unchanged resting orders while
+            // still replacing it whenever execution actually changes a field.
+            V current = values.get(key);
+            if (current != null && current.equals(typed)) return;
             values.put(key, typed);
         }
     }
