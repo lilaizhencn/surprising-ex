@@ -1017,6 +1017,7 @@ public final class TradingRuntimeState implements AutoCloseable {
         MatcherSettlementChanges changes = matcherSettlementChangesPool.pollFirst();
         if (changes == null) changes = new MatcherSettlementChanges(accountLanes.length);
         changes.activeLaneMask = laneMask;
+        changes.ensureActiveLanes(laneMask);
         return changes;
     }
 
@@ -1026,6 +1027,10 @@ public final class TradingRuntimeState implements AutoCloseable {
     }
 
     static final class MatcherSettlementChanges {
+        private static final LaneDelta EMPTY_LANE_DELTA = new LaneDelta();
+        private static final LaneBalancePatches EMPTY_BALANCE_PATCHES = new LaneBalancePatches();
+        private static final RuntimeFundsAccumulator EMPTY_FUNDS_DELTA = new RuntimeFundsAccumulator();
+        private static final LongLongHashMap EMPTY_USER_REVISIONS = new LongLongHashMap();
         boolean directPositionIdentities;
         /** Owner派发前固定的参与Lane；事件完成后仅回收这些Lane的缓冲。 */
         private long activeLaneMask;
@@ -1045,11 +1050,20 @@ public final class TradingRuntimeState implements AutoCloseable {
             balancePatches = new LaneBalancePatches[laneCount];
             laneFundsDeltas = new RuntimeFundsAccumulator[laneCount];
             userRevisionDeltas = new LongLongHashMap[laneCount];
-            for (int laneId = 0; laneId < laneCount; laneId++) {
-                laneDeltas[laneId] = new LaneDelta();
-                balancePatches[laneId] = new LaneBalancePatches();
-                laneFundsDeltas[laneId] = new RuntimeFundsAccumulator();
-                userRevisionDeltas[laneId] = new LongLongHashMap();
+            java.util.Arrays.fill(laneDeltas, EMPTY_LANE_DELTA);
+            java.util.Arrays.fill(balancePatches, EMPTY_BALANCE_PATCHES);
+            java.util.Arrays.fill(laneFundsDeltas, EMPTY_FUNDS_DELTA);
+            java.util.Arrays.fill(userRevisionDeltas, EMPTY_USER_REVISIONS);
+        }
+
+        private void ensureActiveLanes(long laneMask) {
+            while (laneMask != 0) {
+                int laneId = Long.numberOfTrailingZeros(laneMask);
+                laneMask &= laneMask - 1;
+                if (laneDeltas[laneId] == EMPTY_LANE_DELTA) laneDeltas[laneId] = new LaneDelta();
+                if (balancePatches[laneId] == EMPTY_BALANCE_PATCHES) balancePatches[laneId] = new LaneBalancePatches();
+                if (laneFundsDeltas[laneId] == EMPTY_FUNDS_DELTA) laneFundsDeltas[laneId] = new RuntimeFundsAccumulator();
+                if (userRevisionDeltas[laneId] == EMPTY_USER_REVISIONS) userRevisionDeltas[laneId] = new LongLongHashMap();
             }
         }
 
@@ -1079,11 +1093,13 @@ public final class TradingRuntimeState implements AutoCloseable {
 
         void ensureAdmissionCapacity(int laneId, int expectedOrders) {
             if (expectedOrders <= 0) return;
+            ensureActiveLanes(1L << laneId);
             laneDeltas[laneId].ensureAdmissionCapacity(expectedOrders);
         }
 
         void ensureOrderCapacity(int expectedOrders, long laneMask) {
             if (expectedOrders <= 0) return;
+            ensureActiveLanes(laneMask);
             while (laneMask != 0) {
                 int laneId = Long.numberOfTrailingZeros(laneMask);
                 laneMask &= laneMask - 1;
