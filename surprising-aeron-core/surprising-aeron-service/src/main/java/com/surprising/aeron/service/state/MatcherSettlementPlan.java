@@ -42,7 +42,8 @@ public final class MatcherSettlementPlan {
     private long[] preCancellationStorage;
     private int[] makerLaneHeads;
     private int[] makerLaneNext;
-    private int takerLaneId;
+    /** Cached once while the plan is built; settlement checks this for every matcher event. */
+    private int takerLaneId = -1;
     /** 索引数组归事件所有并复用；只有本代深度成交启用时读取。 */
     private boolean laneEventsIndexed;
     /** 单命令初始身份，仅所属在途槽复用，构建完成后不对外发布。 */
@@ -60,7 +61,7 @@ public final class MatcherSettlementPlan {
         matcherEvents = List.of(); completedTrigger = null; preCancellationOrderIds = NO_ORDERS;
         preCancellationSize = 0;
         rejectedTaker = false; laneEventsIndexed = false; orderCount = tradeCount = 0;
-        directTaker = null;
+        directTaker = null; takerLaneId = -1;
     }
 
     /** Matcher builds routing from its immutable fact; it never reads another thread's account tables. */
@@ -74,6 +75,7 @@ public final class MatcherSettlementPlan {
         clearReferences();
         coreSequence = sequence; directTaker = taker;
         takerOrderId = taker.orderId(); activeUserId = taker.userId();
+        takerLaneId = runtime.topology().accountLaneId(activeUserId);
         requiredLaneMask = runtime.topology().accountLaneMask(activeUserId);
         matcherEvents = result.matcherEvents();
         int capacity = Math.addExact(matcherEvents.size(), Math.addExact(result.cancellations().size(), 1));
@@ -120,6 +122,7 @@ public final class MatcherSettlementPlan {
         coreSequence = sequence;
         takerOrderId = order.orderId();
         activeUserId = userId;
+        takerLaneId = runtime.topology().accountLaneId(activeUserId);
         rejectedTaker = !result.accepted();
         requiredLaneMask = runtime.topology().accountLaneMask(activeUserId);
         orderCount = result.accepted() ? 1 : 0;
@@ -318,6 +321,7 @@ public final class MatcherSettlementPlan {
             if (orderId > 0) orderCount = addUnique(uniqueOrders, orders, orderCount, orderId);
         }
         long laneMask = runtime.topology().accountLaneMask(activeUserId);
+        int builtTakerLaneId = runtime.topology().accountLaneId(activeUserId);
         // A single native event cannot revisit a maker; no remaining-quantity table is needed.
         boolean cumulativeValidation = batch != null || result.matcherEvents().size() > 1;
         LongLongHashMap remainingByOrderId = !cumulativeValidation ? null : batch == null
@@ -379,6 +383,7 @@ public final class MatcherSettlementPlan {
                 ? new MatcherSettlementPlan(coreSequence, takerOrderId, activeUserId, laneMask, orders, orderCount, result.matcherEvents(), tradeCount)
                 : target;
         plan.coreSequence = coreSequence; plan.takerOrderId = takerOrderId; plan.activeUserId = activeUserId;
+        plan.takerLaneId = builtTakerLaneId;
         plan.requiredLaneMask = laneMask; plan.orderIds = orders; plan.orderCount = orderCount;
         plan.matcherEvents = result.matcherEvents(); plan.tradeCount = tradeCount;
         plan.preCancellationOrderIds = NO_ORDERS; plan.preCancellationSize = 0;
@@ -572,7 +577,7 @@ public final class MatcherSettlementPlan {
         // Small fills need no index. For deep fills, each maker lane follows only its events;
         // the taker lane still consumes the original order, without copying any fill.
         if (matcherEvents.size() < 8 || Long.bitCount(requiredLaneMask) < 2) return this;
-        takerLaneId = runtime.topology().accountLaneId(activeUserId);
+        // takerLaneId is cached during plan construction; indexing only adds maker chains.
         laneEventsIndexed = true;
         if (makerLaneHeads == null || makerLaneHeads.length != runtime.topology().accountLaneCount())
             makerLaneHeads = new int[runtime.topology().accountLaneCount()];
@@ -605,7 +610,7 @@ public final class MatcherSettlementPlan {
         // settlement loop and cannot change the answer.
         if (laneEventsIndexed && laneId != takerLaneId) return true;
         MatcherEvent event = matcherEvents.get(index);
-        return runtime.topology().accountLaneId(activeUserId) == laneId
+        return takerLaneId == laneId
                 || runtime.topology().accountLaneId(event.matchedOrderUid()) == laneId;
     }
 }

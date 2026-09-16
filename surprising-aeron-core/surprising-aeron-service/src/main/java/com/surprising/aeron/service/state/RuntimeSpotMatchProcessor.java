@@ -60,13 +60,14 @@ public final class RuntimeSpotMatchProcessor {
             if (match.eventType() != MatcherEventType.TRADE) continue;
             taker = requireOpen(runtime, takerOrderId);
             OrderRuntime maker = requireOpen(runtime, match.matchedOrderId());
+            boolean makerTerminal = match.size() == maker.remainingQuantitySteps();
             OrderRuntime buyer = taker.side() == CoreOrderSide.BUY ? taker : maker;
             OrderRuntime seller = taker.side() == CoreOrderSide.SELL ? taker : maker;
             applyFill(runtime, instrument, buyer, match.price(), match.size(),
                     buyer.orderId() == taker.orderId(), baseAssetId, quoteAssetId, treasuryDelta);
             applyFill(runtime, instrument, seller, match.price(), match.size(),
                     seller.orderId() == taker.orderId(), baseAssetId, quoteAssetId, treasuryDelta);
-            releaseTerminalReservation(runtime, maker.orderId());
+            if (makerTerminal) releaseTerminalReservation(runtime, maker.orderId());
         }
         taker = runtime.order(takerOrderId);
         if (!taker.canceled() && (taker.timeInForce().immediate()
@@ -154,9 +155,11 @@ public final class RuntimeSpotMatchProcessor {
             }
             OrderRuntime maker = runtime.order(match.matchedOrderId());
             if (maker != null) {
-                maker = applyFill(runtime, instrument, requireOpen(runtime, maker.orderId()), match.price(), match.size(),
+                maker = requireOpen(runtime, maker.orderId());
+                boolean makerTerminal = match.size() == maker.remainingQuantitySteps();
+                maker = applyFill(runtime, instrument, maker, match.price(), match.size(),
                         false, baseAssetId, quoteAssetId, treasuryDelta, commitTimestamp, commitPosition);
-                releaseTerminalReservation(runtime, maker.orderId());
+                if (makerTerminal) releaseTerminalReservation(runtime, maker.orderId());
             }
         }
     }

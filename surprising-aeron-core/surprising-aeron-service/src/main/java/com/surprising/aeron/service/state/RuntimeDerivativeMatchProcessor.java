@@ -50,6 +50,7 @@ public final class RuntimeDerivativeMatchProcessor {
             if (match.eventType() != MatcherEventType.TRADE) continue;
             taker = requireOpen(runtime, takerOrderId);
             OrderRuntime maker = requireOpen(runtime, match.matchedOrderId());
+            boolean makerTerminal = match.size() == maker.remainingQuantitySteps();
             if (maker.userId() != match.matchedOrderUid() || maker.symbolId() != taker.symbolId()
                     || maker.side() == taker.side() || maker.userId() == taker.userId()) {
                 throw new IllegalStateException("runtime match does not match authoritative orders");
@@ -58,7 +59,7 @@ public final class RuntimeDerivativeMatchProcessor {
                     match.size(), true, settleAssetId, treasuryDelta);
             applyFill(runtime, identities, instrument, maker, match.price(),
                     match.size(), false, settleAssetId, treasuryDelta);
-            if (runtime.order(maker.orderId()).canceled()) {
+            if (makerTerminal) {
                 long releaseUnits = runtime.reservation(maker.orderId()).reservedUnits();
                 runtime.releaseTerminalReservation(maker.orderId());
                 if (releaseUnits > 0) runtime.advanceUserRevision(maker.userId());
@@ -182,9 +183,10 @@ public final class RuntimeDerivativeMatchProcessor {
             OrderRuntime maker = runtime.order(match.matchedOrderId());
             if (maker != null) {
                 maker = requireOpen(runtime, maker.orderId());
+                boolean makerTerminal = match.size() == maker.remainingQuantitySteps();
                 applyFill(runtime, identities, instrument, maker, match.price(), match.size(), false,
                         settleAssetId, treasuryDelta, commitTimestamp, commitPosition);
-                if (runtime.order(maker.orderId()).canceled()) {
+                if (makerTerminal) {
                     long releaseUnits = runtime.reservation(maker.orderId()).reservedUnits();
                     runtime.releaseTerminalReservation(maker.orderId());
                     if (releaseUnits > 0) runtime.advanceUserRevision(maker.userId());
