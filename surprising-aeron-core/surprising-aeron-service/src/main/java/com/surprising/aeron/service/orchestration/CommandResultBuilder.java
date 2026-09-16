@@ -82,6 +82,8 @@ final class CommandResultBuilder {
 
     /** 当前命令变化的订单 ID，保持 primitive 收集直到返回边界。 */
     PrimitiveLongChangeSet changedOrderIds = new PrimitiveLongChangeSet();
+    /** Lane settlement already supplied the exact primitive user keys for this command. */
+    private boolean laneDeltaIdsSeeded;
 
     /** 复用批量订单响应的去重集合和临时视图缓冲；List.copyOf 在边界创建稳定结果。 */
     private final PrimitiveLongChangeSet commandViewOrderIds = new PrimitiveLongChangeSet();
@@ -136,19 +138,6 @@ final class CommandResultBuilder {
         commandChangedOrderIds = List.of();
     }
 
-    /**
-     * Collects changed users directly into the owner-confined primitive set.  The old
-     * stream based callers built a boxed List<Long>, then copied it back into this set
-     * at command completion.  Keeping the boundary list empty removes both allocations
-     * while preserving the existing response contract.
-     */
-    void addChangedUsers(Iterable<Long> userIds) {
-        owner.seedChangeAccumulators();
-        commandChangedUserIds = List.of();
-        if (userIds == null) return;
-        for (Long userId : userIds) if (userId != null) changedUserIds.add(userId);
-    }
-
     void beginChangedUsers() {
         owner.seedChangeAccumulators();
         commandChangedUserIds = List.of();
@@ -177,11 +166,17 @@ final class CommandResultBuilder {
         owner.commandFundsAccumulator.clear();
         changedUserIds.clear();
         changedOrderIds.clear();
+        laneDeltaIdsSeeded = false;
     }
+
+    void markLaneDeltaIdsSeeded() { laneDeltaIdsSeeded = true; }
 
     void materializeChangeAccumulators() {
         owner.seedChangeAccumulators();
-        owner.runtimeState.acceptChangedUserIds(changedUserIds::add);
+        // A matcher settlement has already copied its LaneDelta user keys into the primitive
+        // set. Scanning the Owner-wide changed-user index again only duplicates probes and can
+        // accidentally include an earlier command's users while a commit is suspended.
+        if (!laneDeltaIdsSeeded) owner.runtimeState.acceptChangedUserIds(changedUserIds::add);
         commandChangedUserIds = changedUserIds.toImmutableList();
         commandChangedOrderIds = changedOrderIds.toImmutableList();
     }
@@ -198,20 +193,20 @@ final class CommandResultBuilder {
     void materializeCommandOrderViews(CommandSlot pending) {
         switch (pending.operation()) {
             case PLACE -> {
-                materializeResponseOrder(pending.decodedCommand().placeOrder().orderId());
+                materializeResponseOrder(pending, pending.decodedCommand().placeOrder().orderId());
                 return;
             }
             case CANCEL -> {
-                materializeResponseOrder(pending.decodedCommand().cancelOrder().orderId());
+                materializeResponseOrder(pending, pending.decodedCommand().cancelOrder().orderId());
                 return;
             }
             case REPLACE, AMEND -> {
                 ResolvedMatchingAdmission admission = owner.requireMatchingAdmission(pending);
-                materializeResponseOrders(admission.originalOrderId(), admission.command().orderId());
+                materializeResponseOrders(pending, admission.originalOrderId(), admission.command().orderId());
                 return;
             }
             case TRIGGER -> {
-                materializeResponseOrder(pending.settlementPlan().takerOrderId());
+                materializeResponseOrder(pending, pending.settlementPlan().takerOrderId());
                 return;
             }
             default -> { }
@@ -313,6 +308,51 @@ final class CommandResultBuilder {
         commandOrderViews = List.of();
     }
 
+    private OrderRuntime responseOrder(CommandSlot pending, long orderId) {
+        if (pending != null && pending.laneResultPrepared()) {
+            OrderRuntime laneOrder = pending.laneResultOrder(orderId);
+            if (laneOrder != null) return laneOrder;
+        }
+        return owner.responseOrder(orderId);
+    }
+
+    private String responseOrderSymbol(CommandSlot pending, long orderId, OrderRuntime order) {
+        if (pending != null && pending.laneResultPrepared()) {
+            String symbol = pending.laneResultSymbol(orderId);
+            if (symbol != null) return symbol;
+        }
+        return owner.runtimeOrderSymbol(order);
+    }
+
+    private void materializeResponseOrder(CommandSlot pending, long orderId) {
+        commandOrderSources.clear();
+        commandSingleOrder = responseOrder(pending, orderId);
+        commandOrderViews = List.of();
+    }
+
+    private void materializeResponseOrders(CommandSlot pending, long firstOrderId, long secondOrderId) {
+        commandOrderSources.clear();
+        OrderRuntime first = responseOrder(pending, firstOrderId);
+        OrderRuntime second = responseOrder(pending, secondOrderId);
+        if (first == null) {
+            if (second == null) {
+                commandSingleOrder = null;
+                commandOrderViews = List.of();
+            } else {
+                commandSingleOrder = second;
+                commandOrderViews = List.of();
+            }
+        } else if (second == null) {
+            commandSingleOrder = first;
+            commandOrderViews = List.of();
+        } else {
+            commandSingleOrder = null;
+            commandOrderViews = List.of();
+            commandOrderSources.add(first, responseOrderSymbol(pending, firstOrderId, first));
+            commandOrderSources.add(second, responseOrderSymbol(pending, secondOrderId, second));
+        }
+    }
+
     byte[] commandResultData() {
         return commandResultData(null, null);
     }
@@ -337,6 +377,10 @@ final class CommandResultBuilder {
         }
         if (commandTriggerOrderView != null) {
             return com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeList(List.of(commandTriggerOrderView));
+        }
+        if (pending != null) {
+            byte[] prepared = pending.lanePreparedResponse();
+            if (prepared != null) return prepared;
         }
         if (commandSingleOrder == null && commandOrderViews.isEmpty() && commandOrderSources.isEmpty()) {
             return EMPTY_RESULT;

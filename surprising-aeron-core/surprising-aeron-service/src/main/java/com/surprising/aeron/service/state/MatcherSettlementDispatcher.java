@@ -76,12 +76,20 @@ final class MatcherSettlementDispatcher {
             com.surprising.aeron.service.command.order.ResolvedMatchingAdmission admission,
             java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
             long timestamp, long position, List<Long> cancellations) {
+        return prepareDirectReplacement(sequence, commitSequence, laneMask, admission, commandId, shard,
+                identities, timestamp, position, cancellations, null);
+    }
+
+    MatcherSettlementEvent prepareDirectReplacement(long sequence, long commitSequence, long laneMask,
+            com.surprising.aeron.service.command.order.ResolvedMatchingAdmission admission,
+            java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
+            long timestamp, long position, List<Long> cancellations, LaneOrderResultTarget resultTarget) {
         owner.assertOwner();
         var resolved = admission.resolved();
         OrderRuntime order = TradingRuntimeState.preparedOrder(owner.productLine(), admission.userId(),
                 resolved, commandId, resolved.symbolId(), timestamp, position);
         MatcherSettlementEvent event = prepareDirect(sequence, commitSequence, laneMask, order, null, 1,
-                commandId, shard, identities, timestamp, position, cancellations, null);
+                commandId, shard, identities, timestamp, position, cancellations, resultTarget);
         event.replacement(admission, identities.assetId(resolved.reservationAsset()));
         return event;
     }
@@ -89,6 +97,13 @@ final class MatcherSettlementDispatcher {
     MatcherSettlementEvent prepareDirectCancellation(long sequence, OrderRuntime order,
             java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
             long timestamp, long position) {
+        return prepareDirectCancellation(sequence, order, commandId, shard, identities,
+                timestamp, position, null);
+    }
+
+    MatcherSettlementEvent prepareDirectCancellation(long sequence, OrderRuntime order,
+            java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
+            long timestamp, long position, LaneOrderResultTarget resultTarget) {
         owner.assertOwner();
         if (order == null) throw new IllegalArgumentException("cancel order is missing");
         long laneMask = owner.topology.accountLaneMask(order.userId());
@@ -98,7 +113,7 @@ final class MatcherSettlementDispatcher {
         event.batchStorage(1).admittedOrders[0] = order;
         // 撤单不依赖当前合约配置，也不需要为成交解析资产或构建持仓身份。
         event.prepareDirect(sequence, laneMask, timestamp, position, commandId, shard,
-                owner, identities, 1, List.of(), null);
+                owner, identities, 1, List.of(), resultTarget);
         event.cancellation(order.userId());
         return event;
     }

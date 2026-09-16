@@ -22,6 +22,7 @@ import com.surprising.aeron.service.state.model.CoreRiskState;
 import com.surprising.aeron.service.state.model.CoreTriggerOrderState;
 
 import org.eclipse.collections.impl.map.mutable.primitive.LongObjectHashMap;
+import com.surprising.aeron.service.command.support.PrimitiveLongChangeSet;
 import org.eclipse.collections.impl.map.mutable.primitive.LongLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.IntLongHashMap;
 import org.eclipse.collections.impl.map.mutable.primitive.IntObjectHashMap;
@@ -1214,6 +1215,24 @@ public final class TradingRuntimeState implements AutoCloseable {
             }
         }
 
+        /**
+         * Export the already materialized Lane change keys without walking the matcher plan
+         * or looking entities up in the Owner publication maps.  The buffers are still owned by
+         * this event until collectMatcherSettlement() returns, so the copy is primitive-only and
+         * deterministic.
+         */
+        void appendChangedIds(PrimitiveLongChangeSet userIds, PrimitiveLongChangeSet orderIds) {
+            if (userIds == null || orderIds == null) throw new IllegalArgumentException("change sets are required");
+            long lanes = activeLaneMask;
+            while (lanes != 0) {
+                int laneId = Long.numberOfTrailingZeros(lanes);
+                lanes &= lanes - 1;
+                laneDeltas[laneId].appendChangedIds(userIds, orderIds);
+                LaneBalancePatches balances = balancePatches[laneId];
+                for (int index = 0; index < balances.size(); index++) userIds.add(balances.userId(index));
+            }
+        }
+
         void clear() {
             directPositionIdentities = false;
             long lanes = activeLaneMask;
@@ -1335,6 +1354,19 @@ public final class TradingRuntimeState implements AutoCloseable {
 
         void removeOrderRoute(long orderId) { removedOrderRoutes.add(orderId); }
         void removeReservationRoute(long orderId) { removedReservationRoutes.add(orderId); }
+
+        void appendChangedIds(PrimitiveLongChangeSet userIds, PrimitiveLongChangeSet orderIds) {
+            users.forEach((userId, ignored) -> userIds.add(userId));
+            orders.forEach((orderId, ignored) -> orderIds.add(orderId));
+            removedOrderRoutes.forEach(orderIds::add);
+            reservations.forEach((orderId, reservation) -> {
+                orderIds.add(orderId);
+                if (reservation != null) userIds.add(reservation.userId());
+            });
+            positions.forEach((positionKey, position) -> {
+                if (position != null) userIds.add(position.userId());
+            });
+        }
         void drainTo(int laneId,
                              LanePublishedMap<UserRuntime> targetUsers,
                              LanePublishedMap<OrderRuntime> targetOrders,
@@ -5787,15 +5819,30 @@ public final class TradingRuntimeState implements AutoCloseable {
             com.surprising.aeron.service.command.order.ResolvedMatchingAdmission admission,
             java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
             long timestamp, long position, List<Long> cancellations) {
+        return prepareDirectReplacement(sequence, commitSequence, laneMask, admission, commandId, shard,
+                identities, timestamp, position, cancellations, null);
+    }
+
+    public MatcherSettlementEvent prepareDirectReplacement(long sequence, long commitSequence, long laneMask,
+            com.surprising.aeron.service.command.order.ResolvedMatchingAdmission admission,
+            java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
+            long timestamp, long position, List<Long> cancellations, LaneOrderResultTarget resultTarget) {
         return settlements.prepareDirectReplacement(sequence, commitSequence, laneMask, admission, commandId, shard,
-                identities, timestamp, position, cancellations);
+                identities, timestamp, position, cancellations, resultTarget);
     }
 
     public MatcherSettlementEvent prepareDirectCancellation(long sequence, OrderRuntime order,
             java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
             long timestamp, long position) {
+        return prepareDirectCancellation(sequence, order, commandId, shard, identities,
+                timestamp, position, null);
+    }
+
+    public MatcherSettlementEvent prepareDirectCancellation(long sequence, OrderRuntime order,
+            java.util.UUID commandId, int shard, RuntimeIdentityRegistry identities,
+            long timestamp, long position, LaneOrderResultTarget resultTarget) {
         return settlements.prepareDirectCancellation(sequence, order, commandId, shard,
-                identities, timestamp, position);
+                identities, timestamp, position, resultTarget);
     }
 
     public MatcherSettlementEvent prepareDirectCancelBatch(long sequence, boolean finalChunk, long userId, OrderRuntime[] orders,

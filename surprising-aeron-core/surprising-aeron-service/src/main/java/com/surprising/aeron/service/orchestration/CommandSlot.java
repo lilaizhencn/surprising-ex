@@ -9,6 +9,7 @@ import com.surprising.aeron.service.state.RuntimeProjectionPoint;
 import com.surprising.aeron.service.state.PlaceAdmissionEvent;
 import com.surprising.aeron.service.state.ResolvedPlaceOrder;
 import com.surprising.aeron.service.state.LaneCancelEvent;
+import com.surprising.aeron.service.state.OrderRuntime;
 import com.surprising.aeron.service.matching.CoreMatchingOrder;
 import java.util.List;
 import java.util.Objects;
@@ -89,6 +90,44 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
     boolean controlPending;
     long controlStartedNanos;
     byte[] resultData;
+
+    /**
+     * Lane-owned response target for a single matching command.  The target stores immutable
+     * after-images produced by the settlement Lane, so the Owner does not look the same orders
+     * up again while closing the command.  Batch commands use their existing OrderBatchPending
+     * target and therefore never allocate another target here.
+     */
+    private final LaneResultTarget laneResultTarget = new LaneResultTarget();
+
+    void prepareLaneResultTarget() {
+        if (orderBatch != null) return;
+        long first = 0, second = 0;
+        switch (operation) {
+            case PLACE -> first = decodedCommand.placeOrder().orderId();
+            case CANCEL -> first = decodedCommand.cancelOrder().orderId();
+            case REPLACE, AMEND -> {
+                ResolvedMatchingAdmission value = admission;
+                if (value != null) {
+                    first = value.originalOrderId();
+                    second = value.command().orderId();
+                }
+            }
+            case TRIGGER -> {
+                if (admittedMatchingOrder != null) first = admittedMatchingOrder.orderId();
+            }
+            default -> { }
+        }
+        laneResultTarget.bind(first, second);
+    }
+
+    com.surprising.aeron.service.state.LaneOrderResultTarget laneResultTarget() {
+        return laneResultTarget.active() ? laneResultTarget : null;
+    }
+
+    OrderRuntime laneResultOrder(long orderId) { return laneResultTarget.order(orderId); }
+    String laneResultSymbol(long orderId) { return laneResultTarget.symbol(orderId); }
+    boolean laneResultPrepared() { return laneResultTarget.prepared(); }
+    byte[] lanePreparedResponse() { return laneResultTarget.preparedResponse(); }
 
     void deferControl(java.util.function.BooleanSupplier work) {
         if (controlWork != null) throw new IllegalStateException("command already has pending work");
@@ -724,5 +763,112 @@ public final class CommandSlot implements com.surprising.aeron.service.state.Mat
         deferredClusterPosition = 0;
         deferredSourceKey = null;
         cachedMatcherShard = -1;
+        laneResultTarget.clear();
+    }
+
+    private static final class LaneResultTarget
+            implements com.surprising.aeron.service.state.LaneOrderResultTarget {
+        private final long[] ids = new long[2];
+        private final OrderRuntime[] orders = new OrderRuntime[2];
+        private final String[] symbols = new String[2];
+        private int count;
+        private boolean prepared;
+        private com.surprising.aeron.service.matching.CoreMatchingResult matcherResult;
+        private byte[] response;
+
+        void bind(long first, long second) {
+            clear();
+            if (first <= 0) return;
+            ids[0] = first;
+            count = 1;
+            if (second > 0 && second != first) {
+                ids[1] = second;
+                count = 2;
+            }
+        }
+
+        boolean active() { return count != 0; }
+        boolean prepared() { return prepared; }
+        OrderRuntime order(long id) {
+            for (int index = 0; index < count; index++) if (ids[index] == id) return orders[index];
+            return null;
+        }
+        String symbol(long id) {
+            for (int index = 0; index < count; index++) if (ids[index] == id) return symbols[index];
+            return null;
+        }
+
+        @Override public int resultCount() { return count; }
+        @Override public long resultOrderId(int index) { return ids[index]; }
+        @Override public long resultOriginalOrderId(int index) { return 0; }
+        @Override public void resultOrder(int index, OrderRuntime order, String symbol) {
+            orders[index] = order;
+            symbols[index] = symbol;
+        }
+        @Override public boolean includeTerminalAfterImage() { return true; }
+        @Override public void matcherResult(com.surprising.aeron.service.matching.CoreMatchingResult result) {
+            matcherResult = result;
+        }
+        @Override public void prepareResponse() {
+            prepared = true;
+            if (count != 1 || orders[0] == null || matcherResult == null) return;
+            var nativeCommand = matcherResult.nativeCommand();
+            var prefix = matcherResult.matcherPrefix();
+            if (!prefix.bound() || nativeCommand.orderId() <= 0 || nativeCommand.instrumentChangeId() <= 0
+                    || nativeCommand.matcherSequence() <= 0) return;
+            try {
+                response = com.surprising.aeron.protocol.CoreCommandResultCodec.encodeSingleOrder(
+                        nativeCommand.coreSequence(),
+                        new java.util.UUID(nativeCommand.commandIdMostSignificantBits(),
+                                nativeCommand.commandIdLeastSignificantBits()),
+                        nativeCommand.orderId(), nativeCommand.instrumentChangeId(), nativeCommand.matcherSequence(),
+                        prefix.before(), prefix.after(), source);
+            } catch (IllegalArgumentException ignored) {
+                response = null;
+            }
+        }
+
+        private final com.surprising.aeron.protocol.CoreOrderStateSource source =
+                new com.surprising.aeron.protocol.CoreOrderStateSource() {
+                    private OrderRuntime value() { return orders[0]; }
+                    public long orderId() { return value().orderId(); }
+                    public com.surprising.product.api.ProductLine productLine() { return value().productLine(); }
+                    public long userId() { return value().userId(); }
+                    public String symbol() { return symbols[0]; }
+                    public long instrumentChangeId() { return value().instrumentChangeId(); }
+                    public com.surprising.aeron.protocol.CoreOrderSide side() { return value().side(); }
+                    public long priceTicks() { return value().priceTicks(); }
+                    public long quantitySteps() { return value().quantitySteps(); }
+                    public long executedQuantitySteps() { return value().executedQuantitySteps(); }
+                    public long remainingQuantitySteps() { return value().remainingQuantitySteps(); }
+                    public boolean reduceOnly() { return value().reduceOnly(); }
+                    public com.surprising.aeron.protocol.CoreMarginMode marginMode() { return value().marginMode(); }
+                    public com.surprising.aeron.protocol.CorePositionSide positionSide() { return value().positionSide(); }
+                    public com.surprising.aeron.protocol.CoreOrderType orderType() { return value().orderType(); }
+                    public com.surprising.aeron.protocol.CoreTimeInForce timeInForce() { return value().timeInForce(); }
+                    public boolean postOnly() { return value().postOnly(); }
+                    public String clientOrderId() { return value().clientOrderId(); }
+                    public java.util.UUID commandId() { return value().commandId(); }
+                    public long makerFeeRatePpm() { return value().makerFeeRatePpm(); }
+                    public long takerFeeRatePpm() { return value().takerFeeRatePpm(); }
+                    public long cumulativeFeeUnits() { return value().cumulativeFeeUnits(); }
+                    public long createdAtEpochMillis() { return value().createdAtEpochMillis(); }
+                    public long updatedAtEpochMillis() { return value().updatedAtEpochMillis(); }
+                    public long clusterPosition() { return value().clusterPosition(); }
+                    public String status() { return value().status().name(); }
+                    public long revision() { return value().revision(); }
+                };
+
+        @Override public byte[] preparedResponse() { return response; }
+
+        void clear() {
+            java.util.Arrays.fill(orders, null);
+            java.util.Arrays.fill(symbols, null);
+            java.util.Arrays.fill(ids, 0);
+            count = 0;
+            prepared = false;
+            matcherResult = null;
+            response = null;
+        }
     }
 }

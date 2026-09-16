@@ -4,8 +4,6 @@ import com.surprising.aeron.service.state.AccountLaneState;
 import com.surprising.aeron.service.state.MatcherSettlementEvent;
 
 import java.util.Locale;
-import java.lang.invoke.MethodHandles;
-import java.lang.invoke.VarHandle;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
@@ -49,14 +47,6 @@ public final class SettlementLaneWorker implements AutoCloseable {
     private volatile boolean started;
     private volatile boolean running = true;
     private volatile Throwable failure;
-    /** Lane先声明休眠再重读工作/恢复序号；生产者CAS认领一次唤醒，合并同轮后续通知。 */
-    private volatile boolean parkRequested;
-    private static final VarHandle PARK_REQUESTED;
-    static {
-        try { PARK_REQUESTED = MethodHandles.lookup().findVarHandle(SettlementLaneWorker.class, "parkRequested", boolean.class); }
-        catch (ReflectiveOperationException failure) { throw new ExceptionInInitializerError(failure); }
-    }
-
     public SettlementLaneWorker(String role, AccountLaneState lane, int requestedCapacity) {
         this(role, lane, requestedCapacity, ignored -> { });
     }
@@ -162,15 +152,18 @@ public final class SettlementLaneWorker implements AutoCloseable {
         return position + 1;
     }
 
-    /** 同一次休眠只唤醒一次；CAS失败说明已通知或Lane已恢复，不能省略消费者的重读。 */
+    /** Unpark is idempotent; the consumer rechecks every volatile cursor after waking. */
     public void signalWork() {
-        if (waitStrategy == WaitStrategy.BLOCKING && parkRequested
-                && PARK_REQUESTED.compareAndSet(this, true, false)) LockSupport.unpark(thread);
+        // An unconditional unpark is intentional.  LockSupport coalesces permits, and the
+        // consumer rechecks every volatile cursor after waking. Conditioning the wake-up on a
+        // racy consumer-state read can lose the only admission notification in the handoff
+        // window (the Matcher then waits for a receipt that the Lane never observes).
+        if (waitStrategy == WaitStrategy.BLOCKING) LockSupport.unpark(thread);
     }
 
     /** Matcher publishes a direct payload; this is separate from the normal Owner submission path. */
     public void signalDirectReady() {
-        if (parkRequested && PARK_REQUESTED.compareAndSet(this, true, false)) LockSupport.unpark(thread);
+        if (waitStrategy == WaitStrategy.BLOCKING) LockSupport.unpark(thread);
     }
 
     public int depth() {
@@ -231,10 +224,7 @@ public final class SettlementLaneWorker implements AutoCloseable {
                             case BUSY_SPIN -> Thread.onSpinWait();
                             case YIELDING -> Thread.yield();
                             case BLOCKING -> {
-                                parkRequested = true;
-                                try {
-                                    if (running && resumedHandoff < completedHandoff) LockSupport.park(this);
-                                } finally { parkRequested = false; }
+                                if (running && resumedHandoff < completedHandoff) LockSupport.park(this);
                             }
                         }
                         continue;
@@ -274,18 +264,13 @@ public final class SettlementLaneWorker implements AutoCloseable {
 
                     // The queue head is a valid command whose Matcher payload has not arrived.
                     // Spinning forever here burns a whole core without doing settlement work and
-                    // can starve the Owner/Matcher that will make the event executable.  After a
-                    // short hand-tuned spin, use the existing publication signal/park handshake.
+                    // can starve the Owner/Matcher that will make the event executable. After a
+                    // short hand-tuned spin, park until the Matcher signals publication.
                     if (waitStrategy == WaitStrategy.BUSY_SPIN) {
                         if (directReadySpins++ >= DIRECT_READY_SPIN_LIMIT) {
-                            parkRequested = true;
-                            try {
-                                if (running && next < producerSequence.value
-                                        && !ready(commands[(int) next & indexMask])) LockSupport.park(this);
-                            } finally {
-                                parkRequested = false;
-                                directReadySpins = 0;
-                            }
+                            if (running && next < producerSequence.value
+                                    && !ready(commands[(int) next & indexMask])) LockSupport.park(this);
+                            directReadySpins = 0;
                         } else {
                             Thread.onSpinWait();
                         }
@@ -300,13 +285,8 @@ public final class SettlementLaneWorker implements AutoCloseable {
                             idleSpins++;
                             Thread.onSpinWait();
                         } else {
-                            parkRequested = true;
-                            try {
-                                if (running && (next >= producerSequence.value
-                                        || !ready(commands[(int) next & indexMask]))) LockSupport.park(this);
-                            } finally {
-                                parkRequested = false;
-                            }
+                            if (running && (next >= producerSequence.value
+                                    || !ready(commands[(int) next & indexMask]))) LockSupport.park(this);
                         }
                     }
                 }

@@ -1589,6 +1589,9 @@ public final class TradingCoreRuntime implements AutoCloseable,
 
     void submitMatching(CommandSlot pending) {
         if (pending.crossShardCancellationStarted || matchingSubmissionDeferred(pending.sequence())) return;
+        // Bind the fixed response target before any Matcher/Lane handoff. The target is reused
+        // by this CommandSlot and contains no per-command collection or map.
+        pending.prepareLaneResultTarget();
         // Standalone mode executes the admission inline and retains its historical synchronous
         // owner-visible publication contract. Cluster mode uses the Lane→Matcher receipt path
         // below and never enters this branch.
@@ -1628,13 +1631,13 @@ public final class TradingCoreRuntime implements AutoCloseable,
                         pending.sequence(), directInitialLaneMask(pending.placeAdmission().userId()), pending.placeAdmission(),
                         pending.command().header().commandId(), matcherShard(pending), identities,
                         pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                        pending.preMatchingCancellationOrderIds(), null);
+                        pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
             } else if (directTaker != null) {
                 direct = runtimeState.prepareDirectMatcherSettlement(pending.sequence(),
                         directInitialLaneMask(directTaker.userId()), directTaker, null, 1,
                         pending.command().header().commandId(), matcherShard(pending), identities,
                         pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                        pending.preMatchingCancellationOrderIds(), null);
+                        pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
             }
             pending.settlement(direct, direct.plan(), System.nanoTime());
             direct.markMatcherOwnedPublication();
@@ -1649,7 +1652,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                     directInitialLaneMask(admission.userId()),
                     admission, pending.command().header().commandId(), matcherShard(pending), identities,
                     pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                    pending.preMatchingCancellationOrderIds());
+                    pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
             pending.settlement(direct, direct.plan(), System.nanoTime());
             if (runtimeState.asynchronousCommands()) {
                 direct.markMatcherOwnedPublication();
@@ -1666,7 +1669,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
                     directInitialLaneMask(triggerOrder.userId()),
                     triggerOrder, null, 1, pending.command().header().commandId(), matcherShard(pending),
                     identities, pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(),
-                    pending.preMatchingCancellationOrderIds(), null);
+                    pending.preMatchingCancellationOrderIds(), pending.laneResultTarget());
             direct.triggerCompletion(trigger, execute[3]);
             pending.settlement(direct, direct.plan(), System.nanoTime());
             direct.markMatcherOwnedPublication();
@@ -1677,7 +1680,7 @@ public final class TradingCoreRuntime implements AutoCloseable,
             OrderRuntime canceledOrder = runtimeOrder(pending.decodedCommand().cancelOrder().orderId());
             direct = runtimeState.prepareDirectCancellation(pending.sequence(), canceledOrder,
                     pending.command().header().commandId(), matcherShard(pending), identities,
-                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition());
+                    pending.commitFenceTimestamp(), pending.commitFenceClusterPosition(), pending.laneResultTarget());
             pending.settlement(direct, direct.plan(), System.nanoTime());
             direct.markMatcherOwnedPublication();
             direct.reserveMatcherPublication();
@@ -3140,15 +3143,6 @@ public final class TradingCoreRuntime implements AutoCloseable,
                 new CoreMessage(header, com.surprising.aeron.protocol.CoreTriggerOrderCodec.encodeExecute(
                         trigger.triggerOrderId(), triggerSequence, triggeredPriceTicks, triggeredAtEpochMillis)),
                 matchingOrder(childOrderId)));
-    }
-
-    void addChangedUsers(com.surprising.aeron.service.state.MatcherSettlementPlan plan) {
-        resultBuilder.changedUserIds.add(plan.activeUserId());
-        for (int index = 0; index < plan.orderCount(); index++) {
-            var order = runtimeState.order(plan.orderId(index));
-            if (order != null) resultBuilder.changedUserIds.add(order.userId());
-        }
-        resultBuilder.commandChangedUserIds = List.of();
     }
 
     void setCommandFundsDelta(

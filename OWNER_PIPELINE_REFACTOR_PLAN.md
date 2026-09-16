@@ -1,6 +1,6 @@
 # Owner / 交易链路低分配重构计划（待审核）
 
-状态：**阶段 5 已完成，阶段 6 待执行**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
+状态：**阶段 6 已完成，阶段 7 待执行**。每个阶段必须完成代码、旧路径清理和正确性验收后才进入下一阶段；压测留到全部核心阶段完成后。
 
 本计划最初为待审核草案，现按审核意见执行。阶段 4 已完成并通过 JDK 27 正确性验收（全量 1,090 项，0 failures，0 errors，1 skipped）；没有启动吞吐压测。
 
@@ -243,16 +243,18 @@ Owner 仍负责资金变更、全局事实索引、投影发布和结果构造�
 
 涉及：`OrderedCommitCoordinator`、`TradingRuntimeState.collectMatcherSettlement`、`OwnerCommitPublisher`、`CommandResultBuilder`、`CommandResultLedger`。
 
+状态：**已完成（100%，普通单笔结算路径）**。
+
 改动：
 
-- `completeDispatchedMatcherSettlement()` 改为消费已完成的 Lane Delta；
-- Owner 只维护当前队头 sequence、已完成 lane mask 和固定 slot 中的 Delta；
-- Owner 不再重新遍历订单、持仓和资金对象；
-- Owner 只合并资金增量、更新全局 revision/hash、写 projection/log/result ledger；
-- Lane 侧 `ResponseArena` 负责终态字段准备和一次性编码；
-- Ledger 保存固定槽位的 response descriptor，保留幂等和重放语义。
+- `MatcherSettlementEvent`/`LaneCancelEvent` 直接把 Lane 已产生的 primitive changed-key 集合交给 Owner；Owner 不再重走 `MatcherSettlementPlan`，也不再为终态提交重新查找订单运行时对象。
+- `completeDispatchedMatcherSettlement()` 和同步撮合路径只合并已完成 Lane Delta，Owner 保留资金增量、队头顺序、全局 revision/hash、projection/log/result ledger 和最终响应发送。
+- `CommandSlot` 为单笔普通命令复用固定 `LaneResultTarget`，Lane 保存订单 after-image，并在结果已完整时完成单订单响应编码；Owner 只消费 response descriptor。双订单 REPLACE/AMEND 和 batch 继续走既有兼容编码，保留原有终态/原子性语义。
+- `CommandResultBuilder` 使用 Lane 提供的 changed-key 集合时跳过 Owner 全局 changed-user 扫描；Lane 局部账户、订单和持仓状态仍由 Lane 所有。
 
-全局事实索引若涉及多个 Lane，只在 Owner 使用 Delta 中的已确定变更 key 更新；局部订单、账户、持仓索引留在 Lane。
+全局事实索引若涉及多个 Lane，只在 Owner 使用 Delta 中的已确定变更 key 更新；局部订单、账户、持仓索引留在 Lane。完整的 slab/arena 响应存储和剩余命令迁移属于阶段 7，不能在本阶段虚报完成。
+
+验证：JDK 27 编译通过；服务模块全量回归 `931 tests, 0 failures, 0 errors, 1 skipped`；普通撮合、批量原子性、恢复和 admission 目标测试通过。
 
 ### 阶段 7：迁移剩余命令
 
@@ -322,4 +324,8 @@ Owner 仍负责资金变更、全局事实索引、投影发布和结果构造�
 - 阶段 2 验收：`mvn -pl surprising-aeron-core/surprising-aeron-service -am test`，JDK 27，910 项通过、1 项既有跳过、0 失败。补正了一个原有测试等待条件，使其等待 Lane 已建立订单后再校验准入版本；未执行吞吐压测。
 - 阶段 3（普通 PLACE 的 Lane→Matcher admission receipt）：已完成。新增按 Lane×Matcher shard 的固定 SPSC `AdmissionReceiptRing`；Lane 完成冻结后直接发布 primitive receipt，Matcher 在自己的线程消费并决定是否撮合；Owner 不再把 `PlaceAdmissionEvent` 结果转交给 Matcher。Lane 新增独立 admission mailbox，未发布的 Matcher 结算不会阻塞后续准入；批量 PLACE 旧协调路径保留到阶段 7。
 - 阶段 3 验收：JDK 27 下 `mvn -pl surprising-aeron-core/surprising-aeron-service -am test`，931 项通过、1 项既有跳过、0 失败、0 错误；其中 `ClusterCommandPipelineTest` 为 244 项通过、1 项既有跳过。未执行吞吐压测。
-- 下一阶段为阶段 4：建立 Matcher→Lane settlement 专用 SPSC，移除当前 Owner 作为结算队列生产者的兼容路径。
+- 阶段 4（Matcher→Lane 结算直达）：已完成。普通异步结算使用 Matcher 唯一生产、Lane 唯一消费的固定 SPSC；Owner 只保留控制队列生产者，旧 `dispatchDirect()` 兼容入口不再用于普通路径。
+- 阶段 5（Lane 就地状态更新）：已完成。订单、reservation、position 和账户状态在 Lane 内复用对象就地更新；只有发布边界生成不可变 after-image，终态 route 清理单独处理，避免 Owner/Matcher 间重复物化。
+- 阶段 6（紧凑终态提交）：已完成。Lane 直接提供 primitive changed-key 集合和单笔响应 after-image；Owner 不再重走 settlement plan、不再为单笔终态重新查找运行时订单或编码响应，只合并 Delta 并完成全局有序提交。REPLACE/AMEND 双订单和 batch 仍保留兼容语义，待阶段 7 迁移。
+- 阶段 4～6 验收：JDK 27 编译及服务模块全量回归通过，`931 tests, 0 failures, 0 errors, 1 skipped`；普通撮合、跨 Lane 结算、批量原子性、恢复和 admission 目标测试通过。未执行吞吐压测。
+- 下一阶段为阶段 7：按同一模型迁移剩余 batch、风控/强平、资金费/结算、ADL、交割和期权等命令，完成后再统一压测。

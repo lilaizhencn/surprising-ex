@@ -281,8 +281,6 @@ final class OrderedCommitCoordinator {
                 owner.setCommandFundsDelta(pending.fundsDelta());
                 owner.activateFactContext(pending.command(), pending.fingerprint());
                 beginCommitPublicationBatch();
-                owner.addChangedUsers(pending.settlementPlan());
-                owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(pending.settlementPlan());
                 return completeDispatchedMatcherSettlement(pending, matchingResult, laneContext);
             }
             if (laneContext.hasCommitContext()) owner.restoreMatchingCommitContext(pending);
@@ -335,8 +333,6 @@ final class OrderedCommitCoordinator {
             switch (pending.operation()) {
                 case PLACE -> {
                     var command = pending.decodedCommand().placeOrder();
-                    owner.addChangedUsers(settlementPlan);
-                    owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(settlementPlan);
                     boolean dispatchOnly = pending.isDispatchOnly();
                     settlementTreasuryDelta = owner.applyMatchesOnAccountLanes(
                             pending, settlementPlan, sequence, matchingResult, laneContext, applyStartNanos);
@@ -345,6 +341,9 @@ final class OrderedCommitCoordinator {
                         owner.suspendMatchingCommitContext(pending);
                         return null;
                     }
+                    pending.settlementEvent().appendChangedIds(
+                            owner.resultBuilder.changedUserIds, owner.resultBuilder.changedOrderIds);
+                    owner.resultBuilder.markLaneDeltaIdsSeeded();
                     owner.resultBuilder.commandTradeCount = TradingCoreRuntime.tradeCount(settlementPlan);
                 }
                 case CANCEL -> {
@@ -366,12 +365,13 @@ final class OrderedCommitCoordinator {
                     var trigger = owner.runtimeState.triggerOrder(execute[0]);
                     if (trigger == null) throw new CoreStateRejectedException("TRIGGER_ORDER_NOT_FOUND",
                             "trigger order not found");
-                    owner.addChangedUsers(settlementPlan);
-                    owner.resultBuilder.commandChangedOrderIds = TradingCoreRuntime.boxedOrderIds(settlementPlan);
                     settlementTreasuryDelta = owner.applyMatchesOnAccountLanes(
                             pending, settlementPlan, sequence, matchingResult, laneContext, applyStartNanos);
                     if (settlementTreasuryDelta == null) return null;
                     requestCommitPublication();
+                    pending.settlementEvent().appendChangedIds(
+                            owner.resultBuilder.changedUserIds, owner.resultBuilder.changedOrderIds);
+                    owner.resultBuilder.markLaneDeltaIdsSeeded();
                     owner.resultBuilder.commandTradeCount = TradingCoreRuntime.tradeCount(settlementPlan);
                 }
                 case LIQUIDATION -> {
@@ -565,6 +565,11 @@ final class OrderedCommitCoordinator {
         owner.captureRealtimeTrades(pending);
         com.surprising.aeron.service.state.RuntimeTreasuryDelta settlementTreasuryDelta;
         try {
+            // LaneDelta already contains the exact users and orders changed by the settlement.
+            // Copy only primitive keys before collection releases the event; do not walk the
+            // matcher plan or perform a second Owner-side order lookup.
+            event.appendChangedIds(owner.resultBuilder.changedUserIds, owner.resultBuilder.changedOrderIds);
+            owner.resultBuilder.markLaneDeltaIdsSeeded();
             settlementTreasuryDelta = owner.runtimeState.collectMatcherSettlement(
                     event, owner.commandFundsAccumulator, owner.terminalRetention);
             laneContext.completeLanes(event.requiredLaneMask());
@@ -659,6 +664,8 @@ final class OrderedCommitCoordinator {
         com.surprising.aeron.service.state.LaneCancelEvent event = pending.cancelEvent();
         if (event == null || !event.complete()) return null;
         try {
+            event.appendChangedIds(owner.resultBuilder.changedUserIds, owner.resultBuilder.changedOrderIds);
+            owner.resultBuilder.markLaneDeltaIdsSeeded();
             owner.runtimeState.collectCancel(event, owner.commandFundsAccumulator, owner.terminalRetention);
             laneContext.completeLanes(event.requiredLaneMask());
             owner.runtimeState.setMetadata(owner.productLine,
