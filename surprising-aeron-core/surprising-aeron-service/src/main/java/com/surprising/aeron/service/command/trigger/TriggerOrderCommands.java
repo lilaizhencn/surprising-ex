@@ -7,8 +7,6 @@ import com.surprising.aeron.service.state.index.TriggerOrderIndex;
 import com.surprising.aeron.service.state.RuntimeCommandProcessor;
 import com.surprising.aeron.service.state.TradingRuntimeState;
 import com.surprising.aeron.service.command.support.PrimitiveLongChangeSet;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
 
 import com.surprising.aeron.protocol.CoreOrderSide;
@@ -20,6 +18,8 @@ public final class TriggerOrderCommands {
 
     /** Owner selection scratch, copied into the existing commit event before the next command. */
     private final PrimitiveLongChangeSet closingTriggerIds = new PrimitiveLongChangeSet();
+    /** Reused owner scratch for one OCO cancellation page; never escapes this command. */
+    private final PrimitiveLongChangeSet ocoSiblingPage = new PrimitiveLongChangeSet(64);
 
     public PrimitiveLongChangeSet closingTriggerIds() { return closingTriggerIds; }
 
@@ -239,19 +239,20 @@ public final class TriggerOrderCommands {
     public TriggerCommandContext.OcoCancellationPage cancelOcoSiblings(
             com.surprising.aeron.service.state.model.CoreTriggerOrderState trigger, long cursor, int limit) {
         if (limit <= 0) return new TriggerCommandContext.OcoCancellationPage(false, cursor, 0);
-        List<Long> page = new ArrayList<>(limit);
+        ocoSiblingPage.clear();
         boolean more = false;
         for (Long siblingId : owner.triggerOrderIndex().ocoSiblings(trigger).descendingSet()) {
             if (siblingId == null || siblingId == trigger.triggerOrderId() || siblingId >= cursor) continue;
-            if (page.size() >= limit) {
+            if (ocoSiblingPage.size() >= limit) {
                 more = true;
                 break;
             }
-            page.add(siblingId);
+            ocoSiblingPage.add(siblingId.longValue());
         }
         long nextCursor = cursor;
         int work = 0;
-        for (long siblingId : page) {
+        for (int index = 0; index < ocoSiblingPage.size(); index++) {
+            long siblingId = ocoSiblingPage.valueAt(index);
             nextCursor = siblingId;
             work++;
             var sibling = owner.runtimeState().triggerOrder(siblingId);
