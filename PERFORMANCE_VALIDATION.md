@@ -1994,3 +1994,9 @@ JFR 的分配/调用栈显示，`RuntimeIdentityRegistry.retainPositionInLane` �
 验证更正：以下最初 JFR/无 JFR 轮运行前均未重新打包服务 JAR，不能作为本改动性能证据，仅保留原始目录审计：JFR `387,087.323/s`（`/tmp/core-tombstone-profile-20260916`），无 JFR `370,482.873/s`、`401,000.707/s`（`/tmp/core-position-registration-20260916`、`/tmp/core-position-registration-rerun-20260916`）。
 
 重新打包 benchmarks 及依赖后，固定口径无 JFR 轮为 `408,925.621 business/s`、`39,063.307 core/s`，普通最差业务 p99 `16.343ms`，`clientPass=true`、`unfinished=0`、`fundsDiff=0`、`peakInFlight=256`。独立 JFR 轮为 `373,765.896 business/s`（JFR 开销）、Owner `93.09%`、Matcher `53.37%`、四 Lane 各约 `95.3%`；`retainPositionInLane` 不在热点方法表，`Long` 分配压力 `3.44%`、`ConcurrentHashMap.putVal` 分配压力 `3.65%`。JFR 轮完整性通过但 p99 `42.795ms`，不用于吞吐比较；原始目录 `/tmp/core-position-registration-built-20260916`、`/tmp/core-position-registration-built-profile-20260916` 保留审计，节点与客户端均已退出。
+
+### 2026-09-16：复用 MatcherSettlementPlan 的 Lane 事件索引进行校验
+
+JFR 继续显示 `SettlementLaneWorker.run` 占 Lane 样本约 `78%`，而 Lane 实际业务执行时间约占测量窗口 `42%`。检查发现深度成交计划已经建立 `makerLaneHeads/makerLaneNext` 索引，但 `validateDirectLane` 仍让每个非 taker Lane 完整扫描同一批 matcher 事件，再过滤不属于本 Lane 的 maker。现在非 taker Lane 复用已有链，taker Lane 保持原始顺序扫描，以确保同 Lane maker 与 taker 校验语义不变；没有新增状态、分配或跨线程同步。
+
+验证：定向 `MatcherSettlementPlanTest`、`MatcherSettlementEventTest`、`RuntimeDerivativeMatchProcessorTest` 通过；服务模块全量测试通过（失败/错误 `0`）。重新打包实际 service JAR 后按固定单节点、1 Matcher、4 Lane、128 symbols、window256、BUSY_SPIN、G1、MIXED batch20 口径完成两轮无 JFR 端到端：`360,347.695 business/s` 与 `405,000.997 business/s`，均 `clientPass=true`、`peakInFlight=256`、`unfinished=0`、`fundsDiff=0`；短测方差较大，不能宣称绝对吞吐提升或回退。独立 JFR 轮为 `391,725.456 business/s`，Owner `97.97%`、Matcher `97.73%`、四 Lane 约 `98.2%`，Lane 有效执行比约 `42.20%`；分配主项仍为 `decodePlaceOrder`、`CoreMatchingResult`、`preparedOrder`、终态结果编码和 `FillCursor.order`，说明该重复扫描不是当前主要分配来源。原始目录 `/tmp/core-matcher-index-built-20260916`、`/tmp/core-matcher-index-built-rerun-20260916`、`/tmp/core-matcher-index-profile-20260916` 保留审计，节点与客户端均已退出。

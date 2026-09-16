@@ -142,8 +142,15 @@ public final class MatcherSettlementPlan {
             requireDirectOrder(taker, activeUserId, directTaker.side());
             if (tradeCount != 0) runtime.retainDirectPositionIdentity(lane, identities, instrument, taker);
         }
-        for (MatcherEvent event : matcherEvents) {
+        // Deep-fill plans already carry a per-maker-Lane event chain.  Reuse it here so
+        // each non-taker Lane validates only its own makers instead of rescanning the
+        // complete matcher result.  The taker Lane deliberately keeps the original
+        // sequential traversal because it may also contain makers from that Lane.
+        for (int index = firstMatcherEvent(lane.laneId()); index >= 0;
+                index = nextMatcherEvent(index, lane.laneId())) {
+            MatcherEvent event = matcherEvents.get(index);
             if (event.eventType() != MatcherEventType.TRADE
+                    || !matcherEventTouchesLane(index, lane.laneId(), runtime)
                     || runtime.topology().accountLaneId(event.matchedOrderUid()) != lane.laneId()) continue;
             OrderRuntime maker = lane.orders.get(event.matchedOrderId());
             requireDirectOrder(maker, event.matchedOrderUid(), directTaker.side()
