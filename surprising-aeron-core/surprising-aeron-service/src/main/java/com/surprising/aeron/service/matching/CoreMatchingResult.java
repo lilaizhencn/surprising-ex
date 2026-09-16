@@ -193,8 +193,11 @@ public final class CoreMatchingResult {
     public boolean matcherStateChanged() { return matcherStateChanged; }
     public Outcome outcome() { return outcome; }
     public NativeCommand nativeCommand() {
-        if (nativeCommand == EMPTY_COMMAND && nativeMatcherResult != null)
-            return new NativeCommand(0, 0, 0, 0, 0, nativeMatcherResult.sequence(), 0, 0, -1);
+        if (nativeCommand == EMPTY_COMMAND && nativeMatcherResult != null) {
+            // The unbound result is queried several times while evidence is attached and
+            // validated. Cache the synthetic identity instead of allocating on every read.
+            nativeCommand = new NativeCommand(0, 0, 0, 0, 0, nativeMatcherResult.sequence(), 0, 0, -1);
+        }
         return nativeCommand;
     }
     /** 原生结果绑定证据前只需序号，直接读取而不物化占位身份。 */
