@@ -168,7 +168,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     /** 当前批量项撮合前必须先完成的撤单集合。 */
     List<Long> currentPreMatchingCancellationOrderIds = List.of();
     /** 批量提交的唯一阶段：等待、预派发或有序提交，禁止重复取得派发权。 */
-    CommitStage commitStage = CommitStage.WAITING;
+    private byte commitState;
     /** 批处理生命周期位图；用一个 primitive 状态取代多个相互独立的布尔字段。 */
     int lifecycleFlags;
     private static final int ADMISSION_COLLECTED = 1;
@@ -234,19 +234,21 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
     /** 本批准入订单增量索引，供后续批量项检查前面项目产生的订单依赖。 */
     BatchAdmissionOrderIndex admissionOrderIndex;
 
-    enum CommitStage { WAITING, PREDISPATCHED, COMMITTING }
+    private static final byte COMMIT_WAITING = 0;
+    private static final byte COMMIT_PREDISPATCHED = 1;
+    private static final byte COMMITTING = 2;
 
-    boolean canPredispatch() { return commitStage == CommitStage.WAITING; }
-    boolean commitStarted() { return commitStage == CommitStage.COMMITTING; }
+    boolean canPredispatch() { return commitState == COMMIT_WAITING; }
+    boolean commitStarted() { return commitState == COMMITTING; }
 
     void markPredispatched() {
         if (!canPredispatch()) throw new IllegalStateException("batch Lane work already owned");
-        commitStage = CommitStage.PREDISPATCHED;
+        commitState = COMMIT_PREDISPATCHED;
     }
 
     void beginCommit() {
         if (commitStarted()) throw new IllegalStateException("batch commit already started");
-        commitStage = CommitStage.COMMITTING;
+        commitState = COMMITTING;
     }
 
     private boolean has(int bit) { return (lifecycleFlags & bit) != 0; }
@@ -352,7 +354,7 @@ final class OrderBatchPending implements com.surprising.aeron.service.state.Lane
         cancellationChunkEnd = 0;
         sequence = 0;
         currentPreMatchingCancellationOrderIds = List.of();
-        commitStage = CommitStage.WAITING;
+        commitState = COMMIT_WAITING;
         pipelined = false;
         sequentialAdmission = false;
         java.util.Arrays.fill(pipelinedMatchingResults, 0, pipelinedMatchingResultCount, null);
